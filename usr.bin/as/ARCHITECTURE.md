@@ -61,6 +61,8 @@ Name: Lexer, parser, sections, symbol table, and data directives
 
 Description: `as_lexer.c`, `as_parser.c`, `as_sections.c`, `as_symtab.c`, and `as_data.c` turn source text into a bounded in-memory assembly model. This layer owns labels, numeric locals, directives, literals, fixups, include/macro handling, and section-relative state before any ISA-specific encoding occurs.
 
+`as_lexer.c` is the one place a token's end is decided. A statement is a row of tokens -- a token for each operator, punctuation mark, register, number, name and string (`a+b` is three, `%fs:0` three, `$sym` two) -- with the labels, the directive or the mnemonic marked at its head. `as_parser.c` builds operands from those tokens and does not look inside a token's text; `as_expr.c` parses an expression from a row of tokens, and text that holds an expression (a directive's argument, kept as text for what reads the directive) is made tokens by the same lexer first. An operand's `raw` and a directive's arguments are the tokens as they were written, kept for messages and for the consumers that still take text.
+
 Technologies: C, bounded token buffers, expression parsing, section and symbol bookkeeping
 
 Deployment: Linked directly into the single `as` binary

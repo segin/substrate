@@ -2,7 +2,8 @@
 #define SUBSTRATE_AS_EXPR_H
 
 /*
- * Expressions: the one lexer, parser and evaluator of them.
+ * Expressions: the one parser and evaluator of them.  Their tokens are
+ * the lexer's (as_lexer.h), as every other token is.
  *
  * Everything in the assembler that reads a number or an expression --
  * an operand, the argument of a data directive, a repeat count, an
@@ -23,6 +24,8 @@
  * give 1 and 0.  Arithmetic is that of a 64-bit two's-complement machine:
  * it wraps and does not trap.
  */
+
+#include "as_lexer.h"
 
 #include <stddef.h>
 
@@ -89,8 +92,14 @@ struct as_expr {
  */
 #define AS_EXPR_MAX_NODES 4096
 
-/* Parse the whole of `s`; NULL if it is not one expression, or is too
- * large.  `file` and `line` are recorded in the nodes for diagnostics. */
+/*
+ * Parse the whole of a row of tokens; NULL if they are not one
+ * expression, or it is too large.  `file` and `line` are recorded in the
+ * nodes for diagnostics.  A string token is a name, the name in quotes.
+ */
+as_expr_t *as_expr_parse_tokens(const as_token_t *tokv, size_t n, const char *file, unsigned line);
+
+/* The same of text, which is made tokens first (as_lex_text_tokens). */
 as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line);
 void as_expr_free(as_expr_t *e);
 

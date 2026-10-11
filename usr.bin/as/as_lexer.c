@@ -125,6 +125,7 @@ static int as_token_vec_push(as_token_vec_t *v, as_token_kind_t kind, const char
     v->items[v->count].file = interned_file;
     v->items[v->count].line = line;
     v->items[v->count].col = col;
+    v->items[v->count].space_before = 0;
     if (v->items[v->count].text == NULL) {
         as_token_free(&v->items[v->count]);
         return -1;
@@ -159,25 +160,14 @@ static int as_token_vec_push_take(as_token_vec_t *v, as_token_t *src) {
     return 0;
 }
 
-static int is_punct_delim(int ch) {
-    return ch == ',' || ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}';
+/* What a name may begin with, and what it may go on with.  `@` is of a
+ * name: `foo@PLT` is one, and so is the `@function` of .type. */
+static int is_name_start(int ch) {
+    return isalpha(ch) || ch == '_' || ch == '.' || ch == '@';
 }
 
-static int is_operator_token(const char *tok) {
-    static const char *const ops[] = {
-        "+", "-", "*", "/", "%", "|", "&", "^", "~", "<<", ">>",
-    };
-    size_t i;
-
-    if (tok == NULL || tok[0] == '\0') {
-        return 0;
-    }
-    for (i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
-        if (strcmp(tok, ops[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
+static int is_name_part(int ch) {
+    return isalnum(ch) || ch == '_' || ch == '.' || ch == '$' || ch == '@';
 }
 
 static int is_x86_register_name(const char *s) {
@@ -251,40 +241,6 @@ static int is_x86_register_name(const char *s) {
     return 0;
 }
 
-static int is_x86_segment_selector_name(const char *s) {
-    return s != NULL &&
-           (strcmp(s, "cs") == 0 || strcmp(s, "ds") == 0 || strcmp(s, "es") == 0 ||
-            strcmp(s, "fs") == 0 || strcmp(s, "gs") == 0 || strcmp(s, "ss") == 0);
-}
-
-static int token_looks_like_segment_prefix(const char *tok) {
-    size_t n;
-    const char *base;
-    char tmp[8];
-
-    if (tok == NULL) {
-        return 0;
-    }
-    n = strlen(tok);
-    if (n < 2 || tok[n - 1] != ':') {
-        return 0;
-    }
-    base = tok;
-    if (*base == '%') {
-        base++;
-    }
-    n = strlen(base);
-    if (n < 2 || base[n - 1] != ':') {
-        return 0;
-    }
-    if (n - 1 >= sizeof(tmp)) {
-        return 0;
-    }
-    memcpy(tmp, base, n - 1);
-    tmp[n - 1] = '\0';
-    return is_x86_segment_selector_name(tmp);
-}
-
 /* as_lexer_cfg_t.arm_registers of the file being read. */
 static int lex_arm_registers;
 
@@ -311,51 +267,33 @@ static int is_arm_like_register_name(const char *s) {
     return 0;
 }
 
-static int looks_numeric(const char *s) {
-    size_t i = 0;
+int as_lex_escape(const char *s, size_t *inout_i) {
+    size_t i = *inout_i;
+    int c = (unsigned char)s[i];
 
-    if (s == NULL || s[0] == '\0') {
-        return 0;
-    }
-    if (s[i] == '+' || s[i] == '-') {
-        i++;
-    }
-    if (s[i] == '\0') {
-        return 0;
-    }
-    if (s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
-        i += 2;
-        if (!isxdigit((unsigned char)s[i])) {
-            return 0;
+    if (c >= '0' && c <= '7') {
+        int v = 0, n = 0;
+
+        while (n < 3 && s[i] >= '0' && s[i] <= '7') {
+            v = v * 8 + (s[i] - '0');
+            i++;
+            n++;
         }
-        for (; s[i] != '\0'; ++i) {
-            if (!isxdigit((unsigned char)s[i])) {
-                return 0;
-            }
-        }
-        return 1;
+        *inout_i = i;
+        return v & 0xff;
     }
-    if (s[i] == '0' && (s[i + 1] == 'b' || s[i + 1] == 'B')) {
-        i += 2;
-        if (s[i] != '0' && s[i] != '1') {
-            return 0;
-        }
-        for (; s[i] != '\0'; ++i) {
-            if (s[i] != '0' && s[i] != '1') {
-                return 0;
-            }
-        }
-        return 1;
+    *inout_i = i + 1;
+    switch (c) {
+    case 'n': return '\n';
+    case 't': return '\t';
+    case 'r': return '\r';
+    case 'b': return '\b';
+    case 'f': return '\f';
+    case '\\': return '\\';
+    case '\'': return '\'';
+    case '"': return '"';
+    default: return c;
     }
-    if (!isdigit((unsigned char)s[i])) {
-        return 0;
-    }
-    for (; s[i] != '\0'; ++i) {
-        if (!isdigit((unsigned char)s[i])) {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 static char unescape_single(int c) {
@@ -698,282 +636,277 @@ static char *read_file_all(const char *path, size_t *len_out, lex_ctx_t *ctx) {
     return buf;
 }
 
-static as_token_kind_t classify_token(const char *tok, int intel_syntax) {
-    const char *s = tok;
-
-    if (tok == NULL || tok[0] == '\0') {
-        return AS_TOK_INVALID;
-    }
-    if (tok[0] == '.') {
-        return AS_TOK_DIRECTIVE;
-    }
-    if (tok[0] == '$') {
-        s = tok + 1;
-    }
-    if (tok[0] == '%' && is_x86_register_name(tok + 1)) {
-        return AS_TOK_REGISTER;
-    }
-    if ((intel_syntax && is_x86_register_name(tok)) || (lex_arm_registers && is_arm_like_register_name(tok))) {
-        return AS_TOK_REGISTER;
-    }
-    if (looks_numeric(s)) {
-        return AS_TOK_IMMEDIATE;
-    }
-    if (is_operator_token(tok)) {
-        return AS_TOK_OPERATOR;
-    }
-    return AS_TOK_IDENTIFIER;
-}
-
 /* Whether the tokens so far, past their labels, begin an instruction
  * and not a directive. */
-static int statement_is_instruction(const as_token_vec_t *line_tokens) {
-    size_t i;
+/* Where a number that begins at s[i] ends. */
+static size_t number_end(const char *s, size_t i) {
+    size_t j = i;
 
-    for (i = 0; i < line_tokens->count; ++i) {
-        if (line_tokens->items[i].kind != AS_TOK_LABEL) {
-            return line_tokens->items[i].kind != AS_TOK_DIRECTIVE;
+    if (s[j] == '0' && (s[j + 1] == 'x' || s[j + 1] == 'X')) {
+        j += 2;
+    } else {
+        while (isdigit((unsigned char)s[j])) {
+            j++;
+        }
+        /* A fraction, and an exponent with its sign: the one place a
+         * `.`, a `+` or a `-` is of a number.  (Not after 0x: 0x1e+3 is
+         * a sum.) */
+        if (s[j] == '.' && isdigit((unsigned char)s[j + 1])) {
+            j++;
+            while (isdigit((unsigned char)s[j])) {
+                j++;
+            }
+        }
+        if ((s[j] == 'e' || s[j] == 'E') && (s[j + 1] == '+' || s[j + 1] == '-') &&
+            isdigit((unsigned char)s[j + 2])) {
+            j += 2;
         }
     }
-    return 0;
+    /* Hexadecimal digits, the f or b of a local label, and whatever
+     * else runs on: `12abc` is one token, and whoever wants a number
+     * says it is not one. */
+    while (isalnum((unsigned char)s[j]) || s[j] == '_') {
+        j++;
+    }
+    return j;
 }
 
-static int tokenize_line(const char *file, unsigned line_no, const char *line, int intel_syntax,
-                         as_token_vec_t *line_tokens, lex_ctx_t *ctx) {
+/* Whether what has just been read is the end of a value, so that a `%`
+ * that follows it with no space is the remainder and not a register. */
+static int ends_a_value(const as_token_vec_t *v, size_t first) {
+    const as_token_t *t;
+
+    if (v->count <= first) {
+        return 0;
+    }
+    t = &v->items[v->count - 1];
+    return t->kind == AS_TOK_NUMBER || t->kind == AS_TOK_IDENTIFIER || t->kind == AS_TOK_REGISTER ||
+           (t->kind == AS_TOK_PUNCT && (t->text[0] == ')' || t->text[0] == ']'));
+}
+
+/*
+ * The tokens of `s`, added to `out`: every one of them, with nothing
+ * decided about what the statement is.  This is the one place the
+ * assembler decides where a token ends.
+ */
+static int scan_tokens(const char *file, unsigned line_no, const char *s, as_token_vec_t *out, lex_ctx_t *ctx) {
+    size_t first = out->count;
     size_t i = 0;
-    int saw_mnemonic = 0;
 
-    while (line[i] != '\0') {
+    for (;;) {
         size_t start;
-        unsigned col;
+        as_token_kind_t kind;
+        char small[40];
+        const char *text = NULL;
+        char *owned = NULL;
+        int space = 0;
+        int rc;
 
-        while (line[i] != '\0' && isspace((unsigned char)line[i])) {
+        while (s[i] != '\0' && isspace((unsigned char)s[i])) {
             i++;
+            space = 1;
         }
-        if (line[i] == '\0') {
-            break;
+        if (s[i] == '\0') {
+            return 0;
         }
-        /*
-         * {vex} and {evex} are not skipped here.  They were, by a
-         * comparison that counted the terminator -- so it matched only
-         * where the prefix ended the line, and then stepped over the
-         * terminator and read on.  Dropping a request for an encoding
-         * would be wrong in any case; they go on as tokens and the
-         * statement is refused until the encoders honour them.
-         */
-        if (is_punct_delim((unsigned char)line[i])) {
-            char punct[2];
-
-            punct[0] = line[i];
-            punct[1] = '\0';
-            if (as_token_vec_push(line_tokens, AS_TOK_PUNCT, punct, file, line_no, (unsigned)(i + 1)) != 0) {
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
-            }
-            i++;
-            continue;
-        }
-
         start = i;
-        col = (unsigned)(i + 1);
 
-        if (line[i] == '"') {
+        if (s[i] == '"') {
             as_scan_t scan;
             size_t more;
-            char *raw;
-            size_t n;
 
             /* To the quote that closes it: the last character the
              * scanner calls part of the string. */
             memset(&scan, 0, sizeof(scan));
-            (void)as_scan_step(&scan, line, i, &more);
+            (void)as_scan_step(&scan, s, i, &more);
             i++;
-            while (line[i] != '\0') {
-                (void)as_scan_step(&scan, line, i, &more);
+            while (s[i] != '\0') {
+                (void)as_scan_step(&scan, s, i, &more);
                 if (scan.quote == 0) {
                     break;
                 }
                 i++;
             }
-            if (line[i] != '"') {
+            if (s[i] != '"') {
                 set_err(ctx, "%s:%u: unterminated string literal", file, line_no);
                 return -1;
             }
-            n = i - (start + 1);
-            raw = (char *)malloc(n + 1);
-            if (raw == NULL) {
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
-            }
-            memcpy(raw, line + start + 1, n);
-            raw[n] = '\0';
-            /*
-             * A name in quotes: `"x.y":` defines it and `jmp "x.y"`
-             * uses it.  Where a label may stand, a string before a colon
-             * is one; among an instruction's operands a string is a name,
-             * an instruction having no use for a string.
-             */
-            if (!saw_mnemonic && line[i + 1] == ':') {
-                if (as_token_vec_push(line_tokens, AS_TOK_LABEL, raw, file, line_no, col) != 0) {
-                    free(raw);
-                    set_err(ctx, "%s:%u: out of memory", file, line_no);
-                    return -1;
-                }
-                free(raw);
-                i += 2;
-                continue;
-            }
-            if (saw_mnemonic && line_tokens->count != 0 && line_tokens->items[0].kind != AS_TOK_DIRECTIVE &&
-                (line_tokens->items[0].kind != AS_TOK_LABEL || statement_is_instruction(line_tokens))) {
-                if (as_token_vec_push(line_tokens, AS_TOK_IDENTIFIER, raw, file, line_no, col) != 0) {
-                    free(raw);
-                    set_err(ctx, "%s:%u: out of memory", file, line_no);
-                    return -1;
-                }
-                free(raw);
-                i++;
-                continue;
-            }
-            if (as_token_vec_push(line_tokens, AS_TOK_STRING, raw, file, line_no, col) != 0) {
-                free(raw);
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
-            }
-            free(raw);
+            kind = AS_TOK_STRING;
+            start++;
+            owned = strndup(s + start, i - start);
             i++;
-            continue;
-        }
+        } else if (s[i] == '\'' && s[i + 1] != '\0') {
+            int c;
 
-        if (line[i] == '\'' && line[i + 1] != '\0') {
-            char tmp[32];
-            char c = 0;
-            int done = 0;
-
+            /* 'c, with or without the quote that closes it; a token
+             * that is the number. */
             i++;
-            if (line[i] == '\\' && line[i + 1] != '\0') {
-                c = unescape_single((unsigned char)line[++i]);
+            if (s[i] == '\\' && s[i + 1] != '\0') {
                 i++;
+                c = as_lex_escape(s, &i);
             } else {
-                c = line[i++];
+                c = (unsigned char)s[i++];
             }
-            /* The quote that closes it may be left out: `'a` is 'a'. */
-            if (line[i] == '\'') {
+            if (s[i] == '\'') {
                 i++;
             }
-            (void)done;
-            snprintf(tmp, sizeof(tmp), "%u", (unsigned char)c);
-            if (as_token_vec_push(line_tokens, AS_TOK_IMMEDIATE, tmp, file, line_no, col) != 0) {
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
+            snprintf(small, sizeof(small), "%d", c);
+            kind = AS_TOK_NUMBER;
+            text = small;
+        } else if (isdigit((unsigned char)s[i])) {
+            i = number_end(s, i);
+            kind = AS_TOK_NUMBER;
+        } else if (is_name_start((unsigned char)s[i])) {
+            while (is_name_part((unsigned char)s[i])) {
+                i++;
             }
-            continue;
-        }
-
-        while (line[i] != '\0' && !isspace((unsigned char)line[i]) && !is_punct_delim((unsigned char)line[i])) {
+            kind = AS_TOK_IDENTIFIER;
+        } else if (s[i] == '%' && (isalpha((unsigned char)s[i + 1]) || s[i + 1] == '_') &&
+                   (space || !ends_a_value(out, first))) {
+            /* A register, if there is one of the name; and if there is
+             * not, a name that nothing will know. */
             i++;
+            while (isalnum((unsigned char)s[i]) || s[i] == '_') {
+                i++;
+            }
+            owned = strndup(s + start, i - start);
+            kind = owned != NULL && is_x86_register_name(owned + 1) ? AS_TOK_REGISTER : AS_TOK_IDENTIFIER;
+        } else {
+            static const char *const two[] = {"<<", ">>", "==", "!=", "<>", "<=", ">=", "&&", "||"};
+            size_t k;
+
+            kind = AS_TOK_PUNCT;
+            for (k = 0; k < sizeof(two) / sizeof(two[0]); ++k) {
+                if (s[i] == two[k][0] && s[i + 1] == two[k][1]) {
+                    kind = AS_TOK_OPERATOR;
+                    i += 2;
+                    break;
+                }
+            }
+            if (kind == AS_TOK_PUNCT) {
+                if (strchr("+-*/%&|^~!<>", s[i]) != NULL) {
+                    kind = AS_TOK_OPERATOR;
+                }
+                i++;
+            }
         }
 
-        if (i > start) {
-            size_t n = i - start;
-            char *tok = (char *)malloc(n + 1);
-            as_token_kind_t kind;
+        if (text == NULL && owned == NULL) {
+            owned = strndup(s + start, i - start);
+        }
+        if (text == NULL && owned == NULL) {
+            set_err(ctx, "%s:%u: out of memory", file, line_no);
+            return -1;
+        }
+        rc = as_token_vec_push(out, kind, text != NULL ? text : owned, file, line_no, (unsigned)(start + 1));
+        free(owned);
+        if (rc != 0) {
+            set_err(ctx, "%s:%u: out of memory", file, line_no);
+            return -1;
+        }
+        out->items[out->count - 1].space_before = (unsigned char)space;
+    }
+}
 
-            if (tok == NULL) {
+int as_lex_text_tokens(const char *text, const char *file, unsigned line, as_token_vec_t *out) {
+    if (text == NULL || out == NULL) {
+        return -1;
+    }
+    return scan_tokens(file != NULL ? file : "", line, text, out, NULL);
+}
+
+/* Take token `at` out of the row. */
+static void drop_token(as_token_vec_t *v, size_t at) {
+    as_token_free(&v->items[at]);
+    memmove(&v->items[at], &v->items[at + 1], (v->count - at - 1) * sizeof(v->items[0]));
+    v->count--;
+}
+
+/*
+ * The tokens of one statement: scanned, and then its head is read --
+ * the labels it begins with, each a name and a colon, and after them
+ * the directive or the instruction's name.
+ */
+static int tokenize_line(const char *file, unsigned line_no, const char *line, int intel_syntax,
+                         as_token_vec_t *line_tokens, lex_ctx_t *ctx) {
+    size_t head = line_tokens->count;
+    size_t i;
+    as_token_t *t;
+
+    if (scan_tokens(file, line_no, line, line_tokens, ctx) != 0) {
+        return -1;
+    }
+    /* `q1:q2: .long 4`, `1: nop`, `"x.y": ret`: each name before a colon
+     * is a label, however many there are. */
+    while (head + 1 < line_tokens->count) {
+        const as_token_t *colon = &line_tokens->items[head + 1];
+
+        t = &line_tokens->items[head];
+        if (colon->kind != AS_TOK_PUNCT || colon->text[0] != ':' ||
+            (t->kind != AS_TOK_IDENTIFIER && t->kind != AS_TOK_STRING &&
+             !(t->kind == AS_TOK_NUMBER && t->text[strspn(t->text, "0123456789")] == '\0')) ||
+            t->text[0] == '%') {
+            break;
+        }
+        t->kind = AS_TOK_LABEL;
+        drop_token(line_tokens, head + 1);
+        head++;
+    }
+    if (head >= line_tokens->count) {
+        return 0;
+    }
+    t = &line_tokens->items[head];
+    if (t->kind == AS_TOK_IDENTIFIER) {
+        const as_token_t *next = head + 1 < line_tokens->count ? &line_tokens->items[head + 1] : NULL;
+
+        /* `x = 5` is neither: the name stays a name. */
+        if (next != NULL && next->kind == AS_TOK_PUNCT && next->text[0] == '=') {
+            return 0;
+        }
+        t->kind = t->text[0] == '.' ? AS_TOK_DIRECTIVE : AS_TOK_MNEMONIC;
+        /* An instruction's name may have a hyphen in it, and five do:
+         * `xcrypt-ecb` and its like. */
+        while (t->kind == AS_TOK_MNEMONIC && head + 2 < line_tokens->count) {
+            const as_token_t *hyphen = &line_tokens->items[head + 1];
+            const as_token_t *rest = &line_tokens->items[head + 2];
+            size_t len = strlen(t->text);
+            char *joined;
+
+            if (hyphen->kind != AS_TOK_OPERATOR || strcmp(hyphen->text, "-") != 0 || hyphen->space_before ||
+                rest->kind != AS_TOK_IDENTIFIER || rest->space_before) {
+                break;
+            }
+            joined = (char *)realloc(t->text, len + strlen(rest->text) + 2);
+            if (joined == NULL) {
                 set_err(ctx, "%s:%u: out of memory", file, line_no);
                 return -1;
             }
-            memcpy(tok, line + start, n);
-            tok[n] = '\0';
+            joined[len] = '-';
+            memcpy(joined + len + 1, rest->text, strlen(rest->text) + 1);
+            t->text = joined;
+            drop_token(line_tokens, head + 2);
+            drop_token(line_tokens, head + 1);
+            t = &line_tokens->items[head];
+        }
+    }
+    for (i = head + (t->kind == AS_TOK_DIRECTIVE || t->kind == AS_TOK_MNEMONIC ? 1 : 0); i < line_tokens->count;
+         ++i) {
+        as_token_t *u = &line_tokens->items[i];
 
-            if (!saw_mnemonic) {
-                char *embedded_colon = strchr(tok, ':');
-                if (embedded_colon != NULL && embedded_colon != tok && embedded_colon[1] != '\0' &&
-                    token_looks_like_segment_prefix(tok) == 0) {
-                    as_token_kind_t rest_kind;
-                    char *rest = embedded_colon + 1;
-                    *embedded_colon = '\0';
-                    if (as_token_vec_push(line_tokens, AS_TOK_LABEL, tok, file, line_no, col) != 0) {
-                        free(tok);
-                        set_err(ctx, "%s:%u: out of memory", file, line_no);
-                        return -1;
-                    }
-                    /* `q1:q2: .long 4`, `a:b:nop`: each name before a
-                     * colon is a label, however many are run together. */
-                    for (;;) {
-                        char *colon = strchr(rest, ':');
-
-                        if (colon == NULL || colon == rest) {
-                            break;
-                        }
-                        *colon = '\0';
-                        if (as_token_vec_push(line_tokens, AS_TOK_LABEL, rest, file, line_no,
-                                              col + (unsigned)(rest - tok)) != 0) {
-                            free(tok);
-                            set_err(ctx, "%s:%u: out of memory", file, line_no);
-                            return -1;
-                        }
-                        rest = colon + 1;
-                    }
-                    if (*rest == '\0') {
-                        free(tok);
-                        continue;
-                    }
-                    rest_kind = classify_token(rest, intel_syntax);
-                    if (rest_kind == AS_TOK_IDENTIFIER) {
-                        rest_kind = AS_TOK_MNEMONIC;
-                    }
-                    if (as_token_vec_push(line_tokens, rest_kind, rest, file, line_no,
-                                          col + (unsigned)(rest - tok)) != 0) {
-                        free(tok);
-                        set_err(ctx, "%s:%u: out of memory", file, line_no);
-                        return -1;
-                    }
-                    saw_mnemonic = (rest_kind != AS_TOK_DIRECTIVE && rest_kind != AS_TOK_LABEL);
-                    free(tok);
-                    continue;
-                }
-            }
-
-            if (n > 0 && tok[n - 1] == ':' && (token_looks_like_segment_prefix(tok) == 0 || !saw_mnemonic)) {
-                tok[n - 1] = '\0';
-                kind = AS_TOK_LABEL;
-            } else if (!saw_mnemonic) {
-                size_t j = i;
-                while (line[j] != '\0' && isspace((unsigned char)line[j])) {
-                    j++;
-                }
-                if (line[j] == ':') {
-                    kind = AS_TOK_LABEL;
-                    i = j + 1;
-                } else {
-                    kind = classify_token(tok, intel_syntax);
-                    if (kind == AS_TOK_IDENTIFIER && !saw_mnemonic) {
-                        kind = AS_TOK_MNEMONIC;
-                        saw_mnemonic = 1;
-                    } else if (kind != AS_TOK_DIRECTIVE && kind != AS_TOK_LABEL) {
-                        saw_mnemonic = 1;
-                    }
-                }
-            } else {
-                kind = classify_token(tok, intel_syntax);
-                if (kind == AS_TOK_IDENTIFIER && !saw_mnemonic) {
-                    kind = AS_TOK_MNEMONIC;
-                    saw_mnemonic = 1;
-                } else if (kind != AS_TOK_DIRECTIVE && kind != AS_TOK_LABEL) {
-                    saw_mnemonic = 1;
-                }
-            }
-
-            if (as_token_vec_push(line_tokens, kind, tok, file, line_no, col) != 0) {
-                free(tok);
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
-            }
-            free(tok);
+        /* Among an instruction's operands a string is a name, an
+         * instruction having no use for a string: `jmp "x.y"`. */
+        if (u->kind == AS_TOK_STRING && t->kind == AS_TOK_MNEMONIC) {
+            u->kind = AS_TOK_IDENTIFIER;
+        } else if (u->kind == AS_TOK_IDENTIFIER &&
+                   ((intel_syntax && is_x86_register_name(u->text)) ||
+                    (lex_arm_registers && is_arm_like_register_name(u->text)))) {
+            /* Where registers are written bare. */
+            u->kind = AS_TOK_REGISTER;
         }
     }
     return 0;
 }
+
 
 static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth);
 

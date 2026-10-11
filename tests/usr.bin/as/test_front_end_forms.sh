@@ -35,6 +35,18 @@ cat > cases <<'EOF'
 32 64	90ebfdebfb	1: 2: nop|jmp 1b|jmp 2b
 32 64	9001	"x.y": nop|.byte . - "x.y"
 32 64	90	.globl "a b"|"a b": nop
+32 64	9001	"a b": nop|.byte . - "a b"
+32 64	05000000	.set "k k", 5|.long "k k"
+32 64	909004000000	"a b": nop|nop|.long "a b" - . + 6
+32 64	9001000000	1: "a b": nop|.long "a b"-1b+1
+32 64	05000000	.Lq = 5|.long .Lq
+32 64	0500000006000000	.Lq=5|x = .Lq+1|.long .Lq, x
+32 64	900000000090	nop|. = . + 4|nop
+32 64	900000000090	nop|.=.+4|nop
+32 64	90000090	nop|.org .+2|nop
+32 64	909000000090	nop|1: nop|.org 1b+4|nop
+32 64	f30fa7c8	xcrypt-ecb
+32 64	0300000001000000	.long 7%4, 7 % 3
 32 64	b061	movb $'a',%al
 32 64	b061	movb $'a,%al
 32 64	6162	.byte 'a, 'a+1

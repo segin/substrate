@@ -10,7 +10,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 ${CC:-cc} -std=gnu17 -O1 -Wall -Wextra -Werror -o "$work/test_expr" \
-    -I"$top/usr.bin/as" "$here/test_expr.c" "$top/usr.bin/as/as_expr.c" ||
+    -I"$top/usr.bin/as" "$here/test_expr.c" "$top/usr.bin/as/as_expr.c" "$top/usr.bin/as/as_lexer.c" ||
     { echo "FAIL: the expression test does not build"; exit 1; }
 
 "$work/test_expr"

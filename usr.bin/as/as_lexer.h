@@ -7,11 +7,34 @@
 extern "C" {
 #endif
 
+/*
+ * A statement is a row of these, one for each thing in it that means
+ * something by itself:
+ *
+ *   AS_TOK_LABEL       a name (or a number, or a quoted string) with the
+ *                      colon after it, at the head of a statement; the
+ *                      colon is not in the text and is not a token
+ *   AS_TOK_DIRECTIVE   the `.name` a statement begins with
+ *   AS_TOK_MNEMONIC    the name a statement begins with otherwise
+ *   AS_TOK_REGISTER    `%eax`: a percent sign and the name of a register,
+ *                      both in the text; and a bare register name where
+ *                      the syntax has those (Intel, ARM)
+ *   AS_TOK_NUMBER      `42`, `0x10`, `1f`, `1.5e3`; a character constant
+ *                      is one too, its text the value in decimal
+ *   AS_TOK_IDENTIFIER  any other name: letters, digits, `_`, `.`, `$` and
+ *                      `@`, not beginning with a digit or `$`
+ *   AS_TOK_STRING      what is between two `"`, escapes as written
+ *   AS_TOK_OPERATOR    + - * / % & | ^ ~ ! < > << >> == != <> <= >= && ||
+ *   AS_TOK_PUNCT       any other single character: , ( ) [ ] { } : = $ #
+ *
+ * `a+b` is three tokens, `%fs:0` is three, `$sym` is two.  What reads a
+ * statement reads these and does not look inside their text for more.
+ */
 typedef enum {
     AS_TOK_INVALID = 0,
     AS_TOK_MNEMONIC,
     AS_TOK_REGISTER,
-    AS_TOK_IMMEDIATE,
+    AS_TOK_NUMBER,
     AS_TOK_LABEL,
     AS_TOK_DIRECTIVE,
     AS_TOK_STRING,
@@ -26,6 +49,9 @@ typedef struct {
     char *file;
     unsigned line;
     unsigned col;
+    /* Whether white space came before it: `a %b` and `a%b` differ, and
+     * what shows an operand as it was written wants to know. */
+    unsigned char space_before;
 } as_token_t;
 
 typedef struct {
@@ -110,6 +136,19 @@ int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more);
  */
 int as_lex_text(const char *name, const char *text, size_t len, int marked, const as_lexer_cfg_t *cfg,
                 as_token_vec_t *out, char *errbuf, size_t errbuf_sz);
+
+/*
+ * The tokens of a piece of text that is not a statement -- an
+ * expression, the argument of a directive: no label, directive or
+ * mnemonic is looked for.  Their file is `file`, which may be NULL, and
+ * their line `line`.  0, or -1 for a string with no end or want of
+ * memory.
+ */
+int as_lex_text_tokens(const char *text, const char *file, unsigned line, as_token_vec_t *out);
+
+/* The value of the character after a backslash at s[*i], in a string or
+ * a character constant; *i is moved past what was read of it. */
+int as_lex_escape(const char *s, size_t *i);
 
 /*
  * Where the user wrote what an internal file name and line stand for:

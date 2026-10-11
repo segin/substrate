@@ -13604,10 +13604,13 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             if (expr == NULL) {
                 return -1;
             }
-            if (eval_local_rel_expr_virtual(ctx, section_name, st, 0, x86_code_bits, expr, &target) != 0) {
+            /* The distance from here, where `.` is here; it was measured
+             * from the section's start, and `.org .+4` went to 4. */
+            if (eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, expr, &target) != 0) {
                 as_expr_free(expr);
                 return -1;
             }
+            target += (long long)sec_off;
             as_expr_free(expr);
         }
         if (target < 0 || (uint64_t)target < sec_off) {

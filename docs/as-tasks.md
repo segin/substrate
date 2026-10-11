@@ -363,10 +363,12 @@ with a symbol table.
 - [x] **AS-T-093** When `;` occurs inside a comment or a quoted string, the assembler shall not begin a statement there.
   Trace: AS-FE-009.  Verify: T — `nop # c; hlt` is `90`; `.ascii "a\";b"` is `61 22 3b 62`; a C string holding `\";` compiled by gcc assembles.  After: 092.
   Done with 092, of which it is the consequence: the two places that split at `;` did not know a comment, and one of them not an escaped quote.  `nop # a ; ret` assembled a `ret`; `.ascii "a\"; b"` was refused as an unterminated string; and a comment of the 16-bit corpus, `# fallback; gen=0f c0`, was read as an assignment to `gen`, which is all that had kept `test_i8086_corpus.sh` from passing.  `test_quote_scanner.sh`.
-- [ ] **AS-T-094** The lexer shall produce a token for each operator, punctuation mark, register, number, name and string of a statement.
+- [x] **AS-T-094** The lexer shall produce a token for each operator, punctuation mark, register, number, name and string of a statement.
   Trace: AS-FE-051.  Verify: T — a lexer unit test: `a+b`, `%fs:0`, `x=5`, `*%eax`, `$sym`, `%gs : 8` give the tokens listed in the test.
-- [ ] **AS-T-095** The parser shall build operands and expressions from tokens and shall not scan text.
+  Done.  The lexer cut a line at white space and at seven characters, so `a+b`, `%fs:0`, `x=5`, `*%eax` and `$sym` were each one token whose text the parser went through again.  One scanner now ends every token (`as_lexer.h` says what each kind is); a token knows whether white space came before it; and the head of a statement -- labels, directive, mnemonic -- is read from the tokens.  `test_lexer_core.c` holds 37 statements to their tokens, the six of the Verify line first.  Three things came with it: `.Lq = 5` and `.Lq=5` are assignments (they were "unknown directive"); `. = . + 4` moves the location counter, as `.org . + 4`, which itself measured `.` from the section's start and is put right; and a number token is a new kind, `AS_TOK_NUMBER`, where `AS_TOK_IMMEDIATE` had been `$0x10` whole.  One thing the scanner cannot tell: `a %b` is read as a register after a name, and the expression parser takes it for the remainder.
+- [x] **AS-T-095** The parser shall build operands and expressions from tokens and shall not scan text.
   Trace: AS-FE-051.  Verify: I — `join_tokens` and the `strchr` scans for `:`, `=`, `*` are gone from `as_parser.c`; `as_expr.c` takes tokens.  After: 094.
+  Done.  `join_tokens` is gone, and with it every scan of a token's text in `as_parser.c`: the segment before a colon, the star of an indirect operand, the `$`, `x=5`, the far pointer, and the Intel operand's `reg*scale+disp` in one token, which was 250 lines of its own and is now a sum of terms read from tokens (`[4*ecx]` is read as well as `[ecx*4]`).  `as_expr.c` has no lexer: `as_expr_parse_tokens` reads a row of tokens, and `as_parse_expr_string` makes text tokens with the lexer first.  What stays text is an operand's `raw` and a directive's arguments, which are the tokens as written (`tokens_as_written`), for messages and for the consumers that take text; nothing in the parser reads them back, but the emitter and the data builder still do, and that is theirs to change (220 and after).  The two corpora assemble to the same bytes as before, line for line, and a 51,000-line compiler output to the same object in the same time.
 - [ ] **AS-T-096** The assembler shall hold the x86 register names in one table that gives each its class, width and number.
   Trace: AS-FE-051, AS-DES-004.  Verify: I — the tables of `as_lexer.c`, `as_parser.c` and the encoders are one.
 - [x] **AS-T-097** When a `# N "file"` line of the C preprocessor is read, the assembler shall take N and the file as the coordinates of the lines that follow.
@@ -378,9 +380,10 @@ with a symbol table.
 - [x] **AS-T-099** When two or more labels are written on one line, the assembler shall define each.
   Trace: AS-FE-013.  Verify: T — `q1:q2: .long 4`; `a: b: c: nop`.  After: 094.
   Done ahead of 094: with spaces between they were taken already; run together, `q1:q2:` and `a:b:nop`, only the first was.  `test_front_end_forms.sh`.
-- [ ] **AS-T-100** When a symbol name is written in double quotes, the assembler shall take the quoted text as the name.
+- [x] **AS-T-100** When a symbol name is written in double quotes, the assembler shall take the quoted text as the name.
   Trace: AS-FE-040.  Verify: T — `"a b": .long "a b"`.
   In part: `"x.y":` and `"a b":` define the name, and an instruction's operand in quotes is a name (`jmp "x.y"`).  Not done: a quoted name among a directive's arguments, `.long "a b"`, where the tokens are joined back into text and a name with a space in it is two; it waits on 095.
+  Done with 095: an expression reads a string token as a name, and the argument of a directive that takes numbers, and the right-hand side of an assignment, keep a string's quotes.  `.long "a b"`, `.long "a b" - .`, `.set "k k", 5` are in `test_front_end_forms.sh`, which GNU as passes.
 - [x] **AS-T-101** When a character constant is written after `$` or within an expression, with or without its closing quote, the assembler shall take its value.
   Trace: AS-FE-040.  Verify: T — `movb $'a',%al`, `movb $'a,%al`, `.byte 'a, 'a+1`, `'\n`.
   Done.  The tokenizer wanted the closing quote, and the scanner of 092 took `'` for the start of a string that ran to the next `'`, so `.byte ';, 2` began a statement at its `;`.  A character constant is the quote, one character or a backslash and one, and a closing quote that may be left out.  `test_front_end_forms.sh`.  GNU's `'\0` is the digit 0 and its `'\x41` is 9; here they are NUL and refused.
@@ -1171,5 +1174,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 166 done, 185 open.  Numbers run to 400, with gaps left between
+351 tasks: 169 done, 182 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

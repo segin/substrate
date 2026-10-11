@@ -25,9 +25,19 @@ typedef struct {
     int local_forward;
 } expr_tok_t;
 
+/*
+ * Where the parser is among the tokens it was given.  `cur` is the next
+ * of them as an expression reads it: a number has its value, a local
+ * label its digit and direction, an operator which one it is.
+ */
 typedef struct {
-    const char *s;
+    const as_token_t *tokv;
+    size_t n;
     size_t i;
+    /* A `%name` met where an operator is wanted is the remainder and a
+     * name -- `a %b`, which the tokenizer cannot tell from a register --
+     * and this is set between the two halves of it. */
+    int half;
     expr_tok_t cur;
     const char *file;
     unsigned line;
@@ -171,138 +181,74 @@ int as_expr_parse_number(const char *s, long long *out) {
     return 0;
 }
 
-/* The character after a backslash in a character constant. */
-static int expr_char_escape(const char *s, size_t *inout_i) {
-    size_t i = *inout_i;
-    int c = (unsigned char)s[i];
+/* Which operator an operator token is; AS_EXPR_OP_NONE for one that is
+ * none of an expression's. */
+static as_expr_op_t expr_op_of(const char *s) {
+    static const struct {
+        const char *text;
+        as_expr_op_t op;
+    } ops[] = {
+        {"<<", AS_EXPR_OP_SHL}, {">>", AS_EXPR_OP_SHR}, {"==", AS_EXPR_OP_EQ},   {"!=", AS_EXPR_OP_NE},
+        {"<>", AS_EXPR_OP_NE},  {"<=", AS_EXPR_OP_LE},  {">=", AS_EXPR_OP_GE},   {"&&", AS_EXPR_OP_LAND},
+        {"||", AS_EXPR_OP_LOR}, {"<", AS_EXPR_OP_LT},   {">", AS_EXPR_OP_GT},    {"+", AS_EXPR_OP_ADD},
+        {"-", AS_EXPR_OP_SUB},  {"*", AS_EXPR_OP_MUL},  {"/", AS_EXPR_OP_DIV},   {"%", AS_EXPR_OP_MOD},
+        {"|", AS_EXPR_OP_OR},   {"&", AS_EXPR_OP_AND},  {"^", AS_EXPR_OP_XOR},   {"~", AS_EXPR_OP_BNOT},
+        /* Infix it is or-not; where a value is wanted, logical not. */
+        {"!", AS_EXPR_OP_ORNOT},
+    };
+    size_t i;
 
-    if (c >= '0' && c <= '7') {
-        int v = 0, n = 0;
-
-        while (n < 3 && s[i] >= '0' && s[i] <= '7') {
-            v = v * 8 + (s[i] - '0');
-            i++;
-            n++;
+    for (i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
+        if (strcmp(s, ops[i].text) == 0) {
+            return ops[i].op;
         }
-        *inout_i = i;
-        return v & 0xff;
     }
-    *inout_i = i + 1;
-    switch (c) {
-    case 'n': return '\n';
-    case 't': return '\t';
-    case 'r': return '\r';
-    case 'b': return '\b';
-    case 'f': return '\f';
-    case '\\': return '\\';
-    case '\'': return '\'';
-    case '"': return '"';
-    default: return c;
-    }
+    return AS_EXPR_OP_NONE;
 }
 
-static int expr_op_tok(expr_lex_t *lx, as_expr_op_t op, size_t next) {
-    lx->cur.kind = EXPR_TOK_OP;
-    lx->cur.op = op;
-    lx->i = next;
+static int expr_symbol_tok(expr_lex_t *lx, const char *prefix, const char *name, size_t take) {
+    size_t plen = strlen(prefix);
+    size_t nlen = strlen(name);
+
+    lx->cur.symbol = (char *)malloc(plen + nlen + 1);
+    if (lx->cur.symbol == NULL) {
+        return -1;
+    }
+    memcpy(lx->cur.symbol, prefix, plen);
+    memcpy(lx->cur.symbol + plen, name, nlen + 1);
+    lx->cur.kind = EXPR_TOK_SYMBOL;
+    lx->i += take;
     return 0;
 }
 
+/* The next token, as an expression reads it. */
 static int expr_lex_next(expr_lex_t *lx) {
-    const char *s = lx->s;
-    size_t i;
+    const as_token_t *t;
+    const char *s;
 
     expr_lex_free_cur(lx);
     memset(&lx->cur, 0, sizeof(lx->cur));
 
-    i = lx->i;
-    while (s[i] != '\0' && isspace((unsigned char)s[i])) {
-        i++;
-    }
-
-    if (s[i] == '\0') {
+    if (lx->i >= lx->n) {
         lx->cur.kind = EXPR_TOK_EOF;
-        lx->i = i;
         return 0;
     }
+    t = &lx->tokv[lx->i];
+    s = t->text;
 
-    if (s[i] == '(') {
-        lx->cur.kind = EXPR_TOK_LPAREN;
-        lx->i = i + 1;
-        return 0;
-    }
-    if (s[i] == ')') {
-        lx->cur.kind = EXPR_TOK_RPAREN;
-        lx->i = i + 1;
-        return 0;
-    }
-
-    /* Two characters before one. */
-    if (s[i] == '<' && s[i + 1] == '<') return expr_op_tok(lx, AS_EXPR_OP_SHL, i + 2);
-    if (s[i] == '>' && s[i + 1] == '>') return expr_op_tok(lx, AS_EXPR_OP_SHR, i + 2);
-    if (s[i] == '=' && s[i + 1] == '=') return expr_op_tok(lx, AS_EXPR_OP_EQ, i + 2);
-    if (s[i] == '!' && s[i + 1] == '=') return expr_op_tok(lx, AS_EXPR_OP_NE, i + 2);
-    if (s[i] == '<' && s[i + 1] == '>') return expr_op_tok(lx, AS_EXPR_OP_NE, i + 2);
-    if (s[i] == '<' && s[i + 1] == '=') return expr_op_tok(lx, AS_EXPR_OP_LE, i + 2);
-    if (s[i] == '>' && s[i + 1] == '=') return expr_op_tok(lx, AS_EXPR_OP_GE, i + 2);
-    if (s[i] == '&' && s[i + 1] == '&') return expr_op_tok(lx, AS_EXPR_OP_LAND, i + 2);
-    if (s[i] == '|' && s[i + 1] == '|') return expr_op_tok(lx, AS_EXPR_OP_LOR, i + 2);
-
-    switch (s[i]) {
-    case '<': return expr_op_tok(lx, AS_EXPR_OP_LT, i + 1);
-    case '>': return expr_op_tok(lx, AS_EXPR_OP_GT, i + 1);
-    case '+': return expr_op_tok(lx, AS_EXPR_OP_ADD, i + 1);
-    case '-': return expr_op_tok(lx, AS_EXPR_OP_SUB, i + 1);
-    case '*': return expr_op_tok(lx, AS_EXPR_OP_MUL, i + 1);
-    case '/': return expr_op_tok(lx, AS_EXPR_OP_DIV, i + 1);
-    case '%': return expr_op_tok(lx, AS_EXPR_OP_MOD, i + 1);
-    case '|': return expr_op_tok(lx, AS_EXPR_OP_OR, i + 1);
-    case '&': return expr_op_tok(lx, AS_EXPR_OP_AND, i + 1);
-    case '^': return expr_op_tok(lx, AS_EXPR_OP_XOR, i + 1);
-    case '~': return expr_op_tok(lx, AS_EXPR_OP_BNOT, i + 1);
-    /* Infix it is or-not; where a value is wanted, logical not. */
-    case '!': return expr_op_tok(lx, AS_EXPR_OP_ORNOT, i + 1);
-    default: break;
-    }
-
-    /* 'c, with or without the closing quote. */
-    if (s[i] == '\'' && s[i + 1] != '\0') {
-        int c;
-
-        i++;
-        if (s[i] == '\\' && s[i + 1] != '\0') {
-            i++;
-            c = expr_char_escape(s, &i);
-        } else {
-            c = (unsigned char)s[i];
-            i++;
-        }
-        if (s[i] == '\'') {
-            i++;
-        }
-        lx->cur.kind = EXPR_TOK_NUMBER;
-        lx->cur.number = c;
-        lx->i = i;
-        return 0;
-    }
-
-    if (isdigit((unsigned char)s[i])) {
+    switch (t->kind) {
+    case AS_TOK_NUMBER: {
+        size_t digits = strspn(s, "0123456789");
+        size_t at = 0;
         long long v = 0;
-        size_t begin = i;
-        size_t end = i;
 
-        while (isdigit((unsigned char)s[end])) {
-            end++;
-        }
-        /* A local label: digits, then f or b, then nothing of a name. */
-        if (end > begin && (s[end] == 'f' || s[end] == 'b') &&
-            !isalnum((unsigned char)s[end + 1]) && s[end + 1] != '_') {
+        /* A local label: digits, then f or b, then nothing.  (0b1 is a
+         * binary number, and has more after the b.) */
+        if (digits != 0 && (s[digits] == 'f' || s[digits] == 'b') && s[digits + 1] == '\0') {
             long long local_id = 0;
             size_t j;
 
-            /* But 0b is a prefix where binary digits follow, and that
-             * was settled above by the digit scan stopping at the b. */
-            for (j = begin; j < end; ++j) {
+            for (j = 0; j < digits; ++j) {
                 local_id = local_id * 10 + (long long)(s[j] - '0');
                 if (local_id > INT_MAX) {
                     return -1;
@@ -310,46 +256,68 @@ static int expr_lex_next(expr_lex_t *lx) {
             }
             lx->cur.kind = EXPR_TOK_LOCAL;
             lx->cur.local_digit = (int)local_id;
-            lx->cur.local_forward = (s[end] == 'f');
-            lx->i = end + 1;
+            lx->cur.local_forward = (s[digits] == 'f');
+            lx->i++;
             return 0;
         }
-
-        if (expr_parse_number(s, &i, &v) != 0) {
-            return -1;
-        }
-        /* Digits that run on into a name are not a number: `12abc` is
-         * nothing at all. */
-        if (isalnum((unsigned char)s[i]) || s[i] == '_') {
+        /* Digits that run on into a name are not a number, nor is one
+         * with a fraction: `12abc` and `1.5` are nothing at all here. */
+        if (expr_parse_number(s, &at, &v) != 0 || s[at] != '\0') {
             return -1;
         }
         lx->cur.kind = EXPR_TOK_NUMBER;
         lx->cur.number = v;
-        lx->i = i;
+        lx->i++;
         return 0;
     }
-
-    if (isalpha((unsigned char)s[i]) || s[i] == '_' || s[i] == '.' || s[i] == '$') {
-        size_t begin = i;
-        size_t len;
-
-        i++;
-        while (isalnum((unsigned char)s[i]) || s[i] == '_' || s[i] == '.' || s[i] == '$' || s[i] == '@') {
-            i++;
+    case AS_TOK_STRING:
+        /* A name in quotes is a name. */
+        return expr_symbol_tok(lx, "", s, 1);
+    case AS_TOK_IDENTIFIER:
+    case AS_TOK_REGISTER:
+    case AS_TOK_MNEMONIC:
+    case AS_TOK_DIRECTIVE:
+    case AS_TOK_LABEL:
+        if (s[0] == '%') {
+            if (!lx->half) {
+                lx->half = 1;
+                lx->cur.kind = EXPR_TOK_OP;
+                lx->cur.op = AS_EXPR_OP_MOD;
+                return 0;
+            }
+            lx->half = 0;
+            return expr_symbol_tok(lx, "", s + 1, 1);
         }
-        len = i - begin;
-        lx->cur.symbol = (char *)malloc(len + 1);
-        if (lx->cur.symbol == NULL) {
+        return expr_symbol_tok(lx, "", s, 1);
+    case AS_TOK_OPERATOR:
+        lx->cur.op = expr_op_of(s);
+        if (lx->cur.op == AS_EXPR_OP_NONE) {
             return -1;
         }
-        memcpy(lx->cur.symbol, s + begin, len);
-        lx->cur.symbol[len] = '\0';
-        lx->cur.kind = EXPR_TOK_SYMBOL;
-        lx->i = i;
+        lx->cur.kind = EXPR_TOK_OP;
+        lx->i++;
         return 0;
-    }
+    case AS_TOK_PUNCT:
+        if (s[0] == '(' || s[0] == ')') {
+            lx->cur.kind = s[0] == '(' ? EXPR_TOK_LPAREN : EXPR_TOK_RPAREN;
+            lx->i++;
+            return 0;
+        }
+        /* A name may begin with a dollar sign, which is otherwise a
+         * token of its own. */
+        if (s[0] == '$') {
+            const as_token_t *next = lx->i + 1 < lx->n ? &lx->tokv[lx->i + 1] : NULL;
 
-    return -1;
+            if (next != NULL && !next->space_before &&
+                (next->kind == AS_TOK_IDENTIFIER || next->kind == AS_TOK_NUMBER) && next->text[0] != '%') {
+                return expr_symbol_tok(lx, "$", next->text, 2);
+            }
+            return expr_symbol_tok(lx, "$", "", 1);
+        }
+        return -1;
+    default:
+        return -1;
+    }
 }
 
 /* GNU as's four ranks of infix operator; -1 for what is not one. */
@@ -539,15 +507,16 @@ static as_expr_t *parse_expr_bp(expr_lex_t *lx, int min_bp) {
     return lhs;
 }
 
-as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) {
+as_expr_t *as_expr_parse_tokens(const as_token_t *tokv, size_t n, const char *file, unsigned line) {
     expr_lex_t lx;
     as_expr_t *e;
 
-    if (s == NULL) {
+    if (tokv == NULL || n == 0) {
         return NULL;
     }
     memset(&lx, 0, sizeof(lx));
-    lx.s = s;
+    lx.tokv = tokv;
+    lx.n = n;
     lx.file = file;
     lx.line = line;
     if (expr_lex_next(&lx) != 0) {
@@ -560,6 +529,23 @@ as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) 
         return NULL;
     }
     expr_lex_free_cur(&lx);
+    return e;
+}
+
+/* Text is made tokens by the tokenizer there is, and then read as
+ * tokens: an expression in a string has no grammar of its own. */
+as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) {
+    as_token_vec_t toks;
+    as_expr_t *e = NULL;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    as_token_vec_init(&toks);
+    if (as_lex_text_tokens(s, file, line, &toks) == 0) {
+        e = as_expr_parse_tokens(toks.items, toks.count, file, line);
+    }
+    as_token_vec_free(&toks);
     return e;
 }
 
