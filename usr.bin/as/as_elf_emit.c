@@ -7583,7 +7583,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     }
     if (insn->operand_count == 0) {
         if ((insn->prefixes & AS_PREFIX_REX) != 0 &&
-            (strcmp(mnbuf, "rex") == 0 || strncasecmp(mnbuf, "rex.", 4) == 0)) {
+            (strcmp(mnbuf, "rex") == 0 || strcmp(mnbuf, "rex64") == 0 || strncasecmp(mnbuf, "rex.", 4) == 0)) {
             unsigned char rex_only = (unsigned char)(0x40u | (insn->rex_bits & 0x0fu));
 
             if (out_cap < 1) {
@@ -11120,6 +11120,17 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
  * which shortened an immediate.  Before an instruction that has the
  * prefix already it is the prefix twice, and refused.
  */
+/* Whether an expression is a symbol with the @TLSCALL operator on it. */
+static int expr_is_tlscall(const as_expr_t *e) {
+    const char *at;
+
+    if (e == NULL || e->kind != AS_EXPR_SYMBOL || e->symbol == NULL) {
+        return 0;
+    }
+    at = strchr(e->symbol, '@');
+    return at != NULL && strcasecmp(at, "@TLSCALL") == 0;
+}
+
 /*
  * Whether an instruction's suffix says one size and a general register
  * among its operands is of another: `movl %ax, %ebx`, `addw %al, %bx`,
@@ -11227,6 +11238,35 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                     bare.u.instr.mnemonic = base;
                     return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
                 }
+            }
+        }
+    }
+
+    /* A REX prefix is of 64-bit code and of no other: `rex nop` was
+     * assembled in 32-bit code, the prefix left out and nothing said. */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && cfg != NULL && !cfg->is_64 &&
+        (st->u.instr.prefixes & AS_PREFIX_REX) != 0) {
+        snprintf(encerr, encerr_sz, "a REX prefix is written, and there is none but in 64-bit code");
+        return -1;
+    }
+
+    /*
+     * `call *foo@TLSCALL(%eax)`: the operator marks the call for the
+     * linker and is no part of the address, which is (%eax) and nothing
+     * added.  The relocation is made where the others are.
+     */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.operand_count <= 4) {
+        for (i = 0; i < st->u.instr.operand_count; ++i) {
+            const as_operand_t *op = &st->u.instr.operands[i];
+
+            if (op->kind == AS_OPERAND_MEMORY && expr_is_tlscall(op->u.mem.disp)) {
+                as_operand_t ops[4];
+
+                memcpy(ops, st->u.instr.operands, st->u.instr.operand_count * sizeof(ops[0]));
+                ops[i].u.mem.disp = NULL;
+                bare = *st;
+                bare.u.instr.operands = ops;
+                return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
             }
         }
     }
@@ -14297,6 +14337,76 @@ static uint32_t reloc_type_for_machine(unsigned machine) {
     }
 }
 
+/* Whether a relocation type is one of thread-local storage's. */
+static int reloc_type_is_tls(unsigned machine, uint32_t t) {
+    if (machine == EM_X86_64) {
+        return (t >= R_X86_64_DTPMOD64 && t <= R_X86_64_TPOFF32) || t == R_X86_64_GOTPC32_TLSDESC ||
+               t == R_X86_64_TLSDESC_CALL || t == R_X86_64_TLSDESC;
+    }
+    if (machine == EM_386) {
+        return (t >= R_386_TLS_TPOFF && t <= R_386_TLS_LDM) || (t >= R_386_TLS_LDO_32 && t <= R_386_TLS_TPOFF32) ||
+               t == R_386_TLS_GOTDESC || t == R_386_TLS_DESC_CALL || t == R_386_TLS_DESC;
+    }
+    return 0;
+}
+
+/* `.` for an expression that is being made a relocation's addend: the
+ * offset in its section of the statement, which the cookie points at. */
+static int reloc_dot_lookup(void *cookie, const char *name, long long *out) {
+    if (strcmp(name, ".") != 0) {
+        return 0;
+    }
+    *out = *(const long long *)cookie;
+    return 1;
+}
+
+/* What reloc_type_for_symbol() gives for an operator there is not. */
+#define AS_RELOC_TYPE_BAD 0xffffffffu
+
+/*
+ * Whether the instruction a relocation is being made for is one the
+ * psABIs let a linker rewrite when the symbol turns out to be local --
+ * a load by mov, a test, one of the eight binary operations reading
+ * memory, or a call or jump through memory: 0 if it is not (or the
+ * relocation is a data directive's), 1 if it is, 2 if it is and has a
+ * REX prefix.  Set around the making of an instruction's relocation.
+ */
+static int reloc_got_load;
+
+static int x86_got_load_kind(const unsigned char *code, size_t len) {
+    size_t i = 0;
+    int rex = 0;
+
+    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf2 || code[i] == 0xf3 || code[i] == 0x2e ||
+                       code[i] == 0x36 || code[i] == 0x3e || code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
+        /* (Of 16 bits it is not one of them: there is nothing for the
+         * linker to make it into.) */
+        if (code[i] == 0x66) {
+            return 0;
+        }
+        i++;
+    }
+    if (i < len && (code[i] & 0xf0) == 0x40) {
+        rex = 1;
+        i++;
+    }
+    if (i + 1 >= len) {
+        return 0;
+    }
+    switch (code[i]) {
+    case 0x8b: /* mov */
+    case 0x85: /* test */
+    case 0x03: case 0x0b: case 0x13: case 0x1b: case 0x23: case 0x2b: case 0x33: case 0x3b:
+        return rex ? 2 : 1;
+    case 0xff: /* call, jmp through memory; and, as GNU as has it, push */
+        return ((code[i + 1] >> 3) & 7) == 2 || ((code[i + 1] >> 3) & 7) == 4 || ((code[i + 1] >> 3) & 7) == 6
+                   ? (rex ? 2 : 1)
+                   : 0;
+    default:
+        return 0;
+    }
+}
+
 static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32_t fallback) {
     if (name == NULL) {
         return fallback;
@@ -14310,8 +14420,27 @@ static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32
          * sym@GOT -- how position-independent code reaches everything --
          * were an R_386_32 against a symbol whose name ended in @GOTOFF.
          */
-        if (as_reloc_op_type(machine, name, &t) == 1) {
+        int op = as_reloc_op_type(machine, name, &t);
+
+        if (op == 1) {
+            /* In a field of 64 bits, the type of that width. */
+            if (fallback == R_X86_64_64) {
+                t = as_reloc_op_widen(machine, t);
+            }
+            /* In an instruction the linker may rewrite, the type that
+             * says so: see x86_got_load_kind(). */
+            if (machine == EM_X86_64 && t == R_X86_64_GOTPCREL && reloc_got_load != 0) {
+                t = reloc_got_load == 2 ? R_X86_64_REX_GOTPCRELX : R_X86_64_GOTPCRELX;
+            } else if (machine == EM_386 && t == R_386_GOT32 && reloc_got_load != 0) {
+                t = R_386_GOT32X;
+            }
             return t;
+        }
+        /* What follows the @ is no operator, or none this machine has:
+         * `foo@BOGUS`, `foo@GOTPCREL` in i386 code.  It was left on the
+         * symbol's name, and the object named a symbol `foo@BOGUS`. */
+        if (op < 0) {
+            return AS_RELOC_TYPE_BAD;
         }
         /* The table itself, by name, in i386 code: relative to here. */
         if (machine == EM_386 && strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 && fallback == R_386_32) {
@@ -15177,6 +15306,17 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                     free_name_index(&loc_index);
                     return -1;
                 }
+                /*
+                 * What is defined in a thread-local section is a
+                 * thread-local symbol, whatever .type called it: a
+                 * compiler writes `.type x, @object` for a __thread
+                 * variable.  Left an object, the linker took its value
+                 * for an address and not an offset in the thread's
+                 * block, and the program read another variable.
+                 */
+                if ((elf_section_flags(loc->sec) & SHF_TLS) != 0) {
+                    (void)elf_symbol_set_type(esym, STT_TLS);
+                }
             } else if (ctx->text_sec != NULL && elf_symbol_define(esym, ctx->text_sec, 0) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
                 free_name_index(&loc_index);
@@ -15380,7 +15520,7 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
                 }
                 rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name,
                                               fallback_type);
-                if (elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
+                if (rtype == AS_RELOC_TYPE_BAD || elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
                     free(sym_name);
                     return -1;
                 }
@@ -15407,6 +15547,18 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
         return 0;
     }
     rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, fallback_type);
+    if (rtype == AS_RELOC_TYPE_BAD) {
+        set_err(ctx, "'%s': what follows the @ is not a relocation operator this target has", name);
+        free(sym_name);
+        return -1;
+    }
+    /* A symbol reached by a thread-local relocation is a thread-local
+     * symbol, and one that another file defines is known to be one by
+     * this alone. */
+    if (reloc_type_is_tls(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, rtype) &&
+        elf_symbol_type(sym) == STT_NOTYPE) {
+        (void)elf_symbol_set_type(sym, STT_TLS);
+    }
     if (elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
         free(sym_name);
         return -1;
@@ -17163,6 +17315,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
             size_t code_len = 0;
             char encerr[256];
             size_t rel_count = 0;
+            int tls_in_stmt = 0;
 
             if (encode_x86_stmt_for_layout(ctx, track.current, cur_off, track.x86_code_bits,
                                            st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
@@ -17241,6 +17394,18 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (sym == NULL) {
                     continue;
                 }
+                /* @TLSCALL has no field: its relocation is on the
+                 * instruction, at its first byte. */
+                if (expr_is_tlscall(e)) {
+                    if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, cur_off, machine == EM_X86_64 ? R_X86_64_NONE : R_386_NONE,
+                                                0) != 0) {
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    rel_count++;
+                    continue;
+                }
                 {
                     /* The addend, where the expression is this symbol and
                      * a number; a local label taken from it is a number
@@ -17255,6 +17420,21 @@ static int emit_relocations(emit_ctx_t *ctx) {
                          eval_local_rel_expr_virtual(ctx, track.current, st, 0, track.x86_code_bits,
                                                      lin.sub_local, &local_off) == 0)) {
                         addend = (int64_t)(lin.value - local_off);
+                    } else {
+                        /* `sym + [. - .L1]`: the distance from a label of
+                         * this section to here is a number. */
+                        long long here = (long long)cur_off;
+                        char label_section[128];
+                        uint64_t label_off = 0;
+
+                        if (as_expr_eval_linear(e, reloc_dot_lookup, &here, &lin) == AS_EXPR_EVAL_OK &&
+                            lin.add_symbol != NULL && strcmp(lin.add_symbol, sym) == 0 && lin.sub_symbol != NULL &&
+                            lin.sub_local == NULL && lin.add_local == NULL &&
+                            find_label_virtual_location(ctx, NULL, NULL, 0, 0, lin.sub_symbol, label_section,
+                                                        sizeof(label_section), &label_off) == 0 &&
+                            track.current != NULL && strcmp(label_section, track.current) == 0) {
+                            addend = (int64_t)(lin.value - (long long)label_off);
+                        }
                     }
                 }
                 t = default_text_reloc_type(machine, &st->u.instr, op);
@@ -17392,13 +17572,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     code_len >= reloc_width) {
                     addend += (int64_t)(code_len - reloc_width);
                 }
-                if (rel_count > 0) {
-                    set_err(ctx, "%s:%u: multiple symbolic relocations in one x86 instruction are not yet supported",
-                            st->file != NULL ? st->file : "<input>", st->line);
-                    section_track_free(&track);
-                    sec_buf_vec_free(&secbufs);
-                    return -1;
-                }
+                /* (An instruction may have two: an address and a number,
+                 * `movl $a, b`.  Each has its own field, the address's
+                 * found by where displacements go and the number's at
+                 * the instruction's end.) */
                 reloc_off = have_disp_field ? cur_off + (uint64_t)disp_field_off
                                             : cur_off + (uint64_t)code_len - reloc_width;
                 if (machine_relocation_addend_is_in_place(machine)) {
@@ -17417,11 +17594,57 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     fprintf(stderr, "as: reloc-trace   -> sym=%s type=%u off=0x%llx addend=%lld\n",
                             sym, (unsigned)t, (unsigned long long)reloc_off, (long long)addend);
                 }
+                /* An operator on what a branch goes to is @PLT or it is
+                 * a mistake: `jmp foo@GOTOFF` was assembled. */
+                if (is_rel_mnemonic(st->u.instr.mnemonic) && op->kind != AS_OPERAND_MEMORY &&
+                    !(op->raw != NULL && op->raw[0] == '*')) {
+                    uint32_t op_type = 0;
+
+                    if (as_reloc_op_type(machine, sym, &op_type) == 1 && op_type != R_386_PLT32 &&
+                        op_type != R_X86_64_PLT32) {
+                        set_err(ctx, "%s:%u: '%s' is not what a branch can go to",
+                                st->file != NULL ? st->file : "<input>", st->line, sym);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                }
+                /* The operators of thread-local storage belong to the
+                 * few instructions a linker knows how to rewrite, none
+                 * of which has a second symbol in it. */
+                {
+                    uint32_t op_type = 0;
+                    int tls = as_reloc_op_type(machine, sym, &op_type) == 1 &&
+                              (machine == EM_X86_64
+                                   ? (op_type == R_X86_64_TLSGD || op_type == R_X86_64_TLSLD ||
+                                      op_type == R_X86_64_GOTTPOFF || op_type == R_X86_64_GOTPC32_TLSDESC)
+                                   : (op_type == R_386_TLS_GD || op_type == R_386_TLS_LDM ||
+                                      op_type == R_386_TLS_IE_32 || op_type == R_386_TLS_GOTIE ||
+                                      op_type == R_386_TLS_IE || op_type == R_386_TLS_GOTDESC));
+
+                    if ((tls && rel_count > 0) || (tls_in_stmt && rel_count > 0)) {
+                        set_err(ctx, "%s:%u: '%s' is in an instruction with another symbol, which none of its forms has",
+                                st->file != NULL ? st->file : "<input>", st->line, sym);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    tls_in_stmt |= tls;
+                }
+                reloc_got_load = x86_got_load_kind(code, code_len);
                 if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, reloc_off, t, addend) != 0) {
+                    reloc_got_load = 0;
+                    if (ctx->errbuf != NULL && ctx->errbuf[0] != '\0' && strchr(ctx->errbuf, ':') == NULL) {
+                        char why[256];
+
+                        snprintf(why, sizeof(why), "%s", ctx->errbuf);
+                        set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, why);
+                    }
                     section_track_free(&track);
                     sec_buf_vec_free(&secbufs);
                     return -1;
                 }
+                reloc_got_load = 0;
                 rel_count++;
             }
             /*

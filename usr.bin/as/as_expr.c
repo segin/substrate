@@ -298,8 +298,10 @@ static int expr_lex_next(expr_lex_t *lx) {
         lx->i++;
         return 0;
     case AS_TOK_PUNCT:
-        if (s[0] == '(' || s[0] == ')') {
-            lx->cur.kind = s[0] == '(' ? EXPR_TOK_LPAREN : EXPR_TOK_RPAREN;
+        /* Square brackets group as parentheses do, as in GNU as: the
+         * `+[.-.L1]` of position-independent i386 code. */
+        if (s[0] == '(' || s[0] == ')' || s[0] == '[' || s[0] == ']') {
+            lx->cur.kind = (s[0] == '(' || s[0] == '[') ? EXPR_TOK_LPAREN : EXPR_TOK_RPAREN;
             lx->i++;
             return 0;
         }

@@ -881,6 +881,25 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
         as_expr_free(sc);
     }
 
+    /* The instruction pointer is a base and nothing goes with it: there
+     * is no encoding for `sym(%rip,%rax,2)`, which was assembled as
+     * `sym(%rip)`. */
+    {
+        const as_x86_reg_info_t *base = mem.base_reg != NULL ? as_x86_reg_find(mem.base_reg) : NULL;
+        const as_x86_reg_info_t *index = mem.index_reg != NULL ? as_x86_reg_find(mem.index_reg) : NULL;
+
+        if (parse_is_x86 && ((base != NULL && base->cls == AS_X86_REGCLASS_IP && mem.index_reg != NULL) ||
+                             (index != NULL && index->cls == AS_X86_REGCLASS_IP))) {
+            set_err(ctx, "%s:%u: the instruction pointer is a base, and takes no index",
+                    tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line);
+            free(mem.base_reg);
+            free(mem.index_reg);
+            free(mem.segment_reg);
+            as_expr_free(mem.disp);
+            return -1;
+        }
+    }
+
     out_op->kind = AS_OPERAND_MEMORY;
     out_op->u.mem = mem;
     return 0;
@@ -1657,7 +1676,10 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "repne") || streq_ci(s, "repnz")) {
         return AS_PREFIX_REPNE;
     }
-    if (streq_ci(s, "rex") || (strncasecmp(s, "rex.", 4) == 0 && rex_bits_for(s) != 0)) {
+    /* (`rex64` is `rex.W` by its older name: a compiler writes it before
+     * the call of __tls_get_addr, to make the sequence the length the
+     * linker expects.) */
+    if (streq_ci(s, "rex") || streq_ci(s, "rex64") || (strncasecmp(s, "rex.", 4) == 0 && rex_bits_for(s) != 0)) {
         return AS_PREFIX_REX;
     }
     if (streq_ci(s, "data16")) {
@@ -1701,6 +1723,9 @@ static unsigned rex_bits_for(const char *s) {
     }
     if (streq_ci(s, "rex")) {
         return 0;
+    }
+    if (streq_ci(s, "rex64")) {
+        return 0x8u;
     }
     if (strncasecmp(s, "rex.", 4) != 0) {
         return 0;

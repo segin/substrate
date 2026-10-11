@@ -29,7 +29,25 @@ static const struct {
     { "NTPOFF",    R_386_TLS_LE,     0 },
     { "TPOFF",     R_386_TLS_LE_32,  R_X86_64_TPOFF32 },
     { "SIZE",      R_386_SIZE32,     R_X86_64_SIZE32 },
+    { "TLSDESC",   R_386_TLS_GOTDESC, R_X86_64_GOTPC32_TLSDESC },
+    { "PLTOFF",    0,                R_X86_64_PLTOFF64 },
+    /* On the call through a TLS descriptor: it marks the instruction
+     * and has no field. */
+    { "TLSCALL",   R_386_TLS_DESC_CALL, R_X86_64_TLSDESC_CALL },
 };
+
+uint32_t as_reloc_op_widen(unsigned machine, uint32_t type) {
+    if (machine != EM_X86_64) {
+        return type;
+    }
+    switch (type) {
+    case R_X86_64_GOT32: return R_X86_64_GOT64;
+    case R_X86_64_DTPOFF32: return R_X86_64_DTPOFF64;
+    case R_X86_64_TPOFF32: return R_X86_64_TPOFF64;
+    case R_X86_64_SIZE32: return R_X86_64_SIZE64;
+    default: return type;
+    }
+}
 
 /* Which operator follows the @ of `name`, and where the @ is; -1 if what
  * follows is not one.  Case is not significant, as GNU as has it. */

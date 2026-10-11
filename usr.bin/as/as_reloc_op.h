@@ -24,6 +24,11 @@ extern "C" {
  */
 int as_reloc_op_type(unsigned machine, const char *name, uint32_t *type_out);
 
+/* The type an operator names where the field is of 64 bits: `.quad
+ * foo@GOT` is R_X86_64_GOT64 where `.long foo@GOT` is R_X86_64_GOT32.
+ * `type` itself where there is no wider one. */
+uint32_t as_reloc_op_widen(unsigned machine, uint32_t type);
+
 /* Cut a known operator off `name`, leaving the symbol's own name: 1 if
  * one was cut, 0 if there was none.  Other uses of @ are left alone. */
 int as_reloc_op_strip(char *name);

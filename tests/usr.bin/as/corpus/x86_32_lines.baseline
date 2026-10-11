@@ -17,7 +17,6 @@ movl %eax,%ss:(%ebp)
 movl %ss:(%ebp),%ecx
 leal %ss:(%ebp),%edx
 movl %eax,%gs:sym@NTPOFF
-movl sym@GOT(%ebx),%ecx
 movl %eax,sym@PLT
 movl %eax,sym@TLSGD(,%ebx,1)
 movl sym@TLSGD(,%ebx,1),%ecx
@@ -32,31 +31,18 @@ movl %eax,sym@TLSLDM(%ebx)
 movl sym@TLSLDM(%ebx),%ecx
 leal sym@TLSLDM(%ebx),%edx
 movl %eax,sym@GOT
-movl sym@GOT,%ecx
 movl %eax,sym@GOTOFF
 movl %eax,sym@TLSGD(%ebx)
 movl sym@TLSGD(%ebx),%ecx
 leal sym@TLSGD(%ebx),%edx
 movl %eax,sym@TLSDESC(%ebx)
 movl sym@TLSDESC(%ebx),%ecx
-leal sym@TLSDESC(%ebx),%edx
 movl %eax,(%r8d)
 movl (%r8d),%ecx
 leal (%r8d),%edx
 movl %eax,(%eax,%r8d)
 movl (%eax,%r8d),%ecx
 leal (%eax,%r8d),%edx
-movl $sym2,sym+4(%ecx)
-movl $sym2,sym(%ebx)
-movl $sym2,sym(%eax,%edx,8)
-movl $sym2,sym(%ecx,%edx,8)
-movl $sym2,sym(%edx,%edx,8)
-movl $sym2,sym(%ebx,%edx,8)
-movl $sym2,sym(%esp,%edx,8)
-movl $sym2,sym(%ebp,%edx,8)
-movl $sym2,sym(%esi,%edx,8)
-movl $sym2,sym(%edi,%edx,8)
-movl $sym2,sym(,%ebx,8)
 movb %al,0x1234
 fldl (%bp,%di)
 fldl (%bp,%si)
@@ -74,9 +60,6 @@ imull $100,sym@GOTTPOFF(%ebx),%eax
 fldl sym@GOTTPOFF(%ebx)
 movb %al,sym@GOTTPOFF(%ebx)
 movw sym@GOTTPOFF(%ebx),%bx
-pushl sym@GOT
-call *sym@GOT
-movl $sym2,sym@GOT
 movb %al,sym@GOT
 fldl (%al)
 fldl (%eax,%xmm0)
@@ -133,17 +116,11 @@ jmpw sym
 calll sym
 jmpl sym
 movl $sym@INDNTPOFF,%eax
-1: | addl $_GLOBAL_OFFSET_TABLE_+[.-1b],%ebx
-call 1f | 1: popl %ebx | addl $_GLOBAL_OFFSET_TABLE_+[.-1b],%ebx
 addl $_GLOBAL_OFFSET_TABLE_,%eax
-movl sym@GOT(%ebx),%eax
-call *sym@GOT(%ebx)
 movl sym@INDNTPOFF,%eax
 movl %gs:sym@NTPOFF,%eax
 subl $sym@TPOFF,%eax
 addl $sym,%eax
-cmpl $sym,sym2
-movl $sym,sym2
 testl $sym,%eax
 movl $sym2-sym,%eax
 .data | .long 0 | lv: .long 0 | .text | movl lv,%eax
@@ -227,7 +204,6 @@ movzb %al,%ebx
 movzw %ax,%ebx
 movzxb %al,%bl
 addb $sym,%al
-addb $sym,sym
 addw $0xff80,%ax
 addw $0xffff,%ax
 addw $0xffffff80,%ax
@@ -253,7 +229,6 @@ addw $0xffffff80,-4(%ebp,%ecx,4)
 addw $0xffffffff,(%ebx)
 addw $0xffffffff,sym
 addw $0xffffffff,-4(%ebp,%ecx,4)
-addw $sym,sym
 addl $0xffffff80,%eax
 addl $0xffffffff,%eax
 addl $0xffffff80,%ebx
@@ -268,9 +243,7 @@ addl $0xffffff80,-4(%ebp,%ecx,4)
 addl $0xffffffff,(%ebx)
 addl $0xffffffff,sym
 addl $0xffffffff,-4(%ebp,%ecx,4)
-addl $sym,sym
 orb $sym,%al
-orb $sym,sym
 orw $0xff80,%ax
 orw $0xffff,%ax
 orw $0xffffff80,%ax
@@ -296,7 +269,6 @@ orw $0xffffff80,-4(%ebp,%ecx,4)
 orw $0xffffffff,(%ebx)
 orw $0xffffffff,sym
 orw $0xffffffff,-4(%ebp,%ecx,4)
-orw $sym,sym
 orl $0xffffff80,%eax
 orl $0xffffffff,%eax
 orl $sym,%eax
@@ -312,9 +284,7 @@ orl $0xffffff80,-4(%ebp,%ecx,4)
 orl $0xffffffff,(%ebx)
 orl $0xffffffff,sym
 orl $0xffffffff,-4(%ebp,%ecx,4)
-orl $sym,sym
 adcb $sym,%al
-adcb $sym,sym
 adcw $0xff80,%ax
 adcw $0xffff,%ax
 adcw $0xffffff80,%ax
@@ -340,7 +310,6 @@ adcw $0xffffff80,-4(%ebp,%ecx,4)
 adcw $0xffffffff,(%ebx)
 adcw $0xffffffff,sym
 adcw $0xffffffff,-4(%ebp,%ecx,4)
-adcw $sym,sym
 adcl $0xffffff80,%eax
 adcl $0xffffffff,%eax
 adcl $sym,%eax
@@ -356,9 +325,7 @@ adcl $0xffffff80,-4(%ebp,%ecx,4)
 adcl $0xffffffff,(%ebx)
 adcl $0xffffffff,sym
 adcl $0xffffffff,-4(%ebp,%ecx,4)
-adcl $sym,sym
 sbbb $sym,%al
-sbbb $sym,sym
 sbbw $0xff80,%ax
 sbbw $0xffff,%ax
 sbbw $0xffffff80,%ax
@@ -384,7 +351,6 @@ sbbw $0xffffff80,-4(%ebp,%ecx,4)
 sbbw $0xffffffff,(%ebx)
 sbbw $0xffffffff,sym
 sbbw $0xffffffff,-4(%ebp,%ecx,4)
-sbbw $sym,sym
 sbbl $0xffffff80,%eax
 sbbl $0xffffffff,%eax
 sbbl $sym,%eax
@@ -400,9 +366,7 @@ sbbl $0xffffff80,-4(%ebp,%ecx,4)
 sbbl $0xffffffff,(%ebx)
 sbbl $0xffffffff,sym
 sbbl $0xffffffff,-4(%ebp,%ecx,4)
-sbbl $sym,sym
 andb $sym,%al
-andb $sym,sym
 andw $0xff80,%ax
 andw $0xffff,%ax
 andw $0xffffff80,%ax
@@ -428,7 +392,6 @@ andw $0xffffff80,-4(%ebp,%ecx,4)
 andw $0xffffffff,(%ebx)
 andw $0xffffffff,sym
 andw $0xffffffff,-4(%ebp,%ecx,4)
-andw $sym,sym
 andl $0xffffff80,%eax
 andl $0xffffffff,%eax
 andl $sym,%eax
@@ -444,9 +407,7 @@ andl $0xffffff80,-4(%ebp,%ecx,4)
 andl $0xffffffff,(%ebx)
 andl $0xffffffff,sym
 andl $0xffffffff,-4(%ebp,%ecx,4)
-andl $sym,sym
 subb $sym,%al
-subb $sym,sym
 subw $0xff80,%ax
 subw $0xffff,%ax
 subw $0xffffff80,%ax
@@ -472,7 +433,6 @@ subw $0xffffff80,-4(%ebp,%ecx,4)
 subw $0xffffffff,(%ebx)
 subw $0xffffffff,sym
 subw $0xffffffff,-4(%ebp,%ecx,4)
-subw $sym,sym
 subl $0xffffff80,%eax
 subl $0xffffffff,%eax
 subl $sym,%eax
@@ -488,9 +448,7 @@ subl $0xffffff80,-4(%ebp,%ecx,4)
 subl $0xffffffff,(%ebx)
 subl $0xffffffff,sym
 subl $0xffffffff,-4(%ebp,%ecx,4)
-subl $sym,sym
 xorb $sym,%al
-xorb $sym,sym
 xorw $0xff80,%ax
 xorw $0xffff,%ax
 xorw $0xffffff80,%ax
@@ -516,7 +474,6 @@ xorw $0xffffff80,-4(%ebp,%ecx,4)
 xorw $0xffffffff,(%ebx)
 xorw $0xffffffff,sym
 xorw $0xffffffff,-4(%ebp,%ecx,4)
-xorw $sym,sym
 xorl $0xffffff80,%eax
 xorl $0xffffffff,%eax
 xorl $sym,%eax
@@ -532,9 +489,7 @@ xorl $0xffffff80,-4(%ebp,%ecx,4)
 xorl $0xffffffff,(%ebx)
 xorl $0xffffffff,sym
 xorl $0xffffffff,-4(%ebp,%ecx,4)
-xorl $sym,sym
 cmpb $sym,%al
-cmpb $sym,sym
 cmpw $0xff80,%ax
 cmpw $0xffff,%ax
 cmpw $0xffffff80,%ax
@@ -560,7 +515,6 @@ cmpw $0xffffff80,-4(%ebp,%ecx,4)
 cmpw $0xffffffff,(%ebx)
 cmpw $0xffffffff,sym
 cmpw $0xffffffff,-4(%ebp,%ecx,4)
-cmpw $sym,sym
 cmpl $0xffffff80,%eax
 cmpl $0xffffffff,%eax
 cmpl $sym,%eax
@@ -576,15 +530,8 @@ cmpl $0xffffff80,-4(%ebp,%ecx,4)
 cmpl $0xffffffff,(%ebx)
 cmpl $0xffffffff,sym
 cmpl $0xffffffff,-4(%ebp,%ecx,4)
-cmpl $sym,sym
 testb $sym,%al
-testb $sym,sym
 testw $sym,%ax
-testw $sym,sym
-testl $sym,sym
-movb $sym,sym
-movw $sym,sym
-movl $sym,sym
 pushb %al
 push %al
 pushb %cl
@@ -622,10 +569,6 @@ data16
 addr32
 data16 jmp sym
 addr16 jcxz 1f | 1:
-rex.W nop
-rex movb %al,%bl
-rex.B incl %eax
-data16 rex.W nop
 seta %ax
 seta %eax
 setab %al

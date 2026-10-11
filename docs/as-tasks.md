@@ -684,9 +684,10 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-DES-001.  Verify: I; T — a unit test over forms with a displacement, an immediate, and both.  After: 162.
 - [ ] **AS-T-191** The assembler shall make each instruction relocation from a fixup record and from nothing else.
   Trace: AS-DES-001.  Verify: I — the code that derives a relocation's place from the instruction's length and mnemonic is gone.  After: 190.
-- [ ] **AS-T-389** When an instruction has a symbolic address and a symbolic immediate, the assembler shall emit a relocation for each.
+- [x] **AS-T-389** When an instruction has a symbolic address and a symbolic immediate, the assembler shall emit a relocation for each.
   Trace: AS-OBJ-001.  Verify: T — `movl $sym2, sym(%rip)`: `R_X86_64_PC32 sym-8` at 2 and `R_X86_64_32 sym2` at 6, as GNU.  After: 191.
   (Added with 192: today it is refused, "multiple symbolic relocations in one x86 instruction are not yet supported".)
+  Done, with 197: the refusal is gone, each operand's relocation being placed by its own field already -- the address's where displacements go, the number's at the instruction's end.  `movl $sym2, sym(%rip)` is GNU's, addend of -8 and all.  `test_reloc_operators.sh`.
 - [x] **AS-T-192** When an instruction has a symbolic displacement followed by an immediate, the assembler shall place the relocation on the displacement and keep the immediate.
   Met ahead of 191, in place: the displacement is found by reading the encoded instruction's own ModRM and SIB (`x86_disp32_offset`), not assumed to be last.  `test_reloc_field.sh`; and `compiler/prog.c` now has such instructions, which it had none of — with them the assembler before this ran 2 of the 18 builds.
   Trace: AS-OBJ-001, AS-EXT-004 (note 8).  Verify: T — `movl $5,sym`, `cmpl $0,sym`, `movb $1,sym`, `shll $2,sym`, `testl $1,sym+4`, `pinsrb $3,foo(%rip),%xmm2`: GNU.  After: 191.
@@ -700,8 +701,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-002.  Verify: T — `movq $sym,8(%rsp)` (`imm32`, `R_X86_64_32S`), `cmpq $gtab+64,%rax`, `addl $sym,%eax` (not the `imm8` form), `pushl $sym`: GNU.  After: 190.
 - [ ] **AS-T-196** If a relocation would not fit within the field its fixup names, then the assembler shall fail.
   Trace: AS-OBJ-002.  Verify: I — no code clamps a relocation's width to the instruction's length; T — no input of the suite writes a relocation over an opcode byte.  After: 191.
-- [ ] **AS-T-197** When an instruction holds two symbolic fields, the assembler shall emit a relocation for each.
+- [x] **AS-T-197** When an instruction holds two symbolic fields, the assembler shall emit a relocation for each.
   Trace: AS-OBJ-015.  Verify: T — `movl $a,b`, `cmpl $a,b(%ebx)`: GNU.  After: 191.
+  Done, ahead of 191: both, and `movw`, `movb`, `addl` with a symbol on each side, `movq`, `cmpl`, `addw` and `imull` in 64-bit code, have GNU's two relocations (`test_reloc_operators.sh`); 129 lines left the 64-bit baseline and 51 the 32-bit.  Two things GNU refuses came to light when the refusal went, and are refused for their own reasons now: `sym(%rip,%rax,2)`, the instruction pointer taking no index, and a thread-local operator in an instruction with a second symbol.  The relocations are written in the order of the operands, where GNU writes them in the order of their offsets.
 - [ ] **AS-T-198** When a 64-bit instruction refers to an absolute symbol through a 32-bit displacement, the assembler shall emit `R_X86_64_32S` on that displacement.
   Trace: AS-EXT-004 (note 7).  Verify: T — `pandn foo,%xmm2`, `popcnt foo,%ebx`, `xsave foo`, `vpunpckldq foo,%ymm2,%ymm3`: GNU.  After: 191.
 - [ ] **AS-T-199** When a memory operand of any x86 instruction is written with a segment override, the assembler shall emit the segment prefix.
@@ -711,19 +713,25 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 - [ ] **AS-T-200** The assembler shall recognise a relocation operator as a suffix of a symbol in an expression, and shall not leave it in the symbol's name.
   Trace: AS-OBJ-003, AS-DES-003.  Verify: I — no `strstr` on symbol names for `@`; T — no symbol with `@` in its name reaches a symbol table but `.symver`'s.  After: 094.
-- [ ] **AS-T-201** If a relocation operator is unknown, or not valid for the target or the field it is used in, then the assembler shall fail.
+- [x] **AS-T-201** If a relocation operator is unknown, or not valid for the target or the field it is used in, then the assembler shall fail.
   Trace: AS-OBJ-003.  Verify: T — `foo@BOGUS`, `foo@GOTPCREL` under `--32`, `foo@GOTOFF` in a branch.  After: 200.
+  Done, ahead of 200: each of the three was assembled -- `movl foo@BOGUS,%eax` with a relocation against a symbol called `foo@BOGUS` -- and each is refused, with the symbol's text in the message.  `test_reloc_operators.sh`.
 - [ ] **AS-T-289** *(note on 200–204)* In part, 2026-10-10: one table of operators (`as_reloc_op.c`) is used both to take the operator off the symbol's name and to choose the relocation, for i386 and x86-64: `@PLT`, `@GOT`, `@GOTOFF`, `@GOTPCREL`, `@TLSGD`, `@TLSLDM`, `@TLSLD`, `@DTPOFF`, `@GOTTPOFF`, `@GOTNTPOFF`, `@INDNTPOFF`, `@NTPOFF`, `@TPOFF`, `@SIZE`.  `test_i386_pic.sh`.  With it gcc's 32-bit position-independent output links, and its `-O0` build of `compiler/prog.c` runs.  Still open under these tasks: the operator is found by its `@` in the symbol's text, not parsed; an unknown operator is not refused; `@GOT` is `R_386_GOT32`, not the relaxable `GOT32X`; `@TLSDESC`, `@TLSCALL`, `@PLTOFF`; the demonstrations (a PIC shared object, each TLS model).
+  2026-10-11: all of that but the first is done, under 201 to 205.  What is left is 200 alone: the operator is still found by its `@` in the symbol's text and is not a part of the expression.
   Trace: AS-OBJ-003.  Verify: I — this entry is removed when 200 to 204 are each ticked.
-- [ ] **AS-T-202** When assembling for i386, the assembler shall emit for `@GOT`, `@GOTOFF`, `@PLT`, `@TLSGD`, `@TLSLDM`, `@DTPOFF`, `@GOTTPOFF`, `@GOTNTPOFF`, `@INDNTPOFF`, `@NTPOFF`, `@TPOFF`, `@TLSDESC` and `@TLSCALL` the relocation type the i386 psABI names.
+- [x] **AS-T-202** When assembling for i386, the assembler shall emit for `@GOT`, `@GOTOFF`, `@PLT`, `@TLSGD`, `@TLSLDM`, `@DTPOFF`, `@GOTTPOFF`, `@GOTNTPOFF`, `@INDNTPOFF`, `@NTPOFF`, `@TPOFF`, `@TLSDESC` and `@TLSCALL` the relocation type the i386 psABI names.
   Trace: AS-OBJ-003.  Verify: T — one instruction and one data directive for each, against GNU; D — a PIC shared object and a program using each TLS model, built with `gcc -m32 -fPIC -S` and this assembler, link and run.  After: 200.
-- [ ] **AS-T-203** When assembling for i386 and `_GLOBAL_OFFSET_TABLE_` is an operand, the assembler shall emit `R_386_GOTPC`.
+  Done.  `@TLSDESC` and `@TLSCALL` were not operators; they are, `@TLSCALL` marking its instruction and having no field (`call *foo@TLSCALL(%eax)` is `FF 10`).  A load through the table that the linker may rewrite is `R_386_GOT32X`.  Each operator in an instruction and in data is GNU's (`test_reloc_operators.sh`).  The demonstration was made, and failed, and is why this took what it took: no program using thread-local storage ran, the types being right.  A symbol defined in a thread-local section stayed an object, and one of another file reached by a thread-local relocation had no type, so the linker took each for an address; the program printed 187494 for 10.  Both are `STT_TLS` now.  `test_tls_models.sh` builds a shared library and a program in the global-dynamic, local-dynamic and initial-exec models, with and without descriptors, and runs them: six of six in 32-bit code.
+- [x] **AS-T-203** When assembling for i386 and `_GLOBAL_OFFSET_TABLE_` is an operand, the assembler shall emit `R_386_GOTPC`.
   Trace: AS-OBJ-003.  Verify: T — `addl $_GLOBAL_OFFSET_TABLE_,%ebx` and the `+[.-.L1]` form.  After: 200.
   In part: the plain form, with the addend GNU gives it (`test_i386_pic.sh`).  The `+[.-.L1]` form is not tried.
-- [ ] **AS-T-204** When assembling for x86-64, the assembler shall emit for `@GOT`, `@GOTOFF`, `@GOTPCREL`, `@PLT`, `@TLSGD`, `@TLSLD`, `@DTPOFF`, `@GOTTPOFF`, `@TPOFF`, `@TLSDESC`, `@TLSCALL`, `@SIZE` and `@PLTOFF` the relocation type the x86-64 psABI names.
+  Done: square brackets group in an expression as parentheses do, and the distance from a label of the section to the statement is a number in a relocation's addend.  `.L1: popl %ebx` / `addl $_GLOBAL_OFFSET_TABLE_+[.-.L1], %ebx` has GNU's addend of 3, and so with a numeric label.  `test_reloc_operators.sh`.
+- [x] **AS-T-204** When assembling for x86-64, the assembler shall emit for `@GOT`, `@GOTOFF`, `@GOTPCREL`, `@PLT`, `@TLSGD`, `@TLSLD`, `@DTPOFF`, `@GOTTPOFF`, `@TPOFF`, `@TLSDESC`, `@TLSCALL`, `@SIZE` and `@PLTOFF` the relocation type the x86-64 psABI names.
   Trace: AS-OBJ-003.  Verify: T and D as 202, with `-m64`.  After: 200.
-- [ ] **AS-T-205** When a `mov`, `test`, `binop`, `call` or `jmp` uses `@GOTPCREL`, the assembler shall emit `R_X86_64_GOTPCRELX` or `R_X86_64_REX_GOTPCRELX` as the psABI gives.
+  Done.  `@TLSDESC`, `@TLSCALL` and `@PLTOFF` are operators; in a field of 64 bits an operator names the 64-bit type (`.quad foo@GOT` was `R_X86_64_GOT32` and is `R_X86_64_GOT64`; so `@DTPOFF`, `@TPOFF`, `@SIZE`, and `movabs $foo@GOT`).  Each is GNU's in an instruction and in data (`test_reloc_operators.sh`).  The demonstration: six of six combinations of `test_tls_models.sh` run in 64-bit code, for which `rex64` had to be a prefix -- a compiler writes it before the call of `__tls_get_addr` -- and the symbols `STT_TLS`, as under 202.  (`rex` in 32-bit code was assembled with the prefix left out; it is refused.)
+- [x] **AS-T-205** When a `mov`, `test`, `binop`, `call` or `jmp` uses `@GOTPCREL`, the assembler shall emit `R_X86_64_GOTPCRELX` or `R_X86_64_REX_GOTPCRELX` as the psABI gives.
   Trace: AS-OBJ-015.  Verify: T — each instruction class with and without `REX`.  After: 204.
+  Done: a `mov` that loads, a `test`, the eight binary operations reading memory, and a `call`, `jmp` or `push` through memory have `R_X86_64_GOTPCRELX`, or `R_X86_64_REX_GOTPCRELX` with a `REX` prefix; a `lea`, a store, and an operation of 16 bits keep `R_X86_64_GOTPCREL`.  As GNU as 2.47 has each (`test_reloc_operators.sh`).
 - [x] **AS-T-206** When an i386 `call` or `jmp` names a symbol without `@PLT`, the assembler shall emit `R_386_PC32`.
   Trace: AS-OBJ-015.  Verify: T — global, local and undefined targets: GNU.  After: 191.
   Done, ahead of 191: a call had `R_386_PLT32`, which is what `call f@PLT` gets, and now has `R_386_PC32` as a jump has.  Global, weak and undefined targets are GNU's (`test_own_label_branch.sh`); a local one of the same section has no relocation (187).  `test_i386_rel_addend.sh` held a call to `R_386_PLT32` and holds it to the other.  Not GNU's yet: a local label of another section that is not a `.L` one is relocated against its symbol, where GNU uses the section's.
@@ -1189,5 +1197,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 182 done, 169 open.  Numbers run to 400, with gaps left between
+351 tasks: 189 done, 162 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

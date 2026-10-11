@@ -317,6 +317,9 @@ typedef enum {
 #define R_386_TLS_DTPOFF32 36
 #define R_386_TLS_TPOFF32 37
 #define R_386_SIZE32 38
+#define R_386_TLS_GOTDESC 39
+#define R_386_TLS_DESC_CALL 40
+#define R_386_TLS_DESC 41
 #define R_386_IRELATIVE 42
 #define R_386_GOT32X 43
 #endif
@@ -349,6 +352,11 @@ typedef enum {
 #define R_X86_64_PC64 24
 #define R_X86_64_GOTOFF64 25
 #define R_X86_64_GOTPC32 26
+#define R_X86_64_GOT64 27
+#define R_X86_64_GOTPCREL64 28
+#define R_X86_64_GOTPC64 29
+#define R_X86_64_GOTPLT64 30
+#define R_X86_64_PLTOFF64 31
 #define R_X86_64_SIZE32 32
 #define R_X86_64_SIZE64 33
 #define R_X86_64_GOTPC32_TLSDESC 34
