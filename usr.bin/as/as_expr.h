@@ -103,6 +103,14 @@ as_expr_t *as_expr_parse_tokens(const as_token_t *tokv, size_t n, const char *fi
 as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line);
 void as_expr_free(as_expr_t *e);
 
+/* A copy of the whole tree, or NULL for no memory. */
+as_expr_t *as_expr_clone(const as_expr_t *e);
+
+/* The expression written out, so that parsing it gives the same tree:
+ * every operation within another is in parentheses.  The caller frees
+ * it; NULL for no memory. */
+char *as_expr_to_text(const as_expr_t *e);
+
 /* The whole of `s` as one integer literal with an optional sign: decimal,
  * 0x hexadecimal, 0b binary or a leading 0 for octal, up to 64 bits (a
  * value of 2^63 or more is its two's-complement self, not a saturated

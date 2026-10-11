@@ -1857,6 +1857,438 @@ done:
     return rc;
 }
 
+/*
+ * Symbols that are other names for something.
+ *
+ * `.set a, expr`, where expr is no number, makes `a` a name for what
+ * expr is: another symbol and so many bytes on, a place, the distance
+ * between two.  Each part of the assembler that met such a name made
+ * what it could of it, and they did not agree: a name for a name was
+ * undefined if the second was set further down; a name for another
+ * file's symbol was a symbol of its own that no file defined; a
+ * distance was refused unless it was written `. - label`.
+ *
+ * So the name is taken out before any of them sees it.  Wherever it is
+ * used -- in an operand, or in the argument of a directive that takes a
+ * value -- what it stands for is put in its place, names within names
+ * followed to the end, and a name that comes back to itself said to.
+ * `.` in what a name stands for is where the `.set` is, which a label
+ * put there says.  What is left of the `.set` is what the symbol table
+ * needs: the name, and one symbol with a number, or two labels.
+ *
+ * And a symbol set to a number further down than where it is used is
+ * its number there, in an operand or a value: it had been a relocation
+ * against an absolute symbol.
+ */
+typedef struct {
+    char *name;
+    size_t stmt;
+    as_expr_t *expr;
+    int busy;
+    int resolved;
+    int kept; /* a symbol of its own: see lower_aliases() */
+} alias_def_t;
+
+typedef struct {
+    alias_def_t *items;
+    size_t count;
+    size_t cap;
+    set_consts_t consts;
+    const char *loop; /* a name that stands for itself */
+    int failed;       /* no memory */
+} alias_ctx_t;
+
+/* What a name stands for where statement `use` is: as it was last set
+ * before there, or -- set only further down -- as it is set last. */
+static alias_def_t *alias_find(alias_ctx_t *a, const char *name, size_t use) {
+    alias_def_t *last = NULL;
+    alias_def_t *before = NULL;
+    size_t i;
+
+    for (i = 0; i < a->count; ++i) {
+        if (strcmp(a->items[i].name, name) != 0) {
+            continue;
+        }
+        last = &a->items[i];
+        if (a->items[i].stmt < use) {
+            before = last;
+        }
+    }
+    return before != NULL ? before : last;
+}
+
+static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *changed);
+
+static void alias_resolve(alias_ctx_t *a, alias_def_t *def) {
+    int changed = 0;
+
+    if (def->resolved) {
+        return;
+    }
+    if (def->busy) {
+        a->loop = def->name;
+        return;
+    }
+    def->busy = 1;
+    alias_substitute(a, def->expr, def->stmt, &changed);
+    def->busy = 0;
+    def->resolved = 1;
+}
+
+static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *changed) {
+    alias_def_t *def;
+    as_expr_t *copy;
+    long long value;
+
+    if (e == NULL || a->loop != NULL || a->failed) {
+        return;
+    }
+    alias_substitute(a, e->lhs, use, changed);
+    alias_substitute(a, e->rhs, use, changed);
+    if (e->kind != AS_EXPR_SYMBOL || e->symbol == NULL) {
+        return;
+    }
+    def = alias_find(a, e->symbol, use);
+    if (def == NULL) {
+        /* A number it is not yet set to here, and will be. */
+        if (!struct_lookup(&a->consts.now, e->symbol, &value) && set_lookup(&a->consts, e->symbol, &value)) {
+            free(e->symbol);
+            e->symbol = NULL;
+            e->kind = AS_EXPR_CONST;
+            e->value = value;
+            *changed = 1;
+        }
+        return;
+    }
+    alias_resolve(a, def);
+    if (a->loop != NULL || a->failed || def->kept) {
+        return;
+    }
+    copy = as_expr_clone(def->expr);
+    if (copy == NULL) {
+        a->failed = 1;
+        return;
+    }
+    free(e->symbol);
+    free(e->src_file);
+    *e = *copy;
+    free(copy);
+    *changed = 1;
+}
+
+static int expr_names_dot(const as_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && strcmp(e->symbol, ".") == 0) {
+        return 1;
+    }
+    return expr_names_dot(e->lhs) || expr_names_dot(e->rhs);
+}
+
+static int expr_rename_dot(as_expr_t *e, const char *label) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && strcmp(e->symbol, ".") == 0) {
+        char *copy = lower_strdup(label);
+
+        if (copy == NULL) {
+            return -1;
+        }
+        free(e->symbol);
+        e->symbol = copy;
+    }
+    return expr_rename_dot(e->lhs, label) != 0 || expr_rename_dot(e->rhs, label) != 0 ? -1 : 0;
+}
+
+static int stmt_add_label(as_stmt_t *st, const char *name) {
+    as_label_def_t *labels = (as_label_def_t *)realloc(st->labels, (st->label_count + 1) * sizeof(*labels));
+
+    if (labels == NULL) {
+        return -1;
+    }
+    st->labels = labels;
+    st->label_cap = st->label_count + 1;
+    memset(&labels[st->label_count], 0, sizeof(labels[0]));
+    labels[st->label_count].name = lower_strdup(name);
+    labels[st->label_count].line = st->line;
+    labels[st->label_count].file = st->file != NULL ? lower_strdup(st->file) : NULL;
+    if (labels[st->label_count].name == NULL || (st->file != NULL && labels[st->label_count].file == NULL)) {
+        free(labels[st->label_count].name);
+        free(labels[st->label_count].file);
+        return -1;
+    }
+    st->label_count++;
+    return 0;
+}
+
+/* The directives whose arguments from `first` on are values. */
+static int directive_takes_values(const char *name, size_t *first) {
+    static const char *const all[] = {".byte",  ".word",    ".short",   ".hword",  ".2byte", ".long",
+                                      ".int",   ".4byte",   ".quad",    ".8byte",  ".skip",  ".space",
+                                      ".zero",  ".fill",    ".org",     ".uleb128", ".sleb128"};
+    /* (Not an alignment: it is of what is known where it stands.) */
+    size_t i;
+
+    *first = 0;
+    for (i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
+        if (strcmp(name, all[i]) == 0) {
+            return 1;
+        }
+    }
+    if (strcmp(name, ".size") == 0) {
+        *first = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static int source_has_label(const as_parse_result_t *parsed, const char *name) {
+    size_t i;
+    size_t j;
+
+    for (i = 0; i < parsed->count; ++i) {
+        for (j = 0; j < parsed->items[i].label_count; ++j) {
+            if (parsed->items[i].labels[j].name != NULL && strcmp(parsed->items[i].labels[j].name, name) == 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
+    alias_ctx_t a;
+    int rc = -1;
+    size_t i;
+    size_t k;
+
+    memset(&a, 0, sizeof(a));
+    if (set_consts_collect(parsed, &a.consts) != 0) {
+        goto oom;
+    }
+    /* What each name that is no number stands for. */
+    for (i = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        as_directive_t *d = &st->u.directive;
+        as_expr_t *e;
+        long long value;
+        char *name;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || !directive_is_set(d)) {
+            continue;
+        }
+        if (as_expr_eval_string(d->args[1], set_lookup, &a.consts, &value) == AS_EXPR_EVAL_OK) {
+            continue;
+        }
+        e = as_parse_expr_string(d->args[1], st->file, st->line);
+        if (e == NULL) {
+            /* Not an expression: said where it is read. */
+            continue;
+        }
+        if (expr_names_dot(e)) {
+            char label[48];
+
+            snprintf(label, sizeof(label), ".Lset.%lu", (unsigned long)i);
+            if (stmt_add_label(st, label) != 0 || expr_rename_dot(e, label) != 0) {
+                as_expr_free(e);
+                goto oom;
+            }
+        }
+        name = local_common_name(d);
+        if (name == NULL) {
+            as_expr_free(e);
+            goto oom;
+        }
+        if (a.count == a.cap) {
+            size_t cap = a.cap != 0 ? a.cap * 2 : 16;
+            alias_def_t *items = (alias_def_t *)realloc(a.items, cap * sizeof(*items));
+
+            if (items == NULL) {
+                free(name);
+                as_expr_free(e);
+                goto oom;
+            }
+            a.items = items;
+            a.cap = cap;
+        }
+        memset(&a.items[a.count], 0, sizeof(a.items[0]));
+        a.items[a.count].name = name;
+        a.items[a.count].stmt = i;
+        a.items[a.count].expr = e;
+        a.count++;
+    }
+    for (i = 0; i < a.count; ++i) {
+        alias_resolve(&a, &a.items[i]);
+    }
+    /*
+     * A name that other files see, for a place in this one, is a symbol
+     * in its own right: another file may say what it is instead, and
+     * what refers to it must go by the name.  It is not put in.
+     */
+    for (i = 0; i < parsed->count && a.loop == NULL && !a.failed; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        const as_directive_t *d = &st->u.directive;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL ||
+            (strcmp(d->name, ".globl") != 0 && strcmp(d->name, ".global") != 0 && strcmp(d->name, ".weak") != 0)) {
+            continue;
+        }
+        for (k = 0; k < d->arg_count; ++k) {
+            as_directive_t one = *d;
+            char *name;
+            size_t j;
+
+            one.args = &d->args[k];
+            one.arg_count = 1;
+            name = local_common_name(&one);
+            if (name == NULL) {
+                goto oom;
+            }
+            for (j = 0; j < a.count; ++j) {
+                as_expr_linear_t lin;
+
+                if (strcmp(a.items[j].name, name) == 0 &&
+                    as_expr_eval_linear(a.items[j].expr, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
+                    lin.add_symbol != NULL && lin.sub_symbol == NULL && source_has_label(parsed, lin.add_symbol)) {
+                    a.items[j].kept = 1;
+                }
+            }
+            free(name);
+        }
+    }
+    /* And each put where it is named. */
+    for (i = 0; i < parsed->count && a.loop == NULL && !a.failed; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        int changed = 0;
+
+        if (st->kind == AS_STMT_INSTRUCTION) {
+            for (k = 0; k < st->u.instr.operand_count; ++k) {
+                as_operand_t *op = &st->u.instr.operands[k];
+
+                if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
+                    alias_substitute(&a, op->u.expr, i, &changed);
+                } else if (op->kind == AS_OPERAND_MEMORY) {
+                    alias_substitute(&a, op->u.mem.disp, i, &changed);
+                }
+            }
+        } else if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL) {
+            as_directive_t *d = &st->u.directive;
+            size_t first = 0;
+            int is_set = directive_is_set(d);
+
+            if (is_set || directive_takes_values(d->name, &first)) {
+                for (k = is_set ? 1 : first; k < d->arg_count; ++k) {
+                    as_expr_t *e;
+                    char *text;
+
+                    if (d->args[k] == NULL || arg_is_empty(d, k)) {
+                        continue;
+                    }
+                    e = as_parse_expr_string(d->args[k], st->file, st->line);
+                    if (e == NULL) {
+                        continue;
+                    }
+                    changed = 0;
+                    if (is_set) {
+                        char *name = local_common_name(d);
+                        alias_def_t *def = name != NULL ? alias_find(&a, name, i + 1) : NULL;
+
+                        free(name);
+                        if (def != NULL && def->stmt == i) {
+                            as_expr_free(e);
+                            e = as_expr_clone(def->expr);
+                            if (e == NULL) {
+                                a.failed = 1;
+                                break;
+                            }
+                            changed = 1;
+                        }
+                    } else {
+                        alias_substitute(&a, e, i, &changed);
+                    }
+                    if (changed && a.loop == NULL && !a.failed) {
+                        text = as_expr_to_text(e);
+                        if (text == NULL) {
+                            a.failed = 1;
+                        } else {
+                            free(d->args[k]);
+                            d->args[k] = text;
+                        }
+                    }
+                    as_expr_free(e);
+                }
+            }
+            /* The numbers as they stand, for what is further down. */
+            if (is_set) {
+                long long value;
+                char *name = local_common_name(d);
+
+                if (name == NULL) {
+                    goto oom;
+                }
+                if (as_expr_eval_string(d->args[1], struct_lookup, &a.consts.now, &value) == AS_EXPR_EVAL_OK) {
+                    long long plain;
+
+                    if (struct_define(&a.consts.now, name, value) != 0) {
+                        free(name);
+                        goto oom;
+                    }
+                    /* A number made of other symbols' numbers is
+                     * written as the number it is: the symbol table
+                     * reads the directive with no table of them. */
+                    if (as_expr_eval_string(d->args[1], NULL, NULL, &plain) != AS_EXPR_EVAL_OK &&
+                        arg_set_number(d, 1, value) != 0) {
+                        free(name);
+                        goto oom;
+                    }
+                }
+                free(name);
+            }
+        }
+    }
+    if (a.failed) {
+        goto oom;
+    }
+    if (a.loop != NULL) {
+        alias_def_t *def = alias_find(&a, a.loop, 0);
+        const as_stmt_t *st = &parsed->items[def != NULL ? def->stmt : 0];
+
+        if (errbuf != NULL && errbuf_sz != 0) {
+            snprintf(errbuf, errbuf_sz, "%s:%u: symbol definition loop encountered at `%s'",
+                     st->file != NULL ? st->file : "<input>", st->line, a.loop);
+        }
+        goto done;
+    }
+    rc = 0;
+    goto done;
+
+oom:
+    if (errbuf != NULL && errbuf_sz != 0) {
+        snprintf(errbuf, errbuf_sz, "out of memory");
+    }
+done:
+    for (i = 0; i < a.count; ++i) {
+        free(a.items[i].name);
+        as_expr_free(a.items[i].expr);
+    }
+    free(a.items);
+    for (i = 0; i < a.consts.now.count; ++i) {
+        free(a.consts.now.items[i].name);
+    }
+    free(a.consts.now.items);
+    for (i = 0; i < a.consts.last.count; ++i) {
+        free(a.consts.last.items[i].name);
+    }
+    free(a.consts.last.items);
+    for (i = 0; i < a.consts.never.count; ++i) {
+        free(a.consts.never.items[i].name);
+    }
+    free(a.consts.never.items);
+    return rc;
+}
+
 int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char *errbuf, size_t errbuf_sz) {
     size_t pushed = 0;
     size_t i;
@@ -1912,7 +2344,7 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
     if (lower_structs(parsed, errbuf, errbuf_sz) != 0) {
         return -1;
     }
-    if (lower_local_commons(parsed, errbuf, errbuf_sz) != 0) {
+    if (lower_local_commons(parsed, errbuf, errbuf_sz) != 0 || lower_aliases(parsed, errbuf, errbuf_sz) != 0) {
         return -1;
     }
     return lower_arguments(parsed, errbuf, errbuf_sz);

@@ -155,6 +155,7 @@ void as_symtab_free(as_symtab_t *tab) {
         free(s->name);
         free(s->def_file);
         free(s->alias_target);
+        free(s->alias_minus);
         free(s->size_base_symbol);
         free(s->size_target_symbol);
         free(s->size_anchor_file);
@@ -315,6 +316,12 @@ static int parse_set_rhs(const char *text, as_symbol_t *sym) {
         sym->alias_from_dot = 1;
         sym->alias_addend = 0;
         rc = sym->alias_target != NULL ? 0 : -1;
+    } else if (lin.add_symbol != NULL && lin.sub_symbol != NULL && strcmp(lin.add_symbol, ".") != 0 &&
+               strcmp(lin.sub_symbol, ".") != 0) {
+        sym->alias_target = expr_symbol_copy(lin.add_symbol);
+        sym->alias_minus = expr_symbol_copy(lin.sub_symbol);
+        sym->alias_addend = lin.value;
+        rc = sym->alias_target != NULL && sym->alias_minus != NULL ? 0 : -1;
     }
     as_expr_free(e);
     return rc;
@@ -654,6 +661,8 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
 
         free(sym->alias_target);
         sym->alias_target = NULL;
+        free(sym->alias_minus);
+        sym->alias_minus = NULL;
         sym->alias_from_dot = 0;
         sym->alias_addend = 0;
         sym->is_absolute = 0;

@@ -16172,6 +16172,32 @@ static const as_symbol_t *find_as_symbol_const(emit_ctx_t *ctx, const as_symtab_
     return as_strmap_get(&ctx->symtab_by_name, name, &i) ? &symtab->items[i] : NULL;
 }
 
+/*
+ * The symbols of the source that are not symbols of the object: a
+ * compiler's .L labels; a name set to itself; and a name for a symbol
+ * of another file, which is that symbol wherever it is used and has
+ * nothing of its own to say -- it had been written as a local symbol
+ * that no file defines.
+ */
+static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, const as_symbol_t *s) {
+    const as_symbol_t *target;
+
+    if (is_local_temp_symbol_name(s->name)) {
+        return 1;
+    }
+    if (s->alias_target == NULL || s->name == NULL) {
+        return 0;
+    }
+    if (strcmp(s->alias_target, s->name) == 0) {
+        return 1;
+    }
+    if (s->alias_minus != NULL || s->alias_from_dot || is_local_temp_symbol_name(s->alias_target)) {
+        return 0;
+    }
+    target = find_as_symbol_const(ctx, symtab, s->alias_target);
+    return target == NULL || (!target->defined && !target->is_common);
+}
+
 static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym) {
     emit_sym_t *next;
     size_t pos;
@@ -16936,10 +16962,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         elf_symbol_t *esym;
         unsigned long long sym_size = s->size;
 
-        if (is_local_temp_symbol_name(s->name)) {
-            continue;
-        }
-        if (s->alias_target != NULL && s->name != NULL && strcmp(s->alias_target, s->name) == 0) {
+        if (symbol_is_not_emitted(ctx, symtab, s)) {
             continue;
         }
         if (s->size_target_symbol != NULL) {
@@ -17055,10 +17078,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         elf_symbol_t *esym;
         const sym_loc_t *loc;
 
-        if (is_local_temp_symbol_name(s->name)) {
-            continue;
-        }
-        if (s->alias_target != NULL && s->name != NULL && strcmp(s->alias_target, s->name) == 0) {
+        if (symbol_is_not_emitted(ctx, symtab, s)) {
             continue;
         }
         esym = ensure_emit_symbol(ctx, s->name);
@@ -17139,10 +17159,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         uint16_t shndx;
         int64_t v;
 
-        if (is_local_temp_symbol_name(s->name)) {
-            continue;
-        }
-        if (s->alias_target != NULL && s->name != NULL && strcmp(s->alias_target, s->name) == 0) {
+        if (symbol_is_not_emitted(ctx, symtab, s)) {
             continue;
         }
         if (s->alias_target == NULL) {
@@ -17153,6 +17170,30 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             free_sym_locs(locs, loc_count);
             free_name_index(&loc_index);
             return -1;
+        }
+        if (s->alias_minus != NULL) {
+            /* The distance between two labels: a number, if they are
+             * of one section. */
+            const sym_loc_t *to = find_sym_loc(locs, &loc_index, s->alias_target);
+            const sym_loc_t *from = find_sym_loc(locs, &loc_index, s->alias_minus);
+
+            if (to == NULL || from == NULL || to->sec == NULL || to->sec != from->sec) {
+                set_err(ctx, "%s:%u: '%s' is set to '%s' less '%s', which are not two labels of one section",
+                        s->def_file != NULL ? s->def_file : "<input>", s->def_line, s->name, s->alias_target,
+                        s->alias_minus);
+                free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            v = (int64_t)to->off - (int64_t)from->off + s->alias_addend;
+            if (elf_symbol_set_shndx(esym, SHN_ABS) != ELF_OK || elf_symbol_set_value(esym, (uint64_t)v) != ELF_OK) {
+                free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            continue;
         }
         if (s->alias_from_dot) {
             const sym_loc_t *target_loc = find_sym_loc(locs, &loc_index, s->alias_target);
@@ -17203,6 +17244,22 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             }
             continue;
         }
+        /* A name for a place that has no symbol of its own -- a
+         * compiler's label, or the `.` of a `.set` -- is at the place. */
+        if (is_local_temp_symbol_name(s->alias_target)) {
+            const sym_loc_t *at = find_sym_loc(locs, &loc_index, s->alias_target);
+
+            if (at == NULL || at->sec == NULL ||
+                elf_symbol_define(esym, at->sec, (uint64_t)((int64_t)at->off + s->alias_addend)) != ELF_OK) {
+                set_err(ctx, "%s:%u: '%s' is set to '%s', which is no place in this source",
+                        s->def_file != NULL ? s->def_file : "<input>", s->def_line, s->name, s->alias_target);
+                free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            continue;
+        }
         target = ensure_emit_symbol(ctx, s->alias_target);
         if (target == NULL) {
             free_sym_locs(locs, loc_count);
@@ -17220,6 +17277,14 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             free_sym_locs(locs, loc_count);
             free_name_index(&loc_index);
             return -1;
+        }
+        /* Another name for a function or an object is one, and as
+         * large, unless it was said to be something else. */
+        if (elf_symbol_type(esym) == STT_NOTYPE) {
+            (void)elf_symbol_set_type(esym, elf_symbol_type(target));
+            if (elf_symbol_size(esym) == 0 && s->alias_addend == 0) {
+                (void)elf_symbol_set_size(esym, elf_symbol_size(target));
+            }
         }
     }
 

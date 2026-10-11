@@ -44,6 +44,9 @@ typedef struct {
     int is_absolute;
     unsigned long long absolute_value;
     char *alias_target;
+    /* `.set name, target - minus`: the distance between two labels of
+     * one section, which is a number. */
+    char *alias_minus;
     int alias_from_dot;
     long long alias_addend;
     unsigned long long size;

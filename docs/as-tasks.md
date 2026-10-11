@@ -896,21 +896,28 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 ### G.2 Symbols
 
-- [ ] **AS-T-260** When an absolute symbol is used as an immediate or displacement, the assembler shall encode its value with no relocation.
+- [x] **AS-T-260** When an absolute symbol is used as an immediate or displacement, the assembler shall encode its value with no relocation.
   Trace: AS-SYM-001.  Verify: T — `.set g1,2*8` / `movl $g1,%eax` is `b8 10 00 00 00`; `movl g1(%ebx),%eax`; a forward reference to a later `.set`.  After: 220.
+  Done, ahead of 220: the forward reference is the number too, in an operand and in a data directive, put in by the pass of 261 (`test_symbol_aliases.sh`).  With GNU a displacement that is one keeps four bytes, the number not being known when the instruction is sized; here it has the one byte it needs.
   In part, ahead of 220: a symbol set above the instruction is folded before layout, as immediate, displacement and bare address (`test_absolute_symbol.sh`).  Still open: the forward reference, which keeps a relocation against the absolute symbol (right once linked, and in the long form).  Found by giving `test_cli_driver.sh` bytes to check: its `-I` and `-D` cases had passed on exit status with the immediate 0.
-- [ ] **AS-T-261** When `.set` is given `symbol ± constant`, the assembler shall define the symbol in the target's section at the target's value plus the constant.
+- [x] **AS-T-261** When `.set` is given `symbol ± constant`, the assembler shall define the symbol in the target's section at the target's value plus the constant.
   Trace: AS-SYM-001, AS-SYM-002.  Verify: T — `.set f1,4+c1` / `.long f1`: a relocation with addend 4 (today the 4 is lost).  After: 220.
-- [ ] **AS-T-262** When `.set` is given the difference of two symbols of one section, the assembler shall define the symbol absolute with that difference.
+  Done, ahead of 220, with 260 and 262 to 266, by one pass over the source before anything else reads it (`lower_aliases` in `as_lower.c`): what a name set by `.set` or `=` stands for, where that is no number, is put wherever the name is used -- in an operand's expression, and in the argument of a directive that takes a value -- names within names followed to the end; `.` in it is where the `.set` stands, which a label put there says.  So `.long f1` is `c1` and 4.  What is left of the `.set` is what the symbol table wants of it: the name, and one symbol with a number, or two labels.  A name other files see, for a place of this source, is not put in: what refers to it goes by the name, as with GNU.  `test_symbol_aliases.sh`, 42 cases that GNU passes.
+- [x] **AS-T-262** When `.set` is given the difference of two symbols of one section, the assembler shall define the symbol absolute with that difference.
   Trace: AS-SYM-001.  Verify: T — `.set j1, e1 - c1` / `.long j1`; `.set len, . - start`.  After: 220.
-- [ ] **AS-T-263** When a symbol is an alias of another, the assembler shall resolve it whatever the order of definition.
+  Done (see 261): `.set j1, e1 - c1` was "malformed directive .set", there being a rule for `. - label` and for nothing else; the symbol is absolute with the distance, and a use of it is the number (`alias_minus` in the symbol table).  Two labels of different sections are refused, on the line of the `.set`.
+- [x] **AS-T-263** When a symbol is an alias of another, the assembler shall resolve it whatever the order of definition.
   Trace: AS-SYM-002.  Verify: T — `.set a1,b1` / `.set b1,c1` / `c1: nop`: all three defined at one place.  After: 220.
-- [ ] **AS-T-264** If aliases form a loop, then the assembler shall fail and name a symbol of the loop.
+  Done (see 261): `a1` had been undefined.
+- [x] **AS-T-264** If aliases form a loop, then the assembler shall fail and name a symbol of the loop.
   Trace: AS-SYM-002.  Verify: T — `.set x,y` / `.set y,x`.
-- [ ] **AS-T-265** When a symbol is an alias of an undefined symbol, the assembler shall relocate references to it against the undefined symbol.
+  Done (see 261), in GNU's words: it had assembled, with a relocation against a local symbol nothing defines.  Loops of two and of three.
+- [x] **AS-T-265** When a symbol is an alias of an undefined symbol, the assembler shall relocate references to it against the undefined symbol.
   Trace: AS-SYM-002.  Verify: T — `.set a,ext` / `call a`: GNU.
-- [ ] **AS-T-266** When a symbol is made an alias of a function or object by `.set` or `=`, the assembler shall give it the target's type.
+  Done (see 261): `call a` had been a call to a local symbol `a` that no file defines, which no linker resolves.  The name is the other file's symbol wherever it is used -- a call, a jump, an address, an immediate, a data directive, with a number added, through a second name -- and is no symbol of the object, as with GNU (`symbol_is_not_emitted`).
+- [x] **AS-T-266** When a symbol is made an alias of a function or object by `.set` or `=`, the assembler shall give it the target's type.
   Trace: AS-SYM-002, AS-OBJ-011.  Verify: T — against `readelf -s` of GNU's object.
+  Done (see 261): the type, and the size where nothing is added to the target; GNU's symbol tables.
 - [ ] **AS-T-267** If the expression of `.size` is not a constant or a difference of symbols of one section plus a constant, then the assembler shall fail.
   Trace: AS-SYM-003.  Verify: T — `.size f, e` and `.size f, e-g` with g in another section are refused; `.size f, e-g` in one section is the difference (today 3 for 2); the lone-symbol reading is kept only for a symbol set by `. - f`.  After: 220.
 - [ ] **AS-T-268** When `.type` names `@gnu_indirect_function`, `@gnu_unique_object`, `@tls_object`, `@common`, `@notype`, `@function` or `@object`, in any of the spellings GNU accepts (`@`, `%`, quoted, `STT_*`), the assembler shall give the symbol that type.
@@ -1261,5 +1268,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 236 done, 115 open.  Numbers run to 400, with gaps left between
+351 tasks: 243 done, 108 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

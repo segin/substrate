@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -73,6 +74,157 @@ void as_expr_free(as_expr_t *e) {
     free(e->symbol);
     free(e->src_file);
     free(e);
+}
+
+as_expr_t *as_expr_clone(const as_expr_t *e) {
+    as_expr_t *copy;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    copy = (as_expr_t *)calloc(1, sizeof(*copy));
+    if (copy == NULL) {
+        return NULL;
+    }
+    *copy = *e;
+    copy->symbol = NULL;
+    copy->src_file = NULL;
+    copy->lhs = NULL;
+    copy->rhs = NULL;
+    if ((e->symbol != NULL && (copy->symbol = expr_strdup(e->symbol)) == NULL) ||
+        (e->src_file != NULL && (copy->src_file = expr_strdup(e->src_file)) == NULL) ||
+        (e->lhs != NULL && (copy->lhs = as_expr_clone(e->lhs)) == NULL) ||
+        (e->rhs != NULL && (copy->rhs = as_expr_clone(e->rhs)) == NULL)) {
+        as_expr_free(copy);
+        return NULL;
+    }
+    return copy;
+}
+
+typedef struct {
+    char *text;
+    size_t len;
+    size_t cap;
+    int failed;
+} expr_text_t;
+
+static void expr_text_put(expr_text_t *t, const char *s) {
+    size_t n = strlen(s);
+
+    if (t->failed) {
+        return;
+    }
+    if (t->len + n + 1 > t->cap) {
+        size_t cap = t->cap != 0 ? t->cap * 2 : 64;
+        char *grown;
+
+        while (cap < t->len + n + 1) {
+            cap *= 2;
+        }
+        grown = (char *)realloc(t->text, cap);
+        if (grown == NULL) {
+            t->failed = 1;
+            return;
+        }
+        t->text = grown;
+        t->cap = cap;
+    }
+    memcpy(t->text + t->len, s, n + 1);
+    t->len += n;
+}
+
+static const char *expr_op_text(as_expr_op_t op) {
+    switch (op) {
+    case AS_EXPR_OP_ADD: return "+";
+    case AS_EXPR_OP_SUB: return "-";
+    case AS_EXPR_OP_MUL: return "*";
+    case AS_EXPR_OP_DIV: return "/";
+    case AS_EXPR_OP_MOD: return "%";
+    case AS_EXPR_OP_OR: return "|";
+    case AS_EXPR_OP_AND: return "&";
+    case AS_EXPR_OP_XOR: return "^";
+    case AS_EXPR_OP_SHL: return "<<";
+    case AS_EXPR_OP_SHR: return ">>";
+    case AS_EXPR_OP_EQ: return "==";
+    case AS_EXPR_OP_NE: return "!=";
+    case AS_EXPR_OP_LT: return "<";
+    case AS_EXPR_OP_LE: return "<=";
+    case AS_EXPR_OP_GT: return ">";
+    case AS_EXPR_OP_GE: return ">=";
+    case AS_EXPR_OP_NEG: return "-";
+    case AS_EXPR_OP_BNOT: return "~";
+    case AS_EXPR_OP_LNOT: return "!";
+    case AS_EXPR_OP_ORNOT: return "!";
+    case AS_EXPR_OP_LAND: return "&&";
+    case AS_EXPR_OP_LOR: return "||";
+    default: return NULL;
+    }
+}
+
+static void expr_text_node(expr_text_t *t, const as_expr_t *e, int nested) {
+    char num[32];
+    const char *op;
+
+    if (e == NULL) {
+        t->failed = 1;
+        return;
+    }
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        snprintf(num, sizeof(num), e->value < 0 ? "(%lld)" : "%lld", e->value);
+        expr_text_put(t, num);
+        return;
+    case AS_EXPR_SYMBOL:
+        expr_text_put(t, e->symbol != NULL ? e->symbol : "");
+        return;
+    case AS_EXPR_LOCAL_REF:
+        snprintf(num, sizeof(num), "%d%c", e->local_digit, e->local_forward ? 'f' : 'b');
+        expr_text_put(t, num);
+        return;
+    case AS_EXPR_UNARY:
+        op = expr_op_text(e->op);
+        if (op == NULL) {
+            t->failed = 1;
+            return;
+        }
+        expr_text_put(t, "(");
+        expr_text_put(t, op);
+        expr_text_node(t, e->lhs != NULL ? e->lhs : e->rhs, 1);
+        expr_text_put(t, ")");
+        return;
+    case AS_EXPR_BINARY:
+        op = expr_op_text(e->op);
+        if (op == NULL) {
+            t->failed = 1;
+            return;
+        }
+        if (nested) {
+            expr_text_put(t, "(");
+        }
+        expr_text_node(t, e->lhs, 1);
+        expr_text_put(t, " ");
+        expr_text_put(t, op);
+        expr_text_put(t, " ");
+        expr_text_node(t, e->rhs, 1);
+        if (nested) {
+            expr_text_put(t, ")");
+        }
+        return;
+    default:
+        t->failed = 1;
+    }
+}
+
+char *as_expr_to_text(const as_expr_t *e) {
+    expr_text_t t;
+
+    memset(&t, 0, sizeof(t));
+    expr_text_node(&t, e, 0);
+    if (t.failed) {
+        free(t.text);
+        return NULL;
+    }
+    return t.text;
 }
 
 static as_expr_t *new_expr(expr_lex_t *lx, as_expr_kind_t kind) {
