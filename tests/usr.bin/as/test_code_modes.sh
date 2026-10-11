@@ -88,5 +88,61 @@ t 32 6689c389c3 '.code16gcc|mov %eax,%ebx|mov %ax,%bx'
 t 32 e200e3fe '.code16gcc|loop 1f|1:|jcxz 1b'
 t 32 e80000c3 '.code16gcc|.code16|call f|f: ret'
 
+# Code of one machine in an object of the other (AS-T-346): the
+# relocation is the one the code wants, by the name the object has for
+# it -- or the statement is refused, where the object has none.  They
+# had been chosen as for the object's own code: `.code32` and `movl
+# sym, %eax` in an ELF64 object had the relocation that sign-extends,
+# `.code16` there was refused, and in an ELF32 object `.code64` and
+# `mov sym(%rip), %rax` had an absolute relocation and a wrong place,
+# and `movabs $sym, %rax` a relocation of four bytes on its eight.
+#
+# x OPTION BYTES RELOCATIONS SOURCE, the relocations as offset:type.
+x() {
+    cases=$((cases + 1))
+    printf '\t.text\n%s\n' "$4" | tr '|' '\n' > t.s
+    rm -f t.o
+    if ! "$AS" "--$1" -o t.o t.s > out 2>&1; then
+        [ "$2" = refused ] || { echo "FAIL --$1 [$4]: refused, and GNU as: $2"; fail=1; }
+        return
+    fi
+    objcopy -O binary --only-section=.text t.o text.bin 2> /dev/null
+    got=$(od -An -v -tx1 text.bin | tr -d ' \n')
+    rel=$(readelf -rW t.o | awk '/^0/ { sub(/R_386_|R_X86_64_/, "", $3); printf "%s%x:%s", sep, strtonum("0x" $1), $3; sep = "," }')
+    [ "$got" = "$2" ] || { echo "FAIL --$1 [$4]: $got, and GNU as: $2"; fail=1; }
+    [ "$rel" = "$3" ] || { echo "FAIL --$1 [$4]: relocations '$rel', and GNU as: '$3'"; fail=1; }
+}
+x 64 a10000 '1:16' '.code16|movw sym,%ax'
+x 64 e90000 '1:PC16' '.code16|jmp sym'
+x 64 b80000 '1:16' '.code16|mov $sym,%ax'
+x 64 a100000000 '1:32' '.code32|movl sym,%eax'
+x 64 b800000000 '1:32' '.code32|movl $sym,%eax'
+x 64 e900000000 '1:PC32' '.code32|jmp sym'
+x 64 e800000000 '1:PC32' '.code32|call sym'
+x 64 6800000000 '1:32' '.code32|pushl $sym'
+x 64 8d0500000000 '2:32' '.code32|lea sym,%eax'
+x 64 8b9800000000 '2:32' '.code32|movl sym(%eax),%ebx'
+x 64 b80000000081c300000000 '1:32,7:32' '.code32|movl $sym,%eax|addl $sym,%ebx'
+x 64 8b8300000000 '2:GOT32' '.code32|mov sym@GOT(%ebx),%eax'
+x 64 e800000000 '1:PLT32' '.code32|call sym@PLT'
+x 64 eb0190e8fbffffff '' '.code32|jmp 1f|nop|1:|call 1b'
+x 32 488b05fcffffff '3:PC32' '.code64|mov sym(%rip),%rax'
+x 32 488d05fcffffff '3:PC32' '.code64|lea sym(%rip),%rax'
+x 32 e8fcffffff '1:PC32' '.code64|call sym'
+x 32 e8fcffffff '1:PLT32' '.code64|call sym@PLT'
+x 32 e9fcffffff '1:PC32' '.code64|jmp sym'
+x 32 b800000000 '1:32' '.code64|mov $sym,%eax'
+x 32 c70000000000 '2:32' '.code64|movl $sym,(%rax)'
+x 32 678b9800000000 '3:32' '.code64|addr32 mov sym(%eax),%ebx'
+x 32 eb0190 '' '.code64|jmp 1f|nop|1:'
+x 32 refused '' '.code64|mov sym,%rax'
+x 32 refused '' '.code64|mov sym,%eax'
+x 32 refused '' '.code64|mov sym(%rax),%eax'
+x 32 refused '' '.code64|movabs $sym,%rax'
+x 32 refused '' '.code64|mov $sym,%rax'
+x 32 refused '' '.code64|movq $sym,(%rax)'
+x 32 refused '' '.code64|push $sym'
+x 32 refused '' '.code64|mov sym@GOTPCREL(%rip),%rax'
+
 [ "$fail" = 0 ] && echo "ok ($cases cases)"
 exit "$fail"

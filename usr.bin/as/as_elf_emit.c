@@ -19742,6 +19742,37 @@ out:
     return rc;
 }
 
+/*
+ * A relocation chosen for code of one machine, named as an object of
+ * the other names it: .code32 or .code16 in an ELF64 object, .code64 in
+ * an ELF32 one.  0, or -1 where the object has none such -- a field
+ * sign-extended to 64 bits or of 64 has none in ELF32, and what goes
+ * by a table has none across.
+ */
+static int x86_reloc_for_object(unsigned code_machine, unsigned obj_machine, uint32_t *type) {
+    static const uint32_t pairs[][2] = {
+        /* i386's, x86-64's */
+        {R_386_32, R_X86_64_32},     {R_386_16, R_X86_64_16},     {R_386_8, R_X86_64_8},
+        {R_386_PC32, R_X86_64_PC32}, {R_386_PC16, R_X86_64_PC16}, {R_386_PC8, R_X86_64_PC8},
+    };
+    size_t i;
+
+    if (code_machine == obj_machine) {
+        return 0;
+    }
+    if (code_machine == EM_X86_64 && *type == R_X86_64_PLT32) {
+        *type = R_386_PC32;
+        return 0;
+    }
+    for (i = 0; i < sizeof(pairs) / sizeof(pairs[0]); ++i) {
+        if (*type == pairs[i][code_machine == EM_386 ? 0 : 1]) {
+            *type = pairs[i][code_machine == EM_386 ? 1 : 0];
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int emit_relocations(emit_ctx_t *ctx) {
     size_t i;
     unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
@@ -20025,6 +20056,17 @@ static int emit_relocations(emit_ctx_t *ctx) {
             char encerr[256];
             size_t rel_count = 0;
             int tls_in_stmt = 0;
+            /*
+             * The object's machine, and the one whose instructions
+             * these are: .code32 in an ELF64 object is i386's code, and
+             * its fields are found and its relocations chosen as
+             * i386's are, then named as the object names them.  From
+             * here `machine` is the code's.
+             */
+            const unsigned obj_machine = machine;
+            unsigned machine = (obj_machine == EM_386 || obj_machine == EM_X86_64)
+                                   ? (track.x86_code_bits == 64u ? (unsigned)EM_X86_64 : (unsigned)EM_386)
+                                   : obj_machine;
 
             if (encode_x86_stmt_for_layout(ctx, track.current, cur_off, track.x86_code_bits,
                                            st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
@@ -20464,7 +20506,16 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     t = machine == EM_X86_64 ? R_X86_64_PC32 : R_386_PC32;
                     addend = (int64_t)taken_value + (int64_t)reloc_off;
                 }
-                if (machine_relocation_addend_is_in_place(machine)) {
+                if (x86_reloc_for_object(machine, obj_machine, &t) != 0) {
+                    set_err(ctx, "%s:%u: '%s' needs a relocation that an %s object has not",
+                            st->file != NULL ? st->file : "<input>", st->line,
+                            st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "",
+                            obj_machine == EM_X86_64 ? "ELF64" : "ELF32");
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+                if (machine_relocation_addend_is_in_place(obj_machine)) {
                     uint64_t code_rel_off = reloc_off - cur_off;
                     if (code_rel_off + reloc_width <= (uint64_t)code_len) {
                         write_u64_le_at(code + code_rel_off,

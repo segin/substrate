@@ -159,9 +159,4 @@ fcomi
 fucomi
 fldenvs (%rax)
 fnstenvl (%rax)
-.code32 | movl sym,%eax
-.code32 | call sym
-.code16 | jmp sym
 .code16 | movl %eax,%cr0 | ljmpl $8,$1f | .code32 | 1: movl %eax,%ebx | ljmp $8,$2f | .code64 | 2: movq %rax,%rbx
-.code32 | ljmp $8,$sym
-.code32 | pushl $sym
