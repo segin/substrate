@@ -1430,6 +1430,16 @@ static int emit_i386_modrm16(unsigned reg_field, const as_mem_operand_t *mem, un
     return 0;
 }
 
+/*
+ * The statement being encoded is of 16-bit code.  An address that is
+ * a symbol or a number and no register is two bytes there, behind
+ * ModRM 00 reg 110; the emitters that are handed operands and not the
+ * mode wrote the four bytes of 32-bit code behind r/m 101, which in
+ * 16-bit code is (%di) and four bytes of something else: `fldl sym`,
+ * `addps sym, %xmm1`, `bt $1, sym`.
+ */
+static int x86_emit_code16;
+
 static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm_op,
                                       unsigned char *out, size_t out_cap, size_t *pos_io) {
     unsigned rm_reg;
@@ -1468,6 +1478,13 @@ static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm
 
         if (eval_abs_mem_disp(rm_op->u.expr, &disp) != 0 || pos + 5 > out_cap) {
             return -1;
+        }
+        if (x86_emit_code16) {
+            out[pos++] = (unsigned char)(((reg_field & 7u) << 3) | 6u);
+            out[pos++] = (unsigned char)(disp & 0xff);
+            out[pos++] = (unsigned char)((disp >> 8) & 0xff);
+            *pos_io = pos;
+            return 0;
         }
         out[pos++] = (unsigned char)(((reg_field & 7u) << 3) | 5u);
         out[pos++] = (unsigned char)(disp & 0xff);
@@ -11955,6 +11972,11 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         if (convert_operand_x86(src, mn, &ops[i], cfg->is_64, intel, encerr, encerr_sz) != 0) {
             return -1;
         }
+        /* An address with no register is of the code's size. */
+        if (ops[i].kind == AS_X86_OP_MEM && ops[i].u.mem.disp_only && ops[i].u.mem.addr_bits == 0 && !cfg->is_64 &&
+            cfg->x86_code_bits == 16u) {
+            ops[i].u.mem.addr_bits = 16u;
+        }
     }
     memset(&rq, 0, sizeof(rq));
     rq.mnemonic = mn;
@@ -12294,10 +12316,17 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
                                          size_t *code_len) {
     const as_instruction_t *insn;
     size_t at = 0;
+    size_t disp_len = 4;
+    unsigned char absolute = 0x05;
     size_t i;
 
-    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64 || cfg->x86_code_bits == 16) {
+    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64) {
         return;
+    }
+    /* (In 16-bit code the address is of two bytes, behind r/m 110.) */
+    if (cfg->x86_code_bits == 16u) {
+        disp_len = 2;
+        absolute = 0x06;
     }
     insn = &st->u.instr;
     if (insn->operand_count != 2 || insn->mnemonic == NULL ||
@@ -12309,7 +12338,7 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
                               code[at] == 0x64 || code[at] == 0x65 || code[at] == 0x66)) {
         ++at;
     }
-    if (at + 6 != *code_len || code[at + 1] != 0x05 ||
+    if (at + 2 + disp_len != *code_len || code[at + 1] != absolute ||
         !(code[at] == 0x88 || code[at] == 0x89 || code[at] == 0x8a || code[at] == 0x8b)) {
         return;
     }
@@ -12328,7 +12357,7 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
     }
     /* 8a and 8b read, to a0 and a1; 88 and 89 write, a2 and a3. */
     code[at] = (unsigned char)(0xa0u + (code[at] & 1u) + ((code[at] & 2u) ? 0u : 2u));
-    memmove(code + at + 1, code + at + 2, 4);
+    memmove(code + at + 1, code + at + 2, disp_len);
     (*code_len)--;
 }
 
@@ -12368,7 +12397,7 @@ static int x86_addr16_prefix(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsig
     size_t len;
     size_t i;
 
-    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64 || cfg->x86_code_bits == 16) {
+    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64) {
         return 0;
     }
     /* (A wait is an instruction of its own, and the prefix is of the
@@ -12382,7 +12411,10 @@ static int x86_addr16_prefix(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsig
         }
     }
     len = *code_len - skip;
-    if (x86_prepend_addr_size(&st->u.instr, 16, code + skip, code_cap - skip, &len) != 0) {
+    /* (In 16-bit code it is the 32-bit registers that have it:
+     * `fldl (%eax)` there loaded through %bx and %si.) */
+    if (x86_prepend_addr_size(&st->u.instr, cfg->x86_code_bits == 16u ? 32 : 16, code + skip, code_cap - skip, &len) !=
+        0) {
         return -1;
     }
     *code_len = len + skip;
@@ -12441,6 +12473,9 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
     size_t i;
+
+    /* (For the emitters that are handed operands and no mode.) */
+    x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
 
     /*
      * A segment that is the one the address has anyway -- %ss with the
@@ -14880,7 +14915,8 @@ static int relax_branch_target(emit_ctx_t *ctx, size_t idx, const char *section,
     unsigned cc;
     size_t target;
 
-    if (st->kind != AS_STMT_INSTRUCTION || st->u.instr.operand_count != 1 || code_bits == 16u ||
+    (void)code_bits;
+    if (st->kind != AS_STMT_INSTRUCTION || st->u.instr.operand_count != 1 ||
         st->u.instr.target_in_other_section || !is_rel_mnemonic(st->u.instr.mnemonic) ||
         is_call_mnemonic(st->u.instr.mnemonic) || is_fixed_short_rel_mnemonic(st->u.instr.mnemonic) ||
         normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0 ||
@@ -14914,14 +14950,18 @@ static int relax_branch_target(emit_ctx_t *ctx, size_t idx, const char *section,
 
 /* A jump that does not reach in two bytes: `jmp` is five, a conditional
  * one six. */
-static size_t relax_long_size(const as_stmt_t *st) {
+/* The long form of a jump: one opcode byte or two, a distance of 32
+ * bits or -- in 16-bit code, or with a `w` -- of 16, and the operand-
+ * size prefix where that is not the code's. */
+static size_t relax_long_size(const as_stmt_t *st, unsigned code_bits) {
     char mnbuf[32];
     char suffix = '\0';
+    int is_jmp = normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
+                 streq_ci(mnbuf, "jmp");
+    int code16 = code_bits == 16u;
+    int wide16 = suffix == 'w' || (code16 && suffix != 'l');
 
-    return normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
-                   streq_ci(mnbuf, "jmp")
-               ? 5
-               : 6;
+    return (is_jmp ? 1u : 2u) + (wide16 ? 2u : 4u) + (wide16 != code16 ? 1u : 0u);
 }
 
 /* What is remembered of where statements are, forgotten: it was worked
@@ -15075,7 +15115,7 @@ static int relax_branches(emit_ctx_t *ctx) {
                 if (ctx->branch_short[i] == 1) {
                     n = 2;
                 } else if (ctx->branch_short[i] == 2) {
-                    n = relax_long_size(st);
+                    n = relax_long_size(st, track.x86_code_bits);
                 } else {
                     /* Any other instruction is as long as it is,
                      * wherever it is: found once. */
@@ -15194,7 +15234,7 @@ static int relaxed_place_branch_target(emit_ctx_t *ctx, const as_stmt_t *st, con
     }
     if (addend == 0 ||
         eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, place,
-                                        *is_short ? 2 : relax_long_size(st), abs_target) != 0) {
+                                        *is_short ? 2 : relax_long_size(st, x86_code_bits), abs_target) != 0) {
         return -1;
     }
     *abs_target += addend;
@@ -15246,7 +15286,7 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     }
     /* A jump that was sized is the size it was given. */
     if (branch_is_relaxed(ctx, st, &is_local)) {
-        return is_local ? 2u : (unsigned)relax_long_size(st);
+        return is_local ? 2u : (unsigned)relax_long_size(st, x86_code_bits);
     }
     e = op->u.expr;
     is_local = ((e != NULL && expr_has_local_ref(e)) ||
@@ -15256,20 +15296,35 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
                                        : (e->kind == AS_EXPR_SYMBOL &&
                                           local_temp_branch_is_short(ctx, section_name, st, e, x86_code_bits)))) ||
                 raw_is_numeric_local_ref(op->raw));
-    if (is_call_mnemonic(st->u.instr.mnemonic)) {
-        return 5u;
-    }
-    if (is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
-        return fixed_short_rel_size(st->u.instr.mnemonic, x86_code_bits);
-    }
-    if (is_local) {
-        return 2u;
-    }
-    if (streq_ci(mnbuf, "jmp")) {
-        return 5u;
-    }
-    if (x86_cond_code(mnbuf, &cc) == 0) {
-        return 6u;
+    /*
+     * The distance is of 16 bits in 16-bit code and with a `w`, of 32
+     * otherwise, and has the operand-size prefix where it is not the
+     * code's.  A call was five bytes and a jump five or six whatever
+     * the code: in 16-bit code every label behind a call or a long
+     * jump was thought two bytes further on than it is, and a branch
+     * over one went two bytes past where it was sent.
+     */
+    {
+        int code16 = x86_code_bits == 16u;
+        int wide16 = suffix == 'w' || (code16 && suffix != 'l');
+        unsigned field = wide16 ? 2u : 4u;
+        unsigned prefix = (wide16 != code16) ? 1u : 0u;
+
+        if (is_call_mnemonic(st->u.instr.mnemonic)) {
+            return 1u + field + prefix;
+        }
+        if (is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+            return fixed_short_rel_size(st->u.instr.mnemonic, x86_code_bits);
+        }
+        if (is_local) {
+            return 2u;
+        }
+        if (streq_ci(mnbuf, "jmp")) {
+            return 1u + field + prefix;
+        }
+        if (x86_cond_code(mnbuf, &cc) == 0) {
+            return 2u + field + prefix;
+        }
     }
     return 0;
 }
@@ -18842,8 +18897,17 @@ static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t
  * relocation written over all of it but the REX, and `addw $sym, %ax`
  * four over its opcode.
  */
-static int x86_imm_field_width(const unsigned char *code, size_t len, int is_64,
+/*
+ * The width of an instruction's immediate, read from its bytes.  The
+ * 66 prefix says the other operand size than the code's: 16 bits in
+ * 32- and 64-bit code, 32 in 16-bit code -- where it had been read as
+ * it is in the others, so that `movw $sym, %ax` was thought to have
+ * four bytes and was refused for having two, and `movl $sym, %eax`
+ * had a relocation of two on its four.
+ */
+static int x86_imm_field_width(const unsigned char *code, size_t len, unsigned code_bits,
                                unsigned *width_out, int *rex_w_out, unsigned char *opcode_out) {
+    int is_64 = code_bits == 64u;
     size_t i = 0;
     int has_66 = 0;
     int rex_w = 0;
@@ -18864,6 +18928,9 @@ static int x86_imm_field_width(const unsigned char *code, size_t len, int is_64,
     }
     if (i >= len) {
         return -1;
+    }
+    if (code_bits == 16u) {
+        has_66 = !has_66;
     }
     op = code[i];
     if (op == 0x80 || op == 0xc6 || op == 0xf6 || op == 0xa8 || (op >= 0xb0 && op <= 0xb7) ||
@@ -18939,6 +19006,15 @@ static int x86_disp16_offset(const unsigned char *code, size_t len, int code16, 
     }
     if (!addr16 || i >= len) {
         return -1;
+    }
+    /* A move between the accumulator and an address with no ModRM:
+     * the address is what follows the opcode. */
+    if (code[i] >= 0xa0 && code[i] <= 0xa3) {
+        if (i + 3 != len) {
+            return -1;
+        }
+        *off_out = i + 1;
+        return 0;
     }
     /* VEX and EVEX, which in 32-bit code are told from les, lds and
      * bound by the two top bits of the next byte. */
@@ -20193,7 +20269,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     int imm_rex_w;
                     unsigned char imm_opcode;
 
-                    if (x86_imm_field_width(code, code_len, machine == EM_X86_64, &imm_width, &imm_rex_w,
+                    if (x86_imm_field_width(code, code_len, track.x86_code_bits, &imm_width, &imm_rex_w,
                                             &imm_opcode) == 0) {
                         reloc_width = imm_width;
                         if (machine == EM_386) {

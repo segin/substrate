@@ -1568,8 +1568,14 @@ static int encode_jcc_rel32(enc_ctx_t *ctx, const char *mnemonic, int32_t rel_ta
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
         if (streq_ci(mnemonic, map[i].name)) {
             if (ctx->insn == NULL || (!ctx->insn->rel_is_disp && !ctx->insn->has_section_offset)) {
+                /* To a symbol, whose distance a relocation fills in:
+                 * of 16 bits in 16-bit code.  It was of 32 there too,
+                 * and the two bytes after it were the next
+                 * instruction's to the processor. */
+                int near16 = ctx->insn != NULL && ctx->insn->default_bits == 16u;
+
                 if (emit8(ctx, 0x0f) != 0 || emit8(ctx, (uint8_t)(0x80 | map[i].cc)) != 0 ||
-                    emit32(ctx, (uint32_t)rel_target) != 0) {
+                    (near16 ? emit16(ctx, (uint16_t)rel_target) : emit32(ctx, (uint32_t)rel_target)) != 0) {
                     return -1;
                 }
                 return 0;

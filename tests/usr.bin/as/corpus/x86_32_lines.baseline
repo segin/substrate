@@ -104,19 +104,8 @@ fcomi
 fucomi
 fldenvs (%eax)
 fnstenvl (%eax)
-.code16 | movw sym,%ax
-.code16 | movl sym,%eax
-.code16 | movw %ax,sym
-.code16 | movb sym,%al
-.code16 | movw $sym,%ax
-.code16 | movl $sym,%eax
 .code16 | jmpl sym
 .code16 | data32 jmp sym
-.code16 | movw %fs:sym,%ax
-.code16 | nop | .code32 | movl sym,%eax | .code16 | movw sym,%ax
-.code16 | pushl $sym
-.code16 | pushw $sym
-.code16 | je sym
 .code16 | movw 0xffff(%bx),%ax
 .code16gcc | pushl %eax
 .code16gcc | call sym
