@@ -38,6 +38,10 @@
  * where --max-expansion-bytes does not say: 256 MiB. */
 #define AS_EXPANSION_BYTES_DEFAULT (256ull * 1024 * 1024)
 
+/* How deep files may include files, where --max-include-depth does not
+ * say. */
+#define AS_INCLUDE_DEPTH_DEFAULT 64
+
 /* How deep macros may be expanded, where --max-macro-depth does not say. */
 #define AS_MACRO_DEPTH_DEFAULT 64
 
@@ -2512,36 +2516,163 @@ static struct macro_cond *macro_cond_new(const as_ctx_t *ctx);
 static int macro_cond_active(struct macro_cond *mc, const as_text_t *written);
 static void macro_cond_free(struct macro_cond *mc);
 
-static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
+/*
+ * The file an .include names: as written, which is to say in the
+ * current directory, if that opens; or else under each -I directory in
+ * the order given.  That is the order GNU as looks in.  (The -I
+ * directories were looked in first.)  The caller frees.
+ */
+static char *find_include_file(const as_ctx_t *ctx, const char *name) {
+    size_t i;
+
+    if (access(name, R_OK) == 0) {
+        return xstrdup(name);
+    }
+    if (name[0] != '/' && ctx != NULL) {
+        for (i = 0; i < ctx->as_opts.count; ++i) {
+            const char *opt = ctx->as_opts.items[i];
+            size_t n;
+            char *path;
+
+            if (strncmp(opt, "-I", 2) != 0 || opt[2] == '\0') {
+                continue;
+            }
+            n = strlen(opt + 2) + strlen(name) + 2;
+            path = (char *)malloc(n);
+            if (path == NULL) {
+                return NULL;
+            }
+            snprintf(path, n, "%s/%s", opt + 2, name);
+            if (access(path, R_OK) == 0) {
+                return path;
+            }
+            free(path);
+        }
+    }
+    errno = ENOENT;
+    return NULL;
+}
+
+/*
+ * Expand one text into `out`: the source, or a file it includes, which
+ * is read here and expanded in its place -- with the macros defined so
+ * far, defining macros for what follows, and under the conditionals that
+ * stand.  (.include was left for the tokenizer, after all of that: a
+ * macro of an included file was not defined, its conditionals were not
+ * followed, and its lines were numbered apart from the including
+ * file's, so a `1b` could not reach back out of it.)  `chain` is the
+ * files being read, outermost first.
+ */
+static int expand_source_lines(const as_ctx_t *ctx, gas_macro_vec_t *macros, as_text_t *in, as_text_t *out,
+                               strvec_t *chain) {
+    struct macro_cond *conds = macros->conds;
+    const as_text_t *outer = out->origin;
     char *line = NULL;
     size_t cap = 0;
-    gas_macro_vec_t macros = {0};
-    struct macro_cond *conds;
     int rc = -1;
 
-    if (in == NULL || out == NULL) {
-        return -1;
-    }
-    conds = macro_cond_new(ctx);
-    if (conds == NULL) {
-        return -1;
-    }
     out->origin = in;
-    macros.conds = conds;
-    macros.max_depth = ctx != NULL && ctx->max_macro_depth > 0 ? (unsigned long)ctx->max_macro_depth
-                                                                : AS_MACRO_DEPTH_DEFAULT;
-    expand_err[0] = '\0';
-
     while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
 
-        macros.file = in->file;
-        macros.line = in->line;
+        macros->file = in->file;
+        macros->line = in->line;
         /* The lines of a macro being defined are its body, whatever
          * they are. */
-        if (macros.defining) {
-            if (expand_gas_macro_statement(out, &macros, line, 0) != 0) {
+        if (macros->defining) {
+            if (expand_gas_macro_statement(out, macros, line, 0) != 0) {
                 goto out;
+            }
+            continue;
+        }
+        /* `lab: .include "f"`: the label is a line of its own, and the
+         * directive the next. */
+        {
+            const char *p = d;
+
+            for (;;) {
+                const char *q = p;
+
+                while (isalnum((unsigned char)*q) || *q == '_' || *q == '.' || *q == '$') {
+                    q++;
+                }
+                if (q == p || *q != ':') {
+                    break;
+                }
+                p = q + 1;
+                while (isspace((unsigned char)*p)) {
+                    p++;
+                }
+            }
+            if (p != d && line_starts_with_directive(p, ".include") && macro_cond_active(conds, out)) {
+                for (; d < p; ++d) {
+                    text_putc((unsigned char)*d, out);
+                }
+                text_putc('\n', out);
+            }
+        }
+        if (line_starts_with_directive(d, ".include") && macro_cond_active(conds, out)) {
+            unsigned long limit = ctx != NULL && ctx->max_include_depth > 0 ? (unsigned long)ctx->max_include_depth
+                                                                           : AS_INCLUDE_DEPTH_DEFAULT;
+            const char *q = d + 8;
+            const char *end;
+            char *name;
+            char *path;
+            as_text_t inc;
+            int inner;
+
+            while (isspace((unsigned char)*q)) {
+                q++;
+            }
+            end = *q == '"' ? strchr(q + 1, '"') : NULL;
+            if (end == NULL) {
+                snprintf(expand_err, sizeof(expand_err), ".include: a file name in double quotes is wanted");
+                goto out;
+            }
+            name = (char *)malloc((size_t)(end - q));
+            if (name == NULL) {
+                goto out;
+            }
+            memcpy(name, q + 1, (size_t)(end - q) - 1);
+            name[end - q - 1] = '\0';
+            if (chain->count >= limit) {
+                size_t k;
+                size_t at;
+
+                snprintf(expand_err, sizeof(expand_err), "files are included more than %lu deep (--max-include-depth):",
+                         limit);
+                for (k = 0; k < chain->count && k < 4; ++k) {
+                    at = strlen(expand_err);
+                    snprintf(expand_err + at, sizeof(expand_err) - at, " %.40s,", chain->items[k]);
+                }
+                at = strlen(expand_err);
+                snprintf(expand_err + at, sizeof(expand_err) - at, " ... %.40s", name);
+                free(name);
+                goto out;
+            }
+            path = find_include_file(ctx, name);
+            if (path == NULL || text_read_file(&inc, path) != 0) {
+                snprintf(expand_err, sizeof(expand_err), ".include: cannot open %.150s: %s", name, strerror(errno));
+                free(path);
+                free(name);
+                goto out;
+            }
+            free(name);
+            if (strvec_push(chain, path) != 0) {
+                free(path);
+                text_free(&inc);
+                goto out;
+            }
+            free(path);
+            inner = expand_source_lines(ctx, macros, &inc, out, chain);
+            free(chain->items[--chain->count]);
+            text_free(&inc);
+            out->origin = in;
+            if (inner != 0) {
+                rc = inner;
+                free(line);
+                out->origin = outer;
+                return rc;
             }
             continue;
         }
@@ -2562,7 +2693,7 @@ static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_tex
             continue;
         }
         if (line_starts_with_directive(d, ".rept")) {
-            if (expand_rept_block_with_macros(in, out, &macros, d + 5) != 0) {
+            if (expand_rept_block_with_macros(in, out, macros, d + 5) != 0) {
                 goto out;
             }
             continue;
@@ -2579,15 +2710,17 @@ static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_tex
             }
             continue;
         }
-        if (expand_gas_macro_statement(out, &macros, line, 0) != 0) {
+        if (expand_gas_macro_statement(out, macros, line, 0) != 0) {
             goto out;
         }
     }
 
-    if (macros.defining) {
-        macros.line = macros.def.def_line;
+    /* A macro is defined within one file: its .endm is not looked for
+     * in the file that includes this one. */
+    if (macros->defining) {
+        macros->line = macros->def.def_line;
         snprintf(expand_err, sizeof(expand_err), "the .macro %s here has no .endm",
-                 macros.def.name != NULL ? macros.def.name : "");
+                 macros->def.name != NULL ? macros->def.name : "");
         goto out;
     }
     if (out->failed) {
@@ -2603,11 +2736,37 @@ out:
 
         snprintf(said, sizeof(said), "%s", expand_err);
         snprintf(expand_err, sizeof(expand_err), "%s:%u: %.180s", in->file != NULL ? in->file : "<input>",
-                 macros.defining ? macros.line : in->line, said);
+                 macros->defining ? macros->line : in->line, said);
     }
     free(line);
-    gas_macro_vec_free(&macros);
-    macro_cond_free(conds);
+    out->origin = outer;
+    return rc;
+}
+
+static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
+    gas_macro_vec_t macros = {0};
+    strvec_t chain = {0};
+    int rc;
+
+    if (in == NULL || out == NULL) {
+        return -1;
+    }
+    macros.conds = macro_cond_new(ctx);
+    if (macros.conds == NULL) {
+        return -1;
+    }
+    macros.max_depth = ctx != NULL && ctx->max_macro_depth > 0 ? (unsigned long)ctx->max_macro_depth
+                                                                : AS_MACRO_DEPTH_DEFAULT;
+    expand_err[0] = '\0';
+    rc = expand_source_lines(ctx, &macros, in, out, &chain);
+    out->origin = in;
+    {
+        struct macro_cond *conds = macros.conds;
+
+        gas_macro_vec_free(&macros);
+        macro_cond_free(conds);
+    }
+    strvec_free(&chain);
     return rc;
 }
 

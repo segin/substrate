@@ -15712,6 +15712,14 @@ static int append_incbin_to_bytebuf(emit_ctx_t *ctx, const as_stmt_t *st, bytebu
         }
         skip -= nread;
     }
+    /* What is asked for is in the file, or it is refused: a skip past
+     * the end gave nothing, and a count past it gave what there was. */
+    if (skip > 0) {
+        fclose(fp);
+        set_err(ctx, "%s:%u: .incbin: the file is shorter than what is to be skipped",
+                st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0);
+        return -1;
+    }
     while (!has_count || count > 0) {
         size_t want = sizeof(tmp);
         size_t nread;
@@ -15733,6 +15741,11 @@ static int append_incbin_to_bytebuf(emit_ctx_t *ctx, const as_stmt_t *st, bytebu
         }
     }
     fclose(fp);
+    if (has_count && count > 0) {
+        set_err(ctx, "%s:%u: .incbin: the file has fewer bytes after the skip than are asked for",
+                st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0);
+        return -1;
+    }
     return 1;
 }
 

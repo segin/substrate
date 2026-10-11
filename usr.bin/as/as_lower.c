@@ -568,6 +568,32 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
     if (strcmp(d->name, ".single") == 0) {
         return set_name(d, ".float");
     }
+    /*
+     * .incbin "file", skip, count: a skip left empty is 0, and a count
+     * of 0, or left empty, is the rest of the file -- as GNU as has it.
+     * An empty skip was refused, and a count of 0 gave no bytes.
+     */
+    if (strcmp(d->name, ".incbin") == 0 && d->arg_count >= 2) {
+        long long count = 1;
+
+        if (arg_is_empty(d, 1)) {
+            char *zero = lower_strdup("0");
+
+            if (zero == NULL) {
+                return -1;
+            }
+            free(d->args[1]);
+            d->args[1] = zero;
+        }
+        if (d->arg_count == 3 &&
+            (arg_is_empty(d, 2) ||
+             (as_expr_eval_string(arg_text(d, 2), NULL, NULL, &count) == AS_EXPR_EVAL_OK && count == 0))) {
+            free(d->args[2]);
+            d->args[2] = NULL;
+            d->arg_count = 2;
+        }
+        return 0;
+    }
     /* An alignment that pads with a pattern of two bytes or four. */
     if (strcmp(d->name, ".balignw") == 0 || strcmp(d->name, ".balignl") == 0) {
         d->fill_width = d->name[7] == 'w' ? 2 : 4;

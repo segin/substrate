@@ -458,20 +458,26 @@ with a symbol table.
 
 - [x] **AS-T-123** When `.include "f"` is assembled, the assembler shall assemble the contents of f in its place.
   Trace: AS-FE-001.  Verify: T — `.include "inc2.s"` then `cli`, with `nop; hlt` in the file: `90 f4 fa`.  After: 090.
-- [ ] **AS-T-124** If the file of an `.include` cannot be opened, then the assembler shall fail and name the file and the including line.
+- [x] **AS-T-124** If the file of an `.include` cannot be opened, then the assembler shall fail and name the file and the including line.
   Trace: AS-FE-001.  Verify: T.  After: 123.
   In part: it fails and names the file (`test_include.sh`).  The including line is right inside an included file and wrong for the source itself, which is named as the driver's temporary copy (`/tmp/ascond_…:2`); that is the line-marker work of 127.  Also open: an `.include` after a label on its line is not seen.
+  Done with 127: the file and the line of the directive, in whichever file it stands; and an `.include` after a label is seen.
 - [x] **AS-T-125** When `.include` names a relative path, the assembler shall look in each `-I` directory in order and then in the current directory.
   Trace: AS-FE-001.  Verify: T — a file found each way; the temporary directory is never searched.  After: 123.
   Met, and reworded: this said "the including file's directory and then each `-I`".  GNU as does not look beside the including file, and here that directory is the temporary one for the source itself.  The search is GNU's.
-- [ ] **AS-T-126** If inclusion nests deeper than `--max-include-depth`, then the assembler shall fail and name the chain.
+  Corrected since: the search was not GNU's, and nor is this task's wording.  GNU as 2.46 looks in the current directory first and then in the `-I` directories in their order; run with GNU as, the test of the order failed.  The assembler and the test now have GNU's order.
+- [x] **AS-T-126** If inclusion nests deeper than `--max-include-depth`, then the assembler shall fail and name the chain.
   Trace: AS-FE-001.  Verify: T — a file that includes itself.  After: 123.
-- [ ] **AS-T-127** The assembler shall expand macros, repeats and conditionals in included text as in the including file, with macros defined in either visible in both.
+  Done: 64 deep where the option does not say; the message names the first files of the chain and the one that went too far.
+- [x] **AS-T-127** The assembler shall expand macros, repeats and conditionals in included text as in the including file, with macros defined in either visible in both.
   Trace: AS-FE-001.  Verify: T.  After: 123.
-- [ ] **AS-T-128** A local label reference shall resolve to the nearest definition in assembly order, across the boundary of an included file.
+  Done.  `.include` was left for the tokenizer, after the macros, repeats and conditionals of the source had been done: a macro of an included file was not defined, a macro of the including file not expanded in it, its conditionals not followed -- and a file named in a branch not taken was read, and had to be there.  The file is now read by the pass that expands macros, and expanded in its place by the same code, with the macros and conditionals that stand.  `test_include.sh`.
+- [x] **AS-T-128** A local label reference shall resolve to the nearest definition in assembly order, across the boundary of an included file.
   Trace: AS-FE-001.  Verify: T — `1:` in the including file, `jmp 1b` in the included.  After: 123.
-- [ ] **AS-T-129** When `.incbin "f", skip, count` is written, the assembler shall emit count bytes of f from skip, and shall fail if the file is shorter than skip.
+  Done by 127: the included lines are lines of the one expanded source, numbered in the order assembled, where they had the included file's name and its own numbers and a `1b` in it could not see out.
+- [x] **AS-T-129** When `.incbin "f", skip, count` is written, the assembler shall emit count bytes of f from skip, and shall fail if the file is shorter than skip.
   Trace: AS-DAT-003.  Verify: T — the three argument forms; a skip past the end.
+  Done.  The three forms were right.  A skip past the end gave no bytes and a count past it gave what there was; both are refused, as GNU refuses them.  A skip left empty was refused and is 0; a count of 0 gave nothing and is the rest of the file.  `test_include.sh`.
 
 ### C.4 Operands as written
 
@@ -1146,5 +1152,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 146 done, 205 open.  Numbers run to 400, with gaps left between
+351 tasks: 151 done, 200 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

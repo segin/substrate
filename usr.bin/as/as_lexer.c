@@ -615,7 +615,9 @@ static char *resolve_include_path(const as_lexer_cfg_t *cfg, const char *include
     if (include_name == NULL) {
         return NULL;
     }
-    if (include_name[0] == '/') {
+    /* As written first -- the current directory -- and then the -I
+     * directories in their order, which is GNU as's order. */
+    if (include_name[0] == '/' || file_readable(include_name)) {
         return file_readable(include_name) ? strdup(include_name) : NULL;
     }
 
