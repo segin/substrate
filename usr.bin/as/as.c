@@ -3701,6 +3701,10 @@ static int run_native_backend(const as_ctx_t *ctx) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
         goto out;
     }
+    if (as_elf_mark_far_branches(&parsed, &ecfg) != 0) {
+        as_diag(AS_E_BACKEND, "out of memory");
+        goto out;
+    }
     {
         AS_PHASE_BEGIN();
         if (as_symtab_build(&parsed, &syms, errbuf, sizeof(errbuf)) != 0) {

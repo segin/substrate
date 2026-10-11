@@ -499,9 +499,10 @@ with a symbol table.
 - [x] **AS-T-135** When a local label is an argument of a data directive, the assembler shall emit a relocation against the label's section with the label's offset.
   Trace: AS-FE-004, AS-LAY-003.  Verify: T — `.long 1b, 2f`, `.quad 1b`: no undefined symbol named `1b`.
   Done by the same names: `.long 1b` was a relocation against an undefined symbol called `1b`.  In the arguments of the data directives, `.set` and the LEB128 pair.  A `1b` with no `1:` before it is refused, as in GNU.
-- [ ] **AS-T-136** When a local label is defined in a section other than the one that refers to it, the assembler shall resolve the reference with a relocation.
+- [x] **AS-T-136** When a local label is defined in a section other than the one that refers to it, the assembler shall resolve the reference with a relocation.
   Trace: AS-LAY-003.  Verify: T — `.data` / `1: .long 0` / `.text` / `jmp 1b` / `call 1b` / `movl $1b,%eax`: GNU.
   In part: `movl $1b, %eax` is right, by 134.  The branches are not, and are worse than the Verify line supposes -- **`jmp 1b` to a label of another section is left out of the object, with exit status 0**; `call 1b`, `jne 1b` and `loop 1b` are assembled as branches to offset 0 of their own section.  With a compiler's label, `jmp .Lx` across sections fails ("failed to emit relocations") and `jne .Lx` is the short form with an 8-bit relocation; only `call .Lx` is right.  The branch code takes a local label to be of its own section in three places (the encoding, the choice of short or long, the relocation).  Making branches use the names of 134 was tried and put back: it changed which `1:` a branch finds across subsections.
+  Done.  Before anything is emitted, a pass finds each branch whose local label -- numeric or `.L`, alone or with something added -- is defined in another section, marks it, and for a numeric label makes the branch refer to it by the name of 134; which `1:` a branch means is settled by the parser before that and is not changed.  A marked branch is never the short form, is not resolved as a distance within its section, and gets `R_386_PC32`/`R_X86_64_PC32` against the label's section, a `call` included; `loop` and `jecxz`, which have only a short form, keep it with the 8-bit relocation GNU gives them.  `test_far_local_branch.sh`, 22 cases, which GNU as passes, gcc's `je .Lcold` into `.text.unlikely` among them.  Not this item: a `call` of a label of its own section, or of a symbol, in 32-bit code is `R_386_PLT32` where GNU resolves it or gives `R_386_PC32`.
 - [ ] **AS-T-137** When a branch names an absolute address, the assembler shall emit a PC-relative relocation against the absolute section.
   Trace: AS-LAY-003, AS-X86-026.  Verify: T — `jmp 0x1234`, `call 0x1000`, `je 0x1000`: GNU.
   Not done, and what stands in the way: the object library (`elf_add_relocation`) refuses a relocation that names no symbol, which is what one against the absolute section is.  Today `jmp 0x1234` is assembled as the distance from the instruction to 0x1234 as if its section were loaded at 0, with no relocation -- right only there.  To do: let the library write a relocation with symbol 0, then emit `R_386_PC32`/`R_X86_64_PC32` with the target less four.
@@ -1168,5 +1169,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 163 done, 188 open.  Numbers run to 400, with gaps left between
+351 tasks: 164 done, 187 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

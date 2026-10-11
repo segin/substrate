@@ -119,6 +119,13 @@ typedef struct {
     as_operand_t *operands;
     size_t operand_count;
     size_t operand_cap;
+    /*
+     * A branch to a local label -- a numeric one, or a compiler's .L --
+     * that is defined in another section than the branch: the distance
+     * is not known until the sections are placed, so it is the long form
+     * with a relocation.  Set by as_elf_mark_far_branches().
+     */
+    unsigned target_in_other_section;
 } as_instruction_t;
 
 typedef enum {
@@ -188,6 +195,15 @@ void as_parse_result_free(as_parse_result_t *r);
 
 int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
                     as_parse_result_t *out, char *errbuf, size_t errbuf_sz);
+
+/*
+ * Whether ST is a branch whose one operand is where it goes; and, for
+ * such a branch to a numeric label, the label's reference made a
+ * reference to the name the label has beside its number.  0, or -1 for
+ * want of memory.
+ */
+int as_parse_is_direct_branch(const as_stmt_t *st);
+int as_parse_name_branch_label(as_stmt_t *st);
 
 #ifdef __cplusplus
 }

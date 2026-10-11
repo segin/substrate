@@ -13342,6 +13342,10 @@ done:
  */
 static int x86_branch_may_be_short(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                    const as_expr_t *e, unsigned x86_code_bits) {
+    /* To another section: how far is not known here. */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.target_in_other_section) {
+        return 0;
+    }
     if (e == NULL || e->kind != AS_EXPR_SYMBOL || !expr_is_local_temp_symbol(e) || x86_code_bits == 16u) {
         return 1;
     }
@@ -13866,16 +13870,22 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
         as_expr_t *raw_local_expr = NULL;
         const as_expr_t *rel_expr = NULL;
         long long disp;
+        /* A local label of another section is no nearer than a symbol
+         * of another file: the long form, and a relocation. */
+        int far_label = st->u.instr.target_in_other_section && !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic);
 
         if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
             op->u.expr != NULL &&
             op->kind == AS_OPERAND_LABEL_REF &&
             !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic) &&
-            !expr_has_local_ref(op->u.expr) &&
-            !expr_is_local_temp_symbol(op->u.expr) &&
-            !raw_is_numeric_local_ref(op->raw)) {
+            (far_label || (!expr_has_local_ref(op->u.expr) &&
+                           !expr_is_local_temp_symbol(op->u.expr) &&
+                           !raw_is_numeric_local_ref(op->raw)))) {
             stmt_cfg.have_current_text_offset = 0u;
             stmt_cfg.current_text_offset = 0u;
+        }
+        if (far_label) {
+            goto unresolved_rel_target;
         }
 
         if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
@@ -16617,10 +16627,14 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
 
     if ((code_len == 5 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
         (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
+        /* A call of a local label of another section is of a place in
+         * that section, not of a function that may be elsewhere. */
+        int by_plt = streq_ci(in->mnemonic, "call") && !in->target_in_other_section;
+
         if (machine == EM_X86_64) {
-            *type = streq_ci(in->mnemonic, "call") ? R_X86_64_PLT32 : R_X86_64_PC32;
+            *type = by_plt ? R_X86_64_PLT32 : R_X86_64_PC32;
         } else {
-            *type = streq_ci(in->mnemonic, "call") ? R_386_PLT32 : R_386_PC32;
+            *type = by_plt ? R_386_PLT32 : R_386_PC32;
         }
         *width = 4;
         return;
@@ -17075,8 +17089,9 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     int is_distance = mnemonic_takes_a_target(st->u.instr.mnemonic) &&
                                       op->kind != AS_OPERAND_MEMORY && !(op->raw != NULL && op->raw[0] == '*');
                     int can_resolve_without_reloc =
-                        is_distance && (e->kind == AS_EXPR_LOCAL_REF || expr_is_local_temp_symbol(e) ||
-                                        is_fixed_short_rel_mnemonic(st->u.instr.mnemonic));
+                        is_distance && !st->u.instr.target_in_other_section &&
+                        (e->kind == AS_EXPR_LOCAL_REF || expr_is_local_temp_symbol(e) ||
+                         is_fixed_short_rel_mnemonic(st->u.instr.mnemonic));
                     if (machine == EM_X86_64 &&
                         op->kind == AS_OPERAND_MEMORY &&
                         op->u.mem.base_reg != NULL &&
@@ -17338,6 +17353,149 @@ static int emit_relocations(emit_ctx_t *ctx) {
     section_track_free(&track);
     sec_buf_vec_free(&secbufs);
     return 0;
+}
+
+/* A local label and the section it is defined in, to be looked up. */
+typedef struct {
+    const char *name; /* NULL for a numeric label, which is found by its line */
+    unsigned line;
+    int digit;
+    size_t section;
+} far_label_t;
+
+static int far_label_cmp(const void *a, const void *b) {
+    const far_label_t *x = (const far_label_t *)a;
+    const far_label_t *y = (const far_label_t *)b;
+
+    if ((x->name == NULL) != (y->name == NULL)) {
+        return x->name == NULL ? -1 : 1;
+    }
+    if (x->name != NULL) {
+        return strcmp(x->name, y->name);
+    }
+    if (x->line != y->line) {
+        return x->line < y->line ? -1 : 1;
+    }
+    return x->digit - y->digit;
+}
+
+/* The local label a branch's operand names, alone or with something
+ * added to it: `1b`, `.L5`, `1b+4`. */
+static const as_expr_t *far_branch_label(const as_expr_t *e) {
+    const as_expr_t *found;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    if ((e->kind == AS_EXPR_LOCAL_REF && e->local_resolved) ||
+        (e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol))) {
+        return e;
+    }
+    found = far_branch_label(e->lhs);
+    return found != NULL ? found : far_branch_label(e->rhs);
+}
+
+int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg) {
+    section_track_t track;
+    sec_buf_vec_t names; /* for the sections' numbers only */
+    far_label_t *labels = NULL;
+    size_t label_count = 0, label_cap = 0;
+    size_t *stmt_section = NULL;
+    size_t i;
+    int rc = -1;
+
+    if (parsed == NULL || parsed->count == 0) {
+        return 0;
+    }
+    memset(&names, 0, sizeof(names));
+    if (section_track_init(&track, cfg != NULL && cfg->is_64 ? 64u
+                                                             : (cfg != NULL && cfg->x86_code_bits == 16u ? 16u : 32u)) !=
+        0) {
+        return -1;
+    }
+    stmt_section = (size_t *)calloc(parsed->count, sizeof(*stmt_section));
+    if (stmt_section == NULL) {
+        goto out;
+    }
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        sec_buf_t *sb = sec_buf_get_or_add(&names, track.current);
+        size_t j;
+
+        if (sb == NULL) {
+            goto out;
+        }
+        stmt_section[i] = (size_t)(sb - names.items);
+        for (j = 0; j < st->label_count; ++j) {
+            const char *name = st->labels[j].name;
+            int digit = -1;
+            int numeric = numeric_local_label_number(name, &digit) == 0;
+
+            if (!numeric && !is_local_temp_symbol_name(name)) {
+                continue;
+            }
+            if (label_count == label_cap) {
+                size_t cap = label_cap != 0 ? label_cap * 2 : 64;
+                far_label_t *grown = (far_label_t *)realloc(labels, cap * sizeof(*grown));
+
+                if (grown == NULL) {
+                    goto out;
+                }
+                labels = grown;
+                label_cap = cap;
+            }
+            labels[label_count].name = numeric ? NULL : name;
+            labels[label_count].line = numeric ? st->labels[j].line : 0;
+            labels[label_count].digit = numeric ? digit : 0;
+            labels[label_count].section = stmt_section[i];
+            label_count++;
+        }
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            (void)section_track_apply_directive(&track, &st->u.directive);
+        }
+    }
+    if (label_count != 0) {
+        qsort(labels, label_count, sizeof(*labels), far_label_cmp);
+    }
+    for (i = 0; label_count != 0 && i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        const as_expr_t *e;
+        far_label_t key;
+        const far_label_t *found;
+
+        if (!as_parse_is_direct_branch(st)) {
+            continue;
+        }
+        e = far_branch_label(st->u.instr.operands[0].u.expr);
+        if (e == NULL) {
+            continue;
+        }
+        memset(&key, 0, sizeof(key));
+        if (e->kind == AS_EXPR_LOCAL_REF && e->local_resolved) {
+            key.line = e->local_target_line;
+            key.digit = e->local_digit;
+        } else if (e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol)) {
+            key.name = e->symbol;
+        } else {
+            continue;
+        }
+        found = (const far_label_t *)bsearch(&key, labels, label_count, sizeof(*labels), far_label_cmp);
+        if (found == NULL || found->section == stmt_section[i]) {
+            continue;
+        }
+        st->u.instr.target_in_other_section = 1;
+        if (as_parse_name_branch_label(st) != 0) {
+            goto out;
+        }
+    }
+    rc = 0;
+
+out:
+    free(labels);
+    free(stmt_section);
+    sec_buf_vec_free(&names);
+    section_track_free(&track);
+    return rc;
 }
 
 /*

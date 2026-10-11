@@ -67,6 +67,15 @@ typedef struct {
     unsigned check_only;
 } as_elf_cfg_t;
 
+/*
+ * Before anything is emitted: every branch to a local label that is
+ * defined in another section than the branch is marked as one
+ * (as_instruction_t.target_in_other_section), and if the label is a
+ * numeric one the branch is made to refer to it by name.  0, or -1 for
+ * want of memory.
+ */
+int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg);
+
 int as_elf_emit_file(const as_parse_result_t *parsed,
                      const as_section_state_t *sections,
                      const as_symtab_t *symtab,

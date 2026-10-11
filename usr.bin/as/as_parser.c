@@ -2745,6 +2745,17 @@ static int instruction_is_direct_branch(const as_instruction_t *in) {
            strncasecmp(mn, "xbegin", 6) == 0;
 }
 
+int as_parse_is_direct_branch(const as_stmt_t *st) {
+    return st != NULL && st->kind == AS_STMT_INSTRUCTION && instruction_is_direct_branch(&st->u.instr);
+}
+
+int as_parse_name_branch_label(as_stmt_t *st) {
+    if (!as_parse_is_direct_branch(st) || st->u.instr.operands[0].u.expr == NULL) {
+        return 0;
+    }
+    return name_local_refs(st->u.instr.operands[0].u.expr);
+}
+
 static int directive_names_local_labels(const char *name) {
     static const char *const names[] = {
         ".byte", ".word", ".short", ".hword", ".2byte", ".long", ".int", ".4byte", ".quad", ".8byte", ".value",
