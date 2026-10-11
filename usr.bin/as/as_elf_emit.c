@@ -2890,6 +2890,7 @@ static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *pref
         {"cmpps", 0x00, 0xc2},
         {"cmppd", 0x66, 0xc2},
         {"cmpss", 0xf3, 0xc2},
+        {"cmpsd", 0xf2, 0xc2},
         {"shufps", 0x00, 0xc6},
         {"shufpd", 0x66, 0xc6},
         {"pshufd", 0x66, 0x70},
@@ -6922,7 +6923,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(prefix, opcode2, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
+    /* cmpsd with three operands is SSE2's; with fewer it is the string
+     * instruction, which is the encoder's. */
     if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
+        (strcmp(mnbuf, "cmpsd") == 0 && insn->operand_count == 3) ||
         strcmp(mnbuf, "pinsrw") == 0 || strcmp(mnbuf, "pextrw") == 0 ||
         strcmp(mnbuf, "shufps") == 0 || strcmp(mnbuf, "shufpd") == 0 ||
         strcmp(mnbuf, "pshufd") == 0) {
@@ -6941,6 +6945,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
+            strcmp(mnbuf, "cmpsd") == 0 ||
             strcmp(mnbuf, "shufps") == 0 || strcmp(mnbuf, "shufpd") == 0 ||
             strcmp(mnbuf, "pshufd") == 0) {
             unsigned char prefix;
@@ -10064,6 +10069,34 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
     fprintf(stderr, "as: warning: %s:%u: %s\n", st->file != NULL ? st->file : "<input>", st->line, text);
 }
 
+/*
+ * cmp<predicate><ps|pd|ss|sd>: the predicate's number, 0 to 7, and the
+ * instruction it is a spelling of in `base`; -1 if the mnemonic is not
+ * one of the thirty-two.
+ */
+static int x86_sse_compare_alias(const char *mn, char *base, size_t base_sz) {
+    static const char *const predicates[] = {"eq", "lt", "le", "unord", "neq", "nlt", "nle", "ord"};
+    size_t n = strlen(mn);
+    size_t i;
+
+    if (n < 7 || base_sz < 6 || strncasecmp(mn, "cmp", 3) != 0) {
+        return -1;
+    }
+    if (strcasecmp(mn + n - 2, "ps") != 0 && strcasecmp(mn + n - 2, "pd") != 0 &&
+        strcasecmp(mn + n - 2, "ss") != 0 && strcasecmp(mn + n - 2, "sd") != 0) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(predicates) / sizeof(predicates[0]); ++i) {
+        size_t len = strlen(predicates[i]);
+
+        if (n == 3 + len + 2 && strncasecmp(mn + 3, predicates[i], len) == 0) {
+            snprintf(base, base_sz, "cmp%c%c", tolower((unsigned char)mn[n - 2]), tolower((unsigned char)mn[n - 1]));
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
                            size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_insn_t in;
@@ -10087,6 +10120,37 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
      * option again, or -msyntax=intel would outlast an .att_syntax.
      */
     intel_syntax = (st->u.instr.syntax_intel != 0);
+    /*
+     * The SSE comparisons by name: `cmpltsd %xmm0, %xmm1` is `cmpsd $1,
+     * %xmm0, %xmm1`, and so for the eight predicates of each of cmpps,
+     * cmppd, cmpss and cmpsd.  The statement is assembled as the one it
+     * stands for.
+     */
+    if (st->u.instr.operand_count == 2 && st->u.instr.mnemonic != NULL) {
+        char base[8];
+        int predicate = x86_sse_compare_alias(st->u.instr.mnemonic, base, sizeof(base));
+
+        if (predicate >= 0) {
+            static char *const text[] = {"$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7"};
+            as_expr_t value;
+            as_operand_t operands[3];
+            as_stmt_t whole = *st;
+
+            memset(&value, 0, sizeof(value));
+            value.kind = AS_EXPR_CONST;
+            value.value = predicate;
+            memset(operands, 0, sizeof(operands));
+            operands[intel_syntax ? 2 : 0].kind = AS_OPERAND_IMMEDIATE;
+            operands[intel_syntax ? 2 : 0].raw = text[predicate];
+            operands[intel_syntax ? 2 : 0].u.expr = &value;
+            operands[intel_syntax ? 0 : 1] = st->u.instr.operands[0];
+            operands[intel_syntax ? 1 : 2] = st->u.instr.operands[1];
+            whole.u.instr.mnemonic = base;
+            whole.u.instr.operands = operands;
+            whole.u.instr.operand_count = 3;
+            return encode_x86_stmt(ctx, cfg, &whole, code, code_cap, code_len, encerr, encerr_sz);
+        }
+    }
     memset(&in, 0, sizeof(in));
     if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
         snprintf(encerr, encerr_sz, "unsupported mnemonic length");

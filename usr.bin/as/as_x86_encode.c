@@ -5217,13 +5217,18 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_err(&ctx, "unsupported x86_64 movdqu form");
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "cmpss")) {
+    } else if (streq_ci(insn->mnemonic, "cmpss") || (streq_ci(insn->mnemonic, "cmpsd") && insn->op_count == 3)) {
+        /* cmpsd with three operands is the SSE2 comparison of doubles,
+         * F2 0F C2; with none or two it is the string instruction, to
+         * which this was given whatever its operands: `cmpsd $1, %xmm0,
+         * %xmm1` came out as the one byte A7. */
         if (insn->op_count != 3 || !operand_is_xmm_reg(a) || c->kind != AS_X86_OP_IMM ||
             (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
-            set_err(&ctx, "unsupported x86_64 cmpss form");
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
             return -1;
         }
-        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc2) != 0 ||
+        if (emit8(&ctx, streq_ci(insn->mnemonic, "cmpsd") ? 0xf2 : 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, 0xc2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
             emit8(&ctx, (uint8_t)c->u.imm) != 0) {
             return -1;

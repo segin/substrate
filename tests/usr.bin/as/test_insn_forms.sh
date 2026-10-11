@@ -913,6 +913,63 @@ t "32"    0223           'add (%ebx),%ah'
 t "32"    3823           'cmp %ah,(%ebx)'
 t "32"    f08623         'lock xchg %ah,(%ebx)'
 
+# cmpsd with three operands is SSE2's comparison of doubles.  It was
+# given to the string instruction whatever its operands, and `cmpsd $1,
+# %xmm0, %xmm1` came out as the one byte A7.
+t "32 64" f20fc2c801     'cmpsd $1, %xmm0, %xmm1'
+t "32 64" f20fc2c707     'cmpsd $7, %xmm7, %xmm0'
+t "32"    f20fc20800     'cmpsd $0, (%eax), %xmm1'
+t "64"    f20fc20800     'cmpsd $0, (%rax), %xmm1'
+t "64"    f2450fc2d102   'cmpsd $2, %xmm9, %xmm10'
+t "32 64" f30fc2c801     'cmpss $1, %xmm0, %xmm1'
+t "32 64" 660fc2c801     'cmppd $1, %xmm0, %xmm1'
+t "32 64" a7             'cmpsd'
+t "32 64" a7             'cmpsl'
+t "32 64" f3a7           'repe cmpsd'
+t "32 64" f20f10c8       'movsd %xmm0, %xmm1'
+t "32 64" a5             'movsd'
+
+# The comparisons by name: eight predicates of each of the four, which
+# were not mnemonics.
+n=0
+for pred in eq lt le unord neq nlt nle ord; do
+    t "32 64" "0fc2d10$n"   "cmp${pred}ps %xmm1, %xmm2"
+    t "32 64" "660fc2d10$n" "cmp${pred}pd %xmm1, %xmm2"
+    t "32 64" "f30fc2d10$n" "cmp${pred}ss %xmm1, %xmm2"
+    t "32 64" "f20fc2d10$n" "cmp${pred}sd %xmm1, %xmm2"
+    n=$((n + 1))
+done
+t "32"    f20fc21001     'cmpltsd (%eax), %xmm2'
+t "64"    440fc2480804   'cmpneqps 8(%rax), %xmm9'
+t "64"    f2450fc2da07   'cmpordsd %xmm10, %xmm11'
+t "32 64" refused        'cmpltsd %xmm1'
+t "32 64" refused        'cmpgtsd %xmm1, %xmm2'
+t "32 64" refused        'cmpltsd $1, %xmm1, %xmm2'
+
+# The SSSE3 instructions on %mm registers have no 66: that prefix is
+# what makes them the %xmm ones.  It was written for both, so `pshufb
+# %mm0, %mm1` shuffled %xmm1.
+t "32 64" 0f3800c8       'pshufb %mm0, %mm1'
+t "32 64" 0f381cc8       'pabsb %mm0, %mm1'
+t "32 64" 0f381dc8       'pabsw %mm0,%mm1'
+t "32 64" 0f381ec8       'pabsd %mm0,%mm1'
+t "32 64" 0f3801da       'phaddw %mm2, %mm3'
+t "32 64" 0f3802c8       'phaddd %mm0,%mm1'
+t "32 64" 0f3805c8       'phsubw %mm0,%mm1'
+t "32 64" 0f3806d1       'phsubd %mm1,%mm2'
+t "32 64" 0f3807c8       'phsubsw %mm0,%mm1'
+t "32 64" 0f3808c8       'psignb %mm0, %mm1'
+t "32 64" 0f3809d1       'psignw %mm1,%mm2'
+t "32 64" 0f380ac8       'psignd %mm0,%mm1'
+t "32 64" 0f380bc8       'pmulhrsw %mm0, %mm1'
+t "32 64" 0f3804d1       'pmaddubsw %mm1, %mm2'
+t "32 64" 0f3a0fc801     'palignr $1, %mm0, %mm1'
+t "32"    0f381c08       'pabsb (%eax), %mm1'
+t "64"    0f381c08       'pabsb (%rax), %mm1'
+t "32 64" 660f381ec8     'pabsd %xmm0, %xmm1'
+t "32 64" 660f3803d1     'phaddsw %xmm1,%xmm2'
+t "64"    66440f380008   'pshufb (%rax), %xmm9'
+
 # A displacement written as the number 0 is no displacement: `0(%eax)`
 # is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
 # (%r13), which cannot be without one, have one byte of zero and had

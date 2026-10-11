@@ -202,7 +202,10 @@ static int emit_ssse3_core(ss_ctx_t *ctx, uint8_t map, uint8_t opcode, const as_
     size_t rex_pos;
     uint8_t rex = 0x40;
 
-    if (emit8(ctx, 0x66) != 0) {
+    /* 66 is what makes these the %xmm instructions.  On %mm registers
+     * they have none; it was written for both, so `pshufb %mm0, %mm1`
+     * shuffled %xmm1. */
+    if (!insn->dst.is_mmx && emit8(ctx, 0x66) != 0) {
         return -1;
     }
 

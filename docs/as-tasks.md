@@ -97,8 +97,9 @@ status 0.
 - [x] **AS-T-020** When a branch of the 64-bit encoder's first mnemonic chain has encoded an instruction, the encoder shall return that encoding.
   Trace: AS-X86-001, AS-EXT-001.  Verify: T — under `--64`, `testl %eax,%ebx`, `xchg`, `cmpxchg`, `cpuid`, `rdtsc`, `rol`, `neg`, `not`, three-operand `imul`, `bsf`, `xorps %xmm0,%xmm0`, `addpd`, `movd`, `sqrtsd`, `fnstsw` match GNU.
   Done: `test_x86_64_first_chain.sh`.  Of the 18,072 lines of the 64-bit corpus, 2,977 that were refused are assembled; identical to GNU rose from 6,947 to 8,879 and no line that assembled before changed.  The shifts, rotates, `xchg` and `xadd` set `REX.W` for every size but a byte, which the refusal had hidden; that is mended with it.  **Of the newly assembled lines 859 differ from GNU and 185 are ones GNU refuses**: they are the defects of 038, 061–063, 168–171, 186 and 192, now reached in 64-bit mode as they always were in 32-bit.
-- [ ] **AS-T-021** The 51 SSE and 45 SSE2 mnemonics refused in 64-bit mode shall each assemble to GNU's bytes for register and constant-memory operands.
+- [x] **AS-T-021** The 51 SSE and 45 SSE2 mnemonics refused in 64-bit mode shall each assemble to GNU's bytes for register and constant-memory operands.
   Trace: AS-EXT-001.  Verify: T — the `sse` and `sse2` families of the extension corpus under `--64` show no "refused".  After: 020.
+  Done.  Most had come with 020 and what followed it: of the 3,757 distinct lines of the two x86-64-v1 corpora in the tree, which have every SSE and SSE2 instruction, none is refused now.  What was left, and is mended: `cmpsd` with three operands was given to the string instruction and came out as the one byte `A7`, in both modes; and the thirty-two comparisons by name, `cmpltsd`, `cmpneqps` and the rest, were not mnemonics.  With them: the SSSE3 instructions on `%mm` registers were written with the `66` that makes them the `%xmm` ones, so `pshufb %mm0,%mm1` shuffled `%xmm1`.  `test_insn_forms.sh`, 77 cases.  Seen in that corpus and not SSE's: an explicit `data16` or `rex.W` written before an instruction is mishandled (`data16 adc $…,%rax` gets a two-byte immediate; `rex.W adc $0,%al` loses the W), `movabs %ax,addr` has no `66` (035), and `lea (sym),%eax` -- a symbol in parentheses -- is taken for a register.
 - [x] **AS-T-022** If an instruction that takes an operand is written with none, then the assembler shall report an error.
   Trace: AS-X86-040.  Verify: T — `inc`, `dec`, `push`, `pop`, `neg`, `not`, `mul`, `div`, `call`, `jmp` bare: exit 1, a message, nothing from the sanitizer build.
   Done: an absent operand is an empty operand, not a null pointer, in both encoders.  `test_sanitizer_sweep.sh` gives each of the encoder's 595 mnemonics fifteen sets of operands under ASan and UBSan, names the ten of this task and holds each to exit 1 and a message, and holds the plain build to the sanitizer build's result for every line.
@@ -1081,5 +1082,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 85 done, 265 open.  Numbers run to 399, with gaps left between
+350 tasks: 86 done, 264 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.
