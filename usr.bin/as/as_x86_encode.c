@@ -3102,7 +3102,12 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "int")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
+        if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM && !a->imm_symbolic && a->u.imm == 3) {
+            /* The third has an instruction of one byte to itself. */
+            if (emit8(&ctx, 0xcc) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
             if (emit8(&ctx, 0xcd) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
                 return -1;
             }
@@ -6949,8 +6954,15 @@ more_mnemonics:
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "int")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM ||
-            emit8(&ctx, 0xcd) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM) {
+            return -1;
+        }
+        /* The third has an instruction of one byte to itself. */
+        if (!a->imm_symbolic && a->u.imm == 3) {
+            if (emit8(&ctx, 0xcc) != 0) {
+                return -1;
+            }
+        } else if (emit8(&ctx, 0xcd) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "salc") || streq_ci(insn->mnemonic, "udb")) {

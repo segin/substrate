@@ -10433,6 +10433,369 @@ static int x86_immediate_fits(const as_instruction_t *insn, const char *mn, char
  * that contradicts the register written, or a q outside 64-bit code,
  * was assembled as the suffix said or as the register did.  1 if so.
  */
+/* The name is `base`, or `base` and one of the letters of `suffixes`. */
+static int x86_name_is(const char *mn, const char *base, const char *suffixes) {
+    size_t n = strlen(base);
+
+    if (strncmp(mn, base, n) != 0) {
+        return 0;
+    }
+    return mn[n] == '\0' || (mn[n + 1] == '\0' && strchr(suffixes, mn[n]) != NULL);
+}
+
+/* Whether a register is one that only 64-bit code has. */
+static int x86_reg_is_of_64_bit_code(const as_x86_reg_info_t *r) {
+    switch (r->cls) {
+    case AS_X86_REGCLASS_GENERAL:
+        return r->width == 64 || r->number > 7 || (r->flags & AS_X86_REGF_REX8) != 0;
+    case AS_X86_REGCLASS_IP:
+        return r->width == 64;
+    case AS_X86_REGCLASS_XMM:
+    case AS_X86_REGCLASS_YMM:
+    case AS_X86_REGCLASS_ZMM:
+    case AS_X86_REGCLASS_CONTROL:
+    case AS_X86_REGCLASS_DEBUG:
+        return r->number > 7;
+    case AS_X86_REGCLASS_NO_INDEX:
+        return r->width == 64;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * A register that is not of a class and a width the instruction takes
+ * where it is written.
+ *
+ * The encoders took a register by its number and asked no more of it:
+ * `mov %al, %ebx` was `mov %eax, %ebx`, `seta %ax` was `seta %al`,
+ * `push %al` pushed %eax, `fldl (%al)` loaded through %eax, `movl %eax,
+ * (%r8d)` in 32-bit code stored through %eax, and `movq $1, %mm0` put
+ * the one in %rax.  GNU as refuses each, and so does this.
+ *
+ * It is not the table of what every instruction takes, which the
+ * encoders have yet to be given; it is the rules that hold for all of
+ * them and the instructions that were found assembling what they
+ * cannot mean.  1 with the reason in `encerr` if the statement is
+ * refused.
+ */
+static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_syntax, int is_64, char *encerr,
+                                       size_t encerr_sz) {
+    const as_x86_reg_info_t *reg[4] = {NULL, NULL, NULL, NULL};
+    const as_operand_t *src;
+    const as_operand_t *dst;
+    const as_x86_reg_info_t *rs;
+    const as_x86_reg_info_t *rd;
+    char mn[24];
+    size_t i;
+    size_t n;
+
+    if (insn->mnemonic == NULL || insn->operand_count > 4) {
+        return 0;
+    }
+    n = strlen(insn->mnemonic);
+    if (n >= sizeof(mn)) {
+        return 0;
+    }
+    for (i = 0; i <= n; ++i) {
+        mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
+    }
+
+    /* Every register, and every register an address is made of. */
+    for (i = 0; i < insn->operand_count; ++i) {
+        const as_operand_t *op = &insn->operands[i];
+
+        if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
+            reg[i] = as_x86_reg_find(op->u.reg);
+            if (reg[i] != NULL && !is_64 && x86_reg_is_of_64_bit_code(reg[i])) {
+                snprintf(encerr, encerr_sz, "'%s' is a register of 64-bit code", op->u.reg);
+                return 1;
+            }
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            const char *names[2];
+            int wide = 0;
+            int k;
+            long long disp = 0;
+
+            names[0] = op->u.mem.base_reg;
+            names[1] = op->u.mem.index_reg;
+            for (k = 0; k < 2; ++k) {
+                const as_x86_reg_info_t *r = names[k] != NULL ? as_x86_reg_find(names[k]) : NULL;
+
+                if (r == NULL) {
+                    continue;
+                }
+                if (!is_64 && x86_reg_is_of_64_bit_code(r)) {
+                    snprintf(encerr, encerr_sz, "'%s' is a register of 64-bit code", names[k]);
+                    return 1;
+                }
+                if ((r->cls == AS_X86_REGCLASS_GENERAL && r->width == 8) || r->cls == AS_X86_REGCLASS_SEGMENT ||
+                    r->cls == AS_X86_REGCLASS_X87 || r->cls == AS_X86_REGCLASS_MMX ||
+                    r->cls == AS_X86_REGCLASS_MASK || r->cls == AS_X86_REGCLASS_CONTROL ||
+                    r->cls == AS_X86_REGCLASS_DEBUG || r->cls == AS_X86_REGCLASS_TEST) {
+                    snprintf(encerr, encerr_sz, "'%s' is not a register an address is made of", names[k]);
+                    return 1;
+                }
+                /* (`(%dx)` is how a port is written, and no address.) */
+                if (is_64 && r->cls == AS_X86_REGCLASS_GENERAL && r->width == 16 &&
+                    !(r->number == 2 && (strncmp(mn, "in", 2) == 0 || strncmp(mn, "out", 3) == 0))) {
+                    snprintf(encerr, encerr_sz, "'%s' is not a register an address of 64-bit code is made of",
+                             names[k]);
+                    return 1;
+                }
+                wide |= r->width == 64 && (r->cls == AS_X86_REGCLASS_GENERAL || r->cls == AS_X86_REGCLASS_IP);
+            }
+            /* A displacement is of 32 bits and is sign-extended: one
+             * that 32 bits do not hold was cut down to them.  (But
+             * an address computed into 32 bits is cut down anyway.) */
+            if (x86_name_is(mn, "lea", "wlq")) {
+                const as_operand_t *to = &insn->operands[intel_syntax ? 0 : insn->operand_count - 1];
+                const as_x86_reg_info_t *r =
+                    to->kind == AS_OPERAND_REGISTER && to->u.reg != NULL ? as_x86_reg_find(to->u.reg) : NULL;
+
+                if (r != NULL && r->width <= 32) {
+                    wide = 0;
+                }
+            }
+            if (wide && op->u.mem.disp != NULL && !expr_has_symbol(op->u.mem.disp) &&
+                eval_expr_const(op->u.mem.disp, &disp) == 0 && (disp < INT32_MIN || disp > INT32_MAX)) {
+                snprintf(encerr, encerr_sz, "the displacement %lld is not one 32 bits hold", disp);
+                return 1;
+            }
+        }
+    }
+    /*
+     * Names 64-bit code has no instruction for: the descriptor tables'
+     * have one size there, the string instructions on ports none of 64
+     * bits, and the far branches through memory no form of 64 that GNU
+     * as will write.
+     */
+    if (is_64 &&
+        (strcmp(mn, "lgdtl") == 0 || strcmp(mn, "lgdtw") == 0 || strcmp(mn, "lidtl") == 0 || strcmp(mn, "lidtw") == 0 ||
+         strcmp(mn, "sgdtl") == 0 || strcmp(mn, "sgdtw") == 0 || strcmp(mn, "sidtl") == 0 || strcmp(mn, "sidtw") == 0 ||
+         strcmp(mn, "insq") == 0 || strcmp(mn, "outsq") == 0 || strcmp(mn, "ljmpq") == 0 || strcmp(mn, "lcallq") == 0 ||
+         (insn->operand_count == 0 &&
+          (strcmp(mn, "into") == 0 || strcmp(mn, "salc") == 0 || strcmp(mn, "pushfl") == 0 ||
+           strcmp(mn, "popfl") == 0 || strcmp(mn, "leavel") == 0 || strcmp(mn, "retl") == 0)))) {
+        snprintf(encerr, encerr_sz, "'%s' is not an instruction of 64-bit code", mn);
+        return 1;
+    }
+    if (insn->operand_count == 0) {
+        return 0;
+    }
+    src = &insn->operands[intel_syntax ? insn->operand_count - 1 : 0];
+    dst = &insn->operands[intel_syntax ? 0 : insn->operand_count - 1];
+    rs = reg[intel_syntax ? insn->operand_count - 1 : 0];
+    rd = reg[intel_syntax ? 0 : insn->operand_count - 1];
+    snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+
+    /*
+     * The instructions of integers take general registers and no
+     * others: `inc %xmm0` was `inc %eax`, `mul %mm0` was `mul %eax`.
+     * (A move takes a segment, control or debug register too, and has
+     * its own rules below.)
+     */
+    {
+        static const char *const integer[] = {
+            "add",  "or",   "adc",     "sbb",  "and",  "sub",  "xor",  "cmp",    "test",  "xchg",  "inc",
+            "dec",  "neg",  "not",     "mul",  "imul", "div",  "idiv", "shl",    "shr",   "sal",   "sar",
+            "rol",  "ror",  "rcl",     "rcr",  "xadd", "lea",  "bsf",  "bsr",    "bt",    "bts",   "btr",
+            "btc",  "popcnt", "lzcnt", "tzcnt", "bswap", "cmpxchg",
+        };
+        /* Of these the two registers are of one width, and of the
+         * last seven neither is a byte. */
+        static const char *const one_width[] = {
+            "xadd", "cmpxchg", "bsf", "bsr", "popcnt", "lzcnt", "tzcnt", "imul",
+        };
+        int is_integer = x86_name_is(mn, "mov", "bwl");
+        int is_one_width = strncmp(mn, "cmov", 4) == 0;
+        int no_byte = is_one_width;
+
+        for (i = 0; i < sizeof(integer) / sizeof(integer[0]) && !is_integer; ++i) {
+            is_integer = x86_name_is(mn, integer[i], "bwlq");
+        }
+        for (i = 0; i < sizeof(one_width) / sizeof(one_width[0]) && !is_one_width; ++i) {
+            is_one_width = x86_name_is(mn, one_width[i], "bwlq");
+            no_byte = is_one_width && i >= 2;
+        }
+        for (i = 0; i < insn->operand_count && is_integer; ++i) {
+            if (reg[i] == NULL || reg[i]->cls == AS_X86_REGCLASS_GENERAL) {
+                continue;
+            }
+            if (mn[0] == 'm' && mn[1] == 'o' &&
+                (reg[i]->cls == AS_X86_REGCLASS_SEGMENT || reg[i]->cls == AS_X86_REGCLASS_CONTROL ||
+                 reg[i]->cls == AS_X86_REGCLASS_DEBUG || reg[i]->cls == AS_X86_REGCLASS_TEST)) {
+                continue;
+            }
+            return 1;
+        }
+        if (is_one_width && insn->operand_count == 2 && rs != NULL && rd != NULL &&
+            rs->cls == AS_X86_REGCLASS_GENERAL && rd->cls == AS_X86_REGCLASS_GENERAL &&
+            (rs->width != rd->width || (no_byte && rs->width == 8))) {
+            return 1;
+        }
+    }
+    /* What is of one kind of vector register is of no other, but for
+     * the conversions between them. */
+    {
+        int mmx = 0;
+        int xmm = 0;
+        int general = 0;
+
+        for (i = 0; i < insn->operand_count; ++i) {
+            if (reg[i] != NULL) {
+                mmx += reg[i]->cls == AS_X86_REGCLASS_MMX;
+                xmm += reg[i]->cls == AS_X86_REGCLASS_XMM;
+                general += reg[i]->cls == AS_X86_REGCLASS_GENERAL;
+            }
+        }
+        if (mmx != 0 && xmm != 0 && strcmp(mn, "movq2dq") != 0 && strcmp(mn, "movdq2q") != 0 &&
+            strncmp(mn, "cvt", 3) != 0) {
+            return 1;
+        }
+        /* movd is between a vector register and a general one or
+         * memory; movsd and movss of two operands are of %xmm. */
+        if (strcmp(mn, "movd") == 0 && insn->operand_count == 2 && rs != NULL && rd != NULL && mmx + xmm != 1) {
+            return 1;
+        }
+        if ((strcmp(mn, "movsd") == 0 || strcmp(mn, "movss") == 0) && insn->operand_count == 2 &&
+            (mmx != 0 || general != 0)) {
+            return 1;
+        }
+        if ((x86_name_is(mn, "cvtsi2sd", "lq") || x86_name_is(mn, "cvtsi2ss", "lq")) && insn->operand_count == 2 &&
+            rs != NULL && rs->cls != AS_X86_REGCLASS_GENERAL) {
+            return 1;
+        }
+    }
+    if (x86_name_is(mn, "mov", "bwlq") && insn->operand_count == 2) {
+        const as_x86_reg_info_t *general = rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL ? rs : rd;
+        const as_x86_reg_info_t *other = general == rs ? rd : rs;
+
+        if (rs != NULL && rd != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && rd->cls == AS_X86_REGCLASS_GENERAL &&
+            rs->width != rd->width) {
+            return 1;
+        }
+        if (general != NULL && general->cls == AS_X86_REGCLASS_GENERAL && other != NULL) {
+            if (other->cls == AS_X86_REGCLASS_SEGMENT && general->width == 8) {
+                return 1;
+            }
+            if ((other->cls == AS_X86_REGCLASS_CONTROL || other->cls == AS_X86_REGCLASS_DEBUG ||
+                 other->cls == AS_X86_REGCLASS_TEST) &&
+                general->width != (is_64 ? 64u : 32u)) {
+                return 1;
+            }
+        }
+        /* A segment register is moved to and from memory as a word. */
+        if (((rs != NULL && rs->cls == AS_X86_REGCLASS_SEGMENT) || (rd != NULL && rd->cls == AS_X86_REGCLASS_SEGMENT)) &&
+            (mn[3] == 'b' || (mn[3] == 'l' && (src->kind == AS_OPERAND_MEMORY || dst->kind == AS_OPERAND_MEMORY)))) {
+            return 1;
+        }
+        /* movq of a number is a move to a general register. */
+        if (mn[3] == 'q' && src->kind == AS_OPERAND_IMMEDIATE && !operand_is_bare_address(src) && rd != NULL &&
+            (rd->cls == AS_X86_REGCLASS_MMX || rd->cls == AS_X86_REGCLASS_XMM)) {
+            return 1;
+        }
+    }
+    if (insn->operand_count == 2 && rs != NULL && rd != NULL && rs->cls == AS_X86_REGCLASS_GENERAL &&
+        rd->cls == AS_X86_REGCLASS_GENERAL && rs->width != rd->width &&
+        (x86_name_is(mn, "add", "bwlq") || x86_name_is(mn, "or", "bwlq") || x86_name_is(mn, "adc", "bwlq") ||
+         x86_name_is(mn, "sbb", "bwlq") || x86_name_is(mn, "and", "bwlq") || x86_name_is(mn, "sub", "bwlq") ||
+         x86_name_is(mn, "xor", "bwlq") || x86_name_is(mn, "cmp", "bwlq") || x86_name_is(mn, "test", "bwlq") ||
+         x86_name_is(mn, "xchg", "bwlq"))) {
+        return 1;
+    }
+    if (x86_name_is(mn, "push", "bwlq") || x86_name_is(mn, "pop", "bwlq")) {
+        char suffix = mn[mn[1] == 'u' ? 4 : 3];
+
+        /* Nothing of one byte is pushed, and in 64-bit code nothing
+         * of four. */
+        if (suffix == 'b' || (rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && rs->width == 8)) {
+            return 1;
+        }
+        if (is_64 && (suffix == 'l' || (rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && rs->width == 32))) {
+            return 1;
+        }
+    }
+    if (strncmp(mn, "set", 3) == 0 && insn->operand_count == 1 && rs != NULL &&
+        (rs->cls != AS_X86_REGCLASS_GENERAL || rs->width != 8)) {
+        return 1;
+    }
+    if (strncmp(mn, "cmov", 4) == 0 && insn->operand_count == 2 &&
+        ((rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && rs->width == 8) ||
+         (rd != NULL && rd->cls == AS_X86_REGCLASS_GENERAL && rd->width == 8))) {
+        return 1;
+    }
+    if (strncmp(mn, "bswap", 5) == 0 && rs != NULL && rs->width != 32 && rs->width != 64) {
+        return 1;
+    }
+    if (strcmp(mn, "leab") == 0 || strcmp(mn, "btb") == 0 || strcmp(mn, "btsb") == 0 || strcmp(mn, "btrb") == 0 ||
+        strcmp(mn, "btcb") == 0) {
+        return 1;
+    }
+    if ((x86_name_is(mn, "lea", "wlq") || strncmp(mn, "movsx", 5) == 0 || strncmp(mn, "movzx", 5) == 0) &&
+        insn->operand_count == 2 && rd != NULL && rd->cls == AS_X86_REGCLASS_GENERAL && rd->width == 8) {
+        return 1;
+    }
+    /* What is in memory and nowhere else. */
+    if (insn->operand_count == 1 && rs != NULL &&
+        (strcmp(mn, "lgdt") == 0 || strcmp(mn, "lidt") == 0 || strcmp(mn, "sgdt") == 0 || strcmp(mn, "sidt") == 0 ||
+         strcmp(mn, "invlpg") == 0 || strcmp(mn, "cmpxchg8b") == 0 || strcmp(mn, "cmpxchg16b") == 0)) {
+        return 1;
+    }
+    if (insn->operand_count == 1 && rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL &&
+        ((strcmp(mn, "lmsw") == 0 && rs->width != 16) ||
+         ((strcmp(mn, "fnstsw") == 0 || strcmp(mn, "fstsw") == 0) && (rs->width != 16 || rs->number != 0)))) {
+        return 1;
+    }
+    if (!is_64 && (strcmp(mn, "rdfsbase") == 0 || strcmp(mn, "rdgsbase") == 0 || strcmp(mn, "wrfsbase") == 0 ||
+                   strcmp(mn, "wrgsbase") == 0)) {
+        snprintf(encerr, encerr_sz, "'%s' is an instruction of 64-bit code", mn);
+        return 1;
+    }
+    /* A branch through a register goes through one as wide as an
+     * address, and a branch goes to no number with a `$` on it. */
+    if (mnemonic_takes_a_target(mn) && insn->operand_count == 1) {
+        const char *raw = src->raw != NULL ? src->raw : "";
+
+        if (raw[0] == '$' || (raw[0] == '*' && raw[1] == '$')) {
+            return 1;
+        }
+        if (rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && (rs->width == 8 || (is_64 && rs->width == 32))) {
+            return 1;
+        }
+        if (is_64 && raw[0] == '*' && (strcmp(mn, "jmpl") == 0 || strcmp(mn, "calll") == 0)) {
+            return 1;
+        }
+    }
+    /* A conditional move of the stack is to its top, and says so. */
+    if (strncmp(mn, "fcmov", 5) == 0 && insn->operand_count == 1) {
+        return 1;
+    }
+    /* A count in a register is in %cl. */
+    if (insn->operand_count == 2 && rs != NULL &&
+        (x86_name_is(mn, "shl", "bwlq") || x86_name_is(mn, "shr", "bwlq") || x86_name_is(mn, "sal", "bwlq") ||
+         x86_name_is(mn, "sar", "bwlq") || x86_name_is(mn, "rol", "bwlq") || x86_name_is(mn, "ror", "bwlq") ||
+         x86_name_is(mn, "rcl", "bwlq") || x86_name_is(mn, "rcr", "bwlq")) &&
+        !(rs->cls == AS_X86_REGCLASS_GENERAL && rs->width == 8 && rs->number == 1 &&
+          (rs->flags & (AS_X86_REGF_HIGH8 | AS_X86_REGF_REX8)) == 0)) {
+        return 1;
+    }
+    /* A port is read into the accumulator and written from it, in the
+     * width the name says where it says one. */
+    if ((x86_name_is(mn, "in", "bwl") || x86_name_is(mn, "out", "bwl")) && insn->operand_count == 2) {
+        const as_x86_reg_info_t *acc = mn[0] == 'i' ? rd : rs;
+        char suffix = mn[mn[0] == 'i' ? 2 : 3];
+
+        if (acc == NULL || acc->cls != AS_X86_REGCLASS_GENERAL || acc->number != 0 || acc->width > 32 ||
+            (acc->flags & AS_X86_REGF_HIGH8) != 0 ||
+            (suffix != '\0' && acc->width != (suffix == 'b' ? 8u : (suffix == 'w' ? 16u : 32u)))) {
+            return 1;
+        }
+    }
+    encerr[0] = '\0';
+    return 0;
+}
+
 static int x86_int_convert_suffix_contradicts(const as_instruction_t *insn, int is_64) {
     const char *mn = insn->mnemonic;
     size_t n;
@@ -10604,6 +10967,13 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
     }
     if (x86_int_convert_suffix_contradicts(&st->u.instr, cfg->is_64)) {
         snprintf(encerr, encerr_sz, "'%s': the suffix is not the width of the integer operand", st->u.instr.mnemonic);
+        return -1;
+    }
+    /* (By the mode of the code, which .code32 in a 64-bit object makes
+     * other than the object's.) */
+    if (x86_operand_classes_refused(&st->u.instr, intel_syntax,
+                                    cfg->is_64 && cfg->x86_code_bits != 32u && cfg->x86_code_bits != 16u, encerr,
+                                    encerr_sz)) {
         return -1;
     }
     if ((st->u.instr.prefixes & AS_PREFIX_LOCK) != 0 && !x86_lock_is_allowed(&st->u.instr, mnbuf, intel_syntax)) {

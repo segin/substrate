@@ -26,7 +26,6 @@ test_branch_relax_exact.sh	a branch is made long up to three bytes before it nee
 test_branch_relax_label.sh	a branch to an ordinary label of its own section is resolved now, and short where it plainly reaches (AS-T-187); what is left is the two cases at the limit, as in test_branch_relax_exact.sh (AS-T-221)
 test_complex_control_32_64.sh	`.uleb128 .LVU23` in .debug_loclists: the view numbers that `.loc ... view` defines are not symbols here (AS-T-400).  It stopped before at a ; inside a comment, which no longer begins a statement
 test_diagnostics_determinism.sh	a forced short jump out of range, `jmpb` over 300 bytes, is assembled and should be refused (AS-T-221).  Its messages name the user's file and line now, which is where it stopped before
-test_i386_encoding.sh	`add %eax, %xmm0` is assembled: a register's class is not checked (AS-T-171)
 test_i8086_elf_object.sh	16-bit code is assembled to the wrong bytes (AS-T-347).  test_i8086_corpus.sh, which asks only that the two 16-bit corpora assemble, passes now that a ; in a comment is no statement -- their bytes are not right for it
 test_i8086_realmode_core.sh	16-bit code, as above (AS-T-347)
 test_isa_heavy_64.sh	vmovdqu is not a mnemonic (AS-T-332)

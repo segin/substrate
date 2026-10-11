@@ -22,14 +22,6 @@ leal sym(%eip),%edx
 leal sym@GOT(%rax),%edx
 leal sym@TPOFF(%rax),%edx
 leal sym@DTPOFF(%rax),%edx
-movl %eax,0x123456789(%rax)
-movl 0x123456789(%rax),%ecx
-movl %eax,0x80000000(%rax)
-movl 0x80000000(%rax),%ecx
-movl %eax,-0x80000001(%rax)
-movl -0x80000001(%rax),%ecx
-movl %eax,0xffffffff(%rax)
-movl 0xffffffff(%rax),%ecx
 movl %eax,(%r16)
 movl (%r16),%ecx
 leal (%r16),%edx
@@ -76,97 +68,6 @@ leaq sym(%eip),%r10
 cmpq $0x100,sym(%eip)
 movq $sym2,sym(%eip)
 addq $-1,sym(%eip)
-fldl (%al)
-fldl (%cx)
-fldl (%bx)
-movb $1,0x123456789(%rax)
-movw $0x1234,0x123456789(%rax)
-movl $0x12345678,0x123456789(%rax)
-addl $4,0x123456789(%rax)
-cmpb $0,0x123456789(%rax)
-incl 0x123456789(%rax)
-pushq 0x123456789(%rax)
-call *0x123456789(%rax)
-movl $sym2,0x123456789(%rax)
-testl $1,0x123456789(%rax)
-shll $3,0x123456789(%rax)
-imull $100,0x123456789(%rax),%eax
-fldl 0x123456789(%rax)
-movb %al,0x123456789(%rax)
-movw 0x123456789(%rax),%bx
-movq %rax,0x123456789(%rax)
-movq 0x123456789(%rax),%r9
-movq $1,0x123456789(%rax)
-leaq 0x123456789(%rax),%r10
-cmpq $0x100,0x123456789(%rax)
-movq $sym2,0x123456789(%rax)
-addq $-1,0x123456789(%rax)
-movb $1,0x80000000(%rax)
-movw $0x1234,0x80000000(%rax)
-movl $0x12345678,0x80000000(%rax)
-addl $4,0x80000000(%rax)
-cmpb $0,0x80000000(%rax)
-incl 0x80000000(%rax)
-pushq 0x80000000(%rax)
-call *0x80000000(%rax)
-movl $sym2,0x80000000(%rax)
-testl $1,0x80000000(%rax)
-shll $3,0x80000000(%rax)
-imull $100,0x80000000(%rax),%eax
-fldl 0x80000000(%rax)
-movb %al,0x80000000(%rax)
-movw 0x80000000(%rax),%bx
-movq %rax,0x80000000(%rax)
-movq 0x80000000(%rax),%r9
-movq $1,0x80000000(%rax)
-leaq 0x80000000(%rax),%r10
-cmpq $0x100,0x80000000(%rax)
-movq $sym2,0x80000000(%rax)
-addq $-1,0x80000000(%rax)
-movb $1,-0x80000001(%rax)
-movw $0x1234,-0x80000001(%rax)
-movl $0x12345678,-0x80000001(%rax)
-addl $4,-0x80000001(%rax)
-cmpb $0,-0x80000001(%rax)
-incl -0x80000001(%rax)
-pushq -0x80000001(%rax)
-call *-0x80000001(%rax)
-movl $sym2,-0x80000001(%rax)
-testl $1,-0x80000001(%rax)
-shll $3,-0x80000001(%rax)
-imull $100,-0x80000001(%rax),%eax
-fldl -0x80000001(%rax)
-movb %al,-0x80000001(%rax)
-movw -0x80000001(%rax),%bx
-movq %rax,-0x80000001(%rax)
-movq -0x80000001(%rax),%r9
-movq $1,-0x80000001(%rax)
-leaq -0x80000001(%rax),%r10
-cmpq $0x100,-0x80000001(%rax)
-movq $sym2,-0x80000001(%rax)
-addq $-1,-0x80000001(%rax)
-movb $1,0xffffffff(%rax)
-movw $0x1234,0xffffffff(%rax)
-movl $0x12345678,0xffffffff(%rax)
-addl $4,0xffffffff(%rax)
-cmpb $0,0xffffffff(%rax)
-incl 0xffffffff(%rax)
-pushq 0xffffffff(%rax)
-call *0xffffffff(%rax)
-movl $sym2,0xffffffff(%rax)
-testl $1,0xffffffff(%rax)
-shll $3,0xffffffff(%rax)
-imull $100,0xffffffff(%rax),%eax
-fldl 0xffffffff(%rax)
-movb %al,0xffffffff(%rax)
-movw 0xffffffff(%rax),%bx
-movq %rax,0xffffffff(%rax)
-movq 0xffffffff(%rax),%r9
-movq $1,0xffffffff(%rax)
-leaq 0xffffffff(%rax),%r10
-cmpq $0x100,0xffffffff(%rax)
-movq $sym2,0xffffffff(%rax)
-addq $-1,0xffffffff(%rax)
 movb $1,(%r16)
 movw $0x1234,(%r16)
 movl $0x12345678,(%r16)
@@ -189,59 +90,17 @@ leaq (%r16),%r10
 cmpq $0x100,(%r16)
 movq $sym2,(%r16)
 addq $-1,(%r16)
-mov %al,%ebx
-mov %eax,%bl
-int $3
-into
-shll %cx,%eax
-pushl %eax
-popl %eax
-pushl $1
-push %eax
-pop %ebx
-pushl (%rax)
-popl sym
-salc
 pushfq
 popfq
-pushfl
-popfl
 leaveq
-leavel
-retl
 callq *%rax
-call *%eax
-jmp *%eax
 jmpq *%rax
-jmpl *(%rax)
-calll *(%rax)
-ljmpq *(%rax)
-lcallq *(%rax)
-movq $0,%mm0
-movq $1,%mm0
-movq $-1,%mm0
-movq $0x7f,%mm0
-movq $0x80,%mm0
-movq $-0x80,%mm0
-movq $-0x81,%mm0
-movq $0x7fffffff,%mm0
-movq $0x80000000,%mm0
 addl $0xffffffff,%eax
 addl $0xffffffff,%ebx
-movq $0xffffffff,%mm0
 andl $0xffffffff,(%rax)
 pushw $0xffffffff
 addw $0xffffffff,%ax
 addw $0xffffffff,%bx
-movq $-0x80000000,%mm0
-movq $-0x80000001,%mm0
-movq $0x100000000,%mm0
-movq $0x7fffffffffffffff,%mm0
-movq $0xffffffffffffffff,%mm0
-movq $-0x8000000000000000,%mm0
-movq $0xffffffff80000000,%mm0
-movq $0xffffffff7fffffff,%mm0
-movq $0x123456789abcdef0,%mm0
 call *sym@TLSCALL(%rax)
 movabs $_GLOBAL_OFFSET_TABLE_,%rax
 leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
@@ -254,54 +113,11 @@ leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
 .globl gf | gf: nop | jmp gf
 .globl gf | gf: nop | je gf
-movl %es,(%rax)
-movl (%rax),%es
-movb %al,%es
-mov %es,%al
-movl %cs,(%rax)
-movl (%rax),%cs
-movb %al,%cs
-mov %cs,%al
-movl %ss,(%rax)
-movl (%rax),%ss
-movb %al,%ss
-mov %ss,%al
-movl %ds,(%rax)
-movl (%rax),%ds
-movb %al,%ds
-mov %ds,%al
-movl %fs,(%rax)
-movl (%rax),%fs
-movb %al,%fs
-mov %fs,%al
-movl %gs,(%rax)
-movl (%rax),%gs
-movb %al,%gs
-mov %gs,%al
-mov %cr0,%eax
-mov %cr2,%eax
-mov %cr3,%eax
-mov %cr4,%eax
-mov %cr8,%eax
-mov %cr1,%eax
-mov %cr5,%eax
-mov %dr0,%eax
-mov %dr1,%eax
-mov %dr2,%eax
-mov %dr3,%eax
-mov %dr6,%eax
-mov %dr7,%eax
-mov %db0,%eax
-mov %db7,%eax
-mov %dr4,%eax
-mov %cr9,%eax
 movsb %al,%ebx
 movsw %ax,%ebx
-movsxb %al,%bl
 movsxd %ax,%bx
 movzb %al,%ebx
 movzw %ax,%ebx
-movzxb %al,%bl
 addw $0xff80,%ax
 addw $0xffff,%ax
 addw $0xffffff80,%ax
@@ -650,57 +466,9 @@ cmpl $0xffffff80,-4(%rbp,%rcx,4)
 cmpl $0xffffffff,(%rbx)
 cmpl $0xffffffff,sym
 cmpl $0xffffffff,-4(%rbp,%rcx,4)
-pushb %al
-push %al
-pushb %cl
-push %cl
-pushb %sil
-push %sil
-pushb %r9b
-push %r9b
-pushb (%rbx)
-pushb sym
-pushb 8(%rsp)
-pushb $1
-pushl %ebx
-push %ebx
-pushl %esp
-push %esp
-pushl %ebp
-push %ebp
-pushl %r9d
-push %r9d
-pushl (%rbx)
-pushl sym
-pushl 8(%rsp)
-popb %al
-pop %al
-popb %cl
-pop %cl
-popb %sil
-pop %sil
-popb %r9b
-pop %r9b
-popb (%rbx)
-popb sym
-popb 8(%rsp)
-pop %eax
-popl %ebx
-popl %esp
-pop %esp
-popl %ebp
-pop %ebp
-popl %r9d
-pop %r9d
-popl (%rbx)
-popl 8(%rsp)
 divw %bx,%ax
 idivw (%rbx),%ax
 imulw %bx,%ax,%bx
-btb $1,%al
-btsb $1,%al
-btrb $1,%al
-btcb $1,%al
 divl %ebx,%eax
 idivl (%rbx),%eax
 imull %ebx,%eax,%ebx
@@ -727,11 +495,8 @@ cs; nop
 ds; movl %eax,(%rbx)
 fs
 gs
-seta %ax
 seta %eax
 setab %al
-cmovab %al,%bl
-ja $1
 jmp .
 jmp .+2
 jmp .+0x100
@@ -740,35 +505,21 @@ call .+5
 je .
 je .+2
 pushw $0xffff
-pushl $0x12345678
 femms
 monitor
 mwait
 rdrand %eax
 rdseed %eax
-bswap %ax
-bswapw %ax
 serialize
-lgdtl (%rax)
-lgdtw (%rax)
 lgdtq (%rax)
-sgdtl (%rax)
-sidtw (%rax)
-lgdt %eax
-invlpg %eax
-lmsw %eax
 clflushopt (%rax)
 invpcid (%rax),%rbx
 rdpid %rax
 int $sym
 ret $sym
 enter $sym,$1
-leab (%rax),%al
-lea (%rax),%al
 rdrand %rax
 rdrand %r9
-insq
-outsq
 movsl (%rdi),%es:(%rsi)
 movsl (%eax),%es:(%ebx)
 smovl
@@ -782,16 +533,11 @@ inl %dx
 in %dx
 outb %dx
 outb $0x80
-in $0x60,%rax
-inb %dx,%ax
-outb %ax,%dx
 in $sym,%al
 out %al,$sym
 fucomip
 fcomi
 fucomi
-fcmovb %st(1)
-fnstsw %eax
 fldenvs (%rax)
 fnstenvl (%rax)
 .code32 | incl %eax
@@ -799,7 +545,6 @@ fnstenvl (%rax)
 .code32 | movl sym,%eax
 .code32 | movl (%eax),%ebx
 .code32 | call sym
-.code32 | movq %rax,%rbx
 .code16 | movw %ax,%bx
 .code16 | movw (%bx),%ax
 .code16 | jmp sym

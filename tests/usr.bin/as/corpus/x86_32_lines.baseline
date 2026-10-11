@@ -23,12 +23,6 @@ movl sym@TLSGD(%ebx),%ecx
 leal sym@TLSGD(%ebx),%edx
 movl %eax,sym@TLSDESC(%ebx)
 movl sym@TLSDESC(%ebx),%ecx
-movl %eax,(%r8d)
-movl (%r8d),%ecx
-leal (%r8d),%edx
-movl %eax,(%eax,%r8d)
-movl (%eax,%r8d),%ecx
-leal (%eax,%r8d),%edx
 fldl (%bp,%di)
 fldl (%bp,%si)
 movb $1,sym@GOTTPOFF(%ebx)
@@ -45,41 +39,6 @@ imull $100,sym@GOTTPOFF(%ebx),%eax
 fldl sym@GOTTPOFF(%ebx)
 movb %al,sym@GOTTPOFF(%ebx)
 movw sym@GOTTPOFF(%ebx),%bx
-fldl (%al)
-fldl (%rax)
-movb $1,(%r8d)
-movw $0x1234,(%r8d)
-movl $0x12345678,(%r8d)
-addl $4,(%r8d)
-cmpb $0,(%r8d)
-incl (%r8d)
-pushl (%r8d)
-call *(%r8d)
-movl $sym2,(%r8d)
-testl $1,(%r8d)
-shll $3,(%r8d)
-imull $100,(%r8d),%eax
-movb %al,(%r8d)
-movw (%r8d),%bx
-movb $1,(%eax,%r8d)
-movw $0x1234,(%eax,%r8d)
-movl $0x12345678,(%eax,%r8d)
-addl $4,(%eax,%r8d)
-cmpb $0,(%eax,%r8d)
-incl (%eax,%r8d)
-pushl (%eax,%r8d)
-call *(%eax,%r8d)
-movl $sym2,(%eax,%r8d)
-testl $1,(%eax,%r8d)
-shll $3,(%eax,%r8d)
-imull $100,(%eax,%r8d),%eax
-movb %al,(%eax,%r8d)
-movw (%eax,%r8d),%bx
-mov %al,%ebx
-mov %eax,%bl
-int $3
-shll %cx,%eax
-push %rax
 movl %cr8,%eax
 movl %eax,%cr8
 lcall $sym,$sym2
@@ -87,8 +46,6 @@ ljmp $0x10000,$0
 jmp $0x10,$0x1000
 call $0x10,$0x1000
 jcxz sym
-jmp *%al
-jmp *$1
 callw sym
 jmpw sym
 calll sym
@@ -109,61 +66,18 @@ nop | lf: nop | movl lf(,%eax,4),%ecx
 .section .foo,"ax" | lf: nop | .text | jmp lf
 .section .foo,"ax" | lf: nop | .text | je lf
 .section .foo,"ax" | lf: nop | .text | movl $lf,%eax
-movl %es,(%eax)
-movl (%eax),%es
-movb %al,%es
-mov %es,%al
-movl %cs,(%eax)
-movl (%eax),%cs
-movb %al,%cs
-mov %cs,%al
-movl %ss,(%eax)
-movl (%eax),%ss
-movb %al,%ss
-mov %ss,%al
-movl %ds,(%eax)
-movl (%eax),%ds
-movb %al,%ds
-mov %ds,%al
-movl %fs,(%eax)
-movl (%eax),%fs
-movb %al,%fs
-mov %fs,%al
-movl %gs,(%eax)
-movl (%eax),%gs
-movb %al,%gs
-mov %gs,%al
-mov %cr0,%ax
-mov %cr2,%ax
-mov %cr3,%ax
-mov %cr4,%ax
 mov %cr8,%eax
 mov %eax,%cr8
 movl %cr8,%ebx
 movl %edi,%cr8
-mov %cr1,%ax
-mov %cr5,%ax
-mov %dr0,%ax
-mov %dr1,%ax
-mov %dr2,%ax
-mov %dr3,%ax
-mov %dr6,%ax
-mov %dr7,%ax
-mov %db0,%ax
-mov %db7,%ax
-mov %dr4,%ax
-mov %tr6,%ax
-mov %tr7,%ax
 mov %cr9,%eax
 mov %eax,%cr9
 movl %cr9,%ebx
 movl %edi,%cr9
 movsb %al,%ebx
 movsw %ax,%ebx
-movsxb %al,%bl
 movzb %al,%ebx
 movzw %ax,%ebx
-movzxb %al,%bl
 addw $0xff80,%ax
 addw $0xffff,%ax
 addw $0xffffff80,%ax
@@ -468,34 +382,10 @@ cmpl $0xffffff80,-4(%ebp,%ecx,4)
 cmpl $0xffffffff,(%ebx)
 cmpl $0xffffffff,sym
 cmpl $0xffffffff,-4(%ebp,%ecx,4)
-pushb %al
-push %al
-pushb %cl
-push %cl
-pushb %bh
-push %bh
-pushb (%ebx)
-pushb sym
-pushb 8(%esp)
-pushb $1
-popb %al
-pop %al
-popb %cl
-pop %cl
-popb %bh
-pop %bh
-popb (%ebx)
-popb sym
-popb 8(%esp)
 divw %bx,%ax
 idivw (%ebx),%ax
-btb $1,%al
-btsb $1,%al
-btrb $1,%al
-btcb $1,%al
 divl %ebx,%eax
 idivl (%ebx),%eax
-cmpxchg8b %eax
 ds call sym
 addr16 movl %eax,(%eax)
 addr32 nop
@@ -503,11 +393,7 @@ data16
 addr32
 data16 jmp sym
 addr16 jcxz 1f | 1:
-seta %ax
-seta %eax
 setab %al
-cmovab %al,%bl
-ja $1
 jmp .
 jmp .+2
 jmp .+0x100
@@ -518,18 +404,9 @@ je .+2
 push $0xffffffff
 pushw $0xffff
 xsetbv
-bswap %ax
-bswapw %ax
-lgdt %eax
-invlpg %eax
-lmsw %eax
-rdfsbase %eax
-wrgsbase %eax
 int $sym
 ret $sym
 enter $sym,$1
-leab (%eax),%al
-lea (%eax),%al
 movsl (%edi),%es:(%esi)
 movsl (%eax),%es:(%ebx)
 stosb %bl,%es:(%edi)
@@ -544,15 +421,11 @@ inl %dx
 in %dx
 outb %dx
 outb $0x80
-in $0x60,%rax
-inb %dx,%ax
-outb %ax,%dx
 in $sym,%al
 out %al,$sym
 fucomip
 fcomi
 fucomi
-fnstsw %eax
 fldenvs (%eax)
 fnstenvl (%eax)
 .code16 | push %eax
