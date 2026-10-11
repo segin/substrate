@@ -1,5 +1,6 @@
 #include "as_elf_emit.h"
 #include "as_x86_encode.h"
+#include "as_x86_regs.h"
 #include "as_reloc_op.h"
 #include "as_x86_vex.h"
 #include "as_x86_avx.h"
@@ -564,31 +565,6 @@ static int streq_ci(const char *a, const char *b) {
     return a[i] == '\0' && b[i] == '\0';
 }
 
-static int startswith_ci(const char *s, const char *prefix) {
-    size_t i;
-
-    if (s == NULL || prefix == NULL) {
-        return 0;
-    }
-    for (i = 0; prefix[i] != '\0'; ++i) {
-        char cs = s[i];
-        char cp = prefix[i];
-        if (cs == '\0') {
-            return 0;
-        }
-        if (cs >= 'A' && cs <= 'Z') {
-            cs = (char)(cs + ('a' - 'A'));
-        }
-        if (cp >= 'A' && cp <= 'Z') {
-            cp = (char)(cp + ('a' - 'A'));
-        }
-        if (cs != cp) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
 static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
     static const char *const exact[] = {
         "movaps", "movups", "movapd", "movupd", "movdqa", "movdqu",
@@ -861,129 +837,53 @@ static int raw_is_numeric_local_ref(const char *raw) {
     return i > 0 && (raw[i] == 'f' || raw[i] == 'b') && raw[i + 1] == '\0';
 }
 
-static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
-    static const struct {
-        const char *name;
-        as_x86_reg_t reg;
-    } map[] = {
-        {"al", AS_X86_REG_RAX}, {"ah", AS_X86_REG_AH}, {"ax", AS_X86_REG_RAX}, {"eax", AS_X86_REG_RAX}, {"rax", AS_X86_REG_RAX},
-        {"cl", AS_X86_REG_RCX}, {"ch", AS_X86_REG_CH}, {"cx", AS_X86_REG_RCX}, {"ecx", AS_X86_REG_RCX}, {"rcx", AS_X86_REG_RCX},
-        {"dl", AS_X86_REG_RDX}, {"dh", AS_X86_REG_DH}, {"dx", AS_X86_REG_RDX}, {"edx", AS_X86_REG_RDX}, {"rdx", AS_X86_REG_RDX},
-        {"bl", AS_X86_REG_RBX}, {"bh", AS_X86_REG_BH}, {"bx", AS_X86_REG_RBX}, {"ebx", AS_X86_REG_RBX}, {"rbx", AS_X86_REG_RBX},
-        {"spl", AS_X86_REG_RSP}, {"sp", AS_X86_REG_RSP}, {"esp", AS_X86_REG_RSP}, {"rsp", AS_X86_REG_RSP},
-        {"bpl", AS_X86_REG_RBP}, {"bp", AS_X86_REG_RBP}, {"ebp", AS_X86_REG_RBP}, {"rbp", AS_X86_REG_RBP},
-        {"sil", AS_X86_REG_RSI}, {"si", AS_X86_REG_RSI}, {"esi", AS_X86_REG_RSI}, {"rsi", AS_X86_REG_RSI},
-        {"dil", AS_X86_REG_RDI}, {"di", AS_X86_REG_RDI}, {"edi", AS_X86_REG_RDI}, {"rdi", AS_X86_REG_RDI},
-        {"r8b", AS_X86_REG_R8}, {"r8w", AS_X86_REG_R8}, {"r8d", AS_X86_REG_R8}, {"r8", AS_X86_REG_R8},
-        {"r9b", AS_X86_REG_R9}, {"r9w", AS_X86_REG_R9}, {"r9d", AS_X86_REG_R9}, {"r9", AS_X86_REG_R9},
-        {"r10b", AS_X86_REG_R10}, {"r10w", AS_X86_REG_R10}, {"r10d", AS_X86_REG_R10}, {"r10", AS_X86_REG_R10},
-        {"r11b", AS_X86_REG_R11}, {"r11w", AS_X86_REG_R11}, {"r11d", AS_X86_REG_R11}, {"r11", AS_X86_REG_R11},
-        {"r12b", AS_X86_REG_R12}, {"r12w", AS_X86_REG_R12}, {"r12d", AS_X86_REG_R12}, {"r12", AS_X86_REG_R12},
-        {"r13b", AS_X86_REG_R13}, {"r13w", AS_X86_REG_R13}, {"r13d", AS_X86_REG_R13}, {"r13", AS_X86_REG_R13},
-        {"r14b", AS_X86_REG_R14}, {"r14w", AS_X86_REG_R14}, {"r14d", AS_X86_REG_R14}, {"r14", AS_X86_REG_R14},
-        {"r15b", AS_X86_REG_R15}, {"r15w", AS_X86_REG_R15}, {"r15d", AS_X86_REG_R15}, {"r15", AS_X86_REG_R15},
-    };
-    const char *p = name;
-    size_t i;
-    unsigned v = 0;
+/*
+ * The questions the encoders have of a register's name.  Each is asked
+ * of the one table (as_x86_regs.h); each had a list of its own.
+ */
 
-    if (name == NULL || out == NULL) {
+/* A general register, %al to %r15, or a vector or MMX register that an
+ * instruction's register field can hold: its number, %ah to %bh having
+ * numbers of their own. */
+static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
+    static const as_x86_reg_t high8[] = {AS_X86_REG_AH, AS_X86_REG_CH, AS_X86_REG_DH, AS_X86_REG_BH};
+    const as_x86_reg_info_t *r = as_x86_reg_find(name);
+
+    if (r == NULL || out == NULL) {
         return -1;
     }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
+    switch (r->cls) {
+    case AS_X86_REGCLASS_GENERAL:
+        if (r->number > 15) {
+            return -1;
+        }
+        *out = (r->flags & AS_X86_REGF_HIGH8) != 0 ? high8[r->number - 4] : (as_x86_reg_t)r->number;
+        return 0;
+    case AS_X86_REGCLASS_XMM:
+    case AS_X86_REGCLASS_YMM:
+    case AS_X86_REGCLASS_ZMM:
+        if (r->number > 15) {
+            return -1;
+        }
+        *out = (as_x86_reg_t)r->number;
+        return 0;
+    case AS_X86_REGCLASS_MMX:
+        *out = (as_x86_reg_t)r->number;
+        return 0;
+    default:
+        return -1;
     }
-    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (streq_ci(p, map[i].name)) {
-            *out = map[i].reg;
-            return 0;
-        }
-    }
-    if ((startswith_ci(p, "xmm") || startswith_ci(p, "ymm") || startswith_ci(p, "zmm")) &&
-        isdigit((unsigned char)p[3])) {
-        p += 3;
-        while (isdigit((unsigned char)*p)) {
-            v = (v * 10u) + (unsigned)(*p - '0');
-            ++p;
-        }
-        if (*p == '\0' && v <= 15u) {
-            *out = (as_x86_reg_t)v;
-            return 0;
-        }
-    }
-    if (startswith_ci(p, "mm") && isdigit((unsigned char)p[2])) {
-        p += 2;
-        while (isdigit((unsigned char)*p)) {
-            v = (v * 10u) + (unsigned)(*p - '0');
-            ++p;
-        }
-        if (*p == '\0' && v <= 7u) {
-            *out = (as_x86_reg_t)v;
-            return 0;
-        }
-    }
-    return -1;
 }
 
+/* How wide a register is, for the address it is the base or index of
+ * and for the operand it is; 0 for one that has no place in either. */
 static unsigned parse_x86_reg_bits(const char *name) {
-    const char *p;
-    size_t n;
+    const as_x86_reg_info_t *r = as_x86_reg_find(name);
 
-    if (name == NULL) {
+    if (r == NULL || r->cls == AS_X86_REGCLASS_X87 || r->cls == AS_X86_REGCLASS_NO_INDEX) {
         return 0;
     }
-    p = name;
-    while (*p == '%') {
-        ++p;
-    }
-    n = strlen(p);
-    if (n == 0) {
-        return 0;
-    }
-    if (streq_ci(p, "al") || streq_ci(p, "ah") || streq_ci(p, "bl") || streq_ci(p, "bh") ||
-        streq_ci(p, "cl") || streq_ci(p, "ch") || streq_ci(p, "dl") || streq_ci(p, "dh") ||
-        streq_ci(p, "sil") || streq_ci(p, "dil") || streq_ci(p, "spl") || streq_ci(p, "bpl") ||
-        (p[0] == 'r' && n >= 3 && p[n - 1] == 'b')) {
-        return 8;
-    }
-    if (streq_ci(p, "ax") || streq_ci(p, "bx") || streq_ci(p, "cx") || streq_ci(p, "dx") ||
-        streq_ci(p, "si") || streq_ci(p, "di") || streq_ci(p, "sp") || streq_ci(p, "bp") ||
-        streq_ci(p, "ip") ||
-        (p[0] == 'r' && n >= 3 && p[n - 1] == 'w')) {
-        return 16;
-    }
-    if (streq_ci(p, "eax") || streq_ci(p, "ebx") || streq_ci(p, "ecx") || streq_ci(p, "edx") ||
-        streq_ci(p, "esi") || streq_ci(p, "edi") || streq_ci(p, "esp") || streq_ci(p, "ebp") ||
-        streq_ci(p, "eip") ||
-        (p[0] == 'r' && n >= 3 && p[n - 1] == 'd')) {
-        return 32;
-    }
-    if (streq_ci(p, "rax") || streq_ci(p, "rbx") || streq_ci(p, "rcx") || streq_ci(p, "rdx") ||
-        streq_ci(p, "rsi") || streq_ci(p, "rdi") || streq_ci(p, "rsp") || streq_ci(p, "rbp") ||
-        streq_ci(p, "rip") ||
-        (p[0] == 'r' && n >= 2 && p[n - 1] >= '0' && p[n - 1] <= '9')) {
-        return 64;
-    }
-    if (p[0] == 'm' && p[1] == 'm' && isdigit((unsigned char)p[2])) {
-        return 64;
-    }
-    if (p[0] == 'x' && p[1] == 'm' && p[2] == 'm' && isdigit((unsigned char)p[3])) {
-        return 128;
-    }
-    if (p[0] == 'y' && p[1] == 'm' && p[2] == 'm' && isdigit((unsigned char)p[3])) {
-        return 256;
-    }
-    if (p[0] == 'z' && p[1] == 'm' && p[2] == 'm' && isdigit((unsigned char)p[3])) {
-        return 512;
-    }
-    if (p[0] == 'k' && isdigit((unsigned char)p[1])) {
-        return 64;
-    }
-    if (streq_ci(p, "cs") || streq_ci(p, "ds") || streq_ci(p, "es") || streq_ci(p, "fs") ||
-        streq_ci(p, "gs") || streq_ci(p, "ss")) {
-        return 16;
-    }
-    return 0;
+    return r->width;
 }
 
 static unsigned infer_x86_mem_addr_bits(const as_mem_operand_t *mem) {
@@ -1008,62 +908,33 @@ static unsigned infer_x86_mem_addr_bits(const as_mem_operand_t *mem) {
     return index_bits;
 }
 
-static int parse_bnd_reg(const char *name, unsigned *out) {
-    const char *p = name;
-    unsigned v = 0;
+/* The number of a register of one class, numbered no more than `max`. */
+static int reg_of_class(const char *name, as_x86_reg_class_t cls, unsigned max, unsigned *out) {
+    const as_x86_reg_info_t *r = as_x86_reg_find_class(name, cls, max);
 
-    if (name == NULL || out == NULL) {
+    if (r == NULL || out == NULL) {
         return -1;
     }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    if (!((p[0] == 'b' || p[0] == 'B') &&
-          (p[1] == 'n' || p[1] == 'N') &&
-          (p[2] == 'd' || p[2] == 'D') &&
-          isdigit((unsigned char)p[3]))) {
-        return -1;
-    }
-    p += 3;
-    while (isdigit((unsigned char)*p)) {
-        v = (v * 10u) + (unsigned)(*p - '0');
-        ++p;
-    }
-    if (*p != '\0' || v > 3u) {
-        return -1;
-    }
-    *out = v;
+    *out = r->number;
     return 0;
 }
 
-static int parse_x86_sysreg(const char *name, const char *kind, unsigned max_reg, unsigned *out) {
-    const char *p = name;
-    unsigned v = 0;
+static int parse_bnd_reg(const char *name, unsigned *out) {
+    return reg_of_class(name, AS_X86_REGCLASS_BOUND, 3, out);
+}
 
-    if (name == NULL || kind == NULL || out == NULL) {
+/* A control, debug or test register -- `kind` is "cr", "dr", "db" or
+ * "tr", the letters its name begins with -- numbered no more than
+ * max_reg. */
+static int parse_x86_sysreg(const char *name, const char *kind, unsigned max_reg, unsigned *out) {
+    const as_x86_reg_info_t *r = as_x86_reg_find(name);
+
+    if (r == NULL || kind == NULL || out == NULL || r->number > max_reg ||
+        (r->cls != AS_X86_REGCLASS_CONTROL && r->cls != AS_X86_REGCLASS_DEBUG && r->cls != AS_X86_REGCLASS_TEST) ||
+        strncmp(r->name, kind, strlen(kind)) != 0) {
         return -1;
     }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    while (*kind != '\0') {
-        if (tolower((unsigned char)*p) != tolower((unsigned char)*kind)) {
-            return -1;
-        }
-        ++p;
-        ++kind;
-    }
-    if (!isdigit((unsigned char)*p)) {
-        return -1;
-    }
-    while (isdigit((unsigned char)*p)) {
-        v = (v * 10u) + (unsigned)(*p - '0');
-        ++p;
-    }
-    if (*p != '\0' || v > max_reg) {
-        return -1;
-    }
-    *out = v;
+    *out = r->number;
     return 0;
 }
 
@@ -1137,62 +1008,14 @@ static int parse_seg_reg_text(const char *name, as_x86_seg_t *out) {
 }
 
 static int x86_reg_width_bits(const char *name) {
-    const char *p = name;
-    size_t n;
+    const as_x86_reg_info_t *r = as_x86_reg_find(name);
 
-    if (p == NULL || p[0] == '\0') {
+    /* (A mask register has no width that an operand's size is told
+     * from, nor has the x87 stack.) */
+    if (r == NULL || r->cls == AS_X86_REGCLASS_MASK || r->cls == AS_X86_REGCLASS_X87) {
         return 0;
     }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    n = strlen(p);
-    if (n == 0) {
-        return 0;
-    }
-    if (n >= 3 && (p[0] == 'x' || p[0] == 'X') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
-        return 128;
-    }
-    if (n >= 3 && (p[0] == 'y' || p[0] == 'Y') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
-        return 256;
-    }
-    if (n >= 3 && (p[0] == 'z' || p[0] == 'Z') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
-        return 512;
-    }
-    if (n >= 2 && (p[0] == 'm' || p[0] == 'M') && (p[1] == 'm' || p[1] == 'M')) {
-        return 64;
-    }
-    if (streq_ci(p, "al") || streq_ci(p, "ah") || streq_ci(p, "bl") || streq_ci(p, "bh") || streq_ci(p, "cl") ||
-        streq_ci(p, "ch") || streq_ci(p, "dl") || streq_ci(p, "dh") || streq_ci(p, "sil") || streq_ci(p, "dil") ||
-        streq_ci(p, "spl") || streq_ci(p, "bpl")) {
-        return 8;
-    }
-    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'b' || p[n - 1] == 'B')) {
-        return 8;
-    }
-    if (streq_ci(p, "ax") || streq_ci(p, "bx") || streq_ci(p, "cx") || streq_ci(p, "dx") || streq_ci(p, "si") ||
-        streq_ci(p, "di") || streq_ci(p, "sp") || streq_ci(p, "bp") || streq_ci(p, "ip") ||
-        streq_ci(p, "cs") || streq_ci(p, "ds") || streq_ci(p, "es") || streq_ci(p, "fs") ||
-        streq_ci(p, "gs") || streq_ci(p, "ss")) {
-        return 16;
-    }
-    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'w' || p[n - 1] == 'W')) {
-        return 16;
-    }
-    if (n > 1 && (p[0] == 'e' || p[0] == 'E')) {
-        return 32;
-    }
-    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'd' || p[n - 1] == 'D')) {
-        return 32;
-    }
-    if (streq_ci(p, "rax") || streq_ci(p, "rbx") || streq_ci(p, "rcx") || streq_ci(p, "rdx") || streq_ci(p, "rsi") ||
-        streq_ci(p, "rdi") || streq_ci(p, "rsp") || streq_ci(p, "rbp") || streq_ci(p, "rip")) {
-        return 64;
-    }
-    if (n >= 2 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1])) {
-        return 64;
-    }
-    return 0;
+    return (int)r->width;
 }
 
 static int operand_is_x86_seg_reg(const as_operand_t *op) {
@@ -3042,14 +2865,18 @@ static int has_unsized_memory_and_immediate(const as_instruction_t *insn, const 
 }
 
 static as_x86_seg_t map_seg(const char *s) {
-    if (s == NULL) return AS_X86_SEG_NONE;
-    if (streq_ci(s, "cs")) return AS_X86_SEG_CS;
-    if (streq_ci(s, "ds")) return AS_X86_SEG_DS;
-    if (streq_ci(s, "es")) return AS_X86_SEG_ES;
-    if (streq_ci(s, "fs")) return AS_X86_SEG_FS;
-    if (streq_ci(s, "gs")) return AS_X86_SEG_GS;
-    if (streq_ci(s, "ss")) return AS_X86_SEG_SS;
-    return AS_X86_SEG_NONE;
+    /* By the segment's number in the table: es, cs, ss, ds, fs, gs. */
+    static const as_x86_seg_t segs[] = {AS_X86_SEG_ES, AS_X86_SEG_CS, AS_X86_SEG_SS,
+                                        AS_X86_SEG_DS, AS_X86_SEG_FS, AS_X86_SEG_GS};
+    const as_x86_reg_info_t *r;
+
+    /* (Without its percent sign: this is asked of names that have had
+     * it taken off, and one that has it still is not one.) */
+    if (s == NULL || s[0] == '%' || isspace((unsigned char)s[0])) {
+        return AS_X86_SEG_NONE;
+    }
+    r = as_x86_reg_find_class(s, AS_X86_REGCLASS_SEGMENT, 5);
+    return r != NULL ? segs[r->number] : AS_X86_SEG_NONE;
 }
 
 /* movs, cmps, lods, stos, scas, ins and outs, with a size suffix or not. */
@@ -3583,131 +3410,25 @@ static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, cha
 }
 
 static int parse_xmm_reg(const char *name, unsigned *out) {
-    const char *p = name;
-    unsigned v = 0;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    if (!(p[0] == 'x' || p[0] == 'X') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
-        return -1;
-    }
-    p += 3;
-    if (!isdigit((unsigned char)*p)) {
-        return -1;
-    }
-    while (isdigit((unsigned char)*p)) {
-        v = (v * 10u) + (unsigned)(*p - '0');
-        ++p;
-    }
-    if (*p != '\0' || v > 15u) {
-        return -1;
-    }
-    *out = v;
-    return 0;
+    /* (To %xmm15 and %ymm15: the encoders that take these are the ones
+     * without a prefix that reaches further.) */
+    return reg_of_class(name, AS_X86_REGCLASS_XMM, 15, out);
 }
 
 static int parse_ymm_reg(const char *name, unsigned *out) {
-    const char *p = name;
-    unsigned v = 0;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    if (!(p[0] == 'y' || p[0] == 'Y') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
-        return -1;
-    }
-    p += 3;
-    if (!isdigit((unsigned char)*p)) {
-        return -1;
-    }
-    while (isdigit((unsigned char)*p)) {
-        v = (v * 10u) + (unsigned)(*p - '0');
-        ++p;
-    }
-    if (*p != '\0' || v > 15u) {
-        return -1;
-    }
-    *out = v;
-    return 0;
+    return reg_of_class(name, AS_X86_REGCLASS_YMM, 15, out);
 }
 
 static int parse_zmm_reg(const char *name, unsigned *out) {
-    const char *p = name;
-    unsigned v = 0;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    if (!(p[0] == 'z' || p[0] == 'Z') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
-        return -1;
-    }
-    p += 3;
-    if (!isdigit((unsigned char)*p)) {
-        return -1;
-    }
-    while (isdigit((unsigned char)*p)) {
-        v = (v * 10u) + (unsigned)(*p - '0');
-        ++p;
-    }
-    if (*p != '\0' || v > 31u) {
-        return -1;
-    }
-    *out = v;
-    return 0;
+    return reg_of_class(name, AS_X86_REGCLASS_ZMM, 31, out);
 }
 
 static int parse_mmx_reg(const char *name, unsigned *out) {
-    const char *p = name;
-    unsigned v = 0;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    if (!(p[0] == 'm' || p[0] == 'M') || !(p[1] == 'm' || p[1] == 'M')) {
-        return -1;
-    }
-    p += 2;
-    if (!isdigit((unsigned char)*p)) {
-        return -1;
-    }
-    while (isdigit((unsigned char)*p)) {
-        v = (v * 10u) + (unsigned)(*p - '0');
-        ++p;
-    }
-    if (*p != '\0' || v > 7u) {
-        return -1;
-    }
-    *out = v;
-    return 0;
+    return reg_of_class(name, AS_X86_REGCLASS_MMX, 7, out);
 }
 
 static int parse_k_reg(const char *name, unsigned *out) {
-    const char *p = name;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    while (*p == '%' || isspace((unsigned char)*p)) {
-        ++p;
-    }
-    if ((p[0] == 'k' || p[0] == 'K') && p[1] >= '0' && p[1] <= '7' && p[2] == '\0') {
-        *out = (unsigned)(p[1] - '0');
-        return 0;
-    }
-    return -1;
+    return reg_of_class(name, AS_X86_REGCLASS_MASK, 7, out);
 }
 
 static int parse_st_index(const char *s, unsigned *out) {
@@ -3747,17 +3468,9 @@ static int parse_st_index(const char *s, unsigned *out) {
 }
 
 static int is_x86_low8_reg(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    return streq_ci(name, "al") || streq_ci(name, "%al") || streq_ci(name, "bl") || streq_ci(name, "%bl") ||
-           streq_ci(name, "cl") || streq_ci(name, "%cl") || streq_ci(name, "dl") || streq_ci(name, "%dl") ||
-           streq_ci(name, "sil") || streq_ci(name, "%sil") || streq_ci(name, "dil") || streq_ci(name, "%dil") ||
-           streq_ci(name, "spl") || streq_ci(name, "%spl") || streq_ci(name, "bpl") || streq_ci(name, "%bpl") ||
-           streq_ci(name, "r8b") || streq_ci(name, "%r8b") || streq_ci(name, "r9b") || streq_ci(name, "%r9b") ||
-           streq_ci(name, "r10b") || streq_ci(name, "%r10b") || streq_ci(name, "r11b") || streq_ci(name, "%r11b") ||
-           streq_ci(name, "r12b") || streq_ci(name, "%r12b") || streq_ci(name, "r13b") || streq_ci(name, "%r13b") ||
-           streq_ci(name, "r14b") || streq_ci(name, "%r14b") || streq_ci(name, "r15b") || streq_ci(name, "%r15b");
+    const as_x86_reg_info_t *r = as_x86_reg_find_class(name, AS_X86_REGCLASS_GENERAL, 15);
+
+    return r != NULL && r->width == 8 && (r->flags & AS_X86_REGF_HIGH8) == 0;
 }
 
 static int emit_x86_64_xmm_memop(unsigned char prefix, unsigned char opcode, unsigned xr, const as_mem_operand_t *mem,

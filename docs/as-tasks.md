@@ -369,8 +369,9 @@ with a symbol table.
 - [x] **AS-T-095** The parser shall build operands and expressions from tokens and shall not scan text.
   Trace: AS-FE-051.  Verify: I — `join_tokens` and the `strchr` scans for `:`, `=`, `*` are gone from `as_parser.c`; `as_expr.c` takes tokens.  After: 094.
   Done.  `join_tokens` is gone, and with it every scan of a token's text in `as_parser.c`: the segment before a colon, the star of an indirect operand, the `$`, `x=5`, the far pointer, and the Intel operand's `reg*scale+disp` in one token, which was 250 lines of its own and is now a sum of terms read from tokens (`[4*ecx]` is read as well as `[ecx*4]`).  `as_expr.c` has no lexer: `as_expr_parse_tokens` reads a row of tokens, and `as_parse_expr_string` makes text tokens with the lexer first.  What stays text is an operand's `raw` and a directive's arguments, which are the tokens as written (`tokens_as_written`), for messages and for the consumers that take text; nothing in the parser reads them back, but the emitter and the data builder still do, and that is theirs to change (220 and after).  The two corpora assemble to the same bytes as before, line for line, and a 51,000-line compiler output to the same object in the same time.
-- [ ] **AS-T-096** The assembler shall hold the x86 register names in one table that gives each its class, width and number.
+- [x] **AS-T-096** The assembler shall hold the x86 register names in one table that gives each its class, width and number.
   Trace: AS-FE-051, AS-DES-004.  Verify: I — the tables of `as_lexer.c`, `as_parser.c` and the encoders are one.
+  Done.  `as_x86_regs.c` is the table: 330 names, each with its class (general, instruction pointer, segment, x87, MMX, XMM, YMM, ZMM, mask, control, debug, test, bound), its width and its number, and flags for `%ah` to `%bh` and for `%spl` to `%dil`.  The lists it replaces were the lexer's, three of the parser's and eleven of the emitter's (`parse_x86_reg`, `parse_x86_reg_bits`, `x86_reg_width_bits`, the five for vector, MMX and mask registers, and those for bound, system and segment registers); each of those functions is now a question asked of the table.  They had not agreed: `%xmm99` was a register to the lexer, any `%rN` to the parser.  A name is a register if it is in the table, in either case of letters -- `movl %EAX, %ebx` was refused, the lexer's list being of lower-case names.  `test_register_names.sh`, 27 cases, which GNU as passes; the corpora assemble as before.  Left: the 27 places in the emitter that ask whether an operand is one particular register (`%eax`, `%dx`, `%cl`) by comparing its name, which are not lists but are not the table either.
 - [x] **AS-T-097** When a `# N "file"` line of the C preprocessor is read, the assembler shall take N and the file as the coordinates of the lines that follow.
   Trace: AS-FE-030.  Verify: T — an error in a `.S` file with an `#include` above it names the `.S` file and the right line.  After: 090.
   Done with the marks of 090: what reads a line of the source takes `# N "file"` as it takes a mark, in any source and not a `.S` alone, as GNU does.  `test_source_positions.sh`.
@@ -1174,5 +1175,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 169 done, 182 open.  Numbers run to 400, with gaps left between
+351 tasks: 170 done, 181 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

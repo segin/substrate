@@ -9,6 +9,7 @@ It describes how the assembler is organized, how it fits into the native toolcha
 usr.bin/as/
 ├── as.c                     # CLI entry point, toolchain recursion guard, context limits
 ├── as_lexer.c               # Tokenizer for directives, identifiers, numbers, strings
+├── as_x86_regs.c            # The x86 registers: one table of name, class, width, number
 ├── as_parser.c              # Statement/directive parsing and architecture dispatch
 ├── as_symtab.c              # Symbol definition, lookup, local/numeric label support
 ├── as_sections.c            # Section creation, switching, alignment, layout state

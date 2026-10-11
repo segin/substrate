@@ -1,5 +1,7 @@
 #include "as_lexer.h"
 
+#include "as_x86_regs.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -170,75 +172,12 @@ static int is_name_part(int ch) {
     return isalnum(ch) || ch == '_' || ch == '.' || ch == '$' || ch == '@';
 }
 
+/* Whether `s`, with no percent sign, names a register: the table says
+ * (as_x86_regs.h).  %eiz and %riz are in it and are none. */
 static int is_x86_register_name(const char *s) {
-    static const char *const fixed[] = {
-        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
-        "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
-        "ax", "bx", "cx", "dx", "si", "di", "sp", "bp",
-        "al", "ah", "bl", "bh", "cl", "ch", "dl", "dh",
-        "sil", "dil", "spl", "bpl",
-        "rip", "eip", "ip",
-        "cs", "ds", "es", "fs", "gs", "ss",
-        "st", "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "mm6", "mm7",
-        "bnd0", "bnd1", "bnd2", "bnd3",
-    };
-    size_t i;
+    const as_x86_reg_info_t *r = s != NULL && s[0] != '%' ? as_x86_reg_find(s) : NULL;
 
-    if (s == NULL || s[0] == '\0') {
-        return 0;
-    }
-    for (i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
-        if (strcmp(s, fixed[i]) == 0) {
-            return 1;
-        }
-    }
-    if (s[0] == 'r' && isdigit((unsigned char)s[1])) {
-        const char *p = s + 1;
-        long n;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        if (*p == 'b' || *p == 'w' || *p == 'd') {
-            ++p;
-        }
-        if (*p == '\0') {
-            n = strtol(s + 1, NULL, 10);
-            if (n >= 8 && n <= 31) {
-                return 1;
-            }
-        }
-    }
-    if ((strncmp(s, "xmm", 3) == 0 || strncmp(s, "ymm", 3) == 0 || strncmp(s, "zmm", 3) == 0) &&
-        isdigit((unsigned char)s[3])) {
-        const char *p = s + 3;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        if (*p == '\0') {
-            return 1;
-        }
-    }
-    if (((s[0] == 'c' || s[0] == 'C' || s[0] == 'd' || s[0] == 'D' || s[0] == 't' || s[0] == 'T') &&
-         (s[1] == 'r' || s[1] == 'R') && isdigit((unsigned char)s[2])) ||
-        ((s[0] == 'd' || s[0] == 'D') && (s[1] == 'b' || s[1] == 'B') && isdigit((unsigned char)s[2]))) {
-        const char *p = s + 2;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        if (*p == '\0') {
-            return 1;
-        }
-    }
-    if (s[0] == 'k' && isdigit((unsigned char)s[1])) {
-        const char *p = s + 1;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        if (*p == '\0') {
-            return 1;
-        }
-    }
-    return 0;
+    return r != NULL && r->cls != AS_X86_REGCLASS_NO_INDEX;
 }
 
 /* as_lexer_cfg_t.arm_registers of the file being read. */

@@ -1,5 +1,7 @@
 #include "as_parser.h"
 
+#include "as_x86_regs.h"
+
 #include <ctype.h>
 #include <limits.h>
 #include <stdint.h>
@@ -296,119 +298,37 @@ static int parse_arm_registers = 1;
 static int parse_is_x86;
 
 static int is_x86_register_text(const char *s) {
-    const char *p;
+    const as_x86_reg_info_t *r;
 
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
-    if (s[0] == '%') {
-        s++;
-    } else if (!parse_bare_x86_registers) {
+    if (s[0] != '%' && !parse_bare_x86_registers) {
         return 0;
     }
-    if (strncmp(s, "xmm", 3) == 0 || strncmp(s, "ymm", 3) == 0 || strncmp(s, "zmm", 3) == 0) {
-        if (!isdigit((unsigned char)s[3])) {
-            return 0;
-        }
-        p = s + 3;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        return *p == '\0';
-    }
-    if (strncmp(s, "mm", 2) == 0) {
-        if (!isdigit((unsigned char)s[2])) {
-            return 0;
-        }
-        p = s + 2;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        return *p == '\0';
-    }
-    if (s[0] == 'k' && isdigit((unsigned char)s[1])) {
-        p = s + 1;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        return *p == '\0';
-    }
-    if (strncasecmp(s, "bnd", 3) == 0 && isdigit((unsigned char)s[3])) {
-        p = s + 3;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        return *p == '\0';
-    }
-    if (((s[0] == 'c' || s[0] == 'C' || s[0] == 'd' || s[0] == 'D' || s[0] == 't' || s[0] == 'T') &&
-         (s[1] == 'r' || s[1] == 'R') && isdigit((unsigned char)s[2])) ||
-        ((s[0] == 'd' || s[0] == 'D') && (s[1] == 'b' || s[1] == 'B') && isdigit((unsigned char)s[2]))) {
-        p = s + 2;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        return *p == '\0';
-    }
-    if (s[0] == 'r' && isdigit((unsigned char)s[1])) {
-        p = s + 1;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        if (*p == 'b' || *p == 'w' || *p == 'd') {
-            ++p;
-        }
-        return *p == '\0';
-    }
-    if (streq_ci(s, "rax") || streq_ci(s, "rbx") || streq_ci(s, "rcx") || streq_ci(s, "rdx") ||
-        streq_ci(s, "rsi") || streq_ci(s, "rdi") || streq_ci(s, "rsp") || streq_ci(s, "rbp") ||
-        streq_ci(s, "eax") || streq_ci(s, "ebx") || streq_ci(s, "ecx") || streq_ci(s, "edx") ||
-        streq_ci(s, "esi") || streq_ci(s, "edi") || streq_ci(s, "esp") || streq_ci(s, "ebp") ||
-        streq_ci(s, "ax") || streq_ci(s, "bx") || streq_ci(s, "cx") || streq_ci(s, "dx") ||
-        streq_ci(s, "si") || streq_ci(s, "di") || streq_ci(s, "sp") || streq_ci(s, "bp") ||
-        streq_ci(s, "al") || streq_ci(s, "ah") || streq_ci(s, "bl") || streq_ci(s, "bh") ||
-        streq_ci(s, "cl") || streq_ci(s, "ch") || streq_ci(s, "dl") || streq_ci(s, "dh") ||
-        streq_ci(s, "sil") || streq_ci(s, "dil") || streq_ci(s, "spl") || streq_ci(s, "bpl") ||
-        streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
-        streq_ci(s, "ss") || streq_ci(s, "rip") || streq_ci(s, "eip")) {
-        return 1;
-    }
-    return 0;
+    /* What the table has (as_x86_regs.h), but for what is not an
+     * operand by itself: the x87 stack's top, which is read with its
+     * index, the 16-bit instruction pointer, and the index that is
+     * none. */
+    r = as_x86_reg_find(s);
+    return r != NULL && r->cls != AS_X86_REGCLASS_X87 && r->cls != AS_X86_REGCLASS_NO_INDEX &&
+           !(r->cls == AS_X86_REGCLASS_IP && r->width == 16);
 }
 
 static int is_x86_segment_text(const char *s) {
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
-    if (s[0] == '%') {
-        s++;
-    }
-    return streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
-           streq_ci(s, "ss");
+    return as_x86_reg_find_class(s, AS_X86_REGCLASS_SEGMENT, 5) != NULL;
 }
 
 static int parse_k_mask_text(const char *s, unsigned *out) {
-    const char *p;
-    unsigned value = 0;
+    const as_x86_reg_info_t *r = as_x86_reg_find_class(s, AS_X86_REGCLASS_MASK, 7);
 
-    if (s == NULL || out == NULL) {
+    if (r == NULL || out == NULL) {
         return -1;
     }
-    p = s;
-    if (*p == '%') {
-        p++;
-    }
-    if ((*p != 'k' && *p != 'K') || !isdigit((unsigned char)p[1])) {
-        return -1;
-    }
-    p++;
-    while (isdigit((unsigned char)*p)) {
-        value = value * 10u + (unsigned)(*p - '0');
-        p++;
-    }
-    if (*p != '\0' || value > 7u) {
-        return -1;
-    }
-    *out = value;
+    *out = r->number;
     return 0;
 }
 
