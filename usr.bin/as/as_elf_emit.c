@@ -18408,9 +18408,27 @@ static int x86_imm_field_width(const unsigned char *code, size_t len, int is_64,
  * addresses through 16-bit registers: a 67 prefix, and then ModRM by
  * the 16-bit table, which has no SIB byte.  0 and its place, or -1.
  */
-static int x86_disp16_offset(const unsigned char *code, size_t len, size_t *off_out) {
+/* How many of an instruction's first bytes are prefixes, a REX among
+ * them in 64-bit code: what its opcode is behind. */
+static size_t x86_prefix_count(const unsigned char *code, size_t len, int is_64) {
     size_t i = 0;
-    int addr16 = 0;
+
+    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3 ||
+                       code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e || code[i] == 0x26 || code[i] == 0x64 ||
+                       code[i] == 0x65)) {
+        i++;
+    }
+    if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
+        i++;
+    }
+    return i;
+}
+
+static int x86_disp16_offset(const unsigned char *code, size_t len, int code16, size_t *off_out) {
+    size_t i = 0;
+    /* Of 16 bits in 16-bit code, and in 32-bit code behind the prefix;
+     * the prefix in 16-bit code makes it of 32. */
+    int addr16 = code16;
     unsigned mod;
     unsigned rm;
 
@@ -18422,7 +18440,7 @@ static int x86_disp16_offset(const unsigned char *code, size_t len, size_t *off_
                        code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
                        code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
         if (code[i] == 0x67) {
-            addr16 = 1;
+            addr16 = !code16;
         }
         i++;
     }
@@ -19704,17 +19722,29 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * in 64-bit code a displacement is four bytes sign-
                  * extended whatever the operation's size.
                  */
-                if ((op->kind == AS_OPERAND_MEMORY ||
+                if (machine == EM_386 && track.x86_code_bits == 16u &&
+                    (op->kind == AS_OPERAND_MEMORY ||
                      (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
-                    reloc_width != 1 && reloc_width != 2 &&
-                    x86_disp32_offset(code, code_len, machine == EM_X86_64, &disp_field_off) == 0) {
+                    x86_disp16_offset(code, code_len, 1, &disp_field_off) == 0) {
+                    /* In 16-bit code an address is of 16 bits: `movw
+                     * sym, %bx` is two bytes of it and R_386_16.  Taken
+                     * for one of 32, it had four bytes of relocation
+                     * and no room for them, and the instruction was
+                     * zeros from its first byte. */
+                    reloc_width = 2;
+                    t = R_386_16;
+                    have_disp_field = 1;
+                } else if ((op->kind == AS_OPERAND_MEMORY ||
+                            (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
+                           reloc_width != 1 && reloc_width != 2 &&
+                           x86_disp32_offset(code, code_len, machine == EM_X86_64, &disp_field_off) == 0) {
                     have_disp_field = 1;
                     reloc_width = 4;
                     if (machine == EM_X86_64 && t == R_X86_64_64) {
                         t = R_X86_64_32S;
                     }
                 } else if (machine == EM_386 && op->kind == AS_OPERAND_MEMORY &&
-                           x86_disp16_offset(code, code_len, &disp_field_off) == 0) {
+                           x86_disp16_offset(code, code_len, track.x86_code_bits == 16u, &disp_field_off) == 0) {
                     /* `movl sym(%bx), %ecx`: two bytes, and their own
                      * relocation.  Four were written over the end of the
                      * instruction, the opcode among them. */
@@ -19755,13 +19785,21 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     x86_64_disp_reloc_is_unsigned(code, code_len, st->u.instr.mnemonic)) {
                     t = R_X86_64_32;
                 }
-                if (code_len < reloc_width) {
-                    /* cc-emitted dead-code from skipped __always_inline
-                     * helpers can produce a byte-immediate instruction
-                     * referencing a 4-byte symbol relocation. The body
-                     * is unreachable but as still has to lay it out.
-                     * Clamp the relocation to the encoded slot. */
-                    reloc_width = code_len;
+                /*
+                 * A field is behind an opcode: one that is as long as
+                 * its instruction, or longer, is not a field of it.
+                 * Such a relocation was cut to the instruction's length
+                 * and written from its first byte -- `callw sym` was
+                 * four zeros, the prefix and the opcode gone -- and is
+                 * refused, on its line.
+                 */
+                if (!have_disp_field && code_len <= reloc_width + x86_prefix_count(code, code_len, machine == EM_X86_64)) {
+                    set_err(ctx, "%s:%u: '%s': the instruction has no field of %u bytes for the symbol",
+                            st->file != NULL ? st->file : "<input>", st->line,
+                            st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "", (unsigned)reloc_width);
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
                 }
                 if (t == R_386_PC8 || t == R_X86_64_PC8) {
                     addend += -1;
