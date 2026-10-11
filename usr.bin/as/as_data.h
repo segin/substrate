@@ -76,6 +76,12 @@ void as_data_program_free(as_data_program_t *p);
 
 int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out);
 
+/*
+ * The LEB128 encoding of a 64-bit value, signed or not, into out (at
+ * least 10 bytes).  The number of bytes written.
+ */
+size_t as_leb128_encode(long long value, int is_signed, unsigned char *out);
+
 int as_data_build(const as_parse_result_t *parsed, as_data_program_t *out,
                   char *errbuf, size_t errbuf_sz);
 

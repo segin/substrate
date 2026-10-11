@@ -14,6 +14,7 @@
 #include "as_x86_ssse3.h"
 #include "as_x86_sse41.h"
 #include "as_x86_sse42.h"
+#include "as_data.h"
 
 #include "elfobj.h"
 
@@ -60,6 +61,14 @@ typedef struct {
     long long value;
 } asm_var_t;
 
+/* The longest LEB128 of 64 bits. */
+#define LEB128_MAX_BYTES 10
+
+struct leb_stmt {
+    const as_stmt_t *st;
+    unsigned char *arg_bytes; /* for each argument, the bytes it takes */
+};
+
 typedef struct {
     char *name;
     char *reg;
@@ -86,6 +95,11 @@ typedef struct {
     size_t asm_reg_alias_count;
     size_t asm_reg_alias_cap;
     int virtual_scanning;
+    /* The .uleb128 and .sleb128 statements whose arguments are distances
+     * between labels, in the order of the source, and the bytes each
+     * argument takes.  See settle_leb128_sizes(). */
+    struct leb_stmt *leb;
+    size_t leb_count;
     /* Per-statement size cache for the conservative virtual-size path.
      * Linux's syscall_32.s drove ~13k stmts × thousands of branch range
      * queries, each redoing the full encode_x86_stmt for every entry —
@@ -613,6 +627,27 @@ static int align_exceeds_max_skip(const as_directive_t *d, size_t need) {
         return -1;
     }
     return (unsigned long long)need > (unsigned long long)max_skip ? 1 : 0;
+}
+
+/*
+ * The padding of an alignment: `need` bytes of `fill`.  .balignw and
+ * .balignl, and the two of .p2align, pad with a pattern of two bytes or
+ * four where one is written, and then the padding must be a whole number
+ * of patterns: GNU as refuses "alignment padding (7 bytes) not a multiple
+ * of 2", and so does this (-2).  -1 for no memory.
+ */
+static int append_align_fill(bytebuf_t *buf, const as_directive_t *d, size_t need, uint64_t fill) {
+    size_t width = d->fill_width > 1 && directive_has_arg(d, 1) ? d->fill_width : 1;
+
+    if (need % width != 0) {
+        return -2;
+    }
+    for (; need > 0; need -= width) {
+        if (bytebuf_append_u64_le(buf, fill, width) != 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 /*
@@ -8593,10 +8628,8 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
         case 0: break;
         default: return -1;
         }
-        while (need-- > 0) {
-            if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
-                return -1;
-            }
+        if (append_align_fill(buf, d, need, (uint64_t)fill) != 0) {
+            return -1;
         }
         return 1;
     }
@@ -11780,7 +11813,9 @@ static int find_stmt_virtual_location(emit_ctx_t *ctx, const as_stmt_t *target_s
                 return -1;
             }
         }
-        if (st == target_st && st->label_count > 0 && !found) {
+        /* A statement without a label has a place too: a .uleb128 asks
+         * for its own, to take `.` from. */
+        if (st == target_st && !found) {
             snprintf(section_out, section_out_sz, "%s", track.current != NULL ? track.current : "");
             *off_out = (uint64_t)sb->buf.len;
             found = 1;
@@ -13291,6 +13326,110 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
     return bytebuf_append(buf, code, code_len);
 }
 
+/*
+ * .uleb128 and .sleb128 of the distance between two labels.
+ *
+ * (Of numbers they are .byte by now: as_directives_lower.)  How many
+ * bytes one takes depends on a distance, and the distance on how many
+ * bytes this and its like take, if any lies between the labels -- as in
+ * a compiler's exception table, whose length is such a number and whose
+ * entries are too.  So the sizes are settled before anything is laid
+ * out for good: settle_leb128_sizes() starts each at one byte and grows
+ * it until none wants more.  Wherever the layout is being worked out the
+ * directive is that many bytes and nothing is evaluated; where the bytes
+ * are written for the object, the value is, and is padded to the size.
+ */
+static struct leb_stmt *find_leb_stmt(emit_ctx_t *ctx, const as_stmt_t *st) {
+    size_t lo = 0;
+    size_t hi = ctx != NULL ? ctx->leb_count : 0;
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (ctx->leb[mid].st == st) {
+            return &ctx->leb[mid];
+        }
+        if (ctx->leb[mid].st < st) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return NULL;
+}
+
+static int eval_leb128_arg(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st, uint64_t sec_off,
+                           unsigned x86_code_bits, const char *arg, long long *out) {
+    as_expr_t *expr;
+    int rc;
+
+    if (parse_int64(arg, out) == 0 || parse_const_expr_string(arg, out) == 0) {
+        return 0;
+    }
+    expr = as_parse_expr_string(arg, st != NULL ? st->file : NULL, st != NULL ? st->line : 0);
+    if (expr == NULL) {
+        return -1;
+    }
+    /* Two labels of another section, or of this one. */
+    rc = eval_abs_local_diff_expr_virtual(ctx, st, expr, out);
+    if (rc != 0) {
+        rc = eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, expr, out);
+    }
+    as_expr_free(expr);
+    return rc;
+}
+
+static int append_leb128_directive(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name, const as_stmt_t *st,
+                                   uint64_t sec_off, unsigned x86_code_bits, const as_directive_t *d) {
+    struct leb_stmt *leb = find_leb_stmt(ctx, st);
+    int is_signed = d->name[1] == 's';
+    uint64_t done = 0;
+    size_t i;
+
+    if (ctx == NULL || d->arg_count == 0) {
+        return -1;
+    }
+    for (i = 0; i < d->arg_count; ++i) {
+        unsigned char bytes[LEB128_MAX_BYTES];
+        size_t want = leb != NULL ? leb->arg_bytes[i] : 1;
+        size_t n;
+        long long v = 0;
+
+        if (ctx->virtual_scanning) {
+            if (bytebuf_append_zeros(buf, want) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        /* `.` is where this argument's bytes begin. */
+        if (d->args[i] == NULL ||
+            eval_leb128_arg(ctx, section_name, st, sec_off + done, x86_code_bits, d->args[i], &v) != 0) {
+            set_err(ctx, "%s:%u: %s: '%s' is neither a number nor the distance between two labels",
+                    st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0, d->name,
+                    d->args[i] != NULL ? d->args[i] : "");
+            return -1;
+        }
+        n = as_leb128_encode(v, is_signed, bytes);
+        if (n > want) {
+            set_err(ctx, "%s:%u: %s: the size of '%s' did not settle",
+                    st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0, d->name,
+                    d->args[i]);
+            return -1;
+        }
+        /* Padded: every byte but the last says that more follow, and
+         * those added carry the sign and nothing else. */
+        for (; n < want; ++n) {
+            bytes[n - 1] |= 0x80;
+            bytes[n] = is_signed && v < 0 ? 0x7f : 0x00;
+        }
+        if (bytebuf_append(buf, bytes, n) != 0) {
+            return -1;
+        }
+        done += n;
+    }
+    return 1;
+}
+
 static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name,
                                      const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
                                      const as_directive_t *d) {
@@ -13303,6 +13442,9 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
     (void)x86_code_bits;
     if (d == NULL || d->name == NULL) {
         return 0;
+    }
+    if (strcmp(d->name, ".uleb128") == 0 || strcmp(d->name, ".sleb128") == 0) {
+        return append_leb128_directive(ctx, buf, section_name, st, sec_off, x86_code_bits, d);
     }
     if (ctx != NULL && ctx->virtual_scanning &&
         (strcmp(d->name, ".skip") == 0 || strcmp(d->name, ".space") == 0)) {
@@ -13387,10 +13529,11 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         case 0: break;
         default: return -1;
         }
-        while (need-- > 0) {
-            if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
-                return -1;
-            }
+        if (append_align_fill(buf, d, need, (uint64_t)fill) != 0) {
+            set_err(ctx, "%s:%u: alignment padding (%lu bytes) is not a multiple of %u",
+                    st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0,
+                    (unsigned long)need, d->fill_width);
+            return -1;
         }
         return 1;
     }
@@ -15593,11 +15736,16 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
                     st->file != NULL ? st->file : "<input>", st->line, d->name);
             return -1;
         }
-        while (need-- > 0) {
-            if (bytebuf_append_u64_le(&sec->buf, fill, 1) != 0) {
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
+        switch (append_align_fill(&sec->buf, d, need, fill)) {
+        case 0:
+            break;
+        case -2:
+            set_err(ctx, "%s:%u: alignment padding (%lu bytes) is not a multiple of %u",
+                    st->file != NULL ? st->file : "<input>", st->line, (unsigned long)need, d->fill_width);
+            return -1;
+        default:
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
         }
         sec->touched = 1;
         return 0;
@@ -16986,6 +17134,121 @@ static int emit_relocations(emit_ctx_t *ctx) {
     return 0;
 }
 
+static void free_leb128_sizes(emit_ctx_t *ctx) {
+    size_t i;
+
+    for (i = 0; i < ctx->leb_count; ++i) {
+        free(ctx->leb[i].arg_bytes);
+    }
+    free(ctx->leb);
+    ctx->leb = NULL;
+    ctx->leb_count = 0;
+}
+
+/*
+ * Give each .uleb128 and .sleb128 that is left the bytes its arguments
+ * take: one each to begin with, and more wherever a value does not fit,
+ * until none grows.  A size only grows, so it ends.  What had been
+ * worked out of the layout stood on the sizes before, and is forgotten
+ * each time one changes.
+ */
+static int settle_leb128_sizes(emit_ctx_t *ctx) {
+    size_t count = 0;
+    size_t i;
+    int pass;
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL && st->u.directive.arg_count != 0 &&
+            (strcmp(st->u.directive.name, ".uleb128") == 0 || strcmp(st->u.directive.name, ".sleb128") == 0)) {
+            count++;
+        }
+    }
+    if (count == 0) {
+        return 0;
+    }
+    ctx->leb = (struct leb_stmt *)calloc(count, sizeof(*ctx->leb));
+    if (ctx->leb == NULL) {
+        return -1;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL && st->u.directive.arg_count != 0 &&
+            (strcmp(st->u.directive.name, ".uleb128") == 0 || strcmp(st->u.directive.name, ".sleb128") == 0)) {
+            struct leb_stmt *leb = &ctx->leb[ctx->leb_count];
+
+            leb->arg_bytes = (unsigned char *)malloc(st->u.directive.arg_count);
+            if (leb->arg_bytes == NULL) {
+                return -1;
+            }
+            memset(leb->arg_bytes, 1, st->u.directive.arg_count);
+            leb->st = st;
+            ctx->leb_count++;
+        }
+    }
+    for (pass = 0; pass < LEB128_MAX_BYTES * 8; ++pass) {
+        int grew = 0;
+
+        for (i = 0; i < ctx->leb_count; ++i) {
+            struct leb_stmt *leb = &ctx->leb[i];
+            const as_directive_t *d = &leb->st->u.directive;
+            unsigned bits = ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 32u;
+            char section[128];
+            uint64_t off = 0;
+            int placed = 0;
+            uint64_t done = 0;
+            size_t j;
+
+            for (j = 0; j < d->arg_count; done += leb->arg_bytes[j], ++j) {
+                unsigned char bytes[LEB128_MAX_BYTES];
+                long long v = 0;
+                size_t n;
+
+                if (d->args[j] == NULL) {
+                    continue;
+                }
+                if (eval_leb128_arg(ctx, NULL, leb->st, 0, bits, d->args[j], &v) != 0) {
+                    /* Not two labels: something of `.`, which wants the
+                     * place of the directive.  One that cannot be worked
+                     * out at all is said so where the bytes are written. */
+                    if (!placed) {
+                        section[0] = '\0';
+                        (void)find_stmt_virtual_location(ctx, leb->st, section, sizeof(section), &off);
+                        placed = 1;
+                    }
+                    if (section[0] == '\0' ||
+                        eval_leb128_arg(ctx, section, leb->st, off + done, bits, d->args[j], &v) != 0) {
+                        continue;
+                    }
+                }
+                n = as_leb128_encode(v, d->name[1] == 's', bytes);
+                if (n > leb->arg_bytes[j]) {
+                    leb->arg_bytes[j] = (unsigned char)n;
+                    grew = 1;
+                }
+            }
+        }
+        if (!grew) {
+            break;
+        }
+        virtual_label_cache_free(ctx);
+        if (ctx->stmt_size_cached != NULL) {
+            memset(ctx->stmt_size_cached, 0, ctx->stmt_size_cache_count);
+        }
+        if (ctx->branch_short != NULL) {
+            memset(ctx->branch_short, 0, ctx->branch_short_count);
+        }
+        for (i = 0; i < ctx->section_prefix_count; ++i) {
+            free(ctx->section_prefixes[i].name);
+            free(ctx->section_prefixes[i].prefix);
+        }
+        ctx->section_prefix_count = 0;
+    }
+    return 0;
+}
+
 int as_elf_emit_file(const as_parse_result_t *parsed,
                      const as_section_state_t *sections,
                      const as_symtab_t *symtab,
@@ -17072,6 +17335,10 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         }
     }
 
+    if (settle_leb128_sizes(&ctx) != 0) {
+        snprintf(errbuf, errbuf_sz, "out of memory");
+        goto fail;
+    }
     if (emit_text_program(&ctx) != 0) {
         if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
             set_err(&ctx, "failed to emit text instructions");
@@ -17143,6 +17410,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);
+    free_leb128_sizes(&ctx);
     {
         size_t _i;
         for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
@@ -17169,6 +17437,7 @@ fail:
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);
+    free_leb128_sizes(&ctx);
     {
         size_t _i;
         for (_i = 0; _i < ctx.section_prefix_count; ++_i) {

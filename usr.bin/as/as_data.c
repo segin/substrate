@@ -44,6 +44,39 @@ static char *xstrdup(const char *s) {
     return p;
 }
 
+size_t as_leb128_encode(long long value, int is_signed, unsigned char *out) {
+    size_t n = 0;
+
+    if (is_signed) {
+        int more = 1;
+
+        while (more) {
+            unsigned char b = (unsigned char)(value & 0x7f);
+
+            value >>= 7;
+            if ((value == 0 && (b & 0x40) == 0) || (value == -1 && (b & 0x40) != 0)) {
+                more = 0;
+            } else {
+                b |= 0x80;
+            }
+            out[n++] = b;
+        }
+    } else {
+        unsigned long long u = (unsigned long long)value;
+
+        do {
+            unsigned char b = (unsigned char)(u & 0x7f);
+
+            u >>= 7;
+            if (u != 0) {
+                b |= 0x80;
+            }
+            out[n++] = b;
+        } while (u != 0);
+    }
+    return n;
+}
+
 int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out) {
     size_t i;
     size_t j;

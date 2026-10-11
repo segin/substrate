@@ -287,26 +287,36 @@ status 0.
 - [x] **AS-T-067** When `.int`, `.value`, `.2byte`, `.4byte` or `.8byte` is written, the assembler shall emit its arguments at 4, 2, 2, 4 and 8 bytes.
   Trace: AS-OBJ-008.  Verify: T — `.byte 0xEE` / `.int 5` / `.byte 0xFF` is `ee 05 00 00 00 ff`; each of the five.
   Done: `.int` and `.value` put nothing in the section -- a directive nothing knows is passed over in silence (074) -- and what followed was at the wrong address; they are `.long` and `.short` from the parser on.  The other three were right.  `test_data_empty_and_names.sh`.  Seen with it, each still passed over in silence and each its own task below: `.dc.*`, `.ds.*`, `.dcb.*` (068), `.octa` (069), `.uleb128` and `.sleb128` (070), `.single`, `.tfloat`, `.string16` (071), the `w` and `l` alignments (072), `.struct` (073), `.error`, `.err` and `.abort` (075, 076).  And `.int sym` in 64-bit code is refused, as `.long sym` is there (210).
-- [ ] **AS-T-068** When `.dc.b`, `.dc.w`, `.dc.l`, `.dc.q`, `.dc.a`, `.ds.*` or `.dcb.*` is written, the assembler shall emit what GNU `as` emits.
+- [x] **AS-T-068** When `.dc.b`, `.dc.w`, `.dc.l`, `.dc.q`, `.dc.a`, `.ds.*` or `.dcb.*` is written, the assembler shall emit what GNU `as` emits.
   Trace: AS-OBJ-008.  Verify: T — each.
-- [ ] **AS-T-069** When `.octa` is written, the assembler shall emit 16 bytes for each argument.
+  Done, with 069–073, in a pass between the parser and the rest (`as_lower.c`): each is rewritten into a directive the assembler already stores -- `.byte`, `.short`, `.long`, `.quad`, `.float`, `.double`, `.fill` -- so that the three places that store data need know nothing new.  `.dc`, `.dc.b/.w/.l/.a/.s/.d/.x`; `.ds` and its seven; `.dcb` and its six.  GNU as 2.46 has no `.dc.q` and no `.dcb.q`, and they are refused here as there.  `test_data_directives.sh`, 208 cases, the bytes GNU's.
+- [x] **AS-T-069** When `.octa` is written, the assembler shall emit 16 bytes for each argument.
   Trace: AS-OBJ-008.  Verify: T — a value below and above 2^64.
-- [ ] **AS-T-070** When `.uleb128` or `.sleb128` is written, the assembler shall emit the LEB128 encoding of each argument.
+  Done: a number of up to 128 bits, decimal, hexadecimal, binary or octal, negative or not; an expression of numbers is its 64 bits sign-extended.  More than 128 bits are cut off as GNU cuts them, without GNU's warning of it.
+- [x] **AS-T-070** When `.uleb128` or `.sleb128` is written, the assembler shall emit the LEB128 encoding of each argument.
   Trace: AS-OBJ-008.  Verify: T — 0, 127, 128, -1, -129, 2^63, and a difference of two labels in one section.
-- [ ] **AS-T-071** When `.single`, `.tfloat` or `.string16` is written, the assembler shall emit what GNU `as` emits.
+  Done.  Of numbers, up to 128 bits, they are `.byte` after the pass above.  Of the distance between two labels -- of the directive's section or another, which is a compiler's exception table -- the size depends on the distance and the distance on the sizes of any that lie between the labels, so the sizes are settled before anything is laid out for good: each starts at one byte and grows until none wants more, what had been worked out of the layout being forgotten each time one grows.  While the layout is worked out the directive is that many bytes and nothing is evaluated; where the bytes are written the value is, padded to the size.  A table whose length spans entries of two bytes each is GNU's, byte for byte.  `.` is where the argument's own bytes begin.
+- [x] **AS-T-071** When `.single`, `.tfloat` or `.string16` is written, the assembler shall emit what GNU `as` emits.
   Trace: AS-OBJ-008.  Verify: T — each.
-- [ ] **AS-T-072** When `.balignw`, `.balignl`, `.p2alignw` or `.p2alignl` is written, the assembler shall pad with the 2- or 4-byte fill pattern.
+  Done.  `.single` is `.float`; `.string8`, `16`, `32` and `64` are their characters and a zero at that width.  `.tfloat` is the x87 format of ten bytes: the decimal is worked out exactly as an integer times a power of two and rounded once, to nearest and to even, there being no `strtold` in the system's C library to lean on; `0.1`, `1e4932`, `1e-4940` and a number of thirty digits are GNU's bytes.  It does not take `inf`, `nan` or a hexadecimal number.
+- [x] **AS-T-072** When `.balignw`, `.balignl`, `.p2alignw` or `.p2alignl` is written, the assembler shall pad with the 2- or 4-byte fill pattern.
   Trace: AS-OBJ-008, AS-SEC-006.  Verify: T — each, with and without a fill and a maximum.
-- [ ] **AS-T-073** When `.struct` is written, the assembler shall define the labels that follow as absolute offsets.
+  Done: they are `.balign` and `.p2align` carrying the width of their pattern, so the section's alignment and the layout are found as for those.  Padding that is not a whole number of patterns is refused, as GNU refuses it; without a pattern it is what the plain directive pads with.
+- [x] **AS-T-073** When `.struct` is written, the assembler shall define the labels that follow as absolute offsets.
   Trace: AS-OBJ-008.  Verify: T — the offsets idiom (`.struct 0` / `a: .struct a+4` / `b:`).
-- [ ] **AS-T-074** If a directive is not one the assembler implements, then the assembler shall fail and name the directive and its line.
+  Done in the same pass: each label becomes a `.set` of its offset, so it is an absolute symbol (and global if `.globl` says so), and the directives that reserve room -- the scalars, `.skip`, `.space`, `.zero`, `.fill`, `.org`, the alignments -- move the offset on and are taken out.  The next directive that names a section ends it, and `.previous` and `.popsection` come back as from any section.  A value other than zero, and a string, are refused as GNU refuses them.  An instruction is refused, where GNU takes it and assembles nothing.
+- [x] **AS-T-074** If a directive is not one the assembler implements, then the assembler shall fail and name the directive and its line.
   Trace: AS-OBJ-008, AS-FE-010.  Verify: T — `.foobar 1,2`: exit 1; no directive name returns success from a default branch (I — the two default returns of AS-OBJ-008).  After: 067–073.
-- [ ] **AS-T-075** When `.error` or `.err` is assembled, the assembler shall print the message and fail.
+  Done at one place, before any of the layers that each pass over what they do not know: a directive is one of a list -- those some layer acts on, and twenty that GNU takes and that say nothing of the bytes (`.extern`, `.arch`, the listing controls, `.stabs`, `.addrsig` …) -- or it is an error, with its name and line, and every such is reported.  The default returns are left as they are, since each layer is rightly silent about the other layers' directives; none is reached with a name off the list.  `.code16gcc` is off it and is now refused where it was ignored and its code assembled for the wrong mode (348).  `test_message_directives.sh`.
+- [x] **AS-T-075** When `.error` or `.err` is assembled, the assembler shall print the message and fail.
   Trace: AS-FE-010.  Verify: T — `.error "boom"`: "boom" on standard error, exit 1; inside a false conditional, nothing.
-- [ ] **AS-T-076** When `.abort` is assembled, the assembler shall stop and fail.
+  Done, with 076 and 077, after the conditionals are resolved: each is reported with its line, the rest of the source is still read for more, and no object is written.  `.fail` likewise: an error below 500, a warning from there.  `test_message_directives.sh`, 24 cases, which GNU as passes.
+- [x] **AS-T-076** When `.abort` is assembled, the assembler shall stop and fail.
   Trace: AS-FE-010.  Verify: T.
-- [ ] **AS-T-077** When `.warning` is assembled, the assembler shall print the message and continue.
+  Done: it ends the assembly where it stands; what follows it is not read for errors.
+- [x] **AS-T-077** When `.warning` is assembled, the assembler shall print the message and continue.
   Trace: AS-FE-010.  Verify: T.
+  Done: a warning like the others, counted by `--fatal-warnings` and silenced by `--no-warn`.  `.print` writes its line to standard output.
 
 ### B.7 Code that vanishes
 
@@ -1098,5 +1108,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 102 done, 248 open.  Numbers run to 399, with gaps left between
+350 tasks: 112 done, 238 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

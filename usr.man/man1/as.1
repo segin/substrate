@@ -203,10 +203,43 @@ toolchain flows, including:
 .Bl -tag -width ".cfi_startproc/.cfi_endproc"
 .It Data
 .Cm .byte , .short/.hword , .long/.int , .quad/.8byte , .float , .double ,
-.Cm .ascii , .asciz/.string , .zero/.space , .fill , .skip , .org , .incbin
+.Cm .ascii , .asciz/.string , .zero/.space , .fill , .skip , .org , .incbin ,
+.Cm .value , .2byte , .4byte , .single , .tfloat , .octa ,
+.Cm .uleb128 , .sleb128 , .string8/.string16/.string32/.string64 ,
+.Cm .dc , .dc.b/.w/.l/.a/.s/.d/.x , .ds , .ds.b/.w/.l/.s/.d/.x/.p ,
+.Cm .dcb , .dcb.b/.w/.l/.s/.d/.x .
+An argument of
+.Cm .uleb128
+or
+.Cm .sleb128
+may be the distance between two labels.
 .It Sections and layout
 .Cm .text , .data , .bss , .rodata , .section , .pushsection , .popsection ,
-.Cm .previous , .subsection , .group , .align/.balign/.p2align
+.Cm .previous , .subsection , .group , .align/.balign/.p2align ,
+.Cm .balignw/.balignl , .p2alignw/.p2alignl , .struct .
+A subsection number, given by
+.Cm .subsection ,
+.Cm .text Ar n ,
+.Cm .data Ar n
+or as the second argument of
+.Cm .pushsection ,
+places what follows in that numbered part of the section; the parts
+are assembled in ascending order of number.
+.Cm .struct
+lays what follows out from an offset and assembles it into nothing: its
+labels are absolute symbols.
+.It Messages
+.Cm .error , .err
+and
+.Cm .abort
+fail the assembly;
+.Cm .warning
+warns;
+.Cm .print
+writes a line to standard output;
+.Cm .fail
+is an error below 500 and a warning from there.
+A directive that is not known is an error.
 .It Symbols
 .Cm .globl/.global , .local , .weak , .comm , .lcomm , .type , .size ,
 .Cm .hidden , .protected , .internal , .symver

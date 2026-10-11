@@ -2,6 +2,7 @@
 #include "as_elf_emit.h"
 #include "as_lexer.h"
 #include "as_parser.h"
+#include "as_lower.h"
 #include "as_sections.h"
 #include "as_symtab.h"
 #include "elfobj.h"
@@ -207,6 +208,169 @@ static int directive_is_explicitly_unsupported(const char *name) {
            strcmp(name, ".else") == 0 || strcmp(name, ".elseif") == 0 || strcmp(name, ".endif") == 0 ||
            strcmp(name, ".macro") == 0 || strcmp(name, ".endm") == 0 || strcmp(name, ".rept") == 0 ||
            strcmp(name, ".endr") == 0 || strcmp(name, ".irp") == 0 || strcmp(name, ".irpc") == 0;
+}
+
+/*
+ * Whether a directive is one some part of the assembler acts on, by the
+ * time the conditionals, the macros and the directives that are other
+ * directives rewritten are gone.  One that is not was passed over in
+ * silence: whatever it was to store or to change was not, and the object
+ * was written as if the line had not been there.
+ */
+static int directive_is_known(const char *name) {
+    static const char *const known[] = {
+        /* data */
+        ".byte", ".short", ".word", ".hword", ".2byte", ".long", ".int", ".4byte", ".quad", ".8byte",
+        ".ascii", ".asciz", ".string", ".float", ".double", ".fill", ".skip", ".space", ".zero", ".org",
+        ".incbin", ".align", ".balign", ".p2align", ".uleb128", ".sleb128",
+        /* sections */
+        ".text", ".data", ".bss", ".rodata", ".section", ".pushsection", ".popsection", ".previous",
+        ".subsection", ".group",
+        /* symbols */
+        ".globl", ".global", ".local", ".weak", ".hidden", ".internal", ".protected", ".type", ".size",
+        ".comm", ".lcomm", ".symver", ".set", ".equ", ".equiv",
+        /* modes */
+        ".code16", ".code32", ".code64", ".intel_syntax", ".att_syntax",
+        /* debugging */
+        ".file", ".loc", ".ident",
+        /*
+         * And those GNU as takes that say nothing of the bytes: a
+         * declaration it ignores too, the instruction sets to allow,
+         * listings, and debugging formats that are not written.
+         */
+        ".extern", ".arch", ".loc_mark_labels", ".line", ".ln", ".eject", ".list", ".nolist", ".title",
+        ".sbttl", ".psize", ".stabs", ".stabn", ".stabd", ".version", ".gnu_attribute", ".addrsig",
+        ".addrsig_sym", ".sse_check", ".operand_check",
+    };
+    size_t i;
+
+    if (name == NULL) {
+        return 0;
+    }
+    if (strncmp(name, ".cfi_", 5) == 0) {
+        return 1;
+    }
+    for (i = 0; i < sizeof(known) / sizeof(known[0]); ++i) {
+        if (strcmp(name, known[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The text of a directive that says something: its one argument, a
+ * string, or `fallback` if it has none. */
+static char *message_text(const as_directive_t *d, const char *fallback) {
+    char *bytes = NULL;
+    size_t len = 0;
+    char *text;
+
+    if (d->arg_count < 1 || d->args[0] == NULL || d->args[0][0] == '\0' ||
+        as_decode_string_literal(d->args[0], &bytes, &len) != 0) {
+        len = strlen(fallback);
+        text = (char *)malloc(len + 1);
+        if (text != NULL) {
+            memcpy(text, fallback, len + 1);
+        }
+        return text;
+    }
+    text = (char *)malloc(len + 1);
+    if (text != NULL) {
+        memcpy(text, bytes, len);
+        text[len] = '\0';
+    }
+    free(bytes);
+    return text;
+}
+
+/*
+ * The directives that say something to whoever is assembling, and those
+ * that are not directives at all.
+ *
+ * .error and .err are errors, each reported and the assembly failed when
+ * all have been; .abort is one that ends it there; .warning is a warning
+ * and .print a line on standard output; .fail is an error below 500 and
+ * a warning from there.  They are done here, after the conditionals,
+ * so that one in a branch not taken says nothing.  A directive that is
+ * not known is an error, named with its line.
+ *
+ * 0, or -1 with every message written already.
+ */
+static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *warnings) {
+    unsigned errors = 0;
+    size_t i;
+
+    for (i = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        as_directive_t *d = &st->u.directive;
+        const char *file = st->file != NULL ? st->file : "<input>";
+        const char *said = NULL;
+        char *text = NULL;
+        int is_error = 0;
+        size_t k;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            continue;
+        }
+        if (strcmp(d->name, ".error") == 0) {
+            text = message_text(d, ".error directive invoked in source file");
+            is_error = 1;
+        } else if (strcmp(d->name, ".err") == 0) {
+            said = ".err encountered";
+            is_error = 1;
+        } else if (strcmp(d->name, ".abort") == 0) {
+            as_diag(AS_E_BACKEND, "%s:%u: .abort detected: the assembly is abandoned", file, st->line);
+            return -1;
+        } else if (strcmp(d->name, ".warning") == 0) {
+            text = message_text(d, ".warning directive invoked in source file");
+        } else if (strcmp(d->name, ".print") == 0) {
+            text = message_text(d, "");
+            if (text != NULL) {
+                puts(text);
+            }
+            free(text);
+            text = NULL;
+            said = "";
+        } else if (strcmp(d->name, ".fail") == 0) {
+            long long n = 0;
+            static char fail_text[64];
+
+            if (d->arg_count >= 1 && d->args[0] != NULL) {
+                (void)as_expr_eval_string(d->args[0], NULL, NULL, &n);
+            }
+            snprintf(fail_text, sizeof(fail_text), ".fail %lld encountered", n);
+            said = fail_text;
+            is_error = n < 500;
+        } else if (!directive_is_known(d->name)) {
+            as_diag(AS_E_BACKEND, "%s:%u: unknown directive %s", file, st->line, d->name);
+            errors++;
+            continue;
+        } else {
+            continue;
+        }
+        if (text != NULL) {
+            said = text;
+        }
+        if (said != NULL && said[0] != '\0') {
+            if (is_error) {
+                as_diag(AS_E_BACKEND, "%s:%u: %s", file, st->line, said);
+                errors++;
+            } else if (!warnings->suppress) {
+                fprintf(stderr, "as: warning: %s:%u: %s\n", file, st->line, said);
+                warnings->count++;
+            }
+        }
+        free(text);
+        /* Said; what is left of the statement is its labels. */
+        for (k = 0; k < d->arg_count; ++k) {
+            free(d->args[k]);
+        }
+        free(d->args);
+        free(d->name);
+        memset(&st->u, 0, sizeof(st->u));
+        st->kind = st->label_count != 0 ? AS_STMT_LABEL_ONLY : AS_STMT_EMPTY;
+    }
+    return errors != 0 ? -1 : 0;
 }
 
 static int validate_directives(const as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
@@ -2511,6 +2675,10 @@ static int run_native_backend(const as_ctx_t *ctx) {
         }
         AS_PHASE_END(ctx, "parse");
     }
+    if (as_directives_lower(&parsed, ecfg.is_64 ? 8u : 4u, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
     {
         AS_PHASE_BEGIN();
         if (validate_directives(&parsed, errbuf, sizeof(errbuf)) != 0) {
@@ -2518,6 +2686,9 @@ static int run_native_backend(const as_ctx_t *ctx) {
             goto out;
         }
         AS_PHASE_END(ctx, "validate");
+    }
+    if (run_message_directives(&parsed, &warnings) != 0) {
+        goto out;
     }
     if (as_sections_gather_subsections(&parsed, ecfg.x86_code_bits, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);

@@ -145,6 +145,13 @@ typedef struct {
      * this.  They are "0" in args.
      */
     unsigned zero_assumed;
+    /*
+     * For an alignment: the bytes of the pattern it pads with, 2 for
+     * .balignw and .p2alignw and 4 for .balignl and .p2alignl, which are
+     * .balign and .p2align by the time anything but the parser's caller
+     * sees them.  0 otherwise, for a pattern of one byte.
+     */
+    unsigned fill_width;
 } as_directive_t;
 
 typedef struct {
