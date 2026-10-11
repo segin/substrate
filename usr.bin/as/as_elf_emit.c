@@ -11368,6 +11368,56 @@ static int x86_suffix_denied_by_register(const as_instruction_t *insn, const cha
     return 0;
 }
 
+/*
+ * A move between the accumulator and an address that is a number or a
+ * symbol and no register: in 32-bit code there is a form with no ModRM,
+ * a byte shorter, and it is the one GNU as writes.  (In 64-bit code
+ * that form takes an address of eight bytes, and is `movabs`.)  A load
+ * through the global offset table is left as it is, for the linker to
+ * make a `lea` of.
+ */
+static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
+                                         size_t *code_len) {
+    const as_instruction_t *insn;
+    size_t at = 0;
+    size_t i;
+
+    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64 || cfg->x86_code_bits == 16) {
+        return;
+    }
+    insn = &st->u.instr;
+    if (insn->operand_count != 2 || insn->mnemonic == NULL ||
+        !(streq_ci(insn->mnemonic, "mov") || streq_ci(insn->mnemonic, "movb") || streq_ci(insn->mnemonic, "movw") ||
+          streq_ci(insn->mnemonic, "movl"))) {
+        return;
+    }
+    while (at < *code_len && (code[at] == 0x26 || code[at] == 0x2e || code[at] == 0x36 || code[at] == 0x3e ||
+                              code[at] == 0x64 || code[at] == 0x65 || code[at] == 0x66)) {
+        ++at;
+    }
+    if (at + 6 != *code_len || code[at + 1] != 0x05 ||
+        !(code[at] == 0x88 || code[at] == 0x89 || code[at] == 0x8a || code[at] == 0x8b)) {
+        return;
+    }
+    for (i = 0; i < insn->operand_count && (code[at] == 0x8a || code[at] == 0x8b); ++i) {
+        const as_operand_t *op = &insn->operands[i];
+        const as_expr_t *e = op->kind == AS_OPERAND_MEMORY
+                                 ? op->u.mem.disp
+                                 : ((op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) ? op->u.expr
+                                                                                                           : NULL);
+        const char *sym = e != NULL ? first_symbol_in_expr(e) : NULL;
+        size_t n = sym != NULL ? strlen(sym) : 0;
+
+        if (n > 4 && strcasecmp(sym + n - 4, "@GOT") == 0) {
+            return;
+        }
+    }
+    /* 8a and 8b read, to a0 and a1; 88 and 89 write, a2 and a3. */
+    code[at] = (unsigned char)(0xa0u + (code[at] & 1u) + ((code[at] & 2u) ? 0u : 2u));
+    memmove(code + at + 1, code + at + 2, 4);
+    (*code_len)--;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
@@ -11580,6 +11630,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     if (st == NULL || st->kind != AS_STMT_INSTRUCTION || (st->u.instr.prefixes & AS_PREFIX_DATA16) == 0) {
         int rc = encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 
+        if (rc == 0) {
+            x86_shorten_accumulator_move(cfg, st, code, code_len);
+        }
+
         /*
          * xacquire and xrelease: some of the emitters write a lock and
          * no repeat prefix, having no instruction that repeats, and the
@@ -11623,6 +11677,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             return -1;
         }
     }
+    x86_shorten_accumulator_move(cfg, st, code, code_len);
     return x86_prepend_opsize(code, code_cap, code_len);
 }
 
@@ -17604,6 +17659,12 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 int64_t addend = 0;
                 int have_disp_field = 0;
                 size_t disp_field_off = 0;
+                int is_label_difference = 0;
+                long long label_difference = 0;
+                const char *taken_from = NULL;
+                long long taken_value = 0;
+                int dot_relative = 0;
+                int dot_alone = 0;
 
                 if (asm_reg_alias_for_operand(ctx, op) != NULL) {
                     continue;
@@ -17656,6 +17717,68 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (sym == NULL) {
                     continue;
                 }
+                /*
+                 * One label of a section less another of it is a number,
+                 * and is written as one.  It was given a relocation to
+                 * the first and the second was forgotten: `movl
+                 * $end-start, %eax` loaded the address of `end`.
+                 */
+                {
+                    as_expr_linear_t lin;
+
+                    if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
+                        (lin.add_symbol != NULL || lin.add_local != NULL) &&
+                        (lin.sub_symbol != NULL || lin.sub_local != NULL) &&
+                        !(op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
+                          streq_ci(op->u.mem.base_reg, "rip")) &&
+                        eval_abs_local_diff_expr_virtual(ctx, st, e, &label_difference) == 0) {
+                        is_label_difference = 1;
+                    } else if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK && lin.add_symbol != NULL &&
+                               lin.sub_symbol != NULL && lin.add_local == NULL && lin.sub_local == NULL &&
+                               (strcmp(lin.add_symbol, ".") == 0 || strcmp(lin.sub_symbol, ".") == 0)) {
+                        /*
+                         * With `.`, which is where the instruction
+                         * begins: `. - label` and `label - .` are
+                         * numbers, and `ext - .` is a distance.
+                         */
+                        long long here = (long long)cur_off;
+                        const char *other = strcmp(lin.add_symbol, ".") == 0 ? lin.sub_symbol : lin.add_symbol;
+                        int dot_is_taken = strcmp(lin.sub_symbol, ".") == 0;
+                        as_expr_linear_t at;
+                        char label_section[128];
+                        uint64_t label_off = 0;
+
+                        if (strcmp(other, ".") == 0) {
+                            is_label_difference = 1;
+                            label_difference = lin.value;
+                        } else if (as_expr_eval_linear(e, reloc_dot_lookup, &here, &at) != AS_EXPR_EVAL_OK) {
+                            taken_from = lin.sub_symbol;
+                        } else if (find_label_virtual_location(ctx, NULL, NULL, 0, 0, other, label_section,
+                                                               sizeof(label_section), &label_off) == 0 &&
+                                   track.current != NULL && strcmp(label_section, track.current) == 0) {
+                            is_label_difference = 1;
+                            label_difference = at.value + (dot_is_taken ? (long long)label_off : -(long long)label_off);
+                        } else if (dot_is_taken) {
+                            dot_relative = 1;
+                            taken_value = at.value;
+                            sym = other;
+                        } else {
+                            taken_from = lin.sub_symbol;
+                        }
+                    } else if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK && lin.add_symbol != NULL &&
+                               lin.sub_symbol != NULL && lin.add_local == NULL && lin.sub_local == NULL) {
+                        /* Less a label, from a symbol of elsewhere. */
+                        taken_from = lin.sub_symbol;
+                        taken_value = lin.value;
+                    } else if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK && lin.add_symbol != NULL &&
+                               strcmp(lin.add_symbol, ".") == 0 && lin.sub_symbol == NULL && lin.add_local == NULL &&
+                               lin.sub_local == NULL && track.current != NULL) {
+                        /* `.` alone is a place in this section, and was
+                         * a relocation to a symbol named `.`. */
+                        dot_alone = 1;
+                        taken_value = lin.value;
+                    }
+                }
                 /* @TLSCALL has no field: its relocation is on the
                  * instruction, at its first byte. */
                 if (expr_is_tlscall(e)) {
@@ -17698,6 +17821,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                             addend = (int64_t)(lin.value - (long long)label_off);
                         }
                     }
+                }
+                if (dot_alone) {
+                    sym = track.current;
+                    addend = (int64_t)taken_value + (int64_t)cur_off;
                 }
                 t = default_text_reloc_type(machine, &st->u.instr, op);
                 if (t == R_386_PC8 || t == R_X86_64_PC8) {
@@ -17840,6 +17967,62 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * the instruction's end.) */
                 reloc_off = have_disp_field ? cur_off + (uint64_t)disp_field_off
                                             : cur_off + (uint64_t)code_len - reloc_width;
+                if (is_label_difference) {
+                    uint64_t code_rel_off = reloc_off - cur_off;
+                    long long low = reloc_width >= 8 ? INT64_MIN : -(1ll << (reloc_width * 8 - 1));
+                    long long high = reloc_width >= 8 ? INT64_MAX : (1ll << (reloc_width * 8)) - 1;
+
+                    if (code_rel_off + reloc_width > (uint64_t)code_len || label_difference < low ||
+                        label_difference > high) {
+                        set_err(ctx, "%s:%u: the difference of labels, %lld, does not fit the %u bytes it has in '%s'",
+                                st->file != NULL ? st->file : "<input>", st->line, label_difference,
+                                (unsigned)reloc_width, st->u.instr.mnemonic);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    write_u64_le_at(code + code_rel_off, (uint64_t)label_difference, (unsigned)reloc_width);
+                    continue;
+                }
+                /*
+                 * A symbol of elsewhere less a label of this section is
+                 * the symbol's distance from the field, and the field's
+                 * from the label, which is a number.  Less anything
+                 * else there is no relocation for it.  The label was
+                 * forgotten here too: `movl $ext-start, %eax` loaded
+                 * the address of `ext`.
+                 */
+                if (taken_from != NULL) {
+                    char label_section[128];
+                    uint64_t label_off = 0;
+
+                    if (reloc_width != 4 ||
+                        find_label_virtual_location(ctx, NULL, NULL, 0, 0, taken_from, label_section,
+                                                    sizeof(label_section), &label_off) != 0 ||
+                        track.current == NULL || strcmp(label_section, track.current) != 0) {
+                        set_err(ctx, "%s:%u: '%s' is taken from '%s' and is not a label of this section",
+                                st->file != NULL ? st->file : "<input>", st->line, taken_from, sym);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    t = machine == EM_X86_64 ? R_X86_64_PC32 : R_386_PC32;
+                    addend = (int64_t)taken_value + (int64_t)(reloc_off - label_off);
+                }
+                if (dot_relative) {
+                    if (reloc_width != 4) {
+                        set_err(ctx, "%s:%u: '%s' less '.' does not fit the %u bytes it has in '%s'",
+                                st->file != NULL ? st->file : "<input>", st->line, sym, (unsigned)reloc_width,
+                                st->u.instr.mnemonic);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    /* (`.` was taken as the section's offset of the
+                     * instruction, and the field is further on.) */
+                    t = machine == EM_X86_64 ? R_X86_64_PC32 : R_386_PC32;
+                    addend = (int64_t)taken_value + (int64_t)reloc_off;
+                }
                 if (machine_relocation_addend_is_in_place(machine)) {
                     uint64_t code_rel_off = reloc_off - cur_off;
                     if (code_rel_off + reloc_width <= (uint64_t)code_len) {

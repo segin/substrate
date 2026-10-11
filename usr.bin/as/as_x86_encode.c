@@ -1814,7 +1814,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             /* The shortest of the forms there are: with %al or the
              * accumulator one that names no register, and for a number
              * a signed byte holds one with a byte of immediate. */
-            int acc = a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_EAX && !b->imm_symbolic;
+            int acc = a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_EAX;
 
             if (insn->byte_op) {
                 if (acc) {
@@ -2527,7 +2527,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 return -1;
             }
         } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_EAX &&
-                   b->kind == AS_X86_OP_IMM && !b->imm_symbolic) {
+                   b->kind == AS_X86_OP_IMM) {
             /* With %al or the accumulator, the form that names no
              * register. */
             if (insn->byte_op) {
@@ -3330,7 +3330,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         if (bits == 8) {
             /* With %al, the form that names no register. */
-            if (a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX && !b->imm_symbolic) {
+            if (a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX) {
                 if (emit8(&ctx, (uint8_t)(ext * 8u + 4u)) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
@@ -3344,7 +3344,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
                 return -1;
             }
-        } else if (a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX && !b->imm_symbolic) {
+        } else if (a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX) {
             /* With the accumulator, likewise. */
             if (emit8(&ctx, (uint8_t)(ext * 8u + 5u)) != 0 ||
                 emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm,
@@ -4759,7 +4759,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 return -1;
             }
         } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX &&
-                   b->kind == AS_X86_OP_IMM && !b->imm_symbolic) {
+                   b->kind == AS_X86_OP_IMM) {
             /* With %al or the accumulator, the form that names no
              * register. */
             if (bits == 8) {
