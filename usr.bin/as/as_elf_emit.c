@@ -175,6 +175,14 @@ static int parse_zmm_reg(const char *name, unsigned *out);
 static int parse_mmx_reg(const char *name, unsigned *out);
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                int intel_syntax, char *errbuf, size_t errbuf_sz);
+
+/*
+ * The pseudo-prefixes of the statement being encoded, for
+ * convert_operand_x86(), which is given an operand and not its
+ * statement: {disp8} and {disp32} are about the operand.  Set by
+ * encode_x86_stmt() as it begins.
+ */
+static unsigned x86_stmt_pseudo;
 static char *xstrdup(const char *s);
 static int is_local_temp_symbol_name(const char *name);
 static int expr_is_local_temp_symbol(const as_expr_t *e);
@@ -4755,11 +4763,25 @@ static int x86_mnemonic_is_64bit_by_default(const char *mn) {
     return 0;
 }
 
-/* Whether a statement of 32-bit code addresses through 16-bit registers
- * (the port of in and out, `(%dx)`, is no address). */
-static int x86_stmt_addr16_in_32(const as_elf_cfg_t *cfg, const as_instruction_t *insn) {
+/*
+ * Whether a statement is one that only the encoders of as_x86_encode.c
+ * can do right, and the emitters handed the statement itself must leave:
+ * a statement of 32-bit code that addresses through 16-bit registers
+ * (the port of in and out, `(%dx)`, is no address), and one with a
+ * pseudo-prefix that asks for a displacement's width, a direction or a
+ * REX, of which those emitters know nothing.  The VEX and EVEX ones
+ * convert their operands as the encoders do, and so honour the two that
+ * are about a displacement; `pseudo_mask` is the pseudo-prefixes that
+ * count for the caller.
+ */
+#define X86_PSEUDO_DISP (AS_PSEUDO_DISP8 | AS_PSEUDO_DISP32)
+#define X86_PSEUDO_FORMS (X86_PSEUDO_DISP | AS_PSEUDO_LOAD | AS_PSEUDO_STORE | AS_PSEUDO_REX)
+static int x86_stmt_is_the_encoders(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned pseudo_mask) {
     size_t i;
 
+    if ((insn->pseudo & pseudo_mask) != 0) {
+        return 1;
+    }
     if (cfg->is_64 || cfg->x86_code_bits == 16u) {
         return 0;
     }
@@ -4802,6 +4824,33 @@ static int x86_special_takes_opsize(const as_instruction_t *insn, const char *mn
         }
     }
     return 1;
+}
+
+/*
+ * {vex3}: the three-byte VEX prefix where the two-byte one would do.
+ * C5 [R vvvv L pp] is C4 [R 1 1 00001] [0 vvvv L pp].
+ */
+static int x86_vex_make_3byte(unsigned char *code, size_t code_cap, size_t *code_len) {
+    size_t at = 0;
+    unsigned char b;
+
+    while (at < *code_len && (code[at] == 0x26 || code[at] == 0x2e || code[at] == 0x36 || code[at] == 0x3e ||
+                              code[at] == 0x64 || code[at] == 0x65 || code[at] == 0x67)) {
+        ++at;
+    }
+    if (at + 1 >= *code_len || code[at] != 0xc5) {
+        return 0;
+    }
+    if (*code_len >= code_cap) {
+        return -1;
+    }
+    b = code[at + 1];
+    memmove(code + at + 2, code + at + 1, *code_len - at - 1);
+    code[at] = 0xc4;
+    code[at + 1] = (unsigned char)((b & 0x80u) | 0x61u);
+    code[at + 2] = (unsigned char)(b & 0x7fu);
+    (*code_len)++;
+    return 0;
 }
 
 static int x86_prepend_opsize(unsigned char *code, size_t code_cap, size_t *code_len) {
@@ -8344,8 +8393,18 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
          * (16-bit addressing has its own table, where (%bp,%si) needs
          * none.)
          */
-        if (dst->u.mem.has_base && !dst->u.mem.force_disp32) {
-            int is_bp = ((unsigned)dst->u.mem.base & 7u) == 5u && dst->u.mem.base < AS_X86_REG_AH;
+        /*
+         * Unless a width was asked for.  {disp32} is four bytes, of zero
+         * if nothing was written; {disp8} is one where the value goes in
+         * one, and four where it does not, as GNU as has it.
+         */
+        if ((x86_stmt_pseudo & AS_PSEUDO_DISP32) != 0 && (dst->u.mem.has_base || dst->u.mem.has_index)) {
+            dst->u.mem.has_disp = 1;
+            dst->u.mem.force_disp32 = 1;
+        } else if ((x86_stmt_pseudo & AS_PSEUDO_DISP8) != 0 && dst->u.mem.has_base) {
+            dst->u.mem.has_disp = 1;
+        } else if (dst->u.mem.has_base && !dst->u.mem.force_disp32) {
+            int is_bp =((unsigned)dst->u.mem.base & 7u) == 5u && dst->u.mem.base < AS_X86_REG_AH;
 
             if (dst->u.mem.addr_bits == 16u && dst->u.mem.has_index) {
                 is_bp = 0;
@@ -10120,6 +10179,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
      * option again, or -msyntax=intel would outlast an .att_syntax.
      */
     intel_syntax = (st->u.instr.syntax_intel != 0);
+    x86_stmt_pseudo = st->u.instr.pseudo;
     /*
      * The SSE comparisons by name: `cmpltsd %xmm0, %xmm1` is `cmpsd $1,
      * %xmm0, %xmm1`, and so for the eight predicates of each of cmpps,
@@ -10186,6 +10246,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     in.seg_override = map_seg(st->u.instr.segment_override);
     in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
     in.explicit_rex = (st->u.instr.prefixes & AS_PREFIX_REX) != 0;
+    in.prefer_load = (st->u.instr.pseudo & AS_PSEUDO_LOAD) != 0;
+    in.rex_wanted = (st->u.instr.pseudo & AS_PSEUDO_REX) != 0;
+    if (in.rex_wanted && !cfg->is_64) {
+        snprintf(encerr, encerr_sz, "{rex} is only for 64-bit code");
+        return -1;
+    }
     in.rex_bits = (uint8_t)(st->u.instr.rex_bits & 0x0f);
     if ((st->u.instr.prefixes & AS_PREFIX_REPNE) != 0) {
         in.rep_prefix = 2;
@@ -10351,12 +10417,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
      * (%ebx)`; such a statement goes past them to the encoder that has
      * both tables, or is refused there.
      */
-    if (!x86_stmt_addr16_in_32(cfg, &st->u.instr) &&
+    if (!x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS) &&
         emit_x87_forms(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
         *code_len > 0) {
         return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
     }
-    if (!x86_stmt_addr16_in_32(cfg, &st->u.instr) &&
+    if (!x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS) &&
         emit_simd_movq(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
         *code_len > 0) {
         return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
@@ -10372,7 +10438,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             return -1;
         }
     }
-    if (!cfg->is_64 && !x86_stmt_addr16_in_32(cfg, &st->u.instr) &&
+    if (!cfg->is_64 && !x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS) &&
         emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         if (*code_len > 0) {
             /*
@@ -10409,9 +10475,14 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
      * were tried first, so in 32-bit code, and in 64-bit code at
      * x86-64-v4, `vaddps %ymm0, %ymm1, %ymm2` was the AVX-512 one.
      */
-    if ((!cfg->is_64 || cfg->x86_64_isa_level >= 3) && !x86_stmt_addr16_in_32(cfg, &st->u.instr) &&
-        !((!cfg->is_64 || cfg->x86_64_isa_level >= 4) &&
-          (x86_mnemonic_is_evex_first(mnbuf) || x86_stmt_has_decorator(&st->u.instr)))) {
+    /* {vex} and {vex3} ask for VEX whatever would be chosen, and {evex}
+     * for the other. */
+    if ((!cfg->is_64 || cfg->x86_64_isa_level >= 3) &&
+        !x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS & ~X86_PSEUDO_DISP) &&
+        (st->u.instr.pseudo & AS_PSEUDO_EVEX) == 0 &&
+        ((st->u.instr.pseudo & (AS_PSEUDO_VEX | AS_PSEUDO_VEX3)) != 0 ||
+         !((!cfg->is_64 || cfg->x86_64_isa_level >= 4) &&
+           (x86_mnemonic_is_evex_first(mnbuf) || x86_stmt_has_decorator(&st->u.instr))))) {
         if ((try_encode_x86_vex_extra_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
              *code_len > 0) ||
             (try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
@@ -10424,13 +10495,18 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
              *code_len > 0) ||
             (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
              *code_len > 0)) {
+            if ((st->u.instr.pseudo & AS_PSEUDO_VEX3) != 0 && x86_vex_make_3byte(code, code_cap, code_len) != 0) {
+                return -1;
+            }
             if (x86_prepend_segment(&st->u.instr, code, code_cap, code_len) != 0) {
                 return -1;
             }
             return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
         }
     }
-    if ((!cfg->is_64 || cfg->x86_64_isa_level >= 4) && !x86_stmt_addr16_in_32(cfg, &st->u.instr)) {
+    if ((!cfg->is_64 || cfg->x86_64_isa_level >= 4) &&
+        !x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS & ~X86_PSEUDO_DISP) &&
+        (st->u.instr.pseudo & (AS_PSEUDO_VEX | AS_PSEUDO_VEX3)) == 0) {
         if ((try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
              *code_len > 0) ||
             (try_encode_x86_avx512bw_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
@@ -10456,7 +10532,11 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
         return -1;
     }
-    if (cfg->is_64) {
+    if ((st->u.instr.pseudo & (AS_PSEUDO_VEX | AS_PSEUDO_VEX3 | AS_PSEUDO_EVEX)) != 0) {
+        snprintf(encerr, encerr_sz, "'%s' cannot be encoded as its pseudo-prefix asks", mnbuf);
+        return -1;
+    }
+    if (cfg->is_64 && !x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS)) {
         int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
         if (s64 == 0) {
             if (*code_len > 0) {

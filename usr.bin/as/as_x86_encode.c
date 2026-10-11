@@ -519,6 +519,11 @@ int as_x86_encode_ext(as_x86_ext_encode_fn fn, const as_x86_insn_t *insn, uint8_
     if (fn == NULL || insn == NULL || out == NULL) {
         return -1;
     }
+    /* Nor do they know {load} or {rex}; an instruction of theirs written
+     * with one is refused rather than encoded without it. */
+    if (insn->prefer_load || insn->rex_wanted) {
+        return -1;
+    }
     /* These encoders have the 32- and 64-bit ModRM table and not the
      * 16-bit one: an address through %bx or %si is not theirs. */
     if (insn->default_bits != 64u) {
@@ -1613,7 +1618,8 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             /* From memory only.  Between two registers there are two
              * encodings, and GNU as writes the other one, 88 and 89: an
              * object is compared with GNU's byte for byte. */
-            } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+            } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG &&
+                       (b->kind == AS_X86_OP_MEM || (b->kind == AS_X86_OP_REG && insn->prefer_load))) {
                 if (encode_reg_rm_pair(&ctx, 0x8a, a, b, 0) != 0) {
                     return -1;
                 }
@@ -1634,7 +1640,8 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
                 return -1;
             }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG &&
+                   (b->kind == AS_X86_OP_MEM || (b->kind == AS_X86_OP_REG && insn->prefer_load))) {
             if (encode_reg_rm_pair(&ctx, 0x8b, a, b, 0) != 0) {
                 return -1;
             }
@@ -1738,7 +1745,8 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             op_rm_reg = (uint8_t)(op_rm_reg - 1u);
             op_reg_rm = (uint8_t)(op_reg_rm - 1u);
         }
-        if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
+        if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG &&
+            !(insn->prefer_load && a->kind == AS_X86_OP_REG)) {
             if (encode_reg_rm_pair(&ctx, op_rm_reg, a, b, 1) != 0) {
                 return -1;
             }
@@ -3607,7 +3615,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         /* Between two registers, the form whose destination is ModRM.rm:
          * it is the one GNU as writes. */
-        if (a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+        if (a->kind == AS_X86_OP_REG &&
+            (b->kind == AS_X86_OP_MEM || (b->kind == AS_X86_OP_REG && insn->prefer_load))) {
             if (emit8(&ctx, reg_dst_op) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
                 return -1;
             }
@@ -3710,7 +3719,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     }
 
     if (streq_ci(insn->mnemonic, "mov") && insn->op_count == 2 && a->kind == AS_X86_OP_REG &&
-        b->kind == AS_X86_OP_MEM) {
+        (b->kind == AS_X86_OP_MEM || (b->kind == AS_X86_OP_REG && insn->prefer_load))) {
         unsigned width = insn->byte_op ? 8u : (insn->rex_w ? 64u : (insn->operand_size_override ? 16u : 32u));
 
         if (width == 16u && emit8(&ctx, 0x66) != 0) {
@@ -7010,6 +7019,9 @@ finish:
             } else if (needs_rex_low8(op->u.reg)) {
                 force_rex = 1;
             }
+        }
+        if (insn->rex_wanted && !high8) {
+            force_rex = 1;
         }
         if (high8 && (rex_w || rex_r || rex_x || rex_b || force_rex)) {
             set_err(&ctx, "%%ah, %%ch, %%dh and %%bh cannot be used in an instruction that needs REX");

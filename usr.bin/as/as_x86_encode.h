@@ -115,6 +115,16 @@ typedef struct {
     int lock_prefix;
     int rep_prefix;
     int explicit_rex;
+    /*
+     * {load}: between two registers, the encoding whose destination is
+     * ModRM.reg, which is not the one written otherwise.
+     */
+    int prefer_load;
+    /*
+     * {rex}: a REX prefix though none is needed -- unless a register is
+     * %ah to %bh, which cannot be had with one, and then none.
+     */
+    int rex_wanted;
     int rex_w;
     uint8_t rex_bits;
     int byte_op;

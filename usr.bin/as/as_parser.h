@@ -83,11 +83,32 @@ typedef struct {
 #define AS_PREFIX_DATA16 (1u << 6)
 #define AS_PREFIX_ADDR16 (1u << 7)
 
+/*
+ * The pseudo-prefixes, written in braces before an x86 instruction, that
+ * ask for one of its encodings: `{vex}`, `{vex2}` (the same), `{vex3}`,
+ * `{evex}`, `{disp8}`, `{disp32}`, `{load}`, `{store}`, `{rex}`, and
+ * `{nooptimize}`, which asks for nothing this assembler would do.
+ */
+#define AS_PSEUDO_VEX (1u << 0)
+#define AS_PSEUDO_VEX3 (1u << 1)
+#define AS_PSEUDO_EVEX (1u << 2)
+#define AS_PSEUDO_DISP8 (1u << 3)
+#define AS_PSEUDO_DISP32 (1u << 4)
+#define AS_PSEUDO_LOAD (1u << 5)
+#define AS_PSEUDO_STORE (1u << 6)
+#define AS_PSEUDO_REX (1u << 7)
+#define AS_PSEUDO_NOOPTIMIZE (1u << 8)
+
+/* The flag of a pseudo-prefix's name, without its braces; 0 if it is
+ * not one. */
+unsigned as_pseudo_prefix_flag(const char *name);
+
 typedef struct {
     char *mnemonic;
     char *arm_condition;
     unsigned syntax_intel;
     unsigned prefixes;
+    unsigned pseudo;
     unsigned rex_bits;
     unsigned opmask;
     int zeroing;

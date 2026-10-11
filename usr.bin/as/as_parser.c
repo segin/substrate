@@ -81,6 +81,35 @@ static int streq_ci(const char *a, const char *b) {
     return a[i] == '\0' && b[i] == '\0';
 }
 
+unsigned as_pseudo_prefix_flag(const char *name) {
+    static const struct {
+        const char *name;
+        unsigned flag;
+    } table[] = {
+        {"vex", AS_PSEUDO_VEX},       {"vex2", AS_PSEUDO_VEX},     {"vex3", AS_PSEUDO_VEX3},
+        {"evex", AS_PSEUDO_EVEX},     {"disp8", AS_PSEUDO_DISP8},  {"disp32", AS_PSEUDO_DISP32},
+        {"load", AS_PSEUDO_LOAD},     {"store", AS_PSEUDO_STORE},  {"rex", AS_PSEUDO_REX},
+        {"nooptimize", AS_PSEUDO_NOOPTIMIZE},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
+        if (streq_ci(name, table[i].name)) {
+            return table[i].flag;
+        }
+    }
+    return 0;
+}
+
+/* Whether three tokens are `{`, the name of a pseudo-prefix, `}`. */
+static unsigned pseudo_prefix_at(const as_token_t *tokv, size_t n, size_t i) {
+    if (i + 2 < n + 0 && tokv[i].text != NULL && strcmp(tokv[i].text, "{") == 0 && tokv[i + 1].text != NULL &&
+        tokv[i + 2].text != NULL && strcmp(tokv[i + 2].text, "}") == 0) {
+        return as_pseudo_prefix_flag(tokv[i + 1].text);
+    }
+    return 0;
+}
+
 static char *join_tokens(const as_token_t *tokv, size_t n, int for_expr);
 
 static int push_local_def(local_label_vec_t *v, int digit, const char *file, unsigned line) {
@@ -2071,11 +2100,11 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
 
     i = 0;
     while (i < n) {
-        if (i + 2 < n &&
-            tokv[i].text != NULL && strcmp(tokv[i].text, "{") == 0 &&
-            tokv[i + 1].text != NULL &&
-            tokv[i + 2].text != NULL && strcmp(tokv[i + 2].text, "}") == 0 &&
-            (streq_ci(tokv[i + 1].text, "vex") || streq_ci(tokv[i + 1].text, "evex"))) {
+        /* A pseudo-prefix is kept with the instruction, for the encoder
+         * to do as it asks.  ({vex} and {evex} were stepped over here
+         * and forgotten.) */
+        if (pseudo_prefix_at(tokv, n, i) != 0) {
+            in.pseudo |= pseudo_prefix_at(tokv, n, i);
             i += 3;
             continue;
         }
@@ -2337,13 +2366,6 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     }
 
     i = 0;
-    while (i + 2 < n &&
-           tokv[i].text != NULL && strcmp(tokv[i].text, "{") == 0 &&
-           tokv[i + 1].text != NULL &&
-           tokv[i + 2].text != NULL && strcmp(tokv[i + 2].text, "}") == 0 &&
-           (streq_ci(tokv[i + 1].text, "vex") || streq_ci(tokv[i + 1].text, "evex"))) {
-        i += 3;
-    }
     while (i < n &&
            (tokv[i].kind == AS_TOK_LABEL ||
             (i + 1 < n && tokv[i + 1].text != NULL && strcmp(tokv[i + 1].text, ":") == 0 &&
@@ -2549,14 +2571,6 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
         while (j < tokens->count && tokens->items[j].line == tokens->items[i].line &&
                strcmp(tokens->items[j].file, tokens->items[i].file) == 0) {
             j++;
-        }
-
-        while (start + 2 < j &&
-               tokens->items[start].text != NULL && strcmp(tokens->items[start].text, "{") == 0 &&
-               tokens->items[start + 1].text != NULL &&
-               tokens->items[start + 2].text != NULL && strcmp(tokens->items[start + 2].text, "}") == 0 &&
-               (streq_ci(tokens->items[start + 1].text, "vex") || streq_ci(tokens->items[start + 1].text, "evex"))) {
-            start += 3;
         }
 
         if (parse_line_tokens(&ctx, tokens->items + start, j - start, &st) != 0) {

@@ -106,9 +106,10 @@ status 0.
 - [x] **AS-T-023** The lexer shall not read a byte beyond the terminator of the line it is given.
   Trace: AS-FE-020.  Verify: T — a file whose only line is `{vex}`, and the same for `{evex}`, `{disp8}`, `{disp32}`, under the sanitizer build.
   Done: the comparison that counted the terminator is gone; `test_sanitizer_sweep.sh` has the lines, with and without a final newline.
-- [ ] **AS-T-086** When `{vex}`, `{vex2}`, `{vex3}`, `{evex}`, `{disp8}`, `{disp32}`, `{load}`, `{store}` or `{rex}` precedes an instruction, the assembler shall encode the instruction as the prefix asks, or refuse the statement.
+- [x] **AS-T-086** When `{vex}`, `{vex2}`, `{vex3}`, `{evex}`, `{disp8}`, `{disp32}`, `{load}`, `{store}` or `{rex}` precedes an instruction, the assembler shall encode the instruction as the prefix asks, or refuse the statement.
   Trace: AS-FE-020, AS-FE-052.  Verify: T — `{evex} vaddps %xmm1,%xmm2,%xmm3` is EVEX, `{vex} vaddps …` VEX, `{disp32} movl (%eax),%ebx` has a 32-bit displacement: GNU; an unknown `{name}` is refused.  Today five places in the lexer and parser remove `{vex}` and `{evex}` and the instruction is encoded as if they were not written.  After: 161.
   Found while doing 023.
+  Done ahead of 161.  The lexer and the parser no longer take them out; the parser keeps them with the instruction and the encoders do as each asks: `{vex}` and `{evex}` choose which encoders are tried, `{vex3}` widens a two-byte VEX prefix, `{disp8}` and `{disp32}` set the displacement's width where the operand is converted (so for every encoder), `{load}` picks the other direction between two registers, `{rex}` forces the prefix in 64-bit code.  Where an instruction has no such encoding the statement is refused -- `{vex} nop`, `{evex} vzeroupper`, `{rex}` in 32-bit code -- and so is one whose emitter cannot do what is asked (`{disp8} fldl (%eax)`), where GNU assembles it.  `test_pseudo_prefix.sh`, 81 cases.
 - [ ] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
   Trace: AS-SEC-001.  Verify: T — `.text` / `nop` / `.pushsection .text, 1` / `ret` / `.popsection` / `nop`: `.text` is `AX` and holds `90 90 c3`.
   In part: the number is no longer read as flags, so the section keeps them and its code (`test_subsection.sh`).  Subsection 0 is entered; **any other is refused**, by `.pushsection`, `.subsection`, `.text n` and `.data n` alike, with "subsections other than 0 are not supported".  Before this they were silently ignored and the contents assembled in source order, which puts out-of-line code in line; 240 is what gathers them, and ticks this.
@@ -1082,5 +1083,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 86 done, 264 open.  Numbers run to 399, with gaps left between
+350 tasks: 87 done, 263 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

@@ -952,16 +952,6 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
 
         for (i = 0; !is_include && i < line_tokens.count; ++i) {
             as_token_t *t = &line_tokens.items[i];
-            if (i + 2 < line_tokens.count &&
-                line_tokens.items[i].kind == AS_TOK_PUNCT &&
-                strcmp(line_tokens.items[i].text, "{") == 0 &&
-                (line_tokens.items[i + 1].kind == AS_TOK_IDENTIFIER || line_tokens.items[i + 1].kind == AS_TOK_REGISTER) &&
-                line_tokens.items[i + 2].kind == AS_TOK_PUNCT &&
-                strcmp(line_tokens.items[i + 2].text, "}") == 0 &&
-                (strcmp(line_tokens.items[i + 1].text, "vex") == 0 || strcmp(line_tokens.items[i + 1].text, "evex") == 0)) {
-                i += 2;
-                continue;
-            }
             if (as_token_vec_push_take(ctx->out, t) != 0) {
                 set_err(ctx, "%s:%u: out of memory", path, line_no);
                 as_token_vec_free(&line_tokens);
@@ -1039,32 +1029,6 @@ int as_lex_file(const char *path, const as_lexer_cfg_t *cfg, as_token_vec_t *out
     }
 
     rc = lex_file_internal(&ctx, path, 0);
-    if (rc == 0 && out != NULL && out->items != NULL) {
-        size_t i;
-        size_t w = 0;
-
-        for (i = 0; i < out->count; ++i) {
-            if (i + 2 < out->count &&
-                out->items[i].kind == AS_TOK_PUNCT &&
-                strcmp(out->items[i].text, "{") == 0 &&
-                (out->items[i + 1].kind == AS_TOK_IDENTIFIER || out->items[i + 1].kind == AS_TOK_REGISTER) &&
-                out->items[i + 2].kind == AS_TOK_PUNCT &&
-                strcmp(out->items[i + 2].text, "}") == 0 &&
-                (strcmp(out->items[i + 1].text, "vex") == 0 || strcmp(out->items[i + 1].text, "evex") == 0)) {
-                as_token_free(&out->items[i]);
-                as_token_free(&out->items[i + 1]);
-                as_token_free(&out->items[i + 2]);
-                i += 2;
-                continue;
-            }
-            if (w != i) {
-                out->items[w] = out->items[i];
-                memset(&out->items[i], 0, sizeof(out->items[i]));
-            }
-            ++w;
-        }
-        out->count = w;
-    }
 
     while (ctx.include_stack_count > 0) {
         free(ctx.include_stack[ctx.include_stack_count - 1]);
