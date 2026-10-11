@@ -197,6 +197,29 @@ done <<'EOF'
 32 64	refused	cvtsi2sd %xmm0,%xmm1
 32	660f6ec00f7ec8f20f10c8f30f1000f20f2ac00f2ac8f30fd6c8f20fd6c8a5	movd %eax,%xmm0|movd %mm1,%eax|movsd %xmm0,%xmm1|movss (%eax),%xmm0|cvtsi2sd %eax,%xmm0|cvtpi2ps %mm0,%xmm1|movq2dq %mm0,%xmm1|movdq2q %xmm0,%mm1|movsd
 64	660f6ec00f7ec8f20f10c867f30f1000f20f2ac00f2ac8f30fd6c8f20fd6c8a5	movd %eax,%xmm0|movd %mm1,%eax|movsd %xmm0,%xmm1|movss (%eax),%xmm0|cvtsi2sd %eax,%xmm0|cvtpi2ps %mm0,%xmm1|movq2dq %mm0,%xmm1|movdq2q %xmm0,%mm1|movsd
+# A general register where a vector one belongs was taken by its number:
+# `vaddps %eax, %xmm0, %xmm1` was `vaddps %xmm0, %xmm0, %xmm1`.  Sixty-one
+# instructions have one of each -- the moves between the two, the
+# conversions of an integer, the extractions and insertions of an
+# element, the masks of signs -- and no other does.
+32 64	refused	vaddps %eax,%xmm0,%xmm1
+32 64	refused	pshufb %eax,%xmm0
+32 64	refused	vfmadd231pd %xmm0,%eax,%xmm1
+32 64	refused	addps %eax,%xmm0
+32 64	refused	paddb %eax,%mm0
+32 64	refused	pxor %xmm0,%eax
+32 64	refused	vpxor %eax,%ymm1,%ymm2
+32 64	refused	sqrtsd %eax,%xmm0
+32 64	refused	aesenc %eax,%xmm1
+32 64	refused	pcmpeqb %xmm1,%ebx
+32 64	refused	roundps $1,%eax,%xmm0
+32 64	refused	vblendps $1,%eax,%xmm1,%xmm2
+32 64	refused	crc32 %xmm0,%eax
+32 64	refused	vpaddd %zmm0,%eax,%zmm1
+32 64	660f6ec0660f7ecb0f6ec0660fc5c001660fc4c001660fd7c00f50c9f20f2ac0f20f2cc0f30f2ac8	movd %eax,%xmm0|movd %xmm1,%ebx|movd %eax,%mm0|pextrw $1,%xmm0,%eax|pinsrw $1,%eax,%xmm0|pmovmskb %xmm0,%eax|movmskps %xmm1,%ecx|cvtsi2sd %eax,%xmm0|cvttsd2si %xmm0,%eax|cvtsi2ssl %eax,%xmm1
+32 64	660f3a16c001660f3a22c001660f3a17c001660f3a14c902660f3a20d203	pextrd $1,%xmm0,%eax|pinsrd $1,%eax,%xmm0|extractps $1,%xmm0,%eax|pextrb $2,%xmm1,%ecx|pinsrb $3,%edx,%xmm2
+32	c4e37122d001c5f32ad0	vpinsrd $1,%eax,%xmm1,%xmm2|vcvtsi2sd %eax,%xmm1,%xmm2
+64	66480f6ec066480f7ec0f2480f2ac066480f3a16c00166480f3a22c001	movq %rax,%xmm0|movq %xmm0,%rax|cvtsi2sdq %rax,%xmm0|pextrq $1,%xmm0,%rax|pinsrq $1,%rax,%xmm0
 # No operand where there is none, and no number where a register is.
 32 64	refused	hlt %eax
 32 64	refused	nop $1

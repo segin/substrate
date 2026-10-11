@@ -10727,15 +10727,53 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
     /* What is of one kind of vector register is of no other, but for
      * the conversions between them. */
     {
+        /*
+         * The instructions that have a general register and a vector
+         * one among their operands: the moves between the two, the
+         * conversions of an integer, the extractions and insertions of
+         * an element, the masks of signs, and the broadcasts of
+         * AVX-512.  They are every one GNU as will assemble with such
+         * a pair, of some 12,900 names tried.  In any other instruction
+         * a general register where a vector one belongs was taken by
+         * its number: `vaddps %eax, %xmm0, %xmm1` was `vaddps %xmm0,
+         * %xmm0, %xmm1`, and `pshufb %eax, %xmm0` `pshufb %mm0, %xmm0`.
+         */
+        static const char *const of_both[] = {
+            "cvtsd2si",     "cvtsi2sd",     "cvtsi2ss",    "cvtss2si",     "cvttsd2si",    "cvttss2si",
+            "extractps",    "movd",         "movmskpd",    "movmskps",     "movq",         "pextrb",
+            "pextrd",       "pextrq",       "pextrw",      "pinsrb",       "pinsrd",       "pinsrq",
+            "pinsrw",       "pmovmskb",     "vcvtsd2si",   "vcvtsd2usi",   "vcvtsh2si",    "vcvtsh2usi",
+            "vcvtsi2sd",    "vcvtsi2sh",    "vcvtsi2ss",   "vcvtss2si",    "vcvtss2usi",   "vcvttsd2si",
+            "vcvttsd2sis",  "vcvttsd2usi",  "vcvttsd2usis", "vcvttsh2si",  "vcvttsh2usi",  "vcvttss2si",
+            "vcvttss2sis",  "vcvttss2usi",  "vcvttss2usis", "vcvtusi2sd",  "vcvtusi2sh",   "vcvtusi2ss",
+            "vextractps",   "vmovd",        "vmovmskpd",   "vmovmskps",    "vmovq",        "vmovw",
+            "vpbroadcastb", "vpbroadcastd", "vpbroadcastq", "vpbroadcastw", "vpextrb",     "vpextrd",
+            "vpextrq",      "vpextrw",      "vpinsrb",     "vpinsrd",      "vpinsrq",      "vpinsrw",
+            "vpmovmskb",
+        };
         int mmx = 0;
         int xmm = 0;
+        int wide = 0;
         int general = 0;
 
         for (i = 0; i < insn->operand_count; ++i) {
             if (reg[i] != NULL) {
                 mmx += reg[i]->cls == AS_X86_REGCLASS_MMX;
                 xmm += reg[i]->cls == AS_X86_REGCLASS_XMM;
+                wide += reg[i]->cls == AS_X86_REGCLASS_YMM || reg[i]->cls == AS_X86_REGCLASS_ZMM;
                 general += reg[i]->cls == AS_X86_REGCLASS_GENERAL;
+            }
+        }
+        if (general != 0 && mmx + xmm + wide != 0) {
+            int found = 0;
+
+            /* (By its name, or its name and the l or q of the integer's
+             * width: `cvtsi2sdl`.) */
+            for (i = 0; i < sizeof(of_both) / sizeof(of_both[0]) && !found; ++i) {
+                found = x86_name_is(mn, of_both[i], "lq");
+            }
+            if (!found) {
+                return 1;
             }
         }
         if (mmx != 0 && xmm != 0 && strcmp(mn, "movq2dq") != 0 && strcmp(mn, "movdq2q") != 0 &&
