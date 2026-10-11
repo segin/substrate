@@ -1022,9 +1022,10 @@ empty for the family named.
   Trace: AS-EXT-003.  Verify: T — `vcvtph2ps`, `vcvtps2ph`, register and memory, XMM and YMM.  After: 161.
 - [x] **AS-T-315** When an AVX-512CD instruction is written, the assembler shall encode it.
   Trace: AS-EXT-003.  Verify: T — `vpconflict{d,q}`, `vplzcnt{d,q}`, `vpbroadcastm{b2q,w2d}`.  After: 161.
-- [ ] **AS-T-316** If an operand, register or prefix is not valid in the mode being assembled, then the extension encoders shall refuse the instruction.
+- [x] **AS-T-316** If an operand, register or prefix is not valid in the mode being assembled, then the extension encoders shall refuse the instruction.
   Trace: AS-EXT-004 (note 5).  Verify: T — under `--32`: `addps %xmm9,%xmm1`, `vaddps %xmm9,%xmm1,%xmm2`, `haddps (%rax),%xmm1`, `andn %rax,%rbx,%rcx`, `pextrq $1,%xmm1,%rax`, `cvtsi2sdq %rax,%xmm1`: exit 1.  After: 171.
-- [ ] **AS-T-317** When an SSSE3 instruction or `pextrw` is written with MMX registers, the assembler shall encode the MMX form without `66`.
+  Done, 2026-10-11, with 317, 335 and 337 to 339: the instructions of MMX and SSE, of AES, SHA and GFNI, of BMI1 and BMI2, the three bit counts, `movbe`, `movnti`, `monitor`, `mwait`, `xgetbv`, `xsetbv` and `xrstors` are rows of the table of 311 (`as_x86_vec_table.c`), 324 mnemonics more, and its emitter writes those with no VEX as it writes the others.  A row says what registers it takes, so `paddb %ymm1,%ymm2` is not `paddb %xmm1,%xmm2`, `pmaxsd (%rax),%mm2` is not an SSE4.1 instruction on an MMX register, and `lzcntq (%rax),%bx` is refused; a byte that is a count or a choice is not written with a sign (`psllw $-1`, `cmpps $-1` are GNU's refusals, and `pshufd $-1` is not); and a `lock`, a repeat or `data16` written before one is refused, where it had been left off with nothing said.  The extension corpus in its three modes, 131,614 lines: none that GNU as 2.46 refuses is taken, and none it takes is assembled to other bytes.  Refused of what GNU takes: `bextr` with a number (TBM, an XOP prefix), `movbe` between registers (338, APX in GNU), `vcvttps2dq %xmm1,%ymm2` (see 311), and at `-march=x86-64-v3` what needs AVX-512; and there the six VNNI and IFMA instructions are their VEX forms, GNU's being EVEX.  `test_vec_forms.sh`, now 23,000 forms, which GNU passes.
+- [x] **AS-T-317** When an SSSE3 instruction or `pextrw` is written with MMX registers, the assembler shall encode the MMX form without `66`.
   Trace: AS-EXT-005.  Verify: T — the sixteen SSSE3 mnemonics with `%mm` operands and memory; `pextrw $3,%mm1,%eax`.  After: 161.
 - [x] **AS-T-318** When an EVEX prefix is built, the assembler shall place ModRM.reg bit 3 in `R` and bit 4 in `R'`, and ModRM.rm bit 4 in `X` for a register operand.
   Trace: AS-EXT-006.  Verify: T — destinations and sources 8–15 and 16–31 for one instruction of each EVEX form.  After: 162.
@@ -1064,15 +1065,15 @@ empty for the family named.
   Trace: AS-EXT-009.  Verify: T — each, register and memory.
 - [x] **AS-T-334** When a gather or scatter is written with a vector index, the assembler shall encode it.
   Trace: AS-EXT-009, AS-EXT-008 (note 18d).  Verify: T — the AVX2 gathers with XMM and YMM index (including `vgatherqps`/`vpgatherqd` with a YMM index), the AVX-512 gathers and scatters.  After: 177.
-- [ ] **AS-T-335** When an AES-NI, VAES, PCLMULQDQ, VPCLMULQDQ, SHA or GFNI instruction is written, the assembler shall encode it in 32- and 64-bit modes.
+- [x] **AS-T-335** When an AES-NI, VAES, PCLMULQDQ, VPCLMULQDQ, SHA or GFNI instruction is written, the assembler shall encode it in 32- and 64-bit modes.
   Trace: AS-EXT-009.  Verify: T — `aesenc`, `aesenclast`, `aesdec`, `aesdeclast`, `aesimc`, `aeskeygenassist`, their VEX forms, `pclmulqdq` and its aliases, the seven SHA instructions, `gf2p8*`.
 - [x] **AS-T-336** When any of these AVX-512 instructions is written, the assembler shall encode it: `vcompressp[sd]`, `vpcompress[dq]`, `vexpandp[sd]`, `vpexpand[dq]`, `vpmovs*`, `vpmovus*`, `vpmov[wdq]*`, `vpabsq`, `vextract[fi]32x4`, `vextract[fi]64x4`, `vextract[fi]32x8`, `vextract[fi]64x2`, `vbroadcast[fi]32x4`, `vbroadcast[fi]64x4`, `vbroadcast[fi]64x2`, `vcvt*2usi`, `vcvttp[sd]2udq`, `vcvtudq2pd`.
   Trace: AS-EXT-009.  Verify: T — the 34 fully refused mnemonics.
-- [ ] **AS-T-337** When `blsi`, `blsr`, `blsmsk` or `rorx` is written in 32-bit mode, or `xrstors`/`xrstors64` in their modes, the assembler shall encode it.
+- [x] **AS-T-337** When `blsi`, `blsr`, `blsmsk` or `rorx` is written in 32-bit mode, or `xrstors`/`xrstors64` in their modes, the assembler shall encode it.
   Trace: AS-EXT-009.  Verify: T.
-- [ ] **AS-T-338** When `movbe` is written with two registers, the assembler shall refuse it.
+- [x] **AS-T-338** When `movbe` is written with two registers, the assembler shall refuse it.
   Trace: AS-EXT-010.  Verify: T — `movbe %eax,%ebx`: exit 1 (GNU accepts it only with APX).
-- [ ] **AS-T-339** The extension corpus shall show no line in the classes "wrong" and "accepts-invalid" for any family.
+- [x] **AS-T-339** The extension corpus shall show no line in the classes "wrong" and "accepts-invalid" for any family.
   Trace: AS-EXT-001 to 010.  Verify: T — the differential harness over `aud/ext/` in the three modes with an empty baseline for those classes.  After: 310–338.
 
 ## J. Modes
@@ -1281,5 +1282,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 284 done, 67 open.  Numbers run to 400, with gaps left between
+351 tasks: 290 done, 61 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

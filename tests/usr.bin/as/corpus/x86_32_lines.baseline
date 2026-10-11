@@ -81,7 +81,6 @@ addr16 jcxz 1f | 1:
 setab %al
 call .
 call .+5
-xsetbv
 int $sym
 ret $sym
 movsl (%edi),%es:(%esi)

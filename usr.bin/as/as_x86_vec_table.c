@@ -46,6 +46,11 @@
     VX(n, pp, map, op, w, L128, "iXxx", "imvr", fl), VX(n, pp, map, op, w, L256, "iYyy", "imvr", fl)
 #define V2I(n, pp, map, op, w, fl) \
     VX(n, pp, map, op, w, L128, "iXx", "imr", fl), VX(n, pp, map, op, w, L256, "iYy", "imr", fl)
+/* The same where the byte is never negative. */
+#define V3U(n, pp, map, op, w, fl) \
+    VX(n, pp, map, op, w, L128, "uXxx", "imvr", fl), VX(n, pp, map, op, w, L256, "uYyy", "imvr", fl)
+#define V2U(n, pp, map, op, w, fl) \
+    VX(n, pp, map, op, w, L128, "uXx", "imr", fl), VX(n, pp, map, op, w, L256, "uYy", "imr", fl)
 /* VEX, %xmm alone. */
 #define V3X(n, pp, map, op, w, fl) VX(n, pp, map, op, w, L128, "Xxx", "mvr", fl)
 #define V3S(n, pp, map, op, w, fl) VX(n, pp, map, op, w, LIG, "Xxx", "mvr", fl)
@@ -65,6 +70,12 @@
 #define E2I(n, pp, map, op, w, bc, fz) \
     EX(n, pp, map, op, w, L128, "iXx", "imr", 16, bc, KZ), EX(n, pp, map, op, w, L256, "iYy", "imr", 32, bc, KZ), \
         EX(n, pp, map, op, w, L512, "iZz", "imr", 64, bc, KZ | (fz))
+#define E3U(n, pp, map, op, w, bc, fz) \
+    EX(n, pp, map, op, w, L128, "uXxx", "imvr", 16, bc, KZ), EX(n, pp, map, op, w, L256, "uYyy", "imvr", 32, bc, KZ), \
+        EX(n, pp, map, op, w, L512, "uZzz", "imvr", 64, bc, KZ | (fz))
+#define E2U(n, pp, map, op, w, bc, fz) \
+    EX(n, pp, map, op, w, L128, "uXx", "imr", 16, bc, KZ), EX(n, pp, map, op, w, L256, "uYy", "imr", 32, bc, KZ), \
+        EX(n, pp, map, op, w, L512, "uZz", "imr", 64, bc, KZ | (fz))
 /* EVEX, a scalar: `N` its bytes. */
 #define E3S(n, pp, map, op, w, N, fl) EX(n, pp, map, op, w, LIG, "Xxx", "mvr", N, 0, KZ | (fl))
 #define E2S(n, pp, map, op, w, N, fl) EX(n, pp, map, op, w, LIG, "Xx", "mr", N, 0, fl)
@@ -98,12 +109,12 @@
  * number: `op` and `iop` /`dg`. */
 #define SHIFT(n, op, iop, dg, ew, bc) \
     VX(n, P66, M1, op, WIG, L128, "Xxx", "mvr", 0), VX(n, P66, M1, op, WIG, L256, "Xyy", "mvr", 0), \
-        VX(n, P66, M1, iop, WIG, L128, "ixx", "imv", DG(dg)), VX(n, P66, M1, iop, WIG, L256, "iyy", "imv", DG(dg)), \
+        VX(n, P66, M1, iop, WIG, L128, "uxx", "imv", DG(dg)), VX(n, P66, M1, iop, WIG, L256, "uyy", "imv", DG(dg)), \
         EX(n, P66, M1, op, ew, L128, "Xxx", "mvr", 16, 0, KZ), EX(n, P66, M1, op, ew, L256, "Xyy", "mvr", 16, 0, KZ), \
         EX(n, P66, M1, op, ew, L512, "Xzz", "mvr", 16, 0, KZ), \
-        EX(n, P66, M1, iop, ew, L128, "iXx", "imv", 16, bc, KZ | DG(dg)), \
-        EX(n, P66, M1, iop, ew, L256, "iYy", "imv", 32, bc, KZ | DG(dg)), \
-        EX(n, P66, M1, iop, ew, L512, "iZz", "imv", 64, bc, KZ | DG(dg))
+        EX(n, P66, M1, iop, ew, L128, "uXx", "imv", 16, bc, KZ | DG(dg)), \
+        EX(n, P66, M1, iop, ew, L256, "uYy", "imv", 32, bc, KZ | DG(dg)), \
+        EX(n, P66, M1, iop, ew, L512, "uZz", "imv", 64, bc, KZ | DG(dg))
 
 /* Sign and zero extension: the source is `sx`, `sy`, `sz` bytes of
  * memory, or an %xmm register (a %ymm one for the 512-bit quarter...). */
@@ -181,10 +192,10 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     V3S("vrcpss", PF3, M1, 0x53, WIG, 0),
     V2("vrsqrtps", P0, M1, 0x52, WIG, 0),
     V3S("vrsqrtss", PF3, M1, 0x52, WIG, 0),
-    V2I("vroundps", P66, M3, 0x08, WIG, 0),
-    V2I("vroundpd", P66, M3, 0x09, WIG, 0),
-    VX("vroundss", P66, M3, 0x0a, WIG, LIG, "iXxx", "imvr", 0),
-    VX("vroundsd", P66, M3, 0x0b, WIG, LIG, "iXxx", "imvr", 0),
+    V2U("vroundps", P66, M3, 0x08, WIG, 0),
+    V2U("vroundpd", P66, M3, 0x09, WIG, 0),
+    VX("vroundss", P66, M3, 0x0a, WIG, LIG, "uXxx", "imvr", 0),
+    VX("vroundsd", P66, M3, 0x0b, WIG, LIG, "uXxx", "imvr", 0),
     VX("vdppd", P66, M3, 0x41, WIG, L128, "iXxx", "imvr", 0),
     V3I("vdpps", P66, M3, 0x40, WIG, 0),
 
@@ -235,18 +246,18 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     E3YZ("vpermpd", P66, M2, 0x16, W1, 8),
 
     /* Compares. */
-    V3I("vcmpps", P0, M1, 0xc2, WIG, 0),
-    EX("vcmpps", P0, M1, 0xc2, W0, L128, "iXxk", "imvr", 16, 4, K),
-    EX("vcmpps", P0, M1, 0xc2, W0, L256, "iYyk", "imvr", 32, 4, K),
-    EX("vcmpps", P0, M1, 0xc2, W0, L512, "iZzk", "imvr", 64, 4, K | SAE),
-    V3I("vcmppd", P66, M1, 0xc2, WIG, 0),
-    EX("vcmppd", P66, M1, 0xc2, W1, L128, "iXxk", "imvr", 16, 8, K),
-    EX("vcmppd", P66, M1, 0xc2, W1, L256, "iYyk", "imvr", 32, 8, K),
-    EX("vcmppd", P66, M1, 0xc2, W1, L512, "iZzk", "imvr", 64, 8, K | SAE),
-    VX("vcmpss", PF3, M1, 0xc2, WIG, LIG, "iXxx", "imvr", 0),
-    EX("vcmpss", PF3, M1, 0xc2, W0, LIG, "iXxk", "imvr", 4, 0, K | SAE),
-    VX("vcmpsd", PF2, M1, 0xc2, WIG, LIG, "iXxx", "imvr", 0),
-    EX("vcmpsd", PF2, M1, 0xc2, W1, LIG, "iXxk", "imvr", 8, 0, K | SAE),
+    V3U("vcmpps", P0, M1, 0xc2, WIG, 0),
+    EX("vcmpps", P0, M1, 0xc2, W0, L128, "uXxk", "imvr", 16, 4, K),
+    EX("vcmpps", P0, M1, 0xc2, W0, L256, "uYyk", "imvr", 32, 4, K),
+    EX("vcmpps", P0, M1, 0xc2, W0, L512, "uZzk", "imvr", 64, 4, K | SAE),
+    V3U("vcmppd", P66, M1, 0xc2, WIG, 0),
+    EX("vcmppd", P66, M1, 0xc2, W1, L128, "uXxk", "imvr", 16, 8, K),
+    EX("vcmppd", P66, M1, 0xc2, W1, L256, "uYyk", "imvr", 32, 8, K),
+    EX("vcmppd", P66, M1, 0xc2, W1, L512, "uZzk", "imvr", 64, 8, K | SAE),
+    VX("vcmpss", PF3, M1, 0xc2, WIG, LIG, "uXxx", "imvr", 0),
+    EX("vcmpss", PF3, M1, 0xc2, W0, LIG, "uXxk", "imvr", 4, 0, K | SAE),
+    VX("vcmpsd", PF2, M1, 0xc2, WIG, LIG, "uXxx", "imvr", 0),
+    EX("vcmpsd", PF2, M1, 0xc2, W1, LIG, "uXxk", "imvr", 8, 0, K | SAE),
     V2S("vcomiss", P0, M1, 0x2f, WIG, 0),
     E2S("vcomiss", P0, M1, 0x2f, W0, 4, SAE),
     V2S("vcomisd", P66, M1, 0x2f, WIG, 0),
@@ -313,11 +324,11 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     EX("vcvtph2ps", P66, M2, 0x13, W0, L128, "Xx", "mr", 8, 0, KZ),
     EX("vcvtph2ps", P66, M2, 0x13, W0, L256, "Xy", "mr", 16, 0, KZ),
     EX("vcvtph2ps", P66, M2, 0x13, W0, L512, "Yz", "mr", 32, 0, KZ | SAE),
-    VX("vcvtps2ph", P66, M3, 0x1d, W0, L128, "ixX", "irm", 0),
-    VX("vcvtps2ph", P66, M3, 0x1d, W0, L256, "iyX", "irm", 0),
-    EX("vcvtps2ph", P66, M3, 0x1d, W0, L128, "ixX", "irm", 8, 0, KZ),
-    EX("vcvtps2ph", P66, M3, 0x1d, W0, L256, "iyX", "irm", 16, 0, KZ),
-    EX("vcvtps2ph", P66, M3, 0x1d, W0, L512, "izY", "irm", 32, 0, KZ | SAE),
+    VX("vcvtps2ph", P66, M3, 0x1d, W0, L128, "uxX", "irm", 0),
+    VX("vcvtps2ph", P66, M3, 0x1d, W0, L256, "uyX", "irm", 0),
+    EX("vcvtps2ph", P66, M3, 0x1d, W0, L128, "uxX", "irm", 8, 0, KZ),
+    EX("vcvtps2ph", P66, M3, 0x1d, W0, L256, "uyX", "irm", 16, 0, KZ),
+    EX("vcvtps2ph", P66, M3, 0x1d, W0, L512, "uzY", "irm", 32, 0, KZ | SAE),
 
     /* Moves. */
     VMOVE("vmovaps", P0, 0x28, 0x29),
@@ -454,36 +465,36 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     EX("vpbroadcastq", P66, M2, 0x7c, W1, L128, "qx", "mr", 0, 0, KZ | O64),
     EX("vpbroadcastq", P66, M2, 0x7c, W1, L256, "qy", "mr", 0, 0, KZ | O64),
     EX("vpbroadcastq", P66, M2, 0x7c, W1, L512, "qz", "mr", 0, 0, KZ | O64),
-    VX("vinsertf128", P66, M3, 0x18, W0, L256, "iXyy", "imvr", 0),
-    VX("vinserti128", P66, M3, 0x38, W0, L256, "iXyy", "imvr", 0),
-    VX("vextractf128", P66, M3, 0x19, W0, L256, "iyX", "irm", 0),
-    VX("vextracti128", P66, M3, 0x39, W0, L256, "iyX", "irm", 0),
-    VX("vinsertps", P66, M3, 0x21, WIG, L128, "iXxx", "imvr", 0),
-    EX("vinsertps", P66, M3, 0x21, W0, L128, "iXxx", "imvr", 4, 0, 0),
-    VX("vextractps", P66, M3, 0x17, WIG, L128, "ixR", "irm", 0),
-    VX("vextractps", P66, M3, 0x17, WIG, L128, "ixm", "irm", 0),
-    EX("vextractps", P66, M3, 0x17, WIG, L128, "ixR", "irm", 4, 0, 0),
-    EX("vextractps", P66, M3, 0x17, WIG, L128, "ixm", "irm", 4, 0, 0),
-    VX("vpextrb", P66, M3, 0x14, W0, L128, "ixR", "irm", 0),
-    VX("vpextrb", P66, M3, 0x14, W0, L128, "ixm", "irm", 0),
-    EX("vpextrb", P66, M3, 0x14, WIG, L128, "ixR", "irm", 1, 0, 0),
-    EX("vpextrb", P66, M3, 0x14, WIG, L128, "ixm", "irm", 1, 0, 0),
-    VX("vpextrw", P66, M1, 0xc5, W0, L128, "ixR", "imr", 0),
-    VX("vpextrw", P66, M3, 0x15, W0, L128, "ixm", "irm", 0),
-    EX("vpextrw", P66, M1, 0xc5, WIG, L128, "ixR", "imr", 0, 0, 0),
-    EX("vpextrw", P66, M3, 0x15, WIG, L128, "ixm", "irm", 2, 0, 0),
-    VX("vpextrd", P66, M3, 0x16, W0, L128, "ixD", "irm", 0),
-    EX("vpextrd", P66, M3, 0x16, W0, L128, "ixD", "irm", 4, 0, 0),
-    VX("vpextrq", P66, M3, 0x16, W1, L128, "ixQ", "irm", O64),
-    EX("vpextrq", P66, M3, 0x16, W1, L128, "ixQ", "irm", 8, 0, O64),
-    VX("vpinsrb", P66, M3, 0x20, W0, L128, "iExx", "imvr", 0),
-    EX("vpinsrb", P66, M3, 0x20, WIG, L128, "iExx", "imvr", 1, 0, 0),
-    VX("vpinsrw", P66, M1, 0xc4, W0, L128, "iExx", "imvr", 0),
-    EX("vpinsrw", P66, M1, 0xc4, WIG, L128, "iExx", "imvr", 2, 0, 0),
-    VX("vpinsrd", P66, M3, 0x22, W0, L128, "iDxx", "imvr", 0),
-    EX("vpinsrd", P66, M3, 0x22, W0, L128, "iDxx", "imvr", 4, 0, 0),
-    VX("vpinsrq", P66, M3, 0x22, W1, L128, "iQxx", "imvr", O64),
-    EX("vpinsrq", P66, M3, 0x22, W1, L128, "iQxx", "imvr", 8, 0, O64),
+    VX("vinsertf128", P66, M3, 0x18, W0, L256, "uXyy", "imvr", 0),
+    VX("vinserti128", P66, M3, 0x38, W0, L256, "uXyy", "imvr", 0),
+    VX("vextractf128", P66, M3, 0x19, W0, L256, "uyX", "irm", 0),
+    VX("vextracti128", P66, M3, 0x39, W0, L256, "uyX", "irm", 0),
+    VX("vinsertps", P66, M3, 0x21, WIG, L128, "uXxx", "imvr", 0),
+    EX("vinsertps", P66, M3, 0x21, W0, L128, "uXxx", "imvr", 4, 0, 0),
+    VX("vextractps", P66, M3, 0x17, WIG, L128, "uxR", "irm", 0),
+    VX("vextractps", P66, M3, 0x17, WIG, L128, "uxm", "irm", 0),
+    EX("vextractps", P66, M3, 0x17, WIG, L128, "uxR", "irm", 4, 0, 0),
+    EX("vextractps", P66, M3, 0x17, WIG, L128, "uxm", "irm", 4, 0, 0),
+    VX("vpextrb", P66, M3, 0x14, W0, L128, "uxR", "irm", 0),
+    VX("vpextrb", P66, M3, 0x14, W0, L128, "uxm", "irm", 0),
+    EX("vpextrb", P66, M3, 0x14, WIG, L128, "uxR", "irm", 1, 0, 0),
+    EX("vpextrb", P66, M3, 0x14, WIG, L128, "uxm", "irm", 1, 0, 0),
+    VX("vpextrw", P66, M1, 0xc5, W0, L128, "uxR", "imr", 0),
+    VX("vpextrw", P66, M3, 0x15, W0, L128, "uxm", "irm", 0),
+    EX("vpextrw", P66, M1, 0xc5, WIG, L128, "uxR", "imr", 0, 0, 0),
+    EX("vpextrw", P66, M3, 0x15, WIG, L128, "uxm", "irm", 2, 0, 0),
+    VX("vpextrd", P66, M3, 0x16, W0, L128, "uxD", "irm", 0),
+    EX("vpextrd", P66, M3, 0x16, W0, L128, "uxD", "irm", 4, 0, 0),
+    VX("vpextrq", P66, M3, 0x16, W1, L128, "uxQ", "irm", O64),
+    EX("vpextrq", P66, M3, 0x16, W1, L128, "uxQ", "irm", 8, 0, O64),
+    VX("vpinsrb", P66, M3, 0x20, W0, L128, "uExx", "imvr", 0),
+    EX("vpinsrb", P66, M3, 0x20, WIG, L128, "uExx", "imvr", 1, 0, 0),
+    VX("vpinsrw", P66, M1, 0xc4, W0, L128, "uExx", "imvr", 0),
+    EX("vpinsrw", P66, M1, 0xc4, WIG, L128, "uExx", "imvr", 2, 0, 0),
+    VX("vpinsrd", P66, M3, 0x22, W0, L128, "uDxx", "imvr", 0),
+    EX("vpinsrd", P66, M3, 0x22, W0, L128, "uDxx", "imvr", 4, 0, 0),
+    VX("vpinsrq", P66, M3, 0x22, W1, L128, "uQxx", "imvr", O64),
+    EX("vpinsrq", P66, M3, 0x22, W1, L128, "uQxx", "imvr", 8, 0, O64),
 
     /* Integer arithmetic. */
     INT_BW("vpaddb", P66, M1, 0xfc, 0),
@@ -561,8 +572,8 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     VX("vphminposuw", P66, M2, 0x41, WIG, L128, "Xx", "mr", 0),
     V3I("vmpsadbw", P66, M3, 0x42, WIG, 0),
     E3I("vmpsadbw", PF3, M3, 0x42, W0, 0, 0),
-    V3I("vpalignr", P66, M3, 0x0f, WIG, 0),
-    E3I("vpalignr", P66, M3, 0x0f, WIG, 0, 0),
+    V3U("vpalignr", P66, M3, 0x0f, WIG, 0),
+    E3U("vpalignr", P66, M3, 0x0f, WIG, 0, 0),
     V2I("vpshufd", P66, M1, 0x70, WIG, 0),
     E2I("vpshufd", P66, M1, 0x70, W0, 4, 0),
     V2I("vpshufhw", PF3, M1, 0x70, WIG, 0),
@@ -582,10 +593,10 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     PCMP("vpcmpgtw", M1, 0x65, 0, WIG, 0),
     PCMP("vpcmpgtd", M1, 0x66, 0, W0, 4),
     PCMP("vpcmpgtq", M2, 0x37, 0, W1, 8),
-    VX("vpcmpestri", P66, M3, 0x61, WIG, L128, "iXx", "imr", 0),
-    VX("vpcmpestrm", P66, M3, 0x60, WIG, L128, "iXx", "imr", 0),
-    VX("vpcmpistri", P66, M3, 0x63, WIG, L128, "iXx", "imr", 0),
-    VX("vpcmpistrm", P66, M3, 0x62, WIG, L128, "iXx", "imr", 0),
+    VX("vpcmpestri", P66, M3, 0x61, WIG, L128, "uXx", "imr", 0),
+    VX("vpcmpestrm", P66, M3, 0x60, WIG, L128, "uXx", "imr", 0),
+    VX("vpcmpistri", P66, M3, 0x63, WIG, L128, "uXx", "imr", 0),
+    VX("vpcmpistrm", P66, M3, 0x62, WIG, L128, "uXx", "imr", 0),
 
     /* Shifts. */
     SHIFT("vpsllw", 0xf1, 0x71, 6, WIG, 0),
@@ -597,10 +608,10 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     SHIFT("vpsrld", 0xd2, 0x72, 2, W0, 4),
     SHIFT("vpsrlq", 0xd3, 0x73, 2, W1, 8),
 #define BYTESHIFT(n, dg) \
-    VX(n, P66, M1, 0x73, WIG, L128, "ixx", "imv", DG(dg)), VX(n, P66, M1, 0x73, WIG, L256, "iyy", "imv", DG(dg)), \
-        EX(n, P66, M1, 0x73, WIG, L128, "iXx", "imv", 16, 0, DG(dg)), \
-        EX(n, P66, M1, 0x73, WIG, L256, "iYy", "imv", 32, 0, DG(dg)), \
-        EX(n, P66, M1, 0x73, WIG, L512, "iZz", "imv", 64, 0, DG(dg))
+    VX(n, P66, M1, 0x73, WIG, L128, "uxx", "imv", DG(dg)), VX(n, P66, M1, 0x73, WIG, L256, "uyy", "imv", DG(dg)), \
+        EX(n, P66, M1, 0x73, WIG, L128, "uXx", "imv", 16, 0, DG(dg)), \
+        EX(n, P66, M1, 0x73, WIG, L256, "uYy", "imv", 32, 0, DG(dg)), \
+        EX(n, P66, M1, 0x73, WIG, L512, "uZz", "imv", 64, 0, DG(dg))
     BYTESHIFT("vpslldq", 7),
     BYTESHIFT("vpsrldq", 3),
     V3("vpsllvd", P66, M2, 0x47, W0, 0),
@@ -638,15 +649,15 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     AESROW("vaesdec", 0xde),
     AESROW("vaesdeclast", 0xdf),
     VX("vaesimc", P66, M2, 0xdb, WIG, L128, "Xx", "mr", 0),
-    VX("vaeskeygenassist", P66, M3, 0xdf, WIG, L128, "iXx", "imr", 0),
+    VX("vaeskeygenassist", P66, M3, 0xdf, WIG, L128, "uXx", "imr", 0),
     V3I("vpclmulqdq", P66, M3, 0x44, WIG, 0),
     EX("vpclmulqdq", P66, M3, 0x44, WIG, L128, "iXxx", "imvr", 16, 0, 0),
     EX("vpclmulqdq", P66, M3, 0x44, WIG, L256, "iYyy", "imvr", 32, 0, 0),
     EX("vpclmulqdq", P66, M3, 0x44, WIG, L512, "iZzz", "imvr", 64, 0, 0),
-    V3I("vgf2p8affineqb", P66, M3, 0xce, W1, 0),
-    E3I("vgf2p8affineqb", P66, M3, 0xce, W1, 8, 0),
-    V3I("vgf2p8affineinvqb", P66, M3, 0xcf, W1, 0),
-    E3I("vgf2p8affineinvqb", P66, M3, 0xcf, W1, 8, 0),
+    V3U("vgf2p8affineqb", P66, M3, 0xce, W1, 0),
+    E3U("vgf2p8affineqb", P66, M3, 0xce, W1, 8, 0),
+    V3U("vgf2p8affineinvqb", P66, M3, 0xcf, W1, 0),
+    E3U("vgf2p8affineinvqb", P66, M3, 0xcf, W1, 8, 0),
     V3("vgf2p8mulb", P66, M2, 0xcf, W0, 0),
     E3("vgf2p8mulb", P66, M2, 0xcf, W0, 0, 0),
 
@@ -755,8 +766,8 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     E3I("vdbpsadbw", P66, M3, 0x42, W0, 0, 0),
     E3I("vpternlogd", P66, M3, 0x25, W0, 4, 0),
     E3I("vpternlogq", P66, M3, 0x25, W1, 8, 0),
-    E3I("valignd", P66, M3, 0x03, W0, 4, 0),
-    E3I("valignq", P66, M3, 0x03, W1, 8, 0),
+    E3U("valignd", P66, M3, 0x03, W0, 4, 0),
+    E3U("valignq", P66, M3, 0x03, W1, 8, 0),
     E3("vblendmps", P66, M2, 0x65, W0, 4, 0),
     E3("vblendmpd", P66, M2, 0x65, W1, 8, 0),
     E3("vpblendmd", P66, M2, 0x64, W0, 4, 0),
@@ -803,33 +814,33 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     E2("vplzcntq", P66, M2, 0x44, W1, 8, 0),
 
     /* With a number: of two operands, and scalars. */
-#define E3SI(n, pp, map, op, w, N, fl) EX(n, pp, map, op, w, LIG, "iXxx", "imvr", N, 0, KZ | (fl))
-    E2I("vgetmantps", P66, M3, 0x26, W0, 4, SAE),
-    E2I("vgetmantpd", P66, M3, 0x26, W1, 8, SAE),
+#define E3SI(n, pp, map, op, w, N, fl) EX(n, pp, map, op, w, LIG, "uXxx", "imvr", N, 0, KZ | (fl))
+    E2U("vgetmantps", P66, M3, 0x26, W0, 4, SAE),
+    E2U("vgetmantpd", P66, M3, 0x26, W1, 8, SAE),
     E3SI("vgetmantss", P66, M3, 0x27, W0, 4, SAE),
     E3SI("vgetmantsd", P66, M3, 0x27, W1, 8, SAE),
-    E2I("vrndscaleps", P66, M3, 0x08, W0, 4, SAE),
-    E2I("vrndscalepd", P66, M3, 0x09, W1, 8, SAE),
+    E2U("vrndscaleps", P66, M3, 0x08, W0, 4, SAE),
+    E2U("vrndscalepd", P66, M3, 0x09, W1, 8, SAE),
     E3SI("vrndscaless", P66, M3, 0x0a, W0, 4, SAE),
     E3SI("vrndscalesd", P66, M3, 0x0b, W1, 8, SAE),
-    E2I("vreduceps", P66, M3, 0x56, W0, 4, SAE),
-    E2I("vreducepd", P66, M3, 0x56, W1, 8, SAE),
+    E2U("vreduceps", P66, M3, 0x56, W0, 4, SAE),
+    E2U("vreducepd", P66, M3, 0x56, W1, 8, SAE),
     E3SI("vreducess", P66, M3, 0x57, W0, 4, SAE),
     E3SI("vreducesd", P66, M3, 0x57, W1, 8, SAE),
-    E3I("vrangeps", P66, M3, 0x50, W0, 4, SAE),
-    E3I("vrangepd", P66, M3, 0x50, W1, 8, SAE),
+    E3U("vrangeps", P66, M3, 0x50, W0, 4, SAE),
+    E3U("vrangepd", P66, M3, 0x50, W1, 8, SAE),
     E3SI("vrangess", P66, M3, 0x51, W0, 4, SAE),
     E3SI("vrangesd", P66, M3, 0x51, W1, 8, SAE),
     E3I("vfixupimmps", P66, M3, 0x54, W0, 4, SAE),
     E3I("vfixupimmpd", P66, M3, 0x54, W1, 8, SAE),
-    E3SI("vfixupimmss", P66, M3, 0x55, W0, 4, SAE),
-    E3SI("vfixupimmsd", P66, M3, 0x55, W1, 8, SAE),
-    E3I("vpshldw", P66, M3, 0x70, W1, 0, 0),
-    E3I("vpshldd", P66, M3, 0x71, W0, 4, 0),
-    E3I("vpshldq", P66, M3, 0x71, W1, 8, 0),
-    E3I("vpshrdw", P66, M3, 0x72, W1, 0, 0),
-    E3I("vpshrdd", P66, M3, 0x73, W0, 4, 0),
-    E3I("vpshrdq", P66, M3, 0x73, W1, 8, 0),
+    EX("vfixupimmss", P66, M3, 0x55, W0, LIG, "iXxx", "imvr", 4, 0, KZ | SAE),
+    EX("vfixupimmsd", P66, M3, 0x55, W1, LIG, "iXxx", "imvr", 8, 0, KZ | SAE),
+    E3U("vpshldw", P66, M3, 0x70, W1, 0, 0),
+    E3U("vpshldd", P66, M3, 0x71, W0, 4, 0),
+    E3U("vpshldq", P66, M3, 0x71, W1, 8, 0),
+    E3U("vpshrdw", P66, M3, 0x72, W1, 0, 0),
+    E3U("vpshrdd", P66, M3, 0x73, W0, 4, 0),
+    E3U("vpshrdq", P66, M3, 0x73, W1, 8, 0),
     E3("vpshldvw", P66, M2, 0x70, W1, 0, 0),
     E3("vpshldvd", P66, M2, 0x71, W0, 4, 0),
     E3("vpshldvq", P66, M2, 0x71, W1, 8, 0),
@@ -847,9 +858,9 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     EX("vpsraq", P66, M1, 0xe2, W1, L128, "Xxx", "mvr", 16, 0, KZ),
     EX("vpsraq", P66, M1, 0xe2, W1, L256, "Xyy", "mvr", 16, 0, KZ),
     EX("vpsraq", P66, M1, 0xe2, W1, L512, "Xzz", "mvr", 16, 0, KZ),
-    EX("vpsraq", P66, M1, 0x72, W1, L128, "iXx", "imv", 16, 8, KZ | DG(4)),
-    EX("vpsraq", P66, M1, 0x72, W1, L256, "iYy", "imv", 32, 8, KZ | DG(4)),
-    EX("vpsraq", P66, M1, 0x72, W1, L512, "iZz", "imv", 64, 8, KZ | DG(4)),
+    EX("vpsraq", P66, M1, 0x72, W1, L128, "uXx", "imv", 16, 8, KZ | DG(4)),
+    EX("vpsraq", P66, M1, 0x72, W1, L256, "uYy", "imv", 32, 8, KZ | DG(4)),
+    EX("vpsraq", P66, M1, 0x72, W1, L512, "uZz", "imv", 64, 8, KZ | DG(4)),
     E3("vpsravq", P66, M2, 0x46, W1, 8, 0),
     E3("vpsllvw", P66, M2, 0x12, W1, 0, 0),
     E3("vpsravw", P66, M2, 0x11, W1, 0, 0),
@@ -872,8 +883,8 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     EX(n, pp, map, op, w, L128, "Xxk", "mvr", 16, bc, K), EX(n, pp, map, op, w, L256, "Yyk", "mvr", 32, bc, K), \
         EX(n, pp, map, op, w, L512, "Zzk", "mvr", 64, bc, K)
 #define E3KI(n, pp, map, op, w, bc) \
-    EX(n, pp, map, op, w, L128, "iXxk", "imvr", 16, bc, K), EX(n, pp, map, op, w, L256, "iYyk", "imvr", 32, bc, K), \
-        EX(n, pp, map, op, w, L512, "iZzk", "imvr", 64, bc, K)
+    EX(n, pp, map, op, w, L128, "uXxk", "imvr", 16, bc, K), EX(n, pp, map, op, w, L256, "uYyk", "imvr", 32, bc, K), \
+        EX(n, pp, map, op, w, L512, "uZzk", "imvr", 64, bc, K)
     E3KI("vpcmpd", P66, M3, 0x1f, W0, 4),
     E3KI("vpcmpq", P66, M3, 0x1f, W1, 8),
     E3KI("vpcmpud", P66, M3, 0x1e, W0, 4),
@@ -979,13 +990,13 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     EX("vbroadcasti32x8", P66, M2, 0x5b, W0, L512, "mz", "mr", 32, 0, KZ),
     EX("vbroadcasti64x4", P66, M2, 0x5b, W1, L512, "mz", "mr", 32, 0, KZ),
 #define INSERT128(n, w, op) \
-    EX(n, P66, M3, op, w, L256, "iXyy", "imvr", 16, 0, KZ), EX(n, P66, M3, op, w, L512, "iXzz", "imvr", 16, 0, KZ)
+    EX(n, P66, M3, op, w, L256, "uXyy", "imvr", 16, 0, KZ), EX(n, P66, M3, op, w, L512, "uXzz", "imvr", 16, 0, KZ)
 #define EXTRACT128(n, w, op) \
-    EX(n, P66, M3, op, w, L256, "iyx", "irm", 16, 0, KZ), EX(n, P66, M3, op, w, L256, "iym", "irm", 16, 0, K), \
-        EX(n, P66, M3, op, w, L512, "izx", "irm", 16, 0, KZ), EX(n, P66, M3, op, w, L512, "izm", "irm", 16, 0, K)
-#define INSERT256(n, w, op) EX(n, P66, M3, op, w, L512, "iYzz", "imvr", 32, 0, KZ)
+    EX(n, P66, M3, op, w, L256, "uyx", "irm", 16, 0, KZ), EX(n, P66, M3, op, w, L256, "uym", "irm", 16, 0, K), \
+        EX(n, P66, M3, op, w, L512, "uzx", "irm", 16, 0, KZ), EX(n, P66, M3, op, w, L512, "uzm", "irm", 16, 0, K)
+#define INSERT256(n, w, op) EX(n, P66, M3, op, w, L512, "uYzz", "imvr", 32, 0, KZ)
 #define EXTRACT256(n, w, op) \
-    EX(n, P66, M3, op, w, L512, "izy", "irm", 32, 0, KZ), EX(n, P66, M3, op, w, L512, "izm", "irm", 32, 0, K)
+    EX(n, P66, M3, op, w, L512, "uzy", "irm", 32, 0, KZ), EX(n, P66, M3, op, w, L512, "uzm", "irm", 32, 0, K)
     INSERT128("vinsertf32x4", W0, 0x18),
     INSERT128("vinsertf64x2", W1, 0x18),
     INSERT128("vinserti32x4", W0, 0x38),
@@ -1046,6 +1057,379 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
         EX(n "q", pp, M1, 0x7b, W1, LIG, "Qxx", "mvr", 8, 0, O64 | (efl64))
     EUSI2F("vcvtusi2sd", PF2, 0, ER),
     EUSI2F("vcvtusi2ss", PF3, ER, ER),
+
+    /*
+     * BMI1 and BMI2: VEX, and general registers.
+     */
+#define OP32 AS_VEC_F_OP32
+#define OP16 AS_VEC_F_OP16
+#define WEAK AS_VEC_F_WEAK
+/* One of 32 bits and one of 64, under the name and under the name
+ * with an l or a q after it. */
+#define GPR3(n, pp, map, op, o32, o64, roles, fl) \
+    VX(n, pp, map, op, W0, L128, o32, roles, AS_VEC_F_VEX3 | (fl)), \
+        VX(n, pp, map, op, W1, L128, o64, roles, AS_VEC_F_VEX3 | O64 | (fl)), \
+        VX(n "l", pp, map, op, W0, L128, o32, roles, AS_VEC_F_VEX3 | (fl)), \
+        VX(n "q", pp, map, op, W1, L128, o64, roles, AS_VEC_F_VEX3 | O64 | (fl))
+    GPR3("andn", P0, M2, 0xf2, "Ddd", "Qqq", "mvr", 0),
+    GPR3("bextr", P0, M2, 0xf7, "dDd", "qQq", "vmr", 0),
+    GPR3("bzhi", P0, M2, 0xf5, "dDd", "qQq", "vmr", 0),
+    GPR3("mulx", PF2, M2, 0xf6, "Ddd", "Qqq", "mvr", 0),
+    GPR3("pdep", PF2, M2, 0xf5, "Ddd", "Qqq", "mvr", 0),
+    GPR3("pext", PF3, M2, 0xf5, "Ddd", "Qqq", "mvr", 0),
+    GPR3("sarx", PF3, M2, 0xf7, "dDd", "qQq", "vmr", 0),
+    GPR3("shlx", P66, M2, 0xf7, "dDd", "qQq", "vmr", 0),
+    GPR3("shrx", PF2, M2, 0xf7, "dDd", "qQq", "vmr", 0),
+    GPR3("rorx", PF2, M3, 0xf0, "iDd", "iQq", "imr", 0),
+    GPR3("blsr", P0, M2, 0xf3, "Dd", "Qq", "mv", DG(1)),
+    GPR3("blsmsk", P0, M2, 0xf3, "Dd", "Qq", "mv", DG(2)),
+    GPR3("blsi", P0, M2, 0xf3, "Dd", "Qq", "mv", DG(3)),
+
+    /*
+     * No VEX from here: MMX, SSE to SSE4.2, AES, SHA, GFNI, and the
+     * three counts that are written like them.
+     */
+#define LX(n, pp, map, op, w, ops, roles, fl) {n, AS_VEC_LEGACY, pp, map, op, w, 0, ops, roles, 0, 0, fl}
+/* An instruction with no operand in ModRM: `b` the byte after the
+ * opcode, 0 for none. */
+#define LFIX(n, op, b, ops, roles) {n, AS_VEC_LEGACY, P0, M1, op, W0, 0, ops, roles, b, 0, 0}
+/* %xmm, or memory, to %xmm; and with a number before. */
+#define S2(n, pp, map, op) LX(n, pp, map, op, W0, "Xx", "mr", 0)
+#define S2I(n, pp, map, op) LX(n, pp, map, op, W0, "iXx", "imr", 0)
+#define S2U(n, pp, map, op) LX(n, pp, map, op, W0, "uXx", "imr", 0)
+/* The same for MMX registers, and for %xmm with the 66 that makes it so. */
+#define MS2(n, map, op) LX(n, P0, map, op, W0, "Nn", "mr", 0), LX(n, P66, map, op, W0, "Xx", "mr", 0)
+/* ps, pd, ss, sd of one opcode. */
+#define SARITH(base, op) \
+    S2(base "ps", P0, M1, op), S2(base "pd", P66, M1, op), S2(base "ss", PF3, M1, op), S2(base "sd", PF2, M1, op)
+#define SLOGIC(base, op) S2(base "ps", P0, M1, op), S2(base "pd", P66, M1, op)
+/* A whole vector to a register, and from one. */
+#define SMOVE(n, pp, ld, st) LX(n, pp, M1, ld, W0, "Xx", "mr", SWAP), LX(n, pp, M1, st, W0, "xX", "rm", 0)
+/* A shift: by a count in a register or in memory, and by a number. */
+#define MSHIFT(n, op, iop, dg) \
+    LX(n, P0, M1, op, W0, "Nn", "mr", 0), LX(n, P0, M1, iop, W0, "un", "im", DG(dg)), \
+        LX(n, P66, M1, op, W0, "Xx", "mr", 0), LX(n, P66, M1, iop, W0, "ux", "im", DG(dg))
+/* To a general register of 32 or 64 bits from a scalar, under the name
+ * and with an l or a q after it. */
+#define SCVT2SI(n, pp, op) \
+    LX(n, pp, M1, op, W0, "Xd", "mr", 0), LX(n, pp, M1, op, W1, "Xq", "mr", O64), \
+        LX(n "l", pp, M1, op, W0, "Xd", "mr", 0), LX(n "q", pp, M1, op, W1, "Xq", "mr", O64)
+#define SSI2F(n, pp) \
+    LX(n, pp, M1, 0x2a, W0, "Dx", "mr", 0), LX(n, pp, M1, 0x2a, W1, "qx", "mr", O64), \
+        LX(n "l", pp, M1, 0x2a, W0, "Dx", "mr", 0), LX(n "q", pp, M1, 0x2a, W1, "Qx", "mr", O64)
+/* A count of bits: of 16, 32 or 64, by the register or by the letter. */
+#define BITCOUNT(n, op) \
+    LX(n, PF3, M1, op, W0, "Ww", "mr", OP16), LX(n, PF3, M1, op, W0, "Dd", "mr", OP32), \
+        LX(n, PF3, M1, op, W1, "Qq", "mr", O64), LX(n "w", PF3, M1, op, W0, "Ww", "mr", OP16), \
+        LX(n "l", PF3, M1, op, W0, "Dd", "mr", OP32), LX(n "q", PF3, M1, op, W1, "Qq", "mr", O64)
+
+    SARITH("add", 0x58),
+    SARITH("mul", 0x59),
+    SARITH("sub", 0x5c),
+    SARITH("div", 0x5e),
+    SARITH("max", 0x5f),
+    SARITH("min", 0x5d),
+    SARITH("sqrt", 0x51),
+    SLOGIC("and", 0x54),
+    SLOGIC("andn", 0x55),
+    SLOGIC("or", 0x56),
+    SLOGIC("xor", 0x57),
+    S2("rcpps", P0, M1, 0x53),
+    S2("rcpss", PF3, M1, 0x53),
+    S2("rsqrtps", P0, M1, 0x52),
+    S2("rsqrtss", PF3, M1, 0x52),
+    S2U("cmpps", P0, M1, 0xc2),
+    S2U("cmppd", P66, M1, 0xc2),
+    S2U("cmpss", PF3, M1, 0xc2),
+    LX("cmpsd", PF2, M1, 0xc2, W0, "uXx", "imr", WEAK),
+    S2("comiss", P0, M1, 0x2f),
+    S2("comisd", P66, M1, 0x2f),
+    S2("ucomiss", P0, M1, 0x2e),
+    S2("ucomisd", P66, M1, 0x2e),
+    S2I("shufps", P0, M1, 0xc6),
+    S2I("shufpd", P66, M1, 0xc6),
+    S2("unpcklps", P0, M1, 0x14),
+    S2("unpckhps", P0, M1, 0x15),
+    S2("unpcklpd", P66, M1, 0x14),
+    S2("unpckhpd", P66, M1, 0x15),
+    S2("addsubpd", P66, M1, 0xd0),
+    S2("addsubps", PF2, M1, 0xd0),
+    S2("haddpd", P66, M1, 0x7c),
+    S2("haddps", PF2, M1, 0x7c),
+    S2("hsubpd", P66, M1, 0x7d),
+    S2("hsubps", PF2, M1, 0x7d),
+    S2U("roundps", P66, M3, 0x08),
+    S2U("roundpd", P66, M3, 0x09),
+    S2U("roundss", P66, M3, 0x0a),
+    S2U("roundsd", P66, M3, 0x0b),
+    S2I("dpps", P66, M3, 0x40),
+    S2I("dppd", P66, M3, 0x41),
+    S2I("blendps", P66, M3, 0x0c),
+    S2I("blendpd", P66, M3, 0x0d),
+    S2I("pblendw", P66, M3, 0x0e),
+    S2I("mpsadbw", P66, M3, 0x42),
+    S2U("insertps", P66, M3, 0x21),
+    /* The mask of these is %xmm0, written or not. */
+#define SBLENDV(n, op) LX(n, P66, M2, op, W0, "Xx", "mr", 0), LX(n, P66, M2, op, W0, "0Xx", "-mr", 0)
+    SBLENDV("blendvps", 0x14),
+    SBLENDV("blendvpd", 0x15),
+    SBLENDV("pblendvb", 0x10),
+
+    /* Conversions. */
+    S2("cvtdq2pd", PF3, M1, 0xe6),
+    S2("cvtdq2ps", P0, M1, 0x5b),
+    S2("cvtpd2dq", PF2, M1, 0xe6),
+    S2("cvtpd2ps", P66, M1, 0x5a),
+    S2("cvtps2dq", P66, M1, 0x5b),
+    S2("cvtps2pd", P0, M1, 0x5a),
+    S2("cvttpd2dq", P66, M1, 0xe6),
+    S2("cvttps2dq", PF3, M1, 0x5b),
+    S2("cvtsd2ss", PF2, M1, 0x5a),
+    S2("cvtss2sd", PF3, M1, 0x5a),
+    SCVT2SI("cvtsd2si", PF2, 0x2d),
+    SCVT2SI("cvttsd2si", PF2, 0x2c),
+    SCVT2SI("cvtss2si", PF3, 0x2d),
+    SCVT2SI("cvttss2si", PF3, 0x2c),
+    SSI2F("cvtsi2sd", PF2),
+    SSI2F("cvtsi2ss", PF3),
+    LX("cvtpi2ps", P0, M1, 0x2a, W0, "Nx", "mr", 0),
+    LX("cvtpi2pd", P66, M1, 0x2a, W0, "Nx", "mr", 0),
+    LX("cvtps2pi", P0, M1, 0x2d, W0, "Xn", "mr", 0),
+    LX("cvttps2pi", P0, M1, 0x2c, W0, "Xn", "mr", 0),
+    LX("cvtpd2pi", P66, M1, 0x2d, W0, "Xn", "mr", 0),
+    LX("cvttpd2pi", P66, M1, 0x2c, W0, "Xn", "mr", 0),
+
+    /* Moves. */
+    SMOVE("movaps", P0, 0x28, 0x29),
+    SMOVE("movapd", P66, 0x28, 0x29),
+    SMOVE("movups", P0, 0x10, 0x11),
+    SMOVE("movupd", P66, 0x10, 0x11),
+    SMOVE("movdqa", P66, 0x6f, 0x7f),
+    SMOVE("movdqu", PF3, 0x6f, 0x7f),
+    SMOVE("movss", PF3, 0x10, 0x11),
+    LX("movsd", PF2, M1, 0x10, W0, "Xx", "mr", SWAP | WEAK),
+    LX("movsd", PF2, M1, 0x11, W0, "xX", "rm", WEAK),
+    LX("movd", P0, M1, 0x6e, W0, "Dn", "mr", 0),
+    LX("movd", P0, M1, 0x7e, W0, "nD", "rm", 0),
+    LX("movd", P66, M1, 0x6e, W0, "Dx", "mr", 0),
+    LX("movd", P66, M1, 0x7e, W0, "xD", "rm", 0),
+    LX("movd", P0, M1, 0x6e, W1, "qn", "mr", O64),
+    LX("movd", P0, M1, 0x7e, W1, "nq", "rm", O64),
+    LX("movd", P66, M1, 0x6e, W1, "qx", "mr", O64),
+    LX("movd", P66, M1, 0x7e, W1, "xq", "rm", O64),
+    LX("movq", P0, M1, 0x6f, W0, "Nn", "mr", WEAK),
+    LX("movq", P0, M1, 0x7f, W0, "nN", "rm", WEAK),
+    LX("movq", PF3, M1, 0x7e, W0, "Xx", "mr", WEAK),
+    LX("movq", P66, M1, 0xd6, W0, "xX", "rm", WEAK),
+    LX("movq", P0, M1, 0x6e, W1, "qn", "mr", O64 | WEAK),
+    LX("movq", P0, M1, 0x7e, W1, "nq", "rm", O64 | WEAK),
+    LX("movq", P66, M1, 0x6e, W1, "qx", "mr", O64 | WEAK),
+    LX("movq", P66, M1, 0x7e, W1, "xq", "rm", O64 | WEAK),
+    LX("movdq2q", PF2, M1, 0xd6, W0, "xn", "mr", 0),
+    LX("movq2dq", PF3, M1, 0xd6, W0, "nx", "mr", 0),
+    LX("movhlps", P0, M1, 0x12, W0, "xx", "mr", 0),
+    LX("movlhps", P0, M1, 0x16, W0, "xx", "mr", 0),
+#define SHALFMOVE(n, pp, ld, st) LX(n, pp, M1, ld, W0, "mx", "mr", 0), LX(n, pp, M1, st, W0, "xm", "rm", 0)
+    SHALFMOVE("movhps", P0, 0x16, 0x17),
+    SHALFMOVE("movhpd", P66, 0x16, 0x17),
+    SHALFMOVE("movlps", P0, 0x12, 0x13),
+    SHALFMOVE("movlpd", P66, 0x12, 0x13),
+    LX("movmskps", P0, M1, 0x50, W0, "xR", "mr", 0),
+    LX("movmskpd", P66, M1, 0x50, W0, "xR", "mr", 0),
+    LX("pmovmskb", P0, M1, 0xd7, W0, "nR", "mr", 0),
+    LX("pmovmskb", P66, M1, 0xd7, W0, "xR", "mr", 0),
+    LX("movntps", P0, M1, 0x2b, W0, "xm", "rm", 0),
+    LX("movntpd", P66, M1, 0x2b, W0, "xm", "rm", 0),
+    LX("movntdq", P66, M1, 0xe7, W0, "xm", "rm", 0),
+    LX("movntq", P0, M1, 0xe7, W0, "nm", "rm", 0),
+    LX("movntdqa", P66, M2, 0x2a, W0, "mx", "mr", 0),
+    LX("maskmovq", P0, M1, 0xf7, W0, "nn", "mr", 0),
+    LX("maskmovdqu", P66, M1, 0xf7, W0, "xx", "mr", 0),
+    LX("lddqu", PF2, M1, 0xf0, W0, "mx", "mr", 0),
+    S2("movddup", PF2, M1, 0x12),
+    S2("movshdup", PF3, M1, 0x16),
+    S2("movsldup", PF3, M1, 0x12),
+    LFIX("emms", 0x77, 0, "", ""),
+    LFIX("monitor", 0x01, 0xc8, "", ""),
+    LFIX("monitor", 0x01, 0xc8, "Rac", "---"),
+    LFIX("mwait", 0x01, 0xc9, "", ""),
+    LFIX("mwait", 0x01, 0xc9, "ac", "--"),
+
+    /* Integer arithmetic of MMX and SSE2. */
+    MS2("paddb", M1, 0xfc),
+    MS2("paddw", M1, 0xfd),
+    MS2("paddd", M1, 0xfe),
+    MS2("paddq", M1, 0xd4),
+    MS2("paddsb", M1, 0xec),
+    MS2("paddsw", M1, 0xed),
+    MS2("paddusb", M1, 0xdc),
+    MS2("paddusw", M1, 0xdd),
+    MS2("psubb", M1, 0xf8),
+    MS2("psubw", M1, 0xf9),
+    MS2("psubd", M1, 0xfa),
+    MS2("psubq", M1, 0xfb),
+    MS2("psubsb", M1, 0xe8),
+    MS2("psubsw", M1, 0xe9),
+    MS2("psubusb", M1, 0xd8),
+    MS2("psubusw", M1, 0xd9),
+    MS2("pand", M1, 0xdb),
+    MS2("pandn", M1, 0xdf),
+    MS2("por", M1, 0xeb),
+    MS2("pxor", M1, 0xef),
+    MS2("pavgb", M1, 0xe0),
+    MS2("pavgw", M1, 0xe3),
+    MS2("pcmpeqb", M1, 0x74),
+    MS2("pcmpeqw", M1, 0x75),
+    MS2("pcmpeqd", M1, 0x76),
+    MS2("pcmpgtb", M1, 0x64),
+    MS2("pcmpgtw", M1, 0x65),
+    MS2("pcmpgtd", M1, 0x66),
+    MS2("pmaddwd", M1, 0xf5),
+    MS2("pmaxsw", M1, 0xee),
+    MS2("pmaxub", M1, 0xde),
+    MS2("pminsw", M1, 0xea),
+    MS2("pminub", M1, 0xda),
+    MS2("pmulhuw", M1, 0xe4),
+    MS2("pmulhw", M1, 0xe5),
+    MS2("pmullw", M1, 0xd5),
+    MS2("pmuludq", M1, 0xf4),
+    MS2("psadbw", M1, 0xf6),
+    MS2("packsswb", M1, 0x63),
+    MS2("packssdw", M1, 0x6b),
+    MS2("packuswb", M1, 0x67),
+    MS2("punpckhbw", M1, 0x68),
+    MS2("punpckhwd", M1, 0x69),
+    MS2("punpckhdq", M1, 0x6a),
+    MS2("punpcklbw", M1, 0x60),
+    MS2("punpcklwd", M1, 0x61),
+    MS2("punpckldq", M1, 0x62),
+    S2("punpckhqdq", P66, M1, 0x6d),
+    S2("punpcklqdq", P66, M1, 0x6c),
+    MSHIFT("psllw", 0xf1, 0x71, 6),
+    MSHIFT("pslld", 0xf2, 0x72, 6),
+    MSHIFT("psllq", 0xf3, 0x73, 6),
+    MSHIFT("psraw", 0xe1, 0x71, 4),
+    MSHIFT("psrad", 0xe2, 0x72, 4),
+    MSHIFT("psrlw", 0xd1, 0x71, 2),
+    MSHIFT("psrld", 0xd2, 0x72, 2),
+    MSHIFT("psrlq", 0xd3, 0x73, 2),
+    LX("pslldq", P66, M1, 0x73, W0, "ux", "im", DG(7)),
+    LX("psrldq", P66, M1, 0x73, W0, "ux", "im", DG(3)),
+    LX("pshufw", P0, M1, 0x70, W0, "iNn", "imr", 0),
+    S2I("pshufd", P66, M1, 0x70),
+    S2I("pshufhw", PF3, M1, 0x70),
+    S2I("pshuflw", PF2, M1, 0x70),
+    LX("pextrw", P0, M1, 0xc5, W0, "unR", "imr", 0),
+    LX("pextrw", P66, M1, 0xc5, W0, "uxR", "imr", 0),
+    LX("pextrw", P66, M3, 0x15, W0, "uxm", "irm", 0),
+    LX("pinsrw", P0, M1, 0xc4, W0, "uEn", "imr", 0),
+    LX("pinsrw", P66, M1, 0xc4, W0, "uEx", "imr", 0),
+
+    /* SSSE3, on MMX registers and on %xmm. */
+    MS2("pabsb", M2, 0x1c),
+    MS2("pabsw", M2, 0x1d),
+    MS2("pabsd", M2, 0x1e),
+    MS2("phaddw", M2, 0x01),
+    MS2("phaddd", M2, 0x02),
+    MS2("phaddsw", M2, 0x03),
+    MS2("phsubw", M2, 0x05),
+    MS2("phsubd", M2, 0x06),
+    MS2("phsubsw", M2, 0x07),
+    MS2("pmaddubsw", M2, 0x04),
+    MS2("pmulhrsw", M2, 0x0b),
+    MS2("pshufb", M2, 0x00),
+    MS2("psignb", M2, 0x08),
+    MS2("psignw", M2, 0x09),
+    MS2("psignd", M2, 0x0a),
+    LX("palignr", P0, M3, 0x0f, W0, "uNn", "imr", 0),
+    LX("palignr", P66, M3, 0x0f, W0, "uXx", "imr", 0),
+
+    /* SSE4.1 and SSE4.2. */
+    S2("packusdw", P66, M2, 0x2b),
+    S2("pcmpeqq", P66, M2, 0x29),
+    S2("pcmpgtq", P66, M2, 0x37),
+    S2("phminposuw", P66, M2, 0x41),
+    S2("pmaxsb", P66, M2, 0x3c),
+    S2("pmaxsd", P66, M2, 0x3d),
+    S2("pmaxuw", P66, M2, 0x3e),
+    S2("pmaxud", P66, M2, 0x3f),
+    S2("pminsb", P66, M2, 0x38),
+    S2("pminsd", P66, M2, 0x39),
+    S2("pminuw", P66, M2, 0x3a),
+    S2("pminud", P66, M2, 0x3b),
+    S2("pmuldq", P66, M2, 0x28),
+    S2("pmulld", P66, M2, 0x40),
+    S2("ptest", P66, M2, 0x17),
+    S2("pmovsxbw", P66, M2, 0x20),
+    S2("pmovsxbd", P66, M2, 0x21),
+    S2("pmovsxbq", P66, M2, 0x22),
+    S2("pmovsxwd", P66, M2, 0x23),
+    S2("pmovsxwq", P66, M2, 0x24),
+    S2("pmovsxdq", P66, M2, 0x25),
+    S2("pmovzxbw", P66, M2, 0x30),
+    S2("pmovzxbd", P66, M2, 0x31),
+    S2("pmovzxbq", P66, M2, 0x32),
+    S2("pmovzxwd", P66, M2, 0x33),
+    S2("pmovzxwq", P66, M2, 0x34),
+    S2("pmovzxdq", P66, M2, 0x35),
+    LX("extractps", P66, M3, 0x17, W0, "uxE", "irm", 0),
+    LX("pextrb", P66, M3, 0x14, W0, "uxE", "irm", 0),
+    LX("pextrd", P66, M3, 0x16, W0, "uxD", "irm", 0),
+    LX("pextrq", P66, M3, 0x16, W1, "uxQ", "irm", O64),
+    LX("pinsrb", P66, M3, 0x20, W0, "uEx", "imr", 0),
+    LX("pinsrd", P66, M3, 0x22, W0, "uDx", "imr", 0),
+    LX("pinsrq", P66, M3, 0x22, W1, "uQx", "imr", O64),
+#define PCMPSTR(n, op) S2U(n, P66, M3, op), LX(n "q", P66, M3, op, W1, "uXx", "imr", O64)
+    PCMPSTR("pcmpestrm", 0x60),
+    PCMPSTR("pcmpestri", 0x61),
+    S2U("pcmpistrm", P66, M3, 0x62),
+    S2U("pcmpistri", P66, M3, 0x63),
+
+    /* AES, carry-less multiplication, SHA, the Galois field. */
+    S2("aesenc", P66, M2, 0xdc),
+    S2("aesenclast", P66, M2, 0xdd),
+    S2("aesdec", P66, M2, 0xde),
+    S2("aesdeclast", P66, M2, 0xdf),
+    S2("aesimc", P66, M2, 0xdb),
+    S2U("aeskeygenassist", P66, M3, 0xdf),
+    S2I("pclmulqdq", P66, M3, 0x44),
+    S2I("sha1rnds4", P0, M3, 0xcc),
+    S2("sha1nexte", P0, M2, 0xc8),
+    S2("sha1msg1", P0, M2, 0xc9),
+    S2("sha1msg2", P0, M2, 0xca),
+    S2("sha256rnds2", P0, M2, 0xcb),
+    LX("sha256rnds2", P0, M2, 0xcb, W0, "0Xx", "-mr", 0),
+    S2("sha256msg1", P0, M2, 0xcc),
+    S2("sha256msg2", P0, M2, 0xcd),
+    S2("gf2p8mulb", P66, M2, 0xcf),
+    S2U("gf2p8affineqb", P66, M3, 0xce),
+    S2U("gf2p8affineinvqb", P66, M3, 0xcf),
+
+    /* A move with the bytes turned about: from memory or to it, and
+     * never between registers. */
+#define MOVBE(n, o16, o32, o64, s16, s32, s64) \
+    LX(n, P0, M2, 0xf0, W0, o16, "mr", OP16), LX(n, P0, M2, 0xf0, W0, o32, "mr", OP32), \
+        LX(n, P0, M2, 0xf0, W1, o64, "mr", O64), LX(n, P0, M2, 0xf1, W0, s16, "rm", OP16), \
+        LX(n, P0, M2, 0xf1, W0, s32, "rm", OP32), LX(n, P0, M2, 0xf1, W1, s64, "rm", O64)
+    MOVBE("movbe", "mw", "md", "mq", "wm", "dm", "qm"),
+    LX("movbew", P0, M2, 0xf0, W0, "mw", "mr", OP16),
+    LX("movbew", P0, M2, 0xf1, W0, "wm", "rm", OP16),
+    LX("movbel", P0, M2, 0xf0, W0, "md", "mr", OP32),
+    LX("movbel", P0, M2, 0xf1, W0, "dm", "rm", OP32),
+    LX("movbeq", P0, M2, 0xf0, W1, "mq", "mr", O64),
+    LX("movbeq", P0, M2, 0xf1, W1, "qm", "rm", O64),
+    LX("movnti", P0, M1, 0xc3, W0, "dm", "rm", 0),
+    LX("movnti", P0, M1, 0xc3, W1, "qm", "rm", O64),
+    LX("movntil", P0, M1, 0xc3, W0, "dm", "rm", 0),
+    LX("movntiq", P0, M1, 0xc3, W1, "qm", "rm", O64),
+    LFIX("xgetbv", 0x01, 0xd0, "", ""),
+    LFIX("xsetbv", 0x01, 0xd1, "", ""),
+    LX("xrstors", P0, M1, 0xc7, W0, "m", "m", DG(3)),
+    LX("xrstors64", P0, M1, 0xc7, W1, "m", "m", O64 | DG(3)),
+
+    BITCOUNT("popcnt", 0xb8),
+    BITCOUNT("lzcnt", 0xbd),
+    BITCOUNT("tzcnt", 0xbc),
 };
 
 const size_t as_x86_vec_table_count = sizeof(as_x86_vec_table) / sizeof(as_x86_vec_table[0]);

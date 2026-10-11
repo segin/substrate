@@ -11962,7 +11962,63 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
     rq.pseudo = insn->pseudo;
     rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
     rq.level = cfg->is_64 ? cfg->x86_64_isa_level : 4u;
-    return as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
+    rq.explicit_rex = (insn->prefixes & AS_PREFIX_REX) != 0 || (insn->pseudo & AS_PSEUDO_REX) != 0;
+    rq.rex_bits = insn->rex_bits & 0xfu;
+    {
+        int rc = as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
+
+        if (rc <= 0) {
+            return rc;
+        }
+    }
+    /*
+     * A prefix written before one of these.  None of them is locked
+     * or repeated, and where F3, F2 or 66 stands before one it is part
+     * of its opcode: `lock addps`, `rep addps`, `data16 vaddps` were
+     * assembled with the prefix left off, and nothing said.
+     */
+    {
+        static const struct {
+            unsigned flag;
+            const char *name;
+        } none[] = {{AS_PREFIX_LOCK, "lock"},     {AS_PREFIX_HLE, "xacquire or xrelease"},
+                    {AS_PREFIX_REP, "rep"},       {AS_PREFIX_REPE, "repe"},
+                    {AS_PREFIX_REPNE, "repne"},   {AS_PREFIX_DATA16, "data16"}};
+
+        for (i = 0; i < sizeof(none) / sizeof(none[0]); ++i) {
+            if ((insn->prefixes & none[i].flag) != 0) {
+                snprintf(encerr, encerr_sz, "'%s' takes no %s prefix", mn, none[i].name);
+                return -1;
+            }
+        }
+    }
+    /* The address size, written: the byte, unless the address is of
+     * registers that already say another. */
+    if ((insn->prefixes & AS_PREFIX_ADDR16) != 0) {
+        unsigned other = cfg->is_64 ? 32u : cfg->x86_code_bits == 16u ? 32u : 16u;
+        int have = 0;
+
+        for (i = 0; i < n; ++i) {
+            if (ops[i].kind == AS_X86_OP_MEM && ops[i].u.mem.addr_bits != 0) {
+                if (ops[i].u.mem.addr_bits != other) {
+                    snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and an address of another size", mn);
+                    return -1;
+                }
+                have = 1;
+            }
+        }
+        /* (An address of the other size has the byte put on by what
+         * writes the prefixes outside the instruction.) */
+        if (!have) {
+            if (*code_len >= code_cap) {
+                return -1;
+            }
+            memmove(code + 1, code, *code_len);
+            code[0] = 0x67;
+            (*code_len)++;
+        }
+    }
+    return 1;
 }
 
 /*

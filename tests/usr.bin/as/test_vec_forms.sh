@@ -10,9 +10,17 @@
 # was no operand, and AVX itself was refused unless -march asked for it.
 # They are one table and one emitter (as_x86_vec.c, as_x86_vec_table.c).
 #
-# vec_forms.txt holds, for each such mnemonic of the audit's corpus,
-# what GNU as 2.46 makes of it in each shape of its operands, in 64-bit
-# and in 32-bit code: the bytes, or `refused`.  GNU as passes this test.
+#
+# And then those of MMX and SSE, of BMI, and the few others the audit's
+# corpus has (AS-T-316, 317, 335, 337 to 339), which went into the same
+# table: they had taken any register for the one they wanted -- `paddb
+# %ymm1,%ymm2` was `paddb %xmm1,%xmm2`, `pmaxsd (%rax),%mm2` an SSE4.1
+# instruction on an MMX register -- and AES, SHA and `xrstors` were not
+# assembled at all.
+#
+# vec_forms.txt holds, for each mnemonic of the audit's corpus, what
+# GNU as 2.46 makes of it in each shape of its operands, in 64-bit and
+# in 32-bit code: the bytes, or `refused`.  GNU as passes this test.
 #
 # The lines of a mode are assembled together, and the bytes of all of
 # them compared; on a difference the first line that differs is found

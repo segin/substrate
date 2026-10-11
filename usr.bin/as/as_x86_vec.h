@@ -24,7 +24,9 @@
 extern "C" {
 #endif
 
-enum { AS_VEC_VEX = 1, AS_VEC_EVEX = 2 };
+/* The prefix of a row: VEX, EVEX, or neither -- the instructions of
+ * MMX and SSE, which the same emitter writes. */
+enum { AS_VEC_VEX = 1, AS_VEC_EVEX = 2, AS_VEC_LEGACY = 3 };
 enum { AS_VEC_PP_NONE = 0, AS_VEC_PP_66 = 1, AS_VEC_PP_F3 = 2, AS_VEC_PP_F2 = 3 };
 enum { AS_VEC_MAP_0F = 1, AS_VEC_MAP_0F38 = 2, AS_VEC_MAP_0F3A = 3, AS_VEC_MAP_5 = 5, AS_VEC_MAP_6 = 6 };
 /* W: 0, 1, or ignored by the processor (and written 0). */
@@ -47,6 +49,9 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_64 (1u << 10)    /* in 64-bit code only */
 #define AS_VEC_F_VEX3 (1u << 11)  /* never the two-byte prefix */
 #define AS_VEC_F_NO64 (1u << 12)  /* W is 0 outside 64-bit code, whatever the row says */
+#define AS_VEC_F_OP16 (1u << 13)  /* no VEX: an operand of 16 bits, with the prefix that says so */
+#define AS_VEC_F_OP32 (1u << 14)  /* no VEX: one of 32 bits, which in 16-bit code has the prefix */
+#define AS_VEC_F_WEAK (1u << 15)  /* the name is also another instruction's: without a vector register, not this */
 
 typedef struct {
     const char *name;
@@ -68,16 +73,22 @@ typedef struct {
      *   R E     a general register of 32 or of 64 bits, either; that, or memory
      *   m       memory
      *   1 2 3   memory whose index is an %xmm, a %ymm, a %zmm register
-     *   i       a number of one byte
+     *   i u     a number of one byte: -128 to 255; 0 to 255 only
+     *   n N     an MMX register; that, or memory
+     *   w W     a general register of 16 bits; that, or memory
+     *   0 a c   %xmm0, %eax, %ecx and no other
      */
     const char *ops;
     /*
      * Where each goes: r ModRM.reg, m ModRM.rm, v the prefix's vvvv,
      * i a byte after the instruction, 4 the high four bits of that
-     * byte.
+     * byte, - nowhere (the instruction implies it).
      */
     const char *roles;
-    unsigned char disp8_n; /* EVEX: what a one-byte displacement is multiplied by */
+    /* EVEX: what a one-byte displacement is multiplied by.  (A row
+     * with no VEX and no operand in ModRM: the byte after its opcode,
+     * if it has one.) */
+    unsigned char disp8_n;
     unsigned char bcst;    /* EVEX: an element's bytes if memory may be broadcast, else 0 */
     unsigned short flags;
 } as_x86_vec_tmpl_t;
@@ -98,6 +109,10 @@ typedef struct {
     unsigned pseudo; /* AS_PSEUDO_* of as_parser.h */
     unsigned mode;   /* 16, 32 or 64 */
     unsigned level;  /* the x86-64 level allowed: under 3 no VEX, under 4 no EVEX */
+    /* A REX prefix was written, `rex.W` or `{rex}`: its bits, which
+     * may be none.  Only an instruction with no VEX has one. */
+    int explicit_rex;
+    unsigned rex_bits;
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */

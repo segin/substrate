@@ -130,8 +130,6 @@ setab %al
 call .
 call .+5
 femms
-monitor
-mwait
 rdrand %eax
 rdseed %eax
 serialize

@@ -86,7 +86,36 @@ static int alias_of(const char *name, char *base, size_t base_sz, int *imm) {
       icmp[] = {{"eq", 0}, {"lt", 1}, {"le", 2}, {"neq", 4}, {"nlt", 5}, {"nle", 6}};
     size_t n = strlen(name);
     size_t i;
+    /* The same names without the `v` are SSE's: of the compares, the
+     * first eight. */
+    int sse = name[0] != 'v';
 
+    if (sse) {
+        if (n > 5 && strncmp(name, "cmp", 3) == 0) {
+            const char *suffix = name + n - 2;
+
+            if (strcmp(suffix, "ps") == 0 || strcmp(suffix, "pd") == 0 || strcmp(suffix, "ss") == 0 ||
+                strcmp(suffix, "sd") == 0) {
+                for (i = 0; i < 8; ++i) {
+                    if (strlen(cmp[i]) == n - 5 && strncmp(name + 3, cmp[i], n - 5) == 0) {
+                        snprintf(base, base_sz, "cmp%s", suffix);
+                        *imm = (int)i;
+                        return 0;
+                    }
+                }
+            }
+        }
+        if (n == 12 && strncmp(name, "pclmul", 6) == 0 && strcmp(name + 10, "dq") == 0) {
+            for (i = 0; i < sizeof(clmul) / sizeof(clmul[0]); ++i) {
+                if (strncmp(name + 6, clmul[i].word, 4) == 0) {
+                    snprintf(base, base_sz, "pclmulqdq");
+                    *imm = clmul[i].imm;
+                    return 0;
+                }
+            }
+        }
+        return -1;
+    }
     if (n > 6 && strncmp(name, "vcmp", 4) == 0) {
         const char *suffix = name + n - 2;
 
@@ -194,6 +223,24 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return mem && op->u.mem.index_class == AS_X86_REGCLASS_ZMM;
     case 'i':
         return op->kind == AS_X86_OP_IMM;
+    case 'u':
+        /* A byte that is a count, a place or a choice, and is never
+         * written with a sign. */
+        return op->kind == AS_X86_OP_IMM && (op->imm_symbolic || (op->u.imm >= 0 && op->u.imm <= 255));
+    case 'n':
+        return cls == AS_X86_REGCLASS_MMX;
+    case 'N':
+        return cls == AS_X86_REGCLASS_MMX || plain_mem;
+    case 'w':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16;
+    case 'W':
+        return (cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16) || plain_mem;
+    case '0':
+        return cls == AS_X86_REGCLASS_XMM && (unsigned)op->u.reg == 0u;
+    case 'a':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 32 && (unsigned)op->u.reg == 0u;
+    case 'c':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 32 && (unsigned)op->u.reg == 1u;
     default:
         return 0;
     }
@@ -384,9 +431,20 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     size_t prefix;
     size_t i;
 
-    if (rm == NULL && t->ops[0] != '\0') {
+    if (rm == NULL && t->ops[0] != '\0' && t->enc != AS_VEC_LEGACY) {
         vec_err(ctx, "internal: a row with nothing in r/m");
         return -1;
+    }
+    if (rm == NULL && t->enc == AS_VEC_LEGACY) {
+        /* No operand in ModRM: the opcode, and the byte after it that
+         * the row gives, if it gives one (`monitor` is 0F 01 C8). */
+        static const uint8_t pp_byte[] = {0, 0x66, 0xf3, 0xf2};
+
+        if ((t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) || put8(ctx, 0x0fu) != 0 ||
+            put8(ctx, t->opcode) != 0) {
+            return -1;
+        }
+        return t->disp8_n != 0 ? put8(ctx, t->disp8_n) : 0;
     }
     if (rm == NULL) {
         /* No operand, and so no ModRM: vzeroupper and vzeroall. */
@@ -414,6 +472,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             const as_x86_operand_t *op = &rq->ops[i];
 
             if ((op->kind == AS_X86_OP_REG && op->reg_class != AS_X86_REGCLASS_MASK && (unsigned)op->u.reg > 7u) ||
+                (op->kind == AS_X86_OP_REG && op->reg_class == AS_X86_REGCLASS_GENERAL && op->size_bits == 64) ||
                 (op->kind == AS_X86_OP_MEM && ((op->u.mem.has_base && (unsigned)op->u.mem.base > 7u) ||
                                                (op->u.mem.has_index && (unsigned)op->u.mem.index > 7u)))) {
                 vec_err(ctx, "a register of 64-bit code");
@@ -451,7 +510,36 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
     }
 
-    if (t->enc == AS_VEC_VEX) {
+    if (t->enc == AS_VEC_LEGACY) {
+        /* No VEX: the prefix that is part of the opcode, REX if a bit
+         * of it is wanted, the escape bytes.  Before them the operand
+         * size, where the row's is not the mode's. */
+        static const uint8_t pp_byte[] = {0, 0x66, 0xf3, 0xf2};
+        unsigned r = (reg >> 3) & 1u;
+        unsigned rex = (w << 3) | (r << 2) | (x << 1) | b | (rq->explicit_rex ? 0x40u | rq->rex_bits : 0u);
+        int size16 = (t->flags & AS_VEC_F_OP16) != 0;
+        int size32 = (t->flags & AS_VEC_F_OP32) != 0;
+
+        if ((size16 && rq->mode != 16u) || (size32 && rq->mode == 16u)) {
+            if (put8(ctx, 0x66u) != 0) {
+                return -1;
+            }
+        }
+        if (t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) {
+            return -1;
+        }
+        if (rex != 0 && rq->mode != 64u) {
+            vec_err(ctx, "a REX prefix outside 64-bit code");
+            return -1;
+        }
+        if (rex != 0 && put8(ctx, 0x40u | (rex & 0xfu)) != 0) {
+            return -1;
+        }
+        if (put8(ctx, 0x0fu) != 0 || (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
+            (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0)) {
+            return -1;
+        }
+    } else if (t->enc == AS_VEC_VEX) {
         unsigned r = (reg >> 3) & 1u;
         int two = t->map == AS_VEC_MAP_0F && !w && !x && !b && (rq->pseudo & AS_PSEUDO_VEX3) == 0 &&
                   (t->flags & AS_VEC_F_VEX3) == 0;
@@ -527,6 +615,21 @@ static int row_refuses(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, i
     const as_x86_operand_t *rm = role_op(t, rq, 'm');
     int mem = rm != NULL && rm->kind == AS_X86_OP_MEM;
 
+    if (t->enc == AS_VEC_LEGACY) {
+        if (evex) {
+            *why = "takes no mask, broadcast or rounding, and no register past the fifteenth";
+            return 1;
+        }
+        if ((rq->pseudo & (AS_PSEUDO_VEX | AS_PSEUDO_VEX3)) != 0) {
+            *why = "has no VEX form: the instruction with one has another name";
+            return 1;
+        }
+        return 0;
+    }
+    if (rq->explicit_rex) {
+        *why = "has a VEX or EVEX prefix, and takes no REX one";
+        return 1;
+    }
     if (t->enc == AS_VEC_VEX) {
         if ((rq->pseudo & AS_PSEUDO_EVEX) != 0) {
             *why = "has no EVEX form with these operands";
@@ -638,6 +741,21 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
             snprintf(errbuf, errbuf_sz, "'%s' does not take these operands", rq->mnemonic);
         }
         return (int)i;
+    }
+    if ((as_x86_vec_table[first].flags & AS_VEC_F_WEAK) != 0) {
+        /* `movsd`, `cmpsd` and `movq` are also instructions of the
+         * general registers, and are these only with a vector one. */
+        int vector = 0;
+
+        for (i = 0; i < rq->op_count; ++i) {
+            if (rq->ops[i].kind == AS_X86_OP_REG &&
+                (is_vector_class(rq->ops[i].reg_class) || rq->ops[i].reg_class == AS_X86_REGCLASS_MMX)) {
+                vector = 1;
+            }
+        }
+        if (!vector) {
+            return 0;
+        }
     }
     memset(&ctx, 0, sizeof(ctx));
     ctx.out = out;
