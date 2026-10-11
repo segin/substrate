@@ -158,5 +158,29 @@ v "32 64" 62f3752825d001   'vpternlogd $1, %ymm0, %ymm1, %ymm2'
 v "32 64" 62f2750850d0     'vpdpbusd %xmm0, %xmm1, %xmm2'
 v "32 64" 62f2f528b4d0     'vpmadd52luq %ymm0, %ymm1, %ymm2'
 
+# The conversions from an integer: W is the integer's width.  VEX.W was
+# never set, so `vcvtsi2sd %rax, ...` converted %eax; EVEX.W was set for
+# every vcvtusi2sd and for no vcvtusi2ss.
+v "32 64" c5f32ac0         'vcvtsi2sd %eax,%xmm1,%xmm0'
+v "32 64" c5f22ac0         'vcvtsi2ss %eax,%xmm1,%xmm0'
+v "64"    c4e1f32ac0       'vcvtsi2sd %rax,%xmm1,%xmm0'
+v "64"    c4e1f22ac0       'vcvtsi2ss %rax,%xmm1,%xmm0'
+v "64"    c441f32ad1       'vcvtsi2sd %r9,%xmm1,%xmm10'
+v "64"    c5f32a00         'vcvtsi2sd (%rax),%xmm1,%xmm0'
+v "64"    c5f32a00         'vcvtsi2sdl (%rax),%xmm1,%xmm0'
+v "64"    c4e1f32a00       'vcvtsi2sdq (%rax),%xmm1,%xmm0'
+v "64"    c5f22a00         'vcvtsi2ssl (%rax),%xmm1,%xmm0'
+v "64"    c4e1f22a00       'vcvtsi2ssq (%rax),%xmm1,%xmm0'
+v "32 64" 62f177087bc0     'vcvtusi2sd %eax,%xmm1,%xmm0'
+v "32 64" 62f176087bc0     'vcvtusi2ss %eax,%xmm1,%xmm0'
+v "64"    62f1f7087bc0     'vcvtusi2sd %rax,%xmm1,%xmm0'
+v "64"    62f1f6087bc0     'vcvtusi2ss %rax,%xmm1,%xmm0'
+v "64"    62f177087b00     'vcvtusi2sdl (%rax),%xmm1,%xmm0'
+v "64"    62f1f7087b00     'vcvtusi2sdq (%rax),%xmm1,%xmm0'
+v "64"    62f176087b00     'vcvtusi2ssl (%rax),%xmm1,%xmm0'
+v "64"    62f1f6087b00     'vcvtusi2ssq (%rax),%xmm1,%xmm0'
+v "64"    refused          'vcvtsi2sdl %rax,%xmm1,%xmm0'
+v "64"    refused          'vcvtsi2sdq %eax,%xmm1,%xmm0'
+
 [ "$fail" -eq 0 ] && echo "ok: VEX where an instruction has both encodings ($cases cases)"
 exit "$fail"

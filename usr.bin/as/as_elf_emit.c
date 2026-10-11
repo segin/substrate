@@ -7408,15 +7408,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0x66, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "aesencwide256kl") == 0 || strcmp(mnbuf, "aesencwide128kl") == 0) {
-        const as_operand_t *op;
-
-        if (insn->operand_count != 1) {
-            return -1;
-        }
-        op = &insn->operands[0];
-        return emit_i386_prefixed_0f_map_rm(0xf3, 0x38, 0xd8, 0u, op, out, out_cap, out_len);
-    }
     if (strcmp(mnbuf, "loadiwkey") == 0 || strcmp(mnbuf, "aesenc128kl") == 0 || strcmp(mnbuf, "aesdec128kl") == 0 ||
         strcmp(mnbuf, "aesenc256kl") == 0 || strcmp(mnbuf, "aesdec256kl") == 0) {
         unsigned char opcode3;
@@ -9090,7 +9081,9 @@ static int try_encode_x86_avx_stmt(const as_instruction_t *in, int intel_syntax,
         avx.mnemonic = mnbuf;
     }
     avx.vector_bits = infer_avx_vector_bits(in);
-    if (suffix == 'q') {
+    /* A q, or a 64-bit register for the integer: the conversion is from
+     * 64 bits and has VEX.W. */
+    if (suffix == 'q' || (avx.mnemonic == mnbuf && suffix != 'l' && x86_stmt_has_gpr_of_width(in, 64))) {
         avx.vex_w = 1;
     }
 
@@ -9357,7 +9350,12 @@ static int try_encode_x86_avx512f_stmt(const as_instruction_t *in, int intel_syn
     ev.op_count = 3;
     ev.rounding_mode = -1;
     ev.evex_w_override = -1;
-    if (suffix == 'q') {
+    if (ev.mnemonic == mnbuf) {
+        /* vcvtusi2sd and vcvtusi2ss: EVEX.W is the width of the integer
+         * -- a q, or a 64-bit register -- and not the row's.  It was
+         * set for every vcvtusi2sd and for no vcvtusi2ss. */
+        ev.evex_w_override = (suffix == 'q' || (suffix != 'l' && x86_stmt_has_gpr_of_width(in, 64))) ? 1 : 0;
+    } else if (suffix == 'q') {
         ev.evex_w_override = 1;
     }
     dst_i = intel_syntax ? 0u : (in->operand_count == 4 ? 3u : 2u);
@@ -9646,7 +9644,9 @@ static int try_encode_x86_avx512f_generic_stmt(const as_instruction_t *in, int i
     ev.sae = in->sae;
     ev.rounding_mode = in->rounding_mode;
     ev.evex_w_override = -1;
-    if (suffix == 'q') {
+    if (ev.mnemonic == mnbuf) {
+        ev.evex_w_override = (suffix == 'q' || (suffix != 'l' && x86_stmt_has_gpr_of_width(in, 64))) ? 1 : 0;
+    } else if (suffix == 'q') {
         ev.evex_w_override = 1;
     }
 
@@ -10291,6 +10291,145 @@ static int x86_max_operand_count(const char *mn) {
     return -1;
 }
 
+static int x86_name_in(const char *mn, const char *list) {
+    char key[40];
+    size_t n = strlen(mn);
+
+    if (n == 0 || n + 3 > sizeof(key)) {
+        return 0;
+    }
+    key[0] = ' ';
+    memcpy(key + 1, mn, n);
+    key[n + 1] = ' ';
+    key[n + 2] = '\0';
+    return strstr(list, key) != NULL;
+}
+
+/*
+ * Whether an immediate written in the statement goes in the field its
+ * instruction has for it.  Two kinds of field are checked, the two where
+ * a value that does not fit was cut down in silence:
+ *
+ *   - a byte that is a count, a selector or a mask and nothing else --
+ *     a shift's count, int's vector, the byte of the SSE instructions.
+ *     0 to 255; for the shuffles, blends and rotates, whose byte GNU as
+ *     also takes written as a negative number, -128 to 255.  `shl $256,
+ *     %eax` shifted by nothing and `int $256` was `int $0`.
+ *   - the four bytes that a 64-bit operation sign-extends.  `addq
+ *     $0xffffffff, %rax` added -1, and `pushq $0x80000000` pushed a
+ *     negative number.  -2^31 to 2^31 - 1.
+ *
+ * The lists and the ranges are GNU as 2.46's, found by trial.  0 if it
+ * fits or is not one of these; -1, with the message, if it does not.
+ */
+static int x86_immediate_fits(const as_instruction_t *insn, const char *mn, char suffix, int intel_syntax, int is_64,
+                              char *err, size_t err_sz) {
+    static const char unsigned_byte[] =
+        " aad aam aeskeygenassist bt btc btr bts cmppd cmpps cmpsd cmpss extractps gf2p8affineqb"
+        " gf2p8affineinvqb insertps int palignr pcmpestri pcmpestrm pcmpistri pcmpistrm pextrb pextrd"
+        " pextrq pextrw pinsrb pinsrd pinsrq pinsrw pslld pslldq psllq psllw psrad psraw psrld psrldq"
+        " psrlq psrlw rcl rcr roundpd roundps roundsd roundss sal sar shl shld shr shrd xabort ";
+    static const char signed_byte[] =
+        " blendpd blendps dppd dpps mpsadbw pblendw pclmulqdq pshufd pshufhw pshuflw pshufw rol ror"
+        " rorx sha1rnds4 shufpd shufps ";
+    static const char extended[] = " add or adc sbb and sub xor cmp test imul push ";
+    const as_operand_t *imm;
+    long long v;
+
+    if (insn->operand_count == 0) {
+        return 0;
+    }
+    /* enter's second operand, the nesting level, is such a byte too, and
+     * is written second in either syntax. */
+    if (strcmp(mn, "enter") == 0 && insn->operand_count == 2 && insn->operands[1].kind == AS_OPERAND_IMMEDIATE &&
+        eval_expr_const(insn->operands[1].u.expr, &v) == 0 && (v < 0 || v > 255)) {
+        snprintf(err, err_sz, "the nesting level of 'enter' is a byte, 0 to 255, and %lld is not", v);
+        return -1;
+    }
+    /* The immediate is written first in AT&T syntax and last in Intel. */
+    imm = &insn->operands[intel_syntax ? insn->operand_count - 1 : 0];
+    if (imm->kind != AS_OPERAND_IMMEDIATE || (!intel_syntax && (imm->raw == NULL || imm->raw[0] != '$')) ||
+        eval_expr_const(imm->u.expr, &v) != 0) {
+        return 0;
+    }
+    if (x86_name_in(mn, unsigned_byte) || x86_name_in(mn, signed_byte)) {
+        long long low = x86_name_in(mn, signed_byte) ? -128 : 0;
+
+        /* A shift of a byte: there GNU as takes the count written as a
+         * negative number too, the operand being a byte as it is. */
+        if (x86_name_in(mn, " sal sar shl shr rcl rcr ") &&
+            (suffix == 'b' || x86_stmt_has_gpr_of_width(insn, 8))) {
+            const as_operand_t *dst = &insn->operands[intel_syntax ? 0 : insn->operand_count - 1];
+
+            if (suffix == 'b' || (dst->kind == AS_OPERAND_REGISTER && x86_reg_width_bits(dst->u.reg) == 8)) {
+                low = -128;
+            }
+        }
+
+        /* cmpsd with fewer than three operands is the string one. */
+        if (strcmp(mn, "cmpsd") == 0 && insn->operand_count != 3) {
+            return 0;
+        }
+        if (v < low || v > 255) {
+            snprintf(err, err_sz, "the immediate of '%s' is a byte, %lld to 255, and %lld is not", mn, low, v);
+            return -1;
+        }
+        return 0;
+    }
+    if (is_64 && (v < -2147483648LL || v > 2147483647LL)) {
+        int wide = suffix == 'q' || x86_stmt_has_gpr_of_width(insn, 64);
+
+        if (strcmp(mn, "push") == 0) {
+            wide = suffix != 'w';
+        } else if (strcmp(mn, "mov") == 0) {
+            /* To a register there is the form with all eight bytes. */
+            const as_operand_t *dst = &insn->operands[intel_syntax ? 0 : insn->operand_count - 1];
+
+            wide = wide && dst->kind != AS_OPERAND_REGISTER;
+        } else if (!x86_name_in(mn, extended)) {
+            wide = 0;
+        }
+        if (wide) {
+            snprintf(err, err_sz,
+                     "the immediate of '%s' is four bytes sign-extended to 64 bits, and %lld does not fit", mn, v);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * The conversions from an integer -- cvtsi2sd, cvtsi2ss, and the same
+ * with v and with u -- take an l or a q for the integer's width.  One
+ * that contradicts the register written, or a q outside 64-bit code,
+ * was assembled as the suffix said or as the register did.  1 if so.
+ */
+static int x86_int_convert_suffix_contradicts(const as_instruction_t *insn, int is_64) {
+    const char *mn = insn->mnemonic;
+    size_t n;
+    char last;
+
+    if (mn == NULL) {
+        return 0;
+    }
+    if (mn[0] == 'v' || mn[0] == 'V') {
+        mn++;
+    }
+    n = strlen(mn);
+    if (!((n == 9 && (strncasecmp(mn, "cvtsi2sd", 8) == 0 || strncasecmp(mn, "cvtsi2ss", 8) == 0)) ||
+          (n == 10 && (strncasecmp(mn, "cvtusi2sd", 9) == 0 || strncasecmp(mn, "cvtusi2ss", 9) == 0)))) {
+        return 0;
+    }
+    last = mn[n - 1];
+    if (last == 'q' || last == 'Q') {
+        return !is_64 || x86_stmt_has_gpr_of_width(insn, 32);
+    }
+    if (last == 'l' || last == 'L') {
+        return x86_stmt_has_gpr_of_width(insn, 64);
+    }
+    return 0;
+}
+
 /*
  * Whether lock may stand before this instruction.  The processor takes
  * it on a short list of instructions and only where the destination is
@@ -10430,6 +10569,13 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                      most == 1 ? "" : "s", st->u.instr.operand_count);
             return -1;
         }
+    }
+    if (x86_immediate_fits(&st->u.instr, mnbuf, suffix, intel_syntax, cfg->is_64, encerr, encerr_sz) != 0) {
+        return -1;
+    }
+    if (x86_int_convert_suffix_contradicts(&st->u.instr, cfg->is_64)) {
+        snprintf(encerr, encerr_sz, "'%s': the suffix is not the width of the integer operand", st->u.instr.mnemonic);
+        return -1;
     }
     if ((st->u.instr.prefixes & AS_PREFIX_LOCK) != 0 && !x86_lock_is_allowed(&st->u.instr, mnbuf, intel_syntax)) {
         snprintf(encerr, encerr_sz, "lock is not allowed on '%s' with these operands", mnbuf);
@@ -10847,6 +10993,14 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                     as_x86_seg_t seg = map_seg(op->u.mem.segment_reg);
                     char family = string_index_register(op->u.mem.base_reg);
 
+                    /* The destination is through %es and nothing can
+                     * make it otherwise: another segment written on it
+                     * was dropped, and the store went to %es. */
+                    if (family == 'd' && seg != AS_X86_SEG_ES) {
+                        snprintf(encerr, encerr_sz, "'%s': the destination of a string instruction is through %%es",
+                                 mnbuf);
+                        return -1;
+                    }
                     if (family == 'd' || (family == 's' && seg == AS_X86_SEG_DS)) {
                         continue;
                     }
@@ -13942,6 +14096,34 @@ static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
          * line was parsed, and here it is said. */
         if (st->u.directive.zero_assumed != 0 && ctx->cfg != NULL) {
             warn_stmt(ctx->cfg, st, "zero assumed for missing expression");
+        }
+        /*
+         * A number too wide for its directive is stored cut down, and
+         * said to be: `.byte 256` is 00 and a warning.  The test is GNU
+         * as's -- bits lost from the value and from its negative both,
+         * so that -129, which is 7f, passes as 255 does.
+         */
+        if (ctx->cfg != NULL) {
+            unsigned width = directive_fixed_scalar_width(&st->u.directive);
+            size_t k;
+
+            for (k = 0; (width == 1 || width == 2 || width == 4) && k < st->u.directive.arg_count; ++k) {
+                as_expr_t *e = as_parse_expr_string(st->u.directive.args[k], st->file, st->line);
+                long long v;
+
+                if (e != NULL && eval_expr_const(e, &v) == 0) {
+                    unsigned long long high = ~0ULL << (8u * width);
+                    unsigned long long u = (unsigned long long)v;
+
+                    if ((u & high) != 0 && ((0ULL - u) & high) != 0) {
+                        char text[96];
+
+                        snprintf(text, sizeof(text), "value 0x%llx truncated to 0x%llx", u, u & ~high);
+                        warn_stmt(ctx->cfg, st, text);
+                    }
+                }
+                as_expr_free(e);
+            }
         }
     }
 

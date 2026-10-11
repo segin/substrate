@@ -218,8 +218,9 @@ status 0.
 - [x] **AS-T-050** When `extrq` or `insertq` is written with two immediates, the assembler shall emit them in the order the manual gives.
   Trace: AS-SEL-009.  Verify: T — both: GNU.
   Done: AT&T's order of the two was taken for Intel's.  Found with it and mended: `extrq`'s ModRM.reg held the register where the form is `/0`; a memory operand, and `extrq $4,%xmm1`, were assembled; `%xmm9` was taken in 32-bit code; and 64-bit code had neither instruction.  One function now serves both modes.  `test_insn_forms.sh`, both syntaxes.
-- [ ] **AS-T-051** When `aesencwide256kl` is written, the assembler shall encode opcode extension `/2`.
+- [x] **AS-T-051** When `aesencwide256kl` is written, the assembler shall encode opcode extension `/2`.
   Trace: AS-SEL-009.  Verify: T — the four wide Key Locker instructions: GNU.
+  Done.  The four are one opcode, `F3 0F 38 D8`, told apart by ModRM.reg (`/0` to `/3`).  The two encryptions were both `/0` in 32-bit code, so `aesencwide256kl` was `aesencwide128kl`; the two decryptions, and all four in 64-bit code, were not known.  They are in the two encoders now, with a memory operand and nothing else.  `test_insn_forms.sh`.
 - [x] **AS-T-052** When `crc32` is written, the assembler shall take the source width from the suffix or the source register.
   Done: `crc32` is encoded by the two main encoders, not by the SSE4.2 module, which knew neither the mode nor the prefixes.  Wrong before, by mode: in 32-bit code every source register was taken for 32 bits, and `crc32q` got a `REX` byte, which is `dec %eax` there; in 64-bit code a suffix on a memory source was ignored, `%ah` was `%al`, `%sil` had no `REX` and so was `%dh`, and a 64-bit destination with a byte source had no `REX.W`; in both a segment override was dropped, and a destination of 16 bits, a suffix at odds with the source register, and an `%xmm` operand were assembled.  `test_insn_forms.sh`, both syntaxes.  Left: `(%eax)` in 64-bit code wants `67` (176); Intel's `crc32 eax, [ebx]`, with no size, is taken for 32 bits where GNU refuses it.
   Trace: AS-SEL-009, AS-EXT-008.  Verify: T — `crc32b mem,%ebx` (`F0`), `crc32 %al,%ebx`, `crc32 %ax,%ebx` (with `66`), `crc32w (%r12),%ebx`, `crc32 %sil,%ebx` (with `REX`), `crc32q`: GNU.
@@ -231,8 +232,9 @@ status 0.
   Met: `test_string_insn.sh`.  With it the prefixes are written in GNU's order (segment, address size, operand size, rep, lock), and a `q` suffix in 32-bit code is refused where it reaches the general encoder.
 - [x] **AS-T-055** When a string instruction is written with operands, the assembler shall emit a segment override for the source operand's segment only where it differs from the default, and none for the `%es` destination.
   Trace: AS-X86-025.  Verify: T — `movsl (%esi),%es:(%edi)` (`A5`), `movsw %cs:(%esi),%es:(%edi)` (`2E 66 A5`), `lodsb %fs:(%esi)`: GNU.
-- [ ] **AS-T-056** If a string instruction's destination is written with a segment other than `%es`, then the assembler shall refuse it.
+- [x] **AS-T-056** If a string instruction's destination is written with a segment other than `%es`, then the assembler shall refuse it.
   Trace: AS-X86-025.  Verify: T — `stosl %eax,%ds:(%edi)`: exit 1.
+  Done: the segment was dropped and the instruction assembled, storing through `%es` where the source said otherwise.  Refused for `movs`, `stos`, `scas`, `cmps` and `ins` in both modes; `%es` written out, and any segment on the source, are as before.  `test_insn_forms.sh`.
 - [x] **AS-T-057** When `xlat`, `aam`, `aad`, `loop`, `loope`, `loopne` or `jecxz` is written in a form GNU accepts, the assembler shall encode it.
   Trace: AS-X86-041, AS-FE-032.  Verify: T — bare `xlat`, `aam`, `aad`, `aam $10`, `loop 1b`, `jecxz 1b`: GNU.
   Done: `xlat` and `xlatb` with no operand are `d7`; `aam` and `aad` with none take base ten; `loop`, `loope`, `loopz`, `loopne`, `loopnz` -- with a `w`, `l` or `q` for the counter, which they had not -- and `jecxz` reach a label, by the change of 037.  A target out of a byte's reach is refused, with the distance.  `test_loop_jcxz.sh`, 63 cases in the two modes, GNU's bytes and GNU's refusals.
@@ -254,11 +256,13 @@ status 0.
 - [x] **AS-T-062** When an instruction has a 16-bit operand and an immediate, the assembler shall emit a 16-bit immediate, or the sign-extended 8-bit form.
   Trace: AS-X86-012.  Verify: T — `addw $0x1000,%bx`, `cmpw $0x1234,(%rax)`, `andw`, `pushw $0x1234`, `movw $1,%ax`, both modes: GNU.
   Done: `test_imm_width.sh`, with `testw` and `imulw` besides.  `movw $1,%ax` has its 16-bit immediate and, in 64-bit mode, two `66` prefixes: that is 035.
-- [ ] **AS-T-063** If an immediate does not fit the field its instruction gives it, then the assembler shall refuse it.
+- [x] **AS-T-063** If an immediate does not fit the field its instruction gives it, then the assembler shall refuse it.
+  Done for the two kinds of field where the value was cut down in silence, checked in one place before any encoder: the byte that is a count, a vector or a mask (0 to 255 for 47 instructions; -128 to 255 for the 17 shuffles, blends and rotates and for a shift of a byte, as GNU has it; `enter`'s level), and the four bytes a 64-bit operation sign-extends (`add` and its seven fellows, `test`, `imul`, `push`, and `mov` to memory).  The lists and ranges are GNU as 2.46's, by trial.  454 lines of the corpora now match that did not.  `movb $256,%al` and `addw $0x10000,%ax` of the Verify line are not refusals in GNU: it shortens them with a warning, and so does this assembler.  `test_insn_forms.sh`.  Not covered: the AVX forms' immediates.
   Trace: AS-X86-013.  Verify: T — `addq $0xffffffff,%rax`, `addq $0x80000000,%rbx`, `pushq $0x80000000`, `movq $0x123456789,(%rax)`, `int $256`, `enter $0x10000,$0`, `shl $-1,%eax`, `movb $256,%al`: exit 1, as GNU.
   Seen while doing 053, all assembled and all refused by GNU: a negative byte on `cmpps`, `pinsrw`, `pextrw`, `psrldq`, `palignr`, `roundps`, `pinsrb`, `pextrd`, `pcmpistri`, `insertps`, `shld`, `bt`, `int`, and as `enter`'s level; `pshufd $256` and `mpsadbw $-129` in 64-bit code.  Two are worse than a truncation: `psllw $-1,%xmm1` in 32-bit code takes the immediate for an address (`66 0F F1 0D FF FF FF FF`), and `cmpsd $-2,%xmm1,%xmm2` is assembled as the string instruction, `A7`.
-- [ ] **AS-T-064** When a value is written to `.byte`, `.word` or `.long` that does not fit, the assembler shall warn and emit the truncated value.
+- [x] **AS-T-064** When a value is written to `.byte`, `.word` or `.long` that does not fit, the assembler shall warn and emit the truncated value.
   Trace: AS-DAT-003.  Verify: T — `.byte 256`, `.word 65536`, `.long 0x100000000`: a warning on standard error, exit 0, GNU's bytes.
+  Done: the bytes were GNU's already and nothing was said.  The warning is GNU's, "value 0x100 truncated to 0x0", and so is the test for it -- bits lost from the value and from its negative both, so `.byte -129` (7f) passes and `.byte -256` does not.  It counts for `--fatal-warnings` and is silenced by `--no-warn`.  `test_data_truncation.sh`.  Left: `.quad` of a number wider than 64 bits is refused where GNU warns "bignum truncated" and stores the low eight bytes.
 
 ### B.5 x86-64 addressing
 
@@ -271,9 +275,10 @@ status 0.
 - [x] **AS-T-065** When `%r12` is written as an index register, the assembler shall encode it.
   Trace: AS-X86-024.  Verify: T — `movl %eax,(%rax,%r12)`, `(%rbx,%r12,8)`, `(,%r12,4)`; `%rsp` as index still refused.
   Done: the test for `%rsp` was of the low three bits.  339 more lines of the 64-bit corpus are GNU's bytes.  With it: the extension encoders had no such test at all and wrote `(%rax,%rsp)` as `(%rax)`; the stack pointer is now refused as an index where the operand is converted, for every encoder.  `test_insn_forms.sh`, 23 cases.
-- [ ] **AS-T-066** When `cvtsi2sd`, `cvtsi2ss` or their VEX forms are written with a 32-bit source, the assembler shall not set `REX.W` or `VEX.W`.
+- [x] **AS-T-066** When `cvtsi2sd`, `cvtsi2ss` or their VEX forms are written with a 32-bit source, the assembler shall not set `REX.W` or `VEX.W`.
   Trace: AS-SEL-006, AS-X86-024, AS-EXT-008.  Verify: T — `cvtsi2sd %eax,%xmm0`, `cvtsi2sdl (%rax),%xmm0`, `cvtsi2sdq %rax,%xmm0`, `vcvtsi2sdq %rax,%xmm1,%xmm2`, `vcvtusi2sdl`: GNU.
   In part: `cvtsi2sd` and `cvtsi2ss` take `REX.W` from the width of the integer, and `cvtsd2si`/`cvtss2si` to a 64-bit register have it (`test_rex_prefix.sh`).  Still open: `vcvtsi2sdq %rax,…` lacks `VEX.W` and `vcvtusi2sdl %eax,…` has `EVEX.W`.
+  Done.  `VEX.W` was never set for the promoted scalar forms, so `vcvtsi2sd %rax,…` and `vcvtsi2sdq (%rax),…` converted 32 bits; it is the integer's width now, from a `q` or a 64-bit register.  `EVEX.W` for `vcvtusi2sd` and `vcvtusi2ss` was the table row's -- set for every one of the first and none of the second -- and is the integer's width too.  A suffix that contradicts the register (`cvtsi2sdl %rax`, `vcvtsi2sdq %eax`), or a `q` in 32-bit code, is refused as GNU refuses it.  232 lines of the AVX corpora now match that did not.  `test_insn_forms.sh`, `test_vex_preferred.sh`.  Left: `cvtsd2sil`/`cvtsd2siq` and `vcvttsd2si` and its three fellows are not mnemonics in 64-bit code.
 
 ### B.6 Directives that do nothing
 
@@ -1090,5 +1095,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 94 done, 256 open.  Numbers run to 399, with gaps left between
+350 tasks: 99 done, 251 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

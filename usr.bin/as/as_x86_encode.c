@@ -969,6 +969,20 @@ static int mnemonic_rep_compatible(const char *mn) {
  * that has them and the plain instruction to one that has not.
  */
 /*
+ * The four wide Key Locker instructions are one opcode, F3 0F 38 D8,
+ * told apart by ModRM.reg: its value, or -1.  The two encryptions were
+ * both /0 in 32-bit code -- so aesencwide256kl was aesencwide128kl --
+ * and the decryptions, and all four in 64-bit code, were not known.
+ */
+static int keylocker_wide_ext(const char *mn) {
+    if (streq_ci(mn, "aesencwide128kl")) return 0;
+    if (streq_ci(mn, "aesdecwide128kl")) return 1;
+    if (streq_ci(mn, "aesencwide256kl")) return 2;
+    if (streq_ci(mn, "aesdecwide256kl")) return 3;
+    return -1;
+}
+
+/*
  * The operand-size prefix of an instruction whose name says its size --
  * cbtw and cwtl are one opcode, as are cwtd and cltd, pushaw and
  * pushal: 66 where the size named is not the mode's own.  Without it
@@ -2859,6 +2873,15 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "femms")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0e) != 0) {
+            return -1;
+        }
+    } else if (keylocker_wide_ext(insn->mnemonic) >= 0) {
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x38) != 0 || emit8(&ctx, 0xd8) != 0 ||
+            modrm_sib_disp(&ctx, (uint8_t)keylocker_wide_ext(insn->mnemonic), a) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "crc32")) {
@@ -5500,6 +5523,15 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (keylocker_wide_ext(insn->mnemonic) >= 0) {
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x38) != 0 || emit8(&ctx, 0xd8) != 0 ||
+            modrm_sib_disp64(&ctx, (as_x86_reg_t)keylocker_wide_ext(insn->mnemonic), a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "crc32")) {

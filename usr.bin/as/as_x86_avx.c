@@ -336,8 +336,13 @@ int as_x86_encode_avx(const as_x86_avx_insn_t *insn, uint8_t *out, size_t out_ca
             return -1;
         }
 
+        /* W is for the two conversions from an integer, where it says
+         * that the integer is of 64 bits.  It was never set, and
+         * `vcvtsi2sd %rax, ...` converted %eax. */
         return encode_vex_with_optional_imm(insn->op1.u.reg, insn->op2.u.reg, &insn->op3,
-                                            promoted->opcode, promoted->map, promoted->pp, 0,
+                                            promoted->opcode, promoted->map, promoted->pp,
+                                            (streq_ci(insn->mnemonic, "vcvtsi2sd") ||
+                                             streq_ci(insn->mnemonic, "vcvtsi2ss")) && insn->vex_w,
                                             vex_l, 0, 0, out, out_cap, out_len, errbuf,
                                             errbuf_sz);
     }
