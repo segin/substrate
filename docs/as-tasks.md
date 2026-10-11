@@ -353,12 +353,16 @@ with a symbol table.
 
 - [ ] **AS-T-090** The assembler shall read each input into statements that each carry the file name and line number the user would recognise.
   Trace: AS-FE-050, AS-FE-030.  Verify: I — no statement is constructed from a temporary file's coordinates; T — every message in the suite names the input file.
-- [ ] **AS-T-091** The assembler shall expand macros, repeats and conditionals without writing intermediate files.
+  In part, and the part a user sees is done: every error and warning names the file and line its author wrote -- after macros, repeats and conditionals; the line a macro was called on for what is in its expansion; the line of a repeat's body; the second statement of a `;` line; the second of two sources; an included file; `{standard input}`; and what a C preprocessor's `# 12 "file"` lines say.  `test_source_positions.sh`, 13 cases, which GNU as passes.  Each line of the expanded source carries a mark of where it came from, and the tokenizer keeps a table from the lines of that text to the user's.  Not done, which is the I of the Verify line: a statement still *carries* the line of the expanded text, under a file name marked internal (`as_lexer.h`), and is turned into the user's where a message is written.  It has to be a number no other statement has, because 45 places find a numeric label, or `.`, or a symbol's definition, by statement line -- and the lines of one macro expansion are all one line of the user's.  To finish: give statements an ordinal of their own for those 45, and let the line be the user's.
+- [x] **AS-T-091** The assembler shall expand macros, repeats and conditionals without writing intermediate files.
   Trace: AS-FE-050, AS-FE-024.  Verify: D — `strace -e trace=openat` over the suite opens no file the user did not name, but for the output's temporary.  After: 090.
-- [ ] **AS-T-092** The assembler shall have one scanner of quoted strings and comments, which honours backslash escapes.
+  Done.  There were up to six files in `/tmp` for one assembly: the C preprocessor's output, the three passes of expansion, the `--defsym` definitions, and the sources gathered when there were several or the standard input.  All are texts in memory now (`as_text_t` in `as.c`); the preprocessor's output is read through a pipe.  `as.c` calls `mkstemp` nowhere.  With no `strace` on the build host the Verify was made with gdb catching `openat`: a source with a macro, a repeat, a conditional, an `.include` and `--defsym` opens the source, the included file, the output and the output's temporary, and nothing else.  `AS_KEEP_TEMPS` has nothing to keep; `AS_DUMP_EXPANDED=1` writes the expanded source to standard error instead.
+- [x] **AS-T-092** The assembler shall have one scanner of quoted strings and comments, which honours backslash escapes.
   Trace: AS-FE-050.  Verify: I — the six scanners of AS-FE-050 are one function.
-- [ ] **AS-T-093** When `;` occurs inside a comment or a quoted string, the assembler shall not begin a statement there.
+  Done: `as_scan_step` (`as_lexer.c`) says of each character of a line whether it is text, string or comment, and the six places that kept their own quote state ask it -- the two that split a line at `;`, the two that split a macro's arguments, the one that takes comments out, the one that reads a string token.  `test_quote_scanner.sh`, 40 cases, the bytes GNU's.  `//` is still taken for a comment, which GNU as for x86 does not do.
+- [x] **AS-T-093** When `;` occurs inside a comment or a quoted string, the assembler shall not begin a statement there.
   Trace: AS-FE-009.  Verify: T — `nop # c; hlt` is `90`; `.ascii "a\";b"` is `61 22 3b 62`; a C string holding `\";` compiled by gcc assembles.  After: 092.
+  Done with 092, of which it is the consequence: the two places that split at `;` did not know a comment, and one of them not an escaped quote.  `nop # a ; ret` assembled a `ret`; `.ascii "a\"; b"` was refused as an unterminated string; and a comment of the 16-bit corpus, `# fallback; gen=0f c0`, was read as an assignment to `gen`, which is all that had kept `test_i8086_corpus.sh` from passing.  `test_quote_scanner.sh`.
 - [ ] **AS-T-094** The lexer shall produce a token for each operator, punctuation mark, register, number, name and string of a statement.
   Trace: AS-FE-051.  Verify: T — a lexer unit test: `a+b`, `%fs:0`, `x=5`, `*%eax`, `$sym`, `%gs : 8` give the tokens listed in the test.
 - [ ] **AS-T-095** The parser shall build operands and expressions from tokens and shall not scan text.
@@ -824,6 +828,8 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-010.  Verify: T.  After: 290.
 - [ ] **AS-T-294** When `.file N "name"` and `.loc` directives are assembled, the assembler shall emit a `.debug_line` program that `readelf --debug-dump=decodedline` reads as the same rows GNU's does.
   Trace: AS-OBJ-010.  Verify: T — the output of `gcc -g -S`.  After: 220.
+- [ ] **AS-T-400** When `.loc` is written with `view NAME`, the assembler shall define NAME as the view's number, so that `.uleb128 NAME` in `.debug_loclists` assembles.
+  Trace: AS-OBJ-010.  Verify: T — the output of `gcc -O2 -g -S`, whose location lists hold `.uleb128 .LVU23`: GNU's bytes.  Found when `.uleb128` stopped being passed over (070): before that every such line was dropped and the list was short of its views.  It is where `test_complex_control_32_64.sh` now stops.  After: 294.
 - [ ] **AS-T-295** Where `-g` is given for an assembly source with no debug directives, the assembler shall emit line information for the source itself, or shall refuse the option.
   Trace: AS-OBJ-010, AS-FE-014.  Verify: T — `readelf --debug-dump=info` reports no corruption.
 - [ ] **AS-T-296** The assembler shall write the output with the permissions `0666` less the umask.
@@ -1115,5 +1121,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 119 done, 231 open.  Numbers run to 399, with gaps left between
+351 tasks: 122 done, 229 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

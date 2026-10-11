@@ -63,8 +63,10 @@ if "$AS" -32 -msyntax=intel -o "$TMP/intel_bad_form.o" "$TMP/intel_bad_form.s" >
     echo "expected Intel unsupported-form failure"
     exit 1
 fi
-grep -q "unsupported operand form for 'mov'" "$TMP/abf.err"
-grep -q "unsupported operand form for 'mov'" "$TMP/ibf.err"
+# Three operands are one more than any form of mov takes, and it is
+# said so, with the instruction, and where: the user's file and line.
+grep -q "att_bad_form\.s:3: 'mov' takes 2 operands at most" "$TMP/abf.err"
+grep -q "intel_bad_form\.s:4: 'mov' takes 2 operands at most" "$TMP/ibf.err"
 
 # ambiguous Intel memory-size diagnostics
 cat > "$TMP/ambiguous_intel.s" <<'SRC'

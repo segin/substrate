@@ -10321,7 +10321,15 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
         }
         w->count++;
     }
-    fprintf(stderr, "as: warning: %s:%u: %s\n", st->file != NULL ? st->file : "<input>", st->line, text);
+    {
+        /* Where the user wrote it, not where it stands in the expanded
+         * source. */
+        const char *file = st->file != NULL ? st->file : "<input>";
+        unsigned line = st->line;
+
+        (void)as_source_position(file, st->line, &file, &line);
+        fprintf(stderr, "as: warning: %s:%u: %s\n", file, line, text);
+    }
 }
 
 /*

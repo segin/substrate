@@ -432,13 +432,50 @@ static char *unescape_string(const char *in) {
     return out;
 }
 
+int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more) {
+    int c = (unsigned char)s[i];
+
+    *more = 0;
+    if (st->block_comment) {
+        if (c == '*' && s[i + 1] == '/') {
+            st->block_comment = 0;
+            *more = 1;
+        }
+        return AS_SCAN_COMMENT;
+    }
+    if (st->quote != 0) {
+        if (st->escaped) {
+            st->escaped = 0;
+        } else if (c == '\\') {
+            st->escaped = 1;
+        } else if (c == st->quote) {
+            st->quote = 0;
+        }
+        return AS_SCAN_QUOTED;
+    }
+    if (c == '"' || c == '\'') {
+        st->quote = c;
+        st->escaped = 0;
+        return AS_SCAN_QUOTED;
+    }
+    if (c == '/' && s[i + 1] == '*') {
+        st->block_comment = 1;
+        *more = 1;
+        return AS_SCAN_COMMENT;
+    }
+    if (c == '#' || (c == '/' && s[i + 1] == '/')) {
+        return AS_SCAN_COMMENT_TO_EOL;
+    }
+    return AS_SCAN_TEXT;
+}
+
+/* The line without its comments.  A string does not go on to the next
+ * line; a block comment does. */
 static char *strip_comments(const char *line, int *in_block_comment) {
+    as_scan_t scan;
     size_t i;
-    size_t j;
+    size_t j = 0;
     size_t n;
-    int in_str = 0;
-    int esc = 0;
-    char quote = 0;
     char *out;
 
     if (line == NULL || in_block_comment == NULL) {
@@ -449,52 +486,21 @@ static char *strip_comments(const char *line, int *in_block_comment) {
     if (out == NULL) {
         return NULL;
     }
-
-    j = 0;
+    memset(&scan, 0, sizeof(scan));
+    scan.block_comment = *in_block_comment;
     for (i = 0; i < n; ++i) {
-        int c = (unsigned char)line[i];
+        size_t more;
+        int kind = as_scan_step(&scan, line, i, &more);
 
-        if (*in_block_comment) {
-            if (c == '*' && i + 1 < n && line[i + 1] == '/') {
-                *in_block_comment = 0;
-                i++;
-            }
-            continue;
-        }
-
-        if (in_str) {
-            out[j++] = (char)c;
-            if (esc) {
-                esc = 0;
-            } else if (c == '\\') {
-                esc = 1;
-            } else if (c == quote) {
-                in_str = 0;
-                quote = 0;
-            }
-            continue;
-        }
-
-        if ((c == '"' || c == '\'') && !*in_block_comment) {
-            in_str = 1;
-            quote = (char)c;
-            out[j++] = (char)c;
-            continue;
-        }
-        if (c == '/' && i + 1 < n && line[i + 1] == '*') {
-            *in_block_comment = 1;
-            i++;
-            continue;
-        }
-        if (c == '/' && i + 1 < n && line[i + 1] == '/') {
+        if (kind == AS_SCAN_COMMENT_TO_EOL || (kind == AS_SCAN_TEXT && line[i] == ';')) {
             break;
         }
-        if (c == '#' || c == ';') {
-            break;
+        if (kind != AS_SCAN_COMMENT) {
+            out[j++] = line[i];
         }
-        out[j++] = (char)c;
+        i += more;
     }
-
+    *in_block_comment = scan.block_comment;
     out[j] = '\0';
     return out;
 }
@@ -734,16 +740,19 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
         col = (unsigned)(i + 1);
 
         if (line[i] == '"') {
+            as_scan_t scan;
+            size_t more;
             char *raw;
             size_t n;
 
+            /* To the quote that closes it: the last character the
+             * scanner calls part of the string. */
+            memset(&scan, 0, sizeof(scan));
+            (void)as_scan_step(&scan, line, i, &more);
             i++;
             while (line[i] != '\0') {
-                if (line[i] == '\\' && line[i + 1] != '\0') {
-                    i += 2;
-                    continue;
-                }
-                if (line[i] == '"') {
+                (void)as_scan_step(&scan, line, i, &more);
+                if (scan.quote == 0) {
                     break;
                 }
                 i++;
@@ -883,28 +892,181 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
     return 0;
 }
 
-static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
-    char *file_buf = NULL;
-    size_t file_len = 0;
+static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth);
+
+/*
+ * Where each line of an expanded source was written.
+ *
+ * A statement's line is the line of the text it was tokenized from, one
+ * to a line and counted up: the rest of the assembler finds a numeric
+ * label by going back or forward through those numbers, so no two
+ * statements may share one -- and several lines of an expansion were all
+ * written, by their author, on the one line that called the macro.  So
+ * the statement keeps the counted line, under a file name that is
+ * marked as internal, and this is the table from there to the file and
+ * line the user knows, which is what a message is given.
+ */
+typedef struct {
+    const char *file;
+    unsigned line;
+} source_pos_t;
+
+static char *source_map_name;
+static source_pos_t *source_map;
+static size_t source_map_count;
+static size_t source_map_cap;
+static char **source_map_files;
+static size_t source_map_file_count;
+
+static int source_map_begin(const char *internal_name) {
+    char *copy = (char *)malloc(strlen(internal_name) + 1);
+
+    if (copy == NULL) {
+        return -1;
+    }
+    memcpy(copy, internal_name, strlen(internal_name) + 1);
+    free(source_map_name);
+    source_map_name = copy;
+    source_map_count = 0;
+    return 0;
+}
+
+static int source_map_add(unsigned line_no, const char *user_file, unsigned user_line) {
+    const char *file = NULL;
+    size_t i;
+
+    for (i = source_map_file_count; i > 0 && file == NULL; --i) {
+        if (strcmp(source_map_files[i - 1], user_file) == 0) {
+            file = source_map_files[i - 1];
+        }
+    }
+    if (file == NULL) {
+        char **files = (char **)realloc(source_map_files, (source_map_file_count + 1) * sizeof(*files));
+        char *copy;
+
+        if (files == NULL) {
+            return -1;
+        }
+        source_map_files = files;
+        copy = (char *)malloc(strlen(user_file) + 1);
+        if (copy == NULL) {
+            return -1;
+        }
+        memcpy(copy, user_file, strlen(user_file) + 1);
+        source_map_files[source_map_file_count++] = copy;
+        file = copy;
+    }
+    if ((size_t)line_no >= source_map_cap) {
+        size_t ncap = source_map_cap == 0 ? 1024 : source_map_cap;
+        source_pos_t *next;
+
+        while (ncap <= (size_t)line_no) {
+            ncap *= 2;
+        }
+        next = (source_pos_t *)realloc(source_map, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        memset(next + source_map_cap, 0, (ncap - source_map_cap) * sizeof(*next));
+        source_map = next;
+        source_map_cap = ncap;
+    }
+    source_map[line_no].file = file;
+    source_map[line_no].line = user_line;
+    if ((size_t)line_no >= source_map_count) {
+        source_map_count = (size_t)line_no + 1;
+    }
+    return 0;
+}
+
+int as_source_position(const char *file, unsigned line, const char **file_out, unsigned *line_out) {
+    if (file == NULL || source_map_name == NULL || strcmp(file, source_map_name) != 0 ||
+        (size_t)line >= source_map_count || source_map[line].file == NULL) {
+        return 0;
+    }
+    *file_out = source_map[line].file;
+    *line_out = source_map[line].line;
+    return 1;
+}
+
+void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
+    size_t n = 0;
+    size_t name_len = source_map_name != NULL ? strlen(source_map_name) : 0;
+
+    if (out == NULL || out_sz == 0) {
+        return;
+    }
+    while (in != NULL && *in != '\0' && n + 1 < out_sz) {
+        const char *digits;
+        const char *file;
+        unsigned long line = 0;
+        unsigned user_line;
+        int wrote;
+
+        if (name_len == 0 || strncmp(in, source_map_name, name_len) != 0 || in[name_len] != ':' ||
+            !isdigit((unsigned char)in[name_len + 1])) {
+            /* A name that is internal and has no line after it is the
+             * file itself. */
+            if (in[0] == AS_SOURCE_INTERNAL_PREFIX[0]) {
+                in++;
+                continue;
+            }
+            out[n++] = *in++;
+            continue;
+        }
+        for (digits = in + name_len + 1; isdigit((unsigned char)*digits); ++digits) {
+            line = line * 10 + (unsigned long)(*digits - '0');
+        }
+        if (!as_source_position(source_map_name, (unsigned)line, &file, &user_line)) {
+            in++;
+            continue;
+        }
+        wrote = snprintf(out + n, out_sz - n, "%s:%u", file, user_line);
+        if (wrote < 0 || (size_t)wrote >= out_sz - n) {
+            break;
+        }
+        n += (size_t)wrote;
+        in = digits;
+    }
+    out[n] = '\0';
+}
+
+/*
+ * Tokenize a text, which is taken and freed.  `name` is the file its
+ * first line is of.  If it is `marked`, a line that begins with
+ * AS_LEX_MARK is not source: it says which line of which file the next
+ * one is, and is how the source keeps the user's coordinates through
+ * what expands it.
+ */
+static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t file_len, unsigned depth,
+                      int marked) {
+    char path[PATH_MAX];
+    char user_file[PATH_MAX];
+    unsigned user_line = 0;
     size_t pos = 0;
     unsigned line_no = 0;
     int in_block_comment = 0;
 
-    if (ctx == NULL || path == NULL) {
+    if (ctx == NULL || name == NULL || file_buf == NULL) {
+        free(file_buf);
+        return -1;
+    }
+    snprintf(path, sizeof(path), "%s%s", marked ? AS_SOURCE_INTERNAL_PREFIX : "", name);
+    snprintf(user_file, sizeof(user_file), "%s", name);
+    if (marked && source_map_begin(path) != 0) {
+        set_err(ctx, "%s: out of memory", name);
+        free(file_buf);
         return -1;
     }
     if (ctx->cfg != NULL && ctx->cfg->max_include_depth > 0 && depth > ctx->cfg->max_include_depth) {
         set_err(ctx, "%s: include depth exceeded (%u)", path, ctx->cfg->max_include_depth);
+        free(file_buf);
         return -1;
     }
 
     if (append_path(&ctx->include_stack, &ctx->include_stack_count, &ctx->include_stack_cap, path) != 0) {
         set_err(ctx, "%s: out of memory", path);
-        return -1;
-    }
-
-    file_buf = read_file_all(path, &file_len, ctx);
-    if (file_buf == NULL) {
+        free(file_buf);
         return -1;
     }
 
@@ -922,7 +1084,25 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
         }
         saved = file_buf[end];
         file_buf[end] = '\0';
+        if (marked && line[0] == AS_LEX_MARK) {
+            char *rest = NULL;
+            unsigned long at = strtoul(line + 1, &rest, 10);
+
+            if (rest != NULL && *rest == ' ' && rest[1] != '\0') {
+                snprintf(user_file, sizeof(user_file), "%s", rest + 1);
+            }
+            user_line = at > 0 ? (unsigned)(at - 1) : 0;
+            file_buf[end] = saved;
+            pos = saved == '\n' ? end + 1 : end;
+            continue;
+        }
         line_no++;
+        user_line++;
+        if (marked && source_map_add(line_no, user_file, user_line) != 0) {
+            set_err(ctx, "%s:%u: out of memory", path, line_no);
+            free(file_buf);
+            return -1;
+        }
 
         sanitized = strip_comments(line, &in_block_comment);
         if (sanitized == NULL) {
@@ -1011,6 +1191,59 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
     free(ctx->include_stack[ctx->include_stack_count - 1]);
     ctx->include_stack_count--;
     return 0;
+}
+
+static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
+    char *file_buf;
+    size_t file_len = 0;
+
+    if (ctx == NULL || path == NULL) {
+        return -1;
+    }
+    file_buf = read_file_all(path, &file_len, ctx);
+    if (file_buf == NULL) {
+        return -1;
+    }
+    return lex_buffer(ctx, path, file_buf, file_len, depth, 0);
+}
+
+int as_lex_text(const char *name, const char *text, size_t len, int marked, const as_lexer_cfg_t *cfg,
+                as_token_vec_t *out, char *errbuf, size_t errbuf_sz) {
+    lex_ctx_t ctx;
+    char *copy;
+    int rc;
+
+    if (name == NULL || out == NULL || (text == NULL && len != 0)) {
+        return -1;
+    }
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cfg = cfg;
+    ctx.out = out;
+    ctx.errbuf = errbuf;
+    ctx.errbuf_sz = errbuf_sz;
+    if (errbuf != NULL && errbuf_sz > 0) {
+        errbuf[0] = '\0';
+    }
+    lex_arm_registers = cfg != NULL && cfg->arm_registers;
+
+    /* The tokenizer ends each line where it stands, so it has its own. */
+    copy = (char *)malloc(len + 1);
+    if (copy == NULL) {
+        set_err(&ctx, "%s: out of memory", name);
+        return -1;
+    }
+    if (len != 0) {
+        memcpy(copy, text, len);
+    }
+    copy[len] = '\0';
+    rc = lex_buffer(&ctx, name, copy, len, 0, marked);
+
+    while (ctx.include_stack_count > 0) {
+        free(ctx.include_stack[ctx.include_stack_count - 1]);
+        ctx.include_stack_count--;
+    }
+    free(ctx.include_stack);
+    return rc;
 }
 
 int as_lex_file(const char *path, const as_lexer_cfg_t *cfg, as_token_vec_t *out,

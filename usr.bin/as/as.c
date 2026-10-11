@@ -8,6 +8,7 @@
 #include "elfobj.h"
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -32,6 +33,9 @@
 #define SUBSTRATE_TC_TRACE_ENV "SUBSTRATE_TC_TRACE"
 #define SUBSTRATE_TC_MAX_ENV "SUBSTRATE_TC_MAX_DEPTH"
 #define SUBSTRATE_TC_DEFAULT_MAX 64
+
+/* What the standard input is called in a message, as GNU as calls it. */
+#define AS_STDIN_NAME "{standard input}"
 
 #define AS_MODE_AUTO (-1)
 #define AS_MODE_32 0
@@ -59,6 +63,9 @@ typedef struct {
     int warn_enabled;
     int fatal_warnings;
     const char *in_path;
+    /* The source, where it is not the one file in_path names: several
+     * files one after another, or the standard input. */
+    struct as_text *gathered;
     const char *out_path;
     const char *listing_path;
     const char *self_path;
@@ -175,17 +182,24 @@ static const char *as_error_code_name(as_error_code_t code) {
     }
 }
 
+/*
+ * Every error is written here.  A statement's place is a line of the
+ * expanded source under an internal name (as_lexer.h); it is given as
+ * the file and line the user wrote it at.
+ */
 static void as_diag(as_error_code_t code, const char *fmt, ...) {
+    char said[1024];
+    char shown[1024];
     va_list ap;
 
     if (g_emit_error_codes) {
         fprintf(stderr, "[%s] ", as_error_code_name(code));
     }
-    fprintf(stderr, "as: error: ");
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    vsnprintf(said, sizeof(said), fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    as_source_positions_in_text(said, shown, sizeof(shown));
+    fprintf(stderr, "as: error: %s\n", shown);
 }
 
 static void usage(const char *prog) {
@@ -356,7 +370,11 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
                 as_diag(AS_E_BACKEND, "%s:%u: %s", file, st->line, said);
                 errors++;
             } else if (!warnings->suppress) {
-                fprintf(stderr, "as: warning: %s:%u: %s\n", file, st->line, said);
+                const char *shown_file = file;
+                unsigned shown_line = st->line;
+
+                (void)as_source_position(file, st->line, &shown_file, &shown_line);
+                fprintf(stderr, "as: warning: %s:%u: %s\n", shown_file, shown_line, said);
                 warnings->count++;
             }
         }
@@ -555,8 +573,20 @@ static const char *line_start_directive(const char *line) {
     return line;
 }
 
+static ssize_t text_getline(char **line, size_t *cap, struct as_text *t);
+static void text_rewind(struct as_text *t);
+
+static void preflight_done(FILE *fp, const as_ctx_t *ctx) {
+    if (fp != NULL) {
+        fclose(fp);
+    }
+    if (ctx->gathered != NULL) {
+        text_rewind(ctx->gathered);
+    }
+}
+
 static int preflight_source_limits(const as_ctx_t *ctx) {
-    FILE *fp;
+    FILE *fp = NULL;
     char *line = NULL;
     size_t cap = 0;
     ssize_t nread;
@@ -568,13 +598,17 @@ static int preflight_source_limits(const as_ctx_t *ctx) {
         return -1;
     }
 
-    fp = fopen(ctx->in_path, "rb");
-    if (fp == NULL) {
-        as_diag(AS_E_USAGE, "failed to open input %s: %s", ctx->in_path, strerror(errno));
-        return -1;
+    /* The file, or what was gathered of several or of the standard
+     * input, which is read here and then again from its beginning. */
+    if (ctx->gathered == NULL) {
+        fp = fopen(ctx->in_path, "rb");
+        if (fp == NULL) {
+            as_diag(AS_E_USAGE, "failed to open input %s: %s", ctx->in_path, strerror(errno));
+            return -1;
+        }
     }
 
-    while ((nread = getline(&line, &cap, fp)) >= 0) {
+    while ((nread = fp != NULL ? getline(&line, &cap, fp) : text_getline(&line, &cap, ctx->gathered)) >= 0) {
         const char *d;
         int tlen;
 
@@ -584,14 +618,14 @@ static int preflight_source_limits(const as_ctx_t *ctx) {
             as_diag(AS_E_LIMIT, "%s:%llu: input exceeds --max-input-bytes=%llu", ctx->in_path, lineno,
                     ctx->max_input_bytes);
             free(line);
-            fclose(fp);
+            preflight_done(fp, ctx);
             return -1;
         }
         if (ctx->max_line_bytes > 0 && (unsigned long long)nread > ctx->max_line_bytes) {
             as_diag(AS_E_LIMIT, "%s:%llu: line exceeds --max-line-bytes=%llu", ctx->in_path, lineno,
                     ctx->max_line_bytes);
             free(line);
-            fclose(fp);
+            preflight_done(fp, ctx);
             return -1;
         }
         tlen = count_max_token_len(line);
@@ -599,7 +633,7 @@ static int preflight_source_limits(const as_ctx_t *ctx) {
             as_diag(AS_E_LIMIT, "%s:%llu: token exceeds --max-token-length=%llu", ctx->in_path, lineno,
                     ctx->max_token_length);
             free(line);
-            fclose(fp);
+            preflight_done(fp, ctx);
             return -1;
         }
 
@@ -610,7 +644,7 @@ static int preflight_source_limits(const as_ctx_t *ctx) {
                 as_diag(AS_E_LIMIT, "%s:%llu: macro depth exceeds --max-macro-depth=%llu", ctx->in_path, lineno,
                         ctx->max_macro_depth);
                 free(line);
-                fclose(fp);
+                preflight_done(fp, ctx);
                 return -1;
             }
         } else if (strncmp(d, ".endm", 5) == 0 && (d[5] == '\0' || isspace((unsigned char)d[5]))) {
@@ -621,7 +655,7 @@ static int preflight_source_limits(const as_ctx_t *ctx) {
     }
 
     free(line);
-    fclose(fp);
+    preflight_done(fp, ctx);
     return 0;
 }
 
@@ -819,7 +853,12 @@ static const char *resolve_cpp_tool(const as_ctx_t *ctx, char *buf, size_t bufsz
     return "cpp";
 }
 
-static int run_cpp_stage(const as_ctx_t *ctx, const char *in_path, const char *out_path) {
+/*
+ * Run the C preprocessor over a source and take what it writes: its
+ * standard output, read here through a pipe, in *text_out (the caller's
+ * to free) and *len_out.  It was told to write a file in /tmp.
+ */
+static int run_cpp_capture(const as_ctx_t *ctx, const char *in_path, char **text_out, size_t *len_out) {
     size_t i;
     size_t argc;
     char **argv;
@@ -828,9 +867,16 @@ static int run_cpp_stage(const as_ctx_t *ctx, const char *in_path, const char *o
     const char *cpp_prog;
     pid_t pid;
     int status;
+    int fds[2];
+    char *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    int failed = 0;
 
+    *text_out = NULL;
+    *len_out = 0;
     cpp_prog = resolve_cpp_tool(ctx, cpp_path, sizeof(cpp_path));
-    argc = 5 + ctx->gcc_opts.count;
+    argc = 3 + ctx->gcc_opts.count;
     argv = (char **)calloc(argc + 1, sizeof(*argv));
     if (argv == NULL) {
         return -1;
@@ -840,29 +886,68 @@ static int run_cpp_stage(const as_ctx_t *ctx, const char *in_path, const char *o
     for (i = 0; i < ctx->gcc_opts.count; ++i) {
         argv[at++] = ctx->gcc_opts.items[i];
     }
-    argv[at++] = "-o";
-    argv[at++] = (char *)out_path;
     argv[at++] = (char *)in_path;
     argv[at] = NULL;
 
+    if (pipe(fds) != 0) {
+        free(argv);
+        return -1;
+    }
     pid = fork();
     if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
         free(argv);
         return -1;
     }
     if (pid == 0) {
+        close(fds[0]);
+        if (dup2(fds[1], STDOUT_FILENO) < 0) {
+            _exit(127);
+        }
+        close(fds[1]);
         execvp(argv[0], argv);
         _exit(127);
     }
-
-    if (waitpid(pid, &status, 0) < 0) {
-        free(argv);
-        return -1;
-    }
+    close(fds[1]);
     free(argv);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+
+    for (;;) {
+        ssize_t got;
+
+        if (cap - len < 65536) {
+            size_t ncap = cap == 0 ? 131072 : cap * 2;
+            char *next = (char *)realloc(buf, ncap + 1);
+
+            if (next == NULL) {
+                failed = 1;
+                break;
+            }
+            buf = next;
+            cap = ncap;
+        }
+        got = read(fds[0], buf + len, cap - len);
+        if (got < 0 && errno == EINTR) {
+            continue;
+        }
+        if (got < 0) {
+            failed = 1;
+        }
+        if (got <= 0) {
+            break;
+        }
+        len += (size_t)got;
+    }
+    close(fds[0]);
+    if (waitpid(pid, &status, 0) < 0 || failed || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        free(buf);
         return -1;
     }
+    if (buf != NULL) {
+        buf[len] = '\0';
+    }
+    *text_out = buf;
+    *len_out = len;
     return 0;
 }
 
@@ -936,46 +1021,306 @@ static char *trim_in_place(char *s) {
     return s;
 }
 
-static int write_substituted_line(FILE *out, const char *line, const char *var, const char *value) {
+/*
+ * The source on its way from its file to the tokenizer.
+ *
+ * Macros, repeats and conditionals are expanded as text, line by line,
+ * each pass reading one text and writing the next.  The texts were
+ * files in /tmp -- four of them for a source with no macro in it -- and
+ * a statement had the name of the last and its line there, which is
+ * what every message said: "/tmp/ascond_dlnR1j:5".  They are in memory,
+ * and each line knows the file and line it came from: a writer notes
+ * where its reader stands whenever a line is begun, and where the count
+ * a later reader would keep goes wrong -- lines left out, or several
+ * made of one -- it writes a mark (AS_LEX_MARK) that puts it right.
+ */
+typedef struct as_text {
+    char *data;
+    size_t len;
+    size_t cap;
+    int failed;
+    /* As what is read: the next byte, and the file and line of the line
+     * last read. */
+    size_t pos;
+    char *file;
+    unsigned line;
+    /* As what is written: the text its lines are made from, where a
+     * reader of it will take the next line to be, and whether a line is
+     * part written. */
+    const struct as_text *origin;
+    char *out_file;
+    unsigned out_line;
+    int mid_line;
+} as_text_t;
+
+static void text_free(as_text_t *t) {
+    if (t == NULL) {
+        return;
+    }
+    free(t->data);
+    free(t->file);
+    free(t->out_file);
+    memset(t, 0, sizeof(*t));
+}
+
+static int text_set_file(char **slot, const char *name) {
+    char *copy = xstrdup(name != NULL ? name : "<input>");
+
+    if (copy == NULL) {
+        return -1;
+    }
+    free(*slot);
+    *slot = copy;
+    return 0;
+}
+
+static int text_reserve(as_text_t *t, size_t more) {
+    if (t->failed) {
+        return -1;
+    }
+    if (t->len + more + 1 > t->cap) {
+        size_t ncap = t->cap == 0 ? 4096 : t->cap;
+        char *next;
+
+        while (ncap < t->len + more + 1) {
+            ncap *= 2;
+        }
+        next = (char *)realloc(t->data, ncap);
+        if (next == NULL) {
+            t->failed = 1;
+            return -1;
+        }
+        t->data = next;
+        t->cap = ncap;
+    }
+    return 0;
+}
+
+static void text_put_raw(as_text_t *t, const char *s, size_t n) {
+    if (text_reserve(t, n) != 0) {
+        return;
+    }
+    memcpy(t->data + t->len, s, n);
+    t->len += n;
+    t->data[t->len] = '\0';
+}
+
+/* A line is about to be written: see that whoever reads it will know
+ * the line it is made from. */
+static void text_begin_line(as_text_t *t) {
+    const as_text_t *from = t->origin;
+    char mark[32];
+
+    if (from == NULL || from->file == NULL || from->line == 0) {
+        return;
+    }
+    if (t->out_file != NULL && strcmp(t->out_file, from->file) == 0 && t->out_line + 1 == from->line) {
+        return;
+    }
+    snprintf(mark, sizeof(mark), "%c%u ", AS_LEX_MARK, from->line);
+    text_put_raw(t, mark, strlen(mark));
+    text_put_raw(t, from->file, strlen(from->file));
+    text_put_raw(t, "\n", 1);
+    if (t->out_file == NULL || strcmp(t->out_file, from->file) != 0) {
+        if (text_set_file(&t->out_file, from->file) != 0) {
+            t->failed = 1;
+        }
+    }
+    t->out_line = from->line - 1;
+}
+
+static void text_putc(int c, as_text_t *t) {
+    char ch = (char)c;
+
+    if (!t->mid_line) {
+        text_begin_line(t);
+    }
+    text_put_raw(t, &ch, 1);
+    if (ch == '\n') {
+        t->out_line++;
+        t->mid_line = 0;
+    } else {
+        t->mid_line = 1;
+    }
+}
+
+static void text_puts(const char *s, as_text_t *t) {
+    for (; *s != '\0'; ++s) {
+        text_putc((unsigned char)*s, t);
+    }
+}
+
+/*
+ * The next line of a text, as getline(3) gives one of a file: with its
+ * newline, in *line, and its length returned; -1 at the end.  A mark is
+ * taken in and not given, and so is the line a C preprocessor leaves to
+ * say the same thing, `# 12 "file.S"`.
+ */
+static ssize_t text_getline(char **line, size_t *cap, as_text_t *t) {
+    for (;;) {
+        const char *start;
+        size_t n = 0;
+
+        if (t->pos >= t->len) {
+            return -1;
+        }
+        start = t->data + t->pos;
+        while (t->pos + n < t->len && start[n] != '\n') {
+            n++;
+        }
+        if (t->pos + n < t->len) {
+            n++;
+        }
+        t->pos += n;
+        if (start[0] == AS_LEX_MARK ||
+            (start[0] == '#' && n > 3 && start[1] == ' ' && isdigit((unsigned char)start[2]))) {
+            const char *p = start + (start[0] == '#' ? 2 : 1);
+            const char *end = start + n;
+            unsigned long at = 0;
+            const char *name;
+            const char *name_end;
+
+            while (p < end && isdigit((unsigned char)*p)) {
+                at = at * 10 + (unsigned long)(*p - '0');
+                p++;
+            }
+            while (p < end && *p == ' ') {
+                p++;
+            }
+            name = p;
+            name_end = end;
+            while (name_end > name && (name_end[-1] == '\n' || name_end[-1] == '\r')) {
+                name_end--;
+            }
+            if (start[0] == '#') {
+                /* "file" and then flags that are of no use here. */
+                if (name < name_end && *name == '"') {
+                    const char *close = name + 1;
+
+                    while (close < name_end && *close != '"') {
+                        close++;
+                    }
+                    name++;
+                    name_end = close;
+                } else if (name < name_end) {
+                    /* `# 12 something else`: a comment that begins with
+                     * a number, and a line like any other. */
+                    goto ordinary;
+                }
+            }
+            if (name < name_end) {
+                char *copy = (char *)malloc((size_t)(name_end - name) + 1);
+
+                if (copy == NULL) {
+                    return -1;
+                }
+                memcpy(copy, name, (size_t)(name_end - name));
+                copy[name_end - name] = '\0';
+                free(t->file);
+                t->file = copy;
+            }
+            t->line = at > 0 ? (unsigned)(at - 1) : 0;
+            continue;
+        }
+    ordinary:
+        if (*cap < n + 1) {
+            char *next = (char *)realloc(*line, n + 1);
+
+            if (next == NULL) {
+                return -1;
+            }
+            *line = next;
+            *cap = n + 1;
+        }
+        memcpy(*line, start, n);
+        (*line)[n] = '\0';
+        t->line++;
+        return (ssize_t)n;
+    }
+}
+
+/* Read it again from its first line. */
+static void text_rewind(as_text_t *t) {
+    t->pos = 0;
+    t->line = 0;
+}
+
+/* A file, read whole, as a text whose first line is its line 1. */
+static int text_read_file(as_text_t *t, const char *path) {
+    int fd = open(path, O_RDONLY);
+
+    memset(t, 0, sizeof(*t));
+    if (fd < 0) {
+        return -1;
+    }
+    for (;;) {
+        ssize_t got;
+
+        if (text_reserve(t, 65536) != 0) {
+            close(fd);
+            return -1;
+        }
+        got = read(fd, t->data + t->len, 65536);
+        if (got < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            close(fd);
+            return -1;
+        }
+        if (got == 0) {
+            break;
+        }
+        t->len += (size_t)got;
+    }
+    close(fd);
+    if (t->data != NULL) {
+        t->data[t->len] = '\0';
+    }
+    return text_set_file(&t->file, path);
+}
+
+static int write_substituted_line(as_text_t *out, const char *line, const char *var, const char *value) {
     size_t vlen;
     const char *p;
-    int quote = 0;
-    int escaped = 0;
+    as_scan_t scan;
+    int comment = 0;
 
     if (out == NULL || line == NULL || var == NULL || value == NULL) {
         return -1;
     }
+    memset(&scan, 0, sizeof(scan));
     vlen = strlen(var);
     for (p = line; *p != '\0'; ++p) {
-        if (quote != 0) {
-            if (!escaped && *p == quote) {
-                quote = 0;
-            }
-            escaped = (!escaped && *p == '\\') ? 1 : 0;
-        } else if (*p == '"' || *p == '\'') {
-            quote = *p;
-        } else if (*p == ';') {
-            fputc('\n', out);
+        size_t more;
+        int kind = comment ? AS_SCAN_COMMENT_TO_EOL : as_scan_step(&scan, line, (size_t)(p - line), &more);
+
+        /* A `;` ends a statement where it is text: not in a string, and
+         * not in a comment. */
+        if (kind == AS_SCAN_COMMENT_TO_EOL) {
+            comment = 1;
+        } else if (kind == AS_SCAN_TEXT && *p == ';') {
+            text_putc('\n', out);
             continue;
         }
         if (*p == '\\' && vlen > 0 && strncmp(p + 1, var, vlen) == 0) {
-            fputs(value, out);
+            text_puts(value, out);
             p += vlen;
             continue;
         }
-        fputc((unsigned char)*p, out);
+        text_putc((unsigned char)*p, out);
     }
     if (p == line || p[-1] != '\n') {
-        fputc('\n', out);
+        text_putc('\n', out);
     }
-    return ferror(out) ? -1 : 0;
+    return out->failed ? -1 : 0;
 }
 
-static int write_split_asm_line(FILE *out, const char *line) {
+static int write_split_asm_line(as_text_t *out, const char *line) {
     return write_substituted_line(out, line, "", "");
 }
 
-static int expand_irp_block(FILE *in, FILE *out, const char *header, int chars_mode) {
+static int expand_irp_block(as_text_t *in, as_text_t *out, const char *header, int chars_mode) {
     char *spec = NULL;
     char *var;
     char *vals;
@@ -1012,7 +1357,7 @@ static int expand_irp_block(FILE *in, FILE *out, const char *header, int chars_m
         }
     }
 
-    while (getline(&line, &cap, in) >= 0) {
+    while (text_getline(&line, &cap, in) >= 0) {
         if (line_starts_with_directive(line, ".endr")) {
             break;
         }
@@ -1073,7 +1418,7 @@ static int eval_rept_count(const char *s, long *out) {
     return 0;
 }
 
-static int expand_rept_block(FILE *in, FILE *out, const char *header) {
+static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) {
     char *line = NULL;
     size_t cap = 0;
     strvec_t body = {0};
@@ -1081,11 +1426,13 @@ static int expand_rept_block(FILE *in, FILE *out, const char *header) {
     long iter;
     int nested = 0;
     int rc = -1;
+    unsigned first_line = in->line + 1;
+    unsigned end_line;
 
     if (eval_rept_count(header, &count) != 0) {
         return -1;
     }
-    while (getline(&line, &cap, in) >= 0) {
+    while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
         if (line_starts_with_directive(d, ".rept")) {
             nested++;
@@ -1099,14 +1446,20 @@ static int expand_rept_block(FILE *in, FILE *out, const char *header) {
             goto out;
         }
     }
+    /* Each copy of a line is of the line it was written on, which is
+     * where a message about it should point. */
+    end_line = in->line;
     for (iter = 0; iter < count; ++iter) {
         size_t i;
         for (i = 0; i < body.count; ++i) {
+            in->line = first_line + (unsigned)i;
             if (write_split_asm_line(out, body.items[i]) != 0) {
+                in->line = end_line;
                 goto out;
             }
         }
     }
+    in->line = end_line;
     rc = 0;
 
 out:
@@ -1115,36 +1468,17 @@ out:
     return rc;
 }
 
-static int expand_rept_file(const char *in_path, char **out_path) {
-    FILE *in = NULL;
-    FILE *out = NULL;
-    char tmp_template[] = "/tmp/asrept_XXXXXX";
+static int expand_rept_file(as_text_t *in, as_text_t *out) {
     char *line = NULL;
     size_t cap = 0;
-    int fd = -1;
     int rc = -1;
 
-    if (in_path == NULL || out_path == NULL) {
+    if (in == NULL || out == NULL) {
         return -1;
     }
-    *out_path = NULL;
-    in = fopen(in_path, "rb");
-    if (in == NULL) {
-        return -1;
-    }
-    fd = mkstemp(tmp_template);
-    if (fd < 0) {
-        goto out;
-    }
-    out = fdopen(fd, "wb");
-    if (out == NULL) {
-        close(fd);
-        fd = -1;
-        goto out;
-    }
-    fd = -1;
+    out->origin = in;
 
-    while (getline(&line, &cap, in) >= 0) {
+    while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
         if (line_starts_with_directive(d, ".rept")) {
             if (expand_rept_block(in, out, d + 5) != 0) {
@@ -1164,31 +1498,15 @@ static int expand_rept_file(const char *in_path, char **out_path) {
             }
             continue;
         }
-        fputs(line, out);
+        text_puts(line, out);
     }
-    if (fflush(out) != 0) {
-        goto out;
-    }
-    *out_path = xstrdup(tmp_template);
-    if (*out_path == NULL) {
+    if (out->failed) {
         goto out;
     }
     rc = 0;
 
 out:
     free(line);
-    if (fd >= 0) {
-        close(fd);
-    }
-    if (out != NULL) {
-        fclose(out);
-    }
-    if (in != NULL) {
-        fclose(in);
-    }
-    if (rc != 0) {
-        unlink(tmp_template);
-    }
     return rc;
 }
 
@@ -1267,23 +1585,21 @@ static int gas_macro_vec_push(gas_macro_vec_t *v, gas_macro_t *m) {
 static int split_macro_list(const char *s, strvec_t *out, int split_ws) {
     const char *start;
     size_t i;
-    int quote = 0;
+    as_scan_t scan;
     int depth = 0;
 
     if (s == NULL || out == NULL) {
         return -1;
     }
+    memset(&scan, 0, sizeof(scan));
     start = s;
     for (i = 0;; ++i) {
         char ch = s[i];
         int sep = 0;
+        size_t more;
 
-        if (quote != 0) {
-            if (ch == quote) {
-                quote = 0;
-            }
-        } else if (ch == '"' || ch == '\'') {
-            quote = ch;
+        if (ch != '\0' && as_scan_step(&scan, s, i, &more) == AS_SCAN_QUOTED) {
+            /* part of a string, whatever it is */
         } else if (ch == '(' || ch == '[' || ch == '{') {
             depth++;
         } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
@@ -1345,22 +1661,20 @@ static int push_macro_arg_slice(strvec_t *out, const char *start, const char *en
 static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
     const char *start;
     size_t i;
-    int quote = 0;
+    as_scan_t scan;
     int depth = 0;
 
     if (s == NULL || out == NULL) {
         return -1;
     }
+    memset(&scan, 0, sizeof(scan));
     start = s;
     for (i = 0;; ++i) {
         char ch = s[i];
+        size_t more;
 
-        if (quote != 0) {
-            if (ch == quote) {
-                quote = 0;
-            }
-        } else if (ch == '"' || ch == '\'') {
-            quote = ch;
+        if (ch != '\0' && as_scan_step(&scan, s, i, &more) == AS_SCAN_QUOTED) {
+            /* part of a string, whatever it is */
         } else if (ch == '(' || ch == '[' || ch == '{') {
             depth++;
         } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
@@ -1594,23 +1908,25 @@ static char *macro_named_arg_eq(char *arg) {
     return *p == '=' ? p : NULL;
 }
 
-static int expand_gas_macro_statement(FILE *out, gas_macro_vec_t *macros, const char *line, unsigned depth);
+static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, const char *line, unsigned depth);
 
-static int expand_split_statement(FILE *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
+static int expand_split_statement(as_text_t *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
     size_t i;
     const char *start = line;
-    int quote = 0;
+    as_scan_t scan;
     int split = 0;
 
+    memset(&scan, 0, sizeof(scan));
     for (i = 0; line != NULL && line[i] != '\0'; ++i) {
         char ch = line[i];
-        if (quote != 0) {
-            if (ch == quote) {
-                quote = 0;
-            }
-        } else if (ch == '"' || ch == '\'') {
-            quote = ch;
-        } else if (ch == ';') {
+        size_t more;
+        int kind = as_scan_step(&scan, line, i, &more);
+
+        /* The rest is comment, and a `;` in it is no statement's end. */
+        if (kind == AS_SCAN_COMMENT_TO_EOL) {
+            break;
+        }
+        if (kind == AS_SCAN_TEXT && ch == ';') {
             size_t n = (size_t)(line + i - start);
             char *part = (char *)malloc(n + 2);
             if (part == NULL) {
@@ -1644,7 +1960,7 @@ static int expand_split_statement(FILE *out, gas_macro_vec_t *macros, const char
     return -2;
 }
 
-static int expand_gas_macro_statement(FILE *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
+static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
     const char *p;
     const char *name_start;
     char name[128];
@@ -1692,7 +2008,11 @@ static int expand_gas_macro_statement(FILE *out, gas_macro_vec_t *macros, const 
             }
             rname[rn] = '\0';
             if (rn > 0 && find_gas_macro(macros, rname) != NULL) {
-                if (fprintf(out, "%.*s:\n", (int)(q - label_start), label_start) < 0) {
+                for (; label_start < q; ++label_start) {
+                    text_putc((unsigned char)*label_start, out);
+                }
+                text_puts(":\n", out);
+                if (out->failed) {
                     return -1;
                 }
                 return expand_gas_macro_statement(out, macros, rest, depth + 1);
@@ -1774,7 +2094,7 @@ out:
     return rc;
 }
 
-static int expand_rept_block_with_macros(FILE *in, FILE *out, gas_macro_vec_t *macros, const char *header) {
+static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macro_vec_t *macros, const char *header) {
     char *line = NULL;
     size_t cap = 0;
     strvec_t body = {0};
@@ -1782,11 +2102,13 @@ static int expand_rept_block_with_macros(FILE *in, FILE *out, gas_macro_vec_t *m
     long iter;
     int nested = 0;
     int rc = -1;
+    unsigned first_line = in->line + 1;
+    unsigned end_line;
 
     if (eval_rept_count(header, &count) != 0) {
         return -1;
     }
-    while (getline(&line, &cap, in) >= 0) {
+    while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
         if (line_starts_with_directive(d, ".rept")) {
             nested++;
@@ -1800,14 +2122,18 @@ static int expand_rept_block_with_macros(FILE *in, FILE *out, gas_macro_vec_t *m
             goto out;
         }
     }
+    end_line = in->line;
     for (iter = 0; iter < count; ++iter) {
         size_t i;
         for (i = 0; i < body.count; ++i) {
+            in->line = first_line + (unsigned)i;
             if (expand_gas_macro_statement(out, macros, body.items[i], 0) != 0) {
+                in->line = end_line;
                 goto out;
             }
         }
     }
+    in->line = end_line;
     rc = 0;
 
 out:
@@ -1816,37 +2142,18 @@ out:
     return rc;
 }
 
-static int expand_gas_source_controls(const char *in_path, char **out_path) {
-    FILE *in = NULL;
-    FILE *out = NULL;
-    char tmp_template[] = "/tmp/asexp_XXXXXX";
+static int expand_gas_source_controls(as_text_t *in, as_text_t *out) {
     char *line = NULL;
     size_t cap = 0;
-    int fd = -1;
     gas_macro_vec_t macros = {0};
     int rc = -1;
 
-    if (in_path == NULL || out_path == NULL) {
+    if (in == NULL || out == NULL) {
         return -1;
     }
-    *out_path = NULL;
-    in = fopen(in_path, "rb");
-    if (in == NULL) {
-        return -1;
-    }
-    fd = mkstemp(tmp_template);
-    if (fd < 0) {
-        goto out;
-    }
-    out = fdopen(fd, "wb");
-    if (out == NULL) {
-        close(fd);
-        fd = -1;
-        goto out;
-    }
-    fd = -1;
+    out->origin = in;
 
-    while (getline(&line, &cap, in) >= 0) {
+    while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
 
         if (line_starts_with_directive(d, ".macro")) {
@@ -1854,7 +2161,7 @@ static int expand_gas_source_controls(const char *in_path, char **out_path) {
             if (parse_gas_macro_header(d + 6, &m) != 0) {
                 goto out;
             }
-            while (getline(&line, &cap, in) >= 0) {
+            while (text_getline(&line, &cap, in) >= 0) {
                 if (line_starts_with_directive(line_start_directive(line), ".endm")) {
                     break;
                 }
@@ -1892,11 +2199,7 @@ static int expand_gas_source_controls(const char *in_path, char **out_path) {
         }
     }
 
-    if (fflush(out) != 0) {
-        goto out;
-    }
-    *out_path = xstrdup(tmp_template);
-    if (*out_path == NULL) {
+    if (out->failed) {
         goto out;
     }
     rc = 0;
@@ -1904,18 +2207,6 @@ static int expand_gas_source_controls(const char *in_path, char **out_path) {
 out:
     free(line);
     gas_macro_vec_free(&macros);
-    if (fd >= 0) {
-        close(fd);
-    }
-    if (out != NULL) {
-        fclose(out);
-    }
-    if (in != NULL) {
-        fclose(in);
-    }
-    if (rc != 0) {
-        unlink(tmp_template);
-    }
     return rc;
 }
 
@@ -1980,21 +2271,20 @@ static int defsym_lookup(void *cookie, const char *name, long long *value_out) {
 }
 
 /*
- * The --defsym symbols, as a source would define them: a file with a
- * `.set` for each, to be read before the source.  It is a file of its
+ * The --defsym symbols, as a source would define them: a `.set` for
+ * each, in a text to be read before the source.  It is a text of its
  * own, and not lines put before the source's, so that no line of the
- * source has its number moved.  *out_path is NULL if there are none.
+ * source has its number moved.  It is empty if there are none.
  */
-static int write_defsym_file(const as_ctx_t *ctx, char **out_path) {
-    char tmp_template[] = "/tmp/asdef_XXXXXX";
-    FILE *out = NULL;
+static int write_defsym_text(const as_ctx_t *ctx, as_text_t *out) {
     size_t i;
 
-    *out_path = NULL;
+    memset(out, 0, sizeof(*out));
     for (i = 0; i < ctx->as_opts.count; ++i) {
         const char *opt = ctx->as_opts.items[i];
         size_t name_len;
         long long value;
+        char number[32];
 
         if (strncmp(opt, DEFSYM_OPT, sizeof(DEFSYM_OPT) - 1) != 0) {
             continue;
@@ -2003,30 +2293,12 @@ static int write_defsym_file(const as_ctx_t *ctx, char **out_path) {
         if (defsym_split(opt, &name_len, &value) != 0) {
             continue;
         }
-        if (out == NULL) {
-            int fd = mkstemp(tmp_template);
-
-            if (fd < 0) {
-                return -1;
-            }
-            out = fdopen(fd, "wb");
-            if (out == NULL) {
-                close(fd);
-                unlink(tmp_template);
-                return -1;
-            }
-        }
-        if (fprintf(out, ".set %.*s, %lld\n", (int)name_len, opt, value) < 0) {
-            fclose(out);
-            unlink(tmp_template);
-            return -1;
-        }
+        snprintf(number, sizeof(number), ", %lld\n", value);
+        text_put_raw(out, ".set ", 5);
+        text_put_raw(out, opt, name_len);
+        text_put_raw(out, number, strlen(number));
     }
-    if (out == NULL) {
-        return 0;
-    }
-    if (fclose(out) != 0 || (*out_path = xstrdup(tmp_template)) == NULL) {
-        unlink(tmp_template);
+    if (out->failed) {
         return -1;
     }
     return 0;
@@ -2326,40 +2598,21 @@ static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr) {
     return lb[0] != '\0';
 }
 
-static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, char **out_path) {
-    FILE *in = NULL;
-    FILE *out = NULL;
-    char tmp_template[] = "/tmp/ascond_XXXXXX";
+static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
     char *line = NULL;
     size_t cap = 0;
-    int fd = -1;
     gas_cond_frame_t stack[1024];
     cond_syms_t known = { ctx, NULL, 0, 0 };
     size_t depth = 0;
     int active = 1;
     int rc = -1;
 
-    if (in_path == NULL || out_path == NULL) {
+    if (in == NULL || out == NULL) {
         return -1;
     }
-    *out_path = NULL;
-    in = fopen(in_path, "rb");
-    if (in == NULL) {
-        return -1;
-    }
-    fd = mkstemp(tmp_template);
-    if (fd < 0) {
-        goto out;
-    }
-    out = fdopen(fd, "wb");
-    if (out == NULL) {
-        close(fd);
-        fd = -1;
-        goto out;
-    }
-    fd = -1;
+    out->origin = in;
 
-    while (getline(&line, &cap, in) >= 0) {
+    while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
 
         if (line_starts_with_directive(d, ".ifdef") || line_starts_with_directive(d, ".ifndef")) {
@@ -2379,7 +2632,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".ifb") || line_starts_with_directive(d, ".ifnb")) {
@@ -2402,7 +2655,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             f->else_seen = 0;
             active = f->active;
             free(tmp);
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".ifc") || line_starts_with_directive(d, ".ifnc")) {
@@ -2435,7 +2688,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             f->else_seen = 0;
             active = f->active;
             free(tmp);
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".ifeq") || line_starts_with_directive(d, ".ifne") ||
@@ -2466,7 +2719,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".if")) {
@@ -2480,7 +2733,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".elseif")) {
@@ -2498,7 +2751,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
                 }
             }
             active = f->active;
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".else")) {
@@ -2511,7 +2764,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             f->branch_taken = f->branch_taken || f->active;
             f->else_seen = 1;
             active = f->active;
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (line_starts_with_directive(d, ".endif")) {
@@ -2520,41 +2773,29 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             }
             depth--;
             active = depth == 0 ? 1 : stack[depth - 1].active;
-            fputc('\n', out);
+            text_putc('\n', out);
             continue;
         }
         if (active) {
             if (cond_syms_note_line(&known, line) != 0) {
                 goto out;
             }
-            fputs(line, out);
+            text_puts(line, out);
+            /* A last line without its newline is a line all the same. */
+            if (out->mid_line) {
+                text_putc('\n', out);
+            }
         } else {
-            fputc('\n', out);
+            text_putc('\n', out);
         }
     }
-    if (depth != 0 || fflush(out) != 0) {
-        goto out;
-    }
-    *out_path = xstrdup(tmp_template);
-    if (*out_path == NULL) {
+    if (depth != 0 || out->failed) {
         goto out;
     }
     rc = 0;
 
 out:
     free(line);
-    if (fd >= 0) {
-        close(fd);
-    }
-    if (out != NULL) {
-        fclose(out);
-    }
-    if (in != NULL) {
-        fclose(in);
-    }
-    if (rc != 0) {
-        unlink(tmp_template);
-    }
     cond_syms_free(&known);
     return rc;
 }
@@ -2571,15 +2812,20 @@ static int run_native_backend(const as_ctx_t *ctx) {
     const char **include_dirs = NULL;
     size_t include_dir_count = 0;
     char errbuf[512];
-    char *temp_pp = NULL;
-    char *temp_expanded = NULL;
-    char *temp_rept = NULL;
-    char *temp_cond = NULL;
-    char *temp_defs = NULL;
-    const char *src_path = NULL;
+    as_text_t text_source;
+    as_text_t text_expanded;
+    as_text_t text_rept;
+    as_text_t text_cond;
+    as_text_t text_defs;
+    as_text_t *source = &text_source;
     as_elf_warnings_t warnings;
     int rc = -1;
 
+    memset(&text_source, 0, sizeof(text_source));
+    memset(&text_expanded, 0, sizeof(text_expanded));
+    memset(&text_rept, 0, sizeof(text_rept));
+    memset(&text_cond, 0, sizeof(text_cond));
+    memset(&text_defs, 0, sizeof(text_defs));
     memset(&warnings, 0, sizeof(warnings));
     warnings.suppress = !ctx->warn_enabled;
     memset(&lcfg, 0, sizeof(lcfg));
@@ -2591,43 +2837,34 @@ static int run_native_backend(const as_ctx_t *ctx) {
     as_section_state_init(&secs);
     as_data_program_init(&data);
 
-    if (source_needs_cpp(ctx->in_path)) {
-        char tmp_template[] = "/tmp/aspp_XXXXXX";
-        int fd = mkstemp(tmp_template);
-        if (fd < 0) {
-            as_diag(AS_E_INTERNAL, "failed to create temp preprocessed file: %s", strerror(errno));
-            goto out;
-        }
-        close(fd);
-        temp_pp = xstrdup(tmp_template);
-        if (temp_pp == NULL) {
-            as_diag(AS_E_INTERNAL, "out of memory");
-            goto out;
-        }
-        if (run_cpp_stage(ctx, ctx->in_path, temp_pp) != 0) {
+    /* The source: gathered already, the output of the C preprocessor, or
+     * the file as it stands. */
+    if (ctx->gathered != NULL) {
+        source = ctx->gathered;
+    } else if (source_needs_cpp(ctx->in_path)) {
+        if (run_cpp_capture(ctx, ctx->in_path, &text_source.data, &text_source.len) != 0 ||
+            text_set_file(&text_source.file, ctx->in_path) != 0) {
             as_diag(AS_E_BACKEND, "preprocessor stage failed");
             goto out;
         }
-        src_path = temp_pp;
-    } else {
-        src_path = ctx->in_path;
+        text_source.cap = text_source.len + 1;
+    } else if (text_read_file(&text_source, ctx->in_path) != 0) {
+        as_diag(AS_E_USAGE, "%s: %s", ctx->in_path, strerror(errno));
+        goto out;
     }
 
-    if (expand_gas_source_controls(src_path, &temp_expanded) != 0) {
+    if (expand_gas_source_controls(source, &text_expanded) != 0) {
         as_diag(AS_E_BACKEND, "macro/control expansion stage failed");
         goto out;
     }
-    src_path = temp_expanded;
-    if (expand_rept_file(src_path, &temp_rept) != 0) {
+    if (expand_rept_file(&text_expanded, &text_rept) != 0) {
         as_diag(AS_E_BACKEND, "repeat expansion stage failed");
         goto out;
     }
-    src_path = temp_rept;
-    if (filter_gas_conditionals(ctx, src_path, &temp_cond) != 0) {
+    if (filter_gas_conditionals(ctx, &text_rept, &text_cond) != 0) {
         as_diag(AS_E_BACKEND, "conditional assembly stage failed");
         goto out;
     }
-    src_path = temp_cond;
 
     if (collect_include_dirs(ctx, &include_dirs, &include_dir_count) != 0) {
         as_diag(AS_E_INTERNAL, "failed to build include dir list");
@@ -2651,18 +2888,33 @@ static int run_native_backend(const as_ctx_t *ctx) {
     ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
     ecfg.warnings = &warnings;
 
-    if (write_defsym_file(ctx, &temp_defs) != 0) {
+    /* For whoever is debugging the expansion: what the tokenizer is
+     * given, a mark shown as `#@`.  (AS_KEEP_TEMPS kept the files.) */
+    if (getenv("AS_DUMP_EXPANDED") != NULL) {
+        size_t k;
+
+        for (k = 0; k < text_cond.len; ++k) {
+            if (text_cond.data[k] == AS_LEX_MARK) {
+                fputs("#@", stderr);
+            } else {
+                fputc(text_cond.data[k], stderr);
+            }
+        }
+    }
+    if (write_defsym_text(ctx, &text_defs) != 0) {
         as_diag(AS_E_INTERNAL, "failed to write the --defsym definitions");
         goto out;
     }
     {
         AS_PHASE_BEGIN();
         /* The --defsym symbols first: their tokens go before the source's. */
-        if (temp_defs != NULL && as_lex_file(temp_defs, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
+        if (text_defs.len != 0 &&
+            as_lex_text("--defsym", text_defs.data, text_defs.len, 0, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
             as_diag(AS_E_BACKEND, "%s", errbuf);
             goto out;
         }
-        if (as_lex_file(src_path, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
+        if (as_lex_text(ctx->in_path, text_cond.data != NULL ? text_cond.data : "", text_cond.len, 1, &lcfg,
+                        &toks, errbuf, sizeof(errbuf)) != 0) {
             as_diag(AS_E_BACKEND, "%s", errbuf);
             goto out;
         }
@@ -2748,26 +3000,11 @@ static int run_native_backend(const as_ctx_t *ctx) {
 
 out:
     as_elf_warnings_free(&warnings);
-    if (temp_pp != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
-        unlink(temp_pp);
-    }
-    if (temp_expanded != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
-        unlink(temp_expanded);
-    }
-    if (temp_rept != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
-        unlink(temp_rept);
-    }
-    if (temp_cond != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
-        unlink(temp_cond);
-    }
-    if (temp_defs != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
-        unlink(temp_defs);
-    }
-    free(temp_pp);
-    free(temp_expanded);
-    free(temp_rept);
-    free(temp_cond);
-    free(temp_defs);
+    text_free(&text_source);
+    text_free(&text_expanded);
+    text_free(&text_rept);
+    text_free(&text_cond);
+    text_free(&text_defs);
     free(include_dirs);
     as_data_program_free(&data);
     as_section_state_free(&secs);
@@ -2947,76 +3184,71 @@ static void print_statistics(unsigned long long start_us, unsigned long long end
 }
 
 /*
- * The sources named, or the standard input if none is, copied one after
- * another into a file of their own, whose name is left in *out_path for
- * the caller to remove.  A source that does not end its last line has
- * it ended, so that the next begins on a line of its own.
+ * The sources named, or the standard input if none is, one after another
+ * in one text, each behind a mark that says whose lines follow.  A
+ * source that does not end its last line has it ended, so that the next
+ * begins on a line of its own.
  */
-static int gather_sources(const strvec_t *inputs, char **out_path) {
-    char tmp_template[] = "/tmp/asin_XXXXXX";
-    char buf[65536];
-    FILE *out;
+static int gather_sources(const strvec_t *inputs, as_text_t *out) {
     size_t i;
     size_t count = inputs->count == 0 ? 1 : inputs->count;
-    int fd = mkstemp(tmp_template);
 
-    if (fd < 0 || (out = fdopen(fd, "wb")) == NULL) {
-        if (fd >= 0) {
-            close(fd);
-            unlink(tmp_template);
-        }
-        as_diag(AS_E_INTERNAL, "failed to make a file to gather the sources in");
-        return -1;
-    }
-    *out_path = xstrdup(tmp_template);
-    if (*out_path == NULL) {
-        fclose(out);
-        unlink(tmp_template);
-        return -1;
-    }
-
+    memset(out, 0, sizeof(*out));
     for (i = 0; i < count; ++i) {
         const char *name = inputs->count == 0 ? "-" : inputs->items[i];
-        FILE *in = strcmp(name, "-") == 0 ? stdin : fopen(name, "rb");
-        size_t n;
-        int last = '\n';
+        int is_stdin = strcmp(name, "-") == 0;
+        const char *shown = is_stdin ? AS_STDIN_NAME : name;
+        int fd = is_stdin ? STDIN_FILENO : open(name, O_RDONLY);
+        char mark[32];
 
-        if (in == NULL) {
+        if (fd < 0) {
             as_diag(AS_E_USAGE, "failed to open input %s: %s", name, strerror(errno));
-            fclose(out);
             return -1;
         }
-        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-            last = buf[n - 1];
-            if (fwrite(buf, 1, n, out) != n) {
+        snprintf(mark, sizeof(mark), "%c1 ", AS_LEX_MARK);
+        text_put_raw(out, mark, strlen(mark));
+        text_put_raw(out, shown, strlen(shown));
+        text_put_raw(out, "\n", 1);
+        for (;;) {
+            ssize_t got;
+
+            if (text_reserve(out, 65536) != 0) {
                 break;
             }
-        }
-        if (ferror(in) || ferror(out) || (last != '\n' && fputc('\n', out) == EOF)) {
-            as_diag(AS_E_INTERNAL, "failed to read %s", strcmp(name, "-") == 0 ? "the standard input" : name);
-            if (in != stdin) {
-                fclose(in);
+            got = read(fd, out->data + out->len, 65536);
+            if (got < 0 && errno == EINTR) {
+                continue;
             }
-            fclose(out);
+            if (got <= 0) {
+                if (got < 0) {
+                    out->failed = 1;
+                }
+                break;
+            }
+            out->len += (size_t)got;
+            out->data[out->len] = '\0';
+        }
+        if (!is_stdin) {
+            close(fd);
+        }
+        if (out->len != 0 && out->data[out->len - 1] != '\n') {
+            text_put_raw(out, "\n", 1);
+        }
+        if (out->failed) {
+            as_diag(AS_E_INTERNAL, "failed to read %s", is_stdin ? "the standard input" : name);
             return -1;
         }
-        if (in != stdin) {
-            fclose(in);
-        }
     }
-    if (fclose(out) != 0) {
-        as_diag(AS_E_INTERNAL, "failed to gather the sources");
-        return -1;
-    }
-    return 0;
+    return text_set_file(&out->file, inputs->count == 0 ? AS_STDIN_NAME : inputs->items[0]);
 }
 
 /*
  * The assembler, given its arguments with each -Wa taken apart: what is
  * in a -Wa is an option like any other, and is read where they are.
- * `inputs` and `*spool_path` are the caller's, to free and to remove.
+ * `inputs` is the caller's, to free.
  */
-static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
+static int as_run(int argc, char **argv, strvec_t *inputs) {
+    static as_text_t gathered;
     as_ctx_t ctx;
     int i;
     int query_version = 0;
@@ -3376,12 +3608,13 @@ static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
             strvec_free(&ctx.gcc_opts);
             strvec_free(&ctx.as_opts);
             return 2;
-        } else if (gather_sources(inputs, spool_path) != 0) {
+        } else if (gather_sources(inputs, &gathered) != 0) {
             strvec_free(&ctx.gcc_opts);
             strvec_free(&ctx.as_opts);
             return 1;
         } else {
-            ctx.in_path = *spool_path;
+            ctx.gathered = &gathered;
+            ctx.in_path = inputs->count == 0 ? AS_STDIN_NAME : inputs->items[0];
         }
     }
 
@@ -3506,7 +3739,6 @@ static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
 int main(int argc, char **argv) {
     strvec_t args;
     strvec_t inputs;
-    char *spool_path = NULL;
     int i;
     int rc;
 
@@ -3535,13 +3767,7 @@ int main(int argc, char **argv) {
     }
 
     memset(&inputs, 0, sizeof(inputs));
-    rc = as_run((int)args.count, args.items, &inputs, &spool_path);
-    if (spool_path != NULL) {
-        if (getenv("AS_KEEP_TEMPS") == NULL) {
-            unlink(spool_path);
-        }
-        free(spool_path);
-    }
+    rc = as_run((int)args.count, args.items, &inputs);
     strvec_free(&inputs);
     strvec_free(&args);
     return rc;

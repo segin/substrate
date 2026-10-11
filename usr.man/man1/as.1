@@ -309,6 +309,13 @@ marks the highest required level via cumulative needed bits.
 Override preprocessor executable for
 .Pa .S
 inputs.
+.It Ev AS_DUMP_EXPANDED
+If set, the source as it stands after macros, repeats and conditionals
+are expanded is written to standard error before it is assembled.
+A line that begins
+.Ql #@
+says which line of which file the next one came from.
+The expansion is done in memory: no intermediate file is written.
 .It Ev AS_ERROR_CODES
 If non-empty,
 .Nm
