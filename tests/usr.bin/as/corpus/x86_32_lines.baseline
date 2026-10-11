@@ -392,13 +392,8 @@ addr32
 data16 jmp sym
 addr16 jcxz 1f | 1:
 setab %al
-jmp .
-jmp .+2
-jmp .+0x100
 call .
 call .+5
-je .
-je .+2
 push $0xffffffff
 pushw $0xffff
 xsetbv

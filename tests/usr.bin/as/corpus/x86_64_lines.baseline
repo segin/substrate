@@ -497,13 +497,8 @@ fs
 gs
 seta %eax
 setab %al
-jmp .
-jmp .+2
-jmp .+0x100
 call .
 call .+5
-je .
-je .+2
 pushw $0xffff
 femms
 monitor

@@ -785,9 +785,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-213** If an expression in a data directive or an operand cannot be expressed as a constant or as one relocation, then the assembler shall fail and say why.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long x+y`, `.long 2*x`, `.long ext - h` (h in another section), `movl $x+y,%eax`, `movl $2*x,%eax`: exit 1.  After: 191.
   Done, ahead of 191 (see 210): each of the five, and `x/2`, `x&1`, `~ext`, `. - ext`, `ext+ext`, `ext1-ext2` and a label less one of another section, are refused on their line.  `.long x+y` had been the sum of two offsets, and `movl $x+y,%eax` the relocation of `x` alone.  An operand is asked the same question by the same evaluator before anything is made of it.  More is taken than GNU takes where the arithmetic is sound (`ext+b-a` with `a` and `b` of one section).
-- [ ] **AS-T-214** When `.` is used in an expression, the assembler shall give the address of the start of the statement, or for a data directive of the element.
+- [x] **AS-T-214** When `.` is used in an expression, the assembler shall give the address of the start of the statement, or for a data directive of the element.
   Trace: AS-FE-006.  Verify: T — `.long .+4`, `.long ., .`, `jmp .`, `jmp .+2`, `movl $., %eax`: GNU; no symbol named `.` reaches the symbol table.  After: 220.
-  In part, 2026-10-11 (see 210): in a data directive `.` is the place of the element -- `.long ., .` had been two relocations to a symbol named `.`, and the second element the place of the first -- and no symbol of that name reaches the symbol table from a directive or an instruction (`test_data_expressions.sh`).  Still open: `jmp .` and `jmp .+2` reach the right place in the five-byte form with a relocation against the section, where GNU has `eb fe` and `eb 00`; that is the relaxation of 221.
+  In part, 2026-10-11 (see 210): in a data directive `.` is the place of the element -- `.long ., .` had been two relocations to a symbol named `.`, and the second element the place of the first -- and no symbol of that name reaches the symbol table from a directive or an instruction (`test_data_expressions.sh`).  What was left was `jmp .` and `jmp .+2`, which reached the right place in the five-byte form with a relocation against the section; with 221 they are `eb fe` and `eb 00`, `.` and a label with a number added being places a jump is sized to like any other (`test_jump_sizes.sh`).
 - [x] **AS-T-215** When a reference to a local label lies in a mergeable section (`SHF_MERGE`), the assembler shall emit the relocation against the label's own symbol and not against the section.
   Trace: AS-OBJ-004.  Verify: T — three strings in `.rodata.str1.1,"aMS"` reached by `leaq .LCn(%rip)`: GNU's relocations; D — linked with GNU `ld`, the program prints `alpha|beta|gamma`.
   Done: `test_merge_section_reloc.sh`, which links and runs it.  With this, 217, 034, 066, 061 and 222, **six of the fourteen combinations of `test_compiler_output.sh` run** — all of 64 bits but `-O0` — and `compiler/expect-runs` holds them.
@@ -798,20 +798,24 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 - [ ] **AS-T-220** The assembler shall hold, for each statement, its section, its offset, its bytes and its fixups, computed once.
   Trace: AS-DES-002.  Verify: I — the five passes that re-encode, and the "virtual layout" machinery, are gone.  After: 190.
-- [ ] **AS-T-221** The assembler shall size branches by relaxation over that table until no size changes.
+- [x] **AS-T-221** The assembler shall size branches by relaxation over that table until no size changes.
   Trace: AS-DES-002, AS-LAY-002.  Verify: T — the boundary cases at 126–129 bytes forward and 125–128 back, with alignment and `.org` between.  After: 220.
+  Done, ahead of 220 and without its table: `relax_branches()` in `as_elf_emit.c`.  Every `jmp` and conditional jump of 32- or 64-bit code to a place in its own section starts as two bytes; the statements are laid out; each that does not reach is made five or six; and again until none changes.  What it decides is one array (`branch_short`) that the layout and the encoding both read.  It was found by 223 and 224, which were not two small cases but one large fault: **a jump to a numbered label was laid out as two bytes whatever it was written as**, so after `jmp 9f` over 200 bytes every label was taken to be three bytes before its place by anything that worked out a distance -- `jmp a` further down went three bytes short of `a`.  Jumps to other labels had been sized by a rule that was right and pessimistic (long if the statements between came to 127 bytes with every jump among them counted long, or were more than 64).  Now each is as short as it can be, which is GNU's: `test_jump_sizes.sh`, 131 cases that GNU passes, at each edge, with jumps whose sizes depend on each other, across `.org` and alignments; `test_branch_relax_exact.sh` and `test_branch_relax_label.sh` left the list of expected failures, and ten lines left the baselines.  Not sized there, and as they were: 16-bit code, calls, and what is in another section or file.  The cost is a layout of the source for each round, of which there are two or three: a 24,000-line source took 2.5 s and takes 3.3 (GNU: 0.03), which is 165's and 228's to mend.
 - [x] **AS-T-222** When the distance between two places is computed, the assembler shall include the alignment padding between them.
   Trace: AS-LAY-001.  Verify: T — `jmp 1f` / `.skip 120,0x90` / `.p2align 4,0xcc` / `1: ret` is `eb 7e`; the backward case; `--64`; `a: .byte 1` / `.p2align 4` / `b: .byte 2` then `.long b-a` elsewhere is 16.  After: 220.
   Done, ahead of 220 and within the layout prediction as it stands, because it stood between the assembler and anything compiled at `-O2`: the alignment's padding is computed from its offset in the section, not from the scratch buffer it is measured into, and its size is not cached.  `test_align_branch.sh`.
-- [ ] **AS-T-223** When a branch crosses `.org`, the assembler shall reach the branch's label.
+- [x] **AS-T-223** When a branch crosses `.org`, the assembler shall reach the branch's label.
   Trace: AS-LAY-002.  Verify: T — `jmp 1f` / `.skip 60` / `.org 0x90` / `1: ret`.  After: 221.
-- [ ] **AS-T-224** When a difference of labels spans a branch, the assembler shall use the branch's final size.
+  Done by 221: the jump was `e9 8e`, three bytes past its label, and is GNU's `e9 8b`; so over an alignment.  `test_jump_sizes.sh`.
+- [x] **AS-T-224** When a difference of labels spans a branch, the assembler shall use the branch's final size.
   Trace: AS-LAY-002.  Verify: T — `a: jmp 9f` / `.skip 200` / `9: b: ret` with `.long b-a` in and out of the section (0xce) and `.skip b-a` (206 bytes).  After: 221.
+  Done by 221: `.long b-a` was 0xca for 0xcd (0xce with `je`), in a directive and in an instruction's immediate, and `.skip b-a` three bytes short.  `test_jump_sizes.sh`.
 - [x] **AS-T-225** If `.org` would move the location counter backwards, then the assembler shall fail.
   Trace: AS-LAY-002.  Verify: T.  After: 220.
   Found done, ahead of 220: `.byte 1,2,3` / `.org 1` is refused on its line.  Held by `test_directive_numbers.sh`.
-- [ ] **AS-T-226** A reference to a local label shall resolve to the right definition whatever the number of local labels in the file.
+- [x] **AS-T-226** A reference to a local label shall resolve to the right definition whatever the number of local labels in the file.
   Trace: AS-OBJ-012.  Verify: T — 9,000 lines of `1: .long 1b - .`: every entry right; no fixed-size array of labels remains (I).  After: 220.
+  Done, ahead of 220.  The entries were right past the 8192 there was room for, by a slower road: a label that did not fit was looked for by laying the source out again.  The array grows (`local_labels` in `emit_relocations`), and a data directive's field is no longer worked out twice, once by the old evaluators and once by `emit_data_field`: 9,000 such lines took 7 s and take 0.9.  `test_jump_sizes.sh` holds the 9,000, backward and forward.  A label is still found among those passed by going through them, which is 227's.
 - [ ] **AS-T-227** The assembler shall look up symbols and sections through hashed indexes.
   Trace: AS-PERF-001, AS-PERF-003.  Verify: I — no linear scan by name per statement (`find_as_symbol_const`, `elf_find_section` through `section_for_name`, `sec_buf_find`, `as_sections.c:182-206`).  After: 220.
 - [ ] **AS-T-228** Assembly time shall be linear in the number of statements, symbols, relocations and sections.
@@ -869,8 +873,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-250** If the count of `.zero`, `.skip`, `.space` or `.fill` has no absolute value, or is negative, then the assembler shall fail.
   Trace: AS-OBJ-007, AS-DAT-002.  Verify: T — a count naming an undefined symbol; `.skip -1`; the special case for text holding `0b`, `-` and `.` is gone (I).
   Done.  `.skip undefined` and `.space undefined` assembled as no bytes, and are refused on their line as `.zero` and `.fill` were.  A count below nothing is not an error with GNU but a warning, and the directive is passed over; so it is here, in GNU's words (`.zero -1` and `.fill -1` had been errors, `.skip -1` silent).  The two special cases in `.fill` for a count whose text held `0b`, `-` and `.` are gone, and nothing in the suite or the corpora needed them.  `test_directive_numbers.sh`.
-- [ ] **AS-T-251** When padding is emitted in a section that holds code and no fill is given, the assembler shall pad with the multi-byte NOP sequences GNU `as` uses for the mode.
+- [x] **AS-T-251** When padding is emitted in a section that holds code and no fill is given, the assembler shall pad with the multi-byte NOP sequences GNU `as` uses for the mode.
   Trace: AS-SEC-006.  Verify: T — pads of 1 to 15 bytes in 32- and 64-bit modes: GNU.  After: 029.
+  Done: the padding was 0x90 for each byte and is GNU 2.46's (`append_x86_nops` in `as_elf_emit.c`) -- the odd length first and then the longest NOP there is, 8 bytes of a 32-bit object's, 11 of a 64-bit object's, 5 in 16-bit code; a jump over the padding where there would be more than two of them (seven of the 64-bit ones); one NOP of a byte first where the padding is behind data; the same for a fill of 0x90 and with a most-to-skip.  `test_nop_padding.sh`, 109 cases that GNU passes: each length from 1 to 15 in both modes, and to 200.  The flat-binary writer pads as it did.
 - [x] **AS-T-252** The assembler shall give a section the largest alignment asked for within it, and no more.
   Trace: AS-SEC-006.  Verify: T — a `.text` with no alignment directive has alignment 1; `.data` with `.balign 8` has 8: GNU.
   Done: `.text`, `.data` and `.bss` began at 16, 4 and 4 and begin at 1 (`ensure_builtins`).  `test_section_stack.sh`; the programs of `test_compiler_output.sh` link and run as before.
@@ -1244,5 +1249,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 221 done, 130 open.  Numbers run to 400, with gaps left between
+351 tasks: 227 done, 124 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

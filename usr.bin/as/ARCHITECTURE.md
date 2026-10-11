@@ -82,7 +82,7 @@ Deployment: Statically linked backend modules selected at runtime by target mode
 
 Name: Relaxation pass and object-file emission
 
-Description: Branch relaxation is done in `as_elf_emit.c`, which chooses each branch's form from the encoded sizes of the statements between it and its target. (A separate `as_relax.c` existed that nothing called and that sized every instruction as four bytes; it is removed.) `as_elf_emit.c` then serializes sections, symbols, and relocations through `libelfobj` into the final ELF relocatable object.
+Description: Branch relaxation is done in `as_elf_emit.c` by `relax_branches()`: every `jmp` and conditional jump of 32- or 64-bit code to a label of its own section (numbered, compiler's or the source's own, or `.`, with or without a number added) starts in its two-byte form, the statements are laid out, each jump that does not reach is made long, and that repeats until none changes. The decisions are one table (`branch_short`) that both the layout and the encoding read, so the two cannot disagree. 16-bit code, calls and branches to other sections or files are not sized there. (A separate `as_relax.c` existed that nothing called and that sized every instruction as four bytes; it is removed.) `as_elf_emit.c` then serializes sections, symbols, and relocations through `libelfobj` into the final ELF relocatable object.
 
 Technologies: C, bounded relaxation loops, `libelfobj` section/symbol/relocation APIs
 

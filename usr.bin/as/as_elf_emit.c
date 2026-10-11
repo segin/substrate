@@ -130,10 +130,19 @@ typedef struct {
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;
     size_t stmt_size_cache_count;
-    /* Whether each branch to a compiler's local label is the short form:
-     * 0 not yet decided, 1 short, 2 not.  See local_temp_branch_is_short(). */
+    /* Whether each branch to a label of its own section is the short
+     * form: 0 not one that is sized here, 1 short, 2 long.  Made by
+     * relax_branches(), which relax_state says the state of: 0 not yet
+     * run, 1 running, 2 done. */
     unsigned char *branch_short;
     size_t branch_short_count;
+    int relax_state;
+    /* Set while a directive is given its bytes for good, if the last
+     * bytes of its section were data: see append_x86_nops(). */
+    int pad_after_data;
+    /* The local labels emit_relocations() has passed, which it frees
+     * here so that each way out of it need not. */
+    void *emit_labels;
     /* Per-section prefix-sum table for O(1) range-size queries during
      * branch sizing. range_layout[s].prefix[i] is the sum of all
      * conservative stmt sizes in section `name` for stmts j < i. The
@@ -684,6 +693,94 @@ static int append_align_fill(bytebuf_t *buf, const as_directive_t *d, size_t nee
     }
     for (; need > 0; need -= width) {
         if (bytebuf_append_u64_le(buf, fill, width) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Padding between instructions: `need` bytes that do nothing, as GNU as
+ * 2.46 writes them.  One long NOP runs faster than as many one-byte
+ * ones, so the padding is as few instructions as there are: the odd
+ * length first, then the longest NOP the mode has, over and over.  Past
+ * a number of those -- two, or seven with the NOPs of a 64-bit object --
+ * a jump over the padding comes first, so that none of it is run.
+ *
+ * The NOPs are of the object, not of the mode: `.code32` in a 64-bit
+ * object pads with the 64-bit ones.  16-bit code has its own.
+ */
+static int append_x86_nops(bytebuf_t *buf, size_t need, unsigned code_bits, int is_64_object) {
+    static const unsigned char of_16[][5] = {
+        {0x90}, {0x89, 0xf6}, {0x8d, 0x74, 0x00}, {0x8d, 0xb4, 0x00, 0x00}, {0x2e, 0x8d, 0xb4, 0x00, 0x00}};
+    static const unsigned char of_32[][8] = {
+        {0x90},
+        {0x66, 0x90},
+        {0x8d, 0x76, 0x00},
+        {0x8d, 0x74, 0x26, 0x00},
+        {0x2e, 0x8d, 0x74, 0x26, 0x00},
+        {0x8d, 0xb6, 0x00, 0x00, 0x00, 0x00},
+        {0x8d, 0xb4, 0x26, 0x00, 0x00, 0x00, 0x00},
+        {0x2e, 0x8d, 0xb4, 0x26, 0x00, 0x00, 0x00, 0x00}};
+    static const unsigned char of_64[][11] = {
+        {0x90},
+        {0x66, 0x90},
+        {0x0f, 0x1f, 0x00},
+        {0x0f, 0x1f, 0x40, 0x00},
+        {0x0f, 0x1f, 0x44, 0x00, 0x00},
+        {0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00},
+        {0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00},
+        {0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x66, 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00}};
+    const unsigned char *patterns;
+    size_t longest;
+    size_t stride;
+    size_t most;
+    size_t odd;
+
+    if (code_bits == 16) {
+        patterns = &of_16[0][0];
+        longest = sizeof(of_16) / sizeof(of_16[0]);
+        stride = sizeof(of_16[0]);
+        most = 2;
+    } else if (is_64_object) {
+        patterns = &of_64[0][0];
+        longest = sizeof(of_64) / sizeof(of_64[0]);
+        stride = sizeof(of_64[0]);
+        most = 7;
+    } else {
+        patterns = &of_32[0][0];
+        longest = sizeof(of_32) / sizeof(of_32[0]);
+        stride = sizeof(of_32[0]);
+        most = 2;
+    }
+    if (need / longest > most) {
+        if (need - 2 <= 127) {
+            need -= 2;
+            if (bytebuf_append_u64_le(buf, 0xeb, 1) != 0 || bytebuf_append_u64_le(buf, (uint64_t)need, 1) != 0) {
+                return -1;
+            }
+        } else {
+            if (code_bits == 16) {
+                if (bytebuf_append_u64_le(buf, 0x66, 1) != 0) {
+                    return -1;
+                }
+                need -= 1;
+            }
+            need -= 5;
+            if (bytebuf_append_u64_le(buf, 0xe9, 1) != 0 || bytebuf_append_u64_le(buf, (uint64_t)need, 4) != 0) {
+                return -1;
+            }
+        }
+    }
+    odd = need % longest;
+    if (odd != 0 && bytebuf_append(buf, patterns + (odd - 1) * stride, odd) != 0) {
+        return -1;
+    }
+    for (need -= odd; need != 0; need -= longest) {
+        if (bytebuf_append(buf, patterns + (longest - 1) * stride, longest) != 0) {
             return -1;
         }
     }
@@ -8669,6 +8766,9 @@ static const char *section_from_directive(const as_directive_t *d) {
 typedef struct {
     char *name;
     bytebuf_t buf;
+    /* Whether the last bytes put in it were data and not an
+     * instruction: what padding between instructions begins with. */
+    int after_data;
 } sec_buf_t;
 
 typedef struct {
@@ -14357,6 +14457,300 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
 }
 
 /*
+ * What a jump names, where that is one place and a number of bytes from
+ * it: a label, numbered or not, or `.`, alone or with a number added or
+ * taken away.  0 with the place's node and the number, -1 for anything
+ * else.
+ */
+static int relax_branch_parts(const as_expr_t *e, const as_expr_t **place, long long *addend) {
+    const as_expr_t *other = NULL;
+
+    *addend = 0;
+    if (e == NULL) {
+        return -1;
+    }
+    if (e->kind == AS_EXPR_BINARY && e->lhs != NULL && e->rhs != NULL &&
+        (e->op == AS_EXPR_OP_ADD || e->op == AS_EXPR_OP_SUB)) {
+        if (e->rhs->kind == AS_EXPR_CONST) {
+            other = e->lhs;
+            *addend = e->op == AS_EXPR_OP_ADD ? e->rhs->value : (long long)(0ull - (unsigned long long)e->rhs->value);
+        } else if (e->lhs->kind == AS_EXPR_CONST && e->op == AS_EXPR_OP_ADD) {
+            other = e->rhs;
+            *addend = e->lhs->value;
+        } else {
+            return -1;
+        }
+        e = other;
+    }
+    if (e->kind != AS_EXPR_LOCAL_REF && !(e->kind == AS_EXPR_SYMBOL && e->symbol != NULL)) {
+        return -1;
+    }
+    *place = e;
+    return 0;
+}
+
+/*
+ * The statement a branch that is sized here goes to, or -1 if it is not
+ * one: a `jmp` or a conditional jump of 32- or 64-bit code, to one label
+ * of the source -- a numbered one, a compiler's, or any that no other
+ * file sees -- in the section the branch is in.
+ */
+static int relax_branch_target(emit_ctx_t *ctx, size_t idx, const char *section, unsigned code_bits,
+                               size_t *target_out) {
+    const as_stmt_t *st = &ctx->parsed->items[idx];
+    const as_stmt_t *target_st = NULL;
+    const as_operand_t *op;
+    const as_expr_t *e;
+    long long addend;
+    char mnbuf[32];
+    char suffix = '\0';
+    unsigned cc;
+    size_t target;
+
+    if (st->kind != AS_STMT_INSTRUCTION || st->u.instr.operand_count != 1 || code_bits == 16u ||
+        st->u.instr.target_in_other_section || !is_rel_mnemonic(st->u.instr.mnemonic) ||
+        is_call_mnemonic(st->u.instr.mnemonic) || is_fixed_short_rel_mnemonic(st->u.instr.mnemonic) ||
+        normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0 ||
+        (!streq_ci(mnbuf, "jmp") && x86_cond_code(mnbuf, &cc) != 0)) {
+        return -1;
+    }
+    op = &st->u.instr.operands[0];
+    if ((op->kind != AS_OPERAND_LABEL_REF && op->kind != AS_OPERAND_IMMEDIATE) ||
+        (op->raw != NULL && op->raw[0] == '*') || relax_branch_parts(op->u.expr, &e, &addend) != 0) {
+        return -1;
+    }
+    /* `.`: the jump itself. */
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && strcmp(e->symbol, ".") == 0) {
+        *target_out = idx;
+        return 0;
+    }
+    if (e->kind == AS_EXPR_LOCAL_REF) {
+        target_st = resolve_local_ref_target_stmt(ctx, st, e->src_file, e->local_digit, e->local_forward);
+    } else if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && expr_is_local_temp_symbol(e) &&
+               label_stmt_index(ctx, e->symbol, &target) == 0) {
+        target_st = &ctx->parsed->items[target];
+    }
+    if (target_st == NULL || parsed_stmt_index(ctx, target_st, &target) != 0 ||
+        target >= ctx->stmt_section_at_count || ctx->stmt_section_at[target] == NULL ||
+        strcmp(ctx->stmt_section_at[target], section) != 0) {
+        return -1;
+    }
+    *target_out = target;
+    return 0;
+}
+
+/* A jump that does not reach in two bytes: `jmp` is five, a conditional
+ * one six. */
+static size_t relax_long_size(const as_stmt_t *st) {
+    char mnbuf[32];
+    char suffix = '\0';
+
+    return normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
+                   streq_ci(mnbuf, "jmp")
+               ? 5
+               : 6;
+}
+
+/* What is remembered of where statements are, forgotten: it was worked
+ * out with branches of other sizes. */
+static void relax_forget_layout(emit_ctx_t *ctx) {
+    size_t i;
+
+    virtual_label_cache_free(ctx);
+    if (ctx->stmt_size_cached != NULL) {
+        memset(ctx->stmt_size_cached, 0, ctx->stmt_size_cache_count);
+    }
+    for (i = 0; i < ctx->section_prefix_count; ++i) {
+        free(ctx->section_prefixes[i].name);
+        free(ctx->section_prefixes[i].prefix);
+    }
+    ctx->section_prefix_count = 0;
+}
+
+/*
+ * Size the branches.
+ *
+ * A jump to a label of its own section is two bytes if the label is
+ * within 127 bytes ahead or 128 behind, and five or six if not; and how
+ * far the label is depends on the sizes of the jumps between.  So every
+ * one starts short, the statements are laid out, each jump that does not
+ * reach is made long, and that is done again until none changes -- which
+ * it does, a jump only ever growing.  Then each is as short as it can
+ * be, which is what GNU as makes it.
+ *
+ * Before this there were two guesses.  A jump to a compiler's label was
+ * short if the statements between came to 127 bytes with every jump
+ * among them counted long, and none were more than 64: right, but long
+ * where it need not be.  A jump to a numbered label was counted as two
+ * bytes whatever it was written as: after `jmp 9f` over 200 bytes, which
+ * is five, every label was taken to be three bytes before its place by
+ * whatever worked a distance out -- `jmp a` further down went three
+ * bytes short of `a`, and `.long b - a` was three less than it is.
+ *
+ * 0, or -1 for no memory.  While it runs (relax_state 1) what asks is
+ * given the sizes as they stand.
+ */
+static int relax_branches(emit_ctx_t *ctx) {
+    size_t count = ctx->parsed != NULL ? ctx->parsed->count : 0;
+    size_t *target = NULL;
+    size_t *fixed = NULL;
+    uint64_t *off = NULL;
+    struct relax_at {
+        const char *name;
+        uint64_t off;
+    } *at = NULL;
+    size_t at_count = 0, at_cap = 0;
+    section_track_t track;
+    int tracking = 0;
+    int changed = 1;
+    int rc = -1;
+    size_t i;
+
+    if (ctx->relax_state != 0) {
+        return 0;
+    }
+    if (count == 0 || ctx->cfg == NULL || (ctx->cfg->machine != EM_386 && ctx->cfg->machine != EM_X86_64)) {
+        ctx->relax_state = 2;
+        return 0;
+    }
+    if (ctx->branch_short_count < count) {
+        unsigned char *next = (unsigned char *)realloc(ctx->branch_short, count);
+
+        if (next == NULL) {
+            return -1;
+        }
+        ctx->branch_short = next;
+        ctx->branch_short_count = count;
+    }
+    memset(ctx->branch_short, 0, ctx->branch_short_count);
+    target = (size_t *)malloc(count * sizeof(*target));
+    fixed = (size_t *)malloc(count * sizeof(*fixed));
+    off = (uint64_t *)malloc(count * sizeof(*off));
+    if (target == NULL || fixed == NULL || off == NULL || build_stmt_section_at(ctx) != 0) {
+        goto out;
+    }
+    /* Which statements are the jumps, each of them short to begin with. */
+    if (section_track_init(&track, ctx->cfg->is_64 ? 64u : (ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+        goto out;
+    }
+    tracking = 1;
+    for (i = 0; i < count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        fixed[i] = (size_t)-1;
+        target[i] = (size_t)-1;
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            if (section_track_apply_directive(&track, &st->u.directive) < 0) {
+                goto out;
+            }
+        } else if (relax_branch_target(ctx, i, track.current != NULL ? track.current : "", track.x86_code_bits,
+                                       &target[i]) == 0) {
+            ctx->branch_short[i] = 1;
+        }
+    }
+    ctx->relax_state = 1;
+    ctx->virtual_scanning++;
+    while (changed) {
+        changed = 0;
+        relax_forget_layout(ctx);
+        if (tracking) {
+            section_track_free(&track);
+        }
+        if (section_track_init(&track, ctx->cfg->is_64 ? 64u : (ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+            tracking = 0;
+            goto unwind;
+        }
+        tracking = 1;
+        for (i = 0; i < at_count; ++i) {
+            at[i].off = 0;
+        }
+        for (i = 0; i < count; ++i) {
+            const as_stmt_t *st = &ctx->parsed->items[i];
+            const char *section = track.current != NULL ? track.current : "";
+            size_t k;
+            size_t n = 0;
+
+            for (k = 0; k < at_count && strcmp(at[k].name, ctx->stmt_section_at[i]) != 0; ++k) {
+            }
+            if (k == at_count) {
+                if (at_count == at_cap) {
+                    size_t cap = at_cap != 0 ? at_cap * 2 : 16;
+                    struct relax_at *grown = (struct relax_at *)realloc(at, cap * sizeof(*grown));
+
+                    if (grown == NULL) {
+                        goto unwind;
+                    }
+                    at = grown;
+                    at_cap = cap;
+                }
+                at[at_count].name = ctx->stmt_section_at[i];
+                at[at_count].off = 0;
+                at_count++;
+            }
+            off[i] = at[k].off;
+            if (st->kind == AS_STMT_DIRECTIVE) {
+                int trc = section_track_apply_directive(&track, &st->u.directive);
+
+                if (trc < 0) {
+                    goto unwind;
+                }
+                if (trc > 0) {
+                    continue;
+                }
+                (void)stmt_virtual_size_in_section(ctx, section, st, off[i], track.x86_code_bits, &n);
+            } else if (st->kind == AS_STMT_INSTRUCTION) {
+                if (ctx->branch_short[i] == 1) {
+                    n = 2;
+                } else if (ctx->branch_short[i] == 2) {
+                    n = relax_long_size(st);
+                } else {
+                    /* Any other instruction is as long as it is,
+                     * wherever it is: found once. */
+                    if (fixed[i] == (size_t)-1 &&
+                        stmt_virtual_size_in_section(ctx, section, st, off[i], track.x86_code_bits, &fixed[i]) != 0) {
+                        fixed[i] = 0;
+                    }
+                    n = fixed[i];
+                }
+            }
+            at[k].off += n;
+        }
+        for (i = 0; i < count; ++i) {
+            const as_expr_t *place;
+            long long addend;
+            long long disp;
+
+            if (ctx->branch_short[i] != 1) {
+                continue;
+            }
+            (void)relax_branch_parts(ctx->parsed->items[i].u.instr.operands[0].u.expr, &place, &addend);
+            disp = (long long)off[target[i]] + addend - (long long)(off[i] + 2);
+            if (disp < -128 || disp > 127) {
+                ctx->branch_short[i] = 2;
+                changed = 1;
+            }
+        }
+    }
+    rc = 0;
+unwind:
+    ctx->virtual_scanning--;
+    relax_forget_layout(ctx);
+    if (rc != 0) {
+        memset(ctx->branch_short, 0, ctx->branch_short_count);
+    }
+    ctx->relax_state = rc == 0 ? 2 : 0;
+out:
+    if (tracking) {
+        section_track_free(&track);
+    }
+    free(target);
+    free(fixed);
+    free(off);
+    free(at);
+    return rc;
+}
+
+/*
  * Whether the branch `st` to the compiler's local label `e` takes the
  * short form, two bytes with a displacement of one.
  *
@@ -14373,71 +14767,65 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
  * the middle of the other.  Every program with a loop died of an illegal
  * instruction.
  *
- * So it is decided once, here, and from bytes.  The distance is summed
- * with every branch that lies between counted at its longest, so that
- * the answer for one branch does not depend on the answer for another
- * (two branches can each lie between the other and its label).  That
- * sum is at least the true distance: a branch said to be short does fit.
- * Some that would have fitted are written long.
+ * So it is decided once, by relax_branches(), and both are told what it
+ * decided.
  */
 static int local_temp_branch_is_short(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                       const as_expr_t *e, unsigned x86_code_bits) {
-    size_t base_idx, target_idx = (size_t)-1, lo, hi, i;
-    uint64_t dist = 0;
-    int is_short = 0;
+    size_t base_idx;
 
-    if (ctx == NULL || ctx->parsed == NULL || st == NULL || e == NULL || e->symbol == NULL ||
-        parsed_stmt_index(ctx, st, &base_idx) != 0) {
+    (void)section_name;
+    (void)e;
+    (void)x86_code_bits;
+    if (ctx == NULL || ctx->parsed == NULL || st == NULL || parsed_stmt_index(ctx, st, &base_idx) != 0 ||
+        relax_branches(ctx) != 0) {
         return 0;
     }
-    if (base_idx < ctx->branch_short_count && ctx->branch_short[base_idx] != 0) {
-        return ctx->branch_short[base_idx] == 1;
-    }
-    if (ctx->branch_short_count < ctx->parsed->count) {
-        unsigned char *next = (unsigned char *)realloc(ctx->branch_short, ctx->parsed->count);
+    return base_idx < ctx->branch_short_count && ctx->branch_short[base_idx] == 1;
+}
 
-        if (next == NULL) {
-            return 0;
-        }
-        memset(next + ctx->branch_short_count, 0, ctx->parsed->count - ctx->branch_short_count);
-        ctx->branch_short = next;
-        ctx->branch_short_count = ctx->parsed->count;
-    }
-    if (label_stmt_index(ctx, e->symbol, &target_idx) != 0) {
-        target_idx = (size_t)-1;
-    }
-    if (target_idx == (size_t)-1 || target_idx == base_idx) {
-        goto done;
-    }
-    /* Forward, what lies between is after the branch; backward, it is the
-     * target and what follows it, and the branch's own two bytes. */
-    lo = target_idx > base_idx ? base_idx + 1 : target_idx;
-    hi = target_idx > base_idx ? target_idx : base_idx;
-    if (hi - lo > 64) {
-        goto done;
-    }
-    ctx->virtual_scanning++;
-    for (i = lo; i < hi; ++i) {
-        const as_stmt_t *t = &ctx->parsed->items[i];
-        size_t n = 0;
+/* Whether the statement is a branch relax_branches() has sized, and
+ * then *is_short for which form it has. */
+static int branch_is_relaxed(emit_ctx_t *ctx, const as_stmt_t *st, int *is_short) {
+    size_t idx;
 
-        if (t->kind == AS_STMT_INSTRUCTION && t->u.instr.operand_count == 1 &&
-            is_rel_mnemonic(t->u.instr.mnemonic)) {
-            n = is_fixed_short_rel_mnemonic(t->u.instr.mnemonic)
-                    ? fixed_short_rel_size(t->u.instr.mnemonic, x86_code_bits)
-                    : (is_call_mnemonic(t->u.instr.mnemonic) ? 5 : 6);
-        } else if (stmt_virtual_size_in_section(ctx, section_name, t, dist, x86_code_bits, &n) != 0) {
-            ctx->virtual_scanning--;
-            goto done;
-        }
-        dist += n;
+    if (ctx == NULL || ctx->parsed == NULL || st == NULL || parsed_stmt_index(ctx, st, &idx) != 0 ||
+        relax_branches(ctx) != 0 || idx >= ctx->branch_short_count || ctx->branch_short[idx] == 0) {
+        return 0;
     }
-    ctx->virtual_scanning--;
-    is_short = target_idx > base_idx ? dist <= 127 : dist + 2 <= 128;
+    *is_short = ctx->branch_short[idx] == 1;
+    return 1;
+}
 
-done:
-    ctx->branch_short[base_idx] = is_short ? 1 : 2;
-    return is_short;
+/*
+ * Where a sized jump goes that names `.`, or a label of the source that
+ * is not a numbered one, with a number added: 0 with the place in its
+ * section and which form the jump has, -1 if `st` is not such a jump.
+ * (A label alone, and a numbered one with a number, were resolved
+ * before there was this, and still are where they were.)
+ */
+static int relaxed_place_branch_target(emit_ctx_t *ctx, const as_stmt_t *st, const char *section_name,
+                                       uint64_t sec_off, unsigned x86_code_bits, long long *abs_target,
+                                       int *is_short) {
+    const as_expr_t *place = NULL;
+    long long addend = 0;
+
+    if (st == NULL || st->kind != AS_STMT_INSTRUCTION || st->u.instr.operand_count != 1 ||
+        !branch_is_relaxed(ctx, st, is_short) ||
+        relax_branch_parts(st->u.instr.operands[0].u.expr, &place, &addend) != 0 || place->kind != AS_EXPR_SYMBOL) {
+        return -1;
+    }
+    if (strcmp(place->symbol, ".") == 0) {
+        *abs_target = (long long)sec_off + addend;
+        return 0;
+    }
+    if (addend == 0 ||
+        eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, place,
+                                        *is_short ? 2 : relax_long_size(st), abs_target) != 0) {
+        return -1;
+    }
+    *abs_target += addend;
+    return 0;
 }
 
 /*
@@ -14449,8 +14837,14 @@ done:
 static int x86_branch_may_be_short(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                    const as_expr_t *e, unsigned x86_code_bits) {
     /* To another section: how far is not known here. */
+    int is_short;
+
     if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.target_in_other_section) {
         return 0;
+    }
+    /* One that was sized is the size it was given. */
+    if (branch_is_relaxed(ctx, st, &is_short)) {
+        return is_short;
     }
     if (e == NULL || e->kind != AS_EXPR_SYMBOL || !expr_is_local_temp_symbol(e) || x86_code_bits == 16u) {
         return 1;
@@ -14476,6 +14870,10 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     op = &st->u.instr.operands[0];
     if (op->kind != AS_OPERAND_LABEL_REF && op->kind != AS_OPERAND_IMMEDIATE) {
         return 0;
+    }
+    /* A jump that was sized is the size it was given. */
+    if (branch_is_relaxed(ctx, st, &is_local)) {
+        return is_local ? 2u : (unsigned)relax_long_size(st);
     }
     e = op->u.expr;
     is_local = ((e != NULL && expr_has_local_ref(e)) ||
@@ -14782,6 +15180,21 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         case 0: break;
         default: return -1;
         }
+        /* Where instructions go, padding that is NOPs -- none named, or
+         * 0x90 named -- is the long NOPs GNU as pads with. */
+        if (fill == 0x90 && !(d->fill_width > 1 && directive_has_arg(d, 1)) && ctx != NULL && ctx->cfg != NULL &&
+            (ctx->cfg->machine == EM_386 || ctx->cfg->machine == EM_X86_64) &&
+            section_name_has_exec_flag(ctx, section_name)) {
+            /* Behind data GNU as writes one NOP of a byte, and pads
+             * what is left. */
+            if (ctx->pad_after_data && need != 0) {
+                if (bytebuf_append_u64_le(buf, 0x90, 1) != 0) {
+                    return -1;
+                }
+                need--;
+            }
+            return append_x86_nops(buf, need, x86_code_bits, ctx->cfg->machine == EM_X86_64) == 0 ? 1 : -1;
+        }
         if (append_align_fill(buf, d, need, (uint64_t)fill) != 0) {
             set_err(ctx, "%s:%u: alignment padding (%lu bytes) is not a multiple of %u",
                     st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0,
@@ -14855,6 +15268,16 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
                 parse_int64(d->args[i], &v) == 0 || parse_const_expr_string(d->args[i], &v) == 0 ||
                 eval_arg_asm_vars(ctx, st, d->args[i], &v) == 0) {
                 if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            /* For x86 what is not a number as it stands is worked out
+             * where the relocations are made (emit_data_field), which
+             * writes the field: here it is its width and no more. */
+            if (ctx != NULL && ctx->cfg != NULL &&
+                (ctx->cfg->machine == EM_386 || ctx->cfg->machine == EM_X86_64)) {
+                if (bytebuf_append_zeros(buf, width) != 0) {
                     return -1;
                 }
                 continue;
@@ -15010,6 +15433,35 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
         }
         if (far_label) {
             goto unresolved_rel_target;
+        }
+        /* `jmp .`, `jmp .+2`, `jmp label+1`: a place and a number, which
+         * is as far as it is and needs no relocation. */
+        {
+            long long abs_target;
+            int is_short;
+
+            if (relaxed_place_branch_target(ctx, st, section_name, sec_off, x86_code_bits, &abs_target, &is_short) ==
+                0) {
+                as_stmt_t tmp = *st;
+                as_instruction_t tin = st->u.instr;
+                as_operand_t tops[3];
+                as_expr_t texpr;
+                as_elf_cfg_t local_cfg = stmt_cfg;
+
+                memcpy(tops, st->u.instr.operands, st->u.instr.operand_count * sizeof(*tops));
+                memset(&texpr, 0, sizeof(texpr));
+                texpr.kind = AS_EXPR_CONST;
+                texpr.value = abs_target;
+                tops[0].kind = AS_OPERAND_LABEL_REF;
+                tops[0].u.expr = &texpr;
+                tin.operands = tops;
+                tmp.u.instr = tin;
+                local_cfg.x86_rel_is_disp = 0u;
+                local_cfg.have_current_text_offset = 1u;
+                local_cfg.current_text_offset = sec_off;
+                return emit_resolved_x86_branch_ex(&local_cfg, &tmp, sec_off, abs_target, is_short, code, code_cap,
+                                                   code_len, encerr, encerr_sz);
+            }
         }
 
         if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
@@ -18512,7 +18964,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
     unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
     sec_buf_vec_t secbufs;
     section_track_t track;
-    local_emit_label_t local_labels[8192];
+    local_emit_label_t *local_labels = NULL;
+    size_t local_label_cap = 0;
     size_t local_label_count = 0;
     size_t *list_sec = NULL;
     size_t *list_off = NULL;
@@ -18565,10 +19018,28 @@ static int emit_relocations(emit_ctx_t *ctx) {
 
         for (j = 0; j < st->label_count; ++j) {
             int label_digit = -1;
-            if (local_label_count < sizeof(local_labels) / sizeof(local_labels[0]) &&
-                (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 ||
-                 is_local_temp_symbol_name(st->labels[j].name))) {
-                local_emit_label_t *dst = &local_labels[local_label_count++];
+            if (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 ||
+                is_local_temp_symbol_name(st->labels[j].name)) {
+                local_emit_label_t *dst;
+
+                /* As many as the source has: there was room for 8192,
+                 * and one past that was found by laying the source out
+                 * again from its top, each time. */
+                if (local_label_count == local_label_cap) {
+                    size_t cap = local_label_cap != 0 ? local_label_cap * 2 : 256;
+                    local_emit_label_t *grown =
+                        (local_emit_label_t *)realloc(local_labels, cap * sizeof(*grown));
+
+                    if (grown == NULL) {
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    local_labels = grown;
+                    local_label_cap = cap;
+                    ctx->emit_labels = grown;
+                }
+                dst = &local_labels[local_label_count++];
                 dst->digit = label_digit;
                 dst->name = st->labels[j].name;
                 dst->file = st->labels[j].file;
@@ -18603,13 +19074,20 @@ static int emit_relocations(emit_ctx_t *ctx) {
             else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
             else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
 
+            ctx->pad_after_data = sb->after_data;
             drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
                                             track.x86_code_bits, d);
+            ctx->pad_after_data = 0;
             if (drc < 0) {
                 set_err(ctx, "%s:%u: malformed directive data", st->file != NULL ? st->file : "<input>", st->line);
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
                 return -1;
+            }
+            /* Padding leaves it as it was; `.org` is not data. */
+            if ((uint64_t)sb->buf.len > cur_off && strcmp(d->name, ".align") != 0 &&
+                strcmp(d->name, ".balign") != 0 && strcmp(d->name, ".p2align") != 0) {
+                sb->after_data = strcmp(d->name, ".org") != 0;
             }
             if (width != 0) {
                 for (j = 0; j < d->arg_count; ++j) {
@@ -18799,6 +19277,16 @@ static int emit_relocations(emit_ctx_t *ctx) {
 
                 if (asm_reg_alias_for_operand(ctx, op) != NULL) {
                     continue;
+                }
+                /* A jump that was written with its distance in it. */
+                {
+                    long long there;
+                    int is_short;
+
+                    if (relaxed_place_branch_target(ctx, st, track.current, cur_off, track.x86_code_bits, &there,
+                                                    &is_short) == 0) {
+                        continue;
+                    }
                 }
                 if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
                     e = op->u.expr;
@@ -19279,6 +19767,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 sec_buf_vec_free(&secbufs);
                 return -1;
             }
+            sb->after_data = 0;
         }
     }
 
@@ -19705,6 +20194,7 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
         if (ctx->branch_short != NULL) {
             memset(ctx->branch_short, 0, ctx->branch_short_count);
         }
+        ctx->relax_state = 0;
         for (i = 0; i < ctx->section_prefix_count; ++i) {
             free(ctx->section_prefixes[i].name);
             free(ctx->section_prefixes[i].prefix);
@@ -19889,6 +20379,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);
+    free(ctx.emit_labels);
     free_leb128_sizes(&ctx);
     {
         size_t _i;
@@ -19919,6 +20410,7 @@ fail:
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);
+    free(ctx.emit_labels);
     free_leb128_sizes(&ctx);
     {
         size_t _i;
