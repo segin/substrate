@@ -128,3 +128,36 @@ const as_x86_reg_info_t *as_x86_reg_find_class(const char *name, as_x86_reg_clas
 
     return r != NULL && r->cls == cls && r->number <= max ? r : NULL;
 }
+
+size_t as_x86_reg_count(void) {
+    return REG_COUNT;
+}
+
+const as_x86_reg_info_t *as_x86_reg_at(size_t i) {
+    return i < REG_COUNT ? &regs[i] : NULL;
+}
+
+int as_x86_reg_operand(const char *name, as_x86_operand_t *dst) {
+    static const as_x86_reg_t high8[] = {AS_X86_REG_AH, AS_X86_REG_CH, AS_X86_REG_DH, AS_X86_REG_BH};
+    const as_x86_reg_info_t *r = as_x86_reg_find(name);
+
+    if (r == NULL || dst == NULL) {
+        return -1;
+    }
+    memset(dst, 0, sizeof(*dst));
+    dst->reg_class = r->cls;
+    dst->size_bits = r->width;
+    if (r->cls == AS_X86_REGCLASS_X87) {
+        dst->kind = AS_X86_OP_FPU;
+        dst->u.fpu = r->number;
+        return 0;
+    }
+    dst->kind = AS_X86_OP_REG;
+    dst->is_mmx = r->cls == AS_X86_REGCLASS_MMX;
+    if (r->cls == AS_X86_REGCLASS_GENERAL && (r->flags & AS_X86_REGF_HIGH8) != 0) {
+        dst->u.reg = high8[r->number - 4];
+    } else {
+        dst->u.reg = (as_x86_reg_t)r->number;
+    }
+    return 0;
+}

@@ -592,8 +592,9 @@ with a symbol table.
 A register has a class and a width; an instruction is found by its name in
 one table of templates; there is one ModRM/SIB/prefix emitter.
 
-- [ ] **AS-T-160** The assembler shall represent each x86 operand with its kind and, for a register, its class (general, segment, control, debug, x87, MMX, XMM, YMM, ZMM, opmask, bound) and width.
+- [x] **AS-T-160** The assembler shall represent each x86 operand with its kind and, for a register, its class (general, segment, control, debug, x87, MMX, XMM, YMM, ZMM, opmask, bound) and width.
   Trace: AS-X86-010, AS-DES-004.  Verify: I; T — a unit test of the operand converter over every register name.  After: 096.
+  Done.  An operand had a width and a number and nothing to say what kind of register it was, but for a flag that told `%mm0` from `%rax`.  It has the register's class (`reg_class` in `as_x86_operand_t`), and one function makes a register operand from a name, for a register of any class, out of the one table of registers: `as_x86_reg_operand()`.  The converter the encoders are fed by is that function and a rule for which classes those encoders take.  `test_x86_operand_core.sh` asks it for each of the 316 names in the table, in both cases of letter, and for thirty by hand.  What uses the class is 161's: the encoders still ask a register's number and width and no more, and what is refused for its class (171) is refused by rules on the statement.
 - [ ] **AS-T-161** The assembler shall find an x86 instruction by one lookup of its mnemonic in a table of templates, each giving operand classes, widths, opcode, prefixes and the modes it is valid in.
   Trace: AS-DES-006, AS-DES-004, AS-PERF-002.  Verify: I — no `strcmp` ladder over mnemonics remains; A — callgrind shows one hash lookup per statement.  After: 160.
 - [ ] **AS-T-162** The assembler shall have one emitter of prefixes, `REX`/`VEX`/`EVEX`, ModRM, SIB, displacement and immediate, used by every x86 instruction.
@@ -1218,5 +1219,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 201 done, 150 open.  Numbers run to 400, with gaps left between
+351 tasks: 202 done, 149 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

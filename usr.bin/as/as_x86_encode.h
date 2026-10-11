@@ -95,6 +95,14 @@ typedef struct {
      * `movd %xmm0, %rax` was read as a move into %mm0.
      */
     int is_mmx;
+    /*
+     * What kind of register it is: an as_x86_reg_class_t (as_x86_regs.h),
+     * 0 for an operand that is none.  With size_bits, which is its
+     * width, it is what an instruction asks of a register operand; the
+     * number in `reg` says which one of its kind, and is the same for
+     * %eax, %xmm0, %es and %cr0.
+     */
+    unsigned char reg_class;
     union {
         as_x86_reg_t reg;
         int64_t imm;

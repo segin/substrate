@@ -15,6 +15,10 @@
  * one is read from it.
  */
 
+#include "as_x86_encode.h"
+
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -62,6 +66,19 @@ const as_x86_reg_info_t *as_x86_reg_find(const char *name);
 /* The same, if it is of the class asked for and its number is no more
  * than `max`. */
 const as_x86_reg_info_t *as_x86_reg_find_class(const char *name, as_x86_reg_class_t cls, unsigned max);
+
+/* How many registers there are, and the one at `i` of them, or NULL. */
+size_t as_x86_reg_count(void);
+const as_x86_reg_info_t *as_x86_reg_at(size_t i);
+
+/*
+ * The operand a register's name is: its kind, its class, its width and
+ * its number, for a register of any class.  %st is the top of the x87
+ * stack, an operand of the kind the others of the stack are; %ah to %bh
+ * have the numbers the encoders know them by.  0, or -1 if `name` names
+ * no register.
+ */
+int as_x86_reg_operand(const char *name, as_x86_operand_t *dst);
 
 #ifdef __cplusplus
 }

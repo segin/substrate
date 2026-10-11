@@ -8211,41 +8211,32 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
     }
 
     switch (op->kind) {
-    case AS_OPERAND_REGISTER:
-        dst->kind = AS_X86_OP_REG;
-        if (parse_x86_reg(op->u.reg, &dst->u.reg) == 0) {
-            unsigned mm;
+    case AS_OPERAND_REGISTER: {
+        /*
+         * The register's kind, width and number, from the one table of
+         * them.  The encoders this is for take a general register, an
+         * MMX one and a vector one of the first sixteen; the others --
+         * a segment, control, debug or mask register, and what APX and
+         * AVX-512 add to the sixteen -- have emitters of their own, and
+         * are no operand of these.
+         */
+        const as_x86_reg_info_t *r = as_x86_reg_find(op->u.reg);
 
-            dst->size_bits = parse_x86_reg_bits(op->u.reg);
-            dst->is_mmx = parse_mmx_reg(op->u.reg, &mm) == 0;
+        if (r != NULL &&
+            (r->cls == AS_X86_REGCLASS_MMX ||
+             ((r->cls == AS_X86_REGCLASS_GENERAL || r->cls == AS_X86_REGCLASS_XMM ||
+               r->cls == AS_X86_REGCLASS_YMM || r->cls == AS_X86_REGCLASS_ZMM) &&
+              r->number <= 15)) &&
+            as_x86_reg_operand(op->u.reg, dst) == 0) {
             return 0;
         }
-        {
-            unsigned vr;
-
-            if (parse_xmm_reg(op->u.reg, &vr) == 0) {
-                dst->u.reg = (as_x86_reg_t)vr;
-                dst->size_bits = 128;
-                return 0;
-            }
-            if (parse_ymm_reg(op->u.reg, &vr) == 0) {
-                dst->u.reg = (as_x86_reg_t)vr;
-                dst->size_bits = 256;
-                return 0;
-            }
-            if (parse_mmx_reg(op->u.reg, &vr) == 0) {
-                dst->u.reg = (as_x86_reg_t)vr;
-                dst->size_bits = 64;
-                dst->is_mmx = 1;
-                return 0;
-            }
-        }
-        {
-            snprintf(errbuf, errbuf_sz, "unknown x86 register: %s", op->u.reg != NULL ? op->u.reg : "<null>");
-            return -1;
-        }
+        dst->kind = AS_X86_OP_REG;
+        snprintf(errbuf, errbuf_sz, "unknown x86 register: %s", op->u.reg != NULL ? op->u.reg : "<null>");
+        return -1;
+    }
     case AS_OPERAND_COPROCESSOR:
         dst->kind = AS_X86_OP_FPU;
+        dst->reg_class = AS_X86_REGCLASS_X87;
         if (parse_st_index(op->u.coproc, &dst->u.fpu) != 0) {
             snprintf(errbuf, errbuf_sz, "unknown x87 register: %s",
                      op->u.coproc != NULL ? op->u.coproc : "<null>");
