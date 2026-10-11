@@ -807,8 +807,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-LAY-002.  Verify: T — `jmp 1f` / `.skip 60` / `.org 0x90` / `1: ret`.  After: 221.
 - [ ] **AS-T-224** When a difference of labels spans a branch, the assembler shall use the branch's final size.
   Trace: AS-LAY-002.  Verify: T — `a: jmp 9f` / `.skip 200` / `9: b: ret` with `.long b-a` in and out of the section (0xce) and `.skip b-a` (206 bytes).  After: 221.
-- [ ] **AS-T-225** If `.org` would move the location counter backwards, then the assembler shall fail.
+- [x] **AS-T-225** If `.org` would move the location counter backwards, then the assembler shall fail.
   Trace: AS-LAY-002.  Verify: T.  After: 220.
+  Found done, ahead of 220: `.byte 1,2,3` / `.org 1` is refused on its line.  Held by `test_directive_numbers.sh`.
 - [ ] **AS-T-226** A reference to a local label shall resolve to the right definition whatever the number of local labels in the file.
   Trace: AS-OBJ-012.  Verify: T — 9,000 lines of `1: .long 1b - .`: every entry right; no fixed-size array of labels remains (I).  After: 220.
 - [ ] **AS-T-227** The assembler shall look up symbols and sections through hashed indexes.
@@ -850,19 +851,24 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-244** When two or more sections name one group, the assembler shall emit one group section with each as a member and its signature symbol once.
   Trace: AS-SEC-004.  Verify: T — against `readelf -g` of GNU's object.
   Done.  Each section of a group but the first was given no group's number (`section_group_ordinal`), so the group held the first alone and the others carried `SHF_GROUP` with nothing to belong to -- a linker that discards a duplicate COMDAT group would have kept them.  Two and three sections, in two groups that interleave: GNU's members, and the signature symbol once.  `test_section_stack.sh`.  The group section is written after its members, where GNU writes it first.
-- [ ] **AS-T-245** If a section flag character or section type is not known, then the assembler shall fail.
+- [x] **AS-T-245** If a section flag character or section type is not known, then the assembler shall fail.
   Trace: AS-SEC-005.  Verify: T — `"aq"`, `@bogus`; `@init_array`, `@fini_array`, `@preinit_array`, `@note`, `@nobits`, `@unwind` and a numeric type are accepted with the right type.
-- [ ] **AS-T-246** If a section is declared `M` without an entry size, or `G` without a group name, then the assembler shall fail.
+  Done, as GNU as has it and not as this was written: a letter that is no flag is refused (it was); a type that is none is GNU's warning, "unrecognized section type", and the section is what its name makes it -- it had been taken for `@progbits` and nothing said.  The seven types and a number are the right type.  `test_directive_numbers.sh`.
+- [x] **AS-T-246** If a section is declared `M` without an entry size, or `G` without a group name, then the assembler shall fail.
   Trace: AS-SEC-005.  Verify: T.
+  Done, as GNU as has it: each is a warning in GNU's words and the section is without the flag.  `M` had been dropped and nothing said; `G` had been kept, a section marked as of a group with no group.  The warning is a `.warning` put before the directive where directives are lowered (`lower_arguments` in `as_lower.c`), which is how a pass with no way to warn says something.  `test_directive_numbers.sh`.
 - [x] **AS-T-247** If a section is declared a second time with different flags, type or entry size, then the assembler shall fail, and shall leave the first declaration's attributes.
   Trace: AS-SEC-005.  Verify: T — as GNU ("changed section attributes").
   Done: other flags were refused already; another type was taken (and failed later for a reason of its own, or did not), and another entry size was taken and was the section's from there.  Each is refused on its line; the same again, or the name alone, is taken.  `test_section_stack.sh`.
-- [ ] **AS-T-248** The assembler shall have one validator of alignment arguments, which accepts an alignment of 0 as 1 and any power of two the object format can hold.
+- [x] **AS-T-248** The assembler shall have one validator of alignment arguments, which accepts an alignment of 0 as 1 and any power of two the object format can hold.
   Trace: AS-SEC-006.  Verify: I — the three validators are one; T — `.align 0`, `.p2align 0`, `.balign 1`, the largest value, one more refused.
-- [ ] **AS-T-249** When the argument of an alignment directive, `.zero`, `.skip`, `.space`, `.fill` or `.org` names symbols with absolute values, the assembler shall evaluate it.
+  Done.  An alignment is validated once, where directives are lowered (`lower_arguments` in `as_lower.c`), and is a number that needs no validating by the time the three that had each checked it read it: none at all and 0 are 1 (both had been errors, "malformed data directive"), it is a power of two, and it is no more than 2^20 (`AS_ALIGN_P2_MAX`).  The three keep the reading of the number, and a guard on the shift.  `test_directive_numbers.sh`, 133 cases, which GNU passes but for the widest: 2^20 is what the object library will write for a section (`elf_section_set_align`, and the reader and the linker with it), where the format holds 2^31 and 2^63 and GNU goes that far.  Raising it is the library's.
+- [x] **AS-T-249** When the argument of an alignment directive, `.zero`, `.skip`, `.space`, `.fill` or `.org` names symbols with absolute values, the assembler shall evaluate it.
   Trace: AS-SEC-006, AS-DAT-002, AS-OBJ-007.  Verify: T — `.set A,4` / `.align A`; `.set e1,0` / `.set e2,3` / `.zero e2-e1`; `.skip K*2`; `.fill K,1,0x66`; `.org K`.
-- [ ] **AS-T-250** If the count of `.zero`, `.skip`, `.space` or `.fill` has no absolute value, or is negative, then the assembler shall fail.
+  Done.  Each of the five was wrong: `.align A` was "malformed section directive", `.zero e2-e1` an error, `.skip K*2` no bytes at all and no word said, `.fill K` and `.org K` errors.  The symbols the source sets to numbers are followed where directives are lowered, and an argument of these directives that is a number once they are known is written as the number -- every argument, so a fill and the size of a `.fill` as well.  A count may name a symbol set further down, as with GNU; an alignment may not, as with GNU.  With it, as GNU has them: `.zero n, fill`, `.org place, fill`, and the 32 bits a `.fill` keeps of its value.  `test_directive_numbers.sh`.
+- [x] **AS-T-250** If the count of `.zero`, `.skip`, `.space` or `.fill` has no absolute value, or is negative, then the assembler shall fail.
   Trace: AS-OBJ-007, AS-DAT-002.  Verify: T — a count naming an undefined symbol; `.skip -1`; the special case for text holding `0b`, `-` and `.` is gone (I).
+  Done.  `.skip undefined` and `.space undefined` assembled as no bytes, and are refused on their line as `.zero` and `.fill` were.  A count below nothing is not an error with GNU but a warning, and the directive is passed over; so it is here, in GNU's words (`.zero -1` and `.fill -1` had been errors, `.skip -1` silent).  The two special cases in `.fill` for a count whose text held `0b`, `-` and `.` are gone, and nothing in the suite or the corpora needed them.  `test_directive_numbers.sh`.
 - [ ] **AS-T-251** When padding is emitted in a section that holds code and no fill is given, the assembler shall pad with the multi-byte NOP sequences GNU `as` uses for the mode.
   Trace: AS-SEC-006.  Verify: T — pads of 1 to 15 bytes in 32- and 64-bit modes: GNU.  After: 029.
 - [x] **AS-T-252** The assembler shall give a section the largest alignment asked for within it, and no more.
@@ -1238,5 +1244,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 215 done, 136 open.  Numbers run to 400, with gaps left between
+351 tasks: 221 done, 130 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

@@ -833,7 +833,7 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
             return -1;
         }
         if (strcmp(d->name, ".p2align") == 0) {
-            if (a >= 31) {
+            if (a > 31) {
                 return -1;
             }
             a = 1u << a;

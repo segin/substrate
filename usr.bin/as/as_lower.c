@@ -1507,6 +1507,356 @@ done:
     return rc;
 }
 
+/*
+ * The symbols a source sets to numbers: as they stand at the statement
+ * being read, and -- for a name not yet set there -- as they end, but
+ * for the names that are somewhere set to what is no number.
+ */
+typedef struct {
+    struct_consts_t now;
+    struct_consts_t last;
+    struct_consts_t never;
+} set_consts_t;
+
+static int set_lookup(void *cookie, const char *name, long long *value_out) {
+    const set_consts_t *c = (const set_consts_t *)cookie;
+    long long unused;
+
+    if (struct_lookup((void *)&c->now, name, value_out)) {
+        return 1;
+    }
+    return !struct_lookup((void *)&c->never, name, &unused) && struct_lookup((void *)&c->last, name, value_out);
+}
+
+static int directive_is_set(const as_directive_t *d) {
+    return (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0 || strcmp(d->name, ".equiv") == 0) &&
+           d->arg_count == 2;
+}
+
+/* Every name the source sets, with the number it ends as. */
+static int set_consts_collect(const as_parse_result_t *parsed, set_consts_t *c) {
+    size_t i;
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        long long v = 0;
+        char *name;
+        int is_number;
+
+        if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL || !directive_is_set(&st->u.directive)) {
+            continue;
+        }
+        name = local_common_name(&st->u.directive);
+        if (name == NULL) {
+            return -1;
+        }
+        /* A name that is ever set to what is no number is not known
+         * ahead of where it is set. */
+        is_number = as_expr_eval_string(st->u.directive.args[1], struct_lookup, &c->last, &v) == AS_EXPR_EVAL_OK;
+        if (struct_define(is_number ? &c->last : &c->never, name, v) != 0) {
+            free(name);
+            return -1;
+        }
+        free(name);
+    }
+    return 0;
+}
+
+/* An argument that is a number once the symbols set to numbers are
+ * known is written as the number. */
+static int arg_make_number(as_directive_t *d, size_t i, set_consts_t *c, int ahead) {
+    long long v;
+    char text[32];
+    char *copy;
+
+    /* An alignment is of what is known where it stands; a count may
+     * be of a symbol set further down. */
+    if (i >= d->arg_count || d->args[i] == NULL || arg_is_empty(d, i) ||
+        as_expr_eval_string(d->args[i], NULL, NULL, &v) == AS_EXPR_EVAL_OK ||
+        (ahead ? as_expr_eval_string(d->args[i], set_lookup, c, &v)
+               : as_expr_eval_string(d->args[i], struct_lookup, &c->now, &v)) != AS_EXPR_EVAL_OK) {
+        return 0;
+    }
+    snprintf(text, sizeof(text), "%lld", v);
+    copy = lower_strdup(text);
+    if (copy == NULL) {
+        return -1;
+    }
+    free(d->args[i]);
+    d->args[i] = copy;
+    return 0;
+}
+
+/* The value of an argument that is there and is a number by now. */
+static int arg_number(const as_directive_t *d, size_t i, long long *out) {
+    return i < d->arg_count && d->args[i] != NULL && !arg_is_empty(d, i) &&
+           as_expr_eval_string(d->args[i], NULL, NULL, out) == AS_EXPR_EVAL_OK;
+}
+
+static int arg_set_number(as_directive_t *d, size_t i, long long v) {
+    char text[32];
+    char *copy;
+
+    snprintf(text, sizeof(text), "%lld", v);
+    copy = lower_strdup(text);
+    if (copy == NULL) {
+        return -1;
+    }
+    if (i < d->arg_count) {
+        free(d->args[i]);
+        d->args[i] = copy;
+        return 0;
+    }
+    if (i != d->arg_count || d->arg_count != 0) {
+        free(copy);
+        return -1;
+    }
+    {
+        arg_vec_t v1;
+
+        memset(&v1, 0, sizeof(v1));
+        if (vec_push(&v1, copy) != 0) {
+            return -1;
+        }
+        set_args(d, &v1);
+    }
+    return 0;
+}
+
+static int section_type_is_known(const char *raw) {
+    static const char *const known[] = {"progbits", "nobits", "note", "init_array", "fini_array",
+                                        "preinit_array", "unwind", "rela", "rel"};
+    char word[32];
+    size_t n = 0;
+    size_t i;
+
+    while (*raw != '\0' && (isspace((unsigned char)*raw) || *raw == '@' || *raw == '%' || *raw == '"')) {
+        raw++;
+    }
+    if (isdigit((unsigned char)*raw)) {
+        return 1;
+    }
+    while (raw[n] != '\0' && raw[n] != '"' && !isspace((unsigned char)raw[n]) && n + 1 < sizeof(word)) {
+        word[n] = (char)tolower((unsigned char)raw[n]);
+        n++;
+    }
+    word[n] = '\0';
+    for (i = 0; i < sizeof(known) / sizeof(known[0]); ++i) {
+        if (strcmp(word, known[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Take a letter out of a string of section flags. */
+static void section_flag_drop(char *flags, char letter) {
+    char *w = flags;
+    const char *r;
+
+    for (r = flags; *r != '\0'; ++r) {
+        if (*r != letter) {
+            *w++ = *r;
+        }
+    }
+    *w = '\0';
+}
+
+/*
+ * The arguments of the directives that take numbers, checked once and
+ * left as numbers for everything that reads them after.
+ *
+ * - A symbol set to a number is its number: `.align A`, `.skip K*2`,
+ *   `.fill K, 1, 0x66`, `.org K`, and where the `.set` is further down.
+ * - An alignment is validated here and nowhere else: none, or 0, is 1;
+ *   it is a power of two; it is no more than the object library will
+ *   write (AS_ALIGN_P2_MAX).
+ * - A count below nothing is said and the directive passed over.
+ * - `.zero n, fill` is `.skip`; `.fill` of more than 8 bytes is of 8.
+ * - A section of entries to merge with no size for one, or of a group
+ *   with no name for it, or of a type that is none, is said, and is
+ *   without that.
+ *
+ * What is said is a `.warning` put before the directive.
+ */
+static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
+    set_consts_t consts;
+    stmt_vec_t out;
+    const char *why = NULL;
+    int rc = -1;
+    size_t i;
+
+    memset(&consts, 0, sizeof(consts));
+    memset(&out, 0, sizeof(out));
+    if (set_consts_collect(parsed, &consts) != 0) {
+        goto oom;
+    }
+    for (i = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        as_directive_t *d = &st->u.directive;
+        const char *said = NULL;
+        int is_align;
+        int is_space;
+        long long v = 0;
+        size_t k;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            if (stmt_vec_push(&out, st) != 0) {
+                goto oom;
+            }
+            continue;
+        }
+        if (directive_is_set(d)) {
+            char *name = local_common_name(d);
+
+            if (name == NULL) {
+                goto oom;
+            }
+            if (as_expr_eval_string(d->args[1], struct_lookup, &consts.now, &v) == AS_EXPR_EVAL_OK &&
+                struct_define(&consts.now, name, v) != 0) {
+                free(name);
+                goto oom;
+            }
+            free(name);
+        }
+        is_align = strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 ||
+                   strcmp(d->name, ".p2align") == 0;
+        is_space = strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".skip") == 0 || strcmp(d->name, ".space") == 0;
+        if (is_align || is_space || strcmp(d->name, ".fill") == 0 || strcmp(d->name, ".org") == 0) {
+            for (k = 0; k < d->arg_count; ++k) {
+                if (arg_make_number(d, k, &consts, !is_align) != 0) {
+                    goto oom;
+                }
+            }
+        }
+        if (is_align) {
+            int p2 = strcmp(d->name, ".p2align") == 0;
+
+            if (d->arg_count == 0 || arg_is_empty(d, 0)) {
+                /* None is asked for: the least there is. */
+                if (arg_set_number(d, 0, p2 ? 0 : 1) != 0) {
+                    goto oom;
+                }
+            } else if (arg_number(d, 0, &v)) {
+                if (!p2 && v == 0) {
+                    if (arg_set_number(d, 0, 1) != 0) {
+                        goto oom;
+                    }
+                } else if (!p2 && (v < 0 || (v & (v - 1)) != 0)) {
+                    why = "alignment not a power of 2";
+                } else if (p2 ? (v < 0 || v > AS_ALIGN_P2_MAX) : v > (1ll << AS_ALIGN_P2_MAX)) {
+                    why = "alignment too large: the most is 2 to the power 20";
+                }
+            }
+        } else if (is_space && arg_number(d, 0, &v) && v < 0) {
+            said = ".space repeat count is negative, ignored";
+        } else if (strcmp(d->name, ".zero") == 0 && d->arg_count > 2) {
+            why = "takes a count and a fill";
+        } else if (strcmp(d->name, ".zero") == 0 && d->arg_count == 2) {
+            if (set_name(d, ".skip") != 0) {
+                goto oom;
+            }
+        } else if (strcmp(d->name, ".fill") == 0) {
+            if (arg_number(d, 0, &v) && v < 0) {
+                said = "repeat < 0; .fill ignored";
+            } else if (arg_number(d, 1, &v) && v < 0) {
+                said = "size negative; .fill ignored";
+            } else if (arg_number(d, 1, &v) && v == 0) {
+                if (arg_set_number(d, 0, 0) != 0 || arg_set_number(d, 1, 1) != 0) {
+                    goto oom;
+                }
+            } else if (arg_number(d, 1, &v) && v > 8) {
+                if (push_directive(&out, st, ".warning", ".fill size clamped to 8", NULL) != 0 ||
+                    arg_set_number(d, 1, 8) != 0) {
+                    goto oom;
+                }
+            }
+        } else if ((strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) && d->arg_count >= 2 &&
+                   d->args[1] != NULL && !(d->arg_count == 2 && arg_number(d, 1, &v))) {
+            char *flags = d->args[1];
+            size_t named = 3;
+
+            if (d->arg_count >= 3 && !arg_is_empty(d, 2) && !section_type_is_known(d->args[2])) {
+                if (push_directive(&out, st, ".warning", "unrecognized section type", NULL) != 0) {
+                    goto oom;
+                }
+                d->args[2][0] = '\0';
+            }
+            if (strchr(flags, 'M') != NULL) {
+                if (d->arg_count <= named || arg_is_empty(d, named)) {
+                    if (push_directive(&out, st, ".warning", "entity size for SHF_MERGE not specified", NULL) != 0) {
+                        goto oom;
+                    }
+                    section_flag_drop(flags, 'M');
+                } else {
+                    named++;
+                }
+            }
+            if (strchr(flags, 'o') != NULL) {
+                named++;
+            }
+            if (strchr(flags, 'G') != NULL && (d->arg_count <= named || arg_is_empty(d, named))) {
+                if (push_directive(&out, st, ".warning", "group name for SHF_GROUP not specified", NULL) != 0) {
+                    goto oom;
+                }
+                section_flag_drop(flags, 'G');
+            }
+        }
+        if (why != NULL) {
+            if (errbuf != NULL && errbuf_sz != 0) {
+                snprintf(errbuf, errbuf_sz, "%s:%u: %s: %s", st->file != NULL ? st->file : "<input>", st->line,
+                         d->name, why);
+            }
+            goto fail;
+        }
+        if (said != NULL) {
+            /* The labels of the line stay; the directive is the saying. */
+            arg_vec_t text;
+
+            memset(&text, 0, sizeof(text));
+            if (vec_push_text(&text, said) != 0 || set_name(d, ".warning") != 0) {
+                vec_free(&text);
+                goto oom;
+            }
+            set_args(d, &text);
+        }
+        if (stmt_vec_push(&out, st) != 0) {
+            goto oom;
+        }
+    }
+    free(parsed->items);
+    parsed->items = out.items;
+    parsed->count = out.count;
+    parsed->cap = out.cap;
+    out.items = NULL;
+    rc = 0;
+    goto done;
+
+oom:
+    if (errbuf != NULL && errbuf_sz != 0) {
+        snprintf(errbuf, errbuf_sz, "out of memory");
+    }
+fail:
+    /* Statements are in two places or in neither by now; the assembler
+     * is about to exit, and is not to free any of them twice. */
+    parsed->count = 0;
+    free(out.items);
+done:
+    for (i = 0; i < consts.now.count; ++i) {
+        free(consts.now.items[i].name);
+    }
+    free(consts.now.items);
+    for (i = 0; i < consts.last.count; ++i) {
+        free(consts.last.items[i].name);
+    }
+    free(consts.last.items);
+    for (i = 0; i < consts.never.count; ++i) {
+        free(consts.never.items[i].name);
+    }
+    free(consts.never.items);
+    return rc;
+}
+
 int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char *errbuf, size_t errbuf_sz) {
     size_t pushed = 0;
     size_t i;
@@ -1562,5 +1912,8 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
     if (lower_structs(parsed, errbuf, errbuf_sz) != 0) {
         return -1;
     }
-    return lower_local_commons(parsed, errbuf, errbuf_sz);
+    if (lower_local_commons(parsed, errbuf, errbuf_sz) != 0) {
+        return -1;
+    }
+    return lower_arguments(parsed, errbuf, errbuf_sz);
 }

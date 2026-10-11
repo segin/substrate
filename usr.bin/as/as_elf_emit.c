@@ -14722,6 +14722,21 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         if (target < 0 || (uint64_t)target < sec_off) {
             return -1;
         }
+        if (d->arg_count >= 2 && d->args[1] != NULL && d->args[1][0] != '\0') {
+            long long fill = 0;
+            uint64_t n;
+
+            /* `.org place, fill`: the byte the gap is filled with. */
+            if (parse_int64(d->args[1], &fill) != 0 && parse_const_expr_string(d->args[1], &fill) != 0) {
+                return -1;
+            }
+            for (n = sec_off; n < (uint64_t)target; ++n) {
+                if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
+                    return -1;
+                }
+            }
+            return 1;
+        }
         if ((uint64_t)target > sec_off &&
             bytebuf_append_zeros(buf, (size_t)((uint64_t)target - sec_off)) != 0) {
             return -1;
@@ -14744,7 +14759,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             return -1;
         }
         if (strcmp(d->name, ".p2align") == 0) {
-            if (raw >= (long long)(sizeof(size_t) * CHAR_BIT - 1)) {
+            if (raw > 31) {
                 return -1;
             }
             align = (size_t)1u << (unsigned)raw;
@@ -14783,24 +14798,15 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         if (d->arg_count < 1 || d->args[0] == NULL) {
             return -1;
         }
-        if (d->args[0] != NULL && strstr(d->args[0], "0b") != NULL && strstr(d->args[0], "-") != NULL &&
-            strstr(d->args[0], ".") != NULL) {
-            repeat = 1;
-        } else if (parse_int64(d->args[0], &repeat) != 0 && parse_const_expr_string(d->args[0], &repeat) != 0) {
+        if (parse_int64(d->args[0], &repeat) != 0 && parse_const_expr_string(d->args[0], &repeat) != 0) {
             as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->file : NULL,
                                                   st != NULL ? st->line : 0);
             if (expr == NULL ||
                 (eval_abs_local_diff_expr_virtual(ctx, st, expr, &repeat) != 0 &&
                  eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, expr, &repeat) != 0 &&
                  eval_local_align_fill_expr(ctx, section_name, st, sec_off, x86_code_bits, d->args[0], &repeat) != 0)) {
-                if (d->args[0] != NULL && strstr(d->args[0], "0b") != NULL && strstr(d->args[0], "- .") != NULL) {
-                    repeat = 1;
-                    as_expr_free(expr);
-                    expr = NULL;
-                } else {
                 as_expr_free(expr);
                 return -1;
-                }
             }
             as_expr_free(expr);
         }
@@ -14815,6 +14821,11 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         if (repeat < 0 || repeat > (1 << 20)) {
             return -1;
+        }
+        /* The value is of 32 bits, as GNU as has it, whatever the size
+         * of what it fills. */
+        if (size > 4) {
+            value &= 0xffffffffll;
         }
         for (i = 0; i < (size_t)repeat; ++i) {
             if (bytebuf_append_u64_le(buf, (uint64_t)value, (unsigned)size) != 0) {
@@ -14903,7 +14914,11 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             if (expr == NULL ||
                 (eval_abs_local_diff_expr_virtual(ctx, st, expr, &count) != 0 &&
                  eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, expr, &count) != 0)) {
-                if (strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+                /* While places are still being found a count may not be
+                 * known yet; once they are, one that is no number was
+                 * taken for none, and is refused as that of .zero is. */
+                if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) && ctx != NULL &&
+                    ctx->virtual_scanning) {
                     as_expr_free(expr);
                     expr = NULL;
                     count = 0;

@@ -288,6 +288,17 @@ An argument of
 or
 .Cm .sleb128
 may be the distance between two labels.
+An argument of
+.Cm .byte , .short , .long
+or
+.Cm .quad
+is a number; or a symbol and a number, which is a relocation of the
+directive's width; or that less a place in the directive's own section
+(a label of it, or
+.Ql \&. ) ,
+which is a relocation relative to the field.
+Two labels of one section differ by a number.
+Any other expression is an error.
 .It Sections and layout
 .Cm .text , .data , .bss , .rodata , .section , .pushsection , .popsection ,
 .Cm .previous , .subsection , .group , .align/.balign/.p2align ,
@@ -303,6 +314,20 @@ are assembled in ascending order of number.
 .Cm .struct
 lays what follows out from an offset and assembles it into nothing: its
 labels are absolute symbols.
+.Pp
+An alignment, a count or a fill may be an expression of symbols set to
+numbers; a count may also be the distance between two labels, or name a
+symbol set further down.
+An alignment of 0, or none, is 1; it must be a power of two, and the
+widest is 2 to the power 20.
+A section is aligned as far as the widest alignment asked for within it.
+.Cm .popsection
+brings back both the section
+.Cm .pushsection
+was written in and the one before it; with nothing pushed it is warned
+of and passed over.
+A section named a second time must have the flags, type and entry size
+it was first given.
 .It Messages
 .Cm .error , .err
 and
@@ -317,7 +342,17 @@ is an error below 500 and a warning from there.
 A directive that is not known is an error.
 .It Symbols
 .Cm .globl/.global , .local , .weak , .comm , .lcomm , .type , .size ,
-.Cm .hidden , .protected , .internal , .symver
+.Cm .hidden , .protected , .internal , .symver .
+.Cm .lcomm ,
+and
+.Cm .comm
+of a name that a
+.Cm .local
+above it names, reserve storage in
+.Ql .bss
+for a local symbol; any other
+.Cm .comm
+is a common symbol for the linker to place.
 .It Conditionals and macros
 .Cm .if/.ifdef/.ifndef/.else/.endif , .macro/.endm , .rept/.endr , .irp/.irpc
 .It Debug/CFI
