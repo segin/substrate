@@ -791,8 +791,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-215** When a reference to a local label lies in a mergeable section (`SHF_MERGE`), the assembler shall emit the relocation against the label's own symbol and not against the section.
   Trace: AS-OBJ-004.  Verify: T — three strings in `.rodata.str1.1,"aMS"` reached by `leaq .LCn(%rip)`: GNU's relocations; D — linked with GNU `ld`, the program prints `alpha|beta|gamma`.
   Done: `test_merge_section_reloc.sh`, which links and runs it.  With this, 217, 034, 066, 061 and 222, **six of the fourteen combinations of `test_compiler_output.sh` run** — all of 64 bits but `-O0` — and `compiler/expect-runs` holds them.
-- [ ] **AS-T-216** `as_x86_reloc.c` shall be the one place a relocation type is chosen, or shall be removed.
+- [x] **AS-T-216** `as_x86_reloc.c` shall be the one place a relocation type is chosen, or shall be removed.
   Trace: AS-X86-002.  Verify: I.  After: 200.
+  Removed, ahead of 200, with its header and `test_x86_reloc_core`: nothing but its own test called it, and its table was short of the 8- and 16-bit types and most of the thread-local ones.  The types are chosen by `as_reloc_op.c` for an operator, by `data_reloc_type` for a data directive's width, and in `as_elf_emit.c` for an instruction's field -- three places and not one, which is 191's and 200's.
 
 ## F. One layout, computed once
 
@@ -816,8 +817,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-226** A reference to a local label shall resolve to the right definition whatever the number of local labels in the file.
   Trace: AS-OBJ-012.  Verify: T — 9,000 lines of `1: .long 1b - .`: every entry right; no fixed-size array of labels remains (I).  After: 220.
   Done, ahead of 220.  The entries were right past the 8192 there was room for, by a slower road: a label that did not fit was looked for by laying the source out again.  The array grows (`local_labels` in `emit_relocations`), and a data directive's field is no longer worked out twice, once by the old evaluators and once by `emit_data_field`: 9,000 such lines took 7 s and take 0.9.  `test_jump_sizes.sh` holds the 9,000, backward and forward.  A label is still found among those passed by going through them, which is 227's.
-- [ ] **AS-T-227** The assembler shall look up symbols and sections through hashed indexes.
+- [x] **AS-T-227** The assembler shall look up symbols and sections through hashed indexes.
   Trace: AS-PERF-001, AS-PERF-003.  Verify: I — no linear scan by name per statement (`find_as_symbol_const`, `elf_find_section` through `section_for_name`, `sec_buf_find`, `as_sections.c:182-206`).  After: 220.
+  Done for the four, ahead of 220: a table from names to numbers (`as_strmap.h`, open addressing, in the header so that the unit tests need name no further file) is beside the section buffers of each pass, beside the section state, and in the emitter for the sections of the object it has been asked for and for the source's symbols.  A source of 4,000 functions each in a section of its own, with a datum each in another, took 47 s and takes 26 (GNU: 0.12): the rest of that is the layout being worked out again for each label, which is 228's and 220's.  Still found by going through them: a numbered label among those passed, and a label's place in the cache of places.
 - [ ] **AS-T-228** Assembly time shall be linear in the number of statements, symbols, relocations and sections.
   Trace: AS-PERF-001, AS-PERF-003.  Verify: T — a timing test: each of the audit's five shapes (plain instructions, `movl extN`, `.long extN`, branches to `.L` labels, one section per function) and `dN: .long dN - dN-1` at n and 4n takes no more than 5 times as long at 4n; D — each within 5 times GNU's time on the reference host.  After: 220, 227.
 - [ ] **AS-T-229** The assembler shall use no more than 200 bytes of memory for each source statement, on average over a file of 200,000 instructions.
@@ -882,8 +884,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-253** The assembler shall emit `.text`, `.data` and `.bss` always and any other section only when the source names it.
   Trace: AS-SEC-006.  Verify: T — no empty `.rodata` in the object of an empty source.
   Done: `.rodata` is made when it is named, by `.section .rodata` or by the `.rodata` directive this assembler has and GNU does not, with the flags its name implies.  `test_section_stack.sh`.
-- [ ] **AS-T-254** The assembler shall accept section, symbol and file names of any length.
+- [x] **AS-T-254** The assembler shall accept section, symbol and file names of any length.
   Trace: AS-OBJ-021.  Verify: T — a 301-character and a 5,000-character section name, a relocation into each; no fixed buffer holds a name (I).
+  Done.  A section's name went about the emitter in seventeen arrays of 128 bytes and came out of its quotes into one of 256, so a section of 301 characters was "unknown section", and two whose names were alike for 127 would have been one.  A name is kept once, whole (`section_name_keep` in `as_elf_emit.c`), and what is found out about where a label is hands that pointer about.  Symbols and file names were of any length already.  `test_long_names.sh`: sections of 301 and 5,000 characters and two alike for 300, a symbol of 5,000, relocations into each from instructions and data, and the object linked; GNU passes it.
 - [ ] **AS-T-255** When `.zero`, `.space`, `.skip` or `.fill` asks for more than 1 MiB, the assembler shall emit it.
   Trace: AS-OBJ-016.  Verify: T — `.zero 0x4000000` in `.data` and in `.bss`.
 
@@ -1249,5 +1252,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 227 done, 124 open.  Numbers run to 400, with gaps left between
+351 tasks: 230 done, 121 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

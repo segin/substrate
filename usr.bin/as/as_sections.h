@@ -2,6 +2,7 @@
 #define SUBSTRATE_AS_SECTIONS_H
 
 #include "as_parser.h"
+#include "as_strmap.h"
 
 #include <stddef.h>
 
@@ -32,6 +33,9 @@ typedef struct {
     /* Set by the caller before as_sections_build(), for an ELF64 object:
      * a section type may mean another thing there. */
     int elf64;
+    /* A section's name to its place in items, for subsection 0 of each
+     * -- which is all there are once subsections are gathered. */
+    as_strmap_t by_name;
 } as_section_state_t;
 
 void as_section_state_init(as_section_state_t *s);

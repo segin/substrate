@@ -16,6 +16,7 @@
 #include "as_x86_sse41.h"
 #include "as_x86_sse42.h"
 #include "as_data.h"
+#include "as_strmap.h"
 
 #include "elfobj.h"
 
@@ -143,6 +144,19 @@ typedef struct {
     /* The local labels emit_relocations() has passed, which it frees
      * here so that each way out of it need not. */
     void *emit_labels;
+    /* Section names, kept: see section_name_keep(). */
+    char **kept_names;
+    size_t kept_name_count;
+    size_t kept_name_cap;
+    as_strmap_t kept_by_name;
+    /* The object's sections that have been asked for by name
+     * (section_for_name), and the symbols of the source by theirs. */
+    as_strmap_t sec_by_name;
+    elf_section_t **sec_found;
+    size_t sec_found_count;
+    size_t sec_found_cap;
+    as_strmap_t symtab_by_name;
+    int symtab_indexed;
     /* Per-section prefix-sum table for O(1) range-size queries during
      * branch sizing. range_layout[s].prefix[i] is the sum of all
      * conservative stmt sizes in section `name` for stmts j < i. The
@@ -175,9 +189,11 @@ typedef struct {
     size_t cap;
 } bytebuf_t;
 
+/* `section` is a name kept by section_name_keep(): of any length, and
+ * good for as long as the object is being made. */
 typedef struct {
     int has_section;
-    char section[128];
+    const char *section;
     long long value;
 } virtual_addr_value_t;
 
@@ -203,8 +219,8 @@ static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name,
                                       uint64_t sec_off, unsigned x86_code_bits, uint64_t *size_out);
 static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_name, size_t start_idx, size_t end_idx,
                                          unsigned x86_code_bits, uint64_t *size_out);
-static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_st,
-                                       char *section_out, size_t section_out_sz);
+static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_st, const char **section_out);
+static const char *section_name_keep(emit_ctx_t *ctx, const char *name);
 static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                            uint64_t base_off, unsigned x86_code_bits, const as_expr_t *rel_expr,
                                            size_t branch_len, long long *abs_target_out);
@@ -8723,7 +8739,10 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
 
 static const char *section_from_directive(const as_directive_t *d) {
     const char *arg;
-    static char secbuf[256];
+    /* The name out of its quotes, good until the next is asked for; as
+     * long as the name is, where it had been 255 bytes of it. */
+    static char *secbuf;
+    static size_t secbuf_cap;
     size_t i;
     size_t n = 0;
 
@@ -8740,15 +8759,24 @@ static const char *section_from_directive(const as_directive_t *d) {
         while (*arg != '\0' && isspace((unsigned char)*arg)) {
             arg++;
         }
+        if (strlen(arg) + 1 > secbuf_cap) {
+            char *grown = (char *)realloc(secbuf, strlen(arg) + 1);
+
+            if (grown == NULL) {
+                return NULL;
+            }
+            secbuf = grown;
+            secbuf_cap = strlen(arg) + 1;
+        }
         if (*arg == '"' || *arg == '\'') {
             char q = *arg++;
-            while (*arg != '\0' && *arg != q && n + 1 < sizeof(secbuf)) {
+            while (*arg != '\0' && *arg != q && n + 1 < secbuf_cap) {
                 secbuf[n++] = *arg++;
             }
             secbuf[n] = '\0';
             return secbuf;
         }
-        for (i = 0; arg[i] != '\0' && n + 1 < sizeof(secbuf); ++i) {
+        for (i = 0; arg[i] != '\0' && n + 1 < secbuf_cap; ++i) {
             if (isspace((unsigned char)arg[i]) || arg[i] == ',') {
                 break;
             }
@@ -8775,6 +8803,7 @@ typedef struct {
     sec_buf_t *items;
     size_t count;
     size_t cap;
+    as_strmap_t by_name; /* a section's name to its place in items */
 } sec_buf_vec_t;
 
 typedef struct {
@@ -8797,6 +8826,7 @@ static void sec_buf_vec_free(sec_buf_vec_t *v) {
         free(v->items[i].buf.data);
     }
     free(v->items);
+    as_strmap_free(&v->by_name);
     memset(v, 0, sizeof(*v));
 }
 
@@ -8806,12 +8836,7 @@ static sec_buf_t *sec_buf_find(sec_buf_vec_t *v, const char *name) {
     if (v == NULL || name == NULL) {
         return NULL;
     }
-    for (i = 0; i < v->count; ++i) {
-        if (strcmp(v->items[i].name, name) == 0) {
-            return &v->items[i];
-        }
-    }
-    return NULL;
+    return as_strmap_get(&v->by_name, name, &i) ? &v->items[i] : NULL;
 }
 
 static sec_buf_t *sec_buf_get_or_add(sec_buf_vec_t *v, const char *name) {
@@ -8836,6 +8861,10 @@ static sec_buf_t *sec_buf_get_or_add(sec_buf_vec_t *v, const char *name) {
     memset(&v->items[v->count], 0, sizeof(v->items[v->count]));
     v->items[v->count].name = xstrdup(name);
     if (v->items[v->count].name == NULL) {
+        return NULL;
+    }
+    if (as_strmap_put(&v->by_name, v->items[v->count].name, v->count) != 0) {
+        free(v->items[v->count].name);
         return NULL;
     }
     v->count++;
@@ -10007,7 +10036,35 @@ static elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
     if (strcmp(name, ".data") == 0) {
         return ctx->data_sec;
     }
-    return elf_find_section(ctx->obj, name);
+    /* Looked for in the object once, and after that by its name's
+     * number: the object's own search goes through every section. */
+    {
+        elf_section_t *sec;
+        size_t at;
+
+        if (as_strmap_get(&ctx->sec_by_name, name, &at)) {
+            return ctx->sec_found[at];
+        }
+        sec = elf_find_section(ctx->obj, name);
+        if (sec != NULL) {
+            const char *kept = section_name_keep(ctx, name);
+
+            if (ctx->sec_found_count == ctx->sec_found_cap) {
+                size_t cap = ctx->sec_found_cap != 0 ? ctx->sec_found_cap * 2 : 16;
+                elf_section_t **grown = (elf_section_t **)realloc(ctx->sec_found, cap * sizeof(*grown));
+
+                if (grown == NULL) {
+                    return sec;
+                }
+                ctx->sec_found = grown;
+                ctx->sec_found_cap = cap;
+            }
+            if (kept[0] != '\0' && as_strmap_put(&ctx->sec_by_name, kept, ctx->sec_found_count) == 0) {
+                ctx->sec_found[ctx->sec_found_count++] = sec;
+            }
+        }
+        return sec;
+    }
 }
 
 /*
@@ -12555,9 +12612,44 @@ static int __attribute__((unused)) find_label_virtual_offset(emit_ctx_t *ctx, co
     return -1;
 }
 
+/*
+ * A section's name, kept: the same pointer for the same name, good until
+ * the object is made.  What is found out about where a label is is
+ * handed about as one of these, where it had been copied into arrays of
+ * 128 bytes -- and a section whose name was longer was another section,
+ * or none.
+ */
+static const char *section_name_keep(emit_ctx_t *ctx, const char *name) {
+    size_t i;
+    char *copy;
+
+    if (name == NULL || name[0] == '\0' || ctx == NULL) {
+        return "";
+    }
+    if (as_strmap_get(&ctx->kept_by_name, name, &i)) {
+        return ctx->kept_names[i];
+    }
+    if (ctx->kept_name_count == ctx->kept_name_cap) {
+        size_t cap = ctx->kept_name_cap != 0 ? ctx->kept_name_cap * 2 : 16;
+        char **grown = (char **)realloc(ctx->kept_names, cap * sizeof(*grown));
+
+        if (grown == NULL) {
+            return "";
+        }
+        ctx->kept_names = grown;
+        ctx->kept_name_cap = cap;
+    }
+    copy = xstrdup(name);
+    if (copy == NULL || as_strmap_put(&ctx->kept_by_name, copy, ctx->kept_name_count) != 0) {
+        free(copy);
+        return "";
+    }
+    ctx->kept_names[ctx->kept_name_count++] = copy;
+    return copy;
+}
+
 static int virtual_label_cache_lookup(emit_ctx_t *ctx, const char *file, unsigned line, int digit,
-                                      const char *sym_name, char *section_out, size_t section_out_sz,
-                                      uint64_t *off_out) {
+                                      const char *sym_name, const char **section_out, uint64_t *off_out) {
     size_t i;
 
     if (ctx == NULL || section_out == NULL || off_out == NULL) {
@@ -12586,15 +12678,14 @@ static int virtual_label_cache_lookup(emit_ctx_t *ctx, const char *file, unsigne
         if (c->off == UINT64_MAX) {
             return -1;
         }
-        snprintf(section_out, section_out_sz, "%s", c->section != NULL ? c->section : "");
+        *section_out = section_name_keep(ctx, c->section);
         *off_out = c->off;
         return 0;
     }
     return -1;
 }
 
-static int virtual_label_cache_lookup_stmt(emit_ctx_t *ctx, const as_stmt_t *stmt,
-                                           char *section_out, size_t section_out_sz,
+static int virtual_label_cache_lookup_stmt(emit_ctx_t *ctx, const as_stmt_t *stmt, const char **section_out,
                                            uint64_t *off_out) {
     size_t i;
 
@@ -12609,7 +12700,7 @@ static int virtual_label_cache_lookup_stmt(emit_ctx_t *ctx, const as_stmt_t *stm
         if (c->off == UINT64_MAX) {
             return -1;
         }
-        snprintf(section_out, section_out_sz, "%s", c->section != NULL ? c->section : "");
+        *section_out = section_name_keep(ctx, c->section);
         *off_out = c->off;
         return 0;
     }
@@ -12627,7 +12718,7 @@ static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const 
     }
     (void)numeric_local_label_number(label->name, &digit);
     if (digit < 0 && virtual_label_cache_lookup(ctx, label->file, label->line, digit, label->name,
-                                                (char[2]){0}, 2, &(uint64_t){0}) == 0) {
+                                                &(const char *){NULL}, &(uint64_t){0}) == 0) {
         return 0;
     }
     if (ctx->vlabel_count == ctx->vlabel_cap) {
@@ -12757,18 +12848,17 @@ static int __attribute__((unused)) prebuild_virtual_label_cache(emit_ctx_t *ctx)
 
 static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
                                        const char *file, unsigned line, int digit, const char *sym_name,
-                                       char *section_out, size_t section_out_sz, uint64_t *off_out) {
+                                       const char **section_out, uint64_t *off_out) {
     size_t i;
     sec_buf_vec_t secbufs;
     section_track_t track;
 
-    if (ctx == NULL || section_out == NULL || section_out_sz == 0 || off_out == NULL ||
-        (sym_name == NULL && file == NULL)) {
+    if (ctx == NULL || section_out == NULL || off_out == NULL || (sym_name == NULL && file == NULL)) {
         return -1;
     }
-    section_out[0] = '\0';
+    *section_out = "";
     *off_out = 0;
-    if (virtual_label_cache_lookup(ctx, file, line, digit, sym_name, section_out, section_out_sz, off_out) == 0) {
+    if (virtual_label_cache_lookup(ctx, file, line, digit, sym_name, section_out, off_out) == 0) {
         return 0;
     }
     /* Fast path: look up the target stmt by label name (O(N) once via the
@@ -12817,7 +12907,7 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
                             (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u);
             pfx = get_section_prefix_sums(ctx, target_section, bits);
             if (pfx != NULL && target_idx < ctx->section_prefix_count + ctx->parsed->count) {
-                snprintf(section_out, section_out_sz, "%s", target_section);
+                *section_out = section_name_keep(ctx, target_section);
                 *off_out = pfx[target_idx];
                 /* Also push into vlabel_cache so future lookups hit the
                  * existing fast path. */
@@ -12878,7 +12968,7 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
                        strcmp(st->labels[j].file, file) == 0);
             }
             if (matches) {
-                snprintf(section_out, section_out_sz, "%s", track.current != NULL ? track.current : "");
+                *section_out = section_name_keep(ctx, track.current);
                 *off_out = (uint64_t)sb->buf.len;
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
@@ -13054,18 +13144,18 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
 }
 
 static int find_stmt_virtual_location(emit_ctx_t *ctx, const as_stmt_t *target_st,
-                                      char *section_out, size_t section_out_sz, uint64_t *off_out) {
+                                      const char **section_out, uint64_t *off_out) {
     size_t i;
     sec_buf_vec_t secbufs;
     section_track_t track;
     int found = 0;
 
-    if (ctx == NULL || target_st == NULL || section_out == NULL || section_out_sz == 0 || off_out == NULL) {
+    if (ctx == NULL || target_st == NULL || section_out == NULL || off_out == NULL) {
         return -1;
     }
-    section_out[0] = '\0';
+    *section_out = "";
     *off_out = 0;
-    if (virtual_label_cache_lookup_stmt(ctx, target_st, section_out, section_out_sz, off_out) == 0) {
+    if (virtual_label_cache_lookup_stmt(ctx, target_st, section_out, off_out) == 0) {
         if (getenv("AS_PROFILE_LOC") != NULL) {
             static unsigned long h = 0; h++;
             if ((h & 0x3FFFF) == 0) fprintf(stderr, "find_stmt_loc HIT: %lu\n", h);
@@ -13104,7 +13194,7 @@ static int find_stmt_virtual_location(emit_ctx_t *ctx, const as_stmt_t *target_s
         /* A statement without a label has a place too: a .uleb128 asks
          * for its own, to take `.` from. */
         if (st == target_st && !found) {
-            snprintf(section_out, section_out_sz, "%s", track.current != NULL ? track.current : "");
+            *section_out = section_name_keep(ctx, track.current);
             *off_out = (uint64_t)sb->buf.len;
             found = 1;
         }
@@ -13177,7 +13267,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
         }
         if (e->symbol == NULL ||
             find_label_virtual_location(ctx, base_st, NULL, 0, 0, e->symbol,
-                                        target_loc.section, sizeof(target_loc.section),
+                                        &target_loc.section,
                                         &target_off) != 0 ||
             strcmp(target_loc.section, section_name) != 0) {
             return -1;
@@ -13192,7 +13282,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
             const as_stmt_t *target_st = resolve_local_ref_target_stmt(ctx, base_st, e->src_file,
                                                                        e->local_digit, e->local_forward);
             if (target_st != NULL &&
-                find_stmt_virtual_location(ctx, target_st, target_loc.section, sizeof(target_loc.section),
+                find_stmt_virtual_location(ctx, target_st, &target_loc.section,
                                            &target_off) == 0 &&
                 strcmp(target_loc.section, section_name) == 0) {
                 *out = (long long)target_off - (long long)base_off;
@@ -13210,7 +13300,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
             }
             if (find_label_virtual_location(ctx, base_st,
                                             e->src_file, target_line, e->local_digit,
-                                            NULL, target_loc.section, sizeof(target_loc.section),
+                                            NULL, &target_loc.section,
                                             &target_off) != 0 ||
                 strcmp(target_loc.section, section_name) != 0) {
                 return -1;
@@ -13273,7 +13363,7 @@ static int local_ref_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
                                                                    e->local_digit, e->local_forward);
         if (target_st != NULL) {
             memset(out, 0, sizeof(*out));
-            if (find_stmt_virtual_location(ctx, target_st, out->section, sizeof(out->section), &off) != 0) {
+            if (find_stmt_virtual_location(ctx, target_st, &out->section, &off) != 0) {
                 return -1;
             }
             out->has_section = 1;
@@ -13289,7 +13379,7 @@ static int local_ref_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
     }
     memset(out, 0, sizeof(*out));
     if (find_label_virtual_location(ctx, base_st, e->src_file, target_line, e->local_digit, NULL,
-                                    out->section, sizeof(out->section), &off) != 0) {
+                                    &out->section, &off) != 0) {
         return -1;
     }
     out->has_section = 1;
@@ -13317,7 +13407,7 @@ static int eval_virtual_addr_expr(emit_ctx_t *ctx, const as_stmt_t *base_st,
             return -1;
         }
         if (find_label_virtual_location(ctx, base_st, NULL, 0, 0, e->symbol,
-                                        out->section, sizeof(out->section), &off) != 0) {
+                                        &out->section, &off) != 0) {
             return -1;
         }
         out->has_section = 1;
@@ -13436,7 +13526,7 @@ static int numeric_local_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base
         const as_stmt_t *target_st = resolve_local_ref_target_stmt(ctx, base_st, base_st->file, digit, forward);
         if (target_st != NULL) {
             memset(out, 0, sizeof(*out));
-            if (find_stmt_virtual_location(ctx, target_st, out->section, sizeof(out->section), &off) != 0) {
+            if (find_stmt_virtual_location(ctx, target_st, &out->section, &off) != 0) {
                 return -1;
             }
             out->has_section = 1;
@@ -13449,7 +13539,7 @@ static int numeric_local_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base
     }
     memset(out, 0, sizeof(*out));
     if (find_label_virtual_location(ctx, base_st, base_st->file, target_line, digit, NULL,
-                                    out->section, sizeof(out->section), &off) != 0) {
+                                    &out->section, &off) != 0) {
         return -1;
     }
     out->has_section = 1;
@@ -13507,7 +13597,7 @@ static int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, co
     }
     memset(&v741b, 0, sizeof(v741b));
     v741b.has_section = 1;
-    snprintf(v741b.section, sizeof(v741b.section), "%s", section_name);
+    v741b.section = section_name_keep(ctx, section_name);
     v741b.value = (long long)sec_off;
     repl_len = v744f.value - v743f.value;
     orig_len = v741b.value - v740b.value;
@@ -13529,13 +13619,13 @@ static int eval_linux_alt_len_expr(emit_ctx_t *ctx, const as_stmt_t *st, const c
         size_t i742;
         size_t i740;
         uint64_t orig = 0;
-        char section[128];
+        const char *section = "";
 
         if (s742 != NULL && s740 != NULL &&
             parsed_stmt_index(ctx, s742, &i742) == 0 &&
             parsed_stmt_index(ctx, s740, &i740) == 0 &&
             i740 <= i742 &&
-            stmt_declared_label_section(ctx, s740, section, sizeof(section)) == 0 &&
+            stmt_declared_label_section(ctx, s740, &section) == 0 &&
             linux_alt_original_range_size(ctx, section, i740, i742,
                                           ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u,
                                           &orig) == 0) {
@@ -14322,14 +14412,13 @@ static int build_stmt_section_at(emit_ctx_t *ctx) {
     return 0;
 }
 
-static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_st,
-                                       char *section_out, size_t section_out_sz) {
+static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_st, const char **section_out) {
     size_t idx;
 
-    if (ctx == NULL || target_st == NULL || section_out == NULL || section_out_sz == 0) {
+    if (ctx == NULL || target_st == NULL || section_out == NULL) {
         return -1;
     }
-    section_out[0] = '\0';
+    *section_out = "";
     if (build_stmt_section_at(ctx) != 0) {
         return -1;
     }
@@ -14337,7 +14426,8 @@ static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_
         return -1;
     }
     if (ctx->stmt_section_at[idx] != NULL) {
-        snprintf(section_out, section_out_sz, "%s", ctx->stmt_section_at[idx]);
+        /* The table's own copy: it lasts as long as the context. */
+        *section_out = ctx->stmt_section_at[idx];
     }
     return 0;
 }
@@ -14432,9 +14522,9 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
         return -1;
     }
     {
-        char target_section[128];
+        const char *target_section = "";
 
-        if (stmt_declared_label_section(ctx, target_st, target_section, sizeof(target_section)) != 0 ||
+        if (stmt_declared_label_section(ctx, target_st, &target_section) != 0 ||
             strcmp(target_section, section_name) != 0) {
             return -1;
         }
@@ -15958,18 +16048,25 @@ static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
     return sym;
 }
 
-static const as_symbol_t *find_as_symbol_const(const as_symtab_t *symtab, const char *name) {
+/* A symbol of the source by its name: the first of that name, found by
+ * a table made the first time one is asked for. */
+static const as_symbol_t *find_as_symbol_const(emit_ctx_t *ctx, const as_symtab_t *symtab, const char *name) {
     size_t i;
 
     if (symtab == NULL || name == NULL) {
         return NULL;
     }
-    for (i = 0; i < symtab->count; ++i) {
-        if (symtab->items[i].name != NULL && strcmp(symtab->items[i].name, name) == 0) {
-            return &symtab->items[i];
+    if (!ctx->symtab_indexed) {
+        for (i = symtab->count; i > 0; --i) {
+            if (symtab->items[i - 1].name != NULL &&
+                as_strmap_put(&ctx->symtab_by_name, symtab->items[i - 1].name, i - 1) != 0) {
+                as_strmap_free(&ctx->symtab_by_name);
+                return NULL;
+            }
         }
+        ctx->symtab_indexed = 1;
     }
-    return NULL;
+    return as_strmap_get(&ctx->symtab_by_name, name, &i) ? &symtab->items[i] : NULL;
 }
 
 static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym) {
@@ -16669,7 +16766,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 base_sec = dot->sec;
                 base_off = dot->off;
             } else {
-                const as_symbol_t *base_sym = find_as_symbol_const(symtab, s->size_base_symbol);
+                const as_symbol_t *base_sym = find_as_symbol_const(ctx, symtab, s->size_base_symbol);
                 const sym_loc_t *base_loc = NULL;
 
                 if (base_sym != NULL && base_sym->alias_from_dot && base_sym->alias_target != NULL &&
@@ -16931,7 +17028,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
  * constant was whatever its .rodata began with.
  */
 static int64_t local_label_addend(emit_ctx_t *ctx, const char *name) {
-    char target_section[128];
+    const char *target_section = "";
     uint64_t target_off = 0;
     char *sym_name = xstrdup(name);
     int64_t off = 0;
@@ -16942,7 +17039,7 @@ static int64_t local_label_addend(emit_ctx_t *ctx, const char *name) {
     strip_reloc_modifier(sym_name);
     if (sym_name[0] != '\0' && is_local_temp_symbol_name(sym_name) &&
         find_label_virtual_location(ctx, NULL, NULL, 0, 0, sym_name,
-                                    target_section, sizeof(target_section),
+                                    &target_section,
                                     &target_off) == 0) {
         elf_section_t *target_sec = section_for_name(ctx, target_section);
 
@@ -16978,11 +17075,11 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
         return -1;
     }
     if (is_local_temp_symbol_name(sym_name)) {
-        char target_section[128];
+        const char *target_section = "";
         uint64_t target_off = 0;
 
         if (find_label_virtual_location(ctx, NULL, NULL, 0, 0, sym_name,
-                                        target_section, sizeof(target_section), &target_off) == 0) {
+                                        &target_section, &target_off) == 0) {
             elf_section_t *target_sec = section_for_name(ctx, target_section);
             char *section_name;
 
@@ -18449,7 +18546,7 @@ typedef struct {
     const char *name;
     const char *file;
     unsigned line;
-    char section[128];
+    const char *section; /* kept: section_name_keep() */
     uint64_t off;
 } local_emit_label_t;
 
@@ -18518,7 +18615,7 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
                                      as_expr_t *minuend_out, int64_t *extra_out) {
     as_expr_linear_t lin;
     const local_emit_label_t *seen = NULL;
-    char section[128];
+    const char *section = "";
     uint64_t off = 0;
 
     if (ctx == NULL || expr == NULL || cur_section == NULL || minuend_out == NULL || extra_out == NULL) {
@@ -18537,7 +18634,7 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
         }
         off = seen->off;
     } else if (find_label_virtual_location(ctx, st, NULL, 0, 0, lin.sub_symbol,
-                                           section, sizeof(section), &off) != 0 ||
+                                           &section, &off) != 0 ||
                strcmp(section, cur_section) != 0) {
         return -1;
     }
@@ -18553,7 +18650,7 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
         uint64_t add_off = 0;
 
         if (find_label_virtual_location(ctx, st, NULL, 0, 0, lin.add_symbol,
-                                        section, sizeof(section), &add_off) == 0 &&
+                                        &section, &add_off) == 0 &&
             strcmp(section, cur_section) == 0) {
             return -1;
         }
@@ -18597,7 +18694,6 @@ static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
  * field.  Anything else has no relocation that says it and is refused.
  */
 #define DATA_TERMS_MAX 6u
-#define DATA_SECTIONS_MAX 6u
 
 typedef struct {
     const char *base;      /* a section's name, or a symbol's */
@@ -18622,25 +18718,14 @@ typedef struct {
     uint64_t off;
     const local_emit_label_t *labels;
     size_t label_count;
-    char sections[DATA_SECTIONS_MAX][128];
-    size_t section_count;
     /* Set where a place was multiplied, divided, shifted or the like. */
     int not_linear;
 } data_eval_t;
 
 static const char *data_eval_section(data_eval_t *ev, const char *name) {
-    size_t i;
+    const char *kept = section_name_keep(ev->ctx, name);
 
-    for (i = 0; i < ev->section_count; ++i) {
-        if (strcmp(ev->sections[i], name) == 0) {
-            return ev->sections[i];
-        }
-    }
-    if (ev->section_count == DATA_SECTIONS_MAX || strlen(name) >= sizeof(ev->sections[0])) {
-        return NULL;
-    }
-    snprintf(ev->sections[ev->section_count], sizeof(ev->sections[0]), "%s", name);
-    return ev->sections[ev->section_count++];
+    return kept[0] != '\0' || name == NULL || name[0] == '\0' ? kept : NULL;
 }
 
 static int data_value_add(data_value_t *v, const data_term_t *term) {
@@ -18698,7 +18783,7 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
         return 0;
     case AS_EXPR_SYMBOL: {
         const local_emit_label_t *seen = NULL;
-        char section[128];
+        const char *section = "";
         uint64_t off = 0;
         data_term_t term;
 
@@ -18716,8 +18801,7 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
                 find_seen_temp_label(ev->labels, ev->label_count, e->symbol, &seen) == 0) {
                 return data_eval_place(ev, seen->section, (long long)seen->off, e->symbol, out);
             }
-            if (find_label_virtual_location(ev->ctx, ev->st, NULL, 0, 0, e->symbol, section, sizeof(section),
-                                            &off) == 0) {
+            if (find_label_virtual_location(ev->ctx, ev->st, NULL, 0, 0, e->symbol, &section, &off) == 0) {
                 return data_eval_place(ev, section, (long long)off, e->symbol, out);
             }
         }
@@ -19045,7 +19129,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 dst->file = st->labels[j].file;
                 dst->line = st->labels[j].line;
                 dst->off = cur_off;
-                snprintf(dst->section, sizeof(dst->section), "%s", track.current != NULL ? track.current : "");
+                dst->section = section_name_keep(ctx, track.current);
             }
         }
 
@@ -19181,7 +19265,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                             } else if (minuend->kind == AS_EXPR_SYMBOL &&
                                        minuend->symbol != NULL &&
                                        strcmp(minuend->symbol, ".") != 0) {
-                                char target_section[128];
+                                const char *target_section = "";
                                 uint64_t target_off = 0;
                                 if (is_local_temp_symbol_name(minuend->symbol)) {
                                     const local_emit_label_t *seen = NULL;
@@ -19191,7 +19275,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                         addend = (int64_t)seen->off;
                                         handled = (target_name != NULL);
                                     } else if (find_label_virtual_location(ctx, st, NULL, 0, 0, minuend->symbol,
-                                                                           target_section, sizeof(target_section),
+                                                                           &target_section,
                                                                            &target_off) == 0) {
                                         target_name = xstrdup(target_section);
                                         addend = (int64_t)target_off;
@@ -19373,7 +19457,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         const char *other = strcmp(lin.add_symbol, ".") == 0 ? lin.sub_symbol : lin.add_symbol;
                         int dot_is_taken = strcmp(lin.sub_symbol, ".") == 0;
                         as_expr_linear_t at;
-                        char label_section[128];
+                        const char *label_section = "";
                         uint64_t label_off = 0;
 
                         if (strcmp(other, ".") == 0) {
@@ -19381,8 +19465,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                             label_difference = lin.value;
                         } else if (as_expr_eval_linear(e, reloc_dot_lookup, &here, &at) != AS_EXPR_EVAL_OK) {
                             taken_from = lin.sub_symbol;
-                        } else if (find_label_virtual_location(ctx, NULL, NULL, 0, 0, other, label_section,
-                                                               sizeof(label_section), &label_off) == 0 &&
+                        } else if (find_label_virtual_location(ctx, NULL, NULL, 0, 0, other, &label_section,
+                                                               &label_off) == 0 &&
                                    track.current != NULL && strcmp(label_section, track.current) == 0) {
                             is_label_difference = 1;
                             label_difference = at.value + (dot_is_taken ? (long long)label_off : -(long long)label_off);
@@ -19437,14 +19521,14 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         /* `sym + [. - .L1]`: the distance from a label of
                          * this section to here is a number. */
                         long long here = (long long)cur_off;
-                        char label_section[128];
+                        const char *label_section = "";
                         uint64_t label_off = 0;
 
                         if (as_expr_eval_linear(e, reloc_dot_lookup, &here, &lin) == AS_EXPR_EVAL_OK &&
                             lin.add_symbol != NULL && strcmp(lin.add_symbol, sym) == 0 && lin.sub_symbol != NULL &&
                             lin.sub_local == NULL && lin.add_local == NULL &&
-                            find_label_virtual_location(ctx, NULL, NULL, 0, 0, lin.sub_symbol, label_section,
-                                                        sizeof(label_section), &label_off) == 0 &&
+                            find_label_virtual_location(ctx, NULL, NULL, 0, 0, lin.sub_symbol, &label_section,
+                                                        &label_off) == 0 &&
                             track.current != NULL && strcmp(label_section, track.current) == 0) {
                             addend = (int64_t)(lin.value - (long long)label_off);
                         }
@@ -19621,12 +19705,12 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * the address of `ext`.
                  */
                 if (taken_from != NULL) {
-                    char label_section[128];
+                    const char *label_section = "";
                     uint64_t label_off = 0;
 
                     if (reloc_width != 4 ||
-                        find_label_virtual_location(ctx, NULL, NULL, 0, 0, taken_from, label_section,
-                                                    sizeof(label_section), &label_off) != 0 ||
+                        find_label_virtual_location(ctx, NULL, NULL, 0, 0, taken_from, &label_section,
+                                                    &label_off) != 0 ||
                         track.current == NULL || strcmp(label_section, track.current) != 0) {
                         set_err(ctx, "%s:%u: '%s' is taken from '%s' and is not a label of this section",
                                 st->file != NULL ? st->file : "<input>", st->line, taken_from, sym);
@@ -20149,7 +20233,7 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
             struct leb_stmt *leb = &ctx->leb[i];
             const as_directive_t *d = &leb->st->u.directive;
             unsigned bits = ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 32u;
-            char section[128];
+            const char *section = "";
             uint64_t off = 0;
             int placed = 0;
             uint64_t done = 0;
@@ -20168,8 +20252,8 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
                      * place of the directive.  One that cannot be worked
                      * out at all is said so where the bytes are written. */
                     if (!placed) {
-                        section[0] = '\0';
-                        (void)find_stmt_virtual_location(ctx, leb->st, section, sizeof(section), &off);
+                        section = "";
+                        (void)find_stmt_virtual_location(ctx, leb->st, &section, &off);
                         placed = 1;
                     }
                     if (section[0] == '\0' ||
@@ -20383,6 +20467,14 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     free_leb128_sizes(&ctx);
     {
         size_t _i;
+        for (_i = 0; _i < ctx.kept_name_count; ++_i) {
+            free(ctx.kept_names[_i]);
+        }
+        free(ctx.kept_names);
+        as_strmap_free(&ctx.kept_by_name);
+        as_strmap_free(&ctx.sec_by_name);
+        free(ctx.sec_found);
+        as_strmap_free(&ctx.symtab_by_name);
         for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
             free(ctx.section_prefixes[_i].name);
             free(ctx.section_prefixes[_i].prefix);
@@ -20414,6 +20506,14 @@ fail:
     free_leb128_sizes(&ctx);
     {
         size_t _i;
+        for (_i = 0; _i < ctx.kept_name_count; ++_i) {
+            free(ctx.kept_names[_i]);
+        }
+        free(ctx.kept_names);
+        as_strmap_free(&ctx.kept_by_name);
+        as_strmap_free(&ctx.sec_by_name);
+        free(ctx.sec_found);
+        as_strmap_free(&ctx.symtab_by_name);
         for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
             free(ctx.section_prefixes[_i].name);
             free(ctx.section_prefixes[_i].prefix);

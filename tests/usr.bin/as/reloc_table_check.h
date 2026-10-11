@@ -1,6 +1,6 @@
 /*
- * What the three tests of a relocation table share (test_x86_reloc_core,
- * test_arm_reloc_core, test_a64_reloc_core): each table names a
+ * What the tests of a relocation table share (test_arm_reloc_core,
+ * test_a64_reloc_core): each table names a
  * relocation by an enumerator of its own and gives the number the ABI
  * gives it.
  *

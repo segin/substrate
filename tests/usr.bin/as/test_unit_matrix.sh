@@ -20,7 +20,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 "$ROOT/tests/usr.bin/as/test_a64_branch_core.sh"
 
 # 8a.3 Relocation type/addend emission.
-"$ROOT/tests/usr.bin/as/test_x86_reloc_core.sh"
 "$ROOT/tests/usr.bin/as/test_arm_reloc_core.sh"
 "$ROOT/tests/usr.bin/as/test_a64_reloc_core.sh"
 "$ROOT/tests/usr.bin/as/test_relocations_elf_32_64.sh"

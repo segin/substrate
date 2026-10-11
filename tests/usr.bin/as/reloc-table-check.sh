@@ -1,9 +1,9 @@
 #!/bin/sh
 # reloc-table-check.sh MODULE MACHINE...
 #
-# The body of test_x86_reloc_core.sh, test_arm_reloc_core.sh and
-# test_a64_reloc_core.sh: build test_MODULE_reloc_core.c with
-# usr.bin/as/as_MODULE_reloc.c, run it once for each MACHINE, and hold the
+# The body of test_arm_reloc_core.sh and test_a64_reloc_core.sh: build
+# test_MODULE_reloc_core.c with usr.bin/as/as_MODULE_reloc.c, run it
+# once for each MACHINE, and hold the
 # object it writes to what readelf says is in it.
 #
 # The program checks the table's numbers and its refusals, and prints the

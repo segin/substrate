@@ -191,6 +191,7 @@ void as_section_state_init(as_section_state_t *s) {
     s->stack_count = 0;
     s->stack_cap = 0;
     s->elf64 = 0;
+    memset(&s->by_name, 0, sizeof(s->by_name));
 }
 
 void as_section_state_free(as_section_state_t *s) {
@@ -205,6 +206,7 @@ void as_section_state_free(as_section_state_t *s) {
     }
     free(s->items);
     free(s->stack);
+    as_strmap_free(&s->by_name);
     memset(s, 0, sizeof(*s));
 }
 
@@ -213,6 +215,9 @@ const as_section_t *as_sections_find(const as_section_state_t *s, const char *na
 
     if (s == NULL || name == NULL) {
         return NULL;
+    }
+    if (subsection == 0) {
+        return as_strmap_get(&s->by_name, name, &i) ? &s->items[i] : NULL;
     }
 
     for (i = 0; i < s->count; ++i) {
@@ -226,6 +231,9 @@ const as_section_t *as_sections_find(const as_section_state_t *s, const char *na
 static ssize_t find_section_index(const as_section_state_t *s, const char *name, unsigned subsection) {
     size_t i;
 
+    if (subsection == 0) {
+        return as_strmap_get(&s->by_name, name, &i) ? (ssize_t)i : -1;
+    }
     for (i = 0; i < s->count; ++i) {
         if (s->items[i].subsection == subsection && strcmp(s->items[i].name, name) == 0) {
             return (ssize_t)i;
@@ -251,6 +259,10 @@ static ssize_t add_section(as_section_state_t *s, const char *name, unsigned sub
     memset(&s->items[s->count], 0, sizeof(s->items[s->count]));
     s->items[s->count].name = xstrdup(name);
     if (s->items[s->count].name == NULL) {
+        return -1;
+    }
+    if (subsection == 0 && as_strmap_put(&s->by_name, s->items[s->count].name, s->count) != 0) {
+        free(s->items[s->count].name);
         return -1;
     }
     s->items[s->count].subsection = subsection;
