@@ -843,8 +843,38 @@ static int is_disp8(int32_t v) {
 }
 
 /* May this immediate have the sign-extended one-byte form? */
-static int imm_is_s8(const as_x86_operand_t *op) {
-    return !op->imm_symbolic && op->u.imm >= -128 && op->u.imm <= 127;
+/*
+ * Whether the number is one a signed byte holds, at the width of what
+ * it is done to: `addw $0xff80, %bx` adds -128 to sixteen bits, and
+ * `addl $0xffffff80, %eax` to thirty-two, and each has the form with a
+ * byte of immediate.  Asked of the number as it was written, neither
+ * was a byte and each took the long form.
+ */
+static int imm_is_s8_at(const as_x86_operand_t *op, unsigned bits) {
+    long long v = op->u.imm;
+
+    if (op->imm_symbolic) {
+        return 0;
+    }
+    /* A number written as 32 bits with the top one set is that
+     * negative number; and it is a byte only if it is a number the
+     * width holds at all -- one too large for 16 bits is cut to them
+     * with a warning, and keeps the long form. */
+    if (bits != 64 && v >= 0x80000000ll && v <= 0xffffffffll) {
+        v -= 0x100000000ll;
+    }
+    if (bits == 16) {
+        if (v < -0x8000ll || v > 0xffffll) {
+            return 0;
+        }
+        v = (int16_t)(uint16_t)v;
+    } else if (bits == 32) {
+        if (v < -0x80000000ll || v > 0xffffffffll) {
+            return 0;
+        }
+        v = (int32_t)(uint32_t)v;
+    }
+    return v >= -128 && v <= 127;
 }
 
 static unsigned effective_i386_operand_bits(const as_x86_insn_t *insn) {
@@ -1816,7 +1846,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                            emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
-            } else if (imm_is_s8(b)) {
+            } else if (imm_is_s8_at(b, effective_i386_operand_bits(insn))) {
                 if (emit8(&ctx, 0x83) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 ||
                     emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
                     return -1;
@@ -1836,7 +1866,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "imul") || streq_ci(insn->mnemonic, "imulb") || streq_ci(insn->mnemonic, "imull") || streq_ci(insn->mnemonic, "imulq")) {
         if (insn->op_count == 3 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b) && c->kind == AS_X86_OP_IMM) {
-            if (!c->imm_symbolic && (int8_t)c->u.imm == c->u.imm) {
+            if (imm_is_s8_at(c, effective_i386_operand_bits(insn))) {
                 if (emit8(&ctx, 0x6b) != 0 || modrm_sib_disp(&ctx, (uint8_t)(a->u.reg & 7), b) != 0 ||
                     emit8(&ctx, (uint8_t)c->u.imm) != 0) {
                     return -1;
@@ -2684,13 +2714,21 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         uint8_t opcode;
         int32_t rel;
         long long disp;
+        /* The counter that is not the mode's own is asked for by the
+         * address-size prefix: without it `jcxz` in 32-bit code was
+         * `jecxz`, and tested the other register. */
+        int other_counter = (streq_ci(insn->mnemonic, "jcxz") && insn->default_bits != 16u) ||
+                            (streq_ci(insn->mnemonic, "jecxz") && insn->default_bits == 16u);
 
         if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
             set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
         rel = a->u.rel;
-        if (resolve_rel_target(&ctx, rel, 2u, &disp) != 0) {
+        if (resolve_rel_target(&ctx, rel, other_counter ? 3u : 2u, &disp) != 0) {
+            return -1;
+        }
+        if (other_counter && emit8(&ctx, 0x67) != 0) {
             return -1;
         }
         if (disp < -128 || disp > 127) {
@@ -2753,7 +2791,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             }
         } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
             /* A number that a signed byte holds is pushed from one. */
-            if (imm_is_s8(a)) {
+            if (imm_is_s8_at(a, effective_i386_operand_bits(insn))) {
                 if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
                     return -1;
                 }
@@ -3335,7 +3373,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                        emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                 return -1;
             }
-        } else if (imm_is_s8(b)) {
+        } else if (imm_is_s8_at(b, insn->operand_size_override && bits == 32 ? 16u : (unsigned)bits)) {
             if (emit8(&ctx, 0x83) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
                 emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
                 return -1;
@@ -3360,9 +3398,10 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         insn->op_count == 2 && a != NULL && b != NULL && a->kind == AS_X86_OP_REG &&
         (b->kind == AS_X86_OP_REG || b->kind == AS_X86_OP_MEM)) {
         uint8_t op2 = streq_ci(insn->mnemonic, "lar") ? 0x02u : 0x03u;
-        if (a->size_bits == 64 || insn->rex_w) {
-            rex_w = 1;
-        }
+
+        /* (No REX.W for a 64-bit register: what is loaded is a
+         * segment's limit or its rights, and fills the register
+         * either way.) */
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
@@ -3371,8 +3410,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     }
 
     if (streq_ci(insn->mnemonic, "rdpid") && insn->op_count == 1 && a != NULL && a->kind == AS_X86_OP_REG) {
-        uint8_t r = (uint8_t)(0x40u | ((a->size_bits == 64 || insn->rex_w) ? 0x08u : 0u) |
-                              (reg_ext(a->u.reg) ? 0x01u : 0u));
+        /* (Nor here: the register is the mode's size with no prefix.) */
+        uint8_t r = (uint8_t)(0x40u | (reg_ext(a->u.reg) ? 0x01u : 0u));
         ctx.at = rex_pos;
         if (emit8(&ctx, 0xf3) != 0 || ((r != 0x40u) && emit8(&ctx, r) != 0) ||
             emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc7) != 0 ||
@@ -3619,7 +3658,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             goto finish;
         }
         if (a->kind == AS_X86_OP_IMM) {
-            if (imm_is_s8(a)) {
+            if (imm_is_s8_at(a, insn->operand_size_override ? 16u : 64u)) {
                 if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
                     return -1;
                 }
@@ -4478,7 +4517,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     } else if (streq_ci(insn->mnemonic, "imul") || streq_ci(insn->mnemonic, "imulb") || streq_ci(insn->mnemonic, "imull") || streq_ci(insn->mnemonic, "imulq")) {
         if (insn->op_count == 3 && a->kind == AS_X86_OP_REG &&
             (b->kind == AS_X86_OP_REG || b->kind == AS_X86_OP_MEM) && c->kind == AS_X86_OP_IMM) {
-            if (!c->imm_symbolic && (int8_t)c->u.imm == c->u.imm) {
+            if (imm_is_s8_at(c, insn->rex_w ? 64u : (insn->operand_size_override ? 16u : 32u))) {
                 if (emit8(&ctx, 0x6b) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
                     emit8(&ctx, (uint8_t)c->u.imm) != 0) {
                     return -1;
@@ -4694,7 +4733,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                     emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
-            } else if (imm_is_s8(b)) {
+            } else if (imm_is_s8_at(b, insn->operand_size_override && bits == 32 ? 16u : (unsigned)bits)) {
                 if (emit8(&ctx, 0x83) != 0 ||
                     modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
                     emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
@@ -6264,7 +6303,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 return -1;
             }
         } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (imm_is_s8(a)) {
+            if (imm_is_s8_at(a, insn->operand_size_override ? 16u : 64u)) {
                 if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)(int8_t)a->u.imm) != 0) {
                     return -1;
                 }
@@ -6994,11 +7033,16 @@ more_mnemonics:
             return -1;
         }
         rel = a->u.rel;
-        if (resolve_rel_target(&ctx, rel, 2u, &disp) != 0) {
+        /* (%ecx for the counter is asked for by the address-size
+         * prefix: without it `jecxz` was `jrcxz`.) */
+        if (resolve_rel_target(&ctx, rel, streq_ci(insn->mnemonic, "jecxz") ? 3u : 2u, &disp) != 0) {
             return -1;
         }
         if (disp < -128 || disp > 127) {
             set_err(&ctx, "x86_64 loop target out of range");
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "jecxz") && emit8(&ctx, 0x67) != 0) {
             return -1;
         }
         if (streq_ci(insn->mnemonic, "loop")) opcode = 0xe2;

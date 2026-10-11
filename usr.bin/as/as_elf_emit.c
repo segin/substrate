@@ -3320,8 +3320,8 @@ static int is_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
-    if (streq_ci(mn, "call") || streq_ci(mn, "jmp") || streq_ci(mn, "xbegin") ||
-        x86_fixed_short_branch(mn, 32u, NULL, NULL) != -1) {
+    if (streq_ci(mn, "call") || streq_ci(mn, "callw") || streq_ci(mn, "calll") || streq_ci(mn, "callq") ||
+        streq_ci(mn, "jmp") || streq_ci(mn, "xbegin") || x86_fixed_short_branch(mn, 32u, NULL, NULL) != -1) {
         return 1;
     }
     if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
@@ -3330,8 +3330,12 @@ static int is_rel_mnemonic(const char *mn) {
     return 0;
 }
 
+/* (`callw` and `calll` are calls too: taken for some other instruction
+ * that names a symbol, they had the relocation of an address and not
+ * of a distance.) */
 static int is_call_mnemonic(const char *mn) {
-    return streq_ci(mn, "call") || streq_ci(mn, "lcall");
+    return streq_ci(mn, "call") || streq_ci(mn, "lcall") || streq_ci(mn, "callw") || streq_ci(mn, "calll") ||
+           streq_ci(mn, "callq");
 }
 
 static int is_fixed_short_rel_mnemonic(const char *mn) {
@@ -4034,7 +4038,10 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
                 return -1;
             }
         }
-        has_disp = 1;
+        /* A displacement of nothing is none: `fldl 0(%r8)` had a byte
+         * of zero for it.  (The frame pointer and %r13 have no form
+         * without one, and are given it below.) */
+        has_disp = disp != 0 || expr_has_symbol(mem->disp);
     }
 
     breg = (unsigned)base & 15u;
@@ -11402,8 +11409,15 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         in.operand_size_override = (in.default_bits != 16u);
     } else if (suffix == 'l') {
         in.operand_size_override = (in.default_bits == 16u);
-    } else if (suffix == 'q' && !streq_ci(mnbuf, "enter")) {
-        /* (enter's frame is 64-bit in 64-bit code with no prefix to say so.) */
+    } else if (suffix == 'q' && !streq_ci(mnbuf, "enter") &&
+               !(cfg->is_64 &&
+                 (streq_ci(mnbuf, "pushf") || streq_ci(mnbuf, "popf") || streq_ci(mnbuf, "leave") ||
+                  streq_ci(mnbuf, "call") || streq_ci(mnbuf, "jmp") || streq_ci(mnbuf, "lgdt") ||
+                  streq_ci(mnbuf, "lidt") || streq_ci(mnbuf, "sgdt") || streq_ci(mnbuf, "sidt")))) {
+        /* (Those are of 64 bits in 64-bit code with no prefix to say
+         * so: `pushfq`, `leaveq`, `callq *%rax` had a REX.W that did
+         * nothing but take a byte.  In 32-bit code a q is what they
+         * are refused for.) */
         in.rex_w = 1;
     }
     /* The instructions on a 16-bit selector in memory are 16 bits with
@@ -12211,10 +12225,85 @@ static int x86_addr16_prefix(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsig
     return 0;
 }
 
+/* Whether the segment written on an address is the one it has with
+ * none written. */
+static int x86_segment_is_the_default(const as_mem_operand_t *mem) {
+    static const char *const of_stack[] = {"ebp", "esp", "rbp", "rsp", "bp", "sp"};
+    const char *seg = mem->segment_reg;
+    const char *base = mem->base_reg;
+    int stack = 0;
+    size_t i;
+
+    if (seg == NULL) {
+        return 0;
+    }
+    seg += seg[0] == '%';
+    if (base != NULL) {
+        base += base[0] == '%';
+        for (i = 0; i < sizeof(of_stack) / sizeof(of_stack[0]); ++i) {
+            if (streq_ci(base, of_stack[i])) {
+                stack = 1;
+            }
+        }
+    }
+    return streq_ci(seg, stack ? "ss" : "ds");
+}
+
+/* Whether the address is the one a string instruction stores or
+ * compares through: (%edi), in whichever size. */
+static int x86_is_string_destination(const char *mn, const as_mem_operand_t *mem) {
+    static const char *const names[] = {"movs", "cmps", "scas", "stos", "ins"};
+    const char *base = mem->base_reg;
+    size_t i;
+
+    if (mn == NULL || base == NULL) {
+        return 0;
+    }
+    base += base[0] == '%';
+    if (!streq_ci(base, "di") && !streq_ci(base, "edi") && !streq_ci(base, "rdi")) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        size_t n = strlen(names[i]);
+
+        if (strncasecmp(mn, names[i], n) == 0 && (mn[n] == '\0' || (strchr("bwlqdBWLQD", mn[n]) != NULL && mn[n + 1] == '\0'))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
     size_t i;
+
+    /*
+     * A segment that is the one the address has anyway -- %ss with the
+     * frame or stack pointer for its base, %ds with anything else -- is
+     * no prefix: `movl %ds:sym, %ecx` had a 3E that said nothing.
+     */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.operand_count <= 4) {
+        as_operand_t ops[4];
+        int dropped = 0;
+
+        for (i = 0; i < st->u.instr.operand_count; ++i) {
+            ops[i] = st->u.instr.operands[i];
+            /* (Not where a string instruction stores: that is through
+             * %es and nothing else, and %ds written there is refused
+             * for what it is.) */
+            if (ops[i].kind == AS_OPERAND_MEMORY && x86_segment_is_the_default(&ops[i].u.mem) &&
+                !x86_is_string_destination(st->u.instr.mnemonic, &ops[i].u.mem)) {
+                ops[i].u.mem.segment_reg = NULL;
+                dropped = 1;
+            }
+        }
+        if (dropped) {
+            bare = *st;
+            bare.u.instr.operands = ops;
+            return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
+        }
+    }
 
     /*
      * `andnl`, `bzhiq`, `shlxl`: the instructions of BMI are found by
@@ -13733,17 +13822,31 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
     }
     *code_len = 0;
     if (streq_ci(mnbuf, "call")) {
-        long long disp32 = abs_target - ((long long)sec_off + 5);
-        if (disp32 < INT32_MIN || disp32 > INT32_MAX || code_cap < 5) {
+        /* A call of 16 bits -- `callw`, or `call` in 16-bit code -- has
+         * two bytes for its distance and pushes two; where that is not
+         * the mode's own size the prefix says so.  Each was the 32-bit
+         * call whatever was written. */
+        int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
+        int op16 = suffix == 'w' || (code16 && suffix != 'l');
+        size_t n = 0;
+        size_t len = (size_t)(op16 != code16) + 1u + (op16 ? 2u : 4u);
+        long long disp = abs_target - ((long long)sec_off + (long long)len);
+
+        if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
             snprintf(encerr, encerr_sz, "call target out of range");
             return -1;
         }
-        code[0] = 0xe8;
-        code[1] = (unsigned char)((uint32_t)disp32 & 0xffu);
-        code[2] = (unsigned char)(((uint32_t)disp32 >> 8) & 0xffu);
-        code[3] = (unsigned char)(((uint32_t)disp32 >> 16) & 0xffu);
-        code[4] = (unsigned char)(((uint32_t)disp32 >> 24) & 0xffu);
-        *code_len = 5;
+        if (op16 != code16) {
+            code[n++] = 0x66;
+        }
+        code[n++] = 0xe8;
+        code[n++] = (unsigned char)((uint32_t)disp & 0xffu);
+        code[n++] = (unsigned char)(((uint32_t)disp >> 8) & 0xffu);
+        if (!op16) {
+            code[n++] = (unsigned char)(((uint32_t)disp >> 16) & 0xffu);
+            code[n++] = (unsigned char)(((uint32_t)disp >> 24) & 0xffu);
+        }
+        *code_len = n;
         return 0;
     }
     if (streq_ci(mnbuf, "jmp")) {
@@ -18529,6 +18632,15 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
         *width = 2;
         return;
     }
+    /* `callw sym` in 32-bit code: the same two bytes behind a prefix.
+     * It was given four, which there are not, and they were written
+     * from the instruction's first byte: the prefix and the opcode
+     * were zeros. */
+    if (machine == EM_386 && code_len == 4 && code[0] == 0x66 && (code[1] == 0xe8 || code[1] == 0xe9)) {
+        *type = R_386_PC16;
+        *width = 2;
+        return;
+    }
 
     if (machine == EM_386 && code_len == 4 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80) {
         *type = R_386_PC16;
@@ -19619,6 +19731,16 @@ static int emit_relocations(emit_ctx_t *ctx) {
                      */
                     reloc_width = code_len - 2 - disp_field_off;
                     t = reloc_width == 2 ? R_386_16 : R_386_32;
+                    have_disp_field = 1;
+                } else if (code_len == 4 && code[0] == 0xc8 && op == &st->u.instr.operands[0] &&
+                           op->kind == AS_OPERAND_IMMEDIATE) {
+                    /* `enter $sym, $1`: the frame's size is the two
+                     * bytes behind the opcode, with one more behind
+                     * them.  The relocation was of four, from the
+                     * opcode on. */
+                    disp_field_off = 1;
+                    reloc_width = 2;
+                    t = machine == EM_X86_64 ? R_X86_64_16 : R_386_16;
                     have_disp_field = 1;
                 }
                 /*
