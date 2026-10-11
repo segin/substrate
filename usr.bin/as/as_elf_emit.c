@@ -10851,6 +10851,9 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         (strcmp(mn, "lgdtl") == 0 || strcmp(mn, "lgdtw") == 0 || strcmp(mn, "lidtl") == 0 || strcmp(mn, "lidtw") == 0 ||
          strcmp(mn, "sgdtl") == 0 || strcmp(mn, "sgdtw") == 0 || strcmp(mn, "sidtl") == 0 || strcmp(mn, "sidtw") == 0 ||
          strcmp(mn, "insq") == 0 || strcmp(mn, "outsq") == 0 || strcmp(mn, "ljmpq") == 0 || strcmp(mn, "lcallq") == 0 ||
+         /* (A frame of 32 bits is none of 64-bit code: `enterl $1, $2`
+          * was taken, and made the frame `enterq` makes.) */
+         strcmp(mn, "enterl") == 0 ||
          (insn->operand_count == 0 &&
           (strcmp(mn, "into") == 0 || strcmp(mn, "salc") == 0 || strcmp(mn, "pushfl") == 0 ||
            strcmp(mn, "popfl") == 0 || strcmp(mn, "leavel") == 0 || strcmp(mn, "retl") == 0)))) {

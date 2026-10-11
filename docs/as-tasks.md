@@ -1088,9 +1088,10 @@ empty for the family named.
   Not worked as a task; noted 2026-10-11 that `test_i8086_elf_object.sh` and `test_i8086_realmode_core.sh`, which were expected to fail for this, pass since calls by a size other than the mode's were mended under 186.  The corpus and the demonstration this asks for have not been run.
 - [ ] **AS-T-348** When `.code16gcc` is assembled, the assembler shall encode stack and branch instructions with 32-bit operand size, as GNU does.
   Trace: AS-X86-030.  Verify: T — `call`, `ret`, `push`, `pop`, `enter`, `leave` under `.code16gcc`.  After: 347.
-- [ ] **AS-T-349** If an instruction, register or suffix valid only in 64-bit mode is written in 16- or 32-bit mode, then the assembler shall refuse it.
+- [x] **AS-T-349** If an instruction, register or suffix valid only in 64-bit mode is written in 16- or 32-bit mode, then the assembler shall refuse it.
   Trace: AS-X86-030, AS-OBJ-013.  Verify: T — `pushq %rax`, `incq`, `retq`, `leaveq`, `callq`, `jmpq *%eax`, `stosq`, `rex movb`, `in $0x60,%rax`, `addq $1,%rax`, `movq %rax,%rbx`, `%r8`, `%sil`, `syscall` is accepted, `swapgs` refused.  After: 161.
-- [ ] **AS-T-350** If an instruction or operand size not valid in 64-bit mode is written in 64-bit mode, then the assembler shall refuse it.
+  Done, with 350, 2026-10-11: each had been mended under another task as it was met (171, 186, the string and stack instructions), and nothing held the two lists together.  `test_mode_only.sh` does, 72 cases against GNU as 2.46's verdict, which GNU passes; the one found wrong by it was `enterl $1,$2`, taken in 64-bit code for the frame `enterq` makes.  Left as it was: `mov %cr8,%eax` in 32-bit code, which GNU writes as a locked `mov %cr0` and this refuses.
+- [x] **AS-T-350** If an instruction or operand size not valid in 64-bit mode is written in 64-bit mode, then the assembler shall refuse it.
   Trace: AS-X86-030.  Verify: T — `push %eax`, `pop %ebx`, `into`, `salc`, `pushfl`, `popfl`, `retl`, `jmp *%eax`, `calll *(%rax)`, `pusha`, `aaa`, `daa`, `bound`, `les`, `lds`, `inc %eax` uses `FF /0` not `40`.  After: 161.
 
 ## K. Documents and dead code
@@ -1283,5 +1284,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 291 done, 60 open.  Numbers run to 400, with gaps left between
+351 tasks: 293 done, 58 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
