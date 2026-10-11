@@ -2729,10 +2729,13 @@ elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol
     struct elf_reloc *rel;
     elf_err_t err;
 
-    if (section == NULL || section->obj == NULL || symbol == NULL) {
+    /* No symbol is a relocation against the absolute section, symbol
+     * number 0: what `jmp 0x1234` needs, and what an object that is read
+     * may already hold. */
+    if (section == NULL || section->obj == NULL) {
         return ELF_ERR_STATE;
     }
-    if (section->obj != symbol->obj) {
+    if (symbol != NULL && section->obj != symbol->obj) {
         return ELF_ERR_STATE;
     }
     if (section->obj->readonly || section->obj->finalized) {

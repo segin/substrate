@@ -1065,6 +1065,17 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 local_shndx = (uint16_t)(dst_sym_sec->index + 1);
             }
 
+            /*
+             * The null symbol, number 0 of a table that was read: the
+             * relocation names no symbol, which is the address 0 and not
+             * a symbol nobody defined.  `jmp 0x1234` is assembled so.
+             */
+            if (r->symbol->index == 0 && r->symbol->shndx == SHN_UNDEF &&
+                (r->symbol->name == NULL || r->symbol->name[0] == '\0')) {
+                local_value = 0;
+                local_shndx = SHN_ABS;
+            }
+
             if (snprintf(local_name, sizeof(local_name), "__elfobj_local_%zu_%u_%zu",
                          input_index, (unsigned)r->symbol->index, i) < 0) {
                 return ELF_ERR_STATE;

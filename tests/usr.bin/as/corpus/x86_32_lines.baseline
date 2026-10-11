@@ -216,10 +216,6 @@ jmp *%al
 jmp *$1
 call sym
 call sym-4
-call 0x1000
-jmp 0x1000
-jmp 0
-je 0x1000
 callw sym
 jmpw sym
 calll sym

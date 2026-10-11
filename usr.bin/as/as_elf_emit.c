@@ -17296,6 +17296,48 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 }
                 rel_count++;
             }
+            /*
+             * A branch to a number, `jmp 0x1234`: the number is an
+             * address, and where this section will be is not known, so
+             * the distance is the linker's to work out -- a PC-relative
+             * relocation with no symbol.  It was encoded as the distance
+             * from here with the section at address 0.
+             */
+            if (rel_count == 0 && (machine == EM_386 || machine == EM_X86_64) && track.x86_code_bits != 16u &&
+                as_parse_is_direct_branch(st) && is_rel_mnemonic(st->u.instr.mnemonic) &&
+                st->u.instr.operands[0].u.expr != NULL) {
+                long long target;
+                size_t width = 0;
+
+                if (code_len == 2 && (code[0] == 0xeb || (code[0] >= 0x70 && code[0] <= 0x7f) ||
+                                      (code[0] >= 0xe0 && code[0] <= 0xe3))) {
+                    width = 1;
+                } else if (code_len == 3 && code[0] == 0x67 && code[1] >= 0xe0 && code[1] <= 0xe3) {
+                    /* jcxz in 32-bit code, jecxz in 64-bit: the count
+                     * register of the other size. */
+                    width = 1;
+                } else if ((code_len == 5 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
+                           (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
+                    width = 4;
+                }
+                if (width != 0 && eval_expr_const(st->u.instr.operands[0].u.expr, &target) == 0) {
+                    int64_t addend = (int64_t)target - (int64_t)width;
+                    uint32_t type = machine == EM_X86_64 ? (width == 1 ? R_X86_64_PC8 : R_X86_64_PC32)
+                                                         : (width == 1 ? R_386_PC8 : R_386_PC32);
+
+                    write_u64_le_at(code + code_len - width,
+                                    machine_relocation_addend_is_in_place(machine) ? (uint64_t)addend : 0,
+                                    (unsigned)width);
+                    if (cur_sec == NULL ||
+                        elf_add_relocation(cur_sec, cur_off + code_len - width, NULL, type, addend) != ELF_OK) {
+                        set_err(ctx, "%s:%u: a relocation for a branch to an address could not be made",
+                                st->file != NULL ? st->file : "<input>", st->line);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                }
+            }
             if (bytebuf_append(&sb->buf, code, code_len) != 0) {
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);

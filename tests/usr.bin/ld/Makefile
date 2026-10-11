@@ -10,5 +10,6 @@ run:
 	./test_output.sh
 	./test_tls.sh
 	./test_got.sh
+	./test_absolute_reloc.sh
 
 clean:

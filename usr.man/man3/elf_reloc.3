@@ -63,6 +63,19 @@
 Relocations can be added to sections, enumerated at section/object scope,
 and evaluated through the registered backend for a target machine.
 .Pp
+The
+.Fa symbol
+given to
+.Fn elf_add_relocation
+may be
+.Dv NULL :
+the relocation is then against the absolute section, symbol number 0,
+as for a branch to a numeric address.
+.Fn elf_reloc_symbol
+returns
+.Dv NULL
+for such a relocation, whether it was added or read from a file.
+.Pp
 .Fn elf_apply_relocation
 evaluates the exact relocation record.
 .Fn elf_apply_relocation_value
