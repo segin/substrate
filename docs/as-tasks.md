@@ -1114,8 +1114,9 @@ empty for the family named.
   Trace: AS-DOC-002.  Verify: I — a line-by-line reconciliation recorded in the commit.
 - [ ] **AS-T-358** `as(1)` (`usr.man/man1/as.1`) shall describe every option, the directives implemented and the limits, and shall pass `mandoc -T lint`.
   Trace: AS-DOC-002.  Verify: I; T — `mandoc -T lint`.
-- [ ] **AS-T-359** `TASKLIST_AS.md` shall be closed out: each of its 24 open items either ticked, moved here with a number, or struck as obsolete.
+- [x] **AS-T-359** `TASKLIST_AS.md` shall be closed out: each of its 24 open items either ticked, moved here with a number, or struck as obsolete.
   Trace: AS-TST-002.  Verify: I.
+  Done, 2026-10-11; the list says at its head that it is closed and where the work is.  Of the 24: ten ticked, as done -- the rollout test in the suite and passing, the three of ARM and AArch64 (370 to 387), the corpora held to GNU, both Intel round trips, the i8086 corpus, and the list's own end; four moved -- the specification to 357, as(1) to 358, the mnemonic ladders of `as_elf_emit.c` to 161 and 164; ten struck, each with its reason beside it -- seven that are rules of working and no work (a clean rebuild, which checks to run, one seam to a commit, a test with every change, no junk in the repository), and three about builds for the host that nothing depends on now that the suite builds its own.  `ARCHITECTURE.md` names `docs/as-tasks.md` where it named the old list.
 - [ ] **AS-T-360** The assembler's sources shall hold no function that nothing calls.
   Trace: AS-FE-052, AS-DES-003, AS-DES-004.  Verify: A — built with `-ffunction-sections -Wl,--gc-sections -Wl,--print-gc-sections`, no function of `usr.bin/as` is discarded; the dead code named in AS-DES-003 and AS-DES-004 is gone.
 
@@ -1299,5 +1300,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 320 done, 31 open.  Numbers run to 400, with gaps left between
+351 tasks: 321 done, 30 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

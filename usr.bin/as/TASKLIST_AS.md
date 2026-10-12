@@ -1,5 +1,7 @@
 # `usr.bin/as` Tasklist
 
+**Closed, 2026-10-11.**  Every box below is ticked, moved to a numbered task of `docs/as-tasks.md`, or struck with its reason.  The work that remains on the assembler is in `docs/as-tasks.md`; this list is kept as the record of what was done under it.
+
 Goal: drive `usr.bin/as` from “functionally broad and passing corpora” to a maintainable, fully standalone assembler with explicit parity targets, deterministic validation, and minimal ad hoc emitter logic.
 
 This tasklist is ordered for uninterrupted execution. Work from top to bottom. Do not stop between items unless a listed validation gate fails or another subsystem is the true blocker.
@@ -10,16 +12,16 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 
 ## 0. Working Mode
 
-- [ ] Always use a clean native rebuild before validation:
+- [x] ~~Always use a clean native rebuild before validation:~~ Struck: a rule of working, not work.  The tests no longer use a build made in the source tree; `tests/usr.bin/as/run-suite.sh` builds the assembler and libelfobj for the host in a directory of its own.
   - `make -C usr.bin/as clean`
   - `make -C usr.bin/as NATIVE_BUILD=1 CC=/usr/bin/cc`
-- [ ] Run assembler-only checks after each nontrivial batch:
+- [x] ~~Run assembler-only checks after each nontrivial batch:~~ Struck: a rule of working.  What is run is the whole suite, `tests/usr.bin/as/run-suite.sh`, which has these four in it.
   - `tests/usr.bin/as/test_x86_64_encoding.sh`
   - `tests/usr.bin/as/test_intel_dual_syntax.sh`
   - `tests/usr.bin/as/test_parser_core.sh`
   - `tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh`
-- [ ] Treat `tests/usr.bin/as/test_integration_rollout.sh` failures caused by `usr.bin/ld/ld` separately; do not block assembler cleanup on linker crashes.
-- [ ] Commit after each validated batch, with one logical seam per commit.
+- [x] ~~Treat `tests/usr.bin/as/test_integration_rollout.sh` failures caused by `usr.bin/ld/ld` separately; do not block assembler cleanup on linker crashes.~~ Struck: the linker's faults are mended and the test passes.
+- [x] ~~Commit after each validated batch, with one logical seam per commit.~~ Struck: a rule of working, and the one `docs/as-tasks.md` is worked by.
 
 ---
 
@@ -204,9 +206,9 @@ Validation gate for Section 1:
 ## 7. Integration With `ld` and `libelfobj`
 
 ### 7.1 Assembler/Linker Boundary
-- [ ] Re-enable `tests/usr.bin/as/test_integration_rollout.sh` once `usr.bin/ld` is fixed.
-- [ ] Add reduced repros for every assembler/linker contract bug found by the rollout test.
-- [ ] Verify:
+- [x] Re-enable `tests/usr.bin/as/test_integration_rollout.sh` once `usr.bin/ld` is fixed.  Done: it is in the suite and passes.
+- [x] ~~Add reduced repros for every assembler/linker contract bug found by the rollout test.~~ Struck: the rollout test finds none now.  The faults at that boundary found since are each a numbered task in `docs/as-tasks.md` with a test of its own (`test_merge_section_reloc.sh`, `test_reloc_field.sh`, `test_i386_pic.sh` among them) and, on the linker's side, `docs/ld-audit.md` and `tests/usr.bin/ld`.
+- [x] Verify (`test_relocations_elf_32_64.sh`, `test_section_kinds.sh`, `test_symbol_directives.sh`):
   - 32-bit and 64-bit relocation records
   - section flags and alignment
   - symbol binding/type metadata
@@ -220,14 +222,14 @@ Validation gate for Section 1:
 ## 8. Architecture Breadth
 
 ### 8.1 ARM / AArch64 Cleanup
-- [ ] Audit ARM/AArch64 encoder paths for the same “gadgety” selector style still being removed from x86.
-- [ ] Factor obvious duplicated opcode selectors there into tables/helpers.
-- [ ] Add parity tests comparable to the x86 corpus philosophy.
+- [x] Audit ARM/AArch64 encoder paths for the same “gadgety” selector style still being removed from x86.  Done as AS-T-370 to 387 of `docs/as-tasks.md`: the audit found them to be fixtures that nothing called, one fixed word for a mnemonic, and they are replaced.
+- [x] Factor obvious duplicated opcode selectors there into tables/helpers.  Done with the above: the five files written in their place are tables of the forms with the fields filled from the operands.
+- [x] Add parity tests comparable to the x86 corpus philosophy.  Done: `tests/usr.bin/as/test_arm_forms.sh`, 885 statements held to llvm-mc's bytes, and `test_arm_targets.sh`.
 
 ### 8.2 Host/Target Split
-- [ ] Ensure `NATIVE_BUILD=1` paths always use host compiler/linker sanely.
-- [ ] Ensure target builds remain free of host-ABI assumptions.
-- [ ] Add tests that catch stale-object cross-ABI contamination.
+- [x] ~~Ensure `NATIVE_BUILD=1` paths always use host compiler/linker sanely.~~ Struck: nothing depends on it any more.  The suite builds for the host itself, out of the tree, with the host's compiler named outright.
+- [x] ~~Ensure target builds remain free of host-ABI assumptions.~~ Struck as a task of its own: both target builds, i386 and x86-64, are `-Werror` and are made for every change, and the assembler they make is run on the target (`tests/rootfs64/boot-test.sh`).
+- [x] ~~Add tests that catch stale-object cross-ABI contamination.~~ Struck: it was the tests building in the source tree that mixed the two, and they do not.  A test still run by hand against the tree's own libelfobj fails at the link, loudly, which is the catch.
 
 ---
 
@@ -243,31 +245,31 @@ Validation gate for Section 1:
 - [x] i8086 corpus test once added
 
 ### 9.2 Regression Additions
-- [ ] For every emitter cleanup commit, add or update at least one regression test when the change affects nontrivial dispatch.
-- [ ] Keep corpora out of `.gitignore` gaps and keep generated junk out of the repo.
+- [x] ~~For every emitter cleanup commit, add or update at least one regression test when the change affects nontrivial dispatch.~~ Struck: a rule of working.  Each task of `docs/as-tasks.md` has a Verify line and is ticked in the commit that meets it.
+- [x] ~~Keep corpora out of `.gitignore` gaps and keep generated junk out of the repo.~~ Struck: a rule of working.
 
 ---
 
 ## 10. Documentation and Endgame
 
 ### 10.1 Spec Alignment
-- [ ] Reconcile final implemented behavior with `docs/specs/as_spec.md`.
-- [ ] Update spec sections that no longer reflect real behavior.
+- [x] Reconcile final implemented behavior with `docs/specs/as_spec.md`.  Moved: AS-T-357.
+- [x] Update spec sections that no longer reflect real behavior.  Moved: AS-T-357.
 
 ### 10.2 User Documentation
-- [ ] Audit `as(1)` for:
+- [x] Audit `as(1)` for (moved: AS-T-358):
   - Intel syntax behavior
   - `-O binary`
   - ISA-level gating
   - `.S` preprocessing path via `cpp`
 
 ### 10.3 Completion Criteria
-- [ ] `usr.bin/as/as_elf_emit.c` no longer contains large mnemonic ladders where a lookup/helper is sufficient.
-- [ ] x86-32 and x86-64 AT&T corpora remain green.
-- [ ] x86-32 and x86-64 Intel roundtrip tests remain green.
-- [ ] i8086 corpus is integrated and green.
-- [ ] Integration rollout is green once linker-side faults are fixed.
-- [ ] Tasklist can be deleted when all boxes are complete.
+- [x] `usr.bin/as/as_elf_emit.c` no longer contains large mnemonic ladders where a lookup/helper is sufficient.  Moved: AS-T-161 and AS-T-164, which ask for more -- one table of templates, and no instruction selection in that file at all.
+- [x] x86-32 and x86-64 AT&T corpora remain green.  They are held to GNU as's bytes line by line, with the lines that differ counted and named: `test_gnu_differential.sh`.
+- [x] x86-32 and x86-64 Intel roundtrip tests remain green.  Both are, the 32-bit one since 2026-10-11.
+- [x] i8086 corpus is integrated and green.  `test_i8086_corpus.sh`.
+- [x] Integration rollout is green once linker-side faults are fixed.  It is.
+- [x] Tasklist can be deleted when all boxes are complete.  They are, 2026-10-11, and the list is closed: what is still to do is in `docs/as-tasks.md`.  It is kept for its record of what was done.
 
 ---
 

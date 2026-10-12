@@ -22,7 +22,7 @@ usr.bin/as/
 ├── as_a64.c                 # AArch64 encoder
 ├── as_a64_simd.c            # AArch64: floats and vectors
 ├── Makefile                 # Native/target build wiring, alias links, elfobj dependency
-└── TASKLIST_AS.md           # Forward backlog for parser/encoder parity work
+└── TASKLIST_AS.md           # The first task list, closed; what is to do is docs/as-tasks.md
 
 tests/usr.bin/as/
 ├── test_*_core.c/.sh        # Unit and driver-facing core tests by subsystem
@@ -140,7 +140,7 @@ Purpose: Feed the native linker and preserve relocation/symbol information neede
 
 `cc`: The compiler driver invokes `as` with `--from-cc` and ABI mode flags so C compilation and direct assembly share one assembler implementation.
 
-Specifications: Behavioral requirements live in `docs/specs/as_spec.md`; remaining backlog and parity work live in `TASKLIST_AS.md`.
+Specifications: Behavioral requirements live in `docs/specs/as_spec.md`; what remains to do is `docs/as-tasks.md`, each task with the test or inspection that closes it (`TASKLIST_AS.md`, the list before it, is closed).
 
 Tests: Architecture-facing regression surfaces live in `tests/usr.bin/as/`.
 
@@ -172,7 +172,7 @@ Integration role: The assembler is also exercised indirectly through compiler an
 
 ## 9. Future Considerations / Roadmap
 
-Parity growth: `TASKLIST_AS.md` continues to track ISA feature expansion and compatibility work.
+Parity growth: `docs/as-tasks.md` tracks what is open, among it the one table of templates for x86 (AS-T-161) that the per-extension files give way to.
 
 Cross-ISA maintenance: The shared parser/front-end must remain architecture-neutral enough to keep x86, ARM, and AArch64 backends aligned without backend-specific parser forks.
 
