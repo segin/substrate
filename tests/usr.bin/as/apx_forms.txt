@@ -17123,3 +17123,23 @@
 64	refused	kmovw %r16,%k1
 64	62f17c0893c1	{evex} kmovw %k1,%eax
 64	62f1fc089008	{evex} kmovq (%rax),%k1
+64	c4e2716cda	tcmmimfp16ps %tmm1, %tmm2, %tmm3
+64	c4e2706cda	tcmmrlfp16ps %tmm1, %tmm2, %tmm3
+64	c4e2725cda	tdpbf16ps %tmm1, %tmm2, %tmm3
+64	c4e2735cda	tdpfp16ps %tmm1, %tmm2, %tmm3
+64	c4e2425ce8	tdpbf16ps %tmm7, %tmm0, %tmm5
+64	refused	tdpbf16ps %tmm1, %tmm1, %tmm3
+64	refused	tdpbf16ps (%rax), %tmm2, %tmm3
+64	d500a10100000000000000	jmpabs $1
+32	refused	tcmmimfp16ps %tmm1, %tmm2, %tmm3
+32	refused	tcmmrlfp16ps %tmm1, %tmm2, %tmm3
+32	refused	tdpbf16ps %tmm1, %tmm2, %tmm3
+32	refused	tdpfp16ps %tmm1, %tmm2, %tmm3
+32	refused	tdpbf16ps %tmm7, %tmm0, %tmm5
+32	refused	tdpbf16ps %tmm1, %tmm1, %tmm3
+32	refused	tdpbf16ps (%rax), %tmm2, %tmm3
+32	refused	jmpabs $1
+64	refused	tdpbssd %tmm1, %tmm1, %tmm3
+64	refused	tdpbssd %tmm1, %tmm2, %tmm1
+64	refused	tdpbssd %tmm1, %tmm2, %tmm2
+64	c4e2735eda	tdpbssd %tmm1, %tmm2, %tmm3

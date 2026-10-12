@@ -13167,8 +13167,14 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 /* (No instruction of that name: the one that says so,
                  * or the table of the rest that has the name without
                  * the letter and not with.) */
-                if (rc == 0 || !((strstr(encerr, "unsupported") != NULL && strstr(encerr, "mnemonic") != NULL) ||
-                                 (as_x86_vec_knows(st->u.instr.mnemonic) && !as_x86_vec_knows(name)))) {
+                if (rc == 0 || as_x86_vec_has_rows(name) ||
+                    !((strstr(encerr, "unsupported") != NULL && strstr(encerr, "mnemonic") != NULL) ||
+                      (as_x86_vec_knows(st->u.instr.mnemonic) && !as_x86_vec_knows(name)))) {
+                    /* (A name the table has -- `ccmpzb` -- is an
+                     * instruction, whoever says it is none.) */
+                    if (rc != 0 && strstr(encerr, "unsupported") != NULL) {
+                        snprintf(encerr, encerr_sz, "'%s' has no operand of the size written", st->u.instr.mnemonic);
+                    }
                     return rc;
                 }
                 encerr[0] = '\0';

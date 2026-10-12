@@ -221,6 +221,12 @@ int as_x86_vec_knows(const char *mnemonic) {
     return alias_of(mnemonic, base, sizeof(base), &imm) == 0 && find_rows(base, &first) == 0;
 }
 
+int as_x86_vec_has_rows(const char *mnemonic) {
+    size_t first;
+
+    return mnemonic != NULL && find_rows(mnemonic, &first) == 0;
+}
+
 int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int high) {
     size_t first;
     size_t i;
@@ -1110,6 +1116,13 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
         if ((t->flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0 &&
             (rq->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) == 0 &&
             !((t->flags & AS_VEC_F_PROMOHI) != 0 && has_high_general(rq))) {
+            continue;
+        }
+        /* (Three tiles are three different ones.) */
+        if (strcmp(t->ops, "ttt") == 0 &&
+            (rq->ops[0].u.reg == rq->ops[1].u.reg || rq->ops[0].u.reg == rq->ops[2].u.reg ||
+             rq->ops[1].u.reg == rq->ops[2].u.reg)) {
+            why = "takes three tile registers, and no one of them twice";
             continue;
         }
         /* (`{dfv=}` is of the conditional compare and test.) */

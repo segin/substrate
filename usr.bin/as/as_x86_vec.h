@@ -172,6 +172,10 @@ int as_x86_vec_knows(const char *mnemonic);
  * only for those are not counted otherwise. */
 int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int high);
 
+/* Whether the table has any row of the name (in lower case), APX's or
+ * not: it is the name of something. */
+int as_x86_vec_has_rows(const char *mnemonic);
+
 /*
  * 1 with the instruction in out[0 .. *out_len), 0 if the mnemonic is
  * no row's, -1 with the reason in errbuf if it is and the statement is

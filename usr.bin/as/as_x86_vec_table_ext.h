@@ -176,6 +176,12 @@
     VX("tdpbf8ps", P0, M5, 0xfd, W0, L128, "ttt", "vmr", O64),
     VX("tdpbhf8ps", PF2, M5, 0xfd, W0, L128, "ttt", "vmr", O64),
     VX("tdpbssd", PF2, M2, 0x5e, W0, L128, "ttt", "vmr", O64),
+    /* (AMX of half precision and of complex numbers, which the sweep
+     * that had no three tile registers did not find.) */
+    VX("tdpbf16ps", PF3, M2, 0x5c, W0, L128, "ttt", "vmr", O64),
+    VX("tdpfp16ps", PF2, M2, 0x5c, W0, L128, "ttt", "vmr", O64),
+    VX("tcmmimfp16ps", P66, M2, 0x6c, W0, L128, "ttt", "vmr", O64),
+    VX("tcmmrlfp16ps", P0, M2, 0x6c, W0, L128, "ttt", "vmr", O64),
     VX("tdpbsud", PF3, M2, 0x5e, W0, L128, "ttt", "vmr", O64),
     VX("tdpbusd", P66, M2, 0x5e, W0, L128, "ttt", "vmr", O64),
     VX("tdpbuud", P0, M2, 0x5e, W0, L128, "ttt", "vmr", O64),

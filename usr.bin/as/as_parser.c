@@ -1990,7 +1990,9 @@ static int intel_statement_to_att(as_instruction_t *in) {
     /* (jmp and call, and with a letter for the size: jmpw, callq.) */
     int goes_to = (starts_ci(mn, "jmp") && letters <= 4) || (starts_ci(mn, "call") && letters <= 5) ||
                   streq_ci(mn, "ljmp") || streq_ci(mn, "lcall");
-    int takes_target = goes_to || mn[0] == 'j' || mn[0] == 'J' || starts_ci(mn, "loop") || streq_ci(mn, "xbegin");
+    /* (`jmpabs`, of APX, is given a number and not a place.) */
+    int takes_target = !streq_ci(mn, "jmpabs") &&
+                       (goes_to || mn[0] == 'j' || mn[0] == 'J' || starts_ci(mn, "loop") || streq_ci(mn, "xbegin"));
     /* (All but these have their operands the other way about; and a
      * far jump or call, whose segment is first either way.) */
     int as_written = starts_ci(mn, "bound") || starts_ci(mn, "enter") || starts_ci(mn, "invlpg") ||
