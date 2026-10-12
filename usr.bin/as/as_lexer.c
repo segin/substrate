@@ -856,6 +856,38 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             drop_token(line_tokens, head + 1);
             t = &line_tokens->items[head];
         }
+        /* And behind a prefix: `rep xstore-rng` was `xstore` with an
+         * operand `-rng`.  Only these names, an operand after another
+         * mnemonic being free to be `a-b`. */
+        if (t->kind == AS_TOK_MNEMONIC && head + 3 < line_tokens->count) {
+            as_token_t *name = &line_tokens->items[head + 1];
+            const as_token_t *hyphen = &line_tokens->items[head + 2];
+            const as_token_t *rest = &line_tokens->items[head + 3];
+
+            if (name->kind == AS_TOK_IDENTIFIER && strlen(name->text) == 6 && tolower((unsigned char)name->text[0]) == 'x' &&
+                ((tolower((unsigned char)name->text[1]) == 's' && tolower((unsigned char)name->text[2]) == 't' &&
+                  tolower((unsigned char)name->text[3]) == 'o' && tolower((unsigned char)name->text[4]) == 'r' &&
+                  tolower((unsigned char)name->text[5]) == 'e') ||
+                 (tolower((unsigned char)name->text[1]) == 'c' && tolower((unsigned char)name->text[2]) == 'r' &&
+                  tolower((unsigned char)name->text[3]) == 'y' && tolower((unsigned char)name->text[4]) == 'p' &&
+                  tolower((unsigned char)name->text[5]) == 't')) &&
+                hyphen->kind == AS_TOK_OPERATOR && strcmp(hyphen->text, "-") == 0 && !hyphen->space_before &&
+                rest->kind == AS_TOK_IDENTIFIER && !rest->space_before) {
+                size_t len = strlen(name->text);
+                char *joined = (char *)realloc(name->text, len + strlen(rest->text) + 2);
+
+                if (joined == NULL) {
+                    set_err(ctx, "%s:%u: out of memory", file, line_no);
+                    return -1;
+                }
+                joined[len] = '-';
+                memcpy(joined + len + 1, rest->text, strlen(rest->text) + 1);
+                name->text = joined;
+                drop_token(line_tokens, head + 3);
+                drop_token(line_tokens, head + 2);
+                t = &line_tokens->items[head];
+            }
+        }
     }
     for (i = head + (t->kind == AS_TOK_DIRECTIVE || t->kind == AS_TOK_MNEMONIC ? 1 : 0); i < line_tokens->count;
          ++i) {

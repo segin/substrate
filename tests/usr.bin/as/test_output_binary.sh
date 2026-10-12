@@ -25,9 +25,24 @@ cat > "$TMP/layout.s" <<'SRC'
 SRC
 
 "$AS" -64 -O binary -o "$TMP/layout.bin" "$TMP/layout.s"
-# Padding in a section of code is NOPs, as GNU as writes it: three bytes
-# in 64-bit mode are 90 66 90 from GNU as 2.47.  (This test wanted zeros.)
-[ "$(hex_of "$TMP/layout.bin")" = "90906690cc0000004142000044332211000000" ]
+# Padding in a section of code is NOPs, as GNU as writes it: behind a
+# byte of data one NOP of a byte, and the two left are 66 90.  (This
+# test wanted zeros.)  Each section then begins where its own alignment
+# says, and one the source aligns nothing in is aligned to a byte, as
+# it is in the object: this test wanted each at a multiple of four,
+# which was the alignment every section once had whatever was written.
+[ "$(hex_of "$TMP/layout.bin")" = "90906690cc414244332211000000" ]
+
+# A section the source does align begins where that says.
+cat > "$TMP/aligned.s" <<'SRC'
+.text
+.byte 0xcc
+.data
+.balign 4
+.long 0x11223344
+SRC
+"$AS" -64 -O binary -o "$TMP/aligned.bin" "$TMP/aligned.s"
+[ "$(hex_of "$TMP/aligned.bin")" = "cc00000044332211" ]
 
 cat > "$TMP/org.s" <<'SRC'
 .text

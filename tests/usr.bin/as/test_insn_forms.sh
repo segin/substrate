@@ -444,6 +444,50 @@ t "32 64" f30fa6c0       'rep montmul'
 t "32 64" f30fa7c0       'rep xstore'
 t "32 64" f30fa6c8       'repz xsha1'
 t "32 64" refused        'montmul %eax'
+# A name with a hyphen in it behind a prefix: `rep xstore-rng` was
+# `xstore` with an operand `-rng`.
+t "32 64" f30fa7c0       'rep xstore-rng'
+t "32 64" f30fa7c0       'repz xstore-rng'
+t "32 64" f30fa7c8       'rep xcrypt-ecb'
+t "32 64" refused        'repnz xstore-rng'
+
+# monitor and mwait, with the registers they are told things in
+# written: the first of monitor's holds an address, and the one that is
+# not the mode's own has 67.  Any 32-bit register was taken for the
+# first and %eax and %ecx for the other two -- `monitor %ebx,%eax,%ecx`
+# -- and the three that are right were refused.
+t "32 64" 0f01c8         'monitor'
+t "32"    0f01c8         'monitor %eax,%ecx,%edx'
+t "32"    670f01c8       'monitor %ax,%ecx,%edx'
+t "64"    670f01c8       'monitor %eax,%ecx,%edx'
+t "64"    0f01c8         'monitor %rax,%ecx,%edx'
+t "64"    0f01c8         'monitor %rax,%rcx,%rdx'
+t "32 64" refused        'monitor %ebx,%eax,%ecx'
+t "32 64" refused        'monitor %eax,%ecx'
+t "32"    refused        'monitor %eax,%rcx,%rdx'
+t "32 64" 0f01c9         'mwait %eax,%ecx'
+t "64"    0f01c9         'mwait %rax,%rcx'
+t "32"    refused        'mwait %rax,%rcx'
+t "32 64" refused        'mwait %ecx,%eax'
+
+# data16 before an instruction of general registers, or of none, that
+# has neither VEX nor EVEX: 66 is the operand size, and the first byte
+# but for an address size's.  All of them were refused.  Before an MMX
+# or SSE instruction 66 is part of the opcode or nothing, and is.
+t "32 64" 660f01d0       'data16 xgetbv'
+t "32 64" 660f01d1       'data16 xsetbv'
+t "32 64" 660f01c8       'data16 monitor'
+t "32 64" 660f77         'data16 emms'
+t "32 64" 66f30fb8d8     'data16 popcnt %eax,%ebx'
+t "32 64" 66f30fbcd8     'data16 tzcnt %eax,%ebx'
+t "32"    660f38f018     'data16 movbe (%eax),%ebx'
+t "64"    67660f38f018   'data16 movbe (%eax),%ebx'
+t "32"    660fc303       'data16 movnti %eax,(%ebx)'
+t "32"    660fc718       'data16 xrstors (%eax)'
+t "32 64" refused        'data16 popcnt %ax,%bx'
+t "32 64" refused        'data16 paddb %mm0,%mm1'
+t "32 64" refused        'data16 addps %xmm0,%xmm1'
+t "32 64" refused        'data16 andn %eax,%ebx,%ecx'
 
 # The user-mode wait instructions.  tpause and umwait take a 32-bit
 # register, and %edx and %eax may be written after it; umonitor takes

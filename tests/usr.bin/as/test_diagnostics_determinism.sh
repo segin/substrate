@@ -28,7 +28,7 @@ if "$AS" -32 -o "$TMP/diag_line.o" "$TMP/diag_line.s" >"$TMP/diag_line.out" 2>"$
     exit 1
 fi
 grep -Eq "diag_line\.s:3|diag_line\.s" "$TMP/diag_line.err"
-grep -Eqi "unknown x86 register|register" "$TMP/diag_line.err"
+grep -Eqi "does not take these operands|operand type mismatch|register" "$TMP/diag_line.err"
 
 # unsupported mnemonic diagnostics
 cat > "$TMP/bad_mnemonic.s" <<'SRC'
@@ -65,8 +65,8 @@ if "$AS" -32 -msyntax=intel -o "$TMP/intel_bad_form.o" "$TMP/intel_bad_form.s" >
 fi
 # Three operands are one more than any form of mov takes, and it is
 # said so, with the instruction, and where: the user's file and line.
-grep -q "att_bad_form\.s:3: 'mov' takes 2 operands at most" "$TMP/abf.err"
-grep -q "intel_bad_form\.s:4: 'mov' takes 2 operands at most" "$TMP/ibf.err"
+grep -q "att_bad_form\.s:3: Error: 'mov' takes 2 operands at most" "$TMP/abf.err"
+grep -q "intel_bad_form\.s:4: Error: 'mov' takes 2 operands at most" "$TMP/ibf.err"
 
 # ambiguous Intel memory-size diagnostics
 cat > "$TMP/ambiguous_intel.s" <<'SRC'
@@ -103,7 +103,7 @@ if "$AS" -64 -march=x86-64-v2 -o "$TMP/avx2_gate.o" "$TMP/avx2_gate.s" >"$TMP/av
     echo "expected AVX2 ISA-gate failure"
     exit 1
 fi
-grep -q "instruction requires -march=x86-64-v3 or higher: vpbroadcastd" "$TMP/avx2g.err"
+grep -q "'vpbroadcastd' requires -march=x86-64-v3 or higher" "$TMP/avx2g.err"
 
 cat > "$TMP/avx512_gate.s" <<'SRC'
 .text
@@ -114,7 +114,7 @@ if "$AS" -64 -march=x86-64-v3 -o "$TMP/avx512_gate.o" "$TMP/avx512_gate.s" >"$TM
     echo "expected AVX-512 ISA-gate failure"
     exit 1
 fi
-grep -q "instruction requires -march=x86-64-v4 or higher: vrcp14ps" "$TMP/avx512g.err"
+grep -q "'vrcp14ps' requires -march=x86-64-v4 or higher" "$TMP/avx512g.err"
 
 # include stack diagnostics via cpp include chain
 cat > "$TMP/inc/stack2.inc" <<'SRC'
@@ -242,9 +242,17 @@ while [ "$n" -lt 20 ]; do
     n=$((n + 1))
 done
 
-# structured internal error codes (opt-in)
+# structured internal error codes (opt-in): one for what is wrong with
+# the source, and another for what is wrong with how it was run.  (Two
+# sources are one source, as GNU as has it, and no misuse: this asked
+# for a usage error of them.)
 if AS_ERROR_CODES=1 "$AS" -64 -o "$TMP/multi.o" "$TMP/base.s" "$TMP/diag_line.s" >"$TMP/ec.out" 2>"$TMP/ec.err"; then
-    echo "expected multi-input failure with error codes"
+    echo "expected failure with error codes"
+    exit 1
+fi
+grep -q "\[AS_E_BACKEND\].*diag_line\.s:3" "$TMP/ec.err"
+if AS_ERROR_CODES=1 "$AS" -64 -march=no-such-processor -o "$TMP/multi.o" "$TMP/base.s" >"$TMP/ec.out" 2>"$TMP/ec.err"; then
+    echo "expected a usage failure with error codes"
     exit 1
 fi
 grep -q "\[AS_E_USAGE\]" "$TMP/ec.err"

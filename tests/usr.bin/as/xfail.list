@@ -22,9 +22,14 @@
 # resolved, not relocated), test_lexer_core (string tokens are raw),
 # test_output_binary (code is padded with NOPs), test_testing_fuzz_perf
 # (the object is the assembler's own, not GNU's byte for byte).
-test_diagnostics_determinism.sh	a forced short jump out of range, `jmpb` over 300 bytes, is assembled and should be refused (AS-T-221).  Its messages name the user's file and line now, which is where it stopped before
-test_output_binary.sh	code is padded with one-byte NOPs, not GNU's sequences (AS-T-251)
+#
+# 2026-10-11: three came off.  test_diagnostics_determinism was past the
+# fault it was listed for and stopped on its own stale wording of four
+# messages; test_output_binary wanted GNU's NOPs in a flat image, which
+# it has now, and a gap between sections that their alignment does not
+# ask for; test_x86_32_corpus_intel_roundtrip was refused `monitor` with
+# its registers, `data16` before an instruction of general registers,
+# and `rep xstore-rng`.
 test_unit_matrix.sh	one of the tests it runs, test_i386_refactor_tail.sh, is handed the tree's own assembler, which is built for the target and does not run here
-test_x86_32_corpus_intel_roundtrip.sh	stops at line 251 of the corpus, `fcoms -0x6f70(%bx,%si)`: an x87 instruction with a 16-bit address is refused (AS-T-176).  GNU as 2.46 passes the test: it leaves out the 206 lines of the corpus that GNU refuses, and from the Intel source it makes of objdump's listing what objdump prints and no source says (`repz add`, `lock mov`, `jaw`)
-test_x86_avx512f_core.sh	EVEX vaddpd is encoded with W = 0 (AS-T-339)
-test_x86_avx_core.sh	vpermilps is not encoded (AS-T-327)
+test_x86_avx512f_core.sh	a unit test of as_x86_avx512f.c, whose EVEX vaddpd has W = 0.  Nothing asks that file for vaddpd any more -- the table of as_x86_vec_table.c has it, and has it right (AS-T-339) -- and the file goes with the names it is still asked for (AS-T-163)
+test_x86_avx_core.sh	a unit test of as_x86_avx.c, which does not encode vpermilps.  Nothing asks it to -- the table has it (AS-T-327) -- and the file goes with AS-T-163

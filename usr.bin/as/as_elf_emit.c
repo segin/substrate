@@ -12053,6 +12053,25 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
 
         for (i = 0; i < sizeof(none) / sizeof(none[0]); ++i) {
             if ((insn->prefixes & none[i].flag) != 0) {
+                /* (66 before one of general registers, or of none, is
+                 * the operand size: `data16 popcnt`, `data16 xgetbv`.
+                 * It is the first byte but for an address size's.) */
+                if (none[i].flag == AS_PREFIX_DATA16 && as_x86_vec_takes_data16(mn)) {
+                    size_t at = *code_len != 0 && code[0] == 0x67 ? 1 : 0;
+
+                    if (*code_len + 1 > code_cap) {
+                        return -1;
+                    }
+                    if (at < *code_len && code[at] == 0x66) {
+                        snprintf(encerr, encerr_sz, "'%s' has the operand-size prefix already, for its 16-bit operands",
+                                 mn);
+                        return -1;
+                    }
+                    memmove(code + at + 1, code + at, *code_len - at);
+                    code[at] = 0x66;
+                    (*code_len)++;
+                    continue;
+                }
                 snprintf(encerr, encerr_sz, "'%s' takes no %s prefix", mn, none[i].name);
                 return -1;
             }
@@ -19025,6 +19044,10 @@ typedef struct {
     unsigned flags;
     unsigned align;
     int touched;
+    /* For padding where instructions go: the mode the code is in, and
+     * whether what was last put in the section was data. */
+    unsigned code_bits;
+    int after_data;
     bytebuf_t buf;
 } bin_section_t;
 
@@ -19513,6 +19536,34 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
                     st->file != NULL ? st->file : "<input>", st->line, d->name);
             return -1;
         }
+        /* Where instructions go, padding that is NOPs -- none named, or
+         * 0x90 named -- is the NOPs the object writer pads with: this
+         * wrote 0x90 for each byte. */
+        if ((sec->flags & SHF_EXECINSTR) != 0 && ctx->cfg != NULL &&
+            (ctx->cfg->target != 0 ? !directive_has_arg(d, 1)
+                                   : fill == 0x90 && !(d->fill_width > 1 && directive_has_arg(d, 1)))) {
+            int rc;
+
+            if (ctx->cfg->target != 0) {
+                rc = append_arm_nops(&sec->buf, need, ctx->cfg->target, sec->code_bits);
+            } else {
+                rc = 0;
+                if (sec->after_data && need != 0) {
+                    rc = bytebuf_append_u64_le(&sec->buf, 0x90, 1);
+                    need--;
+                }
+                if (rc == 0) {
+                    rc = append_x86_nops(&sec->buf, need, sec->code_bits, ctx->cfg->machine == EM_X86_64);
+                }
+            }
+            if (rc != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            sec->touched = 1;
+            sec->after_data = 0;
+            return 0;
+        }
         switch (append_align_fill(&sec->buf, d, need, fill)) {
         case 0:
             break;
@@ -19923,8 +19974,18 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
                         st->file != NULL ? st->file : "<input>", st->line, d->name);
                 goto fail;
             }
-            if (append_data_directive_binary(&ctx, st, sec, &handled) != 0) {
-                goto fail;
+            {
+                size_t before = sec->buf.len;
+                int aligns = strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 ||
+                             strcmp(d->name, ".p2align") == 0;
+
+                sec->code_bits = cur_code_bits;
+                if (append_data_directive_binary(&ctx, st, sec, &handled) != 0) {
+                    goto fail;
+                }
+                if (!aligns && sec->buf.len != before) {
+                    sec->after_data = 1;
+                }
             }
             (void)handled;
             continue;
@@ -19954,6 +20015,7 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
                 goto fail;
             }
             sec->touched = 1;
+            sec->after_data = 0;
         }
     }
 

@@ -1251,7 +1251,7 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     S2("movsldup", PF3, M1, 0x12),
     LFIX("emms", 0x77, 0, "", ""),
     LFIX("monitor", 0x01, 0xc8, "", ""),
-    LFIX("monitor", 0x01, 0xc8, "Rac", "---"),
+    LFIX("monitor", 0x01, 0xc8, "Ace", "---"),
     LFIX("mwait", 0x01, 0xc9, "", ""),
     LFIX("mwait", 0x01, 0xc9, "ac", "--"),
 

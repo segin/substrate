@@ -237,10 +237,23 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return (cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16) || plain_mem;
     case '0':
         return cls == AS_X86_REGCLASS_XMM && (unsigned)op->u.reg == 0u;
+    /* The registers `monitor` and `mwait` are told things in, which may
+     * be written and are not encoded: %eax, %ecx, %edx, or in 64-bit
+     * code -- where no other has 64-bit registers -- those of 64 bits. */
     case 'a':
-        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 32 && (unsigned)op->u.reg == 0u;
+        return cls == AS_X86_REGCLASS_GENERAL && (op->size_bits == 32 || op->size_bits == 64) &&
+               (unsigned)op->u.reg == 0u;
     case 'c':
-        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 32 && (unsigned)op->u.reg == 1u;
+        return cls == AS_X86_REGCLASS_GENERAL && (op->size_bits == 32 || op->size_bits == 64) &&
+               (unsigned)op->u.reg == 1u;
+    case 'e':
+        return cls == AS_X86_REGCLASS_GENERAL && (op->size_bits == 32 || op->size_bits == 64) &&
+               (unsigned)op->u.reg == 2u;
+    /* And the one an address is in: %rax, %eax or %ax, of which the one
+     * that is not the mode's own asks for the address-size prefix. */
+    case 'A':
+        return cls == AS_X86_REGCLASS_GENERAL && (unsigned)op->u.reg == 0u &&
+               (op->size_bits == 16 || op->size_bits == 32 || op->size_bits == 64);
     default:
         return 0;
     }
@@ -439,7 +452,27 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         /* No operand in ModRM: the opcode, and the byte after it that
          * the row gives, if it gives one (`monitor` is 0F 01 C8). */
         static const uint8_t pp_byte[] = {0, 0x66, 0xf3, 0xf2};
+        const char *addr = strchr(t->ops, 'A');
+        size_t k;
 
+        for (k = 0; k < rq->op_count; ++k) {
+            if (rq->ops[k].kind == AS_X86_OP_REG && rq->ops[k].size_bits == 64 && rq->mode != 64u) {
+                vec_err(ctx, "a 64-bit register in %u-bit code", rq->mode);
+                return -1;
+            }
+        }
+        if (addr != NULL) {
+            unsigned bits = rq->ops[addr - t->ops].size_bits;
+            unsigned other = rq->mode == 64u ? 32u : rq->mode == 32u ? 16u : 32u;
+
+            if (bits != rq->mode && bits != other) {
+                vec_err(ctx, "an address in a %u-bit register in %u-bit code", bits, rq->mode);
+                return -1;
+            }
+            if (bits == other && put8(ctx, 0x67u) != 0) {
+                return -1;
+            }
+        }
         if ((t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) || put8(ctx, 0x0fu) != 0 ||
             put8(ctx, t->opcode) != 0) {
             return -1;
@@ -696,6 +729,20 @@ static int row_refuses(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, i
         return 1;
     }
     return 0;
+}
+
+int as_x86_vec_takes_data16(const char *mnemonic) {
+    size_t i;
+
+    if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
+        return 0;
+    }
+    for (; i < as_x86_vec_table_count && strcmp(as_x86_vec_table[i].name, mnemonic) == 0; ++i) {
+        if (as_x86_vec_table[i].enc != AS_VEC_LEGACY || strpbrk(as_x86_vec_table[i].ops, "xyzXYZnN0123") != NULL) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, size_t *out_len, char *errbuf,

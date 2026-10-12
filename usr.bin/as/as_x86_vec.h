@@ -76,7 +76,11 @@ typedef struct {
      *   i u     a number of one byte: -128 to 255; 0 to 255 only
      *   n N     an MMX register; that, or memory
      *   w W     a general register of 16 bits; that, or memory
-     *   0 a c   %xmm0, %eax, %ecx and no other
+     *   0       %xmm0 and no other
+     *   a c e   %eax, %ecx, %edx and no other, or in 64-bit code %rax,
+     *           %rcx, %rdx
+     *   A       %rax, %eax or %ax, holding an address: the one that is
+     *           not the mode's own has the address-size prefix
      */
     const char *ops;
     /*
@@ -125,6 +129,15 @@ int as_x86_vec_knows(const char *mnemonic);
  */
 int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, size_t *out_len, char *errbuf,
                       size_t errbuf_sz);
+
+/*
+ * Whether `data16` may be written before the instruction: it may
+ * before one with neither VEX nor EVEX and no MMX or vector register --
+ * `popcnt`, `movbe`, `xgetbv`, `emms` -- where 66 is the operand size
+ * and is put before everything else.  Before the rest 66 is part of the
+ * opcode or is nothing, and GNU as refuses it.
+ */
+int as_x86_vec_takes_data16(const char *mnemonic);
 
 #ifdef __cplusplus
 }
