@@ -122,6 +122,7 @@ static int as_token_vec_push(as_token_vec_t *v, as_token_kind_t kind, const char
     v->items[v->count].line = line;
     v->items[v->count].col = col;
     v->items[v->count].space_before = 0;
+    v->items[v->count].quoted = 0;
     if (v->items[v->count].text == NULL) {
         as_token_free(&v->items[v->count]);
         return -1;
@@ -862,6 +863,7 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
          * instruction having no use for a string: `jmp "x.y"`. */
         if (u->kind == AS_TOK_STRING && t->kind == AS_TOK_MNEMONIC) {
             u->kind = AS_TOK_IDENTIFIER;
+            u->quoted = 1;
         } else if (u->kind == AS_TOK_IDENTIFIER && intel_syntax && is_x86_register_name(u->text)) {
             /* Where registers are written bare. */
             u->kind = AS_TOK_REGISTER;

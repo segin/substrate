@@ -150,6 +150,14 @@ typedef struct {
      * that it is not written to set. */
     unsigned arm_in_it : 1;
     /*
+     * The instruction was written the Intel way.  It is held the AT&T
+     * way like any other (syntax_intel is 0) and is assembled as one;
+     * what is left of how it was written is that memory with no size
+     * on it has none -- `inc [eax]` is not `incl` -- and that the size
+     * that is on it is the instruction's.
+     */
+    unsigned from_intel : 1;
+    /*
      * The instruction's bytes, if it has been encoded already and its
      * operands let go (as_x86_precode()): code_len of them, which are
      * its bytes in code of code_bits and nowhere else.  0 for an

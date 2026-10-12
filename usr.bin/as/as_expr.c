@@ -394,6 +394,24 @@ static int expr_symbol_tok(expr_lex_t *lx, const char *prefix, const char *name,
     return 0;
 }
 
+/*
+ * Whether a relocation operator stands after the name at hand as a
+ * token of its own.  `free@PLT` is one token; `"free"@PLT` is two, the
+ * name having ended at its quote -- and that is how a compiler writes
+ * every name in Intel syntax.  The two were no expression, and no
+ * instruction with one was assembled.
+ */
+static int expr_operator_follows(const expr_lex_t *lx) {
+    const as_token_t *next;
+
+    if (lx->i + 1 >= lx->n) {
+        return 0;
+    }
+    next = &lx->tokv[lx->i + 1];
+    return next->kind == AS_TOK_IDENTIFIER && next->text != NULL && next->text[0] == '@' && next->text[1] != '\0' &&
+           next->text[1] != '@';
+}
+
 /* The next token, as an expression reads it. */
 static int expr_lex_next(expr_lex_t *lx) {
     const as_token_t *t;
@@ -445,6 +463,9 @@ static int expr_lex_next(expr_lex_t *lx) {
     }
     case AS_TOK_STRING:
         /* A name in quotes is a name. */
+        if (expr_operator_follows(lx)) {
+            return expr_symbol_tok(lx, s, lx->tokv[lx->i + 1].text, 2);
+        }
         return expr_symbol_tok(lx, "", s, 1);
     case AS_TOK_IDENTIFIER:
     case AS_TOK_REGISTER:
@@ -460,6 +481,9 @@ static int expr_lex_next(expr_lex_t *lx) {
             }
             lx->half = 0;
             return expr_symbol_tok(lx, "", s + 1, 1);
+        }
+        if (t->kind == AS_TOK_IDENTIFIER && strchr(s, '@') == NULL && expr_operator_follows(lx)) {
+            return expr_symbol_tok(lx, s, lx->tokv[lx->i + 1].text, 2);
         }
         return expr_symbol_tok(lx, "", s, 1);
     case AS_TOK_OPERATOR:

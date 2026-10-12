@@ -589,9 +589,25 @@ and a name without one is a symbol, whatever it spells:
 .Ql call sp
 calls the function
 .Va sp .
-Intel memory qualifiers
-.Cm byte|word|dword|qword|xmmword|ymmword|zmmword ptr
-are recognized on x86 memory operands.
+A statement in Intel syntax is assembled as the AT&T statement it is:
+its operands in the other order, and the size written on memory,
+.Cm byte|word|dword|fword|qword|tbyte|xmmword|ymmword|zmmword ptr ,
+for the suffix of the instruction where it has one.
+Memory with no size written, in an instruction that has nothing else
+to tell its size from, is refused:
+.Ql inc [eax] .
+What a compiler writes with
+.Fl masm=intel
+is understood: a name in quotes, which is a symbol whatever it spells
+and may have a relocation operator on it
+.Pq Ql call \&"free\&"@PLT ;
+.Ql OFFSET FLAT:sym
+for the address of a symbol; a symbol before the brackets of its
+address
+.Pq Ql .LC0[rip] ;
+and brackets around what a jump goes through.
+The size written on the memory of an instruction of vectors is not
+checked against the instruction.
 .Cm .code16 , .code32
 and
 .Cm .code64

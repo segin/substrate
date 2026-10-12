@@ -52,6 +52,10 @@ typedef struct {
     /* Whether white space came before it: `a %b` and `a%b` differ, and
      * what shows an operand as it was written wants to know. */
     unsigned char space_before;
+    /* A name that was written in quotes, among an instruction's
+     * operands: it is a symbol whatever it spells, `"sp"` and `"eax"`
+     * too -- which is what a compiler quotes its names for. */
+    unsigned char quoted;
 } as_token_t;
 
 typedef struct {

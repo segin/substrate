@@ -16,6 +16,10 @@ extern "C" {
  * 32-bit object's section can be. */
 #define AS_ELF_FILL_MAX 0x7fffffffll
 
+/* The most operands of an instruction whose memory has a size written
+ * on it the Intel way. */
+#define AS_X86_SIZED_MAX_OPERANDS 6u
+
 /*
  * The warnings of one assembly.  A statement is encoded more than once
  * on the way to its final bytes, and is warned about once: `seen` is the

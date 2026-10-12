@@ -66,8 +66,15 @@ cd "$work" || exit 1
 # of its own and does not export -- a compiler's `f.localalias` -- is
 # that label and no other object's: `call f.localalias` was a call of
 # `f` through the procedure linkage table.
+#
+# suffix_forms.txt is the same of a size letter and a register that is
+# not of the size, for the instructions that were not held to it:
+# `shldw %edx, (%eax)`, `leaw (%eax), %eax` and `bswapw %eax` were
+# assembled, the letter winning or the register as it fell out; and of
+# a product by a number, which took a
+# register of bytes and two of different widths.
 cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" "$here/labeldiff_forms.txt" \
-    "$here/pic_forms.txt" > forms.txt
+    "$here/pic_forms.txt" "$here/suffix_forms.txt" > forms.txt
 
 fail=0
 cases=0

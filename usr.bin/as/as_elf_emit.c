@@ -9701,6 +9701,19 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
      * And the widths of the rest that took any.
      */
     {
+        /* A product by a number, or into a register, is of no bytes,
+         * and its two registers are of one width: `imul $18, %cl` and
+         * `imul $18, %rdx, %ecx` were taken. */
+        if (!intel_syntax && x86_name_is(mn, "imul", "wlq") && insn->operand_count >= 2) {
+            const as_x86_reg_info_t *a = reg[insn->operand_count - 2];
+            const as_x86_reg_info_t *b = reg[insn->operand_count - 1];
+
+            if ((a != NULL && a->cls == AS_X86_REGCLASS_GENERAL && a->width == 8) ||
+                (b != NULL && b->cls == AS_X86_REGCLASS_GENERAL && b->width == 8) ||
+                (a != NULL && b != NULL && a->width != b->width)) {
+                return 1;
+            }
+        }
         /* The two registers after a count are of one width, and no
          * bytes: `shrd %ecx, %rdx`. */
         if ((x86_name_is(mn, "shld", "wlq") || x86_name_is(mn, "shrd", "wlq")) && insn->operand_count >= 2) {
@@ -11115,9 +11128,11 @@ static int x86_suffix_denied_by_register(const as_instruction_t *insn, const cha
     static const char *const same_size[] = {
         "add", "adc", "sbb", "sub", "and", "or",  "xor", "cmp",  "mov",  "test", "xchg", "xadd", "cmpxchg",
         "inc", "dec", "not", "neg", "mul", "div", "idiv", "imul", "push", "pop",  "bt",   "bts",  "btr",
-        "btc", "bsf", "bsr",
+        "btc", "bsf", "bsr", "lea", "bswap",
     };
-    static const char *const shifts[] = {"shl", "shr", "sar", "sal", "rol", "ror", "rcl", "rcr"};
+    /* (The double shifts are of this kind with three operands: the
+     * count first, where a count is written.) */
+    static const char *const shifts[] = {"shl", "shr", "sar", "sal", "rol", "ror", "rcl", "rcr", "shld", "shrd"};
     unsigned want = suffix == 'b' ? 8u : (suffix == 'w' ? 16u : (suffix == 'l' ? 32u : 64u));
     int is_shift = 0;
     int known = strncmp(base, "cmov", 4) == 0;
@@ -11152,7 +11167,7 @@ static int x86_suffix_denied_by_register(const as_instruction_t *insn, const cha
 
         /* A shift's count is %cl whatever is shifted. */
         if (op->kind != AS_OPERAND_REGISTER ||
-            (is_shift && insn->operand_count == 2 && i == (intel_syntax ? 1u : 0u))) {
+            (is_shift && insn->operand_count == (base[3] == 'd' ? 3u : 2u) && i == (intel_syntax ? 1u : 0u))) {
             continue;
         }
         r = as_x86_reg_find(op->u.reg);
@@ -12195,6 +12210,209 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
     return 0;
 }
 
+/*
+ * The name an instruction has with the size written on its memory --
+ * `shl` and `BYTE PTR` are `shlb` -- in `out`; 0 if the size makes no
+ * name.  It is a name to try: most instructions of vectors have no
+ * suffix, and what comes of `movss` and a DWORD is no instruction.
+ */
+/* The x87's instructions of numbers in memory: of real ones, and of
+ * whole ones.  The size of the number is in their names. */
+static const char *const x87_real[] = {"fld", "fst", "fstp", "fadd", "fsub", "fsubr", "fmul", "fdiv", "fdivr", "fcom", "fcomp"};
+static const char *const x87_whole[] = {"fild",  "fist",  "fistp", "fisttp", "fiadd", "fisub",
+                                        "fisubr", "fimul", "fidiv", "fidivr", "ficom", "ficomp"};
+
+static int x86_sized_x87(const char *mnemonic) {
+    size_t i;
+
+    for (i = 0; i < sizeof(x87_real) / sizeof(x87_real[0]); ++i) {
+        if (strcasecmp(mnemonic, x87_real[i]) == 0) {
+            return 1;
+        }
+    }
+    for (i = 0; i < sizeof(x87_whole) / sizeof(x87_whole[0]); ++i) {
+        if (strcasecmp(mnemonic, x87_whole[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * The instructions whose memory is what it is, whatever is written on
+ * it and whether anything is: a line of the cache, a page, a table of
+ * descriptors, a selector, the machine's status word.
+ */
+static int x86_memory_of_one_size(const char *mnemonic) {
+    static const char *const one[] = {"sgdt", "sidt", "lgdt", "lidt", "smsw", "lmsw", "str",  "ltr",
+                                      "sldt", "lldt", "verr", "verw", "clwb", "cldemote"};
+    size_t i;
+
+    if (strncasecmp(mnemonic, "prefetch", 8) == 0 || strncasecmp(mnemonic, "clflush", 7) == 0 ||
+        strncasecmp(mnemonic, "inv", 3) == 0) {
+        return 1;
+    }
+    for (i = 0; i < sizeof(one) / sizeof(one[0]); ++i) {
+        if (strcasecmp(mnemonic, one[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int x86_sized_mnemonic(const as_instruction_t *in, int is_64, char *out, size_t out_sz) {
+    char mn[32];
+    const char *suffix = NULL;
+    int bits = 0;
+    int dest_bits = 0;
+    size_t i;
+    size_t n;
+
+    n = strlen(in->mnemonic);
+    if (n == 0 || n >= sizeof(mn)) {
+        return 0;
+    }
+    for (i = 0; i <= n; ++i) {
+        mn[i] = (char)tolower((unsigned char)in->mnemonic[i]);
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        if (in->operands[i].kind == AS_OPERAND_MEMORY && in->operands[i].u.mem.size_bits != 0 && bits == 0) {
+            bits = in->operands[i].u.mem.size_bits;
+        }
+    }
+    if (in->operand_count != 0 && in->operands[in->operand_count - 1].kind == AS_OPERAND_REGISTER) {
+        dest_bits = x86_reg_width_bits(in->operands[in->operand_count - 1].u.reg);
+    }
+    /* (An address is no size; and what is converted to a general
+     * register, or looked up for one, has the register's.) */
+    if (as_strcmp(mn, "lea") == 0 || strstr(mn, "2si") != NULL || strstr(mn, "2usi") != NULL ||
+        as_strcmp(mn, "lar") == 0 || as_strcmp(mn, "lsl") == 0 || as_strcmp(mn, "bound") == 0 ||
+        as_strcmp(mn, "lds") == 0 || as_strcmp(mn, "les") == 0 || as_strcmp(mn, "lfs") == 0 ||
+        as_strcmp(mn, "lgs") == 0 || as_strcmp(mn, "lss") == 0 || x86_memory_of_one_size(mn)) {
+        return 0;
+    }
+    /* (A condition is set in a byte.) */
+    if (strncmp(mn, "set", 3) == 0 && bits != 8) {
+        return -1;
+    }
+    /* (These two and an x are other instructions, of half precision.) */
+    if (as_strcmp(mn, "vcvtph2ps") == 0 || as_strcmp(mn, "vcvtps2ph") == 0) {
+        return 0;
+    }
+    if (as_strcmp(mn, "movsx") == 0 || as_strcmp(mn, "movzx") == 0 || as_strcmp(mn, "movsxd") == 0) {
+        if (bits == 32 && mn[3] == 's') {
+            snprintf(out, out_sz, "%s", dest_bits == 64 ? "movslq" : "movsxd");
+            return 1;
+        }
+        if ((bits != 8 && bits != 16) || mn[5] == 'd') {
+            return -1;
+        }
+        snprintf(out, out_sz, "mov%cx%c", mn[3], bits == 8 ? 'b' : 'w');
+        return 1;
+    }
+    for (i = 0; i < sizeof(x87_real) / sizeof(x87_real[0]); ++i) {
+        if (as_strcmp(mn, x87_real[i]) == 0) {
+            suffix = bits == 32 ? "s" : bits == 64 ? "l" : bits == 80 ? "t" : NULL;
+            if (suffix == NULL) {
+                return -1;
+            }
+            goto made;
+        }
+    }
+    for (i = 0; i < sizeof(x87_whole) / sizeof(x87_whole[0]); ++i) {
+        if (as_strcmp(mn, x87_whole[i]) == 0) {
+            suffix = bits == 16 ? "s" : bits == 32 ? "l" : bits == 64 ? "ll" : NULL;
+            if (suffix == NULL) {
+                return -1;
+            }
+            goto made;
+        }
+    }
+    if (mn[0] == 'f') {
+        return 0;
+    }
+    /* (A far pointer is six bytes, and four where the code is of 64
+     * bits or of 16: a jump through one is a far jump.) */
+    if (as_strcmp(mn, "jmp") == 0 || as_strcmp(mn, "call") == 0) {
+        if (bits == 48) {
+            snprintf(out, out_sz, "l%s", mn);
+            return 1;
+        }
+        if (bits == 32 && (is_64 || x86_emit_code16)) {
+            snprintf(out, out_sz, "l%sw", mn);
+            return 1;
+        }
+        if (bits == 80 || bits == 8 || bits >= 128) {
+            return -1;
+        }
+    }
+    /* (Six bytes and ten are a far pointer, and what a table of
+     * descriptors is loaded from.) */
+    if (bits == 48 || bits == 80) {
+        static const char *const far[] = {"lgdt", "lidt", "sgdt", "sidt", "lds", "les", "lfs", "lgs", "lss"};
+
+        for (i = 0; i < sizeof(far) / sizeof(far[0]); ++i) {
+            if (as_strcmp(mn, far[i]) == 0) {
+                return 0;
+            }
+        }
+        return -1;
+    }
+    /* (Sixteen bytes and more are a vector's, and an instruction with
+     * no register of vectors has few uses for them.) */
+    if (bits >= 128 && mn[0] != 'v' && strncmp(mn, "aes", 3) != 0 && strncmp(mn, "enqcmd", 6) != 0 &&
+        strncmp(mn, "inv", 3) != 0 &&
+        as_strcmp(mn, "movdir64b") != 0 && as_strcmp(mn, "cmpxchg16b") != 0 && strstr(mn, "tilecfg") == NULL) {
+        int vectors = 0;
+
+        for (i = 0; i < in->operand_count; ++i) {
+            const as_x86_reg_info_t *r =
+                in->operands[i].kind == AS_OPERAND_REGISTER ? as_x86_reg_find(in->operands[i].u.reg) : NULL;
+
+            vectors |= r != NULL && r->cls != AS_X86_REGCLASS_GENERAL && r->cls != AS_X86_REGCLASS_SEGMENT;
+        }
+        if (!vectors) {
+            return -1;
+        }
+    }
+    /*
+     * The letter is the instruction's own where the instruction is of
+     * general registers.  One of vectors has none -- its name and a
+     * letter are another instruction, as `psrld` and `q` are, and
+     * `invlpg` and `b` -- but for what converts a whole number, which
+     * is sized as one; and x, y and z are of the instructions of AVX.
+     */
+    if (bits <= 64) {
+        int others = strncmp(mn, "inv", 3) == 0 || as_strcmp(mn, "prefetch") == 0;
+
+        for (i = 0; i < in->operand_count; ++i) {
+            const as_x86_reg_info_t *r =
+                in->operands[i].kind == AS_OPERAND_REGISTER ? as_x86_reg_find(in->operands[i].u.reg) : NULL;
+
+            others |= r != NULL && r->cls != AS_X86_REGCLASS_GENERAL && r->cls != AS_X86_REGCLASS_SEGMENT;
+        }
+        if (others && strstr(mn, "si2s") == NULL) {
+            return 0;
+        }
+    } else if (mn[0] != 'v') {
+        return 0;
+    }
+    suffix = bits == 8     ? "b"
+             : bits == 16  ? "w"
+             : bits == 32  ? "l"
+             : bits == 64  ? "q"
+             : bits == 128 ? "x"
+             : bits == 256 ? "y"
+             : bits == 512 ? "z"
+                           : NULL;
+made:
+    if (suffix == NULL || n + strlen(suffix) >= out_sz) {
+        return 0;
+    }
+    snprintf(out, out_sz, "%s%s", mn, suffix);
+    return 1;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
@@ -12202,6 +12420,120 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
     /* (For the emitters that are handed operands and no mode.) */
     x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
+
+    /*
+     * A size written on memory the Intel way, `shl BYTE PTR [rax], 1`:
+     * it is the suffix of the instruction where the instruction has
+     * one, `shlb`, and that is the instruction assembled.  Where it
+     * has none -- `movss xmm0, DWORD PTR [rax]` -- the size says what
+     * the instruction says already, and it is assembled without.
+     */
+    if (st != NULL && cfg != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL &&
+        st->u.instr.code_len == 0) {
+        as_operand_t unsized[AS_X86_SIZED_MAX_OPERANDS];
+        char name[40];
+        int sized = 0;
+
+        for (i = 0; i < st->u.instr.operand_count && i < AS_X86_SIZED_MAX_OPERANDS; ++i) {
+            unsized[i] = st->u.instr.operands[i];
+            if (unsized[i].kind == AS_OPERAND_MEMORY && unsized[i].u.mem.size_bits != 0) {
+                sized = 1;
+                unsized[i].u.mem.size_bits = 0;
+            }
+        }
+        /*
+         * And memory with no size on it, where the instruction has
+         * nothing else to tell one from: `inc [eax]` is a byte or a
+         * word or four of them, and is refused -- the AT&T way it is
+         * `incl`.  It is one that may be written with more than one
+         * suffix.
+         */
+        if (!sized && st->u.instr.from_intel && st->u.instr.operand_count <= AS_X86_SIZED_MAX_OPERANDS &&
+            strlen(st->u.instr.mnemonic) + 2 < sizeof(name)) {
+            static const char *const turns[] = {"shl", "shr", "sal", "sar", "rol", "ror", "rcl", "rcr"};
+            const char *mn = st->u.instr.mnemonic;
+            int x87 = tolower((unsigned char)mn[0]) == 'f';
+            int extends = strcasecmp(mn, "movsx") == 0 || strcasecmp(mn, "movzx") == 0;
+            int turn = 0;
+            int memory = 0;
+            int sizes = 0;
+
+            for (i = 0; i < sizeof(turns) / sizeof(turns[0]); ++i) {
+                turn |= strcasecmp(mn, turns[i]) == 0;
+            }
+            /* (A general register says the size, but for the count of
+             * a shift, which is %cl whatever is shifted, and for what
+             * is extended into it.) */
+            for (i = 0; i < st->u.instr.operand_count; ++i) {
+                const as_operand_t *op = &st->u.instr.operands[i];
+
+                memory |= op->kind == AS_OPERAND_MEMORY;
+                if (op->kind == AS_OPERAND_REGISTER && !extends && !(turn && i == 0) &&
+                    x86_gpr_operand_width_bits(op) != 0) {
+                    sizes = 1;
+                }
+                /* (And what is gone through is a pointer.) */
+                if (op->raw != NULL && op->raw[0] == '*') {
+                    sizes = 1;
+                }
+            }
+            /* (Of the x87's instructions it is those of numbers that
+             * have sizes, the rest having an environment's.) */
+            if (memory && !sizes && !is_rel_mnemonic(mn) && (!x87 || x86_sized_x87(mn)) &&
+                !x86_memory_of_one_size(mn)) {
+                static const char pair[2][2] = {{'b', 'l'}, {'s', 'l'}};
+                as_stmt_t plain = *st;
+                unsigned char tried[16];
+                char said[160];
+                int taken = 0;
+                size_t k;
+
+                plain.u.instr.operands = unsized;
+                plain.u.instr.from_intel = 0;
+                plain.u.instr.mnemonic = name;
+                for (k = 0; k < 2; ++k) {
+                    size_t tried_len = 0;
+
+                    snprintf(name, sizeof(name), "%s%c", st->u.instr.mnemonic, pair[x87][k]);
+                    said[0] = '\0';
+                    taken += encode_x86_stmt(ctx, cfg, &plain, tried, sizeof(tried), &tried_len, said, sizeof(said)) == 0;
+                }
+                if (taken == 2) {
+                    snprintf(encerr, encerr_sz, "ambiguous Intel operand size for '%s'", st->u.instr.mnemonic);
+                    return -1;
+                }
+                plain.u.instr.mnemonic = st->u.instr.mnemonic;
+                return encode_x86_stmt(ctx, cfg, &plain, code, code_cap, code_len, encerr, encerr_sz);
+            }
+        }
+        if (sized && st->u.instr.operand_count <= AS_X86_SIZED_MAX_OPERANDS) {
+            as_stmt_t plain = *st;
+            int named = x86_sized_mnemonic(&st->u.instr, cfg->is_64, name, sizeof(name));
+
+            plain.u.instr.operands = unsized;
+            plain.u.instr.from_intel = 0;
+            if (named < 0) {
+                snprintf(encerr, encerr_sz, "'%s' has no operand of the size written", st->u.instr.mnemonic);
+                return -1;
+            }
+            if (named) {
+                int rc;
+
+                plain.u.instr.mnemonic = name;
+                rc = encode_x86_stmt(ctx, cfg, &plain, code, code_cap, code_len, encerr, encerr_sz);
+                /* (No instruction of that name: the one that says so,
+                 * or the table of the rest that has the name without
+                 * the letter and not with.) */
+                if (rc == 0 || !((strstr(encerr, "unsupported") != NULL && strstr(encerr, "mnemonic") != NULL) ||
+                                 (as_x86_vec_knows(st->u.instr.mnemonic) && !as_x86_vec_knows(name)))) {
+                    return rc;
+                }
+                encerr[0] = '\0';
+                plain.u.instr.mnemonic = st->u.instr.mnemonic;
+            }
+            return encode_x86_stmt(ctx, cfg, &plain, code, code_cap, code_len, encerr, encerr_sz);
+        }
+    }
 
     /* An instruction that was encoded as it was read (as_x86_precode())
      * is its bytes, and has nothing else left to encode it from. */
@@ -16630,7 +16962,8 @@ static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
          key_num(key, key_sz, &n, in->opmask) == 0 &&
          key_num(key, key_sz, &n,
                  (unsigned long long)in->have_opmask | ((unsigned long long)in->zeroing << 1) |
-                     ((unsigned long long)in->sae << 2) | ((unsigned long long)in->syntax_intel << 3)) == 0 &&
+                     ((unsigned long long)in->sae << 2) | ((unsigned long long)in->syntax_intel << 3) |
+                         ((unsigned long long)in->from_intel << 4)) == 0 &&
          key_num(key, key_sz, &n, in->broadcast) == 0 &&
          key_num(key, key_sz, &n, (unsigned long long)(long long)in->rounding_mode) == 0 &&
          key_str(key, key_sz, &n, in->segment_override != NULL ? in->segment_override : "-") == 0 &&

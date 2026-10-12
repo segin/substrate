@@ -319,6 +319,12 @@ static int is_x86_register_text(const char *s) {
            !(r->cls == AS_X86_REGCLASS_IP && r->width == 16);
 }
 
+/* Whether a token is a register: one by its kind or by what it spells,
+ * and not a name that was written in quotes. */
+static int tok_names_register(const as_token_t *t) {
+    return !t->quoted && (t->kind == AS_TOK_REGISTER || is_x86_register_text(t->text));
+}
+
 static int is_x86_segment_text(const char *s) {
     if (s == NULL || s[0] == '\0') {
         return 0;
@@ -891,7 +897,7 @@ static int tok_is_no_index(const as_token_t *t) {
 /* Whether a token between the brackets of an Intel operand is a
  * register. */
 static int tok_is_intel_register(const as_token_t *t) {
-    return tok_is_name(t) &&
+    return tok_is_name(t) && !t->quoted &&
            (t->kind == AS_TOK_REGISTER || is_x86_register_text(t->text) || tok_is_no_index(t));
 }
 
@@ -1001,12 +1007,29 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     int rbr;
     int seg_tok;
     int saw_ptr = 0;
+    int pass;
     as_mem_operand_t mem;
+    size_t before;
+    size_t before_end;
     size_t i;
 
     memset(&mem, 0, sizeof(mem));
     mem.scale = 1;
 
+    /* (A compiler writes what a jump or a call goes through in brackets
+     * of its own: `call [QWORD PTR foo@GOTPCREL[rip]]`, `jmp [QWORD PTR
+     * .L4[0+rax*8]]`.  They are the operand's, and say nothing more.) */
+    if (n > 2 && tok_is(&tokv[0], '[') && tok_is(&tokv[n - 1], ']')) {
+        int inner = 0;
+
+        for (i = 1; i + 1 < n; ++i) {
+            inner |= tok_is(&tokv[i], '[') || streq_ci(tokv[i].text, "ptr");
+        }
+        if (inner) {
+            tokv++;
+            n -= 2;
+        }
+    }
     lbr = find_punct(tokv, n, "[");
     rbr = find_punct(tokv, n, "]");
     if (lbr < 0 || rbr < 0 || rbr <= lbr) {
@@ -1043,7 +1066,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
 
     seg_tok = -1;
     if (lbr >= 2 && strcmp(tokv[lbr - 1].text, ":") == 0 &&
-        (tokv[lbr - 2].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[lbr - 2].text))) {
+        tok_names_register(&tokv[lbr - 2])) {
         seg_tok = lbr - 2;
     }
     if (seg_tok >= 0 && mem.segment_reg == NULL) {
@@ -1052,11 +1075,43 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             return -1;
         }
     }
+    /*
+     * What stands before the bracket, after the size and the segment,
+     * is part of the address: `.LC0[rip]`, `foo@GOTPCREL[rip]`,
+     * `.LC0@GOTOFF[ebx]`, `tbl[0+rax*8]`, which is how a compiler
+     * writes an address of a symbol.  It was passed over, and the
+     * instruction was assembled with the registers alone: no symbol,
+     * no relocation, and nothing said.
+     */
+    before = 0;
+    for (i = 0; i < (size_t)lbr; ++i) {
+        if (streq_ci(tokv[i].text, "ptr")) {
+            before = i + 1;
+        }
+    }
+    if (before == 0 && lbr > 0 && intel_mem_size_bits(tokv[0].text) != 0) {
+        before = 1;
+    }
+    if (before + 1 < (size_t)lbr && strcmp(tokv[before + 1].text, ":") == 0 &&
+        tok_names_register(&tokv[before])) {
+        if (mem.segment_reg == NULL) {
+            mem.segment_reg = strip_register_prefix(tokv[before].text);
+            if (mem.segment_reg == NULL) {
+                return -1;
+            }
+        }
+        before += 2;
+    }
+    before_end = seg_tok >= 0 && (size_t)seg_tok >= before ? (size_t)seg_tok : (size_t)lbr;
 
     /* Between the brackets is a sum, and each term of it is a register,
-     * a register times a scale, or part of the displacement. */
-    i = (size_t)lbr + 1;
-    while (i < (size_t)rbr) {
+     * a register times a scale, or part of the displacement; and so is
+     * what stands before them. */
+    for (pass = 0; pass < 2; ++pass) {
+    size_t stop = pass == 0 ? before_end : (size_t)rbr;
+
+    i = pass == 0 ? before : (size_t)lbr + 1;
+    while (i < stop) {
         int negate = 0;
         int depth = 0;
         size_t term;
@@ -1069,7 +1124,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             i++;
         }
         term = i;
-        for (end = term; end < (size_t)rbr; ++end) {
+        for (end = term; end < stop; ++end) {
             if (tok_is(&tokv[end], '(')) {
                 depth++;
             } else if (tok_is(&tokv[end], ')')) {
@@ -1087,6 +1142,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             return -1;
         }
         i = end;
+    }
     }
 
     out_op->kind = AS_OPERAND_MEMORY;
@@ -1294,6 +1350,43 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
     }
 
     /*
+     * Intel's `OFFSET sym` -- and `OFFSET FLAT:sym`, as a compiler
+     * writes it -- is the address of the symbol and not what is at it:
+     * a number.  It was no operand at all.
+     */
+    if (ctx != NULL && ctx->syntax_intel && n >= 2 && tokv[0].kind == AS_TOK_IDENTIFIER &&
+        streq_ci(tokv[0].text, "offset")) {
+        size_t skip = n >= 4 && streq_ci(tokv[1].text, "flat") && tok_is(&tokv[2], ':') ? 3 : 1;
+
+        char *written = tokens_as_written(tokv + skip, n - skip, 0);
+        char *value;
+        size_t len;
+
+        /* (It is kept as the `$sym` it is the Intel way to write, which
+         * is what tells a value from an address past the parser.) */
+        if (written == NULL) {
+            return -1;
+        }
+        len = strlen(written) + 2;
+        value = (char *)malloc(len);
+        if (value == NULL) {
+            free(written);
+            return -1;
+        }
+        snprintf(value, len, "$%s", written);
+        free(written);
+        free(op->raw);
+        op->raw = value;
+        e = parse_expression_from_tokens(ctx, tokv + skip, n - skip);
+        if (e == NULL) {
+            return -1;
+        }
+        op->kind = AS_OPERAND_IMMEDIATE;
+        op->u.expr = e;
+        return 0;
+    }
+
+    /*
      * x87 stack-register spellings must be recognized before the Intel
      * absolute-memory parser, otherwise st(0) is misread as memory.
      */
@@ -1353,7 +1446,7 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
         return 0;
     }
 
-    if (n == 1 && (tokv[0].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[0].text))) {
+    if (n == 1 && tok_names_register(&tokv[0])) {
         op->kind = AS_OPERAND_REGISTER;
         op->u.reg = strip_register_prefix(tokv[0].text);
         return op->u.reg != NULL ? 0 : -1;
@@ -1368,8 +1461,7 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
     /*
      * Segment-prefixed absolute memory operand, e.g. %gs:0.
      */
-    if (n >= 3 &&
-        (tokv[0].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[0].text)) &&
+    if (n >= 3 && tok_names_register(&tokv[0]) &&
         (tokv[1].kind == AS_TOK_OPERATOR || tokv[1].kind == AS_TOK_PUNCT) && strcmp(tokv[1].text, ":") == 0) {
         as_mem_operand_t mem;
         memset(&mem, 0, sizeof(mem));
@@ -1855,6 +1947,162 @@ static unsigned rex_bits_for(const char *s) {
     return bits;
 }
 
+/* Whether a name begins as another does, whatever its letters' case. */
+static int starts_ci(const char *s, const char *prefix) {
+    return strncasecmp(s, prefix, strlen(prefix)) == 0;
+}
+
+/* `text` with `mark` before it, in place of what `*raw` was. */
+static int raw_marked(char **raw, const char *mark, const char *text) {
+    size_t len = strlen(mark) + strlen(text) + 1;
+    char *made = (char *)malloc(len);
+
+    if (made == NULL) {
+        return -1;
+    }
+    snprintf(made, len, "%s%s", mark, text);
+    free(*raw);
+    *raw = made;
+    return 0;
+}
+
+/*
+ * An instruction written the Intel way, made the one it is the AT&T
+ * way: its operands in the other order, a register `%eax`, a number
+ * `$5`, and what a jump or a call goes through `*%eax`.
+ *
+ * Every emitter was handed the flag instead and left to read the
+ * operands backwards, and those that did not -- the shifts, the
+ * conditional moves, imul, the bit tests, cmpxchg, lea and more --
+ * took the first operand written for the source and sized the
+ * instruction by nothing: `shl rax, 4` and `cmove r15, rax`, which a
+ * compiler writes, were instructions of 32 bits and nothing was said.
+ * There is one reading of an instruction now, and this is where the
+ * other is turned into it.
+ *
+ * The size written on memory -- `BYTE PTR` -- stays on the operand,
+ * which is the only kind that has one; whoever assembles the
+ * instruction makes the suffix of it.
+ */
+static int intel_statement_to_att(as_instruction_t *in) {
+    const char *mn = in->mnemonic != NULL ? in->mnemonic : "";
+    size_t letters = strlen(mn);
+    /* (jmp and call, and with a letter for the size: jmpw, callq.) */
+    int goes_to = (starts_ci(mn, "jmp") && letters <= 4) || (starts_ci(mn, "call") && letters <= 5) ||
+                  streq_ci(mn, "ljmp") || streq_ci(mn, "lcall");
+    int takes_target = goes_to || mn[0] == 'j' || mn[0] == 'J' || starts_ci(mn, "loop") || streq_ci(mn, "xbegin");
+    /* (All but these have their operands the other way about; and a
+     * far jump or call, whose segment is first either way.) */
+    int as_written = starts_ci(mn, "bound") || starts_ci(mn, "enter") || starts_ci(mn, "invlpg") ||
+                     starts_ci(mn, "monitor") || starts_ci(mn, "mwait") || streq_ci(mn, "tpause") ||
+                     streq_ci(mn, "umwait") || streq_ci(mn, "pvalidate") || streq_ci(mn, "rmpadjust") ||
+                     streq_ci(mn, "rmpupdate") || streq_ci(mn, "rmpquery");
+    size_t i;
+
+    for (i = 0; i < in->operand_count; ++i) {
+        as_operand_t *op = &in->operands[i];
+
+        switch (op->kind) {
+        case AS_OPERAND_REGISTER:
+            if (op->u.reg == NULL || raw_marked(&op->raw, goes_to ? "*%" : "%", op->u.reg) != 0) {
+                return -1;
+            }
+            break;
+        case AS_OPERAND_MEMORY:
+            if (goes_to && op->raw != NULL && op->raw[0] != '*') {
+                char *was = xstrdup(op->raw);
+
+                if (was == NULL || raw_marked(&op->raw, "*", was) != 0) {
+                    free(was);
+                    return -1;
+                }
+                free(was);
+            }
+            break;
+        case AS_OPERAND_IMMEDIATE:
+            if (!takes_target && op->raw != NULL && op->raw[0] != '$') {
+                char *was = xstrdup(op->raw);
+
+                if (was == NULL || raw_marked(&op->raw, "$", was) != 0) {
+                    free(was);
+                    return -1;
+                }
+                free(was);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    /* (`jmp 0x10, 0x1234`: a segment and an offset, which is a far
+     * jump to there -- AT&T's `ljmp $0x10, $0x1234`.) */
+    if (goes_to && in->operand_count == 2 && in->operands[0].kind == AS_OPERAND_IMMEDIATE &&
+        (in->operands[1].kind == AS_OPERAND_IMMEDIATE || in->operands[1].kind == AS_OPERAND_LABEL_REF)) {
+        as_written = 1;
+        in->operands[1].kind = AS_OPERAND_IMMEDIATE;
+        for (i = 0; i < 2; ++i) {
+            as_operand_t *op = &in->operands[i];
+            char *was = op->raw != NULL && op->raw[0] != '$' ? xstrdup(op->raw) : NULL;
+
+            if (was != NULL && raw_marked(&op->raw, "$", was) != 0) {
+                free(was);
+                return -1;
+            }
+            free(was);
+        }
+        if (mn[0] != 'l' && mn[0] != 'L') {
+            char far[8];
+
+            snprintf(far, sizeof(far), "l%.6s", mn);
+            free(in->mnemonic);
+            in->mnemonic = xstrdup(far);
+            if (in->mnemonic == NULL) {
+                return -1;
+            }
+            mn = in->mnemonic;
+        }
+    }
+    if (!as_written) {
+        for (i = 0; i + 1 < in->operand_count - i; ++i) {
+            as_operand_t held = in->operands[i];
+
+            in->operands[i] = in->operands[in->operand_count - 1 - i];
+            in->operands[in->operand_count - 1 - i] = held;
+        }
+    }
+    /*
+     * The x87's subtractions and divisions into a register of the
+     * stack that is not its top: AT&T's names for the two directions
+     * are each the other's, since the first assembler that had them,
+     * and Intel's are the manual's.  `fsubp st(1), st` is AT&T's
+     * `fsubrp %st, %st(1)`; it was assembled as `fsubp`, and a compiler
+     * writes it for every subtraction of doubles in i386 code.
+     */
+    if (starts_ci(mn, "fsub") || starts_ci(mn, "fdiv")) {
+        const char *rest = mn + 4;
+        int reversed = rest[0] == 'r' || rest[0] == 'R';
+        int pops = streq_ci(rest + reversed, "p");
+        int plain = rest[reversed] == '\0';
+        const as_operand_t *to = in->operand_count == 2 ? &in->operands[1] : NULL;
+        int into_stack = to != NULL && to->kind == AS_OPERAND_COPROCESSOR && to->u.coproc != NULL &&
+                         !streq_ci(to->u.coproc, "st") && !streq_ci(to->u.coproc, "st(0)");
+
+        if (pops || (plain && into_stack)) {
+            char other[8];
+
+            snprintf(other, sizeof(other), "%.4s%s%s", mn, reversed ? "" : "r", pops ? "p" : "");
+            free(in->mnemonic);
+            in->mnemonic = xstrdup(other);
+            if (in->mnemonic == NULL) {
+                return -1;
+            }
+        }
+    }
+    in->syntax_intel = 0;
+    in->from_intel = 1;
+    return 0;
+}
+
 static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_stmt_t *st) {
     as_instruction_t in;
     size_t i;
@@ -2068,9 +2316,14 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     memset(&off_op, 0, sizeof(off_op));
                     memset(&seg_op, 0, sizeof(seg_op));
                     if (parse_x86_far_immediate_pair(ctx, tokv + start, operand_n, &off_op, &seg_op) == 0) {
+                        /* (The Intel way the segment is first, as it is
+                         * written; the instruction is made AT&T's with
+                         * its two numbers where they are.) */
+                        int seg_first = ctx->syntax_intel;
+
                         if (rewrite_x86_far_imm_mnemonic(&in.mnemonic) != 0 ||
-                            add_operand(&in, &off_op) != 0 ||
-                            add_operand(&in, &seg_op) != 0) {
+                            add_operand(&in, seg_first ? &seg_op : &off_op) != 0 ||
+                            add_operand(&in, seg_first ? &off_op : &seg_op) != 0) {
                             free_operand(&off_op);
                             free_operand(&seg_op);
                             free_instruction(&in);
@@ -2204,6 +2457,11 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                 return -1;
             }
         }
+    }
+
+    if (in.syntax_intel && parse_is_x86 && intel_statement_to_att(&in) != 0) {
+        free_instruction(&in);
+        return -1;
     }
 
     st->kind = AS_STMT_INSTRUCTION;
