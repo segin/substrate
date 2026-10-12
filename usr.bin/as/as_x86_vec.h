@@ -71,6 +71,7 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_IMM32 (1u << 18) /* the number after it is of four bytes */
 #define AS_VEC_F_SIB (1u << 19)   /* memory always with a SIB byte: AMX, whose index is the stride */
 #define AS_VEC_F_SUFFIX (1u << 20) /* no VEX: the row's byte goes after the operands (3DNow!) */
+#define AS_VEC_F_LOCK (1u << 21)   /* no VEX: may have a lock prefix (said by the name's first row) */
 
 typedef struct {
     const char *name;
@@ -159,6 +160,10 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
  * opcode or is nothing, and GNU as refuses it.
  */
 int as_x86_vec_takes_data16(const char *mnemonic);
+
+/* 1 if the instruction may be locked (AS_VEC_F_LOCK on its first row):
+ * `lock cmpxchg16b`, and `xacquire` and `xrelease` with it. */
+int as_x86_vec_takes_lock(const char *mnemonic);
 
 #ifdef __cplusplus
 }

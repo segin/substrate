@@ -7,11 +7,6 @@
 #include "as_dwline.h"
 #include "as_x86_vec.h"
 #include "as_x86_vex.h"
-#include "as_x86_avx.h"
-#include "as_x86_avx2.h"
-#include "as_x86_bmi1.h"
-#include "as_x86_bmi2.h"
-#include "as_x86_fma.h"
 #include "as_x86_sse3.h"
 #include "as_x86_ssse3.h"
 #include "as_x86_sse41.h"
@@ -7731,8 +7726,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     return -1;
 }
 
-static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, unsigned isa_level,
-                               unsigned char *out, size_t out_cap, size_t *out_len) {
+static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, unsigned char *out, size_t out_cap,
+                               size_t *out_len) {
     const as_operand_t *a;
     const as_operand_t *b;
     const as_operand_t *src;
@@ -8238,54 +8233,6 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             return -1;
         }
         return emit_x86_64_xmm_to_gp_cvtt(0xf3, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "vpbroadcastd") == 0 || strcmp(mnbuf, "vpbroadcastq") == 0) {
-        as_x86_avx2_insn_t avx2;
-        unsigned yd;
-        unsigned xs;
-        char avxerr[128];
-        unsigned char opcode;
-        unsigned char vex2;
-        unsigned char vex3;
-        unsigned char modrm;
-        if (isa_level < 3u) {
-            return -2;
-        }
-        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
-            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(src->u.reg, &xs) != 0 || parse_ymm_reg(dst->u.reg, &yd) != 0) {
-            goto fallback_vpbroadcast;
-        }
-        opcode = (strcmp(mnbuf, "vpbroadcastd") == 0) ? 0x58u : 0x59u;
-        vex2 = (unsigned char)((((yd & 8u) ? 0u : 1u) << 7) | (1u << 6) | (((xs & 8u) ? 0u : 1u) << 5) | 0x02u);
-        vex3 = 0x7du;
-        modrm = (unsigned char)(0xc0u | ((yd & 7u) << 3) | (xs & 7u));
-        if (out_cap < 5) {
-            return -1;
-        }
-        out[0] = 0xc4u;
-        out[1] = vex2;
-        out[2] = vex3;
-        out[3] = opcode;
-        out[4] = modrm;
-        if (out_len != NULL) {
-            *out_len = 5;
-        }
-        return 0;
-fallback_vpbroadcast:
-        memset(&avx2, 0, sizeof(avx2));
-        avx2.mnemonic = mnbuf;
-        avx2.op_count = 2;
-        avx2.vector_bits = 256;
-        if (dst == NULL || src == NULL ||
-            convert_operand_x86(dst, mnbuf, &avx2.op1, 1, intel_syntax, avxerr, sizeof(avxerr)) != 0 ||
-            convert_operand_x86(src, mnbuf, &avx2.op2, 1, intel_syntax, avxerr, sizeof(avxerr)) != 0) {
-            return -1;
-        }
-        if (as_x86_encode_avx2(&avx2, out, out_cap, out_len, avxerr, sizeof(avxerr)) != 0) {
-            return -1;
-        }
-        return 0;
     }
 
     return -1;
@@ -10605,7 +10552,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         return -1;
     }
     if (cfg->is_64 && !x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS)) {
-        int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
+        int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, code, code_cap, code_len);
         if (s64 == 0) {
             if (*code_len > 0) {
                 /* movabs to or from %ax is a 16-bit move and has the
@@ -10617,10 +10564,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                 }
                 return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
             }
-        }
-        if (s64 == -2) {
-            set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
-            return -1;
         }
     }
 
@@ -10895,6 +10838,17 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
 
         for (i = 0; i < sizeof(none) / sizeof(none[0]); ++i) {
             if ((insn->prefixes & none[i].flag) != 0) {
+                /* (One that may be locked: F0 before it, and after a
+                 * segment, which the caller writes.) */
+                if (none[i].flag == AS_PREFIX_LOCK && as_x86_vec_takes_lock(mn)) {
+                    if (*code_len + 1 > code_cap) {
+                        return -1;
+                    }
+                    memmove(code + 1, code, *code_len);
+                    code[0] = 0xf0;
+                    (*code_len)++;
+                    continue;
+                }
                 /* (66 before one of general registers, or of none, is
                  * the operand size: `data16 popcnt`, `data16 xgetbv`.
                  * It is the first byte but for an address size's.) */

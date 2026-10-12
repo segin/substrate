@@ -821,6 +821,12 @@ int as_x86_vec_takes_data16(const char *mnemonic) {
     return 1;
 }
 
+int as_x86_vec_takes_lock(const char *mnemonic) {
+    size_t i;
+
+    return mnemonic != NULL && find_rows(mnemonic, &i) == 0 && (as_x86_vec_table[i].flags & AS_VEC_F_LOCK) != 0;
+}
+
 int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, size_t *out_len, char *errbuf,
                       size_t errbuf_sz) {
     const char *why = "does not take these operands";

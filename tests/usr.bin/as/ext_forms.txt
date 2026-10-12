@@ -20656,3 +20656,92 @@
 32	c4e365482012	vpermil2ps $2,%ymm1,(%eax),%ymm3,%ymm4
 64	refused	vpermil2pd $16,%xmm1,%xmm2,%xmm3,%xmm4
 64	refused	vpermil2pd %xmm1,%xmm2,%xmm3,%xmm4
+64	480fc708	cmpxchg16b (%rax)
+64	480fc70c48	cmpxchg16b (%rax,%rcx,2)
+64	9f	lahf
+64	9e	sahf
+64	660f38f6d1	adcx %ecx, %edx
+64	66480f38f6d1	adcx %rcx, %rdx
+64	660f38f610	adcx (%rax), %edx
+64	66480f38f610	adcx (%rax), %rdx
+64	660f38f61448	adcx (%rax,%rcx,2), %edx
+64	66480f38f61448	adcx (%rax,%rcx,2), %rdx
+64	660f38f6d1	adcxl %ecx, %edx
+64	660f38f610	adcxl (%rax), %edx
+64	660f38f61448	adcxl (%rax,%rcx,2), %edx
+64	66480f38f6d1	adcxq %rcx, %rdx
+64	66480f38f610	adcxq (%rax), %rdx
+64	66480f38f61448	adcxq (%rax,%rcx,2), %rdx
+64	f30f38f6d1	adox %ecx, %edx
+64	f3480f38f6d1	adox %rcx, %rdx
+64	f30f38f610	adox (%rax), %edx
+64	f3480f38f610	adox (%rax), %rdx
+64	f30f38f61448	adox (%rax,%rcx,2), %edx
+64	f3480f38f61448	adox (%rax,%rcx,2), %rdx
+64	f30f38f6d1	adoxl %ecx, %edx
+64	f30f38f610	adoxl (%rax), %edx
+64	f30f38f61448	adoxl (%rax,%rcx,2), %edx
+64	f3480f38f6d1	adoxq %rcx, %rdx
+64	f3480f38f610	adoxq (%rax), %rdx
+64	f3480f38f61448	adoxq (%rax,%rcx,2), %rdx
+64	0fae28	xrstor (%rax)
+64	0fae2c48	xrstor (%rax,%rcx,2)
+64	480fae28	xrstor64 (%rax)
+64	480fae2c48	xrstor64 (%rax,%rcx,2)
+64	480fae28	xrstorq (%rax)
+64	480fae2c48	xrstorq (%rax,%rcx,2)
+64	0fae20	xsave (%rax)
+64	0fae2448	xsave (%rax,%rcx,2)
+64	480fae20	xsave64 (%rax)
+64	480fae2448	xsave64 (%rax,%rcx,2)
+64	480fae20	xsaveq (%rax)
+64	480fae2448	xsaveq (%rax,%rcx,2)
+64	0fc720	xsavec (%rax)
+64	0fc72448	xsavec (%rax,%rcx,2)
+64	480fc720	xsavec64 (%rax)
+64	480fc72448	xsavec64 (%rax,%rcx,2)
+64	0fae30	xsaveopt (%rax)
+64	0fae3448	xsaveopt (%rax,%rcx,2)
+64	480fae30	xsaveopt64 (%rax)
+64	480fae3448	xsaveopt64 (%rax,%rcx,2)
+64	0fc728	xsaves (%rax)
+64	0fc72c48	xsaves (%rax,%rcx,2)
+64	480fc728	xsaves64 (%rax)
+64	480fc72c48	xsaves64 (%rax,%rcx,2)
+64	0fc718	xrstors (%rax)
+64	0fc71c48	xrstors (%rax,%rcx,2)
+64	480fc718	xrstors64 (%rax)
+64	480fc71c48	xrstors64 (%rax,%rcx,2)
+32	9f	lahf
+32	9e	sahf
+32	660f38f6d1	adcx %ecx, %edx
+32	660f38f610	adcx (%eax), %edx
+32	660f38f61448	adcx (%eax,%ecx,2), %edx
+32	660f38f6d1	adcxl %ecx, %edx
+32	660f38f610	adcxl (%eax), %edx
+32	660f38f61448	adcxl (%eax,%ecx,2), %edx
+32	f30f38f6d1	adox %ecx, %edx
+32	f30f38f610	adox (%eax), %edx
+32	f30f38f61448	adox (%eax,%ecx,2), %edx
+32	f30f38f6d1	adoxl %ecx, %edx
+32	f30f38f610	adoxl (%eax), %edx
+32	f30f38f61448	adoxl (%eax,%ecx,2), %edx
+32	0fae28	xrstor (%eax)
+32	0fae2c48	xrstor (%eax,%ecx,2)
+32	0fae20	xsave (%eax)
+32	0fae2448	xsave (%eax,%ecx,2)
+32	0fc720	xsavec (%eax)
+32	0fc72448	xsavec (%eax,%ecx,2)
+32	0fae30	xsaveopt (%eax)
+32	0fae3448	xsaveopt (%eax,%ecx,2)
+32	0fc728	xsaves (%eax)
+32	0fc72c48	xsaves (%eax,%ecx,2)
+32	0fc718	xrstors (%eax)
+32	0fc71c48	xrstors (%eax,%ecx,2)
+64	f0480fc70b	lock cmpxchg16b (%rbx)
+64	65f04b0fc74c6c08	lock cmpxchg16b %gs:8(%r12,%r13,2)
+64	refused	lock adcx %eax, %ebx
+64	refused	xacquire lock cmpxchg16b (%rbx)
+64	refused	rep cmpxchg16b (%rbx)
+32	refused	cmpxchg16b (%eax)
+32	refused	xsave64 (%eax)

@@ -1027,3 +1027,34 @@
     VX("vpermil2ps", P66, M3, 0x48, W1, L128, "umxxx", "im4vr", 0),
     VX("vpermil2ps", P66, M3, 0x48, W0, L256, "uyYyy", "i4mvr", 0),
     VX("vpermil2ps", P66, M3, 0x48, W1, L256, "umyyy", "im4vr", 0),
+
+    /*
+     * And the last of what the files of the levels had (as_x86_v2.c,
+     * as_x86_v3_misc.c): the flags to and from %ah, the 16-byte
+     * exchange, the two adds that keep one flag each, and the saving
+     * and restoring of the extended state.  The names with a size on
+     * them are GNU as's.
+     */
+    {"lahf", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x9f, W0, 0, "", "", 0, 0, 0},
+    {"sahf", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x9e, W0, 0, "", "", 0, 0, 0},
+    LX("cmpxchg16b", P0, M1, 0xc7, W1, "m", "m", DG(1) | O64 | AS_VEC_F_LOCK),
+    LX("adcx", P66, M2, 0xf6, W0, "Dd", "mr", 0),
+    LX("adcx", P66, M2, 0xf6, W1, "Qq", "mr", O64),
+    LX("adcxl", P66, M2, 0xf6, W0, "Dd", "mr", 0),
+    LX("adcxq", P66, M2, 0xf6, W1, "Qq", "mr", O64),
+    LX("adox", PF3, M2, 0xf6, W0, "Dd", "mr", 0),
+    LX("adox", PF3, M2, 0xf6, W1, "Qq", "mr", O64),
+    LX("adoxl", PF3, M2, 0xf6, W0, "Dd", "mr", 0),
+    LX("adoxq", PF3, M2, 0xf6, W1, "Qq", "mr", O64),
+    LX("xsave", P0, M1, 0xae, W0, "m", "m", DG(4)),
+    LX("xsave64", P0, M1, 0xae, W1, "m", "m", DG(4) | O64),
+    LX("xsaveq", P0, M1, 0xae, W1, "m", "m", DG(4) | O64),
+    LX("xrstor", P0, M1, 0xae, W0, "m", "m", DG(5)),
+    LX("xrstor64", P0, M1, 0xae, W1, "m", "m", DG(5) | O64),
+    LX("xrstorq", P0, M1, 0xae, W1, "m", "m", DG(5) | O64),
+    LX("xsaveopt", P0, M1, 0xae, W0, "m", "m", DG(6)),
+    LX("xsaveopt64", P0, M1, 0xae, W1, "m", "m", DG(6) | O64),
+    LX("xsavec", P0, M1, 0xc7, W0, "m", "m", DG(4)),
+    LX("xsavec64", P0, M1, 0xc7, W1, "m", "m", DG(4) | O64),
+    LX("xsaves", P0, M1, 0xc7, W0, "m", "m", DG(5)),
+    LX("xsaves64", P0, M1, 0xc7, W1, "m", "m", DG(5) | O64),

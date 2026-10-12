@@ -31,4 +31,3 @@
 # its registers, `data16` before an instruction of general registers,
 # and `rep xstore-rng`.
 test_unit_matrix.sh	one of the tests it runs, test_i386_refactor_tail.sh, is handed the tree's own assembler, which is built for the target and does not run here
-test_x86_avx_core.sh	a unit test of as_x86_avx.c, which does not encode vpermilps.  Nothing asks it to -- the table has it (AS-T-327) -- and the file goes with AS-T-163
