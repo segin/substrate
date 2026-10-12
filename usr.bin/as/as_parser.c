@@ -2293,6 +2293,20 @@ int as_parse_is_direct_branch(const as_stmt_t *st) {
             st->u.instr.operands[0].kind == AS_OPERAND_IMMEDIATE);
 }
 
+int as_stmt_add_label(as_stmt_t *st, const char *name) {
+    size_t i;
+
+    if (st == NULL || name == NULL) {
+        return -1;
+    }
+    for (i = 0; i < st->label_count; ++i) {
+        if (st->labels[i].name != NULL && strcmp(st->labels[i].name, name) == 0) {
+            return 0;
+        }
+    }
+    return push_label(st, name, st->file != NULL ? st->file : "<input>", st->line);
+}
+
 int as_parse_name_branch_label(as_stmt_t *st) {
     if (!as_parse_is_direct_branch(st) || st->u.instr.operands[0].u.expr == NULL) {
         return 0;

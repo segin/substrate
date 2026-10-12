@@ -241,6 +241,10 @@ int as_parse_end(as_parser_t *p);
 int as_parse_is_direct_branch(const as_stmt_t *st);
 int as_parse_name_branch_label(as_stmt_t *st);
 
+/* Give a statement one label more, of this name, if it has not one of
+ * it already.  0, or -1 for want of memory. */
+int as_stmt_add_label(as_stmt_t *st, const char *name);
+
 #ifdef __cplusplus
 }
 #endif

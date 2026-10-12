@@ -34,8 +34,6 @@ leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 .data | .long 0 | lv: .long 0 | .text | movabs $lv,%rax
 .data | .long 0 | lv: .long 0 | .text | call lv
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
-.globl gf | gf: nop | jmp gf
-.globl gf | gf: nop | je gf
 imulw %bx,%ax,%bx
 imull %ebx,%eax,%ebx
 imulq %rbx,%rax,%rbx

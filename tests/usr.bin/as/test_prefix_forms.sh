@@ -27,6 +27,25 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work" || exit 1
 
+# extreg_forms.txt is the same of %r8 to %r15 where an instruction asks
+# for one register by name.  %r9 passed for %rcx, %r8 for the
+# accumulator and %r10w for %dx, their low three bits being the same:
+# `shrdq $7, %r8, %r9` -- which a compiler writes -- was refused, its
+# destination taken for the count, and `in %r10w, %eax`, `lods
+# %ds:(%rsi), %r8` and `movabs sym, %r8` were assembled as something
+# else.
+#
+# rep_forms.txt is the same of the repeat and lock prefixes, and of
+# jumps to labels the source exports.  `rep bsf`, which a compiler
+# writes for a count of trailing zeros, was `bsf` in 32-bit code: the
+# emitter of it and a dozen others dropped the prefix and said nothing,
+# and before the others of them it is refused now.  A jump to a global
+# label of its own section goes where the label is, in the short form
+# if it reaches -- it was the long form and a relocation -- and a call
+# of one is still the linker's.  The last two are jumps across an
+# alignment, which are short where GNU as's are.
+cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" > forms.txt
+
 fail=0
 cases=0
 while IFS='	' read -r mode want src; do
@@ -44,7 +63,7 @@ while IFS='	' read -r mode want src; do
         echo "FAIL --$mode [$src]: $got, and GNU as: $want"
         fail=1
     fi
-done < "$here/prefix_forms.txt"
+done < forms.txt
 
 [ "$fail" = 0 ] && echo "ok ($cases cases)"
 exit "$fail"

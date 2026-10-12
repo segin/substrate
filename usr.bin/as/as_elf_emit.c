@@ -11610,6 +11610,42 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                 return -1;
             }
             /*
+             * Nor a repeat prefix.  `rep bsf` is what a compiler writes
+             * for a count of trailing zeros that an older processor can
+             * run too -- F3 0F BC is `tzcnt` to one that has it and
+             * `bsf` to one that has not -- and it came out as `bsf`
+             * alone, which leaves its destination as it was when the
+             * source is zero, where `tzcnt` sets it to 32.  Before the
+             * others of these there is nothing to repeat, and the
+             * prefix was dropped without a word.
+             */
+            if ((st->u.instr.prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE | AS_PREFIX_REPNE)) != 0 &&
+                (st->u.instr.prefixes & AS_PREFIX_HLE) == 0) {
+                unsigned char want = (st->u.instr.prefixes & AS_PREFIX_REPNE) != 0 ? 0xf2 : 0xf3;
+                size_t k;
+                int have = 0;
+
+                for (k = 0; k < *code_len && (code[k] == 0x26 || code[k] == 0x2e || code[k] == 0x36 ||
+                                              code[k] == 0x3e || code[k] == 0x64 || code[k] == 0x65 ||
+                                              code[k] == 0x66 || code[k] == 0x67 || code[k] == 0xf0 ||
+                                              code[k] == 0xf2 || code[k] == 0xf3);
+                     ++k) {
+                    have |= code[k] == want;
+                }
+                if (!have) {
+                    if (strcmp(mnbuf, "bsf") != 0 && strcmp(mnbuf, "bsr") != 0) {
+                        snprintf(encerr, encerr_sz, "'%s' is not an instruction a repeat prefix goes before", mnbuf);
+                        return -1;
+                    }
+                    if (*code_len >= code_cap) {
+                        return -1;
+                    }
+                    memmove(code + 1, code, *code_len);
+                    code[0] = want;
+                    (*code_len)++;
+                }
+            }
+            /*
              * Nor the operand-size prefix: `bsf %ax, %bx`, `btw`,
              * `shld $4, %ax, %bx`, `cmpxchg %ax, (%ebx)` and `popcnt
              * %ax, %bx` were each the 32-bit instruction.  Whatever
@@ -12691,6 +12727,23 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
     }
     direct = in->operand_count == 1 &&
              (in->operands[0].kind == AS_OPERAND_LABEL_REF || in->operands[0].kind == AS_OPERAND_IMMEDIATE);
+    /* A repeat prefix goes before no instruction of the x87; and
+     * xacquire and xrelease before one that is locked, or an exchange
+     * with memory, or (xrelease) a store.  In 32-bit code several
+     * emitters took either before anything. */
+    if ((in->prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE | AS_PREFIX_REPNE)) != 0) {
+        if ((in->prefixes & AS_PREFIX_HLE) == 0) {
+            if (base[0] == 'f' && strcmp(base, "femms") != 0) {
+                snprintf(encerr, encerr_sz, "'%s' is not an instruction a repeat prefix goes before", in->mnemonic);
+                return 1;
+            }
+        } else if ((in->prefixes & AS_PREFIX_LOCK) == 0 && strcmp(base, "xchg") != 0 &&
+                   !(strcmp(base, "mov") == 0 && (in->prefixes & AS_PREFIX_REP) != 0)) {
+            snprintf(encerr, encerr_sz, "'%s' is not locked, and %s goes before an instruction that is", in->mnemonic,
+                     (in->prefixes & AS_PREFIX_REPNE) != 0 ? "xacquire" : "xrelease");
+            return 1;
+        }
+    }
     /* A jump to a label is of the code's size, and has no letter to
      * say another; nor has a call one for 32 bits in 64-bit code. */
     if (direct && suffix != '\0' && suffix != 'b' &&
@@ -12726,6 +12779,24 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
              (want != 0 && r->width != want))) {
             snprintf(encerr, encerr_sz, "'%s' stores the accumulator, and %%%s is not it", in->mnemonic, r->name);
             return 1;
+        }
+    }
+    /* A move to or from an address of 64 bits is the accumulator's and
+     * no other register's: `movabs sym, %r8` was `movabs $sym, %r8`,
+     * which loads the address and not what is at it. */
+    if (in->operand_count == 2 && !in->syntax_intel && strcmp(base, "movabs") == 0) {
+        for (i = 0; i < 2; ++i) {
+            const as_operand_t *at = &in->operands[i];
+            const as_operand_t *other = &in->operands[1 - i];
+            const as_x86_reg_info_t *r = other->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(other->u.reg) : NULL;
+
+            if ((at->kind == AS_OPERAND_MEMORY || operand_is_bare_address(at)) && r != NULL &&
+                strcmp(r->name, "al") != 0 && strcmp(r->name, "ax") != 0 && strcmp(r->name, "eax") != 0 &&
+                strcmp(r->name, "rax") != 0) {
+                snprintf(encerr, encerr_sz, "'movabs' moves between an address and the accumulator, and %%%s is not it",
+                         r->name);
+                return 1;
+            }
         }
     }
     /* `movsxd` widens 32 bits. */
@@ -15636,15 +15707,19 @@ static int relax_branches(emit_ctx_t *ctx) {
     size_t *target = NULL;
     size_t *fixed = NULL;
     size_t *sid = NULL;
+    unsigned *region = NULL;
     uint64_t *off = NULL;
     struct relax_at {
         const char *name;
         uint64_t off;
+        unsigned region;
     } *at = NULL;
     size_t at_count = 0, at_cap = 0;
     section_track_t track;
     int tracking = 0;
-    int changed = 1;
+    int changed = 0;
+    int moved = 0;
+    unsigned round = 0;
     int rc = -1;
     size_t i;
 
@@ -15707,7 +15782,8 @@ static int relax_branches(emit_ctx_t *ctx) {
         }
         slots = (size_t *)calloc(cap, sizeof(*slots));
         sid = (size_t *)malloc(count * sizeof(*sid));
-        if (slots == NULL || sid == NULL) {
+        region = (unsigned *)malloc(count * sizeof(*region));
+        if (slots == NULL || sid == NULL || region == NULL) {
             free(slots);
             goto out;
         }
@@ -15736,16 +15812,49 @@ static int relax_branches(emit_ctx_t *ctx) {
                 }
                 at[at_count].name = name;
                 at[at_count].off = 0;
+                at[at_count].region = 0;
                 slots[s] = ++at_count;
             }
             sid[i] = slots[s] - 1;
+            /* (And which stretch of its section between alignments,
+             * for the rounds below: an alignment is the last of one.) */
+            region[i] = at[sid[i]].region;
+            {
+                const as_stmt_t *st = &ctx->parsed->items[i];
+
+                if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
+                    (strcmp(st->u.directive.name, ".p2align") == 0 || strcmp(st->u.directive.name, ".balign") == 0 ||
+                     strcmp(st->u.directive.name, ".align") == 0 || strcmp(st->u.directive.name, ".org") == 0)) {
+                    at[sid[i]].region++;
+                }
+            }
         }
         free(slots);
     }
     ctx->relax_state = 1;
     ctx->virtual_scanning++;
-    while (changed) {
+    /*
+     * A round goes down the source once.  Each statement is where the
+     * ones before it now put it; a short jump is asked whether it still
+     * reaches -- a label behind it is where this round put it, and one
+     * ahead where the last round did, moved by as much as the jump
+     * itself has been -- and if it does not it is long from there on,
+     * in the round that found it.  The rounds end when one changes no
+     * jump and moves no statement, so that every distance asked about
+     * in it was the true one.
+     *
+     * (Every jump of a round was asked against the layout of the round
+     * before, all at once: a jump that did not reach by the width of
+     * some padding was made long though another, made long in the same
+     * round, had taken the padding away.  GNU as walks as this does, and
+     * what a compiler makes at -O2 came out some bytes different from
+     * it in one function in eight.)
+     */
+    /* (The first round lays the statements out with every jump short,
+     * and asks nothing; the second is the first that asks.) */
+    while (changed || moved || round < 2) {
         changed = 0;
+        moved = 0;
         relax_forget_layout(ctx);
         if (tracking) {
             section_track_free(&track);
@@ -15763,8 +15872,39 @@ static int relax_branches(emit_ctx_t *ctx) {
             const char *section = track.current != NULL ? track.current : "";
             size_t k = sid[i];
             size_t n = 0;
+            long long stretch = round == 0 ? 0 : (long long)at[k].off - (long long)off[i];
 
+            moved |= stretch != 0;
             off[i] = at[k].off;
+            if (round != 0 && ctx->branch_short[i] == 1) {
+                const as_expr_t *place;
+                long long addend;
+                long long there;
+                long long disp;
+                long long pre = (long long)x86_branch_flip16(st);
+
+                (void)relax_branch_parts(st->u.instr.operands[0].u.expr, &place, &addend);
+                there = (long long)off[target[i]];
+                /* A label ahead has yet to be moved in this round.  It
+                 * will move as this jump has, unless an alignment lies
+                 * between, whose padding takes up what came before it:
+                 * then it is taken to stay, and if that puts it behind
+                 * the jump the question is left for the next round. */
+                if (target[i] > i && (stretch < 0 || region[target[i]] == region[i])) {
+                    there += stretch;
+                }
+                disp = there + addend - ((long long)off[i] + 2 + pre);
+                if (target[i] > i && there < (long long)off[i]) {
+                    disp = 0;
+                }
+                if (disp < -128 || disp > 127) {
+                    ctx->branch_short[i] = 2;
+                    changed = 1;
+                    /* (What has been remembered of sizes and places in
+                     * this round was worked out with the jump short.) */
+                    relax_forget_layout(ctx);
+                }
+            }
             if (st->kind == AS_STMT_DIRECTIVE) {
                 int trc = section_track_apply_directive(&track, &st->u.directive);
 
@@ -15777,7 +15917,7 @@ static int relax_branches(emit_ctx_t *ctx) {
                 (void)stmt_virtual_size_in_section(ctx, section, st, off[i], track.x86_code_bits, &n);
             } else if (st->kind == AS_STMT_INSTRUCTION) {
                 if (ctx->branch_short[i] == 1) {
-                    n = 2;
+                    n = 2u + (size_t)x86_branch_flip16(st);
                 } else if (ctx->branch_short[i] == 2) {
                     n = relax_long_size(st, track.x86_code_bits);
                 } else {
@@ -15792,21 +15932,7 @@ static int relax_branches(emit_ctx_t *ctx) {
             }
             at[k].off += n;
         }
-        for (i = 0; i < count; ++i) {
-            const as_expr_t *place;
-            long long addend;
-            long long disp;
-
-            if (ctx->branch_short[i] != 1) {
-                continue;
-            }
-            (void)relax_branch_parts(ctx->parsed->items[i].u.instr.operands[0].u.expr, &place, &addend);
-            disp = (long long)off[target[i]] + addend - (long long)(off[i] + 2);
-            if (disp < -128 || disp > 127) {
-                ctx->branch_short[i] = 2;
-                changed = 1;
-            }
-        }
+        round++;
     }
     rc = 0;
 unwind:
@@ -15823,6 +15949,7 @@ out:
     free(target);
     free(fixed);
     free(sid);
+    free(region);
     free(off);
     free(at);
     return rc;
@@ -23120,7 +23247,23 @@ typedef struct {
     unsigned line;
     int digit;
     size_t section;
+    size_t stmt; /* the statement it is on */
 } far_label_t;
+
+/* The symbol a jump goes to, where it is written as a name and no
+ * operator: the node of it, or NULL. */
+static as_expr_t *jump_symbol_node(as_expr_t *e) {
+    as_expr_t *found;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    if (e->kind == AS_EXPR_SYMBOL) {
+        return e->symbol != NULL && e->reloc_op == NULL ? e : NULL;
+    }
+    found = jump_symbol_node(e->lhs);
+    return found != NULL ? found : jump_symbol_node(e->rhs);
+}
 
 static int far_label_cmp(const void *a, const void *b) {
     const far_label_t *x = (const far_label_t *)a;
@@ -23160,6 +23303,8 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
     size_t label_count = 0, label_cap = 0;
     const char **exported = NULL;
     size_t exported_count = 0, exported_cap = 0;
+    const char **weak = NULL;
+    size_t weak_count = 0, weak_cap = 0;
     size_t *stmt_section = NULL;
     size_t i;
     int rc = -1;
@@ -23206,6 +23351,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             labels[label_count].line = numeric ? st->labels[j].line : 0;
             labels[label_count].digit = numeric ? digit : 0;
             labels[label_count].section = stmt_section[i];
+            labels[label_count].stmt = i;
             label_count++;
         }
         if (st->kind == AS_STMT_DIRECTIVE) {
@@ -23215,6 +23361,20 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
              * source's own. */
             if (strcmp(d->name, ".globl") == 0 || strcmp(d->name, ".global") == 0 || strcmp(d->name, ".weak") == 0) {
                 for (j = 0; j < d->arg_count; ++j) {
+                    /* (And those that may be replaced, apart.) */
+                    if (strcmp(d->name, ".weak") == 0) {
+                        if (weak_count == weak_cap) {
+                            size_t cap = weak_cap != 0 ? weak_cap * 2 : 16;
+                            const char **grown = (const char **)realloc(weak, cap * sizeof(*grown));
+
+                            if (grown == NULL) {
+                                goto out;
+                            }
+                            weak = grown;
+                            weak_cap = cap;
+                        }
+                        weak[weak_count++] = d->args[j];
+                    }
                     if (exported_count == exported_cap) {
                         size_t cap = exported_cap != 0 ? exported_cap * 2 : 64;
                         const char **grown = (const char **)realloc(exported, cap * sizeof(*grown));
@@ -23238,6 +23398,9 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
     near_names_free();
     if (exported_count != 0) {
         qsort(exported, exported_count, sizeof(*exported), near_name_cmp);
+    }
+    if (weak_count != 0) {
+        qsort(weak, weak_count, sizeof(*weak), near_name_cmp);
     }
     near_names = (char **)calloc(label_count != 0 ? label_count : 1, sizeof(*near_names));
     if (near_names == NULL) {
@@ -23267,6 +23430,57 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 
         if (!as_parse_is_direct_branch(st)) {
             continue;
+        }
+        /*
+         * A jump to a label of its own section that the source exports
+         * goes where the label is: another file may call the name, and
+         * may not put something else where this one's code jumps to.
+         * (A weak one it may; and a call or a `loop` of the name is the
+         * linker's, as GNU as leaves them.)  The jump is made to go to
+         * a name of the source's own, put on the label here: it was the
+         * long form with a relocation, where the label was two bytes
+         * away.
+         */
+        {
+            as_expr_t *node = jump_symbol_node(st->u.instr.operands[0].u.expr);
+            unsigned cc;
+            char mnbuf[32];
+            char suffix = '\0';
+
+            if (node != NULL && !expr_is_local_temp_symbol(node) && strcmp(node->symbol, ".") != 0 &&
+                normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
+                (streq_ci(mnbuf, "jmp") || x86_cond_code(mnbuf, &cc) == 0) &&
+                (cfg == NULL || cfg->target == 0) && exported_count != 0 &&
+                bsearch(&node->symbol, exported, exported_count, sizeof(*exported), near_name_cmp) != NULL &&
+                (weak_count == 0 ||
+                 bsearch(&node->symbol, weak, weak_count, sizeof(*weak), near_name_cmp) == NULL)) {
+                far_label_t want;
+                const far_label_t *at;
+
+                memset(&want, 0, sizeof(want));
+                want.name = node->symbol;
+                at = label_count != 0
+                         ? (const far_label_t *)bsearch(&want, labels, label_count, sizeof(*labels), far_label_cmp)
+                         : NULL;
+                if (at != NULL && at->section == stmt_section[i]) {
+                    size_t len = strlen(node->symbol) + sizeof(".L.jump.");
+                    char *alias = (char *)malloc(len);
+
+                    if (alias == NULL) {
+                        goto out;
+                    }
+                    snprintf(alias, len, ".L.jump.%s", node->symbol);
+                    if (as_stmt_add_label(&parsed->items[at->stmt], alias) != 0) {
+                        free(alias);
+                        goto out;
+                    }
+                    free(node->symbol);
+                    node->symbol = alias;
+                    /* (Its section is the jump's, which is all the rest
+                     * of this asks.) */
+                    continue;
+                }
+            }
         }
         e = far_branch_label(st->u.instr.operands[0].u.expr);
         if (e == NULL) {
@@ -23305,6 +23519,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 out:
     free(labels);
     free(exported);
+    free(weak);
     free(stmt_section);
     sec_buf_vec_free(&names);
     section_track_free(&track);

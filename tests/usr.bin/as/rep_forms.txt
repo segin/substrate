@@ -1,0 +1,518 @@
+32	f30fbcc9	rep bsf %ecx,%ecx
+64	f30fbcc9	rep bsf %ecx,%ecx
+32	f30fbdc9	rep bsr %ecx,%ecx
+64	f30fbdc9	rep bsr %ecx,%ecx
+32	f30fbc08	rep bsfl (%eax),%ecx
+64	67f30fbc08	rep bsfl (%eax),%ecx
+32	66f30fbcd1	rep bsfw %cx,%dx
+64	66f30fbcd1	rep bsfw %cx,%dx
+32	66f30fbd10	rep bsrw (%eax),%dx
+64	6766f30fbd10	rep bsrw (%eax),%dx
+32	f3c3	rep ret
+64	f3c3	rep ret
+32	f390	rep nop
+64	f390	rep nop
+32	refused	rep cmpxchg %eax,(%ebx)
+64	refused	rep cmpxchg %eax,(%ebx)
+32	refused	rep addl %eax,(%ebx)
+64	refused	rep addl %eax,(%ebx)
+32	refused	rep popcnt %eax,%ebx
+64	refused	rep popcnt %eax,%ebx
+32	refused	rep xchg %eax,(%ebx)
+64	refused	rep xchg %eax,(%ebx)
+32	refused	rep incl (%eax)
+64	refused	rep incl (%eax)
+32	f3aa	rep stosb
+64	f3aa	rep stosb
+32	f3a5	rep movsl
+64	f3a5	rep movsl
+32	f3a6	rep cmpsb
+64	f3a6	rep cmpsb
+32	refused	rep lzcnt %eax,%ebx
+64	refused	rep lzcnt %eax,%ebx
+32	refused	rep tzcnt %eax,%ebx
+64	refused	rep tzcnt %eax,%ebx
+32	refused	rep bt %eax,%ebx
+64	refused	rep bt %eax,%ebx
+32	refused	rep shld %cl,%eax,%ebx
+64	refused	rep shld %cl,%eax,%ebx
+32	refused	rep btsl $1,(%eax)
+64	refused	rep btsl $1,(%eax)
+32	refused	rep negl (%eax)
+64	refused	rep negl (%eax)
+32	refused	rep fldl (%eax)
+64	refused	rep fldl (%eax)
+32	refused	rep sldt %ax
+64	refused	rep sldt %ax
+32	refused	rep cmpxchg8b (%eax)
+64	refused	rep cmpxchg8b (%eax)
+32	refused	rep cpuid
+64	refused	rep cpuid
+32	f3ad	rep lodsl
+64	f3ad	rep lodsl
+32	f3ae	rep scasb
+64	f3ae	rep scasb
+32	f30fbcc9	repe bsf %ecx,%ecx
+64	f30fbcc9	repe bsf %ecx,%ecx
+32	f30fbdc9	repe bsr %ecx,%ecx
+64	f30fbdc9	repe bsr %ecx,%ecx
+32	f30fbc08	repe bsfl (%eax),%ecx
+64	67f30fbc08	repe bsfl (%eax),%ecx
+32	66f30fbcd1	repe bsfw %cx,%dx
+64	66f30fbcd1	repe bsfw %cx,%dx
+32	66f30fbd10	repe bsrw (%eax),%dx
+64	6766f30fbd10	repe bsrw (%eax),%dx
+32	f3c3	repe ret
+64	f3c3	repe ret
+32	f390	repe nop
+64	f390	repe nop
+32	refused	repe cmpxchg %eax,(%ebx)
+64	refused	repe cmpxchg %eax,(%ebx)
+32	refused	repe addl %eax,(%ebx)
+64	refused	repe addl %eax,(%ebx)
+32	refused	repe popcnt %eax,%ebx
+64	refused	repe popcnt %eax,%ebx
+32	refused	repe xchg %eax,(%ebx)
+64	refused	repe xchg %eax,(%ebx)
+32	refused	repe incl (%eax)
+64	refused	repe incl (%eax)
+32	f3aa	repe stosb
+64	f3aa	repe stosb
+32	f3a5	repe movsl
+64	f3a5	repe movsl
+32	f3a6	repe cmpsb
+64	f3a6	repe cmpsb
+32	refused	repe lzcnt %eax,%ebx
+64	refused	repe lzcnt %eax,%ebx
+32	refused	repe tzcnt %eax,%ebx
+64	refused	repe tzcnt %eax,%ebx
+32	refused	repe bt %eax,%ebx
+64	refused	repe bt %eax,%ebx
+32	refused	repe shld %cl,%eax,%ebx
+64	refused	repe shld %cl,%eax,%ebx
+32	refused	repe btsl $1,(%eax)
+64	refused	repe btsl $1,(%eax)
+32	refused	repe negl (%eax)
+64	refused	repe negl (%eax)
+32	refused	repe fldl (%eax)
+64	refused	repe fldl (%eax)
+32	refused	repe sldt %ax
+64	refused	repe sldt %ax
+32	refused	repe cmpxchg8b (%eax)
+64	refused	repe cmpxchg8b (%eax)
+32	refused	repe cpuid
+64	refused	repe cpuid
+32	f3ad	repe lodsl
+64	f3ad	repe lodsl
+32	f3ae	repe scasb
+64	f3ae	repe scasb
+32	f30fbcc9	repz bsf %ecx,%ecx
+64	f30fbcc9	repz bsf %ecx,%ecx
+32	f30fbdc9	repz bsr %ecx,%ecx
+64	f30fbdc9	repz bsr %ecx,%ecx
+32	f30fbc08	repz bsfl (%eax),%ecx
+64	67f30fbc08	repz bsfl (%eax),%ecx
+32	66f30fbcd1	repz bsfw %cx,%dx
+64	66f30fbcd1	repz bsfw %cx,%dx
+32	66f30fbd10	repz bsrw (%eax),%dx
+64	6766f30fbd10	repz bsrw (%eax),%dx
+32	f3c3	repz ret
+64	f3c3	repz ret
+32	f390	repz nop
+64	f390	repz nop
+32	refused	repz cmpxchg %eax,(%ebx)
+64	refused	repz cmpxchg %eax,(%ebx)
+32	refused	repz addl %eax,(%ebx)
+64	refused	repz addl %eax,(%ebx)
+32	refused	repz popcnt %eax,%ebx
+64	refused	repz popcnt %eax,%ebx
+32	refused	repz xchg %eax,(%ebx)
+64	refused	repz xchg %eax,(%ebx)
+32	refused	repz incl (%eax)
+64	refused	repz incl (%eax)
+32	f3aa	repz stosb
+64	f3aa	repz stosb
+32	f3a5	repz movsl
+64	f3a5	repz movsl
+32	f3a6	repz cmpsb
+64	f3a6	repz cmpsb
+32	refused	repz lzcnt %eax,%ebx
+64	refused	repz lzcnt %eax,%ebx
+32	refused	repz tzcnt %eax,%ebx
+64	refused	repz tzcnt %eax,%ebx
+32	refused	repz bt %eax,%ebx
+64	refused	repz bt %eax,%ebx
+32	refused	repz shld %cl,%eax,%ebx
+64	refused	repz shld %cl,%eax,%ebx
+32	refused	repz btsl $1,(%eax)
+64	refused	repz btsl $1,(%eax)
+32	refused	repz negl (%eax)
+64	refused	repz negl (%eax)
+32	refused	repz fldl (%eax)
+64	refused	repz fldl (%eax)
+32	refused	repz sldt %ax
+64	refused	repz sldt %ax
+32	refused	repz cmpxchg8b (%eax)
+64	refused	repz cmpxchg8b (%eax)
+32	refused	repz cpuid
+64	refused	repz cpuid
+32	f3ad	repz lodsl
+64	f3ad	repz lodsl
+32	f3ae	repz scasb
+64	f3ae	repz scasb
+32	f20fbcc9	repne bsf %ecx,%ecx
+64	f20fbcc9	repne bsf %ecx,%ecx
+32	f20fbdc9	repne bsr %ecx,%ecx
+64	f20fbdc9	repne bsr %ecx,%ecx
+32	f20fbc08	repne bsfl (%eax),%ecx
+64	67f20fbc08	repne bsfl (%eax),%ecx
+32	66f20fbcd1	repne bsfw %cx,%dx
+64	66f20fbcd1	repne bsfw %cx,%dx
+32	66f20fbd10	repne bsrw (%eax),%dx
+64	6766f20fbd10	repne bsrw (%eax),%dx
+32	f2c3	repne ret
+64	f2c3	repne ret
+32	f290	repne nop
+64	f290	repne nop
+32	refused	repne cmpxchg %eax,(%ebx)
+64	refused	repne cmpxchg %eax,(%ebx)
+32	refused	repne addl %eax,(%ebx)
+64	refused	repne addl %eax,(%ebx)
+32	refused	repne popcnt %eax,%ebx
+64	refused	repne popcnt %eax,%ebx
+32	refused	repne xchg %eax,(%ebx)
+64	refused	repne xchg %eax,(%ebx)
+32	refused	repne incl (%eax)
+64	refused	repne incl (%eax)
+32	f2aa	repne stosb
+64	f2aa	repne stosb
+32	f2a5	repne movsl
+64	f2a5	repne movsl
+32	f2a6	repne cmpsb
+64	f2a6	repne cmpsb
+32	refused	repne lzcnt %eax,%ebx
+64	refused	repne lzcnt %eax,%ebx
+32	refused	repne tzcnt %eax,%ebx
+64	refused	repne tzcnt %eax,%ebx
+32	refused	repne bt %eax,%ebx
+64	refused	repne bt %eax,%ebx
+32	refused	repne shld %cl,%eax,%ebx
+64	refused	repne shld %cl,%eax,%ebx
+32	refused	repne btsl $1,(%eax)
+64	refused	repne btsl $1,(%eax)
+32	refused	repne negl (%eax)
+64	refused	repne negl (%eax)
+32	refused	repne fldl (%eax)
+64	refused	repne fldl (%eax)
+32	refused	repne sldt %ax
+64	refused	repne sldt %ax
+32	refused	repne cmpxchg8b (%eax)
+64	refused	repne cmpxchg8b (%eax)
+32	refused	repne cpuid
+64	refused	repne cpuid
+32	f2ad	repne lodsl
+64	f2ad	repne lodsl
+32	f2ae	repne scasb
+64	f2ae	repne scasb
+32	f20fbcc9	repnz bsf %ecx,%ecx
+64	f20fbcc9	repnz bsf %ecx,%ecx
+32	f20fbdc9	repnz bsr %ecx,%ecx
+64	f20fbdc9	repnz bsr %ecx,%ecx
+32	f20fbc08	repnz bsfl (%eax),%ecx
+64	67f20fbc08	repnz bsfl (%eax),%ecx
+32	66f20fbcd1	repnz bsfw %cx,%dx
+64	66f20fbcd1	repnz bsfw %cx,%dx
+32	66f20fbd10	repnz bsrw (%eax),%dx
+64	6766f20fbd10	repnz bsrw (%eax),%dx
+32	f2c3	repnz ret
+64	f2c3	repnz ret
+32	f290	repnz nop
+64	f290	repnz nop
+32	refused	repnz cmpxchg %eax,(%ebx)
+64	refused	repnz cmpxchg %eax,(%ebx)
+32	refused	repnz addl %eax,(%ebx)
+64	refused	repnz addl %eax,(%ebx)
+32	refused	repnz popcnt %eax,%ebx
+64	refused	repnz popcnt %eax,%ebx
+32	refused	repnz xchg %eax,(%ebx)
+64	refused	repnz xchg %eax,(%ebx)
+32	refused	repnz incl (%eax)
+64	refused	repnz incl (%eax)
+32	f2aa	repnz stosb
+64	f2aa	repnz stosb
+32	f2a5	repnz movsl
+64	f2a5	repnz movsl
+32	f2a6	repnz cmpsb
+64	f2a6	repnz cmpsb
+32	refused	repnz lzcnt %eax,%ebx
+64	refused	repnz lzcnt %eax,%ebx
+32	refused	repnz tzcnt %eax,%ebx
+64	refused	repnz tzcnt %eax,%ebx
+32	refused	repnz bt %eax,%ebx
+64	refused	repnz bt %eax,%ebx
+32	refused	repnz shld %cl,%eax,%ebx
+64	refused	repnz shld %cl,%eax,%ebx
+32	refused	repnz btsl $1,(%eax)
+64	refused	repnz btsl $1,(%eax)
+32	refused	repnz negl (%eax)
+64	refused	repnz negl (%eax)
+32	refused	repnz fldl (%eax)
+64	refused	repnz fldl (%eax)
+32	refused	repnz sldt %ax
+64	refused	repnz sldt %ax
+32	refused	repnz cmpxchg8b (%eax)
+64	refused	repnz cmpxchg8b (%eax)
+32	refused	repnz cpuid
+64	refused	repnz cpuid
+32	f2ad	repnz lodsl
+64	f2ad	repnz lodsl
+32	f2ae	repnz scasb
+64	f2ae	repnz scasb
+32	refused	lock bsf %ecx,%ecx
+64	refused	lock bsf %ecx,%ecx
+32	refused	lock bsr %ecx,%ecx
+64	refused	lock bsr %ecx,%ecx
+32	refused	lock bsfl (%eax),%ecx
+64	refused	lock bsfl (%eax),%ecx
+32	refused	lock bsfw %cx,%dx
+64	refused	lock bsfw %cx,%dx
+32	refused	lock bsrw (%eax),%dx
+64	refused	lock bsrw (%eax),%dx
+32	refused	lock ret
+64	refused	lock ret
+32	refused	lock nop
+64	refused	lock nop
+32	f00fb103	lock cmpxchg %eax,(%ebx)
+64	67f00fb103	lock cmpxchg %eax,(%ebx)
+32	f00103	lock addl %eax,(%ebx)
+64	67f00103	lock addl %eax,(%ebx)
+32	refused	lock popcnt %eax,%ebx
+64	refused	lock popcnt %eax,%ebx
+32	f08703	lock xchg %eax,(%ebx)
+64	67f08703	lock xchg %eax,(%ebx)
+32	f0ff00	lock incl (%eax)
+64	67f0ff00	lock incl (%eax)
+32	refused	lock stosb
+64	refused	lock stosb
+32	refused	lock movsl
+64	refused	lock movsl
+32	refused	lock cmpsb
+64	refused	lock cmpsb
+32	refused	lock lzcnt %eax,%ebx
+64	refused	lock lzcnt %eax,%ebx
+32	refused	lock tzcnt %eax,%ebx
+64	refused	lock tzcnt %eax,%ebx
+32	refused	lock bt %eax,%ebx
+64	refused	lock bt %eax,%ebx
+32	refused	lock shld %cl,%eax,%ebx
+64	refused	lock shld %cl,%eax,%ebx
+32	f00fba2801	lock btsl $1,(%eax)
+64	67f00fba2801	lock btsl $1,(%eax)
+32	f0f718	lock negl (%eax)
+64	67f0f718	lock negl (%eax)
+32	refused	lock fldl (%eax)
+64	refused	lock fldl (%eax)
+32	refused	lock sldt %ax
+64	refused	lock sldt %ax
+32	f00fc708	lock cmpxchg8b (%eax)
+64	67f00fc708	lock cmpxchg8b (%eax)
+32	refused	lock cpuid
+64	refused	lock cpuid
+32	refused	lock lodsl
+64	refused	lock lodsl
+32	refused	lock scasb
+64	refused	lock scasb
+32	refused	rep lock bsf %ecx,%ecx
+64	refused	rep lock bsf %ecx,%ecx
+32	refused	rep lock bsr %ecx,%ecx
+64	refused	rep lock bsr %ecx,%ecx
+32	refused	rep lock bsfl (%eax),%ecx
+64	refused	rep lock bsfl (%eax),%ecx
+32	refused	rep lock bsfw %cx,%dx
+64	refused	rep lock bsfw %cx,%dx
+32	refused	rep lock bsrw (%eax),%dx
+64	refused	rep lock bsrw (%eax),%dx
+32	refused	rep lock ret
+64	refused	rep lock ret
+32	refused	rep lock nop
+64	refused	rep lock nop
+32	refused	rep lock cmpxchg %eax,(%ebx)
+64	refused	rep lock cmpxchg %eax,(%ebx)
+32	refused	rep lock addl %eax,(%ebx)
+64	refused	rep lock addl %eax,(%ebx)
+32	refused	rep lock popcnt %eax,%ebx
+64	refused	rep lock popcnt %eax,%ebx
+32	refused	rep lock xchg %eax,(%ebx)
+64	refused	rep lock xchg %eax,(%ebx)
+32	refused	rep lock incl (%eax)
+64	refused	rep lock incl (%eax)
+32	refused	rep lock stosb
+64	refused	rep lock stosb
+32	refused	rep lock movsl
+64	refused	rep lock movsl
+32	refused	rep lock cmpsb
+64	refused	rep lock cmpsb
+32	refused	rep lock lzcnt %eax,%ebx
+64	refused	rep lock lzcnt %eax,%ebx
+32	refused	rep lock tzcnt %eax,%ebx
+64	refused	rep lock tzcnt %eax,%ebx
+32	refused	rep lock bt %eax,%ebx
+64	refused	rep lock bt %eax,%ebx
+32	refused	rep lock shld %cl,%eax,%ebx
+64	refused	rep lock shld %cl,%eax,%ebx
+32	refused	rep lock btsl $1,(%eax)
+64	refused	rep lock btsl $1,(%eax)
+32	refused	rep lock negl (%eax)
+64	refused	rep lock negl (%eax)
+32	refused	rep lock fldl (%eax)
+64	refused	rep lock fldl (%eax)
+32	refused	rep lock sldt %ax
+64	refused	rep lock sldt %ax
+32	refused	rep lock cmpxchg8b (%eax)
+64	refused	rep lock cmpxchg8b (%eax)
+32	refused	rep lock cpuid
+64	refused	rep lock cpuid
+32	refused	rep lock lodsl
+64	refused	rep lock lodsl
+32	refused	rep lock scasb
+64	refused	rep lock scasb
+32	refused	xacquire bsf %ecx,%ecx
+64	refused	xacquire bsf %ecx,%ecx
+32	refused	xacquire bsr %ecx,%ecx
+64	refused	xacquire bsr %ecx,%ecx
+32	refused	xacquire bsfl (%eax),%ecx
+64	refused	xacquire bsfl (%eax),%ecx
+32	refused	xacquire bsfw %cx,%dx
+64	refused	xacquire bsfw %cx,%dx
+32	refused	xacquire bsrw (%eax),%dx
+64	refused	xacquire bsrw (%eax),%dx
+32	refused	xacquire ret
+64	refused	xacquire ret
+32	refused	xacquire nop
+64	refused	xacquire nop
+32	refused	xacquire cmpxchg %eax,(%ebx)
+64	refused	xacquire cmpxchg %eax,(%ebx)
+32	refused	xacquire addl %eax,(%ebx)
+64	refused	xacquire addl %eax,(%ebx)
+32	refused	xacquire popcnt %eax,%ebx
+64	refused	xacquire popcnt %eax,%ebx
+32	f28703	xacquire xchg %eax,(%ebx)
+64	67f28703	xacquire xchg %eax,(%ebx)
+32	refused	xacquire incl (%eax)
+64	refused	xacquire incl (%eax)
+32	refused	xacquire stosb
+64	refused	xacquire stosb
+32	refused	xacquire movsl
+64	refused	xacquire movsl
+32	refused	xacquire cmpsb
+64	refused	xacquire cmpsb
+32	refused	xacquire lzcnt %eax,%ebx
+64	refused	xacquire lzcnt %eax,%ebx
+32	refused	xacquire tzcnt %eax,%ebx
+64	refused	xacquire tzcnt %eax,%ebx
+32	refused	xacquire bt %eax,%ebx
+64	refused	xacquire bt %eax,%ebx
+32	refused	xacquire shld %cl,%eax,%ebx
+64	refused	xacquire shld %cl,%eax,%ebx
+32	refused	xacquire btsl $1,(%eax)
+64	refused	xacquire btsl $1,(%eax)
+32	refused	xacquire negl (%eax)
+64	refused	xacquire negl (%eax)
+32	refused	xacquire fldl (%eax)
+64	refused	xacquire fldl (%eax)
+32	refused	xacquire sldt %ax
+64	refused	xacquire sldt %ax
+32	refused	xacquire cmpxchg8b (%eax)
+64	refused	xacquire cmpxchg8b (%eax)
+32	refused	xacquire cpuid
+64	refused	xacquire cpuid
+32	refused	xacquire lodsl
+64	refused	xacquire lodsl
+32	refused	xacquire scasb
+64	refused	xacquire scasb
+32	refused	xrelease lock bsf %ecx,%ecx
+64	refused	xrelease lock bsf %ecx,%ecx
+32	refused	xrelease lock bsr %ecx,%ecx
+64	refused	xrelease lock bsr %ecx,%ecx
+32	refused	xrelease lock bsfl (%eax),%ecx
+64	refused	xrelease lock bsfl (%eax),%ecx
+32	refused	xrelease lock bsfw %cx,%dx
+64	refused	xrelease lock bsfw %cx,%dx
+32	refused	xrelease lock bsrw (%eax),%dx
+64	refused	xrelease lock bsrw (%eax),%dx
+32	refused	xrelease lock ret
+64	refused	xrelease lock ret
+32	refused	xrelease lock nop
+64	refused	xrelease lock nop
+32	f3f00fb103	xrelease lock cmpxchg %eax,(%ebx)
+64	67f3f00fb103	xrelease lock cmpxchg %eax,(%ebx)
+32	f3f00103	xrelease lock addl %eax,(%ebx)
+64	67f3f00103	xrelease lock addl %eax,(%ebx)
+32	refused	xrelease lock popcnt %eax,%ebx
+64	refused	xrelease lock popcnt %eax,%ebx
+32	f3f08703	xrelease lock xchg %eax,(%ebx)
+64	67f3f08703	xrelease lock xchg %eax,(%ebx)
+32	f3f0ff00	xrelease lock incl (%eax)
+64	67f3f0ff00	xrelease lock incl (%eax)
+32	refused	xrelease lock stosb
+64	refused	xrelease lock stosb
+32	refused	xrelease lock movsl
+64	refused	xrelease lock movsl
+32	refused	xrelease lock cmpsb
+64	refused	xrelease lock cmpsb
+32	refused	xrelease lock lzcnt %eax,%ebx
+64	refused	xrelease lock lzcnt %eax,%ebx
+32	refused	xrelease lock tzcnt %eax,%ebx
+64	refused	xrelease lock tzcnt %eax,%ebx
+32	refused	xrelease lock bt %eax,%ebx
+64	refused	xrelease lock bt %eax,%ebx
+32	refused	xrelease lock shld %cl,%eax,%ebx
+64	refused	xrelease lock shld %cl,%eax,%ebx
+32	f3f00fba2801	xrelease lock btsl $1,(%eax)
+64	67f3f00fba2801	xrelease lock btsl $1,(%eax)
+32	f3f0f718	xrelease lock negl (%eax)
+64	67f3f0f718	xrelease lock negl (%eax)
+32	refused	xrelease lock fldl (%eax)
+64	refused	xrelease lock fldl (%eax)
+32	refused	xrelease lock sldt %ax
+64	refused	xrelease lock sldt %ax
+32	f3f00fc708	xrelease lock cmpxchg8b (%eax)
+64	67f3f00fc708	xrelease lock cmpxchg8b (%eax)
+32	refused	xrelease lock cpuid
+64	refused	xrelease lock cpuid
+32	refused	xrelease lock lodsl
+64	refused	xrelease lock lodsl
+32	refused	xrelease lock scasb
+64	refused	xrelease lock scasb
+32	90ebfd	.globl g;g: nop;jmp g
+64	90ebfd	.globl g;g: nop;jmp g
+32	9074fd	.globl g;g: nop;je g
+64	9074fd	.globl g;g: nop;je g
+32	90e8fcffffff/R_386_PC32@2:g	.globl g;g: nop;call g
+64	90e800000000/R_X86_64_PLT32@2:g-4	.globl g;g: nop;call g
+32	90e9fcffffff/R_386_PC32@2:g	.weak g;g: nop;jmp g
+64	90e900000000/R_X86_64_PLT32@2:g-4	.weak g;g: nop;jmp g
+32	e9c8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000090	.globl g;jmp g;.skip 200;g: nop
+64	e9c8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000090	.globl g;jmp g;.skip 200;g: nop
+32	eb019090	.globl g;jmp g;nop;g: nop
+64	eb019090	.globl g;jmp g;nop;g: nop
+32	90ebfd	.hidden g;.globl g;g: nop;jmp g
+64	90ebfd	.hidden g;.globl g;g: nop;jmp g
+32	90ebfe	.globl g;g: nop;jmp g+1
+64	90ebfe	.globl g;g: nop;jmp g+1
+32	90e9fcffffff/R_386_PLT32@2:g	.globl g;g: nop;jmp g@PLT
+64	90e900000000/R_X86_64_PLT32@2:g-4	.globl g;g: nop;jmp g@PLT
+32	90/R_386_PC32@1:g	.globl g;g: nop;.section .t2,"ax";jmp g
+64	90/R_X86_64_PLT32@1:g-4	.globl g;g: nop;.section .t2,"ax";jmp g
+32	9075fd	g: nop;.globl g;jne g
+64	9075fd	g: nop;.globl g;jne g
+32	90e9fcffffff/R_386_PC32@2:g	.globl g;.weak g;g: nop;jmp g
+64	90e900000000/R_X86_64_PLT32@2:g-4	.globl g;.weak g;g: nop;jmp g
+32	9090ebfcebfb	.globl g, h;g: nop;h: nop;jmp g;jmp h
+64	9090ebfcebfb	.globl g, h;g: nop;h: nop;jmp g;jmp h
+32	9066ebfc	.globl g;g: nop;data16 jmp g
+64	9066ebfc	.globl g;g: nop;data16 jmp g
+32	0f8ea0000000eb082e8db42600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c3	f:;jle .L9;jmp .L7;.p2align 4,,10;.p2align 3;.L7:;.skip 150;.L9:;ret
+64	0f8ea0000000eb080f1f840000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c3	f:;jle .L9;jmp .L7;.p2align 4,,10;.p2align 3;.L7:;.skip 150;.L9:;ret
+32	0f8ea0000000eb082e8db42600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c3	f:;jle .L9;jmp .L7;.p2align 4;.L7:;.skip 150;.L9:;ret
+64	0f8ea0000000eb080f1f840000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c3	f:;jle .L9;jmp .L7;.p2align 4;.L7:;.skip 150;.L9:;ret

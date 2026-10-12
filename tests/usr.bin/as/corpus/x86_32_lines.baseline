@@ -6,8 +6,6 @@ lcall $sym,$sym2
 .data | .long 0 | lv: .long 0 | .text | movl $lv+8,4(%esp)
 .data | .long 0 | lv: .long 0 | .text | call lv
 .data | .long 0 | lv: .long 0 | .text | leal lv@GOTOFF(%ebx),%eax
-.globl gf | gf: nop | jmp gf
-.globl gf | gf: nop | je gf
 nop | lf: nop | movl $lf,%eax
 nop | lf: nop | pushl $lf
 nop | lf: nop | jmp *lf

@@ -581,10 +581,11 @@ static int reg_is_exact_low3(const as_x86_operand_t *op, as_x86_reg_t reg) {
     if (op == NULL || op->kind != AS_X86_OP_REG) {
         return 0;
     }
-    if (op->u.reg >= AS_X86_REG_AH || reg >= AS_X86_REG_AH) {
-        return op->u.reg == reg;
-    }
-    return (((unsigned)op->u.reg) & 7u) == (((unsigned)reg) & 7u);
+    /* (The register itself, and not the one of %r8 to %r15 whose low
+     * three bits are its: %r9 passed for %rcx, so that `shrdq $7, %r8,
+     * %r9` had its destination taken for the count and was refused, and
+     * %r8 passed for the accumulator and %r10w for %dx.) */
+    return op->u.reg == reg;
 }
 
 static int is_high8_reg(as_x86_reg_t r) {
@@ -6528,7 +6529,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_unsupported_form(&ctx, insn);
             return -1;
         }
-        if (reg_is_exact_low3(a, AS_X86_REG_RCX)) {
+        /* (%cl, which is the count; %rcx may be what is shifted.) */
+        if (reg_is_exact_low3(a, AS_X86_REG_RCX) && a->size_bits == 8) {
             count_op = a;
             src_op = b;
             dst_op = c;
@@ -6543,7 +6545,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 emit8(&ctx, (uint8_t)count_op->u.imm) != 0) {
                 return -1;
             }
-        } else if (reg_is_exact_low3(count_op, AS_X86_REG_RCX)) {
+        } else if (reg_is_exact_low3(count_op, AS_X86_REG_RCX) && count_op->size_bits == 8) {
             if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, (uint8_t)(op2 + 1u)) != 0 ||
                 modrm_sib_disp64(&ctx, src_op->u.reg, dst_op, &rex_r, &rex_x, &rex_b) != 0) {
                 return -1;
