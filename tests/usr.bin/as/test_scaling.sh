@@ -51,14 +51,28 @@ for shape in plain extern data branch section difference; do
     gen "$shape" "$N" > one.s
     gen "$shape" $((N * 4)) > four.s
     a=$(cost one.s) || { echo "FAIL $shape: not assembled at n=$N"; fail=1; continue; }
-    a2=$(cost one.s)
     b=$(cost four.s) || { echo "FAIL $shape: not assembled at n=$((N * 4))"; fail=1; continue; }
-    b2=$(cost four.s)
-    [ "$a2" -lt "$a" ] && a=$a2
-    [ "$b2" -lt "$b" ] && b=$b2
-    # (Under five hundredths of a second there is nothing to measure.)
-    [ "$a" -lt 5 ] && a=5
-    if [ "$b" -gt $((a * 5)) ]; then
+    # The lesser of the times of each, measured again while the larger
+    # looks too long: the suite runs its tests side by side, on a
+    # machine that is doing other things, and the clock counts in
+    # hundredths.  (A run of GitHub's took 90 ms and 490 for a shape
+    # that takes 440 and 1880 here, and failed.)  What is quadratic
+    # stays too long however often it is measured.
+    tries=0
+    while :; do
+        a2=$(cost one.s)
+        b2=$(cost four.s)
+        [ "$a2" -lt "$a" ] && a=$a2
+        [ "$b2" -lt "$b" ] && b=$b2
+        tries=$((tries + 1))
+        # (Under five hundredths of a second there is nothing to
+        # measure; and two hundredths are the clock's own.)
+        low=$a
+        [ "$low" -lt 5 ] && low=5
+        [ "$b" -le $((low * 5 + 2)) ] && break
+        [ "$tries" -ge 4 ] && break
+    done
+    if [ "$b" -gt $((low * 5 + 2)) ]; then
         echo "FAIL $shape: $N statements in ${a}0 ms and $((N * 4)) in ${b}0 ms, more than five times as long"
         fail=1
     fi
