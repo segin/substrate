@@ -9254,7 +9254,7 @@ static const char *const x86_max_operands[] = {
     " fsts fstsw fsubl fsubrl fsubrs fsubs fucom fucomp fxch fxrstor fxrstor64 fxsave fxsave64"
     " hreset imulb incsspd int invlpg ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb"
     " jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz ldmxcsr lgdt lgdtl"
-    " lidt lidtl lldt lmsw loop loope loopne loopnz loopz lret lretq lretw ltr mul mulb mull mulq"
+    " lidt lidtl lldt lmsw loop loope loopne loopnz loopz lret lretq lretw ltr mul mulb mull mulq verr verw"
     " nop pop prefetch prefetchnta prefetcht0 prefetcht1 prefetcht2 prefetchw prefetchwt1 ptwrite"
     " push rdfsbase rdgsbase rdpid rdrand rdseed ret retf retfq retfw retl retq retw seta setae"
     " setb setbe setc sete setg setge setl setle setna setnae setnb setnbe setnc setne setng"
@@ -9688,6 +9688,12 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         if (as_x86_vec_knows(mn) || mn[0] == 'k' || strcmp(mn, "extrq") == 0 || strcmp(mn, "insertq") == 0 ||
             (normalize_x86_mnemonic(mn, base, sizeof(base), &suffix) == 0 && as_x86_vec_knows(base))) {
             break;
+        }
+        /* (A name that is no instruction's at all is that, whatever
+         * its operands.) */
+        if (x86_max_operand_count(mn) < 0 &&
+            (normalize_x86_mnemonic(mn, base, sizeof(base), &suffix) != 0 || x86_max_operand_count(base) < 0)) {
+            snprintf(encerr, encerr_sz, "unsupported %smnemonic: %s", is_64 ? "x86_64 " : "", mn);
         }
         return 1;
     }
@@ -11222,11 +11228,49 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
  * little SSE, and `fldl (%bx)` and `movaps (%bx), %xmm0` were
  * "unsupported mnemonic".  What they refuse is given to the emitters.
  */
+/*
+ * What is said of a statement that was refused, where the encoder that
+ * refused it said what is not so, or nothing: an instruction this
+ * assembler has is no "unsupported mnemonic" when its operands are not
+ * its own (`fisttpl %eax`), and a register it has is no "unknown
+ * register" where an instruction does not take it (`movq %cr0,
+ * (%rax)`).
+ */
+static void x86_refusal_said(const as_stmt_t *st, char *encerr, size_t encerr_sz) {
+    const char *mn;
+    char base[32];
+    char suffix = '\0';
+    int known;
+
+    if (st == NULL || st->kind != AS_STMT_INSTRUCTION || encerr == NULL || encerr_sz == 0 ||
+        st->u.instr.mnemonic == NULL || st->u.instr.operand_count == 0) {
+        return;
+    }
+    mn = st->u.instr.mnemonic;
+    if (encerr[0] != '\0' && !(strncmp(encerr, "unsupported ", 12) == 0 && strstr(encerr, "mnemonic: ") != NULL) &&
+        strncmp(encerr, "unknown x86 register: ", 22) != 0) {
+        return;
+    }
+    if (strncmp(encerr, "unknown x86 register: ", 22) == 0 && as_x86_reg_find(encerr + 22) == NULL) {
+        return;
+    }
+    known = x86_max_operand_count(mn) >= 0 || as_x86_vec_knows(mn);
+    if (!known && normalize_x86_mnemonic(mn, base, sizeof(base), &suffix) == 0) {
+        known = x86_max_operand_count(base) >= 0 || as_x86_vec_knows(base) || strcmp(base, mn) != 0;
+    }
+    if (known || strncmp(encerr, "unknown x86 register: ", 22) == 0) {
+        snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+    }
+}
+
 static int encode_x86_stmt_either(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                                   size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     char first[256];
     int rc = encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 
+    if (rc != 0) {
+        x86_refusal_said(st, encerr, encerr_sz);
+    }
     if (rc == 0 || cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64 ||
         !x86_stmt_is_the_encoders(cfg, &st->u.instr, 0)) {
         return rc;
