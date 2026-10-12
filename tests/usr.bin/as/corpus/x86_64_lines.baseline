@@ -40,7 +40,5 @@ imulq %rbx,%rax,%rbx
 seta %eax
 int $sym
 ret $sym
-movsl (%rdi),%es:(%rsi)
-movsl (%eax),%es:(%ebx)
 in $sym,%al
 out %al,$sym

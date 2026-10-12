@@ -11956,6 +11956,87 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
             return 1;
         }
     }
+    /*
+     * A string instruction written with an address that is not the one
+     * it works through -- `movsb (%rax), (%rax)`, `lods (%rbx)`.  The
+     * instruction has no other address, and GNU as says which was
+     * expected and assembles it; so does this.  (And the System V
+     * names with their addresses written: `smov (%rsi), (%rdi)`.)
+     */
+    if (!in->syntax_intel && (nops == 1 || nops == 2)) {
+        /* The register each address is through: the first operand's,
+         * and the second's. */
+        static const struct {
+            const char *name;
+            char first;
+            char second;
+        } through[] = {{"movs", 's', 'd'}, {"cmps", 'd', 's'}, {"scas", 'd', 0}, {"lods", 's', 0},
+                       {"stos", 'd', 'd'}, {"ins", 0, 'd'},    {"outs", 's', 0}, {"smov", 's', 'd'},
+                       {"scmp", 'd', 's'}, {"ssca", 'd', 0},   {"slod", 's', 0}, {"ssto", 'd', 'd'}};
+        static const char *const si[] = {"si", "esi", "rsi"};
+        static const char *const di[] = {"di", "edi", "rdi"};
+        size_t f;
+
+        for (f = 0; f < sizeof(through) / sizeof(through[0]); ++f) {
+            size_t fl = strlen(through[f].name);
+            int old = through[f].name[0] == 's' && f >= 7;
+            int changed = old;
+            size_t k;
+
+            if (strncmp(low, through[f].name, fl) != 0 ||
+                (low[fl] != '\0' && (strchr("bwlq", low[fl]) == NULL || low[fl + 1] != '\0'))) {
+                continue;
+            }
+            /* (`movsb (%eax), %ebx` is the widening move, below.) */
+            if (f == 0 && nops == 2 && ops[1].kind == AS_OPERAND_REGISTER) {
+                break;
+            }
+            for (k = 0; k < nops; ++k) {
+                char want = k == 0 ? through[f].first : through[f].second;
+                const as_mem_operand_t *m = &ops[k].u.mem;
+                const as_x86_reg_info_t *r;
+                const char *canon;
+                const char *base;
+
+                /* (One operand alone is the address: `stos (%rax)`.) */
+                if (ops[k].kind != AS_OPERAND_MEMORY || want == 0 || m->base_reg == NULL) {
+                    continue;
+                }
+                r = as_x86_reg_find(m->base_reg);
+                if (r == NULL || r->cls != AS_X86_REGCLASS_GENERAL || (r->width != 16 && r->width != 32 && r->width != 64)) {
+                    continue;
+                }
+                canon = (want == 's' ? si : di)[r->width == 16 ? 0 : r->width == 32 ? 1 : 2];
+                base = m->base_reg + (m->base_reg[0] == '%');
+                if (!streq_ci(base, canon)) {
+                    char said[96];
+
+                    snprintf(said, sizeof(said), "`(%%%s)' is not valid here (expected `(%%%s)')", base, canon);
+                    warn_stmt(cfg, st, said);
+                    /* (Not written to: the operand is the copy's.) */
+                    ops[k].u.mem.base_reg = (char *)canon;
+                    changed = 1;
+                }
+                /* (Nor has it an index or a displacement, whatever is
+                 * written of them.) */
+                if (ops[k].u.mem.index_reg != NULL || ops[k].u.mem.disp != NULL) {
+                    ops[k].u.mem.index_reg = NULL;
+                    ops[k].u.mem.disp = NULL;
+                    changed = 1;
+                }
+            }
+            if (!changed) {
+                break;
+            }
+            snprintf(name, name_sz, "%s", low);
+            for (k = 0; old && k < sizeof(strings) / sizeof(strings[0]); ++k) {
+                if (strncmp(low, strings[k].old, 4) == 0) {
+                    snprintf(name, name_sz, "%s%c", strings[k].now, low[4] != '\0' ? low[4] : 'l');
+                }
+            }
+            return 1;
+        }
+    }
     if (nops == 2 && ops[1].kind == AS_OPERAND_REGISTER &&
         (as_strcmp(low, "movsb") == 0 || as_strcmp(low, "movzb") == 0 || as_strcmp(low, "movsw") == 0 ||
          as_strcmp(low, "movzw") == 0 || as_strcmp(low, "movsl") == 0)) {

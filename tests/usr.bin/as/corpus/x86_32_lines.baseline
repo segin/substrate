@@ -16,7 +16,5 @@ nop | lf: nop | movl lf(,%eax,4),%ecx
 .section .foo,"ax" | lf: nop | .text | movl $lf,%eax
 int $sym
 ret $sym
-movsl (%edi),%es:(%esi)
-movsl (%eax),%es:(%ebx)
 in $sym,%al
 out %al,$sym
