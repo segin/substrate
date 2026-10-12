@@ -759,7 +759,7 @@ static int append_align_fill(bytebuf_t *buf, const as_directive_t *d, size_t nee
  * The NOPs are of the object, not of the mode: `.code32` in a 64-bit
  * object pads with the 64-bit ones.  16-bit code has its own.
  */
-static int append_x86_nops(bytebuf_t *buf, size_t need, unsigned code_bits, int is_64_object) {
+static int append_x86_nops(bytebuf_t *buf, size_t need, size_t single, unsigned code_bits, int is_64_object) {
     static const unsigned char of_16[][5] = {
         {0x90}, {0x89, 0xf6}, {0x8d, 0x74, 0x00}, {0x8d, 0xb4, 0x00, 0x00}, {0x2e, 0x8d, 0xb4, 0x00, 0x00}};
     static const unsigned char of_32[][8] = {
@@ -788,6 +788,7 @@ static int append_x86_nops(bytebuf_t *buf, size_t need, unsigned code_bits, int 
     size_t stride;
     size_t most;
     size_t odd;
+    int jump;
 
     if (code_bits == 16) {
         patterns = &of_16[0][0];
@@ -805,7 +806,21 @@ static int append_x86_nops(bytebuf_t *buf, size_t need, unsigned code_bits, int 
         stride = sizeof(of_32[0]);
         most = 2;
     }
-    if (need / longest > most) {
+    /* (`.nops` may ask for none longer than `single`; more than the
+     * longest there is is refused, and said with the longest.) */
+    if (single > longest) {
+        return (int)longest + 1;
+    }
+    if (need == 0) {
+        return 0;
+    }
+    /* (Whether there is a jump is by the longest there is, whatever
+     * the longest asked for.) */
+    jump = need / longest > most;
+    if (single != 0) {
+        longest = single;
+    }
+    if (jump) {
         if (need - 2 <= 127) {
             need -= 2;
             if (bytebuf_append_u64_le(buf, 0xeb, 1) != 0 || bytebuf_append_u64_le(buf, (uint64_t)need, 1) != 0) {
@@ -833,6 +848,27 @@ static int append_x86_nops(bytebuf_t *buf, size_t need, unsigned code_bits, int 
             return -1;
         }
     }
+    return 0;
+}
+
+int as_x86_nop_bytes(size_t need, size_t single, unsigned code_bits, int is_64_object, unsigned char **out,
+                     size_t *longest) {
+    bytebuf_t buf;
+    int rc;
+
+    memset(&buf, 0, sizeof(buf));
+    *out = NULL;
+    rc = append_x86_nops(&buf, need, single, code_bits, is_64_object);
+    if (rc > 0) {
+        *longest = (size_t)rc - 1;
+        free(buf.data);
+        return -2;
+    }
+    if (rc != 0 || buf.len != need) {
+        free(buf.data);
+        return -1;
+    }
+    *out = buf.data;
     return 0;
 }
 
@@ -16762,7 +16798,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
                 }
                 need--;
             }
-            return append_x86_nops(buf, need, x86_code_bits, ctx->cfg->machine == EM_X86_64) == 0 ? 1 : -1;
+            return append_x86_nops(buf, need, 0, x86_code_bits, ctx->cfg->machine == EM_X86_64) == 0 ? 1 : -1;
         }
         if (append_align_fill(buf, d, need, (uint64_t)fill) != 0) {
             set_err(ctx, "%s:%u: alignment padding (%lu bytes) is not a multiple of %u",
@@ -20578,7 +20614,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
                     need--;
                 }
                 if (rc == 0) {
-                    rc = append_x86_nops(&sec->buf, need, sec->code_bits, ctx->cfg->machine == EM_X86_64);
+                    rc = append_x86_nops(&sec->buf, need, 0, sec->code_bits, ctx->cfg->machine == EM_X86_64);
                 }
             }
             if (rc != 0) {

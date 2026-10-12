@@ -130,6 +130,16 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
  */
 int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st);
 
+/*
+ * `need` bytes of x86 instructions that do nothing, as an alignment is
+ * padded with them: in `*out`, which is the caller's to free (NULL for
+ * none).  `single` is the longest one instruction of them may be, or 0
+ * for the longest there is.  0; -1 for no memory; -2 if `single` is
+ * more than the longest there is, which is then in `*longest`.
+ */
+int as_x86_nop_bytes(size_t need, size_t single, unsigned code_bits, int is_64_object, unsigned char **out,
+                     size_t *longest);
+
 /* Let go what as_x86_precode() keeps between its calls: once, when the
  * source has all been read and assembled, or has not. */
 void as_x86_precode_free(void);

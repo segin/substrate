@@ -334,6 +334,15 @@ toolchain flows, including:
 .Cm .uleb128 , .sleb128 , .string8/.string16/.string32/.string64 ,
 .Cm .dc , .dc.b/.w/.l/.a/.s/.d/.x , .ds , .ds.b/.w/.l/.s/.d/.x/.p ,
 .Cm .dcb , .dcb.b/.w/.l/.s/.d/.x .
+On x86,
+.Cm .nops Ar size Ns Op , Ar most
+is
+.Ar size
+bytes of instructions that do nothing, as an alignment is padded with
+them: the long ones of the object, none longer than
+.Ar most
+bytes if that is given and not 0, and a jump over the rest where
+there are many.
 A floating-point number is a decimal one, which may have
 .Li 0
 and a letter before it

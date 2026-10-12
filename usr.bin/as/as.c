@@ -3877,6 +3877,10 @@ static int run_native_backend(const as_ctx_t *ctx) {
         goto out;
     }
     ecfg.thumb_funcs = (const char *const *)thumb_funcs;
+    if (ctx->target == 0 && as_x86_nops_lower(&parsed, ecfg.is_64 != 0, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
     if (as_directives_lower(&parsed, ecfg.is_64 ? 8u : 4u, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
         goto out;

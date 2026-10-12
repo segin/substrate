@@ -29,6 +29,18 @@ extern "C" {
  */
 int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char *errbuf, size_t errbuf_sz);
 
+/* The most bytes one `.nops` may be. */
+#define AS_NOPS_MAX 0x100000l
+
+/*
+ * x86's `.nops size[, most]`: `size` bytes of instructions that do
+ * nothing, none of them longer than `most` -- what an alignment is
+ * padded with, and where there is much of it a jump over the rest.  It
+ * is made the `.byte` of those bytes, by the size of the code where it
+ * stands (`.code16` and the others are followed).
+ */
+int as_x86_nops_lower(as_parse_result_t *parsed, int is_64, char *errbuf, size_t errbuf_sz);
+
 /*
  * What is ARM's or AArch64's own, made what the rest of the assembler
  * knows; to be run before as_directives_lower().

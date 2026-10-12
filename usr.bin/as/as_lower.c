@@ -3,6 +3,7 @@
 #include "as_arm.h"
 #include "as_arm_int.h"
 #include "as_data.h"
+#include "as_elf_emit.h"
 #include "as_expr.h"
 
 #include <ctype.h>
@@ -3614,4 +3615,79 @@ done:
     free(last.file);
     arm_lower_free(&a);
     return rc;
+}
+
+int as_x86_nops_lower(as_parse_result_t *parsed, int is_64, char *errbuf, size_t errbuf_sz) {
+    unsigned code_bits = is_64 ? 64u : 32u;
+    size_t i;
+
+    if (parsed == NULL) {
+        return -1;
+    }
+    for (i = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        as_directive_t *d = &st->u.directive;
+        const char *file = st->file != NULL ? st->file : "<input>";
+        unsigned char *bytes = NULL;
+        long long count = 0;
+        long long single = 0;
+        size_t longest = 0;
+        arg_vec_t made;
+        size_t k;
+        int rc;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            continue;
+        }
+        if (strcmp(d->name, ".code16") == 0 || strcmp(d->name, ".code16gcc") == 0) {
+            code_bits = 16;
+        } else if (strcmp(d->name, ".code32") == 0) {
+            code_bits = 32;
+        } else if (strcmp(d->name, ".code64") == 0) {
+            code_bits = 64;
+        }
+        if (strcmp(d->name, ".nops") != 0) {
+            continue;
+        }
+        if (d->arg_count > 2) {
+            snprintf(errbuf, errbuf_sz, "%s:%u: .nops takes a size, and the most bytes one instruction of it may be",
+                     file, st->line);
+            return -1;
+        }
+        if ((d->arg_count >= 1 && d->args[0] != NULL && d->args[0][0] != '\0' &&
+             as_expr_eval_string(d->args[0], NULL, NULL, &count) != AS_EXPR_EVAL_OK) ||
+            (d->arg_count == 2 && d->args[1] != NULL && d->args[1][0] != '\0' &&
+             (as_expr_eval_string(d->args[1], NULL, NULL, &single) != AS_EXPR_EVAL_OK || single < 0))) {
+            snprintf(errbuf, errbuf_sz, "%s:%u: .nops: the size is a number, and so is the most of one instruction",
+                     file, st->line);
+            return -1;
+        }
+        /* (A size below nothing is nothing, as GNU as has it.) */
+        if (count < 0) {
+            count = 0;
+        }
+        if (count > AS_NOPS_MAX) {
+            snprintf(errbuf, errbuf_sz, "%s:%u: .nops: %lld bytes are more than %ld", file, st->line, count,
+                     (long)AS_NOPS_MAX);
+            return -1;
+        }
+        rc = as_x86_nop_bytes((size_t)count, (size_t)single, code_bits, is_64, &bytes, &longest);
+        if (rc == -2) {
+            snprintf(errbuf, errbuf_sz, "%s:%u: .nops: one instruction of %lld bytes, and the longest is of %zu", file,
+                     st->line, single, longest);
+            return -1;
+        }
+        memset(&made, 0, sizeof(made));
+        for (k = 0; rc == 0 && k < (size_t)count; ++k) {
+            rc = vec_push_num(&made, bytes[k]);
+        }
+        free(bytes);
+        if (rc != 0 || set_name(d, ".byte") != 0) {
+            vec_free(&made);
+            snprintf(errbuf, errbuf_sz, "out of memory");
+            return -1;
+        }
+        set_args(d, &made);
+    }
+    return 0;
 }
