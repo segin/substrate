@@ -25,6 +25,11 @@ extern "C" {
  */
 typedef struct {
     int suppress;
+    /* With `probe` nothing is written either, and `wanted` is how many
+     * warnings would have been: for one who is to know whether a
+     * statement has any to make when its turn comes. */
+    int probe;
+    unsigned wanted;
     unsigned count;
     const void **seen;
     size_t seen_count;
@@ -98,6 +103,14 @@ typedef struct {
  * want of memory.
  */
 int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg);
+
+/*
+ * Encode an x86 instruction of registers and numbers now, in code of
+ * `code_bits`, and let its operands go: 1 if it was, and the statement
+ * is its bytes from here on (as_instruction_t.code); 0 if it is left as
+ * it was written.
+ */
+int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st);
 
 int as_elf_emit_file(const as_parse_result_t *parsed,
                      const as_section_state_t *sections,

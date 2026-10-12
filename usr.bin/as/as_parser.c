@@ -159,6 +159,23 @@ static void free_operand(as_operand_t *op) {
  * read when something in it could not be -- where its name was freed in
  * fifteen places and the operands read before the bad one in none.
  */
+void as_instruction_drop_operands(as_instruction_t *in) {
+    size_t i;
+
+    if (in == NULL) {
+        return;
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        free_operand(&in->operands[i]);
+    }
+    free(in->operands);
+    free(in->segment_override);
+    in->operands = NULL;
+    in->operand_count = 0;
+    in->operand_cap = 0;
+    in->segment_override = NULL;
+}
+
 static void free_instruction(as_instruction_t *in) {
     size_t i;
 
@@ -2074,11 +2091,17 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
         return 0;
     }
 
+    /*
+     * (A colon, and not a string that is one: `.string ":"` was taken
+     * for a label named `.string` and nothing after it -- the directive
+     * was gone, and no byte of it written, and nothing said.  It is what
+     * a compiler writes for the ":" of a C source.)
+     */
     i = 0;
     while (i < n &&
            (tokv[i].kind == AS_TOK_LABEL ||
-            (i + 1 < n && tokv[i + 1].text != NULL && strcmp(tokv[i + 1].text, ":") == 0 &&
-             tokv[i].text != NULL && tokv[i].text[0] != '\0'))) {
+            (i + 1 < n && tokv[i + 1].kind != AS_TOK_STRING && tokv[i + 1].text != NULL &&
+             strcmp(tokv[i + 1].text, ":") == 0 && tokv[i].text != NULL && tokv[i].text[0] != '\0'))) {
         if (push_label(st, tokv[i].text, tokv[i].file, tokv[i].line) != 0) {
             return -1;
         }
@@ -2090,7 +2113,10 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                 return -1;
             }
         }
-        i += (i + 1 < n && tokv[i + 1].text != NULL && strcmp(tokv[i + 1].text, ":") == 0) ? 2 : 1;
+        i += (i + 1 < n && tokv[i + 1].kind != AS_TOK_STRING && tokv[i + 1].text != NULL &&
+              strcmp(tokv[i + 1].text, ":") == 0)
+                 ? 2
+                 : 1;
     }
 
     if (i == n) {

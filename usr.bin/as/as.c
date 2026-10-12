@@ -3613,9 +3613,47 @@ static void report_emit_error(void *cookie, const char *message) {
     as_diag(AS_E_BACKEND, "%s", message);
 }
 
-/* The lexer's lines, given to the parser (as_lexer_cfg_t.lines). */
+/*
+ * The lexer's lines, given to the parser (as_lexer_cfg_t.lines); and
+ * each instruction they make that is of registers and numbers encoded
+ * there and then, in the code the directives so far have said it is in,
+ * so that nothing of it is kept but its bytes (as_x86_precode()).
+ */
+typedef struct {
+    as_parser_t *parser;
+    as_parse_result_t *parsed;
+    const as_elf_cfg_t *cfg;
+    unsigned code_bits;
+    size_t seen;
+} parse_sink_t;
+
 static int parse_lines_given(void *cookie, const as_token_t *items, size_t count) {
-    return as_parse_feed((as_parser_t *)cookie, items, count);
+    parse_sink_t *sink = (parse_sink_t *)cookie;
+    int rc = as_parse_feed(sink->parser, items, count);
+
+    for (; sink->seen < sink->parsed->count; ++sink->seen) {
+        as_stmt_t *st = &sink->parsed->items[sink->seen];
+
+        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL) {
+            const char *name = st->u.directive.name;
+
+            if (strcmp(name, ".code16") == 0) {
+                sink->code_bits = 16u;
+            } else if (strcmp(name, ".code16gcc") == 0) {
+                /* (Code a compiler made for 32 bits: its calls, returns
+                 * and pushes are made 32-bit ones further on, and are
+                 * not to be encoded before they are.) */
+                sink->code_bits = 0;
+            } else if (strcmp(name, ".code32") == 0) {
+                sink->code_bits = 32u;
+            } else if (strcmp(name, ".code64") == 0) {
+                sink->code_bits = 64u;
+            }
+        } else if (st->kind == AS_STMT_INSTRUCTION && sink->code_bits != 0) {
+            (void)as_x86_precode(sink->cfg, sink->code_bits, st);
+        }
+    }
+    return rc;
 }
 
 static int run_native_backend(const as_ctx_t *ctx) {
@@ -3756,6 +3794,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
          * object was written: 400 bytes for each line of the source.)
          */
         as_parser_t *parser = as_parse_begin(&pcfg, &parsed, parse_errbuf, sizeof(parse_errbuf));
+        parse_sink_t sink;
         int lexed = -1;
 
         AS_PHASE_BEGIN();
@@ -3763,8 +3802,13 @@ static int run_native_backend(const as_ctx_t *ctx) {
             as_diag(AS_E_INTERNAL, "out of memory");
             goto out;
         }
+        sink.parser = parser;
+        sink.parsed = &parsed;
+        sink.cfg = &ecfg;
+        sink.code_bits = ecfg.x86_code_bits;
+        sink.seen = 0;
         lcfg.lines = parse_lines_given;
-        lcfg.lines_cookie = parser;
+        lcfg.lines_cookie = &sink;
         /* The --defsym symbols first: their tokens go before the source's. */
         if (text_defs.len == 0 ||
             as_lex_text("--defsym", text_defs.data, text_defs.len, 0, &lcfg, &toks, errbuf, sizeof(errbuf)) == 0) {

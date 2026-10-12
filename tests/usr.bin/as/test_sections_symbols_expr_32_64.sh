@@ -119,9 +119,10 @@ check_obj() {
     A3_HEX=$(sym_get_hex "$OBJ" a3)
     [ -n "$A1_HEX" ] && [ -n "$A2_HEX" ] && [ -n "$A3_HEX" ]
 
-    A1=$((16#$A1_HEX))
-    A2=$((16#$A2_HEX))
-    A3=$((16#$A3_HEX))
+    # (0x, which every shell's arithmetic has; 16# is bash's.)
+    A1=$((0x$A1_HEX))
+    A2=$((0x$A2_HEX))
+    A3=$((0x$A3_HEX))
 
     [ $((A1 % 16)) -eq 0 ]
     [ $((A2 % 32)) -eq 0 ]

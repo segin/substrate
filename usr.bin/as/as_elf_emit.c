@@ -10437,6 +10437,10 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
     if (w != NULL) {
         size_t i;
 
+        if (w->probe) {
+            w->wanted++;
+            return;
+        }
         if (w->suppress) {
             return;
         }
@@ -13054,6 +13058,20 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     /* (For the emitters that are handed operands and no mode.) */
     x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
 
+    /* An instruction that was encoded as it was read (as_x86_precode())
+     * is its bytes, and has nothing else left to encode it from. */
+    if (st != NULL && cfg != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.code_len != 0) {
+        unsigned bits = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
+
+        if (st->u.instr.code_bits != bits || st->u.instr.code_len > code_cap) {
+            snprintf(encerr, encerr_sz, "internal: '%s' was encoded for %u-bit code and is in %u-bit",
+                     st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "?", (unsigned)st->u.instr.code_bits, bits);
+            return -1;
+        }
+        memcpy(code, st->u.instr.code, st->u.instr.code_len);
+        *code_len = st->u.instr.code_len;
+        return 0;
+    }
     if (st != NULL && cfg != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL) {
         int rc = x86_bare_prefixes(cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 
@@ -17079,6 +17097,55 @@ static int stmt_is_place_free(const as_stmt_t *st) {
     return 1;
 }
 
+/*
+ * Encode an instruction as it is read, if it is one of registers and
+ * numbers, and let its operands go: the statement is its bytes from
+ * here on (as_instruction_t.code).  Such an instruction needs nothing
+ * the rest of the source could tell -- no label, no symbol, no layout --
+ * and what was kept of it until the object was written was three times
+ * the size of everything else kept for it.
+ *
+ * `code_bits` is the size of the code it is in.  1 if it was encoded, 0
+ * if it is left as it was: it is not such an instruction, or it cannot
+ * be encoded, which is said when its turn comes in the ordinary way.
+ * AS_NO_STMT_CODE in the environment leaves every instruction as it was.
+ */
+int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
+    static int off = -1;
+    as_elf_cfg_t stmt_cfg;
+    as_elf_warnings_t probe;
+    unsigned char code[32];
+    char encerr[256];
+    size_t code_len = 0;
+
+    if (off < 0) {
+        off = getenv("AS_NO_STMT_CODE") != NULL;
+    }
+    if (off || cfg == NULL || st == NULL || cfg->target != 0 || st->kind != AS_STMT_INSTRUCTION ||
+        st->u.instr.code_len != 0 || (cfg->machine != EM_386 && cfg->machine != EM_X86_64) ||
+        !stmt_is_place_free(st)) {
+        return 0;
+    }
+    stmt_cfg = *cfg;
+    stmt_cfg.x86_code_bits = code_bits;
+    stmt_cfg.is_64 = code_bits == 64u;
+    /* (One that has a warning to make is left to make it in its turn,
+     * among the others'.) */
+    memset(&probe, 0, sizeof(probe));
+    probe.probe = 1;
+    stmt_cfg.warnings = &probe;
+    encerr[0] = '\0';
+    if (encode_x86_stmt(NULL, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0 ||
+        probe.wanted != 0 || code_len == 0 || code_len > sizeof(st->u.instr.code)) {
+        return 0;
+    }
+    as_instruction_drop_operands(&st->u.instr);
+    memcpy(st->u.instr.code, code, code_len);
+    st->u.instr.code_len = (unsigned char)code_len;
+    st->u.instr.code_bits = (unsigned char)code_bits;
+    return 1;
+}
+
 static struct stmt_code *stmt_code_slot(emit_ctx_t *ctx, const as_stmt_t *st) {
     static int off = -1;
     size_t idx = 0;
@@ -17127,7 +17194,8 @@ static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
     size_t i;
     int w;
 
-    if (ctx->asm_reg_alias_count != 0 || !stmt_is_place_free(st)) {
+    /* (One that is its bytes already has no operands to be the key.) */
+    if (ctx->asm_reg_alias_count != 0 || in->code_len != 0 || !stmt_is_place_free(st)) {
         return 0;
     }
     w = snprintf(key, key_sz, "%u %x %x %x %x %d %d %d %d %d %u %s %s", x86_code_bits, in->prefixes, in->pseudo,

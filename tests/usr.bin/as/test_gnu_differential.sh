@@ -16,8 +16,13 @@
 #
 # and the diff of the baseline is the record of what the commit did.
 #
-# Where GNU as is not installed there is nothing to compare with, and
-# the test says that it was skipped and passes.
+# What GNU as makes of each line is written down, in corpus/*.gnu, from
+# the GNU as each of those files names at its head, and no GNU as is
+# run: the one a machine has may be an older one, which takes what that
+# one refuses, and the baselines are of that one.  (They are written
+# again, after a line is added to a corpus,
+# with `gnu-diff.py --gnu-results FILE --write-gnu-results` and that
+# GNU as for $GNU_AS.)
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -34,7 +39,8 @@ if ! command -v python3 > /dev/null 2>&1; then
 fi
 
 run() {
-    python3 "$here/gnu-diff.py" "$1" --baseline "$here/corpus/$2.baseline" "$here/corpus/$2.txt" > "$work/$2.out" 2>&1
+    python3 "$here/gnu-diff.py" "$1" --baseline "$here/corpus/$2.baseline" --gnu-results "$here/corpus/$2.gnu" \
+        "$here/corpus/$2.txt" > "$work/$2.out" 2>&1
     echo $? > "$work/$2.rc"
 }
 

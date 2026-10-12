@@ -15,7 +15,7 @@
 # 64-bit code, `stosb %bl, %es:(%edi)` and `movsxd %ax, %bx` were
 # assembled, and GNU as refuses each.
 #
-# prefix_forms.txt holds what GNU as 2.46 makes of each statement: the
+# prefix_forms.txt holds what GNU as 2.47 makes of each statement: the
 # bytes of .text, and the type, place and symbol of each relocation; or
 # `refused`.  (`;` in a statement is a new line.)  GNU as passes this.
 set -u

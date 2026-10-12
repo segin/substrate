@@ -724,6 +724,70 @@ static int lower_floats(as_directive_t *d, const char **why) {
     return set_name(d, is_double ? ".quad" : ".long");
 }
 
+/*
+ * `.base64 "..."`, of one string or several: the bytes each says in
+ * base 64, which a compiler writes its tables of constants in.  They
+ * are `.byte` of each.  (It was no directive, and what a current gcc
+ * makes of a source with a table in it was not assembled.)
+ */
+static int lower_base64(as_directive_t *d, const char **why) {
+    static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    arg_vec_t v;
+    size_t i;
+
+    if (strcmp(d->name, ".base64") != 0) {
+        return 0;
+    }
+    memset(&v, 0, sizeof(v));
+    for (i = 0; i < d->arg_count; ++i) {
+        const char *s = arg_text(d, i);
+        size_t len = strlen(s);
+        unsigned acc = 0;
+        unsigned have = 0;
+        size_t pad = 0;
+        size_t k;
+
+        /* (With its quotes or, as the parser hands a string to some
+         * directives, without them.) */
+        if (len >= 2 && s[0] == '"' && s[len - 1] == '"') {
+            s++;
+            len -= 2;
+        }
+        for (k = 0; k < len; ++k) {
+            const char *at = s[k] != '\0' ? strchr(digits, s[k]) : NULL;
+
+            if (s[k] == '=') {
+                pad++;
+                continue;
+            }
+            if (at == NULL || pad != 0) {
+                vec_free(&v);
+                *why = "has a character that is no digit of base 64";
+                return 1;
+            }
+            acc = (acc << 6) | (unsigned)(at - digits);
+            have += 6;
+            if (have >= 8) {
+                have -= 8;
+                if (vec_push_num(&v, (acc >> have) & 0xffu) != 0) {
+                    vec_free(&v);
+                    return -1;
+                }
+            }
+        }
+        /* Four digits are three bytes; what is short of four is made
+         * up with `=`.  (An empty string is refused, as GNU as refuses
+         * it.) */
+        if (len == 0 || len % 4 != 0 || pad > 2) {
+            vec_free(&v);
+            *why = "has a string that is not whole groups of four digits";
+            return 1;
+        }
+    }
+    set_args(d, &v);
+    return set_name(d, ".byte");
+}
+
 static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why) {
     arg_vec_t v;
     const lower_unit_t *unit;
@@ -2605,6 +2669,9 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
         rc = lower_one(&st->u.directive, address_bytes, &why);
         if (rc == 0) {
             rc = lower_floats(&st->u.directive, &why);
+        }
+        if (rc == 0) {
+            rc = lower_base64(&st->u.directive, &why);
         }
         if (rc == 0) {
             continue;

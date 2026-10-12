@@ -23,9 +23,16 @@ difference found, known or not.
 
 $AS is this assembler; $GNU_AS, or `as` on $PATH, is GNU's.
 
+With --gnu-results FILE, what GNU as makes of each line is read from
+FILE and no GNU as is run: one GNU as takes and refuses what another
+does not (2.44 began to refuse a TLS operator on an instruction it is
+not for), and a baseline is of the one it was written against.
+--write-gnu-results writes FILE from the GNU as that is here.
+
 Exit status: 0 when the differences are those of the baseline (or, with
-none given, always); 1 when they are not; 77 when GNU as is not to be
-had, with a line saying so -- the caller is to count that a skip.
+none given, always); 1 when they are not; 77 when GNU as is wanted and
+not to be had, with a line saying so -- the caller is to count that a
+skip.
 """
 import concurrent.futures
 import os
@@ -115,6 +122,8 @@ def main(argv):
     opts = []
     baseline = None
     write_baseline = False
+    gnu_results = None
+    write_gnu_results = False
     list_all = False
     corpus = None
     i = 0
@@ -130,6 +139,11 @@ def main(argv):
             baseline = argv[i]
         elif a == '--write-baseline':
             write_baseline = True
+        elif a == '--gnu-results':
+            i += 1
+            gnu_results = argv[i]
+        elif a == '--write-gnu-results':
+            write_gnu_results = True
         elif a == '--list':
             list_all = True
         else:
@@ -143,27 +157,51 @@ def main(argv):
     if not ours:
         sys.stderr.write('gnu-diff.py: $AS is not set\n')
         return 2
-    gnu = os.environ.get('GNU_AS') or shutil.which('as')
-    version = ''
-    if gnu:
-        try:
-            version = subprocess.run([gnu, '--version'], capture_output=True, text=True).stdout
-        except OSError:
-            version = ''
-    if 'GNU assembler' not in version:
-        print('skipped: GNU as is not installed (looked for %s)' % (os.environ.get('GNU_AS') or '`as` on $PATH'))
-        return 77
-
     lines = []
     for raw in open(corpus):
         s = raw.strip()
         if s and not s.startswith('#'):
             lines.append(s)
 
+    # What GNU as makes of each line: as it was written down, if it was
+    # (and is of these lines), or of the GNU as that is here.
+    recorded = None
+    if gnu_results is not None and not write_gnu_results and os.path.exists(gnu_results):
+        recorded = {}
+        for raw in open(gnu_results):
+            if raw.startswith('#') or '\t' not in raw:
+                continue
+            result, line = raw.rstrip('\n').split('\t', 1)
+            recorded[line] = result
+        if any(l not in recorded for l in lines):
+            sys.stderr.write('gnu-diff.py: %s has not every line of %s: write it again\n' % (gnu_results, corpus))
+            return 2
+    gnu = None
+    if recorded is None:
+        gnu = os.environ.get('GNU_AS') or shutil.which('as')
+        version = ''
+        if gnu:
+            try:
+                version = subprocess.run([gnu, '--version'], capture_output=True, text=True).stdout
+            except OSError:
+                version = ''
+        if 'GNU assembler' not in version:
+            print('skipped: GNU as is not installed (looked for %s)' % (os.environ.get('GNU_AS') or '`as` on $PATH'))
+            return 77
+
     jobs = int(os.environ.get('JOBS') or os.cpu_count() or 2)
     with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
         mine = list(pool.map(assemble, [([ours, mode] + opts, l) for l in lines], chunksize=64))
-        theirs = list(pool.map(assemble, [([gnu, mode], l) for l in lines], chunksize=64))
+        if recorded is not None:
+            theirs = [recorded[l] for l in lines]
+        else:
+            theirs = list(pool.map(assemble, [([gnu, mode], l) for l in lines], chunksize=64))
+    if write_gnu_results:
+        with open(gnu_results, 'w') as f:
+            f.write('# What GNU as makes of each line of %s: its result, a tab, the line.\n' % os.path.basename(corpus))
+            f.write('# Written by gnu-diff.py --write-gnu-results with %s\n' % version.splitlines()[0])
+            for l, b in zip(lines, theirs):
+                f.write('%s\t%s\n' % (b, l))
 
     differing = [l for l, a, b in zip(lines, mine, theirs) if a != b]
     print('%s %s: %d lines, %d differ from GNU as' % (os.path.basename(corpus), mode, len(lines), len(differing)))

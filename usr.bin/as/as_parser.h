@@ -138,7 +138,19 @@ typedef struct {
     /* Thumb: the instruction is in an IT block, and so sets no flags
      * that it is not written to set. */
     unsigned arm_in_it;
+    /*
+     * The instruction's bytes, if it has been encoded already and its
+     * operands let go (as_x86_precode()): code_len of them, which are
+     * its bytes in code of code_bits and nowhere else.  0 for an
+     * instruction that is still what was written.
+     */
+    unsigned char code_len;
+    unsigned char code_bits;
+    unsigned char code[15];
 } as_instruction_t;
+
+/* Let an instruction's operands go, and keep its name. */
+void as_instruction_drop_operands(as_instruction_t *in);
 
 typedef enum {
     AS_STMT_EMPTY = 0,
