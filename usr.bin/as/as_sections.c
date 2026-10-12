@@ -1,5 +1,6 @@
 #include "as_sections.h"
 
+#include "as_strmap.h"
 #include "as_util.h"
 #include "elfobj.h"
 
@@ -763,6 +764,7 @@ typedef struct {
     int *high;    /* and the highest */
     size_t count;
     size_t cap;
+    as_strmap_t by_name; /* where each of `names` is */
     sub_frame_t at;
     sub_frame_t *stack;
     size_t stack_count;
@@ -788,11 +790,11 @@ static size_t sub_intern(sub_track_t *t, const char *raw) {
     if (name == NULL) {
         return (size_t)-1;
     }
-    for (i = 0; i < t->count; ++i) {
-        if (strcmp(t->names[i], name) == 0) {
-            free(name);
-            return i;
-        }
+    /* (By the table of them: each was looked for among all there are,
+     * at every `.section`.) */
+    if (as_strmap_get(&t->by_name, name, &i)) {
+        free(name);
+        return i;
     }
     if (t->count == t->cap) {
         size_t ncap = t->cap == 0 ? 8 : t->cap * 2;
@@ -829,7 +831,8 @@ static size_t sub_intern(sub_track_t *t, const char *raw) {
         t->cap = ncap;
     }
     t->spell[t->count] = trim_copy(raw);
-    if (t->spell[t->count] == NULL) {
+    if (t->spell[t->count] == NULL || as_strmap_put(&t->by_name, name, t->count) != 0) {
+        free(t->spell[t->count]);
         free(name);
         return (size_t)-1;
     }
@@ -846,6 +849,7 @@ static void sub_track_free(sub_track_t *t) {
         free(t->names[i]);
         free(t->spell[i]);
     }
+    as_strmap_free(&t->by_name);
     free(t->names);
     free(t->spell);
     free(t->low);

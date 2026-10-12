@@ -768,6 +768,11 @@ Default for
 .It Ev AS_MAX_LINE_BYTES
 Default for
 .Fl -max-line-bytes .
+.It Ev AS_NO_STMT_CODE
+If set, the bytes of an instruction are worked out each time a pass
+wants them, and not kept from the first.
+The object is the same either way; the variable is for the test that
+holds it so.
 .It Ev AS_MAX_TOKEN_LENGTH
 Default for
 .Fl -max-token-length .

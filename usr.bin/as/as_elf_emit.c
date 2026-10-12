@@ -87,6 +87,35 @@ typedef struct {
     size_t stmt;
 } label_index_t;
 
+/*
+ * An instruction's bytes, kept: the statement at this offset of its
+ * section, in this code and this layout, is these.  The passes after
+ * the first -- the labels' places, the text, the relocations -- each
+ * encoded every statement again, five times in all.
+ */
+struct stmt_code {
+    uint64_t off;
+    unsigned epoch;
+    unsigned char bits;
+    unsigned char len;      /* 0: not kept */
+    unsigned char anywhere; /* the same wherever it stands */
+    unsigned char bytes[17];
+};
+
+/*
+ * And by what was written: an instruction of registers and numbers is
+ * the same bytes each time it is written the same way, and a compiler
+ * writes a few hundred of them many thousands of times.  One slot of a
+ * table that is open-addressed by the hash of the key, which is the
+ * statement's text and what else it is assembled by.
+ */
+struct text_code {
+    char *key; /* NULL: an empty slot */
+    uint32_t hash;
+    unsigned char len;
+    unsigned char bytes[17];
+};
+
 typedef struct {
     const as_elf_cfg_t *cfg;
     const as_parse_result_t *parsed;
@@ -160,6 +189,16 @@ typedef struct {
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;
     size_t stmt_size_cache_count;
+    /* What each statement was encoded to, where and in which layout:
+     * encode_x86_stmt_for_layout(). */
+    struct stmt_code *stmt_code;
+    size_t stmt_code_count;
+    unsigned layout_epoch;
+    /* The bytes of each instruction of registers and numbers that has
+     * been written, by its text: text_code_find(). */
+    struct text_code *text_code;
+    size_t text_code_cap;
+    size_t text_code_count;
     /* Whether each branch to a label of its own section is the short
      * form: 0 not one that is sized here, 1 short, 2 long.  Made by
      * relax_branches(), which relax_state says the state of: 0 not yet
@@ -232,6 +271,14 @@ static as_x86_seg_t map_seg(const char *s);
 static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
 static int x86_cond_code(const char *mnemonic, unsigned *cc_out);
 static int x86_base_is_ip(const char *base_reg);
+static int stmt_is_place_free(const as_stmt_t *st);
+static int stmt_code_find(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits, int anywhere,
+                          unsigned char *code, size_t code_cap, size_t *code_len);
+static void stmt_code_keep(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
+                           const unsigned char *code, size_t code_len);
+static int encode_x86_stmt_by_text(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, unsigned x86_code_bits,
+                                   const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
+                                   char *encerr, size_t encerr_sz);
 static const char *first_symbol_op_in_expr(const as_expr_t *e);
 static int x86_disp16_offset(const unsigned char *code, size_t len, int code16, size_t *off_out);
 static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out);
@@ -9965,6 +10012,36 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
     return 1;
 }
 
+/*
+ * A section of the object, kept by its name for section_for_name(): as
+ * it is made, so that it is never looked for in the object, whose
+ * search goes through every section -- for a section to a function,
+ * every function for every function.  (If it cannot be kept it is
+ * looked for.)
+ */
+static void section_remember(emit_ctx_t *ctx, const char *name, elf_section_t *sec) {
+    const char *kept;
+    size_t at;
+
+    if (ctx == NULL || name == NULL || sec == NULL || as_strmap_get(&ctx->sec_by_name, name, &at)) {
+        return;
+    }
+    kept = section_name_keep(ctx, name);
+    if (ctx->sec_found_count == ctx->sec_found_cap) {
+        size_t cap = ctx->sec_found_cap != 0 ? ctx->sec_found_cap * 2 : 16;
+        elf_section_t **grown = (elf_section_t **)realloc(ctx->sec_found, cap * sizeof(*grown));
+
+        if (grown == NULL) {
+            return;
+        }
+        ctx->sec_found = grown;
+        ctx->sec_found_cap = cap;
+    }
+    if (kept[0] != '\0' && as_strmap_put(&ctx->sec_by_name, kept, ctx->sec_found_count) == 0) {
+        ctx->sec_found[ctx->sec_found_count++] = sec;
+    }
+}
+
 static elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
     if (ctx == NULL || name == NULL) {
         return NULL;
@@ -9986,21 +10063,7 @@ static elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
         }
         sec = elf_find_section(ctx->obj, name);
         if (sec != NULL) {
-            const char *kept = section_name_keep(ctx, name);
-
-            if (ctx->sec_found_count == ctx->sec_found_cap) {
-                size_t cap = ctx->sec_found_cap != 0 ? ctx->sec_found_cap * 2 : 16;
-                elf_section_t **grown = (elf_section_t **)realloc(ctx->sec_found, cap * sizeof(*grown));
-
-                if (grown == NULL) {
-                    return sec;
-                }
-                ctx->sec_found = grown;
-                ctx->sec_found_cap = cap;
-            }
-            if (kept[0] != '\0' && as_strmap_put(&ctx->sec_by_name, kept, ctx->sec_found_count) == 0) {
-                ctx->sec_found[ctx->sec_found_count++] = sec;
-            }
+            section_remember(ctx, name, sec);
         }
         return sec;
     }
@@ -15515,6 +15578,7 @@ static size_t relax_long_size(const as_stmt_t *st, unsigned code_bits) {
 static void relax_forget_layout(emit_ctx_t *ctx) {
     size_t i;
 
+    ctx->layout_epoch++;
     virtual_label_cache_free(ctx);
     if (ctx->stmt_size_cached != NULL) {
         memset(ctx->stmt_size_cached, 0, ctx->stmt_size_cache_count);
@@ -15553,6 +15617,7 @@ static int relax_branches(emit_ctx_t *ctx) {
     size_t count = ctx->parsed != NULL ? ctx->parsed->count : 0;
     size_t *target = NULL;
     size_t *fixed = NULL;
+    size_t *sid = NULL;
     uint64_t *off = NULL;
     struct relax_at {
         const char *name;
@@ -15608,6 +15673,57 @@ static int relax_branches(emit_ctx_t *ctx) {
             ctx->branch_short[i] = 1;
         }
     }
+    /*
+     * Which section each statement is in, by number: the sections are
+     * numbered as they are met, through a table of their names.  (The
+     * name was looked for among all the sections at every statement of
+     * every round, which for a section to a function is every function
+     * for every function.)
+     */
+    {
+        size_t cap = 64;
+        size_t *slots;
+
+        while (cap < count * 2) {
+            cap *= 2;
+        }
+        slots = (size_t *)calloc(cap, sizeof(*slots));
+        sid = (size_t *)malloc(count * sizeof(*sid));
+        if (slots == NULL || sid == NULL) {
+            free(slots);
+            goto out;
+        }
+        for (i = 0; i < count; ++i) {
+            const char *name = ctx->stmt_section_at[i];
+            size_t h = 2166136261u;
+            const char *p;
+            size_t s;
+
+            for (p = name; *p != '\0'; ++p) {
+                h = (h ^ (unsigned char)*p) * 16777619u;
+            }
+            for (s = h & (cap - 1); slots[s] != 0 && strcmp(at[slots[s] - 1].name, name) != 0; s = (s + 1) & (cap - 1)) {
+            }
+            if (slots[s] == 0) {
+                if (at_count == at_cap) {
+                    size_t ncap = at_cap != 0 ? at_cap * 2 : 16;
+                    struct relax_at *grown = (struct relax_at *)realloc(at, ncap * sizeof(*grown));
+
+                    if (grown == NULL) {
+                        free(slots);
+                        goto out;
+                    }
+                    at = grown;
+                    at_cap = ncap;
+                }
+                at[at_count].name = name;
+                at[at_count].off = 0;
+                slots[s] = ++at_count;
+            }
+            sid[i] = slots[s] - 1;
+        }
+        free(slots);
+    }
     ctx->relax_state = 1;
     ctx->virtual_scanning++;
     while (changed) {
@@ -15627,26 +15743,9 @@ static int relax_branches(emit_ctx_t *ctx) {
         for (i = 0; i < count; ++i) {
             const as_stmt_t *st = &ctx->parsed->items[i];
             const char *section = track.current != NULL ? track.current : "";
-            size_t k;
+            size_t k = sid[i];
             size_t n = 0;
 
-            for (k = 0; k < at_count && strcmp(at[k].name, ctx->stmt_section_at[i]) != 0; ++k) {
-            }
-            if (k == at_count) {
-                if (at_count == at_cap) {
-                    size_t cap = at_cap != 0 ? at_cap * 2 : 16;
-                    struct relax_at *grown = (struct relax_at *)realloc(at, cap * sizeof(*grown));
-
-                    if (grown == NULL) {
-                        goto unwind;
-                    }
-                    at = grown;
-                    at_cap = cap;
-                }
-                at[at_count].name = ctx->stmt_section_at[i];
-                at[at_count].off = 0;
-                at_count++;
-            }
             off[i] = at[k].off;
             if (st->kind == AS_STMT_DIRECTIVE) {
                 int trc = section_track_apply_directive(&track, &st->u.directive);
@@ -15705,6 +15804,7 @@ out:
     }
     free(target);
     free(fixed);
+    free(sid);
     free(off);
     free(at);
     return rc;
@@ -16053,8 +16153,20 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
     stmt_cfg.is_64 = x86_code_bits == 64u;
     stmt_cfg.have_current_text_offset = 1u;
     stmt_cfg.current_text_offset = (uint64_t)buf->len;
-    if (encode_x86_stmt(ctx, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
-        return -1;
+    if (stmt_code_find(ctx, st, 0, x86_code_bits, 1, code, sizeof(code), &code_len)) {
+        return bytebuf_append(buf, code, code_len);
+    }
+    {
+        int rc = encode_x86_stmt_by_text(ctx, &stmt_cfg, x86_code_bits, st, code, sizeof(code), &code_len, encerr,
+                                         sizeof(encerr));
+
+        if (rc < 0 ||
+            (rc == 1 && encode_x86_stmt(ctx, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0)) {
+            return -1;
+        }
+    }
+    if (stmt_is_place_free(st)) {
+        stmt_code_keep(ctx, st, (uint64_t)buf->len, x86_code_bits, code, code_len);
     }
     return bytebuf_append(buf, code, code_len);
 }
@@ -16917,9 +17029,302 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
     return append_directive_data(buf, d);
 }
 
+static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
+                              const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
+                              char *encerr, size_t encerr_sz);
+
+/* Is there no name in the expression: nothing but numbers? */
+static int expr_is_numbers(const as_expr_t *e) {
+    if (e == NULL) {
+        return 1;
+    }
+    if (e->kind == AS_EXPR_CONST) {
+        return 1;
+    }
+    if (e->kind == AS_EXPR_SYMBOL || e->kind == AS_EXPR_LOCAL_REF) {
+        return 0;
+    }
+    return expr_is_numbers(e->lhs) && expr_is_numbers(e->rhs);
+}
+
+/*
+ * An instruction of registers and numbers is the same bytes wherever
+ * it stands and however the rest is laid out; one with a name in it, or
+ * that goes somewhere, is not.
+ */
+static int stmt_is_place_free(const as_stmt_t *st) {
+    size_t i;
+
+    if (st->u.instr.mnemonic == NULL || is_rel_mnemonic(st->u.instr.mnemonic)) {
+        return 0;
+    }
+    for (i = 0; i < st->u.instr.operand_count; ++i) {
+        const as_operand_t *op = &st->u.instr.operands[i];
+
+        if (op->kind == AS_OPERAND_REGISTER) {
+            continue;
+        }
+        if (op->kind == AS_OPERAND_IMMEDIATE) {
+            if (!expr_is_numbers(op->u.expr)) {
+                return 0;
+            }
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            if (!expr_is_numbers(op->u.mem.disp) || x86_base_is_ip(op->u.mem.base_reg)) {
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static struct stmt_code *stmt_code_slot(emit_ctx_t *ctx, const as_stmt_t *st) {
+    static int off = -1;
+    size_t idx = 0;
+
+    if (off < 0) {
+        off = getenv("AS_NO_STMT_CODE") != NULL;
+    }
+    if (off || ctx == NULL || ctx->cfg == NULL || ctx->cfg->target != 0 || st == NULL ||
+        st->kind != AS_STMT_INSTRUCTION || parsed_stmt_index(ctx, st, &idx) != 0) {
+        return NULL;
+    }
+    if (ctx->stmt_code == NULL) {
+        ctx->stmt_code = (struct stmt_code *)calloc(ctx->parsed->count, sizeof(*ctx->stmt_code));
+        ctx->stmt_code_count = ctx->stmt_code != NULL ? ctx->parsed->count : 0;
+    }
+    return idx < ctx->stmt_code_count ? &ctx->stmt_code[idx] : NULL;
+}
+
+/* The statement's bytes, if they are kept for here (or, `anywhere`
+ * asked, for anywhere): 1, and the bytes. */
+static int stmt_code_find(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits, int anywhere,
+                          unsigned char *code, size_t code_cap, size_t *code_len) {
+    const struct stmt_code *kept = stmt_code_slot(ctx, st);
+
+    if (kept == NULL || kept->len == 0 || kept->bits != (unsigned char)x86_code_bits || kept->len > code_cap) {
+        return 0;
+    }
+    if (!kept->anywhere && (anywhere || kept->off != sec_off || kept->epoch != ctx->layout_epoch)) {
+        return 0;
+    }
+    memcpy(code, kept->bytes, kept->len);
+    *code_len = kept->len;
+    return 1;
+}
+
+/*
+ * The key of a statement in the table of texts: every field of it that
+ * an encoder reads, with the code's size before them.  0 if it has no
+ * key -- it is not of registers and numbers, an operand has no text, a
+ * register has been given another name (which a later statement may
+ * give again), or the key is too long to be worth keeping.
+ */
+static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz) {
+    const as_instruction_t *in = &st->u.instr;
+    size_t n;
+    size_t i;
+    int w;
+
+    if (ctx->asm_reg_alias_count != 0 || !stmt_is_place_free(st)) {
+        return 0;
+    }
+    w = snprintf(key, key_sz, "%u %x %x %x %x %d %d %d %d %d %u %s %s", x86_code_bits, in->prefixes, in->pseudo,
+                 in->rex_bits, in->opmask, in->have_opmask, in->zeroing, in->broadcast, in->sae, in->rounding_mode,
+                 in->syntax_intel, in->segment_override != NULL ? in->segment_override : "-", in->mnemonic);
+    if (w < 0 || (size_t)w >= key_sz) {
+        return 0;
+    }
+    n = (size_t)w;
+    /* What each operand is, not how it was written: a name that is a
+     * number is written the same when the number has been set again. */
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+        char mark = op->raw != NULL && (op->raw[0] == '$' || op->raw[0] == '*') ? op->raw[0] : '.';
+        long long v = 0;
+
+        if (op->kind == AS_OPERAND_REGISTER) {
+            w = snprintf(key + n, key_sz - n, "\t%c%%%s", mark, op->u.reg);
+        } else if (op->kind == AS_OPERAND_IMMEDIATE) {
+            if (eval_expr_const(op->u.expr, &v) != 0) {
+                return 0;
+            }
+            w = snprintf(key + n, key_sz - n, "\t%c%lld", mark, v);
+        } else {
+            const as_mem_operand_t *m = &op->u.mem;
+
+            if (m->disp != NULL && eval_expr_const(m->disp, &v) != 0) {
+                return 0;
+            }
+            w = snprintf(key + n, key_sz - n, "\t%c%s:%d%lld(%s,%s,%d)%d", mark,
+                         m->segment_reg != NULL ? m->segment_reg : "", m->disp != NULL, v,
+                         m->base_reg != NULL ? m->base_reg : "", m->index_reg != NULL ? m->index_reg : "", m->scale,
+                         (int)m->size_bits);
+        }
+        if (w < 0 || (size_t)w >= key_sz - n) {
+            return 0;
+        }
+        n += (size_t)w;
+    }
+    return n;
+}
+
+static uint32_t text_code_hash(const char *key, size_t n) {
+    uint32_t h = 2166136261u;
+    size_t i;
+
+    for (i = 0; i < n; ++i) {
+        h = (h ^ (unsigned char)key[i]) * 16777619u;
+    }
+    return h;
+}
+
+static int text_code_find(emit_ctx_t *ctx, const char *key, size_t n, unsigned char *code, size_t code_cap,
+                          size_t *code_len) {
+    uint32_t h = text_code_hash(key, n);
+    size_t at;
+
+    if (ctx->text_code_cap == 0) {
+        return 0;
+    }
+    for (at = h & (ctx->text_code_cap - 1); ctx->text_code[at].key != NULL; at = (at + 1) & (ctx->text_code_cap - 1)) {
+        const struct text_code *t = &ctx->text_code[at];
+
+        if (t->hash == h && strcmp(t->key, key) == 0) {
+            if (t->len > code_cap) {
+                return 0;
+            }
+            memcpy(code, t->bytes, t->len);
+            *code_len = t->len;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* (For want of memory the statement is not kept, and is encoded again
+ * when it is written again.) */
+static void text_code_keep(emit_ctx_t *ctx, const char *key, size_t n, const unsigned char *code, size_t code_len) {
+    uint32_t h = text_code_hash(key, n);
+    struct text_code *t;
+    size_t at;
+
+    if (code_len == 0 || code_len > sizeof(t->bytes)) {
+        return;
+    }
+    if ((ctx->text_code_count + 1) * 2 > ctx->text_code_cap) {
+        size_t ncap = ctx->text_code_cap == 0 ? 1024 : ctx->text_code_cap * 2;
+        struct text_code *next = (struct text_code *)calloc(ncap, sizeof(*next));
+        size_t i;
+
+        if (next == NULL) {
+            return;
+        }
+        for (i = 0; i < ctx->text_code_cap; ++i) {
+            if (ctx->text_code[i].key != NULL) {
+                for (at = ctx->text_code[i].hash & (ncap - 1); next[at].key != NULL; at = (at + 1) & (ncap - 1)) {
+                }
+                next[at] = ctx->text_code[i];
+            }
+        }
+        free(ctx->text_code);
+        ctx->text_code = next;
+        ctx->text_code_cap = ncap;
+    }
+    for (at = h & (ctx->text_code_cap - 1); ctx->text_code[at].key != NULL; at = (at + 1) & (ctx->text_code_cap - 1)) {
+    }
+    t = &ctx->text_code[at];
+    t->key = xstrdup(key);
+    if (t->key == NULL) {
+        return;
+    }
+    t->hash = h;
+    t->len = (unsigned char)code_len;
+    memcpy(t->bytes, code, code_len);
+    ctx->text_code_count++;
+}
+
+static void text_code_free(emit_ctx_t *ctx) {
+    size_t i;
+
+    for (i = 0; i < ctx->text_code_cap; ++i) {
+        free(ctx->text_code[i].key);
+    }
+    free(ctx->text_code);
+    ctx->text_code = NULL;
+    ctx->text_code_cap = 0;
+    ctx->text_code_count = 0;
+}
+
+/*
+ * An instruction of registers and numbers, encoded -- once for each way
+ * it is written.  1 if the statement is not one (and nothing is done),
+ * else what encode_x86_stmt() returns.
+ */
+static int encode_x86_stmt_by_text(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, unsigned x86_code_bits,
+                                   const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
+                                   char *encerr, size_t encerr_sz) {
+    char key[192];
+    size_t n;
+    int rc;
+
+    if (stmt_code_slot(ctx, st) == NULL) {
+        return 1;
+    }
+    n = text_code_key(ctx, st, x86_code_bits, key, sizeof(key));
+    if (n == 0) {
+        return 1;
+    }
+    if (text_code_find(ctx, key, n, code, code_cap, code_len)) {
+        return 0;
+    }
+    rc = encode_x86_stmt(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+    if (rc == 0) {
+        text_code_keep(ctx, key, n, code, *code_len);
+    }
+    return rc;
+}
+
+static void stmt_code_keep(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
+                           const unsigned char *code, size_t code_len) {
+    struct stmt_code *kept = stmt_code_slot(ctx, st);
+
+    if (kept == NULL || code_len == 0 || code_len > sizeof(kept->bytes)) {
+        return;
+    }
+    kept->off = sec_off;
+    kept->bits = (unsigned char)x86_code_bits;
+    kept->epoch = ctx->layout_epoch;
+    kept->anywhere = (unsigned char)stmt_is_place_free(st);
+    kept->len = (unsigned char)code_len;
+    memcpy(kept->bytes, code, code_len);
+}
+
+/*
+ * A statement's bytes where it stands.  They are worked out once for a
+ * layout and kept (struct stmt_code); AS_NO_STMT_CODE in the
+ * environment has them worked out every time, for a test to hold the
+ * two to the same object.
+ */
 static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
                                       const as_stmt_t *st, unsigned char *code, size_t code_cap,
                                       size_t *code_len, char *encerr, size_t encerr_sz) {
+    int rc;
+
+    if (code != NULL && code_len != NULL && stmt_code_find(ctx, st, sec_off, x86_code_bits, 0, code, code_cap, code_len)) {
+        return 0;
+    }
+    rc = encode_x86_stmt_at(ctx, section_name, sec_off, x86_code_bits, st, code, code_cap, code_len, encerr, encerr_sz);
+    if (rc == 0 && code != NULL && code_len != NULL) {
+        stmt_code_keep(ctx, st, sec_off, x86_code_bits, code, *code_len);
+    }
+    return rc;
+}
+
+static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
+                              const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
+                              char *encerr, size_t encerr_sz) {
     as_elf_cfg_t stmt_cfg;
 
     if (ctx == NULL || ctx->cfg == NULL || st == NULL) {
@@ -17111,6 +17516,13 @@ unresolved_rel_target:
         }
     }
 
+    {
+        int rc = encode_x86_stmt_by_text(ctx, &stmt_cfg, x86_code_bits, st, code, code_cap, code_len, encerr, encerr_sz);
+
+        if (rc != 1) {
+            return rc;
+        }
+    }
     return encode_x86_stmt(ctx, &stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 }
 
@@ -21121,11 +21533,107 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
     return 0;
 }
 
+/*
+ * The labels seen so far, by name: the last of each.  The list grows as
+ * a pass goes down the source and is asked at every name on the way, so
+ * the index is of the list it was last asked about and takes in what
+ * has been added since.  (Each name was looked for from the end of the
+ * list back, which for a source of labels is every label for every
+ * label.)
+ */
+static struct {
+    const local_emit_label_t *labels;
+    size_t indexed;
+    size_t *slots; /* an index into labels, and one; 0 for empty */
+    size_t cap;
+    size_t used;
+} seen_labels;
+
+static void seen_labels_free(void) {
+    free(seen_labels.slots);
+    memset(&seen_labels, 0, sizeof(seen_labels));
+}
+
+static size_t seen_label_hash(const char *name) {
+    size_t h = 2166136261u;
+
+    for (; *name != '\0'; ++name) {
+        h = (h ^ (unsigned char)*name) * 16777619u;
+    }
+    return h;
+}
+
+static void seen_label_put(const local_emit_label_t *labels, size_t *slots, size_t cap, size_t i) {
+    size_t at = seen_label_hash(labels[i].name) & (cap - 1);
+
+    while (slots[at] != 0 && strcmp(labels[slots[at] - 1].name, labels[i].name) != 0) {
+        at = (at + 1) & (cap - 1);
+    }
+    if (slots[at] == 0) {
+        seen_labels.used++;
+    }
+    slots[at] = i + 1;
+}
+
+/* Take the labels from `indexed` to `count` into the index; -1 for want
+ * of memory, and the caller looks the slow way. */
+static int seen_labels_take(const local_emit_label_t *labels, size_t count) {
+    size_t i;
+
+    if (seen_labels.labels != labels || count < seen_labels.indexed) {
+        seen_labels_free();
+        seen_labels.labels = labels;
+    }
+    for (i = seen_labels.indexed; i < count; ++i) {
+        if (labels[i].name == NULL) {
+            continue;
+        }
+        if ((seen_labels.used + 1) * 2 > seen_labels.cap) {
+            size_t ncap = seen_labels.cap == 0 ? 256 : seen_labels.cap * 2;
+            size_t *next = (size_t *)calloc(ncap, sizeof(*next));
+            size_t k;
+
+            if (next == NULL) {
+                return -1;
+            }
+            seen_labels.used = 0;
+            for (k = 0; k < seen_labels.cap; ++k) {
+                if (seen_labels.slots[k] != 0) {
+                    seen_label_put(labels, next, ncap, seen_labels.slots[k] - 1);
+                }
+            }
+            free(seen_labels.slots);
+            seen_labels.slots = next;
+            seen_labels.cap = ncap;
+        }
+        seen_label_put(labels, seen_labels.slots, seen_labels.cap, i);
+    }
+    seen_labels.indexed = count;
+    return 0;
+}
+
 static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
                                 const char *name, const local_emit_label_t **out) {
     size_t i;
 
     if (labels == NULL || name == NULL || out == NULL) {
+        return -1;
+    }
+    if (seen_labels_take(labels, count) == 0) {
+        size_t at;
+
+        if (seen_labels.cap == 0) {
+            return -1;
+        }
+        for (at = seen_label_hash(name) & (seen_labels.cap - 1); seen_labels.slots[at] != 0;
+             at = (at + 1) & (seen_labels.cap - 1)) {
+            const local_emit_label_t *cur = &labels[seen_labels.slots[at] - 1];
+
+            if (strcmp(cur->name, name) == 0) {
+                *out = cur;
+                return 0;
+            }
+        }
         return -1;
     }
     for (i = count; i > 0; --i) {
@@ -21601,6 +22109,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
     }
     ctx->list_sec = list_sec;
     ctx->list_off = list_off;
+    /* (The index of labels seen is of this pass's list, which is new.) */
+    seen_labels_free();
 
     for (i = 0; i < ctx->parsed->count; ++i) {
         const as_stmt_t *st = &ctx->parsed->items[i];
@@ -22971,6 +23481,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
             set_err(&ctx, "failed to add section %s", s->name);
             goto fail;
         }
+        section_remember(&ctx, s->name, es);
         {
             unsigned long long align = s->align > 0 ? s->align : 1;
 
@@ -23132,6 +23643,9 @@ fail:
     free(ctx.label_index);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
+    free(ctx.stmt_code);
+    text_code_free(&ctx);
+    seen_labels_free();
     free(ctx.branch_short);
     free(ctx.emit_labels);
     free_leb128_sizes(&ctx);

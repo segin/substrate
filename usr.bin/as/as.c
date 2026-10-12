@@ -2978,6 +2978,11 @@ typedef struct {
     cond_sym_t *items;
     size_t count;
     size_t cap;
+    /* Where each name is in `items`, less one, by the hash of the name;
+     * 0 for an empty slot.  (Every label of the source is a name here,
+     * and each was looked for among all those before it.) */
+    size_t *slots;
+    size_t slot_cap;
 } cond_syms_t;
 
 static void cond_syms_free(cond_syms_t *syms) {
@@ -2987,17 +2992,64 @@ static void cond_syms_free(cond_syms_t *syms) {
         free(syms->items[i].name);
     }
     free(syms->items);
+    free(syms->slots);
     syms->items = NULL;
+    syms->slots = NULL;
     syms->count = 0;
     syms->cap = 0;
+    syms->slot_cap = 0;
+}
+
+static size_t cond_sym_hash(const char *name, size_t name_len) {
+    size_t h = 2166136261u;
+    size_t i;
+
+    for (i = 0; i < name_len; ++i) {
+        h = (h ^ (unsigned char)name[i]) * 16777619u;
+    }
+    return h;
+}
+
+/* Room in the index for one name more, at no more than half full. */
+static int cond_syms_index_grow(cond_syms_t *syms) {
+    size_t ncap;
+    size_t *next;
+    size_t i;
+
+    if ((syms->count + 1) * 2 <= syms->slot_cap) {
+        return 0;
+    }
+    ncap = syms->slot_cap == 0 ? 64 : syms->slot_cap * 2;
+    next = (size_t *)calloc(ncap, sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    for (i = 0; i < syms->count; ++i) {
+        size_t at = cond_sym_hash(syms->items[i].name, strlen(syms->items[i].name)) & (ncap - 1);
+
+        while (next[at] != 0) {
+            at = (at + 1) & (ncap - 1);
+        }
+        next[at] = i + 1;
+    }
+    free(syms->slots);
+    syms->slots = next;
+    syms->slot_cap = ncap;
+    return 0;
 }
 
 static cond_sym_t *cond_sym_find(const cond_syms_t *syms, const char *name, size_t name_len) {
-    size_t i;
+    size_t at;
 
-    for (i = 0; i < syms->count; ++i) {
-        if (strlen(syms->items[i].name) == name_len && strncmp(syms->items[i].name, name, name_len) == 0) {
-            return &syms->items[i];
+    if (syms->slot_cap == 0) {
+        return NULL;
+    }
+    for (at = cond_sym_hash(name, name_len) & (syms->slot_cap - 1); syms->slots[at] != 0;
+         at = (at + 1) & (syms->slot_cap - 1)) {
+        cond_sym_t *sym = &syms->items[syms->slots[at] - 1];
+
+        if (strncmp(sym->name, name, name_len) == 0 && sym->name[name_len] == '\0') {
+            return sym;
         }
     }
     return NULL;
@@ -3051,6 +3103,18 @@ static int cond_sym_define(cond_syms_t *syms, const char *name, size_t name_len,
         }
         memcpy(sym->name, name, name_len);
         sym->name[name_len] = '\0';
+        if (cond_syms_index_grow(syms) != 0) {
+            free(sym->name);
+            return -1;
+        }
+        {
+            size_t at = cond_sym_hash(name, name_len) & (syms->slot_cap - 1);
+
+            while (syms->slots[at] != 0) {
+                at = (at + 1) & (syms->slot_cap - 1);
+            }
+            syms->slots[at] = syms->count + 1;
+        }
         syms->count++;
     }
     sym->has_value = has_value;
