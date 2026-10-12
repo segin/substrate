@@ -19,7 +19,10 @@ usr.bin/as/
 ├── as_symtab.c              # Symbols: definition, binding, type, aliases
 ├── as_sections.c            # Sections, the section stack, subsections, the code mode
 ├── as_data.c                # What data directives are written in: string literals, LEB128
-├── as_elf_emit.c            # Layout, relaxation, x86 instruction selection, relocations, the object
+├── as_elf_emit.c            # Layout, relaxation, relocations, symbols, the object
+├── as_x86_stmt.c            # x86: a statement made its bytes -- selection, refusals, the emitters by form
+├── as_flat.c                # The writer of a flat binary (-O binary)
+├── as_emit_int.h            # What those three share: the emitter's context and what each calls of the others
 │                            #   and the flat image
 ├── as_cfi.c                 # .cfi_* made .eh_frame or .debug_frame
 ├── as_dwline.c              # .file and .loc made .debug_line

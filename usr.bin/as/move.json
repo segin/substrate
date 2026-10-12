@@ -1,0 +1,1 @@
+{"out": ["adjust_x86_rel_reloc_to_encoding", "append_x86_nops", "emit_resolved_x86_branch_ex", "x86_64_disp_reloc_is_unsigned", "x86_branch_hint", "x86_disp32_offset_code16", "x86_far_pointer_offset", "x86_got_load_kind", "x86_imm_field_width", "x86_prefix_count"], "in": ["bytebuf_append", "bytebuf_append_u64_le"]}

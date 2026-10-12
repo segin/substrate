@@ -294,4 +294,67 @@ int append_arm_nops(bytebuf_t *buf, size_t need, unsigned target, unsigned code_
 int append_align_fill(bytebuf_t *buf, const as_directive_t *d, size_t need, uint64_t fill);
 int align_exceeds_max_skip(const as_directive_t *d, size_t need);
 
+/*
+ * And what it has that the encoder of an x86 statement (as_x86_stmt.c)
+ * calls: what an expression is, a warning, and a register by the name
+ * a source gave it.
+ */
+int eval_expr_const(const as_expr_t *e, long long *out);
+int expr_has_local_ref(const as_expr_t *e);
+int expr_is_local_temp_symbol(const as_expr_t *e);
+int expr_is_tlscall(const as_expr_t *e);
+const char *first_symbol_op_in_expr(const as_expr_t *e);
+int raw_is_numeric_local_ref(const char *raw);
+void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *text);
+const as_operand_t *x86_operand_with_reg_alias(const emit_ctx_t *ctx, const as_operand_t *op, as_operand_t *tmp);
+
+/*
+ * as_x86_stmt.c: an x86 statement made its bytes, and what the layout
+ * and the relocations ask of an instruction -- whether it is a branch
+ * and of what kind, its mnemonic less its suffix, where in its bytes a
+ * displacement is, whether it is refused.
+ */
+int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
+int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
+                    size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz);
+int is_call_mnemonic(const char *mn);
+int is_fixed_short_rel_mnemonic(const char *mn);
+int is_rel_mnemonic(const char *mn);
+int mnemonic_takes_a_target(const char *mn);
+/* (Let go what is remembered of each mnemonic a source had.) */
+void mn_facts_free(void);
+int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, char *suffix_out);
+int operand_is_bare_address(const as_operand_t *op);
+int parse_mmx_reg(const char *name, unsigned *out);
+int parse_x86_reg(const char *name, as_x86_reg_t *out);
+int parse_xmm_reg(const char *name, unsigned *out);
+int reg_of_class(const char *name, as_x86_reg_class_t cls, unsigned max, unsigned *out);
+int x86_base_is_ip(const char *base_reg);
+int x86_branch_flip16(const as_stmt_t *st);
+char x86_branch_size_letter(const as_stmt_t *st, char suffix, unsigned code_bits);
+int x86_cond_code(const char *mnemonic, unsigned *cc_out);
+int x86_disp16_offset(const unsigned char *code, size_t len, int code16, size_t *off_out);
+int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out);
+int x86_fixed_short_branch(const char *mn, unsigned code_bits, int *need67, unsigned char *opcode);
+int x86_operand_classes_refused(const as_instruction_t *insn, int intel_syntax, int is_64, char *encerr,
+                                size_t encerr_sz);
+int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *encerr, size_t encerr_sz);
+/* A branch whose distance is known, in the form it has for that
+ * distance; and the prefix a hint of its direction is. */
+int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off, long long abs_target,
+                                int allow_short, unsigned char *code, size_t code_cap, size_t *code_len,
+                                char *encerr, size_t encerr_sz);
+unsigned x86_branch_hint(const as_stmt_t *st);
+/* What an instruction's bytes say of where a relocation goes in them,
+ * and of what kind it is. */
+void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruction_t *in, const as_operand_t *op,
+                                      const unsigned char *code, size_t code_len, uint32_t *type, uint64_t *width);
+int x86_64_disp_reloc_is_unsigned(const unsigned char *code, size_t len, const char *mnemonic);
+int x86_disp32_offset_code16(const unsigned char *code, size_t len, size_t *off_out);
+int x86_far_pointer_offset(const unsigned char *code, size_t len, size_t *off_out);
+int x86_got_load_kind(const unsigned char *code, size_t len);
+int x86_imm_field_width(const unsigned char *code, size_t len, unsigned code_bits, unsigned *width_out,
+                        int *rex_w_out, unsigned char *opcode_out);
+size_t x86_prefix_count(const unsigned char *code, size_t len, int is_64);
+
 #endif
