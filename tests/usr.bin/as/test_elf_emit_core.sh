@@ -25,6 +25,11 @@ cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/inclu
    "$ROOT/usr.bin/as/as_x86_encode.c" \
    "$ROOT/usr.bin/as/as_cfi.c" \
    "$ROOT/usr.bin/as/as_dwline.c" \
+   "$ROOT/usr.bin/as/as_arm.c" \
+   "$ROOT/usr.bin/as/as_arm_simd.c" \
+   "$ROOT/usr.bin/as/as_arm_thumb.c" \
+   "$ROOT/usr.bin/as/as_a64.c" \
+   "$ROOT/usr.bin/as/as_a64_simd.c" \
    "$ROOT/usr.bin/as/as_x86_vec.c" \
    "$ROOT/usr.bin/as/as_x86_vec_table.c" \
    "$ROOT/usr.bin/as/as_x86_vex.c" \

@@ -1,4 +1,5 @@
 #include "as_elf_emit.h"
+#include "as_arm.h"
 #include "as_x86_encode.h"
 #include "as_x86_regs.h"
 #include "as_reloc_op.h"
@@ -129,6 +130,9 @@ typedef struct {
     size_t asm_reg_alias_count;
     size_t asm_reg_alias_cap;
     int virtual_scanning;
+    /* ARM and AArch64: what the encoder last gave, for the fields of it
+     * that relocations fill. */
+    as_arm_out_t arm_out;
     /* The sections that are not flagged as code and have instructions
      * written in them.  See section_name_is_executable(). */
     char **code_sections;
@@ -14589,7 +14593,9 @@ static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *sect
         }
         if (track.current != NULL && strcmp(track.current, section_name) == 0) {
             size_t n = 0;
-            if (stmt_virtual_size_in_section(ctx, section_name, st, total, x86_code_bits, &n) == 0) {
+            /* (In the mode the statement is in, which a .code16 before
+             * it may have made another than the file began in.) */
+            if (stmt_virtual_size_in_section(ctx, section_name, st, total, track.x86_code_bits, &n) == 0) {
                 total += (uint64_t)n;
             }
         }
@@ -15103,7 +15109,8 @@ static int relax_branches(emit_ctx_t *ctx) {
     if (ctx->relax_state != 0) {
         return 0;
     }
-    if (count == 0 || ctx->cfg == NULL || (ctx->cfg->machine != EM_386 && ctx->cfg->machine != EM_X86_64)) {
+    if (count == 0 || ctx->cfg == NULL || ctx->cfg->target != 0 ||
+        (ctx->cfg->machine != EM_386 && ctx->cfg->machine != EM_X86_64)) {
         ctx->relax_state = 2;
         return 0;
     }
@@ -15410,6 +15417,91 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     return 0;
 }
 
+/*
+ * ARM and AArch64.
+ *
+ * An instruction of theirs is as long as it is wherever it stands, so
+ * there is nothing to relax: it is measured by encoding it with no
+ * labels known, and encoded again once they are.
+ */
+typedef struct {
+    emit_ctx_t *ctx;
+    const char *section;
+} arm_label_ctx_t;
+
+static int arm_label(void *cookie, const char *name, uint64_t *offset) {
+    arm_label_ctx_t *lc = (arm_label_ctx_t *)cookie;
+    const char *sec = "";
+    uint64_t off = 0;
+
+    if (find_label_virtual_location(lc->ctx, NULL, NULL, 0, 0, name, &sec, &off) != 0 || sec == NULL ||
+        lc->section == NULL || strcmp(sec, lc->section) != 0) {
+        return 1;
+    }
+    *offset = off;
+    return 0;
+}
+
+static int arm_encode_stmt(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, int placed,
+                           unsigned code_bits, const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                           size_t *code_len, char *encerr, size_t encerr_sz) {
+    const char *ops[16];
+    arm_label_ctx_t lc;
+    as_arm_req_t rq;
+    size_t i;
+    int rc;
+
+    if (st->u.instr.operand_count > sizeof(ops) / sizeof(ops[0])) {
+        snprintf(encerr, encerr_sz, "'%s' has too many operands", st->u.instr.mnemonic);
+        return -1;
+    }
+    for (i = 0; i < st->u.instr.operand_count; ++i) {
+        ops[i] = st->u.instr.operands[i].raw != NULL ? st->u.instr.operands[i].raw : "";
+    }
+    lc.ctx = ctx;
+    lc.section = section_name;
+    memset(&rq, 0, sizeof(rq));
+    rq.mnemonic = st->u.instr.mnemonic;
+    rq.ops = ops;
+    rq.op_count = st->u.instr.operand_count;
+    rq.pc = sec_off;
+    rq.thumb = code_bits == 16u;
+    rq.in_it = (int)st->u.instr.arm_in_it;
+    rq.label = placed ? arm_label : NULL;
+    rq.cookie = &lc;
+    rc = ctx->cfg->target == EM_AARCH64 ? as_a64_encode(&rq, &ctx->arm_out, encerr, encerr_sz)
+                                        : as_arm_encode(&rq, &ctx->arm_out, encerr, encerr_sz);
+    if (rc != 0) {
+        return -1;
+    }
+    if (ctx->arm_out.len > code_cap) {
+        return -1;
+    }
+    memcpy(code, ctx->arm_out.bytes, ctx->arm_out.len);
+    *code_len = ctx->arm_out.len;
+    return 0;
+}
+
+/* Padding where instructions go: the instruction that does nothing,
+ * behind as many zeros as it takes to stand where one may. */
+static int append_arm_nops(bytebuf_t *buf, size_t need, unsigned target, unsigned code_bits) {
+    static const unsigned char arm_nop[4] = {0x00, 0xf0, 0x20, 0xe3};
+    static const unsigned char thumb_nop[2] = {0x00, 0xbf};
+    static const unsigned char a64_nop[4] = {0x1f, 0x20, 0x03, 0xd5};
+    const unsigned char *nop = target == EM_AARCH64 ? a64_nop : (code_bits == 16u ? thumb_nop : arm_nop);
+    size_t unit = target != EM_AARCH64 && code_bits == 16u ? 2 : 4;
+
+    if (need % unit != 0 && bytebuf_append_zeros(buf, need % unit) != 0) {
+        return -1;
+    }
+    for (need -= need % unit; need != 0; need -= unit) {
+        if (bytebuf_append(buf, nop, unit) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name,
                                             const as_stmt_t *st, unsigned x86_code_bits) {
     unsigned char code[32];
@@ -15419,6 +15511,13 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
 
     if (ctx == NULL || ctx->cfg == NULL || buf == NULL || st == NULL) {
         return -1;
+    }
+    if (ctx->cfg->target != 0 && st->kind == AS_STMT_INSTRUCTION) {
+        if (arm_encode_stmt(ctx, section_name, (uint64_t)buf->len, 0, x86_code_bits, st, code, sizeof(code), &code_len,
+                            encerr, sizeof(encerr)) != 0) {
+            return -1;
+        }
+        return bytebuf_append(buf, code, code_len);
     }
     /* See note in stmt_virtual_size_in_section: precise branch sizing recurses
      * through this function, so cap recursion at the top level. */
@@ -16119,8 +16218,12 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         /* Where instructions go, padding that is NOPs -- none named, or
          * 0x90 named -- is the long NOPs GNU as pads with. */
+        if (ctx != NULL && ctx->cfg != NULL && ctx->cfg->target != 0 && !directive_has_arg(d, 1) &&
+            section_name_has_exec_flag(ctx, section_name)) {
+            return append_arm_nops(buf, need, ctx->cfg->target, x86_code_bits) == 0 ? 1 : -1;
+        }
         if (fill == 0x90 && !(d->fill_width > 1 && directive_has_arg(d, 1)) && ctx != NULL && ctx->cfg != NULL &&
-            (ctx->cfg->machine == EM_386 || ctx->cfg->machine == EM_X86_64) &&
+            ctx->cfg->target == 0 && (ctx->cfg->machine == EM_386 || ctx->cfg->machine == EM_X86_64) &&
             section_name_has_exec_flag(ctx, section_name)) {
             /* Behind data GNU as writes one NOP of a byte, and pads
              * what is left. */
@@ -16340,6 +16443,10 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
 
     if (ctx == NULL || ctx->cfg == NULL || st == NULL) {
         return -1;
+    }
+    if (ctx->cfg->target != 0 && st->kind == AS_STMT_INSTRUCTION) {
+        return arm_encode_stmt(ctx, section_name, sec_off, 1, x86_code_bits, st, code, code_cap, code_len, encerr,
+                               encerr_sz);
     }
     stmt_cfg = *ctx->cfg;
     stmt_cfg.x86_code_bits = x86_code_bits;
@@ -16736,6 +16843,39 @@ static int reloc_dot_lookup(void *cookie, const char *name, long long *out) {
  * REX prefix.  Set around the making of an instruction's relocation.
  */
 static int reloc_got_load;
+
+/*
+ * Set while a relocation of an ARM or AArch64 instruction is added: the
+ * type is the target's own already, and for ARM, whose addends are in
+ * the instruction, the symbol stays the symbol -- a compiler's local
+ * label is not made its section and a distance into it, which the
+ * instruction's field would have to hold.
+ */
+static int reloc_type_exact;
+
+/* The relocation of a data directive, chosen as x86's of the same ELF
+ * class, as the target names it; AS_RELOC_TYPE_BAD if it has none. */
+static uint32_t reloc_type_for_target(unsigned target, uint32_t type) {
+    static const uint32_t arm[][2] = {
+        {R_386_NONE, R_ARM_NONE}, {R_386_32, R_ARM_ABS32}, {R_386_PC32, R_ARM_REL32},
+        {R_386_16, R_ARM_ABS16},  {R_386_8, R_ARM_ABS8},
+    };
+    static const uint32_t a64[][2] = {
+        {R_X86_64_NONE, R_AARCH64_NONE},   {R_X86_64_64, R_AARCH64_ABS64},     {R_X86_64_32, R_AARCH64_ABS32},
+        {R_X86_64_32S, R_AARCH64_ABS32},   {R_X86_64_16, R_AARCH64_ABS16},     {R_X86_64_PC64, R_AARCH64_PREL64},
+        {R_X86_64_PC32, R_AARCH64_PREL32}, {R_X86_64_PLT32, R_AARCH64_PREL32}, {R_X86_64_PC16, R_AARCH64_PREL16},
+    };
+    const uint32_t (*map)[2] = target == EM_AARCH64 ? a64 : arm;
+    size_t count = target == EM_AARCH64 ? sizeof(a64) / sizeof(a64[0]) : sizeof(arm) / sizeof(arm[0]);
+    size_t i;
+
+    for (i = 0; i < count; ++i) {
+        if (map[i][0] == type) {
+            return map[i][1];
+        }
+    }
+    return AS_RELOC_TYPE_BAD;
+}
 
 static int x86_got_load_kind(const unsigned char *code, size_t len) {
     size_t i = 0;
@@ -18447,7 +18587,17 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             }
             loc = find_sym_loc(locs, &loc_index, s->name);
             if (loc != NULL && loc->sec != NULL) {
-                if (elf_symbol_define(esym, loc->sec, loc->off) != ELF_OK) {
+                uint64_t thumb_bit = 0;
+                size_t tf;
+
+                for (tf = 0; tf < ctx->cfg->thumb_func_count; ++tf) {
+                    if (strcmp(ctx->cfg->thumb_funcs[tf], s->name) == 0) {
+                        thumb_bit = 1;
+                        (void)elf_symbol_set_type(esym, STT_FUNC);
+                        break;
+                    }
+                }
+                if (elf_symbol_define(esym, loc->sec, loc->off | thumb_bit) != ELF_OK) {
                     free_sym_locs(locs, loc_count);
                     free_name_index(&loc_index);
                     return -1;
@@ -18701,7 +18851,9 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
              * end of a merged section and the program printed the wrong
              * strings.
              */
-            if (target_sec != NULL && (elf_section_flags(target_sec) & SHF_MERGE) != 0) {
+            if (target_sec != NULL &&
+                ((elf_section_flags(target_sec) & SHF_MERGE) != 0 ||
+                 (reloc_type_exact && ctx->cfg != NULL && ctx->cfg->target == EM_ARM))) {
                 sym = find_emit_symbol(ctx, sym_name);
                 if (sym == NULL) {
                     sym = elf_add_symbol(ctx->obj, sym_name, 0, 0, STB_LOCAL, STT_NOTYPE);
@@ -18715,8 +18867,12 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
                     free(sym_name);
                     return 0;
                 }
-                rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name,
-                                              fallback_type);
+                rtype = reloc_type_exact ? fallback_type
+                                         : reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name,
+                                                                 fallback_type);
+                if (rtype != AS_RELOC_TYPE_BAD && !reloc_type_exact && ctx->cfg != NULL && ctx->cfg->target != 0) {
+                    rtype = reloc_type_for_target(ctx->cfg->target, rtype);
+                }
                 if (rtype == AS_RELOC_TYPE_BAD || elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
                     free(sym_name);
                     return -1;
@@ -18743,11 +18899,20 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
         free(sym_name);
         return 0;
     }
-    rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, fallback_type);
+    rtype = reloc_type_exact ? fallback_type
+                             : reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, fallback_type);
     if (rtype == AS_RELOC_TYPE_BAD) {
         set_err(ctx, "'%s': what follows the @ is not a relocation operator this target has", name);
         free(sym_name);
         return -1;
+    }
+    if (!reloc_type_exact && ctx->cfg != NULL && ctx->cfg->target != 0) {
+        rtype = reloc_type_for_target(ctx->cfg->target, rtype);
+        if (rtype == AS_RELOC_TYPE_BAD) {
+            set_err(ctx, "'%s': a relocation this target has none for", name);
+            free(sym_name);
+            return -1;
+        }
     }
     /* A symbol reached by a thread-local relocation is a thread-local
      * symbol, and one that another file defines is known to be one by
@@ -21034,6 +21199,35 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 sec_buf_vec_free(&secbufs);
                 return -1;
             }
+            if (ctx->cfg->target != 0) {
+                /* The fields a relocation fills are told by the
+                 * encoder, with the relocation's own number. */
+                int bad = 0;
+
+                for (j = 0; j < ctx->arm_out.fixup_count && !bad; ++j) {
+                    const as_arm_fixup_t *f = &ctx->arm_out.fixups[j];
+
+                    reloc_type_exact = 1;
+                    bad = add_reloc_for_symbol_ex(ctx, cur_sec, f->symbol, cur_off + f->offset, f->type, f->addend);
+                    reloc_type_exact = 0;
+                }
+                if (bad) {
+                    if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
+                        set_err(ctx, "%s:%u: a relocation for '%s' could not be made",
+                                st->file != NULL ? st->file : "<input>", st->line, st->u.instr.mnemonic);
+                    }
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+                if (bytebuf_append(&sb->buf, code, code_len) != 0) {
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+                sb->after_data = 0;
+                continue;
+            }
             if (trace_env) {
                 fprintf(stderr, "as: reloc-trace insn %s:%u mnem=%s text_off=0x%llx len=%llu\n",
                         st->file != NULL ? st->file : "<input>",
@@ -22063,10 +22257,14 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     ctx.sections = sections;
     ctx.symtab = symtab;
     cls = cfg->is_64 ? ELFOBJ_CLASS_64 : ELFOBJ_CLASS_32;
-    ctx.obj = elf_create(ET_REL, (uint16_t)cfg->machine, cls, ELFOBJ_ENDIAN_LE);
+    ctx.obj = elf_create(ET_REL, (uint16_t)(cfg->target != 0 ? cfg->target : cfg->machine), cls, ELFOBJ_ENDIAN_LE);
     if (ctx.obj == NULL) {
         set_err(&ctx, "elf_create failed");
         return -1;
+    }
+    /* An ARM object says which ABI it is of, and a linker asks. */
+    if (cfg->target == EM_ARM) {
+        (void)elf_set_flags(ctx.obj, EF_ARM_ABI_VER5);
     }
 
     for (i = 0; i < sections->count; ++i) {
@@ -22076,9 +22274,18 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
             set_err(&ctx, "failed to add section %s", s->name);
             goto fail;
         }
-        if (elf_section_set_align(es, s->align > 0 ? s->align : 1) != ELF_OK) {
-            set_err(&ctx, "failed to set align on %s", s->name);
-            goto fail;
+        {
+            unsigned long long align = s->align > 0 ? s->align : 1;
+
+            /* The instructions of ARM and AArch64 are words, and stand
+             * where a word may wherever the linker puts their section. */
+            if (cfg->target != 0 && (s->flags & SHF_EXECINSTR) != 0 && align < 4) {
+                align = 4;
+            }
+            if (elf_section_set_align(es, align) != ELF_OK) {
+                set_err(&ctx, "failed to set align on %s", s->name);
+                goto fail;
+            }
         }
         if ((s->flags & SHF_MERGE) != 0 && s->entsize != 0 &&
             elf_section_set_merge(es, s->entsize, (s->flags & SHF_STRINGS) != 0) != ELF_OK) {

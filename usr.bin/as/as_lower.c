@@ -1,5 +1,7 @@
 #include "as_lower.h"
 
+#include "as_arm.h"
+#include "as_arm_int.h"
 #include "as_data.h"
 #include "as_expr.h"
 
@@ -2578,4 +2580,722 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
         return -1;
     }
     return lower_arguments(parsed, errbuf, errbuf_sz);
+}
+
+/*
+ * ARM and AArch64.
+ */
+
+/* A constant waiting for its literal pool. */
+typedef struct {
+    char *section;
+    char *label;
+    char *expr;
+    unsigned size;
+} arm_literal_t;
+
+typedef struct {
+    int a64;
+    int thumb;
+    unsigned it_left;
+    char *section;
+    char *previous;
+    char *stack[32];
+    size_t depth;
+    arm_literal_t *lits;
+    size_t lit_count;
+    size_t lit_cap;
+    unsigned serial;
+    /* .eabi_attribute: the bytes of the attributes, in order. */
+    unsigned char *attrs;
+    size_t attr_len;
+    size_t attr_cap;
+    /* Thumb functions: the labels defined in Thumb code, the names
+     * `.type` calls functions, and the labels `.thumb_func` is before. */
+    arg_vec_t thumb_labels;
+    arg_vec_t functions;
+    arg_vec_t thumb_funcs;
+    int thumb_func_next;
+    stmt_vec_t out;
+    const char *why;
+} arm_lower_t;
+
+static int arm_set_section(arm_lower_t *a, const char *name) {
+    char *copy = lower_strdup(name);
+
+    if (copy == NULL) {
+        return -1;
+    }
+    free(a->previous);
+    a->previous = a->section;
+    a->section = copy;
+    return 0;
+}
+
+static int arm_attr_byte(arm_lower_t *a, unsigned b) {
+    if (a->attr_len == a->attr_cap) {
+        size_t ncap = a->attr_cap == 0 ? 64 : a->attr_cap * 2;
+        unsigned char *next = (unsigned char *)realloc(a->attrs, ncap);
+
+        if (next == NULL) {
+            return -1;
+        }
+        a->attrs = next;
+        a->attr_cap = ncap;
+    }
+    a->attrs[a->attr_len++] = (unsigned char)b;
+    return 0;
+}
+
+static int arm_attr_uleb(arm_lower_t *a, unsigned long long v) {
+    do {
+        unsigned b = (unsigned)(v & 0x7f);
+
+        v >>= 7;
+        if (arm_attr_byte(a, b | (v != 0 ? 0x80u : 0u)) != 0) {
+            return -1;
+        }
+    } while (v != 0);
+    return 0;
+}
+
+/* The statement is gone, but for its labels. */
+static int arm_drop(arm_lower_t *a, as_stmt_t *st) {
+    size_t i;
+
+    if (st->kind == AS_STMT_DIRECTIVE) {
+        for (i = 0; i < st->u.directive.arg_count; ++i) {
+            free(st->u.directive.args[i]);
+        }
+        free(st->u.directive.args);
+        free(st->u.directive.name);
+        memset(&st->u.directive, 0, sizeof(st->u.directive));
+    }
+    if (st->label_count != 0) {
+        st->kind = AS_STMT_LABEL_ONLY;
+        return stmt_vec_push(&a->out, st);
+    }
+    free(st->file);
+    free(st->labels);
+    memset(st, 0, sizeof(*st));
+    return 0;
+}
+
+/* The constants waiting in `section` are put here; `wrap` if here is
+ * not in that section. */
+static int arm_flush(arm_lower_t *a, const as_stmt_t *at, const char *section, int wrap) {
+    unsigned widest = 0;
+    size_t i;
+    size_t kept = 0;
+
+    for (i = 0; i < a->lit_count; ++i) {
+        if (strcmp(a->lits[i].section, section) == 0 && a->lits[i].size > widest) {
+            widest = a->lits[i].size;
+        }
+    }
+    if (widest == 0) {
+        return 0;
+    }
+    if (wrap && push_directive(&a->out, at, ".pushsection", section, NULL) != 0) {
+        return -1;
+    }
+    for (i = 0; i < a->lit_count; ++i) {
+        arm_literal_t *l = &a->lits[i];
+
+        if (strcmp(l->section, section) != 0) {
+            a->lits[kept++] = *l;
+            continue;
+        }
+        /* Each where a word of its size may stand, with nothing in the
+         * gap: it is data, among instructions or not. */
+        if (push_directive(&a->out, at, ".p2align", l->size == 8 ? "3" : "2", "0") != 0 ||
+            push_label(&a->out, at, l->label) != 0 ||
+            push_directive(&a->out, at, l->size == 8 ? ".quad" : ".long", l->expr, NULL) != 0) {
+            return -1;
+        }
+        free(l->section);
+        free(l->label);
+        free(l->expr);
+    }
+    a->lit_count = kept;
+    return wrap ? push_directive(&a->out, at, ".popsection", NULL, NULL) : 0;
+}
+
+/* `ldr reg, =value`: a move where one instruction can move the value,
+ * and otherwise a load of it from the literal pool. */
+static int arm_load_constant(arm_lower_t *a, as_stmt_t *st) {
+    as_instruction_t *in = &st->u.instr;
+    const char *value = in->operands[1].raw + 1;
+    const char *ops[2];
+    char imm[160];
+    char mov[16];
+    char label[40];
+    as_arm_req_t rq;
+    as_arm_out_t out;
+    unsigned size = 4;
+    char *text;
+    size_t i;
+
+    if (strlen(value) + 2 > sizeof(imm) || strlen(in->mnemonic) + 1 > sizeof(mov)) {
+        a->why = "a constant too long";
+        return 1;
+    }
+    snprintf(imm, sizeof(imm), "#%s", value);
+    /* (`ldreq` is `moveq`.) */
+    snprintf(mov, sizeof(mov), "mov%s", in->mnemonic + 3);
+    ops[0] = in->operands[0].raw;
+    ops[1] = imm;
+    memset(&rq, 0, sizeof(rq));
+    rq.mnemonic = mov;
+    rq.ops = ops;
+    rq.op_count = 2;
+    rq.thumb = a->thumb;
+    rq.in_it = a->it_left != 0;
+    if (isdigit((unsigned char)value[0]) || value[0] == '-' || value[0] == '~') {
+        if ((a->a64 ? as_a64_encode(&rq, &out, NULL, 0) : as_arm_encode(&rq, &out, NULL, 0)) == 0 &&
+            out.fixup_count == 0) {
+            char *m = lower_strdup(mov);
+            char *o = lower_strdup(imm);
+
+            if (m == NULL || o == NULL) {
+                free(m);
+                free(o);
+                return -1;
+            }
+            free(in->mnemonic);
+            in->mnemonic = m;
+            free(in->operands[1].raw);
+            in->operands[1].raw = o;
+            return 0;
+        }
+    }
+    if (a->a64) {
+        unsigned n, bits;
+        int sp;
+
+        if (as_a64_register(in->operands[0].raw, &n, &bits, &sp) != 0 || (bits != 32 && bits != 64)) {
+            a->why = "a constant is loaded to a general register";
+            return 1;
+        }
+        size = bits / 8;
+    }
+    for (i = 0; i < a->lit_count; ++i) {
+        if (a->lits[i].size == size && strcmp(a->lits[i].section, a->section) == 0 &&
+            strcmp(a->lits[i].expr, value) == 0) {
+            break;
+        }
+    }
+    if (i == a->lit_count) {
+        arm_literal_t l;
+
+        if (a->lit_count == a->lit_cap) {
+            size_t ncap = a->lit_cap == 0 ? 16 : a->lit_cap * 2;
+            arm_literal_t *next = (arm_literal_t *)realloc(a->lits, ncap * sizeof(*next));
+
+            if (next == NULL) {
+                return -1;
+            }
+            a->lits = next;
+            a->lit_cap = ncap;
+        }
+        snprintf(label, sizeof(label), ".Lpool.%u", a->serial++);
+        l.section = lower_strdup(a->section);
+        l.label = lower_strdup(label);
+        l.expr = lower_strdup(value);
+        l.size = size;
+        if (l.section == NULL || l.label == NULL || l.expr == NULL) {
+            free(l.section);
+            free(l.label);
+            free(l.expr);
+            return -1;
+        }
+        a->lits[a->lit_count++] = l;
+    }
+    text = lower_strdup(a->lits[i].label);
+    if (text == NULL) {
+        return -1;
+    }
+    free(in->operands[1].raw);
+    in->operands[1].raw = text;
+    return 0;
+}
+
+static int arm_names(const arg_vec_t *v, const char *name) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* One directive: 0 if it stays (as it is or as it was made), 2 if it
+ * is dropped, 1 with a->why, -1 for want of memory. */
+static int arm_directive(arm_lower_t *a, as_stmt_t *st) {
+    as_directive_t *d = &st->u.directive;
+    const char *n = d->name;
+    const char *a0 = d->arg_count > 0 && d->args[0] != NULL ? d->args[0] : "";
+    long long v;
+
+    if (strcmp(n, ".text") == 0 || strcmp(n, ".data") == 0 || strcmp(n, ".bss") == 0) {
+        return arm_set_section(a, n);
+    }
+    if (strcmp(n, ".section") == 0 && a0[0] != '\0') {
+        return arm_set_section(a, a0);
+    }
+    if (strcmp(n, ".pushsection") == 0 && a0[0] != '\0') {
+        if (a->depth == sizeof(a->stack) / sizeof(a->stack[0])) {
+            a->why = "sections pushed too deep";
+            return 1;
+        }
+        a->stack[a->depth] = lower_strdup(a->section);
+        if (a->stack[a->depth] == NULL) {
+            return -1;
+        }
+        a->depth++;
+        return arm_set_section(a, a0);
+    }
+    if (strcmp(n, ".popsection") == 0) {
+        if (a->depth != 0) {
+            free(a->previous);
+            a->previous = a->section;
+            a->section = a->stack[--a->depth];
+        }
+        return 0;
+    }
+    if (strcmp(n, ".previous") == 0) {
+        if (a->previous != NULL) {
+            char *t = a->section;
+
+            a->section = a->previous;
+            a->previous = t;
+        }
+        return 0;
+    }
+    if (strcmp(n, ".ltorg") == 0 || strcmp(n, ".pool") == 0) {
+        /* Its labels are before the pool.  (With labels the statement
+         * lives on as them, and its file's name with it.) */
+        if (st->label_count != 0) {
+            as_stmt_t at = *st;
+
+            if (arm_drop(a, st) != 0 || arm_flush(a, &at, a->section, 0) != 0) {
+                return -1;
+            }
+        } else if (arm_flush(a, st, a->section, 0) != 0 || arm_drop(a, st) != 0) {
+            return -1;
+        }
+        return 3;
+    }
+    if (strcmp(n, ".word") == 0) {
+        return set_name(d, ".long");
+    }
+    if (strcmp(n, ".align") == 0) {
+        /* A power of two; none written is four bytes. */
+        if (d->arg_count == 0) {
+            arg_vec_t args;
+
+            memset(&args, 0, sizeof(args));
+            if (vec_push_text(&args, "2") != 0) {
+                return -1;
+            }
+            set_args(d, &args);
+        }
+        return set_name(d, ".p2align");
+    }
+    if (strcmp(n, ".inst") == 0 || strcmp(n, ".inst.n") == 0 || strcmp(n, ".inst.w") == 0) {
+        arg_vec_t args;
+        size_t i;
+
+        if (d->arg_count == 0) {
+            a->why = "an instruction's number";
+            return 1;
+        }
+        if (!a->thumb) {
+            if (n[5] != '\0') {
+                a->why = "a width is of a Thumb instruction";
+                return 1;
+            }
+            return set_name(d, ".long");
+        }
+        /* Thumb: a half word, or two with the high one first. */
+        memset(&args, 0, sizeof(args));
+        for (i = 0; i < d->arg_count; ++i) {
+            int wide;
+
+            if (as_arm_number(d->args[i], &v) != 0 || v < 0 || v > 0xffffffffll) {
+                vec_free(&args);
+                a->why = "a Thumb instruction is a number";
+                return 1;
+            }
+            wide = n[5] == '\0' ? v > 0xffff : n[6] == 'w';
+            if (!wide && v > 0xffff) {
+                vec_free(&args);
+                a->why = "a narrow instruction is 16 bits";
+                return 1;
+            }
+            if ((wide && vec_push_num(&args, (unsigned long long)v >> 16) != 0) ||
+                vec_push_num(&args, (unsigned long long)v & 0xffff) != 0) {
+                vec_free(&args);
+                return -1;
+            }
+        }
+        set_args(d, &args);
+        return set_name(d, ".short");
+    }
+    if (a->a64) {
+        if (strcmp(n, ".arch") == 0 || strcmp(n, ".cpu") == 0 || strcmp(n, ".arch_extension") == 0) {
+            if (a0[0] == '\0') {
+                a->why = "which one";
+                return 1;
+            }
+            return 2;
+        }
+        if (strcmp(n, ".arm") == 0 || strcmp(n, ".thumb") == 0 || strcmp(n, ".thumb_func") == 0 ||
+            strcmp(n, ".syntax") == 0 || strcmp(n, ".fpu") == 0 || strcmp(n, ".eabi_attribute") == 0 ||
+            strcmp(n, ".fnstart") == 0 || strcmp(n, ".fnend") == 0 || strcmp(n, ".code") == 0) {
+            a->why = "a directive of ARM, and this is AArch64";
+            return 1;
+        }
+        return 0;
+    }
+    if (strcmp(n, ".arm") == 0 || strcmp(n, ".thumb") == 0 || strcmp(n, ".code") == 0) {
+        arg_vec_t none;
+
+        if (n[1] == 'c') {
+            if (strcmp(a0, "16") != 0 && strcmp(a0, "32") != 0) {
+                a->why = "16 for Thumb or 32 for ARM";
+                return 1;
+            }
+            a->thumb = a0[0] == '1';
+        } else {
+            if (d->arg_count != 0) {
+                a->why = "it takes no argument";
+                return 1;
+            }
+            a->thumb = n[1] == 't';
+        }
+        a->it_left = 0;
+        memset(&none, 0, sizeof(none));
+        set_args(d, &none);
+        /* What follows stands where an instruction of its kind may:
+         * at a multiple of four bytes, or of two. */
+        if (push_directive(&a->out, st, ".p2align", a->thumb ? "1" : "2", "0") != 0) {
+            return -1;
+        }
+        return set_name(d, a->thumb ? ".code16" : ".code32");
+    }
+    if (strcmp(n, ".thumb_func") == 0) {
+        if (d->arg_count != 0) {
+            a->why = "it takes no argument: the function is the next label";
+            return 1;
+        }
+        a->thumb_func_next = 1;
+        return 2;
+    }
+    if (strcmp(n, ".syntax") == 0) {
+        /* Both orders of a mnemonic's parts are read whichever is
+         * said, and an immediate has its `#` or has not. */
+        if (strcasecmp(a0, "unified") != 0 && strcasecmp(a0, "divided") != 0) {
+            a->why = "unified or divided";
+            return 1;
+        }
+        return 2;
+    }
+    if (strcmp(n, ".arch") == 0 || strcmp(n, ".cpu") == 0 || strcmp(n, ".fpu") == 0 ||
+        strcmp(n, ".arch_extension") == 0 || strcmp(n, ".object_arch") == 0) {
+        /* Every instruction this assembler has is allowed already. */
+        if (a0[0] == '\0' || d->arg_count != 1) {
+            a->why = "which one";
+            return 1;
+        }
+        return 2;
+    }
+    if (strcmp(n, ".eabi_attribute") == 0) {
+        long long tag;
+        const char *val = d->arg_count > 1 && d->args[1] != NULL ? d->args[1] : "";
+        int is_string;
+
+        if (d->arg_count != 2 || as_arm_number(a0, &tag) != 0 || tag <= 0) {
+            a->why = "a tag's number and its value";
+            return 1;
+        }
+        is_string = tag == 4 || tag == 5 || tag == 67 || (tag > 32 && (tag & 1) != 0);
+        if (arm_attr_uleb(a, (unsigned long long)tag) != 0) {
+            return -1;
+        }
+        if (is_string) {
+            size_t len = strlen(val);
+            size_t i;
+
+            /* (With its quotes or without them, as the parser has it.) */
+            if (len >= 2 && val[0] == '"' && val[len - 1] == '"') {
+                val++;
+                len -= 2;
+            }
+            if (len == 0) {
+                a->why = "this tag's value is a string";
+                return 1;
+            }
+            for (i = 0; i < len; ++i) {
+                if (arm_attr_byte(a, (unsigned char)val[i]) != 0) {
+                    return -1;
+                }
+            }
+            return arm_attr_byte(a, 0) != 0 ? -1 : 2;
+        }
+        if (as_arm_number(val, &v) != 0 || v < 0) {
+            a->why = "this tag's value is a number";
+            return 1;
+        }
+        return arm_attr_uleb(a, (unsigned long long)v) != 0 ? -1 : 2;
+    }
+    if (strcmp(n, ".fnstart") == 0 || strcmp(n, ".fnend") == 0 || strcmp(n, ".cantunwind") == 0 ||
+        strcmp(n, ".save") == 0 || strcmp(n, ".vsave") == 0 || strcmp(n, ".pad") == 0 || strcmp(n, ".setfp") == 0 ||
+        strcmp(n, ".personality") == 0 || strcmp(n, ".personalityindex") == 0 || strcmp(n, ".handlerdata") == 0 ||
+        strcmp(n, ".movsp") == 0 || strcmp(n, ".unwind_raw") == 0) {
+        a->why = "the tables for unwinding ARM's stack are not made by this assembler";
+        return 1;
+    }
+    if (strcmp(n, ".type") == 0 && d->arg_count >= 2 && d->args[1] != NULL &&
+        (strcasecmp(d->args[1], "%function") == 0 || strcasecmp(d->args[1], "#function") == 0 ||
+         strcasecmp(d->args[1], "function") == 0 || strcasecmp(d->args[1], "STT_FUNC") == 0)) {
+        return vec_push_text(&a->functions, a0);
+    }
+    return 0;
+}
+
+static void arm_lower_free(arm_lower_t *a) {
+    size_t i;
+
+    free(a->section);
+    free(a->previous);
+    for (i = 0; i < a->depth; ++i) {
+        free(a->stack[i]);
+    }
+    for (i = 0; i < a->lit_count; ++i) {
+        free(a->lits[i].section);
+        free(a->lits[i].label);
+        free(a->lits[i].expr);
+    }
+    free(a->lits);
+    free(a->attrs);
+    vec_free(&a->thumb_labels);
+    vec_free(&a->functions);
+    vec_free(&a->thumb_funcs);
+}
+
+int as_arm_lower(as_parse_result_t *parsed, int a64, int thumb, char ***thumb_funcs, size_t *thumb_func_count,
+                 char *errbuf, size_t errbuf_sz) {
+    arm_lower_t a;
+    as_stmt_t last;
+    int rc = -1;
+    size_t i;
+    size_t j;
+
+    memset(&a, 0, sizeof(a));
+    memset(&last, 0, sizeof(last));
+    a.a64 = a64;
+    a.section = lower_strdup(".text");
+    if (a.section == NULL) {
+        goto oom;
+    }
+    if (thumb && !a64) {
+        a.thumb = 1;
+        if (push_directive(&a.out, &last, ".code16", NULL, NULL) != 0) {
+            goto oom;
+        }
+    }
+    for (i = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        int r = 0;
+
+        if (st->file != NULL && (last.file == NULL || strcmp(last.file, st->file) != 0)) {
+            char *copy = lower_strdup(st->file);
+
+            if (copy == NULL) {
+                goto oom;
+            }
+            free(last.file);
+            last.file = copy;
+        }
+        last.line = st->line;
+        for (j = 0; j < st->label_count; ++j) {
+            const char *name = st->labels[j].name;
+
+            if (name == NULL) {
+                continue;
+            }
+            if (a.thumb && vec_push_text(&a.thumb_labels, name) != 0) {
+                goto oom;
+            }
+            if (a.thumb_func_next) {
+                a.thumb_func_next = 0;
+                if (vec_push_text(&a.thumb_funcs, name) != 0) {
+                    goto oom;
+                }
+            }
+        }
+        if (st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL) {
+            as_instruction_t *in = &st->u.instr;
+            const char *m = in->mnemonic;
+            size_t len = strlen(m);
+
+            if (!a64 && len >= 2 && len <= 4 && strncasecmp(m, "it", 2) == 0 && strspn(m + 2, "teTE") == len - 2 &&
+                in->operand_count == 1) {
+                /* In ARM code it says what the conditions of the next
+                 * instructions say themselves, and is no instruction. */
+                if (!a.thumb) {
+                    size_t k;
+
+                    for (k = 0; k < in->operand_count; ++k) {
+                        free(in->operands[k].raw);
+                    }
+                    free(in->operands);
+                    free(in->mnemonic);
+                    free(in->segment_override);
+                    memset(in, 0, sizeof(*in));
+                    st->kind = AS_STMT_LABEL_ONLY;
+                    if (st->label_count == 0) {
+                        free(st->file);
+                        free(st->labels);
+                        memset(st, 0, sizeof(*st));
+                        continue;
+                    }
+                } else {
+                    a.it_left = (unsigned)len;
+                }
+            } else if (a.it_left != 0) {
+                in->arm_in_it = 1;
+            }
+            if (st->kind == AS_STMT_INSTRUCTION && strncasecmp(m, "ldr", 3) == 0 && in->operand_count == 2 &&
+                in->operands[1].raw != NULL && in->operands[1].raw[0] == '=') {
+                r = arm_load_constant(&a, st);
+            }
+            if (a.it_left != 0) {
+                a.it_left--;
+            }
+        } else if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL) {
+            r = arm_directive(&a, st);
+            if (r == 3) {
+                continue; /* (gone, and what it made put in its place) */
+            }
+            if (r == 2) {
+                if (arm_drop(&a, st) != 0) {
+                    goto oom;
+                }
+                continue;
+            }
+        }
+        if (r < 0) {
+            goto oom;
+        }
+        if (r > 0) {
+            if (errbuf != NULL && errbuf_sz != 0) {
+                snprintf(errbuf, errbuf_sz, "%s:%u: %s: %s", st->file != NULL ? st->file : "<input>", st->line,
+                         st->kind == AS_STMT_DIRECTIVE ? st->u.directive.name : st->u.instr.mnemonic, a.why);
+            }
+            /* What was moved to the new list is the list's again. */
+            goto restore;
+        }
+        if (stmt_vec_push(&a.out, st) != 0) {
+            goto oom;
+        }
+    }
+    /* What no .ltorg took is at the end of its section. */
+    while (a.lit_count != 0) {
+        char *section = lower_strdup(a.lits[0].section);
+
+        if (section == NULL || arm_flush(&a, &last, section, 1) != 0) {
+            free(section);
+            goto oom;
+        }
+        free(section);
+    }
+    if (a.attr_len != 0) {
+        char num[24];
+        static const char aeabi[] = "aeabi";
+
+        if (push_directive(&a.out, &last, ".pushsection", ".ARM.attributes", "\"\"") != 0) {
+            goto oom;
+        }
+        /* The section's type is its own. */
+        {
+            as_directive_t *d = &a.out.items[a.out.count - 1].u.directive;
+            arg_vec_t args;
+
+            args.items = d->args;
+            args.count = d->arg_count;
+            args.cap = d->arg_cap;
+            d->args = NULL;
+            d->arg_count = 0;
+            d->arg_cap = 0;
+            if (vec_push_text(&args, "%0x70000003") != 0) {
+                vec_free(&args);
+                goto oom;
+            }
+            set_args(d, &args);
+        }
+        snprintf(num, sizeof(num), "%lu", (unsigned long)(4 + sizeof(aeabi) + 5 + a.attr_len));
+        if (push_directive(&a.out, &last, ".byte", "0x41", NULL) != 0 ||
+            push_directive(&a.out, &last, ".long", num, NULL) != 0) {
+            goto oom;
+        }
+        for (j = 0; j < sizeof(aeabi); ++j) {
+            snprintf(num, sizeof(num), "%u", (unsigned)aeabi[j]);
+            if (push_directive(&a.out, &last, ".byte", num, NULL) != 0) {
+                goto oom;
+            }
+        }
+        snprintf(num, sizeof(num), "%lu", (unsigned long)(5 + a.attr_len));
+        if (push_directive(&a.out, &last, ".byte", "1", NULL) != 0 ||
+            push_directive(&a.out, &last, ".long", num, NULL) != 0) {
+            goto oom;
+        }
+        for (j = 0; j < a.attr_len; ++j) {
+            snprintf(num, sizeof(num), "%u", (unsigned)a.attrs[j]);
+            if (push_directive(&a.out, &last, ".byte", num, NULL) != 0) {
+                goto oom;
+            }
+        }
+        if (push_directive(&a.out, &last, ".popsection", NULL, NULL) != 0) {
+            goto oom;
+        }
+    }
+    /* A label of Thumb code that is called a function is one of Thumb. */
+    for (j = 0; j < a.thumb_labels.count; ++j) {
+        if (arm_names(&a.functions, a.thumb_labels.items[j]) && !arm_names(&a.thumb_funcs, a.thumb_labels.items[j]) &&
+            vec_push_text(&a.thumb_funcs, a.thumb_labels.items[j]) != 0) {
+            goto oom;
+        }
+    }
+    free(parsed->items);
+    parsed->items = a.out.items;
+    parsed->count = a.out.count;
+    parsed->cap = a.out.cap;
+    memset(&a.out, 0, sizeof(a.out));
+    if (thumb_funcs != NULL && thumb_func_count != NULL) {
+        *thumb_funcs = a.thumb_funcs.items;
+        *thumb_func_count = a.thumb_funcs.count;
+        memset(&a.thumb_funcs, 0, sizeof(a.thumb_funcs));
+    }
+    rc = 0;
+    goto done;
+oom:
+    if (errbuf != NULL && errbuf_sz != 0) {
+        snprintf(errbuf, errbuf_sz, "out of memory");
+    }
+restore:
+    /*
+     * The statements were moved one by one to the new list; the old
+     * list has those not reached yet.  The assembler is about to exit:
+     * the old list is emptied so that nothing is freed twice.
+     */
+    parsed->count = 0;
+    free(a.out.items);
+done:
+    free(last.file);
+    arm_lower_free(&a);
+    return rc;
 }

@@ -20,6 +20,7 @@
 .Op Fl al Ns Op = Ns Ar file
 .Op Fl -defsym Ar sym=val
 .Op Fl -statistics
+.Op Fl -target Ns = Ns Ar name
 .Op Fl -target-help
 .Op Fl -version
 .Op Fl Wa Ar opts
@@ -236,6 +237,18 @@ Print what this assembler is, and exit.
 It names itself the Substrate assembler: it is not GNU
 .Nm ,
 and a script that asks should not be told it is.
+.It Fl -target Ns = Ns Ar name
+The machine to assemble for:
+.Cm i386 ,
+.Cm x86_64 ,
+.Cm arm
+or
+.Cm aarch64 .
+Without it the machine is x86, or the one of the name
+.Nm
+is run as.
+See
+.Sx ARCHITECTURE SYNTAX .
 .It Fl -target-help
 Print target summary and exit.
 .It Fl Wa Ar opts
@@ -534,15 +547,105 @@ and
 .Li {vex3}
 ask for the other.
 .It ARM and AArch64
-Not assembled for.
-The source holds encoders for both that nothing calls.
-.Nm
-is not installed as
+Run as
 .Nm arm-as
 or
 .Nm aarch64-as ,
-and run under such a name, or given an option that names such a
-target, it fails and writes no object.
+or with
+.Fl -target
+naming one,
+.Nm
+reads that machine's source and writes that machine's object: ELF32 for
+ARM, with its addends in the instructions, and ELF64 for AArch64, with
+them in the relocations.
+.Pp
+For ARM: the data-processing instructions, the multiplies and divides,
+loads and stores of one register and of several, branches,
+.Li svc ,
+.Li mrs ,
+.Li msr ,
+.Li mrc
+and
+.Li mcr ,
+the hints, and of VFP and NEON the arithmetic, comparisons,
+conversions, moves, loads and stores.
+A mnemonic's
+.Li s
+and its condition may be in either order.
+After
+.Li .thumb
+the same in Thumb, in 16 bits where 16 can say what is written and
+.Li .w
+does not ask for 32, with the flags set by the mnemonic and by whether
+an
+.Li it
+block holds the instruction.
+A Thumb branch is 32 bits unless
+.Li .n
+is written, and is not shortened by how near its label is.
+For AArch64: data processing with a number and with a register,
+bit fields, conditional selection, loads and stores of one register and
+of two, branches, the system instructions and registers, and of the
+floats and vectors the arithmetic, comparisons, conversions, moves of
+elements and loads and stores.
+.Pp
+.Li "ldr reg, =value"
+is a move where one instruction can move the value and otherwise a load
+from a literal pool, which is put where
+.Li .ltorg
+or
+.Li .pool
+is and, for what none of those took, at the end of its section.
+.Li .word
+is four bytes,
+.Li .inst
+an instruction's, and
+.Li .align
+a power of two.
+.Li .arm ,
+.Li .thumb
+and
+.Li .code
+choose ARM's instruction set, and
+.Li .thumb_func ,
+or
+.Li .type
+calling a label of Thumb code a function, sets the low bit of the
+symbol.
+.Li .syntax ,
+.Li .arch ,
+.Li .cpu
+and
+.Li .fpu
+are checked and change nothing: every instruction
+.Nm
+has is allowed.
+.Li .eabi_attribute
+makes
+.Li .ARM.attributes .
+The directives of ARM's unwinding tables
+.Pq Li .fnstart , .fnend , .save No and the rest
+are refused, no table being made.
+A comment is from
+.Li @
+in ARM, from
+.Li //
+in both, and from a
+.Li #
+that begins its line.
+.Pp
+.Fl mcpu ,
+.Fl mfpu ,
+.Fl mfloat-abi
+and
+.Fl march
+are taken and change nothing;
+.Fl mthumb
+begins the source as Thumb.
+The mapping symbols
+.Pq Li $a , $t , $d
+are not written, so a disassembler must be told which instruction set
+a Thumb object holds.
 .El
 .Pp
 See

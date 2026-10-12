@@ -841,11 +841,6 @@ static int collect_instruction_refs(sym_ctx_t *ctx, const as_stmt_t *st) {
                 return -1;
             }
             break;
-        case AS_OPERAND_SHIFTED_REGISTER:
-            if (visit_expr_ref(ctx, op->u.shifted.amount_expr, st->file, st->line) != 0) {
-                return -1;
-            }
-            break;
         default:
             break;
         }

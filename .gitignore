@@ -246,6 +246,8 @@ sbin/*/*
 /usr.bin/as/as
 /usr.bin/as/as.x64
 /usr.bin/as/as.x86
+/usr.bin/as/arm-as
+/usr.bin/as/aarch64-as
 /usr.bin/brandelf/brandelf
 /usr.bin/brandelf/brandelf.host
 /usr.bin/cc/cc

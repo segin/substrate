@@ -218,30 +218,30 @@ static void verify_arm(const char *path) {
         fail("arm parse failed");
     }
 
-    st = find_instr(&parsed, 1, "add");
-    if (st == NULL || st->u.instr.arm_condition == NULL || strcmp(st->u.instr.arm_condition, "eq") != 0 ||
-        st->u.instr.operand_count != 3 || st->u.instr.operands[2].kind != AS_OPERAND_SHIFTED_REGISTER ||
-        st->u.instr.operands[2].u.shifted.shift != AS_SHIFT_LSL || st->u.instr.operands[2].u.shifted.amount_reg == NULL ||
-        strcmp(st->u.instr.operands[2].u.shifted.amount_reg, "r3") != 0) {
+    /* An operand of ARM is its text, for the encoder to read: the
+     * mnemonic is whole, its condition with it, a shift is an operand
+     * of its own with one blank in it, and a list is one operand. */
+    st = find_instr(&parsed, 1, "addeq");
+    if (st == NULL || st->u.instr.operand_count != 4 || st->u.instr.operands[2].kind != AS_OPERAND_RAW ||
+        strcmp(st->u.instr.operands[2].raw, "r2") != 0 || strcmp(st->u.instr.operands[3].raw, "lsl r3") != 0) {
         fail("arm condition/shift parse failed");
     }
 
     st = find_instr(&parsed, 2, "stmia");
-    if (st == NULL || st->u.instr.operand_count != 2 || st->u.instr.operands[1].kind != AS_OPERAND_REGISTER_LIST ||
-        st->u.instr.operands[1].u.reg_list.count != 3) {
+    if (st == NULL || st->u.instr.operand_count != 2 || st->u.instr.operands[1].kind != AS_OPERAND_RAW ||
+        strcmp(st->u.instr.operands[1].raw, "{r1,r2,r3}") != 0) {
         fail("arm register-list parse failed");
     }
 
     st = find_instr(&parsed, 3, "mrc");
-    if (st == NULL || st->u.instr.operand_count != 6 || st->u.instr.operands[0].kind != AS_OPERAND_COPROCESSOR ||
-        st->u.instr.operands[3].kind != AS_OPERAND_COPROCESSOR) {
+    if (st == NULL || st->u.instr.operand_count != 6 || strcmp(st->u.instr.operands[0].raw, "p15") != 0 ||
+        strcmp(st->u.instr.operands[3].raw, "c1") != 0) {
         fail("arm coprocessor parse failed");
     }
 
-    st = find_instr(&parsed, 4, "b");
-    if (st == NULL || st->u.instr.arm_condition == NULL || strcmp(st->u.instr.arm_condition, "ne") != 0 ||
-        st->u.instr.operand_count != 1 || st->u.instr.operands[0].kind != AS_OPERAND_LABEL_REF) {
-        fail("arm branch condition parse failed");
+    st = find_instr(&parsed, 4, "bne");
+    if (st == NULL || st->u.instr.operand_count != 1 || strcmp(st->u.instr.operands[0].raw, "label") != 0) {
+        fail("arm branch parse failed");
     }
 
     as_parse_result_free(&parsed);

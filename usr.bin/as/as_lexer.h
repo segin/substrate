@@ -112,6 +112,16 @@ enum {
 int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more);
 
 /*
+ * Whose source is read, which decides what a comment is.  x86: from `#`
+ * or `//`.  ARM: from `@` or `//`, and from a `#` that is the first
+ * thing of its line -- elsewhere `#` is before a number.  AArch64: as
+ * ARM, but that `@` is nothing.
+ */
+enum { AS_DIALECT_X86 = 0, AS_DIALECT_ARM, AS_DIALECT_A64 };
+void as_scan_set_dialect(int dialect);
+int as_scan_dialect(void);
+
+/*
  * The first byte of a line that is not source but says where the next
  * line is from: the mark, the line's number in decimal, a space and the
  * file's name.  What expands the source before it is tokenized writes

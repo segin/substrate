@@ -27,19 +27,12 @@ typedef enum {
     AS_OPERAND_IMMEDIATE,
     AS_OPERAND_MEMORY,
     AS_OPERAND_LABEL_REF,
-    AS_OPERAND_SHIFTED_REGISTER,
     AS_OPERAND_REGISTER_LIST,
     AS_OPERAND_COPROCESSOR,
+    /* An operand of ARM or AArch64: `raw` is it, and nothing else is
+     * known of it here.  See as_arm.h. */
+    AS_OPERAND_RAW,
 } as_operand_kind_t;
-
-typedef enum {
-    AS_SHIFT_NONE = 0,
-    AS_SHIFT_LSL,
-    AS_SHIFT_LSR,
-    AS_SHIFT_ASR,
-    AS_SHIFT_ROR,
-    AS_SHIFT_RRX,
-} as_shift_kind_t;
 
 typedef struct {
     char *base_reg;
@@ -51,21 +44,12 @@ typedef struct {
 } as_mem_operand_t;
 
 typedef struct {
-    char *reg;
-    as_shift_kind_t shift;
-    int amount_is_reg;
-    char *amount_reg;
-    as_expr_t *amount_expr;
-} as_shift_operand_t;
-
-typedef struct {
     as_operand_kind_t kind;
     char *raw;
     union {
         char *reg;
         as_expr_t *expr;
         as_mem_operand_t mem;
-        as_shift_operand_t shifted;
         struct {
             char **regs;
             size_t count;
@@ -111,7 +95,6 @@ unsigned as_pseudo_prefix_flag(const char *name);
 
 typedef struct {
     char *mnemonic;
-    char *arm_condition;
     unsigned syntax_intel;
     unsigned prefixes;
     unsigned pseudo;
@@ -137,6 +120,9 @@ typedef struct {
      * all, which is as far and is another file's symbol besides.
      */
     unsigned target_in_other_section;
+    /* Thumb: the instruction is in an IT block, and so sets no flags
+     * that it is not written to set. */
+    unsigned arm_in_it;
 } as_instruction_t;
 
 typedef enum {

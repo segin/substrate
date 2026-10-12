@@ -16,8 +16,11 @@ usr.bin/as/
 ├── as_data.c                # Data directives, literals, fixups, expression materialization
 ├── as_elf_emit.c            # ELF object emission through libelfobj
 ├── as_x86_*.c               # x86 and x86_64 encoders, relocations, ISA extensions
-├── as_arm_*.c               # ARM encoders, relocations, system/VFP/NEON handling
-├── as_a64_*.c               # AArch64 encoders, relocations, SIMD/system handling
+├── as_arm.c                 # ARM (A32) encoder; what the ARM and AArch64 encoders share
+├── as_arm_simd.c            # ARM: VFP and NEON
+├── as_arm_thumb.c           # ARM: Thumb-2
+├── as_a64.c                 # AArch64 encoder
+├── as_a64_simd.c            # AArch64: floats and vectors
 ├── Makefile                 # Native/target build wiring, alias links, elfobj dependency
 └── TASKLIST_AS.md           # Forward backlog for parser/encoder parity work
 
@@ -72,7 +75,18 @@ Deployment: Linked directly into the single `as` binary
 
 Name: Architecture-specific instruction encoders and relocation helpers
 
-Description: ISA families are split into dedicated files such as `as_x86_encode.c`, `as_x86_vex.c`, `as_arm_encode.c`, and `as_a64_encode.c`. The parser remains mostly architecture-agnostic and hands normalized instruction/data requests into the active encoder backend.
+Description: ISA families are split into dedicated files such as `as_x86_encode.c`, `as_x86_vex.c`, `as_arm.c`, and `as_a64.c`. The parser remains mostly architecture-agnostic and hands normalized instruction/data requests into the active encoder backend.
+
+**ARM and AArch64: the decision.** The two back ends are completed, not removed (2026-10-11). There were seventeen files, `as_arm_*.c` and `as_a64_*.c`, that nothing called and that were fixtures: a table of one fixed word for a mnemonic, whatever its operands. They are gone, and five files written in their place that read the operands. Run as `arm-as` or `aarch64-as`, or with `--target`, the assembler writes an `EM_ARM` or an `EM_AARCH64` object.
+
+How they fit, since the rest of the assembler was written for x86:
+
+- *An operand is its text.* An operand of these machines -- `[r1, #4]!`, `{r4-r7, lr}`, `r2, lsl #3`, `v0.s[1]`, `:lo12:sym`, `=0x1234` -- is none of the kinds the x86 front end knows, so in this mode the parser keeps each operand as written (`AS_OPERAND_RAW`, with no blank in it but one between two words) and the encoder reads it. The mnemonic is whole too: its `s` and condition are split off by the encoder's table of the real mnemonics (`as_arm_split_mnemonic()`), in either order; the parser's own copy of that, which took `teq` for `t` and `eq`, is gone.
+- *One call per instruction.* `as_arm_encode()` and `as_a64_encode()` (`as_arm.h`) are handed the mnemonic, the operands, where the instruction stands, whether it is Thumb and in an IT block, and a callback that says where a label of its section is. They answer with the bytes and, for each field the linker fills, the ELF relocation's own number, the symbol and the addend. The emitter calls them at its two places an instruction is encoded -- to measure (`append_virtual_instruction_bytes()`, no labels known) and to write (`encode_x86_stmt_for_layout()`) -- and adds the relocations in `emit_relocations()`. An instruction is as long wherever it stands, so nothing is relaxed; a Thumb branch is 32 bits unless `.n` is written.
+- *The data directives are x86's.* `as_elf_cfg_t.target` is `EM_ARM` or `EM_AARCH64` while `machine` stays the x86 machine of the same ELF class, by which sections, symbols and data are laid out as ever; the relocation of a data directive is chosen as x86's and named as the target names it where it is written (`reloc_type_for_target()`). ARM's addends are in place (REL) as i386's are, AArch64's in the relocation (RELA) as x86-64's. The code mode that `.code16`/`.code32` set is Thumb/ARM here.
+- *What is ARM's own is lowered first.* `as_arm_lower()` (`as_lower.c`) runs before `as_directives_lower()`: `ldr reg, =value` becomes a move or a load from a literal pool, placed at `.ltorg`/`.pool` and at the end of its section; `.word`, `.inst`, `.align`, `.arm`, `.thumb`, `.code`, `.thumb_func`, `.eabi_attribute` become what the rest knows; `.syntax`, `.arch`, `.cpu`, `.fpu` are checked and dropped; the unwinding directives (`.fnstart` and the rest) are refused, no table being made. The scanner's idea of a comment is the target's (`as_scan_set_dialect()`).
+
+Not done: mapping symbols (`$a`, `$t`, `$d`), ARM's unwinding tables, relaxation of Thumb branches, and the instructions outside the classes named in as(1). `tests/usr.bin/as/test_arm_forms.sh` holds 885 statements to llvm-mc's bytes, and `test_arm_targets.sh` the objects, the refusals, the pool and the directives, and runs a program of each machine under qemu.
 
 Call frame information is `as_cfi.c`: the emitter gathers the `.cfi_*` directives with the section and offset each stands at, and is handed back the bytes of `.eh_frame` or `.debug_frame` and the places in them a relocation fills (`emit_call_frames()` in `as_elf_emit.c`). `tests/usr.bin/as/test_cfi_frames.sh` holds them to GNU as's bytes.
 
@@ -172,7 +186,7 @@ Repository Path: `usr.bin/as/`
 
 Primary Consumers: Direct user invocation, `usr.bin/cc`, and toolchain regression harnesses
 
-Date of Last Update: 2026-04-22
+Date of Last Update: 2026-10-11
 
 ## 11. Glossary / Acronyms
 

@@ -66,6 +66,10 @@ typedef enum {
 
 typedef struct {
     int mode;
+    /* 0 for x86; EM_ARM or EM_AARCH64. */
+    unsigned target;
+    /* ARM: the source begins as Thumb (-mthumb). */
+    int arm_thumb;
     int syntax_intel;
     as_output_t output;
     int emit_listing;
@@ -246,7 +250,7 @@ static void usage(const char *prog) {
             "[-O elf|binary] "
             "[-msyntax=att|intel] [--warn|-W|--no-warn] [--fatal-warnings] "
             "[--from-cc] "
-            "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
+            "[-al[=file]] [--defsym sym=val] [--statistics] [--target=name] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
             "[--max-macro-depth N] [--max-include-depth N] [-o output] [file ...]\n",
             prog);
@@ -1932,7 +1936,7 @@ static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
             depth++;
         } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
             depth--;
-        } else if (depth == 0 && ch == '#') {
+        } else if (depth == 0 && ch == '#' && as_scan_dialect() == AS_DIALECT_X86) {
             /* GAS treats '#' as a line comment on x86. Stop here so
              * trailing comments do not become spurious positional macro
              * arguments and overwrite earlier named values. */
@@ -1942,7 +1946,7 @@ static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
             while (isspace((unsigned char)*next)) {
                 next++;
             }
-            if (*next == '#') {
+            if (*next == '#' && as_scan_dialect() == AS_DIALECT_X86) {
                 if (push_macro_arg_slice(out, start, s + i) != 0) {
                     return -1;
                 }
@@ -3126,7 +3130,7 @@ static int cond_syms_note_line(cond_syms_t *syms, const char *line) {
     if (copy == NULL) {
         return -1;
     }
-    hash = strchr(copy, '#');
+    hash = as_scan_dialect() == AS_DIALECT_X86 ? strchr(copy, '#') : NULL;
     if (hash != NULL) {
         *hash = '\0';
     }
@@ -3546,6 +3550,7 @@ static void report_emit_error(void *cookie, const char *message) {
 
 static int run_native_backend(const as_ctx_t *ctx) {
     as_token_vec_t toks;
+    char **thumb_funcs = NULL;
     as_parse_result_t parsed;
     as_symtab_t syms;
     as_section_state_t secs;
@@ -3643,7 +3648,8 @@ static int run_native_backend(const as_ctx_t *ctx) {
     lcfg.max_include_depth = (unsigned)ctx->max_include_depth;
 
     pcfg.intel_syntax = ctx->syntax_intel;
-    pcfg.arch = AS_PARSER_ARCH_X86;
+    pcfg.arch = ctx->target != 0 ? AS_PARSER_ARCH_ARM : AS_PARSER_ARCH_X86;
+    ecfg.target = ctx->target;
 
     ecfg.machine = ctx->mode == AS_MODE_64 ? EM_X86_64 : EM_386;
     ecfg.is_64 = ctx->mode == AS_MODE_64 ? 1u : 0u;
@@ -3714,6 +3720,12 @@ static int run_native_backend(const as_ctx_t *ctx) {
         listing_begin(ctx->in_path, &ecfg);
     }
     ecfg.check_only = (unsigned)source_in_error;
+    if (ctx->target != 0 && as_arm_lower(&parsed, ctx->target == EM_AARCH64, ctx->arm_thumb, &thumb_funcs,
+                                         &ecfg.thumb_func_count, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    ecfg.thumb_funcs = (const char *const *)thumb_funcs;
     if (as_directives_lower(&parsed, ecfg.is_64 ? 8u : 4u, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
         goto out;
@@ -3827,6 +3839,14 @@ out:
     as_symtab_free(&syms);
     as_parse_result_free(&parsed);
     as_token_vec_free(&toks);
+    if (thumb_funcs != NULL) {
+        size_t k;
+
+        for (k = 0; k < ecfg.thumb_func_count; ++k) {
+            free(thumb_funcs[k]);
+        }
+        free(thumb_funcs);
+    }
     return rc;
 }
 
@@ -3864,7 +3884,14 @@ static int validate_output_file(const as_ctx_t *ctx) {
         return -1;
     }
 
-    if (ctx->mode == AS_MODE_64) {
+    if (ctx->target != 0) {
+        if (elf_machine(check) != ctx->target ||
+            elf_class(check) != (ctx->target == EM_AARCH64 ? ELFOBJ_CLASS_64 : ELFOBJ_CLASS_32)) {
+            as_diag(AS_E_VALIDATE, "output is not an object of the target");
+            elf_close(check);
+            return -1;
+        }
+    } else if (ctx->mode == AS_MODE_64) {
         if (elf_class(check) != ELFOBJ_CLASS_64 || elf_machine(check) != EM_X86_64) {
             as_diag(AS_E_VALIDATE, "output is not x86_64 ELF64");
             elf_close(check);
@@ -3912,8 +3939,10 @@ static void print_target_help(const as_ctx_t *ctx) {
     puts("    Intel memory qualifiers parsed: byte/word/dword/qword/xmmword/ymmword/zmmword ptr");
     puts("  x86-64:");
     puts("    baseline x86-64 plus ISA levels x86-64-v2/v3/v4");
-    puts("  ARMv7 / AArch64:");
-    puts("    baseline branch/arithmetic syntax, register lists, condition codes");
+    puts("  ARMv7 / AArch64 (run as arm-as or aarch64-as, or --target=arm|aarch64):");
+    puts("    ARM and Thumb-2 integer instructions, VFP and NEON; A64 integer, system, FP and SIMD");
+    puts("    ldr reg, =value and literal pools (.ltorg, .pool); .arm, .thumb, .inst, .eabi_attribute");
+    puts("    -mthumb begins as Thumb; -mcpu, -mfpu, -march are taken and allow everything");
     puts("  output:");
     puts("    -O elf (default) or -O binary (flat image: .text/.rodata/.data/.bss)");
 }
@@ -4236,8 +4265,12 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
         const char *base = argv[0] != NULL ? strrchr(argv[0], '/') : NULL;
 
         base = base != NULL ? base + 1 : (argv[0] != NULL ? argv[0] : "");
-        if (strncmp(base, "arm", 3) == 0 || strncmp(base, "aarch64", 7) == 0 || strncmp(base, "thumb", 5) == 0) {
-            as_diag(AS_E_USAGE, "run as %s: this assembler assembles for x86 and x86-64 only", base);
+        if (strncmp(base, "aarch64", 7) == 0) {
+            ctx->target = EM_AARCH64;
+        } else if (strncmp(base, "arm", 3) == 0) {
+            ctx->target = EM_ARM;
+        } else if (strncmp(base, "thumb", 5) == 0) {
+            as_diag(AS_E_USAGE, "run as %s: Thumb is assembled by arm-as, after `.thumb`", base);
             return 1;
         }
     }
@@ -4258,6 +4291,30 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
         }
         if (strcmp(arg, "--target-help") == 0) {
             ctx->target_help = 1;
+            continue;
+        }
+        if (strncmp(arg, "--target=", 9) == 0 || strcmp(arg, "--target") == 0) {
+            const char *name = arg[8] == '=' ? arg + 9 : (i + 1 < argc ? argv[++i] : NULL);
+
+            if (name == NULL) {
+                as_diag(AS_E_USAGE, "--target requires an argument");
+                return 2;
+            }
+            if (strncmp(name, "aarch64", 7) == 0 || strncmp(name, "arm64", 5) == 0) {
+                ctx->target = EM_AARCH64;
+            } else if (strncmp(name, "arm", 3) == 0) {
+                ctx->target = EM_ARM;
+            } else if (strncmp(name, "x86_64", 6) == 0 || strncmp(name, "x86-64", 6) == 0 ||
+                       strncmp(name, "amd64", 5) == 0) {
+                ctx->target = 0;
+                ctx->mode = AS_MODE_64;
+            } else if (strcmp(name, "x86") == 0 || (name[0] == 'i' && name[1] != '\0' && strncmp(name + 2, "86", 2) == 0)) {
+                ctx->target = 0;
+                ctx->mode = AS_MODE_32;
+            } else {
+                as_diag(AS_E_USAGE, "--target=%s: the targets are i386, x86_64, arm and aarch64", name);
+                return 2;
+            }
             continue;
         }
         if (strcmp(arg, "--statistics") == 0) {
@@ -4470,6 +4527,17 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
             }
             continue;
         }
+        /* ARM's and AArch64's own: which processor, of which every
+         * instruction this assembler has is allowed already, and which
+         * of ARM's two instruction sets the source begins in. */
+        if (ctx->target != 0 && (strncmp(arg, "-mcpu=", 6) == 0 || strncmp(arg, "-mfpu=", 6) == 0 ||
+                                 strncmp(arg, "-mfloat-abi=", 12) == 0)) {
+            continue;
+        }
+        if (ctx->target == EM_ARM && (strcmp(arg, "-mthumb") == 0 || strcmp(arg, "-marm") == 0)) {
+            ctx->arm_thumb = arg[2] == 't';
+            continue;
+        }
         if (strncmp(arg, "-march=", 7) == 0) {
             ctx->march = arg + 7;
             if (strvec_push(&ctx->gcc_opts, arg) != 0) {
@@ -4583,6 +4651,13 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
     if (ctx->in_path == NULL) {
         usage(argv[0]);
         return 2;
+    }
+    if (ctx->target != 0) {
+        /* The object's class is the target's, whatever else was said. */
+        ctx->mode = ctx->target == EM_AARCH64 ? AS_MODE_64 : AS_MODE_32;
+        as_scan_set_dialect(ctx->target == EM_AARCH64 ? AS_DIALECT_A64 : AS_DIALECT_ARM);
+        /* (-march= names one of the target's processors, not of x86's.) */
+        ctx->march = NULL;
     }
     if (ctx->mode == AS_MODE_AUTO) {
         ctx->mode = infer_mode(ctx);

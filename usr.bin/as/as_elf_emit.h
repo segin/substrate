@@ -39,6 +39,20 @@ void as_elf_warnings_free(as_elf_warnings_t *w);
 
 typedef struct {
     unsigned machine;
+    /*
+     * 0 for x86.  For ARM and AArch64, EM_ARM or EM_AARCH64: the
+     * machine the object is of and whose instructions are encoded (see
+     * as_arm.h), while `machine` is the x86 one of the same ELF class --
+     * EM_386 beside EM_ARM, EM_X86_64 beside EM_AARCH64 -- by which the
+     * data directives are laid out and their relocations chosen, to be
+     * named as the target names them when they are written.  The code
+     * mode is 32 for ARM, 16 for Thumb and 64 for AArch64.
+     */
+    unsigned target;
+    /* ARM: the functions of Thumb code, whose symbols are functions
+     * with the low bit of their value set.  See as_arm_lower(). */
+    const char *const *thumb_funcs;
+    size_t thumb_func_count;
     unsigned is_64;
     unsigned x86_code_bits;
     unsigned use_rela;

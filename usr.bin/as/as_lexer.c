@@ -313,6 +313,8 @@ static char *unescape_string(const char *in) {
     return out;
 }
 
+static int scan_dialect = AS_DIALECT_X86;
+
 int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more) {
     int c = (unsigned char)s[i];
 
@@ -367,10 +369,33 @@ int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more) {
         *more = 1;
         return AS_SCAN_COMMENT;
     }
+    if (scan_dialect != AS_DIALECT_X86) {
+        /* `#` is before a number there, and is a comment only where it
+         * is the first thing of its line; ARM's comment is `@`. */
+        if (c == '#') {
+            size_t k;
+
+            for (k = 0; k < i && isspace((unsigned char)s[k]); ++k) {
+            }
+            return k == i ? AS_SCAN_COMMENT_TO_EOL : AS_SCAN_TEXT;
+        }
+        if ((c == '@' && scan_dialect == AS_DIALECT_ARM) || (c == '/' && s[i + 1] == '/')) {
+            return AS_SCAN_COMMENT_TO_EOL;
+        }
+        return AS_SCAN_TEXT;
+    }
     if (c == '#' || (c == '/' && s[i + 1] == '/')) {
         return AS_SCAN_COMMENT_TO_EOL;
     }
     return AS_SCAN_TEXT;
+}
+
+void as_scan_set_dialect(int dialect) {
+    scan_dialect = dialect;
+}
+
+int as_scan_dialect(void) {
+    return scan_dialect;
 }
 
 /* The line without its comments.  A string does not go on to the next

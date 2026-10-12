@@ -1,0 +1,39 @@
+# Where this assembler and llvm-mc part, and why this is right.
+# mode<TAB>bytes<TAB>statement, as arm_forms.txt has them.
+#
+# The old order of a mnemonic's parts, the condition before the `s`,
+# which GNU as takes and llvm-mc does not.
+arm	564755b0	sublts r4, r5, r6, asr r7
+arm	0100b001	moveqs r0, r1
+# The stack names of the loads and stores of several registers: "empty
+# descending" and "full ascending" are, for a load, increment-before and
+# decrement-after, and for a store the other two.  llvm-mc has only fd
+# and ea.
+arm	060090e9	ldmed r0, {r1, r2}
+arm	060010e8	ldmfa r0, {r1, r2}
+arm	060000e8	stmed r0, {r1, r2}
+arm	060080e9	stmfa r0, {r1, r2}
+# A call to a label of the same section is the distance to it, as GNU as
+# has it; llvm-mc leaves every call to the linker.
+arm	3e0000eb	bl fwd
+# With no size written, an s or a d register is a float of its size.
+arm	810a30ee	vadd s0, s1, s2
+arm	a20b71ee	vadd d16, d17, d18
+# One d register moved to another is VFP's move, as GNU as has it;
+# llvm-mc ORs the register with itself in NEON.
+arm	410bb0ee	vmov d0, d1
+# A number the rotated form can hold is in the rotated form; llvm-mc
+# prefers movw.
+thumb	4ff47f40	mov r0, #0xff00
+# A Thumb branch is 32 bits unless `.n` is written: it is not shortened
+# by how near its label turns out to be.
+thumb	00f07eb8	b fwd
+thumb	40f07e80	bne fwd
+# An IT instruction alone, which llvm-mc refuses for want of the
+# instructions it is for.
+thumb	08bf	it eq
+thumb	14bf	ite ne
+thumb	bcbf	itt lt
+thumb	a2bf	ittt ge
+# A call to the secure monitor, which llvm-mc wants an option for.
+a64	430000d4	smc #2

@@ -340,6 +340,7 @@ status 0.
   Done, and for more than ARM's names: in AT&T syntax a register is written with `%`, and a name without one is a symbol whatever it spells.  x86's own were taken bare too -- `call sp` was `call *%sp`, `call r12` in 64-bit code `call *%r12` -- and wrongly assembled where ARM's were refused.  The lexer no longer makes registers of ARM's names unless told to, and the parser takes a bare name for a register only in Intel syntax, and then only x86's.  With it, Intel `mov bx, si`, `di` and `bp` are the registers: they were not in the parser's list and were assembled as a load from a symbol of that name.  `test_bare_names.sh`, 39 cases, which GNU as passes.  `movl sym,%eax` is still the long form where GNU writes `A1` (a matter of encoding choice, not of names).
 - [x] **AS-T-083** The build shall not install the assembler under the names `arm-as` and `aarch64-as` while it cannot assemble for those targets.
   Trace: AS-ARM-001.  Verify: I — `Makefile` and `build-rootfs.sh` install neither; the images hold neither.  (Undone by section L if that is taken up.)
+  Undone by section L, 2026-10-11 (370): the assembler assembles for both, the links are made and installed again, and `test_build_matrix.sh` checks that they are and that each writes its machine's object.  084 stands for what is still no target: `--target=sparc`, ARM's options with no ARM target, and `thumb-as`.
   Done: the two links are out of the Makefile's `alias_links` and `install_aliases`; `build-rootfs.sh` never named them, and neither image nor `dist/` held one.  `test_build_matrix.sh` checks that they are not made.  as(1) says ARM is not assembled for, where it described staged support.
 - [x] **AS-T-084** If the assembler is asked for a target it cannot assemble for, by name or by option, then it shall fail and write no object.
   Trace: AS-ARM-002.  Verify: T — `--target=aarch64`, `-marm`, `-mthumb`, `-mcpu=cortex-a53`, and `argv[0]` of `arm-as`: exit 1.
@@ -1123,42 +1124,47 @@ make the targets real.  It is last because nothing else depends on it and
 the seventeen files are, as they stand, fixtures and not encoders.  If it
 is not to be done, 370 is ticked with "removed" and the rest struck.
 
-- [ ] **AS-T-370** A decision shall be recorded in `usr.bin/as/ARCHITECTURE.md`: the ARM and AArch64 back ends are to be completed, or their seventeen files are removed.
+- [x] **AS-T-370** A decision shall be recorded in `usr.bin/as/ARCHITECTURE.md`: the ARM and AArch64 back ends are to be completed, or their seventeen files are removed.
   Trace: AS-ARM-001, AS-ARM-004.  Verify: I.
-- [ ] **AS-T-371** When invoked as `arm-as` or `aarch64-as`, or with `--target` naming one, the assembler shall parse for that architecture and write an object of that machine type.
+  Done, 2026-10-11, and both: completed, and the seventeen files removed.  They could not be completed as they stood -- each took a structure of numbers that nothing filled, and most answered with one fixed word -- so five files are written in their place that take the instruction as it was written and read its operands (`as_arm.c`, `as_arm_simd.c`, `as_arm_thumb.c`, `as_a64.c`, `as_a64_simd.c`; `as_arm.h` is the interface).  `ARCHITECTURE.md` section 3.3 has the decision and how the back ends sit in an assembler written for x86: the operand kept as text, one call for an instruction, x86's data directives with their relocations renamed, ARM's own directives lowered first.  This whole section is that one piece of work and is ticked with it; 083 and 084 are undone by it, as they said they would be.  What is not done is said there and in as(1): mapping symbols, ARM's unwinding tables (their directives are refused), relaxation of Thumb branches, and the instructions outside the classes the corpus has.
+  Found on the way, and x86's: the table of where each statement stands measured every statement in the mode the file began in, so a label after a `.code16` in a 32-bit file -- or after `.thumb` -- was placed as if the code before it were of the other size.  One line of the differential corpus that mixed the three modes is right for it and is out of the baseline.
+- [x] **AS-T-371** When invoked as `arm-as` or `aarch64-as`, or with `--target` naming one, the assembler shall parse for that architecture and write an object of that machine type.
   Trace: AS-ARM-001, AS-ARM-002.  Verify: T — `add r0, r0, r1` under `arm-as` gives an `EM_ARM` object holding `e0800001`; `ret` under `aarch64-as` an `EM_AARCH64` object holding `d65f03c0`.  After: 370, 090.
-- [ ] **AS-T-372** The ARM and AArch64 instruction structures shall hold the operands of the instruction.
+- [x] **AS-T-372** The ARM and AArch64 instruction structures shall hold the operands of the instruction.
   Trace: AS-ARM-004.  Verify: I — no encoder is a table of one fixed word per mnemonic.  After: 371.
-- [ ] **AS-T-373** When an ARM or AArch64 instruction is encoded, the encoding shall be of the operands written.
+- [x] **AS-T-373** When an ARM or AArch64 instruction is encoded, the encoding shall be of the operands written.
   Trace: AS-ARM-004.  Verify: T — a differential corpus against `llvm-mc` for each instruction class (data processing, multiply, load/store, load/store multiple, branch, system, VFP, NEON; AArch64 data processing immediate and register, load/store, branch, system, SIMD): identical words.  After: 372.
-- [ ] **AS-T-374** If an ARM or AArch64 operand cannot be encoded, then the assembler shall fail and say why.
+- [x] **AS-T-374** If an ARM or AArch64 operand cannot be encoded, then the assembler shall fail and say why.
   Trace: AS-ARM-005, AS-ARM-008.  Verify: T — `add r0, r1, #0x101`, `mov r0, #0x12345` (without `movw`), `movw r3, #0x10000`, a branch out of range, a misaligned branch target: exit 1 with the specific message.  After: 372.
-- [ ] **AS-T-375** When an ARM shift of `lsr #32`, `asr #32` or `rrx` is written, the assembler shall encode it; if `lsr #0`, `asr #0` or `ror #0` is written, it shall encode `lsl #0` or refuse as the architecture defines.
+- [x] **AS-T-375** When an ARM shift of `lsr #32`, `asr #32` or `rrx` is written, the assembler shall encode it; if `lsr #0`, `asr #0` or `ror #0` is written, it shall encode `lsl #0` or refuse as the architecture defines.
   Trace: AS-ARM-006.  Verify: T — against `llvm-mc`.
-- [ ] **AS-T-376** If an ARM register number is out of range for its field, then the encoder shall refuse it.
+- [x] **AS-T-376** If an ARM register number is out of range for its field, then the encoder shall refuse it.
   Trace: AS-ARM-006.  Verify: T — a unit test of each field.
-- [ ] **AS-T-377** When `ldr rX, =const` is written, the assembler shall place the constant in a literal pool emitted at `.ltorg`/`.pool` or the end of the section, and load it PC-relative.
+  Done, in the shape the new encoders give it: an encoder is handed no register's number, only its name, and a name past the last register is no register.  `test_arm_targets.sh` has `r16` refused in each field of a data-processing instruction, a shift, a multiply, a load's register, base and index, and a list; `d32`, `s32` and `q16`; and for AArch64 `x31`, `w31`, `x05` and `x007`.
+- [x] **AS-T-377** When `ldr rX, =const` is written, the assembler shall place the constant in a literal pool emitted at `.ltorg`/`.pool` or the end of the section, and load it PC-relative.
   Trace: AS-ARM-006.  Verify: T — against `llvm-mc`; D — the code runs under `qemu-arm`.
-- [ ] **AS-T-378** When an ARM load or store has a negative offset, or post-indexing, the assembler shall encode the U and P bits accordingly.
+- [x] **AS-T-378** When an ARM load or store has a negative offset, or post-indexing, the assembler shall encode the U and P bits accordingly.
   Trace: AS-ARM-006.  Verify: T — `ldr r0,[r1,#-4]`, `ldr r0,[r1],#4`, `str r0,[r1,#-4]!`.
-- [ ] **AS-T-379** When `ldm` or `stm` is written with a stack suffix (`fd`, `ed`, `fa`, `ea`), the assembler shall map it for a load and for a store as the architecture defines.
+- [x] **AS-T-379** When `ldm` or `stm` is written with a stack suffix (`fd`, `ed`, `fa`, `ea`), the assembler shall map it for a load and for a store as the architecture defines.
   Trace: AS-ARM-006.  Verify: T — the eight combinations; `push`/`pop` with any register list.
-- [ ] **AS-T-380** The assembler shall split an ARM mnemonic into base, `s` flag and condition by a table of the real mnemonics, in unified and divided order.
+- [x] **AS-T-380** The assembler shall split an ARM mnemonic into base, `s` flag and condition by a table of the real mnemonics, in unified and divided order.
   Trace: AS-ARM-006.  Verify: T — `teq`, `svc`, `bls`, `mrs`, `movseq`, `moveqs`, `bleq`, `blt`, `blo`; the copy in `as_parser.c` is gone.
-- [ ] **AS-T-381** When a conditional hint is written, the assembler shall encode its condition.
+- [x] **AS-T-381** When a conditional hint is written, the assembler shall encode its condition.
   Trace: AS-ARM-006.  Verify: T — `nopeq`, `wfine`.
-- [ ] **AS-T-382** When Thumb `add`, `orn` and their fellows are encoded, the assembler shall choose flag-setting by the mnemonic and the IT state, and emit the two halves of a 32-bit instruction in one order.
+- [x] **AS-T-382** When Thumb `add`, `orn` and their fellows are encoded, the assembler shall choose flag-setting by the mnemonic and the IT state, and emit the two halves of a 32-bit instruction in one order.
   Trace: AS-ARM-006.  Verify: T — against `llvm-mc -mattr=+thumb2`.
-- [ ] **AS-T-383** When AArch64 `ret` is written with no register, the assembler shall encode `ret x30`.
+  Done, and more of Thumb than was asked, since a data-processing instruction alone is no program: the shifts, `mul`, `movw`/`movt`, loads and stores, `push`/`pop`, branches, `cbz`, `it` and the hints.  173 statements against `llvm-mc -triple=thumbv7`, 166 the same; the seven are in `arm_own.txt` with their reasons (a branch is not shortened by its distance; `mov r0, #0xff00` is the rotated form and not `movw`; an `it` alone).  A program of Thumb and ARM code with IT blocks, a literal pool and `.inst` is byte for byte llvm-mc's object, and one runs under `qemu-arm`.
+- [x] **AS-T-383** When AArch64 `ret` is written with no register, the assembler shall encode `ret x30`.
   Trace: AS-ARM-007.  Verify: T.
-- [ ] **AS-T-384** The AArch64 branch encoder shall match the mnemonic before it validates fields, and shall accept `b.eq` and each condition by name.
+- [x] **AS-T-384** The AArch64 branch encoder shall match the mnemonic before it validates fields, and shall accept `b.eq` and each condition by name.
   Trace: AS-ARM-007.  Verify: T — `cbz`, `b.ne`, `b.hs`, `bne` (alias).
-- [ ] **AS-T-385** The AArch64 register parser shall accept `x0`–`x30`, `w0`–`w30`, `sp`, `wsp`, `xzr`, `wzr`, `fp`, `lr`, `ip0`, `ip1` and the vector and FP registers, and shall refuse `x05` and `x007`.
+- [x] **AS-T-385** The AArch64 register parser shall accept `x0`–`x30`, `w0`–`w30`, `sp`, `wsp`, `xzr`, `wzr`, `fp`, `lr`, `ip0`, `ip1` and the vector and FP registers, and shall refuse `x05` and `x007`.
   Trace: AS-ARM-007.  Verify: T — a unit test.
-- [ ] **AS-T-386** The AArch64 relocation table shall name only relocations the ELF ABI for AArch64 defines.
+- [x] **AS-T-386** The AArch64 relocation table shall name only relocations the ELF ABI for AArch64 defines.
   Trace: AS-ARM-007.  Verify: I — `R_AARCH64_MOVW_UABS_G3_NC` is gone.
-- [ ] **AS-T-387** When `.inst`, `.word`, `.arch`, `.syntax`, `.arm`, `.thumb`, `.cpu`, `.fpu`, `.eabi_attribute`, `.fnstart`, `.fnend`, `.thumb_func`, `.ltorg` or `.pool` is assembled for ARM or AArch64, the assembler shall give it its effect or fail.
+- [x] **AS-T-387** When `.inst`, `.word`, `.arch`, `.syntax`, `.arm`, `.thumb`, `.cpu`, `.fpu`, `.eabi_attribute`, `.fnstart`, `.fnend`, `.thumb_func`, `.ltorg` or `.pool` is assembled for ARM or AArch64, the assembler shall give it its effect or fail.
   Trace: AS-ARM-002.  Verify: T — `.inst 0xd65f03c0` emits four bytes; `.word 0xe12fff1e` four; each other directive has a case.  After: 371.
+  Done.  Their effects: `.word` four bytes; `.inst` an instruction's bytes (in Thumb a half word, or two with the high one first, by `.n`, `.w` or the number); `.arm`, `.thumb` and `.code 16|32` the instruction set, after padding to where an instruction of it may stand; `.thumb_func`, and `.type` calling a label of Thumb code a function, the low bit of the symbol's value; `.ltorg` and `.pool` the literal pool; `.eabi_attribute` the section `.ARM.attributes`, which `llvm-readelf --arch-specific` reads back.  `.syntax`, `.arch`, `.cpu` and `.fpu` are checked for an argument that is one and have no other effect, every instruction being allowed and both orders of a mnemonic read.  `.fnstart`, `.fnend` and the other unwinding directives fail, with the reason, since no table is made.  Under AArch64 the directives that are ARM's fail.
 
 ## Trace: audit entry to tasks
 
@@ -1291,5 +1297,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 302 done, 49 open.  Numbers run to 400, with gaps left between
+351 tasks: 320 done, 31 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

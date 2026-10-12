@@ -178,11 +178,6 @@ static void free_operand(as_operand_t *op) {
         free(op->u.mem.segment_reg);
         as_expr_free(op->u.mem.disp);
         break;
-    case AS_OPERAND_SHIFTED_REGISTER:
-        free(op->u.shifted.reg);
-        free(op->u.shifted.amount_reg);
-        as_expr_free(op->u.shifted.amount_expr);
-        break;
     case AS_OPERAND_REGISTER_LIST:
         for (i = 0; i < op->u.reg_list.count; ++i) {
             free(op->u.reg_list.regs[i]);
@@ -208,7 +203,6 @@ static void free_instruction(as_instruction_t *in) {
     size_t i;
 
     free(in->mnemonic);
-    free(in->arm_condition);
     free(in->segment_override);
     for (i = 0; i < in->operand_count; ++i) {
         free_operand(&in->operands[i]);
@@ -539,29 +533,6 @@ static int is_arm_register_text(const char *s) {
         return *p == '\0';
     }
     return 0;
-}
-
-static int is_shift_keyword(const char *s) {
-    return streq_ci(s, "lsl") || streq_ci(s, "lsr") || streq_ci(s, "asr") || streq_ci(s, "ror") || streq_ci(s, "rrx");
-}
-
-static as_shift_kind_t shift_from_keyword(const char *s) {
-    if (streq_ci(s, "lsl")) {
-        return AS_SHIFT_LSL;
-    }
-    if (streq_ci(s, "lsr")) {
-        return AS_SHIFT_LSR;
-    }
-    if (streq_ci(s, "asr")) {
-        return AS_SHIFT_ASR;
-    }
-    if (streq_ci(s, "ror")) {
-        return AS_SHIFT_ROR;
-    }
-    if (streq_ci(s, "rrx")) {
-        return AS_SHIFT_RRX;
-    }
-    return AS_SHIFT_NONE;
 }
 
 static int is_coprocessor_text(const char *s) {
@@ -1227,42 +1198,44 @@ static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *o
     return op->u.reg_list.count > 0 ? 0 : -1;
 }
 
-static int parse_shift_suffix(parse_ctx_t *ctx, as_operand_t *prev, const as_token_t *tokv, size_t n) {
-    (void)ctx;
+/*
+ * An operand of ARM or AArch64 is kept as it was written, for the
+ * encoder to read: with no blank in it but one between two words --
+ * `lsl #2`, `lsl r3` -- so that the encoders have one spelling of each
+ * thing to know.
+ */
+static void arm_squeeze(char *s) {
+    size_t r;
+    size_t w = 0;
 
-    if (n == 0 || prev == NULL) {
-        return -1;
-    }
-    if (prev->kind != AS_OPERAND_REGISTER && prev->kind != AS_OPERAND_SHIFTED_REGISTER) {
-        return -1;
-    }
-    if (!is_shift_keyword(tokv[0].text)) {
-        return -1;
-    }
+    for (r = 0; s[r] != '\0'; ++r) {
+        if (isspace((unsigned char)s[r])) {
+            size_t next = r;
+            int prev = w != 0 ? (unsigned char)s[w - 1] : 0;
+            int after;
 
-    if (prev->kind == AS_OPERAND_REGISTER) {
-        char *reg = prev->u.reg;
-        prev->kind = AS_OPERAND_SHIFTED_REGISTER;
-        memset(&prev->u.shifted, 0, sizeof(prev->u.shifted));
-        prev->u.shifted.reg = reg;
-    }
-
-    prev->u.shifted.shift = shift_from_keyword(tokv[0].text);
-
-    if (n >= 2) {
-        if (tok_is(&tokv[1], '#')) {
-            prev->u.shifted.amount_expr = n >= 3 ? parse_expression_from_tokens(ctx, tokv + 2, n - 2) : NULL;
-            if (prev->u.shifted.amount_expr == NULL) {
-                return -1;
+            while (isspace((unsigned char)s[next])) {
+                next++;
             }
-        } else if (tokv[1].kind == AS_TOK_REGISTER || is_arm_register_text(tokv[1].text)) {
-            prev->u.shifted.amount_is_reg = 1;
-            prev->u.shifted.amount_reg = strip_register_prefix(tokv[1].text);
-            if (prev->u.shifted.amount_reg == NULL) {
-                return -1;
+            after = (unsigned char)s[next];
+            r = next - 1;
+            if ((isalnum(prev) || prev == '_') && (isalnum(after) || after == '_' || after == '#')) {
+                s[w++] = ' ';
             }
+            continue;
         }
+        s[w++] = s[r];
     }
+    s[w] = '\0';
+}
+
+static int parse_arm_operand(const as_token_t *tokv, size_t n, as_operand_t *op) {
+    op->raw = tokens_as_written(tokv, n, 1);
+    if (op->raw == NULL) {
+        return -1;
+    }
+    arm_squeeze(op->raw);
+    op->kind = AS_OPERAND_RAW;
     return 0;
 }
 
@@ -1564,44 +1537,6 @@ static int parse_directive(const as_token_t *tokv, size_t n, as_stmt_t *st) {
                 }
             }
             start = i + 1;
-        }
-    }
-    return 0;
-}
-
-static int parse_arm_condition(as_instruction_t *in) {
-    static const char *const conds[] = {
-        "eq", "ne", "cs", "hs", "cc", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al",
-    };
-    size_t i;
-    size_t len;
-
-    if (in->mnemonic == NULL) {
-        return 0;
-    }
-
-    len = strlen(in->mnemonic);
-    for (i = 0; i < sizeof(conds) / sizeof(conds[0]); ++i) {
-        size_t clen = strlen(conds[i]);
-        if (len <= clen) {
-            continue;
-        }
-        if (streq_ci(in->mnemonic + (len - clen), conds[i])) {
-            char *base;
-            base = (char *)malloc(len - clen + 1);
-            if (base == NULL) {
-                return -1;
-            }
-            memcpy(base, in->mnemonic, len - clen);
-            base[len - clen] = '\0';
-            in->arm_condition = xstrdup(conds[i]);
-            if (in->arm_condition == NULL) {
-                free(base);
-                return -1;
-            }
-            free(in->mnemonic);
-            in->mnemonic = base;
-            return 0;
         }
     }
     return 0;
@@ -1917,14 +1852,6 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     }
     i++;
 
-    if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM) {
-        if (parse_arm_condition(&in) != 0) {
-            free(in.mnemonic);
-            free(in.segment_override);
-            return -1;
-        }
-    }
-
     start = i;
     first_operand = i;
     while (i <= n) {
@@ -1978,9 +1905,12 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     in.sae = 1;
                     in.rounding_mode = decor.rounding_mode;
                     rounding_written = 1;
-                } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM && in.operand_count > 0 &&
-                    is_shift_keyword(tokv[start].text) && parse_shift_suffix(ctx, &in.operands[in.operand_count - 1], tokv + start, operand_n) == 0) {
-                    /* Shift suffix consumed by previous operand. */
+                } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM) {
+                    if (parse_arm_operand(tokv + start, operand_n, &op) != 0 || add_operand(&in, &op) != 0) {
+                        free_operand(&op);
+                        free_instruction(&in);
+                        return -1;
+                    }
                 } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
                            in.operand_count == 0 && is_x86_far_imm_mnemonic(in.mnemonic)) {
                     as_operand_t off_op;
@@ -2505,9 +2435,17 @@ static void resolve_locals(parse_ctx_t *ctx) {
             case AS_OPERAND_MEMORY:
                 e = op->u.mem.disp;
                 break;
-            case AS_OPERAND_SHIFTED_REGISTER:
-                e = op->u.shifted.amount_expr;
+            case AS_OPERAND_RAW: {
+                /* (`b 1b`, `adr r0, 1f`: the label's name.) */
+                char *named = op->raw != NULL ? name_local_refs_in_text(ctx, st->file, st->line, op->raw) : NULL;
+
+                if (named != NULL) {
+                    arm_squeeze(named);
+                    free(op->raw);
+                    op->raw = named;
+                }
                 break;
+            }
             default:
                 break;
             }

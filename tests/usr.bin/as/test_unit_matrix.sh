@@ -10,18 +10,10 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 "$ROOT/tests/usr.bin/as/test_i8086_corpus.sh"
 "$ROOT/tests/usr.bin/as/test_i8086_realmode_core.sh"
 "$ROOT/tests/usr.bin/as/test_i8086_elf_object.sh"
-"$ROOT/tests/usr.bin/as/test_arm_encode_core.sh"
-"$ROOT/tests/usr.bin/as/test_a64_encode_core.sh"
-"$ROOT/tests/usr.bin/as/test_a64_simd_core.sh"
-"$ROOT/tests/usr.bin/as/test_a64_v81_core.sh"
+"$ROOT/tests/usr.bin/as/test_arm_forms.sh"
 
-# 8a.2 Operand range limits.
-"$ROOT/tests/usr.bin/as/test_arm_thumb_core.sh"
-"$ROOT/tests/usr.bin/as/test_a64_branch_core.sh"
-
-# 8a.3 Relocation type/addend emission.
-"$ROOT/tests/usr.bin/as/test_arm_reloc_core.sh"
-"$ROOT/tests/usr.bin/as/test_a64_reloc_core.sh"
+# 8a.2 Operand range limits, and 8a.3 relocation type/addend emission.
+"$ROOT/tests/usr.bin/as/test_arm_targets.sh"
 "$ROOT/tests/usr.bin/as/test_relocations_elf_32_64.sh"
 
 
