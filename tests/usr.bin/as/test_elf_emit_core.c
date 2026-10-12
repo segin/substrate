@@ -92,11 +92,12 @@ int main(int argc, char **argv) {
     if (elf_find_section(obj, ".debug_custom") == NULL) {
         fail("missing debug sections");
     }
-    /* `.file 1` and `.loc` are in the source, and no line table is made
-     * of them: so no section that says one was.  (This asked for the
-     * section, which was there with nothing in it.) */
-    if (elf_find_section(obj, ".debug_line") != NULL) {
-        fail("a .debug_line section with no line table in it");
+    /* `.file 1` and `.loc` are in the source, and the line table is
+     * made of them: the section is there, and is not empty.  (It was
+     * there with nothing in it once, and then not there at all.) */
+    if (elf_find_section(obj, ".debug_line") == NULL ||
+        elf_section_size(elf_find_section(obj, ".debug_line")) == 0) {
+        fail("no line table for a source with .loc");
     }
 
     if (elf_find_section(obj, ".eh_frame") == NULL) {

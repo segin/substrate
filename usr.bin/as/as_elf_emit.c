@@ -3,6 +3,7 @@
 #include "as_x86_regs.h"
 #include "as_reloc_op.h"
 #include "as_cfi.h"
+#include "as_dwline.h"
 #include "as_x86_vec.h"
 #include "as_x86_vex.h"
 #include "as_x86_avx.h"
@@ -61,6 +62,10 @@ typedef struct {
     char *section;
     uint64_t off;
     const as_stmt_t *stmt;
+    /* What it is found by besides its name: where it is written, for a
+     * numbered label, and the statement it is. */
+    char *place_key;
+    char *stmt_key;
 } virtual_label_cache_t;
 
 typedef struct {
@@ -74,6 +79,13 @@ typedef struct {
 struct leb_stmt {
     const as_stmt_t *st;
     unsigned char *arg_bytes; /* for each argument, the bytes it takes */
+};
+
+/* A row of the line table: what a `.loc` said, where it took effect,
+ * and the name it gave its view, if it gave one. */
+struct line_row {
+    as_dwline_row_t row;
+    char view[48];
 };
 
 typedef struct {
@@ -104,6 +116,12 @@ typedef struct {
     virtual_label_cache_t *vlabel_cache;
     size_t vlabel_count;
     size_t vlabel_cap;
+    /* The same by name (the first of a name), by place and by
+     * statement (the last): it was searched from end to end for each,
+     * and a compiler's debugging sections ask a hundred thousand times. */
+    as_strmap_t vlabel_by_name;
+    as_strmap_t vlabel_by_place;
+    as_strmap_t vlabel_by_stmt;
     asm_var_t *asm_vars;
     size_t asm_var_count;
     size_t asm_var_cap;
@@ -121,6 +139,20 @@ typedef struct {
      * argument takes.  See settle_leb128_sizes(). */
     struct leb_stmt *leb;
     size_t leb_count;
+    /* The rows of the line table, as the layout now is, and the rows
+     * that `.loc ... view NAME` gave a name to.  See line_rows(). */
+    struct line_row *line_rows;
+    size_t line_row_count;
+    int line_rows_valid;
+    int line_rows_busy;
+    /* -g was given and the source has no `.loc`: each instruction is a
+     * row of the line table, of its own line. */
+    int line_own;
+    as_strmap_t line_views;
+    as_strmap_t line_view_names;
+    char **line_view_name_list;
+    size_t line_view_name_count;
+    int line_view_names_made;
     /* Per-statement size cache for the conservative virtual-size path.
      * Linux's syscall_32.s drove ~13k stmts × thousands of branch range
      * queries, each redoing the full encode_x86_stmt for every entry —
@@ -12952,6 +12984,19 @@ static const char *section_name_keep(emit_ctx_t *ctx, const char *name) {
     return copy;
 }
 
+/* The keys the cache of labels is found by: a place in the source, and
+ * a statement.  0, or -1 for a file's name too long to make one of. */
+#define VLABEL_KEY_MAX 1100
+static int vlabel_place_key(char *key, size_t key_sz, const char *file, unsigned line, int digit) {
+    int n = snprintf(key, key_sz, "%u %d %s", line, digit, file);
+
+    return n < 0 || (size_t)n >= key_sz ? -1 : 0;
+}
+
+static void vlabel_stmt_key(char *key, size_t key_sz, const as_stmt_t *st) {
+    snprintf(key, key_sz, "%p", (const void *)st);
+}
+
 static int virtual_label_cache_lookup(emit_ctx_t *ctx, const char *file, unsigned line, int digit,
                                       const char *sym_name, const char **section_out, uint64_t *off_out) {
     size_t i;
@@ -12967,18 +13012,19 @@ static int virtual_label_cache_lookup(emit_ctx_t *ctx, const char *file, unsigne
     if (sym_name == NULL && digit < 0) {
         return -1;
     }
-    for (i = 0; i < ctx->vlabel_count; ++i) {
-        virtual_label_cache_t *c = &ctx->vlabel_cache[i];
+    {
+        virtual_label_cache_t *c;
+        char key[VLABEL_KEY_MAX];
+
         if (sym_name != NULL) {
-            if (c->name == NULL || strcmp(c->name, sym_name) != 0) {
-                continue;
+            if (!as_strmap_get(&ctx->vlabel_by_name, sym_name, &i)) {
+                return -1;
             }
-        } else {
-            if (c->file == NULL || file == NULL || strcmp(c->file, file) != 0 ||
-                c->line != line || c->digit != digit) {
-                continue;
-            }
+        } else if (file == NULL || vlabel_place_key(key, sizeof(key), file, line, digit) != 0 ||
+                   !as_strmap_get(&ctx->vlabel_by_place, key, &i)) {
+            return -1;
         }
+        c = &ctx->vlabel_cache[i];
         if (c->off == UINT64_MAX) {
             return -1;
         }
@@ -12996,11 +13042,15 @@ static int virtual_label_cache_lookup_stmt(emit_ctx_t *ctx, const as_stmt_t *stm
     if (ctx == NULL || stmt == NULL || section_out == NULL || off_out == NULL) {
         return -1;
     }
-    for (i = ctx->vlabel_count; i > 0; --i) {
-        virtual_label_cache_t *c = &ctx->vlabel_cache[i - 1];
-        if (c->stmt != stmt) {
-            continue;
+    {
+        virtual_label_cache_t *c;
+        char key[32];
+
+        vlabel_stmt_key(key, sizeof(key), stmt);
+        if (!as_strmap_get(&ctx->vlabel_by_stmt, key, &i)) {
+            return -1;
         }
+        c = &ctx->vlabel_cache[i];
         if (c->off == UINT64_MAX) {
             return -1;
         }
@@ -13008,7 +13058,6 @@ static int virtual_label_cache_lookup_stmt(emit_ctx_t *ctx, const as_stmt_t *stm
         *off_out = c->off;
         return 0;
     }
-    return -1;
 }
 
 static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const as_label_def_t *label,
@@ -13046,6 +13095,30 @@ static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const 
     if (c->name == NULL || c->file == NULL || c->section == NULL) {
         return -1;
     }
+    {
+        char key[VLABEL_KEY_MAX];
+        size_t at = ctx->vlabel_count - 1;
+        size_t was;
+
+        /* By name the first of the name is found, by place the first
+         * at the place, by statement the last. */
+        if (!as_strmap_get(&ctx->vlabel_by_name, c->name, &was) &&
+            as_strmap_put(&ctx->vlabel_by_name, c->name, at) != 0) {
+            return -1;
+        }
+        if (vlabel_place_key(key, sizeof(key), c->file, c->line, c->digit) == 0 &&
+            !as_strmap_get(&ctx->vlabel_by_place, key, &was)) {
+            c->place_key = xstrdup(key);
+            if (c->place_key == NULL || as_strmap_put(&ctx->vlabel_by_place, c->place_key, at) != 0) {
+                return -1;
+            }
+        }
+        vlabel_stmt_key(key, sizeof(key), st);
+        c->stmt_key = xstrdup(key);
+        if (c->stmt_key == NULL || as_strmap_put(&ctx->vlabel_by_stmt, c->stmt_key, at) != 0) {
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -13055,11 +13128,18 @@ static void virtual_label_cache_free(emit_ctx_t *ctx) {
     if (ctx == NULL) {
         return;
     }
+    /* (Where the rows of the line table stand is of the layout too.) */
+    ctx->line_rows_valid = 0;
     for (i = 0; i < ctx->vlabel_count; ++i) {
         free(ctx->vlabel_cache[i].name);
         free(ctx->vlabel_cache[i].file);
         free(ctx->vlabel_cache[i].section);
+        free(ctx->vlabel_cache[i].place_key);
+        free(ctx->vlabel_cache[i].stmt_key);
     }
+    as_strmap_free(&ctx->vlabel_by_name);
+    as_strmap_free(&ctx->vlabel_by_place);
+    as_strmap_free(&ctx->vlabel_by_stmt);
     free(ctx->vlabel_cache);
     ctx->vlabel_cache = NULL;
     ctx->vlabel_count = 0;
@@ -15425,12 +15505,435 @@ static struct leb_stmt *find_leb_stmt(emit_ctx_t *ctx, const as_stmt_t *st) {
     return NULL;
 }
 
+/*
+ * Where every statement stands in its section, as the layout now is:
+ * one walk of the source for all of them.  (To ask it of each statement
+ * is a walk of its section for each, and the rows of a line table and
+ * the directives of call frame information are many: a compiler's
+ * 2,400 lines of C++ with debugging information took 81 seconds.)
+ * The offsets are the caller's to free; a statement's section is
+ * ctx->stmt_section_at[] of it.  0, or -1.
+ */
+static int layout_offsets(emit_ctx_t *ctx, uint64_t **off_out) {
+    size_t count = ctx->parsed->count;
+    uint64_t *off = (uint64_t *)malloc((count != 0 ? count : 1) * sizeof(*off));
+    uint64_t *sizes = NULL;
+    size_t size_count = 0;
+    size_t size_cap = 0;
+    as_strmap_t by_name;
+    section_track_t track;
+    size_t i;
+    int rc = -1;
+
+    memset(&by_name, 0, sizeof(by_name));
+    if (off == NULL || build_stmt_section_at(ctx) != 0 ||
+        section_track_init(&track, ctx->cfg->is_64 ? 64u : (ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+        free(off);
+        return -1;
+    }
+    ctx->virtual_scanning++;
+    for (i = 0; i < count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        const char *section = track.current != NULL ? track.current : "";
+        const char *in = i < ctx->stmt_section_at_count && ctx->stmt_section_at[i] != NULL ? ctx->stmt_section_at[i]
+                                                                                           : "";
+        size_t k;
+        size_t n = 0;
+
+        if (!as_strmap_get(&by_name, in, &k)) {
+            if (size_count == size_cap) {
+                size_t cap = size_cap != 0 ? size_cap * 2 : 16;
+                uint64_t *grown = (uint64_t *)realloc(sizes, cap * sizeof(*grown));
+
+                if (grown == NULL) {
+                    goto out;
+                }
+                sizes = grown;
+                size_cap = cap;
+            }
+            k = size_count++;
+            sizes[k] = 0;
+            if (as_strmap_put(&by_name, in, k) != 0) {
+                goto out;
+            }
+        }
+        off[i] = sizes[k];
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int trc = section_track_apply_directive(&track, &st->u.directive);
+
+            if (trc < 0) {
+                goto out;
+            }
+            if (trc > 0) {
+                continue;
+            }
+        } else if (st->kind != AS_STMT_INSTRUCTION) {
+            continue;
+        }
+        (void)stmt_virtual_size_in_section(ctx, section, st, off[i], track.x86_code_bits, &n);
+        sizes[k] += n;
+    }
+    *off_out = off;
+    off = NULL;
+    rc = 0;
+out:
+    ctx->virtual_scanning--;
+    section_track_free(&track);
+    as_strmap_free(&by_name);
+    free(sizes);
+    free(off);
+    return rc;
+}
+
+/* The words of a directive, which may have come as one argument or as
+ * several: the next one from *at, in word[0 .. word_sz).  0 at the end. */
+static int next_word(const as_directive_t *d, size_t *arg, const char **at, char *word, size_t word_sz) {
+    for (;;) {
+        const char *p = *at;
+        size_t n = 0;
+
+        if (p == NULL) {
+            if (*arg >= d->arg_count) {
+                return 0;
+            }
+            p = d->args[*arg] != NULL ? d->args[*arg] : "";
+        }
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p == '\0') {
+            (*arg)++;
+            *at = NULL;
+            continue;
+        }
+        if (*p == '"') {
+            /* A string is one word, quotes and all. */
+            word[n++] = *p++;
+            while (*p != '\0' && *p != '"' && n + 2 < word_sz) {
+                word[n++] = *p++;
+            }
+            if (*p == '"') {
+                word[n++] = *p++;
+            }
+        } else {
+            while (*p != '\0' && !isspace((unsigned char)*p) && n + 1 < word_sz) {
+                word[n++] = *p++;
+            }
+        }
+        word[n] = '\0';
+        *at = p;
+        return 1;
+    }
+}
+
+/*
+ * What a `.loc` says, into *r: the file and the line, a column, and
+ * then by name what is so of the place.  `is_stmt` and `isa` stay as
+ * they are set until set again -- *sticky_stmt, *sticky_isa -- and the
+ * rest are of this row alone.  0, or -1 with *why.
+ */
+static int parse_loc(const as_directive_t *d, struct line_row *r, unsigned *sticky_stmt, unsigned *sticky_isa,
+                     const char **why) {
+    char word[512];
+    size_t arg = 0;
+    const char *at = NULL;
+    unsigned long numbers[3] = {0, 0, 0};
+    size_t have = 0;
+    char *end;
+
+    memset(r, 0, sizeof(*r));
+    *why = "a file's number and a line";
+    while (next_word(d, &arg, &at, word, sizeof(word))) {
+        if (isdigit((unsigned char)word[0]) && have < 3) {
+            numbers[have++] = strtoul(word, &end, 0);
+            if (*end != '\0') {
+                return -1;
+            }
+            continue;
+        }
+        if (have < 2) {
+            return -1;
+        }
+        if (strcmp(word, "basic_block") == 0) {
+            r->row.flags |= AS_DWLINE_BASIC_BLOCK;
+        } else if (strcmp(word, "prologue_end") == 0) {
+            r->row.flags |= AS_DWLINE_PROLOGUE_END;
+        } else if (strcmp(word, "epilogue_begin") == 0) {
+            r->row.flags |= AS_DWLINE_EPILOGUE_BEGIN;
+        } else if (strcmp(word, "is_stmt") == 0 || strcmp(word, "isa") == 0 || strcmp(word, "discriminator") == 0) {
+            char value[64];
+            unsigned long n;
+
+            *why = "a number after is_stmt, isa or discriminator";
+            if (!next_word(d, &arg, &at, value, sizeof(value))) {
+                return -1;
+            }
+            n = strtoul(value, &end, 0);
+            if (*end != '\0' || (word[1] == 's' && word[2] == '_' && n > 1)) {
+                return -1;
+            }
+            if (word[0] == 'd') {
+                r->row.discriminator = (unsigned)n;
+            } else if (word[2] == 'a') {
+                *sticky_isa = (unsigned)n;
+            } else {
+                *sticky_stmt = (unsigned)n;
+            }
+        } else if (strcmp(word, "view") == 0) {
+            *why = "a name after view";
+            if (!next_word(d, &arg, &at, word, sizeof(word)) || strlen(word) >= sizeof(r->view)) {
+                return -1;
+            }
+            memcpy(r->view, word, strlen(word) + 1);
+            if (strcmp(word, "-0") == 0) {
+                r->row.flags |= AS_DWLINE_VIEW_RESET;
+            }
+        } else {
+            *why = "what is not a thing .loc says of a place";
+            return -1;
+        }
+    }
+    if (have < 2) {
+        return -1;
+    }
+    r->row.file = (unsigned)numbers[0];
+    r->row.line = (unsigned)numbers[1];
+    r->row.column = (unsigned)numbers[2];
+    r->row.isa = *sticky_isa;
+    if (*sticky_stmt) {
+        r->row.flags |= AS_DWLINE_IS_STMT;
+    }
+    return 0;
+}
+
+/*
+ * The rows of the line table, as the layout now is.
+ *
+ * A `.loc` is a row where it takes effect, and that is where GNU as
+ * has it: at the instruction after it, wherever padding or data has
+ * put that, or -- two with nothing between -- at the `.loc` after it;
+ * one with a `view` at once, where it stands; and one that nothing
+ * follows is no row.  With `own_source` there are no `.loc` and each
+ * instruction is a row, of its own line in the source (-g).
+ */
+static int line_rows_from(emit_ctx_t *ctx, const uint64_t *offsets);
+
+static int line_rows(emit_ctx_t *ctx) {
+    uint64_t *offsets = NULL;
+    int rc;
+
+    if (ctx->line_rows_valid) {
+        return 0;
+    }
+    /* (Laying the source out may ask after a view, which asks for
+     * this: it is told there is none yet.) */
+    if (ctx->line_rows_busy) {
+        return -1;
+    }
+    ctx->line_rows_busy = 1;
+    rc = layout_offsets(ctx, &offsets);
+    ctx->line_rows_busy = 0;
+    if (rc != 0) {
+        set_err(ctx, "out of memory");
+        return -1;
+    }
+    rc = line_rows_from(ctx, offsets);
+    free(offsets);
+    return rc;
+}
+
+static int line_rows_from(emit_ctx_t *ctx, const uint64_t *offsets) {
+    struct line_row pending;
+    int have_pending = 0;
+    unsigned stmt = 1;
+    unsigned isa = 0;
+    size_t cap = 0;
+    size_t i;
+
+    ctx->line_row_count = 0;
+    as_strmap_free(&ctx->line_views);
+    memset(&ctx->line_views, 0, sizeof(ctx->line_views));
+    cap = 0;
+    free(ctx->line_rows);
+    ctx->line_rows = NULL;
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        int is_loc = st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
+                     strcmp(st->u.directive.name, ".loc") == 0;
+        struct line_row now;
+        const char *why = "";
+        const char *section = NULL;
+        uint64_t off = 0;
+        int emit = 0;
+
+        if (!is_loc && !(st->kind == AS_STMT_INSTRUCTION && (have_pending || ctx->line_own))) {
+            continue;
+        }
+        if (is_loc && parse_loc(&st->u.directive, &now, &stmt, &isa, &why) != 0) {
+            set_err(ctx, "%s:%u: .loc: %s", st->file != NULL ? st->file : "<input>", st->line, why);
+            return -1;
+        }
+        if (i >= ctx->stmt_section_at_count || ctx->stmt_section_at[i] == NULL) {
+            continue;
+        }
+        section = ctx->stmt_section_at[i];
+        off = offsets[i];
+        if (!is_loc && ctx->line_own) {
+            memset(&pending, 0, sizeof(pending));
+            pending.row.file = 1;
+            pending.row.line = st->line;
+            pending.row.flags = AS_DWLINE_IS_STMT;
+            have_pending = 1;
+        }
+        /* The row before takes effect here, if it has not yet. */
+        if (have_pending) {
+            pending.row.section = section;
+            pending.row.offset = off;
+            emit = 1;
+        }
+        for (;;) {
+            if (emit) {
+                if (ctx->line_row_count == cap) {
+                    size_t ncap = cap != 0 ? cap * 2 : 256;
+                    struct line_row *grown = (struct line_row *)realloc(ctx->line_rows, ncap * sizeof(*grown));
+
+                    if (grown == NULL) {
+                        set_err(ctx, "out of memory");
+                        return -1;
+                    }
+                    ctx->line_rows = grown;
+                    cap = ncap;
+                }
+                ctx->line_rows[ctx->line_row_count] = pending;
+                ctx->line_row_count++;
+                have_pending = 0;
+                emit = 0;
+            }
+            if (!is_loc) {
+                break;
+            }
+            /* And this one waits for what follows it, unless it has a
+             * view, which is of where it stands. */
+            pending = now;
+            have_pending = 1;
+            is_loc = 0;
+            if (now.view[0] != '\0') {
+                pending.row.section = section;
+                pending.row.offset = off;
+                emit = 1;
+                continue;
+            }
+            break;
+        }
+    }
+    /* The rows that have names, by them. */
+    for (i = 0; i < ctx->line_row_count; ++i) {
+        if (ctx->line_rows[i].view[0] != '\0' && strcmp(ctx->line_rows[i].view, "-0") != 0 &&
+            as_strmap_put(&ctx->line_views, ctx->line_rows[i].view, i) != 0) {
+            set_err(ctx, "out of memory");
+            return -1;
+        }
+    }
+    ctx->line_rows_valid = 1;
+    return 0;
+}
+
+/* The names `.loc ... view NAME` gives, each with the statement that
+ * gives it: found once. */
+static int line_view_names(emit_ctx_t *ctx) {
+    size_t i;
+
+    if (ctx->line_view_names_made) {
+        return 0;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        const as_directive_t *d = &st->u.directive;
+        char word[512];
+        size_t arg = 0;
+        const char *at = NULL;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || strcmp(d->name, ".loc") != 0) {
+            continue;
+        }
+        while (next_word(d, &arg, &at, word, sizeof(word))) {
+            if (strcmp(word, "view") == 0 && next_word(d, &arg, &at, word, sizeof(word)) &&
+                strcmp(word, "-0") != 0) {
+                char *kept = xstrdup(word);
+                void *grown = kept != NULL
+                                  ? realloc(ctx->line_view_name_list,
+                                            (ctx->line_view_name_count + 1) * sizeof(ctx->line_view_name_list[0]))
+                                  : NULL;
+
+                if (grown == NULL) {
+                    free(kept);
+                    return -1;
+                }
+                ctx->line_view_name_list = (char **)grown;
+                ctx->line_view_name_list[ctx->line_view_name_count++] = kept;
+                if (as_strmap_put(&ctx->line_view_names, kept, i) != 0) {
+                    return -1;
+                }
+            }
+        }
+    }
+    ctx->line_view_names_made = 1;
+    return 0;
+}
+
+/*
+ * The number of a view that `.loc ... view NAME` named: how many rows
+ * stand before it at the same address of the same section, with none
+ * between at another.  0 and the number, or -1 if NAME is no view's.
+ */
+static int line_view_value(emit_ctx_t *ctx, const char *name, long long *out) {
+    size_t at = 0;
+    size_t i;
+    long long n = 0;
+
+    while (isspace((unsigned char)*name)) {
+        name++;
+    }
+    if (name[0] != '.' && !isalpha((unsigned char)name[0]) && name[0] != '_') {
+        return -1;
+    }
+    /* (The names there are do not change, and most that are asked of
+     * are none of them: the rows are worked out only for one that is.) */
+    if (line_view_names(ctx) != 0 || !as_strmap_get(&ctx->line_view_names, name, &at)) {
+        return -1;
+    }
+    if (line_rows(ctx) != 0 || !as_strmap_get(&ctx->line_views, name, &at)) {
+        return -1;
+    }
+    for (i = at; i > 0; --i) {
+        const struct line_row *before = &ctx->line_rows[i - 1];
+
+        if (strcmp(before->row.section, ctx->line_rows[at].row.section) != 0) {
+            continue;
+        }
+        if (before->row.offset != ctx->line_rows[at].row.offset) {
+            break;
+        }
+        n++;
+        /* (`view -0` is where the count begins again.) */
+        if ((before->row.flags & AS_DWLINE_VIEW_RESET) != 0) {
+            break;
+        }
+    }
+    *out = n;
+    return 0;
+}
+
 static int eval_leb128_arg(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st, uint64_t sec_off,
                            unsigned x86_code_bits, const char *arg, long long *out) {
     as_expr_t *expr;
     int rc;
 
     if (parse_int64(arg, out) == 0 || parse_const_expr_string(arg, out) == 0) {
+        return 0;
+    }
+    /* A view of the line table, by its name. */
+    if (ctx != NULL && line_view_value(ctx, arg, out) == 0) {
         return 0;
     }
     expr = as_parse_expr_string(arg, st != NULL ? st->file : NULL, st != NULL ? st->line : 0);
@@ -16545,6 +17048,15 @@ static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, con
     if (is_local_temp_symbol_name(s->name) && s->bind == AS_SYM_BIND_LOCAL) {
         return 1;
     }
+    /* A view of the line table is a number and no symbol. */
+    {
+        size_t at;
+
+        if (s->name != NULL && !s->defined && line_view_names(ctx) == 0 &&
+            as_strmap_get(&ctx->line_view_names, s->name, &at)) {
+            return 1;
+        }
+    }
     /* A weak symbol that is neither here nor referred to says nothing:
      * GNU as leaves it out.  (One that is referred to is made when the
      * reference is.) */
@@ -16881,6 +17393,320 @@ out:
     return rc;
 }
 
+/* What is between the quotes of a word that is a string: a copy, or
+ * NULL for a word that is none or for no memory. */
+static char *unquoted(const char *word) {
+    size_t n = strlen(word);
+    char *copy;
+
+    if (n == 0) {
+        return NULL;
+    }
+    /* (The parser has taken the quotes off some, and they come bare.) */
+    if (n < 2 || word[0] != '"' || word[n - 1] != '"') {
+        copy = (char *)malloc(n + 1);
+        if (copy != NULL) {
+            memcpy(copy, word, n + 1);
+        }
+        return copy;
+    }
+    copy = (char *)malloc(n - 1);
+    if (copy != NULL) {
+        memcpy(copy, word + 1, n - 2);
+        copy[n - 2] = '\0';
+    }
+    return copy;
+}
+
+static int source_has_loc(const as_parse_result_t *parsed) {
+    size_t i;
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
+            strcmp(st->u.directive.name, ".loc") == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * The compile unit of an assembly source assembled with -g: one entry
+ * in `.debug_info` that names the source and its line table -- and,
+ * where its code is all in one section, where that begins and how long
+ * it is -- and the abbreviation it is written by.  A debugger finds
+ * the line table by it.
+ */
+static int emit_own_compile_unit(emit_ctx_t *ctx, const char *name, const as_dwline_end_t *ends, size_t end_count) {
+    /* DW_TAG_compile_unit, no children: DW_AT_stmt_list as an offset
+     * into a section, DW_AT_name and DW_AT_producer as strings,
+     * DW_AT_language in two bytes -- and then, with `ranged`,
+     * DW_AT_low_pc as an address and DW_AT_high_pc as a length. */
+    static const unsigned char abbrev_head[] = {0x01, 0x11, 0x00, 0x10, 0x17, 0x03, 0x08, 0x25, 0x08, 0x13, 0x05};
+    static const char producer[] = "Substrate as";
+    unsigned machine = ctx->cfg->machine;
+    unsigned ptr = ctx->cfg->is_64 ? 8u : 4u;
+    uint32_t abs32 = machine == EM_X86_64 ? R_X86_64_32 : R_386_32;
+    int ranged = end_count == 1;
+    elf_section_t *info;
+    elf_section_t *abbrev;
+    bytebuf_t a;
+    bytebuf_t d;
+    unsigned char word[8];
+    size_t low_at = 0;
+    size_t k;
+    int rc = -1;
+
+    memset(&a, 0, sizeof(a));
+    memset(&d, 0, sizeof(d));
+    if (ensure_section_exists(ctx, ".debug_abbrev", SHT_PROGBITS, 0, 1, NULL, 0) != 0 ||
+        ensure_section_exists(ctx, ".debug_info", SHT_PROGBITS, 0, 1, NULL, 0) != 0 ||
+        (abbrev = elf_find_section(ctx->obj, ".debug_abbrev")) == NULL ||
+        (info = elf_find_section(ctx->obj, ".debug_info")) == NULL) {
+        set_err(ctx, "failed to emit .debug_info");
+        return -1;
+    }
+    if (elf_section_size(abbrev) != 0 || elf_section_size(info) != 0) {
+        /* The source has debugging information of its own, and wants
+         * none made for it. */
+        return 0;
+    }
+    if (bytebuf_append(&a, abbrev_head, sizeof(abbrev_head)) != 0 ||
+        (ranged && bytebuf_append(&a, ptr == 8 ? "\x11\x01\x12\x07" : "\x11\x01\x12\x06", 4) != 0) ||
+        bytebuf_append_zeros(&a, 3) != 0) {
+        goto oom;
+    }
+    /* The unit: its length, DWARF 4, where its abbreviations are, the
+     * size of an address; then the one entry. */
+    memset(word, 0, sizeof(word));
+    word[0] = 4;
+    if (bytebuf_append_zeros(&d, 4) != 0 || bytebuf_append(&d, word, 2) != 0 || bytebuf_append_zeros(&d, 4) != 0) {
+        goto oom;
+    }
+    word[0] = (unsigned char)ptr;
+    if (bytebuf_append(&d, word, 1) != 0 || bytebuf_append(&d, "\x01", 1) != 0 || bytebuf_append_zeros(&d, 4) != 0 ||
+        bytebuf_append(&d, name, strlen(name) + 1) != 0 || bytebuf_append(&d, producer, sizeof(producer)) != 0 ||
+        bytebuf_append(&d, "\x01\x80", 2) != 0) {
+        goto oom;
+    }
+    if (ranged) {
+        low_at = d.len;
+        if (bytebuf_append_zeros(&d, ptr) != 0) {
+            goto oom;
+        }
+        for (k = 0; k < ptr; ++k) {
+            word[k] = (unsigned char)(ends[0].size >> (8 * k));
+        }
+        if (bytebuf_append(&d, word, ptr) != 0) {
+            goto oom;
+        }
+    }
+    {
+        uint32_t len = (uint32_t)(d.len - 4);
+
+        for (k = 0; k < 4; ++k) {
+            d.data[k] = (unsigned char)(len >> (8 * k));
+        }
+    }
+    /* (The fields a relocation fills are 0, which is the addend an
+     * object with them in place has.) */
+    if (add_reloc_for_symbol_ex(ctx, info, ".debug_abbrev", 6, abs32, 0) != 0 ||
+        add_reloc_for_symbol_ex(ctx, info, ".debug_line", 12, abs32, 0) != 0 ||
+        (ranged && add_reloc_for_symbol_ex(ctx, info, ends[0].section, low_at,
+                                           machine == EM_X86_64 ? R_X86_64_64 : R_386_32, 0) != 0)) {
+        set_err(ctx, ".debug_info: no relocation could be made");
+        goto out;
+    }
+    if (elf_section_set_data(abbrev, a.data, a.len) != ELF_OK || elf_section_set_data(info, d.data, d.len) != ELF_OK) {
+        set_err(ctx, "failed to emit .debug_info");
+        goto out;
+    }
+    rc = 0;
+    goto out;
+oom:
+    set_err(ctx, "out of memory");
+out:
+    free(a.data);
+    free(d.data);
+    return rc;
+}
+
+/*
+ * `.debug_line`: the files `.file N` named and the rows of `.loc`,
+ * made a line table (as_dwline.h).  There was none: the directives
+ * were taken and nothing made of them, and a compiler that leaves the
+ * table to the assembler had no line numbers in what it built.
+ */
+static int emit_line_table(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
+    unsigned machine = ctx->cfg->machine;
+    as_dwline_file_t *files = NULL;
+    char **owned = NULL;
+    size_t owned_count = 0;
+    size_t file_count = 0;
+    as_dwline_row_t *rows = NULL;
+    as_dwline_end_t *ends = NULL;
+    size_t end_count = 0;
+    as_dwline_table_t table;
+    elf_section_t *sec;
+    char why[256];
+    size_t i;
+    size_t k;
+    int rc = -1;
+
+    memset(&table, 0, sizeof(table));
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        const as_directive_t *d = &st->u.directive;
+        char word[1024];
+        size_t arg = 0;
+        const char *at = NULL;
+        char *first;
+        char *second = NULL;
+        unsigned long number;
+        char *end;
+        void *grown;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || strcmp(d->name, ".file") != 0 ||
+            !next_word(d, &arg, &at, word, sizeof(word)) || !isdigit((unsigned char)word[0])) {
+            continue;
+        }
+        number = strtoul(word, &end, 10);
+        if (*end != '\0' || number > 0xffffu || !next_word(d, &arg, &at, word, sizeof(word)) ||
+            (first = unquoted(word)) == NULL) {
+            set_err(ctx, "%s:%u: .file: a number and a name in quotes", st->file != NULL ? st->file : "<input>",
+                    st->line);
+            goto out;
+        }
+        /* A second string is the name, and the first its directory. */
+        if (next_word(d, &arg, &at, word, sizeof(word)) && strcmp(word, "md5") != 0) {
+            second = unquoted(word);
+        }
+        for (k = 0; k < file_count; ++k) {
+            if (files[k].number == (unsigned)number) {
+                break;
+            }
+        }
+        if (k < file_count) {
+            /* (Said again, and the same: check_file_numbers.) */
+            free(first);
+            free(second);
+            continue;
+        }
+        grown = realloc(owned, (owned_count + 2) * sizeof(owned[0]));
+        if (grown == NULL) {
+            free(first);
+            free(second);
+            set_err(ctx, "out of memory");
+            goto out;
+        }
+        owned = (char **)grown;
+        owned[owned_count++] = first;
+        if (second != NULL) {
+            owned[owned_count++] = second;
+        }
+        grown = realloc(files, (file_count + 1) * sizeof(files[0]));
+        if (grown == NULL) {
+            set_err(ctx, "out of memory");
+            goto out;
+        }
+        files = (as_dwline_file_t *)grown;
+        files[file_count].number = (unsigned)number;
+        files[file_count].dir = second != NULL ? first : NULL;
+        files[file_count].name = second != NULL ? second : first;
+        file_count++;
+    }
+    if (ctx->line_own) {
+        /* -g, and a source that says nothing of lines: the one file is
+         * the source. */
+        free(files);
+        files = (as_dwline_file_t *)malloc(sizeof(files[0]));
+        if (files == NULL) {
+            file_count = 0;
+            set_err(ctx, "out of memory");
+            goto out;
+        }
+        files[0].number = 1;
+        files[0].dir = NULL;
+        files[0].name = ctx->cfg->source_name != NULL ? ctx->cfg->source_name : "<input>";
+        file_count = 1;
+    }
+    ctx->line_rows_valid = 0;
+    if (line_rows(ctx) != 0) {
+        goto out;
+    }
+    if (ctx->line_row_count == 0) {
+        rc = 0;
+        goto out;
+    }
+    rows = (as_dwline_row_t *)malloc(ctx->line_row_count * sizeof(rows[0]));
+    ends = (as_dwline_end_t *)malloc(ctx->line_row_count * sizeof(ends[0]));
+    if (rows == NULL || ends == NULL) {
+        set_err(ctx, "out of memory");
+        goto out;
+    }
+    for (i = 0; i < ctx->line_row_count; ++i) {
+        rows[i] = ctx->line_rows[i].row;
+        for (k = 0; k < end_count; ++k) {
+            if (strcmp(ends[k].section, rows[i].section) == 0) {
+                break;
+            }
+        }
+        if (k == end_count) {
+            elf_section_t *code = elf_find_section(ctx->obj, rows[i].section);
+
+            ends[end_count].section = rows[i].section;
+            ends[end_count].size = code != NULL ? elf_section_size(code) : rows[i].offset;
+            end_count++;
+        }
+    }
+    if (as_dwline_build(files, file_count, rows, ctx->line_row_count, ends, end_count, ctx->cfg->is_64 != 0, &table,
+                        why, sizeof(why)) != 0) {
+        set_err(ctx, "%s", why);
+        goto out;
+    }
+    if (ensure_section_exists(ctx, ".debug_line", SHT_PROGBITS, 0, 1, NULL, 0) != 0 ||
+        (sec = elf_find_section(ctx->obj, ".debug_line")) == NULL) {
+        set_err(ctx, "failed to emit .debug_line");
+        goto out;
+    }
+    if (elf_section_size(sec) != 0) {
+        set_err(ctx, "the source has .loc, and writes .debug_line itself as well");
+        goto out;
+    }
+    for (i = 0; i < table.fixup_count; ++i) {
+        const as_dwline_fixup_t *f = &table.fixups[i];
+        uint32_t type = machine == EM_X86_64 ? (f->width == 8 ? R_X86_64_64 : R_X86_64_32) : R_386_32;
+
+        if (machine_relocation_addend_is_in_place(machine)) {
+            write_u64_le_at(table.bytes + f->offset, (uint64_t)f->addend, f->width);
+        }
+        if (add_reloc_for_symbol_ex(ctx, sec, f->section, f->offset, type, f->addend) != 0) {
+            set_err(ctx, ".debug_line: no relocation could be made against '%s'", f->section);
+            goto out;
+        }
+    }
+    if (elf_section_set_data(sec, table.bytes, table.len) != ELF_OK) {
+        set_err(ctx, "failed to emit .debug_line");
+        goto out;
+    }
+    if (ctx->line_own && emit_own_compile_unit(ctx, files[0].name, ends, end_count) != 0) {
+        goto out;
+    }
+    rc = 0;
+out:
+    as_dwline_table_free(&table);
+    for (i = 0; i < owned_count; ++i) {
+        free(owned[i]);
+    }
+    free(owned);
+    free(files);
+    free(rows);
+    free(ends);
+    return rc;
+}
+
 /* The call frame information of the source: every `.cfi_*` directive
  * with the place it stands at, and the sections made of them. */
 static int emit_call_frames(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
@@ -16889,9 +17715,14 @@ static int emit_call_frames(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
     size_t cap = 0;
     int eh_frame = 0;
     int debug_frame = 0;
+    uint64_t *offsets = NULL;
     size_t i;
     int rc = -1;
 
+    if (layout_offsets(ctx, &offsets) != 0) {
+        set_err(ctx, "out of memory");
+        return -1;
+    }
     for (i = 0; i < parsed->count; ++i) {
         const as_stmt_t *st = &parsed->items[i];
         const char *section = NULL;
@@ -16901,11 +17732,14 @@ static int emit_call_frames(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
             strncmp(st->u.directive.name, ".cfi_", 5) != 0) {
             continue;
         }
-        if (strcmp(st->u.directive.name, ".cfi_sections") != 0 &&
-            find_stmt_virtual_location(ctx, st, &section, &off) != 0) {
-            set_err(ctx, "%s:%u: %s: where it stands could not be found", st->file != NULL ? st->file : "<input>",
-                    st->line, st->u.directive.name);
-            goto out;
+        if (strcmp(st->u.directive.name, ".cfi_sections") != 0) {
+            if (i >= ctx->stmt_section_at_count || ctx->stmt_section_at[i] == NULL) {
+                set_err(ctx, "%s:%u: %s: where it stands could not be found",
+                        st->file != NULL ? st->file : "<input>", st->line, st->u.directive.name);
+                goto out;
+            }
+            section = ctx->stmt_section_at[i];
+            off = offsets[i];
         }
         if (count == cap) {
             size_t ncap = cap != 0 ? cap * 2 : 64;
@@ -16933,6 +17767,7 @@ static int emit_call_frames(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
     rc = 0;
 out:
     free(events);
+    free(offsets);
     return rc;
 }
 
@@ -19615,6 +20450,10 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
         if (asm_var_lookup(ev->ctx, e->symbol, &out->c) == 0) {
             return 0;
         }
+        /* A view of the line table is a number. */
+        if (line_view_value(ev->ctx, e->symbol, &out->c) == 0) {
+            return 0;
+        }
         if (strchr(e->symbol, '@') == NULL) {
             if (is_local_temp_symbol_name(e->symbol) &&
                 find_seen_temp_label(ev->labels, ev->label_count, e->symbol, &seen) == 0) {
@@ -21331,14 +22170,13 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
 
     collect_directive_presence(parsed, &has_file_loc, &has_cfi);
-    /*
-     * `.file N` and `.loc` are taken and no line table is made of
-     * them.  A `.debug_line` with nothing in it was made instead, and
-     * by it a compiler's configure script, which looks for the section,
-     * took this for an assembler that makes line tables and left its
-     * own unwritten.  There is none, and the compiler writes its own.
-     */
+    /* `.file N` and `.loc` are made the line table of `.debug_line`. */
     if (has_file_loc && check_file_numbers(&ctx, parsed) != 0) {
+        goto fail;
+    }
+    ctx.line_own = cfg->line_own_source && !source_has_loc(parsed);
+    ctx.line_rows_valid = 0;
+    if ((has_file_loc || ctx.line_own) && emit_line_table(&ctx, parsed) != 0) {
         goto fail;
     }
     if (has_cfi && emit_call_frames(&ctx, parsed) != 0) {
@@ -21389,6 +22227,13 @@ fail:
     free(ctx.branch_short);
     free(ctx.emit_labels);
     free_leb128_sizes(&ctx);
+    free(ctx.line_rows);
+    as_strmap_free(&ctx.line_views);
+    as_strmap_free(&ctx.line_view_names);
+    for (i = 0; i < ctx.line_view_name_count; ++i) {
+        free(ctx.line_view_name_list[i]);
+    }
+    free(ctx.line_view_name_list);
     {
         size_t _i;
         for (_i = 0; _i < ctx.kept_name_count; ++_i) {

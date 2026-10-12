@@ -976,12 +976,15 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Done: none is made.  `test_object_basics.sh`; `test_elf_emit_core.c` asked for one and asks that there be none.
 - [x] **AS-T-293** When `.cfi_sections .debug_frame` is given, the assembler shall emit `.debug_frame`.
   Trace: AS-OBJ-010.  Verify: T.  After: 290.
-- [ ] **AS-T-294** When `.file N "name"` and `.loc` directives are assembled, the assembler shall emit a `.debug_line` program that `readelf --debug-dump=decodedline` reads as the same rows GNU's does.
+- [x] **AS-T-294** When `.file N "name"` and `.loc` directives are assembled, the assembler shall emit a `.debug_line` program that `readelf --debug-dump=decodedline` reads as the same rows GNU's does.
   Trace: AS-OBJ-010.  Verify: T — the output of `gcc -g -S`.  After: 220.
-- [ ] **AS-T-400** When `.loc` is written with `view NAME`, the assembler shall define NAME as the view's number, so that `.uleb128 NAME` in `.debug_loclists` assembles.
+  Done, 2026-10-11, with 400 and 295.  The directives were taken and nothing made of them.  `as_dwline.c` makes the table from the files and the rows the emitter hands it, and the emitter (`line_rows`, `emit_line_table`) places a row as GNU as 2.46 places it: at the instruction that follows the `.loc`, wherever padding has put that; at the next `.loc` if none comes between; where it stands if it has a view; and nowhere if nothing follows it.  The header is DWARF 5 where the source has a `.file 0` and DWARF 3 where not, as GNU's is, with the directories split from the names as GNU splits them; the opcodes are not GNU's, and the rows are.  For `gcc -g` at `-O0` and `-O2` in both modes and `g++ -g` at `-O0`, `-O2` and `-O2 -fPIC`, `readelf --debug-dump=decodedline` reads the same rows from both, and in 64-bit code `.debug_info`, `.debug_loclists`, `.debug_rnglists` and `.debug_aranges` are GNU's byte for byte (in 32-bit code they differ where a relocation names a label of the file, as everywhere).  `test_line_table.sh`, which GNU passes; `test_complex_control_32_64.sh` passes and is off the list of failures.  Found on the way: such a source took 81 seconds, the place of every `.loc` and `.cfi_*` being found by a walk of its section and the cache of labels searched from end to end; it takes 0.9 (`layout_offsets`, and the cache is by name, by place and by statement -- the half of 227 that was owed).  Not made: a compile unit for a source with `.loc` and no `.debug_info` of its own, which GNU makes; the MD5 of a `.file`.
+- [x] **AS-T-400** When `.loc` is written with `view NAME`, the assembler shall define NAME as the view's number, so that `.uleb128 NAME` in `.debug_loclists` assembles.
   Trace: AS-OBJ-010.  Verify: T — the output of `gcc -O2 -g -S`, whose location lists hold `.uleb128 .LVU23`: GNU's bytes.  Found when `.uleb128` stopped being passed over (070): before that every such line was dropped and the list was short of its views.  It is where `test_complex_control_32_64.sh` now stops.  After: 294.
-- [ ] **AS-T-295** Where `-g` is given for an assembly source with no debug directives, the assembler shall emit line information for the source itself, or shall refuse the option.
+  Done (see 294): the name a `.loc ... view NAME` gives is the number of its view -- how many rows stand before it at the same address of its section, counted again from a `view -0` -- wherever a number is written, in `.uleb128` and in `.byte`, and is no symbol of the object.  The location lists of `gcc -O2 -g` and of `g++ -O2 -g` are GNU's bytes.
+- [x] **AS-T-295** Where `-g` is given for an assembly source with no debug directives, the assembler shall emit line information for the source itself, or shall refuse the option.
   Trace: AS-OBJ-010, AS-FE-014.  Verify: T — `readelf --debug-dump=info` reports no corruption.
+  Done (see 294): `-g`, `--gen-debug` and `--gdwarf-N` on a source with no `.loc` make a line table of the source itself, each instruction a row of its line -- the rows GNU as makes -- and a compile unit in `.debug_info` that names the source and the table, with the code's address and length where it is all in one section.  `readelf` reads it without complaint and `gdb` lists the source by it.  A source with `.loc` of its own keeps its own.
 - [x] **AS-T-296** The assembler shall write the output with the permissions `0666` less the umask.
   Trace: AS-OBJ-020, AS-FE-032.  Verify: T — umask 022 gives 0644.
   Done, with 297 to 301: `test_output_file.sh`, which GNU passes but for the pipe.  The file was made for its owner alone whatever the mask, being moved into place from a temporary one; the object library gives a new file what the mask leaves of 0666 (`elf__write_file_atomic`).
@@ -1288,5 +1291,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 299 done, 52 open.  Numbers run to 400, with gaps left between
+351 tasks: 302 done, 49 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

@@ -74,6 +74,8 @@ typedef struct {
     int invoked_from_cc;
     int warn_enabled;
     int fatal_warnings;
+    /* -g: a line table of the source itself, if it has none of its own. */
+    int gen_debug;
     const char *in_path;
     /* The source, where it is not the one file in_path names: several
      * files one after another, or the standard input. */
@@ -3706,6 +3708,8 @@ static int run_native_backend(const as_ctx_t *ctx) {
         AS_PHASE_END(ctx, "parse");
     }
     ecfg.report_error = report_emit_error;
+    ecfg.line_own_source = (unsigned)(ctx->gen_debug != 0);
+    ecfg.source_name = ctx->in_path;
     if (ctx->emit_listing) {
         listing_begin(ctx->in_path, &ecfg);
     }
@@ -4435,6 +4439,7 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
             if (strvec_push(&ctx->gcc_opts, arg) != 0 || strvec_push(&ctx->as_opts, arg) != 0) {
                 return 1;
             }
+            ctx->gen_debug = 1;
             continue;
         }
         if (strcmp(arg, "-I") == 0 || strcmp(arg, "-D") == 0 || strcmp(arg, "-march") == 0 ||
@@ -4491,7 +4496,11 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
          * numbers in a form the .loc directives of the source do not
          * depend on; --noexecstack is what an object here is already.
          */
-        if (strncmp(arg, "--gdwarf", 8) == 0 || strcmp(arg, "--noexecstack") == 0) {
+        if (strncmp(arg, "--gdwarf", 8) == 0 || strcmp(arg, "--gen-debug") == 0) {
+            ctx->gen_debug = 1;
+            continue;
+        }
+        if (strcmp(arg, "--noexecstack") == 0) {
             continue;
         }
 

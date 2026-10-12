@@ -11,9 +11,10 @@
 #
 # This assembler took the number twice, and made a `.debug_line` with
 # nothing in it.  So it was found to be broken where it was not, and to
-# make line tables, which it does not.  It refuses the number, as GNU as
-# does; and it makes no `.debug_line`, which is not what GNU as does and
-# is the truth: the directives are taken and no table is made of them.
+# make line tables, which it did not.  It refuses the number, as GNU as
+# does; and for a while it made no `.debug_line`, which was the truth.
+# It makes the table now (AS-T-294, test_line_table.sh), and the section
+# has the rows in it.
 #
 # The refusals here are GNU as's too.
 set -u
@@ -61,13 +62,14 @@ printf '\tnop\n\t.file 1 "foo.s"\n\t.file 1 "bar.s"\n' > t.s
 "$AS" --32 -o t.o t.s > out 2>&1
 grep -q '^t\.s:3: Error: .*1' out || { echo "FAIL the message: $(tr '\n' '|' < out)"; fail=1; }
 
-# `.loc` is taken; this assembler makes no line table of it, and no
-# section that says it has.
+# `.loc` is taken, and the section it makes has its rows: a
+# `.debug_line` that says there is a line table is one.
 taken "a .loc" '\t.text\n\t.file 1 "t.c"\n\t.loc 1 3 0\n\tnop\n\t.loc 1 5 0\n\tret\n'
 if [ "$gnu" = 0 ]; then
     cases=$((cases + 1))
-    if readelf -SW t.o | grep -q 'debug_line'; then
-        echo "FAIL: a .debug_line with no line table in it"; fail=1
+    rows=$(readelf --debug-dump=decodedline t.o 2> /dev/null | grep -c '^t\.c  *[35] ')
+    if [ "$rows" != 2 ]; then
+        echo "FAIL: a .debug_line without its two rows ($rows)"; fail=1
     fi
     cases=$((cases + 1))
     got=$(objcopy -O binary -j .text t.o /dev/stdout | od -An -v -tx1 | tr -d ' \n')

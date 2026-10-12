@@ -94,16 +94,24 @@ the object.
 It may not be one of the sources, by any name.
 .It Fl c
 Accepted for compatibility; output remains an object file.
-.It Fl g
-Accepted, with no effect: no debugging information is generated for the
-source.
-What a compiler writes of its own, in
+.It Fl g , Fl -gen-debug , Fl -gdwarf- Ns Ar N
+For a source that has no
+.Li .loc
+of its own, make a line table of the source itself, each instruction a
+row of its line, and a compile unit in
+.Li .debug_info
+that names the source and the table.
+A source with
+.Li .loc
+has the table those say, with the option or without it; and what a
+compiler writes in
 .Li .debug_*
-sections and with
-.Li .file
-and
-.Li .loc ,
-is assembled as it is written.
+sections is assembled as it is written.
+The table is of DWARF 5 if the source has a
+.Li .file 0 ,
+and of DWARF 3 if not, whatever
+.Ar N
+is.
 .It Fl I Ar dir
 Add
 .Ar dir
@@ -240,7 +248,7 @@ is
 A compiler's driver passes its own
 .Fl Wa
 through, so this is what such an option arrives as.
-.It Fl -gdwarf- Ns Ar N , Fl -noexecstack , Fl -from-cc
+.It Fl -noexecstack , Fl -from-cc
 Accepted, with no effect: compilers' drivers pass them,
 .Xr cc 1
 the last.
@@ -457,9 +465,25 @@ DWARF number.
 .Cm .file
 and
 .Cm .loc
-are taken and nothing is made of them: there is no line table and no
-.Ql .debug_line
-section, and a compiler that is to have one writes it as data.
+are made the line table of
+.Ql .debug_line :
+the files by their numbers, and a row for each
+.Cm .loc ,
+which says a file's number, a line and a column, and then any of
+.Cm is_stmt Ar 0|1 , basic_block , prologue_end , epilogue_begin ,
+.Cm isa Ar n , discriminator Ar n
+and
+.Cm view Ar name .
+A row is at the instruction that follows its
+.Cm .loc ,
+or at the next
+.Cm .loc
+if none comes between; one with a view is where it stands; and one that
+nothing follows is no row.
+The name of a view is its number \(em how many rows stand before it at
+the same address \(em wherever a number is written, and is no symbol;
+.Cm view -0
+begins the count again.
 A file number that
 .Cm .file
 has given to one file is refused for another.

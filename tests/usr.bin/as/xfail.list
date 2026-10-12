@@ -22,9 +22,7 @@
 # resolved, not relocated), test_lexer_core (string tokens are raw),
 # test_output_binary (code is padded with NOPs), test_testing_fuzz_perf
 # (the object is the assembler's own, not GNU's byte for byte).
-test_complex_control_32_64.sh	`.uleb128 .LVU23` in .debug_loclists: the view numbers that `.loc ... view` defines are not symbols here (AS-T-400).  It stopped before at a ; inside a comment, which no longer begins a statement
 test_diagnostics_determinism.sh	a forced short jump out of range, `jmpb` over 300 bytes, is assembled and should be refused (AS-T-221).  Its messages name the user's file and line now, which is where it stopped before
-test_isa_heavy_64.sh	vmovdqu is not a mnemonic (AS-T-332)
 test_output_binary.sh	code is padded with one-byte NOPs, not GNU's sequences (AS-T-251)
 test_unit_matrix.sh	one of the tests it runs, test_i386_refactor_tail.sh, is handed the tree's own assembler, which is built for the target and does not run here
 test_x86_32_corpus_intel_roundtrip.sh	stops at line 251 of the corpus, `fcoms -0x6f70(%bx,%si)`: an x87 instruction with a 16-bit address is refused (AS-T-176).  GNU as 2.46 passes the test: it leaves out the 206 lines of the corpus that GNU refuses, and from the Intel source it makes of objdump's listing what objdump prints and no source says (`repz add`, `lock mov`, `jaw`)

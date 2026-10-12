@@ -69,6 +69,11 @@ typedef struct {
     /* Only look for those: write no object.  For a source that is known
      * to be in error already and is read on for what else is wrong. */
     unsigned check_only;
+    /* -g, for a source that has no `.loc` of its own: a line table of
+     * the source itself, each instruction a row, and the name it is
+     * the table of. */
+    unsigned line_own_source;
+    const char *source_name;
 } as_elf_cfg_t;
 
 /*
