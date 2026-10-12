@@ -48,7 +48,13 @@ cd "$work" || exit 1
 # takes, and of prefixes on a line of their own: `smovl`, `movsb
 # %al,%ebx`, `div %ebx,%eax`, `in %dx`, `setab`, `fldenvs`, `data16`,
 # `sym(%eip)`.  None was assembled.
-cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" > forms.txt
+#
+# tls_forms.txt is the same of the relocation operators on the
+# instructions they are and are not for: each of thread-local storage
+# belongs to the one instruction a linker rewrites, and `movl %eax,
+# sym@TLSGD(%ebx)` and its like were assembled.
+cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" \
+    "$here/tls_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0

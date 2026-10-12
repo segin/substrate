@@ -1,41 +1,9 @@
 # Lines of x86_32_lines.txt that this assembler and GNU as assemble differently.
 # Written by gnu-diff.py --write-baseline; see test_gnu_differential.sh.
-movl %eax,sym@TLSGD(,%ebx,1)
-movl sym@TLSGD(,%ebx,1),%ecx
-leal sym@TLSGD(,%ebx,1),%edx
-movl %eax,sym@GOTTPOFF(%ebx)
-leal sym@GOTTPOFF(%ebx),%edx
-movl %eax,sym@INDNTPOFF
-leal sym@INDNTPOFF,%edx
-movl %eax,sym@GOTNTPOFF(%ebx)
-leal sym@GOTNTPOFF(%ebx),%edx
-movl %eax,sym@TLSLDM(%ebx)
-movl sym@TLSLDM(%ebx),%ecx
-leal sym@TLSLDM(%ebx),%edx
-movl %eax,sym@TLSGD(%ebx)
-movl sym@TLSGD(%ebx),%ecx
-leal sym@TLSGD(%ebx),%edx
-movl %eax,sym@TLSDESC(%ebx)
-movl sym@TLSDESC(%ebx),%ecx
-movb $1,sym@GOTTPOFF(%ebx)
-movw $0x1234,sym@GOTTPOFF(%ebx)
-movl $0x12345678,sym@GOTTPOFF(%ebx)
-addl $4,sym@GOTTPOFF(%ebx)
-cmpb $0,sym@GOTTPOFF(%ebx)
-incl sym@GOTTPOFF(%ebx)
-pushl sym@GOTTPOFF(%ebx)
-call *sym@GOTTPOFF(%ebx)
-testl $1,sym@GOTTPOFF(%ebx)
-shll $3,sym@GOTTPOFF(%ebx)
-imull $100,sym@GOTTPOFF(%ebx),%eax
-fldl sym@GOTTPOFF(%ebx)
-movb %al,sym@GOTTPOFF(%ebx)
-movw sym@GOTTPOFF(%ebx),%bx
 lcall $sym,$sym2
 ljmp $0x10000,$0
 jmpw sym
 jmpl sym
-movl $sym@INDNTPOFF,%eax
 .data | .long 0 | lv: .long 0 | .text | movl lv,%eax
 .data | .long 0 | lv: .long 0 | .text | movl $lv,%eax
 .data | .long 0 | lv: .long 0 | .text | movl $lv+8,4(%esp)

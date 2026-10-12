@@ -231,6 +231,10 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
 static int x64_reloc_size(uint32_t type) {
     switch (type) {
         case R_X86_64_NONE:
+        /* (It marks the call of a TLS descriptor, `call *x@TLSCALL(%rax)`,
+         * for the linker to rewrite, and has no field; it was sized 4,
+         * which the two bytes of that call do not have.) */
+        case R_X86_64_TLSDESC_CALL:
             return 0;
         case R_X86_64_64:
             return 8;
@@ -252,7 +256,6 @@ static int x64_reloc_size(uint32_t type) {
         case R_X86_64_GOTPC32:
         case R_X86_64_SIZE32:
         case R_X86_64_GOTPC32_TLSDESC:
-        case R_X86_64_TLSDESC_CALL:
         case R_X86_64_TLSDESC:
         case R_X86_64_GOTPCRELX:
         case R_X86_64_REX_GOTPCRELX:
@@ -325,6 +328,7 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
 
     switch (type) {
         case R_X86_64_NONE:
+        case R_X86_64_TLSDESC_CALL:
             *out_value = 0;
             return 0;
         case R_X86_64_64:
@@ -360,7 +364,6 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_RELATIVE:
         case R_X86_64_SIZE32:
         case R_X86_64_GOTPC32_TLSDESC:
-        case R_X86_64_TLSDESC_CALL:
         case R_X86_64_TLSDESC:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
             if (!swide_in_unsigned_bits(v, 32)) {

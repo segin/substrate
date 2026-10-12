@@ -245,6 +245,7 @@ static as_x86_seg_t map_seg(const char *s);
 static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
 static int x86_cond_code(const char *mnemonic, unsigned *cc_out);
 static int x86_base_is_ip(const char *base_reg);
+static const char *first_symbol_op_in_expr(const as_expr_t *e);
 static int append_incbin_to_bytebuf(emit_ctx_t *ctx, const as_stmt_t *st, bytebuf_t *buf, const as_directive_t *d);
 static int section_name_is_executable(emit_ctx_t *ctx, const char *name);
 static int is_numeric_local_label_name(const char *name);
@@ -12418,6 +12419,180 @@ static int x86_base_is_ip(const char *base_reg) {
 }
 
 /*
+ * An operator of thread-local storage belongs to one instruction, the
+ * one its access model is written with, and the linker rewrites that
+ * instruction by its bytes: on any other it would rewrite something
+ * else.  So each is taken where GNU as takes it and nowhere else --
+ * `movl %eax, sym@TLSGD(%ebx)` and thirty like it were assembled.
+ *
+ *   32-bit  @TLSGD      leal sym@TLSGD(,%ebx,1), %eax
+ *                       leal sym@TLSGD(%reg), %eax         not (%eax)
+ *           @TLSLDM     leal sym@TLSLDM(%reg), %eax        not (%eax)
+ *           @TLSDESC    leal sym@TLSDESC(%ebx), %reg
+ *           @GOTTPOFF, @GOTNTPOFF
+ *                       movl, addl, subl sym@OP(%reg), %reg
+ *           @INDNTPOFF  movl, addl sym@INDNTPOFF, %reg
+ *   64-bit  @TLSGD, @TLSLD
+ *                       leaq sym@OP(%rip), %rdi
+ *           @TLSDESC    leaq sym@TLSDESC(%rip), %reg
+ *           @GOTTPOFF   movq, addq sym@GOTTPOFF(%rip), %reg
+ *   both    @TLSCALL    call *sym@TLSCALL(%eax), or (%rax)
+ *
+ * NULL if the statement may have the operator it has, or what is wrong.
+ */
+static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char **op_out) {
+    const as_instruction_t *in = &st->u.instr;
+    const as_operand_t *mem = NULL;
+    const as_operand_t *dst;
+    const as_x86_reg_info_t *dr;
+    const as_x86_reg_info_t *br;
+    const char *rop = NULL;
+    char base[32];
+    char suffix = '\0';
+    size_t regs = 0;
+    size_t imms = 0;
+    size_t i;
+    unsigned want = cfg->is_64 ? 64u : 32u;
+    int lea_model;
+
+    if (in->operand_count == 0 || in->operand_count > 4) {
+        return NULL;
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+        const as_expr_t *e = op->kind == AS_OPERAND_MEMORY                                         ? op->u.mem.disp
+                             : (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) ? op->u.expr
+                                                                                                    : NULL;
+        const char *r = first_symbol_op_in_expr(e);
+
+        regs += op->kind == AS_OPERAND_REGISTER;
+        imms += op->kind == AS_OPERAND_IMMEDIATE;
+        if (r != NULL && rop == NULL) {
+            rop = r;
+            mem = op;
+        }
+    }
+    if (rop == NULL) {
+        return NULL;
+    }
+    /* An operator's relocation is of four bytes, and an address of 16
+     * bits has two for it. */
+    if (mem->kind == AS_OPERAND_MEMORY) {
+        const as_x86_reg_info_t *b = mem->u.mem.base_reg != NULL ? as_x86_reg_find(mem->u.mem.base_reg) : NULL;
+        const as_x86_reg_info_t *x = mem->u.mem.index_reg != NULL ? as_x86_reg_find(mem->u.mem.index_reg) : NULL;
+
+        if ((b != NULL && b->cls == AS_X86_REGCLASS_GENERAL && b->width == 16) ||
+            (x != NULL && x->cls == AS_X86_REGCLASS_GENERAL && x->width == 16)) {
+            *op_out = rop;
+            return "the address is of 16 bits, and its relocation of 32";
+        }
+    }
+    /* And three that are not of thread-local storage alone: a place in
+     * a table or a block is no distance from %rip, and its relocation
+     * is signed where an address of 32 bits is not. */
+    if (cfg->is_64 && mem->kind == AS_OPERAND_MEMORY &&
+        (streq_ci(rop, "TPOFF") || streq_ci(rop, "DTPOFF") || streq_ci(rop, "GOT") || streq_ci(rop, "GOTPCREL"))) {
+        const as_x86_reg_info_t *b = mem->u.mem.base_reg != NULL ? as_x86_reg_find(mem->u.mem.base_reg) : NULL;
+        const as_x86_reg_info_t *x = mem->u.mem.index_reg != NULL ? as_x86_reg_find(mem->u.mem.index_reg) : NULL;
+
+        *op_out = rop;
+        if ((b != NULL && b->cls == AS_X86_REGCLASS_GENERAL && b->width == 32) ||
+            (x != NULL && x->cls == AS_X86_REGCLASS_GENERAL && x->width == 32)) {
+            return "the address is of 32 bits, and its relocation is not";
+        }
+        if (!streq_ci(rop, "GOTPCREL") && streq_ci(mem->u.mem.base_reg != NULL ? mem->u.mem.base_reg : "", "rip")) {
+            return "it is a place, and no distance from %rip";
+        }
+        return NULL;
+    }
+    if (!(streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSDESC") || streq_ci(rop, "TLSCALL") ||
+          streq_ci(rop, "GOTTPOFF") ||
+          (cfg->is_64 ? streq_ci(rop, "TLSLD")
+                      : streq_ci(rop, "TLSLDM") || streq_ci(rop, "GOTNTPOFF") || streq_ci(rop, "INDNTPOFF")))) {
+        return NULL;
+    }
+    *op_out = rop;
+    if (normalize_x86_mnemonic(in->mnemonic, base, sizeof(base), &suffix) != 0) {
+        return NULL;
+    }
+    if (mem->kind == AS_OPERAND_IMMEDIATE) {
+        return "it is on a number, and belongs on an address";
+    }
+    /* (A symbol alone is an address with no register.) */
+    if (mem->kind != AS_OPERAND_MEMORY) {
+        static const as_operand_t bare_address = {.kind = AS_OPERAND_MEMORY};
+
+        mem = &bare_address;
+    }
+    br = mem->u.mem.base_reg != NULL ? as_x86_reg_find(mem->u.mem.base_reg) : NULL;
+    if (streq_ci(rop, "TLSCALL")) {
+        if (strcmp(base, "call") != 0) {
+            return "it is for a call";
+        }
+        if (mem->u.mem.index_reg != NULL || br == NULL || (strcmp(br->name, "eax") != 0 && strcmp(br->name, "rax") != 0)) {
+            return cfg->is_64 ? "the call is through (%rax)" : "the call is through (%eax)";
+        }
+        return NULL;
+    }
+    dst = &in->operands[in->syntax_intel ? 0 : in->operand_count - 1];
+    dr = dst->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(dst->u.reg) : NULL;
+    if (dr != NULL && dr->cls != AS_X86_REGCLASS_GENERAL) {
+        dr = NULL;
+    }
+    lea_model = streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSDESC") || streq_ci(rop, "TLSLD") || streq_ci(rop, "TLSLDM");
+    if (lea_model) {
+        if (strcmp(base, "lea") != 0) {
+            return "it is for lea";
+        }
+    } else if (strcmp(base, "mov") != 0 && strcmp(base, "add") != 0 &&
+               (cfg->is_64 || streq_ci(rop, "INDNTPOFF") || strcmp(base, "sub") != 0)) {
+        return cfg->is_64 || streq_ci(rop, "INDNTPOFF") ? "it is for mov or add" : "it is for mov, add or sub";
+    }
+    if (!lea_model && (imms != 0 || dr == NULL || (!cfg->is_64 && regs != 1))) {
+        return "it is for an address read into a register";
+    }
+    if (dr == NULL || dr->width != want) {
+        return cfg->is_64 ? "the register is of 64 bits" : "the register is of 32 bits";
+    }
+    if (cfg->is_64) {
+        if (br == NULL || strcmp(br->name, "rip") != 0 || mem->u.mem.index_reg != NULL) {
+            return "the address is from %rip";
+        }
+        if ((streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSLD")) && strcmp(dr->name, "rdi") != 0) {
+            return "the register is %rdi";
+        }
+        return NULL;
+    }
+    if (streq_ci(rop, "INDNTPOFF")) {
+        return mem->u.mem.base_reg != NULL || mem->u.mem.index_reg != NULL ? "the address has no register" : NULL;
+    }
+    if (streq_ci(rop, "TLSGD") && mem->u.mem.index_reg != NULL) {
+        const as_x86_reg_info_t *xr = as_x86_reg_find(mem->u.mem.index_reg);
+
+        if (mem->u.mem.base_reg != NULL || xr == NULL || strcmp(xr->name, "ebx") != 0 || mem->u.mem.scale > 1) {
+            return "with an index the address is (,%ebx,1)";
+        }
+        return strcmp(dr->name, "eax") != 0 ? "the register is %eax" : NULL;
+    }
+    if (mem->u.mem.index_reg != NULL) {
+        return "the address has no index";
+    }
+    if (br == NULL || br->cls != AS_X86_REGCLASS_GENERAL) {
+        return "the address has a base register";
+    }
+    if (streq_ci(rop, "TLSDESC")) {
+        return strcmp(br->name, "ebx") != 0 ? "the address is from %ebx" : NULL;
+    }
+    if (streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSLDM")) {
+        if (strcmp(dr->name, "eax") != 0) {
+            return "the register is %eax";
+        }
+        return strcmp(br->name, "eax") == 0 ? "the address is not from %eax" : NULL;
+    }
+    return br->width != 32 ? "the base register is of 32 bits" : NULL;
+}
+
+/*
  * A statement that is prefixes alone (AS_BARE_PREFIX_MNEMONIC): their
  * bytes in the order written.  0 if it was one and is assembled, -1 if
  * it was one and is refused, 1 if it is something else.
@@ -12670,6 +12845,15 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
         if (rc <= 0) {
             return rc;
+        }
+        {
+            const char *rop = NULL;
+            const char *wrong = x86_tls_shape_wrong(cfg, st, &rop);
+
+            if (wrong != NULL) {
+                snprintf(encerr, encerr_sz, "'@%s' is not for this instruction: %s", rop, wrong);
+                return -1;
+            }
         }
         if (!st->u.instr.syntax_intel) {
             as_operand_t ops[4];
@@ -21858,6 +22042,17 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         sec_buf_vec_free(&secbufs);
                         return -1;
                     }
+                }
+                /* An operator's relocation is of four bytes or eight,
+                 * and an address of 16 bits has two for it: `movl
+                 * sym@GOT(%bx), %eax` failed with no line named, and
+                 * with a number in the instruction was assembled. */
+                if (rop != NULL && reloc_width < 4) {
+                    set_err(ctx, "%s:%u: '%s@%s' is a relocation of 4 bytes, and the field it is in has %u",
+                            st->file != NULL ? st->file : "<input>", st->line, sym, rop, (unsigned)reloc_width);
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
                 }
                 /* The operators of thread-local storage belong to the
                  * few instructions a linker knows how to rewrite, none

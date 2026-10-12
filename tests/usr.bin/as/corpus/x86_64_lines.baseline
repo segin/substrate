@@ -1,41 +1,12 @@
 # Lines of x86_64_lines.txt that this assembler and GNU as assemble differently.
 # Written by gnu-diff.py --write-baseline; see test_gnu_differential.sh.
 leal %fs:sym@TPOFF,%edx
-movl %eax,sym@GOTTPOFF(%rip)
-movl sym@GOTTPOFF(%rip),%ecx
-leal sym@GOTTPOFF(%rip),%edx
-movl %eax,sym@TLSGD(%rip)
-movl sym@TLSGD(%rip),%ecx
-leal sym@TLSGD(%rip),%edx
-movl %eax,sym@TLSLD(%rip)
-movl sym@TLSLD(%rip),%ecx
-leal sym@TLSLD(%rip),%edx
 leal sym@GOT(%rax),%edx
 leal sym@TPOFF(%rax),%edx
 leal sym@DTPOFF(%rax),%edx
 movl %eax,(%r16)
 movl (%r16),%ecx
 leal (%r16),%edx
-movb $1,sym@TLSLD(%rip)
-movw $0x1234,sym@TLSLD(%rip)
-movl $0x12345678,sym@TLSLD(%rip)
-addl $4,sym@TLSLD(%rip)
-cmpb $0,sym@TLSLD(%rip)
-incl sym@TLSLD(%rip)
-pushq sym@TLSLD(%rip)
-call *sym@TLSLD(%rip)
-testl $1,sym@TLSLD(%rip)
-shll $3,sym@TLSLD(%rip)
-imull $100,sym@TLSLD(%rip),%eax
-fldl sym@TLSLD(%rip)
-movb %al,sym@TLSLD(%rip)
-movw sym@TLSLD(%rip),%bx
-movq %rax,sym@TLSLD(%rip)
-movq sym@TLSLD(%rip),%r9
-movq $1,sym@TLSLD(%rip)
-leaq sym@TLSLD(%rip),%r10
-cmpq $0x100,sym@TLSLD(%rip)
-addq $-1,sym@TLSLD(%rip)
 fldl sym(%eip)
 movb $1,(%r16)
 movw $0x1234,(%r16)
@@ -59,7 +30,6 @@ leaq (%r16),%r10
 cmpq $0x100,(%r16)
 movq $sym2,(%r16)
 addq $-1,(%r16)
-call *sym@TLSCALL(%rax)
 movabs $_GLOBAL_OFFSET_TABLE_,%rax
 leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 .L1: | movq .L1(%rip),%rax
