@@ -12738,6 +12738,113 @@ made:
 }
 
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
+                           size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz);
+
+/*
+ * A statement whose only registers of APX are the base and the index
+ * of its address, assembled by an emitter that knows sixteen
+ * registers: it is assembled with %r8 to %r15 in their places -- the
+ * registers whose low three bits are theirs, and which have every
+ * rule of an address that they have -- and the REX prefix that comes
+ * of it is made REX2, with the fifth bits and the fourth as they are.
+ * 0, or -1 if the statement is not of that kind or has no REX to make
+ * over (an opcode of the three-byte maps has none).
+ */
+static int x86_lift_address_to_rex2(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st,
+                                    unsigned char *code, size_t code_cap, size_t *code_len) {
+    static const unsigned char before[] = {0x66, 0x67, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0, 0x9b};
+    as_operand_t ops[AS_X86_SIZED_MAX_OPERANDS];
+    as_stmt_t low = *st;
+    char base_name[8];
+    char index_name[8];
+    char said[160];
+    unsigned base3 = 0;
+    unsigned index3 = 0;
+    int high_base = 0;
+    int high_index = 0;
+    int two_byte;
+    size_t at = 0;
+    size_t i;
+
+    /* (The instructions that save and restore the processor's state
+     * take no REX2, by its makers' say.) */
+    if (st->u.instr.operand_count > AS_X86_SIZED_MAX_OPERANDS || strncasecmp(st->u.instr.mnemonic, "xsave", 5) == 0 ||
+        strncasecmp(st->u.instr.mnemonic, "xrstor", 6) == 0) {
+        return -1;
+    }
+    for (i = 0; i < st->u.instr.operand_count; ++i) {
+        const as_x86_reg_info_t *r;
+
+        ops[i] = st->u.instr.operands[i];
+        if (ops[i].kind == AS_OPERAND_REGISTER && x86_name_is_high_general(ops[i].u.reg)) {
+            return -1;
+        }
+        if (ops[i].kind != AS_OPERAND_MEMORY) {
+            continue;
+        }
+        if (x86_name_is_high_general(ops[i].u.mem.base_reg)) {
+            r = as_x86_reg_find(ops[i].u.mem.base_reg);
+            if (r == NULL || high_base || (r->width != 64 && r->width != 32)) {
+                return -1;
+            }
+            high_base = 1;
+            base3 = (r->number >> 3) & 1u;
+            snprintf(base_name, sizeof(base_name), "r%u%s", 8u + (r->number & 7u), r->width == 32 ? "d" : "");
+            ops[i].u.mem.base_reg = base_name;
+        }
+        if (x86_name_is_high_general(ops[i].u.mem.index_reg)) {
+            r = as_x86_reg_find(ops[i].u.mem.index_reg);
+            if (r == NULL || high_index || (r->width != 64 && r->width != 32)) {
+                return -1;
+            }
+            high_index = 1;
+            index3 = (r->number >> 3) & 1u;
+            snprintf(index_name, sizeof(index_name), "r%u%s", 8u + (r->number & 7u), r->width == 32 ? "d" : "");
+            ops[i].u.mem.index_reg = index_name;
+        }
+    }
+    if (!high_base && !high_index) {
+        return -1;
+    }
+    low.u.instr.operands = ops;
+    said[0] = '\0';
+    *code_len = 0;
+    if (encode_x86_stmt(ctx, cfg, &low, code, code_cap, code_len, said, sizeof(said)) != 0) {
+        return -1;
+    }
+    while (at < *code_len && memchr(before, code[at], sizeof(before)) != NULL) {
+        at++;
+    }
+    if (at + 1 >= *code_len || (code[at] & 0xf0u) != 0x40u) {
+        return -1;
+    }
+    two_byte = code[at + 1] == 0x0f;
+    if (two_byte && at + 2 < *code_len && (code[at + 2] == 0x38 || code[at + 2] == 0x3a)) {
+        return -1;
+    }
+    {
+        unsigned rex = code[at] & 0x0fu;
+
+        if (high_base) {
+            rex = (rex & ~1u) | base3;
+        }
+        if (high_index) {
+            rex = (rex & ~2u) | (index3 << 1);
+        }
+        if (!two_byte) {
+            if (*code_len >= code_cap) {
+                return -1;
+            }
+            memmove(code + at + 2, code + at + 1, *code_len - at - 1);
+            (*code_len)++;
+        }
+        code[at] = 0xd5u;
+        code[at + 1] = (unsigned char)((two_byte ? 0x80u : 0u) | (high_index ? 0x20u : 0u) | (high_base ? 0x10u : 0u) | rex);
+    }
+    return 0;
+}
+
+static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
     size_t i;
@@ -12770,13 +12877,25 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             while (at < *code_len && memchr(before, code[at], sizeof(before)) != NULL) {
                 at++;
             }
-            if (at >= *code_len || (code[at] != 0xd5 && code[at] != 0x62)) {
-                snprintf(encerr, encerr_sz, "'%s' has no form that says %%r16 to %%r31", st->u.instr.mnemonic);
-                *code_len = 0;
-                return -1;
+            if (at < *code_len && (code[at] == 0xd5 || code[at] == 0x62)) {
+                return 0;
             }
         }
-        return rc;
+        /* (Not said, or not assembled: where the registers are in an
+         * address and nowhere else, it is assembled with others in
+         * their places and its REX made REX2.) */
+        x86_high_held = 1;
+        rc = x86_lift_address_to_rex2(ctx, cfg, st, code, code_cap, code_len);
+        x86_high_held = 0;
+        if (rc != 0) {
+            if (encerr[0] == '\0' || strstr(encerr, "does not take these operands") != NULL) {
+                snprintf(encerr, encerr_sz, "'%s' has no form that says %%r16 to %%r31", st->u.instr.mnemonic);
+            }
+            *code_len = 0;
+            return -1;
+        }
+        encerr[0] = '\0';
+        return 0;
     }
 
     /*
@@ -22952,6 +23071,20 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) && code_len < reloc_width) {
                         t = R_X86_64_32S;
                         reloc_width = 4;
+                    } else if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
+                        /* (Nor one that is eight bytes long by its
+                         * prefix: `movq $sym@GOTPCREL, %r16` is C7 and
+                         * four bytes behind REX2.) */
+                        unsigned field = 0;
+                        int field_rex_w = 0;
+                        unsigned char field_opcode = 0;
+
+                        if (x86_imm_field_width(code, code_len, track.x86_code_bits, &field, &field_rex_w,
+                                                &field_opcode) == 0 &&
+                            field == 4) {
+                            t = R_X86_64_32S;
+                            reloc_width = 4;
+                        }
                     }
                 }
                 adjust_x86_rel_reloc_to_encoding(machine, &st->u.instr, op, code, code_len, &t, &reloc_width);

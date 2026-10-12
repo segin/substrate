@@ -1,6 +1,5 @@
 # Lines of x86_64_lines.txt that this assembler and GNU as assemble differently.
 # Written by gnu-diff.py --write-baseline; see test_gnu_differential.sh.
-fldl (%r16)
 .L1: | movq .L1(%rip),%rax
 .data | lv: .long 0 | .text | movl lv(%rip),%eax
 .data | .long 0 | lv: .long 0 | .text | movl $5,lv(%rip)
