@@ -44,7 +44,17 @@ cd "$work" || exit 1
 # if it reaches -- it was the long form and a relocation -- and a call
 # of one is still the linker's.  The last two are jumps across an
 # alignment, which are short where GNU as's are.
-cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" > forms.txt
+#
+# labeldiff_forms.txt is the same of a label less a label in an
+# instruction.  Where both stand before it with nothing of variable
+# size between -- no jump that is sized, no alignment -- the difference
+# is a number where the instruction is read, and has the short form a
+# number has: `addl $b-a, %eax` is 83 and a byte.  It was 81 and four
+# always, and `ret $b-a`, `shl $b-a, %eax`, `bt $b-a, %eax` and `in
+# $b-a, %al`, which have no field for a symbol, were refused.  With a
+# jump between, or a label ahead, it is the long form here as it is
+# GNU as's.
+cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" "$here/labeldiff_forms.txt" > forms.txt
 
 fail=0
 cases=0

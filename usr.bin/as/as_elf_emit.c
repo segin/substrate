@@ -309,6 +309,8 @@ static int x86_branch_may_be_short(emit_ctx_t *ctx, const char *section_name, co
                                    const as_expr_t *e, unsigned x86_code_bits);
 static int parse_x86_reg(const char *name, as_x86_reg_t *out);
 static int build_stmt_section_at(emit_ctx_t *ctx);
+static const as_stmt_t *stmt_fold_label_diffs(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits,
+                                              as_stmt_t *tmp, as_operand_t ops[4], as_expr_t consts[4]);
 static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
                                                unsigned x86_code_bits);
 static int parse_xmm_reg(const char *name, unsigned *out);
@@ -16375,6 +16377,139 @@ static int append_arm_nops(bytebuf_t *buf, size_t need, unsigned target, unsigne
     return 0;
 }
 
+/* A statement between two labels that may be one size or another, so
+ * that how far apart the labels are is not known until all are laid
+ * out: a jump that is sized, an alignment, a change of code. */
+static int stmt_is_of_variable_size(const as_stmt_t *st) {
+    if (st->kind == AS_STMT_INSTRUCTION) {
+        const as_instruction_t *in = &st->u.instr;
+
+        return in->mnemonic != NULL && in->operand_count == 1 && is_rel_mnemonic(in->mnemonic) &&
+               !is_call_mnemonic(in->mnemonic) && !is_fixed_short_rel_mnemonic(in->mnemonic) &&
+               (in->operands[0].kind == AS_OPERAND_LABEL_REF || in->operands[0].kind == AS_OPERAND_IMMEDIATE) &&
+               !(in->operands[0].raw != NULL && in->operands[0].raw[0] == '*');
+    }
+    if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL) {
+        static const char *const always[] = {".p2align", ".balign", ".align",  ".org",    ".uleb128",
+                                             ".sleb128", ".incbin", ".code16", ".code32", ".code64"};
+        static const char *const counted[] = {".skip", ".space", ".zero", ".fill"};
+        const as_directive_t *d = &st->u.directive;
+        size_t i;
+
+        for (i = 0; i < sizeof(always) / sizeof(always[0]); ++i) {
+            if (strcmp(d->name, always[i]) == 0) {
+                return 1;
+            }
+        }
+        for (i = 0; i < sizeof(counted) / sizeof(counted[0]); ++i) {
+            if (strcmp(d->name, counted[i]) == 0) {
+                long long n;
+
+                return d->arg_count == 0 || d->args[0] == NULL || parse_int64(d->args[0], &n) != 0;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
+ * A label less a label, where both stand before the statement, in one
+ * section, with nothing of variable size between: how far apart they
+ * are is known where the statement is read, and it is a number like any
+ * other.  0 and the number (with whatever else the expression adds), or
+ * -1 if the expression is not such a one.
+ */
+static int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, const as_expr_t *e,
+                            long long *out) {
+    as_expr_linear_t lin;
+    const char *sec;
+    uint64_t size = 0;
+    size_t is, ia, ib, lo, hi, k;
+
+    if (e == NULL || e->kind == AS_EXPR_CONST || first_symbol_op_in_expr(e) != NULL ||
+        as_expr_eval_linear(e, NULL, NULL, &lin) != AS_EXPR_EVAL_OK || lin.add_symbol == NULL ||
+        lin.sub_symbol == NULL || lin.add_local != NULL || lin.sub_local != NULL ||
+        parsed_stmt_index(ctx, st, &is) != 0 || label_stmt_index(ctx, lin.add_symbol, &ib) != 0 ||
+        label_stmt_index(ctx, lin.sub_symbol, &ia) != 0 || ia > is || ib > is || build_stmt_section_at(ctx) != 0 ||
+        ia >= ctx->stmt_section_at_count || ib >= ctx->stmt_section_at_count) {
+        return -1;
+    }
+    sec = ctx->stmt_section_at[ia];
+    if (sec == NULL || ctx->stmt_section_at[ib] == NULL || strcmp(sec, ctx->stmt_section_at[ib]) != 0) {
+        return -1;
+    }
+    lo = ia < ib ? ia : ib;
+    hi = ia < ib ? ib : ia;
+    for (k = lo; k < hi; ++k) {
+        const as_stmt_t *between = &ctx->parsed->items[k];
+
+        if (stmt_is_of_variable_size(between) &&
+            (between->kind == AS_STMT_DIRECTIVE ||
+             (ctx->stmt_section_at[k] != NULL && strcmp(ctx->stmt_section_at[k], sec) == 0))) {
+            return -1;
+        }
+    }
+    if (stmt_range_size_in_section(ctx, sec, lo, hi, 0, x86_code_bits, &size) != 0) {
+        return -1;
+    }
+    *out = lin.value + (ib >= ia ? (long long)size : -(long long)size);
+    return 0;
+}
+
+/*
+ * The statement with each such difference in its operands made the
+ * number it is: `st` itself if it has none, else `tmp`, which has `ops`
+ * for its operands and `consts` for the numbers.
+ *
+ * `addl $b-a, %eax` was encoded as an instruction with a symbol in it,
+ * in the long form whatever the distance -- 81 and four bytes where GNU
+ * as has 83 and one -- and `ret $b-a`, `shl $b-a, %eax` and `bt $b-a,
+ * %eax`, which have no field a symbol could go in, were refused.  A
+ * label ahead of the statement, or a jump or an alignment between the
+ * two, leaves it the long form, as it does GNU as's.
+ */
+static const as_stmt_t *stmt_fold_label_diffs(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits,
+                                              as_stmt_t *tmp, as_operand_t ops[4], as_expr_t consts[4]) {
+    const as_instruction_t *in;
+    int any = 0;
+    size_t i;
+
+    if (ctx == NULL || ctx->cfg == NULL || ctx->cfg->target != 0 || st == NULL || st->kind != AS_STMT_INSTRUCTION) {
+        return st;
+    }
+    in = &st->u.instr;
+    if (in->operand_count == 0 || in->operand_count > 4 || in->mnemonic == NULL || is_rel_mnemonic(in->mnemonic)) {
+        return st;
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+        const as_expr_t *e = op->kind == AS_OPERAND_MEMORY                                         ? op->u.mem.disp
+                             : (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) ? op->u.expr
+                                                                                                    : NULL;
+        long long v;
+
+        ops[i] = *op;
+        if (e == NULL || fixed_label_diff(ctx, st, x86_code_bits, e, &v) != 0) {
+            continue;
+        }
+        memset(&consts[i], 0, sizeof(consts[i]));
+        consts[i].kind = AS_EXPR_CONST;
+        consts[i].value = v;
+        if (op->kind == AS_OPERAND_MEMORY) {
+            ops[i].u.mem.disp = &consts[i];
+        } else {
+            ops[i].u.expr = &consts[i];
+        }
+        any = 1;
+    }
+    if (!any) {
+        return st;
+    }
+    *tmp = *st;
+    tmp->u.instr.operands = ops;
+    return tmp;
+}
+
 static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name,
                                             const as_stmt_t *st, unsigned x86_code_bits) {
     unsigned char code[32];
@@ -16443,11 +16578,16 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
         return bytebuf_append(buf, code, code_len);
     }
     {
-        int rc = encode_x86_stmt_by_text(ctx, &stmt_cfg, x86_code_bits, st, code, sizeof(code), &code_len, encerr,
-                                         sizeof(encerr));
+        as_stmt_t folded;
+        as_operand_t fold_ops[4];
+        as_expr_t fold_consts[4];
+        const as_stmt_t *as = stmt_fold_label_diffs(ctx, st, x86_code_bits, &folded, fold_ops, fold_consts);
+        int rc = as == st ? encode_x86_stmt_by_text(ctx, &stmt_cfg, x86_code_bits, st, code, sizeof(code), &code_len,
+                                                    encerr, sizeof(encerr))
+                          : 1;
 
         if (rc < 0 ||
-            (rc == 1 && encode_x86_stmt(ctx, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0)) {
+            (rc == 1 && encode_x86_stmt(ctx, &stmt_cfg, as, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0)) {
             return -1;
         }
     }
@@ -17667,6 +17807,9 @@ static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_
                               const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
                               char *encerr, size_t encerr_sz) {
     as_elf_cfg_t stmt_cfg;
+    as_stmt_t folded;
+    as_operand_t fold_ops[4];
+    as_expr_t fold_consts[4];
 
     if (ctx == NULL || ctx->cfg == NULL || st == NULL) {
         return -1;
@@ -17675,6 +17818,7 @@ static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_
         return arm_encode_stmt(ctx, section_name, sec_off, 1, x86_code_bits, st, code, code_cap, code_len, encerr,
                                encerr_sz);
     }
+    st = stmt_fold_label_diffs(ctx, st, x86_code_bits, &folded, fold_ops, fold_consts);
     stmt_cfg = *ctx->cfg;
     stmt_cfg.x86_code_bits = x86_code_bits;
     stmt_cfg.is_64 = x86_code_bits == 64u;
@@ -22851,6 +22995,17 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     continue;
                 }
                 rop = first_symbol_op_in_expr(e);
+                /* (A difference that was a number when the instruction
+                 * was encoded is in its bytes already, in whatever form
+                 * the number chose: stmt_fold_label_diffs().) */
+                {
+                    long long known;
+
+                    if (st->u.instr.mnemonic != NULL && !is_rel_mnemonic(st->u.instr.mnemonic) &&
+                        fixed_label_diff(ctx, st, track.x86_code_bits, e, &known) == 0) {
+                        continue;
+                    }
+                }
                 /*
                  * One label of a section less another of it is a number,
                  * and is written as one.  It was given a relocation to
