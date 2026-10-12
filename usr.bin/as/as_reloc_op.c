@@ -42,6 +42,7 @@ uint32_t as_reloc_op_widen(unsigned machine, uint32_t type) {
     }
     switch (type) {
     case R_X86_64_GOT32: return R_X86_64_GOT64;
+    case R_X86_64_GOTPCREL: return R_X86_64_GOTPCREL64;
     case R_X86_64_DTPOFF32: return R_X86_64_DTPOFF64;
     case R_X86_64_TPOFF32: return R_X86_64_TPOFF64;
     case R_X86_64_SIZE32: return R_X86_64_SIZE64;
@@ -49,40 +50,21 @@ uint32_t as_reloc_op_widen(unsigned machine, uint32_t type) {
     }
 }
 
-/* Which operator follows the @ of `name`, and where the @ is; -1 if what
- * follows is not one.  Case is not significant, as GNU as has it. */
-static int reloc_operator_index(const char *name, const char **at_out) {
-    const char *at;
+int as_reloc_op_type(unsigned machine, const char *op, uint32_t *type_out) {
     size_t i;
-
-    if (name == NULL) {
-        return -1;
-    }
-    at = strchr(name, '@');
-    if (at == NULL || at[1] == '\0') {
-        return -1;
-    }
-    for (i = 0; i < sizeof(reloc_operators) / sizeof(reloc_operators[0]); ++i) {
-        if (strcasecmp(at + 1, reloc_operators[i].name) == 0) {
-            if (at_out != NULL) {
-                *at_out = at;
-            }
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
-int as_reloc_op_type(unsigned machine, const char *name, uint32_t *type_out) {
-    int i;
     uint32_t t;
 
-    if (name == NULL || strchr(name, '@') == NULL) {
+    if (op == NULL) {
         return 0;
     }
-    i = reloc_operator_index(name, NULL);
-    if (i < 0) {
-        return strstr(name, "@@") != NULL ? 0 : -1;
+    /* Case is not significant, as GNU as has it. */
+    for (i = 0; i < sizeof(reloc_operators) / sizeof(reloc_operators[0]); ++i) {
+        if (strcasecmp(op, reloc_operators[i].name) == 0) {
+            break;
+        }
+    }
+    if (i == sizeof(reloc_operators) / sizeof(reloc_operators[0])) {
+        return -1;
     }
     t = machine == EM_X86_64 ? reloc_operators[i].type_x86_64 : reloc_operators[i].type_i386;
     if (t == 0) {
@@ -91,15 +73,5 @@ int as_reloc_op_type(unsigned machine, const char *name, uint32_t *type_out) {
     if (type_out != NULL) {
         *type_out = t;
     }
-    return 1;
-}
-
-int as_reloc_op_strip(char *name) {
-    const char *at = NULL;
-
-    if (reloc_operator_index(name, &at) < 0) {
-        return 0;
-    }
-    name[at - name] = '\0';
     return 1;
 }

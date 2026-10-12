@@ -262,6 +262,11 @@ static int x64_reloc_size(uint32_t type) {
         case R_X86_64_TPOFF64:
         case R_X86_64_PC64:
         case R_X86_64_GOTOFF64:
+        case R_X86_64_GOT64:
+        case R_X86_64_GOTPCREL64:
+        case R_X86_64_GOTPC64:
+        case R_X86_64_GOTPLT64:
+        case R_X86_64_PLTOFF64:
         case R_X86_64_SIZE64:
         case R_X86_64_IRELATIVE:
             return 8;

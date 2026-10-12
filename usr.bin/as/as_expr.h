@@ -73,6 +73,13 @@ struct as_expr {
     as_expr_op_t op;
     long long value;
     char *symbol;
+    /*
+     * The relocation operator written on the symbol -- the GOTOFF of
+     * `sym@GOTOFF` -- as it was written, or NULL.  It is no part of the
+     * symbol's name: `symbol` is `sym`.  Which relocation it names, and
+     * whether the target has it, is for as_reloc_op.h to say.
+     */
+    char *reloc_op;
     int local_digit;
     int local_forward;
     int local_resolved;
@@ -159,6 +166,10 @@ typedef struct {
  * does not (two symbols added, a symbol multiplied, ...). */
 int as_expr_eval_linear(const as_expr_t *e, as_expr_lookup_fn lookup, void *cookie,
                         as_expr_linear_t *out);
+
+/* The relocation operator on a symbol of the expression, the first
+ * there is, or NULL: see as_expr_t.reloc_op. */
+const char *as_expr_reloc_op(const as_expr_t *e);
 
 #ifdef __cplusplus
 }

@@ -2113,7 +2113,8 @@ static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *chan
     }
     alias_substitute(a, e->lhs, use, changed);
     alias_substitute(a, e->rhs, use, changed);
-    if (e->kind != AS_EXPR_SYMBOL || e->symbol == NULL) {
+    /* (A symbol with a relocation operator on it is left a symbol.) */
+    if (e->kind != AS_EXPR_SYMBOL || e->symbol == NULL || e->reloc_op != NULL) {
         return;
     }
     def = alias_find(a, e->symbol, use);

@@ -134,10 +134,6 @@ static char *trim_copy(const char *s) {
     return out;
 }
 
-static void strip_reloc_modifier(char *name) {
-    (void)as_reloc_op_strip(name);
-}
-
 void as_symtab_init(as_symtab_t *tab) {
     if (tab == NULL) {
         return;
@@ -258,16 +254,14 @@ static int parse_u64_arg(const char *s, unsigned long long *out) {
     return 0;
 }
 
-/* A symbol's name out of an expression, without its @modifier. */
+/* A symbol's name out of an expression.  (A relocation operator
+ * written on it is the expression's, and is not in the name.) */
 static char *expr_symbol_copy(const char *name) {
     char *copy = xstrdup(name);
 
-    if (copy != NULL) {
-        strip_reloc_modifier(copy);
-        if (copy[0] == '\0') {
-            free(copy);
-            return NULL;
-        }
+    if (copy != NULL && copy[0] == '\0') {
+        free(copy);
+        return NULL;
     }
     return copy;
 }
@@ -801,7 +795,6 @@ static int visit_expr_ref(sym_ctx_t *ctx, const as_expr_t *e, const char *file, 
         if (name == NULL) {
             return -1;
         }
-        strip_reloc_modifier(name);
         sym = get_or_create_symbol(ctx, name);
         free(name);
         if (sym == NULL) {

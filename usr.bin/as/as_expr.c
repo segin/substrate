@@ -72,8 +72,22 @@ void as_expr_free(as_expr_t *e) {
     as_expr_free(e->lhs);
     as_expr_free(e->rhs);
     free(e->symbol);
+    free(e->reloc_op);
     free(e->src_file);
     free(e);
+}
+
+const char *as_expr_reloc_op(const as_expr_t *e) {
+    const char *op;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    if (e->kind == AS_EXPR_SYMBOL && e->reloc_op != NULL) {
+        return e->reloc_op;
+    }
+    op = as_expr_reloc_op(e->lhs);
+    return op != NULL ? op : as_expr_reloc_op(e->rhs);
 }
 
 as_expr_t *as_expr_clone(const as_expr_t *e) {
@@ -88,10 +102,12 @@ as_expr_t *as_expr_clone(const as_expr_t *e) {
     }
     *copy = *e;
     copy->symbol = NULL;
+    copy->reloc_op = NULL;
     copy->src_file = NULL;
     copy->lhs = NULL;
     copy->rhs = NULL;
     if ((e->symbol != NULL && (copy->symbol = expr_strdup(e->symbol)) == NULL) ||
+        (e->reloc_op != NULL && (copy->reloc_op = expr_strdup(e->reloc_op)) == NULL) ||
         (e->src_file != NULL && (copy->src_file = expr_strdup(e->src_file)) == NULL) ||
         (e->lhs != NULL && (copy->lhs = as_expr_clone(e->lhs)) == NULL) ||
         (e->rhs != NULL && (copy->rhs = as_expr_clone(e->rhs)) == NULL)) {
@@ -176,6 +192,11 @@ static void expr_text_node(expr_text_t *t, const as_expr_t *e, int nested) {
         return;
     case AS_EXPR_SYMBOL:
         expr_text_put(t, e->symbol != NULL ? e->symbol : "");
+        /* (As it was written, for whoever reads the text again.) */
+        if (e->reloc_op != NULL) {
+            expr_text_put(t, "@");
+            expr_text_put(t, e->reloc_op);
+        }
         return;
     case AS_EXPR_LOCAL_REF:
         snprintf(num, sizeof(num), "%d%c", e->local_digit, e->local_forward ? 'f' : 'b');
@@ -548,6 +569,26 @@ static as_expr_t *parse_expr_primary_inner(expr_lex_t *lx) {
             as_expr_free(e);
             return NULL;
         }
+        /*
+         * `sym@OPERATOR`: the operator is taken off here, where the
+         * symbol is read, and is the node's -- it was left in the name,
+         * and everything that was handed the name looked for an `@` in
+         * it.  A name that begins with one, or has two together (a
+         * version, `f@@V1`, which no expression holds but a directive's
+         * argument may be read as one), is left as it is.
+         */
+        {
+            char *at = strchr(e->symbol, '@');
+
+            if (at != NULL && at != e->symbol && at[1] != '\0' && at[1] != '@') {
+                e->reloc_op = expr_strdup(at + 1);
+                if (e->reloc_op == NULL) {
+                    as_expr_free(e);
+                    return NULL;
+                }
+                *at = '\0';
+            }
+        }
         if (expr_lex_next(lx) != 0) {
             as_expr_free(e);
             return NULL;
@@ -771,7 +812,9 @@ int as_expr_eval(const as_expr_t *e, as_expr_lookup_fn lookup, void *cookie, lon
         *out = e->value;
         return AS_EXPR_EVAL_OK;
     case AS_EXPR_SYMBOL:
-        if (lookup != NULL && e->symbol != NULL && lookup(cookie, e->symbol, out) == 1) {
+        /* (A symbol with a relocation operator on it is the linker's
+         * to work out, whatever the symbol is set to here.) */
+        if (lookup != NULL && e->symbol != NULL && e->reloc_op == NULL && lookup(cookie, e->symbol, out) == 1) {
             return AS_EXPR_EVAL_OK;
         }
         return AS_EXPR_EVAL_NOT_CONST;
@@ -839,7 +882,7 @@ int as_expr_eval_linear(const as_expr_t *e, as_expr_lookup_fn lookup, void *cook
         if (e->symbol == NULL) {
             return AS_EXPR_EVAL_NOT_CONST;
         }
-        if (lookup != NULL && lookup(cookie, e->symbol, &out->value) == 1) {
+        if (lookup != NULL && e->reloc_op == NULL && lookup(cookie, e->symbol, &out->value) == 1) {
             return AS_EXPR_EVAL_OK;
         }
         out->add_symbol = e->symbol;

@@ -342,7 +342,9 @@ static void near_names_free(void) {
 /* Whether what a branch names is a label whose place the assembler
  * knows: a compiler's .L label, or one of the source's own. */
 static int expr_is_local_temp_symbol(const as_expr_t *e) {
-    return e != NULL && e->kind == AS_EXPR_SYMBOL &&
+    /* (With a relocation operator on it, it is the linker's to find,
+     * wherever it is.) */
+    return e != NULL && e->kind == AS_EXPR_SYMBOL && e->reloc_op == NULL &&
            (is_local_temp_symbol_name(e->symbol) || name_is_near_label(e->symbol));
 }
 
@@ -934,7 +936,8 @@ static void fold_absolute_symbols(const emit_ctx_t *ctx, as_expr_t *e) {
     if (e == NULL) {
         return;
     }
-    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && asm_var_lookup(ctx, e->symbol, &value) == 0) {
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && e->reloc_op == NULL &&
+        asm_var_lookup(ctx, e->symbol, &value) == 0) {
         free(e->symbol);
         e->symbol = NULL;
         e->kind = AS_EXPR_CONST;
@@ -12263,13 +12266,8 @@ static int encode_x86_opmask(const as_instruction_t *insn, int intel_syntax, int
 
 /* Whether an expression is a symbol with the @TLSCALL operator on it. */
 static int expr_is_tlscall(const as_expr_t *e) {
-    const char *at;
-
-    if (e == NULL || e->kind != AS_EXPR_SYMBOL || e->symbol == NULL) {
-        return 0;
-    }
-    at = strchr(e->symbol, '@');
-    return at != NULL && strcasecmp(at, "@TLSCALL") == 0;
+    return e != NULL && e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && e->reloc_op != NULL &&
+           strcasecmp(e->reloc_op, "TLSCALL") == 0;
 }
 
 /*
@@ -12381,10 +12379,9 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
                                  ? op->u.mem.disp
                                  : ((op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) ? op->u.expr
                                                                                                            : NULL);
-        const char *sym = e != NULL ? first_symbol_in_expr(e) : NULL;
-        size_t n = sym != NULL ? strlen(sym) : 0;
+        const char *rop = as_expr_reloc_op(e);
 
-        if (n > 4 && strcasecmp(sym + n - 4, "@GOT") == 0) {
+        if (rop != NULL && strcasecmp(rop, "GOT") == 0) {
             return;
         }
     }
@@ -13446,7 +13443,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
             *out = 0;
             return 0;
         }
-        if (e->symbol == NULL ||
+        if (e->symbol == NULL || e->reloc_op != NULL ||
             find_label_virtual_location(ctx, base_st, NULL, 0, 0, e->symbol,
                                         &target_loc.section,
                                         &target_off) != 0 ||
@@ -13584,7 +13581,7 @@ static int eval_virtual_addr_expr(emit_ctx_t *ctx, const as_stmt_t *base_st,
     case AS_EXPR_SYMBOL: {
         uint64_t off = 0;
 
-        if (e->symbol == NULL || strcmp(e->symbol, ".") == 0) {
+        if (e->symbol == NULL || e->reloc_op != NULL || strcmp(e->symbol, ".") == 0) {
             return -1;
         }
         if (find_label_virtual_location(ctx, base_st, NULL, 0, 0, e->symbol,
@@ -16690,7 +16687,7 @@ static int x86_got_load_kind(const unsigned char *code, size_t len) {
     }
 }
 
-static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32_t fallback) {
+static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, const char *reloc_op, uint32_t fallback) {
     if (name == NULL) {
         return fallback;
     }
@@ -16703,7 +16700,7 @@ static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32
          * sym@GOT -- how position-independent code reaches everything --
          * were an R_386_32 against a symbol whose name ended in @GOTOFF.
          */
-        int op = as_reloc_op_type(machine, name, &t);
+        int op = as_reloc_op_type(machine, reloc_op, &t);
 
         if (op == 1) {
             /* In a field of 64 bits, the type of that width. */
@@ -16731,10 +16728,6 @@ static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32
         }
     }
     return fallback;
-}
-
-static void strip_reloc_modifier(char *name) {
-    (void)as_reloc_op_strip(name);
 }
 
 static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
@@ -17252,6 +17245,8 @@ static int machine_relocation_addend_is_in_place(unsigned machine);
 static int64_t local_label_addend(emit_ctx_t *ctx, const char *name);
 static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const char *name, uint64_t offset,
                                    uint32_t fallback_type, int64_t addend);
+static int add_reloc_for_symbol_op(emit_ctx_t *ctx, elf_section_t *sec, const char *name, const char *reloc_op,
+                                   uint64_t offset, uint32_t fallback_type, int64_t addend);
 
 /*
  * One section of call frame information, `.eh_frame` or `.debug_frame`,
@@ -18618,7 +18613,6 @@ static int64_t local_label_addend(emit_ctx_t *ctx, const char *name) {
     if (sym_name == NULL) {
         return 0;
     }
-    strip_reloc_modifier(sym_name);
     if (sym_name[0] != '\0' && is_local_temp_symbol_name(sym_name) &&
         find_label_virtual_location(ctx, NULL, NULL, 0, 0, sym_name,
                                     &target_section,
@@ -18643,6 +18637,14 @@ static int64_t local_label_addend(emit_ctx_t *ctx, const char *name) {
 
 static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const char *name,
                                    uint64_t offset, uint32_t fallback_type, int64_t addend) {
+    return add_reloc_for_symbol_op(ctx, sec, name, NULL, offset, fallback_type, addend);
+}
+
+/* The same, for a symbol with a relocation operator written on it --
+ * `reloc_op` is the GOTOFF of sym@GOTOFF, or NULL -- which then names
+ * the relocation. */
+static int add_reloc_for_symbol_op(emit_ctx_t *ctx, elf_section_t *sec, const char *name, const char *reloc_op,
+                                   uint64_t offset, uint32_t fallback_type, int64_t addend) {
     char *sym_name;
     elf_symbol_t *sym;
     uint32_t rtype;
@@ -18651,7 +18653,6 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
     if (sym_name == NULL) {
         return -1;
     }
-    strip_reloc_modifier(sym_name);
     if (sym_name[0] == '\0') {
         free(sym_name);
         return -1;
@@ -18695,7 +18696,7 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
                 }
                 rtype = reloc_type_exact ? fallback_type
                                          : reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name,
-                                                                 fallback_type);
+                                                                 reloc_op, fallback_type);
                 if (rtype != AS_RELOC_TYPE_BAD && !reloc_type_exact && ctx->cfg != NULL && ctx->cfg->target != 0) {
                     rtype = reloc_type_for_target(ctx->cfg->target, rtype);
                 }
@@ -18726,9 +18727,11 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
         return 0;
     }
     rtype = reloc_type_exact ? fallback_type
-                             : reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, fallback_type);
+                             : reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, reloc_op,
+                                                     fallback_type);
     if (rtype == AS_RELOC_TYPE_BAD) {
-        set_err(ctx, "'%s': what follows the @ is not a relocation operator this target has", name);
+        set_err(ctx, "'%s@%s': what follows the @ is not a relocation operator this target has", name,
+                reloc_op != NULL ? reloc_op : "");
         free(sym_name);
         return -1;
     }
@@ -18753,6 +18756,21 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
     }
     free(sym_name);
     return 0;
+}
+
+/* The relocation operator written on that symbol -- the first, as
+ * first_symbol_in_expr() finds it -- or NULL. */
+static const char *first_symbol_op_in_expr(const as_expr_t *e) {
+    if (e == NULL) {
+        return NULL;
+    }
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL) {
+        return e->reloc_op;
+    }
+    if (e->lhs != NULL && first_symbol_in_expr(e->lhs) != NULL) {
+        return first_symbol_op_in_expr(e->lhs);
+    }
+    return first_symbol_op_in_expr(e->rhs);
 }
 
 static const char *first_symbol_in_expr(const as_expr_t *e) {
@@ -18801,7 +18819,15 @@ static char *trim_copy_arg(const char *s) {
     return out;
 }
 
+static int parse_symbol_addend_op_arg(const char *arg, char **sym_out, char **op_out, int64_t *add_out);
+
 static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out) {
+    return parse_symbol_addend_op_arg(arg, sym_out, NULL, add_out);
+}
+
+/* The same, and where op_out is not NULL the relocation operator
+ * written on the symbol, or NULL for none: the caller frees it. */
+static int parse_symbol_addend_op_arg(const char *arg, char **sym_out, char **op_out, int64_t *add_out) {
     as_expr_t *e;
     as_expr_linear_t lin;
     int rc = -1;
@@ -18817,6 +18843,9 @@ static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add
     }
     *sym_out = NULL;
     *add_out = 0;
+    if (op_out != NULL) {
+        *op_out = NULL;
+    }
     e = as_parse_expr_string(arg, NULL, 0);
     if (e == NULL) {
         return -1;
@@ -18824,6 +18853,15 @@ static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add
     if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
         lin.sub_symbol == NULL && lin.sub_local == NULL) {
         if (lin.add_symbol != NULL) {
+            const char *rop = as_expr_reloc_op(e);
+
+            if (op_out != NULL && rop != NULL) {
+                *op_out = xstrdup(rop);
+                if (*op_out == NULL) {
+                    as_expr_free(e);
+                    return -1;
+                }
+            }
             *sym_out = xstrdup(lin.add_symbol);
             rc = *sym_out != NULL ? 0 : -1;
         } else if (lin.add_local != NULL) {
@@ -20385,6 +20423,7 @@ static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
 
 typedef struct {
     const char *base;      /* a section's name, or a symbol's */
+    const char *reloc_op;  /* the operator written on the symbol, or NULL */
     int is_section;
     long long k;
     /* The one label the term is of, while it is of one, and how far
@@ -20423,7 +20462,11 @@ static int data_value_add(data_value_t *v, const data_term_t *term) {
         return 0;
     }
     for (i = 0; i < v->n; ++i) {
-        if (v->t[i].is_section == term->is_section && strcmp(v->t[i].base, term->base) == 0) {
+        /* (A symbol with an operator on it is another thing than the
+         * symbol, and than itself with another operator.) */
+        if (v->t[i].is_section == term->is_section && strcmp(v->t[i].base, term->base) == 0 &&
+            (v->t[i].reloc_op == NULL) == (term->reloc_op == NULL) &&
+            (term->reloc_op == NULL || strcasecmp(v->t[i].reloc_op, term->reloc_op) == 0)) {
             v->t[i].k += term->k;
             v->t[i].label = NULL;
             if (v->t[i].k == 0) {
@@ -20481,14 +20524,14 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
         if (strcmp(e->symbol, ".") == 0) {
             return data_eval_place(ev, ev->section, (long long)ev->off, NULL, out);
         }
-        if (asm_var_lookup(ev->ctx, e->symbol, &out->c) == 0) {
+        if (e->reloc_op == NULL && asm_var_lookup(ev->ctx, e->symbol, &out->c) == 0) {
             return 0;
         }
         /* A view of the line table is a number. */
-        if (line_view_value(ev->ctx, e->symbol, &out->c) == 0) {
+        if (e->reloc_op == NULL && line_view_value(ev->ctx, e->symbol, &out->c) == 0) {
             return 0;
         }
-        if (strchr(e->symbol, '@') == NULL) {
+        if (e->reloc_op == NULL) {
             if (is_local_temp_symbol_name(e->symbol) &&
                 find_seen_temp_label(ev->labels, ev->label_count, e->symbol, &seen) == 0) {
                 return data_eval_place(ev, seen->section, (long long)seen->off, e->symbol, out);
@@ -20499,6 +20542,7 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
         }
         memset(&term, 0, sizeof(term));
         term.base = e->symbol;
+        term.reloc_op = e->reloc_op;
         term.k = 1;
         return data_value_add(out, &term);
     }
@@ -20713,7 +20757,31 @@ static int emit_data_field(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg
         name = place->label;
         addend -= (int64_t)place->label_off;
     }
-    type = strchr(name, '@') != NULL && !pcrel ? reloc_type_for_machine(machine) : data_reloc_type(machine, width, pcrel);
+    /*
+     * (With an operator the relocation is the operator's, and this is
+     * only what says how wide the field is: of eight bytes it names the
+     * wide one of the operator's two, of four the other.  It was the
+     * eight-byte type whatever the field, so `.long ext@GOT` in 64-bit
+     * code had R_X86_64_GOT64 on four bytes, and `.long tv@DTPOFF`,
+     * which a compiler writes in debugging information, was refused.)
+     */
+    type = data_reloc_type(machine, width, pcrel);
+    if (type == AS_RELOC_TYPE_BAD && place->reloc_op != NULL && !pcrel) {
+        type = reloc_type_for_machine(machine);
+    }
+    if (place->reloc_op != NULL) {
+        /* And the operator's relocation is of the field's width, or
+         * there is none to make: `.quad ext@PLT`, and on i386 `.quad`
+         * with any operator, had a relocation of four bytes on eight. */
+        uint32_t named = reloc_type_for_symbol(machine, name, place->reloc_op, type);
+        int bytes = named != AS_RELOC_TYPE_BAD ? elf_reloc_size_for_machine((uint16_t)machine, named) : 0;
+
+        if (bytes > 0 && (unsigned)bytes != width) {
+            set_err(ctx, "%s:%u: '%s': the relocation @%s names is of %d bytes, and the field is of %u", file,
+                    st->line, arg, place->reloc_op, bytes, width);
+            goto out;
+        }
+    }
     if (type == AS_RELOC_TYPE_BAD) {
         set_err(ctx, "%s:%u: '%s': there is no relocation of %u bytes for this target", file, st->line, arg, width);
         goto out;
@@ -20723,7 +20791,7 @@ static int emit_data_field(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg
                         ? (uint64_t)(addend + local_label_addend(ctx, name))
                         : 0,
                     width);
-    if (add_reloc_for_symbol_ex(ctx, sec, name, field_off, type, addend) != 0) {
+    if (add_reloc_for_symbol_op(ctx, sec, name, place->reloc_op, field_off, type, addend) != 0) {
         if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
             set_err(ctx, "%s:%u: '%s': no relocation could be made", file, st->line, arg);
         }
@@ -20899,6 +20967,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
             if (width != 0) {
                 for (j = 0; j < d->arg_count; ++j) {
                     char *sym = NULL;
+                    char *sym_op = NULL;
                     int64_t addend = 0;
                     uint64_t reloc_off;
                     long long const_value = 0;
@@ -20921,10 +20990,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         }
                         continue;
                     }
-                    if (parse_symbol_addend_arg(d->args[j], &sym, &addend) == 0 && sym != NULL) {
+                    if (parse_symbol_addend_op_arg(d->args[j], &sym, &sym_op, &addend) == 0 && sym != NULL) {
                         uint32_t t = reloc_type_for_machine(machine);
                         long long asm_value;
-                        if (asm_var_lookup(ctx, sym, &asm_value) == 0) {
+                        if (sym_op == NULL && asm_var_lookup(ctx, sym, &asm_value) == 0) {
                             free(sym);
                             continue;
                         }
@@ -20934,15 +21003,19 @@ static int emit_relocations(emit_ctx_t *ctx) {
                             write_u64_le_at(sb->buf.data + reloc_off,
                                             (uint64_t)(addend + local_label_addend(ctx, sym)), width);
                         }
-                        if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, reloc_off, t, addend) != 0) {
+                        if (add_reloc_for_symbol_op(ctx, cur_sec, sym, sym_op, reloc_off, t, addend) != 0) {
                             free(sym);
+                            free(sym_op);
                             section_track_free(&track);
                             sec_buf_vec_free(&secbufs);
                             return -1;
                         }
                         free(sym);
+                        free(sym_op);
                         continue;
                     }
+                    free(sym_op);
+                    sym_op = NULL;
                     {
                         as_expr_t *expr = as_parse_expr_string(d->args[j], st->file, st->line);
                         as_expr_t minuend_node;
@@ -21109,6 +21182,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 const as_operand_t *op = &st->u.instr.operands[j];
                 const as_expr_t *e = NULL;
                 const char *sym;
+                const char *rop; /* the operator written on it, or NULL */
                 uint32_t t;
                 uint64_t reloc_off;
                 uint64_t reloc_width = 4;
@@ -21192,6 +21266,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (sym == NULL) {
                     continue;
                 }
+                rop = first_symbol_op_in_expr(e);
                 /*
                  * One label of a section less another of it is a number,
                  * and is written as one.  It was given a relocation to
@@ -21257,8 +21332,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 /* @TLSCALL has no field: its relocation is on the
                  * instruction, at its first byte. */
                 if (expr_is_tlscall(e)) {
-                    if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, cur_off, machine == EM_X86_64 ? R_X86_64_NONE : R_386_NONE,
-                                                0) != 0) {
+                    if (add_reloc_for_symbol_op(ctx, cur_sec, sym, rop, cur_off,
+                                                machine == EM_X86_64 ? R_X86_64_NONE : R_386_NONE, 0) != 0) {
                         section_track_free(&track);
                         sec_buf_vec_free(&secbufs);
                         return -1;
@@ -21327,7 +21402,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * (R_X86_64_32).
                  */
                 if (op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] == '$' &&
-                    strchr(sym, '@') == NULL &&
+                    rop == NULL &&
                     (t == R_386_32 || t == R_X86_64_64 || t == R_X86_64_32S || t == R_X86_64_32)) {
                     unsigned imm_width;
                     int imm_rex_w;
@@ -21563,10 +21638,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     !(op->raw != NULL && op->raw[0] == '*')) {
                     uint32_t op_type = 0;
 
-                    if (as_reloc_op_type(machine, sym, &op_type) == 1 && op_type != R_386_PLT32 &&
+                    if (as_reloc_op_type(machine, rop, &op_type) == 1 && op_type != R_386_PLT32 &&
                         op_type != R_X86_64_PLT32) {
-                        set_err(ctx, "%s:%u: '%s' is not what a branch can go to",
-                                st->file != NULL ? st->file : "<input>", st->line, sym);
+                        set_err(ctx, "%s:%u: '%s@%s' is not what a branch can go to",
+                                st->file != NULL ? st->file : "<input>", st->line, sym, rop);
                         section_track_free(&track);
                         sec_buf_vec_free(&secbufs);
                         return -1;
@@ -21577,7 +21652,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * of which has a second symbol in it. */
                 {
                     uint32_t op_type = 0;
-                    int tls = as_reloc_op_type(machine, sym, &op_type) == 1 &&
+                    int tls = as_reloc_op_type(machine, rop, &op_type) == 1 &&
                               (machine == EM_X86_64
                                    ? (op_type == R_X86_64_TLSGD || op_type == R_X86_64_TLSLD ||
                                       op_type == R_X86_64_GOTTPOFF || op_type == R_X86_64_GOTPC32_TLSDESC)
@@ -21586,8 +21661,9 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                       op_type == R_386_TLS_IE || op_type == R_386_TLS_GOTDESC));
 
                     if ((tls && rel_count > 0) || (tls_in_stmt && rel_count > 0)) {
-                        set_err(ctx, "%s:%u: '%s' is in an instruction with another symbol, which none of its forms has",
-                                st->file != NULL ? st->file : "<input>", st->line, sym);
+                        set_err(ctx, "%s:%u: '%s%s%s' is in an instruction with another symbol, which none of its forms has",
+                                st->file != NULL ? st->file : "<input>", st->line, sym, rop != NULL ? "@" : "",
+                                rop != NULL ? rop : "");
                         section_track_free(&track);
                         sec_buf_vec_free(&secbufs);
                         return -1;
@@ -21595,7 +21671,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     tls_in_stmt |= tls;
                 }
                 reloc_got_load = x86_got_load_kind(code, code_len);
-                if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, reloc_off, t, addend) != 0) {
+                if (add_reloc_for_symbol_op(ctx, cur_sec, sym, rop, reloc_off, t, addend) != 0) {
                     reloc_got_load = 0;
                     if (ctx->errbuf != NULL && ctx->errbuf[0] != '\0' && strchr(ctx->errbuf, ':') == NULL) {
                         char why[256];
