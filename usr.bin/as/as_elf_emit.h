@@ -25,11 +25,12 @@ extern "C" {
  */
 typedef struct {
     int suppress;
-    /* With `probe` nothing is written either, and `wanted` is how many
-     * warnings would have been: for one who is to know whether a
-     * statement has any to make when its turn comes. */
+    /* `asked` is how many times a warning has been asked for, written
+     * or not: for one who is to know whether a statement has any to
+     * make.  With `probe` none is written or counted, and only that is
+     * kept. */
     int probe;
-    unsigned wanted;
+    unsigned asked;
     unsigned count;
     const void **seen;
     size_t seen_count;
@@ -111,6 +112,10 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
  * it was written.
  */
 int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st);
+
+/* Let go what as_x86_precode() keeps between its calls: once, when the
+ * source has all been read and assembled, or has not. */
+void as_x86_precode_free(void);
 
 int as_elf_emit_file(const as_parse_result_t *parsed,
                      const as_section_state_t *sections,

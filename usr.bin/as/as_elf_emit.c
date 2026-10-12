@@ -116,6 +116,14 @@ struct text_code {
     unsigned char bytes[17];
 };
 
+/* The table: the run's, and not an emitter's alone -- an instruction is
+ * encoded as it is read (as_x86_precode()), before there is an emitter. */
+static struct {
+    struct text_code *slots;
+    size_t cap;
+    size_t count;
+} text_codes;
+
 typedef struct {
     const as_elf_cfg_t *cfg;
     const as_parse_result_t *parsed;
@@ -194,11 +202,6 @@ typedef struct {
     struct stmt_code *stmt_code;
     size_t stmt_code_count;
     unsigned layout_epoch;
-    /* The bytes of each instruction of registers and numbers that has
-     * been written, by its text: text_code_find(). */
-    struct text_code *text_code;
-    size_t text_code_cap;
-    size_t text_code_count;
     /* Whether each branch to a label of its own section is the short
      * form: 0 not one that is sized here, 1 short, 2 long.  Made by
      * relax_branches(), which relax_state says the state of: 0 not yet
@@ -272,6 +275,10 @@ static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *po
 static int x86_cond_code(const char *mnemonic, unsigned *cc_out);
 static int x86_base_is_ip(const char *base_reg);
 static int stmt_is_place_free(const as_stmt_t *st);
+static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz);
+static int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len);
+static void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len);
+static void text_code_free(void);
 static int stmt_code_find(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits, int anywhere,
                           unsigned char *code, size_t code_cap, size_t *code_len);
 static void stmt_code_keep(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
@@ -10455,8 +10462,8 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
     if (w != NULL) {
         size_t i;
 
+        w->asked++;
         if (w->probe) {
-            w->wanted++;
             return;
         }
         if (w->suppress) {
@@ -17524,6 +17531,8 @@ int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
     as_elf_warnings_t probe;
     unsigned char code[32];
     char encerr[256];
+    char key[192];
+    size_t key_len;
     size_t code_len = 0;
 
     if (off < 0) {
@@ -17548,8 +17557,20 @@ int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
     probe.probe = 1;
     stmt_cfg.warnings = &probe;
     encerr[0] = '\0';
-    if (encode_x86_stmt(NULL, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0 ||
-        probe.wanted != 0 || code_len == 0 || code_len > sizeof(st->u.instr.code)) {
+    /* By what is written, if one written the same has been encoded:
+     * a compiler writes a few hundred instructions many thousands of
+     * times, and each was encoded anew as it was read. */
+    key_len = text_code_key(NULL, st, code_bits, key, sizeof(key));
+    if (key_len == 0 || !text_code_find(key, key_len, code, sizeof(code), &code_len)) {
+        if (encode_x86_stmt(NULL, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0 ||
+            probe.asked != 0 || code_len == 0 || code_len > sizeof(st->u.instr.code)) {
+            return 0;
+        }
+        if (key_len != 0) {
+            text_code_keep(key, key_len, code, code_len);
+        }
+    }
+    if (code_len == 0 || code_len > sizeof(st->u.instr.code)) {
         return 0;
     }
     as_instruction_drop_operands(&st->u.instr);
@@ -17557,6 +17578,10 @@ int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
     st->u.instr.code_len = (unsigned char)code_len;
     st->u.instr.code_bits = (unsigned char)code_bits;
     return 1;
+}
+
+void as_x86_precode_free(void) {
+    text_code_free();
 }
 
 static struct stmt_code *stmt_code_slot(emit_ctx_t *ctx, const as_stmt_t *st) {
@@ -17608,7 +17633,7 @@ static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
     int w;
 
     /* (One that is its bytes already has no operands to be the key.) */
-    if (ctx->asm_reg_alias_count != 0 || in->code_len != 0 || !stmt_is_place_free(st)) {
+    if ((ctx != NULL && ctx->asm_reg_alias_count != 0) || in->code_len != 0 || !stmt_is_place_free(st)) {
         return 0;
     }
     w = snprintf(key, key_sz, "%u %x %x %x %x %d %d %d %d %d %u %s %s", x86_code_bits, in->prefixes, in->pseudo,
@@ -17661,16 +17686,15 @@ static uint32_t text_code_hash(const char *key, size_t n) {
     return h;
 }
 
-static int text_code_find(emit_ctx_t *ctx, const char *key, size_t n, unsigned char *code, size_t code_cap,
-                          size_t *code_len) {
+static int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len) {
     uint32_t h = text_code_hash(key, n);
     size_t at;
 
-    if (ctx->text_code_cap == 0) {
+    if (text_codes.cap == 0) {
         return 0;
     }
-    for (at = h & (ctx->text_code_cap - 1); ctx->text_code[at].key != NULL; at = (at + 1) & (ctx->text_code_cap - 1)) {
-        const struct text_code *t = &ctx->text_code[at];
+    for (at = h & (text_codes.cap - 1); text_codes.slots[at].key != NULL; at = (at + 1) & (text_codes.cap - 1)) {
+        const struct text_code *t = &text_codes.slots[at];
 
         if (t->hash == h && strcmp(t->key, key) == 0) {
             if (t->len > code_cap) {
@@ -17686,7 +17710,7 @@ static int text_code_find(emit_ctx_t *ctx, const char *key, size_t n, unsigned c
 
 /* (For want of memory the statement is not kept, and is encoded again
  * when it is written again.) */
-static void text_code_keep(emit_ctx_t *ctx, const char *key, size_t n, const unsigned char *code, size_t code_len) {
+static void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len) {
     uint32_t h = text_code_hash(key, n);
     struct text_code *t;
     size_t at;
@@ -17694,28 +17718,28 @@ static void text_code_keep(emit_ctx_t *ctx, const char *key, size_t n, const uns
     if (code_len == 0 || code_len > sizeof(t->bytes)) {
         return;
     }
-    if ((ctx->text_code_count + 1) * 2 > ctx->text_code_cap) {
-        size_t ncap = ctx->text_code_cap == 0 ? 1024 : ctx->text_code_cap * 2;
+    if ((text_codes.count + 1) * 2 > text_codes.cap) {
+        size_t ncap = text_codes.cap == 0 ? 1024 : text_codes.cap * 2;
         struct text_code *next = (struct text_code *)calloc(ncap, sizeof(*next));
         size_t i;
 
         if (next == NULL) {
             return;
         }
-        for (i = 0; i < ctx->text_code_cap; ++i) {
-            if (ctx->text_code[i].key != NULL) {
-                for (at = ctx->text_code[i].hash & (ncap - 1); next[at].key != NULL; at = (at + 1) & (ncap - 1)) {
+        for (i = 0; i < text_codes.cap; ++i) {
+            if (text_codes.slots[i].key != NULL) {
+                for (at = text_codes.slots[i].hash & (ncap - 1); next[at].key != NULL; at = (at + 1) & (ncap - 1)) {
                 }
-                next[at] = ctx->text_code[i];
+                next[at] = text_codes.slots[i];
             }
         }
-        free(ctx->text_code);
-        ctx->text_code = next;
-        ctx->text_code_cap = ncap;
+        free(text_codes.slots);
+        text_codes.slots = next;
+        text_codes.cap = ncap;
     }
-    for (at = h & (ctx->text_code_cap - 1); ctx->text_code[at].key != NULL; at = (at + 1) & (ctx->text_code_cap - 1)) {
+    for (at = h & (text_codes.cap - 1); text_codes.slots[at].key != NULL; at = (at + 1) & (text_codes.cap - 1)) {
     }
-    t = &ctx->text_code[at];
+    t = &text_codes.slots[at];
     t->key = xstrdup(key);
     if (t->key == NULL) {
         return;
@@ -17723,19 +17747,19 @@ static void text_code_keep(emit_ctx_t *ctx, const char *key, size_t n, const uns
     t->hash = h;
     t->len = (unsigned char)code_len;
     memcpy(t->bytes, code, code_len);
-    ctx->text_code_count++;
+    text_codes.count++;
 }
 
-static void text_code_free(emit_ctx_t *ctx) {
+static void text_code_free(void) {
     size_t i;
 
-    for (i = 0; i < ctx->text_code_cap; ++i) {
-        free(ctx->text_code[i].key);
+    for (i = 0; i < text_codes.cap; ++i) {
+        free(text_codes.slots[i].key);
     }
-    free(ctx->text_code);
-    ctx->text_code = NULL;
-    ctx->text_code_cap = 0;
-    ctx->text_code_count = 0;
+    free(text_codes.slots);
+    text_codes.slots = NULL;
+    text_codes.cap = 0;
+    text_codes.count = 0;
 }
 
 /*
@@ -17747,6 +17771,7 @@ static int encode_x86_stmt_by_text(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, uns
                                    const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
                                    char *encerr, size_t encerr_sz) {
     char key[192];
+    unsigned asked = cfg != NULL && cfg->warnings != NULL ? cfg->warnings->asked : 0;
     size_t n;
     int rc;
 
@@ -17757,12 +17782,14 @@ static int encode_x86_stmt_by_text(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, uns
     if (n == 0) {
         return 1;
     }
-    if (text_code_find(ctx, key, n, code, code_cap, code_len)) {
+    if (text_code_find(key, n, code, code_cap, code_len)) {
         return 0;
     }
     rc = encode_x86_stmt(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
-    if (rc == 0) {
-        text_code_keep(ctx, key, n, code, *code_len);
+    /* (One that has a warning to make is not kept: the next that is
+     * written the same has the warning to make too.) */
+    if (rc == 0 && (cfg == NULL || cfg->warnings == NULL || cfg->warnings->asked == asked)) {
+        text_code_keep(key, n, code, *code_len);
     }
     return rc;
 }
@@ -24289,7 +24316,7 @@ fail:
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.stmt_code);
-    text_code_free(&ctx);
+    text_code_free();
     seen_labels_free();
     free(ctx.branch_short);
     free(ctx.emit_labels);

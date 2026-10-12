@@ -3965,6 +3965,7 @@ out:
     as_section_state_free(&secs);
     as_symtab_free(&syms);
     as_parse_result_free(&parsed);
+    as_x86_precode_free();
     as_token_vec_free(&toks);
     if (thumb_funcs != NULL) {
         size_t k;
