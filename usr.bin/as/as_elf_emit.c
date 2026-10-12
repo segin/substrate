@@ -1091,8 +1091,13 @@ static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
     }
     switch (r->cls) {
     case AS_X86_REGCLASS_GENERAL:
+        /* (APX's %r16 to %r31 have numbers of their own for the
+         * emitters: AS_X86_REG_R16.  What comes of a statement with
+         * one is held to having the prefix that says it, in
+         * encode_x86_stmt(), whoever assembled it.) */
         if (r->number > 15) {
-            return -1;
+            *out = (as_x86_reg_t)(AS_X86_REG_R16 + (r->number - 16));
+            return 0;
         }
         *out = (r->flags & AS_X86_REGF_HIGH8) != 0 ? high8[r->number - 4] : (as_x86_reg_t)r->number;
         return 0;
@@ -1509,6 +1514,38 @@ static int x86_emit_code16;
 /* An Intel statement is being assembled as it stands, before its name
  * is tried as one with a `d` for the size (encode_x86_stmt()). */
 static int x86_intel_d_tried;
+/* A statement with one of %r16 to %r31 is being assembled, and what
+ * comes of it will be held to its prefix (encode_x86_stmt()). */
+static int x86_high_held;
+
+/* Whether a name is one of APX's general registers: r16 to r31, with a
+ * letter for the width or without. */
+static int x86_name_is_high_general(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (name[0] == '%') {
+        name++;
+    }
+    return (name[0] == 'r' || name[0] == 'R') && isdigit((unsigned char)name[1]) && isdigit((unsigned char)name[2]) &&
+           (name[1] == '2' || name[1] == '3' || (name[1] == '1' && name[2] >= '6')) &&
+           (name[3] == '\0' || name[4] == '\0');
+}
+
+static int x86_stmt_has_high_general(const as_instruction_t *in) {
+    size_t i;
+
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+
+        if ((op->kind == AS_OPERAND_REGISTER && x86_name_is_high_general(op->u.reg)) ||
+            (op->kind == AS_OPERAND_MEMORY &&
+             (x86_name_is_high_general(op->u.mem.base_reg) || x86_name_is_high_general(op->u.mem.index_reg)))) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm_op,
                                       unsigned char *out, size_t out_cap, size_t *pos_io) {
@@ -8098,6 +8135,19 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             }
         }
         rex = (unsigned char)(0x48u | (((unsigned)gr >> 3) & 0x1u));
+        if (gr >= AS_X86_REG_R16) {
+            /* (One of APX's registers: REX2, with its fifth bit.) */
+            out[0] = 0xd5u;
+            out[1] = (unsigned char)(0x10u | (rex & 0x0fu));
+            out[2] = (unsigned char)(0xb8u + ((unsigned)gr & 7u));
+            for (i = 0; i < 8; ++i) {
+                out[3 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
+            }
+            if (out_len != NULL) {
+                *out_len = 11;
+            }
+            return 0;
+        }
         out[0] = rex;
         out[1] = (unsigned char)(0xb8u + ((unsigned)gr & 7u));
         for (i = 0; i < 8; ++i) {
@@ -8430,6 +8480,14 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
                r->cls == AS_X86_REGCLASS_YMM || r->cls == AS_X86_REGCLASS_ZMM) &&
               r->number <= 15)) &&
             as_x86_reg_operand(op->u.reg, dst) == 0) {
+            return 0;
+        }
+        /* (APX's general registers, in 64-bit code, by the numbers the
+         * emitters have for them: AS_X86_REG_R16.  What is assembled
+         * with one is held to its prefix, in encode_x86_stmt().) */
+        if (r != NULL && is64 && r->cls == AS_X86_REGCLASS_GENERAL && r->number > 15 &&
+            as_x86_reg_operand(op->u.reg, dst) == 0) {
+            dst->u.reg = (as_x86_reg_t)(AS_X86_REG_R16 + (r->number - 16));
             return 0;
         }
         dst->kind = AS_X86_OP_REG;
@@ -12686,6 +12744,40 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
     /* (For the emitters that are handed operands and no mode.) */
     x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
+
+    /*
+     * APX's registers, %r16 to %r31: whoever assembles a statement
+     * with one, what comes of it has the prefix that says them, REX2
+     * or EVEX, or the statement is refused.  The emitters are many and
+     * most know sixteen registers; one that took %r16 for %rax would
+     * say nothing.
+     */
+    if (st != NULL && cfg != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL &&
+        st->u.instr.code_len == 0 && !x86_high_held && x86_stmt_has_high_general(&st->u.instr)) {
+        int rc;
+
+        if (!cfg->is_64) {
+            snprintf(encerr, encerr_sz, "'%s': %%r16 to %%r31 are registers of 64-bit code", st->u.instr.mnemonic);
+            return -1;
+        }
+        x86_high_held = 1;
+        rc = encode_x86_stmt(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+        x86_high_held = 0;
+        if (rc == 0) {
+            static const unsigned char before[] = {0x66, 0x67, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0};
+            size_t at = 0;
+
+            while (at < *code_len && memchr(before, code[at], sizeof(before)) != NULL) {
+                at++;
+            }
+            if (at >= *code_len || (code[at] != 0xd5 && code[at] != 0x62)) {
+                snprintf(encerr, encerr_sz, "'%s' has no form that says %%r16 to %%r31", st->u.instr.mnemonic);
+                *code_len = 0;
+                return -1;
+            }
+        }
+        return rc;
+    }
 
     /*
      * In Intel syntax a `d` after the name of an instruction of general
@@ -21260,7 +21352,15 @@ static int x86_imm_field_width(const unsigned char *code, size_t len, unsigned c
         }
         i++;
     }
-    if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
+    if (is_64 && i + 1 < len && code[i] == 0xd5u) {
+        /* (REX2, of APX: two bytes, the second with REX's four bits;
+         * an opcode of the two-byte map has no number of these.) */
+        if ((code[i + 1] & 0x80u) != 0) {
+            return -1;
+        }
+        rex_w = (code[i + 1] & 0x08u) != 0;
+        i += 2;
+    } else if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
         rex_w = (code[i] & 0x08u) != 0;
         i++;
     }
@@ -21316,7 +21416,10 @@ static size_t x86_prefix_count(const unsigned char *code, size_t len, int is_64)
                        code[i] == 0x65)) {
         i++;
     }
-    if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
+    if (is_64 && i + 1 < len && code[i] == 0xd5u) {
+        /* (REX2, of APX, which is two bytes.) */
+        i += 2;
+    } else if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
         i++;
     }
     return i;
@@ -21454,15 +21557,21 @@ static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, s
     } else if (code[i] == 0x62 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
         i += 5;
     } else {
-        if (is_64 && (code[i] & 0xf0u) == 0x40u) {
+        /* (REX2, of APX: two bytes, and it says itself whether the
+         * opcode is of the two-byte map, with no 0F to say so.) */
+        int rex2 = is_64 && code[i] == 0xd5u;
+
+        if (rex2) {
+            i += 2;
+        } else if (is_64 && (code[i] & 0xf0u) == 0x40u) {
             i++;
         }
-        if (i < len && code[i] == 0x0f) {
+        if (!rex2 && i < len && code[i] == 0x0f) {
             i++;
             if (i < len && (code[i] == 0x38 || code[i] == 0x3a)) {
                 i++;
             }
-        } else if (i < len && code[i] >= 0xa0 && code[i] <= 0xa3) {
+        } else if (!rex2 && i < len && code[i] >= 0xa0 && code[i] <= 0xa3) {
             /* mov between the accumulator and an address with no ModRM. */
             if (is_64 || i + 5 > len) {
                 return -1;

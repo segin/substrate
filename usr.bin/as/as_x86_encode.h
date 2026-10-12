@@ -37,7 +37,19 @@ typedef enum {
     AS_X86_REG_CH = 17,
     AS_X86_REG_DH = 18,
     AS_X86_REG_BH = 19,
+    /*
+     * APX's %r16 to %r31, by the same number whatever their width:
+     * 32 and the low four bits of the register's own, so that the low
+     * three are what ModRM has of it and the fourth what REX has, as
+     * of the registers below them.
+     */
+    AS_X86_REG_R16 = 32,
+    AS_X86_REG_R31 = 47,
 } as_x86_reg_t;
+
+/* In the three bits a REX prefix is put together from, the bit above
+ * each: the fifth bit of an APX register, which only REX2 says. */
+#define AS_X86_REX_EXT4 2
 
 typedef enum {
     AS_X86_SEG_NONE = 0,

@@ -76,8 +76,15 @@ cd "$work" || exit 1
 # test, `cfcmov`, `setzu`, `imulzu`, `push2` and `pop2` -- 695 names
 # with general registers of each width, memory, numbers of each size
 # and %cl in each place.
+#
+# hi_forms.txt is the same of APX's registers, %r16 to %r31, behind a
+# REX2 prefix: the 64-bit lines of the differential corpus with each
+# general register made the one sixteen above it (%rax is %r16, %r9d is
+# %r25d).  They were "does not take these operands" in a register and
+# "unknown x86 base register" in an address.
 cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" \
-    "$here/tls_forms.txt" "$here/selection_forms.txt" "$here/ext_forms.txt" "$here/apx_forms.txt" > forms.txt
+    "$here/tls_forms.txt" "$here/selection_forms.txt" "$here/ext_forms.txt" "$here/apx_forms.txt" \
+    "$here/hi_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0

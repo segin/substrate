@@ -746,7 +746,10 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
              * whether the opcode is of the two-byte map -- which it
              * says instead of the escape byte, and has no way to say
              * of the others. */
-            if (t->map != AS_VEC_MAP_ONE && t->map != AS_VEC_MAP_0F) {
+            /* (Nor have the instructions that save and restore the
+             * state of the processor, by its makers' say.) */
+            if ((t->map != AS_VEC_MAP_ONE && t->map != AS_VEC_MAP_0F) || strncmp(t->name, "xsave", 5) == 0 ||
+                strncmp(t->name, "xrstor", 6) == 0) {
                 vec_err(ctx, "'%s' has no prefix that says %%r16 to %%r31", t->name);
                 return -1;
             }

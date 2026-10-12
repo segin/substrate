@@ -993,7 +993,9 @@ static uint8_t reg_ext(as_x86_reg_t r) {
     if (is_high8_reg(r)) {
         return 0;
     }
-    return (uint8_t)((r >> 3) & 1);
+    /* (And the fifth bit of one of APX's registers above it, for the
+     * REX2 prefix: AS_X86_REX_EXT4.) */
+    return (uint8_t)(((r >> 3) & 1) | (r >= AS_X86_REG_R16 ? AS_X86_REX_EXT4 : 0));
 }
 
 static int needs_rex_low8(as_x86_reg_t r) {
@@ -1101,7 +1103,10 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
             mod = 2;
         } else if (!m->has_disp && (m->base & 7) != AS_X86_REG_RBP) {
             mod = 0;
-        } else if (m->has_disp && is_disp8(m->disp)) {
+        } else if (!m->has_disp || is_disp8(m->disp)) {
+            /* (A base whose low bits are %rbp's and no displacement --
+             * %r21 and %r29, which are given none where %rbp and %r13
+             * are -- has one of a byte, of nothing.) */
             mod = 1;
         } else {
             mod = 2;
@@ -3226,9 +3231,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (a->size_bits == 16 && emit8(&ctx, 0x66) != 0) {
                 return -1;
             }
-            if (a->u.reg >= 8) {
-                rex_b = 1;
-            }
+            rex_b |= reg_ext(a->u.reg);
             if (emit8(&ctx, (uint8_t)(0x50u + (a->u.reg & 7u))) != 0) {
                 return -1;
             }
@@ -3264,9 +3267,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (a->size_bits == 16 && emit8(&ctx, 0x66) != 0) {
                 return -1;
             }
-            if (a->u.reg >= 8) {
-                rex_b = 1;
-            }
+            rex_b |= reg_ext(a->u.reg);
             if (emit8(&ctx, (uint8_t)(0x58u + (a->u.reg & 7u))) != 0) {
                 return -1;
             }
@@ -3421,9 +3422,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (width == 64u) {
             rex_w = 1;
         }
-        if (reg_ext(a->u.reg)) {
-            rex_b = 1;
-        }
+        rex_b |= reg_ext(a->u.reg);
         /*
          * To a 64-bit register, B8+r with REX.W is the form that carries
          * all eight bytes of the value.  Written with four, as this did,
@@ -4154,9 +4153,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             !(a->u.reg == b->u.reg && operand_bits(a) == 32)) {
             as_x86_reg_t other = a->u.reg == AS_X86_REG_RAX ? b->u.reg : a->u.reg;
 
-            if (other >= 8) {
-                rex_b = 1;
-            }
+            rex_b |= reg_ext(other);
             /* (%rax with itself is 90 and no more.) */
             if (a->u.reg == b->u.reg) {
                 rex_w = 0;
@@ -6839,7 +6836,47 @@ finish:
             return -1;
         }
     }
-    rex = (uint8_t)(0x40 | (rex_w ? 0x08 : 0) | (rex_r ? 0x04 : 0) | (rex_x ? 0x02 : 0) | (rex_b ? 0x01 : 0));
+    rex = (uint8_t)(0x40 | (rex_w ? 0x08 : 0) | ((rex_r & 1) ? 0x04 : 0) | ((rex_x & 1) ? 0x02 : 0) |
+                    ((rex_b & 1) ? 0x01 : 0));
+    if (((rex_r | rex_x | rex_b) & AS_X86_REX_EXT4) != 0) {
+        /*
+         * REX2, for %r16 to %r31: two bytes where REX is one, with the
+         * fifth bits above REX's four and a bit that says the opcode is
+         * of the two-byte map -- in place of the 0F that would say so,
+         * and with no way to say the maps past it.
+         */
+        int two_byte;
+        size_t i;
+
+        while (rex_pos + 1 < ctx.at &&
+               (ctx.out[rex_pos + 1] == 0x66 || ctx.out[rex_pos + 1] == 0xf2 || ctx.out[rex_pos + 1] == 0xf3)) {
+            ctx.out[rex_pos] = ctx.out[rex_pos + 1];
+            rex_pos++;
+        }
+        two_byte = rex_pos + 1 < ctx.at && ctx.out[rex_pos + 1] == 0x0f;
+        if (two_byte && rex_pos + 2 < ctx.at && (ctx.out[rex_pos + 2] == 0x38 || ctx.out[rex_pos + 2] == 0x3a)) {
+            set_err(&ctx, "'%s' has no prefix that says %%r16 to %%r31", insn->mnemonic);
+            return -1;
+        }
+        if (!two_byte) {
+            if (ctx.at >= ctx.out_cap) {
+                set_err(&ctx, "instruction too long");
+                return -1;
+            }
+            for (i = ctx.at; i > rex_pos + 1; --i) {
+                ctx.out[i] = ctx.out[i - 1];
+            }
+            ctx.at++;
+        }
+        ctx.out[rex_pos] = 0xd5;
+        ctx.out[rex_pos + 1] =
+            (uint8_t)((two_byte ? 0x80 : 0) | ((rex_r & AS_X86_REX_EXT4) ? 0x40 : 0) |
+                      ((rex_x & AS_X86_REX_EXT4) ? 0x20 : 0) | ((rex_b & AS_X86_REX_EXT4) ? 0x10 : 0) | (rex & 0x0f));
+        if (out_len != NULL) {
+            *out_len = ctx.at;
+        }
+        return 0;
+    }
     if (rex == 0x40 && !force_rex) {
         size_t i;
         for (i = rex_pos + 1; i < ctx.at; ++i) {
