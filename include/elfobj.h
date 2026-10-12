@@ -165,6 +165,13 @@ typedef enum {
 #ifndef SHF_GNU_RETAIN
 #define SHF_GNU_RETAIN 0x200000
 #endif
+/* x86-64: a section of the large code model, and unwind tables. */
+#ifndef SHF_X86_64_LARGE
+#define SHF_X86_64_LARGE 0x10000000
+#endif
+#ifndef SHT_X86_64_UNWIND
+#define SHT_X86_64_UNWIND 0x70000001
+#endif
 #ifndef SHF_COMPRESSED
 #define SHF_COMPRESSED 0x800
 #endif

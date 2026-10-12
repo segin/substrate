@@ -15,6 +15,7 @@ usr.bin/as/
 ├── as_x86_regs.c            # The x86 registers: one table of name, class, width, number
 ├── as_reloc_op.c            # The relocation operators (@GOT, @PLT, ...): one table, i386 and x86-64
 ├── as_lower.c               # Directives made the few the rest stores; ARM's own made x86's (as_arm_lower)
+├── as_util.c                # The helpers every file had its own of: xstrdup, streq_ci, trim_copy, as_errf
 ├── as_symtab.c              # Symbols: definition, binding, type, aliases
 ├── as_sections.c            # Sections, the section stack, subsections, the code mode
 ├── as_data.c                # Data directives: literals, strings, LEB128

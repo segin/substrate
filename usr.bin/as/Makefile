@@ -3,7 +3,7 @@ DYNAMIC = 1
 include ../../Makefile.inc
 
 PROG = as
-SRCS = as.c as_expr.c as_reloc_op.c as_lexer.c as_x86_regs.c as_parser.c as_symtab.c as_sections.c as_lower.c as_data.c as_cfi.c as_dwline.c as_elf_emit.c as_arm.c as_arm_simd.c as_arm_thumb.c as_a64.c as_a64_simd.c as_x86_encode.c as_x86_vec.c as_x86_vec_table.c as_x86_vex.c as_x86_evex.c as_x86_v2.c as_x86_sse3.c as_x86_ssse3.c as_x86_sse41.c as_x86_sse42.c as_x86_avx.c as_x86_avx2.c as_x86_bmi1.c as_x86_bmi2.c as_x86_fma.c as_x86_v3_misc.c as_x86_avx512f.c as_x86_avx512bw.c as_x86_avx512dq.c
+SRCS = as.c as_util.c as_expr.c as_reloc_op.c as_lexer.c as_x86_regs.c as_parser.c as_symtab.c as_sections.c as_lower.c as_data.c as_cfi.c as_dwline.c as_elf_emit.c as_arm.c as_arm_simd.c as_arm_thumb.c as_a64.c as_a64_simd.c as_x86_encode.c as_x86_vec.c as_x86_vec_table.c as_x86_vex.c as_x86_evex.c as_x86_v2.c as_x86_sse3.c as_x86_ssse3.c as_x86_sse41.c as_x86_sse42.c as_x86_avx.c as_x86_avx2.c as_x86_bmi1.c as_x86_bmi2.c as_x86_fma.c as_x86_v3_misc.c as_x86_avx512f.c as_x86_avx512bw.c as_x86_avx512dq.c
 LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0
 USER_CFLAGS += -iquote ../../include
 ifeq ($(NATIVE_BUILD),1)

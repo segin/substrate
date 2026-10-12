@@ -1,5 +1,6 @@
 #include "as_x86_fma.h"
 
+#include "as_util.h"
 #include "as_x86_vex.h"
 
 #include <stdarg.h>
@@ -11,19 +12,6 @@ typedef struct {
     uint8_t base_opcode;
     int packed_only;
 } fma_family_t;
-
-static int set_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
-    va_list ap;
-
-    if (errbuf == NULL || errbuf_sz == 0) {
-        return -1;
-    }
-
-    va_start(ap, fmt);
-    vsnprintf(errbuf, errbuf_sz, fmt, ap);
-    va_end(ap);
-    return -1;
-}
 
 static uint8_t imm8_with_implicit_reg(as_x86_reg_t reg) {
     return (uint8_t)(((((unsigned)reg & 7u) | 0x8u) << 4));
@@ -51,7 +39,7 @@ static int encode_vex_with_imm8(as_x86_reg_t modrm_reg, as_x86_reg_t src1,
         return -1;
     }
     if (n >= out_cap) {
-        return set_err(errbuf, errbuf_sz, "encoding overflow");
+        return as_errf(errbuf, errbuf_sz, "encoding overflow");
     }
     out[n++] = imm8;
     if (out_len != NULL) {
@@ -164,7 +152,7 @@ int as_x86_encode_fma(const as_x86_fma_insn_t *insn, uint8_t *out, size_t out_ca
                                             out_cap, out_len, errbuf, errbuf_sz);
             }
         }
-        return set_err(errbuf, errbuf_sz, "unsupported FMA mnemonic: %s", insn->mnemonic);
+        return as_errf(errbuf, errbuf_sz, "unsupported FMA mnemonic: %s", insn->mnemonic);
     }
 
     if (insn->op_count != 3 || insn->op1.kind != AS_X86_OP_REG ||
@@ -187,7 +175,7 @@ int as_x86_encode_fma(const as_x86_fma_insn_t *insn, uint8_t *out, size_t out_ca
         }
     }
     if (fam == NULL) {
-        return set_err(errbuf, errbuf_sz, "unsupported FMA mnemonic: %s", insn->mnemonic);
+        return as_errf(errbuf, errbuf_sz, "unsupported FMA mnemonic: %s", insn->mnemonic);
     }
 
     if (parse_form_offset(p, &form_offset, &suffix) != 0) {

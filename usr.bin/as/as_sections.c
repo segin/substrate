@@ -1,5 +1,8 @@
 #include "as_sections.h"
 
+#include "as_util.h"
+#include "elfobj.h"
+
 #include <ctype.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -9,101 +12,11 @@
 #include <string.h>
 #include <sys/types.h>
 
-#ifndef SHT_NULL
-#define SHT_NULL 0
-#endif
-#ifndef SHT_PROGBITS
-#define SHT_PROGBITS 1
-#endif
-#ifndef SHT_SYMTAB
-#define SHT_SYMTAB 2
-#endif
-#ifndef SHT_STRTAB
-#define SHT_STRTAB 3
-#endif
-#ifndef SHT_RELA
-#define SHT_RELA 4
-#endif
-#ifndef SHT_HASH
-#define SHT_HASH 5
-#endif
-#ifndef SHT_DYNAMIC
-#define SHT_DYNAMIC 6
-#endif
-#ifndef SHT_NOTE
-#define SHT_NOTE 7
-#endif
-#ifndef SHT_NOBITS
-#define SHT_NOBITS 8
-#endif
-#ifndef SHT_REL
-#define SHT_REL 9
-#endif
-#ifndef SHF_WRITE
-#define SHF_WRITE 0x1
-#endif
-#ifndef SHF_ALLOC
-#define SHF_ALLOC 0x2
-#endif
-#ifndef SHF_EXECINSTR
-#define SHF_EXECINSTR 0x4
-#endif
-#ifndef SHF_MERGE
-#define SHF_MERGE 0x10
-#endif
-#ifndef SHF_STRINGS
-#define SHF_STRINGS 0x20
-#endif
-#ifndef SHF_GROUP
-#define SHF_GROUP 0x200
-#endif
-#ifndef SHF_TLS
-#define SHF_TLS 0x400
-#endif
-#ifndef SHF_LINK_ORDER
-#define SHF_LINK_ORDER 0x80
-#endif
-#ifndef SHF_GNU_RETAIN
-#define SHF_GNU_RETAIN 0x200000
-#endif
-#ifndef SHF_X86_64_LARGE
-#define SHF_X86_64_LARGE 0x10000000
-#endif
-#ifndef SHF_EXCLUDE
-#define SHF_EXCLUDE 0x80000000u
-#endif
-#ifndef SHT_DYNSYM
-#define SHT_DYNSYM 11
-#endif
-#ifndef SHT_INIT_ARRAY
-#define SHT_INIT_ARRAY 14
-#endif
-#ifndef SHT_FINI_ARRAY
-#define SHT_FINI_ARRAY 15
-#endif
-#ifndef SHT_PREINIT_ARRAY
-#define SHT_PREINIT_ARRAY 16
-#endif
-#ifndef SHT_X86_64_UNWIND
-#define SHT_X86_64_UNWIND 0x70000001
-#endif
-
 typedef struct {
     as_section_state_t *out;
     char *errbuf;
     size_t errbuf_sz;
 } sec_ctx_t;
-
-static void set_err(sec_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
 
 /*
  * Room for n things of `size` bytes each where `old` was, or NULL: for
@@ -116,64 +29,6 @@ static void *realloc_array(void *old, size_t n, size_t size) {
         return NULL;
     }
     return realloc(old, n * size);
-}
-
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    return p;
-}
-
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) {
-            return 0;
-        }
-    }
-    return a[i] == '\0' && b[i] == '\0';
-}
-
-static char *trim_copy(const char *s) {
-    const char *b;
-    const char *e;
-    size_t n;
-    char *out;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    b = s;
-    while (*b != '\0' && isspace((unsigned char)*b)) {
-        b++;
-    }
-    e = b + strlen(b);
-    while (e > b && isspace((unsigned char)e[-1])) {
-        e--;
-    }
-
-    n = (size_t)(e - b);
-    out = (char *)malloc(n + 1);
-    if (out == NULL) {
-        return NULL;
-    }
-    memcpy(out, b, n);
-    out[n] = '\0';
-    return out;
 }
 
 static char *unquote_copy(const char *s) {

@@ -23,7 +23,8 @@ push_label:
 .bss
 SRC
 
-cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" \
+cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/include" \
+   "$ROOT/usr.bin/as/as_util.c" \
    "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_x86_regs.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_sections.c" \
    "$ROOT/tests/usr.bin/as/test_sections_core.c" \
    -o "$TMP/test_sections_core"

@@ -21,6 +21,7 @@
 #include "as_x86_sse42.h"
 #include "as_data.h"
 #include "as_strmap.h"
+#include "as_util.h"
 
 #include "elfobj.h"
 
@@ -35,20 +36,6 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#ifndef STV_DEFAULT
-#define STV_DEFAULT 0
-#define STV_INTERNAL 1
-#define STV_HIDDEN 2
-#define STV_PROTECTED 3
-#endif
-
-#ifndef R_ARM_ABS32
-#define R_ARM_ABS32 2
-#endif
-#ifndef R_AARCH64_ABS64
-#define R_AARCH64_ABS64 257
-#endif
 
 typedef struct {
     char *name;
@@ -291,20 +278,8 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
  * encode_x86_stmt() as it begins.
  */
 static unsigned x86_stmt_pseudo;
-static char *xstrdup(const char *s);
 static int is_local_temp_symbol_name(const char *name);
 static int expr_is_local_temp_symbol(const as_expr_t *e);
-
-static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
 
 static int is_local_temp_symbol_name(const char *name) {
     if (name == NULL) {
@@ -519,22 +494,6 @@ static const as_operand_t *x86_operand_with_reg_alias(const emit_ctx_t *ctx, con
     return tmp;
 }
 
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    return p;
-}
-
 static size_t hash_name(const char *name) {
     size_t h;
     size_t prime;
@@ -669,28 +628,6 @@ static void write_u64_le_at(unsigned char *p, uint64_t v, unsigned width) {
     for (i = 0; i < width; ++i) {
         p[i] = (unsigned char)((v >> (i * 8)) & 0xffu);
     }
-}
-
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        char ca = a[i];
-        char cb = b[i];
-        if (ca >= 'A' && ca <= 'Z') {
-            ca = (char)(ca + ('a' - 'A'));
-        }
-        if (cb >= 'A' && cb <= 'Z') {
-            cb = (char)(cb + ('a' - 'A'));
-        }
-        if (ca != cb) {
-            return 0;
-        }
-    }
-    return a[i] == '\0' && b[i] == '\0';
 }
 
 static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {

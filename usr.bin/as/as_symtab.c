@@ -1,5 +1,6 @@
 #include "as_symtab.h"
 #include "as_reloc_op.h"
+#include "as_util.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -16,8 +17,6 @@ typedef struct {
 
 /* What handle_directive() returns when it has said what is wrong. */
 #define SYM_SAID (-3)
-
-static void set_err(sym_ctx_t *ctx, const char *fmt, ...);
 
 static size_t hash_name(const char *name) {
     size_t h;
@@ -77,61 +76,6 @@ static int symtab_index_ensure(as_symtab_t *tab) {
         cap <<= 1;
     }
     return symtab_index_rehash(tab, cap);
-}
-
-static void set_err(sym_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
-
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    return p;
-}
-
-static char *trim_copy(const char *s) {
-    const char *b;
-    const char *e;
-    size_t n;
-    char *out;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    b = s;
-    while (*b != '\0' && isspace((unsigned char)*b)) {
-        b++;
-    }
-    e = b + strlen(b);
-    while (e > b && isspace((unsigned char)e[-1])) {
-        e--;
-    }
-
-    n = (size_t)(e - b);
-    out = (char *)malloc(n + 1);
-    if (out == NULL) {
-        return NULL;
-    }
-    memcpy(out, b, n);
-    out[n] = '\0';
-    return out;
 }
 
 void as_symtab_init(as_symtab_t *tab) {

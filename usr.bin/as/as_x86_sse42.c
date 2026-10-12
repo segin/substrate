@@ -1,5 +1,7 @@
 #include "as_x86_sse42.h"
 
+#include "as_util.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,40 +19,6 @@ typedef struct {
     uint8_t map;
     uint8_t opcode;
 } s42_desc_t;
-
-static void set_err(s42_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
-
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        char ca = a[i];
-        char cb = b[i];
-        if (ca >= 'A' && ca <= 'Z') {
-            ca = (char)(ca + ('a' - 'A'));
-        }
-        if (cb >= 'A' && cb <= 'Z') {
-            cb = (char)(cb + ('a' - 'A'));
-        }
-        if (ca != cb) {
-            return 0;
-        }
-    }
-    return a[i] == '\0' && b[i] == '\0';
-}
 
 static int emit8(s42_ctx_t *ctx, uint8_t v) {
     if (ctx->at >= ctx->out_cap) {

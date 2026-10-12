@@ -1,5 +1,6 @@
 #include "as_x86_avx512dq.h"
 
+#include "as_util.h"
 #include "as_x86_evex.h"
 
 #include <stdarg.h>
@@ -28,44 +29,6 @@ typedef struct {
     int require_mem_dst;
 } dq_desc_t;
 
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        char ca = a[i];
-        char cb = b[i];
-
-        if (ca >= 'A' && ca <= 'Z') {
-            ca = (char)(ca + ('a' - 'A'));
-        }
-        if (cb >= 'A' && cb <= 'Z') {
-            cb = (char)(cb + ('a' - 'A'));
-        }
-        if (ca != cb) {
-            return 0;
-        }
-    }
-
-    return a[i] == '\0' && b[i] == '\0';
-}
-
-static int set_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
-    va_list ap;
-
-    if (errbuf == NULL || errbuf_sz == 0) {
-        return -1;
-    }
-
-    va_start(ap, fmt);
-    vsnprintf(errbuf, errbuf_sz, fmt, ap);
-    va_end(ap);
-    return -1;
-}
-
 static int l2_from_vector_bits(unsigned vector_bits, uint8_t *l2) {
     if (vector_bits == 128) {
         *l2 = 0;
@@ -85,7 +48,7 @@ static int l2_from_vector_bits(unsigned vector_bits, uint8_t *l2) {
 static int append_imm8(uint8_t *out, size_t out_cap, size_t *out_len, uint8_t imm8,
                        char *errbuf, size_t errbuf_sz) {
     if (out_len == NULL || *out_len >= out_cap) {
-        return set_err(errbuf, errbuf_sz, "encoding overflow");
+        return as_errf(errbuf, errbuf_sz, "encoding overflow");
     }
     out[(*out_len)++] = imm8;
     return 0;
@@ -322,5 +285,5 @@ int as_x86_encode_avx512dq(const as_x86_avx512dq_insn_t *insn, uint8_t *out, siz
         }
     }
 
-    return set_err(errbuf, errbuf_sz, "unsupported AVX-512DQ mnemonic: %s", insn->mnemonic);
+    return as_errf(errbuf, errbuf_sz, "unsupported AVX-512DQ mnemonic: %s", insn->mnemonic);
 }

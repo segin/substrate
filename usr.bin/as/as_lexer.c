@@ -1,5 +1,6 @@
 #include "as_lexer.h"
 
+#include "as_util.h"
 #include "as_x86_regs.h"
 
 #include <ctype.h>
@@ -30,17 +31,6 @@ typedef struct {
     const char *spliced_into;
     unsigned text_line;
 } lex_ctx_t;
-
-static void set_err(lex_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
 
 void as_token_vec_init(as_token_vec_t *v) {
     if (v == NULL) {

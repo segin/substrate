@@ -39,6 +39,7 @@ cat > "$TMP/preproc.s" <<'SRC'
 SRC
 
 cc -O2 -Wall -Wextra -Werror -I"$ROOT/usr.bin/as" \
+   "$ROOT/usr.bin/as/as_util.c" \
    "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_x86_regs.c" "$ROOT/tests/usr.bin/as/test_lexer_core.c" \
    -o "$TMP/test_lexer_core"
 

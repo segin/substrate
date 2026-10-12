@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 mkdir -p "$TMP"
 
 cc -Wall -Wextra -Werror -I"$ROOT/usr.bin/as" \
+   "$ROOT/usr.bin/as/as_util.c" \
    "$ROOT/usr.bin/as/as_x86_evex.c" \
    "$ROOT/usr.bin/as/as_x86_avx512bw.c" \
    "$ROOT/tests/usr.bin/as/test_x86_avx512bw_core.c" \

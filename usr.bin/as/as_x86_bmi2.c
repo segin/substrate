@@ -1,45 +1,11 @@
 #include "as_x86_bmi2.h"
 
+#include "as_util.h"
 #include "as_x86_vex.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        char ca = a[i];
-        char cb = b[i];
-        if (ca >= 'A' && ca <= 'Z') {
-            ca = (char)(ca + ('a' - 'A'));
-        }
-        if (cb >= 'A' && cb <= 'Z') {
-            cb = (char)(cb + ('a' - 'A'));
-        }
-        if (ca != cb) {
-            return 0;
-        }
-    }
-    return a[i] == '\0' && b[i] == '\0';
-}
-
-static int set_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
-    va_list ap;
-
-    if (errbuf == NULL || errbuf_sz == 0) {
-        return -1;
-    }
-
-    va_start(ap, fmt);
-    vsnprintf(errbuf, errbuf_sz, fmt, ap);
-    va_end(ap);
-    return -1;
-}
 
 static int encode_vex_with_optional_imm(as_x86_reg_t modrm_reg, as_x86_reg_t src1,
                                         const as_x86_operand_t *src2, uint8_t opcode,
@@ -66,7 +32,7 @@ static int encode_vex_with_optional_imm(as_x86_reg_t modrm_reg, as_x86_reg_t src
 
     if (has_imm8) {
         if (n >= out_cap) {
-            return set_err(errbuf, errbuf_sz, "encoding overflow");
+            return as_errf(errbuf, errbuf_sz, "encoding overflow");
         }
         out[n++] = imm8;
     }
@@ -167,5 +133,5 @@ int as_x86_encode_bmi2(const as_x86_bmi2_insn_t *insn, uint8_t *out, size_t out_
                                             errbuf_sz);
     }
 
-    return set_err(errbuf, errbuf_sz, "unsupported BMI2 mnemonic: %s", insn->mnemonic);
+    return as_errf(errbuf, errbuf_sz, "unsupported BMI2 mnemonic: %s", insn->mnemonic);
 }

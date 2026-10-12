@@ -1,5 +1,6 @@
 #include "as_parser.h"
 
+#include "as_util.h"
 #include "as_x86_regs.h"
 
 #include <ctype.h>
@@ -41,47 +42,6 @@ typedef struct {
     int sae;
     int rounding_mode;
 } x86_operand_decorators_t;
-
-static void set_err(parse_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
-
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    return p;
-}
-
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) {
-            return 0;
-        }
-    }
-    return a[i] == '\0' && b[i] == '\0';
-}
 
 unsigned as_pseudo_prefix_flag(const char *name) {
     static const struct {

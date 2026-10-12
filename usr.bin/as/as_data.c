@@ -1,5 +1,7 @@
 #include "as_data.h"
 
+#include "as_util.h"
+
 #include <ctype.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -16,33 +18,6 @@ typedef struct {
     char *errbuf;
     size_t errbuf_sz;
 } data_ctx_t;
-
-static void set_err(data_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
-
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    return p;
-}
 
 size_t as_leb128_encode(long long value, int is_signed, unsigned char *out) {
     size_t n = 0;
@@ -195,34 +170,6 @@ int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out)
     *bytes_out = out;
     *len_out = j;
     return 0;
-}
-
-static char *trim_copy(const char *s) {
-    const char *b;
-    const char *e;
-    size_t n;
-    char *out;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    b = s;
-    while (*b != '\0' && isspace((unsigned char)*b)) {
-        b++;
-    }
-    e = b + strlen(b);
-    while (e > b && isspace((unsigned char)e[-1])) {
-        e--;
-    }
-
-    n = (size_t)(e - b);
-    out = (char *)malloc(n + 1);
-    if (out == NULL) {
-        return NULL;
-    }
-    memcpy(out, b, n);
-    out[n] = '\0';
-    return out;
 }
 
 /* An argument that is an expression of numbers alone: as_expr.c's value

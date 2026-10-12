@@ -5,6 +5,7 @@
 #include "as_lower.h"
 #include "as_sections.h"
 #include "as_symtab.h"
+#include "as_util.h"
 #include "elfobj.h"
 #include <ctype.h>
 #include <errno.h>
@@ -24,10 +25,6 @@
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
-#endif
-
-#ifndef EM_X86_64
-#define EM_X86_64 62
 #endif
 
 #define SUBSTRATE_TC_DEPTH_ENV "SUBSTRATE_TC_DEPTH"
@@ -507,21 +504,6 @@ static int validate_directives(const as_parse_result_t *parsed, char *errbuf, si
         return -1;
     }
     return 0;
-}
-
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p != NULL) {
-        memcpy(p, s, n);
-    }
-    return p;
 }
 
 static int strvec_push(strvec_t *v, const char *s) {

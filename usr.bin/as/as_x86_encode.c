@@ -1,4 +1,5 @@
 #include "as_x86_encode.h"
+#include "as_util.h"
 #include "as_x86_sse3.h"
 #include "as_x86_sse41.h"
 #include "as_x86_sse42.h"
@@ -30,17 +31,6 @@ typedef struct {
     size_t errbuf_sz;
 } enc_ctx_t;
 
-static void set_err(enc_ctx_t *ctx, const char *fmt, ...) {
-    va_list ap;
-
-    if (ctx == NULL || ctx->errbuf == NULL || ctx->errbuf_sz == 0) {
-        return;
-    }
-    va_start(ap, fmt);
-    vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
-    va_end(ap);
-}
-
 /* A port written as a number is one byte: `in $300, %eax` was port 44,
  * and nothing said.  (Of the forms of 16 and 32 bits; GNU as takes the
  * byte's with a warning, and a number below nothing in any.) */
@@ -58,28 +48,6 @@ static void set_unsupported_form_named(enc_ctx_t *ctx, const char *mnemonic) {
 
 static void set_unsupported_form(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
     set_unsupported_form_named(ctx, insn != NULL ? insn->mnemonic : NULL);
-}
-
-static int streq_ci(const char *a, const char *b) {
-    size_t i;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
-        char ca = a[i];
-        char cb = b[i];
-        if (ca >= 'A' && ca <= 'Z') {
-            ca = (char)(ca + ('a' - 'A'));
-        }
-        if (cb >= 'A' && cb <= 'Z') {
-            cb = (char)(cb + ('a' - 'A'));
-        }
-        if (ca != cb) {
-            return 0;
-        }
-    }
-    return a[i] == '\0' && b[i] == '\0';
 }
 
 static int is_x86_ssse3_mnemonic(const char *mnemonic) {
