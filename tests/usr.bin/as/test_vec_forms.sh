@@ -53,8 +53,15 @@ cd "$work" || exit 1
 # instructions they are and are not for: each of thread-local storage
 # belongs to the one instruction a linker rewrites, and `movl %eax,
 # sym@TLSGD(%ebx)` and its like were assembled.
+#
+# selection_forms.txt is the audit's sweep of operands that are not an
+# instruction's (AS-T-171): each mnemonic with operands of every kind
+# and count it does not take, 28,000 statements that GNU as refuses.
+# 1,752 of them were assembled, into the instruction without the
+# operand or with another: `stos %eax`, `lods $1`, `loop $1`, `lgdtl
+# %eax`, `movsd %st(1), %st(2)`.
 cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" \
-    "$here/tls_forms.txt" > forms.txt
+    "$here/tls_forms.txt" "$here/selection_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0

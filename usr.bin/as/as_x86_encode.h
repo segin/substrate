@@ -222,7 +222,7 @@ static inline int as_x86_modrm16(const as_x86_mem_t *m, unsigned reg_field, int 
         mod = 2;
     } else if (disp == 0 && rm != 6) {
         mod = 0;
-    } else if (disp8 && disp >= -128 && disp <= 127) {
+    } else if (disp8 && ((disp >= -128 && disp <= 127) || (disp >= 0xff80 && disp <= 0xffff))) {
         /* (%bp alone with no displacement would be the address with
          * no register, and is given a displacement of nothing.) */
         mod = 1;

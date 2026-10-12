@@ -1436,7 +1436,9 @@ static int emit_i386_modrm16(unsigned reg_field, const as_mem_operand_t *mem, un
         mod = 2;
     } else if (disp == 0 && rm != 6) {
         mod = 0;
-    } else if (disp >= -128 && disp <= 127) {
+    } else if ((disp >= -128 && disp <= 127) || (disp >= 0xff80 && disp <= 0xffff)) {
+        /* (An address of 16 bits goes round at 64K: 0xffff is one less
+         * than nothing, and a byte says so.) */
         /* (%bp alone with no displacement is an address with no
          * register, so it is given one of nothing.) */
         mod = 1;
@@ -3388,6 +3390,20 @@ static const char *x86_size_word_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
         return (p & AS_PREFIX_ADDR_32) != 0 ? "addr32" : "addr16";
     }
     return NULL;
+}
+
+/*
+ * A segment written before a jump to a label and kept (%cs or %ds: the
+ * hint of which way it will go; as_elf_mark_far_branches() has taken
+ * any other away): one byte before the jump, of every size it has.  It
+ * was written before a jump to a symbol of another object and left out
+ * before one to a label the assembler knew.
+ */
+static unsigned x86_branch_hint(const as_stmt_t *st) {
+    return st != NULL && st->kind == AS_STMT_INSTRUCTION && (st->u.instr.prefixes & AS_PREFIX_SEG_OVERRIDE) != 0 &&
+                   st->u.instr.segment_override != NULL
+               ? 1u
+               : 0u;
 }
 
 /* The size letter such a branch has: its own, or the prefix's. */
@@ -12781,6 +12797,106 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
             return 1;
         }
     }
+    /*
+     * A string instruction's operands, if it is written with any, are
+     * the addresses it works through and the accumulator: `stos %eax`,
+     * `lods $1`, `cmps %eax`, `scasl $1, %eax`, `xlat %eax` were each
+     * the instruction with no operand, whatever was written.  The names
+     * that end in `d` are Intel's, and take none here (but `movsd` and
+     * `cmpsd` of vector registers are other instructions).
+     */
+    if (!in->syntax_intel && in->operand_count != 0) {
+        static const char *const fam[] = {"movs", "cmps", "scas", "lods", "stos", "xlat"};
+        const char *mn = in->mnemonic;
+        size_t len = strlen(mn);
+        size_t f;
+        int vec = 0;
+
+        for (i = 0; i < in->operand_count; ++i) {
+            const as_x86_reg_info_t *r =
+                in->operands[i].kind == AS_OPERAND_REGISTER ? as_x86_reg_find(in->operands[i].u.reg) : NULL;
+
+            vec |= r != NULL && r->cls != AS_X86_REGCLASS_GENERAL && r->cls != AS_X86_REGCLASS_X87;
+        }
+        for (f = 0; f < sizeof(fam) / sizeof(fam[0]); ++f) {
+            size_t fl = strlen(fam[f]);
+            char tail = len == fl + 1 ? (char)tolower((unsigned char)mn[fl]) : '\0';
+
+            if (vec && f < 2 && tail == 'd') {
+                continue;
+            }
+            /* (`movsb %al, %ebx` is the widening move by its older
+             * spelling: x86_old_spelling().) */
+            if (f == 0 && in->operand_count == 2 && in->operands[1].kind == AS_OPERAND_REGISTER) {
+                continue;
+            }
+            const as_operand_t *a0 = &in->operands[0];
+            const as_operand_t *a1 = in->operand_count > 1 ? &in->operands[1] : NULL;
+            const as_x86_reg_info_t *acc = NULL;
+            int ok;
+
+            if (strncasecmp(mn, fam[f], fl) != 0 || (len != fl && (len != fl + 1 || strchr("bwlqd", tail) == NULL))) {
+                continue;
+            }
+            if (f == 5) {
+                ok = (len == fl || tail == 'b') && in->operand_count == 1 && a0->kind == AS_OPERAND_MEMORY;
+            } else if (tail == 'd') {
+                ok = 0;
+            } else if (in->operand_count == 1) {
+                ok = f >= 2 && a0->kind == AS_OPERAND_MEMORY;
+            } else if (in->operand_count == 2 && f < 2) {
+                ok = a0->kind == AS_OPERAND_MEMORY && a1->kind == AS_OPERAND_MEMORY;
+            } else if (in->operand_count == 2) {
+                const as_operand_t *reg = f == 4 ? a0 : a1;
+                const as_operand_t *mem = f == 4 ? a1 : a0;
+
+                acc = reg->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(reg->u.reg) : NULL;
+                ok = mem->kind == AS_OPERAND_MEMORY && acc != NULL && acc->cls == AS_X86_REGCLASS_GENERAL &&
+                     (strcmp(acc->name, "al") == 0 || strcmp(acc->name, "ax") == 0 || strcmp(acc->name, "eax") == 0 ||
+                      strcmp(acc->name, "rax") == 0);
+            } else {
+                ok = 0;
+            }
+            if (!ok) {
+                snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+                return 1;
+            }
+        }
+    }
+    /* What counts down and jumps goes to a place, not a number; the
+     * tables of descriptors and the saved state are in memory; and what
+     * is widened is a byte or a word, as its letter says. */
+    if (!in->syntax_intel && in->operand_count >= 1) {
+        const as_operand_t *a0 = &in->operands[0];
+        const as_x86_reg_info_t *r0 = a0->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(a0->u.reg) : NULL;
+        const char *mn = in->mnemonic;
+        int wrong = 0;
+
+        if (in->operand_count == 1 && a0->raw != NULL && a0->raw[0] == '$' &&
+            (is_fixed_short_rel_mnemonic(mn) || strcasecmp(mn, "retfd") == 0 ||
+             (cfg->is_64 && strcasecmp(mn, "retl") == 0))) {
+            wrong = 1;
+        }
+        if (r0 != NULL && in->operand_count == 1 &&
+            (strncasecmp(mn, "lgdt", 4) == 0 || strncasecmp(mn, "lidt", 4) == 0 || strncasecmp(mn, "sgdt", 4) == 0 ||
+             strncasecmp(mn, "sidt", 4) == 0 || strncasecmp(mn, "xsavec", 6) == 0 || strncasecmp(mn, "xsaves", 6) == 0)) {
+            wrong = 1;
+        }
+        if (r0 != NULL && r0->cls == AS_X86_REGCLASS_GENERAL && in->operand_count == 2 &&
+            ((strcasecmp(mn, "movsxb") == 0 && r0->width != 8) || (strcasecmp(mn, "movsxw") == 0 && r0->width != 16))) {
+            wrong = 1;
+        }
+        if (in->operand_count == 2 && strcmp(base, "movabs") == 0 && a0->kind == AS_OPERAND_IMMEDIATE &&
+            a0->raw != NULL && a0->raw[0] == '$' && in->operands[1].kind == AS_OPERAND_REGISTER) {
+            const as_x86_reg_info_t *r1 = as_x86_reg_find(in->operands[1].u.reg);
+
+            wrong |= r1 != NULL && r1->cls == AS_X86_REGCLASS_GENERAL && r1->width != 64;
+        }
+        if (wrong) {
+            snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+            return 1;
+        }
+    }
     /* A move to or from an address of 64 bits is the accumulator's and
      * no other register's: `movabs sym, %r8` was `movabs $sym, %r8`,
      * which loads the address and not what is at it. */
@@ -14715,6 +14831,30 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
     if (x86_stmt_refused(cfg, st, encerr, encerr_sz)) {
         return -1;
     }
+    /* The hint, and the jump after it: an address-size prefix the jump
+     * has of its own (`jcxz`) goes before the hint, as GNU as has it. */
+    if (x86_branch_hint(st)) {
+        as_stmt_t plain = *st;
+        size_t pos = 0;
+        size_t n;
+
+        plain.u.instr.prefixes &= ~AS_PREFIX_SEG_OVERRIDE;
+        plain.u.instr.segment_override = NULL;
+        if (code_cap < 2 ||
+            emit_resolved_x86_branch_ex(cfg, &plain, sec_off + 1, abs_target, allow_short, code + 1, code_cap - 1, &n,
+                                        encerr, encerr_sz) != 0) {
+            return -1;
+        }
+        while (pos + 1 < n && (code[pos + 1] == 0x67 || code[pos + 1] == 0x66)) {
+            code[pos] = code[pos + 1];
+            pos++;
+        }
+        if (emit_seg_override_byte(code, code_cap, &pos, st->u.instr.segment_override) != 0) {
+            return -1;
+        }
+        *code_len = n + 1;
+        return 0;
+    }
     suffix = x86_branch_size_letter(st, suffix, cfg->is_64 ? 64u : cfg->x86_code_bits);
     if (streq_ci(mnbuf, "call")) {
         /* A call of 16 bits -- `callw`, or `call` in 16-bit code -- has
@@ -15881,7 +16021,7 @@ static int relax_branches(emit_ctx_t *ctx) {
                 long long addend;
                 long long there;
                 long long disp;
-                long long pre = (long long)x86_branch_flip16(st);
+                long long pre = (long long)x86_branch_flip16(st) + (long long)x86_branch_hint(st);
 
                 (void)relax_branch_parts(st->u.instr.operands[0].u.expr, &place, &addend);
                 there = (long long)off[target[i]];
@@ -15917,9 +16057,9 @@ static int relax_branches(emit_ctx_t *ctx) {
                 (void)stmt_virtual_size_in_section(ctx, section, st, off[i], track.x86_code_bits, &n);
             } else if (st->kind == AS_STMT_INSTRUCTION) {
                 if (ctx->branch_short[i] == 1) {
-                    n = 2u + (size_t)x86_branch_flip16(st);
+                    n = 2u + (size_t)x86_branch_flip16(st) + x86_branch_hint(st);
                 } else if (ctx->branch_short[i] == 2) {
-                    n = relax_long_size(st, track.x86_code_bits);
+                    n = relax_long_size(st, track.x86_code_bits) + x86_branch_hint(st);
                 } else {
                     /* Any other instruction is as long as it is,
                      * wherever it is: found once. */
@@ -16051,7 +16191,8 @@ static int relaxed_place_branch_target(emit_ctx_t *ctx, const as_stmt_t *st, con
     }
     if (addend == 0 ||
         eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, place,
-                                        *is_short ? 2 : relax_long_size(st, x86_code_bits), abs_target) != 0) {
+                                        (*is_short ? 2 : relax_long_size(st, x86_code_bits)) + x86_branch_hint(st),
+                                        abs_target) != 0) {
         return -1;
     }
     *abs_target += addend;
@@ -16287,7 +16428,7 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
     {
         unsigned local_rel_len = stmt_local_rel_virtual_len(ctx, section_name, st, x86_code_bits);
         if (local_rel_len != 0) {
-            return bytebuf_append_zeros(buf, local_rel_len);
+            return bytebuf_append_zeros(buf, local_rel_len + x86_branch_hint(st));
         }
     }
     /* The mode is what .code16, .code32 or .code64 last said, whatever
@@ -17251,6 +17392,11 @@ int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
     if (off || cfg == NULL || st == NULL || cfg->target != 0 || st->kind != AS_STMT_INSTRUCTION ||
         st->u.instr.code_len != 0 || (cfg->machine != EM_386 && cfg->machine != EM_X86_64) ||
         !stmt_is_place_free(st)) {
+        return 0;
+    }
+    /* (A segment written before it may yet be taken away, by what goes
+     * through the source for the jumps: as_elf_mark_far_branches().) */
+    if ((st->u.instr.prefixes & AS_PREFIX_SEG_OVERRIDE) != 0) {
         return 0;
     }
     stmt_cfg = *cfg;
@@ -23428,8 +23574,37 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
         far_label_t key;
         const far_label_t *found;
 
+        /* (Nor does one before a far jump say anything.) */
+        if (st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL && (cfg == NULL || cfg->target == 0) &&
+            (strncasecmp(st->u.instr.mnemonic, "ljmp", 4) == 0 || strncasecmp(st->u.instr.mnemonic, "lcall", 5) == 0) &&
+            (st->u.instr.prefixes & AS_PREFIX_SEG_OVERRIDE) != 0 && st->u.instr.operand_count != 0 &&
+            st->u.instr.operands[0].kind != AS_OPERAND_MEMORY && !(cfg != NULL && cfg->is_64)) {
+            free(st->u.instr.segment_override);
+            st->u.instr.segment_override = NULL;
+            st->u.instr.prefixes &= ~AS_PREFIX_SEG_OVERRIDE;
+        }
         if (!as_parse_is_direct_branch(st)) {
             continue;
+        }
+        /*
+         * A segment written before a jump or a call to a label says
+         * nothing of where it goes.  %cs and %ds before a jump are the
+         * hints of which way it will go, and are kept; any other, and
+         * any before a call, GNU as leaves out, and so does this -- it
+         * wrote them all.  (%es and %ss in 64-bit code are left for the
+         * encoder to refuse.)
+         */
+        if ((st->u.instr.prefixes & AS_PREFIX_SEG_OVERRIDE) != 0 && st->u.instr.segment_override != NULL &&
+            (cfg == NULL || cfg->target == 0)) {
+            const char *seg = st->u.instr.segment_override;
+            int hint = streq_ci(seg, "cs") || streq_ci(seg, "ds");
+            int gone64 = cfg != NULL && cfg->is_64 && (streq_ci(seg, "es") || streq_ci(seg, "ss"));
+
+            if (!gone64 && (is_call_mnemonic(st->u.instr.mnemonic) || !hint)) {
+                free(st->u.instr.segment_override);
+                st->u.instr.segment_override = NULL;
+                st->u.instr.prefixes &= ~AS_PREFIX_SEG_OVERRIDE;
+            }
         }
         /*
          * A jump to a label of its own section that the source exports
@@ -23557,6 +23732,38 @@ static unsigned report_instruction_errors(emit_ctx_t *ctx) {
         scratch.len = 0;
         if (ctx->errbuf != NULL && ctx->errbuf_sz != 0) {
             ctx->errbuf[0] = '\0';
+        }
+        /*
+         * A jump or a call is measured without being encoded, so what
+         * is wrong with one that is no instruction at all -- `loop $1`,
+         * `jmpw there`, `jcxz` in 64-bit code -- was found only where
+         * it was written out, and the first such ended the run: of ten
+         * of them one was reported.
+         */
+        if (ctx->cfg->target == 0 && st->u.instr.mnemonic != NULL && is_rel_mnemonic(st->u.instr.mnemonic)) {
+            as_elf_cfg_t stmt_cfg = *ctx->cfg;
+            char why[256];
+            int need67 = 0;
+
+            stmt_cfg.x86_code_bits = track.x86_code_bits;
+            stmt_cfg.is_64 = track.x86_code_bits == 64u;
+            why[0] = '\0';
+            if (x86_fixed_short_branch(st->u.instr.mnemonic, track.x86_code_bits, &need67, NULL) == -2) {
+                snprintf(why, sizeof(why), "'%s' is not an instruction of %u-bit code", st->u.instr.mnemonic,
+                         track.x86_code_bits);
+            } else if (!x86_stmt_refused(&stmt_cfg, st, why, sizeof(why)) &&
+                       !x86_operand_classes_refused(&st->u.instr, st->u.instr.syntax_intel != 0, stmt_cfg.is_64, why,
+                                                    sizeof(why))) {
+                why[0] = '\0';
+            }
+            if (why[0] != '\0') {
+                char said[384];
+
+                snprintf(said, sizeof(said), "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, why);
+                ctx->cfg->report_error(ctx->cfg->report_cookie, said);
+                count++;
+                continue;
+            }
         }
         if (append_virtual_instruction_bytes(ctx, &scratch, track.current, st, track.x86_code_bits) != 0) {
             char generic[384];

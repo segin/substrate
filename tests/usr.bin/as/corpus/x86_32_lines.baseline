@@ -14,11 +14,9 @@ nop | lf: nop | movl lf(,%eax,4),%ecx
 .section .foo,"ax" | lf: nop | .text | jmp lf
 .section .foo,"ax" | lf: nop | .text | je lf
 .section .foo,"ax" | lf: nop | .text | movl $lf,%eax
-ds call sym
 int $sym
 ret $sym
 movsl (%edi),%es:(%esi)
 movsl (%eax),%es:(%ebx)
 in $sym,%al
 out %al,$sym
-.code16 | movw 0xffff(%bx),%ax

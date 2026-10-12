@@ -37,7 +37,6 @@ leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 imulw %bx,%ax,%bx
 imull %ebx,%eax,%ebx
 imulq %rbx,%rax,%rbx
-ds call sym
 seta %eax
 int $sym
 ret $sym

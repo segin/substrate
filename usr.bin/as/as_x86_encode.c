@@ -1241,7 +1241,9 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
                 mod = 2u;
             } else if (!m->has_disp) {
                 mod = (rm16 == 6u) ? 1u : 0u;
-            } else if (is_disp8(m->disp)) {
+            } else if (is_disp8(m->disp) || (m->disp >= 0xff80 && m->disp <= 0xffff)) {
+                /* (An address of 16 bits goes round at 64K: 0xffff is
+                 * one less than nothing, and a byte says so.) */
                 mod = 1u;
             } else {
                 mod = 2u;
