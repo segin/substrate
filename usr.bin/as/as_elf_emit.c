@@ -18647,13 +18647,18 @@ static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *s
     return 0;
 }
 
-static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
+/*
+ * What the data directives of the source say, into the sections they
+ * are in: from the statements, as everything else is.  (There was a
+ * list of them made beforehand, as_data.c's, that this was handed and
+ * did not read.)
+ */
+static int emit_data_sections(emit_ctx_t *ctx) {
     sec_buf_vec_t secbufs;
     section_track_t track;
     size_t i;
     int trc;
 
-    (void)data;
     asm_var_reset(ctx);
     memset(&secbufs, 0, sizeof(secbufs));
     if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
@@ -24103,7 +24108,6 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
 int as_elf_emit_file(const as_parse_result_t *parsed,
                      const as_section_state_t *sections,
                      const as_symtab_t *symtab,
-                     const as_data_program_t *data,
                      const as_elf_cfg_t *cfg,
                      const char *out_path,
                      char *errbuf,
@@ -24116,7 +24120,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     int trace_emit_phase = getenv("AS_DEBUG_EMIT_PHASE") != NULL;
     int emitted = -1; /* what is returned: 0 once the object is written */
 
-    if (parsed == NULL || sections == NULL || symtab == NULL || data == NULL || cfg == NULL || out_path == NULL) {
+    if (parsed == NULL || sections == NULL || symtab == NULL || cfg == NULL || out_path == NULL) {
         return -1;
     }
 
@@ -24221,7 +24225,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
     if (trace_emit_phase) fprintf(stderr, "as: emit-phase text done\n");
 
-    if (emit_data_program(&ctx, data) != 0) {
+    if (emit_data_sections(&ctx) != 0) {
         if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
             set_err(&ctx, "failed to emit data program");
         }

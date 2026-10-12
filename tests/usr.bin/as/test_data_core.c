@@ -1,128 +1,86 @@
 #include "as_data.h"
-#include "as_lexer.h"
-#include "lex_file.h"
-#include "as_parser.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static void fail(const char *msg) {
-    fprintf(stderr, "FAIL: %s\n", msg);
-    exit(1);
+/*
+ * What as_data.c is: the bytes a string literal says, and LEB128.
+ * (What data directives make of them is the emitter's, and is held to
+ * GNU as's by test_data_core.sh.)
+ */
+
+static int failed;
+
+static void literal(const char *src, const char *want, size_t want_len) {
+    char *bytes = NULL;
+    size_t len = 0;
+
+    if (as_decode_string_literal(src, &bytes, &len) != 0) {
+        fprintf(stderr, "FAIL [%s]: not decoded\n", src);
+        failed = 1;
+        return;
+    }
+    if (len != want_len || memcmp(bytes, want, want_len) != 0 || bytes[len] != '\0') {
+        fprintf(stderr, "FAIL [%s]: %zu bytes, not the %zu expected\n", src, len, want_len);
+        failed = 1;
+    }
+    free(bytes);
 }
 
-static const as_data_op_t *find_op(const as_data_program_t *p, unsigned line, const char *directive) {
-    size_t i;
+static void leb(long long value, int is_signed, const char *want, size_t want_len) {
+    unsigned char out[10];
+    size_t n = as_leb128_encode(value, is_signed, out);
 
-    for (i = 0; i < p->count; ++i) {
-        if (p->items[i].line == line && p->items[i].directive != NULL && strcmp(p->items[i].directive, directive) == 0) {
-            return &p->items[i];
-        }
+    if (n != want_len || memcmp(out, want, want_len) != 0) {
+        fprintf(stderr, "FAIL leb128 of %lld (%s): %zu bytes, not the %zu expected\n", value,
+                is_signed ? "signed" : "unsigned", n, want_len);
+        failed = 1;
     }
-    return NULL;
 }
 
-int main(int argc, char **argv) {
-    as_lexer_cfg_t lcfg;
-    as_parser_cfg_t pcfg;
-    as_token_vec_t toks;
-    as_parse_result_t parsed;
-    as_data_program_t prog;
-    const as_data_op_t *op;
-    char err[256];
+int main(void) {
+    char *bytes = NULL;
+    size_t len = 0;
 
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <input.s>\n", argv[0]);
-        return 2;
+    literal("", "", 0);
+    literal("AB", "AB", 2);
+    literal(":", ":", 1);
+    literal("a\\nb", "a\nb", 3);
+    literal("\\t\\r\\b\\f\\v", "\t\r\b\f\v", 5);
+    literal("\\\\\\\"\\'\\?", "\\\"'?", 4);
+    /* GNU as has no escape for a bell: `\a` is an a. */
+    literal("\\a", "a", 1);
+    literal("\\x41\\X42", "AB", 2);
+    literal("\\x", "\0", 1);
+    literal("\\101\\0", "A\0", 2);
+    /* Octal of up to three digits, 8 and 9 among them: `\18` is 16. */
+    literal("\\18", "\020", 1);
+    literal("\\1012", "A2", 2);
+    literal("a\\0b", "a\0b", 3);
+    /* A `\` with nothing after it is no literal. */
+    if (as_decode_string_literal("abc\\", &bytes, &len) == 0) {
+        fprintf(stderr, "FAIL: a literal ending in a backslash was decoded\n");
+        failed = 1;
+        free(bytes);
+    }
+    if (as_decode_string_literal("x", NULL, &len) == 0 || as_decode_string_literal("x", &bytes, NULL) == 0) {
+        fprintf(stderr, "FAIL: decoded to nowhere\n");
+        failed = 1;
     }
 
-    memset(&lcfg, 0, sizeof(lcfg));
-    memset(&pcfg, 0, sizeof(pcfg));
-    pcfg.arch = AS_PARSER_ARCH_X86;
+    leb(0, 0, "\x00", 1);
+    leb(127, 0, "\x7f", 1);
+    leb(128, 0, "\x80\x01", 2);
+    leb(624485, 0, "\xe5\x8e\x26", 3);
+    leb(-1, 0, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01", 10);
+    leb(0, 1, "\x00", 1);
+    leb(63, 1, "\x3f", 1);
+    leb(64, 1, "\xc0\x00", 2);
+    leb(-1, 1, "\x7f", 1);
+    leb(-64, 1, "\x40", 1);
+    leb(-65, 1, "\xbf\x7f", 2);
+    leb(-123456, 1, "\xc0\xbb\x78", 3);
 
-    as_token_vec_init(&toks);
-    as_parse_result_init(&parsed);
-    as_data_program_init(&prog);
-
-    if (test_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
-        fprintf(stderr, "%s\n", err);
-        fail("lex failed");
-    }
-    if (as_parse_tokens(&toks, &pcfg, &parsed, err, sizeof(err)) != 0) {
-        fprintf(stderr, "%s\n", err);
-        fail("parse failed");
-    }
-    if (as_data_build(&parsed, &prog, err, sizeof(err)) != 0) {
-        fprintf(stderr, "%s\n", err);
-        fail("data build failed");
-    }
-
-    if (prog.count != 18) {
-        fail("unexpected data op count");
-    }
-
-    op = find_op(&prog, 1, ".byte");
-    if (op == NULL || op->kind != AS_DATA_INT || op->u.ints.width != 1 || op->u.ints.count != 2 ||
-        op->u.ints.values[0] != 1 || op->u.ints.values[1] != 2) {
-        fail(".byte parse mismatch");
-    }
-
-    op = find_op(&prog, 7, ".8byte");
-    if (op == NULL || op->kind != AS_DATA_INT || op->u.ints.width != 8 || op->u.ints.values[0] != 8) {
-        fail(".8byte parse mismatch");
-    }
-
-    op = find_op(&prog, 8, ".float");
-    if (op == NULL || op->kind != AS_DATA_FLOAT || op->u.floats.is_double != 0 || op->u.floats.values[0] != 1.5) {
-        fail(".float parse mismatch");
-    }
-
-    op = find_op(&prog, 9, ".double");
-    if (op == NULL || op->kind != AS_DATA_FLOAT || op->u.floats.is_double == 0 || op->u.floats.values[0] != 2.5) {
-        fail(".double parse mismatch");
-    }
-
-    op = find_op(&prog, 10, ".ascii");
-    if (op == NULL || op->kind != AS_DATA_STRING || op->u.str.nul_terminated || strcmp(op->u.str.bytes, "AB") != 0) {
-        fail(".ascii parse mismatch");
-    }
-
-    op = find_op(&prog, 11, ".asciz");
-    if (op == NULL || op->kind != AS_DATA_STRING || !op->u.str.nul_terminated || strcmp(op->u.str.bytes, "CD") != 0) {
-        fail(".asciz parse mismatch");
-    }
-
-    op = find_op(&prog, 12, ".string");
-    if (op == NULL || op->kind != AS_DATA_STRING || !op->u.str.nul_terminated || strcmp(op->u.str.bytes, "EF") != 0) {
-        fail(".string parse mismatch");
-    }
-
-    op = find_op(&prog, 13, ".zero");
-    if (op == NULL || op->kind != AS_DATA_ZERO || op->u.zero.count != 16) {
-        fail(".zero parse mismatch");
-    }
-
-    op = find_op(&prog, 15, ".fill");
-    if (op == NULL || op->kind != AS_DATA_FILL || op->u.fill.repeat != 3 || op->u.fill.size != 2 || op->u.fill.value != 0x41) {
-        fail(".fill parse mismatch");
-    }
-
-    op = find_op(&prog, 17, ".org");
-    if (op == NULL || op->kind != AS_DATA_ORG || op->u.org.offset != 128) {
-        fail(".org parse mismatch");
-    }
-
-    op = find_op(&prog, 18, ".incbin");
-    if (op == NULL || op->kind != AS_DATA_INCBIN || op->u.incbin.path == NULL || op->u.incbin.skip != 1 ||
-        !op->u.incbin.has_count || op->u.incbin.count != 2) {
-        fail(".incbin parse mismatch");
-    }
-
-    as_data_program_free(&prog);
-    as_parse_result_free(&parsed);
-    as_token_vec_free(&toks);
-
-    puts("ok");
-    return 0;
+    return failed;
 }

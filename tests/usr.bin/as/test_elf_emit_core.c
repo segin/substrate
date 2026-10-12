@@ -24,7 +24,6 @@ int main(int argc, char **argv) {
     as_parse_result_t parsed;
     as_symtab_t syms;
     as_section_state_t secs;
-    as_data_program_t data;
     elfobj_t *obj = NULL;
     char err[256];
 
@@ -46,7 +45,6 @@ int main(int argc, char **argv) {
     as_parse_result_init(&parsed);
     as_symtab_init(&syms);
     as_section_state_init(&secs);
-    as_data_program_init(&data);
 
     if (test_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
@@ -64,11 +62,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s\n", err);
         fail("sections failed");
     }
-    if (as_data_build(&parsed, &data, err, sizeof(err)) != 0) {
-        fprintf(stderr, "%s\n", err);
-        fail("data failed");
-    }
-    if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, argv[2], err, sizeof(err)) != 0) {
+    if (as_elf_emit_file(&parsed, &secs, &syms, &ecfg, argv[2], err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
         fail("emit failed");
     }
@@ -138,7 +132,6 @@ int main(int argc, char **argv) {
     }
 
     elf_close(obj);
-    as_data_program_free(&data);
     as_section_state_free(&secs);
     as_symtab_free(&syms);
     as_parse_result_free(&parsed);

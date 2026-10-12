@@ -797,6 +797,45 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
     memset(&v, 0, sizeof(v));
     *why = "an argument is not a number";
 
+    /* With nothing after them: GNU as has a directive of space put
+     * none, one of LEB128 put a zero, and one of strings is refused. */
+    for (i = 0; i < d->arg_count && arg_is_empty(d, i); ++i) {
+    }
+    if (i == d->arg_count) {
+        static const char *const space[] = {".zero", ".skip", ".space", ".fill"};
+        static const char *const strings[] = {".ascii", ".asciz", ".string", ".string8", ".string16", ".string32",
+                                              ".string64"};
+        size_t k;
+
+        for (k = 0; k < sizeof(space) / sizeof(space[0]); ++k) {
+            /* (`.fill ,` is nothing too; `.zero ,` is refused.) */
+            if ((d->arg_count == 0 || k == 3) && strcmp(d->name, space[k]) == 0) {
+                set_args(d, &v);
+                return set_name(d, ".byte");
+            }
+        }
+        if (strncmp(d->name, ".ds", 3) == 0 || strncmp(d->name, ".dcb", 4) == 0) {
+            if (find_unit(d->name + (d->name[2] == 's' ? 3 : 4), d->name[2] == 's') != NULL) {
+                set_args(d, &v);
+                return set_name(d, ".byte");
+            }
+        }
+        if (strcmp(d->name, ".uleb128") == 0 || strcmp(d->name, ".sleb128") == 0) {
+            if (vec_push_text(&v, "0") != 0) {
+                vec_free(&v);
+                return -1;
+            }
+            set_args(d, &v);
+            return set_name(d, ".byte");
+        }
+        for (k = 0; d->arg_count == 0 && k < sizeof(strings) / sizeof(strings[0]); ++k) {
+            if (strcmp(d->name, strings[k]) == 0) {
+                *why = "a string is wanted";
+                return 1;
+            }
+        }
+    }
+
     if (strcmp(d->name, ".single") == 0) {
         return set_name(d, ".float");
     }

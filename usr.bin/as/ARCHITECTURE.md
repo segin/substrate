@@ -18,7 +18,7 @@ usr.bin/as/
 ├── as_util.c                # The helpers every file had its own of: xstrdup, streq_ci, trim_copy, as_errf
 ├── as_symtab.c              # Symbols: definition, binding, type, aliases
 ├── as_sections.c            # Sections, the section stack, subsections, the code mode
-├── as_data.c                # Data directives: literals, strings, LEB128
+├── as_data.c                # What data directives are written in: string literals, LEB128
 ├── as_elf_emit.c            # Layout, relaxation, x86 instruction selection, relocations, the object
 │                            #   and the flat image
 ├── as_cfi.c                 # .cfi_* made .eh_frame or .debug_frame
@@ -96,7 +96,7 @@ tests/usr.bin/as/
 5. **Lower.** `as_arm_lower()` for ARM and AArch64, then `as_directives_lower()`: the many directives made the few, numbers settled, `.struct` and common symbols resolved.
 6. **Validate** (`validate_directives()`): a directive that is none there is, is refused; `.error`, `.warning` and `.print` are said.
 7. **Order.** Numbered subsections put behind their sections (`as_sections_gather_subsections()`); branches to labels of other sections marked (`as_elf_mark_far_branches()`).
-8. **Tables.** Symbols (`as_symtab_build()`), sections (`as_sections_build()`), data (`as_data_build()`).
+8. **Tables.** Symbols (`as_symtab_build()`), sections (`as_sections_build()`).  (Data directives have no table: the emitter emits them from the statements.)
 9. **Emit** (`as_elf_emit_file()`, or `as_elf_emit_binary_file()` for `-O binary`): branches relaxed, every statement placed, instructions encoded, relocations made, call frames and the line table built, the object written through libelfobj.
 10. **Check** (`validate_output_file()`): the object is read back and is of the machine and class asked for.
 

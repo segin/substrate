@@ -3662,7 +3662,6 @@ static int run_native_backend(const as_ctx_t *ctx) {
     as_parse_result_t parsed;
     as_symtab_t syms;
     as_section_state_t secs;
-    as_data_program_t data;
     as_lexer_cfg_t lcfg;
     as_parser_cfg_t pcfg;
     as_elf_cfg_t ecfg;
@@ -3694,7 +3693,6 @@ static int run_native_backend(const as_ctx_t *ctx) {
     as_parse_result_init(&parsed);
     as_symtab_init(&syms);
     as_section_state_init(&secs);
-    as_data_program_init(&data);
 
     /* The source: gathered already, the output of the C preprocessor, or
      * the file as it stands. */
@@ -3892,17 +3890,6 @@ static int run_native_backend(const as_ctx_t *ctx) {
         }
         AS_PHASE_END(ctx, "sections");
     }
-    {
-        AS_PHASE_BEGIN();
-        /* A data directive that is wrong is one more thing wrong: the
-         * instructions are still looked at. */
-        if (as_data_build(&parsed, &data, errbuf, sizeof(errbuf)) != 0) {
-            as_diag(AS_E_BACKEND, "%s", errbuf);
-            source_in_error = 1;
-            ecfg.check_only = 1;
-        }
-        AS_PHASE_END(ctx, "data");
-    }
     if (ctx->output == AS_OUTPUT_BINARY && source_in_error) {
         goto out;
     }
@@ -3915,7 +3902,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
         AS_PHASE_END(ctx, "emit-binary");
     } else {
         AS_PHASE_BEGIN();
-        if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
+        if (as_elf_emit_file(&parsed, &secs, &syms, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
             /* Nothing in the buffer: each instruction in error has been
              * reported already. */
             if (errbuf[0] != '\0') {
@@ -3961,7 +3948,6 @@ out:
     text_free(&text_cond);
     text_free(&text_defs);
     free(include_dirs);
-    as_data_program_free(&data);
     as_section_state_free(&secs);
     as_symtab_free(&syms);
     as_parse_result_free(&parsed);

@@ -847,8 +847,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-230** `as_relax.c` shall be the relaxation pass the assembler uses, or shall be removed.
   Trace: AS-DES-005, AS-DES-003.  Verify: I; `usr.bin/as/ARCHITECTURE.md` agrees.  After: 221.
   Removed, with its header and its test, ahead of 221: nothing called it, and it sized every instruction as four bytes and a branch as two, five or six without encoding either, so it could not have been the pass.  The emitter relaxes branches from the encoded sizes.  `usr.bin/as/ARCHITECTURE.md` says so.
-- [ ] **AS-T-231** The program `as_data.c` builds shall be what the emitter emits from, or the module shall be reduced to what is used.
+- [x] **AS-T-231** The program `as_data.c` builds shall be what the emitter emits from, or the module shall be reduced to what is used.
   Trace: AS-DES-005, AS-DES-003.  Verify: I — `emit_data_program` does not begin `(void)data`.  After: 220.
+  Done: reduced.  `as_data.c` is `as_decode_string_literal()` and `as_leb128_encode()`, which are what was used; `as_data_build()`, its program and the nine parsers of it are gone, with the parameter of `as_elf_emit_file()` that carried it, and the emitter's function is `emit_data_sections(ctx)`.  The list was not only unread: it refused what GNU as takes -- `.byte`, `.long`, `.zero`, `.fill` with nothing after them -- and passed `.word` by not knowing it.  Those assemble as GNU's do now, `.uleb128` alone is a zero, and a string directive with no string is refused (`test_data_core.sh`, whose expected bytes GNU as produces too).
 - [ ] **AS-T-232** The assembler shall have one emitter of each data directive.
   Trace: AS-DES-003.  Verify: I — the three emitters and four width ladders of AS-DES-003 are one.  After: 220.
 - [ ] **AS-T-233** The assembler shall have one section state machine.
@@ -1326,5 +1327,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 334 done, 17 open.  Numbers run to 400, with gaps left between
+351 tasks: 335 done, 16 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
