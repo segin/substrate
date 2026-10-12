@@ -10809,14 +10809,14 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
  * 1 if the statement is one and is encoded, 0 if its name is none of
  * them, -1 with the reason if it is one and is refused.
  */
+static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *insn, const char *mn,
+                               unsigned char *code, size_t code_cap, size_t *code_len, char *encerr,
+                               size_t encerr_sz);
+
 static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned char *code, size_t code_cap,
                           size_t *code_len, char *encerr, size_t encerr_sz) {
-    as_x86_operand_t ops[5];
-    as_x86_vec_req_t rq;
     char mn[32];
     size_t n = insn->operand_count;
-    /* (The statement's own syntax: a source may change it as it goes.) */
-    int intel = insn->syntax_intel != 0;
     size_t i;
 
     if (insn->mnemonic == NULL || strlen(insn->mnemonic) >= sizeof(mn)) {
@@ -10826,9 +10826,44 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
     }
     mn[i] = '\0';
+    /*
+     * APX's forms of the instructions of general registers are rows of
+     * the table too -- `add %ecx, %edx, %ebx` -- and the instruction is
+     * asked of it first, in 64-bit code: what the table has no row for,
+     * or cannot read, is the instruction it always was.
+     */
+    if (!as_x86_vec_knows(mn) && as_x86_vec_has_apx(mn)) {
+        static int asking;
+        int rc;
+
+        if (!cfg->is_64 || asking || n < 1) {
+            return 0;
+        }
+        asking = 1;
+        rc = encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);
+        asking = 0;
+        if (rc <= 0) {
+            encerr[0] = '\0';
+            *code_len = 0;
+            return 0;
+        }
+        return rc;
+    }
     if (!as_x86_vec_knows(mn)) {
         return 0;
     }
+    return encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *insn, const char *mn,
+                               unsigned char *code, size_t code_cap, size_t *code_len, char *encerr,
+                               size_t encerr_sz) {
+    as_x86_operand_t ops[5];
+    as_x86_vec_req_t rq;
+    size_t n = insn->operand_count;
+    int intel = insn->syntax_intel != 0;
+    size_t i;
+
     if (n > sizeof(ops) / sizeof(ops[0])) {
         snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
         return -1;

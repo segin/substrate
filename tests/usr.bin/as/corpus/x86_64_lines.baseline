@@ -32,10 +32,6 @@ addq $-1,(%r16)
 .data | .long 0 | lv: .long 0 | .text | movabs $lv,%rax
 .data | .long 0 | lv: .long 0 | .text | call lv
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
-imulw %bx,%ax,%bx
-imull %ebx,%eax,%ebx
-imulq %rbx,%rax,%rbx
-seta %eax
 int $sym
 ret $sym
 in $sym,%al

@@ -16,6 +16,7 @@
 #define M1 AS_VEC_MAP_0F
 #define M2 AS_VEC_MAP_0F38
 #define M3 AS_VEC_MAP_0F3A
+#define M4 AS_VEC_MAP_4
 #define M5 AS_VEC_MAP_5
 #define M6 AS_VEC_MAP_6
 #define M7 AS_VEC_MAP_7
@@ -1552,6 +1553,7 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     /* And the rows of the instruction sets that came after, which are
      * many and are in a file of their own. */
 #include "as_x86_vec_table_ext.h"
+#include "as_x86_vec_table_apx.h"
 };
 
 const size_t as_x86_vec_table_count = sizeof(as_x86_vec_table) / sizeof(as_x86_vec_table[0]);

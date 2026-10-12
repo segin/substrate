@@ -189,8 +189,19 @@ int as_x86_vec_knows(const char *mnemonic) {
     if (mnemonic == NULL) {
         return 0;
     }
-    return find_rows(mnemonic, &first) == 0 ||
-           (alias_of(mnemonic, base, sizeof(base), &imm) == 0 && find_rows(base, &first) == 0);
+    /* (A name whose rows here are APX's forms of an instruction that
+     * is assembled elsewhere is not one this table is asked about.) */
+    if (find_rows(mnemonic, &first) == 0) {
+        return (as_x86_vec_table[first].flags & AS_VEC_F_APX) == 0;
+    }
+    return alias_of(mnemonic, base, sizeof(base), &imm) == 0 && find_rows(base, &first) == 0;
+}
+
+int as_x86_vec_has_apx(const char *mnemonic) {
+    size_t first;
+
+    return mnemonic != NULL && find_rows(mnemonic, &first) == 0 &&
+           (as_x86_vec_table[first].flags & AS_VEC_F_APX) != 0;
 }
 
 static int is_vector_class(unsigned cls) {
@@ -243,6 +254,12 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return mem && op->u.mem.index_class == AS_X86_REGCLASS_ZMM;
     case 'i':
         return op->kind == AS_X86_OP_IMM;
+    case 'l':
+        /* %cl, where it is a count. */
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 && (unsigned)op->u.reg == 1u;
+    case 's':
+        /* A byte that the instruction extends by its sign. */
+        return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm >= -128 && op->u.imm <= 127;
     case 'u':
         /* A byte that is a count, a place or a choice, and is never
          * written with a sign. */
@@ -463,7 +480,9 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     const as_x86_operand_t *vop = role_op(t, rq, 'v');
     const as_x86_operand_t *imm = role_op(t, rq, 'i');
     const as_x86_operand_t *is4 = role_op(t, rq, '4');
-    unsigned reg = strchr(t->roles, 'r') != NULL ? role_reg(t, rq, 'r') : (t->flags & 7u);
+    unsigned reg = (t->flags & AS_VEC_F_REGRM) != 0 ? role_reg(t, rq, 'm')
+                   : strchr(t->roles, 'r') != NULL  ? role_reg(t, rq, 'r')
+                                                    : (t->flags & 7u);
     unsigned vvvv = vop != NULL ? (unsigned)vop->u.reg : 0u;
     unsigned x = 0;
     unsigned b = 0;
@@ -603,12 +622,25 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (put8(&tc, (((unsigned)is4->u.reg & 0xfu) << 4) | low) != 0) {
             return -1;
         }
+    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM16) != 0) {
+        if (imm->imm_symbolic) {
+            vec_err(ctx, "'%s' takes a number that is known here", t->name);
+            return -1;
+        }
+        if (imm->u.imm < -32768 || imm->u.imm > 65535) {
+            vec_err(ctx, "the number %lld is not of two bytes", (long long)imm->u.imm);
+            return -1;
+        }
+        if (put8(&tc, (unsigned)imm->u.imm & 0xffu) != 0 || put8(&tc, ((unsigned)imm->u.imm >> 8) & 0xffu) != 0) {
+            return -1;
+        }
     } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0) {
         if (imm->imm_symbolic) {
             vec_err(ctx, "'%s' takes a number that is known here", t->name);
             return -1;
         }
-        if (imm->u.imm < -2147483648ll || imm->u.imm > 4294967295ll) {
+        /* (Of 64 bits the four bytes are extended by their sign.) */
+        if (imm->u.imm < -2147483648ll || imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll)) {
             vec_err(ctx, "the number %lld is not of four bytes", (long long)imm->u.imm);
             return -1;
         }
@@ -675,6 +707,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         unsigned bbit = 0;
         unsigned ll = len;
         unsigned vhi;
+        unsigned low;
 
         /* A register in r/m has its fifth bit where an index has its
          * fourth. */
@@ -683,7 +716,11 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
         /* V' is the fifth bit of vvvv, or of a vector index. */
         vhi = rm->kind == AS_X86_OP_MEM && rm->u.mem.index_class != 0 ? v4 : (vvvv >> 4) & 1u;
-        if (rq->broadcast != 0) {
+        if ((t->flags & AS_VEC_F_ND) != 0) {
+            /* (APX: the bit says vvvv is where the result goes.) */
+            bbit = 1;
+            ll = 0;
+        } else if (rq->broadcast != 0) {
             bbit = 1;
         } else if (rq->rounding >= 0) {
             bbit = 1;
@@ -694,11 +731,22 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             bbit = 1;
             ll = 0;
         }
+        low = ((vhi ^ 1u) << 3) | (rq->opmask & 7u);
+        if ((t->flags & AS_VEC_F_NF) != 0) {
+            /* (APX: no flags are written, said where a mask would be.) */
+            low |= 4u;
+        }
+        if ((t->flags & AS_VEC_F_SCC) != 0) {
+            /* (APX's conditional compare: the condition where a mask
+             * and V' would be, and the flags to leave if it does not
+             * hold where vvvv would -- none, which is written 0.) */
+            low = t->bcst & 0xfu;
+            vvvv = 0xfu;
+        }
         if (put8(ctx, 0x62u) != 0 ||
             put8(ctx, ((r ^ 1u) << 7) | ((x ^ 1u) << 6) | ((b ^ 1u) << 5) | ((r4 ^ 1u) << 4) | t->map) != 0 ||
             put8(ctx, (w << 7) | ((~vvvv & 0xfu) << 3) | 0x04u | t->pp) != 0 ||
-            put8(ctx, ((rq->zeroing ? 1u : 0u) << 7) | (ll << 5) | (bbit << 4) | ((vhi ^ 1u) << 3) |
-                              (rq->opmask & 7u)) != 0) {
+            put8(ctx, ((rq->zeroing ? 1u : 0u) << 7) | (ll << 5) | (bbit << 4) | low) != 0) {
             return -1;
         }
     }
@@ -947,6 +995,11 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
         }
         *out_len = ctx.at;
         return 1;
+    }
+    /* (APX's forms of an instruction, and these operands are of none
+     * of them: the instruction is assembled where it always was.) */
+    if ((as_x86_vec_table[first].flags & AS_VEC_F_APX) != 0) {
+        return 0;
     }
     if (errbuf != NULL && errbuf_sz > 0) {
         snprintf(errbuf, errbuf_sz, "'%s' %s", rq->mnemonic, lower != NULL ? lower : why);

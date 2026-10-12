@@ -68,8 +68,16 @@ cd "$work" || exit 1
 # mnemonics that were "unsupported mnemonic", in every shape of operands
 # GNU as 2.47 takes them in, with a mask, a broadcast, rounding, a
 # displacement and the registers past the seventh and the fifteenth.
+#
+# apx_forms.txt is the same of APX's forms of the instructions of
+# general registers, which were refused: a new destination (`add %ecx,
+# %edx, %ebx`, `inc %ecx, %edx`, `shl $3, (%rax), %ebx`, `imul`, the
+# conditional moves, the double shifts), the conditional compare and
+# test, `cfcmov`, `setzu`, `imulzu`, `push2` and `pop2` -- 695 names
+# with general registers of each width, memory, numbers of each size
+# and %cl in each place.
 cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" \
-    "$here/tls_forms.txt" "$here/selection_forms.txt" "$here/ext_forms.txt" > forms.txt
+    "$here/tls_forms.txt" "$here/selection_forms.txt" "$here/ext_forms.txt" "$here/apx_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0
