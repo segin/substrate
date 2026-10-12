@@ -129,14 +129,6 @@ const as_x86_reg_info_t *as_x86_reg_find_class(const char *name, as_x86_reg_clas
     return r != NULL && r->cls == cls && r->number <= max ? r : NULL;
 }
 
-size_t as_x86_reg_count(void) {
-    return REG_COUNT;
-}
-
-const as_x86_reg_info_t *as_x86_reg_at(size_t i) {
-    return i < REG_COUNT ? &regs[i] : NULL;
-}
-
 int as_x86_reg_operand(const char *name, as_x86_operand_t *dst) {
     static const as_x86_reg_t high8[] = {AS_X86_REG_AH, AS_X86_REG_CH, AS_X86_REG_DH, AS_X86_REG_BH};
     const as_x86_reg_info_t *r = as_x86_reg_find(name);

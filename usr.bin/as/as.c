@@ -900,33 +900,6 @@ static int validate_march(int mode, const char *march) {
     return 0;
 }
 
-static const char *march_to_gas(int mode, const char *march) {
-    if (march == NULL || march[0] == '\0') {
-        return NULL;
-    }
-
-    if (mode == AS_MODE_64) {
-        if (strcmp(march, "x86-64") == 0 || strcmp(march, "x86-64-v1") == 0 || strcmp(march, "amd64") == 0) {
-            return "x86-64";
-        }
-        if (strcmp(march, "x86-64-v2") == 0) {
-            return "core2";
-        }
-        if (strcmp(march, "x86-64-v3") == 0 || strcmp(march, "x86-64-v4") == 0) {
-            return "znver1";
-        }
-        if (strcmp(march, "generic") == 0 || strcmp(march, "generic64") == 0 || strcmp(march, "native") == 0) {
-            return NULL;
-        }
-        return march;
-    }
-
-    if (strcmp(march, "generic") == 0 || strcmp(march, "generic32") == 0 || strcmp(march, "native") == 0) {
-        return NULL;
-    }
-    return march;
-}
-
 static int source_needs_cpp(const char *path) {
     const char *dot;
 
@@ -4392,9 +4365,8 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
             } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
                 ctx->output = AS_OUTPUT_BINARY;
             } else if (isdigit((unsigned char)value[0])) {
-                if (push_opt_with_value(&ctx->as_opts, "-O", value) != 0) {
-                    return 1;
-                }
+                /* A compiler's level of optimisation, handed on: taken,
+                 * and nothing to an assembler. */
             } else {
                 as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
                 return 2;
@@ -4408,9 +4380,7 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
             } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
                 ctx->output = AS_OUTPUT_BINARY;
             } else if (isdigit((unsigned char)value[0])) {
-                if (strvec_push(&ctx->as_opts, arg) != 0) {
-                    return 1;
-                }
+                /* (as above) */
             } else {
                 as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
                 return 2;
@@ -4545,7 +4515,7 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
             continue;
         }
         if (strcmp(arg, "-g") == 0) {
-            if (strvec_push(&ctx->gcc_opts, arg) != 0 || strvec_push(&ctx->as_opts, arg) != 0) {
+            if (strvec_push(&ctx->gcc_opts, arg) != 0) {
                 return 1;
             }
             ctx->gen_debug = 1;
@@ -4721,29 +4691,6 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
             as_diag(AS_E_USAGE, "invalid -march= option: `%s'", ctx->march);
         }
         return 2;
-    }
-    if (ctx->march != NULL) {
-        const char *gas_march = march_to_gas(ctx->mode, ctx->march);
-        if (gas_march != NULL && push_opt_with_value(&ctx->as_opts, "-march=", gas_march) != 0) {
-            return 1;
-        }
-    }
-    if (push_opt_with_value(&ctx->as_opts, "-msyntax=", ctx->syntax_intel ? "intel" : "att") != 0) {
-        return 1;
-    }
-    if (ctx->warn_enabled) {
-        if (strvec_push(&ctx->as_opts, "--warn") != 0) {
-            return 1;
-        }
-    } else {
-        if (strvec_push(&ctx->as_opts, "--no-warn") != 0) {
-            return 1;
-        }
-    }
-    if (ctx->fatal_warnings) {
-        if (strvec_push(&ctx->as_opts, "--fatal-warnings") != 0) {
-            return 1;
-        }
     }
     if (ctx->max_include_depth > 0) {
         char lim[32];

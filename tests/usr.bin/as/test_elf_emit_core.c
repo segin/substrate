@@ -1,6 +1,7 @@
 #include "as_data.h"
 #include "as_elf_emit.h"
 #include "as_lexer.h"
+#include "lex_file.h"
 #include "as_parser.h"
 #include "as_sections.h"
 #include "as_symtab.h"
@@ -47,7 +48,7 @@ int main(int argc, char **argv) {
     as_section_state_init(&secs);
     as_data_program_init(&data);
 
-    if (as_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
         fail("lex failed");
     }

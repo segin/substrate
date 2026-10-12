@@ -152,6 +152,16 @@ if [ -r "$man" ] && command -v mandoc > /dev/null 2>&1; then
     for limit in max-input-bytes max-line-bytes max-token-length max-macro-depth max-include-depth max-expansion-bytes; do
         grep -q -- "$limit" as.txt || bad "as(1) does not describe the limit --$limit"
     done
+    # And every variable of the environment that is read.  (Three were
+    # not there: the two a debugger of the assembler sets, and the count
+    # the tools keep of how deep one has run another.)
+    cat "$top"/usr.bin/as/*.c | grep -o 'getenv("[A-Z_]*")\|define SUBSTRATE_TC_[A-Z]*_ENV "[A-Z_]*"\|limit_from_env("[A-Z_]*")' |
+        grep -o '"[A-Z_]*"' | tr -d '"' | sort -u > envs
+    [ "$(wc -l < envs)" -ge 10 ] || bad "the source reads $(wc -l < envs) variables, which is too few to be all of them"
+    while IFS= read -r v; do
+        cases=$((cases + 1))
+        grep -q -- "$v" as.txt || bad "as(1) does not describe the variable $v"
+    done < envs
 fi
 
 if [ "$fail" = 0 ]; then

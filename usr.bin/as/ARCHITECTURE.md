@@ -29,19 +29,18 @@ usr.bin/as/
 ├── as_x86_evex.c            # x86: the EVEX prefix
 ├── as_x86_v2.c              # x86, per extension, for the names the table has not yet:
 ├── as_x86_sse3.c            #   lahf, sahf, cmpxchg16b, popcnt (v2); SSE3; SSSE3; SSE4.1; SSE4.2;
-├── as_x86_ssse3.c           #   AVX; AVX2; BMI1; BMI2; F16C; FMA; movbe, lzcnt and the rest of
-├── as_x86_sse41.c           #   x86-64-v3; AVX-512 F, BW, CD, DQ
+├── as_x86_ssse3.c           #   AVX; AVX2; BMI1; BMI2; FMA; movbe, lzcnt and the rest of
+├── as_x86_sse41.c           #   x86-64-v3; AVX-512 F, BW, DQ.  (Those of F16C and AVX-512 CD
+│                            #   are gone, the table having every name of theirs.)
 ├── as_x86_sse42.c
 ├── as_x86_avx.c
 ├── as_x86_avx2.c
 ├── as_x86_bmi1.c
 ├── as_x86_bmi2.c
-├── as_x86_f16c.c
 ├── as_x86_fma.c
 ├── as_x86_v3_misc.c
 ├── as_x86_avx512f.c
 ├── as_x86_avx512bw.c
-├── as_x86_avx512cd.c
 ├── as_x86_avx512dq.c
 ├── as_arm.c                 # ARM (A32) encoder; what the ARM and AArch64 encoders share
 ├── as_arm_simd.c            # ARM: VFP and NEON
@@ -53,9 +52,9 @@ usr.bin/as/
 │                            #   as_parser.h, as_reloc_op.h, as_sections.h, as_symtab.h, as_x86_regs.h,
 │                            #   as_x86_encode.h, as_x86_vec.h, as_x86_vex.h, as_x86_evex.h, as_x86_v2.h,
 │                            #   as_x86_sse3.h, as_x86_ssse3.h, as_x86_sse41.h, as_x86_sse42.h,
-│                            #   as_x86_avx.h, as_x86_avx2.h, as_x86_bmi1.h, as_x86_bmi2.h, as_x86_f16c.h,
+│                            #   as_x86_avx.h, as_x86_avx2.h, as_x86_bmi1.h, as_x86_bmi2.h,
 │                            #   as_x86_fma.h, as_x86_v3_misc.h, as_x86_avx512f.h, as_x86_avx512bw.h,
-│                            #   as_x86_avx512cd.h, as_x86_avx512dq.h).  Three have no .c of theirs:
+│                            #   as_x86_avx512dq.h).  Three have no .c of theirs:
 │                            #   as_arm.h, the interface of the five ARM and AArch64 files; as_arm_int.h,
 │                            #   what those share among themselves; as_strmap.h, a table from names to
 │                            #   numbers, whole in the header.
@@ -67,10 +66,11 @@ tests/usr.bin/as/
 │                            #   out of the tree; the one thing to run
 ├── xfail.list               # The tests expected to fail, each with its reason; the suite fails
 │                            #   if one of them passes
-├── test_*.sh                # 167 tests, each a program that says ok or FAIL.  Most assemble
+├── test_*.sh                # Some 165 tests, each a program that says ok or FAIL.  Most assemble
 │                            #   source and hold the object to bytes that GNU as or llvm-mc made,
 │                            #   and say in their heads whether GNU as passes them
-├── test_*_core.c            # 29 unit tests of one module, built and run by the .sh of their name
+├── test_*_core.c            # Unit tests of one module, built and run by the .sh of their name;
+│                            #   lex_file.h is what those that begin from a file share
 ├── test_gnu_differential.sh # Every line of two corpora against GNU as, with gnu-diff.py; the
 │                            #   lines that differ are counted and named in corpus/*.baseline
 ├── test_insn_forms.sh       # x86 instruction forms, 1,447 cases
@@ -159,7 +159,7 @@ Call frame information is `as_cfi.c`: the emitter gathers the `.cfi_*` directive
 
 The line table is `as_dwline.c`: the emitter gathers the files of `.file N` and a row for each `.loc`, placed where it takes effect (`line_rows()`), and is handed back the bytes of `.debug_line` (`emit_line_table()`). The name a `.loc ... view` gives is a number wherever one is written (`line_view_value()`). With `-g` and no `.loc` in the source the rows are its instructions, and a compile unit is made for them. Where every statement stands is found for all of them by one walk (`layout_offsets()`), which the rows and the frames both use. `tests/usr.bin/as/test_line_table.sh`.
 
-The x86 instructions with a VEX or an EVEX prefix, and those of MMX and SSE that have neither, are one table and one emitter. `as_x86_vec_table.c` has a row for each form of each instruction: its name, the kinds of its operands in AT&T order and where each goes (ModRM.reg, ModRM.rm, `vvvv`, an immediate byte or its high half), the prefix, map, opcode, `W` and length, what a one-byte displacement is multiplied by, whether memory may be broadcast, and what may be written in braces. `as_x86_vec.c` finds the rows of a name by one lookup, takes the first whose operands are the statement's -- VEX rows stand before EVEX ones, so what AVX can say is not said in AVX-512 -- and writes it; the level `-march` must allow is the row's. `encode_x86_vec()` in `as_elf_emit.c` asks it before any other encoder, and a name the table has is refused by it and by nothing else. `tests/usr.bin/as/test_vec_forms.sh` holds 16,000 forms to GNU as's bytes. The per-extension files (`as_x86_avx*.c`, `as_x86_fma.c`, `as_x86_f16c.c`, `as_x86_evex.c`, `as_x86_vex.c`) remain for the names the table does not have yet.
+The x86 instructions with a VEX or an EVEX prefix, and those of MMX and SSE that have neither, are one table and one emitter. `as_x86_vec_table.c` has a row for each form of each instruction: its name, the kinds of its operands in AT&T order and where each goes (ModRM.reg, ModRM.rm, `vvvv`, an immediate byte or its high half), the prefix, map, opcode, `W` and length, what a one-byte displacement is multiplied by, whether memory may be broadcast, and what may be written in braces. `as_x86_vec.c` finds the rows of a name by one lookup, takes the first whose operands are the statement's -- VEX rows stand before EVEX ones, so what AVX can say is not said in AVX-512 -- and writes it; the level `-march` must allow is the row's. `encode_x86_vec()` in `as_elf_emit.c` asks it before any other encoder, and a name the table has is refused by it and by nothing else. `tests/usr.bin/as/test_vec_forms.sh` holds 16,000 forms to GNU as's bytes. The per-extension files (`as_x86_avx*.c`, `as_x86_fma.c`, `as_x86_evex.c`, `as_x86_vex.c`) remain for the names the table does not have yet.
 
 Technologies: C, per-ISA opcode tables and helper logic, relocation fixup synthesis
 

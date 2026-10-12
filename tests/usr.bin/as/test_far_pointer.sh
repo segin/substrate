@@ -56,5 +56,19 @@ s 66ea34121000     -           'ljmpw $0x10,$0x1234'
 s ff2d00000000     2:R_386_32  'ljmp *sym'
 s ff18             -           'lcall *(%eax)'
 
+# Intel's `segment:offset`.  The offset is the first of the two as the
+# statement is kept, and for that one the relocation was still on the
+# last four bytes: `call 8:sym` had segment 0, and `jmp 0x10:sym+4` had
+# its 4 two bytes on.
+i() {
+    s "$1" "$2" ".intel_syntax noprefix
+	$3"
+}
+i 9a000000000800   1:R_386_32  'call 8:sym'
+i ea000000000800   1:R_386_32  'jmp 8:sym'
+i ea040000001000   1:R_386_32  'jmp 0x10:sym+4'
+i ea001000001000   -           'jmp 0x10:0x1000'
+i 9a002000001000   -           'call 0x10:0x2000'
+
 [ "$fail" -eq 0 ] && echo "ok: far jumps and calls ($cases cases)"
 exit "$fail"

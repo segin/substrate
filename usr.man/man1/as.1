@@ -777,6 +777,29 @@ Default for
 .It Ev AS_MAX_INCLUDE_DEPTH
 Default for
 .Fl -max-include-depth .
+.It Ev AS_DEBUG_RELOC_TRACE
+If non-empty, each instruction is written to standard error as its
+relocations are made, with where it stands and how long it is.
+For whoever is debugging the assembler.
+.It Ev AS_DEBUG_EMIT_PHASE
+If set, the object writer says on standard error as it begins each of
+its passes.
+For whoever is debugging the assembler.
+.It Ev SUBSTRATE_TC_DEPTH , SUBSTRATE_TC_MAX_DEPTH , SUBSTRATE_TC_TRACE
+The compiler driver, the assembler and the linker count in
+.Ev SUBSTRATE_TC_DEPTH
+how deep one has run another, and name themselves in
+.Ev SUBSTRATE_TC_TRACE ;
+.Nm
+adds one to the count and, where it is already
+.Ev SUBSTRATE_TC_MAX_DEPTH
+.Pq 64 if that is unset, and never less than 4 ,
+fails with the trace, so that tools that run each other without end are
+stopped.
+.Nm
+also sets
+.Ev SUBSTRATE_AS_ACTIVE
+for what it runs.
 .El
 .Sh FILES
 .Bl -tag -width "docs/specs/as_arch_reference.md"

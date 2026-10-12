@@ -1,5 +1,4 @@
 #include "as_x86_avx512bw.h"
-#include "as_x86_avx512cd.h"
 #include "as_x86_avx512dq.h"
 #include "as_x86_avx512f.h"
 
@@ -76,20 +75,6 @@ static void run_bw_case(const as_x86_avx512bw_insn_t *in, const uint8_t *exp, si
     expect_bytes(name, out, out_len, exp, exp_len);
 }
 
-static void run_cd_case(const as_x86_avx512cd_insn_t *in, const uint8_t *exp, size_t exp_len,
-                        const char *name) {
-    uint8_t out[64];
-    size_t out_len = 0;
-    char err[128];
-
-    if (as_x86_encode_avx512cd(in, out, sizeof(out), &out_len, err, sizeof(err)) != 0) {
-        fprintf(stderr, "%s encode error: %s\n", name, err);
-        fail("encode failed");
-    }
-
-    expect_bytes(name, out, out_len, exp, exp_len);
-}
-
 static void run_dq_case(const as_x86_avx512dq_insn_t *in, const uint8_t *exp, size_t exp_len,
                         const char *name) {
     uint8_t out[64];
@@ -107,20 +92,11 @@ static void run_dq_case(const as_x86_avx512dq_insn_t *in, const uint8_t *exp, si
 int main(void) {
     as_x86_avx512f_insn_t f;
     as_x86_avx512bw_insn_t bw;
-    as_x86_avx512cd_insn_t cd;
     as_x86_avx512dq_insn_t dq;
 
-    memset(&cd, 0, sizeof(cd));
-    cd.mnemonic = "vpconflictd";
-    cd.op_count = 2;
-    cd.op1 = reg_op(AS_X86_REG_RCX);
-    cd.op2 = reg_op(AS_X86_REG_RDX);
-    cd.vector_bits = 256;
-    {
-        const uint8_t exp[] = {0x62, 0xf2, 0x7d, 0x28, 0xc4, 0xca};
-        run_cd_case(&cd, exp, sizeof(exp), "vpconflictd ymm");
-    }
-
+    /* (vpconflictd was here, by the encoder of AVX-512 CD, which
+     * nothing called and is gone: the table has it, and
+     * test_vec_forms.sh holds it to GNU as.) */
     memset(&dq, 0, sizeof(dq));
     dq.mnemonic = "vpmullq";
     dq.op_count = 3;

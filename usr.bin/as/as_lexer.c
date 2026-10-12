@@ -184,31 +184,6 @@ static int is_x86_register_name(const char *s) {
     return r != NULL && r->cls != AS_X86_REGCLASS_NO_INDEX;
 }
 
-/* as_lexer_cfg_t.arm_registers of the file being read. */
-static int lex_arm_registers;
-
-static int is_arm_like_register_name(const char *s) {
-    const char *p;
-
-    if (s == NULL || s[0] == '\0') {
-        return 0;
-    }
-    if (strcmp(s, "sp") == 0 || strcmp(s, "lr") == 0 || strcmp(s, "pc") == 0 || strcmp(s, "cpsr") == 0 ||
-        strcmp(s, "spsr") == 0 || strcmp(s, "xzr") == 0 || strcmp(s, "wzr") == 0) {
-        return 1;
-    }
-    if ((s[0] == 'r' || s[0] == 'w' || s[0] == 'x' || s[0] == 'q' || s[0] == 'd' || s[0] == 's' || s[0] == 'v') &&
-        isdigit((unsigned char)s[1])) {
-        p = s + 1;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        if (*p == '\0') {
-            return 1;
-        }
-    }
-    return 0;
-}
 
 int as_lex_escape(const char *s, size_t *inout_i) {
     size_t i = *inout_i;
@@ -897,9 +872,7 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
          * instruction having no use for a string: `jmp "x.y"`. */
         if (u->kind == AS_TOK_STRING && t->kind == AS_TOK_MNEMONIC) {
             u->kind = AS_TOK_IDENTIFIER;
-        } else if (u->kind == AS_TOK_IDENTIFIER &&
-                   ((intel_syntax && is_x86_register_name(u->text)) ||
-                    (lex_arm_registers && is_arm_like_register_name(u->text)))) {
+        } else if (u->kind == AS_TOK_IDENTIFIER && intel_syntax && is_x86_register_name(u->text)) {
             /* Where registers are written bare. */
             u->kind = AS_TOK_REGISTER;
         }
@@ -1325,7 +1298,6 @@ int as_lex_text(const char *name, const char *text, size_t len, int marked, cons
     if (errbuf != NULL && errbuf_sz > 0) {
         errbuf[0] = '\0';
     }
-    lex_arm_registers = cfg != NULL && cfg->arm_registers;
 
     /* The tokenizer ends each line where it stands, so it has its own. */
     copy = (char *)malloc(len + 1);
@@ -1348,31 +1320,3 @@ int as_lex_text(const char *name, const char *text, size_t len, int marked, cons
     return rc;
 }
 
-int as_lex_file(const char *path, const as_lexer_cfg_t *cfg, as_token_vec_t *out,
-                char *errbuf, size_t errbuf_sz) {
-    lex_ctx_t ctx;
-    int rc;
-
-    if (path == NULL || out == NULL) {
-        return -1;
-    }
-
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.cfg = cfg;
-    ctx.out = out;
-    ctx.errbuf = errbuf;
-    ctx.errbuf_sz = errbuf_sz;
-    if (errbuf != NULL && errbuf_sz > 0) {
-        errbuf[0] = '\0';
-    }
-    lex_arm_registers = cfg != NULL && cfg->arm_registers;
-
-    rc = lex_file_internal(&ctx, path, 0);
-
-    while (ctx.include_stack_count > 0) {
-        free(ctx.include_stack[ctx.include_stack_count - 1]);
-        ctx.include_stack_count--;
-    }
-    free(ctx.include_stack);
-    return rc;
-}

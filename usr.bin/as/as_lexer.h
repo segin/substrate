@@ -68,9 +68,6 @@ typedef struct {
     size_t include_dir_count;
     int intel_syntax;
     unsigned max_include_depth;
-    /* Whether sp, lr, pc, r0, x1 and their like are registers: they are
-     * ARM's, and in x86 source they are names like any other. */
-    int arm_registers;
 } as_lexer_cfg_t;
 
 void as_token_vec_init(as_token_vec_t *v);
@@ -175,9 +172,6 @@ int as_source_position(const char *file, unsigned line, const char **file_out, u
 
 /* A message, with every internal `file:line` in it made the user's. */
 void as_source_positions_in_text(const char *in, char *out, size_t out_sz);
-
-int as_lex_file(const char *path, const as_lexer_cfg_t *cfg, as_token_vec_t *out,
-                char *errbuf, size_t errbuf_sz);
 
 #ifdef __cplusplus
 }

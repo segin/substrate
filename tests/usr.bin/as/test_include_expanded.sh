@@ -86,6 +86,23 @@ elif [ "$(grep -c '^bad\.s:2: Error: ' out)" != 2 ]; then
     echo "FAIL err: not two errors at bad.s:2: $(tr '\n' '|' < out)"; fail=1
 fi
 
+# A file that is in a directory -I names; and one whose name is written
+# with an escape in it.  (Neither had been tried, and each is a function
+# of the tokenizer's that nothing else reaches.)
+mkdir inc
+printf '\tstd\n' > inc/far.s
+printf '.rept 2\n.include "far.s"\n.endr\n\tret\n' > idir.s
+cases=$((cases + 1))
+if ! "$AS" --32 -I inc -o idir.o idir.s > out 2>&1; then
+    echo "FAIL idir: $(tail -1 out)"; fail=1
+else
+    got=$(objdump -d --no-show-raw-insn idir.o | awk '/^ +[0-9a-f]+:/ { printf "%s ", $2 }' | sed 's/ $//')
+    [ "$got" = 'std std ret' ] || { echo "FAIL idir: [$got], not [std std ret]"; fail=1; }
+fi
+printf '\tsti\n' > "$(printf 'a\tb.s')"
+printf '.rept 1\n.include "a\\tb.s"\n.endr\n\tret\n' > esc.s
+is esc 'sti ret'
+
 # A file that is not there.
 cases=$((cases + 1))
 printf '.rept 1\n.include "nosuch.s"\n.endr\n' > missing.s

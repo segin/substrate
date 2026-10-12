@@ -1,5 +1,6 @@
 #include "as_data.h"
 #include "as_lexer.h"
+#include "lex_file.h"
 #include "as_parser.h"
 
 #include <stdio.h>
@@ -44,7 +45,7 @@ int main(int argc, char **argv) {
     as_parse_result_init(&parsed);
     as_data_program_init(&prog);
 
-    if (as_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
         fail("lex failed");
     }

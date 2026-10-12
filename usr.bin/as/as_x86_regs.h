@@ -67,10 +67,6 @@ const as_x86_reg_info_t *as_x86_reg_find(const char *name);
  * than `max`. */
 const as_x86_reg_info_t *as_x86_reg_find_class(const char *name, as_x86_reg_class_t cls, unsigned max);
 
-/* How many registers there are, and the one at `i` of them, or NULL. */
-size_t as_x86_reg_count(void);
-const as_x86_reg_info_t *as_x86_reg_at(size_t i);
-
 /*
  * The operand a register's name is: its kind, its class, its width and
  * its number, for a register of any class.  %st is the top of the x87

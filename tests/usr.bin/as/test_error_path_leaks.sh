@@ -12,6 +12,11 @@
 # are each wrong in a different place.  It must refuse each, and the
 # sanitizer must have nothing to say.
 #
+# The last seven are what the symbol writer refuses (AS-T-280): a size
+# or a value that is a distance to nowhere, or between two sections, or
+# a loop of definitions.  It gathers three tables before it writes a
+# symbol, and eleven of its twenty-nine ways out freed two of them.
+#
 # Run by run-suite.sh; it does not use $AS, having to build its own.
 set -u
 
@@ -90,6 +95,13 @@ jmp foo@GOTOFF
 .rept x\nnop\n.endr
 .include "nosuchfile.inc"
 movl %eax, %ebx\nmovl $1, %nosuch\nmovl (%eax,%ebx,3), %ecx\nmovl %a,%b,%c,%d
+f: nop\n.size f, .-nosuch
+f: nop\n.size f, nosuch-f
+a: nop\n.data\nb: .long 0\n.text\nf: nop\n.size f, b-a
+a: nop\n.data\nb: .long 0\n.set x, b-a
+.set x, .-nosuch
+.data\nd: .long 0\n.text\n.set x, .-d
+.set x, y\n.set y, x
 EOF
 
 [ "$fail" -eq 0 ] && echo "ok: nothing is left allocated by a source in error ($cases cases)"

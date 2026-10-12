@@ -1,6 +1,7 @@
 #include "as_lexer.h"
 #include "as_parser.h"
 #include "as_symtab.h"
+#include "lex_file.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +45,7 @@ int main(int argc, char **argv) {
     as_parse_result_init(&parsed);
     as_symtab_init(&tab);
 
-    if (as_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[1], &lcfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
         fail("lex failed");
     }

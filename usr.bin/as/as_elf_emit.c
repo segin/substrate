@@ -6872,21 +6872,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return -1;
     }
-    if (strcmp(mnbuf, "movq") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_mmx_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_legacy_simd_rm(0x00, 0x6f, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x00, 0x7f, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
-    }
     if (strcmp(mnbuf, "pshufw") == 0) {
         const as_operand_t *imm_op;
         const as_operand_t *rm_op;
@@ -7243,15 +7228,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (strcmp(mnbuf, "movdir64b") == 0 || strcmp(mnbuf, "enqcmd") == 0) {
-            if (intel_syntax) {
-                reg_op = &insn->operands[0];
-                mem_op = &insn->operands[1];
-            } else {
-                mem_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
-        } else if (intel_syntax) {
+        if (intel_syntax) {
             mem_op = &insn->operands[0];
             reg_op = &insn->operands[1];
         } else {
@@ -12858,118 +12835,6 @@ static unsigned directive_fixed_scalar_width(const as_directive_t *d) {
 
 
 
-static int __attribute__((unused)) find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
-                                                             const as_stmt_t *base_st,
-                                                             const char *file, unsigned line, int digit,
-                                                             const char *sym_name, uint64_t *off_out) {
-    size_t i;
-    sec_buf_vec_t secbufs;
-    section_track_t track;
-
-    if (ctx == NULL || section_name == NULL || off_out == NULL ||
-        (sym_name == NULL && file == NULL)) {
-        return -1;
-    }
-    *off_out = 0;
-    memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
-                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
-        return -1;
-    }
-    ctx->virtual_scanning++;
-
-    for (i = 0; i < ctx->parsed->count; ++i) {
-        const as_stmt_t *st = &ctx->parsed->items[i];
-        sec_buf_t *sb;
-        size_t j;
-
-        sb = sec_buf_get_or_add(&secbufs, track.current);
-        if (sb == NULL) {
-            ctx->virtual_scanning--;
-            section_track_free(&track);
-            sec_buf_vec_free(&secbufs);
-            return -1;
-        }
-        for (j = 0; j < st->label_count; ++j) {
-            int matches = 0;
-
-            if (strcmp(track.current, section_name) != 0) {
-                continue;
-            }
-            if (sym_name != NULL) {
-                matches = (st->labels[j].name != NULL && strcmp(st->labels[j].name, sym_name) == 0);
-            } else {
-                int label_digit = -1;
-                matches = (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
-                       label_digit == digit &&
-                       st->labels[j].line == line &&
-                       st->labels[j].file != NULL &&
-                       strcmp(st->labels[j].file, file) == 0);
-            }
-            if (matches) {
-                *off_out = (uint64_t)sb->buf.len;
-                ctx->virtual_scanning--;
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                return 0;
-            }
-        }
-        if (st == base_st && st->kind == AS_STMT_DIRECTIVE) {
-            continue;
-        }
-        if (st->kind == AS_STMT_DIRECTIVE) {
-            int trc = section_track_apply_directive(&track, &st->u.directive);
-            if (trc < 0) {
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                ctx->virtual_scanning--;
-                return -1;
-            }
-            if (trc > 0) {
-                continue;
-            }
-            {
-                unsigned scalar_width = directive_fixed_scalar_width(&st->u.directive);
-                if (scalar_width != 0) {
-                    if (bytebuf_append_zeros(&sb->buf, st->u.directive.arg_count * (size_t)scalar_width) != 0) {
-                        ctx->virtual_scanning--;
-                        section_track_free(&track);
-                        sec_buf_vec_free(&secbufs);
-                        return -1;
-                    }
-                    continue;
-                }
-            }
-            if (append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
-                                          track.x86_code_bits, &st->u.directive) < 0) {
-                if (st->u.directive.name != NULL &&
-                    (strcmp(st->u.directive.name, ".skip") == 0 ||
-                     strcmp(st->u.directive.name, ".space") == 0 ||
-                     strcmp(st->u.directive.name, ".fill") == 0)) {
-                    continue;
-                }
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                ctx->virtual_scanning--;
-                return -1;
-            }
-            continue;
-        }
-        if (st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, track.current)) {
-            if (append_virtual_instruction_bytes(ctx, &sb->buf, track.current, st, track.x86_code_bits) != 0) {
-                ctx->virtual_scanning--;
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                return -1;
-            }
-        }
-    }
-
-    ctx->virtual_scanning--;
-    section_track_free(&track);
-    sec_buf_vec_free(&secbufs);
-    return -1;
-}
 
 /*
  * A section's name, kept: the same pointer for the same name, good until
@@ -13169,89 +13034,6 @@ static void virtual_label_cache_free(emit_ctx_t *ctx) {
     ctx->vlabel_cap = 0;
 }
 
-/* Lazy full-parse walk that populates vlabel_cache for every label in
- * the file in one shot. Currently unused - retained as a starting point
- * for future perf work on label resolution. */
-static int __attribute__((unused)) prebuild_virtual_label_cache(emit_ctx_t *ctx) {
-    size_t i;
-    sec_buf_vec_t secbufs;
-    section_track_t track;
-
-    if (ctx == NULL || ctx->parsed == NULL) {
-        return -1;
-    }
-    if (ctx->vlabel_count > 0) {
-        return 0; /* assume populated */
-    }
-    memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
-                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
-        return -1;
-    }
-    for (i = 0; i < ctx->parsed->count; ++i) {
-        const as_stmt_t *st = &ctx->parsed->items[i];
-        sec_buf_t *sb;
-        size_t j;
-        sb = sec_buf_get_or_add(&secbufs, track.current);
-        if (sb == NULL) {
-            section_track_free(&track);
-            sec_buf_vec_free(&secbufs);
-            return -1;
-        }
-        for (j = 0; j < st->label_count; ++j) {
-            if (virtual_label_cache_push(ctx, st, &st->labels[j], track.current != NULL ? track.current : "",
-                                         (uint64_t)sb->buf.len) != 0) {
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                return -1;
-            }
-        }
-        if (st->kind == AS_STMT_DIRECTIVE) {
-            int trc = section_track_apply_directive(&track, &st->u.directive);
-            if (trc < 0) {
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                return -1;
-            }
-            if (trc > 0) {
-                continue;
-            }
-            {
-                unsigned scalar_width = directive_fixed_scalar_width(&st->u.directive);
-                if (scalar_width != 0) {
-                    if (bytebuf_append_zeros(&sb->buf, st->u.directive.arg_count * (size_t)scalar_width) != 0) {
-                        section_track_free(&track);
-                        sec_buf_vec_free(&secbufs);
-                        return -1;
-                    }
-                    continue;
-                }
-            }
-            ctx->virtual_scanning++;
-            {
-                int arc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
-                                                    track.x86_code_bits, &st->u.directive);
-                ctx->virtual_scanning--;
-                if (arc < 0) {
-                    section_track_free(&track);
-                    sec_buf_vec_free(&secbufs);
-                    return -1;
-                }
-            }
-            continue;
-        }
-        if (st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, track.current)) {
-            if (append_virtual_instruction_bytes(ctx, &sb->buf, track.current, st, track.x86_code_bits) != 0) {
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                return -1;
-            }
-        }
-    }
-    section_track_free(&track);
-    sec_buf_vec_free(&secbufs);
-    return 0;
-}
 
 static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
                                        const char *file, unsigned line, int digit, const char *sym_name,
@@ -13563,15 +13345,7 @@ static int find_stmt_virtual_location(emit_ctx_t *ctx, const as_stmt_t *target_s
     *section_out = "";
     *off_out = 0;
     if (virtual_label_cache_lookup_stmt(ctx, target_st, section_out, off_out) == 0) {
-        if (getenv("AS_PROFILE_LOC") != NULL) {
-            static unsigned long h = 0; h++;
-            if ((h & 0x3FFFF) == 0) fprintf(stderr, "find_stmt_loc HIT: %lu\n", h);
-        }
         return 0;
-    }
-    if (getenv("AS_PROFILE_LOC") != NULL) {
-        static unsigned long m = 0; m++;
-        if ((m & 0xFF) == 0) fprintf(stderr, "find_stmt_loc MISS: %lu (target %p)\n", m, (void*)target_st);
     }
     memset(&secbufs, 0, sizeof(secbufs));
     if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
@@ -16449,12 +16223,6 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
     return append_directive_data(buf, d);
 }
 
-static int append_directive_data_location_pass(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name,
-                                               const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
-                                               const as_directive_t *d) {
-    return append_directive_data_ctx(ctx, buf, section_name, st, sec_off, x86_code_bits, d);
-}
-
 static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
                                       const as_stmt_t *st, unsigned char *code, size_t code_cap,
                                       size_t *code_len, char *encerr, size_t encerr_sz) {
@@ -16710,8 +16478,8 @@ static int emit_text_program(emit_ctx_t *ctx) {
                 sec_buf_vec_free(&secbufs);
                 return -1;
             }
-            drc = append_directive_data_location_pass(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
-                                                      track.x86_code_bits, &st->u.directive);
+            drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
+                                            track.x86_code_bits, &st->u.directive);
             if (drc < 0) {
                 if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
                     set_err(ctx, "%s:%u: malformed directive data", st->file != NULL ? st->file : "<input>", st->line);
@@ -16737,17 +16505,9 @@ static int emit_text_program(emit_ctx_t *ctx) {
                 sec_buf_vec_free(&secbufs);
                 return -1;
             }
-            if (sb == NULL) {
-                sb = sec_buf_get_or_add(&secbufs, track.current);
-                if (sb == NULL) {
-                    section_track_free(&track);
-                    sec_buf_vec_free(&secbufs);
-                    return -1;
-                }
-            }
             if (bytebuf_append(&sb->buf, code, code_len) != 0) {
-               section_track_free(&track);
-               sec_buf_vec_free(&secbufs);
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
                 return -1;
             }
         }
@@ -17057,8 +16817,8 @@ static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
     if (sym == NULL) {
         return NULL;
     }
-    if (sec != NULL) {
-        (void)elf_symbol_define(sym, sec, 0);
+    if (sec != NULL && elf_symbol_define(sym, sec, 0) != ELF_OK) {
+        return NULL;
     }
     if (append_emit_symbol(ctx, name, sym) != 0) {
         return NULL;
@@ -18413,8 +18173,8 @@ static int collect_dot_locations(emit_ctx_t *ctx, dot_loc_t **out, size_t *count
             if (trc > 0) {
                 continue;
             }
-            drc = append_directive_data_location_pass(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
-                                                      track.x86_code_bits, &st->u.directive);
+            drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
+                                            track.x86_code_bits, &st->u.directive);
             if (drc < 0) {
                 free(items);
                 section_track_free(&track);
@@ -18462,6 +18222,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     if (trace_emit_phase) fprintf(stderr, "as: emit-phase symbol locations done count=%zu\n", loc_count);
     if (collect_dot_locations(ctx, &dot_locs, &dot_count) != 0) {
         free_sym_locs(locs, loc_count);
+        free_dot_locs(dot_locs);
         free_name_index(&loc_index);
         return -1;
     }
@@ -18483,6 +18244,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             if (target_loc == NULL || target_loc->sec == NULL) {
                 set_err(ctx, "cannot resolve size target for %s", s->name);
                 free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
                 free_name_index(&loc_index);
                 return -1;
             }
@@ -18592,12 +18354,14 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         esym = ensure_emit_symbol(ctx, s->name);
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
         if (s->is_common) {
             if (elf_symbol_set_shndx(esym, SHN_COMMON) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
                 free_name_index(&loc_index);
                 return -1;
             }
@@ -18619,6 +18383,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 if (elf_symbol_set_value(esym, align) != ELF_OK ||
                     elf_symbol_set_size(esym, s->common_size) != ELF_OK) {
                     free_sym_locs(locs, loc_count);
+                    free_dot_locs(dot_locs);
                     free_name_index(&loc_index);
                     return -1;
                 }
@@ -18627,6 +18392,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             if (elf_symbol_set_shndx(esym, SHN_ABS) != ELF_OK ||
                 elf_symbol_set_value(esym, s->absolute_value) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
                 free_name_index(&loc_index);
                 return -1;
             }
@@ -18642,12 +18408,13 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 for (tf = 0; tf < ctx->cfg->thumb_func_count; ++tf) {
                     if (strcmp(ctx->cfg->thumb_funcs[tf], s->name) == 0) {
                         thumb_bit = 1;
-                        (void)elf_symbol_set_type(esym, STT_FUNC);
                         break;
                     }
                 }
-                if (elf_symbol_define(esym, loc->sec, loc->off | thumb_bit) != ELF_OK) {
+                if ((thumb_bit != 0 && elf_symbol_set_type(esym, STT_FUNC) != ELF_OK) ||
+                    elf_symbol_define(esym, loc->sec, loc->off | thumb_bit) != ELF_OK) {
                     free_sym_locs(locs, loc_count);
+                    free_dot_locs(dot_locs);
                     free_name_index(&loc_index);
                     return -1;
                 }
@@ -18659,8 +18426,11 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                  * for an address and not an offset in the thread's
                  * block, and the program read another variable.
                  */
-                if ((elf_section_flags(loc->sec) & SHF_TLS) != 0) {
-                    (void)elf_symbol_set_type(esym, STT_TLS);
+                if ((elf_section_flags(loc->sec) & SHF_TLS) != 0 && elf_symbol_set_type(esym, STT_TLS) != ELF_OK) {
+                    free_sym_locs(locs, loc_count);
+                    free_dot_locs(dot_locs);
+                    free_name_index(&loc_index);
+                    return -1;
                 }
             } else {
                 /* Defined, and nowhere: it was put at the start of
@@ -18692,6 +18462,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         esym = ensure_emit_symbol(ctx, s->name);
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
@@ -18787,28 +18558,34 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         target = ensure_emit_symbol(ctx, s->alias_target);
         if (target == NULL) {
             free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
         shndx = elf_symbol_shndx(target);
         if (elf_symbol_set_shndx(esym, shndx) != ELF_OK) {
             free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
         v = (int64_t)elf_symbol_value(target) + s->alias_addend;
         if (elf_symbol_set_value(esym, (uint64_t)v) != ELF_OK) {
             free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
         /* Another name for a function or an object is one, and as
          * large, unless it was said to be something else. */
-        if (elf_symbol_type(esym) == STT_NOTYPE) {
-            (void)elf_symbol_set_type(esym, elf_symbol_type(target));
-            if (elf_symbol_size(esym) == 0 && s->alias_addend == 0) {
-                (void)elf_symbol_set_size(esym, elf_symbol_size(target));
-            }
+        if (elf_symbol_type(esym) == STT_NOTYPE &&
+            (elf_symbol_set_type(esym, elf_symbol_type(target)) != ELF_OK ||
+             (elf_symbol_size(esym) == 0 && s->alias_addend == 0 &&
+              elf_symbol_set_size(esym, elf_symbol_size(target)) != ELF_OK))) {
+            free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
+            free_name_index(&loc_index);
+            return -1;
         }
     }
 
@@ -21608,12 +21385,16 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     t = R_386_16;
                     have_disp_field = 1;
                 } else if (machine == EM_386 && st->u.instr.operand_count == 2 && op->kind != AS_OPERAND_MEMORY &&
-                           op == &st->u.instr.operands[1] && x86_far_pointer_offset(code, code_len, &disp_field_off)) {
+                           op == &st->u.instr.operands[st->u.instr.syntax_intel ? 0 : 1] &&
+                           x86_far_pointer_offset(code, code_len, &disp_field_off)) {
                     /*
                      * A far jump or call to `$segment, $symbol`: the
                      * offset, of two bytes or four, is followed by the
                      * two of the segment.  The relocation was put on the
                      * last four bytes, over the segment, which was lost.
+                     * (In Intel's `segment:symbol` the offset is the
+                     * first of the two as they are kept, and for that
+                     * one this was still so.)
                      */
                     reloc_width = code_len - 2 - disp_field_off;
                     t = reloc_width == 2 ? R_386_16 : R_386_32;

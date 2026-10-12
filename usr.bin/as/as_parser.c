@@ -296,12 +296,12 @@ static int push_label(as_stmt_t *st, const char *name, const char *file, unsigne
  * written with `%` and a name without one is a symbol: `call sp` calls
  * the function sp, `movl r12, %eax` reads the variable r12.  They were
  * taken for the registers of those names -- and x1, s1, lr and their
- * like for ARM's, which this is not an assembler of -- so that a C
- * program with a variable called s1 did not assemble.  Set for each
+ * like for ARM's, whose operands are not read here at all (see
+ * parse_arm_operand()) -- so that a C program with a variable called
+ * s1 did not assemble.  Set for each
  * statement by as_parse_tokens().
  */
 static int parse_bare_x86_registers = 1;
-static int parse_arm_registers = 1;
 static int parse_is_x86;
 
 static int is_x86_register_text(const char *s) {
@@ -510,27 +510,6 @@ static int intel_mem_size_bits(const char *s) {
     }
     if (streq_ci(s, "zmmword")) {
         return 512;
-    }
-    return 0;
-}
-
-static int is_arm_register_text(const char *s) {
-    const char *p;
-
-    if (s == NULL || s[0] == '\0' || !parse_arm_registers) {
-        return 0;
-    }
-    if (streq_ci(s, "sp") || streq_ci(s, "lr") || streq_ci(s, "pc") || streq_ci(s, "cpsr") || streq_ci(s, "spsr") ||
-        streq_ci(s, "xzr") || streq_ci(s, "wzr")) {
-        return 1;
-    }
-    if ((s[0] == 'r' || s[0] == 'x' || s[0] == 'w' || s[0] == 'q' || s[0] == 'd' || s[0] == 's' || s[0] == 'v') &&
-        isdigit((unsigned char)s[1])) {
-        p = s + 1;
-        while (isdigit((unsigned char)*p)) {
-            ++p;
-        }
-        return *p == '\0';
     }
     return 0;
 }
@@ -809,8 +788,7 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
         if (strcmp(tokv[comp_starts[0]].text, "%") == 0 && comp_starts[0] + 1 < comp_ends[0]) {
             mem.base_reg = strip_register_prefix(tokv[comp_starts[0] + 1].text);
         } else if (tokv[comp_starts[0]].kind == AS_TOK_REGISTER ||
-                   is_x86_register_text(tokv[comp_starts[0]].text) ||
-                   is_arm_register_text(tokv[comp_starts[0]].text)) {
+                   is_x86_register_text(tokv[comp_starts[0]].text)) {
             mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
         } else if (comp_count == 1 && mem.disp == NULL) {
             /* GAS accepts `(symbol)` as a memory operand whose absolute
@@ -838,8 +816,7 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     if (comp_count >= 2 && comp_ends[1] > comp_starts[1]) {
         if (strcmp(tokv[comp_starts[1]].text, "%") == 0 && comp_starts[1] + 1 < comp_ends[1]) {
             mem.index_reg = strip_register_prefix(tokv[comp_starts[1] + 1].text);
-        } else if (tokv[comp_starts[1]].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[comp_starts[1]].text) ||
-                   is_arm_register_text(tokv[comp_starts[1]].text)) {
+        } else if (tokv[comp_starts[1]].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[comp_starts[1]].text)) {
             mem.index_reg = strip_register_prefix(tokv[comp_starts[1]].text);
         } else {
             set_err(ctx, "%s:%u: the index of a memory operand, '%s', is not a register",
@@ -906,8 +883,7 @@ static int tok_is_no_index(const as_token_t *t) {
  * register. */
 static int tok_is_intel_register(const as_token_t *t) {
     return tok_is_name(t) &&
-           (t->kind == AS_TOK_REGISTER || is_x86_register_text(t->text) || is_arm_register_text(t->text) ||
-            tok_is_no_index(t));
+           (t->kind == AS_TOK_REGISTER || is_x86_register_text(t->text) || tok_is_no_index(t));
 }
 
 /* A scale: the number 1, 2, 4 or 8, or 0 if the token is not one. */
@@ -1368,7 +1344,7 @@ static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t
         return 0;
     }
 
-    if (n == 1 && (tokv[0].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[0].text) || is_arm_register_text(tokv[0].text))) {
+    if (n == 1 && (tokv[0].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[0].text))) {
         op->kind = AS_OPERAND_REGISTER;
         op->u.reg = strip_register_prefix(tokv[0].text);
         return op->u.reg != NULL ? 0 : -1;
@@ -2479,7 +2455,6 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
     ctx.cfg = cfg;
     ctx.syntax_intel = (cfg != NULL && cfg->intel_syntax) ? 1 : 0;
     parse_is_x86 = cfg != NULL && cfg->arch == AS_PARSER_ARCH_X86;
-    parse_arm_registers = !parse_is_x86;
     parse_bare_x86_registers = ctx.syntax_intel || !parse_is_x86;
     ctx.out = out;
     ctx.errbuf = errbuf;

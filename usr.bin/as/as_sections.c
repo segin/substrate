@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,6 +103,19 @@ static void set_err(sec_ctx_t *ctx, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
     va_end(ap);
+}
+
+/*
+ * Room for n things of `size` bytes each where `old` was, or NULL: for
+ * want of memory, or for a count the multiplication cannot hold.  Every
+ * table here that grows, grows by this: nine did, each multiplying a
+ * doubled count by a size with nothing to say the product was one.
+ */
+static void *realloc_array(void *old, size_t n, size_t size) {
+    if (size != 0 && n > SIZE_MAX / size) {
+        return NULL;
+    }
+    return realloc(old, n * size);
 }
 
 static char *xstrdup(const char *s) {
@@ -248,7 +262,7 @@ static ssize_t add_section(as_section_state_t *s, const char *name, unsigned sub
 
     if (s->count == s->cap) {
         size_t ncap = s->cap == 0 ? 16 : s->cap * 2;
-        next = (as_section_t *)realloc(s->items, ncap * sizeof(*next));
+        next = (as_section_t *)realloc_array(s->items, ncap, sizeof(*next));
         if (next == NULL) {
             return -1;
         }
@@ -533,7 +547,7 @@ static int stack_push(as_section_state_t *s, size_t idx) {
 
     if (s->stack_count == s->stack_cap) {
         size_t ncap = s->stack_cap == 0 ? 8 : s->stack_cap * 2;
-        next = (size_t *)realloc(s->stack, ncap * sizeof(*next));
+        next = (size_t *)realloc_array(s->stack, ncap, sizeof(*next));
         if (next == NULL) {
             return -1;
         }
@@ -927,7 +941,7 @@ static size_t sub_intern(sub_track_t *t, const char *raw) {
     }
     if (t->count == t->cap) {
         size_t ncap = t->cap == 0 ? 8 : t->cap * 2;
-        char **names = (char **)realloc(t->names, ncap * sizeof(*names));
+        char **names = (char **)realloc_array(t->names, ncap, sizeof(*names));
         char **spell;
 
         if (names == NULL) {
@@ -935,14 +949,14 @@ static size_t sub_intern(sub_track_t *t, const char *raw) {
             return (size_t)-1;
         }
         t->names = names;
-        spell = (char **)realloc(t->spell, ncap * sizeof(*spell));
+        spell = (char **)realloc_array(t->spell, ncap, sizeof(*spell));
         if (spell == NULL) {
             free(name);
             return (size_t)-1;
         }
         t->spell = spell;
         {
-            int *low = (int *)realloc(t->low, ncap * sizeof(*low));
+            int *low = (int *)realloc_array(t->low, ncap, sizeof(*low));
             int *high;
 
             if (low == NULL) {
@@ -950,7 +964,7 @@ static size_t sub_intern(sub_track_t *t, const char *raw) {
                 return (size_t)-1;
             }
             t->low = low;
-            high = (int *)realloc(t->high, ncap * sizeof(*high));
+            high = (int *)realloc_array(t->high, ncap, sizeof(*high));
             if (high == NULL) {
                 free(name);
                 return (size_t)-1;
@@ -1069,7 +1083,7 @@ static int sub_track_apply(sub_track_t *t, const as_directive_t *d) {
         if (push) {
             if (t->stack_count == t->stack_cap) {
                 size_t ncap = t->stack_cap == 0 ? 8 : t->stack_cap * 2;
-                sub_frame_t *stack = (sub_frame_t *)realloc(t->stack, ncap * sizeof(*stack));
+                sub_frame_t *stack = (sub_frame_t *)realloc_array(t->stack, ncap, sizeof(*stack));
 
                 if (stack == NULL) {
                     return -1;
@@ -1105,7 +1119,7 @@ static const char *sub_mode_directive(const as_stmt_t *st) {
 static int sub_vec_push(sub_stmt_vec_t *v, const as_stmt_t *st) {
     if (v->count == v->cap) {
         size_t ncap = v->cap == 0 ? 64 : v->cap * 2;
-        as_stmt_t *items = (as_stmt_t *)realloc(v->items, ncap * sizeof(*items));
+        as_stmt_t *items = (as_stmt_t *)realloc_array(v->items, ncap, sizeof(*items));
 
         if (items == NULL) {
             return -1;
@@ -1235,7 +1249,7 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
     do {                                                                                       \
         if (moved_count == moved_cap) {                                                        \
             size_t ncap = moved_cap == 0 ? 64 : moved_cap * 2;                                 \
-            sub_moved_t *next = (sub_moved_t *)realloc(moved, ncap * sizeof(*next));           \
+            sub_moved_t *next = (sub_moved_t *)realloc_array(moved, ncap, sizeof(*next));      \
             if (next == NULL) {                                                                \
                 goto oom;                                                                      \
             }                                                                                  \

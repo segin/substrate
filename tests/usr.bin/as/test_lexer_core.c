@@ -1,4 +1,5 @@
 #include "as_lexer.h"
+#include "lex_file.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,7 +158,7 @@ int main(int argc, char **argv) {
     cfg.intel_syntax = 0;
     cfg.max_include_depth = 16;
 
-    if (as_lex_file(argv[1], &cfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[1], &cfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "lex att failed: %s\n", err);
         as_token_vec_free(&toks);
         return 1;
@@ -182,7 +183,7 @@ int main(int argc, char **argv) {
     memset(&cfg, 0, sizeof(cfg));
     cfg.intel_syntax = 1;
     cfg.max_include_depth = 16;
-    if (as_lex_file(argv[2], &cfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[2], &cfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "lex intel failed: %s\n", err);
         as_token_vec_free(&toks);
         return 1;
@@ -202,7 +203,7 @@ int main(int argc, char **argv) {
     cfg.include_dirs = inc_dirs;
     cfg.include_dir_count = 1;
     cfg.max_include_depth = 16;
-    if (as_lex_file(argv[3], &cfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[3], &cfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "lex include failed: %s\n", err);
         as_token_vec_free(&toks);
         return 1;
@@ -223,7 +224,7 @@ int main(int argc, char **argv) {
     as_token_vec_init(&toks);
     memset(&cfg, 0, sizeof(cfg));
     cfg.max_include_depth = 16;
-    if (as_lex_file(argv[4], &cfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(argv[4], &cfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "lex preproc failed: %s\n", err);
         as_token_vec_free(&toks);
         return 1;

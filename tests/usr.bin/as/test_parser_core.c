@@ -1,5 +1,6 @@
 #include "as_lexer.h"
 #include "as_parser.h"
+#include "lex_file.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,7 +48,7 @@ static void verify_x86(const char *path) {
     as_token_vec_init(&toks);
     as_parse_result_init(&parsed);
 
-    if (as_lex_file(path, &lcfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(path, &lcfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
         fail("x86 lex failed");
     }
@@ -209,7 +210,7 @@ static void verify_arm(const char *path) {
     as_token_vec_init(&toks);
     as_parse_result_init(&parsed);
 
-    if (as_lex_file(path, &lcfg, &toks, err, sizeof(err)) != 0) {
+    if (test_lex_file(path, &lcfg, &toks, err, sizeof(err)) != 0) {
         fprintf(stderr, "%s\n", err);
         fail("arm lex failed");
     }

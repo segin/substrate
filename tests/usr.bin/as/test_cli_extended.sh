@@ -194,5 +194,19 @@ rm -f t.o
 same "-c" t.o
 [ -s out ] && bad "-c: says something: $(head -1 out)"
 
+# --- the recursion guard ------------------------------------------------
+# The tools of the chain count how deep one has run another, and at the
+# limit the assembler stops, with the trace: nothing had ever reached
+# the stop.  Below the limit it assembles as ever.
+rm -f t.o
+SUBSTRATE_TC_DEPTH=64 SUBSTRATE_TC_TRACE='cc->as->cc' "$AS" -32 -o t.o att.s > out 2>&1
+[ $? -eq 1 ] || bad "at the limit of recursion: does not exit 1"
+grep -q 'recursion guard hit at depth 64 (max 64), trace: cc->as->cc' out ||
+    bad "at the limit of recursion: does not say so: $(head -1 out)"
+[ -e t.o ] && bad "at the limit of recursion: assembles"
+SUBSTRATE_TC_DEPTH=63 "$AS" -32 -o t.o att.s > out 2>&1 || bad "one below the limit of recursion: refused"
+SUBSTRATE_TC_DEPTH=5 SUBSTRATE_TC_MAX_DEPTH=5 "$AS" -32 -o t.o att.s > out 2>&1 &&
+    bad "at a limit of recursion given in the environment: assembles"
+
 [ "$fail" -eq 0 ] && echo "ok: -msyntax, -al, --statistics, --target-help, --version, -c"
 exit "$fail"

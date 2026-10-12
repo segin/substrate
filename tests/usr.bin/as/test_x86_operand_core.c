@@ -10,6 +10,8 @@
  */
 #include <as_x86_encode.h>
 #include <as_x86_regs.h>
+/* The module itself, for its table: see main(). */
+#include <as_x86_regs.c>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -73,14 +75,17 @@ static const char *const not_registers[] = {
 int main(void) {
     as_x86_operand_t op;
     size_t seen[32];
-    size_t count = as_x86_reg_count();
+    size_t count = REG_COUNT;
     size_t i;
 
     memset(seen, 0, sizeof(seen));
 
-    /* Every register in the table, by its own name and in capitals. */
+    /* Every register in the table, by its own name and in capitals.
+     * (The table is the module's own: this file is compiled with the
+     * module in it, so that the program need keep no way in to the
+     * table that only a test would use.) */
     for (i = 0; i < count; ++i) {
-        const as_x86_reg_info_t *r = as_x86_reg_at(i);
+        const as_x86_reg_info_t *r = &regs[i];
         char upper[16];
         size_t k;
         int pass;
