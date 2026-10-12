@@ -33,7 +33,19 @@ $(O)libm.a: $(OBJS)
 # hidden there, and stay private to libm).  A DT_NEEDED libgcc_s.so.1
 # would make every 64-bit dynamic program fail to load, since libc.so.0
 # needs libm.so.0.
+#
+# And where there is no substrate toolchain for 32-bit code to take
+# libgcc_s.so.1 from -- the 64-bit image is built with the 64-bit
+# toolchain alone, and keeps the 32-bit libraries for `cc -m32` -- the
+# 32-bit libm.so.0 does as the 64-bit one does.  It asked for a
+# libgcc_s.so.1 that build-rootfs.sh had none to install, and no 32-bit
+# program in that image could start.
+LIBM_STAGE1 = $(if $(STAGE1_PREFIX),$(STAGE1_PREFIX),/opt/substrate)
+LIBM_GCC_S := $(wildcard $(LIBM_STAGE1)/i386-unknown-substrate/lib/libgcc_s.so.1 \
+                         $(LIBM_STAGE1)/lib/gcc/i386-unknown-substrate/*/libgcc_s.so.1)
 ifeq ($(ARCH),x86_64)
+LIBM_LIBGCC = $(LIBGCC)
+else ifeq ($(LIBM_GCC_S),)
 LIBM_LIBGCC = $(LIBGCC)
 else
 LIBM_LIBGCC = -lgcc_s
