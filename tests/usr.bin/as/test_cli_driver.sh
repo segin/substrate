@@ -113,6 +113,14 @@ grep -q "invalid -march= option: \`x86-64-v3'" "$TMP/badmarch.err"
 # 9) -mtune acceptance/plumbing
 "$AS" -64 -march=x86-64-v2 -mtune=generic -o "$TMP/tune.o" "$TMP/simple.s"
 
+# 9a) no note of the instruction sets used is written, and a build that
+# says it wants none is taken; one that wants it is told there is none.
+"$AS" -64 -mx86-used-note=no -o "$TMP/note.o" "$TMP/simple.s"
+if "$AS" -64 -mx86-used-note=yes -o "$TMP/note.o" "$TMP/simple.s" 2>/dev/null; then
+    echo "expected -mx86-used-note=yes to fail"
+    exit 1
+fi
+
 # 10) deterministic diagnostics ordering
 if "$AS" -32 -march=invalid-cpu -o "$TMP/invalid1.o" "$TMP/simple.s" >"$TMP/inv1.out" 2>"$TMP/inv1.err"; then
     echo "expected invalid -march to fail"

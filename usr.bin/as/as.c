@@ -258,6 +258,7 @@ static const struct {
     {"-march=CPU[+EXT...]", "the processor whose instructions are allowed (-march CPU)"},
     {"-mtune=CPU", "taken, and changes nothing (-mtune CPU)"},
     {"-msyntax=att|intel", "the syntax the source begins in (-msyntax NAME)"},
+    {"-mx86-used-note=no", "taken: no note of the instruction sets used is written"},
     {"-mthumb, -marm", "ARM: the instruction set the source begins in"},
     {"-mcpu=NAME, -mfpu=NAME, -mfloat-abi=NAME", "ARM and AArch64: taken, and allow everything"},
     {"-O elf|binary", "an ELF object, or a flat image of its sections (-Obinary)"},
@@ -4546,6 +4547,16 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
                 ctx->syntax_intel = 0;
             } else {
                 as_diag(AS_E_USAGE, "unsupported -msyntax=%s (expected att|intel)", value);
+                return 2;
+            }
+            continue;
+        }
+        /* GNU as's note of the instruction sets a source used, which
+         * some builds of it write unasked.  This assembler writes none,
+         * and is told so by a build that wants none. */
+        if (strncmp(arg, "-mx86-used-note=", 16) == 0) {
+            if (strcmp(arg + 16, "no") != 0) {
+                as_diag(AS_E_USAGE, "unsupported -mx86-used-note=%s (only no: no such note is written)", arg + 16);
                 return 2;
             }
             continue;

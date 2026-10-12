@@ -13,6 +13,7 @@
 .Op Fl D Ar macro Ns Op = Ns Ar value
 .Op Fl march Ar cpu
 .Op Fl mtune Ar cpu
+.Op Fl mx86-used-note Ns = Ns Cm no
 .Op Fl O Ar elf|binary
 .Op Fl msyntax Ns = Ns Ar att|intel
 .Op Fl -warn | Fl W | Fl -no-warn
@@ -167,6 +168,15 @@ The processor does not limit the instructions that are assembled: every
 instruction this assembler has is taken whatever is named.
 .It Fl mtune Ar cpu
 Select tuning target string.
+.It Fl mx86-used-note Ns = Ns Cm no
+Taken, and changes nothing: the note of the instruction sets a source
+used
+.Pq Dq x86 ISA used ,
+which some builds of GNU as put in
+.Li .note.gnu.property
+unasked, is not written.
+.Cm yes
+is refused.
 .It Fl O Ar elf|binary
 Select output format.
 .Cm elf
