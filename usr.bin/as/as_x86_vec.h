@@ -80,6 +80,8 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_NF (1u << 26)     /* EVEX of APX: no flags are written, and the bit that says so */
 #define AS_VEC_F_SCC (1u << 27)    /* EVEX of APX: a condition in the prefix, which is the row's `bcst` */
 #define AS_VEC_F_REGRM (1u << 28)  /* the register in r/m is in ModRM.reg too: a product into what is multiplied */
+#define AS_VEC_F_PROMO (1u << 29)  /* APX's EVEX form of an instruction with another: only where {evex} or {nf} asks */
+#define AS_VEC_F_PROMOHI (1u << 30) /* and one that %r16 to %r31 need too, the instruction having no REX2 form */
 
 typedef struct {
     const char *name;
@@ -103,6 +105,7 @@ typedef struct {
      *   1 2 3   memory whose index is an %xmm, a %ymm, a %zmm register
      *   i u     a number of one byte: -128 to 255; 0 to 255 only
      *   l       %cl and no other: a count
+     *   o       the number 1 and no other: a count that is in the opcode
      *   s       a number of one byte that is extended by its sign:
      *           -128 to 127, and known here
      *   n N     an MMX register; that, or memory
@@ -160,8 +163,11 @@ int as_x86_vec_knows(const char *mnemonic);
  * otherwise assembled elsewhere (`add` with three operands).  Such a
  * name is not one as_x86_vec_knows() says yes to; as_x86_vec_encode()
  * gives 0 for it where no row is of the operands.  `op_count` is how
- * many operands the statement has: 0 if no such form has as many. */
-int as_x86_vec_has_apx(const char *mnemonic, size_t op_count);
+ * many operands the statement has: 0 if no such form has as many.
+ * `asked` is whether the statement has `{evex}` or `{nf}` before it,
+ * and `high` whether it has one of %r16 to %r31: the forms that are
+ * only for those are not counted otherwise. */
+int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int high);
 
 /*
  * 1 with the instruction in out[0 .. *out_len), 0 if the mnemonic is

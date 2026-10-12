@@ -48,18 +48,42 @@ static int put32(vec_ctx_t *ctx, uint32_t v) {
 
 static as_strmap_t first_row;
 static int first_row_made;
+/* The row of the same name after each, or the table's count: made
+ * with first_row, and never let go. */
+static size_t *next_row;
 
 /* The first row of a name; the rows of one name stand together. */
 static int find_rows(const char *name, size_t *first) {
     if (!first_row_made) {
         size_t i;
 
+        next_row = (size_t *)malloc(as_x86_vec_table_count * sizeof(*next_row));
+        if (next_row == NULL) {
+            return -1;
+        }
         for (i = 0; i < as_x86_vec_table_count; ++i) {
             size_t was;
 
+            next_row[i] = as_x86_vec_table_count;
             if (!as_strmap_get(&first_row, as_x86_vec_table[i].name, &was) &&
                 as_strmap_put(&first_row, as_x86_vec_table[i].name, i) != 0) {
                 return -1;
+            }
+        }
+        /* The rows of a name stand together, and where a name has more
+         * of them further on -- the forms APX adds to an instruction
+         * that had rows before -- they are another run of it, and are
+         * read after the first. */
+        for (i = 0; i < as_x86_vec_table_count; ++i) {
+            size_t run = 0;
+
+            if (i > 0 && strcmp(as_x86_vec_table[i - 1].name, as_x86_vec_table[i].name) == 0) {
+                next_row[i - 1] = i;
+            } else if (as_strmap_get(&first_row, as_x86_vec_table[i].name, &run) && run != i) {
+                while (next_row[run] != as_x86_vec_table_count) {
+                    run = next_row[run];
+                }
+                next_row[run] = i;
             }
         }
         first_row_made = 1;
@@ -197,7 +221,7 @@ int as_x86_vec_knows(const char *mnemonic) {
     return alias_of(mnemonic, base, sizeof(base), &imm) == 0 && find_rows(base, &first) == 0;
 }
 
-int as_x86_vec_has_apx(const char *mnemonic, size_t op_count) {
+int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int high) {
     size_t first;
     size_t i;
 
@@ -205,10 +229,15 @@ int as_x86_vec_has_apx(const char *mnemonic, size_t op_count) {
         return 0;
     }
     /* (Most statements of such a name are not APX's, and are told by
-     * how many operands they have: `add` of two is none of these.) */
-    for (i = first; i < as_x86_vec_table_count && (i == first || strcmp(as_x86_vec_table[i].name, mnemonic) == 0);
-         ++i) {
-        if (strlen(as_x86_vec_table[i].ops) == op_count) {
+     * how many operands they have, and by whether an EVEX form was
+     * asked for: `add` of two is none of these.) */
+    for (i = first; i < as_x86_vec_table_count; i = next_row[i]) {
+        unsigned flags = as_x86_vec_table[i].flags;
+
+        if (strlen(as_x86_vec_table[i].ops) != op_count) {
+            continue;
+        }
+        if ((flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) == 0 || asked || ((flags & AS_VEC_F_PROMOHI) != 0 && high)) {
             return 1;
         }
     }
@@ -268,6 +297,9 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     case 'l':
         /* %cl, where it is a count. */
         return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 && (unsigned)op->u.reg == 1u;
+    case 'o':
+        /* The number one, which a shift has a form of its own for. */
+        return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm == 1;
     case 's':
         /* A byte that the instruction extends by its sign. */
         return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm >= -128 && op->u.imm <= 127;
@@ -871,6 +903,17 @@ static int row_refuses(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, i
             *why = "takes no mask, broadcast or rounding, and no register past the fifteenth";
             return 1;
         }
+        /* (REX2 says %r16 to %r31 for an opcode of one byte or two:
+         * one of the maps past them is left to the EVEX row of the
+         * name, where there is one.) */
+        if (t->map != AS_VEC_MAP_ONE && t->map != AS_VEC_MAP_0F && has_high_general(rq)) {
+            *why = "has no prefix that says %r16 to %r31 with these operands";
+            return 1;
+        }
+        if ((rq->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0) {
+            *why = "has no EVEX form with these operands";
+            return 1;
+        }
         if ((rq->pseudo & (AS_PSEUDO_VEX | AS_PSEUDO_VEX3)) != 0) {
             *why = "has no VEX form: the instruction with one has another name";
             return 1;
@@ -959,7 +1002,10 @@ int as_x86_vec_takes_data16(const char *mnemonic) {
     if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
         return 0;
     }
-    for (; i < as_x86_vec_table_count && strcmp(as_x86_vec_table[i].name, mnemonic) == 0; ++i) {
+    for (; i < as_x86_vec_table_count; i = next_row[i]) {
+        if ((as_x86_vec_table[i].flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0) {
+            continue;
+        }
         if (as_x86_vec_table[i].enc != AS_VEC_LEGACY || strpbrk(as_x86_vec_table[i].ops, "xyzXYZnN0123") != NULL) {
             return 0;
         }
@@ -1039,10 +1085,28 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
     ctx.errbuf_sz = errbuf_sz;
     evex = needs_evex(rq);
 
-    for (i = first; i < as_x86_vec_table_count && strcmp(as_x86_vec_table[i].name, rq->mnemonic) == 0; ++i) {
+    for (i = first; i < as_x86_vec_table_count; i = next_row[i]) {
         const as_x86_vec_tmpl_t *t = &as_x86_vec_table[i];
 
         if (!row_takes(t, rq)) {
+            continue;
+        }
+        /*
+         * APX's EVEX form of an instruction that has another: it is
+         * the one asked for by `{evex}` or `{nf}`, or -- of the
+         * instructions with no REX2 form -- the one %r16 to %r31 need.
+         * `{nf}` asks for a form that writes no flags, and no other.
+         */
+        if ((t->flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0 &&
+            (rq->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) == 0 &&
+            !((t->flags & AS_VEC_F_PROMOHI) != 0 && has_high_general(rq))) {
+            continue;
+        }
+        if (((t->flags & AS_VEC_F_NF) != 0 && (t->flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0) !=
+            ((rq->pseudo & AS_PSEUDO_NF) != 0)) {
+            if ((rq->pseudo & AS_PSEUDO_NF) != 0) {
+                why = "has no form that writes no flags with these operands";
+            }
             continue;
         }
         if ((t->flags & AS_VEC_F_64) != 0 && rq->mode != 64u) {

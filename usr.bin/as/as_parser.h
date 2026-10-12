@@ -94,6 +94,8 @@ typedef struct {
 #define AS_PSEUDO_STORE (1u << 6)
 #define AS_PSEUDO_REX (1u << 7)
 #define AS_PSEUDO_NOOPTIMIZE (1u << 8)
+/* `{nf}`, of APX: the instruction is to write no flags. */
+#define AS_PSEUDO_NF (1u << 9)
 
 /* The flag of a pseudo-prefix's name, without its braces; 0 if it is
  * not one. */

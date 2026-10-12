@@ -51,7 +51,7 @@ unsigned as_pseudo_prefix_flag(const char *name) {
         {"vex", AS_PSEUDO_VEX},       {"vex2", AS_PSEUDO_VEX},     {"vex3", AS_PSEUDO_VEX3},
         {"evex", AS_PSEUDO_EVEX},     {"disp8", AS_PSEUDO_DISP8},  {"disp32", AS_PSEUDO_DISP32},
         {"load", AS_PSEUDO_LOAD},     {"store", AS_PSEUDO_STORE},  {"rex", AS_PSEUDO_REX},
-        {"nooptimize", AS_PSEUDO_NOOPTIMIZE},
+        {"nooptimize", AS_PSEUDO_NOOPTIMIZE}, {"nf", AS_PSEUDO_NF},
     };
     size_t i;
 

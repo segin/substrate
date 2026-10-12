@@ -10890,7 +10890,9 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
      * asked of it first, in 64-bit code: what the table has no row for,
      * or cannot read, is the instruction it always was.
      */
-    if (cfg->is_64 && n >= 1 && as_x86_vec_has_apx(mn, n)) {
+    if (cfg->is_64 && n >= 1 &&
+        as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
+                           x86_stmt_has_high_general(insn))) {
         static int asking;
         int rc;
 
@@ -10901,6 +10903,11 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         rc = encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);
         asking = 0;
         if (rc <= 0) {
+            /* (`{nf}` is of the table's rows and of nothing else.) */
+            if ((insn->pseudo & AS_PSEUDO_NF) != 0) {
+                snprintf(encerr, encerr_sz, "'%s' has no form that writes no flags with these operands", mn);
+                return -1;
+            }
             encerr[0] = '\0';
             *code_len = 0;
             return 0;
@@ -10908,6 +10915,10 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         return rc;
     }
     if (!as_x86_vec_knows(mn)) {
+        if ((insn->pseudo & AS_PSEUDO_NF) != 0) {
+            snprintf(encerr, encerr_sz, "'%s' has no form that writes no flags with these operands", mn);
+            return -1;
+        }
         return 0;
     }
     return encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);
