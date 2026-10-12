@@ -20745,3 +20745,5081 @@
 64	refused	rep cmpxchg16b (%rbx)
 32	refused	cmpxchg16b (%eax)
 32	refused	xsave64 (%eax)
+64	refused	bsf (%rax), %dl
+64	refused	bsf (%rax,%rcx,2), %dl
+64	refused	bsr (%rax), %dl
+64	refused	bsr (%rax,%rcx,2), %dl
+64	refused	bt %ecx, %rdx
+64	refused	bt %ecx, %dx
+64	refused	bt %ecx, %dl
+64	refused	bt %rcx, %edx
+64	refused	bt %rcx, %dx
+64	refused	bt %rcx, %dl
+64	refused	bt %cx, %edx
+64	refused	bt %cx, %rdx
+64	refused	bt %cx, %dl
+64	refused	bt %cl, %edx
+64	refused	bt %cl, %rdx
+64	refused	bt %cl, %dx
+64	refused	bt %cl, %dl
+64	refused	bt %cl, (%rax)
+64	refused	bt %cl, (%rax,%rcx,2)
+64	refused	bt $0x12, %dl
+64	refused	btc %ecx, %rdx
+64	refused	btc %ecx, %dx
+64	refused	btc %ecx, %dl
+64	refused	btc %rcx, %edx
+64	refused	btc %rcx, %dx
+64	refused	btc %rcx, %dl
+64	refused	btc %cx, %edx
+64	refused	btc %cx, %rdx
+64	refused	btc %cx, %dl
+64	refused	btc %cl, %edx
+64	refused	btc %cl, %rdx
+64	refused	btc %cl, %dx
+64	refused	btc %cl, %dl
+64	refused	btc %cl, (%rax)
+64	refused	btc %cl, (%rax,%rcx,2)
+64	refused	btc $0x12, %dl
+64	refused	btr %ecx, %rdx
+64	refused	btr %ecx, %dx
+64	refused	btr %ecx, %dl
+64	refused	btr %rcx, %edx
+64	refused	btr %rcx, %dx
+64	refused	btr %rcx, %dl
+64	refused	btr %cx, %edx
+64	refused	btr %cx, %rdx
+64	refused	btr %cx, %dl
+64	refused	btr %cl, %edx
+64	refused	btr %cl, %rdx
+64	refused	btr %cl, %dx
+64	refused	btr %cl, %dl
+64	refused	btr %cl, (%rax)
+64	refused	btr %cl, (%rax,%rcx,2)
+64	refused	btr $0x12, %dl
+64	refused	bts %ecx, %rdx
+64	refused	bts %ecx, %dx
+64	refused	bts %ecx, %dl
+64	refused	bts %rcx, %edx
+64	refused	bts %rcx, %dx
+64	refused	bts %rcx, %dl
+64	refused	bts %cx, %edx
+64	refused	bts %cx, %rdx
+64	refused	bts %cx, %dl
+64	refused	bts %cl, %edx
+64	refused	bts %cl, %rdx
+64	refused	bts %cl, %dx
+64	refused	bts %cl, %dl
+64	refused	bts %cl, (%rax)
+64	refused	bts %cl, (%rax,%rcx,2)
+64	refused	bts $0x12, %dl
+64	refused	crc32 (%rax), %mm2
+64	refused	crc32 %mm1, %mm2
+64	refused	crc32 (%rax,%rcx,2), %mm2
+64	refused	jmp %xmm1
+64	refused	jmp %ymm1
+64	refused	jmp %zmm1
+64	refused	jmp %mm1
+64	refused	lar %xmm1, %xmm2
+64	refused	lar %xmm1, %ymm2
+64	refused	lar %xmm1, %zmm2
+64	refused	lar %ymm1, %xmm2
+64	refused	lar %ymm1, %ymm2
+64	refused	lar %ymm1, %zmm2
+64	refused	lar %zmm1, %xmm2
+64	refused	lar %zmm1, %ymm2
+64	refused	lar %zmm1, %zmm2
+64	refused	lar %ecx, %dx
+64	refused	lar %ecx, %dl
+64	refused	lar %cx, %dl
+64	refused	lar %cl, %edx
+64	refused	lar %cl, %dx
+64	refused	lar %cl, %dl
+64	refused	lar (%rax), %xmm2
+64	refused	lar (%rax), %ymm2
+64	refused	lar (%rax), %zmm2
+64	refused	lar (%rax), %dl
+64	refused	lar (%rax), %mm2
+64	refused	lar %mm1, %mm2
+64	refused	lar (%rax,%rcx,2), %xmm2
+64	refused	lar (%rax,%rcx,2), %ymm2
+64	refused	lar (%rax,%rcx,2), %zmm2
+64	refused	lar (%rax,%rcx,2), %dl
+64	refused	lar (%rax,%rcx,2), %mm2
+64	refused	lfs (%rax), %xmm2
+64	refused	lfs (%rax), %ymm2
+64	refused	lfs (%rax), %zmm2
+64	refused	lfs (%rax), %rdx
+64	refused	lfs (%rax), %dl
+64	refused	lfs (%rax), %mm2
+64	refused	lfs (%rax,%rcx,2), %xmm2
+64	refused	lfs (%rax,%rcx,2), %ymm2
+64	refused	lfs (%rax,%rcx,2), %zmm2
+64	refused	lfs (%rax,%rcx,2), %rdx
+64	refused	lfs (%rax,%rcx,2), %dl
+64	refused	lfs (%rax,%rcx,2), %mm2
+64	refused	lgs (%rax), %xmm2
+64	refused	lgs (%rax), %ymm2
+64	refused	lgs (%rax), %zmm2
+64	refused	lgs (%rax), %rdx
+64	refused	lgs (%rax), %dl
+64	refused	lgs (%rax), %mm2
+64	refused	lgs (%rax,%rcx,2), %xmm2
+64	refused	lgs (%rax,%rcx,2), %ymm2
+64	refused	lgs (%rax,%rcx,2), %zmm2
+64	refused	lgs (%rax,%rcx,2), %rdx
+64	refused	lgs (%rax,%rcx,2), %dl
+64	refused	lgs (%rax,%rcx,2), %mm2
+64	refused	lldt %xmm1
+64	refused	lldt %ymm1
+64	refused	lldt %zmm1
+64	refused	lldt %cl
+64	refused	lldt %mm1
+64	refused	lmsw %xmm1
+64	refused	lmsw %ymm1
+64	refused	lmsw %zmm1
+64	refused	lmsw %mm1
+64	refused	lsl %xmm1, %xmm2
+64	refused	lsl %xmm1, %ymm2
+64	refused	lsl %xmm1, %zmm2
+64	refused	lsl %ymm1, %xmm2
+64	refused	lsl %ymm1, %ymm2
+64	refused	lsl %ymm1, %zmm2
+64	refused	lsl %zmm1, %xmm2
+64	refused	lsl %zmm1, %ymm2
+64	refused	lsl %zmm1, %zmm2
+64	refused	lsl %ecx, %dx
+64	refused	lsl %ecx, %dl
+64	refused	lsl %cx, %dl
+64	refused	lsl %cl, %edx
+64	refused	lsl %cl, %dx
+64	refused	lsl %cl, %dl
+64	refused	lsl (%rax), %xmm2
+64	refused	lsl (%rax), %ymm2
+64	refused	lsl (%rax), %zmm2
+64	refused	lsl (%rax), %dl
+64	refused	lsl (%rax), %mm2
+64	refused	lsl %mm1, %mm2
+64	refused	lsl (%rax,%rcx,2), %xmm2
+64	refused	lsl (%rax,%rcx,2), %ymm2
+64	refused	lsl (%rax,%rcx,2), %zmm2
+64	refused	lsl (%rax,%rcx,2), %dl
+64	refused	lsl (%rax,%rcx,2), %mm2
+64	refused	ltr %xmm1
+64	refused	ltr %ymm1
+64	refused	ltr %zmm1
+64	refused	ltr %cl
+64	refused	ltr %mm1
+64	refused	movabs $0x12, %xmm2
+64	refused	movabs $0x12, %ymm2
+64	refused	movabs $0x12, %zmm2
+64	refused	movabs $0x12, %mm2
+64	refused	movsx %xmm1, %xmm2
+64	refused	movsx %xmm1, %ymm2
+64	refused	movsx %xmm1, %zmm2
+64	refused	movsx %ymm1, %xmm2
+64	refused	movsx %ymm1, %ymm2
+64	refused	movsx %ymm1, %zmm2
+64	refused	movsx %ymm1, %mm2
+64	refused	movsx %zmm1, %xmm2
+64	refused	movsx %zmm1, %ymm2
+64	refused	movsx %zmm1, %zmm2
+64	refused	movsx %zmm1, %mm2
+64	refused	movsx %ecx, %dx
+64	refused	movsx %rcx, %edx
+64	refused	movsx %rcx, %rdx
+64	refused	movsx %rcx, %dx
+64	refused	movsx (%rax), %xmm2
+64	refused	movsx (%rax), %ymm2
+64	refused	movsx (%rax), %zmm2
+64	refused	movsx (%rax), %mm2
+64	refused	movsx %mm1, %ymm2
+64	refused	movsx %mm1, %zmm2
+64	refused	movsx %mm1, %mm2
+64	refused	movsx (%rax,%rcx,2), %xmm2
+64	refused	movsx (%rax,%rcx,2), %ymm2
+64	refused	movsx (%rax,%rcx,2), %zmm2
+64	refused	movsx (%rax,%rcx,2), %mm2
+64	refused	movsxd %xmm1, %xmm2
+64	refused	movsxd %xmm1, %ymm2
+64	refused	movsxd %xmm1, %zmm2
+64	refused	movsxd %ymm1, %xmm2
+64	refused	movsxd %ymm1, %ymm2
+64	refused	movsxd %ymm1, %zmm2
+64	refused	movsxd %ymm1, %mm2
+64	refused	movsxd %zmm1, %xmm2
+64	refused	movsxd %zmm1, %ymm2
+64	refused	movsxd %zmm1, %zmm2
+64	refused	movsxd %zmm1, %mm2
+64	refused	movsxd (%rax), %xmm2
+64	refused	movsxd (%rax), %ymm2
+64	refused	movsxd (%rax), %zmm2
+64	refused	movsxd (%rax), %mm2
+64	refused	movsxd %mm1, %ymm2
+64	refused	movsxd %mm1, %zmm2
+64	refused	movsxd %mm1, %mm2
+64	refused	movsxd (%rax,%rcx,2), %xmm2
+64	refused	movsxd (%rax,%rcx,2), %ymm2
+64	refused	movsxd (%rax,%rcx,2), %zmm2
+64	refused	movsxd (%rax,%rcx,2), %mm2
+64	refused	movzx %xmm1, %xmm2
+64	refused	movzx %xmm1, %ymm2
+64	refused	movzx %xmm1, %zmm2
+64	refused	movzx %ymm1, %xmm2
+64	refused	movzx %ymm1, %ymm2
+64	refused	movzx %ymm1, %zmm2
+64	refused	movzx %ymm1, %mm2
+64	refused	movzx %zmm1, %xmm2
+64	refused	movzx %zmm1, %ymm2
+64	refused	movzx %zmm1, %zmm2
+64	refused	movzx %zmm1, %mm2
+64	refused	movzx %rcx, %edx
+64	refused	movzx %rcx, %rdx
+64	refused	movzx %rcx, %dx
+64	refused	movzx (%rax), %xmm2
+64	refused	movzx (%rax), %ymm2
+64	refused	movzx (%rax), %zmm2
+64	refused	movzx (%rax), %mm2
+64	refused	movzx %mm1, %ymm2
+64	refused	movzx %mm1, %zmm2
+64	refused	movzx %mm1, %mm2
+64	refused	movzx (%rax,%rcx,2), %xmm2
+64	refused	movzx (%rax,%rcx,2), %ymm2
+64	refused	movzx (%rax,%rcx,2), %zmm2
+64	refused	movzx (%rax,%rcx,2), %mm2
+64	refused	pop %xmm1
+64	refused	pop %ymm1
+64	refused	pop %zmm1
+64	refused	pop %mm1
+64	refused	push %xmm1
+64	refused	push %ymm1
+64	refused	push %zmm1
+64	refused	push %mm1
+64	refused	rdfsbase %xmm1
+64	refused	rdfsbase %ymm1
+64	refused	rdfsbase %zmm1
+64	refused	rdfsbase %cx
+64	refused	rdfsbase %cl
+64	refused	rdfsbase %mm1
+64	refused	rdgsbase %xmm1
+64	refused	rdgsbase %ymm1
+64	refused	rdgsbase %zmm1
+64	refused	rdgsbase %cx
+64	refused	rdgsbase %cl
+64	refused	rdgsbase %mm1
+64	refused	shrd %ecx, %rdx
+64	refused	shrd %ecx, %dx
+64	refused	shrd %ecx, %dl
+64	refused	shrd %rcx, %edx
+64	refused	shrd %rcx, %dx
+64	refused	shrd %rcx, %dl
+64	refused	shrd %cx, %edx
+64	refused	shrd %cx, %rdx
+64	refused	shrd %cx, %dl
+64	refused	shrd %cl, %edx
+64	refused	shrd %cl, %rdx
+64	refused	shrd %cl, %dx
+64	refused	shrd %cl, %dl
+64	refused	shrd %cl, (%rax)
+64	refused	shrd %cl, (%rax,%rcx,2)
+64	refused	shrd %xmm1, %xmm2, $0x12
+64	refused	shrd %xmm1, %ymm2, $0x12
+64	refused	shrd %xmm1, %zmm2, $0x12
+64	refused	shrd %ymm1, %xmm2, $0x12
+64	refused	shrd %ymm1, %ymm2, $0x12
+64	refused	shrd %ymm1, %zmm2, $0x12
+64	refused	shrd %zmm1, %xmm2, $0x12
+64	refused	shrd %zmm1, %ymm2, $0x12
+64	refused	shrd %zmm1, %zmm2, $0x12
+64	refused	shrd %ecx, %edx, $0x12
+64	refused	shrd %ecx, %rdx, $0x12
+64	refused	shrd %ecx, %dx, $0x12
+64	refused	shrd %rcx, %edx, $0x12
+64	refused	shrd %rcx, %rdx, $0x12
+64	refused	shrd %rcx, %dx, $0x12
+64	refused	shrd (%rax), %xmm2, $0x12
+64	refused	shrd (%rax), %ymm2, $0x12
+64	refused	shrd (%rax), %zmm2, $0x12
+64	refused	shrd (%rax), %edx, $0x12
+64	refused	shrd (%rax), %rdx, $0x12
+64	refused	shrd (%rax), %dx, $0x12
+64	refused	shrd $0x12, %xmm2, %xmm3
+64	refused	shrd $0x12, %xmm2, %ymm3
+64	refused	shrd $0x12, %xmm2, %zmm3
+64	refused	shrd $0x12, %xmm2, (%rax)
+64	refused	shrd $0x12, %ymm2, %xmm3
+64	refused	shrd $0x12, %ymm2, %ymm3
+64	refused	shrd $0x12, %ymm2, %zmm3
+64	refused	shrd $0x12, %ymm2, (%rax)
+64	refused	shrd $0x12, %zmm2, %xmm3
+64	refused	shrd $0x12, %zmm2, %ymm3
+64	refused	shrd $0x12, %zmm2, %zmm3
+64	refused	shrd $0x12, %zmm2, (%rax)
+64	refused	shrd $0x12, %edx, %rbx
+64	refused	shrd $0x12, %edx, %bx
+64	refused	shrd $0x12, %rdx, %ebx
+64	refused	shrd $0x12, %rdx, %bx
+64	refused	shrd $0x12, %dx, %ebx
+64	refused	shrd $0x12, %dx, %rbx
+64	refused	shrd %cx, %edx, $0x12
+64	refused	shrd %cx, %rdx, $0x12
+64	refused	shrd %cx, %dx, $0x12
+64	refused	sldt %xmm1
+64	refused	sldt %ymm1
+64	refused	sldt %zmm1
+64	refused	sldt %cl
+64	refused	sldt %mm1
+64	refused	smsw %xmm1
+64	refused	smsw %ymm1
+64	refused	smsw %zmm1
+64	refused	smsw %cl
+64	refused	smsw %mm1
+64	refused	str %xmm1
+64	refused	str %ymm1
+64	refused	str %zmm1
+64	refused	str %cl
+64	refused	str %mm1
+64	refused	ud0 %xmm1, %xmm2
+64	refused	ud0 %xmm1, %ymm2
+64	refused	ud0 %xmm1, %zmm2
+64	refused	ud0 %ymm1, %xmm2
+64	refused	ud0 %ymm1, %ymm2
+64	refused	ud0 %ymm1, %zmm2
+64	refused	ud0 %ymm1, %mm2
+64	refused	ud0 %zmm1, %xmm2
+64	refused	ud0 %zmm1, %ymm2
+64	refused	ud0 %zmm1, %zmm2
+64	refused	ud0 %zmm1, %mm2
+64	refused	ud0 %ecx, %rdx
+64	refused	ud0 %ecx, %dx
+64	refused	ud0 %ecx, %dl
+64	refused	ud0 %rcx, %edx
+64	refused	ud0 %rcx, %dx
+64	refused	ud0 %rcx, %dl
+64	refused	ud0 %cx, %edx
+64	refused	ud0 %cx, %rdx
+64	refused	ud0 %cx, %dl
+64	refused	ud0 %cl, %edx
+64	refused	ud0 %cl, %rdx
+64	refused	ud0 %cl, %dx
+64	refused	ud0 %cl, %dl
+64	refused	ud0 (%rax), %xmm2
+64	refused	ud0 (%rax), %ymm2
+64	refused	ud0 (%rax), %zmm2
+64	refused	ud0 (%rax), %dl
+64	refused	ud0 (%rax), %mm2
+64	refused	ud0 %mm1, %ymm2
+64	refused	ud0 %mm1, %zmm2
+64	refused	ud0 %mm1, %mm2
+64	refused	ud0 (%rax,%rcx,2), %xmm2
+64	refused	ud0 (%rax,%rcx,2), %ymm2
+64	refused	ud0 (%rax,%rcx,2), %zmm2
+64	refused	ud0 (%rax,%rcx,2), %dl
+64	refused	ud0 (%rax,%rcx,2), %mm2
+64	refused	ud1 %xmm1, %xmm2
+64	refused	ud1 %xmm1, %ymm2
+64	refused	ud1 %xmm1, %zmm2
+64	refused	ud1 %ymm1, %xmm2
+64	refused	ud1 %ymm1, %ymm2
+64	refused	ud1 %ymm1, %zmm2
+64	refused	ud1 %ymm1, %mm2
+64	refused	ud1 %zmm1, %xmm2
+64	refused	ud1 %zmm1, %ymm2
+64	refused	ud1 %zmm1, %zmm2
+64	refused	ud1 %zmm1, %mm2
+64	refused	ud1 %ecx, %rdx
+64	refused	ud1 %ecx, %dx
+64	refused	ud1 %ecx, %dl
+64	refused	ud1 %rcx, %edx
+64	refused	ud1 %rcx, %dx
+64	refused	ud1 %rcx, %dl
+64	refused	ud1 %cx, %edx
+64	refused	ud1 %cx, %rdx
+64	refused	ud1 %cx, %dl
+64	refused	ud1 %cl, %edx
+64	refused	ud1 %cl, %rdx
+64	refused	ud1 %cl, %dx
+64	refused	ud1 %cl, %dl
+64	refused	ud1 (%rax), %xmm2
+64	refused	ud1 (%rax), %ymm2
+64	refused	ud1 (%rax), %zmm2
+64	refused	ud1 (%rax), %dl
+64	refused	ud1 (%rax), %mm2
+64	refused	ud1 %mm1, %ymm2
+64	refused	ud1 %mm1, %zmm2
+64	refused	ud1 %mm1, %mm2
+64	refused	ud1 (%rax,%rcx,2), %xmm2
+64	refused	ud1 (%rax,%rcx,2), %ymm2
+64	refused	ud1 (%rax,%rcx,2), %zmm2
+64	refused	ud1 (%rax,%rcx,2), %dl
+64	refused	ud1 (%rax,%rcx,2), %mm2
+64	refused	umonitor %mm1
+64	refused	verr %xmm1
+64	refused	verr %ymm1
+64	refused	verr %zmm1
+64	refused	verr %cl
+64	refused	verr %mm1
+64	refused	verw %xmm1
+64	refused	verw %ymm1
+64	refused	verw %zmm1
+64	refused	verw %cl
+64	refused	verw %mm1
+64	refused	vpbroadcastb %rcx, %xmm2
+64	refused	vpbroadcastb %rcx, %ymm2
+64	refused	vpbroadcastb %rcx, %zmm2
+64	refused	vpbroadcastw %rcx, %xmm2
+64	refused	vpbroadcastw %rcx, %ymm2
+64	refused	vpbroadcastw %rcx, %zmm2
+64	refused	wrfsbase %xmm1
+64	refused	wrfsbase %ymm1
+64	refused	wrfsbase %zmm1
+64	refused	wrfsbase %cx
+64	refused	wrfsbase %cl
+64	refused	wrfsbase %mm1
+64	refused	wrgsbase %xmm1
+64	refused	wrgsbase %ymm1
+64	refused	wrgsbase %zmm1
+64	refused	wrgsbase %cx
+64	refused	wrgsbase %cl
+64	refused	wrgsbase %mm1
+64	67	adword
+64	8fea7810da12000000	bextr $0x12, %edx, %ebx
+64	8feaf810da12000000	bextr $0x12, %rdx, %rbx
+64	8fea78101812000000	bextr $0x12, (%rax), %ebx
+64	8feaf8101812000000	bextr $0x12, (%rax), %rbx
+64	0fff	ud0
+64	0fb9	ud1
+64	0fb9d1	ud2b %ecx, %edx
+64	480fb9d1	ud2b %rcx, %rdx
+64	660fb9d1	ud2b %cx, %dx
+64	0fb910	ud2b (%rax), %edx
+64	480fb910	ud2b (%rax), %rdx
+64	660fb910	ud2b (%rax), %dx
+64	0fb91448	ud2b (%rax,%rcx,2), %edx
+64	480fb91448	ud2b (%rax,%rcx,2), %rdx
+64	660fb91448	ud2b (%rax,%rcx,2), %dx
+64	f2	xacquire
+64	f3	xrelease
+32	refused	arpl %xmm1, %xmm2
+32	refused	arpl %xmm1, %ymm2
+32	refused	arpl %xmm1, %zmm2
+32	refused	arpl %xmm1, (%eax)
+32	refused	arpl %xmm1, (%eax,%ecx,2)
+32	refused	arpl %ymm1, %xmm2
+32	refused	arpl %ymm1, %ymm2
+32	refused	arpl %ymm1, %zmm2
+32	refused	arpl %ymm1, (%eax)
+32	refused	arpl %ymm1, %mm2
+32	refused	arpl %ymm1, (%eax,%ecx,2)
+32	refused	arpl %zmm1, %xmm2
+32	refused	arpl %zmm1, %ymm2
+32	refused	arpl %zmm1, %zmm2
+32	refused	arpl %zmm1, (%eax)
+32	refused	arpl %zmm1, %mm2
+32	refused	arpl %zmm1, (%eax,%ecx,2)
+32	refused	arpl %ecx, %dx
+32	refused	arpl %ecx, %dl
+32	refused	arpl %cx, %edx
+32	refused	arpl %cx, %dl
+32	refused	arpl %cl, %edx
+32	refused	arpl %cl, %dx
+32	refused	arpl %cl, %dl
+32	refused	arpl %cl, (%eax)
+32	refused	arpl %cl, (%eax,%ecx,2)
+32	refused	arpl %mm1, %ymm2
+32	refused	arpl %mm1, %zmm2
+32	refused	arpl %mm1, (%eax)
+32	refused	arpl %mm1, %mm2
+32	refused	arpl %mm1, (%eax,%ecx,2)
+32	refused	bound %xmm1, (%eax)
+32	refused	bound %xmm1, (%eax,%ecx,2)
+32	refused	bound %ymm1, (%eax)
+32	refused	bound %ymm1, (%eax,%ecx,2)
+32	refused	bound %zmm1, (%eax)
+32	refused	bound %zmm1, (%eax,%ecx,2)
+32	refused	bound %cl, (%eax)
+32	refused	bound %cl, (%eax,%ecx,2)
+32	refused	bound (%eax), %xmm2
+32	refused	bound (%eax), %ymm2
+32	refused	bound (%eax), %zmm2
+32	refused	bound (%eax), %edx
+32	refused	bound (%eax), %dx
+32	refused	bound (%eax), %dl
+32	refused	bound (%eax), %mm2
+32	refused	bound %mm1, (%eax)
+32	refused	bound %mm1, (%eax,%ecx,2)
+32	refused	bound (%eax,%ecx,2), %xmm2
+32	refused	bound (%eax,%ecx,2), %ymm2
+32	refused	bound (%eax,%ecx,2), %zmm2
+32	refused	bound (%eax,%ecx,2), %edx
+32	refused	bound (%eax,%ecx,2), %dx
+32	refused	bound (%eax,%ecx,2), %dl
+32	refused	bound (%eax,%ecx,2), %mm2
+32	refused	bsf (%eax), %dl
+32	refused	bsf (%eax,%ecx,2), %dl
+32	refused	bsr (%eax), %dl
+32	refused	bsr (%eax,%ecx,2), %dl
+32	refused	bt %ecx, %dx
+32	refused	bt %ecx, %dl
+32	refused	bt %cx, %edx
+32	refused	bt %cx, %dl
+32	refused	bt %cl, %edx
+32	refused	bt %cl, %dx
+32	refused	bt %cl, %dl
+32	refused	bt %cl, (%eax)
+32	refused	bt %cl, (%eax,%ecx,2)
+32	refused	bt $0x12, %dl
+32	refused	btc %ecx, %dx
+32	refused	btc %ecx, %dl
+32	refused	btc %cx, %edx
+32	refused	btc %cx, %dl
+32	refused	btc %cl, %edx
+32	refused	btc %cl, %dx
+32	refused	btc %cl, %dl
+32	refused	btc %cl, (%eax)
+32	refused	btc %cl, (%eax,%ecx,2)
+32	refused	btc $0x12, %dl
+32	refused	btr %ecx, %dx
+32	refused	btr %ecx, %dl
+32	refused	btr %cx, %edx
+32	refused	btr %cx, %dl
+32	refused	btr %cl, %edx
+32	refused	btr %cl, %dx
+32	refused	btr %cl, %dl
+32	refused	btr %cl, (%eax)
+32	refused	btr %cl, (%eax,%ecx,2)
+32	refused	btr $0x12, %dl
+32	refused	bts %ecx, %dx
+32	refused	bts %ecx, %dl
+32	refused	bts %cx, %edx
+32	refused	bts %cx, %dl
+32	refused	bts %cl, %edx
+32	refused	bts %cl, %dx
+32	refused	bts %cl, %dl
+32	refused	bts %cl, (%eax)
+32	refused	bts %cl, (%eax,%ecx,2)
+32	refused	bts $0x12, %dl
+32	refused	jmp %xmm1
+32	refused	jmp %ymm1
+32	refused	jmp %zmm1
+32	refused	jmp %mm1
+32	refused	lar %xmm1, %xmm2
+32	refused	lar %xmm1, %ymm2
+32	refused	lar %xmm1, %zmm2
+32	refused	lar %ymm1, %xmm2
+32	refused	lar %ymm1, %ymm2
+32	refused	lar %ymm1, %zmm2
+32	refused	lar %ymm1, %mm2
+32	refused	lar %zmm1, %xmm2
+32	refused	lar %zmm1, %ymm2
+32	refused	lar %zmm1, %zmm2
+32	refused	lar %zmm1, %mm2
+32	refused	lar %ecx, %dx
+32	refused	lar %ecx, %dl
+32	refused	lar %cx, %dl
+32	refused	lar %cl, %edx
+32	refused	lar %cl, %dx
+32	refused	lar %cl, %dl
+32	refused	lar (%eax), %xmm2
+32	refused	lar (%eax), %ymm2
+32	refused	lar (%eax), %zmm2
+32	refused	lar (%eax), %dl
+32	refused	lar (%eax), %mm2
+32	refused	lar %mm1, %ymm2
+32	refused	lar %mm1, %zmm2
+32	refused	lar %mm1, %mm2
+32	refused	lar (%eax,%ecx,2), %xmm2
+32	refused	lar (%eax,%ecx,2), %ymm2
+32	refused	lar (%eax,%ecx,2), %zmm2
+32	refused	lar (%eax,%ecx,2), %dl
+32	refused	lar (%eax,%ecx,2), %mm2
+32	refused	lds (%eax), %xmm2
+32	refused	lds (%eax), %ymm2
+32	refused	lds (%eax), %zmm2
+32	refused	lds (%eax), %dl
+32	refused	lds (%eax), %mm2
+32	refused	lds (%eax,%ecx,2), %xmm2
+32	refused	lds (%eax,%ecx,2), %ymm2
+32	refused	lds (%eax,%ecx,2), %zmm2
+32	refused	lds (%eax,%ecx,2), %dl
+32	refused	lds (%eax,%ecx,2), %mm2
+32	refused	les (%eax), %xmm2
+32	refused	les (%eax), %ymm2
+32	refused	les (%eax), %zmm2
+32	refused	les (%eax), %dl
+32	refused	les (%eax), %mm2
+32	refused	les (%eax,%ecx,2), %xmm2
+32	refused	les (%eax,%ecx,2), %ymm2
+32	refused	les (%eax,%ecx,2), %zmm2
+32	refused	les (%eax,%ecx,2), %dl
+32	refused	les (%eax,%ecx,2), %mm2
+32	refused	lfs (%eax), %xmm2
+32	refused	lfs (%eax), %ymm2
+32	refused	lfs (%eax), %zmm2
+32	refused	lfs (%eax), %dl
+32	refused	lfs (%eax), %mm2
+32	refused	lfs (%eax,%ecx,2), %xmm2
+32	refused	lfs (%eax,%ecx,2), %ymm2
+32	refused	lfs (%eax,%ecx,2), %zmm2
+32	refused	lfs (%eax,%ecx,2), %dl
+32	refused	lfs (%eax,%ecx,2), %mm2
+32	refused	lgs (%eax), %xmm2
+32	refused	lgs (%eax), %ymm2
+32	refused	lgs (%eax), %zmm2
+32	refused	lgs (%eax), %dl
+32	refused	lgs (%eax), %mm2
+32	refused	lgs (%eax,%ecx,2), %xmm2
+32	refused	lgs (%eax,%ecx,2), %ymm2
+32	refused	lgs (%eax,%ecx,2), %zmm2
+32	refused	lgs (%eax,%ecx,2), %dl
+32	refused	lgs (%eax,%ecx,2), %mm2
+32	refused	lldt %xmm1
+32	refused	lldt %ymm1
+32	refused	lldt %zmm1
+32	refused	lldt %cl
+32	refused	lldt %mm1
+32	refused	lldt %bnd0
+32	refused	lmsw %xmm1
+32	refused	lmsw %ymm1
+32	refused	lmsw %zmm1
+32	refused	lmsw %mm1
+32	refused	lsl %xmm1, %xmm2
+32	refused	lsl %xmm1, %ymm2
+32	refused	lsl %xmm1, %zmm2
+32	refused	lsl %ymm1, %xmm2
+32	refused	lsl %ymm1, %ymm2
+32	refused	lsl %ymm1, %zmm2
+32	refused	lsl %ymm1, %mm2
+32	refused	lsl %zmm1, %xmm2
+32	refused	lsl %zmm1, %ymm2
+32	refused	lsl %zmm1, %zmm2
+32	refused	lsl %zmm1, %mm2
+32	refused	lsl %ecx, %dx
+32	refused	lsl %ecx, %dl
+32	refused	lsl %cx, %dl
+32	refused	lsl %cl, %edx
+32	refused	lsl %cl, %dx
+32	refused	lsl %cl, %dl
+32	refused	lsl (%eax), %xmm2
+32	refused	lsl (%eax), %ymm2
+32	refused	lsl (%eax), %zmm2
+32	refused	lsl (%eax), %dl
+32	refused	lsl (%eax), %mm2
+32	refused	lsl %mm1, %ymm2
+32	refused	lsl %mm1, %zmm2
+32	refused	lsl %mm1, %mm2
+32	refused	lsl (%eax,%ecx,2), %xmm2
+32	refused	lsl (%eax,%ecx,2), %ymm2
+32	refused	lsl (%eax,%ecx,2), %zmm2
+32	refused	lsl (%eax,%ecx,2), %dl
+32	refused	lsl (%eax,%ecx,2), %mm2
+32	refused	ltr %xmm1
+32	refused	ltr %ymm1
+32	refused	ltr %zmm1
+32	refused	ltr %cl
+32	refused	ltr %mm1
+32	refused	ltr %bnd0
+32	refused	movsx %xmm1, %xmm2
+32	refused	movsx %xmm1, %ymm2
+32	refused	movsx %xmm1, %zmm2
+32	refused	movsx %ymm1, %xmm2
+32	refused	movsx %ymm1, %ymm2
+32	refused	movsx %ymm1, %zmm2
+32	refused	movsx %ymm1, %mm2
+32	refused	movsx %zmm1, %xmm2
+32	refused	movsx %zmm1, %ymm2
+32	refused	movsx %zmm1, %zmm2
+32	refused	movsx %zmm1, %mm2
+32	refused	movsx (%eax), %xmm2
+32	refused	movsx (%eax), %ymm2
+32	refused	movsx (%eax), %zmm2
+32	refused	movsx (%eax), %mm2
+32	refused	movsx %mm1, %ymm2
+32	refused	movsx %mm1, %zmm2
+32	refused	movsx %mm1, %mm2
+32	refused	movsx (%eax,%ecx,2), %xmm2
+32	refused	movsx (%eax,%ecx,2), %ymm2
+32	refused	movsx (%eax,%ecx,2), %zmm2
+32	refused	movsx (%eax,%ecx,2), %mm2
+32	refused	movzx %xmm1, %xmm2
+32	refused	movzx %xmm1, %ymm2
+32	refused	movzx %xmm1, %zmm2
+32	refused	movzx %ymm1, %xmm2
+32	refused	movzx %ymm1, %ymm2
+32	refused	movzx %ymm1, %zmm2
+32	refused	movzx %ymm1, %mm2
+32	refused	movzx %zmm1, %xmm2
+32	refused	movzx %zmm1, %ymm2
+32	refused	movzx %zmm1, %zmm2
+32	refused	movzx %zmm1, %mm2
+32	refused	movzx (%eax), %xmm2
+32	refused	movzx (%eax), %ymm2
+32	refused	movzx (%eax), %zmm2
+32	refused	movzx (%eax), %mm2
+32	refused	movzx %mm1, %ymm2
+32	refused	movzx %mm1, %zmm2
+32	refused	movzx %mm1, %mm2
+32	refused	movzx (%eax,%ecx,2), %xmm2
+32	refused	movzx (%eax,%ecx,2), %ymm2
+32	refused	movzx (%eax,%ecx,2), %zmm2
+32	refused	movzx (%eax,%ecx,2), %mm2
+32	refused	pop %xmm1
+32	refused	pop %ymm1
+32	refused	pop %zmm1
+32	refused	pop %mm1
+32	refused	push %xmm1
+32	refused	push %ymm1
+32	refused	push %zmm1
+32	refused	push %mm1
+32	refused	rex64x
+32	refused	rex64xy
+32	refused	rex64xyz
+32	refused	rex64xz
+32	refused	rex64y
+32	refused	rex64yz
+32	refused	rex64z
+32	refused	rexx
+32	refused	rexxy
+32	refused	rexxyz
+32	refused	rexxz
+32	refused	rexy
+32	refused	rexyz
+32	refused	rexz
+32	refused	shrd %ecx, %dx
+32	refused	shrd %ecx, %dl
+32	refused	shrd %ecx, %bnd1
+32	refused	shrd %cx, %edx
+32	refused	shrd %cx, %dl
+32	refused	shrd %cx, %bnd1
+32	refused	shrd %cl, %edx
+32	refused	shrd %cl, %dx
+32	refused	shrd %cl, %dl
+32	refused	shrd %cl, (%eax)
+32	refused	shrd %cl, %bnd1
+32	refused	shrd %cl, (%eax,%ecx,2)
+32	refused	shrd %xmm1, %xmm2, %xmm3
+32	refused	shrd %xmm1, %xmm2, %ymm3
+32	refused	shrd %xmm1, %xmm2, %zmm3
+32	refused	shrd %xmm1, %xmm2, (%eax)
+32	refused	shrd %xmm1, %ymm2, %xmm3
+32	refused	shrd %xmm1, %ymm2, %ymm3
+32	refused	shrd %xmm1, %ymm2, %zmm3
+32	refused	shrd %xmm1, %ymm2, (%eax)
+32	refused	shrd %xmm1, %zmm2, %xmm3
+32	refused	shrd %xmm1, %zmm2, %ymm3
+32	refused	shrd %xmm1, %zmm2, %zmm3
+32	refused	shrd %xmm1, %zmm2, (%eax)
+32	refused	shrd %ymm1, %xmm2, %xmm3
+32	refused	shrd %ymm1, %xmm2, %ymm3
+32	refused	shrd %ymm1, %xmm2, %zmm3
+32	refused	shrd %ymm1, %xmm2, (%eax)
+32	refused	shrd %ymm1, %ymm2, %xmm3
+32	refused	shrd %ymm1, %ymm2, %ymm3
+32	refused	shrd %ymm1, %ymm2, %zmm3
+32	refused	shrd %ymm1, %ymm2, (%eax)
+32	refused	shrd %ymm1, %zmm2, %xmm3
+32	refused	shrd %ymm1, %zmm2, %ymm3
+32	refused	shrd %ymm1, %zmm2, %zmm3
+32	refused	shrd %ymm1, %zmm2, (%eax)
+32	refused	shrd %zmm1, %xmm2, %xmm3
+32	refused	shrd %zmm1, %xmm2, %ymm3
+32	refused	shrd %zmm1, %xmm2, %zmm3
+32	refused	shrd %zmm1, %xmm2, (%eax)
+32	refused	shrd %zmm1, %ymm2, %xmm3
+32	refused	shrd %zmm1, %ymm2, %ymm3
+32	refused	shrd %zmm1, %ymm2, %zmm3
+32	refused	shrd %zmm1, %ymm2, (%eax)
+32	refused	shrd %zmm1, %zmm2, %xmm3
+32	refused	shrd %zmm1, %zmm2, %ymm3
+32	refused	shrd %zmm1, %zmm2, %zmm3
+32	refused	shrd %zmm1, %zmm2, (%eax)
+32	refused	shrd %ecx, %edx, %ebx
+32	refused	shrd %ecx, %edx, (%eax)
+32	refused	shrd %ecx, %edx, %bx
+32	refused	shrd %ecx, %dx, %ebx
+32	refused	shrd %ecx, %dx, (%eax)
+32	refused	shrd %ecx, %dx, %bx
+32	refused	shrd $0x12, %xmm2, %xmm3
+32	refused	shrd $0x12, %xmm2, %ymm3
+32	refused	shrd $0x12, %xmm2, %zmm3
+32	refused	shrd $0x12, %xmm2, (%eax)
+32	refused	shrd $0x12, %ymm2, %xmm3
+32	refused	shrd $0x12, %ymm2, %ymm3
+32	refused	shrd $0x12, %ymm2, %zmm3
+32	refused	shrd $0x12, %ymm2, (%eax)
+32	refused	shrd $0x12, %zmm2, %xmm3
+32	refused	shrd $0x12, %zmm2, %ymm3
+32	refused	shrd $0x12, %zmm2, %zmm3
+32	refused	shrd $0x12, %zmm2, (%eax)
+32	refused	shrd $0x12, %edx, %bx
+32	refused	shrd $0x12, %dx, %ebx
+32	refused	shrd %cx, %edx, %ebx
+32	refused	shrd %cx, %edx, (%eax)
+32	refused	shrd %cx, %edx, %bx
+32	refused	shrd %cx, %dx, %ebx
+32	refused	shrd %cx, %dx, (%eax)
+32	refused	shrd %cx, %dx, %bx
+32	refused	sldt %xmm1
+32	refused	sldt %ymm1
+32	refused	sldt %zmm1
+32	refused	sldt %cl
+32	refused	sldt %mm1
+32	refused	sldt %bnd0
+32	refused	smsw %xmm1
+32	refused	smsw %ymm1
+32	refused	smsw %zmm1
+32	refused	smsw %cl
+32	refused	smsw %mm1
+32	refused	str %xmm1
+32	refused	str %ymm1
+32	refused	str %zmm1
+32	refused	str %cl
+32	refused	str %mm1
+32	refused	str %bnd0
+32	refused	ud0 %xmm1, %xmm2
+32	refused	ud0 %xmm1, %ymm2
+32	refused	ud0 %xmm1, %zmm2
+32	refused	ud0 %ymm1, %xmm2
+32	refused	ud0 %ymm1, %ymm2
+32	refused	ud0 %ymm1, %zmm2
+32	refused	ud0 %ymm1, %mm2
+32	refused	ud0 %zmm1, %xmm2
+32	refused	ud0 %zmm1, %ymm2
+32	refused	ud0 %zmm1, %zmm2
+32	refused	ud0 %zmm1, %mm2
+32	refused	ud0 %ecx, %dx
+32	refused	ud0 %ecx, %dl
+32	refused	ud0 %cx, %edx
+32	refused	ud0 %cx, %dl
+32	refused	ud0 %cl, %edx
+32	refused	ud0 %cl, %dx
+32	refused	ud0 %cl, %dl
+32	refused	ud0 (%eax), %xmm2
+32	refused	ud0 (%eax), %ymm2
+32	refused	ud0 (%eax), %zmm2
+32	refused	ud0 (%eax), %dl
+32	refused	ud0 (%eax), %mm2
+32	refused	ud0 %mm1, %ymm2
+32	refused	ud0 %mm1, %zmm2
+32	refused	ud0 %mm1, %mm2
+32	refused	ud0 %bnd0, %xmm2
+32	refused	ud0 %bnd0, %ymm2
+32	refused	ud0 %bnd0, %zmm2
+32	refused	ud0 %bnd0, %edx
+32	refused	ud0 %bnd0, %dx
+32	refused	ud0 %bnd0, %dl
+32	refused	ud0 %bnd0, %mm2
+32	refused	ud0 (%eax,%ecx,2), %xmm2
+32	refused	ud0 (%eax,%ecx,2), %ymm2
+32	refused	ud0 (%eax,%ecx,2), %zmm2
+32	refused	ud0 (%eax,%ecx,2), %dl
+32	refused	ud0 (%eax,%ecx,2), %mm2
+32	refused	ud1 %xmm1, %xmm2
+32	refused	ud1 %xmm1, %ymm2
+32	refused	ud1 %xmm1, %zmm2
+32	refused	ud1 %ymm1, %xmm2
+32	refused	ud1 %ymm1, %ymm2
+32	refused	ud1 %ymm1, %zmm2
+32	refused	ud1 %ymm1, %mm2
+32	refused	ud1 %zmm1, %xmm2
+32	refused	ud1 %zmm1, %ymm2
+32	refused	ud1 %zmm1, %zmm2
+32	refused	ud1 %zmm1, %mm2
+32	refused	ud1 %ecx, %dx
+32	refused	ud1 %ecx, %dl
+32	refused	ud1 %cx, %edx
+32	refused	ud1 %cx, %dl
+32	refused	ud1 %cl, %edx
+32	refused	ud1 %cl, %dx
+32	refused	ud1 %cl, %dl
+32	refused	ud1 (%eax), %xmm2
+32	refused	ud1 (%eax), %ymm2
+32	refused	ud1 (%eax), %zmm2
+32	refused	ud1 (%eax), %dl
+32	refused	ud1 (%eax), %mm2
+32	refused	ud1 %mm1, %ymm2
+32	refused	ud1 %mm1, %zmm2
+32	refused	ud1 %mm1, %mm2
+32	refused	ud1 %bnd0, %xmm2
+32	refused	ud1 %bnd0, %ymm2
+32	refused	ud1 %bnd0, %zmm2
+32	refused	ud1 %bnd0, %edx
+32	refused	ud1 %bnd0, %dx
+32	refused	ud1 %bnd0, %dl
+32	refused	ud1 %bnd0, %mm2
+32	refused	ud1 (%eax,%ecx,2), %xmm2
+32	refused	ud1 (%eax,%ecx,2), %ymm2
+32	refused	ud1 (%eax,%ecx,2), %zmm2
+32	refused	ud1 (%eax,%ecx,2), %dl
+32	refused	ud1 (%eax,%ecx,2), %mm2
+32	refused	verr %xmm1
+32	refused	verr %ymm1
+32	refused	verr %zmm1
+32	refused	verr %cl
+32	refused	verr %mm1
+32	refused	verr %bnd0
+32	refused	verw %xmm1
+32	refused	verw %ymm1
+32	refused	verw %zmm1
+32	refused	verw %cl
+32	refused	verw %mm1
+32	refused	verw %bnd0
+32	67	adword
+32	67	aword
+32	8fea7810da12000000	bextr $0x12, %edx, %ebx
+32	8fea78101812000000	bextr $0x12, (%eax), %ebx
+32	66	dword
+32	0fff	ud0
+32	0fb9	ud1
+32	0fb9d1	ud2b %ecx, %edx
+32	660fb9d1	ud2b %cx, %dx
+32	0fb910	ud2b (%eax), %edx
+32	660fb910	ud2b (%eax), %dx
+32	0fb91448	ud2b (%eax,%ecx,2), %edx
+32	660fb91448	ud2b (%eax,%ecx,2), %dx
+32	f2	xacquire
+32	f3	xrelease
+64	refused	bndmk
+64	refused	bndmk %bnd0
+64	refused	bndmk %bnd1
+64	refused	bndmk %bnd3
+64	refused	bndmk (%rax)
+64	refused	bndmk 0x40(%rax)
+64	refused	bndmk (%rax,%rcx)
+64	refused	bndmk 0x12(%rax,%rcx,2)
+64	refused	bndmk %ecx
+64	refused	bndmk %cx
+64	refused	bndmk %cl
+64	refused	bndmk $1
+64	refused	bndmk %xmm1
+64	refused	bndmk foo
+64	refused	bndmk foo(%rax)
+64	refused	bndmk %rcx
+64	refused	bndmk %r9
+64	refused	bndmk (%r8,%r9)
+64	refused	bndmk %bnd4
+64	refused	bndmk foo(%rip)
+64	refused	bndmk %bnd0, %bnd0
+64	refused	bndmk %bnd0, %bnd1
+64	refused	bndmk %bnd0, %bnd3
+64	refused	bndmk %bnd0, (%rax)
+64	refused	bndmk %bnd0, 0x40(%rax)
+64	refused	bndmk %bnd0, (%rax,%rcx)
+64	refused	bndmk %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndmk %bnd0, %ecx
+64	refused	bndmk %bnd0, %cx
+64	refused	bndmk %bnd0, %cl
+64	refused	bndmk %bnd0, $1
+64	refused	bndmk %bnd0, %xmm1
+64	refused	bndmk %bnd0, foo
+64	refused	bndmk %bnd0, foo(%rax)
+64	refused	bndmk %bnd0, %rcx
+64	refused	bndmk %bnd0, %r9
+64	refused	bndmk %bnd0, (%r8,%r9)
+64	refused	bndmk %bnd0, %bnd4
+64	refused	bndmk %bnd0, foo(%rip)
+64	refused	bndmk %bnd1, %bnd0
+64	refused	bndmk %bnd1, %bnd1
+64	refused	bndmk %bnd1, %bnd3
+64	refused	bndmk %bnd1, (%rax)
+64	refused	bndmk %bnd1, 0x40(%rax)
+64	refused	bndmk %bnd1, (%rax,%rcx)
+64	refused	bndmk %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndmk %bnd1, %ecx
+64	refused	bndmk %bnd1, %cx
+64	refused	bndmk %bnd1, %cl
+64	refused	bndmk %bnd1, $1
+64	refused	bndmk %bnd1, %xmm1
+64	refused	bndmk %bnd1, foo
+64	refused	bndmk %bnd1, foo(%rax)
+64	refused	bndmk %bnd1, %rcx
+64	refused	bndmk %bnd1, %r9
+64	refused	bndmk %bnd1, (%r8,%r9)
+64	refused	bndmk %bnd1, %bnd4
+64	refused	bndmk %bnd1, foo(%rip)
+64	refused	bndmk %bnd3, %bnd0
+64	refused	bndmk %bnd3, %bnd1
+64	refused	bndmk %bnd3, %bnd3
+64	refused	bndmk %bnd3, (%rax)
+64	refused	bndmk %bnd3, 0x40(%rax)
+64	refused	bndmk %bnd3, (%rax,%rcx)
+64	refused	bndmk %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndmk %bnd3, %ecx
+64	refused	bndmk %bnd3, %cx
+64	refused	bndmk %bnd3, %cl
+64	refused	bndmk %bnd3, $1
+64	refused	bndmk %bnd3, %xmm1
+64	refused	bndmk %bnd3, foo
+64	refused	bndmk %bnd3, foo(%rax)
+64	refused	bndmk %bnd3, %rcx
+64	refused	bndmk %bnd3, %r9
+64	refused	bndmk %bnd3, (%r8,%r9)
+64	refused	bndmk %bnd3, %bnd4
+64	refused	bndmk %bnd3, foo(%rip)
+64	f30f1b00	bndmk (%rax), %bnd0
+64	f30f1b08	bndmk (%rax), %bnd1
+64	f30f1b18	bndmk (%rax), %bnd3
+64	refused	bndmk (%rax), (%rax)
+64	refused	bndmk (%rax), 0x40(%rax)
+64	refused	bndmk (%rax), (%rax,%rcx)
+64	refused	bndmk (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndmk (%rax), %ecx
+64	refused	bndmk (%rax), %cx
+64	refused	bndmk (%rax), %cl
+64	refused	bndmk (%rax), $1
+64	refused	bndmk (%rax), %xmm1
+64	refused	bndmk (%rax), foo
+64	refused	bndmk (%rax), foo(%rax)
+64	refused	bndmk (%rax), %rcx
+64	refused	bndmk (%rax), %r9
+64	refused	bndmk (%rax), (%r8,%r9)
+64	refused	bndmk (%rax), %bnd4
+64	refused	bndmk (%rax), foo(%rip)
+64	f30f1b4040	bndmk 0x40(%rax), %bnd0
+64	f30f1b4840	bndmk 0x40(%rax), %bnd1
+64	f30f1b5840	bndmk 0x40(%rax), %bnd3
+64	refused	bndmk 0x40(%rax), (%rax)
+64	refused	bndmk 0x40(%rax), 0x40(%rax)
+64	refused	bndmk 0x40(%rax), (%rax,%rcx)
+64	refused	bndmk 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndmk 0x40(%rax), %ecx
+64	refused	bndmk 0x40(%rax), %cx
+64	refused	bndmk 0x40(%rax), %cl
+64	refused	bndmk 0x40(%rax), $1
+64	refused	bndmk 0x40(%rax), %xmm1
+64	refused	bndmk 0x40(%rax), foo
+64	refused	bndmk 0x40(%rax), foo(%rax)
+64	refused	bndmk 0x40(%rax), %rcx
+64	refused	bndmk 0x40(%rax), %r9
+64	refused	bndmk 0x40(%rax), (%r8,%r9)
+64	refused	bndmk 0x40(%rax), %bnd4
+64	refused	bndmk 0x40(%rax), foo(%rip)
+64	f30f1b0408	bndmk (%rax,%rcx), %bnd0
+64	f30f1b0c08	bndmk (%rax,%rcx), %bnd1
+64	f30f1b1c08	bndmk (%rax,%rcx), %bnd3
+64	refused	bndmk (%rax,%rcx), (%rax)
+64	refused	bndmk (%rax,%rcx), 0x40(%rax)
+64	refused	bndmk (%rax,%rcx), (%rax,%rcx)
+64	refused	bndmk (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndmk (%rax,%rcx), %ecx
+64	refused	bndmk (%rax,%rcx), %cx
+64	refused	bndmk (%rax,%rcx), %cl
+64	refused	bndmk (%rax,%rcx), $1
+64	refused	bndmk (%rax,%rcx), %xmm1
+64	refused	bndmk (%rax,%rcx), foo
+64	refused	bndmk (%rax,%rcx), foo(%rax)
+64	refused	bndmk (%rax,%rcx), %rcx
+64	refused	bndmk (%rax,%rcx), %r9
+64	refused	bndmk (%rax,%rcx), (%r8,%r9)
+64	refused	bndmk (%rax,%rcx), %bnd4
+64	refused	bndmk (%rax,%rcx), foo(%rip)
+64	f30f1b444812	bndmk 0x12(%rax,%rcx,2), %bnd0
+64	f30f1b4c4812	bndmk 0x12(%rax,%rcx,2), %bnd1
+64	f30f1b5c4812	bndmk 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndmk 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndmk 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndmk 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndmk 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndmk 0x12(%rax,%rcx,2), %ecx
+64	refused	bndmk 0x12(%rax,%rcx,2), %cx
+64	refused	bndmk 0x12(%rax,%rcx,2), %cl
+64	refused	bndmk 0x12(%rax,%rcx,2), $1
+64	refused	bndmk 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndmk 0x12(%rax,%rcx,2), foo
+64	refused	bndmk 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndmk 0x12(%rax,%rcx,2), %rcx
+64	refused	bndmk 0x12(%rax,%rcx,2), %r9
+64	refused	bndmk 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndmk 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndmk 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndmk %ecx, %bnd0
+64	refused	bndmk %ecx, %bnd1
+64	refused	bndmk %ecx, %bnd3
+64	refused	bndmk %ecx, (%rax)
+64	refused	bndmk %ecx, 0x40(%rax)
+64	refused	bndmk %ecx, (%rax,%rcx)
+64	refused	bndmk %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndmk %ecx, %ecx
+64	refused	bndmk %ecx, %cx
+64	refused	bndmk %ecx, %cl
+64	refused	bndmk %ecx, $1
+64	refused	bndmk %ecx, %xmm1
+64	refused	bndmk %ecx, foo
+64	refused	bndmk %ecx, foo(%rax)
+64	refused	bndmk %ecx, %rcx
+64	refused	bndmk %ecx, %r9
+64	refused	bndmk %ecx, (%r8,%r9)
+64	refused	bndmk %ecx, %bnd4
+64	refused	bndmk %ecx, foo(%rip)
+64	refused	bndmk %cx, %bnd0
+64	refused	bndmk %cx, %bnd1
+64	refused	bndmk %cx, %bnd3
+64	refused	bndmk %cx, (%rax)
+64	refused	bndmk %cx, 0x40(%rax)
+64	refused	bndmk %cx, (%rax,%rcx)
+64	refused	bndmk %cx, 0x12(%rax,%rcx,2)
+64	refused	bndmk %cx, %ecx
+64	refused	bndmk %cx, %cx
+64	refused	bndmk %cx, %cl
+64	refused	bndmk %cx, $1
+64	refused	bndmk %cx, %xmm1
+64	refused	bndmk %cx, foo
+64	refused	bndmk %cx, foo(%rax)
+64	refused	bndmk %cx, %rcx
+64	refused	bndmk %cx, %r9
+64	refused	bndmk %cx, (%r8,%r9)
+64	refused	bndmk %cx, %bnd4
+64	refused	bndmk %cx, foo(%rip)
+64	refused	bndmk %cl, %bnd0
+64	refused	bndmk %cl, %bnd1
+64	refused	bndmk %cl, %bnd3
+64	refused	bndmk %cl, (%rax)
+64	refused	bndmk %cl, 0x40(%rax)
+64	refused	bndmk %cl, (%rax,%rcx)
+64	refused	bndmk %cl, 0x12(%rax,%rcx,2)
+64	refused	bndmk %cl, %ecx
+64	refused	bndmk %cl, %cx
+64	refused	bndmk %cl, %cl
+64	refused	bndmk %cl, $1
+64	refused	bndmk %cl, %xmm1
+64	refused	bndmk %cl, foo
+64	refused	bndmk %cl, foo(%rax)
+64	refused	bndmk %cl, %rcx
+64	refused	bndmk %cl, %r9
+64	refused	bndmk %cl, (%r8,%r9)
+64	refused	bndmk %cl, %bnd4
+64	refused	bndmk %cl, foo(%rip)
+64	refused	bndmk $1, %bnd0
+64	refused	bndmk $1, %bnd1
+64	refused	bndmk $1, %bnd3
+64	refused	bndmk $1, (%rax)
+64	refused	bndmk $1, 0x40(%rax)
+64	refused	bndmk $1, (%rax,%rcx)
+64	refused	bndmk $1, 0x12(%rax,%rcx,2)
+64	refused	bndmk $1, %ecx
+64	refused	bndmk $1, %cx
+64	refused	bndmk $1, %cl
+64	refused	bndmk $1, $1
+64	refused	bndmk $1, %xmm1
+64	refused	bndmk $1, foo
+64	refused	bndmk $1, foo(%rax)
+64	refused	bndmk $1, %rcx
+64	refused	bndmk $1, %r9
+64	refused	bndmk $1, (%r8,%r9)
+64	refused	bndmk $1, %bnd4
+64	refused	bndmk $1, foo(%rip)
+64	refused	bndmk %xmm1, %bnd0
+64	refused	bndmk %xmm1, %bnd1
+64	refused	bndmk %xmm1, %bnd3
+64	refused	bndmk %xmm1, (%rax)
+64	refused	bndmk %xmm1, 0x40(%rax)
+64	refused	bndmk %xmm1, (%rax,%rcx)
+64	refused	bndmk %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndmk %xmm1, %ecx
+64	refused	bndmk %xmm1, %cx
+64	refused	bndmk %xmm1, %cl
+64	refused	bndmk %xmm1, $1
+64	refused	bndmk %xmm1, %xmm1
+64	refused	bndmk %xmm1, foo
+64	refused	bndmk %xmm1, foo(%rax)
+64	refused	bndmk %xmm1, %rcx
+64	refused	bndmk %xmm1, %r9
+64	refused	bndmk %xmm1, (%r8,%r9)
+64	refused	bndmk %xmm1, %bnd4
+64	refused	bndmk %xmm1, foo(%rip)
+64	f30f1b042500000000	bndmk foo, %bnd0
+64	f30f1b0c2500000000	bndmk foo, %bnd1
+64	f30f1b1c2500000000	bndmk foo, %bnd3
+64	refused	bndmk foo, (%rax)
+64	refused	bndmk foo, 0x40(%rax)
+64	refused	bndmk foo, (%rax,%rcx)
+64	refused	bndmk foo, 0x12(%rax,%rcx,2)
+64	refused	bndmk foo, %ecx
+64	refused	bndmk foo, %cx
+64	refused	bndmk foo, %cl
+64	refused	bndmk foo, $1
+64	refused	bndmk foo, %xmm1
+64	refused	bndmk foo, foo
+64	refused	bndmk foo, foo(%rax)
+64	refused	bndmk foo, %rcx
+64	refused	bndmk foo, %r9
+64	refused	bndmk foo, (%r8,%r9)
+64	refused	bndmk foo, %bnd4
+64	refused	bndmk foo, foo(%rip)
+64	f30f1b8000000000	bndmk foo(%rax), %bnd0
+64	f30f1b8800000000	bndmk foo(%rax), %bnd1
+64	f30f1b9800000000	bndmk foo(%rax), %bnd3
+64	refused	bndmk foo(%rax), (%rax)
+64	refused	bndmk foo(%rax), 0x40(%rax)
+64	refused	bndmk foo(%rax), (%rax,%rcx)
+64	refused	bndmk foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndmk foo(%rax), %ecx
+64	refused	bndmk foo(%rax), %cx
+64	refused	bndmk foo(%rax), %cl
+64	refused	bndmk foo(%rax), $1
+64	refused	bndmk foo(%rax), %xmm1
+64	refused	bndmk foo(%rax), foo
+64	refused	bndmk foo(%rax), foo(%rax)
+64	refused	bndmk foo(%rax), %rcx
+64	refused	bndmk foo(%rax), %r9
+64	refused	bndmk foo(%rax), (%r8,%r9)
+64	refused	bndmk foo(%rax), %bnd4
+64	refused	bndmk foo(%rax), foo(%rip)
+64	refused	bndmk %rcx, %bnd0
+64	refused	bndmk %rcx, %bnd1
+64	refused	bndmk %rcx, %bnd3
+64	refused	bndmk %rcx, (%rax)
+64	refused	bndmk %rcx, 0x40(%rax)
+64	refused	bndmk %rcx, (%rax,%rcx)
+64	refused	bndmk %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndmk %rcx, %ecx
+64	refused	bndmk %rcx, %cx
+64	refused	bndmk %rcx, %cl
+64	refused	bndmk %rcx, $1
+64	refused	bndmk %rcx, %xmm1
+64	refused	bndmk %rcx, foo
+64	refused	bndmk %rcx, foo(%rax)
+64	refused	bndmk %rcx, %rcx
+64	refused	bndmk %rcx, %r9
+64	refused	bndmk %rcx, (%r8,%r9)
+64	refused	bndmk %rcx, %bnd4
+64	refused	bndmk %rcx, foo(%rip)
+64	refused	bndmk %r9, %bnd0
+64	refused	bndmk %r9, %bnd1
+64	refused	bndmk %r9, %bnd3
+64	refused	bndmk %r9, (%rax)
+64	refused	bndmk %r9, 0x40(%rax)
+64	refused	bndmk %r9, (%rax,%rcx)
+64	refused	bndmk %r9, 0x12(%rax,%rcx,2)
+64	refused	bndmk %r9, %ecx
+64	refused	bndmk %r9, %cx
+64	refused	bndmk %r9, %cl
+64	refused	bndmk %r9, $1
+64	refused	bndmk %r9, %xmm1
+64	refused	bndmk %r9, foo
+64	refused	bndmk %r9, foo(%rax)
+64	refused	bndmk %r9, %rcx
+64	refused	bndmk %r9, %r9
+64	refused	bndmk %r9, (%r8,%r9)
+64	refused	bndmk %r9, %bnd4
+64	refused	bndmk %r9, foo(%rip)
+64	f3430f1b0408	bndmk (%r8,%r9), %bnd0
+64	f3430f1b0c08	bndmk (%r8,%r9), %bnd1
+64	f3430f1b1c08	bndmk (%r8,%r9), %bnd3
+64	refused	bndmk (%r8,%r9), (%rax)
+64	refused	bndmk (%r8,%r9), 0x40(%rax)
+64	refused	bndmk (%r8,%r9), (%rax,%rcx)
+64	refused	bndmk (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndmk (%r8,%r9), %ecx
+64	refused	bndmk (%r8,%r9), %cx
+64	refused	bndmk (%r8,%r9), %cl
+64	refused	bndmk (%r8,%r9), $1
+64	refused	bndmk (%r8,%r9), %xmm1
+64	refused	bndmk (%r8,%r9), foo
+64	refused	bndmk (%r8,%r9), foo(%rax)
+64	refused	bndmk (%r8,%r9), %rcx
+64	refused	bndmk (%r8,%r9), %r9
+64	refused	bndmk (%r8,%r9), (%r8,%r9)
+64	refused	bndmk (%r8,%r9), %bnd4
+64	refused	bndmk (%r8,%r9), foo(%rip)
+64	refused	bndmk %bnd4, %bnd0
+64	refused	bndmk %bnd4, %bnd1
+64	refused	bndmk %bnd4, %bnd3
+64	refused	bndmk %bnd4, (%rax)
+64	refused	bndmk %bnd4, 0x40(%rax)
+64	refused	bndmk %bnd4, (%rax,%rcx)
+64	refused	bndmk %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndmk %bnd4, %ecx
+64	refused	bndmk %bnd4, %cx
+64	refused	bndmk %bnd4, %cl
+64	refused	bndmk %bnd4, $1
+64	refused	bndmk %bnd4, %xmm1
+64	refused	bndmk %bnd4, foo
+64	refused	bndmk %bnd4, foo(%rax)
+64	refused	bndmk %bnd4, %rcx
+64	refused	bndmk %bnd4, %r9
+64	refused	bndmk %bnd4, (%r8,%r9)
+64	refused	bndmk %bnd4, %bnd4
+64	refused	bndmk %bnd4, foo(%rip)
+64	refused	bndmk foo(%rip), %bnd0
+64	refused	bndmk foo(%rip), %bnd1
+64	refused	bndmk foo(%rip), %bnd3
+64	refused	bndmk foo(%rip), (%rax)
+64	refused	bndmk foo(%rip), 0x40(%rax)
+64	refused	bndmk foo(%rip), (%rax,%rcx)
+64	refused	bndmk foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndmk foo(%rip), %ecx
+64	refused	bndmk foo(%rip), %cx
+64	refused	bndmk foo(%rip), %cl
+64	refused	bndmk foo(%rip), $1
+64	refused	bndmk foo(%rip), %xmm1
+64	refused	bndmk foo(%rip), foo
+64	refused	bndmk foo(%rip), foo(%rax)
+64	refused	bndmk foo(%rip), %rcx
+64	refused	bndmk foo(%rip), %r9
+64	refused	bndmk foo(%rip), (%r8,%r9)
+64	refused	bndmk foo(%rip), %bnd4
+64	refused	bndmk foo(%rip), foo(%rip)
+64	refused	bndmov
+64	refused	bndmov %bnd0
+64	refused	bndmov %bnd1
+64	refused	bndmov %bnd3
+64	refused	bndmov (%rax)
+64	refused	bndmov 0x40(%rax)
+64	refused	bndmov (%rax,%rcx)
+64	refused	bndmov 0x12(%rax,%rcx,2)
+64	refused	bndmov %ecx
+64	refused	bndmov %cx
+64	refused	bndmov %cl
+64	refused	bndmov $1
+64	refused	bndmov %xmm1
+64	refused	bndmov foo
+64	refused	bndmov foo(%rax)
+64	refused	bndmov %rcx
+64	refused	bndmov %r9
+64	refused	bndmov (%r8,%r9)
+64	refused	bndmov %bnd4
+64	refused	bndmov foo(%rip)
+64	660f1ac0	bndmov %bnd0, %bnd0
+64	660f1ac8	bndmov %bnd0, %bnd1
+64	660f1ad8	bndmov %bnd0, %bnd3
+64	660f1b00	bndmov %bnd0, (%rax)
+64	660f1b4040	bndmov %bnd0, 0x40(%rax)
+64	660f1b0408	bndmov %bnd0, (%rax,%rcx)
+64	660f1b444812	bndmov %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndmov %bnd0, %ecx
+64	refused	bndmov %bnd0, %cx
+64	refused	bndmov %bnd0, %cl
+64	refused	bndmov %bnd0, $1
+64	refused	bndmov %bnd0, %xmm1
+64	660f1b042500000000	bndmov %bnd0, foo
+64	660f1b8000000000	bndmov %bnd0, foo(%rax)
+64	refused	bndmov %bnd0, %rcx
+64	refused	bndmov %bnd0, %r9
+64	66430f1b0408	bndmov %bnd0, (%r8,%r9)
+64	refused	bndmov %bnd0, %bnd4
+64	660f1b0500000000	bndmov %bnd0, foo(%rip)
+64	660f1ac1	bndmov %bnd1, %bnd0
+64	660f1ac9	bndmov %bnd1, %bnd1
+64	660f1ad9	bndmov %bnd1, %bnd3
+64	660f1b08	bndmov %bnd1, (%rax)
+64	660f1b4840	bndmov %bnd1, 0x40(%rax)
+64	660f1b0c08	bndmov %bnd1, (%rax,%rcx)
+64	660f1b4c4812	bndmov %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndmov %bnd1, %ecx
+64	refused	bndmov %bnd1, %cx
+64	refused	bndmov %bnd1, %cl
+64	refused	bndmov %bnd1, $1
+64	refused	bndmov %bnd1, %xmm1
+64	660f1b0c2500000000	bndmov %bnd1, foo
+64	660f1b8800000000	bndmov %bnd1, foo(%rax)
+64	refused	bndmov %bnd1, %rcx
+64	refused	bndmov %bnd1, %r9
+64	66430f1b0c08	bndmov %bnd1, (%r8,%r9)
+64	refused	bndmov %bnd1, %bnd4
+64	660f1b0d00000000	bndmov %bnd1, foo(%rip)
+64	660f1ac3	bndmov %bnd3, %bnd0
+64	660f1acb	bndmov %bnd3, %bnd1
+64	660f1adb	bndmov %bnd3, %bnd3
+64	660f1b18	bndmov %bnd3, (%rax)
+64	660f1b5840	bndmov %bnd3, 0x40(%rax)
+64	660f1b1c08	bndmov %bnd3, (%rax,%rcx)
+64	660f1b5c4812	bndmov %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndmov %bnd3, %ecx
+64	refused	bndmov %bnd3, %cx
+64	refused	bndmov %bnd3, %cl
+64	refused	bndmov %bnd3, $1
+64	refused	bndmov %bnd3, %xmm1
+64	660f1b1c2500000000	bndmov %bnd3, foo
+64	660f1b9800000000	bndmov %bnd3, foo(%rax)
+64	refused	bndmov %bnd3, %rcx
+64	refused	bndmov %bnd3, %r9
+64	66430f1b1c08	bndmov %bnd3, (%r8,%r9)
+64	refused	bndmov %bnd3, %bnd4
+64	660f1b1d00000000	bndmov %bnd3, foo(%rip)
+64	660f1a00	bndmov (%rax), %bnd0
+64	660f1a08	bndmov (%rax), %bnd1
+64	660f1a18	bndmov (%rax), %bnd3
+64	refused	bndmov (%rax), (%rax)
+64	refused	bndmov (%rax), 0x40(%rax)
+64	refused	bndmov (%rax), (%rax,%rcx)
+64	refused	bndmov (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndmov (%rax), %ecx
+64	refused	bndmov (%rax), %cx
+64	refused	bndmov (%rax), %cl
+64	refused	bndmov (%rax), $1
+64	refused	bndmov (%rax), %xmm1
+64	refused	bndmov (%rax), foo
+64	refused	bndmov (%rax), foo(%rax)
+64	refused	bndmov (%rax), %rcx
+64	refused	bndmov (%rax), %r9
+64	refused	bndmov (%rax), (%r8,%r9)
+64	refused	bndmov (%rax), %bnd4
+64	refused	bndmov (%rax), foo(%rip)
+64	660f1a4040	bndmov 0x40(%rax), %bnd0
+64	660f1a4840	bndmov 0x40(%rax), %bnd1
+64	660f1a5840	bndmov 0x40(%rax), %bnd3
+64	refused	bndmov 0x40(%rax), (%rax)
+64	refused	bndmov 0x40(%rax), 0x40(%rax)
+64	refused	bndmov 0x40(%rax), (%rax,%rcx)
+64	refused	bndmov 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndmov 0x40(%rax), %ecx
+64	refused	bndmov 0x40(%rax), %cx
+64	refused	bndmov 0x40(%rax), %cl
+64	refused	bndmov 0x40(%rax), $1
+64	refused	bndmov 0x40(%rax), %xmm1
+64	refused	bndmov 0x40(%rax), foo
+64	refused	bndmov 0x40(%rax), foo(%rax)
+64	refused	bndmov 0x40(%rax), %rcx
+64	refused	bndmov 0x40(%rax), %r9
+64	refused	bndmov 0x40(%rax), (%r8,%r9)
+64	refused	bndmov 0x40(%rax), %bnd4
+64	refused	bndmov 0x40(%rax), foo(%rip)
+64	660f1a0408	bndmov (%rax,%rcx), %bnd0
+64	660f1a0c08	bndmov (%rax,%rcx), %bnd1
+64	660f1a1c08	bndmov (%rax,%rcx), %bnd3
+64	refused	bndmov (%rax,%rcx), (%rax)
+64	refused	bndmov (%rax,%rcx), 0x40(%rax)
+64	refused	bndmov (%rax,%rcx), (%rax,%rcx)
+64	refused	bndmov (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndmov (%rax,%rcx), %ecx
+64	refused	bndmov (%rax,%rcx), %cx
+64	refused	bndmov (%rax,%rcx), %cl
+64	refused	bndmov (%rax,%rcx), $1
+64	refused	bndmov (%rax,%rcx), %xmm1
+64	refused	bndmov (%rax,%rcx), foo
+64	refused	bndmov (%rax,%rcx), foo(%rax)
+64	refused	bndmov (%rax,%rcx), %rcx
+64	refused	bndmov (%rax,%rcx), %r9
+64	refused	bndmov (%rax,%rcx), (%r8,%r9)
+64	refused	bndmov (%rax,%rcx), %bnd4
+64	refused	bndmov (%rax,%rcx), foo(%rip)
+64	660f1a444812	bndmov 0x12(%rax,%rcx,2), %bnd0
+64	660f1a4c4812	bndmov 0x12(%rax,%rcx,2), %bnd1
+64	660f1a5c4812	bndmov 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndmov 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndmov 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndmov 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndmov 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndmov 0x12(%rax,%rcx,2), %ecx
+64	refused	bndmov 0x12(%rax,%rcx,2), %cx
+64	refused	bndmov 0x12(%rax,%rcx,2), %cl
+64	refused	bndmov 0x12(%rax,%rcx,2), $1
+64	refused	bndmov 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndmov 0x12(%rax,%rcx,2), foo
+64	refused	bndmov 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndmov 0x12(%rax,%rcx,2), %rcx
+64	refused	bndmov 0x12(%rax,%rcx,2), %r9
+64	refused	bndmov 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndmov 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndmov 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndmov %ecx, %bnd0
+64	refused	bndmov %ecx, %bnd1
+64	refused	bndmov %ecx, %bnd3
+64	refused	bndmov %ecx, (%rax)
+64	refused	bndmov %ecx, 0x40(%rax)
+64	refused	bndmov %ecx, (%rax,%rcx)
+64	refused	bndmov %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndmov %ecx, %ecx
+64	refused	bndmov %ecx, %cx
+64	refused	bndmov %ecx, %cl
+64	refused	bndmov %ecx, $1
+64	refused	bndmov %ecx, %xmm1
+64	refused	bndmov %ecx, foo
+64	refused	bndmov %ecx, foo(%rax)
+64	refused	bndmov %ecx, %rcx
+64	refused	bndmov %ecx, %r9
+64	refused	bndmov %ecx, (%r8,%r9)
+64	refused	bndmov %ecx, %bnd4
+64	refused	bndmov %ecx, foo(%rip)
+64	refused	bndmov %cx, %bnd0
+64	refused	bndmov %cx, %bnd1
+64	refused	bndmov %cx, %bnd3
+64	refused	bndmov %cx, (%rax)
+64	refused	bndmov %cx, 0x40(%rax)
+64	refused	bndmov %cx, (%rax,%rcx)
+64	refused	bndmov %cx, 0x12(%rax,%rcx,2)
+64	refused	bndmov %cx, %ecx
+64	refused	bndmov %cx, %cx
+64	refused	bndmov %cx, %cl
+64	refused	bndmov %cx, $1
+64	refused	bndmov %cx, %xmm1
+64	refused	bndmov %cx, foo
+64	refused	bndmov %cx, foo(%rax)
+64	refused	bndmov %cx, %rcx
+64	refused	bndmov %cx, %r9
+64	refused	bndmov %cx, (%r8,%r9)
+64	refused	bndmov %cx, %bnd4
+64	refused	bndmov %cx, foo(%rip)
+64	refused	bndmov %cl, %bnd0
+64	refused	bndmov %cl, %bnd1
+64	refused	bndmov %cl, %bnd3
+64	refused	bndmov %cl, (%rax)
+64	refused	bndmov %cl, 0x40(%rax)
+64	refused	bndmov %cl, (%rax,%rcx)
+64	refused	bndmov %cl, 0x12(%rax,%rcx,2)
+64	refused	bndmov %cl, %ecx
+64	refused	bndmov %cl, %cx
+64	refused	bndmov %cl, %cl
+64	refused	bndmov %cl, $1
+64	refused	bndmov %cl, %xmm1
+64	refused	bndmov %cl, foo
+64	refused	bndmov %cl, foo(%rax)
+64	refused	bndmov %cl, %rcx
+64	refused	bndmov %cl, %r9
+64	refused	bndmov %cl, (%r8,%r9)
+64	refused	bndmov %cl, %bnd4
+64	refused	bndmov %cl, foo(%rip)
+64	refused	bndmov $1, %bnd0
+64	refused	bndmov $1, %bnd1
+64	refused	bndmov $1, %bnd3
+64	refused	bndmov $1, (%rax)
+64	refused	bndmov $1, 0x40(%rax)
+64	refused	bndmov $1, (%rax,%rcx)
+64	refused	bndmov $1, 0x12(%rax,%rcx,2)
+64	refused	bndmov $1, %ecx
+64	refused	bndmov $1, %cx
+64	refused	bndmov $1, %cl
+64	refused	bndmov $1, $1
+64	refused	bndmov $1, %xmm1
+64	refused	bndmov $1, foo
+64	refused	bndmov $1, foo(%rax)
+64	refused	bndmov $1, %rcx
+64	refused	bndmov $1, %r9
+64	refused	bndmov $1, (%r8,%r9)
+64	refused	bndmov $1, %bnd4
+64	refused	bndmov $1, foo(%rip)
+64	refused	bndmov %xmm1, %bnd0
+64	refused	bndmov %xmm1, %bnd1
+64	refused	bndmov %xmm1, %bnd3
+64	refused	bndmov %xmm1, (%rax)
+64	refused	bndmov %xmm1, 0x40(%rax)
+64	refused	bndmov %xmm1, (%rax,%rcx)
+64	refused	bndmov %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndmov %xmm1, %ecx
+64	refused	bndmov %xmm1, %cx
+64	refused	bndmov %xmm1, %cl
+64	refused	bndmov %xmm1, $1
+64	refused	bndmov %xmm1, %xmm1
+64	refused	bndmov %xmm1, foo
+64	refused	bndmov %xmm1, foo(%rax)
+64	refused	bndmov %xmm1, %rcx
+64	refused	bndmov %xmm1, %r9
+64	refused	bndmov %xmm1, (%r8,%r9)
+64	refused	bndmov %xmm1, %bnd4
+64	refused	bndmov %xmm1, foo(%rip)
+64	660f1a042500000000	bndmov foo, %bnd0
+64	660f1a0c2500000000	bndmov foo, %bnd1
+64	660f1a1c2500000000	bndmov foo, %bnd3
+64	refused	bndmov foo, (%rax)
+64	refused	bndmov foo, 0x40(%rax)
+64	refused	bndmov foo, (%rax,%rcx)
+64	refused	bndmov foo, 0x12(%rax,%rcx,2)
+64	refused	bndmov foo, %ecx
+64	refused	bndmov foo, %cx
+64	refused	bndmov foo, %cl
+64	refused	bndmov foo, $1
+64	refused	bndmov foo, %xmm1
+64	refused	bndmov foo, foo
+64	refused	bndmov foo, foo(%rax)
+64	refused	bndmov foo, %rcx
+64	refused	bndmov foo, %r9
+64	refused	bndmov foo, (%r8,%r9)
+64	refused	bndmov foo, %bnd4
+64	refused	bndmov foo, foo(%rip)
+64	660f1a8000000000	bndmov foo(%rax), %bnd0
+64	660f1a8800000000	bndmov foo(%rax), %bnd1
+64	660f1a9800000000	bndmov foo(%rax), %bnd3
+64	refused	bndmov foo(%rax), (%rax)
+64	refused	bndmov foo(%rax), 0x40(%rax)
+64	refused	bndmov foo(%rax), (%rax,%rcx)
+64	refused	bndmov foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndmov foo(%rax), %ecx
+64	refused	bndmov foo(%rax), %cx
+64	refused	bndmov foo(%rax), %cl
+64	refused	bndmov foo(%rax), $1
+64	refused	bndmov foo(%rax), %xmm1
+64	refused	bndmov foo(%rax), foo
+64	refused	bndmov foo(%rax), foo(%rax)
+64	refused	bndmov foo(%rax), %rcx
+64	refused	bndmov foo(%rax), %r9
+64	refused	bndmov foo(%rax), (%r8,%r9)
+64	refused	bndmov foo(%rax), %bnd4
+64	refused	bndmov foo(%rax), foo(%rip)
+64	refused	bndmov %rcx, %bnd0
+64	refused	bndmov %rcx, %bnd1
+64	refused	bndmov %rcx, %bnd3
+64	refused	bndmov %rcx, (%rax)
+64	refused	bndmov %rcx, 0x40(%rax)
+64	refused	bndmov %rcx, (%rax,%rcx)
+64	refused	bndmov %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndmov %rcx, %ecx
+64	refused	bndmov %rcx, %cx
+64	refused	bndmov %rcx, %cl
+64	refused	bndmov %rcx, $1
+64	refused	bndmov %rcx, %xmm1
+64	refused	bndmov %rcx, foo
+64	refused	bndmov %rcx, foo(%rax)
+64	refused	bndmov %rcx, %rcx
+64	refused	bndmov %rcx, %r9
+64	refused	bndmov %rcx, (%r8,%r9)
+64	refused	bndmov %rcx, %bnd4
+64	refused	bndmov %rcx, foo(%rip)
+64	refused	bndmov %r9, %bnd0
+64	refused	bndmov %r9, %bnd1
+64	refused	bndmov %r9, %bnd3
+64	refused	bndmov %r9, (%rax)
+64	refused	bndmov %r9, 0x40(%rax)
+64	refused	bndmov %r9, (%rax,%rcx)
+64	refused	bndmov %r9, 0x12(%rax,%rcx,2)
+64	refused	bndmov %r9, %ecx
+64	refused	bndmov %r9, %cx
+64	refused	bndmov %r9, %cl
+64	refused	bndmov %r9, $1
+64	refused	bndmov %r9, %xmm1
+64	refused	bndmov %r9, foo
+64	refused	bndmov %r9, foo(%rax)
+64	refused	bndmov %r9, %rcx
+64	refused	bndmov %r9, %r9
+64	refused	bndmov %r9, (%r8,%r9)
+64	refused	bndmov %r9, %bnd4
+64	refused	bndmov %r9, foo(%rip)
+64	66430f1a0408	bndmov (%r8,%r9), %bnd0
+64	66430f1a0c08	bndmov (%r8,%r9), %bnd1
+64	66430f1a1c08	bndmov (%r8,%r9), %bnd3
+64	refused	bndmov (%r8,%r9), (%rax)
+64	refused	bndmov (%r8,%r9), 0x40(%rax)
+64	refused	bndmov (%r8,%r9), (%rax,%rcx)
+64	refused	bndmov (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndmov (%r8,%r9), %ecx
+64	refused	bndmov (%r8,%r9), %cx
+64	refused	bndmov (%r8,%r9), %cl
+64	refused	bndmov (%r8,%r9), $1
+64	refused	bndmov (%r8,%r9), %xmm1
+64	refused	bndmov (%r8,%r9), foo
+64	refused	bndmov (%r8,%r9), foo(%rax)
+64	refused	bndmov (%r8,%r9), %rcx
+64	refused	bndmov (%r8,%r9), %r9
+64	refused	bndmov (%r8,%r9), (%r8,%r9)
+64	refused	bndmov (%r8,%r9), %bnd4
+64	refused	bndmov (%r8,%r9), foo(%rip)
+64	refused	bndmov %bnd4, %bnd0
+64	refused	bndmov %bnd4, %bnd1
+64	refused	bndmov %bnd4, %bnd3
+64	refused	bndmov %bnd4, (%rax)
+64	refused	bndmov %bnd4, 0x40(%rax)
+64	refused	bndmov %bnd4, (%rax,%rcx)
+64	refused	bndmov %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndmov %bnd4, %ecx
+64	refused	bndmov %bnd4, %cx
+64	refused	bndmov %bnd4, %cl
+64	refused	bndmov %bnd4, $1
+64	refused	bndmov %bnd4, %xmm1
+64	refused	bndmov %bnd4, foo
+64	refused	bndmov %bnd4, foo(%rax)
+64	refused	bndmov %bnd4, %rcx
+64	refused	bndmov %bnd4, %r9
+64	refused	bndmov %bnd4, (%r8,%r9)
+64	refused	bndmov %bnd4, %bnd4
+64	refused	bndmov %bnd4, foo(%rip)
+64	660f1a0500000000	bndmov foo(%rip), %bnd0
+64	660f1a0d00000000	bndmov foo(%rip), %bnd1
+64	660f1a1d00000000	bndmov foo(%rip), %bnd3
+64	refused	bndmov foo(%rip), (%rax)
+64	refused	bndmov foo(%rip), 0x40(%rax)
+64	refused	bndmov foo(%rip), (%rax,%rcx)
+64	refused	bndmov foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndmov foo(%rip), %ecx
+64	refused	bndmov foo(%rip), %cx
+64	refused	bndmov foo(%rip), %cl
+64	refused	bndmov foo(%rip), $1
+64	refused	bndmov foo(%rip), %xmm1
+64	refused	bndmov foo(%rip), foo
+64	refused	bndmov foo(%rip), foo(%rax)
+64	refused	bndmov foo(%rip), %rcx
+64	refused	bndmov foo(%rip), %r9
+64	refused	bndmov foo(%rip), (%r8,%r9)
+64	refused	bndmov foo(%rip), %bnd4
+64	refused	bndmov foo(%rip), foo(%rip)
+64	refused	bndcl
+64	refused	bndcl %bnd0
+64	refused	bndcl %bnd1
+64	refused	bndcl %bnd3
+64	refused	bndcl (%rax)
+64	refused	bndcl 0x40(%rax)
+64	refused	bndcl (%rax,%rcx)
+64	refused	bndcl 0x12(%rax,%rcx,2)
+64	refused	bndcl %ecx
+64	refused	bndcl %cx
+64	refused	bndcl %cl
+64	refused	bndcl $1
+64	refused	bndcl %xmm1
+64	refused	bndcl foo
+64	refused	bndcl foo(%rax)
+64	refused	bndcl %rcx
+64	refused	bndcl %r9
+64	refused	bndcl (%r8,%r9)
+64	refused	bndcl %bnd4
+64	refused	bndcl foo(%rip)
+64	refused	bndcl %bnd0, %bnd0
+64	refused	bndcl %bnd0, %bnd1
+64	refused	bndcl %bnd0, %bnd3
+64	refused	bndcl %bnd0, (%rax)
+64	refused	bndcl %bnd0, 0x40(%rax)
+64	refused	bndcl %bnd0, (%rax,%rcx)
+64	refused	bndcl %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndcl %bnd0, %ecx
+64	refused	bndcl %bnd0, %cx
+64	refused	bndcl %bnd0, %cl
+64	refused	bndcl %bnd0, $1
+64	refused	bndcl %bnd0, %xmm1
+64	refused	bndcl %bnd0, foo
+64	refused	bndcl %bnd0, foo(%rax)
+64	refused	bndcl %bnd0, %rcx
+64	refused	bndcl %bnd0, %r9
+64	refused	bndcl %bnd0, (%r8,%r9)
+64	refused	bndcl %bnd0, %bnd4
+64	refused	bndcl %bnd0, foo(%rip)
+64	refused	bndcl %bnd1, %bnd0
+64	refused	bndcl %bnd1, %bnd1
+64	refused	bndcl %bnd1, %bnd3
+64	refused	bndcl %bnd1, (%rax)
+64	refused	bndcl %bnd1, 0x40(%rax)
+64	refused	bndcl %bnd1, (%rax,%rcx)
+64	refused	bndcl %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndcl %bnd1, %ecx
+64	refused	bndcl %bnd1, %cx
+64	refused	bndcl %bnd1, %cl
+64	refused	bndcl %bnd1, $1
+64	refused	bndcl %bnd1, %xmm1
+64	refused	bndcl %bnd1, foo
+64	refused	bndcl %bnd1, foo(%rax)
+64	refused	bndcl %bnd1, %rcx
+64	refused	bndcl %bnd1, %r9
+64	refused	bndcl %bnd1, (%r8,%r9)
+64	refused	bndcl %bnd1, %bnd4
+64	refused	bndcl %bnd1, foo(%rip)
+64	refused	bndcl %bnd3, %bnd0
+64	refused	bndcl %bnd3, %bnd1
+64	refused	bndcl %bnd3, %bnd3
+64	refused	bndcl %bnd3, (%rax)
+64	refused	bndcl %bnd3, 0x40(%rax)
+64	refused	bndcl %bnd3, (%rax,%rcx)
+64	refused	bndcl %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndcl %bnd3, %ecx
+64	refused	bndcl %bnd3, %cx
+64	refused	bndcl %bnd3, %cl
+64	refused	bndcl %bnd3, $1
+64	refused	bndcl %bnd3, %xmm1
+64	refused	bndcl %bnd3, foo
+64	refused	bndcl %bnd3, foo(%rax)
+64	refused	bndcl %bnd3, %rcx
+64	refused	bndcl %bnd3, %r9
+64	refused	bndcl %bnd3, (%r8,%r9)
+64	refused	bndcl %bnd3, %bnd4
+64	refused	bndcl %bnd3, foo(%rip)
+64	f30f1a00	bndcl (%rax), %bnd0
+64	f30f1a08	bndcl (%rax), %bnd1
+64	f30f1a18	bndcl (%rax), %bnd3
+64	refused	bndcl (%rax), (%rax)
+64	refused	bndcl (%rax), 0x40(%rax)
+64	refused	bndcl (%rax), (%rax,%rcx)
+64	refused	bndcl (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcl (%rax), %ecx
+64	refused	bndcl (%rax), %cx
+64	refused	bndcl (%rax), %cl
+64	refused	bndcl (%rax), $1
+64	refused	bndcl (%rax), %xmm1
+64	refused	bndcl (%rax), foo
+64	refused	bndcl (%rax), foo(%rax)
+64	refused	bndcl (%rax), %rcx
+64	refused	bndcl (%rax), %r9
+64	refused	bndcl (%rax), (%r8,%r9)
+64	refused	bndcl (%rax), %bnd4
+64	refused	bndcl (%rax), foo(%rip)
+64	f30f1a4040	bndcl 0x40(%rax), %bnd0
+64	f30f1a4840	bndcl 0x40(%rax), %bnd1
+64	f30f1a5840	bndcl 0x40(%rax), %bnd3
+64	refused	bndcl 0x40(%rax), (%rax)
+64	refused	bndcl 0x40(%rax), 0x40(%rax)
+64	refused	bndcl 0x40(%rax), (%rax,%rcx)
+64	refused	bndcl 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcl 0x40(%rax), %ecx
+64	refused	bndcl 0x40(%rax), %cx
+64	refused	bndcl 0x40(%rax), %cl
+64	refused	bndcl 0x40(%rax), $1
+64	refused	bndcl 0x40(%rax), %xmm1
+64	refused	bndcl 0x40(%rax), foo
+64	refused	bndcl 0x40(%rax), foo(%rax)
+64	refused	bndcl 0x40(%rax), %rcx
+64	refused	bndcl 0x40(%rax), %r9
+64	refused	bndcl 0x40(%rax), (%r8,%r9)
+64	refused	bndcl 0x40(%rax), %bnd4
+64	refused	bndcl 0x40(%rax), foo(%rip)
+64	f30f1a0408	bndcl (%rax,%rcx), %bnd0
+64	f30f1a0c08	bndcl (%rax,%rcx), %bnd1
+64	f30f1a1c08	bndcl (%rax,%rcx), %bnd3
+64	refused	bndcl (%rax,%rcx), (%rax)
+64	refused	bndcl (%rax,%rcx), 0x40(%rax)
+64	refused	bndcl (%rax,%rcx), (%rax,%rcx)
+64	refused	bndcl (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndcl (%rax,%rcx), %ecx
+64	refused	bndcl (%rax,%rcx), %cx
+64	refused	bndcl (%rax,%rcx), %cl
+64	refused	bndcl (%rax,%rcx), $1
+64	refused	bndcl (%rax,%rcx), %xmm1
+64	refused	bndcl (%rax,%rcx), foo
+64	refused	bndcl (%rax,%rcx), foo(%rax)
+64	refused	bndcl (%rax,%rcx), %rcx
+64	refused	bndcl (%rax,%rcx), %r9
+64	refused	bndcl (%rax,%rcx), (%r8,%r9)
+64	refused	bndcl (%rax,%rcx), %bnd4
+64	refused	bndcl (%rax,%rcx), foo(%rip)
+64	f30f1a444812	bndcl 0x12(%rax,%rcx,2), %bnd0
+64	f30f1a4c4812	bndcl 0x12(%rax,%rcx,2), %bnd1
+64	f30f1a5c4812	bndcl 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndcl 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndcl 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndcl 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndcl 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndcl 0x12(%rax,%rcx,2), %ecx
+64	refused	bndcl 0x12(%rax,%rcx,2), %cx
+64	refused	bndcl 0x12(%rax,%rcx,2), %cl
+64	refused	bndcl 0x12(%rax,%rcx,2), $1
+64	refused	bndcl 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndcl 0x12(%rax,%rcx,2), foo
+64	refused	bndcl 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndcl 0x12(%rax,%rcx,2), %rcx
+64	refused	bndcl 0x12(%rax,%rcx,2), %r9
+64	refused	bndcl 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndcl 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndcl 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndcl %ecx, %bnd0
+64	refused	bndcl %ecx, %bnd1
+64	refused	bndcl %ecx, %bnd3
+64	refused	bndcl %ecx, (%rax)
+64	refused	bndcl %ecx, 0x40(%rax)
+64	refused	bndcl %ecx, (%rax,%rcx)
+64	refused	bndcl %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndcl %ecx, %ecx
+64	refused	bndcl %ecx, %cx
+64	refused	bndcl %ecx, %cl
+64	refused	bndcl %ecx, $1
+64	refused	bndcl %ecx, %xmm1
+64	refused	bndcl %ecx, foo
+64	refused	bndcl %ecx, foo(%rax)
+64	refused	bndcl %ecx, %rcx
+64	refused	bndcl %ecx, %r9
+64	refused	bndcl %ecx, (%r8,%r9)
+64	refused	bndcl %ecx, %bnd4
+64	refused	bndcl %ecx, foo(%rip)
+64	refused	bndcl %cx, %bnd0
+64	refused	bndcl %cx, %bnd1
+64	refused	bndcl %cx, %bnd3
+64	refused	bndcl %cx, (%rax)
+64	refused	bndcl %cx, 0x40(%rax)
+64	refused	bndcl %cx, (%rax,%rcx)
+64	refused	bndcl %cx, 0x12(%rax,%rcx,2)
+64	refused	bndcl %cx, %ecx
+64	refused	bndcl %cx, %cx
+64	refused	bndcl %cx, %cl
+64	refused	bndcl %cx, $1
+64	refused	bndcl %cx, %xmm1
+64	refused	bndcl %cx, foo
+64	refused	bndcl %cx, foo(%rax)
+64	refused	bndcl %cx, %rcx
+64	refused	bndcl %cx, %r9
+64	refused	bndcl %cx, (%r8,%r9)
+64	refused	bndcl %cx, %bnd4
+64	refused	bndcl %cx, foo(%rip)
+64	refused	bndcl %cl, %bnd0
+64	refused	bndcl %cl, %bnd1
+64	refused	bndcl %cl, %bnd3
+64	refused	bndcl %cl, (%rax)
+64	refused	bndcl %cl, 0x40(%rax)
+64	refused	bndcl %cl, (%rax,%rcx)
+64	refused	bndcl %cl, 0x12(%rax,%rcx,2)
+64	refused	bndcl %cl, %ecx
+64	refused	bndcl %cl, %cx
+64	refused	bndcl %cl, %cl
+64	refused	bndcl %cl, $1
+64	refused	bndcl %cl, %xmm1
+64	refused	bndcl %cl, foo
+64	refused	bndcl %cl, foo(%rax)
+64	refused	bndcl %cl, %rcx
+64	refused	bndcl %cl, %r9
+64	refused	bndcl %cl, (%r8,%r9)
+64	refused	bndcl %cl, %bnd4
+64	refused	bndcl %cl, foo(%rip)
+64	refused	bndcl $1, %bnd0
+64	refused	bndcl $1, %bnd1
+64	refused	bndcl $1, %bnd3
+64	refused	bndcl $1, (%rax)
+64	refused	bndcl $1, 0x40(%rax)
+64	refused	bndcl $1, (%rax,%rcx)
+64	refused	bndcl $1, 0x12(%rax,%rcx,2)
+64	refused	bndcl $1, %ecx
+64	refused	bndcl $1, %cx
+64	refused	bndcl $1, %cl
+64	refused	bndcl $1, $1
+64	refused	bndcl $1, %xmm1
+64	refused	bndcl $1, foo
+64	refused	bndcl $1, foo(%rax)
+64	refused	bndcl $1, %rcx
+64	refused	bndcl $1, %r9
+64	refused	bndcl $1, (%r8,%r9)
+64	refused	bndcl $1, %bnd4
+64	refused	bndcl $1, foo(%rip)
+64	refused	bndcl %xmm1, %bnd0
+64	refused	bndcl %xmm1, %bnd1
+64	refused	bndcl %xmm1, %bnd3
+64	refused	bndcl %xmm1, (%rax)
+64	refused	bndcl %xmm1, 0x40(%rax)
+64	refused	bndcl %xmm1, (%rax,%rcx)
+64	refused	bndcl %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndcl %xmm1, %ecx
+64	refused	bndcl %xmm1, %cx
+64	refused	bndcl %xmm1, %cl
+64	refused	bndcl %xmm1, $1
+64	refused	bndcl %xmm1, %xmm1
+64	refused	bndcl %xmm1, foo
+64	refused	bndcl %xmm1, foo(%rax)
+64	refused	bndcl %xmm1, %rcx
+64	refused	bndcl %xmm1, %r9
+64	refused	bndcl %xmm1, (%r8,%r9)
+64	refused	bndcl %xmm1, %bnd4
+64	refused	bndcl %xmm1, foo(%rip)
+64	f30f1a042500000000	bndcl foo, %bnd0
+64	f30f1a0c2500000000	bndcl foo, %bnd1
+64	f30f1a1c2500000000	bndcl foo, %bnd3
+64	refused	bndcl foo, (%rax)
+64	refused	bndcl foo, 0x40(%rax)
+64	refused	bndcl foo, (%rax,%rcx)
+64	refused	bndcl foo, 0x12(%rax,%rcx,2)
+64	refused	bndcl foo, %ecx
+64	refused	bndcl foo, %cx
+64	refused	bndcl foo, %cl
+64	refused	bndcl foo, $1
+64	refused	bndcl foo, %xmm1
+64	refused	bndcl foo, foo
+64	refused	bndcl foo, foo(%rax)
+64	refused	bndcl foo, %rcx
+64	refused	bndcl foo, %r9
+64	refused	bndcl foo, (%r8,%r9)
+64	refused	bndcl foo, %bnd4
+64	refused	bndcl foo, foo(%rip)
+64	f30f1a8000000000	bndcl foo(%rax), %bnd0
+64	f30f1a8800000000	bndcl foo(%rax), %bnd1
+64	f30f1a9800000000	bndcl foo(%rax), %bnd3
+64	refused	bndcl foo(%rax), (%rax)
+64	refused	bndcl foo(%rax), 0x40(%rax)
+64	refused	bndcl foo(%rax), (%rax,%rcx)
+64	refused	bndcl foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcl foo(%rax), %ecx
+64	refused	bndcl foo(%rax), %cx
+64	refused	bndcl foo(%rax), %cl
+64	refused	bndcl foo(%rax), $1
+64	refused	bndcl foo(%rax), %xmm1
+64	refused	bndcl foo(%rax), foo
+64	refused	bndcl foo(%rax), foo(%rax)
+64	refused	bndcl foo(%rax), %rcx
+64	refused	bndcl foo(%rax), %r9
+64	refused	bndcl foo(%rax), (%r8,%r9)
+64	refused	bndcl foo(%rax), %bnd4
+64	refused	bndcl foo(%rax), foo(%rip)
+64	f30f1ac1	bndcl %rcx, %bnd0
+64	f30f1ac9	bndcl %rcx, %bnd1
+64	f30f1ad9	bndcl %rcx, %bnd3
+64	refused	bndcl %rcx, (%rax)
+64	refused	bndcl %rcx, 0x40(%rax)
+64	refused	bndcl %rcx, (%rax,%rcx)
+64	refused	bndcl %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndcl %rcx, %ecx
+64	refused	bndcl %rcx, %cx
+64	refused	bndcl %rcx, %cl
+64	refused	bndcl %rcx, $1
+64	refused	bndcl %rcx, %xmm1
+64	refused	bndcl %rcx, foo
+64	refused	bndcl %rcx, foo(%rax)
+64	refused	bndcl %rcx, %rcx
+64	refused	bndcl %rcx, %r9
+64	refused	bndcl %rcx, (%r8,%r9)
+64	refused	bndcl %rcx, %bnd4
+64	refused	bndcl %rcx, foo(%rip)
+64	f3410f1ac1	bndcl %r9, %bnd0
+64	f3410f1ac9	bndcl %r9, %bnd1
+64	f3410f1ad9	bndcl %r9, %bnd3
+64	refused	bndcl %r9, (%rax)
+64	refused	bndcl %r9, 0x40(%rax)
+64	refused	bndcl %r9, (%rax,%rcx)
+64	refused	bndcl %r9, 0x12(%rax,%rcx,2)
+64	refused	bndcl %r9, %ecx
+64	refused	bndcl %r9, %cx
+64	refused	bndcl %r9, %cl
+64	refused	bndcl %r9, $1
+64	refused	bndcl %r9, %xmm1
+64	refused	bndcl %r9, foo
+64	refused	bndcl %r9, foo(%rax)
+64	refused	bndcl %r9, %rcx
+64	refused	bndcl %r9, %r9
+64	refused	bndcl %r9, (%r8,%r9)
+64	refused	bndcl %r9, %bnd4
+64	refused	bndcl %r9, foo(%rip)
+64	f3430f1a0408	bndcl (%r8,%r9), %bnd0
+64	f3430f1a0c08	bndcl (%r8,%r9), %bnd1
+64	f3430f1a1c08	bndcl (%r8,%r9), %bnd3
+64	refused	bndcl (%r8,%r9), (%rax)
+64	refused	bndcl (%r8,%r9), 0x40(%rax)
+64	refused	bndcl (%r8,%r9), (%rax,%rcx)
+64	refused	bndcl (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndcl (%r8,%r9), %ecx
+64	refused	bndcl (%r8,%r9), %cx
+64	refused	bndcl (%r8,%r9), %cl
+64	refused	bndcl (%r8,%r9), $1
+64	refused	bndcl (%r8,%r9), %xmm1
+64	refused	bndcl (%r8,%r9), foo
+64	refused	bndcl (%r8,%r9), foo(%rax)
+64	refused	bndcl (%r8,%r9), %rcx
+64	refused	bndcl (%r8,%r9), %r9
+64	refused	bndcl (%r8,%r9), (%r8,%r9)
+64	refused	bndcl (%r8,%r9), %bnd4
+64	refused	bndcl (%r8,%r9), foo(%rip)
+64	refused	bndcl %bnd4, %bnd0
+64	refused	bndcl %bnd4, %bnd1
+64	refused	bndcl %bnd4, %bnd3
+64	refused	bndcl %bnd4, (%rax)
+64	refused	bndcl %bnd4, 0x40(%rax)
+64	refused	bndcl %bnd4, (%rax,%rcx)
+64	refused	bndcl %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndcl %bnd4, %ecx
+64	refused	bndcl %bnd4, %cx
+64	refused	bndcl %bnd4, %cl
+64	refused	bndcl %bnd4, $1
+64	refused	bndcl %bnd4, %xmm1
+64	refused	bndcl %bnd4, foo
+64	refused	bndcl %bnd4, foo(%rax)
+64	refused	bndcl %bnd4, %rcx
+64	refused	bndcl %bnd4, %r9
+64	refused	bndcl %bnd4, (%r8,%r9)
+64	refused	bndcl %bnd4, %bnd4
+64	refused	bndcl %bnd4, foo(%rip)
+64	f30f1a0500000000	bndcl foo(%rip), %bnd0
+64	f30f1a0d00000000	bndcl foo(%rip), %bnd1
+64	f30f1a1d00000000	bndcl foo(%rip), %bnd3
+64	refused	bndcl foo(%rip), (%rax)
+64	refused	bndcl foo(%rip), 0x40(%rax)
+64	refused	bndcl foo(%rip), (%rax,%rcx)
+64	refused	bndcl foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndcl foo(%rip), %ecx
+64	refused	bndcl foo(%rip), %cx
+64	refused	bndcl foo(%rip), %cl
+64	refused	bndcl foo(%rip), $1
+64	refused	bndcl foo(%rip), %xmm1
+64	refused	bndcl foo(%rip), foo
+64	refused	bndcl foo(%rip), foo(%rax)
+64	refused	bndcl foo(%rip), %rcx
+64	refused	bndcl foo(%rip), %r9
+64	refused	bndcl foo(%rip), (%r8,%r9)
+64	refused	bndcl foo(%rip), %bnd4
+64	refused	bndcl foo(%rip), foo(%rip)
+64	refused	bndcu
+64	refused	bndcu %bnd0
+64	refused	bndcu %bnd1
+64	refused	bndcu %bnd3
+64	refused	bndcu (%rax)
+64	refused	bndcu 0x40(%rax)
+64	refused	bndcu (%rax,%rcx)
+64	refused	bndcu 0x12(%rax,%rcx,2)
+64	refused	bndcu %ecx
+64	refused	bndcu %cx
+64	refused	bndcu %cl
+64	refused	bndcu $1
+64	refused	bndcu %xmm1
+64	refused	bndcu foo
+64	refused	bndcu foo(%rax)
+64	refused	bndcu %rcx
+64	refused	bndcu %r9
+64	refused	bndcu (%r8,%r9)
+64	refused	bndcu %bnd4
+64	refused	bndcu foo(%rip)
+64	refused	bndcu %bnd0, %bnd0
+64	refused	bndcu %bnd0, %bnd1
+64	refused	bndcu %bnd0, %bnd3
+64	refused	bndcu %bnd0, (%rax)
+64	refused	bndcu %bnd0, 0x40(%rax)
+64	refused	bndcu %bnd0, (%rax,%rcx)
+64	refused	bndcu %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndcu %bnd0, %ecx
+64	refused	bndcu %bnd0, %cx
+64	refused	bndcu %bnd0, %cl
+64	refused	bndcu %bnd0, $1
+64	refused	bndcu %bnd0, %xmm1
+64	refused	bndcu %bnd0, foo
+64	refused	bndcu %bnd0, foo(%rax)
+64	refused	bndcu %bnd0, %rcx
+64	refused	bndcu %bnd0, %r9
+64	refused	bndcu %bnd0, (%r8,%r9)
+64	refused	bndcu %bnd0, %bnd4
+64	refused	bndcu %bnd0, foo(%rip)
+64	refused	bndcu %bnd1, %bnd0
+64	refused	bndcu %bnd1, %bnd1
+64	refused	bndcu %bnd1, %bnd3
+64	refused	bndcu %bnd1, (%rax)
+64	refused	bndcu %bnd1, 0x40(%rax)
+64	refused	bndcu %bnd1, (%rax,%rcx)
+64	refused	bndcu %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndcu %bnd1, %ecx
+64	refused	bndcu %bnd1, %cx
+64	refused	bndcu %bnd1, %cl
+64	refused	bndcu %bnd1, $1
+64	refused	bndcu %bnd1, %xmm1
+64	refused	bndcu %bnd1, foo
+64	refused	bndcu %bnd1, foo(%rax)
+64	refused	bndcu %bnd1, %rcx
+64	refused	bndcu %bnd1, %r9
+64	refused	bndcu %bnd1, (%r8,%r9)
+64	refused	bndcu %bnd1, %bnd4
+64	refused	bndcu %bnd1, foo(%rip)
+64	refused	bndcu %bnd3, %bnd0
+64	refused	bndcu %bnd3, %bnd1
+64	refused	bndcu %bnd3, %bnd3
+64	refused	bndcu %bnd3, (%rax)
+64	refused	bndcu %bnd3, 0x40(%rax)
+64	refused	bndcu %bnd3, (%rax,%rcx)
+64	refused	bndcu %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndcu %bnd3, %ecx
+64	refused	bndcu %bnd3, %cx
+64	refused	bndcu %bnd3, %cl
+64	refused	bndcu %bnd3, $1
+64	refused	bndcu %bnd3, %xmm1
+64	refused	bndcu %bnd3, foo
+64	refused	bndcu %bnd3, foo(%rax)
+64	refused	bndcu %bnd3, %rcx
+64	refused	bndcu %bnd3, %r9
+64	refused	bndcu %bnd3, (%r8,%r9)
+64	refused	bndcu %bnd3, %bnd4
+64	refused	bndcu %bnd3, foo(%rip)
+64	f20f1a00	bndcu (%rax), %bnd0
+64	f20f1a08	bndcu (%rax), %bnd1
+64	f20f1a18	bndcu (%rax), %bnd3
+64	refused	bndcu (%rax), (%rax)
+64	refused	bndcu (%rax), 0x40(%rax)
+64	refused	bndcu (%rax), (%rax,%rcx)
+64	refused	bndcu (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcu (%rax), %ecx
+64	refused	bndcu (%rax), %cx
+64	refused	bndcu (%rax), %cl
+64	refused	bndcu (%rax), $1
+64	refused	bndcu (%rax), %xmm1
+64	refused	bndcu (%rax), foo
+64	refused	bndcu (%rax), foo(%rax)
+64	refused	bndcu (%rax), %rcx
+64	refused	bndcu (%rax), %r9
+64	refused	bndcu (%rax), (%r8,%r9)
+64	refused	bndcu (%rax), %bnd4
+64	refused	bndcu (%rax), foo(%rip)
+64	f20f1a4040	bndcu 0x40(%rax), %bnd0
+64	f20f1a4840	bndcu 0x40(%rax), %bnd1
+64	f20f1a5840	bndcu 0x40(%rax), %bnd3
+64	refused	bndcu 0x40(%rax), (%rax)
+64	refused	bndcu 0x40(%rax), 0x40(%rax)
+64	refused	bndcu 0x40(%rax), (%rax,%rcx)
+64	refused	bndcu 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcu 0x40(%rax), %ecx
+64	refused	bndcu 0x40(%rax), %cx
+64	refused	bndcu 0x40(%rax), %cl
+64	refused	bndcu 0x40(%rax), $1
+64	refused	bndcu 0x40(%rax), %xmm1
+64	refused	bndcu 0x40(%rax), foo
+64	refused	bndcu 0x40(%rax), foo(%rax)
+64	refused	bndcu 0x40(%rax), %rcx
+64	refused	bndcu 0x40(%rax), %r9
+64	refused	bndcu 0x40(%rax), (%r8,%r9)
+64	refused	bndcu 0x40(%rax), %bnd4
+64	refused	bndcu 0x40(%rax), foo(%rip)
+64	f20f1a0408	bndcu (%rax,%rcx), %bnd0
+64	f20f1a0c08	bndcu (%rax,%rcx), %bnd1
+64	f20f1a1c08	bndcu (%rax,%rcx), %bnd3
+64	refused	bndcu (%rax,%rcx), (%rax)
+64	refused	bndcu (%rax,%rcx), 0x40(%rax)
+64	refused	bndcu (%rax,%rcx), (%rax,%rcx)
+64	refused	bndcu (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndcu (%rax,%rcx), %ecx
+64	refused	bndcu (%rax,%rcx), %cx
+64	refused	bndcu (%rax,%rcx), %cl
+64	refused	bndcu (%rax,%rcx), $1
+64	refused	bndcu (%rax,%rcx), %xmm1
+64	refused	bndcu (%rax,%rcx), foo
+64	refused	bndcu (%rax,%rcx), foo(%rax)
+64	refused	bndcu (%rax,%rcx), %rcx
+64	refused	bndcu (%rax,%rcx), %r9
+64	refused	bndcu (%rax,%rcx), (%r8,%r9)
+64	refused	bndcu (%rax,%rcx), %bnd4
+64	refused	bndcu (%rax,%rcx), foo(%rip)
+64	f20f1a444812	bndcu 0x12(%rax,%rcx,2), %bnd0
+64	f20f1a4c4812	bndcu 0x12(%rax,%rcx,2), %bnd1
+64	f20f1a5c4812	bndcu 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndcu 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndcu 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndcu 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndcu 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndcu 0x12(%rax,%rcx,2), %ecx
+64	refused	bndcu 0x12(%rax,%rcx,2), %cx
+64	refused	bndcu 0x12(%rax,%rcx,2), %cl
+64	refused	bndcu 0x12(%rax,%rcx,2), $1
+64	refused	bndcu 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndcu 0x12(%rax,%rcx,2), foo
+64	refused	bndcu 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndcu 0x12(%rax,%rcx,2), %rcx
+64	refused	bndcu 0x12(%rax,%rcx,2), %r9
+64	refused	bndcu 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndcu 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndcu 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndcu %ecx, %bnd0
+64	refused	bndcu %ecx, %bnd1
+64	refused	bndcu %ecx, %bnd3
+64	refused	bndcu %ecx, (%rax)
+64	refused	bndcu %ecx, 0x40(%rax)
+64	refused	bndcu %ecx, (%rax,%rcx)
+64	refused	bndcu %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndcu %ecx, %ecx
+64	refused	bndcu %ecx, %cx
+64	refused	bndcu %ecx, %cl
+64	refused	bndcu %ecx, $1
+64	refused	bndcu %ecx, %xmm1
+64	refused	bndcu %ecx, foo
+64	refused	bndcu %ecx, foo(%rax)
+64	refused	bndcu %ecx, %rcx
+64	refused	bndcu %ecx, %r9
+64	refused	bndcu %ecx, (%r8,%r9)
+64	refused	bndcu %ecx, %bnd4
+64	refused	bndcu %ecx, foo(%rip)
+64	refused	bndcu %cx, %bnd0
+64	refused	bndcu %cx, %bnd1
+64	refused	bndcu %cx, %bnd3
+64	refused	bndcu %cx, (%rax)
+64	refused	bndcu %cx, 0x40(%rax)
+64	refused	bndcu %cx, (%rax,%rcx)
+64	refused	bndcu %cx, 0x12(%rax,%rcx,2)
+64	refused	bndcu %cx, %ecx
+64	refused	bndcu %cx, %cx
+64	refused	bndcu %cx, %cl
+64	refused	bndcu %cx, $1
+64	refused	bndcu %cx, %xmm1
+64	refused	bndcu %cx, foo
+64	refused	bndcu %cx, foo(%rax)
+64	refused	bndcu %cx, %rcx
+64	refused	bndcu %cx, %r9
+64	refused	bndcu %cx, (%r8,%r9)
+64	refused	bndcu %cx, %bnd4
+64	refused	bndcu %cx, foo(%rip)
+64	refused	bndcu %cl, %bnd0
+64	refused	bndcu %cl, %bnd1
+64	refused	bndcu %cl, %bnd3
+64	refused	bndcu %cl, (%rax)
+64	refused	bndcu %cl, 0x40(%rax)
+64	refused	bndcu %cl, (%rax,%rcx)
+64	refused	bndcu %cl, 0x12(%rax,%rcx,2)
+64	refused	bndcu %cl, %ecx
+64	refused	bndcu %cl, %cx
+64	refused	bndcu %cl, %cl
+64	refused	bndcu %cl, $1
+64	refused	bndcu %cl, %xmm1
+64	refused	bndcu %cl, foo
+64	refused	bndcu %cl, foo(%rax)
+64	refused	bndcu %cl, %rcx
+64	refused	bndcu %cl, %r9
+64	refused	bndcu %cl, (%r8,%r9)
+64	refused	bndcu %cl, %bnd4
+64	refused	bndcu %cl, foo(%rip)
+64	refused	bndcu $1, %bnd0
+64	refused	bndcu $1, %bnd1
+64	refused	bndcu $1, %bnd3
+64	refused	bndcu $1, (%rax)
+64	refused	bndcu $1, 0x40(%rax)
+64	refused	bndcu $1, (%rax,%rcx)
+64	refused	bndcu $1, 0x12(%rax,%rcx,2)
+64	refused	bndcu $1, %ecx
+64	refused	bndcu $1, %cx
+64	refused	bndcu $1, %cl
+64	refused	bndcu $1, $1
+64	refused	bndcu $1, %xmm1
+64	refused	bndcu $1, foo
+64	refused	bndcu $1, foo(%rax)
+64	refused	bndcu $1, %rcx
+64	refused	bndcu $1, %r9
+64	refused	bndcu $1, (%r8,%r9)
+64	refused	bndcu $1, %bnd4
+64	refused	bndcu $1, foo(%rip)
+64	refused	bndcu %xmm1, %bnd0
+64	refused	bndcu %xmm1, %bnd1
+64	refused	bndcu %xmm1, %bnd3
+64	refused	bndcu %xmm1, (%rax)
+64	refused	bndcu %xmm1, 0x40(%rax)
+64	refused	bndcu %xmm1, (%rax,%rcx)
+64	refused	bndcu %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndcu %xmm1, %ecx
+64	refused	bndcu %xmm1, %cx
+64	refused	bndcu %xmm1, %cl
+64	refused	bndcu %xmm1, $1
+64	refused	bndcu %xmm1, %xmm1
+64	refused	bndcu %xmm1, foo
+64	refused	bndcu %xmm1, foo(%rax)
+64	refused	bndcu %xmm1, %rcx
+64	refused	bndcu %xmm1, %r9
+64	refused	bndcu %xmm1, (%r8,%r9)
+64	refused	bndcu %xmm1, %bnd4
+64	refused	bndcu %xmm1, foo(%rip)
+64	f20f1a042500000000	bndcu foo, %bnd0
+64	f20f1a0c2500000000	bndcu foo, %bnd1
+64	f20f1a1c2500000000	bndcu foo, %bnd3
+64	refused	bndcu foo, (%rax)
+64	refused	bndcu foo, 0x40(%rax)
+64	refused	bndcu foo, (%rax,%rcx)
+64	refused	bndcu foo, 0x12(%rax,%rcx,2)
+64	refused	bndcu foo, %ecx
+64	refused	bndcu foo, %cx
+64	refused	bndcu foo, %cl
+64	refused	bndcu foo, $1
+64	refused	bndcu foo, %xmm1
+64	refused	bndcu foo, foo
+64	refused	bndcu foo, foo(%rax)
+64	refused	bndcu foo, %rcx
+64	refused	bndcu foo, %r9
+64	refused	bndcu foo, (%r8,%r9)
+64	refused	bndcu foo, %bnd4
+64	refused	bndcu foo, foo(%rip)
+64	f20f1a8000000000	bndcu foo(%rax), %bnd0
+64	f20f1a8800000000	bndcu foo(%rax), %bnd1
+64	f20f1a9800000000	bndcu foo(%rax), %bnd3
+64	refused	bndcu foo(%rax), (%rax)
+64	refused	bndcu foo(%rax), 0x40(%rax)
+64	refused	bndcu foo(%rax), (%rax,%rcx)
+64	refused	bndcu foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcu foo(%rax), %ecx
+64	refused	bndcu foo(%rax), %cx
+64	refused	bndcu foo(%rax), %cl
+64	refused	bndcu foo(%rax), $1
+64	refused	bndcu foo(%rax), %xmm1
+64	refused	bndcu foo(%rax), foo
+64	refused	bndcu foo(%rax), foo(%rax)
+64	refused	bndcu foo(%rax), %rcx
+64	refused	bndcu foo(%rax), %r9
+64	refused	bndcu foo(%rax), (%r8,%r9)
+64	refused	bndcu foo(%rax), %bnd4
+64	refused	bndcu foo(%rax), foo(%rip)
+64	f20f1ac1	bndcu %rcx, %bnd0
+64	f20f1ac9	bndcu %rcx, %bnd1
+64	f20f1ad9	bndcu %rcx, %bnd3
+64	refused	bndcu %rcx, (%rax)
+64	refused	bndcu %rcx, 0x40(%rax)
+64	refused	bndcu %rcx, (%rax,%rcx)
+64	refused	bndcu %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndcu %rcx, %ecx
+64	refused	bndcu %rcx, %cx
+64	refused	bndcu %rcx, %cl
+64	refused	bndcu %rcx, $1
+64	refused	bndcu %rcx, %xmm1
+64	refused	bndcu %rcx, foo
+64	refused	bndcu %rcx, foo(%rax)
+64	refused	bndcu %rcx, %rcx
+64	refused	bndcu %rcx, %r9
+64	refused	bndcu %rcx, (%r8,%r9)
+64	refused	bndcu %rcx, %bnd4
+64	refused	bndcu %rcx, foo(%rip)
+64	f2410f1ac1	bndcu %r9, %bnd0
+64	f2410f1ac9	bndcu %r9, %bnd1
+64	f2410f1ad9	bndcu %r9, %bnd3
+64	refused	bndcu %r9, (%rax)
+64	refused	bndcu %r9, 0x40(%rax)
+64	refused	bndcu %r9, (%rax,%rcx)
+64	refused	bndcu %r9, 0x12(%rax,%rcx,2)
+64	refused	bndcu %r9, %ecx
+64	refused	bndcu %r9, %cx
+64	refused	bndcu %r9, %cl
+64	refused	bndcu %r9, $1
+64	refused	bndcu %r9, %xmm1
+64	refused	bndcu %r9, foo
+64	refused	bndcu %r9, foo(%rax)
+64	refused	bndcu %r9, %rcx
+64	refused	bndcu %r9, %r9
+64	refused	bndcu %r9, (%r8,%r9)
+64	refused	bndcu %r9, %bnd4
+64	refused	bndcu %r9, foo(%rip)
+64	f2430f1a0408	bndcu (%r8,%r9), %bnd0
+64	f2430f1a0c08	bndcu (%r8,%r9), %bnd1
+64	f2430f1a1c08	bndcu (%r8,%r9), %bnd3
+64	refused	bndcu (%r8,%r9), (%rax)
+64	refused	bndcu (%r8,%r9), 0x40(%rax)
+64	refused	bndcu (%r8,%r9), (%rax,%rcx)
+64	refused	bndcu (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndcu (%r8,%r9), %ecx
+64	refused	bndcu (%r8,%r9), %cx
+64	refused	bndcu (%r8,%r9), %cl
+64	refused	bndcu (%r8,%r9), $1
+64	refused	bndcu (%r8,%r9), %xmm1
+64	refused	bndcu (%r8,%r9), foo
+64	refused	bndcu (%r8,%r9), foo(%rax)
+64	refused	bndcu (%r8,%r9), %rcx
+64	refused	bndcu (%r8,%r9), %r9
+64	refused	bndcu (%r8,%r9), (%r8,%r9)
+64	refused	bndcu (%r8,%r9), %bnd4
+64	refused	bndcu (%r8,%r9), foo(%rip)
+64	refused	bndcu %bnd4, %bnd0
+64	refused	bndcu %bnd4, %bnd1
+64	refused	bndcu %bnd4, %bnd3
+64	refused	bndcu %bnd4, (%rax)
+64	refused	bndcu %bnd4, 0x40(%rax)
+64	refused	bndcu %bnd4, (%rax,%rcx)
+64	refused	bndcu %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndcu %bnd4, %ecx
+64	refused	bndcu %bnd4, %cx
+64	refused	bndcu %bnd4, %cl
+64	refused	bndcu %bnd4, $1
+64	refused	bndcu %bnd4, %xmm1
+64	refused	bndcu %bnd4, foo
+64	refused	bndcu %bnd4, foo(%rax)
+64	refused	bndcu %bnd4, %rcx
+64	refused	bndcu %bnd4, %r9
+64	refused	bndcu %bnd4, (%r8,%r9)
+64	refused	bndcu %bnd4, %bnd4
+64	refused	bndcu %bnd4, foo(%rip)
+64	f20f1a0500000000	bndcu foo(%rip), %bnd0
+64	f20f1a0d00000000	bndcu foo(%rip), %bnd1
+64	f20f1a1d00000000	bndcu foo(%rip), %bnd3
+64	refused	bndcu foo(%rip), (%rax)
+64	refused	bndcu foo(%rip), 0x40(%rax)
+64	refused	bndcu foo(%rip), (%rax,%rcx)
+64	refused	bndcu foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndcu foo(%rip), %ecx
+64	refused	bndcu foo(%rip), %cx
+64	refused	bndcu foo(%rip), %cl
+64	refused	bndcu foo(%rip), $1
+64	refused	bndcu foo(%rip), %xmm1
+64	refused	bndcu foo(%rip), foo
+64	refused	bndcu foo(%rip), foo(%rax)
+64	refused	bndcu foo(%rip), %rcx
+64	refused	bndcu foo(%rip), %r9
+64	refused	bndcu foo(%rip), (%r8,%r9)
+64	refused	bndcu foo(%rip), %bnd4
+64	refused	bndcu foo(%rip), foo(%rip)
+64	refused	bndcn
+64	refused	bndcn %bnd0
+64	refused	bndcn %bnd1
+64	refused	bndcn %bnd3
+64	refused	bndcn (%rax)
+64	refused	bndcn 0x40(%rax)
+64	refused	bndcn (%rax,%rcx)
+64	refused	bndcn 0x12(%rax,%rcx,2)
+64	refused	bndcn %ecx
+64	refused	bndcn %cx
+64	refused	bndcn %cl
+64	refused	bndcn $1
+64	refused	bndcn %xmm1
+64	refused	bndcn foo
+64	refused	bndcn foo(%rax)
+64	refused	bndcn %rcx
+64	refused	bndcn %r9
+64	refused	bndcn (%r8,%r9)
+64	refused	bndcn %bnd4
+64	refused	bndcn foo(%rip)
+64	refused	bndcn %bnd0, %bnd0
+64	refused	bndcn %bnd0, %bnd1
+64	refused	bndcn %bnd0, %bnd3
+64	refused	bndcn %bnd0, (%rax)
+64	refused	bndcn %bnd0, 0x40(%rax)
+64	refused	bndcn %bnd0, (%rax,%rcx)
+64	refused	bndcn %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndcn %bnd0, %ecx
+64	refused	bndcn %bnd0, %cx
+64	refused	bndcn %bnd0, %cl
+64	refused	bndcn %bnd0, $1
+64	refused	bndcn %bnd0, %xmm1
+64	refused	bndcn %bnd0, foo
+64	refused	bndcn %bnd0, foo(%rax)
+64	refused	bndcn %bnd0, %rcx
+64	refused	bndcn %bnd0, %r9
+64	refused	bndcn %bnd0, (%r8,%r9)
+64	refused	bndcn %bnd0, %bnd4
+64	refused	bndcn %bnd0, foo(%rip)
+64	refused	bndcn %bnd1, %bnd0
+64	refused	bndcn %bnd1, %bnd1
+64	refused	bndcn %bnd1, %bnd3
+64	refused	bndcn %bnd1, (%rax)
+64	refused	bndcn %bnd1, 0x40(%rax)
+64	refused	bndcn %bnd1, (%rax,%rcx)
+64	refused	bndcn %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndcn %bnd1, %ecx
+64	refused	bndcn %bnd1, %cx
+64	refused	bndcn %bnd1, %cl
+64	refused	bndcn %bnd1, $1
+64	refused	bndcn %bnd1, %xmm1
+64	refused	bndcn %bnd1, foo
+64	refused	bndcn %bnd1, foo(%rax)
+64	refused	bndcn %bnd1, %rcx
+64	refused	bndcn %bnd1, %r9
+64	refused	bndcn %bnd1, (%r8,%r9)
+64	refused	bndcn %bnd1, %bnd4
+64	refused	bndcn %bnd1, foo(%rip)
+64	refused	bndcn %bnd3, %bnd0
+64	refused	bndcn %bnd3, %bnd1
+64	refused	bndcn %bnd3, %bnd3
+64	refused	bndcn %bnd3, (%rax)
+64	refused	bndcn %bnd3, 0x40(%rax)
+64	refused	bndcn %bnd3, (%rax,%rcx)
+64	refused	bndcn %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndcn %bnd3, %ecx
+64	refused	bndcn %bnd3, %cx
+64	refused	bndcn %bnd3, %cl
+64	refused	bndcn %bnd3, $1
+64	refused	bndcn %bnd3, %xmm1
+64	refused	bndcn %bnd3, foo
+64	refused	bndcn %bnd3, foo(%rax)
+64	refused	bndcn %bnd3, %rcx
+64	refused	bndcn %bnd3, %r9
+64	refused	bndcn %bnd3, (%r8,%r9)
+64	refused	bndcn %bnd3, %bnd4
+64	refused	bndcn %bnd3, foo(%rip)
+64	f20f1b00	bndcn (%rax), %bnd0
+64	f20f1b08	bndcn (%rax), %bnd1
+64	f20f1b18	bndcn (%rax), %bnd3
+64	refused	bndcn (%rax), (%rax)
+64	refused	bndcn (%rax), 0x40(%rax)
+64	refused	bndcn (%rax), (%rax,%rcx)
+64	refused	bndcn (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcn (%rax), %ecx
+64	refused	bndcn (%rax), %cx
+64	refused	bndcn (%rax), %cl
+64	refused	bndcn (%rax), $1
+64	refused	bndcn (%rax), %xmm1
+64	refused	bndcn (%rax), foo
+64	refused	bndcn (%rax), foo(%rax)
+64	refused	bndcn (%rax), %rcx
+64	refused	bndcn (%rax), %r9
+64	refused	bndcn (%rax), (%r8,%r9)
+64	refused	bndcn (%rax), %bnd4
+64	refused	bndcn (%rax), foo(%rip)
+64	f20f1b4040	bndcn 0x40(%rax), %bnd0
+64	f20f1b4840	bndcn 0x40(%rax), %bnd1
+64	f20f1b5840	bndcn 0x40(%rax), %bnd3
+64	refused	bndcn 0x40(%rax), (%rax)
+64	refused	bndcn 0x40(%rax), 0x40(%rax)
+64	refused	bndcn 0x40(%rax), (%rax,%rcx)
+64	refused	bndcn 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcn 0x40(%rax), %ecx
+64	refused	bndcn 0x40(%rax), %cx
+64	refused	bndcn 0x40(%rax), %cl
+64	refused	bndcn 0x40(%rax), $1
+64	refused	bndcn 0x40(%rax), %xmm1
+64	refused	bndcn 0x40(%rax), foo
+64	refused	bndcn 0x40(%rax), foo(%rax)
+64	refused	bndcn 0x40(%rax), %rcx
+64	refused	bndcn 0x40(%rax), %r9
+64	refused	bndcn 0x40(%rax), (%r8,%r9)
+64	refused	bndcn 0x40(%rax), %bnd4
+64	refused	bndcn 0x40(%rax), foo(%rip)
+64	f20f1b0408	bndcn (%rax,%rcx), %bnd0
+64	f20f1b0c08	bndcn (%rax,%rcx), %bnd1
+64	f20f1b1c08	bndcn (%rax,%rcx), %bnd3
+64	refused	bndcn (%rax,%rcx), (%rax)
+64	refused	bndcn (%rax,%rcx), 0x40(%rax)
+64	refused	bndcn (%rax,%rcx), (%rax,%rcx)
+64	refused	bndcn (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndcn (%rax,%rcx), %ecx
+64	refused	bndcn (%rax,%rcx), %cx
+64	refused	bndcn (%rax,%rcx), %cl
+64	refused	bndcn (%rax,%rcx), $1
+64	refused	bndcn (%rax,%rcx), %xmm1
+64	refused	bndcn (%rax,%rcx), foo
+64	refused	bndcn (%rax,%rcx), foo(%rax)
+64	refused	bndcn (%rax,%rcx), %rcx
+64	refused	bndcn (%rax,%rcx), %r9
+64	refused	bndcn (%rax,%rcx), (%r8,%r9)
+64	refused	bndcn (%rax,%rcx), %bnd4
+64	refused	bndcn (%rax,%rcx), foo(%rip)
+64	f20f1b444812	bndcn 0x12(%rax,%rcx,2), %bnd0
+64	f20f1b4c4812	bndcn 0x12(%rax,%rcx,2), %bnd1
+64	f20f1b5c4812	bndcn 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndcn 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndcn 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndcn 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndcn 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndcn 0x12(%rax,%rcx,2), %ecx
+64	refused	bndcn 0x12(%rax,%rcx,2), %cx
+64	refused	bndcn 0x12(%rax,%rcx,2), %cl
+64	refused	bndcn 0x12(%rax,%rcx,2), $1
+64	refused	bndcn 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndcn 0x12(%rax,%rcx,2), foo
+64	refused	bndcn 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndcn 0x12(%rax,%rcx,2), %rcx
+64	refused	bndcn 0x12(%rax,%rcx,2), %r9
+64	refused	bndcn 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndcn 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndcn 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndcn %ecx, %bnd0
+64	refused	bndcn %ecx, %bnd1
+64	refused	bndcn %ecx, %bnd3
+64	refused	bndcn %ecx, (%rax)
+64	refused	bndcn %ecx, 0x40(%rax)
+64	refused	bndcn %ecx, (%rax,%rcx)
+64	refused	bndcn %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndcn %ecx, %ecx
+64	refused	bndcn %ecx, %cx
+64	refused	bndcn %ecx, %cl
+64	refused	bndcn %ecx, $1
+64	refused	bndcn %ecx, %xmm1
+64	refused	bndcn %ecx, foo
+64	refused	bndcn %ecx, foo(%rax)
+64	refused	bndcn %ecx, %rcx
+64	refused	bndcn %ecx, %r9
+64	refused	bndcn %ecx, (%r8,%r9)
+64	refused	bndcn %ecx, %bnd4
+64	refused	bndcn %ecx, foo(%rip)
+64	refused	bndcn %cx, %bnd0
+64	refused	bndcn %cx, %bnd1
+64	refused	bndcn %cx, %bnd3
+64	refused	bndcn %cx, (%rax)
+64	refused	bndcn %cx, 0x40(%rax)
+64	refused	bndcn %cx, (%rax,%rcx)
+64	refused	bndcn %cx, 0x12(%rax,%rcx,2)
+64	refused	bndcn %cx, %ecx
+64	refused	bndcn %cx, %cx
+64	refused	bndcn %cx, %cl
+64	refused	bndcn %cx, $1
+64	refused	bndcn %cx, %xmm1
+64	refused	bndcn %cx, foo
+64	refused	bndcn %cx, foo(%rax)
+64	refused	bndcn %cx, %rcx
+64	refused	bndcn %cx, %r9
+64	refused	bndcn %cx, (%r8,%r9)
+64	refused	bndcn %cx, %bnd4
+64	refused	bndcn %cx, foo(%rip)
+64	refused	bndcn %cl, %bnd0
+64	refused	bndcn %cl, %bnd1
+64	refused	bndcn %cl, %bnd3
+64	refused	bndcn %cl, (%rax)
+64	refused	bndcn %cl, 0x40(%rax)
+64	refused	bndcn %cl, (%rax,%rcx)
+64	refused	bndcn %cl, 0x12(%rax,%rcx,2)
+64	refused	bndcn %cl, %ecx
+64	refused	bndcn %cl, %cx
+64	refused	bndcn %cl, %cl
+64	refused	bndcn %cl, $1
+64	refused	bndcn %cl, %xmm1
+64	refused	bndcn %cl, foo
+64	refused	bndcn %cl, foo(%rax)
+64	refused	bndcn %cl, %rcx
+64	refused	bndcn %cl, %r9
+64	refused	bndcn %cl, (%r8,%r9)
+64	refused	bndcn %cl, %bnd4
+64	refused	bndcn %cl, foo(%rip)
+64	refused	bndcn $1, %bnd0
+64	refused	bndcn $1, %bnd1
+64	refused	bndcn $1, %bnd3
+64	refused	bndcn $1, (%rax)
+64	refused	bndcn $1, 0x40(%rax)
+64	refused	bndcn $1, (%rax,%rcx)
+64	refused	bndcn $1, 0x12(%rax,%rcx,2)
+64	refused	bndcn $1, %ecx
+64	refused	bndcn $1, %cx
+64	refused	bndcn $1, %cl
+64	refused	bndcn $1, $1
+64	refused	bndcn $1, %xmm1
+64	refused	bndcn $1, foo
+64	refused	bndcn $1, foo(%rax)
+64	refused	bndcn $1, %rcx
+64	refused	bndcn $1, %r9
+64	refused	bndcn $1, (%r8,%r9)
+64	refused	bndcn $1, %bnd4
+64	refused	bndcn $1, foo(%rip)
+64	refused	bndcn %xmm1, %bnd0
+64	refused	bndcn %xmm1, %bnd1
+64	refused	bndcn %xmm1, %bnd3
+64	refused	bndcn %xmm1, (%rax)
+64	refused	bndcn %xmm1, 0x40(%rax)
+64	refused	bndcn %xmm1, (%rax,%rcx)
+64	refused	bndcn %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndcn %xmm1, %ecx
+64	refused	bndcn %xmm1, %cx
+64	refused	bndcn %xmm1, %cl
+64	refused	bndcn %xmm1, $1
+64	refused	bndcn %xmm1, %xmm1
+64	refused	bndcn %xmm1, foo
+64	refused	bndcn %xmm1, foo(%rax)
+64	refused	bndcn %xmm1, %rcx
+64	refused	bndcn %xmm1, %r9
+64	refused	bndcn %xmm1, (%r8,%r9)
+64	refused	bndcn %xmm1, %bnd4
+64	refused	bndcn %xmm1, foo(%rip)
+64	f20f1b042500000000	bndcn foo, %bnd0
+64	f20f1b0c2500000000	bndcn foo, %bnd1
+64	f20f1b1c2500000000	bndcn foo, %bnd3
+64	refused	bndcn foo, (%rax)
+64	refused	bndcn foo, 0x40(%rax)
+64	refused	bndcn foo, (%rax,%rcx)
+64	refused	bndcn foo, 0x12(%rax,%rcx,2)
+64	refused	bndcn foo, %ecx
+64	refused	bndcn foo, %cx
+64	refused	bndcn foo, %cl
+64	refused	bndcn foo, $1
+64	refused	bndcn foo, %xmm1
+64	refused	bndcn foo, foo
+64	refused	bndcn foo, foo(%rax)
+64	refused	bndcn foo, %rcx
+64	refused	bndcn foo, %r9
+64	refused	bndcn foo, (%r8,%r9)
+64	refused	bndcn foo, %bnd4
+64	refused	bndcn foo, foo(%rip)
+64	f20f1b8000000000	bndcn foo(%rax), %bnd0
+64	f20f1b8800000000	bndcn foo(%rax), %bnd1
+64	f20f1b9800000000	bndcn foo(%rax), %bnd3
+64	refused	bndcn foo(%rax), (%rax)
+64	refused	bndcn foo(%rax), 0x40(%rax)
+64	refused	bndcn foo(%rax), (%rax,%rcx)
+64	refused	bndcn foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndcn foo(%rax), %ecx
+64	refused	bndcn foo(%rax), %cx
+64	refused	bndcn foo(%rax), %cl
+64	refused	bndcn foo(%rax), $1
+64	refused	bndcn foo(%rax), %xmm1
+64	refused	bndcn foo(%rax), foo
+64	refused	bndcn foo(%rax), foo(%rax)
+64	refused	bndcn foo(%rax), %rcx
+64	refused	bndcn foo(%rax), %r9
+64	refused	bndcn foo(%rax), (%r8,%r9)
+64	refused	bndcn foo(%rax), %bnd4
+64	refused	bndcn foo(%rax), foo(%rip)
+64	f20f1bc1	bndcn %rcx, %bnd0
+64	f20f1bc9	bndcn %rcx, %bnd1
+64	f20f1bd9	bndcn %rcx, %bnd3
+64	refused	bndcn %rcx, (%rax)
+64	refused	bndcn %rcx, 0x40(%rax)
+64	refused	bndcn %rcx, (%rax,%rcx)
+64	refused	bndcn %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndcn %rcx, %ecx
+64	refused	bndcn %rcx, %cx
+64	refused	bndcn %rcx, %cl
+64	refused	bndcn %rcx, $1
+64	refused	bndcn %rcx, %xmm1
+64	refused	bndcn %rcx, foo
+64	refused	bndcn %rcx, foo(%rax)
+64	refused	bndcn %rcx, %rcx
+64	refused	bndcn %rcx, %r9
+64	refused	bndcn %rcx, (%r8,%r9)
+64	refused	bndcn %rcx, %bnd4
+64	refused	bndcn %rcx, foo(%rip)
+64	f2410f1bc1	bndcn %r9, %bnd0
+64	f2410f1bc9	bndcn %r9, %bnd1
+64	f2410f1bd9	bndcn %r9, %bnd3
+64	refused	bndcn %r9, (%rax)
+64	refused	bndcn %r9, 0x40(%rax)
+64	refused	bndcn %r9, (%rax,%rcx)
+64	refused	bndcn %r9, 0x12(%rax,%rcx,2)
+64	refused	bndcn %r9, %ecx
+64	refused	bndcn %r9, %cx
+64	refused	bndcn %r9, %cl
+64	refused	bndcn %r9, $1
+64	refused	bndcn %r9, %xmm1
+64	refused	bndcn %r9, foo
+64	refused	bndcn %r9, foo(%rax)
+64	refused	bndcn %r9, %rcx
+64	refused	bndcn %r9, %r9
+64	refused	bndcn %r9, (%r8,%r9)
+64	refused	bndcn %r9, %bnd4
+64	refused	bndcn %r9, foo(%rip)
+64	f2430f1b0408	bndcn (%r8,%r9), %bnd0
+64	f2430f1b0c08	bndcn (%r8,%r9), %bnd1
+64	f2430f1b1c08	bndcn (%r8,%r9), %bnd3
+64	refused	bndcn (%r8,%r9), (%rax)
+64	refused	bndcn (%r8,%r9), 0x40(%rax)
+64	refused	bndcn (%r8,%r9), (%rax,%rcx)
+64	refused	bndcn (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndcn (%r8,%r9), %ecx
+64	refused	bndcn (%r8,%r9), %cx
+64	refused	bndcn (%r8,%r9), %cl
+64	refused	bndcn (%r8,%r9), $1
+64	refused	bndcn (%r8,%r9), %xmm1
+64	refused	bndcn (%r8,%r9), foo
+64	refused	bndcn (%r8,%r9), foo(%rax)
+64	refused	bndcn (%r8,%r9), %rcx
+64	refused	bndcn (%r8,%r9), %r9
+64	refused	bndcn (%r8,%r9), (%r8,%r9)
+64	refused	bndcn (%r8,%r9), %bnd4
+64	refused	bndcn (%r8,%r9), foo(%rip)
+64	refused	bndcn %bnd4, %bnd0
+64	refused	bndcn %bnd4, %bnd1
+64	refused	bndcn %bnd4, %bnd3
+64	refused	bndcn %bnd4, (%rax)
+64	refused	bndcn %bnd4, 0x40(%rax)
+64	refused	bndcn %bnd4, (%rax,%rcx)
+64	refused	bndcn %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndcn %bnd4, %ecx
+64	refused	bndcn %bnd4, %cx
+64	refused	bndcn %bnd4, %cl
+64	refused	bndcn %bnd4, $1
+64	refused	bndcn %bnd4, %xmm1
+64	refused	bndcn %bnd4, foo
+64	refused	bndcn %bnd4, foo(%rax)
+64	refused	bndcn %bnd4, %rcx
+64	refused	bndcn %bnd4, %r9
+64	refused	bndcn %bnd4, (%r8,%r9)
+64	refused	bndcn %bnd4, %bnd4
+64	refused	bndcn %bnd4, foo(%rip)
+64	f20f1b0500000000	bndcn foo(%rip), %bnd0
+64	f20f1b0d00000000	bndcn foo(%rip), %bnd1
+64	f20f1b1d00000000	bndcn foo(%rip), %bnd3
+64	refused	bndcn foo(%rip), (%rax)
+64	refused	bndcn foo(%rip), 0x40(%rax)
+64	refused	bndcn foo(%rip), (%rax,%rcx)
+64	refused	bndcn foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndcn foo(%rip), %ecx
+64	refused	bndcn foo(%rip), %cx
+64	refused	bndcn foo(%rip), %cl
+64	refused	bndcn foo(%rip), $1
+64	refused	bndcn foo(%rip), %xmm1
+64	refused	bndcn foo(%rip), foo
+64	refused	bndcn foo(%rip), foo(%rax)
+64	refused	bndcn foo(%rip), %rcx
+64	refused	bndcn foo(%rip), %r9
+64	refused	bndcn foo(%rip), (%r8,%r9)
+64	refused	bndcn foo(%rip), %bnd4
+64	refused	bndcn foo(%rip), foo(%rip)
+64	refused	bndldx
+64	refused	bndldx %bnd0
+64	refused	bndldx %bnd1
+64	refused	bndldx %bnd3
+64	refused	bndldx (%rax)
+64	refused	bndldx 0x40(%rax)
+64	refused	bndldx (%rax,%rcx)
+64	refused	bndldx 0x12(%rax,%rcx,2)
+64	refused	bndldx %ecx
+64	refused	bndldx %cx
+64	refused	bndldx %cl
+64	refused	bndldx $1
+64	refused	bndldx %xmm1
+64	refused	bndldx foo
+64	refused	bndldx foo(%rax)
+64	refused	bndldx %rcx
+64	refused	bndldx %r9
+64	refused	bndldx (%r8,%r9)
+64	refused	bndldx %bnd4
+64	refused	bndldx foo(%rip)
+64	refused	bndldx %bnd0, %bnd0
+64	refused	bndldx %bnd0, %bnd1
+64	refused	bndldx %bnd0, %bnd3
+64	refused	bndldx %bnd0, (%rax)
+64	refused	bndldx %bnd0, 0x40(%rax)
+64	refused	bndldx %bnd0, (%rax,%rcx)
+64	refused	bndldx %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndldx %bnd0, %ecx
+64	refused	bndldx %bnd0, %cx
+64	refused	bndldx %bnd0, %cl
+64	refused	bndldx %bnd0, $1
+64	refused	bndldx %bnd0, %xmm1
+64	refused	bndldx %bnd0, foo
+64	refused	bndldx %bnd0, foo(%rax)
+64	refused	bndldx %bnd0, %rcx
+64	refused	bndldx %bnd0, %r9
+64	refused	bndldx %bnd0, (%r8,%r9)
+64	refused	bndldx %bnd0, %bnd4
+64	refused	bndldx %bnd0, foo(%rip)
+64	refused	bndldx %bnd1, %bnd0
+64	refused	bndldx %bnd1, %bnd1
+64	refused	bndldx %bnd1, %bnd3
+64	refused	bndldx %bnd1, (%rax)
+64	refused	bndldx %bnd1, 0x40(%rax)
+64	refused	bndldx %bnd1, (%rax,%rcx)
+64	refused	bndldx %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndldx %bnd1, %ecx
+64	refused	bndldx %bnd1, %cx
+64	refused	bndldx %bnd1, %cl
+64	refused	bndldx %bnd1, $1
+64	refused	bndldx %bnd1, %xmm1
+64	refused	bndldx %bnd1, foo
+64	refused	bndldx %bnd1, foo(%rax)
+64	refused	bndldx %bnd1, %rcx
+64	refused	bndldx %bnd1, %r9
+64	refused	bndldx %bnd1, (%r8,%r9)
+64	refused	bndldx %bnd1, %bnd4
+64	refused	bndldx %bnd1, foo(%rip)
+64	refused	bndldx %bnd3, %bnd0
+64	refused	bndldx %bnd3, %bnd1
+64	refused	bndldx %bnd3, %bnd3
+64	refused	bndldx %bnd3, (%rax)
+64	refused	bndldx %bnd3, 0x40(%rax)
+64	refused	bndldx %bnd3, (%rax,%rcx)
+64	refused	bndldx %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndldx %bnd3, %ecx
+64	refused	bndldx %bnd3, %cx
+64	refused	bndldx %bnd3, %cl
+64	refused	bndldx %bnd3, $1
+64	refused	bndldx %bnd3, %xmm1
+64	refused	bndldx %bnd3, foo
+64	refused	bndldx %bnd3, foo(%rax)
+64	refused	bndldx %bnd3, %rcx
+64	refused	bndldx %bnd3, %r9
+64	refused	bndldx %bnd3, (%r8,%r9)
+64	refused	bndldx %bnd3, %bnd4
+64	refused	bndldx %bnd3, foo(%rip)
+64	0f1a00	bndldx (%rax), %bnd0
+64	0f1a08	bndldx (%rax), %bnd1
+64	0f1a18	bndldx (%rax), %bnd3
+64	refused	bndldx (%rax), (%rax)
+64	refused	bndldx (%rax), 0x40(%rax)
+64	refused	bndldx (%rax), (%rax,%rcx)
+64	refused	bndldx (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndldx (%rax), %ecx
+64	refused	bndldx (%rax), %cx
+64	refused	bndldx (%rax), %cl
+64	refused	bndldx (%rax), $1
+64	refused	bndldx (%rax), %xmm1
+64	refused	bndldx (%rax), foo
+64	refused	bndldx (%rax), foo(%rax)
+64	refused	bndldx (%rax), %rcx
+64	refused	bndldx (%rax), %r9
+64	refused	bndldx (%rax), (%r8,%r9)
+64	refused	bndldx (%rax), %bnd4
+64	refused	bndldx (%rax), foo(%rip)
+64	0f1a4040	bndldx 0x40(%rax), %bnd0
+64	0f1a4840	bndldx 0x40(%rax), %bnd1
+64	0f1a5840	bndldx 0x40(%rax), %bnd3
+64	refused	bndldx 0x40(%rax), (%rax)
+64	refused	bndldx 0x40(%rax), 0x40(%rax)
+64	refused	bndldx 0x40(%rax), (%rax,%rcx)
+64	refused	bndldx 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndldx 0x40(%rax), %ecx
+64	refused	bndldx 0x40(%rax), %cx
+64	refused	bndldx 0x40(%rax), %cl
+64	refused	bndldx 0x40(%rax), $1
+64	refused	bndldx 0x40(%rax), %xmm1
+64	refused	bndldx 0x40(%rax), foo
+64	refused	bndldx 0x40(%rax), foo(%rax)
+64	refused	bndldx 0x40(%rax), %rcx
+64	refused	bndldx 0x40(%rax), %r9
+64	refused	bndldx 0x40(%rax), (%r8,%r9)
+64	refused	bndldx 0x40(%rax), %bnd4
+64	refused	bndldx 0x40(%rax), foo(%rip)
+64	0f1a0408	bndldx (%rax,%rcx), %bnd0
+64	0f1a0c08	bndldx (%rax,%rcx), %bnd1
+64	0f1a1c08	bndldx (%rax,%rcx), %bnd3
+64	refused	bndldx (%rax,%rcx), (%rax)
+64	refused	bndldx (%rax,%rcx), 0x40(%rax)
+64	refused	bndldx (%rax,%rcx), (%rax,%rcx)
+64	refused	bndldx (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndldx (%rax,%rcx), %ecx
+64	refused	bndldx (%rax,%rcx), %cx
+64	refused	bndldx (%rax,%rcx), %cl
+64	refused	bndldx (%rax,%rcx), $1
+64	refused	bndldx (%rax,%rcx), %xmm1
+64	refused	bndldx (%rax,%rcx), foo
+64	refused	bndldx (%rax,%rcx), foo(%rax)
+64	refused	bndldx (%rax,%rcx), %rcx
+64	refused	bndldx (%rax,%rcx), %r9
+64	refused	bndldx (%rax,%rcx), (%r8,%r9)
+64	refused	bndldx (%rax,%rcx), %bnd4
+64	refused	bndldx (%rax,%rcx), foo(%rip)
+64	0f1a444812	bndldx 0x12(%rax,%rcx,2), %bnd0
+64	0f1a4c4812	bndldx 0x12(%rax,%rcx,2), %bnd1
+64	0f1a5c4812	bndldx 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndldx 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndldx 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndldx 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndldx 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndldx 0x12(%rax,%rcx,2), %ecx
+64	refused	bndldx 0x12(%rax,%rcx,2), %cx
+64	refused	bndldx 0x12(%rax,%rcx,2), %cl
+64	refused	bndldx 0x12(%rax,%rcx,2), $1
+64	refused	bndldx 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndldx 0x12(%rax,%rcx,2), foo
+64	refused	bndldx 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndldx 0x12(%rax,%rcx,2), %rcx
+64	refused	bndldx 0x12(%rax,%rcx,2), %r9
+64	refused	bndldx 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndldx 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndldx 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndldx %ecx, %bnd0
+64	refused	bndldx %ecx, %bnd1
+64	refused	bndldx %ecx, %bnd3
+64	refused	bndldx %ecx, (%rax)
+64	refused	bndldx %ecx, 0x40(%rax)
+64	refused	bndldx %ecx, (%rax,%rcx)
+64	refused	bndldx %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndldx %ecx, %ecx
+64	refused	bndldx %ecx, %cx
+64	refused	bndldx %ecx, %cl
+64	refused	bndldx %ecx, $1
+64	refused	bndldx %ecx, %xmm1
+64	refused	bndldx %ecx, foo
+64	refused	bndldx %ecx, foo(%rax)
+64	refused	bndldx %ecx, %rcx
+64	refused	bndldx %ecx, %r9
+64	refused	bndldx %ecx, (%r8,%r9)
+64	refused	bndldx %ecx, %bnd4
+64	refused	bndldx %ecx, foo(%rip)
+64	refused	bndldx %cx, %bnd0
+64	refused	bndldx %cx, %bnd1
+64	refused	bndldx %cx, %bnd3
+64	refused	bndldx %cx, (%rax)
+64	refused	bndldx %cx, 0x40(%rax)
+64	refused	bndldx %cx, (%rax,%rcx)
+64	refused	bndldx %cx, 0x12(%rax,%rcx,2)
+64	refused	bndldx %cx, %ecx
+64	refused	bndldx %cx, %cx
+64	refused	bndldx %cx, %cl
+64	refused	bndldx %cx, $1
+64	refused	bndldx %cx, %xmm1
+64	refused	bndldx %cx, foo
+64	refused	bndldx %cx, foo(%rax)
+64	refused	bndldx %cx, %rcx
+64	refused	bndldx %cx, %r9
+64	refused	bndldx %cx, (%r8,%r9)
+64	refused	bndldx %cx, %bnd4
+64	refused	bndldx %cx, foo(%rip)
+64	refused	bndldx %cl, %bnd0
+64	refused	bndldx %cl, %bnd1
+64	refused	bndldx %cl, %bnd3
+64	refused	bndldx %cl, (%rax)
+64	refused	bndldx %cl, 0x40(%rax)
+64	refused	bndldx %cl, (%rax,%rcx)
+64	refused	bndldx %cl, 0x12(%rax,%rcx,2)
+64	refused	bndldx %cl, %ecx
+64	refused	bndldx %cl, %cx
+64	refused	bndldx %cl, %cl
+64	refused	bndldx %cl, $1
+64	refused	bndldx %cl, %xmm1
+64	refused	bndldx %cl, foo
+64	refused	bndldx %cl, foo(%rax)
+64	refused	bndldx %cl, %rcx
+64	refused	bndldx %cl, %r9
+64	refused	bndldx %cl, (%r8,%r9)
+64	refused	bndldx %cl, %bnd4
+64	refused	bndldx %cl, foo(%rip)
+64	refused	bndldx $1, %bnd0
+64	refused	bndldx $1, %bnd1
+64	refused	bndldx $1, %bnd3
+64	refused	bndldx $1, (%rax)
+64	refused	bndldx $1, 0x40(%rax)
+64	refused	bndldx $1, (%rax,%rcx)
+64	refused	bndldx $1, 0x12(%rax,%rcx,2)
+64	refused	bndldx $1, %ecx
+64	refused	bndldx $1, %cx
+64	refused	bndldx $1, %cl
+64	refused	bndldx $1, $1
+64	refused	bndldx $1, %xmm1
+64	refused	bndldx $1, foo
+64	refused	bndldx $1, foo(%rax)
+64	refused	bndldx $1, %rcx
+64	refused	bndldx $1, %r9
+64	refused	bndldx $1, (%r8,%r9)
+64	refused	bndldx $1, %bnd4
+64	refused	bndldx $1, foo(%rip)
+64	refused	bndldx %xmm1, %bnd0
+64	refused	bndldx %xmm1, %bnd1
+64	refused	bndldx %xmm1, %bnd3
+64	refused	bndldx %xmm1, (%rax)
+64	refused	bndldx %xmm1, 0x40(%rax)
+64	refused	bndldx %xmm1, (%rax,%rcx)
+64	refused	bndldx %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndldx %xmm1, %ecx
+64	refused	bndldx %xmm1, %cx
+64	refused	bndldx %xmm1, %cl
+64	refused	bndldx %xmm1, $1
+64	refused	bndldx %xmm1, %xmm1
+64	refused	bndldx %xmm1, foo
+64	refused	bndldx %xmm1, foo(%rax)
+64	refused	bndldx %xmm1, %rcx
+64	refused	bndldx %xmm1, %r9
+64	refused	bndldx %xmm1, (%r8,%r9)
+64	refused	bndldx %xmm1, %bnd4
+64	refused	bndldx %xmm1, foo(%rip)
+64	0f1a042500000000	bndldx foo, %bnd0
+64	0f1a0c2500000000	bndldx foo, %bnd1
+64	0f1a1c2500000000	bndldx foo, %bnd3
+64	refused	bndldx foo, (%rax)
+64	refused	bndldx foo, 0x40(%rax)
+64	refused	bndldx foo, (%rax,%rcx)
+64	refused	bndldx foo, 0x12(%rax,%rcx,2)
+64	refused	bndldx foo, %ecx
+64	refused	bndldx foo, %cx
+64	refused	bndldx foo, %cl
+64	refused	bndldx foo, $1
+64	refused	bndldx foo, %xmm1
+64	refused	bndldx foo, foo
+64	refused	bndldx foo, foo(%rax)
+64	refused	bndldx foo, %rcx
+64	refused	bndldx foo, %r9
+64	refused	bndldx foo, (%r8,%r9)
+64	refused	bndldx foo, %bnd4
+64	refused	bndldx foo, foo(%rip)
+64	0f1a8000000000	bndldx foo(%rax), %bnd0
+64	0f1a8800000000	bndldx foo(%rax), %bnd1
+64	0f1a9800000000	bndldx foo(%rax), %bnd3
+64	refused	bndldx foo(%rax), (%rax)
+64	refused	bndldx foo(%rax), 0x40(%rax)
+64	refused	bndldx foo(%rax), (%rax,%rcx)
+64	refused	bndldx foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndldx foo(%rax), %ecx
+64	refused	bndldx foo(%rax), %cx
+64	refused	bndldx foo(%rax), %cl
+64	refused	bndldx foo(%rax), $1
+64	refused	bndldx foo(%rax), %xmm1
+64	refused	bndldx foo(%rax), foo
+64	refused	bndldx foo(%rax), foo(%rax)
+64	refused	bndldx foo(%rax), %rcx
+64	refused	bndldx foo(%rax), %r9
+64	refused	bndldx foo(%rax), (%r8,%r9)
+64	refused	bndldx foo(%rax), %bnd4
+64	refused	bndldx foo(%rax), foo(%rip)
+64	refused	bndldx %rcx, %bnd0
+64	refused	bndldx %rcx, %bnd1
+64	refused	bndldx %rcx, %bnd3
+64	refused	bndldx %rcx, (%rax)
+64	refused	bndldx %rcx, 0x40(%rax)
+64	refused	bndldx %rcx, (%rax,%rcx)
+64	refused	bndldx %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndldx %rcx, %ecx
+64	refused	bndldx %rcx, %cx
+64	refused	bndldx %rcx, %cl
+64	refused	bndldx %rcx, $1
+64	refused	bndldx %rcx, %xmm1
+64	refused	bndldx %rcx, foo
+64	refused	bndldx %rcx, foo(%rax)
+64	refused	bndldx %rcx, %rcx
+64	refused	bndldx %rcx, %r9
+64	refused	bndldx %rcx, (%r8,%r9)
+64	refused	bndldx %rcx, %bnd4
+64	refused	bndldx %rcx, foo(%rip)
+64	refused	bndldx %r9, %bnd0
+64	refused	bndldx %r9, %bnd1
+64	refused	bndldx %r9, %bnd3
+64	refused	bndldx %r9, (%rax)
+64	refused	bndldx %r9, 0x40(%rax)
+64	refused	bndldx %r9, (%rax,%rcx)
+64	refused	bndldx %r9, 0x12(%rax,%rcx,2)
+64	refused	bndldx %r9, %ecx
+64	refused	bndldx %r9, %cx
+64	refused	bndldx %r9, %cl
+64	refused	bndldx %r9, $1
+64	refused	bndldx %r9, %xmm1
+64	refused	bndldx %r9, foo
+64	refused	bndldx %r9, foo(%rax)
+64	refused	bndldx %r9, %rcx
+64	refused	bndldx %r9, %r9
+64	refused	bndldx %r9, (%r8,%r9)
+64	refused	bndldx %r9, %bnd4
+64	refused	bndldx %r9, foo(%rip)
+64	430f1a0408	bndldx (%r8,%r9), %bnd0
+64	430f1a0c08	bndldx (%r8,%r9), %bnd1
+64	430f1a1c08	bndldx (%r8,%r9), %bnd3
+64	refused	bndldx (%r8,%r9), (%rax)
+64	refused	bndldx (%r8,%r9), 0x40(%rax)
+64	refused	bndldx (%r8,%r9), (%rax,%rcx)
+64	refused	bndldx (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndldx (%r8,%r9), %ecx
+64	refused	bndldx (%r8,%r9), %cx
+64	refused	bndldx (%r8,%r9), %cl
+64	refused	bndldx (%r8,%r9), $1
+64	refused	bndldx (%r8,%r9), %xmm1
+64	refused	bndldx (%r8,%r9), foo
+64	refused	bndldx (%r8,%r9), foo(%rax)
+64	refused	bndldx (%r8,%r9), %rcx
+64	refused	bndldx (%r8,%r9), %r9
+64	refused	bndldx (%r8,%r9), (%r8,%r9)
+64	refused	bndldx (%r8,%r9), %bnd4
+64	refused	bndldx (%r8,%r9), foo(%rip)
+64	refused	bndldx %bnd4, %bnd0
+64	refused	bndldx %bnd4, %bnd1
+64	refused	bndldx %bnd4, %bnd3
+64	refused	bndldx %bnd4, (%rax)
+64	refused	bndldx %bnd4, 0x40(%rax)
+64	refused	bndldx %bnd4, (%rax,%rcx)
+64	refused	bndldx %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndldx %bnd4, %ecx
+64	refused	bndldx %bnd4, %cx
+64	refused	bndldx %bnd4, %cl
+64	refused	bndldx %bnd4, $1
+64	refused	bndldx %bnd4, %xmm1
+64	refused	bndldx %bnd4, foo
+64	refused	bndldx %bnd4, foo(%rax)
+64	refused	bndldx %bnd4, %rcx
+64	refused	bndldx %bnd4, %r9
+64	refused	bndldx %bnd4, (%r8,%r9)
+64	refused	bndldx %bnd4, %bnd4
+64	refused	bndldx %bnd4, foo(%rip)
+64	refused	bndldx foo(%rip), %bnd0
+64	refused	bndldx foo(%rip), %bnd1
+64	refused	bndldx foo(%rip), %bnd3
+64	refused	bndldx foo(%rip), (%rax)
+64	refused	bndldx foo(%rip), 0x40(%rax)
+64	refused	bndldx foo(%rip), (%rax,%rcx)
+64	refused	bndldx foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndldx foo(%rip), %ecx
+64	refused	bndldx foo(%rip), %cx
+64	refused	bndldx foo(%rip), %cl
+64	refused	bndldx foo(%rip), $1
+64	refused	bndldx foo(%rip), %xmm1
+64	refused	bndldx foo(%rip), foo
+64	refused	bndldx foo(%rip), foo(%rax)
+64	refused	bndldx foo(%rip), %rcx
+64	refused	bndldx foo(%rip), %r9
+64	refused	bndldx foo(%rip), (%r8,%r9)
+64	refused	bndldx foo(%rip), %bnd4
+64	refused	bndldx foo(%rip), foo(%rip)
+64	refused	bndstx
+64	refused	bndstx %bnd0
+64	refused	bndstx %bnd1
+64	refused	bndstx %bnd3
+64	refused	bndstx (%rax)
+64	refused	bndstx 0x40(%rax)
+64	refused	bndstx (%rax,%rcx)
+64	refused	bndstx 0x12(%rax,%rcx,2)
+64	refused	bndstx %ecx
+64	refused	bndstx %cx
+64	refused	bndstx %cl
+64	refused	bndstx $1
+64	refused	bndstx %xmm1
+64	refused	bndstx foo
+64	refused	bndstx foo(%rax)
+64	refused	bndstx %rcx
+64	refused	bndstx %r9
+64	refused	bndstx (%r8,%r9)
+64	refused	bndstx %bnd4
+64	refused	bndstx foo(%rip)
+64	refused	bndstx %bnd0, %bnd0
+64	refused	bndstx %bnd0, %bnd1
+64	refused	bndstx %bnd0, %bnd3
+64	0f1b00	bndstx %bnd0, (%rax)
+64	0f1b4040	bndstx %bnd0, 0x40(%rax)
+64	0f1b0408	bndstx %bnd0, (%rax,%rcx)
+64	0f1b444812	bndstx %bnd0, 0x12(%rax,%rcx,2)
+64	refused	bndstx %bnd0, %ecx
+64	refused	bndstx %bnd0, %cx
+64	refused	bndstx %bnd0, %cl
+64	refused	bndstx %bnd0, $1
+64	refused	bndstx %bnd0, %xmm1
+64	0f1b042500000000	bndstx %bnd0, foo
+64	0f1b8000000000	bndstx %bnd0, foo(%rax)
+64	refused	bndstx %bnd0, %rcx
+64	refused	bndstx %bnd0, %r9
+64	430f1b0408	bndstx %bnd0, (%r8,%r9)
+64	refused	bndstx %bnd0, %bnd4
+64	refused	bndstx %bnd0, foo(%rip)
+64	refused	bndstx %bnd1, %bnd0
+64	refused	bndstx %bnd1, %bnd1
+64	refused	bndstx %bnd1, %bnd3
+64	0f1b08	bndstx %bnd1, (%rax)
+64	0f1b4840	bndstx %bnd1, 0x40(%rax)
+64	0f1b0c08	bndstx %bnd1, (%rax,%rcx)
+64	0f1b4c4812	bndstx %bnd1, 0x12(%rax,%rcx,2)
+64	refused	bndstx %bnd1, %ecx
+64	refused	bndstx %bnd1, %cx
+64	refused	bndstx %bnd1, %cl
+64	refused	bndstx %bnd1, $1
+64	refused	bndstx %bnd1, %xmm1
+64	0f1b0c2500000000	bndstx %bnd1, foo
+64	0f1b8800000000	bndstx %bnd1, foo(%rax)
+64	refused	bndstx %bnd1, %rcx
+64	refused	bndstx %bnd1, %r9
+64	430f1b0c08	bndstx %bnd1, (%r8,%r9)
+64	refused	bndstx %bnd1, %bnd4
+64	refused	bndstx %bnd1, foo(%rip)
+64	refused	bndstx %bnd3, %bnd0
+64	refused	bndstx %bnd3, %bnd1
+64	refused	bndstx %bnd3, %bnd3
+64	0f1b18	bndstx %bnd3, (%rax)
+64	0f1b5840	bndstx %bnd3, 0x40(%rax)
+64	0f1b1c08	bndstx %bnd3, (%rax,%rcx)
+64	0f1b5c4812	bndstx %bnd3, 0x12(%rax,%rcx,2)
+64	refused	bndstx %bnd3, %ecx
+64	refused	bndstx %bnd3, %cx
+64	refused	bndstx %bnd3, %cl
+64	refused	bndstx %bnd3, $1
+64	refused	bndstx %bnd3, %xmm1
+64	0f1b1c2500000000	bndstx %bnd3, foo
+64	0f1b9800000000	bndstx %bnd3, foo(%rax)
+64	refused	bndstx %bnd3, %rcx
+64	refused	bndstx %bnd3, %r9
+64	430f1b1c08	bndstx %bnd3, (%r8,%r9)
+64	refused	bndstx %bnd3, %bnd4
+64	refused	bndstx %bnd3, foo(%rip)
+64	refused	bndstx (%rax), %bnd0
+64	refused	bndstx (%rax), %bnd1
+64	refused	bndstx (%rax), %bnd3
+64	refused	bndstx (%rax), (%rax)
+64	refused	bndstx (%rax), 0x40(%rax)
+64	refused	bndstx (%rax), (%rax,%rcx)
+64	refused	bndstx (%rax), 0x12(%rax,%rcx,2)
+64	refused	bndstx (%rax), %ecx
+64	refused	bndstx (%rax), %cx
+64	refused	bndstx (%rax), %cl
+64	refused	bndstx (%rax), $1
+64	refused	bndstx (%rax), %xmm1
+64	refused	bndstx (%rax), foo
+64	refused	bndstx (%rax), foo(%rax)
+64	refused	bndstx (%rax), %rcx
+64	refused	bndstx (%rax), %r9
+64	refused	bndstx (%rax), (%r8,%r9)
+64	refused	bndstx (%rax), %bnd4
+64	refused	bndstx (%rax), foo(%rip)
+64	refused	bndstx 0x40(%rax), %bnd0
+64	refused	bndstx 0x40(%rax), %bnd1
+64	refused	bndstx 0x40(%rax), %bnd3
+64	refused	bndstx 0x40(%rax), (%rax)
+64	refused	bndstx 0x40(%rax), 0x40(%rax)
+64	refused	bndstx 0x40(%rax), (%rax,%rcx)
+64	refused	bndstx 0x40(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndstx 0x40(%rax), %ecx
+64	refused	bndstx 0x40(%rax), %cx
+64	refused	bndstx 0x40(%rax), %cl
+64	refused	bndstx 0x40(%rax), $1
+64	refused	bndstx 0x40(%rax), %xmm1
+64	refused	bndstx 0x40(%rax), foo
+64	refused	bndstx 0x40(%rax), foo(%rax)
+64	refused	bndstx 0x40(%rax), %rcx
+64	refused	bndstx 0x40(%rax), %r9
+64	refused	bndstx 0x40(%rax), (%r8,%r9)
+64	refused	bndstx 0x40(%rax), %bnd4
+64	refused	bndstx 0x40(%rax), foo(%rip)
+64	refused	bndstx (%rax,%rcx), %bnd0
+64	refused	bndstx (%rax,%rcx), %bnd1
+64	refused	bndstx (%rax,%rcx), %bnd3
+64	refused	bndstx (%rax,%rcx), (%rax)
+64	refused	bndstx (%rax,%rcx), 0x40(%rax)
+64	refused	bndstx (%rax,%rcx), (%rax,%rcx)
+64	refused	bndstx (%rax,%rcx), 0x12(%rax,%rcx,2)
+64	refused	bndstx (%rax,%rcx), %ecx
+64	refused	bndstx (%rax,%rcx), %cx
+64	refused	bndstx (%rax,%rcx), %cl
+64	refused	bndstx (%rax,%rcx), $1
+64	refused	bndstx (%rax,%rcx), %xmm1
+64	refused	bndstx (%rax,%rcx), foo
+64	refused	bndstx (%rax,%rcx), foo(%rax)
+64	refused	bndstx (%rax,%rcx), %rcx
+64	refused	bndstx (%rax,%rcx), %r9
+64	refused	bndstx (%rax,%rcx), (%r8,%r9)
+64	refused	bndstx (%rax,%rcx), %bnd4
+64	refused	bndstx (%rax,%rcx), foo(%rip)
+64	refused	bndstx 0x12(%rax,%rcx,2), %bnd0
+64	refused	bndstx 0x12(%rax,%rcx,2), %bnd1
+64	refused	bndstx 0x12(%rax,%rcx,2), %bnd3
+64	refused	bndstx 0x12(%rax,%rcx,2), (%rax)
+64	refused	bndstx 0x12(%rax,%rcx,2), 0x40(%rax)
+64	refused	bndstx 0x12(%rax,%rcx,2), (%rax,%rcx)
+64	refused	bndstx 0x12(%rax,%rcx,2), 0x12(%rax,%rcx,2)
+64	refused	bndstx 0x12(%rax,%rcx,2), %ecx
+64	refused	bndstx 0x12(%rax,%rcx,2), %cx
+64	refused	bndstx 0x12(%rax,%rcx,2), %cl
+64	refused	bndstx 0x12(%rax,%rcx,2), $1
+64	refused	bndstx 0x12(%rax,%rcx,2), %xmm1
+64	refused	bndstx 0x12(%rax,%rcx,2), foo
+64	refused	bndstx 0x12(%rax,%rcx,2), foo(%rax)
+64	refused	bndstx 0x12(%rax,%rcx,2), %rcx
+64	refused	bndstx 0x12(%rax,%rcx,2), %r9
+64	refused	bndstx 0x12(%rax,%rcx,2), (%r8,%r9)
+64	refused	bndstx 0x12(%rax,%rcx,2), %bnd4
+64	refused	bndstx 0x12(%rax,%rcx,2), foo(%rip)
+64	refused	bndstx %ecx, %bnd0
+64	refused	bndstx %ecx, %bnd1
+64	refused	bndstx %ecx, %bnd3
+64	refused	bndstx %ecx, (%rax)
+64	refused	bndstx %ecx, 0x40(%rax)
+64	refused	bndstx %ecx, (%rax,%rcx)
+64	refused	bndstx %ecx, 0x12(%rax,%rcx,2)
+64	refused	bndstx %ecx, %ecx
+64	refused	bndstx %ecx, %cx
+64	refused	bndstx %ecx, %cl
+64	refused	bndstx %ecx, $1
+64	refused	bndstx %ecx, %xmm1
+64	refused	bndstx %ecx, foo
+64	refused	bndstx %ecx, foo(%rax)
+64	refused	bndstx %ecx, %rcx
+64	refused	bndstx %ecx, %r9
+64	refused	bndstx %ecx, (%r8,%r9)
+64	refused	bndstx %ecx, %bnd4
+64	refused	bndstx %ecx, foo(%rip)
+64	refused	bndstx %cx, %bnd0
+64	refused	bndstx %cx, %bnd1
+64	refused	bndstx %cx, %bnd3
+64	refused	bndstx %cx, (%rax)
+64	refused	bndstx %cx, 0x40(%rax)
+64	refused	bndstx %cx, (%rax,%rcx)
+64	refused	bndstx %cx, 0x12(%rax,%rcx,2)
+64	refused	bndstx %cx, %ecx
+64	refused	bndstx %cx, %cx
+64	refused	bndstx %cx, %cl
+64	refused	bndstx %cx, $1
+64	refused	bndstx %cx, %xmm1
+64	refused	bndstx %cx, foo
+64	refused	bndstx %cx, foo(%rax)
+64	refused	bndstx %cx, %rcx
+64	refused	bndstx %cx, %r9
+64	refused	bndstx %cx, (%r8,%r9)
+64	refused	bndstx %cx, %bnd4
+64	refused	bndstx %cx, foo(%rip)
+64	refused	bndstx %cl, %bnd0
+64	refused	bndstx %cl, %bnd1
+64	refused	bndstx %cl, %bnd3
+64	refused	bndstx %cl, (%rax)
+64	refused	bndstx %cl, 0x40(%rax)
+64	refused	bndstx %cl, (%rax,%rcx)
+64	refused	bndstx %cl, 0x12(%rax,%rcx,2)
+64	refused	bndstx %cl, %ecx
+64	refused	bndstx %cl, %cx
+64	refused	bndstx %cl, %cl
+64	refused	bndstx %cl, $1
+64	refused	bndstx %cl, %xmm1
+64	refused	bndstx %cl, foo
+64	refused	bndstx %cl, foo(%rax)
+64	refused	bndstx %cl, %rcx
+64	refused	bndstx %cl, %r9
+64	refused	bndstx %cl, (%r8,%r9)
+64	refused	bndstx %cl, %bnd4
+64	refused	bndstx %cl, foo(%rip)
+64	refused	bndstx $1, %bnd0
+64	refused	bndstx $1, %bnd1
+64	refused	bndstx $1, %bnd3
+64	refused	bndstx $1, (%rax)
+64	refused	bndstx $1, 0x40(%rax)
+64	refused	bndstx $1, (%rax,%rcx)
+64	refused	bndstx $1, 0x12(%rax,%rcx,2)
+64	refused	bndstx $1, %ecx
+64	refused	bndstx $1, %cx
+64	refused	bndstx $1, %cl
+64	refused	bndstx $1, $1
+64	refused	bndstx $1, %xmm1
+64	refused	bndstx $1, foo
+64	refused	bndstx $1, foo(%rax)
+64	refused	bndstx $1, %rcx
+64	refused	bndstx $1, %r9
+64	refused	bndstx $1, (%r8,%r9)
+64	refused	bndstx $1, %bnd4
+64	refused	bndstx $1, foo(%rip)
+64	refused	bndstx %xmm1, %bnd0
+64	refused	bndstx %xmm1, %bnd1
+64	refused	bndstx %xmm1, %bnd3
+64	refused	bndstx %xmm1, (%rax)
+64	refused	bndstx %xmm1, 0x40(%rax)
+64	refused	bndstx %xmm1, (%rax,%rcx)
+64	refused	bndstx %xmm1, 0x12(%rax,%rcx,2)
+64	refused	bndstx %xmm1, %ecx
+64	refused	bndstx %xmm1, %cx
+64	refused	bndstx %xmm1, %cl
+64	refused	bndstx %xmm1, $1
+64	refused	bndstx %xmm1, %xmm1
+64	refused	bndstx %xmm1, foo
+64	refused	bndstx %xmm1, foo(%rax)
+64	refused	bndstx %xmm1, %rcx
+64	refused	bndstx %xmm1, %r9
+64	refused	bndstx %xmm1, (%r8,%r9)
+64	refused	bndstx %xmm1, %bnd4
+64	refused	bndstx %xmm1, foo(%rip)
+64	refused	bndstx foo, %bnd0
+64	refused	bndstx foo, %bnd1
+64	refused	bndstx foo, %bnd3
+64	refused	bndstx foo, (%rax)
+64	refused	bndstx foo, 0x40(%rax)
+64	refused	bndstx foo, (%rax,%rcx)
+64	refused	bndstx foo, 0x12(%rax,%rcx,2)
+64	refused	bndstx foo, %ecx
+64	refused	bndstx foo, %cx
+64	refused	bndstx foo, %cl
+64	refused	bndstx foo, $1
+64	refused	bndstx foo, %xmm1
+64	refused	bndstx foo, foo
+64	refused	bndstx foo, foo(%rax)
+64	refused	bndstx foo, %rcx
+64	refused	bndstx foo, %r9
+64	refused	bndstx foo, (%r8,%r9)
+64	refused	bndstx foo, %bnd4
+64	refused	bndstx foo, foo(%rip)
+64	refused	bndstx foo(%rax), %bnd0
+64	refused	bndstx foo(%rax), %bnd1
+64	refused	bndstx foo(%rax), %bnd3
+64	refused	bndstx foo(%rax), (%rax)
+64	refused	bndstx foo(%rax), 0x40(%rax)
+64	refused	bndstx foo(%rax), (%rax,%rcx)
+64	refused	bndstx foo(%rax), 0x12(%rax,%rcx,2)
+64	refused	bndstx foo(%rax), %ecx
+64	refused	bndstx foo(%rax), %cx
+64	refused	bndstx foo(%rax), %cl
+64	refused	bndstx foo(%rax), $1
+64	refused	bndstx foo(%rax), %xmm1
+64	refused	bndstx foo(%rax), foo
+64	refused	bndstx foo(%rax), foo(%rax)
+64	refused	bndstx foo(%rax), %rcx
+64	refused	bndstx foo(%rax), %r9
+64	refused	bndstx foo(%rax), (%r8,%r9)
+64	refused	bndstx foo(%rax), %bnd4
+64	refused	bndstx foo(%rax), foo(%rip)
+64	refused	bndstx %rcx, %bnd0
+64	refused	bndstx %rcx, %bnd1
+64	refused	bndstx %rcx, %bnd3
+64	refused	bndstx %rcx, (%rax)
+64	refused	bndstx %rcx, 0x40(%rax)
+64	refused	bndstx %rcx, (%rax,%rcx)
+64	refused	bndstx %rcx, 0x12(%rax,%rcx,2)
+64	refused	bndstx %rcx, %ecx
+64	refused	bndstx %rcx, %cx
+64	refused	bndstx %rcx, %cl
+64	refused	bndstx %rcx, $1
+64	refused	bndstx %rcx, %xmm1
+64	refused	bndstx %rcx, foo
+64	refused	bndstx %rcx, foo(%rax)
+64	refused	bndstx %rcx, %rcx
+64	refused	bndstx %rcx, %r9
+64	refused	bndstx %rcx, (%r8,%r9)
+64	refused	bndstx %rcx, %bnd4
+64	refused	bndstx %rcx, foo(%rip)
+64	refused	bndstx %r9, %bnd0
+64	refused	bndstx %r9, %bnd1
+64	refused	bndstx %r9, %bnd3
+64	refused	bndstx %r9, (%rax)
+64	refused	bndstx %r9, 0x40(%rax)
+64	refused	bndstx %r9, (%rax,%rcx)
+64	refused	bndstx %r9, 0x12(%rax,%rcx,2)
+64	refused	bndstx %r9, %ecx
+64	refused	bndstx %r9, %cx
+64	refused	bndstx %r9, %cl
+64	refused	bndstx %r9, $1
+64	refused	bndstx %r9, %xmm1
+64	refused	bndstx %r9, foo
+64	refused	bndstx %r9, foo(%rax)
+64	refused	bndstx %r9, %rcx
+64	refused	bndstx %r9, %r9
+64	refused	bndstx %r9, (%r8,%r9)
+64	refused	bndstx %r9, %bnd4
+64	refused	bndstx %r9, foo(%rip)
+64	refused	bndstx (%r8,%r9), %bnd0
+64	refused	bndstx (%r8,%r9), %bnd1
+64	refused	bndstx (%r8,%r9), %bnd3
+64	refused	bndstx (%r8,%r9), (%rax)
+64	refused	bndstx (%r8,%r9), 0x40(%rax)
+64	refused	bndstx (%r8,%r9), (%rax,%rcx)
+64	refused	bndstx (%r8,%r9), 0x12(%rax,%rcx,2)
+64	refused	bndstx (%r8,%r9), %ecx
+64	refused	bndstx (%r8,%r9), %cx
+64	refused	bndstx (%r8,%r9), %cl
+64	refused	bndstx (%r8,%r9), $1
+64	refused	bndstx (%r8,%r9), %xmm1
+64	refused	bndstx (%r8,%r9), foo
+64	refused	bndstx (%r8,%r9), foo(%rax)
+64	refused	bndstx (%r8,%r9), %rcx
+64	refused	bndstx (%r8,%r9), %r9
+64	refused	bndstx (%r8,%r9), (%r8,%r9)
+64	refused	bndstx (%r8,%r9), %bnd4
+64	refused	bndstx (%r8,%r9), foo(%rip)
+64	refused	bndstx %bnd4, %bnd0
+64	refused	bndstx %bnd4, %bnd1
+64	refused	bndstx %bnd4, %bnd3
+64	refused	bndstx %bnd4, (%rax)
+64	refused	bndstx %bnd4, 0x40(%rax)
+64	refused	bndstx %bnd4, (%rax,%rcx)
+64	refused	bndstx %bnd4, 0x12(%rax,%rcx,2)
+64	refused	bndstx %bnd4, %ecx
+64	refused	bndstx %bnd4, %cx
+64	refused	bndstx %bnd4, %cl
+64	refused	bndstx %bnd4, $1
+64	refused	bndstx %bnd4, %xmm1
+64	refused	bndstx %bnd4, foo
+64	refused	bndstx %bnd4, foo(%rax)
+64	refused	bndstx %bnd4, %rcx
+64	refused	bndstx %bnd4, %r9
+64	refused	bndstx %bnd4, (%r8,%r9)
+64	refused	bndstx %bnd4, %bnd4
+64	refused	bndstx %bnd4, foo(%rip)
+64	refused	bndstx foo(%rip), %bnd0
+64	refused	bndstx foo(%rip), %bnd1
+64	refused	bndstx foo(%rip), %bnd3
+64	refused	bndstx foo(%rip), (%rax)
+64	refused	bndstx foo(%rip), 0x40(%rax)
+64	refused	bndstx foo(%rip), (%rax,%rcx)
+64	refused	bndstx foo(%rip), 0x12(%rax,%rcx,2)
+64	refused	bndstx foo(%rip), %ecx
+64	refused	bndstx foo(%rip), %cx
+64	refused	bndstx foo(%rip), %cl
+64	refused	bndstx foo(%rip), $1
+64	refused	bndstx foo(%rip), %xmm1
+64	refused	bndstx foo(%rip), foo
+64	refused	bndstx foo(%rip), foo(%rax)
+64	refused	bndstx foo(%rip), %rcx
+64	refused	bndstx foo(%rip), %r9
+64	refused	bndstx foo(%rip), (%r8,%r9)
+64	refused	bndstx foo(%rip), %bnd4
+64	refused	bndstx foo(%rip), foo(%rip)
+32	refused	bndmk
+32	refused	bndmk %bnd0
+32	refused	bndmk %bnd1
+32	refused	bndmk %bnd3
+32	refused	bndmk (%eax)
+32	refused	bndmk 0x40(%eax)
+32	refused	bndmk (%eax,%ecx)
+32	refused	bndmk 0x12(%eax,%ecx,2)
+32	refused	bndmk %ecx
+32	refused	bndmk %cx
+32	refused	bndmk %cl
+32	refused	bndmk $1
+32	refused	bndmk %xmm1
+32	refused	bndmk foo
+32	refused	bndmk foo(%eax)
+32	refused	bndmk %bnd0, %bnd0
+32	refused	bndmk %bnd0, %bnd1
+32	refused	bndmk %bnd0, %bnd3
+32	refused	bndmk %bnd0, (%eax)
+32	refused	bndmk %bnd0, 0x40(%eax)
+32	refused	bndmk %bnd0, (%eax,%ecx)
+32	refused	bndmk %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndmk %bnd0, %ecx
+32	refused	bndmk %bnd0, %cx
+32	refused	bndmk %bnd0, %cl
+32	refused	bndmk %bnd0, $1
+32	refused	bndmk %bnd0, %xmm1
+32	refused	bndmk %bnd0, foo
+32	refused	bndmk %bnd0, foo(%eax)
+32	refused	bndmk %bnd1, %bnd0
+32	refused	bndmk %bnd1, %bnd1
+32	refused	bndmk %bnd1, %bnd3
+32	refused	bndmk %bnd1, (%eax)
+32	refused	bndmk %bnd1, 0x40(%eax)
+32	refused	bndmk %bnd1, (%eax,%ecx)
+32	refused	bndmk %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndmk %bnd1, %ecx
+32	refused	bndmk %bnd1, %cx
+32	refused	bndmk %bnd1, %cl
+32	refused	bndmk %bnd1, $1
+32	refused	bndmk %bnd1, %xmm1
+32	refused	bndmk %bnd1, foo
+32	refused	bndmk %bnd1, foo(%eax)
+32	refused	bndmk %bnd3, %bnd0
+32	refused	bndmk %bnd3, %bnd1
+32	refused	bndmk %bnd3, %bnd3
+32	refused	bndmk %bnd3, (%eax)
+32	refused	bndmk %bnd3, 0x40(%eax)
+32	refused	bndmk %bnd3, (%eax,%ecx)
+32	refused	bndmk %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndmk %bnd3, %ecx
+32	refused	bndmk %bnd3, %cx
+32	refused	bndmk %bnd3, %cl
+32	refused	bndmk %bnd3, $1
+32	refused	bndmk %bnd3, %xmm1
+32	refused	bndmk %bnd3, foo
+32	refused	bndmk %bnd3, foo(%eax)
+32	f30f1b00	bndmk (%eax), %bnd0
+32	f30f1b08	bndmk (%eax), %bnd1
+32	f30f1b18	bndmk (%eax), %bnd3
+32	refused	bndmk (%eax), (%eax)
+32	refused	bndmk (%eax), 0x40(%eax)
+32	refused	bndmk (%eax), (%eax,%ecx)
+32	refused	bndmk (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndmk (%eax), %ecx
+32	refused	bndmk (%eax), %cx
+32	refused	bndmk (%eax), %cl
+32	refused	bndmk (%eax), $1
+32	refused	bndmk (%eax), %xmm1
+32	refused	bndmk (%eax), foo
+32	refused	bndmk (%eax), foo(%eax)
+32	f30f1b4040	bndmk 0x40(%eax), %bnd0
+32	f30f1b4840	bndmk 0x40(%eax), %bnd1
+32	f30f1b5840	bndmk 0x40(%eax), %bnd3
+32	refused	bndmk 0x40(%eax), (%eax)
+32	refused	bndmk 0x40(%eax), 0x40(%eax)
+32	refused	bndmk 0x40(%eax), (%eax,%ecx)
+32	refused	bndmk 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndmk 0x40(%eax), %ecx
+32	refused	bndmk 0x40(%eax), %cx
+32	refused	bndmk 0x40(%eax), %cl
+32	refused	bndmk 0x40(%eax), $1
+32	refused	bndmk 0x40(%eax), %xmm1
+32	refused	bndmk 0x40(%eax), foo
+32	refused	bndmk 0x40(%eax), foo(%eax)
+32	f30f1b0408	bndmk (%eax,%ecx), %bnd0
+32	f30f1b0c08	bndmk (%eax,%ecx), %bnd1
+32	f30f1b1c08	bndmk (%eax,%ecx), %bnd3
+32	refused	bndmk (%eax,%ecx), (%eax)
+32	refused	bndmk (%eax,%ecx), 0x40(%eax)
+32	refused	bndmk (%eax,%ecx), (%eax,%ecx)
+32	refused	bndmk (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndmk (%eax,%ecx), %ecx
+32	refused	bndmk (%eax,%ecx), %cx
+32	refused	bndmk (%eax,%ecx), %cl
+32	refused	bndmk (%eax,%ecx), $1
+32	refused	bndmk (%eax,%ecx), %xmm1
+32	refused	bndmk (%eax,%ecx), foo
+32	refused	bndmk (%eax,%ecx), foo(%eax)
+32	f30f1b444812	bndmk 0x12(%eax,%ecx,2), %bnd0
+32	f30f1b4c4812	bndmk 0x12(%eax,%ecx,2), %bnd1
+32	f30f1b5c4812	bndmk 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndmk 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndmk 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndmk 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndmk 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndmk 0x12(%eax,%ecx,2), %ecx
+32	refused	bndmk 0x12(%eax,%ecx,2), %cx
+32	refused	bndmk 0x12(%eax,%ecx,2), %cl
+32	refused	bndmk 0x12(%eax,%ecx,2), $1
+32	refused	bndmk 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndmk 0x12(%eax,%ecx,2), foo
+32	refused	bndmk 0x12(%eax,%ecx,2), foo(%eax)
+32	refused	bndmk %ecx, %bnd0
+32	refused	bndmk %ecx, %bnd1
+32	refused	bndmk %ecx, %bnd3
+32	refused	bndmk %ecx, (%eax)
+32	refused	bndmk %ecx, 0x40(%eax)
+32	refused	bndmk %ecx, (%eax,%ecx)
+32	refused	bndmk %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndmk %ecx, %ecx
+32	refused	bndmk %ecx, %cx
+32	refused	bndmk %ecx, %cl
+32	refused	bndmk %ecx, $1
+32	refused	bndmk %ecx, %xmm1
+32	refused	bndmk %ecx, foo
+32	refused	bndmk %ecx, foo(%eax)
+32	refused	bndmk %cx, %bnd0
+32	refused	bndmk %cx, %bnd1
+32	refused	bndmk %cx, %bnd3
+32	refused	bndmk %cx, (%eax)
+32	refused	bndmk %cx, 0x40(%eax)
+32	refused	bndmk %cx, (%eax,%ecx)
+32	refused	bndmk %cx, 0x12(%eax,%ecx,2)
+32	refused	bndmk %cx, %ecx
+32	refused	bndmk %cx, %cx
+32	refused	bndmk %cx, %cl
+32	refused	bndmk %cx, $1
+32	refused	bndmk %cx, %xmm1
+32	refused	bndmk %cx, foo
+32	refused	bndmk %cx, foo(%eax)
+32	refused	bndmk %cl, %bnd0
+32	refused	bndmk %cl, %bnd1
+32	refused	bndmk %cl, %bnd3
+32	refused	bndmk %cl, (%eax)
+32	refused	bndmk %cl, 0x40(%eax)
+32	refused	bndmk %cl, (%eax,%ecx)
+32	refused	bndmk %cl, 0x12(%eax,%ecx,2)
+32	refused	bndmk %cl, %ecx
+32	refused	bndmk %cl, %cx
+32	refused	bndmk %cl, %cl
+32	refused	bndmk %cl, $1
+32	refused	bndmk %cl, %xmm1
+32	refused	bndmk %cl, foo
+32	refused	bndmk %cl, foo(%eax)
+32	refused	bndmk $1, %bnd0
+32	refused	bndmk $1, %bnd1
+32	refused	bndmk $1, %bnd3
+32	refused	bndmk $1, (%eax)
+32	refused	bndmk $1, 0x40(%eax)
+32	refused	bndmk $1, (%eax,%ecx)
+32	refused	bndmk $1, 0x12(%eax,%ecx,2)
+32	refused	bndmk $1, %ecx
+32	refused	bndmk $1, %cx
+32	refused	bndmk $1, %cl
+32	refused	bndmk $1, $1
+32	refused	bndmk $1, %xmm1
+32	refused	bndmk $1, foo
+32	refused	bndmk $1, foo(%eax)
+32	refused	bndmk %xmm1, %bnd0
+32	refused	bndmk %xmm1, %bnd1
+32	refused	bndmk %xmm1, %bnd3
+32	refused	bndmk %xmm1, (%eax)
+32	refused	bndmk %xmm1, 0x40(%eax)
+32	refused	bndmk %xmm1, (%eax,%ecx)
+32	refused	bndmk %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndmk %xmm1, %ecx
+32	refused	bndmk %xmm1, %cx
+32	refused	bndmk %xmm1, %cl
+32	refused	bndmk %xmm1, $1
+32	refused	bndmk %xmm1, %xmm1
+32	refused	bndmk %xmm1, foo
+32	refused	bndmk %xmm1, foo(%eax)
+32	f30f1b0500000000	bndmk foo, %bnd0
+32	f30f1b0d00000000	bndmk foo, %bnd1
+32	f30f1b1d00000000	bndmk foo, %bnd3
+32	refused	bndmk foo, (%eax)
+32	refused	bndmk foo, 0x40(%eax)
+32	refused	bndmk foo, (%eax,%ecx)
+32	refused	bndmk foo, 0x12(%eax,%ecx,2)
+32	refused	bndmk foo, %ecx
+32	refused	bndmk foo, %cx
+32	refused	bndmk foo, %cl
+32	refused	bndmk foo, $1
+32	refused	bndmk foo, %xmm1
+32	refused	bndmk foo, foo
+32	refused	bndmk foo, foo(%eax)
+32	f30f1b8000000000	bndmk foo(%eax), %bnd0
+32	f30f1b8800000000	bndmk foo(%eax), %bnd1
+32	f30f1b9800000000	bndmk foo(%eax), %bnd3
+32	refused	bndmk foo(%eax), (%eax)
+32	refused	bndmk foo(%eax), 0x40(%eax)
+32	refused	bndmk foo(%eax), (%eax,%ecx)
+32	refused	bndmk foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndmk foo(%eax), %ecx
+32	refused	bndmk foo(%eax), %cx
+32	refused	bndmk foo(%eax), %cl
+32	refused	bndmk foo(%eax), $1
+32	refused	bndmk foo(%eax), %xmm1
+32	refused	bndmk foo(%eax), foo
+32	refused	bndmk foo(%eax), foo(%eax)
+32	refused	bndmov
+32	refused	bndmov %bnd0
+32	refused	bndmov %bnd1
+32	refused	bndmov %bnd3
+32	refused	bndmov (%eax)
+32	refused	bndmov 0x40(%eax)
+32	refused	bndmov (%eax,%ecx)
+32	refused	bndmov 0x12(%eax,%ecx,2)
+32	refused	bndmov %ecx
+32	refused	bndmov %cx
+32	refused	bndmov %cl
+32	refused	bndmov $1
+32	refused	bndmov %xmm1
+32	refused	bndmov foo
+32	refused	bndmov foo(%eax)
+32	660f1ac0	bndmov %bnd0, %bnd0
+32	660f1ac8	bndmov %bnd0, %bnd1
+32	660f1ad8	bndmov %bnd0, %bnd3
+32	660f1b00	bndmov %bnd0, (%eax)
+32	660f1b4040	bndmov %bnd0, 0x40(%eax)
+32	660f1b0408	bndmov %bnd0, (%eax,%ecx)
+32	660f1b444812	bndmov %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndmov %bnd0, %ecx
+32	refused	bndmov %bnd0, %cx
+32	refused	bndmov %bnd0, %cl
+32	refused	bndmov %bnd0, $1
+32	refused	bndmov %bnd0, %xmm1
+32	660f1b0500000000	bndmov %bnd0, foo
+32	660f1b8000000000	bndmov %bnd0, foo(%eax)
+32	660f1ac1	bndmov %bnd1, %bnd0
+32	660f1ac9	bndmov %bnd1, %bnd1
+32	660f1ad9	bndmov %bnd1, %bnd3
+32	660f1b08	bndmov %bnd1, (%eax)
+32	660f1b4840	bndmov %bnd1, 0x40(%eax)
+32	660f1b0c08	bndmov %bnd1, (%eax,%ecx)
+32	660f1b4c4812	bndmov %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndmov %bnd1, %ecx
+32	refused	bndmov %bnd1, %cx
+32	refused	bndmov %bnd1, %cl
+32	refused	bndmov %bnd1, $1
+32	refused	bndmov %bnd1, %xmm1
+32	660f1b0d00000000	bndmov %bnd1, foo
+32	660f1b8800000000	bndmov %bnd1, foo(%eax)
+32	660f1ac3	bndmov %bnd3, %bnd0
+32	660f1acb	bndmov %bnd3, %bnd1
+32	660f1adb	bndmov %bnd3, %bnd3
+32	660f1b18	bndmov %bnd3, (%eax)
+32	660f1b5840	bndmov %bnd3, 0x40(%eax)
+32	660f1b1c08	bndmov %bnd3, (%eax,%ecx)
+32	660f1b5c4812	bndmov %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndmov %bnd3, %ecx
+32	refused	bndmov %bnd3, %cx
+32	refused	bndmov %bnd3, %cl
+32	refused	bndmov %bnd3, $1
+32	refused	bndmov %bnd3, %xmm1
+32	660f1b1d00000000	bndmov %bnd3, foo
+32	660f1b9800000000	bndmov %bnd3, foo(%eax)
+32	660f1a00	bndmov (%eax), %bnd0
+32	660f1a08	bndmov (%eax), %bnd1
+32	660f1a18	bndmov (%eax), %bnd3
+32	refused	bndmov (%eax), (%eax)
+32	refused	bndmov (%eax), 0x40(%eax)
+32	refused	bndmov (%eax), (%eax,%ecx)
+32	refused	bndmov (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndmov (%eax), %ecx
+32	refused	bndmov (%eax), %cx
+32	refused	bndmov (%eax), %cl
+32	refused	bndmov (%eax), $1
+32	refused	bndmov (%eax), %xmm1
+32	refused	bndmov (%eax), foo
+32	refused	bndmov (%eax), foo(%eax)
+32	660f1a4040	bndmov 0x40(%eax), %bnd0
+32	660f1a4840	bndmov 0x40(%eax), %bnd1
+32	660f1a5840	bndmov 0x40(%eax), %bnd3
+32	refused	bndmov 0x40(%eax), (%eax)
+32	refused	bndmov 0x40(%eax), 0x40(%eax)
+32	refused	bndmov 0x40(%eax), (%eax,%ecx)
+32	refused	bndmov 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndmov 0x40(%eax), %ecx
+32	refused	bndmov 0x40(%eax), %cx
+32	refused	bndmov 0x40(%eax), %cl
+32	refused	bndmov 0x40(%eax), $1
+32	refused	bndmov 0x40(%eax), %xmm1
+32	refused	bndmov 0x40(%eax), foo
+32	refused	bndmov 0x40(%eax), foo(%eax)
+32	660f1a0408	bndmov (%eax,%ecx), %bnd0
+32	660f1a0c08	bndmov (%eax,%ecx), %bnd1
+32	660f1a1c08	bndmov (%eax,%ecx), %bnd3
+32	refused	bndmov (%eax,%ecx), (%eax)
+32	refused	bndmov (%eax,%ecx), 0x40(%eax)
+32	refused	bndmov (%eax,%ecx), (%eax,%ecx)
+32	refused	bndmov (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndmov (%eax,%ecx), %ecx
+32	refused	bndmov (%eax,%ecx), %cx
+32	refused	bndmov (%eax,%ecx), %cl
+32	refused	bndmov (%eax,%ecx), $1
+32	refused	bndmov (%eax,%ecx), %xmm1
+32	refused	bndmov (%eax,%ecx), foo
+32	refused	bndmov (%eax,%ecx), foo(%eax)
+32	660f1a444812	bndmov 0x12(%eax,%ecx,2), %bnd0
+32	660f1a4c4812	bndmov 0x12(%eax,%ecx,2), %bnd1
+32	660f1a5c4812	bndmov 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndmov 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndmov 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndmov 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndmov 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndmov 0x12(%eax,%ecx,2), %ecx
+32	refused	bndmov 0x12(%eax,%ecx,2), %cx
+32	refused	bndmov 0x12(%eax,%ecx,2), %cl
+32	refused	bndmov 0x12(%eax,%ecx,2), $1
+32	refused	bndmov 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndmov 0x12(%eax,%ecx,2), foo
+32	refused	bndmov 0x12(%eax,%ecx,2), foo(%eax)
+32	refused	bndmov %ecx, %bnd0
+32	refused	bndmov %ecx, %bnd1
+32	refused	bndmov %ecx, %bnd3
+32	refused	bndmov %ecx, (%eax)
+32	refused	bndmov %ecx, 0x40(%eax)
+32	refused	bndmov %ecx, (%eax,%ecx)
+32	refused	bndmov %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndmov %ecx, %ecx
+32	refused	bndmov %ecx, %cx
+32	refused	bndmov %ecx, %cl
+32	refused	bndmov %ecx, $1
+32	refused	bndmov %ecx, %xmm1
+32	refused	bndmov %ecx, foo
+32	refused	bndmov %ecx, foo(%eax)
+32	refused	bndmov %cx, %bnd0
+32	refused	bndmov %cx, %bnd1
+32	refused	bndmov %cx, %bnd3
+32	refused	bndmov %cx, (%eax)
+32	refused	bndmov %cx, 0x40(%eax)
+32	refused	bndmov %cx, (%eax,%ecx)
+32	refused	bndmov %cx, 0x12(%eax,%ecx,2)
+32	refused	bndmov %cx, %ecx
+32	refused	bndmov %cx, %cx
+32	refused	bndmov %cx, %cl
+32	refused	bndmov %cx, $1
+32	refused	bndmov %cx, %xmm1
+32	refused	bndmov %cx, foo
+32	refused	bndmov %cx, foo(%eax)
+32	refused	bndmov %cl, %bnd0
+32	refused	bndmov %cl, %bnd1
+32	refused	bndmov %cl, %bnd3
+32	refused	bndmov %cl, (%eax)
+32	refused	bndmov %cl, 0x40(%eax)
+32	refused	bndmov %cl, (%eax,%ecx)
+32	refused	bndmov %cl, 0x12(%eax,%ecx,2)
+32	refused	bndmov %cl, %ecx
+32	refused	bndmov %cl, %cx
+32	refused	bndmov %cl, %cl
+32	refused	bndmov %cl, $1
+32	refused	bndmov %cl, %xmm1
+32	refused	bndmov %cl, foo
+32	refused	bndmov %cl, foo(%eax)
+32	refused	bndmov $1, %bnd0
+32	refused	bndmov $1, %bnd1
+32	refused	bndmov $1, %bnd3
+32	refused	bndmov $1, (%eax)
+32	refused	bndmov $1, 0x40(%eax)
+32	refused	bndmov $1, (%eax,%ecx)
+32	refused	bndmov $1, 0x12(%eax,%ecx,2)
+32	refused	bndmov $1, %ecx
+32	refused	bndmov $1, %cx
+32	refused	bndmov $1, %cl
+32	refused	bndmov $1, $1
+32	refused	bndmov $1, %xmm1
+32	refused	bndmov $1, foo
+32	refused	bndmov $1, foo(%eax)
+32	refused	bndmov %xmm1, %bnd0
+32	refused	bndmov %xmm1, %bnd1
+32	refused	bndmov %xmm1, %bnd3
+32	refused	bndmov %xmm1, (%eax)
+32	refused	bndmov %xmm1, 0x40(%eax)
+32	refused	bndmov %xmm1, (%eax,%ecx)
+32	refused	bndmov %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndmov %xmm1, %ecx
+32	refused	bndmov %xmm1, %cx
+32	refused	bndmov %xmm1, %cl
+32	refused	bndmov %xmm1, $1
+32	refused	bndmov %xmm1, %xmm1
+32	refused	bndmov %xmm1, foo
+32	refused	bndmov %xmm1, foo(%eax)
+32	660f1a0500000000	bndmov foo, %bnd0
+32	660f1a0d00000000	bndmov foo, %bnd1
+32	660f1a1d00000000	bndmov foo, %bnd3
+32	refused	bndmov foo, (%eax)
+32	refused	bndmov foo, 0x40(%eax)
+32	refused	bndmov foo, (%eax,%ecx)
+32	refused	bndmov foo, 0x12(%eax,%ecx,2)
+32	refused	bndmov foo, %ecx
+32	refused	bndmov foo, %cx
+32	refused	bndmov foo, %cl
+32	refused	bndmov foo, $1
+32	refused	bndmov foo, %xmm1
+32	refused	bndmov foo, foo
+32	refused	bndmov foo, foo(%eax)
+32	660f1a8000000000	bndmov foo(%eax), %bnd0
+32	660f1a8800000000	bndmov foo(%eax), %bnd1
+32	660f1a9800000000	bndmov foo(%eax), %bnd3
+32	refused	bndmov foo(%eax), (%eax)
+32	refused	bndmov foo(%eax), 0x40(%eax)
+32	refused	bndmov foo(%eax), (%eax,%ecx)
+32	refused	bndmov foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndmov foo(%eax), %ecx
+32	refused	bndmov foo(%eax), %cx
+32	refused	bndmov foo(%eax), %cl
+32	refused	bndmov foo(%eax), $1
+32	refused	bndmov foo(%eax), %xmm1
+32	refused	bndmov foo(%eax), foo
+32	refused	bndmov foo(%eax), foo(%eax)
+32	refused	bndcl
+32	refused	bndcl %bnd0
+32	refused	bndcl %bnd1
+32	refused	bndcl %bnd3
+32	refused	bndcl (%eax)
+32	refused	bndcl 0x40(%eax)
+32	refused	bndcl (%eax,%ecx)
+32	refused	bndcl 0x12(%eax,%ecx,2)
+32	refused	bndcl %ecx
+32	refused	bndcl %cx
+32	refused	bndcl %cl
+32	refused	bndcl $1
+32	refused	bndcl %xmm1
+32	refused	bndcl foo
+32	refused	bndcl foo(%eax)
+32	refused	bndcl %bnd0, %bnd0
+32	refused	bndcl %bnd0, %bnd1
+32	refused	bndcl %bnd0, %bnd3
+32	refused	bndcl %bnd0, (%eax)
+32	refused	bndcl %bnd0, 0x40(%eax)
+32	refused	bndcl %bnd0, (%eax,%ecx)
+32	refused	bndcl %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndcl %bnd0, %ecx
+32	refused	bndcl %bnd0, %cx
+32	refused	bndcl %bnd0, %cl
+32	refused	bndcl %bnd0, $1
+32	refused	bndcl %bnd0, %xmm1
+32	refused	bndcl %bnd0, foo
+32	refused	bndcl %bnd0, foo(%eax)
+32	refused	bndcl %bnd1, %bnd0
+32	refused	bndcl %bnd1, %bnd1
+32	refused	bndcl %bnd1, %bnd3
+32	refused	bndcl %bnd1, (%eax)
+32	refused	bndcl %bnd1, 0x40(%eax)
+32	refused	bndcl %bnd1, (%eax,%ecx)
+32	refused	bndcl %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndcl %bnd1, %ecx
+32	refused	bndcl %bnd1, %cx
+32	refused	bndcl %bnd1, %cl
+32	refused	bndcl %bnd1, $1
+32	refused	bndcl %bnd1, %xmm1
+32	refused	bndcl %bnd1, foo
+32	refused	bndcl %bnd1, foo(%eax)
+32	refused	bndcl %bnd3, %bnd0
+32	refused	bndcl %bnd3, %bnd1
+32	refused	bndcl %bnd3, %bnd3
+32	refused	bndcl %bnd3, (%eax)
+32	refused	bndcl %bnd3, 0x40(%eax)
+32	refused	bndcl %bnd3, (%eax,%ecx)
+32	refused	bndcl %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndcl %bnd3, %ecx
+32	refused	bndcl %bnd3, %cx
+32	refused	bndcl %bnd3, %cl
+32	refused	bndcl %bnd3, $1
+32	refused	bndcl %bnd3, %xmm1
+32	refused	bndcl %bnd3, foo
+32	refused	bndcl %bnd3, foo(%eax)
+32	f30f1a00	bndcl (%eax), %bnd0
+32	f30f1a08	bndcl (%eax), %bnd1
+32	f30f1a18	bndcl (%eax), %bnd3
+32	refused	bndcl (%eax), (%eax)
+32	refused	bndcl (%eax), 0x40(%eax)
+32	refused	bndcl (%eax), (%eax,%ecx)
+32	refused	bndcl (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcl (%eax), %ecx
+32	refused	bndcl (%eax), %cx
+32	refused	bndcl (%eax), %cl
+32	refused	bndcl (%eax), $1
+32	refused	bndcl (%eax), %xmm1
+32	refused	bndcl (%eax), foo
+32	refused	bndcl (%eax), foo(%eax)
+32	f30f1a4040	bndcl 0x40(%eax), %bnd0
+32	f30f1a4840	bndcl 0x40(%eax), %bnd1
+32	f30f1a5840	bndcl 0x40(%eax), %bnd3
+32	refused	bndcl 0x40(%eax), (%eax)
+32	refused	bndcl 0x40(%eax), 0x40(%eax)
+32	refused	bndcl 0x40(%eax), (%eax,%ecx)
+32	refused	bndcl 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcl 0x40(%eax), %ecx
+32	refused	bndcl 0x40(%eax), %cx
+32	refused	bndcl 0x40(%eax), %cl
+32	refused	bndcl 0x40(%eax), $1
+32	refused	bndcl 0x40(%eax), %xmm1
+32	refused	bndcl 0x40(%eax), foo
+32	refused	bndcl 0x40(%eax), foo(%eax)
+32	f30f1a0408	bndcl (%eax,%ecx), %bnd0
+32	f30f1a0c08	bndcl (%eax,%ecx), %bnd1
+32	f30f1a1c08	bndcl (%eax,%ecx), %bnd3
+32	refused	bndcl (%eax,%ecx), (%eax)
+32	refused	bndcl (%eax,%ecx), 0x40(%eax)
+32	refused	bndcl (%eax,%ecx), (%eax,%ecx)
+32	refused	bndcl (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndcl (%eax,%ecx), %ecx
+32	refused	bndcl (%eax,%ecx), %cx
+32	refused	bndcl (%eax,%ecx), %cl
+32	refused	bndcl (%eax,%ecx), $1
+32	refused	bndcl (%eax,%ecx), %xmm1
+32	refused	bndcl (%eax,%ecx), foo
+32	refused	bndcl (%eax,%ecx), foo(%eax)
+32	f30f1a444812	bndcl 0x12(%eax,%ecx,2), %bnd0
+32	f30f1a4c4812	bndcl 0x12(%eax,%ecx,2), %bnd1
+32	f30f1a5c4812	bndcl 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndcl 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndcl 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndcl 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndcl 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndcl 0x12(%eax,%ecx,2), %ecx
+32	refused	bndcl 0x12(%eax,%ecx,2), %cx
+32	refused	bndcl 0x12(%eax,%ecx,2), %cl
+32	refused	bndcl 0x12(%eax,%ecx,2), $1
+32	refused	bndcl 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndcl 0x12(%eax,%ecx,2), foo
+32	refused	bndcl 0x12(%eax,%ecx,2), foo(%eax)
+32	f30f1ac1	bndcl %ecx, %bnd0
+32	f30f1ac9	bndcl %ecx, %bnd1
+32	f30f1ad9	bndcl %ecx, %bnd3
+32	refused	bndcl %ecx, (%eax)
+32	refused	bndcl %ecx, 0x40(%eax)
+32	refused	bndcl %ecx, (%eax,%ecx)
+32	refused	bndcl %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndcl %ecx, %ecx
+32	refused	bndcl %ecx, %cx
+32	refused	bndcl %ecx, %cl
+32	refused	bndcl %ecx, $1
+32	refused	bndcl %ecx, %xmm1
+32	refused	bndcl %ecx, foo
+32	refused	bndcl %ecx, foo(%eax)
+32	refused	bndcl %cx, %bnd0
+32	refused	bndcl %cx, %bnd1
+32	refused	bndcl %cx, %bnd3
+32	refused	bndcl %cx, (%eax)
+32	refused	bndcl %cx, 0x40(%eax)
+32	refused	bndcl %cx, (%eax,%ecx)
+32	refused	bndcl %cx, 0x12(%eax,%ecx,2)
+32	refused	bndcl %cx, %ecx
+32	refused	bndcl %cx, %cx
+32	refused	bndcl %cx, %cl
+32	refused	bndcl %cx, $1
+32	refused	bndcl %cx, %xmm1
+32	refused	bndcl %cx, foo
+32	refused	bndcl %cx, foo(%eax)
+32	refused	bndcl %cl, %bnd0
+32	refused	bndcl %cl, %bnd1
+32	refused	bndcl %cl, %bnd3
+32	refused	bndcl %cl, (%eax)
+32	refused	bndcl %cl, 0x40(%eax)
+32	refused	bndcl %cl, (%eax,%ecx)
+32	refused	bndcl %cl, 0x12(%eax,%ecx,2)
+32	refused	bndcl %cl, %ecx
+32	refused	bndcl %cl, %cx
+32	refused	bndcl %cl, %cl
+32	refused	bndcl %cl, $1
+32	refused	bndcl %cl, %xmm1
+32	refused	bndcl %cl, foo
+32	refused	bndcl %cl, foo(%eax)
+32	refused	bndcl $1, %bnd0
+32	refused	bndcl $1, %bnd1
+32	refused	bndcl $1, %bnd3
+32	refused	bndcl $1, (%eax)
+32	refused	bndcl $1, 0x40(%eax)
+32	refused	bndcl $1, (%eax,%ecx)
+32	refused	bndcl $1, 0x12(%eax,%ecx,2)
+32	refused	bndcl $1, %ecx
+32	refused	bndcl $1, %cx
+32	refused	bndcl $1, %cl
+32	refused	bndcl $1, $1
+32	refused	bndcl $1, %xmm1
+32	refused	bndcl $1, foo
+32	refused	bndcl $1, foo(%eax)
+32	refused	bndcl %xmm1, %bnd0
+32	refused	bndcl %xmm1, %bnd1
+32	refused	bndcl %xmm1, %bnd3
+32	refused	bndcl %xmm1, (%eax)
+32	refused	bndcl %xmm1, 0x40(%eax)
+32	refused	bndcl %xmm1, (%eax,%ecx)
+32	refused	bndcl %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndcl %xmm1, %ecx
+32	refused	bndcl %xmm1, %cx
+32	refused	bndcl %xmm1, %cl
+32	refused	bndcl %xmm1, $1
+32	refused	bndcl %xmm1, %xmm1
+32	refused	bndcl %xmm1, foo
+32	refused	bndcl %xmm1, foo(%eax)
+32	f30f1a0500000000	bndcl foo, %bnd0
+32	f30f1a0d00000000	bndcl foo, %bnd1
+32	f30f1a1d00000000	bndcl foo, %bnd3
+32	refused	bndcl foo, (%eax)
+32	refused	bndcl foo, 0x40(%eax)
+32	refused	bndcl foo, (%eax,%ecx)
+32	refused	bndcl foo, 0x12(%eax,%ecx,2)
+32	refused	bndcl foo, %ecx
+32	refused	bndcl foo, %cx
+32	refused	bndcl foo, %cl
+32	refused	bndcl foo, $1
+32	refused	bndcl foo, %xmm1
+32	refused	bndcl foo, foo
+32	refused	bndcl foo, foo(%eax)
+32	f30f1a8000000000	bndcl foo(%eax), %bnd0
+32	f30f1a8800000000	bndcl foo(%eax), %bnd1
+32	f30f1a9800000000	bndcl foo(%eax), %bnd3
+32	refused	bndcl foo(%eax), (%eax)
+32	refused	bndcl foo(%eax), 0x40(%eax)
+32	refused	bndcl foo(%eax), (%eax,%ecx)
+32	refused	bndcl foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcl foo(%eax), %ecx
+32	refused	bndcl foo(%eax), %cx
+32	refused	bndcl foo(%eax), %cl
+32	refused	bndcl foo(%eax), $1
+32	refused	bndcl foo(%eax), %xmm1
+32	refused	bndcl foo(%eax), foo
+32	refused	bndcl foo(%eax), foo(%eax)
+32	refused	bndcu
+32	refused	bndcu %bnd0
+32	refused	bndcu %bnd1
+32	refused	bndcu %bnd3
+32	refused	bndcu (%eax)
+32	refused	bndcu 0x40(%eax)
+32	refused	bndcu (%eax,%ecx)
+32	refused	bndcu 0x12(%eax,%ecx,2)
+32	refused	bndcu %ecx
+32	refused	bndcu %cx
+32	refused	bndcu %cl
+32	refused	bndcu $1
+32	refused	bndcu %xmm1
+32	refused	bndcu foo
+32	refused	bndcu foo(%eax)
+32	refused	bndcu %bnd0, %bnd0
+32	refused	bndcu %bnd0, %bnd1
+32	refused	bndcu %bnd0, %bnd3
+32	refused	bndcu %bnd0, (%eax)
+32	refused	bndcu %bnd0, 0x40(%eax)
+32	refused	bndcu %bnd0, (%eax,%ecx)
+32	refused	bndcu %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndcu %bnd0, %ecx
+32	refused	bndcu %bnd0, %cx
+32	refused	bndcu %bnd0, %cl
+32	refused	bndcu %bnd0, $1
+32	refused	bndcu %bnd0, %xmm1
+32	refused	bndcu %bnd0, foo
+32	refused	bndcu %bnd0, foo(%eax)
+32	refused	bndcu %bnd1, %bnd0
+32	refused	bndcu %bnd1, %bnd1
+32	refused	bndcu %bnd1, %bnd3
+32	refused	bndcu %bnd1, (%eax)
+32	refused	bndcu %bnd1, 0x40(%eax)
+32	refused	bndcu %bnd1, (%eax,%ecx)
+32	refused	bndcu %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndcu %bnd1, %ecx
+32	refused	bndcu %bnd1, %cx
+32	refused	bndcu %bnd1, %cl
+32	refused	bndcu %bnd1, $1
+32	refused	bndcu %bnd1, %xmm1
+32	refused	bndcu %bnd1, foo
+32	refused	bndcu %bnd1, foo(%eax)
+32	refused	bndcu %bnd3, %bnd0
+32	refused	bndcu %bnd3, %bnd1
+32	refused	bndcu %bnd3, %bnd3
+32	refused	bndcu %bnd3, (%eax)
+32	refused	bndcu %bnd3, 0x40(%eax)
+32	refused	bndcu %bnd3, (%eax,%ecx)
+32	refused	bndcu %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndcu %bnd3, %ecx
+32	refused	bndcu %bnd3, %cx
+32	refused	bndcu %bnd3, %cl
+32	refused	bndcu %bnd3, $1
+32	refused	bndcu %bnd3, %xmm1
+32	refused	bndcu %bnd3, foo
+32	refused	bndcu %bnd3, foo(%eax)
+32	f20f1a00	bndcu (%eax), %bnd0
+32	f20f1a08	bndcu (%eax), %bnd1
+32	f20f1a18	bndcu (%eax), %bnd3
+32	refused	bndcu (%eax), (%eax)
+32	refused	bndcu (%eax), 0x40(%eax)
+32	refused	bndcu (%eax), (%eax,%ecx)
+32	refused	bndcu (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcu (%eax), %ecx
+32	refused	bndcu (%eax), %cx
+32	refused	bndcu (%eax), %cl
+32	refused	bndcu (%eax), $1
+32	refused	bndcu (%eax), %xmm1
+32	refused	bndcu (%eax), foo
+32	refused	bndcu (%eax), foo(%eax)
+32	f20f1a4040	bndcu 0x40(%eax), %bnd0
+32	f20f1a4840	bndcu 0x40(%eax), %bnd1
+32	f20f1a5840	bndcu 0x40(%eax), %bnd3
+32	refused	bndcu 0x40(%eax), (%eax)
+32	refused	bndcu 0x40(%eax), 0x40(%eax)
+32	refused	bndcu 0x40(%eax), (%eax,%ecx)
+32	refused	bndcu 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcu 0x40(%eax), %ecx
+32	refused	bndcu 0x40(%eax), %cx
+32	refused	bndcu 0x40(%eax), %cl
+32	refused	bndcu 0x40(%eax), $1
+32	refused	bndcu 0x40(%eax), %xmm1
+32	refused	bndcu 0x40(%eax), foo
+32	refused	bndcu 0x40(%eax), foo(%eax)
+32	f20f1a0408	bndcu (%eax,%ecx), %bnd0
+32	f20f1a0c08	bndcu (%eax,%ecx), %bnd1
+32	f20f1a1c08	bndcu (%eax,%ecx), %bnd3
+32	refused	bndcu (%eax,%ecx), (%eax)
+32	refused	bndcu (%eax,%ecx), 0x40(%eax)
+32	refused	bndcu (%eax,%ecx), (%eax,%ecx)
+32	refused	bndcu (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndcu (%eax,%ecx), %ecx
+32	refused	bndcu (%eax,%ecx), %cx
+32	refused	bndcu (%eax,%ecx), %cl
+32	refused	bndcu (%eax,%ecx), $1
+32	refused	bndcu (%eax,%ecx), %xmm1
+32	refused	bndcu (%eax,%ecx), foo
+32	refused	bndcu (%eax,%ecx), foo(%eax)
+32	f20f1a444812	bndcu 0x12(%eax,%ecx,2), %bnd0
+32	f20f1a4c4812	bndcu 0x12(%eax,%ecx,2), %bnd1
+32	f20f1a5c4812	bndcu 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndcu 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndcu 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndcu 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndcu 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndcu 0x12(%eax,%ecx,2), %ecx
+32	refused	bndcu 0x12(%eax,%ecx,2), %cx
+32	refused	bndcu 0x12(%eax,%ecx,2), %cl
+32	refused	bndcu 0x12(%eax,%ecx,2), $1
+32	refused	bndcu 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndcu 0x12(%eax,%ecx,2), foo
+32	refused	bndcu 0x12(%eax,%ecx,2), foo(%eax)
+32	f20f1ac1	bndcu %ecx, %bnd0
+32	f20f1ac9	bndcu %ecx, %bnd1
+32	f20f1ad9	bndcu %ecx, %bnd3
+32	refused	bndcu %ecx, (%eax)
+32	refused	bndcu %ecx, 0x40(%eax)
+32	refused	bndcu %ecx, (%eax,%ecx)
+32	refused	bndcu %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndcu %ecx, %ecx
+32	refused	bndcu %ecx, %cx
+32	refused	bndcu %ecx, %cl
+32	refused	bndcu %ecx, $1
+32	refused	bndcu %ecx, %xmm1
+32	refused	bndcu %ecx, foo
+32	refused	bndcu %ecx, foo(%eax)
+32	refused	bndcu %cx, %bnd0
+32	refused	bndcu %cx, %bnd1
+32	refused	bndcu %cx, %bnd3
+32	refused	bndcu %cx, (%eax)
+32	refused	bndcu %cx, 0x40(%eax)
+32	refused	bndcu %cx, (%eax,%ecx)
+32	refused	bndcu %cx, 0x12(%eax,%ecx,2)
+32	refused	bndcu %cx, %ecx
+32	refused	bndcu %cx, %cx
+32	refused	bndcu %cx, %cl
+32	refused	bndcu %cx, $1
+32	refused	bndcu %cx, %xmm1
+32	refused	bndcu %cx, foo
+32	refused	bndcu %cx, foo(%eax)
+32	refused	bndcu %cl, %bnd0
+32	refused	bndcu %cl, %bnd1
+32	refused	bndcu %cl, %bnd3
+32	refused	bndcu %cl, (%eax)
+32	refused	bndcu %cl, 0x40(%eax)
+32	refused	bndcu %cl, (%eax,%ecx)
+32	refused	bndcu %cl, 0x12(%eax,%ecx,2)
+32	refused	bndcu %cl, %ecx
+32	refused	bndcu %cl, %cx
+32	refused	bndcu %cl, %cl
+32	refused	bndcu %cl, $1
+32	refused	bndcu %cl, %xmm1
+32	refused	bndcu %cl, foo
+32	refused	bndcu %cl, foo(%eax)
+32	refused	bndcu $1, %bnd0
+32	refused	bndcu $1, %bnd1
+32	refused	bndcu $1, %bnd3
+32	refused	bndcu $1, (%eax)
+32	refused	bndcu $1, 0x40(%eax)
+32	refused	bndcu $1, (%eax,%ecx)
+32	refused	bndcu $1, 0x12(%eax,%ecx,2)
+32	refused	bndcu $1, %ecx
+32	refused	bndcu $1, %cx
+32	refused	bndcu $1, %cl
+32	refused	bndcu $1, $1
+32	refused	bndcu $1, %xmm1
+32	refused	bndcu $1, foo
+32	refused	bndcu $1, foo(%eax)
+32	refused	bndcu %xmm1, %bnd0
+32	refused	bndcu %xmm1, %bnd1
+32	refused	bndcu %xmm1, %bnd3
+32	refused	bndcu %xmm1, (%eax)
+32	refused	bndcu %xmm1, 0x40(%eax)
+32	refused	bndcu %xmm1, (%eax,%ecx)
+32	refused	bndcu %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndcu %xmm1, %ecx
+32	refused	bndcu %xmm1, %cx
+32	refused	bndcu %xmm1, %cl
+32	refused	bndcu %xmm1, $1
+32	refused	bndcu %xmm1, %xmm1
+32	refused	bndcu %xmm1, foo
+32	refused	bndcu %xmm1, foo(%eax)
+32	f20f1a0500000000	bndcu foo, %bnd0
+32	f20f1a0d00000000	bndcu foo, %bnd1
+32	f20f1a1d00000000	bndcu foo, %bnd3
+32	refused	bndcu foo, (%eax)
+32	refused	bndcu foo, 0x40(%eax)
+32	refused	bndcu foo, (%eax,%ecx)
+32	refused	bndcu foo, 0x12(%eax,%ecx,2)
+32	refused	bndcu foo, %ecx
+32	refused	bndcu foo, %cx
+32	refused	bndcu foo, %cl
+32	refused	bndcu foo, $1
+32	refused	bndcu foo, %xmm1
+32	refused	bndcu foo, foo
+32	refused	bndcu foo, foo(%eax)
+32	f20f1a8000000000	bndcu foo(%eax), %bnd0
+32	f20f1a8800000000	bndcu foo(%eax), %bnd1
+32	f20f1a9800000000	bndcu foo(%eax), %bnd3
+32	refused	bndcu foo(%eax), (%eax)
+32	refused	bndcu foo(%eax), 0x40(%eax)
+32	refused	bndcu foo(%eax), (%eax,%ecx)
+32	refused	bndcu foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcu foo(%eax), %ecx
+32	refused	bndcu foo(%eax), %cx
+32	refused	bndcu foo(%eax), %cl
+32	refused	bndcu foo(%eax), $1
+32	refused	bndcu foo(%eax), %xmm1
+32	refused	bndcu foo(%eax), foo
+32	refused	bndcu foo(%eax), foo(%eax)
+32	refused	bndcn
+32	refused	bndcn %bnd0
+32	refused	bndcn %bnd1
+32	refused	bndcn %bnd3
+32	refused	bndcn (%eax)
+32	refused	bndcn 0x40(%eax)
+32	refused	bndcn (%eax,%ecx)
+32	refused	bndcn 0x12(%eax,%ecx,2)
+32	refused	bndcn %ecx
+32	refused	bndcn %cx
+32	refused	bndcn %cl
+32	refused	bndcn $1
+32	refused	bndcn %xmm1
+32	refused	bndcn foo
+32	refused	bndcn foo(%eax)
+32	refused	bndcn %bnd0, %bnd0
+32	refused	bndcn %bnd0, %bnd1
+32	refused	bndcn %bnd0, %bnd3
+32	refused	bndcn %bnd0, (%eax)
+32	refused	bndcn %bnd0, 0x40(%eax)
+32	refused	bndcn %bnd0, (%eax,%ecx)
+32	refused	bndcn %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndcn %bnd0, %ecx
+32	refused	bndcn %bnd0, %cx
+32	refused	bndcn %bnd0, %cl
+32	refused	bndcn %bnd0, $1
+32	refused	bndcn %bnd0, %xmm1
+32	refused	bndcn %bnd0, foo
+32	refused	bndcn %bnd0, foo(%eax)
+32	refused	bndcn %bnd1, %bnd0
+32	refused	bndcn %bnd1, %bnd1
+32	refused	bndcn %bnd1, %bnd3
+32	refused	bndcn %bnd1, (%eax)
+32	refused	bndcn %bnd1, 0x40(%eax)
+32	refused	bndcn %bnd1, (%eax,%ecx)
+32	refused	bndcn %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndcn %bnd1, %ecx
+32	refused	bndcn %bnd1, %cx
+32	refused	bndcn %bnd1, %cl
+32	refused	bndcn %bnd1, $1
+32	refused	bndcn %bnd1, %xmm1
+32	refused	bndcn %bnd1, foo
+32	refused	bndcn %bnd1, foo(%eax)
+32	refused	bndcn %bnd3, %bnd0
+32	refused	bndcn %bnd3, %bnd1
+32	refused	bndcn %bnd3, %bnd3
+32	refused	bndcn %bnd3, (%eax)
+32	refused	bndcn %bnd3, 0x40(%eax)
+32	refused	bndcn %bnd3, (%eax,%ecx)
+32	refused	bndcn %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndcn %bnd3, %ecx
+32	refused	bndcn %bnd3, %cx
+32	refused	bndcn %bnd3, %cl
+32	refused	bndcn %bnd3, $1
+32	refused	bndcn %bnd3, %xmm1
+32	refused	bndcn %bnd3, foo
+32	refused	bndcn %bnd3, foo(%eax)
+32	f20f1b00	bndcn (%eax), %bnd0
+32	f20f1b08	bndcn (%eax), %bnd1
+32	f20f1b18	bndcn (%eax), %bnd3
+32	refused	bndcn (%eax), (%eax)
+32	refused	bndcn (%eax), 0x40(%eax)
+32	refused	bndcn (%eax), (%eax,%ecx)
+32	refused	bndcn (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcn (%eax), %ecx
+32	refused	bndcn (%eax), %cx
+32	refused	bndcn (%eax), %cl
+32	refused	bndcn (%eax), $1
+32	refused	bndcn (%eax), %xmm1
+32	refused	bndcn (%eax), foo
+32	refused	bndcn (%eax), foo(%eax)
+32	f20f1b4040	bndcn 0x40(%eax), %bnd0
+32	f20f1b4840	bndcn 0x40(%eax), %bnd1
+32	f20f1b5840	bndcn 0x40(%eax), %bnd3
+32	refused	bndcn 0x40(%eax), (%eax)
+32	refused	bndcn 0x40(%eax), 0x40(%eax)
+32	refused	bndcn 0x40(%eax), (%eax,%ecx)
+32	refused	bndcn 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcn 0x40(%eax), %ecx
+32	refused	bndcn 0x40(%eax), %cx
+32	refused	bndcn 0x40(%eax), %cl
+32	refused	bndcn 0x40(%eax), $1
+32	refused	bndcn 0x40(%eax), %xmm1
+32	refused	bndcn 0x40(%eax), foo
+32	refused	bndcn 0x40(%eax), foo(%eax)
+32	f20f1b0408	bndcn (%eax,%ecx), %bnd0
+32	f20f1b0c08	bndcn (%eax,%ecx), %bnd1
+32	f20f1b1c08	bndcn (%eax,%ecx), %bnd3
+32	refused	bndcn (%eax,%ecx), (%eax)
+32	refused	bndcn (%eax,%ecx), 0x40(%eax)
+32	refused	bndcn (%eax,%ecx), (%eax,%ecx)
+32	refused	bndcn (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndcn (%eax,%ecx), %ecx
+32	refused	bndcn (%eax,%ecx), %cx
+32	refused	bndcn (%eax,%ecx), %cl
+32	refused	bndcn (%eax,%ecx), $1
+32	refused	bndcn (%eax,%ecx), %xmm1
+32	refused	bndcn (%eax,%ecx), foo
+32	refused	bndcn (%eax,%ecx), foo(%eax)
+32	f20f1b444812	bndcn 0x12(%eax,%ecx,2), %bnd0
+32	f20f1b4c4812	bndcn 0x12(%eax,%ecx,2), %bnd1
+32	f20f1b5c4812	bndcn 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndcn 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndcn 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndcn 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndcn 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndcn 0x12(%eax,%ecx,2), %ecx
+32	refused	bndcn 0x12(%eax,%ecx,2), %cx
+32	refused	bndcn 0x12(%eax,%ecx,2), %cl
+32	refused	bndcn 0x12(%eax,%ecx,2), $1
+32	refused	bndcn 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndcn 0x12(%eax,%ecx,2), foo
+32	refused	bndcn 0x12(%eax,%ecx,2), foo(%eax)
+32	f20f1bc1	bndcn %ecx, %bnd0
+32	f20f1bc9	bndcn %ecx, %bnd1
+32	f20f1bd9	bndcn %ecx, %bnd3
+32	refused	bndcn %ecx, (%eax)
+32	refused	bndcn %ecx, 0x40(%eax)
+32	refused	bndcn %ecx, (%eax,%ecx)
+32	refused	bndcn %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndcn %ecx, %ecx
+32	refused	bndcn %ecx, %cx
+32	refused	bndcn %ecx, %cl
+32	refused	bndcn %ecx, $1
+32	refused	bndcn %ecx, %xmm1
+32	refused	bndcn %ecx, foo
+32	refused	bndcn %ecx, foo(%eax)
+32	refused	bndcn %cx, %bnd0
+32	refused	bndcn %cx, %bnd1
+32	refused	bndcn %cx, %bnd3
+32	refused	bndcn %cx, (%eax)
+32	refused	bndcn %cx, 0x40(%eax)
+32	refused	bndcn %cx, (%eax,%ecx)
+32	refused	bndcn %cx, 0x12(%eax,%ecx,2)
+32	refused	bndcn %cx, %ecx
+32	refused	bndcn %cx, %cx
+32	refused	bndcn %cx, %cl
+32	refused	bndcn %cx, $1
+32	refused	bndcn %cx, %xmm1
+32	refused	bndcn %cx, foo
+32	refused	bndcn %cx, foo(%eax)
+32	refused	bndcn %cl, %bnd0
+32	refused	bndcn %cl, %bnd1
+32	refused	bndcn %cl, %bnd3
+32	refused	bndcn %cl, (%eax)
+32	refused	bndcn %cl, 0x40(%eax)
+32	refused	bndcn %cl, (%eax,%ecx)
+32	refused	bndcn %cl, 0x12(%eax,%ecx,2)
+32	refused	bndcn %cl, %ecx
+32	refused	bndcn %cl, %cx
+32	refused	bndcn %cl, %cl
+32	refused	bndcn %cl, $1
+32	refused	bndcn %cl, %xmm1
+32	refused	bndcn %cl, foo
+32	refused	bndcn %cl, foo(%eax)
+32	refused	bndcn $1, %bnd0
+32	refused	bndcn $1, %bnd1
+32	refused	bndcn $1, %bnd3
+32	refused	bndcn $1, (%eax)
+32	refused	bndcn $1, 0x40(%eax)
+32	refused	bndcn $1, (%eax,%ecx)
+32	refused	bndcn $1, 0x12(%eax,%ecx,2)
+32	refused	bndcn $1, %ecx
+32	refused	bndcn $1, %cx
+32	refused	bndcn $1, %cl
+32	refused	bndcn $1, $1
+32	refused	bndcn $1, %xmm1
+32	refused	bndcn $1, foo
+32	refused	bndcn $1, foo(%eax)
+32	refused	bndcn %xmm1, %bnd0
+32	refused	bndcn %xmm1, %bnd1
+32	refused	bndcn %xmm1, %bnd3
+32	refused	bndcn %xmm1, (%eax)
+32	refused	bndcn %xmm1, 0x40(%eax)
+32	refused	bndcn %xmm1, (%eax,%ecx)
+32	refused	bndcn %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndcn %xmm1, %ecx
+32	refused	bndcn %xmm1, %cx
+32	refused	bndcn %xmm1, %cl
+32	refused	bndcn %xmm1, $1
+32	refused	bndcn %xmm1, %xmm1
+32	refused	bndcn %xmm1, foo
+32	refused	bndcn %xmm1, foo(%eax)
+32	f20f1b0500000000	bndcn foo, %bnd0
+32	f20f1b0d00000000	bndcn foo, %bnd1
+32	f20f1b1d00000000	bndcn foo, %bnd3
+32	refused	bndcn foo, (%eax)
+32	refused	bndcn foo, 0x40(%eax)
+32	refused	bndcn foo, (%eax,%ecx)
+32	refused	bndcn foo, 0x12(%eax,%ecx,2)
+32	refused	bndcn foo, %ecx
+32	refused	bndcn foo, %cx
+32	refused	bndcn foo, %cl
+32	refused	bndcn foo, $1
+32	refused	bndcn foo, %xmm1
+32	refused	bndcn foo, foo
+32	refused	bndcn foo, foo(%eax)
+32	f20f1b8000000000	bndcn foo(%eax), %bnd0
+32	f20f1b8800000000	bndcn foo(%eax), %bnd1
+32	f20f1b9800000000	bndcn foo(%eax), %bnd3
+32	refused	bndcn foo(%eax), (%eax)
+32	refused	bndcn foo(%eax), 0x40(%eax)
+32	refused	bndcn foo(%eax), (%eax,%ecx)
+32	refused	bndcn foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndcn foo(%eax), %ecx
+32	refused	bndcn foo(%eax), %cx
+32	refused	bndcn foo(%eax), %cl
+32	refused	bndcn foo(%eax), $1
+32	refused	bndcn foo(%eax), %xmm1
+32	refused	bndcn foo(%eax), foo
+32	refused	bndcn foo(%eax), foo(%eax)
+32	refused	bndldx
+32	refused	bndldx %bnd0
+32	refused	bndldx %bnd1
+32	refused	bndldx %bnd3
+32	refused	bndldx (%eax)
+32	refused	bndldx 0x40(%eax)
+32	refused	bndldx (%eax,%ecx)
+32	refused	bndldx 0x12(%eax,%ecx,2)
+32	refused	bndldx %ecx
+32	refused	bndldx %cx
+32	refused	bndldx %cl
+32	refused	bndldx $1
+32	refused	bndldx %xmm1
+32	refused	bndldx foo
+32	refused	bndldx foo(%eax)
+32	refused	bndldx %bnd0, %bnd0
+32	refused	bndldx %bnd0, %bnd1
+32	refused	bndldx %bnd0, %bnd3
+32	refused	bndldx %bnd0, (%eax)
+32	refused	bndldx %bnd0, 0x40(%eax)
+32	refused	bndldx %bnd0, (%eax,%ecx)
+32	refused	bndldx %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndldx %bnd0, %ecx
+32	refused	bndldx %bnd0, %cx
+32	refused	bndldx %bnd0, %cl
+32	refused	bndldx %bnd0, $1
+32	refused	bndldx %bnd0, %xmm1
+32	refused	bndldx %bnd0, foo
+32	refused	bndldx %bnd0, foo(%eax)
+32	refused	bndldx %bnd1, %bnd0
+32	refused	bndldx %bnd1, %bnd1
+32	refused	bndldx %bnd1, %bnd3
+32	refused	bndldx %bnd1, (%eax)
+32	refused	bndldx %bnd1, 0x40(%eax)
+32	refused	bndldx %bnd1, (%eax,%ecx)
+32	refused	bndldx %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndldx %bnd1, %ecx
+32	refused	bndldx %bnd1, %cx
+32	refused	bndldx %bnd1, %cl
+32	refused	bndldx %bnd1, $1
+32	refused	bndldx %bnd1, %xmm1
+32	refused	bndldx %bnd1, foo
+32	refused	bndldx %bnd1, foo(%eax)
+32	refused	bndldx %bnd3, %bnd0
+32	refused	bndldx %bnd3, %bnd1
+32	refused	bndldx %bnd3, %bnd3
+32	refused	bndldx %bnd3, (%eax)
+32	refused	bndldx %bnd3, 0x40(%eax)
+32	refused	bndldx %bnd3, (%eax,%ecx)
+32	refused	bndldx %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndldx %bnd3, %ecx
+32	refused	bndldx %bnd3, %cx
+32	refused	bndldx %bnd3, %cl
+32	refused	bndldx %bnd3, $1
+32	refused	bndldx %bnd3, %xmm1
+32	refused	bndldx %bnd3, foo
+32	refused	bndldx %bnd3, foo(%eax)
+32	0f1a00	bndldx (%eax), %bnd0
+32	0f1a08	bndldx (%eax), %bnd1
+32	0f1a18	bndldx (%eax), %bnd3
+32	refused	bndldx (%eax), (%eax)
+32	refused	bndldx (%eax), 0x40(%eax)
+32	refused	bndldx (%eax), (%eax,%ecx)
+32	refused	bndldx (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndldx (%eax), %ecx
+32	refused	bndldx (%eax), %cx
+32	refused	bndldx (%eax), %cl
+32	refused	bndldx (%eax), $1
+32	refused	bndldx (%eax), %xmm1
+32	refused	bndldx (%eax), foo
+32	refused	bndldx (%eax), foo(%eax)
+32	0f1a4040	bndldx 0x40(%eax), %bnd0
+32	0f1a4840	bndldx 0x40(%eax), %bnd1
+32	0f1a5840	bndldx 0x40(%eax), %bnd3
+32	refused	bndldx 0x40(%eax), (%eax)
+32	refused	bndldx 0x40(%eax), 0x40(%eax)
+32	refused	bndldx 0x40(%eax), (%eax,%ecx)
+32	refused	bndldx 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndldx 0x40(%eax), %ecx
+32	refused	bndldx 0x40(%eax), %cx
+32	refused	bndldx 0x40(%eax), %cl
+32	refused	bndldx 0x40(%eax), $1
+32	refused	bndldx 0x40(%eax), %xmm1
+32	refused	bndldx 0x40(%eax), foo
+32	refused	bndldx 0x40(%eax), foo(%eax)
+32	0f1a0408	bndldx (%eax,%ecx), %bnd0
+32	0f1a0c08	bndldx (%eax,%ecx), %bnd1
+32	0f1a1c08	bndldx (%eax,%ecx), %bnd3
+32	refused	bndldx (%eax,%ecx), (%eax)
+32	refused	bndldx (%eax,%ecx), 0x40(%eax)
+32	refused	bndldx (%eax,%ecx), (%eax,%ecx)
+32	refused	bndldx (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndldx (%eax,%ecx), %ecx
+32	refused	bndldx (%eax,%ecx), %cx
+32	refused	bndldx (%eax,%ecx), %cl
+32	refused	bndldx (%eax,%ecx), $1
+32	refused	bndldx (%eax,%ecx), %xmm1
+32	refused	bndldx (%eax,%ecx), foo
+32	refused	bndldx (%eax,%ecx), foo(%eax)
+32	0f1a444812	bndldx 0x12(%eax,%ecx,2), %bnd0
+32	0f1a4c4812	bndldx 0x12(%eax,%ecx,2), %bnd1
+32	0f1a5c4812	bndldx 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndldx 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndldx 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndldx 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndldx 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndldx 0x12(%eax,%ecx,2), %ecx
+32	refused	bndldx 0x12(%eax,%ecx,2), %cx
+32	refused	bndldx 0x12(%eax,%ecx,2), %cl
+32	refused	bndldx 0x12(%eax,%ecx,2), $1
+32	refused	bndldx 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndldx 0x12(%eax,%ecx,2), foo
+32	refused	bndldx 0x12(%eax,%ecx,2), foo(%eax)
+32	refused	bndldx %ecx, %bnd0
+32	refused	bndldx %ecx, %bnd1
+32	refused	bndldx %ecx, %bnd3
+32	refused	bndldx %ecx, (%eax)
+32	refused	bndldx %ecx, 0x40(%eax)
+32	refused	bndldx %ecx, (%eax,%ecx)
+32	refused	bndldx %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndldx %ecx, %ecx
+32	refused	bndldx %ecx, %cx
+32	refused	bndldx %ecx, %cl
+32	refused	bndldx %ecx, $1
+32	refused	bndldx %ecx, %xmm1
+32	refused	bndldx %ecx, foo
+32	refused	bndldx %ecx, foo(%eax)
+32	refused	bndldx %cx, %bnd0
+32	refused	bndldx %cx, %bnd1
+32	refused	bndldx %cx, %bnd3
+32	refused	bndldx %cx, (%eax)
+32	refused	bndldx %cx, 0x40(%eax)
+32	refused	bndldx %cx, (%eax,%ecx)
+32	refused	bndldx %cx, 0x12(%eax,%ecx,2)
+32	refused	bndldx %cx, %ecx
+32	refused	bndldx %cx, %cx
+32	refused	bndldx %cx, %cl
+32	refused	bndldx %cx, $1
+32	refused	bndldx %cx, %xmm1
+32	refused	bndldx %cx, foo
+32	refused	bndldx %cx, foo(%eax)
+32	refused	bndldx %cl, %bnd0
+32	refused	bndldx %cl, %bnd1
+32	refused	bndldx %cl, %bnd3
+32	refused	bndldx %cl, (%eax)
+32	refused	bndldx %cl, 0x40(%eax)
+32	refused	bndldx %cl, (%eax,%ecx)
+32	refused	bndldx %cl, 0x12(%eax,%ecx,2)
+32	refused	bndldx %cl, %ecx
+32	refused	bndldx %cl, %cx
+32	refused	bndldx %cl, %cl
+32	refused	bndldx %cl, $1
+32	refused	bndldx %cl, %xmm1
+32	refused	bndldx %cl, foo
+32	refused	bndldx %cl, foo(%eax)
+32	refused	bndldx $1, %bnd0
+32	refused	bndldx $1, %bnd1
+32	refused	bndldx $1, %bnd3
+32	refused	bndldx $1, (%eax)
+32	refused	bndldx $1, 0x40(%eax)
+32	refused	bndldx $1, (%eax,%ecx)
+32	refused	bndldx $1, 0x12(%eax,%ecx,2)
+32	refused	bndldx $1, %ecx
+32	refused	bndldx $1, %cx
+32	refused	bndldx $1, %cl
+32	refused	bndldx $1, $1
+32	refused	bndldx $1, %xmm1
+32	refused	bndldx $1, foo
+32	refused	bndldx $1, foo(%eax)
+32	refused	bndldx %xmm1, %bnd0
+32	refused	bndldx %xmm1, %bnd1
+32	refused	bndldx %xmm1, %bnd3
+32	refused	bndldx %xmm1, (%eax)
+32	refused	bndldx %xmm1, 0x40(%eax)
+32	refused	bndldx %xmm1, (%eax,%ecx)
+32	refused	bndldx %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndldx %xmm1, %ecx
+32	refused	bndldx %xmm1, %cx
+32	refused	bndldx %xmm1, %cl
+32	refused	bndldx %xmm1, $1
+32	refused	bndldx %xmm1, %xmm1
+32	refused	bndldx %xmm1, foo
+32	refused	bndldx %xmm1, foo(%eax)
+32	0f1a0500000000	bndldx foo, %bnd0
+32	0f1a0d00000000	bndldx foo, %bnd1
+32	0f1a1d00000000	bndldx foo, %bnd3
+32	refused	bndldx foo, (%eax)
+32	refused	bndldx foo, 0x40(%eax)
+32	refused	bndldx foo, (%eax,%ecx)
+32	refused	bndldx foo, 0x12(%eax,%ecx,2)
+32	refused	bndldx foo, %ecx
+32	refused	bndldx foo, %cx
+32	refused	bndldx foo, %cl
+32	refused	bndldx foo, $1
+32	refused	bndldx foo, %xmm1
+32	refused	bndldx foo, foo
+32	refused	bndldx foo, foo(%eax)
+32	0f1a8000000000	bndldx foo(%eax), %bnd0
+32	0f1a8800000000	bndldx foo(%eax), %bnd1
+32	0f1a9800000000	bndldx foo(%eax), %bnd3
+32	refused	bndldx foo(%eax), (%eax)
+32	refused	bndldx foo(%eax), 0x40(%eax)
+32	refused	bndldx foo(%eax), (%eax,%ecx)
+32	refused	bndldx foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndldx foo(%eax), %ecx
+32	refused	bndldx foo(%eax), %cx
+32	refused	bndldx foo(%eax), %cl
+32	refused	bndldx foo(%eax), $1
+32	refused	bndldx foo(%eax), %xmm1
+32	refused	bndldx foo(%eax), foo
+32	refused	bndldx foo(%eax), foo(%eax)
+32	refused	bndstx
+32	refused	bndstx %bnd0
+32	refused	bndstx %bnd1
+32	refused	bndstx %bnd3
+32	refused	bndstx (%eax)
+32	refused	bndstx 0x40(%eax)
+32	refused	bndstx (%eax,%ecx)
+32	refused	bndstx 0x12(%eax,%ecx,2)
+32	refused	bndstx %ecx
+32	refused	bndstx %cx
+32	refused	bndstx %cl
+32	refused	bndstx $1
+32	refused	bndstx %xmm1
+32	refused	bndstx foo
+32	refused	bndstx foo(%eax)
+32	refused	bndstx %bnd0, %bnd0
+32	refused	bndstx %bnd0, %bnd1
+32	refused	bndstx %bnd0, %bnd3
+32	0f1b00	bndstx %bnd0, (%eax)
+32	0f1b4040	bndstx %bnd0, 0x40(%eax)
+32	0f1b0408	bndstx %bnd0, (%eax,%ecx)
+32	0f1b444812	bndstx %bnd0, 0x12(%eax,%ecx,2)
+32	refused	bndstx %bnd0, %ecx
+32	refused	bndstx %bnd0, %cx
+32	refused	bndstx %bnd0, %cl
+32	refused	bndstx %bnd0, $1
+32	refused	bndstx %bnd0, %xmm1
+32	0f1b0500000000	bndstx %bnd0, foo
+32	0f1b8000000000	bndstx %bnd0, foo(%eax)
+32	refused	bndstx %bnd1, %bnd0
+32	refused	bndstx %bnd1, %bnd1
+32	refused	bndstx %bnd1, %bnd3
+32	0f1b08	bndstx %bnd1, (%eax)
+32	0f1b4840	bndstx %bnd1, 0x40(%eax)
+32	0f1b0c08	bndstx %bnd1, (%eax,%ecx)
+32	0f1b4c4812	bndstx %bnd1, 0x12(%eax,%ecx,2)
+32	refused	bndstx %bnd1, %ecx
+32	refused	bndstx %bnd1, %cx
+32	refused	bndstx %bnd1, %cl
+32	refused	bndstx %bnd1, $1
+32	refused	bndstx %bnd1, %xmm1
+32	0f1b0d00000000	bndstx %bnd1, foo
+32	0f1b8800000000	bndstx %bnd1, foo(%eax)
+32	refused	bndstx %bnd3, %bnd0
+32	refused	bndstx %bnd3, %bnd1
+32	refused	bndstx %bnd3, %bnd3
+32	0f1b18	bndstx %bnd3, (%eax)
+32	0f1b5840	bndstx %bnd3, 0x40(%eax)
+32	0f1b1c08	bndstx %bnd3, (%eax,%ecx)
+32	0f1b5c4812	bndstx %bnd3, 0x12(%eax,%ecx,2)
+32	refused	bndstx %bnd3, %ecx
+32	refused	bndstx %bnd3, %cx
+32	refused	bndstx %bnd3, %cl
+32	refused	bndstx %bnd3, $1
+32	refused	bndstx %bnd3, %xmm1
+32	0f1b1d00000000	bndstx %bnd3, foo
+32	0f1b9800000000	bndstx %bnd3, foo(%eax)
+32	refused	bndstx (%eax), %bnd0
+32	refused	bndstx (%eax), %bnd1
+32	refused	bndstx (%eax), %bnd3
+32	refused	bndstx (%eax), (%eax)
+32	refused	bndstx (%eax), 0x40(%eax)
+32	refused	bndstx (%eax), (%eax,%ecx)
+32	refused	bndstx (%eax), 0x12(%eax,%ecx,2)
+32	refused	bndstx (%eax), %ecx
+32	refused	bndstx (%eax), %cx
+32	refused	bndstx (%eax), %cl
+32	refused	bndstx (%eax), $1
+32	refused	bndstx (%eax), %xmm1
+32	refused	bndstx (%eax), foo
+32	refused	bndstx (%eax), foo(%eax)
+32	refused	bndstx 0x40(%eax), %bnd0
+32	refused	bndstx 0x40(%eax), %bnd1
+32	refused	bndstx 0x40(%eax), %bnd3
+32	refused	bndstx 0x40(%eax), (%eax)
+32	refused	bndstx 0x40(%eax), 0x40(%eax)
+32	refused	bndstx 0x40(%eax), (%eax,%ecx)
+32	refused	bndstx 0x40(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndstx 0x40(%eax), %ecx
+32	refused	bndstx 0x40(%eax), %cx
+32	refused	bndstx 0x40(%eax), %cl
+32	refused	bndstx 0x40(%eax), $1
+32	refused	bndstx 0x40(%eax), %xmm1
+32	refused	bndstx 0x40(%eax), foo
+32	refused	bndstx 0x40(%eax), foo(%eax)
+32	refused	bndstx (%eax,%ecx), %bnd0
+32	refused	bndstx (%eax,%ecx), %bnd1
+32	refused	bndstx (%eax,%ecx), %bnd3
+32	refused	bndstx (%eax,%ecx), (%eax)
+32	refused	bndstx (%eax,%ecx), 0x40(%eax)
+32	refused	bndstx (%eax,%ecx), (%eax,%ecx)
+32	refused	bndstx (%eax,%ecx), 0x12(%eax,%ecx,2)
+32	refused	bndstx (%eax,%ecx), %ecx
+32	refused	bndstx (%eax,%ecx), %cx
+32	refused	bndstx (%eax,%ecx), %cl
+32	refused	bndstx (%eax,%ecx), $1
+32	refused	bndstx (%eax,%ecx), %xmm1
+32	refused	bndstx (%eax,%ecx), foo
+32	refused	bndstx (%eax,%ecx), foo(%eax)
+32	refused	bndstx 0x12(%eax,%ecx,2), %bnd0
+32	refused	bndstx 0x12(%eax,%ecx,2), %bnd1
+32	refused	bndstx 0x12(%eax,%ecx,2), %bnd3
+32	refused	bndstx 0x12(%eax,%ecx,2), (%eax)
+32	refused	bndstx 0x12(%eax,%ecx,2), 0x40(%eax)
+32	refused	bndstx 0x12(%eax,%ecx,2), (%eax,%ecx)
+32	refused	bndstx 0x12(%eax,%ecx,2), 0x12(%eax,%ecx,2)
+32	refused	bndstx 0x12(%eax,%ecx,2), %ecx
+32	refused	bndstx 0x12(%eax,%ecx,2), %cx
+32	refused	bndstx 0x12(%eax,%ecx,2), %cl
+32	refused	bndstx 0x12(%eax,%ecx,2), $1
+32	refused	bndstx 0x12(%eax,%ecx,2), %xmm1
+32	refused	bndstx 0x12(%eax,%ecx,2), foo
+32	refused	bndstx 0x12(%eax,%ecx,2), foo(%eax)
+32	refused	bndstx %ecx, %bnd0
+32	refused	bndstx %ecx, %bnd1
+32	refused	bndstx %ecx, %bnd3
+32	refused	bndstx %ecx, (%eax)
+32	refused	bndstx %ecx, 0x40(%eax)
+32	refused	bndstx %ecx, (%eax,%ecx)
+32	refused	bndstx %ecx, 0x12(%eax,%ecx,2)
+32	refused	bndstx %ecx, %ecx
+32	refused	bndstx %ecx, %cx
+32	refused	bndstx %ecx, %cl
+32	refused	bndstx %ecx, $1
+32	refused	bndstx %ecx, %xmm1
+32	refused	bndstx %ecx, foo
+32	refused	bndstx %ecx, foo(%eax)
+32	refused	bndstx %cx, %bnd0
+32	refused	bndstx %cx, %bnd1
+32	refused	bndstx %cx, %bnd3
+32	refused	bndstx %cx, (%eax)
+32	refused	bndstx %cx, 0x40(%eax)
+32	refused	bndstx %cx, (%eax,%ecx)
+32	refused	bndstx %cx, 0x12(%eax,%ecx,2)
+32	refused	bndstx %cx, %ecx
+32	refused	bndstx %cx, %cx
+32	refused	bndstx %cx, %cl
+32	refused	bndstx %cx, $1
+32	refused	bndstx %cx, %xmm1
+32	refused	bndstx %cx, foo
+32	refused	bndstx %cx, foo(%eax)
+32	refused	bndstx %cl, %bnd0
+32	refused	bndstx %cl, %bnd1
+32	refused	bndstx %cl, %bnd3
+32	refused	bndstx %cl, (%eax)
+32	refused	bndstx %cl, 0x40(%eax)
+32	refused	bndstx %cl, (%eax,%ecx)
+32	refused	bndstx %cl, 0x12(%eax,%ecx,2)
+32	refused	bndstx %cl, %ecx
+32	refused	bndstx %cl, %cx
+32	refused	bndstx %cl, %cl
+32	refused	bndstx %cl, $1
+32	refused	bndstx %cl, %xmm1
+32	refused	bndstx %cl, foo
+32	refused	bndstx %cl, foo(%eax)
+32	refused	bndstx $1, %bnd0
+32	refused	bndstx $1, %bnd1
+32	refused	bndstx $1, %bnd3
+32	refused	bndstx $1, (%eax)
+32	refused	bndstx $1, 0x40(%eax)
+32	refused	bndstx $1, (%eax,%ecx)
+32	refused	bndstx $1, 0x12(%eax,%ecx,2)
+32	refused	bndstx $1, %ecx
+32	refused	bndstx $1, %cx
+32	refused	bndstx $1, %cl
+32	refused	bndstx $1, $1
+32	refused	bndstx $1, %xmm1
+32	refused	bndstx $1, foo
+32	refused	bndstx $1, foo(%eax)
+32	refused	bndstx %xmm1, %bnd0
+32	refused	bndstx %xmm1, %bnd1
+32	refused	bndstx %xmm1, %bnd3
+32	refused	bndstx %xmm1, (%eax)
+32	refused	bndstx %xmm1, 0x40(%eax)
+32	refused	bndstx %xmm1, (%eax,%ecx)
+32	refused	bndstx %xmm1, 0x12(%eax,%ecx,2)
+32	refused	bndstx %xmm1, %ecx
+32	refused	bndstx %xmm1, %cx
+32	refused	bndstx %xmm1, %cl
+32	refused	bndstx %xmm1, $1
+32	refused	bndstx %xmm1, %xmm1
+32	refused	bndstx %xmm1, foo
+32	refused	bndstx %xmm1, foo(%eax)
+32	refused	bndstx foo, %bnd0
+32	refused	bndstx foo, %bnd1
+32	refused	bndstx foo, %bnd3
+32	refused	bndstx foo, (%eax)
+32	refused	bndstx foo, 0x40(%eax)
+32	refused	bndstx foo, (%eax,%ecx)
+32	refused	bndstx foo, 0x12(%eax,%ecx,2)
+32	refused	bndstx foo, %ecx
+32	refused	bndstx foo, %cx
+32	refused	bndstx foo, %cl
+32	refused	bndstx foo, $1
+32	refused	bndstx foo, %xmm1
+32	refused	bndstx foo, foo
+32	refused	bndstx foo, foo(%eax)
+32	refused	bndstx foo(%eax), %bnd0
+32	refused	bndstx foo(%eax), %bnd1
+32	refused	bndstx foo(%eax), %bnd3
+32	refused	bndstx foo(%eax), (%eax)
+32	refused	bndstx foo(%eax), 0x40(%eax)
+32	refused	bndstx foo(%eax), (%eax,%ecx)
+32	refused	bndstx foo(%eax), 0x12(%eax,%ecx,2)
+32	refused	bndstx foo(%eax), %ecx
+32	refused	bndstx foo(%eax), %cx
+32	refused	bndstx foo(%eax), %cl
+32	refused	bndstx foo(%eax), $1
+32	refused	bndstx foo(%eax), %xmm1
+32	refused	bndstx foo(%eax), foo
+32	refused	bndstx foo(%eax), foo(%eax)

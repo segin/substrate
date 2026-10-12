@@ -1058,3 +1058,46 @@
     LX("xsavec64", P0, M1, 0xc7, W1, "m", "m", DG(4) | O64),
     LX("xsaves", P0, M1, 0xc7, W0, "m", "m", DG(5)),
     LX("xsaves64", P0, M1, 0xc7, W1, "m", "m", DG(5) | O64),
+
+    /*
+     * MPX: the bounds of a pointer, in %bnd0 to %bnd3.  (GNU as 2.47
+     * has these behind `.arch .mpx`; here they are taken as any other
+     * instruction is.)  A check reads a general register of the code's
+     * width, or an address; the bounds made, and the table of them,
+     * are of an address that is not %rip's.
+     */
+    LX("bndmk", PF3, M1, 0x1b, W0, "mB", "mr", AS_VEC_F_NORIP),
+    LX("bndmov", P66, M1, 0x1a, W0, "BB", "mr", 0),
+    LX("bndmov", P66, M1, 0x1a, W0, "mB", "mr", 0),
+    LX("bndmov", P66, M1, 0x1b, W0, "Bm", "rm", 0),
+    LX("bndcl", PF3, M1, 0x1a, W0, "qB", "mr", O64),
+    LX("bndcl", PF3, M1, 0x1a, W0, "dB", "mr", X32),
+    LX("bndcl", PF3, M1, 0x1a, W0, "mB", "mr", 0),
+    LX("bndcu", PF2, M1, 0x1a, W0, "qB", "mr", O64),
+    LX("bndcu", PF2, M1, 0x1a, W0, "dB", "mr", X32),
+    LX("bndcu", PF2, M1, 0x1a, W0, "mB", "mr", 0),
+    LX("bndcn", PF2, M1, 0x1b, W0, "qB", "mr", O64),
+    LX("bndcn", PF2, M1, 0x1b, W0, "dB", "mr", X32),
+    LX("bndcn", PF2, M1, 0x1b, W0, "mB", "mr", 0),
+    LX("bndldx", P0, M1, 0x1a, W0, "mB", "mr", AS_VEC_F_NORIP),
+    LX("bndstx", P0, M1, 0x1b, W0, "Bm", "rm", AS_VEC_F_NORIP),
+
+    /* SSE4a's stores of a scalar past the cache. */
+    LX("movntsd", PF2, M1, 0x2b, W0, "xm", "rm", 0),
+    LX("movntss", PF3, M1, 0x2b, W0, "xm", "rm", 0),
+
+    /* The instructions that are defined to be undefined: alone, or
+     * with the operands a processor reads past.  (`ud2b` is `ud1` by
+     * its older name.) */
+    LFIX("ud0", 0xff, 0, "", ""),
+    LX("ud0", P0, M1, 0xff, W0, "Ww", "mr", OP16),
+    LX("ud0", P0, M1, 0xff, W0, "Dd", "mr", OP32),
+    LX("ud0", P0, M1, 0xff, W1, "Qq", "mr", O64),
+    LFIX("ud1", 0xb9, 0, "", ""),
+    LX("ud1", P0, M1, 0xb9, W0, "Ww", "mr", OP16),
+    LX("ud1", P0, M1, 0xb9, W0, "Dd", "mr", OP32),
+    LX("ud1", P0, M1, 0xb9, W1, "Qq", "mr", O64),
+    LFIX("ud2b", 0xb9, 0, "", ""),
+    LX("ud2b", P0, M1, 0xb9, W0, "Ww", "mr", OP16),
+    LX("ud2b", P0, M1, 0xb9, W0, "Dd", "mr", OP32),
+    LX("ud2b", P0, M1, 0xb9, W1, "Qq", "mr", O64),

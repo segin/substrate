@@ -1628,7 +1628,11 @@ unsigned as_x86_bare_prefix_byte(const char *word) {
                {"addr32", 0x67u},
                /* A branch taken, and not: the hints, which are %ds and
                 * %cs by other names. */
-               {"ht", 0x3eu},     {"hnt", 0x2eu}};
+               {"ht", 0x3eu},     {"hnt", 0x2eu},
+               /* And the rest GNU as takes on a line of their own. */
+               {"xacquire", 0xf2u}, {"xrelease", 0xf3u},
+               /* (data16, data32, addr16 and addr32 by other names.) */
+               {"word", 0x66u},   {"dword", 0x66u},  {"aword", 0x67u},    {"adword", 0x67u}};
     size_t i;
 
     /* REX by the names it had before `rex.W`: rexx, rex64yz. */
@@ -1679,6 +1683,17 @@ static int prefix_flag_for(const char *s, char **segment_override) {
             *segment_override = strip_register_prefix(streq_ci(s, "ht") ? "ds" : "cs");
         }
         return AS_PREFIX_SEG_OVERRIDE;
+    }
+    /* (`word`, `dword`, `aword` and `adword` are the four that follow,
+     * by the names they had first.) */
+    if (streq_ci(s, "word")) {
+        s = "data16";
+    } else if (streq_ci(s, "dword")) {
+        s = "data32";
+    } else if (streq_ci(s, "aword")) {
+        s = "addr16";
+    } else if (streq_ci(s, "adword")) {
+        s = "addr32";
     }
     if (streq_ci(s, "data16")) {
         return AS_PREFIX_DATA16;

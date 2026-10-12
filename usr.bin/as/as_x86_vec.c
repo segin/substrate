@@ -249,6 +249,8 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return op->kind == AS_X86_OP_IMM && (op->imm_symbolic || (op->u.imm >= 0 && op->u.imm <= 255));
     case 't':
         return cls == AS_X86_REGCLASS_TILE;
+    case 'B':
+        return cls == AS_X86_REGCLASS_BOUND;
     case 'h':
         /* (Not %ah to %bh, nor %spl to %dil, which a REX prefix tells
          * apart: no row that takes a byte has needed them.) */
@@ -474,6 +476,10 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     size_t prefix;
     size_t i;
 
+    if (rm != NULL && rm->kind == AS_X86_OP_MEM && rm->u.mem.rip_relative && (t->flags & AS_VEC_F_NORIP) != 0) {
+        vec_err(ctx, "'%s' takes no address from %%rip", t->name);
+        return -1;
+    }
     if (rm == NULL && t->ops[0] != '\0' && t->enc != AS_VEC_LEGACY && (t->flags & AS_VEC_F_MODRM) == 0) {
         vec_err(ctx, "internal: a row with nothing in r/m");
         return -1;

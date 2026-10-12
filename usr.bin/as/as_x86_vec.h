@@ -72,6 +72,7 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_SIB (1u << 19)   /* memory always with a SIB byte: AMX, whose index is the stride */
 #define AS_VEC_F_SUFFIX (1u << 20) /* no VEX: the row's byte goes after the operands (3DNow!) */
 #define AS_VEC_F_LOCK (1u << 21)   /* no VEX: may have a lock prefix (said by the name's first row) */
+#define AS_VEC_F_NORIP (1u << 22)  /* memory that is not an address from %rip (MPX) */
 
 typedef struct {
     const char *name;
@@ -96,6 +97,7 @@ typedef struct {
      *   i u     a number of one byte: -128 to 255; 0 to 255 only
      *   n N     an MMX register; that, or memory
      *   t       a tile register, %tmm0 to %tmm7
+     *   B       a bound register, %bnd0 to %bnd3
      *   h       a general register of 8 bits: %al to %bl, %r8b to %r15b
      *   w W     a general register of 16 bits; that, or memory
      *   0       %xmm0 and no other

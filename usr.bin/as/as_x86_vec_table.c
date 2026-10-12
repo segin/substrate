@@ -458,13 +458,13 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
         EX(n, P66, M2, op, ew, L128, "Xx", "mr", N, 0, KZ), EX(n, P66, M2, op, ew, L256, "Xy", "mr", N, 0, KZ), \
         EX(n, P66, M2, op, ew, L512, "Xz", "mr", N, 0, KZ)
     PBROADCAST("vpbroadcastb", 0x78, W0, 1),
-    EX("vpbroadcastb", P66, M2, 0x7a, W0, L128, "Rx", "mr", 0, 0, KZ),
-    EX("vpbroadcastb", P66, M2, 0x7a, W0, L256, "Ry", "mr", 0, 0, KZ),
-    EX("vpbroadcastb", P66, M2, 0x7a, W0, L512, "Rz", "mr", 0, 0, KZ),
+    EX("vpbroadcastb", P66, M2, 0x7a, W0, L128, "dx", "mr", 0, 0, KZ),
+    EX("vpbroadcastb", P66, M2, 0x7a, W0, L256, "dy", "mr", 0, 0, KZ),
+    EX("vpbroadcastb", P66, M2, 0x7a, W0, L512, "dz", "mr", 0, 0, KZ),
     PBROADCAST("vpbroadcastw", 0x79, W0, 2),
-    EX("vpbroadcastw", P66, M2, 0x7b, W0, L128, "Rx", "mr", 0, 0, KZ),
-    EX("vpbroadcastw", P66, M2, 0x7b, W0, L256, "Ry", "mr", 0, 0, KZ),
-    EX("vpbroadcastw", P66, M2, 0x7b, W0, L512, "Rz", "mr", 0, 0, KZ),
+    EX("vpbroadcastw", P66, M2, 0x7b, W0, L128, "dx", "mr", 0, 0, KZ),
+    EX("vpbroadcastw", P66, M2, 0x7b, W0, L256, "dy", "mr", 0, 0, KZ),
+    EX("vpbroadcastw", P66, M2, 0x7b, W0, L512, "dz", "mr", 0, 0, KZ),
     PBROADCAST("vpbroadcastd", 0x58, W0, 4),
     EX("vpbroadcastd", P66, M2, 0x7c, W0, L128, "dx", "mr", 0, 0, KZ),
     EX("vpbroadcastd", P66, M2, 0x7c, W0, L256, "dy", "mr", 0, 0, KZ),
@@ -1080,6 +1080,10 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
         VX(n "l", pp, map, op, W0, L128, o32, roles, AS_VEC_F_VEX3 | (fl)), \
         VX(n "q", pp, map, op, W1, L128, o64, roles, AS_VEC_F_VEX3 | O64 | (fl))
     GPR3("andn", P0, M2, 0xf2, "Ddd", "Qqq", "mvr", 0),
+    /* (TBM's `bextr`, whose field is a number of four bytes: before
+     * BMI's, so that the rows of the name stand together.) */
+    XP("bextr", P0, M10, 0x10, W0, L128, "iDd", "imr", AS_VEC_F_IMM32),
+    XP("bextr", P0, M10, 0x10, W1, L128, "iQq", "imr", AS_VEC_F_IMM32 | O64),
     GPR3("bextr", P0, M2, 0xf7, "dDd", "qQq", "vmr", 0),
     GPR3("bzhi", P0, M2, 0xf5, "dDd", "qQq", "vmr", 0),
     GPR3("mulx", PF2, M2, 0xf6, "Ddd", "Qqq", "mvr", 0),
