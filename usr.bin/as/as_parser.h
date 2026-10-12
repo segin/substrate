@@ -93,6 +93,15 @@ typedef struct {
  * not one. */
 unsigned as_pseudo_prefix_flag(const char *name);
 
+/*
+ * A statement that is prefixes alone has this for its mnemonic, and
+ * after it the words, each behind a space: "(prefixes) ds data16".
+ * as_x86_bare_prefix_byte() is the byte of one such word -- a segment,
+ * `data16`, `data32`, `addr16`, `addr32`, `notrack` -- or 0.
+ */
+#define AS_BARE_PREFIX_MNEMONIC "(prefixes)"
+unsigned as_x86_bare_prefix_byte(const char *word);
+
 typedef struct {
     char *mnemonic;
     unsigned syntax_intel;

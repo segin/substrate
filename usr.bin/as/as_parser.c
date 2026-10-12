@@ -1610,6 +1610,23 @@ static int parse_x86_far_immediate_pair(parse_ctx_t *ctx, const as_token_t *tokv
 
 static unsigned rex_bits_for(const char *s);
 
+unsigned as_x86_bare_prefix_byte(const char *word) {
+    static const struct {
+        const char *word;
+        unsigned byte;
+    } map[] = {{"es", 0x26u},     {"cs", 0x2eu},     {"ss", 0x36u},     {"ds", 0x3eu},     {"fs", 0x64u},
+               {"gs", 0x65u},     {"notrack", 0x3eu}, {"data16", 0x66u}, {"data32", 0x66u}, {"addr16", 0x67u},
+               {"addr32", 0x67u}};
+    size_t i;
+
+    for (i = 0; word != NULL && i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (streq_ci(word, map[i].word)) {
+            return map[i].byte;
+        }
+    }
+    return 0;
+}
+
 static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "lock")) {
         return AS_PREFIX_LOCK;
@@ -1729,6 +1746,42 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     memset(&in, 0, sizeof(in));
     in.syntax_intel = (unsigned)(ctx != NULL && ctx->syntax_intel ? 1 : 0);
     in.rounding_mode = -1;
+
+    /*
+     * A line that is prefixes and nothing else -- `data16`, `addr32`,
+     * `ds`, or several -- is their bytes, in the order written, as GNU
+     * as has it; which of them a mode has is the emitter's to say, so
+     * they go to it as one statement named for what it is.  (A size
+     * prefix alone was a parse error, and a segment's was refused in
+     * 64-bit code.)
+     */
+    for (i = 0; i < n; ++i) {
+        if (as_x86_bare_prefix_byte(tokv[i].text) == 0) {
+            break;
+        }
+    }
+    if (n > 0 && i == n) {
+        size_t len = sizeof(AS_BARE_PREFIX_MNEMONIC);
+        char *name;
+
+        for (i = 0; i < n; ++i) {
+            len += strlen(tokv[i].text) + 1u;
+        }
+        name = (char *)malloc(len);
+        if (name == NULL) {
+            return -1;
+        }
+        snprintf(name, len, "%s", AS_BARE_PREFIX_MNEMONIC);
+        for (i = 0; i < n; ++i) {
+            size_t at = strlen(name);
+
+            snprintf(name + at, len - at, " %s", tokv[i].text);
+        }
+        in.mnemonic = name;
+        st->kind = AS_STMT_INSTRUCTION;
+        st->u.instr = in;
+        return 0;
+    }
 
     i = 0;
     while (i < n) {

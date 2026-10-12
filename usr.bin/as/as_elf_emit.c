@@ -243,6 +243,8 @@ static const char *first_symbol_in_expr(const as_expr_t *e);
 static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out);
 static as_x86_seg_t map_seg(const char *s);
 static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
+static int x86_cond_code(const char *mnemonic, unsigned *cc_out);
+static int x86_base_is_ip(const char *base_reg);
 static int append_incbin_to_bytebuf(emit_ctx_t *ctx, const as_stmt_t *st, bytebuf_t *buf, const as_directive_t *d);
 static int section_name_is_executable(emit_ctx_t *ctx, const char *name);
 static int is_numeric_local_label_name(const char *name);
@@ -8398,6 +8400,8 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         dst->u.mem.size_bits = (unsigned)(op->u.mem.size_bits > 0 ? op->u.mem.size_bits : 0);
         (void)is64;
         if (op->u.mem.base_reg != NULL) {
+            /* (%eip is made %rip behind a prefix before it comes here,
+             * in 64-bit code; elsewhere it is no register.) */
             if (streq_ci(op->u.mem.base_reg, "rip")) {
                 /* `(%rip)` is x86_64-only addressing. In 32-bit mode it
                  * appears in dead-code from cc-emitted out-of-line
@@ -11970,7 +11974,9 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         int have = 0;
 
         for (i = 0; i < n; ++i) {
-            if (ops[i].kind == AS_X86_OP_MEM && ops[i].u.mem.addr_bits != 0) {
+            /* (From where the instruction is, the prefix is all that
+             * says the address is of 32 bits: `(%eip)`.) */
+            if (ops[i].kind == AS_X86_OP_MEM && ops[i].u.mem.addr_bits != 0 && !ops[i].u.mem.rip_relative) {
                 if (ops[i].u.mem.addr_bits != other) {
                     snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and an address of another size", mn);
                     return -1;
@@ -12405,6 +12411,252 @@ static int x86_is_string_destination(const char *mn, const as_mem_operand_t *mem
     return 0;
 }
 
+/* Is this base the place the instruction is at: %rip, or %eip, which is
+ * the same in an address of 32 bits? */
+static int x86_base_is_ip(const char *base_reg) {
+    return base_reg != NULL && (streq_ci(base_reg, "rip") || streq_ci(base_reg, "eip"));
+}
+
+/*
+ * A statement that is prefixes alone (AS_BARE_PREFIX_MNEMONIC): their
+ * bytes in the order written.  0 if it was one and is assembled, -1 if
+ * it was one and is refused, 1 if it is something else.
+ */
+static int x86_bare_prefixes(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                             size_t *code_len, char *encerr, size_t encerr_sz) {
+    const char *p = st->u.instr.mnemonic;
+    size_t n = 0;
+
+    if (strncmp(p, AS_BARE_PREFIX_MNEMONIC, sizeof(AS_BARE_PREFIX_MNEMONIC) - 1u) != 0) {
+        return 1;
+    }
+    p += sizeof(AS_BARE_PREFIX_MNEMONIC) - 1u;
+    while (*p == ' ') {
+        char word[16];
+        size_t k = 0;
+
+        p++;
+        while (*p != '\0' && *p != ' ' && k + 1 < sizeof(word)) {
+            word[k++] = *p++;
+        }
+        word[k] = '\0';
+        /* The segments 64-bit code has no use for, and the sizes that
+         * are not its other ones. */
+        if (cfg->is_64 && (streq_ci(word, "es") || streq_ci(word, "ss") || streq_ci(word, "data32") ||
+                           streq_ci(word, "addr16"))) {
+            snprintf(encerr, encerr_sz, "'%s' is no prefix of 64-bit code", word);
+            return -1;
+        }
+        if (n >= code_cap) {
+            return -1;
+        }
+        code[n++] = (unsigned char)as_x86_bare_prefix_byte(word);
+    }
+    *code_len = n;
+    return 0;
+}
+
+/* A general register for an operand that was not written. */
+static void x86_implied_reg(as_operand_t *op, const char *reg) {
+    static char raw[8];
+
+    memset(op, 0, sizeof(*op));
+    op->kind = AS_OPERAND_REGISTER;
+    snprintf(raw, sizeof(raw), "%%%s", reg);
+    op->raw = raw;
+    op->u.reg = raw + 1;
+}
+
+/*
+ * The spellings of older assemblers, which GNU as still takes: each is
+ * another way to write an instruction this assembler has, and is made
+ * that instruction here, once, for both emitters.  None was assembled.
+ *
+ *   smovl, sscab, slod, ssto, scmp   the string instructions, by the
+ *                                    names they had on System V
+ *   movsb %al,%ebx, movzw %ax,%ebx   an extension whose second size is
+ *                                    its register's
+ *   div %ebx,%eax                    the accumulator written out
+ *   in %dx, outb %dx, in $5          the accumulator left out
+ *   setab                            a byte's suffix on what is a byte
+ *   fldenvs, fnsavel                 an environment of 16 bits, or 32
+ *   jmp $8,$0x1000                   a far jump without its l
+ *
+ * 1 if `bare` is now the statement to assemble; `ops` and `name` are
+ * what it points into.  2 if it is, behind a wait (9B) that the caller
+ * is to write, and 3 behind a lock (F0).
+ */
+static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stmt_t *bare, as_operand_t ops[4],
+                            char *name, size_t name_sz) {
+    static const struct {
+        const char *old;
+        const char *now;
+    } strings[] = {{"smov", "movs"}, {"ssca", "scas"}, {"slod", "lods"}, {"ssto", "stos"}, {"scmp", "cmps"}};
+    static const char *const env[] = {"fldenv", "fnstenv", "fstenv", "fsave", "fnsave", "frstor"};
+    const as_instruction_t *in = &st->u.instr;
+    const char *mn = in->mnemonic;
+    size_t len = strlen(mn);
+    size_t nops = in->operand_count;
+    size_t i;
+    char low[16];
+
+    if (len == 0 || len >= sizeof(low) || nops > 4) {
+        return 0;
+    }
+    for (i = 0; i <= len; ++i) {
+        low[i] = (char)tolower((unsigned char)mn[i]);
+    }
+    *bare = *st;
+    for (i = 0; i < nops; ++i) {
+        ops[i] = in->operands[i];
+    }
+    bare->u.instr.operands = ops;
+    bare->u.instr.mnemonic = name;
+
+    for (i = 0; nops == 0 && i < sizeof(strings) / sizeof(strings[0]); ++i) {
+        if (strncmp(low, strings[i].old, 4) == 0 &&
+            (low[4] == '\0' || (strchr("bwlq", low[4]) != NULL && low[5] == '\0'))) {
+            snprintf(name, name_sz, "%s%c", strings[i].now, low[4] != '\0' ? low[4] : 'l');
+            return 1;
+        }
+    }
+    if (nops == 2 && ops[1].kind == AS_OPERAND_REGISTER &&
+        (strcmp(low, "movsb") == 0 || strcmp(low, "movzb") == 0 || strcmp(low, "movsw") == 0 ||
+         strcmp(low, "movzw") == 0 || strcmp(low, "movsl") == 0)) {
+        unsigned bits = parse_x86_reg_bits(ops[1].u.reg);
+        const as_x86_reg_info_t *r = as_x86_reg_find(ops[1].u.reg);
+
+        if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL && (bits == 16u || bits == 32u || bits == 64u)) {
+            snprintf(name, name_sz, "%s%c", low, bits == 16u ? 'w' : bits == 32u ? 'l' : 'q');
+            return 1;
+        }
+    }
+    if (nops == 2 && ops[1].kind == AS_OPERAND_REGISTER &&
+        (strncmp(low, "div", 3) == 0 || strncmp(low, "idiv", 4) == 0)) {
+        const char *rest = low + (low[0] == 'i' ? 4 : 3);
+        const as_x86_reg_info_t *r = as_x86_reg_find(ops[1].u.reg);
+
+        if ((rest[0] == '\0' || (strchr("bwlq", rest[0]) != NULL && rest[1] == '\0')) && r != NULL &&
+            r->cls == AS_X86_REGCLASS_GENERAL &&
+            (strcmp(r->name, "al") == 0 || strcmp(r->name, "ax") == 0 || strcmp(r->name, "eax") == 0 ||
+             strcmp(r->name, "rax") == 0)) {
+            /* (Its size is kept, for a divisor in memory.) */
+            snprintf(name, name_sz, "%.*s%c", (int)(rest - low), low,
+                     rest[0] != '\0' ? rest[0] : r->width == 8 ? 'b' : r->width == 16 ? 'w' : r->width == 32 ? 'l' : 'q');
+            bare->u.instr.operand_count = 1;
+            return 1;
+        }
+    }
+    if (nops == 1 && (strncmp(low, "in", 2) == 0 || strncmp(low, "out", 3) == 0)) {
+        int out = low[0] == 'o';
+        const char *rest = low + (out ? 3 : 2);
+        int port = (ops[0].kind == AS_OPERAND_REGISTER && streq_ci(ops[0].u.reg, "dx")) ||
+                   ops[0].kind == AS_OPERAND_IMMEDIATE;
+
+        if (port && (rest[0] == '\0' || (strchr("bwl", rest[0]) != NULL && rest[1] == '\0'))) {
+            snprintf(name, name_sz, "%s", low);
+            if (out) {
+                ops[1] = ops[0];
+            }
+            x86_implied_reg(&ops[out ? 0 : 1], rest[0] == 'b' ? "al" : rest[0] == 'w' ? "ax" : "eax");
+            bare->u.instr.operand_count = 2;
+            return 1;
+        }
+    }
+    if (nops == 1 && len >= 5 && strncmp(low, "set", 3) == 0 && low[len - 1] == 'b') {
+        char jcc[16];
+        unsigned cc;
+
+        snprintf(jcc, sizeof(jcc), "j%s", low + 3);
+        if (x86_cond_code(jcc, &cc) != 0) {
+            jcc[strlen(jcc) - 1] = '\0';
+            if (x86_cond_code(jcc, &cc) == 0) {
+                snprintf(name, name_sz, "%.*s", (int)(len - 1), low);
+                return 1;
+            }
+        }
+    }
+    for (i = 0; nops == 1 && i < sizeof(env) / sizeof(env[0]); ++i) {
+        size_t el = strlen(env[i]);
+
+        if (strncmp(low, env[i], el) == 0 && (low[el] == 's' || low[el] == 'l') && low[el + 1] == '\0') {
+            /* 16 bits where the mode's are 32, or 32 where they are 16. */
+            int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
+
+            if ((low[el] == 's') == code16) {
+                snprintf(name, name_sz, "%s", env[i]);
+                return 1;
+            }
+            /* The wait of `fsave` and `fstenv` is before the size's
+             * prefix, not after: the instruction is the one without
+             * it, and the caller writes the wait. */
+            bare->u.instr.prefixes |= AS_PREFIX_DATA16;
+            if (strcmp(env[i], "fsave") == 0 || strcmp(env[i], "fstenv") == 0) {
+                snprintf(name, name_sz, "fn%s", env[i] + 1);
+                return 2;
+            }
+            snprintf(name, name_sz, "%s", env[i]);
+            return 1;
+        }
+    }
+    /* A comparison with the register under the top, not written. */
+    if (nops == 0 && (strcmp(low, "fcomi") == 0 || strcmp(low, "fucomi") == 0 || strcmp(low, "fcomip") == 0 ||
+                      strcmp(low, "fucomip") == 0)) {
+        snprintf(name, name_sz, "%s", low);
+        x86_implied_reg(&ops[0], "st(1)");
+        bare->u.instr.operand_count = 1;
+        return 1;
+    }
+    /* A string through the port, of the size the port's register is
+     * not: 32 bits unless a letter says. */
+    if (nops == 2 && (strcmp(low, "ins") == 0 || strcmp(low, "outs") == 0)) {
+        snprintf(name, name_sz, "%sl", low);
+        return 1;
+    }
+    if (nops == 0 && strcmp(low, "sysretl") == 0 && !cfg->is_64) {
+        snprintf(name, name_sz, "sysret");
+        return 1;
+    }
+    /* From where the instruction is, in an address of 32 bits: %rip
+     * behind the prefix that says so. */
+    for (i = 0; cfg->is_64 && i < nops; ++i) {
+        static char rip[] = "rip";
+
+        if (ops[i].kind == AS_OPERAND_MEMORY && ops[i].u.mem.base_reg != NULL &&
+            streq_ci(ops[i].u.mem.base_reg, "eip") && ops[i].u.mem.index_reg == NULL &&
+            (in->prefixes & AS_PREFIX_ADDR16) == 0) {
+            snprintf(name, name_sz, "%s", low);
+            ops[i].u.mem.base_reg = rip;
+            bare->u.instr.prefixes |= AS_PREFIX_ADDR16;
+            return 1;
+        }
+    }
+    /* %cr8 where there are no registers past the seventh: %cr0 behind
+     * a lock, which is how AMD's processors have it in 32-bit code. */
+    if (nops == 2 && !cfg->is_64 && (strcmp(low, "mov") == 0 || strcmp(low, "movl") == 0) &&
+        (in->prefixes & AS_PREFIX_LOCK) == 0) {
+        for (i = 0; i < 2; ++i) {
+            const char *r = ops[i].kind == AS_OPERAND_REGISTER ? ops[i].u.reg : "";
+            unsigned num = strncasecmp(r, "cr", 2) == 0 && r[2] != '\0' ? (unsigned)atoi(r + 2) : 0u;
+
+            if (num >= 8u && num <= 15u && strlen(r) <= 4 && ops[1 - i].kind == AS_OPERAND_REGISTER) {
+                char low_cr[4];
+
+                snprintf(name, name_sz, "%s", low);
+                snprintf(low_cr, sizeof(low_cr), "cr%u", num - 8u);
+                x86_implied_reg(&ops[i], low_cr);
+                return 3;
+            }
+        }
+    }
+    if (nops == 2 && (strcmp(low, "jmp") == 0 || strcmp(low, "call") == 0) && ops[0].kind == AS_OPERAND_IMMEDIATE &&
+        ops[1].kind == AS_OPERAND_IMMEDIATE) {
+        snprintf(name, name_sz, "l%s", low);
+        return 1;
+    }
+    return 0;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
@@ -12412,6 +12664,35 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
     /* (For the emitters that are handed operands and no mode.) */
     x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
+
+    if (st != NULL && cfg != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL) {
+        int rc = x86_bare_prefixes(cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+
+        if (rc <= 0) {
+            return rc;
+        }
+        if (!st->u.instr.syntax_intel) {
+            as_operand_t ops[4];
+            char name[32];
+
+            int how = x86_old_spelling(cfg, st, &bare, ops, name, sizeof(name));
+
+            if (how >= 2) {
+                if (code_cap < 2) {
+                    return -1;
+                }
+                code[0] = how == 2 ? 0x9b : 0xf0;
+                rc = encode_x86_stmt(ctx, cfg, &bare, code + 1, code_cap - 1, code_len, encerr, encerr_sz);
+                if (rc == 0) {
+                    (*code_len)++;
+                }
+                return rc;
+            }
+            if (how == 1) {
+                return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
+            }
+        }
+    }
 
     /*
      * A segment that is the one the address has anyway -- %ss with the
@@ -16306,7 +16587,7 @@ unresolved_rel_target:
 
             if (op->kind != AS_OPERAND_MEMORY ||
                 op->u.mem.base_reg == NULL ||
-                !streq_ci(op->u.mem.base_reg, "rip") ||
+                !x86_base_is_ip(op->u.mem.base_reg) ||
                 op->u.mem.disp == NULL ||
                 !expr_has_local_ref(op->u.mem.disp) ||
                 eval_local_rel_expr_virtual(ctx, section_name, NULL, 0,
@@ -19831,7 +20112,7 @@ static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t
             return R_X86_64_PC32;
         }
         if (op != NULL && op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
-            streq_ci(op->u.mem.base_reg, "rip")) {
+            x86_base_is_ip(op->u.mem.base_reg)) {
             return R_X86_64_PC32;
         }
         if (op != NULL && op->kind == AS_OPERAND_MEMORY) {
@@ -21176,7 +21457,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     if (machine == EM_X86_64 &&
                         op->kind == AS_OPERAND_MEMORY &&
                         op->u.mem.base_reg != NULL &&
-                        streq_ci(op->u.mem.base_reg, "rip")) {
+                        x86_base_is_ip(op->u.mem.base_reg)) {
                         skip_local_resolve = 1;
                     }
                     /* A call of a symbol is the linker's to resolve --
@@ -21211,7 +21492,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         (lin.add_symbol != NULL || lin.add_local != NULL) &&
                         (lin.sub_symbol != NULL || lin.sub_local != NULL) &&
                         !(op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
-                          streq_ci(op->u.mem.base_reg, "rip")) &&
+                          x86_base_is_ip(op->u.mem.base_reg)) &&
                         eval_abs_local_diff_expr_virtual(ctx, st, e, &label_difference) == 0) {
                         is_label_difference = 1;
                     } else if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK && lin.add_symbol != NULL &&
@@ -21456,7 +21737,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 } else if (machine == EM_X86_64 &&
                            op->kind == AS_OPERAND_MEMORY &&
                            op->u.mem.base_reg != NULL &&
-                           streq_ci(op->u.mem.base_reg, "rip")) {
+                           x86_base_is_ip(op->u.mem.base_reg)) {
                     addend += -4;
                     /* Less what follows the field as well: the address
                      * is counted from the end of the instruction. */

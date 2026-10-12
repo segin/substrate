@@ -31,12 +31,8 @@ imull $100,sym@GOTTPOFF(%ebx),%eax
 fldl sym@GOTTPOFF(%ebx)
 movb %al,sym@GOTTPOFF(%ebx)
 movw sym@GOTTPOFF(%ebx),%bx
-movl %cr8,%eax
-movl %eax,%cr8
 lcall $sym,$sym2
 ljmp $0x10000,$0
-jmp $0x10,$0x1000
-call $0x10,$0x1000
 jmpw sym
 jmpl sym
 movl $sym@INDNTPOFF,%eax
@@ -55,30 +51,11 @@ nop | lf: nop | movl lf(,%eax,4),%ecx
 .section .foo,"ax" | lf: nop | .text | jmp lf
 .section .foo,"ax" | lf: nop | .text | je lf
 .section .foo,"ax" | lf: nop | .text | movl $lf,%eax
-mov %cr8,%eax
-mov %eax,%cr8
-movl %cr8,%ebx
-movl %edi,%cr8
-mov %cr9,%eax
-mov %eax,%cr9
-movl %cr9,%ebx
-movl %edi,%cr9
-movsb %al,%ebx
-movsw %ax,%ebx
-movzb %al,%ebx
-movzw %ax,%ebx
-divw %bx,%ax
-idivw (%ebx),%ax
-divl %ebx,%eax
-idivl (%ebx),%eax
 ds call sym
 addr16 movl %eax,(%eax)
 addr32 nop
-data16
-addr32
 data16 jmp sym
 addr16 jcxz 1f | 1:
-setab %al
 call .
 call .+5
 int $sym
@@ -86,24 +63,8 @@ ret $sym
 movsl (%edi),%es:(%esi)
 movsl (%eax),%es:(%ebx)
 stosb %bl,%es:(%edi)
-smovl
-ssca
-slod
-ssto
-scmp
-inb %dx
-inb $1
-inl %dx
-in %dx
-outb %dx
-outb $0x80
 in $sym,%al
 out %al,$sym
-fucomip
-fcomi
-fucomi
-fldenvs (%eax)
-fnstenvl (%eax)
 .code16 | jmpl sym
 .code16 | data32 jmp sym
 .code16 | movw 0xffff(%bx),%ax

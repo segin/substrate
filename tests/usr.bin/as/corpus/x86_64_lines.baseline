@@ -10,9 +10,6 @@ leal sym@TLSGD(%rip),%edx
 movl %eax,sym@TLSLD(%rip)
 movl sym@TLSLD(%rip),%ecx
 leal sym@TLSLD(%rip),%edx
-movl %eax,sym(%eip)
-movl sym(%eip),%ecx
-leal sym(%eip),%edx
 leal sym@GOT(%rax),%edx
 leal sym@TPOFF(%rax),%edx
 leal sym@DTPOFF(%rax),%edx
@@ -39,28 +36,7 @@ movq $1,sym@TLSLD(%rip)
 leaq sym@TLSLD(%rip),%r10
 cmpq $0x100,sym@TLSLD(%rip)
 addq $-1,sym@TLSLD(%rip)
-movb $1,sym(%eip)
-movw $0x1234,sym(%eip)
-movl $0x12345678,sym(%eip)
-addl $4,sym(%eip)
-cmpb $0,sym(%eip)
-incl sym(%eip)
-pushq sym(%eip)
-call *sym(%eip)
-movl $sym2,sym(%eip)
-testl $1,sym(%eip)
-shll $3,sym(%eip)
-imull $100,sym(%eip),%eax
 fldl sym(%eip)
-movb %al,sym(%eip)
-movw sym(%eip),%bx
-movq %rax,sym(%eip)
-movq sym(%eip),%r9
-movq $1,sym(%eip)
-leaq sym(%eip),%r10
-cmpq $0x100,sym(%eip)
-movq $sym2,sym(%eip)
-addq $-1,sym(%eip)
 movb $1,(%r16)
 movw $0x1234,(%r16)
 movl $0x12345678,(%r16)
@@ -95,55 +71,22 @@ leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
 .globl gf | gf: nop | jmp gf
 .globl gf | gf: nop | je gf
-movsb %al,%ebx
-movsw %ax,%ebx
 movsxd %ax,%bx
-movzb %al,%ebx
-movzw %ax,%ebx
-divw %bx,%ax
-idivw (%rbx),%ax
 imulw %bx,%ax,%bx
-divl %ebx,%eax
-idivl (%rbx),%eax
 imull %ebx,%eax,%ebx
-divq %rbx,%rax
-idivq (%rbx),%rax
 imulq %rbx,%rax,%rbx
 ds call sym
 es movsb
 addr32 movl %eax,(%rax)
 addr16 nop
-data16
-addr32
 data16 jmp sym
 addr32 jecxz 1f | 1:
-cs; nop
-ds; movl %eax,(%rbx)
-fs
-gs
 seta %eax
-setab %al
 call .
 call .+5
 int $sym
 ret $sym
 movsl (%rdi),%es:(%rsi)
 movsl (%eax),%es:(%ebx)
-smovl
-ssca
-slod
-ssto
-scmp
-inb %dx
-inb $1
-inl %dx
-in %dx
-outb %dx
-outb $0x80
 in $sym,%al
 out %al,$sym
-fucomip
-fcomi
-fucomi
-fldenvs (%rax)
-fnstenvl (%rax)

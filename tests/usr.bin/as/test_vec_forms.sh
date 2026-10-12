@@ -43,7 +43,12 @@ cd "$work" || exit 1
 # too: the 32-bit emitter had most of them and the 64-bit one almost
 # none -- `rdrand %eax`, `clflushopt (%rax)`, `xtest` and forty more
 # were "unsupported mnemonic" in 64-bit code -- and neither had AMD's.
-cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" > forms.txt
+#
+# legacy_forms.txt is the same of the older spellings GNU as still
+# takes, and of prefixes on a line of their own: `smovl`, `movsb
+# %al,%ebx`, `div %ebx,%eax`, `in %dx`, `setab`, `fldenvs`, `data16`,
+# `sym(%eip)`.  None was assembled.
+cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0

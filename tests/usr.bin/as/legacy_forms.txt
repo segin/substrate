@@ -1,0 +1,530 @@
+32	37	aaa
+32	d50a	aad $10
+32	d40a	aam
+32	d40a	aam $10
+32	67	addr16
+32	67	addr32
+32	63c3	arpl %ax,%bx
+32	6203	bound %eax,(%ebx)
+32	refused	bswap %ax
+32	0fbae003	bt $3,%eax
+32	0fbb03	btc %eax,(%ebx)
+32	0fba2003	btl $3,(%eax)
+32	9a080000000500	call $5,$8
+32	9a001000000800	call $8,$0x1000
+32	6698	cbtw
+32	99	cltd
+32	refused	cltq
+32	a7	cmps %es:(%edi),%ds:(%esi)
+32	a6	cmpsb %es:(%edi),%ds:(%esi)
+32	0fb103	cmpxchg %eax,(%ebx)
+32	refused	cqto
+32	2e	cs
+32	6699	cwtd
+32	98	cwtl
+32	27	daa
+32	66	data16
+32	6667	data16 addr32
+32	66	data32
+32	f6f3	div %bl,%al
+32	f7f3	div %ebx,%eax
+32	refused	div %ebx,%ecx
+32	refused	div %rbx,%rax
+32	f733	div (%ebx),%eax
+32	f6f3	divb %bl,%al
+32	f7f3	divl %ebx,%eax
+32	66f733	divw (%ebx),%ax
+32	3e	ds
+32	3e66	ds data16
+32	3e26	ds es
+32	c8080000	enter $8,$0
+32	66c8080000	enterw $8,$0
+32	26	es
+32	dec1	fadd
+32	dec1	faddp
+32	d8d1	fcom
+32	dbf1	fcomi
+32	dbf2	fcomi %st(2)
+32	dff1	fcomip
+32	d8d9	fcomp
+32	ded9	fcompp
+32	def9	fdivrp
+32	ddc1	ffree %st(1)
+32	dfc1	ffreep %st(1)
+32	d920	fldenvl (%eax)
+32	66d920	fldenvs (%eax)
+32	refused	fldenvs (%rax)
+32	dec9	fmulp
+32	d9d0	fnop
+32	dd30	fnsavel (%eax)
+32	refused	fnsaves (%rax)
+32	d930	fnstenvl (%eax)
+32	66d930	fnstenvs (%eax)
+32	refused	frstorl (%rax)
+32	66dd20	frstors (%eax)
+32	64	fs
+32	refused	fsavel (%rax)
+32	9b66dd30	fsaves (%eax)
+32	9bd930	fstenvl (%eax)
+32	refused	fstenvs (%rax)
+32	refused	fstp
+32	dee1	fsubp
+32	dbe9	fucomi
+32	dfe9	fucomip
+32	dfeb	fucomip %st(3),%st
+32	dae9	fucompp
+32	9b	fwait
+32	d9c9	fxch
+32	65	gs
+32	refused	icebp
+32	refused	idiv %bl,%ax
+32	66f7fb	idiv %bx,%ax
+32	f7fb	idiv %ebx,%eax
+32	refused	idivq %rbx,%rax
+32	6bc005	imul $5,%eax
+32	69dbf4010000	imul $500,%ebx
+32	f7eb	imul %ebx
+32	refused	in $300
+32	refused	in $300,%eax
+32	e52c	in $44,%eax
+32	e505	in $5
+32	e405	in $5,%al
+32	refused	in %cx
+32	ed	in %dx
+32	ed	in %dx,%eax
+32	ec	inb %dx
+32	e505	inl $5
+32	ed	inl %dx
+32	refused	inq %dx
+32	6d	ins %dx,%es:(%edi)
+32	6d	ins %dx,(%edi)
+32	6d	insl %dx,%es:(%edi)
+32	666d	insw %dx,%es:(%edi)
+32	cd05	int $5
+32	f1	int1
+32	cc	int3
+32	ce	into
+32	0f0138	invlpg (%eax)
+32	66ed	inw %dx
+32	cf	iretl
+32	refused	iretq
+32	66cf	iretw
+32	67e300	jcxz 1f; 1:
+32	e300	jecxz 1f; 1:
+32	ea001000000800	jmp $8,$0x1000
+32	ea050000000800	jmp $8,$5
+32	9a001000000800	lcall $8,$0x1000
+32	refused	lea (%eip),%eax
+32	refused	lea 5(%eip),%eax
+32	c9	leave
+32	c9	leavel
+32	refused	leaveq
+32	66c9	leavew
+32	0f0110	lgdtl (%eax)
+32	refused	lgdtq (%rax)
+32	660f0110	lgdtw (%eax)
+32	ea050000000800	ljmp $8,$5
+32	0f01f0	lmsw %ax
+32	f0	lock
+32	ad	lods %ds:(%esi),%eax
+32	ad	lods (%esi)
+32	e200	loop 1f; 1:
+32	e200	loopl 1f; 1:
+32	67e200	loopw 1f; 1:
+32	ca0500	lret $5
+32	f00f20c0	mov %cr8,%eax
+32	refused	mov %cr8,%rax
+32	f00f20c8	mov %cr9,%eax
+32	f00f22c0	mov %eax,%cr8
+32	refused	mov %eax,4(%eip)
+32	0f24f0	mov %tr6,%eax
+32	refused	mov 5(%eip),%eax
+32	refused	mov 5(%eip),%rax
+32	refused	mov 5(%eip,%eax),%eax
+32	refused	movabs $0x1122334455667788,%rax
+32	refused	movabs 0x1122334455667788,%al
+32	refused	movabsq %rax,0x1122334455667788
+32	f00f20c0	movl %cr8,%eax
+32	0f23f8	movl %eax,%db7
+32	refused	movq %cr8,%rax
+32	refused	movq %dr7,%rax
+32	refused	movq %rax,%cr0
+32	a5	movs %ds:(%esi),%es:(%edi)
+32	refused	movsb %al,%al
+32	660fbed8	movsb %al,%bx
+32	0fbed8	movsb %al,%ebx
+32	refused	movsb %al,%rbx
+32	0fbe18	movsb (%eax),%ebx
+32	a4	movsb (%esi),(%edi)
+32	a5	movsl %ds:(%esi),%es:(%edi)
+32	refused	movsl %eax,%ebx
+32	refused	movsl %eax,%rbx
+32	0fbfd8	movsw %ax,%ebx
+32	refused	movsw %ax,%rbx
+32	66a5	movsw %ds:(%esi),%es:(%edi)
+32	0fbf18	movsw (%eax),%ebx
+32	660fb6d8	movzb %al,%bx
+32	0fb6d8	movzb %al,%ebx
+32	refused	movzb %al,%rbx
+32	refused	movzb %ax,%ebx
+32	660fb618	movzb (%eax),%bx
+32	0fb7d8	movzw %ax,%ebx
+32	refused	movzw (%rax),%rbx
+32	refused	mul %ebx,%eax
+32	0f1fc0	nop %eax
+32	0f1f00	nopl (%eax)
+32	refused	nopq (%rax)
+32	660f1f00	nopw (%eax)
+32	3e	notrack
+32	e705	out $5
+32	refused	out %al
+32	e605	out %al,$5
+32	ef	out %dx
+32	refused	out %eax,$0x1ff
+32	ee	outb %dx
+32	ef	outl %dx
+32	6f	outs %ds:(%esi),%dx
+32	6f	outs (%esi),%dx
+32	6e	outsb %ds:(%esi),%dx
+32	66ef	outw %dx
+32	61	popa
+32	refused	popfq
+32	60	pusha
+32	60	pushal
+32	6660	pushaw
+32	9c	pushf
+32	9c	pushfl
+32	refused	pushfq
+32	669c	pushfw
+32	6a05	pushl $5
+32	refused	pushq $5
+32	666a05	pushw $5
+32	d1d0	rcl $1,%eax
+32	f3	rep
+32	f3	repe
+32	f2	repne
+32	c20500	ret $5
+32	refused	rex64
+32	d6	salc
+32	d1fb	sar %ebx
+32	af	scas %es:(%edi),%eax
+32	a7	scmp
+32	a7	scmpl
+32	66a7	scmpw
+32	0f97c0	setab %al
+32	0f92c0	setb %al
+32	0f92c0	setbb %al
+32	0f92c0	setcb %al
+32	0f9300	setnbb (%eax)
+32	0f95c0	setneb %al
+32	0f0100	sgdt (%eax)
+32	d1e0	shl %eax
+32	0fa5c3	shld %cl,%eax,%ebx
+32	0fa5c3	shld %eax,%ebx
+32	0fac0303	shrd $3,%eax,(%ebx)
+32	0f0108	sidtl (%eax)
+32	0f00c0	sldt %eax
+32	refused	sldt %rax
+32	ad	slod
+32	ac	slodb
+32	ad	slodl
+32	a5	smov
+32	a4	smovb
+32	a5	smovl
+32	refused	smovq
+32	66a5	smovw
+32	660f01e0	smsw %ax
+32	0f01e0	smsw %eax
+32	0f0120	smsw (%eax)
+32	36	ss
+32	af	ssca
+32	ae	sscab
+32	refused	sscaq
+32	ab	ssto
+32	66ab	sstow
+32	ab	stos %eax,%es:(%edi)
+32	ab	stos %es:(%edi)
+32	0f00c8	str %eax
+32	0f34	sysenter
+32	0f35	sysexit
+32	0f07	sysret
+32	0f07	sysretl
+32	refused	sysretq
+32	8503	test %eax,(%ebx)
+32	8503	test (%ebx),%eax
+32	0fffd8	ud0 %eax,%ebx
+32	0fb9d8	ud1 %eax,%ebx
+32	0f0b	ud2a
+32	0fb9	ud2b
+32	0f00e0	verr %ax
+32	0fc003	xadd %al,(%ebx)
+32	6690	xchg %ax,%ax
+32	90	xchg %eax,%eax
+32	8703	xchg %eax,(%ebx)
+32	refused	xchg %rax,%rax
+32	8703	xchg (%ebx),%eax
+32	d7	xlat
+32	d7	xlatb
+64	refused	aaa
+64	refused	aad $10
+64	refused	aam
+64	refused	aam $10
+64	refused	addr16
+64	67	addr32
+64	refused	arpl %ax,%bx
+64	refused	bound %eax,(%ebx)
+64	refused	bswap %ax
+64	0fbae003	bt $3,%eax
+64	670fbb03	btc %eax,(%ebx)
+64	670fba2003	btl $3,(%eax)
+64	refused	call $5,$8
+64	refused	call $8,$0x1000
+64	6698	cbtw
+64	99	cltd
+64	4898	cltq
+64	67a7	cmps %es:(%edi),%ds:(%esi)
+64	67a6	cmpsb %es:(%edi),%ds:(%esi)
+64	670fb103	cmpxchg %eax,(%ebx)
+64	4899	cqto
+64	2e	cs
+64	6699	cwtd
+64	98	cwtl
+64	refused	daa
+64	66	data16
+64	6667	data16 addr32
+64	refused	data32
+64	f6f3	div %bl,%al
+64	f7f3	div %ebx,%eax
+64	refused	div %ebx,%ecx
+64	48f7f3	div %rbx,%rax
+64	67f733	div (%ebx),%eax
+64	f6f3	divb %bl,%al
+64	f7f3	divl %ebx,%eax
+64	6766f733	divw (%ebx),%ax
+64	3e	ds
+64	3e66	ds data16
+64	refused	ds es
+64	c8080000	enter $8,$0
+64	66c8080000	enterw $8,$0
+64	refused	es
+64	dec1	fadd
+64	dec1	faddp
+64	d8d1	fcom
+64	dbf1	fcomi
+64	dbf2	fcomi %st(2)
+64	dff1	fcomip
+64	d8d9	fcomp
+64	ded9	fcompp
+64	def9	fdivrp
+64	ddc1	ffree %st(1)
+64	dfc1	ffreep %st(1)
+64	67d920	fldenvl (%eax)
+64	6766d920	fldenvs (%eax)
+64	66d920	fldenvs (%rax)
+64	dec9	fmulp
+64	d9d0	fnop
+64	67dd30	fnsavel (%eax)
+64	66dd30	fnsaves (%rax)
+64	67d930	fnstenvl (%eax)
+64	6766d930	fnstenvs (%eax)
+64	dd20	frstorl (%rax)
+64	6766dd20	frstors (%eax)
+64	64	fs
+64	9bdd30	fsavel (%rax)
+64	9b6766dd30	fsaves (%eax)
+64	9b67d930	fstenvl (%eax)
+64	9b66d930	fstenvs (%rax)
+64	refused	fstp
+64	dee1	fsubp
+64	dbe9	fucomi
+64	dfe9	fucomip
+64	dfeb	fucomip %st(3),%st
+64	dae9	fucompp
+64	9b	fwait
+64	d9c9	fxch
+64	65	gs
+64	refused	icebp
+64	refused	idiv %bl,%ax
+64	66f7fb	idiv %bx,%ax
+64	f7fb	idiv %ebx,%eax
+64	48f7fb	idivq %rbx,%rax
+64	6bc005	imul $5,%eax
+64	69dbf4010000	imul $500,%ebx
+64	f7eb	imul %ebx
+64	refused	in $300
+64	refused	in $300,%eax
+64	e505	in $5
+64	e405	in $5,%al
+64	refused	in %cx
+64	ed	in %dx
+64	ed	in %dx,%eax
+64	ec	inb %dx
+64	e505	inl $5
+64	ed	inl %dx
+64	refused	inq %dx
+64	676d	ins %dx,%es:(%edi)
+64	676d	ins %dx,(%edi)
+64	676d	insl %dx,%es:(%edi)
+64	67666d	insw %dx,%es:(%edi)
+64	cd05	int $5
+64	f1	int1
+64	cc	int3
+64	refused	into
+64	670f0138	invlpg (%eax)
+64	66ed	inw %dx
+64	cf	iretl
+64	48cf	iretq
+64	66cf	iretw
+64	67e300	jecxz 1f; 1:
+64	e300	jrcxz 1f; 1:
+64	refused	lcall $8,$0x1000
+64	678d0500000000	lea (%eip),%eax
+64	678d0505000000	lea 5(%eip),%eax
+64	c9	leave
+64	refused	leavel
+64	c9	leaveq
+64	66c9	leavew
+64	refused	lgdtl (%eax)
+64	0f0110	lgdtq (%rax)
+64	refused	lgdtw (%eax)
+64	refused	ljmp $8,$5
+64	0f01f0	lmsw %ax
+64	f0	lock
+64	67ad	lods %ds:(%esi),%eax
+64	67ad	lods (%esi)
+64	e200	loop 1f; 1:
+64	67e200	loopl 1f; 1:
+64	ca0500	lret $5
+64	refused	mov %cr8,%eax
+64	440f20c0	mov %cr8,%rax
+64	refused	mov %cr9,%eax
+64	refused	mov %eax,%cr8
+64	67890504000000	mov %eax,4(%eip)
+64	refused	mov %tr6,%eax
+64	678b0505000000	mov 5(%eip),%eax
+64	67488b0505000000	mov 5(%eip),%rax
+64	refused	mov 5(%eip,%eax),%eax
+64	48b88877665544332211	movabs $0x1122334455667788,%rax
+64	a08877665544332211	movabs 0x1122334455667788,%al
+64	48a38877665544332211	movabsq %rax,0x1122334455667788
+64	refused	movl %cr8,%eax
+64	refused	movl %eax,%db7
+64	440f20c0	movq %cr8,%rax
+64	0f21f8	movq %dr7,%rax
+64	0f22c0	movq %rax,%cr0
+64	67a5	movs %ds:(%esi),%es:(%edi)
+64	refused	movsb %al,%al
+64	660fbed8	movsb %al,%bx
+64	0fbed8	movsb %al,%ebx
+64	480fbed8	movsb %al,%rbx
+64	670fbe18	movsb (%eax),%ebx
+64	67a4	movsb (%esi),(%edi)
+64	67a5	movsl %ds:(%esi),%es:(%edi)
+64	refused	movsl %eax,%ebx
+64	4863d8	movsl %eax,%rbx
+64	0fbfd8	movsw %ax,%ebx
+64	480fbfd8	movsw %ax,%rbx
+64	6766a5	movsw %ds:(%esi),%es:(%edi)
+64	670fbf18	movsw (%eax),%ebx
+64	660fb6d8	movzb %al,%bx
+64	0fb6d8	movzb %al,%ebx
+64	480fb6d8	movzb %al,%rbx
+64	refused	movzb %ax,%ebx
+64	67660fb618	movzb (%eax),%bx
+64	0fb7d8	movzw %ax,%ebx
+64	480fb718	movzw (%rax),%rbx
+64	refused	mul %ebx,%eax
+64	0f1fc0	nop %eax
+64	670f1f00	nopl (%eax)
+64	480f1f00	nopq (%rax)
+64	67660f1f00	nopw (%eax)
+64	3e	notrack
+64	e705	out $5
+64	refused	out %al
+64	e605	out %al,$5
+64	refused	out %ax,$256
+64	ef	out %dx
+64	ee	outb %dx
+64	ef	outl %dx
+64	676f	outs %ds:(%esi),%dx
+64	676f	outs (%esi),%dx
+64	676e	outsb %ds:(%esi),%dx
+64	66ef	outw %dx
+64	refused	popa
+64	9d	popfq
+64	refused	pusha
+64	refused	pushal
+64	refused	pushaw
+64	9c	pushf
+64	refused	pushfl
+64	9c	pushfq
+64	669c	pushfw
+64	refused	pushl $5
+64	6a05	pushq $5
+64	666a05	pushw $5
+64	d1d0	rcl $1,%eax
+64	f3	rep
+64	f3	repe
+64	f2	repne
+64	c20500	ret $5
+64	48	rex64
+64	refused	salc
+64	d1fb	sar %ebx
+64	67af	scas %es:(%edi),%eax
+64	a7	scmp
+64	a7	scmpl
+64	66a7	scmpw
+64	0f97c0	setab %al
+64	0f92c0	setb %al
+64	0f92c0	setbb %al
+64	0f92c0	setcb %al
+64	670f9300	setnbb (%eax)
+64	0f95c0	setneb %al
+64	670f0100	sgdt (%eax)
+64	d1e0	shl %eax
+64	0fa5c3	shld %cl,%eax,%ebx
+64	0fa5c3	shld %eax,%ebx
+64	670fac0303	shrd $3,%eax,(%ebx)
+64	refused	sidtl (%eax)
+64	0f00c0	sldt %eax
+64	0f00c0	sldt %rax
+64	ad	slod
+64	ac	slodb
+64	ad	slodl
+64	a5	smov
+64	a4	smovb
+64	a5	smovl
+64	48a5	smovq
+64	66a5	smovw
+64	660f01e0	smsw %ax
+64	0f01e0	smsw %eax
+64	670f0120	smsw (%eax)
+64	refused	ss
+64	af	ssca
+64	ae	sscab
+64	48af	sscaq
+64	ab	ssto
+64	66ab	sstow
+64	67ab	stos %eax,%es:(%edi)
+64	67ab	stos %es:(%edi)
+64	0f00c8	str %eax
+64	0f34	sysenter
+64	0f35	sysexit
+64	0f07	sysret
+64	0f07	sysretl
+64	480f07	sysretq
+64	678503	test %eax,(%ebx)
+64	678503	test (%ebx),%eax
+64	0fffd8	ud0 %eax,%ebx
+64	0fb9d8	ud1 %eax,%ebx
+64	0f0b	ud2a
+64	0fb9	ud2b
+64	0f00e0	verr %ax
+64	670fc003	xadd %al,(%ebx)
+64	6690	xchg %ax,%ax
+64	87c0	xchg %eax,%eax
+64	678703	xchg %eax,(%ebx)
+64	90	xchg %rax,%rax
+64	678703	xchg (%ebx),%eax
+64	d7	xlat
+64	d7	xlatb
