@@ -12,7 +12,7 @@ The Substrate assembler (`as`) is a standalone, multi-architecture assembler tha
 | Install path     | `/usr/bin/as`                                            |
 | Input            | Assembly source (`.s`, `.S`), AT&T or Intel syntax       |
 | Output           | ELF relocatable objects (`.o`, default) and flat binary (`-O binary`) |
-| Architectures    | i386, x86-64 (v1–v4), ARMv7 (AArch32), AArch64 (v8.0–8.1) |
+| Architectures    | i386, x86-64 (v1–v4), ARMv7 (AArch32), AArch64 (v8.0–8.1) — see Appendix C for how much of each there is |
 | Library deps     | `libelfobj` (ELF generation)                             |
 | Host build       | `NATIVE_BUILD=1` for development/test on Linux/BSD host  |
 
@@ -606,3 +606,89 @@ The prior phase-1 implementation used delegated backend assembly (`gcc -c -x ass
   - Property type: `GNU_PROPERTY_X86_ISA_1_NEEDED` (`0xc0008002`).
   - ISA bits: `GNU_PROPERTY_X86_ISA_1_BASELINE`, `GNU_PROPERTY_X86_ISA_1_V2`, `GNU_PROPERTY_X86_ISA_1_V3`, `GNU_PROPERTY_X86_ISA_1_V4`.
 - The note bitmask communicates minimum required ISA level for the object and is used by loader/tooling compatibility checks.
+- **No such note is written** (see REQ-AS-107 in Appendix C): this appendix describes what the requirement asks for, not what the assembler does.
+
+## Appendix C: Reconciliation with the assembler
+
+Made 2026-10-11, requirement by requirement, against the assembler of that date: each claim below was tried, not read off the source.  A requirement is **met**, or it is a **divergence** and is **open** -- the text above still says what was asked for, and this says what there is.  Where a divergence is the assembler's deliberate choice, usually because GNU `as` does the same, that is said; it is listed all the same.  The work that remains is tracked in `docs/as-tasks.md`, and the tests named are in `tests/usr.bin/as/`.
+
+### Met
+
+| Requirement | Held by |
+|---|---|
+| REQ-AS-010, 011, 013 | several sources are one source; `-` and no file are the standard input (`test_source_positions.sh`, `test_cli_extended.sh`) |
+| REQ-AS-012, 048 | `-I` and `.include` (`test_include_expanded.sh`) |
+| REQ-AS-014 | bytes above 127 pass through strings and comments untouched |
+| REQ-AS-020, 021, 025 | decimal, `0x`, leading-`0` octal, `0b`; `'c'` (`test_lexer_core.sh`, `test_data_literals.sh`) |
+| REQ-AS-023 | `;` separates statements, in every target |
+| REQ-AS-030, 031 | `test_parser_core.sh` |
+| REQ-AS-032 | numeric labels, and of more than one digit; as a branch's target and as an address (`test_label_arithmetic.sh`) |
+| REQ-AS-033, 034 | every operator listed, and `==`, `<`, `&&` and their fellows (`test_expr.sh`, `test_data_expressions.sh`) |
+| REQ-AS-035 to 038 | `test_intel_dual_syntax.sh`, both Intel round trips |
+| REQ-AS-040 to 046 | every directive listed; `.cfi_*` are made call frame information, not only taken (`test_cfi_frames.sh`).  as(1) has the whole list of directives, which is longer |
+| REQ-AS-047 | `.group NAME` puts the current section in a group (this assembler's own directive: GNU `as` has none), and `.section NAME,"axG",@progbits,GROUP,comdat` does as GNU's |
+| REQ-AS-051, 052 | `test_cli_extended.sh` |
+| REQ-AS-055 | `test_vec_forms.sh` |
+| REQ-AS-057 | `test_arm_targets.sh` |
+| REQ-AS-060 to 063 | the two corpora against GNU `as` (`test_gnu_differential.sh`), `test_insn_forms.sh`, `test_vec_forms.sh`.  VEX and EVEX are encoded whatever `-march` is, unless it forbids them |
+| REQ-AS-070, 072 to 075 | `test_arm_forms.sh` against llvm-mc |
+| REQ-AS-081, 082 | `test_arm_forms.sh`, `test_arm_targets.sh` |
+| REQ-AS-090, 091, 094 | `test_branch_relax.sh`.  A branch only ever grows, so the passes end of themselves |
+| REQ-AS-092, 093 | `test_arm_targets.sh` |
+| REQ-AS-100 to 104 | `test_arm_targets.sh`, `test_relocations_elf_32_64.sh` |
+| REQ-AS-105, 106 | `test_cfi_frames.sh`, `test_line_table.sh`: GNU `as`'s bytes.  `.eh_frame_hdr` is the linker's to make |
+| REQ-AS-108 | every object has `.note.GNU-stack` |
+| REQ-AS-112 to 116 | `test_output_binary.sh`.  A flat image is written for i386 and x86-64 only |
+| REQ-AS-122, 123, 125 | `test_cli_extended.sh`, `test_output_file.sh` |
+| REQ-AS-130, 132 to 134, 136, 138 to 140 | `test_cli_help.sh`, which holds `--help` and as(1) to the options there are; `test_cli_extended.sh` |
+| REQ-AS-200 | `test_diagnostics_determinism.sh` |
+| REQ-AS-206 | linked by the Substrate `ld` (`test_integration_rollout.sh`), by GNU `ld`, and for ARM and AArch64 by `lld` (`test_arm_targets.sh`) |
+| REQ-AS-207, 208 | the suite builds it for the host; both target builds are made for every change |
+| REQ-US-01-A to C | the i8086 and 32-bit corpora; `test_code_modes.sh` |
+| REQ-US-02-A to C | `test_vec_forms.sh` |
+| REQ-US-03-A, B (flat images) | `test_output_binary.sh` |
+| REQ-US-03-C, D (ARM) | `test_arm_targets.sh`: IT blocks; the literal pool, which runs under qemu |
+| REQ-US-04-C | `test_arm_forms.sh` |
+| REQ-US-06-A to D | `test_branch_relax.sh`, `test_cfi_frames.sh`, `test_line_table.sh` |
+| REQ-DS-02-C | the lexer, directives, symbols, sections and the object writer are one for all four targets (`usr.bin/as/ARCHITECTURE.md`) |
+| REQ-DS-03-B | every test of bytes reports what it got and what it wanted |
+| REQ-DS-05-A to C | `test_gnu_differential.sh` (every line of two corpora against GNU `as`), `test_integration_rollout.sh`, `tests/usr.bin/ld` |
+| REQ-DS-06-A, B | `test_fuzz_matrix.sh`, `test_testing_fuzz_perf.sh` |
+| Acceptance 1, 5, 6, 8 | the tests above; the listing in `test_listing.sh` |
+
+### Open: divergences
+
+| Requirement | What there is |
+|---|---|
+| Scope: "AArch64 (v8.0–8.1)" | v8.0's integer, system, float and vector instructions as as(1) lists them; nothing of v8.1 |
+| REQ-AS-022 | so for x86.  For ARM a comment is from `@` and for both ARM and AArch64 `#` begins one only at the start of a line, being elsewhere what stands before a number |
+| REQ-AS-024 | a line ending in `\` is not continued.  GNU `as` does not continue one either |
+| REQ-AS-050, 053, 054, 131; REQ-DS-02-B; Acceptance 3, 4 | `-march` does not choose the machine.  It is chosen by the name the assembler is run under (`arm-as`, `aarch64-as`) or by `--target`; `-march` then names a processor of that machine, and for ARM and AArch64 changes nothing |
+| REQ-AS-056 | the message names the instruction and the level it needs, not the level in force |
+| REQ-AS-064 | open as AS-T-186: most short forms are chosen (the sign-extended byte, the accumulator's forms, `disp8`, the two-byte VEX); 2,681 lines of the two corpora still differ from GNU `as`, some of them longer |
+| REQ-AS-065 | a number too wide for a byte or a word is cut to it with a warning, as GNU `as` does (`immediate truncated to 8 bits`); a displacement or a branch that does not fit is an error |
+| REQ-AS-071; REQ-US-03-B | the narrowest form is chosen for everything but a branch: `b` and `bcc` are 32 bits unless `.n` is written, and are not shortened by distance |
+| REQ-AS-076; REQ-US-03-A | not "all": the arithmetic, comparisons, conversions, moves, loads and stores of VFP and NEON that `tests/usr.bin/as/arm_forms.txt` has |
+| REQ-AS-080; REQ-US-04-B | not "all": the classes as(1) lists.  `MSR` and `MRS` with the system registers by name or by number; no `DC`, `IC`, `AT`, `TLBI` |
+| REQ-AS-083, 084; REQ-US-04-A; Acceptance 4 | no LSE atomics and no RDMA: nothing of ARMv8.1 |
+| REQ-AS-095 | there is no count to exceed and no such error: relaxation cannot fail to end |
+| REQ-AS-107; Acceptance 2; Appendix B | no `.note.gnu.property` is written, at any `-march`.  GNU `as` writes none by itself either (it has `-mx86-used-note` for the instructions used, and never says "needed") |
+| REQ-AS-109 | `e_flags` is `EF_ARM_ABI_VER5` and no float ABI flag |
+| REQ-AS-110, 111; Acceptance 3 | no mapping symbols.  A disassembler must be told which instruction set a Thumb object holds |
+| REQ-AS-120, 121 | `file:line: Error: message` and `file:line: Warning: message`, as GNU `as` writes them |
+| REQ-AS-124 | 0, and 1 for an error in the source; 2 for a misuse of the command line |
+| REQ-AS-126 | no count at the end, but under `--fatal-warnings` |
+| REQ-AS-135 | `-D` defines a macro for the C preprocessor, for a `.S` source, and is nothing to `.ifdef` in a `.s` one; `--defsym` is what defines a symbol |
+| REQ-AS-137 | `-W` is `--no-warn`, as it is GNU's; `--warn` is the default said aloud |
+| REQ-AS-201, 202 | for a `.S` source, and only then, the C preprocessor is run as a child (`cpp`, or `$AS_CPP`).  A `.s` source runs nothing |
+| REQ-AS-203, 204 | not tried at 10 million lines or a million symbols.  Open as AS-T-228 and AS-T-229: time is not yet linear in every shape of source, and 200,000 statements take some 180 MB |
+| REQ-AS-205 | allocations are checked and a failure is said and is exit 1; no test starves it of memory |
+| REQ-AS-209; REQ-DS-06-C; Acceptance 7 | the fuzzing tests find nothing; none has run for 24 hours |
+| REQ-US-05-A | the options of this specification, as corrected above, are taken; `as --help` is the list |
+| REQ-US-05-B | an option that is not known is an error and exit 1, as it is to GNU `as` |
+| REQ-US-05-C | relocation types and section names are GNU's; a relocation against a label of the file that is no `.L` label names the label, where GNU `as` names its section and a distance into it.  Linked, the two are the same |
+| REQ-DS-01-A to C | so for ARM, AArch64 and the VEX/EVEX/SSE instructions of x86 (`as_x86_vec_table.c`, held to GNU by `test_vec_forms.sh`); not for the integer instructions of x86, which are still chosen in code.  Open as AS-T-161 to 164 |
+| REQ-DS-02-A | no one interface: ARM and AArch64 are behind `as_arm.h`; x86 is in the emitter itself.  Open as AS-T-164 and AS-T-235 |
+| REQ-DS-03-A, C | the tests are lines of text -- mode, bytes, statement -- not that structure; and not every mnemonic of the integer instructions has a line of its own |
+| REQ-DS-04-A, B | `--statistics` prints the time of each pass, the whole and the peak resident size, and nothing of relaxation.  `AS_DEBUG_RELOC_TRACE` logs each relocation; nothing logs a relaxation |
+| Acceptance 9 | assembled, linked and run for all four machines -- x86 on Substrate itself, ARM and AArch64 under qemu, linked by `lld`; the Substrate `ld` links x86 only |

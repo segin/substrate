@@ -730,27 +730,21 @@ See
 .Pa docs/specs/as_arch_reference.md
 for the per-architecture instruction-family appendix.
 .Sh NOTE.GNU.PROPERTY
-For x86-64 ISA level tagging,
 .Nm
-uses
+writes no
 .Pa .note.gnu.property
-with GNU property type
-.Dv GNU_PROPERTY_X86_ISA_1_NEEDED
-.Pq 0xc0008002 .
-The ISA bitmask uses:
-.Bl -tag -width GNU_PROPERTY_X86_ISA_1_BASELINE
-.It Dv GNU_PROPERTY_X86_ISA_1_BASELINE
-Baseline x86-64 ISA.
-.It Dv GNU_PROPERTY_X86_ISA_1_V2
-x86-64-v2 requirement bit.
-.It Dv GNU_PROPERTY_X86_ISA_1_V3
-x86-64-v3 requirement bit.
-.It Dv GNU_PROPERTY_X86_ISA_1_V4
-x86-64-v4 requirement bit.
-.El
-When the selected/used ISA level is v2+,
+of its own, at any
+.Fl march :
+an object does not say which x86-64 level its instructions need.
+.Po
+This page said that it did, with
+.Dv GNU_PROPERTY_X86_ISA_1_NEEDED ;
+it never has.
+GNU
 .Nm
-marks the highest required level via cumulative needed bits.
+writes none by itself either.
+.Pc
+A source may write the section itself.
 .Sh ENVIRONMENT
 .Bl -tag -width AS_BACKEND
 .It Ev AS_CPP
