@@ -244,11 +244,31 @@ static int push_stmt(as_parse_result_t *r, const as_stmt_t *st) {
     return 0;
 }
 
+void as_parse_result_reserve(as_parse_result_t *r, size_t n) {
+    as_stmt_t *next;
+
+    if (r == NULL || n <= r->cap || n > (size_t)-1 / sizeof(*next)) {
+        return;
+    }
+    next = (as_stmt_t *)realloc(r->items, n * sizeof(*next));
+    if (next != NULL) {
+        r->items = next;
+        r->cap = n;
+    }
+}
+
 static int push_label(as_stmt_t *st, const char *name, const char *file, unsigned line) {
     as_label_def_t *next;
 
     if (st->label_count == st->label_cap) {
-        size_t ncap = st->label_cap == 0 ? 4 : st->label_cap * 2;
+        size_t ncap = st->label_cap == 0 ? 4 : (size_t)st->label_cap * 2;
+
+        if (ncap > AS_STMT_MAX_LABELS) {
+            ncap = AS_STMT_MAX_LABELS;
+        }
+        if (ncap <= st->label_count) {
+            return -1;
+        }
         next = (as_label_def_t *)realloc(st->labels, ncap * sizeof(*next));
         if (next == NULL) {
             return -1;
@@ -432,6 +452,9 @@ static int parse_x86_operand_decorators(parse_ctx_t *ctx, const as_token_t *tokv
         } else if (is_broadcast_text(inner)) {
             /* The count written: {1to8} is 8. */
             decor->broadcast = atoi(inner + 3);
+            if (decor->broadcast < 0 || decor->broadcast > AS_INSTR_MAX_BROADCAST) {
+                decor->broadcast = AS_INSTR_MAX_BROADCAST;
+            }
         } else if (streq_ci(inner, "sae")) {
             decor->sae = 1;
         } else if (parse_rounding_text(inner, &rmode, &sae) == 0) {
@@ -621,7 +644,14 @@ static int add_operand(as_instruction_t *in, const as_operand_t *op) {
     if (in->operand_count == in->operand_cap) {
         /* (Two to begin with, which is what most instructions have:
          * room for four was 128 bytes more for each of them.) */
-        size_t ncap = in->operand_cap == 0 ? 2 : in->operand_cap * 2;
+        size_t ncap = in->operand_cap == 0 ? 2 : (size_t)in->operand_cap * 2;
+
+        if (ncap > AS_INSTR_MAX_OPERANDS) {
+            ncap = AS_INSTR_MAX_OPERANDS;
+        }
+        if (ncap <= in->operand_count) {
+            return -1;
+        }
         next = (as_operand_t *)realloc(in->operands, ncap * sizeof(*next));
         if (next == NULL) {
             return -1;

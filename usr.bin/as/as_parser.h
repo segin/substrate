@@ -108,24 +108,35 @@ unsigned as_pseudo_prefix_flag(const char *name);
 #define AS_BARE_PREFIX_MNEMONIC "(prefixes)"
 unsigned as_x86_bare_prefix_byte(const char *word);
 
+/* The most operands an instruction may have: more than any has, and
+ * what the count of them is kept in. */
+#define AS_INSTR_MAX_OPERANDS 250u
+/* The most {1toN} may say and be kept: more than any instruction takes. */
+#define AS_INSTR_MAX_BROADCAST 255
+
+/*
+ * One instruction as it was written.  There is one of these for every
+ * instruction of the source until the object is written, so its fields
+ * are as small as what they hold: 56 bytes on a 64-bit host.
+ */
 typedef struct {
     char *mnemonic;
-    unsigned syntax_intel;
-    unsigned prefixes;
-    unsigned pseudo;
-    unsigned rex_bits;
-    unsigned opmask;
-    /* A write mask was written, %k0 or another: opmask is 0 for none
-     * and for %k0, which is no write mask and is refused for one. */
-    int have_opmask;
-    int zeroing;
-    int broadcast;
-    int sae;
-    int rounding_mode;
     char *segment_override;
     as_operand_t *operands;
-    size_t operand_count;
-    size_t operand_cap;
+    unsigned short prefixes; /* AS_PREFIX_* */
+    unsigned short pseudo;   /* AS_PSEUDO_* */
+    unsigned char rex_bits;
+    unsigned char opmask;
+    unsigned char broadcast;   /* N of {1toN}, or 0 */
+    signed char rounding_mode; /* -1, or 0 to 3 */
+    unsigned char operand_count;
+    unsigned char operand_cap;
+    unsigned syntax_intel : 1;
+    /* A write mask was written, %k0 or another: opmask is 0 for none
+     * and for %k0, which is no write mask and is refused for one. */
+    unsigned have_opmask : 1;
+    unsigned zeroing : 1;
+    unsigned sae : 1;
     /*
      * A branch to a local label -- a numeric one, or a compiler's .L --
      * that is defined in another section than the branch: the distance
@@ -134,10 +145,10 @@ typedef struct {
      * AS_TARGET_UNDEFINED for a .L label the source does not define at
      * all, which is as far and is another file's symbol besides.
      */
-    unsigned target_in_other_section;
+    unsigned target_in_other_section : 2;
     /* Thumb: the instruction is in an IT block, and so sets no flags
      * that it is not written to set. */
-    unsigned arm_in_it;
+    unsigned arm_in_it : 1;
     /*
      * The instruction's bytes, if it has been encoded already and its
      * operands let go (as_x86_precode()): code_len of them, which are
@@ -168,8 +179,8 @@ typedef struct {
 typedef struct {
     char *name;
     char **args;
-    size_t arg_count;
-    size_t arg_cap;
+    unsigned arg_count;
+    unsigned arg_cap;
     /*
      * Arguments of a data directive that were written empty -- `.byte
      * 1,,2` -- and are zero: GNU as assumes it and warns, and so does
@@ -185,20 +196,28 @@ typedef struct {
     unsigned fill_width;
 } as_directive_t;
 
+/* The most labels one statement may have before it: what the room for
+ * them is kept in. */
+#define AS_STMT_MAX_LABELS 0xffffffu
+
+/*
+ * One statement.  As with the instruction in it, there is one for every
+ * line of the source, and it is 88 bytes on a 64-bit host.
+ */
 typedef struct {
-    as_stmt_kind_t kind;
     char *file;
-    unsigned line;
     as_label_def_t *labels;
-    size_t label_count;
-    size_t label_cap;
+    unsigned line;
+    unsigned label_count;
+    unsigned label_cap : 24;
+    unsigned kind : 8; /* as_stmt_kind_t */
     /*
      * Where the statement stood in the source, counted from 1, when the
      * statements are no longer in that order -- numbered subsections are
      * moved behind the rest of their section -- and 0 when they are.  A
      * numeric label is found by going back or forward in the source.
      */
-    size_t source_seq;
+    unsigned source_seq;
     union {
         as_directive_t directive;
         as_instruction_t instr;
@@ -228,6 +247,13 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
  * feed they were given to.
  */
 typedef struct as_parser as_parser_t;
+/*
+ * Room for `n` statements, for one who knows about how many there will
+ * be: the vector is not then doubled, and copied, on its way there.
+ * Nothing is wrong if there is no such room, or if there are more.
+ */
+void as_parse_result_reserve(as_parse_result_t *r, size_t n);
+
 as_parser_t *as_parse_begin(const as_parser_cfg_t *cfg, as_parse_result_t *out, char *errbuf, size_t errbuf_sz);
 int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count);
 int as_parse_end(as_parser_t *p);

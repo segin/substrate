@@ -1239,6 +1239,16 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
     }
     free(moved);
     free(parsed->items);
+    /* (The room that doubling made and is not used is given back, as
+     * the parser gives its own back: these are kept to the end.) */
+    if (main_v.count != 0 && main_v.count < main_v.cap) {
+        as_stmt_t *fit = (as_stmt_t *)realloc(main_v.items, main_v.count * sizeof(*fit));
+
+        if (fit != NULL) {
+            main_v.items = fit;
+            main_v.cap = main_v.count;
+        }
+    }
     parsed->items = main_v.items;
     parsed->count = main_v.count;
     parsed->cap = main_v.cap;

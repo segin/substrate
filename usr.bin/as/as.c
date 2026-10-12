@@ -3735,15 +3735,21 @@ static int run_native_backend(const as_ctx_t *ctx) {
         as_diag(AS_E_BACKEND, "%s", expand_err[0] != '\0' ? expand_err : "macro/control expansion stage failed");
         goto out;
     }
+    /* Each pass writes the source out again for the next, and what it
+     * read is let go when it has: there were four of the source held
+     * until the object was written. */
+    text_free(&text_source);
     expand_err[0] = '\0';
     if (expand_rept_file(&text_expanded, &text_rept) != 0) {
         as_diag(AS_E_BACKEND, "%s", expand_err[0] != '\0' ? expand_err : "repeat expansion stage failed");
         goto out;
     }
+    text_free(&text_expanded);
     /* It says what is wrong itself. */
     if (filter_gas_conditionals(ctx, &text_rept, &text_cond) != 0) {
         goto out;
     }
+    text_free(&text_rept);
 
     if (collect_include_dirs(ctx, &include_dirs, &include_dir_count) != 0) {
         as_diag(AS_E_INTERNAL, "failed to build include dir list");
@@ -3801,6 +3807,18 @@ static int run_native_backend(const as_ctx_t *ctx) {
             as_diag(AS_E_INTERNAL, "out of memory");
             goto out;
         }
+        /* About a statement a line: the vector of them is made that
+         * long at once, and not by doubling, which had the old one and
+         * the new both there at the largest it got. */
+        {
+            size_t lines = 0;
+            size_t k;
+
+            for (k = 0; k < text_cond.len; ++k) {
+                lines += text_cond.data[k] == '\n';
+            }
+            as_parse_result_reserve(&parsed, lines + 16);
+        }
         sink.parser = parser;
         sink.parsed = &parsed;
         sink.cfg = &ecfg;
@@ -3838,6 +3856,8 @@ static int run_native_backend(const as_ctx_t *ctx) {
         }
         AS_PHASE_END(ctx, "parse");
         as_token_vec_free(&toks);
+        /* (The statements are their own copies of what they say.) */
+        text_free(&text_cond);
     }
     ecfg.report_error = report_emit_error;
     ecfg.line_own_source = (unsigned)(ctx->gen_debug != 0);

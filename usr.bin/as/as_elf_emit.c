@@ -238,7 +238,9 @@ typedef struct {
     struct as_section_prefix_s {
         char *name;
         unsigned x86_code_bits;
-        uint64_t *prefix;
+        /* (Of 32 bits each: there is one for every statement of the
+         * source, for every section that is asked about.) */
+        uint32_t *prefix;
         size_t prefix_count;
     } *section_prefixes;
     size_t section_prefix_count;
@@ -318,7 +320,7 @@ static int parse_x86_reg(const char *name, as_x86_reg_t *out);
 static int build_stmt_section_at(emit_ctx_t *ctx);
 static const as_stmt_t *stmt_fold_label_diffs(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits,
                                               as_stmt_t *tmp, as_operand_t ops[4], as_expr_t consts[4]);
-static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
+static const uint32_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
                                                unsigned x86_code_bits);
 static int parse_xmm_reg(const char *name, unsigned *out);
 static int parse_ymm_reg(const char *name, unsigned *out);
@@ -11358,7 +11360,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         }
         if (most >= 0 && st->u.instr.operand_count > (size_t)most) {
             snprintf(encerr, encerr_sz, "'%s' takes %d operand%s at most, and has %zu", st->u.instr.mnemonic, most,
-                     most == 1 ? "" : "s", st->u.instr.operand_count);
+                     most == 1 ? "" : "s", (size_t)st->u.instr.operand_count);
             return -1;
         }
     }
@@ -11876,7 +11878,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
      */
     if (st->u.instr.operand_count > 3) {
         snprintf(encerr, encerr_sz, "unsupported operand form for '%s': %zu operands", mnbuf,
-                 st->u.instr.operand_count);
+                 (size_t)st->u.instr.operand_count);
         return -1;
     }
     /*
@@ -14015,7 +14017,7 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
         if (target_st != NULL && target_idx < ctx->stmt_section_at_count &&
             ctx->stmt_section_at[target_idx] != NULL) {
             const char *target_section = ctx->stmt_section_at[target_idx];
-            const uint64_t *pfx;
+            const uint32_t *pfx;
             unsigned bits = ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
                             (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u);
             pfx = get_section_prefix_sums(ctx, target_section, bits);
@@ -15281,11 +15283,11 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
  * entries; prefix[i] is the cumulative size of stmts j < i in the named
  * section (under the conservative virtual sizing, i.e. with virtual_scanning
  * incremented so branches degrade to a fixed length). */
-static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
+static const uint32_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
                                                unsigned x86_code_bits) {
     size_t i;
     section_track_t track;
-    uint64_t *prefix;
+    uint32_t *prefix;
     uint64_t total;
     if (ctx == NULL || ctx->parsed == NULL || section_name == NULL) {
         return NULL;
@@ -15314,7 +15316,7 @@ static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *sect
         ctx->section_prefixes = next;
         ctx->section_prefix_cap = ncap;
     }
-    prefix = (uint64_t *)calloc(ctx->parsed->count + 1, sizeof(*prefix));
+    prefix = (uint32_t *)calloc(ctx->parsed->count + 1, sizeof(*prefix));
     if (prefix == NULL) {
         return NULL;
     }
@@ -15345,7 +15347,7 @@ static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *sect
                 return NULL;
             }
             if (trc > 0) {
-                prefix[i + 1] = total;
+                prefix[i + 1] = (uint32_t)total;
                 continue;
             }
         }
@@ -15357,7 +15359,15 @@ static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *sect
                 total += (uint64_t)n;
             }
         }
-        prefix[i + 1] = total;
+        /* (A section of more than 4 GiB has no table: it is walked.) */
+        if (total > UINT32_MAX) {
+            ctx->section_prefix_building = 0;
+            ctx->virtual_scanning--;
+            section_track_free(&track);
+            free(prefix);
+            return NULL;
+        }
+        prefix[i + 1] = (uint32_t)total;
     }
     ctx->section_prefix_building = 0;
     ctx->virtual_scanning--;
@@ -15382,7 +15392,7 @@ static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name,
     section_track_t track;
     uint64_t total = 0;
     size_t i;
-    const uint64_t *prefix;
+    const uint32_t *prefix;
 
     (void)sec_off;
     if (ctx == NULL || section_name == NULL || size_out == NULL || start_idx > end_idx ||

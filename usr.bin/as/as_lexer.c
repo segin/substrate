@@ -886,9 +886,12 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth);
  * line the user knows, which is what a message is given.
  */
 typedef struct {
-    const char *file;
-    /* The macro the line is of the expansion of, or NULL. */
-    const char *macro;
+    /* Which of source_map_files, counted from 1; 0 for a line that has
+     * no place.  (Not the names themselves: there is one of these for
+     * every line of the source.) */
+    unsigned file;
+    /* The macro the line is of the expansion of, the same way, or 0. */
+    unsigned macro;
     unsigned line;
 } source_pos_t;
 
@@ -912,39 +915,43 @@ static int source_map_begin(const char *internal_name) {
     return 0;
 }
 
-/* A name the table keeps: the one it has already, or a copy. */
-static const char *source_map_name_of(const char *name, size_t len) {
+/* A name the table keeps, the one it has already or a copy: which it
+ * is, counted from 1, or 0 for want of memory. */
+static unsigned source_map_name_of(const char *name, size_t len) {
     char **files;
     char *copy;
     size_t i;
 
     for (i = source_map_file_count; i > 0; --i) {
         if (strlen(source_map_files[i - 1]) == len && memcmp(source_map_files[i - 1], name, len) == 0) {
-            return source_map_files[i - 1];
+            return (unsigned)i;
         }
+    }
+    if (source_map_file_count >= UINT_MAX - 1u) {
+        return 0;
     }
     files = (char **)realloc(source_map_files, (source_map_file_count + 1) * sizeof(*files));
     if (files == NULL) {
-        return NULL;
+        return 0;
     }
     source_map_files = files;
     copy = (char *)malloc(len + 1);
     if (copy == NULL) {
-        return NULL;
+        return 0;
     }
     memcpy(copy, name, len);
     copy[len] = '\0';
     source_map_files[source_map_file_count++] = copy;
-    return copy;
+    return (unsigned)source_map_file_count;
 }
 
 static int source_map_add(unsigned line_no, const char *user_file, unsigned user_line) {
     /* The file, and after AS_LEX_MACRO_SEP the macro the line is of. */
     const char *sep = strchr(user_file, AS_LEX_MACRO_SEP);
-    const char *file = source_map_name_of(user_file, sep != NULL ? (size_t)(sep - user_file) : strlen(user_file));
-    const char *macro = sep != NULL ? source_map_name_of(sep + 1, strlen(sep + 1)) : NULL;
+    unsigned file = source_map_name_of(user_file, sep != NULL ? (size_t)(sep - user_file) : strlen(user_file));
+    unsigned macro = sep != NULL ? source_map_name_of(sep + 1, strlen(sep + 1)) : 0;
 
-    if (file == NULL || (sep != NULL && macro == NULL)) {
+    if (file == 0 || (sep != NULL && macro == 0)) {
         return -1;
     }
     if ((size_t)line_no >= source_map_cap) {
@@ -973,10 +980,10 @@ static int source_map_add(unsigned line_no, const char *user_file, unsigned user
 
 int as_source_position(const char *file, unsigned line, const char **file_out, unsigned *line_out) {
     if (file == NULL || source_map_name == NULL || strcmp(file, source_map_name) != 0 ||
-        (size_t)line >= source_map_count || source_map[line].file == NULL) {
+        (size_t)line >= source_map_count || source_map[line].file == 0) {
         return 0;
     }
-    *file_out = source_map[line].file;
+    *file_out = source_map_files[source_map[line].file - 1];
     *line_out = source_map[line].line;
     return 1;
 }
@@ -1033,8 +1040,8 @@ void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
             in++;
             continue;
         }
-        if (macro[0] == '\0' && source_map[line].macro != NULL) {
-            snprintf(macro, sizeof(macro), "%s", source_map[line].macro);
+        if (macro[0] == '\0' && source_map[line].macro != 0) {
+            snprintf(macro, sizeof(macro), "%s", source_map_files[source_map[line].macro - 1]);
         }
         wrote = snprintf(out + n, out_sz - n, "%s:%u", file, user_line);
         if (wrote < 0 || (size_t)wrote >= out_sz - n) {
