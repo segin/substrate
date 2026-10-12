@@ -17,6 +17,10 @@ typedef struct {
     as_section_state_t *out;
     char *errbuf;
     size_t errbuf_sz;
+    /* Which section the source is in, the one before it and what is
+     * pushed: the one tracker of that there is, which the emitter walks
+     * a source with too.  The indices in `out` are where it says. */
+    section_track_t track;
 } sec_ctx_t;
 
 /*
@@ -57,9 +61,6 @@ void as_section_state_init(as_section_state_t *s) {
     s->cap = 0;
     s->current_index = 0;
     s->previous_index = 0;
-    s->stack = NULL;
-    s->stack_count = 0;
-    s->stack_cap = 0;
     s->elf64 = 0;
     memset(&s->by_name, 0, sizeof(s->by_name));
 }
@@ -75,7 +76,6 @@ void as_section_state_free(as_section_state_t *s) {
         free(s->items[i].group);
     }
     free(s->items);
-    free(s->stack);
     as_strmap_free(&s->by_name);
     memset(s, 0, sizeof(*s));
 }
@@ -375,6 +375,196 @@ static void infer_section_defaults(const char *name, unsigned *flags, unsigned *
     }
 }
 
+const char *section_from_directive(const as_directive_t *d) {
+    const char *arg;
+    /* The name out of its quotes, good until the next is asked for; as
+     * long as the name is, where it had been 255 bytes of it. */
+    static char *secbuf;
+    static size_t secbuf_cap;
+    size_t i;
+    size_t n = 0;
+
+    if (d == NULL || d->name == NULL) {
+        return NULL;
+    }
+    if (as_strcmp(d->name, ".text") == 0) return ".text";
+    if (as_strcmp(d->name, ".data") == 0) return ".data";
+    if (as_strcmp(d->name, ".rodata") == 0) return ".rodata";
+    if (as_strcmp(d->name, ".bss") == 0) return ".bss";
+    if ((as_strcmp(d->name, ".section") == 0 || as_strcmp(d->name, ".pushsection") == 0) &&
+        d->arg_count > 0 && d->args[0] != NULL && d->args[0][0] != '\0') {
+        arg = d->args[0];
+        while (*arg != '\0' && isspace((unsigned char)*arg)) {
+            arg++;
+        }
+        if (strlen(arg) + 1 > secbuf_cap) {
+            char *grown = (char *)realloc(secbuf, strlen(arg) + 1);
+
+            if (grown == NULL) {
+                return NULL;
+            }
+            secbuf = grown;
+            secbuf_cap = strlen(arg) + 1;
+        }
+        if (*arg == '"' || *arg == '\'') {
+            char q = *arg++;
+            while (*arg != '\0' && *arg != q && n + 1 < secbuf_cap) {
+                secbuf[n++] = *arg++;
+            }
+            secbuf[n] = '\0';
+            return secbuf;
+        }
+        /* (The argument is the name, all of it: one written in quotes
+         * may have a space in it, and comes here without the quotes.
+         * It was cut at the space, and the section the table of them
+         * has by its whole name was "unknown section".) */
+        for (i = 0; arg[i] != '\0' && n + 1 < secbuf_cap; ++i) {
+            if (arg[i] == ',') {
+                break;
+            }
+            secbuf[n++] = arg[i];
+        }
+        while (n > 0 && isspace((unsigned char)secbuf[n - 1])) {
+            n--;
+        }
+        secbuf[n] = '\0';
+        return n > 0 ? secbuf : NULL;
+    }
+    return NULL;
+}
+
+int section_track_init(section_track_t *st, unsigned initial_code_bits) {
+    if (st == NULL) {
+        return -1;
+    }
+    memset(st, 0, sizeof(*st));
+    st->current = xstrdup(".text");
+    st->previous = xstrdup(".text");
+    st->x86_code_bits = initial_code_bits == 64u ? 64u : (initial_code_bits == 16u ? 16u : 32u);
+    if (st->current == NULL || st->previous == NULL) {
+        free(st->current);
+        free(st->previous);
+        memset(st, 0, sizeof(*st));
+        return -1;
+    }
+    return 0;
+}
+
+void section_track_free(section_track_t *st) {
+    size_t i;
+
+    if (st == NULL) {
+        return;
+    }
+    for (i = 0; i < st->stack_count; ++i) {
+        free(st->stack[i]);
+    }
+    free(st->stack);
+    free(st->current);
+    free(st->previous);
+    memset(st, 0, sizeof(*st));
+}
+
+static int section_track_switch(section_track_t *st, const char *name) {
+    char *next;
+    char *old;
+
+    if (st == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    next = xstrdup(name);
+    if (next == NULL) {
+        return -1;
+    }
+    old = st->current;
+    st->current = next;
+    free(st->previous);
+    st->previous = old;
+    return 0;
+}
+
+static int section_track_push(section_track_t *st) {
+    char **next;
+
+    if (st == NULL || st->current == NULL) {
+        return -1;
+    }
+    /* Two of each push: the section it was written in, and the one
+     * before that, which a .popsection brings back as well. */
+    if (st->stack_count + 2 > st->stack_cap) {
+        size_t ncap = st->stack_cap == 0 ? 8 : st->stack_cap * 2;
+        next = (char **)realloc(st->stack, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        st->stack = next;
+        st->stack_cap = ncap;
+    }
+    st->stack[st->stack_count] = xstrdup(st->current);
+    if (st->stack[st->stack_count] == NULL) {
+        return -1;
+    }
+    st->stack[st->stack_count + 1] = st->previous != NULL ? xstrdup(st->previous) : NULL;
+    if (st->previous != NULL && st->stack[st->stack_count + 1] == NULL) {
+        free(st->stack[st->stack_count]);
+        return -1;
+    }
+    st->stack_count += 2;
+    return 0;
+}
+
+int section_track_apply_directive(section_track_t *st, const as_directive_t *d) {
+    const char *sec_name;
+    char *tmp;
+
+    if (st == NULL || d == NULL || d->name == NULL) {
+        return 0;
+    }
+    if (as_strcmp(d->name, ".previous") == 0) {
+        if (st->previous == NULL) {
+            return 1;
+        }
+        tmp = st->current;
+        st->current = st->previous;
+        st->previous = tmp;
+        return 1;
+    }
+    if (as_strcmp(d->name, ".popsection") == 0) {
+        if (st->stack_count < 2) {
+            return 1;
+        }
+        st->stack_count -= 2;
+        free(st->current);
+        free(st->previous);
+        st->current = st->stack[st->stack_count];
+        st->previous = st->stack[st->stack_count + 1];
+        return 1;
+    }
+    if (as_strcmp(d->name, ".code16") == 0) {
+        st->x86_code_bits = 16u;
+        return 1;
+    }
+    if (as_strcmp(d->name, ".code32") == 0) {
+        st->x86_code_bits = 32u;
+        return 1;
+    }
+    if (as_strcmp(d->name, ".code64") == 0) {
+        st->x86_code_bits = 64u;
+        return 1;
+    }
+    sec_name = section_from_directive(d);
+    if (sec_name == NULL) {
+        return 0;
+    }
+    if (as_strcmp(d->name, ".pushsection") == 0 && section_track_push(st) != 0) {
+        return -1;
+    }
+    if (section_track_switch(st, sec_name) != 0) {
+        return -1;
+    }
+    return 1;
+}
+
 static int switch_section(sec_ctx_t *ctx, const char *name, unsigned subsection,
                           unsigned flags, unsigned type, int update_attrs) {
     ssize_t idx;
@@ -393,25 +583,27 @@ static int switch_section(sec_ctx_t *ctx, const char *name, unsigned subsection,
         s->items[idx].type = type;
     }
 
+    if (section_track_switch(&ctx->track, name) != 0) {
+        return -1;
+    }
     s->previous_index = s->current_index;
     s->current_index = (size_t)idx;
     return 0;
 }
 
-static int stack_push(as_section_state_t *s, size_t idx) {
-    size_t *next;
+/* The indices of the section the tracker is in and of the one before
+ * it: after a .popsection or a .previous, which name no section. */
+static void follow_track(sec_ctx_t *ctx) {
+    as_section_state_t *s = ctx->out;
+    ssize_t cur = ctx->track.current != NULL ? find_section_index(s, ctx->track.current, 0) : -1;
+    ssize_t prev = ctx->track.previous != NULL ? find_section_index(s, ctx->track.previous, 0) : -1;
 
-    if (s->stack_count == s->stack_cap) {
-        size_t ncap = s->stack_cap == 0 ? 8 : s->stack_cap * 2;
-        next = (size_t *)realloc_array(s->stack, ncap, sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        s->stack = next;
-        s->stack_cap = ncap;
+    if (cur >= 0) {
+        s->current_index = (size_t)cur;
     }
-    s->stack[s->stack_count++] = idx;
-    return 0;
+    if (prev >= 0) {
+        s->previous_index = (size_t)prev;
+    }
 }
 
 /*
@@ -447,7 +639,7 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
 
     /* The section it is written in and the one before: a .popsection
      * brings both back. */
-    if (do_push && (stack_push(s, s->current_index) != 0 || stack_push(s, s->previous_index) != 0)) {
+    if (do_push && section_track_push(&ctx->track) != 0) {
         return -1;
     }
 
@@ -650,18 +842,18 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
     if (strcmp(d->name, ".popsection") == 0) {
         /* One with nothing pushed is warned of and taken out before
          * this (as_directives_lower). */
-        if (s->stack_count < 2) {
-            return 0;
+        if (section_track_apply_directive(&ctx->track, d) < 0) {
+            return -1;
         }
-        s->previous_index = s->stack[--s->stack_count];
-        s->current_index = s->stack[--s->stack_count];
+        follow_track(ctx);
         return 0;
     }
 
     if (strcmp(d->name, ".previous") == 0) {
-        size_t tmp = s->current_index;
-        s->current_index = s->previous_index;
-        s->previous_index = tmp;
+        if (section_track_apply_directive(&ctx->track, d) < 0) {
+            return -1;
+        }
+        follow_track(ctx);
         return 0;
     }
 
@@ -1272,6 +1464,7 @@ int as_sections_build(const as_parse_result_t *parsed, as_section_state_t *out,
                       char *errbuf, size_t errbuf_sz) {
     sec_ctx_t ctx;
     size_t i;
+    int rc = 0;
 
     if (parsed == NULL || out == NULL) {
         return -1;
@@ -1285,12 +1478,12 @@ int as_sections_build(const as_parse_result_t *parsed, as_section_state_t *out,
         errbuf[0] = '\0';
     }
 
-    if (ensure_builtins(out) != 0) {
+    if (ensure_builtins(out) != 0 || section_track_init(&ctx.track, 32u) != 0) {
         set_err(&ctx, "section state init failed");
         return -1;
     }
 
-    for (i = 0; i < parsed->count; ++i) {
+    for (i = 0; i < parsed->count && rc == 0; ++i) {
         const as_stmt_t *st = &parsed->items[i];
         if (st->kind != AS_STMT_DIRECTIVE) {
             continue;
@@ -1299,16 +1492,20 @@ int as_sections_build(const as_parse_result_t *parsed, as_section_state_t *out,
         case 0:
             break;
         case SEC_SAID:
-            return -1;
+            rc = -1;
+            break;
         case SEC_NO_SUBSECTIONS:
             set_err(&ctx, "%s:%u: %s: subsections other than 0 are not supported",
                     st->file, st->line, st->u.directive.name);
-            return -1;
+            rc = -1;
+            break;
         default:
             set_err(&ctx, "%s:%u: malformed section directive %s", st->file, st->line, st->u.directive.name);
-            return -1;
+            rc = -1;
+            break;
         }
     }
 
-    return 0;
+    section_track_free(&ctx.track);
+    return rc;
 }

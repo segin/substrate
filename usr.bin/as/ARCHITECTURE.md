@@ -17,7 +17,7 @@ usr.bin/as/
 ├── as_lower.c               # Directives made the few the rest stores; ARM's own made x86's (as_arm_lower)
 ├── as_util.c                # The helpers every file had its own of: xstrdup, streq_ci, trim_copy, as_errf
 ├── as_symtab.c              # Symbols: definition, binding, type, aliases
-├── as_sections.c            # Sections, the section stack, subsections, the code mode
+├── as_sections.c            # Sections, subsections, and the one tracker of which section a source is in
 ├── as_data.c                # What data directives are written in: string literals, LEB128
 ├── as_elf_emit.c            # The object writer: its phases, the relocations, the data and text of each section
 ├── as_layout.c              # Where everything is: sections, offsets, labels, the sizing of branches

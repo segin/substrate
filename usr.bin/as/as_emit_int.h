@@ -275,15 +275,6 @@ typedef struct {
     as_strmap_t by_name; /* a section's name to its place in items */
 } sec_buf_vec_t;
 
-typedef struct {
-    char *current;
-    char *previous;
-    unsigned x86_code_bits;
-    char **stack;
-    size_t stack_count;
-    size_t stack_cap;
-} section_track_t;
-
 /*
  * What as_elf_emit.c has that the writer of a flat binary uses too:
  * the buffer of bytes, the padding of an alignment, the evaluation of
@@ -291,7 +282,6 @@ typedef struct {
  * stands.
  */
 char *trim_copy_arg(const char *s);
-const char *section_from_directive(const as_directive_t *d);
 int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out);
 int parse_int64(const char *s, long long *out);
 int parse_const_expr_string(const char *s, long long *out);
@@ -425,9 +415,6 @@ elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name);
 int section_name_is_executable(emit_ctx_t *ctx, const char *name);
 const char *section_name_keep(emit_ctx_t *ctx, const char *name);
 void section_remember(emit_ctx_t *ctx, const char *name, elf_section_t *sec);
-int section_track_apply_directive(section_track_t *st, const as_directive_t *d);
-void section_track_free(section_track_t *st);
-int section_track_init(section_track_t *st, unsigned initial_code_bits);
 int stmt_is_place_free(const as_stmt_t *st);
 int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len);
 void text_code_free(void);

@@ -27,9 +27,6 @@ typedef struct {
     size_t cap;
     size_t current_index;
     size_t previous_index;
-    size_t *stack;
-    size_t stack_count;
-    size_t stack_cap;
     /* Set by the caller before as_sections_build(), for an ELF64 object:
      * a section type may mean another thing there. */
     int elf64;
@@ -37,6 +34,20 @@ typedef struct {
      * -- which is all there are once subsections are gathered. */
     as_strmap_t by_name;
 } as_section_state_t;
+
+typedef struct {
+    char *current;
+    char *previous;
+    unsigned x86_code_bits;
+    char **stack;
+    size_t stack_count;
+    size_t stack_cap;
+} section_track_t;
+
+const char *section_from_directive(const as_directive_t *d);
+int section_track_apply_directive(section_track_t *st, const as_directive_t *d);
+void section_track_free(section_track_t *st);
+int section_track_init(section_track_t *st, unsigned initial_code_bits);
 
 void as_section_state_init(as_section_state_t *s);
 void as_section_state_free(as_section_state_t *s);
