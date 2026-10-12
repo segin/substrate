@@ -10832,11 +10832,11 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
      * asked of it first, in 64-bit code: what the table has no row for,
      * or cannot read, is the instruction it always was.
      */
-    if (!as_x86_vec_knows(mn) && as_x86_vec_has_apx(mn)) {
+    if (cfg->is_64 && n >= 1 && as_x86_vec_has_apx(mn, n)) {
         static int asking;
         int rc;
 
-        if (!cfg->is_64 || asking || n < 1) {
+        if (asking) {
             return 0;
         }
         asking = 1;

@@ -159,8 +159,9 @@ int as_x86_vec_knows(const char *mnemonic);
 /* Whether the table has APX's forms of an instruction that is
  * otherwise assembled elsewhere (`add` with three operands).  Such a
  * name is not one as_x86_vec_knows() says yes to; as_x86_vec_encode()
- * gives 0 for it where no row is of the operands. */
-int as_x86_vec_has_apx(const char *mnemonic);
+ * gives 0 for it where no row is of the operands.  `op_count` is how
+ * many operands the statement has: 0 if no such form has as many. */
+int as_x86_vec_has_apx(const char *mnemonic, size_t op_count);
 
 /*
  * 1 with the instruction in out[0 .. *out_len), 0 if the mnemonic is

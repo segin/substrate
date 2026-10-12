@@ -197,11 +197,22 @@ int as_x86_vec_knows(const char *mnemonic) {
     return alias_of(mnemonic, base, sizeof(base), &imm) == 0 && find_rows(base, &first) == 0;
 }
 
-int as_x86_vec_has_apx(const char *mnemonic) {
+int as_x86_vec_has_apx(const char *mnemonic, size_t op_count) {
     size_t first;
+    size_t i;
 
-    return mnemonic != NULL && find_rows(mnemonic, &first) == 0 &&
-           (as_x86_vec_table[first].flags & AS_VEC_F_APX) != 0;
+    if (mnemonic == NULL || find_rows(mnemonic, &first) != 0 || (as_x86_vec_table[first].flags & AS_VEC_F_APX) == 0) {
+        return 0;
+    }
+    /* (Most statements of such a name are not APX's, and are told by
+     * how many operands they have: `add` of two is none of these.) */
+    for (i = first; i < as_x86_vec_table_count && (i == first || strcmp(as_x86_vec_table[i].name, mnemonic) == 0);
+         ++i) {
+        if (strlen(as_x86_vec_table[i].ops) == op_count) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int is_vector_class(unsigned cls) {
