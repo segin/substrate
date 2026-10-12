@@ -10,13 +10,30 @@ typedef struct {
      * whether what was last put in the section was data. */
     unsigned code_bits;
     int after_data;
+    /* Where in the image the section begins, once it has been put. */
+    size_t base;
     bytebuf_t buf;
 } bin_section_t;
+
+/* A number in the image that is a place in it: `.long label`.  Where a
+ * section begins is not known until all of them are written, so what is
+ * known is kept -- which section, how far into it -- and the number is
+ * written when the image is put together. */
+typedef struct {
+    size_t field_section;
+    size_t field_off;
+    unsigned width;
+    size_t target_section;
+    long long target_off;
+} bin_patch_t;
 
 typedef struct {
     bin_section_t *items;
     size_t count;
     size_t cap;
+    bin_patch_t *patches;
+    size_t patch_count;
+    size_t patch_cap;
 } bin_section_vec_t;
 
 static void bin_section_vec_free(bin_section_vec_t *v) {
@@ -30,6 +47,7 @@ static void bin_section_vec_free(bin_section_vec_t *v) {
         free(v->items[i].buf.data);
     }
     free(v->items);
+    free(v->patches);
     memset(v, 0, sizeof(*v));
 }
 
@@ -144,8 +162,31 @@ static bin_section_t *bin_section_get_or_add(bin_section_vec_t *v, const char *n
  * is the distance between two labels is that; what is a label is how
  * far it is from the number; and a symbol of nowhere is 0.
  */
-static int flat_scalar_values(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, const as_directive_t *d,
-                              size_t at) {
+static int flat_patch_push(bin_section_vec_t *v, const bin_section_t *sec, size_t field_off, unsigned width,
+                           size_t target_section, long long target_off) {
+    bin_patch_t *p;
+
+    if (v->patch_count == v->patch_cap) {
+        size_t cap = v->patch_cap != 0 ? v->patch_cap * 2 : 16;
+        bin_patch_t *grown = (bin_patch_t *)realloc(v->patches, cap * sizeof(*grown));
+
+        if (grown == NULL) {
+            return -1;
+        }
+        v->patches = grown;
+        v->patch_cap = cap;
+    }
+    p = &v->patches[v->patch_count++];
+    p->field_section = (size_t)(sec - v->items);
+    p->field_off = field_off;
+    p->width = width;
+    p->target_section = target_section;
+    p->target_off = target_off;
+    return 0;
+}
+
+static int flat_scalar_values(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_vec_t *vec, bin_section_t *sec,
+                              const as_directive_t *d, size_t at) {
     unsigned width = directive_fixed_scalar_width(d);
     size_t i;
 
@@ -165,16 +206,47 @@ static int flat_scalar_values(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_
                         d->args[i] != NULL ? d->args[i] : "");
                 return -1;
             }
-            if ((eval_abs_local_diff_expr_virtual(ctx, st, expr, &v) != 0 &&
-                 /* (From where the number is and as far again on:
-                  * what this writer has always made of a label, kept
-                  * as it was while the emitters are made one.  It is
-                  * no address.) */
-                 eval_local_rel_expr_virtual(ctx, sec->name, st, at + (uint64_t)(2 * i * width),
-                                             ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u, expr, &v) != 0)) {
-                /* (A symbol of nowhere, or what the emitter made of
-                 * it: left as it is.) */
+            if (eval_abs_local_diff_expr_virtual(ctx, st, expr, &v) != 0) {
+                unsigned bits = ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u;
+                size_t field_off = at + i * width;
+                size_t k;
+                long long from_start = 0;
+                long long from_field = 0;
+                int found = 0;
+
+                /*
+                 * A place: a label and what is added to it, or `.`.
+                 * The evaluator gives a label as its distance from a
+                 * place named to it and `.` as none, so it is asked
+                 * from the start of each section and again from the
+                 * number: the answers differ for a label, which is
+                 * then that far into the section, and are the same for
+                 * `.`, which is the number's own place.  (This wrote
+                 * a label as its distance from the number, and further
+                 * with each number of the directive: no address.)
+                 */
+                for (k = 0; k < vec->count && !found; ++k) {
+                    if (eval_local_rel_expr_virtual(ctx, vec->items[k].name, st, 0, bits, expr, &from_start) == 0 &&
+                        eval_local_rel_expr_virtual(ctx, vec->items[k].name, st, 1, bits, expr, &from_field) == 0) {
+                        found = 1;
+                        if (from_start == from_field) {
+                            if (flat_patch_push(vec, sec, field_off, width, (size_t)(sec - vec->items),
+                                                (long long)field_off + from_start) != 0) {
+                                as_expr_free(expr);
+                                return -1;
+                            }
+                        } else if (flat_patch_push(vec, sec, field_off, width, k, from_start) != 0) {
+                            as_expr_free(expr);
+                            return -1;
+                        }
+                    }
+                }
                 as_expr_free(expr);
+                if (!found) {
+                    set_err(ctx, "%s:%u: '%s' is no place in the image: a flat image has no relocations",
+                            st->file != NULL ? st->file : "<input>", st->line, d->args[i]);
+                    return -1;
+                }
                 continue;
             }
             as_expr_free(expr);
@@ -196,7 +268,8 @@ static int flat_scalar_values(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_
  * space, the fills, the alignments and `.org` over again, 330 lines,
  * to be kept in step with the other by hand.
  */
-static int append_data_directive_flat(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, int *handled) {
+static int append_data_directive_flat(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_vec_t *vec,
+                                      bin_section_t *sec, int *handled) {
     const as_directive_t *d;
     size_t before;
     int rc;
@@ -214,7 +287,7 @@ static int append_data_directive_flat(emit_ctx_t *ctx, const as_stmt_t *st, bin_
     ctx->pad_after_data = sec->after_data;
     rc = append_directive_data_ctx(ctx, &sec->buf, sec->name, st, (uint64_t)sec->buf.len, sec->code_bits, d);
     ctx->pad_after_data = 0;
-    if (rc > 0 && flat_scalar_values(ctx, st, sec, d, before) != 0) {
+    if (rc > 0 && flat_scalar_values(ctx, st, vec, sec, d, before) != 0) {
         return -1;
     }
     if (rc < 0) {
@@ -259,7 +332,7 @@ static int is_binary_metadata_directive(const char *name) {
     return 0;
 }
 
-static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const char *out_path) {
+static int write_binary_file(emit_ctx_t *ctx, bin_section_vec_t *v, const char *out_path) {
     static const char *const first_order[] = {".text", ".rodata", ".data"};
     bytebuf_t out;
     size_t i;
@@ -275,13 +348,14 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
     for (i = 0; i < sizeof(first_order) / sizeof(first_order[0]); ++i) {
         size_t j;
         for (j = 0; j < v->count; ++j) {
-            const bin_section_t *s = &v->items[j];
+            bin_section_t *s = &v->items[j];
             size_t align;
             size_t need;
             if (used[j] || as_strcmp(s->name, first_order[i]) != 0) {
                 continue;
             }
             if (s->buf.len == 0 && !s->touched) {
+                s->base = out.len;
                 used[j] = 1;
                 continue;
             }
@@ -295,6 +369,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
                 free(out.data);
                 return -1;
             }
+            s->base = out.len;
             if (s->type == SHT_NOBITS) {
                 if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
                     free(used);
@@ -311,13 +386,14 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
     }
 
     for (i = 0; i < v->count; ++i) {
-        const bin_section_t *s = &v->items[i];
+        bin_section_t *s = &v->items[i];
         size_t align;
         size_t need;
         if (used[i] || as_strcmp(s->name, ".bss") == 0) {
             continue;
         }
         if (s->buf.len == 0 && !s->touched) {
+            s->base = out.len;
             used[i] = 1;
             continue;
         }
@@ -331,6 +407,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
             free(out.data);
             return -1;
         }
+        s->base = out.len;
         if (s->type == SHT_NOBITS) {
             if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
                 free(used);
@@ -346,13 +423,14 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
     }
 
     for (i = 0; i < v->count; ++i) {
-        const bin_section_t *s = &v->items[i];
+        bin_section_t *s = &v->items[i];
         size_t align;
         size_t need;
         if (used[i] || as_strcmp(s->name, ".bss") != 0) {
             continue;
         }
         if (s->buf.len == 0 && !s->touched) {
+            s->base = out.len;
             used[i] = 1;
             continue;
         }
@@ -366,6 +444,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
             free(out.data);
             return -1;
         }
+        s->base = out.len;
         if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
             free(used);
             free(out.data);
@@ -375,6 +454,22 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
     }
 
     free(used);
+    /* The numbers that are places in the image, now that each section
+     * has one. */
+    for (i = 0; i < v->patch_count; ++i) {
+        const bin_patch_t *p = &v->patches[i];
+        const bin_section_t *in = &v->items[p->field_section];
+        unsigned long long value = (unsigned long long)((long long)v->items[p->target_section].base + p->target_off);
+        size_t at = in->base + p->field_off;
+        unsigned k;
+
+        if (in->type == SHT_NOBITS || at + p->width > out.len) {
+            continue;
+        }
+        for (k = 0; k < p->width; ++k) {
+            out.data[at + k] = (unsigned char)((value >> (k * 8u)) & 0xffu);
+        }
+    }
     fp = fopen(out_path, "wb");
     if (fp == NULL) {
         free(out.data);
@@ -472,7 +567,7 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
                              as_strcmp(d->name, ".p2align") == 0;
 
                 sec->code_bits = cur_code_bits;
-                if (append_data_directive_flat(&ctx, st, sec, &handled) != 0) {
+                if (append_data_directive_flat(&ctx, st, &sv, sec, &handled) != 0) {
                     goto fail;
                 }
                 if (!aligns && sec->buf.len != before) {

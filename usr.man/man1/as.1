@@ -185,6 +185,10 @@ is the default and emits ET_REL objects.
 emits flat raw bytes with section-layout policy
 .Pq .text , .rodata , .data , then .bss .
 Binary mode rejects unresolved relocations and ELF-only metadata directives.
+The image begins at address 0: a label written as data
+.Pq Li ".long label"
+is its offset from the start of the image, in whichever section it is,
+and a symbol the source does not define is an error.
 .It Fl msyntax Ns = Ns Ar att|intel
 Select the x86 syntax the source begins in.
 An

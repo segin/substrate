@@ -58,7 +58,37 @@ if [ "$got" != "$want" ]; then
     fail=1
 fi
 
-# What is no expression is said, and a place behind this one is.
+# A label written as data is its place in the image, whichever section
+# it is in, and `.` is the number's own.  (It was the label's distance
+# from the number.)
+cat > p.s <<'EOF'
+	.text
+a:	nop
+b:	ret
+	.long a, b, b+4, ., 1f
+	.word b
+1:	.quad d, e-2
+	.byte b
+	.data
+d:	.long a
+e:	.long d, e, .
+	.section .x,"a"
+	.long 1b, e
+EOF
+want=90c30000000001000000050000000e00000018000000010029000000000000002b000000000000000100000000290000002d00000035000000180000002d000000
+if ! "$AS" --64 -O binary -o p.bin p.s 2> err; then
+    echo "FAIL: labels as data: $(head -1 err)"
+    fail=1
+else
+    got=$(od -An -v -tx1 p.bin | tr -d ' \n')
+    if [ "$got" != "$want" ]; then
+        echo "FAIL: labels as data: the image is $got"
+        fail=1
+    fi
+fi
+
+# What is no expression is said, and a place behind this one is, and a
+# symbol of nowhere.
 refused() {
     printf '\t.text\nq:\tnop\n\tnop\n\t%s\n' "$1" > e.s
     if "$AS" --64 -O binary -o e.bin e.s 2> err; then
@@ -68,6 +98,7 @@ refused() {
 }
 refused '.long 1+'
 refused '.org 1'
+refused '.long nowhere'
 
 [ "$fail" = 0 ] && echo "ok: data directives in a flat image"
 exit "$fail"
