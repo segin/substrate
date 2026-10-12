@@ -1658,8 +1658,14 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "data16")) {
         return AS_PREFIX_DATA16;
     }
-    if (streq_ci(s, "addr16") || streq_ci(s, "addr32")) {
+    if (streq_ci(s, "data32")) {
+        return AS_PREFIX_DATA16 | AS_PREFIX_DATA_32;
+    }
+    if (streq_ci(s, "addr16")) {
         return AS_PREFIX_ADDR16;
+    }
+    if (streq_ci(s, "addr32")) {
+        return AS_PREFIX_ADDR16 | AS_PREFIX_ADDR_32;
     }
     /*
      * notrack: the byte 3E before an indirect jmp or call, which tells a

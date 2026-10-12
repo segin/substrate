@@ -72,6 +72,12 @@ typedef struct {
 /* xacquire or xrelease: with AS_PREFIX_REPNE or AS_PREFIX_REP, whose
  * byte it is, and saying that it is no repeat. */
 #define AS_PREFIX_HLE (1u << 8)
+/* With AS_PREFIX_ADDR16, which is the address-size prefix by either
+ * name: the name written was `addr32`.  A mode has the one that is
+ * not its own size. */
+#define AS_PREFIX_ADDR_32 (1u << 9)
+/* And the same of the operand-size prefix: `data32`. */
+#define AS_PREFIX_DATA_32 (1u << 10)
 
 /*
  * The pseudo-prefixes, written in braces before an x86 instruction, that

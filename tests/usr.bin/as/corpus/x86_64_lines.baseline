@@ -1,13 +1,8 @@
 # Lines of x86_64_lines.txt that this assembler and GNU as assemble differently.
 # Written by gnu-diff.py --write-baseline; see test_gnu_differential.sh.
-leal %fs:sym@TPOFF,%edx
-leal sym@GOT(%rax),%edx
-leal sym@TPOFF(%rax),%edx
-leal sym@DTPOFF(%rax),%edx
 movl %eax,(%r16)
 movl (%r16),%ecx
 leal (%r16),%edx
-fldl sym(%eip)
 movb $1,(%r16)
 movw $0x1234,(%r16)
 movl $0x12345678,(%r16)
@@ -41,19 +36,11 @@ leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
 .globl gf | gf: nop | jmp gf
 .globl gf | gf: nop | je gf
-movsxd %ax,%bx
 imulw %bx,%ax,%bx
 imull %ebx,%eax,%ebx
 imulq %rbx,%rax,%rbx
 ds call sym
-es movsb
-addr32 movl %eax,(%rax)
-addr16 nop
-data16 jmp sym
-addr32 jecxz 1f | 1:
 seta %eax
-call .
-call .+5
 int $sym
 ret $sym
 movsl (%rdi),%es:(%rsi)

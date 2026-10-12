@@ -1,0 +1,901 @@
+32	660f38f607	.code16; adcx (%bx),%eax
+32	67660f38f600	.code16; adcx (%eax),%eax
+32	660f38f6060000/R_386_16@5:sym	.code16; adcx sym,%eax
+32	67660f38f60578563412	.code16; addr32 adcx 0x12345678,%eax
+32	67660f38f60500000000/R_386_32@6:sym	.code16; addr32 adcx sym,%eax
+32	6766010578563412	.code16; addr32 addl %eax,0x12345678
+32	6766010500000000/R_386_32@4:sym	.code16; addr32 addl %eax,sym
+32	678105785634123412	.code16; addr32 addw $0x1234,0x12345678
+32	678105000000003412/R_386_32@3:sym	.code16; addr32 addw $0x1234,sym
+32	670fba257856341201	.code16; addr32 bt $1,0x12345678
+32	670fba250000000001/R_386_32@4:sym	.code16; addr32 bt $1,sym
+32	67ff1578563412	.code16; addr32 call *0x12345678
+32	67ff1500000000/R_386_32@3:sym	.code16; addr32 call *sym
+32	670fae3d78563412	.code16; addr32 clflush 0x12345678
+32	670fae3d00000000/R_386_32@4:sym	.code16; addr32 clflush sym
+32	67660f440578563412	.code16; addr32 cmove 0x12345678,%eax
+32	67660f440500000000/R_386_32@5:sym	.code16; addr32 cmove sym,%eax
+32	67660fb10578563412	.code16; addr32 cmpxchg %eax,0x12345678
+32	67660fb10500000000/R_386_32@5:sym	.code16; addr32 cmpxchg %eax,sym
+32	670fc70d78563412	.code16; addr32 cmpxchg8b 0x12345678
+32	670fc70d00000000/R_386_32@4:sym	.code16; addr32 cmpxchg8b sym
+32	6766f20f38f10578563412	.code16; addr32 crc32l 0x12345678,%eax
+32	6766f20f38f10500000000/R_386_32@7:sym	.code16; addr32 crc32l sym,%eax
+32	67d80578563412	.code16; addr32 fadds 0x12345678
+32	67d80500000000/R_386_32@3:sym	.code16; addr32 fadds sym
+32	67df2578563412	.code16; addr32 fbld 0x12345678
+32	67df2500000000/R_386_32@3:sym	.code16; addr32 fbld sym
+32	67db0578563412	.code16; addr32 fildl 0x12345678
+32	67db0500000000/R_386_32@3:sym	.code16; addr32 fildl sym
+32	67db0d78563412	.code16; addr32 fisttpl 0x12345678
+32	67db0d00000000/R_386_32@3:sym	.code16; addr32 fisttpl sym
+32	67d92d78563412	.code16; addr32 fldcw 0x12345678
+32	67d92d00000000/R_386_32@3:sym	.code16; addr32 fldcw sym
+32	67dd0578563412	.code16; addr32 fldl 0x12345678
+32	67dd0500000000/R_386_32@3:sym	.code16; addr32 fldl sym
+32	67d93d78563412	.code16; addr32 fnstcw 0x12345678
+32	67d93d00000000/R_386_32@3:sym	.code16; addr32 fnstcw sym
+32	67d91d78563412	.code16; addr32 fstps 0x12345678
+32	67d91d00000000/R_386_32@3:sym	.code16; addr32 fstps sym
+32	670fae0578563412	.code16; addr32 fxsave 0x12345678
+32	670fae0500000000/R_386_32@4:sym	.code16; addr32 fxsave sym
+32	67666b057856341203	.code16; addr32 imul $3,0x12345678,%eax
+32	67666b050000000003/R_386_32@4:sym	.code16; addr32 imul $3,sym,%eax
+32	6766ff0578563412	.code16; addr32 incl 0x12345678
+32	6766ff0500000000/R_386_32@4:sym	.code16; addr32 incl sym
+32	670f013d78563412	.code16; addr32 invlpg 0x12345678
+32	670f013d00000000/R_386_32@4:sym	.code16; addr32 invlpg sym
+32	67ff2578563412	.code16; addr32 jmp *0x12345678
+32	67ff2500000000/R_386_32@3:sym	.code16; addr32 jmp *sym
+32	67668d0578563412	.code16; addr32 leal 0x12345678,%eax
+32	67668d0500000000/R_386_32@4:sym	.code16; addr32 leal sym,%eax
+32	6766f0ff0578563412	.code16; addr32 lock incl 0x12345678
+32	6766f0ff0500000000/R_386_32@5:sym	.code16; addr32 lock incl sym
+32	670f290d78563412	.code16; addr32 movaps %xmm1,0x12345678
+32	670f290d00000000/R_386_32@4:sym	.code16; addr32 movaps %xmm1,sym
+32	67a078563412	.code16; addr32 movb 0x12345678,%al
+32	67a000000000/R_386_32@2:sym	.code16; addr32 movb sym,%al
+32	67660f38f00578563412	.code16; addr32 movbe 0x12345678,%eax
+32	67660f38f00500000000/R_386_32@6:sym	.code16; addr32 movbe sym,%eax
+32	6766c7057856341201000000	.code16; addr32 movl $1,0x12345678
+32	6766c7050000000001000000/R_386_32@4:sym	.code16; addr32 movl $1,sym
+32	6766a378563412	.code16; addr32 movl %eax,0x12345678
+32	6766a300000000/R_386_32@3:sym	.code16; addr32 movl %eax,sym
+32	6766a178563412	.code16; addr32 movl 0x12345678,%eax
+32	67668b1d78563412	.code16; addr32 movl 0x12345678,%ebx
+32	6766a100000000/R_386_32@3:sym	.code16; addr32 movl sym,%eax
+32	67668b1d00000000/R_386_32@4:sym	.code16; addr32 movl sym,%ebx
+32	670fc30578563412	.code16; addr32 movnti %eax,0x12345678
+32	670fc30500000000/R_386_32@4:sym	.code16; addr32 movnti %eax,sym
+32	67f30f100578563412	.code16; addr32 movss 0x12345678,%xmm0
+32	67f30f100500000000/R_386_32@5:sym	.code16; addr32 movss sym,%xmm0
+32	67a378563412	.code16; addr32 movw %ax,0x12345678
+32	67a300000000/R_386_32@2:sym	.code16; addr32 movw %ax,sym
+32	678b1d78563412	.code16; addr32 movw 0x12345678,%bx
+32	678b1d00000000/R_386_32@3:sym	.code16; addr32 movw sym,%bx
+32	67660fb60578563412	.code16; addr32 movzbl 0x12345678,%eax
+32	67660fb60500000000/R_386_32@5:sym	.code16; addr32 movzbl sym,%eax
+32	670ffc0578563412	.code16; addr32 paddb 0x12345678,%mm0
+32	670ffc0500000000/R_386_32@4:sym	.code16; addr32 paddb sym,%mm0
+32	6766f30fb80578563412	.code16; addr32 popcnt 0x12345678,%eax
+32	6766f30fb80500000000/R_386_32@6:sym	.code16; addr32 popcnt sym,%eax
+32	670f180d78563412	.code16; addr32 prefetcht0 0x12345678
+32	670f180d00000000/R_386_32@4:sym	.code16; addr32 prefetcht0 sym
+32	6766ff3578563412	.code16; addr32 pushl 0x12345678
+32	6766ff3500000000/R_386_32@4:sym	.code16; addr32 pushl sym
+32	670f950578563412	.code16; addr32 setne 0x12345678
+32	670f950500000000/R_386_32@4:sym	.code16; addr32 setne sym
+32	670f010578563412	.code16; addr32 sgdt 0x12345678
+32	670f010500000000/R_386_32@4:sym	.code16; addr32 sgdt sym
+32	6766d12578563412	.code16; addr32 shll 0x12345678
+32	6766d12500000000/R_386_32@4:sym	.code16; addr32 shll sym
+32	67f6057856341201	.code16; addr32 testb $1,0x12345678
+32	67f6050000000001/R_386_32@3:sym	.code16; addr32 testb $1,sym
+32	67c5fc580d78563412	.code16; addr32 vaddps 0x12345678,%ymm0,%ymm1
+32	67c5fc580d00000000/R_386_32@5:sym	.code16; addr32 vaddps sym,%ymm0,%ymm1
+32	6766870578563412	.code16; addr32 xchg %eax,0x12345678
+32	6766870500000000/R_386_32@4:sym	.code16; addr32 xchg %eax,sym
+32	f30f38f607	.code16; adox (%bx),%eax
+32	67f30f38f600	.code16; adox (%eax),%eax
+32	f30f38f6060000/R_386_16@5:sym	.code16; adox sym,%eax
+32	6625ffffff7f	.code16; andl $0x7fffffff,%eax
+32	6307	.code16; arpl %ax,(%bx)
+32	676300	.code16; arpl %ax,(%eax)
+32	63060000/R_386_16@2:sym	.code16; arpl %ax,sym
+32	6207	.code16; bound %ax,(%bx)
+32	676200	.code16; bound %ax,(%eax)
+32	62060000/R_386_16@2:sym	.code16; bound %ax,sym
+32	666207	.code16; bound %eax,(%bx)
+32	67666200	.code16; bound %eax,(%eax)
+32	6662060000/R_386_16@3:sym	.code16; bound %eax,sym
+32	6207	.code16; boundw %ax,(%bx)
+32	676200	.code16; boundw %ax,(%eax)
+32	62060000/R_386_16@2:sym	.code16; boundw %ax,sym
+32	660fbc07	.code16; bsf (%bx),%eax
+32	67660fbc00	.code16; bsf (%eax),%eax
+32	660fbc060000/R_386_16@4:sym	.code16; bsf sym,%eax
+32	0fbc07	.code16; bsfw (%bx),%ax
+32	670fbc00	.code16; bsfw (%eax),%ax
+32	0fbc060000/R_386_16@3:sym	.code16; bsfw sym,%ax
+32	0fbd07	.code16; bsr (%bx),%ax
+32	660fbd07	.code16; bsr (%bx),%eax
+32	670fbd00	.code16; bsr (%eax),%ax
+32	67660fbd00	.code16; bsr (%eax),%eax
+32	0fbd060000/R_386_16@3:sym	.code16; bsr sym,%ax
+32	660fbd060000/R_386_16@4:sym	.code16; bsr sym,%eax
+32	660fbd07	.code16; bsrl (%bx),%eax
+32	67660fbd00	.code16; bsrl (%eax),%eax
+32	660fbd060000/R_386_16@4:sym	.code16; bsrl sym,%eax
+32	660fc8	.code16; bswap %eax
+32	660fcb	.code16; bswap %ebx
+32	0fa3c3	.code16; bt %ax,%bx
+32	0fa307	.code16; bt %ax,(%bx)
+32	670fa300	.code16; bt %ax,(%eax)
+32	0fa3060000/R_386_16@3:sym	.code16; bt %ax,sym
+32	660fa3c3	.code16; bt %eax,%ebx
+32	660fbaf803	.code16; btc $3,%eax
+32	0fbb07	.code16; btcw %ax,(%bx)
+32	670fbb00	.code16; btcw %ax,(%eax)
+32	0fbb060000/R_386_16@3:sym	.code16; btcw %ax,sym
+32	660fba2701	.code16; btl $1,(%bx)
+32	67660fba2001	.code16; btl $1,(%eax)
+32	660fba26000001/R_386_16@4:sym	.code16; btl $1,sym
+32	0fb3c3	.code16; btr %ax,%bx
+32	660fb307	.code16; btrl %eax,(%bx)
+32	67660fb300	.code16; btrl %eax,(%eax)
+32	660fb3060000/R_386_16@4:sym	.code16; btrl %eax,sym
+32	0fab07	.code16; bts %ax,(%bx)
+32	670fab00	.code16; bts %ax,(%eax)
+32	0fab060000/R_386_16@3:sym	.code16; bts %ax,sym
+32	660fab07	.code16; bts %eax,(%bx)
+32	67660fab00	.code16; bts %eax,(%eax)
+32	660fab060000/R_386_16@4:sym	.code16; bts %eax,sym
+32	660fba2f02	.code16; btsl $2,(%bx)
+32	67660fba2802	.code16; btsl $2,(%eax)
+32	660fba2e000002/R_386_16@4:sym	.code16; btsl $2,sym
+32	0fba2f02	.code16; btsw $2,(%bx)
+32	670fba2802	.code16; btsw $2,(%eax)
+32	0fba2e000002/R_386_16@3:sym	.code16; btsw $2,sym
+32	0fba2701	.code16; btw $1,(%bx)
+32	670fba2001	.code16; btw $1,(%eax)
+32	0fba26000001/R_386_16@3:sym	.code16; btw $1,sym
+32	98	.code16; cbtw
+32	6699	.code16; cltd
+32	660f4407	.code16; cmovel (%bx),%eax
+32	67660f4400	.code16; cmovel (%eax),%eax
+32	660f44060000/R_386_16@4:sym	.code16; cmovel sym,%eax
+32	0f4507	.code16; cmovne (%bx),%ax
+32	660f4507	.code16; cmovne (%bx),%eax
+32	670f4500	.code16; cmovne (%eax),%ax
+32	67660f4500	.code16; cmovne (%eax),%eax
+32	0f45060000/R_386_16@3:sym	.code16; cmovne sym,%ax
+32	660f45060000/R_386_16@4:sym	.code16; cmovne sym,%eax
+32	0fb0c3	.code16; cmpxchg %al,%bl
+32	0fb007	.code16; cmpxchg %al,(%bx)
+32	670fb000	.code16; cmpxchg %al,(%eax)
+32	0fb0060000/R_386_16@3:sym	.code16; cmpxchg %al,sym
+32	0fb1c3	.code16; cmpxchg %ax,%bx
+32	0fb107	.code16; cmpxchg %ax,(%bx)
+32	670fb100	.code16; cmpxchg %ax,(%eax)
+32	0fb1060000/R_386_16@3:sym	.code16; cmpxchg %ax,sym
+32	660fb1c3	.code16; cmpxchg %eax,%ebx
+32	660fb107	.code16; cmpxchg %eax,(%bx)
+32	67660fb100	.code16; cmpxchg %eax,(%eax)
+32	660fb1060000/R_386_16@4:sym	.code16; cmpxchg %eax,sym
+32	refused	.code16; cmpxchg16b (%bx)
+32	refused	.code16; cmpxchg16b (%eax)
+32	refused	.code16; cmpxchg16b sym
+32	0fc70f	.code16; cmpxchg8b (%bx)
+32	670fc708	.code16; cmpxchg8b (%eax)
+32	0fc70e0000/R_386_16@3:sym	.code16; cmpxchg8b sym
+32	660fb107	.code16; cmpxchgl %eax,(%bx)
+32	67660fb100	.code16; cmpxchgl %eax,(%eax)
+32	660fb1060000/R_386_16@4:sym	.code16; cmpxchgl %eax,sym
+32	0fb107	.code16; cmpxchgw %ax,(%bx)
+32	670fb100	.code16; cmpxchgw %ax,(%eax)
+32	0fb1060000/R_386_16@3:sym	.code16; cmpxchgw %ax,sym
+32	0fa2	.code16; cpuid
+32	f20f38f007	.code16; crc32b (%bx),%eax
+32	67f20f38f000	.code16; crc32b (%eax),%eax
+32	f20f38f0060000/R_386_16@5:sym	.code16; crc32b sym,%eax
+32	66f20f38f107	.code16; crc32l (%bx),%eax
+32	6766f20f38f100	.code16; crc32l (%eax),%eax
+32	66f20f38f1060000/R_386_16@6:sym	.code16; crc32l sym,%eax
+32	f20f38f107	.code16; crc32w (%bx),%eax
+32	67f20f38f100	.code16; crc32w (%eax),%eax
+32	f20f38f1060000/R_386_16@5:sym	.code16; crc32w sym,%eax
+32	f30f2ac0	.code16; cvtsi2ss %eax,%xmm0
+32	f30f2a07	.code16; cvtsi2ssl (%bx),%xmm0
+32	67f30f2a00	.code16; cvtsi2ssl (%eax),%xmm0
+32	f30f2a060000/R_386_16@4:sym	.code16; cvtsi2ssl sym,%xmm0
+32	99	.code16; cwtd
+32	6698	.code16; cwtl
+32	f737	.code16; divw (%bx)
+32	67f730	.code16; divw (%eax)
+32	f7360000/R_386_16@2:sym	.code16; divw sym
+32	c8080000	.code16; enter $8,$0
+32	9bdfe0	.code16; fstsw %ax
+32	0faf07	.code16; imul (%bx),%ax
+32	660faf07	.code16; imul (%bx),%eax
+32	670faf00	.code16; imul (%eax),%ax
+32	67660faf00	.code16; imul (%eax),%eax
+32	0faf060000/R_386_16@3:sym	.code16; imul sym,%ax
+32	660faf060000/R_386_16@4:sym	.code16; imul sym,%eax
+32	666b0703	.code16; imull $3,(%bx),%eax
+32	67666b0003	.code16; imull $3,(%eax),%eax
+32	666b06000003/R_386_16@3:sym	.code16; imull $3,sym,%eax
+32	6b0703	.code16; imulw $3,(%bx),%ax
+32	676b0003	.code16; imulw $3,(%eax),%ax
+32	6b06000003/R_386_16@2:sym	.code16; imulw $3,sym,%ax
+32	e505	.code16; in $5,%ax
+32	66e505	.code16; in $5,%eax
+32	66ff07	.code16; incl (%bx)
+32	6766ff00	.code16; incl (%eax)
+32	66ff060000/R_386_16@3:sym	.code16; incl sym
+32	ff07	.code16; incw (%bx)
+32	67ff00	.code16; incw (%eax)
+32	ff060000/R_386_16@2:sym	.code16; incw sym
+32	666d	.code16; insl
+32	0f013f	.code16; invlpg (%bx)
+32	670f0138	.code16; invlpg (%eax)
+32	0f013e0000/R_386_16@3:sym	.code16; invlpg sym
+32	66cf	.code16; iretl
+32	cf	.code16; iretw
+32	e300	.code16; jcxz 1f; 1:
+32	67e300	.code16; jecxz 1f; 1:
+32	0f0207	.code16; lar (%bx),%ax
+32	660f0207	.code16; lar (%bx),%eax
+32	670f0200	.code16; lar (%eax),%ax
+32	67660f0200	.code16; lar (%eax),%eax
+32	0f02060000/R_386_16@3:sym	.code16; lar sym,%ax
+32	660f02060000/R_386_16@4:sym	.code16; lar sym,%eax
+32	66c507	.code16; lds (%bx),%eax
+32	6766c500	.code16; lds (%eax),%eax
+32	66c5060000/R_386_16@3:sym	.code16; lds sym,%eax
+32	668d07	.code16; leal (%bx),%eax
+32	67668d00	.code16; leal (%eax),%eax
+32	668d060000/R_386_16@3:sym	.code16; leal sym,%eax
+32	c9	.code16; leave
+32	8d07	.code16; leaw (%bx),%ax
+32	678d00	.code16; leaw (%eax),%ax
+32	8d060000/R_386_16@2:sym	.code16; leaw sym,%ax
+32	c407	.code16; les (%bx),%ax
+32	67c400	.code16; les (%eax),%ax
+32	c4060000/R_386_16@2:sym	.code16; les sym,%ax
+32	660fb407	.code16; lfs (%bx),%eax
+32	67660fb400	.code16; lfs (%eax),%eax
+32	660fb4060000/R_386_16@4:sym	.code16; lfs sym,%eax
+32	0f0117	.code16; lgdt (%bx)
+32	670f0110	.code16; lgdt (%eax)
+32	0f01160000/R_386_16@3:sym	.code16; lgdt sym
+32	660f0117	.code16; lgdtl (%bx)
+32	67660f0110	.code16; lgdtl (%eax)
+32	660f01160000/R_386_16@4:sym	.code16; lgdtl sym
+32	0f0117	.code16; lgdtw (%bx)
+32	670f0110	.code16; lgdtw (%eax)
+32	0f01160000/R_386_16@3:sym	.code16; lgdtw sym
+32	0fb51f	.code16; lgs (%bx),%bx
+32	670fb518	.code16; lgs (%eax),%bx
+32	0fb51e0000/R_386_16@3:sym	.code16; lgs sym,%bx
+32	0f011f	.code16; lidt (%bx)
+32	670f0118	.code16; lidt (%eax)
+32	0f011e0000/R_386_16@3:sym	.code16; lidt sym
+32	0f00d0	.code16; lldt %ax
+32	0f01f0	.code16; lmsw %ax
+32	0f0137	.code16; lmsw (%bx)
+32	670f0130	.code16; lmsw (%eax)
+32	0f01360000/R_386_16@3:sym	.code16; lmsw sym
+32	66f00fba2f01	.code16; lock btsl $1,(%bx)
+32	6766f00fba2801	.code16; lock btsl $1,(%eax)
+32	66f00fba2e000001/R_386_16@5:sym	.code16; lock btsl $1,sym
+32	66f00fb107	.code16; lock cmpxchg %eax,(%bx)
+32	6766f00fb100	.code16; lock cmpxchg %eax,(%eax)
+32	66f00fb1060000/R_386_16@5:sym	.code16; lock cmpxchg %eax,sym
+32	67e200	.code16; loopl 1f; 1:
+32	e200	.code16; loopw 1f; 1:
+32	66cb	.code16; lretl
+32	660f03c0	.code16; lsl %ax,%eax
+32	0f0307	.code16; lsl (%bx),%ax
+32	670f0300	.code16; lsl (%eax),%ax
+32	0f03060000/R_386_16@3:sym	.code16; lsl sym,%ax
+32	0fb207	.code16; lss (%bx),%ax
+32	660fb207	.code16; lss (%bx),%eax
+32	670fb200	.code16; lss (%eax),%ax
+32	67660fb200	.code16; lss (%eax),%eax
+32	0fb2060000/R_386_16@3:sym	.code16; lss sym,%ax
+32	660fb2060000/R_386_16@4:sym	.code16; lss sym,%eax
+32	0f00d8	.code16; ltr %ax
+32	66f30fbd07	.code16; lzcnt (%bx),%eax
+32	6766f30fbd00	.code16; lzcnt (%eax),%eax
+32	66f30fbd060000/R_386_16@5:sym	.code16; lzcnt sym,%eax
+32	0f38f107	.code16; movbe %ax,(%bx)
+32	670f38f100	.code16; movbe %ax,(%eax)
+32	0f38f1060000/R_386_16@4:sym	.code16; movbe %ax,sym
+32	0f38f007	.code16; movbe (%bx),%ax
+32	660f38f007	.code16; movbe (%bx),%eax
+32	670f38f000	.code16; movbe (%eax),%ax
+32	67660f38f000	.code16; movbe (%eax),%eax
+32	0f38f0060000/R_386_16@4:sym	.code16; movbe sym,%ax
+32	660f38f0060000/R_386_16@5:sym	.code16; movbe sym,%eax
+32	660f6ec0	.code16; movd %eax,%xmm0
+32	0f20c0	.code16; movl %cr0,%eax
+32	0f21c0	.code16; movl %dr0,%eax
+32	0f22c0	.code16; movl %eax,%cr0
+32	0fc307	.code16; movnti %eax,(%bx)
+32	670fc300	.code16; movnti %eax,(%eax)
+32	0fc3060000/R_386_16@3:sym	.code16; movnti %eax,sym
+32	660fbec0	.code16; movsbl %al,%eax
+32	660fbe07	.code16; movsbl (%bx),%eax
+32	67660fbe00	.code16; movsbl (%eax),%eax
+32	660fbe060000/R_386_16@4:sym	.code16; movsbl sym,%eax
+32	0fbec0	.code16; movsbw %al,%ax
+32	0fbe07	.code16; movsbw (%bx),%ax
+32	670fbe00	.code16; movsbw (%eax),%ax
+32	0fbe060000/R_386_16@3:sym	.code16; movsbw sym,%ax
+32	66a5	.code16; movsl
+32	660fb7c0	.code16; movzwl %ax,%eax
+32	660fb707	.code16; movzwl (%bx),%eax
+32	67660fb700	.code16; movzwl (%eax),%eax
+32	660fb7060000/R_386_16@4:sym	.code16; movzwl sym,%eax
+32	66f727	.code16; mull (%bx)
+32	6766f720	.code16; mull (%eax)
+32	66f7260000/R_386_16@3:sym	.code16; mull sym
+32	f71f	.code16; negw (%bx)
+32	67f718	.code16; negw (%eax)
+32	f71e0000/R_386_16@2:sym	.code16; negw sym
+32	66f717	.code16; notl (%bx)
+32	6766f710	.code16; notl (%eax)
+32	66f7160000/R_386_16@3:sym	.code16; notl sym
+32	66ef	.code16; out %eax,%dx
+32	6f	.code16; outsw
+32	660fc5c001	.code16; pextrw $1,%xmm0,%eax
+32	f30fb807	.code16; popcnt (%bx),%ax
+32	66f30fb807	.code16; popcnt (%bx),%eax
+32	67f30fb800	.code16; popcnt (%eax),%ax
+32	6766f30fb800	.code16; popcnt (%eax),%eax
+32	f30fb8060000/R_386_16@4:sym	.code16; popcnt sym,%ax
+32	66f30fb8060000/R_386_16@5:sym	.code16; popcnt sym,%eax
+32	66f30fb807	.code16; popcntl (%bx),%eax
+32	6766f30fb800	.code16; popcntl (%eax),%eax
+32	66f30fb8060000/R_386_16@5:sym	.code16; popcntl sym,%eax
+32	f30fb807	.code16; popcntw (%bx),%ax
+32	67f30fb800	.code16; popcntw (%eax),%ax
+32	f30fb8060000/R_386_16@4:sym	.code16; popcntw sym,%ax
+32	0fa9	.code16; popw %gs
+32	8f07	.code16; popw (%bx)
+32	678f00	.code16; popw (%eax)
+32	8f060000/R_386_16@2:sym	.code16; popw sym
+32	0fa0	.code16; push %fs
+32	669c	.code16; pushfl
+32	9c	.code16; pushfw
+32	6650	.code16; pushl %eax
+32	660fa0	.code16; pushl %fs
+32	66ff37	.code16; pushl (%bx)
+32	6766ff30	.code16; pushl (%eax)
+32	66ff360000/R_386_16@3:sym	.code16; pushl sym
+32	50	.code16; pushw %ax
+32	0fc7f0	.code16; rdrand %ax
+32	660fc7f0	.code16; rdrand %eax
+32	660fc7f3	.code16; rdrand %ebx
+32	0fc7fb	.code16; rdseed %bx
+32	660fc7f8	.code16; rdseed %eax
+32	0f31	.code16; rdtsc
+32	66c3	.code16; retl
+32	c3	.code16; retw
+32	0f92c0	.code16; setb %al
+32	0f9407	.code16; sete (%bx)
+32	670f9400	.code16; sete (%eax)
+32	0f94060000/R_386_16@3:sym	.code16; sete sym
+32	0f0107	.code16; sgdtw (%bx)
+32	670f0100	.code16; sgdtw (%eax)
+32	0f01060000/R_386_16@3:sym	.code16; sgdtw sym
+32	0fa5c3	.code16; shld %cl,%ax,%bx
+32	660fa507	.code16; shld %cl,%eax,(%bx)
+32	67660fa500	.code16; shld %cl,%eax,(%eax)
+32	660fa5060000/R_386_16@4:sym	.code16; shld %cl,%eax,sym
+32	660fa4c303	.code16; shldl $3,%eax,%ebx
+32	660fa5c3	.code16; shldl %cl,%eax,%ebx
+32	0fac0701	.code16; shrd $1,%ax,(%bx)
+32	670fac0001	.code16; shrd $1,%ax,(%eax)
+32	0fac06000001/R_386_16@3:sym	.code16; shrd $1,%ax,sym
+32	660fad07	.code16; shrdl %cl,%eax,(%bx)
+32	67660fad00	.code16; shrdl %cl,%eax,(%eax)
+32	660fad060000/R_386_16@4:sym	.code16; shrdl %cl,%eax,sym
+32	0fac0702	.code16; shrdw $2,%ax,(%bx)
+32	670fac0002	.code16; shrdw $2,%ax,(%eax)
+32	0fac06000002/R_386_16@3:sym	.code16; shrdw $2,%ax,sym
+32	660f010f	.code16; sidtl (%bx)
+32	67660f0108	.code16; sidtl (%eax)
+32	660f010e0000/R_386_16@4:sym	.code16; sidtl sym
+32	0f00c0	.code16; sldt %ax
+32	660f00c0	.code16; sldt %eax
+32	0f0007	.code16; sldt (%bx)
+32	670f0000	.code16; sldt (%eax)
+32	0f00060000/R_386_16@3:sym	.code16; sldt sym
+32	0f01e0	.code16; smsw %ax
+32	660f01e0	.code16; smsw %eax
+32	0f0127	.code16; smsw (%bx)
+32	670f0120	.code16; smsw (%eax)
+32	0f01260000/R_386_16@3:sym	.code16; smsw sym
+32	ab	.code16; stosw
+32	0f00c8	.code16; str %ax
+32	660f00c8	.code16; str %eax
+32	668507	.code16; testl %eax,(%bx)
+32	67668500	.code16; testl %eax,(%eax)
+32	6685060000/R_386_16@3:sym	.code16; testl %eax,sym
+32	a90100	.code16; testw $1,%ax
+32	f30fbc07	.code16; tzcnt (%bx),%ax
+32	67f30fbc00	.code16; tzcnt (%eax),%ax
+32	f30fbc060000/R_386_16@4:sym	.code16; tzcnt sym,%ax
+32	0f00e0	.code16; verr %ax
+32	0f002f	.code16; verw (%bx)
+32	670f0028	.code16; verw (%eax)
+32	0f002e0000/R_386_16@3:sym	.code16; verw sym
+32	0fc1c3	.code16; xadd %ax,%bx
+32	0fc107	.code16; xadd %ax,(%bx)
+32	670fc100	.code16; xadd %ax,(%eax)
+32	0fc1060000/R_386_16@3:sym	.code16; xadd %ax,sym
+32	660fc1c3	.code16; xadd %eax,%ebx
+32	660fc107	.code16; xadd %eax,(%bx)
+32	67660fc100	.code16; xadd %eax,(%eax)
+32	660fc1060000/R_386_16@4:sym	.code16; xadd %eax,sym
+32	660fc107	.code16; xaddl %eax,(%bx)
+32	67660fc100	.code16; xaddl %eax,(%eax)
+32	660fc1060000/R_386_16@4:sym	.code16; xaddl %eax,sym
+32	6693	.code16; xchg %eax,%ebx
+32	668707	.code16; xchgl %eax,(%bx)
+32	67668700	.code16; xchgl %eax,(%eax)
+32	6687060000/R_386_16@3:sym	.code16; xchgl %eax,sym
+32	8707	.code16; xchgw %ax,(%bx)
+32	678700	.code16; xchgw %ax,(%eax)
+32	87060000/R_386_16@2:sym	.code16; xchgw %ax,sym
+32	81c200000000/R_386_TLS_LE_32@2:sym	addl $sym@TPOFF,%edx
+32	67660f38f6063412	addr16 adcx 0x1234,%eax
+32	67660f38f6060000/R_386_16@6:sym	addr16 adcx sym,%eax
+32	6701063412	addr16 addl %eax,0x1234
+32	6701060000/R_386_16@3:sym	addr16 addl %eax,sym
+32	6766810634123412	addr16 addw $0x1234,0x1234
+32	6766810600003412/R_386_16@4:sym	addr16 addw $0x1234,sym
+32	670fba26341201	addr16 bt $1,0x1234
+32	670fba26000001/R_386_16@4:sym	addr16 bt $1,sym
+32	67ff163412	addr16 call *0x1234
+32	67ff160000/R_386_16@3:sym	addr16 call *sym
+32	670fae3e3412	addr16 clflush 0x1234
+32	670fae3e0000/R_386_16@4:sym	addr16 clflush sym
+32	670f44063412	addr16 cmove 0x1234,%eax
+32	670f44060000/R_386_16@4:sym	addr16 cmove sym,%eax
+32	670fb1063412	addr16 cmpxchg %eax,0x1234
+32	670fb1060000/R_386_16@4:sym	addr16 cmpxchg %eax,sym
+32	670fc70e3412	addr16 cmpxchg8b 0x1234
+32	670fc70e0000/R_386_16@4:sym	addr16 cmpxchg8b sym
+32	67f20f38f1063412	addr16 crc32l 0x1234,%eax
+32	67f20f38f1060000/R_386_16@6:sym	addr16 crc32l sym,%eax
+32	67d8063412	addr16 fadds 0x1234
+32	67d8060000/R_386_16@3:sym	addr16 fadds sym
+32	67df263412	addr16 fbld 0x1234
+32	67df260000/R_386_16@3:sym	addr16 fbld sym
+32	67db063412	addr16 fildl 0x1234
+32	67db060000/R_386_16@3:sym	addr16 fildl sym
+32	67db0e3412	addr16 fisttpl 0x1234
+32	67db0e0000/R_386_16@3:sym	addr16 fisttpl sym
+32	67d92e3412	addr16 fldcw 0x1234
+32	67d92e0000/R_386_16@3:sym	addr16 fldcw sym
+32	67dd063412	addr16 fldl 0x1234
+32	67dd060000/R_386_16@3:sym	addr16 fldl sym
+32	67d93e3412	addr16 fnstcw 0x1234
+32	67d93e0000/R_386_16@3:sym	addr16 fnstcw sym
+32	67d91e3412	addr16 fstps 0x1234
+32	67d91e0000/R_386_16@3:sym	addr16 fstps sym
+32	670fae063412	addr16 fxsave 0x1234
+32	670fae060000/R_386_16@4:sym	addr16 fxsave sym
+32	676b06341203	addr16 imul $3,0x1234,%eax
+32	676b06000003/R_386_16@3:sym	addr16 imul $3,sym,%eax
+32	67ff063412	addr16 incl 0x1234
+32	67ff060000/R_386_16@3:sym	addr16 incl sym
+32	670f013e3412	addr16 invlpg 0x1234
+32	670f013e0000/R_386_16@4:sym	addr16 invlpg sym
+32	67e300	addr16 jecxz 1f; 1:
+32	67ff263412	addr16 jmp *0x1234
+32	67ff260000/R_386_16@3:sym	addr16 jmp *sym
+32	678d063412	addr16 leal 0x1234,%eax
+32	678d060000/R_386_16@3:sym	addr16 leal sym,%eax
+32	67f0ff063412	addr16 lock incl 0x1234
+32	67f0ff060000/R_386_16@4:sym	addr16 lock incl sym
+32	67e200	addr16 loop 1f; 1:
+32	67e000	addr16 loopne 1f; 1:
+32	670f290e3412	addr16 movaps %xmm1,0x1234
+32	670f290e0000/R_386_16@4:sym	addr16 movaps %xmm1,sym
+32	67a03412	addr16 movb 0x1234,%al
+32	67a00000/R_386_16@2:sym	addr16 movb sym,%al
+32	670f38f0063412	addr16 movbe 0x1234,%eax
+32	670f38f0060000/R_386_16@5:sym	addr16 movbe sym,%eax
+32	67c706341201000000	addr16 movl $1,0x1234
+32	67c706000001000000/R_386_16@3:sym	addr16 movl $1,sym
+32	6789c3	addr16 movl %eax,%ebx
+32	678907	addr16 movl %eax,(%bx)
+32	refused	addr16 movl %eax,(%eax)
+32	67a33412	addr16 movl %eax,0x1234
+32	67a30000/R_386_16@2:sym	addr16 movl %eax,sym
+32	67a13412	addr16 movl 0x1234,%eax
+32	678b1e3412	addr16 movl 0x1234,%ebx
+32	67a10000/R_386_16@2:sym	addr16 movl sym,%eax
+32	678b1e0000/R_386_16@3:sym	addr16 movl sym,%ebx
+32	670fc3063412	addr16 movnti %eax,0x1234
+32	670fc3060000/R_386_16@4:sym	addr16 movnti %eax,sym
+32	67a4	addr16 movsb
+32	67f30f10063412	addr16 movss 0x1234,%xmm0
+32	67f30f10060000/R_386_16@5:sym	addr16 movss sym,%xmm0
+32	6766a33412	addr16 movw %ax,0x1234
+32	6766a30000/R_386_16@3:sym	addr16 movw %ax,sym
+32	67668b1e3412	addr16 movw 0x1234,%bx
+32	67668b1e0000/R_386_16@4:sym	addr16 movw sym,%bx
+32	670fb6063412	addr16 movzbl 0x1234,%eax
+32	670fb6060000/R_386_16@4:sym	addr16 movzbl sym,%eax
+32	6790	addr16 nop
+32	670ffc063412	addr16 paddb 0x1234,%mm0
+32	670ffc060000/R_386_16@4:sym	addr16 paddb sym,%mm0
+32	67f30fb8063412	addr16 popcnt 0x1234,%eax
+32	67f30fb8060000/R_386_16@5:sym	addr16 popcnt sym,%eax
+32	670f180e3412	addr16 prefetcht0 0x1234
+32	670f180e0000/R_386_16@4:sym	addr16 prefetcht0 sym
+32	6750	addr16 push %eax
+32	67ff363412	addr16 pushl 0x1234
+32	67ff360000/R_386_16@3:sym	addr16 pushl sym
+32	670f95063412	addr16 setne 0x1234
+32	670f95060000/R_386_16@4:sym	addr16 setne sym
+32	670f01063412	addr16 sgdt 0x1234
+32	670f01060000/R_386_16@4:sym	addr16 sgdt sym
+32	67d1263412	addr16 shll 0x1234
+32	67d1260000/R_386_16@3:sym	addr16 shll sym
+32	67ab	addr16 stosl
+32	67f606341201	addr16 testb $1,0x1234
+32	67f606000001/R_386_16@3:sym	addr16 testb $1,sym
+32	67c5fc580e3412	addr16 vaddps 0x1234,%ymm0,%ymm1
+32	67c5fc580e0000/R_386_16@5:sym	addr16 vaddps sym,%ymm0,%ymm1
+32	6787063412	addr16 xchg %eax,0x1234
+32	6787060000/R_386_16@3:sym	addr16 xchg %eax,sym
+32	refused	addr32 call sym
+32	refused	addr32 jecxz 1f; 1:
+32	refused	addr32 jmp sym
+32	refused	addr32 jrcxz 1f; 1:
+32	refused	addr32 lea (%eax),%ebx
+32	refused	addr32 lea (%rax),%rbx
+32	refused	addr32 lodsb
+32	refused	addr32 loop 1f; 1:
+32	refused	addr32 loope 1f; 1:
+32	refused	addr32 movl %eax,%ebx
+32	refused	addr32 movl %eax,(%bx)
+32	refused	addr32 movl %eax,(%eax)
+32	refused	addr32 movl %eax,(%rax)
+32	refused	addr32 movl sym,%eax
+32	refused	addr32 movsb
+32	refused	addr32 nop
+32	refused	addr32 ret
+32	refused	addr32 xlat
+32	e8fbffffff	call .
+32	e800000000	call .+5
+32	e8f8ffffff	call .-3
+32	e8fcffffff/R_386_PC32@1:sym	calll sym
+32	refused	callq sym
+32	66e80000	callw 1f; 1:
+32	66e8feff/R_386_PC16@2:ext	callw ext
+32	66e8feff/R_386_PC16@2:sym	callw sym
+32	26a6	cmpsb %es:(%edi),%es:(%esi)
+32	2e0f84fcffffff/R_386_PC32@3:sym	cs je sym
+32	2effe0	cs jmp *%eax
+32	2e8b00	cs mov (%eax),%eax
+32	2e90	cs nop
+32	676690	data16 addr16 nop
+32	66e80000	data16 call 1f; 1:
+32	66e8feff/R_386_PC16@2:ext	data16 call ext
+32	66e8feff/R_386_PC16@2:sym	data16 call sym
+32	66cf	data16 iret
+32	667400	data16 je 1f; 1:
+32	660f84feff/R_386_PC16@3:sym	data16 je sym
+32	66eb00	data16 jmp 1f; 1:
+32	66e9feff/R_386_PC16@2:ext	data16 jmp ext
+32	66e90200/R_386_PC16@2:ext	data16 jmp ext+4
+32	66e9feff/R_386_PC16@2:sym	data16 jmp sym
+32	660f85feff/R_386_PC16@3:ext	data16 jne ext
+32	668d18	data16 lea (%eax),%ebx
+32	e200	data16 loop 1f; 1:
+32	66cb	data16 lret
+32	refused	data16 mov %ax,%bx
+32	6689c3	data16 mov %eax,%ebx
+32	6688c3	data16 movb %al,%bl
+32	6689c3	data16 movl %eax,%ebx
+32	66a4	data16 movsb
+32	refused	data16 movw %ax,%bx
+32	6690	data16 nop
+32	6650	data16 push %eax
+32	6650	data16 pushl %eax
+32	66c3	data16 ret
+32	66ab	data16 stosl
+32	refused	data32 jmp sym
+32	3effd0	ds call *%eax
+32	refused	ds call *%rax
+32	3e0f84fcffffff/R_386_PC32@3:sym	ds je sym
+32	3ee9fcffffff/R_386_PC32@2:sym	ds jmp sym
+32	3e89c3	ds mov %eax,%ebx
+32	refused	ds mov %eax,%es:(%ebx)
+32	3e8903	ds mov %eax,(%ebx)
+32	3ea4	ds movsb
+32	3e90	ds nop
+32	3e50	ds push %eax
+32	3ec3	ds ret
+32	3eaa	ds stosb
+32	26ac	es lodsb
+32	268900	es mov %eax,(%eax)
+32	refused	es mov %eax,(%rax)
+32	26a4	es movsb
+32	2690	es nop
+32	26aa	es stosb
+32	64a4	fs movsb
+32	refused	insb %cx,%es:(%edi)
+32	refused	insb %dx,%ds:(%edi)
+32	74fe	je .
+32	ebfe	jmp .
+32	eb00	jmp .+2
+32	ffe0	jmpl *%eax
+32	refused	jmpl sym
+32	refused	jmpq *%rax
+32	refused	jmpq sym
+32	66ffe0	jmpw *%ax
+32	refused	jmpw sym
+32	000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066e834ff	lab: .skip 200; callw lab
+32	000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066e834ff	lab: .skip 200; data16 call lab
+32	000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066e934ff	lab: .skip 200; data16 jmp lab
+32	0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000660f8533ff	lab: .skip 200; data16 jne lab
+32	66ebfd	lab: data16 jmp lab
+32	6675fd	lab: data16 jne lab
+32	refused	lcall $0x10000,$0
+32	refused	lea sym@TPOFF(%rax),%edx
+32	648d1500000000/R_386_TLS_LE_32@3:sym	leal %fs:sym@TPOFF,%edx
+32	refused	leal sym(%rax),%edx
+32	refused	leal sym@DTPOFF(%rax),%edx
+32	8d9000000000/R_386_GOT32@2:sym	leal sym@GOT(%eax),%edx
+32	refused	leal sym@GOT(%rax),%edx
+32	refused	leal sym@GOTOFF(%rax),%edx
+32	refused	leal sym@GOTPCREL(%rip),%edx
+32	8d9000000000/R_386_TLS_LE@2:sym	leal sym@NTPOFF(%eax),%edx
+32	refused	leal sym@PLT(%rax),%edx
+32	refused	leal sym@TPOFF(%rax),%edx
+32	8d1500000000/R_386_TLS_LE_32@2:sym	leal sym@TPOFF,%edx
+32	refused	leaq %fs:sym@TPOFF,%rdx
+32	refused	leaq sym@TPOFF(%rax),%rdx
+32	668d9000000000/R_386_TLS_LE@3:sym	leaw sym@NTPOFF(%eax),%dx
+32	refused	leaw sym@TPOFF(%rax),%dx
+32	ea00000000ffff	ljmp $-1,$0
+32	refused	ljmp $0x10000,$0
+32	ea00000000ffff	ljmp $0xffff,$0
+32	ea000000000800	ljmp $8,$0x100000000
+32	refused	ljmpw $8,$0x10000
+32	66eaffff0800	ljmpw $8,$0xffff
+32	refused	lodsb %ds:(%esi),%bl
+32	ad	lodsl (%esi),%eax
+32	e200	loopl 1f; 1:
+32	67e200	loopw 1f; 1:
+32	ba00000000/R_386_TLS_LE_32@1:sym	movl $sym@TPOFF,%edx
+32	648b1500000000/R_386_TLS_LE_32@3:sym	movl %fs:sym@TPOFF,%edx
+32	26a4	movsb %es:(%esi),%es:(%edi)
+32	refused	movsb (%esi),%ds:(%edi)
+32	refused	movslq %ax,%rbx
+32	refused	movslq %eax,%rbx
+32	refused	movsxd %ax,%bx
+32	refused	movsxd %ax,%rbx
+32	refused	movsxd %eax,%ebx
+32	refused	movsxd %eax,%rbx
+32	refused	movsxd (%rax),%bx
+32	refused	movsxd (%rax),%ebx
+32	266e	outsb %es:(%esi),%dx
+32	refused	scasb %es:(%edi),%bl
+32	af	scasl %es:(%edi),%eax
+32	3690	ss nop
+32	refused	stosb %al,%ds:(%edi)
+32	aa	stosb %al,%es:(%edi)
+32	aa	stosb %al,(%esi)
+32	refused	stosb %bl,%es:(%edi)
+32	refused	stosl %ax,%es:(%edi)
+32	refused	stosl %ebx,%es:(%edi)
+32	66ab	stosw %ax,%es:(%edi)
+64	67660f38f60500000000/R_X86_64_PC32@6:sym-4	adcx sym(%eip),%eax
+64	refused	addl $sym@TPOFF,%edx
+64	67010500000000/R_X86_64_PC32@3:sym-4	addl %eax,sym(%eip)
+64	refused	addr16 jecxz 1f; 1:
+64	refused	addr16 loop 1f; 1:
+64	refused	addr16 loopne 1f; 1:
+64	refused	addr16 movl %eax,%ebx
+64	refused	addr16 movl %eax,(%bx)
+64	refused	addr16 movl %eax,(%eax)
+64	refused	addr16 movl sym,%eax
+64	refused	addr16 movsb
+64	refused	addr16 nop
+64	refused	addr16 push %eax
+64	refused	addr16 stosl
+64	refused	addr32 jecxz 1f; 1:
+64	67e300	addr32 jrcxz 1f; 1:
+64	678d18	addr32 lea (%eax),%ebx
+64	refused	addr32 lea (%rax),%rbx
+64	67ac	addr32 lodsb
+64	67e200	addr32 loop 1f; 1:
+64	67e100	addr32 loope 1f; 1:
+64	6789c3	addr32 movl %eax,%ebx
+64	refused	addr32 movl %eax,(%bx)
+64	678900	addr32 movl %eax,(%eax)
+64	refused	addr32 movl %eax,(%rax)
+64	67a4	addr32 movsb
+64	6790	addr32 nop
+64	67c3	addr32 ret
+64	67d7	addr32 xlat
+64	67668105000000003412/R_X86_64_PC32@4:sym-6	addw $0x1234,sym(%eip)
+64	670fba250000000001/R_X86_64_PC32@4:sym-5	bt $1,sym(%eip)
+64	67ff1500000000/R_X86_64_PC32@3:sym-4	call *sym(%eip)
+64	e8fbffffff	call .
+64	e800000000	call .+5
+64	e8f8ffffff	call .-3
+64	refused	calll sym
+64	e800000000/R_X86_64_PLT32@1:sym-4	callq sym
+64	66e80000	callw 1f; 1:
+64	66e80000/R_X86_64_PC16@2:ext-2	callw ext
+64	66e80000/R_X86_64_PC16@2:sym-2	callw sym
+64	670fae3d00000000/R_X86_64_PC32@4:sym-4	clflush sym(%eip)
+64	670f440500000000/R_X86_64_PC32@4:sym-4	cmove sym(%eip),%eax
+64	2667a6	cmpsb %es:(%edi),%es:(%esi)
+64	670fb10500000000/R_X86_64_PC32@4:sym-4	cmpxchg %eax,sym(%eip)
+64	670fc70d00000000/R_X86_64_PC32@4:sym-4	cmpxchg8b sym(%eip)
+64	67f20f38f10500000000/R_X86_64_PC32@6:sym-4	crc32l sym(%eip),%eax
+64	2e0f8400000000/R_X86_64_PLT32@3:sym-4	cs je sym
+64	refused	cs jmp *%eax
+64	2e678b00	cs mov (%eax),%eax
+64	2e90	cs nop
+64	refused	data16 addr16 nop
+64	66e80000	data16 call 1f; 1:
+64	66e80000/R_X86_64_PC16@2:ext-2	data16 call ext
+64	66e80000/R_X86_64_PC16@2:sym-2	data16 call sym
+64	66cf	data16 iret
+64	667400	data16 je 1f; 1:
+64	660f840000/R_X86_64_PC16@3:sym-2	data16 je sym
+64	66eb00	data16 jmp 1f; 1:
+64	66e90000/R_X86_64_PC16@2:ext-2	data16 jmp ext
+64	66e90000/R_X86_64_PC16@2:ext+2	data16 jmp ext+4
+64	66e90000/R_X86_64_PC16@2:sym-2	data16 jmp sym
+64	660f850000/R_X86_64_PC16@3:ext-2	data16 jne ext
+64	67668d18	data16 lea (%eax),%ebx
+64	e200	data16 loop 1f; 1:
+64	66cb	data16 lret
+64	refused	data16 mov %ax,%bx
+64	6689c3	data16 mov %eax,%ebx
+64	6688c3	data16 movb %al,%bl
+64	6689c3	data16 movl %eax,%ebx
+64	66a4	data16 movsb
+64	refused	data16 movw %ax,%bx
+64	6690	data16 nop
+64	refused	data16 push %eax
+64	refused	data16 pushl %eax
+64	66c3	data16 ret
+64	66ab	data16 stosl
+64	refused	data32 jmp sym
+64	refused	ds call *%eax
+64	3effd0	ds call *%rax
+64	3e0f8400000000/R_X86_64_PLT32@3:sym-4	ds je sym
+64	3ee900000000/R_X86_64_PLT32@2:sym-4	ds jmp sym
+64	3e89c3	ds mov %eax,%ebx
+64	refused	ds mov %eax,%es:(%ebx)
+64	3e678903	ds mov %eax,(%ebx)
+64	3ea4	ds movsb
+64	3e90	ds nop
+64	refused	ds push %eax
+64	3ec3	ds ret
+64	3eaa	ds stosb
+64	refused	es call sym
+64	refused	es je sym
+64	refused	es lodsb
+64	refused	es mov %eax,(%eax)
+64	refused	es mov %eax,(%rax)
+64	refused	es movsb
+64	refused	es nop
+64	refused	es stosb
+64	67d80500000000/R_X86_64_PC32@3:sym-4	fadds sym(%eip)
+64	67df2500000000/R_X86_64_PC32@3:sym-4	fbld sym(%eip)
+64	67db0500000000/R_X86_64_PC32@3:sym-4	fildl sym(%eip)
+64	67db0d00000000/R_X86_64_PC32@3:sym-4	fisttpl sym(%eip)
+64	67d92d00000000/R_X86_64_PC32@3:sym-4	fldcw sym(%eip)
+64	67dd0500000000/R_X86_64_PC32@3:sym-4	fldl sym(%eip)
+64	67d93d00000000/R_X86_64_PC32@3:sym-4	fnstcw sym(%eip)
+64	64a4	fs movsb
+64	67d91d00000000/R_X86_64_PC32@3:sym-4	fstps sym(%eip)
+64	670fae0500000000/R_X86_64_PC32@4:sym-4	fxsave sym(%eip)
+64	676b050000000003/R_X86_64_PC32@3:sym-5	imul $3,sym(%eip),%eax
+64	67ff0500000000/R_X86_64_PC32@3:sym-4	incl sym(%eip)
+64	refused	insb %cx,%es:(%edi)
+64	refused	insb %dx,%ds:(%edi)
+64	670f013d00000000/R_X86_64_PC32@4:sym-4	invlpg sym(%eip)
+64	74fe	je .
+64	67ff2500000000/R_X86_64_PC32@3:sym-4	jmp *sym(%eip)
+64	ebfe	jmp .
+64	eb00	jmp .+2
+64	refused	jmpl *%eax
+64	refused	jmpl sym
+64	ffe0	jmpq *%rax
+64	refused	jmpq sym
+64	66ffe0	jmpw *%ax
+64	refused	jmpw sym
+64	000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066e834ff	lab: .skip 200; callw lab
+64	000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066e834ff	lab: .skip 200; data16 call lab
+64	000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066e934ff	lab: .skip 200; data16 jmp lab
+64	0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000660f8533ff	lab: .skip 200; data16 jne lab
+64	66ebfd	lab: data16 jmp lab
+64	6675fd	lab: data16 jne lab
+64	refused	lcall $0x10000,$0
+64	refused	lea sym@TPOFF(%rax),%edx
+64	refused	leal %fs:sym@TPOFF,%edx
+64	678d0500000000/R_X86_64_PC32@3:sym-4	leal sym(%eip),%eax
+64	8d9000000000/R_X86_64_32@2:sym+0	leal sym(%rax),%edx
+64	refused	leal sym@DTPOFF(%rax),%edx
+64	refused	leal sym@GOT(%eax),%edx
+64	refused	leal sym@GOT(%rax),%edx
+64	refused	leal sym@GOTOFF(%rax),%edx
+64	8d1500000000/R_X86_64_GOTPCREL@2:sym-4	leal sym@GOTPCREL(%rip),%edx
+64	refused	leal sym@NTPOFF(%eax),%edx
+64	refused	leal sym@PLT(%rax),%edx
+64	refused	leal sym@TPOFF(%rax),%edx
+64	refused	leal sym@TPOFF,%edx
+64	64488d142500000000/R_X86_64_TPOFF32@5:sym+0	leaq %fs:sym@TPOFF,%rdx
+64	488d9000000000/R_X86_64_TPOFF32@3:sym+0	leaq sym@TPOFF(%rax),%rdx
+64	refused	leaw sym@NTPOFF(%eax),%dx
+64	refused	leaw sym@TPOFF(%rax),%dx
+64	refused	ljmp $-1,$0
+64	refused	ljmp $0x10000,$0
+64	refused	ljmp $0xffff,$0
+64	refused	ljmp $8,$0x100000000
+64	refused	ljmpw $8,$0x10000
+64	refused	ljmpw $8,$0xffff
+64	67f0ff0500000000/R_X86_64_PC32@4:sym-4	lock incl sym(%eip)
+64	refused	lodsb %ds:(%esi),%bl
+64	67ad	lodsl (%esi),%eax
+64	67e200	loopl 1f; 1:
+64	refused	loopw 1f; 1:
+64	670f290d00000000/R_X86_64_PC32@4:sym-4	movaps %xmm1,sym(%eip)
+64	678a0500000000/R_X86_64_PC32@3:sym-4	movb sym(%eip),%al
+64	670f38f00500000000/R_X86_64_PC32@5:sym-4	movbe sym(%eip),%eax
+64	67c7050000000001000000/R_X86_64_PC32@3:sym-8	movl $1,sym(%eip)
+64	refused	movl $sym@TPOFF,%edx
+64	67890500000000/R_X86_64_PC32@3:sym-4	movl %eax,sym(%eip)
+64	648b142500000000/R_X86_64_TPOFF32@4:sym+0	movl %fs:sym@TPOFF,%edx
+64	678b0500000000/R_X86_64_PC32@3:sym-4	movl sym(%eip),%eax
+64	678b1d00000000/R_X86_64_PC32@3:sym-4	movl sym(%eip),%ebx
+64	670fc30500000000/R_X86_64_PC32@4:sym-4	movnti %eax,sym(%eip)
+64	2667a4	movsb %es:(%esi),%es:(%edi)
+64	refused	movsb (%esi),%ds:(%edi)
+64	refused	movslq %ax,%rbx
+64	4863d8	movslq %eax,%rbx
+64	67f30f100500000000/R_X86_64_PC32@5:sym-4	movss sym(%eip),%xmm0
+64	refused	movsxd %ax,%bx
+64	refused	movsxd %ax,%rbx
+64	63d8	movsxd %eax,%ebx
+64	4863d8	movsxd %eax,%rbx
+64	666318	movsxd (%rax),%bx
+64	6318	movsxd (%rax),%ebx
+64	6766890500000000/R_X86_64_PC32@4:sym-4	movw %ax,sym(%eip)
+64	67668b1d00000000/R_X86_64_PC32@4:sym-4	movw sym(%eip),%bx
+64	670fb60500000000/R_X86_64_PC32@4:sym-4	movzbl sym(%eip),%eax
+64	26676e	outsb %es:(%esi),%dx
+64	670ffc0500000000/R_X86_64_PC32@4:sym-4	paddb sym(%eip),%mm0
+64	67f30fb80500000000/R_X86_64_PC32@5:sym-4	popcnt sym(%eip),%eax
+64	670f180d00000000/R_X86_64_PC32@4:sym-4	prefetcht0 sym(%eip)
+64	refused	pushl sym(%eip)
+64	refused	scasb %es:(%edi),%bl
+64	67af	scasl %es:(%edi),%eax
+64	670f950500000000/R_X86_64_PC32@4:sym-4	setne sym(%eip)
+64	670f010500000000/R_X86_64_PC32@4:sym-4	sgdt sym(%eip)
+64	67d12500000000/R_X86_64_PC32@3:sym-4	shll sym(%eip)
+64	refused	ss nop
+64	refused	stosb %al,%ds:(%edi)
+64	67aa	stosb %al,%es:(%edi)
+64	refused	stosb %bl,%es:(%edi)
+64	refused	stosl %ax,%es:(%edi)
+64	refused	stosl %ebx,%es:(%edi)
+64	6766ab	stosw %ax,%es:(%edi)
+64	67f6050000000001/R_X86_64_PC32@3:sym-5	testb $1,sym(%eip)
+64	67c5fc580d00000000/R_X86_64_PC32@5:sym-4	vaddps sym(%eip),%ymm0,%ymm1
+64	67870500000000/R_X86_64_PC32@3:sym-4	xchg %eax,sym(%eip)

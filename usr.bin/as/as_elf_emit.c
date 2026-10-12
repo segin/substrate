@@ -246,6 +246,8 @@ static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *po
 static int x86_cond_code(const char *mnemonic, unsigned *cc_out);
 static int x86_base_is_ip(const char *base_reg);
 static const char *first_symbol_op_in_expr(const as_expr_t *e);
+static int x86_disp16_offset(const unsigned char *code, size_t len, int code16, size_t *off_out);
+static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out);
 static int append_incbin_to_bytebuf(emit_ctx_t *ctx, const as_stmt_t *st, bytebuf_t *buf, const as_directive_t *d);
 static int section_name_is_executable(emit_ctx_t *ctx, const char *name);
 static int is_numeric_local_label_name(const char *name);
@@ -3369,6 +3371,46 @@ static int is_fixed_short_rel_mnemonic(const char *mn) {
     return x86_fixed_short_branch(mn, 32u, NULL, NULL) != -1;
 }
 
+/*
+ * `data16` before a call or a jump to a label: the distance is of the
+ * size the code's is not, behind the prefix -- and the prefix is there
+ * though the jump be a short one.  (Before `loop` and its like it says
+ * nothing and is not written, as GNU as has it.)  With a label the
+ * assembler knew, the prefix was left out and nothing said; with one
+ * it did not, the distance had four bytes behind a prefix that said
+ * two.
+ */
+static int x86_branch_flip16(const as_stmt_t *st) {
+    return st != NULL && st->kind == AS_STMT_INSTRUCTION && (st->u.instr.prefixes & AS_PREFIX_DATA16) != 0 &&
+           x86_fixed_short_branch(st->u.instr.mnemonic, 32u, NULL, NULL) == -1;
+}
+
+/*
+ * A size prefix by its name: a mode has the one that names the size it
+ * is not -- `data32` and `addr32` in 16-bit code, `data16` and `addr16`
+ * in 32-bit, `data16` and `addr32` in 64-bit -- and the other says
+ * nothing a processor would hear.  `addr32 nop` in 32-bit code was
+ * assembled with the byte, which there means 16.  NULL, or the name
+ * that is wrong.
+ */
+static const char *x86_size_word_wrong(const as_elf_cfg_t *cfg, const as_stmt_t *st) {
+    unsigned p = st->u.instr.prefixes;
+    int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
+
+    if ((p & AS_PREFIX_DATA16) != 0 && ((p & AS_PREFIX_DATA_32) != 0) != code16) {
+        return code16 ? "data16" : "data32";
+    }
+    if ((p & AS_PREFIX_ADDR16) != 0 && ((p & AS_PREFIX_ADDR_32) != 0) != (code16 || cfg->is_64)) {
+        return (p & AS_PREFIX_ADDR_32) != 0 ? "addr32" : "addr16";
+    }
+    return NULL;
+}
+
+/* The size letter such a branch has: its own, or the prefix's. */
+static char x86_branch_size_letter(const as_stmt_t *st, char suffix, unsigned code_bits) {
+    return x86_branch_flip16(st) ? (code_bits == 16u ? 'l' : 'w') : suffix;
+}
+
 /* How long one is: two bytes, and the prefix where the mode wants it. */
 static size_t fixed_short_rel_size(const char *mn, unsigned code_bits) {
     int need67 = 0;
@@ -4989,7 +5031,9 @@ static int x86_special_takes_opsize(const as_instruction_t *insn, const char *mn
     static const char *const selector[] = {"sldt", "str", "lldt", "ltr", "lmsw", "smsw", "verr", "verw"};
     size_t i;
 
-    if (strcmp(mn, "mov") == 0) {
+    /* (adcx and adox have no form of 16 bits: 66 is adcx's own, and
+     * part of its opcode.) */
+    if (strcmp(mn, "mov") == 0 || strcmp(mn, "adcx") == 0 || strcmp(mn, "adox") == 0) {
         return 0;
     }
     for (i = 0; i < sizeof(selector) / sizeof(selector[0]); ++i) {
@@ -11568,9 +11612,12 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
              * made the statement a 16-bit one -- a w, or its registers
              * -- has been settled above.
              */
-            if (cfg->x86_code_bits != 16u &&
-                ((in.operand_size_override && x86_special_takes_opsize(&st->u.instr, mnbuf)) ||
-                 x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax)) &&
+            /* (And in 16-bit code the other way about: there it is the
+             * 32-bit statement that has the prefix, and `cmpxchg %eax,
+             * (%bx)`, `btl $1, sym` and `bsf (%si), %eax` had none.) */
+            if (((in.operand_size_override && x86_special_takes_opsize(&st->u.instr, mnbuf)) ||
+                 (cfg->x86_code_bits != 16u &&
+                  x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax))) &&
                 x86_prepend_opsize(code, code_cap, code_len) != 0) {
                 return -1;
             }
@@ -12340,7 +12387,31 @@ static int x86_addr16_prefix(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsig
     size_t len;
     size_t i;
 
-    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64) {
+    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION) {
+        return 0;
+    }
+    /* In 64-bit code the registers of an address say its size to every
+     * emitter; what some did not hear is the prefix written, before an
+     * address from %rip or with no register: `fldl sym(%eip)` was
+     * `fldl sym(%rip)`. */
+    if (cfg->is_64) {
+        if ((st->u.instr.prefixes & AS_PREFIX_ADDR16) == 0 || *code_len == 0) {
+            return 0;
+        }
+        skip = (*code_len > 1 && code[0] == 0x9b) ? 1 : 0;
+        for (i = skip; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                                         code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
+                                         code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
+            if (code[i] == 0x67) {
+                return 0;
+            }
+        }
+        if (*code_len + 1 > code_cap) {
+            return -1;
+        }
+        memmove(code + skip + 1, code + skip, *code_len - skip);
+        code[skip] = 0x67;
+        (*code_len)++;
         return 0;
     }
     /* (A wait is an instruction of its own, and the prefix is of the
@@ -12593,6 +12664,149 @@ static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
 }
 
 /*
+ * What is refused of a statement before either emitter is asked, for
+ * being something neither should be asked: each of these was assembled,
+ * into an instruction that was not the one written.  1, and the reason,
+ * or 0.
+ */
+static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *encerr, size_t encerr_sz) {
+    const as_instruction_t *in = &st->u.instr;
+    const char *word = x86_size_word_wrong(cfg, st);
+    unsigned bits = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
+    char base[32];
+    char suffix = '\0';
+    int direct;
+    size_t i;
+
+    if (word != NULL) {
+        snprintf(encerr, encerr_sz, "'%s' is no prefix of %u-bit code", word, bits);
+        return 1;
+    }
+    if (in->operand_count > 4 || normalize_x86_mnemonic(in->mnemonic, base, sizeof(base), &suffix) != 0) {
+        return 0;
+    }
+    direct = in->operand_count == 1 &&
+             (in->operands[0].kind == AS_OPERAND_LABEL_REF || in->operands[0].kind == AS_OPERAND_IMMEDIATE);
+    /* A jump to a label is of the code's size, and has no letter to
+     * say another; nor has a call one for 32 bits in 64-bit code. */
+    if (direct && suffix != '\0' && suffix != 'b' &&
+        (strcmp(base, "jmp") == 0 || (strcmp(base, "call") == 0 && cfg->is_64 && suffix == 'l'))) {
+        snprintf(encerr, encerr_sz, "'%s' to a label takes no size: it is '%s'", in->mnemonic, base);
+        return 1;
+    }
+    /* A segment is 16 bits, and so is where a far jump of 16 goes. */
+    if (in->operand_count == 2 && (strcmp(base, "ljmp") == 0 || strcmp(base, "lcall") == 0) &&
+        in->operands[0].kind == AS_OPERAND_IMMEDIATE && in->operands[1].kind == AS_OPERAND_IMMEDIATE) {
+        long long v;
+
+        /* (Intel's `segment:offset` is kept with the offset first.) */
+        if (eval_expr_const(in->operands[in->syntax_intel ? 1 : 0].u.expr, &v) == 0 && (v < -32768 || v > 65535)) {
+            snprintf(encerr, encerr_sz, "segment %lld is not of 16 bits", v);
+            return 1;
+        }
+        if ((suffix == 'w' || (bits == 16u && suffix != 'l')) && eval_expr_const(in->operands[in->syntax_intel ? 0 : 1].u.expr, &v) == 0 &&
+            (v < -32768 || v > 65535)) {
+            snprintf(encerr, encerr_sz, "offset %lld is not of 16 bits", v);
+            return 1;
+        }
+    }
+    /* What `stos` stores is the accumulator, of the size it stores. */
+    if (in->operand_count == 2 && strcmp(base, "stos") == 0) {
+        const as_operand_t *src = &in->operands[in->syntax_intel ? 1 : 0];
+        const as_x86_reg_info_t *r = src->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(src->u.reg) : NULL;
+        unsigned want = suffix == 'b' ? 8u : suffix == 'w' ? 16u : suffix == 'l' ? 32u : suffix == 'q' ? 64u : 0u;
+
+        if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL &&
+            ((strcmp(r->name, "al") != 0 && strcmp(r->name, "ax") != 0 && strcmp(r->name, "eax") != 0 &&
+              strcmp(r->name, "rax") != 0) ||
+             (want != 0 && r->width != want))) {
+            snprintf(encerr, encerr_sz, "'%s' stores the accumulator, and %%%s is not it", in->mnemonic, r->name);
+            return 1;
+        }
+    }
+    /* `movsxd` widens 32 bits. */
+    if (in->operand_count == 2 && strcmp(base, "movsxd") == 0) {
+        const as_operand_t *src = &in->operands[in->syntax_intel ? 1 : 0];
+        const as_x86_reg_info_t *r = src->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(src->u.reg) : NULL;
+
+        if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL && r->width != 32) {
+            snprintf(encerr, encerr_sz, "'movsxd' widens a register of 32 bits, and %%%s is of %u", r->name,
+                     (unsigned)r->width);
+            return 1;
+        }
+    }
+    /* A segment's prefix by its name. */
+    if ((in->prefixes & AS_PREFIX_SEG_OVERRIDE) != 0 && in->segment_override != NULL) {
+        if (cfg->is_64 && (streq_ci(in->segment_override, "es") || streq_ci(in->segment_override, "ss"))) {
+            snprintf(encerr, encerr_sz, "'%s' is no prefix of 64-bit code", in->segment_override);
+            return 1;
+        }
+        for (i = 0; i < in->operand_count; ++i) {
+            /* (Where a string instruction stores is through %es and no
+             * other, and writing that is no second segment: `ds stos
+             * %ax, %es:(%di)`.) */
+            if (in->operands[i].kind == AS_OPERAND_MEMORY && in->operands[i].u.mem.segment_reg != NULL &&
+                !x86_is_string_destination(in->mnemonic, &in->operands[i].u.mem)) {
+                snprintf(encerr, encerr_sz, "a segment is written before '%s' and another in its address",
+                         in->mnemonic);
+                return 1;
+            }
+        }
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+
+        /* The address-size prefix, and an address of the size it says
+         * the address is not. */
+        if ((in->prefixes & AS_PREFIX_ADDR16) != 0 && op->kind == AS_OPERAND_MEMORY) {
+            const as_x86_reg_info_t *b = op->u.mem.base_reg != NULL ? as_x86_reg_find(op->u.mem.base_reg) : NULL;
+            const as_x86_reg_info_t *x = op->u.mem.index_reg != NULL ? as_x86_reg_find(op->u.mem.index_reg) : NULL;
+
+            if ((b != NULL && b->cls == AS_X86_REGCLASS_GENERAL && b->width == bits) ||
+                (x != NULL && x->cls == AS_X86_REGCLASS_GENERAL && x->width == bits)) {
+                snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and an address of %u bits", in->mnemonic,
+                         bits);
+                return 1;
+            }
+        }
+        /* In 64-bit code a place in a table or a block is a signed
+         * number: it is no part of an address that `lea` puts in a
+         * register of 32 bits, nor a number of 32 that is not widened. */
+        if (cfg->is_64 && (op->kind == AS_OPERAND_MEMORY || op->kind == AS_OPERAND_IMMEDIATE ||
+                           op->kind == AS_OPERAND_LABEL_REF)) {
+            const char *rop = first_symbol_op_in_expr(op->kind == AS_OPERAND_MEMORY ? op->u.mem.disp : op->u.expr);
+            int wide = suffix == 'q' || strcmp(base, "push") == 0;
+            size_t k;
+
+            if (rop == NULL ||
+                !(streq_ci(rop, "TPOFF") || streq_ci(rop, "DTPOFF") || streq_ci(rop, "GOT") || streq_ci(rop, "PLT"))) {
+                continue;
+            }
+            /* (A symbol alone is an address without a register.) */
+            if (op->kind != AS_OPERAND_IMMEDIATE && strcmp(base, "lea") != 0) {
+                continue;
+            }
+            /* (From %rip it is a distance, and the same in any width.) */
+            if (op->kind == AS_OPERAND_MEMORY && x86_base_is_ip(op->u.mem.base_reg)) {
+                continue;
+            }
+            for (k = 0; k < in->operand_count; ++k) {
+                const as_x86_reg_info_t *r =
+                    in->operands[k].kind == AS_OPERAND_REGISTER ? as_x86_reg_find(in->operands[k].u.reg) : NULL;
+
+                wide |= r != NULL && r->cls == AS_X86_REGCLASS_GENERAL && r->width == 64;
+            }
+            if (!wide) {
+                snprintf(encerr, encerr_sz, "'@%s' is a signed number, and '%s' has 32 bits that are not widened", rop,
+                         in->mnemonic);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
  * A statement that is prefixes alone (AS_BARE_PREFIX_MNEMONIC): their
  * bytes in the order written.  0 if it was one and is assembled, -1 if
  * it was one and is refused, 1 if it is something else.
@@ -12802,7 +13016,7 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
             (in->prefixes & AS_PREFIX_ADDR16) == 0) {
             snprintf(name, name_sz, "%s", low);
             ops[i].u.mem.base_reg = rip;
-            bare->u.instr.prefixes |= AS_PREFIX_ADDR16;
+            bare->u.instr.prefixes |= AS_PREFIX_ADDR16 | AS_PREFIX_ADDR_32;
             return 1;
         }
     }
@@ -12845,6 +13059,134 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
         if (rc <= 0) {
             return rc;
+        }
+        if (x86_stmt_refused(cfg, st, encerr, encerr_sz)) {
+            return -1;
+        }
+        /*
+         * The address-size prefix before an address that has no
+         * register to say its size: the address is of the size the
+         * prefix says, 16 bits in 32-bit code and 32 in 16-bit.  It is
+         * assembled as this code's and made the other's here, for all
+         * the emitters at once: most of them left the prefix out, and
+         * the rest wrote it before the ModRM byte of this code's
+         * address, which behind the prefix is `(%di)` -- `addr16 movss
+         * sym, %xmm0` loaded from there.
+         */
+        if (!cfg->is_64 && (st->u.instr.prefixes & AS_PREFIX_ADDR16) != 0 &&
+            st->u.instr.operand_count <= 4 &&
+            (!is_rel_mnemonic(st->u.instr.mnemonic) ||
+             (st->u.instr.operand_count == 1 && st->u.instr.operands[0].raw != NULL &&
+              st->u.instr.operands[0].raw[0] == '*'))) {
+            int code16 = cfg->x86_code_bits == 16u;
+            int absolute = 0;
+            long long where = 0;
+            int where_known = 0;
+
+            for (i = 0; i < st->u.instr.operand_count; ++i) {
+                const as_operand_t *op = &st->u.instr.operands[i];
+
+                /* (In Intel's syntax a number has no mark, and is not
+                 * taken for an address here.) */
+                if ((!st->u.instr.syntax_intel && operand_is_bare_address(op)) ||
+                    (op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg == NULL && op->u.mem.index_reg == NULL)) {
+                    absolute = 1;
+                    where_known = eval_expr_const(op->kind == AS_OPERAND_MEMORY ? op->u.mem.disp : op->u.expr, &where) == 0;
+                }
+            }
+            if (absolute) {
+                size_t off = 0;
+                size_t n;
+
+                bare = *st;
+                bare.u.instr.prefixes &= ~(AS_PREFIX_ADDR16 | AS_PREFIX_ADDR_32);
+                if (code_cap < 4 ||
+                    encode_x86_stmt(ctx, cfg, &bare, code + 1, code_cap - 3, code_len, encerr, encerr_sz) != 0) {
+                    return -1;
+                }
+                n = *code_len;
+                if ((code16 ? x86_disp16_offset(code + 1, n, 1, &off) : x86_disp32_offset(code + 1, n, 0, &off)) != 0 ||
+                    off == 0 || off + (code16 ? 2u : 4u) > n) {
+                    snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and no address it can be for",
+                             st->u.instr.mnemonic);
+                    return -1;
+                }
+                off += 1;
+                /* (The byte before the address is the ModRM byte, whose
+                 * "no register" is 5 in an address of 32 bits and 6 in
+                 * one of 16; or it is the opcode of a move to or from
+                 * the accumulator, which has none.  The address itself
+                 * is two bytes shorter, or longer.) */
+                if ((code[off - 1] & 0xc7u) == (code16 ? 0x06u : 0x05u)) {
+                    code[off - 1] = (unsigned char)((code[off - 1] & 0x38u) | (code16 ? 0x05u : 0x06u));
+                } else if (code[off - 1] < 0xa0 || code[off - 1] > 0xa3) {
+                    snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and no address it can be for",
+                             st->u.instr.mnemonic);
+                    return -1;
+                }
+                if (code16) {
+                    memmove(code + off + 4, code + off + 2, n + 1 - (off + 2));
+                    /* (A number has its upper half, which the two
+                     * bytes it was assembled into had not.) */
+                    code[off + 2] = where_known ? (unsigned char)(((uint32_t)where >> 16) & 0xffu) : 0;
+                    code[off + 3] = where_known ? (unsigned char)(((uint32_t)where >> 24) & 0xffu) : 0;
+                    n += 2;
+                } else {
+                    memmove(code + off + 2, code + off + 4, n + 1 - (off + 4));
+                    n -= 2;
+                }
+                code[0] = 0x67;
+                *code_len = n + 1;
+                return 0;
+            }
+        }
+        /*
+         * A call or a jump to a place not known here, of the size the
+         * code's is not -- `callw sym`, `data16 jmp sym` -- is the
+         * instruction of the other code behind the prefix.  `data16
+         * jne sym` had the four bytes of this code's behind a prefix
+         * that said two, and `callw sym` in 64-bit code the same.
+         * (Before `loop` and its like `data16` says nothing.)
+         */
+        if (st->u.instr.operand_count == 1 && is_rel_mnemonic(st->u.instr.mnemonic) &&
+            (st->u.instr.operands[0].kind == AS_OPERAND_LABEL_REF ||
+             st->u.instr.operands[0].kind == AS_OPERAND_IMMEDIATE)) {
+            char base[32];
+            char letter = '\0';
+            int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
+
+            if (is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+                if ((st->u.instr.prefixes & AS_PREFIX_DATA16) != 0) {
+                    bare = *st;
+                    bare.u.instr.prefixes &= ~AS_PREFIX_DATA16;
+                    return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
+                }
+            } else if (normalize_x86_mnemonic(st->u.instr.mnemonic, base, sizeof(base), &letter) == 0) {
+                int op16;
+
+                long long number;
+
+                letter = x86_branch_size_letter(st, letter, cfg->is_64 ? 64u : cfg->x86_code_bits);
+                op16 = letter == 'w' || (code16 && letter != 'l');
+                /* (To a number, which is no place in this object, the
+                 * prefix is written before the jump as it is.) */
+                if (op16 != code16 && eval_expr_const(st->u.instr.operands[0].u.expr, &number) != 0) {
+                    as_elf_cfg_t other = *cfg;
+
+                    other.x86_code_bits = code16 ? 32u : 16u;
+                    other.is_64 = 0;
+                    bare = *st;
+                    bare.u.instr.mnemonic = base;
+                    bare.u.instr.prefixes &= ~(AS_PREFIX_DATA16 | AS_PREFIX_ADDR16 | AS_PREFIX_ADDR_32);
+                    if (code_cap < 2 ||
+                        encode_x86_stmt(ctx, &other, &bare, code + 1, code_cap - 1, code_len, encerr, encerr_sz) != 0) {
+                        return -1;
+                    }
+                    code[0] = 0x66;
+                    (*code_len)++;
+                    return 0;
+                }
+            }
         }
         {
             const char *rop = NULL;
@@ -14281,6 +14623,10 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
         return -1;
     }
     *code_len = 0;
+    if (x86_stmt_refused(cfg, st, encerr, encerr_sz)) {
+        return -1;
+    }
+    suffix = x86_branch_size_letter(st, suffix, cfg->is_64 ? 64u : cfg->x86_code_bits);
     if (streq_ci(mnbuf, "call")) {
         /* A call of 16 bits -- `callw`, or `call` in 16-bit code -- has
          * two bytes for its distance and pushes two; where that is not
@@ -14333,85 +14679,64 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
         *code_len = n;
         return 0;
     }
-    if (streq_ci(mnbuf, "jmp")) {
-        disp8 = abs_target - ((long long)sec_off + 2);
-        if (allow_short && disp8 >= -128 && disp8 <= 127) {
-            if (code_cap < 2) {
-                return -1;
+    {
+        int is_jmp = streq_ci(mnbuf, "jmp");
+
+        if (is_jmp || x86_cond_code(mnbuf, &cc) == 0) {
+            /*
+             * A jump: one byte of distance where that reaches, and
+             * where it does not, two or four by the size it is of --
+             * the code's, or the one a `w`, an `l` or `data16` gives
+             * it, behind the prefix.  (The size written was not asked:
+             * `data16 jmp` to a label was `jmp`.)
+             */
+            const char *what = is_jmp ? "jump" : "conditional branch";
+            int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
+            int op16 = suffix == 'w' || (code16 && suffix != 'l');
+            size_t pre = x86_branch_flip16(st) ? 1u : 0u;
+            size_t n = 0;
+            size_t len;
+            long long disp;
+
+            disp8 = abs_target - ((long long)sec_off + 2 + (long long)pre);
+            if (allow_short && disp8 >= -128 && disp8 <= 127) {
+                if (code_cap < 2 + pre) {
+                    return -1;
+                }
+                if (pre) {
+                    code[n++] = 0x66;
+                }
+                code[n++] = is_jmp ? 0xeb : (unsigned char)(0x70u | cc);
+                code[n++] = (unsigned char)(signed char)disp8;
+                *code_len = n;
+                return 0;
             }
-            code[0] = 0xeb;
-            code[1] = (unsigned char)(signed char)disp8;
-            *code_len = 2;
-            return 0;
-        }
-        if (suffix == 'b') {
-            snprintf(encerr, encerr_sz, "jump target out of range");
-            return -1;
-        }
-        if (!cfg->is_64 && cfg->x86_code_bits == 16u) {
-            long long disp16 = abs_target - ((long long)sec_off + 3);
-            if (disp16 < -32768 || disp16 > 32767 || code_cap < 3) {
+            if (is_jmp && suffix == 'b') {
                 snprintf(encerr, encerr_sz, "jump target out of range");
                 return -1;
             }
-            code[0] = 0xe9;
-            code[1] = (unsigned char)((uint16_t)disp16 & 0xffu);
-            code[2] = (unsigned char)(((uint16_t)disp16 >> 8) & 0xffu);
-            *code_len = 3;
-            return 0;
-        }
-        {
-            long long disp32 = abs_target - ((long long)sec_off + 5);
-            if (disp32 < INT32_MIN || disp32 > INT32_MAX || code_cap < 5) {
-                snprintf(encerr, encerr_sz, "jump target out of range");
+            len = (size_t)(op16 != code16) + (is_jmp ? 1u : 2u) + (op16 ? 2u : 4u);
+            disp = abs_target - ((long long)sec_off + (long long)len);
+            if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
+                snprintf(encerr, encerr_sz, "%s target out of range", what);
                 return -1;
             }
-            code[0] = 0xe9;
-            code[1] = (unsigned char)((uint32_t)disp32 & 0xffu);
-            code[2] = (unsigned char)(((uint32_t)disp32 >> 8) & 0xffu);
-            code[3] = (unsigned char)(((uint32_t)disp32 >> 16) & 0xffu);
-            code[4] = (unsigned char)(((uint32_t)disp32 >> 24) & 0xffu);
-            *code_len = 5;
-            return 0;
-        }
-    }
-    if (x86_cond_code(mnbuf, &cc) == 0) {
-        disp8 = abs_target - ((long long)sec_off + 2);
-        if (allow_short && disp8 >= -128 && disp8 <= 127) {
-            if (code_cap < 2) {
-                return -1;
+            if (op16 != code16) {
+                code[n++] = 0x66;
             }
-            code[0] = (unsigned char)(0x70u | cc);
-            code[1] = (unsigned char)(signed char)disp8;
-            *code_len = 2;
-            return 0;
-        }
-        if (!cfg->is_64 && cfg->x86_code_bits == 16u) {
-            long long disp16 = abs_target - ((long long)sec_off + 4);
-            if (disp16 < -32768 || disp16 > 32767 || code_cap < 4) {
-                snprintf(encerr, encerr_sz, "conditional branch target out of range");
-                return -1;
+            if (is_jmp) {
+                code[n++] = 0xe9;
+            } else {
+                code[n++] = 0x0f;
+                code[n++] = (unsigned char)(0x80u | cc);
             }
-            code[0] = 0x0f;
-            code[1] = (unsigned char)(0x80u | cc);
-            code[2] = (unsigned char)((uint16_t)disp16 & 0xffu);
-            code[3] = (unsigned char)(((uint16_t)disp16 >> 8) & 0xffu);
-            *code_len = 4;
-            return 0;
-        }
-        {
-            long long disp32 = abs_target - ((long long)sec_off + 6);
-            if (disp32 < INT32_MIN || disp32 > INT32_MAX || code_cap < 6) {
-                snprintf(encerr, encerr_sz, "conditional branch target out of range");
-                return -1;
+            code[n++] = (unsigned char)((uint32_t)disp & 0xffu);
+            code[n++] = (unsigned char)(((uint32_t)disp >> 8) & 0xffu);
+            if (!op16) {
+                code[n++] = (unsigned char)(((uint32_t)disp >> 16) & 0xffu);
+                code[n++] = (unsigned char)(((uint32_t)disp >> 24) & 0xffu);
             }
-            code[0] = 0x0f;
-            code[1] = (unsigned char)(0x80u | cc);
-            code[2] = (unsigned char)((uint32_t)disp32 & 0xffu);
-            code[3] = (unsigned char)(((uint32_t)disp32 >> 8) & 0xffu);
-            code[4] = (unsigned char)(((uint32_t)disp32 >> 16) & 0xffu);
-            code[5] = (unsigned char)(((uint32_t)disp32 >> 24) & 0xffu);
-            *code_len = 6;
+            *code_len = n;
             return 0;
         }
     }
@@ -14425,6 +14750,16 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
             snprintf(encerr, encerr_sz, "'%s' is not an instruction of %u-bit code", st->u.instr.mnemonic,
                      cfg->is_64 ? 64u : cfg->x86_code_bits);
             return -1;
+        }
+        /* The address-size prefix, written: it is what the instruction
+         * counts in, and `addr16 loop` was `loop`.  One that has the
+         * prefix for its own has no other register to count in. */
+        if (kind == 0 && (st->u.instr.prefixes & AS_PREFIX_ADDR16) != 0) {
+            if (need67) {
+                snprintf(encerr, encerr_sz, "'%s' has the address-size prefix already", st->u.instr.mnemonic);
+                return -1;
+            }
+            need67 = 1;
         }
         if (kind == 0) {
             size_t len = need67 ? 3u : 2u;
@@ -15231,8 +15566,10 @@ static size_t relax_long_size(const as_stmt_t *st, unsigned code_bits) {
     int is_jmp = normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
                  streq_ci(mnbuf, "jmp");
     int code16 = code_bits == 16u;
-    int wide16 = suffix == 'w' || (code16 && suffix != 'l');
+    int wide16;
 
+    suffix = x86_branch_size_letter(st, suffix, code_bits);
+    wide16 = suffix == 'w' || (code16 && suffix != 'l');
     return (is_jmp ? 1u : 2u) + (wide16 ? 2u : 4u) + (wide16 != code16 ? 1u : 0u);
 }
 
@@ -15490,6 +15827,31 @@ static int branch_is_relaxed(emit_ctx_t *ctx, const as_stmt_t *st, int *is_short
  * (A label alone, and a numbered one with a number, were resolved
  * before there was this, and still are where they were.)
  */
+/*
+ * A call of where it stands, or so many bytes from there: `call .`,
+ * `call .+5`.  It is as far as it says, like a jump of the same, and
+ * was given a relocation against the section -- with the distance of
+ * the wrong end of the instruction in it.
+ */
+static int call_to_place_target(const as_stmt_t *st, uint64_t sec_off, long long *abs_target) {
+    const as_expr_t *place = NULL;
+    long long addend = 0;
+    const as_operand_t *op;
+
+    if (st == NULL || st->kind != AS_STMT_INSTRUCTION || st->u.instr.operand_count != 1 ||
+        !is_call_mnemonic(st->u.instr.mnemonic) || strncasecmp(st->u.instr.mnemonic, "lcall", 5) == 0) {
+        return -1;
+    }
+    op = &st->u.instr.operands[0];
+    if ((op->kind != AS_OPERAND_LABEL_REF && op->kind != AS_OPERAND_IMMEDIATE) ||
+        (op->raw != NULL && op->raw[0] == '*') || relax_branch_parts(op->u.expr, &place, &addend) != 0 ||
+        place->kind != AS_EXPR_SYMBOL || strcmp(place->symbol, ".") != 0) {
+        return -1;
+    }
+    *abs_target = (long long)sec_off + addend;
+    return 0;
+}
+
 static int relaxed_place_branch_target(emit_ctx_t *ctx, const as_stmt_t *st, const char *section_name,
                                        uint64_t sec_off, unsigned x86_code_bits, long long *abs_target,
                                        int *is_short) {
@@ -15559,7 +15921,7 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     }
     /* A jump that was sized is the size it was given. */
     if (branch_is_relaxed(ctx, st, &is_local)) {
-        return is_local ? 2u : (unsigned)relax_long_size(st, x86_code_bits);
+        return is_local ? 2u + (unsigned)x86_branch_flip16(st) : (unsigned)relax_long_size(st, x86_code_bits);
     }
     e = op->u.expr;
     is_local = ((e != NULL && expr_has_local_ref(e)) ||
@@ -15579,7 +15941,7 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
      */
     {
         int code16 = x86_code_bits == 16u;
-        int wide16 = suffix == 'w' || (code16 && suffix != 'l');
+        int wide16 = (suffix = x86_branch_size_letter(st, suffix, x86_code_bits)) == 'w' || (code16 && suffix != 'l');
         unsigned field = wide16 ? 2u : 4u;
         unsigned prefix = (wide16 != code16) ? 1u : 0u;
 
@@ -15587,10 +15949,13 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
             return 1u + field + prefix;
         }
         if (is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
-            return fixed_short_rel_size(st->u.instr.mnemonic, x86_code_bits);
+            /* (And the address-size prefix, written: `addr16 loop`
+             * counts in %cx.) */
+            return (unsigned)fixed_short_rel_size(st->u.instr.mnemonic, x86_code_bits) +
+                   ((st->u.instr.prefixes & AS_PREFIX_ADDR16) != 0 ? 1u : 0u);
         }
         if (is_local) {
-            return 2u;
+            return 2u + (unsigned)x86_branch_flip16(st);
         }
         if (streq_ci(mnbuf, "jmp")) {
             return 1u + field + prefix;
@@ -16685,6 +17050,10 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
                 local_cfg.current_text_offset = sec_off;
                 return emit_resolved_x86_branch_ex(&local_cfg, &tmp, sec_off, abs_target, is_short, code, code_cap,
                                                    code_len, encerr, encerr_sz);
+            }
+            if (call_to_place_target(st, sec_off, &abs_target) == 0) {
+                return emit_resolved_x86_branch_ex(&stmt_cfg, st, sec_off, abs_target, 0, code, code_cap, code_len,
+                                                   encerr, encerr_sz);
             }
         }
 
@@ -20588,6 +20957,41 @@ static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, s
     return 0;
 }
 
+/*
+ * The same in 16-bit code, where an address of 32 bits is behind the
+ * prefix that is one of 16 in 32-bit code: the instruction less that
+ * prefix is laid out as 32-bit code's is.  (Without this the four
+ * bytes were looked for at the instruction's end, and `addr32 bt $1,
+ * sym` had its relocation over the count.)
+ */
+static int x86_disp32_offset_code16(const unsigned char *code, size_t len, size_t *off_out) {
+    unsigned char tmp[32];
+    size_t at = 0;
+    size_t i;
+
+    if (len == 0 || len > sizeof(tmp)) {
+        return -1;
+    }
+    for (i = 0; i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
+                            code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                            code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x9b); ++i) {
+        if (code[i] == 0x67) {
+            break;
+        }
+    }
+    if (i >= len || code[i] != 0x67) {
+        return -1;
+    }
+    at = i;
+    memcpy(tmp, code, at);
+    memcpy(tmp + at, code + at + 1, len - at - 1);
+    if (x86_disp32_offset(tmp, len - 1, 0, off_out) != 0) {
+        return -1;
+    }
+    *off_out += 1;
+    return 0;
+}
+
 static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruction_t *in,
                                              const as_operand_t *op, const unsigned char *code,
                                              size_t code_len, uint32_t *type, uint64_t *width) {
@@ -20602,10 +21006,25 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
         return;
     }
 
+    /* The prefixes are no part of the shape: `data16 jmp sym`, `ds
+     * call sym` and `callw sym` in 64-bit code had the relocation of a
+     * distance of four bytes, which the first and last have not. */
+    while (code_len > 2 && (code[0] == 0x26 || code[0] == 0x2e || code[0] == 0x36 || code[0] == 0x3e ||
+                            code[0] == 0x64 || code[0] == 0x65 || code[0] == 0x66 || code[0] == 0x67)) {
+        code++;
+        code_len--;
+    }
     if (code_len == 2 &&
         (code[0] == 0xeb || (code[0] >= 0x70 && code[0] <= 0x7f) || (code[0] >= 0xe0 && code[0] <= 0xe3))) {
         *type = (machine == EM_X86_64) ? R_X86_64_PC8 : R_386_PC8;
         *width = 1;
+        return;
+    }
+    if ((code_len == 3 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
+        (code_len == 4 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80) ||
+        (code_len == 4 && code[0] == 0xc7 && code[1] == 0xf8)) {
+        *type = (machine == EM_X86_64) ? R_X86_64_PC16 : R_386_PC16;
+        *width = 2;
         return;
     }
 
@@ -20637,26 +21056,6 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
         return;
     }
 
-    if (machine == EM_386 && code_len == 3 && (code[0] == 0xe8 || code[0] == 0xe9)) {
-        *type = R_386_PC16;
-        *width = 2;
-        return;
-    }
-    /* `callw sym` in 32-bit code: the same two bytes behind a prefix.
-     * It was given four, which there are not, and they were written
-     * from the instruction's first byte: the prefix and the opcode
-     * were zeros. */
-    if (machine == EM_386 && code_len == 4 && code[0] == 0x66 && (code[1] == 0xe8 || code[1] == 0xe9)) {
-        *type = R_386_PC16;
-        *width = 2;
-        return;
-    }
-
-    if (machine == EM_386 && code_len == 4 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80) {
-        *type = R_386_PC16;
-        *width = 2;
-        return;
-    }
 }
 
 static int machine_relocation_addend_is_in_place(unsigned machine) {
@@ -21601,7 +22000,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     int is_short;
 
                     if (relaxed_place_branch_target(ctx, st, track.current, cur_off, track.x86_code_bits, &there,
-                                                    &is_short) == 0) {
+                                                    &is_short) == 0 ||
+                        call_to_place_target(st, cur_off, &there) == 0) {
                         continue;
                     }
                 }
@@ -21841,13 +22241,17 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 } else if ((op->kind == AS_OPERAND_MEMORY ||
                             (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
                            reloc_width != 1 && reloc_width != 2 &&
-                           x86_disp32_offset(code, code_len, machine == EM_X86_64, &disp_field_off) == 0) {
+                           (track.x86_code_bits == 16u && machine == EM_386
+                                ? x86_disp32_offset_code16(code, code_len, &disp_field_off)
+                                : x86_disp32_offset(code, code_len, machine == EM_X86_64, &disp_field_off)) == 0) {
                     have_disp_field = 1;
                     reloc_width = 4;
                     if (machine == EM_X86_64 && t == R_X86_64_64) {
                         t = R_X86_64_32S;
                     }
-                } else if (machine == EM_386 && op->kind == AS_OPERAND_MEMORY &&
+                } else if (machine == EM_386 &&
+                           (op->kind == AS_OPERAND_MEMORY ||
+                            (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
                            x86_disp16_offset(code, code_len, track.x86_code_bits == 16u, &disp_field_off) == 0) {
                     /* `movl sym(%bx), %ecx`: two bytes, and their own
                      * relocation.  Four were written over the end of the

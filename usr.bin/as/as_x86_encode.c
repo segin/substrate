@@ -3009,8 +3009,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form(&ctx, insn);
             return -1;
         }
-        if ((sbits == 16 && emit8(&ctx, 0x66) != 0) || emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 ||
-            emit8(&ctx, 0x38) != 0 || emit8(&ctx, sbits == 8 ? 0xf0 : 0xf1) != 0 ||
+        /* (16 bits are the code's own in 16-bit code, and have no
+         * prefix there: `crc32w (%bx), %eax` had one, and read 32.) */
+        if ((sbits == 16 && insn->default_bits != 16u && emit8(&ctx, 0x66) != 0) || emit8(&ctx, 0xf2) != 0 ||
+            emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x38) != 0 || emit8(&ctx, sbits == 8 ? 0xf0 : 0xf1) != 0 ||
             modrm_sib_disp(&ctx, (uint8_t)a->u.reg, b) != 0) {
             return -1;
         }
