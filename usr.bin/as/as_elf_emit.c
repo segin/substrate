@@ -3328,7 +3328,103 @@ static int x86_fixed_short_branch(const char *mn, unsigned code_bits, int *need6
     return 0;
 }
 
+/*
+ * What is asked of a mnemonic alone, and answered by going through
+ * lists of names: what it is without its suffix, how many operands it
+ * may have, whether it is a branch.  Each was asked several times for
+ * every time a statement was encoded, and was a quarter of the time an
+ * assembly took; each is answered once now for each name a source has.
+ */
+struct mn_facts {
+    char *key;
+    char base[30];
+    char suffix;
+    signed char norm; /* what normalize_x86_mnemonic() returns; 1: not asked yet */
+    signed char rel;  /* is_rel_mnemonic(); -1: not asked yet */
+    /* Which lists of x86_operand_classes_refused() the name is in: 1 an
+     * instruction of integers, 2 of one width, 4 and of no byte; -1: not
+     * asked yet. */
+    signed char classes;
+    int max_ops;      /* x86_max_operand_count(); -2: not asked yet */
+};
+
+static struct {
+    as_strmap_t by_name;
+    struct mn_facts **items;
+    size_t count;
+    size_t cap;
+} mn_memo;
+
+/* The facts of `mn`, or NULL where they are not kept (a name too long
+ * to be an instruction's, or no memory). */
+static struct mn_facts *mn_facts_of(const char *mn) {
+    struct mn_facts *f;
+    size_t at;
+
+    if (mn == NULL || mn[0] == '\0') {
+        return NULL;
+    }
+    if (as_strmap_get(&mn_memo.by_name, mn, &at)) {
+        return mn_memo.items[at];
+    }
+    if (strlen(mn) >= sizeof(f->base)) {
+        return NULL;
+    }
+    if (mn_memo.count == mn_memo.cap) {
+        size_t ncap = mn_memo.cap == 0 ? 64 : mn_memo.cap * 2;
+        struct mn_facts **next = (struct mn_facts **)realloc(mn_memo.items, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            return NULL;
+        }
+        mn_memo.items = next;
+        mn_memo.cap = ncap;
+    }
+    f = (struct mn_facts *)calloc(1, sizeof(*f));
+    if (f == NULL) {
+        return NULL;
+    }
+    f->key = xstrdup(mn);
+    if (f->key == NULL || as_strmap_put(&mn_memo.by_name, f->key, mn_memo.count) != 0) {
+        free(f->key);
+        free(f);
+        return NULL;
+    }
+    f->norm = 1;
+    f->rel = -1;
+    f->classes = -1;
+    f->max_ops = -2;
+    mn_memo.items[mn_memo.count++] = f;
+    return f;
+}
+
+static void mn_facts_free(void) {
+    size_t i;
+
+    as_strmap_free(&mn_memo.by_name);
+    for (i = 0; i < mn_memo.count; ++i) {
+        free(mn_memo.items[i]->key);
+        free(mn_memo.items[i]);
+    }
+    free(mn_memo.items);
+    memset(&mn_memo, 0, sizeof(mn_memo));
+}
+
+static int is_rel_mnemonic_uncached(const char *mn);
+
 static int is_rel_mnemonic(const char *mn) {
+    struct mn_facts *f = mn_facts_of(mn);
+
+    if (f == NULL) {
+        return is_rel_mnemonic_uncached(mn);
+    }
+    if (f->rel < 0) {
+        f->rel = (signed char)is_rel_mnemonic_uncached(mn);
+    }
+    return f->rel;
+}
+
+static int is_rel_mnemonic_uncached(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
@@ -3499,7 +3595,39 @@ static int has_x86_size_suffix(const char *mn, char *suffix_out) {
     return 1;
 }
 
+static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t dst_sz, char *suffix_out);
+
 static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, char *suffix_out) {
+    struct mn_facts *f;
+    size_t n;
+
+    if (src == NULL || dst == NULL || dst_sz == 0) {
+        return -1;
+    }
+    n = strlen(src);
+    if (n + 1 > dst_sz) {
+        return -1;
+    }
+    f = mn_facts_of(src);
+    if (f == NULL) {
+        return normalize_x86_mnemonic_uncached(src, dst, dst_sz, suffix_out);
+    }
+    if (f->norm == 1) {
+        f->suffix = '\0';
+        f->norm = (signed char)normalize_x86_mnemonic_uncached(src, f->base, sizeof(f->base), &f->suffix);
+    }
+    if (f->norm != 0) {
+        return f->norm;
+    }
+    /* (What is left of a name is no longer than the name.) */
+    memcpy(dst, f->base, strlen(f->base) + 1);
+    if (suffix_out != NULL) {
+        *suffix_out = f->suffix;
+    }
+    return 0;
+}
+
+static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t dst_sz, char *suffix_out) {
     size_t i;
     size_t n;
     char suffix = '\0';
@@ -9311,7 +9439,21 @@ static const char *const x86_max_operands[] = {
 };
 
 /* The entry of x86_max_operands that has the mnemonic, or -1. */
+static int x86_max_operand_count_uncached(const char *mn);
+
 static int x86_max_operand_count(const char *mn) {
+    struct mn_facts *f = mn_facts_of(mn);
+
+    if (f == NULL) {
+        return mn != NULL ? x86_max_operand_count_uncached(mn) : -1;
+    }
+    if (f->max_ops == -2) {
+        f->max_ops = x86_max_operand_count_uncached(mn);
+    }
+    return f->max_ops;
+}
+
+static int x86_max_operand_count_uncached(const char *mn) {
     char key[40];
     size_t n = strlen(mn);
     size_t i;
@@ -9623,16 +9765,30 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         static const char *const one_width[] = {
             "xadd", "cmpxchg", "bsf", "bsr", "popcnt", "lzcnt", "tzcnt", "imul", "bt", "bts", "btr", "btc",
         };
-        int is_integer = x86_name_is(mn, "mov", "bwl");
-        int is_one_width = strncmp(mn, "cmov", 4) == 0;
-        int no_byte = is_one_width;
+        struct mn_facts *facts = mn_facts_of(mn);
+        int is_integer;
+        int is_one_width;
+        int no_byte;
 
-        for (i = 0; i < sizeof(integer) / sizeof(integer[0]) && !is_integer; ++i) {
-            is_integer = x86_name_is(mn, integer[i], "bwlq");
-        }
-        for (i = 0; i < sizeof(one_width) / sizeof(one_width[0]) && !is_one_width; ++i) {
-            is_one_width = x86_name_is(mn, one_width[i], "bwlq");
-            no_byte = is_one_width && i >= 2;
+        /* (Which of the lists a name is in is found once for the name.) */
+        if (facts != NULL && facts->classes >= 0) {
+            is_integer = facts->classes & 1;
+            is_one_width = (facts->classes >> 1) & 1;
+            no_byte = (facts->classes >> 2) & 1;
+        } else {
+            is_integer = x86_name_is(mn, "mov", "bwl");
+            is_one_width = strncmp(mn, "cmov", 4) == 0;
+            no_byte = is_one_width;
+            for (i = 0; i < sizeof(integer) / sizeof(integer[0]) && !is_integer; ++i) {
+                is_integer = x86_name_is(mn, integer[i], "bwlq");
+            }
+            for (i = 0; i < sizeof(one_width) / sizeof(one_width[0]) && !is_one_width; ++i) {
+                is_one_width = x86_name_is(mn, one_width[i], "bwlq");
+                no_byte = is_one_width && i >= 2;
+            }
+            if (facts != NULL) {
+                facts->classes = (signed char)((is_integer ? 1 : 0) | (is_one_width ? 2 : 0) | (no_byte ? 4 : 0));
+            }
         }
         for (i = 0; i < insn->operand_count && is_integer; ++i) {
             if (reg[i] == NULL || reg[i]->cls == AS_X86_REGCLASS_GENERAL) {
@@ -16458,6 +16614,7 @@ int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
 
 void as_x86_precode_free(void) {
     text_code_free();
+    mn_facts_free();
 }
 
 static struct stmt_code *stmt_code_slot(emit_ctx_t *ctx, const as_stmt_t *st) {
