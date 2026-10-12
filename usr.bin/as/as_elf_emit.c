@@ -8,9 +8,6 @@
 #include "as_x86_vec.h"
 #include "as_x86_vex.h"
 #include "as_x86_sse3.h"
-#include "as_x86_ssse3.h"
-#include "as_x86_sse41.h"
-#include "as_x86_sse42.h"
 #include "as_data.h"
 #include "as_strmap.h"
 #include "as_util.h"
@@ -9093,127 +9090,6 @@ static int section_name_is_executable(emit_ctx_t *ctx, const char *name) {
     return 0;
 }
 
-static int try_encode_x86_ssse3(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
-                                size_t *code_len, char *encerr, size_t encerr_sz) {
-    as_x86_ssse3_insn_t ss;
-
-    if (in == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    memset(&ss, 0, sizeof(ss));
-    ss.mnemonic = in->mnemonic;
-    ss.op_count = in->op_count;
-    if (in->op_count >= 1) {
-        ss.dst = in->ops[0];
-    }
-    if (in->op_count >= 2) {
-        ss.src = in->ops[1];
-    }
-    if (in->op_count >= 3 && in->ops[2].kind == AS_X86_OP_IMM) {
-        ss.has_imm8 = 1;
-        ss.imm8 = (uint8_t)in->ops[2].u.imm;
-    }
-    return as_x86_encode_ssse3(&ss, code, code_cap, code_len, encerr, encerr_sz);
-}
-
-static int try_encode_x86_sse41(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
-                                size_t *code_len, char *encerr, size_t encerr_sz) {
-    as_x86_sse41_insn_t s41;
-    int explicit_xmm0_mask_first;
-    int explicit_xmm0_mask_last;
-    int immediate_3op;
-
-    if (in == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    memset(&s41, 0, sizeof(s41));
-    s41.mnemonic = in->mnemonic;
-    explicit_xmm0_mask_first =
-        (streq_ci(in->mnemonic, "blendvps") || streq_ci(in->mnemonic, "blendvpd") || streq_ci(in->mnemonic, "pblendvb")) &&
-        in->op_count == 3 && in->ops[0].kind == AS_X86_OP_REG && in->ops[0].u.reg == 0;
-    explicit_xmm0_mask_last =
-        (streq_ci(in->mnemonic, "blendvps") || streq_ci(in->mnemonic, "blendvpd") || streq_ci(in->mnemonic, "pblendvb")) &&
-        in->op_count == 3 && in->ops[2].kind == AS_X86_OP_REG && in->ops[2].u.reg == 0;
-    immediate_3op = in->op_count == 3 &&
-                    (in->ops[0].kind == AS_X86_OP_IMM || in->ops[2].kind == AS_X86_OP_IMM);
-
-    if (explicit_xmm0_mask_last) {
-        s41.op_count = 2;
-        s41.dst = in->ops[0];
-        s41.src = in->ops[1];
-    } else if (explicit_xmm0_mask_first) {
-        s41.op_count = 2;
-        s41.dst = in->ops[2];
-        s41.src = in->ops[1];
-    } else if (immediate_3op) {
-        s41.op_count = 2;
-        if (in->ops[0].kind == AS_X86_OP_IMM) {
-            s41.imm8 = (uint8_t)in->ops[0].u.imm;
-            s41.src = in->ops[1];
-            s41.dst = in->ops[2];
-        } else {
-            s41.imm8 = (uint8_t)in->ops[2].u.imm;
-            s41.dst = in->ops[0];
-            s41.src = in->ops[1];
-        }
-        s41.has_imm8 = 1;
-    } else {
-        s41.op_count = in->op_count;
-        if (in->op_count >= 1) {
-            s41.dst = in->ops[0];
-        }
-        if (in->op_count >= 2) {
-            s41.src = in->ops[1];
-        }
-    }
-    if (!explicit_xmm0_mask_first && !explicit_xmm0_mask_last && !immediate_3op &&
-        in->op_count >= 3 && in->ops[2].kind == AS_X86_OP_IMM) {
-        s41.has_imm8 = 1;
-        s41.imm8 = (uint8_t)in->ops[2].u.imm;
-    }
-    return as_x86_encode_sse41(&s41, code, code_cap, code_len, encerr, encerr_sz);
-}
-
-static int try_encode_x86_sse42(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
-                                size_t *code_len, char *encerr, size_t encerr_sz) {
-    as_x86_sse42_insn_t s42;
-    int immediate_3op;
-
-    if (in == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    memset(&s42, 0, sizeof(s42));
-    s42.mnemonic = in->mnemonic;
-    immediate_3op = in->op_count == 3 &&
-                    (in->ops[0].kind == AS_X86_OP_IMM || in->ops[2].kind == AS_X86_OP_IMM);
-    if (immediate_3op) {
-        s42.op_count = 2;
-        if (in->ops[0].kind == AS_X86_OP_IMM) {
-            s42.imm8 = (uint8_t)in->ops[0].u.imm;
-            s42.src = in->ops[1];
-            s42.dst = in->ops[2];
-        } else {
-            s42.imm8 = (uint8_t)in->ops[2].u.imm;
-            s42.dst = in->ops[0];
-            s42.src = in->ops[1];
-        }
-        s42.has_imm8 = 1;
-    } else {
-        s42.op_count = in->op_count;
-        if (in->op_count >= 1) {
-            s42.dst = in->ops[0];
-        }
-        if (in->op_count >= 2) {
-            s42.src = in->ops[1];
-        }
-        if (in->op_count >= 3 && in->ops[2].kind == AS_X86_OP_IMM) {
-            s42.has_imm8 = 1;
-            s42.imm8 = (uint8_t)in->ops[2].u.imm;
-        }
-    }
-    return as_x86_encode_sse42(&s42, code, code_cap, code_len, encerr, encerr_sz);
-}
-
 static int try_encode_x86_sse3(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
                                size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_sse3_insn_t s3;
@@ -10691,19 +10567,10 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
             return -1;
         }
     } else {
+        /* (`fisttp`, by its suffix.  The encoders of SSSE3, SSE4.1 and
+         * SSE4.2 were asked here too, about every instruction of 32-bit
+         * code that had come this far: the table has all of theirs.) */
         if (as_x86_encode_ext(try_encode_x86_sse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (as_x86_encode_ext(try_encode_x86_ssse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (as_x86_encode_ext(try_encode_x86_sse41, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (as_x86_encode_ext(try_encode_x86_sse42, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
             *code_len > 0) {
             return 0;
         }

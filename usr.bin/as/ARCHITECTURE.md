@@ -29,9 +29,8 @@ usr.bin/as/
 ├── as_x86_vec_table_ext.h   # x86: more rows of it -- FP16, AVX10.2, XOP, AMX, 3DNow! and the rest GNU as has
 ├── as_x86_vex.c             # x86: the VEX prefix
 ├── as_x86_sse3.c            # x86, per extension, what is left of it: `fisttp` (SSE3), whose
-├── as_x86_ssse3.c           #   opcode is its operand's size; and SSSE3, SSE4.1 and SSE4.2 as the
-├── as_x86_sse41.c           #   emitter still calls them, for no name the table has not.  (Those
-├── as_x86_sse42.c           #   of x86-64-v2 and v3, AVX, AVX2, FMA, BMI, F16C and AVX-512 are gone.)
+│                            #   opcode is its operand's size.  (Those of SSSE3, SSE4.1, SSE4.2,
+│                            #   x86-64-v2 and v3, AVX, AVX2, FMA, BMI, F16C and AVX-512 are gone.)
 ├── as_arm.c                 # ARM (A32) encoder; what the ARM and AArch64 encoders share
 ├── as_arm_simd.c            # ARM: VFP and NEON
 ├── as_arm_thumb.c           # ARM: Thumb-2
@@ -41,7 +40,7 @@ usr.bin/as/
 │                            #   as_data.h, as_dwline.h, as_elf_emit.h, as_expr.h, as_lexer.h, as_lower.h,
 │                            #   as_parser.h, as_reloc_op.h, as_sections.h, as_symtab.h, as_x86_regs.h,
 │                            #   as_x86_encode.h, as_x86_vec.h, as_x86_vex.h,
-│                            #   as_x86_sse3.h, as_x86_ssse3.h, as_x86_sse41.h, as_x86_sse42.h).
+│                            #   as_x86_sse3.h).
 │                            #   Three have no .c of theirs:
 │                            #   as_arm.h, the interface of the five ARM and AArch64 files; as_arm_int.h,
 │                            #   what those share among themselves; as_strmap.h, a table from names to
