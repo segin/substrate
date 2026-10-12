@@ -14615,7 +14615,7 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
                                        size_t *code_len, char *encerr, size_t encerr_sz) {
     char mnbuf[32];
     char suffix = '\0';
-    unsigned cc;
+    unsigned cc = 0;
     long long disp8;
 
     if (cfg == NULL || st == NULL || code == NULL || code_len == NULL ||
