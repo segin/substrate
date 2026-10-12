@@ -202,6 +202,11 @@ typedef struct {
     /* Set while a directive is given its bytes for good, if the last
      * bytes of its section were data: see append_x86_nops(). */
     int pad_after_data;
+    /* A flat image is being written (as_flat.c), which has no object
+     * to ask a section's flags of: whether the section a directive is
+     * in is one of instructions, as its writer has it. */
+    int flat_image;
+    int flat_section_exec;
     /* The local labels emit_relocations() has passed, which it frees
      * here so that each way out of it need not. */
     void *emit_labels;

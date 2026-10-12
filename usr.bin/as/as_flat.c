@@ -137,366 +137,108 @@ static bin_section_t *bin_section_get_or_add(bin_section_vec_t *v, const char *n
     return &v->items[v->count - 1];
 }
 
-static int parse_nonneg_u64_or_reloc(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg,
-                                     const char *what, unsigned long long *out) {
-    long long v;
-    char *sym = NULL;
-    int64_t add = 0;
+/*
+ * The numbers of `.byte`, `.word`, `.long` and `.quad` in a flat image,
+ * written over what the one emitter of them put at `at`: that emitter
+ * leaves a symbol's place for the linker, and an image has none.  What
+ * is the distance between two labels is that; what is a label is how
+ * far it is from the number; and a symbol of nowhere is 0.
+ */
+static int flat_scalar_values(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, const as_directive_t *d,
+                              size_t at) {
+    unsigned width = directive_fixed_scalar_width(d);
+    size_t i;
 
-    if (parse_int64(arg, &v) == 0 || parse_const_expr_string(arg, &v) == 0) {
-        if (v < 0) {
-            set_err(ctx, "%s:%u: %s must be non-negative", st->file != NULL ? st->file : "<input>", st->line, what);
-            return -1;
-        }
-        *out = (unsigned long long)v;
+    if (width == 0 || sec->buf.len < at + (size_t)d->arg_count * width) {
         return 0;
     }
-    if (parse_symbol_addend_arg(arg, &sym, &add) == 0 && sym != NULL) {
-        set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
-                st->file != NULL ? st->file : "<input>", st->line, sym);
-        free(sym);
-        return -1;
-    }
-    set_err(ctx, "%s:%u: invalid %s argument: %s", st->file != NULL ? st->file : "<input>", st->line, what, arg);
-    free(sym);
-    return -1;
-}
+    for (i = 0; i < d->arg_count; ++i) {
+        long long v;
+        unsigned k;
 
-static int append_incbin_bytes(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, const as_directive_t *d) {
-    if (append_incbin_to_bytebuf(ctx, st, &sec->buf, d) < 0) {
-        return -1;
+        if (eval_linux_alt_len_expr(ctx, st, d->args[i], &v) != 0 && parse_int64(d->args[i], &v) != 0 &&
+            parse_const_expr_string(d->args[i], &v) != 0 && eval_arg_asm_vars(ctx, st, d->args[i], &v) != 0) {
+            as_expr_t *expr = as_parse_expr_string(d->args[i], st->file, st->line);
+
+            if (expr == NULL) {
+                set_err(ctx, "%s:%u: '%s' is not an expression", st->file != NULL ? st->file : "<input>", st->line,
+                        d->args[i] != NULL ? d->args[i] : "");
+                return -1;
+            }
+            if ((eval_abs_local_diff_expr_virtual(ctx, st, expr, &v) != 0 &&
+                 /* (From where the number is and as far again on:
+                  * what this writer has always made of a label, kept
+                  * as it was while the emitters are made one.  It is
+                  * no address.) */
+                 eval_local_rel_expr_virtual(ctx, sec->name, st, at + (uint64_t)(2 * i * width),
+                                             ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u, expr, &v) != 0)) {
+                /* (A symbol of nowhere, or what the emitter made of
+                 * it: left as it is.) */
+                as_expr_free(expr);
+                continue;
+            }
+            as_expr_free(expr);
+        }
+        for (k = 0; k < width; ++k) {
+            sec->buf.data[at + i * width + k] = (unsigned char)(((unsigned long long)v >> (k * 8u)) & 0xffu);
+        }
     }
-    sec->touched = 1;
     return 0;
 }
 
-static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, int *handled) {
+/*
+ * The bytes of a data directive, in a flat image: what they are in an
+ * object, from the one emitter of them there is.  (A symbol's place is
+ * the linker's to put in an object and nobody's here, and is written
+ * 0 in both; the distance between two labels is a number in both.)
+ *
+ * The image had an emitter of its own: the strings, the numbers, the
+ * space, the fills, the alignments and `.org` over again, 330 lines,
+ * to be kept in step with the other by hand.
+ */
+static int append_data_directive_flat(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, int *handled) {
     const as_directive_t *d;
-    size_t i;
+    size_t before;
+    int rc;
 
     if (ctx == NULL || st == NULL || sec == NULL || handled == NULL || st->kind != AS_STMT_DIRECTIVE) {
         return -1;
     }
     d = &st->u.directive;
     *handled = 0;
-
-    if (as_strcmp(d->name, ".incbin") == 0) {
-        *handled = 1;
-        return append_incbin_bytes(ctx, st, sec, d);
+    before = sec->buf.len;
+    /* (Whether padding is of instructions is the section's flags to
+     * say, which an image has in its own table and not in an object.) */
+    ctx->flat_image = 1;
+    ctx->flat_section_exec = (sec->flags & SHF_EXECINSTR) != 0;
+    ctx->pad_after_data = sec->after_data;
+    rc = append_directive_data_ctx(ctx, &sec->buf, sec->name, st, (uint64_t)sec->buf.len, sec->code_bits, d);
+    ctx->pad_after_data = 0;
+    if (rc > 0 && flat_scalar_values(ctx, st, sec, d, before) != 0) {
+        return -1;
     }
-    if (as_strcmp(d->name, ".ascii") == 0 || as_strcmp(d->name, ".asciz") == 0 || as_strcmp(d->name, ".string") == 0) {
-        int nul = (as_strcmp(d->name, ".ascii") == 0) ? 0 : 1;
-        *handled = 1;
-        for (i = 0; i < d->arg_count; ++i) {
-            const char *s = d->args[i] != NULL ? d->args[i] : "";
-            char *bytes = NULL;
-            size_t len = 0;
-            if (as_decode_string_literal(s, &bytes, &len) != 0) {
-                set_err(ctx, "%s:%u: malformed string literal", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-            if (bytebuf_append(&sec->buf, bytes, len) != 0) {
-                free(bytes);
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-            if (nul && bytebuf_append_zeros(&sec->buf, 1) != 0) {
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-        }
-        sec->touched = 1;
-        return 0;
-    }
-    if (as_strcmp(d->name, ".float") == 0 || as_strcmp(d->name, ".double") == 0) {
-        int is_double = as_strcmp(d->name, ".double") == 0;
-        *handled = 1;
-        for (i = 0; i < d->arg_count; ++i) {
-            char *tmp = trim_copy_arg(d->args[i]);
-            char *end;
-            double dv;
-            if (tmp == NULL || tmp[0] == '\0') {
-                free(tmp);
-                set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line, d->name);
-                return -1;
-            }
-            dv = strtod(tmp, &end);
-            if (end == tmp || *end != '\0') {
-                char *sym = NULL;
-                int64_t add = 0;
-                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
-                    set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
-                            st->file != NULL ? st->file : "<input>", st->line, sym);
-                    free(sym);
-                } else {
-                    set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line,
-                            d->name);
-                }
-                free(tmp);
-                return -1;
-            }
-            free(tmp);
-            if (is_double) {
-                if (bytebuf_append(&sec->buf, &dv, sizeof(dv)) != 0) {
-                    set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                    return -1;
-                }
+    if (rc < 0) {
+        if (ctx->errbuf != NULL && ctx->errbuf[0] == '\0') {
+            if (as_strcmp(d->name, ".org") == 0) {
+                set_err(ctx, "%s:%u: .org: not a place at or after this one in its section",
+                        st->file != NULL ? st->file : "<input>", st->line);
             } else {
-                float fv = (float)dv;
-                if (bytebuf_append(&sec->buf, &fv, sizeof(fv)) != 0) {
-                    set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                    return -1;
-                }
+                set_err(ctx, "%s:%u: malformed %s directive data", st->file != NULL ? st->file : "<input>",
+                        st->line, d->name);
             }
         }
-        sec->touched = 1;
-        return 0;
+        return -1;
     }
-    if (as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 || as_strcmp(d->name, ".p2align") == 0) {
-        unsigned long long raw;
-        unsigned long long fill = (sec->flags & SHF_EXECINSTR) != 0 ? 0x90 : 0;
-        size_t align;
-        size_t need;
+    if (rc > 0) {
         *handled = 1;
-        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &raw) != 0) {
-            return -1;
-        }
-        if (directive_has_arg(d, 1) && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".align fill", &fill) != 0) {
-            return -1;
-        }
-        if (as_strcmp(d->name, ".p2align") == 0) {
-            if (raw >= (unsigned long long)(sizeof(size_t) * CHAR_BIT - 1)) {
-                set_err(ctx, "%s:%u: .p2align exponent too large", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-            align = (size_t)1u << (unsigned)raw;
-        } else {
-            align = (size_t)raw;
-        }
-        if (align == 0 || (align & (align - 1)) != 0) {
-            set_err(ctx, "%s:%u: alignment must be a power of two", st->file != NULL ? st->file : "<input>", st->line);
-            return -1;
-        }
-        need = (align - (sec->buf.len & (align - 1))) & (align - 1);
-        switch (align_exceeds_max_skip(d, need)) {
-        case 1: need = 0; break;
-        case 0: break;
-        default:
-            set_err(ctx, "%s:%u: %s: the maximum to skip is not a number",
-                    st->file != NULL ? st->file : "<input>", st->line, d->name);
-            return -1;
-        }
-        /* Where instructions go, padding that is NOPs -- none named, or
-         * 0x90 named -- is the NOPs the object writer pads with: this
-         * wrote 0x90 for each byte. */
-        if ((sec->flags & SHF_EXECINSTR) != 0 && ctx->cfg != NULL &&
-            (ctx->cfg->target != 0 ? !directive_has_arg(d, 1)
-                                   : fill == 0x90 && !(d->fill_width > 1 && directive_has_arg(d, 1)))) {
-            int rc;
-
-            if (ctx->cfg->target != 0) {
-                rc = append_arm_nops(&sec->buf, need, ctx->cfg->target, sec->code_bits);
-            } else {
-                rc = 0;
-                if (sec->after_data && need != 0) {
-                    rc = bytebuf_append_u64_le(&sec->buf, 0x90, 1);
-                    need--;
-                }
-                if (rc == 0) {
-                    rc = append_x86_nops(&sec->buf, need, 0, sec->code_bits, ctx->cfg->machine == EM_X86_64);
-                }
-            }
-            if (rc != 0) {
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-            sec->touched = 1;
-            sec->after_data = 0;
-            return 0;
-        }
-        switch (append_align_fill(&sec->buf, d, need, fill)) {
-        case 0:
-            break;
-        case -2:
-            set_err(ctx, "%s:%u: alignment padding (%lu bytes) is not a multiple of %u",
-                    st->file != NULL ? st->file : "<input>", st->line, (unsigned long)need, d->fill_width);
-            return -1;
-        default:
-            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-            return -1;
-        }
         sec->touched = 1;
-        return 0;
+        if (as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 ||
+            as_strcmp(d->name, ".p2align") == 0) {
+            if (sec->buf.len != before) {
+                sec->after_data = 0;
+            }
+        }
     }
-    if (as_strcmp(d->name, ".org") == 0) {
-        unsigned long long off;
-        *handled = 1;
-        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".org offset", &off) != 0) {
-            return -1;
-        }
-        if ((size_t)off < sec->buf.len) {
-            set_err(ctx, "%s:%u: backward .org is not supported in binary mode",
-                    st->file != NULL ? st->file : "<input>", st->line);
-            return -1;
-        }
-        if ((size_t)off > sec->buf.len && bytebuf_append_zeros(&sec->buf, (size_t)off - sec->buf.len) != 0) {
-            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-            return -1;
-        }
-        sec->touched = 1;
-        return 0;
-    }
-    if (as_strcmp(d->name, ".zero") == 0 || as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) {
-        unsigned long long n;
-        unsigned long long fill = 0;
-        long long signed_n = 0;
-        size_t k;
-        *handled = 1;
-        if (d->arg_count < 1) {
-            set_err(ctx, "%s:%u: %s requires count argument", st->file != NULL ? st->file : "<input>", st->line, d->name);
-            return -1;
-        }
-        if (eval_linux_alt_pad_expr(ctx, sec->name, st, sec->buf.len,
-                                    ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u,
-                                    d->args[0], &signed_n) == 0) {
-            n = signed_n < 0 ? 0 : (unsigned long long)signed_n;
-        } else if (parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &n) != 0) {
-            as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->file : NULL,
-                                                  st != NULL ? st->line : 0);
-            if (expr != NULL &&
-                       (eval_abs_local_diff_expr_virtual(ctx, st, expr, &signed_n) == 0 ||
-                        eval_local_rel_expr_virtual(ctx, sec->name, st, sec->buf.len,
-                                                    ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u,
-                                                    expr, &signed_n) == 0)) {
-                n = signed_n < 0 ? 0 : (unsigned long long)signed_n;
-            } else {
-                as_expr_free(expr);
-                return -1;
-            }
-            as_expr_free(expr);
-        }
-        if (n > (1ULL << 20)) {
-            set_err(ctx, "%s:%u: %s count is unreasonably large: %llu",
-                    st->file != NULL ? st->file : "<input>", st->line, d->name, n);
-            return -1;
-        }
-        if ((as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) && d->arg_count >= 2) {
-            long long fv = 0;
-            if (parse_int64(d->args[1], &fv) != 0 && parse_const_expr_string(d->args[1], &fv) != 0) {
-                return -1;
-            }
-            fill = (unsigned long long)fv;
-        }
-        for (k = 0; k < (size_t)n; ++k) {
-            if (bytebuf_append_u64_le(&sec->buf, fill, 1) != 0) {
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-        }
-        sec->touched = 1;
-        return 0;
-    }
-    if (as_strcmp(d->name, ".fill") == 0) {
-        unsigned long long repeat = 0;
-        unsigned long long size = 1;
-        unsigned long long value = 0;
-        long long repeat_expr = 0;
-        *handled = 1;
-        if (d->arg_count < 1) {
-            return -1;
-        }
-        if (parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".fill repeat", &repeat) != 0) {
-            as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->file : NULL,
-                                                  st != NULL ? st->line : 0);
-            if (expr == NULL ||
-                (eval_abs_local_diff_expr_virtual(ctx, st, expr, &repeat_expr) != 0 &&
-                 eval_local_rel_expr_virtual(ctx, sec->name, st, sec->buf.len,
-                                             ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u, expr,
-                                             &repeat_expr) != 0) ||
-                repeat_expr < 0) {
-                as_expr_free(expr);
-                return -1;
-            }
-            as_expr_free(expr);
-            repeat = (unsigned long long)repeat_expr;
-        }
-        if (d->arg_count >= 2 && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".fill size", &size) != 0) {
-            return -1;
-        }
-        if (d->arg_count >= 3 && parse_nonneg_u64_or_reloc(ctx, st, d->args[2], ".fill value", &value) != 0) {
-            return -1;
-        }
-        if (repeat > (1ULL << 20)) {
-            set_err(ctx, "%s:%u: .fill repeat is unreasonably large: %llu",
-                    st->file != NULL ? st->file : "<input>", st->line, repeat);
-            return -1;
-        }
-        if (size == 0 || size > 8) {
-            set_err(ctx, "%s:%u: .fill size must be in [1,8]", st->file != NULL ? st->file : "<input>", st->line);
-            return -1;
-        }
-        for (i = 0; i < (size_t)repeat; ++i) {
-            if (bytebuf_append_u64_le(&sec->buf, value, (unsigned)size) != 0) {
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-        }
-        sec->touched = 1;
-        return 0;
-    }
-    if (as_strcmp(d->name, ".byte") == 0 || as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
-        as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0 || as_strcmp(d->name, ".long") == 0 ||
-        as_strcmp(d->name, ".int") == 0 || as_strcmp(d->name, ".4byte") == 0 || as_strcmp(d->name, ".quad") == 0 ||
-        as_strcmp(d->name, ".8byte") == 0) {
-        unsigned width = 1;
-        *handled = 1;
-        if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 || as_strcmp(d->name, ".hword") == 0 ||
-            as_strcmp(d->name, ".2byte") == 0) {
-            width = 2;
-        } else if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".int") == 0 || as_strcmp(d->name, ".4byte") == 0) {
-            width = 4;
-        } else if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) {
-            width = 8;
-        }
-        for (i = 0; i < d->arg_count; ++i) {
-            long long v;
-            if (eval_linux_alt_len_expr(ctx, st, d->args[i], &v) != 0 &&
-                parse_int64(d->args[i], &v) != 0 &&
-                parse_const_expr_string(d->args[i], &v) != 0 &&
-                eval_arg_asm_vars(ctx, st, d->args[i], &v) != 0) {
-                char *sym = NULL;
-                int64_t add = 0;
-                as_expr_t *expr = as_parse_expr_string(d->args[i], st != NULL ? st->file : NULL,
-                                                       st != NULL ? st->line : 0);
-                if (expr != NULL &&
-                    (eval_abs_local_diff_expr_virtual(ctx, st, expr, &v) == 0 ||
-                     eval_local_rel_expr_virtual(ctx, sec->name, st, sec->buf.len + (uint64_t)(i * width),
-                                                 ctx->cfg != NULL ? ctx->cfg->x86_code_bits : 64u,
-                                                 expr, &v) == 0)) {
-                    as_expr_free(expr);
-                } else if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
-                    as_expr_free(expr);
-                    free(sym);
-                    v = 0;
-                } else if (expr != NULL && expr_has_symbol(expr)) {
-                    as_expr_free(expr);
-                    v = 0;
-                } else {
-                    as_expr_free(expr);
-                    set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line,
-                            d->name);
-                    return -1;
-                }
-            }
-            if (bytebuf_append_u64_le(&sec->buf, (uint64_t)v, width) != 0) {
-                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
-                return -1;
-            }
-        }
-        sec->touched = 1;
-        return 0;
-    }
-
     return 0;
 }
 
@@ -730,7 +472,7 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
                              as_strcmp(d->name, ".p2align") == 0;
 
                 sec->code_bits = cur_code_bits;
-                if (append_data_directive_binary(&ctx, st, sec, &handled) != 0) {
+                if (append_data_directive_flat(&ctx, st, sec, &handled) != 0) {
                     goto fail;
                 }
                 if (!aligns && sec->buf.len != before) {

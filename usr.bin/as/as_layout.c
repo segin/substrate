@@ -551,7 +551,13 @@ elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
 
 /* Whether the section is flagged as code: it is padded with NOPs. */
 static int section_name_has_exec_flag(emit_ctx_t *ctx, const char *name) {
-    elf_section_t *sec = section_for_name(ctx, name);
+    elf_section_t *sec;
+
+    /* (A flat image has no object to ask: its writer says.) */
+    if (ctx != NULL && ctx->flat_image) {
+        return ctx->flat_section_exec;
+    }
+    sec = section_for_name(ctx, name);
     if (sec == NULL) {
         return 0;
     }
@@ -638,6 +644,8 @@ int section_name_is_executable(emit_ctx_t *ctx, const char *name) {
     return 0;
 }
 
+/* The width in bytes of each value a data directive lays down, or 0 if
+ * the directive is not one of those: the one place that says. */
 unsigned directive_fixed_scalar_width(const as_directive_t *d) {
     if (d == NULL || d->name == NULL) {
         return 0;
@@ -1738,28 +1746,6 @@ static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *bas
     return base_idx - target_idx <= max_stmt_distance;
 }
 
-/* The width in bytes of each value a data directive lays down, or 0 if
- * the directive is not one of those. */
-static unsigned data_directive_width(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    if (as_strcmp(name, ".byte") == 0) {
-        return 1;
-    }
-    if (as_strcmp(name, ".word") == 0 || as_strcmp(name, ".short") == 0 ||
-        as_strcmp(name, ".hword") == 0 || as_strcmp(name, ".2byte") == 0) {
-        return 2;
-    }
-    if (as_strcmp(name, ".long") == 0 || as_strcmp(name, ".4byte") == 0) {
-        return 4;
-    }
-    if (as_strcmp(name, ".quad") == 0 || as_strcmp(name, ".8byte") == 0) {
-        return 8;
-    }
-    return 0;
-}
-
 /* An alignment or an .org is as long as it takes to get from where it is
  * to where it leads: its size is not the statement's alone and must not
  * be remembered as if it were. */
@@ -1873,7 +1859,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
     if (st->kind == AS_STMT_DIRECTIVE) {
         section_track_t track;
         int trc;
-        unsigned data_width = data_directive_width(st->u.directive.name);
+        unsigned data_width = directive_fixed_scalar_width(&st->u.directive);
 
         /*
          * A directive that lays down values of a fixed width is that
@@ -3992,16 +3978,7 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
         }
         return 1;
     }
-    if (as_strcmp(d->name, ".byte") == 0) {
-        width = 1;
-    } else if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
-               as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0) {
-        width = 2;
-    } else if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".4byte") == 0) {
-        width = 4;
-    } else if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) {
-        width = 8;
-    }
+    width = directive_fixed_scalar_width(d);
     if (width != 0) {
         for (i = 0; i < d->arg_count; ++i) {
             long long v;

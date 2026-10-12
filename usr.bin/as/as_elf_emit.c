@@ -2607,11 +2607,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
             if (trc > 0) {
                 continue;
             }
-            if (as_strcmp(d->name, ".byte") == 0) width = 1;
-            else if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
-                     as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0) width = 2;
-            else if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".4byte") == 0) width = 4;
-            else if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) width = 8;
+            width = directive_fixed_scalar_width(d);
 
             ctx->pad_after_data = sb->after_data;
             drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
