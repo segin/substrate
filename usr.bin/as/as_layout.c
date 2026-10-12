@@ -346,7 +346,7 @@ int eval_arg_asm_vars(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg, lon
     if (parse_int64(arg, out) == 0 || parse_const_expr_string(arg, out) == 0) {
         return 0;
     }
-    expr = as_parse_expr_string(arg, st != NULL ? st->file : NULL, st != NULL ? st->line : 0);
+    expr = as_parse_expr_string(arg, st != NULL ? st->unit : NULL, st != NULL ? st->ordinal : 0);
     if (expr == NULL) {
         return -1;
     }
@@ -781,7 +781,7 @@ static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const 
         return -1;
     }
     (void)numeric_local_label_number(label->name, &digit);
-    if (digit < 0 && virtual_label_cache_lookup(ctx, label->file, label->line, digit, label->name,
+    if (digit < 0 && virtual_label_cache_lookup(ctx, label->unit, label->ordinal, digit, label->name,
                                                 &(const char *){NULL}, &(uint64_t){0}) == 0) {
         return 0;
     }
@@ -797,9 +797,9 @@ static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const 
     c = &ctx->vlabel_cache[ctx->vlabel_count++];
     memset(c, 0, sizeof(*c));
     c->name = xstrdup(label->name);
-    c->file = xstrdup(label->file != NULL ? label->file : "");
+    c->file = xstrdup(label->unit != NULL ? label->unit : "");
     c->section = xstrdup(section);
-    c->line = label->line;
+    c->line = label->ordinal;
     c->digit = digit;
     c->off = off;
     c->stmt = st;
@@ -896,9 +896,9 @@ int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
                 } else {
                     int label_digit = -1;
                     matches = (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
-                               label_digit == digit && st->labels[j].line == line &&
-                               st->labels[j].file != NULL && file != NULL &&
-                               as_strcmp(st->labels[j].file, file) == 0);
+                               label_digit == digit && st->labels[j].ordinal == line &&
+                               st->labels[j].unit != NULL && file != NULL &&
+                               as_strcmp(st->labels[j].unit, file) == 0);
                 }
                 if (matches) {
                     target_st = st;
@@ -974,9 +974,9 @@ int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
                 int label_digit = -1;
                 matches = (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
                        label_digit == digit &&
-                       st->labels[j].line == line &&
-                       st->labels[j].file != NULL &&
-                       as_strcmp(st->labels[j].file, file) == 0);
+                       st->labels[j].ordinal == line &&
+                       st->labels[j].unit != NULL &&
+                       as_strcmp(st->labels[j].unit, file) == 0);
             }
             if (matches) {
                 *section_out = section_name_keep(ctx, track.current);
@@ -1052,18 +1052,18 @@ static int resolve_local_ref_target_line(emit_ctx_t *ctx, const char *file, unsi
         for (j = 0; j < st->label_count; ++j) {
             int label_digit = -1;
             if (numeric_local_label_number(st->labels[j].name, &label_digit) != 0 ||
-                label_digit != digit || st->labels[j].file == NULL ||
-                as_strcmp(st->labels[j].file, file) != 0) {
+                label_digit != digit || st->labels[j].unit == NULL ||
+                as_strcmp(st->labels[j].unit, file) != 0) {
                 continue;
             }
             if (forward) {
-                if (st->labels[j].line > ref_line && (!found || st->labels[j].line < best)) {
-                    best = st->labels[j].line;
+                if (st->labels[j].ordinal > ref_line && (!found || st->labels[j].ordinal < best)) {
+                    best = st->labels[j].ordinal;
                     found = 1;
                 }
             } else {
-                if (st->labels[j].line <= ref_line && (!found || st->labels[j].line > best)) {
-                    best = st->labels[j].line;
+                if (st->labels[j].ordinal <= ref_line && (!found || st->labels[j].ordinal > best)) {
+                    best = st->labels[j].ordinal;
                     found = 1;
                 }
             }
@@ -1114,7 +1114,7 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
                 int label_digit = -1;
 
                 if (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 && label_digit == digit &&
-                    st->labels[j].file != NULL && as_strcmp(st->labels[j].file, file) == 0) {
+                    st->labels[j].unit != NULL && as_strcmp(st->labels[j].unit, file) == 0) {
                     best = st;
                     break;
                 }
@@ -1130,8 +1130,8 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
                 int label_digit = -1;
                 if (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
                     label_digit == digit &&
-                    st->labels[j].file != NULL &&
-                    as_strcmp(st->labels[j].file, file) == 0) {
+                    st->labels[j].unit != NULL &&
+                    as_strcmp(st->labels[j].unit, file) == 0) {
                     return st;
                 }
             }
@@ -1144,8 +1144,8 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
                 int label_digit = -1;
                 if (numeric_local_label_number(st->labels[j - 1].name, &label_digit) == 0 &&
                     label_digit == digit &&
-                    st->labels[j - 1].file != NULL &&
-                    as_strcmp(st->labels[j - 1].file, file) == 0) {
+                    st->labels[j - 1].unit != NULL &&
+                    as_strcmp(st->labels[j - 1].unit, file) == 0) {
                     return st;
                 }
             }
@@ -1522,11 +1522,11 @@ static int numeric_local_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base
     unsigned target_line = 0;
     uint64_t off = 0;
 
-    if (ctx == NULL || base_st == NULL || base_st->file == NULL || out == NULL) {
+    if (ctx == NULL || base_st == NULL || base_st->unit == NULL || out == NULL) {
         return -1;
     }
     {
-        const as_stmt_t *target_st = resolve_local_ref_target_stmt(ctx, base_st, base_st->file, digit, forward);
+        const as_stmt_t *target_st = resolve_local_ref_target_stmt(ctx, base_st, base_st->unit, digit, forward);
         if (target_st != NULL) {
             memset(out, 0, sizeof(*out));
             if (find_stmt_virtual_location(ctx, target_st, &out->section, &off) != 0) {
@@ -1537,11 +1537,11 @@ static int numeric_local_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base
             return 0;
         }
     }
-    if (resolve_local_ref_target_line(ctx, base_st->file, base_st->line, digit, forward, &target_line) != 0) {
+    if (resolve_local_ref_target_line(ctx, base_st->unit, base_st->ordinal, digit, forward, &target_line) != 0) {
         return -1;
     }
     memset(out, 0, sizeof(*out));
-    if (find_label_virtual_location(ctx, base_st, base_st->file, target_line, digit, NULL,
+    if (find_label_virtual_location(ctx, base_st, base_st->unit, target_line, digit, NULL,
                                     &out->section, &off) != 0) {
         return -1;
     }
@@ -1565,9 +1565,9 @@ int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, const as_
         return -1;
     }
     {
-        const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->file, 744, 1);
-        const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->file, 743, 1);
-        const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->file, 740, 0);
+        const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->unit,744, 1);
+        const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->unit,743, 1);
+        const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->unit,740, 0);
         size_t i744;
         size_t i743;
         size_t i740;
@@ -1617,8 +1617,8 @@ int eval_linux_alt_len_expr(emit_ctx_t *ctx, const as_stmt_t *st, const char *ar
         return -1;
     }
     if (as_strcmp(arg, "742b-740b") == 0) {
-        const as_stmt_t *s742 = resolve_local_ref_target_stmt(ctx, st, st->file, 742, 0);
-        const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->file, 740, 0);
+        const as_stmt_t *s742 = resolve_local_ref_target_stmt(ctx, st, st->unit,742, 0);
+        const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->unit,740, 0);
         size_t i742;
         size_t i740;
         uint64_t orig = 0;
@@ -1679,7 +1679,7 @@ static int eval_local_align_fill_expr(emit_ctx_t *ctx, const char *section_name,
     if (parse_const_expr_string(align_text, &align) != 0 && parse_int64(align_text, &align) != 0) {
         goto out;
     }
-    local = as_parse_expr_string("0b", st != NULL ? st->file : NULL, st != NULL ? st->line : 0);
+    local = as_parse_expr_string("0b", st != NULL ? st->unit : NULL, st != NULL ? st->ordinal : 0);
     if (local == NULL) {
         goto out;
     }
@@ -2145,8 +2145,8 @@ static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_na
             st->u.directive.args[0] != NULL &&
             strstr(st->u.directive.args[0], "744f-743f") != NULL &&
             strstr(st->u.directive.args[0], "741b-740b") != NULL) {
-            const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->file, 744, 1);
-            const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->file, 743, 1);
+            const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->unit,744, 1);
+            const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->unit,743, 1);
             size_t i744;
             size_t i743;
             uint64_t repl = 0;
@@ -3726,7 +3726,7 @@ int eval_leb128_arg(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *
     if (ctx != NULL && line_view_value(ctx, arg, out) == 0) {
         return 0;
     }
-    expr = as_parse_expr_string(arg, st != NULL ? st->file : NULL, st != NULL ? st->line : 0);
+    expr = as_parse_expr_string(arg, st != NULL ? st->unit : NULL, st != NULL ? st->ordinal : 0);
     if (expr == NULL) {
         return -1;
     }
@@ -3830,8 +3830,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
             return -1;
         }
         if (parse_int64(d->args[0], &target) != 0) {
-            expr = as_parse_expr_string(d->args[0], st != NULL ? st->file : NULL,
-                                        st != NULL ? st->line : 0);
+            expr = as_parse_expr_string(d->args[0], st != NULL ? st->unit : NULL,
+                                        st != NULL ? st->ordinal : 0);
             if (expr == NULL) {
                 return -1;
             }
@@ -3943,8 +3943,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
             return -1;
         }
         if (parse_int64(d->args[0], &repeat) != 0 && parse_const_expr_string(d->args[0], &repeat) != 0) {
-            as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->file : NULL,
-                                                  st != NULL ? st->line : 0);
+            as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->unit : NULL,
+                                                  st != NULL ? st->ordinal : 0);
             if (expr == NULL ||
                 (eval_abs_local_diff_expr_virtual(ctx, st, expr, &repeat) != 0 &&
                  eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, expr, &repeat) != 0 &&
@@ -4004,8 +4004,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
                 }
                 continue;
             }
-            expr = as_parse_expr_string(d->args[i], st != NULL ? st->file : NULL,
-                                        st != NULL ? st->line : 0);
+            expr = as_parse_expr_string(d->args[i], st != NULL ? st->unit : NULL,
+                                        st != NULL ? st->ordinal : 0);
             if (expr != NULL) {
                 long long ev = 0;
                 if (eval_abs_local_diff_expr_virtual(ctx, st, expr, &ev) == 0 ||
@@ -4028,8 +4028,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
                 continue;
             }
             free(sym);
-            expr = as_parse_expr_string(d->args[i], st != NULL ? st->file : NULL,
-                                        st != NULL ? st->line : 0);
+            expr = as_parse_expr_string(d->args[i], st != NULL ? st->unit : NULL,
+                                        st != NULL ? st->ordinal : 0);
             if (expr != NULL && expr_has_symbol(expr)) {
                 as_expr_free(expr);
                 if (bytebuf_append_zeros(buf, width) != 0) {
@@ -4054,8 +4054,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
              * evaluated before generic constant parsing can treat comparisons as
              * ordinary arithmetic. */
         } else if (parse_int64(d->args[0], &count) != 0 && parse_const_expr_string(d->args[0], &count) != 0) {
-            as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->file : NULL,
-                                                  st != NULL ? st->line : 0);
+            as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->unit : NULL,
+                                                  st != NULL ? st->ordinal : 0);
             if (expr == NULL ||
                 (eval_abs_local_diff_expr_virtual(ctx, st, expr, &count) != 0 &&
                  eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, expr, &count) != 0)) {
@@ -4535,7 +4535,7 @@ static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_
             rel_expr = op->u.expr;
             if ((rel_expr == NULL || (!expr_has_local_ref(rel_expr) && !expr_is_local_temp_symbol(rel_expr))) &&
                 raw_is_numeric_local_ref(op->raw)) {
-                raw_local_expr = as_parse_expr_string(op->raw, st->file, st->line);
+                raw_local_expr = as_parse_expr_string(op->raw, st->unit, st->ordinal);
                 if (raw_local_expr != NULL) {
                     rel_expr = raw_local_expr;
                 }
@@ -5234,7 +5234,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
                 label_cap = cap;
             }
             labels[label_count].name = numeric ? NULL : name;
-            labels[label_count].line = numeric ? st->labels[j].line : 0;
+            labels[label_count].line = numeric ? st->labels[j].ordinal : 0;
             labels[label_count].digit = numeric ? digit : 0;
             labels[label_count].section = stmt_section[i];
             labels[label_count].stmt = i;

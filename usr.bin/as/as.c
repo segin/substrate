@@ -456,6 +456,7 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
         }
         if (said != NULL && said[0] != '\0') {
             if (is_error) {
+                as_source_message_about(st->unit, st->ordinal);
                 as_diag(AS_E_BACKEND, "%s:%u: %s", file, st->line, said);
                 errors++;
             } else if (!warnings->suppress) {
@@ -465,6 +466,7 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
                 char shown[1024];
 
                 snprintf(written, sizeof(written), "%s:%u: Warning: %s\n", file, st->line, said);
+                as_source_message_about(st->unit, st->ordinal);
                 as_source_positions_in_text(written, shown, sizeof(shown));
                 fputs(shown, stderr);
                 warnings->count++;
@@ -3662,6 +3664,23 @@ static int parse_lines_given(void *cookie, const as_token_t *items, size_t count
     return rc;
 }
 
+/*
+ * A message is being written about the statement whose `file` this is:
+ * which statement, for the macro it is of the expansion of.  (Only when
+ * something is wrong, so every statement is looked at.)
+ */
+static void message_about_statement(const char *file, void *arg) {
+    const as_parse_result_t *parsed = (const as_parse_result_t *)arg;
+    size_t i;
+
+    for (i = 0; file != NULL && i < parsed->count; ++i) {
+        if (parsed->items[i].file == file) {
+            as_source_message_about(parsed->items[i].unit, parsed->items[i].ordinal);
+            return;
+        }
+    }
+}
+
 static int run_native_backend(const as_ctx_t *ctx) {
     as_token_vec_t toks;
     char **thumb_funcs = NULL;
@@ -3697,6 +3716,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
     memset(&ecfg, 0, sizeof(ecfg));
     as_token_vec_init(&toks);
     as_parse_result_init(&parsed);
+    as_err_about(message_about_statement, &parsed);
     as_symtab_init(&syms);
     as_section_state_init(&secs);
 
@@ -3980,6 +4000,7 @@ out:
     free(include_dirs);
     as_section_state_free(&secs);
     as_symtab_free(&syms);
+    as_err_about(NULL, NULL);
     as_parse_result_free(&parsed);
     as_x86_precode_free();
     as_token_vec_free(&toks);

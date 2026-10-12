@@ -106,8 +106,27 @@ else
     echo "FAIL the expansion: $(head -1 err)"; fail=1
 fi
 
-# This assembler's own: it makes no file in /tmp on the way.
+# The lines of a line table (-g) are the user's.  A statement carried
+# its line in the expanded source, and the table had those: after a
+# macro's definition every line was off by its length, and each line of
+# an expansion had a line of its own.
+printf '\t.text\n\t.macro m\n\tnop\n\tnop\n\t.endm\n\tnop\n\tm\n\tret\n' > lines.s
+cases=$((cases + 1))
+if "$AS" --64 -g -o lines.o lines.s 2> err; then
+    got=$(readelf --debug-dump=decodedline lines.o 2>/dev/null | awk '$1 ~ /^lines\.s/ && $2 ~ /^[0-9]+$/ {print $2}' |
+          uniq | tr '\n' ' ')
+    [ "$got" = "6 7 8 " ] || { echo "FAIL line table: the lines are $got"; fail=1; }
+else
+    echo "FAIL line table: $(head -1 err)"; fail=1
+fi
+
+# This assembler's own: it makes no file in /tmp on the way, and of two
+# macros, one calling the other, it names the one the statement is in.
 if ! "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+    cases=$((cases + 1))
+    printf '\t.text\n\t.macro in a\n\tmovl %%eax, \\a\n\t.endm\n\t.macro out a\n\tnop\n\tin \\a\n\t.endm\n\tout %%bx\n' > nest.s
+    "$AS" --64 -o nest.o nest.s > out 2> err
+    grep -q "nest\.s:9:.*macro 'in'" err || { echo "FAIL nested macros: $(head -1 err)"; fail=1; }
     cases=$((cases + 1))
     if grep -q 'mkstemp *(\|tmpfile *(\|\[\] = "/tmp/' "$top/usr.bin/as/as.c"; then
         echo "FAIL: as.c makes a temporary file"; fail=1

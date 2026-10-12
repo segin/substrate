@@ -276,6 +276,12 @@ static int push_label(as_stmt_t *st, const char *name, const char *file, unsigne
         st->labels = next;
         st->label_cap = ncap;
     }
+    /* (`file` and `line` are of the text that is read, which tell one
+     * statement from another; where the author wrote it is found from
+     * them.) */
+    st->labels[st->label_count].unit = as_source_unit(file);
+    st->labels[st->label_count].ordinal = line;
+    (void)as_source_position(file, line, &file, &line);
     st->labels[st->label_count].name = xstrdup(name);
     st->labels[st->label_count].file = xstrdup(file);
     st->labels[st->label_count].line = line;
@@ -2542,8 +2548,16 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     size_t i;
 
     memset(st, 0, sizeof(*st));
-    st->line = n > 0 ? tokv[0].line : 0;
-    st->file = n > 0 ? xstrdup(tokv[0].file) : NULL;
+    if (n > 0) {
+        const char *file = tokv[0].file;
+        unsigned line = tokv[0].line;
+
+        st->unit = as_source_unit(file);
+        st->ordinal = line;
+        (void)as_source_position(file, line, &file, &line);
+        st->line = line;
+        st->file = xstrdup(file);
+    }
     if (n > 0 && st->file == NULL) {
         return -1;
     }
@@ -2766,7 +2780,7 @@ int as_stmt_add_label(as_stmt_t *st, const char *name) {
             return 0;
         }
     }
-    return push_label(st, name, st->file != NULL ? st->file : "<input>", st->line);
+    return push_label(st, name, st->unit != NULL ? st->unit : "<input>", st->ordinal);
 }
 
 int as_parse_name_branch_label(as_stmt_t *st) {
@@ -2884,8 +2898,8 @@ static void resolve_locals(parse_ctx_t *ctx) {
             if (end == NULL || *end != '\0' || digit < 0 || digit > INT_MAX) {
                 continue;
             }
-            local_label_name(named, sizeof(named), (int)digit, st->labels[j].line);
-            if (push_label(st, named, st->labels[j].file, st->labels[j].line) != 0 && !ctx->unresolved_local) {
+            local_label_name(named, sizeof(named), (int)digit, st->labels[j].ordinal);
+            if (push_label(st, named, st->labels[j].unit, st->labels[j].ordinal) != 0 && !ctx->unresolved_local) {
                 ctx->unresolved_local = 1;
                 set_err(ctx, "out of memory");
             }
@@ -2903,7 +2917,7 @@ static void resolve_locals(parse_ctx_t *ctx) {
                 if (st->u.directive.args[j] == NULL) {
                     continue;
                 }
-                named = name_local_refs_in_text(ctx, st->file, st->line, st->u.directive.args[j]);
+                named = name_local_refs_in_text(ctx, st->unit, st->ordinal, st->u.directive.args[j]);
                 if (named == NULL) {
                     if (!ctx->unresolved_local) {
                         ctx->unresolved_local = 1;
@@ -2936,7 +2950,7 @@ static void resolve_locals(parse_ctx_t *ctx) {
                 break;
             case AS_OPERAND_RAW: {
                 /* (`b 1b`, `adr r0, 1f`: the label's name.) */
-                char *named = op->raw != NULL ? name_local_refs_in_text(ctx, st->file, st->line, op->raw) : NULL;
+                char *named = op->raw != NULL ? name_local_refs_in_text(ctx, st->unit, st->ordinal, op->raw) : NULL;
 
                 if (named != NULL) {
                     arm_squeeze(named);
@@ -3088,8 +3102,16 @@ int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count) {
             if (label_count != 0 && error_count < AS_PARSE_ERRORS_MAX) {
                 memset(&st, 0, sizeof(st));
                 st.kind = AS_STMT_LABEL_ONLY;
-                st.file = xstrdup(tokens->items[start].file != NULL ? tokens->items[start].file : "<input>");
-                st.line = tokens->items[start].line;
+                {
+                    const char *file = tokens->items[start].file != NULL ? tokens->items[start].file : "<input>";
+                    unsigned line = tokens->items[start].line;
+
+                    st.unit = as_source_unit(file);
+                    st.ordinal = line;
+                    (void)as_source_position(file, line, &file, &line);
+                    st.file = xstrdup(file);
+                    st.line = line;
+                }
                 st.labels = labels;
                 st.label_count = label_count;
                 st.label_cap = label_cap;

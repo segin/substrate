@@ -328,10 +328,12 @@ static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *s
     return rc;
 }
 
-static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned line) {
+static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned line, const char *unit,
+                                 unsigned ordinal) {
     if (sym->defined) {
-        if ((sym->def_file != NULL && file != NULL && strcmp(sym->def_file, file) == 0 && sym->def_line == line) ||
-            (sym->def_file == NULL && file == NULL && sym->def_line == line)) {
+        if ((sym->def_unit != NULL && unit != NULL && strcmp(sym->def_unit, unit) == 0 &&
+             sym->def_ordinal == ordinal) ||
+            (sym->def_unit == NULL && unit == NULL && sym->def_ordinal == ordinal)) {
             return 0;
         }
         return 1;
@@ -342,6 +344,8 @@ static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned li
             return -1;
         }
         sym->def_line = line;
+        sym->def_unit = unit;
+        sym->def_ordinal = ordinal;
     }
     sym->defined = 1;
     return 0;
@@ -600,7 +604,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             free(size);
             return -1;
         }
-        if (parse_size_arg(size, name, sym, st->file, st->line) != 0) {
+        if (parse_size_arg(size, name, sym, st->unit, st->ordinal) != 0) {
             free(name);
             free(size);
             return -1;
@@ -654,7 +658,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         sym->is_absolute = 0;
         sym->absolute_value = 0;
         sym->is_common = 0;
-        rc = symbol_set_definition(sym, st->file, st->line);
+        rc = symbol_set_definition(sym, st->file, st->line, st->unit, st->ordinal);
         if (rc < 0) {
             return -1;
         }
@@ -665,6 +669,8 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
                 return -1;
             }
             sym->def_line = st->line;
+            sym->def_unit = st->unit;
+            sym->def_ordinal = st->ordinal;
             sym->defined = 1;
         }
 
@@ -745,7 +751,8 @@ static int visit_expr_ref(sym_ctx_t *ctx, const as_expr_t *e, const char *file, 
             return -1;
         }
         sym->reference_count++;
-        if (!sym->defined || (sym->def_file != NULL && strcmp(sym->def_file, file) == 0 && sym->def_line > line)) {
+        if (!sym->defined ||
+            (sym->def_unit != NULL && file != NULL && strcmp(sym->def_unit, file) == 0 && sym->def_ordinal > line)) {
             sym->forward_ref_count++;
         }
     }
@@ -769,12 +776,12 @@ static int collect_instruction_refs(sym_ctx_t *ctx, const as_stmt_t *st) {
         switch (op->kind) {
         case AS_OPERAND_IMMEDIATE:
         case AS_OPERAND_LABEL_REF:
-            if (visit_expr_ref(ctx, op->u.expr, st->file, st->line) != 0) {
+            if (visit_expr_ref(ctx, op->u.expr, st->unit, st->ordinal) != 0) {
                 return -1;
             }
             break;
         case AS_OPERAND_MEMORY:
-            if (visit_expr_ref(ctx, op->u.mem.disp, st->file, st->line) != 0) {
+            if (visit_expr_ref(ctx, op->u.mem.disp, st->unit, st->ordinal) != 0) {
                 return -1;
             }
             break;
@@ -832,7 +839,7 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                 set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
                 return -1;
             }
-            rc = symbol_set_definition(sym, l->file, l->line);
+            rc = symbol_set_definition(sym, l->file, l->line, l->unit, l->ordinal);
             if (rc == 1 && sym->defined_by_set && !sym->defined_by_equiv) {
                 /* A label for a name that was set is the label, as
                  * with GNU as: the name had only been lent a value. */
@@ -848,6 +855,8 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                 free(sym->def_file);
                 sym->def_file = xstrdup(l->file);
                 sym->def_line = l->line;
+                sym->def_unit = l->unit;
+                sym->def_ordinal = l->ordinal;
                 rc = sym->def_file != NULL || l->file == NULL ? 0 : -1;
             }
             if (rc == 1) {
@@ -892,8 +901,8 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
             for (k = 0; k < sizeof(data) / sizeof(data[0]) && strcmp(d->name, data[k]) != 0; ++k) {
             }
             for (j = 0; k < sizeof(data) / sizeof(data[0]) && j < d->arg_count; ++j) {
-                as_expr_t *e = d->args[j] != NULL ? as_parse_expr_string(d->args[j], st->file, st->line) : NULL;
-                int rc = e != NULL ? visit_expr_ref(&ctx, e, st->file, st->line) : 0;
+                as_expr_t *e = d->args[j] != NULL ? as_parse_expr_string(d->args[j], st->unit, st->ordinal) : NULL;
+                int rc = e != NULL ? visit_expr_ref(&ctx, e, st->unit, st->ordinal) : 0;
 
                 as_expr_free(e);
                 if (rc != 0) {

@@ -183,6 +183,22 @@ int as_lex_escape(const char *s, size_t *i);
  */
 int as_source_position(const char *file, unsigned line, const char **file_out, unsigned *line_out);
 
+/*
+ * The name of a text statements are read from, kept once and for as
+ * long as the assembler runs: what a statement's `unit` is.  NULL for
+ * NULL or for want of memory.
+ */
+const char *as_source_unit(const char *name);
+
+/*
+ * The statement the next message is about, by its unit and ordinal: if
+ * the message begins with where that statement was written, the macro
+ * named at its end is the one that statement is of the expansion of.
+ * Without it the macro is the one called on that line, which is another
+ * when macros call macros.
+ */
+void as_source_message_about(const char *unit, unsigned ordinal);
+
 /* A message, with every internal `file:line` in it made the user's. */
 void as_source_positions_in_text(const char *in, char *out, size_t out_sz);
 

@@ -1173,6 +1173,8 @@ static int struct_set_labels(stmt_vec_t *out, struct_consts_t *consts, as_stmt_t
         memset(&made, 0, sizeof(made));
         made.kind = AS_STMT_DIRECTIVE;
         made.line = st->labels[i].line != 0 ? st->labels[i].line : st->line;
+        made.ordinal = st->labels[i].ordinal != 0 ? st->labels[i].ordinal : st->ordinal;
+        made.unit = st->unit;
         made.file = st->file != NULL ? lower_strdup(st->file) : NULL;
         made.u.directive.name = lower_strdup(".set");
         made.u.directive.args = (char **)calloc(2, sizeof(char *));
@@ -1503,6 +1505,8 @@ static int push_directive(stmt_vec_t *out, const as_stmt_t *at, const char *name
     memset(&args, 0, sizeof(args));
     made.kind = AS_STMT_DIRECTIVE;
     made.line = at->line;
+    made.ordinal = at->ordinal;
+    made.unit = at->unit;
     made.file = at->file != NULL ? lower_strdup(at->file) : NULL;
     made.u.directive.name = lower_strdup(name);
     if ((at->file != NULL && made.file == NULL) || made.u.directive.name == NULL ||
@@ -1530,12 +1534,16 @@ static int push_label(stmt_vec_t *out, const as_stmt_t *at, const char *name) {
     memset(&made, 0, sizeof(made));
     made.kind = AS_STMT_LABEL_ONLY;
     made.line = at->line;
+    made.ordinal = at->ordinal;
+    made.unit = at->unit;
     made.file = at->file != NULL ? lower_strdup(at->file) : NULL;
     made.labels = (as_label_def_t *)calloc(1, sizeof(*made.labels));
     if (made.labels != NULL) {
         made.label_cap = 1;
         made.labels[0].name = lower_strdup(name);
         made.labels[0].line = at->line;
+        made.labels[0].ordinal = at->ordinal;
+        made.labels[0].unit = at->unit;
         made.labels[0].file = at->file != NULL ? lower_strdup(at->file) : NULL;
         made.label_count = 1;
     }
@@ -2389,6 +2397,8 @@ static int stmt_add_label(as_stmt_t *st, const char *name) {
     memset(&labels[st->label_count], 0, sizeof(labels[0]));
     labels[st->label_count].name = lower_strdup(name);
     labels[st->label_count].line = st->line;
+    labels[st->label_count].ordinal = st->ordinal;
+    labels[st->label_count].unit = st->unit;
     labels[st->label_count].file = st->file != NULL ? lower_strdup(st->file) : NULL;
     if (labels[st->label_count].name == NULL || (st->file != NULL && labels[st->label_count].file == NULL)) {
         free(labels[st->label_count].name);
@@ -2547,7 +2557,7 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         if (as_expr_eval_string(d->args[1], set_lookup, &a.consts, &value) == AS_EXPR_EVAL_OK) {
             continue;
         }
-        e = as_parse_expr_string(d->args[1], st->file, st->line);
+        e = as_parse_expr_string(d->args[1], st->unit, st->ordinal);
         if (e == NULL) {
             /* Not an expression: said where it is read. */
             continue;
@@ -2667,7 +2677,7 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
                     if (d->args[k] == NULL || arg_is_empty(d, k)) {
                         continue;
                     }
-                    e = as_parse_expr_string(d->args[k], st->file, st->line);
+                    e = as_parse_expr_string(d->args[k], st->unit, st->ordinal);
                     if (e == NULL) {
                         continue;
                     }
@@ -3438,6 +3448,8 @@ int as_arm_lower(as_parse_result_t *parsed, int a64, int thumb, char ***thumb_fu
             last.file = copy;
         }
         last.line = st->line;
+        last.ordinal = st->ordinal;
+        last.unit = st->unit;
         for (j = 0; j < st->label_count; ++j) {
             const char *name = st->labels[j].name;
 

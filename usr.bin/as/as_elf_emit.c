@@ -463,6 +463,7 @@ void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *text) {
 
         snprintf(written, sizeof(written), "%s:%u: Warning: %s\n", st->file != NULL ? st->file : "<input>", st->line,
                  text);
+        as_source_message_about(st->unit, st->ordinal);
         as_source_positions_in_text(written, shown, sizeof(shown));
         fputs(shown, stderr);
     }
@@ -879,7 +880,7 @@ static int emit_data_sections(emit_ctx_t *ctx) {
             size_t k;
 
             for (k = 0; (width == 1 || width == 2 || width == 4) && k < st->u.directive.arg_count; ++k) {
-                as_expr_t *e = as_parse_expr_string(st->u.directive.args[k], st->file, st->line);
+                as_expr_t *e = as_parse_expr_string(st->u.directive.args[k], st->unit, st->ordinal);
                 long long v;
 
                 if (e != NULL && eval_expr_const(e, &v) == 0) {
@@ -2372,7 +2373,7 @@ static int emit_data_field(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg
                            const local_emit_label_t *labels, size_t label_count) {
     unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
     const char *file = st->file != NULL ? st->file : "<input>";
-    as_expr_t *expr = as_parse_expr_string(arg, st->file, st->line);
+    as_expr_t *expr = as_parse_expr_string(arg, st->unit, st->ordinal);
     data_eval_t ev;
     data_value_t v;
     const data_term_t *place = NULL;
@@ -2581,8 +2582,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 dst = &local_labels[local_label_count++];
                 dst->digit = label_digit;
                 dst->name = st->labels[j].name;
-                dst->file = st->labels[j].file;
-                dst->line = st->labels[j].line;
+                dst->file = st->labels[j].unit;
+                dst->line = st->labels[j].ordinal;
                 dst->off = cur_off;
                 dst->section = section_name_keep(ctx, track.current);
             }
@@ -2677,7 +2678,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     free(sym_op);
                     sym_op = NULL;
                     {
-                        as_expr_t *expr = as_parse_expr_string(d->args[j], st->file, st->line);
+                        as_expr_t *expr = as_parse_expr_string(d->args[j], st->unit, st->ordinal);
                         as_expr_t minuend_node;
                         const as_expr_t *minuend = NULL;
                         int64_t pcrel_extra = 0;
@@ -3553,6 +3554,7 @@ static unsigned report_instruction_errors(emit_ctx_t *ctx) {
                 char said[384];
 
                 snprintf(said, sizeof(said), "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, why);
+                as_source_message_about(st->unit, st->ordinal);
                 ctx->cfg->report_error(ctx->cfg->report_cookie, said);
                 count++;
                 continue;
@@ -3576,6 +3578,7 @@ static unsigned report_instruction_errors(emit_ctx_t *ctx) {
                          st->file != NULL ? st->file : "<input>", st->line,
                          st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "?");
             }
+            as_source_message_about(st->unit, st->ordinal);
             ctx->cfg->report_error(ctx->cfg->report_cookie,
                                    ctx->errbuf != NULL && ctx->errbuf[0] != '\0' ? ctx->errbuf : generic);
             count++;

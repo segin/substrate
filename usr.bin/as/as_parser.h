@@ -183,10 +183,28 @@ typedef enum {
     AS_STMT_INSTRUCTION,
 } as_stmt_kind_t;
 
+/*
+ * Where a label or a statement is, twice over.
+ *
+ * `file` and `line` are where its author wrote it, and are what a
+ * message says: the file named on the command line or included, and
+ * the line of that file -- of a macro's expansion, the line the macro
+ * was called on.
+ *
+ * `unit` and `ordinal` are what tells one statement from another, which
+ * those cannot: every line of a macro's expansion is one line of the
+ * user's.  The ordinal is the statement's line in the text the
+ * assembler reads once macros, repeats and conditionals are expanded,
+ * and the unit names that text (as_source_unit()); a numeric label, `.`
+ * and the place a symbol was defined are found by them.  For a source
+ * that was not expanded they are the file and the line.
+ */
 typedef struct {
     char *name;
     unsigned line;
     char *file;
+    unsigned ordinal;
+    const char *unit;
 } as_label_def_t;
 
 typedef struct {
@@ -231,6 +249,10 @@ typedef struct {
      * numeric label is found by going back or forward in the source.
      */
     unsigned source_seq;
+    /* What tells this statement from every other, where `file` and
+     * `line` are the user's: see as_label_def_t. */
+    unsigned ordinal;
+    const char *unit;
     union {
         as_directive_t directive;
         as_instruction_t instr;

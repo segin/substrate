@@ -72,6 +72,9 @@ char *trim_copy(const char *s) {
     return out;
 }
 
+static as_err_about_fn err_about;
+static void *err_about_arg;
+
 int as_errf(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
     va_list ap;
 
@@ -82,5 +85,18 @@ int as_errf(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(errbuf, errbuf_sz, fmt, ap);
     va_end(ap);
+    /* A message that begins with where a statement is was given that
+     * statement's own file name, which is no other's: whoever knows the
+     * statements is told which one, by it. */
+    if (err_about != NULL && strncmp(fmt, "%s:%u:", 6) == 0) {
+        va_start(ap, fmt);
+        err_about(va_arg(ap, const char *), err_about_arg);
+        va_end(ap);
+    }
     return -1;
+}
+
+void as_err_about(as_err_about_fn fn, void *arg) {
+    err_about = fn;
+    err_about_arg = arg;
 }

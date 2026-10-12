@@ -199,7 +199,7 @@ static int flat_scalar_values(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_
 
         if (eval_linux_alt_len_expr(ctx, st, d->args[i], &v) != 0 && parse_int64(d->args[i], &v) != 0 &&
             parse_const_expr_string(d->args[i], &v) != 0 && eval_arg_asm_vars(ctx, st, d->args[i], &v) != 0) {
-            as_expr_t *expr = as_parse_expr_string(d->args[i], st->file, st->line);
+            as_expr_t *expr = as_parse_expr_string(d->args[i], st->unit, st->ordinal);
 
             if (expr == NULL) {
                 set_err(ctx, "%s:%u: '%s' is not an expression", st->file != NULL ? st->file : "<input>", st->line,

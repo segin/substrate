@@ -36,6 +36,17 @@ char *trim_copy(const char *s);
 int as_errf(char *errbuf, size_t errbuf_sz, const char *fmt, ...);
 
 /*
+ * A message whose format begins "%s:%u:" is about a statement, and its
+ * first argument is that statement's `file`: the pointer itself, which
+ * every statement has its own of.  `fn` is called with it for each such
+ * message, so that what a statement carries beyond its file and line --
+ * which macro's expansion it is of -- can be found for the message.
+ * The pointer is to be compared and not read.  NULL for no one.
+ */
+typedef void (*as_err_about_fn)(const char *file, void *arg);
+void as_err_about(as_err_about_fn fn, void *arg);
+
+/*
  * The same for a context that carries the buffer as `errbuf` and
  * `errbuf_sz`, whichever context it is; a NULL one did not ask either.
  */

@@ -42,8 +42,12 @@ typedef struct {
      * and by `.equiv`, which may not be undone. */
     int defined_by_set;
     int defined_by_equiv;
+    /* Where it was defined: as its author wrote it, for a message, and
+     * which statement that is (see as_label_def_t). */
     unsigned def_line;
     char *def_file;
+    unsigned def_ordinal;
+    const char *def_unit;
     int is_common;
     unsigned long long common_size;
     unsigned long long common_align;

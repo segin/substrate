@@ -1188,6 +1188,8 @@ static int sub_make_directive(as_stmt_t *out, const as_stmt_t *at, const char *n
     memset(out, 0, sizeof(*out));
     out->kind = AS_STMT_DIRECTIVE;
     out->line = at->line;
+    out->ordinal = at->ordinal;
+    out->unit = at->unit;
     out->file = at->file != NULL ? xstrdup(at->file) : NULL;
     out->u.directive.name = xstrdup(name);
     if ((at->file != NULL && out->file == NULL) || out->u.directive.name == NULL) {
@@ -1377,6 +1379,8 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
             made.kind = AS_STMT_LABEL_ONLY;
             made.source_seq = st->source_seq;
             made.line = st->line;
+            made.ordinal = st->ordinal;
+            made.unit = st->unit;
             made.file = st->file != NULL ? xstrdup(st->file) : NULL;
             if (st->file != NULL && made.file == NULL) {
                 goto oom;

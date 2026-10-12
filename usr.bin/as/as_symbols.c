@@ -561,8 +561,8 @@ static int collect_dot_locations(emit_ctx_t *ctx, dot_loc_t **out, size_t *count
                 items = next;
                 cap = ncap;
             }
-            items[count].file = st->file;
-            items[count].line = st->line;
+            items[count].file = st->unit;
+            items[count].line = st->ordinal;
             items[count].sec = section_for_name(ctx, track.current);
             items[count].off = cur_off;
             count++;
@@ -669,7 +669,7 @@ int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
 
                 if (base_sym != NULL && base_sym->alias_from_dot && base_sym->alias_target != NULL &&
                     as_strcmp(base_sym->alias_target, s->size_target_symbol) == 0) {
-                    const dot_loc_t *dot = find_dot_loc(dot_locs, dot_count, base_sym->def_file, base_sym->def_line);
+                    const dot_loc_t *dot = find_dot_loc(dot_locs, dot_count, base_sym->def_unit, base_sym->def_ordinal);
                     if (dot == NULL || dot->sec == NULL || dot->sec != target_loc->sec ||
                         dot->off < target_loc->off) {
                         set_err(ctx, "cannot resolve symbolic size alias for %s", s->name);
@@ -907,7 +907,7 @@ int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 return -1;
             }
             {
-                const dot_loc_t *dot = find_dot_loc(dot_locs, dot_count, s->def_file, s->def_line);
+                const dot_loc_t *dot = find_dot_loc(dot_locs, dot_count, s->def_unit, s->def_ordinal);
                 if (dot != NULL) {
                     dot_sec = dot->sec;
                     dot_off = dot->off;

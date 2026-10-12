@@ -904,6 +904,44 @@ static size_t source_map_cap;
 static char **source_map_files;
 static size_t source_map_file_count;
 
+/*
+ * The names of the texts statements have been read from, each kept once
+ * and for as long as the assembler runs: a statement points at its
+ * unit's and need not own it.  (There are two in a run: the text of the
+ * sources, and the `--defsym` options.)
+ */
+static char **source_units;
+static size_t source_unit_count;
+
+const char *as_source_unit(const char *name) {
+    size_t i;
+    size_t len;
+    char *copy;
+    char **grown;
+
+    if (name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < source_unit_count; ++i) {
+        if (strcmp(source_units[i], name) == 0) {
+            return source_units[i];
+        }
+    }
+    len = strlen(name) + 1;
+    copy = (char *)malloc(len);
+    grown = (char **)realloc(source_units, (source_unit_count + 1) * sizeof(*grown));
+    if (grown != NULL) {
+        source_units = grown;
+    }
+    if (copy == NULL || grown == NULL) {
+        free(copy);
+        return NULL;
+    }
+    memcpy(copy, name, len);
+    source_units[source_unit_count++] = copy;
+    return copy;
+}
+
 static int source_map_begin(const char *internal_name) {
     char *copy = (char *)malloc(strlen(internal_name) + 1);
 
@@ -990,6 +1028,15 @@ int as_source_position(const char *file, unsigned line, const char **file_out, u
     return 1;
 }
 
+static int message_about_set;
+static unsigned message_about_ordinal;
+
+void as_source_message_about(const char *unit, unsigned ordinal) {
+    message_about_set = unit != NULL && source_map_name != NULL && strcmp(unit, source_map_name) == 0 &&
+                        (size_t)ordinal < source_map_count;
+    message_about_ordinal = ordinal;
+}
+
 void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
     size_t n = 0;
     size_t name_len = source_map_name != NULL ? strlen(source_map_name) : 0;
@@ -1001,6 +1048,58 @@ void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
         return;
     }
     macro[0] = '\0';
+    /*
+     * A message about a statement begins with where its author wrote
+     * it, which a statement carries.  If that line called a macro, the
+     * macro is the one the first line of the expansion is of: the one
+     * called there, and not one that it calls in turn.
+     */
+    if (in != NULL) {
+        size_t f;
+        int known = 0;
+
+        /* The statement itself, if it was said which and the message
+         * begins with where that one is. */
+        if (message_about_set) {
+            const char *file;
+            unsigned user_line;
+            char head[512];
+
+            message_about_set = 0;
+            if (as_source_position(source_map_name, message_about_ordinal, &file, &user_line) &&
+                snprintf(head, sizeof(head), "%s:%u:", file, user_line) < (int)sizeof(head) &&
+                strncmp(in, head, strlen(head)) == 0) {
+                known = 1;
+                if (source_map[message_about_ordinal].macro != 0) {
+                    snprintf(macro, sizeof(macro), "%s",
+                             source_map_files[source_map[message_about_ordinal].macro - 1]);
+                }
+            }
+        }
+        for (f = 0; !known && f < source_map_file_count && macro[0] == '\0'; ++f) {
+            size_t len = strlen(source_map_files[f]);
+            unsigned long line = 0;
+            const char *p;
+            size_t k;
+
+            if (len == 0 || strncmp(in, source_map_files[f], len) != 0 || in[len] != ':' ||
+                !isdigit((unsigned char)in[len + 1])) {
+                continue;
+            }
+            for (p = in + len + 1; isdigit((unsigned char)*p); ++p) {
+                line = line * 10 + (unsigned long)(*p - '0');
+            }
+            if (*p != ':') {
+                continue;
+            }
+            for (k = 0; k < source_map_count; ++k) {
+                if (source_map[k].file == f + 1 && source_map[k].line == line && source_map[k].macro != 0) {
+                    snprintf(macro, sizeof(macro), "%s", source_map_files[source_map[k].macro - 1]);
+                    break;
+                }
+            }
+        }
+    }
     while (in != NULL && *in != '\0' && n + 1 < out_sz) {
         const char *digits;
         const char *file;
