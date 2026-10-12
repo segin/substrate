@@ -10889,10 +10889,25 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
             /* A vector for the index: the rest of the address is
              * read as any other is, and the index put to it. */
             as_operand_t plain = *src;
+            const as_x86_reg_info_t *base =
+                cfg->is_64 && src->u.mem.base_reg != NULL ? as_x86_reg_find(src->u.mem.base_reg) : NULL;
 
+            /* (And a base that is one of APX's registers likewise.) */
+            if (base != NULL && !(base->cls == AS_X86_REGCLASS_GENERAL && base->number > 15 &&
+                                  (base->width == 64 || base->width == 32))) {
+                base = NULL;
+            }
+            if (base != NULL) {
+                plain.u.mem.base_reg = NULL;
+            }
             plain.u.mem.index_reg = NULL;
             if (convert_operand_x86(&plain, mn, &ops[i], cfg->is_64, intel, encerr, encerr_sz) != 0) {
                 return -1;
+            }
+            if (base != NULL) {
+                ops[i].u.mem.has_base = 1;
+                ops[i].u.mem.base = (as_x86_reg_t)base->number;
+                ops[i].u.mem.addr_bits = base->width;
             }
             ops[i].u.mem.has_index = 1;
             ops[i].u.mem.index = (as_x86_reg_t)index->number;
@@ -10902,6 +10917,51 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                 ops[i].u.mem.addr_bits = cfg->is_64 ? 64u : 32u;
             }
             continue;
+        }
+        /*
+         * APX's registers, %r16 to %r31, in an address: the rest of it
+         * is read as any other is, and they are put to it.  The table
+         * has the prefix that says them; no other emitter is given
+         * them.
+         */
+        if (src->kind == AS_OPERAND_MEMORY && cfg->is_64) {
+            const as_x86_reg_info_t *base = src->u.mem.base_reg != NULL ? as_x86_reg_find(src->u.mem.base_reg) : NULL;
+            int high_base = base != NULL && base->cls == AS_X86_REGCLASS_GENERAL && base->number > 15;
+            int high_index = index != NULL && index->cls == AS_X86_REGCLASS_GENERAL && index->number > 15;
+
+            if (high_base || high_index) {
+                as_operand_t plain = *src;
+
+                /* (An address is of 64 bits or of 32, all of it.) */
+                if ((high_base && base->width != 64 && base->width != 32) ||
+                    (high_index && index->width != 64 && index->width != 32) ||
+                    (base != NULL && index != NULL && base->cls == AS_X86_REGCLASS_GENERAL &&
+                     index->cls == AS_X86_REGCLASS_GENERAL && base->width != index->width)) {
+                    snprintf(encerr, encerr_sz, "'%s': not an address", mn);
+                    return -1;
+                }
+                if (high_base) {
+                    plain.u.mem.base_reg = NULL;
+                }
+                if (high_index) {
+                    plain.u.mem.index_reg = NULL;
+                }
+                if (convert_operand_x86(&plain, mn, &ops[i], cfg->is_64, intel, encerr, encerr_sz) != 0) {
+                    return -1;
+                }
+                if (high_base) {
+                    ops[i].u.mem.has_base = 1;
+                    ops[i].u.mem.base = (as_x86_reg_t)base->number;
+                    ops[i].u.mem.addr_bits = base->width;
+                }
+                if (high_index) {
+                    ops[i].u.mem.has_index = 1;
+                    ops[i].u.mem.index = (as_x86_reg_t)index->number;
+                    ops[i].u.mem.addr_bits = index->width;
+                }
+                ops[i].u.mem.disp_only = 0;
+                continue;
+            }
         }
         if (convert_operand_x86(src, mn, &ops[i], cfg->is_64, intel, encerr, encerr_sz) != 0) {
             return -1;

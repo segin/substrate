@@ -354,6 +354,26 @@ static int needs_evex(const as_x86_vec_req_t *rq) {
     return 0;
 }
 
+/* Whether a statement has one of APX's general registers, %r16 to
+ * %r31, which a VEX prefix has no bits for. */
+static int has_high_general(const as_x86_vec_req_t *rq) {
+    size_t i;
+
+    for (i = 0; i < rq->op_count; ++i) {
+        const as_x86_operand_t *op = &rq->ops[i];
+
+        if (op->kind == AS_X86_OP_REG && op->reg_class == AS_X86_REGCLASS_GENERAL && (unsigned)op->u.reg > 15u) {
+            return 1;
+        }
+        if (op->kind == AS_X86_OP_MEM && op->u.mem.addr_bits != 16u && !op->u.mem.rip_relative &&
+            ((op->u.mem.has_base && (unsigned)op->u.mem.base > 15u) ||
+             (op->u.mem.has_index && op->u.mem.index_class == 0 && (unsigned)op->u.mem.index > 15u))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The operand of a role, or NULL. */
 static const as_x86_operand_t *role_op(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, char role) {
     const char *p = strchr(t->roles, role);
@@ -499,6 +519,9 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     unsigned b = 0;
     unsigned x4 = 0;
     unsigned v4 = 0;
+    unsigned b4 = 0;
+    unsigned xg4 = 0;
+    int high = 0;
     unsigned w = t->w == AS_VEC_W1 ? 1u : 0u;
     unsigned len = t->len == AS_VEC_LIG ? 0u : t->len;
     uint8_t tail[16];
@@ -668,6 +691,34 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
     }
 
+    /*
+     * APX's general registers, %r16 to %r31: the fifth bit of one in
+     * r/m or of a base is B4, of an index X4, and of one in ModRM.reg
+     * R4 -- which an EVEX prefix has places for that are not where a
+     * vector register's are, and an instruction with no prefix of that
+     * kind says in a REX2 one.
+     */
+    {
+        const as_x86_operand_t *rop = strchr(t->roles, 'r') != NULL ? role_op(t, rq, 'r') : NULL;
+
+        if (rm != NULL && rm->kind == AS_X86_OP_REG && rm->reg_class == AS_X86_REGCLASS_GENERAL) {
+            b4 = x4;
+            x4 = 0;
+        } else if (rm != NULL && rm->kind == AS_X86_OP_MEM && rm->u.mem.addr_bits != 16u && !rm->u.mem.rip_relative) {
+            b4 = rm->u.mem.has_base ? ((unsigned)rm->u.mem.base >> 4) & 1u : 0u;
+            xg4 = rm->u.mem.has_index && rm->u.mem.index_class == 0 ? ((unsigned)rm->u.mem.index >> 4) & 1u : 0u;
+        }
+        high = b4 != 0 || xg4 != 0 ||
+               (rop != NULL && rop->kind == AS_X86_OP_REG && rop->reg_class == AS_X86_REGCLASS_GENERAL &&
+                (unsigned)rop->u.reg > 15u) ||
+               (vop != NULL && vop->kind == AS_X86_OP_REG && vop->reg_class == AS_X86_REGCLASS_GENERAL &&
+                (unsigned)vop->u.reg > 15u);
+    }
+    if (high && rq->mode != 64u) {
+        vec_err(ctx, "'%s': %%r16 to %%r31 are registers of 64-bit code", t->name);
+        return -1;
+    }
+
     if (t->enc == AS_VEC_LEGACY) {
         /* No VEX: the prefix that is part of the opcode, REX if a bit
          * of it is wanted, the escape bytes.  Before them the operand
@@ -690,15 +741,37 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             vec_err(ctx, "a REX prefix outside 64-bit code");
             return -1;
         }
-        if (rex != 0 && put8(ctx, 0x40u | (rex & 0xfu)) != 0) {
-            return -1;
-        }
-        if ((t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) || (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
-            (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0)) {
-            return -1;
+        if (high) {
+            /* REX2: the bits of REX, the fifth bits above them, and
+             * whether the opcode is of the two-byte map -- which it
+             * says instead of the escape byte, and has no way to say
+             * of the others. */
+            if (t->map != AS_VEC_MAP_ONE && t->map != AS_VEC_MAP_0F) {
+                vec_err(ctx, "'%s' has no prefix that says %%r16 to %%r31", t->name);
+                return -1;
+            }
+            if (put8(ctx, 0xd5u) != 0 ||
+                put8(ctx, ((t->map == AS_VEC_MAP_0F ? 1u : 0u) << 7) | (((reg >> 4) & 1u) << 6) | (xg4 << 5) |
+                                  (b4 << 4) | (rex & 0xfu)) != 0) {
+                return -1;
+            }
+        } else {
+            if (rex != 0 && put8(ctx, 0x40u | (rex & 0xfu)) != 0) {
+                return -1;
+            }
+            if ((t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) ||
+                (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
+                (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0)) {
+                return -1;
+            }
         }
     } else if (t->enc == AS_VEC_VEX || t->enc == AS_VEC_XOP) {
         unsigned r = (reg >> 3) & 1u;
+
+        if (high) {
+            vec_err(ctx, "'%s' has no prefix that says %%r16 to %%r31", t->name);
+            return -1;
+        }
         int two = t->enc == AS_VEC_VEX && t->map == AS_VEC_MAP_0F && !w && !x && !b &&
                   (rq->pseudo & AS_PSEUDO_VEX3) == 0 && (t->flags & AS_VEC_F_VEX3) == 0;
 
@@ -722,7 +795,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
 
         /* A register in r/m has its fifth bit where an index has its
          * fourth. */
-        if (rm->kind == AS_X86_OP_REG) {
+        if (rm->kind == AS_X86_OP_REG && rm->reg_class != AS_X86_REGCLASS_GENERAL) {
             x = x4;
         }
         /* V' is the fifth bit of vvvv, or of a vector index. */
@@ -755,8 +828,9 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             vvvv = 0xfu;
         }
         if (put8(ctx, 0x62u) != 0 ||
-            put8(ctx, ((r ^ 1u) << 7) | ((x ^ 1u) << 6) | ((b ^ 1u) << 5) | ((r4 ^ 1u) << 4) | t->map) != 0 ||
-            put8(ctx, (w << 7) | ((~vvvv & 0xfu) << 3) | 0x04u | t->pp) != 0 ||
+            put8(ctx, ((r ^ 1u) << 7) | ((x ^ 1u) << 6) | ((b ^ 1u) << 5) | ((r4 ^ 1u) << 4) | (b4 << 3) | t->map) !=
+                0 ||
+            put8(ctx, (w << 7) | ((~vvvv & 0xfu) << 3) | ((xg4 ^ 1u) << 2) | t->pp) != 0 ||
             put8(ctx, ((rq->zeroing ? 1u : 0u) << 7) | (ll << 5) | (bbit << 4) | low) != 0) {
             return -1;
         }
@@ -811,6 +885,10 @@ static int row_refuses(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, i
         }
         if (evex) {
             *why = "has no AVX-512 form with these operands";
+            return 1;
+        }
+        if (has_high_general(rq)) {
+            *why = "has no prefix that says %r16 to %r31 with these operands";
             return 1;
         }
         if (rq->mode == 64u && rq->level < 3u) {
