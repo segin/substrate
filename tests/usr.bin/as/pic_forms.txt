@@ -1,0 +1,31 @@
+64	9048b80000000000000000/R_X86_64_GOTPC64@3:_GLOBAL_OFFSET_TABLE_+2	foo: nop; movabs $_GLOBAL_OFFSET_TABLE_,%rax
+64	9049bb0000000000000000/R_X86_64_GOTPC64@3:_GLOBAL_OFFSET_TABLE_+2	foo: nop; movabs $_GLOBAL_OFFSET_TABLE_-.,%r11
+64	9049bb0000000000000000/R_X86_64_GOTPC64@3:_GLOBAL_OFFSET_TABLE_+3	foo: nop; movabs $_GLOBAL_OFFSET_TABLE_-foo,%r11
+64	9049bb0000000000000000/R_X86_64_PC64@3:ext+2	foo: nop; movabs $ext-.,%r11
+64	9049bb0000000000000000/R_X86_64_PC64@3:ext+3	foo: nop; movabs $ext-foo,%r11
+64	9048b80000000000000000/R_X86_64_PC64@3:ext+13	foo: nop; movabs $ext-foo+16,%rax
+64	90488d0500000000/R_X86_64_GOTPC32@4:_GLOBAL_OFFSET_TABLE_-4	foo: nop; leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
+64	9081c300000000/R_X86_64_GOTPC32@3:_GLOBAL_OFFSET_TABLE_+2	foo: nop; addl $_GLOBAL_OFFSET_TABLE_,%ebx
+64	90b800000000/R_X86_64_GOTPC32@2:_GLOBAL_OFFSET_TABLE_+1	foo: nop; movl $_GLOBAL_OFFSET_TABLE_,%eax
+64	904881c300000000/R_X86_64_GOTPC32@4:_GLOBAL_OFFSET_TABLE_+3	foo: nop; addq $_GLOBAL_OFFSET_TABLE_,%rbx
+64	90480500000000/R_X86_64_GOTPC32@3:_GLOBAL_OFFSET_TABLE_+3	foo: nop; addq $_GLOBAL_OFFSET_TABLE_-foo,%rax
+64	908b042500000000/R_X86_64_GOTPC32@4:_GLOBAL_OFFSET_TABLE_+0	foo: nop; movl _GLOBAL_OFFSET_TABLE_,%eax
+64	90488b0500000000/R_X86_64_GOTPC32@4:_GLOBAL_OFFSET_TABLE_-4	foo: nop; movq _GLOBAL_OFFSET_TABLE_(%rip),%rax
+64	90b800000000/R_X86_64_PC32@2:ext+1	foo: nop; movl $ext-.,%eax
+32	9081c302000000/R_386_GOTPC@3:_GLOBAL_OFFSET_TABLE_	foo: nop; addl $_GLOBAL_OFFSET_TABLE_,%ebx
+32	90b801000000/R_386_GOTPC@2:_GLOBAL_OFFSET_TABLE_	foo: nop; movl $_GLOBAL_OFFSET_TABLE_-.,%eax
+32	9081c303000000/R_386_GOTPC@3:_GLOBAL_OFFSET_TABLE_	foo: nop; addl $_GLOBAL_OFFSET_TABLE_+[.-foo],%ebx
+32	908d8303000000/R_386_GOTPC@3:_GLOBAL_OFFSET_TABLE_	foo: nop; leal _GLOBAL_OFFSET_TABLE_-foo(%ebx),%eax
+32	90b801000000/R_386_PC32@2:ext	foo: nop; movl $ext-.,%eax
+64	c3e8faffffff	.globl f; f: ret; .set f.localalias,f; call f.localalias
+64	c3ebfd	.globl f; f: ret; .set f.localalias,f; jmp f.localalias
+64	c3e800000000/R_X86_64_PLT32@2:f-4	.globl f; f: ret; .set f.localalias,f; call f
+64	c3e800000000/R_X86_64_PLT32@2:pub-4	.globl f; f: ret; .set pub,f; .globl pub; call pub
+64	c3e8faffffff	f: ret; .set g,f; call g
+32	c3e8faffffff	.globl f; f: ret; .set f.localalias,f; call f.localalias
+32	c3e8fcffffff/R_386_PC32@2:f	.globl f; f: ret; .set f.localalias,f; call f
+64	c348c7c000000000/R_X86_64_32S@4:.text+0	.globl f; f: ret; .set f.localalias,f; movq $f.localalias,%rax
+64	c36800000000/R_X86_64_32S@2:.text+0	.globl f; f: ret; .set f.localalias,f; pushq $f.localalias
+32	c3b800000000/R_386_32@2:.text	.globl f; f: ret; .set f.localalias,f; movl $f.localalias,%eax
+32	c3a100000000/R_386_32@2:.text	.globl f; f: ret; .set f.localalias,f; movl f.localalias,%eax
+64	c3b805000000	.globl f; f: ret; .set k,5; movl $k,%eax

@@ -2203,6 +2203,10 @@ typedef struct {
     int busy;
     int resolved;
     int kept; /* a symbol of its own: see lower_aliases() */
+    /* What a branch to the name goes to, if the name is this file's
+     * own for a label of it: see alias_branch_target(). */
+    int branch_known;
+    char *branch_label;
 } alias_def_t;
 
 typedef struct {
@@ -2375,6 +2379,95 @@ static int source_has_label(const as_parse_result_t *parsed, const char *name) {
     return 0;
 }
 
+/*
+ * A call or a jump to a name that this file has set to one of its own
+ * labels, and has not exported: `call f.localalias`, which a compiler
+ * writes so that the call is to this file's `f` and to no other's.
+ *
+ * Put `f` in its place, as the name is elsewhere, and the call is one
+ * to a symbol another object may take over: it was assembled with a
+ * relocation through the procedure linkage table, and a shared object
+ * made of it had a table entry and a jump for a call GNU as resolves
+ * where it stands.  So such a branch goes to a label of this file's
+ * that is put where `f` is, `.L.alias.f`, which nothing else can name.
+ *
+ * The label's name, or NULL where the name is not one of these (and is
+ * to be put in its place as any other).
+ */
+static const char *alias_branch_target(alias_ctx_t *a, as_parse_result_t *parsed, const as_stmt_t *st,
+                                       const as_operand_t *op, size_t use) {
+    const char *m = st->u.instr.mnemonic;
+    const as_expr_t *e = op->u.expr;
+    alias_def_t *def;
+    const char *target;
+    size_t i;
+    size_t j;
+
+    /* (And an address taken of it, or a load through it: `leaq
+     * f.localalias(%rip), %rax` named `f`, which a shared object may
+     * not be made with.) */
+    if (op->kind == AS_OPERAND_MEMORY) {
+        e = op->u.mem.disp;
+    }
+    if (m == NULL || e == NULL || e->kind != AS_EXPR_SYMBOL || e->symbol == NULL || e->reloc_op != NULL ||
+        e->lhs != NULL || e->rhs != NULL) {
+        return NULL;
+    }
+    def = alias_find(a, e->symbol, use);
+    if (def == NULL) {
+        return NULL;
+    }
+    if (def->branch_known) {
+        return def->branch_label;
+    }
+    def->branch_known = 1;
+    alias_resolve(a, def);
+    if (a->loop != NULL || a->failed || def->kept || def->expr == NULL || def->expr->kind != AS_EXPR_SYMBOL ||
+        def->expr->symbol == NULL || def->expr->reloc_op != NULL || def->expr->lhs != NULL || def->expr->rhs != NULL) {
+        return NULL;
+    }
+    target = def->expr->symbol;
+    /* (A name that is exported is another object's to bind.) */
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *s = &parsed->items[i];
+
+        if (s->kind != AS_STMT_DIRECTIVE || s->u.directive.name == NULL ||
+            (strcmp(s->u.directive.name, ".globl") != 0 && strcmp(s->u.directive.name, ".global") != 0 &&
+             strcmp(s->u.directive.name, ".weak") != 0)) {
+            continue;
+        }
+        for (j = 0; j < s->u.directive.arg_count; ++j) {
+            if (s->u.directive.args[j] != NULL && strcmp(s->u.directive.args[j], def->name) == 0) {
+                return NULL;
+            }
+        }
+    }
+    for (i = 0; i < parsed->count; ++i) {
+        for (j = 0; j < parsed->items[i].label_count; ++j) {
+            const char *have = parsed->items[i].labels[j].name;
+
+            if (have != NULL && strcmp(have, target) == 0) {
+                size_t len = strlen(target) + sizeof(".L.alias.");
+                char *label = (char *)malloc(len);
+
+                if (label == NULL) {
+                    a->failed = 1;
+                    return NULL;
+                }
+                snprintf(label, len, ".L.alias.%s", target);
+                if (!source_has_label(parsed, label) && stmt_add_label(&parsed->items[i], label) != 0) {
+                    free(label);
+                    a->failed = 1;
+                    return NULL;
+                }
+                def->branch_label = label;
+                return label;
+            }
+        }
+    }
+    return NULL;
+}
+
 static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
     alias_ctx_t a;
     int rc = -1;
@@ -2484,6 +2577,22 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
             for (k = 0; k < st->u.instr.operand_count; ++k) {
                 as_operand_t *op = &st->u.instr.operands[k];
 
+                if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF ||
+                    op->kind == AS_OPERAND_MEMORY) {
+                    const char *local = alias_branch_target(&a, parsed, st, op, i);
+
+                    if (local != NULL) {
+                        as_expr_t *e = op->kind == AS_OPERAND_MEMORY ? op->u.mem.disp : op->u.expr;
+                        char *copy = lower_strdup(local);
+
+                        if (copy == NULL) {
+                            goto oom;
+                        }
+                        free(e->symbol);
+                        e->symbol = copy;
+                        continue;
+                    }
+                }
                 if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
                     alias_substitute(&a, op->u.expr, i, &changed);
                 } else if (op->kind == AS_OPERAND_MEMORY) {
@@ -2588,6 +2697,7 @@ oom:
 done:
     for (i = 0; i < a.count; ++i) {
         free(a.items[i].name);
+        free(a.items[i].branch_label);
         as_expr_free(a.items[i].expr);
     }
     free(a.items);

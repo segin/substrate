@@ -54,7 +54,20 @@ cd "$work" || exit 1
 # $b-a, %al`, which have no field for a symbol, were refused.  With a
 # jump between, or a label ahead, it is the long form here as it is
 # GNU as's.
-cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" "$here/labeldiff_forms.txt" > forms.txt
+#
+# pic_forms.txt is the same of what position-independent code of the
+# medium and large models is written with.  The table of offsets by
+# its name is counted from where it is named, in x86-64 code as in
+# i386: `movabs $_GLOBAL_OFFSET_TABLE_, %rax` was R_X86_64_64, the
+# table's address itself.  A symbol less a place or a label of the
+# section is a distance in the eight bytes of `movabs` as in four --
+# `movabs $_GLOBAL_OFFSET_TABLE_-1b, %r11` was refused, and no code of
+# the large model was assembled.  And a name this file sets to a label
+# of its own and does not export -- a compiler's `f.localalias` -- is
+# that label and no other object's: `call f.localalias` was a call of
+# `f` through the procedure linkage table.
+cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" "$here/labeldiff_forms.txt" \
+    "$here/pic_forms.txt" > forms.txt
 
 fail=0
 cases=0

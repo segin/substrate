@@ -17346,8 +17346,19 @@ static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, const 
             return AS_RELOC_TYPE_BAD;
         }
         /* The table itself, by name, in i386 code: relative to here. */
-        if (machine == EM_386 && as_strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 && fallback == R_386_32) {
+        if (machine == EM_386 && as_strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 &&
+            (fallback == R_386_32 || fallback == R_386_PC32)) {
             return R_386_GOTPC;
+        }
+        /* And in x86-64 code, where it was the table's address itself:
+         * `movabs $_GLOBAL_OFFSET_TABLE_, %rax` was R_X86_64_64. */
+        if (machine == EM_X86_64 && as_strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0) {
+            if (fallback == R_X86_64_64 || fallback == R_X86_64_PC64) {
+                return R_X86_64_GOTPC64;
+            }
+            if (fallback == R_X86_64_32 || fallback == R_X86_64_32S || fallback == R_X86_64_PC32) {
+                return R_X86_64_GOTPC32;
+            }
         }
     }
     return fallback;
@@ -22314,8 +22325,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * less the instruction -- more by the field's place in
                  * the instruction, which is the addend GNU as gives it.
                  */
-                if (machine == EM_386 && t == R_386_32 && as_strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0 &&
-                    code_len >= reloc_width) {
+                if (((machine == EM_386 && t == R_386_32) ||
+                     (machine == EM_X86_64 && !have_disp_field &&
+                      (t == R_X86_64_64 || t == R_X86_64_32 || t == R_X86_64_32S))) &&
+                    as_strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0 && code_len >= reloc_width) {
                     addend += (int64_t)(code_len - reloc_width);
                 }
                 /* (An instruction may have two: an address and a number,
@@ -22353,7 +22366,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     const char *label_section = "";
                     uint64_t label_off = 0;
 
-                    if (reloc_width != 4 ||
+                    /* (In four bytes, or in the eight of `movabs`, which
+                     * is how code of the large model finds its table:
+                     * `movabs $_GLOBAL_OFFSET_TABLE_-1b, %r11`.) */
+                    if ((reloc_width != 4 && !(reloc_width == 8 && machine == EM_X86_64)) ||
                         find_label_virtual_location(ctx, NULL, NULL, 0, 0, taken_from, &label_section,
                                                     &label_off) != 0 ||
                         track.current == NULL || as_strcmp(label_section, track.current) != 0) {
@@ -22363,11 +22379,11 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         sec_buf_vec_free(&secbufs);
                         return -1;
                     }
-                    t = machine == EM_X86_64 ? R_X86_64_PC32 : R_386_PC32;
+                    t = machine == EM_X86_64 ? (reloc_width == 8 ? R_X86_64_PC64 : R_X86_64_PC32) : R_386_PC32;
                     addend = (int64_t)taken_value + (int64_t)(reloc_off - label_off);
                 }
                 if (dot_relative) {
-                    if (reloc_width != 4) {
+                    if (reloc_width != 4 && !(reloc_width == 8 && machine == EM_X86_64)) {
                         set_err(ctx, "%s:%u: '%s' less '.' does not fit the %u bytes it has in '%s'",
                                 st->file != NULL ? st->file : "<input>", st->line, sym, (unsigned)reloc_width,
                                 st->u.instr.mnemonic);
@@ -22377,7 +22393,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     }
                     /* (`.` was taken as the section's offset of the
                      * instruction, and the field is further on.) */
-                    t = machine == EM_X86_64 ? R_X86_64_PC32 : R_386_PC32;
+                    t = machine == EM_X86_64 ? (reloc_width == 8 ? R_X86_64_PC64 : R_X86_64_PC32) : R_386_PC32;
                     addend = (int64_t)taken_value + (int64_t)reloc_off;
                 }
                 if (x86_reloc_for_object(machine, obj_machine, &t) != 0) {
