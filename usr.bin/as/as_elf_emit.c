@@ -10886,6 +10886,17 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
     }
     mn[i] = '\0';
+    /* (`{evex} cmp` and `{evex} test` are APX's conditional ones with
+     * the condition that always holds: `ccmpt`, `ctestt`.) */
+    if (cfg->is_64 && (insn->pseudo & AS_PSEUDO_EVEX) != 0 && i + 3 < sizeof(mn)) {
+        const char *as = x86_name_is(mn, "cmp", "bwlq") ? "ccmpt" : x86_name_is(mn, "test", "bwlq") ? "ctestt" : NULL;
+
+        if (as != NULL) {
+            char letter = mn[0] == 'c' ? mn[3] : mn[4];
+
+            snprintf(mn, sizeof(mn), "%s%c", as, letter);
+        }
+    }
     /* (`{dfv=}` is of APX's conditional compare and test.) */
     if (insn->have_dfv && (!cfg->is_64 || (strncmp(mn, "ccmp", 4) != 0 && strncmp(mn, "ctest", 5) != 0))) {
         snprintf(encerr, encerr_sz, "'%s' takes no {dfv=}", mn);
@@ -10910,7 +10921,7 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
             return 1;
         }
         if (as_strcmp(mn, "jmpabs") == 0 && op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] == '$' &&
-            eval_expr_const(op->u.expr, &where) == 0) {
+            (eval_expr_const(op->u.expr, &where) == 0 || expr_has_symbol(op->u.expr))) {
             code[0] = 0xd5u;
             code[1] = 0x00u;
             code[2] = 0xa1u;
@@ -12806,8 +12817,10 @@ static int x86_lift_address_to_rex2(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, co
     as_operand_t ops[AS_X86_SIZED_MAX_OPERANDS];
     as_stmt_t low = *st;
     char base_name[8];
+    char base_raw[10];
     char index_name[8];
     char said[160];
+    int only_register = 0;
     unsigned base3 = 0;
     unsigned index3 = 0;
     int high_base = 0;
@@ -12827,7 +12840,36 @@ static int x86_lift_address_to_rex2(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, co
 
         ops[i] = st->u.instr.operands[i];
         if (ops[i].kind == AS_OPERAND_REGISTER && x86_name_is_high_general(ops[i].u.reg)) {
-            return -1;
+            /*
+             * Or one register of them, where the statement has no
+             * other general register and no memory -- a move to or
+             * from a segment, control or debug register, `rdfsbase`:
+             * it is in r/m, where a base would be.
+             */
+            static const char *const width[] = {"b", "w", "d", ""};
+            size_t k;
+
+            r = as_x86_reg_find(ops[i].u.reg);
+            if (r == NULL || high_base) {
+                return -1;
+            }
+            for (k = 0; k < st->u.instr.operand_count; ++k) {
+                const as_operand_t *other = &st->u.instr.operands[k];
+                const as_x86_reg_info_t *o = other->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(other->u.reg) : NULL;
+
+                if (other->kind == AS_OPERAND_MEMORY || (k != i && o != NULL && o->cls == AS_X86_REGCLASS_GENERAL)) {
+                    return -1;
+                }
+            }
+            high_base = 1;
+            only_register = 1;
+            base3 = (r->number >> 3) & 1u;
+            snprintf(base_name, sizeof(base_name), "r%u%s", 8u + (r->number & 7u),
+                     width[r->width == 8 ? 0 : r->width == 16 ? 1 : r->width == 32 ? 2 : 3]);
+            snprintf(base_raw, sizeof(base_raw), "%%%s", base_name);
+            ops[i].u.reg = base_name;
+            ops[i].raw = base_raw;
+            continue;
         }
         if (ops[i].kind != AS_OPERAND_MEMORY) {
             continue;
@@ -12866,6 +12908,11 @@ static int x86_lift_address_to_rex2(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, co
         at++;
     }
     if (at + 1 >= *code_len || (code[at] & 0xf0u) != 0x40u) {
+        return -1;
+    }
+    /* (The register is where a base would be, or this is not known
+     * to be right.) */
+    if (only_register && (code[at] & 1u) == 0) {
         return -1;
     }
     two_byte = code[at + 1] == 0x0f;
@@ -12927,7 +12974,9 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             while (at < *code_len && memchr(before, code[at], sizeof(before)) != NULL) {
                 at++;
             }
-            if (at < *code_len && (code[at] == 0xd5 || code[at] == 0x62)) {
+            /* (`xlat` has its address written and none in it.) */
+            if ((at < *code_len && (code[at] == 0xd5 || code[at] == 0x62)) ||
+                strncasecmp(st->u.instr.mnemonic, "xlat", 4) == 0) {
                 return 0;
             }
         }
@@ -13386,8 +13435,21 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     /* The opmask instructions are encoded in one place, which is not
      * either of the two that the rest are divided between. */
     if (st != NULL && st->kind == AS_STMT_INSTRUCTION && cfg != NULL) {
-        int opmask = encode_x86_opmask(&st->u.instr, st->u.instr.syntax_intel != 0, cfg->is_64 != 0, code, code_cap,
-                                       code_len, encerr, encerr_sz);
+        int opmask;
+
+        /* (But for a move of one with %r16 to %r31, or one {evex} is
+         * asked of, which is APX's EVEX form and a row of the table.) */
+        if (cfg->is_64 && strncasecmp(st->u.instr.mnemonic, "kmov", 4) == 0 &&
+            ((st->u.instr.pseudo & AS_PSEUDO_EVEX) != 0 || x86_stmt_has_high_general(&st->u.instr))) {
+            int vec = encode_x86_vec(cfg, &st->u.instr, code, code_cap, code_len, encerr, encerr_sz);
+
+            if (vec > 0) {
+                return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len) != 0 ? -1 : 0;
+            }
+            encerr[0] = '\0';
+        }
+        opmask = encode_x86_opmask(&st->u.instr, st->u.instr.syntax_intel != 0, cfg->is_64 != 0, code, code_cap,
+                                   code_len, encerr, encerr_sz);
 
         if (opmask < 0) {
             return -1;

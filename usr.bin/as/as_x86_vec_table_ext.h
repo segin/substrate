@@ -907,6 +907,9 @@
     VX("wrmsrns", PF3, M7, 0xf6, W0, L128, "qi", "mi", AS_VEC_F_IMM32 | DG(0) | O64),
     EX("wrmsrns", PF3, M7, 0xf6, W0, L128, "qi", "mi", 0, 0, AS_VEC_F_IMM32 | DG(0) | O64),
     LFIX("wrmsrns", 0x01, 0xc6, "", ""),
+    /* (And the read of one by its number; with no operand `rdmsr` is
+     * the old instruction, and assembled where it always was.) */
+    VX("rdmsr", PF2, M7, 0xf6, W0, L128, "iq", "im", AS_VEC_F_IMM32 | DG(0) | O64 | AS_VEC_F_APX),
 
     /*
      * And those with no VEX prefix, which were written by hand from the
@@ -1106,3 +1109,42 @@
     LX("ud2b", P0, M1, 0xb9, W0, "Ww", "mr", OP16),
     LX("ud2b", P0, M1, 0xb9, W0, "Dd", "mr", OP32),
     LX("ud2b", P0, M1, 0xb9, W1, "Qq", "mr", O64),
+    /*
+     * crc32 in APX's EVEX form, which %r16 to %r31 need (its opcode is
+     * of a map REX2 has no way to say) and {evex} asks for: what is
+     * summed is a byte, a word or the register's width, by the
+     * register it is in or by the name's letter.  (The rows of `crc32`
+     * with both of one width are among the generated ones.)
+     */
+#define CRC32X (O64 | AS_VEC_F_APX | AS_VEC_F_PROMOHI)
+    EX("crc32", P0, M4, 0xf0, W0, L128, "hd", "mr", 1, 0, CRC32X),
+    EX("crc32", P0, M4, 0xf0, W1, L128, "hq", "mr", 1, 0, CRC32X),
+    EX("crc32", P66, M4, 0xf1, W0, L128, "wd", "mr", 1, 0, CRC32X),
+    EX("crc32b", P0, M4, 0xf0, W0, L128, "hd", "mr", 1, 0, CRC32X),
+    EX("crc32b", P0, M4, 0xf0, W0, L128, "md", "mr", 1, 0, CRC32X),
+    EX("crc32b", P0, M4, 0xf0, W1, L128, "hq", "mr", 1, 0, CRC32X),
+    EX("crc32b", P0, M4, 0xf0, W1, L128, "mq", "mr", 1, 0, CRC32X),
+    EX("crc32w", P66, M4, 0xf1, W0, L128, "wd", "mr", 1, 0, CRC32X),
+    EX("crc32w", P66, M4, 0xf1, W0, L128, "md", "mr", 1, 0, CRC32X),
+    EX("crc32l", P0, M4, 0xf1, W0, L128, "dd", "mr", 1, 0, CRC32X),
+    EX("crc32l", P0, M4, 0xf1, W0, L128, "md", "mr", 1, 0, CRC32X),
+    EX("crc32q", P0, M4, 0xf1, W1, L128, "qq", "mr", 1, 0, CRC32X),
+    EX("crc32q", P0, M4, 0xf1, W1, L128, "mq", "mr", 1, 0, CRC32X),
+    /* The moves of a mask register likewise, to and from one of %r16
+     * to %r31 or memory at an address of them. */
+    EX("kmovb", P66, M1, 0x90, W0, L128, "mk", "mr", 1, 0, CRC32X),
+    EX("kmovb", P66, M1, 0x91, W0, L128, "km", "rm", 1, 0, CRC32X),
+    EX("kmovb", P66, M1, 0x92, W0, L128, "dk", "mr", 1, 0, CRC32X),
+    EX("kmovb", P66, M1, 0x93, W0, L128, "kd", "mr", 1, 0, CRC32X),
+    EX("kmovw", P0, M1, 0x90, W0, L128, "mk", "mr", 1, 0, CRC32X),
+    EX("kmovw", P0, M1, 0x91, W0, L128, "km", "rm", 1, 0, CRC32X),
+    EX("kmovw", P0, M1, 0x92, W0, L128, "dk", "mr", 1, 0, CRC32X),
+    EX("kmovw", P0, M1, 0x93, W0, L128, "kd", "mr", 1, 0, CRC32X),
+    EX("kmovd", P66, M1, 0x90, W1, L128, "mk", "mr", 1, 0, CRC32X),
+    EX("kmovd", P66, M1, 0x91, W1, L128, "km", "rm", 1, 0, CRC32X),
+    EX("kmovd", PF2, M1, 0x92, W0, L128, "dk", "mr", 1, 0, CRC32X),
+    EX("kmovd", PF2, M1, 0x93, W0, L128, "kd", "mr", 1, 0, CRC32X),
+    EX("kmovq", P0, M1, 0x90, W1, L128, "mk", "mr", 1, 0, CRC32X),
+    EX("kmovq", P0, M1, 0x91, W1, L128, "km", "rm", 1, 0, CRC32X),
+    EX("kmovq", PF2, M1, 0x92, W1, L128, "qk", "mr", 1, 0, CRC32X),
+    EX("kmovq", PF2, M1, 0x93, W1, L128, "kq", "mr", 1, 0, CRC32X),

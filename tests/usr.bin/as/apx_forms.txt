@@ -17058,3 +17058,68 @@
 32	refused	ccmpt {dfv=of} %cl,%dl
 32	refused	ccmpf {dfv=cf} %cx,%dx
 32	refused	ccmps {dfv=OF, CF} %ecx,%edx
+64	62f47c08f0d1	{evex} crc32b %cl,%edx
+64	62f47c08f010	{evex} crc32b (%rax),%edx
+64	62f4fc08f0d1	{evex} crc32b %cl,%rdx
+64	62f4fc08f010	{evex} crc32b (%rax),%rdx
+64	62f47d08f1d1	{evex} crc32w %cx,%edx
+64	62f47d08f110	{evex} crc32w (%rax),%edx
+64	62f47c08f1d1	{evex} crc32l %ecx,%edx
+64	62f47c08f110	{evex} crc32l (%rax),%edx
+64	62f4fc08f1d1	{evex} crc32q %rcx,%rdx
+64	62f4fc08f110	{evex} crc32q (%rax),%rdx
+64	62f47c08f0d1	{evex} crc32 %cl,%edx
+64	62f47d08f1d1	{evex} crc32 %cx,%edx
+64	62f4fc08f0d1	{evex} crc32 %cl,%rdx
+64	62fc7c08f0c0	crc32b %r16b,%eax
+64	62fc7d08f1c0	crc32w %r16w,%eax
+64	62ec7c08f1d8	crc32l %r16d,%r19d
+64	62fcfc08f100	crc32q (%r16),%rax
+64	f20f38f0d1	crc32b %cl,%edx
+64	f20f38f1d1	crc32 %ecx,%edx
+64	f20f38f110	crc32l (%rax),%edx
+64	62f4040a39ca	{evex} cmp %ecx,%edx
+64	62f4040a85ca	{evex} test %ecx,%edx
+64	62f4040a83fa01	{evex} cmp $1,%edx
+64	62f4040a803801	{evex} cmpb $1,(%rax)
+64	62f4840a8508	{evex} testq %rcx,(%rax)
+64	62ec840a39c1	{evex} cmp %r16,%r17
+64	39ca	cmp %ecx,%edx
+64	d59022c0	mov %r16,%cr0
+64	d59020c0	mov %cr0,%r16
+64	d59520c0	mov %cr8,%r24
+64	d59023c8	mov %r16,%dr1
+64	d5108ed8	mov %r16,%ds
+64	d5108ce0	mov %fs,%r16
+64	66d5108cd0	movw %ss,%r16w
+64	d5108e10	movw (%r16),%ss
+64	f3d598aec0	rdfsbase %r16
+64	f3d590aed8	wrgsbase %r16d
+64	f3d599aecf	rdgsbase %r31
+64	62fc7e08f200	invpcid (%r16),%rax
+64	d5108ed8	mov %r16d,%ds
+64	d5118cc1	mov %es,%r25d
+64	62e17c0893c1	kmovw %k1,%r16d
+64	62f97c0892d1	kmovw %r17d,%k2
+64	62f97c089008	kmovw (%r16),%k1
+64	62f97808915c0808	kmovw %k3,8(%r16,%r17)
+64	62e17d0893e1	kmovb %k1,%r20d
+64	62f97d0892d5	kmovb %r21d,%k2
+64	62f97d089010	kmovb (%r16),%k2
+64	62d97d089117	kmovb %k2,(%r31)
+64	62e17f0893c1	kmovd %k1,%r16d
+64	62f97f0892c8	kmovd %r16d,%k1
+64	62f9fd089008	kmovd (%r16),%k1
+64	62f9fd089108	kmovd %k1,(%r16)
+64	62e1ff0893c1	kmovq %k1,%r16
+64	62f9ff0892c8	kmovq %r16,%k1
+64	62f9fc089008	kmovq (%r16),%k1
+64	62f9fc089108	kmovq %k1,(%r16)
+64	c5f893c1	kmovw %k1,%eax
+64	c5f892c8	kmovw %eax,%k1
+64	c4e1f89008	kmovq (%rax),%k1
+64	c5f890d1	kmovw %k1,%k2
+64	refused	kmovq %k1,%r16d
+64	refused	kmovw %r16,%k1
+64	62f17c0893c1	{evex} kmovw %k1,%eax
+64	62f1fc089008	{evex} kmovq (%rax),%k1
