@@ -209,6 +209,18 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
                     as_parse_result_t *out, char *errbuf, size_t errbuf_sz);
 
 /*
+ * The same a part at a time: begin, feed the tokens of whole lines in
+ * the order of the source, and end, which is what as_parse_tokens()
+ * returns.  A feed returns -1 only for want of memory; what cannot be
+ * read is kept for the end.  Nothing of the tokens is held past the
+ * feed they were given to.
+ */
+typedef struct as_parser as_parser_t;
+as_parser_t *as_parse_begin(const as_parser_cfg_t *cfg, as_parse_result_t *out, char *errbuf, size_t errbuf_sz);
+int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count);
+int as_parse_end(as_parser_t *p);
+
+/*
  * Whether ST is a branch whose one operand is where it goes; and, for
  * such a branch to a numeric label, the label's reference made a
  * reference to the name the label has beside its number.  0, or -1 for

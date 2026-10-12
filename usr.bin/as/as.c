@@ -3613,6 +3613,11 @@ static void report_emit_error(void *cookie, const char *message) {
     as_diag(AS_E_BACKEND, "%s", message);
 }
 
+/* The lexer's lines, given to the parser (as_lexer_cfg_t.lines). */
+static int parse_lines_given(void *cookie, const as_token_t *items, size_t count) {
+    return as_parse_feed((as_parser_t *)cookie, items, count);
+}
+
 static int run_native_backend(const as_ctx_t *ctx) {
     as_token_vec_t toks;
     char **thumb_funcs = NULL;
@@ -3626,6 +3631,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
     const char **include_dirs = NULL;
     size_t include_dir_count = 0;
     char errbuf[8192];
+    char parse_errbuf[8192];
     int source_in_error = 0;
     as_text_t text_source;
     as_text_t text_expanded;
@@ -3743,27 +3749,38 @@ static int run_native_backend(const as_ctx_t *ctx) {
         goto out;
     }
     {
+        /*
+         * The source is made tokens and the tokens statements a few
+         * lines at a time: the parser is given each line's as they are
+         * made and they are not kept.  (All of them were, until the
+         * object was written: 400 bytes for each line of the source.)
+         */
+        as_parser_t *parser = as_parse_begin(&pcfg, &parsed, parse_errbuf, sizeof(parse_errbuf));
+        int lexed = -1;
+
         AS_PHASE_BEGIN();
+        if (parser == NULL) {
+            as_diag(AS_E_INTERNAL, "out of memory");
+            goto out;
+        }
+        lcfg.lines = parse_lines_given;
+        lcfg.lines_cookie = parser;
         /* The --defsym symbols first: their tokens go before the source's. */
-        if (text_defs.len != 0 &&
-            as_lex_text("--defsym", text_defs.data, text_defs.len, 0, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
+        if (text_defs.len == 0 ||
+            as_lex_text("--defsym", text_defs.data, text_defs.len, 0, &lcfg, &toks, errbuf, sizeof(errbuf)) == 0) {
+            lexed = as_lex_text(ctx->in_path, text_cond.data != NULL ? text_cond.data : "", text_cond.len, 1, &lcfg,
+                                &toks, errbuf, sizeof(errbuf));
+        }
+        if (lexed != 0) {
+            (void)as_parse_end(parser);
             as_diag(AS_E_BACKEND, "%s", errbuf);
             goto out;
         }
-        if (as_lex_text(ctx->in_path, text_cond.data != NULL ? text_cond.data : "", text_cond.len, 1, &lcfg,
-                        &toks, errbuf, sizeof(errbuf)) != 0) {
-            as_diag(AS_E_BACKEND, "%s", errbuf);
-            goto out;
-        }
-        AS_PHASE_END(ctx, "lex");
-    }
-    {
-        AS_PHASE_BEGIN();
         /* Statements that cannot be read are each reported, a line of
          * the buffer each, and the rest of the source is gone through
          * for what else is wrong with it; nothing is written. */
-        if (as_parse_tokens(&toks, &pcfg, &parsed, errbuf, sizeof(errbuf)) != 0) {
-            char *line = errbuf;
+        if (as_parse_end(parser) != 0) {
+            char *line = parse_errbuf;
 
             while (line != NULL && *line != '\0') {
                 char *end = strchr(line, '\n');
@@ -3777,6 +3794,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
             source_in_error = 1;
         }
         AS_PHASE_END(ctx, "parse");
+        as_token_vec_free(&toks);
     }
     ecfg.report_error = report_emit_error;
     ecfg.line_own_source = (unsigned)(ctx->gen_debug != 0);

@@ -602,7 +602,9 @@ static int add_operand(as_instruction_t *in, const as_operand_t *op) {
     as_operand_t *next;
 
     if (in->operand_count == in->operand_cap) {
-        size_t ncap = in->operand_cap == 0 ? 4 : in->operand_cap * 2;
+        /* (Two to begin with, which is what most instructions have:
+         * room for four was 128 bytes more for each of them.) */
+        size_t ncap = in->operand_cap == 0 ? 2 : in->operand_cap * 2;
         next = (as_operand_t *)realloc(in->operands, ncap * sizeof(*next));
         if (next == NULL) {
             return -1;
@@ -2458,29 +2460,83 @@ static void resolve_locals(parse_ctx_t *ctx) {
     }
 }
 
+/*
+ * The parser between the lines it is given: as_parse_begin(), then
+ * as_parse_feed() with the tokens of whole lines, as many at a time as
+ * the caller has, then as_parse_end().  (All the tokens of a source at
+ * once were 400 bytes for each of its lines, held while every line was
+ * read.)
+ */
+struct as_parser {
+    parse_ctx_t ctx;
+    char *errors;
+    size_t errors_len;
+    unsigned error_count;
+    int done; /* no more is read: too many errors, or no memory */
+};
+
+as_parser_t *as_parse_begin(const as_parser_cfg_t *cfg, as_parse_result_t *out, char *errbuf, size_t errbuf_sz) {
+    as_parser_t *p;
+
+    if (out == NULL) {
+        return NULL;
+    }
+    p = (as_parser_t *)calloc(1, sizeof(*p));
+    if (p == NULL) {
+        return NULL;
+    }
+    p->ctx.cfg = cfg;
+    p->ctx.syntax_intel = (cfg != NULL && cfg->intel_syntax) ? 1 : 0;
+    parse_is_x86 = cfg != NULL && cfg->arch == AS_PARSER_ARCH_X86;
+    parse_bare_x86_registers = p->ctx.syntax_intel || !parse_is_x86;
+    p->ctx.out = out;
+    p->ctx.errbuf = errbuf;
+    p->ctx.errbuf_sz = errbuf_sz;
+    if (errbuf != NULL && errbuf_sz > 0) {
+        errbuf[0] = '\0';
+    }
+    return p;
+}
+
 int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
                     as_parse_result_t *out, char *errbuf, size_t errbuf_sz) {
-    parse_ctx_t ctx;
-    size_t i;
-    char *errors = NULL;
-    size_t errors_len = 0;
-    unsigned error_count = 0;
+    as_parser_t *p;
 
     if (tokens == NULL || out == NULL) {
         return -1;
     }
-
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.cfg = cfg;
-    ctx.syntax_intel = (cfg != NULL && cfg->intel_syntax) ? 1 : 0;
-    parse_is_x86 = cfg != NULL && cfg->arch == AS_PARSER_ARCH_X86;
-    parse_bare_x86_registers = ctx.syntax_intel || !parse_is_x86;
-    ctx.out = out;
-    ctx.errbuf = errbuf;
-    ctx.errbuf_sz = errbuf_sz;
-    if (errbuf != NULL && errbuf_sz > 0) {
-        errbuf[0] = '\0';
+    p = as_parse_begin(cfg, out, errbuf, errbuf_sz);
+    if (p == NULL) {
+        return -1;
     }
+    (void)as_parse_feed(p, tokens->items, tokens->count);
+    return as_parse_end(p);
+}
+
+int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count) {
+    /* (The statements below were written for a vector of them.) */
+    const struct {
+        const as_token_t *items;
+        size_t count;
+    } given = {items, count}, *tokens = &given;
+    parse_ctx_t ctx;
+    as_parse_result_t *out;
+    size_t i;
+    char *errors;
+    size_t errors_len;
+    unsigned error_count;
+
+    if (p == NULL || (items == NULL && count != 0)) {
+        return -1;
+    }
+    if (p->done) {
+        return 0;
+    }
+    ctx = p->ctx;
+    out = ctx.out;
+    errors = p->errors;
+    errors_len = p->errors_len;
+    error_count = p->error_count;
 
     i = 0;
     while (i < tokens->count) {
@@ -2548,6 +2604,7 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
                 free(labels);
             }
             if (error_count >= AS_PARSE_ERRORS_MAX) {
+                p->done = 1;
                 break;
             }
             i = j;
@@ -2557,15 +2614,50 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
         if (push_stmt(out, &st) != 0) {
             free_stmt(&st);
             set_err(&ctx, "%s:%u: out of memory", tokens->items[i].file, tokens->items[i].line);
-            free_local_defs(&ctx.local_defs);
+            p->ctx = ctx;
+            p->errors = errors;
+            p->errors_len = errors_len;
+            p->error_count = error_count + 1;
+            p->done = 1;
             return -1;
         }
 
         i = j;
     }
+    p->ctx = ctx;
+    p->errors = errors;
+    p->errors_len = errors_len;
+    p->error_count = error_count;
+    return 0;
+}
+
+int as_parse_end(as_parser_t *p) {
+    parse_ctx_t ctx;
+    char *errors;
+    size_t errors_len;
+    unsigned error_count;
+
+    if (p == NULL) {
+        return -1;
+    }
+    ctx = p->ctx;
+    errors = p->errors;
+    errors_len = p->errors_len;
+    error_count = p->error_count;
+    free(p);
 
     resolve_locals(&ctx);
     free_local_defs(&ctx.local_defs);
+    /* The room that was made by doubling and is not used is given
+     * back: it was a third of the vector on average. */
+    if (ctx.out->count != 0 && ctx.out->count < ctx.out->cap) {
+        as_stmt_t *fit = (as_stmt_t *)realloc(ctx.out->items, ctx.out->count * sizeof(*fit));
+
+        if (fit != NULL) {
+            ctx.out->items = fit;
+            ctx.out->cap = ctx.out->count;
+        }
+    }
     /* Every statement that could not be read, a line each, and after
      * them a numeric label that is not there, if one is not. */
     if (error_count != 0 && ctx.errbuf != NULL && ctx.errbuf_sz > 0) {

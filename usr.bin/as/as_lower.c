@@ -1847,9 +1847,31 @@ static void section_flag_drop(char *flags, char letter) {
  *
  * What is said is a `.warning` put before the directive.
  */
+/* Say of each statement in the vector from `*count` to `made` that it
+ * goes before the statement at `at`. */
+static int lower_note_before(size_t **before, size_t *cap, size_t *count, size_t made, size_t at) {
+    while (*count < made) {
+        if (*count == *cap) {
+            size_t ncap = *cap == 0 ? 8 : *cap * 2;
+            size_t *next = (size_t *)realloc(*before, ncap * sizeof(*next));
+
+            if (next == NULL) {
+                return -1;
+            }
+            *before = next;
+            *cap = ncap;
+        }
+        (*before)[(*count)++] = at;
+    }
+    return 0;
+}
+
 static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
     set_consts_t consts;
     stmt_vec_t out;
+    size_t *before = NULL;
+    size_t before_cap = 0;
+    size_t before_count = 0;
     const char *why = NULL;
     int rc = -1;
     size_t i;
@@ -1868,10 +1890,16 @@ static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbu
         long long v = 0;
         size_t k;
 
+        /*
+         * Each statement is changed where it is.  (A second vector of
+         * them all was made here, 144 bytes and more for each, though
+         * none is dropped and the few that are added are warnings: `out`
+         * has those alone, and `before` the statement each goes before.)
+         */
+        if (lower_note_before(&before, &before_cap, &before_count, out.count, i - 1) != 0) {
+            goto oom;
+        }
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
-            if (stmt_vec_push(&out, st) != 0) {
-                goto oom;
-            }
             continue;
         }
         if (directive_is_set(d)) {
@@ -1988,15 +2016,31 @@ static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbu
             }
             set_args(d, &text);
         }
-        if (stmt_vec_push(&out, st) != 0) {
+    }
+    if (out.count != 0) {
+        as_stmt_t *merged;
+        size_t w = 0;
+        size_t k = 0;
+
+        if (lower_note_before(&before, &before_cap, &before_count, out.count, parsed->count - 1) != 0) {
             goto oom;
         }
+        merged = (as_stmt_t *)malloc((parsed->count + out.count) * sizeof(*merged));
+        if (merged == NULL) {
+            goto oom;
+        }
+        for (i = 0; i < parsed->count; ++i) {
+            while (k < out.count && before[k] == i) {
+                merged[w++] = out.items[k++];
+            }
+            merged[w++] = parsed->items[i];
+        }
+        free(parsed->items);
+        parsed->items = merged;
+        parsed->count = w;
+        parsed->cap = w;
+        out.count = 0;
     }
-    free(parsed->items);
-    parsed->items = out.items;
-    parsed->count = out.count;
-    parsed->cap = out.cap;
-    out.items = NULL;
     rc = 0;
     goto done;
 
@@ -2008,8 +2052,9 @@ fail:
     /* Statements are in two places or in neither by now; the assembler
      * is about to exit, and is not to free any of them twice. */
     parsed->count = 0;
-    free(out.items);
 done:
+    free(out.items);
+    free(before);
     for (i = 0; i < consts.now.count; ++i) {
         free(consts.now.items[i].name);
     }

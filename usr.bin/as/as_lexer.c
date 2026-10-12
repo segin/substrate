@@ -1070,6 +1070,30 @@ void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
  * one is, and is how the source keeps the user's coordinates through
  * what expands it.
  */
+/*
+ * Give the tokens held to the one who asked for the lines, if one did,
+ * and hold none.  (The names of files stay: a token to come may be of
+ * one of them.)
+ */
+static int lex_give_lines(lex_ctx_t *ctx) {
+    as_token_vec_t *v = ctx->out;
+    size_t i;
+    int rc;
+
+    if (ctx->cfg == NULL || ctx->cfg->lines == NULL || v->count == 0) {
+        return 0;
+    }
+    rc = ctx->cfg->lines(ctx->cfg->lines_cookie, v->items, v->count);
+    for (i = 0; i < v->count; ++i) {
+        as_token_free(&v->items[i]);
+    }
+    v->count = 0;
+    if (rc != 0 && ctx->errbuf != NULL && ctx->errbuf_sz > 0 && ctx->errbuf[0] == '\0') {
+        set_err(ctx, "out of memory");
+    }
+    return rc != 0 ? -1 : 0;
+}
+
 static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t file_len, unsigned depth,
                       int marked) {
     char path[PATH_MAX];
@@ -1194,6 +1218,18 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
                      strcmp(line_tokens.items[0].text, ".include") == 0 &&
                      line_tokens.items[1].kind == AS_TOK_STRING;
 
+        /* What is held goes to whoever asked for the lines, before a
+         * line that is not more of the statement held. */
+        if (!is_include && line_tokens.count != 0 && ctx->out->count != 0) {
+            const as_token_t *last = &ctx->out->items[ctx->out->count - 1];
+            const as_token_t *first = &line_tokens.items[0];
+
+            if ((last->line != first->line || strcmp(last->file, first->file) != 0) && lex_give_lines(ctx) != 0) {
+                as_token_vec_free(&line_tokens);
+                free(file_buf);
+                return -1;
+            }
+        }
         for (i = 0; !is_include && i < line_tokens.count; ++i) {
             as_token_t *t = &line_tokens.items[i];
             if (as_token_vec_push_take(ctx->out, t) != 0) {
@@ -1301,6 +1337,9 @@ int as_lex_text(const char *name, const char *text, size_t len, int marked, cons
     copy[len] = '\0';
     rc = lex_buffer(&ctx, name, copy, len, 0, marked);
     ctx.spliced_into = NULL;
+    if (rc == 0) {
+        rc = lex_give_lines(&ctx);
+    }
 
     while (ctx.include_stack_count > 0) {
         free(ctx.include_stack[ctx.include_stack_count - 1]);

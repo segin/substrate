@@ -68,6 +68,15 @@ typedef struct {
     size_t include_dir_count;
     int intel_syntax;
     unsigned max_include_depth;
+    /*
+     * If set, the tokens are given to this a few lines at a time, whole
+     * lines always and in the order of the source, and are not kept:
+     * the vector as_lex_text() is given is where they are between
+     * times, and is empty when it returns.  Other than 0 from it ends
+     * the reading, and as_lex_text() returns -1.
+     */
+    int (*lines)(void *cookie, const as_token_t *items, size_t count);
+    void *lines_cookie;
 } as_lexer_cfg_t;
 
 void as_token_vec_init(as_token_vec_t *v);
