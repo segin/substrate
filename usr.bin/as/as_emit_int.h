@@ -260,6 +260,30 @@ typedef struct {
     long long value;
 } virtual_addr_value_t;
 
+typedef struct {
+    char *name;
+    bytebuf_t buf;
+    /* Whether the last bytes put in it were data and not an
+     * instruction: what padding between instructions begins with. */
+    int after_data;
+} sec_buf_t;
+
+typedef struct {
+    sec_buf_t *items;
+    size_t count;
+    size_t cap;
+    as_strmap_t by_name; /* a section's name to its place in items */
+} sec_buf_vec_t;
+
+typedef struct {
+    char *current;
+    char *previous;
+    unsigned x86_code_bits;
+    char **stack;
+    size_t stack_count;
+    size_t stack_cap;
+} section_track_t;
+
 /*
  * What as_elf_emit.c has that the writer of a flat binary uses too:
  * the buffer of bytes, the padding of an alignment, the evaluation of
@@ -356,5 +380,59 @@ int x86_got_load_kind(const unsigned char *code, size_t len);
 int x86_imm_field_width(const unsigned char *code, size_t len, unsigned code_bits, unsigned *width_out,
                         int *rex_w_out, unsigned char *opcode_out);
 size_t x86_prefix_count(const unsigned char *code, size_t len, int is_64);
+
+/*
+ * as_layout.c: where everything is.  The sections as a source goes
+ * through them, the offset of each statement and the place of each
+ * label, the bytes a directive is, the sizing of branches, and the
+ * symbols of the object as they are looked up and made.
+ */
+int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name, const as_stmt_t *st,
+                              uint64_t sec_off, unsigned x86_code_bits, const as_directive_t *d);
+int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym);
+int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name, const as_stmt_t *st,
+                                     unsigned x86_code_bits);
+int asm_var_lookup(const emit_ctx_t *ctx, const char *name, long long *out);
+int call_to_place_target(const as_stmt_t *st, uint64_t sec_off, long long *abs_target);
+unsigned directive_fixed_scalar_width(const as_directive_t *d);
+elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name);
+int eval_leb128_arg(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st, uint64_t sec_off,
+                    unsigned x86_code_bits, const char *arg, long long *out);
+const as_symbol_t *find_as_symbol_const(emit_ctx_t *ctx, const as_symtab_t *symtab, const char *name);
+elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name);
+int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st, const char *file, unsigned line, int digit,
+                                const char *sym_name, const char **section_out, uint64_t *off_out);
+int find_stmt_virtual_location(emit_ctx_t *ctx, const as_stmt_t *target_st, const char **section_out,
+                               uint64_t *off_out);
+const char *first_symbol_in_expr(const as_expr_t *e);
+int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, const as_expr_t *e, long long *out);
+size_t hash_name(const char *name);
+int is_local_temp_symbol_name(const char *name);
+int layout_offsets(emit_ctx_t *ctx, uint64_t **off_out);
+int line_rows(emit_ctx_t *ctx);
+int line_view_names(emit_ctx_t *ctx);
+int line_view_value(emit_ctx_t *ctx, const char *name, long long *out);
+int local_ref_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st, const as_expr_t *e,
+                               virtual_addr_value_t *out);
+int next_word(const as_directive_t *d, size_t *arg, const char **at, char *word, size_t word_sz);
+int numeric_local_label_number(const char *name, int *out);
+int parse_symbol_addend_op_arg(const char *arg, char **sym_out, char **op_out, int64_t *add_out);
+int relaxed_place_branch_target(emit_ctx_t *ctx, const as_stmt_t *st, const char *section_name, uint64_t sec_off,
+                                unsigned x86_code_bits, long long *abs_target, int *is_short);
+sec_buf_t *sec_buf_get_or_add(sec_buf_vec_t *v, const char *name);
+void sec_buf_vec_free(sec_buf_vec_t *v);
+elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name);
+int section_name_is_executable(emit_ctx_t *ctx, const char *name);
+const char *section_name_keep(emit_ctx_t *ctx, const char *name);
+void section_remember(emit_ctx_t *ctx, const char *name, elf_section_t *sec);
+int section_track_apply_directive(section_track_t *st, const as_directive_t *d);
+void section_track_free(section_track_t *st);
+int section_track_init(section_track_t *st, unsigned initial_code_bits);
+int stmt_is_place_free(const as_stmt_t *st);
+int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len);
+void text_code_free(void);
+void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len);
+size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz);
+void virtual_label_cache_free(emit_ctx_t *ctx);
 
 #endif
