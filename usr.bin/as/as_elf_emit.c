@@ -8585,146 +8585,22 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
     }
 }
 
-static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
+/*
+ * The strings: .ascii, .asciz and .string.  1 with the bytes in `buf`, 0
+ * if the directive is none of them, -1 if a literal cannot be read.
+ *
+ * (This was a second emitter of every data directive -- the numbers,
+ * the space, .fill, the alignments, .org and the floats -- behind the
+ * one that has the context, append_directive_data_ctx(), which has
+ * each of those itself and came here for the strings alone; the floats
+ * are numbers by the time anything is emitted.)
+ */
+static int append_string_directive(bytebuf_t *buf, const as_directive_t *d) {
     size_t i;
-    unsigned width = 0;
-    long long v;
 
     if (d == NULL || d->name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".byte") == 0) width = 1;
-    else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
-             strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
-    else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
-    else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
-
-    if (width != 0) {
-        for (i = 0; i < d->arg_count; ++i) {
-            if (parse_int64(d->args[i], &v) == 0 || parse_const_expr_string(d->args[i], &v) == 0) {
-                if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
-                    return -1;
-                }
-                continue;
-            }
-            {
-                char *sym = NULL;
-                int64_t add = 0;
-                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
-                    free(sym);
-                    if (bytebuf_append_zeros(buf, width) != 0) {
-                        return -1;
-                    }
-                    continue;
-                }
-                free(sym);
-            }
-            return -1;
-        }
-        return 1;
-    }
-
-    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
-        long long fill = 0;
-        size_t j;
-        if (d->arg_count < 1 || (parse_int64(d->args[0], &v) != 0 && parse_const_expr_string(d->args[0], &v) != 0) ||
-            v < 0) {
-            return -1;
-        }
-        if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) &&
-            d->arg_count >= 2) {
-            if (parse_int64(d->args[1], &fill) != 0) {
-                return -1;
-            }
-            for (j = 0; j < (size_t)v; ++j) {
-                if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
-                    return -1;
-                }
-            }
-            return 1;
-        }
-        if (bytebuf_append_zeros(buf, (size_t)v) != 0) {
-            return -1;
-        }
-        return 1;
-    }
-
-    if (strcmp(d->name, ".fill") == 0) {
-        long long repeat = 0;
-        long long size = 1;
-        long long value = 0;
-
-        if (d->arg_count < 1 ||
-            (parse_int64(d->args[0], &repeat) != 0 && parse_const_expr_string(d->args[0], &repeat) != 0) ||
-            repeat < 0) {
-            return -1;
-        }
-        if (d->arg_count >= 2 &&
-            ((parse_int64(d->args[1], &size) != 0 && parse_const_expr_string(d->args[1], &size) != 0) ||
-             size <= 0 || size > 8)) {
-            return -1;
-        }
-        if (d->arg_count >= 3 &&
-            (parse_int64(d->args[2], &value) != 0 && parse_const_expr_string(d->args[2], &value) != 0)) {
-            return -1;
-        }
-        for (i = 0; i < (size_t)repeat; ++i) {
-            if (bytebuf_append_u64_le(buf, (uint64_t)value, (unsigned)size) != 0) {
-                return -1;
-            }
-        }
-        return 1;
-    }
-
-    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
-        size_t align = 1;
-        size_t need;
-        long long fill = 0;
-        if (d->arg_count < 1 ||
-            (parse_int64(d->args[0], &v) != 0 && parse_const_expr_string(d->args[0], &v) != 0) ||
-            v < 0) {
-            return -1;
-        }
-        if (directive_has_arg(d, 1) &&
-            (parse_int64(d->args[1], &fill) != 0 && parse_const_expr_string(d->args[1], &fill) != 0)) {
-            return -1;
-        }
-        if (strcmp(d->name, ".p2align") == 0) {
-            if (v >= (long long)(sizeof(size_t) * CHAR_BIT - 1)) {
-                return -1;
-            }
-            align = (size_t)1u << (unsigned)v;
-        } else {
-            align = (size_t)v;
-        }
-        if (align == 0 || (align & (align - 1)) != 0) {
-            return -1;
-        }
-        need = (align - (buf->len & (align - 1))) & (align - 1);
-        switch (align_exceeds_max_skip(d, need)) {
-        case 1: need = 0; break;
-        case 0: break;
-        default: return -1;
-        }
-        if (append_align_fill(buf, d, need, (uint64_t)fill) != 0) {
-            return -1;
-        }
-        return 1;
-    }
-
-    if (strcmp(d->name, ".org") == 0) {
-        if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
-            return -1;
-        }
-        if ((size_t)v < buf->len) {
-            return -1;
-        }
-        if ((size_t)v > buf->len && bytebuf_append_zeros(buf, (size_t)v - buf->len) != 0) {
-            return -1;
-        }
-        return 1;
-    }
-
     if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
         int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
         for (i = 0; i < d->arg_count; ++i) {
@@ -8745,38 +8621,6 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
         }
         return 1;
     }
-
-    if (strcmp(d->name, ".float") == 0 || strcmp(d->name, ".double") == 0) {
-        int is_double = strcmp(d->name, ".double") == 0;
-        for (i = 0; i < d->arg_count; ++i) {
-            char *end;
-            double dv = strtod(d->args[i], &end);
-            if (end == d->args[i] || *end != '\0') {
-                return -1;
-            }
-            if (is_double) {
-                union {
-                    double d;
-                    uint64_t u;
-                } u64;
-                u64.d = dv;
-                if (bytebuf_append_u64_le(buf, u64.u, 8) != 0) {
-                    return -1;
-                }
-            } else {
-                union {
-                    float f;
-                    uint32_t u;
-                } u32;
-                u32.f = (float)dv;
-                if (bytebuf_append_u64_le(buf, (uint64_t)u32.u, 4) != 0) {
-                    return -1;
-                }
-            }
-        }
-        return 1;
-    }
-
     return 0;
 }
 
@@ -16491,7 +16335,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         return 1;
     }
-    return append_directive_data(buf, d);
+    return append_string_directive(buf, d);
 }
 
 static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
