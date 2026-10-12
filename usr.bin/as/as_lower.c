@@ -2265,8 +2265,62 @@ static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *chan
     }
     alias_substitute(a, e->lhs, use, changed);
     alias_substitute(a, e->rhs, use, changed);
-    /* (A symbol with a relocation operator on it is left a symbol.) */
-    if (e->kind != AS_EXPR_SYMBOL || e->symbol == NULL || e->reloc_op != NULL) {
+    if (e->kind != AS_EXPR_SYMBOL || e->symbol == NULL) {
+        return;
+    }
+    /*
+     * A symbol with a relocation operator on it is left a symbol -- but
+     * the symbol the name stands for, where that is one alone: a
+     * compiler names one constant twice (`.set .LC24,.LC25`) and loads
+     * it by either name, `.LC24@GOTOFF(%ebx)`.  The name was left as
+     * it was written, the `.set` that made it was taken out with the
+     * rest, and the object asked every other for a symbol `.LC24`.
+     */
+    if (e->reloc_op != NULL) {
+        as_expr_linear_t lin;
+        char *target;
+
+        def = alias_find(a, e->symbol, use);
+        if (def == NULL) {
+            return;
+        }
+        alias_resolve(a, def);
+        if (a->loop != NULL || a->failed || def->kept ||
+            as_expr_eval_linear(def->expr, NULL, NULL, &lin) != AS_EXPR_EVAL_OK || lin.add_symbol == NULL ||
+            lin.sub_symbol != NULL || lin.add_local != NULL || lin.sub_local != NULL) {
+            return;
+        }
+        /* (A symbol and some bytes on: the operator is on the symbol,
+         * and the bytes are added to what it makes.) */
+        if (lin.value != 0) {
+            char text[256];
+            as_expr_t *made;
+
+            if (snprintf(text, sizeof(text), "%s@%s%+lld", lin.add_symbol, e->reloc_op, lin.value) >=
+                (int)sizeof(text)) {
+                return;
+            }
+            made = as_parse_expr_string(text, e->src_file, e->src_line);
+            if (made == NULL) {
+                a->failed = 1;
+                return;
+            }
+            free(e->symbol);
+            free(e->reloc_op);
+            free(e->src_file);
+            *e = *made;
+            free(made);
+            *changed = 1;
+            return;
+        }
+        target = lower_strdup(lin.add_symbol);
+        if (target == NULL) {
+            a->failed = 1;
+            return;
+        }
+        free(e->symbol);
+        e->symbol = target;
+        *changed = 1;
         return;
     }
     def = alias_find(a, e->symbol, use);
