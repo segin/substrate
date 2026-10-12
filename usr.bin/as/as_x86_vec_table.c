@@ -1430,6 +1430,112 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     BITCOUNT("popcnt", 0xb8),
     BITCOUNT("lzcnt", 0xbd),
     BITCOUNT("tzcnt", 0xbc),
+
+    /*
+     * The instructions of the system, of virtual machines, of the
+     * shadow stack and their like: an opcode and no more, or with one
+     * register or one address.  The 32-bit emitter had most of them and
+     * the 64-bit one almost none -- `rdrand %eax`, `clflushopt (%rax)`,
+     * `xtest` and forty more were "unsupported mnemonic" in 64-bit
+     * code -- and neither had those of AMD's virtual machines or of
+     * the shadow stack.
+     */
+#define LFIXP(n, pp, op, b, ops, roles) {n, AS_VEC_LEGACY, pp, M1, op, W0, 0, ops, roles, b, 0, 0}
+#define X32 AS_VEC_F_X32
+    /* With a byte that is a number after the byte that is the opcode's. */
+    {"xabort", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xc6, W0, 0, "u", "i", 0xf8, 0, 0},
+    {"hreset", AS_VEC_LEGACY, PF3, M3, 0xf0, W0, 0, "u", "i", 0xc0, 0, 0},
+    LFIX("femms", 0x0e, 0, "", ""),
+    LFIX("getsec", 0x37, 0, "", ""),
+    LFIXP("wbnoinvd", PF3, 0x09, 0, "", ""),
+    LFIX("serialize", 0x01, 0xe8, "", ""),
+    LFIX("xtest", 0x01, 0xd6, "", ""),
+    LFIX("xend", 0x01, 0xd5, "", ""),
+    LFIX("rdpkru", 0x01, 0xee, "", ""),
+    LFIX("wrpkru", 0x01, 0xef, "", ""),
+    LFIX("pconfig", 0x01, 0xc5, "", ""),
+    LFIX("encls", 0x01, 0xcf, "", ""),
+    LFIX("enclu", 0x01, 0xd7, "", ""),
+    LFIX("enclv", 0x01, 0xc0, "", ""),
+    LFIX("vmmcall", 0x01, 0xd9, "", ""),
+    LFIX("stgi", 0x01, 0xdc, "", ""),
+    LFIX("clgi", 0x01, 0xdd, "", ""),
+    LFIXP("saveprevssp", PF3, 0x01, 0xea, "", ""),
+    LFIXP("setssbsy", PF3, 0x01, 0xe8, "", ""),
+    LFIXP("xresldtrk", PF2, 0x01, 0xe9, "", ""),
+    LFIXP("xsusldtrk", PF2, 0x01, 0xe8, "", ""),
+    {"uiret", AS_VEC_LEGACY, PF3, M1, 0x01, W0, 0, "", "", 0xec, 0, O64},
+    {"testui", AS_VEC_LEGACY, PF3, M1, 0x01, W0, 0, "", "", 0xed, 0, O64},
+    {"clui", AS_VEC_LEGACY, PF3, M1, 0x01, W0, 0, "", "", 0xee, 0, O64},
+    {"stui", AS_VEC_LEGACY, PF3, M1, 0x01, W0, 0, "", "", 0xef, 0, O64},
+    /* With the registers they are told things in written, which are
+     * no part of the instruction: the first of each holds an address. */
+    LFIX("clzero", 0x01, 0xfc, "", ""),
+    LFIX("clzero", 0x01, 0xfc, "A", "-"),
+    LFIX("monitorx", 0x01, 0xfa, "", ""),
+    LFIX("monitorx", 0x01, 0xfa, "Ace", "---"),
+    LFIX("mwaitx", 0x01, 0xfb, "", ""),
+    LFIX("mwaitx", 0x01, 0xfb, "acb", "---"),
+    LFIX("skinit", 0x01, 0xde, "", ""),
+    LFIX("skinit", 0x01, 0xde, "a", "-"),
+    LFIX("invlpga", 0x01, 0xdf, "", ""),
+    LFIX("invlpga", 0x01, 0xdf, "Ac", "--"),
+    LFIX("vmrun", 0x01, 0xd8, "", ""),
+    LFIX("vmrun", 0x01, 0xd8, "A", "-"),
+    LFIX("vmload", 0x01, 0xda, "", ""),
+    LFIX("vmload", 0x01, 0xda, "A", "-"),
+    LFIX("vmsave", 0x01, 0xdb, "", ""),
+    LFIX("vmsave", 0x01, 0xdb, "A", "-"),
+    /* A random number, to a register of any width. */
+    LX("rdrand", P0, M1, 0xc7, W0, "w", "m", OP16 | DG(6)),
+    LX("rdrand", P0, M1, 0xc7, W0, "d", "m", OP32 | DG(6)),
+    LX("rdrand", P0, M1, 0xc7, W1, "q", "m", O64 | DG(6)),
+    LX("rdseed", P0, M1, 0xc7, W0, "w", "m", OP16 | DG(7)),
+    LX("rdseed", P0, M1, 0xc7, W0, "d", "m", OP32 | DG(7)),
+    LX("rdseed", P0, M1, 0xc7, W1, "q", "m", O64 | DG(7)),
+    /* The processor's number: to a register of the mode's own width. */
+    LX("rdpid", PF3, M1, 0xc7, W0, "q", "m", O64 | DG(7)),
+    LX("rdpid", PF3, M1, 0xc7, W0, "d", "m", X32 | DG(7)),
+    LX("senduipi", PF3, M1, 0xc7, W0, "q", "m", O64 | DG(6)),
+    /* One address. */
+    LX("vmclear", P66, M1, 0xc7, W0, "m", "m", DG(6)),
+    LX("vmptrld", P0, M1, 0xc7, W0, "m", "m", DG(6)),
+    LX("vmxon", PF3, M1, 0xc7, W0, "m", "m", DG(6)),
+    LX("vmptrst", P0, M1, 0xc7, W0, "m", "m", DG(7)),
+    LX("clflushopt", P66, M1, 0xae, W0, "m", "m", DG(7)),
+    LX("clwb", P66, M1, 0xae, W0, "m", "m", DG(6)),
+    LX("clrssbsy", PF3, M1, 0xae, W0, "m", "m", DG(6)),
+    LX("rstorssp", PF3, M1, 0x01, W0, "m", "m", DG(5)),
+    LX("cldemote", P0, M1, 0x1c, W0, "m", "m", DG(0)),
+    /* A value for the trace: 32 bits or 64, by the register or by the
+     * letter, and from memory 32 unless the letter says. */
+    LX("ptwrite", PF3, M1, 0xae, W0, "D", "m", DG(4)),
+    LX("ptwrite", PF3, M1, 0xae, W1, "q", "m", O64 | DG(4)),
+    LX("ptwritel", PF3, M1, 0xae, W0, "D", "m", DG(4)),
+    LX("ptwriteq", PF3, M1, 0xae, W1, "Q", "m", O64 | DG(4)),
+    /* The shadow stack. */
+    LX("incsspd", PF3, M1, 0xae, W0, "d", "m", DG(5)),
+    LX("incsspq", PF3, M1, 0xae, W1, "q", "m", O64 | DG(5)),
+    LX("rdsspd", PF3, M1, 0x1e, W0, "d", "m", DG(1)),
+    LX("rdsspq", PF3, M1, 0x1e, W1, "q", "m", O64 | DG(1)),
+    LX("wrssd", P0, M2, 0xf6, W0, "dm", "rm", 0),
+    LX("wrssq", P0, M2, 0xf6, W1, "qm", "rm", O64),
+    LX("wrussd", P66, M2, 0xf5, W0, "dm", "rm", 0),
+    LX("wrussq", P66, M2, 0xf5, W1, "qm", "rm", O64),
+    /* From 16 bytes of memory, with a register of the mode's width. */
+    LX("invept", P66, M2, 0x80, W0, "mq", "mr", O64),
+    LX("invept", P66, M2, 0x80, W0, "md", "mr", X32),
+    LX("invvpid", P66, M2, 0x81, W0, "mq", "mr", O64),
+    LX("invvpid", P66, M2, 0x81, W0, "md", "mr", X32),
+    LX("invpcid", P66, M2, 0x82, W0, "mq", "mr", O64),
+    LX("invpcid", P66, M2, 0x82, W0, "md", "mr", X32),
+    /* A store that goes round the cache: a register, or 64 bytes whose
+     * destination is an address in a register of the address's width. */
+    LX("movdiri", P0, M2, 0xf9, W0, "dm", "rm", 0),
+    LX("movdiri", P0, M2, 0xf9, W1, "qm", "rm", O64),
+    LX("movdir64b", P66, M2, 0xf8, W0, "mq", "mr", O64),
+    LX("movdir64b", P66, M2, 0xf8, W0, "md", "mr", X32),
+    LX("movdir64b", P66, M2, 0xf8, W0, "mw", "mr", X32),
 };
 
 const size_t as_x86_vec_table_count = sizeof(as_x86_vec_table) / sizeof(as_x86_vec_table[0]);

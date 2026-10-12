@@ -2441,10 +2441,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x33) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "getsec")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x37) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "bswap")) {
         if (insn->op_count != 1 || a->kind != AS_X86_OP_REG) {
             set_unsupported_form_named(&ctx, "bswap");
@@ -2638,18 +2634,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x9e) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "lahf")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x9f) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "xabort")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM || emit8(&ctx, 0xc6) != 0 || emit8(&ctx, 0xf8) != 0 ||
-            emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "xbegin")) {
         if (insn->op_count != 1 || a->kind != AS_X86_OP_REL || emit8(&ctx, 0xc7) != 0 || emit8(&ctx, 0xf8) != 0 ||
             emit32(&ctx, (uint32_t)a->u.rel) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "lahf")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x9f) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "int3")) {
@@ -2910,10 +2901,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || modrm_sib_disp(&ctx, ext, a) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "enclv")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xc0) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "monitor")) {
         if (insn->op_count != 3 || a->kind != AS_X86_OP_REG || b->kind != AS_X86_OP_REG || c->kind != AS_X86_OP_REG ||
             emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xc8) != 0) {
@@ -2922,14 +2909,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "xgetbv")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xd0) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "vmrun")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xd8) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "serialize")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xe8) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "lar") || streq_ci(insn->mnemonic, "lsl")) {
@@ -2999,10 +2978,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "wbinvd")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x09) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "femms")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0e) != 0) {
             return -1;
         }
     } else if (keylocker_wide_ext(insn->mnemonic) >= 0) {
@@ -3407,27 +3382,22 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
 
         /* (No REX.W for a 64-bit register: what is loaded is a
          * segment's limit or its rights, and fills the register
-         * either way.) */
+         * either way.  Nor for the letter that says 64 bits -- `lslq`
+         * had it.) */
+        rex_w = 0;
+        /* The selector is 16 bits whatever register it is in; but a
+         * register of 32 bits is not written beside one of 64, either
+         * way round. */
+        if (b->kind == AS_X86_OP_REG && a->size_bits != b->size_bits && b->size_bits != 16 &&
+            (a->size_bits == 64 || b->size_bits == 64)) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
         goto finish;
-    }
-
-    if (streq_ci(insn->mnemonic, "rdpid") && insn->op_count == 1 && a != NULL && a->kind == AS_X86_OP_REG) {
-        /* (Nor here: the register is the mode's size with no prefix.) */
-        uint8_t r = (uint8_t)(0x40u | (reg_ext(a->u.reg) ? 0x01u : 0u));
-        ctx.at = rex_pos;
-        if (emit8(&ctx, 0xf3) != 0 || ((r != 0x40u) && emit8(&ctx, r) != 0) ||
-            emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc7) != 0 ||
-            emit8(&ctx, (uint8_t)(0xf8u | reg_low3(a->u.reg))) != 0) {
-            return -1;
-        }
-        if (out_len != NULL) {
-            *out_len = ctx.at;
-        }
-        return 0;
     }
 
     if ((streq_ci(insn->mnemonic, "sldt") || streq_ci(insn->mnemonic, "str") ||
@@ -6221,6 +6191,15 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             }
         } else {
             set_unsupported_form_named(&ctx, "jmp");
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "xbegin")) {
+        long long disp;
+
+        /* (To a place not yet known, as a call is; it was no
+         * instruction of 64-bit code at all.) */
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_REL || resolve_rel_target(&ctx, a->u.rel, 6u, &disp) != 0 ||
+            emit8(&ctx, 0xc7) != 0 || emit8(&ctx, 0xf8) != 0 || emit32(&ctx, (uint32_t)disp) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "call")) {

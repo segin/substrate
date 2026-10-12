@@ -37,7 +37,13 @@ cd "$work" || exit 1
 # registers past the fifteenth, the one-byte displacement and what it
 # is multiplied by, masks, broadcasts and rounding and their misuse,
 # the lengths of the conversions, gathers and scatters.
-cat "$here/vec_forms.txt" "$here/vec_rules.txt" > forms.txt
+#
+# sys_forms.txt is the same of the instructions of the system, of
+# virtual machines and of the shadow stack, which are rows of the table
+# too: the 32-bit emitter had most of them and the 64-bit one almost
+# none -- `rdrand %eax`, `clflushopt (%rax)`, `xtest` and forty more
+# were "unsupported mnemonic" in 64-bit code -- and neither had AMD's.
+cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0

@@ -1995,16 +1995,8 @@ static int lookup_i386_0fc7_group(const char *mnemonic, unsigned char *prefix, u
         unsigned reg_field;
     } map[] = {
         {"cmpxchg8b", 0x00, 1u},
-        {"xrstors", 0x00, 3u},
         {"xsavec", 0x00, 4u},
         {"xsaves", 0x00, 5u},
-        {"rdrand", 0x00, 6u},
-        {"vmclear", 0x66, 6u},
-        {"vmptrld", 0x00, 6u},
-        {"vmxon", 0xf3, 6u},
-        {"rdseed", 0x00, 7u},
-        {"vmptrst", 0x00, 7u},
-        {"rdpid", 0xf3, 7u},
     };
     size_t i;
 
@@ -2056,9 +2048,6 @@ static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) 
         {"rdgsbase", 1u},
         {"wrfsbase", 2u},
         {"wrgsbase", 3u},
-        {"ptwrite", 4u},
-        {"incsspd", 5u},
-        {"clrssbsy", 6u},
     };
     size_t i;
 
@@ -2088,8 +2077,6 @@ static int lookup_i386_0fae_rm_group(const char *mnemonic, unsigned char *prefix
         {"xrstor", 0x00, 5u},
         {"xsaveopt", 0x00, 6u},
         {"clflush", 0x00, 7u},
-        {"clwb", 0x66, 6u},
-        {"clflushopt", 0x66, 7u},
     };
     size_t i;
 
@@ -2352,29 +2339,6 @@ static int lookup_i386_movbe_opcode(int intel_syntax, int first_is_reg, unsigned
     return 0;
 }
 
-static int lookup_i386_vm_invalidate_opcode(const char *mnemonic, unsigned char *opcode3) {
-    static const struct {
-        const char *mnemonic;
-        unsigned char opcode3;
-    } map[] = {
-        {"invept", 0x80},
-        {"invvpid", 0x81},
-        {"invpcid", 0x82},
-    };
-    size_t i;
-
-    if (mnemonic == NULL || opcode3 == NULL) {
-        return -1;
-    }
-    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
-            *opcode3 = map[i].opcode3;
-            return 0;
-        }
-    }
-    return -1;
-}
-
 static int lookup_i386_aes_0f38_opcode(const char *mnemonic, unsigned char *opcode3) {
     static const struct {
         const char *mnemonic;
@@ -2434,12 +2398,8 @@ static int lookup_i386_memorder_opcode(const char *mnemonic, unsigned char *pref
         unsigned char opcode3;
         int reg_first;
     } map[] = {
-        {"wrssd", 0x00, 0xf6, 0},
-        {"wrussd", 0x66, 0xf5, 0},
-        {"movdir64b", 0x66, 0xf8, 1},
         {"enqcmd", 0xf2, 0xf8, 1},
         {"enqcmds", 0xf3, 0xf8, 1},
-        {"movdiri", 0x00, 0xf9, 0},
         {"aadd", 0x00, 0xfc, 0},
         {"aand", 0x66, 0xfc, 0},
         {"aor", 0xf2, 0xfc, 0},
@@ -2957,7 +2917,6 @@ static int lookup_i386_cachehint_regf(const char *mnemonic, unsigned char *opcod
         unsigned char opcode2;
         unsigned char regf;
     } map[] = {
-        {"cldemote", 0x1c, 0u},
         {"prefetch", 0x0d, 0u},
         {"prefetchwt1", 0x0d, 2u},
         {"prefetchnta", 0x18, 0u},
@@ -3474,7 +3433,7 @@ static int has_x86_size_suffix(const char *mn, char *suffix_out) {
             const char *base;
             const char *suffixes;
         } some[] = {
-            {"shld", "wlq"},  {"shrd", "wlq"}, {"lar", "wl"},     {"lsl", "wl"},   {"movnti", "lq"}, {"bound", "wl"},
+            {"shld", "wlq"},  {"shrd", "wlq"}, {"lar", "wlq"},    {"lsl", "wlq"},  {"movnti", "lq"}, {"bound", "wl"},
             {"lss", "wl"},    {"lfs", "wl"},   {"lgs", "wl"},     {"lds", "wl"},   {"les", "wl"},    {"iret", "wlq"},
             {"lret", "wlq"},  {"movbe", "wlq"}, {"adcx", "lq"},   {"adox", "lq"},
         };
@@ -6933,16 +6892,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "wbnoinvd") == 0) {
-        if (insn->operand_count != 0 || out == NULL || out_len == NULL || out_cap < 3) {
-            return -1;
-        }
-        out[0] = 0xf3;
-        out[1] = 0x0f;
-        out[2] = 0x09;
-        *out_len = 3;
-        return 0;
-    }
     if (strcmp(mnbuf, "shld") == 0 || strcmp(mnbuf, "shrd") == 0) {
         const as_operand_t *count_op;
         const as_operand_t *src_op;
@@ -6978,8 +6927,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     if (strcmp(mnbuf, "fxsave") == 0 || strcmp(mnbuf, "fxrstor") == 0 || strcmp(mnbuf, "ldmxcsr") == 0 ||
         strcmp(mnbuf, "stmxcsr") == 0 || strcmp(mnbuf, "xsave") == 0 || strcmp(mnbuf, "xrstor") == 0 ||
-        strcmp(mnbuf, "xsaveopt") == 0 || strcmp(mnbuf, "clflush") == 0 ||
-        strcmp(mnbuf, "clwb") == 0 || strcmp(mnbuf, "clflushopt") == 0) {
+        strcmp(mnbuf, "xsaveopt") == 0 || strcmp(mnbuf, "clflush") == 0) {
         unsigned reg_field;
         unsigned char prefix;
 
@@ -7014,8 +6962,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return 0;
     }
     if (strcmp(mnbuf, "rdfsbase") == 0 || strcmp(mnbuf, "rdgsbase") == 0 || strcmp(mnbuf, "wrfsbase") == 0 ||
-        strcmp(mnbuf, "wrgsbase") == 0 || strcmp(mnbuf, "ptwrite") == 0 || strcmp(mnbuf, "incsspd") == 0 ||
-        strcmp(mnbuf, "clrssbsy") == 0) {
+        strcmp(mnbuf, "wrgsbase") == 0) {
         unsigned reg_field;
 
         if (insn->operand_count != 1 || a == NULL) {
@@ -7288,10 +7235,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x00, 0xff, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cmpxchg8b") == 0 || strcmp(mnbuf, "rdrand") == 0 || strcmp(mnbuf, "rdseed") == 0 ||
-        strcmp(mnbuf, "xrstors") == 0 || strcmp(mnbuf, "xsavec") == 0 || strcmp(mnbuf, "xsaves") == 0 ||
-        strcmp(mnbuf, "vmclear") == 0 || strcmp(mnbuf, "vmptrld") == 0 || strcmp(mnbuf, "vmptrst") == 0 ||
-        strcmp(mnbuf, "vmxon") == 0 || strcmp(mnbuf, "rdpid") == 0) {
+    /* (The rest of this group -- rdrand, rdseed, rdpid, xrstors and
+     * those of virtual machines -- are rows of as_x86_vec_table.c.) */
+    if (strcmp(mnbuf, "cmpxchg8b") == 0 || strcmp(mnbuf, "xsavec") == 0 || strcmp(mnbuf, "xsaves") == 0) {
         unsigned reg_field;
         unsigned char prefix;
         const as_operand_t *op;
@@ -7452,26 +7398,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_map_rm_imm8(prefix, 0x3a, 0x0f, xr, src_op, (unsigned char)immv,
                                                  out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "hreset") == 0) {
-        long long immv;
-
-        if (insn->operand_count != 1 || a == NULL ||
-            (a->kind != AS_OPERAND_IMMEDIATE && a->kind != AS_OPERAND_LABEL_REF) ||
-            eval_expr_const(a->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
-            return -1;
-        }
-        if (out_cap < 6) {
-            return -1;
-        }
-        out[0] = 0xf3;
-        out[1] = 0x0f;
-        out[2] = 0x3a;
-        out[3] = 0xf0;
-        out[4] = 0xc0;
-        out[5] = (unsigned char)immv;
-        if (out_len != NULL) *out_len = 6;
-        return 0;
-    }
     if (strcmp(mnbuf, "movbe") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
@@ -7493,26 +7419,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         return emit_i386_prefixed_0f_map_rm(0x00, 0x38, opcode3, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "invept") == 0 || strcmp(mnbuf, "invvpid") == 0 || strcmp(mnbuf, "invpcid") == 0) {
-        const as_operand_t *rm_op;
-        const as_operand_t *reg_op;
-        as_x86_reg_t gr;
-        unsigned char opcode3;
-
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        if (select_i386_syntax_reg_rm_operands(insn, intel_syntax, 1, &reg_op, &rm_op) != 0) {
-            return -1;
-        }
-        if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
-            return -1;
-        }
-        if (lookup_i386_vm_invalidate_opcode(mnbuf, &opcode3) != 0) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_map_rm(0x66, 0x38, opcode3, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "gf2p8mulb") == 0 || strcmp(mnbuf, "aesimc") == 0 || strcmp(mnbuf, "aesenc") == 0 ||
         strcmp(mnbuf, "aesenclast") == 0 || strcmp(mnbuf, "aesdec") == 0 || strcmp(mnbuf, "aesdeclast") == 0) {
@@ -7546,10 +7452,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0xf3, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "wrssd") == 0 || strcmp(mnbuf, "wrussd") == 0 || strcmp(mnbuf, "movdir64b") == 0 ||
-        strcmp(mnbuf, "enqcmd") == 0 || strcmp(mnbuf, "enqcmds") == 0 ||
-        strcmp(mnbuf, "movdiri") == 0 || strcmp(mnbuf, "aadd") == 0 || strcmp(mnbuf, "aand") == 0 ||
-        strcmp(mnbuf, "aor") == 0 || strcmp(mnbuf, "axor") == 0) {
+    /* (wrssd, wrussd, movdiri and movdir64b are rows of
+     * as_x86_vec_table.c.) */
+    if (strcmp(mnbuf, "enqcmd") == 0 || strcmp(mnbuf, "enqcmds") == 0 || strcmp(mnbuf, "aadd") == 0 ||
+        strcmp(mnbuf, "aand") == 0 || strcmp(mnbuf, "aor") == 0 || strcmp(mnbuf, "axor") == 0) {
         const as_operand_t *mem_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -13938,6 +13844,30 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
         *code_len = n;
         return 0;
     }
+    if (streq_ci(mnbuf, "xbegin")) {
+        /* Where a transaction goes if it is abandoned: a distance of
+         * the mode's size from the instruction's end.  (No branch that
+         * could be resolved, it was said to be, in either mode.) */
+        int op16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
+        size_t len = op16 ? 4u : 6u;
+        long long disp = abs_target - ((long long)sec_off + (long long)len);
+        size_t n = 0;
+
+        if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
+            snprintf(encerr, encerr_sz, "xbegin target out of range");
+            return -1;
+        }
+        code[n++] = 0xc7;
+        code[n++] = 0xf8;
+        code[n++] = (unsigned char)((uint32_t)disp & 0xffu);
+        code[n++] = (unsigned char)(((uint32_t)disp >> 8) & 0xffu);
+        if (!op16) {
+            code[n++] = (unsigned char)(((uint32_t)disp >> 16) & 0xffu);
+            code[n++] = (unsigned char)(((uint32_t)disp >> 24) & 0xffu);
+        }
+        *code_len = n;
+        return 0;
+    }
     if (streq_ci(mnbuf, "jmp")) {
         disp8 = abs_target - ((long long)sec_off + 2);
         if (allow_short && disp8 >= -128 && disp8 <= 127) {
@@ -20215,6 +20145,7 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
     }
 
     if ((code_len == 5 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
+        (code_len == 6 && code[0] == 0xc7 && code[1] == 0xf8) ||
         (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
         /* A call of a local label of another section is of a place in
          * that section, not of a function that may be elsewhere. */

@@ -109,10 +109,6 @@ imull %ebx,%eax,%ebx
 divq %rbx,%rax
 idivq (%rbx),%rax
 imulq %rbx,%rax,%rbx
-lslq %rax,%rbx
-lslq (%rbx),%rbx
-larq %rax,%rbx
-larq (%rbx),%rbx
 ds call sym
 es movsb
 addr32 movl %eax,(%rax)
@@ -129,16 +125,8 @@ seta %eax
 setab %al
 call .
 call .+5
-femms
-rdrand %eax
-rdseed %eax
-serialize
-clflushopt (%rax)
-invpcid (%rax),%rbx
 int $sym
 ret $sym
-rdrand %rax
-rdrand %r9
 movsl (%rdi),%es:(%rsi)
 movsl (%eax),%es:(%ebx)
 smovl

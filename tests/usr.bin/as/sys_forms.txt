@@ -1,0 +1,280 @@
+32	660fc7f0	rdrand %ax
+32	0fc7f0	rdrand %eax
+32	refused	rdrand %rax
+32	refused	rdrand %r9
+32	refused	rdrand %r9d
+32	refused	rdrand (%rax)
+32	660fc7fb	rdseed %bx
+32	0fc7fb	rdseed %ebx
+32	refused	rdseed %rbx
+32	refused	vmclear (%rax)
+32	660fc730	vmclear (%eax)
+32	refused	vmptrld (%rax)
+32	0fc730	vmptrld (%eax)
+32	refused	vmxon (%rax)
+32	f30fc730	vmxon (%eax)
+32	refused	vmptrst (%rax)
+32	0fc738	vmptrst (%eax)
+32	refused	vmclear %rax
+32	refused	clflushopt (%rax)
+32	660fae38	clflushopt (%eax)
+32	refused	clflushopt %eax
+32	refused	clwb (%rax)
+32	660fae30	clwb (%eax)
+32	refused	clrssbsy (%rax)
+32	f30fae30	clrssbsy (%eax)
+32	refused	rstorssp (%rax)
+32	f30f0128	rstorssp (%eax)
+32	refused	cldemote (%rax)
+32	0f1c00	cldemote (%eax)
+32	f30faee0	ptwrite %eax
+32	refused	ptwrite %rax
+32	refused	ptwrite (%rax)
+32	refused	ptwritel (%rax)
+32	refused	ptwriteq (%rax)
+32	f30fae20	ptwrite (%eax)
+32	f30faee0	ptwritel %eax
+32	refused	ptwriteq %rax
+32	f30faee8	incsspd %eax
+32	refused	incsspq %rax
+32	refused	incsspd %r9d
+32	f30f1ec8	rdsspd %eax
+32	refused	rdsspq %rax
+32	refused	invept (%rax),%rbx
+32	660f388018	invept (%eax),%ebx
+32	refused	invept (%rax),%ebx
+32	refused	invvpid (%rax),%rbx
+32	660f388118	invvpid (%eax),%ebx
+32	refused	invpcid (%rax),%rbx
+32	660f388218	invpcid (%eax),%ebx
+32	refused	invpcid (%rax),%r9
+32	refused	movdiri %eax,(%rbx)
+32	refused	movdiri %rax,(%rbx)
+32	0f38f903	movdiri %eax,(%ebx)
+32	refused	movdiri %eax,%ebx
+32	refused	movdir64b (%rax),%rbx
+32	67660f38f807	movdir64b (%bx),%ax
+32	refused	movdir64b (%rax),%ebx
+32	refused	wrssd %eax,(%rbx)
+32	refused	wrssq %rax,(%rbx)
+32	0f38f603	wrssd %eax,(%ebx)
+32	refused	wrussd %eax,(%rbx)
+32	refused	wrussq %rax,(%rbx)
+32	660f38f503	wrussd %eax,(%ebx)
+32	0f0e	femms
+32	0f01e8	serialize
+32	0f01d6	xtest
+32	0f01d5	xend
+32	c6f801	xabort $1
+32	c6f8ff	xabort $255
+32	c7f800000000	xbegin 1f; 1:
+32	0f01ee	rdpkru
+32	0f01ef	wrpkru
+32	0f01fc	clzero
+32	refused	clzero %rax
+32	0f01fc	clzero %eax
+32	670f01fc	clzero %ax
+32	0f01fa	monitorx
+32	refused	monitorx %rax,%ecx,%edx
+32	0f01fa	monitorx %eax,%ecx,%edx
+32	refused	monitorx %rax,%rcx,%rdx
+32	0f01fb	mwaitx
+32	0f01fb	mwaitx %eax,%ecx,%ebx
+32	refused	mwaitx %rax,%rcx,%rbx
+32	f30f01ea	saveprevssp
+32	f30f01e8	setssbsy
+32	0f01c5	pconfig
+32	0f01cf	encls
+32	0f01d7	enclu
+32	0f01c0	enclv
+32	0f37	getsec
+32	0f01d9	vmmcall
+32	0f01c1	vmcall
+32	0f01de	skinit
+32	0f01de	skinit %eax
+32	0f01dc	stgi
+32	0f01dd	clgi
+32	0f01df	invlpga
+32	refused	invlpga %rax,%ecx
+32	0f01df	invlpga %eax,%ecx
+32	f30f09	wbnoinvd
+32	0f01da	vmload
+32	refused	vmload %rax
+32	0f01da	vmload %eax
+32	0f01db	vmsave
+32	refused	vmsave %rax
+32	0f01d8	vmrun
+32	refused	vmrun %rax
+32	0f01d8	vmrun %eax
+32	660f03d8	lsl %ax,%bx
+32	0f03d8	lsl %eax,%ebx
+32	refused	lsl %rax,%rbx
+32	660f03d8	lslw %ax,%bx
+32	0f03d8	lsll %eax,%ebx
+32	refused	lslq %rax,%rbx
+32	refused	lslq (%rbx),%rbx
+32	refused	lsl (%rbx),%ebx
+32	660f02d8	larw %ax,%bx
+32	0f02d8	larl %eax,%ebx
+32	refused	larq %rax,%rbx
+32	refused	larq (%rbx),%rbx
+32	0f02d8	lar %eax,%ebx
+32	refused	rdpid %rax
+32	f30fc7f8	rdpid %eax
+32	660faef0	tpause %eax
+32	f20faef3	umwait %ebx
+32	refused	umonitor %rax
+32	f30faef0	umonitor %eax
+32	f30f1efa	endbr64
+32	f30f1efb	endbr32
+32	refused	rdfsbase %eax
+32	refused	rdfsbase %rax
+32	refused	wrgsbase %r10
+32	f20f01e9	xresldtrk
+32	f20f01e8	xsusldtrk
+32	refused	uiret
+32	refused	testui
+32	refused	clui
+32	refused	stui
+32	refused	senduipi %rax
+32	f30f3af0c000	hreset $0
+64	660fc7f0	rdrand %ax
+64	0fc7f0	rdrand %eax
+64	480fc7f0	rdrand %rax
+64	490fc7f1	rdrand %r9
+64	410fc7f1	rdrand %r9d
+64	refused	rdrand (%rax)
+64	660fc7fb	rdseed %bx
+64	0fc7fb	rdseed %ebx
+64	480fc7fb	rdseed %rbx
+64	660fc730	vmclear (%rax)
+64	67660fc730	vmclear (%eax)
+64	0fc730	vmptrld (%rax)
+64	670fc730	vmptrld (%eax)
+64	f30fc730	vmxon (%rax)
+64	67f30fc730	vmxon (%eax)
+64	0fc738	vmptrst (%rax)
+64	670fc738	vmptrst (%eax)
+64	refused	vmclear %rax
+64	660fae38	clflushopt (%rax)
+64	67660fae38	clflushopt (%eax)
+64	refused	clflushopt %eax
+64	660fae30	clwb (%rax)
+64	67660fae30	clwb (%eax)
+64	f30fae30	clrssbsy (%rax)
+64	67f30fae30	clrssbsy (%eax)
+64	f30f0128	rstorssp (%rax)
+64	67f30f0128	rstorssp (%eax)
+64	0f1c00	cldemote (%rax)
+64	670f1c00	cldemote (%eax)
+64	f30faee0	ptwrite %eax
+64	f3480faee0	ptwrite %rax
+64	f30fae20	ptwrite (%rax)
+64	f30fae20	ptwritel (%rax)
+64	f3480fae20	ptwriteq (%rax)
+64	67f30fae20	ptwrite (%eax)
+64	f30faee0	ptwritel %eax
+64	f3480faee0	ptwriteq %rax
+64	f30faee8	incsspd %eax
+64	f3480faee8	incsspq %rax
+64	f3410faee9	incsspd %r9d
+64	f30f1ec8	rdsspd %eax
+64	f3480f1ec8	rdsspq %rax
+64	660f388018	invept (%rax),%rbx
+64	refused	invept (%eax),%ebx
+64	refused	invept (%rax),%ebx
+64	660f388118	invvpid (%rax),%rbx
+64	refused	invvpid (%eax),%ebx
+64	660f388218	invpcid (%rax),%rbx
+64	refused	invpcid (%eax),%ebx
+64	66440f388208	invpcid (%rax),%r9
+64	0f38f903	movdiri %eax,(%rbx)
+64	480f38f903	movdiri %rax,(%rbx)
+64	670f38f903	movdiri %eax,(%ebx)
+64	refused	movdiri %eax,%ebx
+64	660f38f818	movdir64b (%rax),%rbx
+64	refused	movdir64b (%bx),%ax
+64	refused	movdir64b (%rax),%ebx
+64	0f38f603	wrssd %eax,(%rbx)
+64	480f38f603	wrssq %rax,(%rbx)
+64	670f38f603	wrssd %eax,(%ebx)
+64	660f38f503	wrussd %eax,(%rbx)
+64	66480f38f503	wrussq %rax,(%rbx)
+64	67660f38f503	wrussd %eax,(%ebx)
+64	0f0e	femms
+64	0f01e8	serialize
+64	0f01d6	xtest
+64	0f01d5	xend
+64	c6f801	xabort $1
+64	c6f8ff	xabort $255
+64	c7f800000000	xbegin 1f; 1:
+64	0f01ee	rdpkru
+64	0f01ef	wrpkru
+64	0f01fc	clzero
+64	0f01fc	clzero %rax
+64	670f01fc	clzero %eax
+64	refused	clzero %ax
+64	0f01fa	monitorx
+64	0f01fa	monitorx %rax,%ecx,%edx
+64	670f01fa	monitorx %eax,%ecx,%edx
+64	0f01fa	monitorx %rax,%rcx,%rdx
+64	0f01fb	mwaitx
+64	0f01fb	mwaitx %eax,%ecx,%ebx
+64	0f01fb	mwaitx %rax,%rcx,%rbx
+64	f30f01ea	saveprevssp
+64	f30f01e8	setssbsy
+64	0f01c5	pconfig
+64	0f01cf	encls
+64	0f01d7	enclu
+64	0f01c0	enclv
+64	0f37	getsec
+64	0f01d9	vmmcall
+64	0f01c1	vmcall
+64	0f01de	skinit
+64	0f01de	skinit %eax
+64	0f01dc	stgi
+64	0f01dd	clgi
+64	0f01df	invlpga
+64	0f01df	invlpga %rax,%ecx
+64	670f01df	invlpga %eax,%ecx
+64	f30f09	wbnoinvd
+64	0f01da	vmload
+64	0f01da	vmload %rax
+64	670f01da	vmload %eax
+64	0f01db	vmsave
+64	0f01db	vmsave %rax
+64	0f01d8	vmrun
+64	0f01d8	vmrun %rax
+64	670f01d8	vmrun %eax
+64	660f03d8	lsl %ax,%bx
+64	0f03d8	lsl %eax,%ebx
+64	0f03d8	lsl %rax,%rbx
+64	660f03d8	lslw %ax,%bx
+64	0f03d8	lsll %eax,%ebx
+64	0f03d8	lslq %rax,%rbx
+64	0f031b	lslq (%rbx),%rbx
+64	0f031b	lsl (%rbx),%ebx
+64	660f02d8	larw %ax,%bx
+64	0f02d8	larl %eax,%ebx
+64	0f02d8	larq %rax,%rbx
+64	0f021b	larq (%rbx),%rbx
+64	0f02d8	lar %eax,%ebx
+64	f30fc7f8	rdpid %rax
+64	refused	rdpid %eax
+64	660faef0	tpause %eax
+64	f20faef3	umwait %ebx
+64	f30faef0	umonitor %rax
+64	67f30faef0	umonitor %eax
+64	f30f1efa	endbr64
+64	f30f1efb	endbr32
+64	f30faec0	rdfsbase %eax
+64	f3480faec0	rdfsbase %rax
+64	f3490faeda	wrgsbase %r10
+64	f20f01e9	xresldtrk
+64	f20f01e8	xsusldtrk
+64	f30f01ec	uiret
+64	f30f01ed	testui
+64	f30f01ee	clui
+64	f30f01ef	stui
+64	f30fc7f0	senduipi %rax
+64	f30f3af0c000	hreset $0

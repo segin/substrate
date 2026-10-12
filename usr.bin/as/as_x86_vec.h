@@ -28,7 +28,9 @@ extern "C" {
  * MMX and SSE, which the same emitter writes. */
 enum { AS_VEC_VEX = 1, AS_VEC_EVEX = 2, AS_VEC_LEGACY = 3 };
 enum { AS_VEC_PP_NONE = 0, AS_VEC_PP_66 = 1, AS_VEC_PP_F3 = 2, AS_VEC_PP_F2 = 3 };
-enum { AS_VEC_MAP_0F = 1, AS_VEC_MAP_0F38 = 2, AS_VEC_MAP_0F3A = 3, AS_VEC_MAP_5 = 5, AS_VEC_MAP_6 = 6 };
+/* (AS_VEC_MAP_ONE: an opcode of one byte, which only a row without a
+ * VEX or an EVEX prefix can have.) */
+enum { AS_VEC_MAP_ONE = 0, AS_VEC_MAP_0F = 1, AS_VEC_MAP_0F38 = 2, AS_VEC_MAP_0F3A = 3, AS_VEC_MAP_5 = 5, AS_VEC_MAP_6 = 6 };
 /* W: 0, 1, or ignored by the processor (and written 0). */
 enum { AS_VEC_W0 = 0, AS_VEC_W1 = 1, AS_VEC_WIG = 2 };
 /* The vector length: 128, 256 or 512 bits, or ignored (written 0). */
@@ -52,6 +54,7 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_OP16 (1u << 13)  /* no VEX: an operand of 16 bits, with the prefix that says so */
 #define AS_VEC_F_OP32 (1u << 14)  /* no VEX: one of 32 bits, which in 16-bit code has the prefix */
 #define AS_VEC_F_WEAK (1u << 15)  /* the name is also another instruction's: without a vector register, not this */
+#define AS_VEC_F_X32 (1u << 16)   /* in 16- and 32-bit code only */
 
 typedef struct {
     const char *name;
@@ -77,8 +80,8 @@ typedef struct {
      *   n N     an MMX register; that, or memory
      *   w W     a general register of 16 bits; that, or memory
      *   0       %xmm0 and no other
-     *   a c e   %eax, %ecx, %edx and no other, or in 64-bit code %rax,
-     *           %rcx, %rdx
+     *   a c e b %eax, %ecx, %edx, %ebx and no other, or in 64-bit code
+     *           %rax, %rcx, %rdx, %rbx
      *   A       %rax, %eax or %ax, holding an address: the one that is
      *           not the mode's own has the address-size prefix
      */
@@ -94,7 +97,7 @@ typedef struct {
      * if it has one.) */
     unsigned char disp8_n;
     unsigned char bcst;    /* EVEX: an element's bytes if memory may be broadcast, else 0 */
-    unsigned short flags;
+    unsigned flags;
 } as_x86_vec_tmpl_t;
 
 extern const as_x86_vec_tmpl_t as_x86_vec_table[];

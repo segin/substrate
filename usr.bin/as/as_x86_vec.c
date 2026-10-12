@@ -249,6 +249,9 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     case 'e':
         return cls == AS_X86_REGCLASS_GENERAL && (op->size_bits == 32 || op->size_bits == 64) &&
                (unsigned)op->u.reg == 2u;
+    case 'b':
+        return cls == AS_X86_REGCLASS_GENERAL && (op->size_bits == 32 || op->size_bits == 64) &&
+               (unsigned)op->u.reg == 3u;
     /* And the one an address is in: %rax, %eax or %ax, of which the one
      * that is not the mode's own asks for the address-size prefix. */
     case 'A':
@@ -473,11 +476,23 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 return -1;
             }
         }
-        if ((t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) || put8(ctx, 0x0fu) != 0 ||
-            put8(ctx, t->opcode) != 0) {
+        if ((t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) ||
+            (t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) ||
+            (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
+            (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0) || put8(ctx, t->opcode) != 0 ||
+            (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
             return -1;
         }
-        return t->disp8_n != 0 ? put8(ctx, t->disp8_n) : 0;
+        /* And a number after that, if the row has one (`xabort $1`). */
+        {
+            const as_x86_operand_t *imm = role_op(t, rq, 'i');
+
+            if (imm != NULL && imm->imm_symbolic) {
+                vec_err(ctx, "'%s' takes a number that is known here", t->name);
+                return -1;
+            }
+            return imm != NULL ? put8(ctx, (unsigned)imm->u.imm & 0xffu) : 0;
+        }
     }
     if (rm == NULL) {
         /* No operand, and so no ModRM: vzeroupper and vzeroall. */
@@ -568,7 +583,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (rex != 0 && put8(ctx, 0x40u | (rex & 0xfu)) != 0) {
             return -1;
         }
-        if (put8(ctx, 0x0fu) != 0 || (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
+        if ((t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) || (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
             (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0)) {
             return -1;
         }
@@ -819,6 +834,10 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
         }
         if ((t->flags & AS_VEC_F_64) != 0 && rq->mode != 64u) {
             why = "is an instruction of 64-bit code with these operands";
+            continue;
+        }
+        if ((t->flags & AS_VEC_F_X32) != 0 && rq->mode == 64u) {
+            why = "is not an instruction of 64-bit code with these operands";
             continue;
         }
         if (row_refuses(t, rq, evex, &why)) {
