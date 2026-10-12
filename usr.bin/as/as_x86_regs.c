@@ -71,6 +71,15 @@ static const as_x86_reg_info_t regs[] = {
     {"bnd2", AS_X86_REGCLASS_BOUND, 2, 0, 0},
     {"bnd3", AS_X86_REGCLASS_BOUND, 3, 0, 0},
 
+    {"tmm0", AS_X86_REGCLASS_TILE, 0, 0, 0},
+    {"tmm1", AS_X86_REGCLASS_TILE, 1, 0, 0},
+    {"tmm2", AS_X86_REGCLASS_TILE, 2, 0, 0},
+    {"tmm3", AS_X86_REGCLASS_TILE, 3, 0, 0},
+    {"tmm4", AS_X86_REGCLASS_TILE, 4, 0, 0},
+    {"tmm5", AS_X86_REGCLASS_TILE, 5, 0, 0},
+    {"tmm6", AS_X86_REGCLASS_TILE, 6, 0, 0},
+    {"tmm7", AS_X86_REGCLASS_TILE, 7, 0, 0},
+
     {"eiz", AS_X86_REGCLASS_NO_INDEX, 0, 32, 0},
     {"riz", AS_X86_REGCLASS_NO_INDEX, 0, 64, 0},
 };

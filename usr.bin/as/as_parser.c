@@ -1625,8 +1625,17 @@ unsigned as_x86_bare_prefix_byte(const char *word) {
         unsigned byte;
     } map[] = {{"es", 0x26u},     {"cs", 0x2eu},     {"ss", 0x36u},     {"ds", 0x3eu},     {"fs", 0x64u},
                {"gs", 0x65u},     {"notrack", 0x3eu}, {"data16", 0x66u}, {"data32", 0x66u}, {"addr16", 0x67u},
-               {"addr32", 0x67u}};
+               {"addr32", 0x67u},
+               /* A branch taken, and not: the hints, which are %ds and
+                * %cs by other names. */
+               {"ht", 0x3eu},     {"hnt", 0x2eu}};
     size_t i;
+
+    /* REX by the names it had before `rex.W`: rexx, rex64yz. */
+    if (word != NULL && strncasecmp(word, "rex", 3) == 0 && word[3] != '\0' && word[3] != '.' &&
+        !streq_ci(word, "rex64") && (rex_bits_for(word) != 0)) {
+        return 0x40u | rex_bits_for(word);
+    }
 
     for (i = 0; word != NULL && i < sizeof(map) / sizeof(map[0]); ++i) {
         if (streq_ci(word, map[i].word)) {
@@ -1661,8 +1670,15 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     /* (`rex64` is `rex.W` by its older name: a compiler writes it before
      * the call of __tls_get_addr, to make the sequence the length the
      * linker expects.) */
-    if (streq_ci(s, "rex") || streq_ci(s, "rex64") || (strncasecmp(s, "rex.", 4) == 0 && rex_bits_for(s) != 0)) {
+    if (streq_ci(s, "rex") || streq_ci(s, "rex64") || (strncasecmp(s, "rex", 3) == 0 && rex_bits_for(s) != 0)) {
         return AS_PREFIX_REX;
+    }
+    /* The hints of a conditional jump, taken and not: %ds and %cs. */
+    if (streq_ci(s, "ht") || streq_ci(s, "hnt")) {
+        if (segment_override != NULL && *segment_override == NULL) {
+            *segment_override = strip_register_prefix(streq_ci(s, "ht") ? "ds" : "cs");
+        }
+        return AS_PREFIX_SEG_OVERRIDE;
     }
     if (streq_ci(s, "data16")) {
         return AS_PREFIX_DATA16;
@@ -1714,6 +1730,28 @@ static unsigned rex_bits_for(const char *s) {
     }
     if (streq_ci(s, "rex64")) {
         return 0x8u;
+    }
+    /* The older names: `rex`, `64` for W if it is set, and then of x,
+     * y and z -- R, X and B -- those that are, in that order. */
+    if (strncasecmp(s, "rex", 3) == 0 && s[3] != '.' && s[3] != '\0') {
+        p = s + 3;
+        if (p[0] == '6' && p[1] == '4') {
+            bits |= 0x8u;
+            p += 2;
+        }
+        if (tolower((unsigned char)*p) == 'x') {
+            bits |= 0x4u;
+            p++;
+        }
+        if (tolower((unsigned char)*p) == 'y') {
+            bits |= 0x2u;
+            p++;
+        }
+        if (tolower((unsigned char)*p) == 'z') {
+            bits |= 0x1u;
+            p++;
+        }
+        return *p == '\0' ? bits : 0;
     }
     if (strncasecmp(s, "rex.", 4) != 0) {
         return 0;

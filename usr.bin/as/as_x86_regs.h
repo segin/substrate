@@ -38,6 +38,7 @@ typedef enum {
     AS_X86_REGCLASS_DEBUG,    /* %dr0 to %dr15, and %db0 to %db15 */
     AS_X86_REGCLASS_TEST,     /* %tr0 to %tr7 */
     AS_X86_REGCLASS_BOUND,    /* %bnd0 to %bnd3 */
+    AS_X86_REGCLASS_TILE,     /* %tmm0 to %tmm7 */
     AS_X86_REGCLASS_NO_INDEX, /* %eiz %riz: where an index is written and there is none */
 } as_x86_reg_class_t;
 

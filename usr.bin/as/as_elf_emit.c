@@ -13190,6 +13190,15 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
             return 1;
         }
     }
+    /* `fcompi` and `fucompi` are fcomip and fucomip, as they were first
+     * written. */
+    if (strcmp(low, "fcompi") == 0 || strcmp(low, "fucompi") == 0) {
+        snprintf(low, sizeof(low), "%s", low[1] == 'u' ? "fucomip" : "fcomip");
+        if (nops != 0) {
+            snprintf(name, name_sz, "%s", low);
+            return 1;
+        }
+    }
     /* A comparison with the register under the top, not written. */
     if (nops == 0 && (strcmp(low, "fcomi") == 0 || strcmp(low, "fucomi") == 0 || strcmp(low, "fcomip") == 0 ||
                       strcmp(low, "fucomip") == 0)) {
@@ -13197,6 +13206,18 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
         x86_implied_reg(&ops[0], "st(1)");
         bare->u.instr.operand_count = 1;
         return 1;
+    }
+    /* `clr` of a register is that register xor itself. */
+    if (nops == 1 && ops[0].kind == AS_OPERAND_REGISTER &&
+        (strcmp(low, "clr") == 0 || (len == 4 && strncmp(low, "clr", 3) == 0 && strchr("bwlq", low[3]) != NULL))) {
+        const as_x86_reg_info_t *r = as_x86_reg_find(ops[0].u.reg);
+
+        if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL) {
+            snprintf(name, name_sz, "xor%s", low + 3);
+            ops[1] = ops[0];
+            bare->u.instr.operand_count = 2;
+            return 1;
+        }
     }
     /* A string through the port, of the size the port's register is
      * not: 32 bits unless a letter says. */

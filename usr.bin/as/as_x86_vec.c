@@ -120,7 +120,7 @@ static int alias_of(const char *name, char *base, size_t base_sz, int *imm) {
         const char *suffix = name + n - 2;
 
         if (strcmp(suffix, "ps") == 0 || strcmp(suffix, "pd") == 0 || strcmp(suffix, "ss") == 0 ||
-            strcmp(suffix, "sd") == 0) {
+            strcmp(suffix, "sd") == 0 || strcmp(suffix, "ph") == 0 || strcmp(suffix, "sh") == 0) {
             for (i = 0; i < sizeof(cmp) / sizeof(cmp[0]); ++i) {
                 if (strlen(cmp[i]) == n - 6 && strncmp(name + 4, cmp[i], n - 6) == 0) {
                     snprintf(base, base_sz, "vcmp%s", suffix);
@@ -138,6 +138,26 @@ static int alias_of(const char *name, char *base, size_t base_sz, int *imm) {
                 return 0;
             }
         }
+    }
+    if (n > 6 && strncmp(name, "vpcom", 5) == 0) {
+        /* XOP's compares, which have eight and name them otherwise. */
+        static const char *const com[] = {"lt", "le", "gt", "ge", "eq", "neq", "false", "true"};
+        const char *elem = name + n - 1;
+
+        if (strchr("bwdq", *elem) == NULL) {
+            return -1;
+        }
+        if (elem[-1] == 'u' && n > 7) {
+            elem--;
+        }
+        for (i = 0; i < sizeof(com) / sizeof(com[0]); ++i) {
+            if (strlen(com[i]) == (size_t)(elem - (name + 5)) && strncmp(name + 5, com[i], strlen(com[i])) == 0) {
+                snprintf(base, base_sz, "vpcom%s", elem);
+                *imm = (int)i;
+                return 0;
+            }
+        }
+        return -1;
     }
     if (n > 6 && strncmp(name, "vpcmp", 5) == 0) {
         /* The element's letter, with a `u` before it for unsigned. */
@@ -227,6 +247,13 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         /* A byte that is a count, a place or a choice, and is never
          * written with a sign. */
         return op->kind == AS_X86_OP_IMM && (op->imm_symbolic || (op->u.imm >= 0 && op->u.imm <= 255));
+    case 't':
+        return cls == AS_X86_REGCLASS_TILE;
+    case 'h':
+        /* (Not %ah to %bh, nor %spl to %dil, which a REX prefix tells
+         * apart: no row that takes a byte has needed them.) */
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 &&
+               ((unsigned)op->u.reg < 4u || (unsigned)op->u.reg > 7u);
     case 'n':
         return cls == AS_X86_REGCLASS_MMX;
     case 'N':
@@ -319,7 +346,7 @@ static unsigned scale_bits(unsigned scale) {
  * 0 is a size not known, and then there is no one-byte displacement.
  */
 static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, const as_x86_operand_t *rm,
-                     unsigned disp8_n, unsigned *x, unsigned *b, unsigned *x4, unsigned *v4) {
+                     unsigned disp8_n, int force_sib, unsigned *x, unsigned *b, unsigned *x4, unsigned *v4) {
     const as_x86_mem_t *m;
     unsigned regbits = (reg & 7u) << 3;
     unsigned mod;
@@ -404,7 +431,7 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
     } else {
         mod = 2;
     }
-    if (m->has_index || (base & 7u) == 4u) {
+    if (m->has_index || (base & 7u) == 4u || force_sib) {
         if (put8(ctx, (mod << 6) | regbits | 4u) != 0 ||
             put8(ctx, (scale_bits(m->scale) << 6) | (m->has_index ? ((unsigned)m->index & 7u) << 3 : 0x20u) |
                               (base & 7u)) != 0) {
@@ -447,7 +474,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     size_t prefix;
     size_t i;
 
-    if (rm == NULL && t->ops[0] != '\0' && t->enc != AS_VEC_LEGACY) {
+    if (rm == NULL && t->ops[0] != '\0' && t->enc != AS_VEC_LEGACY && (t->flags & AS_VEC_F_MODRM) == 0) {
         vec_err(ctx, "internal: a row with nothing in r/m");
         return -1;
     }
@@ -494,7 +521,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             return imm != NULL ? put8(ctx, (unsigned)imm->u.imm & 0xffu) : 0;
         }
     }
-    if (rm == NULL) {
+    if (rm == NULL && (t->flags & AS_VEC_F_MODRM) == 0) {
         /* No operand, and so no ModRM: vzeroupper and vzeroall. */
         return put8(ctx, 0xc5u) != 0 || put8(ctx, 0xf8u | (len << 2) | t->pp) != 0 || put8(ctx, t->opcode) != 0 ? -1
                                                                                                              : 0;
@@ -538,14 +565,48 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (t->enc == AS_VEC_EVEX) {
             n = rq->broadcast != 0 ? t->bcst : t->disp8_n;
         }
-        if (put8(&tc, t->opcode) != 0 || put_modrm(&tc, rq, reg, rm, n, &x, &b, &x4, &v4) != 0) {
+        if (put8(&tc, t->opcode) != 0) {
+            return -1;
+        }
+        if (rm == NULL) {
+            /* (AS_VEC_F_MODRM: the register, if there is one, in reg.) */
+            if (put8(&tc, 0xc0u | ((reg & 7u) << 3)) != 0) {
+                return -1;
+            }
+        } else if (put_modrm(&tc, rq, reg, rm, n, (t->flags & AS_VEC_F_SIB) != 0, &x, &b, &x4, &v4) != 0) {
             return -1;
         }
     }
-    if (is4 != NULL) {
-        /* The register in the high four bits; the low four may hold a
-         * number, and hold nothing here. */
-        if (put8(&tc, ((unsigned)is4->u.reg & 0xfu) << 4) != 0) {
+    if ((t->flags & AS_VEC_F_SUFFIX) != 0) {
+        if (put8(&tc, t->disp8_n) != 0) {
+            return -1;
+        }
+    } else if (is4 != NULL) {
+        /* The register in the high four bits; the low four hold a
+         * number where the row has one too (XOP's vpermil2), and else
+         * nothing. */
+        unsigned low = 0;
+
+        if (imm != NULL) {
+            if (imm->imm_symbolic || imm->u.imm < 0 || imm->u.imm > 15) {
+                vec_err(ctx, "'%s' takes a number of four bits", t->name);
+                return -1;
+            }
+            low = (unsigned)imm->u.imm;
+        }
+        if (put8(&tc, (((unsigned)is4->u.reg & 0xfu) << 4) | low) != 0) {
+            return -1;
+        }
+    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0) {
+        if (imm->imm_symbolic) {
+            vec_err(ctx, "'%s' takes a number that is known here", t->name);
+            return -1;
+        }
+        if (imm->u.imm < -2147483648ll || imm->u.imm > 4294967295ll) {
+            vec_err(ctx, "the number %lld is not of four bytes", (long long)imm->u.imm);
+            return -1;
+        }
+        if (put32(&tc, (uint32_t)imm->u.imm) != 0) {
             return -1;
         }
     } else if (imm != NULL) {
@@ -587,17 +648,17 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0)) {
             return -1;
         }
-    } else if (t->enc == AS_VEC_VEX) {
+    } else if (t->enc == AS_VEC_VEX || t->enc == AS_VEC_XOP) {
         unsigned r = (reg >> 3) & 1u;
-        int two = t->map == AS_VEC_MAP_0F && !w && !x && !b && (rq->pseudo & AS_PSEUDO_VEX3) == 0 &&
-                  (t->flags & AS_VEC_F_VEX3) == 0;
+        int two = t->enc == AS_VEC_VEX && t->map == AS_VEC_MAP_0F && !w && !x && !b &&
+                  (rq->pseudo & AS_PSEUDO_VEX3) == 0 && (t->flags & AS_VEC_F_VEX3) == 0;
 
         if (two) {
             if (put8(ctx, 0xc5u) != 0 ||
                 put8(ctx, ((r ^ 1u) << 7) | ((~vvvv & 0xfu) << 3) | (len << 2) | t->pp) != 0) {
                 return -1;
             }
-        } else if (put8(ctx, 0xc4u) != 0 ||
+        } else if (put8(ctx, t->enc == AS_VEC_XOP ? 0x8fu : 0xc4u) != 0 ||
                    put8(ctx, ((r ^ 1u) << 7) | ((x ^ 1u) << 6) | ((b ^ 1u) << 5) | t->map) != 0 ||
                    put8(ctx, (w << 7) | ((~vvvv & 0xfu) << 3) | (len << 2) | t->pp) != 0) {
             return -1;
@@ -678,7 +739,7 @@ static int row_refuses(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, i
         *why = "has a VEX or EVEX prefix, and takes no REX one";
         return 1;
     }
-    if (t->enc == AS_VEC_VEX) {
+    if (t->enc == AS_VEC_VEX || t->enc == AS_VEC_XOP) {
         if ((rq->pseudo & AS_PSEUDO_EVEX) != 0) {
             *why = "has no EVEX form with these operands";
             return 1;

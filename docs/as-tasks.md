@@ -1124,6 +1124,12 @@ empty for the family named.
   Done, with 350, 2026-10-11: each had been mended under another task as it was met (171, 186, the string and stack instructions), and nothing held the two lists together.  `test_mode_only.sh` does, 72 cases against GNU as 2.46's verdict, which GNU passes; the one found wrong by it was `enterl $1,$2`, taken in 64-bit code for the frame `enterq` makes.  Left as it was: `mov %cr8,%eax` in 32-bit code, which GNU writes as a locked `mov %cr0` and this refuses.
 - [x] **AS-T-350** If an instruction or operand size not valid in 64-bit mode is written in 64-bit mode, then the assembler shall refuse it.
   Trace: AS-X86-030.  Verify: T — `push %eax`, `pop %ebx`, `into`, `salc`, `pushfl`, `popfl`, `retl`, `jmp *%eax`, `calll *(%rax)`, `pusha`, `aaa`, `daa`, `bound`, `les`, `lds`, `inc %eax` uses `FF /0` not `40`.  After: 161.
+- [x] **AS-T-351** The assembler shall assemble every mnemonic GNU as 2.47 has that is not of APX, MPX or the AMX transposes, in each shape of operands GNU as takes it in, to the bytes GNU as makes.
+  Trace: AS-EXT-010, AS-X86-003.  Verify: T — `ext_forms.txt` in `test_vec_forms.sh`: every statement found by trying each such mnemonic with operands of every kind, with GNU's bytes or its refusal.
+  Found late, and by the oracle: the audit's corpus and the sweep of AS-T-171 were made from a list of 1,018 mnemonics, and GNU as has 2,004.  732 were "unsupported mnemonic" here: all of AVX512-FP16 and AVX10.2 (222), XOP (118), APX (98), AMX (37), CMPccXADD (30), 3DNow! (24), the Xeon Phi's prefetches and 4FMAPS (28), TBM and LWP (13), Key Locker (7), RAO-INT, the later VNNI and conversions, SM3, SM4 and SHA512, `enqcmd`, `vmread` and `vmwrite`, a dozen of the system's, and the older spellings `clr`, `fcompi`, `hnt`, `rexx`.  A further 30 were assembled only by the per-extension encoders the table was to have replaced (`vcmpph`, `vdpbf16ps`, `vp2intersectd`, `vpermil2pd`).  Done: 610 mnemonics are rows of the table (`as_x86_vec_table_ext.h`, 1,000 rows, made from GNU's own output: for each statement it takes, the prefix, map, opcode, where each operand goes, and by further statements the mask, broadcast, rounding and displacement it allows), with XOP's prefix, the tile registers, a four-byte immediate, a forced SIB byte and 3DNow!'s trailing opcode added to the one emitter.  20,658 statements, each GNU's bytes or its refusal.  One is left as it is: GNU as 2.47 takes `movrs %ecx, (%rax)`, the register first, and makes of it the load `movrs (%rax), %ecx`; here that is refused.
+- [ ] **AS-T-352** The assembler shall assemble the instructions of APX, MPX and the AMX transposes as GNU as 2.47 does.
+  Trace: AS-EXT-010.  Verify: T — the same sweep, over those mnemonics and over every instruction with a register of %r16 to %r31.
+  Open.  APX is not a list of mnemonics alone: a REX2 prefix and an EVEX one for instructions that have neither now, a third operand for the old two-operand ones (`addl %eax, %ebx, %ecx`), `{nf}`, and `ccmp`, `ctest`, `cfcmov`, `push2`, `pop2`, `pushp`, `popp`, `jmpabs`, `imulzu`, `setzu` (98 mnemonics, 2,093 statements in the sweep).  Of MPX (`bndmk` and six more) and the transposes (`t2rpntlvwz0`, `ttransposed` and fourteen more) GNU as has the names and the sweep found no operands it takes them with; `rmpread` likewise.  `.nops` is a directive GNU as has and this has not.
 
 ## K. Documents and dead code
 
@@ -1329,5 +1335,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 336 done, 15 open.  Numbers run to 400, with gaps left between
+353 tasks: 337 done, 16 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

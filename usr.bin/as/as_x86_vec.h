@@ -26,11 +26,23 @@ extern "C" {
 
 /* The prefix of a row: VEX, EVEX, or neither -- the instructions of
  * MMX and SSE, which the same emitter writes. */
-enum { AS_VEC_VEX = 1, AS_VEC_EVEX = 2, AS_VEC_LEGACY = 3 };
+enum { AS_VEC_VEX = 1, AS_VEC_EVEX = 2, AS_VEC_LEGACY = 3, AS_VEC_XOP = 4 };
 enum { AS_VEC_PP_NONE = 0, AS_VEC_PP_66 = 1, AS_VEC_PP_F3 = 2, AS_VEC_PP_F2 = 3 };
 /* (AS_VEC_MAP_ONE: an opcode of one byte, which only a row without a
  * VEX or an EVEX prefix can have.) */
-enum { AS_VEC_MAP_ONE = 0, AS_VEC_MAP_0F = 1, AS_VEC_MAP_0F38 = 2, AS_VEC_MAP_0F3A = 3, AS_VEC_MAP_5 = 5, AS_VEC_MAP_6 = 6 };
+enum {
+    AS_VEC_MAP_ONE = 0,
+    AS_VEC_MAP_0F = 1,
+    AS_VEC_MAP_0F38 = 2,
+    AS_VEC_MAP_0F3A = 3,
+    AS_VEC_MAP_5 = 5,
+    AS_VEC_MAP_6 = 6,
+    AS_VEC_MAP_7 = 7,
+    /* XOP's own: the prefix is 8F, and is always of three bytes. */
+    AS_VEC_MAP_8 = 8,
+    AS_VEC_MAP_9 = 9,
+    AS_VEC_MAP_10 = 10
+};
 /* W: 0, 1, or ignored by the processor (and written 0). */
 enum { AS_VEC_W0 = 0, AS_VEC_W1 = 1, AS_VEC_WIG = 2 };
 /* The vector length: 128, 256 or 512 bits, or ignored (written 0). */
@@ -55,6 +67,10 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_OP32 (1u << 14)  /* no VEX: one of 32 bits, which in 16-bit code has the prefix */
 #define AS_VEC_F_WEAK (1u << 15)  /* the name is also another instruction's: without a vector register, not this */
 #define AS_VEC_F_X32 (1u << 16)   /* in 16- and 32-bit code only */
+#define AS_VEC_F_MODRM (1u << 17) /* VEX: a ModRM though no operand is in r/m, which is register 0 */
+#define AS_VEC_F_IMM32 (1u << 18) /* the number after it is of four bytes */
+#define AS_VEC_F_SIB (1u << 19)   /* memory always with a SIB byte: AMX, whose index is the stride */
+#define AS_VEC_F_SUFFIX (1u << 20) /* no VEX: the row's byte goes after the operands (3DNow!) */
 
 typedef struct {
     const char *name;
@@ -78,6 +94,8 @@ typedef struct {
      *   1 2 3   memory whose index is an %xmm, a %ymm, a %zmm register
      *   i u     a number of one byte: -128 to 255; 0 to 255 only
      *   n N     an MMX register; that, or memory
+     *   t       a tile register, %tmm0 to %tmm7
+     *   h       a general register of 8 bits: %al to %bl, %r8b to %r15b
      *   w W     a general register of 16 bits; that, or memory
      *   0       %xmm0 and no other
      *   a c e b %eax, %ecx, %edx, %ebx and no other, or in 64-bit code

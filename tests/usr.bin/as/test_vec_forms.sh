@@ -60,8 +60,16 @@ cd "$work" || exit 1
 # 1,752 of them were assembled, into the instruction without the
 # operand or with another: `stos %eax`, `lods $1`, `loop $1`, `lgdtl
 # %eax`, `movsd %st(1), %st(2)`.
+#
+# ext_forms.txt is the same of the instruction sets the audit's corpus
+# has nothing of, because GNU as's own list of mnemonics was not what it
+# was made from: AVX512-FP16, AVX10.2, the later VNNI and conversions,
+# SM3, SM4 and SHA512, CMPccXADD, AMX, and AMD's XOP, TBM and LWP -- 500
+# mnemonics that were "unsupported mnemonic", in every shape of operands
+# GNU as 2.47 takes them in, with a mask, a broadcast, rounding, a
+# displacement and the registers past the seventh and the fifteenth.
 cat "$here/vec_forms.txt" "$here/vec_rules.txt" "$here/sys_forms.txt" "$here/legacy_forms.txt" \
-    "$here/tls_forms.txt" "$here/selection_forms.txt" > forms.txt
+    "$here/tls_forms.txt" "$here/selection_forms.txt" "$here/ext_forms.txt" > forms.txt
 data=forms.txt
 
 fail=0

@@ -16,6 +16,12 @@
 #define M1 AS_VEC_MAP_0F
 #define M2 AS_VEC_MAP_0F38
 #define M3 AS_VEC_MAP_0F3A
+#define M5 AS_VEC_MAP_5
+#define M6 AS_VEC_MAP_6
+#define M7 AS_VEC_MAP_7
+#define M8 AS_VEC_MAP_8
+#define M9 AS_VEC_MAP_9
+#define M10 AS_VEC_MAP_10
 #define W0 AS_VEC_W0
 #define W1 AS_VEC_W1
 #define WIG AS_VEC_WIG
@@ -36,6 +42,8 @@
 
 #define VX(n, pp, map, op, w, l, ops, roles, fl) {n, AS_VEC_VEX, pp, map, op, w, l, ops, roles, 0, 0, fl}
 #define EX(n, pp, map, op, w, l, ops, roles, N, bc, fl) {n, AS_VEC_EVEX, pp, map, op, w, l, ops, roles, N, bc, fl}
+/* XOP: as VEX is, behind 8F. */
+#define XP(n, pp, map, op, w, l, ops, roles, fl) {n, AS_VEC_XOP, pp, map, op, w, l, ops, roles, 0, 0, fl}
 
 /* VEX, %xmm and %ymm: three operands; two; and each with a byte before. */
 #define V3(n, pp, map, op, w, fl) \
@@ -1536,6 +1544,10 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
     LX("movdir64b", P66, M2, 0xf8, W0, "mq", "mr", O64),
     LX("movdir64b", P66, M2, 0xf8, W0, "md", "mr", X32),
     LX("movdir64b", P66, M2, 0xf8, W0, "mw", "mr", X32),
+
+    /* And the rows of the instruction sets that came after, which are
+     * many and are in a file of their own. */
+#include "as_x86_vec_table_ext.h"
 };
 
 const size_t as_x86_vec_table_count = sizeof(as_x86_vec_table) / sizeof(as_x86_vec_table[0]);
