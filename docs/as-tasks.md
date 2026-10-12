@@ -864,9 +864,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-234** The helper functions `trim_copy`, `xstrdup`, `set_err`, `streq_ci` and the ELF constants shall each be defined once.
   Trace: AS-DES-005, AS-DES-006.  Verify: I — `grep -c` of each definition under `usr.bin/as` is 1; the constants come from `<elf.h>`.
   Done: `as_util.c` and `as_util.h` have the one of each.  There had been three of `trim_copy`, six of `xstrdup`, sixteen of `streq_ci` and twenty-three of `set_err`, which is one macro now over one function (`as_errf`), for any context that has `errbuf` and `errbuf_sz`; the eight encoder files whose own took the buffer call `as_errf`.  No ELF constant is defined under `usr.bin/as`: they are `elfobj.h`'s, which every build of the assembler has and which the object writer already used -- the project's `<elf.h>` has not `SHF_GNU_RETAIN`, and a host build's is the host's.  The two it lacked (`SHF_X86_64_LARGE`, `SHT_X86_64_UNWIND`) were added to it.
-- [ ] **AS-T-235** `as_elf_emit.c` shall hold the object writer and nothing else; the flat-binary writer, layout and symbol resolution shall each be in a file named for it.
+- [x] **AS-T-235** `as_elf_emit.c` shall hold the object writer and nothing else; the flat-binary writer, layout and symbol resolution shall each be in a file named for it.
   Trace: AS-DES-003.  Verify: I.  After: 164, 220.
-  In part.  The flat-binary writer is `as_flat.c` (780 lines, moved whole; a flat image of a source with every data directive is the same bytes as before), and with AS-T-164 the encoder is out.  Left in `as_elf_emit.c`: layout and relaxation, symbol resolution, relocations and the object writer together, 10,600 lines.
+  Done ahead of 220, as moves and nothing else.  The flat-binary writer is `as_flat.c` (780 lines; a flat image of a source with every data directive is the same bytes as before).  The layout is `as_layout.c`: the 135 functions that four or more of the object writer's eight phases reach and that reach nothing outside themselves -- the sections as a source goes through them, the offset of each statement and the place of each label, the bytes a directive is, the sizing of branches -- 5,650 lines.  Symbol resolution is `as_symbols.c`: what `emit_symbols()` calls and nothing else does, 1,000 lines.  With AS-T-164 the encoder is `as_x86_stmt.c`.  `as_elf_emit.c` is 3,970 lines, from 24,400: `as_elf_emit_file()` and its phases, the relocations, the line table's and the call frames' glue, the data and the text of each section.  Each new file is a copy of `as_elf_emit.c` with the rest taken out, so that its lines keep their history, and which functions went to each was worked out from the calls; no line was changed but for the functions called across a cut, which are `static` no longer and declared in `as_emit_int.h`.
 
 ## G. Sections, symbols and data
 
@@ -1359,5 +1359,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-356 tasks: 344 done, 12 open.  Numbers run to 400, with gaps left between
+356 tasks: 345 done, 11 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

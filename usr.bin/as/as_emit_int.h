@@ -435,4 +435,8 @@ void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t
 size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz);
 void virtual_label_cache_free(emit_ctx_t *ctx);
 
+/* as_symbols.c: where each symbol of the source is, and the object's
+ * symbols made of them -- their binding, kind, section and versions. */
+int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab);
+
 #endif
