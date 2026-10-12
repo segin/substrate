@@ -101,6 +101,11 @@ static int reg_key_cmp(const void *key, const void *item) {
 }
 
 const as_x86_reg_info_t *as_x86_reg_find(const char *name) {
+    static struct recent_reg {
+        char key[REG_NAME_MAX + 1];
+        const as_x86_reg_info_t *reg;
+    } recent[64];
+    struct recent_reg *slot;
     char key[REG_NAME_MAX + 1];
     const as_x86_reg_info_t *const *found;
     size_t i;
@@ -121,6 +126,14 @@ const as_x86_reg_info_t *as_x86_reg_find(const char *name) {
         return NULL;
     }
     key[i] = '\0';
+    /* The registers a source names are a few, named over and over, and
+     * one statement's are asked for many times: the last answers are
+     * kept, by the name. */
+    slot = &recent[((unsigned char)key[0] * 31u + (unsigned char)key[1] * 7u + (unsigned char)key[i - 1] + i) &
+                   (sizeof(recent) / sizeof(recent[0]) - 1u)];
+    if (slot->key[0] != '\0' && strcmp(slot->key, key) == 0) {
+        return slot->reg;
+    }
     if (!by_name_made) {
         for (i = 0; i < REG_COUNT; ++i) {
             by_name[i] = &regs[i];
@@ -129,7 +142,9 @@ const as_x86_reg_info_t *as_x86_reg_find(const char *name) {
         by_name_made = 1;
     }
     found = (const as_x86_reg_info_t *const *)bsearch(key, by_name, REG_COUNT, sizeof(by_name[0]), reg_key_cmp);
-    return found != NULL ? *found : NULL;
+    memcpy(slot->key, key, sizeof(slot->key));
+    slot->reg = found != NULL ? *found : NULL;
+    return slot->reg;
 }
 
 const as_x86_reg_info_t *as_x86_reg_find_class(const char *name, as_x86_reg_class_t cls, unsigned max) {
