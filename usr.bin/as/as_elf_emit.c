@@ -17582,9 +17582,39 @@ static int source_has_loc(const as_parse_result_t *parsed) {
 
     for (i = 0; i < parsed->count; ++i) {
         const as_stmt_t *st = &parsed->items[i];
+        const as_directive_t *d = &st->u.directive;
 
-        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
-            strcmp(st->u.directive.name, ".loc") == 0) {
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            continue;
+        }
+        if (strcmp(d->name, ".loc") == 0) {
+            return 1;
+        }
+        /* A file with a number is of a line table the source means to
+         * write, whether it has got to a row of it or not: a compiler's
+         * output for a function with no line, and what GCC's configure
+         * asks -g of. */
+        if (strcmp(d->name, ".file") == 0 && d->arg_count != 0 && d->args[0] != NULL &&
+            isdigit((unsigned char)d->args[0][0])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether the source writes its own debugging information: a section
+ * `.debug_info` or `.debug_line`, as a compiler's output has. */
+static int source_has_debug_sections(const as_parse_result_t *parsed) {
+    size_t i;
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        const as_directive_t *d = &st->u.directive;
+
+        if (st->kind == AS_STMT_DIRECTIVE && d->name != NULL &&
+            (strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) && d->arg_count != 0 &&
+            d->args[0] != NULL &&
+            (strcmp(d->args[0], ".debug_line") == 0 || strcmp(d->args[0], ".debug_info") == 0)) {
             return 1;
         }
     }
@@ -19915,9 +19945,9 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
     if (parsed == NULL || cfg == NULL || out_path == NULL) {
         return -1;
     }
-    if (!(cfg->machine == EM_386 || cfg->machine == EM_X86_64)) {
+    if (cfg->target != 0 || !(cfg->machine == EM_386 || cfg->machine == EM_X86_64)) {
         if (errbuf != NULL && errbuf_sz > 0) {
-            snprintf(errbuf, errbuf_sz, "binary output currently supports x86/i386 targets only");
+            snprintf(errbuf, errbuf_sz, "a flat image (-O binary) is written for i386 and x86-64 only");
         }
         return -1;
     }
@@ -22443,7 +22473,11 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     if (has_file_loc && check_file_numbers(&ctx, parsed) != 0) {
         goto fail;
     }
-    ctx.line_own = cfg->line_own_source && !source_has_loc(parsed);
+    /* With -g the source's own instructions are the rows -- unless it
+     * has rows of its own, or is a compiler's output with its debugging
+     * information written out, which -g then adds nothing to: it was
+     * refused, as writing `.debug_line` twice. */
+    ctx.line_own = cfg->line_own_source && !source_has_loc(parsed) && !source_has_debug_sections(parsed);
     ctx.line_rows_valid = 0;
     if ((has_file_loc || ctx.line_own) && emit_line_table(&ctx, parsed) != 0) {
         goto fail;

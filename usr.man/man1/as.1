@@ -21,6 +21,7 @@
 .Op Fl -defsym Ar sym=val
 .Op Fl -statistics
 .Op Fl -target Ns = Ns Ar name
+.Op Fl -help
 .Op Fl -target-help
 .Op Fl -version
 .Op Fl Wa Ar opts
@@ -232,6 +233,18 @@ With no value it is 0.
 An option that is not of this form is an error.
 .It Fl -statistics
 Print wall-clock/resource usage statistics.
+.It Fl -help
+List the options, on the standard output, and exit.
+Every option that is taken is in the list.
+.It Fl mthumb , Fl marm
+For ARM: the instruction set the source begins in.
+Refused when the machine is not ARM.
+.It Fl mcpu Ns = Ns Ar name , Fl mfpu Ns = Ns Ar name , Fl mfloat-abi Ns = Ns Ar name
+For ARM and AArch64: taken, and nothing changed by them, every
+instruction
+.Nm
+has for the machine being allowed.
+Refused when the machine is x86.
 .It Fl -version , Fl v
 Print what this assembler is, and exit.
 It names itself the Substrate assembler: it is not GNU
@@ -450,6 +463,25 @@ for the only name the symbol is to have
 which the linker reads.
 .It Conditionals and macros
 .Cm .if/.ifdef/.ifndef/.else/.endif , .macro/.endm , .rept/.endr , .irp/.irpc
+.Pp
+A condition may also be a number held to zero \(em
+.Cm .ifeq , .ifne , .ifge , .ifgt , .ifle , .iflt
+\(em two strings held to each other \(em
+.Cm .ifc , .ifnc , .ifeqs , .ifnes
+\(em or whether an argument is blank,
+.Cm .ifb
+and
+.Cm .ifnb ;
+and
+.Cm .elseif
+is an
+.Cm .else
+with a condition of its own.
+In a macro
+.Cm .exitm
+ends the expansion, and
+.Cm .purgem
+forgets a macro.
 .It Debug/CFI
 .Cm .file , .loc , .cfi_*
 .Pp
@@ -500,6 +532,40 @@ begins the count again.
 A file number that
 .Cm .file
 has given to one file is refused for another.
+.It Taken, and nothing done
+Directives that say nothing of the bytes are taken so that source
+written for GNU
+.Nm
+assembles, and have no effect:
+.Cm .extern
+(every symbol not defined is another file's already),
+.Cm .ident ,
+.Cm .version ,
+.Cm .gnu_attribute ,
+.Cm .addrsig
+and
+.Cm .addrsig_sym ,
+.Cm .sse_check
+and
+.Cm .operand_check ,
+.Cm .loc_mark_labels ,
+.Cm .line
+and
+.Cm .ln ,
+the listing's
+.Cm .eject , .list , .nolist , .title , .sbttl
+and
+.Cm .psize ,
+the debugging format of
+.Cm .stabs , .stabn
+and
+.Cm .stabd ,
+which is not written, and
+.Cm .noaltmacro ,
+macros being read that way and
+.Cm .altmacro
+not taken.
+A directive that is none of these and none above is an error.
 .El
 .Sh ARCHITECTURE SYNTAX
 .Bl -tag -width "ARM and AArch64"
@@ -599,7 +665,14 @@ is and, for what none of those took, at the end of its section.
 .Li .word
 is four bytes,
 .Li .inst
-an instruction's, and
+an instruction's
+.Po
+in Thumb a half word or two, by the number or by
+.Li .inst.n
+and
+.Li .inst.w
+.Pc ,
+and
 .Li .align
 a power of two.
 .Li .arm ,
@@ -614,6 +687,8 @@ calling a label of Thumb code a function, sets the low bit of the
 symbol.
 .Li .syntax ,
 .Li .arch ,
+.Li .arch_extension ,
+.Li .object_arch ,
 .Li .cpu
 and
 .Li .fpu
@@ -623,9 +698,12 @@ has is allowed.
 .Li .eabi_attribute
 makes
 .Li .ARM.attributes .
-The directives of ARM's unwinding tables
-.Pq Li .fnstart , .fnend , .save No and the rest
-are refused, no table being made.
+The directives of ARM's unwinding tables \(em
+.Li .fnstart , .fnend , .cantunwind , .save , .vsave , .pad , .setfp ,
+.Li .movsp , .personality , .personalityindex , .handlerdata
+and
+.Li .unwind_raw
+\(em are refused, no table being made.
 A comment is from
 .Li @
 in ARM, from

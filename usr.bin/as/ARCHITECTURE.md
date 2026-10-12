@@ -7,30 +7,97 @@ It describes how the assembler is organized, how it fits into the native toolcha
 
 ```text
 usr.bin/as/
-├── as.c                     # CLI entry point, toolchain recursion guard, context limits
-├── as_lexer.c               # Tokenizer for directives, identifiers, numbers, strings
+├── as.c                     # The program: options, the source read and expanded (macros, repeats,
+│                            #   conditionals, includes), the passes in their order, listings, messages
+├── as_lexer.c               # Tokens; the one scanner of strings and comments
+├── as_expr.c                # Expressions: parsed from tokens, evaluated, reduced to a symbol and a number
+├── as_parser.c              # Statements: labels, directives, instructions and their operands
 ├── as_x86_regs.c            # The x86 registers: one table of name, class, width, number
-├── as_parser.c              # Statement/directive parsing and architecture dispatch
-├── as_symtab.c              # Symbol definition, lookup, local/numeric label support
-├── as_sections.c            # Section creation, switching, alignment, layout state
-├── as_data.c                # Data directives, literals, fixups, expression materialization
-├── as_elf_emit.c            # ELF object emission through libelfobj
-├── as_x86_*.c               # x86 and x86_64 encoders, relocations, ISA extensions
+├── as_reloc_op.c            # The relocation operators (@GOT, @PLT, ...): one table, i386 and x86-64
+├── as_lower.c               # Directives made the few the rest stores; ARM's own made x86's (as_arm_lower)
+├── as_symtab.c              # Symbols: definition, binding, type, aliases
+├── as_sections.c            # Sections, the section stack, subsections, the code mode
+├── as_data.c                # Data directives: literals, strings, LEB128
+├── as_elf_emit.c            # Layout, relaxation, x86 instruction selection, relocations, the object
+│                            #   and the flat image
+├── as_cfi.c                 # .cfi_* made .eh_frame or .debug_frame
+├── as_dwline.c              # .file and .loc made .debug_line
+├── as_x86_encode.c          # x86: the integer instructions of i386 and x86-64, ModRM and SIB
+├── as_x86_vec.c             # x86: the one emitter of VEX, EVEX, MMX and SSE instructions
+├── as_x86_vec_table.c       # x86: its table, a row for each form
+├── as_x86_vex.c             # x86: the VEX prefix
+├── as_x86_evex.c            # x86: the EVEX prefix
+├── as_x86_v2.c              # x86, per extension, for the names the table has not yet:
+├── as_x86_sse3.c            #   lahf, sahf, cmpxchg16b, popcnt (v2); SSE3; SSSE3; SSE4.1; SSE4.2;
+├── as_x86_ssse3.c           #   AVX; AVX2; BMI1; BMI2; F16C; FMA; movbe, lzcnt and the rest of
+├── as_x86_sse41.c           #   x86-64-v3; AVX-512 F, BW, CD, DQ
+├── as_x86_sse42.c
+├── as_x86_avx.c
+├── as_x86_avx2.c
+├── as_x86_bmi1.c
+├── as_x86_bmi2.c
+├── as_x86_f16c.c
+├── as_x86_fma.c
+├── as_x86_v3_misc.c
+├── as_x86_avx512f.c
+├── as_x86_avx512bw.c
+├── as_x86_avx512cd.c
+├── as_x86_avx512dq.c
 ├── as_arm.c                 # ARM (A32) encoder; what the ARM and AArch64 encoders share
 ├── as_arm_simd.c            # ARM: VFP and NEON
 ├── as_arm_thumb.c           # ARM: Thumb-2
 ├── as_a64.c                 # AArch64 encoder
 ├── as_a64_simd.c            # AArch64: floats and vectors
+├── *.h                      # Each .c has the header of its name, with its interface (as_cfi.h,
+│                            #   as_data.h, as_dwline.h, as_elf_emit.h, as_expr.h, as_lexer.h, as_lower.h,
+│                            #   as_parser.h, as_reloc_op.h, as_sections.h, as_symtab.h, as_x86_regs.h,
+│                            #   as_x86_encode.h, as_x86_vec.h, as_x86_vex.h, as_x86_evex.h, as_x86_v2.h,
+│                            #   as_x86_sse3.h, as_x86_ssse3.h, as_x86_sse41.h, as_x86_sse42.h,
+│                            #   as_x86_avx.h, as_x86_avx2.h, as_x86_bmi1.h, as_x86_bmi2.h, as_x86_f16c.h,
+│                            #   as_x86_fma.h, as_x86_v3_misc.h, as_x86_avx512f.h, as_x86_avx512bw.h,
+│                            #   as_x86_avx512cd.h, as_x86_avx512dq.h).  Three have no .c of theirs:
+│                            #   as_arm.h, the interface of the five ARM and AArch64 files; as_arm_int.h,
+│                            #   what those share among themselves; as_strmap.h, a table from names to
+│                            #   numbers, whole in the header.
 ├── Makefile                 # Native/target build wiring, alias links, elfobj dependency
 └── TASKLIST_AS.md           # The first task list, closed; what is to do is docs/as-tasks.md
 
 tests/usr.bin/as/
-├── test_*_core.c/.sh        # Unit and driver-facing core tests by subsystem
-├── test_cli_*.sh            # CLI and mode behavior
-├── test_*_roundtrip.sh      # ISA corpus parity / roundtrip checks
+├── run-suite.sh             # Runs every test_*.sh against an assembler it builds for the host,
+│                            #   out of the tree; the one thing to run
+├── xfail.list               # The tests expected to fail, each with its reason; the suite fails
+│                            #   if one of them passes
+├── test_*.sh                # 167 tests, each a program that says ok or FAIL.  Most assemble
+│                            #   source and hold the object to bytes that GNU as or llvm-mc made,
+│                            #   and say in their heads whether GNU as passes them
+├── test_*_core.c            # 29 unit tests of one module, built and run by the .sh of their name
+├── test_gnu_differential.sh # Every line of two corpora against GNU as, with gnu-diff.py; the
+│                            #   lines that differ are counted and named in corpus/*.baseline
+├── test_insn_forms.sh       # x86 instruction forms, 1,447 cases
+├── test_vec_forms.sh        # The VEX/EVEX/SSE table: vec_forms.txt and vec_rules.txt, 16,000 forms
+├── test_arm_forms.sh        # ARM, Thumb, AArch64: arm_forms.txt and arm_own.txt, 885 statements
+├── test_arm_targets.sh      # The ARM and AArch64 objects, refusals, literal pool, directives
+├── test_cli_help.sh         # --help and as(1) held to the options and directives there are
 ├── test_fuzz_matrix.sh      # Fuzz-smoke and matrix orchestration
-└── corpus/                  # Sample assembly corpora for regression inputs
+├── branch-relax-check.sh, sanitizer_sweep.c, sanitizer_sweep.h   # Shared by several tests
+├── compiler/                # Sources a C compiler's output is assembled from
+└── corpus/                  # The corpora, their generators and their baselines
 ```
+
+### The passes
+
+`run_native_backend()` in `as.c` runs them, in this order, each on what the one before left:
+
+1. **Read.** The source, or the output of the C preprocessor for a `.S` file; several sources are one.
+2. **Expand.** Macros and `.irp` (`expand_gas_source_controls()`), repeats (`expand_rept_file()`), conditionals (`filter_gas_conditionals()`), all on text, each line carrying a mark of the file and line it came from.
+3. **Lex** (`as_lex_text()`): tokens, with `.include` read where an expansion wrote one.
+4. **Parse** (`as_parse_tokens()`): statements; numeric labels given names.
+5. **Lower.** `as_arm_lower()` for ARM and AArch64, then `as_directives_lower()`: the many directives made the few, numbers settled, `.struct` and common symbols resolved.
+6. **Validate** (`validate_directives()`): a directive that is none there is, is refused; `.error`, `.warning` and `.print` are said.
+7. **Order.** Numbered subsections put behind their sections (`as_sections_gather_subsections()`); branches to labels of other sections marked (`as_elf_mark_far_branches()`).
+8. **Tables.** Symbols (`as_symtab_build()`), sections (`as_sections_build()`), data (`as_data_build()`).
+9. **Emit** (`as_elf_emit_file()`, or `as_elf_emit_binary_file()` for `-O binary`): branches relaxed, every statement placed, instructions encoded, relocations made, call frames and the line table built, the object written through libelfobj.
+10. **Check** (`validate_output_file()`): the object is read back and is of the machine and class asked for.
 
 ## 2. High-Level System Diagram
 
@@ -102,7 +169,7 @@ Deployment: Statically linked backend modules selected at runtime by target mode
 
 Name: Relaxation pass and object-file emission
 
-Description: Branch relaxation is done in `as_elf_emit.c` by `relax_branches()`: every `jmp` and conditional jump of 32- or 64-bit code to a label of its own section (numbered, compiler's or the source's own, or `.`, with or without a number added) starts in its two-byte form, the statements are laid out, each jump that does not reach is made long, and that repeats until none changes. The decisions are one table (`branch_short`) that both the layout and the encoding read, so the two cannot disagree. 16-bit code, calls and branches to other sections or files are not sized there. (A separate `as_relax.c` existed that nothing called and that sized every instruction as four bytes; it is removed.) `as_elf_emit.c` then serializes sections, symbols, and relocations through `libelfobj` into the final ELF relocatable object.
+Description: Branch relaxation is done in `as_elf_emit.c` by `relax_branches()`: every `jmp` and conditional jump of 32- or 64-bit code to a label of its own section (numbered, compiler's or the source's own, or `.`, with or without a number added) starts in its two-byte form, the statements are laid out, each jump that does not reach is made long, and that repeats until none changes. The decisions are one table (`branch_short`) that both the layout and the encoding read, so the two cannot disagree. 16-bit code, calls and branches to other sections or files are not sized there. (A separate relaxation module existed that nothing called and that sized every instruction as four bytes; it is removed.) `as_elf_emit.c` then serializes sections, symbols, and relocations through `libelfobj` into the final ELF relocatable object.
 
 Technologies: C, bounded relaxation loops, `libelfobj` section/symbol/relocation APIs
 

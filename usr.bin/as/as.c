@@ -244,16 +244,62 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
     fprintf(stderr, "as: error: %s\n", shown);
 }
 
+/*
+ * The options, for --help: every one that is taken, and none that is
+ * not.  tests/usr.bin/as/test_cli_help.sh holds the two to each other
+ * -- it tries each line of this, and looks for each option the
+ * argument loop compares with in what this prints.
+ */
+static const struct {
+    const char *option; /* as it is written, with what follows it */
+    const char *what;
+} as_options[] = {
+    {"-o FILE", "the object to write (a.out)"},
+    {"-32, --32", "assemble for i386"},
+    {"-64, --64", "assemble for x86-64"},
+    {"--target=NAME", "the machine: i386, x86_64, arm, aarch64 (--target NAME)"},
+    {"-march=CPU[+EXT...]", "the processor whose instructions are allowed (-march CPU)"},
+    {"-mtune=CPU", "taken, and changes nothing (-mtune CPU)"},
+    {"-msyntax=att|intel", "the syntax the source begins in (-msyntax NAME)"},
+    {"-mthumb, -marm", "ARM: the instruction set the source begins in"},
+    {"-mcpu=NAME, -mfpu=NAME, -mfloat-abi=NAME", "ARM and AArch64: taken, and allow everything"},
+    {"-O elf|binary", "an ELF object, or a flat image of its sections (-Obinary)"},
+    {"-g, --gen-debug, --gdwarf-N", "a line table for the source itself"},
+    {"-I DIR", "where .include and .incbin look (-IDIR)"},
+    {"-D NAME[=VALUE]", "a macro for the C preprocessor, for a .S source (-DNAME)"},
+    {"--defsym SYM=VALUE", "define a symbol before the source is read"},
+    {"-al[=FILE]", "a listing, on the standard output or in FILE"},
+    {"-c", "taken, and changes nothing"},
+    {"--warn", "warnings are written (so they are unless -W is given)"},
+    {"-W, --no-warn", "warnings are not written"},
+    {"--fatal-warnings", "a warning is an error"},
+    {"--noexecstack", "taken: the stack is never marked executable"},
+    {"--from-cc", "run by the compiler driver, which this then does not run"},
+    {"-Wa,OPTS", "options handed on by a compiler driver (-Wa OPTS)"},
+    {"--statistics", "the time each pass took, on the standard error"},
+    {"--max-input-bytes N", "refuse a source longer than this"},
+    {"--max-line-bytes N", "refuse a line longer than this"},
+    {"--max-token-length N", "refuse a token longer than this"},
+    {"--max-macro-depth N", "refuse macros nested deeper than this"},
+    {"--max-include-depth N", "refuse files included deeper than this"},
+    {"--max-expansion-bytes N", "refuse a source that expands to more than this"},
+    {"--version, -v", "say what this is, and assemble nothing"},
+    {"--help", "this"},
+    {"--target-help", "what is assembled for each machine"},
+};
+
+static void print_help(FILE *out, const char *prog) {
+    size_t i;
+
+    fprintf(out, "usage: %s [options] [-o output] [file ...]\n", prog);
+    fprintf(out, "With no file, or for the file `-', the source is the standard input.\n\n");
+    for (i = 0; i < sizeof(as_options) / sizeof(as_options[0]); ++i) {
+        fprintf(out, "  %-24s   %s\n", as_options[i].option, as_options[i].what);
+    }
+}
+
 static void usage(const char *prog) {
-    fprintf(stderr,
-            "usage: %s [-32|-64] [-c] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
-            "[-O elf|binary] "
-            "[-msyntax=att|intel] [--warn|-W|--no-warn] [--fatal-warnings] "
-            "[--from-cc] "
-            "[-al[=file]] [--defsym sym=val] [--statistics] [--target=name] [--target-help] "
-            "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
-            "[--max-macro-depth N] [--max-include-depth N] [-o output] [file ...]\n",
-            prog);
+    fprintf(stderr, "usage: %s [options] [-o output] [file ...]\n%s --help lists the options\n", prog, prog);
 }
 
 static int directive_is_explicitly_unsupported(const char *name) {
@@ -3931,20 +3977,22 @@ static void print_phase_stat(const as_ctx_t *ctx, const char *phase, unsigned lo
 
 static void print_target_help(const as_ctx_t *ctx) {
     (void)ctx;
-    puts("Substrate assembler target help:");
-    puts("  x86/i386:");
-    puts("    core integer ops, jumps/calls/returns, basic x87/MMX/SSE names");
-    puts("    prefixes: lock, rep/repe/repne, segment overrides, rex");
-    puts("    syntax: -msyntax=att|intel, .intel_syntax/.att_syntax");
-    puts("    Intel memory qualifiers parsed: byte/word/dword/qword/xmmword/ymmword/zmmword ptr");
-    puts("  x86-64:");
-    puts("    baseline x86-64 plus ISA levels x86-64-v2/v3/v4");
-    puts("  ARMv7 / AArch64 (run as arm-as or aarch64-as, or --target=arm|aarch64):");
-    puts("    ARM and Thumb-2 integer instructions, VFP and NEON; A64 integer, system, FP and SIMD");
-    puts("    ldr reg, =value and literal pools (.ltorg, .pool); .arm, .thumb, .inst, .eabi_attribute");
-    puts("    -mthumb begins as Thumb; -mcpu, -mfpu, -march are taken and allow everything");
-    puts("  output:");
-    puts("    -O elf (default) or -O binary (flat image: .text/.rodata/.data/.bss)");
+    puts("Substrate assembler: the machines it assembles for.");
+    puts("  i386 (-32, --32, --target=i386):");
+    puts("    the integer instructions, x87, MMX and SSE to SSE4.2, AES, SHA, BMI, AVX, AVX2 and AVX-512,");
+    puts("    in 32-bit code and, after .code16, in 16-bit; ELF32, relocations with their addends in place");
+    puts("    AT&T syntax, or Intel's after .intel_syntax or with -msyntax=intel");
+    puts("  x86-64 (-64, --64, --target=x86_64):");
+    puts("    the same in 64-bit code; ELF64, relocations with addends");
+    puts("    -march=x86-64, x86-64-v2, x86-64-v3 or x86-64-v4 allows no more than that level has");
+    puts("  arm (run as arm-as, or --target=arm):");
+    puts("    ARM's integer instructions, VFP and NEON, and after .thumb or with -mthumb those of Thumb-2;");
+    puts("    ELF32, relocations with their addends in place");
+    puts("  aarch64 (run as aarch64-as, or --target=aarch64):");
+    puts("    A64's integer and system instructions, floats and vectors; ELF64, relocations with addends");
+    puts("  For arm and aarch64: ldr reg, =value and literal pools (.ltorg, .pool); -mcpu, -mfpu and");
+    puts("    -march are taken and allow everything.");
+    puts("  Output: -O elf, an object, or -O binary, a flat image of the sections (x86 only).");
 }
 
 /*
@@ -4288,6 +4336,10 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
         if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
             query_version = 1;
             continue;
+        }
+        if (strcmp(arg, "--help") == 0) {
+            print_help(stdout, argv[0] != NULL ? argv[0] : "as");
+            return 0;
         }
         if (strcmp(arg, "--target-help") == 0) {
             ctx->target_help = 1;
@@ -4639,7 +4691,7 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
          * that version, and does not try them.
          */
         printf("as (Substrate assembler)\n");
-        printf("Assembles for i386 and x86-64, to ELF or to a flat binary.\n");
+        printf("Assembles for i386 and x86-64, to ELF or to a flat binary, and for ARM and AArch64, to ELF.\n");
         return 0;
     }
 

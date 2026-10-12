@@ -174,6 +174,42 @@ cases=$((cases + 1))
 "$AS" --64 -g -o h.o h.s 2> err
 rows h.o | grep -q '^x\.c 20 0 1 x' || { echo "FAIL -g and a source with .loc of its own"; fail=1; }
 cases=$((cases + 1))
+# A numbered .file is of a table the source means to write, though it
+# has no .loc: -g adds no rows of the assembly source to it.  (GCC's
+# configure asks exactly this, and where the object named the source it
+# took -g to be unusable for a compiler's output.)
+printf '\t.text\nfoo:\tnop\n\t.file 1 "foo.c"\n' > numbered.s
+cases=$((cases + 1))
+if "$AS" --64 -g -o numbered.o numbered.s 2> err; then
+    objdump -W numbered.o 2> /dev/null | grep -q 'numbered\.s' &&
+        { echo "FAIL -g and a source with a numbered .file: the object names the assembly source"; fail=1; }
+else
+    echo "FAIL -g and a source with a numbered .file: $(head -1 err)"; fail=1
+fi
+# And one that writes its debugging sections out, as a compiler without
+# .loc does, keeps those under -g: it was refused, as writing
+# .debug_line twice, and GCC's configure took the assembler for one that
+# cannot be given -g at all.
+cat > own.s <<'EOF'
+	.text
+f:	nop
+	.section .debug_line,"",@progbits
+	.long 0x11223344
+	.byte 0x55
+	.section .debug_info,"",@progbits
+	.byte 0x66
+EOF
+for opt in -g --gdwarf-4; do
+    cases=$((cases + 1))
+    if ! "$AS" --64 "$opt" -o own.o own.s 2> err; then
+        echo "FAIL $opt and a source with .debug_line of its own: $(head -1 err)"; fail=1
+        continue
+    fi
+    [ "$(objdump -s -j .debug_line own.o | tail -n +5 | cut -c7-41 | tr -d ' \n')" = 4433221155 ] ||
+        { echo "FAIL $opt: .debug_line is not the source's own"; fail=1; }
+    [ "$(objdump -s -j .debug_info own.o | tail -n +5 | cut -c7-41 | tr -d ' \n')" = 66 ] ||
+        { echo "FAIL $opt: .debug_info is not the source's own"; fail=1; }
+done
 
 # A compiler's output.
 gnu=
