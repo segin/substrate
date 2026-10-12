@@ -619,8 +619,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   In part, ahead of 161 and 190.  Each statement was encoded five times -- once to size it, twice for the places of labels, once for the text and once before any of them -- at some 53,000 machine instructions a time, 292,000 for each source instruction.  Its bytes are kept now from the first that works them out (`struct stmt_code` in `as_elf_emit.c`: by the statement, its offset, the code's size and the layout they were worked out in), and an instruction of registers and numbers is encoded once for each way it is written (`struct text_code`, by what its operands are and not how they were spelt, so that a name set again to another number is another).  `AS_NO_STMT_CODE` in the environment turns both off, and the objects of both corpora are the same either way.  200,000 `addl` lines took 15.8 seconds and take 1.3.  Open: the one encoding is still tens of thousands of instructions, most of them comparing the mnemonic with names it is not (161), and the front end is some 22,000 for each line.
 - [ ] **AS-T-166** When an encoder refuses a statement, the message the user sees shall be that encoder's.
   Trace: AS-DES-006, AS-ARM-008.  Verify: T — `rorx` with bad operands has a message; no message is overwritten by a later attempt.  After: 161.
-- [ ] **AS-T-167** `x86_stmt_requires_v3`/`_v4` shall not encode a statement to learn what it needs.
+- [x] **AS-T-167** `x86_stmt_requires_v3`/`_v4` shall not encode a statement to learn what it needs.
   Trace: AS-DES-006.  Verify: I — the requirement comes from the matched template.  After: 161.
+  Done, ahead of 161: both functions are gone.  They ran every per-extension encoder a second time over a statement that had already failed them.  An instruction with a VEX or an EVEX prefix is a row of the table and of nothing else now (AS-T-351 gave it the last thirty names the old encoders alone had), and the row's prefix is what says `requires -march=x86-64-v3` or `v4` (`row_refuses()` in `as_x86_vec.c`).  The twelve wrappers the emitter tried after the table went with them -- no statement of the suite, of either corpus or of the 76,000 forms reached one -- and so did `as_x86_avx512f.c`, `as_x86_avx512bw.c`, `as_x86_avx512dq.c` and `as_x86_evex.c`, which nothing else called, with the five unit tests that were of those files alone.
 
 ### D.1 Operand size
 
@@ -1335,5 +1336,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-353 tasks: 337 done, 16 open.  Numbers run to 400, with gaps left between
+353 tasks: 338 done, 15 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

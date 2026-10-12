@@ -34,12 +34,8 @@ cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/inclu
    "$ROOT/usr.bin/as/as_x86_vec.c" \
    "$ROOT/usr.bin/as/as_x86_vec_table.c" \
    "$ROOT/usr.bin/as/as_x86_vex.c" \
-   "$ROOT/usr.bin/as/as_x86_evex.c" \
    "$ROOT/usr.bin/as/as_x86_avx.c" \
    "$ROOT/usr.bin/as/as_x86_avx2.c" \
-   "$ROOT/usr.bin/as/as_x86_avx512f.c" \
-   "$ROOT/usr.bin/as/as_x86_avx512bw.c" \
-   "$ROOT/usr.bin/as/as_x86_avx512dq.c" \
    "$ROOT/usr.bin/as/as_x86_fma.c" \
    "$ROOT/usr.bin/as/as_x86_sse3.c" \
    "$ROOT/usr.bin/as/as_x86_ssse3.c" \
