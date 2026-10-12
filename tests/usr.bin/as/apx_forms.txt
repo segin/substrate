@@ -17030,3 +17030,31 @@
 32	refused	jmpabs $1
 32	refused	jmpabs 0x1122
 32	refused	jmpabs %rax
+64	62f44c0839ca	ccmps {dfv=of,cf} %ecx,%edx
+64	62f4040839ca	ccmps {dfv=} %ecx,%edx
+64	62f4fc053908	ccmpne {dfv=of,sf,zf,cf} %rcx,(%rax)
+64	62f4140283fa01	ccmpb {dfv=zf} $1,%edx
+64	62f4240c85ca	ctestl {dfv=sf} %ecx,%edx
+64	62fc0c05f70012000000	ctestne {dfv=cf} $0x12,(%r16)
+64	62ecc40739c1	ccmpa {dfv=of} %r16,%r17
+64	62f4040839ca	ccmps %ecx,%edx
+64	refused	ccmps {dfv=xx} %ecx,%edx
+64	refused	add {dfv=of} %ecx,%edx
+64	62f41c083b08	ccmpsl {dfv=cf,zf} (%rax),%ecx
+64	62f4440a38ca	ccmpt {dfv=of} %cl,%dl
+64	62f40d0b39ca	ccmpf {dfv=cf} %cx,%dx
+64	62f44c0839ca	ccmps {dfv=OF, CF} %ecx,%edx
+32	refused	ccmps {dfv=of,cf} %ecx,%edx
+32	refused	ccmps {dfv=} %ecx,%edx
+32	refused	ccmpne {dfv=of,sf,zf,cf} %rcx,(%rax)
+32	refused	ccmpb {dfv=zf} $1,%edx
+32	refused	ctestl {dfv=sf} %ecx,%edx
+32	refused	ctestne {dfv=cf} $0x12,(%r16)
+32	refused	ccmpa {dfv=of} %r16,%r17
+32	refused	ccmps %ecx,%edx
+32	refused	ccmps {dfv=xx} %ecx,%edx
+32	refused	add {dfv=of} %ecx,%edx
+32	refused	ccmpsl {dfv=cf,zf} (%rax),%ecx
+32	refused	ccmpt {dfv=of} %cl,%dl
+32	refused	ccmpf {dfv=cf} %cx,%dx
+32	refused	ccmps {dfv=OF, CF} %ecx,%edx

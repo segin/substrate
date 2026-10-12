@@ -159,6 +159,9 @@ typedef struct {
      * that is on it is the instruction's.
      */
     unsigned from_intel : 1;
+    /* `{dfv=...}` was written, and its flags: cf 1, zf 2, sf 4, of 8. */
+    unsigned have_dfv : 1;
+    unsigned dfv : 4;
     /*
      * The instruction's bytes, if it has been encoded already and its
      * operands let go (as_x86_precode()): code_len of them, which are

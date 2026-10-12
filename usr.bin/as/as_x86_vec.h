@@ -148,6 +148,9 @@ typedef struct {
     int sae;
     int rounding; /* -1, or 0 to 3 for rn, rd, ru, rz */
     unsigned pseudo; /* AS_PSEUDO_* of as_parser.h */
+    /* `{dfv=}` was written, and its flags (cf 1, zf 2, sf 4, of 8). */
+    unsigned char have_dfv;
+    unsigned char dfv;
     unsigned mode;   /* 16, 32 or 64 */
     unsigned level;  /* the x86-64 level allowed: under 3 no VEX, under 4 no EVEX */
     /* A REX prefix was written, `rex.W` or `{rex}`: its bits, which

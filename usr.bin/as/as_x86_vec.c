@@ -688,11 +688,12 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (put8(&tc, (((unsigned)is4->u.reg & 0xfu) << 4) | low) != 0) {
             return -1;
         }
-    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM16) != 0) {
-        if (imm->imm_symbolic) {
-            vec_err(ctx, "'%s' takes a number that is known here", t->name);
+    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM16) != 0 && imm->imm_symbolic) {
+        /* (A symbol: two bytes for the linker.) */
+        if (put8(&tc, 0) != 0 || put8(&tc, 0) != 0) {
             return -1;
         }
+    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM16) != 0) {
         if (imm->u.imm < -32768 || imm->u.imm > 65535) {
             vec_err(ctx, "the number %lld is not of two bytes", (long long)imm->u.imm);
             return -1;
@@ -700,11 +701,18 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (put8(&tc, (unsigned)imm->u.imm & 0xffu) != 0 || put8(&tc, ((unsigned)imm->u.imm >> 8) & 0xffu) != 0) {
             return -1;
         }
-    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0) {
-        if (imm->imm_symbolic) {
+    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0 && imm->imm_symbolic) {
+        /* (A symbol: four bytes for the linker, which are the
+         * instruction's last.  Of APX's rows; the others take a number
+         * that is known here.) */
+        if ((t->flags & AS_VEC_F_APX) == 0) {
             vec_err(ctx, "'%s' takes a number that is known here", t->name);
             return -1;
         }
+        if (put32(&tc, 0) != 0) {
+            return -1;
+        }
+    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0) {
         /* (Of 64 bits the four bytes are extended by their sign.) */
         if (imm->u.imm < -2147483648ll || imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll)) {
             vec_err(ctx, "the number %lld is not of four bytes", (long long)imm->u.imm);
@@ -860,7 +868,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
              * and V' would be, and the flags to leave if it does not
              * hold where vvvv would -- none, which is written 0.) */
             low = t->bcst & 0xfu;
-            vvvv = 0xfu;
+            vvvv = ~(unsigned)rq->dfv & 0xfu;
         }
         if (put8(ctx, 0x62u) != 0 ||
             put8(ctx, ((r ^ 1u) << 7) | ((x ^ 1u) << 6) | ((b ^ 1u) << 5) | ((r4 ^ 1u) << 4) | (b4 << 3) | t->map) !=
@@ -1102,6 +1110,11 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
         if ((t->flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0 &&
             (rq->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) == 0 &&
             !((t->flags & AS_VEC_F_PROMOHI) != 0 && has_high_general(rq))) {
+            continue;
+        }
+        /* (`{dfv=}` is of the conditional compare and test.) */
+        if (rq->have_dfv && (t->flags & AS_VEC_F_SCC) == 0) {
+            why = "takes no {dfv=}";
             continue;
         }
         if (((t->flags & AS_VEC_F_NF) != 0 && (t->flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0) !=

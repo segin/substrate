@@ -2103,7 +2103,74 @@ static int intel_statement_to_att(as_instruction_t *in) {
     return 0;
 }
 
+static int parse_instruction_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_stmt_t *st);
+
+/*
+ * `{dfv=of,sf,zf,cf}`, of APX's conditional compare and test: the
+ * flags the instruction is to leave set where its condition does not
+ * hold.  It stands among the operands and is none of them: it is taken
+ * out here, and the rest read as any instruction is.
+ */
 static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_stmt_t *st) {
+    static const char *const names[] = {"cf", "zf", "sf", "of"};
+    as_token_t *rest;
+    unsigned flags = 0;
+    size_t open;
+    size_t close;
+    size_t i;
+    int rc;
+
+    for (open = 0; open + 2 < n; ++open) {
+        if (tokv[open].text != NULL && strcmp(tokv[open].text, "{") == 0 && tokv[open + 1].text != NULL &&
+            streq_ci(tokv[open + 1].text, "dfv") && tokv[open + 2].text != NULL && strcmp(tokv[open + 2].text, "=") == 0) {
+            break;
+        }
+    }
+    if (open + 2 >= n) {
+        return parse_instruction_tokens(ctx, tokv, n, st);
+    }
+    for (close = open + 3; close < n && strcmp(tokv[close].text, "}") != 0; ++close) {
+        size_t k;
+
+        if (strcmp(tokv[close].text, ",") == 0) {
+            continue;
+        }
+        for (k = 0; k < sizeof(names) / sizeof(names[0]); ++k) {
+            if (streq_ci(tokv[close].text, names[k])) {
+                flags |= 1u << k;
+                break;
+            }
+        }
+        if (k == sizeof(names) / sizeof(names[0])) {
+            set_err(ctx, "%s:%u: '%s' is no flag of {dfv=}: they are of, sf, zf and cf",
+                    tokv[open].file != NULL ? tokv[open].file : "<input>", tokv[open].line, tokv[close].text);
+            return -1;
+        }
+    }
+    if (close == n) {
+        set_err(ctx, "%s:%u: {dfv= has no }", tokv[open].file != NULL ? tokv[open].file : "<input>", tokv[open].line);
+        return -1;
+    }
+    rest = (as_token_t *)malloc(n * sizeof(*rest));
+    if (rest == NULL) {
+        return -1;
+    }
+    for (i = 0; i < open; ++i) {
+        rest[i] = tokv[i];
+    }
+    for (i = close + 1; i < n; ++i) {
+        rest[open + (i - close - 1)] = tokv[i];
+    }
+    rc = parse_instruction_tokens(ctx, rest, n - (close + 1 - open), st);
+    free(rest);
+    if (rc == 0 && st->kind == AS_STMT_INSTRUCTION) {
+        st->u.instr.have_dfv = 1;
+        st->u.instr.dfv = flags & 0xfu;
+    }
+    return rc;
+}
+
+static int parse_instruction_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_stmt_t *st) {
     as_instruction_t in;
     size_t i;
     size_t start;

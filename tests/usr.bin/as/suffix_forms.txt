@@ -97,3 +97,20 @@
 64	480f388b10	movrsq (%rax),%rdx
 64	refused	movrsl (%rax),%rdx
 64	refused	movrsb (%rax),%edx
+64	62f4641881c200000000/R_X86_64_32@6:sym+0	add $sym,%edx,%ebx
+64	62f4e41881c200000000/R_X86_64_32S@6:sym+0	add $sym,%rdx,%rbx
+64	62f46418810000000000/R_X86_64_32@6:sym+4	add $sym+4,(%rax),%ebx
+64	62fcf41081680800000000/R_X86_64_32S@7:sym+0	sub $sym,8(%r16),%r17
+64	62f4651881c20000/R_X86_64_16@6:sym+0	add $sym,%dx,%bx
+64	62f4641880c200/R_X86_64_8@6:sym+0	add $sym,%dl,%bl
+64	69da00000000/R_X86_64_32@2:sym+0	imul $sym,%edx,%ebx
+64	62f4040881fa00000000/R_X86_64_32@6:sym+0	ccmps $sym,%edx
+64	62f40405f70000000000/R_X86_64_32@6:sym+0	ctestne $sym,(%rax)
+64	62f46418010d00000000/R_X86_64_PC32@6:sym-4	add %ecx,sym(%rip),%ebx
+64	62f4641883050000000001/R_X86_64_PC32@6:sym2-5	add $1,sym2(%rip),%ebx
+64	62f46418c1e200/R_X86_64_8@6:sym+0	shl $sym,%edx,%ebx
+64	62f47c0c81c200000000/R_X86_64_32@6:sym+0	{nf} add $sym,%edx
+64	62f47c08812800000000/R_X86_64_32@6:sym+0	{evex} sub $sym,(%rax)
+64	0500000000/R_X86_64_32@1:sym+0	add $sym,%eax
+64	d51081c000000000/R_X86_64_32@4:sym+0	add $sym,%r16d
+64	d51869c000000000/R_X86_64_32S@4:sym+0	imul $sym,%r16,%rax

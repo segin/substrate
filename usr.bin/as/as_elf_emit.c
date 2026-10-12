@@ -10886,6 +10886,11 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
     }
     mn[i] = '\0';
+    /* (`{dfv=}` is of APX's conditional compare and test.) */
+    if (insn->have_dfv && (!cfg->is_64 || (strncmp(mn, "ccmp", 4) != 0 && strncmp(mn, "ctest", 5) != 0))) {
+        snprintf(encerr, encerr_sz, "'%s' takes no {dfv=}", mn);
+        return -1;
+    }
     /*
      * Three of APX's that are a REX2 prefix and an old opcode: a push
      * and a pop that say the stack is balanced (`pushp`, `popp`: REX2
@@ -11084,6 +11089,8 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
     rq.sae = insn->sae;
     rq.rounding = insn->rounding_mode;
     rq.pseudo = insn->pseudo;
+    rq.have_dfv = (unsigned char)insn->have_dfv;
+    rq.dfv = (unsigned char)insn->dfv;
     rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
     rq.level = cfg->is_64 ? cfg->x86_64_isa_level : 4u;
     rq.explicit_rex = (insn->prefixes & AS_PREFIX_REX) != 0 || (insn->pseudo & AS_PSEUDO_REX) != 0;
@@ -17556,7 +17563,8 @@ static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
          key_num(key, key_sz, &n,
                  (unsigned long long)in->have_opmask | ((unsigned long long)in->zeroing << 1) |
                      ((unsigned long long)in->sae << 2) | ((unsigned long long)in->syntax_intel << 3) |
-                         ((unsigned long long)in->from_intel << 4)) == 0 &&
+                         ((unsigned long long)in->from_intel << 4) | ((unsigned long long)in->have_dfv << 5) |
+                         ((unsigned long long)in->dfv << 6)) == 0 &&
          key_num(key, key_sz, &n, in->broadcast) == 0 &&
          key_num(key, key_sz, &n, (unsigned long long)(long long)in->rounding_mode) == 0 &&
          key_str(key, key_sz, &n, in->segment_override != NULL ? in->segment_override : "-") == 0 &&
@@ -21514,7 +21522,24 @@ static int x86_imm_field_width(const unsigned char *code, size_t len, unsigned c
         }
         i++;
     }
-    if (is_64 && i + 1 < len && code[i] == 0xd5u) {
+    if (is_64 && i + 4 < len && code[i] == 0x62u && (code[i + 1] & 0x07u) == 4u) {
+        /* (EVEX of APX, map 4: the old opcodes of one byte behind four
+         * bytes of prefix, with W and the operand-size prefix in it.
+         * A number of one byte is a symbol's too, as GNU as has it.) */
+        rex_w = (code[i + 2] & 0x80u) != 0;
+        has_66 = (code[i + 2] & 0x03u) == 1u;
+        i += 4;
+        op = code[i];
+        if (op == 0x83 || op == 0x6b || op == 0xc0 || op == 0xc1) {
+            if (len - i <= 1) {
+                return -1;
+            }
+            *width_out = 1;
+            *rex_w_out = rex_w;
+            *opcode_out = op;
+            return 0;
+        }
+    } else if (is_64 && i + 1 < len && code[i] == 0xd5u) {
         /* (REX2, of APX: two bytes, the second with REX's four bits;
          * an opcode of the two-byte map has no number of these.) */
         if ((code[i + 1] & 0x80u) != 0) {
