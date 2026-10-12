@@ -606,8 +606,14 @@ for the address of a symbol; a symbol before the brackets of its
 address
 .Pq Ql .LC0[rip] ;
 and brackets around what a jump goes through.
-The size written on the memory of an instruction of vectors is not
-checked against the instruction.
+A
+.Sq d
+after the name of an instruction of general registers is the
+.Sq l
+of AT&T syntax:
+.Ql addd [eax], 5 .
+A size that the instruction has not is refused:
+.Ql paddd xmm1, BYTE PTR [eax] .
 .Cm .code16 , .code32
 and
 .Cm .code64

@@ -1470,6 +1470,9 @@ static int emit_i386_modrm16(unsigned reg_field, const as_mem_operand_t *mem, un
  * `addps sym, %xmm1`, `bt $1, sym`.
  */
 static int x86_emit_code16;
+/* An Intel statement is being assembled as it stands, before its name
+ * is tried as one with a `d` for the size (encode_x86_stmt()). */
+static int x86_intel_d_tried;
 
 static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm_op,
                                       unsigned char *out, size_t out_cap, size_t *pos_io) {
@@ -10202,6 +10205,19 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
             as_expr_t value;
             as_operand_t operands[3];
             as_stmt_t whole = *st;
+            const as_operand_t *into =
+                st->u.instr.operand_count == 2 ? &st->u.instr.operands[intel_syntax ? 0 : 1] : NULL;
+            const as_x86_reg_info_t *r =
+                into != NULL && into->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(into->u.reg) : NULL;
+
+            /* (Into a register of vectors: `cmpeqsd (%eax), (%eax)`
+             * was made `cmpsd` and a number, which with no register is
+             * the instruction that compares strings, and was assembled
+             * as that.) */
+            if (r == NULL || r->cls != AS_X86_REGCLASS_XMM) {
+                snprintf(encerr, encerr_sz, "'%s' does not take these operands", st->u.instr.mnemonic);
+                return -1;
+            }
 
             memset(&value, 0, sizeof(value));
             value.kind = AS_EXPR_CONST;
@@ -11610,6 +11626,28 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
     }
     direct = in->operand_count == 1 &&
              (in->operands[0].kind == AS_OPERAND_LABEL_REF || in->operands[0].kind == AS_OPERAND_IMMEDIATE);
+    /*
+     * The string instructions of four bytes are `insl`, `stosl`: the
+     * names with a `d` are Intel's, and Intel's `d` is made the `l`
+     * where a statement is Intel's (encode_x86_stmt()).  They were
+     * taken in AT&T syntax too.  And a count of bits is of no byte:
+     * `popcntb` was taken in 32-bit code.
+     */
+    {
+        static const char *const intel[] = {"insd", "outsd", "lodsd", "stosd", "scasd"};
+
+        for (i = 0; i < sizeof(intel) / sizeof(intel[0]); ++i) {
+            if (strcasecmp(in->mnemonic, intel[i]) == 0) {
+                snprintf(encerr, encerr_sz, "unsupported %smnemonic: %s", cfg->is_64 ? "x86_64 " : "", in->mnemonic);
+                return 1;
+            }
+        }
+        if (suffix == 'b' &&
+            (as_strcmp(base, "popcnt") == 0 || as_strcmp(base, "lzcnt") == 0 || as_strcmp(base, "tzcnt") == 0)) {
+            snprintf(encerr, encerr_sz, "'%s' does not take these operands", in->mnemonic);
+            return 1;
+        }
+    }
     /* A repeat prefix goes before no instruction of the x87; and
      * xacquire and xrelease before one that is locked, or an exchange
      * with memory, or (xrelease) a store.  In 32-bit code several
@@ -12260,6 +12298,103 @@ static int x86_memory_of_one_size(const char *mnemonic) {
     return 0;
 }
 
+/* Whether a name is an instruction's, as written or less its suffix. */
+static int x86_name_is_known(const char *mnemonic) {
+    char lower[32];
+    char base[32];
+    char suffix = '\0';
+    size_t n = strlen(mnemonic);
+    size_t i;
+
+    if (n >= sizeof(lower)) {
+        return 0;
+    }
+    for (i = 0; i <= n; ++i) {
+        lower[i] = (char)tolower((unsigned char)mnemonic[i]);
+    }
+    if (x86_max_operand_count(lower) >= 0 || as_x86_vec_knows(lower)) {
+        return 1;
+    }
+    return normalize_x86_mnemonic(lower, base, sizeof(base), &suffix) == 0 && as_strcmp(base, lower) != 0 &&
+           (x86_max_operand_count(base) >= 0 || as_x86_vec_knows(base));
+}
+
+/*
+ * The sizes of memory an instruction takes, for the instructions that
+ * have no suffix to say one with: by the widest register of vectors
+ * among the operands -- none, MMX, XMM, YMM, ZMM -- a bit for each size
+ * (AS_X86_MEMSIZE_*).  No bits is nothing known, and nothing refused;
+ * AS_X86_MEMSIZE_NONE alone is memory that takes no size.
+ * The names are in order.  (as_x86_memsize_table.h is what GNU as 2.47
+ * takes of each name in Intel syntax, with memory of each size in each
+ * place among registers of each kind.)
+ */
+struct x86_memsize {
+    const char *name;
+    unsigned short sizes[5];
+};
+
+static const struct x86_memsize x86_memsizes[] = {
+#include "as_x86_memsize_table.h"
+};
+
+static int x86_memsize_cmp(const void *key, const void *row) {
+    return strcmp((const char *)key, ((const struct x86_memsize *)row)->name);
+}
+
+/*
+ * Whether the size written on an instruction's memory is one the
+ * instruction has not: `paddd xmm1, BYTE PTR [rax]` adds sixteen
+ * bytes, and `vcompresspd WORD PTR [rax], ymm2` stores thirty-two.
+ */
+static int x86_memory_size_refused(const as_instruction_t *in) {
+    const struct x86_memsize *row;
+    char mn[32];
+    unsigned widest = 0;
+    unsigned bit;
+    int bits = 0;
+    size_t i;
+    size_t n = strlen(in->mnemonic);
+
+    /* (What is broadcast is one element, and that is its size.) */
+    if (n >= sizeof(mn) || in->broadcast != 0) {
+        return 0;
+    }
+    for (i = 0; i <= n; ++i) {
+        mn[i] = (char)tolower((unsigned char)in->mnemonic[i]);
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+        const as_x86_reg_info_t *r = op->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(op->u.reg) : NULL;
+        unsigned width = r == NULL                          ? 0u
+                         : r->cls == AS_X86_REGCLASS_MMX    ? 1u
+                         : r->cls == AS_X86_REGCLASS_XMM    ? 2u
+                         : r->cls == AS_X86_REGCLASS_YMM    ? 3u
+                         : r->cls == AS_X86_REGCLASS_ZMM    ? 4u
+                                                            : 0u;
+
+        if (width > widest) {
+            widest = width;
+        }
+        if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits != 0 && bits == 0) {
+            bits = op->u.mem.size_bits;
+        }
+    }
+    bit = bits == 8     ? AS_X86_MEMSIZE_8
+          : bits == 16  ? AS_X86_MEMSIZE_16
+          : bits == 32  ? AS_X86_MEMSIZE_32
+          : bits == 48  ? AS_X86_MEMSIZE_48
+          : bits == 64  ? AS_X86_MEMSIZE_64
+          : bits == 80  ? AS_X86_MEMSIZE_80
+          : bits == 128 ? AS_X86_MEMSIZE_128
+          : bits == 256 ? AS_X86_MEMSIZE_256
+          : bits == 512 ? AS_X86_MEMSIZE_512
+                        : 0u;
+    row = (const struct x86_memsize *)bsearch(mn, x86_memsizes, sizeof(x86_memsizes) / sizeof(x86_memsizes[0]),
+                                              sizeof(x86_memsizes[0]), x86_memsize_cmp);
+    return row != NULL && bit != 0 && row->sizes[widest] != 0 && (row->sizes[widest] & bit) == 0;
+}
+
 static int x86_sized_mnemonic(const as_instruction_t *in, int is_64, char *out, size_t out_sz) {
     char mn[32];
     const char *suffix = NULL;
@@ -12422,6 +12557,58 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
 
     /*
+     * In Intel syntax a `d` after the name of an instruction of general
+     * registers is AT&T's `l`: `addd [eax], 5`, `movd ecx, edx`.  It
+     * is tried where the name as it stands is no instruction, or is
+     * not one of these operands -- `movd` is of vectors.
+     */
+    if (st != NULL && cfg != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL &&
+        st->u.instr.from_intel && st->u.instr.code_len == 0 && !x86_intel_d_tried) {
+        size_t letters = strlen(st->u.instr.mnemonic);
+        int rc;
+
+        x86_intel_d_tried = 1;
+        rc = encode_x86_stmt(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+        x86_intel_d_tried = 0;
+        if (rc != 0 && letters >= 3 && letters < 30 && tolower((unsigned char)st->u.instr.mnemonic[letters - 1]) == 'd' &&
+            st->u.instr.operand_count <= AS_X86_SIZED_MAX_OPERANDS) {
+            as_operand_t ops[AS_X86_SIZED_MAX_OPERANDS];
+            as_stmt_t dword = *st;
+            unsigned char tried[16];
+            size_t tried_len = 0;
+            char said[160];
+            char name[32];
+            int general = 1;
+
+            for (i = 0; i < st->u.instr.operand_count; ++i) {
+                ops[i] = st->u.instr.operands[i];
+                if (ops[i].kind == AS_OPERAND_REGISTER && x86_gpr_operand_width_bits(&ops[i]) == 0) {
+                    general = 0;
+                }
+                if (ops[i].kind == AS_OPERAND_MEMORY) {
+                    if (ops[i].u.mem.size_bits != 0 && ops[i].u.mem.size_bits != 32) {
+                        general = 0;
+                    }
+                    ops[i].u.mem.size_bits = 0;
+                }
+            }
+            snprintf(name, sizeof(name), "%.*sl", (int)(letters - 1), st->u.instr.mnemonic);
+            dword.u.instr.mnemonic = name;
+            dword.u.instr.operands = ops;
+            dword.u.instr.from_intel = 0;
+            said[0] = '\0';
+            if (general && sizeof(tried) <= code_cap &&
+                encode_x86_stmt(ctx, cfg, &dword, tried, sizeof(tried), &tried_len, said, sizeof(said)) == 0) {
+                memcpy(code, tried, tried_len);
+                *code_len = tried_len;
+                encerr[0] = '\0';
+                return 0;
+            }
+        }
+        return rc;
+    }
+
+    /*
      * A size written on memory the Intel way, `shl BYTE PTR [rax], 1`:
      * it is the suffix of the instruction where the instruction has
      * one, `shlb`, and that is the instruction assembled.  Where it
@@ -12512,6 +12699,21 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
             plain.u.instr.operands = unsized;
             plain.u.instr.from_intel = 0;
+            /* (A name that is no instruction is none with a letter
+             * after it: `sh DWORD PTR [rax], 1` was `shl`, and `mu`,
+             * `su` and `cmov` were what an l or a b made of them.) */
+            if (!x86_name_is_known(st->u.instr.mnemonic)) {
+                /* (Not in the lists of names: it is what is said of
+                 * it with no size that says whether it is one.) */
+                unsigned char tried[16];
+                size_t tried_len = 0;
+
+                if (encode_x86_stmt(ctx, cfg, &plain, tried, sizeof(tried), &tried_len, encerr, encerr_sz) != 0 &&
+                    strstr(encerr, "unsupported") != NULL && strstr(encerr, "mnemonic") != NULL) {
+                    return -1;
+                }
+                encerr[0] = '\0';
+            }
             if (named < 0) {
                 snprintf(encerr, encerr_sz, "'%s' has no operand of the size written", st->u.instr.mnemonic);
                 return -1;
@@ -12530,6 +12732,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 }
                 encerr[0] = '\0';
                 plain.u.instr.mnemonic = st->u.instr.mnemonic;
+            }
+            /* (No suffix, and the size is still held to what the
+             * instruction has.) */
+            if (x86_memory_size_refused(&st->u.instr)) {
+                snprintf(encerr, encerr_sz, "'%s' has no operand of the size written", st->u.instr.mnemonic);
+                return -1;
             }
             return encode_x86_stmt(ctx, cfg, &plain, code, code_cap, code_len, encerr, encerr_sz);
         }

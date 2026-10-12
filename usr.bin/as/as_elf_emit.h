@@ -20,6 +20,19 @@ extern "C" {
  * on it the Intel way. */
 #define AS_X86_SIZED_MAX_OPERANDS 6u
 
+/* The sizes of memory, a bit each, as as_x86_memsize_table.h has them. */
+#define AS_X86_MEMSIZE_8 (1u << 0)
+#define AS_X86_MEMSIZE_16 (1u << 1)
+#define AS_X86_MEMSIZE_32 (1u << 2)
+#define AS_X86_MEMSIZE_48 (1u << 3)
+#define AS_X86_MEMSIZE_64 (1u << 4)
+#define AS_X86_MEMSIZE_80 (1u << 5)
+#define AS_X86_MEMSIZE_128 (1u << 6)
+#define AS_X86_MEMSIZE_256 (1u << 7)
+#define AS_X86_MEMSIZE_512 (1u << 8)
+/* Memory, and no size on it: a state that is saved, a key. */
+#define AS_X86_MEMSIZE_NONE (1u << 9)
+
 /*
  * The warnings of one assembly.  A statement is encoded more than once
  * on the way to its final bytes, and is warned about once: `seen` is the

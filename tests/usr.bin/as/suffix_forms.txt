@@ -51,3 +51,49 @@
 64	refused	bswapl %rax
 64	488d00	leaq (%rax),%rax
 64	refused	leaq (%rax),%eax
+64	refused	cmpeqsd (%eax), (%eax)
+64	refused	cmpeqsd $0x12, $0x12
+64	f20fc2d101	cmpltsd %xmm1,%xmm2
+64	67f20fc21000	cmpeqsd (%eax),%xmm2
+64	670fc21004	cmpneqps (%eax),%xmm2
+64	refused	cmpeqss %xmm1,(%eax)
+64	refused	cmpunordpd (%eax),(%eax)
+64	refused	insd
+64	refused	outsd
+64	refused	lodsd
+64	refused	stosd
+64	refused	scasd
+64	6d	insl
+64	ab	stosl
+64	refused	popcntb %ecx,%edx
+64	refused	popcntb (%eax),%dx
+64	6766f30fb810	popcntw (%eax),%dx
+64	67f30fb810	popcntl (%eax),%edx
+64	refused	lzcntb (%eax),%dx
+64	refused	tzcntb (%eax),%dx
+32	refused	cmpeqsd (%eax), (%eax)
+32	refused	cmpeqsd $0x12, $0x12
+32	f20fc2d101	cmpltsd %xmm1,%xmm2
+32	f20fc21000	cmpeqsd (%eax),%xmm2
+32	0fc21004	cmpneqps (%eax),%xmm2
+32	refused	cmpeqss %xmm1,(%eax)
+32	refused	cmpunordpd (%eax),(%eax)
+32	refused	insd
+32	refused	outsd
+32	refused	lodsd
+32	refused	stosd
+32	refused	scasd
+32	6d	insl
+32	ab	stosl
+32	refused	popcntb %ecx,%edx
+32	refused	popcntb (%eax),%dx
+32	66f30fb810	popcntw (%eax),%dx
+32	f30fb810	popcntl (%eax),%edx
+32	refused	lzcntb (%eax),%dx
+32	refused	tzcntb (%eax),%dx
+64	0f388a10	movrsb (%rax),%dl
+64	660f388b10	movrsw (%rax),%dx
+64	0f388b10	movrsl (%rax),%edx
+64	480f388b10	movrsq (%rax),%rdx
+64	refused	movrsl (%rax),%rdx
+64	refused	movrsb (%rax),%edx

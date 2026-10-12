@@ -70,7 +70,11 @@ cd "$work" || exit 1
 # suffix_forms.txt is the same of a size letter and a register that is
 # not of the size, for the instructions that were not held to it:
 # `shldw %edx, (%eax)`, `leaw (%eax), %eax` and `bswapw %eax` were
-# assembled, the letter winning or the register as it fell out; and of
+# assembled, the letter winning or the register as it fell out; of a
+# comparison of SSE by name with no register (`cmpeqsd (%eax), (%eax)`),
+# which was the instruction that compares strings; of the string
+# instructions by their Intel names (`stosd`) and `popcntb`, which were
+# taken; of `movrsb`, which was not; and of
 # a product by a number, which took a
 # register of bytes and two of different widths.
 cat "$here/prefix_forms.txt" "$here/extreg_forms.txt" "$here/rep_forms.txt" "$here/labeldiff_forms.txt" \

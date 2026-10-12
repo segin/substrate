@@ -1016,6 +1016,11 @@
     LX("movrs", P0, M2, 0x8b, W0, "mw", "mr", OP16 | O64),
     LX("movrs", P0, M2, 0x8b, W0, "md", "mr", O64),
     LX("movrs", P0, M2, 0x8b, W1, "mq", "mr", O64),
+    /* (And with the size in the name.) */
+    LX("movrsb", P0, M2, 0x8a, W0, "mh", "mr", O64),
+    LX("movrsw", P0, M2, 0x8b, W0, "mw", "mr", OP16 | O64),
+    LX("movrsl", P0, M2, 0x8b, W0, "md", "mr", O64),
+    LX("movrsq", P0, M2, 0x8b, W1, "mq", "mr", O64),
 
     /* XOP's permute of two sources, by a third and a number: the one
      * instruction with a register and a number in its last byte. */
