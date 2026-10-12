@@ -2,6 +2,22 @@
 #define AS_UTIL_H
 
 #include <stddef.h>
+#include <string.h>
+
+/*
+ * strcmp(), with the first characters compared where it is called.  A
+ * mnemonic is looked for by going down lists of names, a thousand
+ * comparisons and more for one statement, and nearly every one of them
+ * is settled by its first character: the call was most of what they
+ * cost.  What it returns is strcmp()'s in its sign, which is all that is
+ * said of strcmp()'s.
+ */
+static inline int as_strcmp(const char *a, const char *b) {
+    unsigned char ca = (unsigned char)a[0];
+    unsigned char cb = (unsigned char)b[0];
+
+    return ca != cb ? (ca < cb ? -1 : 1) : strcmp(a, b);
+}
 
 /* A copy of `s` in memory of its own, or NULL: for a NULL, or for want of memory. */
 char *xstrdup(const char *s);

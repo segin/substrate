@@ -347,7 +347,7 @@ static char **near_names;
 static size_t near_name_count;
 
 static int near_name_cmp(const void *a, const void *b) {
-    return strcmp(*(const char *const *)a, *(const char *const *)b);
+    return as_strcmp(*(const char *const *)a, *(const char *const *)b);
 }
 
 static int name_is_near_label(const char *name) {
@@ -406,7 +406,7 @@ static int asm_var_lookup(const emit_ctx_t *ctx, const char *name, long long *ou
     }
     for (i = ctx->asm_var_count; i > 0; --i) {
         const asm_var_t *v = &ctx->asm_vars[i - 1];
-        if (v->name != NULL && strcmp(v->name, name) == 0) {
+        if (v->name != NULL && as_strcmp(v->name, name) == 0) {
             *out = v->value;
             return 0;
         }
@@ -422,7 +422,7 @@ static int asm_var_set(emit_ctx_t *ctx, const char *name, long long value) {
         return -1;
     }
     for (i = 0; i < ctx->asm_var_count; ++i) {
-        if (ctx->asm_vars[i].name != NULL && strcmp(ctx->asm_vars[i].name, name) == 0) {
+        if (ctx->asm_vars[i].name != NULL && as_strcmp(ctx->asm_vars[i].name, name) == 0) {
             ctx->asm_vars[i].value = value;
             return 0;
         }
@@ -453,7 +453,7 @@ static const char *asm_reg_alias_lookup(const emit_ctx_t *ctx, const char *name)
     }
     for (i = ctx->asm_reg_alias_count; i > 0; --i) {
         const asm_reg_alias_t *a = &ctx->asm_reg_aliases[i - 1];
-        if (a->name != NULL && strcmp(a->name, name) == 0) {
+        if (a->name != NULL && as_strcmp(a->name, name) == 0) {
             return a->reg;
         }
     }
@@ -468,7 +468,7 @@ static int asm_reg_alias_set(emit_ctx_t *ctx, const char *name, const char *reg)
         return -1;
     }
     for (i = 0; i < ctx->asm_reg_alias_count; ++i) {
-        if (ctx->asm_reg_aliases[i].name != NULL && strcmp(ctx->asm_reg_aliases[i].name, name) == 0) {
+        if (ctx->asm_reg_aliases[i].name != NULL && as_strcmp(ctx->asm_reg_aliases[i].name, name) == 0) {
             char *r = xstrdup(reg);
             if (r == NULL) {
                 return -1;
@@ -571,7 +571,7 @@ static uint32_t section_group_ordinal(const as_section_state_t *sections, size_t
      * first has: it had none, and was left out of the group. */
     for (i = 0; i < index; ++i) {
         if (sections->items[i].group != NULL &&
-            strcmp(sections->items[i].group, sections->items[index].group) == 0) {
+            as_strcmp(sections->items[i].group, sections->items[index].group) == 0) {
             index = i;
             break;
         }
@@ -585,7 +585,7 @@ static uint32_t section_group_ordinal(const as_section_state_t *sections, size_t
             continue;
         }
         for (j = 0; j < i; ++j) {
-            if (sections->items[j].group != NULL && strcmp(sections->items[j].group, group) == 0) {
+            if (sections->items[j].group != NULL && as_strcmp(sections->items[j].group, group) == 0) {
                 first = 0;
                 break;
             }
@@ -696,7 +696,7 @@ static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
         return 0;
     }
     for (i = 0; i < sizeof(exact) / sizeof(exact[0]); ++i) {
-        if (strcmp(mnemonic, exact[i]) == 0) {
+        if (as_strcmp(mnemonic, exact[i]) == 0) {
             return 1;
         }
     }
@@ -862,7 +862,7 @@ static int eval_expr_const(const as_expr_t *e, long long *out) {
 /* What .set and = have given a value to; the location counter is not
  * among them. */
 static int asm_var_expr_lookup(void *cookie, const char *name, long long *out) {
-    if (strcmp(name, ".") == 0) {
+    if (as_strcmp(name, ".") == 0) {
         return 0;
     }
     return asm_var_lookup((const emit_ctx_t *)cookie, name, out) == 0;
@@ -901,7 +901,7 @@ static int apply_asm_var_directive(emit_ctx_t *ctx, const as_stmt_t *st, const a
     unsigned vr;
 
     if (ctx == NULL || d == NULL || d->name == NULL ||
-        (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0 && strcmp(d->name, ".equiv") != 0) ||
+        (as_strcmp(d->name, ".set") != 0 && as_strcmp(d->name, ".equ") != 0 && as_strcmp(d->name, ".equiv") != 0) ||
         d->arg_count < 2 || d->args[0] == NULL || d->args[1] == NULL) {
         return 0;
     }
@@ -1920,7 +1920,7 @@ static int lookup_i386_packed_rm_opcode(const char *mnemonic, unsigned char *opc
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -1946,7 +1946,7 @@ static int lookup_i386_xmm_unprefixed_opcode(const char *mnemonic, unsigned char
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -1971,7 +1971,7 @@ static int lookup_i386_xmm_66_opcode(const char *mnemonic, unsigned char *opcode
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -1995,7 +1995,7 @@ static int lookup_i386_0fc7_group(const char *mnemonic, unsigned char *prefix, u
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *reg_field = map[i].reg_field;
             return 0;
@@ -2022,7 +2022,7 @@ static int lookup_i386_0f00_group(const char *mnemonic, unsigned *reg_field) {
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *reg_field = map[i].reg_field;
             return 0;
         }
@@ -2046,7 +2046,7 @@ static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) 
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *reg_field = map[i].reg_field;
             return 0;
         }
@@ -2075,7 +2075,7 @@ static int lookup_i386_0fae_rm_group(const char *mnemonic, unsigned char *prefix
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *reg_field = map[i].reg_field;
             return 0;
@@ -2099,7 +2099,7 @@ static int lookup_i386_fence_tail(const char *mnemonic, unsigned char *tail) {
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *tail = map[i].tail;
             return 0;
         }
@@ -2124,7 +2124,7 @@ static int lookup_i386_bt_group(const char *mnemonic, unsigned *reg_field, unsig
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *reg_field = map[i].reg_field;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -2151,7 +2151,7 @@ static int lookup_i386_scanbit_group(const char *mnemonic, unsigned char *prefix
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -2182,7 +2182,7 @@ static int lookup_i386_f2_scalar_xmm_opcode(const char *mnemonic, unsigned char 
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -2215,7 +2215,7 @@ static int lookup_i386_f3_scalar_xmm_opcode(const char *mnemonic, unsigned char 
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -2237,7 +2237,7 @@ static int lookup_i386_fixed_0f_opcode(const char *mnemonic, unsigned char *opco
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -2260,7 +2260,7 @@ static int lookup_i386_shiftd_opcode(const char *mnemonic, unsigned char *reg_op
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *reg_opcode = map[i].reg_opcode;
             *imm_opcode = map[i].imm_opcode;
             return 0;
@@ -2286,7 +2286,7 @@ static int lookup_i386_sha_0f38_opcode(const char *mnemonic, unsigned char *opco
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode3 = map[i].opcode3;
             return 0;
         }
@@ -2310,7 +2310,7 @@ static int lookup_i386_crypto_0f3a_imm8_opcode(const char *mnemonic, unsigned ch
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode3 = map[i].opcode3;
             return 0;
         }
@@ -2348,7 +2348,7 @@ static int lookup_i386_aes_0f38_opcode(const char *mnemonic, unsigned char *opco
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode3 = map[i].opcode3;
             return 0;
         }
@@ -2373,7 +2373,7 @@ static int lookup_i386_keylocker_opcode(const char *mnemonic, unsigned char *opc
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode3 = map[i].opcode3;
             return 0;
         }
@@ -2402,7 +2402,7 @@ static int lookup_i386_memorder_opcode(const char *mnemonic, unsigned char *pref
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode3 = map[i].opcode3;
             *reg_first = map[i].reg_first;
@@ -2429,7 +2429,7 @@ static int lookup_i386_x87_nooperand_opcode(const char *mnemonic, unsigned char 
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *op1 = map[i].op1;
             *op2 = map[i].op2;
             return 0;
@@ -2461,7 +2461,7 @@ static int lookup_i386_x87_fcmov_opcode(const char *mnemonic, unsigned char *op1
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *op1 = map[i].op1;
             *base = map[i].base;
             return 0;
@@ -2486,7 +2486,7 @@ static int lookup_i386_x87_stack_unary_opcode(const char *mnemonic, unsigned cha
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *base = map[i].base;
             return 0;
         }
@@ -2512,7 +2512,7 @@ static int lookup_i386_x87_pop2_opcode(const char *mnemonic, unsigned char *base
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *base = map[i].base;
             return 0;
         }
@@ -2534,7 +2534,7 @@ static int lookup_i386_x87_ipcompare_opcode(const char *mnemonic, unsigned char 
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *base = map[i].base;
             return 0;
         }
@@ -2568,7 +2568,7 @@ static int lookup_i386_x87_arith_opcode(const char *mnemonic, unsigned char *mem
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *mem_d8_regf = map[i].mem_d8_regf;
             *mem_dc_regf = map[i].mem_dc_regf;
             *stack_single_base = map[i].stack_single_base;
@@ -2593,7 +2593,7 @@ static int lookup_i386_adcxo_prefix(const char *mnemonic, unsigned char *prefix)
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             return 0;
         }
@@ -2615,7 +2615,7 @@ static int lookup_i386_encodekey_opcode(const char *mnemonic, unsigned char *opc
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode3 = map[i].opcode3;
             return 0;
         }
@@ -2640,7 +2640,7 @@ static int lookup_i386_bndcmp_opcode(const char *mnemonic, unsigned char *prefix
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -2676,7 +2676,7 @@ static int lookup_x86_xmm_move_family(const char *mnemonic, unsigned char *prefi
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *load_opcode2 = map[i].load_opcode2;
             *store_opcode2 = map[i].store_opcode2;
@@ -2701,7 +2701,7 @@ static int lookup_i386_movmsk_prefix(const char *mnemonic, unsigned char *prefix
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             return 0;
         }
@@ -2724,7 +2724,7 @@ static int lookup_i386_mmx_xmm_bridge(const char *mnemonic, unsigned char *prefi
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *dst_is_xmm = map[i].dst_is_xmm;
             return 0;
@@ -2748,7 +2748,7 @@ static int lookup_i386_mmx_xmm_convert_to_xmm(const char *mnemonic, unsigned cha
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -2774,7 +2774,7 @@ static int lookup_i386_mmx_xmm_convert_from_xmm(const char *mnemonic, unsigned c
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -2802,7 +2802,7 @@ static int lookup_i386_movnt_store_family(const char *mnemonic, unsigned char *p
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             *use_xmm = map[i].use_xmm;
@@ -2826,7 +2826,7 @@ static int lookup_i386_xmm_shiftdq_imm8(const char *mnemonic, unsigned char *reg
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *reg_field = map[i].reg_field;
             return 0;
         }
@@ -2849,7 +2849,7 @@ static int lookup_i386_xmm_shuffle_tail(const char *mnemonic, unsigned char *pre
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -2872,7 +2872,7 @@ static int lookup_i386_xmm_regpair_opcode(const char *mnemonic, unsigned char *o
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -2894,7 +2894,7 @@ static int lookup_i386_comisd_opcode(const char *mnemonic, unsigned char *opcode
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             return 0;
         }
@@ -2921,7 +2921,7 @@ static int lookup_i386_cachehint_regf(const char *mnemonic, unsigned char *opcod
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
             *regf = map[i].regf;
             return 0;
@@ -2944,7 +2944,7 @@ static int lookup_i386_extrq_insertq_prefix(const char *mnemonic, unsigned char 
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             return 0;
         }
@@ -2979,7 +2979,7 @@ static int select_x86_vmread_vmwrite_operands(const as_instruction_t *insn, int 
     if (insn == NULL || mnemonic == NULL || rm_op == NULL || reg_op == NULL || insn->operand_count != 2) {
         return -1;
     }
-    is_vmread = (strcmp(mnemonic, "vmread") == 0);
+    is_vmread = (as_strcmp(mnemonic, "vmread") == 0);
     if (is_vmread == intel_syntax) {
         *rm_op = &insn->operands[0];
         *reg_op = &insn->operands[1];
@@ -3053,7 +3053,7 @@ static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *pref
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
             *opcode2 = map[i].opcode2;
             return 0;
@@ -3539,7 +3539,7 @@ static int is_size_suffixable_base(const char *mn) {
         return 0;
     }
     for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
-        if (strcmp(mn, names[i]) == 0) {
+        if (as_strcmp(mn, names[i]) == 0) {
             return 1;
         }
     }
@@ -3581,7 +3581,7 @@ static int has_x86_size_suffix(const char *mn, char *suffix_out) {
         size_t i;
 
         for (i = 0; i < sizeof(some) / sizeof(some[0]); ++i) {
-            if (strcmp(tmp, some[i].base) == 0 && strchr(some[i].suffixes, c) != NULL) {
+            if (as_strcmp(tmp, some[i].base) == 0 && strchr(some[i].suffixes, c) != NULL) {
                 break;
             }
         }
@@ -3652,7 +3652,7 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         dst[1] = 'h';
     }
 
-    if (strcmp(dst, "movslq") == 0) {
+    if (as_strcmp(dst, "movslq") == 0) {
         if (dst_sz < sizeof("movsxd")) {
             return -1;
         }
@@ -3663,12 +3663,12 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         }
         return 0;
     }
-    if (strcmp(dst, "movsbq") == 0 || strcmp(dst, "movsbl") == 0 || strcmp(dst, "movsbw") == 0) {
+    if (as_strcmp(dst, "movsbq") == 0 || as_strcmp(dst, "movsbl") == 0 || as_strcmp(dst, "movsbw") == 0) {
         if (dst_sz < sizeof("movsxb")) {
             return -1;
         }
         memcpy(dst, "movsxb", sizeof("movsxb"));
-        if (strcmp(dst, "movsxb") == 0 && n >= 1) {
+        if (as_strcmp(dst, "movsxb") == 0 && n >= 1) {
             char last = (char)tolower((unsigned char)src[n - 1]);
             suffix = (last == 'q' || last == 'l' || last == 'w') ? last : 'l';
         }
@@ -3677,7 +3677,7 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         }
         return 0;
     }
-    if (strcmp(dst, "movswq") == 0 || strcmp(dst, "movswl") == 0) {
+    if (as_strcmp(dst, "movswq") == 0 || as_strcmp(dst, "movswl") == 0) {
         if (dst_sz < sizeof("movsxw")) {
             return -1;
         }
@@ -3688,7 +3688,7 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         }
         return 0;
     }
-    if (strcmp(dst, "movzbq") == 0 || strcmp(dst, "movzbl") == 0 || strcmp(dst, "movzbw") == 0) {
+    if (as_strcmp(dst, "movzbq") == 0 || as_strcmp(dst, "movzbl") == 0 || as_strcmp(dst, "movzbw") == 0) {
         if (dst_sz < sizeof("movzxb")) {
             return -1;
         }
@@ -3702,7 +3702,7 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         }
         return 0;
     }
-    if (strcmp(dst, "movzwq") == 0 || strcmp(dst, "movzwl") == 0) {
+    if (as_strcmp(dst, "movzwq") == 0 || as_strcmp(dst, "movzwl") == 0) {
         if (dst_sz < sizeof("movzxw")) {
             return -1;
         }
@@ -3727,7 +3727,7 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         }
         return 0;
     }
-    if (strcmp(dst, "movabsq") == 0 || strcmp(dst, "movabs") == 0) {
+    if (as_strcmp(dst, "movabsq") == 0 || as_strcmp(dst, "movabs") == 0) {
         if (dst_sz < sizeof("movabs")) {
             return -1;
         }
@@ -3738,35 +3738,35 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
         }
         return 0;
     }
-    if (strcmp(dst, "sysretd") == 0) {
+    if (as_strcmp(dst, "sysretd") == 0) {
         if (dst_sz < sizeof("sysretl")) {
             return -1;
         }
         memcpy(dst, "sysretl", sizeof("sysretl"));
         return 0;
     }
-    if (strcmp(dst, "sysexitd") == 0) {
+    if (as_strcmp(dst, "sysexitd") == 0) {
         if (dst_sz < sizeof("sysexitl")) {
             return -1;
         }
         memcpy(dst, "sysexitl", sizeof("sysexitl"));
         return 0;
     }
-    if (strcmp(dst, "retfq") == 0) {
+    if (as_strcmp(dst, "retfq") == 0) {
         if (dst_sz < sizeof("lretq")) {
             return -1;
         }
         memcpy(dst, "lretq", sizeof("lretq"));
         return 0;
     }
-    if (strcmp(dst, "retfw") == 0) {
+    if (as_strcmp(dst, "retfw") == 0) {
         if (dst_sz < sizeof("lretw")) {
             return -1;
         }
         memcpy(dst, "lretw", sizeof("lretw"));
         return 0;
     }
-    if (strcmp(dst, "retfd") == 0) {
+    if (as_strcmp(dst, "retfd") == 0) {
         if (dst_sz < sizeof("lret")) {
             return -1;
         }
@@ -4367,7 +4367,7 @@ static int lookup_x86_64_x87_mem_exact(const char *mnemonic, unsigned char *opco
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode = map[i].opcode;
             *reg_field = map[i].reg_field;
             return 0;
@@ -4401,7 +4401,7 @@ static int lookup_x86_64_x87_mem16_32(const char *mnemonic, unsigned char *opcod
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode16 = map[i].opcode16;
             *reg16 = map[i].reg16;
             *opcode32 = map[i].opcode32;
@@ -4435,7 +4435,7 @@ static int lookup_x86_64_x87_mem16_32_64(const char *mnemonic, unsigned char *op
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode16 = map[i].opcode16;
             *reg16 = map[i].reg16;
             *opcode32 = map[i].opcode32;
@@ -4843,7 +4843,7 @@ static int emit_x86_padlock_waitpkg(const char *mn, const as_instruction_t *insn
         return -1;
     }
     for (i = 0; i < sizeof(padlock) / sizeof(padlock[0]); ++i) {
-        if (strcmp(mn, padlock[i].mnemonic) != 0) {
+        if (as_strcmp(mn, padlock[i].mnemonic) != 0) {
             continue;
         }
         if (insn->operand_count != 0 || (insn->prefixes & ~rep_prefixes) != 0 || out_cap < 4) {
@@ -4859,11 +4859,11 @@ static int emit_x86_padlock_waitpkg(const char *mn, const as_instruction_t *insn
         return 0;
     }
 
-    if (strcmp(mn, "tpause") == 0) {
+    if (as_strcmp(mn, "tpause") == 0) {
         prefix = 0x66;
-    } else if (strcmp(mn, "umwait") == 0) {
+    } else if (as_strcmp(mn, "umwait") == 0) {
         prefix = 0xf2;
-    } else if (strcmp(mn, "umonitor") == 0) {
+    } else if (as_strcmp(mn, "umonitor") == 0) {
         prefix = 0xf3;
     } else {
         return 1;
@@ -4996,7 +4996,7 @@ static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code
 static int x86_segment_form_is_16bit(const as_instruction_t *insn, const char *mn, char suffix, int intel_syntax) {
     as_x86_seg_t seg;
 
-    if (strcmp(mn, "mov") == 0 && insn->operand_count == 2) {
+    if (as_strcmp(mn, "mov") == 0 && insn->operand_count == 2) {
         const as_operand_t *src = &insn->operands[intel_syntax ? 1 : 0];
         const as_operand_t *dst = &insn->operands[intel_syntax ? 0 : 1];
 
@@ -5004,7 +5004,7 @@ static int x86_segment_form_is_16bit(const as_instruction_t *insn, const char *m
                parse_seg_reg_text(src->u.reg, &seg) == 0 && x86_reg_width_bits(dst->u.reg) == 16 &&
                parse_seg_reg_text(dst->u.reg, &seg) != 0;
     }
-    if ((strcmp(mn, "push") == 0 || strcmp(mn, "pop") == 0) && insn->operand_count == 1 && suffix == 'w') {
+    if ((as_strcmp(mn, "push") == 0 || as_strcmp(mn, "pop") == 0) && insn->operand_count == 1 && suffix == 'w') {
         return insn->operands[0].kind == AS_OPERAND_REGISTER &&
                parse_seg_reg_text(insn->operands[0].u.reg, &seg) == 0;
     }
@@ -5080,7 +5080,7 @@ static int x86_mnemonic_is_64bit_by_default(const char *mn) {
     size_t i;
 
     for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
-        if (strcmp(mn, names[i]) == 0) {
+        if (as_strcmp(mn, names[i]) == 0) {
             return 1;
         }
     }
@@ -5149,11 +5149,11 @@ static int x86_special_takes_opsize(const as_instruction_t *insn, const char *mn
 
     /* (adcx and adox have no form of 16 bits: 66 is adcx's own, and
      * part of its opcode.) */
-    if (strcmp(mn, "mov") == 0 || strcmp(mn, "adcx") == 0 || strcmp(mn, "adox") == 0) {
+    if (as_strcmp(mn, "mov") == 0 || as_strcmp(mn, "adcx") == 0 || as_strcmp(mn, "adox") == 0) {
         return 0;
     }
     for (i = 0; i < sizeof(selector) / sizeof(selector[0]); ++i) {
-        if (strcmp(mn, selector[i]) == 0) {
+        if (as_strcmp(mn, selector[i]) == 0) {
             return insn->operand_count == 1 && insn->operands[0].kind == AS_OPERAND_REGISTER;
         }
     }
@@ -5464,7 +5464,7 @@ static int lookup_i386_x87_mem_exact(const char *mnemonic, unsigned char *opcode
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode = map[i].opcode;
             *reg_field = map[i].reg_field;
             return 0;
@@ -5498,7 +5498,7 @@ static int lookup_i386_x87_mem16_32_named(const char *mnemonic, unsigned char *o
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode16 = map[i].opcode16;
             *reg16 = map[i].reg16;
             *opcode32 = map[i].opcode32;
@@ -5532,7 +5532,7 @@ static int lookup_i386_x87_mem16_32_64_named(const char *mnemonic, unsigned char
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+        if (as_strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode16 = map[i].opcode16;
             *reg16 = map[i].reg16;
             *opcode32 = map[i].opcode32;
@@ -5552,7 +5552,7 @@ static int emit_i386_x87_stack_load_exchange(const as_instruction_t *insn, const
     if (mnemonic == NULL || insn == NULL || out == NULL) {
         return -1;
     }
-    if (strcmp(mnemonic, "fld1") == 0) {
+    if (as_strcmp(mnemonic, "fld1") == 0) {
         if (insn->operand_count != 0 || out_cap < 2) {
             return -1;
         }
@@ -5561,7 +5561,7 @@ static int emit_i386_x87_stack_load_exchange(const as_instruction_t *insn, const
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnemonic, "fld") == 0) {
+    if (as_strcmp(mnemonic, "fld") == 0) {
         if (insn->operand_count != 1 || op == NULL) {
             return -1;
         }
@@ -5576,7 +5576,7 @@ static int emit_i386_x87_stack_load_exchange(const as_instruction_t *insn, const
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnemonic, "fxch") == 0) {
+    if (as_strcmp(mnemonic, "fxch") == 0) {
         if (insn->operand_count != 1 || op == NULL || operand_st_index(op, &stidx) != 0 || out_cap < 2) {
             return -1;
         }
@@ -5887,7 +5887,7 @@ static int emit_i386_movmask_family(const char *mnemonic, const as_operand_t *sr
     if (lookup_i386_movmsk_prefix(mnemonic, &prefix) == 0) {
         return emit_i386_movmsk(prefix, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnemonic, "pmovmskb") != 0 || out == NULL || out_len == NULL || out_cap < 4 ||
+    if (as_strcmp(mnemonic, "pmovmskb") != 0 || out == NULL || out_len == NULL || out_cap < 4 ||
         dst->kind != AS_OPERAND_REGISTER || src->kind != AS_OPERAND_REGISTER ||
         parse_x86_reg(dst->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
         return -1;
@@ -6044,7 +6044,7 @@ static int emit_x86_extrq_insertq(const char *mnemonic, const as_instruction_t *
     n = insn->operand_count;
     if (n == 2) {
         nreg = 2;
-    } else if (n == (strcmp(mnemonic, "insertq") == 0 ? 4u : 3u)) {
+    } else if (n == (as_strcmp(mnemonic, "insertq") == 0 ? 4u : 3u)) {
         nreg = n - 2;
     } else {
         return -1;
@@ -6129,7 +6129,7 @@ static int x86_shuffle_imm8_fits(long long v) {
 }
 
 static int x86_is_shuffle_mnemonic(const char *mn) {
-    return strcmp(mn, "pshufd") == 0 || strcmp(mn, "shufps") == 0 || strcmp(mn, "shufpd") == 0;
+    return as_strcmp(mn, "pshufd") == 0 || as_strcmp(mn, "shufps") == 0 || as_strcmp(mn, "shufpd") == 0;
 }
 
 static int emit_i386_xmm_shuffle_tail_family(const char *mnemonic, const as_instruction_t *insn, int intel_syntax,
@@ -6188,7 +6188,7 @@ static int emit_x86_seg_pushpop(const char *mnemonic, const as_operand_t *op, in
     if (parse_seg_reg_text(op->u.reg, &seg) != 0) {
         return -1;
     }
-    if (strcmp(mnemonic, "push") == 0) {
+    if (as_strcmp(mnemonic, "push") == 0) {
         switch (seg) {
         case AS_X86_SEG_ES:
             if (!allow_legacy || out_cap < 1) return -1;
@@ -6226,7 +6226,7 @@ static int emit_x86_seg_pushpop(const char *mnemonic, const as_operand_t *op, in
             return -1;
         }
     }
-    if (strcmp(mnemonic, "pop") == 0) {
+    if (as_strcmp(mnemonic, "pop") == 0) {
         switch (seg) {
         case AS_X86_SEG_ES:
             if (!allow_legacy || out_cap < 1) return -1;
@@ -6334,7 +6334,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     src = intel_syntax ? b : a;
     dst = intel_syntax ? a : b;
 
-    if (strcmp(mnbuf, "mov") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
+    if (as_strcmp(mnbuf, "mov") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
         unsigned sr;
         unsigned gr;
         as_x86_seg_t seg;
@@ -6389,11 +6389,11 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_prefixed_1byte_rm(insn, 0x8e, seg_field, src, out, out_cap, out_len);
         }
     }
-    if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
+    if ((as_strcmp(mnbuf, "push") == 0 || as_strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
         return emit_x86_seg_pushpop(mnbuf, a, 1, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "in") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
+    if (as_strcmp(mnbuf, "in") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
         const char *dstreg = NULL;
         size_t pos = 0;
         if (src->kind == AS_OPERAND_MEMORY && src->u.mem.base_reg != NULL && src->u.mem.index_reg == NULL &&
@@ -6418,7 +6418,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             }
         }
     }
-    if (strcmp(mnbuf, "out") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
+    if (as_strcmp(mnbuf, "out") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
         const char *srcreg = NULL;
         size_t pos = 0;
         if (dst->kind == AS_OPERAND_MEMORY && dst->u.mem.base_reg != NULL && dst->u.mem.index_reg == NULL &&
@@ -6443,10 +6443,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             }
         }
     }
-    if (strcmp(mnbuf, "fld1") == 0 || strcmp(mnbuf, "fld") == 0 || strcmp(mnbuf, "fxch") == 0) {
+    if (as_strcmp(mnbuf, "fld1") == 0 || as_strcmp(mnbuf, "fld") == 0 || as_strcmp(mnbuf, "fxch") == 0) {
         return emit_i386_x87_stack_load_exchange(insn, mnbuf, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fnop") == 0 || strcmp(mnbuf, "fchs") == 0 || strcmp(mnbuf, "f2xm1") == 0 || strcmp(mnbuf, "fprem") == 0) {
+    if (as_strcmp(mnbuf, "fnop") == 0 || as_strcmp(mnbuf, "fchs") == 0 || as_strcmp(mnbuf, "f2xm1") == 0 || as_strcmp(mnbuf, "fprem") == 0) {
         unsigned char op1;
         unsigned char op2;
 
@@ -6461,9 +6461,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "fcmovb") == 0 || strcmp(mnbuf, "fcmove") == 0 || strcmp(mnbuf, "fcmovbe") == 0 || strcmp(mnbuf, "fcmovu") == 0 ||
-        strcmp(mnbuf, "fcmovnb") == 0 || strcmp(mnbuf, "fcmovne") == 0 || strcmp(mnbuf, "fcmovnbe") == 0 || strcmp(mnbuf, "fcmovnu") == 0 ||
-        strcmp(mnbuf, "fucomi") == 0 || strcmp(mnbuf, "fcomi") == 0) {
+    if (as_strcmp(mnbuf, "fcmovb") == 0 || as_strcmp(mnbuf, "fcmove") == 0 || as_strcmp(mnbuf, "fcmovbe") == 0 || as_strcmp(mnbuf, "fcmovu") == 0 ||
+        as_strcmp(mnbuf, "fcmovnb") == 0 || as_strcmp(mnbuf, "fcmovne") == 0 || as_strcmp(mnbuf, "fcmovnbe") == 0 || as_strcmp(mnbuf, "fcmovnu") == 0 ||
+        as_strcmp(mnbuf, "fucomi") == 0 || as_strcmp(mnbuf, "fcomi") == 0) {
         unsigned char op1;
         unsigned char base;
         if (insn->operand_count != 2 || src == NULL || dst == NULL ||
@@ -6479,8 +6479,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "fadd") == 0 || strcmp(mnbuf, "fmul") == 0 || strcmp(mnbuf, "fcom") == 0 || strcmp(mnbuf, "fcomp") == 0 ||
-        strcmp(mnbuf, "fsub") == 0 || strcmp(mnbuf, "fsubr") == 0 || strcmp(mnbuf, "fdiv") == 0 || strcmp(mnbuf, "fdivr") == 0) {
+    if (as_strcmp(mnbuf, "fadd") == 0 || as_strcmp(mnbuf, "fmul") == 0 || as_strcmp(mnbuf, "fcom") == 0 || as_strcmp(mnbuf, "fcomp") == 0 ||
+        as_strcmp(mnbuf, "fsub") == 0 || as_strcmp(mnbuf, "fsubr") == 0 || as_strcmp(mnbuf, "fdiv") == 0 || as_strcmp(mnbuf, "fdivr") == 0) {
         unsigned stsrc;
         unsigned stdst;
         unsigned char mem_d8_regf;
@@ -6519,7 +6519,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return 0;
     }
-    if (strcmp(mnbuf, "fstp") == 0) {
+    if (as_strcmp(mnbuf, "fstp") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
@@ -6536,12 +6536,12 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return 0;
     }
-    if (strcmp(mnbuf, "ffree") == 0 || strcmp(mnbuf, "fst") == 0 || strcmp(mnbuf, "fucom") == 0 || strcmp(mnbuf, "fucomp") == 0) {
+    if (as_strcmp(mnbuf, "ffree") == 0 || as_strcmp(mnbuf, "fst") == 0 || as_strcmp(mnbuf, "fucom") == 0 || as_strcmp(mnbuf, "fucomp") == 0) {
         unsigned char base;
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        if (strcmp(mnbuf, "fst") == 0 && a->kind == AS_OPERAND_MEMORY) {
+        if (as_strcmp(mnbuf, "fst") == 0 && a->kind == AS_OPERAND_MEMORY) {
             return emit_i386_x87_mem_by_size(insn, a, 0xd9, 2u, 0xdd, 2u, -1, 0u, out, out_cap, out_len);
         }
         if (operand_st_index(a, &stidx) != 0) {
@@ -6555,7 +6555,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "fucompp") == 0) {
+    if (as_strcmp(mnbuf, "fucompp") == 0) {
         if (insn->operand_count != 0) {
             return -1;
         }
@@ -6566,7 +6566,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return 0;
     }
-    if (strcmp(mnbuf, "sahf") == 0) {
+    if (as_strcmp(mnbuf, "sahf") == 0) {
         if (insn->operand_count != 0) {
             return -1;
         }
@@ -6576,7 +6576,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return 0;
     }
-    if (strcmp(mnbuf, "int1") == 0) {
+    if (as_strcmp(mnbuf, "int1") == 0) {
         if (insn->operand_count != 0) {
             return -1;
         }
@@ -6584,7 +6584,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 1;
         return 0;
     }
-    if (strcmp(mnbuf, "cmc") == 0) {
+    if (as_strcmp(mnbuf, "cmc") == 0) {
         if (insn->operand_count != 0) {
             return -1;
         }
@@ -6592,7 +6592,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 1;
         return 0;
     }
-    if (strcmp(mnbuf, "fnstsw") == 0) {
+    if (as_strcmp(mnbuf, "fnstsw") == 0) {
         as_x86_reg_t gr;
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
@@ -6639,68 +6639,68 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                                              out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "fiaddl") == 0) {
+    if (as_strcmp(mnbuf, "fiaddl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 0u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fimull") == 0) {
+    if (as_strcmp(mnbuf, "fimull") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 1u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fisubl") == 0) {
+    if (as_strcmp(mnbuf, "fisubl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 4u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fisubrl") == 0) {
+    if (as_strcmp(mnbuf, "fisubrl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 5u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fidivl") == 0) {
+    if (as_strcmp(mnbuf, "fidivl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 6u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fidivrl") == 0) {
+    if (as_strcmp(mnbuf, "fidivrl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 7u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fiadds") == 0) {
+    if (as_strcmp(mnbuf, "fiadds") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 0u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fimuls") == 0) {
+    if (as_strcmp(mnbuf, "fimuls") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 1u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fisubs") == 0) {
+    if (as_strcmp(mnbuf, "fisubs") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 4u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fisubrs") == 0) {
+    if (as_strcmp(mnbuf, "fisubrs") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 5u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fidivs") == 0) {
+    if (as_strcmp(mnbuf, "fidivs") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 6u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fidivrs") == 0) {
+    if (as_strcmp(mnbuf, "fidivrs") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 7u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "frstor") == 0) {
+    if (as_strcmp(mnbuf, "frstor") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 4u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fnsave") == 0) {
+    if (as_strcmp(mnbuf, "fnsave") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 6u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "faddp") == 0 || strcmp(mnbuf, "fmulp") == 0 || strcmp(mnbuf, "fsubp") == 0 ||
-        strcmp(mnbuf, "fsubrp") == 0 || strcmp(mnbuf, "fdivp") == 0 || strcmp(mnbuf, "fdivrp") == 0) {
+    if (as_strcmp(mnbuf, "faddp") == 0 || as_strcmp(mnbuf, "fmulp") == 0 || as_strcmp(mnbuf, "fsubp") == 0 ||
+        as_strcmp(mnbuf, "fsubrp") == 0 || as_strcmp(mnbuf, "fdivp") == 0 || as_strcmp(mnbuf, "fdivrp") == 0) {
         unsigned char base;
         if (insn->operand_count != 2 || src == NULL || dst == NULL ||
             operand_st_index(src, &stsrc) != 0 || operand_st_index(dst, &stdst) != 0 ||
@@ -6715,7 +6715,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "ffreep") == 0) {
+    if (as_strcmp(mnbuf, "ffreep") == 0) {
         if (insn->operand_count != 1 || a == NULL || operand_st_index(a, &stidx) != 0) {
             return -1;
         }
@@ -6724,7 +6724,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "fucomip") == 0 || strcmp(mnbuf, "fcomip") == 0) {
+    if (as_strcmp(mnbuf, "fucomip") == 0 || as_strcmp(mnbuf, "fcomip") == 0) {
         unsigned char base;
         if (insn->operand_count != 2 || src == NULL || dst == NULL ||
             operand_st_index(src, &stsrc) != 0 || operand_st_index(dst, &stdst) != 0 ||
@@ -6739,7 +6739,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "pxor") == 0) {
+    if (as_strcmp(mnbuf, "pxor") == 0) {
         unsigned char prefix;
 
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER) {
@@ -6760,13 +6760,13 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_legacy_simd_rm(prefix, 0xef, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movdqa") == 0) {
+    if (as_strcmp(mnbuf, "movdqa") == 0) {
         return emit_i386_xmm_move_rm(0x66, 0x6f, 0x7f, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movdqu") == 0) {
+    if (as_strcmp(mnbuf, "movdqu") == 0) {
         return emit_i386_xmm_move_rm(0xf3, 0x6f, 0x7f, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtsi2sd") == 0) {
+    if (as_strcmp(mnbuf, "cvtsi2sd") == 0) {
         as_x86_reg_t gr;
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
             parse_xmm_reg(dst->u.reg, &xr) != 0) {
@@ -6787,10 +6787,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0xf2, 0x2a, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movss") == 0) {
+    if (as_strcmp(mnbuf, "movss") == 0) {
         return emit_i386_xmm_move_rm(0xf3, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtsi2ss") == 0) {
+    if (as_strcmp(mnbuf, "cvtsi2ss") == 0) {
         as_x86_reg_t gr;
 
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
@@ -6812,21 +6812,21 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0xf3, 0x2a, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movntsd") == 0) {
+    if (as_strcmp(mnbuf, "movntsd") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || src->kind != AS_OPERAND_REGISTER ||
             dst->kind == AS_OPERAND_REGISTER || parse_xmm_reg(src->u.reg, &xr) != 0) {
             return -1;
         }
         return emit_i386_prefixed_0f_rm(0xf2, 0x2b, xr, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movntss") == 0) {
+    if (as_strcmp(mnbuf, "movntss") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || src->kind != AS_OPERAND_REGISTER ||
             dst->kind == AS_OPERAND_REGISTER || parse_xmm_reg(src->u.reg, &xr) != 0) {
             return -1;
         }
         return emit_i386_prefixed_0f_rm(0xf3, 0x2b, xr, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvttsd2si") == 0 || strcmp(mnbuf, "cvtsd2si") == 0) {
+    if (as_strcmp(mnbuf, "cvttsd2si") == 0 || as_strcmp(mnbuf, "cvtsd2si") == 0) {
         unsigned char opcode2;
 
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
@@ -6841,7 +6841,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0xf2, opcode2, (unsigned)gr & 7u, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvttss2si") == 0 || strcmp(mnbuf, "cvtss2si") == 0) {
+    if (as_strcmp(mnbuf, "cvttss2si") == 0 || as_strcmp(mnbuf, "cvtss2si") == 0) {
         unsigned char opcode2;
 
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
@@ -6856,9 +6856,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0xf3, opcode2, (unsigned)gr & 7u, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "sqrtsd") == 0 || strcmp(mnbuf, "addsd") == 0 || strcmp(mnbuf, "mulsd") == 0 ||
-        strcmp(mnbuf, "cvtsd2ss") == 0 || strcmp(mnbuf, "subsd") == 0 || strcmp(mnbuf, "minsd") == 0 ||
-        strcmp(mnbuf, "divsd") == 0 || strcmp(mnbuf, "maxsd") == 0) {
+    if (as_strcmp(mnbuf, "sqrtsd") == 0 || as_strcmp(mnbuf, "addsd") == 0 || as_strcmp(mnbuf, "mulsd") == 0 ||
+        as_strcmp(mnbuf, "cvtsd2ss") == 0 || as_strcmp(mnbuf, "subsd") == 0 || as_strcmp(mnbuf, "minsd") == 0 ||
+        as_strcmp(mnbuf, "divsd") == 0 || as_strcmp(mnbuf, "maxsd") == 0) {
         unsigned char opcode2;
 
         if (lookup_i386_f2_scalar_xmm_opcode(mnbuf, &opcode2) != 0) {
@@ -6866,10 +6866,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_xmm_srcdst_rm(0xf2, opcode2, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "sqrtss") == 0 || strcmp(mnbuf, "rsqrtss") == 0 || strcmp(mnbuf, "rcpss") == 0 ||
-        strcmp(mnbuf, "addss") == 0 || strcmp(mnbuf, "mulss") == 0 || strcmp(mnbuf, "cvtss2sd") == 0 ||
-        strcmp(mnbuf, "cvttps2dq") == 0 || strcmp(mnbuf, "subss") == 0 || strcmp(mnbuf, "minss") == 0 ||
-        strcmp(mnbuf, "divss") == 0 || strcmp(mnbuf, "maxss") == 0) {
+    if (as_strcmp(mnbuf, "sqrtss") == 0 || as_strcmp(mnbuf, "rsqrtss") == 0 || as_strcmp(mnbuf, "rcpss") == 0 ||
+        as_strcmp(mnbuf, "addss") == 0 || as_strcmp(mnbuf, "mulss") == 0 || as_strcmp(mnbuf, "cvtss2sd") == 0 ||
+        as_strcmp(mnbuf, "cvttps2dq") == 0 || as_strcmp(mnbuf, "subss") == 0 || as_strcmp(mnbuf, "minss") == 0 ||
+        as_strcmp(mnbuf, "divss") == 0 || as_strcmp(mnbuf, "maxss") == 0) {
         unsigned char opcode2;
 
         if (lookup_i386_f3_scalar_xmm_opcode(mnbuf, &opcode2) != 0) {
@@ -6924,7 +6924,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                     return emit_i386_legacy_simd_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
                 }
                 for (k = 0; k < sizeof(by_number) / sizeof(by_number[0]); ++k) {
-                    if (strcmp(mnbuf, by_number[k].name) == 0) {
+                    if (as_strcmp(mnbuf, by_number[k].name) == 0) {
                         break;
                     }
                 }
@@ -6945,7 +6945,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_legacy_simd_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "movd") == 0) {
+    if (as_strcmp(mnbuf, "movd") == 0) {
         as_x86_reg_t gr;
         if (insn->operand_count != 2 || src == NULL || dst == NULL) {
             return -1;
@@ -6970,7 +6970,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return -1;
     }
-    if (strcmp(mnbuf, "pshufw") == 0) {
+    if (as_strcmp(mnbuf, "pshufw") == 0) {
         const as_operand_t *imm_op;
         const as_operand_t *rm_op;
         const as_operand_t *dst_op;
@@ -7000,7 +7000,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_legacy_simd_rm_imm8(0x00, 0x70, xr, rm_op, (unsigned char)immv, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "vmread") == 0 || strcmp(mnbuf, "vmwrite") == 0) {
+    if (as_strcmp(mnbuf, "vmread") == 0 || as_strcmp(mnbuf, "vmwrite") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7011,10 +7011,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x00, strcmp(mnbuf, "vmread") == 0 ? 0x78 : 0x79,
+        return emit_i386_prefixed_0f_rm(0x00, as_strcmp(mnbuf, "vmread") == 0 ? 0x78 : 0x79,
                                         (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cpuid") == 0 || strcmp(mnbuf, "rsm") == 0) {
+    if (as_strcmp(mnbuf, "cpuid") == 0 || as_strcmp(mnbuf, "rsm") == 0) {
         unsigned char opcode2;
 
         if (insn->operand_count != 0 || out == NULL || out_len == NULL || out_cap < 2) {
@@ -7028,7 +7028,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         *out_len = 2;
         return 0;
     }
-    if (strcmp(mnbuf, "shld") == 0 || strcmp(mnbuf, "shrd") == 0) {
+    if (as_strcmp(mnbuf, "shld") == 0 || as_strcmp(mnbuf, "shrd") == 0) {
         const as_operand_t *count_op;
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
@@ -7061,9 +7061,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_legacy_simd_rm_imm8(0x00, imm_opcode, (unsigned)gr & 7u, dst_op,
                                              (unsigned char)immv, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fxsave") == 0 || strcmp(mnbuf, "fxrstor") == 0 || strcmp(mnbuf, "ldmxcsr") == 0 ||
-        strcmp(mnbuf, "stmxcsr") == 0 || strcmp(mnbuf, "xsave") == 0 || strcmp(mnbuf, "xrstor") == 0 ||
-        strcmp(mnbuf, "xsaveopt") == 0 || strcmp(mnbuf, "clflush") == 0) {
+    if (as_strcmp(mnbuf, "fxsave") == 0 || as_strcmp(mnbuf, "fxrstor") == 0 || as_strcmp(mnbuf, "ldmxcsr") == 0 ||
+        as_strcmp(mnbuf, "stmxcsr") == 0 || as_strcmp(mnbuf, "xsave") == 0 || as_strcmp(mnbuf, "xrstor") == 0 ||
+        as_strcmp(mnbuf, "xsaveopt") == 0 || as_strcmp(mnbuf, "clflush") == 0) {
         unsigned reg_field;
         unsigned char prefix;
 
@@ -7078,7 +7078,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(prefix, 0xae, reg_field, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "lfence") == 0 || strcmp(mnbuf, "mfence") == 0 || strcmp(mnbuf, "sfence") == 0) {
+    if (as_strcmp(mnbuf, "lfence") == 0 || as_strcmp(mnbuf, "mfence") == 0 || as_strcmp(mnbuf, "sfence") == 0) {
         unsigned char tail;
         size_t pos = 0;
 
@@ -7097,8 +7097,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = pos;
         return 0;
     }
-    if (strcmp(mnbuf, "rdfsbase") == 0 || strcmp(mnbuf, "rdgsbase") == 0 || strcmp(mnbuf, "wrfsbase") == 0 ||
-        strcmp(mnbuf, "wrgsbase") == 0) {
+    if (as_strcmp(mnbuf, "rdfsbase") == 0 || as_strcmp(mnbuf, "rdgsbase") == 0 || as_strcmp(mnbuf, "wrfsbase") == 0 ||
+        as_strcmp(mnbuf, "wrgsbase") == 0) {
         unsigned reg_field;
 
         if (insn->operand_count != 1 || a == NULL) {
@@ -7109,7 +7109,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0xf3, 0xae, reg_field, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "tpause") == 0) {
+    if (as_strcmp(mnbuf, "tpause") == 0) {
         as_x86_reg_t gr;
 
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_REGISTER ||
@@ -7123,7 +7123,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) *out_len = 4;
         return 0;
     }
-    if (strcmp(mnbuf, "cmpxchg") == 0) {
+    if (as_strcmp(mnbuf, "cmpxchg") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
         unsigned reg_field;
@@ -7147,8 +7147,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         opcode2 = x86_reg_width_bits(reg_op->u.reg) == 8 ? 0xb0 : 0xb1;
         return emit_i386_prefixed_0f_rm(0x00, opcode2, reg_field, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "sldt") == 0 || strcmp(mnbuf, "str") == 0 || strcmp(mnbuf, "lldt") == 0 ||
-        strcmp(mnbuf, "ltr") == 0 || strcmp(mnbuf, "verr") == 0 || strcmp(mnbuf, "verw") == 0) {
+    if (as_strcmp(mnbuf, "sldt") == 0 || as_strcmp(mnbuf, "str") == 0 || as_strcmp(mnbuf, "lldt") == 0 ||
+        as_strcmp(mnbuf, "ltr") == 0 || as_strcmp(mnbuf, "verr") == 0 || as_strcmp(mnbuf, "verw") == 0) {
         unsigned reg_field;
 
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_COPROCESSOR) {
@@ -7159,7 +7159,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x00, 0x00, reg_field, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "bt") == 0 || strcmp(mnbuf, "bts") == 0 || strcmp(mnbuf, "btr") == 0 || strcmp(mnbuf, "btc") == 0) {
+    if (as_strcmp(mnbuf, "bt") == 0 || as_strcmp(mnbuf, "bts") == 0 || as_strcmp(mnbuf, "btr") == 0 || as_strcmp(mnbuf, "btc") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *src_op;
         unsigned reg_field;
@@ -7193,7 +7193,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_legacy_simd_rm_imm8(0x00, 0xba, reg_field, rm_op, (unsigned char)immv, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "ud1") == 0) {
+    if (as_strcmp(mnbuf, "ud1") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7208,8 +7208,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x00, 0xb9, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "bsf") == 0 || strcmp(mnbuf, "bsr") == 0 ||
-        strcmp(mnbuf, "popcnt") == 0 || strcmp(mnbuf, "tzcnt") == 0 || strcmp(mnbuf, "lzcnt") == 0) {
+    if (as_strcmp(mnbuf, "bsf") == 0 || as_strcmp(mnbuf, "bsr") == 0 ||
+        as_strcmp(mnbuf, "popcnt") == 0 || as_strcmp(mnbuf, "tzcnt") == 0 || as_strcmp(mnbuf, "lzcnt") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7236,11 +7236,11 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     /* cmpsd with three operands is SSE2's; with fewer it is the string
      * instruction, which is the encoder's. */
-    if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
-        (strcmp(mnbuf, "cmpsd") == 0 && insn->operand_count == 3) ||
-        strcmp(mnbuf, "pinsrw") == 0 || strcmp(mnbuf, "pextrw") == 0 ||
-        strcmp(mnbuf, "shufps") == 0 || strcmp(mnbuf, "shufpd") == 0 ||
-        strcmp(mnbuf, "pshufd") == 0) {
+    if (as_strcmp(mnbuf, "cmpps") == 0 || as_strcmp(mnbuf, "cmppd") == 0 || as_strcmp(mnbuf, "cmpss") == 0 ||
+        (as_strcmp(mnbuf, "cmpsd") == 0 && insn->operand_count == 3) ||
+        as_strcmp(mnbuf, "pinsrw") == 0 || as_strcmp(mnbuf, "pextrw") == 0 ||
+        as_strcmp(mnbuf, "shufps") == 0 || as_strcmp(mnbuf, "shufpd") == 0 ||
+        as_strcmp(mnbuf, "pshufd") == 0) {
         const as_operand_t *imm_op;
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
@@ -7255,10 +7255,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             immv < (x86_is_shuffle_mnemonic(mnbuf) ? -128 : 0)) {
             return -1;
         }
-        if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
-            strcmp(mnbuf, "cmpsd") == 0 ||
-            strcmp(mnbuf, "shufps") == 0 || strcmp(mnbuf, "shufpd") == 0 ||
-            strcmp(mnbuf, "pshufd") == 0) {
+        if (as_strcmp(mnbuf, "cmpps") == 0 || as_strcmp(mnbuf, "cmppd") == 0 || as_strcmp(mnbuf, "cmpss") == 0 ||
+            as_strcmp(mnbuf, "cmpsd") == 0 ||
+            as_strcmp(mnbuf, "shufps") == 0 || as_strcmp(mnbuf, "shufpd") == 0 ||
+            as_strcmp(mnbuf, "pshufd") == 0) {
             unsigned char prefix;
             unsigned char opcode2;
 
@@ -7274,7 +7274,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_legacy_simd_rm_imm8(prefix, opcode2, xr, src_op, (unsigned char)immv,
                                                  out, out_cap, out_len);
         }
-        if (strcmp(mnbuf, "pinsrw") == 0) {
+        if (as_strcmp(mnbuf, "pinsrw") == 0) {
             if (dst_op->kind != AS_OPERAND_REGISTER) {
                 return -1;
             }
@@ -7306,7 +7306,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_legacy_simd_rm_imm8(0x66, 0xc5, (unsigned)gr & 7u, src_op, (unsigned char)immv,
                                              out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movnti") == 0) {
+    if (as_strcmp(mnbuf, "movnti") == 0) {
         const as_operand_t *mem_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7326,37 +7326,37 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x00, 0xc3, (unsigned)gr & 7u, mem_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "pmovmskb") == 0) {
+    if (as_strcmp(mnbuf, "pmovmskb") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_i386_movmask_family(mnbuf, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movntq") == 0) {
+    if (as_strcmp(mnbuf, "movntq") == 0) {
         return emit_i386_movnt_store(0x00, 0xe7, 0, intel_syntax, insn, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvttpd2dq") == 0) {
+    if (as_strcmp(mnbuf, "cvttpd2dq") == 0) {
         return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0xe6, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtpd2dq") == 0) {
+    if (as_strcmp(mnbuf, "cvtpd2dq") == 0) {
         return emit_i386_prefixed_xmm_srcdst_rm(0xf2, 0xe6, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movntdq") == 0) {
+    if (as_strcmp(mnbuf, "movntdq") == 0) {
         return emit_i386_movnt_store(0x66, 0xe7, 1, intel_syntax, insn, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "maskmovq") == 0) {
+    if (as_strcmp(mnbuf, "maskmovq") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_i386_maskmov(0x00, 0, dst, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "maskmovdqu") == 0) {
+    if (as_strcmp(mnbuf, "maskmovdqu") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_i386_maskmov(0x66, 1, dst, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "ud0") == 0) {
+    if (as_strcmp(mnbuf, "ud0") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7373,7 +7373,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     /* (The rest of this group -- rdrand, rdseed, rdpid, xrstors and
      * those of virtual machines -- are rows of as_x86_vec_table.c.) */
-    if (strcmp(mnbuf, "cmpxchg8b") == 0 || strcmp(mnbuf, "xsavec") == 0 || strcmp(mnbuf, "xsaves") == 0) {
+    if (as_strcmp(mnbuf, "cmpxchg8b") == 0 || as_strcmp(mnbuf, "xsavec") == 0 || as_strcmp(mnbuf, "xsaves") == 0) {
         unsigned reg_field;
         unsigned char prefix;
         const as_operand_t *op;
@@ -7387,8 +7387,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(prefix, 0xc7, reg_field, op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "sha1nexte") == 0 || strcmp(mnbuf, "sha1msg1") == 0 || strcmp(mnbuf, "sha1msg2") == 0 ||
-        strcmp(mnbuf, "sha256msg1") == 0 || strcmp(mnbuf, "sha256msg2") == 0) {
+    if (as_strcmp(mnbuf, "sha1nexte") == 0 || as_strcmp(mnbuf, "sha1msg1") == 0 || as_strcmp(mnbuf, "sha1msg2") == 0 ||
+        as_strcmp(mnbuf, "sha256msg1") == 0 || as_strcmp(mnbuf, "sha256msg2") == 0) {
         unsigned char opcode3;
 
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
@@ -7403,7 +7403,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0x00, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "sha256rnds2") == 0) {
+    if (as_strcmp(mnbuf, "sha256rnds2") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *dst_op;
 
@@ -7431,7 +7431,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0x00, 0x38, 0xcb, xr, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "sha1rnds4") == 0) {
+    if (as_strcmp(mnbuf, "sha1rnds4") == 0) {
         const as_operand_t *imm_op;
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
@@ -7460,8 +7460,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_map_rm_imm8(0x00, 0x3a, 0xcc, xr, src_op, (unsigned char)immv,
                                                  out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "pclmulqdq") == 0 || strcmp(mnbuf, "gf2p8affineqb") == 0 ||
-        strcmp(mnbuf, "gf2p8affineinvqb") == 0 || strcmp(mnbuf, "aeskeygenassist") == 0) {
+    if (as_strcmp(mnbuf, "pclmulqdq") == 0 || as_strcmp(mnbuf, "gf2p8affineqb") == 0 ||
+        as_strcmp(mnbuf, "gf2p8affineinvqb") == 0 || as_strcmp(mnbuf, "aeskeygenassist") == 0) {
         const as_operand_t *imm_op;
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
@@ -7494,7 +7494,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_map_rm_imm8(0x66, 0x3a, opcode3, xr, src_op, (unsigned char)immv,
                                                  out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "palignr") == 0) {
+    if (as_strcmp(mnbuf, "palignr") == 0) {
         const as_operand_t *imm_op;
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
@@ -7534,7 +7534,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_map_rm_imm8(prefix, 0x3a, 0x0f, xr, src_op, (unsigned char)immv,
                                                  out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movbe") == 0) {
+    if (as_strcmp(mnbuf, "movbe") == 0) {
         const as_operand_t *rm_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7556,8 +7556,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0x00, 0x38, opcode3, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "gf2p8mulb") == 0 || strcmp(mnbuf, "aesimc") == 0 || strcmp(mnbuf, "aesenc") == 0 ||
-        strcmp(mnbuf, "aesenclast") == 0 || strcmp(mnbuf, "aesdec") == 0 || strcmp(mnbuf, "aesdeclast") == 0) {
+    if (as_strcmp(mnbuf, "gf2p8mulb") == 0 || as_strcmp(mnbuf, "aesimc") == 0 || as_strcmp(mnbuf, "aesenc") == 0 ||
+        as_strcmp(mnbuf, "aesenclast") == 0 || as_strcmp(mnbuf, "aesdec") == 0 || as_strcmp(mnbuf, "aesdeclast") == 0) {
         unsigned char opcode3;
 
         if (dst == NULL || src == NULL || insn->operand_count != 2 || dst->kind != AS_OPERAND_REGISTER ||
@@ -7572,8 +7572,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0x66, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "loadiwkey") == 0 || strcmp(mnbuf, "aesenc128kl") == 0 || strcmp(mnbuf, "aesdec128kl") == 0 ||
-        strcmp(mnbuf, "aesenc256kl") == 0 || strcmp(mnbuf, "aesdec256kl") == 0) {
+    if (as_strcmp(mnbuf, "loadiwkey") == 0 || as_strcmp(mnbuf, "aesenc128kl") == 0 || as_strcmp(mnbuf, "aesdec128kl") == 0 ||
+        as_strcmp(mnbuf, "aesenc256kl") == 0 || as_strcmp(mnbuf, "aesdec256kl") == 0) {
         unsigned char opcode3;
 
         if (dst == NULL || src == NULL || insn->operand_count != 2 || dst->kind != AS_OPERAND_REGISTER ||
@@ -7590,8 +7590,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     /* (wrssd, wrussd, movdiri and movdir64b are rows of
      * as_x86_vec_table.c.) */
-    if (strcmp(mnbuf, "enqcmd") == 0 || strcmp(mnbuf, "enqcmds") == 0 || strcmp(mnbuf, "aadd") == 0 ||
-        strcmp(mnbuf, "aand") == 0 || strcmp(mnbuf, "aor") == 0 || strcmp(mnbuf, "axor") == 0) {
+    if (as_strcmp(mnbuf, "enqcmd") == 0 || as_strcmp(mnbuf, "enqcmds") == 0 || as_strcmp(mnbuf, "aadd") == 0 ||
+        as_strcmp(mnbuf, "aand") == 0 || as_strcmp(mnbuf, "aor") == 0 || as_strcmp(mnbuf, "axor") == 0) {
         const as_operand_t *mem_op;
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
@@ -7613,7 +7613,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(prefix, 0x38, opcode3, (unsigned)gr & 7u, mem_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "adcx") == 0 || strcmp(mnbuf, "adox") == 0) {
+    if (as_strcmp(mnbuf, "adcx") == 0 || as_strcmp(mnbuf, "adox") == 0) {
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
         as_x86_reg_t gr;
@@ -7637,7 +7637,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(prefix, 0x38, 0xf6, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "encodekey128") == 0 || strcmp(mnbuf, "encodekey256") == 0) {
+    if (as_strcmp(mnbuf, "encodekey128") == 0 || as_strcmp(mnbuf, "encodekey256") == 0) {
         const as_operand_t *src_op;
         const as_operand_t *dst_op;
         unsigned char opcode3;
@@ -7668,7 +7668,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         int is_partial;
 
         if (lookup_x86_xmm_move_family(mnbuf, &prefix, &load_opcode2, &store_opcode2, &is_partial) == 0 &&
-            (strcmp(mnbuf, "movhlps") != 0 && strcmp(mnbuf, "movlhps") != 0)) {
+            (as_strcmp(mnbuf, "movhlps") != 0 && as_strcmp(mnbuf, "movlhps") != 0)) {
             if (is_partial) {
                 return emit_i386_xmm_partial_move_rm(prefix, load_opcode2, store_opcode2, src, dst, out, out_cap, out_len);
             }
@@ -7758,7 +7758,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_mmx_xmm_bridge(prefix, src, dst, dst_is_xmm, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "cvtdq2pd") == 0) {
+    if (as_strcmp(mnbuf, "cvtdq2pd") == 0) {
         return emit_i386_prefixed_xmm_srcdst_rm(0xf3, 0xe6, src, dst, out, out_cap, out_len);
     }
     if (emit_i386_cachehint_family(mnbuf, a, out, out_cap, out_len) == 0) {
@@ -7797,7 +7797,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         size_t i;
 
         for (i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
-            if (strcmp(mnbuf, ops[i].mnemonic) != 0) {
+            if (as_strcmp(mnbuf, ops[i].mnemonic) != 0) {
                 continue;
             }
             if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
@@ -7810,20 +7810,20 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_3dnow_rm(xr, src, ops[i].imm8, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "bndldx") == 0) {
+    if (as_strcmp(mnbuf, "bndldx") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_i386_bnd_binary(0x00, 0x1a, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "bndstx") == 0) {
+    if (as_strcmp(mnbuf, "bndstx") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || src->kind != AS_OPERAND_REGISTER ||
             parse_bnd_reg(src->u.reg, &xr) != 0) {
             return -1;
         }
         return emit_i386_prefixed_0f_rm(0x00, 0x1b, xr, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "bndmov") == 0) {
+    if (as_strcmp(mnbuf, "bndmov") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL) {
             return -1;
         }
@@ -7835,8 +7835,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return -1;
     }
-    if (strcmp(mnbuf, "bndcl") == 0 || strcmp(mnbuf, "bndcu") == 0 || strcmp(mnbuf, "bndcn") == 0 ||
-        strcmp(mnbuf, "bndmk") == 0) {
+    if (as_strcmp(mnbuf, "bndcl") == 0 || as_strcmp(mnbuf, "bndcu") == 0 || as_strcmp(mnbuf, "bndcn") == 0 ||
+        as_strcmp(mnbuf, "bndmk") == 0) {
         unsigned char prefix;
         unsigned char opcode2;
         if (insn->operand_count != 2) {
@@ -7873,7 +7873,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     }
     if (insn->operand_count == 0) {
         if ((insn->prefixes & AS_PREFIX_REX) != 0 &&
-            (strcmp(mnbuf, "rex") == 0 || strcmp(mnbuf, "rex64") == 0 || strncasecmp(mnbuf, "rex.", 4) == 0)) {
+            (as_strcmp(mnbuf, "rex") == 0 || as_strcmp(mnbuf, "rex64") == 0 || strncasecmp(mnbuf, "rex.", 4) == 0)) {
             unsigned char rex_only = (unsigned char)(0x40u | (insn->rex_bits & 0x0fu));
 
             if (out_cap < 1) {
@@ -7898,10 +7898,10 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     src = intel_syntax ? b : a;
     dst = intel_syntax ? a : b;
 
-    if (strcmp(mnbuf, "extrq") == 0 || strcmp(mnbuf, "insertq") == 0) {
+    if (as_strcmp(mnbuf, "extrq") == 0 || as_strcmp(mnbuf, "insertq") == 0) {
         return emit_x86_extrq_insertq(mnbuf, insn, intel_syntax, 1, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movabs") == 0) {
+    if (as_strcmp(mnbuf, "movabs") == 0) {
         size_t i;
         size_t pos = 0;
         const char *seg_override = NULL;
@@ -8069,7 +8069,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return 0;
     }
-    if (strcmp(mnbuf, "mov") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
+    if (as_strcmp(mnbuf, "mov") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
         unsigned sr;
         as_x86_seg_t seg;
         unsigned seg_field;
@@ -8163,17 +8163,17 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             }
         }
     }
-    if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
+    if ((as_strcmp(mnbuf, "push") == 0 || as_strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
         return emit_x86_seg_pushpop(mnbuf, a, 0, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fldl") == 0) {
+    if (as_strcmp(mnbuf, "fldl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
             return -1;
         }
         return emit_x86_64_1byte_regfield_memop(0xdd, 0u, &a->u.mem, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fld") == 0) {
+    if (as_strcmp(mnbuf, "fld") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
@@ -8193,7 +8193,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "fst") == 0) {
+    if (as_strcmp(mnbuf, "fst") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
@@ -8202,7 +8202,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return -1;
     }
-    if (strcmp(mnbuf, "fstp") == 0) {
+    if (as_strcmp(mnbuf, "fstp") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
@@ -8211,7 +8211,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return -1;
     }
-    if (strcmp(mnbuf, "fstpt") == 0) {
+    if (as_strcmp(mnbuf, "fstpt") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
             return -1;
         }
@@ -8242,7 +8242,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
                                                 out_len);
         }
     }
-    if (strcmp(mnbuf, "fucompp") == 0) {
+    if (as_strcmp(mnbuf, "fucompp") == 0) {
         if (insn->operand_count != 0) {
             return -1;
         }
@@ -8256,13 +8256,13 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return 0;
     }
-    if (strcmp(mnbuf, "movdqa") == 0) {
+    if (as_strcmp(mnbuf, "movdqa") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_x86_64_xmm_move_rm(0x66, 0x6f, 0x6f, 0x7f, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movdqu") == 0) {
+    if (as_strcmp(mnbuf, "movdqu") == 0) {
         return emit_x86_64_xmm_move_rm(0xf3, 0x6f, 0x6f, 0x7f, src, dst, out, out_cap, out_len);
     }
     {
@@ -8277,7 +8277,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
                                            src, dst, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "prefetcht1") == 0) {
+    if (as_strcmp(mnbuf, "prefetcht1") == 0) {
         if (insn->operand_count != 1 || src == NULL || src->kind != AS_OPERAND_MEMORY) {
             return -1;
         }
@@ -8293,67 +8293,67 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             return emit_x86_64_mmx_srcdst(packed_opcode2, src, dst, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "cvtsd2ss") == 0) {
+    if (as_strcmp(mnbuf, "cvtsd2ss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x5a, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtss2sd") == 0) {
+    if (as_strcmp(mnbuf, "cvtss2sd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x5a, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "addsd") == 0) {
+    if (as_strcmp(mnbuf, "addsd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x58, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "addss") == 0) {
+    if (as_strcmp(mnbuf, "addss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x58, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "subsd") == 0) {
+    if (as_strcmp(mnbuf, "subsd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x5c, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "subss") == 0) {
+    if (as_strcmp(mnbuf, "subss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x5c, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "mulsd") == 0) {
+    if (as_strcmp(mnbuf, "mulsd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x59, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "mulss") == 0) {
+    if (as_strcmp(mnbuf, "mulss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x59, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "divsd") == 0) {
+    if (as_strcmp(mnbuf, "divsd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x5e, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "divss") == 0) {
+    if (as_strcmp(mnbuf, "divss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x5e, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "ucomisd") == 0) {
+    if (as_strcmp(mnbuf, "ucomisd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0x66, 0x2e, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "ucomiss") == 0) {
+    if (as_strcmp(mnbuf, "ucomiss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0x00, 0x2e, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "comisd") == 0) {
+    if (as_strcmp(mnbuf, "comisd") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0x66, 0x2f, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "comiss") == 0) {
+    if (as_strcmp(mnbuf, "comiss") == 0) {
         return emit_x86_64_xmm_binary_op(insn, 0x00, 0x2f, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtsi2sd") == 0) {
+    if (as_strcmp(mnbuf, "cvtsi2sd") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_x86_64_gp_to_xmm_cvtsi(0xf2, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtsi2ss") == 0) {
+    if (as_strcmp(mnbuf, "cvtsi2ss") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_x86_64_gp_to_xmm_cvtsi(0xf3, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvttsd2si") == 0) {
+    if (as_strcmp(mnbuf, "cvttsd2si") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
         return emit_x86_64_xmm_to_gp_cvtt(0xf2, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvttss2si") == 0) {
+    if (as_strcmp(mnbuf, "cvttss2si") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
@@ -8601,8 +8601,8 @@ static int append_string_directive(bytebuf_t *buf, const as_directive_t *d) {
     if (d == NULL || d->name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
-        int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
+    if (as_strcmp(d->name, ".ascii") == 0 || as_strcmp(d->name, ".asciz") == 0 || as_strcmp(d->name, ".string") == 0) {
+        int nul = (as_strcmp(d->name, ".ascii") == 0) ? 0 : 1;
         for (i = 0; i < d->arg_count; ++i) {
             const char *s = d->args[i] != NULL ? d->args[i] : "";
             char *bytes = NULL;
@@ -8636,11 +8636,11 @@ static const char *section_from_directive(const as_directive_t *d) {
     if (d == NULL || d->name == NULL) {
         return NULL;
     }
-    if (strcmp(d->name, ".text") == 0) return ".text";
-    if (strcmp(d->name, ".data") == 0) return ".data";
-    if (strcmp(d->name, ".rodata") == 0) return ".rodata";
-    if (strcmp(d->name, ".bss") == 0) return ".bss";
-    if ((strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) &&
+    if (as_strcmp(d->name, ".text") == 0) return ".text";
+    if (as_strcmp(d->name, ".data") == 0) return ".data";
+    if (as_strcmp(d->name, ".rodata") == 0) return ".rodata";
+    if (as_strcmp(d->name, ".bss") == 0) return ".bss";
+    if ((as_strcmp(d->name, ".section") == 0 || as_strcmp(d->name, ".pushsection") == 0) &&
         d->arg_count > 0 && d->args[0] != NULL && d->args[0][0] != '\0') {
         arg = d->args[0];
         while (*arg != '\0' && isspace((unsigned char)*arg)) {
@@ -8845,7 +8845,7 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
     if (st == NULL || d == NULL || d->name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".previous") == 0) {
+    if (as_strcmp(d->name, ".previous") == 0) {
         if (st->previous == NULL) {
             return 1;
         }
@@ -8854,7 +8854,7 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
         st->previous = tmp;
         return 1;
     }
-    if (strcmp(d->name, ".popsection") == 0) {
+    if (as_strcmp(d->name, ".popsection") == 0) {
         if (st->stack_count < 2) {
             return 1;
         }
@@ -8865,15 +8865,15 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
         st->previous = st->stack[st->stack_count + 1];
         return 1;
     }
-    if (strcmp(d->name, ".code16") == 0) {
+    if (as_strcmp(d->name, ".code16") == 0) {
         st->x86_code_bits = 16u;
         return 1;
     }
-    if (strcmp(d->name, ".code32") == 0) {
+    if (as_strcmp(d->name, ".code32") == 0) {
         st->x86_code_bits = 32u;
         return 1;
     }
-    if (strcmp(d->name, ".code64") == 0) {
+    if (as_strcmp(d->name, ".code64") == 0) {
         st->x86_code_bits = 64u;
         return 1;
     }
@@ -8881,7 +8881,7 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
     if (sec_name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".pushsection") == 0 && section_track_push(st) != 0) {
+    if (as_strcmp(d->name, ".pushsection") == 0 && section_track_push(st) != 0) {
         return -1;
     }
     if (section_track_switch(st, sec_name) != 0) {
@@ -8924,10 +8924,10 @@ static elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
     if (ctx == NULL || name == NULL) {
         return NULL;
     }
-    if (strcmp(name, ".text") == 0) {
+    if (as_strcmp(name, ".text") == 0) {
         return ctx->text_sec;
     }
-    if (strcmp(name, ".data") == 0) {
+    if (as_strcmp(name, ".data") == 0) {
         return ctx->data_sec;
     }
     /* Looked for in the object once, and after that by its name's
@@ -9009,7 +9009,7 @@ static int find_sections_with_instructions(emit_ctx_t *ctx) {
             continue;
         }
         for (k = 0; k < ctx->code_section_count; ++k) {
-            if (strcmp(ctx->code_sections[k], track.current) == 0) {
+            if (as_strcmp(ctx->code_sections[k], track.current) == 0) {
                 break;
             }
         }
@@ -9055,7 +9055,7 @@ static int section_name_is_executable(emit_ctx_t *ctx, const char *name) {
         (void)find_sections_with_instructions(ctx);
     }
     for (k = 0; k < ctx->code_section_count; ++k) {
-        if (strcmp(ctx->code_sections[k], name) == 0) {
+        if (as_strcmp(ctx->code_sections[k], name) == 0) {
             return 1;
         }
     }
@@ -9369,7 +9369,7 @@ static int x86_immediate_fits(const as_instruction_t *insn, const char *mn, char
     }
     /* enter's second operand, the nesting level, is such a byte too, and
      * is written second in either syntax. */
-    if (strcmp(mn, "enter") == 0 && insn->operand_count == 2 && insn->operands[1].kind == AS_OPERAND_IMMEDIATE &&
+    if (as_strcmp(mn, "enter") == 0 && insn->operand_count == 2 && insn->operands[1].kind == AS_OPERAND_IMMEDIATE &&
         eval_expr_const(insn->operands[1].u.expr, &v) == 0 && (v < 0 || v > 255)) {
         snprintf(err, err_sz, "the nesting level of 'enter' is a byte, 0 to 255, and %lld is not", v);
         return -1;
@@ -9395,7 +9395,7 @@ static int x86_immediate_fits(const as_instruction_t *insn, const char *mn, char
         }
 
         /* cmpsd with fewer than three operands is the string one. */
-        if (strcmp(mn, "cmpsd") == 0 && insn->operand_count != 3) {
+        if (as_strcmp(mn, "cmpsd") == 0 && insn->operand_count != 3) {
             return 0;
         }
         if (v < low || v > 255) {
@@ -9407,9 +9407,9 @@ static int x86_immediate_fits(const as_instruction_t *insn, const char *mn, char
     if (is_64 && (v < -2147483648LL || v > 2147483647LL)) {
         int wide = suffix == 'q' || x86_stmt_has_gpr_of_width(insn, 64);
 
-        if (strcmp(mn, "push") == 0) {
+        if (as_strcmp(mn, "push") == 0) {
             wide = suffix != 'w';
-        } else if (strcmp(mn, "mov") == 0) {
+        } else if (as_strcmp(mn, "mov") == 0) {
             /* To a register there is the form with all eight bytes. */
             const as_operand_t *dst = &insn->operands[intel_syntax ? 0 : insn->operand_count - 1];
 
@@ -9570,15 +9570,15 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
      * as will write.
      */
     if (is_64 &&
-        (strcmp(mn, "lgdtl") == 0 || strcmp(mn, "lgdtw") == 0 || strcmp(mn, "lidtl") == 0 || strcmp(mn, "lidtw") == 0 ||
-         strcmp(mn, "sgdtl") == 0 || strcmp(mn, "sgdtw") == 0 || strcmp(mn, "sidtl") == 0 || strcmp(mn, "sidtw") == 0 ||
-         strcmp(mn, "insq") == 0 || strcmp(mn, "outsq") == 0 || strcmp(mn, "ljmpq") == 0 || strcmp(mn, "lcallq") == 0 ||
+        (as_strcmp(mn, "lgdtl") == 0 || as_strcmp(mn, "lgdtw") == 0 || as_strcmp(mn, "lidtl") == 0 || as_strcmp(mn, "lidtw") == 0 ||
+         as_strcmp(mn, "sgdtl") == 0 || as_strcmp(mn, "sgdtw") == 0 || as_strcmp(mn, "sidtl") == 0 || as_strcmp(mn, "sidtw") == 0 ||
+         as_strcmp(mn, "insq") == 0 || as_strcmp(mn, "outsq") == 0 || as_strcmp(mn, "ljmpq") == 0 || as_strcmp(mn, "lcallq") == 0 ||
          /* (A frame of 32 bits is none of 64-bit code: `enterl $1, $2`
           * was taken, and made the frame `enterq` makes.) */
-         strcmp(mn, "enterl") == 0 ||
+         as_strcmp(mn, "enterl") == 0 ||
          (insn->operand_count == 0 &&
-          (strcmp(mn, "into") == 0 || strcmp(mn, "salc") == 0 || strcmp(mn, "pushfl") == 0 ||
-           strcmp(mn, "popfl") == 0 || strcmp(mn, "leavel") == 0 || strcmp(mn, "retl") == 0)))) {
+          (as_strcmp(mn, "into") == 0 || as_strcmp(mn, "salc") == 0 || as_strcmp(mn, "pushfl") == 0 ||
+           as_strcmp(mn, "popfl") == 0 || as_strcmp(mn, "leavel") == 0 || as_strcmp(mn, "retl") == 0)))) {
         snprintf(encerr, encerr_sz, "'%s' is not an instruction of 64-bit code", mn);
         return 1;
     }
@@ -9685,7 +9685,7 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
             }
             return 1;
         }
-        if (as_x86_vec_knows(mn) || mn[0] == 'k' || strcmp(mn, "extrq") == 0 || strcmp(mn, "insertq") == 0 ||
+        if (as_x86_vec_knows(mn) || mn[0] == 'k' || as_strcmp(mn, "extrq") == 0 || as_strcmp(mn, "insertq") == 0 ||
             (normalize_x86_mnemonic(mn, base, sizeof(base), &suffix) == 0 && as_x86_vec_knows(base))) {
             break;
         }
@@ -9741,7 +9741,7 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         }
         /* The privilege of a selector is adjusted in 16 bits; GNU as
          * takes the registers written as of 32 too, the two alike. */
-        if (strcmp(mn, "arpl") == 0 &&
+        if (as_strcmp(mn, "arpl") == 0 &&
             ((rs != NULL && rs->width != 16 && rs->width != 32) ||
              (rd != NULL && rd->cls == AS_X86_REGCLASS_GENERAL && rd->width != 16 && rd->width != 32) ||
              (rs != NULL && rd != NULL && rs->width != rd->width))) {
@@ -9763,9 +9763,9 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
             }
         }
         /* A selector, or the machine status word, in no byte. */
-        if ((strcmp(mn, "lldt") == 0 || strcmp(mn, "ltr") == 0 || strcmp(mn, "sldt") == 0 ||
-             strcmp(mn, "smsw") == 0 || strcmp(mn, "str") == 0 || strcmp(mn, "verr") == 0 ||
-             strcmp(mn, "verw") == 0 || strcmp(mn, "lmsw") == 0) &&
+        if ((as_strcmp(mn, "lldt") == 0 || as_strcmp(mn, "ltr") == 0 || as_strcmp(mn, "sldt") == 0 ||
+             as_strcmp(mn, "smsw") == 0 || as_strcmp(mn, "str") == 0 || as_strcmp(mn, "verr") == 0 ||
+             as_strcmp(mn, "verw") == 0 || as_strcmp(mn, "lmsw") == 0) &&
             rd != NULL && rd->cls == AS_X86_REGCLASS_GENERAL && rd->width == 8) {
             return 1;
         }
@@ -9778,7 +9778,7 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         /* An extension is to a wider register -- or, as GNU as has it,
          * of 16 bits to 16, and with a sign of 32 to 32 in 64-bit code,
          * which is movsxd without its width. */
-        if ((strcmp(mn, "movsx") == 0 || strcmp(mn, "movzx") == 0) && insn->operand_count == 2 && rs != NULL &&
+        if ((as_strcmp(mn, "movsx") == 0 || as_strcmp(mn, "movzx") == 0) && insn->operand_count == 2 && rs != NULL &&
             rd != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && rd->cls == AS_X86_REGCLASS_GENERAL) {
             int sx = mn[3] == 's';
 
@@ -9789,7 +9789,7 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         }
         /* The undefined instructions with operands: two of one width,
          * and no bytes. */
-        if ((strcmp(mn, "ud0") == 0 || strcmp(mn, "ud1") == 0 || strcmp(mn, "ud2b") == 0) &&
+        if ((as_strcmp(mn, "ud0") == 0 || as_strcmp(mn, "ud1") == 0 || as_strcmp(mn, "ud2b") == 0) &&
             insn->operand_count == 2 &&
             ((rd != NULL && rd->width == 8) || (rs != NULL && rs->width == 8) ||
              (rs != NULL && rd != NULL && rs->width != rd->width))) {
@@ -9843,9 +9843,9 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
          * of vectors at all: `vaddps %eax, %ebx, %ecx` was assembled.
          */
         if (general != 0 && (mmx + xmm + wide != 0 || mn[0] == 'v')) {
-            int not_of_vectors = strcmp(mn, "verr") == 0 || strcmp(mn, "verw") == 0 || strcmp(mn, "vmload") == 0 ||
-                                 strcmp(mn, "vmread") == 0 || strcmp(mn, "vmrun") == 0 || strcmp(mn, "vmsave") == 0 ||
-                                 strcmp(mn, "vmwrite") == 0;
+            int not_of_vectors = as_strcmp(mn, "verr") == 0 || as_strcmp(mn, "verw") == 0 || as_strcmp(mn, "vmload") == 0 ||
+                                 as_strcmp(mn, "vmread") == 0 || as_strcmp(mn, "vmrun") == 0 || as_strcmp(mn, "vmsave") == 0 ||
+                                 as_strcmp(mn, "vmwrite") == 0;
             int found = 0;
 
             /* (By its name, or its name and the l or q of the integer's
@@ -9859,7 +9859,7 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
             /* And one of those has a vector register or an address
              * among its operands -- but for movq, which is a move of
              * general registers too. */
-            if (found && mmx + xmm + wide == 0 && strcmp(mn, "movq") != 0) {
+            if (found && mmx + xmm + wide == 0 && as_strcmp(mn, "movq") != 0) {
                 int in_memory = 0;
 
                 for (i = 0; i < insn->operand_count; ++i) {
@@ -9889,13 +9889,13 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
             size_t len = strlen(mn);
 
             for (i = 0; i < sizeof(of_vectors) / sizeof(of_vectors[0]); ++i) {
-                if (strcmp(mn, of_vectors[i]) == 0) {
+                if (as_strcmp(mn, of_vectors[i]) == 0) {
                     return 1;
                 }
             }
             if (len >= 5 && strncmp(mn, "cmp", 3) == 0 &&
-                (strcmp(mn + len - 2, "sd") == 0 || strcmp(mn + len - 2, "ss") == 0 ||
-                 strcmp(mn + len - 2, "pd") == 0 || strcmp(mn + len - 2, "ps") == 0)) {
+                (as_strcmp(mn + len - 2, "sd") == 0 || as_strcmp(mn + len - 2, "ss") == 0 ||
+                 as_strcmp(mn + len - 2, "pd") == 0 || as_strcmp(mn + len - 2, "ps") == 0)) {
                 return 1;
             }
         }
@@ -9912,16 +9912,16 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
                 }
             }
         }
-        if (mmx != 0 && xmm != 0 && strcmp(mn, "movq2dq") != 0 && strcmp(mn, "movdq2q") != 0 &&
+        if (mmx != 0 && xmm != 0 && as_strcmp(mn, "movq2dq") != 0 && as_strcmp(mn, "movdq2q") != 0 &&
             strncmp(mn, "cvt", 3) != 0) {
             return 1;
         }
         /* movd is between a vector register and a general one or
          * memory; movsd and movss of two operands are of %xmm. */
-        if (strcmp(mn, "movd") == 0 && insn->operand_count == 2 && rs != NULL && rd != NULL && mmx + xmm != 1) {
+        if (as_strcmp(mn, "movd") == 0 && insn->operand_count == 2 && rs != NULL && rd != NULL && mmx + xmm != 1) {
             return 1;
         }
-        if ((strcmp(mn, "movsd") == 0 || strcmp(mn, "movss") == 0) && insn->operand_count == 2 &&
+        if ((as_strcmp(mn, "movsd") == 0 || as_strcmp(mn, "movss") == 0) && insn->operand_count == 2 &&
             (mmx != 0 || general != 0)) {
             return 1;
         }
@@ -9991,8 +9991,8 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
     if (strncmp(mn, "bswap", 5) == 0 && rs != NULL && rs->width != 32 && rs->width != 64) {
         return 1;
     }
-    if (strcmp(mn, "leab") == 0 || strcmp(mn, "btb") == 0 || strcmp(mn, "btsb") == 0 || strcmp(mn, "btrb") == 0 ||
-        strcmp(mn, "btcb") == 0) {
+    if (as_strcmp(mn, "leab") == 0 || as_strcmp(mn, "btb") == 0 || as_strcmp(mn, "btsb") == 0 || as_strcmp(mn, "btrb") == 0 ||
+        as_strcmp(mn, "btcb") == 0) {
         return 1;
     }
     if ((x86_name_is(mn, "lea", "wlq") || strncmp(mn, "movsx", 5) == 0 || strncmp(mn, "movzx", 5) == 0) &&
@@ -10001,17 +10001,17 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
     }
     /* What is in memory and nowhere else. */
     if (insn->operand_count == 1 && rs != NULL &&
-        (strcmp(mn, "lgdt") == 0 || strcmp(mn, "lidt") == 0 || strcmp(mn, "sgdt") == 0 || strcmp(mn, "sidt") == 0 ||
-         strcmp(mn, "invlpg") == 0 || strcmp(mn, "cmpxchg8b") == 0 || strcmp(mn, "cmpxchg16b") == 0)) {
+        (as_strcmp(mn, "lgdt") == 0 || as_strcmp(mn, "lidt") == 0 || as_strcmp(mn, "sgdt") == 0 || as_strcmp(mn, "sidt") == 0 ||
+         as_strcmp(mn, "invlpg") == 0 || as_strcmp(mn, "cmpxchg8b") == 0 || as_strcmp(mn, "cmpxchg16b") == 0)) {
         return 1;
     }
     if (insn->operand_count == 1 && rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL &&
-        ((strcmp(mn, "lmsw") == 0 && rs->width != 16) ||
-         ((strcmp(mn, "fnstsw") == 0 || strcmp(mn, "fstsw") == 0) && (rs->width != 16 || rs->number != 0)))) {
+        ((as_strcmp(mn, "lmsw") == 0 && rs->width != 16) ||
+         ((as_strcmp(mn, "fnstsw") == 0 || as_strcmp(mn, "fstsw") == 0) && (rs->width != 16 || rs->number != 0)))) {
         return 1;
     }
-    if (!is_64 && (strcmp(mn, "rdfsbase") == 0 || strcmp(mn, "rdgsbase") == 0 || strcmp(mn, "wrfsbase") == 0 ||
-                   strcmp(mn, "wrgsbase") == 0)) {
+    if (!is_64 && (as_strcmp(mn, "rdfsbase") == 0 || as_strcmp(mn, "rdgsbase") == 0 || as_strcmp(mn, "wrfsbase") == 0 ||
+                   as_strcmp(mn, "wrgsbase") == 0)) {
         snprintf(encerr, encerr_sz, "'%s' is an instruction of 64-bit code", mn);
         return 1;
     }
@@ -10026,7 +10026,7 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
         if (rs != NULL && rs->cls == AS_X86_REGCLASS_GENERAL && (rs->width == 8 || (is_64 && rs->width == 32))) {
             return 1;
         }
-        if (is_64 && raw[0] == '*' && (strcmp(mn, "jmpl") == 0 || strcmp(mn, "calll") == 0)) {
+        if (is_64 && raw[0] == '*' && (as_strcmp(mn, "jmpl") == 0 || as_strcmp(mn, "calll") == 0)) {
             return 1;
         }
     }
@@ -10102,7 +10102,7 @@ static int x86_lock_is_allowed(const as_instruction_t *insn, const char *mn, int
     int known = 0;
 
     for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
-        if (strcmp(mn, names[i]) == 0) {
+        if (as_strcmp(mn, names[i]) == 0) {
             known = 1;
         }
     }
@@ -10110,7 +10110,7 @@ static int x86_lock_is_allowed(const as_instruction_t *insn, const char *mn, int
         return 0;
     }
     /* xchg has no destination: either side. */
-    if (strcmp(mn, "xchg") == 0) {
+    if (as_strcmp(mn, "xchg") == 0) {
         for (i = 0; i < insn->operand_count; ++i) {
             if (insn->operands[i].kind == AS_OPERAND_MEMORY || operand_is_bare_address(&insn->operands[i])) {
                 return 1;
@@ -10250,7 +10250,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
      * `movzxb %al, %bx` extends a byte to 16 and has one.  The encoders
      * know the source's width by these names.
      */
-    if (!st->u.instr.syntax_intel && (strcmp(mnbuf, "movsx") == 0 || strcmp(mnbuf, "movzx") == 0)) {
+    if (!st->u.instr.syntax_intel && (as_strcmp(mnbuf, "movsx") == 0 || as_strcmp(mnbuf, "movzx") == 0)) {
         int is_sign = mnbuf[3] == 's';
 
         if (suffix == 'b') {
@@ -10313,7 +10313,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
     /* The instructions on a 16-bit selector in memory are 16 bits with
      * no prefix; a w on one -- `sldtw (%rax)`, `ltrw sym` -- says only
      * what is so. */
-    if (in.operand_size_override && strcmp(mnbuf, "mov") != 0 && !x86_special_takes_opsize(&st->u.instr, mnbuf)) {
+    if (in.operand_size_override && as_strcmp(mnbuf, "mov") != 0 && !x86_special_takes_opsize(&st->u.instr, mnbuf)) {
         in.operand_size_override = 0;
     }
 
@@ -10521,7 +10521,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                     have |= code[k] == want;
                 }
                 if (!have) {
-                    if (strcmp(mnbuf, "bsf") != 0 && strcmp(mnbuf, "bsr") != 0) {
+                    if (as_strcmp(mnbuf, "bsf") != 0 && as_strcmp(mnbuf, "bsr") != 0) {
                         snprintf(encerr, encerr_sz, "'%s' is not an instruction a repeat prefix goes before", mnbuf);
                         return -1;
                     }
@@ -10579,7 +10579,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                 /* movabs to or from %ax is a 16-bit move and has the
                  * prefix; its emitter wrote none. */
                 if ((x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) ||
-                     (strcmp(mnbuf, "movabs") == 0 && x86_stmt_has_gpr_of_width(&st->u.instr, 16))) &&
+                     (as_strcmp(mnbuf, "movabs") == 0 && x86_stmt_has_gpr_of_width(&st->u.instr, 16))) &&
                     x86_prepend_opsize(code, code_cap, code_len) != 0) {
                     return -1;
                 }
@@ -11124,10 +11124,10 @@ static int x86_suffix_denied_by_register(const as_instruction_t *insn, const cha
     size_t i;
 
     for (i = 0; !known && i < sizeof(same_size) / sizeof(same_size[0]); ++i) {
-        known = strcmp(base, same_size[i]) == 0;
+        known = as_strcmp(base, same_size[i]) == 0;
     }
     for (i = 0; !known && i < sizeof(shifts) / sizeof(shifts[0]); ++i) {
-        known = is_shift = strcmp(base, shifts[i]) == 0;
+        known = is_shift = as_strcmp(base, shifts[i]) == 0;
     }
     if (!known) {
         return 0;
@@ -11256,7 +11256,7 @@ static void x86_refusal_said(const as_stmt_t *st, char *encerr, size_t encerr_sz
     }
     known = x86_max_operand_count(mn) >= 0 || as_x86_vec_knows(mn);
     if (!known && normalize_x86_mnemonic(mn, base, sizeof(base), &suffix) == 0) {
-        known = x86_max_operand_count(base) >= 0 || as_x86_vec_knows(base) || strcmp(base, mn) != 0;
+        known = x86_max_operand_count(base) >= 0 || as_x86_vec_knows(base) || as_strcmp(base, mn) != 0;
     }
     if (known || strncmp(encerr, "unknown x86 register: ", 22) == 0) {
         snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
@@ -11505,10 +11505,10 @@ static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
     }
     br = mem->u.mem.base_reg != NULL ? as_x86_reg_find(mem->u.mem.base_reg) : NULL;
     if (streq_ci(rop, "TLSCALL")) {
-        if (strcmp(base, "call") != 0) {
+        if (as_strcmp(base, "call") != 0) {
             return "it is for a call";
         }
-        if (mem->u.mem.index_reg != NULL || br == NULL || (strcmp(br->name, "eax") != 0 && strcmp(br->name, "rax") != 0)) {
+        if (mem->u.mem.index_reg != NULL || br == NULL || (as_strcmp(br->name, "eax") != 0 && as_strcmp(br->name, "rax") != 0)) {
             return cfg->is_64 ? "the call is through (%rax)" : "the call is through (%eax)";
         }
         return NULL;
@@ -11520,11 +11520,11 @@ static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
     }
     lea_model = streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSDESC") || streq_ci(rop, "TLSLD") || streq_ci(rop, "TLSLDM");
     if (lea_model) {
-        if (strcmp(base, "lea") != 0) {
+        if (as_strcmp(base, "lea") != 0) {
             return "it is for lea";
         }
-    } else if (strcmp(base, "mov") != 0 && strcmp(base, "add") != 0 &&
-               (cfg->is_64 || streq_ci(rop, "INDNTPOFF") || strcmp(base, "sub") != 0)) {
+    } else if (as_strcmp(base, "mov") != 0 && as_strcmp(base, "add") != 0 &&
+               (cfg->is_64 || streq_ci(rop, "INDNTPOFF") || as_strcmp(base, "sub") != 0)) {
         return cfg->is_64 || streq_ci(rop, "INDNTPOFF") ? "it is for mov or add" : "it is for mov, add or sub";
     }
     if (!lea_model && (imms != 0 || dr == NULL || (!cfg->is_64 && regs != 1))) {
@@ -11534,10 +11534,10 @@ static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
         return cfg->is_64 ? "the register is of 64 bits" : "the register is of 32 bits";
     }
     if (cfg->is_64) {
-        if (br == NULL || strcmp(br->name, "rip") != 0 || mem->u.mem.index_reg != NULL) {
+        if (br == NULL || as_strcmp(br->name, "rip") != 0 || mem->u.mem.index_reg != NULL) {
             return "the address is from %rip";
         }
-        if ((streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSLD")) && strcmp(dr->name, "rdi") != 0) {
+        if ((streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSLD")) && as_strcmp(dr->name, "rdi") != 0) {
             return "the register is %rdi";
         }
         return NULL;
@@ -11548,10 +11548,10 @@ static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
     if (streq_ci(rop, "TLSGD") && mem->u.mem.index_reg != NULL) {
         const as_x86_reg_info_t *xr = as_x86_reg_find(mem->u.mem.index_reg);
 
-        if (mem->u.mem.base_reg != NULL || xr == NULL || strcmp(xr->name, "ebx") != 0 || mem->u.mem.scale > 1) {
+        if (mem->u.mem.base_reg != NULL || xr == NULL || as_strcmp(xr->name, "ebx") != 0 || mem->u.mem.scale > 1) {
             return "with an index the address is (,%ebx,1)";
         }
-        return strcmp(dr->name, "eax") != 0 ? "the register is %eax" : NULL;
+        return as_strcmp(dr->name, "eax") != 0 ? "the register is %eax" : NULL;
     }
     if (mem->u.mem.index_reg != NULL) {
         return "the address has no index";
@@ -11560,13 +11560,13 @@ static const char *x86_tls_shape_wrong(const as_elf_cfg_t *cfg, const as_stmt_t 
         return "the address has a base register";
     }
     if (streq_ci(rop, "TLSDESC")) {
-        return strcmp(br->name, "ebx") != 0 ? "the address is from %ebx" : NULL;
+        return as_strcmp(br->name, "ebx") != 0 ? "the address is from %ebx" : NULL;
     }
     if (streq_ci(rop, "TLSGD") || streq_ci(rop, "TLSLDM")) {
-        if (strcmp(dr->name, "eax") != 0) {
+        if (as_strcmp(dr->name, "eax") != 0) {
             return "the register is %eax";
         }
-        return strcmp(br->name, "eax") == 0 ? "the address is not from %eax" : NULL;
+        return as_strcmp(br->name, "eax") == 0 ? "the address is not from %eax" : NULL;
     }
     return br->width != 32 ? "the base register is of 32 bits" : NULL;
 }
@@ -11601,12 +11601,12 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
      * emitters took either before anything. */
     if ((in->prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE | AS_PREFIX_REPNE)) != 0) {
         if ((in->prefixes & AS_PREFIX_HLE) == 0) {
-            if (base[0] == 'f' && strcmp(base, "femms") != 0) {
+            if (base[0] == 'f' && as_strcmp(base, "femms") != 0) {
                 snprintf(encerr, encerr_sz, "'%s' is not an instruction a repeat prefix goes before", in->mnemonic);
                 return 1;
             }
-        } else if ((in->prefixes & AS_PREFIX_LOCK) == 0 && strcmp(base, "xchg") != 0 &&
-                   !(strcmp(base, "mov") == 0 && (in->prefixes & AS_PREFIX_REP) != 0)) {
+        } else if ((in->prefixes & AS_PREFIX_LOCK) == 0 && as_strcmp(base, "xchg") != 0 &&
+                   !(as_strcmp(base, "mov") == 0 && (in->prefixes & AS_PREFIX_REP) != 0)) {
             snprintf(encerr, encerr_sz, "'%s' is not locked, and %s goes before an instruction that is", in->mnemonic,
                      (in->prefixes & AS_PREFIX_REPNE) != 0 ? "xacquire" : "xrelease");
             return 1;
@@ -11615,12 +11615,12 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
     /* A jump to a label is of the code's size, and has no letter to
      * say another; nor has a call one for 32 bits in 64-bit code. */
     if (direct && suffix != '\0' && suffix != 'b' &&
-        (strcmp(base, "jmp") == 0 || (strcmp(base, "call") == 0 && cfg->is_64 && suffix == 'l'))) {
+        (as_strcmp(base, "jmp") == 0 || (as_strcmp(base, "call") == 0 && cfg->is_64 && suffix == 'l'))) {
         snprintf(encerr, encerr_sz, "'%s' to a label takes no size: it is '%s'", in->mnemonic, base);
         return 1;
     }
     /* A segment is 16 bits, and so is where a far jump of 16 goes. */
-    if (in->operand_count == 2 && (strcmp(base, "ljmp") == 0 || strcmp(base, "lcall") == 0) &&
+    if (in->operand_count == 2 && (as_strcmp(base, "ljmp") == 0 || as_strcmp(base, "lcall") == 0) &&
         in->operands[0].kind == AS_OPERAND_IMMEDIATE && in->operands[1].kind == AS_OPERAND_IMMEDIATE) {
         long long v;
 
@@ -11636,14 +11636,14 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
         }
     }
     /* What `stos` stores is the accumulator, of the size it stores. */
-    if (in->operand_count == 2 && strcmp(base, "stos") == 0) {
+    if (in->operand_count == 2 && as_strcmp(base, "stos") == 0) {
         const as_operand_t *src = &in->operands[in->syntax_intel ? 1 : 0];
         const as_x86_reg_info_t *r = src->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(src->u.reg) : NULL;
         unsigned want = suffix == 'b' ? 8u : suffix == 'w' ? 16u : suffix == 'l' ? 32u : suffix == 'q' ? 64u : 0u;
 
         if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL &&
-            ((strcmp(r->name, "al") != 0 && strcmp(r->name, "ax") != 0 && strcmp(r->name, "eax") != 0 &&
-              strcmp(r->name, "rax") != 0) ||
+            ((as_strcmp(r->name, "al") != 0 && as_strcmp(r->name, "ax") != 0 && as_strcmp(r->name, "eax") != 0 &&
+              as_strcmp(r->name, "rax") != 0) ||
              (want != 0 && r->width != want))) {
             snprintf(encerr, encerr_sz, "'%s' stores the accumulator, and %%%s is not it", in->mnemonic, r->name);
             return 1;
@@ -11704,8 +11704,8 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
 
                 acc = reg->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(reg->u.reg) : NULL;
                 ok = mem->kind == AS_OPERAND_MEMORY && acc != NULL && acc->cls == AS_X86_REGCLASS_GENERAL &&
-                     (strcmp(acc->name, "al") == 0 || strcmp(acc->name, "ax") == 0 || strcmp(acc->name, "eax") == 0 ||
-                      strcmp(acc->name, "rax") == 0);
+                     (as_strcmp(acc->name, "al") == 0 || as_strcmp(acc->name, "ax") == 0 || as_strcmp(acc->name, "eax") == 0 ||
+                      as_strcmp(acc->name, "rax") == 0);
             } else {
                 ok = 0;
             }
@@ -11738,7 +11738,7 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
             ((strcasecmp(mn, "movsxb") == 0 && r0->width != 8) || (strcasecmp(mn, "movsxw") == 0 && r0->width != 16))) {
             wrong = 1;
         }
-        if (in->operand_count == 2 && strcmp(base, "movabs") == 0 && a0->kind == AS_OPERAND_IMMEDIATE &&
+        if (in->operand_count == 2 && as_strcmp(base, "movabs") == 0 && a0->kind == AS_OPERAND_IMMEDIATE &&
             a0->raw != NULL && a0->raw[0] == '$' && in->operands[1].kind == AS_OPERAND_REGISTER) {
             const as_x86_reg_info_t *r1 = as_x86_reg_find(in->operands[1].u.reg);
 
@@ -11752,15 +11752,15 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
     /* A move to or from an address of 64 bits is the accumulator's and
      * no other register's: `movabs sym, %r8` was `movabs $sym, %r8`,
      * which loads the address and not what is at it. */
-    if (in->operand_count == 2 && !in->syntax_intel && strcmp(base, "movabs") == 0) {
+    if (in->operand_count == 2 && !in->syntax_intel && as_strcmp(base, "movabs") == 0) {
         for (i = 0; i < 2; ++i) {
             const as_operand_t *at = &in->operands[i];
             const as_operand_t *other = &in->operands[1 - i];
             const as_x86_reg_info_t *r = other->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(other->u.reg) : NULL;
 
             if ((at->kind == AS_OPERAND_MEMORY || operand_is_bare_address(at)) && r != NULL &&
-                strcmp(r->name, "al") != 0 && strcmp(r->name, "ax") != 0 && strcmp(r->name, "eax") != 0 &&
-                strcmp(r->name, "rax") != 0) {
+                as_strcmp(r->name, "al") != 0 && as_strcmp(r->name, "ax") != 0 && as_strcmp(r->name, "eax") != 0 &&
+                as_strcmp(r->name, "rax") != 0) {
                 snprintf(encerr, encerr_sz, "'movabs' moves between an address and the accumulator, and %%%s is not it",
                          r->name);
                 return 1;
@@ -11768,7 +11768,7 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
         }
     }
     /* `movsxd` widens 32 bits. */
-    if (in->operand_count == 2 && strcmp(base, "movsxd") == 0) {
+    if (in->operand_count == 2 && as_strcmp(base, "movsxd") == 0) {
         const as_operand_t *src = &in->operands[in->syntax_intel ? 1 : 0];
         const as_x86_reg_info_t *r = src->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(src->u.reg) : NULL;
 
@@ -11818,7 +11818,7 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
         if (cfg->is_64 && (op->kind == AS_OPERAND_MEMORY || op->kind == AS_OPERAND_IMMEDIATE ||
                            op->kind == AS_OPERAND_LABEL_REF)) {
             const char *rop = first_symbol_op_in_expr(op->kind == AS_OPERAND_MEMORY ? op->u.mem.disp : op->u.expr);
-            int wide = suffix == 'q' || strcmp(base, "push") == 0;
+            int wide = suffix == 'q' || as_strcmp(base, "push") == 0;
             size_t k;
 
             if (rop == NULL ||
@@ -11826,7 +11826,7 @@ static int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *
                 continue;
             }
             /* (A symbol alone is an address without a register.) */
-            if (op->kind != AS_OPERAND_IMMEDIATE && strcmp(base, "lea") != 0) {
+            if (op->kind != AS_OPERAND_IMMEDIATE && as_strcmp(base, "lea") != 0) {
                 continue;
             }
             /* (From %rip it is a distance, and the same in any width.) */
@@ -11957,8 +11957,8 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
         }
     }
     if (nops == 2 && ops[1].kind == AS_OPERAND_REGISTER &&
-        (strcmp(low, "movsb") == 0 || strcmp(low, "movzb") == 0 || strcmp(low, "movsw") == 0 ||
-         strcmp(low, "movzw") == 0 || strcmp(low, "movsl") == 0)) {
+        (as_strcmp(low, "movsb") == 0 || as_strcmp(low, "movzb") == 0 || as_strcmp(low, "movsw") == 0 ||
+         as_strcmp(low, "movzw") == 0 || as_strcmp(low, "movsl") == 0)) {
         unsigned bits = parse_x86_reg_bits(ops[1].u.reg);
         const as_x86_reg_info_t *r = as_x86_reg_find(ops[1].u.reg);
 
@@ -11974,8 +11974,8 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
 
         if ((rest[0] == '\0' || (strchr("bwlq", rest[0]) != NULL && rest[1] == '\0')) && r != NULL &&
             r->cls == AS_X86_REGCLASS_GENERAL &&
-            (strcmp(r->name, "al") == 0 || strcmp(r->name, "ax") == 0 || strcmp(r->name, "eax") == 0 ||
-             strcmp(r->name, "rax") == 0)) {
+            (as_strcmp(r->name, "al") == 0 || as_strcmp(r->name, "ax") == 0 || as_strcmp(r->name, "eax") == 0 ||
+             as_strcmp(r->name, "rax") == 0)) {
             /* (Its size is kept, for a divisor in memory.) */
             snprintf(name, name_sz, "%.*s%c", (int)(rest - low), low,
                      rest[0] != '\0' ? rest[0] : r->width == 8 ? 'b' : r->width == 16 ? 'w' : r->width == 32 ? 'l' : 'q');
@@ -12027,7 +12027,7 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
              * prefix, not after: the instruction is the one without
              * it, and the caller writes the wait. */
             bare->u.instr.prefixes |= AS_PREFIX_DATA16;
-            if (strcmp(env[i], "fsave") == 0 || strcmp(env[i], "fstenv") == 0) {
+            if (as_strcmp(env[i], "fsave") == 0 || as_strcmp(env[i], "fstenv") == 0) {
                 snprintf(name, name_sz, "fn%s", env[i] + 1);
                 return 2;
             }
@@ -12037,7 +12037,7 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
     }
     /* `fcompi` and `fucompi` are fcomip and fucomip, as they were first
      * written. */
-    if (strcmp(low, "fcompi") == 0 || strcmp(low, "fucompi") == 0) {
+    if (as_strcmp(low, "fcompi") == 0 || as_strcmp(low, "fucompi") == 0) {
         snprintf(low, sizeof(low), "%s", low[1] == 'u' ? "fucomip" : "fcomip");
         if (nops != 0) {
             snprintf(name, name_sz, "%s", low);
@@ -12045,8 +12045,8 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
         }
     }
     /* A comparison with the register under the top, not written. */
-    if (nops == 0 && (strcmp(low, "fcomi") == 0 || strcmp(low, "fucomi") == 0 || strcmp(low, "fcomip") == 0 ||
-                      strcmp(low, "fucomip") == 0)) {
+    if (nops == 0 && (as_strcmp(low, "fcomi") == 0 || as_strcmp(low, "fucomi") == 0 || as_strcmp(low, "fcomip") == 0 ||
+                      as_strcmp(low, "fucomip") == 0)) {
         snprintf(name, name_sz, "%s", low);
         x86_implied_reg(&ops[0], "st(1)");
         bare->u.instr.operand_count = 1;
@@ -12054,7 +12054,7 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
     }
     /* `clr` of a register is that register xor itself. */
     if (nops == 1 && ops[0].kind == AS_OPERAND_REGISTER &&
-        (strcmp(low, "clr") == 0 || (len == 4 && strncmp(low, "clr", 3) == 0 && strchr("bwlq", low[3]) != NULL))) {
+        (as_strcmp(low, "clr") == 0 || (len == 4 && strncmp(low, "clr", 3) == 0 && strchr("bwlq", low[3]) != NULL))) {
         const as_x86_reg_info_t *r = as_x86_reg_find(ops[0].u.reg);
 
         if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL) {
@@ -12066,11 +12066,11 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
     }
     /* A string through the port, of the size the port's register is
      * not: 32 bits unless a letter says. */
-    if (nops == 2 && (strcmp(low, "ins") == 0 || strcmp(low, "outs") == 0)) {
+    if (nops == 2 && (as_strcmp(low, "ins") == 0 || as_strcmp(low, "outs") == 0)) {
         snprintf(name, name_sz, "%sl", low);
         return 1;
     }
-    if (nops == 0 && strcmp(low, "sysretl") == 0 && !cfg->is_64) {
+    if (nops == 0 && as_strcmp(low, "sysretl") == 0 && !cfg->is_64) {
         snprintf(name, name_sz, "sysret");
         return 1;
     }
@@ -12090,7 +12090,7 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
     }
     /* %cr8 where there are no registers past the seventh: %cr0 behind
      * a lock, which is how AMD's processors have it in 32-bit code. */
-    if (nops == 2 && !cfg->is_64 && (strcmp(low, "mov") == 0 || strcmp(low, "movl") == 0) &&
+    if (nops == 2 && !cfg->is_64 && (as_strcmp(low, "mov") == 0 || as_strcmp(low, "movl") == 0) &&
         (in->prefixes & AS_PREFIX_LOCK) == 0) {
         for (i = 0; i < 2; ++i) {
             const char *r = ops[i].kind == AS_OPERAND_REGISTER ? ops[i].u.reg : "";
@@ -12106,7 +12106,7 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
             }
         }
     }
-    if (nops == 2 && (strcmp(low, "jmp") == 0 || strcmp(low, "call") == 0) && ops[0].kind == AS_OPERAND_IMMEDIATE &&
+    if (nops == 2 && (as_strcmp(low, "jmp") == 0 || as_strcmp(low, "call") == 0) && ops[0].kind == AS_OPERAND_IMMEDIATE &&
         ops[1].kind == AS_OPERAND_IMMEDIATE) {
         snprintf(name, name_sz, "l%s", low);
         return 1;
@@ -12351,7 +12351,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             }
             base[n - 1] = '\0';
             for (k = 0; k < sizeof(bases) / sizeof(bases[0]); ++k) {
-                if (strcmp(base, bases[k]) == 0) {
+                if (as_strcmp(base, bases[k]) == 0) {
                     const as_operand_t *dst = &st->u.instr.operands[cfg != NULL && cfg->intel_syntax
                                                                         ? 0
                                                                         : st->u.instr.operand_count - 1];
@@ -12481,7 +12481,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             base[0] = '\0';
         }
         /* `shld %eax, %ebx`: the count that is not written is %cl. */
-        if (st->u.instr.operand_count == 2 && (strcmp(base, "shld") == 0 || strcmp(base, "shrd") == 0)) {
+        if (st->u.instr.operand_count == 2 && (as_strcmp(base, "shld") == 0 || as_strcmp(base, "shrd") == 0)) {
             as_operand_t ops[3];
             as_operand_t count;
             char cl[] = "cl";
@@ -12502,7 +12502,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
         /* `imul $2, %eax`: the register is multiplied and is where the
          * product goes. */
-        if (st->u.instr.operand_count == 2 && strcmp(base, "imul") == 0) {
+        if (st->u.instr.operand_count == 2 && as_strcmp(base, "imul") == 0) {
             int intel = cfg != NULL && cfg->intel_syntax;
             const as_operand_t *imm = &st->u.instr.operands[intel ? 1 : 0];
             const as_operand_t *reg = &st->u.instr.operands[intel ? 0 : 1];
@@ -12616,11 +12616,11 @@ static unsigned directive_fixed_scalar_width(const as_directive_t *d) {
     if (d == NULL || d->name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".byte") == 0) return 1;
-    if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
-        strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) return 2;
-    if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) return 4;
-    if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) return 8;
+    if (as_strcmp(d->name, ".byte") == 0) return 1;
+    if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
+        as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0) return 2;
+    if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".4byte") == 0) return 4;
+    if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) return 8;
     return 0;
 }
 
@@ -12862,13 +12862,13 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
             for (j = 0; j < st->label_count; ++j) {
                 int matches;
                 if (sym_name != NULL) {
-                    matches = (st->labels[j].name != NULL && strcmp(st->labels[j].name, sym_name) == 0);
+                    matches = (st->labels[j].name != NULL && as_strcmp(st->labels[j].name, sym_name) == 0);
                 } else {
                     int label_digit = -1;
                     matches = (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
                                label_digit == digit && st->labels[j].line == line &&
                                st->labels[j].file != NULL && file != NULL &&
-                               strcmp(st->labels[j].file, file) == 0);
+                               as_strcmp(st->labels[j].file, file) == 0);
                 }
                 if (matches) {
                     target_st = st;
@@ -12939,14 +12939,14 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
             }
 
             if (sym_name != NULL) {
-                matches = (st->labels[j].name != NULL && strcmp(st->labels[j].name, sym_name) == 0);
+                matches = (st->labels[j].name != NULL && as_strcmp(st->labels[j].name, sym_name) == 0);
             } else {
                 int label_digit = -1;
                 matches = (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
                        label_digit == digit &&
                        st->labels[j].line == line &&
                        st->labels[j].file != NULL &&
-                       strcmp(st->labels[j].file, file) == 0);
+                       as_strcmp(st->labels[j].file, file) == 0);
             }
             if (matches) {
                 *section_out = section_name_keep(ctx, track.current);
@@ -13023,7 +13023,7 @@ static int resolve_local_ref_target_line(emit_ctx_t *ctx, const char *file, unsi
             int label_digit = -1;
             if (numeric_local_label_number(st->labels[j].name, &label_digit) != 0 ||
                 label_digit != digit || st->labels[j].file == NULL ||
-                strcmp(st->labels[j].file, file) != 0) {
+                as_strcmp(st->labels[j].file, file) != 0) {
                 continue;
             }
             if (forward) {
@@ -13084,7 +13084,7 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
                 int label_digit = -1;
 
                 if (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 && label_digit == digit &&
-                    st->labels[j].file != NULL && strcmp(st->labels[j].file, file) == 0) {
+                    st->labels[j].file != NULL && as_strcmp(st->labels[j].file, file) == 0) {
                     best = st;
                     break;
                 }
@@ -13101,7 +13101,7 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
                 if (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
                     label_digit == digit &&
                     st->labels[j].file != NULL &&
-                    strcmp(st->labels[j].file, file) == 0) {
+                    as_strcmp(st->labels[j].file, file) == 0) {
                     return st;
                 }
             }
@@ -13115,7 +13115,7 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
                 if (numeric_local_label_number(st->labels[j - 1].name, &label_digit) == 0 &&
                     label_digit == digit &&
                     st->labels[j - 1].file != NULL &&
-                    strcmp(st->labels[j - 1].file, file) == 0) {
+                    as_strcmp(st->labels[j - 1].file, file) == 0) {
                     return st;
                 }
             }
@@ -13234,7 +13234,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
         *out = e->value;
         return 0;
     case AS_EXPR_SYMBOL:
-        if (e->symbol != NULL && strcmp(e->symbol, ".") == 0) {
+        if (e->symbol != NULL && as_strcmp(e->symbol, ".") == 0) {
             *out = 0;
             return 0;
         }
@@ -13242,7 +13242,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
             find_label_virtual_location(ctx, base_st, NULL, 0, 0, e->symbol,
                                         &target_loc.section,
                                         &target_off) != 0 ||
-            strcmp(target_loc.section, section_name) != 0) {
+            as_strcmp(target_loc.section, section_name) != 0) {
             return -1;
         }
         *out = (long long)target_off - (long long)base_off;
@@ -13257,7 +13257,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
             if (target_st != NULL &&
                 find_stmt_virtual_location(ctx, target_st, &target_loc.section,
                                            &target_off) == 0 &&
-                strcmp(target_loc.section, section_name) == 0) {
+                as_strcmp(target_loc.section, section_name) == 0) {
                 *out = (long long)target_off - (long long)base_off;
                 return 0;
             }
@@ -13275,7 +13275,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
                                             e->src_file, target_line, e->local_digit,
                                             NULL, &target_loc.section,
                                             &target_off) != 0 ||
-                strcmp(target_loc.section, section_name) != 0) {
+                as_strcmp(target_loc.section, section_name) != 0) {
                 return -1;
             }
         }
@@ -13376,7 +13376,7 @@ static int eval_virtual_addr_expr(emit_ctx_t *ctx, const as_stmt_t *base_st,
     case AS_EXPR_SYMBOL: {
         uint64_t off = 0;
 
-        if (e->symbol == NULL || e->reloc_op != NULL || strcmp(e->symbol, ".") == 0) {
+        if (e->symbol == NULL || e->reloc_op != NULL || as_strcmp(e->symbol, ".") == 0) {
             return -1;
         }
         if (find_label_virtual_location(ctx, base_st, NULL, 0, 0, e->symbol,
@@ -13417,7 +13417,7 @@ static int eval_virtual_addr_expr(emit_ctx_t *ctx, const as_stmt_t *base_st,
             return 0;
         case AS_EXPR_OP_SUB:
             if (l.has_section && r.has_section) {
-                if (strcmp(l.section, r.section) != 0) {
+                if (as_strcmp(l.section, r.section) != 0) {
                     return -1;
                 }
                 out->has_section = 0;
@@ -13564,8 +13564,8 @@ static int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, co
         numeric_local_virtual_location(ctx, st, 743, 1, &v743f) != 0 ||
         numeric_local_virtual_location(ctx, st, 740, 0, &v740b) != 0 ||
         !v744f.has_section || !v743f.has_section || !v740b.has_section ||
-        strcmp(v744f.section, v743f.section) != 0 ||
-        section_name == NULL || strcmp(section_name, v740b.section) != 0) {
+        as_strcmp(v744f.section, v743f.section) != 0 ||
+        section_name == NULL || as_strcmp(section_name, v740b.section) != 0) {
         return -1;
     }
     memset(&v741b, 0, sizeof(v741b));
@@ -13586,7 +13586,7 @@ static int eval_linux_alt_len_expr(emit_ctx_t *ctx, const as_stmt_t *st, const c
     if (ctx == NULL || st == NULL || arg == NULL || out == NULL) {
         return -1;
     }
-    if (strcmp(arg, "742b-740b") == 0) {
+    if (as_strcmp(arg, "742b-740b") == 0) {
         const as_stmt_t *s742 = resolve_local_ref_target_stmt(ctx, st, st->file, 742, 0);
         const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->file, 740, 0);
         size_t i742;
@@ -13607,16 +13607,16 @@ static int eval_linux_alt_len_expr(emit_ctx_t *ctx, const as_stmt_t *st, const c
         }
         if (numeric_local_virtual_location(ctx, st, 742, 0, &a) != 0 ||
             numeric_local_virtual_location(ctx, st, 740, 0, &b) != 0 ||
-            !a.has_section || !b.has_section || strcmp(a.section, b.section) != 0) {
+            !a.has_section || !b.has_section || as_strcmp(a.section, b.section) != 0) {
             return -1;
         }
         *out = a.value - b.value;
         return 0;
     }
-    if (strcmp(arg, "744f-743f") == 0) {
+    if (as_strcmp(arg, "744f-743f") == 0) {
         if (numeric_local_virtual_location(ctx, st, 744, 1, &a) != 0 ||
             numeric_local_virtual_location(ctx, st, 743, 1, &b) != 0 ||
-            !a.has_section || !b.has_section || strcmp(a.section, b.section) != 0) {
+            !a.has_section || !b.has_section || as_strcmp(a.section, b.section) != 0) {
             return -1;
         }
         *out = a.value - b.value;
@@ -13923,7 +13923,7 @@ static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *bas
         size_t j;
 
         for (j = 0; j < st->label_count; ++j) {
-            if (st->labels[j].name != NULL && strcmp(st->labels[j].name, rel_expr->symbol) == 0) {
+            if (st->labels[j].name != NULL && as_strcmp(st->labels[j].name, rel_expr->symbol) == 0) {
                 target_st = st;
                 break;
             }
@@ -13947,17 +13947,17 @@ static unsigned data_directive_width(const char *name) {
     if (name == NULL) {
         return 0;
     }
-    if (strcmp(name, ".byte") == 0) {
+    if (as_strcmp(name, ".byte") == 0) {
         return 1;
     }
-    if (strcmp(name, ".word") == 0 || strcmp(name, ".short") == 0 ||
-        strcmp(name, ".hword") == 0 || strcmp(name, ".2byte") == 0) {
+    if (as_strcmp(name, ".word") == 0 || as_strcmp(name, ".short") == 0 ||
+        as_strcmp(name, ".hword") == 0 || as_strcmp(name, ".2byte") == 0) {
         return 2;
     }
-    if (strcmp(name, ".long") == 0 || strcmp(name, ".4byte") == 0) {
+    if (as_strcmp(name, ".long") == 0 || as_strcmp(name, ".4byte") == 0) {
         return 4;
     }
-    if (strcmp(name, ".quad") == 0 || strcmp(name, ".8byte") == 0) {
+    if (as_strcmp(name, ".quad") == 0 || as_strcmp(name, ".8byte") == 0) {
         return 8;
     }
     return 0;
@@ -13973,8 +13973,8 @@ static int stmt_size_depends_on_offset(const as_stmt_t *st) {
         return 0;
     }
     name = st->u.directive.name;
-    return strcmp(name, ".align") == 0 || strcmp(name, ".balign") == 0 ||
-           strcmp(name, ".p2align") == 0 || strcmp(name, ".org") == 0;
+    return as_strcmp(name, ".align") == 0 || as_strcmp(name, ".balign") == 0 ||
+           as_strcmp(name, ".p2align") == 0 || as_strcmp(name, ".org") == 0;
 }
 
 static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
@@ -14161,7 +14161,7 @@ static const uint32_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *sect
     for (i = 0; i < ctx->section_prefix_count; ++i) {
         if (ctx->section_prefixes[i].name != NULL &&
             ctx->section_prefixes[i].x86_code_bits == x86_code_bits &&
-            strcmp(ctx->section_prefixes[i].name, section_name) == 0) {
+            as_strcmp(ctx->section_prefixes[i].name, section_name) == 0) {
             return ctx->section_prefixes[i].prefix;
         }
     }
@@ -14217,7 +14217,7 @@ static const uint32_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *sect
                 continue;
             }
         }
-        if (track.current != NULL && strcmp(track.current, section_name) == 0) {
+        if (track.current != NULL && as_strcmp(track.current, section_name) == 0) {
             size_t n = 0;
             /* (In the mode the statement is in, which a .code16 before
              * it may have made another than the file began in.) */
@@ -14298,7 +14298,7 @@ static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name,
                 continue;
             }
         }
-        if (track.current == NULL || strcmp(track.current, section_name) != 0) {
+        if (track.current == NULL || as_strcmp(track.current, section_name) != 0) {
             continue;
         }
         {
@@ -14351,13 +14351,13 @@ static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_na
                 continue;
             }
         }
-        if (track.current == NULL || strcmp(track.current, section_name) != 0) {
+        if (track.current == NULL || as_strcmp(track.current, section_name) != 0) {
             continue;
         }
         if (st->kind == AS_STMT_DIRECTIVE &&
             st->u.directive.name != NULL &&
-            (strcmp(st->u.directive.name, ".skip") == 0 ||
-             strcmp(st->u.directive.name, ".space") == 0) &&
+            (as_strcmp(st->u.directive.name, ".skip") == 0 ||
+             as_strcmp(st->u.directive.name, ".space") == 0) &&
             st->u.directive.arg_count >= 1 &&
             st->u.directive.args[0] != NULL &&
             strstr(st->u.directive.args[0], "744f-743f") != NULL &&
@@ -14474,7 +14474,7 @@ static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_
 static int label_index_cmp(const void *a, const void *b) {
     const label_index_t *x = (const label_index_t *)a;
     const label_index_t *y = (const label_index_t *)b;
-    int c = strcmp(x->name, y->name);
+    int c = as_strcmp(x->name, y->name);
 
     /* The first of a name that is defined twice. */
     return c != 0 ? c : (x->stmt < y->stmt ? -1 : (x->stmt > y->stmt ? 1 : 0));
@@ -14522,13 +14522,13 @@ static int label_stmt_index(emit_ctx_t *ctx, const char *name, size_t *idx_out) 
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
 
-        if (strcmp(ctx->label_index[mid].name, name) < 0) {
+        if (as_strcmp(ctx->label_index[mid].name, name) < 0) {
             lo = mid + 1;
         } else {
             hi = mid;
         }
     }
-    if (lo == ctx->label_index_count || strcmp(ctx->label_index[lo].name, name) != 0) {
+    if (lo == ctx->label_index_count || as_strcmp(ctx->label_index[lo].name, name) != 0) {
         return -1;
     }
     *idx_out = ctx->label_index[lo].stmt;
@@ -14564,7 +14564,7 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
         const char *target_section = "";
 
         if (stmt_declared_label_section(ctx, target_st, &target_section) != 0 ||
-            strcmp(target_section, section_name) != 0) {
+            as_strcmp(target_section, section_name) != 0) {
             return -1;
         }
     }
@@ -14650,7 +14650,7 @@ static int relax_branch_target(emit_ctx_t *ctx, size_t idx, const char *section,
         return -1;
     }
     /* `.`: the jump itself. */
-    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && strcmp(e->symbol, ".") == 0) {
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && as_strcmp(e->symbol, ".") == 0) {
         *target_out = idx;
         return 0;
     }
@@ -14662,7 +14662,7 @@ static int relax_branch_target(emit_ctx_t *ctx, size_t idx, const char *section,
     }
     if (target_st == NULL || parsed_stmt_index(ctx, target_st, &target) != 0 ||
         target >= ctx->stmt_section_at_count || ctx->stmt_section_at[target] == NULL ||
-        strcmp(ctx->stmt_section_at[target], section) != 0) {
+        as_strcmp(ctx->stmt_section_at[target], section) != 0) {
         return -1;
     }
     *target_out = target;
@@ -14821,7 +14821,7 @@ static int relax_branches(emit_ctx_t *ctx) {
             for (p = name; *p != '\0'; ++p) {
                 h = (h ^ (unsigned char)*p) * 16777619u;
             }
-            for (s = h & (cap - 1); slots[s] != 0 && strcmp(at[slots[s] - 1].name, name) != 0; s = (s + 1) & (cap - 1)) {
+            for (s = h & (cap - 1); slots[s] != 0 && as_strcmp(at[slots[s] - 1].name, name) != 0; s = (s + 1) & (cap - 1)) {
             }
             if (slots[s] == 0) {
                 if (at_count == at_cap) {
@@ -14848,8 +14848,8 @@ static int relax_branches(emit_ctx_t *ctx) {
                 const as_stmt_t *st = &ctx->parsed->items[i];
 
                 if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
-                    (strcmp(st->u.directive.name, ".p2align") == 0 || strcmp(st->u.directive.name, ".balign") == 0 ||
-                     strcmp(st->u.directive.name, ".align") == 0 || strcmp(st->u.directive.name, ".org") == 0)) {
+                    (as_strcmp(st->u.directive.name, ".p2align") == 0 || as_strcmp(st->u.directive.name, ".balign") == 0 ||
+                     as_strcmp(st->u.directive.name, ".align") == 0 || as_strcmp(st->u.directive.name, ".org") == 0)) {
                     at[sid[i]].region++;
                 }
             }
@@ -15052,7 +15052,7 @@ static int call_to_place_target(const as_stmt_t *st, uint64_t sec_off, long long
     op = &st->u.instr.operands[0];
     if ((op->kind != AS_OPERAND_LABEL_REF && op->kind != AS_OPERAND_IMMEDIATE) ||
         (op->raw != NULL && op->raw[0] == '*') || relax_branch_parts(op->u.expr, &place, &addend) != 0 ||
-        place->kind != AS_EXPR_SYMBOL || strcmp(place->symbol, ".") != 0) {
+        place->kind != AS_EXPR_SYMBOL || as_strcmp(place->symbol, ".") != 0) {
         return -1;
     }
     *abs_target = (long long)sec_off + addend;
@@ -15070,7 +15070,7 @@ static int relaxed_place_branch_target(emit_ctx_t *ctx, const as_stmt_t *st, con
         relax_branch_parts(st->u.instr.operands[0].u.expr, &place, &addend) != 0 || place->kind != AS_EXPR_SYMBOL) {
         return -1;
     }
-    if (strcmp(place->symbol, ".") == 0) {
+    if (as_strcmp(place->symbol, ".") == 0) {
         *abs_target = (long long)sec_off + addend;
         return 0;
     }
@@ -15133,7 +15133,7 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     }
     e = op->u.expr;
     is_local = ((e != NULL && expr_has_local_ref(e)) ||
-                (section_name != NULL && strcmp(section_name, ".altinstr_replacement") != 0 &&
+                (section_name != NULL && as_strcmp(section_name, ".altinstr_replacement") != 0 &&
                  e != NULL && expr_is_local_temp_symbol(e) &&
                  (x86_code_bits == 16u ? local_temp_branch_target_within(ctx, st, e, 64)
                                        : (e->kind == AS_EXPR_SYMBOL &&
@@ -15193,7 +15193,7 @@ static int arm_label(void *cookie, const char *name, uint64_t *offset) {
     uint64_t off = 0;
 
     if (find_label_virtual_location(lc->ctx, NULL, NULL, 0, 0, name, &sec, &off) != 0 || sec == NULL ||
-        lc->section == NULL || strcmp(sec, lc->section) != 0) {
+        lc->section == NULL || as_strcmp(sec, lc->section) != 0) {
         return 1;
     }
     *offset = off;
@@ -15280,12 +15280,12 @@ static int stmt_is_of_variable_size(const as_stmt_t *st) {
         size_t i;
 
         for (i = 0; i < sizeof(always) / sizeof(always[0]); ++i) {
-            if (strcmp(d->name, always[i]) == 0) {
+            if (as_strcmp(d->name, always[i]) == 0) {
                 return 1;
             }
         }
         for (i = 0; i < sizeof(counted) / sizeof(counted[0]); ++i) {
-            if (strcmp(d->name, counted[i]) == 0) {
+            if (as_strcmp(d->name, counted[i]) == 0) {
                 long long n;
 
                 return d->arg_count == 0 || d->args[0] == NULL || parse_int64(d->args[0], &n) != 0;
@@ -15318,7 +15318,7 @@ static int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
         return -1;
     }
     sec = ctx->stmt_section_at[ia];
-    if (sec == NULL || ctx->stmt_section_at[ib] == NULL || strcmp(sec, ctx->stmt_section_at[ib]) != 0) {
+    if (sec == NULL || ctx->stmt_section_at[ib] == NULL || as_strcmp(sec, ctx->stmt_section_at[ib]) != 0) {
         return -1;
     }
     lo = ia < ib ? ia : ib;
@@ -15328,7 +15328,7 @@ static int fixed_label_diff(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_c
 
         if (stmt_is_of_variable_size(between) &&
             (between->kind == AS_STMT_DIRECTIVE ||
-             (ctx->stmt_section_at[k] != NULL && strcmp(ctx->stmt_section_at[k], sec) == 0))) {
+             (ctx->stmt_section_at[k] != NULL && as_strcmp(ctx->stmt_section_at[k], sec) == 0))) {
             return -1;
         }
     }
@@ -15661,13 +15661,13 @@ static int parse_loc(const as_directive_t *d, struct line_row *r, unsigned *stic
         if (have < 2) {
             return -1;
         }
-        if (strcmp(word, "basic_block") == 0) {
+        if (as_strcmp(word, "basic_block") == 0) {
             r->row.flags |= AS_DWLINE_BASIC_BLOCK;
-        } else if (strcmp(word, "prologue_end") == 0) {
+        } else if (as_strcmp(word, "prologue_end") == 0) {
             r->row.flags |= AS_DWLINE_PROLOGUE_END;
-        } else if (strcmp(word, "epilogue_begin") == 0) {
+        } else if (as_strcmp(word, "epilogue_begin") == 0) {
             r->row.flags |= AS_DWLINE_EPILOGUE_BEGIN;
-        } else if (strcmp(word, "is_stmt") == 0 || strcmp(word, "isa") == 0 || strcmp(word, "discriminator") == 0) {
+        } else if (as_strcmp(word, "is_stmt") == 0 || as_strcmp(word, "isa") == 0 || as_strcmp(word, "discriminator") == 0) {
             char value[64];
             unsigned long n;
 
@@ -15686,13 +15686,13 @@ static int parse_loc(const as_directive_t *d, struct line_row *r, unsigned *stic
             } else {
                 *sticky_stmt = (unsigned)n;
             }
-        } else if (strcmp(word, "view") == 0) {
+        } else if (as_strcmp(word, "view") == 0) {
             *why = "a name after view";
             if (!next_word(d, &arg, &at, word, sizeof(word)) || strlen(word) >= sizeof(r->view)) {
                 return -1;
             }
             memcpy(r->view, word, strlen(word) + 1);
-            if (strcmp(word, "-0") == 0) {
+            if (as_strcmp(word, "-0") == 0) {
                 r->row.flags |= AS_DWLINE_VIEW_RESET;
             }
         } else {
@@ -15766,7 +15766,7 @@ static int line_rows_from(emit_ctx_t *ctx, const uint64_t *offsets) {
     for (i = 0; i < ctx->parsed->count; ++i) {
         const as_stmt_t *st = &ctx->parsed->items[i];
         int is_loc = st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
-                     strcmp(st->u.directive.name, ".loc") == 0;
+                     as_strcmp(st->u.directive.name, ".loc") == 0;
         struct line_row now;
         const char *why = "";
         const char *section = NULL;
@@ -15835,7 +15835,7 @@ static int line_rows_from(emit_ctx_t *ctx, const uint64_t *offsets) {
     }
     /* The rows that have names, by them. */
     for (i = 0; i < ctx->line_row_count; ++i) {
-        if (ctx->line_rows[i].view[0] != '\0' && strcmp(ctx->line_rows[i].view, "-0") != 0 &&
+        if (ctx->line_rows[i].view[0] != '\0' && as_strcmp(ctx->line_rows[i].view, "-0") != 0 &&
             as_strmap_put(&ctx->line_views, ctx->line_rows[i].view, i) != 0) {
             set_err(ctx, "out of memory");
             return -1;
@@ -15860,12 +15860,12 @@ static int line_view_names(emit_ctx_t *ctx) {
         size_t arg = 0;
         const char *at = NULL;
 
-        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || strcmp(d->name, ".loc") != 0) {
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || as_strcmp(d->name, ".loc") != 0) {
             continue;
         }
         while (next_word(d, &arg, &at, word, sizeof(word))) {
-            if (strcmp(word, "view") == 0 && next_word(d, &arg, &at, word, sizeof(word)) &&
-                strcmp(word, "-0") != 0) {
+            if (as_strcmp(word, "view") == 0 && next_word(d, &arg, &at, word, sizeof(word)) &&
+                as_strcmp(word, "-0") != 0) {
                 char *kept = xstrdup(word);
                 void *grown = kept != NULL
                                   ? realloc(ctx->line_view_name_list,
@@ -15915,7 +15915,7 @@ static int line_view_value(emit_ctx_t *ctx, const char *name, long long *out) {
     for (i = at; i > 0; --i) {
         const struct line_row *before = &ctx->line_rows[i - 1];
 
-        if (strcmp(before->row.section, ctx->line_rows[at].row.section) != 0) {
+        if (as_strcmp(before->row.section, ctx->line_rows[at].row.section) != 0) {
             continue;
         }
         if (before->row.offset != ctx->line_rows[at].row.offset) {
@@ -16020,11 +16020,11 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
     if (d == NULL || d->name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".uleb128") == 0 || strcmp(d->name, ".sleb128") == 0) {
+    if (as_strcmp(d->name, ".uleb128") == 0 || as_strcmp(d->name, ".sleb128") == 0) {
         return append_leb128_directive(ctx, buf, section_name, st, sec_off, x86_code_bits, d);
     }
     if (ctx != NULL && ctx->virtual_scanning &&
-        (strcmp(d->name, ".skip") == 0 || strcmp(d->name, ".space") == 0)) {
+        (as_strcmp(d->name, ".skip") == 0 || as_strcmp(d->name, ".space") == 0)) {
         long long tmp = 0;
         if (ctx->virtual_scanning > 1) {
             return 1;
@@ -16036,10 +16036,10 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             return 1;
         }
     }
-    if (strcmp(d->name, ".incbin") == 0) {
+    if (as_strcmp(d->name, ".incbin") == 0) {
         return append_incbin_to_bytebuf(ctx, st, buf, d);
     }
-    if (strcmp(d->name, ".org") == 0) {
+    if (as_strcmp(d->name, ".org") == 0) {
         long long target = 0;
         as_expr_t *expr;
 
@@ -16085,7 +16085,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         return 1;
     }
-    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+    if (as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 || as_strcmp(d->name, ".p2align") == 0) {
         long long raw = 0;
         long long fill = section_name_has_exec_flag(ctx, section_name) ? 0x90 : 0;
         size_t align;
@@ -16100,7 +16100,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             (parse_int64(d->args[1], &fill) != 0 && parse_const_expr_string(d->args[1], &fill) != 0)) {
             return -1;
         }
-        if (strcmp(d->name, ".p2align") == 0) {
+        if (as_strcmp(d->name, ".p2align") == 0) {
             if (raw > 31) {
                 return -1;
             }
@@ -16151,7 +16151,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         return 1;
     }
-    if (strcmp(d->name, ".fill") == 0) {
+    if (as_strcmp(d->name, ".fill") == 0) {
         long long repeat = 0;
         long long size = 1;
         long long value = 0;
@@ -16195,14 +16195,14 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         return 1;
     }
-    if (strcmp(d->name, ".byte") == 0) {
+    if (as_strcmp(d->name, ".byte") == 0) {
         width = 1;
-    } else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
-               strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) {
+    } else if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
+               as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0) {
         width = 2;
-    } else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) {
+    } else if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".4byte") == 0) {
         width = 4;
-    } else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) {
+    } else if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) {
         width = 8;
     }
     if (width != 0) {
@@ -16268,7 +16268,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         }
         return 1;
     }
-    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+    if (as_strcmp(d->name, ".zero") == 0 || as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) {
         long long count = 0;
         long long fill = 0;
         size_t j;
@@ -16288,7 +16288,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
                 /* While places are still being found a count may not be
                  * known yet; once they are, one that is no number was
                  * taken for none, and is refused as that of .zero is. */
-                if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) && ctx != NULL &&
+                if ((as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) && ctx != NULL &&
                     ctx->virtual_scanning) {
                     as_expr_free(expr);
                     expr = NULL;
@@ -16305,7 +16305,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             }
             as_expr_free(expr);
         }
-        if (count < 0 && (strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0)) {
+        if (count < 0 && (as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0)) {
             count = 0;
         }
         if (count < 0) {
@@ -16319,7 +16319,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
                     count);
             return -1;
         }
-        if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) && d->arg_count >= 2) {
+        if ((as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) && d->arg_count >= 2) {
             if (parse_int64(d->args[1], &fill) != 0 && parse_const_expr_string(d->args[1], &fill) != 0) {
                 return -1;
             }
@@ -16503,53 +16503,93 @@ static int stmt_code_find(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off
  * register has been given another name (which a later statement may
  * give again), or the key is too long to be worth keeping.
  */
+/* What a key is put together of: a string, and a number.  Each is ended
+ * by a byte no name has, so that no two keys of different things are
+ * the same.  0, or -1 where the key has no room for it. */
+static int key_str(char *key, size_t key_sz, size_t *n, const char *s) {
+    size_t len = strlen(s);
+
+    if (*n + len + 2 > key_sz) {
+        return -1;
+    }
+    memcpy(key + *n, s, len);
+    *n += len;
+    key[(*n)++] = '\x1f';
+    return 0;
+}
+
+static int key_num(char *key, size_t key_sz, size_t *n, unsigned long long v) {
+    if (*n + 18 > key_sz) {
+        return -1;
+    }
+    do {
+        key[(*n)++] = "0123456789abcdef"[v & 15u];
+        v >>= 4;
+    } while (v != 0);
+    key[(*n)++] = '\x1e';
+    return 0;
+}
+
 static size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz) {
     const as_instruction_t *in = &st->u.instr;
     size_t n;
     size_t i;
-    int w;
+    int ok;
 
     /* (One that is its bytes already has no operands to be the key.) */
     if ((ctx != NULL && ctx->asm_reg_alias_count != 0) || in->code_len != 0 || !stmt_is_place_free(st)) {
         return 0;
     }
-    w = snprintf(key, key_sz, "%u %x %x %x %x %d %d %d %d %d %u %s %s", x86_code_bits, in->prefixes, in->pseudo,
-                 in->rex_bits, in->opmask, in->have_opmask, in->zeroing, in->broadcast, in->sae, in->rounding_mode,
-                 in->syntax_intel, in->segment_override != NULL ? in->segment_override : "-", in->mnemonic);
-    if (w < 0 || (size_t)w >= key_sz) {
-        return 0;
-    }
-    n = (size_t)w;
+    /* (Put together by hand: it is made for every instruction of
+     * registers and numbers that is read, and snprintf() was a fifth of
+     * the time such a source took.) */
+    n = 0;
+    ok = key_num(key, key_sz, &n, x86_code_bits) == 0 && key_num(key, key_sz, &n, in->prefixes) == 0 &&
+         key_num(key, key_sz, &n, in->pseudo) == 0 && key_num(key, key_sz, &n, in->rex_bits) == 0 &&
+         key_num(key, key_sz, &n, in->opmask) == 0 &&
+         key_num(key, key_sz, &n,
+                 (unsigned long long)in->have_opmask | ((unsigned long long)in->zeroing << 1) |
+                     ((unsigned long long)in->sae << 2) | ((unsigned long long)in->syntax_intel << 3)) == 0 &&
+         key_num(key, key_sz, &n, in->broadcast) == 0 &&
+         key_num(key, key_sz, &n, (unsigned long long)(long long)in->rounding_mode) == 0 &&
+         key_str(key, key_sz, &n, in->segment_override != NULL ? in->segment_override : "-") == 0 &&
+         key_str(key, key_sz, &n, in->mnemonic) == 0;
     /* What each operand is, not how it was written: a name that is a
      * number is written the same when the number has been set again. */
-    for (i = 0; i < in->operand_count; ++i) {
+    for (i = 0; ok && i < in->operand_count; ++i) {
         const as_operand_t *op = &in->operands[i];
-        char mark = op->raw != NULL && (op->raw[0] == '$' || op->raw[0] == '*') ? op->raw[0] : '.';
+        char mark[3];
         long long v = 0;
 
+        mark[0] = '\t';
+        mark[1] = op->raw != NULL && (op->raw[0] == '$' || op->raw[0] == '*') ? op->raw[0] : '.';
+        mark[2] = '\0';
+        ok = key_str(key, key_sz, &n, mark) == 0;
         if (op->kind == AS_OPERAND_REGISTER) {
-            w = snprintf(key + n, key_sz - n, "\t%c%%%s", mark, op->u.reg);
+            ok = ok && key_str(key, key_sz, &n, "%") == 0 && key_str(key, key_sz, &n, op->u.reg) == 0;
         } else if (op->kind == AS_OPERAND_IMMEDIATE) {
             if (eval_expr_const(op->u.expr, &v) != 0) {
                 return 0;
             }
-            w = snprintf(key + n, key_sz - n, "\t%c%lld", mark, v);
+            ok = ok && key_str(key, key_sz, &n, "$") == 0 && key_num(key, key_sz, &n, (unsigned long long)v) == 0;
         } else {
             const as_mem_operand_t *m = &op->u.mem;
 
             if (m->disp != NULL && eval_expr_const(m->disp, &v) != 0) {
                 return 0;
             }
-            w = snprintf(key + n, key_sz - n, "\t%c%s:%d%lld(%s,%s,%d)%d", mark,
-                         m->segment_reg != NULL ? m->segment_reg : "", m->disp != NULL, v,
-                         m->base_reg != NULL ? m->base_reg : "", m->index_reg != NULL ? m->index_reg : "", m->scale,
-                         (int)m->size_bits);
+            ok = ok && key_str(key, key_sz, &n, m->segment_reg != NULL ? m->segment_reg : "") == 0 &&
+                 key_num(key, key_sz, &n, m->disp != NULL) == 0 && key_num(key, key_sz, &n, (unsigned long long)v) == 0 &&
+                 key_str(key, key_sz, &n, m->base_reg != NULL ? m->base_reg : "") == 0 &&
+                 key_str(key, key_sz, &n, m->index_reg != NULL ? m->index_reg : "") == 0 &&
+                 key_num(key, key_sz, &n, (unsigned long long)m->scale) == 0 &&
+                 key_num(key, key_sz, &n, (unsigned long long)m->size_bits) == 0;
         }
-        if (w < 0 || (size_t)w >= key_sz - n) {
-            return 0;
-        }
-        n += (size_t)w;
     }
+    if (!ok || n >= key_sz) {
+        return 0;
+    }
+    key[n] = '\0';
     return n;
 }
 
@@ -16573,7 +16613,7 @@ static int text_code_find(const char *key, size_t n, unsigned char *code, size_t
     for (at = h & (text_codes.cap - 1); text_codes.slots[at].key != NULL; at = (at + 1) & (text_codes.cap - 1)) {
         const struct text_code *t = &text_codes.slots[at];
 
-        if (t->hash == h && strcmp(t->key, key) == 0) {
+        if (t->hash == h && as_strcmp(t->key, key) == 0) {
             if (t->len > code_cap) {
                 return 0;
             }
@@ -16831,7 +16871,7 @@ static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_
             } else if ((expr_has_local_ref(rel_expr) || expr_is_local_temp_symbol(rel_expr)) &&
                        eval_virtual_addr_expr(ctx, st, rel_expr, &target) == 0 &&
                        target.has_section &&
-                       strcmp(target.section, section_name) == 0) {
+                       as_strcmp(target.section, section_name) == 0) {
                 abs_target = target.value;
             } else {
                 as_expr_free(raw_local_expr);
@@ -17102,7 +17142,7 @@ static int reloc_type_is_tls(unsigned machine, uint32_t t) {
 /* `.` for an expression that is being made a relocation's addend: the
  * offset in its section of the statement, which the cookie points at. */
 static int reloc_dot_lookup(void *cookie, const char *name, long long *out) {
-    if (strcmp(name, ".") != 0) {
+    if (as_strcmp(name, ".") != 0) {
         return 0;
     }
     *out = *(const long long *)cookie;
@@ -17225,7 +17265,7 @@ static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, const 
             return AS_RELOC_TYPE_BAD;
         }
         /* The table itself, by name, in i386 code: relative to here. */
-        if (machine == EM_386 && strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 && fallback == R_386_32) {
+        if (machine == EM_386 && as_strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 && fallback == R_386_32) {
             return R_386_GOTPC;
         }
     }
@@ -17241,7 +17281,7 @@ static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
     pos = hash_name(name) & (ctx->sym_index_cap - 1);
     while (ctx->sym_index[pos] != 0) {
         size_t idx = ctx->sym_index[pos] - 1;
-        if (strcmp(ctx->sym_map[idx].name, name) == 0) {
+        if (as_strcmp(ctx->sym_map[idx].name, name) == 0) {
             return ctx->sym_map[idx].sym;
         }
         pos = (pos + 1) & (ctx->sym_index_cap - 1);
@@ -17481,7 +17521,7 @@ static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, con
     if (s->alias_target == NULL || s->name == NULL) {
         return 0;
     }
-    if (strcmp(s->alias_target, s->name) == 0) {
+    if (as_strcmp(s->alias_target, s->name) == 0) {
         return 1;
     }
     if (s->alias_minus != NULL || s->alias_from_dot || is_local_temp_symbol_name(s->alias_target)) {
@@ -17662,7 +17702,7 @@ static int check_file_numbers(emit_ctx_t *ctx, const as_parse_result_t *parsed) 
         char *end = NULL;
         unsigned long number;
 
-        if (st->kind != AS_STMT_DIRECTIVE || strcmp(st->u.directive.name, ".file") != 0 ||
+        if (st->kind != AS_STMT_DIRECTIVE || as_strcmp(st->u.directive.name, ".file") != 0 ||
             st->u.directive.arg_count == 0 || st->u.directive.args[0] == NULL) {
             continue;
         }
@@ -17683,7 +17723,7 @@ static int check_file_numbers(emit_ctx_t *ctx, const as_parse_result_t *parsed) 
             }
         }
         if (k < count) {
-            if (strcmp(seen[k].name, end) != 0) {
+            if (as_strcmp(seen[k].name, end) != 0) {
                 set_err(ctx, "%s:%u: file number %lu is %s already, and cannot be %s",
                         st->file != NULL ? st->file : "<input>", st->line, number, seen[k].name, end);
                 rc = -1;
@@ -17720,7 +17760,7 @@ static int collect_directive_presence(const as_parse_result_t *parsed, int *has_
         if (st->kind != AS_STMT_DIRECTIVE) {
             continue;
         }
-        if (strcmp(st->u.directive.name, ".file") == 0 || strcmp(st->u.directive.name, ".loc") == 0) {
+        if (as_strcmp(st->u.directive.name, ".file") == 0 || as_strcmp(st->u.directive.name, ".loc") == 0) {
             *has_file_loc = 1;
         }
         if (strncmp(st->u.directive.name, ".cfi_", 5) == 0) {
@@ -17849,14 +17889,14 @@ static int source_has_loc(const as_parse_result_t *parsed) {
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
             continue;
         }
-        if (strcmp(d->name, ".loc") == 0) {
+        if (as_strcmp(d->name, ".loc") == 0) {
             return 1;
         }
         /* A file with a number is of a line table the source means to
          * write, whether it has got to a row of it or not: a compiler's
          * output for a function with no line, and what GCC's configure
          * asks -g of. */
-        if (strcmp(d->name, ".file") == 0 && d->arg_count != 0 && d->args[0] != NULL &&
+        if (as_strcmp(d->name, ".file") == 0 && d->arg_count != 0 && d->args[0] != NULL &&
             isdigit((unsigned char)d->args[0][0])) {
             return 1;
         }
@@ -17874,9 +17914,9 @@ static int source_has_debug_sections(const as_parse_result_t *parsed) {
         const as_directive_t *d = &st->u.directive;
 
         if (st->kind == AS_STMT_DIRECTIVE && d->name != NULL &&
-            (strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) && d->arg_count != 0 &&
+            (as_strcmp(d->name, ".section") == 0 || as_strcmp(d->name, ".pushsection") == 0) && d->arg_count != 0 &&
             d->args[0] != NULL &&
-            (strcmp(d->args[0], ".debug_line") == 0 || strcmp(d->args[0], ".debug_info") == 0)) {
+            (as_strcmp(d->args[0], ".debug_line") == 0 || as_strcmp(d->args[0], ".debug_info") == 0)) {
             return 1;
         }
     }
@@ -18019,7 +18059,7 @@ static int emit_line_table(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
         char *end;
         void *grown;
 
-        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || strcmp(d->name, ".file") != 0 ||
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL || as_strcmp(d->name, ".file") != 0 ||
             !next_word(d, &arg, &at, word, sizeof(word)) || !isdigit((unsigned char)word[0])) {
             continue;
         }
@@ -18031,7 +18071,7 @@ static int emit_line_table(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
             goto out;
         }
         /* A second string is the name, and the first its directory. */
-        if (next_word(d, &arg, &at, word, sizeof(word)) && strcmp(word, "md5") != 0) {
+        if (next_word(d, &arg, &at, word, sizeof(word)) && as_strcmp(word, "md5") != 0) {
             second = unquoted(word);
         }
         for (k = 0; k < file_count; ++k) {
@@ -18100,7 +18140,7 @@ static int emit_line_table(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
     for (i = 0; i < ctx->line_row_count; ++i) {
         rows[i] = ctx->line_rows[i].row;
         for (k = 0; k < end_count; ++k) {
-            if (strcmp(ends[k].section, rows[i].section) == 0) {
+            if (as_strcmp(ends[k].section, rows[i].section) == 0) {
                 break;
             }
         }
@@ -18183,7 +18223,7 @@ static int emit_call_frames(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
             strncmp(st->u.directive.name, ".cfi_", 5) != 0) {
             continue;
         }
-        if (strcmp(st->u.directive.name, ".cfi_sections") != 0) {
+        if (as_strcmp(st->u.directive.name, ".cfi_sections") != 0) {
             if (i >= ctx->stmt_section_at_count || ctx->stmt_section_at[i] == NULL) {
                 set_err(ctx, "%s:%u: %s: where it stands could not be found",
                         st->file != NULL ? st->file : "<input>", st->line, st->u.directive.name);
@@ -18262,7 +18302,7 @@ static int emit_file_symbols_and_comment(emit_ctx_t *ctx) {
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
             continue;
         }
-        if (strcmp(d->name, ".file") == 0 && d->arg_count == 1) {
+        if (as_strcmp(d->name, ".file") == 0 && d->arg_count == 1) {
             const char *arg = d->args[0] != NULL ? d->args[0] : "";
 
             /* (With a number before the name it is a file of the line
@@ -18286,7 +18326,7 @@ static int emit_file_symbols_and_comment(emit_ctx_t *ctx) {
                     goto out;
                 }
             }
-        } else if (strcmp(d->name, ".ident") == 0) {
+        } else if (as_strcmp(d->name, ".ident") == 0) {
             text = directive_string(d, 0, &len);
             if (text == NULL) {
                 set_err(ctx, "%s:%u: .ident: a string in quotes is wanted", st->file != NULL ? st->file : "<input>",
@@ -18347,7 +18387,7 @@ static const dot_loc_t *find_dot_loc(const dot_loc_t *locs, size_t count, const 
         return NULL;
     }
     for (i = 0; i < count; ++i) {
-        if (locs[i].file != NULL && locs[i].line == line && strcmp(locs[i].file, file) == 0) {
+        if (locs[i].file != NULL && locs[i].line == line && as_strcmp(locs[i].file, file) == 0) {
             return &locs[i];
         }
     }
@@ -18442,7 +18482,7 @@ static const sym_loc_t *find_sym_loc(const sym_loc_t *locs, const name_index_t *
     pos = hash_name(name) & (idx->cap - 1);
     while (idx->slots[pos] != 0) {
         size_t hit = idx->slots[pos] - 1;
-        if (strcmp(locs[hit].name, name) == 0) {
+        if (as_strcmp(locs[hit].name, name) == 0) {
             return &locs[hit];
         }
         pos = (pos + 1) & (idx->cap - 1);
@@ -18464,7 +18504,7 @@ static int upsert_sym_loc(sym_loc_t **locs, size_t *count, size_t *cap, name_ind
     pos = hash_name(name) & (idx->cap - 1);
     while (idx->slots[pos] != 0) {
         size_t hit = idx->slots[pos] - 1;
-        if (strcmp((*locs)[hit].name, name) == 0) {
+        if (as_strcmp((*locs)[hit].name, name) == 0) {
             (*locs)[hit].sec = sec;
             (*locs)[hit].off = off;
             return 0;
@@ -18766,7 +18806,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 const sym_loc_t *base_loc = NULL;
 
                 if (base_sym != NULL && base_sym->alias_from_dot && base_sym->alias_target != NULL &&
-                    strcmp(base_sym->alias_target, s->size_target_symbol) == 0) {
+                    as_strcmp(base_sym->alias_target, s->size_target_symbol) == 0) {
                     const dot_loc_t *dot = find_dot_loc(dot_locs, dot_count, base_sym->def_file, base_sym->def_line);
                     if (dot == NULL || dot->sec == NULL || dot->sec != target_loc->sec ||
                         dot->off < target_loc->off) {
@@ -18908,7 +18948,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 size_t tf;
 
                 for (tf = 0; tf < ctx->cfg->thumb_func_count; ++tf) {
-                    if (strcmp(ctx->cfg->thumb_funcs[tf], s->name) == 0) {
+                    if (as_strcmp(ctx->cfg->thumb_funcs[tf], s->name) == 0) {
                         thumb_bit = 1;
                         break;
                     }
@@ -19457,7 +19497,7 @@ static bin_section_t *bin_section_find(bin_section_vec_t *v, const char *name) {
         return NULL;
     }
     for (i = 0; i < v->count; ++i) {
-        if (strcmp(v->items[i].name, name) == 0) {
+        if (as_strcmp(v->items[i].name, name) == 0) {
             return &v->items[i];
         }
     }
@@ -19504,19 +19544,19 @@ static bin_section_t *bin_section_get_or_add(bin_section_vec_t *v, const char *n
     if (sec != NULL) {
         return sec;
     }
-    if (strcmp(name, ".text") == 0) {
+    if (as_strcmp(name, ".text") == 0) {
         type = SHT_PROGBITS;
         flags = SHF_ALLOC | SHF_EXECINSTR;
         align = 16;
-    } else if (strcmp(name, ".rodata") == 0) {
+    } else if (as_strcmp(name, ".rodata") == 0) {
         type = SHT_PROGBITS;
         flags = SHF_ALLOC;
         align = 4;
-    } else if (strcmp(name, ".data") == 0) {
+    } else if (as_strcmp(name, ".data") == 0) {
         type = SHT_PROGBITS;
         flags = SHF_ALLOC | SHF_WRITE;
         align = 4;
-    } else if (strcmp(name, ".bss") == 0) {
+    } else if (as_strcmp(name, ".bss") == 0) {
         type = SHT_NOBITS;
         flags = SHF_ALLOC | SHF_WRITE;
         align = 4;
@@ -19782,12 +19822,12 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
     d = &st->u.directive;
     *handled = 0;
 
-    if (strcmp(d->name, ".incbin") == 0) {
+    if (as_strcmp(d->name, ".incbin") == 0) {
         *handled = 1;
         return append_incbin_bytes(ctx, st, sec, d);
     }
-    if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
-        int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
+    if (as_strcmp(d->name, ".ascii") == 0 || as_strcmp(d->name, ".asciz") == 0 || as_strcmp(d->name, ".string") == 0) {
+        int nul = (as_strcmp(d->name, ".ascii") == 0) ? 0 : 1;
         *handled = 1;
         for (i = 0; i < d->arg_count; ++i) {
             const char *s = d->args[i] != NULL ? d->args[i] : "";
@@ -19810,8 +19850,8 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         sec->touched = 1;
         return 0;
     }
-    if (strcmp(d->name, ".float") == 0 || strcmp(d->name, ".double") == 0) {
-        int is_double = strcmp(d->name, ".double") == 0;
+    if (as_strcmp(d->name, ".float") == 0 || as_strcmp(d->name, ".double") == 0) {
+        int is_double = as_strcmp(d->name, ".double") == 0;
         *handled = 1;
         for (i = 0; i < d->arg_count; ++i) {
             char *tmp = trim_copy_arg(d->args[i]);
@@ -19854,7 +19894,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         sec->touched = 1;
         return 0;
     }
-    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+    if (as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 || as_strcmp(d->name, ".p2align") == 0) {
         unsigned long long raw;
         unsigned long long fill = (sec->flags & SHF_EXECINSTR) != 0 ? 0x90 : 0;
         size_t align;
@@ -19866,7 +19906,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         if (directive_has_arg(d, 1) && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".align fill", &fill) != 0) {
             return -1;
         }
-        if (strcmp(d->name, ".p2align") == 0) {
+        if (as_strcmp(d->name, ".p2align") == 0) {
             if (raw >= (unsigned long long)(sizeof(size_t) * CHAR_BIT - 1)) {
                 set_err(ctx, "%s:%u: .p2align exponent too large", st->file != NULL ? st->file : "<input>", st->line);
                 return -1;
@@ -19930,7 +19970,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         sec->touched = 1;
         return 0;
     }
-    if (strcmp(d->name, ".org") == 0) {
+    if (as_strcmp(d->name, ".org") == 0) {
         unsigned long long off;
         *handled = 1;
         if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".org offset", &off) != 0) {
@@ -19948,7 +19988,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         sec->touched = 1;
         return 0;
     }
-    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+    if (as_strcmp(d->name, ".zero") == 0 || as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) {
         unsigned long long n;
         unsigned long long fill = 0;
         long long signed_n = 0;
@@ -19982,7 +20022,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
                     st->file != NULL ? st->file : "<input>", st->line, d->name, n);
             return -1;
         }
-        if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) && d->arg_count >= 2) {
+        if ((as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) && d->arg_count >= 2) {
             long long fv = 0;
             if (parse_int64(d->args[1], &fv) != 0 && parse_const_expr_string(d->args[1], &fv) != 0) {
                 return -1;
@@ -19998,7 +20038,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         sec->touched = 1;
         return 0;
     }
-    if (strcmp(d->name, ".fill") == 0) {
+    if (as_strcmp(d->name, ".fill") == 0) {
         unsigned long long repeat = 0;
         unsigned long long size = 1;
         unsigned long long value = 0;
@@ -20046,18 +20086,18 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         sec->touched = 1;
         return 0;
     }
-    if (strcmp(d->name, ".byte") == 0 || strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
-        strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0 || strcmp(d->name, ".long") == 0 ||
-        strcmp(d->name, ".int") == 0 || strcmp(d->name, ".4byte") == 0 || strcmp(d->name, ".quad") == 0 ||
-        strcmp(d->name, ".8byte") == 0) {
+    if (as_strcmp(d->name, ".byte") == 0 || as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
+        as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0 || as_strcmp(d->name, ".long") == 0 ||
+        as_strcmp(d->name, ".int") == 0 || as_strcmp(d->name, ".4byte") == 0 || as_strcmp(d->name, ".quad") == 0 ||
+        as_strcmp(d->name, ".8byte") == 0) {
         unsigned width = 1;
         *handled = 1;
-        if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 || strcmp(d->name, ".hword") == 0 ||
-            strcmp(d->name, ".2byte") == 0) {
+        if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 || as_strcmp(d->name, ".hword") == 0 ||
+            as_strcmp(d->name, ".2byte") == 0) {
             width = 2;
-        } else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".int") == 0 || strcmp(d->name, ".4byte") == 0) {
+        } else if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".int") == 0 || as_strcmp(d->name, ".4byte") == 0) {
             width = 4;
-        } else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) {
+        } else if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) {
             width = 8;
         }
         for (i = 0; i < d->arg_count; ++i) {
@@ -20106,11 +20146,11 @@ static int is_binary_metadata_directive(const char *name) {
     if (name == NULL) {
         return 0;
     }
-    if (strcmp(name, ".globl") == 0 || strcmp(name, ".global") == 0 || strcmp(name, ".local") == 0 ||
-        strcmp(name, ".weak") == 0 || strcmp(name, ".type") == 0 || strcmp(name, ".size") == 0 ||
-        strcmp(name, ".hidden") == 0 || strcmp(name, ".protected") == 0 || strcmp(name, ".internal") == 0 ||
-        strcmp(name, ".symver") == 0 || strcmp(name, ".comm") == 0 || strcmp(name, ".lcomm") == 0 ||
-        strcmp(name, ".file") == 0 || strcmp(name, ".loc") == 0 || strcmp(name, ".ident") == 0) {
+    if (as_strcmp(name, ".globl") == 0 || as_strcmp(name, ".global") == 0 || as_strcmp(name, ".local") == 0 ||
+        as_strcmp(name, ".weak") == 0 || as_strcmp(name, ".type") == 0 || as_strcmp(name, ".size") == 0 ||
+        as_strcmp(name, ".hidden") == 0 || as_strcmp(name, ".protected") == 0 || as_strcmp(name, ".internal") == 0 ||
+        as_strcmp(name, ".symver") == 0 || as_strcmp(name, ".comm") == 0 || as_strcmp(name, ".lcomm") == 0 ||
+        as_strcmp(name, ".file") == 0 || as_strcmp(name, ".loc") == 0 || as_strcmp(name, ".ident") == 0) {
         return 1;
     }
     if (strncmp(name, ".cfi_", 5) == 0) {
@@ -20138,7 +20178,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
             const bin_section_t *s = &v->items[j];
             size_t align;
             size_t need;
-            if (used[j] || strcmp(s->name, first_order[i]) != 0) {
+            if (used[j] || as_strcmp(s->name, first_order[i]) != 0) {
                 continue;
             }
             if (s->buf.len == 0 && !s->touched) {
@@ -20174,7 +20214,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
         const bin_section_t *s = &v->items[i];
         size_t align;
         size_t need;
-        if (used[i] || strcmp(s->name, ".bss") == 0) {
+        if (used[i] || as_strcmp(s->name, ".bss") == 0) {
             continue;
         }
         if (s->buf.len == 0 && !s->touched) {
@@ -20209,7 +20249,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
         const bin_section_t *s = &v->items[i];
         size_t align;
         size_t need;
-        if (used[i] || strcmp(s->name, ".bss") != 0) {
+        if (used[i] || as_strcmp(s->name, ".bss") != 0) {
             continue;
         }
         if (s->buf.len == 0 && !s->touched) {
@@ -20309,15 +20349,15 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
                 cur_section = next;
                 continue;
             }
-            if (strcmp(d->name, ".code16") == 0) {
+            if (as_strcmp(d->name, ".code16") == 0) {
                 cur_code_bits = 16u;
                 continue;
             }
-            if (strcmp(d->name, ".code32") == 0) {
+            if (as_strcmp(d->name, ".code32") == 0) {
                 cur_code_bits = 32u;
                 continue;
             }
-            if (strcmp(d->name, ".code64") == 0) {
+            if (as_strcmp(d->name, ".code64") == 0) {
                 cur_code_bits = 64u;
                 continue;
             }
@@ -20328,8 +20368,8 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
             }
             {
                 size_t before = sec->buf.len;
-                int aligns = strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 ||
-                             strcmp(d->name, ".p2align") == 0;
+                int aligns = as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 ||
+                             as_strcmp(d->name, ".p2align") == 0;
 
                 sec->code_bits = cur_code_bits;
                 if (append_data_directive_binary(&ctx, st, sec, &handled) != 0) {
@@ -20830,7 +20870,7 @@ static int find_seen_local_label(const local_emit_label_t *labels, size_t count,
     for (i = 0; i < count; ++i) {
         const local_emit_label_t *cur = &labels[i];
         if (cur->digit != ref->local_digit || cur->file == NULL ||
-            strcmp(cur->file, ref->src_file) != 0) {
+            as_strcmp(cur->file, ref->src_file) != 0) {
             continue;
         }
         if (ref->local_resolved) {
@@ -20887,19 +20927,19 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
     }
     if (as_expr_eval_linear(expr, NULL, NULL, &lin) != AS_EXPR_EVAL_OK ||
         lin.add_symbol == NULL || lin.sub_symbol == NULL ||
-        strcmp(lin.add_symbol, ".") == 0 || strcmp(lin.sub_symbol, ".") == 0) {
+        as_strcmp(lin.add_symbol, ".") == 0 || as_strcmp(lin.sub_symbol, ".") == 0) {
         return -1;
     }
 
     /* Where the subtracted label is: it must be here. */
     if (find_seen_temp_label(labels, label_count, lin.sub_symbol, &seen) == 0) {
-        if (strcmp(seen->section, cur_section) != 0) {
+        if (as_strcmp(seen->section, cur_section) != 0) {
             return -1;
         }
         off = seen->off;
     } else if (find_label_virtual_location(ctx, st, NULL, 0, 0, lin.sub_symbol,
                                            &section, &off) != 0 ||
-               strcmp(section, cur_section) != 0) {
+               as_strcmp(section, cur_section) != 0) {
         return -1;
     }
 
@@ -20907,7 +20947,7 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
      * which the directive has already been given. */
     seen = NULL;
     if (find_seen_temp_label(labels, label_count, lin.add_symbol, &seen) == 0) {
-        if (strcmp(seen->section, cur_section) == 0) {
+        if (as_strcmp(seen->section, cur_section) == 0) {
             return -1;
         }
     } else {
@@ -20915,7 +20955,7 @@ static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const
 
         if (find_label_virtual_location(ctx, st, NULL, 0, 0, lin.add_symbol,
                                         &section, &add_off) == 0 &&
-            strcmp(section, cur_section) == 0) {
+            as_strcmp(section, cur_section) == 0) {
             return -1;
         }
     }
@@ -20960,7 +21000,7 @@ static size_t seen_label_hash(const char *name) {
 static void seen_label_put(const local_emit_label_t *labels, size_t *slots, size_t cap, size_t i) {
     size_t at = seen_label_hash(labels[i].name) & (cap - 1);
 
-    while (slots[at] != 0 && strcmp(labels[slots[at] - 1].name, labels[i].name) != 0) {
+    while (slots[at] != 0 && as_strcmp(labels[slots[at] - 1].name, labels[i].name) != 0) {
         at = (at + 1) & (cap - 1);
     }
     if (slots[at] == 0) {
@@ -21023,7 +21063,7 @@ static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
              at = (at + 1) & (seen_labels.cap - 1)) {
             const local_emit_label_t *cur = &labels[seen_labels.slots[at] - 1];
 
-            if (strcmp(cur->name, name) == 0) {
+            if (as_strcmp(cur->name, name) == 0) {
                 *out = cur;
                 return 0;
             }
@@ -21032,7 +21072,7 @@ static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
     }
     for (i = count; i > 0; --i) {
         const local_emit_label_t *cur = &labels[i - 1];
-        if (cur->name != NULL && strcmp(cur->name, name) == 0) {
+        if (cur->name != NULL && as_strcmp(cur->name, name) == 0) {
             *out = cur;
             return 0;
         }
@@ -21098,7 +21138,7 @@ static int data_value_add(data_value_t *v, const data_term_t *term) {
     for (i = 0; i < v->n; ++i) {
         /* (A symbol with an operator on it is another thing than the
          * symbol, and than itself with another operator.) */
-        if (v->t[i].is_section == term->is_section && strcmp(v->t[i].base, term->base) == 0 &&
+        if (v->t[i].is_section == term->is_section && as_strcmp(v->t[i].base, term->base) == 0 &&
             (v->t[i].reloc_op == NULL) == (term->reloc_op == NULL) &&
             (term->reloc_op == NULL || strcasecmp(v->t[i].reloc_op, term->reloc_op) == 0)) {
             v->t[i].k += term->k;
@@ -21155,7 +21195,7 @@ static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
         if (e->symbol == NULL) {
             return -1;
         }
-        if (strcmp(e->symbol, ".") == 0) {
+        if (as_strcmp(e->symbol, ".") == 0) {
             return data_eval_place(ev, ev->section, (long long)ev->off, NULL, out);
         }
         if (e->reloc_op == NULL && asm_var_lookup(ev->ctx, e->symbol, &out->c) == 0) {
@@ -21278,7 +21318,7 @@ static const data_term_t *data_value_place(const data_eval_t *ev, const data_val
     for (i = 0; i < v->n; ++i) {
         if (v->t[i].k == 1 && place == NULL) {
             place = &v->t[i];
-        } else if (v->t[i].k == -1 && v->t[i].is_section && strcmp(v->t[i].base, ev->section) == 0 && !*pcrel) {
+        } else if (v->t[i].k == -1 && v->t[i].is_section && as_strcmp(v->t[i].base, ev->section) == 0 && !*pcrel) {
             *pcrel = 1;
         } else {
             return NULL;
@@ -21579,11 +21619,11 @@ static int emit_relocations(emit_ctx_t *ctx) {
             if (trc > 0) {
                 continue;
             }
-            if (strcmp(d->name, ".byte") == 0) width = 1;
-            else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
-                     strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
-            else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
-            else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
+            if (as_strcmp(d->name, ".byte") == 0) width = 1;
+            else if (as_strcmp(d->name, ".word") == 0 || as_strcmp(d->name, ".short") == 0 ||
+                     as_strcmp(d->name, ".hword") == 0 || as_strcmp(d->name, ".2byte") == 0) width = 2;
+            else if (as_strcmp(d->name, ".long") == 0 || as_strcmp(d->name, ".4byte") == 0) width = 4;
+            else if (as_strcmp(d->name, ".quad") == 0 || as_strcmp(d->name, ".8byte") == 0) width = 8;
 
             ctx->pad_after_data = sb->after_data;
             drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
@@ -21596,9 +21636,9 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 return -1;
             }
             /* Padding leaves it as it was; `.org` is not data. */
-            if ((uint64_t)sb->buf.len > cur_off && strcmp(d->name, ".align") != 0 &&
-                strcmp(d->name, ".balign") != 0 && strcmp(d->name, ".p2align") != 0) {
-                sb->after_data = strcmp(d->name, ".org") != 0;
+            if ((uint64_t)sb->buf.len > cur_off && as_strcmp(d->name, ".align") != 0 &&
+                as_strcmp(d->name, ".balign") != 0 && as_strcmp(d->name, ".p2align") != 0) {
+                sb->after_data = as_strcmp(d->name, ".org") != 0;
             }
             if (width != 0) {
                 for (j = 0; j < d->arg_count; ++j) {
@@ -21667,7 +21707,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                 expr->rhs != NULL &&
                                 expr->rhs->kind == AS_EXPR_SYMBOL &&
                                 expr->rhs->symbol != NULL &&
-                                strcmp(expr->rhs->symbol, ".") == 0) {
+                                as_strcmp(expr->rhs->symbol, ".") == 0) {
                                 minuend = expr->lhs;
                             } else if (label_difference_as_pcrel(ctx, st, expr, track.current,
                                                                  cur_off + (uint64_t)(j * width),
@@ -21696,7 +21736,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                 }
                             } else if (minuend->kind == AS_EXPR_SYMBOL &&
                                        minuend->symbol != NULL &&
-                                       strcmp(minuend->symbol, ".") != 0) {
+                                       as_strcmp(minuend->symbol, ".") != 0) {
                                 const char *target_section = "";
                                 uint64_t target_off = 0;
                                 if (is_local_temp_symbol_name(minuend->symbol)) {
@@ -21933,27 +21973,27 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         is_label_difference = 1;
                     } else if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK && lin.add_symbol != NULL &&
                                lin.sub_symbol != NULL && lin.add_local == NULL && lin.sub_local == NULL &&
-                               (strcmp(lin.add_symbol, ".") == 0 || strcmp(lin.sub_symbol, ".") == 0)) {
+                               (as_strcmp(lin.add_symbol, ".") == 0 || as_strcmp(lin.sub_symbol, ".") == 0)) {
                         /*
                          * With `.`, which is where the instruction
                          * begins: `. - label` and `label - .` are
                          * numbers, and `ext - .` is a distance.
                          */
                         long long here = (long long)cur_off;
-                        const char *other = strcmp(lin.add_symbol, ".") == 0 ? lin.sub_symbol : lin.add_symbol;
-                        int dot_is_taken = strcmp(lin.sub_symbol, ".") == 0;
+                        const char *other = as_strcmp(lin.add_symbol, ".") == 0 ? lin.sub_symbol : lin.add_symbol;
+                        int dot_is_taken = as_strcmp(lin.sub_symbol, ".") == 0;
                         as_expr_linear_t at;
                         const char *label_section = "";
                         uint64_t label_off = 0;
 
-                        if (strcmp(other, ".") == 0) {
+                        if (as_strcmp(other, ".") == 0) {
                             is_label_difference = 1;
                             label_difference = lin.value;
                         } else if (as_expr_eval_linear(e, reloc_dot_lookup, &here, &at) != AS_EXPR_EVAL_OK) {
                             taken_from = lin.sub_symbol;
                         } else if (find_label_virtual_location(ctx, NULL, NULL, 0, 0, other, &label_section,
                                                                &label_off) == 0 &&
-                                   track.current != NULL && strcmp(label_section, track.current) == 0) {
+                                   track.current != NULL && as_strcmp(label_section, track.current) == 0) {
                             is_label_difference = 1;
                             label_difference = at.value + (dot_is_taken ? (long long)label_off : -(long long)label_off);
                         } else if (dot_is_taken) {
@@ -21969,7 +22009,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         taken_from = lin.sub_symbol;
                         taken_value = lin.value;
                     } else if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK && lin.add_symbol != NULL &&
-                               strcmp(lin.add_symbol, ".") == 0 && lin.sub_symbol == NULL && lin.add_local == NULL &&
+                               as_strcmp(lin.add_symbol, ".") == 0 && lin.sub_symbol == NULL && lin.add_local == NULL &&
                                lin.sub_local == NULL && track.current != NULL) {
                         /* `.` alone is a place in this section, and was
                          * a relocation to a symbol named `.`. */
@@ -21997,7 +22037,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     long long local_off = 0;
 
                     if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
-                        lin.add_symbol != NULL && strcmp(lin.add_symbol, sym) == 0 &&
+                        lin.add_symbol != NULL && as_strcmp(lin.add_symbol, sym) == 0 &&
                         lin.sub_symbol == NULL &&
                         (lin.sub_local == NULL ||
                          eval_local_rel_expr_virtual(ctx, track.current, st, 0, track.x86_code_bits,
@@ -22011,11 +22051,11 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         uint64_t label_off = 0;
 
                         if (as_expr_eval_linear(e, reloc_dot_lookup, &here, &lin) == AS_EXPR_EVAL_OK &&
-                            lin.add_symbol != NULL && strcmp(lin.add_symbol, sym) == 0 && lin.sub_symbol != NULL &&
+                            lin.add_symbol != NULL && as_strcmp(lin.add_symbol, sym) == 0 && lin.sub_symbol != NULL &&
                             lin.sub_local == NULL && lin.add_local == NULL &&
                             find_label_virtual_location(ctx, NULL, NULL, 0, 0, lin.sub_symbol, &label_section,
                                                         &label_off) == 0 &&
-                            track.current != NULL && strcmp(label_section, track.current) == 0) {
+                            track.current != NULL && as_strcmp(label_section, track.current) == 0) {
                             addend = (int64_t)(lin.value - (long long)label_off);
                         }
                     }
@@ -22193,7 +22233,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                  * less the instruction -- more by the field's place in
                  * the instruction, which is the addend GNU as gives it.
                  */
-                if (machine == EM_386 && t == R_386_32 && strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0 &&
+                if (machine == EM_386 && t == R_386_32 && as_strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0 &&
                     code_len >= reloc_width) {
                     addend += (int64_t)(code_len - reloc_width);
                 }
@@ -22235,7 +22275,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     if (reloc_width != 4 ||
                         find_label_virtual_location(ctx, NULL, NULL, 0, 0, taken_from, &label_section,
                                                     &label_off) != 0 ||
-                        track.current == NULL || strcmp(label_section, track.current) != 0) {
+                        track.current == NULL || as_strcmp(label_section, track.current) != 0) {
                         set_err(ctx, "%s:%u: '%s' is taken from '%s' and is not a label of this section",
                                 st->file != NULL ? st->file : "<input>", st->line, taken_from, sym);
                         section_track_free(&track);
@@ -22483,7 +22523,7 @@ static int far_label_cmp(const void *a, const void *b) {
         return x->name == NULL ? -1 : 1;
     }
     if (x->name != NULL) {
-        return strcmp(x->name, y->name);
+        return as_strcmp(x->name, y->name);
     }
     if (x->line != y->line) {
         return x->line < y->line ? -1 : 1;
@@ -22569,10 +22609,10 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 
             /* What another file may see, or replace, is not the
              * source's own. */
-            if (strcmp(d->name, ".globl") == 0 || strcmp(d->name, ".global") == 0 || strcmp(d->name, ".weak") == 0) {
+            if (as_strcmp(d->name, ".globl") == 0 || as_strcmp(d->name, ".global") == 0 || as_strcmp(d->name, ".weak") == 0) {
                 for (j = 0; j < d->arg_count; ++j) {
                     /* (And those that may be replaced, apart.) */
-                    if (strcmp(d->name, ".weak") == 0) {
+                    if (as_strcmp(d->name, ".weak") == 0) {
                         if (weak_count == weak_cap) {
                             size_t cap = weak_cap != 0 ? weak_cap * 2 : 16;
                             const char **grown = (const char **)realloc(weak, cap * sizeof(*grown));
@@ -22621,7 +22661,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 
         /* (Sorted by name, so one defined twice is twice together.) */
         if (name == NULL || is_local_temp_symbol_name(name) ||
-            (near_name_count != 0 && strcmp(near_names[near_name_count - 1], name) == 0) ||
+            (near_name_count != 0 && as_strcmp(near_names[near_name_count - 1], name) == 0) ||
             (exported_count != 0 &&
              bsearch(&name, exported, exported_count, sizeof(*exported), near_name_cmp) != NULL)) {
             continue;
@@ -22686,7 +22726,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             char mnbuf[32];
             char suffix = '\0';
 
-            if (node != NULL && !expr_is_local_temp_symbol(node) && strcmp(node->symbol, ".") != 0 &&
+            if (node != NULL && !expr_is_local_temp_symbol(node) && as_strcmp(node->symbol, ".") != 0 &&
                 normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
                 (streq_ci(mnbuf, "jmp") || x86_cond_code(mnbuf, &cc) == 0) &&
                 (cfg == NULL || cfg->target == 0) && exported_count != 0 &&
@@ -22893,7 +22933,7 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
         const as_stmt_t *st = &ctx->parsed->items[i];
 
         if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL && st->u.directive.arg_count != 0 &&
-            (strcmp(st->u.directive.name, ".uleb128") == 0 || strcmp(st->u.directive.name, ".sleb128") == 0)) {
+            (as_strcmp(st->u.directive.name, ".uleb128") == 0 || as_strcmp(st->u.directive.name, ".sleb128") == 0)) {
             count++;
         }
     }
@@ -22908,7 +22948,7 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
         const as_stmt_t *st = &ctx->parsed->items[i];
 
         if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL && st->u.directive.arg_count != 0 &&
-            (strcmp(st->u.directive.name, ".uleb128") == 0 || strcmp(st->u.directive.name, ".sleb128") == 0)) {
+            (as_strcmp(st->u.directive.name, ".uleb128") == 0 || as_strcmp(st->u.directive.name, ".sleb128") == 0)) {
             struct leb_stmt *leb = &ctx->leb[ctx->leb_count];
 
             leb->arg_bytes = (unsigned char *)malloc(st->u.directive.arg_count);
@@ -23061,10 +23101,10 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
             }
         }
 
-        if (strcmp(s->name, ".text") == 0 && s->subsection == 0) {
+        if (as_strcmp(s->name, ".text") == 0 && s->subsection == 0) {
             ctx.text_sec = es;
         }
-        if (strcmp(s->name, ".data") == 0 && s->subsection == 0) {
+        if (as_strcmp(s->name, ".data") == 0 && s->subsection == 0) {
             ctx.data_sec = es;
         }
     }

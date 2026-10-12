@@ -1091,6 +1091,11 @@ static int line_starts_with_directive(const char *line, const char *name) {
     if (line == NULL) {
         return 0;
     }
+    /* (A line is asked this of forty directives, and is most often an
+     * instruction, which its first character says.) */
+    if (*line != name[0]) {
+        return 0;
+    }
     n = strlen(name);
     return strncmp(line, name, n) == 0 && (line[n] == '\0' || isspace((unsigned char)line[n]) ||
                                            line[n] == ',' || line[n] == ';');

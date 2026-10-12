@@ -1619,6 +1619,52 @@ static int parse_x86_far_immediate_pair(parse_ctx_t *ctx, const as_token_t *tokv
 
 static unsigned rex_bits_for(const char *s);
 
+/*
+ * Whether a word may be a prefix at all, by its first two characters:
+ * every statement's first word is asked whether it is one of thirty,
+ * and nearly every one is a mnemonic that is none.  1 for a word that
+ * begins as one of them does.
+ */
+static int prefix_word_candidate(const char *s) {
+    int a;
+    int b;
+
+    if (s == NULL || s[0] == '\0') {
+        return 0;
+    }
+    a = tolower((unsigned char)s[0]);
+    b = tolower((unsigned char)s[1]);
+    switch (a) {
+    case '%':
+        return 1;
+    case 'l': /* lock */
+    case 'n': /* notrack */
+    case 'w': /* word */
+        return b == 'o';
+    case 'b': /* bnd */
+        return b == 'n';
+    case 'x': /* xacquire, xrelease */
+        return b == 'a' || b == 'r';
+    case 'r': /* rep and its kind, rex and its */
+        return b == 'e';
+    case 'd': /* data16, data32, dword, ds */
+        return b == 'a' || b == 'w' || b == 's';
+    case 'a': /* addr16, addr32, adword, aword -- and not add, the commonest of all */
+        return b == 'w' || (b == 'd' && (tolower((unsigned char)s[2]) == 'w' ||
+                                         (tolower((unsigned char)s[2]) == 'd' && tolower((unsigned char)s[3]) == 'r')));
+    case 'h': /* ht, hnt */
+        return b == 't' || b == 'n';
+    case 'c': /* the segments */
+    case 'e':
+    case 'f':
+    case 'g':
+    case 's':
+        return b == 's';
+    default:
+        return 0;
+    }
+}
+
 unsigned as_x86_bare_prefix_byte(const char *word) {
     static const struct {
         const char *word;
@@ -1635,6 +1681,9 @@ unsigned as_x86_bare_prefix_byte(const char *word) {
                {"word", 0x66u},   {"dword", 0x66u},  {"aword", 0x67u},    {"adword", 0x67u}};
     size_t i;
 
+    if (!prefix_word_candidate(word)) {
+        return 0;
+    }
     /* REX by the names it had before `rex.W`: rexx, rex64yz. */
     if (word != NULL && strncasecmp(word, "rex", 3) == 0 && word[3] != '\0' && word[3] != '.' &&
         !streq_ci(word, "rex64") && (rex_bits_for(word) != 0)) {
@@ -1650,6 +1699,9 @@ unsigned as_x86_bare_prefix_byte(const char *word) {
 }
 
 static int prefix_flag_for(const char *s, char **segment_override) {
+    if (!prefix_word_candidate(s)) {
+        return 0;
+    }
     if (streq_ci(s, "lock")) {
         return AS_PREFIX_LOCK;
     }
