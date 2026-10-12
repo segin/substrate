@@ -3508,7 +3508,9 @@ static int is_rel_mnemonic_uncached(const char *mn) {
         streq_ci(mn, "jmp") || streq_ci(mn, "xbegin") || x86_fixed_short_branch(mn, 32u, NULL, NULL) != -1) {
         return 1;
     }
-    if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
+    /* (But for APX's jump to an address of eight bytes, which is a
+     * number and no distance.) */
+    if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0' && strcasecmp(mn, "jmpabs") != 0) {
         return 1;
     }
     return 0;
@@ -10884,6 +10886,36 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
     }
     mn[i] = '\0';
+    /*
+     * Three of APX's that are a REX2 prefix and an old opcode: a push
+     * and a pop that say the stack is balanced (`pushp`, `popp`: REX2
+     * with W), and a jump to an address of eight bytes (`jmpabs`).
+     */
+    if (cfg->is_64 && n == 1 && code_cap >= 11) {
+        const as_operand_t *op = &insn->operands[0];
+        const as_x86_reg_info_t *r = op->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(op->u.reg) : NULL;
+        int push = as_strcmp(mn, "pushp") == 0;
+        long long where = 0;
+
+        if ((push || as_strcmp(mn, "popp") == 0) && r != NULL && r->cls == AS_X86_REGCLASS_GENERAL && r->width == 64) {
+            code[0] = 0xd5u;
+            code[1] = (unsigned char)(0x08u | (r->number > 15 ? 0x10u : 0u) | ((r->number >> 3) & 1u));
+            code[2] = (unsigned char)((push ? 0x50u : 0x58u) + (r->number & 7u));
+            *code_len = 3;
+            return 1;
+        }
+        if (as_strcmp(mn, "jmpabs") == 0 && op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] == '$' &&
+            eval_expr_const(op->u.expr, &where) == 0) {
+            code[0] = 0xd5u;
+            code[1] = 0x00u;
+            code[2] = 0xa1u;
+            for (i = 0; i < 8; ++i) {
+                code[3 + i] = (unsigned char)(((unsigned long long)where >> (i * 8u)) & 0xffu);
+            }
+            *code_len = 11;
+            return 1;
+        }
+    }
     /*
      * APX's forms of the instructions of general registers are rows of
      * the table too -- `add %ecx, %edx, %ebx` -- and the instruction is

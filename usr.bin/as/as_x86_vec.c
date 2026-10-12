@@ -1003,7 +1003,9 @@ int as_x86_vec_takes_data16(const char *mnemonic) {
         return 0;
     }
     for (; i < as_x86_vec_table_count; i = next_row[i]) {
-        if ((as_x86_vec_table[i].flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) != 0) {
+        /* (The forms APX adds to the name are not what a prefix is
+         * written before.) */
+        if ((as_x86_vec_table[i].flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI | AS_VEC_F_APX)) != 0) {
             continue;
         }
         if (as_x86_vec_table[i].enc != AS_VEC_LEGACY || strpbrk(as_x86_vec_table[i].ops, "xyzXYZnN0123") != NULL) {
