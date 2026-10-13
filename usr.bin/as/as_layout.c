@@ -4699,7 +4699,82 @@ unresolved_rel_target:
             return rc;
         }
     }
-    return encode_x86_stmt(ctx, &stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+    /*
+     * A jump or a call to a name and nothing more, that was not
+     * resolved above: its bytes are the long form with room for where
+     * it goes, the same for every such statement of the mnemonic in
+     * the mode -- so they are worked out once for each and kept.  (It
+     * went through the whole of the general encoder every time, some
+     * 23,000 machine instructions of names compared.)
+     */
+    {
+        static struct far_form {
+            char mn[16];
+            unsigned bits;
+            unsigned char machine64;
+            unsigned char known_place;
+            unsigned char kind;
+            unsigned char len;
+            unsigned char bytes[16];
+        } kept[64];
+        static size_t kept_count;
+        static int off = -1;
+        const as_expr_t *e = NULL;
+        struct far_form want;
+        size_t k;
+        int rc;
+
+        if (off < 0) {
+            off = getenv("AS_NO_STMT_CODE") != NULL;
+        }
+        memset(&want, 0, sizeof(want));
+        if (!off && st->kind == AS_STMT_INSTRUCTION && st->u.instr.operand_count == 1 && st->u.instr.prefixes == 0 &&
+            st->u.instr.pseudo == 0 && st->u.instr.code_len == 0 && st->u.instr.mnemonic != NULL &&
+            strlen(st->u.instr.mnemonic) < sizeof(want.mn) && is_rel_mnemonic(st->u.instr.mnemonic) &&
+            st->u.instr.operands[0].kind == AS_OPERAND_LABEL_REF && ctx->asm_reg_alias_count == 0) {
+            e = st->u.instr.operands[0].u.expr;
+        }
+        if (e == NULL || e->kind != AS_EXPR_SYMBOL || e->symbol == NULL || e->reloc_op != NULL ||
+            code_cap < sizeof(want.bytes)) {
+            return encode_x86_stmt(ctx, &stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+        }
+        for (k = 0; st->u.instr.mnemonic[k] != '\0'; ++k) {
+            want.mn[k] = (char)tolower((unsigned char)st->u.instr.mnemonic[k]);
+        }
+        want.bits = x86_code_bits;
+        want.machine64 = stmt_cfg.machine == EM_X86_64;
+        want.known_place = (unsigned char)stmt_cfg.have_current_text_offset;
+        /* (What the name is of: a compiler's label, a label of the
+         * source's own, or a symbol of elsewhere.) */
+        want.kind = (unsigned char)(expr_is_local_temp_symbol(e) ? 1 : name_is_near_label(e->symbol) ? 2 : 3);
+        want.kind = (unsigned char)(want.kind + (st->u.instr.target_in_other_section ? 8 : 0));
+        for (k = 0; k < kept_count; ++k) {
+            if (kept[k].bits == want.bits && kept[k].machine64 == want.machine64 &&
+                kept[k].known_place == want.known_place && kept[k].kind == want.kind &&
+                strcmp(kept[k].mn, want.mn) == 0) {
+                if (getenv("AS_CHECK_FAR_FORMS") != NULL) {
+                    unsigned char again[16];
+                    size_t again_len = 0;
+
+                    if (encode_x86_stmt(ctx, &stmt_cfg, st, again, sizeof(again), &again_len, encerr, encerr_sz) != 0 ||
+                        again_len != kept[k].len || memcmp(again, kept[k].bytes, again_len) != 0) {
+                        fprintf(stderr, "AS_CHECK_FAR_FORMS: %s %s differs from the form kept\n", want.mn, e->symbol);
+                        abort();
+                    }
+                }
+                memcpy(code, kept[k].bytes, kept[k].len);
+                *code_len = kept[k].len;
+                return 0;
+            }
+        }
+        rc = encode_x86_stmt(ctx, &stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+        if (rc == 0 && *code_len <= sizeof(want.bytes) && kept_count < sizeof(kept) / sizeof(kept[0])) {
+            want.len = (unsigned char)*code_len;
+            memcpy(want.bytes, code, *code_len);
+            kept[kept_count++] = want;
+        }
+        return rc;
+    }
 }
 
 elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
