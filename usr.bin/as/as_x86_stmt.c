@@ -9400,7 +9400,21 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
          * for, here as where the instruction always went.) */
         if (as_x86_vec_has_base(mn, n) &&
             x86_operand_classes_refused(insn, insn->syntax_intel != 0, cfg->is_64, encerr, encerr_sz)) {
-            return -1;
+            /* (Unless APX has given the name forms those operands are
+             * of: `seta %eax`, which is no instruction but APX's.
+             * What is refused of an address is refused of APX's forms
+             * as of any.) */
+            int has_memory = 0;
+
+            for (i = 0; i < n; ++i) {
+                has_memory |= insn->operands[i].kind == AS_OPERAND_MEMORY;
+            }
+            if (has_memory ||
+                !(cfg->is_64 && as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
+                                                   x86_stmt_has_high_general(insn)))) {
+                return -1;
+            }
+            encerr[0] = '\0';
         }
         asking = 1;
         rc = encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);
