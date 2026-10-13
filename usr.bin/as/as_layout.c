@@ -66,6 +66,8 @@ static int stmt_code_find(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off
 static void stmt_code_keep(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
                            const unsigned char *code, size_t code_len);
 
+static int stmt_code_is_anywhere(emit_ctx_t *ctx, const as_stmt_t *st);
+
 static int encode_x86_stmt_by_text(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, unsigned x86_code_bits,
                                    const as_stmt_t *st, unsigned char *code, size_t code_cap, size_t *code_len,
                                    char *encerr, size_t encerr_sz);
@@ -3214,7 +3216,7 @@ int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, const char
             return -1;
         }
     }
-    if (stmt_is_place_free(st)) {
+    if (stmt_code_is_anywhere(ctx, st)) {
         stmt_code_keep(ctx, st, (uint64_t)buf->len, x86_code_bits, code, code_len);
     }
     return bytebuf_append(buf, code, code_len);
@@ -4126,6 +4128,69 @@ int stmt_is_place_free(const as_stmt_t *st) {
     return 1;
 }
 
+/* Is every name in the expression one the source does not define: a
+ * symbol of another object, whose place is the linker's to put in? */
+static int expr_names_are_external(emit_ctx_t *ctx, const as_expr_t *e) {
+    if (e == NULL || e->kind == AS_EXPR_CONST) {
+        return 1;
+    }
+    if (e->kind == AS_EXPR_LOCAL_REF) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_SYMBOL) {
+        const as_symbol_t *sym;
+        long long value;
+
+        if (e->symbol == NULL || as_strcmp(e->symbol, ".") == 0 || ctx->symtab == NULL ||
+            asm_var_lookup(ctx, e->symbol, &value) == 0) {
+            return 0;
+        }
+        sym = find_as_symbol_const(ctx, ctx->symtab, e->symbol);
+        return sym != NULL && !sym->defined && !sym->is_absolute && sym->alias_target == NULL;
+    }
+    return expr_names_are_external(ctx, e->lhs) && expr_names_are_external(ctx, e->rhs);
+}
+
+/*
+ * Are a statement's bytes the same wherever it stands in this object:
+ * one of registers and numbers, or one whose names are all of symbols
+ * defined elsewhere -- what is written for those is room for the linker
+ * and nothing of where the statement is.  (Such a statement was worked
+ * out once to see that it could be, and again to be written.)  Not one
+ * that goes somewhere, nor one that reaches from the instruction
+ * pointer.
+ */
+static int stmt_code_is_anywhere(emit_ctx_t *ctx, const as_stmt_t *st) {
+    size_t i;
+
+    if (stmt_is_place_free(st)) {
+        return 1;
+    }
+    if (ctx == NULL || st->u.instr.mnemonic == NULL || is_rel_mnemonic(st->u.instr.mnemonic)) {
+        return 0;
+    }
+    for (i = 0; i < st->u.instr.operand_count; ++i) {
+        const as_operand_t *op = &st->u.instr.operands[i];
+
+        if (op->kind == AS_OPERAND_REGISTER) {
+            continue;
+        }
+        /* (A name alone is memory at that name: `movl ext, %eax`.) */
+        if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
+            if (!expr_names_are_external(ctx, op->u.expr)) {
+                return 0;
+            }
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            if (x86_base_is_ip(op->u.mem.base_reg) || !expr_names_are_external(ctx, op->u.mem.disp)) {
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static struct stmt_code *stmt_code_slot(emit_ctx_t *ctx, const as_stmt_t *st) {
     static int off = -1;
     size_t idx = 0;
@@ -4388,7 +4453,7 @@ static void stmt_code_keep(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_of
     kept->off = sec_off;
     kept->bits = (unsigned char)x86_code_bits;
     kept->epoch = ctx->layout_epoch;
-    kept->anywhere = (unsigned char)stmt_is_place_free(st);
+    kept->anywhere = (unsigned char)stmt_code_is_anywhere(ctx, st);
     kept->len = (unsigned char)code_len;
     memcpy(kept->bytes, code, code_len);
 }
