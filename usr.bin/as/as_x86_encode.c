@@ -948,67 +948,6 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
 }
 
 
-static int encode_jcc_rel32(enc_ctx_t *ctx, const char *mnemonic, int32_t rel_target) {
-    static const struct {
-        const char *name;
-        uint8_t cc;
-    } map[] = {
-        {"jo", 0x0},   {"jno", 0x1}, {"jb", 0x2},  {"jnae", 0x2}, {"jc", 0x2},   {"jnb", 0x3},
-        {"jae", 0x3},  {"jnc", 0x3}, {"je", 0x4},  {"jz", 0x4},   {"jne", 0x5},  {"jnz", 0x5},
-        {"jbe", 0x6},  {"jna", 0x6}, {"ja", 0x7},  {"jnbe", 0x7}, {"js", 0x8},   {"jns", 0x9},
-        {"jp", 0xa},   {"jpe", 0xa}, {"jnp", 0xb}, {"jpo", 0xb},  {"jl", 0xc},   {"jnge", 0xc},
-        {"jge", 0xd},  {"jnl", 0xd}, {"jle", 0xe}, {"jng", 0xe},  {"jg", 0xf},   {"jnle", 0xf},
-    };
-    size_t i;
-    long long disp;
-    unsigned near_bits;
-    unsigned near_len;
-
-    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
-        if (streq_ci(mnemonic, map[i].name)) {
-            if (ctx->insn == NULL || (!ctx->insn->rel_is_disp && !ctx->insn->has_section_offset)) {
-                /* To a symbol, whose distance a relocation fills in:
-                 * of 16 bits in 16-bit code.  It was of 32 there too,
-                 * and the two bytes after it were the next
-                 * instruction's to the processor. */
-                int near16 = ctx->insn != NULL && ctx->insn->default_bits == 16u;
-
-                if (emit8(ctx, 0x0f) != 0 || emit8(ctx, (uint8_t)(0x80 | map[i].cc)) != 0 ||
-                    (near16 ? emit16(ctx, (uint16_t)rel_target) : emit32(ctx, (uint32_t)rel_target)) != 0) {
-                    return -1;
-                }
-                return 0;
-            }
-            if (!ctx->insn->force_rel32) {
-                if (resolve_rel_target(ctx, rel_target, 2u, &disp) != 0) {
-                    return -1;
-                }
-                if (disp >= -128 && disp <= 127) {
-                    if (emit8(ctx, (uint8_t)(0x70 | map[i].cc)) != 0 || emit8(ctx, (uint8_t)((signed char)disp)) != 0) {
-                        return -1;
-                    }
-                    return 0;
-                }
-            }
-            near_bits = (ctx->insn != NULL && ctx->insn->default_bits == 16u) ? 16u : 32u;
-            near_len = near_bits == 16u ? 4u : 6u;
-            if (resolve_rel_target(ctx, rel_target, near_len, &disp) != 0) {
-                return -1;
-            }
-            if (near_bits == 16u && (disp < -32768 || disp > 32767)) {
-                set_err(ctx, "conditional branch target out of range");
-                return -1;
-            }
-            if (emit8(ctx, 0x0f) != 0 || emit8(ctx, (uint8_t)(0x80 | map[i].cc)) != 0 ||
-                emit_i386_imm_or_rel(ctx, (uint32_t)disp, near_bits) != 0) {
-                return -1;
-            }
-            return 0;
-        }
-    }
-    return -1;
-}
-
 static int is_reg_or_mem(const as_x86_operand_t *op) {
     return op->kind == AS_X86_OP_REG || op->kind == AS_X86_OP_MEM;
 }
@@ -1463,47 +1402,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (emit8(&ctx, 0xd7) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
-               streq_ci(insn->mnemonic, "loopz") || streq_ci(insn->mnemonic, "loopne") ||
-               streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jcxz") ||
-               streq_ci(insn->mnemonic, "jecxz") ||
-               streq_ci(insn->mnemonic, "jrcxz")) {
-        uint8_t opcode;
-        int32_t rel;
-        long long disp;
-        /* The counter that is not the mode's own is asked for by the
-         * address-size prefix: without it `jcxz` in 32-bit code was
-         * `jecxz`, and tested the other register. */
-        int other_counter = (streq_ci(insn->mnemonic, "jcxz") && insn->default_bits != 16u) ||
-                            (streq_ci(insn->mnemonic, "jecxz") && insn->default_bits == 16u);
-
-        if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
-        rel = a->u.rel;
-        if (resolve_rel_target(&ctx, rel, other_counter ? 3u : 2u, &disp) != 0) {
-            return -1;
-        }
-        if (other_counter && emit8(&ctx, 0x67) != 0) {
-            return -1;
-        }
-        if (disp < -128 || disp > 127) {
-            set_err(&ctx, "loop target out of range");
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "loop")) opcode = 0xe2;
-        else if (streq_ci(insn->mnemonic, "loope") || streq_ci(insn->mnemonic, "loopz")) opcode = 0xe1;
-        else if (streq_ci(insn->mnemonic, "loopne") || streq_ci(insn->mnemonic, "loopnz")) opcode = 0xe0;
-        else opcode = 0xe3;
-        if (emit8(&ctx, opcode) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
-            return -1;
-        }
-    } else if (encode_jcc_rel32(&ctx, insn->mnemonic, (insn->op_count == 1 && a->kind == AS_X86_OP_REL) ? a->u.rel : 0) == 0) {
-        if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
     } else if (insn->op_count == 0 && (streq_ci(insn->mnemonic, "ds") || streq_ci(insn->mnemonic, "es") ||
                                         streq_ci(insn->mnemonic, "cs") || streq_ci(insn->mnemonic, "ss") ||
                                         streq_ci(insn->mnemonic, "fs") || streq_ci(insn->mnemonic, "gs"))) {
@@ -1668,10 +1566,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         set_unsupported_form_named(&ctx, insn->mnemonic);
         return -1;
-    }
-
-    if (insn->op_count == 1 && a->kind == AS_X86_OP_REL && encode_jcc_rel32(&ctx, insn->mnemonic, a->u.rel) == 0) {
-        goto finish;
     }
 
 
@@ -2128,11 +2022,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_unsupported_form_named(&ctx, "ljmp");
             return -1;
         }
-    } else if (encode_jcc_rel32(&ctx, insn->mnemonic, (insn->op_count == 1 && a->kind == AS_X86_OP_REL) ? a->u.rel : 0) == 0) {
-        if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
     } else {
         /* Not one of the mnemonics above. */
         goto more_mnemonics;
@@ -2160,38 +2049,6 @@ more_mnemonics:
             }
         } else {
             set_unsupported_form_named(&ctx, "enter");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
-               streq_ci(insn->mnemonic, "loopz") || streq_ci(insn->mnemonic, "loopne") ||
-               streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jecxz") ||
-               streq_ci(insn->mnemonic, "jrcxz")) {
-        uint8_t opcode;
-        int32_t rel;
-        long long disp;
-
-        if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
-            set_err(&ctx, "unsupported x86_64 loop form");
-            return -1;
-        }
-        rel = a->u.rel;
-        /* (%ecx for the counter is asked for by the address-size
-         * prefix: without it `jecxz` was `jrcxz`.) */
-        if (resolve_rel_target(&ctx, rel, streq_ci(insn->mnemonic, "jecxz") ? 3u : 2u, &disp) != 0) {
-            return -1;
-        }
-        if (disp < -128 || disp > 127) {
-            set_err(&ctx, "x86_64 loop target out of range");
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "jecxz") && emit8(&ctx, 0x67) != 0) {
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "loop")) opcode = 0xe2;
-        else if (streq_ci(insn->mnemonic, "loope") || streq_ci(insn->mnemonic, "loopz")) opcode = 0xe1;
-        else if (streq_ci(insn->mnemonic, "loopne") || streq_ci(insn->mnemonic, "loopnz")) opcode = 0xe0;
-        else opcode = 0xe3;
-        if (emit8(&ctx, opcode) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {

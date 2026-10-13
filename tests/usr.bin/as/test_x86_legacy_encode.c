@@ -189,12 +189,8 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    insn.mnemonic = "jz";
-    insn.ops[0] = rel_op(-4);
-    {
-        const uint8_t exp[] = {0x0f, 0x84, 0xfc, 0xff, 0xff, 0xff};
-        check_encode(&insn, exp, sizeof(exp));
-    }
+    /* (jz was asked of this encoder here; the conditional jumps are
+     * rows of the table now.) */
 
     insn.mnemonic = "call";
     insn.ops[0] = rel_op(0x20);
