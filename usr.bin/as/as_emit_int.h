@@ -79,11 +79,6 @@ typedef struct {
     char *reg;
 } asm_reg_alias_t;
 
-/* A label's name, which is the parse's, and the statement it is on. */
-typedef struct {
-    const char *name;
-    size_t stmt;
-} label_index_t;
 
 /*
  * An instruction's bytes, kept: the statement at this offset of its
@@ -181,8 +176,7 @@ typedef struct {
     size_t *list_sec;
     size_t *list_off;
     /* Every label and the statement it is on, by name: label_stmt_index(). */
-    label_index_t *label_index;
-    size_t label_index_count;
+    as_strmap_t label_index;
     int label_index_made;
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;

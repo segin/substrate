@@ -3937,7 +3937,7 @@ fail:
     virtual_label_cache_free(&ctx);
     free(ctx.list_sec);
     free(ctx.list_off);
-    free(ctx.label_index);
+    as_strmap_free(&ctx.label_index);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.stmt_code);

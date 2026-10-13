@@ -2254,68 +2254,37 @@ static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_
     return 0;
 }
 
-static int label_index_cmp(const void *a, const void *b) {
-    const label_index_t *x = (const label_index_t *)a;
-    const label_index_t *y = (const label_index_t *)b;
-    int c = as_strcmp(x->name, y->name);
-
-    /* The first of a name that is defined twice. */
-    return c != 0 ? c : (x->stmt < y->stmt ? -1 : (x->stmt > y->stmt ? 1 : 0));
-}
-
 /*
  * The statement a label is on: the first, in the order of the
- * statements, that has it.  Asked for every branch on every pass, by
- * going through every label of the source until this kept them sorted.
+ * statements, that has it.  Asked for every branch on every pass --
+ * by going through every label of the source, once; then by halving a
+ * sorted list of them, seventeen names compared for one of a hundred
+ * thousand, which was a sixth of the time of assembling branches; and
+ * by one hash of the name now.
  */
 static int label_stmt_index(emit_ctx_t *ctx, const char *name, size_t *idx_out) {
-    size_t lo, hi;
-
     if (ctx == NULL || ctx->parsed == NULL || name == NULL) {
         return -1;
     }
     if (!ctx->label_index_made) {
-        size_t n = 0;
         size_t i, j;
 
         for (i = 0; i < ctx->parsed->count; ++i) {
-            n += ctx->parsed->items[i].label_count;
-        }
-        ctx->label_index = n != 0 ? (label_index_t *)malloc(n * sizeof(*ctx->label_index)) : NULL;
-        ctx->label_index_count = 0;
-        for (i = 0; ctx->label_index != NULL && i < ctx->parsed->count; ++i) {
             const as_stmt_t *st = &ctx->parsed->items[i];
 
             for (j = 0; j < st->label_count; ++j) {
-                if (st->labels[j].name != NULL) {
-                    ctx->label_index[ctx->label_index_count].name = st->labels[j].name;
-                    ctx->label_index[ctx->label_index_count].stmt = i;
-                    ctx->label_index_count++;
+                size_t had;
+
+                /* (The first of a name that is defined twice.) */
+                if (st->labels[j].name != NULL && !as_strmap_get(&ctx->label_index, st->labels[j].name, &had) &&
+                    as_strmap_put(&ctx->label_index, st->labels[j].name, i) != 0) {
+                    return -1;
                 }
             }
         }
-        if (ctx->label_index_count != 0) {
-            qsort(ctx->label_index, ctx->label_index_count, sizeof(*ctx->label_index), label_index_cmp);
-        }
         ctx->label_index_made = 1;
     }
-    /* The first entry whose name is not less than `name`. */
-    lo = 0;
-    hi = ctx->label_index_count;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-
-        if (as_strcmp(ctx->label_index[mid].name, name) < 0) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    if (lo == ctx->label_index_count || as_strcmp(ctx->label_index[lo].name, name) != 0) {
-        return -1;
-    }
-    *idx_out = ctx->label_index[lo].stmt;
-    return 0;
+    return as_strmap_get(&ctx->label_index, name, idx_out) ? 0 : -1;
 }
 
 static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
