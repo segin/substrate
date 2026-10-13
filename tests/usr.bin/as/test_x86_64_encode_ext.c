@@ -18,14 +18,6 @@ static as_x86_operand_t reg_op(as_x86_reg_t r) {
     return op;
 }
 
-static as_x86_operand_t imm_op(int32_t v) {
-    as_x86_operand_t op;
-    memset(&op, 0, sizeof(op));
-    op.kind = AS_X86_OP_IMM;
-    op.u.imm = v;
-    return op;
-}
-
 static as_x86_operand_t mem_rip(int32_t disp) {
     as_x86_operand_t op;
     memset(&op, 0, sizeof(op));
@@ -88,38 +80,27 @@ static void check_encode64(const as_x86_insn_t *insn, const uint8_t *exp, size_t
 int main(void) {
     as_x86_insn_t insn;
 
+    /*
+     * What this encoder makes of an address of 64-bit registers, by an
+     * instruction it still has: cmpxchg16b, REX.W 0F C7 /1.  (These were
+     * of mov, which is rows of the table now, as_x86_vec_table_base.h,
+     * and is tested there.)
+     */
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
-    insn.op_count = 2;
-    insn.rex_w = 1;
-    insn.ops[0] = reg_op(AS_X86_REG_R8);
-    insn.ops[1] = mem_full(AS_X86_REG_R9, AS_X86_REG_R10, 8, 0x20);
+    insn.mnemonic = "cmpxchg16b";
+    insn.op_count = 1;
+    insn.ops[0] = mem_full(AS_X86_REG_R9, AS_X86_REG_R10, 8, 0x20);
     {
-        const uint8_t exp[] = {0x4f, 0x8b, 0x44, 0xd1, 0x20};
+        const uint8_t exp[] = {0x4b, 0x0f, 0xc7, 0x4c, 0xd1, 0x20};
         check_encode64(&insn, exp, sizeof(exp));
     }
 
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
-    insn.op_count = 2;
-    insn.rex_w = 1;
-    insn.ops[0] = reg_op(AS_X86_REG_RAX);
-    insn.ops[1] = mem_rip(0x1234);
+    insn.mnemonic = "cmpxchg16b";
+    insn.op_count = 1;
+    insn.ops[0] = mem_rip(0x1234);
     {
-        const uint8_t exp[] = {0x48, 0x8b, 0x05, 0x34, 0x12, 0x00, 0x00};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
-
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
-    insn.op_count = 2;
-    insn.rex_w = 1;
-    insn.ops[0] = reg_op(AS_X86_REG_R9);
-    insn.ops[1] = reg_op(AS_X86_REG_RAX);
-    {
-        /* mov %rax, %r9, as GNU as writes it: the destination in
-         * ModRM.rm.  (This had the other encoding, 4c 8b c8.) */
-        const uint8_t exp[] = {0x49, 0x89, 0xc1};
+        const uint8_t exp[] = {0x48, 0x0f, 0xc7, 0x0d, 0x34, 0x12, 0x00, 0x00};
         check_encode64(&insn, exp, sizeof(exp));
     }
 
@@ -157,17 +138,6 @@ int main(void) {
     /* (syscall, sysret and swapgs were asked of this encoder here.  It
      * has them no longer: the instructions of no operand are rows of the
      * table, as_x86_vec_table_base.h, and the forms files hold them.) */
-
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
-    insn.op_count = 2;
-    insn.rex_w = 1;
-    insn.ops[0] = reg_op(AS_X86_REG_R15);
-    insn.ops[1] = imm_op(0x11223344);
-    {
-        const uint8_t exp[] = {0x49, 0xc7, 0xc7, 0x44, 0x33, 0x22, 0x11};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
 
     puts("ok");
     return 0;
