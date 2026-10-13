@@ -328,31 +328,19 @@ static int asm_var_expr_lookup(void *cookie, const char *name, long long *out) {
     return asm_var_lookup((const emit_ctx_t *)cookie, name, out) == 0;
 }
 
-/* An expression of numbers and assembly-time variables. */
-static int eval_expr_asm_vars(emit_ctx_t *ctx, const as_expr_t *e, long long *out) {
-    if (ctx == NULL) {
-        return -1;
-    }
-    return as_expr_eval(e, asm_var_expr_lookup, ctx, out) == AS_EXPR_EVAL_OK ? 0 : -1;
-}
-
 int eval_arg_asm_vars(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg, long long *out) {
-    as_expr_t *expr;
-    int rc;
-
+    (void)st;
     if (ctx == NULL || arg == NULL || out == NULL) {
         return -1;
     }
-    if (parse_int64(arg, out) == 0 || parse_const_expr_string(arg, out) == 0) {
+    if (parse_int64(arg, out) == 0) {
         return 0;
     }
-    expr = as_parse_expr_string(arg, st != NULL ? st->unit : NULL, st != NULL ? st->ordinal : 0);
-    if (expr == NULL) {
-        return -1;
-    }
-    rc = eval_expr_asm_vars(ctx, expr, out);
-    as_expr_free(expr);
-    return rc;
+    /* One reading of it, with the variables to hand: an expression of
+     * numbers alone asks for none.  (It was evaluated as numbers alone
+     * and then, a copy of it made for the purpose, with the variables;
+     * where the statement stands is nothing to either.) */
+    return as_expr_eval_string(arg, asm_var_expr_lookup, ctx, out) == AS_EXPR_EVAL_OK ? 0 : -1;
 }
 
 int expr_has_symbol(const as_expr_t *e) {
