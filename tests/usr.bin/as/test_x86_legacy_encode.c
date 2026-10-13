@@ -151,13 +151,16 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
+    /* (A base, an index with a scale, and a displacement of one byte:
+     * of mov, since this encoder has lea no longer -- it is a row of
+     * the table's, as_x86_vec_table_base.h.) */
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "lea";
+    insn.mnemonic = "mov";
     insn.op_count = 2;
     insn.ops[0] = reg_op(AS_X86_REG_EAX);
     insn.ops[1] = mem_full(AS_X86_REG_EBX, AS_X86_REG_ECX, 2, 8);
     {
-        const uint8_t exp[] = {0x8d, 0x44, 0x4b, 0x08};
+        const uint8_t exp[] = {0x8b, 0x44, 0x4b, 0x08};
         check_encode(&insn, exp, sizeof(exp));
     }
 
