@@ -856,10 +856,22 @@ static int emit_data_sections(emit_ctx_t *ctx) {
             sec_buf_vec_free(&secbufs);
             return -1;
         }
+        /* What is wrong with the directive, if it says: what was said
+         * of an earlier one that was only tried is not this. */
+        if (ctx->errbuf != NULL && ctx->errbuf_sz != 0) {
+            ctx->errbuf[0] = '\0';
+        }
         drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
                                         track.x86_code_bits, &st->u.directive);
         if (drc < 0) {
-            set_err(ctx, "%s:%u: malformed %s directive data", st->file != NULL ? st->file : "<input>", st->line, track.current);
+            /* (And if it does not, that it is the directive: this named
+             * the section, "malformed .data directive data", and said
+             * that over what the directive had said -- that the file
+             * of an .incbin is not there.) */
+            if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
+                set_err(ctx, "%s:%u: malformed %s directive data", st->file != NULL ? st->file : "<input>",
+                        st->line, st->u.directive.name != NULL ? st->u.directive.name : "");
+            }
             section_track_free(&track);
             sec_buf_vec_free(&secbufs);
             return -1;

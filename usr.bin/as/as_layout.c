@@ -3845,6 +3845,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
             as_expr_free(expr);
         }
         if (target < 0 || (uint64_t)target < sec_off) {
+            set_err(ctx, "%s:%u: attempt to move .org backwards",
+                    st != NULL && st->file != NULL ? st->file : "<input>", st != NULL ? st->line : 0);
             return -1;
         }
         if (d->arg_count >= 2 && d->args[1] != NULL && d->args[1][0] != '\0') {
