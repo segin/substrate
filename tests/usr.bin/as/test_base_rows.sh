@@ -151,6 +151,20 @@ is 32 0fa9 'pop %gs'
 is 64 0fa0 'push %fs'
 refused 64 'push %es'
 refused 32 'pop %cs'
+# A name that is all rows is refused, not handed on, where no row has
+# that many operands -- `retl $4` was not one, and was assembled:
+is 32 c20400 'retl $4'
+# mov: a number that four bytes extended by their sign do not make is
+# moved with eight; a control register with a suffix; `{rex}` where
+# there may be no REX is left out, and `rex` is not; `{load}` of two
+# byte registers; and a displacement cut to an address's sixteen bits:
+is 64 48b8ffffffff00000000 'mov $0xffffffff, %rax'
+is 64 48c7c0ffffffff 'mov $-1, %rax'
+is 32 0f20c0 'movl %cr0, %eax'
+is 64 88e0 '{rex} movb %ah, %al'
+refused 64 'rex movb %ah, %al'
+is 32 8ac4 '{load} movb %ah, %al'
+is 32 678b870000 'movl 0x10000(%bx), %eax'
 
 [ "$fail" -eq 0 ] && echo "ok: the rows of the instructions of general registers ($cases cases)"
 exit "$fail"

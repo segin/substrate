@@ -388,6 +388,16 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return cls == AS_X86_REGCLASS_CONTROL;
     case '6':
         return cls == AS_X86_REGCLASS_DEBUG;
+    /* A test register, %tr0 to %tr7, which a 486 had. */
+    case 'r':
+        return cls == AS_X86_REGCLASS_TEST;
+    /* A number that four bytes hold once they are extended by their
+     * sign to 64 bits, or a symbol, which is given that room: what
+     * `mov $n, %rax` is C7 for, and above which it is the move of
+     * eight bytes. */
+    case 'p':
+        return op->kind == AS_X86_OP_IMM &&
+               (op->imm_symbolic || (op->u.imm >= -2147483648ll && op->u.imm <= 2147483647ll));
     case '7':
         return cls == AS_X86_REGCLASS_SEGMENT;
     /* The segment registers an instruction of one byte pushes -- %es,
@@ -720,12 +730,23 @@ static int emit_row_bytes(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x
             ops[i].u.reg = (as_x86_reg_t)place;
             continue;
         }
-        if ((t->ops[i] != 'H' && t->ops[i] != 'v') || ops[i].kind != AS_X86_OP_REG) {
+        /* (Or the row of memory into a register that `{load}` takes
+         * for two registers: its first is a byte register then.) */
+        if ((t->ops[i] != 'H' && t->ops[i] != 'v' &&
+             !(t->ops[i] == 'm' && ops[i].reg_class == AS_X86_REGCLASS_GENERAL && ops[i].size_bits == 8)) ||
+            ops[i].kind != AS_X86_OP_REG) {
             continue;
         }
         if (ops[i].high8) {
             ops[i].u.reg = (as_x86_reg_t)((unsigned)ops[i].u.reg - (unsigned)AS_X86_REG_AH + 4u);
             as.no_rex = 1;
+            /* (`{rex}` asks for a prefix where there may be one, and
+             * GNU as leaves it out where there may not: `{rex} movb
+             * %ah, %al` is 88 E0.  A `rex` written as a prefix is not
+             * left out, and is refused.) */
+            if ((rq->pseudo & AS_PSEUDO_REX) != 0 && rq->rex_bits == 0 && rq->mode == 64u) {
+                as.explicit_rex = 0;
+            }
         } else if ((unsigned)ops[i].u.reg >= 4u && (unsigned)ops[i].u.reg <= 7u) {
             if (rq->mode != 64u) {
                 vec_err(ctx, "'%s': %%spl, %%bpl, %%sil and %%dil are registers of 64-bit code", t->name);

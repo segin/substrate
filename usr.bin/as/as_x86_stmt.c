@@ -9705,7 +9705,10 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                     (((insn->prefixes & AS_PREFIX_LOCK) != 0 && as_x86_vec_base_takes_lock(mn)) ||
                      (strncmp(mn, "xchg", 4) == 0 && as_x86_vec_base_is_whole(mn)) ||
                      (strncmp(mn, "mov", 3) == 0 && strlen(mn) <= 4 && as_x86_vec_base_is_whole(mn) &&
-                      (insn->prefixes & AS_PREFIX_REPNE) == 0 && n == 2 && ops[1].kind == AS_X86_OP_MEM))) {
+                      (insn->prefixes & AS_PREFIX_REPNE) == 0 && n == 2 && ops[1].kind == AS_X86_OP_MEM &&
+                      /* (Of a general register or a number, not of
+                       * a segment register.) */
+                      !(ops[0].kind == AS_X86_OP_REG && ops[0].reg_class != AS_X86_REGCLASS_GENERAL)))) {
                     if (none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPNE) {
                         continue;
                     }

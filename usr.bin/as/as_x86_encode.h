@@ -250,10 +250,11 @@ static inline int as_x86_modrm16(const as_x86_mem_t *m, unsigned reg_field, int 
         /* (%bp alone with no displacement would be the address with
          * no register, and is given a displacement of nothing.) */
         mod = 1;
-    } else if (disp >= -32768 && disp <= 65535) {
-        mod = 2;
     } else {
-        return -1;
+        /* (A displacement that sixteen bits do not hold keeps its low
+         * sixteen, as GNU as has it with a warning: `movl 0x10000(%bx),
+         * %eax` is 67 8B 87 00 00.) */
+        mod = 2;
     }
     out[0] = (uint8_t)((mod << 6) | ((reg_field & 7u) << 3) | rm);
     *n = 1;
