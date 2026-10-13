@@ -66,6 +66,8 @@ static unsigned x86_stmt_pseudo;
  * back to ask it again is answered "not mine". */
 static int x86_vec_asking;
 
+static int x86_is_string_destination(const char *mn, const as_mem_operand_t *mem);
+
 static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
     static const char *const exact[] = {
         "movaps", "movups", "movapd", "movupd", "movdqa", "movdqu",
@@ -4081,7 +4083,10 @@ static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code
     }
     name = insn->segment_override;
     for (i = 0; name == NULL && i < insn->operand_count; ++i) {
-        if (insn->operands[i].kind == AS_OPERAND_MEMORY) {
+        /* (Where a string instruction stores is through %es whatever
+         * is written, and its %es: is no prefix.) */
+        if (insn->operands[i].kind == AS_OPERAND_MEMORY &&
+            !x86_is_string_destination(insn->mnemonic, &insn->operands[i].u.mem)) {
             name = insn->operands[i].u.mem.segment_reg;
         }
     }
@@ -9640,6 +9645,14 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
         if (ops[i].kind == AS_X86_OP_MEM && disp != NULL && as_expr_reloc_op(disp) != NULL &&
             strcasecmp(as_expr_reloc_op(disp), "GOT") == 0) {
             ops[i].u.mem.disp_has_op = 1;
+        }
+        /* (Where a string instruction stores is through %es and
+         * nothing can make it otherwise: another segment written
+         * there is refused for what it is.) */
+        if (src->kind == AS_OPERAND_MEMORY && src->u.mem.segment_reg != NULL &&
+            x86_is_string_destination(mn, &src->u.mem) && map_seg(src->u.mem.segment_reg) != AS_X86_SEG_ES) {
+            snprintf(encerr, encerr_sz, "'%s': the destination of a string instruction is through %%es", mn);
+            return -1;
         }
         /* (And `call *sym@TLSCALL(%eax)` has no displacement at all:
          * the symbol marks the call for the linker and is no part of

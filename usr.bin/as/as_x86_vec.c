@@ -490,6 +490,14 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     case 'A':
         return cls == AS_X86_REGCLASS_GENERAL && (unsigned)op->u.reg == 0u &&
                (op->size_bits == 16 || op->size_bits == 32 || op->size_bits == 64);
+    /* What a string instruction reads and what it writes: memory
+     * through the source index and through the destination index, %si
+     * and %di at whichever size, with nothing added. */
+    case '<':
+    case '>':
+        return mem && op->u.mem.has_base && !op->u.mem.has_index && !op->u.mem.rip_relative &&
+               (!op->u.mem.has_disp || (op->u.mem.disp == 0 && !op->u.mem.force_disp32)) &&
+               (unsigned)op->u.mem.base == (want == '<' ? 6u : 7u);
     default:
         return 0;
     }
@@ -893,6 +901,31 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         for (k = 0; k < rq->op_count; ++k) {
             if (rq->ops[k].kind == AS_X86_OP_REG && rq->ops[k].size_bits == 64 && rq->mode != 64u) {
                 vec_err(ctx, "a 64-bit register in %u-bit code", rq->mode);
+                return -1;
+            }
+        }
+        /* (Or in the index registers of a string instruction, which
+         * are of one size where both are written.) */
+        if (addr == NULL && (t->flags & AS_VEC_F_BASE) != 0 && strpbrk(t->ops, "<>") != NULL) {
+            unsigned bits = 0;
+            unsigned other = rq->mode == 64u ? 32u : rq->mode == 32u ? 16u : 32u;
+
+            for (k = 0; k < rq->op_count; ++k) {
+                if (t->ops[k] == '<' || t->ops[k] == '>') {
+                    unsigned b = rq->ops[k].u.mem.addr_bits != 0 ? rq->ops[k].u.mem.addr_bits : rq->mode;
+
+                    if (bits != 0 && bits != b) {
+                        vec_err(ctx, "'%s': the two index registers are of different sizes", t->name);
+                        return -1;
+                    }
+                    bits = b;
+                }
+            }
+            if (bits != rq->mode && bits != other) {
+                vec_err(ctx, "an address in a %u-bit register in %u-bit code", bits, rq->mode);
+                return -1;
+            }
+            if (bits == other && put8(ctx, 0x67u) != 0) {
                 return -1;
             }
         }
