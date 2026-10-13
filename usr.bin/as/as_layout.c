@@ -228,6 +228,11 @@ int bytebuf_append(bytebuf_t *b, const void *p, size_t n) {
 }
 
 int bytebuf_append_zeros(bytebuf_t *b, size_t n) {
+    /* (None is none: a buffer that has had nothing has no storage to
+     * hand to memset, which may not be given NULL even for no bytes.) */
+    if (n == 0) {
+        return 0;
+    }
     if (bytebuf_reserve(b, n) != 0) {
         return -1;
     }
