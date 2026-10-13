@@ -1302,6 +1302,23 @@ int as_x86_vec_takes_lock(const char *mnemonic) {
     return mnemonic != NULL && find_rows(mnemonic, &i) == 0 && (as_x86_vec_table[i].flags & AS_VEC_F_LOCK) != 0;
 }
 
+/* The same of the forms the name always had: any row of AS_VEC_F_BASE
+ * may say so.  (A name's first rows are APX's where it has them, and
+ * say it of APX's forms.) */
+int as_x86_vec_base_takes_lock(const char *mnemonic) {
+    size_t i;
+
+    if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
+        return 0;
+    }
+    for (; i < as_x86_vec_table_count; i = next_row[i]) {
+        if ((as_x86_vec_table[i].flags & (AS_VEC_F_LOCK | AS_VEC_F_BASE)) == (AS_VEC_F_LOCK | AS_VEC_F_BASE)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, size_t *out_len, char *errbuf,
                       size_t errbuf_sz) {
     const char *why = "does not take these operands";

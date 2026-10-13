@@ -9632,12 +9632,43 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
             if ((insn->prefixes & none[i].flag) != 0) {
                 /* (One that may be locked: F0 before it, and after a
                  * segment, which the caller writes.) */
-                if (none[i].flag == AS_PREFIX_LOCK && as_x86_vec_takes_lock(mn)) {
+                /* (Of APX's forms the name's first row says; of the
+                 * forms it always had, any of those rows.) */
+                size_t lead = *code_len != 0 && code[0] == 0x67u ? 1 : 0;
+                int evex = lead < *code_len && code[lead] == 0x62u;
+
+                if (none[i].flag == AS_PREFIX_LOCK &&
+                    (evex ? as_x86_vec_takes_lock(mn) : as_x86_vec_takes_lock(mn) || as_x86_vec_base_takes_lock(mn))) {
+                    size_t at = 0;
+
                     if (*code_len + 1 > code_cap) {
                         return -1;
                     }
-                    memmove(code + 1, code, *code_len);
-                    code[0] = 0xf0;
+                    /*
+                     * A form an instruction always had (no EVEX): it
+                     * is locked only where it writes to memory -- its
+                     * last operand, or either of xchg's -- and F0 goes
+                     * after the prefixes of the address's and the
+                     * operand's size, as GNU as has it: `lock addw $1,
+                     * (%eax)` is 66 F0 83 00 01.
+                     */
+                    if (!evex && as_x86_vec_has_base(mn, n)) {
+                        int to_memory = n >= 1 && ops[n - 1].kind == AS_X86_OP_MEM;
+                        size_t k;
+
+                        for (k = 0; strncmp(mn, "xchg", 4) == 0 && k < n; ++k) {
+                            to_memory |= ops[k].kind == AS_X86_OP_MEM;
+                        }
+                        if (!to_memory) {
+                            snprintf(encerr, encerr_sz, "'%s' is locked only where it writes to memory", mn);
+                            return -1;
+                        }
+                        while (at < *code_len && (code[at] == 0x66u || code[at] == 0x67u)) {
+                            at++;
+                        }
+                    }
+                    memmove(code + at + 1, code + at, *code_len - at);
+                    code[at] = 0xf0;
                     (*code_len)++;
                     continue;
                 }

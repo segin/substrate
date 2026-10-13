@@ -236,6 +236,7 @@ int as_x86_vec_takes_data16(const char *mnemonic);
 /* 1 if the instruction may be locked (AS_VEC_F_LOCK on its first row):
  * `lock cmpxchg16b`, and `xacquire` and `xrelease` with it. */
 int as_x86_vec_takes_lock(const char *mnemonic);
+int as_x86_vec_base_takes_lock(const char *mnemonic);
 
 #ifdef __cplusplus
 }
