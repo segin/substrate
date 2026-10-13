@@ -40,18 +40,19 @@ typedef struct {
     elf_symbol_t *sym;
 } emit_sym_t;
 
+/* (The name is the label's, the file its unit's and the section's name
+ * the one kept for the object: none is this entry's to free.) */
 typedef struct {
-    char *name;
-    char *file;
+    const char *name;
+    const char *file;
     unsigned line;
     int digit;
-    char *section;
+    const char *section;
     uint64_t off;
     const as_stmt_t *stmt;
     /* What it is found by besides its name: where it is written, for a
      * numbered label, and the statement it is. */
     char *place_key;
-    char *stmt_key;
 } virtual_label_cache_t;
 
 typedef struct {
@@ -131,7 +132,9 @@ typedef struct {
      * and a compiler's debugging sections ask a hundred thousand times. */
     as_strmap_t vlabel_by_name;
     as_strmap_t vlabel_by_place;
-    as_strmap_t vlabel_by_stmt;
+    /* By statement: for each statement of the parse, one more than the
+     * entry's index, or 0. */
+    size_t *vlabel_of_stmt;
     asm_var_t *asm_vars;
     size_t asm_var_count;
     size_t asm_var_cap;

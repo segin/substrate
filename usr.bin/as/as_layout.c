@@ -704,10 +704,6 @@ static int vlabel_place_key(char *key, size_t key_sz, const char *file, unsigned
     return n < 0 || (size_t)n >= key_sz ? -1 : 0;
 }
 
-static void vlabel_stmt_key(char *key, size_t key_sz, const as_stmt_t *st) {
-    snprintf(key, key_sz, "%p", (const void *)st);
-}
-
 static int virtual_label_cache_lookup(emit_ctx_t *ctx, const char *file, unsigned line, int digit,
                                       const char *sym_name, const char **section_out, uint64_t *off_out) {
     size_t i;
@@ -755,12 +751,13 @@ static int virtual_label_cache_lookup_stmt(emit_ctx_t *ctx, const as_stmt_t *stm
     }
     {
         virtual_label_cache_t *c;
-        char key[32];
 
-        vlabel_stmt_key(key, sizeof(key), stmt);
-        if (!as_strmap_get(&ctx->vlabel_by_stmt, key, &i)) {
+        if (ctx->vlabel_of_stmt == NULL || ctx->parsed == NULL || stmt < ctx->parsed->items ||
+            stmt >= ctx->parsed->items + ctx->parsed->count ||
+            ctx->vlabel_of_stmt[stmt - ctx->parsed->items] == 0) {
             return -1;
         }
+        i = ctx->vlabel_of_stmt[stmt - ctx->parsed->items] - 1;
         c = &ctx->vlabel_cache[i];
         if (c->off == UINT64_MAX) {
             return -1;
@@ -796,16 +793,17 @@ static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const 
     }
     c = &ctx->vlabel_cache[ctx->vlabel_count++];
     memset(c, 0, sizeof(*c));
-    c->name = xstrdup(label->name);
-    c->file = xstrdup(label->unit != NULL ? label->unit : "");
-    c->section = xstrdup(section);
+    /* (Nothing of an entry is a copy but the key of a numbered label's
+     * place.  Each had its name, its file and its section's name copied
+     * and two keys printed for it, which was most of the time of
+     * finding where a label is.) */
+    c->name = label->name;
+    c->file = label->unit != NULL ? label->unit : "";
+    c->section = section_name_keep(ctx, section);
     c->line = label->ordinal;
     c->digit = digit;
     c->off = off;
     c->stmt = st;
-    if (c->name == NULL || c->file == NULL || c->section == NULL) {
-        return -1;
-    }
     {
         char key[VLABEL_KEY_MAX];
         size_t at = ctx->vlabel_count - 1;
@@ -817,17 +815,22 @@ static int virtual_label_cache_push(emit_ctx_t *ctx, const as_stmt_t *st, const 
             as_strmap_put(&ctx->vlabel_by_name, c->name, at) != 0) {
             return -1;
         }
-        if (vlabel_place_key(key, sizeof(key), c->file, c->line, c->digit) == 0 &&
+        /* (By its place a numbered label is looked for, and no other.) */
+        if (digit >= 0 && vlabel_place_key(key, sizeof(key), c->file, c->line, c->digit) == 0 &&
             !as_strmap_get(&ctx->vlabel_by_place, key, &was)) {
             c->place_key = xstrdup(key);
             if (c->place_key == NULL || as_strmap_put(&ctx->vlabel_by_place, c->place_key, at) != 0) {
                 return -1;
             }
         }
-        vlabel_stmt_key(key, sizeof(key), st);
-        c->stmt_key = xstrdup(key);
-        if (c->stmt_key == NULL || as_strmap_put(&ctx->vlabel_by_stmt, c->stmt_key, at) != 0) {
-            return -1;
+        if (ctx->parsed != NULL && st >= ctx->parsed->items && st < ctx->parsed->items + ctx->parsed->count) {
+            if (ctx->vlabel_of_stmt == NULL) {
+                ctx->vlabel_of_stmt = (size_t *)calloc(ctx->parsed->count, sizeof(*ctx->vlabel_of_stmt));
+                if (ctx->vlabel_of_stmt == NULL) {
+                    return -1;
+                }
+            }
+            ctx->vlabel_of_stmt[st - ctx->parsed->items] = at + 1;
         }
     }
     return 0;
@@ -842,15 +845,12 @@ void virtual_label_cache_free(emit_ctx_t *ctx) {
     /* (Where the rows of the line table stand is of the layout too.) */
     ctx->line_rows_valid = 0;
     for (i = 0; i < ctx->vlabel_count; ++i) {
-        free(ctx->vlabel_cache[i].name);
-        free(ctx->vlabel_cache[i].file);
-        free(ctx->vlabel_cache[i].section);
         free(ctx->vlabel_cache[i].place_key);
-        free(ctx->vlabel_cache[i].stmt_key);
     }
     as_strmap_free(&ctx->vlabel_by_name);
     as_strmap_free(&ctx->vlabel_by_place);
-    as_strmap_free(&ctx->vlabel_by_stmt);
+    free(ctx->vlabel_of_stmt);
+    ctx->vlabel_of_stmt = NULL;
     free(ctx->vlabel_cache);
     ctx->vlabel_cache = NULL;
     ctx->vlabel_count = 0;
