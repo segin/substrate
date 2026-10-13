@@ -85,6 +85,10 @@ is 64 62f47f1847c0 'seta %eax'
 is 32 d8c3 'fadd %st(3), %st'
 is 32 dcc3 'fadd %st, %st(3)'
 is 32 c20800 'ret $8'
+# (A symbol that marks a call for the linker is no part of its address.)
+is 32 ff10 'call *sym@TLSCALL(%eax)'
+is 32 ff5008 'call *8(%eax)'
+is 64 ffd1 'call *%rcx'
 
 [ "$fail" -eq 0 ] && echo "ok: the rows of the instructions of general registers ($cases cases)"
 exit "$fail"
