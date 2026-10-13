@@ -753,19 +753,120 @@ as_expr_t *as_expr_parse_tokens(const as_token_t *tokv, size_t n, const char *fi
 
 /* Text is made tokens by the tokenizer there is, and then read as
  * tokens: an expression in a string has no grammar of its own. */
-as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) {
+static as_expr_t *parse_expr_text(const char *s, const char *file, unsigned line) {
     as_token_vec_t toks;
     as_expr_t *e = NULL;
 
-    if (s == NULL) {
-        return NULL;
-    }
     as_token_vec_init(&toks);
     if (as_lex_text_tokens(s, file, line, &toks) == 0) {
         e = as_expr_parse_tokens(toks.items, toks.count, file, line);
     }
     as_token_vec_free(&toks);
     return e;
+}
+
+/*
+ * The expressions read from text of late, each kept as it was read.
+ *
+ * The argument of a directive is text until it is wanted, and it is
+ * wanted often: by each pass over the statements, and in each by every
+ * way there is of taking it for a number.  `.long a - b` was made
+ * tokens and read as an expression eighteen times, which was half the
+ * time of assembling it.  What an expression is depends on its text and
+ * on where it stands -- a `1b` in it is found from there -- and on
+ * nothing else, so one read is as good as another.
+ *
+ * A slot for each of EXPR_KEPT hashes; what is kept in a slot gives way
+ * to the next text that hashes there.  An entry whose expression is
+ * NULL is a text that is no expression.
+ */
+#define EXPR_KEPT (1u << 20)
+
+typedef struct {
+    char *text;
+    as_expr_t *expr;
+} expr_kept_t;
+
+static expr_kept_t *expr_kept;
+
+/* (Kept as read from nowhere: where it stands is put in the copy that
+ * is handed out, which is all that where it stands is to an
+ * expression -- every node of one carries the same file and line.) */
+static const as_expr_t *expr_of_text(const char *s, int *known) {
+    unsigned long h = 5381ul;
+    const char *p;
+    expr_kept_t *k;
+    char *text;
+
+    *known = 0;
+    if (expr_kept == NULL) {
+        expr_kept = (expr_kept_t *)calloc(EXPR_KEPT, sizeof(*expr_kept));
+        if (expr_kept == NULL) {
+            return NULL;
+        }
+    }
+    for (p = s; *p != '\0'; ++p) {
+        h = h * 33ul + (unsigned char)*p;
+    }
+    k = &expr_kept[h % EXPR_KEPT];
+    if (k->text != NULL && strcmp(k->text, s) == 0) {
+        *known = 1;
+        return k->expr;
+    }
+    text = expr_strdup(s);
+    if (text == NULL) {
+        return NULL;
+    }
+    free(k->text);
+    as_expr_free(k->expr);
+    k->text = text;
+    k->expr = parse_expr_text(s, NULL, 0);
+    *known = 1;
+    return k->expr;
+}
+
+/* A copy of `e` that stands at `line` of `file`. */
+static as_expr_t *expr_clone_at(const as_expr_t *e, const char *file, unsigned line) {
+    as_expr_t *copy;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    copy = (as_expr_t *)calloc(1, sizeof(*copy));
+    if (copy == NULL) {
+        return NULL;
+    }
+    *copy = *e;
+    copy->symbol = NULL;
+    copy->reloc_op = NULL;
+    copy->src_file = NULL;
+    copy->src_line = line;
+    copy->lhs = NULL;
+    copy->rhs = NULL;
+    if ((e->symbol != NULL && (copy->symbol = expr_strdup(e->symbol)) == NULL) ||
+        (e->reloc_op != NULL && (copy->reloc_op = expr_strdup(e->reloc_op)) == NULL) ||
+        (file != NULL && (copy->src_file = expr_strdup(file)) == NULL) ||
+        (e->lhs != NULL && (copy->lhs = expr_clone_at(e->lhs, file, line)) == NULL) ||
+        (e->rhs != NULL && (copy->rhs = expr_clone_at(e->rhs, file, line)) == NULL)) {
+        as_expr_free(copy);
+        return NULL;
+    }
+    return copy;
+}
+
+as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) {
+    const as_expr_t *kept;
+    int known;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    kept = expr_of_text(s, &known);
+    if (!known) {
+        return parse_expr_text(s, file, line);
+    }
+    /* The caller's own, to change and to free. */
+    return expr_clone_at(kept, file, line);
 }
 
 /* ------------------------------------------------------------------ */
@@ -864,9 +965,20 @@ int as_expr_eval(const as_expr_t *e, as_expr_lookup_fn lookup, void *cookie, lon
 }
 
 int as_expr_eval_string(const char *s, as_expr_lookup_fn lookup, void *cookie, long long *out) {
-    as_expr_t *e = as_parse_expr_string(s, NULL, 0);
+    const as_expr_t *kept;
+    as_expr_t *e;
+    int known;
     int rc;
 
+    if (s == NULL) {
+        return AS_EXPR_EVAL_NOT_CONST;
+    }
+    /* (Read only, so the one that is kept will do.) */
+    kept = expr_of_text(s, &known);
+    if (known) {
+        return kept != NULL ? as_expr_eval(kept, lookup, cookie, out) : AS_EXPR_EVAL_NOT_CONST;
+    }
+    e = parse_expr_text(s, NULL, 0);
     if (e == NULL) {
         return AS_EXPR_EVAL_NOT_CONST;
     }
