@@ -335,6 +335,13 @@ static int operand_is(const as_x86_operand_t *op, char want) {
                ((op->u.imm >= -128 && op->u.imm <= 127) || (op->u.imm >= 0xffffff80ll && op->u.imm <= 0xffffffffll));
     /* A general register of 16, of 32, of 64 bits that is not %ax,
      * %eax, %rax: those have a form of their own with a number. */
+    /* A general register of 8 bits, any of them -- %ah to %bh, which
+     * are written with no REX prefix, and %spl to %dil, which are
+     * written with one (emit_row_bytes()); and one that is not %al. */
+    case 'H':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8;
+    case 'v':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 && (unsigned)op->u.reg != 0u;
     case 'f':
         return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16 && (unsigned)op->u.reg != 0u;
     case 'g':
@@ -576,6 +583,45 @@ static unsigned role_reg(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq,
 /*
  * Write the row for the statement.  0, or -1 with the reason.
  */
+static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq);
+
+/*
+ * A row with registers of 8 bits of any kind (class H or v).
+ *
+ * %ah, %ch, %dh and %bh are numbers 4 to 7 in an instruction with no
+ * REX prefix, and cannot be named in one that has it; %spl, %bpl, %sil
+ * and %dil are those numbers in one that has it, and so make it have
+ * one, of no bits if no other is wanted.  The row is emitted with the
+ * registers numbered so and with that said of the prefix.
+ */
+static int emit_row_bytes(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq) {
+    as_x86_operand_t ops[8];
+    as_x86_vec_req_t as = *rq;
+    size_t i;
+
+    if (strpbrk(t->ops, "Hv") == NULL || rq->op_count > sizeof(ops) / sizeof(ops[0])) {
+        return emit_row(ctx, t, rq);
+    }
+    for (i = 0; i < rq->op_count; ++i) {
+        ops[i] = rq->ops[i];
+        if ((t->ops[i] != 'H' && t->ops[i] != 'v') || ops[i].kind != AS_X86_OP_REG) {
+            continue;
+        }
+        if ((unsigned)ops[i].u.reg >= (unsigned)AS_X86_REG_AH && (unsigned)ops[i].u.reg <= (unsigned)AS_X86_REG_BH) {
+            ops[i].u.reg = (as_x86_reg_t)((unsigned)ops[i].u.reg - (unsigned)AS_X86_REG_AH + 4u);
+            as.no_rex = 1;
+        } else if ((unsigned)ops[i].u.reg >= 4u && (unsigned)ops[i].u.reg <= 7u) {
+            if (rq->mode != 64u) {
+                vec_err(ctx, "'%s': %%spl, %%bpl, %%sil and %%dil are registers of 64-bit code", t->name);
+                return -1;
+            }
+            as.explicit_rex = 1;
+        }
+    }
+    as.ops = ops;
+    return emit_row(ctx, t, &as);
+}
+
 static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq) {
     const as_x86_operand_t *rm = role_op(t, rq, 'm');
     const as_x86_operand_t *vop = role_op(t, rq, 'v');
@@ -822,6 +868,11 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
         if (rex != 0 && rq->mode != 64u) {
             vec_err(ctx, "a REX prefix outside 64-bit code");
+            return -1;
+        }
+        if (rq->no_rex && (rex != 0 || high)) {
+            vec_err(ctx, "'%s': %%ah, %%ch, %%dh and %%bh cannot be named in an instruction with a REX prefix",
+                    t->name);
             return -1;
         }
         if (high) {
@@ -1211,7 +1262,7 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
                 continue;
             }
         }
-        if (emit_row(&ctx, t, rq) != 0) {
+        if (emit_row_bytes(&ctx, t, rq) != 0) {
             return -1;
         }
         *out_len = ctx.at;

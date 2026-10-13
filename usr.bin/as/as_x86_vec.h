@@ -119,6 +119,8 @@ typedef struct {
      *   S T     one that is such a byte once cut to 16, to 32 bits
      *   f g j   a general register of 16, 32, 64 bits that is not
      *           %ax, %eax, %rax
+     *   H v     a general register of 8 bits, any of them; one that
+     *           is not %al
      *   n N     an MMX register; that, or memory
      *   t       a tile register, %tmm0 to %tmm7
      *   B       a bound register, %bnd0 to %bnd3
@@ -168,6 +170,9 @@ typedef struct {
      * may be none.  Only an instruction with no VEX has one. */
     int explicit_rex;
     unsigned rex_bits;
+    /* Set by the emitter for itself: an operand is %ah, %ch, %dh or
+     * %bh, which no instruction with a REX prefix can name. */
+    int no_rex;
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */
