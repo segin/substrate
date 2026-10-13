@@ -9643,11 +9643,13 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
         }
         /* (And `call *sym@TLSCALL(%eax)` has no displacement at all:
          * the symbol marks the call for the linker and is no part of
-         * the address.  That is not a row's to say, and the statement
-         * is assembled where it always was.) */
+         * the address, which is (%eax) and nothing added.  The
+         * relocation is made where the others are.) */
         if (ops[i].kind == AS_X86_OP_MEM && disp != NULL && as_expr_reloc_op(disp) != NULL &&
             strcasecmp(as_expr_reloc_op(disp), "TLSCALL") == 0 && as_x86_vec_has_base(mn, n)) {
-            return 0;
+            ops[i].u.mem.has_disp = 0;
+            ops[i].u.mem.force_disp32 = 0;
+            ops[i].u.mem.disp = 0;
         }
     }
     memset(&rq, 0, sizeof(rq));

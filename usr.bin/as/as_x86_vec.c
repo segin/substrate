@@ -810,6 +810,16 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
         put8(ctx, 0x66u) != 0) {
         return -1;
     }
+    /* (A REX prefix that is written is written, where there is one.) */
+    if (rq->explicit_rex) {
+        if (rq->mode != 64u) {
+            vec_err(ctx, "'%s': a REX prefix outside 64-bit code", t->name);
+            return -1;
+        }
+        if (put8(ctx, 0x40u | (rq->rex_bits & 0xfu)) != 0) {
+            return -1;
+        }
+    }
     if (t->disp8_n != 0 && known && !rq->force_near) {
         disp = rq->rel_is_disp ? target : target - ((long long)rq->offset + 2);
         if (disp >= -128 && disp <= 127) {
@@ -969,6 +979,50 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             if (put8(ctx, t->opcode + preg) != 0 || (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
                 return -1;
             }
+        }
+        /*
+         * Two numbers after the opcode, which enter has (the frame's
+         * size in two bytes and the level in one) and the far jump and
+         * call to a place written as a segment and an offset (the
+         * offset, of the operand's size, and then the segment in two).
+         * Role `z` is a number of the operand's size, `2` one of two
+         * bytes and `1` one of a byte, and they are written in that
+         * order whatever order they are operands in.  A symbol is room
+         * for the linker.
+         */
+        if ((t->flags & AS_VEC_F_BASE) != 0 &&
+            (role_op(t, rq, 'z') != NULL || role_op(t, rq, '2') != NULL || role_op(t, rq, '1') != NULL)) {
+            static const char order[] = "z21";
+            size_t r;
+
+            for (r = 0; order[r] != '\0'; ++r) {
+                const as_x86_operand_t *num = role_op(t, rq, order[r]);
+                unsigned bytes = order[r] == '1' ? 1u
+                                 : order[r] == '2' ? 2u
+                                 : (t->flags & AS_VEC_F_OP16) != 0 || (rq->mode == 16u && (t->flags & AS_VEC_F_OP32) == 0)
+                                       ? 2u
+                                       : 4u;
+                unsigned b;
+
+                if (num == NULL) {
+                    continue;
+                }
+                if (!num->imm_symbolic &&
+                    (bytes == 1u ? (num->u.imm < -128 || num->u.imm > 255)
+                     /* (An offset of four bytes keeps its low four,
+                      * as GNU as has it: `ljmp $8, $0x100000000`.) */
+                     : bytes == 2u && (num->u.imm < -32768 || num->u.imm > 65535))) {
+                    vec_err(ctx, "the number %lld is not of %u byte%s", (long long)num->u.imm, bytes,
+                            bytes == 1u ? "" : "s");
+                    return -1;
+                }
+                for (b = 0; b < bytes; ++b) {
+                    if (put8(ctx, num->imm_symbolic ? 0u : (unsigned)(((uint64_t)num->u.imm >> (b * 8u)) & 0xffu)) != 0) {
+                        return -1;
+                    }
+                }
+            }
+            return 0;
         }
         /* An address after the opcode (role `o`): of the code's own
          * size, two bytes in 16-bit code and four in 32-bit.  A symbol
