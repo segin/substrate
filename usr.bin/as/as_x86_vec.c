@@ -499,10 +499,10 @@ static int operand_is(const as_x86_operand_t *op, char want) {
                (!op->u.mem.has_disp || (op->u.mem.disp == 0 && !op->u.mem.force_disp32)) &&
                (unsigned)op->u.mem.base == (want == '<' ? 6u : 7u);
     /* And the table xlat looks in, written as memory through a
-     * register: whichever, for its size is all that is read of it. */
+     * register: whichever and with whatever added, for the size of
+     * the address is all that is read of it. */
     case '=':
-        return mem && op->u.mem.has_base && !op->u.mem.has_index && !op->u.mem.rip_relative &&
-               (!op->u.mem.has_disp || (op->u.mem.disp == 0 && !op->u.mem.force_disp32));
+        return mem && op->u.mem.has_base && !op->u.mem.rip_relative;
     default:
         return 0;
     }
