@@ -1554,6 +1554,9 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
      * many and are in a file of their own. */
 #include "as_x86_vec_table_ext.h"
 #include "as_x86_vec_table_apx.h"
+    /* And the forms the instructions of general registers always had,
+     * as they come here: after APX's, which are of other operands. */
+#include "as_x86_vec_table_base.h"
 };
 
 const size_t as_x86_vec_table_count = sizeof(as_x86_vec_table) / sizeof(as_x86_vec_table[0]);

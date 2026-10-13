@@ -33,6 +33,7 @@ usr.bin/as/
 ├── as_x86_vec_table.c       # x86: its table, a row for each form
 ├── as_x86_vec_table_ext.h   # x86: more rows of it -- FP16, AVX10.2, XOP, AMX, 3DNow! and the rest GNU as has
 ├── as_x86_vec_table_apx.h   # x86: and APX's forms of the instructions of general registers (generated)
+├── as_x86_vec_table_base.h  # x86: and the forms those instructions always had, as they come to the table (generated)
 ├── as_x86_memsize_table.h   # x86: the sizes of memory each instruction takes in Intel syntax (generated)
 ├── as_x86_vex.c             # x86: the VEX prefix
 ├── as_x86_sse3.c            # x86, per extension, what is left of it: `fisttp` (SSE3), whose

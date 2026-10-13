@@ -82,6 +82,14 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 #define AS_VEC_F_REGRM (1u << 28)  /* the register in r/m is in ModRM.reg too: a product into what is multiplied */
 #define AS_VEC_F_PROMO (1u << 29)  /* APX's EVEX form of an instruction with another: only where {evex} or {nf} asks */
 #define AS_VEC_F_PROMOHI (1u << 30) /* and one that %r16 to %r31 need too, the instruction having no REX2 form */
+/*
+ * A form an instruction has always had, of a name that is still
+ * assembled elsewhere for the forms that have no row yet: the table is
+ * asked first, in every mode, and what none of its rows is of is left
+ * to where it always went.  (The instructions of general registers are
+ * coming here from the encoders that compare names, a family at a time.)
+ */
+#define AS_VEC_F_BASE (1u << 31)
 
 typedef struct {
     const char *name;
@@ -171,6 +179,9 @@ int as_x86_vec_knows(const char *mnemonic);
  * and `high` whether it has one of %r16 to %r31: the forms that are
  * only for those are not counted otherwise. */
 int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int high);
+
+/* Has the name a row of AS_VEC_F_BASE with this many operands? */
+int as_x86_vec_has_base(const char *mnemonic, size_t op_count);
 
 /* Whether the table has any row of the name (in lower case), APX's or
  * not: it is the name of something. */

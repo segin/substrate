@@ -9378,14 +9378,25 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
      * asked of it first, in 64-bit code: what the table has no row for,
      * or cannot read, is the instruction it always was.
      */
-    if (cfg->is_64 && n >= 1 &&
-        as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
-                           x86_stmt_has_high_general(insn))) {
+    /* (And so are the forms an instruction has always had, as they
+     * come to the table: those are asked of it in every mode.) */
+    if ((cfg->is_64 && n >= 1 &&
+         as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
+                            x86_stmt_has_high_general(insn))) ||
+        as_x86_vec_has_base(mn, n)) {
         static int asking;
         int rc;
 
         if (asking) {
             return 0;
+        }
+        /* (What is refused of an instruction's operands whatever its
+         * form -- a displacement 32 bits do not hold, a register no
+         * address is made of -- is refused before its form is looked
+         * for, here as where the instruction always went.) */
+        if (as_x86_vec_has_base(mn, n) &&
+            x86_operand_classes_refused(insn, insn->syntax_intel != 0, cfg->is_64, encerr, encerr_sz)) {
+            return -1;
         }
         asking = 1;
         rc = encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);

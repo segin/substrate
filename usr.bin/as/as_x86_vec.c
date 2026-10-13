@@ -215,8 +215,10 @@ int as_x86_vec_knows(const char *mnemonic) {
     }
     /* (A name whose rows here are APX's forms of an instruction that
      * is assembled elsewhere is not one this table is asked about.) */
+    /* (Nor one whose rows are the forms that have come here so far of
+     * an instruction that is still assembled elsewhere.) */
     if (find_rows(mnemonic, &first) == 0) {
-        return (as_x86_vec_table[first].flags & AS_VEC_F_APX) == 0;
+        return (as_x86_vec_table[first].flags & (AS_VEC_F_APX | AS_VEC_F_BASE)) == 0;
     }
     return alias_of(mnemonic, base, sizeof(base), &imm) == 0 && find_rows(base, &first) == 0;
 }
@@ -244,6 +246,20 @@ int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int hig
             continue;
         }
         if ((flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI)) == 0 || asked || ((flags & AS_VEC_F_PROMOHI) != 0 && high)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int as_x86_vec_has_base(const char *mnemonic, size_t op_count) {
+    size_t i;
+
+    if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
+        return 0;
+    }
+    for (; i < as_x86_vec_table_count; i = next_row[i]) {
+        if ((as_x86_vec_table[i].flags & AS_VEC_F_BASE) != 0 && strlen(as_x86_vec_table[i].ops) == op_count) {
             return 1;
         }
     }
@@ -1019,7 +1035,7 @@ int as_x86_vec_takes_data16(const char *mnemonic) {
     for (; i < as_x86_vec_table_count; i = next_row[i]) {
         /* (The forms APX adds to the name are not what a prefix is
          * written before.) */
-        if ((as_x86_vec_table[i].flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI | AS_VEC_F_APX)) != 0) {
+        if ((as_x86_vec_table[i].flags & (AS_VEC_F_PROMO | AS_VEC_F_PROMOHI | AS_VEC_F_APX | AS_VEC_F_BASE)) != 0) {
             continue;
         }
         if (as_x86_vec_table[i].enc != AS_VEC_LEGACY || strpbrk(as_x86_vec_table[i].ops, "xyzXYZnN0123") != NULL) {
@@ -1182,7 +1198,7 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
     }
     /* (APX's forms of an instruction, and these operands are of none
      * of them: the instruction is assembled where it always was.) */
-    if ((as_x86_vec_table[first].flags & AS_VEC_F_APX) != 0) {
+    if ((as_x86_vec_table[first].flags & (AS_VEC_F_APX | AS_VEC_F_BASE)) != 0) {
         return 0;
     }
     if (errbuf != NULL && errbuf_sz > 0) {
