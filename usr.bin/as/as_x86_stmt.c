@@ -9748,6 +9748,26 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                     (*code_len)++;
                     continue;
                 }
+                /* (The PadLock instructions repeat: most are written
+                 * by the table with the F3 that says so whether or
+                 * not `rep` is, and xstore has it only where it is
+                 * written.  One F3 either way.) */
+                if ((none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPE) &&
+                    (insn->prefixes & AS_PREFIX_HLE) == 0 && !evex && n == 0 &&
+                    (strncmp(mn, "xcrypt", 6) == 0 || strncmp(mn, "xstore", 6) == 0 || strncmp(mn, "xsha", 4) == 0 ||
+                     strcmp(mn, "montmul") == 0) &&
+                    as_x86_vec_base_is_whole(mn)) {
+                    if (*code_len != 0 && code[0] == 0xf3u) {
+                        continue;
+                    }
+                    if (*code_len + 1 > code_cap) {
+                        return -1;
+                    }
+                    memmove(code + 1, code, *code_len);
+                    code[0] = 0xf3u;
+                    (*code_len)++;
+                    continue;
+                }
                 /* (A repeat before bsf or bsr is the byte, which GNU
                  * as takes: F3 0F BC is tzcnt where there is one and
                  * bsf where there is not.  After the prefixes of
