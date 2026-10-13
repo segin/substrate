@@ -134,6 +134,23 @@ is 32 6669c03412 'imul $0x1234, %ax'
 is 32 f30fbcd1 'rep bsf %ecx, %edx'
 is 32 f3890500000000 'xrelease mov %eax, sym'
 refused 32 'xacquire mov %eax, sym'
+# What is pushed with no suffix is of the code's size; a number that is
+# a byte once cut to it is the byte, and one that 64 bits are not made
+# of by the sign of four bytes is refused:
+is 32 6880000000 'push $128'
+is 32 6aff 'push $0xffffffff'
+is 64 6a01 'push $1'
+refused 64 'push $0xffffffff'
+is 32 6668ffff 'pushw $0x7fffffff'
+# The segment registers, the first four in an opcode of one byte and
+# not in 64-bit code, %fs and %gs in one of two; %cs is not popped:
+is 32 1e 'push %ds'
+is 32 0fa0 'push %fs'
+is 32 660fa0 'pushw %fs'
+is 32 0fa9 'pop %gs'
+is 64 0fa0 'push %fs'
+refused 64 'push %es'
+refused 32 'pop %cs'
 
 [ "$fail" -eq 0 ] && echo "ok: the rows of the instructions of general registers ($cases cases)"
 exit "$fail"

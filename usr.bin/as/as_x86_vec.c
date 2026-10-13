@@ -390,6 +390,15 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return cls == AS_X86_REGCLASS_DEBUG;
     case '7':
         return cls == AS_X86_REGCLASS_SEGMENT;
+    /* The segment registers an instruction of one byte pushes -- %es,
+     * %cs, %ss, %ds -- and pops, which are those but %cs; and the two
+     * that came later, %fs and %gs, whose instructions are of two. */
+    case '8':
+        return cls == AS_X86_REGCLASS_SEGMENT && (unsigned)op->u.reg <= 3u;
+    case '4':
+        return cls == AS_X86_REGCLASS_SEGMENT && (unsigned)op->u.reg <= 3u && (unsigned)op->u.reg != 1u;
+    case '9':
+        return cls == AS_X86_REGCLASS_SEGMENT && ((unsigned)op->u.reg == 4u || (unsigned)op->u.reg == 5u);
     /* The port `in` and `out` go through: %dx, written as the register
      * or in brackets as an address is. */
     case 'C':
@@ -838,7 +847,19 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                     return -1;
                 }
             }
-            if (put8(ctx, t->opcode + (preg & 7u)) != 0 || (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
+            /* (Or a segment register in it, role `g`: the low two bits
+             * of its number in the opcode's bits 3 and 4.  `push %ds`
+             * is 1E, `pop %gs` 0F A9.) */
+            {
+                const as_x86_operand_t *seg = (t->flags & AS_VEC_F_BASE) != 0 ? role_op(t, rq, 'g') : NULL;
+
+                if (seg != NULL) {
+                    preg = ((unsigned)seg->u.reg & 3u) << 3;
+                } else {
+                    preg &= 7u;
+                }
+            }
+            if (put8(ctx, t->opcode + preg) != 0 || (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
                 return -1;
             }
         }
@@ -896,6 +917,13 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
              */
             cut = (t->flags & AS_VEC_F_BASE) != 0 && rq->op_count == 2 && strchr(t->ops, 'i') != NULL &&
                   t->w != AS_VEC_W1;
+            /* (And a number pushed, but as 64-bit code pushes it:
+             * `pushw $0x7fffffff` pushes 0xffff, and the byte that a
+             * number is once cut to the size is that byte.) */
+            if ((t->flags & AS_VEC_F_BASE) != 0 && rq->op_count == 1 && strncmp(t->name, "push", 4) == 0 &&
+                (strchr("STL", t->ops[0]) != NULL || wide == 2 || (wide == 4 && rq->mode != 64u))) {
+                cut = 1;
+            }
             if (imm->imm_symbolic && ((wide == 0 && !cut) || (t->flags & AS_VEC_F_BASE) == 0)) {
                 vec_err(ctx, "'%s' takes a number that is known here", t->name);
                 return -1;
@@ -908,10 +936,15 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 }
                 return put8(ctx, imm->imm_symbolic ? 0u : (unsigned)imm->u.imm & 0xffu);
             }
+            /* (Four bytes that 64 bits are made of by their sign must
+             * be the number: of a row with W, and of what 64-bit code
+             * pushes, which has no W and is of 64 bits all the same.) */
             if (!imm->imm_symbolic && !cut &&
                 (wide == 2 ? (imm->u.imm < -32768 || imm->u.imm > 65535)
                            : (imm->u.imm < -2147483648ll ||
-                              imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll)))) {
+                              imm->u.imm > (t->w == AS_VEC_W1 || (rq->mode == 64u && strncmp(t->name, "push", 4) == 0)
+                                                ? 2147483647ll
+                                                : 4294967295ll)))) {
                 vec_err(ctx, "the number %lld is not of %u bytes", (long long)imm->u.imm, wide);
                 return -1;
             }
@@ -1471,6 +1504,13 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
          * unasked, and the other is still where it was.) */
         if ((t->flags & AS_VEC_F_BASE) != 0 && (rq->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) != 0) {
             if (t->bcst != AS_VEC_LEGACY_WHOLE) {
+                continue;
+            }
+            /* (A segment register pushed is stored and one popped is
+             * loaded: GNU as will not have the other asked of it.) */
+            if (strchr(t->roles, 'g') != NULL &&
+                (rq->pseudo & (strncmp(t->name, "push", 4) == 0 ? AS_PSEUDO_LOAD : AS_PSEUDO_STORE)) != 0) {
+                why = "has one way to be written with a segment register";
                 continue;
             }
             /*
