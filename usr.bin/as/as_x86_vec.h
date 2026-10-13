@@ -48,6 +48,9 @@ enum {
 enum { AS_VEC_W0 = 0, AS_VEC_W1 = 1, AS_VEC_WIG = 2 };
 /* The vector length: 128, 256 or 512 bits, or ignored (written 0). */
 enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
+/* (A row with no VEX has no vector length, and its `len` says one
+ * thing instead: that the number after the opcode is of eight bytes.) */
+#define AS_VEC_LEGACY_IMM64 1
 
 /*
  * What a row allows besides its operands.  The low three bits are the

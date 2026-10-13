@@ -1855,6 +1855,9 @@
     LX("crc32", PF2, M2, 0xf1, W0, "wd", "mr", AS_VEC_F_BASE | OP16),
     LX("crc32", PF2, M2, 0xf1, W0, "dd", "mr", AS_VEC_F_BASE | OP32),
     LX("crc32", PF2, M2, 0xf1, W1, "qq", "mr", AS_VEC_F_BASE | O64),
+    /* (movabs of a number of eight bytes to a register.  By hand.) */
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, 0, AS_VEC_F_BASE | O64},
+    {"movabsq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, 0, AS_VEC_F_BASE | O64},
     /* And the moves that widen. */
     LX("movsb", P0, M1, 0xbe, W0, "mw", "mr", AS_VEC_F_BASE | OP16),
     LX("movsb", P0, M1, 0xbe, W0, "md", "mr", AS_VEC_F_BASE | OP32),

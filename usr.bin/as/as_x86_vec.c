@@ -808,6 +808,20 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             unsigned wide = (t->flags & AS_VEC_F_IMM16) != 0 ? 2u : (t->flags & AS_VEC_F_IMM32) != 0 ? 4u : 0u;
             unsigned k2;
 
+            /* (Of eight bytes, which one instruction has: movabs.  A
+             * row with no VEX has no use for `len` but to say so.) */
+            if (t->len == AS_VEC_LEGACY_IMM64) {
+                if (!imm->imm_symbolic || (t->flags & AS_VEC_F_BASE) != 0) {
+                    for (k2 = 0; k2 < 8u; ++k2) {
+                        if (put8(ctx, imm->imm_symbolic ? 0u
+                                                        : (unsigned)(((uint64_t)imm->u.imm >> (k2 * 8u)) & 0xffu)) != 0) {
+                            return -1;
+                        }
+                    }
+                    return 0;
+                }
+            }
+
             if (imm == NULL) {
                 return 0;
             }
