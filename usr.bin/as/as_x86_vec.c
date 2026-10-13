@@ -359,7 +359,7 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     case 'h':
         /* (Not %ah to %bh, nor %spl to %dil, which a REX prefix tells
          * apart: no row that takes a byte has needed them.) */
-        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 &&
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 && !op->high8 &&
                ((unsigned)op->u.reg < 4u || (unsigned)op->u.reg > 7u);
     case 'n':
         return cls == AS_X86_REGCLASS_MMX;
@@ -607,7 +607,7 @@ static int emit_row_bytes(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x
         if ((t->ops[i] != 'H' && t->ops[i] != 'v') || ops[i].kind != AS_X86_OP_REG) {
             continue;
         }
-        if ((unsigned)ops[i].u.reg >= (unsigned)AS_X86_REG_AH && (unsigned)ops[i].u.reg <= (unsigned)AS_X86_REG_BH) {
+        if (ops[i].high8) {
             ops[i].u.reg = (as_x86_reg_t)((unsigned)ops[i].u.reg - (unsigned)AS_X86_REG_AH + 4u);
             as.no_rex = 1;
         } else if ((unsigned)ops[i].u.reg >= 4u && (unsigned)ops[i].u.reg <= 7u) {

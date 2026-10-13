@@ -118,6 +118,13 @@ typedef struct {
      * %eax, %xmm0, %es and %cr0.
      */
     unsigned char reg_class;
+    /*
+     * The register is %ah, %ch, %dh or %bh.  Their numbers
+     * (AS_X86_REG_AH and after) are 16 to 19, which are also what
+     * %r16b to %r19b are to whoever numbers APX's registers by their
+     * own -- and nothing else told the two apart.
+     */
+    unsigned char high8;
     union {
         as_x86_reg_t reg;
         int64_t imm;

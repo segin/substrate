@@ -172,6 +172,7 @@ int as_x86_reg_operand(const char *name, as_x86_operand_t *dst) {
     dst->is_mmx = r->cls == AS_X86_REGCLASS_MMX;
     if (r->cls == AS_X86_REGCLASS_GENERAL && (r->flags & AS_X86_REGF_HIGH8) != 0) {
         dst->u.reg = high8[r->number - 4];
+        dst->high8 = 1;
     } else {
         dst->u.reg = (as_x86_reg_t)r->number;
     }
