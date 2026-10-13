@@ -234,27 +234,7 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "push";
-    insn.op_count = 1;
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    {
-        const uint8_t exp[] = {0x50};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.ops[0] = imm_op(0x01020304);
-    {
-        const uint8_t exp[] = {0x68, 0x04, 0x03, 0x02, 0x01};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "pop";
-    insn.ops[0] = reg_op(AS_X86_REG_EBX);
-    {
-        const uint8_t exp[] = {0x5b};
-        check_encode(&insn, exp, sizeof(exp));
-    }
+    /* (Nor push and pop.) */
 
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "clc";

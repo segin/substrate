@@ -416,40 +416,6 @@ static int is_disp8(int32_t v) {
     return v >= -128 && v <= 127;
 }
 
-/* May this immediate have the sign-extended one-byte form? */
-/*
- * Whether the number is one a signed byte holds, at the width of what
- * it is done to: `addw $0xff80, %bx` adds -128 to sixteen bits, and
- * `addl $0xffffff80, %eax` to thirty-two, and each has the form with a
- * byte of immediate.  Asked of the number as it was written, neither
- * was a byte and each took the long form.
- */
-static int imm_is_s8_at(const as_x86_operand_t *op, unsigned bits) {
-    long long v = op->u.imm;
-
-    if (op->imm_symbolic) {
-        return 0;
-    }
-    /* A number written as 32 bits with the top one set is that
-     * negative number; and it is a byte only if it is a number the
-     * width holds at all -- one too large for 16 bits is cut to them
-     * with a warning, and keeps the long form. */
-    if (bits != 64 && v >= 0x80000000ll && v <= 0xffffffffll) {
-        v -= 0x100000000ll;
-    }
-    if (bits == 16) {
-        if (v < -0x8000ll || v > 0xffffll) {
-            return 0;
-        }
-        v = (int16_t)(uint16_t)v;
-    } else if (bits == 32) {
-        if (v < -0x80000000ll || v > 0xffffffffll) {
-            return 0;
-        }
-        v = (int32_t)(uint32_t)v;
-    }
-    return v >= -128 && v <= 127;
-}
 
 static unsigned effective_i386_operand_bits(const as_x86_insn_t *insn) {
     unsigned defbits;
@@ -2013,43 +1979,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "push")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
-            if (emit8(&ctx, (uint8_t)(0x50 | (a->u.reg & 7))) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp(&ctx, 6, a) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            /* A number that a signed byte holds is pushed from one. */
-            if (imm_is_s8_at(a, effective_i386_operand_bits(insn))) {
-                if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-                    return -1;
-                }
-            } else if (emit8(&ctx, 0x68) != 0 ||
-                       emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm, effective_i386_operand_bits(insn)) != 0) {
-                return -1;
-            }
-        } else {
-            set_err(&ctx, "unsupported operand form for 'push' (op_count=%zu kind=%d)", insn->op_count,
-                    a != NULL ? (int)a->kind : -1);
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "pop")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
-            if (emit8(&ctx, (uint8_t)(0x58 | (a->u.reg & 7))) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0x8f) != 0 || modrm_sib_disp(&ctx, 0, a) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "pop");
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "clc")) {
         if (emit8(&ctx, 0xf8) != 0) {
             return -1;
@@ -2598,66 +2527,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         goto finish;
     }
 
-
-    if (streq_ci(insn->mnemonic, "push") && insn->op_count == 1) {
-        /* A push is of 64 bits with no prefix: `pushq %rbp` is 55 and
-         * not REX.W and 55.  (A `rex.W` that is written is written.) */
-        rex_w = (insn->rex_bits & 0x08u) != 0;
-        if (a->kind == AS_X86_OP_REG) {
-            if (a->size_bits == 16 && emit8(&ctx, 0x66) != 0) {
-                return -1;
-            }
-            rex_b |= reg_ext(a->u.reg);
-            if (emit8(&ctx, (uint8_t)(0x50u + (a->u.reg & 7u))) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        if (a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)6, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        if (a->kind == AS_X86_OP_IMM) {
-            if (imm_is_s8_at(a, insn->operand_size_override ? 16u : 64u)) {
-                if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-                    return -1;
-                }
-            } else if (emit8(&ctx, 0x68) != 0 ||
-                       emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm,
-                                            insn->operand_size_override ? 16u : 32u) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        set_unsupported_form(&ctx, insn);
-        return -1;
-    }
-
-    if (streq_ci(insn->mnemonic, "pop") && insn->op_count == 1) {
-        /* Of 64 bits with no prefix to say so, as a push is; one that
-         * is written, `rex.W`, is written. */
-        rex_w = (insn->rex_bits & 0x08u) != 0;
-        if (a->kind == AS_X86_OP_REG) {
-            if (a->size_bits == 16 && emit8(&ctx, 0x66) != 0) {
-                return -1;
-            }
-            rex_b |= reg_ext(a->u.reg);
-            if (emit8(&ctx, (uint8_t)(0x58u + (a->u.reg & 7u))) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        if (a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0x8f) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        set_unsupported_form(&ctx, insn);
-        return -1;
-    }
 
     if (streq_ci(insn->mnemonic, "mov") && insn->op_count == 2 &&
         (operand_is_xmm_reg(a) || operand_is_xmm_reg(b)) && insn->rex_w) {
@@ -4644,47 +4513,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     } else if (encode_jcc_rel32(&ctx, insn->mnemonic, (insn->op_count == 1 && a->kind == AS_X86_OP_REL) ? a->u.rel : 0) == 0) {
         if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
             set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "push")) {
-        rex_w = 0;
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
-            rex_b |= reg_ext(a->u.reg);
-            if (emit8(&ctx, (uint8_t)(0x50 | reg_low3(a->u.reg))) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RSI, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (imm_is_s8_at(a, insn->operand_size_override ? 16u : 64u)) {
-                if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)(int8_t)a->u.imm) != 0) {
-                    return -1;
-                }
-            } else {
-                if (emit8(&ctx, 0x68) != 0 || emit32(&ctx, (uint32_t)a->u.imm) != 0) {
-                    return -1;
-                }
-            }
-        } else {
-            set_err(&ctx, "unsupported operand form for 'push' (op_count=%zu kind=%d)", insn->op_count,
-                    a != NULL ? (int)a->kind : -1);
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "pop")) {
-        rex_w = 0;
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
-            rex_b |= reg_ext(a->u.reg);
-            if (emit8(&ctx, (uint8_t)(0x58 | reg_low3(a->u.reg))) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0x8f) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "pop");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "sysenter")) {
