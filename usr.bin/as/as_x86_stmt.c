@@ -11030,19 +11030,12 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
      * written. */
     if (as_strcmp(low, "fcompi") == 0 || as_strcmp(low, "fucompi") == 0) {
         snprintf(low, sizeof(low), "%s", low[1] == 'u' ? "fucomip" : "fcomip");
-        if (nops != 0) {
-            snprintf(name, name_sz, "%s", low);
-            return 1;
-        }
-    }
-    /* A comparison with the register under the top, not written. */
-    if (nops == 0 && (as_strcmp(low, "fcomi") == 0 || as_strcmp(low, "fucomi") == 0 || as_strcmp(low, "fcomip") == 0 ||
-                      as_strcmp(low, "fucomip") == 0)) {
         snprintf(name, name_sz, "%s", low);
-        x86_implied_reg(&ops[0], "st(1)");
-        bare->u.instr.operand_count = 1;
         return 1;
     }
+    /* (A comparison with the register under the top, not written --
+     * `fcomi` with no operand -- was given the register here; it is a
+     * row of the table's, with the other instructions of no operand.) */
     /* `clr` of a register is that register xor itself. */
     if (nops == 1 && ops[0].kind == AS_OPERAND_REGISTER &&
         (as_strcmp(low, "clr") == 0 || (len == 4 && strncmp(low, "clr", 3) == 0 && strchr("bwlq", low[3]) != NULL))) {

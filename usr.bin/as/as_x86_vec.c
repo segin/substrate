@@ -1503,7 +1503,9 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
          * have come from the older encoders have the one written
          * unasked, and the other is still where it was.) */
         if ((t->flags & AS_VEC_F_BASE) != 0 && (rq->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) != 0) {
-            if (t->bcst != AS_VEC_LEGACY_WHOLE) {
+            /* (The name's, though this row may be one with no operand,
+             * which does not say: `{load} aad`.) */
+            if (t->bcst != AS_VEC_LEGACY_WHOLE && !as_x86_vec_base_is_whole(t->name)) {
                 continue;
             }
             /* (A segment register pushed is stored and one popped is
