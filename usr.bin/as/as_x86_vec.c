@@ -551,6 +551,13 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
         size_t n = 0;
         size_t k;
 
+        /* (An address of 16-bit registers has a displacement of one
+         * byte or of two, and `{disp32}` asks for what it has not:
+         * GNU as refuses it, and this took it for two.) */
+        if ((rq->pseudo & AS_PSEUDO_DISP32) != 0) {
+            vec_err(ctx, "{disp32} before an address of 16-bit registers, which has no displacement of four bytes");
+            return -1;
+        }
         /* (A one-byte displacement only where it is the bytes it says.) */
         if (as_x86_modrm16(m, reg & 7u, disp8_n == 1u && (rq->pseudo & AS_PSEUDO_DISP32) == 0, bytes, &n) != 0) {
             vec_err(ctx, "not an address of 16-bit registers");

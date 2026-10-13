@@ -9637,6 +9637,34 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                 size_t lead = *code_len != 0 && code[0] == 0x67u ? 1 : 0;
                 int evex = lead < *code_len && code[lead] == 0x62u;
 
+                /*
+                 * xacquire and xrelease before a locked form an
+                 * instruction always had: F2 or F3 ahead of the lock,
+                 * which was written a moment ago.  (They are written as
+                 * a repeat and the flag that says which they are; the
+                 * repeat is no prefix of its own then.)
+                 */
+                if ((insn->prefixes & AS_PREFIX_HLE) != 0 && !evex && (insn->prefixes & AS_PREFIX_LOCK) != 0 &&
+                    as_x86_vec_base_takes_lock(mn)) {
+                    if (none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPNE) {
+                        continue;
+                    }
+                    if (none[i].flag == AS_PREFIX_HLE) {
+                        size_t at = 0;
+
+                        if (*code_len + 1 > code_cap) {
+                            return -1;
+                        }
+                        while (at < *code_len && (code[at] == 0x66u || code[at] == 0x67u)) {
+                            at++;
+                        }
+                        memmove(code + at + 1, code + at, *code_len - at);
+                        code[at] = (insn->prefixes & AS_PREFIX_REPNE) != 0 ? 0xf2u : 0xf3u;
+                        (*code_len)++;
+                        continue;
+                    }
+                }
+
                 if (none[i].flag == AS_PREFIX_LOCK &&
                     (evex ? as_x86_vec_takes_lock(mn) : as_x86_vec_takes_lock(mn) || as_x86_vec_base_takes_lock(mn))) {
                     size_t at = 0;
