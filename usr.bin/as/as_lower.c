@@ -2316,7 +2316,6 @@ static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *chan
             }
             free(e->symbol);
             free(e->reloc_op);
-            free(e->src_file);
             *e = *made;
             free(made);
             *changed = 1;
@@ -2354,7 +2353,6 @@ static void alias_substitute(alias_ctx_t *a, as_expr_t *e, size_t use, int *chan
         return;
     }
     free(e->symbol);
-    free(e->src_file);
     *e = *copy;
     free(copy);
     *changed = 1;

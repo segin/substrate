@@ -73,7 +73,6 @@ void as_expr_free(as_expr_t *e) {
     as_expr_free(e->rhs);
     free(e->symbol);
     free(e->reloc_op);
-    free(e->src_file);
     free(e);
 }
 
@@ -103,12 +102,10 @@ as_expr_t *as_expr_clone(const as_expr_t *e) {
     *copy = *e;
     copy->symbol = NULL;
     copy->reloc_op = NULL;
-    copy->src_file = NULL;
     copy->lhs = NULL;
     copy->rhs = NULL;
     if ((e->symbol != NULL && (copy->symbol = expr_strdup(e->symbol)) == NULL) ||
         (e->reloc_op != NULL && (copy->reloc_op = expr_strdup(e->reloc_op)) == NULL) ||
-        (e->src_file != NULL && (copy->src_file = expr_strdup(e->src_file)) == NULL) ||
         (e->lhs != NULL && (copy->lhs = as_expr_clone(e->lhs)) == NULL) ||
         (e->rhs != NULL && (copy->rhs = as_expr_clone(e->rhs)) == NULL)) {
         as_expr_free(copy);
@@ -262,7 +259,7 @@ static as_expr_t *new_expr(expr_lex_t *lx, as_expr_kind_t kind) {
     e->kind = kind;
     e->src_line = lx->line;
     if (lx->file != NULL) {
-        e->src_file = expr_strdup(lx->file);
+        e->src_file = as_source_unit(lx->file);
         if (e->src_file == NULL) {
             free(e);
             return NULL;
@@ -839,13 +836,12 @@ static as_expr_t *expr_clone_at(const as_expr_t *e, const char *file, unsigned l
     *copy = *e;
     copy->symbol = NULL;
     copy->reloc_op = NULL;
-    copy->src_file = NULL;
+    copy->src_file = file;
     copy->src_line = line;
     copy->lhs = NULL;
     copy->rhs = NULL;
     if ((e->symbol != NULL && (copy->symbol = expr_strdup(e->symbol)) == NULL) ||
         (e->reloc_op != NULL && (copy->reloc_op = expr_strdup(e->reloc_op)) == NULL) ||
-        (file != NULL && (copy->src_file = expr_strdup(file)) == NULL) ||
         (e->lhs != NULL && (copy->lhs = expr_clone_at(e->lhs, file, line)) == NULL) ||
         (e->rhs != NULL && (copy->rhs = expr_clone_at(e->rhs, file, line)) == NULL)) {
         as_expr_free(copy);
@@ -866,6 +862,9 @@ as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) 
         return parse_expr_text(s, file, line);
     }
     /* The caller's own, to change and to free. */
+    if (file != NULL && (file = as_source_unit(file)) == NULL) {
+        return NULL;
+    }
     return expr_clone_at(kept, file, line);
 }
 

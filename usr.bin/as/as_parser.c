@@ -628,7 +628,7 @@ static as_expr_t *new_expr(as_expr_kind_t kind, const as_token_t *src) {
     e->kind = kind;
     if (src != NULL) {
         e->src_line = src->line;
-        e->src_file = xstrdup(src->file);
+        e->src_file = as_source_unit(src->file);
         if (e->src_file == NULL) {
             free(e);
             return NULL;

@@ -85,7 +85,10 @@ struct as_expr {
     int local_resolved;
     unsigned local_target_line;
     unsigned src_line;
-    char *src_file;
+    /* (The name is kept once for all that are of it, as_source_unit():
+     * a node does not own it.  Each had a copy of its own, made and
+     * freed with every copy of the expression.) */
+    const char *src_file;
     as_expr_t *lhs;
     as_expr_t *rhs;
 };
