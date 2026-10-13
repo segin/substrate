@@ -9622,6 +9622,7 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
     rq.rounding = insn->rounding_mode;
     rq.pseudo = insn->pseudo;
     rq.no_moffs = (insn->prefixes & AS_PREFIX_HLE) != 0;
+    rq.data16 = (insn->prefixes & AS_PREFIX_DATA16) != 0;
     rq.have_dfv = (unsigned char)insn->have_dfv;
     rq.dfv = (unsigned char)insn->dfv;
     rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;

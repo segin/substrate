@@ -927,6 +927,15 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 (strchr("STL", t->ops[0]) != NULL || wide == 2 || (wide == 4 && rq->mode != 64u))) {
                 cut = 1;
             }
+            /* (And the count of a return of 16 bits, near or far:
+             * `retw $0x10000` is 66 C2 00 00.  One of 32 or of 64 bits
+             * with such a count is refused.) */
+            if ((t->flags & AS_VEC_F_BASE) != 0 && rq->op_count == 1 && wide == 2 &&
+                (strncmp(t->name, "ret", 3) == 0 || strncmp(t->name, "lret", 4) == 0) &&
+                ((t->flags & AS_VEC_F_OP16) != 0 || (rq->data16 && (t->flags & AS_VEC_F_64) == 0) ||
+                 (rq->mode == 16u && (t->flags & AS_VEC_F_OP32) == 0))) {
+                cut = 1;
+            }
             if (imm->imm_symbolic && ((wide == 0 && !cut) || (t->flags & AS_VEC_F_BASE) == 0)) {
                 vec_err(ctx, "'%s' takes a number that is known here", t->name);
                 return -1;

@@ -193,6 +193,9 @@ typedef struct {
     /* The form with ModRM, and not the accumulator's with an address
      * after the opcode: `xrelease mov %eax, x` is F3 89 05. */
     int no_moffs;
+    /* data16 was written: the operand is of 16 bits where the code's
+     * is not, which a return's count is cut by. */
+    int data16;
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */
