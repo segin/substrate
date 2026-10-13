@@ -121,6 +121,7 @@ typedef struct {
      *           %ax, %eax, %rax
      *   H v     a general register of 8 bits, any of them; one that
      *           is not %al
+     *   V F G J %al, %ax, %eax, %rax and no other
      *   n N     an MMX register; that, or memory
      *   t       a tile register, %tmm0 to %tmm7
      *   B       a bound register, %bnd0 to %bnd3

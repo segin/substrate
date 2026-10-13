@@ -342,6 +342,16 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8;
     case 'v':
         return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 && (unsigned)op->u.reg != 0u;
+    /* And the ones those are not: %al, %ax, %eax, %rax, in the forms
+     * that are theirs alone. */
+    case 'V':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8 && (unsigned)op->u.reg == 0u;
+    case 'F':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16 && (unsigned)op->u.reg == 0u;
+    case 'G':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 32 && (unsigned)op->u.reg == 0u;
+    case 'J':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 64 && (unsigned)op->u.reg == 0u;
     case 'f':
         return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16 && (unsigned)op->u.reg != 0u;
     case 'g':
@@ -678,22 +688,67 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 return -1;
             }
         }
-        if ((t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) ||
-            (t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) ||
+        /* (The operand's size where it is not the mode's, and W, as
+         * for a row with a ModRM: `add $0x1234, %ax` is 66 05 34 12
+         * in 32-bit code, `add $1, %rax` with four bytes 48 05.) */
+        if ((((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
+             ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) &&
+            put8(ctx, 0x66u) != 0) {
+            return -1;
+        }
+        if (t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) {
+            return -1;
+        }
+        if (t->w == AS_VEC_W1 && (t->flags & AS_VEC_F_BASE) != 0) {
+            if (rq->mode != 64u) {
+                vec_err(ctx, "a REX prefix outside 64-bit code");
+                return -1;
+            }
+            if (put8(ctx, 0x48u) != 0) {
+                return -1;
+            }
+        }
+        if ((t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) ||
             (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
             (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0) || put8(ctx, t->opcode) != 0 ||
             (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
             return -1;
         }
-        /* And a number after that, if the row has one (`xabort $1`). */
+        /* And a number after that, if the row has one (`xabort $1`):
+         * of one byte, or of the two or four the row says, which may
+         * be a symbol's room in a form an instruction always had. */
         {
             const as_x86_operand_t *imm = role_op(t, rq, 'i');
+            unsigned wide = (t->flags & AS_VEC_F_IMM16) != 0 ? 2u : (t->flags & AS_VEC_F_IMM32) != 0 ? 4u : 0u;
+            unsigned k2;
 
-            if (imm != NULL && imm->imm_symbolic) {
+            if (imm == NULL) {
+                return 0;
+            }
+            if (imm->imm_symbolic && (wide == 0 || (t->flags & AS_VEC_F_BASE) == 0)) {
                 vec_err(ctx, "'%s' takes a number that is known here", t->name);
                 return -1;
             }
-            return imm != NULL ? put8(ctx, (unsigned)imm->u.imm & 0xffu) : 0;
+            if (wide == 0) {
+                if (!imm->imm_symbolic && (t->flags & AS_VEC_F_BASE) != 0 && (imm->u.imm < -128 || imm->u.imm > 255)) {
+                    vec_err(ctx, "the number %lld is not of one byte", (long long)imm->u.imm);
+                    return -1;
+                }
+                return put8(ctx, (unsigned)imm->u.imm & 0xffu);
+            }
+            if (!imm->imm_symbolic &&
+                (wide == 2 ? (imm->u.imm < -32768 || imm->u.imm > 65535)
+                           : (imm->u.imm < -2147483648ll ||
+                              imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll)))) {
+                vec_err(ctx, "the number %lld is not of %u bytes", (long long)imm->u.imm, wide);
+                return -1;
+            }
+            for (k2 = 0; k2 < wide; ++k2) {
+                if (put8(ctx, imm->imm_symbolic ? 0u : (unsigned)(((uint64_t)imm->u.imm >> (k2 * 8u)) & 0xffu)) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
         }
     }
     if (rm == NULL && (t->flags & AS_VEC_F_MODRM) == 0) {
