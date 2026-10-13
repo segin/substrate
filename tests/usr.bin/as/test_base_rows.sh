@@ -165,6 +165,17 @@ is 64 88e0 '{rex} movb %ah, %al'
 refused 64 'rex movb %ah, %al'
 is 32 8ac4 '{load} movb %ah, %al'
 is 32 678b870000 'movl 0x10000(%bx), %eax'
+# movq of general registers shares its name with the one of vector
+# registers, and a prefix before it is taken as before any move:
+is 64 4889c3 'movq %rax, %rbx'
+is 64 664889c3 'data16 movq %rax, %rbx'
+is 64 644889c3 'fs movq %rax, %rbx'
+is 64 66480f7ec0 'movq %xmm0, %rax'
+# int's third has a byte to itself:
+is 32 cc 'int $3'
+is 32 cd80 'int $0x80'
+refused 32 'int $256'
+is 64 f3480faec0 'rdfsbase %rax'
 
 [ "$fail" -eq 0 ] && echo "ok: the rows of the instructions of general registers ($cases cases)"
 exit "$fail"

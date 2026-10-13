@@ -9766,7 +9766,20 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                 /* (66 before one of general registers, or of none, is
                  * the operand size: `data16 popcnt`, `data16 xgetbv`.
                  * It is the first byte but for an address size's.) */
-                if (none[i].flag == AS_PREFIX_DATA16 && as_x86_vec_takes_data16(mn)) {
+                /* (And before movq of general registers, which shares
+                 * its name with one of vector registers that takes
+                 * none.) */
+                int general = as_x86_vec_has_base(mn, n);
+                size_t k;
+
+                for (k = 0; k < n; ++k) {
+                    if (ops[k].kind == AS_X86_OP_REG && ops[k].reg_class != AS_X86_REGCLASS_GENERAL &&
+                        ops[k].reg_class != AS_X86_REGCLASS_SEGMENT && ops[k].reg_class != AS_X86_REGCLASS_CONTROL &&
+                        ops[k].reg_class != AS_X86_REGCLASS_DEBUG) {
+                        general = 0;
+                    }
+                }
+                if (none[i].flag == AS_PREFIX_DATA16 && (as_x86_vec_takes_data16(mn) || general)) {
                     size_t at = *code_len != 0 && code[0] == 0x67 ? 1 : 0;
 
                     if (*code_len + 1 > code_cap) {

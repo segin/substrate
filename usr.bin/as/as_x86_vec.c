@@ -1512,7 +1512,10 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
                 vector = 1;
             }
         }
-        if (!vector) {
+        /* (Unless the instruction of general registers has come to
+         * the table too, as movq has: its rows are looked through
+         * with the rest.) */
+        if (!vector && !as_x86_vec_has_base(rq->mnemonic, rq->op_count)) {
             return 0;
         }
     }

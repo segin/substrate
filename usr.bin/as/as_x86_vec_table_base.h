@@ -2392,6 +2392,20 @@
     LW("wrfsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(2)),
     LW("wrgsbase", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | O64 | DG(3)),
     LW("wrgsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(3)),
+    /* movq of general, segment, control and debug registers: mov, of 64 bits. */
+    LW("movq", P0, AS_VEC_MAP_ONE, 0x89, W1, "qq", "rm", AS_VEC_F_BASE | O64),
+    LW("movq", P0, AS_VEC_MAP_ONE, 0x8b, W1, "mq", "mr", AS_VEC_F_BASE | O64),
+    LW("movq", P0, AS_VEC_MAP_ONE, 0x89, W1, "qm", "rm", AS_VEC_F_BASE | O64),
+    LW("movq", P0, AS_VEC_MAP_ONE, 0xc7, W1, "pj", "im", AS_VEC_F_BASE | O64 | DG(0) | AS_VEC_F_IMM32),
+    LW("movq", P0, AS_VEC_MAP_ONE, 0x8c, W0, "7q", "rm", AS_VEC_F_BASE | O64),
+    LW("movq", P0, AS_VEC_MAP_ONE, 0x8e, W0, "q7", "mr", AS_VEC_F_BASE | O64),
+    LW("movq", P0, M1, 0x20, W0, "5q", "rm", AS_VEC_F_BASE | O64),
+    LW("movq", P0, M1, 0x22, W0, "q5", "mr", AS_VEC_F_BASE | O64),
+    LW("movq", P0, M1, 0x21, W0, "6q", "rm", AS_VEC_F_BASE | O64),
+    LW("movq", P0, M1, 0x23, W0, "q6", "mr", AS_VEC_F_BASE | O64),
+    LW("movq", P0, AS_VEC_MAP_ONE, 0xc7, W1, "pJ", "im", AS_VEC_F_BASE | O64 | DG(0) | AS_VEC_F_IMM32),
+    {"movq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    LW("movq", P0, AS_VEC_MAP_ONE, 0xc7, W1, "pm", "im", AS_VEC_F_BASE | O64 | DG(0) | AS_VEC_F_IMM32),
     /* And the instructions with no operand: the opcode, and the byte
      * after it where there is one. */
     {"aaa", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x37, W0, 0, "", "", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | AS_VEC_F_X32},
