@@ -2562,6 +2562,28 @@ int is_fixed_short_rel_mnemonic(const char *mn) {
 }
 
 /*
+ * Whether a jump or a call to a place is written with its full
+ * displacement though the place may be near: a call always is, and so
+ * is a jump to anything but a label local to the file, whose distance
+ * the linker or a later pass may yet change.  `suffix` is the letter
+ * the name ends in that says a size, or '\0'.
+ */
+static int x86_branch_is_near(const as_instruction_t *insn, char suffix) {
+    const as_operand_t *relop;
+    const as_expr_t *relexpr;
+
+    if (insn->operand_count != 1 || !is_rel_mnemonic(insn->mnemonic) ||
+        is_fixed_short_rel_mnemonic(insn->mnemonic) || suffix == 'b') {
+        return 0;
+    }
+    relop = &insn->operands[0];
+    relexpr = (relop->kind == AS_OPERAND_LABEL_REF || relop->kind == AS_OPERAND_IMMEDIATE) ? relop->u.expr : NULL;
+    return is_call_mnemonic(insn->mnemonic) || relexpr == NULL ||
+           (!expr_has_local_ref(relexpr) && !expr_is_local_temp_symbol(relexpr) &&
+            !raw_is_numeric_local_ref(relop->raw));
+}
+
+/*
  * `data16` before a call or a jump to a label: the distance is of the
  * size the code's is not, behind the prefix -- and the prefix is there
  * though the jump be a short one.  (Before `loop` and its like it says
@@ -8914,20 +8936,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         in.operand_size_override = 0;
     }
 
-    if (st->u.instr.operand_count == 1 &&
-        is_rel_mnemonic(st->u.instr.mnemonic) &&
-        !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic) &&
-        suffix != 'b') {
-        const as_operand_t *relop = &st->u.instr.operands[0];
-        const as_expr_t *relexpr = (relop->kind == AS_OPERAND_LABEL_REF ||
-                                    relop->kind == AS_OPERAND_IMMEDIATE) ? relop->u.expr : NULL;
-        if (is_call_mnemonic(st->u.instr.mnemonic) ||
-            relexpr == NULL ||
-            (!expr_has_local_ref(relexpr) && !expr_is_local_temp_symbol(relexpr) &&
-             !raw_is_numeric_local_ref(relop->raw))) {
-            in.force_rel32 = 1u;
-        }
-    }
+    in.force_rel32 = x86_branch_is_near(&st->u.instr, suffix) ? 1u : 0u;
 
     /*
      * AT&T writes the destination last and the encoder wants it first.
@@ -9654,6 +9663,18 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
     rq.pseudo = insn->pseudo;
     rq.no_moffs = (insn->prefixes & AS_PREFIX_HLE) != 0;
     rq.data16 = (insn->prefixes & AS_PREFIX_DATA16) != 0;
+    rq.rel_is_disp = cfg->x86_rel_is_disp != 0;
+    rq.has_offset = cfg->have_current_text_offset != 0;
+    rq.offset = cfg->current_text_offset;
+    {
+        char base[32];
+        char suffix = '\0';
+
+        if (normalize_x86_mnemonic(insn->mnemonic, base, sizeof(base), &suffix) != 0) {
+            suffix = '\0';
+        }
+        rq.force_near = x86_branch_is_near(insn, suffix);
+    }
     rq.have_dfv = (unsigned char)insn->have_dfv;
     rq.dfv = (unsigned char)insn->dfv;
     rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;

@@ -196,6 +196,18 @@ typedef struct {
     /* data16 was written: the operand is of 16 bits where the code's
      * is not, which a return's count is cut by. */
     int data16;
+    /*
+     * A branch to a place.  The operand's number is the distance where
+     * `rel_is_disp` says so; where the instruction's own offset is
+     * known it is the place, and the distance is from the end of the
+     * instruction; otherwise it is what a relocation is added to.
+     * `force_near` asks for the form with the full displacement
+     * though a byte would do.
+     */
+    int rel_is_disp;
+    int has_offset;
+    uint64_t offset;
+    int force_near;
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */

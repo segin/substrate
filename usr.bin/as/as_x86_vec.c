@@ -389,6 +389,9 @@ static int operand_is(const as_x86_operand_t *op, char want) {
      * mov has forms of its own for. */
     case '5':
         return cls == AS_X86_REGCLASS_CONTROL;
+    /* The place a jump or a call goes to. */
+    case '&':
+        return op->kind == AS_X86_OP_REL;
     case '6':
         return cls == AS_X86_REGCLASS_DEBUG;
     /* A test register, %tr0 to %tr7, which a 486 had. */
@@ -762,6 +765,76 @@ static int emit_row_bytes(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x
     return emit_row(ctx, t, &as);
 }
 
+/*
+ * A jump or a call to a place (roles `j` and `J`).
+ *
+ * The row's opcode is the form with the full displacement, of two
+ * bytes or of four; where it has another with one byte, that opcode is
+ * in the row's `disp8_n`, and is written where the distance is known
+ * and a byte holds it and the near form was not asked for.  Role `J`
+ * is a form with a byte and no other -- loop and the jumps on the
+ * counter -- whose rows say by OP16 and OP32 which counter they test,
+ * and so whether the address-size prefix is before them.
+ *
+ * The distance is from the end of the instruction, and the lengths
+ * here are what the encoders this came from took them for: two for the
+ * short form, and for the near one the opcode's bytes and the
+ * displacement's, with no prefix counted.
+ */
+static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq,
+                       const as_x86_operand_t *to, int short_only) {
+    int known = rq->rel_is_disp || rq->has_offset;
+    unsigned opcode_len = t->map == AS_VEC_MAP_ONE ? 1u : 2u;
+    long long target = (long long)to->u.rel;
+    long long disp;
+    unsigned near_bytes;
+    unsigned k;
+
+    if (short_only) {
+        int other = ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
+                    ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode != 32u);
+        unsigned len = other ? 3u : 2u;
+
+        disp = rq->rel_is_disp || !rq->has_offset ? target : target - ((long long)rq->offset + (long long)len);
+        if (disp < -128 || disp > 127) {
+            vec_err(ctx, "'%s' goes no further than a byte says, and its target is not so near", t->name);
+            return -1;
+        }
+        if ((other && put8(ctx, 0x67u) != 0) || put8(ctx, t->opcode) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+    if ((((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
+         ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) &&
+        put8(ctx, 0x66u) != 0) {
+        return -1;
+    }
+    if (t->disp8_n != 0 && known && !rq->force_near) {
+        disp = rq->rel_is_disp ? target : target - ((long long)rq->offset + 2);
+        if (disp >= -128 && disp <= 127) {
+            return put8(ctx, t->disp8_n) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0 ? -1 : 0;
+        }
+    }
+    near_bytes = (t->flags & AS_VEC_F_OP16) != 0 || (rq->mode == 16u && (t->flags & AS_VEC_F_OP32) == 0) ? 2u : 4u;
+    disp = rq->rel_is_disp || !rq->has_offset
+               ? target
+               : target - ((long long)rq->offset + (long long)(opcode_len + near_bytes));
+    if (near_bytes == 2u && opcode_len == 2u && known && (disp < -32768 || disp > 32767)) {
+        vec_err(ctx, "conditional branch target out of range");
+        return -1;
+    }
+    if ((opcode_len == 2u && put8(ctx, 0x0fu) != 0) || put8(ctx, t->opcode) != 0) {
+        return -1;
+    }
+    for (k = 0; k < near_bytes; ++k) {
+        if (put8(ctx, (unsigned)(((unsigned long long)disp >> (k * 8u)) & 0xffu)) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq) {
     const as_x86_operand_t *rm = role_op(t, rq, 'm');
     const as_x86_operand_t *vop = role_op(t, rq, 'v');
@@ -792,6 +865,13 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     if (rm == NULL && t->ops[0] != '\0' && t->enc != AS_VEC_LEGACY && (t->flags & AS_VEC_F_MODRM) == 0) {
         vec_err(ctx, "internal: a row with nothing in r/m");
         return -1;
+    }
+    if (rm == NULL && t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 &&
+        (role_op(t, rq, 'j') != NULL || role_op(t, rq, 'J') != NULL)) {
+        const as_x86_operand_t *near_or_short = role_op(t, rq, 'j');
+
+        return emit_branch(ctx, t, rq, near_or_short != NULL ? near_or_short : role_op(t, rq, 'J'),
+                           near_or_short == NULL);
     }
     if (rm == NULL && t->enc == AS_VEC_LEGACY) {
         /* No operand in ModRM: the opcode, and the byte after it that
