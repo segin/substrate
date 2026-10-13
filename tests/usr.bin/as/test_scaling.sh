@@ -72,9 +72,25 @@ for shape in plain extern data branch section difference; do
         [ "$b" -le $((low * 5 + 2)) ] && break
         [ "$tries" -ge 4 ] && break
     done
+    # And at twice the size, before it is called too long.  The smaller
+    # of the two is what a processor's cache holds and the larger is
+    # not, on some machines: each statement of the larger then costs
+    # more, though the work is in proportion.  (A run of GitHub's, of
+    # the assembler as a 32-bit program, took 100 ms and 590 for the
+    # loads of external symbols, once those had been made quicker; here
+    # they take 160, 660 and, for four times that again, 2,540.)  At
+    # twice the size both are past the cache, and what is quadratic is
+    # further over than it was.
     if [ "$b" -gt $((low * 5 + 2)) ]; then
-        echo "FAIL $shape: $N statements in ${a}0 ms and $((N * 4)) in ${b}0 ms, more than five times as long"
-        fail=1
+        gen "$shape" $((N * 2)) > one.s
+        gen "$shape" $((N * 8)) > four.s
+        a2=$(cost one.s) && b2=$(cost four.s) || { echo "FAIL $shape: not assembled at n=$((N * 8))"; fail=1; continue; }
+        low2=$a2
+        [ "$low2" -lt 5 ] && low2=5
+        if [ "$b2" -gt $((low2 * 5 + 2)) ]; then
+            echo "FAIL $shape: $N statements in ${a}0 ms and $((N * 4)) in ${b}0 ms, more than five times as long; and $((N * 2)) in ${a2}0 ms and $((N * 8)) in ${b2}0 ms"
+            fail=1
+        fi
     fi
 done
 
