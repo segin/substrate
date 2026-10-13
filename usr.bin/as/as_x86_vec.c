@@ -530,7 +530,10 @@ static int has_high_general(const as_x86_vec_req_t *rq) {
     for (i = 0; i < rq->op_count; ++i) {
         const as_x86_operand_t *op = &rq->ops[i];
 
-        if (op->kind == AS_X86_OP_REG && op->reg_class == AS_X86_REGCLASS_GENERAL && (unsigned)op->u.reg > 15u) {
+        /* (%ah to %bh have numbers above fifteen here too, and are not
+         * of those: `crc32 %ah, %ecx` was looked for among APX's forms.) */
+        if (op->kind == AS_X86_OP_REG && op->reg_class == AS_X86_REGCLASS_GENERAL && !op->high8 &&
+            (unsigned)op->u.reg > 15u) {
             return 1;
         }
         if (op->kind == AS_X86_OP_MEM && op->u.mem.addr_bits != 16u && !op->u.mem.rip_relative &&
@@ -1513,6 +1516,12 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
             if (strchr(t->roles, 'g') != NULL &&
                 (rq->pseudo & (strncmp(t->name, "push", 4) == 0 ? AS_PSEUDO_LOAD : AS_PSEUDO_STORE)) != 0) {
                 why = "has one way to be written with a segment register";
+                continue;
+            }
+            /* (Nor will it have `{load}` before the status word stored
+             * in %ax.) */
+            if ((rq->pseudo & AS_PSEUDO_LOAD) != 0 && t->ops[0] == 'F' && strcmp(t->name, "fnstsw") == 0) {
+                why = "stores, and is not written the other way";
                 continue;
             }
             /*
