@@ -190,6 +190,9 @@ typedef struct {
     /* Set by the emitter for itself: an operand is %ah, %ch, %dh or
      * %bh, which no instruction with a REX prefix can name. */
     int no_rex;
+    /* The form with ModRM, and not the accumulator's with an address
+     * after the opcode: `xrelease mov %eax, x` is F3 89 05. */
+    int no_moffs;
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */

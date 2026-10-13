@@ -1450,6 +1450,10 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
         if (!row_takes(t, rq)) {
             continue;
         }
+        /* (xrelease before a move: the form with ModRM.) */
+        if (rq->no_moffs && (t->flags & AS_VEC_F_BASE) != 0 && strchr(t->roles, 'o') != NULL) {
+            continue;
+        }
         /*
          * APX's EVEX form of an instruction that has another: it is
          * the one asked for by `{evex}` or `{nf}`, or -- of the

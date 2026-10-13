@@ -9621,6 +9621,7 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
     rq.sae = insn->sae;
     rq.rounding = insn->rounding_mode;
     rq.pseudo = insn->pseudo;
+    rq.no_moffs = (insn->prefixes & AS_PREFIX_HLE) != 0;
     rq.have_dfv = (unsigned char)insn->have_dfv;
     rq.dfv = (unsigned char)insn->dfv;
     rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
@@ -9666,9 +9667,13 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                  */
                 /* (And before an exchange with no lock written: it is
                  * locked without one.) */
+                /* (And xrelease, but not xacquire, before a move to
+                 * memory.) */
                 if ((insn->prefixes & AS_PREFIX_HLE) != 0 && !evex &&
                     (((insn->prefixes & AS_PREFIX_LOCK) != 0 && as_x86_vec_base_takes_lock(mn)) ||
-                     (strncmp(mn, "xchg", 4) == 0 && as_x86_vec_base_is_whole(mn)))) {
+                     (strncmp(mn, "xchg", 4) == 0 && as_x86_vec_base_is_whole(mn)) ||
+                     (strncmp(mn, "mov", 3) == 0 && strlen(mn) <= 4 && as_x86_vec_base_is_whole(mn) &&
+                      (insn->prefixes & AS_PREFIX_REPNE) == 0 && n == 2 && ops[1].kind == AS_X86_OP_MEM))) {
                     if (none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPNE) {
                         continue;
                     }
@@ -9739,6 +9744,31 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                     }
                     memmove(code + at + 1, code + at, *code_len - at);
                     code[at] = 0x66;
+                    (*code_len)++;
+                    continue;
+                }
+                /* (A repeat before bsf or bsr is the byte, which GNU
+                 * as takes: F3 0F BC is tzcnt where there is one and
+                 * bsf where there is not.  After the prefixes of
+                 * size, and once though `rep` and `repe` are two
+                 * flags.) */
+                if ((none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPE ||
+                     none[i].flag == AS_PREFIX_REPNE) &&
+                    (insn->prefixes & AS_PREFIX_HLE) == 0 && !evex &&
+                    (strncmp(mn, "bsf", 3) == 0 || strncmp(mn, "bsr", 3) == 0) && as_x86_vec_base_is_whole(mn)) {
+                    size_t at = 0;
+
+                    if (none[i].flag == AS_PREFIX_REPE && (insn->prefixes & AS_PREFIX_REP) != 0) {
+                        continue;
+                    }
+                    if (*code_len + 1 > code_cap) {
+                        return -1;
+                    }
+                    while (at < *code_len && (code[at] == 0x66u || code[at] == 0x67u)) {
+                        at++;
+                    }
+                    memmove(code + at + 1, code + at, *code_len - at);
+                    code[at] = none[i].flag == AS_PREFIX_REPNE ? 0xf2u : 0xf3u;
                     (*code_len)++;
                     continue;
                 }

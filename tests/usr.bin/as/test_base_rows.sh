@@ -121,6 +121,19 @@ is 32 810034120000 'add $0x1234, (%eax)'
 is 32 81073412 '.code16
 add $0x1234, (%bx)'
 is 64 66ffc9 'dec %cx'
+is 32 c70001000000 'mov $1, (%eax)'
+is 64 48c7c001000000 'mov $1, %rax'
+is 32 d320 'shl %cl, (%eax)'
+# The accumulator has no form of its own with a shift's count, and a
+# product's number may be more than a byte with it:
+is 32 c0e07f 'shlb $0x7f, %al'
+is 32 d2c8 'ror %cl, %al'
+is 32 6669c03412 'imul $0x1234, %ax'
+# A repeat before bsf is the byte; xrelease before a move to memory is
+# of the form with ModRM, and not the accumulator's with an address:
+is 32 f30fbcd1 'rep bsf %ecx, %edx'
+is 32 f3890500000000 'xrelease mov %eax, sym'
+refused 32 'xacquire mov %eax, sym'
 
 [ "$fail" -eq 0 ] && echo "ok: the rows of the instructions of general registers ($cases cases)"
 exit "$fail"
