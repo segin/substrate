@@ -137,7 +137,8 @@ typedef struct {
     /*
      * Where each goes: r ModRM.reg, m ModRM.rm, v the prefix's vvvv,
      * i a byte after the instruction, 4 the high four bits of that
-     * byte, - nowhere (the instruction implies it).
+     * byte, - nowhere (the instruction implies it), + the opcode
+     * itself, whose low three bits are the register's (`push %rbx`).
      */
     const char *roles;
     /* EVEX: what a one-byte displacement is multiplied by.  (A row

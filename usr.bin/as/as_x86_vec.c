@@ -699,20 +699,54 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) {
             return -1;
         }
-        if (t->w == AS_VEC_W1 && (t->flags & AS_VEC_F_BASE) != 0) {
-            if (rq->mode != 64u) {
-                vec_err(ctx, "a REX prefix outside 64-bit code");
+        /*
+         * A register in the opcode itself (role `+`): its low three
+         * bits are added to the opcode, the fourth is REX's B, and the
+         * fifth -- of %r16 to %r31 -- REX2's.  `push %rbx` is 53,
+         * `push %r9` 41 51, `push %r17` D5 10 51.
+         */
+        {
+            const as_x86_operand_t *plus = (t->flags & AS_VEC_F_BASE) != 0 ? role_op(t, rq, '+') : NULL;
+            unsigned preg = plus != NULL ? (unsigned)plus->u.reg : 0u;
+            unsigned rex = (t->flags & AS_VEC_F_BASE) == 0
+                               ? 0u
+                               : ((t->w == AS_VEC_W1 ? 8u : 0u) | ((preg >> 3) & 1u) |
+                                  (rq->explicit_rex ? 0x40u | rq->rex_bits : 0u));
+            int far = preg > 15u;
+
+            if ((rex != 0 || far) && rq->mode != 64u) {
+                vec_err(ctx, far ? "'%s': %%r16 to %%r31 are registers of 64-bit code"
+                                 : "'%s': a REX prefix outside 64-bit code",
+                        t->name);
                 return -1;
             }
-            if (put8(ctx, 0x48u) != 0) {
+            if (rq->no_rex && (rex != 0 || far)) {
+                vec_err(ctx, "'%s': %%ah, %%ch, %%dh and %%bh cannot be named in an instruction with a REX prefix",
+                        t->name);
                 return -1;
             }
-        }
-        if ((t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) ||
-            (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
-            (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0) || put8(ctx, t->opcode) != 0 ||
-            (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
-            return -1;
+            if (far) {
+                if (t->map != AS_VEC_MAP_ONE && t->map != AS_VEC_MAP_0F) {
+                    vec_err(ctx, "'%s' has no prefix that says %%r16 to %%r31", t->name);
+                    return -1;
+                }
+                if (put8(ctx, 0xd5u) != 0 ||
+                    put8(ctx, ((t->map == AS_VEC_MAP_0F ? 1u : 0u) << 7) | (1u << 4) | (rex & 0xfu)) != 0) {
+                    return -1;
+                }
+            } else {
+                if (rex != 0 && put8(ctx, 0x40u | (rex & 0xfu)) != 0) {
+                    return -1;
+                }
+                if ((t->map != AS_VEC_MAP_ONE && put8(ctx, 0x0fu) != 0) ||
+                    (t->map == AS_VEC_MAP_0F38 && put8(ctx, 0x38u) != 0) ||
+                    (t->map == AS_VEC_MAP_0F3A && put8(ctx, 0x3au) != 0)) {
+                    return -1;
+                }
+            }
+            if (put8(ctx, t->opcode + (preg & 7u)) != 0 || (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
+                return -1;
+            }
         }
         /* And a number after that, if the row has one (`xabort $1`):
          * of one byte, or of the two or four the row says, which may
