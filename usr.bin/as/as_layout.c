@@ -1768,7 +1768,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
         !stmt_size_depends_on_offset(st)) {
         cache_eligible = 1;
         if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL &&
-            ctx->stmt_size_cached[cache_idx]) {
+            ctx->stmt_size_cached[cache_idx] == ctx->stmt_size_stamp + 1u) {
             *size_out = ctx->stmt_size_cache[cache_idx];
             return 0;
         }
@@ -1826,7 +1826,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
             if (ctx->stmt_size_cache_count < ctx->parsed->count) {
                 size_t want = ctx->parsed->count;
                 size_t *new_cache = (size_t *)realloc(ctx->stmt_size_cache, want * sizeof(*new_cache));
-                unsigned char *new_flags = (unsigned char *)realloc(ctx->stmt_size_cached, want * sizeof(*new_flags));
+                unsigned *new_flags = (unsigned *)realloc(ctx->stmt_size_cached, want * sizeof(*new_flags));
                 if (new_cache != NULL && new_flags != NULL) {
                     if (ctx->stmt_size_cache_count < want) {
                         memset(new_cache + ctx->stmt_size_cache_count, 0,
@@ -1841,7 +1841,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
             }
             if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL) {
                 ctx->stmt_size_cache[cache_idx] = *size_out;
-                ctx->stmt_size_cached[cache_idx] = 1u;
+                ctx->stmt_size_cached[cache_idx] = ctx->stmt_size_stamp + 1u;
             }
         }
         return 0;
@@ -1894,7 +1894,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
             if (ctx->stmt_size_cache_count < ctx->parsed->count) {
                 size_t want = ctx->parsed->count;
                 size_t *new_cache = (size_t *)realloc(ctx->stmt_size_cache, want * sizeof(*new_cache));
-                unsigned char *new_flags = (unsigned char *)realloc(ctx->stmt_size_cached, want * sizeof(*new_flags));
+                unsigned *new_flags = (unsigned *)realloc(ctx->stmt_size_cached, want * sizeof(*new_flags));
                 if (new_cache != NULL && new_flags != NULL) {
                     if (ctx->stmt_size_cache_count < want) {
                         memset(new_cache + ctx->stmt_size_cache_count, 0,
@@ -1909,7 +1909,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
             }
             if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL) {
                 ctx->stmt_size_cache[cache_idx] = *size_out;
-                ctx->stmt_size_cached[cache_idx] = 1u;
+                ctx->stmt_size_cached[cache_idx] = ctx->stmt_size_stamp + 1u;
             }
         }
         return 0;
@@ -2429,6 +2429,18 @@ static size_t relax_long_size(const as_stmt_t *st, unsigned code_bits) {
     return (is_jmp ? 1u : 2u) + (wide16 ? 2u : 4u) + (wide16 != code16 ? 1u : 0u);
 }
 
+/* The sizes kept for the statements, forgotten: the next stamp, under
+ * which none has been kept.  (When the stamps run out, which is after
+ * four thousand million of them, the table is cleared.) */
+void stmt_sizes_forget(emit_ctx_t *ctx) {
+    if (++ctx->stmt_size_stamp == UINT_MAX) {
+        ctx->stmt_size_stamp = 0;
+        if (ctx->stmt_size_cached != NULL) {
+            memset(ctx->stmt_size_cached, 0, ctx->stmt_size_cache_count * sizeof(*ctx->stmt_size_cached));
+        }
+    }
+}
+
 /* What is remembered of where statements are, forgotten: it was worked
  * out with branches of other sizes. */
 static void relax_forget_layout(emit_ctx_t *ctx) {
@@ -2436,9 +2448,7 @@ static void relax_forget_layout(emit_ctx_t *ctx) {
 
     ctx->layout_epoch++;
     virtual_label_cache_free(ctx);
-    if (ctx->stmt_size_cached != NULL) {
-        memset(ctx->stmt_size_cached, 0, ctx->stmt_size_cache_count);
-    }
+    stmt_sizes_forget(ctx);
     for (i = 0; i < ctx->section_prefix_count; ++i) {
         free(ctx->section_prefixes[i].name);
         free(ctx->section_prefixes[i].prefix);

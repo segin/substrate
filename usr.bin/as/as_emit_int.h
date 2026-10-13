@@ -182,7 +182,13 @@ typedef struct {
     as_strmap_t label_index;
     int label_index_made;
     size_t *stmt_size_cache;
-    unsigned char *stmt_size_cached;
+    /* For each statement, one more than the stamp its size was kept
+     * under: the size is good while that is the stamp there is.  To
+     * forget every size is to take the next stamp.  (It was a byte for
+     * each, all of them cleared -- for every jump that was made long,
+     * which is every statement for every jump.) */
+    unsigned *stmt_size_cached;
+    unsigned stmt_size_stamp;
     size_t stmt_size_cache_count;
     /* What each statement was encoded to, where and in which layout:
      * encode_x86_stmt_for_layout(). */
@@ -427,6 +433,7 @@ void text_code_free(void);
 void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len);
 size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz);
 void virtual_label_cache_free(emit_ctx_t *ctx);
+void stmt_sizes_forget(emit_ctx_t *ctx);
 
 /* as_symbols.c: where each symbol of the source is, and the object's
  * symbols made of them -- their binding, kind, section and versions. */

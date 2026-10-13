@@ -3710,9 +3710,7 @@ static int settle_leb128_sizes(emit_ctx_t *ctx) {
             break;
         }
         virtual_label_cache_free(ctx);
-        if (ctx->stmt_size_cached != NULL) {
-            memset(ctx->stmt_size_cached, 0, ctx->stmt_size_cache_count);
-        }
+        stmt_sizes_forget(ctx);
         if (ctx->branch_short != NULL) {
             memset(ctx->branch_short, 0, ctx->branch_short_count);
         }
