@@ -95,11 +95,16 @@ static char *as_token_vec_intern_file(as_token_vec_t *v, const char *file) {
     return copy;
 }
 
-static int as_token_vec_push(as_token_vec_t *v, as_token_kind_t kind, const char *text,
-                             const char *file, unsigned line, unsigned col) {
+/* A token of `text`, or of `owned` if that is given: a copy the caller
+ * made, which is taken (and is the caller's still if this fails). */
+static int as_token_vec_push_text(as_token_vec_t *v, as_token_kind_t kind, const char *text, char *owned,
+                                  const char *file, unsigned line, unsigned col) {
     as_token_t *next;
     char *interned_file;
 
+    if (owned != NULL) {
+        text = owned;
+    }
     if (v == NULL || text == NULL || file == NULL) {
         return -1;
     }
@@ -117,7 +122,10 @@ static int as_token_vec_push(as_token_vec_t *v, as_token_kind_t kind, const char
         v->cap = ncap;
     }
     v->items[v->count].kind = kind;
-    v->items[v->count].text = strdup(text);
+    /* (`owned` is the token's from here on: the scanner's copy of a
+     * lexeme was copied again for the token and then freed, a second
+     * allocation for every token of every line.) */
+    v->items[v->count].text = owned != NULL ? owned : strdup(text);
     v->items[v->count].file = interned_file;
     v->items[v->count].line = line;
     v->items[v->count].col = col;
@@ -732,8 +740,11 @@ static int scan_tokens(const char *file, unsigned line_no, const char *s, as_tok
             set_err(ctx, "%s:%u: out of memory", file, line_no);
             return -1;
         }
-        rc = as_token_vec_push(out, kind, text != NULL ? text : owned, file, line_no, (unsigned)(start + 1));
-        free(owned);
+        rc = as_token_vec_push_text(out, kind, text, text == NULL ? owned : NULL, file, line_no,
+                                    (unsigned)(start + 1));
+        if (rc != 0 || text != NULL) {
+            free(owned);
+        }
         if (rc != 0) {
             set_err(ctx, "%s:%u: out of memory", file, line_no);
             return -1;
