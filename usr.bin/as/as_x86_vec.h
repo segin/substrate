@@ -116,6 +116,9 @@ typedef struct {
      *   o       the number 1 and no other: a count that is in the opcode
      *   s       a number of one byte that is extended by its sign:
      *           -128 to 127, and known here
+     *   S T     one that is such a byte once cut to 16, to 32 bits
+     *   f g j   a general register of 16, 32, 64 bits that is not
+     *           %ax, %eax, %rax
      *   n N     an MMX register; that, or memory
      *   t       a tile register, %tmm0 to %tmm7
      *   B       a bound register, %bnd0 to %bnd3

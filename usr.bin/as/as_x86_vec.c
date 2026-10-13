@@ -325,6 +325,22 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     case 's':
         /* A byte that the instruction extends by its sign. */
         return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm >= -128 && op->u.imm <= 127;
+    /* And one that is such a byte once it is cut to the 16 or the 32
+     * bits it is added to: `addl $0xffffffff, %ecx` is 83 C1 FF. */
+    case 'S':
+        return op->kind == AS_X86_OP_IMM && !op->imm_symbolic &&
+               ((op->u.imm >= -128 && op->u.imm <= 127) || (op->u.imm >= 0xff80 && op->u.imm <= 0xffff));
+    case 'T':
+        return op->kind == AS_X86_OP_IMM && !op->imm_symbolic &&
+               ((op->u.imm >= -128 && op->u.imm <= 127) || (op->u.imm >= 0xffffff80ll && op->u.imm <= 0xffffffffll));
+    /* A general register of 16, of 32, of 64 bits that is not %ax,
+     * %eax, %rax: those have a form of their own with a number. */
+    case 'f':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16 && (unsigned)op->u.reg != 0u;
+    case 'g':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 32 && (unsigned)op->u.reg != 0u;
+    case 'j':
+        return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 64 && (unsigned)op->u.reg != 0u;
     case 'u':
         /* A byte that is a count, a place or a choice, and is never
          * written with a sign. */
@@ -727,7 +743,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         /* (A symbol: four bytes for the linker, which are the
          * instruction's last.  Of APX's rows; the others take a number
          * that is known here.) */
-        if ((t->flags & AS_VEC_F_APX) == 0) {
+        if ((t->flags & (AS_VEC_F_APX | AS_VEC_F_BASE)) == 0) {
             vec_err(ctx, "'%s' takes a number that is known here", t->name);
             return -1;
         }
@@ -744,7 +760,12 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             return -1;
         }
     } else if (imm != NULL) {
-        if (!imm->imm_symbolic && (imm->u.imm < -128 || imm->u.imm > 255)) {
+        /* (One that is a byte once cut to 16 or to 32 bits is its low
+         * byte, which is what the row's class has found it to be.) */
+        const char *at = strchr(t->roles, 'i');
+        char cls = at != NULL ? t->ops[at - t->roles] : '\0';
+
+        if (!imm->imm_symbolic && cls != 'S' && cls != 'T' && (imm->u.imm < -128 || imm->u.imm > 255)) {
             vec_err(ctx, "the number %lld is not of one byte", (long long)imm->u.imm);
             return -1;
         }
