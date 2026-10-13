@@ -1475,6 +1475,7 @@ static int expand_irp_block(as_text_t *in, as_text_t *out, const char *header, i
     strvec_t body = {0};
     int rc = -1;
     int closed = 0;
+    int nested = 0;
     unsigned begun = in->line;
 
     spec = xstrdup(header);
@@ -1509,10 +1510,21 @@ static int expand_irp_block(as_text_t *in, as_text_t *out, const char *header, i
         }
     }
 
+    /* (To its own .endr: one of a repeat inside it is that repeat's,
+     * and part of the body.  The first .endr ended it, and a .rept or
+     * an .irp in the body of an .irp had none.) */
     while (text_getline(&line, &cap, in) >= 0) {
-        if (line_starts_with_directive(line, ".endr")) {
-            closed = 1;
-            break;
+        const char *d = line_start_directive(line);
+
+        if (line_starts_with_directive(d, ".rept") || line_starts_with_directive(d, ".irp") ||
+            line_starts_with_directive(d, ".irpc")) {
+            nested++;
+        } else if (line_starts_with_directive(d, ".endr")) {
+            if (nested == 0) {
+                closed = 1;
+                break;
+            }
+            nested--;
         }
         if (strvec_push(&body, line) != 0) {
             goto out;
@@ -1619,6 +1631,13 @@ static unsigned long long rept_body_bytes(const strvec_t *body) {
             }
             continue;
         }
+        /* (An .irp's .endr is its own: how many times it goes round is
+         * not counted, and it is taken for once.) */
+        if ((line_starts_with_directive(d, ".irp") || line_starts_with_directive(d, ".irpc")) &&
+            depth < sizeof(times) / sizeof(times[0])) {
+            times[depth++] = factor;
+            continue;
+        }
         bytes += len > cap / (factor != 0 ? factor : 1) ? cap : len * factor;
         if (bytes > cap) {
             bytes = cap;
@@ -1646,7 +1665,8 @@ static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) 
     }
     while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
-        if (line_starts_with_directive(d, ".rept")) {
+        if (line_starts_with_directive(d, ".rept") || line_starts_with_directive(d, ".irp") ||
+            line_starts_with_directive(d, ".irpc")) {
             nested++;
         } else if (line_starts_with_directive(d, ".endr")) {
             if (nested == 0) {
@@ -2198,6 +2218,138 @@ static size_t macro_cond_depth(struct macro_cond *mc, const as_text_t *written);
 /* The parameters of one macro that are known to have been given. */
 #define MACRO_PARAMS_TRACKED 64
 
+/* The conditionals opened since there were `entry` of them, closed: an
+ * .exitm leaves them open, and what follows is not to be in them. */
+static void macro_close_conds(as_text_t *out, gas_macro_vec_t *macros, size_t entry) {
+    size_t now = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : entry;
+
+    for (; now > entry; --now) {
+        text_puts(".endif\n", out);
+    }
+}
+
+/*
+ * The statements of a macro's body, its arguments already in them.
+ *
+ * A .rept, .irp or .irpc among them is expanded here, where the macros
+ * are known, and what it makes is statements of the body in turn: a
+ * macro called in a repeat in a macro's body is that macro's expansion.
+ * (The repeat was written out as it stood for a later pass, which knows
+ * no macros, and the call was "unsupported mnemonic".)  A repeat whose
+ * count is not a number yet, or that has no .endr in the body, is left
+ * for that pass to say so.
+ *
+ * 0, MACRO_EXIT for an .exitm, or -1.
+ */
+static int expand_macro_lines(as_text_t *out, gas_macro_vec_t *macros, const char *macro_name, char **lines,
+                              size_t count, unsigned depth) {
+    size_t i;
+
+    for (i = 0; i < count; ++i) {
+        const char *d = line_start_directive(lines[i]);
+        int is_rept = line_starts_with_directive(d, ".rept");
+        int is_irpc = !is_rept && line_starts_with_directive(d, ".irpc");
+        int is_irp = !is_rept && !is_irpc && line_starts_with_directive(d, ".irp");
+        const char *outer;
+        int step;
+
+        if ((is_rept || is_irp || is_irpc) && !macros->defining) {
+            size_t end;
+            int nested = 0;
+            int closed = 0;
+            long times = 0;
+
+            for (end = i + 1; end < count; ++end) {
+                const char *e = line_start_directive(lines[end]);
+
+                if (line_starts_with_directive(e, ".rept") || line_starts_with_directive(e, ".irp") ||
+                    line_starts_with_directive(e, ".irpc")) {
+                    nested++;
+                } else if (line_starts_with_directive(e, ".endr")) {
+                    if (nested == 0) {
+                        closed = 1;
+                        break;
+                    }
+                    nested--;
+                }
+            }
+            /* An .exitm in a repeat ends the repeat, all that is left
+             * of it, and what follows the repeat goes on: as GNU as,
+             * to which a repeat is an expansion like a macro's.  The
+             * conditionals it had opened are closed for it. */
+            if (closed && is_rept && eval_rept_count(d + 5, &times) == 0) {
+                size_t entry = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : 0;
+                long k;
+
+                for (k = 0; k < times; ++k) {
+                    step = expand_macro_lines(out, macros, macro_name, lines + i + 1, end - i - 1, depth);
+                    if (step == MACRO_EXIT) {
+                        macro_close_conds(out, macros, entry);
+                        break;
+                    }
+                    if (step != 0) {
+                        return step;
+                    }
+                    if (out->failed) {
+                        return -1;
+                    }
+                }
+                i = end;
+                continue;
+            }
+            if (closed && !is_rept) {
+                as_text_t block;
+                as_text_t made;
+                strvec_t each = {0};
+                char *line = NULL;
+                size_t cap = 0;
+                size_t k;
+                size_t entry = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : 0;
+
+                memset(&block, 0, sizeof(block));
+                memset(&made, 0, sizeof(made));
+                for (k = i + 1; k <= end; ++k) {
+                    text_puts(lines[k], &block);
+                }
+                step = block.failed || expand_irp_block(&block, &made, d + (is_irpc ? 5 : 4), is_irpc) != 0 ||
+                               made.failed
+                           ? -1
+                           : 0;
+                text_rewind(&made);
+                while (step == 0 && text_getline(&line, &cap, &made) >= 0) {
+                    if (strvec_push(&each, line) != 0) {
+                        step = -1;
+                    }
+                }
+                if (step == 0) {
+                    step = expand_macro_lines(out, macros, macro_name, each.items, each.count, depth);
+                }
+                free(line);
+                strvec_free(&each);
+                text_free(&block);
+                text_free(&made);
+                if (step == MACRO_EXIT) {
+                    macro_close_conds(out, macros, entry);
+                } else if (step != 0) {
+                    return step;
+                }
+                i = end;
+                continue;
+            }
+        }
+        /* The lines written are of this macro's expansion, and of the
+         * one that called it again when it is done. */
+        outer = out->macro;
+        out->macro = macro_name;
+        step = expand_gas_macro_statement(out, macros, lines[i], depth + 1);
+        out->macro = outer;
+        if (step != 0) {
+            return step;
+        }
+    }
+    return 0;
+}
+
 static int expand_split_statement(as_text_t *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
     size_t i;
     const char *start = line;
@@ -2487,33 +2639,29 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
         unsigned long macro_serial = macros->serial++;
         size_t entry_depth = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : 0;
 
+        strvec_t lines = {0};
+        int step = 0;
+
+        /* The body with the arguments in it, and then its statements:
+         * a repeat in it is known whole before it is begun. */
         for (i = 0; i < m->body.count; ++i) {
             char *expanded = expand_gas_macro_line_text(m->body.items[i], m, values, macro_serial);
-            /* The lines written are of this macro's expansion, and of
-             * the one that called it again when it is done. */
-            const char *outer = out->macro;
-            int step;
 
-            if (expanded == NULL) {
+            if (expanded == NULL || strvec_push(&lines, expanded) != 0) {
+                free(expanded);
+                strvec_free(&lines);
                 goto out;
             }
-            out->macro = m->name;
-            step = expand_gas_macro_statement(out, macros, expanded, depth + 1);
-            out->macro = outer;
             free(expanded);
-            if (step == MACRO_EXIT) {
-                /* .exitm: the rest of the body is not expanded, and the
-                 * conditionals it opened are closed for it. */
-                size_t now = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : entry_depth;
-
-                for (; now > entry_depth; --now) {
-                    text_puts(".endif\n", out);
-                }
-                break;
-            }
-            if (step != 0) {
-                goto out;
-            }
+        }
+        step = expand_macro_lines(out, macros, m->name, lines.items, lines.count, depth);
+        strvec_free(&lines);
+        if (step == MACRO_EXIT) {
+            /* .exitm: the rest of the body is not expanded, and the
+             * conditionals it opened are closed for it. */
+            macro_close_conds(out, macros, entry_depth);
+        } else if (step != 0) {
+            goto out;
         }
         if (macros->defining && depth == 0) {
             snprintf(expand_err, sizeof(expand_err), "macro %s: the .macro it defines, %s, has no .endm", m->name,
@@ -2535,7 +2683,11 @@ out:
     return rc;
 }
 
-static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macro_vec_t *macros, const char *header) {
+static int expand_source_lines(const as_ctx_t *ctx, gas_macro_vec_t *macros, as_text_t *in, as_text_t *out,
+                               strvec_t *chain);
+
+static int expand_rept_block_with_macros(const as_ctx_t *ctx, strvec_t *chain, as_text_t *in, as_text_t *out,
+                                         gas_macro_vec_t *macros, const char *header) {
     char *line = NULL;
     size_t cap = 0;
     strvec_t body = {0};
@@ -2554,7 +2706,9 @@ static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macr
     }
     while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
-        if (line_starts_with_directive(d, ".rept")) {
+        /* (An .irp has an .endr of its own as a .rept has.) */
+        if (line_starts_with_directive(d, ".rept") || line_starts_with_directive(d, ".irp") ||
+            line_starts_with_directive(d, ".irpc")) {
             nested++;
         } else if (line_starts_with_directive(d, ".endr")) {
             if (nested == 0) {
@@ -2589,22 +2743,62 @@ static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macr
             goto out;
         }
     }
-    for (iter = 0; iter < count; ++iter) {
-        size_t i;
-        for (i = 0; i < body.count; ++i) {
-            in->line = first_line + (unsigned)i;
-            if (expand_gas_macro_statement(out, macros, body.items[i], 0) != 0) {
-                in->line = end_line;
-                goto out;
+    /* The body as many times, each line of it where it was written, and
+     * that text is source like the rest: a repeat in it, a macro called
+     * or defined in it.  (Its lines were given to the macros one by
+     * one, and a repeat inside it went to a pass that knows none.) */
+    {
+        as_text_t made;
+        const as_text_t *origin = out->origin;
+
+        memset(&made, 0, sizeof(made));
+        made.origin = in;
+        for (iter = 0; iter < count && !made.failed; ++iter) {
+            size_t i;
+            for (i = 0; i < body.count; ++i) {
+                in->line = first_line + (unsigned)i;
+                text_puts(body.items[i], &made);
             }
         }
+        in->line = end_line;
+        if (!made.failed) {
+            text_rewind(&made);
+            rc = expand_source_lines(ctx, macros, &made, out, chain);
+        }
+        out->origin = origin;
+        text_free(&made);
     }
-    in->line = end_line;
-    rc = 0;
 
 out:
     free(line);
     strvec_free(&body);
+    return rc;
+}
+
+/*
+ * An .irp or .irpc where macros are known: its lines, each with the
+ * value in it, are statements like any other, and one that calls a
+ * macro is the macro's expansion.  (They were written as they stood,
+ * and a macro called in the body of an .irp was "unsupported mnemonic":
+ * a .rept's body was expanded and this was not.)
+ */
+static int expand_irp_block_with_macros(const as_ctx_t *ctx, strvec_t *chain, as_text_t *in, as_text_t *out,
+                                        gas_macro_vec_t *macros, const char *header, int chars_mode) {
+    as_text_t made;
+    const as_text_t *origin = out->origin;
+    int rc = -1;
+
+    memset(&made, 0, sizeof(made));
+    made.origin = in;
+    if (expand_irp_block(in, &made, header, chars_mode) == 0 && !made.failed) {
+        /* The text made of them is source like the rest -- a repeat in
+         * it, a macro defined in it -- and says where each line of it
+         * was written. */
+        text_rewind(&made);
+        rc = expand_source_lines(ctx, macros, &made, out, chain);
+    }
+    out->origin = origin;
+    text_free(&made);
     return rc;
 }
 
@@ -2739,6 +2933,25 @@ static int expand_source_lines(const as_ctx_t *ctx, gas_macro_vec_t *macros, as_
             }
             memcpy(name, q + 1, (size_t)(end - q) - 1);
             name[end - q - 1] = '\0';
+            /* The name is a string, and an escape in it is the
+             * character it stands for: `.include "a\tb.s"` is the file
+             * with a tab in its name, as to GNU as.  (It was looked for
+             * with the backslash in it, here; the tokenizer, which read
+             * the .include of a repeat's body, had it right.) */
+            {
+                size_t from = 0;
+                size_t to = 0;
+
+                while (name[from] != '\0') {
+                    if (name[from] == '\\' && name[from + 1] != '\0') {
+                        from++;
+                        name[to++] = (char)as_lex_escape(name, &from);
+                    } else {
+                        name[to++] = name[from++];
+                    }
+                }
+                name[to] = '\0';
+            }
             if (chain->count >= limit) {
                 size_t k;
                 size_t at;
@@ -2797,19 +3010,19 @@ static int expand_source_lines(const as_ctx_t *ctx, gas_macro_vec_t *macros, as_
             continue;
         }
         if (line_starts_with_directive(d, ".rept")) {
-            if (expand_rept_block_with_macros(in, out, macros, d + 5) != 0) {
+            if (expand_rept_block_with_macros(ctx, chain, in, out, macros, d + 5) != 0) {
                 goto out;
             }
             continue;
         }
         if (line_starts_with_directive(d, ".irpc")) {
-            if (expand_irp_block(in, out, d + 5, 1) != 0) {
+            if (expand_irp_block_with_macros(ctx, chain, in, out, macros, d + 5, 1) != 0) {
                 goto out;
             }
             continue;
         }
         if (line_starts_with_directive(d, ".irp")) {
-            if (expand_irp_block(in, out, d + 4, 0) != 0) {
+            if (expand_irp_block_with_macros(ctx, chain, in, out, macros, d + 4, 0) != 0) {
                 goto out;
             }
             continue;
