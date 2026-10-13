@@ -932,7 +932,8 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
              * with such a count is refused.) */
             if ((t->flags & AS_VEC_F_BASE) != 0 && rq->op_count == 1 && wide == 2 &&
                 (strncmp(t->name, "ret", 3) == 0 || strncmp(t->name, "lret", 4) == 0) &&
-                ((t->flags & AS_VEC_F_OP16) != 0 || (rq->data16 && (t->flags & AS_VEC_F_64) == 0) ||
+                ((t->flags & AS_VEC_F_OP16) != 0 ||
+                 (rq->data16 && (t->flags & (AS_VEC_F_64 | AS_VEC_F_OP32)) == 0) ||
                  (rq->mode == 16u && (t->flags & AS_VEC_F_OP32) == 0))) {
                 cut = 1;
             }

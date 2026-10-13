@@ -62,6 +62,9 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
  * encode_x86_stmt() as it begins.
  */
 static unsigned x86_stmt_pseudo;
+/* The table is being asked of a statement: what it calls that comes
+ * back to ask it again is answered "not mine". */
+static int x86_vec_asking;
 
 static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
     static const char *const exact[] = {
@@ -9403,15 +9406,43 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
      * ways an instruction of two registers can be written, of a name
      * whose rows are not yet all its forms: the rows have the one GNU
      * as writes unasked, and the other is still where it was.) */
+    /*
+     * A name whose every form is a row, written with a number of
+     * operands no row of it has: that is no instruction, and is not
+     * handed on to be made one -- `retl $4` was, by an encoder that
+     * took the letter off and knew `ret`, and so was not a row and was
+     * not missed.  (APX may have given the name forms of that many
+     * operands; those are asked for below.)
+     */
+    if (!x86_vec_asking && as_x86_vec_base_is_whole(mn) && !as_x86_vec_has_base(mn, n) &&
+        !(cfg->is_64 && n >= 1 &&
+          as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
+                             x86_stmt_has_high_general(insn)))) {
+        /* (Said as it is where the instruction always went, where
+         * what is wrong is that there are too many.) */
+        char base[32];
+        char suffix = '\0';
+        int most = x86_max_operand_count(insn->mnemonic);
+
+        if (most < 0 && normalize_x86_mnemonic(insn->mnemonic, base, sizeof(base), &suffix) == 0) {
+            most = x86_max_operand_count(base);
+        }
+        if (most >= 0 && n > (size_t)most) {
+            snprintf(encerr, encerr_sz, "'%s' takes %d operand%s at most, and has %zu", insn->mnemonic, most,
+                     most == 1 ? "" : "s", n);
+        } else {
+            snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+        }
+        return -1;
+    }
     if ((cfg->is_64 && n >= 1 &&
          as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
                             x86_stmt_has_high_general(insn))) ||
         (((insn->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) == 0 || as_x86_vec_base_is_whole(mn)) &&
          as_x86_vec_has_base(mn, n))) {
-        static int asking;
         int rc;
 
-        if (asking) {
+        if (x86_vec_asking) {
             return 0;
         }
         /* (What is refused of an instruction's operands whatever its
@@ -9436,9 +9467,9 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
             }
             encerr[0] = '\0';
         }
-        asking = 1;
+        x86_vec_asking = 1;
         rc = encode_x86_vec_rows(cfg, insn, mn, code, code_cap, code_len, encerr, encerr_sz);
-        asking = 0;
+        x86_vec_asking = 0;
         if (rc <= 0) {
             /* (`{nf}` is of the table's rows and of nothing else.) */
             if ((insn->pseudo & AS_PSEUDO_NF) != 0) {

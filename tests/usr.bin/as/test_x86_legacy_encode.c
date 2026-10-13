@@ -227,42 +227,10 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "ret";
-    {
-        const uint8_t exp[] = {0xc3};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    /* (Nor push and pop.) */
+    /* (Nor push and pop, in and out, ret, or the instructions of no
+     * operand -- clc, pushf, nop, hlt.) */
 
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "clc";
-    {
-        const uint8_t exp[] = {0xf8};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-    insn.mnemonic = "pushf";
-    {
-        const uint8_t exp[] = {0x9c};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    /* (Nor in and out.) */
-
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "nop";
-    {
-        const uint8_t exp[] = {0x90};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "hlt";
-    {
-        const uint8_t exp[] = {0xf4};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
     insn.mnemonic = "int";
     insn.op_count = 1;
     insn.ops[0] = imm_op(0x80);
