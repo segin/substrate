@@ -350,6 +350,14 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     /* A general register of 8 bits, any of them -- %ah to %bh, which
      * are written with no REX prefix, and %spl to %dil, which are
      * written with one (emit_row_bytes()); and one that is not %al. */
+    /* A control register, a debug register, a segment register: what
+     * mov has forms of its own for. */
+    case '5':
+        return cls == AS_X86_REGCLASS_CONTROL;
+    case '6':
+        return cls == AS_X86_REGCLASS_DEBUG;
+    case '7':
+        return cls == AS_X86_REGCLASS_SEGMENT;
     /* The port `in` and `out` go through: %dx, written as the register
      * or in brackets as an address is. */
     case 'C':
