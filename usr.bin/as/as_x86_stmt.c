@@ -3030,6 +3030,35 @@ static int is_x86_low8_reg(const char *name) {
     return r != NULL && r->width == 8 && (r->flags & AS_X86_REGF_HIGH8) == 0;
 }
 
+/*
+ * `movb $0x1234, %al`: the number is cut to the byte the register
+ * holds, and the statement draws a warning.  Said by whichever encoder
+ * assembles the move -- the table's rows or the older ladder.
+ */
+static void warn_mov_byte_cut(const as_elf_cfg_t *cfg, const as_stmt_t *st) {
+    const as_instruction_t *insn = &st->u.instr;
+    const as_operand_t *num = NULL;
+    const as_operand_t *reg = NULL;
+    long long v;
+    size_t i;
+
+    if (insn->mnemonic == NULL || insn->operand_count != 2 ||
+        (strcasecmp(insn->mnemonic, "mov") != 0 && strcasecmp(insn->mnemonic, "movb") != 0)) {
+        return;
+    }
+    for (i = 0; i < 2; ++i) {
+        if (insn->operands[i].kind == AS_OPERAND_IMMEDIATE) {
+            num = &insn->operands[i];
+        } else if (insn->operands[i].kind == AS_OPERAND_REGISTER) {
+            reg = &insn->operands[i];
+        }
+    }
+    if (num != NULL && reg != NULL && num->raw != NULL && (num->raw[0] == '$' || num->raw[0] == '#') &&
+        is_x86_low8_reg(reg->u.reg) && eval_expr_const(num->u.expr, &v) == 0 && (v < -128 || v > 255)) {
+        warn_stmt(cfg, st, "immediate truncated to 8 bits");
+    }
+}
+
 static int emit_x86_64_xmm_memop(unsigned char prefix, unsigned char opcode, unsigned xr, const as_mem_operand_t *mem,
                                  unsigned char *out, size_t out_cap, size_t *out_len) {
     as_x86_reg_t base;
@@ -9008,17 +9037,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         }
     }
 
-    if (streq_ci(mnbuf, "mov") && in.op_count == 2) {
-        const as_operand_t *dst_raw = &st->u.instr.operands[op_index[0]];
-        const as_operand_t *src_raw = &st->u.instr.operands[op_index[1]];
-        long long immv;
-        if (dst_raw->kind == AS_OPERAND_REGISTER && src_raw->kind == AS_OPERAND_IMMEDIATE &&
-            src_raw->raw != NULL && (src_raw->raw[0] == '$' || src_raw->raw[0] == '#') &&
-            is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
-            (immv < -128 || immv > 255)) {
-            warn_stmt(cfg, st, "immediate truncated to 8 bits");
-        }
-    }
+    warn_mov_byte_cut(cfg, st);
 
     /*
      * The emitters below that are handed the statement know one ModRM
@@ -12051,6 +12070,7 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
             if (x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len) != 0) {
                 return -1;
             }
+            warn_mov_byte_cut(cfg, st);
             return x86_addr16_prefix(cfg, st, code, code_cap, code_len);
         }
     }
