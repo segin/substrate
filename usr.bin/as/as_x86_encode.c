@@ -21,17 +21,6 @@ typedef struct {
     size_t errbuf_sz;
 } enc_ctx_t;
 
-/* A port written as a number is one byte: `in $300, %eax` was port 44,
- * and nothing said.  (Of the forms of 16 and 32 bits; GNU as takes the
- * byte's with a warning, and a number below nothing in any.) */
-static int port_out_of_range(enc_ctx_t *ctx, const as_x86_operand_t *port) {
-    if (port->u.imm > 255) {
-        set_err(ctx, "port %lld is not a byte: a port past 255 is read through %%dx", (long long)port->u.imm);
-        return 1;
-    }
-    return 0;
-}
-
 static void set_unsupported_form_named(enc_ctx_t *ctx, const char *mnemonic) {
     set_err(ctx, "unsupported operand form for '%s'", mnemonic != NULL ? mnemonic : "<null>");
 }
@@ -2009,36 +1998,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "popf")) {
         if (emit8(&ctx, 0x9d) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "in")) {
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM && (a->u.reg & 7) == AS_X86_REG_EAX) {
-            if ((!insn->byte_op && port_out_of_range(&ctx, b)) || emit8(&ctx, insn->byte_op ? 0xe4 : 0xe5) != 0 ||
-                emit8(&ctx, (uint8_t)b->u.imm) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_REG &&
-                   (a->u.reg & 7) == AS_X86_REG_EAX && (b->u.reg & 7) == AS_X86_REG_EDX) {
-            if (emit8(&ctx, insn->byte_op ? 0xec : 0xed) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "in");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "out")) {
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_REG && (b->u.reg & 7) == AS_X86_REG_EAX) {
-            if ((!insn->byte_op && port_out_of_range(&ctx, a)) || emit8(&ctx, insn->byte_op ? 0xe6 : 0xe7) != 0 ||
-                emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_REG &&
-                   (a->u.reg & 7) == AS_X86_REG_EDX && (b->u.reg & 7) == AS_X86_REG_EAX) {
-            if (emit8(&ctx, insn->byte_op ? 0xee : 0xef) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "out");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "monitor")) {
@@ -4237,70 +4196,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             return -1;
         }
         if (emit8(&ctx, 0x6f) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "in")) {
-        const as_x86_operand_t *port_op = NULL;
-        const as_x86_operand_t *reg_op = NULL;
-
-        if (insn->op_count != 2) {
-            set_unsupported_form_named(&ctx, "in");
-            return -1;
-        }
-        if (a->kind == AS_X86_OP_REG && reg_is_exact_low3(a, AS_X86_REG_RAX)) {
-            reg_op = a;
-            port_op = b;
-        } else if (b->kind == AS_X86_OP_REG && reg_is_exact_low3(b, AS_X86_REG_RAX)) {
-            reg_op = b;
-            port_op = a;
-        } else {
-            set_unsupported_form_named(&ctx, "in");
-            return -1;
-        }
-        (void)reg_op;
-        if (port_op->kind == AS_X86_OP_IMM) {
-            if ((!insn->byte_op && port_out_of_range(&ctx, port_op)) || emit8(&ctx, insn->byte_op ? 0xe4 : 0xe5) != 0 ||
-                emit8(&ctx, (uint8_t)port_op->u.imm) != 0) {
-                return -1;
-            }
-        } else if (is_dx_port_operand(port_op)) {
-            if (emit8(&ctx, insn->byte_op ? 0xec : 0xed) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "in");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "out")) {
-        const as_x86_operand_t *port_op = NULL;
-        const as_x86_operand_t *reg_op = NULL;
-
-        if (insn->op_count != 2) {
-            set_unsupported_form_named(&ctx, "out");
-            return -1;
-        }
-        if (a->kind == AS_X86_OP_REG && reg_is_exact_low3(a, AS_X86_REG_RAX)) {
-            reg_op = a;
-            port_op = b;
-        } else if (b->kind == AS_X86_OP_REG && reg_is_exact_low3(b, AS_X86_REG_RAX)) {
-            reg_op = b;
-            port_op = a;
-        } else {
-            set_unsupported_form_named(&ctx, "out");
-            return -1;
-        }
-        (void)reg_op;
-        if (port_op->kind == AS_X86_OP_IMM) {
-            if ((!insn->byte_op && port_out_of_range(&ctx, port_op)) || emit8(&ctx, insn->byte_op ? 0xe6 : 0xe7) != 0 ||
-                emit8(&ctx, (uint8_t)port_op->u.imm) != 0) {
-                return -1;
-            }
-        } else if (is_dx_port_operand(port_op)) {
-            if (emit8(&ctx, insn->byte_op ? 0xee : 0xef) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "out");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "jmp")) {

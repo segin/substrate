@@ -248,23 +248,7 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "in";
-    insn.op_count = 2;
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    insn.ops[1] = imm_op(0x80);
-    {
-        const uint8_t exp[] = {0xe5, 0x80};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "out";
-    insn.ops[0] = imm_op(0x81);
-    insn.ops[1] = reg_op(AS_X86_REG_EAX);
-    {
-        const uint8_t exp[] = {0xe7, 0x81};
-        check_encode(&insn, exp, sizeof(exp));
-    }
+    /* (Nor in and out.) */
 
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "nop";
