@@ -1206,6 +1206,13 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
             !((t->flags & AS_VEC_F_PROMOHI) != 0 && has_high_general(rq))) {
             continue;
         }
+        /* (`{load}` and `{store}` ask for one of the two ways an
+         * instruction of two registers can be written; the rows that
+         * have come from the older encoders have the one written
+         * unasked, and the other is still where it was.) */
+        if ((t->flags & AS_VEC_F_BASE) != 0 && (rq->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) != 0) {
+            continue;
+        }
         /* (Three tiles are three different ones.) */
         if (strcmp(t->ops, "ttt") == 0 &&
             (rq->ops[0].u.reg == rq->ops[1].u.reg || rq->ops[0].u.reg == rq->ops[2].u.reg ||

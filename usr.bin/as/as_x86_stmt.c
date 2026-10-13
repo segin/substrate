@@ -9380,10 +9380,14 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
      */
     /* (And so are the forms an instruction has always had, as they
      * come to the table: those are asked of it in every mode.) */
+    /* (But not where `{load}` or `{store}` asks for one of the two
+     * ways an instruction of two registers can be written: the rows
+     * have the one GNU as writes unasked, and the other is still where
+     * it was.) */
     if ((cfg->is_64 && n >= 1 &&
          as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
                             x86_stmt_has_high_general(insn))) ||
-        as_x86_vec_has_base(mn, n)) {
+        ((insn->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) == 0 && as_x86_vec_has_base(mn, n))) {
         static int asking;
         int rc;
 
