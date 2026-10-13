@@ -199,6 +199,10 @@ typedef struct {
     /* Set while a directive is given its bytes for good, if the last
      * bytes of its section were data: see append_x86_nops(). */
     int pad_after_data;
+    /* Set by a pass that follows the source only to find where things
+     * are: the numbers of `.byte`, `.long` and the like are not worked
+     * out for it, and are written as zeros. */
+    int data_sizes_only;
     /* A flat image is being written (as_flat.c), which has no object
      * to ask a section's flags of: whether the section a directive is
      * in is one of instructions, as its writer has it. */

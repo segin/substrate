@@ -3938,6 +3938,11 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
         return 1;
     }
     width = directive_fixed_scalar_width(d);
+    /* Whoever wants only to know where things are wants no values: a
+     * number of a width is that many bytes whatever it is. */
+    if (width != 0 && ctx != NULL && ctx->data_sizes_only) {
+        return bytebuf_append_zeros(buf, (size_t)width * d->arg_count) == 0 ? 1 : -1;
+    }
     if (width != 0) {
         for (i = 0; i < d->arg_count; ++i) {
             long long v;

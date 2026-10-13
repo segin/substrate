@@ -467,8 +467,10 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             if (trc > 0) {
                 continue;
             }
+            ctx->data_sizes_only = 1;
             drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
                                             track.x86_code_bits, &st->u.directive);
+            ctx->data_sizes_only = 0;
             if (drc < 0) {
                 free_sym_locs(*locs, *loc_count);
                 free_name_index(loc_index);
@@ -577,8 +579,10 @@ static int collect_dot_locations(emit_ctx_t *ctx, dot_loc_t **out, size_t *count
             if (trc > 0) {
                 continue;
             }
+            ctx->data_sizes_only = 1;
             drc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
                                             track.x86_code_bits, &st->u.directive);
+            ctx->data_sizes_only = 0;
             if (drc < 0) {
                 free(items);
                 section_track_free(&track);
