@@ -103,64 +103,69 @@ static void check_encode(const as_x86_insn_t *insn, const uint8_t *exp, size_t e
 int main(void) {
     as_x86_insn_t insn;
 
+    /*
+     * What this encoder makes of an address, by an instruction it still
+     * has: arpl, 63 and a ModRM, whose first operand here is the memory
+     * and whose second the register.  (These were of mov, and before
+     * that of lea too; both are rows of the table now,
+     * as_x86_vec_table_base.h, and are tested there.)
+     */
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
+    insn.mnemonic = "arpl";
     insn.op_count = 2;
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    insn.ops[1] = mem_base(AS_X86_REG_EBX);
+    insn.ops[0] = mem_base(AS_X86_REG_EBX);
+    insn.ops[1] = reg_op(AS_X86_REG_EAX);
     {
-        const uint8_t exp[] = {0x8b, 0x03};
+        const uint8_t exp[] = {0x63, 0x03};
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    insn.ops[1] = mem_base_disp(AS_X86_REG_EBX, 0x10);
+    insn.ops[0] = mem_base_disp(AS_X86_REG_EBX, 0x10);
     {
-        const uint8_t exp[] = {0x8b, 0x43, 0x10};
+        const uint8_t exp[] = {0x63, 0x43, 0x10};
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    insn.ops[1] = mem_full(AS_X86_REG_EBX, AS_X86_REG_ECX, 4, 0x12345678);
+    insn.ops[0] = mem_full(AS_X86_REG_EBX, AS_X86_REG_ECX, 4, 0x12345678);
     {
-        const uint8_t exp[] = {0x8b, 0x84, 0x8b, 0x78, 0x56, 0x34, 0x12};
+        const uint8_t exp[] = {0x63, 0x84, 0x8b, 0x78, 0x56, 0x34, 0x12};
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    insn.ops[1] = mem_disp32(0x12345678);
+    insn.ops[0] = mem_disp32(0x12345678);
     {
-        const uint8_t exp[] = {0x8b, 0x05, 0x78, 0x56, 0x34, 0x12};
+        const uint8_t exp[] = {0x63, 0x05, 0x78, 0x56, 0x34, 0x12};
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    insn.ops[1] = mem_base(AS_X86_REG_ESP);
+    insn.ops[0] = mem_base(AS_X86_REG_ESP);
     {
-        const uint8_t exp[] = {0x8b, 0x04, 0x24};
+        const uint8_t exp[] = {0x63, 0x04, 0x24};
         check_encode(&insn, exp, sizeof(exp));
     }
 
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
+    insn.mnemonic = "arpl";
     insn.seg_override = AS_X86_SEG_FS;
     insn.operand_size_override = 1;
     insn.address_size_override = 1;
     insn.op_count = 2;
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    insn.ops[1] = mem_disp32(0x12345678);
+    insn.ops[0] = mem_disp32(0x12345678);
+    insn.ops[1] = reg_op(AS_X86_REG_EAX);
     {
         /* GNU as's order: segment, address size, operand size. */
-        const uint8_t exp[] = {0x64, 0x67, 0x66, 0x8b, 0x05, 0x78, 0x56, 0x34, 0x12};
+        const uint8_t exp[] = {0x64, 0x67, 0x66, 0x63, 0x05, 0x78, 0x56, 0x34, 0x12};
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    /* (A base, an index with a scale, and a displacement of one byte:
-     * of mov, since this encoder has lea no longer -- it is a row of
-     * the table's, as_x86_vec_table_base.h.) */
+    /* (A base, an index with a scale, and a displacement of one byte.) */
     memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "mov";
+    insn.mnemonic = "arpl";
     insn.op_count = 2;
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    insn.ops[1] = mem_full(AS_X86_REG_EBX, AS_X86_REG_ECX, 2, 8);
+    insn.ops[0] = mem_full(AS_X86_REG_EBX, AS_X86_REG_ECX, 2, 8);
+    insn.ops[1] = reg_op(AS_X86_REG_EAX);
     {
-        const uint8_t exp[] = {0x8b, 0x44, 0x4b, 0x08};
+        const uint8_t exp[] = {0x63, 0x44, 0x4b, 0x08};
         check_encode(&insn, exp, sizeof(exp));
     }
 

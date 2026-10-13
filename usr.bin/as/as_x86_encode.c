@@ -997,16 +997,6 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
     return 0;
 }
 
-static int encode_reg_rm_pair(enc_ctx_t *ctx, uint8_t opcode, const as_x86_operand_t *dst, const as_x86_operand_t *src,
-                              int dst_is_rm) {
-    if (emit8(ctx, opcode) != 0) {
-        return -1;
-    }
-    if (dst_is_rm) {
-        return modrm_sib_disp(ctx, (uint8_t)src->u.reg, dst);
-    }
-    return modrm_sib_disp(ctx, (uint8_t)dst->u.reg, src);
-}
 
 static int encode_jcc_rel32(enc_ctx_t *ctx, const char *mnemonic, int32_t rel_target) {
     static const struct {
@@ -1141,59 +1131,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     b = insn->op_count > 1 ? &insn->ops[1] : &no_operand;
     c = insn->op_count > 2 ? &insn->ops[2] : &no_operand;
 
-    if (streq_ci(insn->mnemonic, "mov")) {
-        if (insn->byte_op) {
-            if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM) {
-                /* (reg_code3: %ah to %bh are codes 4 to 7, and by the
-                 * low bits of their numbers `mov $1, %ah` was `mov $1,
-                 * %al`.) */
-                if (emit8(&ctx, (uint8_t)(0xb0 | reg_code3(a->u.reg))) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
-                    return -1;
-                }
-            /* From memory only.  Between two registers there are two
-             * encodings, and GNU as writes the other one, 88 and 89: an
-             * object is compared with GNU's byte for byte. */
-            } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG &&
-                       (b->kind == AS_X86_OP_MEM || (b->kind == AS_X86_OP_REG && insn->prefer_load))) {
-                if (encode_reg_rm_pair(&ctx, 0x8a, a, b, 0) != 0) {
-                    return -1;
-                }
-            } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
-                if (encode_reg_rm_pair(&ctx, 0x88, a, b, 1) != 0) {
-                    return -1;
-                }
-            } else if (insn->op_count == 2 && a->kind == AS_X86_OP_MEM && b->kind == AS_X86_OP_IMM) {
-                if (emit8(&ctx, 0xc6) != 0 || modrm_sib_disp(&ctx, 0, a) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
-                    return -1;
-                }
-            } else {
-                set_unsupported_form_named(&ctx, "movb");
-                return -1;
-            }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, (uint8_t)(0xb8 | (a->u.reg & 7))) != 0 ||
-                emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG &&
-                   (b->kind == AS_X86_OP_MEM || (b->kind == AS_X86_OP_REG && insn->prefer_load))) {
-            if (encode_reg_rm_pair(&ctx, 0x8b, a, b, 0) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
-            if (encode_reg_rm_pair(&ctx, 0x89, a, b, 1) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_MEM && b->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0xc7) != 0 || modrm_sib_disp(&ctx, 0, a) != 0 ||
-                emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "mov");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "movsx") || streq_ci(insn->mnemonic, "movsxb") || streq_ci(insn->mnemonic, "movsxw")) {
+    if (streq_ci(insn->mnemonic, "movsx") || streq_ci(insn->mnemonic, "movsxb") || streq_ci(insn->mnemonic, "movsxw")) {
         /* The source is a word by the mnemonic or by being a 16-bit
          * register; otherwise it is a byte. */
         uint8_t op2 = (streq_ci(insn->mnemonic, "movsxw") || operand_bits(b) == 16) ? 0xbf : 0xbe;
