@@ -18,14 +18,6 @@ static as_x86_operand_t reg_op(as_x86_reg_t r) {
     return op;
 }
 
-static as_x86_operand_t imm_op(int32_t v) {
-    as_x86_operand_t op;
-    memset(&op, 0, sizeof(op));
-    op.kind = AS_X86_OP_IMM;
-    op.u.imm = v;
-    return op;
-}
-
 static as_x86_operand_t rel_op(int32_t v) {
     as_x86_operand_t op;
     memset(&op, 0, sizeof(op));
@@ -235,14 +227,7 @@ int main(void) {
     /* (Nor push and pop, in and out, ret, or the instructions of no
      * operand -- clc, pushf, nop, hlt.) */
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "int";
-    insn.op_count = 1;
-    insn.ops[0] = imm_op(0x80);
-    {
-        const uint8_t exp[] = {0xcd, 0x80};
-        check_encode(&insn, exp, sizeof(exp));
-    }
+    /* (Nor int.) */
 
     puts("ok");
     return 0;

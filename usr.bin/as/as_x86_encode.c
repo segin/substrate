@@ -1518,20 +1518,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "int")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM && !a->imm_symbolic && a->u.imm == 3) {
-            /* The third has an instruction of one byte to itself. */
-            if (emit8(&ctx, 0xcc) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0xcd) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "int");
-            return -1;
-        }
     } else if (insn->op_count == 0 && (streq_ci(insn->mnemonic, "ds") || streq_ci(insn->mnemonic, "es") ||
                                         streq_ci(insn->mnemonic, "cs") || streq_ci(insn->mnemonic, "ss") ||
                                         streq_ci(insn->mnemonic, "fs") || streq_ci(insn->mnemonic, "gs"))) {
@@ -2396,18 +2382,6 @@ more_mnemonics:
             set_unsupported_form_named(&ctx, "enter");
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "int")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM) {
-            return -1;
-        }
-        /* The third has an instruction of one byte to itself. */
-        if (!a->imm_symbolic && a->u.imm == 3) {
-            if (emit8(&ctx, 0xcc) != 0) {
-                return -1;
-            }
-        } else if (emit8(&ctx, 0xcd) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
                streq_ci(insn->mnemonic, "loopz") || streq_ci(insn->mnemonic, "loopne") ||
                streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jecxz") ||
@@ -2454,29 +2428,6 @@ more_mnemonics:
         if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc7) != 0 ||
             modrm_sib_disp64(&ctx, AS_X86_REG_RCX, a, &rex_r, &rex_x, &rex_b) != 0) {
             set_err(&ctx, "unsupported cmpxchg16b form");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "rdfsbase") || streq_ci(insn->mnemonic, "rdgsbase") ||
-               streq_ci(insn->mnemonic, "wrfsbase") || streq_ci(insn->mnemonic, "wrgsbase")) {
-        uint8_t subop;
-        uint8_t rex = 0x40;
-        if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_REG) {
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "rdfsbase")) subop = 0;
-        else if (streq_ci(insn->mnemonic, "rdgsbase")) subop = 1;
-        else if (streq_ci(insn->mnemonic, "wrfsbase")) subop = 2;
-        else subop = 3;
-        if (a->size_bits == 64) {
-            rex |= 0x08;
-        }
-        if (a->u.reg >= 8) {
-            rex |= 0x01;
-        }
-        if (emit8(&ctx, 0xf3) != 0 ||
-            ((rex != 0x40 || a->size_bits == 64) && emit8(&ctx, rex) != 0) ||
-            emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 ||
-            emit8(&ctx, (uint8_t)(0xc0 | (subop << 3) | (a->u.reg & 7))) != 0) {
             return -1;
         }
     } else if ((x87_rc = emit_x87_no_operand(&ctx, insn)) != 0) {

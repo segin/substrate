@@ -365,6 +365,9 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     case 'o':
         /* The number one, which a shift has a form of its own for. */
         return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm == 1;
+    case 'M':
+        /* And the number three, which int has one for. */
+        return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm == 3;
     case 's':
         /* A byte that the instruction extends by its sign. */
         return op->kind == AS_X86_OP_IMM && !op->imm_symbolic && op->u.imm >= -128 && op->u.imm <= 127;

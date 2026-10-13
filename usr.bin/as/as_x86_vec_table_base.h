@@ -2381,6 +2381,17 @@
     LW("movzxw", P0, M1, 0xb7, W0, "mw", "mr", AS_VEC_F_BASE | OP16),
     LW("movsxl", P0, AS_VEC_MAP_ONE, 0x63, W0, "dd", "mr", AS_VEC_F_BASE | O64),
     LW("movsxl", P0, AS_VEC_MAP_ONE, 0x63, W0, "md", "mr", AS_VEC_F_BASE | O64),
+    /* int, whose third has a byte to itself, and the bases of %fs and %gs. */
+    {"int", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xcc, W0, 0, "M", "-", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
+    LW("int", P0, AS_VEC_MAP_ONE, 0xcd, W0, "u", "i", AS_VEC_F_BASE),
+    LW("rdfsbase", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | O64 | DG(0)),
+    LW("rdfsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(0)),
+    LW("rdgsbase", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | O64 | DG(1)),
+    LW("rdgsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(1)),
+    LW("wrfsbase", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | O64 | DG(2)),
+    LW("wrfsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(2)),
+    LW("wrgsbase", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | O64 | DG(3)),
+    LW("wrgsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(3)),
     /* And the instructions with no operand: the opcode, and the byte
      * after it where there is one. */
     {"aaa", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x37, W0, 0, "", "", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | AS_VEC_F_X32},
