@@ -9381,13 +9381,14 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
     /* (And so are the forms an instruction has always had, as they
      * come to the table: those are asked of it in every mode.) */
     /* (But not where `{load}` or `{store}` asks for one of the two
-     * ways an instruction of two registers can be written: the rows
-     * have the one GNU as writes unasked, and the other is still where
-     * it was.) */
+     * ways an instruction of two registers can be written, of a name
+     * whose rows are not yet all its forms: the rows have the one GNU
+     * as writes unasked, and the other is still where it was.) */
     if ((cfg->is_64 && n >= 1 &&
          as_x86_vec_has_apx(mn, n, (insn->pseudo & (AS_PSEUDO_EVEX | AS_PSEUDO_NF)) != 0,
                             x86_stmt_has_high_general(insn))) ||
-        ((insn->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) == 0 && as_x86_vec_has_base(mn, n))) {
+        (((insn->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) == 0 || as_x86_vec_base_is_whole(mn)) &&
+         as_x86_vec_has_base(mn, n))) {
         static int asking;
         int rc;
 
@@ -9644,8 +9645,11 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                  * a repeat and the flag that says which they are; the
                  * repeat is no prefix of its own then.)
                  */
-                if ((insn->prefixes & AS_PREFIX_HLE) != 0 && !evex && (insn->prefixes & AS_PREFIX_LOCK) != 0 &&
-                    as_x86_vec_base_takes_lock(mn)) {
+                /* (And before an exchange with no lock written: it is
+                 * locked without one.) */
+                if ((insn->prefixes & AS_PREFIX_HLE) != 0 && !evex &&
+                    (((insn->prefixes & AS_PREFIX_LOCK) != 0 && as_x86_vec_base_takes_lock(mn)) ||
+                     (strncmp(mn, "xchg", 4) == 0 && as_x86_vec_base_is_whole(mn)))) {
                     if (none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPNE) {
                         continue;
                     }
@@ -12027,7 +12031,18 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
 
     /* Nor are those with a VEX or an EVEX prefix, which have a table. */
     if (st != NULL && st->kind == AS_STMT_INSTRUCTION && cfg != NULL) {
-        int vec = encode_x86_vec(cfg, &st->u.instr, code, code_cap, code_len, encerr, encerr_sz);
+        int vec;
+
+        /*
+         * The table reads `{disp8}` and `{disp32}` from the statement.
+         * The operands it is given are made by what the older encoders
+         * use, which reads them from here -- where the last statement
+         * those encoders assembled had left its own: after a
+         * `{disp32}` one, every address the table wrote had four bytes
+         * of displacement.
+         */
+        x86_stmt_pseudo = 0;
+        vec = encode_x86_vec(cfg, &st->u.instr, code, code_cap, code_len, encerr, encerr_sz);
 
         if (vec < 0) {
             return -1;

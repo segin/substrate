@@ -286,6 +286,21 @@ static int is_vector_class(unsigned cls) {
     return cls == AS_X86_REGCLASS_XMM || cls == AS_X86_REGCLASS_YMM || cls == AS_X86_REGCLASS_ZMM;
 }
 
+/*
+ * How many bytes the number after a row's instruction is of, where the
+ * row says: two, four -- or, where it says both, the code's own size,
+ * which is two in 16-bit code and four in the others (`add $0x1234,
+ * (%bx)` with no suffix).  0 where it says neither: one byte.
+ */
+static unsigned row_imm_bytes(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq) {
+    unsigned both = AS_VEC_F_IMM16 | AS_VEC_F_IMM32;
+
+    if ((t->flags & both) == both) {
+        return rq->mode == 16u ? 2u : 4u;
+    }
+    return (t->flags & AS_VEC_F_IMM16) != 0 ? 2u : (t->flags & AS_VEC_F_IMM32) != 0 ? 4u : 0u;
+}
+
 /* Is the operand what the row's character asks? */
 static int operand_is(const as_x86_operand_t *op, char want) {
     int reg = op->kind == AS_X86_OP_REG;
@@ -357,7 +372,8 @@ static int operand_is(const as_x86_operand_t *op, char want) {
      * bits it is added to: `addl $0xffffffff, %ecx` is 83 C1 FF. */
     case 'S':
         return op->kind == AS_X86_OP_IMM && !op->imm_symbolic &&
-               ((op->u.imm >= -128 && op->u.imm <= 127) || (op->u.imm >= 0xff80 && op->u.imm <= 0xffff));
+               ((op->u.imm >= -128 && op->u.imm <= 127) || (op->u.imm >= 0xff80 && op->u.imm <= 0xffff) ||
+                (op->u.imm >= 0xffffff80ll && op->u.imm <= 0xffffffffll));
     case 'T':
         return op->kind == AS_X86_OP_IMM && !op->imm_symbolic &&
                ((op->u.imm >= -128 && op->u.imm <= 127) || (op->u.imm >= 0xffffff80ll && op->u.imm <= 0xffffffffll));
@@ -461,7 +477,15 @@ static int row_takes(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq) {
         return 0;
     }
     for (i = 0; i < rq->op_count; ++i) {
-        if (!operand_is(&rq->ops[i], t->ops[i])) {
+        char want = t->ops[i];
+
+        /* (`L`: a byte extended by its sign once it is cut to the
+         * code's own size -- what `S` is of 16 bits and `T` of 32, for
+         * a form whose size nothing but the code says.) */
+        if (want == 'L') {
+            want = rq->mode == 16u ? 'S' : 'T';
+        }
+        if (!operand_is(&rq->ops[i], want)) {
             return 0;
         }
     }
@@ -562,6 +586,12 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
         if (as_x86_modrm16(m, reg & 7u, disp8_n == 1u && (rq->pseudo & AS_PSEUDO_DISP32) == 0, bytes, &n) != 0) {
             vec_err(ctx, "not an address of 16-bit registers");
             return -1;
+        }
+        /* (`{disp8}` before an address with no displacement asks for
+         * one of nothing: `{disp8} add %cx, (%bx)` is 01 4F 00.) */
+        if ((rq->pseudo & AS_PSEUDO_DISP8) != 0 && n == 1 && (bytes[0] & 0xc0u) == 0 && !m->disp_only) {
+            bytes[0] |= 0x40u;
+            bytes[n++] = 0;
         }
         for (k = 0; k < n; ++k) {
             if (put8(ctx, bytes[k]) != 0) {
@@ -836,8 +866,9 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
          * be a symbol's room in a form an instruction always had. */
         {
             const as_x86_operand_t *imm = role_op(t, rq, 'i');
-            unsigned wide = (t->flags & AS_VEC_F_IMM16) != 0 ? 2u : (t->flags & AS_VEC_F_IMM32) != 0 ? 4u : 0u;
+            unsigned wide = row_imm_bytes(t, rq);
             unsigned k2;
+            int cut;
 
             /* (Of eight bytes, which one instruction has: movabs.  A
              * row with no VEX has no use for `len` but to say so.) */
@@ -856,18 +887,28 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             if (imm == NULL) {
                 return 0;
             }
-            if (imm->imm_symbolic && (wide == 0 || (t->flags & AS_VEC_F_BASE) == 0)) {
+            /*
+             * A number with the accumulator -- `add $n, %al` and its
+             * kind, whose rows are of a number and a register: one too
+             * large keeps its low bytes, as GNU as has it with a
+             * warning, and the byte may be a symbol's.  (Not a number
+             * alone: `int $0x1234` is refused.)
+             */
+            cut = (t->flags & AS_VEC_F_BASE) != 0 && rq->op_count == 2 && strchr(t->ops, 'i') != NULL &&
+                  t->w != AS_VEC_W1;
+            if (imm->imm_symbolic && ((wide == 0 && !cut) || (t->flags & AS_VEC_F_BASE) == 0)) {
                 vec_err(ctx, "'%s' takes a number that is known here", t->name);
                 return -1;
             }
             if (wide == 0) {
-                if (!imm->imm_symbolic && (t->flags & AS_VEC_F_BASE) != 0 && (imm->u.imm < -128 || imm->u.imm > 255)) {
+                if (!imm->imm_symbolic && !cut && (t->flags & AS_VEC_F_BASE) != 0 &&
+                    (imm->u.imm < -128 || imm->u.imm > 255)) {
                     vec_err(ctx, "the number %lld is not of one byte", (long long)imm->u.imm);
                     return -1;
                 }
-                return put8(ctx, (unsigned)imm->u.imm & 0xffu);
+                return put8(ctx, imm->imm_symbolic ? 0u : (unsigned)imm->u.imm & 0xffu);
             }
-            if (!imm->imm_symbolic &&
+            if (!imm->imm_symbolic && !cut &&
                 (wide == 2 ? (imm->u.imm < -32768 || imm->u.imm > 65535)
                            : (imm->u.imm < -2147483648ll ||
                               imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll)))) {
@@ -958,20 +999,23 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (put8(&tc, (((unsigned)is4->u.reg & 0xfu) << 4) | low) != 0) {
             return -1;
         }
-    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM16) != 0 && imm->imm_symbolic) {
+    } else if (imm != NULL && row_imm_bytes(t, rq) == 2u && imm->imm_symbolic) {
         /* (A symbol: two bytes for the linker.) */
         if (put8(&tc, 0) != 0 || put8(&tc, 0) != 0) {
             return -1;
         }
-    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM16) != 0) {
-        if (imm->u.imm < -32768 || imm->u.imm > 65535) {
+    } else if (imm != NULL && row_imm_bytes(t, rq) == 2u) {
+        /* (A form an instruction always had takes a number too large
+         * and keeps its low bytes, as GNU as does with a warning: `addw
+         * $0x12345678, %cx` adds 0x5678.) */
+        if ((t->flags & AS_VEC_F_BASE) == 0 && (imm->u.imm < -32768 || imm->u.imm > 65535)) {
             vec_err(ctx, "the number %lld is not of two bytes", (long long)imm->u.imm);
             return -1;
         }
         if (put8(&tc, (unsigned)imm->u.imm & 0xffu) != 0 || put8(&tc, ((unsigned)imm->u.imm >> 8) & 0xffu) != 0) {
             return -1;
         }
-    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0 && imm->imm_symbolic) {
+    } else if (imm != NULL && row_imm_bytes(t, rq) == 4u && imm->imm_symbolic) {
         /* (A symbol: four bytes for the linker, which are the
          * instruction's last.  Of APX's rows; the others take a number
          * that is known here.) */
@@ -982,9 +1026,11 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (put32(&tc, 0) != 0) {
             return -1;
         }
-    } else if (imm != NULL && (t->flags & AS_VEC_F_IMM32) != 0) {
-        /* (Of 64 bits the four bytes are extended by their sign.) */
-        if (imm->u.imm < -2147483648ll || imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll)) {
+    } else if (imm != NULL && row_imm_bytes(t, rq) == 4u) {
+        /* (Of 64 bits the four bytes are extended by their sign, and
+         * the number must be what they extend to.) */
+        if (((t->flags & AS_VEC_F_BASE) == 0 || t->w == AS_VEC_W1) &&
+            (imm->u.imm < -2147483648ll || imm->u.imm > (t->w == AS_VEC_W1 ? 2147483647ll : 4294967295ll))) {
             vec_err(ctx, "the number %lld is not of four bytes", (long long)imm->u.imm);
             return -1;
         }
@@ -993,11 +1039,17 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
     } else if (imm != NULL) {
         /* (One that is a byte once cut to 16 or to 32 bits is its low
-         * byte, which is what the row's class has found it to be.) */
+         * byte, which is what the row's class has found it to be.  And
+         * a form an instruction always had keeps the low byte of any
+         * number -- `addb $0x1234, %cl` adds 0x34 -- but for the
+         * shifts and rotations, whose count GNU as will not cut.) */
         const char *at = strchr(t->roles, 'i');
         char cls = at != NULL ? t->ops[at - t->roles] : '\0';
 
-        if (!imm->imm_symbolic && cls != 'S' && cls != 'T' && (imm->u.imm < -128 || imm->u.imm > 255)) {
+        if (!imm->imm_symbolic && cls != 'S' && cls != 'T' && cls != 'L' &&
+            !((t->flags & AS_VEC_F_BASE) != 0 && cls == 'i' &&
+              !(t->map == AS_VEC_MAP_ONE && (t->opcode == 0xc0u || t->opcode == 0xc1u))) &&
+            (imm->u.imm < -128 || imm->u.imm > 255)) {
             vec_err(ctx, "the number %lld is not of one byte", (long long)imm->u.imm);
             return -1;
         }
@@ -1414,7 +1466,35 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
          * have come from the older encoders have the one written
          * unasked, and the other is still where it was.) */
         if ((t->flags & AS_VEC_F_BASE) != 0 && (rq->pseudo & (AS_PSEUDO_LOAD | AS_PSEUDO_STORE)) != 0) {
-            continue;
+            if (t->bcst != AS_VEC_LEGACY_WHOLE) {
+                continue;
+            }
+            /*
+             * A name whose rows are all its forms.  Its row of two
+             * registers is the way that stores, which is what GNU as
+             * writes unasked and for `{store}`; `{load}` asks for the
+             * other where there is one -- the row of memory into a
+             * register, whose opcode is this one's with the bit of the
+             * direction, and whose r/m is then the first register.
+             * (An instruction with one way only has it whatever is
+             * asked: `{load} bt %eax, %ebx` is bt.)
+             */
+            if ((rq->pseudo & AS_PSEUDO_LOAD) != 0 && rq->op_count == 2 && strcmp(t->roles, "rm") == 0 &&
+                rq->ops[0].kind == AS_X86_OP_REG && rq->ops[1].kind == AS_X86_OP_REG) {
+                size_t j;
+
+                for (j = first; j < as_x86_vec_table_count; j = next_row[j]) {
+                    const as_x86_vec_tmpl_t *u = &as_x86_vec_table[j];
+
+                    if ((u->flags & AS_VEC_F_BASE) != 0 && strcmp(u->roles, "mr") == 0 && u->ops[0] == 'm' &&
+                        u->ops[1] == t->ops[1] && u->opcode == (t->opcode | 2u) && (t->opcode & 2u) == 0 &&
+                        u->map == t->map && u->w == t->w &&
+                        ((u->flags ^ t->flags) & (AS_VEC_F_OP16 | AS_VEC_F_OP32 | AS_VEC_F_64)) == 0) {
+                        t = u;
+                        break;
+                    }
+                }
+            }
         }
         /* (Three tiles are three different ones.) */
         if (strcmp(t->ops, "ttt") == 0 &&

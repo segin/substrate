@@ -90,5 +90,37 @@ is 32 ff10 'call *sym@TLSCALL(%eax)'
 is 32 ff5008 'call *8(%eax)'
 is 64 ffd1 'call *%rcx'
 
+# What asking the table alone for a name found.  `{load}` and `{store}`
+# before an instruction with one way to be written are that way:
+is 32 0f44d8 '{load} cmove %eax, %ebx'
+is 32 0fa3c3 '{store} bt %eax, %ebx'
+is 32 0f94c0 '{store} sete %al'
+# a lock goes after the prefixes of size, and xacquire ahead of it:
+is 32 66f0830001 'lock addw $1, (%eax)'
+is 32 f2f00fba2801 'xacquire lock btsl $1, (%eax)'
+refused 32 'lock btsl $1, %eax'
+# `{disp8}` before an address of 16-bit registers with no displacement
+# is one of nothing, and `{disp32}` asks for what such an address lacks:
+is 32 114f00 '.code16
+{disp8} adc %cx, (%bx)'
+refused 32 '.code16
+{disp32} btl %eax, (%bx)'
+# and neither outlasts its statement:
+is 32 318800000000831001 '{disp32} xorl %ecx, (%eax)
+adcl $1, (%eax)'
+# A number too large for where it goes keeps its low bytes; one that is
+# a byte once cut is the byte:
+is 32 6681c17856 'addw $0x12345678, %cx'
+is 32 80c134 'addb $0x1234, %cl'
+is 32 0434 'addb $0x1234, %al'
+is 32 6683c180 'addw $0xffffff80, %cx'
+refused 32 'roll $0x1234, %eax'
+# With no suffix and no register the size is the code's:
+is 32 830001 'add $1, (%eax)'
+is 32 810034120000 'add $0x1234, (%eax)'
+is 32 81073412 '.code16
+add $0x1234, (%bx)'
+is 64 66ffc9 'dec %cx'
+
 [ "$fail" -eq 0 ] && echo "ok: the rows of the instructions of general registers ($cases cases)"
 exit "$fail"
