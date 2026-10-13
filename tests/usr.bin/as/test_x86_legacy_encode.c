@@ -164,41 +164,9 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "xchg";
-    insn.op_count = 2;
-    insn.ops[0] = mem_base(AS_X86_REG_EAX);
-    insn.ops[1] = reg_op(AS_X86_REG_EBX);
-    {
-        const uint8_t exp[] = {0x87, 0x18};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "add";
-    insn.op_count = 2;
-    insn.ops[0] = mem_base(AS_X86_REG_EBX);
-    insn.ops[1] = imm_op(0x11223344);
-    {
-        const uint8_t exp[] = {0x81, 0x03, 0x44, 0x33, 0x22, 0x11};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "xor";
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    insn.ops[1] = mem_base(AS_X86_REG_EBX);
-    {
-        const uint8_t exp[] = {0x33, 0x03};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "cmp";
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    insn.ops[1] = reg_op(AS_X86_REG_ECX);
-    {
-        const uint8_t exp[] = {0x39, 0xc8};
-        check_encode(&insn, exp, sizeof(exp));
-    }
+    /* (xchg, add, xor and cmp were asked of this encoder here.  It has
+     * them no longer: they are rows of the table, as_x86_vec_table_base.h,
+     * and test_base_rows.sh and the forms files hold them.) */
 
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "sar";
