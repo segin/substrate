@@ -123,6 +123,7 @@ typedef struct {
      *           is not %al
      *   V F G J %al, %ax, %eax, %rax and no other
      *   U I     a register of the x87's stack; its top, %st, alone
+     *   C       %dx as a port, written `%dx` or `(%dx)`
      *   O P     memory at an address that is a number alone; and one
      *           that is not a symbol's place in the global offset table
      *   n N     an MMX register; that, or memory

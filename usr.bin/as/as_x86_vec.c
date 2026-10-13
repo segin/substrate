@@ -350,6 +350,12 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     /* A general register of 8 bits, any of them -- %ah to %bh, which
      * are written with no REX prefix, and %spl to %dil, which are
      * written with one (emit_row_bytes()); and one that is not %al. */
+    /* The port `in` and `out` go through: %dx, written as the register
+     * or in brackets as an address is. */
+    case 'C':
+        return (cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 16 && (unsigned)op->u.reg == 2u) ||
+               (plain_mem && op->u.mem.has_base && (unsigned)op->u.mem.base == 2u && op->u.mem.addr_bits == 16u &&
+                !op->u.mem.has_index && !op->u.mem.has_disp && !op->u.mem.rip_relative);
     /* A register of the x87's stack, %st(0) to %st(7); and its top,
      * %st, and no other. */
     case 'U':
