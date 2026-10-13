@@ -86,6 +86,11 @@ typedef struct {
     int force_disp32;
     int32_t disp;
     int disp_only;
+    /* The displacement is a symbol's place in the global offset table,
+     * `sym@GOT`: the relocation that asks for is of a ModRM's
+     * displacement, and the form of an instruction that has none is
+     * not for it. */
+    int disp_has_op;
     /*
      * With disp_only, in 32-bit code: the address is ModRM mod=00 rm=101
      * and four bytes.  64-bit code gives that form to %rip-relative

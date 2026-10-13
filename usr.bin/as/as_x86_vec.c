@@ -308,6 +308,18 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return (cls == AS_X86_REGCLASS_GENERAL && (op->size_bits == 32 || op->size_bits == 64)) || plain_mem;
     case 'm':
         return plain_mem;
+    /* Memory at an address that is a number alone, no register in
+     * it: what the accumulator is moved to and from by a form of its
+     * own in 16- and 32-bit code, with the address after the opcode. */
+    case 'O':
+        return plain_mem && !op->u.mem.has_base && !op->u.mem.has_index && !op->u.mem.rip_relative;
+    /* And such an address to be loaded from, which is not a symbol's
+     * place in the global offset table: that load keeps its ModRM,
+     * for the linker to make another instruction of (a store there is
+     * the short form like any other). */
+    case 'P':
+        return plain_mem && !op->u.mem.has_base && !op->u.mem.has_index && !op->u.mem.rip_relative &&
+               !op->u.mem.disp_has_op;
     case '1':
         return mem && op->u.mem.index_class == AS_X86_REGCLASS_XMM;
     case '2':
@@ -746,6 +758,25 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             }
             if (put8(ctx, t->opcode + (preg & 7u)) != 0 || (t->disp8_n != 0 && put8(ctx, t->disp8_n) != 0)) {
                 return -1;
+            }
+        }
+        /* An address after the opcode (role `o`): of the code's own
+         * size, two bytes in 16-bit code and four in 32-bit.  A symbol
+         * in it is room for the linker. */
+        {
+            const as_x86_operand_t *at = (t->flags & AS_VEC_F_BASE) != 0 ? role_op(t, rq, 'o') : NULL;
+
+            if (at != NULL) {
+                uint32_t where = at->u.mem.has_disp ? (uint32_t)at->u.mem.disp : 0u;
+
+                if (rq->mode == 64u || (at->u.mem.addr_bits != 0 && at->u.mem.addr_bits != rq->mode)) {
+                    vec_err(ctx, "'%s': an address of another size than the code's", t->name);
+                    return -1;
+                }
+                if (rq->mode == 16u ? (put8(ctx, where & 0xffu) != 0 || put8(ctx, (where >> 8) & 0xffu) != 0)
+                                    : put32(ctx, where) != 0) {
+                    return -1;
+                }
             }
         }
         /* And a number after that, if the row has one (`xabort $1`):

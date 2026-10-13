@@ -9558,6 +9558,22 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
             ops[i].u.mem.addr_bits = 16u;
         }
     }
+    /* (An address whose symbol has an operator on it says so: see
+     * disp_has_op.) */
+    for (i = 0; i < n; ++i) {
+        const as_operand_t *src = &insn->operands[intel ? n - 1 - i : i];
+        const as_expr_t *disp = src->kind == AS_OPERAND_MEMORY      ? src->u.mem.disp
+                                : src->kind == AS_OPERAND_LABEL_REF ? src->u.expr
+                                                                    : NULL;
+
+        /* (Of the operators it is @GOT that wants a ModRM: the linker
+         * may make the load another instruction.  `mov sym@ntpoff,
+         * %eax` is the short form like any other.) */
+        if (ops[i].kind == AS_X86_OP_MEM && disp != NULL && as_expr_reloc_op(disp) != NULL &&
+            strcasecmp(as_expr_reloc_op(disp), "GOT") == 0) {
+            ops[i].u.mem.disp_has_op = 1;
+        }
+    }
     memset(&rq, 0, sizeof(rq));
     rq.mnemonic = mn;
     rq.ops = ops;
