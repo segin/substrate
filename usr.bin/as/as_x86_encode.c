@@ -308,15 +308,6 @@ static int emit_x87_no_operand(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
  */
 static const as_x86_operand_t no_operand;
 
-
-static int operand_fpu_index(const as_x86_operand_t *op, unsigned *out) {
-    if (op == NULL || out == NULL || op->kind != AS_X86_OP_FPU || op->u.fpu > 7u) {
-        return -1;
-    }
-    *out = op->u.fpu;
-    return 0;
-}
-
 static int operand_is_xmm_reg(const as_x86_operand_t *op) {
     return op != NULL && op->kind == AS_X86_OP_REG && op->size_bits == 128 && op->u.reg <= AS_X86_REG_R15;
 }
@@ -536,74 +527,6 @@ static int keylocker_wide_ext(const char *mn) {
     if (streq_ci(mn, "aesencwide256kl")) return 2;
     if (streq_ci(mn, "aesdecwide256kl")) return 3;
     return -1;
-}
-
-/*
- * The operand-size prefix of an instruction whose name says its size --
- * cbtw and cwtl are one opcode, as are cwtd and cltd, pushaw and
- * pushal: 66 where the size named is not the mode's own.  Without it
- * the name was ignored, and `cbtw` extended %ax into %eax where it is
- * to extend %al into %ax.
- */
-static int emit_named_opsize(enc_ctx_t *ctx, const as_x86_insn_t *insn, unsigned bits) {
-    unsigned mode_bits = insn->default_bits == 16u ? 16u : 32u;
-
-    return bits != mode_bits ? emit8(ctx, 0x66) : 0;
-}
-
-/*
- * Whether nop has the one operand of the long NOP, 0F 1F /0: memory, or
- * a register of 16 bits or more.  There is none of a byte.
- */
-static int nop_has_long_operand(const as_x86_insn_t *insn) {
-    const as_x86_operand_t *a = &insn->ops[0];
-    int bits;
-
-    if (insn->op_count != 1 || insn->byte_op) {
-        return 0;
-    }
-    if (a->kind == AS_X86_OP_MEM) {
-        return 1;
-    }
-    bits = operand_bits(a);
-    return a->kind == AS_X86_OP_REG && (bits == 16 || bits == 32 || bits == 64);
-}
-
-/*
- * The width of crc32's source, or 0 where the operands are not crc32's.
- * It accumulates into a 32-bit register from a source of 8, 16 or 32
- * bits, or into a 64-bit one from 8 or 64.  The source's width is its
- * register's, or the one a suffix or `byte ptr` gave its memory; with
- * neither it is the destination's.
- */
-static int crc32_source_bits(const as_x86_insn_t *insn, int is_64) {
-    const as_x86_operand_t *dst = &insn->ops[0];
-    const as_x86_operand_t *src = &insn->ops[1];
-    int dbits;
-    int sbits;
-
-    if (insn->op_count != 2 || dst->kind != AS_X86_OP_REG ||
-        (src->kind != AS_X86_OP_REG && src->kind != AS_X86_OP_MEM)) {
-        return 0;
-    }
-    dbits = operand_bits(dst);
-    if (dbits != 32 && !(dbits == 64 && is_64)) {
-        return 0;
-    }
-    sbits = operand_bits(src);
-    if (sbits == 0 && src->kind == AS_X86_OP_MEM) {
-        sbits = dbits;
-    }
-    if (sbits == 8) {
-        return 8;
-    }
-    if (sbits == 64) {
-        return dbits == 64 ? 64 : 0;
-    }
-    if (sbits == 16 || sbits == 32) {
-        return dbits == 32 ? sbits : 0;
-    }
-    return 0;
 }
 
 /* The instructions of VMX that take no operand: 0F 01 and this byte; 0
@@ -1623,10 +1546,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form_named(&ctx, "call");
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "leave")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xc9) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "enter")) {
         if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
             /* The frame's size is sixteen bits and the nesting level
@@ -2234,323 +2153,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         rex_b |= reg_ext(a->u.reg);
         if (emit8(&ctx, (uint8_t)(0xb8u | reg_low3(a->u.reg))) != 0 || emit64(&ctx, (uint64_t)b->u.imm) != 0) {
             return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fadd") || streq_ci(insn->mnemonic, "fmul") ||
-               streq_ci(insn->mnemonic, "fcom") || streq_ci(insn->mnemonic, "fcomp") ||
-               streq_ci(insn->mnemonic, "fsub") || streq_ci(insn->mnemonic, "fsubr") ||
-               streq_ci(insn->mnemonic, "fdiv") || streq_ci(insn->mnemonic, "fdivr")) {
-        unsigned stsrc;
-        unsigned stdst;
-        uint8_t base;
-
-        if (insn->op_count == 1 && a != NULL) {
-            if (a->kind == AS_X86_OP_MEM) {
-                uint8_t ext;
-
-                if (streq_ci(insn->mnemonic, "fadd")) ext = 0;
-                else if (streq_ci(insn->mnemonic, "fmul")) ext = 1;
-                else if (streq_ci(insn->mnemonic, "fcom")) ext = 2;
-                else if (streq_ci(insn->mnemonic, "fcomp")) ext = 3;
-                else if (streq_ci(insn->mnemonic, "fsub")) ext = 4;
-                else if (streq_ci(insn->mnemonic, "fsubr")) ext = 5;
-                else if (streq_ci(insn->mnemonic, "fdiv")) ext = 6;
-                else ext = 7;
-                if (emit8(&ctx, 0xd8) != 0 ||
-                    modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-                    return -1;
-                }
-            } else if (operand_fpu_index(a, &stsrc) == 0) {
-                if (streq_ci(insn->mnemonic, "fcom")) {
-                    if (emit8(&ctx, 0xd8) != 0 || emit8(&ctx, (uint8_t)(0xd0u + stsrc)) != 0) {
-                        return -1;
-                    }
-                } else if (streq_ci(insn->mnemonic, "fcomp")) {
-                    if (emit8(&ctx, 0xd8) != 0 || emit8(&ctx, (uint8_t)(0xd8u + stsrc)) != 0) {
-                        return -1;
-                    }
-                } else {
-                    set_unsupported_form(&ctx, insn);
-                    return -1;
-                }
-            } else {
-                set_unsupported_form(&ctx, insn);
-                return -1;
-            }
-        } else if (insn->op_count == 2 &&
-                   operand_fpu_index(a, &stsrc) == 0 &&
-                   operand_fpu_index(b, &stdst) == 0 &&
-                   stdst == 0) {
-            if (streq_ci(insn->mnemonic, "fadd")) base = 0xc0;
-            else if (streq_ci(insn->mnemonic, "fmul")) base = 0xc8;
-            else if (streq_ci(insn->mnemonic, "fcom")) base = 0xd0;
-            else if (streq_ci(insn->mnemonic, "fcomp")) base = 0xd8;
-            else if (streq_ci(insn->mnemonic, "fsub")) base = 0xe0;
-            else if (streq_ci(insn->mnemonic, "fsubr")) base = 0xe8;
-            else if (streq_ci(insn->mnemonic, "fdiv")) base = 0xf0;
-            else base = 0xf8;
-            if (emit8(&ctx, 0xd8) != 0 || emit8(&ctx, (uint8_t)(base + stsrc)) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fadds") || streq_ci(insn->mnemonic, "fmuls") ||
-               streq_ci(insn->mnemonic, "fcoms") || streq_ci(insn->mnemonic, "fcomps") ||
-               streq_ci(insn->mnemonic, "fsubs") || streq_ci(insn->mnemonic, "fsubrs") ||
-               streq_ci(insn->mnemonic, "fdivs") || streq_ci(insn->mnemonic, "fdivrs")) {
-        uint8_t ext;
-
-        if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "fadds")) ext = 0;
-        else if (streq_ci(insn->mnemonic, "fmuls")) ext = 1;
-        else if (streq_ci(insn->mnemonic, "fcoms")) ext = 2;
-        else if (streq_ci(insn->mnemonic, "fcomps")) ext = 3;
-        else if (streq_ci(insn->mnemonic, "fsubs")) ext = 4;
-        else if (streq_ci(insn->mnemonic, "fsubrs")) ext = 5;
-        else if (streq_ci(insn->mnemonic, "fdivs")) ext = 6;
-        else ext = 7;
-        if (emit8(&ctx, 0xd8) != 0 ||
-            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fld")) {
-        unsigned stidx;
-
-        if (insn->op_count != 1 || a == NULL) {
-            set_unsupported_form_named(&ctx, "fld");
-            return -1;
-        }
-        if (operand_fpu_index(a, &stidx) == 0) {
-            if (emit8(&ctx, 0xd9) != 0 || emit8(&ctx, (uint8_t)(0xc0u + stidx)) != 0) {
-                return -1;
-            }
-        } else if (a->kind == AS_X86_OP_MEM) {
-            if (emit8(&ctx, 0xd9) != 0 ||
-                modrm_sib_disp64(&ctx, (as_x86_reg_t)0, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "fld");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "flds") || streq_ci(insn->mnemonic, "fsts") ||
-               streq_ci(insn->mnemonic, "fstps") || streq_ci(insn->mnemonic, "fldenv") ||
-               streq_ci(insn->mnemonic, "fldcw") || streq_ci(insn->mnemonic, "fnstenv") ||
-               streq_ci(insn->mnemonic, "fnstcw")) {
-        uint8_t ext;
-
-        if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "flds")) ext = 0;
-        else if (streq_ci(insn->mnemonic, "fsts")) ext = 2;
-        else if (streq_ci(insn->mnemonic, "fstps")) ext = 3;
-        else if (streq_ci(insn->mnemonic, "fldenv")) ext = 4;
-        else if (streq_ci(insn->mnemonic, "fldcw")) ext = 5;
-        else if (streq_ci(insn->mnemonic, "fnstenv")) ext = 6;
-        else ext = 7;
-        if (emit8(&ctx, 0xd9) != 0 ||
-            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fxch")) {
-        unsigned stidx;
-
-        if (insn->op_count != 1 || a == NULL || operand_fpu_index(a, &stidx) != 0) {
-            set_unsupported_form_named(&ctx, "fxch");
-            return -1;
-        }
-        if (emit8(&ctx, 0xd9) != 0 || emit8(&ctx, (uint8_t)(0xc8u + stidx)) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fnop")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xd9) != 0 || emit8(&ctx, 0xd0) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fchs")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xd9) != 0 || emit8(&ctx, 0xe0) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fld1")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xd9) != 0 || emit8(&ctx, 0xe8) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "f2xm1")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xd9) != 0 || emit8(&ctx, 0xf0) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fprem")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xd9) != 0 || emit8(&ctx, 0xf8) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fucompp")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xda) != 0 || emit8(&ctx, 0xe9) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fcmovb") || streq_ci(insn->mnemonic, "fcmove") ||
-               streq_ci(insn->mnemonic, "fcmovbe") || streq_ci(insn->mnemonic, "fcmovu") ||
-               streq_ci(insn->mnemonic, "fcmovnb") || streq_ci(insn->mnemonic, "fcmovne") ||
-               streq_ci(insn->mnemonic, "fcmovnbe") || streq_ci(insn->mnemonic, "fcmovnu") ||
-               streq_ci(insn->mnemonic, "fucomi") || streq_ci(insn->mnemonic, "fcomi") ||
-               streq_ci(insn->mnemonic, "fucomip") || streq_ci(insn->mnemonic, "fcomip") ||
-               streq_ci(insn->mnemonic, "faddp") || streq_ci(insn->mnemonic, "fmulp") ||
-               streq_ci(insn->mnemonic, "fsubp") || streq_ci(insn->mnemonic, "fsubrp") ||
-               streq_ci(insn->mnemonic, "fdivp") || streq_ci(insn->mnemonic, "fdivrp") ||
-               streq_ci(insn->mnemonic, "ffree") || streq_ci(insn->mnemonic, "fst") ||
-               streq_ci(insn->mnemonic, "fstp") || streq_ci(insn->mnemonic, "fucom") ||
-               streq_ci(insn->mnemonic, "fucomp") || streq_ci(insn->mnemonic, "ffreep")) {
-        unsigned stsrc;
-        uint8_t op0;
-        uint8_t base;
-
-        if (insn->op_count != 1 && insn->op_count != 2) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (insn->op_count == 1) {
-            if (operand_fpu_index(a, &stsrc) != 0) {
-                set_unsupported_form(&ctx, insn);
-                return -1;
-            }
-        } else {
-            unsigned stdst;
-
-            if (operand_fpu_index(a, &stsrc) != 0 || operand_fpu_index(b, &stdst) != 0 || stdst != 0) {
-                set_unsupported_form(&ctx, insn);
-                return -1;
-            }
-        }
-
-        if (streq_ci(insn->mnemonic, "fcmovb")) { op0 = 0xda; base = 0xc0; }
-        else if (streq_ci(insn->mnemonic, "fcmove")) { op0 = 0xda; base = 0xc8; }
-        else if (streq_ci(insn->mnemonic, "fcmovbe")) { op0 = 0xda; base = 0xd0; }
-        else if (streq_ci(insn->mnemonic, "fcmovu")) { op0 = 0xda; base = 0xd8; }
-        else if (streq_ci(insn->mnemonic, "fcmovnb")) { op0 = 0xdb; base = 0xc0; }
-        else if (streq_ci(insn->mnemonic, "fcmovne")) { op0 = 0xdb; base = 0xc8; }
-        else if (streq_ci(insn->mnemonic, "fcmovnbe")) { op0 = 0xdb; base = 0xd0; }
-        else if (streq_ci(insn->mnemonic, "fcmovnu")) { op0 = 0xdb; base = 0xd8; }
-        else if (streq_ci(insn->mnemonic, "fucomi")) { op0 = 0xdb; base = 0xe8; }
-        else if (streq_ci(insn->mnemonic, "fcomi")) { op0 = 0xdb; base = 0xf0; }
-        else if (streq_ci(insn->mnemonic, "ffree")) { op0 = 0xdd; base = 0xc0; }
-        else if (streq_ci(insn->mnemonic, "fst")) { op0 = 0xdd; base = 0xd0; }
-        else if (streq_ci(insn->mnemonic, "fstp")) { op0 = 0xdd; base = 0xd8; }
-        else if (streq_ci(insn->mnemonic, "fucom")) { op0 = 0xdd; base = 0xe0; }
-        else if (streq_ci(insn->mnemonic, "fucomp")) { op0 = 0xdd; base = 0xe8; }
-        else if (streq_ci(insn->mnemonic, "faddp")) { op0 = 0xde; base = 0xc0; }
-        else if (streq_ci(insn->mnemonic, "fmulp")) { op0 = 0xde; base = 0xc8; }
-        else if (streq_ci(insn->mnemonic, "fsubp")) { op0 = 0xde; base = 0xe0; }
-        else if (streq_ci(insn->mnemonic, "fsubrp")) { op0 = 0xde; base = 0xe8; }
-        else if (streq_ci(insn->mnemonic, "fdivp")) { op0 = 0xde; base = 0xf0; }
-        else if (streq_ci(insn->mnemonic, "fdivrp")) { op0 = 0xde; base = 0xf8; }
-        else if (streq_ci(insn->mnemonic, "ffreep")) { op0 = 0xdf; base = 0xc0; }
-        else if (streq_ci(insn->mnemonic, "fucomip")) { op0 = 0xdf; base = 0xe8; }
-        else { op0 = 0xdf; base = 0xf0; }
-        if (emit8(&ctx, op0) != 0 || emit8(&ctx, (uint8_t)(base + stsrc)) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fiaddl") || streq_ci(insn->mnemonic, "fimull") ||
-               streq_ci(insn->mnemonic, "ficoml") || streq_ci(insn->mnemonic, "ficompl") ||
-               streq_ci(insn->mnemonic, "fisubl") || streq_ci(insn->mnemonic, "fisubrl") ||
-               streq_ci(insn->mnemonic, "fidivl") || streq_ci(insn->mnemonic, "fidivrl") ||
-               streq_ci(insn->mnemonic, "fiadds") || streq_ci(insn->mnemonic, "fimuls") ||
-               streq_ci(insn->mnemonic, "ficoms") || streq_ci(insn->mnemonic, "ficomps") ||
-               streq_ci(insn->mnemonic, "fisubs") || streq_ci(insn->mnemonic, "fisubrs") ||
-               streq_ci(insn->mnemonic, "fidivs") || streq_ci(insn->mnemonic, "fidivrs")) {
-        uint8_t op0;
-        uint8_t ext;
-
-        if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "fiaddl") || streq_ci(insn->mnemonic, "fiadds")) ext = 0;
-        else if (streq_ci(insn->mnemonic, "fimull") || streq_ci(insn->mnemonic, "fimuls")) ext = 1;
-        else if (streq_ci(insn->mnemonic, "ficoml") || streq_ci(insn->mnemonic, "ficoms")) ext = 2;
-        else if (streq_ci(insn->mnemonic, "ficompl") || streq_ci(insn->mnemonic, "ficomps")) ext = 3;
-        else if (streq_ci(insn->mnemonic, "fisubl") || streq_ci(insn->mnemonic, "fisubs")) ext = 4;
-        else if (streq_ci(insn->mnemonic, "fisubrl") || streq_ci(insn->mnemonic, "fisubrs")) ext = 5;
-        else if (streq_ci(insn->mnemonic, "fidivl") || streq_ci(insn->mnemonic, "fidivs")) ext = 6;
-        else ext = 7;
-        op0 = (strchr(insn->mnemonic, 'l') != NULL && strstr(insn->mnemonic, "ll") == NULL) ? 0xda : 0xde;
-        if (strchr(insn->mnemonic, 's') != NULL) {
-            op0 = 0xde;
-        }
-        if (emit8(&ctx, op0) != 0 ||
-            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fildl") || streq_ci(insn->mnemonic, "fistl") ||
-               streq_ci(insn->mnemonic, "fistpl") || streq_ci(insn->mnemonic, "fldt") ||
-               streq_ci(insn->mnemonic, "fstpt") || streq_ci(insn->mnemonic, "filds") ||
-               streq_ci(insn->mnemonic, "fists") || streq_ci(insn->mnemonic, "fistps") ||
-               streq_ci(insn->mnemonic, "fbld") || streq_ci(insn->mnemonic, "fildll") ||
-               streq_ci(insn->mnemonic, "fbstp") || streq_ci(insn->mnemonic, "fistpll")) {
-        uint8_t op0;
-        uint8_t ext;
-
-        if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "fildl")) { op0 = 0xdb; ext = 0; }
-        else if (streq_ci(insn->mnemonic, "fistl")) { op0 = 0xdb; ext = 2; }
-        else if (streq_ci(insn->mnemonic, "fistpl")) { op0 = 0xdb; ext = 3; }
-        else if (streq_ci(insn->mnemonic, "fldt")) { op0 = 0xdb; ext = 5; }
-        else if (streq_ci(insn->mnemonic, "fstpt")) { op0 = 0xdb; ext = 7; }
-        else if (streq_ci(insn->mnemonic, "filds")) { op0 = 0xdf; ext = 0; }
-        else if (streq_ci(insn->mnemonic, "fists")) { op0 = 0xdf; ext = 2; }
-        else if (streq_ci(insn->mnemonic, "fistps")) { op0 = 0xdf; ext = 3; }
-        else if (streq_ci(insn->mnemonic, "fbld")) { op0 = 0xdf; ext = 4; }
-        else if (streq_ci(insn->mnemonic, "fildll")) { op0 = 0xdf; ext = 5; }
-        else if (streq_ci(insn->mnemonic, "fbstp")) { op0 = 0xdf; ext = 6; }
-        else { op0 = 0xdf; ext = 7; }
-        if (emit8(&ctx, op0) != 0 ||
-            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "faddl") || streq_ci(insn->mnemonic, "fmull") ||
-               streq_ci(insn->mnemonic, "fcoml") || streq_ci(insn->mnemonic, "fcompl") ||
-               streq_ci(insn->mnemonic, "fsubl") || streq_ci(insn->mnemonic, "fsubrl") ||
-               streq_ci(insn->mnemonic, "fdivl") || streq_ci(insn->mnemonic, "fdivrl") ||
-               streq_ci(insn->mnemonic, "fldl") || streq_ci(insn->mnemonic, "fstl") ||
-               streq_ci(insn->mnemonic, "fstpl") || streq_ci(insn->mnemonic, "frstor") ||
-               streq_ci(insn->mnemonic, "fnsave") || streq_ci(insn->mnemonic, "fnstsw")) {
-        uint8_t op0;
-        uint8_t ext;
-
-        if (streq_ci(insn->mnemonic, "fnstsw") && insn->op_count == 1 &&
-            a != NULL && a->kind == AS_X86_OP_REG && reg_is_exact_low3(a, AS_X86_REG_RAX)) {
-            if (emit8(&ctx, 0xdf) != 0 || emit8(&ctx, 0xe0) != 0) {
-                return -1;
-            }
-        } else {
-            if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_MEM) {
-                set_unsupported_form(&ctx, insn);
-                return -1;
-            }
-            if (streq_ci(insn->mnemonic, "faddl")) { op0 = 0xdc; ext = 0; }
-            else if (streq_ci(insn->mnemonic, "fmull")) { op0 = 0xdc; ext = 1; }
-            else if (streq_ci(insn->mnemonic, "fcoml")) { op0 = 0xdc; ext = 2; }
-            else if (streq_ci(insn->mnemonic, "fcompl")) { op0 = 0xdc; ext = 3; }
-            else if (streq_ci(insn->mnemonic, "fsubl")) { op0 = 0xdc; ext = 4; }
-            else if (streq_ci(insn->mnemonic, "fsubrl")) { op0 = 0xdc; ext = 5; }
-            else if (streq_ci(insn->mnemonic, "fdivl")) { op0 = 0xdc; ext = 6; }
-            else if (streq_ci(insn->mnemonic, "fdivrl")) { op0 = 0xdc; ext = 7; }
-            else if (streq_ci(insn->mnemonic, "fldl")) { op0 = 0xdd; ext = 0; }
-            else if (streq_ci(insn->mnemonic, "fstl")) { op0 = 0xdd; ext = 2; }
-            else if (streq_ci(insn->mnemonic, "fstpl")) { op0 = 0xdd; ext = 3; }
-            else if (streq_ci(insn->mnemonic, "frstor")) { op0 = 0xdd; ext = 4; }
-            else if (streq_ci(insn->mnemonic, "fnsave")) { op0 = 0xdd; ext = 6; }
-            else { op0 = 0xdd; ext = 7; }
-            if (emit8(&ctx, op0) != 0 ||
-                modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
         }
     } else if (streq_ci(insn->mnemonic, "mov")) {
         if (insn->byte_op) {
@@ -3421,72 +3023,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, (as_x86_reg_t)keylocker_wide_ext(insn->mnemonic), a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "crc32")) {
-        int sbits = crc32_source_bits(insn, 1);
-
-        if (sbits == 0) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        rex_w = operand_bits(a) == 64 ? 1 : 0;
-        if (sbits == 8 && b->kind == AS_X86_OP_REG && needs_rex_low8(b->u.reg)) {
-            force_rex = 1;
-        }
-        if ((sbits == 16 && emit8(&ctx, 0x66) != 0) || emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 ||
-            emit8(&ctx, 0x38) != 0 || emit8(&ctx, sbits == 8 ? 0xf0 : 0xf1) != 0 ||
-            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-        /* %ah and its like are the codes that mean %spl and its like
-         * once there is a REX. */
-        if (b->kind == AS_X86_OP_REG && is_high8_reg(b->u.reg) && (rex_w || rex_r || rex_x || rex_b || force_rex)) {
-            set_err(&ctx, "crc32: a high byte register cannot be encoded with REX");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "nop") && insn->op_count != 0) {
-        /* 0F 1F /0, the long NOP; 0F 18 /0, which this had, is
-         * prefetchnta. */
-        if (!nop_has_long_operand(insn)) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        rex_w = (insn->rex_w || (a->kind == AS_X86_OP_REG && operand_bits(a) == 64)) ? 1 : 0;
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x1f) != 0 ||
-            modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "prefetchnta") || streq_ci(insn->mnemonic, "prefetcht0") ||
-               streq_ci(insn->mnemonic, "prefetcht1") || streq_ci(insn->mnemonic, "prefetcht2")) {
-        uint8_t ext;
-
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "prefetchnta")) ext = 0;
-        else if (streq_ci(insn->mnemonic, "prefetcht0")) ext = 1;
-        else if (streq_ci(insn->mnemonic, "prefetcht1")) ext = 2;
-        else ext = 3;
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x18) != 0 ||
-            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "prefetchw") || streq_ci(insn->mnemonic, "prefetchwt1") ||
-               streq_ci(insn->mnemonic, "prefetch")) {
-        /* AMD/Intel 3DNow! prefetch family: opcode 0x0f 0x0d /reg.
-         * /0=prefetch, /1=prefetchw, /2=prefetchwt1. */
-        uint8_t ext;
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "prefetch")) ext = 0;
-        else if (streq_ci(insn->mnemonic, "prefetchw")) ext = 1;
-        else ext = 2;
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0d) != 0 ||
-            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "movs")) {
         int bits;
 
@@ -3886,80 +3422,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "sysenter")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x34) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "sysexit") || streq_ci(insn->mnemonic, "sysexitl") ||
-               streq_ci(insn->mnemonic, "sysexitq")) {
-        if (streq_ci(insn->mnemonic, "sysexitq")) {
-            rex_w = 1;
-        }
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x35) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "rdtsc")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x31) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "rdtscp")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
-            emit8(&ctx, 0xf9) != 0) {
-            return -1;
-        }
     } else if (vmx_no_operand_byte(insn->mnemonic) != 0) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
             emit8(&ctx, vmx_no_operand_byte(insn->mnemonic)) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "rdmsr")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x32) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "rdpmc")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x33) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cpuid")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xa2) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "endbr32") || streq_ci(insn->mnemonic, "endbr64")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 ||
-            emit8(&ctx, 0x1e) != 0 ||
-            emit8(&ctx, streq_ci(insn->mnemonic, "endbr32") ? 0xfb : 0xfa) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "rsm")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xaa) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fxsave") || streq_ci(insn->mnemonic, "fxsave64") ||
-               streq_ci(insn->mnemonic, "fxrstor") || streq_ci(insn->mnemonic, "fxrstor64") ||
-               streq_ci(insn->mnemonic, "ldmxcsr") || streq_ci(insn->mnemonic, "stmxcsr") ||
-               streq_ci(insn->mnemonic, "clflush")) {
-        as_x86_reg_t ext;
-
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "fxsave") || streq_ci(insn->mnemonic, "fxsave64")) {
-            ext = AS_X86_REG_RAX;
-            if (streq_ci(insn->mnemonic, "fxsave64")) {
-                rex_w = 1;
-            }
-        } else if (streq_ci(insn->mnemonic, "fxrstor") || streq_ci(insn->mnemonic, "fxrstor64")) {
-            ext = AS_X86_REG_RCX;
-            if (streq_ci(insn->mnemonic, "fxrstor64")) {
-                rex_w = 1;
-            }
-        }
-        else if (streq_ci(insn->mnemonic, "ldmxcsr")) ext = AS_X86_REG_RDX;
-        else if (streq_ci(insn->mnemonic, "stmxcsr")) ext = AS_X86_REG_RBX;
-        else ext = AS_X86_REG_RDI;
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 ||
-            modrm_sib_disp64(&ctx, ext, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "ud1")) {
@@ -3977,17 +3442,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             return -1;
         }
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xff) != 0 ||
-            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "lss") || streq_ci(insn->mnemonic, "lfs") || streq_ci(insn->mnemonic, "lgs")) {
-        uint8_t op2 = streq_ci(insn->mnemonic, "lss") ? 0xb2 : (streq_ci(insn->mnemonic, "lfs") ? 0xb4 : 0xb5);
-
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || b->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
@@ -4054,15 +3508,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc6) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
             emit8(&ctx, (uint8_t)c->u.imm) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cmpxchg8b")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
-            set_err(&ctx, "unsupported x86_64 cmpxchg8b form");
-            return -1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc7) != 0 ||
-            modrm_sib_disp64(&ctx, AS_X86_REG_RCX, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "psrlw") || streq_ci(insn->mnemonic, "psrld") ||
@@ -4285,10 +3730,6 @@ more_mnemonics:
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "leave")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xc9) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "enter")) {
         if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
             /* The frame's size is sixteen bits and the nesting level
@@ -4306,46 +3747,6 @@ more_mnemonics:
             set_unsupported_form_named(&ctx, "enter");
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "clc")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf8) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "stc")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf9) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cli")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xfa) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "sti")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xfb) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cld")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xfc) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "std")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xfd) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cmc")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf5) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "hlt")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf4) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "int3")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xcc) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "int1")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf1) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "int")) {
         if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM) {
             return -1;
@@ -4356,31 +3757,6 @@ more_mnemonics:
                 return -1;
             }
         } else if (emit8(&ctx, 0xcd) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "salc") || streq_ci(insn->mnemonic, "udb")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xd6) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "into")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xce) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "ret")) {
-        /* A near return is 64 bits wide here without REX.W, which `retq`
-         * would otherwise bring. */
-        rex_w = 0;
-        if (insn->op_count == 0) {
-            if (emit8(&ctx, 0xc3) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM &&
-                   a->u.imm >= -0x8000 && a->u.imm <= 0xffff) {
-            if (emit8(&ctx, 0xc2) != 0 || emit16(&ctx, (uint16_t)a->u.imm) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "ret");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
@@ -4415,48 +3791,6 @@ more_mnemonics:
         if (emit8(&ctx, opcode) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "lret") || streq_ci(insn->mnemonic, "retf") || streq_ci(insn->mnemonic, "lretw")) {
-        if (streq_ci(insn->mnemonic, "lretw") && emit8(&ctx, 0x66) != 0) {
-            return -1;
-        }
-        if (insn->op_count == 0) {
-            if (emit8(&ctx, 0xcb) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0xca) != 0 || emit16(&ctx, (uint16_t)a->u.imm) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "lretq")) {
-        rex_w = 1;
-        if (insn->op_count == 0) {
-            if (emit8(&ctx, 0xcb) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0xca) != 0 || emit16(&ctx, (uint16_t)a->u.imm) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "lretq");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "iret") || streq_ci(insn->mnemonic, "iretw")) {
-        if (streq_ci(insn->mnemonic, "iretw") && emit8(&ctx, 0x66) != 0) {
-            return -1;
-        }
-        if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "iretq")) {
-        rex_w = 1;
-        if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
         /* Bare, or with the table's address written out: the same byte. */
         if (insn->op_count > 1) {
@@ -4464,70 +3798,6 @@ more_mnemonics:
             return -1;
         }
         if (emit8(&ctx, 0xd7) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw") ||
-               streq_ci(insn->mnemonic, "cwtl") || streq_ci(insn->mnemonic, "cwde")) {
-        unsigned bits = (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw")) ? 16u : 32u;
-
-        if (insn->op_count != 0 || emit_named_opsize(&ctx, insn, bits) != 0 || emit8(&ctx, 0x98) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cltq") || streq_ci(insn->mnemonic, "cdqe")) {
-        rex_w = 1;
-        if (insn->op_count != 0 || emit8(&ctx, 0x98) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd") ||
-               streq_ci(insn->mnemonic, "cltd") || streq_ci(insn->mnemonic, "cdq")) {
-        unsigned bits = (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd")) ? 16u : 32u;
-
-        if (insn->op_count != 0 || emit_named_opsize(&ctx, insn, bits) != 0 || emit8(&ctx, 0x99) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cqto") || streq_ci(insn->mnemonic, "cqo")) {
-        rex_w = 1;
-        if (insn->op_count != 0 || emit8(&ctx, 0x99) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "fwait")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x9b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "pushf")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x9c) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "popf")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x9d) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "nop")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x90) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "pause")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x90) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "invd")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x08) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "wrmsr")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x30) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "mfence")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 || emit8(&ctx, 0xf0) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "lfence")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 || emit8(&ctx, 0xe8) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "sfence")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 || emit8(&ctx, 0xf8) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "emms")) {
@@ -4547,34 +3817,6 @@ more_mnemonics:
         if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc7) != 0 ||
             modrm_sib_disp64(&ctx, AS_X86_REG_RCX, a, &rex_r, &rex_x, &rex_b) != 0) {
             set_err(&ctx, "unsupported cmpxchg16b form");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "syscall")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x05) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "clts")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x06) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "clac") || streq_ci(insn->mnemonic, "stac")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
-            emit8(&ctx, streq_ci(insn->mnemonic, "clac") ? 0xca : 0xcb) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "sysret") || streq_ci(insn->mnemonic, "sysretl") || streq_ci(insn->mnemonic, "sysretq")) {
-        if (streq_ci(insn->mnemonic, "sysretq")) {
-            rex_w = 1;
-        }
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x07) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "wbinvd")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x09) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "swapgs")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xf8) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "rdfsbase") || streq_ci(insn->mnemonic, "rdgsbase") ||

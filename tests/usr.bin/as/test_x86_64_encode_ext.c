@@ -154,24 +154,9 @@ int main(void) {
         check_encode64(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "syscall";
-    {
-        const uint8_t exp[] = {0x0f, 0x05};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "sysret";
-    {
-        const uint8_t exp[] = {0x0f, 0x07};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "swapgs";
-    {
-        const uint8_t exp[] = {0x0f, 0x01, 0xf8};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
+    /* (syscall, sysret and swapgs were asked of this encoder here.  It
+     * has them no longer: the instructions of no operand are rows of the
+     * table, as_x86_vec_table_base.h, and the forms files hold them.) */
 
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "mov";
