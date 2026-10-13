@@ -2521,6 +2521,15 @@
     {"outsb", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x6e, W0, 0, "<C", "--", 0x00, 0, AS_VEC_F_BASE},
     {"outsw", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x6f, W0, 0, "<C", "--", 0x00, 0, AS_VEC_F_BASE | OP16},
     {"outsl", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x6f, W0, 0, "<C", "--", 0x00, 0, AS_VEC_F_BASE | OP32},
+    {"movs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa5, W0, 0, "<>", "--", 0x00, 0, AS_VEC_F_BASE},
+    {"cmps", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa7, W0, 0, "><", "--", 0x00, 0, AS_VEC_F_BASE},
+    {"stos", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xab, W0, 0, ">", "-", 0x00, 0, AS_VEC_F_BASE},
+    {"lods", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xad, W0, 0, "<", "-", 0x00, 0, AS_VEC_F_BASE},
+    {"scas", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xaf, W0, 0, ">", "-", 0x00, 0, AS_VEC_F_BASE},
+    {"ins", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x6d, W0, 0, "C>", "--", 0x00, 0, AS_VEC_F_BASE},
+    {"outs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x6f, W0, 0, "<C", "--", 0x00, 0, AS_VEC_F_BASE},
+    {"xlat", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xd7, W0, 0, "=", "-", 0x00, 0, AS_VEC_F_BASE},
+    {"xlatb", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xd7, W0, 0, "=", "-", 0x00, 0, AS_VEC_F_BASE},
     /* And the instructions with no operand: the opcode, and the byte
      * after it where there is one. */
     {"aaa", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x37, W0, 0, "", "", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | AS_VEC_F_X32},

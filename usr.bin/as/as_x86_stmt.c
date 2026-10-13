@@ -9863,10 +9863,13 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                      * predictor was once humoured, and before the
                      * no-operation of one byte, which it makes
                      * `pause`.) */
-                    (strncmp(mn, "bsf", 3) == 0 || strncmp(mn, "bsr", 3) == 0 || (strcmp(mn, "nop") == 0 && n == 0) ||
-                     strcmp(mn, "ret") == 0 || strcmp(mn, "retw") == 0 || strcmp(mn, "retl") == 0 ||
-                     strcmp(mn, "retq") == 0) &&
-                    as_x86_vec_base_is_whole(mn)) {
+                    /* (And before a string instruction, which is what
+                     * a repeat is for.) */
+                    ((is_string_instruction(mn) && general) ||
+                     ((strncmp(mn, "bsf", 3) == 0 || strncmp(mn, "bsr", 3) == 0 || (strcmp(mn, "nop") == 0 && n == 0) ||
+                       strcmp(mn, "ret") == 0 || strcmp(mn, "retw") == 0 || strcmp(mn, "retl") == 0 ||
+                       strcmp(mn, "retq") == 0) &&
+                      as_x86_vec_base_is_whole(mn)))) {
                     size_t at = 0;
 
                     if (none[i].flag == AS_PREFIX_REPE && (insn->prefixes & AS_PREFIX_REP) != 0) {

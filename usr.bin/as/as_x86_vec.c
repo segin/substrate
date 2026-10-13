@@ -498,6 +498,11 @@ static int operand_is(const as_x86_operand_t *op, char want) {
         return mem && op->u.mem.has_base && !op->u.mem.has_index && !op->u.mem.rip_relative &&
                (!op->u.mem.has_disp || (op->u.mem.disp == 0 && !op->u.mem.force_disp32)) &&
                (unsigned)op->u.mem.base == (want == '<' ? 6u : 7u);
+    /* And the table xlat looks in, written as memory through a
+     * register: whichever, for its size is all that is read of it. */
+    case '=':
+        return mem && op->u.mem.has_base && !op->u.mem.has_index && !op->u.mem.rip_relative &&
+               (!op->u.mem.has_disp || (op->u.mem.disp == 0 && !op->u.mem.force_disp32));
     default:
         return 0;
     }
@@ -906,12 +911,12 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
         /* (Or in the index registers of a string instruction, which
          * are of one size where both are written.) */
-        if (addr == NULL && (t->flags & AS_VEC_F_BASE) != 0 && strpbrk(t->ops, "<>") != NULL) {
+        if (addr == NULL && (t->flags & AS_VEC_F_BASE) != 0 && strpbrk(t->ops, "<>=") != NULL) {
             unsigned bits = 0;
             unsigned other = rq->mode == 64u ? 32u : rq->mode == 32u ? 16u : 32u;
 
             for (k = 0; k < rq->op_count; ++k) {
-                if (t->ops[k] == '<' || t->ops[k] == '>') {
+                if (t->ops[k] == '<' || t->ops[k] == '>' || t->ops[k] == '=') {
                     unsigned b = rq->ops[k].u.mem.addr_bits != 0 ? rq->ops[k].u.mem.addr_bits : rq->mode;
 
                     if (bits != 0 && bits != b) {
