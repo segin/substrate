@@ -2528,47 +2528,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form(&ctx, insn);
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "cmovo") || streq_ci(insn->mnemonic, "cmovno") ||
-               streq_ci(insn->mnemonic, "cmovb") || streq_ci(insn->mnemonic, "cmovae") ||
-               streq_ci(insn->mnemonic, "cmovc") || streq_ci(insn->mnemonic, "cmovnc") ||
-               streq_ci(insn->mnemonic, "cmovnae") || streq_ci(insn->mnemonic, "cmovnb") ||
-               streq_ci(insn->mnemonic, "cmove") || streq_ci(insn->mnemonic, "cmovne") ||
-               streq_ci(insn->mnemonic, "cmovz") || streq_ci(insn->mnemonic, "cmovnz") ||
-               streq_ci(insn->mnemonic, "cmovbe") || streq_ci(insn->mnemonic, "cmova") ||
-               streq_ci(insn->mnemonic, "cmovna") || streq_ci(insn->mnemonic, "cmovnbe") ||
-               streq_ci(insn->mnemonic, "cmovs") || streq_ci(insn->mnemonic, "cmovns") ||
-               streq_ci(insn->mnemonic, "cmovp") || streq_ci(insn->mnemonic, "cmovnp") ||
-               streq_ci(insn->mnemonic, "cmovpe") || streq_ci(insn->mnemonic, "cmovpo") ||
-               streq_ci(insn->mnemonic, "cmovl") || streq_ci(insn->mnemonic, "cmovge") ||
-               streq_ci(insn->mnemonic, "cmovnge") || streq_ci(insn->mnemonic, "cmovnl") ||
-               streq_ci(insn->mnemonic, "cmovle") || streq_ci(insn->mnemonic, "cmovg") ||
-               streq_ci(insn->mnemonic, "cmovng") || streq_ci(insn->mnemonic, "cmovnle")) {
-        uint8_t op2;
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || !is_reg_or_mem(b)) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "cmovo")) op2 = 0x40;
-        else if (streq_ci(insn->mnemonic, "cmovno")) op2 = 0x41;
-        else if (streq_ci(insn->mnemonic, "cmovb") || streq_ci(insn->mnemonic, "cmovc") ||
-                 streq_ci(insn->mnemonic, "cmovnae")) op2 = 0x42;
-        else if (streq_ci(insn->mnemonic, "cmovae") || streq_ci(insn->mnemonic, "cmovnc") ||
-                 streq_ci(insn->mnemonic, "cmovnb")) op2 = 0x43;
-        else if (streq_ci(insn->mnemonic, "cmove") || streq_ci(insn->mnemonic, "cmovz")) op2 = 0x44;
-        else if (streq_ci(insn->mnemonic, "cmovne") || streq_ci(insn->mnemonic, "cmovnz")) op2 = 0x45;
-        else if (streq_ci(insn->mnemonic, "cmovbe") || streq_ci(insn->mnemonic, "cmovna")) op2 = 0x46;
-        else if (streq_ci(insn->mnemonic, "cmova") || streq_ci(insn->mnemonic, "cmovnbe")) op2 = 0x47;
-        else if (streq_ci(insn->mnemonic, "cmovs")) op2 = 0x48;
-        else if (streq_ci(insn->mnemonic, "cmovns")) op2 = 0x49;
-        else if (streq_ci(insn->mnemonic, "cmovp") || streq_ci(insn->mnemonic, "cmovpe")) op2 = 0x4a;
-        else if (streq_ci(insn->mnemonic, "cmovnp") || streq_ci(insn->mnemonic, "cmovpo")) op2 = 0x4b;
-        else if (streq_ci(insn->mnemonic, "cmovl") || streq_ci(insn->mnemonic, "cmovnge")) op2 = 0x4c;
-        else if (streq_ci(insn->mnemonic, "cmovge") || streq_ci(insn->mnemonic, "cmovnl")) op2 = 0x4d;
-        else if (streq_ci(insn->mnemonic, "cmovle") || streq_ci(insn->mnemonic, "cmovng")) op2 = 0x4e;
-        else op2 = 0x4f;
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 || modrm_sib_disp(&ctx, a->u.reg, b) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "clts")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x06) != 0) {
             return -1;
@@ -6433,50 +6392,6 @@ more_mnemonics:
             return -1;
         }
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xf7) != 0 ||
-            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "cmovo") || streq_ci(insn->mnemonic, "cmovno") ||
-               streq_ci(insn->mnemonic, "cmovb") || streq_ci(insn->mnemonic, "cmovae") ||
-               streq_ci(insn->mnemonic, "cmovc") || streq_ci(insn->mnemonic, "cmovnc") ||
-               streq_ci(insn->mnemonic, "cmovnae") || streq_ci(insn->mnemonic, "cmovnb") ||
-               streq_ci(insn->mnemonic, "cmove") || streq_ci(insn->mnemonic, "cmovne") ||
-               streq_ci(insn->mnemonic, "cmovz") || streq_ci(insn->mnemonic, "cmovnz") ||
-               streq_ci(insn->mnemonic, "cmovbe") || streq_ci(insn->mnemonic, "cmova") ||
-               streq_ci(insn->mnemonic, "cmovna") || streq_ci(insn->mnemonic, "cmovnbe") ||
-               streq_ci(insn->mnemonic, "cmovs") || streq_ci(insn->mnemonic, "cmovns") ||
-               streq_ci(insn->mnemonic, "cmovp") || streq_ci(insn->mnemonic, "cmovnp") ||
-               streq_ci(insn->mnemonic, "cmovpe") || streq_ci(insn->mnemonic, "cmovpo") ||
-               streq_ci(insn->mnemonic, "cmovl") || streq_ci(insn->mnemonic, "cmovge") ||
-               streq_ci(insn->mnemonic, "cmovnge") || streq_ci(insn->mnemonic, "cmovnl") ||
-               streq_ci(insn->mnemonic, "cmovle") || streq_ci(insn->mnemonic, "cmovg") ||
-               streq_ci(insn->mnemonic, "cmovng") || streq_ci(insn->mnemonic, "cmovnle")) {
-        uint8_t op2;
-
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG ||
-            (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM)) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "cmovo")) op2 = 0x40;
-        else if (streq_ci(insn->mnemonic, "cmovno")) op2 = 0x41;
-        else if (streq_ci(insn->mnemonic, "cmovb") || streq_ci(insn->mnemonic, "cmovc") ||
-                 streq_ci(insn->mnemonic, "cmovnae")) op2 = 0x42;
-        else if (streq_ci(insn->mnemonic, "cmovae") || streq_ci(insn->mnemonic, "cmovnc") ||
-                 streq_ci(insn->mnemonic, "cmovnb")) op2 = 0x43;
-        else if (streq_ci(insn->mnemonic, "cmove") || streq_ci(insn->mnemonic, "cmovz")) op2 = 0x44;
-        else if (streq_ci(insn->mnemonic, "cmovne") || streq_ci(insn->mnemonic, "cmovnz")) op2 = 0x45;
-        else if (streq_ci(insn->mnemonic, "cmovbe") || streq_ci(insn->mnemonic, "cmovna")) op2 = 0x46;
-        else if (streq_ci(insn->mnemonic, "cmova") || streq_ci(insn->mnemonic, "cmovnbe")) op2 = 0x47;
-        else if (streq_ci(insn->mnemonic, "cmovs")) op2 = 0x48;
-        else if (streq_ci(insn->mnemonic, "cmovns")) op2 = 0x49;
-        else if (streq_ci(insn->mnemonic, "cmovp") || streq_ci(insn->mnemonic, "cmovpe")) op2 = 0x4a;
-        else if (streq_ci(insn->mnemonic, "cmovnp") || streq_ci(insn->mnemonic, "cmovpo")) op2 = 0x4b;
-        else if (streq_ci(insn->mnemonic, "cmovl") || streq_ci(insn->mnemonic, "cmovnge")) op2 = 0x4c;
-        else if (streq_ci(insn->mnemonic, "cmovge") || streq_ci(insn->mnemonic, "cmovnl")) op2 = 0x4d;
-        else if (streq_ci(insn->mnemonic, "cmovle") || streq_ci(insn->mnemonic, "cmovng")) op2 = 0x4e;
-        else op2 = 0x4f;
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }

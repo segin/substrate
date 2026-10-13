@@ -1103,6 +1103,9 @@ const as_x86_vec_tmpl_t as_x86_vec_table[] = {
      * three counts that are written like them.
      */
 #define LX(n, pp, map, op, w, ops, roles, fl) {n, AS_VEC_LEGACY, pp, map, op, w, 0, ops, roles, 0, 0, fl}
+/* The same, of a name whose rows are all its forms (AS_VEC_LEGACY_WHOLE). */
+#define LW(n, pp, map, op, w, ops, roles, fl) \
+    {n, AS_VEC_LEGACY, pp, map, op, w, 0, ops, roles, 0, AS_VEC_LEGACY_WHOLE, fl}
 /* An instruction with no operand in ModRM: `b` the byte after the
  * opcode, 0 for none. */
 #define LFIX(n, op, b, ops, roles) {n, AS_VEC_LEGACY, P0, M1, op, W0, 0, ops, roles, b, 0, 0}

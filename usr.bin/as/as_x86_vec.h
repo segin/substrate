@@ -51,6 +51,11 @@ enum { AS_VEC_L128 = 0, AS_VEC_L256 = 1, AS_VEC_L512 = 2, AS_VEC_LIG = 3 };
 /* (A row with no VEX has no vector length, and its `len` says one
  * thing instead: that the number after the opcode is of eight bytes.) */
 #define AS_VEC_LEGACY_IMM64 1
+/* (Nor has it a broadcast, and its `bcst` says another: that the rows
+ * of AS_VEC_F_BASE of its name are all the forms the name has, so that
+ * what none of them is of is no instruction, and is not looked for in
+ * the encoders the rows came from.) */
+#define AS_VEC_LEGACY_WHOLE 1
 
 /*
  * What a row allows besides its operands.  The low three bits are the
@@ -202,6 +207,10 @@ int as_x86_vec_has_apx(const char *mnemonic, size_t op_count, int asked, int hig
 
 /* Has the name a row of AS_VEC_F_BASE with this many operands? */
 int as_x86_vec_has_base(const char *mnemonic, size_t op_count);
+
+/* Are the name's rows of AS_VEC_F_BASE all the forms it has
+ * (AS_VEC_LEGACY_WHOLE)? */
+int as_x86_vec_base_is_whole(const char *mnemonic);
 
 /* Whether the table has any row of the name (in lower case), APX's or
  * not: it is the name of something. */

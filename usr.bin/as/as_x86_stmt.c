@@ -9425,6 +9425,14 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
                 snprintf(encerr, encerr_sz, "'%s' has no form that writes no flags with these operands", mn);
                 return -1;
             }
+            /* (A name whose every form is a row is assembled nowhere
+             * else: what no row is of is no instruction.) */
+            if (as_x86_vec_base_is_whole(mn)) {
+                if (encerr[0] == '\0') {
+                    snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+                }
+                return -1;
+            }
             encerr[0] = '\0';
             *code_len = 0;
             return 0;

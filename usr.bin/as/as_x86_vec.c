@@ -266,6 +266,22 @@ int as_x86_vec_has_base(const char *mnemonic, size_t op_count) {
     return 0;
 }
 
+int as_x86_vec_base_is_whole(const char *mnemonic) {
+    size_t i;
+
+    if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
+        return 0;
+    }
+    for (; i < as_x86_vec_table_count; i = next_row[i]) {
+        const as_x86_vec_tmpl_t *t = &as_x86_vec_table[i];
+
+        if (t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 && t->bcst == AS_VEC_LEGACY_WHOLE) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int is_vector_class(unsigned cls) {
     return cls == AS_X86_REGCLASS_XMM || cls == AS_X86_REGCLASS_YMM || cls == AS_X86_REGCLASS_ZMM;
 }
