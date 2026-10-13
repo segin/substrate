@@ -1436,6 +1436,18 @@ static int write_substituted_line(as_text_t *out, const char *line, const char *
     }
     memset(&scan, 0, sizeof(scan));
     vlen = strlen(var);
+    /* A line with nothing to put in it and no `;` in it is itself.
+     * (Every line of every source came through here a character at a
+     * time, to find the `;` most have none of.) */
+    if (vlen == 0 && strchr(line, ';') == NULL) {
+        size_t len = strlen(line);
+
+        text_puts(line, out);
+        if (len == 0 || line[len - 1] != '\n') {
+            text_putc('\n', out);
+        }
+        return out->failed ? -1 : 0;
+    }
     for (p = line; *p != '\0'; ++p) {
         size_t more;
         int kind = comment ? AS_SCAN_COMMENT_TO_EOL : as_scan_step(&scan, line, (size_t)(p - line), &more);
