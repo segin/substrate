@@ -350,6 +350,12 @@ static int operand_is(const as_x86_operand_t *op, char want) {
     /* A general register of 8 bits, any of them -- %ah to %bh, which
      * are written with no REX prefix, and %spl to %dil, which are
      * written with one (emit_row_bytes()); and one that is not %al. */
+    /* A register of the x87's stack, %st(0) to %st(7); and its top,
+     * %st, and no other. */
+    case 'U':
+        return op->kind == AS_X86_OP_FPU;
+    case 'I':
+        return op->kind == AS_X86_OP_FPU && op->u.fpu == 0;
     case 'H':
         return cls == AS_X86_REGCLASS_GENERAL && op->size_bits == 8;
     case 'v':
@@ -621,11 +627,20 @@ static int emit_row_bytes(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x
     as_x86_vec_req_t as = *rq;
     size_t i;
 
-    if (strpbrk(t->ops, "Hv") == NULL || rq->op_count > sizeof(ops) / sizeof(ops[0])) {
+    if (strpbrk(t->ops, "HvUI") == NULL || rq->op_count > sizeof(ops) / sizeof(ops[0])) {
         return emit_row(ctx, t, rq);
     }
     for (i = 0; i < rq->op_count; ++i) {
         ops[i] = rq->ops[i];
+        /* (A register of the x87's stack is a register in r/m by its
+         * place in the stack: `fadd %st(3), %st` is D8 C3.) */
+        if ((t->ops[i] == 'U' || t->ops[i] == 'I') && ops[i].kind == AS_X86_OP_FPU) {
+            unsigned place = (unsigned)ops[i].u.fpu;
+
+            ops[i].kind = AS_X86_OP_REG;
+            ops[i].u.reg = (as_x86_reg_t)place;
+            continue;
+        }
         if ((t->ops[i] != 'H' && t->ops[i] != 'v') || ops[i].kind != AS_X86_OP_REG) {
             continue;
         }

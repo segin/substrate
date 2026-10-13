@@ -122,6 +122,9 @@ typedef struct {
      *   H v     a general register of 8 bits, any of them; one that
      *           is not %al
      *   V F G J %al, %ax, %eax, %rax and no other
+     *   U I     a register of the x87's stack; its top, %st, alone
+     *   O P     memory at an address that is a number alone; and one
+     *           that is not a symbol's place in the global offset table
      *   n N     an MMX register; that, or memory
      *   t       a tile register, %tmm0 to %tmm7
      *   B       a bound register, %bnd0 to %bnd3
