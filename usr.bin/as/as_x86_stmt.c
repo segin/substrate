@@ -9362,6 +9362,24 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
     }
     mn[i] = '\0';
+    /* (Five of the coprocessor's control wait for it first: the wait,
+     * and the instruction of the name that does not.) */
+    if (n == 0 && code_cap >= 3 && i + 2 < sizeof(mn) &&
+        (as_strcmp(mn, "fclex") == 0 || as_strcmp(mn, "finit") == 0 || as_strcmp(mn, "fdisi") == 0 ||
+         as_strcmp(mn, "feni") == 0 || as_strcmp(mn, "fsetpm") == 0)) {
+        as_instruction_t unwaited = *insn;
+        char fn[sizeof(mn) + 2];
+        int rc;
+
+        snprintf(fn, sizeof(fn), "fn%s", mn + 1);
+        unwaited.mnemonic = fn;
+        rc = encode_x86_vec(cfg, &unwaited, code + 1, code_cap - 1, code_len, encerr, encerr_sz);
+        if (rc > 0) {
+            code[0] = 0x9b;
+            (*code_len)++;
+        }
+        return rc;
+    }
     /* (`{evex} cmp` and `{evex} test` are APX's conditional ones with
      * the condition that always holds: `ccmpt`, `ctestt`.) */
     if (cfg->is_64 && (insn->pseudo & AS_PSEUDO_EVEX) != 0 && i + 3 < sizeof(mn)) {

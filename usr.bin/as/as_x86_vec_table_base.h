@@ -2392,6 +2392,13 @@
     LW("wrfsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(2)),
     LW("wrgsbase", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | O64 | DG(3)),
     LW("wrgsbase", PF3, M1, 0xae, W1, "q", "m", AS_VEC_F_BASE | O64 | DG(3)),
+    LW("arpl", P0, AS_VEC_MAP_ONE, 0x63, W0, "ww", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("arpl", P0, AS_VEC_MAP_ONE, 0x63, W0, "wm", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("arplw", P0, AS_VEC_MAP_ONE, 0x63, W0, "ww", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("arplw", P0, AS_VEC_MAP_ONE, 0x63, W0, "wm", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("arpl", P0, AS_VEC_MAP_ONE, 0x63, W0, "dd", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("arpl", P0, AS_VEC_MAP_ONE, 0x63, W0, "dm", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("arplw", P0, AS_VEC_MAP_ONE, 0x63, W0, "dm", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
     /* movq of general, segment, control and debug registers: mov, of 64 bits. */
     LW("movq", P0, AS_VEC_MAP_ONE, 0x89, W1, "qq", "rm", AS_VEC_F_BASE | O64),
     LW("movq", P0, AS_VEC_MAP_ONE, 0x8b, W1, "mq", "mr", AS_VEC_F_BASE | O64),
