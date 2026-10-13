@@ -18,14 +18,6 @@ static as_x86_operand_t reg_op(as_x86_reg_t r) {
     return op;
 }
 
-static as_x86_operand_t rel_op(int32_t v) {
-    as_x86_operand_t op;
-    memset(&op, 0, sizeof(op));
-    op.kind = AS_X86_OP_REL;
-    op.u.rel = v;
-    return op;
-}
-
 static as_x86_operand_t mem_base(as_x86_reg_t b) {
     as_x86_operand_t op;
     memset(&op, 0, sizeof(op));
@@ -180,45 +172,8 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "jmp";
-    insn.op_count = 1;
-    insn.ops[0] = rel_op(0x10);
-    {
-        const uint8_t exp[] = {0xe9, 0x10, 0x00, 0x00, 0x00};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    /* (jz was asked of this encoder here; the conditional jumps are
-     * rows of the table now.) */
-
-    insn.mnemonic = "call";
-    insn.ops[0] = rel_op(0x20);
-    {
-        const uint8_t exp[] = {0xe8, 0x20, 0x00, 0x00, 0x00};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "jmp";
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    {
-        const uint8_t exp[] = {0xff, 0xe0};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "call";
-    insn.ops[0] = reg_op(AS_X86_REG_EAX);
-    {
-        const uint8_t exp[] = {0xff, 0xd0};
-        check_encode(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "call";
-    insn.ops[0] = mem_disp32(0x12345678);
-    {
-        const uint8_t exp[] = {0xff, 0x15, 0x78, 0x56, 0x34, 0x12};
-        check_encode(&insn, exp, sizeof(exp));
-    }
+    /* (jmp, jz and call were asked of this encoder here; every jump and
+     * call is a row of the table now.) */
 
     /* (Nor push and pop, in and out, ret, or the instructions of no
      * operand -- clc, pushf, nop, hlt.) */

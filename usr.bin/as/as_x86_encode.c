@@ -378,22 +378,6 @@ static int is_disp8(int32_t v) {
 }
 
 
-static unsigned effective_i386_operand_bits(const as_x86_insn_t *insn) {
-    unsigned defbits;
-
-    if (insn == NULL) {
-        return 32;
-    }
-    if (insn->byte_op) {
-        return 8;
-    }
-    defbits = insn->default_bits == 16u ? 16u : 32u;
-    if (insn->operand_size_override) {
-        return defbits == 16u ? 32u : 16u;
-    }
-    return defbits;
-}
-
 static unsigned effective_i386_addr_bits(const as_x86_insn_t *insn) {
     unsigned defbits;
     size_t i;
@@ -409,19 +393,6 @@ static unsigned effective_i386_addr_bits(const as_x86_insn_t *insn) {
         }
     }
     return defbits;
-}
-
-static int emit_i386_imm_or_rel(enc_ctx_t *ctx, uint32_t v, unsigned bits) {
-    /* Eight bits are eight bits: asked for one byte this wrote four, and
-     * `movb $0, %al` in 64-bit code was followed by three bytes of zeros
-     * that the processor then ran. */
-    if (bits == 8u) {
-        return emit8(ctx, (uint8_t)v);
-    }
-    if (bits == 16u) {
-        return emit16(ctx, (uint16_t)v);
-    }
-    return emit32(ctx, v);
 }
 
 static int resolve_rel_target(const enc_ctx_t *ctx, int32_t target, unsigned inst_len, long long *disp_out) {
@@ -948,10 +919,6 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
 }
 
 
-static int is_reg_or_mem(const as_x86_operand_t *op) {
-    return op->kind == AS_X86_OP_REG || op->kind == AS_X86_OP_MEM;
-}
-
 int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                        size_t *out_len, char *errbuf, size_t errbuf_sz) {
     enc_ctx_t ctx;
@@ -1278,114 +1245,12 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (emit8(&ctx, 0x6f) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "jmp")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
-            unsigned rel_bits = effective_i386_operand_bits(insn);
-            if (!insn->force_rel32 && (insn->byte_op || insn->has_section_offset || insn->rel_is_disp)) {
-                long long disp;
-
-                if (resolve_rel_target(&ctx, a->u.rel, 2u, &disp) != 0) {
-                    return -1;
-                }
-                if (disp >= -128 && disp <= 127) {
-                    if (emit8(&ctx, 0xeb) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
-                        return -1;
-                    }
-                    return 0;
-                }
-                if (insn->byte_op) {
-                    set_err(&ctx, "jump target out of range");
-                    return -1;
-                }
-            }
-            if (emit8(&ctx, 0xe9) != 0) {
-                return -1;
-            }
-            {
-                long long disp;
-                unsigned inst_len = rel_bits == 16u ? 3u : 5u;
-                if (resolve_rel_target(&ctx, a->u.rel, inst_len, &disp) != 0 ||
-                    emit_i386_imm_or_rel(&ctx, (uint32_t)disp, rel_bits) != 0) {
-                    return -1;
-                }
-            }
-        } else if (insn->op_count == 1 && is_reg_or_mem(a)) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp(&ctx, 4, a) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "jmp");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "call")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
-            unsigned rel_bits = effective_i386_operand_bits(insn);
-            if (emit8(&ctx, 0xe8) != 0) {
-                return -1;
-            }
-            {
-                long long disp;
-                unsigned inst_len = rel_bits == 16u ? 3u : 5u;
-                if (resolve_rel_target(&ctx, a->u.rel, inst_len, &disp) != 0 ||
-                    emit_i386_imm_or_rel(&ctx, (uint32_t)disp, rel_bits) != 0) {
-                    return -1;
-                }
-            }
-        } else if (insn->op_count == 1 && is_reg_or_mem(a)) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp(&ctx, 2, a) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "call");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "enter")) {
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
-            /* The frame's size is sixteen bits and the nesting level
-             * eight: a number that is neither, signed or unsigned, does
-             * not fit. */
-            if (a->u.imm < -0x8000 || a->u.imm > 0xffff || b->u.imm < -0x80 || b->u.imm > 0xff) {
-                set_err(&ctx, "enter takes a size of sixteen bits and a level of eight");
-                return -1;
-            }
-            if (emit8(&ctx, 0xc8) != 0 || emit8(&ctx, (uint8_t)(a->u.imm & 0xff)) != 0 ||
-                emit8(&ctx, (uint8_t)((a->u.imm >> 8) & 0xff)) != 0 || emit8(&ctx, (uint8_t)(b->u.imm & 0xff)) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "enter");
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "arpl")) {
         if (insn->op_count != 2 || (a->kind != AS_X86_OP_REG && a->kind != AS_X86_OP_MEM) || b->kind != AS_X86_OP_REG) {
             set_unsupported_form_named(&ctx, "arpl");
             return -1;
         }
         if (emit8(&ctx, 0x63) != 0 || modrm_sib_disp(&ctx, b->u.reg, a) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "lcall") || streq_ci(insn->mnemonic, "ljmp")) {
-        /* The far call and jump to a place that is two numbers, the
-         * segment and the offset in it.  (Through memory they are rows
-         * of the table; this form is not one yet, and comes here.) */
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, streq_ci(insn->mnemonic, "lcall") ? 0x9a : 0xea) != 0) {
-                return -1;
-            }
-            if (emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm, effective_i386_operand_bits(insn)) != 0) {
-                return -1;
-            }
-            if (emit8(&ctx, (uint8_t)(b->u.imm & 0xff)) != 0 || emit8(&ctx, (uint8_t)((b->u.imm >> 8) & 0xff)) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_MEM) {
-            /* (And through memory where the table is not asked: with
-             * `{load}` before it, of a name that is not yet all rows.) */
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp(&ctx, streq_ci(insn->mnemonic, "lcall") ? 3 : 5, a) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xbegin")) {
@@ -1544,29 +1409,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         goto finish;
     }
 
-
-    if ((streq_ci(insn->mnemonic, "call") || streq_ci(insn->mnemonic, "jmp")) && insn->op_count == 1) {
-        if (a->kind == AS_X86_OP_REL) {
-            long long disp;
-            uint8_t op = streq_ci(insn->mnemonic, "call") ? 0xe8 : 0xe9;
-
-            if (resolve_rel_target(&ctx, a->u.rel, 5u, &disp) != 0 || emit8(&ctx, op) != 0 ||
-                emit32(&ctx, (uint32_t)disp) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        if (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) {
-            as_x86_reg_t ext = streq_ci(insn->mnemonic, "call") ? AS_X86_REG_RDX : AS_X86_REG_RSP;
-
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp64(&ctx, ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        set_unsupported_form_named(&ctx, insn->mnemonic);
-        return -1;
-    }
 
 
     if (is_x86_sse3_mnemonic(insn->mnemonic)) {
@@ -1946,40 +1788,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (emit8(&ctx, 0x6f) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "jmp")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
-            if (!insn->force_rel32 && (insn->byte_op || insn->has_section_offset || insn->rel_is_disp)) {
-                long long disp;
-
-                if (resolve_rel_target(&ctx, a->u.rel, 2u, &disp) != 0) {
-                    return -1;
-                }
-                if (disp >= -128 && disp <= 127) {
-                    if (emit8(&ctx, 0xeb) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
-                        return -1;
-                    }
-                    return 0;
-                }
-                if (insn->byte_op) {
-                    set_err(&ctx, "x86_64 jump target out of range");
-                    return -1;
-                }
-            }
-            {
-                long long disp;
-                if (resolve_rel_target(&ctx, a->u.rel, 5u, &disp) != 0 ||
-                    emit8(&ctx, 0xe9) != 0 || emit32(&ctx, (uint32_t)disp) != 0) {
-                    return -1;
-                }
-            }
-        } else if (insn->op_count == 1 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM)) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RSP, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "jmp");
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "xbegin")) {
         long long disp;
 
@@ -1987,21 +1795,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
          * instruction of 64-bit code at all.) */
         if (insn->op_count != 1 || a->kind != AS_X86_OP_REL || resolve_rel_target(&ctx, a->u.rel, 6u, &disp) != 0 ||
             emit8(&ctx, 0xc7) != 0 || emit8(&ctx, 0xf8) != 0 || emit32(&ctx, (uint32_t)disp) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "call")) {
-        if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
-            long long disp;
-            if (resolve_rel_target(&ctx, a->u.rel, 5u, &disp) != 0 ||
-                emit8(&ctx, 0xe8) != 0 || emit32(&ctx, (uint32_t)disp) != 0) {
-                return -1;
-            }
-        } else if (insn->op_count == 1 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM)) {
-            if (emit8(&ctx, 0xff) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RDX, a, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "call");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "lcall") || streq_ci(insn->mnemonic, "callf")) {
@@ -2034,24 +1827,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     goto finish;
 
 more_mnemonics:
-    if (streq_ci(insn->mnemonic, "enter")) {
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
-            /* The frame's size is sixteen bits and the nesting level
-             * eight: a number that is neither, signed or unsigned, does
-             * not fit. */
-            if (a->u.imm < -0x8000 || a->u.imm > 0xffff || b->u.imm < -0x80 || b->u.imm > 0xff) {
-                set_err(&ctx, "enter takes a size of sixteen bits and a level of eight");
-                return -1;
-            }
-            if (emit8(&ctx, 0xc8) != 0 || emit8(&ctx, (uint8_t)(a->u.imm & 0xff)) != 0 ||
-                emit8(&ctx, (uint8_t)((a->u.imm >> 8) & 0xff)) != 0 || emit8(&ctx, (uint8_t)(b->u.imm & 0xff)) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "enter");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
+    if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
         /* Bare, or with the table's address written out: the same byte. */
         if (insn->op_count > 1) {
             set_unsupported_form_named(&ctx, insn->mnemonic);

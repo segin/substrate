@@ -10,14 +10,6 @@ static void fail(const char *msg) {
     exit(1);
 }
 
-static as_x86_operand_t reg_op(as_x86_reg_t r) {
-    as_x86_operand_t op;
-    memset(&op, 0, sizeof(op));
-    op.kind = AS_X86_OP_REG;
-    op.u.reg = r;
-    return op;
-}
-
 static as_x86_operand_t mem_rip(int32_t disp) {
     as_x86_operand_t op;
     memset(&op, 0, sizeof(op));
@@ -113,27 +105,8 @@ int main(void) {
         check_encode64(&insn, exp, sizeof(exp));
     }
 
-    memset(&insn, 0, sizeof(insn));
-    insn.mnemonic = "call";
-    insn.op_count = 1;
-    insn.ops[0] = reg_op(AS_X86_REG_R11);
-    {
-        const uint8_t exp[] = {0x41, 0xff, 0xd3};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "jmp";
-    {
-        const uint8_t exp[] = {0x41, 0xff, 0xe3};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
-
-    insn.mnemonic = "call";
-    insn.ops[0] = mem_base(AS_X86_REG_R12);
-    {
-        const uint8_t exp[] = {0x41, 0xff, 0x14, 0x24};
-        check_encode64(&insn, exp, sizeof(exp));
-    }
+    /* (call and jmp were asked of this encoder here; they are rows of
+     * the table now.) */
 
     /* (syscall, sysret and swapgs were asked of this encoder here.  It
      * has them no longer: the instructions of no operand are rows of the
