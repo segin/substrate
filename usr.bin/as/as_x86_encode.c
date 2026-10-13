@@ -4620,41 +4620,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "shld") || streq_ci(insn->mnemonic, "shrd")) {
-        uint8_t op2 = streq_ci(insn->mnemonic, "shld") ? 0xa4 : 0xac;
-        const as_x86_operand_t *dst_op = a;
-        const as_x86_operand_t *src_op = b;
-        const as_x86_operand_t *count_op = c;
-
-        if (insn->op_count != 3) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        /* (%cl, which is the count; %rcx may be what is shifted.) */
-        if (reg_is_exact_low3(a, AS_X86_REG_RCX) && a->size_bits == 8) {
-            count_op = a;
-            src_op = b;
-            dst_op = c;
-        }
-        if ((dst_op->kind != AS_X86_OP_REG && dst_op->kind != AS_X86_OP_MEM) || src_op->kind != AS_X86_OP_REG) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (count_op->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
-                modrm_sib_disp64(&ctx, src_op->u.reg, dst_op, &rex_r, &rex_x, &rex_b) != 0 ||
-                emit8(&ctx, (uint8_t)count_op->u.imm) != 0) {
-                return -1;
-            }
-        } else if (reg_is_exact_low3(count_op, AS_X86_REG_RCX) && count_op->size_bits == 8) {
-            if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, (uint8_t)(op2 + 1u)) != 0 ||
-                modrm_sib_disp64(&ctx, src_op->u.reg, dst_op, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "cmpps") || streq_ci(insn->mnemonic, "cmppd")) {
         if (insn->op_count != 3 || !operand_is_xmm_reg(a) || c->kind != AS_X86_OP_IMM ||
             (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
