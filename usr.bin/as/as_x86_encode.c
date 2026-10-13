@@ -1131,39 +1131,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     b = insn->op_count > 1 ? &insn->ops[1] : &no_operand;
     c = insn->op_count > 2 ? &insn->ops[2] : &no_operand;
 
-    if (streq_ci(insn->mnemonic, "movsx") || streq_ci(insn->mnemonic, "movsxb") || streq_ci(insn->mnemonic, "movsxw")) {
-        /* The source is a word by the mnemonic or by being a 16-bit
-         * register; otherwise it is a byte. */
-        uint8_t op2 = (streq_ci(insn->mnemonic, "movsxw") || operand_bits(b) == 16) ? 0xbf : 0xbe;
-        if (insn->op_count == 2 && b->kind == AS_X86_OP_REG && operand_bits(b) == 32) {
-            set_err(&ctx, "movsx takes a source of 8 or 16 bits in 32-bit code");
-            return -1;
-        }
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
-            if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
-                modrm_sib_disp(&ctx, (uint8_t)(a->u.reg & 7), b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "movsx");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "movzx") || streq_ci(insn->mnemonic, "movzxb") || streq_ci(insn->mnemonic, "movzxw")) {
-        uint8_t op2 = (streq_ci(insn->mnemonic, "movzxw") || operand_bits(b) == 16) ? 0xb7 : 0xb6;
-        if (insn->op_count == 2 && b->kind == AS_X86_OP_REG && operand_bits(b) == 32) {
-            set_err(&ctx, "movzx takes a source of 8 or 16 bits");
-            return -1;
-        }
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
-            if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
-                modrm_sib_disp(&ctx, (uint8_t)(a->u.reg & 7), b) != 0) {
-                return -1;
-            }
-        } else {
-            set_unsupported_form_named(&ctx, "movzx");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "movs")) {
+    if (streq_ci(insn->mnemonic, "movs")) {
         int bits;
 
         /* With no operands, as it is nearly always written, the suffix
@@ -1794,58 +1762,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     }
 
 
-    if ((streq_ci(insn->mnemonic, "movzx") || streq_ci(insn->mnemonic, "movzxb") ||
-         streq_ci(insn->mnemonic, "movzxw") || streq_ci(insn->mnemonic, "movsx") ||
-         streq_ci(insn->mnemonic, "movsxb") || streq_ci(insn->mnemonic, "movsxw")) &&
-        insn->op_count == 2 && a->kind == AS_X86_OP_REG && (b->kind == AS_X86_OP_REG || b->kind == AS_X86_OP_MEM)) {
-        int is_sign = strncmp(insn->mnemonic, "movs", 4) == 0;
-        uint8_t op2;
-
-        /* A 32-bit register is extended by movsxd, opcode 63, which
-         * `movsx %eax, %rax` is another way of writing; there is no
-         * zero-extension from 32 bits, a 32-bit move being one. */
-        if (b->kind == AS_X86_OP_REG && operand_bits(b) == 32) {
-            if (!is_sign) {
-                set_err(&ctx, "movzx takes a source of 8 or 16 bits");
-                return -1;
-            }
-            if (insn->rex_w || a->size_bits == 64) {
-                rex_w = 1;
-            }
-            if (emit8(&ctx, 0x63) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-                return -1;
-            }
-            goto finish;
-        }
-        if (streq_ci(insn->mnemonic, "movzxw") || streq_ci(insn->mnemonic, "movsxw") || operand_bits(b) == 16) {
-            op2 = is_sign ? 0xbf : 0xb7;
-        } else {
-            op2 = is_sign ? 0xbe : 0xb6;
-        }
-        if (insn->rex_w || a->size_bits == 64) {
-            rex_w = 1;
-        }
-        if (b->kind == AS_X86_OP_REG && needs_rex_low8(b->u.reg) && op2 == (is_sign ? 0xbe : 0xb6)) {
-            force_rex = 1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
-            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-        goto finish;
-    }
-
-    if ((streq_ci(insn->mnemonic, "movsxd") || streq_ci(insn->mnemonic, "movslq")) &&
-        insn->op_count == 2 && a->kind == AS_X86_OP_REG && (b->kind == AS_X86_OP_REG || b->kind == AS_X86_OP_MEM)) {
-        if (insn->rex_w || a->size_bits == 64) {
-            rex_w = 1;
-        }
-        if (emit8(&ctx, 0x63) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-        goto finish;
-    }
-
     if ((streq_ci(insn->mnemonic, "call") || streq_ci(insn->mnemonic, "jmp")) && insn->op_count == 1) {
         if (a->kind == AS_X86_OP_REL) {
             long long disp;
@@ -2175,41 +2091,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             }
         } else {
             set_unsupported_form_named(&ctx, "mov");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "movsxd")) {
-        rex_w = 1;
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG ||
-            (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM) ||
-            emit8(&ctx, 0x63) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            set_err(&ctx, "unsupported movsxd form");
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "movsx") || streq_ci(insn->mnemonic, "movsxb") || streq_ci(insn->mnemonic, "movsxw")) {
-        uint8_t op2 = streq_ci(insn->mnemonic, "movsxw") ? 0xbf : 0xbe;
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM)) {
-            set_unsupported_form_named(&ctx, "movsx");
-            return -1;
-        }
-        if (b->kind == AS_X86_OP_REG && needs_rex_low8(b->u.reg) && op2 == 0xbe) {
-            force_rex = 1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
-            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "movzx") || streq_ci(insn->mnemonic, "movzxb") || streq_ci(insn->mnemonic, "movzxw")) {
-        uint8_t op2 = streq_ci(insn->mnemonic, "movzxw") ? 0xb7 : 0xb6;
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG ||
-            (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM)) {
-            set_unsupported_form_named(&ctx, "movzx");
-            return -1;
-        }
-        if (b->kind == AS_X86_OP_REG && needs_rex_low8(b->u.reg) && op2 == 0xb6) {
-            force_rex = 1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
-            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "movhlps")) {

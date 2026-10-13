@@ -11782,7 +11782,15 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
                 for (k = 0; k < 2; ++k) {
                     size_t tried_len = 0;
 
-                    snprintf(name, sizeof(name), "%s%c", st->u.instr.mnemonic, pair[x87][k]);
+                    /* (movzx and movsx read a byte or a word, and have
+                     * no name with an `l`: `movzx ecx, [eax]` may be
+                     * either of those two.) */
+                    snprintf(name, sizeof(name), "%s%c", st->u.instr.mnemonic,
+                             k == 1 && !x87 &&
+                                     (strcasecmp(st->u.instr.mnemonic, "movzx") == 0 ||
+                                      strcasecmp(st->u.instr.mnemonic, "movsx") == 0)
+                                 ? 'w'
+                                 : pair[x87][k]);
                     said[0] = '\0';
                     taken += encode_x86_stmt(ctx, cfg, &plain, tried, sizeof(tried), &tried_len, said, sizeof(said)) == 0;
                 }
