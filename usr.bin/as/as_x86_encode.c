@@ -2312,39 +2312,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
-    } else if (strncmp(insn->mnemonic, "set", 3) == 0) {
-        static const struct {
-            const char *name;
-            uint8_t cc;
-        } ccmap[] = {
-            {"seto", 0x0},   {"setno", 0x1}, {"setb", 0x2},  {"setnae", 0x2}, {"setc", 0x2},   {"setnb", 0x3},
-            {"setae", 0x3},  {"setnc", 0x3}, {"sete", 0x4},  {"setz", 0x4},   {"setne", 0x5},  {"setnz", 0x5},
-            {"setbe", 0x6},  {"setna", 0x6}, {"seta", 0x7},  {"setnbe", 0x7}, {"sets", 0x8},   {"setns", 0x9},
-            {"setp", 0xa},   {"setpe", 0xa}, {"setnp", 0xb}, {"setpo", 0xb},  {"setl", 0xc},   {"setnge", 0xc},
-            {"setge", 0xd},  {"setnl", 0xd}, {"setle", 0xe}, {"setng", 0xe},  {"setg", 0xf},   {"setnle", 0xf},
-        };
-        size_t i;
-        int found = 0;
-        uint8_t cc = 0;
-
-        if (insn->op_count != 1 || (a->kind != AS_X86_OP_REG && a->kind != AS_X86_OP_MEM)) {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
-        for (i = 0; i < sizeof(ccmap) / sizeof(ccmap[0]); ++i) {
-            if (streq_ci(insn->mnemonic, ccmap[i].name)) {
-                cc = ccmap[i].cc;
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
-            set_err(&ctx, "unsupported i386 setcc mnemonic: %s", insn->mnemonic);
-            return -1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, (uint8_t)(0x90 | cc)) != 0 || modrm_sib_disp(&ctx, 0, a) != 0) {
-            return -1;
-        }
     } else if (streq_ci(insn->mnemonic, "push")) {
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
             if (emit8(&ctx, (uint8_t)(0x50 | (a->u.reg & 7))) != 0) {
@@ -2951,45 +2918,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         goto finish;
     }
 
-    if (insn->mnemonic != NULL && strncmp(insn->mnemonic, "set", 3) == 0) {
-        static const struct {
-            const char *name;
-            uint8_t cc;
-        } ccmap[] = {
-            {"seto", 0x0},   {"setno", 0x1}, {"setb", 0x2},  {"setnae", 0x2}, {"setc", 0x2},   {"setnb", 0x3},
-            {"setae", 0x3},  {"setnc", 0x3}, {"sete", 0x4},  {"setz", 0x4},   {"setne", 0x5},  {"setnz", 0x5},
-            {"setbe", 0x6},  {"setna", 0x6}, {"seta", 0x7},  {"setnbe", 0x7}, {"sets", 0x8},   {"setns", 0x9},
-            {"setp", 0xa},   {"setpe", 0xa}, {"setnp", 0xb}, {"setpo", 0xb},  {"setl", 0xc},   {"setnge", 0xc},
-            {"setge", 0xd},  {"setnl", 0xd}, {"setle", 0xe}, {"setng", 0xe},  {"setg", 0xf},   {"setnle", 0xf},
-        };
-        size_t i;
-        int found = 0;
-        uint8_t cc = 0;
-
-        if (insn->op_count != 1 || (a->kind != AS_X86_OP_REG && a->kind != AS_X86_OP_MEM)) {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
-        for (i = 0; i < sizeof(ccmap) / sizeof(ccmap[0]); ++i) {
-            if (streq_ci(insn->mnemonic, ccmap[i].name)) {
-                cc = ccmap[i].cc;
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
-            set_err(&ctx, "unsupported x86_64 setcc mnemonic: %s", insn->mnemonic);
-            return -1;
-        }
-        if (a->kind == AS_X86_OP_REG && needs_rex_low8(a->u.reg)) {
-            force_rex = 1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, (uint8_t)(0x90 | cc)) != 0 ||
-            modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-        goto finish;
-    }
 
     if ((streq_ci(insn->mnemonic, "movzx") || streq_ci(insn->mnemonic, "movzxb") ||
          streq_ci(insn->mnemonic, "movzxw") || streq_ci(insn->mnemonic, "movsx") ||
@@ -5680,42 +5608,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     } else if (encode_jcc_rel32(&ctx, insn->mnemonic, (insn->op_count == 1 && a->kind == AS_X86_OP_REL) ? a->u.rel : 0) == 0) {
         if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
             set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
-    } else if (strncmp(insn->mnemonic, "set", 3) == 0) {
-        static const struct {
-            const char *name;
-            uint8_t cc;
-        } ccmap[] = {
-            {"seto", 0x0},   {"setno", 0x1}, {"setb", 0x2},  {"setnae", 0x2}, {"setc", 0x2},   {"setnb", 0x3},
-            {"setae", 0x3},  {"setnc", 0x3}, {"sete", 0x4},  {"setz", 0x4},   {"setne", 0x5},  {"setnz", 0x5},
-            {"setbe", 0x6},  {"setna", 0x6}, {"seta", 0x7},  {"setnbe", 0x7}, {"sets", 0x8},   {"setns", 0x9},
-            {"setp", 0xa},   {"setpe", 0xa}, {"setnp", 0xb}, {"setpo", 0xb},  {"setl", 0xc},   {"setnge", 0xc},
-            {"setge", 0xd},  {"setnl", 0xd}, {"setle", 0xe}, {"setng", 0xe},  {"setg", 0xf},   {"setnle", 0xf},
-        };
-        size_t i;
-        int found = 0;
-        uint8_t cc = 0;
-        if (insn->op_count != 1 || (a->kind != AS_X86_OP_REG && a->kind != AS_X86_OP_MEM)) {
-            set_unsupported_form_named(&ctx, insn->mnemonic);
-            return -1;
-        }
-        for (i = 0; i < sizeof(ccmap) / sizeof(ccmap[0]); ++i) {
-            if (streq_ci(insn->mnemonic, ccmap[i].name)) {
-                cc = ccmap[i].cc;
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
-            set_err(&ctx, "unsupported x86_64 setcc mnemonic: %s", insn->mnemonic);
-            return -1;
-        }
-        if (a->kind == AS_X86_OP_REG && needs_rex_low8(a->u.reg)) {
-            force_rex = 1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, (uint8_t)(0x90 | cc)) != 0 ||
-            modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "push")) {
