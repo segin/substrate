@@ -2310,6 +2310,9 @@
     LW("smsww", P0, M1, 0x01, W0, "m", "m", AS_VEC_F_BASE | DG(4)),
     LW("verrw", P0, M1, 0x00, W0, "m", "m", AS_VEC_F_BASE | DG(4)),
     LW("verww", P0, M1, 0x00, W0, "m", "m", AS_VEC_F_BASE | DG(5)),
+    LW("sgdtq", P0, M1, 0x01, W0, "m", "m", AS_VEC_F_BASE | O64 | DG(0)),
+    LW("sidtq", P0, M1, 0x01, W0, "m", "m", AS_VEC_F_BASE | O64 | DG(1)),
+    LW("lidtq", P0, M1, 0x01, W0, "m", "m", AS_VEC_F_BASE | O64 | DG(3)),
     /* And the instructions with no operand: the opcode, and the byte
      * after it where there is one. */
     {"aaa", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x37, W0, 0, "", "", 0x00, 0, AS_VEC_F_BASE | AS_VEC_F_X32},
