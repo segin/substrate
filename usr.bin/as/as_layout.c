@@ -5226,6 +5226,9 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
     sec_buf_vec_t names; /* for the sections' numbers only */
     far_label_t *labels = NULL;
     size_t label_count = 0, label_cap = 0;
+    far_label_t *numbered = NULL;
+    size_t numbered_count = 0;
+    as_strmap_t label_by_name;
     const char **exported = NULL;
     size_t exported_count = 0, exported_cap = 0;
     const char **weak = NULL;
@@ -5239,6 +5242,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
         return 0;
     }
     memset(&names, 0, sizeof(names));
+    memset(&label_by_name, 0, sizeof(label_by_name));
     if (section_track_init(&track, cfg != NULL && cfg->is_64 ? 64u
                                                              : (cfg != NULL && cfg->x86_code_bits == 16u ? 16u : 32u)) !=
         0) {
@@ -5316,8 +5320,35 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             (void)section_track_apply_directive(&track, d);
         }
     }
-    if (label_count != 0) {
-        qsort(labels, label_count, sizeof(*labels), far_label_cmp);
+    /*
+     * A label that has a name is found by it, the first of the name;
+     * one that has a number by where it is written, among those sorted.
+     * (All of them were sorted, by name: a hundred thousand of a
+     * compiler's labels compared a million and a half times over.)
+     */
+    for (i = 0; i < label_count; ++i) {
+        size_t had;
+
+        if (labels[i].name == NULL) {
+            numbered_count++;
+        } else if (!as_strmap_get(&label_by_name, labels[i].name, &had) &&
+                   as_strmap_put(&label_by_name, labels[i].name, i) != 0) {
+            goto out;
+        }
+    }
+    if (numbered_count != 0) {
+        size_t n = 0;
+
+        numbered = (far_label_t *)malloc(numbered_count * sizeof(*numbered));
+        if (numbered == NULL) {
+            goto out;
+        }
+        for (i = 0; i < label_count; ++i) {
+            if (labels[i].name == NULL) {
+                numbered[n++] = labels[i];
+            }
+        }
+        qsort(numbered, numbered_count, sizeof(*numbered), far_label_cmp);
     }
     /* The source's own labels, by name. */
     near_names_free();
@@ -5333,10 +5364,11 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
     }
     for (i = 0; i < label_count; ++i) {
         const char *name = labels[i].name;
+        size_t first;
 
-        /* (Sorted by name, so one defined twice is twice together.) */
+        /* (Once for a name that is defined twice: where it is first.) */
         if (name == NULL || is_local_temp_symbol_name(name) ||
-            (near_name_count != 0 && as_strcmp(near_names[near_name_count - 1], name) == 0) ||
+            (as_strmap_get(&label_by_name, name, &first) && first != i) ||
             (exported_count != 0 &&
              bsearch(&name, exported, exported_count, sizeof(*exported), near_name_cmp) != NULL)) {
             continue;
@@ -5346,6 +5378,10 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             goto out;
         }
         near_name_count++;
+    }
+    /* (Sorted, for whoever looks a name up among them.) */
+    if (near_name_count != 0) {
+        qsort(near_names, near_name_count, sizeof(*near_names), near_name_cmp);
     }
     for (i = 0; i < parsed->count; ++i) {
         as_stmt_t *st = &parsed->items[i];
@@ -5413,9 +5449,11 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 
                 memset(&want, 0, sizeof(want));
                 want.name = node->symbol;
-                at = label_count != 0
-                         ? (const far_label_t *)bsearch(&want, labels, label_count, sizeof(*labels), far_label_cmp)
-                         : NULL;
+                {
+                    size_t which;
+
+                    at = as_strmap_get(&label_by_name, want.name, &which) ? &labels[which] : NULL;
+                }
                 if (at != NULL && at->section == stmt_section[i]) {
                     size_t len = strlen(node->symbol) + sizeof(".L.jump.");
                     char *alias = (char *)malloc(len);
@@ -5449,9 +5487,15 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
         } else {
             continue;
         }
-        found = label_count != 0
-                    ? (const far_label_t *)bsearch(&key, labels, label_count, sizeof(*labels), far_label_cmp)
-                    : NULL;
+        if (key.name != NULL) {
+            size_t which;
+
+            found = as_strmap_get(&label_by_name, key.name, &which) ? &labels[which] : NULL;
+        } else {
+            found = numbered_count != 0 ? (const far_label_t *)bsearch(&key, numbered, numbered_count,
+                                                                         sizeof(*numbered), far_label_cmp)
+                                        : NULL;
+        }
         if (found == NULL) {
             /* A .L label that the source does not define: no nearer
              * than a symbol of another file, which is what it is. */
@@ -5472,6 +5516,8 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 
 out:
     free(labels);
+    free(numbered);
+    as_strmap_free(&label_by_name);
     free(exported);
     free(weak);
     free(stmt_section);
