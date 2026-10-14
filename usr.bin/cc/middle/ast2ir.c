@@ -7832,7 +7832,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (sv < 0) {
                 return -1;
             }
-            return cast_value(sf, sv, want, diag);
+            sv = cast_value(sf, sv, want, diag);
+            if (sv >= 0 && is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
+                sv = normalize_integral_value(sf, sv, e->value_type, diag);
+            }
+            return sv;
         }
 
         cond_raw = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
@@ -7869,6 +7873,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
         tv = cast_value(sf, tv, want, diag);
+        /* each arm is converted to the result type: (c ? s : ull) widens s */
+        if (tv >= 0 && is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
+            tv = normalize_integral_value(sf, tv, e->value_type, diag);
+        }
         if (tv < 0 || emit_mov_instr(sf, dst, tv) != 0 || emit_br_instr(sf, l_end) != 0) {
             return -1;
         }
@@ -7881,6 +7889,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         fv = cast_value(sf, fv, want, diag);
+        if (fv >= 0 && is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
+            fv = normalize_integral_value(sf, fv, e->value_type, diag);
+        }
         if (fv < 0 || emit_mov_instr(sf, dst, fv) != 0 || emit_br_instr(sf, l_end) != 0) {
             return -1;
         }

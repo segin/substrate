@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 9 | 2 |
+| 4. ABI and other code generation | 10 | 3 |
 | 5. Driver and predefined macros | 2 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. Documentation | 1 | 0 |
@@ -141,6 +141,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
+- [x] **CC-35** Each arm of `?:` shall be converted to the result's
+  type.  An arm narrower than an `unsigned long long` result was moved
+  into it unconverted, so on i386 its high word was whatever the stack
+  held: `c ? (short)0 : v0` gave `f7d0710000000000`.  Found when local
+  initializers began to be converted (CC-15), which moved the garbage.
+  *Reproduced* (-m32).  `codegen/ternary_widen.c`.
 - [ ] **CC-34** `(*fp)(...)` shall call `fp` when `fp`'s function
   returns a pointer.  `int *(*pf)(...)` has the pointer depth of a
   pointer to a function pointer, and lowering keeps the dereference for
@@ -191,4 +197,4 @@ changes as well.  *Suite.*
 
 ---
 
-34 requirements: 13 met, 21 open.
+35 requirements: 14 met, 21 open.
