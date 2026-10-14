@@ -14719,3 +14719,7 @@ void cc_ssa_set_pointer_size(int bytes) {
         g_pointer_size_bytes = bytes;
     }
 }
+
+int cc_ssa_pointer_size(void) {
+    return g_pointer_size_bytes;
+}

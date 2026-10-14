@@ -23,6 +23,121 @@ static int value_is_ldouble(const cc_ssa_function_t *f, int v) {
     return f != NULL && f->value_sizes != NULL && v >= 0 && v < f->value_count && f->value_sizes[v] >= 16;
 }
 
+/*
+ * On a 32-bit target an integer value of fewer than 8 bytes lives in a
+ * 32-bit register, and the backend computes it with 32-bit
+ * instructions; folding it must do the same.
+ */
+static int value_is_word32(const cc_ssa_function_t *f, int v) {
+    if (cc_ssa_pointer_size() != 4) {
+        return 0;
+    }
+    if (f->value_sizes == NULL || v < 0 || v >= f->value_count || f->value_sizes[v] == 0) {
+        return 1;
+    }
+    return f->value_sizes[v] < 8;
+}
+
+/*
+ * Fold an integer binary operation the way the target computes it.
+ * Arithmetic is done unsigned so that wrap-around is defined on the
+ * host.  Returns -1 for a division the target would trap on.
+ */
+static int fold_int_binop(cc_ssa_opcode_t op, int is_unsigned, int word32, long long a, long long b,
+                          long long *out) {
+    unsigned long long ua = (unsigned long long)a;
+    unsigned long long ub = (unsigned long long)b;
+    unsigned long long r;
+
+    if (word32) {
+        unsigned int wa = (unsigned int)ua;
+        unsigned int wb = (unsigned int)ub;
+        unsigned int w;
+        int sa = (int)wa;
+        int sb = (int)wb;
+
+        switch (op) {
+        case CC_SSA_ADD: w = wa + wb; break;
+        case CC_SSA_SUB: w = wa - wb; break;
+        case CC_SSA_MUL: w = wa * wb; break;
+        case CC_SSA_AND: w = wa & wb; break;
+        case CC_SSA_OR: w = wa | wb; break;
+        case CC_SSA_XOR: w = wa ^ wb; break;
+        case CC_SSA_SHL: w = wa << (wb & 31u); break;
+        case CC_SSA_SHR:
+            w = is_unsigned ? wa >> (wb & 31u) : (unsigned int)(sa >> (wb & 31u));
+            break;
+        case CC_SSA_DIV:
+            if (wb == 0 || (!is_unsigned && sa == (-2147483647 - 1) && sb == -1)) {
+                return -1;
+            }
+            w = is_unsigned ? wa / wb : (unsigned int)(sa / sb);
+            break;
+        default:
+            return -1;
+        }
+        *out = (long long)(int)w;
+        return 0;
+    }
+
+    switch (op) {
+    case CC_SSA_ADD: r = ua + ub; break;
+    case CC_SSA_SUB: r = ua - ub; break;
+    case CC_SSA_MUL: r = ua * ub; break;
+    case CC_SSA_AND: r = ua & ub; break;
+    case CC_SSA_OR: r = ua | ub; break;
+    case CC_SSA_XOR: r = ua ^ ub; break;
+    case CC_SSA_SHL: r = ua << (ub & 63u); break;
+    case CC_SSA_SHR:
+        r = is_unsigned ? ua >> (ub & 63u) : (unsigned long long)(a >> (ub & 63u));
+        break;
+    case CC_SSA_DIV:
+        if (b == 0 || (!is_unsigned && a == (-9223372036854775807LL - 1) && b == -1)) {
+            return -1;
+        }
+        r = is_unsigned ? ua / ub : (unsigned long long)(a / b);
+        break;
+    default:
+        return -1;
+    }
+    *out = (long long)r;
+    return 0;
+}
+
+/* Fold a compare at the width the backend compares its operands. */
+static long long fold_int_cmp(cc_cmp_kind_t kind, int is_unsigned, int word32, long long a, long long b) {
+    if (word32) {
+        if (is_unsigned) {
+            a = (long long)(unsigned int)a;
+            b = (long long)(unsigned int)b;
+        } else {
+            a = (long long)(int)(unsigned int)a;
+            b = (long long)(int)(unsigned int)b;
+        }
+    } else if (is_unsigned) {
+        unsigned long long ua = (unsigned long long)a;
+        unsigned long long ub = (unsigned long long)b;
+        switch (kind) {
+        case CC_CMP_EQ: return ua == ub;
+        case CC_CMP_NE: return ua != ub;
+        case CC_CMP_LT: return ua < ub;
+        case CC_CMP_LE: return ua <= ub;
+        case CC_CMP_GT: return ua > ub;
+        case CC_CMP_GE: return ua >= ub;
+        }
+        return 0;
+    }
+    switch (kind) {
+    case CC_CMP_EQ: return a == b;
+    case CC_CMP_NE: return a != b;
+    case CC_CMP_LT: return a < b;
+    case CC_CMP_LE: return a <= b;
+    case CC_CMP_GT: return a > b;
+    case CC_CMP_GE: return a >= b;
+    }
+    return 0;
+}
+
 static int fold_function(cc_ssa_function_t *f) {
     const_state_t *st;
     size_t i;
@@ -163,36 +278,9 @@ static int fold_function(cc_ssa_function_t *f) {
                     long long a = st[in->lhs].i;
                     long long b = (in->rhs >= 0) ? st[in->rhs].i : in->imm;
                     long long out = 0;
-                    if (in->op == CC_SSA_DIV && b == 0) {
+                    if (fold_int_binop(in->op, in->is_unsigned, value_is_word32(f, dst), a, b, &out) != 0) {
                         st[dst].known = 0;
                         break;
-                    }
-                    if (in->op == CC_SSA_ADD) {
-                        out = a + b;
-                    } else if (in->op == CC_SSA_SUB) {
-                        out = a - b;
-                    } else if (in->op == CC_SSA_MUL) {
-                        out = a * b;
-                    } else if (in->op == CC_SSA_DIV) {
-                        if (in->is_unsigned) {
-                            out = (long long)((unsigned long long)a / (unsigned long long)b);
-                        } else {
-                            out = a / b;
-                        }
-                    } else if (in->op == CC_SSA_AND) {
-                        out = a & b;
-                    } else if (in->op == CC_SSA_OR) {
-                        out = a | b;
-                    } else if (in->op == CC_SSA_XOR) {
-                        out = a ^ b;
-                    } else if (in->op == CC_SSA_SHL) {
-                        out = a << (b & 63);
-                    } else {
-                        if (in->is_unsigned) {
-                            out = (long long)((unsigned long long)a >> (b & 63));
-                        } else {
-                            out = a >> (b & 63);
-                        }
                     }
                     in->op = CC_SSA_CONST;
                     in->lhs = -1;
@@ -267,38 +355,8 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_CMP:
             if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 && st[in->lhs].known && st[in->rhs].known &&
                 st[in->lhs].type == CC_VAL_I64 && st[in->rhs].type == CC_VAL_I64) {
-                long long a = st[in->lhs].i;
-                long long b = st[in->rhs].i;
-                long long out = 0;
-                if (in->cmp_kind == CC_CMP_EQ) {
-                    out = (a == b);
-                } else if (in->cmp_kind == CC_CMP_NE) {
-                    out = (a != b);
-                } else if (in->cmp_kind == CC_CMP_LT) {
-                    if (in->is_unsigned) {
-                        out = ((unsigned long)a < (unsigned long)b);
-                    } else {
-                        out = (a < b);
-                    }
-                } else if (in->cmp_kind == CC_CMP_LE) {
-                    if (in->is_unsigned) {
-                        out = ((unsigned long)a <= (unsigned long)b);
-                    } else {
-                        out = (a <= b);
-                    }
-                } else if (in->cmp_kind == CC_CMP_GT) {
-                    if (in->is_unsigned) {
-                        out = ((unsigned long)a > (unsigned long)b);
-                    } else {
-                        out = (a > b);
-                    }
-                } else {
-                    if (in->is_unsigned) {
-                        out = ((unsigned long)a >= (unsigned long)b);
-                    } else {
-                        out = (a >= b);
-                    }
-                }
+                int word32 = value_is_word32(f, in->lhs) || value_is_word32(f, in->rhs);
+                long long out = fold_int_cmp(in->cmp_kind, in->is_unsigned, word32, st[in->lhs].i, st[in->rhs].i);
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;
                 in->rhs = -1;
