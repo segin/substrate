@@ -1873,8 +1873,6 @@
     LW("movw", P0, AS_VEC_MAP_ONE, 0x8e, W0, "m7", "mr", AS_VEC_F_BASE),
     LW("movl", P0, AS_VEC_MAP_ONE, 0x8c, W0, "7d", "rm", AS_VEC_F_BASE | OP32),
     LW("movl", P0, AS_VEC_MAP_ONE, 0x8e, W0, "d7", "mr", AS_VEC_F_BASE),
-    LW("movl", P0, AS_VEC_MAP_ONE, 0x8c, W0, "7m", "rm", AS_VEC_F_BASE),
-    LW("movl", P0, AS_VEC_MAP_ONE, 0x8e, W0, "m7", "mr", AS_VEC_F_BASE),
     LW("mov", P0, M1, 0x20, W0, "5d", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
     LW("mov", P0, M1, 0x22, W0, "d5", "mr", AS_VEC_F_BASE | AS_VEC_F_X32),
     LW("mov", P0, M1, 0x20, W0, "5q", "rm", AS_VEC_F_BASE | O64),
