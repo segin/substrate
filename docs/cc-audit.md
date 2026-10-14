@@ -269,9 +269,10 @@ they stand.  *Reproduced* unless marked.
   (`|| true`), including SIGSEGV, and its input came from
   `/dev/urandom` and was discarded.  Inputs now come from fixed seeds,
   a signal or a hang fails the test, and the input is kept.
-- [ ] **CC-45** If `test_ast2ir.c` does not build, then the suite shall
-  fail.  Its build ends in `|| true`, and the next command runs
-  `./test_ast2ir_bin` -- a stale binary from an earlier run passes.
+- [x] **CC-45** If `test_ast2ir.c` does not build, then the suite shall
+  fail.  Its build ended in `|| true`, and the next command ran
+  `./test_ast2ir_bin` -- a stale binary from an earlier run passed.
+  The binary is now removed first and the build may not fail.
 - [ ] **CC-46** A check of generated assembly shall show the property
   under test.  30 of the 190 `grep` checks only look for `.code32` in
   `-m32 -S` output, which shows the flag was read, not that the code is
