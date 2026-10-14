@@ -268,6 +268,11 @@ they stand.  *Reproduced* unless marked.
   not reject) and `native_c90_oldstyle.c` at `-std=c99` (old-style
   definitions are valid until C23).  These record cc's limits as
   requirements: they will fail when cc gains the feature.
+  Done: `noreturn_nonvoid` and `nonnull_empty` are now must-compile
+  tests (renamed), and cc accepts old-style definitions in every mode,
+  as gcc does, while implicit `int` -- which the old-style switch also
+  governed -- is allowed only in C89 modes, as gcc 14 and later have
+  it.  Left: `sizeof(void)`, nested functions.
 - [x] **CC-43** `run_pp_cmd_injection_test.sh` shall run cc.  It ran
   `../../usr.bin/cc/cc` from `tests/usr.bin/cc`, which does not exist,
   and ignored the failure (`|| true`), so it passed without testing

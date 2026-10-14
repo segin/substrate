@@ -466,6 +466,7 @@ typedef struct {
 static int g_parser_pointer_size_bytes = 8;
 static int g_parser_enable_trigraphs = 1;
 static int g_parser_allow_oldstyle_funcdecl = 0;
+static int g_parser_allow_implicit_int = 0;
 static int g_parser_std_c11 = 0;
 static int g_parser_std_c17 = 0;
 static int g_parser_std_c23 = 0;
@@ -3350,11 +3351,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         return -1;
     }
     if (!seen_type) {
-        if (g_parser_allow_oldstyle_funcdecl && seen) {
+        if (g_parser_allow_implicit_int && seen) {
             /*
-             * GNU toolchains accept implicit int in declaration-specifier
-             * lists such as `extern foo();`. Keep this enabled in legacy/GNU
-             * modes so autoconf probes compile.
+             * Implicit int in declaration-specifier lists such as
+             * `extern foo();`: C89 has it, C99 removed it, and gcc (14
+             * and later) rejects it in every later mode, GNU ones too.
              */
             seen_int = 1;
             seen_type = 1;
@@ -11354,10 +11355,10 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             decl_attrs_clear(&spec_attrs);
             return -1;
         }
-    } else if (g_parser_allow_oldstyle_funcdecl) {
+    } else if (g_parser_allow_implicit_int) {
         /*
-         * Legacy/GNU compatibility: allow omitted return type in function
-         * definitions/declarations (`main() { ... }` => `int main() { ... }`).
+         * An omitted return type (`main() { ... }` => `int main() { ... }`)
+         * is implicit int: C89 only, as gcc has it.
          */
         ftype = CC_TYPE_INT;
         ftype_sid = -1;
@@ -12162,8 +12163,10 @@ void cc_parser_set_std_mode(const char *std_mode) {
     g_parser_std_gnu = 0;
 
     if (std_mode == NULL || std_mode[0] == '\0') {
+        /* the default is gnu17: old-style definitions are still C */
         g_parser_enable_trigraphs = 1;
-        g_parser_allow_oldstyle_funcdecl = 0;
+        g_parser_allow_oldstyle_funcdecl = 1;
+        g_parser_allow_implicit_int = 0;
         return;
     }
     if (strncmp(std_mode, "gnu", 3) == 0) {
@@ -12187,12 +12190,15 @@ void cc_parser_set_std_mode(const char *std_mode) {
     } else {
         g_parser_enable_trigraphs = 1;
     }
-    if (g_parser_std_gnu || strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 ||
-        strcmp(std_mode, "c95") == 0) {
-        g_parser_allow_oldstyle_funcdecl = 1;
-    } else {
-        g_parser_allow_oldstyle_funcdecl = 0;
-    }
+    /*
+     * Old-style (K&R) definitions are C up to C17.  C23 removed them,
+     * but gcc still accepts them there, and so does cc.
+     */
+    g_parser_allow_oldstyle_funcdecl = 1;
+    g_parser_allow_implicit_int =
+        strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
+        strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0 ||
+        strcmp(std_mode, "iso9899:1990") == 0 || strcmp(std_mode, "iso9899:199409") == 0;
     if (strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
         g_parser_gnu89_inline = 1;
     } else {

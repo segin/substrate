@@ -831,7 +831,10 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -c native_attr_nonnull_noparams.c -o /tmp/cc_native_attr_nonnull_noparams.o
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_call.c -o /tmp/cc_native_bad_attr_nonnull_call.o 2>/tmp/cc_native_bad_attr_nonnull_call.log
 	grep -q "warning: nonnull argument 1 in call to takes_ptr is null" /tmp/cc_native_bad_attr_nonnull_call.log
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_c99_bad.o
+	$(TOP)/usr.bin/cc/cc -std=c99 native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_c99
+	/tmp/cc_native_c90_oldstyle_c99
+	$(TOP)/usr.bin/cc/cc -std=c23 native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_c23
+	/tmp/cc_native_c90_oldstyle_c23
 	$(TOP)/usr.bin/cc/cc -c native_bad_void_ptr_arith.c -o /tmp/cc_native_bad_void_ptr_arith.o
 	$(TOP)/usr.bin/cc/cc -c driver_hello.s -o /tmp/cc_driver_hello.o
 	$(TOP)/usr.bin/cc/cc -nostdlib /tmp/cc_driver_hello.o -o /tmp/cc_driver_hello
