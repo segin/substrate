@@ -4,6 +4,9 @@ Upstream:  https://gitlab.freedesktop.org/xorg/lib/libxtrans
 Pinned:    1.6.0
 Tarball:   `https://www.x.org/releases/individual/lib/xtrans-1.6.0.tar.xz`
 SHA-256:   `faafea166bf2451a173d9d593352940ec6404145c5d1da5c213423ce4d359e92`
+Fallback:  Debian's `xtrans_1.6.0.orig.tar.gz`, the same tar gzipped
+           (SHA-256 `936b74c60b19c317c3f3cb1b114575032528dbdaf428740483200ea874c2ca0a`),
+           where neither X.Org nor a mirror has it: the mirrors stop at 1.5.2.
 
 ## Why
 
