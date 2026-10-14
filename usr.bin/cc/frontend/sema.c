@@ -5819,11 +5819,12 @@ fail_global_item:
             }
         }
         if ((f->attr_flags & CC_ATTR_NONNULL) != 0 && (!f->has_prototype || f->param_count == 0)) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "nonnull function '%s' requires at least one prototype parameter", f->name);
+            /* as gcc: with no pointer parameter to apply to, nonnull is harmless */
+            char wbuf[256];
+            snprintf(wbuf, sizeof(wbuf), "nonnull attribute on '%s' has no pointer parameter to apply to", f->name);
+            if (emit_warning(diag, f->line, f->col, wbuf, 0) != 0) {
+                goto fail_decl;
             }
-            goto fail_decl;
         }
         if ((f->attr_flags & CC_ATTR_ALIAS) != 0) {
             if (f->has_body) {
