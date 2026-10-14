@@ -2813,6 +2813,17 @@ static int directive_names_local_labels(const char *name) {
     return 0;
 }
 
+/* Whether a text may have a `1b` or a `2f` in it: a digit with a `b` or
+ * an `f` after it.  (Not whether it has: `0x1f` is a number.) */
+static int text_may_name_local(const char *s) {
+    for (; *s != '\0'; ++s) {
+        if (isdigit((unsigned char)s[0]) && (s[1] == 'b' || s[1] == 'f')) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /*
  * An argument of a directive with each `1b` and `2f` in it made the name
  * of the label it means, for a directive on `line` of `file`.  NULL for
@@ -2824,6 +2835,11 @@ static char *name_local_refs_in_text(parse_ctx_t *ctx, const char *file, unsigne
     char *out;
     int changed = 0;
     size_t i;
+
+    /* (Most have none, and are not made tokens to learn it.) */
+    if (!text_may_name_local(arg)) {
+        return xstrdup(arg);
+    }
 
     /* The argument is text by now; its tokens are found again, and one
      * that is a local label's reference is made the label's name. */
@@ -2922,7 +2938,7 @@ static void resolve_locals(parse_ctx_t *ctx) {
             for (j = 0; j < st->u.directive.arg_count; ++j) {
                 char *named;
 
-                if (st->u.directive.args[j] == NULL) {
+                if (st->u.directive.args[j] == NULL || !text_may_name_local(st->u.directive.args[j])) {
                     continue;
                 }
                 named = name_local_refs_in_text(ctx, st->unit, st->ordinal, st->u.directive.args[j]);

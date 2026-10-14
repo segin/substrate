@@ -2676,6 +2676,12 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
                     if (d->args[k] == NULL || arg_is_empty(d, k)) {
                         continue;
                     }
+                    /* (Where the source sets no name to anything, there
+                     * is nothing a value's names stand for, and it is not
+                     * read to learn so.) */
+                    if (!is_set && a.count == 0 && a.consts.now.count == 0 && a.consts.last.count == 0) {
+                        continue;
+                    }
                     e = as_parse_expr_string(d->args[k], st->unit, st->ordinal);
                     if (e == NULL) {
                         continue;

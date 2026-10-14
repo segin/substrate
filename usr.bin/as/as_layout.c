@@ -3965,9 +3965,13 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
             int64_t add = 0;
             as_expr_t *expr;
 
+            /* (A number, or an expression of numbers and of variables:
+             * one reading, where it was read for numbers alone and then
+             * again with the variables, which give the same where there
+             * are none.) */
             if (eval_linux_alt_len_expr(ctx, st, d->args[i], &v) == 0 ||
-                parse_int64(d->args[i], &v) == 0 || parse_const_expr_string(d->args[i], &v) == 0 ||
-                eval_arg_asm_vars(ctx, st, d->args[i], &v) == 0) {
+                (ctx != NULL ? eval_arg_asm_vars(ctx, st, d->args[i], &v)
+                             : parse_int64(d->args[i], &v) == 0 ? 0 : parse_const_expr_string(d->args[i], &v)) == 0) {
                 if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
                     return -1;
                 }

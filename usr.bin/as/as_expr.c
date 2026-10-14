@@ -1,4 +1,5 @@
 #include "as_expr.h"
+#include "as_util.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -369,7 +370,7 @@ static as_expr_op_t expr_op_of(const char *s) {
     size_t i;
 
     for (i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
-        if (strcmp(s, ops[i].text) == 0) {
+        if (as_strcmp(s, ops[i].text) == 0) {
             return ops[i].op;
         }
     }
