@@ -8091,6 +8091,9 @@ static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
             return -1;
         }
         zero = emit_const_i64_instr(sf, 0);
+        if (zero >= 0 && value_size(sf, v) >= 8) {
+            set_value_size(sf, zero, 8);
+        }
     }
     if (zero < 0) {
         return -1;

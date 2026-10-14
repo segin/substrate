@@ -5155,12 +5155,55 @@ static int emit_i386_cmp_float_x87(FILE *fp, const cc_ssa_function_t *f, const s
     return emit_i386_cmp_float_result(fp, f, lay, ist, in);
 }
 
+/*
+ * A compare of 64-bit operands, which live in stack slots as a low and
+ * a high word: the high words decide unless they are equal, and then
+ * the low words decide as unsigned numbers.
+ */
+static void emit_i386_cmp_int64(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                const cc_ssa_instr_t *in) {
+    unsigned long id = next_aux_label_id();
+    int lo = slot_off(lay, in->lhs);
+    int rlo = slot_off(lay, in->rhs);
+
+    int_regs_flush(fp, f, lay, ist);
+    if (in->cmp_kind == CC_CMP_EQ || in->cmp_kind == CC_CMP_NE) {
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
+        fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", lo + 4);
+        fprintf(fp, "\txorl %d(%%ebp), %%eax\n", rlo);
+        fprintf(fp, "\txorl %d(%%ebp), %%edx\n", rlo + 4);
+        fprintf(fp, "\torl %%edx, %%eax\n");
+        fprintf(fp, "\t%s %%al\n", in->cmp_kind == CC_CMP_EQ ? "sete" : "setne");
+    } else {
+        fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", lo + 4);
+        fprintf(fp, "\tcmpl %d(%%ebp), %%edx\n", rlo + 4);
+        fprintf(fp, "\tjne .L__cc_i386_cmp_hi_%lu\n", id);
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
+        fprintf(fp, "\tcmpl %d(%%ebp), %%eax\n", rlo);
+        fprintf(fp, "\t%s %%al\n", setcc_int_mnemonic(in->cmp_kind, 1));
+        fprintf(fp, "\tjmp .L__cc_i386_cmp_done_%lu\n", id);
+        fprintf(fp, ".L__cc_i386_cmp_hi_%lu:\n", id);
+        fprintf(fp, "\t%s %%al\n", setcc_int_mnemonic(in->cmp_kind, in->is_unsigned));
+        fprintf(fp, ".L__cc_i386_cmp_done_%lu:\n", id);
+    }
+    fprintf(fp, "\tmovzbl %%al, %%eax\n");
+    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(lay, in->dst));
+}
+
 static int emit_i386_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                              const cc_ssa_instr_t *in) {
     const char *m = setcc_int_mnemonic(in->cmp_kind, in->is_unsigned);
-    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
-    int rr = int_regs_load(fp, f, lay, ist, in->rhs, -1, rl);
-    int rd = int_regs_define(fp, f, lay, ist, in->dst, rl, rr);
+    int rl;
+    int rr;
+    int rd;
+
+    if (value_size_bytes(f, in->lhs, 4) >= 8 && value_size_bytes(f, in->rhs, 4) >= 8) {
+        emit_i386_cmp_int64(fp, f, lay, ist, in);
+        return 0;
+    }
+    rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+    rr = int_regs_load(fp, f, lay, ist, in->rhs, -1, rl);
+    rd = int_regs_define(fp, f, lay, ist, in->dst, rl, rr);
 
     fprintf(fp, "\tcmpl %s, %s\n", ist->regs[rr], ist->regs[rl]);
     fprintf(fp, "\t%s %s\n", m, reg32_to8(ist->regs[rd]));
