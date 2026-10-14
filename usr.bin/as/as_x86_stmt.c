@@ -485,6 +485,46 @@ static struct {
     size_t cap;
 } mn_memo;
 
+/*
+ * The fields of the bytes encode_x86_stmt() last wrote that hold an
+ * operand's expression, as the table's emitter said them; what puts a
+ * byte before them or among them moves them with x86_fields_move().
+ */
+static as_x86_fields_t x86_fields;
+
+/* The fields from `at` on are `by` bytes further on. */
+static void x86_fields_move(size_t at, int by) {
+    unsigned k;
+
+    for (k = 0; k < x86_fields.n; ++k) {
+        if (x86_fields.f[k].off >= at) {
+            x86_fields.f[k].off = (unsigned char)(x86_fields.f[k].off + by);
+        }
+    }
+}
+
+const as_x86_fields_t *x86_stmt_fields(void) {
+    return &x86_fields;
+}
+
+void x86_stmt_fields_rename(const void *from, const void *to) {
+    unsigned k;
+
+    for (k = 0; k < x86_fields.n; ++k) {
+        if (x86_fields.f[k].expr == from) {
+            x86_fields.f[k].expr = to;
+        }
+    }
+}
+
+void x86_stmt_fields_put(const as_x86_fields_t *f) {
+    if (f != NULL) {
+        x86_fields = *f;
+    } else {
+        x86_fields.n = 0;
+    }
+}
+
 void mn_facts_free(void) {
     size_t i;
 
@@ -1080,8 +1120,25 @@ static int emit_x86_lone_rex(const as_instruction_t *insn, const char *mn, unsig
     return 0;
 }
 
+static int convert_operand_x86_as(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
+                                  int intel_syntax, char *errbuf, size_t errbuf_sz);
+
+/* An operand as the emitter takes it, with the expression it was written
+ * with, which tells the field of the bytes that holds it. */
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                int intel_syntax, char *errbuf, size_t errbuf_sz) {
+    int rc = convert_operand_x86_as(op, mnemonic, dst, is64, intel_syntax, errbuf, errbuf_sz);
+
+    if (rc == 0 && op != NULL) {
+        dst->expr = op->kind == AS_OPERAND_MEMORY                                       ? (const void *)op->u.mem.disp
+                    : op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF ? (const void *)op->u.expr
+                                                                                         : NULL;
+    }
+    return rc;
+}
+
+static int convert_operand_x86_as(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
+                                  int intel_syntax, char *errbuf, size_t errbuf_sz) {
     long long v;
 
     memset(dst, 0, sizeof(*dst));
@@ -2006,6 +2063,7 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         if (rc > 0) {
             code[0] = 0x9b;
             (*code_len)++;
+            x86_fields_move(0, 1);
         }
         return rc;
     }
@@ -2052,6 +2110,12 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
                 code[3 + i] = (unsigned char)(((unsigned long long)where >> (i * 8u)) & 0xffu);
             }
             *code_len = 11;
+            x86_fields.n = 1;
+            x86_fields.f[0].expr = op->u.expr;
+            x86_fields.f[0].off = 3;
+            x86_fields.f[0].width = 8;
+            x86_fields.f[0].kind = AS_X86_FIELD_IMM;
+            x86_fields.f[0].flags = 0;
             return 1;
         }
     }
@@ -2355,6 +2419,7 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
     rq.level = cfg->is_64 ? cfg->x86_64_isa_level : 4u;
     rq.explicit_rex = (insn->prefixes & AS_PREFIX_REX) != 0 || (insn->pseudo & AS_PSEUDO_REX) != 0;
     rq.rex_bits = insn->rex_bits & 0xfu;
+    rq.fields = &x86_fields;
     {
         int rc = as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
 
@@ -2678,6 +2743,8 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
     code[at] = (unsigned char)(0xa0u + (code[at] & 1u) + ((code[at] & 2u) ? 0u : 2u));
     memmove(code + at + 1, code + at + 2, disp_len);
     (*code_len)--;
+    /* (The address is a byte nearer, the ModRM byte gone.) */
+    x86_fields_move(at + 2, -1);
 }
 
 /*
@@ -4046,6 +4113,7 @@ static int x86_lift_address_to_rex2(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, co
             }
             memmove(code + at + 2, code + at + 1, *code_len - at - 1);
             (*code_len)++;
+            x86_fields_move(at + 1, 1);
         }
         code[at] = 0xd5u;
         code[at + 1] = (unsigned char)((two_byte ? 0x80u : 0u) | (high_index ? 0x20u : 0u) | (high_base ? 0x10u : 0u) | rex);
@@ -4060,6 +4128,8 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
 
     /* (For the emitters that are handed operands and no mode.) */
     x86_emit_code16 = cfg != NULL && !cfg->is_64 && cfg->x86_code_bits == 16u;
+    /* (What has no fields said of it has none.) */
+    x86_fields.n = 0;
 
     /*
      * APX's registers, %r16 to %r31: whoever assembles a statement
@@ -4375,11 +4445,22 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
                     return -1;
                 }
                 n = *code_len;
-                if ((code16 ? x86_disp16_offset(code + 1, n, 1, &off) : x86_disp32_offset(code + 1, n, 0, &off)) != 0 ||
-                    off == 0 || off + (code16 ? 2u : 4u) > n) {
-                    snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and no address it can be for",
-                             st->u.instr.mnemonic);
-                    return -1;
+                /* (Where the address is, the emitter has said.) */
+                {
+                    unsigned k;
+                    int found = 0;
+
+                    for (k = 0; k < x86_fields.n && !found; ++k) {
+                        if (x86_fields.f[k].kind == AS_X86_FIELD_DISP && x86_fields.f[k].width == (code16 ? 2u : 4u)) {
+                            off = x86_fields.f[k].off;
+                            found = 1;
+                        }
+                    }
+                    if (!found || off == 0 || off + (code16 ? 2u : 4u) > n) {
+                        snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and no address it can be for",
+                                 st->u.instr.mnemonic);
+                        return -1;
+                    }
                 }
                 off += 1;
                 /* (The byte before the address is the ModRM byte, whose
@@ -4407,6 +4488,19 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
                 }
                 code[0] = 0x67;
                 *code_len = n + 1;
+                /* (Behind the prefix; the address of the other width,
+                 * and what follows it as much further.) */
+                {
+                    unsigned k;
+
+                    x86_fields_move(0, 1);
+                    x86_fields_move(off + 1, code16 ? 2 : -2);
+                    for (k = 0; k < x86_fields.n; ++k) {
+                        if (x86_fields.f[k].kind == AS_X86_FIELD_DISP && x86_fields.f[k].off == off) {
+                            x86_fields.f[k].width = code16 ? 4u : 2u;
+                        }
+                    }
+                }
                 return 0;
             }
         }
@@ -4459,6 +4553,7 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
                     }
                     code[0] = 0x66;
                     (*code_len)++;
+                    x86_fields_move(0, 1);
                     return 0;
                 }
             }
@@ -4486,6 +4581,7 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
                 rc = encode_x86_stmt(ctx, cfg, &bare, code + 1, code_cap - 1, code_len, encerr, encerr_sz);
                 if (rc == 0) {
                     (*code_len)++;
+                    x86_fields_move(0, 1);
                 }
                 return rc;
             }
@@ -4775,155 +4871,6 @@ int x86_cond_code(const char *mnemonic, unsigned *cc_out) {
     return -1;
 }
 
-int x86_disp16_offset(const unsigned char *code, size_t len, int code16, size_t *off_out) {
-    size_t i = 0;
-    /* Of 16 bits in 16-bit code, and in 32-bit code behind the prefix;
-     * the prefix in 16-bit code makes it of 32. */
-    int addr16 = code16;
-    unsigned mod;
-    unsigned rm;
-
-    /* A wait before an x87 instruction is not part of it. */
-    if (len > 1 && code[0] == 0x9b) {
-        i = 1;
-    }
-    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
-                       code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                       code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
-        if (code[i] == 0x67) {
-            addr16 = !code16;
-        }
-        i++;
-    }
-    if (!addr16 || i >= len) {
-        return -1;
-    }
-    /* A move between the accumulator and an address with no ModRM:
-     * the address is what follows the opcode. */
-    if (code[i] >= 0xa0 && code[i] <= 0xa3) {
-        if (i + 3 != len) {
-            return -1;
-        }
-        *off_out = i + 1;
-        return 0;
-    }
-    /* VEX and EVEX, which in 32-bit code are told from les, lds and
-     * bound by the two top bits of the next byte. */
-    if (i + 1 < len && code[i] == 0xc5 && (code[i + 1] & 0xc0u) == 0xc0u) {
-        i += 2;
-    } else if (i + 1 < len && code[i] == 0xc4 && (code[i + 1] & 0xc0u) == 0xc0u) {
-        i += 3;
-    } else if (i + 1 < len && code[i] == 0x62 && (code[i + 1] & 0xc0u) == 0xc0u) {
-        i += 4;
-    } else if (code[i] == 0x0f) {
-        i++;
-        if (i < len && (code[i] == 0x38 || code[i] == 0x3a)) {
-            i++;
-        }
-    }
-    i++;
-    if (i >= len) {
-        return -1;
-    }
-    mod = code[i] >> 6;
-    rm = code[i] & 7u;
-    i++;
-    if (!(mod == 2u || (mod == 0u && rm == 6u)) || i + 2 > len) {
-        return -1;
-    }
-    *off_out = i;
-    return 0;
-}
-
-int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out) {
-    size_t i = 0;
-    unsigned char modrm;
-    unsigned mod;
-    unsigned rm;
-
-    /* A wait before an x87 instruction is not part of it. */
-    if (len > 1 && code[0] == 0x9b) {
-        i = 1;
-    }
-    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
-                       code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                       code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
-        /* In 32-bit code 67 is 16-bit addressing, which has another
-         * ModRM table and a two-byte displacement.  In 64-bit code it
-         * is 32-bit addressing, laid out as 64-bit is. */
-        if (code[i] == 0x67 && !is_64) {
-            return -1;
-        }
-        i++;
-    }
-    if (i + 1 >= len) {
-        return -1;
-    }
-    /* VEX and EVEX: in 32-bit code the same bytes are les, lds and bound
-     * unless the next has its two top bits set. */
-    if (code[i] == 0xc5 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
-        i += 3;
-    } else if (code[i] == 0xc4 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
-        i += 4;
-    } else if (code[i] == 0x62 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
-        i += 5;
-    } else {
-        /* (REX2, of APX: two bytes, and it says itself whether the
-         * opcode is of the two-byte map, with no 0F to say so.) */
-        int rex2 = is_64 && code[i] == 0xd5u;
-
-        if (rex2) {
-            i += 2;
-        } else if (is_64 && (code[i] & 0xf0u) == 0x40u) {
-            i++;
-        }
-        if (!rex2 && i < len && code[i] == 0x0f) {
-            i++;
-            if (i < len && (code[i] == 0x38 || code[i] == 0x3a)) {
-                i++;
-            }
-        } else if (!rex2 && i < len && code[i] >= 0xa0 && code[i] <= 0xa3) {
-            /* mov between the accumulator and an address with no ModRM. */
-            if (is_64 || i + 5 > len) {
-                return -1;
-            }
-            *off_out = i + 1;
-            return 0;
-        }
-        i++;
-    }
-    if (i >= len) {
-        return -1;
-    }
-    modrm = code[i++];
-    mod = modrm >> 6;
-    rm = modrm & 7u;
-    if (mod == 3u) {
-        return -1;
-    }
-    if (rm == 4u) {
-        unsigned char sib;
-
-        if (i >= len) {
-            return -1;
-        }
-        sib = code[i++];
-        if (mod == 0u && (sib & 7u) != 5u) {
-            return -1;
-        }
-        if (mod == 1u) {
-            return -1;
-        }
-    } else if (!((mod == 0u && rm == 5u) || mod == 2u)) {
-        return -1;
-    }
-    if (i + 4 > len) {
-        return -1;
-    }
-    *off_out = i;
-    return 0;
-}
-
 /*
  * Padding between instructions: `need` bytes that do nothing, as GNU as
  * 2.46 writes them.  One long NOP runs faster than as many one-byte
@@ -5151,269 +5098,3 @@ int x86_got_load_kind(const unsigned char *code, size_t len) {
     }
 }
 
-/*
- * How wide the immediate at the end of this encoded instruction is, and
- * whether the operation is a 64-bit one (REX.W) that sign-extends it.
- * -1 for an instruction this does not know the immediate of.
- *
- * A symbolic immediate's relocation goes on that field and is that wide.
- * The width was guessed from the operand as written -- four bytes, or
- * eight when anything about the instruction was 64 bits and the code was
- * long enough to hold eight -- so `addq $sym, 8(%rsp)` had eight bytes of
- * relocation written over all of it but the REX, and `addw $sym, %ax`
- * four over its opcode.
- */
-/*
- * The width of an instruction's immediate, read from its bytes.  The
- * 66 prefix says the other operand size than the code's: 16 bits in
- * 32- and 64-bit code, 32 in 16-bit code -- where it had been read as
- * it is in the others, so that `movw $sym, %ax` was thought to have
- * four bytes and was refused for having two, and `movl $sym, %eax`
- * had a relocation of two on its four.
- */
-int x86_imm_field_width(const unsigned char *code, size_t len, unsigned code_bits,
-                               unsigned *width_out, int *rex_w_out, unsigned char *opcode_out) {
-    int is_64 = code_bits == 64u;
-    size_t i = 0;
-    int has_66 = 0;
-    int rex_w = 0;
-    unsigned char op;
-    unsigned width;
-
-    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
-                       code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                       code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
-        if (code[i] == 0x66) {
-            has_66 = 1;
-        }
-        i++;
-    }
-    if (is_64 && i + 4 < len && code[i] == 0x62u && (code[i + 1] & 0x07u) == 4u) {
-        /* (EVEX of APX, map 4: the old opcodes of one byte behind four
-         * bytes of prefix, with W and the operand-size prefix in it.
-         * A number of one byte is a symbol's too, as GNU as has it.) */
-        rex_w = (code[i + 2] & 0x80u) != 0;
-        has_66 = (code[i + 2] & 0x03u) == 1u;
-        i += 4;
-        op = code[i];
-        if (op == 0x83 || op == 0x6b || op == 0xc0 || op == 0xc1) {
-            if (len - i <= 1) {
-                return -1;
-            }
-            *width_out = 1;
-            *rex_w_out = rex_w;
-            *opcode_out = op;
-            return 0;
-        }
-    } else if (is_64 && i + 1 < len && code[i] == 0xd5u) {
-        /* (REX2, of APX: two bytes, the second with REX's four bits;
-         * an opcode of the two-byte map has no number of these.) */
-        if ((code[i + 1] & 0x80u) != 0) {
-            return -1;
-        }
-        rex_w = (code[i + 1] & 0x08u) != 0;
-        i += 2;
-    } else if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
-        rex_w = (code[i] & 0x08u) != 0;
-        i++;
-    }
-    if (i >= len) {
-        return -1;
-    }
-    if (code_bits == 16u) {
-        has_66 = !has_66;
-    }
-    op = code[i];
-    if (op == 0x80 || op == 0xc6 || op == 0xf6 || op == 0xa8 || (op >= 0xb0 && op <= 0xb7) ||
-        (op & 0xc7u) == 0x04u) {
-        width = 1;
-    } else if (op >= 0xb8 && op <= 0xbf) {
-        width = rex_w ? 8u : (has_66 ? 2u : 4u);
-    } else if (op == 0x81 || op == 0xc7 || op == 0xf7 || op == 0xa9 || op == 0x68 || op == 0x69 ||
-               (op & 0xc7u) == 0x05u) {
-        width = has_66 ? 2u : 4u;
-    } else {
-        return -1;
-    }
-    if (len - i <= width) {
-        return -1;
-    }
-    *width_out = width;
-    *rex_w_out = rex_w;
-    *opcode_out = op;
-    return 0;
-}
-
-/*
- * Where the four-byte displacement of this encoded instruction is: read
- * from its own prefixes, opcode, ModRM and SIB.  -1 if it has none.
- *
- * The relocation of a symbolic address goes there.  It was put on the
- * last four bytes of the instruction, which is where the displacement
- * is unless an immediate follows it: `movl $5, var(%rip)` and
- * `cmpl $0, var` had the relocation on the immediate, which was lost,
- * and nothing on the address.
- */
-/*
- * The two-byte displacement of an instruction of 32-bit code that
- * addresses through 16-bit registers: a 67 prefix, and then ModRM by
- * the 16-bit table, which has no SIB byte.  0 and its place, or -1.
- */
-/* How many of an instruction's first bytes are prefixes, a REX among
- * them in 64-bit code: what its opcode is behind. */
-size_t x86_prefix_count(const unsigned char *code, size_t len, int is_64) {
-    size_t i = 0;
-
-    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3 ||
-                       code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e || code[i] == 0x26 || code[i] == 0x64 ||
-                       code[i] == 0x65)) {
-        i++;
-    }
-    if (is_64 && i + 1 < len && code[i] == 0xd5u) {
-        /* (REX2, of APX, which is two bytes.) */
-        i += 2;
-    } else if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
-        i++;
-    }
-    return i;
-}
-
-int x86_64_disp_reloc_is_unsigned(const unsigned char *code, size_t len, const char *mnemonic) {
-    size_t p = 0;
-    int addr32 = 0;
-
-    while (p < len && (code[p] == 0x26 || code[p] == 0x2e || code[p] == 0x36 || code[p] == 0x3e ||
-                       code[p] == 0x64 || code[p] == 0x65 || code[p] == 0x66 || code[p] == 0x67 ||
-                       code[p] == 0xf0 || code[p] == 0xf2 || code[p] == 0xf3)) {
-        if (code[p] == 0x67) {
-            addr32 = 1;
-        }
-        ++p;
-    }
-    if (addr32) {
-        return 1;
-    }
-    if (mnemonic != NULL && strncasecmp(mnemonic, "lea", 3) == 0) {
-        return !(p < len && (code[p] & 0xf8) == 0x48);
-    }
-    return 0;
-}
-
-/*
- * Whether the bytes are a far jump or call with its target written out
- * -- EA or 9A, an offset of two bytes or of four, and a segment of two
- * -- and where the offset begins.
- */
-int x86_far_pointer_offset(const unsigned char *code, size_t len, size_t *off_out) {
-    size_t p = 0;
-
-    while (p < len && (code[p] == 0x66 || code[p] == 0x67)) {
-        ++p;
-    }
-    if (p >= len || (code[p] != 0xea && code[p] != 0x9a) || (len - p != 5 && len - p != 7)) {
-        return 0;
-    }
-    *off_out = p + 1;
-    return 1;
-}
-
-/*
- * The same in 16-bit code, where an address of 32 bits is behind the
- * prefix that is one of 16 in 32-bit code: the instruction less that
- * prefix is laid out as 32-bit code's is.  (Without this the four
- * bytes were looked for at the instruction's end, and `addr32 bt $1,
- * sym` had its relocation over the count.)
- */
-int x86_disp32_offset_code16(const unsigned char *code, size_t len, size_t *off_out) {
-    unsigned char tmp[32];
-    size_t at = 0;
-    size_t i;
-
-    if (len == 0 || len > sizeof(tmp)) {
-        return -1;
-    }
-    for (i = 0; i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
-                            code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                            code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x9b); ++i) {
-        if (code[i] == 0x67) {
-            break;
-        }
-    }
-    if (i >= len || code[i] != 0x67) {
-        return -1;
-    }
-    at = i;
-    memcpy(tmp, code, at);
-    memcpy(tmp + at, code + at + 1, len - at - 1);
-    if (x86_disp32_offset(tmp, len - 1, 0, off_out) != 0) {
-        return -1;
-    }
-    *off_out += 1;
-    return 0;
-}
-
-void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruction_t *in,
-                                             const as_operand_t *op, const unsigned char *code,
-                                             size_t code_len, uint32_t *type, uint64_t *width) {
-    if (type == NULL || width == NULL || in == NULL || op == NULL || code == NULL) {
-        return;
-    }
-    if (!(machine == EM_386 || machine == EM_X86_64)) {
-        return;
-    }
-    if (!(op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) ||
-        !is_rel_mnemonic(in->mnemonic) || code_len == 0) {
-        return;
-    }
-
-    /* The prefixes are no part of the shape: `data16 jmp sym`, `ds
-     * call sym` and `callw sym` in 64-bit code had the relocation of a
-     * distance of four bytes, which the first and last have not. */
-    while (code_len > 2 && (code[0] == 0x26 || code[0] == 0x2e || code[0] == 0x36 || code[0] == 0x3e ||
-                            code[0] == 0x64 || code[0] == 0x65 || code[0] == 0x66 || code[0] == 0x67)) {
-        code++;
-        code_len--;
-    }
-    if (code_len == 2 &&
-        (code[0] == 0xeb || (code[0] >= 0x70 && code[0] <= 0x7f) || (code[0] >= 0xe0 && code[0] <= 0xe3))) {
-        *type = (machine == EM_X86_64) ? R_X86_64_PC8 : R_386_PC8;
-        *width = 1;
-        return;
-    }
-    if ((code_len == 3 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
-        (code_len == 4 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80) ||
-        (code_len == 4 && code[0] == 0xc7 && code[1] == 0xf8)) {
-        *type = (machine == EM_X86_64) ? R_X86_64_PC16 : R_386_PC16;
-        *width = 2;
-        return;
-    }
-
-    if ((code_len == 5 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
-        (code_len == 6 && code[0] == 0xc7 && code[1] == 0xf8) ||
-        (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
-        /* A call of a local label of another section is of a place in
-         * that section, not of a function that may be elsewhere. */
-        /*
-         * Without an `@PLT` of its own, which is read elsewhere: on
-         * x86-64 a call or a jump, conditional or not, of a symbol
-         * that may be in another object goes by the procedure linkage
-         * table, as GNU as has it; on i386 none does.  (It had been
-         * the call alone, on both.)
-         */
-        if (machine == EM_X86_64) {
-            /* (A symbol and something added to it is a place, not a
-             * procedure: `jmp sym+4` is R_X86_64_PC32.) */
-            int bare = in->operand_count == 1 &&
-                       (in->operands[0].kind == AS_OPERAND_LABEL_REF ||
-                        in->operands[0].kind == AS_OPERAND_IMMEDIATE) &&
-                       in->operands[0].u.expr != NULL && in->operands[0].u.expr->kind == AS_EXPR_SYMBOL;
-
-            *type = (in->target_in_other_section == 1 || !bare) ? R_X86_64_PC32 : R_X86_64_PLT32;
-        } else {
-            *type = R_386_PC32;
-        }
-        *width = 4;
-        return;
-    }
-
-}

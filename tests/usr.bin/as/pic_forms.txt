@@ -29,3 +29,11 @@
 32	c3b800000000/R_386_32@2:.text	.globl f; f: ret; .set f.localalias,f; movl $f.localalias,%eax
 32	c3a100000000/R_386_32@2:.text	.globl f; f: ret; .set f.localalias,f; movl f.localalias,%eax
 64	c3b805000000	.globl f; f: ret; .set k,5; movl $k,%eax
+64	65a30000000000000000/R_X86_64_64@2:sym+0	movabs %eax, %gs:sym
+64	65a10000000000000000/R_X86_64_64@2:sym+0	movabs %gs:sym, %eax
+64	64a20000000000000000/R_X86_64_64@2:sym+4	movabs %al, %fs:sym+4
+32	ea000000000000/R_386_32@1:sym2/R_386_16@5:sym	ljmp $sym, $sym2
+32	9a100000000000/R_386_16@5:sym	lcall $sym, $0x10
+64	81050000000000000000/R_X86_64_PC32@2:sym2-8/R_X86_64_32@6:sym+0	addl $sym, sym2(%rip)
+32	c8000001/R_386_16@1:sym	enter $sym, $1
+32	668b870000/R_386_16@3:sym	.code16;movl sym(%bx), %eax

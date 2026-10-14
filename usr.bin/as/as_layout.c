@@ -4204,6 +4204,9 @@ static int stmt_code_is_anywhere(emit_ctx_t *ctx, const as_stmt_t *st) {
     return 1;
 }
 
+static unsigned char fields_keep(const as_stmt_t *st, struct kept_field *out);
+static void fields_put(const as_stmt_t *st, const struct kept_field *in, unsigned char n);
+
 static struct stmt_code *stmt_code_slot(emit_ctx_t *ctx, const as_stmt_t *st) {
     static int off = -1;
     size_t idx = 0;
@@ -4236,6 +4239,7 @@ static int stmt_code_find(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_off
     }
     memcpy(code, kept->bytes, kept->len);
     *code_len = kept->len;
+    fields_put(st, kept->fields, kept->nfields);
     return 1;
 }
 
@@ -4348,7 +4352,59 @@ static uint32_t text_code_hash(const char *key, size_t n) {
     return h;
 }
 
-int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len) {
+/* The expression an operand was written with, which the emitter's
+ * fields are told by. */
+static const void *operand_expr(const as_operand_t *op) {
+    return op->kind == AS_OPERAND_MEMORY                                       ? (const void *)op->u.mem.disp
+           : op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF ? (const void *)op->u.expr
+                                                                                : NULL;
+}
+
+/* The fields the emitter last said, kept by which of the statement's
+ * operands each holds (one of none, a number folded in, is not kept). */
+static unsigned char fields_keep(const as_stmt_t *st, struct kept_field *out) {
+    const as_x86_fields_t *f = x86_stmt_fields();
+    unsigned char n = 0;
+    unsigned k;
+    size_t i;
+
+    for (k = 0; st != NULL && st->kind == AS_STMT_INSTRUCTION && k < f->n; ++k) {
+        for (i = 0; i < st->u.instr.operand_count; ++i) {
+            if (f->f[k].expr != NULL && operand_expr(&st->u.instr.operands[i]) == f->f[k].expr) {
+                out[n].op = (unsigned char)i;
+                out[n].off = f->f[k].off;
+                out[n].width = f->f[k].width;
+                out[n].kind = f->f[k].kind;
+                out[n].flags = f->f[k].flags;
+                n++;
+                break;
+            }
+        }
+    }
+    return n;
+}
+
+/* And given back, as if the bytes had been encoded again. */
+static void fields_put(const as_stmt_t *st, const struct kept_field *in, unsigned char n) {
+    as_x86_fields_t f;
+    unsigned k;
+
+    f.n = 0;
+    for (k = 0; st != NULL && st->kind == AS_STMT_INSTRUCTION && k < n; ++k) {
+        if (in[k].op < st->u.instr.operand_count) {
+            f.f[f.n].expr = operand_expr(&st->u.instr.operands[in[k].op]);
+            f.f[f.n].off = in[k].off;
+            f.f[f.n].width = in[k].width;
+            f.f[f.n].kind = in[k].kind;
+            f.f[f.n].flags = in[k].flags;
+            f.n++;
+        }
+    }
+    x86_stmt_fields_put(&f);
+}
+
+int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len,
+                   const as_stmt_t *st) {
     uint32_t h = text_code_hash(key, n);
     size_t at;
 
@@ -4364,6 +4420,7 @@ int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_c
             }
             memcpy(code, t->bytes, t->len);
             *code_len = t->len;
+            fields_put(st, t->fields, t->nfields);
             return 1;
         }
     }
@@ -4372,7 +4429,7 @@ int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_c
 
 /* (For want of memory the statement is not kept, and is encoded again
  * when it is written again.) */
-void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len) {
+void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len, const as_stmt_t *st) {
     uint32_t h = text_code_hash(key, n);
     struct text_code *t;
     size_t at;
@@ -4409,6 +4466,7 @@ void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t
     t->hash = h;
     t->len = (unsigned char)code_len;
     memcpy(t->bytes, code, code_len);
+    t->nfields = fields_keep(st, t->fields);
     text_codes.count++;
 }
 
@@ -4444,14 +4502,14 @@ static int encode_x86_stmt_by_text(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, uns
     if (n == 0) {
         return 1;
     }
-    if (text_code_find(key, n, code, code_cap, code_len)) {
+    if (text_code_find(key, n, code, code_cap, code_len, st)) {
         return 0;
     }
     rc = encode_x86_stmt(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
     /* (One that has a warning to make is not kept: the next that is
      * written the same has the warning to make too.) */
     if (rc == 0 && (cfg == NULL || cfg->warnings == NULL || cfg->warnings->asked == asked)) {
-        text_code_keep(key, n, code, *code_len);
+        text_code_keep(key, n, code, *code_len, st);
     }
     return rc;
 }
@@ -4469,6 +4527,7 @@ static void stmt_code_keep(emit_ctx_t *ctx, const as_stmt_t *st, uint64_t sec_of
     kept->anywhere = (unsigned char)stmt_code_is_anywhere(ctx, st);
     kept->len = (unsigned char)code_len;
     memcpy(kept->bytes, code, code_len);
+    kept->nfields = fields_keep(st, kept->fields);
 }
 
 /*
@@ -4564,8 +4623,14 @@ static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_
                 local_cfg.x86_rel_is_disp = 0u;
                 local_cfg.have_current_text_offset = 1u;
                 local_cfg.current_text_offset = sec_off;
-                return emit_resolved_x86_branch_ex(&local_cfg, &tmp, sec_off, abs_target, is_short, code, code_cap,
-                                                   code_len, encerr, encerr_sz);
+                {
+                    int rc = emit_resolved_x86_branch_ex(&local_cfg, &tmp, sec_off, abs_target, is_short, code,
+                                                         code_cap, code_len, encerr, encerr_sz);
+
+                    /* (The place stood in for what was written.) */
+                    x86_stmt_fields_rename(&texpr, st->u.instr.operands[0].u.expr);
+                    return rc;
+                }
             }
             if (call_to_place_target(st, sec_off, &abs_target) == 0) {
                 return emit_resolved_x86_branch_ex(&stmt_cfg, st, sec_off, abs_target, 0, code, code_cap, code_len,
@@ -4637,6 +4702,8 @@ static int encode_x86_stmt_at(emit_ctx_t *ctx, const char *section_name, uint64_
             {
                 int rc = emit_resolved_x86_branch_ex(&local_cfg, &tmp, sec_off, abs_target, may_short, code, code_cap,
                                                   code_len, encerr, encerr_sz);
+
+                x86_stmt_fields_rename(&texpr, st->u.instr.operands[0].u.expr);
                 as_expr_free(raw_local_expr);
                 return rc;
             }
@@ -4714,6 +4781,8 @@ unresolved_rel_target:
             unsigned char kind;
             unsigned char len;
             unsigned char bytes[16];
+            unsigned char nfields;
+            struct kept_field fields[AS_X86_FIELDS_MAX];
         } kept[64];
         static size_t kept_count;
         static int off = -1;
@@ -4762,6 +4831,7 @@ unresolved_rel_target:
                 }
                 memcpy(code, kept[k].bytes, kept[k].len);
                 *code_len = kept[k].len;
+                fields_put(st, kept[k].fields, kept[k].nfields);
                 return 0;
             }
         }
@@ -4769,6 +4839,7 @@ unresolved_rel_target:
         if (rc == 0 && *code_len <= sizeof(want.bytes) && kept_count < sizeof(kept) / sizeof(kept[0])) {
             want.len = (unsigned char)*code_len;
             memcpy(want.bytes, code, *code_len);
+            want.nfields = fields_keep(st, want.fields);
             kept[kept_count++] = want;
         }
         return rc;

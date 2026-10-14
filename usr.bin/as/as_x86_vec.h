@@ -224,6 +224,9 @@ typedef struct {
     unsigned char pfx_hle;  /* F2 or F3 */
     unsigned char pfx_lock; /* F0 */
     unsigned char pfx_rep;  /* F2 or F3 */
+    /* Where the emitter says which of the bytes it wrote hold an
+     * operand's expression, or NULL. */
+    as_x86_fields_t *fields;
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */

@@ -7,7 +7,3 @@
 .data | .long 0 | lv: .long 0 | .text | movabs $lv,%rax
 .data | .long 0 | lv: .long 0 | .text | call lv
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
-int $sym
-ret $sym
-in $sym,%al
-out %al,$sym

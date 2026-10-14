@@ -18,7 +18,24 @@ typedef struct {
     size_t at;
     char *errbuf;
     size_t errbuf_sz;
+    as_x86_fields_t *fields;
 } vec_ctx_t;
+
+/* That the field about to be written, of `width` bytes, holds `op`'s
+ * expression: said where the operand has one. */
+static void note_field(vec_ctx_t *ctx, const as_x86_operand_t *op, unsigned width, unsigned kind, unsigned flags) {
+    as_x86_field_t *f;
+
+    if (ctx->fields == NULL || op == NULL || op->expr == NULL || ctx->fields->n >= AS_X86_FIELDS_MAX) {
+        return;
+    }
+    f = &ctx->fields->f[ctx->fields->n++];
+    f->expr = op->expr;
+    f->off = (unsigned char)ctx->at;
+    f->width = (unsigned char)width;
+    f->kind = (unsigned char)kind;
+    f->flags = (unsigned char)flags;
+}
 
 static void vec_err(vec_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -638,6 +655,12 @@ static unsigned scale_bits(unsigned scale) {
  * VEX, and under EVEX the bytes the instruction reads at the address.
  * 0 is a size not known, and then there is no one-byte displacement.
  */
+/* What a displacement of four bytes is in 64-bit code: one of an address
+ * of 32 bits is not extended at all. */
+static unsigned disp_flags(const as_x86_vec_req_t *rq, const as_x86_mem_t *m) {
+    return rq->mode == 64u && (m->addr_bits == 32u || rq->pfx_67 != 0) ? AS_X86_FIELD_F_UNSIGNED : 0u;
+}
+
 static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, const as_x86_operand_t *rm,
                      unsigned disp8_n, int force_sib, unsigned *x, unsigned *b, unsigned *x4, unsigned *v4) {
     const as_x86_mem_t *m;
@@ -678,6 +701,10 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
             bytes[n++] = 0;
         }
         for (k = 0; k < n; ++k) {
+            /* (What follows the ModRM byte is the displacement.) */
+            if (k == 1) {
+                note_field(ctx, rm, (unsigned)(n - 1), AS_X86_FIELD_DISP, 0);
+            }
             if (put8(ctx, bytes[k]) != 0) {
                 return -1;
             }
@@ -694,7 +721,11 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
             vec_err(ctx, "%%rip is an address of 64-bit code");
             return -1;
         }
-        return put8(ctx, regbits | 5u) != 0 || put32(ctx, (uint32_t)disp) != 0 ? -1 : 0;
+        if (put8(ctx, regbits | 5u) != 0) {
+            return -1;
+        }
+        note_field(ctx, rm, 4, AS_X86_FIELD_DISP, AS_X86_FIELD_F_RIP | disp_flags(rq, m));
+        return put32(ctx, (uint32_t)disp);
     }
     if (m->has_index) {
         *x = ((unsigned)m->index >> 3) & 1u;
@@ -705,14 +736,16 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
          * either it is an absolute address, which 64-bit code writes
          * with a SIB byte, the form without being %rip's. */
         if (!m->has_index && rq->mode != 64u) {
-            return put8(ctx, regbits | 5u) != 0 || put32(ctx, (uint32_t)disp) != 0 ? -1 : 0;
+            if (put8(ctx, regbits | 5u) != 0) {
+                return -1;
+            }
+        } else if (put8(ctx, regbits | 4u) != 0 ||
+                   put8(ctx, (scale_bits(m->scale) << 6) | (m->has_index ? ((unsigned)m->index & 7u) << 3 : 0x20u) |
+                                 5u) != 0) {
+            return -1;
         }
-        return put8(ctx, regbits | 4u) != 0 ||
-                       put8(ctx, (scale_bits(m->scale) << 6) | (m->has_index ? ((unsigned)m->index & 7u) << 3 : 0x20u) |
-                                         5u) != 0 ||
-                       put32(ctx, (uint32_t)disp) != 0
-                   ? -1
-                   : 0;
+        note_field(ctx, rm, 4, AS_X86_FIELD_DISP, disp_flags(rq, m));
+        return put32(ctx, (uint32_t)disp);
     }
     base = (unsigned)m->base;
     *b = (base >> 3) & 1u;
@@ -747,9 +780,14 @@ static int put_modrm(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, unsigned reg, c
         return -1;
     }
     if (mod == 1) {
+        note_field(ctx, rm, 1, AS_X86_FIELD_DISP, 0);
         return put8(ctx, (unsigned)disp8 & 0xffu);
     }
-    return mod == 2 ? put32(ctx, (uint32_t)disp) : 0;
+    if (mod == 2) {
+        note_field(ctx, rm, 4, AS_X86_FIELD_DISP, disp_flags(rq, m));
+        return put32(ctx, (uint32_t)disp);
+    }
+    return 0;
 }
 
 /* A register of a role: its number, 0 if the role has none. */
@@ -888,10 +926,11 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
             }
             return -1;
         }
-        if (put8(ctx, t->opcode) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0) {
+        if (put8(ctx, t->opcode) != 0) {
             return -1;
         }
-        return 0;
+        note_field(ctx, to, 1, AS_X86_FIELD_REL, 0);
+        return put8(ctx, (unsigned)disp & 0xffu);
     }
     /* (And a `w` outside 16-bit code has the operand size's for its
      * own: `data16 callw` is refused, as GNU as refuses it.) */
@@ -919,7 +958,11 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
     if (t->disp8_n != 0 && known && !rq->force_near) {
         disp = rq->rel_is_disp ? target : target - ((long long)rq->offset + pre + 2);
         if (disp >= -128 && disp <= 127) {
-            return put8(ctx, t->disp8_n) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0 ? -1 : 0;
+            if (put8(ctx, t->disp8_n) != 0) {
+                return -1;
+            }
+            note_field(ctx, to, 1, AS_X86_FIELD_REL, 0);
+            return put8(ctx, (unsigned)disp & 0xffu);
         }
     }
     /* (Of two bytes or four by the size of the row, or the other where
@@ -945,6 +988,7 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
     if ((opcode_len == 2u && put8(ctx, 0x0fu) != 0) || put8(ctx, t->opcode) != 0) {
         return -1;
     }
+    note_field(ctx, to, near_bytes, AS_X86_FIELD_REL, 0);
     for (k = 0; k < near_bytes; ++k) {
         if (put8(ctx, (unsigned)(((unsigned long long)disp >> (k * 8u)) & 0xffu)) != 0) {
             return -1;
@@ -973,6 +1017,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     unsigned len = t->len == AS_VEC_LIG ? 0u : t->len;
     uint8_t tail[16];
     vec_ctx_t tc = *ctx;
+    unsigned tail_fields = 0;
     size_t prefix;
     size_t i;
 
@@ -1018,6 +1063,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (put8(ctx, t->opcode) != 0 || put8(ctx, t->disp8_n) != 0) {
             return -1;
         }
+        note_field(ctx, to, bytes, AS_X86_FIELD_REL, AS_X86_FIELD_F_SIGNED16);
         for (k = 0; k < bytes; ++k) {
             if (put8(ctx, (unsigned)(((unsigned long long)disp >> (k * 8u)) & 0xffu)) != 0) {
                 return -1;
@@ -1105,6 +1151,13 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                                   (rq->explicit_rex ? 0x40u | rq->rex_bits : 0u));
             int far = preg > 15u;
 
+            /* (A REX.W written where the instruction has its own is the
+             * same prefix twice, which GNU as refuses: `rex.w lretq`.) */
+            if ((t->flags & AS_VEC_F_BASE) != 0 && t->w == AS_VEC_W1 && rq->explicit_rex &&
+                (rq->rex_bits & 8u) != 0) {
+                vec_err(ctx, "'%s' has the REX.W prefix already", t->name);
+                return -1;
+            }
             if ((rex != 0 || far) && rq->mode != 64u) {
                 vec_err(ctx, far ? "'%s': %%r16 to %%r31 are registers of 64-bit code"
                                  : "'%s': a REX prefix outside 64-bit code",
@@ -1187,6 +1240,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                             bytes == 1u ? "" : "s");
                     return -1;
                 }
+                note_field(ctx, num, bytes, AS_X86_FIELD_IMM, 0);
                 for (b = 0; b < bytes; ++b) {
                     if (put8(ctx, num->imm_symbolic ? 0u : (unsigned)(((uint64_t)num->u.imm >> (b * 8u)) & 0xffu)) != 0) {
                         return -1;
@@ -1211,6 +1265,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                     vec_err(ctx, "'%s': an address of eight bytes is of 64-bit code", t->name);
                     return -1;
                 }
+                note_field(ctx, at, 8, AS_X86_FIELD_DISP, 0);
                 for (k8 = 0; k8 < 8u; ++k8) {
                     if (put8(ctx, (unsigned)((where >> (k8 * 8u)) & 0xffu)) != 0) {
                         return -1;
@@ -1225,6 +1280,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                     vec_err(ctx, "'%s': an address of another size than the code's", t->name);
                     return -1;
                 }
+                note_field(ctx, at, rq->mode == 16u ? 2u : 4u, AS_X86_FIELD_DISP, 0);
                 if (rq->mode == 16u ? (put8(ctx, where & 0xffu) != 0 || put8(ctx, (where >> 8) & 0xffu) != 0)
                                     : put32(ctx, where) != 0) {
                     return -1;
@@ -1244,6 +1300,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
              * row with no VEX has no use for `len` but to say so.) */
             if (t->len == AS_VEC_LEGACY_IMM64) {
                 if (!imm->imm_symbolic || (t->flags & AS_VEC_F_BASE) != 0) {
+                    note_field(ctx, imm, 8, AS_X86_FIELD_IMM, 0);
                     for (k2 = 0; k2 < 8u; ++k2) {
                         if (put8(ctx, imm->imm_symbolic ? 0u
                                                         : (unsigned)(((uint64_t)imm->u.imm >> (k2 * 8u)) & 0xffu)) != 0) {
@@ -1302,6 +1359,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                     vec_err(ctx, "the number %lld is not of one byte", (long long)imm->u.imm);
                     return -1;
                 }
+                note_field(ctx, imm, 1, AS_X86_FIELD_IMM, 0);
                 return put8(ctx, imm->imm_symbolic ? 0u : (unsigned)imm->u.imm & 0xffu);
             }
             /* (Four bytes that 64 bits are made of by their sign must
@@ -1316,6 +1374,10 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 vec_err(ctx, "the number %lld is not of %u bytes", (long long)imm->u.imm, wide);
                 return -1;
             }
+            note_field(ctx, imm, wide, AS_X86_FIELD_IMM,
+                       wide == 4u && rq->mode == 64u && (t->w == AS_VEC_W1 || strncmp(t->name, "push", 4) == 0)
+                           ? AS_X86_FIELD_F_SEXT
+                           : 0u);
             for (k2 = 0; k2 < wide; ++k2) {
                 if (put8(ctx, imm->imm_symbolic ? 0u : (unsigned)(((uint64_t)imm->u.imm >> (k2 * 8u)) & 0xffu)) != 0) {
                     return -1;
@@ -1364,6 +1426,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     tc.out = tail;
     tc.cap = sizeof(tail);
     tc.at = 0;
+    tail_fields = ctx->fields != NULL ? ctx->fields->n : 0u;
     {
         unsigned n = 1;
 
@@ -1380,6 +1443,18 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             }
         } else if (put_modrm(&tc, rq, reg, rm, n, (t->flags & AS_VEC_F_SIB) != 0, &x, &b, &x4, &v4) != 0) {
             return -1;
+        }
+        /* (lea into less than 64 bits throws the top away: its
+         * displacement may be any 32 bits, signed or not.) */
+        if (t->enc == AS_VEC_LEGACY && t->map == AS_VEC_MAP_ONE && t->opcode == 0x8du && rq->mode == 64u &&
+            ctx->fields != NULL && role_op(t, rq, 'r') != NULL && role_op(t, rq, 'r')->size_bits < 64u) {
+            unsigned k;
+
+            for (k = tail_fields; k < ctx->fields->n; ++k) {
+                if (ctx->fields->f[k].kind == AS_X86_FIELD_DISP) {
+                    ctx->fields->f[k].flags |= AS_X86_FIELD_F_UNSIGNED;
+                }
+            }
         }
     }
     if ((t->flags & AS_VEC_F_SUFFIX) != 0) {
@@ -1404,6 +1479,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         }
     } else if (imm != NULL && row_imm_bytes(t, rq) == 2u && imm->imm_symbolic) {
         /* (A symbol: two bytes for the linker.) */
+        note_field(&tc, imm, 2, AS_X86_FIELD_IMM, 0);
         if (put8(&tc, 0) != 0 || put8(&tc, 0) != 0) {
             return -1;
         }
@@ -1415,6 +1491,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             vec_err(ctx, "the number %lld is not of two bytes", (long long)imm->u.imm);
             return -1;
         }
+        note_field(&tc, imm, 2, AS_X86_FIELD_IMM, 0);
         if (put8(&tc, (unsigned)imm->u.imm & 0xffu) != 0 || put8(&tc, ((unsigned)imm->u.imm >> 8) & 0xffu) != 0) {
             return -1;
         }
@@ -1426,6 +1503,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             vec_err(ctx, "'%s' takes a number that is known here", t->name);
             return -1;
         }
+        note_field(&tc, imm, 4, AS_X86_FIELD_IMM, t->w == AS_VEC_W1 && rq->mode == 64u ? AS_X86_FIELD_F_SEXT : 0u);
         if (put32(&tc, 0) != 0) {
             return -1;
         }
@@ -1437,6 +1515,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             vec_err(ctx, "the number %lld is not of four bytes", (long long)imm->u.imm);
             return -1;
         }
+        note_field(&tc, imm, 4, AS_X86_FIELD_IMM, t->w == AS_VEC_W1 && rq->mode == 64u ? AS_X86_FIELD_F_SEXT : 0u);
         if (put32(&tc, (uint32_t)imm->u.imm) != 0) {
             return -1;
         }
@@ -1456,6 +1535,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             vec_err(ctx, "the number %lld is not of one byte", (long long)imm->u.imm);
             return -1;
         }
+        note_field(&tc, imm, 1, AS_X86_FIELD_IMM, 0);
         if (put8(&tc, (unsigned)imm->u.imm & 0xffu) != 0) {
             return -1;
         }
@@ -1508,6 +1588,13 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         int size16 = (t->flags & AS_VEC_F_OP16) != 0;
         int size32 = (t->flags & AS_VEC_F_OP32) != 0;
 
+        /* (And so of one with ModRM: `rex.w movq %rax, %rbx`.  Not where
+         * a register past the fifteenth makes it REX2, into which what
+         * is written goes.) */
+        if (w != 0 && !high && rq->explicit_rex && (rq->rex_bits & 8u) != 0) {
+            vec_err(ctx, "'%s' has the REX.W prefix already", t->name);
+            return -1;
+        }
         if (put_prefixes(ctx, rq, other_address_size(rq), (size16 && rq->mode != 16u) || (size32 && rq->mode == 16u)) !=
             0) {
             return -1;
@@ -1630,7 +1717,11 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             return -1;
         }
     }
-    (void)prefix;
+    /* (The fields of the opcode's part were said where they are in it,
+     * and it is after the prefixes.) */
+    for (i = tail_fields; ctx->fields != NULL && i < ctx->fields->n; ++i) {
+        ctx->fields->f[i].off = (unsigned char)(ctx->fields->f[i].off + prefix);
+    }
     return 0;
 }
 
@@ -1865,6 +1956,10 @@ int as_x86_vec_encode(const as_x86_vec_req_t *rq, uint8_t *out, size_t out_cap, 
     ctx.cap = out_cap;
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;
+    ctx.fields = rq->fields;
+    if (ctx.fields != NULL) {
+        ctx.fields->n = 0;
+    }
     evex = needs_evex(rq);
 
     for (i = first; i < as_x86_vec_table_count; i = next_row[i]) {

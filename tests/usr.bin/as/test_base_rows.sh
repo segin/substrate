@@ -210,6 +210,11 @@ starts 64 673ee27e '.code64
 ds addr32 loop 1f
 .fill 0x7e
 1:'
+# A REX.W written where the instruction has its own is the prefix twice,
+# but not where REX2 takes it in:
+refused 64 'rex.w lretq'
+refused 64 'rex.w movq %rax, %rbx'
+is 64 d5d8bfd1 'rex.w movsx %r17w, %r18'
 # and the four of the coprocessor that store its state after a wait:
 is 32 9bdd30 'fsave (%eax)'
 is 32 9b2667d93f 'fstcw %es:(%bx)'

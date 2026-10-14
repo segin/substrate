@@ -133,6 +133,11 @@ typedef struct {
      * own -- and nothing else told the two apart.
      */
     unsigned char high8;
+    /* The expression the operand was written with, as the statement
+     * has it -- a number's, an address's displacement, a branch's place
+     * -- or NULL: the field of the instruction that holds it is told
+     * by it (as_x86_field_t). */
+    const void *expr;
     union {
         as_x86_reg_t reg;
         int64_t imm;
@@ -141,6 +146,46 @@ typedef struct {
         unsigned fpu;
     } u;
 } as_x86_operand_t;
+
+/*
+ * A field of an instruction's bytes that holds an operand's expression:
+ * where it is and how wide, and what it is -- a displacement of an
+ * address, a number, the distance of a branch.  The encoder says each
+ * as it writes it, and the relocation of an expression that is not a
+ * number goes there and nowhere else.
+ */
+enum {
+    AS_X86_FIELD_DISP = 1, /* an address: after ModRM, or after the opcode (moffs) */
+    AS_X86_FIELD_IMM,      /* a number */
+    AS_X86_FIELD_REL,      /* the distance of a branch, from the instruction's end */
+};
+
+/* A number of four bytes that the operation extends by its sign to 64
+ * bits: of REX.W, or pushed. */
+#define AS_X86_FIELD_F_SEXT 0x01u
+/* A displacement from %rip. */
+#define AS_X86_FIELD_F_RIP 0x02u
+/* A displacement that is not extended to 64 bits, or whose top is
+ * thrown away: of an address of 32 bits, or of lea into less than 64. */
+#define AS_X86_FIELD_F_UNSIGNED 0x04u
+/* A distance of two bytes that is a signed 16 bits in any code:
+ * xbegin's. */
+#define AS_X86_FIELD_F_SIGNED16 0x08u
+
+typedef struct {
+    const void *expr;
+    unsigned char off;
+    unsigned char width;
+    unsigned char kind;
+    unsigned char flags;
+} as_x86_field_t;
+
+#define AS_X86_FIELDS_MAX 4
+
+typedef struct {
+    as_x86_field_t f[AS_X86_FIELDS_MAX];
+    unsigned n;
+} as_x86_fields_t;
 
 typedef struct {
     const char *mnemonic;

@@ -734,10 +734,12 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 ## E. Fixups: the encoder says where its relocations are
 
-- [ ] **AS-T-190** The encoder shall return, with the bytes of an instruction, a record for each field that holds an expression: its offset, width, whether it is PC-relative, the expression, and the number of bytes of the instruction after it.
+- [x] **AS-T-190** The encoder shall return, with the bytes of an instruction, a record for each field that holds an expression: its offset, width, whether it is PC-relative, the expression, and the number of bytes of the instruction after it.
   Trace: AS-DES-001.  Verify: I; T — a unit test over forms with a displacement, an immediate, and both.  After: 162.
-- [ ] **AS-T-191** The assembler shall make each instruction relocation from a fixup record and from nothing else.
+  Done, 2026-10-14.  The table's emitter says each field as it writes it (`note_field()` in `as_x86_vec.c`, into the request's `fields`): an `as_x86_field_t` of the operand's expression (`expr`, which `convert_operand_x86()` gives every operand that has one), its offset and width, and its kind -- a displacement (of ModRM, or the address after the opcode of moffs), a number, or a branch's distance -- with what the relocation needs besides: from %rip, a number of four bytes extended by its sign, a displacement not extended (an address of 32 bits, lea into less than 64), xbegin's two bytes signed.  The bytes after the field are the instruction's length less its end.  What puts a byte before or among them moves them (`x86_fields_move()`: the wait of fsave, the lock of a %cr8, data16 before a branch, the address size of an absolute address, REX2, the accumulator's shorter move), and both kept forms of an encoding keep them with the bytes, by operand (`struct kept_field`).  `test_x86_fields.sh` holds seven forms to theirs: a displacement, a number, both, from %rip with a number extended, an address of 16 bits, a call, and a number with no expression, which has none.
+- [x] **AS-T-191** The assembler shall make each instruction relocation from a fixup record and from nothing else.
   Trace: AS-DES-001.  Verify: I — the code that derives a relocation's place from the instruction's length and mnemonic is gone.  After: 190.
+  Done, 2026-10-14.  The relocation of an operand is on the field the encoder said, of the width it said, of the kind that is that field's (`as_elf_emit.c`), and an operand of a symbol with no field is refused on its line; a branch to a number has its relocation the same way.  Gone: the reading of the bytes back for a field -- `x86_disp32_offset()`, `x86_disp16_offset()`, `x86_disp32_offset_code16()`, `x86_imm_field_width()`, `x86_far_pointer_offset()`, `x86_prefix_count()`, `x86_64_disp_reloc_is_unsigned()`, `adjust_x86_rel_reloc_to_encoding()` -- and the choice of a type by mnemonic (`default_text_reloc_type()`); 520 lines.  What reading the bytes had wrong, and the fields have right, as GNU as has each: `movabs` with a segment had R_X86_64_32S on the last four of its eight bytes, and has R_X86_64_64 on all of them; a far jump or call to `$sym, …` had four bytes of relocation over the offset and the segment, and has two on the segment; `int`, `ret`, `in` and `out` of a symbol, which the differential's baseline had as differing, do not; and the relocations of an instruction with two are in the order of their fields, as GNU as writes them.  (Which load through the GOT a linker may relax is still read from the opcode, `x86_got_load_kind()`: it is the relocation's kind, not its place.)
 - [x] **AS-T-389** When an instruction has a symbolic address and a symbolic immediate, the assembler shall emit a relocation for each.
   Trace: AS-OBJ-001.  Verify: T — `movl $sym2, sym(%rip)`: `R_X86_64_PC32 sym-8` at 2 and `R_X86_64_32 sym2` at 6, as GNU.  After: 191.
   (Added with 192: today it is refused, "multiple symbolic relocations in one x86 instruction are not yet supported".)
@@ -1376,5 +1378,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-356 tasks: 349 done, 7 open.  Numbers run to 400, with gaps left between
+356 tasks: 351 done, 5 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

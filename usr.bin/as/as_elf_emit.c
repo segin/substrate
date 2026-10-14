@@ -522,13 +522,13 @@ int as_x86_precode(const as_elf_cfg_t *cfg, unsigned code_bits, as_stmt_t *st) {
      * a compiler writes a few hundred instructions many thousands of
      * times, and each was encoded anew as it was read. */
     key_len = text_code_key(NULL, st, code_bits, key, sizeof(key));
-    if (key_len == 0 || !text_code_find(key, key_len, code, sizeof(code), &code_len)) {
+    if (key_len == 0 || !text_code_find(key, key_len, code, sizeof(code), &code_len, st)) {
         if (encode_x86_stmt(NULL, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0 ||
             probe.asked != 0 || code_len == 0 || code_len > sizeof(st->u.instr.code)) {
             return 0;
         }
         if (key_len != 0) {
-            text_code_keep(key, key_len, code, code_len);
+            text_code_keep(key, key_len, code, code_len, st);
         }
     }
     if (code_len == 0 || code_len > sizeof(st->u.instr.code)) {
@@ -1803,42 +1803,6 @@ char *trim_copy_arg(const char *s) {
     return out;
 }
 
-static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t *in, const as_operand_t *op) {
-    if (machine == EM_386) {
-        if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
-            in != NULL && is_rel_mnemonic(in->mnemonic)) {
-            if (is_fixed_short_rel_mnemonic(in->mnemonic)) {
-                return R_386_PC8;
-            }
-            if (streq_ci(in->mnemonic, "call")) {
-                return R_386_PLT32;
-            }
-            return R_386_PC32;
-        }
-        return R_386_32;
-    }
-    if (machine == EM_X86_64) {
-        if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
-            in != NULL && is_rel_mnemonic(in->mnemonic)) {
-            if (is_fixed_short_rel_mnemonic(in->mnemonic)) {
-                return R_X86_64_PC8;
-            }
-            if (streq_ci(in->mnemonic, "call")) {
-                return R_X86_64_PLT32;
-            }
-            return R_X86_64_PC32;
-        }
-        if (op != NULL && op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
-            x86_base_is_ip(op->u.mem.base_reg)) {
-            return R_X86_64_PC32;
-        }
-        if (op != NULL && op->kind == AS_OPERAND_MEMORY) {
-            return R_X86_64_32S;
-        }
-        return R_X86_64_64;
-    }
-    return reloc_type_for_machine(machine);
-}
 
 static int machine_relocation_addend_is_in_place(unsigned machine) {
     return machine == EM_386;
@@ -2793,6 +2757,9 @@ static int emit_relocations(emit_ctx_t *ctx) {
             char encerr[256];
             size_t rel_count = 0;
             int tls_in_stmt = 0;
+            as_x86_fields_t fields;
+            size_t order[4];
+            unsigned order_at[4];
             /*
              * The object's machine, and the one whose instructions
              * these are: .code32 in an ELF64 object is i386's code, and
@@ -2812,6 +2779,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 sec_buf_vec_free(&secbufs);
                 return -1;
             }
+            fields = *x86_stmt_fields();
             if (ctx->cfg->target != 0) {
                 /* The fields a relocation fills are told by the
                  * encoder, with the relocation's own number. */
@@ -2849,8 +2817,42 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         (unsigned long long)cur_off,
                         (unsigned long long)code_len);
             }
+            /* (In the order of their fields in the bytes, as GNU as
+             * writes them: `addl $a, b(%rip)` has b's before a's.) */
+            {
+                size_t n = st->u.instr.operand_count < 4 ? st->u.instr.operand_count : 4;
+                size_t a;
+
+                for (a = 0; a < n; ++a) {
+                    const as_operand_t *o = &st->u.instr.operands[a];
+                    const void *x = o->kind == AS_OPERAND_MEMORY ? (const void *)o->u.mem.disp
+                                    : o->kind == AS_OPERAND_IMMEDIATE || o->kind == AS_OPERAND_LABEL_REF
+                                        ? (const void *)o->u.expr
+                                        : NULL;
+                    unsigned fk;
+
+                    order[a] = a;
+                    order_at[a] = 255u;
+                    for (fk = 0; x != NULL && fk < fields.n; ++fk) {
+                        if (fields.f[fk].expr == x) {
+                            order_at[a] = fields.f[fk].off;
+                        }
+                    }
+                }
+                for (a = 1; a < n; ++a) {
+                    size_t b = a;
+
+                    while (b > 0 && order_at[order[b - 1]] > order_at[order[b]]) {
+                        size_t swap = order[b];
+
+                        order[b] = order[b - 1];
+                        order[b - 1] = swap;
+                        b--;
+                    }
+                }
+            }
             for (j = 0; j < st->u.instr.operand_count; ++j) {
-                const as_operand_t *op = &st->u.instr.operands[j];
+                const as_operand_t *op = &st->u.instr.operands[j < 4 ? order[j] : j];
                 const as_expr_t *e = NULL;
                 const char *sym;
                 const char *rop; /* the operator written on it, or NULL */
@@ -3059,179 +3061,88 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     sym = track.current;
                     addend = (int64_t)taken_value + (int64_t)cur_off;
                 }
-                t = default_text_reloc_type(machine, &st->u.instr, op);
-                if (t == R_386_PC8 || t == R_X86_64_PC8) {
-                    reloc_width = 1;
-                } else if (t == R_386_PC16 || t == R_X86_64_PC16) {
-                    reloc_width = 2;
-                } else if (machine == EM_X86_64 && t == R_X86_64_64) {
-                    reloc_width = 8;
-                    /*
-                     * Most x86-64 ALU/immediate encodings use imm32 (sign-extended),
-                     * not full imm64. If the encoded instruction cannot carry an
-                     * 8-byte immediate, fall back to a 32-bit signed relocation.
-                     */
-                    if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) && code_len < reloc_width) {
-                        t = R_X86_64_32S;
-                        reloc_width = 4;
-                    } else if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
-                        /* (Nor one that is eight bytes long by its
-                         * prefix: `movq $sym@GOTPCREL, %r16` is C7 and
-                         * four bytes behind REX2.) */
-                        unsigned field = 0;
-                        int field_rex_w = 0;
-                        unsigned char field_opcode = 0;
+                /*
+                 * Where the field is that holds the expression, and how
+                 * wide, is what the encoder said as it wrote it
+                 * (as_x86_field_t): nothing is read back from the bytes.
+                 * An instruction with no such field has no room for the
+                 * symbol, and is refused on its line -- `callw sym` was
+                 * four zeros from its first byte.
+                 */
+                {
+                    const as_x86_field_t *fld = NULL;
+                    unsigned fk;
+                    size_t tail;
 
-                        if (x86_imm_field_width(code, code_len, track.x86_code_bits, &field, &field_rex_w,
-                                                &field_opcode) == 0 &&
-                            field == 4) {
-                            t = R_X86_64_32S;
-                            reloc_width = 4;
+                    for (fk = 0; fk < fields.n && fld == NULL; ++fk) {
+                        if (fields.f[fk].expr == (const void *)e) {
+                            fld = &fields.f[fk];
                         }
                     }
-                }
-                adjust_x86_rel_reloc_to_encoding(machine, &st->u.instr, op, code, code_len, &t, &reloc_width);
-                /*
-                 * An immediate that is a symbol: the relocation is the
-                 * field's width and kind.  In 64-bit code a four-byte
-                 * field is sign-extended by a 64-bit operation and by a
-                 * push (R_X86_64_32S) and not by a 32-bit one
-                 * (R_X86_64_32).
-                 */
-                if (op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] == '$' &&
-                    rop == NULL &&
-                    (t == R_386_32 || t == R_X86_64_64 || t == R_X86_64_32S || t == R_X86_64_32)) {
-                    unsigned imm_width;
-                    int imm_rex_w;
-                    unsigned char imm_opcode;
-
-                    if (x86_imm_field_width(code, code_len, track.x86_code_bits, &imm_width, &imm_rex_w,
-                                            &imm_opcode) == 0) {
-                        reloc_width = imm_width;
-                        if (machine == EM_386) {
-                            t = imm_width == 1 ? R_386_8 : (imm_width == 2 ? R_386_16 : R_386_32);
-                        } else if (imm_width == 1) {
-                            t = R_X86_64_8;
-                        } else if (imm_width == 2) {
-                            t = R_X86_64_16;
-                        } else if (imm_width == 8) {
-                            t = R_X86_64_64;
+                    if (fld == NULL || (size_t)fld->off + fld->width > code_len) {
+                        set_err(ctx, "%s:%u: '%s': the instruction has no field for the symbol",
+                                st->file != NULL ? st->file : "<input>", st->line,
+                                st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "");
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    disp_field_off = fld->off;
+                    reloc_width = fld->width;
+                    have_disp_field = fld->kind == AS_X86_FIELD_DISP;
+                    tail = code_len - (disp_field_off + reloc_width);
+                    if (fld->kind == AS_X86_FIELD_REL) {
+                        /*
+                         * The distance of a branch, of one byte, two or
+                         * four.  Without an `@PLT` of its own, which is
+                         * read elsewhere: on x86-64 a branch of four
+                         * bytes to a symbol that may be in another
+                         * object goes by the procedure linkage table, as
+                         * GNU as has it -- but not to a symbol and a
+                         * number, which is a place (`jmp sym+4`), nor to
+                         * a label of another section; on i386 none does.
+                         */
+                        if (reloc_width == 1) {
+                            t = machine == EM_X86_64 ? R_X86_64_PC8 : R_386_PC8;
+                        } else if (reloc_width == 2) {
+                            t = machine == EM_X86_64 ? R_X86_64_PC16 : R_386_PC16;
+                        } else if (machine == EM_X86_64 && e->kind == AS_EXPR_SYMBOL &&
+                                   st->u.instr.target_in_other_section != 1) {
+                            t = R_X86_64_PLT32;
                         } else {
-                            t = (imm_rex_w || imm_opcode == 0x68) ? R_X86_64_32S : R_X86_64_32;
+                            t = machine == EM_X86_64 ? R_X86_64_PC32 : R_386_PC32;
                         }
-                    }
-                }
-                /*
-                 * An address that is a symbol: the relocation goes on the
-                 * displacement, wherever in the instruction that is, and
-                 * in 64-bit code a displacement is four bytes sign-
-                 * extended whatever the operation's size.
-                 */
-                if (machine == EM_386 && track.x86_code_bits == 16u &&
-                    (op->kind == AS_OPERAND_MEMORY ||
-                     (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
-                    x86_disp16_offset(code, code_len, 1, &disp_field_off) == 0) {
-                    /* In 16-bit code an address is of 16 bits: `movw
-                     * sym, %bx` is two bytes of it and R_386_16.  Taken
-                     * for one of 32, it had four bytes of relocation
-                     * and no room for them, and the instruction was
-                     * zeros from its first byte. */
-                    reloc_width = 2;
-                    t = R_386_16;
-                    have_disp_field = 1;
-                } else if ((op->kind == AS_OPERAND_MEMORY ||
-                            (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
-                           reloc_width != 1 && reloc_width != 2 &&
-                           (track.x86_code_bits == 16u && machine == EM_386
-                                ? x86_disp32_offset_code16(code, code_len, &disp_field_off)
-                                : x86_disp32_offset(code, code_len, machine == EM_X86_64, &disp_field_off)) == 0) {
-                    have_disp_field = 1;
-                    reloc_width = 4;
-                    if (machine == EM_X86_64 && t == R_X86_64_64) {
-                        t = R_X86_64_32S;
-                    }
-                } else if (machine == EM_386 &&
-                           (op->kind == AS_OPERAND_MEMORY ||
-                            (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
-                           x86_disp16_offset(code, code_len, track.x86_code_bits == 16u, &disp_field_off) == 0) {
-                    /* `movl sym(%bx), %ecx`: two bytes, and their own
-                     * relocation.  Four were written over the end of the
-                     * instruction, the opcode among them. */
-                    reloc_width = 2;
-                    t = R_386_16;
-                    have_disp_field = 1;
-                } else if (machine == EM_386 && st->u.instr.operand_count == 2 && op->kind != AS_OPERAND_MEMORY &&
-                           op == &st->u.instr.operands[st->u.instr.syntax_intel ? 0 : 1] &&
-                           x86_far_pointer_offset(code, code_len, &disp_field_off)) {
-                    /*
-                     * A far jump or call to `$segment, $symbol`: the
-                     * offset, of two bytes or four, is followed by the
-                     * two of the segment.  The relocation was put on the
-                     * last four bytes, over the segment, which was lost.
-                     * (In Intel's `segment:symbol` the offset is the
-                     * first of the two as they are kept, and for that
-                     * one this was still so.)
-                     */
-                    reloc_width = code_len - 2 - disp_field_off;
-                    t = reloc_width == 2 ? R_386_16 : R_386_32;
-                    have_disp_field = 1;
-                } else if (code_len == 4 && code[0] == 0xc8 && op == &st->u.instr.operands[0] &&
-                           op->kind == AS_OPERAND_IMMEDIATE) {
-                    /* `enter $sym, $1`: the frame's size is the two
-                     * bytes behind the opcode, with one more behind
-                     * them.  The relocation was of four, from the
-                     * opcode on. */
-                    disp_field_off = 1;
-                    reloc_width = 2;
-                    t = machine == EM_X86_64 ? R_X86_64_16 : R_386_16;
-                    have_disp_field = 1;
-                }
-                /*
-                 * A displacement is sign-extended to 64 bits, and its
-                 * relocation says so -- but where the address is of 32
-                 * bits it is not extended at all, and where lea leaves
-                 * its result in less than 64 the top is thrown away:
-                 * for both GNU as gives the relocation that takes any
-                 * 32-bit value, signed or not.
-                 */
-                if (machine == EM_X86_64 && have_disp_field && t == R_X86_64_32S &&
-                    x86_64_disp_reloc_is_unsigned(code, code_len, st->u.instr.mnemonic)) {
-                    t = R_X86_64_32;
-                }
-                /*
-                 * A field is behind an opcode: one that is as long as
-                 * its instruction, or longer, is not a field of it.
-                 * Such a relocation was cut to the instruction's length
-                 * and written from its first byte -- `callw sym` was
-                 * four zeros, the prefix and the opcode gone -- and is
-                 * refused, on its line.
-                 */
-                if (!have_disp_field && code_len <= reloc_width + x86_prefix_count(code, code_len, machine == EM_X86_64)) {
-                    set_err(ctx, "%s:%u: '%s': the instruction has no field of %u bytes for the symbol",
-                            st->file != NULL ? st->file : "<input>", st->line,
-                            st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "", (unsigned)reloc_width);
-                    section_track_free(&track);
-                    sec_buf_vec_free(&secbufs);
-                    return -1;
-                }
-                if (t == R_386_PC8 || t == R_X86_64_PC8) {
-                    addend += -1;
-                } else if (t == R_386_PC16 || t == R_X86_64_PC16) {
-                    addend += -2;
-                } else if ((t == R_386_PC32 || t == R_386_PLT32 ||
-                            t == R_X86_64_PC32 || t == R_X86_64_PLT32) &&
-                           (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
-                           is_rel_mnemonic(st->u.instr.mnemonic)) {
-                    addend += -4;
-                } else if (machine == EM_X86_64 &&
-                           op->kind == AS_OPERAND_MEMORY &&
-                           op->u.mem.base_reg != NULL &&
-                           x86_base_is_ip(op->u.mem.base_reg)) {
-                    addend += -4;
-                    /* Less what follows the field as well: the address
-                     * is counted from the end of the instruction. */
-                    if (have_disp_field) {
-                        addend -= (int64_t)(code_len - (disp_field_off + 4));
+                        addend -= (int64_t)(reloc_width + tail);
+                    } else if (fld->kind == AS_X86_FIELD_IMM || reloc_width != 4) {
+                        /* A number, of the field's width; in 64-bit code
+                         * four bytes are R_X86_64_32S where the operation
+                         * extends them by their sign (of 64 bits, or a
+                         * push) and R_X86_64_32 where not.  An address of
+                         * eight bytes, movabs's, and one of two, of
+                         * 16-bit registers or code, are such too. */
+                        if (machine == EM_386) {
+                            t = reloc_width == 1 ? R_386_8 : reloc_width == 2 ? R_386_16 : R_386_32;
+                        } else {
+                            t = reloc_width == 1   ? R_X86_64_8
+                                : reloc_width == 2 ? R_X86_64_16
+                                : reloc_width == 8 ? R_X86_64_64
+                                : (fld->flags & AS_X86_FIELD_F_SEXT) != 0 || rop != NULL ? R_X86_64_32S
+                                                                                       : R_X86_64_32;
+                        }
+                    } else if ((fld->flags & AS_X86_FIELD_F_RIP) != 0) {
+                        /* From %rip, which is the instruction's end. */
+                        t = R_X86_64_PC32;
+                        addend -= (int64_t)(4 + tail);
+                    } else {
+                        /* A displacement of four bytes is sign-extended
+                         * to 64 bits -- but one of an address of 32 bits
+                         * is not extended at all, and where lea leaves its
+                         * result in less than 64 the top is thrown away:
+                         * for both GNU as gives the relocation that takes
+                         * any 32-bit value. */
+                        t = machine == EM_386                                  ? R_386_32
+                            : (fld->flags & AS_X86_FIELD_F_UNSIGNED) != 0 ? R_X86_64_32
+                                                                          : R_X86_64_32S;
                     }
                 }
                 /*
@@ -3245,15 +3156,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (((machine == EM_386 && t == R_386_32) ||
                      (machine == EM_X86_64 && !have_disp_field &&
                       (t == R_X86_64_64 || t == R_X86_64_32 || t == R_X86_64_32S))) &&
-                    as_strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0 && code_len >= reloc_width) {
-                    addend += (int64_t)(code_len - reloc_width);
+                    as_strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0) {
+                    addend += (int64_t)disp_field_off;
                 }
-                /* (An instruction may have two: an address and a number,
-                 * `movl $a, b`.  Each has its own field, the address's
-                 * found by where displacements go and the number's at
-                 * the instruction's end.) */
-                reloc_off = have_disp_field ? cur_off + (uint64_t)disp_field_off
-                                            : cur_off + (uint64_t)code_len - reloc_width;
+                reloc_off = cur_off + (uint64_t)disp_field_off;
                 if (is_label_difference) {
                     uint64_t code_rel_off = reloc_off - cur_off;
                     long long low = reloc_width >= 8 ? INT64_MIN : -(1ll << (reloc_width * 8 - 1));
@@ -3415,32 +3321,30 @@ static int emit_relocations(emit_ctx_t *ctx) {
              */
             if (rel_count == 0 && (machine == EM_386 || machine == EM_X86_64) && as_parse_is_direct_branch(st) &&
                 is_rel_mnemonic(st->u.instr.mnemonic) && st->u.instr.operands[0].u.expr != NULL) {
-                const unsigned char *op = code;
-                size_t len = code_len;
+                const as_x86_field_t *fld = NULL;
                 long long target;
                 size_t width = 0;
+                size_t at = 0;
+                unsigned fk;
 
-                while (len > 2 && (*op == 0x26 || *op == 0x2e || *op == 0x36 || *op == 0x3e || *op == 0x64 ||
-                                   *op == 0x65 || *op == 0x66 || *op == 0x67 || *op == 0xf2 || *op == 0xf3)) {
-                    op++;
-                    len--;
+                /* (Its field is the branch's distance, as the encoder
+                 * said it.) */
+                for (fk = 0; fk < fields.n && fld == NULL; ++fk) {
+                    if (fields.f[fk].kind == AS_X86_FIELD_REL &&
+                        fields.f[fk].expr == (const void *)st->u.instr.operands[0].u.expr) {
+                        fld = &fields.f[fk];
+                        width = fld->width;
+                        at = fld->off;
+                    }
                 }
-                if (len == 2 && (op[0] == 0xeb || (op[0] >= 0x70 && op[0] <= 0x7f) || (op[0] >= 0xe0 && op[0] <= 0xe3))) {
-                    width = 1;
-                } else if (op[0] == 0xe8 || op[0] == 0xe9) {
-                    width = len == 3 ? 2 : len == 5 ? 4 : 0;
-                } else if ((op[0] == 0x0f && (op[1] & 0xf0) == 0x80) || (op[0] == 0xc7 && op[1] == 0xf8)) {
-                    /* (And xbegin, C7 F8, where a transaction goes.) */
-                    width = len == 4 ? 2 : len == 6 ? 4 : 0;
-                }
-                if (width != 0 && eval_expr_const(st->u.instr.operands[0].u.expr, &target) == 0) {
+                if (fld != NULL && eval_expr_const(st->u.instr.operands[0].u.expr, &target) == 0) {
                     int64_t addend;
 
                     /* (Outside 64-bit code a number of two bytes is an
                      * address of 16 bits, and 0xffff is -1 from 0; so is
                      * xbegin's of two bytes in any, as GNU as has it.) */
-                    if ((track.x86_code_bits != 64u || op[0] == 0xc7) && width == 2 && target >= 0x8000 &&
-                        target <= 0xffff) {
+                    if ((track.x86_code_bits != 64u || (fld->flags & AS_X86_FIELD_F_SIGNED16) != 0) && width == 2 &&
+                        target >= 0x8000 && target <= 0xffff) {
                         target -= 0x10000;
                     }
                     addend = (int64_t)target - (int64_t)width;
@@ -3472,11 +3376,13 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         sec_buf_vec_free(&secbufs);
                         return -1;
                     }
-                    write_u64_le_at(code + code_len - width,
+                    /* (Less what follows the field, the distance being
+                     * from the instruction's end.) */
+                    addend -= (int64_t)(code_len - (at + width));
+                    write_u64_le_at(code + at,
                                     machine_relocation_addend_is_in_place(obj_machine) ? (uint64_t)addend : 0,
                                     (unsigned)width);
-                    if (cur_sec == NULL ||
-                        elf_add_relocation(cur_sec, cur_off + code_len - width, NULL, type, addend) != ELF_OK) {
+                    if (cur_sec == NULL || elf_add_relocation(cur_sec, cur_off + at, NULL, type, addend) != ELF_OK) {
                         set_err(ctx, "%s:%u: a relocation for a branch to an address could not be made",
                                 st->file != NULL ? st->file : "<input>", st->line);
                         section_track_free(&track);

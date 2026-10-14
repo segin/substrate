@@ -85,6 +85,17 @@ typedef struct {
  * the first -- the labels' places, the text, the relocations -- each
  * encoded every statement again, five times in all.
  */
+/* A field of kept bytes that holds an operand's expression: which
+ * operand of the statement, and the field as the emitter said it
+ * (as_x86_field_t). */
+struct kept_field {
+    unsigned char op;
+    unsigned char off;
+    unsigned char width;
+    unsigned char kind;
+    unsigned char flags;
+};
+
 struct stmt_code {
     uint64_t off;
     unsigned epoch;
@@ -92,6 +103,8 @@ struct stmt_code {
     unsigned char len;      /* 0: not kept */
     unsigned char anywhere; /* the same wherever it stands */
     unsigned char bytes[17];
+    unsigned char nfields;
+    struct kept_field fields[AS_X86_FIELDS_MAX];
 };
 
 /*
@@ -106,6 +119,8 @@ struct text_code {
     uint32_t hash;
     unsigned char len;
     unsigned char bytes[17];
+    unsigned char nfields;
+    struct kept_field fields[AS_X86_FIELDS_MAX];
 };
 
 typedef struct {
@@ -341,6 +356,14 @@ const as_operand_t *x86_operand_with_reg_alias(const emit_ctx_t *ctx, const as_o
 int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
 int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                     size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz);
+/* The fields of the bytes last encoded that hold an operand's
+ * expression, as the emitter said them; and the same set from kept
+ * bytes. */
+const as_x86_fields_t *x86_stmt_fields(void);
+void x86_stmt_fields_put(const as_x86_fields_t *f);
+/* The fields said of `from`, an expression that stood in for another,
+ * are said of `to`. */
+void x86_stmt_fields_rename(const void *from, const void *to);
 int is_call_mnemonic(const char *mn);
 int is_fixed_short_rel_mnemonic(const char *mn);
 int is_rel_mnemonic(const char *mn);
@@ -357,8 +380,6 @@ int x86_base_is_ip(const char *base_reg);
 int x86_branch_flip16(const as_stmt_t *st);
 char x86_branch_size_letter(const as_stmt_t *st, char suffix, unsigned code_bits);
 int x86_cond_code(const char *mnemonic, unsigned *cc_out);
-int x86_disp16_offset(const unsigned char *code, size_t len, int code16, size_t *off_out);
-int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out);
 int x86_fixed_short_branch(const char *mn, unsigned code_bits, int *need67, unsigned char *opcode);
 int x86_operand_classes_refused(const as_instruction_t *insn, int intel_syntax, int is_64, char *encerr,
                                 size_t encerr_sz);
@@ -369,17 +390,9 @@ int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, ui
                                 int allow_short, unsigned char *code, size_t code_cap, size_t *code_len,
                                 char *encerr, size_t encerr_sz);
 unsigned x86_branch_hint(const as_stmt_t *st);
-/* What an instruction's bytes say of where a relocation goes in them,
- * and of what kind it is. */
-void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruction_t *in, const as_operand_t *op,
-                                      const unsigned char *code, size_t code_len, uint32_t *type, uint64_t *width);
-int x86_64_disp_reloc_is_unsigned(const unsigned char *code, size_t len, const char *mnemonic);
-int x86_disp32_offset_code16(const unsigned char *code, size_t len, size_t *off_out);
-int x86_far_pointer_offset(const unsigned char *code, size_t len, size_t *off_out);
+/* Which of the loads through the GOT an instruction is, which a linker
+ * may relax (R_X86_64_GOTPCRELX and its like). */
 int x86_got_load_kind(const unsigned char *code, size_t len);
-int x86_imm_field_width(const unsigned char *code, size_t len, unsigned code_bits, unsigned *width_out,
-                        int *rex_w_out, unsigned char *opcode_out);
-size_t x86_prefix_count(const unsigned char *code, size_t len, int is_64);
 
 /*
  * as_layout.c: where everything is.  The sections as a source goes
@@ -426,9 +439,10 @@ int section_name_is_executable(emit_ctx_t *ctx, const char *name);
 const char *section_name_keep(emit_ctx_t *ctx, const char *name);
 void section_remember(emit_ctx_t *ctx, const char *name, elf_section_t *sec);
 int stmt_is_place_free(const as_stmt_t *st);
-int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len);
+int text_code_find(const char *key, size_t n, unsigned char *code, size_t code_cap, size_t *code_len,
+                   const as_stmt_t *st);
 void text_code_free(void);
-void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len);
+void text_code_keep(const char *key, size_t n, const unsigned char *code, size_t code_len, const as_stmt_t *st);
 size_t text_code_key(emit_ctx_t *ctx, const as_stmt_t *st, unsigned x86_code_bits, char *key, size_t key_sz);
 void virtual_label_cache_free(emit_ctx_t *ctx);
 void stmt_sizes_forget(emit_ctx_t *ctx);

@@ -1,6 +1,5 @@
 # Lines of x86_32_lines.txt that this assembler and GNU as assemble differently.
 # Written by gnu-diff.py --write-baseline; see test_gnu_differential.sh.
-lcall $sym,$sym2
 .data | .long 0 | lv: .long 0 | .text | movl lv,%eax
 .data | .long 0 | lv: .long 0 | .text | movl $lv,%eax
 .data | .long 0 | lv: .long 0 | .text | movl $lv+8,4(%esp)
@@ -14,7 +13,3 @@ nop | lf: nop | movl lf(,%eax,4),%ecx
 .section .foo,"ax" | lf: nop | .text | jmp lf
 .section .foo,"ax" | lf: nop | .text | je lf
 .section .foo,"ax" | lf: nop | .text | movl $lf,%eax
-int $sym
-ret $sym
-in $sym,%al
-out %al,$sym
