@@ -925,6 +925,34 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         vec_err(ctx, "internal: a row with nothing in r/m");
         return -1;
     }
+    /* xbegin (role `X`): its opcode, the row's second byte, and where
+     * the transaction goes if it is abandoned, in two bytes or four by
+     * the code's size or the other that data16 says.  From the end of
+     * the instruction in 64-bit code, where its place is known; else
+     * as written, for the relocation. */
+    if (rm == NULL && t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 && role_op(t, rq, 'X') != NULL) {
+        const as_x86_operand_t *to = role_op(t, rq, 'X');
+        unsigned bytes = (rq->mode == 16u) != (rq->pfx_66 != 0) ? 2u : 4u;
+        long long disp = (long long)to->u.rel;
+        unsigned k;
+
+        if (rq->mode == 64u && !rq->rel_is_disp && rq->has_offset) {
+            disp -= (long long)rq->offset + 2 + bytes;
+        }
+        if (bytes == 2u ? (disp < -32768 || disp > 65535) : (disp < -2147483648ll || disp > 4294967295ll)) {
+            vec_err(ctx, "'%s': its target is further than %u bytes say", t->name, bytes);
+            return -1;
+        }
+        if (put_prefixes(ctx, rq, 0, 0) != 0 || put8(ctx, t->opcode) != 0 || put8(ctx, t->disp8_n) != 0) {
+            return -1;
+        }
+        for (k = 0; k < bytes; ++k) {
+            if (put8(ctx, (unsigned)(((unsigned long long)disp >> (k * 8u)) & 0xffu)) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
     if (rm == NULL && t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 &&
         (role_op(t, rq, 'j') != NULL || role_op(t, rq, 'J') != NULL)) {
         const as_x86_operand_t *near_or_short = role_op(t, rq, 'j');

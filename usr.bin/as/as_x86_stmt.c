@@ -1129,12 +1129,6 @@ static int x86_stmt_has_decorator(const as_instruction_t *insn) {
            insn->rounding_mode >= 0;
 }
 
-/*
- * The segment override of an instruction that one of the VEX or EVEX
- * encoders wrote.  They are given the operands and not the prefix, and
- * `vmovdqa %fs:(%rbx), %ymm0` read from %ds.  The override goes before
- * the VEX prefix, which is where the encoding begins.
- */
 /* The byte of the segment override a statement has -- its segment
  * prefix, or that of an address among its operands -- or 0 for none. */
 static unsigned char x86_segment_byte(const as_instruction_t *insn) {
@@ -1161,90 +1155,6 @@ static unsigned char x86_segment_byte(const as_instruction_t *insn) {
     case AS_X86_SEG_SS: return 0x36;
     default: return 0;
     }
-}
-
-static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code, size_t code_cap,
-                               size_t *code_len) {
-    unsigned char seg;
-    size_t i;
-
-    if (insn == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    seg = x86_segment_byte(insn);
-    if (seg == 0) {
-        return 0;
-    }
-    /* Some emitters write the override of a memory operand themselves;
-     * not twice. */
-    for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                                  code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
-                                  code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
-        if (code[i] == seg) {
-            return 0;
-        }
-    }
-    if (*code_len >= code_cap) {
-        return -1;
-    }
-    memmove(code + 1, code, *code_len);
-    code[0] = seg;
-    (*code_len)++;
-    return 0;
-}
-
-
-/*
- * The address-size prefix of a 64-bit instruction whose address is
- * through 32-bit registers, for the emitters that are handed the
- * statement and write none: x87, the moves to and from %xmm and the
- * segment registers, VEX and EVEX.  Without it `fldl (%eax)` loaded
- * through all of %rax.  It goes after a segment override, where GNU as
- * has it.  In 32-bit code the same prefix is of an address through
- * 16-bit registers; `width` is the one that wants it.
- */
-static int x86_prepend_addr_size(const as_instruction_t *insn, int width, unsigned char *code, size_t code_cap,
-                                 size_t *code_len) {
-    size_t i;
-    size_t at = 0;
-    int need = 0;
-
-    if (insn == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    for (i = 0; i < insn->operand_count; ++i) {
-        const as_operand_t *op = &insn->operands[i];
-
-        if (op->kind != AS_OPERAND_MEMORY) {
-            continue;
-        }
-        /* (`(%dx)` is how a port is written, and no address.) */
-        if (width == 16 && op->u.mem.base_reg != NULL && op->u.mem.index_reg == NULL &&
-            (streq_ci(op->u.mem.base_reg, "dx") || streq_ci(op->u.mem.base_reg, "%dx"))) {
-            continue;
-        }
-        if ((op->u.mem.base_reg != NULL && x86_reg_width_bits(op->u.mem.base_reg) == width) ||
-            (op->u.mem.index_reg != NULL && x86_reg_width_bits(op->u.mem.index_reg) == width)) {
-            need = 1;
-        }
-    }
-    if (!need) {
-        return 0;
-    }
-    while (at < *code_len && (code[at] == 0x26 || code[at] == 0x2e || code[at] == 0x36 || code[at] == 0x3e ||
-                              code[at] == 0x64 || code[at] == 0x65)) {
-        ++at;
-    }
-    if (at < *code_len && code[at] == 0x67) {
-        return 0;
-    }
-    if (*code_len >= code_cap) {
-        return -1;
-    }
-    memmove(code + at + 1, code + at, *code_len - at);
-    code[at] = 0x67;
-    (*code_len)++;
-    return 0;
 }
 
 
@@ -1301,97 +1211,35 @@ static int x86_stmt_is_the_encoders(const as_elf_cfg_t *cfg, const as_instructio
 
 
 /*
- * What goes before the bytes of an emitter that was handed the statement
- * and writes no prefixes of its own: a segment override -- written as a
- * prefix, `fs flds (%eax)`, or on the operand -- and then the address
- * size of 64-bit code.  The first was dropped: `gs movaps (%eax), %xmm0`
- * and `fs cmpxchg %ecx, (%eax)` read from %ds.
+ * A REX prefix written as a statement of its own in 64-bit code, `rex.W`
+ * or `rex64` with nothing after it: the byte, after a segment, an
+ * address size or data16 written before it, in GNU's order.  1 if the
+ * statement is none of these.
  */
-static int x86_stmt_outer_prefixes(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned char *code,
-                                   size_t code_cap, size_t *code_len) {
-    /*
-     * `fsave`, `fstcw` and the others that wait first: the wait is an
-     * instruction of its own, and the prefixes are of the one after it.
-     * `fsave %fs:(%rax)` had the override twice, once on each side of
-     * the wait, and `fsave (%eax)` had the address size before it.
-     */
-    if (*code_len > 1 && code[0] == 0x9b) {
-        size_t len = *code_len - 1;
+static int emit_x86_lone_rex(const as_instruction_t *insn, const char *mn, unsigned char *out, size_t out_cap,
+                             size_t *out_len) {
+    unsigned char seg = x86_segment_byte(insn);
+    size_t n = 0;
 
-        if (x86_prepend_segment(insn, code + 1, code_cap - 1, &len) != 0 ||
-            (cfg->is_64 && x86_prepend_addr_size(insn, 32, code + 1, code_cap - 1, &len) != 0)) {
-            return -1;
-        }
-        *code_len = len + 1;
-        return 0;
+    if (insn->operand_count != 0 || (insn->prefixes & AS_PREFIX_REX) == 0 ||
+        !(as_strcmp(mn, "rex") == 0 || as_strcmp(mn, "rex64") == 0 || strncasecmp(mn, "rex.", 4) == 0)) {
+        return 1;
     }
-    if (x86_prepend_segment(insn, code, code_cap, code_len) != 0) {
+    if (out_cap < 4) {
         return -1;
     }
-    return cfg->is_64 ? x86_prepend_addr_size(insn, 32, code, code_cap, code_len) : 0;
-}
-
-static int x86_prepend_opsize(unsigned char *code, size_t code_cap, size_t *code_len) {
-    size_t at = 0;
-    size_t i;
-
-    if (code == NULL || code_len == NULL || *code_len >= code_cap) {
-        return -1;
+    if (seg != 0) {
+        out[n++] = seg;
     }
-    /* After a segment override and 67, before lock and rep, which is
-     * GNU's order; and not a second one. */
-    while (at < *code_len && (code[at] == 0x26 || code[at] == 0x2e || code[at] == 0x36 || code[at] == 0x3e ||
-                              code[at] == 0x64 || code[at] == 0x65 || code[at] == 0x67)) {
-        ++at;
+    if ((insn->prefixes & AS_PREFIX_ADDR16) != 0) {
+        out[n++] = 0x67;
     }
-    for (i = at; i < *code_len && (code[i] == 0x66 || code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
-        if (code[i] == 0x66) {
-            return 0;
-        }
+    if ((insn->prefixes & AS_PREFIX_DATA16) != 0) {
+        out[n++] = 0x66;
     }
-    memmove(code + at + 1, code + at, *code_len - at);
-    code[at] = 0x66;
-    (*code_len)++;
+    out[n++] = (unsigned char)(0x40u | (insn->rex_bits & 0x0fu));
+    *out_len = n;
     return 0;
-}
-
-static int emit_x86_64_special(const as_instruction_t *insn, unsigned char *out, size_t out_cap, size_t *out_len) {
-    char mnbuf[32];
-
-    if (out_len != NULL) {
-        *out_len = 0;
-    }
-    if (insn == NULL || out == NULL || out_cap < 11) {
-        return -1;
-    }
-    if (normalize_x86_mnemonic(insn->mnemonic, mnbuf, sizeof(mnbuf), NULL) != 0) {
-        return -1;
-    }
-    if (insn->operand_count == 0) {
-        if ((insn->prefixes & AS_PREFIX_REX) != 0 &&
-            (as_strcmp(mnbuf, "rex") == 0 || as_strcmp(mnbuf, "rex64") == 0 || strncasecmp(mnbuf, "rex.", 4) == 0)) {
-            unsigned char rex_only = (unsigned char)(0x40u | (insn->rex_bits & 0x0fu));
-
-            if (out_cap < 1) {
-                return -1;
-            }
-            out[0] = rex_only;
-            if (out_len != NULL) {
-                *out_len = 1;
-            }
-            return 0;
-        }
-    }
-    if (insn->segment_override != NULL) {
-        return -1;
-    }
-    if ((insn->prefixes & ~(AS_PREFIX_REX | AS_PREFIX_DATA16)) != 0) {
-        return -1;
-    }
-
-    /* (And movabs, extrq and insertq, before they were rows of the
-     * table.) */
-    return -1;
 }
 
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
@@ -2655,13 +2503,8 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         snprintf(encerr, encerr_sz, "'%s' cannot be encoded as its pseudo-prefix asks", mnbuf);
         return -1;
     }
-    if (cfg->is_64 && !x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS)) {
-        int s64 = emit_x86_64_special(&st->u.instr, code, code_cap, code_len);
-        if (s64 == 0) {
-            if (*code_len > 0) {
-                return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
-            }
-        }
+    if (cfg->is_64 && emit_x86_lone_rex(&st->u.instr, mnbuf, code, code_cap, code_len) == 0) {
+        return 0;
     }
 
     for (j = 0; j < in.op_count; ++j) {
@@ -2720,24 +2563,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         snprintf(encerr, encerr_sz, "unsupported operand form for '%s': %zu operands", mnbuf,
                  (size_t)st->u.instr.operand_count);
         return -1;
-    }
-    /* xbegin to a place that is no label of this section: the opcode
-     * and four bytes of distance, from the instruction's end in 64-bit
-     * code where the place is known. */
-    if (streq_ci(mnbuf, "xbegin") && in.op_count == 1 && in.ops[0].kind == AS_X86_OP_REL && code_cap >= 6) {
-        long long disp = (long long)in.ops[0].u.rel;
-        unsigned k;
-
-        if (cfg->is_64 && !in.rel_is_disp && in.has_section_offset) {
-            disp -= (long long)in.section_offset + 6;
-        }
-        code[0] = 0xc7;
-        code[1] = 0xf8;
-        for (k = 0; k < 4u; ++k) {
-            code[2u + k] = (unsigned char)(((unsigned long long)disp >> (k * 8u)) & 0xffu);
-        }
-        *code_len = 6;
-        return 0;
     }
     /* Two encoders were asked here, one of 32-bit code and one of
      * 64-bit, about whatever had come this far.  The table has every
@@ -3565,63 +3390,6 @@ static int encode_x86_stmt_either(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, cons
     return rc;
 }
 
-/*
- * In 32-bit code, the prefix of an address through 16-bit registers,
- * where the emitter that wrote the instruction has not put it on.
- */
-static int x86_addr16_prefix(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
-                             size_t *code_len) {
-    size_t skip;
-    size_t len;
-    size_t i;
-
-    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION) {
-        return 0;
-    }
-    /* In 64-bit code the registers of an address say its size to every
-     * emitter; what some did not hear is the prefix written, before an
-     * address from %rip or with no register: `fldl sym(%eip)` was
-     * `fldl sym(%rip)`. */
-    if (cfg->is_64) {
-        if ((st->u.instr.prefixes & AS_PREFIX_ADDR16) == 0 || *code_len == 0) {
-            return 0;
-        }
-        skip = (*code_len > 1 && code[0] == 0x9b) ? 1 : 0;
-        for (i = skip; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                                         code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
-                                         code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
-            if (code[i] == 0x67) {
-                return 0;
-            }
-        }
-        if (*code_len + 1 > code_cap) {
-            return -1;
-        }
-        memmove(code + skip + 1, code + skip, *code_len - skip);
-        code[skip] = 0x67;
-        (*code_len)++;
-        return 0;
-    }
-    /* (A wait is an instruction of its own, and the prefix is of the
-     * one after it.) */
-    skip = (*code_len > 1 && code[0] == 0x9b) ? 1 : 0;
-    for (i = skip; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                                     code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
-                                     code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
-        if (code[i] == 0x67) {
-            return 0;
-        }
-    }
-    len = *code_len - skip;
-    /* (In 16-bit code it is the 32-bit registers that have it:
-     * `fldl (%eax)` there loaded through %bx and %si.) */
-    if (x86_prepend_addr_size(&st->u.instr, cfg->x86_code_bits == 16u ? 32 : 16, code + skip, code_cap - skip, &len) !=
-        0) {
-        return -1;
-    }
-    *code_len = len + skip;
-    return 0;
-}
 
 /* Whether the segment written on an address is the one it has with
  * none written. */
@@ -5610,62 +5378,17 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
         }
     }
 
-    if (st == NULL || st->kind != AS_STMT_INSTRUCTION || (st->u.instr.prefixes & AS_PREFIX_DATA16) == 0) {
+    /* (data16, xacquire and xrelease, and the address size were put on
+     * here after what the encoder had written; they are the table's to
+     * write with the rest of the prefixes.) */
+    {
         int rc = encode_x86_stmt_either(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 
         if (rc == 0) {
             x86_shorten_accumulator_move(cfg, st, code, code_len);
-            rc = x86_addr16_prefix(cfg, st, code, code_cap, code_len);
-        }
-
-        /*
-         * xacquire and xrelease: some of the emitters write a lock and
-         * no repeat prefix, having no instruction that repeats, and the
-         * byte was left out -- `xacquire lock cmpxchg` was `lock
-         * cmpxchg`.  It goes before the lock, where GNU as has it.
-         */
-        if (rc == 0 && st != NULL && st->kind == AS_STMT_INSTRUCTION && (st->u.instr.prefixes & AS_PREFIX_HLE) != 0) {
-            unsigned char want = (st->u.instr.prefixes & AS_PREFIX_REPNE) != 0 ? 0xf2 : 0xf3;
-            size_t at = 0;
-            int have = 0;
-
-            for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                                          code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
-                                          code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
-                have |= code[i] == want;
-                if (code[i] != 0xf0 && code[i] != 0x66) {
-                    at = i + 1;
-                }
-            }
-            if (!have) {
-                if (*code_len + 1 > code_cap) {
-                    return -1;
-                }
-                memmove(code + at + 1, code + at, *code_len - at);
-                code[at] = want;
-                (*code_len)++;
-            }
         }
         return rc;
     }
-    bare = *st;
-    bare.u.instr.prefixes &= ~AS_PREFIX_DATA16;
-    if (encode_x86_stmt_either(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz) != 0) {
-        return -1;
-    }
-    for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
-                                  code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
-                                  code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
-        if (code[i] == 0x66) {
-            snprintf(encerr, encerr_sz, "data16 before '%s', which has the prefix already", st->u.instr.mnemonic);
-            return -1;
-        }
-    }
-    x86_shorten_accumulator_move(cfg, st, code, code_len);
-    if (x86_prepend_opsize(code, code_cap, code_len) != 0) {
-        return -1;
-    }
-    return x86_addr16_prefix(cfg, st, code, code_cap, code_len);
 }
 
 int x86_cond_code(const char *mnemonic, unsigned *cc_out) {
@@ -6053,14 +5776,19 @@ int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, ui
         /* Where a transaction goes if it is abandoned: a distance of
          * the mode's size from the instruction's end.  (No branch that
          * could be resolved, it was said to be, in either mode.) */
-        int op16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
-        size_t len = op16 ? 4u : 6u;
+        /* (data16 makes it the other size, and is the byte before it.) */
+        int data16 = (st->u.instr.prefixes & AS_PREFIX_DATA16) != 0;
+        int op16 = (!cfg->is_64 && cfg->x86_code_bits == 16u) != data16;
+        size_t len = (op16 ? 4u : 6u) + (data16 ? 1u : 0u);
         long long disp = abs_target - ((long long)sec_off + (long long)len);
         size_t n = 0;
 
         if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
             snprintf(encerr, encerr_sz, "xbegin target out of range");
             return -1;
+        }
+        if (data16) {
+            code[n++] = 0x66;
         }
         code[n++] = 0xc7;
         code[n++] = 0xf8;

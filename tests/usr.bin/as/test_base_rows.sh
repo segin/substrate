@@ -129,6 +129,15 @@ is 64 48a31000000000000000 'movabsq %rax, 0x10'
 is 64 6448a11000000000000000 'movabs %fs:0x10, %rax'
 refused 64 'movabs 0x10, %ebx'
 refused 32 'movabs 0x10, %eax'
+# xbegin with data16 is of two bytes of distance; a REX written alone
+# has what is written before it, in GNU's order:
+is 32 66c7f80000 'data16 xbegin 1f
+1:'
+is 64 66c7f80000 'data16 xbegin 1f
+1:'
+is 64 6648 'data16 rex.w'
+is 64 64676641 'data16 fs addr32 rex.b'
+refused 64 'lock rex.w'
 # and the four of the coprocessor that store its state after a wait:
 is 32 9bdd30 'fsave (%eax)'
 is 32 9b2667d93f 'fstcw %es:(%bx)'

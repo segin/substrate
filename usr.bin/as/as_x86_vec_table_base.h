@@ -2467,6 +2467,7 @@
     {"callw", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xe8, W0, 0, "&", "j", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | OP16},
     {"calll", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xe8, W0, 0, "&", "j", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | OP32 | AS_VEC_F_X32},
     {"callq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xe8, W0, 0, "&", "j", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"xbegin", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xc7, W0, 0, "&", "X", 0xf8, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
     /* enter, and the far jump and call to a segment and an offset: two numbers
      * after the opcode. */
     LW("enter", P0, AS_VEC_MAP_ONE, 0xc8, W0, "iu", "21", AS_VEC_F_BASE),
