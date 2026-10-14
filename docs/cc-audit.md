@@ -43,7 +43,8 @@ silent: the program compiled, ran and printed a wrong answer.
 | 4. ABI and other code generation | 10 | 6 |
 | 5. Driver and predefined macros | 2 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
-| 7. Documentation | 1 | 0 |
+| 7. The restored suite itself | 12 | 0 |
+| 8. Documentation | 1 | 0 |
 
 The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 `run_codegen_diff.sh`, and `run_codegen_random.sh`; CI's
@@ -202,7 +203,85 @@ changes as well.  *Suite.*
 - [ ] **CC-32** The suite's `__int128` expectations shall match the
   compiler's behaviour once CC-22 is settled (87, 823, 824).
 
-## 7. Documentation
+## 7. The restored suite itself
+
+The suite was audited for whether its checks are right and can fail.
+How: every runtime test rebuilt with the host's gcc at cc's default
+`-std=gnu17` (or the test's own `-std`) and run; the `clang_*` tests
+with clang 23; every negative test (`! cc ...`) checked for what it
+asserts and passed to gcc with `-pedantic-errors -Werror`; the scripts
+and the `grep` checks read.  189 of 205 runtime tests pass under gcc as
+they stand.  *Reproduced* unless marked.
+
+- [ ] **CC-36** A runtime test shall pass under gcc, unless it tests an
+  extension gcc lacks.  Five assert acceptance of code gcc (and C)
+  rejects: `native_c99_ucn_ident.c` (`A` names a basic-set
+  character, forbidden by C11 6.4.3p2), `native_c99_wide_literals.c` (a
+  wide string assigned to `const char *`),
+  `native_gnu_types_choose.c` (an undeclared identifier in the
+  unselected `__builtin_choose_expr` branch),
+  `native_gnu_static_nonconst_init.c` (a non-constant static
+  initializer) and `native_gnu_attr_type_parse.c` (a vector initialized
+  from an `int`).
+- [ ] **CC-37** A runtime test shall not depend on unspecified
+  behaviour.  `native_c99_types.c`, `native_c99_inline_semantics.c` and
+  `native_gnu89_inline.c` call a function with only an inline
+  definition; whether that uses the inline or an external definition is
+  unspecified (C11 6.7.4p7), and gcc's build does not link.
+- [ ] **CC-38** `native_gnu_asm_goto.c` shall number asm-goto labels as
+  GNU C does: after outputs and inputs, so with one `+r` output the
+  first label is `%l2`, not `%l0`.  gcc rejects the test; cc fails it
+  too (CC-27).
+- [ ] **CC-39** The default `gnu17` mode shall treat trigraphs as gcc's
+  GNU modes do, or the trigraph tests shall name an ISO mode:
+  `native_c95_trigraph.c` and `native_c99_phase12_trigraph_splice.c`
+  rely on trigraphs in `gnu17`, where gcc ignores them.
+- [ ] **CC-40** A `clang_*` test shall pass under clang.  Of five, two
+  do (`asm_goto_quirks`, `builtin_aliases`).
+  `native_clang_blocks_decl.c` assigns a function to a block pointer,
+  which clang rejects -- cc treats blocks as function pointers;
+  `native_clang_ext_vector_attr.c` initializes a vector from, and casts
+  one to, a scalar, which clang (and gcc) reject;
+  `native_clang_attr_placement.c` uses `__attribute__((unused));` as a
+  statement, which clang rejects and gcc accepts -- it tests gcc
+  behaviour under a clang name.
+- [ ] **CC-41** A negative test shall check that cc rejected the input
+  for the reason named, not merely that it failed.  60 of 68 check only
+  the exit status, so a crash, or a tool that cannot run, passes: the
+  `__int128` test passed when `as` could not be executed.  (Run by
+  hand, cc's message does match the name for most of them.)
+- [ ] **CC-42** A negative test shall expect rejection only of invalid
+  code.  Five expect cc to reject valid code:
+  `native_bad_gnu_nested_capture.c` (GNU C allows a nested function to
+  use the enclosing locals; gcc accepts it), `native_bad_sizeof_void.c`
+  (`sizeof(void)` is 1 in GNU modes, the default),
+  `native_bad_attr_noreturn_nonvoid.c` (a `noreturn` function may have
+  a non-void type), `native_bad_attr_nonnull_empty.c` (gcc warns, does
+  not reject) and `native_c90_oldstyle.c` at `-std=c99` (old-style
+  definitions are valid until C23).  These record cc's limits as
+  requirements: they will fail when cc gains the feature.
+- [ ] **CC-43** `run_pp_cmd_injection_test.sh` shall run cc.  It runs
+  `../../usr.bin/cc/cc` from `tests/usr.bin/cc`, which does not exist,
+  and ignores the failure (`|| true`), so it passes without testing
+  anything.
+- [ ] **CC-44** `run_pp_fuzz_smoke.sh` shall fail when cc crashes on its
+  input, and keep the input that made it.  It ignores every result
+  (`|| true`), including SIGSEGV, and its input comes from
+  `/dev/urandom` and is discarded.
+- [ ] **CC-45** If `test_ast2ir.c` does not build, then the suite shall
+  fail.  Its build ends in `|| true`, and the next command runs
+  `./test_ast2ir_bin` -- a stale binary from an earlier run passes.
+- [ ] **CC-46** A check of generated assembly shall show the property
+  under test.  30 of the 190 `grep` checks only look for `.code32` in
+  `-m32 -S` output, which shows the flag was read, not that the code is
+  right: the -m32 output of those tests is never assembled or run.
+  Others look for `jne`, `movl` or `jmp`, which almost any function
+  contains.  *Traced.*
+- [ ] **CC-47** The suite shall use a private temporary directory.  It
+  writes 310 fixed `/tmp/cc_*` paths, so two runs (two CI jobs on one
+  host, or two users) overwrite each other's files.  *Traced.*
+
+## 8. Documentation
 
 - [ ] **CC-33** `usr.bin/cc/README.md` shall describe the compiler as it
   is.  It describes "phase-9", a scalar-only subset, `-E` via the system
@@ -210,4 +289,4 @@ changes as well.  *Suite.*
 
 ---
 
-35 requirements: 17 met, 18 open.
+47 requirements: 17 met, 30 open.
