@@ -12,7 +12,8 @@
 #
 #   ftp.gnu.org         It and its own redirector, ftpmirror.gnu.org, have
 #                       both been unreachable for hours at a time.
-#   www.x.org           X.Org's releases and archive.
+#   www.x.org           X.Org's releases and archive: its own mirrors, and
+#                       the source collections of FreeBSD and NetBSD.
 #   *.freedesktop.org,  fontconfig, dbus, pkg-config, xcb, cairo, pixman.
 #   www.cairographics.org
 #                       www.freedesktop.org has answered a build machine
@@ -44,6 +45,12 @@ substrate_fetch_urls() {
             _sf_path=${1#*/individual/}
             echo "https://xorg.freedesktop.org/archive/individual/${_sf_path}"
             echo "https://artfiles.org/x.org/pub/individual/${_sf_path}"
+            # The mirrors lag X.Org's releases (artfiles has no xtrans
+            # past 1.5.2, libXpm past 3.5.17), and freedesktop.org has
+            # been unreachable from the CI machines for hours: the source
+            # collections of FreeBSD and NetBSD keep every release.
+            echo "http://distcache.FreeBSD.org/ports-distfiles/xorg/${_sf_path}"
+            echo "https://cdn.NetBSD.org/pub/pkgsrc/distfiles/${_sf_path##*/}"
             ;;
         https://*.freedesktop.org/*|https://www.cairographics.org/releases/*)
             _sf_file=${1##*/}
