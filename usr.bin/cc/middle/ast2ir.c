@@ -2923,6 +2923,22 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
 
     if (g_pointer_size_bytes <= 4 && bits <= 32) {
         if (bits == 32) {
+            if (value_size(sf, v) > 4) {
+                /*
+                 * Truncate into a new value: relabelling v would also
+                 * make the instruction that computes it 32-bit.
+                 */
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_MOV;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = v;
+                in.rhs = -1;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory truncating integer value");
+                    return -1;
+                }
+                v = in.dst;
+            }
             set_value_size(sf, v, 4);
             if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
                 sf->value_is_unsigned[v] = 0;
