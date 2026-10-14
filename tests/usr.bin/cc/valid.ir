@@ -1,0 +1,24 @@
+module "m" {
+  target lp64;
+
+  func @sum : fn(i32 %a, i32 %b) -> i32 {
+  entry:
+    %c = add i32 %a, %b;
+    ret i32 %c;
+  }
+
+  func @loop : fn(i32 %n) -> i32 {
+  entry:
+    %z0 = add i32 0, 0;
+    br loop;
+  loop:
+    %z = phi i32 [ %z0, entry ], [ %zn, body ];
+    %cond = icmp slt i32 %z, %n;
+    br_cond i1 %cond, body, exit;
+  body:
+    %zn = add i32 %z, 1;
+    br loop;
+  exit:
+    ret i32 %z;
+  }
+}

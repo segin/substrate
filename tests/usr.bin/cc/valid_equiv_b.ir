@@ -1,0 +1,8 @@
+module "n" {
+  target lp64;
+
+  func @id : fn(i32 %v) -> i32 {
+  entry:
+    ret i32 %v;
+  }
+}
