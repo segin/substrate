@@ -65,6 +65,8 @@ static unsigned x86_stmt_pseudo;
 /* The table is being asked of a statement: what it calls that comes
  * back to ask it again is answered "not mine". */
 static int x86_vec_asking;
+/* Set while umonitor is asked of the table again behind its prefix. */
+static int x86_umonitor_inside;
 
 static int x86_is_string_destination(const char *mn, const as_mem_operand_t *mem);
 
@@ -1229,134 +1231,6 @@ int operand_is_bare_address(const as_operand_t *op) {
  * legacy prefixes -- the bytes before the opcode that are segment
  * overrides, 66, 67, F2 or F3.
  */
-/*
- * VIA's PadLock instructions and the user-mode wait instructions: an
- * opcode in the 0F map and a ModRM byte that is fixed, for PadLock, or
- * has one register in ModRM.rm.
- *
- * PadLock's take no operand.  Each but xstore is defined with a rep
- * prefix, which GNU as writes whether it is in the source or not, and
- * once.  (montmul and xstore-rng were the two bytes 0F A6 and 0F A7 in
- * 32-bit code, with neither prefix nor ModRM, and unknown in 64-bit;
- * the rest were unknown in both.)
- *
- * tpause and umwait take a 32-bit register, and may have %edx and %eax
- * written after it.  umonitor takes an address in a register, whose
- * width is the address size: 67 where that is not the mode's.
- *
- * 0 if it wrote the instruction, 1 if the mnemonic is none of these,
- * -1 if it is one and its operands are not.
- */
-static int emit_x86_padlock_waitpkg(const char *mn, const as_instruction_t *insn, int intel_syntax, int is_64,
-                                    unsigned char *out, size_t out_cap, size_t *out_len) {
-    static const struct {
-        const char *mnemonic;
-        unsigned char prefix;
-        unsigned char opcode2;
-        unsigned char modrm;
-    } padlock[] = {
-        {"xstore", 0x00, 0xa7, 0xc0},     {"xstore-rng", 0x00, 0xa7, 0xc0}, {"xstorerng", 0x00, 0xa7, 0xc0},
-        {"xcrypt-ecb", 0xf3, 0xa7, 0xc8}, {"xcryptecb", 0xf3, 0xa7, 0xc8},
-        {"xcrypt-cbc", 0xf3, 0xa7, 0xd0}, {"xcryptcbc", 0xf3, 0xa7, 0xd0},
-        {"xcrypt-ctr", 0xf3, 0xa7, 0xd8}, {"xcryptctr", 0xf3, 0xa7, 0xd8},
-        {"xcrypt-cfb", 0xf3, 0xa7, 0xe0}, {"xcryptcfb", 0xf3, 0xa7, 0xe0},
-        {"xcrypt-ofb", 0xf3, 0xa7, 0xe8}, {"xcryptofb", 0xf3, 0xa7, 0xe8},
-        {"montmul", 0xf3, 0xa6, 0xc0},    {"xsha1", 0xf3, 0xa6, 0xc8},      {"xsha256", 0xf3, 0xa6, 0xd0},
-    };
-    const unsigned rep_prefixes = AS_PREFIX_REP | AS_PREFIX_REPE;
-    const as_operand_t *op;
-    unsigned char prefix;
-    as_x86_reg_t reg;
-    int width;
-    int need67 = 0;
-    size_t pos = 0;
-    size_t i;
-
-    if (mn == NULL || insn == NULL || out == NULL || out_len == NULL) {
-        return -1;
-    }
-    for (i = 0; i < sizeof(padlock) / sizeof(padlock[0]); ++i) {
-        if (as_strcmp(mn, padlock[i].mnemonic) != 0) {
-            continue;
-        }
-        if (insn->operand_count != 0 || (insn->prefixes & ~rep_prefixes) != 0 || out_cap < 4) {
-            return -1;
-        }
-        if (padlock[i].prefix != 0 || (insn->prefixes & rep_prefixes) != 0) {
-            out[pos++] = 0xf3;
-        }
-        out[pos++] = 0x0f;
-        out[pos++] = padlock[i].opcode2;
-        out[pos++] = padlock[i].modrm;
-        *out_len = pos;
-        return 0;
-    }
-
-    if (as_strcmp(mn, "tpause") == 0) {
-        prefix = 0x66;
-    } else if (as_strcmp(mn, "umwait") == 0) {
-        prefix = 0xf2;
-    } else if (as_strcmp(mn, "umonitor") == 0) {
-        prefix = 0xf3;
-    } else {
-        return 1;
-    }
-    if (insn->prefixes != 0 || insn->segment_override != NULL || out_cap < 6) {
-        return -1;
-    }
-    if (prefix == 0xf3) {
-        if (insn->operand_count != 1) {
-            return -1;
-        }
-        op = &insn->operands[0];
-    } else if (insn->operand_count == 1) {
-        op = &insn->operands[0];
-    } else if (insn->operand_count == 3) {
-        /* The register, then %edx and %eax, which are where the time is
-         * and are not encoded; Intel's order is the reverse. */
-        const as_operand_t *dx = &insn->operands[1];
-        const as_operand_t *ax = &insn->operands[intel_syntax ? 0 : 2];
-
-        op = &insn->operands[intel_syntax ? 2 : 0];
-        if (dx->kind != AS_OPERAND_REGISTER || ax->kind != AS_OPERAND_REGISTER ||
-            x86_reg_width_bits(dx->u.reg) != 32 || x86_reg_width_bits(ax->u.reg) != 32 ||
-            parse_x86_reg(dx->u.reg, &reg) != 0 || reg != AS_X86_REG_EDX ||
-            parse_x86_reg(ax->u.reg, &reg) != 0 || reg != AS_X86_REG_EAX) {
-            return -1;
-        }
-    } else {
-        return -1;
-    }
-    if (op->kind != AS_OPERAND_REGISTER || parse_x86_reg(op->u.reg, &reg) != 0) {
-        return -1;
-    }
-    width = x86_reg_width_bits(op->u.reg);
-    if (reg >= AS_X86_REG_AH || (!is_64 && reg >= AS_X86_REG_R8)) {
-        return -1;
-    }
-    if (prefix == 0xf3) {
-        if (width == (is_64 ? 32 : 16)) {
-            need67 = 1;
-        } else if (width != (is_64 ? 64 : 32)) {
-            return -1;
-        }
-    } else if (width != 32) {
-        return -1;
-    }
-    if (need67) {
-        out[pos++] = 0x67;
-    }
-    out[pos++] = prefix;
-    if (reg >= AS_X86_REG_R8) {
-        out[pos++] = 0x41;
-    }
-    out[pos++] = 0x0f;
-    out[pos++] = 0xae;
-    out[pos++] = (unsigned char)(0xf0u | ((unsigned)reg & 7u));
-    *out_len = pos;
-    return 0;
-}
-
 /*
  * Whether the statement has a decorator -- a mask `{%k1}`, zeroing `{z}`, a
  * broadcast `{1to8}`, a rounding mode.  Only EVEX has a place for one,
@@ -3480,19 +3354,9 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
 
     warn_mov_byte_cut(cfg, st);
 
-    /* (An emitter of the x87 instructions by name and one of movq were
-     * asked here; the table has every form of theirs.) */
-    {
-        int rc = emit_x86_padlock_waitpkg(mnbuf, &st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len);
-
-        if (rc == 0) {
-            return 0;
-        }
-        if (rc < 0) {
-            snprintf(encerr, encerr_sz, "unsupported operand form for '%s'", mnbuf);
-            return -1;
-        }
-    }
+    /* (An emitter of the x87 instructions by name, one of movq and one
+     * of PadLock's and the wait-for-event instructions were asked
+     * here; the table has every form of theirs.) */
     /* (An emitter of some 1,500 lines was asked here about every
      * statement of 32-bit code: the table has all it had but SSE4a's
      * two of two numbers.) */
@@ -3786,6 +3650,55 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
         mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
     }
     mn[i] = '\0';
+    /* (tpause and umwait may have %edx and %eax written after their
+     * register, which are where the time is and are in no byte of the
+     * instruction; Intel's order is the reverse.) */
+    if (n == 3 && (as_strcmp(mn, "tpause") == 0 || as_strcmp(mn, "umwait") == 0)) {
+        int intel = insn->syntax_intel != 0;
+        const as_operand_t *dx = &insn->operands[1];
+        const as_operand_t *ax = &insn->operands[intel ? 0 : 2];
+        const as_x86_reg_info_t *rd = dx->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(dx->u.reg) : NULL;
+        const as_x86_reg_info_t *ra = ax->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(ax->u.reg) : NULL;
+        as_instruction_t one = *insn;
+
+        if (rd == NULL || ra == NULL || rd->cls != AS_X86_REGCLASS_GENERAL || ra->cls != AS_X86_REGCLASS_GENERAL ||
+            rd->width != 32 || ra->width != 32 || rd->number != 2 || ra->number != 0) {
+            snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+            return -1;
+        }
+        one.operands = (as_operand_t *)&insn->operands[intel ? 2 : 0];
+        one.operand_count = 1;
+        return encode_x86_vec(cfg, &one, code, code_cap, code_len, encerr, encerr_sz);
+    }
+    /* (umonitor's register is an address: where it is not of the
+     * code's size the address-size prefix says so, before the F3.) */
+    if (n == 1 && code_cap >= 2 && as_strcmp(mn, "umonitor") == 0 && !x86_umonitor_inside &&
+        insn->operands[0].kind == AS_OPERAND_REGISTER) {
+        int natural = cfg->is_64 ? 64 : cfg->x86_code_bits == 16u ? 16 : 32;
+        int other = natural == 32 ? 16 : 32;
+
+        if (x86_reg_width_bits(insn->operands[0].u.reg) == other) {
+            int rc;
+
+            /* (And not twice, where it is written as well.) */
+            if ((insn->prefixes & AS_PREFIX_ADDR16) != 0) {
+                snprintf(encerr, encerr_sz, "'umonitor' has the address-size prefix already, for its register");
+                return -1;
+            }
+            x86_umonitor_inside = 1;
+            rc = encode_x86_vec(cfg, insn, code + 1, code_cap - 1, code_len, encerr, encerr_sz);
+            x86_umonitor_inside = 0;
+            if (rc > 0) {
+                code[0] = 0x67;
+                (*code_len)++;
+            }
+            return rc;
+        }
+        if (x86_reg_width_bits(insn->operands[0].u.reg) != natural) {
+            snprintf(encerr, encerr_sz, "'umonitor' does not take these operands");
+            return -1;
+        }
+    }
     /* (Five of the coprocessor's control wait for it first: the wait,
      * and the instruction of the name that does not.) */
     if (code_cap >= 3 && i + 2 < sizeof(mn) &&
@@ -4284,8 +4197,7 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                 if ((none[i].flag == AS_PREFIX_REP || none[i].flag == AS_PREFIX_REPE) &&
                     (insn->prefixes & AS_PREFIX_HLE) == 0 && !evex && n == 0 &&
                     (strncmp(mn, "xcrypt", 6) == 0 || strncmp(mn, "xstore", 6) == 0 || strncmp(mn, "xsha", 4) == 0 ||
-                     strcmp(mn, "montmul") == 0) &&
-                    as_x86_vec_base_is_whole(mn)) {
+                     strcmp(mn, "montmul") == 0)) {
                     if (*code_len != 0 && code[0] == 0xf3u) {
                         continue;
                     }

@@ -2399,6 +2399,11 @@
     LW("arpl", P0, AS_VEC_MAP_ONE, 0x63, W0, "dd", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
     LW("arpl", P0, AS_VEC_MAP_ONE, 0x63, W0, "dm", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
     LW("arplw", P0, AS_VEC_MAP_ONE, 0x63, W0, "dm", "rm", AS_VEC_F_BASE | AS_VEC_F_X32),
+    LW("tpause", P66, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | DG(6)),
+    LW("umwait", PF2, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | DG(6)),
+    LW("umonitor", PF3, M1, 0xae, W0, "w", "m", AS_VEC_F_BASE | AS_VEC_F_X32 | DG(6)),
+    LW("umonitor", PF3, M1, 0xae, W0, "d", "m", AS_VEC_F_BASE | DG(6)),
+    LW("umonitor", PF3, M1, 0xae, W0, "q", "m", AS_VEC_F_BASE | O64 | DG(6)),
     /* movq of general, segment, control and debug registers: mov, of 64 bits. */
     LW("movq", P0, AS_VEC_MAP_ONE, 0x89, W1, "qq", "rm", AS_VEC_F_BASE | O64),
     LW("movq", P0, AS_VEC_MAP_ONE, 0x8b, W1, "mq", "mr", AS_VEC_F_BASE | O64),
@@ -2746,6 +2751,11 @@
     {"xstore", AS_VEC_LEGACY, P0, M1, 0xa7, W0, 0, "", "", 0xc0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
     {"xstore-rng", AS_VEC_LEGACY, P0, M1, 0xa7, W0, 0, "", "", 0xc0, 0, AS_VEC_F_BASE},
     {"xstorerng", AS_VEC_LEGACY, P0, M1, 0xa7, W0, 0, "", "", 0xc0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
+    {"xcrypt-ecb", AS_VEC_LEGACY, PF3, M1, 0xa7, W0, 0, "", "", 0xc8, 0, AS_VEC_F_BASE},
+    {"xcrypt-cbc", AS_VEC_LEGACY, PF3, M1, 0xa7, W0, 0, "", "", 0xd0, 0, AS_VEC_F_BASE},
+    {"xcrypt-ctr", AS_VEC_LEGACY, PF3, M1, 0xa7, W0, 0, "", "", 0xd8, 0, AS_VEC_F_BASE},
+    {"xcrypt-cfb", AS_VEC_LEGACY, PF3, M1, 0xa7, W0, 0, "", "", 0xe0, 0, AS_VEC_F_BASE},
+    {"xcrypt-ofb", AS_VEC_LEGACY, PF3, M1, 0xa7, W0, 0, "", "", 0xe8, 0, AS_VEC_F_BASE},
     /* And the x87's, of memory and of the registers of its stack. */
     LW("fadd", P0, AS_VEC_MAP_ONE, 0xd8, W0, "m", "m", AS_VEC_F_BASE | DG(0)),
     LW("fadd", P0, AS_VEC_MAP_ONE, 0xd8, W0, "U", "m", AS_VEC_F_BASE | DG(0)),
