@@ -1,0 +1,56 @@
+# Programs cc must reject, and the diagnostic it must give.
+# source | extra flags | text the diagnostic must contain (fixed string)
+# Each source is invalid C (gcc rejects it too); run_negative.sh checks
+# that cc exits non-zero, was not killed by a signal, and printed the text.
+native_bad.c||use of undeclared identifier: missing
+native_bad_assign.c||assignment to undeclared identifier: x
+native_bad_break.c||break used outside loop/switch
+native_bad_continue.c||continue used outside loop
+native_bad_case.c||case label used outside switch
+native_bad_default.c||default label used outside switch
+native_bad_switch_dup_case.c||duplicate/overlapping case value in switch
+native_bad_switch_dup_default.c||duplicate default label in switch
+native_bad_for_scope.c||use of undeclared identifier: i
+native_bad_inc.c||++/-- requires an identifier, dereference, or member lvalue
+native_bad_goto.c||goto to unknown label: missing
+native_bad_label_dup.c||duplicate label: L1
+native_bad_bitwise_float.c||bitwise operators require integer operands
+native_bad_proto_conflict.c||conflicting declarations for function: foo_conflict
+native_bad_signed_unsigned.c||conflicting signed/unsigned in declaration specifiers
+native_bad_short_long.c||invalid short/long combination in declaration specifiers
+native_bad_typedef_init.c||typedef declarator cannot have an initializer
+native_bad_deref_nonptr.c||dereference requires pointer operand
+native_bad_addr_expr.c||address-of currently requires an identifier or member lvalue
+native_bad_deref_compound.c||left-hand side of assignment must be an identifier, dereference, or member access
+native_bad_deref_postfix_update.c||++/-- requires an identifier, dereference, or member lvalue
+native_bad_ptr_add_ptr.c||unsupported pointer arithmetic form
+native_bad_index_nonptr.c||dereference requires pointer operand
+native_bad_ptr_add_float.c||unsupported pointer arithmetic form
+native_bad_ptr_sub_incompat.c||incompatible pointer types in subtraction
+native_bad_ptr_cmp_incompat.c||incompatible pointer types in comparison
+native_bad_cast_ptr_float.c||cast currently supports numeric and pointer/integer conversions only
+native_bad_computed_goto_float.c||computed goto requires pointer or integer target expression
+native_bad_attr_noreturn_return.c||noreturn function must not contain a return statement
+native_bad_attr_inline_conflict.c|-std=gnu11|conflicting always_inline/noinline attributes
+native_bad_attr_hot_cold_conflict.c|-std=gnu11|conflicting hot/cold attributes
+native_bad_attr_alias_init.c|-std=gnu11|alias object 'bad_alias' cannot have an initializer
+native_bad_attr_malloc_nonptr.c|-std=gnu11|malloc function 'bad_malloc' must return a pointer type
+native_bad_attr_format_nonvariadic.c|-std=gnu11|format function 'bad_fmt' must be variadic or a v* wrapper
+native_bad_c99_implicit_function.c|-std=c99|implicit function declaration is not allowed in this mode: missing_symbol
+native_bad_no_implicit_int.c|-std=c99|expected function return type
+native_bad_c99_const_assign.c|-std=c99|cannot assign to const-qualified object: x
+native_bad_c99_const_param_assign.c|-std=c99|cannot assign to const-qualified object: x
+native_bad_c99_restrict_nonptr.c|-std=c99|restrict qualifier requires a pointer type
+native_bad_c99_file_scope_auto.c|-std=c99|file-scope object cannot use auto storage: g
+native_bad_c99_extern_local_init.c|-std=c99|extern local declaration cannot have an initializer
+native_bad_c99_flexible_array_init.c|-std=c99|flexible array member cannot be initialized
+native_bad_c99_union_init.c|-std=c99|too many initializers for union v
+native_bad_c99_array_assign.c|-std=c99|array object is not a modifiable lvalue: a
+native_bad_c99_array_update.c|-std=c99|array object is not a modifiable lvalue for ++/--
+native_bad_c99_bitfield_addr.c|-std=c99|cannot take address of bit-field
+native_bad_c99_bitfield_sizeof.c|-std=c99|sizeof cannot be applied to bit-field
+native_bad_c99_bitfield_named_zero.c|-std=c99|zero-width bit-field cannot be named
+native_bad_c99_return_void_value.c|-std=c99|void function returning a value
+native_bad_c99_return_missing_value.c|-std=c99|non-void function must return a value
+native_bad_c99_variadic_too_few.c|-std=c99|variadic call to takes_fixed has 0 args but needs at least 1
+native_bad_c99_pragma_stdc_bad.c|-std=c99|invalid #pragma STDC state

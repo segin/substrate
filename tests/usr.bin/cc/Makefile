@@ -25,7 +25,8 @@ test:
 	$(TOP)/usr.bin/cc/ir-diff valid_equiv_a.ir valid_equiv_b.ir
 	$(TOP)/usr.bin/cc/cc -E -DTESTVAL=7 driver_pp_input.c -o /tmp/cc_driver.pp
 	grep -q "int x = 7;" /tmp/cc_driver.pp
-	! $(TOP)/usr.bin/cc/cc -c driver_pp_input.c -o /tmp/cc_driver_fail.o
+	! $(TOP)/usr.bin/cc/cc -c driver_pp_input.c -o /tmp/cc_driver_fail.o 2>/tmp/cc_driver_fail.log
+	grep -q "use of undeclared identifier: TESTVAL" /tmp/cc_driver_fail.log
 	$(TOP)/usr.bin/cc/cc --bootstrap-gcc -c driver_bootstrap_input.c -o /tmp/cc_driver_bootstrap.o
 	test -f /tmp/cc_driver_bootstrap.o
 	$(TOP)/usr.bin/cc/cc -S native_arith.c -o /tmp/cc_native_arith.s
@@ -766,10 +767,12 @@ test:
 	grep -q "mulsd" /tmp/cc_native_double_dbg.s
 	$(TOP)/usr.bin/cc/cc -Wall -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond.o 2>/tmp/cc_native_warn_assign_cond.log
 	grep -q "warning: assignment used as condition in if" /tmp/cc_native_warn_assign_cond.log
-	! $(TOP)/usr.bin/cc/cc -Wall -Werror -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond_werror.o
+	! $(TOP)/usr.bin/cc/cc -Wall -Werror -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond_werror.o 2>/tmp/cc_native_warn_assign_cond_werror.log
+	grep -q "error: assignment used as condition in if" /tmp/cc_native_warn_assign_cond_werror.log
 	$(TOP)/usr.bin/cc/cc -std=c99 -pedantic -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic.o 2>/tmp/cc_native_c99_computed_goto_pedantic.log
 	grep -q "warning: computed goto is a GNU extension (non-C99)" /tmp/cc_native_c99_computed_goto_pedantic.log
-	! $(TOP)/usr.bin/cc/cc -std=c99 -pedantic-errors -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic_errors.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -pedantic-errors -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic_errors.o 2>/tmp/cc_native_c99_computed_goto_pedantic_errors.log
+	grep -q "error: computed goto is a GNU extension (non-C99)" /tmp/cc_native_c99_computed_goto_pedantic_errors.log
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_ptr_add_ptr.c -o /tmp/cc_native_bad_ptr_add_ptr_loc.o 2>/tmp/cc_native_bad_ptr_add_ptr_loc.log
 	grep -Eq '^[^:]+:[0-9]+:[0-9]+: error: ' /tmp/cc_native_bad_ptr_add_ptr_loc.log
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_source_line.c -o /tmp/cc_native_bad_source_line.o 2>/tmp/cc_native_bad_source_line.log
@@ -807,38 +810,11 @@ test:
 	$(TOP)/usr.bin/cc/cc -E -dM -std=gnu11 /tmp/cc_pp_std_probe.c -o /tmp/cc_pp_strict_gnu11.i
 	! grep -q "^#define __STRICT_ANSI__" /tmp/cc_pp_strict_gnu11.i
 	sh run_simd_intrinsics.sh
-	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_continue.c -o /tmp/cc_native_bad_continue.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_case.c -o /tmp/cc_native_bad_case.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_default.c -o /tmp/cc_native_bad_default.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_switch_dup_case.c -o /tmp/cc_native_bad_switch_dup_case.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_switch_dup_default.c -o /tmp/cc_native_bad_switch_dup_default.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_for_scope.c -o /tmp/cc_native_bad_for_scope.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_inc.c -o /tmp/cc_native_bad_inc.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_goto.c -o /tmp/cc_native_bad_goto.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_label_dup.c -o /tmp/cc_native_bad_label_dup.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_bitwise_float.c -o /tmp/cc_native_bad_bitwise_float.o
+	sh run_negative.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad_sizeof_void.c -o /tmp/cc_native_bad_sizeof_void.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_proto_conflict.c -o /tmp/cc_native_bad_proto_conflict.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_signed_unsigned.c -o /tmp/cc_native_bad_signed_unsigned.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_short_long.c -o /tmp/cc_native_bad_short_long.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_typedef_init.c -o /tmp/cc_native_bad_typedef_init.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_deref_nonptr.c -o /tmp/cc_native_bad_deref_nonptr.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_addr_expr.c -o /tmp/cc_native_bad_addr_expr.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_deref_compound.c -o /tmp/cc_native_bad_deref_compound.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_deref_postfix_update.c -o /tmp/cc_native_bad_deref_postfix_update.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_ptr_add_ptr.c -o /tmp/cc_native_bad_ptr_add_ptr.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_index_nonptr.c -o /tmp/cc_native_bad_index_nonptr.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_ptr_add_float.c -o /tmp/cc_native_bad_ptr_add_float.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_ptr_sub_incompat.c -o /tmp/cc_native_bad_ptr_sub_incompat.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_ptr_cmp_incompat.c -o /tmp/cc_native_bad_ptr_cmp_incompat.o
 	$(TOP)/usr.bin/cc/cc -c native_bad_ptr_depth5.c -o /tmp/cc_native_bad_ptr_depth5.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_negative_array_bound.c -o /tmp/cc_native_bad_negative_array_bound.o 2>/tmp/cc_native_bad_negative_array_bound.log
 	grep -q "array bound must be positive" /tmp/cc_native_bad_negative_array_bound.log
-	! $(TOP)/usr.bin/cc/cc -c native_bad_cast_ptr_float.c -o /tmp/cc_native_bad_cast_ptr_float.o
-	! $(TOP)/usr.bin/cc/cc -c native_bad_computed_goto_float.c -o /tmp/cc_native_bad_computed_goto_float.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_nested_capture.c -o /tmp/cc_native_bad_gnu_nested_capture.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_int128.c -o /tmp/cc_native_bad_gnu_int128.o 2>/tmp/cc_native_bad_gnu_int128.log
 	grep -q "__int128 is not supported" /tmp/cc_native_bad_gnu_int128.log
@@ -851,34 +827,10 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_early_clobber_tie.c -o /tmp/cc_native_bad_gnu_asm_early_clobber_tie.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_early_clobber_fixed.c -o /tmp/cc_native_bad_gnu_asm_early_clobber_fixed.o 2>/tmp/cc_native_bad_gnu_asm_early_clobber_fixed.log
 	grep -q "asm input constraint conflicts with early-clobber output register" /tmp/cc_native_bad_gnu_asm_early_clobber_fixed.log
-	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_return.c -o /tmp/cc_native_bad_attr_noreturn_return.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_nonvoid.c -o /tmp/cc_native_bad_attr_noreturn_nonvoid.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_inline_conflict.c -o /tmp/cc_native_bad_attr_inline_conflict.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_hot_cold_conflict.c -o /tmp/cc_native_bad_attr_hot_cold_conflict.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_alias_init.c -o /tmp/cc_native_bad_attr_alias_init.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_malloc_nonptr.c -o /tmp/cc_native_bad_attr_malloc_nonptr.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_format_nonvariadic.c -o /tmp/cc_native_bad_attr_format_nonvariadic.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_empty.c -o /tmp/cc_native_bad_attr_nonnull_empty.o
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_call.c -o /tmp/cc_native_bad_attr_nonnull_call.o 2>/tmp/cc_native_bad_attr_nonnull_call.log
 	grep -q "warning: nonnull argument 1 in call to takes_ptr is null" /tmp/cc_native_bad_attr_nonnull_call.log
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_implicit_function.c -o /tmp/cc_native_bad_c99_implicit_function.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_no_implicit_int.c -o /tmp/cc_native_bad_no_implicit_int.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_const_assign.c -o /tmp/cc_native_bad_c99_const_assign.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_const_param_assign.c -o /tmp/cc_native_bad_c99_const_param_assign.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_restrict_nonptr.c -o /tmp/cc_native_bad_c99_restrict_nonptr.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_file_scope_auto.c -o /tmp/cc_native_bad_c99_file_scope_auto.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_extern_local_init.c -o /tmp/cc_native_bad_c99_extern_local_init.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_flexible_array_init.c -o /tmp/cc_native_bad_c99_flexible_array_init.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_union_init.c -o /tmp/cc_native_bad_c99_union_init.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_array_assign.c -o /tmp/cc_native_bad_c99_array_assign.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_array_update.c -o /tmp/cc_native_bad_c99_array_update.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_bitfield_addr.c -o /tmp/cc_native_bad_c99_bitfield_addr.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_bitfield_sizeof.c -o /tmp/cc_native_bad_c99_bitfield_sizeof.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_bitfield_named_zero.c -o /tmp/cc_native_bad_c99_bitfield_named_zero.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_return_void_value.c -o /tmp/cc_native_bad_c99_return_void_value.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_return_missing_value.c -o /tmp/cc_native_bad_c99_return_missing_value.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_variadic_too_few.c -o /tmp/cc_native_bad_c99_variadic_too_few.o
-	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_pragma_stdc_bad.c -o /tmp/cc_native_bad_c99_pragma_stdc_bad.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_c99_bad.o
 	$(TOP)/usr.bin/cc/cc -c native_bad_void_ptr_arith.c -o /tmp/cc_native_bad_void_ptr_arith.o
 	$(TOP)/usr.bin/cc/cc -c driver_hello.s -o /tmp/cc_driver_hello.o

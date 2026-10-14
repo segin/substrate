@@ -41,9 +41,9 @@ silent: the program compiled, ran and printed a wrong answer.
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
 | 4. ABI and other code generation | 10 | 6 |
-| 5. Driver and predefined macros | 2 | 0 |
+| 5. Driver and predefined macros | 3 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
-| 7. The restored suite itself | 12 | 0 |
+| 7. The restored suite itself | 12 | 4 |
 | 8. Documentation | 1 | 0 |
 
 The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
@@ -173,6 +173,11 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-21** If a tool the driver runs cannot be executed, then the
   driver shall say so.  When `as` exited 127 (not runnable), cc exited 1
   and printed nothing.  *Reproduced.*
+- [ ] **CC-48** A warning shall name the file it is about.  `cc -Wall`
+  on `native_warn_assign_cond.c` prints `cc:3:2: warning: assignment
+  used as condition in if` -- the program's name where the file's
+  should be; the same diagnostic made an error by `-Werror` names the
+  file.  *Reproduced.*
 - [ ] **CC-22** The compiler shall predefine `__SIZEOF_INT128__` only if
   `__int128` works.  It is predefined for -m64, and a program using
   `__int128` compiles and dies of SIGSEGV.  *Reproduced*; also suite
@@ -245,11 +250,13 @@ they stand.  *Reproduced* unless marked.
   `native_clang_attr_placement.c` uses `__attribute__((unused));` as a
   statement, which clang rejects and gcc accepts -- it tests gcc
   behaviour under a clang name.
-- [ ] **CC-41** A negative test shall check that cc rejected the input
-  for the reason named, not merely that it failed.  60 of 68 check only
-  the exit status, so a crash, or a tool that cannot run, passes: the
-  `__int128` test passed when `as` could not be executed.  (Run by
-  hand, cc's message does match the name for most of them.)
+- [x] **CC-41** A negative test shall check that cc rejected the input
+  for the reason named, not merely that it failed.  60 of 68 checked
+  only the exit status, so a crash, or a tool that cannot run, passed:
+  the `__int128` test passed when `as` could not be executed.  52 now
+  live in `negative/CASES.txt` with the diagnostic each must give,
+  checked by `run_negative.sh`, which also fails on a signal; three more
+  grep their log in the Makefile.  The other five are CC-42.
 - [ ] **CC-42** A negative test shall expect rejection only of invalid
   code.  Five expect cc to reject valid code:
   `native_bad_gnu_nested_capture.c` (GNU C allows a nested function to
@@ -291,4 +298,4 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-47 requirements: 17 met, 30 open.
+48 requirements: 21 met, 27 open.
