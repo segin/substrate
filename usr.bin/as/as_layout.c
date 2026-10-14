@@ -16,7 +16,6 @@
 
 #include "as_x86_vex.h"
 
-#include "as_x86_sse3.h"
 
 #include "as_data.h"
 

@@ -16,7 +16,6 @@
 
 #include "as_x86_vex.h"
 
-#include "as_x86_sse3.h"
 
 #include "as_data.h"
 
@@ -1913,36 +1912,6 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
     }
 }
 
-static int try_encode_x86_sse3(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
-                               size_t *code_len, char *encerr, size_t encerr_sz) {
-    as_x86_sse3_insn_t s3;
-
-    if (in == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    memset(&s3, 0, sizeof(s3));
-    s3.mnemonic = in->mnemonic;
-    s3.op_count = in->op_count;
-    if (in->op_count >= 1) {
-        s3.dst = in->ops[0];
-    }
-    if (in->op_count >= 2) {
-        s3.src = in->ops[1];
-    }
-    if (streq_ci(in->mnemonic, "fisttp")) {
-        /* (With an address of 16-bit registers it is the x87 emitter's,
-         * which knows `fisttp` with no suffix from `fisttpl`: this has
-         * lost the suffix, and would make the first the second.) */
-        if (in->op_count >= 1 && in->ops[0].kind == AS_X86_OP_MEM && in->ops[0].u.mem.addr_bits == 16u) {
-            return -1;
-        }
-        if (in->operand_size_override) s3.width_bits = 16;
-        else if (in->rex_w) s3.width_bits = 64;
-        else s3.width_bits = 32;
-    }
-    return as_x86_encode_sse3(&s3, code, code_cap, code_len, encerr, encerr_sz);
-}
-
 static int x86_mem_operand_is_dx_port(const as_x86_operand_t *op) {
     return op != NULL &&
            op->kind == AS_X86_OP_MEM &&
@@ -3233,11 +3202,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         }
     }
 
-    /* (`fisttp`, by its suffix.) */
-    if (as_x86_encode_ext(try_encode_x86_sse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-        *code_len > 0) {
-        return 0;
-    }
     /* xbegin to a place that is no label of this section: the opcode
      * and four bytes of distance, from the instruction's end in 64-bit
      * code where the place is known. */

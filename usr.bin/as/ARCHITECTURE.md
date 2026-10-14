@@ -28,7 +28,6 @@ usr.bin/as/
 │                            #   and the flat image
 ├── as_cfi.c                 # .cfi_* made .eh_frame or .debug_frame
 ├── as_dwline.c              # .file and .loc made .debug_line
-├── as_x86_prefix.c          # x86: the prefixes before an instruction an encoder outside the table writes
 ├── as_x86_vec.c             # x86: the one emitter of VEX, EVEX, MMX and SSE instructions
 ├── as_x86_vec_table.c       # x86: its table, a row for each form
 ├── as_x86_vec_table_ext.h   # x86: more rows of it -- FP16, AVX10.2, XOP, AMX, 3DNow! and the rest GNU as has
@@ -36,9 +35,6 @@ usr.bin/as/
 ├── as_x86_vec_table_base.h  # x86: and the forms those instructions always had, as they come to the table (generated)
 ├── as_x86_memsize_table.h   # x86: the sizes of memory each instruction takes in Intel syntax (generated)
 ├── as_x86_vex.c             # x86: the VEX prefix
-├── as_x86_sse3.c            # x86, per extension, what is left of it: `fisttp` (SSE3), whose
-│                            #   opcode is its operand's size.  (Those of SSSE3, SSE4.1, SSE4.2,
-│                            #   x86-64-v2 and v3, AVX, AVX2, FMA, BMI, F16C and AVX-512 are gone.)
 ├── as_arm.c                 # ARM (A32) encoder; what the ARM and AArch64 encoders share
 ├── as_arm_simd.c            # ARM: VFP and NEON
 ├── as_arm_thumb.c           # ARM: Thumb-2
@@ -47,8 +43,7 @@ usr.bin/as/
 ├── *.h                      # Each .c has the header of its name, with its interface (as_cfi.h,
 │                            #   as_data.h, as_dwline.h, as_elf_emit.h, as_expr.h, as_lexer.h, as_lower.h,
 │                            #   as_parser.h, as_reloc_op.h, as_sections.h, as_symtab.h, as_x86_regs.h,
-│                            #   as_x86_encode.h, as_x86_vec.h, as_x86_vex.h,
-│                            #   as_x86_sse3.h).
+│                            #   as_x86_encode.h, as_x86_vec.h, as_x86_vex.h).
 │                            #   Three have no .c of theirs:
 │                            #   as_arm.h, the interface of the five ARM and AArch64 files; as_arm_int.h,
 │                            #   what those share among themselves; as_strmap.h, a table from names to

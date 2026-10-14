@@ -23,7 +23,6 @@ SRC
 
 cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/include" \
    "$ROOT/usr.bin/as/as_util.c" \
-   "$ROOT/usr.bin/as/as_x86_prefix.c" \
    "$ROOT/usr.bin/as/as_cfi.c" \
    "$ROOT/usr.bin/as/as_dwline.c" \
    "$ROOT/usr.bin/as/as_arm.c" \
@@ -34,7 +33,6 @@ cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/inclu
    "$ROOT/usr.bin/as/as_x86_vec.c" \
    "$ROOT/usr.bin/as/as_x86_vec_table.c" \
    "$ROOT/usr.bin/as/as_x86_vex.c" \
-   "$ROOT/usr.bin/as/as_x86_sse3.c" \
    "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_x86_regs.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_symtab.c" "$ROOT/usr.bin/as/as_reloc_op.c" \
    "$ROOT/usr.bin/as/as_sections.c" "$ROOT/usr.bin/as/as_data.c" "$ROOT/usr.bin/as/as_elf_emit.c" "$ROOT/usr.bin/as/as_layout.c" "$ROOT/usr.bin/as/as_symbols.c" \
    "$ROOT/usr.bin/as/as_flat.c" \
