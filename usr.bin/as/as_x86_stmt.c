@@ -759,6 +759,40 @@ int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, char *suff
     return 0;
 }
 
+/*
+ * Spellings that are another name's: `to` is the name, and the letter of
+ * size is `sfx` -- or the spelling's last where it is '*', or what `to`
+ * has as any name has where it is '+'.  sal is shl by its other name, the
+ * one a compiler writes for a signed operand; movsbl and its like are
+ * the widening moves by their older names; movabs with none is as wide
+ * as its register, which q stands for; and the far returns and the two
+ * of a system's return have Intel's `d` for AT&T's `l`.
+ */
+static const struct {
+    const char *from;
+    const char *to;
+    char sfx;
+} x86_respellings[] = {
+    {"sal", "shl", '+'},         {"salb", "shlb", '+'},       {"salw", "shlw", '+'},       {"sall", "shll", '+'},
+    {"salq", "shlq", '+'},       {"movslq", "movsxd", 'q'},   {"movsbq", "movsxb", '*'},   {"movsbl", "movsxb", '*'},
+    {"movsbw", "movsxb", '*'},   {"movswq", "movsxw", '*'},   {"movswl", "movsxw", '*'},   {"movzbq", "movzxb", '*'},
+    {"movzbl", "movzxb", '*'},   {"movzbw", "movzxb", '*'},   {"movzwq", "movzxw", '*'},   {"movzwl", "movzxw", '*'},
+    {"movabs", "movabs", 'q'},   {"movabsb", "movabs", 'b'},  {"movabsw", "movabs", 'w'},  {"movabsl", "movabs", 'l'},
+    {"movabsq", "movabs", 'q'},  {"sysretd", "sysretl", '\0'}, {"sysexitd", "sysexitl", '\0'}, {"retfq", "lretq", '\0'},
+    {"retfw", "lretw", '\0'},    {"retfd", "lret", '\0'},
+};
+
+/* Names that a letter of their integer's size may follow, which is no
+ * part of the name: `cvtsi2sdl`, `crc32b`. */
+static const struct {
+    const char *name;
+    const char *letters;
+} x86_sized_names[] = {
+    {"cvtsi2sd", "qlw"},   {"cvtsi2ss", "qlw"},   {"cvttsd2si", "qlw"},  {"cvttss2si", "qlw"},
+    {"vcvtsi2sd", "qlw"},  {"vcvtsi2ss", "qlw"},  {"vcvttsd2si", "qlw"}, {"vcvttss2si", "qlw"},
+    {"vcvtusi2sd", "qlw"}, {"vcvtusi2ss", "qlw"}, {"crc32", "bwlq"},
+};
+
 static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t dst_sz, char *suffix_out) {
     size_t i;
     size_t n;
@@ -776,233 +810,42 @@ static int normalize_x86_mnemonic_uncached(const char *src, char *dst, size_t ds
     }
     dst[n] = '\0';
 
-    /* sal is shl by its other name: the same instruction, and the name a
-     * compiler writes for a signed operand.  The suffix, if there is one,
-     * is taken off below as shl's is. */
-    if (strncmp(dst, "sal", 3) == 0 &&
-        (n == 3 || (n == 4 && (dst[3] == 'b' || dst[3] == 'w' || dst[3] == 'l' || dst[3] == 'q')))) {
-        dst[1] = 'h';
-    }
+    /* A spelling that is another name's. */
+    for (i = 0; i < sizeof(x86_respellings) / sizeof(x86_respellings[0]); ++i) {
+        size_t to_len;
 
-    if (as_strcmp(dst, "movslq") == 0) {
-        if (dst_sz < sizeof("movsxd")) {
+        if (as_strcmp(dst, x86_respellings[i].from) != 0) {
+            continue;
+        }
+        to_len = strlen(x86_respellings[i].to);
+        if (to_len + 1 > dst_sz) {
             return -1;
         }
-        memcpy(dst, "movsxd", sizeof("movsxd"));
-        suffix = 'q';
+        memcpy(dst, x86_respellings[i].to, to_len + 1);
+        n = to_len;
+        if (x86_respellings[i].sfx == '+') {
+            break;
+        }
+        suffix = x86_respellings[i].sfx == '*' ? (char)tolower((unsigned char)src[strlen(src) - 1])
+                                               : x86_respellings[i].sfx;
         if (suffix_out != NULL) {
             *suffix_out = suffix;
         }
         return 0;
     }
-    if (as_strcmp(dst, "movsbq") == 0 || as_strcmp(dst, "movsbl") == 0 || as_strcmp(dst, "movsbw") == 0) {
-        if (dst_sz < sizeof("movsxb")) {
-            return -1;
+    /* A name with the letter of its integer's size after it. */
+    for (i = 0; i < sizeof(x86_sized_names) / sizeof(x86_sized_names[0]); ++i) {
+        size_t len = strlen(x86_sized_names[i].name);
+
+        if (n == len + 1 && strncmp(dst, x86_sized_names[i].name, len) == 0 &&
+            strchr(x86_sized_names[i].letters, dst[len]) != NULL) {
+            dst[len] = '\0';
+            suffix = src[n - 1];
+            if (suffix_out != NULL) {
+                *suffix_out = suffix;
+            }
+            return 0;
         }
-        memcpy(dst, "movsxb", sizeof("movsxb"));
-        if (as_strcmp(dst, "movsxb") == 0 && n >= 1) {
-            char last = (char)tolower((unsigned char)src[n - 1]);
-            suffix = (last == 'q' || last == 'l' || last == 'w') ? last : 'l';
-        }
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (as_strcmp(dst, "movswq") == 0 || as_strcmp(dst, "movswl") == 0) {
-        if (dst_sz < sizeof("movsxw")) {
-            return -1;
-        }
-        memcpy(dst, "movsxw", sizeof("movsxw"));
-        suffix = (char)tolower((unsigned char)src[n - 1]) == 'q' ? 'q' : 'l';
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (as_strcmp(dst, "movzbq") == 0 || as_strcmp(dst, "movzbl") == 0 || as_strcmp(dst, "movzbw") == 0) {
-        if (dst_sz < sizeof("movzxb")) {
-            return -1;
-        }
-        memcpy(dst, "movzxb", sizeof("movzxb"));
-        {
-            char last = (char)tolower((unsigned char)src[n - 1]);
-            suffix = (last == 'q' || last == 'l' || last == 'w') ? last : 'l';
-        }
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (as_strcmp(dst, "movzwq") == 0 || as_strcmp(dst, "movzwl") == 0) {
-        if (dst_sz < sizeof("movzxw")) {
-            return -1;
-        }
-        memcpy(dst, "movzxw", sizeof("movzxw"));
-        suffix = (char)tolower((unsigned char)src[n - 1]) == 'q' ? 'q' : 'l';
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    /* movabs and its four suffixes; with none it is as wide as its
-     * register, which the emitter reads, and q stands for that. */
-    if (strncmp(dst, "movabs", 6) == 0 &&
-        (n == 6 || (n == 7 && (dst[6] == 'b' || dst[6] == 'w' || dst[6] == 'l' || dst[6] == 'q')))) {
-        if (dst_sz < sizeof("movabs")) {
-            return -1;
-        }
-        suffix = (n == 7 && dst[6] != 'q') ? dst[6] : 'q';
-        memcpy(dst, "movabs", sizeof("movabs"));
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (as_strcmp(dst, "movabsq") == 0 || as_strcmp(dst, "movabs") == 0) {
-        if (dst_sz < sizeof("movabs")) {
-            return -1;
-        }
-        memcpy(dst, "movabs", sizeof("movabs"));
-        suffix = 'q';
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (as_strcmp(dst, "sysretd") == 0) {
-        if (dst_sz < sizeof("sysretl")) {
-            return -1;
-        }
-        memcpy(dst, "sysretl", sizeof("sysretl"));
-        return 0;
-    }
-    if (as_strcmp(dst, "sysexitd") == 0) {
-        if (dst_sz < sizeof("sysexitl")) {
-            return -1;
-        }
-        memcpy(dst, "sysexitl", sizeof("sysexitl"));
-        return 0;
-    }
-    if (as_strcmp(dst, "retfq") == 0) {
-        if (dst_sz < sizeof("lretq")) {
-            return -1;
-        }
-        memcpy(dst, "lretq", sizeof("lretq"));
-        return 0;
-    }
-    if (as_strcmp(dst, "retfw") == 0) {
-        if (dst_sz < sizeof("lretw")) {
-            return -1;
-        }
-        memcpy(dst, "lretw", sizeof("lretw"));
-        return 0;
-    }
-    if (as_strcmp(dst, "retfd") == 0) {
-        if (dst_sz < sizeof("lret")) {
-            return -1;
-        }
-        memcpy(dst, "lret", sizeof("lret"));
-        return 0;
-    }
-    if (strncmp(dst, "cvtsi2sd", 8) == 0 && n == 9 &&
-        (dst[8] == 'q' || dst[8] == 'l' || dst[8] == 'w')) {
-        dst[8] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "cvtsi2ss", 8) == 0 && n == 9 &&
-        (dst[8] == 'q' || dst[8] == 'l' || dst[8] == 'w')) {
-        dst[8] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "cvttsd2si", 9) == 0 && n == 10 &&
-        (dst[9] == 'q' || dst[9] == 'l' || dst[9] == 'w')) {
-        dst[9] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "cvttss2si", 9) == 0 && n == 10 &&
-        (dst[9] == 'q' || dst[9] == 'l' || dst[9] == 'w')) {
-        dst[9] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "vcvtsi2sd", 9) == 0 && n == 10 &&
-        (dst[9] == 'q' || dst[9] == 'l' || dst[9] == 'w')) {
-        dst[9] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "vcvtsi2ss", 9) == 0 && n == 10 &&
-        (dst[9] == 'q' || dst[9] == 'l' || dst[9] == 'w')) {
-        dst[9] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "vcvttsd2si", 10) == 0 && n == 11 &&
-        (dst[10] == 'q' || dst[10] == 'l' || dst[10] == 'w')) {
-        dst[10] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "vcvttss2si", 10) == 0 && n == 11 &&
-        (dst[10] == 'q' || dst[10] == 'l' || dst[10] == 'w')) {
-        dst[10] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "vcvtusi2sd", 10) == 0 && n == 11 &&
-        (dst[10] == 'q' || dst[10] == 'l' || dst[10] == 'w')) {
-        dst[10] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "vcvtusi2ss", 10) == 0 && n == 11 &&
-        (dst[10] == 'q' || dst[10] == 'l' || dst[10] == 'w')) {
-        dst[10] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
-    }
-    if (strncmp(dst, "crc32", 5) == 0 && n == 6 &&
-        (dst[5] == 'b' || dst[5] == 'w' || dst[5] == 'l' || dst[5] == 'q')) {
-        dst[5] = '\0';
-        suffix = src[n - 1];
-        if (suffix_out != NULL) {
-            *suffix_out = suffix;
-        }
-        return 0;
     }
     if (x86_mnemonic_keeps_trailing_size_letter(dst)) {
         if (suffix_out != NULL) {
