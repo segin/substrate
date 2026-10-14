@@ -775,6 +775,7 @@ test:
 	grep -Eq '^[[:space:]]*\^$$' /tmp/cc_native_bad_source_line.log
 	sh run_conformance_c99.sh
 	sh run_diff_c99.sh
+	sh run_codegen_diff.sh
 	sh run_postc99_c11_c17.sh
 	sh run_postc99_c23.sh
 	sh run_postc99_c23_attrs.sh

@@ -5598,6 +5598,32 @@ static void emit_i386_int64_binop(FILE *fp, const slot_layout_t *lay, const cc_s
     int dlo = slot_off(lay, in->dst);
     int dhi = dlo + 4;
 
+    if (in->op == CC_SSA_MUL) {
+        /* the low 64 bits of a * b: alo * blo + ((ahi * blo + alo * bhi) << 32) */
+        fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", hi);
+        fprintf(fp, "\timull %d(%%ebp), %%ecx\n", rlo);
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", rhi);
+        fprintf(fp, "\timull %d(%%ebp), %%eax\n", lo);
+        fprintf(fp, "\taddl %%eax, %%ecx\n");
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
+        fprintf(fp, "\tmull %d(%%ebp)\n", rlo);
+        fprintf(fp, "\taddl %%ecx, %%edx\n");
+        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dlo);
+        fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", dhi);
+        return;
+    }
+    if (in->op == CC_SSA_DIV) {
+        fprintf(fp, "\tpushl %d(%%ebp)\n", rhi);
+        fprintf(fp, "\tpushl %d(%%ebp)\n", rlo);
+        fprintf(fp, "\tpushl %d(%%ebp)\n", hi);
+        fprintf(fp, "\tpushl %d(%%ebp)\n", lo);
+        fprintf(fp, "\tcall %s\n", in->is_unsigned ? "__udivdi3" : "__divdi3");
+        fprintf(fp, "\taddl $16, %%esp\n");
+        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dlo);
+        fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", dhi);
+        return;
+    }
+
     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
     fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", hi);
     switch (in->op) {
@@ -6106,7 +6132,8 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     if (value_size_bytes(f, in->dst, 4) >= 8 &&
                         (in->op == CC_SSA_ADD || in->op == CC_SSA_SUB || in->op == CC_SSA_AND ||
                          in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_SHL ||
-                         in->op == CC_SSA_SHR)) {
+                         in->op == CC_SSA_SHR ||
+                         ((in->op == CC_SSA_MUL || in->op == CC_SSA_DIV) && in->rhs >= 0))) {
                         int_regs_flush(fp, f, &lay, &ist);
                         emit_i386_int64_binop(fp, &lay, in);
                         break;

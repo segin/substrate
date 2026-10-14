@@ -4556,6 +4556,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (r.dst < 0 || push_instr(sf, r) != 0) {
                 return -1;
             }
+            if (integral_type_bits(e->value_type) >= 64) {
+                set_value_size(sf, q.dst, 8);
+                set_value_size(sf, p.dst, 8);
+                set_value_size(sf, r.dst, 8);
+            }
             if (is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
                 return normalize_integral_value(sf, r.dst, e->value_type, diag);
             }
@@ -4576,6 +4581,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         if (e->value_type == CC_TYPE_FLOAT) {
             return normalize_float_value(sf, in.dst, e->value_type, diag);
+        }
+        if (vt == CC_VAL_I64 && is_integral_type(e->value_type) && integral_type_bits(e->value_type) >= 64) {
+            set_value_size(sf, in.dst, 8);
         }
         if (vt == CC_VAL_I64 && is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
             return normalize_integral_value(sf, in.dst, e->value_type, diag);
