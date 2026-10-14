@@ -387,6 +387,11 @@ const char *section_from_directive(const as_directive_t *d) {
     if (d == NULL || d->name == NULL) {
         return NULL;
     }
+    /* (Asked of every directive, in several passes: these six begin
+     * `.t`, `.d`, `.r`, `.b`, `.s` or `.p`, and `.long` does not.) */
+    if (d->name[0] != '.' || strchr("tdrbsp", d->name[1]) == NULL || d->name[1] == '\0') {
+        return NULL;
+    }
     if (as_strcmp(d->name, ".text") == 0) return ".text";
     if (as_strcmp(d->name, ".data") == 0) return ".data";
     if (as_strcmp(d->name, ".rodata") == 0) return ".rodata";
@@ -518,6 +523,11 @@ int section_track_apply_directive(section_track_t *st, const as_directive_t *d) 
     char *tmp;
 
     if (st == NULL || d == NULL || d->name == NULL) {
+        return 0;
+    }
+    /* (Of these, and of those section_from_directive() knows, each
+     * begins `.c` or one of its letters.) */
+    if (d->name[0] != '.' || d->name[1] == '\0' || strchr("ctdrbsp", d->name[1]) == NULL) {
         return 0;
     }
     if (as_strcmp(d->name, ".previous") == 0) {

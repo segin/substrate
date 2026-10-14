@@ -414,6 +414,19 @@ int x86_fixed_short_branch(const char *mn, unsigned code_bits, int *need67, unsi
     if (mn == NULL) {
         return -1;
     }
+    /* (Asked of every branch, which most often is a jmp or a jcc: of
+     * these only the three of a counter begin `jc`, `je` or `jr`.) */
+    switch (mn[0] | 0x20) {
+    case 'j':
+        if ((mn[1] | 0x20) != 'c' && (mn[1] | 0x20) != 'e' && (mn[1] | 0x20) != 'r') {
+            return -1;
+        }
+        break;
+    case 'l':
+        break;
+    default:
+        return -1;
+    }
     if (streq_ci(mn, "jcxz")) {
         counter = 16u;
         op = 0xe3;
@@ -613,6 +626,10 @@ static int is_rel_mnemonic_uncached(const char *mn) {
  * that names a symbol, they had the relocation of an address and not
  * of a distance.) */
 int is_call_mnemonic(const char *mn) {
+    /* (Asked of every branch several times; a call begins `c` or `l`.) */
+    if (mn == NULL || ((mn[0] | 0x20) != 'c' && (mn[0] | 0x20) != 'l')) {
+        return 0;
+    }
     return streq_ci(mn, "call") || streq_ci(mn, "lcall") || streq_ci(mn, "callw") || streq_ci(mn, "calll") ||
            streq_ci(mn, "callq");
 }
@@ -3073,8 +3090,10 @@ int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *encerr,
      */
     {
         static const char *const intel[] = {"insd", "outsd", "lodsd", "stosd", "scasd"};
+        size_t mlen = strlen(in->mnemonic);
 
-        for (i = 0; i < sizeof(intel) / sizeof(intel[0]); ++i) {
+        /* (Each of them ends in `d`.) */
+        for (i = 0; mlen > 0 && (in->mnemonic[mlen - 1] | 0x20) == 'd' && i < sizeof(intel) / sizeof(intel[0]); ++i) {
             if (strcasecmp(in->mnemonic, intel[i]) == 0) {
                 snprintf(encerr, encerr_sz, "unsupported %smnemonic: %s", cfg->is_64 ? "x86_64 " : "", in->mnemonic);
                 return 1;
