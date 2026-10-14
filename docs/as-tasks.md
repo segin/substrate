@@ -1055,9 +1055,10 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-301** The clean-up of `as_elf_emit_file` shall be written once.
   Trace: AS-DES-003.  Verify: I.
   Done: the two copies of what `as_elf_emit_file` frees, one for each way out, are one, reached by both.
-- [ ] **AS-T-302** An object of more than 65,279 sections shall be written with ELF's extended section numbering, as GNU as writes it.
+- [x] **AS-T-302** An object of more than 65,279 sections shall be written with ELF's extended section numbering, as GNU as writes it.
   Trace: AS-PERF-001.  Verify: T — 66,000 `.section .text.fN` each with a global symbol: the object is written, `readelf -S` and `readelf -s` agree with GNU's (`e_shnum` 0 and the count in section 0's `sh_size`, `e_shstrndx` `SHN_XINDEX` with the index in its `sh_link`, an `SHT_SYMTAB_SHNDX` section for symbols of an index past `SHN_LORESERVE`), and the linker reads it back.  After: none.
   Found by the timing of AS-T-228: at 66,000 sections the output is refused, "invalid ELF format".  elfobj keeps a symbol's section as 16 bits (`elf_symbol_set_shndx`, `struct elf_symbol`), in its interface as well, which the linker, `nm`, `size` and `ar` use too.
+  Done, 2026-10-14, with one difference from GNU's that the Verify line did not foresee.  A symbol's section is 32 bits in elfobj and its interface (`elf_symbol_shndx()`, `elf_symbol_set_shndx()`, and in the linker, `nm` and `ar`), and a test of `>= 0xff00` for "no section" is `ELF_SHNDX_RESERVED()`, which is the reserved range and nothing past it.  So that a section and a reserved index are never one number -- a symbol's section is a number, and `SHN_ABS` is 0xfff1 -- the library gives the 256 numbers `SHN_LORESERVE` to `SHN_HIRESERVE` empty sections of `SHT_NULL` when an object comes to them (`elf_add_section()`), which no symbol may name; the section after them is 0x10000.  That is the difference: GNU numbers sections through that range, and its object of 66,000 has 256 sections fewer than ours.  Every symbol's section is GNU's but for the 256.  The writer puts the count in the null section's size and the names' index in its link, with `e_shnum` 0 and `e_shstrndx` `SHN_XINDEX`, and writes `SHT_SYMTAB_SHNDX` for symbols past 0xffff; the reader takes all three, and takes the null section back to empty.  The object links -- GNU ld's and ours, in both modes, `f65999` at `f0` and 65,999 -- and is read back by the assembler itself.  Refused: an object in which a section other than `SHT_NULL` is numbered as a reserved index is (GNU's own, past 65,279), which this numbering cannot tell from `SHN_ABS` and its like; and removing or reordering a section of an object of more than 65,279 (`elf_remove_section()`, `elf_reorder_section()`), which would move one among the reserved numbers -- so `ld -r` of such an object is refused, where nothing could make one before.  `test_many_sections.sh`.
 
 ## I. The x86 extensions
 
@@ -1385,5 +1386,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-357 tasks: 353 done, 4 open.  Numbers run to 400, with gaps left between
+357 tasks: 354 done, 3 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

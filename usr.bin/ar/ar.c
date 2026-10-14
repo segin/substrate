@@ -1385,7 +1385,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
         const char *name;
         uint8_t bind;
         uint8_t type;
-        uint16_t shndx;
+        uint32_t shndx;
 
         symbol = elf_symbol_at(obj, i);
         if (symbol == NULL) {

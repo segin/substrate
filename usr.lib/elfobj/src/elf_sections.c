@@ -38,6 +38,28 @@ elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, u
         elf__set_err(obj, ELF_ERR_STATE, "cannot mutate finalized/read-only object");
         return NULL;
     }
+    /* The section that would be numbered SHN_LORESERVE (its number is
+     * its place and one, after the null section): the 256 reserved
+     * numbers are given empty sections first, and it is 0x10000. */
+    if (obj->section_count + 1 == SHN_LORESERVE) {
+        unsigned k;
+
+        for (k = 0; k <= SHN_HIRESERVE - SHN_LORESERVE; ++k) {
+            struct elf_section *pad = (struct elf_section *)elf__calloc(1, sizeof(*pad));
+
+            if (pad == NULL || (pad->name = elf__strdup("")) == NULL || elf__push_section(obj, pad) != ELF_OK) {
+                if (pad != NULL) {
+                    free(pad->name);
+                }
+                free(pad);
+                elf__set_err(obj, ELF_ERR_OOM, "alloc section failed");
+                return NULL;
+            }
+            pad->obj = obj;
+            pad->type = SHT_NULL;
+            pad->placeholder = 1;
+        }
+    }
 
     sec = (struct elf_section *)elf__calloc(1, sizeof(*sec));
     if (sec == NULL) {
@@ -332,6 +354,13 @@ elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
     if (!is_mutable_obj(obj)) {
         return ELF_ERR_STATE;
     }
+    /* (Of an object with the empty sections that stand for the reserved
+     * indices, a section taken out would bring one past them among
+     * them.) */
+    if (obj->section_count + 1 > SHN_LORESERVE) {
+        elf__set_err(obj, ELF_ERR_BOUNDS, "cannot remove a section of an object of more than 65279 sections");
+        return ELF_ERR_BOUNDS;
+    }
 
     for (i = 0; i < obj->section_count; ++i) {
         if (obj->sections[i] == section) {
@@ -360,7 +389,7 @@ elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
         }
         if (sym->shndx == idx + 1) {
             sym->shndx = SHN_UNDEF;
-        } else if (sym->shndx > idx + 1 && sym->shndx < 0xff00) {
+        } else if (sym->shndx > idx + 1 && !ELF_SHNDX_RESERVED(sym->shndx)) {
             sym->shndx--;
         }
     }
@@ -415,6 +444,12 @@ elf_err_t elf_reorder_section(elfobj_t *obj, elf_section_t *section, size_t new_
     if (new_index >= obj->section_count) {
         return ELF_ERR_BOUNDS;
     }
+    /* (As elf_remove_section(): a section moved would move others among
+     * the reserved indices.) */
+    if (obj->section_count + 1 > SHN_LORESERVE) {
+        elf__set_err(obj, ELF_ERR_BOUNDS, "cannot reorder the sections of an object of more than 65279 sections");
+        return ELF_ERR_BOUNDS;
+    }
     for (i = 0; i < obj->section_count; ++i) {
         if (obj->sections[i] == section) {
             old_index = i;
@@ -443,10 +478,10 @@ elf_err_t elf_reorder_section(elfobj_t *obj, elf_section_t *section, size_t new_
     }
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *sym = obj->symbols[i];
-        if (sym == NULL || sym->shndx == SHN_UNDEF || sym->shndx >= 0xff00) {
+        if (sym == NULL || sym->shndx == SHN_UNDEF || ELF_SHNDX_RESERVED(sym->shndx)) {
             continue;
         }
-        sym->shndx = (uint16_t)(remap_index_move((size_t)(sym->shndx - 1), old_index, new_index) + 1);
+        sym->shndx = (uint32_t)(remap_index_move((size_t)(sym->shndx - 1), old_index, new_index) + 1);
     }
     for (i = 0; i < obj->segment_count; ++i) {
         struct elf_segment *seg = obj->segments[i];

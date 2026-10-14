@@ -214,7 +214,7 @@ static int symstate_note_object(symstate_t *state, elfobj_t *obj) {
         const elf_symbol_t *sym = elf_symbol_at(obj, i);
         const char *name;
         uint8_t bind;
-        uint16_t shndx;
+        uint32_t shndx;
 
         if (sym == NULL) {
             continue;
@@ -254,7 +254,7 @@ static int obj_defines_unresolved(const symstate_t *state, elfobj_t *obj) {
         const elf_symbol_t *sym = elf_symbol_at(obj, i);
         const char *name;
         uint8_t bind;
-        uint16_t shndx;
+        uint32_t shndx;
 
         if (sym == NULL) {
             continue;

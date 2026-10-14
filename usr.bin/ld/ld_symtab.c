@@ -258,7 +258,7 @@ int ld_symtab_build(ld_ctx_t *ctx, const objvec_t *inputs, ld_symtab_t *t) {
             const elf_symbol_t *sym = elf_symbol_at(obj, si);
             const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
             uint8_t bind;
-            uint16_t shndx;
+            uint32_t shndx;
             ld_sym_t *e;
 
             if (name == NULL || name[0] == '\0') {

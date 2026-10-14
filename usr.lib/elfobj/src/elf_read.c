@@ -164,7 +164,9 @@ static elf_err_t check_sections_disjoint_in_file(elfobj_t *obj) {
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
 
-        if (sec != NULL && sec->type != SHT_NOBITS && sec->size > 0) {
+        /* (SHT_NULL has no bytes: the null section's size is the count of
+         * sections, under ELF's extended numbering.) */
+        if (sec != NULL && sec->type != SHT_NOBITS && sec->type != SHT_NULL && sec->size > 0) {
             by_off[n++] = sec;
         }
     }
@@ -191,7 +193,7 @@ static elf_err_t check_sections_disjoint_in_file(elfobj_t *obj) {
     return err;
 }
 
-static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize, uint16_t shnum) {
+static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize, uint64_t shnum) {
     size_t i;
     uint64_t table_size;
     uint64_t table_end;
@@ -249,7 +251,7 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
             return ELF_ERR_FORMAT;
         }
 
-        if (sec->type != SHT_NOBITS && sec->size > 0) {
+        if (sec->type != SHT_NOBITS && sec->type != SHT_NULL && sec->size > 0) {
             /* Compare the 64-bit offset/size against image_size without
              * truncating to size_t first; on the 32-bit target a section
              * whose true span is out of file but whose low 32 bits are in
@@ -319,6 +321,26 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
             free(sec);
             return ELF_ERR_OOM;
         }
+    }
+
+    /* The null section's size and link were the count and the names'
+     * index, if they were anything, and are read: it is empty as any is. */
+    if (obj->section_count > 0 && obj->sections[0]->type == SHT_NULL) {
+        obj->sections[0]->size = 0;
+        obj->sections[0]->link = 0;
+    }
+
+    /* The sections numbered as the reserved indices are: empty ones, as
+     * this library writes them, or there is a section a symbol cannot be
+     * told of from SHN_ABS and its like -- which is refused. */
+    for (i = SHN_LORESERVE; i <= SHN_HIRESERVE && i < obj->section_count; ++i) {
+        if (obj->sections[i]->type != SHT_NULL) {
+            if (debug_open_enabled()) {
+                fprintf(stderr, "elfobj: section %zu is numbered as a reserved index is\n", i);
+            }
+            return ELF_ERR_UNSUPPORTED;
+        }
+        obj->sections[i]->placeholder = 1;
     }
 
     return check_sections_disjoint_in_file(obj);
@@ -735,6 +757,7 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
         size_t entsz;
         size_t min_entsz;
         struct elf_section *strsec;
+        struct elf_section *xsec;
         symtab_index_t map;
 
         if (sec->type != SHT_SYMTAB && sec->type != SHT_DYNSYM) {
@@ -753,6 +776,16 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
         nsyms = sec->data_size / entsz;
 
         strsec = obj->sections[sec->link];
+
+        /* The sections of its symbols past the reserved indices, if it
+         * has any. */
+        xsec = NULL;
+        for (j = 0; j < obj->section_count; ++j) {
+            if (obj->sections[j]->type == SHT_SYMTAB_SHNDX && obj->sections[j]->link == i) {
+                xsec = obj->sections[j];
+                break;
+            }
+        }
 
         map.sec_index = i;
         map.count = nsyms;
@@ -809,6 +842,9 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
             sym->type = ELF32_ST_TYPE(st_info);
             sym->other = st_other;
             sym->shndx = st_shndx;
+            if (st_shndx == SHN_XINDEX && xsec != NULL && xsec->data != NULL && j < xsec->data_size / 4) {
+                sym->shndx = elf__rd32(xsec->data + (j * 4), obj->endian);
+            }
 
             if (sym->name == NULL || elf__push_symbol(obj, sym) != ELF_OK) {
                 free(sym->name);
@@ -1189,7 +1225,7 @@ static elf_err_t parse_object(elfobj_t *obj) {
     uint16_t phentsize;
     uint16_t phnum;
     uint16_t shentsize;
-    uint16_t shnum;
+    uint64_t shnum;
     elf_err_t err;
 
     if (!is_elf_magic(b, obj->image_size)) {
@@ -1240,6 +1276,24 @@ static elf_err_t parse_object(elfobj_t *obj) {
         shentsize = elf__rd16(b + 58, obj->endian);
         shnum = elf__rd16(b + 60, obj->endian);
         obj->shstrndx = elf__rd16(b + 62, obj->endian);
+    }
+
+    /* ELF's extended numbering: a count of sections of 0 with a table of
+     * them is in the null section's size, and an index of the names'
+     * section of SHN_XINDEX in its link. */
+    if (shoff != 0 && (shnum == 0 || obj->shstrndx == SHN_XINDEX)) {
+        size_t need = obj->cls == ELFOBJ_CLASS_32 ? 40u : 64u;
+
+        if (shoff > obj->image_size || obj->image_size - shoff < need) {
+            return ELF_ERR_BOUNDS;
+        }
+        if (shnum == 0) {
+            shnum = obj->cls == ELFOBJ_CLASS_32 ? elf__rd32(obj->image + shoff + 20, obj->endian)
+                                                 : elf__rd64(obj->image + shoff + 32, obj->endian);
+        }
+        if (obj->shstrndx == SHN_XINDEX) {
+            obj->shstrndx = elf__rd32(obj->image + shoff + (obj->cls == ELFOBJ_CLASS_32 ? 24u : 40u), obj->endian);
+        }
     }
 
     if (obj->machine != EM_386 && obj->machine != EM_X86_64 &&

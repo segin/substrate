@@ -599,7 +599,7 @@ static int dso_defines_unresolved(const char *path, const ld_ctx_t *ctx, ld_ctx_
     for (i = 0; i < elf_symbol_count(obj); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(obj, i);
         const char *name;
-        uint16_t shndx;
+        uint32_t shndx;
         uint16_t ver;
         uint8_t bind;
         uint8_t vis;
@@ -658,7 +658,7 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
         const char *name;
         uint8_t bind;
         uint8_t vis;
-        uint16_t shndx;
+        uint32_t shndx;
         uint16_t ver;
 
         if (sym == NULL) {
@@ -750,7 +750,7 @@ int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, in
         const elf_symbol_t *sym;
         uint8_t bind;
         uint8_t vis;
-        uint16_t shndx;
+        uint32_t shndx;
 
         if (ld_dso_open(ctx, ctx->dso_inputs.items[i], &obj) != ELF_OK) {
             continue;
@@ -801,7 +801,7 @@ int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, in
 
 
 static int dynsym_shndx_raw(const uint8_t *dynsym, size_t dynsym_len, size_t entsz, elfobj_class_t cls,
-                            elfobj_endian_t endian, size_t index, uint16_t *out_shndx) {
+                            elfobj_endian_t endian, size_t index, uint32_t *out_shndx) {
     size_t off = index * entsz;
 
     if (dynsym == NULL || entsz == 0 || out_shndx == NULL || off > dynsym_len || dynsym_len - off < entsz) {
@@ -977,7 +977,7 @@ static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path
         size_t sym_base_len = 0;
         uint8_t bind;
         uint8_t vis;
-        uint16_t shndx;
+        uint32_t shndx;
         uint16_t sym_ver;
         int hidden;
         char *dup;
@@ -1278,7 +1278,7 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
         size_t base_len;
         const char *ver_name;
         int is_default_name;
-        uint16_t shndx;
+        uint32_t shndx;
         uint16_t curr_ver;
         uint16_t curr_base;
         int curr_hidden;

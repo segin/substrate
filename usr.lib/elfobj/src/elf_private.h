@@ -121,6 +121,7 @@ struct elf_section {
     size_t data_cap;            /* allocated, where data was grown by the
                                  * merge; 0 where it is exactly data_size */
     uint8_t owns_data;
+    uint8_t placeholder;        /* one of the empty sections numbered as the reserved indices are */
     uint8_t has_compression_hint;
     uint32_t compression_type;
     uint64_t compression_size;
@@ -150,7 +151,7 @@ struct elf_symbol {
     uint8_t bind;
     uint8_t type;
     uint8_t other;
-    uint16_t shndx;
+    uint32_t shndx;             /* past SHN_HIRESERVE for a section that is (ELF_SHNDX_RESERVED) */
     uint16_t ver_index;
     char *version_name;
     uint8_t version_default;
@@ -197,7 +198,7 @@ struct elfobj {
     size_t reloc_count;
     size_t reloc_cap;
 
-    uint16_t shstrndx;
+    uint32_t shstrndx;
     uint16_t phnum;
     struct elf_phdr *phdrs;
     size_t phdr_count;

@@ -810,7 +810,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
     return ELF_OK;
 }
 
-static int resolve_src_sec_index(const elfobj_t *obj, uint16_t shndx, size_t *out_idx) {
+static int resolve_src_sec_index(const elfobj_t *obj, uint32_t shndx, size_t *out_idx) {
     size_t idx;
     struct elf_section *sec;
     int parsed_with_null0;
@@ -875,7 +875,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
         struct elf_symbol *existing;
         struct elf_symbol *n;
         uint64_t value = 0;
-        uint16_t shndx = SHN_UNDEF;
+        uint32_t shndx = SHN_UNDEF;
         const char *sec_name = "";
 
         if (sym == NULL) {
@@ -910,9 +910,9 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 if (!elf__u64_add(sym->value, sec_bases[src_sec_index], &value)) {
                     return ELF_ERR_BOUNDS;
                 }
-                shndx = (uint16_t)(dst_sec->index + 1);
+                shndx = (uint32_t)(dst_sec->index + 1);
                 sec_name = dst_sec->name != NULL ? dst_sec->name : "";
-            } else if (sym->shndx != SHN_UNDEF && sym->shndx < 0xff00u) {
+            } else if (sym->shndx != SHN_UNDEF && !ELF_SHNDX_RESERVED(sym->shndx)) {
                 /* A real (non-reserved, < SHN_LORESERVE) input section index
                  * that did not resolve to an output section would be stored
                  * verbatim and read as an out-of-range out->sections[] index
@@ -1044,7 +1044,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
         if (r->symbol->bind == STB_LOCAL) {
             char local_name[160];
             uint64_t local_value = r->symbol->value;
-            uint16_t local_shndx = r->symbol->shndx;
+            uint32_t local_shndx = r->symbol->shndx;
             uint8_t local_type = r->symbol->type;
             size_t sym_src_sec = 0;
 
@@ -1062,7 +1062,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &local_value)) {
                     return ELF_ERR_BOUNDS;
                 }
-                local_shndx = (uint16_t)(dst_sym_sec->index + 1);
+                local_shndx = (uint32_t)(dst_sym_sec->index + 1);
             }
 
             /*
@@ -1090,7 +1090,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
         } else if (r->symbol->name == NULL || r->symbol->name[0] == '\0') {
             char anon_name[96];
             uint64_t anon_value = r->symbol->value;
-            uint16_t anon_shndx = r->symbol->shndx;
+            uint32_t anon_shndx = r->symbol->shndx;
             uint8_t anon_type = STT_NOTYPE;
             size_t sym_src_sec = 0;
 
@@ -1108,7 +1108,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &anon_value)) {
                     return ELF_ERR_BOUNDS;
                 }
-                anon_shndx = (uint16_t)(dst_sym_sec->index + 1);
+                anon_shndx = (uint32_t)(dst_sym_sec->index + 1);
                 anon_type = STT_SECTION;
             }
 

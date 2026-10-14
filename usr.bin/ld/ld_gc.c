@@ -78,9 +78,9 @@ typedef struct {
 } gc_state_t;
 
 static int gc_symbol_is_defined(const elf_symbol_t *sym) {
-    uint16_t shndx = elf_symbol_shndx(sym);
+    uint32_t shndx = elf_symbol_shndx(sym);
 
-    return shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON && shndx < 0xff00;
+    return shndx != SHN_UNDEF && !ELF_SHNDX_RESERVED(shndx);
 }
 
 /*
@@ -515,8 +515,8 @@ static int sections_icf_equal(const elf_section_t *a, const elf_section_t *b) {
 static int icf_fold_section(elfobj_t *obj, size_t leader_idx, size_t dupe_idx) {
     size_t i;
     elf_section_t *dupe;
-    uint16_t dupe_shndx;
-    uint16_t leader_shndx;
+    uint32_t dupe_shndx;
+    uint32_t leader_shndx;
 
     if (obj == NULL || leader_idx >= elf_section_count(obj) || dupe_idx >= elf_section_count(obj)) {
         return -1;

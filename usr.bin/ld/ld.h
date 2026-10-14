@@ -477,7 +477,7 @@ typedef struct {
     int type;                   /* STT_* */
     uint64_t size;
     uint64_t value;
-    uint16_t shndx;
+    uint32_t shndx;
     size_t dso;                 /* which of ctx->dso_inputs */
 } dso_def_t;
 

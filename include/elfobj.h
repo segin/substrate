@@ -132,6 +132,25 @@ typedef enum {
 #ifndef SHT_SYMTAB_SHNDX
 #define SHT_SYMTAB_SHNDX 18
 #endif
+#ifndef SHN_LORESERVE
+#define SHN_LORESERVE 0xff00
+#endif
+#ifndef SHN_XINDEX
+#define SHN_XINDEX 0xffff
+#endif
+#ifndef SHN_HIRESERVE
+#define SHN_HIRESERVE 0xffff
+#endif
+
+/*
+ * A symbol's section is a number of 32 bits.  What is in SHN_LORESERVE to
+ * SHN_HIRESERVE is a reserved one -- SHN_ABS, SHN_COMMON -- and no
+ * section: an object of more sections than that has its sections of those
+ * numbers made empty ones of SHT_NULL by the library (and is written with
+ * ELF's extended numbering), so that a section is never numbered as a
+ * reserved index is.  A section past them is numbered 0x10000 and on.
+ */
+#define ELF_SHNDX_RESERVED(x) ((uint32_t)(x) >= SHN_LORESERVE && (uint32_t)(x) <= SHN_HIRESERVE)
 
 #ifndef SHT_GNU_verdef
 #define SHT_GNU_HASH 0x6ffffff6
@@ -1379,7 +1398,7 @@ elf_err_t elf_symbol_set_version_name(elf_symbol_t *symbol, const char *version,
 uint16_t elf_symbol_version(const elf_symbol_t *symbol);
 elf_err_t elf_symbol_set_value(elf_symbol_t *symbol, uint64_t value);
 elf_err_t elf_symbol_set_size(elf_symbol_t *symbol, uint64_t size);
-elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint16_t shndx);
+elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint32_t shndx);
 int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_t bind);
 elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out);
 elf_symbol_t *elf_symbol_lookup_sysv(elfobj_t *obj, const char *name);
@@ -1521,7 +1540,7 @@ const char *elf_symbol_name(const elf_symbol_t *symbol);
 uint8_t elf_symbol_bind(const elf_symbol_t *symbol);
 uint8_t elf_symbol_type(const elf_symbol_t *symbol);
 uint8_t elf_symbol_visibility(const elf_symbol_t *symbol);
-uint16_t elf_symbol_shndx(const elf_symbol_t *symbol);
+uint32_t elf_symbol_shndx(const elf_symbol_t *symbol);
 uint64_t elf_symbol_value(const elf_symbol_t *symbol);
 uint64_t elf_symbol_size(const elf_symbol_t *symbol);
 

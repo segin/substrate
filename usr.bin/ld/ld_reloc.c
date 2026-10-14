@@ -114,7 +114,7 @@ static size_t ifunc_stub_size(const elfobj_t *obj) {
 
 int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name) {
-    uint16_t shndx;
+    uint32_t shndx;
     uint8_t bind;
     uint64_t value;
 
@@ -145,7 +145,7 @@ int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
         }
         return -1;
     }
-    if (shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+    if (shndx == SHN_ABS || shndx == SHN_COMMON || ELF_SHNDX_RESERVED(shndx)) {
         *out_addr = value;
         return 0;
     }
@@ -336,9 +336,9 @@ static int reloc_is_got_slot(uint16_t machine, uint32_t type) {
  */
 static int got_ref_relaxes(uint16_t machine, uint32_t type, const elf_symbol_t *sym, const uint8_t *buf,
                            size_t sz, uint64_t off) {
-    uint16_t shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
+    uint32_t shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
 
-    if (shndx == SHN_UNDEF || shndx >= 0xff00 || buf == NULL || off < 2 || off + 4 > sz) {
+    if (shndx == SHN_UNDEF || ELF_SHNDX_RESERVED(shndx) || buf == NULL || off < 2 || off + 4 > sz) {
         return 0;
     }
     if (machine == EM_386) {
@@ -456,7 +456,7 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
             const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
             const elf_symbol_t *sym = elf_reloc_symbol(rel);
             uint32_t type = elf_reloc_type(rel);
-            uint16_t shndx;
+            uint32_t shndx;
 
             if (machine == EM_386 && reloc_is_i386_got_relative(type)) {
                 ctx->local_got_need_base = 1;
@@ -488,7 +488,7 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
                 continue;
             }
             if (elf_type(out) == ET_DYN && shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON &&
-                shndx < 0xff00) {
+                !ELF_SHNDX_RESERVED(shndx)) {
                 ctx->local_got_relative++;
             }
             if (ld_vec_room(&ctx->local_got, &ctx->local_got_cap, ctx->local_got_count,
@@ -603,7 +603,7 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
     (void)tls_extent(out, &tls_start, NULL, NULL, NULL);
     for (i = 0; i < ctx->local_got_count; ++i) {
         const elf_symbol_t *sym = ctx->local_got[i];
-        uint16_t shndx = elf_symbol_shndx(sym);
+        uint32_t shndx = elf_symbol_shndx(sym);
         uint64_t addr = 0;
         const char *undef = NULL;
 
@@ -611,7 +611,7 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
             goto out;
         }
         write_uint_bytes(buf + entsz * (ctx->local_got_base + i), (int)entsz, e, addr);
-        if (relbuf != NULL && shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON && shndx < 0xff00 &&
+        if (relbuf != NULL && shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON && !ELF_SHNDX_RESERVED(shndx) &&
             next_rel < rel_total) {
             uint8_t *r = relbuf + relsz * next_rel++;
             uint64_t where = local_got_slot_addr(ctx, out, (long)i);
@@ -669,7 +669,7 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
         memset(code, 0x90, isz);
         for (i = 0; i < ctx->ifunc_count; ++i) {
             const elf_symbol_t *sym = ctx->ifuncs[i];
-            uint16_t shndx = elf_symbol_shndx(sym);
+            uint32_t shndx = elf_symbol_shndx(sym);
             size_t word = ctx->local_got_base + ctx->local_got_count + ctx->tls_got_words + i;
             uint64_t slot = elf_section_addr(got) + entsz * word;
             uint64_t at = elf_section_addr(iplt) + stub * i;
@@ -677,7 +677,7 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
             uint8_t *c = code + stub * i;
             uint8_t *r;
 
-            if (shndx == 0 || shndx >= 0xff00 || (size_t)(shndx - 1) >= elf_section_count(out) ||
+            if (shndx == 0 || ELF_SHNDX_RESERVED(shndx) || (size_t)(shndx - 1) >= elf_section_count(out) ||
                 relbuf == NULL || next_rel >= rel_total) {
                 free(code);
                 goto out;

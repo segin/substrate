@@ -80,7 +80,7 @@
 .Ft elf_err_t
 .Fo elf_symbol_set_shndx
 .Fa "elf_symbol_t *symbol"
-.Fa "uint16_t shndx"
+.Fa "uint32_t shndx"
 .Fc
 .Ft int
 .Fo elf_symbol_is_duplicate_global
@@ -119,7 +119,7 @@
 .Fo elf_symbol_type
 .Fa "const elf_symbol_t *symbol"
 .Fc
-.Ft uint16_t
+.Ft uint32_t
 .Fo elf_symbol_shndx
 .Fa "const elf_symbol_t *symbol"
 .Fc
@@ -253,6 +253,30 @@ Sets section index, including
 .Dv SHN_ABS ,
 and
 .Dv SHN_COMMON .
+The index is 32 bits wide.
+A value from
+.Dv SHN_LORESERVE
+to
+.Dv SHN_HIRESERVE
+.Pq tested by Fn ELF_SHNDX_RESERVED
+is a reserved index and no section.
+An object of more than 65279 sections gives the 256 section numbers of
+that range to empty
+.Dv SHT_NULL
+sections, which no symbol may name, so the sections past them are
+numbered 0x10000 and on; such an object is written with ELF's extended
+numbering
+.Po
+.Va e_shnum
+0,
+.Va e_shstrndx
+.Dv SHN_XINDEX ,
+and an
+.Dv SHT_SYMTAB_SHNDX
+section
+.Pc
+and read back the same way.
+Its sections can be neither removed nor reordered.
 .It Fn elf_symbol_is_duplicate_global "obj" "name" "bind"
 Checks if adding the given symbol would create a global/weak conflict.
 .It Fn elf_symbols_sort_deterministic "obj" "first_global_out"

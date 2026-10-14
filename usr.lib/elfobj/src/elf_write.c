@@ -286,9 +286,16 @@ static uint8_t *build_group_data(const out_group_t *group, elfobj_endian_t endia
     return data;
 }
 
+/*
+ * The symbol table.  A symbol of a section numbered past the reserved
+ * indices has SHN_XINDEX for its section, and its section's number in
+ * *xindex_out at its own place: a table of one number for each symbol,
+ * made for the first such, which is SHT_SYMTAB_SHNDX's.
+ */
 static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_class_t cls,
                              elf_strtab_t *strtab, const char **extra_names, size_t extra_count,
-                             size_t *extra_indices, size_t *out_size, size_t *out_entsize) {
+                             size_t *extra_indices, size_t *out_size, size_t *out_entsize,
+                             uint8_t **xindex_out) {
     size_t entsz = (cls == ELFOBJ_CLASS_64) ? 24 : 16;
     int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
                     (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
@@ -322,10 +329,19 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
         uint8_t *p;
         uint32_t st_name = 0;
         uint8_t st_info = ELF32_ST_INFO(sym->bind, sym->type);
+        uint16_t st_shndx = (uint16_t)sym->shndx;
 
         if (idx >= n) {
             free(buf);
             return NULL;
+        }
+        if (sym->shndx > SHN_HIRESERVE) {
+            if (*xindex_out == NULL && (*xindex_out = (uint8_t *)elf__calloc(n, 4)) == NULL) {
+                free(buf);
+                return NULL;
+            }
+            elf__wr32(*xindex_out + (idx * 4), e, sym->shndx);
+            st_shndx = SHN_XINDEX;
         }
         p = buf + (idx * entsz);
         if (!(has_null && i == 0)) {
@@ -341,12 +357,12 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
             elf__wr32(p + 8, e, (uint32_t)sym->size);
             p[12] = st_info;
             p[13] = sym->other;
-            elf__wr16(p + 14, e, sym->shndx);
+            elf__wr16(p + 14, e, st_shndx);
         } else {
             elf__wr32(p + 0, e, st_name);
             p[4] = st_info;
             p[5] = sym->other;
-            elf__wr16(p + 6, e, sym->shndx);
+            elf__wr16(p + 6, e, st_shndx);
             elf__wr64(p + 8, e, sym->value);
             elf__wr64(p + 16, e, sym->size);
         }
@@ -717,6 +733,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     const char **group_sig_names = NULL;
     size_t *group_sig_indices = NULL;
     uint8_t *symtab_data = NULL;
+    uint8_t *xindex_data = NULL;
     uint8_t *dynstr_data = NULL;
     ver_name_t *ver_names = NULL;
     size_t ver_name_count = 0;
@@ -781,7 +798,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         const char *name = s->name ? s->name : "";
         out_sec_t out;
 
-        if (s->type == SHT_NULL ||
+        /* (An empty section that stands for a reserved index is written,
+         * as one of SHT_NULL, to keep every section past it its number.) */
+        if ((s->type == SHT_NULL && !s->placeholder) ||
             strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
             strcmp(name, ".shstrtab") == 0 ||
             ((s->type == SHT_REL || s->type == SHT_RELA) &&
@@ -902,8 +921,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     }
 
     symtab_data = build_symtab(obj, obj->endian, obj->cls, &strtab, group_sig_names, group_count,
-                               group_sig_indices, &symtab_size, &symtab_entsz);
+                               group_sig_indices, &symtab_size, &symtab_entsz, &xindex_data);
     if (symtab_data == NULL) {
+        free(xindex_data);
+        xindex_data = NULL;
         err = ELF_ERR_OOM;
         goto done;
     }
@@ -952,6 +973,27 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             err = ELF_ERR_OOM;
             goto done;
         }
+    }
+
+    /* The sections of the symbols past the reserved indices. */
+    if (xindex_data != NULL) {
+        out_sec_t xsec;
+
+        memset(&xsec, 0, sizeof(xsec));
+        xsec.name = ".symtab_shndx";
+        xsec.type = SHT_SYMTAB_SHNDX;
+        xsec.addralign = 4;
+        xsec.entsize = 4;
+        xsec.link = (uint32_t)symtab_index;
+        xsec.data = xindex_data;
+        xsec.size = (symtab_size / symtab_entsz) * 4;
+        xsec.owns_data = 1;
+        if (out_push(&secs, &sec_count, &sec_cap, &xsec) != ELF_OK) {
+            free(xindex_data);
+            err = ELF_ERR_OOM;
+            goto done;
+        }
+        xindex_data = NULL;
     }
 
     if (obj->has_versioning && !has_gnu_versym && !has_gnu_verdef) {
@@ -1351,6 +1393,17 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         goto done;
     }
 
+    /* ELF's extended numbering: a count of sections the header has not
+     * room for is 0 there and the null section's size; an index of the
+     * names' section past the reserved ones is SHN_XINDEX there and the
+     * null section's link. */
+    if (sec_count >= SHN_LORESERVE) {
+        secs[0].size = sec_count;
+    }
+    if (shstr_index >= SHN_LORESERVE) {
+        secs[0].link = (uint32_t)shstr_index;
+    }
+
     if (obj->cls == ELFOBJ_CLASS_32) {
         img[0] = ELFMAG0;
         img[1] = ELFMAG1;
@@ -1372,8 +1425,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         elf__wr16(img + 42, obj->endian, sizeof(Elf32_Phdr));
         elf__wr16(img + 44, obj->endian, (uint16_t)phnum);
         elf__wr16(img + 46, obj->endian, (uint16_t)shentsz);
-        elf__wr16(img + 48, obj->endian, (uint16_t)sec_count);
-        elf__wr16(img + 50, obj->endian, (uint16_t)shstr_index);
+        elf__wr16(img + 48, obj->endian, sec_count >= SHN_LORESERVE ? 0 : (uint16_t)sec_count);
+        elf__wr16(img + 50, obj->endian, shstr_index >= SHN_LORESERVE ? SHN_XINDEX : (uint16_t)shstr_index);
     } else {
         img[0] = ELFMAG0;
         img[1] = ELFMAG1;
@@ -1395,8 +1448,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         elf__wr16(img + 54, obj->endian, sizeof(Elf64_Phdr));
         elf__wr16(img + 56, obj->endian, (uint16_t)phnum);
         elf__wr16(img + 58, obj->endian, (uint16_t)shentsz);
-        elf__wr16(img + 60, obj->endian, (uint16_t)sec_count);
-        elf__wr16(img + 62, obj->endian, (uint16_t)shstr_index);
+        elf__wr16(img + 60, obj->endian, sec_count >= SHN_LORESERVE ? 0 : (uint16_t)sec_count);
+        elf__wr16(img + 62, obj->endian, shstr_index >= SHN_LORESERVE ? SHN_XINDEX : (uint16_t)shstr_index);
     }
 
     for (i = 1; i < sec_count; ++i) {

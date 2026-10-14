@@ -62,7 +62,7 @@ int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym) {
     uint8_t bind;
     uint8_t vis;
-    uint16_t shndx;
+    uint32_t shndx;
 
     if (ctx == NULL || out == NULL || sym == NULL) {
         return 0;
@@ -298,14 +298,14 @@ void set_definitions_preemptible(int on) {
  * Not thread-local variables, which stay bound here.
  */
 int symbol_is_preemptible(const elf_symbol_t *sym) {
-    uint16_t shndx;
+    uint32_t shndx;
 
     if (!definitions_are_preemptible || sym == NULL || elf_symbol_name(sym) == NULL ||
         elf_symbol_name(sym)[0] == '\0') {
         return 0;
     }
     shndx = elf_symbol_shndx(sym);
-    return shndx != SHN_UNDEF && shndx != SHN_ABS && shndx < 0xff00 &&
+    return shndx != SHN_UNDEF && shndx != SHN_ABS && !ELF_SHNDX_RESERVED(shndx) &&
            (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK) &&
            elf_symbol_visibility(sym) == STV_DEFAULT && elf_symbol_type(sym) != STT_TLS;
 }
@@ -346,13 +346,13 @@ int is_runtime_import_symbol(const elf_symbol_t *sym) {
 }
 
 static int symbol_needs_runtime_relative_reloc(const elf_symbol_t *sym) {
-    uint16_t shndx;
+    uint32_t shndx;
 
     if (sym == NULL) {
         return 0;
     }
     shndx = elf_symbol_shndx(sym);
-    if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+    if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || ELF_SHNDX_RESERVED(shndx)) {
         return 0;
     }
     return 1;
@@ -1649,7 +1649,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         uint8_t info;
         uint8_t other;
         uint32_t name_off = 0;
-        uint16_t shndx;
+        uint32_t shndx;
         uint16_t version;
         uint64_t value;
         uint64_t size;
@@ -2238,7 +2238,7 @@ int finalize_symbol_values_for_output(elfobj_t *out) {
     }
     for (i = 0; i < elf_symbol_count(out); ++i) {
         elf_symbol_t *sym = elf_symbol_at(out, i);
-        uint16_t shndx;
+        uint32_t shndx;
         uint64_t value;
         uint64_t sec_addr;
 
@@ -2246,7 +2246,7 @@ int finalize_symbol_values_for_output(elfobj_t *out) {
             continue;
         }
         shndx = elf_symbol_shndx(sym);
-        if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+        if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || ELF_SHNDX_RESERVED(shndx)) {
             continue;
         }
         if (shndx == 0 || (size_t)(shndx - 1) >= elf_section_count(out)) {

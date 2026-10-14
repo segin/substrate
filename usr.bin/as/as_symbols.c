@@ -856,7 +856,7 @@ int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         const as_symbol_t *s = &symtab->items[i];
         elf_symbol_t *esym;
         elf_symbol_t *target;
-        uint16_t shndx;
+        uint32_t shndx;
         int64_t v;
 
         if (symbol_is_not_emitted(ctx, symtab, s)) {

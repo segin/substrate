@@ -247,7 +247,10 @@ elf_err_t elf_symbol_define(elf_symbol_t *symbol, elf_section_t *section, uint64
     }
 
     symbol->value = value;
-    symbol->shndx = (uint16_t)(section->index + 1);
+    if (section->placeholder) {
+        return ELF_ERR_BOUNDS;
+    }
+    symbol->shndx = (uint32_t)(section->index + 1);
     symbol->obj->dirty = 1;
     return ELF_OK;
 }
@@ -365,17 +368,18 @@ elf_err_t elf_symbol_set_value(elf_symbol_t *symbol, uint64_t value) {
     return ELF_OK;
 }
 
-elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint16_t shndx) {
+elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint32_t shndx) {
     if (symbol == NULL || symbol->obj == NULL) {
         return ELF_ERR_STATE;
     }
     if (!is_mutable_obj(symbol->obj)) {
         return ELF_ERR_STATE;
     }
-    /* Valid section indices are 0..section_count-1; >= 0xff00 is the
-     * reserved/special range and is not a section index. */
-    if (shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON &&
-        shndx < 0xff00u && shndx >= symbol->obj->section_count) {
+    /* A section is 1 to section_count (the first is the null one the
+     * object is written with); a reserved index is no section, and no
+     * empty section that stands for one is a symbol's. */
+    if (shndx != SHN_UNDEF && !ELF_SHNDX_RESERVED(shndx) &&
+        (shndx > symbol->obj->section_count || symbol->obj->sections[shndx - 1]->placeholder)) {
         return ELF_ERR_BOUNDS;
     }
     symbol->shndx = shndx;

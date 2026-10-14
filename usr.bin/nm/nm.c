@@ -49,7 +49,7 @@ typedef struct {
     uint8_t bind;
     uint8_t stype;
     uint8_t visibility;
-    uint16_t shndx;
+    uint32_t shndx;
     char *sec_name;
     size_t orig_index;
 } nm_sym_t;
@@ -186,7 +186,7 @@ static uint64_t rd64(const uint8_t *p, int be)
 /* Symbol type classification                                          */
 /* ------------------------------------------------------------------ */
 
-static char classify_symbol(elfobj_t *obj, uint16_t shndx, uint8_t bind,
+static char classify_symbol(elfobj_t *obj, uint32_t shndx, uint8_t bind,
                             uint8_t stype, uint64_t value, uint64_t sz,
                             const char **sec_name_out)
 {
