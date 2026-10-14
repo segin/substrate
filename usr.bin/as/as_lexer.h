@@ -85,6 +85,8 @@ typedef struct {
 
 void as_token_vec_init(as_token_vec_t *v);
 void as_token_vec_free(as_token_vec_t *v);
+/* Empty of its tokens, keeping its room and its files for the next. */
+void as_token_vec_clear(as_token_vec_t *v);
 
 /*
  * What a character of a source line is: text, part of a quoted string

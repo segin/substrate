@@ -22,9 +22,12 @@
 extern "C" {
 #endif
 
+/* (Each with its name's hash, which a probe compares before the names
+ * and the table grown does not work out again.) */
 typedef struct {
     const char *key;
     size_t value;
+    uint32_t hash;
 } as_strmap_slot_t;
 
 typedef struct {
@@ -53,12 +56,14 @@ static inline void as_strmap_free(as_strmap_t *m) {
 /* 1 and the number if the name is there, 0 if not. */
 static inline int as_strmap_get(const as_strmap_t *m, const char *key, size_t *value) {
     size_t i;
+    uint32_t h;
 
     if (m->cap == 0 || key == NULL) {
         return 0;
     }
-    for (i = as_strmap_hash(key) & (m->cap - 1); m->slots[i].key != NULL; i = (i + 1) & (m->cap - 1)) {
-        if (strcmp(m->slots[i].key, key) == 0) {
+    h = as_strmap_hash(key);
+    for (i = h & (m->cap - 1); m->slots[i].key != NULL; i = (i + 1) & (m->cap - 1)) {
+        if (m->slots[i].hash == h && strcmp(m->slots[i].key, key) == 0) {
             *value = m->slots[i].value;
             return 1;
         }
@@ -70,10 +75,12 @@ static inline int as_strmap_get(const as_strmap_t *m, const char *key, size_t *v
  * memory. */
 static inline int as_strmap_put(as_strmap_t *m, const char *key, size_t value) {
     size_t i;
+    uint32_t h;
 
     if (key == NULL) {
         return -1;
     }
+    h = as_strmap_hash(key);
     /* No more than half full. */
     if ((m->count + 1) * 2 > m->cap) {
         size_t cap = m->cap != 0 ? m->cap * 2 : 16;
@@ -85,7 +92,7 @@ static inline int as_strmap_put(as_strmap_t *m, const char *key, size_t value) {
         }
         for (k = 0; k < m->cap; ++k) {
             if (m->slots[k].key != NULL) {
-                for (i = as_strmap_hash(m->slots[k].key) & (cap - 1); slots[i].key != NULL; i = (i + 1) & (cap - 1)) {
+                for (i = m->slots[k].hash & (cap - 1); slots[i].key != NULL; i = (i + 1) & (cap - 1)) {
                 }
                 slots[i] = m->slots[k];
             }
@@ -94,14 +101,15 @@ static inline int as_strmap_put(as_strmap_t *m, const char *key, size_t value) {
         m->slots = slots;
         m->cap = cap;
     }
-    for (i = as_strmap_hash(key) & (m->cap - 1); m->slots[i].key != NULL; i = (i + 1) & (m->cap - 1)) {
-        if (strcmp(m->slots[i].key, key) == 0) {
+    for (i = h & (m->cap - 1); m->slots[i].key != NULL; i = (i + 1) & (m->cap - 1)) {
+        if (m->slots[i].hash == h && strcmp(m->slots[i].key, key) == 0) {
             m->slots[i].value = value;
             return 0;
         }
     }
     m->slots[i].key = key;
     m->slots[i].value = value;
+    m->slots[i].hash = h;
     m->count++;
     return 0;
 }

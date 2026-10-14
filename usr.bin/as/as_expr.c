@@ -751,14 +751,16 @@ as_expr_t *as_expr_parse_tokens(const as_token_t *tokv, size_t n, const char *fi
 /* Text is made tokens by the tokenizer there is, and then read as
  * tokens: an expression in a string has no grammar of its own. */
 static as_expr_t *parse_expr_text(const char *s, const char *file, unsigned line) {
-    as_token_vec_t toks;
+    /* (Its room is kept from one text to the next: what the expression
+     * keeps of a token, it copies.) */
+    static as_token_vec_t toks;
     as_expr_t *e = NULL;
 
-    as_token_vec_init(&toks);
+    as_token_vec_clear(&toks);
     if (as_lex_text_tokens(s, file, line, &toks) == 0) {
         e = as_expr_parse_tokens(toks.items, toks.count, file, line);
     }
-    as_token_vec_free(&toks);
+    as_token_vec_clear(&toks);
     return e;
 }
 

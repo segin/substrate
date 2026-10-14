@@ -65,10 +65,12 @@ void as_token_vec_free(as_token_vec_t *v) {
     memset(v, 0, sizeof(*v));
 }
 
-/* Empty of its tokens, keeping the room and the files for the next. */
-static void as_token_vec_clear(as_token_vec_t *v) {
+void as_token_vec_clear(as_token_vec_t *v) {
     size_t i;
 
+    if (v == NULL) {
+        return;
+    }
     for (i = 0; i < v->count; ++i) {
         as_token_free(&v->items[i]);
     }
