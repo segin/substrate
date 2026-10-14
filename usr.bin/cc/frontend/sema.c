@@ -1545,9 +1545,30 @@ static cc_type_t integral_promo_type(cc_type_t t) {
     return t;
 }
 
+/* Conversion rank of a promoted integer type: int, long, long long. */
+static int integral_rank(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+        return 2;
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+        return 3;
+    default:
+        return 1;
+    }
+}
+
+static int integral_rank_bytes(cc_type_t t) {
+    int rank = integral_rank(t);
+    return rank == 3 ? 8 : rank == 2 ? g_pointer_size_bytes : 4;
+}
+
 static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     cc_type_t ap;
     cc_type_t bp;
+    cc_type_t s;
+    cc_type_t u;
 
     if (a == CC_TYPE_VOID || b == CC_TYPE_VOID) {
         return CC_TYPE_VOID;
@@ -1582,29 +1603,30 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
 
     ap = integral_promo_type(a);
     bp = integral_promo_type(b);
+    if (integral_rank(ap) == 1) {
+        ap = is_unsigned_integral_type(ap) ? CC_TYPE_UINT : CC_TYPE_INT;
+    }
+    if (integral_rank(bp) == 1) {
+        bp = is_unsigned_integral_type(bp) ? CC_TYPE_UINT : CC_TYPE_INT;
+    }
+    if (is_unsigned_integral_type(ap) == is_unsigned_integral_type(bp)) {
+        return integral_rank(ap) >= integral_rank(bp) ? ap : bp;
+    }
 
-    if (ap == CC_TYPE_ULONG_LONG || bp == CC_TYPE_ULONG_LONG) {
-        return CC_TYPE_ULONG_LONG;
+    /*
+     * Mixed signedness (C11 6.3.1.8): a signed type of higher rank
+     * wins only when it can hold all of the unsigned type's values,
+     * which for long against unsigned int depends on the target.
+     */
+    s = is_unsigned_integral_type(ap) ? bp : ap;
+    u = is_unsigned_integral_type(ap) ? ap : bp;
+    if (integral_rank(u) >= integral_rank(s)) {
+        return u;
     }
-    if (ap == CC_TYPE_LONG_LONG || bp == CC_TYPE_LONG_LONG) {
-        if (is_unsigned_integral_type(ap) || is_unsigned_integral_type(bp)) {
-            return CC_TYPE_ULONG_LONG;
-        }
-        return CC_TYPE_LONG_LONG;
+    if (integral_rank_bytes(s) > integral_rank_bytes(u)) {
+        return s;
     }
-    if (ap == CC_TYPE_ULONG || bp == CC_TYPE_ULONG) {
-        return CC_TYPE_ULONG;
-    }
-    if (ap == CC_TYPE_LONG || bp == CC_TYPE_LONG) {
-        if (is_unsigned_integral_type(ap) || is_unsigned_integral_type(bp)) {
-            return CC_TYPE_ULONG;
-        }
-        return CC_TYPE_LONG;
-    }
-    if (ap == CC_TYPE_UINT || bp == CC_TYPE_UINT) {
-        return CC_TYPE_UINT;
-    }
-    return CC_TYPE_INT;
+    return s == CC_TYPE_LONG ? CC_TYPE_ULONG : CC_TYPE_ULONG_LONG;
 }
 
 static int is_cmp_op(cc_binop_t op) {
