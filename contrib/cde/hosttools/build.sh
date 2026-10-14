@@ -51,10 +51,14 @@ export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:/usr/l
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# get <file> <url> <sha256> — fetch into WORK, verify, extract
+# get <file> <url> <sha256> — fetch into WORK, verify, extract.  Through
+# substrate_fetch, which tries X.Org's mirrors and the source collections
+# of other systems when a host does not answer: a bare curl here ended
+# the bootstrap at mkfontscale when x.org reset the connection.
+. "${SUBSTRATE_TOP}/contrib/substrate-fetch.sh"
 get() {
     cd "${WORK}"
-    [ -f "$1" ] || { echo "==> fetch $1"; curl -fSL -o "$1" "$2"; }
+    [ -f "$1" ] || { echo "==> fetch $1"; substrate_fetch "$2" "$1" "$3"; }
     echo "$3  $1" | sha256sum -c - >/dev/null
     case "$1" in *.tar.*) tar xf "$1" ;; esac
 }
