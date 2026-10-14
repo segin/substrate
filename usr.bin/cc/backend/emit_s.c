@@ -114,7 +114,8 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     }
     d->line = 0;
     d->col = 0;
-    snprintf(d->message, sizeof(d->message), "%s", msg);
+    /* a longer message is cut to fit */
+    snprintf(d->message, sizeof(d->message), "%.*s", (int)sizeof(d->message) - 1, msg);
 }
 
 static unsigned long next_aux_label_id(void) {

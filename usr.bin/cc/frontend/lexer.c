@@ -901,7 +901,7 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
         out->fnum = strtod(tmp, NULL);
         out->fnum_ld = strtold(tmp, NULL);
     } else {
-        char tmp[128];
+        char tmp[128] = {0};
         char *parse_s = tmp;
         copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
         if (had_binary_prefix && tmp[0] == '0' && (tmp[1] == 'b' || tmp[1] == 'B')) {
