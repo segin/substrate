@@ -369,41 +369,6 @@ static int att_register_operand_size(const as_instruction_t *insn, const char *m
     return 0;
 }
 
-static int infer_explicit_string_width_bits(const as_instruction_t *insn, const char *mnemonic) {
-    size_t i;
-    int bits = 0;
-
-    if (insn == NULL || mnemonic == NULL) {
-        return 0;
-    }
-    for (i = 0; i < insn->operand_count; ++i) {
-        const as_operand_t *op = &insn->operands[i];
-        int cur = 0;
-
-        if ((streq_ci(mnemonic, "in") || streq_ci(mnemonic, "outs") || streq_ci(mnemonic, "ins")) &&
-            operand_is_x86_dx_port_reg(op)) {
-            continue;
-        }
-        if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
-            if (operand_is_x86_seg_reg(op)) {
-                continue;
-            }
-            cur = x86_reg_width_bits(op->u.reg);
-        } else if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits > 0) {
-            cur = op->u.mem.size_bits;
-        }
-        if (cur == 0) {
-            continue;
-        }
-        if (bits == 0) {
-            bits = cur;
-        } else if (bits != cur) {
-            return 0;
-        }
-    }
-    return bits;
-}
-
 static int eval_abs_mem_disp(const as_expr_t *expr, long long *disp_out) {
     if (expr == NULL || disp_out == NULL) {
         return -1;
@@ -805,67 +770,6 @@ static int lookup_i386_extrq_insertq_prefix(const char *mnemonic, unsigned char 
         }
     }
     return -1;
-}
-
-static int mnemonic_needs_uniform_width(const char *mn) {
-    return streq_ci(mn, "mov") || streq_ci(mn, "add") || streq_ci(mn, "sub") || streq_ci(mn, "and") ||
-           streq_ci(mn, "or") || streq_ci(mn, "xor") || streq_ci(mn, "cmp") || streq_ci(mn, "test") ||
-           streq_ci(mn, "xchg");
-}
-
-static int infer_uniform_operand_width_bits(const as_instruction_t *insn, const size_t *op_index, size_t op_count,
-                                            int *out_bits, char *errbuf, size_t errbuf_sz) {
-    size_t j;
-    int bits = 0;
-
-    if (insn == NULL || op_index == NULL || out_bits == NULL) {
-        return -1;
-    }
-    for (j = 0; j < op_count; ++j) {
-        const as_operand_t *op = &insn->operands[op_index[j]];
-        int cur = 0;
-
-        if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
-            cur = x86_reg_width_bits(op->u.reg);
-        } else if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits > 0) {
-            cur = op->u.mem.size_bits;
-        }
-        if (cur == 0) {
-            continue;
-        }
-        if (bits == 0) {
-            bits = cur;
-            continue;
-        }
-        if (bits != cur) {
-            if (errbuf != NULL && errbuf_sz > 0) {
-                snprintf(errbuf, errbuf_sz, "conflicting operand sizes");
-            }
-            return -1;
-        }
-    }
-    *out_bits = bits;
-    return 0;
-}
-
-static int has_unsized_memory_and_immediate(const as_instruction_t *insn, const size_t *op_index, size_t op_count) {
-    size_t j;
-    int have_unsized_mem = 0;
-    int have_imm = 0;
-
-    if (insn == NULL || op_index == NULL) {
-        return 0;
-    }
-    for (j = 0; j < op_count; ++j) {
-        const as_operand_t *op = &insn->operands[op_index[j]];
-
-        if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits == 0) {
-            have_unsized_mem = 1;
-        } else if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
-            have_imm = 1;
-        }
-    }
-    return have_unsized_mem && have_imm;
 }
 
 static as_x86_seg_t map_seg(const char *s) {
@@ -4599,30 +4503,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         op_index[2] = 0;
     }
 
-    if (intel_syntax && suffix == '\0' && mnemonic_needs_uniform_width(mnbuf) && in.op_count > 0 &&
-        !(streq_ci(mnbuf, "mov") &&
-          ((in.op_count > 0 && operand_is_x86_seg_reg(&st->u.instr.operands[op_index[0]])) ||
-           (in.op_count > 1 && operand_is_x86_seg_reg(&st->u.instr.operands[op_index[1]]))))) {
-        int bits = 0;
-        if (infer_uniform_operand_width_bits(&st->u.instr, op_index, in.op_count, &bits, encerr, encerr_sz) != 0) {
-            return -1;
-        }
-        if (bits == 0 && has_unsized_memory_and_immediate(&st->u.instr, op_index, in.op_count)) {
-            snprintf(encerr, encerr_sz, "ambiguous Intel operand size");
-            return -1;
-        }
-        if (bits == 8) {
-            in.byte_op = 1;
-        } else if (bits == 16) {
-            in.operand_size_override = 1;
-        } else if (bits == 64) {
-            if (!cfg->is_64) {
-                snprintf(encerr, encerr_sz, "unsupported Intel size qualifier: qword in 32-bit mode");
-                return -1;
-            }
-            in.rex_w = 1;
-        }
-    }
     /*
      * AT&T with no suffix: the registers say what size the instruction
      * is.  Without this `add %ax, %bx` was `add %eax, %ebx`, and
@@ -4642,53 +4522,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         } else if (bits == 64 && cfg->is_64 && !x86_mnemonic_is_64bit_by_default(mnbuf)) {
             /* And of 64 bits where they are: `mov %rsp, %rbp` was
              * `mov %esp, %ebp`. */
-            in.rex_w = 1;
-        }
-    }
-    if (intel_syntax && suffix == '\0' && (streq_ci(mnbuf, "in") || streq_ci(mnbuf, "out")) && in.op_count == 2) {
-        int bits = 0;
-        for (j = 0; j < in.op_count; ++j) {
-            const as_operand_t *op = &st->u.instr.operands[op_index[j]];
-            int cur = 0;
-
-            if (operand_is_x86_dx_port_reg(op)) {
-                continue;
-            }
-            if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
-                cur = x86_reg_width_bits(op->u.reg);
-            }
-            if (cur == 0) {
-                continue;
-            }
-            bits = cur;
-            break;
-        }
-        if (bits == 8) {
-            in.byte_op = 1;
-        } else if (bits == 16) {
-            in.operand_size_override = 1;
-        } else if (bits == 64) {
-            if (!cfg->is_64) {
-                snprintf(encerr, encerr_sz, "unsupported Intel size qualifier: qword in 32-bit mode");
-                return -1;
-            }
-            in.rex_w = 1;
-        }
-    }
-    if (suffix == '\0' &&
-        (streq_ci(mnbuf, "movs") || streq_ci(mnbuf, "cmps") || streq_ci(mnbuf, "stos") ||
-         streq_ci(mnbuf, "lods") || streq_ci(mnbuf, "scas") || streq_ci(mnbuf, "ins") ||
-         streq_ci(mnbuf, "outs"))) {
-        int bits = infer_explicit_string_width_bits(&st->u.instr, mnbuf);
-        if (bits == 8) {
-            in.byte_op = 1;
-        } else if (bits == 16) {
-            in.operand_size_override = 1;
-        } else if (bits == 64) {
-            if (!cfg->is_64) {
-                snprintf(encerr, encerr_sz, "unsupported explicit string width in 32-bit mode");
-                return -1;
-            }
             in.rex_w = 1;
         }
     }
