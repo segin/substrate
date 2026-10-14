@@ -1068,6 +1068,23 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         {
             const as_x86_operand_t *at = (t->flags & AS_VEC_F_BASE) != 0 ? role_op(t, rq, 'o') : NULL;
 
+            /* (Or of eight bytes, which movabs's is, in 64-bit code;
+             * the row says so as for its number of eight bytes.) */
+            if (at != NULL && t->len == AS_VEC_LEGACY_IMM64) {
+                uint64_t where = at->u.mem.has_disp ? (uint64_t)at->u.mem.disp64 : 0u;
+                unsigned k8;
+
+                if (rq->mode != 64u || (at->u.mem.addr_bits != 0 && at->u.mem.addr_bits != 64u)) {
+                    vec_err(ctx, "'%s': an address of eight bytes is of 64-bit code", t->name);
+                    return -1;
+                }
+                for (k8 = 0; k8 < 8u; ++k8) {
+                    if (put8(ctx, (unsigned)((where >> (k8 * 8u)) & 0xffu)) != 0) {
+                        return -1;
+                    }
+                }
+                return 0;
+            }
             if (at != NULL) {
                 uint32_t where = at->u.mem.has_disp ? (uint32_t)at->u.mem.disp : 0u;
 

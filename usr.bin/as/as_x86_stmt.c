@@ -1472,16 +1472,6 @@ static int x86_special_takes_opsize(const as_instruction_t *insn, const char *mn
     return 1;
 }
 
-static int x86_stmt_has_gpr_of_width(const as_instruction_t *insn, int bits) {
-    size_t i;
-
-    for (i = 0; i < insn->operand_count; ++i) {
-        if (insn->operands[i].kind == AS_OPERAND_REGISTER && x86_reg_width_bits(insn->operands[i].u.reg) == bits) {
-            return 1;
-        }
-    }
-    return 0;
-}
 
 /*
  * What goes before the bytes of an emitter that was handed the statement
@@ -1649,14 +1639,7 @@ static int emit_x86_extrq_insertq(const char *mnemonic, const as_instruction_t *
 
 static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, unsigned char *out, size_t out_cap,
                                size_t *out_len) {
-    const as_operand_t *a;
-    const as_operand_t *b;
-    const as_operand_t *src;
-    const as_operand_t *dst;
     char mnbuf[32];
-    as_x86_reg_t gr;
-    long long imm64;
-    unsigned char rex;
 
     if (out_len != NULL) {
         *out_len = 0;
@@ -1689,195 +1672,12 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         return -1;
     }
 
-    a = insn->operand_count > 0 ? &insn->operands[0] : NULL;
-    b = insn->operand_count > 1 ? &insn->operands[1] : NULL;
-    src = intel_syntax ? b : a;
-    dst = intel_syntax ? a : b;
-
     if (as_strcmp(mnbuf, "extrq") == 0 || as_strcmp(mnbuf, "insertq") == 0) {
         return emit_x86_extrq_insertq(mnbuf, insn, intel_syntax, 1, out, out_cap, out_len);
     }
-    if (as_strcmp(mnbuf, "movabs") == 0) {
-        size_t i;
-        size_t pos = 0;
-        const char *seg_override = NULL;
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_MEMORY && src->u.mem.base_reg == NULL && src->u.mem.index_reg == NULL &&
-            src->u.mem.disp != NULL && dst->kind == AS_OPERAND_REGISTER &&
-            parse_x86_reg(dst->u.reg, &gr) == 0 &&
-            (streq_ci(dst->u.reg, "%al") || streq_ci(dst->u.reg, "al") ||
-             streq_ci(dst->u.reg, "%ax") || streq_ci(dst->u.reg, "ax") ||
-             streq_ci(dst->u.reg, "%eax") || streq_ci(dst->u.reg, "eax") ||
-             streq_ci(dst->u.reg, "%rax") || streq_ci(dst->u.reg, "rax"))) {
-            unsigned char opcode = (streq_ci(dst->u.reg, "%al") || streq_ci(dst->u.reg, "al")) ? 0xa0u : 0xa1u;
-
-            if (eval_expr_const(src->u.mem.disp, &imm64) != 0) {
-                if (expr_has_symbol(src->u.mem.disp)) imm64 = 0;
-                else return -1;
-            }
-            seg_override = src->u.mem.segment_reg;
-            if (seg_override != NULL && !streq_ci(seg_override, "ds")) {
-                if (emit_seg_override_byte(out, out_cap, &pos, seg_override) != 0) {
-                    return -1;
-                }
-            }
-            if (streq_ci(dst->u.reg, "%ax") || streq_ci(dst->u.reg, "ax")) {
-                out[pos++] = 0x66u;
-            } else if (streq_ci(dst->u.reg, "%rax") || streq_ci(dst->u.reg, "rax")) {
-                out[pos++] = 0x48u;
-            }
-            out[pos++] = opcode;
-            for (i = 0; i < 8; ++i) {
-                out[pos + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-            }
-            pos += 8;
-            if (out_len != NULL) {
-                *out_len = pos;
-            }
-            return 0;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY && dst->u.mem.base_reg == NULL &&
-            dst->u.mem.index_reg == NULL && dst->u.mem.disp != NULL &&
-            parse_x86_reg(src->u.reg, &gr) == 0 &&
-            (streq_ci(src->u.reg, "%al") || streq_ci(src->u.reg, "al") ||
-             streq_ci(src->u.reg, "%ax") || streq_ci(src->u.reg, "ax") ||
-             streq_ci(src->u.reg, "%eax") || streq_ci(src->u.reg, "eax") ||
-             streq_ci(src->u.reg, "%rax") || streq_ci(src->u.reg, "rax"))) {
-            unsigned char opcode = (streq_ci(src->u.reg, "%al") || streq_ci(src->u.reg, "al")) ? 0xa2u : 0xa3u;
-
-            if (eval_expr_const(dst->u.mem.disp, &imm64) != 0) {
-                if (expr_has_symbol(dst->u.mem.disp)) imm64 = 0;
-                else return -1;
-            }
-            seg_override = dst->u.mem.segment_reg;
-            if (seg_override != NULL && !streq_ci(seg_override, "ds")) {
-                if (emit_seg_override_byte(out, out_cap, &pos, seg_override) != 0) {
-                    return -1;
-                }
-            }
-            if (streq_ci(src->u.reg, "%ax") || streq_ci(src->u.reg, "ax")) {
-                out[pos++] = 0x66u;
-            } else if (streq_ci(src->u.reg, "%rax") || streq_ci(src->u.reg, "rax")) {
-                out[pos++] = 0x48u;
-            }
-            out[pos++] = opcode;
-            for (i = 0; i < 8; ++i) {
-                out[pos + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-            }
-            pos += 8;
-            if (out_len != NULL) {
-                *out_len = pos;
-            }
-            return 0;
-        }
-        if (!intel_syntax &&
-            (src->kind == AS_OPERAND_IMMEDIATE || src->kind == AS_OPERAND_LABEL_REF) &&
-            dst->kind == AS_OPERAND_REGISTER &&
-            src->raw != NULL && src->raw[0] != '$' && src->raw[0] != '#' &&
-            parse_x86_reg(dst->u.reg, &gr) == 0 &&
-            (streq_ci(dst->u.reg, "%al") || streq_ci(dst->u.reg, "al") ||
-             streq_ci(dst->u.reg, "%ax") || streq_ci(dst->u.reg, "ax") ||
-             streq_ci(dst->u.reg, "%eax") || streq_ci(dst->u.reg, "eax") ||
-             streq_ci(dst->u.reg, "%rax") || streq_ci(dst->u.reg, "rax"))) {
-            unsigned char opcode = (streq_ci(dst->u.reg, "%al") || streq_ci(dst->u.reg, "al")) ? 0xa0u : 0xa1u;
-
-            if (eval_expr_const(src->u.expr, &imm64) != 0) {
-                if (expr_has_symbol(src->u.expr)) imm64 = 0;
-                else return -1;
-            }
-            if (streq_ci(dst->u.reg, "%rax") || streq_ci(dst->u.reg, "rax")) {
-                out[0] = 0x48u;
-                out[1] = opcode;
-                for (i = 0; i < 8; ++i) {
-                    out[2 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-                }
-                if (out_len != NULL) {
-                    *out_len = 10;
-                }
-            } else {
-                out[0] = opcode;
-                for (i = 0; i < 8; ++i) {
-                    out[1 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-                }
-                if (out_len != NULL) {
-                    *out_len = 9;
-                }
-            }
-            return 0;
-        }
-        if (!intel_syntax &&
-            src->kind == AS_OPERAND_REGISTER &&
-            (dst->kind == AS_OPERAND_IMMEDIATE || dst->kind == AS_OPERAND_LABEL_REF) &&
-            dst->raw != NULL && dst->raw[0] != '$' && dst->raw[0] != '#' &&
-            parse_x86_reg(src->u.reg, &gr) == 0 &&
-            (streq_ci(src->u.reg, "%al") || streq_ci(src->u.reg, "al") ||
-             streq_ci(src->u.reg, "%ax") || streq_ci(src->u.reg, "ax") ||
-             streq_ci(src->u.reg, "%eax") || streq_ci(src->u.reg, "eax") ||
-             streq_ci(src->u.reg, "%rax") || streq_ci(src->u.reg, "rax"))) {
-            unsigned char opcode = (streq_ci(src->u.reg, "%al") || streq_ci(src->u.reg, "al")) ? 0xa2u : 0xa3u;
-
-            if (eval_expr_const(dst->u.expr, &imm64) != 0) {
-                if (expr_has_symbol(dst->u.expr)) imm64 = 0;
-                else return -1;
-            }
-            if (streq_ci(src->u.reg, "%rax") || streq_ci(src->u.reg, "rax")) {
-                out[0] = 0x48u;
-                out[1] = opcode;
-                for (i = 0; i < 8; ++i) {
-                    out[2 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-                }
-                if (out_len != NULL) {
-                    *out_len = 10;
-                }
-            } else {
-                out[0] = opcode;
-                for (i = 0; i < 8; ++i) {
-                    out[1 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-                }
-                if (out_len != NULL) {
-                    *out_len = 9;
-                }
-            }
-            return 0;
-        }
-        if ((src->kind != AS_OPERAND_IMMEDIATE && src->kind != AS_OPERAND_LABEL_REF) ||
-            dst->kind != AS_OPERAND_REGISTER ||
-            parse_x86_reg(dst->u.reg, &gr) != 0) {
-            return -1;
-        }
-        if (eval_expr_const(src->u.expr, &imm64) != 0) {
-            if (expr_has_symbol(src->u.expr)) {
-                imm64 = 0;
-            } else {
-                return -1;
-            }
-        }
-        rex = (unsigned char)(0x48u | (((unsigned)gr >> 3) & 0x1u));
-        if (gr >= AS_X86_REG_R16) {
-            /* (One of APX's registers: REX2, with its fifth bit.) */
-            out[0] = 0xd5u;
-            out[1] = (unsigned char)(0x10u | (rex & 0x0fu));
-            out[2] = (unsigned char)(0xb8u + ((unsigned)gr & 7u));
-            for (i = 0; i < 8; ++i) {
-                out[3 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-            }
-            if (out_len != NULL) {
-                *out_len = 11;
-            }
-            return 0;
-        }
-        out[0] = rex;
-        out[1] = (unsigned char)(0xb8u + ((unsigned)gr & 7u));
-        for (i = 0; i < 8; ++i) {
-            out[2 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
-        }
-        if (out_len != NULL) {
-            *out_len = 10;
-        }
-        return 0;
-    }
+    /* (And movabs, before it was rows of the table: to and from an
+     * address of eight bytes, and a number of eight bytes into a
+     * register.) */
     return -1;
 }
 
@@ -1952,6 +1752,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             dst->u.mem.has_disp = 1;
             if (eval_expr_const(op->u.expr, &v) == 0) {
                 dst->u.mem.disp = (int32_t)v;
+                dst->u.mem.disp64 = (int64_t)v;
             } else if (expr_has_symbol(op->u.expr)) {
                 dst->u.mem.disp = 0;
             } else {
@@ -2054,6 +1855,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             if (eval_expr_const(op->u.mem.disp, &v) == 0) {
                 dst->u.mem.has_disp = 1;
                 dst->u.mem.disp = (int32_t)v;
+                dst->u.mem.disp64 = (int64_t)v;
             } else if (expr_has_symbol(op->u.mem.disp)) {
                 dst->u.mem.has_disp = 1;
                 dst->u.mem.force_disp32 = 1;
@@ -3307,13 +3109,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, code, code_cap, code_len);
         if (s64 == 0) {
             if (*code_len > 0) {
-                /* movabs to or from %ax is a 16-bit move and has the
-                 * prefix; its emitter wrote none. */
-                if ((x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) ||
-                     (as_strcmp(mnbuf, "movabs") == 0 && x86_stmt_has_gpr_of_width(&st->u.instr, 16))) &&
-                    x86_prepend_opsize(code, code_cap, code_len) != 0) {
-                    return -1;
-                }
                 return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
             }
         }

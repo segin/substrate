@@ -85,6 +85,9 @@ typedef struct {
     int has_disp;
     int force_disp32;
     int32_t disp;
+    /* All of it, which an address written after movabs's opcode is:
+     * eight bytes, of which `disp` keeps four. */
+    int64_t disp64;
     int disp_only;
     /* The displacement is a symbol's place in the global offset table,
      * `sym@GOT`: the relocation that asks for is of a ModRM's

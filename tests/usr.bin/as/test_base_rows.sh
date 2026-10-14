@@ -122,6 +122,13 @@ refused 64 'umonitor %ax'
 # PadLock's names with a hyphen, and a repeat written before one:
 is 32 f30fa7c8 'xcrypt-ecb'
 is 64 f30fa7d0 'rep xcrypt-cbc'
+# movabs to and from an address of eight bytes, which is rows too:
+is 64 a08877665544332211 'movabs 0x1122334455667788, %al'
+is 64 66a18877665544332211 'movabs 0x1122334455667788, %ax'
+is 64 48a31000000000000000 'movabsq %rax, 0x10'
+is 64 6448a11000000000000000 'movabs %fs:0x10, %rax'
+refused 64 'movabs 0x10, %ebx'
+refused 32 'movabs 0x10, %eax'
 # and the four of the coprocessor that store its state after a wait:
 is 32 9bdd30 'fsave (%eax)'
 is 32 9b2667d93f 'fstcw %es:(%bx)'

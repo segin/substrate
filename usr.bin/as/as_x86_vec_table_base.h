@@ -1856,8 +1856,8 @@
     LW("crc32", PF2, M2, 0xf1, W0, "dd", "mr", AS_VEC_F_BASE | OP32),
     LW("crc32", PF2, M2, 0xf1, W1, "qq", "mr", AS_VEC_F_BASE | O64),
     /* (movabs of a number of eight bytes to a register.  By hand.) */
-    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, 0, AS_VEC_F_BASE | O64},
-    {"movabsq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, 0, AS_VEC_F_BASE | O64},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xb8, W1, AS_VEC_LEGACY_IMM64, "iq", "i+", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
     /* (mov to and from a segment, a control and a debug register.  By hand.) */
     LW("mov", P0, AS_VEC_MAP_ONE, 0x8c, W0, "7w", "rm", AS_VEC_F_BASE | OP16),
     LW("mov", P0, AS_VEC_MAP_ONE, 0x8e, W0, "w7", "mr", AS_VEC_F_BASE),
@@ -2542,6 +2542,23 @@
     {"outs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x6f, W0, 0, "<C", "--", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
     {"xlat", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xd7, W0, 0, "=", "-", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
     {"xlatb", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xd7, W0, 0, "=", "-", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE},
+    /* movabs to and from an address of eight bytes, which follows its opcode. */
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa0, W0, AS_VEC_LEGACY_IMM64, "PV", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa2, W0, AS_VEC_LEGACY_IMM64, "VO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa1, W0, AS_VEC_LEGACY_IMM64, "PF", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64 | OP16},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa3, W0, AS_VEC_LEGACY_IMM64, "FO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64 | OP16},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa1, W0, AS_VEC_LEGACY_IMM64, "PG", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa3, W0, AS_VEC_LEGACY_IMM64, "GO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa1, W1, AS_VEC_LEGACY_IMM64, "PJ", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabs", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa3, W1, AS_VEC_LEGACY_IMM64, "JO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsb", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa0, W0, AS_VEC_LEGACY_IMM64, "PV", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsb", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa2, W0, AS_VEC_LEGACY_IMM64, "VO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsw", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa1, W0, AS_VEC_LEGACY_IMM64, "PF", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64 | OP16},
+    {"movabsw", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa3, W0, AS_VEC_LEGACY_IMM64, "FO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64 | OP16},
+    {"movabsl", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa1, W0, AS_VEC_LEGACY_IMM64, "PG", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsl", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa3, W0, AS_VEC_LEGACY_IMM64, "GO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa1, W1, AS_VEC_LEGACY_IMM64, "PJ", "o-", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
+    {"movabsq", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0xa3, W1, AS_VEC_LEGACY_IMM64, "JO", "-o", 0, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | O64},
     /* And the instructions with no operand: the opcode, and the byte
      * after it where there is one. */
     {"aaa", AS_VEC_LEGACY, P0, AS_VEC_MAP_ONE, 0x37, W0, 0, "", "", 0x00, AS_VEC_LEGACY_WHOLE, AS_VEC_F_BASE | AS_VEC_F_X32},
