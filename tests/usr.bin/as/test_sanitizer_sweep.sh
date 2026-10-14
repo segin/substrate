@@ -87,15 +87,11 @@ if ! nm sweep 2>/dev/null | grep -q '__asan_init'; then
 fi
 
 # --- the lines -----------------------------------------------------------
-# (The names the encoder that compares names still has, and those of the
-# table's rows of the instructions of general registers, which is where
-# most of them have gone.)
-{
-    grep -o 'streq_ci(insn->mnemonic, "[a-z0-9]*")' "$top/usr.bin/as/as_x86_encode.c" |
-        sed 's/.*"\(.*\)".*/\1/'
-    grep -o '^ *\(L[XW](\|{\)"[a-z0-9]*"' "$top/usr.bin/as/as_x86_vec_table_base.h" |
-        sed 's/.*"\(.*\)".*/\1/'
-} | sort -u > mnemonics
+# (The names of the table's rows of the instructions of general
+# registers.  An encoder that compared names had them once, and was
+# where this list was read from.)
+grep -o '^ *\(L[XW](\|{\)"[a-z0-9]*"' "$top/usr.bin/as/as_x86_vec_table_base.h" |
+    sed 's/.*"\(.*\)".*/\1/' | sort -u > mnemonics
 [ "$(wc -l < mnemonics)" -gt 400 ] || { echo "FAIL: the mnemonic list was not found in the encoder"; exit 1; }
 
 # The operands, and the modes each set is tried in: none, each kind

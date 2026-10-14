@@ -171,11 +171,6 @@ typedef struct {
     size_t op_count;
 } as_x86_insn_t;
 
-int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
-                       size_t *out_len, char *errbuf, size_t errbuf_sz);
-int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
-                         size_t *out_len, char *errbuf, size_t errbuf_sz);
-
 /*
  * One of the encoders of an instruction-set extension, behind a wrapper
  * that takes the whole instruction: it writes from the mandatory prefix

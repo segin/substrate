@@ -3,7 +3,7 @@ DYNAMIC = 1
 include ../../Makefile.inc
 
 PROG = as
-SRCS = as.c as_util.c as_expr.c as_reloc_op.c as_lexer.c as_x86_regs.c as_parser.c as_symtab.c as_sections.c as_lower.c as_data.c as_cfi.c as_dwline.c as_elf_emit.c as_layout.c as_symbols.c as_flat.c as_x86_stmt.c as_arm.c as_arm_simd.c as_arm_thumb.c as_a64.c as_a64_simd.c as_x86_encode.c as_x86_vec.c as_x86_vec_table.c as_x86_vex.c as_x86_sse3.c
+SRCS = as.c as_util.c as_expr.c as_reloc_op.c as_lexer.c as_x86_regs.c as_parser.c as_symtab.c as_sections.c as_lower.c as_data.c as_cfi.c as_dwline.c as_elf_emit.c as_layout.c as_symbols.c as_flat.c as_x86_stmt.c as_arm.c as_arm_simd.c as_arm_thumb.c as_a64.c as_a64_simd.c as_x86_prefix.c as_x86_vec.c as_x86_vec_table.c as_x86_vex.c as_x86_sse3.c
 LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0
 USER_CFLAGS += -iquote ../../include
 ifeq ($(NATIVE_BUILD),1)

@@ -4222,7 +4222,7 @@ static int x86_mnemonic_is_64bit_by_default(const char *mn) {
 }
 
 /*
- * Whether a statement is one that only the encoders of as_x86_encode.c
+ * Whether a statement is one that only the table's emitter, as_x86_vec.c,
  * can do right, and the emitters handed the statement itself must leave:
  * a statement of 32-bit code that addresses through 16-bit registers
  * (the port of in and out, `(%dx)`, is no address), and one with a
@@ -9308,23 +9308,34 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         }
     }
 
-    if (cfg->is_64) {
-        if (as_x86_encode_x86_64(&in, code, code_cap, code_len, encerr, encerr_sz) != 0) {
-            return -1;
-        }
-    } else {
-        /* (`fisttp`, by its suffix.  The encoders of SSSE3, SSE4.1 and
-         * SSE4.2 were asked here too, about every instruction of 32-bit
-         * code that had come this far: the table has all of theirs.) */
-        if (as_x86_encode_ext(try_encode_x86_sse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (as_x86_encode_i386(&in, code, code_cap, code_len, encerr, encerr_sz) != 0) {
-            return -1;
-        }
+    /* (`fisttp`, by its suffix.) */
+    if (as_x86_encode_ext(try_encode_x86_sse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+        *code_len > 0) {
+        return 0;
     }
-    return 0;
+    /* xbegin to a place that is no label of this section: the opcode
+     * and four bytes of distance, from the instruction's end in 64-bit
+     * code where the place is known. */
+    if (streq_ci(mnbuf, "xbegin") && in.op_count == 1 && in.ops[0].kind == AS_X86_OP_REL && code_cap >= 6) {
+        long long disp = (long long)in.ops[0].u.rel;
+        unsigned k;
+
+        if (cfg->is_64 && !in.rel_is_disp && in.has_section_offset) {
+            disp -= (long long)in.section_offset + 6;
+        }
+        code[0] = 0xc7;
+        code[1] = 0xf8;
+        for (k = 0; k < 4u; ++k) {
+            code[2u + k] = (unsigned char)(((unsigned long long)disp >> (k * 8u)) & 0xffu);
+        }
+        *code_len = 6;
+        return 0;
+    }
+    /* Two encoders were asked here, one of 32-bit code and one of
+     * 64-bit, about whatever had come this far.  The table has every
+     * instruction they had, and what comes this far is no instruction. */
+    snprintf(encerr, encerr_sz, cfg->is_64 ? "unsupported x86_64 mnemonic: %s" : "unsupported mnemonic: %s", mnbuf);
+    return -1;
 }
 
 /*

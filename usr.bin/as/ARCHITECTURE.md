@@ -28,7 +28,7 @@ usr.bin/as/
 │                            #   and the flat image
 ├── as_cfi.c                 # .cfi_* made .eh_frame or .debug_frame
 ├── as_dwline.c              # .file and .loc made .debug_line
-├── as_x86_encode.c          # x86: the integer instructions of i386 and x86-64, ModRM and SIB
+├── as_x86_prefix.c          # x86: the prefixes before an instruction an encoder outside the table writes
 ├── as_x86_vec.c             # x86: the one emitter of VEX, EVEX, MMX and SSE instructions
 ├── as_x86_vec_table.c       # x86: its table, a row for each form
 ├── as_x86_vec_table_ext.h   # x86: more rows of it -- FP16, AVX10.2, XOP, AMX, 3DNow! and the rest GNU as has
@@ -139,7 +139,7 @@ Deployment: Linked directly into the single `as` binary
 
 Name: Architecture-specific instruction encoders and relocation helpers
 
-Description: ISA families are split into dedicated files such as `as_x86_encode.c`, `as_x86_vex.c`, `as_arm.c`, and `as_a64.c`. The parser remains mostly architecture-agnostic and hands normalized instruction/data requests into the active encoder backend.
+Description: ISA families are split into dedicated files such as `as_x86_vec.c`, `as_x86_vex.c`, `as_arm.c`, and `as_a64.c`. The parser remains mostly architecture-agnostic and hands normalized instruction/data requests into the active encoder backend.
 
 **ARM and AArch64: the decision.** The two back ends are completed, not removed (2026-10-11). There were seventeen files, `as_arm_*.c` and `as_a64_*.c`, that nothing called and that were fixtures: a table of one fixed word for a mnemonic, whatever its operands. They are gone, and five files written in their place that read the operands. Run as `arm-as` or `aarch64-as`, or with `--target`, the assembler writes an `EM_ARM` or an `EM_AARCH64` object.
 
