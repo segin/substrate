@@ -6754,6 +6754,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         arg_size = 0;
                     } else if (!is_transparent_union && !pass_union_scalar && g_pointer_size_bytes == 8 && agg_size > 16) {
                         pass_agg_mem = 1;
+                    } else if (!is_transparent_union && !pass_union_scalar && g_pointer_size_bytes == 4 && agg_size > 4) {
+                        /* i386 psABI: a struct argument is copied onto the stack */
+                        pass_agg_mem = 1;
                     } else if (!is_transparent_union && !pass_union_scalar && g_pointer_size_bytes == 8 &&
                                agg_size > g_pointer_size_bytes && agg_size <= 16) {
                         pass_agg_reg = 1;
@@ -10933,6 +10936,15 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (rv < 0) {
                     return -1;
                 }
+                if (sf->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) {
+                    /*
+                     * i386: every struct is returned through the caller's
+                     * hidden pointer, whatever its size; the backend copies
+                     * the struct rv points at there.
+                     */
+                    ret_size_hint = ret_size;
+                    goto append_return;
+                }
                 if (ret_size <= g_pointer_size_bytes) {
                     cc_ssa_instr_t load_in;
                     memset(&load_in, 0, sizeof(load_in));
@@ -14611,6 +14623,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                            ? CC_VAL_F64
                            : CC_VAL_I64;
         sf->ret_abi = (unsigned char)(af->ret_type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
+        if (g_pointer_size_bytes <= 4 && af->ret_type == CC_TYPE_VOID && af->ret_struct_id >= 0) {
+            /* the i386 psABI returns every struct in memory */
+            sf->ret_abi = CC_CALL_ARG_ABI_AGG_MEM;
+        }
         sf->storage = af->storage;
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;
@@ -14668,6 +14684,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 /* GNU C empty structs are zero-width ABI parameters. */
             } else if (is_aggregate_param && g_pointer_size_bytes == 8 && param_size > 16) {
                 use_agg_mem_abi = 1;
+            } else if (is_aggregate_param && g_pointer_size_bytes == 4 && param_size > 4) {
+                use_agg_mem_abi = 1;
             } else if (is_aggregate_param && g_pointer_size_bytes == 8 && param_size > g_pointer_size_bytes &&
                        param_size <= 16) {
                 use_agg_reg_abi = 1;
@@ -14709,6 +14727,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 set_diag(diag, "out of memory appending SSA parameter instruction");
                 cc_ssa_module_free(out);
                 return -1;
+            }
+            if (use_agg_mem_abi) {
+                /* the value is the address of the struct's stack copy, not the struct */
+                set_value_size(sf, in.dst, g_pointer_size_bytes);
             }
         }
         for (j = 0; j < af->param_count; ++j) {

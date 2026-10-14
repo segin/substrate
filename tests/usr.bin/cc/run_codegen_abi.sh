@@ -1,0 +1,64 @@
+#!/bin/sh
+# run_codegen_abi.sh: build codegen_abi/abi_main.c and abi_lib.c into one
+# program three ways -- both with the host's gcc, main with cc and lib
+# with gcc, and the reverse -- for -m64 and -m32 at -O0 and -O2, and
+# require all three to print the same.  This holds cc to the platform
+# calling convention, not merely to one it agrees with itself on.
+#
+# A host whose gcc cannot link -m32 programs skips the -m32 runs.
+# CC_BIN names another cc to test.
+set -u
+
+ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+CC_BIN=${CC_BIN:-"$ROOT/usr.bin/cc/cc"}
+BASE="$ROOT/tests/usr.bin/cc/codegen_abi"
+HOST_CC=${HOST_CC:-gcc}
+# the native cc must run the host's as and ld, not substrate's
+: "${AS:=as}"
+: "${LD:=ld}"
+export AS LD
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/cc_abi.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+modes=64
+if printf 'int main(void) { return 0; }\n' | "$HOST_CC" -m32 -x c - -o "$tmp/probe" 2>/dev/null; then
+	modes="64 32"
+else
+	echo "run_codegen_abi: $HOST_CC cannot link -m32 programs; skipping -m32"
+fi
+
+fail=0
+runs=0
+for m in $modes; do
+	"$HOST_CC" -m$m -w -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
+	"$tmp/ref" >"$tmp/ref.out" 2>&1
+	for o in O0 O2; do
+		for mix in main lib; do
+			runs=$((runs + 1))
+			if [ $mix = main ]; then
+				ours="$BASE/abi_main.c"
+				theirs="$BASE/abi_lib.c"
+			else
+				ours="$BASE/abi_lib.c"
+				theirs="$BASE/abi_main.c"
+			fi
+			if ! "$CC_BIN" -m$m -$o -c -o "$tmp/ours.o" "$ours" >"$tmp/cc.log" 2>&1; then
+				echo "FAIL -m$m -$o cc-built $mix: cc rejected it"
+				sed -n '1,5s/^/    /p' "$tmp/cc.log"
+				fail=1
+				continue
+			fi
+			"$HOST_CC" -m$m -w -c -o "$tmp/theirs.o" "$theirs" || exit 1
+			"$HOST_CC" -m$m -no-pie -o "$tmp/mixed" "$tmp/ours.o" "$tmp/theirs.o" || exit 1
+			timeout 10 "$tmp/mixed" >"$tmp/mixed.out" 2>&1
+			if ! cmp -s "$tmp/ref.out" "$tmp/mixed.out"; then
+				echo "FAIL -m$m -$o cc-built $mix: output differs from an all-$HOST_CC build (< $HOST_CC, > mixed)"
+				diff "$tmp/ref.out" "$tmp/mixed.out" | sed -n '1,10s/^/    /p'
+				fail=1
+			fi
+		done
+	done
+done
+echo "run_codegen_abi: $runs runs"
+exit $fail

@@ -150,3 +150,6 @@ jobs:
 
       - name: Random arithmetic programs
         run: sh tests/usr.bin/cc/run_codegen_random.sh
+
+      - name: Calls between cc- and gcc-built code
+        run: sh tests/usr.bin/cc/run_codegen_abi.sh

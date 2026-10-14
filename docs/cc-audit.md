@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 10 | 4 |
+| 4. ABI and other code generation | 10 | 6 |
 | 5. Driver and predefined macros | 2 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. Documentation | 1 | 0 |
@@ -112,12 +112,20 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 
 ## 4. ABI and other code generation
 
-- [ ] **CC-13** On i386, a struct passed or returned by value shall
-  arrive whole.  `struct P mk(int)` returning `{x, c, d, s}` gave
-  `x = -135269504`.  *Reproduced* (-m32 only).
-- [ ] **CC-14** On i386, a call with more than a few mixed int, char,
-  short, long, double and float arguments shall pass each one.  Twelve
-  such arguments summed to 67114532, not 120.  *Reproduced* (-m32).
+- [x] **CC-13** On i386, structs shall be passed and returned by value
+  as the i386 psABI (and substrate's gcc) does.  A struct return gave
+  the address of the callee's own stack copy, which the caller read
+  after the stack was reused (`x = -135269504`); a struct argument was
+  passed as a pointer.  Both agreed only with cc itself, so calls to
+  and from gcc-built code -- libc's `div()` among them -- were wrong.
+  Now: a hidden first argument the callee pops (`ret $4`), and the
+  struct's bytes copied onto the stack.  *Reproduced* (-m32).
+  `codegen/struct_return.c`, `run_codegen_abi.sh`.
+- [x] **CC-14** On i386, every argument shall take a multiple of 4 stack
+  bytes.  Parameter offsets advanced by each parameter's own size, so
+  after a `char` the later parameters were read 3 bytes short: twelve
+  mixed arguments summed to 67114532, not 120.  *Reproduced* (-m32).
+  `codegen/call_args.c`.
 - [x] **CC-15** On i386, converting a double to an integer shall
   truncate toward zero and keep every bit of the integer type.  The x87
   conversion dropped its result: the helper flushed the register state
@@ -202,4 +210,4 @@ changes as well.  *Suite.*
 
 ---
 
-35 requirements: 15 met, 20 open.
+35 requirements: 17 met, 18 open.

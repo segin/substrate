@@ -4999,23 +4999,41 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
     return 0;
 }
 
+/*
+ * Where the first parameter is: above the return address, and above the
+ * hidden pointer a function returning a struct is passed first.
+ */
+static int i386_first_param_offset(const cc_ssa_function_t *f) {
+    return f->ret_abi == CC_CALL_ARG_ABI_AGG_MEM ? 12 : 8;
+}
+
+/* Stack bytes an integer parameter of size bytes takes: a multiple of 4. */
+static int i386_param_slot_bytes(long size) {
+    if (size <= 4) {
+        return 4;
+    }
+    return (int)((size + 3) & ~3L);
+}
+
 static int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
-    int off = 8;
+    int off = i386_first_param_offset(f);
     int i;
     for (i = 0; i < param_index; ++i) {
         if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
             off += 12;
+        } else if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) {
+            off += i386_param_slot_bytes(x86_64_param_size_bytes(f, i, 4));
         } else if (f->param_types[i] == CC_VAL_F64) {
             off += 8;
         } else {
-            off += (int)value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4);
+            off += i386_param_slot_bytes(value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4));
         }
     }
     return off;
 }
 
 static int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count) {
-    int off = 8;
+    int off = i386_first_param_offset(f);
     int i;
     if (fixed_count < 0) {
         fixed_count = 0;
@@ -5026,10 +5044,12 @@ static int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_coun
     for (i = 0; i < fixed_count; ++i) {
         if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
             off += 12;
+        } else if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) {
+            off += i386_param_slot_bytes(x86_64_param_size_bytes(f, i, 4));
         } else if (f->param_types[i] == CC_VAL_F64) {
             off += 8;
         } else {
-            off += (int)value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4);
+            off += i386_param_slot_bytes(value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4));
         }
     }
     return off;
@@ -5851,6 +5871,15 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
         fprintf(fp, "\tfstpt (%%esp)\n");
         fprintf(fp, "\tmovw $0, 10(%%esp)\n");
         *stack_bytes += 12;
+    } else if (call_arg_is_agg_mem_abi(in, arg_index)) {
+        /* i386 psABI: a struct argument is a copy of it on the stack */
+        long words = i386_param_slot_bytes(arg_size) / 4;
+        long w;
+        emit_load_ptr_value_reg(fp, lay, value, 0, "%eax");
+        for (w = words - 1; w >= 0; --w) {
+            fprintf(fp, "\tpushl %ld(%%eax)\n", w * 4);
+        }
+        *stack_bytes += words * 4;
     } else if (f->value_types[value] == CC_VAL_F64) {
         emit_i386_push_slot(fp, off + 4);
         emit_i386_push_slot(fp, off);
@@ -5924,19 +5953,28 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
                           const cc_ssa_instr_t *in) {
     long stack_bytes = 0;
     long a;
+    /* a struct result: the i386 psABI passes the buffer's address first */
+    int sret = in->dst >= 0 && in->rhs == in->dst && is_stackalloc_value(lay, in->dst) && in->imm > 0;
 
     int_regs_flush(fp, f, lay, ist);
     for (a = (long)in->arg_count - 1; a >= 0; --a) {
         emit_i386_push_call_arg(fp, f, lay, in, (size_t)a, in->args[a], &stack_bytes);
     }
+    if (sret) {
+        fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->dst));
+        fprintf(fp, "\tpushl %%eax\n");
+    }
 
     emit_i386_call_target(fp, lay, in);
 
+    /* the callee popped the hidden pointer itself (ret $4) */
     if (stack_bytes > 0) {
         fprintf(fp, "\taddl $%ld, %%esp\n", stack_bytes);
     }
 
-    emit_i386_capture_call_result(fp, f, lay, ist, in);
+    if (!sret) {
+        emit_i386_capture_call_result(fp, f, lay, ist, in);
+    }
     return 0;
 }
 
@@ -6032,7 +6070,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                      f->param_abi[in->param_index] == CC_CALL_ARG_ABI_LDOUBLE)
                         ? 1
                         : 0;
-                if (param_is_ldouble && f->value_types[in->dst] == CC_VAL_F64) {
+                if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
+                    f->param_abi[in->param_index] == CC_CALL_ARG_ABI_AGG_MEM) {
+                    /* a struct passed by value is its copy on the stack */
+                    int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                    fprintf(fp, "\tleal %d(%%ebp), %s\n", poff, ist.regs[rd]);
+                } else if (param_is_ldouble && f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tfldt %d(%%ebp)\n", poff);
                     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(&lay, in->dst));
@@ -6308,6 +6351,29 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_RET:
+                if (f->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) {
+                    /*
+                     * i386 psABI: copy the struct to the caller's buffer,
+                     * whose address is the hidden first argument, return
+                     * that address, and pop it.
+                     */
+                    int_regs_flush(fp, f, &lay, &ist);
+                    if (in->lhs >= 0 && in->imm > 0) {
+                        fprintf(fp, "\tpushl $%ld\n", (long)in->imm);
+                        emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%eax");
+                        fprintf(fp, "\tpushl %%eax\n");
+                        fprintf(fp, "\tpushl 8(%%ebp)\n");
+                        fprintf(fp, "\tcall memcpy\n");
+                        fprintf(fp, "\taddl $12, %%esp\n");
+                    }
+                    fprintf(fp, "\tmovl 8(%%ebp), %%eax\n");
+                    fprintf(fp, "\tleave\n");
+                    if (emit_debug) {
+                        fprintf(fp, "\t.cfi_def_cfa %%esp, 4\n");
+                    }
+                    fprintf(fp, "\tret $4\n");
+                    break;
+                }
                 if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
