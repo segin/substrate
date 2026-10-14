@@ -260,10 +260,10 @@ they stand.  *Reproduced* unless marked.
   not reject) and `native_c90_oldstyle.c` at `-std=c99` (old-style
   definitions are valid until C23).  These record cc's limits as
   requirements: they will fail when cc gains the feature.
-- [ ] **CC-43** `run_pp_cmd_injection_test.sh` shall run cc.  It runs
+- [x] **CC-43** `run_pp_cmd_injection_test.sh` shall run cc.  It ran
   `../../usr.bin/cc/cc` from `tests/usr.bin/cc`, which does not exist,
-  and ignores the failure (`|| true`), so it passes without testing
-  anything.
+  and ignored the failure (`|| true`), so it passed without testing
+  anything.  It now runs the tree's cc and fails if cc cannot be run.
 - [ ] **CC-44** `run_pp_fuzz_smoke.sh` shall fail when cc crashes on its
   input, and keep the input that made it.  It ignores every result
   (`|| true`), including SIGSEGV, and its input comes from
