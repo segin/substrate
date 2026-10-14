@@ -1906,6 +1906,9 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 } else if (it->init_is_float &&
                            (elem_type == CC_TYPE_FLOAT || elem_type == CC_TYPE_DOUBLE || elem_type == CC_TYPE_LDOUBLE)) {
                     emit_float_data(fp, elem_size, it->init_f_ld);
+                } else if (it->init_is_float && elem_type == CC_TYPE_BOOL) {
+                    /* 0.25 is true; its truncation to an integer is not */
+                    emit_integer_data(fp, elem_size, it->init_f_ld != 0.0L);
                 } else {
                     emit_integer_data(fp, elem_size, it->init_i);
                 }

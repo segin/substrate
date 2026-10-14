@@ -2836,9 +2836,29 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     }
 
     if (t == CC_TYPE_BOOL) {
-        int z = emit_const_i64_instr(sf, 0);
+        int z;
+        size_t k;
+
+        /*
+         * A floating value has already been truncated to an integer;
+         * _Bool is whether the floating value itself is non-zero, so
+         * 0.5 converts to 1.
+         */
+        for (k = sf->instr_count; k > 0; --k) {
+            const cc_ssa_instr_t *def = &sf->instrs[k - 1];
+            if (def->dst == v) {
+                if (def->op == CC_SSA_F2I && def->lhs >= 0) {
+                    return lower_truthy_value(sf, def->lhs, diag);
+                }
+                break;
+            }
+        }
+        z = emit_const_i64_instr(sf, 0);
         if (z < 0) {
             return -1;
+        }
+        if (value_size(sf, v) >= 8) {
+            set_value_size(sf, z, 8);
         }
         memset(&in, 0, sizeof(in));
         in.op = CC_SSA_CMP;
@@ -8102,6 +8122,17 @@ static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, 
     return 0;
 }
 
+/*
+ * A floating value converted to _Bool is whether it is non-zero (0.5
+ * is true); truncating it to an integer first would make it false.
+ */
+static int bool_from_floating(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag) {
+    if (t != CC_TYPE_BOOL || value_type(sf, v) != CC_VAL_F64) {
+        return v;
+    }
+    return lower_truthy_value(sf, v, diag);
+}
+
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int zero;
@@ -9537,6 +9568,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 init_f = (double)init_i;
                 init_f_ld = (long double)init_i;
                 init_is_float = 1;
+            } else if (g.has_init && is_integral_type(g.type) && init_is_float) {
+                init_i = g.type == CC_TYPE_BOOL ? init_f != 0.0 : (long long)init_f;
+                init_is_float = 0;
             }
             g.init_i = init_i;
             g.init_f = init_f;
@@ -9952,6 +9986,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                 } else {
                     v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
+                    if (v < 0) {
+                        return -1;
+                    }
+                    v = bool_from_floating(sf, v, s->type, diag);
                     if (v < 0) {
                         return -1;
                     }
@@ -10376,6 +10414,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         if (s->expr != NULL) {
             v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
+            if (v < 0) {
+                return -1;
+            }
+            v = bool_from_floating(sf, v, s->type, diag);
             if (v < 0) {
                 return -1;
             }
@@ -14127,6 +14169,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                 sf = 1.0;
                                 s_is_float = 0;
                             }
+                            if (s_is_float && out->globals[i].type == CC_TYPE_BOOL) {
+                                sv = sf != 0.0;
+                                sf = (double)sv;
+                                s_is_float = 0;
+                            }
                             out->globals[i].init_i = sv;
                             out->globals[i].init_f = sf;
                             out->globals[i].init_f_ld =
@@ -14382,6 +14429,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 init_i = 1;
                 init_f = 1.0;
                 init_f_ld = 1.0L;
+                init_is_float = 0;
+            }
+            if (init_is_float && out->globals[i].type == CC_TYPE_BOOL) {
+                init_i = init_f != 0.0;
+                init_f = (double)init_i;
+                init_f_ld = (long double)init_i;
                 init_is_float = 0;
             }
             if (init_is_float && eval_global_init_ld_expr(tu, init, &init_f_ld) != 0) {
