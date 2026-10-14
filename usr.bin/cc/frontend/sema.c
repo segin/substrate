@@ -3450,7 +3450,15 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type)) {
+            /*
+             * (*fp)(...) calls through fp.  A subscript, fps[i](...), is
+             * parsed as *(fps + i); there the element itself is the
+             * function pointer, and stripping a further level of
+             * pointer would type the call's result as a pointer.
+             */
+            if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type) &&
+                !(e->lhs->lhs->kind == CC_EXPR_BIN &&
+                  (e->lhs->lhs->op == CC_BIN_ADD || e->lhs->lhs->op == CC_BIN_SUB) && is_pointer_type(e->lhs->value_type))) {
                 indirect_callee_type = e->lhs->lhs->value_type;
                 indirect_callee_struct_id = e->lhs->lhs->struct_id;
             } else if (is_pointer_type(e->lhs->value_type)) {

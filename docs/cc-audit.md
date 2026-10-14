@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 8 | 0 |
+| 4. ABI and other code generation | 9 | 1 |
 | 5. Driver and predefined macros | 2 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. Documentation | 1 | 0 |
@@ -125,9 +125,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-16** On i386, `long double` shall be 12 bytes with 64-bit
   precision (the i386 psABI).  It is 16 bytes with double's precision.
   *Reproduced* (-m32).
-- [ ] **CC-17** An array of function pointers initialized with function
-  names shall call the named functions.  `int (*t[2])(int, int) = {add,
-  mul}` made `t[0](6, 7)` 52.  *Reproduced* (all modes).
+- [x] **CC-17** A call through an element of an array of function
+  pointers shall have the function's return type.  `t[i](6, 7)` was
+  typed as a pointer, so `r * 100 + t[0](6, 7)` and `q + t[1](6, 7)`
+  were pointer arithmetic: the integer was scaled by 4.  Sema took the
+  subscript's `*(t + i)` for `(*fp)(...)` and stripped one pointer level
+  too many.  *Reproduced* (all modes).  `codegen/fnptr_call.c`.
 - [ ] **CC-18** In an array initializer, an element after a designated
   one shall go to the next index.  `{[4] = 40, [1] = 10, 11}` put 11 at
   index 5, not 2.  *Reproduced* (all modes).
@@ -137,6 +140,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
+- [ ] **CC-34** `(*fp)(...)` shall call `fp` when `fp`'s function
+  returns a pointer.  `int *(*pf)(...)` has the pointer depth of a
+  pointer to a function pointer, and lowering keeps the dereference for
+  those, so it loads from the function's code and calls that: SIGSEGV.
+  `pf(...)` works.  The type system does not record which pointer
+  levels belong to a function declarator.  *Reproduced* (all modes).
 
 ## 5. Driver and predefined macros
 
@@ -181,4 +190,4 @@ changes as well.  *Suite.*
 
 ---
 
-33 requirements: 11 met, 22 open.
+34 requirements: 12 met, 22 open.
