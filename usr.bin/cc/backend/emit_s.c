@@ -1569,15 +1569,16 @@ static long global_object_size_bytes(const cc_ssa_global_t *g, int pointer_size)
     return sz;
 }
 
-static void emit_integer_data(FILE *fp, long size, long value) {
+/* value is long long: a long is 32 bits when cc itself runs on i386 */
+static void emit_integer_data(FILE *fp, long size, long long value) {
     if (size <= 1) {
-        fprintf(fp, "\t.byte %ld\n", value);
+        fprintf(fp, "\t.byte %lld\n", value);
     } else if (size == 2) {
-        fprintf(fp, "\t.short %ld\n", value);
+        fprintf(fp, "\t.short %lld\n", value);
     } else if (size == 4) {
-        fprintf(fp, "\t.long %ld\n", value);
+        fprintf(fp, "\t.long %lld\n", value);
     } else {
-        fprintf(fp, "\t.quad %ld\n", value);
+        fprintf(fp, "\t.quad %lld\n", value);
     }
 }
 

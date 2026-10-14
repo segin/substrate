@@ -11901,7 +11901,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
         return 0;
     case CC_EXPR_FLOAT:
-        *out_i = (long)e->float_val;
+        *out_i = (long long)e->float_val;
         *out_f = e->float_val;
         *out_is_float = 1;
         if (out_sym != NULL) {
@@ -12319,7 +12319,7 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
         out->init_is_float = 0;
         return 0;
     case CC_EXPR_FLOAT:
-        out->init_i = (long)e->float_val;
+        out->init_i = (long long)e->float_val;
         out->init_f = e->float_val;
         out->init_f_ld = e->value_type == CC_TYPE_LDOUBLE ? e->float_val_ld : (long double)e->float_val;
         out->init_is_float = 1;
@@ -14449,7 +14449,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     init_f_ld = (long double)init_i;
                     init_is_float = 1;
                 } else if (is_integral_type(out->globals[i].type) && init_is_float) {
-                    init_i = (long)init_f;
+                    init_i = (long long)init_f;
                     init_is_float = 0;
                 }
             }

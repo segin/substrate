@@ -5,10 +5,11 @@
 # compute, so a miscompile shows as a difference, not as a crash.
 #
 # A host whose gcc cannot link -m32 programs skips the -m32 runs.
+# CC_BIN names another cc to test, such as a build of it for a 32-bit host.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-CC_BIN="$ROOT/usr.bin/cc/cc"
+CC_BIN=${CC_BIN:-"$ROOT/usr.bin/cc/cc"}
 BASE="$ROOT/tests/usr.bin/cc/codegen"
 HOST_CC=${HOST_CC:-gcc}
 # the native cc must run the host's as and ld, not substrate's
