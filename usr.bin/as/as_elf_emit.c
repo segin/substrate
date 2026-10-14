@@ -3408,32 +3408,72 @@ static int emit_relocations(emit_ctx_t *ctx) {
              * address, and where this section will be is not known, so
              * the distance is the linker's to work out -- a PC-relative
              * relocation with no symbol.  It was encoded as the distance
-             * from here with the section at address 0.
+             * from here with the section at address 0.  So it is after
+             * prefixes, of a hint, a size or bnd -- `ds jne 0x10` and
+             * `data16 jmp 0x10` were the distance -- and in 16-bit code,
+             * with two bytes of it, as in GNU as.
              */
-            if (rel_count == 0 && (machine == EM_386 || machine == EM_X86_64) && track.x86_code_bits != 16u &&
-                as_parse_is_direct_branch(st) && is_rel_mnemonic(st->u.instr.mnemonic) &&
-                st->u.instr.operands[0].u.expr != NULL) {
+            if (rel_count == 0 && (machine == EM_386 || machine == EM_X86_64) && as_parse_is_direct_branch(st) &&
+                is_rel_mnemonic(st->u.instr.mnemonic) && st->u.instr.operands[0].u.expr != NULL) {
+                const unsigned char *op = code;
+                size_t len = code_len;
                 long long target;
                 size_t width = 0;
 
-                if (code_len == 2 && (code[0] == 0xeb || (code[0] >= 0x70 && code[0] <= 0x7f) ||
-                                      (code[0] >= 0xe0 && code[0] <= 0xe3))) {
+                while (len > 2 && (*op == 0x26 || *op == 0x2e || *op == 0x36 || *op == 0x3e || *op == 0x64 ||
+                                   *op == 0x65 || *op == 0x66 || *op == 0x67 || *op == 0xf2 || *op == 0xf3)) {
+                    op++;
+                    len--;
+                }
+                if (len == 2 && (op[0] == 0xeb || (op[0] >= 0x70 && op[0] <= 0x7f) || (op[0] >= 0xe0 && op[0] <= 0xe3))) {
                     width = 1;
-                } else if (code_len == 3 && code[0] == 0x67 && code[1] >= 0xe0 && code[1] <= 0xe3) {
-                    /* jcxz in 32-bit code, jecxz in 64-bit: the count
-                     * register of the other size. */
-                    width = 1;
-                } else if ((code_len == 5 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
-                           (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
-                    width = 4;
+                } else if (op[0] == 0xe8 || op[0] == 0xe9) {
+                    width = len == 3 ? 2 : len == 5 ? 4 : 0;
+                } else if ((op[0] == 0x0f && (op[1] & 0xf0) == 0x80) || (op[0] == 0xc7 && op[1] == 0xf8)) {
+                    /* (And xbegin, C7 F8, where a transaction goes.) */
+                    width = len == 4 ? 2 : len == 6 ? 4 : 0;
                 }
                 if (width != 0 && eval_expr_const(st->u.instr.operands[0].u.expr, &target) == 0) {
-                    int64_t addend = (int64_t)target - (int64_t)width;
-                    uint32_t type = machine == EM_X86_64 ? (width == 1 ? R_X86_64_PC8 : R_X86_64_PC32)
-                                                         : (width == 1 ? R_386_PC8 : R_386_PC32);
+                    int64_t addend;
 
+                    /* (Outside 64-bit code a number of two bytes is an
+                     * address of 16 bits, and 0xffff is -1 from 0; so is
+                     * xbegin's of two bytes in any, as GNU as has it.) */
+                    if ((track.x86_code_bits != 64u || op[0] == 0xc7) && width == 2 && target >= 0x8000 &&
+                        target <= 0xffff) {
+                        target -= 0x10000;
+                    }
+                    addend = (int64_t)target - (int64_t)width;
+                    uint32_t type = machine == EM_X86_64
+                                        ? (width == 1 ? R_X86_64_PC8 : width == 2 ? R_X86_64_PC16 : R_X86_64_PC32)
+                                        : (width == 1 ? R_386_PC8 : width == 2 ? R_386_PC16 : R_386_PC32);
+
+                    /* (Named as the object names it: `.code16` in an
+                     * ELF64 object has x86-64's PC16, and the addend in
+                     * the record.) */
+                    if (x86_reloc_for_object(machine, obj_machine, &type) != 0) {
+                        set_err(ctx, "%s:%u: '%s' needs a relocation that an %s object has not",
+                                st->file != NULL ? st->file : "<input>", st->line, st->u.instr.mnemonic,
+                                obj_machine == EM_X86_64 ? "ELF64" : "ELF32");
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    /* An addend in the bytes must be what they hold, of
+                     * either sign as GNU as has it; `data16 jmp 0x14943`
+                     * in ELF32 was cut to its low two. */
+                    if (machine_relocation_addend_is_in_place(obj_machine) && width < 4 &&
+                        (addend > (int64_t)((1ull << (width * 8)) - 1) ||
+                         addend < -(int64_t)((1ull << (width * 8)) - 1))) {
+                        set_err(ctx, "%s:%u: value of %llx too large for field of %u bytes",
+                                st->file != NULL ? st->file : "<input>", st->line, (unsigned long long)addend,
+                                (unsigned)width);
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
                     write_u64_le_at(code + code_len - width,
-                                    machine_relocation_addend_is_in_place(machine) ? (uint64_t)addend : 0,
+                                    machine_relocation_addend_is_in_place(obj_machine) ? (uint64_t)addend : 0,
                                     (unsigned)width);
                     if (cur_sec == NULL ||
                         elf_add_relocation(cur_sec, cur_off + code_len - width, NULL, type, addend) != ELF_OK) {

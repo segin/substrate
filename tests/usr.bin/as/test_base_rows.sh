@@ -138,6 +138,24 @@ is 64 66c7f80000 'data16 xbegin 1f
 is 64 6648 'data16 rex.w'
 is 64 64676641 'data16 fs addr32 rex.b'
 refused 64 'lock rex.w'
+# A branch to a number is a relocation with no symbol, after any prefix
+# and of the size data16 makes it; in ELF32 the addend is in the bytes,
+# in ELF64 in the record:
+is 32 3e0f850c000000 'ds jne 0x10'
+is 32 66e90e00 'data16 jmp 0x10'
+is 32 663e0f850e00 'ds data16 jne 0x10'
+is 32 0f850e00 '.code16
+jne 0x10'
+is 64 e90000 '.code16
+jmp 0x10'
+is 32 c7f80c000000 'xbegin 0x10'
+# two bytes in the object hold a number of either sign, and no more:
+is 32 66e9ffff 'data16 jmp 0x10001'
+refused 32 'data16 jmp 0x10002'
+refused 32 '.code16
+jne 0x14943'
+is 64 0f850000 '.code16
+jne 0x14943'
 # and the four of the coprocessor that store its state after a wait:
 is 32 9bdd30 'fsave (%eax)'
 is 32 9b2667d93f 'fstcw %es:(%bx)'

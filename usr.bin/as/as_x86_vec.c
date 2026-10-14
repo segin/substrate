@@ -45,17 +45,24 @@ static int put8(vec_ctx_t *ctx, unsigned v) {
  * repeat -- in that order, which is GNU as's.  `addr` and `data` are
  * the instruction's own asking for the address size and the operand
  * size; the request's are those written or asked for by its operands.
- * Each is written once, whoever asks.
+ * Each is written once, whoever asks.  Before a branch the segment is
+ * a hint of which way it goes, and comes after the sizes: `ds jcxz` is
+ * 67 3E E3 in 16-bit code.
  */
-static int put_prefixes(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, int addr, int data) {
-    return (rq->pfx_seg != 0 && put8(ctx, rq->pfx_seg) != 0) ||
+static int put_prefixes_of(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, int addr, int data, int branch) {
+    return (!branch && rq->pfx_seg != 0 && put8(ctx, rq->pfx_seg) != 0) ||
            ((addr || rq->pfx_67 != 0) && put8(ctx, 0x67u) != 0) ||
            ((data || rq->pfx_66 != 0) && put8(ctx, 0x66u) != 0) ||
+           (branch && rq->pfx_seg != 0 && put8(ctx, rq->pfx_seg) != 0) ||
            (rq->pfx_hle != 0 && put8(ctx, rq->pfx_hle) != 0) ||
            (rq->pfx_lock != 0 && put8(ctx, 0xf0u) != 0) ||
            (rq->pfx_rep != 0 && put8(ctx, rq->pfx_rep) != 0)
                ? -1
                : 0;
+}
+
+static int put_prefixes(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, int addr, int data) {
+    return put_prefixes_of(ctx, rq, addr, data, 0);
 }
 
 /* Whether an address among the operands is of the other size than the
@@ -835,28 +842,36 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
     unsigned opcode_len = t->map == AS_VEC_MAP_ONE ? 1u : 2u;
     long long target = (long long)to->u.rel;
     long long disp;
+    long long pre;
+    size_t start = ctx->at;
     unsigned near_bytes;
     unsigned k;
 
+    /* (The distance is from the end of the instruction, its prefixes
+     * and all: `ds jne 1f` is three bytes, and `callw` with the operand
+     * size's prefix four.) */
     if (short_only) {
         int other = ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
                     ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode != 32u);
-        unsigned len = other ? 3u : 2u;
 
-        disp = rq->rel_is_disp || !rq->has_offset ? target : target - ((long long)rq->offset + (long long)len);
+        if (put_prefixes_of(ctx, rq, other, 0, 1) != 0) {
+            return -1;
+        }
+        pre = (long long)(ctx->at - start);
+        disp = rq->rel_is_disp || !rq->has_offset ? target : target - ((long long)rq->offset + pre + 2);
         if (disp < -128 || disp > 127) {
             vec_err(ctx, "'%s' goes no further than a byte says, and its target is not so near", t->name);
             return -1;
         }
-        if (put_prefixes(ctx, rq, other, 0) != 0 || put8(ctx, t->opcode) != 0 ||
-            put8(ctx, (unsigned)disp & 0xffu) != 0) {
+        if (put8(ctx, t->opcode) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0) {
             return -1;
         }
         return 0;
     }
-    if (put_prefixes(ctx, rq, 0,
-                     ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
-                         ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) != 0) {
+    if (put_prefixes_of(ctx, rq, 0,
+                        ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
+                            ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u),
+                        1) != 0) {
         return -1;
     }
     /* (A REX prefix that is written is written, where there is one.) */
@@ -869,20 +884,25 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
             return -1;
         }
     }
+    pre = (long long)(ctx->at - start);
     if (t->disp8_n != 0 && known && !rq->force_near) {
-        disp = rq->rel_is_disp ? target : target - ((long long)rq->offset + 2);
+        disp = rq->rel_is_disp ? target : target - ((long long)rq->offset + pre + 2);
         if (disp >= -128 && disp <= 127) {
             return put8(ctx, t->disp8_n) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0 ? -1 : 0;
         }
     }
-    near_bytes = (t->flags & AS_VEC_F_OP16) != 0 || (rq->mode == 16u && (t->flags & AS_VEC_F_OP32) == 0) ? 2u : 4u;
+    /* (Of two bytes or four by the size of the row, or the other where
+     * data16 is written: `data16 jmp 1f` is 66 E9 and two bytes.) */
+    near_bytes =
+        ((t->flags & AS_VEC_F_OP16) != 0 || (rq->mode == 16u && (t->flags & AS_VEC_F_OP32) == 0)) != (rq->pfx_66 != 0)
+            ? 2u
+            : 4u;
     disp = rq->rel_is_disp || !rq->has_offset
                ? target
-               : target - ((long long)rq->offset + (long long)(opcode_len + near_bytes));
-    if (near_bytes == 2u && opcode_len == 2u && known && (disp < -32768 || disp > 32767)) {
-        vec_err(ctx, "conditional branch target out of range");
-        return -1;
-    }
+               : target - ((long long)rq->offset + pre + (long long)(opcode_len + near_bytes));
+    /* (Whether two bytes hold it is the relocation's to say, which it
+     * is to a number or a symbol: in an ELF64 object the record has the
+     * distance, and `.code16; jne 0x14943` is one.) */
     if ((opcode_len == 2u && put8(ctx, 0x0fu) != 0) || put8(ctx, t->opcode) != 0) {
         return -1;
     }
@@ -939,10 +959,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         if (rq->mode == 64u && !rq->rel_is_disp && rq->has_offset) {
             disp -= (long long)rq->offset + 2 + bytes;
         }
-        if (bytes == 2u ? (disp < -32768 || disp > 65535) : (disp < -2147483648ll || disp > 4294967295ll)) {
-            vec_err(ctx, "'%s': its target is further than %u bytes say", t->name, bytes);
-            return -1;
-        }
+        /* (Whether the bytes hold it is the relocation's to say.) */
         if (put_prefixes(ctx, rq, 0, 0) != 0 || put8(ctx, t->opcode) != 0 || put8(ctx, t->disp8_n) != 0) {
             return -1;
         }
