@@ -238,13 +238,6 @@ static int operand_is_x86_seg_reg(const as_operand_t *op) {
     return parse_seg_reg_text(op->u.reg, &seg) == 0;
 }
 
-static int operand_is_x86_dx_port_reg(const as_operand_t *op) {
-    if (op == NULL || op->kind != AS_OPERAND_REGISTER || op->u.reg == NULL) {
-        return 0;
-    }
-    return streq_ci(op->u.reg, "dx") || streq_ci(op->u.reg, "%dx") ||
-           streq_ci(op->u.reg, "edx") || streq_ci(op->u.reg, "%edx");
-}
 
 /* The width of a general register, 8 to 64; 0 for a register of any
  * other kind, and for what is not a register. */
@@ -276,65 +269,6 @@ static int x86_gpr_operand_width_bits(const as_operand_t *op) {
     }
 }
 
-/*
- * The operand size an AT&T instruction with no suffix has from the
- * general registers among its operands: 8, 16, 32 or 64, or 0 if they
- * do not say.  The register that says is the destination, which is
- * written last, or failing a register there the one before it:
- * `mov %ax, (%ebx)` is a 16-bit store, `movzx %al, %eax` a 32-bit
- * instruction.  Not every register is an operand of the instruction's
- * size: the port of in and out is %dx whatever is moved, a move to a
- * segment register is 16 bits with nothing to say so, and the
- * instructions listed take a register of one width and are not
- * instructions of that width -- setcc and its byte, the system
- * instructions and their 16-bit selectors, crc32 whose width is its
- * source's and is settled where it is encoded.
- */
-static int att_register_operand_size(const as_instruction_t *insn, const char *mn) {
-    static const char *const fixed[] = {
-        "fnstsw", "fstsw", "arpl", "lldt", "ltr", "lmsw", "verr", "verw", "enter", "ret", "lret", "crc32",
-    };
-    static const char *const shifts[] = {
-        "sal", "shl", "shr", "sar", "rol", "ror", "rcl", "rcr", "shld", "shrd",
-    };
-    int is_port_io = streq_ci(mn, "in") || streq_ci(mn, "out");
-    int is_shift = 0;
-    size_t i;
-
-    for (i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
-        if (streq_ci(mn, fixed[i])) {
-            return 0;
-        }
-    }
-    if (strncasecmp(mn, "set", 3) == 0) {
-        return 0;
-    }
-    for (i = 0; i < sizeof(shifts) / sizeof(shifts[0]); ++i) {
-        if (streq_ci(mn, shifts[i])) {
-            is_shift = 1;
-        }
-    }
-    if (insn->operand_count > 0 && operand_is_x86_seg_reg(&insn->operands[insn->operand_count - 1])) {
-        return 0;
-    }
-    for (i = insn->operand_count; i > 0; --i) {
-        const as_operand_t *op = &insn->operands[i - 1];
-        int bits;
-
-        if (is_port_io && operand_is_x86_dx_port_reg(op)) {
-            continue;
-        }
-        /* The count of a shift is %cl whatever is shifted. */
-        if (is_shift && i == 1 && insn->operand_count > 1) {
-            continue;
-        }
-        bits = x86_gpr_operand_width_bits(op);
-        if (bits != 0) {
-            return bits;
-        }
-    }
-    return 0;
-}
 
 /*
  * The statement being encoded is of 16-bit code.  An address that is
@@ -439,22 +373,6 @@ static int is_string_instruction(const char *mn) {
     return 0;
 }
 
-/* 's' for %si, %esi or %rsi, 'd' for %di, %edi or %rdi, 0 for another. */
-static char string_index_register(const char *reg) {
-    if (reg == NULL) {
-        return 0;
-    }
-    if (reg[0] == '%') {
-        reg++;
-    }
-    if (strcasecmp(reg, "si") == 0 || strcasecmp(reg, "esi") == 0 || strcasecmp(reg, "rsi") == 0) {
-        return 's';
-    }
-    if (strcasecmp(reg, "di") == 0 || strcasecmp(reg, "edi") == 0 || strcasecmp(reg, "rdi") == 0) {
-        return 'd';
-    }
-    return 0;
-}
 
 int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg) {
     as_x86_seg_t seg;
@@ -1295,30 +1213,6 @@ static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code
     return 0;
 }
 
-/*
- * The instructions with a segment register that are of 16 bits: a move
- * from one to a 16-bit register, and pushw and popw of one.  The
- * emitters of those write no operand-size prefix, so `movw %ds, %si`
- * was `movl %ds, %esi`, which clears the top of %esi, and `pushw %fs`
- * pushed four bytes for two.
- */
-static int x86_segment_form_is_16bit(const as_instruction_t *insn, const char *mn, char suffix, int intel_syntax) {
-    as_x86_seg_t seg;
-
-    if (as_strcmp(mn, "mov") == 0 && insn->operand_count == 2) {
-        const as_operand_t *src = &insn->operands[intel_syntax ? 1 : 0];
-        const as_operand_t *dst = &insn->operands[intel_syntax ? 0 : 1];
-
-        return src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-               parse_seg_reg_text(src->u.reg, &seg) == 0 && x86_reg_width_bits(dst->u.reg) == 16 &&
-               parse_seg_reg_text(dst->u.reg, &seg) != 0;
-    }
-    if ((as_strcmp(mn, "push") == 0 || as_strcmp(mn, "pop") == 0) && insn->operand_count == 1 && suffix == 'w') {
-        return insn->operands[0].kind == AS_OPERAND_REGISTER &&
-               parse_seg_reg_text(insn->operands[0].u.reg, &seg) == 0;
-    }
-    return 0;
-}
 
 /*
  * The address-size prefix of a 64-bit instruction whose address is
@@ -1373,28 +1267,6 @@ static int x86_prepend_addr_size(const as_instruction_t *insn, int width, unsign
     return 0;
 }
 
-/*
- * The instructions whose operand is 64 bits in 64-bit code with no
- * REX.W to say so: those of the stack and of control transfer.
- */
-static int x86_mnemonic_is_64bit_by_default(const char *mn) {
-    static const char *const names[] = {
-        "push", "pop", "call", "jmp", "lcall", "ljmp", "ret", "lret", "enter", "leave",
-        "pushf", "popf", "lgdt", "lidt", "sgdt", "sidt", "lldt", "ltr", "lmsw",
-        /* And those where a 64-bit register is written and the
-         * instruction is not of 64 bits for it, or sees to it itself. */
-        "sldt", "str", "lsl", "lar", "movmskps", "movmskpd", "pmovmskb", "pextrw",
-        "rdfsbase", "rdgsbase", "wrfsbase", "wrgsbase",
-    };
-    size_t i;
-
-    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
-        if (as_strcmp(mn, names[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
 
 /*
  * Whether a statement is one that only the table's emitter, as_x86_vec.c,
@@ -1446,30 +1318,6 @@ static int x86_stmt_is_the_encoders(const as_elf_cfg_t *cfg, const as_instructio
     return 0;
 }
 
-/*
- * Whether a 16-bit statement that the emitter of special forms wrote is
- * to have the operand-size prefix.  Not a move, whose forms with a
- * segment, control or debug register are judged by themselves; and not
- * the instructions on a 16-bit selector in memory -- `sldtw (%eax)`,
- * `ltrw sym` -- which are 16 bits by nature and take the prefix only
- * for a register.
- */
-static int x86_special_takes_opsize(const as_instruction_t *insn, const char *mn) {
-    static const char *const selector[] = {"sldt", "str", "lldt", "ltr", "lmsw", "smsw", "verr", "verw"};
-    size_t i;
-
-    /* (adcx and adox have no form of 16 bits: 66 is adcx's own, and
-     * part of its opcode.) */
-    if (as_strcmp(mn, "mov") == 0 || as_strcmp(mn, "adcx") == 0 || as_strcmp(mn, "adox") == 0) {
-        return 0;
-    }
-    for (i = 0; i < sizeof(selector) / sizeof(selector[0]); ++i) {
-        if (as_strcmp(mn, selector[i]) == 0) {
-            return insn->operand_count == 1 && insn->operands[0].kind == AS_OPERAND_REGISTER;
-        }
-    }
-    return 1;
-}
 
 
 /*
@@ -2898,43 +2746,10 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         return -1;
     }
     in.rex_bits = (uint8_t)(st->u.instr.rex_bits & 0x0f);
-    if ((st->u.instr.prefixes & AS_PREFIX_REPNE) != 0) {
-        in.rep_prefix = 2;
-    } else if ((st->u.instr.prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE)) != 0) {
-        in.rep_prefix = 1;
-    }
-    if ((st->u.instr.prefixes & AS_PREFIX_DATA16) != 0) {
-        in.operand_size_override = 1;
-    }
-    if ((st->u.instr.prefixes & AS_PREFIX_ADDR16) != 0) {
-        in.address_size_override = 1;
-    }
     in.op_count = st->u.instr.operand_count > 3 ? 3 : st->u.instr.operand_count;
-    if (suffix == 'b') {
-        in.byte_op = 1;
-    } else if (suffix == 'w') {
-        in.operand_size_override = (in.default_bits != 16u);
-    } else if (suffix == 'l') {
-        in.operand_size_override = (in.default_bits == 16u);
-    } else if (suffix == 'q' && !streq_ci(mnbuf, "enter") &&
-               !(cfg->is_64 &&
-                 (streq_ci(mnbuf, "pushf") || streq_ci(mnbuf, "popf") || streq_ci(mnbuf, "leave") ||
-                  streq_ci(mnbuf, "call") || streq_ci(mnbuf, "jmp") || streq_ci(mnbuf, "lgdt") ||
-                  streq_ci(mnbuf, "lidt") || streq_ci(mnbuf, "sgdt") || streq_ci(mnbuf, "sidt")))) {
-        /* (Those are of 64 bits in 64-bit code with no prefix to say
-         * so: `pushfq`, `leaveq`, `callq *%rax` had a REX.W that did
-         * nothing but take a byte.  In 32-bit code a q is what they
-         * are refused for.) */
-        in.rex_w = 1;
-    }
-    /* The instructions on a 16-bit selector in memory are 16 bits with
-     * no prefix; a w on one -- `sldtw (%rax)`, `ltrw sym` -- says only
-     * what is so. */
-    if (in.operand_size_override && as_strcmp(mnbuf, "mov") != 0 && !x86_special_takes_opsize(&st->u.instr, mnbuf)) {
-        in.operand_size_override = 0;
-    }
-
-    in.force_rel32 = x86_branch_is_near(&st->u.instr, suffix) ? 1u : 0u;
+    /* (The sizes the prefixes, the suffix and the registers give the
+     * statement were worked out here, for the encoders that compared
+     * names; nothing that comes past the table now reads them.) */
 
     /*
      * AT&T writes the destination last and the encoder wants it first.
@@ -2951,29 +2766,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         op_index[0] = 2;
         op_index[1] = 1;
         op_index[2] = 0;
-    }
-
-    /*
-     * AT&T with no suffix: the registers say what size the instruction
-     * is.  Without this `add %ax, %bx` was `add %eax, %ebx`, and
-     * `mov %al, %cl` was `mov %eax, %ecx`.
-     */
-    if (!intel_syntax && suffix == '\0' && !in.operand_size_override && !in.byte_op && !in.rex_w) {
-        int bits = att_register_operand_size(&st->u.instr, mnbuf);
-
-        if (bits == 8) {
-            in.byte_op = 1;
-        } else if (bits == 16 && in.default_bits != 16u) {
-            in.operand_size_override = 1;
-        } else if (bits == 32 && in.default_bits == 16u) {
-            /* And of 32 bits in 16-bit code, where it is they that
-             * have the prefix: `xor %eax, %eax` was `xor %ax, %ax`. */
-            in.operand_size_override = 1;
-        } else if (bits == 64 && cfg->is_64 && !x86_mnemonic_is_64bit_by_default(mnbuf)) {
-            /* And of 64 bits where they are: `mov %rsp, %rbp` was
-             * `mov %esp, %ebp`. */
-            in.rex_w = 1;
-        }
     }
 
     warn_mov_byte_cut(cfg, st);
@@ -3034,22 +2826,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                     code[0] = want;
                     (*code_len)++;
                 }
-            }
-            /*
-             * Nor the operand-size prefix: `bsf %ax, %bx`, `btw`,
-             * `shld $4, %ax, %bx`, `cmpxchg %ax, (%ebx)` and `popcnt
-             * %ax, %bx` were each the 32-bit instruction.  Whatever
-             * made the statement a 16-bit one -- a w, or its registers
-             * -- has been settled above.
-             */
-            /* (And in 16-bit code the other way about: there it is the
-             * 32-bit statement that has the prefix, and `cmpxchg %eax,
-             * (%bx)`, `btl $1, sym` and `bsf (%si), %eax` had none.) */
-            if (((in.operand_size_override && x86_special_takes_opsize(&st->u.instr, mnbuf)) ||
-                 (cfg->x86_code_bits != 16u &&
-                  x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax))) &&
-                x86_prepend_opsize(code, code_cap, code_len) != 0) {
-                return -1;
             }
             return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
         }
@@ -3130,43 +2906,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
             in.address_size_override = 1;
         }
     }
-    if (in.seg_override == AS_X86_SEG_NONE) {
-        int string_insn = is_string_instruction(in.mnemonic);
-
-        for (j = 0; j < in.op_count; ++j) {
-            const as_operand_t *op = &st->u.instr.operands[op_index[j]];
-            if (op->kind == AS_OPERAND_MEMORY && op->u.mem.segment_reg != NULL) {
-                /*
-                 * A string instruction has two addresses and one prefix,
-                 * which is the source's.  The destination is through
-                 * %es whatever is written, and its %es: is no prefix;
-                 * nor is a %ds: on the source, which is where it reads
-                 * anyway.  (The first segment written was taken, and
-                 * `movsb %fs:(%esi), %es:(%edi)` got Intel's order's
-                 * first, an %es prefix, and read from the wrong place.)
-                 */
-                if (string_insn) {
-                    as_x86_seg_t seg = map_seg(op->u.mem.segment_reg);
-                    char family = string_index_register(op->u.mem.base_reg);
-
-                    /* The destination is through %es and nothing can
-                     * make it otherwise: another segment written on it
-                     * was dropped, and the store went to %es. */
-                    if (family == 'd' && seg != AS_X86_SEG_ES) {
-                        snprintf(encerr, encerr_sz, "'%s': the destination of a string instruction is through %%es",
-                                 mnbuf);
-                        return -1;
-                    }
-                    if (family == 'd' || (family == 's' && seg == AS_X86_SEG_DS)) {
-                        continue;
-                    }
-                }
-                in.seg_override = map_seg(op->u.mem.segment_reg);
-                break;
-            }
-        }
-    }
-
     /*
      * The encoders below take three operands.  A statement of more that
      * has come this far is no form they have, and was cut to its first
@@ -3177,31 +2916,6 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
                  (size_t)st->u.instr.operand_count);
         return -1;
     }
-    /*
-     * crc32's suffix is the width of its source, which the encoder reads
-     * from the operand: the destination is 32 bits, or 64, whatever the
-     * source is.
-     */
-    if (suffix != '\0' && in.op_count == 2 && streq_ci(mnbuf, "crc32")) {
-        unsigned bits = 64u;
-
-        if (suffix == 'b') {
-            bits = 8u;
-        } else if (suffix == 'w') {
-            bits = 16u;
-        } else if (suffix == 'l') {
-            bits = 32u;
-        }
-        if (in.ops[1].kind == AS_X86_OP_REG && in.ops[1].size_bits != bits) {
-            snprintf(encerr, encerr_sz, "crc32%c: the source register is not of the suffix's width", suffix);
-            return -1;
-        }
-        if (in.ops[1].kind == AS_X86_OP_MEM) {
-            in.ops[1].size_bits = bits;
-            in.ops[1].u.mem.size_bits = bits;
-        }
-    }
-
     /* xbegin to a place that is no label of this section: the opcode
      * and four bytes of distance, from the instruction's end in 64-bit
      * code where the place is known. */
