@@ -428,7 +428,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
     const as_directive_t *d = &st->u.directive;
     size_t i;
 
-    if (strcmp(d->name, ".globl") == 0 || strcmp(d->name, ".global") == 0) {
+    if (as_strcmp(d->name, ".globl") == 0 || as_strcmp(d->name, ".global") == 0) {
         for (i = 0; i < d->arg_count; ++i) {
             char *name = trim_copy(d->args[i]);
             as_symbol_t *sym;
@@ -445,7 +445,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".local") == 0) {
+    if (as_strcmp(d->name, ".local") == 0) {
         for (i = 0; i < d->arg_count; ++i) {
             char *name = trim_copy(d->args[i]);
             as_symbol_t *sym;
@@ -466,7 +466,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".weak") == 0) {
+    if (as_strcmp(d->name, ".weak") == 0) {
         for (i = 0; i < d->arg_count; ++i) {
             char *name = trim_copy(d->args[i]);
             as_symbol_t *sym;
@@ -485,7 +485,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
 
     /* A .lcomm, and a .comm of a local name, are storage in .bss by now
      * (as_directives_lower). */
-    if (strcmp(d->name, ".comm") == 0) {
+    if (as_strcmp(d->name, ".comm") == 0) {
         char *name;
         as_symbol_t *sym;
         unsigned long long nsize = 0;
@@ -519,7 +519,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".type") == 0) {
+    if (as_strcmp(d->name, ".type") == 0) {
         char *name = NULL;
         char *type = NULL;
         as_symbol_t *sym;
@@ -567,7 +567,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".size") == 0) {
+    if (as_strcmp(d->name, ".size") == 0) {
         char *name = NULL;
         char *size = NULL;
         as_symbol_t *sym;
@@ -614,10 +614,10 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0 || strcmp(d->name, ".equiv") == 0) {
+    if (as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0) {
         char *name;
         as_symbol_t *sym;
-        int is_equiv = strcmp(d->name, ".equiv") == 0;
+        int is_equiv = as_strcmp(d->name, ".equiv") == 0;
         int rc;
 
         if (d->arg_count < 2) {
@@ -677,17 +677,17 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return parse_set_rhs(d->args[1], sym);
     }
 
-    if (strcmp(d->name, ".hidden") == 0) {
+    if (as_strcmp(d->name, ".hidden") == 0) {
         return apply_visibility(ctx, d, AS_SYM_VIS_HIDDEN);
     }
-    if (strcmp(d->name, ".protected") == 0) {
+    if (as_strcmp(d->name, ".protected") == 0) {
         return apply_visibility(ctx, d, AS_SYM_VIS_PROTECTED);
     }
-    if (strcmp(d->name, ".internal") == 0) {
+    if (as_strcmp(d->name, ".internal") == 0) {
         return apply_visibility(ctx, d, AS_SYM_VIS_INTERNAL);
     }
 
-    if (strcmp(d->name, ".symver") == 0) {
+    if (as_strcmp(d->name, ".symver") == 0) {
         char *name;
         char *ver;
         as_symbol_t *sym;

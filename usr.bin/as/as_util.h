@@ -9,13 +9,22 @@
  * mnemonic is looked for by going down lists of names, a thousand
  * comparisons and more for one statement, and nearly every one of them
  * is settled by its first character: the call was most of what they
- * cost.  What it returns is strcmp()'s in its sign, which is all that is
- * said of strcmp()'s.
+ * cost.  And the second: a directive's name is looked for so too, and
+ * every one begins with its dot.  What it returns is strcmp()'s in its
+ * sign, which is all that is said of strcmp()'s.
  */
 static inline int as_strcmp(const char *a, const char *b) {
     unsigned char ca = (unsigned char)a[0];
     unsigned char cb = (unsigned char)b[0];
 
+    if (ca != cb) {
+        return ca < cb ? -1 : 1;
+    }
+    if (ca == '\0') {
+        return 0;
+    }
+    ca = (unsigned char)a[1];
+    cb = (unsigned char)b[1];
     return ca != cb ? (ca < cb ? -1 : 1) : strcmp(a, b);
 }
 

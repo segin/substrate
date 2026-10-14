@@ -818,8 +818,8 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
     const as_directive_t *d = &st->u.directive;
     as_section_state_t *s = ctx->out;
 
-    if (strcmp(d->name, ".text") == 0 || strcmp(d->name, ".data") == 0 || strcmp(d->name, ".bss") == 0 ||
-        strcmp(d->name, ".rodata") == 0) {
+    if (as_strcmp(d->name, ".text") == 0 || as_strcmp(d->name, ".data") == 0 || as_strcmp(d->name, ".bss") == 0 ||
+        as_strcmp(d->name, ".rodata") == 0) {
         unsigned sub = 0;
         unsigned flags = 0;
         unsigned type = 0;
@@ -841,15 +841,15 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".section") == 0) {
+    if (as_strcmp(d->name, ".section") == 0) {
         return process_section_like(ctx, st, 0);
     }
 
-    if (strcmp(d->name, ".pushsection") == 0) {
+    if (as_strcmp(d->name, ".pushsection") == 0) {
         return process_section_like(ctx, st, 1);
     }
 
-    if (strcmp(d->name, ".popsection") == 0) {
+    if (as_strcmp(d->name, ".popsection") == 0) {
         /* One with nothing pushed is warned of and taken out before
          * this (as_directives_lower). */
         if (section_track_apply_directive(&ctx->track, d) < 0) {
@@ -859,7 +859,7 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".previous") == 0) {
+    if (as_strcmp(d->name, ".previous") == 0) {
         if (section_track_apply_directive(&ctx->track, d) < 0) {
             return -1;
         }
@@ -867,7 +867,7 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".subsection") == 0) {
+    if (as_strcmp(d->name, ".subsection") == 0) {
         unsigned sub = 0;
         as_section_t *cur;
         if (d->arg_count < 1 || parse_u32_arg(d->args[0], &sub) != 0) {
@@ -886,7 +886,7 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".group") == 0) {
+    if (as_strcmp(d->name, ".group") == 0) {
         as_section_t *cur = &s->items[s->current_index];
         if (d->arg_count >= 1) {
             char *g = trim_copy(d->args[0]);
@@ -910,13 +910,13 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+    if (as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 || as_strcmp(d->name, ".p2align") == 0) {
         unsigned a = 0;
         as_section_t *cur = &s->items[s->current_index];
         if (d->arg_count < 1 || parse_u32_arg(d->args[0], &a) != 0) {
             return -1;
         }
-        if (strcmp(d->name, ".p2align") == 0) {
+        if (as_strcmp(d->name, ".p2align") == 0) {
             if (a > 31) {
                 return -1;
             }
@@ -1103,32 +1103,32 @@ static int sub_track_apply(sub_track_t *t, const as_directive_t *d) {
     if (d->name == NULL) {
         return 0;
     }
-    if (strcmp(d->name, ".previous") == 0) {
+    if (as_strcmp(d->name, ".previous") == 0) {
         sub_where_t tmp = t->at.cur;
 
         t->at.cur = t->at.prev;
         t->at.prev = tmp;
         return 1;
     }
-    if (strcmp(d->name, ".popsection") == 0) {
+    if (as_strcmp(d->name, ".popsection") == 0) {
         if (t->stack_count != 0) {
             t->at = t->stack[--t->stack_count];
         }
         return 1;
     }
-    if (strcmp(d->name, ".subsection") == 0) {
+    if (as_strcmp(d->name, ".subsection") == 0) {
         next.sec = t->at.cur.sec;
         if (d->arg_count < 1 || sub_number(d->args[0], &next.sub) != 0) {
             return -1;
         }
-    } else if (strcmp(d->name, ".text") == 0 || strcmp(d->name, ".data") == 0 || strcmp(d->name, ".bss") == 0 ||
-               strcmp(d->name, ".rodata") == 0) {
+    } else if (as_strcmp(d->name, ".text") == 0 || as_strcmp(d->name, ".data") == 0 || as_strcmp(d->name, ".bss") == 0 ||
+               as_strcmp(d->name, ".rodata") == 0) {
         next.sec = sub_intern(t, d->name);
         next.sub = 0;
         if (next.sec == (size_t)-1 || (sub_has_arg(d, 0) && sub_number(d->args[0], &next.sub) != 0)) {
             return -1;
         }
-    } else if (strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) {
+    } else if (as_strcmp(d->name, ".section") == 0 || as_strcmp(d->name, ".pushsection") == 0) {
         int push = d->name[1] == 'p';
 
         if (!sub_has_arg(d, 0)) {
@@ -1338,10 +1338,10 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
         as_stmt_t made;
 
         if (st->kind == AS_STMT_DIRECTIVE && d->name != NULL &&
-            (strcmp(d->name, ".previous") == 0 || strcmp(d->name, ".popsection") == 0 ||
-             strcmp(d->name, ".subsection") == 0 || strcmp(d->name, ".text") == 0 || strcmp(d->name, ".data") == 0 ||
-             strcmp(d->name, ".bss") == 0 || strcmp(d->name, ".rodata") == 0 ||
-             ((strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) && sub_has_arg(d, 0)))) {
+            (as_strcmp(d->name, ".previous") == 0 || as_strcmp(d->name, ".popsection") == 0 ||
+             as_strcmp(d->name, ".subsection") == 0 || as_strcmp(d->name, ".text") == 0 || as_strcmp(d->name, ".data") == 0 ||
+             as_strcmp(d->name, ".bss") == 0 || as_strcmp(d->name, ".rodata") == 0 ||
+             ((as_strcmp(d->name, ".section") == 0 || as_strcmp(d->name, ".pushsection") == 0) && sub_has_arg(d, 0)))) {
             control = 1;
         }
         if (!control && !SUB_IS_MOVED(t)) {
@@ -1409,7 +1409,7 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
         need_header = 1;
         /* The directive stays, without its number: what is left of it
          * is the change of section, which is all the rest know of. */
-        if (strcmp(d->name, ".subsection") == 0) {
+        if (as_strcmp(d->name, ".subsection") == 0) {
             char *name = xstrdup(".section");
             char *arg = xstrdup(t.spell[t.at.cur.sec]);
 
@@ -1423,11 +1423,11 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
             d->args[0] = arg;
             free(d->name);
             d->name = name;
-        } else if (strcmp(d->name, ".pushsection") == 0) {
+        } else if (as_strcmp(d->name, ".pushsection") == 0) {
             if (sub_pushsection_has_number(d)) {
                 sub_drop_args(d, 1);
             }
-        } else if (strcmp(d->name, ".section") != 0) {
+        } else if (as_strcmp(d->name, ".section") != 0) {
             sub_drop_args(d, 0);
         }
         if (sub_vec_push(&main_v, st) != 0) {

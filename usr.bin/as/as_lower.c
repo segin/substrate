@@ -5,6 +5,7 @@
 #include "as_data.h"
 #include "as_elf_emit.h"
 #include "as_expr.h"
+#include "as_util.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -700,11 +701,11 @@ static int float_bits(const char *text, int is_double, uint64_t *bits, const cha
 /* `.float` and `.double` become the `.long` and `.quad` of their bits:
  * the number was read in three places, and is read in this one. */
 static int lower_floats(as_directive_t *d, const char **why) {
-    int is_double = strcmp(d->name, ".double") == 0;
+    int is_double = as_strcmp(d->name, ".double") == 0;
     arg_vec_t v;
     size_t i;
 
-    if (!is_double && strcmp(d->name, ".float") != 0) {
+    if (!is_double && as_strcmp(d->name, ".float") != 0) {
         return 0;
     }
     memset(&v, 0, sizeof(v));
@@ -736,7 +737,7 @@ static int lower_base64(as_directive_t *d, const char **why) {
     arg_vec_t v;
     size_t i;
 
-    if (strcmp(d->name, ".base64") != 0) {
+    if (as_strcmp(d->name, ".base64") != 0) {
         return 0;
     }
     memset(&v, 0, sizeof(v));
@@ -821,7 +822,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
                 return set_name(d, ".byte");
             }
         }
-        if (strcmp(d->name, ".uleb128") == 0 || strcmp(d->name, ".sleb128") == 0) {
+        if (as_strcmp(d->name, ".uleb128") == 0 || as_strcmp(d->name, ".sleb128") == 0) {
             if (vec_push_text(&v, "0") != 0) {
                 vec_free(&v);
                 return -1;
@@ -837,7 +838,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         }
     }
 
-    if (strcmp(d->name, ".single") == 0) {
+    if (as_strcmp(d->name, ".single") == 0) {
         return set_name(d, ".float");
     }
     /*
@@ -845,7 +846,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
      * of 0, or left empty, is the rest of the file -- as GNU as has it.
      * An empty skip was refused, and a count of 0 gave no bytes.
      */
-    if (strcmp(d->name, ".incbin") == 0 && d->arg_count >= 2) {
+    if (as_strcmp(d->name, ".incbin") == 0 && d->arg_count >= 2) {
         long long count = 1;
 
         if (arg_is_empty(d, 1)) {
@@ -867,22 +868,22 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return 0;
     }
     /* An alignment that pads with a pattern of two bytes or four. */
-    if (strcmp(d->name, ".balignw") == 0 || strcmp(d->name, ".balignl") == 0) {
+    if (as_strcmp(d->name, ".balignw") == 0 || as_strcmp(d->name, ".balignl") == 0) {
         d->fill_width = d->name[7] == 'w' ? 2 : 4;
         return set_name(d, ".balign");
     }
-    if (strcmp(d->name, ".p2alignw") == 0 || strcmp(d->name, ".p2alignl") == 0) {
+    if (as_strcmp(d->name, ".p2alignw") == 0 || as_strcmp(d->name, ".p2alignl") == 0) {
         d->fill_width = d->name[8] == 'w' ? 2 : 4;
         return set_name(d, ".p2align");
     }
-    if (strcmp(d->name, ".string8") == 0) {
+    if (as_strcmp(d->name, ".string8") == 0) {
         return set_name(d, ".string");
     }
-    if (strcmp(d->name, ".dc.a") == 0) {
+    if (as_strcmp(d->name, ".dc.a") == 0) {
         return set_name(d, address_bytes == 8 ? ".quad" : ".long");
     }
 
-    if (strcmp(d->name, ".tfloat") == 0 || strcmp(d->name, ".dc.x") == 0) {
+    if (as_strcmp(d->name, ".tfloat") == 0 || as_strcmp(d->name, ".dc.x") == 0) {
         *why = "an argument is not a decimal number";
         for (i = 0; i < d->arg_count; ++i) {
             rc = push_tfloat(&v, arg_text(d, i));
@@ -895,7 +896,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return set_name(d, ".byte");
     }
 
-    if (strcmp(d->name, ".dc") == 0 || strncmp(d->name, ".dc.", 4) == 0) {
+    if (as_strcmp(d->name, ".dc") == 0 || strncmp(d->name, ".dc.", 4) == 0) {
         unit = find_unit(d->name + 3, 0);
         if (unit == NULL) {
             return 0;
@@ -914,7 +915,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return set_name(d, unit->store);
     }
 
-    if (strcmp(d->name, ".ds") == 0 || strncmp(d->name, ".ds.", 4) == 0) {
+    if (as_strcmp(d->name, ".ds") == 0 || strncmp(d->name, ".ds.", 4) == 0) {
         char text[64];
 
         unit = find_unit(d->name + 3, 1);
@@ -958,7 +959,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return set_name(d, ".fill");
     }
 
-    if (strcmp(d->name, ".dcb") == 0 || strncmp(d->name, ".dcb.", 5) == 0) {
+    if (as_strcmp(d->name, ".dcb") == 0 || strncmp(d->name, ".dcb.", 5) == 0) {
         char text[64];
 
         unit = find_unit(d->name + 4, 0);
@@ -999,7 +1000,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return set_name(d, ".fill");
     }
 
-    if (strcmp(d->name, ".octa") == 0) {
+    if (as_strcmp(d->name, ".octa") == 0) {
         for (i = 0; i < d->arg_count; ++i) {
             u128_t value;
             int negative;
@@ -1017,7 +1018,7 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return set_name(d, ".quad");
     }
 
-    if (strcmp(d->name, ".uleb128") == 0 || strcmp(d->name, ".sleb128") == 0) {
+    if (as_strcmp(d->name, ".uleb128") == 0 || as_strcmp(d->name, ".sleb128") == 0) {
         int is_signed = d->name[1] == 's';
 
         /* Of numbers.  One that is the distance between two labels is
@@ -1047,8 +1048,8 @@ static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why
         return set_name(d, ".byte");
     }
 
-    if (strcmp(d->name, ".string16") == 0 || strcmp(d->name, ".string32") == 0 ||
-        strcmp(d->name, ".string64") == 0) {
+    if (as_strcmp(d->name, ".string16") == 0 || as_strcmp(d->name, ".string32") == 0 ||
+        as_strcmp(d->name, ".string64") == 0) {
         const char *store = d->name[7] == '1' ? ".short" : (d->name[7] == '3' ? ".long" : ".quad");
 
         *why = "an argument is not a string";
@@ -1280,18 +1281,18 @@ static const char *struct_advance(const as_directive_t *d, struct_consts_t *cons
         *off += (long long)bytes * (long long)(d->arg_count == 0 ? 1 : d->arg_count);
         return NULL;
     }
-    if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
+    if (as_strcmp(d->name, ".ascii") == 0 || as_strcmp(d->name, ".asciz") == 0 || as_strcmp(d->name, ".string") == 0) {
         return "strings must be placed into a section";
     }
     if (d->arg_count < 1 || as_expr_eval_string(arg_text(d, 0), struct_lookup, consts, &v) != AS_EXPR_EVAL_OK ||
         v < 0) {
         return "is not, in a .struct, a directive with a size that is a number";
     }
-    if (strcmp(d->name, ".skip") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".zero") == 0) {
+    if (as_strcmp(d->name, ".skip") == 0 || as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".zero") == 0) {
         *off += v;
         return NULL;
     }
-    if (strcmp(d->name, ".fill") == 0) {
+    if (as_strcmp(d->name, ".fill") == 0) {
         if (d->arg_count >= 2 && !arg_is_empty(d, 1) &&
             (as_expr_eval_string(arg_text(d, 1), struct_lookup, consts, &size) != AS_EXPR_EVAL_OK || size < 0)) {
             return "the size of what is filled with is not a number";
@@ -1299,14 +1300,14 @@ static const char *struct_advance(const as_directive_t *d, struct_consts_t *cons
         *off += v * size;
         return NULL;
     }
-    if (strcmp(d->name, ".org") == 0) {
+    if (as_strcmp(d->name, ".org") == 0) {
         if (v < *off) {
             return "would move backwards";
         }
         *off = v;
         return NULL;
     }
-    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+    if (as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 || as_strcmp(d->name, ".p2align") == 0) {
         if (d->name[1] == 'p') {
             if (v > 30) {
                 return "is too large an alignment";
@@ -1354,7 +1355,7 @@ static int lower_structs(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         const char *name = st->kind == AS_STMT_DIRECTIVE && d->name != NULL ? d->name : "";
         long long v = 0;
 
-        if (strcmp(name, ".struct") == 0) {
+        if (as_strcmp(name, ".struct") == 0) {
             /* `a: .struct a + 4`: the label is of the offset it leaves. */
             if (at.in_struct && struct_set_labels(&out, &consts, st, at.off) != 0) {
                 goto oom;
@@ -1385,9 +1386,9 @@ static int lower_structs(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
             at.off = v;
             continue;
         }
-        if (strcmp(name, ".text") == 0 || strcmp(name, ".data") == 0 || strcmp(name, ".bss") == 0 ||
-            strcmp(name, ".rodata") == 0 || strcmp(name, ".section") == 0 || strcmp(name, ".pushsection") == 0 ||
-            strcmp(name, ".popsection") == 0 || strcmp(name, ".previous") == 0) {
+        if (as_strcmp(name, ".text") == 0 || as_strcmp(name, ".data") == 0 || as_strcmp(name, ".bss") == 0 ||
+            as_strcmp(name, ".rodata") == 0 || as_strcmp(name, ".section") == 0 || as_strcmp(name, ".pushsection") == 0 ||
+            as_strcmp(name, ".popsection") == 0 || as_strcmp(name, ".previous") == 0) {
             if (at.in_struct && struct_set_labels(&out, &consts, st, at.off) != 0) {
                 goto oom;
             }
@@ -1408,7 +1409,7 @@ static int lower_structs(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
                 if (stack_count != 0) {
                     at = stack[--stack_count];
                 }
-            } else if (strcmp(name, ".previous") == 0 && at.in_struct) {
+            } else if (as_strcmp(name, ".previous") == 0 && at.in_struct) {
                 /* Back to the section the .struct was written in, which
                  * nothing after this pass has left. */
                 at.in_struct = 0;
@@ -1424,7 +1425,7 @@ static int lower_structs(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         }
         if (!at.in_struct) {
             /* A constant set outside may be an offset inside. */
-            if ((strcmp(name, ".set") == 0 || strcmp(name, ".equ") == 0) && d->arg_count == 2 &&
+            if ((as_strcmp(name, ".set") == 0 || as_strcmp(name, ".equ") == 0) && d->arg_count == 2 &&
                 as_expr_eval_string(arg_text(d, 1), struct_lookup, &consts, &v) == AS_EXPR_EVAL_OK &&
                 struct_define(&consts, arg_text(d, 0), v) != 0) {
                 goto oom;
@@ -1446,7 +1447,7 @@ static int lower_structs(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
             continue;
         }
         if (struct_directive_is_placeless(name)) {
-            if ((strcmp(name, ".set") == 0 || strcmp(name, ".equ") == 0) && d->arg_count == 2 &&
+            if ((as_strcmp(name, ".set") == 0 || as_strcmp(name, ".equ") == 0) && d->arg_count == 2 &&
                 as_expr_eval_string(arg_text(d, 1), struct_lookup, &consts, &v) == AS_EXPR_EVAL_OK &&
                 struct_define(&consts, arg_text(d, 0), v) != 0) {
                 goto oom;
@@ -1602,7 +1603,7 @@ static int lower_local_commons(as_parse_result_t *parsed, char *errbuf, size_t e
         const as_stmt_t *st = &parsed->items[i];
 
         if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
-            (strcmp(st->u.directive.name, ".lcomm") == 0 || strcmp(st->u.directive.name, ".comm") == 0)) {
+            (as_strcmp(st->u.directive.name, ".lcomm") == 0 || strcmp(st->u.directive.name, ".comm") == 0)) {
             any = 1;
             break;
         }
@@ -1631,7 +1632,7 @@ static int lower_local_commons(as_parse_result_t *parsed, char *errbuf, size_t e
             }
             continue;
         }
-        if ((strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0 || strcmp(d->name, ".equiv") == 0) &&
+        if ((as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0) &&
             d->arg_count == 2) {
             name = local_common_name(d);
             if (name == NULL) {
@@ -1644,7 +1645,7 @@ static int lower_local_commons(as_parse_result_t *parsed, char *errbuf, size_t e
             }
             free(name);
         }
-        if (strcmp(d->name, ".local") == 0) {
+        if (as_strcmp(d->name, ".local") == 0) {
             for (k = 0; k < d->arg_count; ++k) {
                 as_directive_t one = *d;
 
@@ -1658,8 +1659,8 @@ static int lower_local_commons(as_parse_result_t *parsed, char *errbuf, size_t e
                 free(name);
             }
         }
-        is_lcomm = strcmp(d->name, ".lcomm") == 0;
-        if (!is_lcomm && strcmp(d->name, ".comm") != 0) {
+        is_lcomm = as_strcmp(d->name, ".lcomm") == 0;
+        if (!is_lcomm && as_strcmp(d->name, ".comm") != 0) {
             if (stmt_vec_push(&out, st) != 0) {
                 goto oom;
             }
@@ -1809,7 +1810,7 @@ static int set_lookup(void *cookie, const char *name, long long *value_out) {
 }
 
 static int directive_is_set(const as_directive_t *d) {
-    return (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0 || strcmp(d->name, ".equiv") == 0) &&
+    return (as_strcmp(d->name, ".set") == 0 || as_strcmp(d->name, ".equ") == 0 || as_strcmp(d->name, ".equiv") == 0) &&
            d->arg_count == 2;
 }
 
@@ -2027,10 +2028,10 @@ static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbu
             }
             free(name);
         }
-        is_align = strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 ||
-                   strcmp(d->name, ".p2align") == 0;
-        is_space = strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".skip") == 0 || strcmp(d->name, ".space") == 0;
-        if (is_align || is_space || strcmp(d->name, ".fill") == 0 || strcmp(d->name, ".org") == 0) {
+        is_align = as_strcmp(d->name, ".align") == 0 || as_strcmp(d->name, ".balign") == 0 ||
+                   as_strcmp(d->name, ".p2align") == 0;
+        is_space = as_strcmp(d->name, ".zero") == 0 || as_strcmp(d->name, ".skip") == 0 || as_strcmp(d->name, ".space") == 0;
+        if (is_align || is_space || as_strcmp(d->name, ".fill") == 0 || as_strcmp(d->name, ".org") == 0) {
             for (k = 0; k < d->arg_count; ++k) {
                 if (arg_make_number(d, k, &consts, !is_align) != 0) {
                     goto oom;
@@ -2038,7 +2039,7 @@ static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbu
             }
         }
         if (is_align) {
-            int p2 = strcmp(d->name, ".p2align") == 0;
+            int p2 = as_strcmp(d->name, ".p2align") == 0;
 
             if (d->arg_count == 0 || arg_is_empty(d, 0)) {
                 /* None is asked for: the least there is. */
@@ -2058,13 +2059,13 @@ static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbu
             }
         } else if (is_space && arg_number(d, 0, &v) && v < 0) {
             said = ".space repeat count is negative, ignored";
-        } else if (strcmp(d->name, ".zero") == 0 && d->arg_count > 2) {
+        } else if (as_strcmp(d->name, ".zero") == 0 && d->arg_count > 2) {
             why = "takes a count and a fill";
-        } else if (strcmp(d->name, ".zero") == 0 && d->arg_count == 2) {
+        } else if (as_strcmp(d->name, ".zero") == 0 && d->arg_count == 2) {
             if (set_name(d, ".skip") != 0) {
                 goto oom;
             }
-        } else if (strcmp(d->name, ".fill") == 0) {
+        } else if (as_strcmp(d->name, ".fill") == 0) {
             if (arg_number(d, 0, &v) && v < 0) {
                 said = "repeat < 0; .fill ignored";
             } else if (arg_number(d, 1, &v) && v < 0) {
@@ -2079,7 +2080,7 @@ static int lower_arguments(as_parse_result_t *parsed, char *errbuf, size_t errbu
                     goto oom;
                 }
             }
-        } else if ((strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) && d->arg_count >= 2 &&
+        } else if ((as_strcmp(d->name, ".section") == 0 || as_strcmp(d->name, ".pushsection") == 0) && d->arg_count >= 2 &&
                    d->args[1] != NULL && !(d->arg_count == 2 && arg_number(d, 1, &v))) {
             char *flags = d->args[1];
             size_t named = 3;
@@ -2421,7 +2422,7 @@ static int directive_takes_values(const char *name, size_t *first) {
             return 1;
         }
     }
-    if (strcmp(name, ".size") == 0) {
+    if (as_strcmp(name, ".size") == 0) {
         *first = 1;
         return 1;
     }
@@ -2605,7 +2606,7 @@ static int lower_aliases(as_parse_result_t *parsed, char *errbuf, size_t errbuf_
         const as_directive_t *d = &st->u.directive;
 
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL ||
-            (strcmp(d->name, ".globl") != 0 && strcmp(d->name, ".global") != 0 && strcmp(d->name, ".weak") != 0)) {
+            (as_strcmp(d->name, ".globl") != 0 && as_strcmp(d->name, ".global") != 0 && as_strcmp(d->name, ".weak") != 0)) {
             continue;
         }
         for (k = 0; k < d->arg_count; ++k) {
@@ -2843,7 +2844,7 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
         if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL) {
             continue;
         }
-        if (strcmp(st->u.directive.name, ".code16gcc") == 0) {
+        if (as_strcmp(st->u.directive.name, ".code16gcc") == 0) {
             gcc16 = 1;
             if (set_name(&st->u.directive, ".code16") != 0) {
                 if (errbuf != NULL && errbuf_sz != 0) {
@@ -2851,15 +2852,15 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
                 }
                 return -1;
             }
-        } else if (strcmp(st->u.directive.name, ".code16") == 0 || strcmp(st->u.directive.name, ".code32") == 0 ||
+        } else if (as_strcmp(st->u.directive.name, ".code16") == 0 || strcmp(st->u.directive.name, ".code32") == 0 ||
                    strcmp(st->u.directive.name, ".code64") == 0) {
             gcc16 = 0;
         }
         /* A .popsection with nothing pushed is said and passed over,
          * as GNU as has it. */
-        if (strcmp(st->u.directive.name, ".pushsection") == 0) {
+        if (as_strcmp(st->u.directive.name, ".pushsection") == 0) {
             pushed++;
-        } else if (strcmp(st->u.directive.name, ".popsection") == 0) {
+        } else if (as_strcmp(st->u.directive.name, ".popsection") == 0) {
             if (pushed != 0) {
                 pushed--;
             } else {
@@ -3649,14 +3650,14 @@ int as_x86_nops_lower(as_parse_result_t *parsed, int is_64, char *errbuf, size_t
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
             continue;
         }
-        if (strcmp(d->name, ".code16") == 0 || strcmp(d->name, ".code16gcc") == 0) {
+        if (as_strcmp(d->name, ".code16") == 0 || as_strcmp(d->name, ".code16gcc") == 0) {
             code_bits = 16;
-        } else if (strcmp(d->name, ".code32") == 0) {
+        } else if (as_strcmp(d->name, ".code32") == 0) {
             code_bits = 32;
-        } else if (strcmp(d->name, ".code64") == 0) {
+        } else if (as_strcmp(d->name, ".code64") == 0) {
             code_bits = 64;
         }
-        if (strcmp(d->name, ".nops") != 0) {
+        if (as_strcmp(d->name, ".nops") != 0) {
             continue;
         }
         if (d->arg_count > 2) {

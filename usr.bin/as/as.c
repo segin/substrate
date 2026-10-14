@@ -304,10 +304,10 @@ static int directive_is_explicitly_unsupported(const char *name) {
     if (name == NULL) {
         return 0;
     }
-    return strcmp(name, ".if") == 0 || strcmp(name, ".ifdef") == 0 || strcmp(name, ".ifndef") == 0 ||
-           strcmp(name, ".else") == 0 || strcmp(name, ".elseif") == 0 || strcmp(name, ".endif") == 0 ||
-           strcmp(name, ".macro") == 0 || strcmp(name, ".endm") == 0 || strcmp(name, ".rept") == 0 ||
-           strcmp(name, ".endr") == 0 || strcmp(name, ".irp") == 0 || strcmp(name, ".irpc") == 0;
+    return as_strcmp(name, ".if") == 0 || as_strcmp(name, ".ifdef") == 0 || as_strcmp(name, ".ifndef") == 0 ||
+           as_strcmp(name, ".else") == 0 || as_strcmp(name, ".elseif") == 0 || as_strcmp(name, ".endif") == 0 ||
+           as_strcmp(name, ".macro") == 0 || as_strcmp(name, ".endm") == 0 || as_strcmp(name, ".rept") == 0 ||
+           as_strcmp(name, ".endr") == 0 || as_strcmp(name, ".irp") == 0 || as_strcmp(name, ".irpc") == 0;
 }
 
 /*
@@ -415,18 +415,18 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
         if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
             continue;
         }
-        if (strcmp(d->name, ".error") == 0) {
+        if (as_strcmp(d->name, ".error") == 0) {
             text = message_text(d, ".error directive invoked in source file");
             is_error = 1;
-        } else if (strcmp(d->name, ".err") == 0) {
+        } else if (as_strcmp(d->name, ".err") == 0) {
             said = ".err encountered";
             is_error = 1;
-        } else if (strcmp(d->name, ".abort") == 0) {
+        } else if (as_strcmp(d->name, ".abort") == 0) {
             as_diag(AS_E_BACKEND, "%s:%u: .abort detected: the assembly is abandoned", file, st->line);
             return -1;
-        } else if (strcmp(d->name, ".warning") == 0) {
+        } else if (as_strcmp(d->name, ".warning") == 0) {
             text = message_text(d, ".warning directive invoked in source file");
-        } else if (strcmp(d->name, ".print") == 0) {
+        } else if (as_strcmp(d->name, ".print") == 0) {
             text = message_text(d, "");
             if (text != NULL) {
                 puts(text);
@@ -434,7 +434,7 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
             free(text);
             text = NULL;
             said = "";
-        } else if (strcmp(d->name, ".fail") == 0) {
+        } else if (as_strcmp(d->name, ".fail") == 0) {
             long long n = 0;
             static char fail_text[64];
 
@@ -3885,16 +3885,16 @@ static int parse_lines_given(void *cookie, const as_token_t *items, size_t count
         if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL) {
             const char *name = st->u.directive.name;
 
-            if (strcmp(name, ".code16") == 0) {
+            if (as_strcmp(name, ".code16") == 0) {
                 sink->code_bits = 16u;
-            } else if (strcmp(name, ".code16gcc") == 0) {
+            } else if (as_strcmp(name, ".code16gcc") == 0) {
                 /* (Code a compiler made for 32 bits: its calls, returns
                  * and pushes are made 32-bit ones further on, and are
                  * not to be encoded before they are.) */
                 sink->code_bits = 0;
-            } else if (strcmp(name, ".code32") == 0) {
+            } else if (as_strcmp(name, ".code32") == 0) {
                 sink->code_bits = 32u;
-            } else if (strcmp(name, ".code64") == 0) {
+            } else if (as_strcmp(name, ".code64") == 0) {
                 sink->code_bits = 64u;
             }
         } else if (st->kind == AS_STMT_INSTRUCTION && sink->code_bits != 0) {
