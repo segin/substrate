@@ -1135,16 +1135,12 @@ static int x86_stmt_has_decorator(const as_instruction_t *insn) {
  * `vmovdqa %fs:(%rbx), %ymm0` read from %ds.  The override goes before
  * the VEX prefix, which is where the encoding begins.
  */
-static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code, size_t code_cap,
-                               size_t *code_len) {
-    const char *name;
-    unsigned char seg = 0;
+/* The byte of the segment override a statement has -- its segment
+ * prefix, or that of an address among its operands -- or 0 for none. */
+static unsigned char x86_segment_byte(const as_instruction_t *insn) {
+    const char *name = insn->segment_override;
     size_t i;
 
-    if (insn == NULL || code == NULL || code_len == NULL) {
-        return -1;
-    }
-    name = insn->segment_override;
     for (i = 0; name == NULL && i < insn->operand_count; ++i) {
         /* (Where a string instruction stores is through %es whatever
          * is written, and its %es: is no prefix.) */
@@ -1157,13 +1153,27 @@ static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code
         return 0;
     }
     switch (map_seg(name)) {
-    case AS_X86_SEG_CS: seg = 0x2e; break;
-    case AS_X86_SEG_DS: seg = 0x3e; break;
-    case AS_X86_SEG_ES: seg = 0x26; break;
-    case AS_X86_SEG_FS: seg = 0x64; break;
-    case AS_X86_SEG_GS: seg = 0x65; break;
-    case AS_X86_SEG_SS: seg = 0x36; break;
+    case AS_X86_SEG_CS: return 0x2e;
+    case AS_X86_SEG_DS: return 0x3e;
+    case AS_X86_SEG_ES: return 0x26;
+    case AS_X86_SEG_FS: return 0x64;
+    case AS_X86_SEG_GS: return 0x65;
+    case AS_X86_SEG_SS: return 0x36;
     default: return 0;
+    }
+}
+
+static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code, size_t code_cap,
+                               size_t *code_len) {
+    unsigned char seg;
+    size_t i;
+
+    if (insn == NULL || code == NULL || code_len == NULL) {
+        return -1;
+    }
+    seg = x86_segment_byte(insn);
+    if (seg == 0) {
+        return 0;
     }
     /* Some emitters write the override of a memory operand themselves;
      * not twice. */
@@ -2806,13 +2816,11 @@ static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn,
                 snprintf(encerr, encerr_sz, "'umonitor' has the address-size prefix already, for its register");
                 return -1;
             }
+            /* (The emitter puts it on, with the others, while this
+             * says so.) */
             x86_umonitor_inside = 1;
-            rc = encode_x86_vec(cfg, insn, code + 1, code_cap - 1, code_len, encerr, encerr_sz);
+            rc = encode_x86_vec(cfg, insn, code, code_cap, code_len, encerr, encerr_sz);
             x86_umonitor_inside = 0;
-            if (rc > 0) {
-                code[0] = 0x67;
-                (*code_len)++;
-            }
             return rc;
         }
         if (x86_reg_width_bits(insn->operands[0].u.reg) != natural) {
@@ -3229,28 +3237,13 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                         continue;
                     }
                     if (none[i].flag == AS_PREFIX_HLE) {
-                        size_t at = 0;
-
-                        if (*code_len + 1 > code_cap) {
-                            return -1;
-                        }
-                        while (at < *code_len && (code[at] == 0x66u || code[at] == 0x67u)) {
-                            at++;
-                        }
-                        memmove(code + at + 1, code + at, *code_len - at);
-                        code[at] = (insn->prefixes & AS_PREFIX_REPNE) != 0 ? 0xf2u : 0xf3u;
-                        (*code_len)++;
+                        rq.pfx_hle = (insn->prefixes & AS_PREFIX_REPNE) != 0 ? 0xf2u : 0xf3u;
                         continue;
                     }
                 }
 
                 if (none[i].flag == AS_PREFIX_LOCK &&
                     (evex ? as_x86_vec_takes_lock(mn) : as_x86_vec_takes_lock(mn) || as_x86_vec_base_takes_lock(mn))) {
-                    size_t at = 0;
-
-                    if (*code_len + 1 > code_cap) {
-                        return -1;
-                    }
                     /*
                      * A form an instruction always had (no EVEX): it
                      * is locked only where it writes to memory -- its
@@ -3270,13 +3263,8 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                             snprintf(encerr, encerr_sz, "'%s' is locked only where it writes to memory", mn);
                             return -1;
                         }
-                        while (at < *code_len && (code[at] == 0x66u || code[at] == 0x67u)) {
-                            at++;
-                        }
                     }
-                    memmove(code + at + 1, code + at, *code_len - at);
-                    code[at] = 0xf0;
-                    (*code_len)++;
+                    rq.pfx_lock = 1;
                     continue;
                 }
                 /* (66 before one of general registers, or of none, is
@@ -3298,17 +3286,12 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                 if (none[i].flag == AS_PREFIX_DATA16 && (as_x86_vec_takes_data16(mn) || general)) {
                     size_t at = *code_len != 0 && code[0] == 0x67 ? 1 : 0;
 
-                    if (*code_len + 1 > code_cap) {
-                        return -1;
-                    }
                     if (at < *code_len && code[at] == 0x66) {
                         snprintf(encerr, encerr_sz, "'%s' has the operand-size prefix already, for its 16-bit operands",
                                  mn);
                         return -1;
                     }
-                    memmove(code + at + 1, code + at, *code_len - at);
-                    code[at] = 0x66;
-                    (*code_len)++;
+                    rq.pfx_66 = 1;
                     continue;
                 }
                 /* (The PadLock instructions repeat: most are written
@@ -3322,12 +3305,7 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                     if (*code_len != 0 && code[0] == 0xf3u) {
                         continue;
                     }
-                    if (*code_len + 1 > code_cap) {
-                        return -1;
-                    }
-                    memmove(code + 1, code, *code_len);
-                    code[0] = 0xf3u;
-                    (*code_len)++;
+                    rq.pfx_rep = 0xf3u;
                     continue;
                 }
                 /* (A repeat before bsf or bsr is the byte, which GNU
@@ -3349,20 +3327,10 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                        strcmp(mn, "ret") == 0 || strcmp(mn, "retw") == 0 || strcmp(mn, "retl") == 0 ||
                        strcmp(mn, "retq") == 0) &&
                       as_x86_vec_base_is_whole(mn)))) {
-                    size_t at = 0;
-
                     if (none[i].flag == AS_PREFIX_REPE && (insn->prefixes & AS_PREFIX_REP) != 0) {
                         continue;
                     }
-                    if (*code_len + 1 > code_cap) {
-                        return -1;
-                    }
-                    while (at < *code_len && (code[at] == 0x66u || code[at] == 0x67u)) {
-                        at++;
-                    }
-                    memmove(code + at + 1, code + at, *code_len - at);
-                    code[at] = none[i].flag == AS_PREFIX_REPNE ? 0xf2u : 0xf3u;
-                    (*code_len)++;
+                    rq.pfx_rep = none[i].flag == AS_PREFIX_REPNE ? 0xf2u : 0xf3u;
                     continue;
                 }
                 snprintf(encerr, encerr_sz, "'%s' takes no %s prefix", mn, none[i].name);
@@ -3387,15 +3355,23 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
                 have = 1;
             }
         }
-        /* (An address of the other size has the byte put on by what
-         * writes the prefixes outside the instruction.) */
+        /* (An address of the other size has the byte from the emitter
+         * as its own.) */
         if (!have) {
-            if (*code_len >= code_cap) {
-                return -1;
-            }
-            memmove(code + 1, code, *code_len);
-            code[0] = 0x67;
-            (*code_len)++;
+            rq.pfx_67 = 1;
+        }
+    }
+    /* And the segment, and umonitor's register's size.  What was found
+     * written is the emitter's to put on, before the instruction's own
+     * and in GNU's order: it is asked again, with them. */
+    rq.pfx_seg = x86_segment_byte(insn);
+    rq.pfx_67 |= x86_umonitor_inside ? 1u : 0u;
+    if (rq.pfx_seg != 0 || rq.pfx_67 != 0 || rq.pfx_66 != 0 || rq.pfx_hle != 0 || rq.pfx_lock != 0 ||
+        rq.pfx_rep != 0) {
+        int rc = as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
+
+        if (rc <= 0) {
+            return rc < 0 ? -1 : 0;
         }
     }
     return 1;
@@ -5483,11 +5459,10 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
             return -1;
         }
         if (vec > 0) {
-            if (x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len) != 0) {
-                return -1;
-            }
+            /* (Its prefixes are the table's to write, the segment and
+             * the address size with the rest.) */
             warn_mov_byte_cut(cfg, st);
-            return x86_addr16_prefix(cfg, st, code, code_cap, code_len);
+            return 0;
         }
     }
 

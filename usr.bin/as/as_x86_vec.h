@@ -208,6 +208,19 @@ typedef struct {
     int has_offset;
     uint64_t offset;
     int force_near;
+    /*
+     * The prefixes the statement has besides the instruction's own:
+     * written, or asked for by its operands.  The emitter writes them
+     * with its own in the order GNU as has: the segment, 67, 66, the
+     * F2 or F3 of xacquire or xrelease, F0, the F2 or F3 of a repeat,
+     * and then the instruction's.  0 is none of each.
+     */
+    unsigned char pfx_seg;  /* 26, 2E, 36, 3E, 64 or 65 */
+    unsigned char pfx_67;   /* the address size, where nothing else says it */
+    unsigned char pfx_66;   /* data16 */
+    unsigned char pfx_hle;  /* F2 or F3 */
+    unsigned char pfx_lock; /* F0 */
+    unsigned char pfx_rep;  /* F2 or F3 */
 } as_x86_vec_req_t;
 
 /* 1 if `mnemonic` is the name of a row. */

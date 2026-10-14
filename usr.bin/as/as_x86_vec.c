@@ -39,6 +39,41 @@ static int put8(vec_ctx_t *ctx, unsigned v) {
     return 0;
 }
 
+/*
+ * The prefixes before an instruction's own and its escape: the segment,
+ * the address size, the operand size, xacquire or xrelease, lock, a
+ * repeat -- in that order, which is GNU as's.  `addr` and `data` are
+ * the instruction's own asking for the address size and the operand
+ * size; the request's are those written or asked for by its operands.
+ * Each is written once, whoever asks.
+ */
+static int put_prefixes(vec_ctx_t *ctx, const as_x86_vec_req_t *rq, int addr, int data) {
+    return (rq->pfx_seg != 0 && put8(ctx, rq->pfx_seg) != 0) ||
+           ((addr || rq->pfx_67 != 0) && put8(ctx, 0x67u) != 0) ||
+           ((data || rq->pfx_66 != 0) && put8(ctx, 0x66u) != 0) ||
+           (rq->pfx_hle != 0 && put8(ctx, rq->pfx_hle) != 0) ||
+           (rq->pfx_lock != 0 && put8(ctx, 0xf0u) != 0) ||
+           (rq->pfx_rep != 0 && put8(ctx, rq->pfx_rep) != 0)
+               ? -1
+               : 0;
+}
+
+/* Whether an address among the operands is of the other size than the
+ * code's, which the address-size prefix says: of 16 bits in 32-bit
+ * code, of 32 in 16-bit and in 64-bit code. */
+static int other_address_size(const as_x86_vec_req_t *rq) {
+    unsigned natural = rq->mode;
+    size_t k;
+
+    for (k = 0; k < rq->op_count; ++k) {
+        if (rq->ops[k].kind == AS_X86_OP_MEM && rq->ops[k].u.mem.addr_bits != 0 &&
+            rq->ops[k].u.mem.addr_bits != natural) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int put32(vec_ctx_t *ctx, uint32_t v) {
     return put8(ctx, v & 0xffu) != 0 || put8(ctx, (v >> 8) & 0xffu) != 0 || put8(ctx, (v >> 16) & 0xffu) != 0 ||
                    put8(ctx, (v >> 24) & 0xffu) != 0
@@ -813,14 +848,15 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
             vec_err(ctx, "'%s' goes no further than a byte says, and its target is not so near", t->name);
             return -1;
         }
-        if ((other && put8(ctx, 0x67u) != 0) || put8(ctx, t->opcode) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0) {
+        if (put_prefixes(ctx, rq, other, 0) != 0 || put8(ctx, t->opcode) != 0 ||
+            put8(ctx, (unsigned)disp & 0xffu) != 0) {
             return -1;
         }
         return 0;
     }
-    if ((((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
-         ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) &&
-        put8(ctx, 0x66u) != 0) {
+    if (put_prefixes(ctx, rq, 0,
+                     ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
+                         ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) != 0) {
         return -1;
     }
     /* (A REX prefix that is written is written, where there is one.) */
@@ -901,6 +937,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
          * the row gives, if it gives one (`monitor` is 0F 01 C8). */
         static const uint8_t pp_byte[] = {0, 0x66, 0xf3, 0xf2};
         const char *addr = strchr(t->ops, 'A');
+        int addr67 = 0;
         size_t k;
 
         for (k = 0; k < rq->op_count; ++k) {
@@ -930,9 +967,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 vec_err(ctx, "an address in a %u-bit register in %u-bit code", bits, rq->mode);
                 return -1;
             }
-            if (bits == other && put8(ctx, 0x67u) != 0) {
-                return -1;
-            }
+            addr67 = bits == other;
         }
         if (addr != NULL) {
             unsigned bits = rq->ops[addr - t->ops].size_bits;
@@ -942,16 +977,14 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
                 vec_err(ctx, "an address in a %u-bit register in %u-bit code", bits, rq->mode);
                 return -1;
             }
-            if (bits == other && put8(ctx, 0x67u) != 0) {
-                return -1;
-            }
+            addr67 = bits == other;
         }
         /* (The operand's size where it is not the mode's, and W, as
          * for a row with a ModRM: `add $0x1234, %ax` is 66 05 34 12
          * in 32-bit code, `add $1, %rax` with four bytes 48 05.) */
-        if ((((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
-             ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) &&
-            put8(ctx, 0x66u) != 0) {
+        if (put_prefixes(ctx, rq, addr67,
+                         ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
+                             ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode == 16u)) != 0) {
             return -1;
         }
         if (t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) {
@@ -1193,8 +1226,10 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     }
     if (rm == NULL && (t->flags & AS_VEC_F_MODRM) == 0) {
         /* No operand, and so no ModRM: vzeroupper and vzeroall. */
-        return put8(ctx, 0xc5u) != 0 || put8(ctx, 0xf8u | (len << 2) | t->pp) != 0 || put8(ctx, t->opcode) != 0 ? -1
-                                                                                                             : 0;
+        return put_prefixes(ctx, rq, 0, 0) != 0 || put8(ctx, 0xc5u) != 0 ||
+                       put8(ctx, 0xf8u | (len << 2) | t->pp) != 0 || put8(ctx, t->opcode) != 0
+                   ? -1
+                   : 0;
     }
     if ((t->flags & AS_VEC_F_NO64) != 0 && rq->mode != 64u) {
         w = 0;
@@ -1373,10 +1408,9 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         int size16 = (t->flags & AS_VEC_F_OP16) != 0;
         int size32 = (t->flags & AS_VEC_F_OP32) != 0;
 
-        if ((size16 && rq->mode != 16u) || (size32 && rq->mode == 16u)) {
-            if (put8(ctx, 0x66u) != 0) {
-                return -1;
-            }
+        if (put_prefixes(ctx, rq, other_address_size(rq), (size16 && rq->mode != 16u) || (size32 && rq->mode == 16u)) !=
+            0) {
+            return -1;
         }
         if (t->pp != AS_VEC_PP_NONE && put8(ctx, pp_byte[t->pp]) != 0) {
             return -1;
@@ -1427,6 +1461,9 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
         int two = t->enc == AS_VEC_VEX && t->map == AS_VEC_MAP_0F && !w && !x && !b &&
                   (rq->pseudo & AS_PSEUDO_VEX3) == 0 && (t->flags & AS_VEC_F_VEX3) == 0;
 
+        if (put_prefixes(ctx, rq, other_address_size(rq), 0) != 0) {
+            return -1;
+        }
         if (two) {
             if (put8(ctx, 0xc5u) != 0 ||
                 put8(ctx, ((r ^ 1u) << 7) | ((~vvvv & 0xfu) << 3) | (len << 2) | t->pp) != 0) {
@@ -1479,7 +1516,7 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             low = t->bcst & 0xfu;
             vvvv = ~(unsigned)rq->dfv & 0xfu;
         }
-        if (put8(ctx, 0x62u) != 0 ||
+        if (put_prefixes(ctx, rq, other_address_size(rq), 0) != 0 || put8(ctx, 0x62u) != 0 ||
             put8(ctx, ((r ^ 1u) << 7) | ((x ^ 1u) << 6) | ((b ^ 1u) << 5) | ((r4 ^ 1u) << 4) | (b4 << 3) | t->map) !=
                 0 ||
             put8(ctx, (w << 7) | ((~vvvv & 0xfu) << 3) | ((xg4 ^ 1u) << 2) | t->pp) != 0 ||
