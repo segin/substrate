@@ -5279,19 +5279,32 @@ static void emit_i386_i2f_x87(FILE *fp, const cc_ssa_function_t *f, const slot_l
     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
 }
 
+/*
+ * Floating to integer, truncating (C's conversion) whatever the x87
+ * rounding mode.  The conversion is always to 64 bits, so an unsigned
+ * int above INT_MAX and a long long come out whole; the result goes
+ * straight to the destination's slot, as the flush leaves no register
+ * bound.
+ */
 static void emit_i386_f2i_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                              int src_slot, const char *dst_reg, int scratch_off) {
+                              const cc_ssa_instr_t *in, int scratch_off) {
+    int dst = slot_off(lay, in->dst);
+
     int_regs_flush(fp, f, lay, ist);
-    int_regs_clobber_reg(fp, f, lay, ist, int_reg_index(ist, "%eax"));
     fprintf(fp, "\tfnstcw %d(%%ebp)\n", scratch_off);
     fprintf(fp, "\tmovw %d(%%ebp), %%ax\n", scratch_off);
     fprintf(fp, "\torw $0x0c00, %%ax\n");
     fprintf(fp, "\tmovw %%ax, %d(%%ebp)\n", scratch_off + 2);
     fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off + 2);
-    fprintf(fp, "\tfldl %d(%%ebp)\n", src_slot);
-    fprintf(fp, "\tfistpl %d(%%ebp)\n", scratch_off + 4);
+    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
+    fprintf(fp, "\tfistpll %d(%%ebp)\n", scratch_off + 4);
     fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off);
-    fprintf(fp, "\tmovl %d(%%ebp), %s\n", scratch_off + 4, dst_reg);
+    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", scratch_off + 4);
+    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dst);
+    if (value_size_bytes(f, in->dst, 4) >= 8) {
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", scratch_off + 8);
+        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dst + 4);
+    }
 }
 
 static void emit_i386_fround32_sse(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
@@ -6230,13 +6243,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_F2I:
-                {
+                /* SSE2 on i386 converts only to a signed 32-bit integer */
+                if (use_x87_fp || value_size_bytes(f, in->dst, 4) >= 8 || in->is_unsigned ||
+                    (f->value_is_unsigned != NULL && f->value_is_unsigned[in->dst])) {
+                    emit_i386_f2i_x87(fp, f, &lay, &ist, in, scratch_off);
+                } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
-                    if (use_x87_fp) {
-                        emit_i386_f2i_x87(fp, f, &lay, &ist, slot_off(&lay, in->lhs), ist.regs[rd], scratch_off);
-                    } else {
-                        fprintf(fp, "\tcvttsd2sil %d(%%ebp), %s\n", slot_off(&lay, in->lhs), ist.regs[rd]);
-                    }
+                    fprintf(fp, "\tcvttsd2sil %d(%%ebp), %s\n", slot_off(&lay, in->lhs), ist.regs[rd]);
                 }
                 break;
 

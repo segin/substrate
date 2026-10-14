@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 10 | 3 |
+| 4. ABI and other code generation | 10 | 4 |
 | 5. Driver and predefined macros | 2 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. Documentation | 1 | 0 |
@@ -118,10 +118,15 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-14** On i386, a call with more than a few mixed int, char,
   short, long, double and float arguments shall pass each one.  Twelve
   such arguments summed to 67114532, not 120.  *Reproduced* (-m32).
-- [ ] **CC-15** On i386, converting a double to an integer shall
-  truncate toward zero, and an out-of-range value to `unsigned` shall
-  give gcc's result.  `(int)2.99` gave 3, `(int)-2.99` gave -7926120,
-  `(unsigned)3.9e9` gave 16777217.  *Reproduced* (-m32).
+- [x] **CC-15** On i386, converting a double to an integer shall
+  truncate toward zero and keep every bit of the integer type.  The x87
+  conversion dropped its result: the helper flushed the register state
+  after the destination register had been chosen, so `(int)a` gave the
+  address of `a`.  It also converted to 32 bits only, so
+  `(unsigned)3.9e9` and every `long long` result were wrong, and local
+  initializers were never converted to their integer type, so
+  `long long x = d * 4` kept 32 bits.  *Reproduced* (-m32).
+  `codegen/float_to_int.c`.
 - [ ] **CC-16** On i386, `long double` shall be 12 bytes with 64-bit
   precision (the i386 psABI).  It is 16 bytes with double's precision.
   *Reproduced* (-m32).
@@ -197,4 +202,4 @@ changes as well.  *Suite.*
 
 ---
 
-35 requirements: 14 met, 21 open.
+35 requirements: 15 met, 20 open.

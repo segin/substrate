@@ -2882,6 +2882,17 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     if (bits >= 64) {
         long cur_size = (sf->value_sizes != NULL && v >= 0 && v < sf->value_count) ? sf->value_sizes[v] : 0;
         int src_unsigned = value_is_unsigned(sf, v);
+        size_t k;
+
+        /* a floating value converts straight to 64 bits; nothing to extend */
+        for (k = sf->instr_count; k > 0; --k) {
+            if (sf->instrs[k - 1].dst == v) {
+                if (sf->instrs[k - 1].op == CC_SSA_F2I) {
+                    cur_size = 8;
+                }
+                break;
+            }
+        }
         if (cur_size <= 0) {
             cur_size = g_pointer_size_bytes;
         }
@@ -10009,6 +10020,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         return -1;
                     }
                     v = normalize_float_value(sf, v, s->type, diag);
+                    if (v >= 0 && is_integral_type(s->type) && !is_pointer_type(s->type)) {
+                        v = normalize_integral_value(sf, v, s->type, diag);
+                    }
                     if (v < 0) {
                         return -1;
                     }
@@ -10443,6 +10457,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
             v = normalize_float_value(sf, v, s->type, diag);
+            if (v >= 0 && is_integral_type(s->type) && !is_pointer_type(s->type)) {
+                v = normalize_integral_value(sf, v, s->type, diag);
+            }
             if (v < 0) {
                 return -1;
             }
