@@ -34,7 +34,6 @@ usr.bin/as/
 ├── as_x86_vec_table_apx.h   # x86: and APX's forms of the instructions of general registers (generated)
 ├── as_x86_vec_table_base.h  # x86: and the forms those instructions always had, as they come to the table (generated)
 ├── as_x86_memsize_table.h   # x86: the sizes of memory each instruction takes in Intel syntax (generated)
-├── as_x86_vex.c             # x86: the VEX prefix
 ├── as_arm.c                 # ARM (A32) encoder; what the ARM and AArch64 encoders share
 ├── as_arm_simd.c            # ARM: VFP and NEON
 ├── as_arm_thumb.c           # ARM: Thumb-2
@@ -43,7 +42,7 @@ usr.bin/as/
 ├── *.h                      # Each .c has the header of its name, with its interface (as_cfi.h,
 │                            #   as_data.h, as_dwline.h, as_elf_emit.h, as_expr.h, as_lexer.h, as_lower.h,
 │                            #   as_parser.h, as_reloc_op.h, as_sections.h, as_symtab.h, as_x86_regs.h,
-│                            #   as_x86_encode.h, as_x86_vec.h, as_x86_vex.h).
+│                            #   as_x86_encode.h, as_x86_vec.h).
 │                            #   Three have no .c of theirs:
 │                            #   as_arm.h, the interface of the five ARM and AArch64 files; as_arm_int.h,
 │                            #   what those share among themselves; as_strmap.h, a table from names to
@@ -134,7 +133,7 @@ Deployment: Linked directly into the single `as` binary
 
 Name: Architecture-specific instruction encoders and relocation helpers
 
-Description: ISA families are split into dedicated files such as `as_x86_vec.c`, `as_x86_vex.c`, `as_arm.c`, and `as_a64.c`. The parser remains mostly architecture-agnostic and hands normalized instruction/data requests into the active encoder backend.
+Description: ISA families are split into dedicated files such as `as_x86_vec.c`, `as_arm.c`, and `as_a64.c`. The parser remains mostly architecture-agnostic and hands normalized instruction/data requests into the active encoder backend.
 
 **ARM and AArch64: the decision.** The two back ends are completed, not removed (2026-10-11). There were seventeen files, `as_arm_*.c` and `as_a64_*.c`, that nothing called and that were fixtures: a table of one fixed word for a mnemonic, whatever its operands. They are gone, and five files written in their place that read the operands. Run as `arm-as` or `aarch64-as`, or with `--target`, the assembler writes an `EM_ARM` or an `EM_AARCH64` object.
 

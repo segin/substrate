@@ -15,7 +15,6 @@
 #include "as_cfi.h"
 #include "as_dwline.h"
 #include "as_x86_vec.h"
-#include "as_x86_vex.h"
 #include "as_data.h"
 #include "as_strmap.h"
 #include "as_util.h"

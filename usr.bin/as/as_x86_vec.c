@@ -1325,6 +1325,15 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
             return -1;
         }
     }
+    /* (And a byte after that, which SSE4a's extrq and insertq have: the
+     * index after the length, which AT&T writes before it.) */
+    {
+        const as_x86_operand_t *second = role_op(t, rq, '1');
+
+        if (second != NULL && put8(&tc, (unsigned)second->u.imm & 0xffu) != 0) {
+            return -1;
+        }
+    }
 
     /*
      * APX's general registers, %r16 to %r31: the fifth bit of one in
@@ -1547,6 +1556,12 @@ static int row_refuses(const as_x86_vec_tmpl_t *t, const as_x86_vec_req_t *rq, i
         }
         if (rq->mode == 64u && rq->level < 3u) {
             *why = needs_v3;
+            return 1;
+        }
+        /* (The instructions of the mask registers are AVX-512's, with a
+         * VEX prefix: held to the level the others of it are.) */
+        if (rq->mode == 64u && rq->level < 4u && strpbrk(t->ops, "kK") != NULL) {
+            *why = "requires -march=x86-64-v4 or higher";
             return 1;
         }
         return 0;
