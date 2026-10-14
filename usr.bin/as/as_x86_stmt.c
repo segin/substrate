@@ -5028,12 +5028,142 @@ unsigned x86_branch_hint(const as_stmt_t *st) {
                : 0u;
 }
 
+/*
+ * The bytes of a branch to a place, but for its distance, by its name,
+ * the code's size and whether it may be short: one of two bytes'
+ * distance and one of four.  A branch is encoded for each round of the
+ * layout and again for the text, and each time it is the same bytes
+ * with another distance in them.  Kept only for the branch as most are
+ * written -- a label, no prefix, no segment -- in 32- or 64-bit code,
+ * and only as the encoder wrote it: the distance last.
+ */
+#define BRANCH_MEMO_SLOTS 256u
+
+static int emit_resolved_x86_branch_full(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
+                                         long long abs_target, int allow_short, unsigned char *code,
+                                         size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz);
+
+typedef struct {
+    char mn[16];
+    unsigned char bits;
+    unsigned char may_short;
+    unsigned char have[2]; /* [0] the short form, [1] the near */
+    unsigned char len[2];
+    unsigned char code[2][16];
+} branch_memo_t;
+
+static branch_memo_t branch_memo[BRANCH_MEMO_SLOTS];
+
+static branch_memo_t *branch_memo_slot(const as_stmt_t *st, unsigned bits, int may_short, int make) {
+    const as_instruction_t *in = &st->u.instr;
+    const char *mn = in->mnemonic;
+    unsigned long h = 5381ul;
+    size_t n;
+    branch_memo_t *m;
+
+    if (bits == 16u || mn == NULL || in->operand_count != 1 || in->operands[0].kind != AS_OPERAND_LABEL_REF ||
+        in->prefixes != 0 || in->pseudo != 0 || in->rex_bits != 0 || in->segment_override != NULL ||
+        in->have_dfv || in->from_intel || in->syntax_intel || (n = strlen(mn)) >= sizeof(m->mn)) {
+        return NULL;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        h = h * 33ul + (unsigned char)mn[i];
+    }
+    h = h * 33ul + bits + (may_short ? 1u : 0u);
+    m = &branch_memo[h % BRANCH_MEMO_SLOTS];
+    if (m->bits == bits && m->may_short == (may_short != 0) && memcmp(m->mn, mn, n + 1) == 0) {
+        return m;
+    }
+    if (!make) {
+        return NULL;
+    }
+    memset(m, 0, sizeof(*m));
+    memcpy(m->mn, mn, n + 1);
+    m->bits = (unsigned char)bits;
+    m->may_short = may_short != 0;
+    return m;
+}
+
+/* The bytes of form `k` with the distance to `target` in them, if it
+ * holds it: 1, and the field said; 0 if it does not. */
+static int branch_memo_put(const branch_memo_t *m, int k, const as_stmt_t *st, uint64_t sec_off,
+                           long long target, unsigned char *code, size_t code_cap, size_t *code_len) {
+    size_t len = m->len[k];
+    long long d = target - (long long)(sec_off + len);
+    unsigned w = k == 0 ? 1u : 4u;
+    as_x86_fields_t f;
+    unsigned i;
+
+    if (!m->have[k] || len > code_cap || (k == 0 ? (d < -128 || d > 127) : (d < INT32_MIN || d > INT32_MAX))) {
+        return 0;
+    }
+    memcpy(code, m->code[k], len);
+    for (i = 0; i < w; ++i) {
+        code[len - w + i] = (unsigned char)((unsigned long long)d >> (8u * i));
+    }
+    *code_len = len;
+    memset(&f, 0, sizeof(f));
+    f.n = 1;
+    f.f[0].expr = st->u.instr.operands[0].u.expr;
+    f.f[0].off = (unsigned char)(len - w);
+    f.f[0].width = (unsigned char)w;
+    f.f[0].kind = AS_X86_FIELD_REL;
+    x86_stmt_fields_put(&f);
+    return 1;
+}
+
 int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
                                        long long abs_target, int allow_short, unsigned char *code, size_t code_cap,
                                        size_t *code_len, char *encerr, size_t encerr_sz) {
+    unsigned bits;
+    branch_memo_t *memo;
+
     if (cfg == NULL || st == NULL || code == NULL || code_len == NULL) {
         return -1;
     }
+    *code_len = 0;
+    bits = cfg->is_64 ? 64u : cfg->x86_code_bits;
+    memo = branch_memo_slot(st, bits, allow_short, 0);
+    if (memo != NULL) {
+        /* The short form where it may be and reaches; the near where the
+         * short may not be, or is known and does not reach. */
+        if ((allow_short || !memo->have[1]) &&
+            branch_memo_put(memo, 0, st, sec_off, abs_target, code, code_cap, code_len)) {
+            return 0;
+        }
+        if ((!allow_short || memo->have[0]) &&
+            branch_memo_put(memo, 1, st, sec_off, abs_target, code, code_cap, code_len)) {
+            return 0;
+        }
+    }
+    if (emit_resolved_x86_branch_full(cfg, st, sec_off, abs_target, allow_short, code, code_cap, code_len, encerr,
+                                      encerr_sz) != 0) {
+        return -1;
+    }
+    /* Kept as written: one field, the distance, last, of one byte or of
+     * four, and the distance it holds the one asked for. */
+    {
+        const as_x86_fields_t *f = &x86_fields;
+        size_t len = *code_len;
+        unsigned w = f->n == 1 ? f->f[0].width : 0u;
+
+        if (f->n == 1 && f->f[0].kind == AS_X86_FIELD_REL && f->f[0].flags == 0 && (w == 1u || w == 4u) &&
+            f->f[0].off + w == len && len <= sizeof(branch_memo[0].code[0]) &&
+            f->f[0].expr == (const void *)st->u.instr.operands[0].u.expr &&
+            (memo = branch_memo_slot(st, bits, allow_short, 1)) != NULL) {
+            int k = w == 1u ? 0 : 1;
+
+            memcpy(memo->code[k], code, len);
+            memo->len[k] = (unsigned char)len;
+            memo->have[k] = 1;
+        }
+    }
+    return 0;
+}
+
+static int emit_resolved_x86_branch_full(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
+                                         long long abs_target, int allow_short, unsigned char *code,
+                                         size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     *code_len = 0;
     if (x86_stmt_refused(cfg, st, encerr, encerr_sz)) {
         return -1;
