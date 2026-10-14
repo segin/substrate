@@ -7140,6 +7140,8 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
     size_t member_count = 0;
     size_t member_cap = 0;
     size_t mi = 0;
+    /* where the next undesignated element goes: after the last one written */
+    size_t next_pos = 0;
     if (p->tok.kind != TOK_LBRACE) {
         return parse_assign(p);
     }
@@ -7293,6 +7295,7 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                     list->args[k] = cur;
                 }
             }
+            next_pos = (size_t)hi + 1;
             if (member_names != NULL) {
                 for (mi = 0; mi < member_count; ++mi) {
                     free(member_names[mi]);
@@ -7308,11 +7311,19 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                 free_expr(list);
                 return NULL;
             }
-            if (push_arg(list, item) != 0) {
+            /*
+             * After [4] = a, [1] = b, the next element is [2] (C11
+             * 6.7.9p17): it can land on one already written.
+             */
+            if (next_pos < list->arg_count) {
+                free_expr(list->args[next_pos]);
+                list->args[next_pos] = item;
+            } else if (push_arg(list, item) != 0) {
                 free_expr(item);
                 free_expr(list);
                 return NULL;
             }
+            next_pos++;
         }
         if (p->tok.kind != TOK_COMMA) {
             break;

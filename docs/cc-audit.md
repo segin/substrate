@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 9 | 1 |
+| 4. ABI and other code generation | 9 | 2 |
 | 5. Driver and predefined macros | 2 | 0 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. Documentation | 1 | 0 |
@@ -131,9 +131,10 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   were pointer arithmetic: the integer was scaled by 4.  Sema took the
   subscript's `*(t + i)` for `(*fp)(...)` and stripped one pointer level
   too many.  *Reproduced* (all modes).  `codegen/fnptr_call.c`.
-- [ ] **CC-18** In an array initializer, an element after a designated
+- [x] **CC-18** In an array initializer, an element after a designated
   one shall go to the next index.  `{[4] = 40, [1] = 10, 11}` put 11 at
-  index 5, not 2.  *Reproduced* (all modes).
+  index 5, not 2: an undesignated element was always appended.
+  *Reproduced* (all modes).  `codegen/designated_init.c`.
 - [ ] **CC-19** `sizeof` of a variable-length array shall be its run-time
   size.  It is rejected: "unsupported sizeof operand in lowering".
   *Reproduced.*
@@ -190,4 +191,4 @@ changes as well.  *Suite.*
 
 ---
 
-34 requirements: 12 met, 22 open.
+34 requirements: 13 met, 21 open.
