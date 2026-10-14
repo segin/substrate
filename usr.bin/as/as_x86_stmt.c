@@ -5755,7 +5755,9 @@ int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, ui
         size_t len = (size_t)(op16 != code16) + 1u + (op16 ? 2u : 4u);
         long long disp = abs_target - ((long long)sec_off + (long long)len);
 
-        if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
+        /* (Two bytes of distance are of either sign, as GNU as has it:
+         * a call 0x9000 bytes on in 16-bit code reaches round.) */
+        if ((op16 ? (disp < -65535 || disp > 65535) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
             snprintf(encerr, encerr_sz, "call target out of range");
             return -1;
         }
@@ -5839,7 +5841,10 @@ int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, ui
             }
             len = (size_t)(op16 != code16) + (is_jmp ? 1u : 2u) + (op16 ? 2u : 4u);
             disp = abs_target - ((long long)sec_off + (long long)len);
-            if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
+            /* (Of two bytes it is the low two of the distance, whatever
+             * it is: the instruction pointer of 16 bits goes round, and
+             * GNU as writes `jne` 0x9000 bytes on in 16-bit code.) */
+            if ((!op16 && (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
                 snprintf(encerr, encerr_sz, "%s target out of range", what);
                 return -1;
             }

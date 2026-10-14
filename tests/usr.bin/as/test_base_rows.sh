@@ -43,6 +43,19 @@ is() {
     [ "$got" = "$2" ] || { echo "FAIL --$1 [$3]: $got, not $2"; fail=1; }
 }
 
+# starts MODE BYTES STATEMENT: what it assembles to begins with them.
+starts() {
+    cases=$((cases + 1))
+    printf '%s\n' "$3" > t.s
+    rm -f t.o t.bin
+    if ! "$AS" --"$1" -o t.o t.s > out 2>&1; then
+        echo "FAIL --$1 [$3]: $(tail -1 out)"; fail=1; return
+    fi
+    objcopy -O binary -j .text t.o t.bin
+    got=$(od -An -v -tx1 -N ${#2} t.bin | tr -d ' \n' | cut -c1-${#2})
+    [ "$got" = "$2" ] || { echo "FAIL --$1 [$3]: $got, not $2..."; fail=1; }
+}
+
 # refused MODE STATEMENT: it is no instruction.
 refused() {
     cases=$((cases + 1))
@@ -156,6 +169,24 @@ refused 32 '.code16
 jne 0x14943'
 is 64 0f850000 '.code16
 jne 0x14943'
+# To a label in 16-bit code a jump's two bytes go round, and a call's
+# are of either sign:
+starts 32 0f851000 '.code16
+jne 1f
+.fill 0x10010
+1:'
+starts 32 e80090 '.code16
+call 1f
+.fill 0x9000
+1:'
+refused 32 '.code16
+call 1f
+.fill 0x10010
+1:'
+refused 32 '.code16
+xbegin 1f
+.fill 0x9000
+1:'
 # and the four of the coprocessor that store its state after a wait:
 is 32 9bdd30 'fsave (%eax)'
 is 32 9b2667d93f 'fstcw %es:(%bx)'
