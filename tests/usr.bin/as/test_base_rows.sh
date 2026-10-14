@@ -187,6 +187,29 @@ refused 32 '.code16
 xbegin 1f
 .fill 0x9000
 1:'
+# A branch to a label is the table's too: a prefix that says nothing
+# to it is left out, one that says what it has is refused, and the
+# distance is from the end of all of them:
+is 64 eb00 'jmp 1f
+1:'
+is 64 eb00 'addr32 jmp 1f
+1:'
+is 32 e200 'data16 loop 1f
+1:'
+is 32 66c7f80000 'cs data16 xbegin 1f
+1:'
+is 32 e200 'loopl 1f
+1:'
+is 32 67e200 'loopw 1f
+1:'
+is 64 e2fe '1: loopq 1b'
+refused 64 'addr32 jecxz 1f
+1:'
+refused 32 'data16 callw sym'
+starts 64 673ee27e '.code64
+ds addr32 loop 1f
+.fill 0x7e
+1:'
 # and the four of the coprocessor that store its state after a wait:
 is 32 9bdd30 'fsave (%eax)'
 is 32 9b2667d93f 'fstcw %es:(%bx)'

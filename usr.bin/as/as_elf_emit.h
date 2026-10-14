@@ -84,6 +84,12 @@ typedef struct {
     unsigned x86_rel_is_disp;
     unsigned have_current_text_offset;
     uint64_t current_text_offset;
+    /* A branch whose place layout has found: where it goes in the
+     * section, and whether its short form may be taken.  See
+     * emit_resolved_x86_branch_ex(). */
+    unsigned x86_branch_resolved;
+    unsigned x86_branch_may_short;
+    long long x86_branch_target;
     /* Where warnings are counted; NULL to write each as it arises. */
     as_elf_warnings_t *warnings;
     /*

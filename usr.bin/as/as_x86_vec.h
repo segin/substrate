@@ -202,12 +202,15 @@ typedef struct {
      * known it is the place, and the distance is from the end of the
      * instruction; otherwise it is what a relocation is added to.
      * `force_near` asks for the form with the full displacement
-     * though a byte would do.
+     * though a byte would do.  `resolved` says the place is a label
+     * whose distance is final: no relocation follows, and what the
+     * bytes cannot hold is refused as GNU as refuses it.
      */
     int rel_is_disp;
     int has_offset;
     uint64_t offset;
     int force_near;
+    int resolved;
     /*
      * The prefixes the statement has besides the instruction's own:
      * written, or asked for by its operands.  The emitter writes them

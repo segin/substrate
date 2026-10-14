@@ -5,6 +5,7 @@
 #include "as_x86_regs.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -846,6 +847,18 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
     size_t start = ctx->at;
     unsigned near_bytes;
     unsigned k;
+    as_x86_vec_req_t heard = *rq;
+
+    /* (What a prefix written says nothing to is not written, as GNU as
+     * has it: the size of an operand before `loop` and its like, whose
+     * counter is the address's size, and the size of an address before
+     * any other jump or call.) */
+    if (short_only) {
+        heard.pfx_66 = 0;
+    } else {
+        heard.pfx_67 = 0;
+    }
+    rq = &heard;
 
     /* (The distance is from the end of the instruction, its prefixes
      * and all: `ds jne 1f` is three bytes, and `callw` with the operand
@@ -854,19 +867,37 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
         int other = ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
                     ((t->flags & AS_VEC_F_OP32) != 0 && rq->mode != 32u);
 
+        /* (One whose counter is of the other size has the prefix for
+         * its own, and has no third size to be: `addr32 jecxz` in
+         * 64-bit code.) */
+        if (other && rq->pfx_67 != 0) {
+            vec_err(ctx, "'%s' has the address-size prefix already", t->name);
+            return -1;
+        }
         if (put_prefixes_of(ctx, rq, other, 0, 1) != 0) {
             return -1;
         }
         pre = (long long)(ctx->at - start);
         disp = rq->rel_is_disp || !rq->has_offset ? target : target - ((long long)rq->offset + pre + 2);
         if (disp < -128 || disp > 127) {
-            vec_err(ctx, "'%s' goes no further than a byte says, and its target is not so near", t->name);
+            if (rq->resolved) {
+                vec_err(ctx, "'%s' has only a one-byte displacement, and its target is %lld bytes away", t->name,
+                        disp);
+            } else {
+                vec_err(ctx, "'%s' goes no further than a byte says, and its target is not so near", t->name);
+            }
             return -1;
         }
         if (put8(ctx, t->opcode) != 0 || put8(ctx, (unsigned)disp & 0xffu) != 0) {
             return -1;
         }
         return 0;
+    }
+    /* (And a `w` outside 16-bit code has the operand size's for its
+     * own: `data16 callw` is refused, as GNU as refuses it.) */
+    if ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u && rq->pfx_66 != 0) {
+        vec_err(ctx, "'%s' has the operand-size prefix already", t->name);
+        return -1;
     }
     if (put_prefixes_of(ctx, rq, 0,
                         ((t->flags & AS_VEC_F_OP16) != 0 && rq->mode != 16u) ||
@@ -902,7 +933,15 @@ static int emit_branch(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_
                : target - ((long long)rq->offset + pre + (long long)(opcode_len + near_bytes));
     /* (Whether two bytes hold it is the relocation's to say, which it
      * is to a number or a symbol: in an ELF64 object the record has the
-     * distance, and `.code16; jne 0x14943` is one.) */
+     * distance, and `.code16; jne 0x14943` is one.  To a label it is
+     * GNU as's rule: a jump's two bytes go round, as the instruction
+     * pointer of 16 bits does, and a call's are of either sign.) */
+    if (rq->resolved && ((near_bytes == 2u && t->opcode == 0xe8u && (disp < -65535 || disp > 65535)) ||
+                         (near_bytes == 4u && (disp < INT32_MIN || disp > INT32_MAX)))) {
+        vec_err(ctx, "%s target out of range",
+                t->opcode == 0xe8u ? "call" : opcode_len == 2u ? "conditional branch" : "jump");
+        return -1;
+    }
     if ((opcode_len == 2u && put8(ctx, 0x0fu) != 0) || put8(ctx, t->opcode) != 0) {
         return -1;
     }
@@ -948,19 +987,35 @@ static int emit_row(vec_ctx_t *ctx, const as_x86_vec_tmpl_t *t, const as_x86_vec
     /* xbegin (role `X`): its opcode, the row's second byte, and where
      * the transaction goes if it is abandoned, in two bytes or four by
      * the code's size or the other that data16 says.  From the end of
-     * the instruction in 64-bit code, where its place is known; else
-     * as written, for the relocation. */
+     * the instruction in 64-bit code, where its place is known, and to
+     * a label whose place layout has found; else as written, for the
+     * relocation. */
     if (rm == NULL && t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 && role_op(t, rq, 'X') != NULL) {
         const as_x86_operand_t *to = role_op(t, rq, 'X');
         unsigned bytes = (rq->mode == 16u) != (rq->pfx_66 != 0) ? 2u : 4u;
         long long disp = (long long)to->u.rel;
+        size_t start = ctx->at;
+        as_x86_vec_req_t heard = *rq;
         unsigned k;
 
-        if (rq->mode == 64u && !rq->rel_is_disp && rq->has_offset) {
-            disp -= (long long)rq->offset + 2 + bytes;
+        /* (A segment or an address size written before it says nothing
+         * to it, and GNU as leaves it out: `cs data16 xbegin` is 66 C7
+         * F8.) */
+        heard.pfx_seg = 0;
+        heard.pfx_67 = 0;
+        if (put_prefixes(ctx, &heard, 0, 0) != 0) {
+            return -1;
         }
-        /* (Whether the bytes hold it is the relocation's to say.) */
-        if (put_prefixes(ctx, rq, 0, 0) != 0 || put8(ctx, t->opcode) != 0 || put8(ctx, t->disp8_n) != 0) {
+        if ((rq->mode == 64u || rq->resolved) && !rq->rel_is_disp && rq->has_offset) {
+            disp -= (long long)rq->offset + (long long)(ctx->at - start) + 2 + bytes;
+        }
+        /* (Whether the bytes hold it is the relocation's to say; to a
+         * label, they are signed, as GNU as has them.) */
+        if (rq->resolved && (bytes == 2u ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX))) {
+            vec_err(ctx, "xbegin target out of range");
+            return -1;
+        }
+        if (put8(ctx, t->opcode) != 0 || put8(ctx, t->disp8_n) != 0) {
             return -1;
         }
         for (k = 0; k < bytes; ++k) {

@@ -3003,6 +3003,18 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
         }
         rq.force_near = x86_branch_is_near(insn, suffix);
     }
+    /* (A branch whose place layout has found is to that place, of the
+     * form layout chose.) */
+    if (cfg->x86_branch_resolved) {
+        rq.resolved = 1;
+        rq.has_offset = 1;
+        rq.force_near = !cfg->x86_branch_may_short;
+        for (i = 0; i < n; ++i) {
+            if (ops[i].kind == AS_X86_OP_REL) {
+                ops[i].u.rel = (int32_t)cfg->x86_branch_target;
+            }
+        }
+    }
     rq.have_dfv = (unsigned char)insn->have_dfv;
     rq.dfv = (unsigned char)insn->dfv;
     rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
@@ -3012,6 +3024,14 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
     {
         int rc = as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
 
+        /* (A branch to a place is asked again below with its prefixes,
+         * which its distance counts; what it is without them is no
+         * answer, and a distance a byte holds only once they are
+         * counted is not refused here.) */
+        if (rc < 0 && rq.resolved) {
+            *code_len = 0;
+            rc = 1;
+        }
         if (rc <= 0) {
             return rc;
         }
@@ -3191,7 +3211,7 @@ static int encode_x86_vec_rows(const as_elf_cfg_t *cfg, const as_instruction_t *
      * and in GNU's order: it is asked again, with them. */
     rq.pfx_seg = x86_segment_byte(insn);
     rq.pfx_67 |= x86_umonitor_inside ? 1u : 0u;
-    if (rq.pfx_seg != 0 || rq.pfx_67 != 0 || rq.pfx_66 != 0 || rq.pfx_hle != 0 || rq.pfx_lock != 0 ||
+    if (rq.resolved || rq.pfx_seg != 0 || rq.pfx_67 != 0 || rq.pfx_66 != 0 || rq.pfx_hle != 0 || rq.pfx_lock != 0 ||
         rq.pfx_rep != 0) {
         int rc = as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
 
@@ -5082,6 +5102,11 @@ int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *s
 
                 long long number;
 
+                /* (A `w` outside 16-bit code is the prefix already.) */
+                if (letter == 'w' && !code16 && (st->u.instr.prefixes & AS_PREFIX_DATA16) != 0) {
+                    snprintf(encerr, encerr_sz, "'%s' has the operand-size prefix already", st->u.instr.mnemonic);
+                    return -1;
+                }
                 letter = x86_branch_size_letter(st, letter, cfg->is_64 ? 64u : cfg->x86_code_bits);
                 op16 = letter == 'w' || (code16 && letter != 'l');
                 /* (To a number, which is no place in this object, the
@@ -5706,166 +5731,12 @@ unsigned x86_branch_hint(const as_stmt_t *st) {
 int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
                                        long long abs_target, int allow_short, unsigned char *code, size_t code_cap,
                                        size_t *code_len, char *encerr, size_t encerr_sz) {
-    char mnbuf[32];
-    char suffix = '\0';
-    unsigned cc = 0;
-    long long disp8;
-
-    if (cfg == NULL || st == NULL || code == NULL || code_len == NULL ||
-        normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
+    if (cfg == NULL || st == NULL || code == NULL || code_len == NULL) {
         return -1;
     }
     *code_len = 0;
     if (x86_stmt_refused(cfg, st, encerr, encerr_sz)) {
         return -1;
-    }
-    /* The hint, and the jump after it: an address-size prefix the jump
-     * has of its own (`jcxz`) goes before the hint, as GNU as has it. */
-    if (x86_branch_hint(st)) {
-        as_stmt_t plain = *st;
-        size_t pos = 0;
-        size_t n;
-
-        plain.u.instr.prefixes &= ~AS_PREFIX_SEG_OVERRIDE;
-        plain.u.instr.segment_override = NULL;
-        if (code_cap < 2 ||
-            emit_resolved_x86_branch_ex(cfg, &plain, sec_off + 1, abs_target, allow_short, code + 1, code_cap - 1, &n,
-                                        encerr, encerr_sz) != 0) {
-            return -1;
-        }
-        while (pos + 1 < n && (code[pos + 1] == 0x67 || code[pos + 1] == 0x66)) {
-            code[pos] = code[pos + 1];
-            pos++;
-        }
-        if (emit_seg_override_byte(code, code_cap, &pos, st->u.instr.segment_override) != 0) {
-            return -1;
-        }
-        *code_len = n + 1;
-        return 0;
-    }
-    suffix = x86_branch_size_letter(st, suffix, cfg->is_64 ? 64u : cfg->x86_code_bits);
-    if (streq_ci(mnbuf, "call")) {
-        /* A call of 16 bits -- `callw`, or `call` in 16-bit code -- has
-         * two bytes for its distance and pushes two; where that is not
-         * the mode's own size the prefix says so.  Each was the 32-bit
-         * call whatever was written. */
-        int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
-        int op16 = suffix == 'w' || (code16 && suffix != 'l');
-        size_t n = 0;
-        size_t len = (size_t)(op16 != code16) + 1u + (op16 ? 2u : 4u);
-        long long disp = abs_target - ((long long)sec_off + (long long)len);
-
-        /* (Two bytes of distance are of either sign, as GNU as has it:
-         * a call 0x9000 bytes on in 16-bit code reaches round.) */
-        if ((op16 ? (disp < -65535 || disp > 65535) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
-            snprintf(encerr, encerr_sz, "call target out of range");
-            return -1;
-        }
-        if (op16 != code16) {
-            code[n++] = 0x66;
-        }
-        code[n++] = 0xe8;
-        code[n++] = (unsigned char)((uint32_t)disp & 0xffu);
-        code[n++] = (unsigned char)(((uint32_t)disp >> 8) & 0xffu);
-        if (!op16) {
-            code[n++] = (unsigned char)(((uint32_t)disp >> 16) & 0xffu);
-            code[n++] = (unsigned char)(((uint32_t)disp >> 24) & 0xffu);
-        }
-        *code_len = n;
-        return 0;
-    }
-    if (streq_ci(mnbuf, "xbegin")) {
-        /* Where a transaction goes if it is abandoned: a distance of
-         * the mode's size from the instruction's end.  (No branch that
-         * could be resolved, it was said to be, in either mode.) */
-        /* (data16 makes it the other size, and is the byte before it.) */
-        int data16 = (st->u.instr.prefixes & AS_PREFIX_DATA16) != 0;
-        int op16 = (!cfg->is_64 && cfg->x86_code_bits == 16u) != data16;
-        size_t len = (op16 ? 4u : 6u) + (data16 ? 1u : 0u);
-        long long disp = abs_target - ((long long)sec_off + (long long)len);
-        size_t n = 0;
-
-        if ((op16 ? (disp < -32768 || disp > 32767) : (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
-            snprintf(encerr, encerr_sz, "xbegin target out of range");
-            return -1;
-        }
-        if (data16) {
-            code[n++] = 0x66;
-        }
-        code[n++] = 0xc7;
-        code[n++] = 0xf8;
-        code[n++] = (unsigned char)((uint32_t)disp & 0xffu);
-        code[n++] = (unsigned char)(((uint32_t)disp >> 8) & 0xffu);
-        if (!op16) {
-            code[n++] = (unsigned char)(((uint32_t)disp >> 16) & 0xffu);
-            code[n++] = (unsigned char)(((uint32_t)disp >> 24) & 0xffu);
-        }
-        *code_len = n;
-        return 0;
-    }
-    {
-        int is_jmp = streq_ci(mnbuf, "jmp");
-
-        if (is_jmp || x86_cond_code(mnbuf, &cc) == 0) {
-            /*
-             * A jump: one byte of distance where that reaches, and
-             * where it does not, two or four by the size it is of --
-             * the code's, or the one a `w`, an `l` or `data16` gives
-             * it, behind the prefix.  (The size written was not asked:
-             * `data16 jmp` to a label was `jmp`.)
-             */
-            const char *what = is_jmp ? "jump" : "conditional branch";
-            int code16 = !cfg->is_64 && cfg->x86_code_bits == 16u;
-            int op16 = suffix == 'w' || (code16 && suffix != 'l');
-            size_t pre = x86_branch_flip16(st) ? 1u : 0u;
-            size_t n = 0;
-            size_t len;
-            long long disp;
-
-            disp8 = abs_target - ((long long)sec_off + 2 + (long long)pre);
-            if (allow_short && disp8 >= -128 && disp8 <= 127) {
-                if (code_cap < 2 + pre) {
-                    return -1;
-                }
-                if (pre) {
-                    code[n++] = 0x66;
-                }
-                code[n++] = is_jmp ? 0xeb : (unsigned char)(0x70u | cc);
-                code[n++] = (unsigned char)(signed char)disp8;
-                *code_len = n;
-                return 0;
-            }
-            if (is_jmp && suffix == 'b') {
-                snprintf(encerr, encerr_sz, "jump target out of range");
-                return -1;
-            }
-            len = (size_t)(op16 != code16) + (is_jmp ? 1u : 2u) + (op16 ? 2u : 4u);
-            disp = abs_target - ((long long)sec_off + (long long)len);
-            /* (Of two bytes it is the low two of the distance, whatever
-             * it is: the instruction pointer of 16 bits goes round, and
-             * GNU as writes `jne` 0x9000 bytes on in 16-bit code.) */
-            if ((!op16 && (disp < INT32_MIN || disp > INT32_MAX)) || code_cap < len) {
-                snprintf(encerr, encerr_sz, "%s target out of range", what);
-                return -1;
-            }
-            if (op16 != code16) {
-                code[n++] = 0x66;
-            }
-            if (is_jmp) {
-                code[n++] = 0xe9;
-            } else {
-                code[n++] = 0x0f;
-                code[n++] = (unsigned char)(0x80u | cc);
-            }
-            code[n++] = (unsigned char)((uint32_t)disp & 0xffu);
-            code[n++] = (unsigned char)(((uint32_t)disp >> 8) & 0xffu);
-            if (!op16) {
-                code[n++] = (unsigned char)(((uint32_t)disp >> 16) & 0xffu);
-                code[n++] = (unsigned char)(((uint32_t)disp >> 24) & 0xffu);
-            }
-            *code_len = n;
-            return 0;
-        }
     }
     {
         int need67 = 0;
@@ -5881,36 +5752,35 @@ int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, ui
         /* The address-size prefix, written: it is what the instruction
          * counts in, and `addr16 loop` was `loop`.  One that has the
          * prefix for its own has no other register to count in. */
-        if (kind == 0 && (st->u.instr.prefixes & AS_PREFIX_ADDR16) != 0) {
-            if (need67) {
-                snprintf(encerr, encerr_sz, "'%s' has the address-size prefix already", st->u.instr.mnemonic);
-                return -1;
-            }
-            need67 = 1;
-        }
-        if (kind == 0) {
-            size_t len = need67 ? 3u : 2u;
-
-            disp8 = abs_target - ((long long)sec_off + (long long)len);
-            if (disp8 < -128 || disp8 > 127) {
-                snprintf(encerr, encerr_sz, "'%s' has only a one-byte displacement, and its target is %lld bytes away",
-                         st->u.instr.mnemonic, disp8);
-                return -1;
-            }
-            if (code_cap < len) {
-                return -1;
-            }
-            if (need67) {
-                code[0] = 0x67;
-            }
-            code[len - 2] = opcode;
-            code[len - 1] = (unsigned char)(signed char)disp8;
-            *code_len = len;
-            return 0;
+        if (kind == 0 && need67 && (st->u.instr.prefixes & AS_PREFIX_ADDR16) != 0) {
+            snprintf(encerr, encerr_sz, "'%s' has the address-size prefix already", st->u.instr.mnemonic);
+            return -1;
         }
     }
-    snprintf(encerr, encerr_sz, "'%s' is not a branch this assembler can resolve", st->u.instr.mnemonic);
-    return -1;
+    /*
+     * The bytes are the table's, as every instruction's are: the row of
+     * the name, with the place layout found and the form it chose, and
+     * the prefixes in GNU's order -- the sizes, then a segment that is a
+     * hint of which way the jump goes.
+     */
+    {
+        as_elf_cfg_t at = *cfg;
+        int rc;
+
+        at.x86_branch_resolved = 1u;
+        at.x86_branch_may_short = allow_short != 0;
+        at.x86_branch_target = abs_target;
+        at.have_current_text_offset = 1u;
+        at.current_text_offset = sec_off;
+        rc = encode_x86_vec(&at, &st->u.instr, code, code_cap, code_len, encerr, encerr_sz);
+        if (rc == 1) {
+            return 0;
+        }
+        if (rc == 0) {
+            snprintf(encerr, encerr_sz, "'%s' is not a branch this assembler can resolve", st->u.instr.mnemonic);
+        }
+        return -1;
+    }
 }
 
 int x86_got_load_kind(const unsigned char *code, size_t len) {
