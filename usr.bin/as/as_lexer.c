@@ -65,6 +65,16 @@ void as_token_vec_free(as_token_vec_t *v) {
     memset(v, 0, sizeof(*v));
 }
 
+/* Empty of its tokens, keeping the room and the files for the next. */
+static void as_token_vec_clear(as_token_vec_t *v) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        as_token_free(&v->items[i]);
+    }
+    v->count = 0;
+}
+
 static char *as_token_vec_intern_file(as_token_vec_t *v, const char *file) {
     char **next;
     char *copy;
@@ -73,8 +83,14 @@ static char *as_token_vec_intern_file(as_token_vec_t *v, const char *file) {
     if (v == NULL || file == NULL) {
         return NULL;
     }
+    /* (Asked for every token, and most often of the file the last one
+     * was of, or of the copy given back then.) */
+    if (v->file_count > 0 &&
+        (v->files[v->file_count - 1] == file || strcmp(v->files[v->file_count - 1], file) == 0)) {
+        return v->files[v->file_count - 1];
+    }
     for (i = 0; i < v->file_count; ++i) {
-        if (strcmp(v->files[i], file) == 0) {
+        if (v->files[i] == file || strcmp(v->files[i], file) == 0) {
             return v->files[i];
         }
     }
@@ -1224,7 +1240,10 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
     unsigned tok_line = 0;
     int spliced;
     int in_block_comment = 0;
+    /* (One line's tokens, the room for which is kept from line to line.) */
+    as_token_vec_t line_tokens;
 
+    as_token_vec_init(&line_tokens);
     if (ctx == NULL || name == NULL || file_buf == NULL) {
         free(file_buf);
         return -1;
@@ -1254,7 +1273,6 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
     }
 
     while (pos < file_len) {
-        as_token_vec_t line_tokens;
         char *sanitized;
         char *line = file_buf + pos;
         size_t end = pos;
@@ -1299,11 +1317,13 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
         }
         if (spliced && source_map_add(tok_line, name, line_no) != 0) {
             set_err(ctx, "%s:%u: out of memory", name, line_no);
+            as_token_vec_free(&line_tokens);
             free(file_buf);
             return -1;
         }
         if (marked && source_map_add(tok_line, user_file, user_line) != 0) {
             set_err(ctx, "%s:%u: out of memory", tok_path, tok_line);
+            as_token_vec_free(&line_tokens);
             free(file_buf);
             return -1;
         }
@@ -1311,12 +1331,13 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
         sanitized = strip_comments(line, &in_block_comment);
         if (sanitized == NULL) {
             set_err(ctx, "%s:%u: out of memory", tok_path, tok_line);
+            as_token_vec_free(&line_tokens);
             free(file_buf);
             return -1;
         }
         trim_trailing(sanitized);
 
-        as_token_vec_init(&line_tokens);
+        as_token_vec_clear(&line_tokens);
         if (tokenize_line(tok_path, tok_line, sanitized, ctx->cfg != NULL ? ctx->cfg->intel_syntax : 0, &line_tokens, ctx) != 0) {
             free(sanitized);
             as_token_vec_free(&line_tokens);
@@ -1397,11 +1418,12 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
             free(inc);
         }
 
-        as_token_vec_free(&line_tokens);
+        as_token_vec_clear(&line_tokens);
         file_buf[end] = saved;
         pos = saved == '\n' ? end + 1 : end;
     }
 
+    as_token_vec_free(&line_tokens);
     free(file_buf);
 
     free(ctx->include_stack[ctx->include_stack_count - 1]);

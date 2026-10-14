@@ -490,6 +490,14 @@ static int intel_mem_size_bits(const char *s) {
     if (s == NULL) {
         return 0;
     }
+    /* (Asked of every operand's first word, in AT&T's syntax too: by
+     * the first letter, which most words are not one of these by.) */
+    switch (s[0] | 0x20) {
+    case 'b': case 'w': case 'd': case 'q': case 'm': case 'f': case 't': case 'o': case 'x': case 'y': case 'z':
+        break;
+    default:
+        return 0;
+    }
     if (streq_ci(s, "byte")) {
         return 8;
     }

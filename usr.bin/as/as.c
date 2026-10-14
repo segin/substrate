@@ -2368,8 +2368,13 @@ static int expand_split_statement(as_text_t *out, gas_macro_vec_t *macros, const
     as_scan_t scan;
     int split = 0;
 
+    /* (A line with no `;` in it at all, which is most, is one statement
+     * and need not be read for where its comments and strings are.) */
+    if (line == NULL || strchr(line, ';') == NULL) {
+        return -2;
+    }
     memset(&scan, 0, sizeof(scan));
-    for (i = 0; line != NULL && line[i] != '\0'; ++i) {
+    for (i = 0; line[i] != '\0'; ++i) {
         char ch = line[i];
         size_t more;
         int kind = as_scan_step(&scan, line, i, &more);
@@ -3509,6 +3514,16 @@ static int cond_step(cond_state_t *cs, const char *line, unsigned at) {
     while (!once++) {
         const char *d = line_start_directive(line);
 
+        /* (Every directive of these begins `.i` or `.e`; a line that does
+         * not -- most often an instruction -- is asked of none of the
+         * eighteen.) */
+        if (d == NULL || d[0] != '.' || (d[1] != 'i' && d[1] != 'e')) {
+            if (active && cond_syms_note_line(known_syms, line) != 0) {
+                snprintf(cs->err, sizeof(cs->err), "out of memory");
+                goto out;
+            }
+            continue;
+        }
         if (line_starts_with_directive(d, ".ifdef") || line_starts_with_directive(d, ".ifndef")) {
             gas_cond_frame_t *f;
             int is_ifndef = line_starts_with_directive(d, ".ifndef");
