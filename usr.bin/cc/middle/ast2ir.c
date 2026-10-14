@@ -3107,30 +3107,19 @@ static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int l
     return in.dst;
 }
 
+/*
+ * One 8-byte constant.  Building it as hi << 32 | lo does not work on
+ * i386, where the pieces are 32-bit values and a shift by 32 shifts by 0.
+ */
 static int emit_const_u64_instr(cc_ssa_function_t *sf, unsigned long long v, cc_diag_t *diag) {
-    unsigned long lo_u = (unsigned long)(v & 0xffffffffULL);
-    unsigned long hi_u = (unsigned long)((v >> 32) & 0xffffffffULL);
-    int lo;
-    int hi;
-    int c32;
+    int c = emit_const_i64_instr(sf, (long long)v);
 
-    lo = emit_const_i64_instr(sf, (long)lo_u);
-    if (lo < 0) {
+    if (c < 0) {
+        set_diag(diag, "out of memory lowering 64-bit constant");
         return -1;
     }
-    if (hi_u == 0) {
-        return lo;
-    }
-    hi = emit_const_i64_instr(sf, (long)hi_u);
-    c32 = emit_const_i64_instr(sf, 32);
-    if (hi < 0 || c32 < 0) {
-        return -1;
-    }
-    hi = emit_i64_binop_instr(sf, CC_SSA_SHL, hi, c32, 0, diag);
-    if (hi < 0) {
-        return -1;
-    }
-    return emit_i64_binop_instr(sf, CC_SSA_OR, hi, lo, 0, diag);
+    set_value_size(sf, c, 8);
+    return c;
 }
 
 static int emit_bitfield_mask(cc_ssa_function_t *sf, int width, cc_diag_t *diag) {

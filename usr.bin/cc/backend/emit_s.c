@@ -5410,8 +5410,9 @@ static void emit_i386_const_f64(FILE *fp, const slot_layout_t *lay, int dst, dou
     fprintf(fp, "\tmovl $0x%x, %d(%%ebp)\n", hi, slot_off(lay, dst) + 4);
 }
 
-static void emit_i386_const_i32(FILE *fp, const int_reg_state_t *ist, int rd, long imm) {
-    fprintf(fp, "\tmovl $%ld, %s\n", imm, ist->regs[rd]);
+static void emit_i386_const_i32(FILE *fp, const int_reg_state_t *ist, int rd, long long imm) {
+    /* the low word; a 64-bit constant's high word goes to its slot separately */
+    fprintf(fp, "\tmovl $%ld, %s\n", (long)(int)(unsigned int)imm, ist->regs[rd]);
 }
 
 static void emit_i386_mov_fp(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int use_x87_fp) {
