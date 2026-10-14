@@ -1052,6 +1052,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-301** The clean-up of `as_elf_emit_file` shall be written once.
   Trace: AS-DES-003.  Verify: I.
   Done: the two copies of what `as_elf_emit_file` frees, one for each way out, are one, reached by both.
+- [ ] **AS-T-302** An object of more than 65,279 sections shall be written with ELF's extended section numbering, as GNU as writes it.
+  Trace: AS-PERF-001.  Verify: T — 66,000 `.section .text.fN` each with a global symbol: the object is written, `readelf -S` and `readelf -s` agree with GNU's (`e_shnum` 0 and the count in section 0's `sh_size`, `e_shstrndx` `SHN_XINDEX` with the index in its `sh_link`, an `SHT_SYMTAB_SHNDX` section for symbols of an index past `SHN_LORESERVE`), and the linker reads it back.  After: none.
+  Found by the timing of AS-T-228: at 66,000 sections the output is refused, "invalid ELF format".  elfobj keeps a symbol's section as 16 bits (`elf_symbol_set_shndx`, `struct elf_symbol`), in its interface as well, which the linker, `nm`, `size` and `ar` use too.
 
 ## I. The x86 extensions
 
@@ -1379,5 +1382,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-356 tasks: 351 done, 5 open.  Numbers run to 400, with gaps left between
+357 tasks: 351 done, 6 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
