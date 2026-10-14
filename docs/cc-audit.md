@@ -264,10 +264,11 @@ they stand.  *Reproduced* unless marked.
   `../../usr.bin/cc/cc` from `tests/usr.bin/cc`, which does not exist,
   and ignored the failure (`|| true`), so it passed without testing
   anything.  It now runs the tree's cc and fails if cc cannot be run.
-- [ ] **CC-44** `run_pp_fuzz_smoke.sh` shall fail when cc crashes on its
-  input, and keep the input that made it.  It ignores every result
-  (`|| true`), including SIGSEGV, and its input comes from
-  `/dev/urandom` and is discarded.
+- [x] **CC-44** `run_pp_fuzz_smoke.sh` shall fail when cc crashes on its
+  input, and keep the input that made it.  It ignored every result
+  (`|| true`), including SIGSEGV, and its input came from
+  `/dev/urandom` and was discarded.  Inputs now come from fixed seeds,
+  a signal or a hang fails the test, and the input is kept.
 - [ ] **CC-45** If `test_ast2ir.c` does not build, then the suite shall
   fail.  Its build ends in `|| true`, and the next command runs
   `./test_ast2ir_bin` -- a stale binary from an earlier run passes.
