@@ -54,3 +54,4 @@ native_bad_c99_return_void_value.c|-std=c99|void function returning a value
 native_bad_c99_return_missing_value.c|-std=c99|non-void function must return a value
 native_bad_c99_variadic_too_few.c|-std=c99|variadic call to takes_fixed has 0 args but needs at least 1
 native_bad_c99_pragma_stdc_bad.c|-std=c99|invalid #pragma STDC state
+native_gnu_sizeof_void.c|-pedantic-errors|error: invalid application of 'sizeof' to a void type

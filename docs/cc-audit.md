@@ -40,10 +40,10 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 2 | 2 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 10 | 6 |
+| 4. ABI and other code generation | 12 | 6 |
 | 5. Driver and predefined macros | 3 | 1 |
 | 6. The restored suite's failing commands | 10 | 0 |
-| 7. The restored suite itself | 12 | 4 |
+| 7. The restored suite itself | 12 | 5 |
 | 8. Documentation | 1 | 0 |
 
 The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
@@ -167,6 +167,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   those, so it loads from the function's code and calls that: SIGSEGV.
   `pf(...)` works.  The type system does not record which pointer
   levels belong to a function declarator.  *Reproduced* (all modes).
+- [ ] **CC-49** A GNU C nested function shall be able to use the
+  enclosing function's locals.  `int x = 3; int inner(int y) { return
+  x + y; }` gives "use of undeclared identifier: x"; gcc accepts it
+  (and needs a trampoline when `inner`'s address escapes).  The suite
+  had a test requiring the rejection; it is removed.  *Reproduced.*
+- [ ] **CC-50** `sizeof` shall take an abstract function declarator:
+  `sizeof(int(void))` (gcc: 1, with a `-Wpointer-arith` warning) gives
+  "expected ')' after sizeof type".  *Reproduced.*
 
 ## 5. Driver and predefined macros
 
@@ -258,7 +266,7 @@ they stand.  *Reproduced* unless marked.
   live in `negative/CASES.txt` with the diagnostic each must give,
   checked by `run_negative.sh`, which also fails on a signal; three more
   grep their log in the Makefile.  The other five are CC-42.
-- [ ] **CC-42** A negative test shall expect rejection only of invalid
+- [x] **CC-42** A negative test shall expect rejection only of invalid
   code.  Five expect cc to reject valid code:
   `native_bad_gnu_nested_capture.c` (GNU C allows a nested function to
   use the enclosing locals; gcc accepts it), `native_bad_sizeof_void.c`
@@ -272,7 +280,10 @@ they stand.  *Reproduced* unless marked.
   tests (renamed), and cc accepts old-style definitions in every mode,
   as gcc does, while implicit `int` -- which the old-style switch also
   governed -- is allowed only in C89 modes, as gcc 14 and later have
-  it.  Left: `sizeof(void)`, nested functions.
+  it.  `sizeof(void)` is 1, as in gcc, with a `-pedantic` warning
+  (`native_gnu_sizeof_void.c`, which also checks the error under
+  `-pedantic-errors`).  The nested-function test is removed: cc does
+  not implement what it tested, and that is CC-49.
 - [x] **CC-43** `run_pp_cmd_injection_test.sh` shall run cc.  It ran
   `../../usr.bin/cc/cc` from `tests/usr.bin/cc`, which does not exist,
   and ignored the failure (`|| true`), so it passed without testing
@@ -304,4 +315,4 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-48 requirements: 22 met, 26 open.
+50 requirements: 23 met, 27 open.

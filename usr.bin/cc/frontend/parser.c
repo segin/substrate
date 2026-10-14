@@ -4392,6 +4392,11 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
                     return 0;
                 }
             }
+            if (e->lhs == NULL && st == CC_TYPE_VOID && e->aux_struct_id < 0 && e->array_ndim <= 0) {
+                /* sizeof(void) is 1, as gcc has it */
+                out->bits = parser_const_mask_bits(p, 1u, out->type, out->struct_id);
+                return 0;
+            }
             sz = parser_type_size_bytes(p, st, e->aux_struct_id);
             if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && e->aux_struct_id >= 0))) {
                 out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);

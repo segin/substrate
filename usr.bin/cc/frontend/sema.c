@@ -2044,6 +2044,15 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     return elem_size * count;
 }
 
+/* sizeof(type): as gcc, sizeof(void) is 1 */
+static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
+                              const long array_dims[CC_MAX_ARRAY_DIMS]) {
+    if (t == CC_TYPE_VOID && struct_id < 0 && array_ndim <= 0) {
+        return 1;
+    }
+    return array_type_size_bytes(tu, t, struct_id, array_ndim, array_dims);
+}
+
 static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
     long long a;
     long long b;
@@ -2262,7 +2271,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
                 *out = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
             }
         } else {
-            *out = array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+            *out = sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
         }
         return *out < 0 ? -1 : 0;
 
@@ -4029,8 +4038,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         } else {
-            if (array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims) < 0) {
+            if (sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims) < 0) {
                 set_diag(diag, "sizeof unsupported for this type");
+                return -1;
+            }
+            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0 && e->array_ndim <= 0 &&
+                emit_warning(diag, e->line, e->col, "invalid application of 'sizeof' to a void type", 1) != 0) {
                 return -1;
             }
         }
