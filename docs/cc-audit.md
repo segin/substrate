@@ -38,7 +38,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | Area | Requirements | Met |
 |---|---|---|
 | 1. Integer arithmetic and conversions | 8 | 8 |
-| 2. Programs on substrate | 2 | 2 |
+| 2. Programs on substrate | 3 | 2 |
 | 3. Tests | 2 | 1 |
 | 4. ABI and other code generation | 12 | 6 |
 | 5. Driver and predefined macros | 3 | 1 |
@@ -100,6 +100,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [x] **CC-10** The compiler shall build with `-Wall -Wextra -Werror`
   under the host's GCC (16).  Two warnings stopped the native build.
   `1f7c066f2`.
+- [ ] **CC-51** The compiler shall compile itself correctly.  It
+  compiles every one of its sources without an error, but a cc built
+  that way aborts (`free(): invalid pointer`) on its first program, at
+  -O0 as at -O1.  Swapping one cc-built object at a time into a
+  gcc-built cc: `frontend/parser.c`, `frontend/sema.c`,
+  `middle/ast2ir.c` and `backend/emit_s.c` each break it.  Step 0 of
+  `usr.bin/cc/docs/refactor-plan.md`.  *Reproduced.*
 
 ## 3. Tests
 
@@ -315,4 +322,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-50 requirements: 23 met, 27 open.
+51 requirements: 23 met, 28 open.
+
+The structural refactor and the target-neutral IR are planned in
+`usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
