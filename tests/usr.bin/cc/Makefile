@@ -766,7 +766,7 @@ test:
 	grep -q "addsd" /tmp/cc_native_double_dbg.s
 	grep -q "mulsd" /tmp/cc_native_double_dbg.s
 	$(TOP)/usr.bin/cc/cc -Wall -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond.o 2>/tmp/cc_native_warn_assign_cond.log
-	grep -q "warning: assignment used as condition in if" /tmp/cc_native_warn_assign_cond.log
+	grep -q "^native_warn_assign_cond.c:3:2: warning: assignment used as condition in if" /tmp/cc_native_warn_assign_cond.log
 	! $(TOP)/usr.bin/cc/cc -Wall -Werror -c native_warn_assign_cond.c -o /tmp/cc_native_warn_assign_cond_werror.o 2>/tmp/cc_native_warn_assign_cond_werror.log
 	grep -q "error: assignment used as condition in if" /tmp/cc_native_warn_assign_cond_werror.log
 	$(TOP)/usr.bin/cc/cc -std=c99 -pedantic -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic.o 2>/tmp/cc_native_c99_computed_goto_pedantic.log

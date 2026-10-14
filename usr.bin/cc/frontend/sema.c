@@ -165,6 +165,17 @@ static void set_diag_context(size_t line, size_t col) {
     g_diag_ctx_col = col;
 }
 
+/* "file:line:col: warning: msg", naming the file as errors do */
+static void print_warning(const cc_diag_t *diag, size_t line, size_t col, const char *msg) {
+    const char *where = (diag != NULL && diag->path[0] != '\0') ? diag->path : "cc";
+
+    if (line != 0) {
+        fprintf(stderr, "%s:%zu:%zu: warning: %s\n", where, line, col, msg);
+    } else {
+        fprintf(stderr, "%s: warning: %s\n", where, msg);
+    }
+}
+
 static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg, int pedantic_only) {
     int as_error = g_warn_error || (pedantic_only && g_pedantic_errors);
 
@@ -181,11 +192,7 @@ static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *ms
         col = g_diag_ctx_col;
     }
 
-    if (line != 0) {
-        fprintf(stderr, "cc:%zu:%zu: warning: %s\n", line, col, msg);
-    } else {
-        fprintf(stderr, "cc: warning: %s\n", msg);
-    }
+    print_warning(diag, line, col, msg);
 
     if (!as_error) {
         return 0;
@@ -204,11 +211,7 @@ static int emit_required_warning(cc_diag_t *diag, size_t line, size_t col, const
         line = g_diag_ctx_line;
         col = g_diag_ctx_col;
     }
-    if (line != 0) {
-        fprintf(stderr, "cc:%zu:%zu: warning: %s\n", line, col, msg);
-    } else {
-        fprintf(stderr, "cc: warning: %s\n", msg);
-    }
+    print_warning(diag, line, col, msg);
     if (!g_warn_error) {
         return 0;
     }
