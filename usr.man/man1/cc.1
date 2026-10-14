@@ -80,6 +80,9 @@ and
 or
 .Pa /sbin/ld64.so
 as the program's interpreter.
+A 64-bit program is linked as a position-independent executable; a
+32-bit one is not, as the i386 code generator writes position-dependent
+code.
 .It Fl g
 Emit debug information.
 .It Fl Wall , Fl Werror

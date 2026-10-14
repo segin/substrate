@@ -1961,7 +1961,11 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     libm_path[0] = '\0';
     libgcc[0] = '\0';
     (void)gcc_print_libgcc(o->target, libgcc);
-    argv[at++] = "-pie";
+    /* The i386 backend's code is position-dependent (no GOT-relative
+     * addressing), so an i386 program is a non-PIE executable; as a PIE
+     * its absolute addresses would be text relocations ld.so cannot
+     * apply.  x86-64 code is RIP-relative and links as a PIE. */
+    argv[at++] = o->target == CC_TARGET_I386 ? "-no-pie" : "-pie";
     argv[at++] = "-dynamic-linker";
     argv[at++] = o->target == CC_TARGET_I386 ? CC_SUBSTRATE_LDSO32
                                              : CC_SUBSTRATE_LDSO64;
