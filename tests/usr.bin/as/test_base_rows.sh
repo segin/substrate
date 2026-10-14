@@ -99,6 +99,34 @@ is 32 0f94c0 '{store} sete %al'
 is 32 66f0830001 'lock addw $1, (%eax)'
 is 32 f2f00fba2801 'xacquire lock btsl $1, (%eax)'
 refused 32 'lock btsl $1, %eax'
+# nor is one taken before what is no row of the table and is assembled
+# after it: a lock there was written, once the check was thought the
+# table's alone.
+refused 32 'lock extrq %xmm1, %xmm2'
+refused 32 'lock xbegin 0x10'
+refused 64 'lock xbegin 0x10'
+refused 64 'lock rex.w'
+# the instructions that wait for an event: the time's registers may be
+# written and are in no byte, and umonitor's register is an address,
+# with the prefix that says so where it is not of the code's size.
+is 32 660faef3 'tpause %ebx, %edx, %eax'
+is 64 f20faef1 'umwait %ecx, %edx, %eax'
+refused 32 'tpause %ebx, %eax, %edx'
+is 32 67f30faef0 'umonitor %ax'
+is 32 f30faef0 '.code16
+umonitor %ax'
+is 32 67f30faef0 '.code16
+umonitor %eax'
+is 64 67f3410faef2 'umonitor %r10d'
+refused 64 'umonitor %ax'
+# PadLock's names with a hyphen, and a repeat written before one:
+is 32 f30fa7c8 'xcrypt-ecb'
+is 64 f30fa7d0 'rep xcrypt-cbc'
+# and the four of the coprocessor that store its state after a wait:
+is 32 9bdd30 'fsave (%eax)'
+is 32 9b2667d93f 'fstcw %es:(%bx)'
+is 64 9bdfe0 'fstsw %ax'
+is 32 9bd930 'fstenv (%eax)'
 # `{disp8}` before an address of 16-bit registers with no displacement
 # is one of nothing, and `{disp32}` asks for what such an address lacks:
 is 32 114f00 '.code16
