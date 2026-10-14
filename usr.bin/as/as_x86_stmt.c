@@ -496,6 +496,7 @@ static struct {
     struct mn_facts **items;
     size_t count;
     size_t cap;
+    struct mn_facts *last; /* the facts last asked for */
 } mn_memo;
 
 /*
@@ -559,8 +560,14 @@ static struct mn_facts *mn_facts_of(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return NULL;
     }
+    /* (A statement asks of its own name several times: the facts last
+     * found are kept, and asked again are not looked up.) */
+    if (mn_memo.last != NULL && strcmp(mn_memo.last->key, mn) == 0) {
+        return mn_memo.last;
+    }
     if (as_strmap_get(&mn_memo.by_name, mn, &at)) {
-        return mn_memo.items[at];
+        mn_memo.last = mn_memo.items[at];
+        return mn_memo.last;
     }
     if (strlen(mn) >= sizeof(f->base)) {
         return NULL;
@@ -3081,212 +3088,12 @@ int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *encerr,
     }
     direct = in->operand_count == 1 &&
              (in->operands[0].kind == AS_OPERAND_LABEL_REF || in->operands[0].kind == AS_OPERAND_IMMEDIATE);
-    /*
-     * The string instructions of four bytes are `insl`, `stosl`: the
-     * names with a `d` are Intel's, and Intel's `d` is made the `l`
-     * where a statement is Intel's (encode_x86_stmt()).  They were
-     * taken in AT&T syntax too.  And a count of bits is of no byte:
-     * `popcntb` was taken in 32-bit code.
-     */
-    {
-        static const char *const intel[] = {"insd", "outsd", "lodsd", "stosd", "scasd"};
-        size_t mlen = strlen(in->mnemonic);
-
-        /* (Each of them ends in `d`.) */
-        for (i = 0; mlen > 0 && (in->mnemonic[mlen - 1] | 0x20) == 'd' && i < sizeof(intel) / sizeof(intel[0]); ++i) {
-            if (strcasecmp(in->mnemonic, intel[i]) == 0) {
-                snprintf(encerr, encerr_sz, "unsupported %smnemonic: %s", cfg->is_64 ? "x86_64 " : "", in->mnemonic);
-                return 1;
-            }
-        }
-        if (suffix == 'b' &&
-            (as_strcmp(base, "popcnt") == 0 || as_strcmp(base, "lzcnt") == 0 || as_strcmp(base, "tzcnt") == 0)) {
-            snprintf(encerr, encerr_sz, "'%s' does not take these operands", in->mnemonic);
-            return 1;
-        }
-    }
-    /* A repeat prefix goes before no instruction of the x87; and
-     * xacquire and xrelease before one that is locked, or an exchange
-     * with memory, or (xrelease) a store.  In 32-bit code several
-     * emitters took either before anything. */
-    if ((in->prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE | AS_PREFIX_REPNE)) != 0) {
-        if ((in->prefixes & AS_PREFIX_HLE) == 0) {
-            if (base[0] == 'f' && as_strcmp(base, "femms") != 0) {
-                snprintf(encerr, encerr_sz, "'%s' is not an instruction a repeat prefix goes before", in->mnemonic);
-                return 1;
-            }
-        } else if ((in->prefixes & AS_PREFIX_LOCK) == 0 && as_strcmp(base, "xchg") != 0 &&
-                   !(as_strcmp(base, "mov") == 0 && (in->prefixes & AS_PREFIX_REP) != 0)) {
-            snprintf(encerr, encerr_sz, "'%s' is not locked, and %s goes before an instruction that is", in->mnemonic,
-                     (in->prefixes & AS_PREFIX_REPNE) != 0 ? "xacquire" : "xrelease");
-            return 1;
-        }
-    }
     /* A jump to a label is of the code's size, and has no letter to
      * say another; nor has a call one for 32 bits in 64-bit code. */
     if (direct && suffix != '\0' && suffix != 'b' &&
         (as_strcmp(base, "jmp") == 0 || (as_strcmp(base, "call") == 0 && cfg->is_64 && suffix == 'l'))) {
         snprintf(encerr, encerr_sz, "'%s' to a label takes no size: it is '%s'", in->mnemonic, base);
         return 1;
-    }
-    /* A segment is 16 bits, and so is where a far jump of 16 goes. */
-    if (in->operand_count == 2 && (as_strcmp(base, "ljmp") == 0 || as_strcmp(base, "lcall") == 0) &&
-        in->operands[0].kind == AS_OPERAND_IMMEDIATE && in->operands[1].kind == AS_OPERAND_IMMEDIATE) {
-        long long v;
-
-        /* (Intel's `segment:offset` is kept with the offset first.) */
-        if (eval_expr_const(in->operands[in->syntax_intel ? 1 : 0].u.expr, &v) == 0 && (v < -32768 || v > 65535)) {
-            snprintf(encerr, encerr_sz, "segment %lld is not of 16 bits", v);
-            return 1;
-        }
-        if ((suffix == 'w' || (bits == 16u && suffix != 'l')) && eval_expr_const(in->operands[in->syntax_intel ? 0 : 1].u.expr, &v) == 0 &&
-            (v < -32768 || v > 65535)) {
-            snprintf(encerr, encerr_sz, "offset %lld is not of 16 bits", v);
-            return 1;
-        }
-    }
-    /* What `stos` stores is the accumulator, of the size it stores. */
-    if (in->operand_count == 2 && as_strcmp(base, "stos") == 0) {
-        const as_operand_t *src = &in->operands[in->syntax_intel ? 1 : 0];
-        const as_x86_reg_info_t *r = src->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(src->u.reg) : NULL;
-        unsigned want = suffix == 'b' ? 8u : suffix == 'w' ? 16u : suffix == 'l' ? 32u : suffix == 'q' ? 64u : 0u;
-
-        if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL &&
-            ((as_strcmp(r->name, "al") != 0 && as_strcmp(r->name, "ax") != 0 && as_strcmp(r->name, "eax") != 0 &&
-              as_strcmp(r->name, "rax") != 0) ||
-             (want != 0 && r->width != want))) {
-            snprintf(encerr, encerr_sz, "'%s' stores the accumulator, and %%%s is not it", in->mnemonic, r->name);
-            return 1;
-        }
-    }
-    /*
-     * A string instruction's operands, if it is written with any, are
-     * the addresses it works through and the accumulator: `stos %eax`,
-     * `lods $1`, `cmps %eax`, `scasl $1, %eax`, `xlat %eax` were each
-     * the instruction with no operand, whatever was written.  The names
-     * that end in `d` are Intel's, and take none here (but `movsd` and
-     * `cmpsd` of vector registers are other instructions).
-     */
-    if (!in->syntax_intel && in->operand_count != 0) {
-        static const char *const fam[] = {"movs", "cmps", "scas", "lods", "stos", "xlat"};
-        const char *mn = in->mnemonic;
-        size_t len = strlen(mn);
-        size_t f;
-        int vec = 0;
-
-        for (i = 0; i < in->operand_count; ++i) {
-            const as_x86_reg_info_t *r =
-                in->operands[i].kind == AS_OPERAND_REGISTER ? as_x86_reg_find(in->operands[i].u.reg) : NULL;
-
-            vec |= r != NULL && r->cls != AS_X86_REGCLASS_GENERAL && r->cls != AS_X86_REGCLASS_X87;
-        }
-        for (f = 0; f < sizeof(fam) / sizeof(fam[0]); ++f) {
-            size_t fl = strlen(fam[f]);
-            char tail = len == fl + 1 ? (char)tolower((unsigned char)mn[fl]) : '\0';
-
-            if (vec && f < 2 && tail == 'd') {
-                continue;
-            }
-            /* (`movsb %al, %ebx` is the widening move by its older
-             * spelling: x86_old_spelling().) */
-            if (f == 0 && in->operand_count == 2 && in->operands[1].kind == AS_OPERAND_REGISTER) {
-                continue;
-            }
-            const as_operand_t *a0 = &in->operands[0];
-            const as_operand_t *a1 = in->operand_count > 1 ? &in->operands[1] : NULL;
-            const as_x86_reg_info_t *acc = NULL;
-            int ok;
-
-            if (strncasecmp(mn, fam[f], fl) != 0 || (len != fl && (len != fl + 1 || strchr("bwlqd", tail) == NULL))) {
-                continue;
-            }
-            if (f == 5) {
-                ok = (len == fl || tail == 'b') && in->operand_count == 1 && a0->kind == AS_OPERAND_MEMORY;
-            } else if (tail == 'd') {
-                ok = 0;
-            } else if (in->operand_count == 1) {
-                ok = f >= 2 && a0->kind == AS_OPERAND_MEMORY;
-            } else if (in->operand_count == 2 && f < 2) {
-                ok = a0->kind == AS_OPERAND_MEMORY && a1->kind == AS_OPERAND_MEMORY;
-            } else if (in->operand_count == 2) {
-                const as_operand_t *reg = f == 4 ? a0 : a1;
-                const as_operand_t *mem = f == 4 ? a1 : a0;
-
-                acc = reg->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(reg->u.reg) : NULL;
-                ok = mem->kind == AS_OPERAND_MEMORY && acc != NULL && acc->cls == AS_X86_REGCLASS_GENERAL &&
-                     (as_strcmp(acc->name, "al") == 0 || as_strcmp(acc->name, "ax") == 0 || as_strcmp(acc->name, "eax") == 0 ||
-                      as_strcmp(acc->name, "rax") == 0);
-            } else {
-                ok = 0;
-            }
-            if (!ok) {
-                snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
-                return 1;
-            }
-        }
-    }
-    /* What counts down and jumps goes to a place, not a number; the
-     * tables of descriptors and the saved state are in memory; and what
-     * is widened is a byte or a word, as its letter says. */
-    if (!in->syntax_intel && in->operand_count >= 1) {
-        const as_operand_t *a0 = &in->operands[0];
-        const as_x86_reg_info_t *r0 = a0->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(a0->u.reg) : NULL;
-        const char *mn = in->mnemonic;
-        int wrong = 0;
-
-        if (in->operand_count == 1 && a0->raw != NULL && a0->raw[0] == '$' &&
-            (is_fixed_short_rel_mnemonic(mn) || strcasecmp(mn, "retfd") == 0 ||
-             (cfg->is_64 && strcasecmp(mn, "retl") == 0))) {
-            wrong = 1;
-        }
-        if (r0 != NULL && in->operand_count == 1 &&
-            (strncasecmp(mn, "lgdt", 4) == 0 || strncasecmp(mn, "lidt", 4) == 0 || strncasecmp(mn, "sgdt", 4) == 0 ||
-             strncasecmp(mn, "sidt", 4) == 0 || strncasecmp(mn, "xsavec", 6) == 0 || strncasecmp(mn, "xsaves", 6) == 0)) {
-            wrong = 1;
-        }
-        if (r0 != NULL && r0->cls == AS_X86_REGCLASS_GENERAL && in->operand_count == 2 &&
-            ((strcasecmp(mn, "movsxb") == 0 && r0->width != 8) || (strcasecmp(mn, "movsxw") == 0 && r0->width != 16))) {
-            wrong = 1;
-        }
-        if (in->operand_count == 2 && as_strcmp(base, "movabs") == 0 && a0->kind == AS_OPERAND_IMMEDIATE &&
-            a0->raw != NULL && a0->raw[0] == '$' && in->operands[1].kind == AS_OPERAND_REGISTER) {
-            const as_x86_reg_info_t *r1 = as_x86_reg_find(in->operands[1].u.reg);
-
-            wrong |= r1 != NULL && r1->cls == AS_X86_REGCLASS_GENERAL && r1->width != 64;
-        }
-        if (wrong) {
-            snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
-            return 1;
-        }
-    }
-    /* A move to or from an address of 64 bits is the accumulator's and
-     * no other register's: `movabs sym, %r8` was `movabs $sym, %r8`,
-     * which loads the address and not what is at it. */
-    if (in->operand_count == 2 && !in->syntax_intel && as_strcmp(base, "movabs") == 0) {
-        for (i = 0; i < 2; ++i) {
-            const as_operand_t *at = &in->operands[i];
-            const as_operand_t *other = &in->operands[1 - i];
-            const as_x86_reg_info_t *r = other->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(other->u.reg) : NULL;
-
-            if ((at->kind == AS_OPERAND_MEMORY || operand_is_bare_address(at)) && r != NULL &&
-                as_strcmp(r->name, "al") != 0 && as_strcmp(r->name, "ax") != 0 && as_strcmp(r->name, "eax") != 0 &&
-                as_strcmp(r->name, "rax") != 0) {
-                snprintf(encerr, encerr_sz, "'movabs' moves between an address and the accumulator, and %%%s is not it",
-                         r->name);
-                return 1;
-            }
-        }
-    }
-    /* `movsxd` widens 32 bits. */
-    if (in->operand_count == 2 && as_strcmp(base, "movsxd") == 0) {
-        const as_operand_t *src = &in->operands[in->syntax_intel ? 1 : 0];
-        const as_x86_reg_info_t *r = src->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(src->u.reg) : NULL;
-
-        if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL && r->width != 32) {
-            snprintf(encerr, encerr_sz, "'movsxd' widens a register of 32 bits, and %%%s is of %u", r->name,
-                     (unsigned)r->width);
-            return 1;
-        }
     }
     /* A segment's prefix by its name. */
     if ((in->prefixes & AS_PREFIX_SEG_OVERRIDE) != 0 && in->segment_override != NULL) {
@@ -3298,7 +3105,10 @@ int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *encerr,
             /* (Where a string instruction stores is through %es and no
              * other, and writing that is no second segment: `ds stos
              * %ax, %es:(%di)`.) */
+            /* (The same one twice is one, as GNU as has it: `fs fildl
+             * %fs:(%eax)`.) */
             if (in->operands[i].kind == AS_OPERAND_MEMORY && in->operands[i].u.mem.segment_reg != NULL &&
+                !streq_ci(in->operands[i].u.mem.segment_reg, in->segment_override) &&
                 !x86_is_string_destination(in->mnemonic, &in->operands[i].u.mem)) {
                 snprintf(encerr, encerr_sz, "a segment is written before '%s' and another in its address",
                          in->mnemonic);
@@ -3309,19 +3119,6 @@ int x86_stmt_refused(const as_elf_cfg_t *cfg, const as_stmt_t *st, char *encerr,
     for (i = 0; i < in->operand_count; ++i) {
         const as_operand_t *op = &in->operands[i];
 
-        /* The address-size prefix, and an address of the size it says
-         * the address is not. */
-        if ((in->prefixes & AS_PREFIX_ADDR16) != 0 && op->kind == AS_OPERAND_MEMORY) {
-            const as_x86_reg_info_t *b = op->u.mem.base_reg != NULL ? as_x86_reg_find(op->u.mem.base_reg) : NULL;
-            const as_x86_reg_info_t *x = op->u.mem.index_reg != NULL ? as_x86_reg_find(op->u.mem.index_reg) : NULL;
-
-            if ((b != NULL && b->cls == AS_X86_REGCLASS_GENERAL && b->width == bits) ||
-                (x != NULL && x->cls == AS_X86_REGCLASS_GENERAL && x->width == bits)) {
-                snprintf(encerr, encerr_sz, "'%s' has an address-size prefix, and an address of %u bits", in->mnemonic,
-                         bits);
-                return 1;
-            }
-        }
         /* In 64-bit code a place in a table or a block is a signed
          * number: it is no part of an address that `lea` puts in a
          * register of 32 bits, nor a number of 32 that is not widened. */
@@ -3649,9 +3446,10 @@ static int x86_old_spelling(const as_elf_cfg_t *cfg, const as_stmt_t *st, as_stm
         }
     }
     /* A string through the port, of the size the port's register is
-     * not: 32 bits unless a letter says. */
+     * not: the code's own unless a letter says -- 32 bits, and 16 in
+     * 16-bit code (where it was 32 bits, `66 6f`, and GNU as's is 6f). */
     if (nops == 2 && (as_strcmp(low, "ins") == 0 || as_strcmp(low, "outs") == 0)) {
-        snprintf(name, name_sz, "%sl", low);
+        snprintf(name, name_sz, "%s%c", low, !cfg->is_64 && cfg->x86_code_bits == 16u ? 'w' : 'l');
         return 1;
     }
     if (nops == 0 && as_strcmp(low, "sysretl") == 0 && !cfg->is_64) {

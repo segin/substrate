@@ -13,7 +13,10 @@
 # 16 bits, and `crc32w` had one and read 32.  `addr32` in 32-bit code,
 # a jump to a label with a size letter, `es` before an instruction of
 # 64-bit code, `stosb %bl, %es:(%edi)` and `movsxd %ax, %bx` were
-# assembled, and GNU as refuses each.
+# assembled, and GNU as refuses each.  A segment written before an
+# instruction and again in its address (`fs fildl %fs:(%eax)`) was
+# refused as two; and `outs` and `ins` with their operands written and
+# no letter were of 32 bits in 16-bit code, `66 6f`, where GNU's is 6f.
 #
 # prefix_forms.txt holds what GNU as 2.47 makes of each statement: the
 # bytes of .text, and the type, place and symbol of each relocation; or

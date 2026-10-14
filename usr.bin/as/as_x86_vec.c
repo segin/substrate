@@ -112,22 +112,47 @@ static int first_row_made;
  * with first_row, and never let go. */
 static size_t *next_row;
 
+/* Of a name, by its first row: whether its rows are all its forms
+ * (AS_VEC_LEGACY_WHOLE), and the counts of operands its rows of general
+ * registers take, a bit for each.  Asked of every statement, and once
+ * answered by going through all the name's rows. */
+static unsigned char *name_whole;
+static uint32_t *name_base_ops;
+
 /* The first row of a name; the rows of one name stand together. */
 static int find_rows(const char *name, size_t *first) {
     if (!first_row_made) {
         size_t i;
+        size_t first_row_of_last = 0;
 
         next_row = (size_t *)malloc(as_x86_vec_table_count * sizeof(*next_row));
-        if (next_row == NULL) {
+        name_whole = (unsigned char *)calloc(as_x86_vec_table_count, sizeof(*name_whole));
+        name_base_ops = (uint32_t *)calloc(as_x86_vec_table_count, sizeof(*name_base_ops));
+        if (next_row == NULL || name_whole == NULL || name_base_ops == NULL) {
             return -1;
         }
         for (i = 0; i < as_x86_vec_table_count; ++i) {
-            size_t was;
+            const as_x86_vec_tmpl_t *t = &as_x86_vec_table[i];
+            size_t ops = strlen(t->ops);
+            size_t was = i;
 
             next_row[i] = as_x86_vec_table_count;
-            if (!as_strmap_get(&first_row, as_x86_vec_table[i].name, &was) &&
-                as_strmap_put(&first_row, as_x86_vec_table[i].name, i) != 0) {
-                return -1;
+            /* (A row of the name before it is a run of it, and is its
+             * first row's: looked up only where it begins one.) */
+            if (i > 0 && strcmp(as_x86_vec_table[i - 1].name, t->name) == 0) {
+                was = first_row_of_last;
+            } else if (!as_strmap_get(&first_row, t->name, &was)) {
+                was = i;
+                if (as_strmap_put(&first_row, t->name, i) != 0) {
+                    return -1;
+                }
+            }
+            first_row_of_last = was;
+            if (t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 && t->bcst == AS_VEC_LEGACY_WHOLE) {
+                name_whole[was] = 1;
+            }
+            if ((t->flags & AS_VEC_F_BASE) != 0 && ops < 32) {
+                name_base_ops[was] |= 1u << ops;
             }
         }
         /* The rows of a name stand together, and where a name has more
@@ -148,7 +173,27 @@ static int find_rows(const char *name, size_t *first) {
         }
         first_row_made = 1;
     }
-    return as_strmap_get(&first_row, name, first) ? 0 : -1;
+    /* (A statement asks of its own name several times: the last name
+     * looked up is kept, and asked again is not looked up.) */
+    {
+        static char last[32];
+        static size_t last_first;
+        static int last_found;
+        size_t n = strlen(name);
+
+        if (last[0] != '\0' && memcmp(last, name, n + 1) == 0) {
+            *first = last_first;
+            return last_found ? 0 : -1;
+        }
+        last_found = as_strmap_get(&first_row, name, &last_first);
+        if (n < sizeof(last)) {
+            memcpy(last, name, n + 1);
+        } else {
+            last[0] = '\0';
+        }
+        *first = last_first;
+        return last_found ? 0 : -1;
+    }
 }
 
 /*
@@ -318,12 +363,7 @@ int as_x86_vec_has_base(const char *mnemonic, size_t op_count) {
     if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
         return 0;
     }
-    for (; i < as_x86_vec_table_count; i = next_row[i]) {
-        if ((as_x86_vec_table[i].flags & AS_VEC_F_BASE) != 0 && strlen(as_x86_vec_table[i].ops) == op_count) {
-            return 1;
-        }
-    }
-    return 0;
+    return op_count < 32 && (name_base_ops[i] >> op_count & 1u) != 0;
 }
 
 int as_x86_vec_base_is_whole(const char *mnemonic) {
@@ -332,14 +372,7 @@ int as_x86_vec_base_is_whole(const char *mnemonic) {
     if (mnemonic == NULL || find_rows(mnemonic, &i) != 0) {
         return 0;
     }
-    for (; i < as_x86_vec_table_count; i = next_row[i]) {
-        const as_x86_vec_tmpl_t *t = &as_x86_vec_table[i];
-
-        if (t->enc == AS_VEC_LEGACY && (t->flags & AS_VEC_F_BASE) != 0 && t->bcst == AS_VEC_LEGACY_WHOLE) {
-            return 1;
-        }
-    }
-    return 0;
+    return name_whole[i];
 }
 
 static int is_vector_class(unsigned cls) {
