@@ -244,10 +244,8 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-57** A local multi-dimensional array shall take a brace-nested
   initializer: `int a[2][2] = {{1, 2}, {3, 4}};` inside a function gives
   "initializer list cannot be used as runtime expression in lowering";
-  the flat `{1, 2, 3, 4}` works.  *Reproduced.*  A `static` local
-  multi-dimensional array with any initializer, nested or flat, compiles
-  but the program dies of SIGSEGV: `static int a[3][4] = {1, 2, ...,
-  12};` then reading `a[2][1]` (a one-dimensional static local is fine).
+  the flat `{1, 2, 3, 4}` works.  *Reproduced.*  (A `static` local is a
+  separate, silent failure: CC-60.)
 - [x] **CC-58** sizeof shall give the size of an array of pointers to
   arrays: for a local `int (*rows[2])[4]`, `sizeof rows` was 64 on x86-64
   (gcc: 16) and 32 on i386 (gcc: 8) -- the legacy type encoding sizes it
@@ -269,6 +267,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   record their type; a pointer-to-array member is laid out, read and
   indexed as a pointer.  `codegen/member_declarators.c` checks layout
   and access for twelve member shapes against gcc.
+- [ ] **CC-60** A `static` local multi-dimensional array with an
+  initializer shall hold its initial values.  `static int a[3][4] = {1,
+  2, ..., 12};` inside a function -- the usual way to write a lookup
+  table -- compiles without a diagnostic, and the program dies of
+  SIGSEGV on reading `a[2][1]`; nested braces do the same.  A
+  one-dimensional static local, and a non-static local with flat braces,
+  are fine.  *Reproduced* (both targets; every build of 2026-10-15).  Worse
+  than CC-57's compile error: nothing warns.
 
 ## 5. Driver and predefined macros
 
@@ -414,7 +420,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-59 requirements: 33 met, 26 open.
+60 requirements: 33 met, 27 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
