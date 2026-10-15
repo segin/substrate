@@ -5,8 +5,8 @@ include ../../Makefile.inc
 PROGS = cc cpp ir-verifier ir-normalize ir-diff
 COMMON_SRCS = ir.c parser.c verifier.c serialize.c
 COMMON_OBJS = $(COMMON_SRCS:.c=.o)
-CC_SRCS = cmd/cc.c cmd/pipeline.c \
-	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c \
+CC_SRCS = cmd/cc.c cmd/pipeline.c common/target.c \
+	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c frontend/types.c \
 	  middle/ast2ir.c middle/legalize.c \
 	  middle/passes/opt.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
@@ -21,7 +21,7 @@ BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 CC_HEADERS = include/cc_driver.h include/cc_frontend.h include/cc_ssa.h \
 	     include/cc_backend.h include/cc_mir.h include/cc_pipeline.h \
-	     include/cc_middle.h include/cc_target.h ir.h
+	     include/cc_middle.h include/cc_target.h include/cc_types.h ir.h
 
 ifeq ($(NATIVE_BUILD),1)
     TOOL_CFLAGS = $(CFLAGS) -DCC_NATIVE_BUILD=1

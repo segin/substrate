@@ -10,12 +10,15 @@ usr.bin/cc/
 ├── cmd/
 │   ├── cc.c                 # Driver, tool resolution, stage orchestration, fork/exec glue
 │   └── pipeline.c           # C -> IR -> assembly coordination
+├── common/
+│   └── target.c             # Per-target data layout (psABI sizes and alignments)
 ├── frontend/
 │   ├── preproc.c            # Preprocessor helpers and expansion bounds
 │   ├── lexer.c              # C tokenization
 │   ├── parser.c             # Recursive-descent parser
 │   ├── sema.c               # Type checking and semantic validation
-│   └── builtin.c            # Builtin-function and intrinsic handling
+│   ├── builtin.c            # Builtin-function and intrinsic handling
+│   └── types.c              # Scalar type sizes and alignments, for every phase
 ├── middle/
 │   ├── ast2ir.c             # AST -> SSA lowering
 │   ├── legalize.c           # IR legality checks and normalization
@@ -80,7 +83,7 @@ Deployment: Installed as `usr/bin/cc`; `cpp` is exposed as a symlink to the same
 
 Name: Preprocessor, lexer, parser, and semantic analysis
 
-Description: The frontend turns C translation units into typed ASTs. `frontend/preproc.c` enforces macro-expansion bounds, `frontend/parser.c` owns recursive-descent parsing, and `frontend/sema.c` applies type and language rules before lowering begins.
+Description: The frontend turns C translation units into typed ASTs. `frontend/preproc.c` enforces macro-expansion bounds, `frontend/parser.c` owns recursive-descent parsing, and `frontend/sema.c` applies type and language rules before lowering begins. `frontend/types.c` is the one place the size and alignment of a scalar type are decided, from the target description in `common/target.c` (`cc_target_select()` in the pipeline picks it); structure layout, `sizeof`, `_Alignof`, lowering and the emitter all ask it.
 
 Technologies: C, recursive-descent parsing, bounded macro expansion, semantic diagnostics
 

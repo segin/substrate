@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_types.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -305,7 +306,6 @@ typedef struct {
 } parser_t;
 
 static int next_tok(parser_t *p);
-static long scalar_type_size_bytes(cc_type_t t);
 
 static void set_ptr_depth_diag(parser_t *p, int marker_line) {
     (void)marker_line;
@@ -1154,8 +1154,8 @@ static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
     if (!parser_is_integral_type(a) || !parser_is_integral_type(b)) {
         return CC_TYPE_INT;
     }
-    sa = scalar_type_size_bytes(a);
-    sb = scalar_type_size_bytes(b);
+    sa = cc_type_scalar_size(a);
+    sb = cc_type_scalar_size(b);
     if (sa < 0) sa = 4;
     if (sb < 0) sb = 4;
     if (sa > sb) return a;
@@ -1163,42 +1163,6 @@ static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
     if (parser_is_unsigned_integral_type(a) && !parser_is_unsigned_integral_type(b)) return a;
     if (parser_is_unsigned_integral_type(b) && !parser_is_unsigned_integral_type(a)) return b;
     return a;
-}
-
-static long scalar_type_size_bytes(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_BOOL:
-    case CC_TYPE_CHAR:
-    case CC_TYPE_SCHAR:
-    case CC_TYPE_UCHAR:
-        return 1;
-    case CC_TYPE_SHORT:
-    case CC_TYPE_USHORT:
-        return 2;
-    case CC_TYPE_FLOAT16:
-        return 2;
-    case CC_TYPE_INT:
-    case CC_TYPE_UINT:
-    case CC_TYPE_FLOAT:
-        return 4;
-    case CC_TYPE_LONG:
-    case CC_TYPE_ULONG:
-        return g_parser_pointer_size_bytes;
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
-    case CC_TYPE_DOUBLE:
-        return 8;
-    case CC_TYPE_LDOUBLE:
-        return 16;
-    case CC_TYPE_ENUM:
-        return 4;
-    case CC_TYPE_COMPLEX:
-        return 16;
-    case CC_TYPE_IMAGINARY:
-        return 8;
-    default:
-        return -1;
-    }
 }
 
 static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
@@ -1245,7 +1209,7 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
         }
         return (struct_id + 7) / 8;
     }
-    n = scalar_type_size_bytes(t);
+    n = cc_type_scalar_size(t);
     if (n > 0) {
         return n;
     }
@@ -1255,6 +1219,17 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
     return -1;
 }
 
+/**
+ * Alignment of a type as a structure member and for `_Alignof`.
+ *
+ * @param p          the parser, for its table of structures
+ * @param t          the type
+ * @param struct_id  the structure or union when @p t is one, else -1;
+ *                   for `_Atomic` and `_BitInt` the extra datum those
+ *                   kinds carry in it
+ * @return           the alignment in bytes, or -1 if @p t has none
+ *                   (an incomplete or unknown type)
+ */
 static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_id) {
     long n;
     if (t == CC_TYPE_VOID && struct_id >= 0 && (size_t)struct_id < p->struct_count && p->structs[struct_id].complete) {
@@ -1264,6 +1239,11 @@ static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_i
         }
         return n;
     }
+    n = cc_type_scalar_align(t);
+    if (n > 0) {
+        return n;
+    }
+    /* `_Atomic(T)` and `_BitInt(N)`: aligned as their size, at most a word */
     n = parser_type_size_bytes(p, t, struct_id);
     if (n <= 0) {
         return -1;
@@ -4406,7 +4386,7 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
                 out->bits = parser_const_mask_bits(p, (uint64_t)g_parser_pointer_size_bytes, out->type, out->struct_id);
                 return 0;
             }
-            sz = scalar_type_size_bytes(st);
+            sz = cc_type_scalar_size(st);
             if (sz > 0) {
                 out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);
                 return 0;

@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 #include "cc_ssa.h"
+#include "cc_types.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -550,55 +551,24 @@ static cc_type_t common_integral_type(cc_type_t a, cc_type_t b) {
     return s == CC_TYPE_LONG ? CC_TYPE_ULONG : CC_TYPE_ULONG_LONG;
 }
 
+/**
+ * Size of a type known from its kind alone.
+ *
+ * @param t  the type
+ * @return   the size in bytes of a scalar type; the pointer size for
+ *           `_BitInt`, `_Atomic` and function types, whose real size
+ *           this kind does not carry; -1 for anything else
+ */
 static long type_size_bytes(cc_type_t t) {
-    if (cc_type_is_pointer(t)) {
+    long n = cc_type_scalar_size(t);
+
+    if (n >= 0) {
+        return n;
+    }
+    if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
         return g_pointer_size_bytes;
     }
-    switch (t) {
-    case CC_TYPE_BOOL:
-    case CC_TYPE_CHAR:
-    case CC_TYPE_SCHAR:
-    case CC_TYPE_UCHAR:
-        return 1;
-    case CC_TYPE_SHORT:
-    case CC_TYPE_USHORT:
-        return 2;
-    case CC_TYPE_FLOAT16:
-        return 2;
-    case CC_TYPE_INT:
-    case CC_TYPE_UINT:
-    case CC_TYPE_FLOAT:
-        return 4;
-    case CC_TYPE_LONG:
-    case CC_TYPE_ULONG:
-        return g_pointer_size_bytes;
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
-    case CC_TYPE_DOUBLE:
-        return 8;
-    case CC_TYPE_LDOUBLE:
-        return 16;
-    case CC_TYPE_ENUM:
-        return 4;
-    case CC_TYPE_COMPLEX:
-        return 16;
-    case CC_TYPE_IMAGINARY:
-        return 8;
-    case CC_TYPE_BITINT:
-        return g_pointer_size_bytes;
-    case CC_TYPE_DECIMAL32:
-        return 4;
-    case CC_TYPE_DECIMAL64:
-        return 8;
-    case CC_TYPE_DECIMAL128:
-        return 16;
-    case CC_TYPE_ATOMIC:
-        return g_pointer_size_bytes;
-    case CC_TYPE_FUNC:
-        return g_pointer_size_bytes;
-    default:
-        return -1;
-    }
+    return -1;
 }
 
 static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {

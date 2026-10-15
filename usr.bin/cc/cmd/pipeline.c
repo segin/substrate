@@ -45,6 +45,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         diag->message[0] = '\0';
     }
 
+    cc_target_select(target);
     cc_frontend_set_pointer_size(pointer_size);
     cc_frontend_set_std_mode(std_mode);
     cc_frontend_set_gnu89_inline_mode(gnu89_inline_mode, gnu89_inline_override);

@@ -1,4 +1,5 @@
 #include "cc_backend.h"
+#include "cc_types.h"
 
 #include <float.h>
 #include <stdint.h>
@@ -1447,54 +1448,25 @@ static void emit_lifecycle_attr(FILE *fp, const char *section, const char *secti
     fprintf(fp, "%s %s\n", is_64bit ? ".quad" : ".long", name);
 }
 
+/**
+ * Size of a global object's element type, known from its kind alone.
+ *
+ * @param t             the type
+ * @param pointer_size  the target's pointer size
+ * @return              the size in bytes of a scalar type; the pointer
+ *                      size for `_BitInt`, `_Atomic` and function
+ *                      types; -1 for anything else
+ */
 static long global_type_size_bytes(cc_type_t t, int pointer_size) {
-    if (cc_type_is_pointer(t)) {
+    long n = cc_type_scalar_size(t);
+
+    if (n >= 0) {
+        return n;
+    }
+    if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
         return pointer_size;
     }
-    switch (t) {
-    case CC_TYPE_BOOL:
-    case CC_TYPE_CHAR:
-    case CC_TYPE_SCHAR:
-    case CC_TYPE_UCHAR:
-        return 1;
-    case CC_TYPE_SHORT:
-    case CC_TYPE_USHORT:
-        return 2;
-    case CC_TYPE_FLOAT16:
-        return 2;
-    case CC_TYPE_INT:
-    case CC_TYPE_UINT:
-    case CC_TYPE_FLOAT:
-        return 4;
-    case CC_TYPE_LONG:
-    case CC_TYPE_ULONG:
-        return pointer_size;
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
-    case CC_TYPE_DOUBLE:
-        return 8;
-    case CC_TYPE_LDOUBLE:
-        return 16;
-    case CC_TYPE_ENUM:
-        return 4;
-    case CC_TYPE_COMPLEX:
-        return 16;
-    case CC_TYPE_IMAGINARY:
-        return 8;
-    case CC_TYPE_BITINT:
-        return pointer_size;
-    case CC_TYPE_DECIMAL32:
-        return 4;
-    case CC_TYPE_DECIMAL64:
-        return 8;
-    case CC_TYPE_DECIMAL128:
-        return 16;
-    case CC_TYPE_ATOMIC:
-    case CC_TYPE_FUNC:
-        return pointer_size;
-    default:
-        return -1;
-    }
+    return -1;
 }
 
 static size_t decoded_c_string_len(const char *literal) {
