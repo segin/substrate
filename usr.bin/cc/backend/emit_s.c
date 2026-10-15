@@ -719,24 +719,6 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     }
 }
 
-static const cc_ssa_instr_t *find_def_instr_before(const cc_ssa_function_t *f, int value, size_t max_instr_index) __attribute__((unused));
-static const cc_ssa_instr_t *find_def_instr_before(const cc_ssa_function_t *f, int value, size_t max_instr_index) {
-    size_t i;
-    if (f == NULL || value < 0 || f->instr_count == 0) {
-        return NULL;
-    }
-    if (max_instr_index >= f->instr_count) {
-        max_instr_index = f->instr_count - 1;
-    }
-    for (i = max_instr_index + 1; i > 0; --i) {
-        const cc_ssa_instr_t *in = &f->instrs[i - 1];
-        if (in->dst == value) {
-            return in;
-        }
-    }
-    return NULL;
-}
-
 static int find_store_instr_index_for_ptr_before(const cc_ssa_function_t *f, int ptr_value, size_t max_instr_index);
 
 static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_index, int value, unsigned char *visiting,
