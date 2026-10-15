@@ -747,7 +747,13 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             free(sec_discard);
             return ELF_ERR_FORMAT;
         } else if (action == ELF_LINK_MERGE_APPEND) {
-            if (dst->type != src->type) {
+            /*
+             * .note.GNU-stack is an empty marker whose flags say whether
+             * the stack must be executable.  Toolchains disagree on its
+             * type (gcc and gas write PROGBITS, glibc's own start files
+             * NOTE), and GNU ld takes either; only its flags matter.
+             */
+            if (dst->type != src->type && strcmp(src->name, ".note.GNU-stack") != 0) {
                 elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
                 (void)elf__append_diag(out, src->name);
                 free(sec_discard);
