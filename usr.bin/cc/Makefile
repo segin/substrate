@@ -3,7 +3,9 @@ DYNAMIC = 1
 include ../../Makefile.inc
 
 PROGS = cc cpp ir-verifier ir-normalize ir-diff
-COMMON_SRCS = ir.c parser.c verifier.c serialize.c
+# ir/: the textual SSA IR -- its parser, verifier and serializer, and
+# the ir-verifier, ir-normalize and ir-diff tools built from them
+COMMON_SRCS = ir/ir.c ir/parse.c ir/verify.c ir/serialize.c
 COMMON_OBJS = $(COMMON_SRCS:.c=.o)
 CC_SRCS = cmd/cc.c cmd/pipeline.c common/target.c \
 	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c frontend/types.c \
@@ -12,16 +14,16 @@ CC_SRCS = cmd/cc.c cmd/pipeline.c common/target.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
 	  backend/regalloc.c backend/frame.c backend/emit_s.c
 CC_OBJS = $(CC_SRCS:.c=.o)
-IR_VERIFIER_OBJS = ir-verifier.o $(COMMON_OBJS)
-IR_NORMALIZE_OBJS = ir-normalize.o $(COMMON_OBJS)
-IR_DIFF_OBJS = ir-diff.o $(COMMON_OBJS)
-ALL_OBJS = $(CC_OBJS) $(COMMON_OBJS) ir-verifier.o ir-normalize.o ir-diff.o
+IR_VERIFIER_OBJS = ir/ir-verifier.o $(COMMON_OBJS)
+IR_NORMALIZE_OBJS = ir/ir-normalize.o $(COMMON_OBJS)
+IR_DIFF_OBJS = ir/ir-diff.o $(COMMON_OBJS)
+ALL_OBJS = $(CC_OBJS) $(COMMON_OBJS) ir/ir-verifier.o ir/ir-normalize.o ir/ir-diff.o
 TOOL_CPPFLAGS = -Iinclude
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 CC_HEADERS = include/cc_driver.h include/cc_frontend.h include/cc_ssa.h \
 	     include/cc_backend.h include/cc_pipeline.h \
-	     include/cc_middle.h include/cc_target.h include/cc_types.h ir.h
+	     include/cc_middle.h include/cc_target.h include/cc_types.h
 
 ifeq ($(NATIVE_BUILD),1)
     TOOL_CFLAGS = $(CFLAGS) -DCC_NATIVE_BUILD=1
@@ -120,8 +122,8 @@ ir-diff: $(IR_DIFF_OBJS) $(TOOL_LIBC) $(TOOL_CRT0)
 	$(TOOL_BRAND)
 
 $(CC_OBJS): $(CC_HEADERS)
-$(COMMON_OBJS): ir.h
-ir-verifier.o ir-normalize.o ir-diff.o: ir.h
+$(COMMON_OBJS): ir/ir.h
+ir/ir-verifier.o ir/ir-normalize.o ir/ir-diff.o: ir/ir.h
 
 %.o: %.c
 	$(CC) $(TOOL_CFLAGS) $(TOOL_CPPFLAGS) -c $< -o $@

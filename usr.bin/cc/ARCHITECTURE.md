@@ -29,10 +29,15 @@ usr.bin/cc/
 │   ├── frame.c              # Stack frame layout and slot compaction
 │   └── emit_s.c             # GAS-style assembly emission
 ├── include/                 # Internal driver/frontend/backend headers
-├── ir.c / ir.h              # Shared IR utilities and serialization support
-├── ir-verifier.c            # IR structural validator
-├── ir-normalize.c           # IR normalization utility
-├── ir-diff.c                # IR comparison utility
+├── ir/                      # The textual SSA IR (typed, LLVM-like; tests/usr.bin/cc/valid.ir)
+│   ├── ir.c / ir.h          # Module representation
+│   ├── parse.c              # Text -> module
+│   ├── verify.c             # CFG and SSA invariants: terminators, phi arity, dominance, reachability
+│   ├── serialize.c          # Module -> text, optionally with value names normalized
+│   ├── ir-verifier.c        # Tool: parse and verify
+│   ├── ir-normalize.c       # Tool: parse, verify, print normalized
+│   └── ir-diff.c            # Tool: compare two files after normalizing
+│                            # (cc does not write this form yet: docs/neutral-ir-plan.md step 0)
 ├── README.md                # Current capability/status overview
 ├── SPEC.md                  # Functional requirements
 ├── Makefile                 # Native/target build-mode split and utility builds
