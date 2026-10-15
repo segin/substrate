@@ -85,6 +85,7 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
                                   const long dims[CC_MAX_ARRAY_DIMS]);
 static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
                               const long dims[CC_MAX_ARRAY_DIMS]);
+static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g);
 
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     size_t i;
@@ -9148,6 +9149,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "out of memory creating static local symbol");
                 return -1;
             }
+            if (is_array_obj && needs_runtime_init) {
+                int rc = static_local_array_init_data(tu, s, &g);
+                if (rc < 0) {
+                    free(g.name);
+                    free(g.attr_section);
+                    set_diag(diag, "out of memory laying out a static local array's initializer");
+                    return -1;
+                }
+                needs_runtime_init = rc == 0;
+            }
             if (append_synth_global(ctx->mod, &g) != 0) {
                 free(g.name);
                 free(g.attr_section);
@@ -13222,6 +13233,92 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
         free(relocs[i].payload);
     }
     free(relocs);
+}
+
+/**
+ * Give a static local array of scalars its initializer as data, the way
+ * a file-scope array gets it, instead of code that fills it on the
+ * function's first call.  The initializer of an object with static
+ * storage is constant (C11 6.7.9p4), so its bytes are known now, in any
+ * brace form: `{1, 2, 3, 4}` and `{{1, 2}, {3, 4}}` alike.
+ *
+ * @param tu  the translation unit
+ * @param s   the declaration; an array with an initializer list
+ * @param g   the array's global, which receives the data and has_init
+ * @return    1 if it was given its data; 0 if the initializer is not a
+ *            constant array of scalars this handles, so the caller falls
+ *            back to filling the array at run time; -1 when out of memory
+ */
+static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g) {
+    cc_type_t scalar_type = s->type;
+    int scalar_sid = s->type_struct_id;
+    long dims[CC_MAX_ARRAY_DIMS];
+    int nd = s->array_ndim;
+    long scalar_size;
+    long elem_count = 1;
+    unsigned char *buf;
+    global_reloc_t *relocs = NULL;
+    size_t reloc_count = 0;
+    size_t cur = 0;
+    cc_diag_t quiet;
+    int d;
+
+    if (s->expr == NULL || s->expr->kind != CC_EXPR_INIT_LIST || nd <= 0 || nd > CC_MAX_ARRAY_DIMS) {
+        return 0;
+    }
+    for (d = 0; d < nd; ++d) {
+        if (!is_pointer_type(scalar_type)) {
+            return 0;
+        }
+        scalar_type = ptr_base_type(scalar_type);
+        dims[d] = s->array_dims[d];
+    }
+    if (dims[0] <= 0 && s->array_len > 0 && nd == 1) {
+        dims[0] = s->array_len;
+    }
+    if (scalar_type == CC_TYPE_VOID || is_pointer_type(scalar_type)) {
+        /* aggregates and pointers (string tables) keep their own initialization code */
+        return 0;
+    }
+    scalar_sid = -1;
+    scalar_size = type_size_bytes_with_struct(tu, scalar_type, scalar_sid);
+    if (scalar_size <= 0) {
+        return 0;
+    }
+    for (d = 0; d < nd; ++d) {
+        if (dims[d] <= 0 || elem_count > LONG_MAX / dims[d]) {
+            return 0;
+        }
+        elem_count *= dims[d];
+    }
+    if (scalar_size > LONG_MAX / elem_count) {
+        return 0;
+    }
+    buf = (unsigned char *)calloc((size_t)(scalar_size * elem_count), 1);
+    if (buf == NULL) {
+        return -1;
+    }
+    memset(&quiet, 0, sizeof(quiet));
+    if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_sid, dims, nd, s->expr, &cur, 0, buf,
+                                         scalar_size * elem_count, &relocs, &reloc_count, &quiet) != 0 ||
+        cur < s->expr->arg_count) {
+        /* not a constant this can lay out: leave it to the run-time path and its diagnostics */
+        free(buf);
+        free_global_relocs(relocs, reloc_count);
+        return 0;
+    }
+    if (build_global_stream_from_bytes(g, buf, scalar_size * elem_count, relocs, reloc_count, &quiet) != 0) {
+        free(buf);
+        free_global_relocs(relocs, reloc_count);
+        return -1;
+    }
+    g->type = CC_TYPE_PTR_UCHAR;
+    g->type_struct_id = -1;
+    g->array_len = scalar_size * elem_count;
+    g->has_init = 1;
+    free(buf);
+    free_global_relocs(relocs, reloc_count);
+    return 1;
 }
 
 static int expr_uses_va_arg_pack(const cc_expr_t *e);

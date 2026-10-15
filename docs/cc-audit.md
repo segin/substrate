@@ -267,14 +267,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   record their type; a pointer-to-array member is laid out, read and
   indexed as a pointer.  `codegen/member_declarators.c` checks layout
   and access for twelve member shapes against gcc.
-- [ ] **CC-60** A `static` local multi-dimensional array with an
+- [x] **CC-60** A `static` local multi-dimensional array with an
   initializer shall hold its initial values.  `static int a[3][4] = {1,
   2, ..., 12};` inside a function -- the usual way to write a lookup
-  table -- compiles without a diagnostic, and the program dies of
-  SIGSEGV on reading `a[2][1]`; nested braces do the same.  A
-  one-dimensional static local, and a non-static local with flat braces,
-  are fine.  *Reproduced* (both targets; every build of 2026-10-15).  Worse
-  than CC-57's compile error: nothing warns.
+  table -- compiled without a diagnostic, and the program died of
+  SIGSEGV on reading `a[2][1]`: the code that filled it on the first
+  call took each scalar for a whole row and copied a row from that
+  address.  Nested braces did not compile.  *Reproduced* (both targets).
+  A static local array of scalars now gets its initializer as data, as
+  a file-scope array does, in any brace form; pointer and structure
+  element types keep the first-call fill.  `codegen/static_local_tables.c`
+  checks ten tables against gcc.
 
 ## 5. Driver and predefined macros
 
@@ -420,7 +423,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-60 requirements: 33 met, 27 open.
+60 requirements: 34 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
