@@ -1419,13 +1419,6 @@ static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
 }
 
-static int is_integral_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR ||
-           t == CC_TYPE_SHORT || t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT ||
-           t == CC_TYPE_LONG || t == CC_TYPE_ULONG || t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG ||
-           t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
-}
-
 static cc_type_t ptr_base_type(cc_type_t t) {
     return cc_type_deref_once(t);
 }
@@ -1918,7 +1911,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             continue;
         }
         if (g->init_is_symbol) {
-            if (!is_pointer_type(g->type) && !is_integral_type(g->type)) {
+            if (!is_pointer_type(g->type) && !cc_type_is_integral(g->type)) {
                 snprintf(diag->message, sizeof(diag->message), "symbol initializer requires pointer/integer global: %s",
                          g->name != NULL ? g->name : "<anon>");
                 return -1;

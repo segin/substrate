@@ -107,3 +107,125 @@ long cc_type_scalar_align(cc_type_t t) {
     }
     return l.align;
 }
+
+/**
+ * Whether a type is an integer type.
+ *
+ * @param t  the type
+ * @return   1 if it is, else 0
+ */
+int cc_type_is_integral(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_BOOL:
+    case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
+    case CC_TYPE_UCHAR:
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+    case CC_TYPE_INT:
+    case CC_TYPE_UINT:
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+    case CC_TYPE_ENUM:
+    case CC_TYPE_BITINT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * Whether a type is one of the unsigned integer types.
+ *
+ * @param t  the type
+ * @return   1 if it is, else 0
+ */
+int cc_type_is_unsigned_integral(cc_type_t t) {
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG ||
+           t == CC_TYPE_ULONG_LONG;
+}
+
+/**
+ * Whether a type is a real floating type.
+ *
+ * @param t  the type
+ * @return   1 if it is, else 0
+ */
+int cc_type_is_floating(cc_type_t t) {
+    return t == CC_TYPE_FLOAT16 || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE ||
+           t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128;
+}
+
+/**
+ * Whether a type is a complex or imaginary type.
+ *
+ * @param t  the type
+ * @return   1 if it is, else 0
+ */
+int cc_type_is_complex(cc_type_t t) {
+    return t == CC_TYPE_COMPLEX || t == CC_TYPE_IMAGINARY;
+}
+
+/**
+ * Whether a type is arithmetic, `_Atomic` included.
+ *
+ * @param t  the type
+ * @return   1 if it is, else 0
+ */
+int cc_type_is_numeric(cc_type_t t) {
+    return cc_type_is_integral(t) || cc_type_is_floating(t) || cc_type_is_complex(t) || t == CC_TYPE_ATOMIC;
+}
+
+/**
+ * The coarse integer conversion rank: 1 int and narrower, 2 long,
+ * 3 long long.
+ *
+ * @param t  an integer type
+ * @return   its rank
+ */
+int cc_type_integer_rank(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+        return 2;
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+        return 3;
+    default:
+        return 1;
+    }
+}
+
+/**
+ * The size of the integer types of a type's rank on the current target.
+ *
+ * @param t  an integer type
+ * @return   4, the size of `long`, or 8
+ */
+int cc_type_integer_rank_size(cc_type_t t) {
+    int rank = cc_type_integer_rank(t);
+
+    return rank == 3 ? 8 : rank == 2 ? cc_target_current()->pointer_size : 4;
+}
+
+/**
+ * The integer promotion of a type.
+ *
+ * @param t  the type
+ * @return   `int` for `_Bool`, character and short types; else @p t
+ */
+cc_type_t cc_type_promote(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_BOOL:
+    case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
+    case CC_TYPE_UCHAR:
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+        return CC_TYPE_INT;
+    default:
+        return t;
+    }
+}

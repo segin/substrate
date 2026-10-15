@@ -1068,15 +1068,6 @@ static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) 
     return 1;
 }
 
-static int is_float_type(cc_type_t t) {
-    return t == CC_TYPE_FLOAT16 || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE || t == CC_TYPE_DECIMAL32 ||
-           t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128;
-}
-
-static int is_complex_type(cc_type_t t) {
-    return t == CC_TYPE_COMPLEX || t == CC_TYPE_IMAGINARY;
-}
-
 static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
 }
@@ -1095,27 +1086,12 @@ static cc_type_t pointer_ultimate_base_type(cc_type_t t) {
     return t;
 }
 
-static int is_unsigned_integral_type(cc_type_t t) {
-    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG ||
-           t == CC_TYPE_ULONG_LONG;
-}
-
-static int is_integral_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
-           t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG || t == CC_TYPE_ULONG ||
-           t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG || t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
-}
-
 static cc_type_t size_type(void) {
     return g_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
 }
 
-static int is_numeric_type(cc_type_t t) {
-    return is_integral_type(t) || is_float_type(t) || is_complex_type(t) || t == CC_TYPE_ATOMIC;
-}
-
 static int is_scalar_type(cc_type_t t) {
-    return is_numeric_type(t) || is_pointer_type(t);
+    return cc_type_is_numeric(t) || is_pointer_type(t);
 }
 
 /*
@@ -1222,7 +1198,7 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
     if (dst == src) {
         return 1;
     }
-    if (is_numeric_type(dst) && is_numeric_type(src)) {
+    if (cc_type_is_numeric(dst) && cc_type_is_numeric(src)) {
         return 1;
     }
     if (is_pointer_type(dst) && is_pointer_type(src)) {
@@ -1231,14 +1207,14 @@ static int can_convert(cc_type_t dst, cc_type_t src) {
         if (dbase == CC_TYPE_VOID || sbase == CC_TYPE_VOID || dbase == sbase) {
             return 1;
         }
-        if (is_integral_type(dbase) && is_integral_type(sbase) && type_size_bytes(dbase) == type_size_bytes(sbase)) {
+        if (cc_type_is_integral(dbase) && cc_type_is_integral(sbase) && type_size_bytes(dbase) == type_size_bytes(sbase)) {
             return 1;
         }
     }
-    if (is_pointer_type(dst) && is_integral_type(src)) {
+    if (is_pointer_type(dst) && cc_type_is_integral(src)) {
         return 1;
     }
-    if (is_integral_type(dst) && is_pointer_type(src)) {
+    if (cc_type_is_integral(dst) && is_pointer_type(src)) {
         return 1;
     }
     return 0;
@@ -1324,7 +1300,7 @@ static int check_array_string_initializer(const char *name, cc_type_t array_type
     wide = (init->aux_type == CC_TYPE_INT || init->aux_type == CC_TYPE_UINT || init->aux_type == CC_TYPE_LONG_LONG ||
             init->aux_type == CC_TYPE_ULONG_LONG);
     if (wide) {
-        if (!is_integral_type(elem_type)) {
+        if (!cc_type_is_integral(elem_type)) {
             return 1;
         }
     } else if (!(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
@@ -1406,7 +1382,7 @@ static const cc_struct_member_t *find_union_cast_member(const cc_translation_uni
     for (i = 0; i < sd->member_count; ++i) {
         const cc_struct_member_t *m = &sd->members[i];
         if (can_convert(m->type, src_expr->value_type) ||
-            (is_pointer_type(m->type) && is_integral_type(src_expr->value_type) && is_null_ptr_constant(src_expr))) {
+            (is_pointer_type(m->type) && cc_type_is_integral(src_expr->value_type) && is_null_ptr_constant(src_expr))) {
             return m;
         }
     }
@@ -1493,33 +1469,7 @@ static const cc_function_t *infer_callee_function_expr(const cc_translation_unit
     }
 }
 
-static cc_type_t integral_promo_type(cc_type_t t) {
-    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
-        t == CC_TYPE_USHORT) {
-        return CC_TYPE_INT;
-    }
-    return t;
-}
-
 /* Conversion rank of a promoted integer type: int, long, long long. */
-static int integral_rank(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_LONG:
-    case CC_TYPE_ULONG:
-        return 2;
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
-        return 3;
-    default:
-        return 1;
-    }
-}
-
-static int integral_rank_bytes(cc_type_t t) {
-    int rank = integral_rank(t);
-    return rank == 3 ? 8 : rank == 2 ? g_pointer_size_bytes : 4;
-}
-
 static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     cc_type_t ap;
     cc_type_t bp;
@@ -1557,16 +1507,16 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
         return CC_TYPE_FLOAT16;
     }
 
-    ap = integral_promo_type(a);
-    bp = integral_promo_type(b);
-    if (integral_rank(ap) == 1) {
-        ap = is_unsigned_integral_type(ap) ? CC_TYPE_UINT : CC_TYPE_INT;
+    ap = cc_type_promote(a);
+    bp = cc_type_promote(b);
+    if (cc_type_integer_rank(ap) == 1) {
+        ap = cc_type_is_unsigned_integral(ap) ? CC_TYPE_UINT : CC_TYPE_INT;
     }
-    if (integral_rank(bp) == 1) {
-        bp = is_unsigned_integral_type(bp) ? CC_TYPE_UINT : CC_TYPE_INT;
+    if (cc_type_integer_rank(bp) == 1) {
+        bp = cc_type_is_unsigned_integral(bp) ? CC_TYPE_UINT : CC_TYPE_INT;
     }
-    if (is_unsigned_integral_type(ap) == is_unsigned_integral_type(bp)) {
-        return integral_rank(ap) >= integral_rank(bp) ? ap : bp;
+    if (cc_type_is_unsigned_integral(ap) == cc_type_is_unsigned_integral(bp)) {
+        return cc_type_integer_rank(ap) >= cc_type_integer_rank(bp) ? ap : bp;
     }
 
     /*
@@ -1574,12 +1524,12 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
      * wins only when it can hold all of the unsigned type's values,
      * which for long against unsigned int depends on the target.
      */
-    s = is_unsigned_integral_type(ap) ? bp : ap;
-    u = is_unsigned_integral_type(ap) ? ap : bp;
-    if (integral_rank(u) >= integral_rank(s)) {
+    s = cc_type_is_unsigned_integral(ap) ? bp : ap;
+    u = cc_type_is_unsigned_integral(ap) ? ap : bp;
+    if (cc_type_integer_rank(u) >= cc_type_integer_rank(s)) {
         return u;
     }
-    if (integral_rank_bytes(s) > integral_rank_bytes(u)) {
+    if (cc_type_integer_rank_size(s) > cc_type_integer_rank_size(u)) {
         return s;
     }
     return s == CC_TYPE_LONG ? CC_TYPE_ULONG : CC_TYPE_ULONG_LONG;
@@ -2067,7 +2017,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
         if (eval_const_int_expr(tu, e->lhs, out) != 0) {
             return -1;
         }
-        if (is_integral_type(e->aux_type) && !is_pointer_type(e->aux_type)) {
+        if (cc_type_is_integral(e->aux_type) && !is_pointer_type(e->aux_type)) {
             int bits = 0;
             unsigned long long mask;
             unsigned long long u;
@@ -2311,14 +2261,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 
     switch (e->kind) {
     case CC_EXPR_INT:
-        if (!is_integral_type(e->value_type)) {
+        if (!cc_type_is_integral(e->value_type)) {
             e->value_type = CC_TYPE_INT;
         }
         e->struct_id = -1;
         return 0;
 
     case CC_EXPR_FLOAT:
-        if (!is_float_type(e->value_type)) {
+        if (!cc_type_is_floating(e->value_type)) {
             e->value_type = CC_TYPE_DOUBLE;
         }
         e->struct_id = -1;
@@ -2525,11 +2475,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return 0;
         }
         if (is_shift_op(e->op)) {
-            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
+            if (!cc_type_is_integral(e->lhs->value_type) || !cc_type_is_integral(e->rhs->value_type)) {
                 set_diag(diag, "shift operators require integer operands");
                 return -1;
             }
-            e->value_type = integral_promo_type(e->lhs->value_type);
+            e->value_type = cc_type_promote(e->lhs->value_type);
             if (e->value_type == CC_TYPE_VOID) {
                 set_diag(diag, "void expression used in arithmetic operation");
                 return -1;
@@ -2537,7 +2487,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return 0;
         }
         if (is_bitwise_op(e->op)) {
-            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
+            if (!cc_type_is_integral(e->lhs->value_type) || !cc_type_is_integral(e->rhs->value_type)) {
                 set_diag(diag, "bitwise operators require integer operands");
                 return -1;
             }
@@ -2550,7 +2500,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (is_cmp_op(e->op)) {
             if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
-                if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->rhs->value_type)) {
+                if (cc_type_is_numeric(e->lhs->value_type) && cc_type_is_numeric(e->rhs->value_type)) {
                     e->value_type = CC_TYPE_INT;
                     return 0;
                 }
@@ -2563,18 +2513,18 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     set_diag(diag, "incompatible pointer types in comparison");
                     return -1;
                 }
-                if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type) &&
+                if (is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type) &&
                     is_null_ptr_constant(e->rhs)) {
                     e->value_type = CC_TYPE_INT;
                     return 0;
                 }
-                if (is_pointer_type(e->rhs->value_type) && is_integral_type(e->lhs->value_type) &&
+                if (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->lhs->value_type) &&
                     is_null_ptr_constant(e->lhs)) {
                     e->value_type = CC_TYPE_INT;
                     return 0;
                 }
-                if ((is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) ||
-                    (is_pointer_type(e->rhs->value_type) && is_integral_type(e->lhs->value_type))) {
+                if ((is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type)) ||
+                    (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->lhs->value_type))) {
                     if (g_pedantic && emit_warning(diag, e->line, e->col,
                                                    "comparison between pointer and integer is a GNU extension", 1) != 0) {
                         return -1;
@@ -2593,7 +2543,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "comparison operators require compatible scalar operands");
                 return -1;
             }
-            if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->rhs->value_type)) {
+            if (cc_type_is_numeric(e->lhs->value_type) && cc_type_is_numeric(e->rhs->value_type)) {
                 e->value_type = CC_TYPE_INT;
                 return 0;
             }
@@ -2633,7 +2583,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 e->struct_id = -1;
                 return 0;
             }
-            if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
+            if (is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type)) {
                 if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID) {
                     if (g_pedantic &&
                         emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
@@ -2645,7 +2595,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 expr_copy_array_meta(e, e->lhs);
                 return 0;
             }
-            if (e->op == CC_BIN_ADD && is_integral_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+            if (e->op == CC_BIN_ADD && cc_type_is_integral(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
                 if (ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
                     if (g_pedantic &&
                         emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
@@ -2666,7 +2616,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         if (e->op == CC_BIN_MOD) {
-            if (!is_integral_type(e->lhs->value_type) || !is_integral_type(e->rhs->value_type)) {
+            if (!cc_type_is_integral(e->lhs->value_type) || !cc_type_is_integral(e->rhs->value_type)) {
                 set_diag(diag, "modulo operator requires integer operands");
                 return -1;
             }
@@ -2761,7 +2711,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_numeric_type(e->args[0]->value_type)) {
+            if (!cc_type_is_numeric(e->args[0]->value_type)) {
                 set_diag(diag, "floating classification builtin expects numeric argument");
                 return -1;
             }
@@ -2835,7 +2785,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_scalar_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type)) {
+            if (!is_scalar_type(e->args[0]->value_type) || !cc_type_is_integral(e->args[1]->value_type)) {
                 set_diag(diag, "__builtin_expect expects (scalar, integer)");
                 return -1;
             }
@@ -2905,8 +2855,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
                 return -1;
             }
-            if (!is_integral_type(e->args[1]->value_type) ||
-                (e->arg_count == 3 && !is_integral_type(e->args[2]->value_type))) {
+            if (!cc_type_is_integral(e->args[1]->value_type) ||
+                (e->arg_count == 3 && !cc_type_is_integral(e->args[2]->value_type))) {
                 set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
                 return -1;
             }
@@ -2946,7 +2896,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_integral_type(e->args[0]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type)) {
                 char msg[96];
                 snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
                 set_diag(diag, msg);
@@ -2964,7 +2914,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_integral_type(e->args[0]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type)) {
                 set_diag(diag, "__builtin_popcount argument must be integral");
                 return -1;
             }
@@ -2988,11 +2938,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             out_elem = ptr_base_type(e->args[2]->value_type);
-            if (!is_integral_type(out_elem)) {
+            if (!cc_type_is_integral(out_elem)) {
                 set_diag(diag, "overflow builtin destination must point to an integer type");
                 return -1;
             }
-            if (!is_integral_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type) || !cc_type_is_integral(e->args[1]->value_type)) {
                 set_diag(diag, "overflow builtin operands must be integers");
                 return -1;
             }
@@ -3010,8 +2960,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
             }
-            if (!is_integral_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type) ||
-                !is_integral_type(e->args[2]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type) || !cc_type_is_integral(e->args[1]->value_type) ||
+                !cc_type_is_integral(e->args[2]->value_type)) {
                 set_diag(diag, "overflow_p builtin operands must be integral");
                 return -1;
             }
@@ -3028,7 +2978,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_integral_type(e->args[1]->value_type)) {
+            if (!cc_type_is_integral(e->args[1]->value_type)) {
                 set_diag(diag, "__builtin_object_size second argument must be integral");
                 return -1;
             }
@@ -3045,7 +2995,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_integral_type(e->args[0]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type)) {
                 set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
                                                             : "__builtin_frame_address argument must be integral");
                 return -1;
@@ -3068,7 +3018,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "__builtin_memcmp first two arguments must be pointers");
                 return -1;
             }
-            if (!is_integral_type(e->args[2]->value_type)) {
+            if (!cc_type_is_integral(e->args[2]->value_type)) {
                 set_diag(diag, "__builtin_memcmp third argument must be integral");
                 return -1;
             }
@@ -3090,11 +3040,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "__builtin_prefetch first argument must be a pointer");
                 return -1;
             }
-            if (e->arg_count >= 2 && !is_integral_type(e->args[1]->value_type)) {
+            if (e->arg_count >= 2 && !cc_type_is_integral(e->args[1]->value_type)) {
                 set_diag(diag, "__builtin_prefetch rw argument must be integral");
                 return -1;
             }
-            if (e->arg_count >= 3 && !is_integral_type(e->args[2]->value_type)) {
+            if (e->arg_count >= 3 && !cc_type_is_integral(e->args[2]->value_type)) {
                 set_diag(diag, "__builtin_prefetch locality argument must be integral");
                 return -1;
             }
@@ -3157,11 +3107,11 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "memory builtin source argument must be a pointer");
                 return -1;
             }
-            if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !is_integral_type(e->args[1]->value_type)) {
+            if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !cc_type_is_integral(e->args[1]->value_type)) {
                 set_diag(diag, "memory builtin fill byte must be integral");
                 return -1;
             }
-            if (!is_integral_type(e->args[2]->value_type)) {
+            if (!cc_type_is_integral(e->args[2]->value_type)) {
                 set_diag(diag, "memory builtin size argument must be integral");
                 return -1;
             }
@@ -3188,7 +3138,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_integral_type(e->args[0]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type)) {
                 set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
                                    ? "__atomic_thread_fence memory-order argument must be integral"
                                    : "__atomic_signal_fence memory-order argument must be integral");
@@ -3253,7 +3203,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
                                      ? "__atomic_exchange_n"
                                      : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
-                if (!is_integral_type(e->args[2]->value_type)) {
+                if (!cc_type_is_integral(e->args[2]->value_type)) {
                     set_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
                     return -1;
                 }
@@ -3308,7 +3258,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (elem_type == CC_TYPE_VOID) {
                 elem_type = CC_TYPE_INT;
             }
-            if (!is_integral_type(e->args[1]->value_type)) {
+            if (!cc_type_is_integral(e->args[1]->value_type)) {
                 set_diag(diag, "__atomic_load_n memory-order argument must be integral");
                 return -1;
             }
@@ -3341,7 +3291,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "__atomic_store_n value type mismatch");
                 return -1;
             }
-            if (!is_integral_type(e->args[2]->value_type)) {
+            if (!cc_type_is_integral(e->args[2]->value_type)) {
                 set_diag(diag, "__atomic_store_n memory-order argument must be integral");
                 return -1;
             }
@@ -3362,7 +3312,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_integral_type(e->args[0]->value_type)) {
+            if (!cc_type_is_integral(e->args[0]->value_type)) {
                 set_diag(diag, "byte-swap builtin requires integral argument");
                 return -1;
             }
@@ -3424,13 +3374,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             if (callee != NULL && callee->has_prototype && i < callee->param_count &&
                 !can_convert(callee->params[i].type, e->args[i]->value_type) &&
-                !(is_pointer_type(callee->params[i].type) && is_integral_type(e->args[i]->value_type) &&
+                !(is_pointer_type(callee->params[i].type) && cc_type_is_integral(e->args[i]->value_type) &&
                   is_null_ptr_constant(e->args[i])) &&
                 !(callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0 &&
                   transparent_union_accepts_type(tu, callee->params[i].type_struct_id, e->args[i]->value_type,
                                                  e->args[i]->struct_id)) &&
                 !(callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0 &&
-                  e->args[i]->kind == CC_EXPR_STMT && is_integral_type(e->args[i]->value_type))) {
+                  e->args[i]->kind == CC_EXPR_STMT && cc_type_is_integral(e->args[i]->value_type))) {
                 if (getenv("CC_DEBUG_CALL_ARGS") != NULL) {
                     fprintf(stderr,
                             "cc-debug: call %s arg%zu expect(type=%d sid=%d) got(type=%d sid=%d)\n",
@@ -3620,12 +3570,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         assign_ok = can_convert(dst_type, e->rhs->value_type) ||
-                    (is_pointer_type(dst_type) && is_integral_type(e->rhs->value_type) && is_null_ptr_constant(e->rhs));
+                    (is_pointer_type(dst_type) && cc_type_is_integral(e->rhs->value_type) && is_null_ptr_constant(e->rhs));
         if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && e->rhs->value_type == CC_TYPE_VOID &&
             struct_ids_compatible(tu, dst_struct_id, e->rhs->struct_id)) {
             assign_ok = 1;
         }
-        if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && is_integral_type(e->rhs->value_type) &&
+        if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && cc_type_is_integral(e->rhs->value_type) &&
             e->rhs->kind == CC_EXPR_STMT) {
             assign_ok = 1;
         }
@@ -3833,7 +3783,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
             }
-        } else if (!is_numeric_type(t)) {
+        } else if (!cc_type_is_numeric(t)) {
             set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
             return -1;
         }
@@ -3924,13 +3874,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
-        if (is_numeric_type(e->lhs->value_type) && is_numeric_type(e->aux_type)) {
+        if (cc_type_is_numeric(e->lhs->value_type) && cc_type_is_numeric(e->aux_type)) {
             e->value_type = e->aux_type;
             e->struct_id = -1;
             return 0;
         }
         if (is_pointer_type(e->aux_type) &&
-            (is_pointer_type(e->lhs->value_type) || is_integral_type(e->lhs->value_type))) {
+            (is_pointer_type(e->lhs->value_type) || cc_type_is_integral(e->lhs->value_type))) {
             e->value_type = e->aux_type;
             e->struct_id = e->aux_struct_id;
             if (is_pointer_type(e->lhs->value_type)) {
@@ -3938,7 +3888,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             return 0;
         }
-        if (is_integral_type(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
+        if (cc_type_is_integral(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
             e->value_type = e->aux_type;
             e->struct_id = -1;
             return 0;
@@ -4141,13 +4091,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "incompatible pointer types in conditional expression");
             return -1;
         }
-        if (is_pointer_type(e->rhs->value_type) && is_integral_type(e->third->value_type) &&
+        if (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->third->value_type) &&
             is_null_ptr_constant(e->third)) {
             e->value_type = e->rhs->value_type;
             e->struct_id = e->rhs->struct_id;
             return 0;
         }
-        if (is_pointer_type(e->third->value_type) && is_integral_type(e->rhs->value_type) &&
+        if (is_pointer_type(e->third->value_type) && cc_type_is_integral(e->rhs->value_type) &&
             is_null_ptr_constant(e->rhs)) {
             e->value_type = e->third->value_type;
             e->struct_id = e->third->struct_id;
@@ -4496,7 +4446,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
                 return -1;
             }
             if (!can_convert(elem_type, item->value_type) &&
-                !(is_pointer_type(elem_type) && is_integral_type(item->value_type) && is_null_ptr_constant(item))) {
+                !(is_pointer_type(elem_type) && cc_type_is_integral(item->value_type) && is_null_ptr_constant(item))) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "cannot convert array member initializer %zu for %s",
                              i, name != NULL ? name : "<anon>");
@@ -4527,7 +4477,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             return -1;
         }
         if (!can_convert(m->type, item->value_type) &&
-            !(is_pointer_type(m->type) && is_integral_type(item->value_type) && is_null_ptr_constant(item))) {
+            !(is_pointer_type(m->type) && cc_type_is_integral(item->value_type) && is_null_ptr_constant(item))) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "cannot convert member initializer %zu for struct %s", i,
                          name != NULL ? name : "<anon>");
@@ -4645,7 +4595,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                 return -1;
             }
             if (!can_convert(elem_type, item->value_type) &&
-                !(is_pointer_type(elem_type) && is_integral_type(item->value_type) && is_null_ptr_constant(item))) {
+                !(is_pointer_type(elem_type) && cc_type_is_integral(item->value_type) && is_null_ptr_constant(item))) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "cannot convert initializer %zu for array %s", i,
                              name != NULL ? name : "<anon>");
@@ -4798,7 +4748,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (check_expr(tu, s->array_bound_expr, *vars, *var_count, depth, diag) != 0) {
                     return -1;
                 }
-                if (!is_integral_type(s->array_bound_expr->value_type)) {
+                if (!cc_type_is_integral(s->array_bound_expr->value_type)) {
                     set_diag(diag, "variable-length array bound must be an integer expression");
                     return -1;
                 }
@@ -4847,7 +4797,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return -1;
                         }
                         if (!can_convert(init_type, scalar_init->value_type) &&
-                            !(is_pointer_type(init_type) && is_integral_type(scalar_init->value_type) &&
+                            !(is_pointer_type(init_type) && cc_type_is_integral(scalar_init->value_type) &&
                               is_null_ptr_constant(scalar_init))) {
                             if (diag != NULL && diag->message[0] == '\0') {
                                 snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
@@ -4884,10 +4834,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                     }
                     if (!init_checked && !can_convert(init_type, s->expr->value_type) &&
-                        !(is_pointer_type(init_type) && is_integral_type(s->expr->value_type) &&
+                        !(is_pointer_type(init_type) && cc_type_is_integral(s->expr->value_type) &&
                           is_null_ptr_constant(s->expr)) &&
                         !(is_pointer_type(init_type) && is_pointer_type(s->expr->value_type)) &&
-                        !(is_integral_type(init_type) && is_integral_type(s->expr->value_type))) {
+                        !(cc_type_is_integral(init_type) && cc_type_is_integral(s->expr->value_type))) {
                         if (diag != NULL && diag->message[0] == '\0') {
                             snprintf(diag->message, sizeof(diag->message),
                                      "cannot initialize variable '%s' (type=%d) with expression type=%d",
@@ -5042,7 +4992,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             if (fn_ret_type == CC_TYPE_VOID && fn_ret_struct_id >= 0) {
                 if (!(s->expr->value_type == CC_TYPE_VOID && s->expr->struct_id == fn_ret_struct_id)) {
-                    if (!(s->expr->kind == CC_EXPR_STMT && is_integral_type(s->expr->value_type))) {
+                    if (!(s->expr->kind == CC_EXPR_STMT && cc_type_is_integral(s->expr->value_type))) {
                         set_diag(diag, "return type mismatch");
                         return -1;
                     }
@@ -5228,7 +5178,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        if (!is_integral_type(s->expr->value_type)) {
+        if (!cc_type_is_integral(s->expr->value_type)) {
             set_diag(diag, "switch expression must be integer");
             return -1;
         }
@@ -5343,7 +5293,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(s->expr->value_type) && !is_integral_type(s->expr->value_type)) {
+            if (!is_pointer_type(s->expr->value_type) && !cc_type_is_integral(s->expr->value_type)) {
                 set_diag(diag, "computed goto requires pointer or integer target expression");
                 return -1;
             }
@@ -5564,7 +5514,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                         goto fail_global_item;
                     }
                     if (!can_convert(g->type, scalar_init->value_type) &&
-                        !(is_pointer_type(g->type) && is_integral_type(scalar_init->value_type) &&
+                        !(is_pointer_type(g->type) && cc_type_is_integral(scalar_init->value_type) &&
                           is_null_ptr_constant(scalar_init))) {
                         if (diag != NULL && diag->message[0] == '\0') {
                             snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
@@ -5592,7 +5542,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     }
                 }
                 if (!can_convert(g->type, g->init->value_type) &&
-                    !(is_pointer_type(g->type) && is_integral_type(g->init->value_type) &&
+                    !(is_pointer_type(g->type) && cc_type_is_integral(g->init->value_type) &&
                       is_null_ptr_constant(g->init))) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
