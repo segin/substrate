@@ -39,6 +39,11 @@ static void check_spelling(const cc_ctype_t *t, const char *want, int line) {
 
 #define SPELL(t, want) check_spelling((t), (want), __LINE__)
 
+/**
+ * Run every check, printing each failure.
+ *
+ * @return 0 if all passed, else 1
+ */
 int main(void) {
     const cc_ctype_t *i32 = cc_ct_basic(CC_CT_INT);
     const cc_ctype_t *ch = cc_ct_basic(CC_CT_CHAR);
