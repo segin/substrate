@@ -11,9 +11,5 @@ int cc_backend_pick_spill_victim(const int *reg_values, const int *next_use, con
                                  int reg_count, int avoid, int prefer);
 int cc_backend_checked_frame_add(int *raw_frame, int bytes, cc_diag_t *diag, const char *context);
 int cc_backend_align_frame_size(int raw_frame, int stack_align);
-void cc_backend_set_i386_isa_level(int level);
-void cc_backend_set_i386_sse2(int enabled);
-void cc_backend_set_i386_mmx(int enabled);
-void cc_backend_set_i386_fp_math_mode(int mode);
 
 #endif

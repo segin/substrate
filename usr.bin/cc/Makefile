@@ -7,7 +7,7 @@ PROGS = cc cpp ir-verifier ir-normalize ir-diff
 # the ir-verifier, ir-normalize and ir-diff tools built from them
 COMMON_SRCS = ir/ir.c ir/parse.c ir/verify.c ir/serialize.c
 COMMON_OBJS = $(COMMON_SRCS:.c=.o)
-CC_SRCS = cmd/cc.c cmd/pipeline.c common/asm_constraint.c common/diag.c common/lang.c common/target.c common/util.c \
+CC_SRCS = cmd/cc.c cmd/pipeline.c common/asm_constraint.c common/diag.c common/lang.c common/options.c common/target.c common/util.c \
 	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c frontend/types.c \
 	  middle/ast2ir.c middle/legalize.c \
 	  middle/passes/opt.c \

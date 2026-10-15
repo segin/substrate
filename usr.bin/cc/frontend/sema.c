@@ -2,6 +2,7 @@
 #include "cc_asm.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
+#include "cc_options.h"
 #include "cc_types.h"
 
 #include <limits.h>
@@ -9,13 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int g_allow_implicit_funcdecl = 0;
-static int g_implicit_funcdecl_override = -1;
-static int g_warn_all = 0;
-static int g_warn_error = 0;
-static int g_pedantic = 0;
-static int g_pedantic_errors = 0;
-static int g_gnu89_inline_override = -1;
 static size_t g_diag_ctx_line = 0;
 static size_t g_diag_ctx_col = 0;
 
@@ -92,13 +86,13 @@ static void print_warning(const cc_diag_t *diag, size_t line, size_t col, const 
 }
 
 static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg, int pedantic_only) {
-    int as_error = g_warn_error || (pedantic_only && g_pedantic_errors);
+    int as_error = cc_options_current()->warn_error || (pedantic_only && cc_options_current()->pedantic_errors);
 
     if (pedantic_only) {
-        if (!g_pedantic) {
+        if (!cc_options_current()->pedantic) {
             return 0;
         }
-    } else if (!g_warn_all) {
+    } else if (!cc_options_current()->warn_all) {
         return 0;
     }
 
@@ -127,7 +121,7 @@ static int emit_required_warning(cc_diag_t *diag, size_t line, size_t col, const
         col = g_diag_ctx_col;
     }
     print_warning(diag, line, col, msg);
-    if (!g_warn_error) {
+    if (!cc_options_current()->warn_error) {
         return 0;
     }
     if (diag != NULL && diag->message[0] == '\0') {
@@ -2456,7 +2450,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 if ((is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type)) ||
                     (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->lhs->value_type))) {
-                    if (g_pedantic && emit_warning(diag, e->line, e->col,
+                    if (cc_options_current()->pedantic && emit_warning(diag, e->line, e->col,
                                                    "comparison between pointer and integer is a GNU extension", 1) != 0) {
                         return -1;
                     }
@@ -2500,7 +2494,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
             if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
                 if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID || ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
-                    if (g_pedantic &&
+                    if (cc_options_current()->pedantic &&
                         emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
                         return -1;
                     }
@@ -2516,7 +2510,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             if (is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type)) {
                 if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID) {
-                    if (g_pedantic &&
+                    if (cc_options_current()->pedantic &&
                         emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
                         return -1;
                     }
@@ -2528,7 +2522,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             if (e->op == CC_BIN_ADD && cc_type_is_integral(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
                 if (ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
-                    if (g_pedantic &&
+                    if (cc_options_current()->pedantic &&
                         emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
                         return -1;
                     }
@@ -3395,7 +3389,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 e->struct_id = -1;
                 return 0;
             }
-            if (!g_allow_implicit_funcdecl) {
+            if (!cc_options_implicit_funcdecl()) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message),
                              "implicit function declaration is not allowed in this mode: %s", e->ident);
@@ -3654,7 +3648,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (e->struct_id >= 0) {
                 return 0;
             }
-            if (g_pedantic) {
+            if (cc_options_current()->pedantic) {
                 if (emit_warning(diag, e->line, e->col, "dereferencing 'void *' is a GNU extension", 1) != 0) {
                     return -1;
                 }
@@ -3709,7 +3703,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (is_pointer_type(t)) {
             if (ptr_base_type(t) == CC_TYPE_VOID) {
-                if (g_pedantic &&
+                if (cc_options_current()->pedantic &&
                     emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
                     return -1;
                 }
@@ -5849,39 +5843,3 @@ fail_func:
     return 0;
 }
 
-void cc_frontend_set_std_mode(const char *std_mode) {
-    /* implicit function declarations: C90 allows them, gcc's GNU modes still do */
-    g_allow_implicit_funcdecl = cc_lang_gnu() || !cc_lang_at_least(1999);
-    if (g_implicit_funcdecl_override >= 0) {
-        g_allow_implicit_funcdecl = g_implicit_funcdecl_override ? 1 : 0;
-    }
-    cc_parser_set_std_mode(std_mode);
-    if (g_gnu89_inline_override >= 0) {
-        cc_parser_set_gnu89_inline(g_gnu89_inline_override);
-    }
-}
-
-void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set) {
-    if (!override_set) {
-        g_gnu89_inline_override = -1;
-        return;
-    }
-    g_gnu89_inline_override = enabled ? 1 : 0;
-    cc_parser_set_gnu89_inline(g_gnu89_inline_override);
-}
-
-void cc_frontend_set_implicit_funcdecl_policy(int allow, int override_set) {
-    if (!override_set) {
-        g_implicit_funcdecl_override = -1;
-        return;
-    }
-    g_implicit_funcdecl_override = allow ? 1 : 0;
-    g_allow_implicit_funcdecl = g_implicit_funcdecl_override;
-}
-
-void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors) {
-    g_warn_all = wall ? 1 : 0;
-    g_warn_error = werror ? 1 : 0;
-    g_pedantic = pedantic ? 1 : 0;
-    g_pedantic_errors = pedantic_errors ? 1 : 0;
-}

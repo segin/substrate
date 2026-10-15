@@ -490,32 +490,6 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);
 int cc_builtin_bswap_bits(const char *name);
-void cc_frontend_set_std_mode(const char *std_mode);
-void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set);
-void cc_frontend_set_implicit_funcdecl_policy(int allow, int override_set);
-void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors);
-
-/*
- * The parser's own settings.  The cc_frontend_set_* calls above pass
- * them on; nothing else should call these.
- */
-
-/**
- * Set the language mode the parser accepts: which keywords exist,
- * trigraphs, implicit int, old-style definitions.
- *
- * @param std_mode  a -std= value such as "c99" or "gnu17"; NULL or ""
- *                  means the default, gnu17
- */
-void cc_parser_set_std_mode(const char *std_mode);
-
-/**
- * Choose GNU89 `inline` semantics (an `inline` definition is an
- * external definition) over C99's.
- *
- * @param enabled  nonzero for GNU89 semantics
- */
-void cc_parser_set_gnu89_inline(int enabled);
 int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
                        const char *const *flags, size_t flag_count, cc_diag_t *diag);
 

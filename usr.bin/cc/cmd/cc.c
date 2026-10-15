@@ -5,6 +5,7 @@
 #include "cc_frontend.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
+#include "cc_options.h"
 #include "cc_pipeline.h"
 #include "cc_util.h"
 
@@ -106,7 +107,6 @@ typedef struct {
   int active;
 } sigchld_guard_t;
 
-enum { I386_FPMATH_AUTO = 0, I386_FPMATH_SSE = 1, I386_FPMATH_387 = 2 };
 
 static const char *target_gcc_flag(cc_target_t target) {
   return target == CC_TARGET_I386 ? "-m32" : "-m64";
@@ -120,6 +120,33 @@ static int opt_level_num(const cc_opts_t *o) {
     return 0;
   }
   return o->opt_level[0] - '0';
+}
+
+/**
+ * Collect the settings the compiler proper needs from the parsed
+ * command line.
+ *
+ * @param o    the parsed command line
+ * @param out  receives the compilation settings
+ */
+static void compile_options(const cc_opts_t *o, cc_options_t *out) {
+  cc_options_init(out);
+  /* parse_args has already rejected an unknown -std= */
+  cc_lang_from_std(o->std, &out->lang);
+  out->target = o->target;
+  out->opt_level = opt_level_num(o);
+  out->debug = o->debug;
+  out->pic = o->pic || o->shared;
+  out->warn_all = o->wall;
+  out->warn_error = o->werror;
+  out->pedantic = o->pedantic;
+  out->pedantic_errors = o->pedantic_errors;
+  out->gnu89_inline = o->gnu89_inline_override ? o->gnu89_inline_mode : -1;
+  out->implicit_funcdecl = o->implicit_funcdecl_override;
+  out->i386_isa_level = o->i386_isa_level;
+  out->i386_sse2 = o->i386_has_sse2;
+  out->i386_mmx = o->i386_has_mmx;
+  out->i386_fpmath = (cc_fpmath_t)o->i386_fp_math_mode;
 }
 
 
@@ -1232,7 +1259,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         return -1;
       }
       o->i386_fp_math_mode =
-          strcmp(a, "-mfpmath=387") == 0 ? I386_FPMATH_387 : I386_FPMATH_SSE;
+          strcmp(a, "-mfpmath=387") == 0 ? CC_FPMATH_387 : CC_FPMATH_SSE;
       continue;
     }
     if (strcmp(a, "-mfpmath") == 0) {
@@ -1244,9 +1271,9 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         return -1;
       }
       if (strcmp(argv[i + 1], "387") == 0) {
-        o->i386_fp_math_mode = I386_FPMATH_387;
+        o->i386_fp_math_mode = CC_FPMATH_387;
       } else if (strcmp(argv[i + 1], "sse") == 0) {
-        o->i386_fp_math_mode = I386_FPMATH_SSE;
+        o->i386_fp_math_mode = CC_FPMATH_SSE;
       }
       ++i;
       continue;
@@ -2056,7 +2083,7 @@ int cc_main(int argc, char **argv) {
   o.i386_supports_sse = 1;
   o.i386_supports_sse2 = 1;
   o.i386_supports_mmx = 1;
-  o.i386_fp_math_mode = I386_FPMATH_AUTO;
+  o.i386_fp_math_mode = CC_FPMATH_AUTO;
   o.implicit_funcdecl_override = -1;
 #ifdef CC_SUBSTRATE_BUILD
   o.target = CC_DEFAULT_TARGET;
@@ -2258,13 +2285,9 @@ int cc_main(int argc, char **argv) {
         } else {
           unsetenv("CC_FREESTANDING");
         }
-        if (cc_compile_c_to_s(
-                out_pp, in, out_s, o.std != NULL ? o.std : "gnu17", o.debug,
-                o.target, opt_level_num(&o), o.wall, o.werror, o.pedantic,
-                o.pedantic_errors, o.gnu89_inline_mode, o.gnu89_inline_override,
-                o.i386_isa_level, o.i386_has_sse2, o.i386_has_mmx,
-                o.i386_fp_math_mode, o.implicit_funcdecl_override,
-                (o.pic || o.shared), &diag) != 0) {
+        cc_options_t copts;
+        compile_options(&o, &copts);
+        if (cc_compile_c_to_s(out_pp, in, out_s, &copts, &diag) != 0) {
           if (diag.error_count > 0) {
             if (diag.message[0] != '\0') {
               fprintf(stderr, "cc: error: %s\n", diag.message);

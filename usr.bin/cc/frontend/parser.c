@@ -2,6 +2,7 @@
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_lexer.h"
+#include "cc_options.h"
 #include "cc_types.h"
 #include "cc_util.h"
 
@@ -267,7 +268,6 @@ typedef struct {
     char *alias;
 } decl_attrs_t;
 
-static int g_parser_gnu89_inline = 0;
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
 static cc_type_t ptr_of_type(cc_type_t t);
@@ -11197,7 +11197,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     f->ret_struct_id = ftype_sid;
     f->storage = fn_storage;
     if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0 &&
-        g_parser_gnu89_inline) {
+        cc_options_gnu89_inline()) {
         /*
          * GNU89 inline mode keeps plain inline definitions externally
          * visible unless explicitly static.
@@ -11924,20 +11924,4 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     p.struct_cap = 0;
     free(buf);
     return 0;
-}
-
-/**
- * Reset the parser's mode-dependent defaults for the selected language
- * mode (cc_lang_current()): GNU89 `inline` semantics are the default in
- * the GNU modes before C99.
- *
- * @param std_mode  unused; the mode comes from cc_lang_current()
- */
-void cc_parser_set_std_mode(const char *std_mode) {
-    (void)std_mode;
-    g_parser_gnu89_inline = cc_lang_gnu() && !cc_lang_at_least(1999);
-}
-
-void cc_parser_set_gnu89_inline(int enabled) {
-    g_parser_gnu89_inline = enabled ? 1 : 0;
 }

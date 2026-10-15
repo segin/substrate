@@ -1,6 +1,7 @@
 #include "cc_asm.h"
 #include "cc_backend.h"
 #include "cc_diag.h"
+#include "cc_options.h"
 #include "cc_types.h"
 
 #include <float.h>
@@ -43,10 +44,6 @@ typedef struct {
     int cur_index;
 } int_reg_state_t;
 
-static int g_i386_isa_level = 6;
-static int g_i386_has_mmx = 1;
-static int g_i386_has_sse2 = 1;
-static int g_i386_fp_math_mode = 0;
 static unsigned long g_aux_label_serial = 0;
 
 static const char *reg64_to8(const char *r);
@@ -71,27 +68,6 @@ static long double x86_64_special_ldouble_const(long code) {
         return LDBL_MAX;
     }
     return 0.0L;
-}
-
-void cc_backend_set_i386_isa_level(int level) {
-    if (level < 3) level = 3;
-    if (level > 7) level = 7;
-    g_i386_isa_level = level;
-}
-
-void cc_backend_set_i386_sse2(int enabled) {
-    g_i386_has_sse2 = enabled != 0 ? 1 : 0;
-}
-
-void cc_backend_set_i386_mmx(int enabled) {
-    g_i386_has_mmx = enabled != 0 ? 1 : 0;
-}
-
-void cc_backend_set_i386_fp_math_mode(int mode) {
-    if (mode < 0 || mode > 2) {
-        mode = 0;
-    }
-    g_i386_fp_math_mode = mode;
 }
 
 static const char *arg_reg64_gpr(size_t idx) {
@@ -5025,7 +5001,7 @@ static const char *i386_fp_tmp_reg(void) {
 }
 
 static int i386_has_ud2(void) {
-    return g_i386_isa_level >= 6;
+    return cc_options_current()->i386_isa_level >= 6;
 }
 
 static const char *i386_float_binop_mnemonic(cc_ssa_opcode_t op, int use_x87) {
@@ -5926,6 +5902,7 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
 }
 
 static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit_debug, cc_diag_t *diag) {
+    const cc_options_t *opts = cc_options_current();
     size_t i;
 
     for (i = 0; i < m->func_count; ++i) {
@@ -5938,20 +5915,20 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         int use_x87_fp = 0;
         int scratch_off;
 
-        if (g_i386_has_mmx && g_i386_isa_level < 5) {
+        if (opts->i386_mmx && opts->i386_isa_level < 5) {
             set_diag(diag, "i386 MMX codegen requires -march=i586 or newer");
             return -1;
         }
-        if (g_i386_fp_math_mode == 1) {
-            if (!g_i386_has_sse2 && function_uses_f64(f)) {
+        if (opts->i386_fpmath == CC_FPMATH_SSE) {
+            if (!opts->i386_sse2 && function_uses_f64(f)) {
                 set_diag(diag, "i386 -mfpmath=sse requires SSE2-enabled codegen");
                 return -1;
             }
             use_x87_fp = 0;
-        } else if (g_i386_fp_math_mode == 2) {
+        } else if (opts->i386_fpmath == CC_FPMATH_387) {
             use_x87_fp = 1;
         } else {
-            use_x87_fp = g_i386_has_sse2 ? 0 : 1;
+            use_x87_fp = opts->i386_sse2 ? 0 : 1;
         }
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             return -1;

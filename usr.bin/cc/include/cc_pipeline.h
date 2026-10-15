@@ -2,13 +2,22 @@
 #define CC_PIPELINE_H
 
 #include "cc_frontend.h"
-#include "cc_target.h"
+#include "cc_options.h"
 
-int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const char *std_mode,
-                      int emit_debug, cc_target_t target, int opt_level, int wall, int werror, int pedantic,
-                      int pedantic_errors, int gnu89_inline_mode, int gnu89_inline_override, int i386_isa_level,
-                      int i386_has_sse2, int i386_has_mmx, int i386_fp_math_mode,
-                      int implicit_funcdecl_override, int pic,
+/**
+ * Compile one preprocessed C file to assembly: parse, check, lower to
+ * SSA, optimize, and emit GNU as syntax for the target in @p opts.
+ *
+ * @param in_c         the preprocessed source to read
+ * @param display_src  the name to report in diagnostics and debug
+ *                     info; NULL or "" for none
+ * @param out_s        the assembly file to write
+ * @param opts         the settings; they are selected for the
+ *                     duration of the compilation
+ * @param diag         receives the first error; may be NULL
+ * @return             0, or -1 on error
+ */
+int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const cc_options_t *opts,
                       cc_diag_t *diag);
 
 #endif

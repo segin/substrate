@@ -1,6 +1,5 @@
 #include "cc_backend.h"
 #include "cc_frontend.h"
-#include "cc_lang.h"
 #include "cc_middle.h"
 #include "cc_pipeline.h"
 #include "cc_ssa.h"
@@ -15,15 +14,20 @@ static double now_seconds(void) {
     return (double)ts.tv_sec + ((double)ts.tv_nsec / 1000000000.0);
 }
 
-int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const char *std_mode,
-                      int emit_debug, cc_target_t target, int opt_level, int wall, int werror, int pedantic,
-                      int pedantic_errors, int gnu89_inline_mode, int gnu89_inline_override, int i386_isa_level,
-                      int i386_has_sse2, int i386_has_mmx, int i386_fp_math_mode, int implicit_funcdecl_override,
-                      int pic,
+/**
+ * Compile one preprocessed C file to assembly.
+ *
+ * @param in_c         the preprocessed source
+ * @param display_src  the name for diagnostics and debug info
+ * @param out_s        the assembly file to write
+ * @param opts         the settings
+ * @param diag         receives the first error; may be NULL
+ * @return             0, or -1 on error
+ */
+int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out_s, const cc_options_t *opts,
                       cc_diag_t *diag) {
     cc_translation_unit_t tu;
     cc_ssa_module_t ssa;
-    cc_lang_t lang;
     int rc = -1;
     int timings = getenv("CC_TIMINGS") != NULL;
     int debug_counts = getenv("CC_DEBUG_COUNTS") != NULL;
@@ -46,23 +50,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         diag->message[0] = '\0';
     }
 
-    if (cc_lang_from_std(std_mode, &lang) != 0) {
-        if (diag != NULL) {
-            snprintf(diag->message, sizeof(diag->message), "unrecognized command-line option '-std=%s'", std_mode);
-            diag->error_count = 1;
-        }
-        return -1;
-    }
-    cc_lang_select(&lang);
-    cc_target_select(target);
-    cc_frontend_set_std_mode(std_mode);
-    cc_frontend_set_gnu89_inline_mode(gnu89_inline_mode, gnu89_inline_override);
-    cc_frontend_set_implicit_funcdecl_policy(implicit_funcdecl_override > 0, implicit_funcdecl_override >= 0);
-    cc_frontend_set_diag_flags(wall, werror, pedantic, pedantic_errors);
-    cc_backend_set_i386_isa_level(i386_isa_level);
-    cc_backend_set_i386_sse2(i386_has_sse2);
-    cc_backend_set_i386_mmx(i386_has_mmx);
-    cc_backend_set_i386_fp_math_mode(i386_fp_math_mode);
+    cc_options_select(opts);
 
     if (timings) {
         t0 = now_seconds();
@@ -120,7 +108,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     if (debug_counts) {
         fprintf(stderr, "cc: debug: lowered funcs=%zu globals=%zu\n", ssa.func_count, ssa.global_count);
     }
-    if (cc_run_middle_passes(&ssa, opt_level, diag) != 0) {
+    if (cc_run_middle_passes(&ssa, opts->opt_level, diag) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "middle-end optimization failed");
         }
@@ -133,7 +121,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         fprintf(stderr, "cc: timing opt=%.3fs\n", t_opt);
         t0 = now_seconds();
     }
-    if (cc_emit_gas(&ssa, out_s, display_src, emit_debug, target, pic, diag) == 0) {
+    if (cc_emit_gas(&ssa, out_s, display_src, opts->debug, opts->target, opts->pic, diag) == 0) {
         rc = 0;
     } else if (diag != NULL && diag->message[0] == '\0') {
         snprintf(diag->message, sizeof(diag->message), "backend emission failed");

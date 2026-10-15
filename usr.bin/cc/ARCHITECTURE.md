@@ -14,6 +14,7 @@ usr.bin/cc/
 │   ├── asm_constraint.c     # Inline-asm constraint classification
 │   ├── diag.c               # Diagnostics: record the first error, print it with its source line
 │   ├── lang.c               # C language modes: the one decoder of -std=
+│   ├── options.c            # The settings of one compilation (cc_options_t)
 │   ├── target.c             # Per-target data layout (psABI sizes and alignments)
 │   └── util.c               # String duplication and string vectors
 ├── frontend/
