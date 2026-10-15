@@ -307,6 +307,7 @@ sbin/*/*
 /tests/chmod/unit_cli
 /tests/chmod/unit_mode_parser
 /tests/usr.bin/cc/test_ast2ir_bin
+/tests/usr.bin/cc/test_ctype_bin
 /tests/usr.bin/compress/uncompress
 /tests/sys/property_cmdline
 
