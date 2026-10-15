@@ -38,7 +38,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | Area | Requirements | Met |
 |---|---|---|
 | 1. Integer arithmetic and conversions | 8 | 8 |
-| 2. Programs on substrate | 5 | 4 |
+| 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 1 |
 | 4. ABI and other code generation | 12 | 6 |
 | 5. Driver and predefined macros | 3 | 1 |
@@ -100,7 +100,7 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [x] **CC-10** The compiler shall build with `-Wall -Wextra -Werror`
   under the host's GCC (16).  Two warnings stopped the native build.
   `1f7c066f2`.
-- [ ] **CC-51** The compiler shall compile itself correctly.  It
+- [x] **CC-51** The compiler shall compile itself correctly.  It
   compiles every one of its sources without an error, but a cc built
   that way aborts (`free(): invalid pointer`) on its first program, at
   -O0 as at -O1.  Swapping one cc-built object at a time into a
@@ -108,7 +108,25 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   `middle/ast2ir.c` and `backend/emit_s.c` each break it.  Step 0 of
   `usr.bin/cc/docs/refactor-plan.md`.  *Reproduced.*
   Most of it was CC-52: with the layout fixed, `sema.c`, `ast2ir.c`
-  and `emit_s.c` compile correctly; `parser.c` still does not.
+  and `emit_s.c` compile correctly; `parser.c` was CC-54, and the
+  self-built cc's own wrong answers were CC-55.  Now a cc built by cc
+  (stage 2) passes the codegen, ABI and random checks, and a cc built
+  by that one (stage 3) writes byte-identical assembly for all of cc's
+  sources: `run_selfhost.sh`.
+- [x] **CC-54** A structure passed or returned by value shall be
+  copied whole.  The size of each value and of each call argument was
+  kept in one byte and clamped at 255, so a larger structure was copied
+  in part: `parser.c` passes its 304-byte statement structure by value,
+  and the self-built cc freed the garbage in the uncopied tail.  The
+  sizes are 32 bits now.  *Reproduced* (both).  `codegen/big_struct.c`.
+- [x] **CC-55** Converting a long double to double or float shall round
+  it.  On x86-64 there was no conversion at all: the double was the low
+  8 bytes of the 80-bit value, part of its mantissa, so `(double)0.5L`
+  was -0 -- and the self-built cc, whose emitter turns each floating
+  constant into bytes through a long double, wrote every double in data
+  wrong.  There is now an explicit operation for it, `CC_SSA_FROUND64`,
+  used by casts, initializers, assignments, returns and arguments.
+  *Reproduced* (x86-64).  `codegen/ldouble_convert.c`.
 - [x] **CC-52** Structure layout shall be the psABI's.  Alignment was
   taken to be the size capped at the pointer size, so on x86-64 a
   `long double` member was aligned to 8, not 16, and every member after
@@ -343,7 +361,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-53 requirements: 25 met, 28 open.
+55 requirements: 28 met, 27 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

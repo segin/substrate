@@ -783,6 +783,7 @@ test:
 	sh run_codegen_diff.sh
 	sh run_codegen_random.sh
 	sh run_codegen_abi.sh
+	sh run_selfhost.sh
 	sh run_postc99_c11_c17.sh
 	sh run_postc99_c23.sh
 	sh run_postc99_c23_attrs.sh

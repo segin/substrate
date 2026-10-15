@@ -153,3 +153,6 @@ jobs:
 
       - name: Calls between cc- and gcc-built code
         run: sh tests/usr.bin/cc/run_codegen_abi.sh
+
+      - name: cc compiles itself (stage 2 passes the checks, stage 3 matches it)
+        run: sh tests/usr.bin/cc/run_selfhost.sh
