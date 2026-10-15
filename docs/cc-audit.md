@@ -239,12 +239,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   initializer: `int a[2][2] = {{1, 2}, {3, 4}};` inside a function gives
   "initializer list cannot be used as runtime expression in lowering";
   the flat `{1, 2, 3, 4}` works.  *Reproduced.*
-- [ ] **CC-58** sizeof shall give the size of an array of pointers to
-  arrays: for a local `int (*rows[2])[4]`, `sizeof rows` is 64 on x86-64
+- [x] **CC-58** sizeof shall give the size of an array of pointers to
+  arrays: for a local `int (*rows[2])[4]`, `sizeof rows` was 64 on x86-64
   (gcc: 16) and 32 on i386 (gcc: 8) -- the legacy type encoding sizes it
-  as the array of arrays it cannot tell it from.  Indexing it works.
-  *Reproduced.*  The declaration's real type is now recorded
-  (`cc_stmt_t.ctype`); sizeof of an identifier has yet to read it.
+  as the array of arrays it cannot tell it from -- and `sizeof` of a
+  local `long (*cube)[2][3]` did not compile.  *Reproduced.*  A local's
+  declaration now records its real type, and `sizeof` of a local folds
+  to that type's size.  `codegen/sizeof_locals.c`.  (Parameters and
+  globals still go through the legacy encoding.)
 
 ## 5. Driver and predefined macros
 
@@ -390,7 +392,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-58 requirements: 30 met, 28 open.
+58 requirements: 31 met, 27 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

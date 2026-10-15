@@ -34,6 +34,7 @@ typedef struct {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int depth;
+    const cc_ctype_t *ctype; /**< the variable's type, where its declaration recorded one; else NULL */
 } var_entry_t;
 
 typedef struct {
@@ -547,8 +548,22 @@ static int var_find_visible_n(const parser_t *p, const char *name, size_t len) {
     return -1;
 }
 
+/**
+ * Declare a variable in the current scope, or redeclare one already
+ * declared in it.
+ *
+ * @param p           the parser
+ * @param name        its name; an empty or NULL name declares nothing
+ * @param type        its type in the legacy encoding
+ * @param struct_id   its struct id
+ * @param array_ndim  its array rank
+ * @param array_dims  its bounds
+ * @param ctype       its type, or NULL when its declaration has not
+ *                    built one
+ * @return            0, or -1 when out of memory
+ */
 static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id, int array_ndim,
-                    const long array_dims[CC_MAX_ARRAY_DIMS]) {
+                    const long array_dims[CC_MAX_ARRAY_DIMS], const cc_ctype_t *ctype) {
     var_entry_t *next;
     char *dup;
     int i;
@@ -579,6 +594,7 @@ static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id
             p->vars[i].struct_id = struct_id;
             p->vars[i].array_ndim = array_ndim;
             memcpy(p->vars[i].array_dims, norm_dims, sizeof(p->vars[i].array_dims));
+            p->vars[i].ctype = ctype;
             return 0;
         }
     }
@@ -601,6 +617,7 @@ static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id
     p->vars[p->var_count].array_ndim = array_ndim;
     memcpy(p->vars[p->var_count].array_dims, norm_dims, sizeof(p->vars[p->var_count].array_dims));
     p->vars[p->var_count].depth = p->scope_depth;
+    p->vars[p->var_count].ctype = ctype;
     p->var_count++;
     return 0;
 }
@@ -8659,6 +8676,40 @@ static int fold_sizeof_type(parser_t *p, cc_expr_t *e, const cc_ctype_t *t) {
     return -1;
 }
 
+/**
+ * Fold `sizeof x`, for a variable x whose declaration recorded its type,
+ * into the integer constant it is, when that type has a size (not a
+ * variable-length array).  The declaration in scope here is the one the
+ * expression names, so its size is the answer wherever the expression
+ * is used.  Otherwise the node is left as it is.
+ *
+ * @param p  the parser
+ * @param e  the CC_EXPR_SIZEOF node with its operand
+ */
+static void fold_sizeof_variable(parser_t *p, cc_expr_t *e) {
+    const cc_expr_t *x = e->lhs;
+    int vidx;
+    long n;
+
+    if (x == NULL || x->kind != CC_EXPR_IDENT || x->ident == NULL) {
+        return;
+    }
+    vidx = var_find_visible_n(p, x->ident, strlen(x->ident));
+    if (vidx < 0 || p->vars[vidx].ctype == NULL) {
+        return;
+    }
+    n = cc_ct_size(p->vars[vidx].ctype, p->tu);
+    if (n < 0) {
+        return;
+    }
+    free_expr(e->lhs);
+    e->lhs = NULL;
+    e->kind = CC_EXPR_INT;
+    e->int_val = n;
+    e->value_type = parser_size_type();
+    e->struct_id = -1;
+}
+
 static cc_expr_t *parse_unary(parser_t *p) {
     if (p->tok.kind == TOK_IDENT && parser_is_gnu_mode() && tok_is_ident(p, "__extension__")) {
         if (next_tok(p) != 0) {
@@ -8730,6 +8781,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         e->aux_type = CC_TYPE_VOID;
         e->aux_struct_id = -1;
+        fold_sizeof_variable(p, e);
         return e;
     }
 
@@ -9815,6 +9867,10 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 if (s.array_len <= 0) {
                     s.array_len = inferred;
                 }
+                /* `T a[] = {...}`: the initializer completes the array type */
+                if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0) {
+                    s.ctype = cc_ct_array(s.ctype->of, inferred);
+                }
             }
         }
         if (is_typedef) {
@@ -9852,7 +9908,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 if (s.array_ndim > 0 && !is_pointer_type(vty)) {
                     vty = ptr_of_type(vty);
                 }
-                if (var_push(p, s.decl_name, vty, s.type_struct_id, s.array_ndim, s.array_dims) != 0) {
+                if (var_push(p, s.decl_name, vty, s.type_struct_id, s.array_ndim, s.array_dims, s.ctype) != 0) {
                     free_stmt(&s);
                     return -1;
                 }
@@ -11020,7 +11076,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         for (i = 0; i < f->param_count; ++i) {
             if (f->params[i].name != NULL &&
                 var_push(p, f->params[i].name, f->params[i].type, f->params[i].type_struct_id, f->params[i].array_ndim,
-                         f->params[i].array_dims) != 0) {
+                         f->params[i].array_dims, NULL) != 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking function parameters");
                 return -1;
             }
