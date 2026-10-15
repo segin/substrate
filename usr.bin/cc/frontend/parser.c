@@ -25,6 +25,7 @@ typedef struct {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int depth;
+    const cc_ctype_t *ctype; /**< the type it names, where its declaration recorded one; else NULL */
 } typedef_entry_t;
 
 typedef struct {
@@ -111,6 +112,7 @@ typedef struct {
     int scope_depth;
     int parse_depth;
     int last_storage;
+    const cc_ctype_t *last_alias_ctype; /**< the type of the typedef name the last specifiers were, else NULL */
 } parser_t;
 
 static int next_tok(parser_t *p);
@@ -472,8 +474,23 @@ static int typedef_find_current_scope_n(const parser_t *p, const char *name, siz
     return -1;
 }
 
-static int typedef_push(parser_t *p, const char *name, cc_type_t type, int struct_id,
-                        long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS]) {
+/**
+ * Declare a typedef name in the current scope.  Redeclaring one with the
+ * same type is allowed (C11 6.7p3).
+ *
+ * @param p           the parser
+ * @param name        the name
+ * @param type        the type it names, legacy encoding
+ * @param struct_id   its struct id
+ * @param array_len   its legacy array_len
+ * @param array_ndim  its array rank
+ * @param array_dims  its bounds, or NULL
+ * @param ctype       the type it names, or NULL if not known
+ * @return            0, 1 if it redeclares the name with another type,
+ *                    or -1 when out of memory
+ */
+static int typedef_push(parser_t *p, const char *name, cc_type_t type, int struct_id, long array_len,
+                        int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_ctype_t *ctype) {
     typedef_entry_t *next;
     char *dup;
     int existing;
@@ -514,6 +531,7 @@ static int typedef_push(parser_t *p, const char *name, cc_type_t type, int struc
     p->typedefs[p->typedef_count].array_ndim = array_ndim;
     memcpy(p->typedefs[p->typedef_count].array_dims, norm_dims, sizeof(p->typedefs[p->typedef_count].array_dims));
     p->typedefs[p->typedef_count].depth = p->scope_depth;
+    p->typedefs[p->typedef_count].ctype = ctype;
     p->typedef_count++;
     return 0;
 }
@@ -1657,8 +1675,12 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     long alias_array_len = -1;
     int alias_array_ndim = 0;
     long alias_array_dims[CC_MAX_ARRAY_DIMS];
+    const cc_ctype_t *alias_ctype = NULL;
 #define RETURN_OK()                                                                                                  \
     do {                                                                                                             \
+        p->last_alias_ctype = (alias_ctype != NULL && !seen_atomic && out_type != NULL && *out_type == alias_type)   \
+                                  ? alias_ctype                                                                      \
+                                  : NULL;                                                                            \
         if (seen_atomic && out_type != NULL && *out_type != CC_TYPE_ATOMIC) {                                       \
             cc_type_t __atomic_base_type = *out_type;                                                                \
             int __atomic_base_sid = (out_struct_id != NULL) ? *out_struct_id : -1;                                  \
@@ -1679,6 +1701,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     } while (0)
 
     p->last_storage = 0;
+    p->last_alias_ctype = NULL;
     if (out_typedef != NULL) {
         *out_typedef = 0;
     }
@@ -2099,6 +2122,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 seen_type = 1;
                 seen_alias = 1;
                 alias_type = p->typedefs[tidx].type;
+                alias_ctype = p->typedefs[tidx].ctype;
                 alias_struct_id = p->typedefs[tidx].struct_id;
                 alias_array_len = p->typedefs[tidx].array_len;
                 alias_array_ndim = p->typedefs[tidx].array_ndim;
@@ -5698,15 +5722,25 @@ static const cc_ctype_t *declarator_type(const declarator_t *d, const cc_ctype_t
 }
 
 /**
- * The type the declaration specifiers' legacy outputs describe.
+ * The type the declaration specifiers describe: the typedef's own type
+ * when they were a typedef name that recorded one, since the legacy
+ * encoding loses function types (`typedef int (*op)(int)` reads as a
+ * pointer to int); else the type the legacy outputs describe.
  *
- * @param ty    the type parse_declspec() gave
- * @param sid   its struct id
- * @param ndim  its array rank (a typedef'd array)
- * @param dims  its bounds
- * @return      the type, or NULL
+ * @param alias  the type of the typedef name the specifiers were
+ *               (parser_t.last_alias_ctype just after parse_declspec()),
+ *               or NULL
+ * @param ty     the type parse_declspec() gave
+ * @param sid    its struct id
+ * @param ndim   its array rank (a typedef'd array)
+ * @param dims   its bounds
+ * @return       the type, or NULL
  */
-static const cc_ctype_t *declspec_ctype(cc_type_t ty, int sid, int ndim, const long *dims) {
+static const cc_ctype_t *declspec_ctype(const cc_ctype_t *alias, cc_type_t ty, int sid, int ndim,
+                                        const long *dims) {
+    if (alias != NULL) {
+        return alias;
+    }
     return cc_ct_from_legacy(ty, sid, ndim, dims);
 }
 
@@ -5760,6 +5794,7 @@ static int parse_param_type(parser_t *p, const cc_ctype_t **out) {
     int ndim = 0;
     long dims[CC_MAX_ARRAY_DIMS];
     declarator_t d;
+    const cc_ctype_t *alias;
     const cc_ctype_t *t;
 
     memset(dims, 0, sizeof(dims));
@@ -5767,11 +5802,12 @@ static int parse_param_type(parser_t *p, const cc_ctype_t **out) {
     if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, 1, "expected parameter type", NULL, NULL, NULL) != 0) {
         return -1;
     }
+    alias = p->last_alias_ctype;
     if (parse_declarator_into(p, &d, DECL_ABSTRACT | DECL_PARAM) != 0) {
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(ty, sid, ndim, dims));
+    t = declarator_type(&d, declspec_ctype(alias, ty, sid, ndim, dims));
     declarator_free(&d);
     if (t == NULL) {
         set_diag(p->diag, p->tok.line, p->tok.col, "out of memory building a parameter type");
@@ -6082,6 +6118,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
     int ndim = 0;
     long dims[CC_MAX_ARRAY_DIMS];
     declarator_t d;
+    const cc_ctype_t *alias;
     const cc_ctype_t *t;
     cc_ct_legacy_t leg;
     unsigned i;
@@ -6093,6 +6130,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
     if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, allow_void, what, NULL, NULL, NULL) != 0) {
         return -1;
     }
+    alias = p->last_alias_ctype;
     if (parse_declarator_into(p, &d, DECL_ABSTRACT) != 0) {
         declarator_free(&d);
         return -1;
@@ -6102,7 +6140,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(ty, sid, ndim, dims));
+    t = declarator_type(&d, declspec_ctype(alias, ty, sid, ndim, dims));
     declarator_free(&d);
     if (t == NULL) {
         set_diag(p->diag, line, col, "out of memory building a type");
@@ -7695,6 +7733,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 e->struct_id = p->vars[vidx].struct_id;
                 e->array_ndim = p->vars[vidx].array_ndim;
                 memcpy(e->array_dims, p->vars[vidx].array_dims, sizeof(e->array_dims));
+                e->ctype = p->vars[vidx].ctype;
             }
         }
         return e;
@@ -9263,12 +9302,14 @@ typedef struct {
  * @param base_sid   its struct id
  * @param base_ndim  its array rank (a typedef'd array)
  * @param base_dims  its bounds
+ * @param base_alias the type of the typedef name the specifiers were, or
+ *                   NULL (see declspec_ctype())
  * @param out        receives the declaration; free its name and
  *                   vla_bound when done with them
  * @return           0, or -1 on error (diagnosed)
  */
 static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
-                            named_decl_t *out) {
+                            const cc_ctype_t *base_alias, named_decl_t *out) {
     declarator_t d;
     cc_ct_legacy_t leg;
     size_t line = p->tok.line;
@@ -9282,7 +9323,7 @@ static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
         declarator_free(&d);
         return -1;
     }
-    out->ctype = declarator_type(&d, declspec_ctype(base_type, base_sid, base_ndim, base_dims));
+    out->ctype = declarator_type(&d, declspec_ctype(base_alias, base_type, base_sid, base_ndim, base_dims));
     if (out->ctype == NULL) {
         set_diag(p->diag, line, col, "out of memory building a declaration's type");
         declarator_free(&d);
@@ -9329,6 +9370,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     int is_typedef = 0;
     int base_saw_restrict = 0;
     int decl_storage = 0;
+    const cc_ctype_t *base_alias = NULL;
     decl_attrs_t base_attrs;
 
     decl_attrs_reset(&base_attrs);
@@ -9338,6 +9380,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         return -1;
     }
     decl_storage = p->last_storage;
+    base_alias = p->last_alias_ctype;
     if (p->tok.kind == TOK_SEMI) {
         if ((decl_storage & CC_STORAGE_AUTO_TYPE) != 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "auto type deduction requires an initializer");
@@ -9393,7 +9436,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         {
             named_decl_t nd;
 
-            if (parse_named_decl(p, base_type, base_struct_id, base_array_ndim, base_array_dims, &nd) != 0) {
+            if (parse_named_decl(p, base_type, base_struct_id, base_array_ndim, base_array_dims, base_alias, &nd) !=
+                0) {
                 free_stmt(&s);
                 return -1;
             }
@@ -9568,7 +9612,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
-            trc = typedef_push(p, s.decl_name, s.type, s.type_struct_id, s.array_len, s.array_ndim, s.array_dims);
+            trc = typedef_push(p, s.decl_name, s.type, s.type_struct_id, s.array_len, s.array_ndim, s.array_dims,
+                               s.ctype);
             if (trc > 0) {
                 int existing = typedef_find_current_scope_n(p, s.decl_name, strlen(s.decl_name));
                 if (existing >= 0 && p->diag != NULL && p->diag->message[0] == '\0') {
@@ -10347,6 +10392,8 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
  * @param base_sid          its struct id
  * @param base_ndim         its array rank (a typedef'd array)
  * @param base_dims         its bounds
+ * @param base_alias        the type of the typedef name the specifiers
+ *                          were, or NULL (see declspec_ctype())
  * @param out_name          receives the name (owned), or NULL if none
  * @param out_ctype         receives the adjusted type
  * @param out_type          receives it in the legacy encoding
@@ -10358,7 +10405,7 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
  * @return                  0, or -1 on error (diagnosed)
  */
 static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
-                            char **out_name, const cc_ctype_t **out_ctype, cc_type_t *out_type, long *out_array_len,
+                            const cc_ctype_t *base_alias, char **out_name, const cc_ctype_t **out_ctype, cc_type_t *out_type, long *out_array_len,
                             int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict) {
     declarator_t d;
     const cc_ctype_t *t;
@@ -10374,7 +10421,7 @@ static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(base_type, base_sid, base_ndim, base_dims));
+    t = declarator_type(&d, declspec_ctype(base_alias, base_type, base_sid, base_ndim, base_dims));
     if (t != NULL && t->kind == CC_CT_ARRAY) {
         t = cc_ct_qualified(cc_ct_pointer(t->of), d.saw_restrict ? CC_CQ_RESTRICT : 0);
     } else if (t != NULL && t->kind == CC_CT_FUNCTION) {
@@ -10481,7 +10528,8 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             return -1;
         }
         param_storage = p->last_storage;
-        if (parse_param_decl(p, ptype, ptype_sid, pbase_array_ndim, pbase_array_dims, &pname, &pctype, &dty,
+        if (parse_param_decl(p, ptype, ptype_sid, pbase_array_ndim, pbase_array_dims, p->last_alias_ctype, &pname,
+                             &pctype, &dty,
                              &darr_len, &darr_ndim, darr_dims, &dty_restrict) != 0) {
             return -1;
         }
@@ -11091,7 +11139,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         return -1;
     }
     if (parser_is_c23_or_newer() &&
-        typedef_push(&p, "nullptr_t", CC_TYPE_PTR_VOID, -1, -1, 0, NULL) != 0) {
+        typedef_push(&p, "nullptr_t", CC_TYPE_PTR_VOID, -1, -1, 0, NULL, NULL) != 0) {
         cc_lexer_deinit(&p.lx);
         parser_free_hoisted_funcs(&p);
         parser_free_typedefs(&p);

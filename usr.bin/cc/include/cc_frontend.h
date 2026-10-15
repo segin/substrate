@@ -325,6 +325,7 @@ struct cc_expr {
     long generic_selected;
     cc_stmt_t *stmt_expr_stmts;
     size_t stmt_expr_count;
+    const struct cc_ctype *ctype; /**< identifier: the variable's type, where its declaration recorded one; else NULL */
 };
 
 typedef enum {

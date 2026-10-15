@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_asm.h"
 #include "cc_consteval.h"
+#include "cc_ctype.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_options.h"
@@ -3437,6 +3438,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
+        }
+        if (cc_ct_expr_designates_function(e->lhs)) {
+            /* `*fp` designates the function fp points to, which is used as fp again */
+            e->value_type = e->lhs->value_type;
+            e->struct_id = e->lhs->struct_id;
+            e->array_ndim = e->lhs->array_ndim;
+            memcpy(e->array_dims, e->lhs->array_dims, sizeof(e->array_dims));
+            return 0;
         }
         if (!is_pointer_type(e->lhs->value_type)) {
             if (getenv("CC_DEBUG_SEMA_DEREF") != NULL) {

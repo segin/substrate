@@ -423,6 +423,58 @@ const cc_ctype_t *cc_ct_decay(const cc_ctype_t *t) {
 }
 
 /**
+ * The type of an expression, where the parser recorded it.  See
+ * cc_ctype.h.
+ *
+ * @param e  the expression
+ * @return   its type, or NULL if it is not known
+ */
+const cc_ctype_t *cc_ct_of_expr(const cc_expr_t *e) {
+    const cc_ctype_t *t;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    if (e->kind == CC_EXPR_IDENT) {
+        return e->ctype;
+    }
+    if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_ADD) {
+        /* pointer + integer, either way round, as `a[i]` is `*(a + i)` */
+        t = cc_ct_decay(cc_ct_of_expr(e->lhs));
+        if (t == NULL || t->kind != CC_CT_POINTER) {
+            t = cc_ct_decay(cc_ct_of_expr(e->rhs));
+        }
+        return (t != NULL && t->kind == CC_CT_POINTER) ? t : NULL;
+    }
+    if (e->kind != CC_EXPR_DEREF) {
+        return NULL;
+    }
+    t = cc_ct_of_expr(e->lhs);
+    if (t == NULL || t->kind == CC_CT_FUNCTION) {
+        return t;
+    }
+    t = cc_ct_decay(t);
+    return (t != NULL && t->kind == CC_CT_POINTER) ? t->of : NULL;
+}
+
+/**
+ * Whether an expression is known to be a function or a pointer to one.
+ * See cc_ctype.h.
+ *
+ * @param e  the expression
+ * @return   1 if so, 0 if not or not known
+ */
+int cc_ct_expr_designates_function(const cc_expr_t *e) {
+    const cc_ctype_t *t = cc_ct_of_expr(e);
+
+    if (t == NULL) {
+        return 0;
+    }
+    return t->kind == CC_CT_FUNCTION ||
+           (t->kind == CC_CT_POINTER && t->of != NULL && t->of->kind == CC_CT_FUNCTION);
+}
+
+/**
  * The legacy enumerator for a kind, for the layout table.
  *
  * @param kind  an arithmetic kind or CC_CT_VOID

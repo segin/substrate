@@ -3,8 +3,8 @@
  * element and through a pointer to a function pointer.  Each call's
  * result is the function's return type -- used in arithmetic, a call
  * through t[i] once had pointer type, and q + t[1](6, 7) scaled q by 4.
- * (*pf)(...) for a pf whose function returns a pointer is left out:
- * it is CC-34 in docs/cc-audit.md.
+ * (*pf)(...) for a pf whose function returns a pointer once loaded from
+ * the function's code and called that.
  */
 #include <stdio.h>
 
@@ -37,6 +37,6 @@ int main(void) {
     }
     printf("%d %d %d\n", r, q + t[1](6, 7), q * table[0](1, 2));
     printf("%d %d %d\n", (*f)(1, 2) + 1, (**pp)(3, 4) * 2, pp[0](5, 6) - 1);
-    printf("%d %d\n", *pf(&x, &y, 0), *pf(&x, &y, 1) + 1);
+    printf("%d %d %d\n", *pf(&x, &y, 0), *pf(&x, &y, 1) + 1, *(*pf)(&x, &y, 0) - 1);
     return 0;
 }

@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_asm.h"
 #include "cc_consteval.h"
+#include "cc_ctype.h"
 #include "cc_diag.h"
 #include "cc_ssa.h"
 #include "cc_types.h"
@@ -3787,6 +3788,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_DEREF:
     {
+        if (cc_ct_expr_designates_function(e->lhs)) {
+            /* `*fp` is the function fp points to; as a value it is fp again */
+            return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        }
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
@@ -6086,8 +6091,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     set_diag(diag, "malformed indirect call expression");
                     return -1;
                 }
-                if (callee_expr->kind == CC_EXPR_DEREF && callee_expr->lhs != NULL &&
-                    is_pointer_type(callee_expr->lhs->value_type)) {
+                if (callee_expr->kind == CC_EXPR_DEREF && cc_ct_expr_designates_function(callee_expr->lhs)) {
+                    /*
+                     * Where the operand's type is known, a `*` whose operand is a
+                     * pointer to a function (or is the function) changes nothing:
+                     * `(*fp)()` and `(**fp)()` call fp.
+                     */
+                    while (callee_expr->kind == CC_EXPR_DEREF && cc_ct_expr_designates_function(callee_expr->lhs)) {
+                        callee_expr = callee_expr->lhs;
+                    }
+                } else if (callee_expr->kind == CC_EXPR_DEREF && callee_expr->lhs != NULL &&
+                           cc_ct_of_expr(callee_expr->lhs) == NULL && is_pointer_type(callee_expr->lhs->value_type)) {
                     int keep_deref = 0;
                     const cc_expr_t *d = callee_expr->lhs;
                     if (pointer_depth(callee_expr->lhs->value_type) > 1) {

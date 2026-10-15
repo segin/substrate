@@ -276,4 +276,28 @@ int cc_ct_to_legacy(const cc_ctype_t *t, cc_ct_legacy_t *out);
  */
 cc_type_t cc_ct_legacy_kind(cc_ctype_kind_t kind);
 
+struct cc_expr;
+
+/**
+ * The type of an expression, where the parser recorded enough to know
+ * it: a variable whose declaration gave its type, and any chain of `*`,
+ * subscripts and pointer + integer applied to one.  `*` applied to a
+ * function designator gives the function again (C11 6.5.3.2p4,
+ * 6.3.2.1p4).
+ *
+ * @param e  the expression
+ * @return   its type, or NULL if it is not known
+ */
+const cc_ctype_t *cc_ct_of_expr(const struct cc_expr *e);
+
+/**
+ * Whether an expression is known to be a function or a pointer to one,
+ * so that `*` applied to it designates the same function: `(*fp)()`
+ * and `(**fp)()` call fp.
+ *
+ * @param e  the operand of the `*`
+ * @return   1 if so, 0 if not or not known
+ */
+int cc_ct_expr_designates_function(const struct cc_expr *e);
+
 #endif

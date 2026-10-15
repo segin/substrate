@@ -213,6 +213,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   those, so it loads from the function's code and calls that: SIGSEGV.
   `pf(...)` works.  The type system does not record which pointer
   levels belong to a function declarator.  *Reproduced* (all modes).
+  Fixed where the callee is a local, a parameter or a global, or an
+  element of one (`(*pf)()`, `(**pf)()`, `(*arr[i])()`): those record
+  their real type, typedef names included, and a `*` applied to a
+  pointer to a function is dropped (`codegen/call_through_deref.c`).
+  Still open for a struct member, `(*s.f)()`, whose type is not yet
+  recorded.
 - [ ] **CC-49** A GNU C nested function shall be able to use the
   enclosing function's locals.  `int x = 3; int inner(int y) { return
   x + y; }` gives "use of undeclared identifier: x"; gcc accepts it
