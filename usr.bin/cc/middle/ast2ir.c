@@ -1551,7 +1551,7 @@ static int new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
         }
         cc_value_type_t *next = (cc_value_type_t *)realloc(f->value_types, ncap * sizeof(*next));
         unsigned char *next_unsigned;
-        unsigned char *next_sizes;
+        uint32_t *next_sizes;
         if (next == NULL) {
             return -1;
         }
@@ -1559,7 +1559,7 @@ static int new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
         if (next_unsigned == NULL) {
             return -1;
         }
-        next_sizes = (unsigned char *)realloc(f->value_sizes, ncap * sizeof(*next_sizes));
+        next_sizes = (uint32_t *)realloc(f->value_sizes, ncap * sizeof(*next_sizes));
         if (next_sizes == NULL) {
             return -1;
         }
@@ -1571,10 +1571,18 @@ static int new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
 
     f->value_types[id] = vt;
     f->value_is_unsigned[id] = 0;
-    f->value_sizes[id] = (unsigned char)(vt == CC_VAL_F64 ? 8 : g_pointer_size_bytes);
+    f->value_sizes[id] = (uint32_t)(vt == CC_VAL_F64 ? 8 : g_pointer_size_bytes);
     return id;
 }
 
+/**
+ * Record how many bytes a value holds.
+ *
+ * @param f     the function the value belongs to
+ * @param v     the value
+ * @param size  its size in bytes -- a structure value's whole size; 0 or
+ *              less means "a word", the pointer size
+ */
 static void set_value_size(cc_ssa_function_t *f, int v, long size) {
     if (f == NULL || f->value_sizes == NULL || v < 0 || v >= f->value_count) {
         return;
@@ -1582,10 +1590,10 @@ static void set_value_size(cc_ssa_function_t *f, int v, long size) {
     if (size <= 0) {
         size = g_pointer_size_bytes;
     }
-    if (size > 255) {
-        size = 255;
+    if (size > (long)UINT32_MAX) {
+        size = (long)UINT32_MAX;
     }
-    f->value_sizes[v] = (unsigned char)size;
+    f->value_sizes[v] = (uint32_t)size;
 }
 
 static long value_size(const cc_ssa_function_t *f, int v) {
@@ -3131,8 +3139,8 @@ static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int l
     in.lhs = lhs;
     in.rhs = rhs;
     if (in.dst >= 0 && sf->value_sizes != NULL) {
-        long lsz = (lhs >= 0 && lhs < sf->value_count) ? sf->value_sizes[lhs] : g_pointer_size_bytes;
-        long rsz = (rhs >= 0 && rhs < sf->value_count) ? sf->value_sizes[rhs] : g_pointer_size_bytes;
+        long lsz = (lhs >= 0 && lhs < sf->value_count) ? (long)sf->value_sizes[lhs] : (long)g_pointer_size_bytes;
+        long rsz = (rhs >= 0 && rhs < sf->value_count) ? (long)sf->value_sizes[rhs] : (long)g_pointer_size_bytes;
         set_value_size(sf, in.dst, lsz > rsz ? lsz : rsz);
     }
     if (in.dst < 0 || push_instr(sf, in) != 0) {
@@ -6676,7 +6684,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (in.arg_count > 0) {
             in.args = (int *)calloc(in.arg_count, sizeof(*in.args));
             in.call_arg_abi = (unsigned char *)calloc(in.arg_count, sizeof(*in.call_arg_abi));
-            in.call_arg_sizes = (unsigned char *)calloc(in.arg_count, sizeof(*in.call_arg_sizes));
+            in.call_arg_sizes = (uint32_t *)calloc(in.arg_count, sizeof(*in.call_arg_sizes));
             if (in.args == NULL || in.call_arg_abi == NULL || in.call_arg_sizes == NULL) {
                 free(in.sym);
                 free(in.args);
@@ -6873,7 +6881,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 in.call_arg_abi[i] =
                     (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
             }
-            in.call_arg_sizes[i] = (unsigned char)(arg_needs_ldouble_abi ? 12 : (arg_size > 255 ? 255 : arg_size));
+            in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_size);
         }
         in.call_ret_x87 = (e->value_type == CC_TYPE_LDOUBLE) ? 1 : 0;
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {

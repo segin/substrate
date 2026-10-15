@@ -62,6 +62,30 @@ static int dup_u8_array(unsigned char **out, const unsigned char *src, size_t n)
     return(0);
 }
 
+/**
+ * Copy an array of 32-bit unsigned values.
+ *
+ * @param out  receives the copy, or NULL when @p n is 0 or @p src is NULL
+ * @param src  the array to copy
+ * @param n    its length
+ * @return     0, or -1 if memory runs out
+ */
+static int dup_u32_array(uint32_t **out, const uint32_t *src, size_t n) {
+    uint32_t *p;
+
+    *out = NULL;
+    if (n == 0 || src == NULL) {
+        return(0);
+    }
+    p = (uint32_t *)malloc(n * sizeof(*p));
+    if (p == NULL) {
+        return(-1);
+    }
+    memcpy(p, src, n * sizeof(*p));
+    *out = p;
+    return(0);
+}
+
 static int dup_str_array(char ***out, char *const *src, size_t n) {
     size_t i;
     char **p;
@@ -151,7 +175,7 @@ static int dup_instr(cc_ssa_instr_t *dst, const cc_ssa_instr_t *src) {
     }
     if (dup_int_array(&dst->args, src->args, src->arg_count) != 0 ||
         dup_u8_array(&dst->call_arg_abi, src->call_arg_abi, src->arg_count) != 0 ||
-        dup_u8_array(&dst->call_arg_sizes, src->call_arg_sizes, src->arg_count) != 0 ||
+        dup_u32_array(&dst->call_arg_sizes, src->call_arg_sizes, src->arg_count) != 0 ||
         dup_int_array(&dst->asm_out_values, src->asm_out_values, src->asm_out_count) != 0 ||
         dup_u8_array(&dst->asm_out_sizes, src->asm_out_sizes, src->asm_out_count) != 0 ||
         dup_str_array(&dst->asm_out_constraints, src->asm_out_constraints, src->asm_out_count) != 0 ||

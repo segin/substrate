@@ -2,6 +2,7 @@
 #define CC_SSA_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include "cc_frontend.h"
 
 typedef enum {
@@ -85,7 +86,7 @@ typedef struct {
     char *sym;
     int *args;
     unsigned char *call_arg_abi;
-    unsigned char *call_arg_sizes;
+    uint32_t *call_arg_sizes;  /**< bytes each argument takes; structures may be large */
     size_t arg_count;
     int asm_volatile;
     int asm_is_goto;
@@ -166,7 +167,7 @@ typedef struct {
 
     cc_value_type_t *value_types;
     unsigned char *value_is_unsigned;
-    unsigned char *value_sizes;
+    uint32_t *value_sizes;     /**< bytes in each value; a structure value is its whole size */
     size_t value_cap;
     int value_count;
     int label_count;
