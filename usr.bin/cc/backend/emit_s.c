@@ -783,6 +783,7 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_I2F: return "i2f";
     case CC_SSA_F2I: return "f2i";
     case CC_SSA_FROUND32: return "fround32";
+    case CC_SSA_FROUND64: return "fround64";
     case CC_SSA_STACKALLOC: return "stackalloc";
     case CC_SSA_LABEL: return "label";
     case CC_SSA_BR: return "br";
@@ -2113,6 +2114,7 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
     case CC_SSA_I2F:
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
+    case CC_SSA_FROUND64:
         return in->lhs == value;
     case CC_SSA_STORE:
     case CC_SSA_ADD:
@@ -2363,6 +2365,7 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     case CC_SSA_I2F:
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
+    case CC_SSA_FROUND64:
     case CC_SSA_BR_COND:
     case CC_SSA_RET:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
@@ -3594,6 +3597,10 @@ static void emit_x86_64_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, 
         fprintf(fp, "\taddq $16, %%rsp\n");
         fprintf(fp, "\tmovd %%xmm0, %%eax\n");
         fprintf(fp, "\tmovw %%ax, (%%rdx)\n");
+    } else if (value_size_bytes(f, in->rhs, 8) >= 16 && mem_size < 16) {
+        /* a long double stored to a double or float object is rounded to it */
+        fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
+        fprintf(fp, "\t%s (%s)\n", mem_size == 4 ? "fstps" : "fstpl", ist->regs[rp]);
     } else {
         fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, in->rhs), tmp);
         if (mem_size == 4) {
@@ -3669,6 +3676,32 @@ static void emit_x86_64_i2f(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         fprintf(fp, "\tcvtsi2sdq %s, %s\n", ist->regs[rl], tmp);
     }
     fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", tmp, slot_off(lay, in->dst));
+}
+
+/**
+ * Round a long double value to double.
+ *
+ * The x86-64 back end keeps a 16-byte long double value in its slot as
+ * x87 extended precision, so there this is an x87 load and a double
+ * store.  The i386 back end computes long double in double and converts
+ * only where it loads or stores memory, so its slots already hold the
+ * double and this is a copy.  A source that is a double already --
+ * lowering asks for the rounding without always knowing -- is copied.
+ *
+ * @param fp            the assembly output
+ * @param f             the function, for the source value's size
+ * @param lay           its slot layout
+ * @param in            the CC_SSA_FROUND64 instruction
+ * @param frame         the frame register: "%rbp" or "%ebp"
+ * @param x87_in_slots  whether a 16-byte value's slot holds x87 extended
+ *                      precision (x86-64) rather than a double (i386)
+ */
+static void emit_fround64(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
+                          const char *frame, int x87_in_slots) {
+    int extended = x87_in_slots && value_size_bytes(f, in->lhs, 8) >= 16;
+
+    fprintf(fp, "\t%s %d(%s)\n", extended ? "fldt" : "fldl", slot_off(lay, in->lhs), frame);
+    fprintf(fp, "\tfstpl %d(%s)\n", slot_off(lay, in->dst), frame);
 }
 
 static void emit_x86_64_fround32(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
@@ -4840,6 +4873,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_FROUND32:
                 emit_x86_64_fround32(fp, &lay, in);
+                break;
+
+            case CC_SSA_FROUND64:
+                emit_fround64(fp, f, &lay, in, "%rbp", 1);
                 break;
 
             case CC_SSA_LABEL:
@@ -6274,6 +6311,10 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 } else {
                     emit_i386_fround32_sse(fp, &lay, in);
                 }
+                break;
+
+            case CC_SSA_FROUND64:
+                emit_fround64(fp, f, &lay, in, "%ebp", 0);
                 break;
 
             case CC_SSA_LABEL:

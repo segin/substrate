@@ -2789,6 +2789,37 @@ static int promote_f64_to_ldouble_value(cc_ssa_function_t *sf, int v, cc_diag_t 
     return in.dst;
 }
 
+/**
+ * Convert a long double value to double, the inverse of
+ * promote_f64_to_ldouble_value(): a long double value is 16 bytes of
+ * x87 extended precision, and reading it as a double without the
+ * conversion reads its low 8 bytes, part of the mantissa.
+ *
+ * @param sf    the function being lowered
+ * @param v     the value
+ * @param diag  receives a message if memory runs out
+ * @return      a double value holding @p v rounded to double (@p v
+ *              itself if it is not a long double), or -1 on error
+ */
+static int demote_ldouble_to_f64_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    if (value_type(sf, v) != CC_VAL_F64 || value_size(sf, v) < 16) {
+        return v;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_FROUND64;
+    in.dst = new_value(sf, CC_VAL_F64);
+    in.lhs = v;
+    in.rhs = -1;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory converting long double value");
+        return -1;
+    }
+    set_value_size(sf, in.dst, 8);
+    return in.dst;
+}
+
 static int integral_type_bits(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
@@ -3026,6 +3057,10 @@ static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_d
     cc_ssa_instr_t in;
     if (t != CC_TYPE_FLOAT) {
         return v;
+    }
+    v = demote_ldouble_to_f64_value(sf, v, diag);
+    if (v < 0) {
+        return -1;
     }
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_FROUND32;
@@ -6806,6 +6841,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     if (callee->params[i].type == CC_TYPE_LDOUBLE) {
                         av = promote_f64_to_ldouble_value(sf, av, diag);
+                    } else if (callee->params[i].type == CC_TYPE_DOUBLE) {
+                        av = demote_ldouble_to_f64_value(sf, av, diag);
+                    } else if (callee->params[i].type == CC_TYPE_FLOAT) {
+                        av = normalize_float_value(sf, av, CC_TYPE_FLOAT, diag);
+                    }
+                    if (callee->params[i].type == CC_TYPE_LDOUBLE || callee->params[i].type == CC_TYPE_DOUBLE ||
+                        callee->params[i].type == CC_TYPE_FLOAT) {
                         if (av < 0) {
                             free(in.sym);
                             free(in.args);
@@ -7664,6 +7706,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         v = cast_value(sf, v, type_to_val(e->aux_type), diag);
         if (v < 0) {
             return -1;
+        }
+        if (e->aux_type == CC_TYPE_DOUBLE || e->aux_type == CC_TYPE_FLOAT) {
+            v = demote_ldouble_to_f64_value(sf, v, diag);
+            if (v < 0) {
+                return -1;
+            }
         }
         if (e->aux_type == CC_TYPE_LDOUBLE) {
             if (is_integral_type(cast_src->value_type) && !is_pointer_type(cast_src->value_type)) {
@@ -11053,6 +11101,14 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     ret_size_hint = type_size_bytes_with_struct(tu, ctx->fn->ret_type, ctx->fn->ret_struct_id);
                     if (ret_size_hint <= 0) {
                         ret_size_hint = g_pointer_size_bytes;
+                    }
+                    /* a long double returned from a double or float function is rounded to it */
+                    if (ctx->fn->ret_type == CC_TYPE_DOUBLE || ctx->fn->ret_type == CC_TYPE_FLOAT) {
+                        rv = ctx->fn->ret_type == CC_TYPE_FLOAT ? normalize_float_value(sf, rv, CC_TYPE_FLOAT, diag)
+                                                                : demote_ldouble_to_f64_value(sf, rv, diag);
+                        if (rv < 0) {
+                            return -1;
+                        }
                     }
                 }
             } else {

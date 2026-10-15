@@ -50,6 +50,7 @@ typedef enum {
     CC_SSA_I2F,
     CC_SSA_F2I,
     CC_SSA_FROUND32,
+    CC_SSA_FROUND64,   /**< dst = lhs (a long double) rounded to double */
     CC_SSA_STACKALLOC,
     CC_SSA_LABEL,
     CC_SSA_BR,
