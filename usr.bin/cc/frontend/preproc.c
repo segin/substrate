@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "cc_frontend.h"
+#include "cc_util.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -64,12 +65,6 @@ typedef struct {
 } pp_macro_stack_t;
 
 typedef struct {
-    char **items;
-    size_t count;
-    size_t cap;
-} pp_strvec_t;
-
-typedef struct {
     int parent_active;
     int this_active;
     int any_taken;
@@ -78,13 +73,13 @@ typedef struct {
 
 typedef struct {
     pp_macro_table_t macros;
-    pp_strvec_t quote_paths;
-    pp_strvec_t user_include_paths;
-    pp_strvec_t system_include_paths;
-    pp_strvec_t include_once;
-    pp_strvec_t force_includes;
-    pp_strvec_t force_imacros;
-    pp_strvec_t dep_paths;
+    cc_strvec_t quote_paths;
+    cc_strvec_t user_include_paths;
+    cc_strvec_t system_include_paths;
+    cc_strvec_t include_once;
+    cc_strvec_t force_includes;
+    cc_strvec_t force_imacros;
+    cc_strvec_t dep_paths;
     pp_macro_stack_t pragma_macro_stack;
     int no_default_includes;
     int show_include_paths;
@@ -197,63 +192,14 @@ static void set_diag(cc_diag_t *diag, size_t line, size_t col, const char *msg) 
     snprintf(diag->message, sizeof(diag->message), "%s", msg);
 }
 
-static char *xstrdup_n(const char *s, size_t n) {
-    char *p = (char *)malloc(n + 1);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    p[n] = '\0';
-    return p;
-}
-
-static char *xstrdup(const char *s) {
-    if (s == NULL) {
-        return NULL;
-    }
-    return xstrdup_n(s, strlen(s));
-}
-
-static int strvec_push(pp_strvec_t *v, const char *s) {
-    char **next;
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
-        next = (char **)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
-    }
-    v->items[v->count] = xstrdup(s);
-    if (v->items[v->count] == NULL) {
-        return -1;
-    }
-    v->count++;
-    return 0;
-}
-
-static int strvec_contains(const pp_strvec_t *v, const char *s) {
-    size_t i;
-    if (v == NULL || s == NULL || s[0] == '\0') {
-        return 0;
-    }
-    for (i = 0; i < v->count; ++i) {
-        if (strcmp(v->items[i], s) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int strvec_push_unique(pp_strvec_t *v, const char *s) {
+static int strvec_push_unique(cc_strvec_t *v, const char *s) {
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
-    if (strvec_contains(v, s)) {
+    if (cc_strvec_contains(v, s)) {
         return 0;
     }
-    return strvec_push(v, s);
+    return cc_strvec_push(v, s);
 }
 
 static int sb_append_c(sb_t *sb, char c);
@@ -281,23 +227,12 @@ static void macro_table_ensure_sorted(pp_macro_table_t *t) {
     t->sorted = 1;
 }
 
-static void strvec_pop_free(pp_strvec_t *v) {
+static void strvec_pop_free(cc_strvec_t *v) {
     if (v == NULL || v->count == 0) {
         return;
     }
     free(v->items[v->count - 1]);
     v->count--;
-}
-
-static void strvec_free(pp_strvec_t *v) {
-    size_t i;
-    for (i = 0; i < v->count; ++i) {
-        free(v->items[i]);
-    }
-    free(v->items);
-    v->items = NULL;
-    v->count = 0;
-    v->cap = 0;
 }
 
 static int sb_append_escaped_make_target(sb_t *sb, const char *target, int quote_mode) {
@@ -638,8 +573,8 @@ static int macro_clone_item(const pp_macro_t *src, pp_macro_t *dst) {
         return -1;
     }
     memset(dst, 0, sizeof(*dst));
-    dst->name = xstrdup(src->name != NULL ? src->name : "");
-    dst->body = xstrdup(src->body != NULL ? src->body : "");
+    dst->name = cc_strdup(src->name != NULL ? src->name : "");
+    dst->body = cc_strdup(src->body != NULL ? src->body : "");
     dst->is_function = src->is_function;
     dst->is_variadic = src->is_variadic;
     dst->param_count = src->param_count;
@@ -655,7 +590,7 @@ static int macro_clone_item(const pp_macro_t *src, pp_macro_t *dst) {
             return -1;
         }
         for (i = 0; i < src->param_count; ++i) {
-            dst->params[i] = xstrdup(src->params[i] != NULL ? src->params[i] : "");
+            dst->params[i] = cc_strdup(src->params[i] != NULL ? src->params[i] : "");
             if (dst->params[i] == NULL) {
                 macro_free_item(dst);
                 return -1;
@@ -702,7 +637,7 @@ static int pragma_macro_push(pp_state_t *st, const char *name) {
         return -1;
     }
     memset(&snap, 0, sizeof(snap));
-    snap.name = xstrdup(name);
+    snap.name = cc_strdup(name);
     if (snap.name == NULL) {
         return -1;
     }
@@ -749,7 +684,7 @@ static int pragma_macro_pop(pp_state_t *st, const char *name) {
                     return -1;
                 }
                 for (pi = 0; pi < snap->macro.param_count; ++pi) {
-                    params[pi] = xstrdup(snap->macro.params[pi] != NULL ? snap->macro.params[pi] : "");
+                    params[pi] = cc_strdup(snap->macro.params[pi] != NULL ? snap->macro.params[pi] : "");
                     if (params[pi] == NULL) {
                         size_t pj;
                         for (pj = 0; pj < pi; ++pj) {
@@ -803,12 +738,12 @@ static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int
     } else {
         macro_free_item(m);
     }
-    m->name = xstrdup(name);
+    m->name = cc_strdup(name);
     m->is_function = is_function;
     m->is_variadic = is_variadic;
     m->params = params;
     m->param_count = param_count;
-    m->body = xstrdup(body != NULL ? body : "");
+    m->body = cc_strdup(body != NULL ? body : "");
     if (m->name == NULL || m->body == NULL) {
         macro_free_item(m);
         return -1;
@@ -1463,7 +1398,7 @@ static char *trim_dup(const char *s) {
     while (b > a && (b[-1] == ' ' || b[-1] == '\t' || b[-1] == '\r' || b[-1] == '\n')) {
         b--;
     }
-    return xstrdup_n(a, (size_t)(b - a));
+    return cc_strndup(a, (size_t)(b - a));
 }
 
 static int macro_set_builtin_fn1(pp_macro_table_t *t, const char *name, const char *param, const char *body) {
@@ -1471,7 +1406,7 @@ static int macro_set_builtin_fn1(pp_macro_table_t *t, const char *name, const ch
     if (params == NULL) {
         return -1;
     }
-    params[0] = xstrdup(param);
+    params[0] = cc_strdup(param);
     if (params[0] == NULL) {
         free(params);
         return -1;
@@ -2643,11 +2578,11 @@ static int parse_cmd_define(pp_state_t *st, const char *arg) {
     char *body = NULL;
     int rc = -1;
     if (eq == NULL) {
-        name = xstrdup(arg);
-        body = xstrdup("1");
+        name = cc_strdup(arg);
+        body = cc_strdup("1");
     } else {
-        name = xstrdup_n(arg, (size_t)(eq - arg));
-        body = xstrdup(eq + 1);
+        name = cc_strndup(arg, (size_t)(eq - arg));
+        body = cc_strdup(eq + 1);
     }
     if (name == NULL || body == NULL) {
         goto out;
@@ -2673,7 +2608,7 @@ static int append_dep_target(pp_state_t *st, const char *value, int quote_mode) 
         return -1;
     }
     free(st->dep_target);
-    st->dep_target = sb.buf != NULL ? sb.buf : xstrdup("");
+    st->dep_target = sb.buf != NULL ? sb.buf : cc_strdup("");
     if (st->dep_target == NULL) {
         return -1;
     }
@@ -2718,7 +2653,7 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
              * GCC-compatible handling for -Wp,-MD,<file> and -Wp,-MMD,<file>.
              */
             free(st->dep_file);
-            st->dep_file = xstrdup(f);
+            st->dep_file = cc_strdup(f);
             if (st->dep_file == NULL) {
                 return -1;
             }
@@ -2729,7 +2664,7 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
                 return -1;
             }
             free(st->dep_file);
-            st->dep_file = xstrdup(flags[++i]);
+            st->dep_file = cc_strdup(flags[++i]);
             if (st->dep_file == NULL) {
                 return -1;
             }
@@ -2737,7 +2672,7 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
         }
         if (strncmp(f, "-MF", 3) == 0 && strlen(f) > 3) {
             free(st->dep_file);
-            st->dep_file = xstrdup(f + 3);
+            st->dep_file = cc_strdup(f + 3);
             if (st->dep_file == NULL) {
                 return -1;
             }
@@ -2769,24 +2704,24 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
                 return -1;
             }
             if (strcmp(f, "-include") == 0) {
-                if (strvec_push(&st->force_includes, flags[++i]) != 0) {
+                if (cc_strvec_push(&st->force_includes, flags[++i]) != 0) {
                     return -1;
                 }
             } else {
-                if (strvec_push(&st->force_imacros, flags[++i]) != 0) {
+                if (cc_strvec_push(&st->force_imacros, flags[++i]) != 0) {
                     return -1;
                 }
             }
             continue;
         }
         if (strncmp(f, "-include", 8) == 0 && strlen(f) > 8) {
-            if (strvec_push(&st->force_includes, f + 8) != 0) {
+            if (cc_strvec_push(&st->force_includes, f + 8) != 0) {
                 return -1;
             }
             continue;
         }
         if (strncmp(f, "-imacros", 8) == 0 && strlen(f) > 8) {
-            if (strvec_push(&st->force_imacros, f + 8) != 0) {
+            if (cc_strvec_push(&st->force_imacros, f + 8) != 0) {
                 return -1;
             }
             continue;
@@ -2796,31 +2731,31 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
                 return -1;
             }
             if (strcmp(f, "-I") == 0) {
-                if (strvec_push(&st->user_include_paths, flags[++i]) != 0)
+                if (cc_strvec_push(&st->user_include_paths, flags[++i]) != 0)
                     return -1;
             } else if (strcmp(f, "-isystem") == 0) {
-                if (strvec_push(&st->system_include_paths, flags[++i]) != 0)
+                if (cc_strvec_push(&st->system_include_paths, flags[++i]) != 0)
                     return -1;
             } else {
-                if (strvec_push(&st->quote_paths, flags[++i]) != 0)
+                if (cc_strvec_push(&st->quote_paths, flags[++i]) != 0)
                     return -1;
             }
             continue;
         }
         if (strncmp(f, "-I", 2) == 0 && strlen(f) > 2) {
-            if (strvec_push(&st->user_include_paths, f + 2) != 0) {
+            if (cc_strvec_push(&st->user_include_paths, f + 2) != 0) {
                 return -1;
             }
             continue;
         }
         if (strncmp(f, "-isystem", 8) == 0 && strlen(f) > 8) {
-            if (strvec_push(&st->system_include_paths, f + 8) != 0) {
+            if (cc_strvec_push(&st->system_include_paths, f + 8) != 0) {
                 return -1;
             }
             continue;
         }
         if (strncmp(f, "-iquote", 7) == 0 && strlen(f) > 7) {
-            if (strvec_push(&st->quote_paths, f + 7) != 0) {
+            if (cc_strvec_push(&st->quote_paths, f + 7) != 0) {
                 return -1;
             }
             continue;
@@ -2920,12 +2855,12 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
 static char *dirname_dup(const char *path) {
     const char *slash = strrchr(path, '/');
     if (slash == NULL) {
-        return xstrdup(".");
+        return cc_strdup(".");
     }
     if (slash == path) {
-        return xstrdup("/");
+        return cc_strdup("/");
     }
-    return xstrdup_n(path, (size_t)(slash - path));
+    return cc_strndup(path, (size_t)(slash - path));
 }
 
 static int path_exists(const char *path) {
@@ -3173,7 +3108,7 @@ static int once_add(pp_state_t *st, const char *path) {
     if (once_contains(st, key)) {
         return 0;
     }
-    return strvec_push(&st->include_once, key);
+    return cc_strvec_push(&st->include_once, key);
 }
 
 static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter, int *out_line_no,
@@ -3551,7 +3486,7 @@ static pp_num_t parse_expr_primary(expr_parser_t *p, int *ok) {
         *ok = 0;
         return pp_num_from_signed(0);
     }
-    tmp = xstrdup_n(p->s + start, p->pos - start);
+    tmp = cc_strndup(p->s + start, p->pos - start);
     if (tmp == NULL) {
         *ok = 0;
         return pp_num_from_signed(0);
@@ -3855,7 +3790,7 @@ static pp_num_t parse_expr_cond(expr_parser_t *p, int *ok) {
 }
 
 static char *expand_text(pp_state_t *st, const char *src, const char *file, int line, int depth,
-                         pp_strvec_t *disabled, cc_diag_t *diag);
+                         cc_strvec_t *disabled, cc_diag_t *diag);
 
 static char *stringify_macro_arg(const char *arg) {
     sb_t out;
@@ -3899,7 +3834,7 @@ static char *stringify_macro_arg(const char *arg) {
         return NULL;
     }
     if (out.buf == NULL) {
-        return xstrdup("\"\"");
+        return cc_strdup("\"\"");
     }
     return out.buf;
 }
@@ -3909,7 +3844,7 @@ static char *build_va_args_value(const pp_macro_t *m, char **args, size_t arg_co
     size_t i;
     memset(&out, 0, sizeof(out));
     if (!m->is_variadic || arg_count <= m->param_count) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     for (i = m->param_count; i < arg_count; ++i) {
         if (i > m->param_count) {
@@ -3924,7 +3859,7 @@ static char *build_va_args_value(const pp_macro_t *m, char **args, size_t arg_co
         }
     }
     if (out.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return out.buf;
 }
@@ -3974,7 +3909,7 @@ static int parse_va_opt_body(const char *body, size_t start, size_t *end_out, ch
             level--;
             if (level == 0) {
                 *end_out = i + 1;
-                *text_out = out.buf != NULL ? out.buf : xstrdup("");
+                *text_out = out.buf != NULL ? out.buf : cc_strdup("");
                 if (*text_out == NULL) {
                     sb_free(&out);
                     return -1;
@@ -4021,7 +3956,7 @@ static char *replace_va_args_in_text(const char *text, const char *va_args) {
         i++;
     }
     if (out.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return out.buf;
 }
@@ -4055,7 +3990,7 @@ static char *replace_ident_token(const char *text, const char *from, const char 
         }
         i++;
     }
-    return out.buf != NULL ? out.buf : xstrdup("");
+    return out.buf != NULL ? out.buf : cc_strdup("");
 }
 
 static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_args, size_t arg_count, int allow_va_opt,
@@ -4300,7 +4235,7 @@ next_iter:
     if (out.buf == NULL) {
         free(va_args_exp);
         free(va_args_raw);
-        return xstrdup("");
+        return cc_strdup("");
     }
 
     i = 0;
@@ -4356,7 +4291,7 @@ next_iter:
     free(va_args_raw);
     sb_free(&out);
     if (pasted.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return pasted.buf;
 }
@@ -4367,7 +4302,7 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
     int brace_level = 0;
     int bracket_level = 0;
     sb_t cur;
-    pp_strvec_t args;
+    cc_strvec_t args;
     memset(&cur, 0, sizeof(cur));
     memset(&args, 0, sizeof(args));
     while (src[i] != '\0') {
@@ -4449,7 +4384,7 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
                 if (arg == NULL) {
                     goto fail;
                 }
-                if (strvec_push(&args, arg) != 0) {
+                if (cc_strvec_push(&args, arg) != 0) {
                     free(arg);
                     goto fail;
                 }
@@ -4471,7 +4406,7 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             if (arg == NULL) {
                 goto fail;
             }
-            if (strvec_push(&args, arg) != 0) {
+            if (cc_strvec_push(&args, arg) != 0) {
                 free(arg);
                 goto fail;
             }
@@ -4490,7 +4425,7 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
     }
 fail:
     sb_free(&cur);
-    strvec_free(&args);
+    cc_strvec_free(&args);
     return -1;
 }
 
@@ -4502,7 +4437,7 @@ static void emit_macro_trace(const char *file, int line, const char *name) {
 }
 
 static char *expand_once(pp_state_t *st, const char *src, const char *file, int line, int depth,
-                         pp_strvec_t *disabled, cc_diag_t *diag) {
+                         cc_strvec_t *disabled, cc_diag_t *diag) {
     size_t i = 0;
     sb_t out;
     memset(&out, 0, sizeof(out));
@@ -4524,7 +4459,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
             while (is_ident_char((unsigned char)src[j])) {
                 j++;
             }
-            name = xstrdup_n(src + i, j - i);
+            name = cc_strndup(src + i, j - i);
             if (name == NULL) {
                 sb_free(&out);
                 return NULL;
@@ -4652,7 +4587,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     i = j;
                     continue;
                 }
-                if (disabled != NULL && strvec_contains(disabled, name)) {
+                if (disabled != NULL && cc_strvec_contains(disabled, name)) {
                     if (sb_append_n(&out, src + i, j - i) != 0) {
                         free(name);
                         sb_free(&out);
@@ -4666,7 +4601,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     char *exp_body;
                     char *masked_body;
                     size_t k = j;
-                    if (disabled != NULL && strvec_push(disabled, name) != 0) {
+                    if (disabled != NULL && cc_strvec_push(disabled, name) != 0) {
                         free(name);
                         sb_free(&out);
                         return NULL;
@@ -4698,7 +4633,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                             alias_end++;
                         }
                         if (alias_end > alias_start && skip_ws(alias_end)[0] == '\0') {
-                            char *alias_name = xstrdup_n(alias_start, (size_t)(alias_end - alias_start));
+                            char *alias_name = cc_strndup(alias_start, (size_t)(alias_end - alias_start));
                             if (alias_name == NULL) {
                                 free(exp_body);
                                 free(name);
@@ -4872,7 +4807,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
-                    if (disabled != NULL && strvec_push(disabled, name) != 0) {
+                    if (disabled != NULL && cc_strvec_push(disabled, name) != 0) {
                         emit_macro_trace(file, line, name);
                         free(subst);
                         free(name);
@@ -4951,7 +4886,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
         i++;
     }
     if (out.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return out.buf;
 }
@@ -5049,7 +4984,7 @@ static char *strip_pragma_operators(const char *src) {
         i++;
     }
     if (out.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return out.buf;
 }
@@ -5059,7 +4994,7 @@ static char *mask_hidden_macro_name_tokens(const char *src, const char *name) {
     size_t i = 0;
     size_t nlen;
     if (src == NULL || name == NULL || name[0] == '\0') {
-        return xstrdup(src != NULL ? src : "");
+        return cc_strdup(src != NULL ? src : "");
     }
     nlen = strlen(name);
     memset(&out, 0, sizeof(out));
@@ -5116,7 +5051,7 @@ static char *mask_hidden_macro_name_tokens(const char *src, const char *name) {
         i++;
     }
     if (out.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return out.buf;
 }
@@ -5164,16 +5099,16 @@ static char *unmask_hidden_macro_tokens(const char *src) {
         i++;
     }
     if (out.buf == NULL) {
-        return xstrdup("");
+        return cc_strdup("");
     }
     return out.buf;
 }
 
 static char *expand_text(pp_state_t *st, const char *src, const char *file, int line, int depth,
-                         pp_strvec_t *disabled, cc_diag_t *diag) {
+                         cc_strvec_t *disabled, cc_diag_t *diag) {
     char *cur;
     int pass;
-    pp_strvec_t local_disabled;
+    cc_strvec_t local_disabled;
     int use_local_disabled = 0;
 
     if (depth > (int)st->max_expand_depth) {
@@ -5185,10 +5120,10 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
         disabled = &local_disabled;
         use_local_disabled = 1;
     }
-    cur = xstrdup(src);
+    cur = cc_strdup(src);
     if (cur == NULL) {
         if (use_local_disabled) {
-            strvec_free(disabled);
+            cc_strvec_free(disabled);
         }
         return NULL;
     }
@@ -5197,7 +5132,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
         if (next == NULL) {
             free(cur);
             if (use_local_disabled) {
-                strvec_free(disabled);
+                cc_strvec_free(disabled);
             }
             return NULL;
         }
@@ -5206,7 +5141,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
             free(cur);
             free(next);
             if (use_local_disabled) {
-                strvec_free(disabled);
+                cc_strvec_free(disabled);
             }
             return NULL;
         }
@@ -5215,7 +5150,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
             free(cur);
             free(next);
             if (use_local_disabled) {
-                strvec_free(disabled);
+                cc_strvec_free(disabled);
             }
             return NULL;
         }
@@ -5229,7 +5164,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
             }
             if (use_local_disabled) {
                 char *unmasked = unmask_hidden_macro_tokens(normalized);
-                strvec_free(disabled);
+                cc_strvec_free(disabled);
                 free(normalized);
                 if (unmasked == NULL) {
                     set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
@@ -5243,7 +5178,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
         cur = next;
     }
     if (use_local_disabled) {
-        strvec_free(disabled);
+        cc_strvec_free(disabled);
     }
     {
         char *normalized = strip_pragma_operators(cur);
@@ -5329,7 +5264,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         }
                         name_b = expr + k;
                     }
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5514,7 +5449,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5573,7 +5508,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5626,7 +5561,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5679,7 +5614,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5732,7 +5667,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5785,7 +5720,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5893,7 +5828,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    name = xstrdup_n(name_a, (size_t)(name_b - name_a));
+                    name = cc_strndup(name_a, (size_t)(name_b - name_a));
                     if (name == NULL) {
                         sb_free(&out);
                         return -1;
@@ -5914,7 +5849,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
             }
             i++;
         }
-        rewritten = out.buf != NULL ? out.buf : xstrdup("");
+        rewritten = out.buf != NULL ? out.buf : cc_strdup("");
         if (rewritten == NULL) {
             sb_free(&out);
             return -1;
@@ -5967,7 +5902,7 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
     }
     name_end = p;
     if (*p == '(') {
-        pp_strvec_t parsed_params;
+        cc_strvec_t parsed_params;
         memset(&parsed_params, 0, sizeof(parsed_params));
         is_function = 1;
         p++;
@@ -5983,29 +5918,29 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
                     break;
                 }
                 if (!is_ident_start((unsigned char)*p)) {
-                    strvec_free(&parsed_params);
+                    cc_strvec_free(&parsed_params);
                     return -1;
                 }
                 p++;
                 while (is_ident_char((unsigned char)*p)) {
                     p++;
                 }
-                param = xstrdup_n(a, (size_t)(p - a));
+                param = cc_strndup(a, (size_t)(p - a));
                 if (param == NULL) {
-                    strvec_free(&parsed_params);
+                    cc_strvec_free(&parsed_params);
                     return -1;
                 }
-                if (strvec_push(&parsed_params, param) != 0) {
+                if (cc_strvec_push(&parsed_params, param) != 0) {
                     free(param);
-                    strvec_free(&parsed_params);
+                    cc_strvec_free(&parsed_params);
                     return -1;
                 }
                 if (p[0] == '.' && p[1] == '.' && p[2] == '.') {
                     is_variadic = 1;
-                    vararg_name = xstrdup_n(a, (size_t)(p - a));
+                    vararg_name = cc_strndup(a, (size_t)(p - a));
                     free(param);
                     if (vararg_name == NULL) {
-                        strvec_free(&parsed_params);
+                        cc_strvec_free(&parsed_params);
                         return -1;
                     }
                     free(parsed_params.items[parsed_params.count - 1]);
@@ -6020,7 +5955,7 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
                     break;
                 }
                 if (*p != ',') {
-                    strvec_free(&parsed_params);
+                    cc_strvec_free(&parsed_params);
                     return -1;
                 }
                 p++;
@@ -6028,7 +5963,7 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
             }
         }
         if (*p != ')') {
-            strvec_free(&parsed_params);
+            cc_strvec_free(&parsed_params);
             return -1;
         }
         p++;
@@ -6036,8 +5971,8 @@ static int parse_define_directive(pp_state_t *st, const char *rest) {
         param_count = parsed_params.count;
     }
     p = skip_ws(p);
-    name = xstrdup_n(name_start, (size_t)(name_end - name_start));
-    body = xstrdup(p);
+    name = cc_strndup(name_start, (size_t)(name_end - name_start));
+    body = cc_strdup(p);
     if (name == NULL || body == NULL) {
         free(name);
         free(body);
@@ -6416,7 +6351,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                             p++;
                         }
                         {
-                            char *name = xstrdup_n(a, (size_t)(p - a));
+                            char *name = cc_strndup(a, (size_t)(p - a));
                             if (name == NULL) {
                                 goto fail;
                             }
@@ -6437,7 +6372,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     while (is_ident_char((unsigned char)*p)) {
                         p++;
                     }
-                    name = xstrdup_n(a, (size_t)(p - a));
+                    name = cc_strndup(a, (size_t)(p - a));
                     if (name == NULL) {
                         goto fail;
                     }
@@ -6463,7 +6398,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     while (is_ident_char((unsigned char)*p)) {
                         p++;
                     }
-                    name = xstrdup_n(a, (size_t)(p - a));
+                    name = cc_strndup(a, (size_t)(p - a));
                     if (name == NULL) {
                         goto fail;
                     }
@@ -6517,7 +6452,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     while (is_ident_char((unsigned char)*p)) {
                         p++;
                     }
-                    name = xstrdup_n(a, (size_t)(p - a));
+                    name = cc_strndup(a, (size_t)(p - a));
                     if (name == NULL) {
                         goto fail;
                     }
@@ -6555,7 +6490,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     while (is_ident_char((unsigned char)*p)) {
                         p++;
                     }
-                    name = xstrdup_n(a, (size_t)(p - a));
+                    name = cc_strndup(a, (size_t)(p - a));
                     if (name == NULL) {
                         goto fail;
                     }
@@ -6917,13 +6852,13 @@ out:
         fclose(out);
     }
     macro_table_free(&st.macros);
-    strvec_free(&st.quote_paths);
-    strvec_free(&st.user_include_paths);
-    strvec_free(&st.system_include_paths);
-    strvec_free(&st.include_once);
-    strvec_free(&st.force_includes);
-    strvec_free(&st.force_imacros);
-    strvec_free(&st.dep_paths);
+    cc_strvec_free(&st.quote_paths);
+    cc_strvec_free(&st.user_include_paths);
+    cc_strvec_free(&st.system_include_paths);
+    cc_strvec_free(&st.include_once);
+    cc_strvec_free(&st.force_includes);
+    cc_strvec_free(&st.force_imacros);
+    cc_strvec_free(&st.dep_paths);
     macro_stack_free(&st.pragma_macro_stack);
     free(st.dep_target);
     free(st.dep_file);

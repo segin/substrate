@@ -4,6 +4,7 @@
 #include "cc_driver.h"
 #include "cc_frontend.h"
 #include "cc_pipeline.h"
+#include "cc_util.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -45,12 +46,6 @@
 #define SUBSTRATE_TC_TRACE_ENV "SUBSTRATE_TC_TRACE"
 #define SUBSTRATE_TC_MAX_ENV "SUBSTRATE_TC_MAX_DEPTH"
 #define SUBSTRATE_TC_DEFAULT_MAX 64
-
-typedef struct {
-  char **items;
-  size_t count;
-  size_t cap;
-} strvec_t;
 
 typedef struct {
   const char *self_path;
@@ -96,12 +91,12 @@ typedef struct {
   const char *print_file_name;
   const char *parse_bad_arg;
 
-  strvec_t cpp_flags;
-  strvec_t c_flags;
-  strvec_t as_flags;
-  strvec_t ld_flags;
-  strvec_t inputs;
-  strvec_t temp_files;
+  cc_strvec_t cpp_flags;
+  cc_strvec_t c_flags;
+  cc_strvec_t as_flags;
+  cc_strvec_t ld_flags;
+  cc_strvec_t inputs;
+  cc_strvec_t temp_files;
 } cc_opts_t;
 
 typedef struct {
@@ -125,19 +120,6 @@ static int opt_level_num(const cc_opts_t *o) {
   return o->opt_level[0] - '0';
 }
 
-static char *xstrdup(const char *s) {
-  size_t n;
-  char *p;
-  if (s == NULL) {
-    return NULL;
-  }
-  n = strlen(s) + 1;
-  p = (char *)malloc(n);
-  if (p != NULL) {
-    memcpy(p, s, n);
-  }
-  return p;
-}
 
 static void sigchld_guard_begin(sigchld_guard_t *guard) {
   struct sigaction act;
@@ -203,47 +185,15 @@ static void print_diag_source_line(const char *path, size_t line, size_t col) {
   fclose(fp);
 }
 
-static int strvec_push(strvec_t *v, const char *s) {
-  char **next;
 
-  if (v->count == v->cap) {
-    size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
-    next = (char **)realloc(v->items, ncap * sizeof(*next));
-    if (next == NULL) {
-      return -1;
-    }
-    v->items = next;
-    v->cap = ncap;
-  }
-
-  v->items[v->count] = xstrdup(s);
-  if (v->items[v->count] == NULL) {
-    return -1;
-  }
-
-  v->count++;
-  return 0;
-}
-
-static void strvec_free(strvec_t *v) {
-  size_t i;
-
-  for (i = 0; i < v->count; ++i) {
-    free(v->items[i]);
-  }
-  free(v->items);
-  v->items = NULL;
-  v->count = 0;
-  v->cap = 0;
-}
 
 static void opts_free(cc_opts_t *o) {
-  strvec_free(&o->cpp_flags);
-  strvec_free(&o->c_flags);
-  strvec_free(&o->as_flags);
-  strvec_free(&o->ld_flags);
-  strvec_free(&o->inputs);
-  strvec_free(&o->temp_files);
+  cc_strvec_free(&o->cpp_flags);
+  cc_strvec_free(&o->c_flags);
+  cc_strvec_free(&o->as_flags);
+  cc_strvec_free(&o->ld_flags);
+  cc_strvec_free(&o->inputs);
+  cc_strvec_free(&o->temp_files);
 }
 
 static int run_cmd(const cc_opts_t *o, char **argv) {
@@ -627,7 +577,7 @@ static int toolchain_guard_enter(const char *tool) {
   return 0;
 }
 
-static int strvec_has_flag(const strvec_t *v, const char *flag) {
+static int strvec_has_flag(const cc_strvec_t *v, const char *flag) {
   size_t i;
   if (v == NULL || flag == NULL) {
     return 0;
@@ -640,18 +590,6 @@ static int strvec_has_flag(const strvec_t *v, const char *flag) {
   return 0;
 }
 
-static int strvec_contains(const strvec_t *v, const char *value) {
-  size_t i;
-  if (v == NULL || value == NULL) {
-    return 0;
-  }
-  for (i = 0; i < v->count; ++i) {
-    if (strcmp(v->items[i], value) == 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
 
 static int add_gcc_system_include(cc_opts_t *o, const char *name) {
   char path[PATH_MAX];
@@ -668,14 +606,14 @@ static int add_gcc_system_include(cc_opts_t *o, const char *name) {
                             CC_SUBSTRATE_LOCAL_INCDIR) != 0) {
       return -1;
     }
-    if (!strvec_contains(&o->cpp_flags, sys_inc) &&
-        (strvec_push(&o->cpp_flags, "-isystem") != 0 ||
-         strvec_push(&o->cpp_flags, sys_inc) != 0)) {
+    if (!cc_strvec_contains(&o->cpp_flags, sys_inc) &&
+        (cc_strvec_push(&o->cpp_flags, "-isystem") != 0 ||
+         cc_strvec_push(&o->cpp_flags, sys_inc) != 0)) {
       return -1;
     }
-    if (!strvec_contains(&o->cpp_flags, local_inc) &&
-        (strvec_push(&o->cpp_flags, "-isystem") != 0 ||
-         strvec_push(&o->cpp_flags, local_inc) != 0)) {
+    if (!cc_strvec_contains(&o->cpp_flags, local_inc) &&
+        (cc_strvec_push(&o->cpp_flags, "-isystem") != 0 ||
+         cc_strvec_push(&o->cpp_flags, local_inc) != 0)) {
       return -1;
     }
     return 0;
@@ -687,11 +625,11 @@ static int add_gcc_system_include(cc_opts_t *o, const char *name) {
   if (gcc_print_file_name(name, o->target, path) != 0) {
     return 0;
   }
-  if (strvec_contains(&o->cpp_flags, path)) {
+  if (cc_strvec_contains(&o->cpp_flags, path)) {
     return 0;
   }
-  if (strvec_push(&o->cpp_flags, "-isystem") != 0 ||
-      strvec_push(&o->cpp_flags, path) != 0) {
+  if (cc_strvec_push(&o->cpp_flags, "-isystem") != 0 ||
+      cc_strvec_push(&o->cpp_flags, path) != 0) {
     return -1;
   }
   return 0;
@@ -738,8 +676,8 @@ static int add_builtin_resource_includes(cc_opts_t *o) {
 
   if (snprintf(path, sizeof(path), "%.*s/resource/include", (int)dirlen, self) > 0 &&
       access(path, R_OK | X_OK) == 0) {
-    if (!strvec_contains(&o->cpp_flags, path) &&
-        (strvec_push(&o->cpp_flags, "-isystem") != 0 || strvec_push(&o->cpp_flags, path) != 0)) {
+    if (!cc_strvec_contains(&o->cpp_flags, path) &&
+        (cc_strvec_push(&o->cpp_flags, "-isystem") != 0 || cc_strvec_push(&o->cpp_flags, path) != 0)) {
       return -1;
     }
     return 0;
@@ -747,8 +685,8 @@ static int add_builtin_resource_includes(cc_opts_t *o) {
 
   if (snprintf(path, sizeof(path), "%.*s/../lib/substratecc/include", (int)dirlen, self) > 0 &&
       access(path, R_OK | X_OK) == 0) {
-    if (!strvec_contains(&o->cpp_flags, path) &&
-        (strvec_push(&o->cpp_flags, "-isystem") != 0 || strvec_push(&o->cpp_flags, path) != 0)) {
+    if (!cc_strvec_contains(&o->cpp_flags, path) &&
+        (cc_strvec_push(&o->cpp_flags, "-isystem") != 0 || cc_strvec_push(&o->cpp_flags, path) != 0)) {
       return -1;
     }
   }
@@ -789,14 +727,14 @@ static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix,
     if (snprintf(out, PATH_MAX, "%s", with_suffix) >= PATH_MAX) {
       ret = -1;
     } else {
-      ret = strvec_push(&o->temp_files, out);
+      ret = cc_strvec_push(&o->temp_files, out);
     }
     free(with_suffix);
   } else {
     if (snprintf(out, PATH_MAX, "%s", templ) >= PATH_MAX) {
       ret = -1;
     } else {
-      ret = strvec_push(&o->temp_files, out);
+      ret = cc_strvec_push(&o->temp_files, out);
     }
   }
 
@@ -970,7 +908,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     if (strcmp(a, "-v") == 0 || strcmp(a, "--verbose") == 0) {
       o->verbose = 1;
       if (strcmp(a, "-v") == 0) {
-        if (strvec_push(&o->cpp_flags, a) != 0) {
+        if (cc_strvec_push(&o->cpp_flags, a) != 0) {
           return -1;
         }
       }
@@ -982,17 +920,17 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
     if (strcmp(a, "-Wall") == 0) {
       o->wall = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-Werror") == 0) {
       o->werror = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-Werror=implicit-function-declaration") == 0) {
       o->implicit_funcdecl_override = 0;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strncmp(a, "-Werror=", 8) == 0 || strncmp(a, "-Wno-error=", 11) == 0) {
@@ -1004,36 +942,36 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
     if (strcmp(a, "-Wno-implicit-function-declaration") == 0) {
       o->implicit_funcdecl_override = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-pedantic") == 0) {
       o->pedantic = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-pedantic-errors") == 0) {
       o->pedantic = 1;
       o->pedantic_errors = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-g") == 0) {
       o->debug = 1;
-      strvec_push(&o->c_flags, a);
-      strvec_push(&o->as_flags, a);
+      cc_strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->as_flags, a);
       continue;
     }
     if (strcmp(a, "-fPIC") == 0) {
       o->pic = 1;
-      strvec_push(&o->c_flags, a);
-      strvec_push(&o->ld_flags, a);
+      cc_strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->ld_flags, a);
       continue;
     }
     if (strcmp(a, "-fgnu89-inline") == 0) {
       o->gnu89_inline_mode = 1;
       o->gnu89_inline_override = 1;
-      if (strvec_push(&o->c_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       continue;
@@ -1041,20 +979,20 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     if (strcmp(a, "-fno-gnu89-inline") == 0) {
       o->gnu89_inline_mode = 0;
       o->gnu89_inline_override = 1;
-      if (strvec_push(&o->c_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strcmp(a, "-shared") == 0) {
       o->shared = 1;
-      strvec_push(&o->ld_flags, a);
+      cc_strvec_push(&o->ld_flags, a);
       continue;
     }
     if (strcmp(a, "-pthread") == 0) {
       o->pthread_flag = 1;
-      strvec_push(&o->c_flags, a);
-      strvec_push(&o->ld_flags, a);
+      cc_strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->ld_flags, a);
       continue;
     }
     if (strcmp(a, "-emit-ssa") == 0) {
@@ -1084,19 +1022,19 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
     if (strcmp(a, "-nostdlib") == 0) {
       o->nostdlib = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-nostdinc") == 0) {
       o->nostdinc = 1;
-      if (strvec_push(&o->cpp_flags, a) != 0 ||
-          strvec_push(&o->c_flags, a) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
+          cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strcmp(a, "-P") == 0 || strcmp(a, "-dM") == 0) {
-      if (strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       if (strcmp(a, "-dM") == 0) {
@@ -1106,7 +1044,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
     if (strcmp(a, "-M") == 0 || strcmp(a, "-MM") == 0 ||
         strcmp(a, "-MD") == 0 || strcmp(a, "-MMD") == 0) {
-      if (strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       if (strcmp(a, "-M") == 0 || strcmp(a, "-MM") == 0) {
@@ -1120,8 +1058,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      if (strvec_push(&o->cpp_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
         return -1;
       }
       ++i;
@@ -1130,14 +1068,14 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     if (strncmp(a, "-MF", 3) == 0 || strncmp(a, "-MT", 3) == 0 ||
         strncmp(a, "-MQ", 3) == 0 || strncmp(a, "-include", 8) == 0 ||
         strncmp(a, "-imacros", 8) == 0) {
-      if (strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strcmp(a, "-nodefaultlibs") == 0) {
       o->nodefaultlibs = 1;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
 
@@ -1162,12 +1100,12 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
 
     if (strncmp(a, "-std=", 5) == 0) {
       o->std = a + 5;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strncmp(a, "-O", 2) == 0) {
       o->opt_level = a + 2;
-      strvec_push(&o->c_flags, a);
+      cc_strvec_push(&o->c_flags, a);
       continue;
     }
     if (strcmp(a, "-m32") == 0) {
@@ -1181,16 +1119,16 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         o->i386_supports_sse2 = 0;
         o->i386_supports_mmx = 1;
       }
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strcmp(a, "-m64") == 0) {
       o->target = CC_TARGET_X86_64;
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       continue;
@@ -1208,10 +1146,10 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->c_flags, argv[i + 1]) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->c_flags, argv[i + 1]) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
         return -1;
       }
       if (!is_tune && i386_features_from_arch_name(
@@ -1240,8 +1178,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       int supports_mmx = 0;
       const char *eq = strchr(a, '=');
       int is_tune = strncmp(a, "-mtune=", 7) == 0;
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       if (!is_tune &&
@@ -1260,8 +1198,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     if (strcmp(a, "-msse") == 0 || strcmp(a, "-mno-sse") == 0) {
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       if (strcmp(a, "-msse") == 0) {
@@ -1278,8 +1216,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     if (strcmp(a, "-msse2") == 0 || strcmp(a, "-mno-sse2") == 0) {
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       if (strcmp(a, "-msse2") == 0) {
@@ -1296,8 +1234,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     if (strcmp(a, "-mmmx") == 0 || strcmp(a, "-mno-mmx") == 0) {
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       if (strcmp(a, "-mmmx") == 0) {
@@ -1315,14 +1253,14 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
     if (strcmp(a, "-mavx") == 0 || strcmp(a, "-mno-avx") == 0 ||
         strcmp(a, "-mavx2") == 0 || strcmp(a, "-mno-avx2") == 0) {
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strcmp(a, "-mfpmath=sse") == 0 || strcmp(a, "-mfpmath=387") == 0) {
-      if (strvec_push(&o->c_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       o->i386_fp_math_mode =
@@ -1333,8 +1271,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      if (strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->c_flags, argv[i + 1]) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->c_flags, argv[i + 1]) != 0) {
         return -1;
       }
       if (strcmp(argv[i + 1], "387") == 0) {
@@ -1352,10 +1290,10 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      if (strvec_push(&o->cpp_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, argv[i + 1]) != 0 ||
-          strvec_push(&o->c_flags, a) != 0 ||
-          strvec_push(&o->c_flags, argv[i + 1]) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0 ||
+          cc_strvec_push(&o->c_flags, a) != 0 ||
+          cc_strvec_push(&o->c_flags, argv[i + 1]) != 0) {
         return -1;
       }
       ++i;
@@ -1365,20 +1303,20 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     if (strncmp(a, "-I", 2) == 0 || strncmp(a, "-D", 2) == 0 ||
       strncmp(a, "-U", 2) == 0 || strncmp(a, "-iquote", 7) == 0 ||
       strncmp(a, "-isystem", 8) == 0 || strncmp(a, "-idirafter", 10) == 0) {
-      if (strvec_push(&o->cpp_flags, a) != 0 ||
-          strvec_push(&o->c_flags, a) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
+          cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strncmp(a, "-L", 2) == 0 || strncmp(a, "-l", 2) == 0) {
-      if (strvec_push(&o->ld_flags, a) != 0) {
+      if (cc_strvec_push(&o->ld_flags, a) != 0) {
         return -1;
       }
       continue;
     }
     if (strcmp(a, "-rdynamic") == 0) {
-      if (strvec_push(&o->ld_flags, "--export-dynamic") != 0) {
+      if (cc_strvec_push(&o->ld_flags, "--export-dynamic") != 0) {
         return -1;
       }
       continue;
@@ -1387,22 +1325,22 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      if (strvec_push(&o->ld_flags, a) != 0 ||
-          strvec_push(&o->ld_flags, argv[i + 1]) != 0) {
+      if (cc_strvec_push(&o->ld_flags, a) != 0 ||
+          cc_strvec_push(&o->ld_flags, argv[i + 1]) != 0) {
         return -1;
       }
       ++i;
       continue;
     }
     if (strncmp(a, "-Wl,", 4) == 0) {
-      char *csv = xstrdup(a + 4);
+      char *csv = cc_strdup(a + 4);
       char *tok;
       if (csv == NULL) {
         return -1;
       }
       tok = strtok(csv, ",");
       while (tok != NULL) {
-        if (strvec_push(&o->ld_flags, tok) != 0) {
+        if (cc_strvec_push(&o->ld_flags, tok) != 0) {
           free(csv);
           return -1;
         }
@@ -1412,14 +1350,14 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     if (strncmp(a, "-Wp,", 4) == 0) {
-      char *csv = xstrdup(a + 4);
+      char *csv = cc_strdup(a + 4);
       char *tok;
       if (csv == NULL) {
         return -1;
       }
       tok = strtok(csv, ",");
       while (tok != NULL) {
-        if (strvec_push(&o->cpp_flags, tok) != 0) {
+        if (cc_strvec_push(&o->cpp_flags, tok) != 0) {
           free(csv);
           return -1;
         }
@@ -1434,13 +1372,13 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      csv = xstrdup(argv[++i]);
+      csv = cc_strdup(argv[++i]);
       if (csv == NULL) {
         return -1;
       }
       tok = strtok(csv, ",");
       while (tok != NULL) {
-        if (strvec_push(&o->cpp_flags, tok) != 0) {
+        if (cc_strvec_push(&o->cpp_flags, tok) != 0) {
           free(csv);
           return -1;
         }
@@ -1450,14 +1388,14 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     if (strncmp(a, "-Wa,", 4) == 0) {
-      char *csv = xstrdup(a + 4);
+      char *csv = cc_strdup(a + 4);
       char *tok;
       if (csv == NULL) {
         return -1;
       }
       tok = strtok(csv, ",");
       while (tok != NULL) {
-        if (strvec_push(&o->as_flags, tok) != 0) {
+        if (cc_strvec_push(&o->as_flags, tok) != 0) {
           free(csv);
           return -1;
         }
@@ -1475,8 +1413,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       if (i + 1 >= argc) {
         return -1;
       }
-      if (strvec_push(&o->cpp_flags, a) != 0 ||
-          strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
+          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
         return -1;
       }
       ++i;
@@ -1488,14 +1426,14 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         strncmp(a, "-fpp-max-expanded-bytes=", 24) == 0 ||
         strncmp(a, "-fpp-max-output-bytes=", 22) == 0 ||
         strncmp(a, "-fpp-max-tokens=", 17) == 0) {
-      if (strvec_push(&o->cpp_flags, a) != 0) {
+      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
         return -1;
       }
       continue;
     }
 
     if (strcmp(a, "-") == 0) {
-      if (strvec_push(&o->inputs, a) != 0) {
+      if (cc_strvec_push(&o->inputs, a) != 0) {
         return -1;
       }
       continue;
@@ -1508,13 +1446,13 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
       continue;
     }
     if (a[0] == '-') {
-      if (strvec_push(&o->c_flags, a) != 0) {
+      if (cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       continue;
     }
 
-    if (strvec_push(&o->inputs, a) != 0) {
+    if (cc_strvec_push(&o->inputs, a) != 0) {
       return -1;
     }
   }
@@ -1906,7 +1844,7 @@ static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
   return (int)i;
 }
 
-static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
+static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) {
   char ld_path[PATH_MAX];
   const char *ld_prog;
 #ifdef CC_SUBSTRATE_BUILD
@@ -2140,7 +2078,7 @@ static int maybe_print_info_and_exit(int argc, char **argv) {
 
 int cc_main(int argc, char **argv) {
   cc_opts_t o;
-  strvec_t obj_files;
+  cc_strvec_t obj_files;
   size_t i;
   int rc = 1;
 
@@ -2316,7 +2254,7 @@ int cc_main(int argc, char **argv) {
       if (run_as(&o, tmp_s, out_o) != 0) {
         goto out;
       }
-      if (strvec_push(&obj_files, out_o) != 0) {
+      if (cc_strvec_push(&obj_files, out_o) != 0) {
         goto out;
       }
       continue;
@@ -2414,7 +2352,7 @@ int cc_main(int argc, char **argv) {
       if (run_as(&o, out_s, out_o) != 0) {
         goto out;
       }
-      if (strvec_push(&obj_files, out_o) != 0) {
+      if (cc_strvec_push(&obj_files, out_o) != 0) {
         goto out;
       }
       continue;
@@ -2454,14 +2392,14 @@ int cc_main(int argc, char **argv) {
       if (run_as(&o, in, out_o) != 0) {
         goto out;
       }
-      if (strvec_push(&obj_files, out_o) != 0) {
+      if (cc_strvec_push(&obj_files, out_o) != 0) {
         goto out;
       }
       continue;
     }
 
     if (has_ext(in, ".o") || has_ext(in, ".a") || has_ext(in, ".so")) {
-      if (strvec_push(&obj_files, in) != 0) {
+      if (cc_strvec_push(&obj_files, in) != 0) {
         goto out;
       }
       continue;
@@ -2492,7 +2430,7 @@ int cc_main(int argc, char **argv) {
 out:
   cleanup_temp_files(&o);
   opts_free(&o);
-  strvec_free(&obj_files);
+  cc_strvec_free(&obj_files);
   return rc;
 }
 

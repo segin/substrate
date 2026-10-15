@@ -1,4 +1,5 @@
 #include "cc_lexer.h"
+#include "cc_util.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -14,20 +15,6 @@ void cc_lexer_set_pointer_size(int bytes) {
     }
 }
 
-static char *xstrdup_local(const char *s) {
-    size_t n;
-    char *p;
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s);
-    p = (char *)malloc(n + 1);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n + 1);
-    return p;
-}
 
 static int is_ident_start_ascii(int c) {
     return isalpha(c) || c == '_';
@@ -145,7 +132,7 @@ static void lx_set_logical_file(cc_lexer_t *lx, const char *path) {
     if (path == NULL) {
         return;
     }
-    dup = xstrdup_local(path);
+    dup = cc_strdup(path);
     if (dup == NULL) {
         return;
     }
@@ -296,7 +283,7 @@ int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len, const char *path)
     lx->pos = 0;
     lx->line = 1;
     lx->col = 1;
-    lx->logical_file = xstrdup_local(path != NULL ? path : "");
+    lx->logical_file = cc_strdup(path != NULL ? path : "");
     return 0;
 }
 

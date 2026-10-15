@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_ssa.h"
 #include "cc_types.h"
+#include "cc_util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,19 +149,6 @@ static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     memset(in, 0, sizeof(*in));
 }
 
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-    if (s == NULL) {
-        return NULL;
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p != NULL) {
-        memcpy(p, s, n);
-    }
-    return p;
-}
 
 static size_t utf8_seq_len(unsigned char b0) {
     if ((b0 & 0x80u) == 0) return 1;
@@ -1306,7 +1294,7 @@ static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower
             ctx->labels = next;
             ctx->label_cap = ncap;
         }
-        ctx->labels[ctx->label_count].name = xstrdup(s->label_name);
+        ctx->labels[ctx->label_count].name = cc_strdup(s->label_name);
         if (ctx->labels[ctx->label_count].name == NULL) {
             set_diag(diag, "out of memory duplicating label name");
             return -1;
@@ -1486,7 +1474,7 @@ static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) 
     in.lhs = -1;
     in.rhs = -1;
     in.asm_volatile = 1;
-    in.sym = xstrdup("");
+    in.sym = cc_strdup("");
     in.asm_clobber_count = 1;
     in.asm_clobbers = (char **)calloc(1, sizeof(*in.asm_clobbers));
     if (in.sym == NULL || in.asm_clobbers == NULL) {
@@ -1494,7 +1482,7 @@ static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) 
         set_diag(diag, "out of memory emitting atomic compiler barrier");
         return -1;
     }
-    in.asm_clobbers[0] = xstrdup("memory");
+    in.asm_clobbers[0] = cc_strdup("memory");
     if (in.asm_clobbers[0] == NULL) {
         free_asm_instr_fields(&in);
         set_diag(diag, "out of memory emitting atomic compiler barrier clobber");
@@ -1518,7 +1506,7 @@ static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
     in.lhs = -1;
     in.rhs = -1;
     in.asm_volatile = 1;
-    in.sym = xstrdup(tmpl);
+    in.sym = cc_strdup(tmpl);
     in.asm_clobber_count = 1;
     in.asm_clobbers = (char **)calloc(1, sizeof(*in.asm_clobbers));
     if (in.sym == NULL || in.asm_clobbers == NULL) {
@@ -1526,7 +1514,7 @@ static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
         set_diag(diag, "out of memory emitting atomic full barrier");
         return -1;
     }
-    in.asm_clobbers[0] = xstrdup("memory");
+    in.asm_clobbers[0] = cc_strdup("memory");
     if (in.asm_clobbers[0] == NULL) {
         free_asm_instr_fields(&in);
         set_diag(diag, "out of memory emitting atomic full barrier clobber");
@@ -1691,12 +1679,12 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     }
     *vars = next;
 
-    dup = xstrdup(name);
+    dup = cc_strdup(name);
     if (dup == NULL) {
         return -1;
     }
     if (is_static_storage && static_sym != NULL) {
-        sym_dup = xstrdup(static_sym);
+        sym_dup = cc_strdup(static_sym);
         if (sym_dup == NULL) {
             free(dup);
             return -1;
@@ -3776,7 +3764,7 @@ static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *
     in.lhs = -1;
     in.rhs = -1;
     in.param_index = -1;
-    in.sym = xstrdup(name);
+    in.sym = cc_strdup(name);
     if (in.sym == NULL || in.dst < 0 || push_instr(sf, in) != 0) {
         free(in.sym);
         set_diag(diag, "out of memory emitting global address");
@@ -3929,7 +3917,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_STR:
         in.op = CC_SSA_STR;
         in.dst = new_value(sf, CC_VAL_I64);
-        in.sym = xstrdup(e->ident != NULL ? e->ident : "\"\"");
+        in.sym = cc_strdup(e->ident != NULL ? e->ident : "\"\"");
         if (in.sym == NULL) {
             return -1;
         }
@@ -5219,7 +5207,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             memset(&call_in, 0, sizeof(call_in));
             call_in.op = CC_SSA_CALL;
             call_in.call_is_variadic = 0;
-            call_in.sym = xstrdup(is_freestanding_mode() ? "kmalloc" : "malloc");
+            call_in.sym = cc_strdup(is_freestanding_mode() ? "kmalloc" : "malloc");
             call_in.arg_count = 1;
             call_in.args = (int *)calloc(1, sizeof(*call_in.args));
             call_in.dst = new_value(sf, CC_VAL_I64);
@@ -6040,19 +6028,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMCPY_CHK) {
-                call_in.sym = xstrdup("memcpy");
+                call_in.sym = cc_strdup("memcpy");
                 call_in.args[0] = dstv;
                 call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
                                              CC_VAL_I64, diag);
                 call_in.args[2] = nbytes;
             } else if (bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMMOVE_CHK) {
-                call_in.sym = xstrdup("memmove");
+                call_in.sym = cc_strdup("memmove");
                 call_in.args[0] = dstv;
                 call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
                                              CC_VAL_I64, diag);
                 call_in.args[2] = nbytes;
             } else {
-                call_in.sym = xstrdup("memset");
+                call_in.sym = cc_strdup("memset");
                 call_in.args[0] = dstv;
                 call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
                                              CC_VAL_I64, diag);
@@ -6088,7 +6076,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             memset(&call_in, 0, sizeof(call_in));
             call_in.op = CC_SSA_CALL;
             call_in.call_is_variadic = 0;
-            call_in.sym = xstrdup("strlen");
+            call_in.sym = cc_strdup("strlen");
             call_in.arg_count = 1;
             call_in.args = (int *)calloc(1, sizeof(*call_in.args));
             call_in.dst = new_value(sf, CC_VAL_I64);
@@ -6710,7 +6698,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.call_is_variadic = (callee != NULL && callee->has_prototype) ? callee->is_variadic : 1;
             in.call_fixed_count =
                 (callee != NULL && callee->has_prototype && callee->is_variadic) ? (int)callee->param_count : 0;
-            in.sym = xstrdup(e->ident);
+            in.sym = cc_strdup(e->ident);
             if (in.sym == NULL) {
                 return -1;
             }
@@ -7782,7 +7770,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             for (j = 0; j < var_count; ++j) {
                 lvars[j] = vars[j];
-                lvars[j].name = xstrdup(vars[j].name);
+                lvars[j].name = cc_strdup(vars[j].name);
                 if (lvars[j].name == NULL) {
                     size_t k;
                     for (k = 0; k < j; ++k) {
@@ -7794,7 +7782,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 if (vars[j].static_sym != NULL) {
-                    lvars[j].static_sym = xstrdup(vars[j].static_sym);
+                    lvars[j].static_sym = cc_strdup(vars[j].static_sym);
                     if (lvars[j].static_sym == NULL) {
                         size_t k;
                         free(lvars[j].name);
@@ -8119,7 +8107,7 @@ static int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, lo
     memset(&call_in, 0, sizeof(call_in));
     call_in.op = CC_SSA_CALL;
     call_in.call_is_variadic = 0;
-    call_in.sym = xstrdup("memcpy");
+    call_in.sym = cc_strdup("memcpy");
     call_in.arg_count = 3;
     call_in.args = (int *)calloc(3, sizeof(*call_in.args));
     call_in.dst = new_value(sf, CC_VAL_I64);
@@ -8162,7 +8150,7 @@ static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, 
     memset(&call_in, 0, sizeof(call_in));
     call_in.op = CC_SSA_CALL;
     call_in.call_is_variadic = 0;
-    call_in.sym = xstrdup("memset");
+    call_in.sym = cc_strdup("memset");
     call_in.arg_count = 3;
     call_in.args = (int *)calloc(3, sizeof(*call_in.args));
     call_in.dst = new_value(sf, CC_VAL_I64);
@@ -9613,7 +9601,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
 
             memset(&g, 0, sizeof(g));
-            g.name = xstrdup(sym);
+            g.name = cc_strdup(sym);
             g.type = s->type;
             g.type_struct_id = s->type_struct_id;
             g.array_len = is_array_obj ? s->array_len : -1;
@@ -9622,7 +9610,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             g.attr_flags = s->attr_flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED | CC_ATTR_SECTION);
             g.attr_align = s->attr_align;
             if (s->attr_section != NULL) {
-                g.attr_section = xstrdup(s->attr_section);
+                g.attr_section = cc_strdup(s->attr_section);
             }
             g.has_init = have_const_init;
             if (g.has_init && (g.type == CC_TYPE_FLOAT || g.type == CC_TYPE_DOUBLE || g.type == CC_TYPE_LDOUBLE) &&
@@ -9671,7 +9659,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     return -1;
                 }
                 memset(&guard, 0, sizeof(guard));
-                guard.name = xstrdup(guard_sym);
+                guard.name = cc_strdup(guard_sym);
                 guard.type = CC_TYPE_INT;
                 guard.type_struct_id = -1;
                 guard.array_len = -1;
@@ -10188,7 +10176,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     memset(&call_in, 0, sizeof(call_in));
                     call_in.op = CC_SSA_CALL;
                     call_in.call_is_variadic = 0;
-                    call_in.sym = xstrdup(is_freestanding_mode() ? "kmalloc" : "malloc");
+                    call_in.sym = cc_strdup(is_freestanding_mode() ? "kmalloc" : "malloc");
                     call_in.arg_count = 1;
                     call_in.args = (int *)calloc(1, sizeof(*call_in.args));
                     call_in.dst = new_value(sf, CC_VAL_I64);
@@ -10553,7 +10541,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         in.rhs = -1;
         in.asm_volatile = s->asm_is_volatile ? 1 : 0;
         in.asm_is_goto = s->asm_is_goto ? 1 : 0;
-        in.sym = xstrdup(s->asm_template != NULL ? s->asm_template : "");
+        in.sym = cc_strdup(s->asm_template != NULL ? s->asm_template : "");
         in.asm_out_count = s->asm_output_count;
         in.asm_in_count = s->asm_input_count;
         in.asm_clobber_count = s->asm_clobber_count;
@@ -10770,9 +10758,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             in.asm_out_values[i4] = out_v;
-            in.asm_out_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
+            in.asm_out_constraints[i4] = cc_strdup(op->constraint != NULL ? op->constraint : "");
             if (op->name != NULL) {
-                in.asm_out_names[i4] = xstrdup(op->name);
+                in.asm_out_names[i4] = cc_strdup(op->name);
             }
             if (in.asm_out_constraints[i4] == NULL || (op->name != NULL && in.asm_out_names[i4] == NULL)) {
                 free_asm_instr_fields(&in);
@@ -10805,9 +10793,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 in_sz = 255;
             }
             in.asm_in_sizes[i4] = (unsigned char)in_sz;
-            in.asm_in_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
+            in.asm_in_constraints[i4] = cc_strdup(op->constraint != NULL ? op->constraint : "");
             if (op->name != NULL) {
-                in.asm_in_names[i4] = xstrdup(op->name);
+                in.asm_in_names[i4] = cc_strdup(op->name);
             }
             if (in.asm_in_constraints[i4] == NULL || (op->name != NULL && in.asm_in_names[i4] == NULL)) {
                 free_asm_instr_fields(&in);
@@ -10820,7 +10808,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
         }
         for (i4 = 0; i4 < in.asm_clobber_count; ++i4) {
-            in.asm_clobbers[i4] = xstrdup(s->asm_clobbers[i4] != NULL ? s->asm_clobbers[i4] : "");
+            in.asm_clobbers[i4] = cc_strdup(s->asm_clobbers[i4] != NULL ? s->asm_clobbers[i4] : "");
             if (in.asm_clobbers[i4] == NULL) {
                 free_asm_instr_fields(&in);
                 free(asm_out_store_ptr);
@@ -10856,7 +10844,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             in.asm_goto_labels[i4] = l;
-            in.asm_goto_names[i4] = xstrdup(lname);
+            in.asm_goto_names[i4] = cc_strdup(lname);
             if (in.asm_goto_names[i4] == NULL) {
                 free_asm_instr_fields(&in);
                 free(asm_out_store_ptr);
@@ -11873,7 +11861,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
         return eval_global_addr_symbol_addend(tu, e->rhs, out_sym, out_addend);
     }
     if (e->kind == CC_EXPR_IDENT && e->ident != NULL && e->ident[0] != '\0') {
-        sym = xstrdup(e->ident);
+        sym = cc_strdup(e->ident);
         if (sym == NULL) {
             return -1;
         }
@@ -12001,7 +11989,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         *out_f = 0.0;
         *out_is_float = 0;
         if (out_sym != NULL) {
-            *out_sym = xstrdup(e->ident);
+            *out_sym = cc_strdup(e->ident);
             return *out_sym == NULL ? -1 : 0;
         }
         return 0;
@@ -12022,7 +12010,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
                 } else {
                     char tmp[384];
                     snprintf(tmp, sizeof(tmp), "%s%+ld", sym, addend);
-                    *out_sym = xstrdup(tmp);
+                    *out_sym = cc_strdup(tmp);
                     free(sym);
                     return *out_sym == NULL ? -1 : 0;
                 }
@@ -12146,7 +12134,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
                     } else {
                         char tmp[384];
                         snprintf(tmp, sizeof(tmp), "%s%+ld", addr_sym, addr_addend);
-                        *out_sym = xstrdup(tmp);
+                        *out_sym = cc_strdup(tmp);
                         free(addr_sym);
                         if (*out_sym == NULL) {
                             return -1;
@@ -12204,7 +12192,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
                         *out_sym = base;
                     } else {
                         snprintf(tmp, sizeof(tmp), "%s%+ld", base, addend);
-                        *out_sym = xstrdup(tmp);
+                        *out_sym = cc_strdup(tmp);
                         free(base);
                         if (*out_sym == NULL) {
                             return -1;
@@ -12411,7 +12399,7 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
         return 0;
     case CC_EXPR_STR:
         out->init_is_string = 1;
-        out->init_str = xstrdup(e->ident != NULL ? e->ident : "\"\"");
+        out->init_str = cc_strdup(e->ident != NULL ? e->ident : "\"\"");
         return out->init_str == NULL ? -1 : 0;
     case CC_EXPR_CAST:
         return eval_global_init_item(tu, e->lhs, out);
@@ -12730,7 +12718,7 @@ static int append_global_reloc(global_reloc_t **arr, size_t *count, long offset,
         return -1;
     }
     *arr = next;
-    dup = xstrdup(sym);
+    dup = cc_strdup(sym);
     if (dup == NULL) {
         set_diag(diag, "out of memory duplicating global relocation symbol");
         return -1;
@@ -12758,7 +12746,7 @@ static int append_global_string_reloc(global_reloc_t **arr, size_t *count, long 
         return -1;
     }
     *arr = next;
-    dup = xstrdup(str);
+    dup = cc_strdup(str);
     if (dup == NULL) {
         set_diag(diag, "out of memory duplicating global string relocation payload");
         return -1;
@@ -13679,14 +13667,14 @@ static int build_global_stream_from_bytes(cc_ssa_global_t *g, const unsigned cha
             it.init_size = relocs[ri].size;
             if (relocs[ri].is_string) {
                 it.init_is_string = 1;
-                it.init_str = xstrdup(relocs[ri].payload);
+                it.init_str = cc_strdup(relocs[ri].payload);
                 if (it.init_str == NULL) {
                     set_diag(diag, "out of memory duplicating relocation string in global initializer stream");
                     return -1;
                 }
             } else {
                 it.init_is_symbol = 1;
-                it.init_sym = xstrdup(relocs[ri].payload);
+                it.init_sym = cc_strdup(relocs[ri].payload);
                 if (it.init_sym == NULL) {
                     set_diag(diag, "out of memory duplicating relocation symbol in global initializer stream");
                     return -1;
@@ -13856,7 +13844,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             long struct_elems = 0;
             char *init_sym = NULL;
             const cc_expr_t *init = tu->globals[i].init;
-            out->globals[i].name = xstrdup(tu->globals[i].name);
+            out->globals[i].name = cc_strdup(tu->globals[i].name);
             out->globals[i].type = tu->globals[i].type;
             out->globals[i].type_struct_id = tu->globals[i].type_struct_id;
             out->globals[i].array_len = tu->globals[i].array_len;
@@ -13871,7 +13859,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         tu->globals[i].array_len);
             }
             if (tu->globals[i].attr_section != NULL) {
-                out->globals[i].attr_section = xstrdup(tu->globals[i].attr_section);
+                out->globals[i].attr_section = cc_strdup(tu->globals[i].attr_section);
                 if (out->globals[i].attr_section == NULL) {
                     set_diag(diag, "out of memory duplicating global section attribute");
                     cc_ssa_module_free(out);
@@ -13879,7 +13867,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
             }
             if (tu->globals[i].attr_alias != NULL) {
-                out->globals[i].attr_alias = xstrdup(tu->globals[i].attr_alias);
+                out->globals[i].attr_alias = cc_strdup(tu->globals[i].attr_alias);
                 if (out->globals[i].attr_alias == NULL) {
                     set_diag(diag, "out of memory duplicating global alias attribute");
                     cc_ssa_module_free(out);
@@ -14136,7 +14124,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
                 memset(&lit, 0, sizeof(lit));
-                lit.name = xstrdup(symbuf);
+                lit.name = cc_strdup(symbuf);
                 lit.type = CC_TYPE_PTR_UCHAR;
                 lit.type_struct_id = -1;
                 lit.array_len = lit_size;
@@ -14174,7 +14162,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     cc_ssa_module_free(out);
                     return -1;
                 }
-                init_sym = xstrdup(symbuf);
+                init_sym = cc_strdup(symbuf);
                 if (init_sym == NULL) {
                     set_diag(diag, "out of memory duplicating compound literal symbol reference");
                     cc_ssa_module_free(out);
@@ -14484,7 +14472,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
             } else if (init != NULL && init->kind == CC_EXPR_STR) {
                 init_is_string = 1;
-                out->globals[i].init_str = xstrdup(init->ident != NULL ? init->ident : "\"\"");
+                out->globals[i].init_str = cc_strdup(init->ident != NULL ? init->ident : "\"\"");
                 if (out->globals[i].init_str == NULL) {
                     set_diag(diag, "out of memory duplicating global string initializer");
                     cc_ssa_module_free(out);
@@ -14493,7 +14481,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             } else if (init != NULL && init->kind == CC_EXPR_CAST && init->lhs != NULL &&
                        init->lhs->kind == CC_EXPR_STR && is_pointer_type(tu->globals[i].type)) {
                 init_is_string = 1;
-                out->globals[i].init_str = xstrdup(init->lhs->ident != NULL ? init->lhs->ident : "\"\"");
+                out->globals[i].init_str = cc_strdup(init->lhs->ident != NULL ? init->lhs->ident : "\"\"");
                 if (out->globals[i].init_str == NULL) {
                     set_diag(diag, "out of memory duplicating global string initializer");
                     cc_ssa_module_free(out);
@@ -14556,7 +14544,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             continue;
         }
         memset(&gdecl, 0, sizeof(gdecl));
-        gdecl.name = xstrdup(fdecl->name);
+        gdecl.name = cc_strdup(fdecl->name);
         gdecl.type = CC_TYPE_PTR_VOID;
         gdecl.type_struct_id = -1;
         gdecl.array_len = -1;
@@ -14564,9 +14552,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         gdecl.attr_flags = fdecl->attr_flags;
         gdecl.attr_align = fdecl->attr_align;
         if (fdecl->attr_section != NULL) {
-            gdecl.attr_section = xstrdup(fdecl->attr_section);
+            gdecl.attr_section = cc_strdup(fdecl->attr_section);
         }
-        gdecl.attr_alias = xstrdup(fdecl->attr_alias);
+        gdecl.attr_alias = cc_strdup(fdecl->attr_alias);
         if (gdecl.name == NULL || gdecl.attr_alias == NULL ||
             (fdecl->attr_section != NULL && gdecl.attr_section == NULL)) {
             free(gdecl.name);
@@ -14656,7 +14644,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             eff_attr_section = ".text.unlikely";
         }
 
-        sf->name = xstrdup(af->name);
+        sf->name = cc_strdup(af->name);
         if (sf->name == NULL) {
             set_diag(diag, "out of memory duplicating function name");
             cc_ssa_module_free(out);
@@ -14676,7 +14664,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;
         if (eff_attr_section != NULL) {
-            sf->attr_section = xstrdup(eff_attr_section);
+            sf->attr_section = cc_strdup(eff_attr_section);
             if (sf->attr_section == NULL) {
                 set_diag(diag, "out of memory duplicating function section attribute");
                 cc_ssa_module_free(out);
@@ -14684,7 +14672,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             }
         }
         if (eff_attr_alias != NULL) {
-            sf->attr_alias = xstrdup(eff_attr_alias);
+            sf->attr_alias = cc_strdup(eff_attr_alias);
             if (sf->attr_alias == NULL) {
                 set_diag(diag, "out of memory duplicating function alias attribute");
                 cc_ssa_module_free(out);

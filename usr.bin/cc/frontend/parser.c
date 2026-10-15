@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_lexer.h"
 #include "cc_types.h"
+#include "cc_util.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -49,16 +50,6 @@ typedef struct {
     char *unique_name;
     int depth;
 } local_label_entry_t;
-
-static char *xstrdup_n(const char *s, size_t n) {
-    char *p = (char *)malloc(n + 1);
-    if (p == NULL) {
-        return NULL;
-    }
-    memcpy(p, s, n);
-    p[n] = '\0';
-    return p;
-}
 
 static const char *g_parser_diag_file = NULL;
 
@@ -518,7 +509,7 @@ static cc_tok_kind_t peek_kind(parser_t *p) {
     cc_lexer_t lx = p->lx;
     cc_token_t t;
     if (p->lx.logical_file != NULL) {
-        lx.logical_file = xstrdup_n(p->lx.logical_file, strlen(p->lx.logical_file));
+        lx.logical_file = cc_strndup(p->lx.logical_file, strlen(p->lx.logical_file));
         if (lx.logical_file == NULL) {
             return TOK_EOF;
         }
@@ -591,7 +582,7 @@ static int typedef_push(parser_t *p, const char *name, cc_type_t type, int struc
         p->typedefs = next;
         p->typedef_cap = ncap;
     }
-    dup = xstrdup_n(name, strlen(name));
+    dup = cc_strndup(name, strlen(name));
     if (dup == NULL) {
         return -1;
     }
@@ -680,7 +671,7 @@ static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id
         p->vars = next;
         p->var_cap = ncap;
     }
-    dup = xstrdup_n(name, len);
+    dup = cc_strndup(name, len);
     if (dup == NULL) {
         return -1;
     }
@@ -754,7 +745,7 @@ static int enum_const_push(parser_t *p, const char *name, size_t len, long value
         p->enum_consts = next;
         p->enum_const_cap = ncap;
     }
-    dup = xstrdup_n(name, len);
+    dup = cc_strndup(name, len);
     if (dup == NULL) {
         return -1;
     }
@@ -818,7 +809,7 @@ static int enum_tag_set(parser_t *p, const char *tag, size_t len, cc_type_t type
         p->enum_tags = next;
         p->enum_tag_cap = ncap;
     }
-    dup = xstrdup_n(tag, len);
+    dup = cc_strndup(tag, len);
     if (dup == NULL) {
         return -1;
     }
@@ -863,9 +854,9 @@ static char *local_label_dup_mapped_n(const parser_t *p, const char *name, size_
     const char *mapped = local_label_lookup_n(p, name, len);
 
     if (mapped != NULL) {
-        return xstrdup_n(mapped, strlen(mapped));
+        return cc_strndup(mapped, strlen(mapped));
     }
-    return xstrdup_n(name, len);
+    return cc_strndup(name, len);
 }
 
 static int local_label_push(parser_t *p, const char *name, size_t len) {
@@ -892,8 +883,8 @@ static int local_label_push(parser_t *p, const char *name, size_t len) {
     if (n <= 0 || (size_t)n >= sizeof(unique)) {
         return -1;
     }
-    dup_name = xstrdup_n(name, len);
-    dup_unique = xstrdup_n(unique, strlen(unique));
+    dup_name = cc_strndup(name, len);
+    dup_unique = cc_strndup(unique, strlen(unique));
     if (dup_name == NULL || dup_unique == NULL) {
         free(dup_name);
         free(dup_unique);
@@ -1611,7 +1602,7 @@ static int struct_ensure(parser_t *p, const char *tag, size_t len, int for_defin
     }
     memset(&p->structs[p->struct_count], 0, sizeof(p->structs[p->struct_count]));
     if (tag != NULL) {
-        dup = xstrdup_n(tag, len);
+        dup = cc_strndup(tag, len);
         if (dup == NULL) {
             return -1;
         }
@@ -1652,7 +1643,7 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
     }
     dup = NULL;
     if (name != NULL) {
-        dup = xstrdup_n(name, strlen(name));
+        dup = cc_strndup(name, strlen(name));
         if (dup == NULL) {
             return -1;
         }
@@ -2673,7 +2664,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             }
                         }
                         if (p->tok.kind == TOK_IDENT) {
-                            mname = xstrdup_n(p->tok.start, p->tok.len);
+                            mname = cc_strndup(p->tok.start, p->tok.len);
                             if (mname == NULL) {
                                 return -1;
                             }
@@ -2693,7 +2684,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             }
                         }
                     } else if (p->tok.kind == TOK_IDENT) {
-                        mname = xstrdup_n(p->tok.start, p->tok.len);
+                        mname = cc_strndup(p->tok.start, p->tok.len);
                         if (mname == NULL) {
                             return -1;
                         }
@@ -3906,7 +3897,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         set_diag(p->diag, p->tok.line, p->tok.col, name_err);
         return -1;
     }
-    *out_name = xstrdup_n(p->tok.start, p->tok.len);
+    *out_name = cc_strndup(p->tok.start, p->tok.len);
     if (*out_name == NULL) {
         return -1;
     }
@@ -4843,13 +4834,13 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
         return 0;
     }
     if ((src->flags & CC_ATTR_SECTION) != 0 && src->section != NULL) {
-        sec_dup = xstrdup_n(src->section, strlen(src->section));
+        sec_dup = cc_strndup(src->section, strlen(src->section));
         if (sec_dup == NULL) {
             return -1;
         }
     }
     if ((src->flags & CC_ATTR_ALIAS) != 0 && src->alias != NULL) {
-        alias_dup = xstrdup_n(src->alias, strlen(src->alias));
+        alias_dup = cc_strndup(src->alias, strlen(src->alias));
         if (alias_dup == NULL) {
             free(sec_dup);
             return -1;
@@ -4889,9 +4880,9 @@ static char *dup_string_token(const cc_token_t *tok) {
         end = tok->len - 1;
     }
     if (end < begin) {
-        return xstrdup_n("", 0);
+        return cc_strndup("", 0);
     }
-    return xstrdup_n(tok->start + begin, end - begin);
+    return cc_strndup(tok->start + begin, end - begin);
 }
 
 static int parser_hex_value(int c) {
@@ -5263,7 +5254,7 @@ static int append_string_piece(char **dst, const char *piece) {
         return -1;
     }
     if (*dst == NULL) {
-        *dst = xstrdup_n(piece, strlen(piece));
+        *dst = cc_strndup(piece, strlen(piece));
         return *dst == NULL ? -1 : 0;
     }
     a = strlen(*dst);
@@ -5402,7 +5393,7 @@ static int parse_asm_operand_list(parser_t *p, cc_asm_operand_t **items, size_t 
                 set_diag(p->diag, p->tok.line, p->tok.col, "expected asm operand name");
                 return -1;
             }
-            op.name = xstrdup_n(p->tok.start, p->tok.len);
+            op.name = cc_strndup(p->tok.start, p->tok.len);
             if (op.name == NULL) {
                 return -1;
             }
@@ -6396,7 +6387,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
         if (p->tok.kind == TOK_IDENT) {
-            *out_name = xstrdup_n(p->tok.start, p->tok.len);
+            *out_name = cc_strndup(p->tok.start, p->tok.len);
             if (*out_name == NULL) {
                 return -1;
             }
@@ -6469,7 +6460,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 if (next_tok(p) != 0) {
                     return -1;
                 }
-                *out_name = xstrdup_n(name_start, name_len);
+                *out_name = cc_strndup(name_start, name_len);
                 if (*out_name == NULL) {
                     return -1;
                 }
@@ -6487,7 +6478,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         }
     }
     if (p->tok.kind == TOK_IDENT) {
-        *out_name = xstrdup_n(p->tok.start, p->tok.len);
+        *out_name = cc_strndup(p->tok.start, p->tok.len);
         if (*out_name == NULL) {
             return -1;
         }
@@ -6508,7 +6499,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 if (next_tok(p) != 0) {
                     return -1;
                 }
-                *out_name = xstrdup_n(name_start, name_len);
+                *out_name = cc_strndup(name_start, name_len);
                 if (*out_name == NULL) {
                     return -1;
                 }
@@ -6726,7 +6717,7 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
         return -1;
     }
     f->params = next;
-    f->params[f->param_count].name = xstrdup_n(name, n);
+    f->params[f->param_count].name = cc_strndup(name, n);
     if (f->params[f->param_count].name == NULL) {
         return -1;
     }
@@ -6965,7 +6956,7 @@ static cc_expr_t *parse_initializer_item(parser_t *p) {
                 names = next_names;
                 cap = ncap;
             }
-            names[count] = xstrdup_n(p->tok.start, p->tok.len);
+            names[count] = cc_strndup(p->tok.start, p->tok.len);
             if (names[count] == NULL) {
                 goto fail;
             }
@@ -7106,7 +7097,7 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
                     member_names = next_names;
                     member_cap = ncap;
                 }
-                member_names[member_count] = xstrdup_n(p->tok.start, p->tok.len);
+                member_names[member_count] = cc_strndup(p->tok.start, p->tok.len);
                 if (member_names[member_count] == NULL) {
                     goto fail_array_designator;
                 }
@@ -7563,7 +7554,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
     if (p->tok.kind == TOK_STR) {
         cc_type_t str_ty = string_token_char_type(p, &p->tok);
         char *lit = str_ty == CC_TYPE_CHAR ? canonicalize_narrow_string_token(&p->tok)
-                                           : xstrdup_n(p->tok.start, p->tok.len);
+                                           : cc_strndup(p->tok.start, p->tok.len);
         e = new_expr(CC_EXPR_STR);
         if (e == NULL || lit == NULL) {
             free(lit);
@@ -7579,7 +7570,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
         while (p->tok.kind == TOK_STR) {
             cc_type_t part_ty = string_token_char_type(p, &p->tok);
             char *part = part_ty == CC_TYPE_CHAR ? canonicalize_narrow_string_token(&p->tok)
-                                                 : xstrdup_n(p->tok.start, p->tok.len);
+                                                 : cc_strndup(p->tok.start, p->tok.len);
             size_t alen;
             size_t plen;
             char *next_lit;
@@ -7705,7 +7696,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             return e;
         }
-        char *name = xstrdup_n(p->tok.start, p->tok.len);
+        char *name = cc_strndup(p->tok.start, p->tok.len);
         if (name == NULL) {
             return NULL;
         }
@@ -8226,7 +8217,7 @@ static cc_expr_t *new_ident_expr(const char *name) {
     if (e == NULL) {
         return NULL;
     }
-    e->ident = xstrdup_n(name, strlen(name));
+    e->ident = cc_strndup(name, strlen(name));
     if (e->ident == NULL) {
         free(e);
         return NULL;
@@ -8252,7 +8243,7 @@ static cc_expr_t *new_update_ident_expr(const char *name, cc_binop_t op, int pos
     if (e == NULL) {
         return NULL;
     }
-    e->ident = xstrdup_n(name, strlen(name));
+    e->ident = cc_strndup(name, strlen(name));
     if (e->ident == NULL) {
         free_expr(e);
         return NULL;
@@ -8307,27 +8298,27 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     dst->asm_goto_label_count = 0;
 
     if (src->decl_name != NULL) {
-        dst->decl_name = xstrdup_n(src->decl_name, strlen(src->decl_name));
+        dst->decl_name = cc_strndup(src->decl_name, strlen(src->decl_name));
         if (dst->decl_name == NULL) {
             return -1;
         }
     }
     if (src->label_name != NULL) {
-        dst->label_name = xstrdup_n(src->label_name, strlen(src->label_name));
+        dst->label_name = cc_strndup(src->label_name, strlen(src->label_name));
         if (dst->label_name == NULL) {
             free_stmt(dst);
             return -1;
         }
     }
     if (src->attr_section != NULL) {
-        dst->attr_section = xstrdup_n(src->attr_section, strlen(src->attr_section));
+        dst->attr_section = cc_strndup(src->attr_section, strlen(src->attr_section));
         if (dst->attr_section == NULL) {
             free_stmt(dst);
             return -1;
         }
     }
     if (src->attr_alias != NULL) {
-        dst->attr_alias = xstrdup_n(src->attr_alias, strlen(src->attr_alias));
+        dst->attr_alias = cc_strndup(src->attr_alias, strlen(src->attr_alias));
         if (dst->attr_alias == NULL) {
             free_stmt(dst);
             return -1;
@@ -8348,7 +8339,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         }
     }
     if (src->asm_template != NULL) {
-        dst->asm_template = xstrdup_n(src->asm_template, strlen(src->asm_template));
+        dst->asm_template = cc_strndup(src->asm_template, strlen(src->asm_template));
         if (dst->asm_template == NULL) {
             free_stmt(dst);
             return -1;
@@ -8363,7 +8354,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         dst->asm_output_count = src->asm_output_count;
         for (j = 0; j < src->asm_output_count; ++j) {
             if (src->asm_outputs[j].name != NULL) {
-                dst->asm_outputs[j].name = xstrdup_n(src->asm_outputs[j].name, strlen(src->asm_outputs[j].name));
+                dst->asm_outputs[j].name = cc_strndup(src->asm_outputs[j].name, strlen(src->asm_outputs[j].name));
                 if (dst->asm_outputs[j].name == NULL) {
                     free_stmt(dst);
                     return -1;
@@ -8371,7 +8362,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
             }
             if (src->asm_outputs[j].constraint != NULL) {
                 dst->asm_outputs[j].constraint =
-                    xstrdup_n(src->asm_outputs[j].constraint, strlen(src->asm_outputs[j].constraint));
+                    cc_strndup(src->asm_outputs[j].constraint, strlen(src->asm_outputs[j].constraint));
                 if (dst->asm_outputs[j].constraint == NULL) {
                     free_stmt(dst);
                     return -1;
@@ -8395,7 +8386,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         dst->asm_input_count = src->asm_input_count;
         for (j = 0; j < src->asm_input_count; ++j) {
             if (src->asm_inputs[j].name != NULL) {
-                dst->asm_inputs[j].name = xstrdup_n(src->asm_inputs[j].name, strlen(src->asm_inputs[j].name));
+                dst->asm_inputs[j].name = cc_strndup(src->asm_inputs[j].name, strlen(src->asm_inputs[j].name));
                 if (dst->asm_inputs[j].name == NULL) {
                     free_stmt(dst);
                     return -1;
@@ -8403,7 +8394,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
             }
             if (src->asm_inputs[j].constraint != NULL) {
                 dst->asm_inputs[j].constraint =
-                    xstrdup_n(src->asm_inputs[j].constraint, strlen(src->asm_inputs[j].constraint));
+                    cc_strndup(src->asm_inputs[j].constraint, strlen(src->asm_inputs[j].constraint));
                 if (dst->asm_inputs[j].constraint == NULL) {
                     free_stmt(dst);
                     return -1;
@@ -8426,7 +8417,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         }
         dst->asm_clobber_count = src->asm_clobber_count;
         for (j = 0; j < src->asm_clobber_count; ++j) {
-            dst->asm_clobbers[j] = xstrdup_n(src->asm_clobbers[j], strlen(src->asm_clobbers[j]));
+            dst->asm_clobbers[j] = cc_strndup(src->asm_clobbers[j], strlen(src->asm_clobbers[j]));
             if (dst->asm_clobbers[j] == NULL) {
                 free_stmt(dst);
                 return -1;
@@ -8441,7 +8432,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         }
         dst->asm_goto_label_count = src->asm_goto_label_count;
         for (j = 0; j < src->asm_goto_label_count; ++j) {
-            dst->asm_goto_labels[j] = xstrdup_n(src->asm_goto_labels[j], strlen(src->asm_goto_labels[j]));
+            dst->asm_goto_labels[j] = cc_strndup(src->asm_goto_labels[j], strlen(src->asm_goto_labels[j]));
             if (dst->asm_goto_labels[j] == NULL) {
                 free_stmt(dst);
                 return -1;
@@ -8535,7 +8526,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->generic_selected = src->generic_selected;
 
     if (src->ident != NULL) {
-        dst->ident = xstrdup_n(src->ident, strlen(src->ident));
+        dst->ident = cc_strndup(src->ident, strlen(src->ident));
         if (dst->ident == NULL) {
             free_expr(dst);
             return NULL;
@@ -8723,7 +8714,7 @@ static cc_expr_t *parse_postfix(parser_t *p) {
             }
             m->member_is_arrow = is_arrow;
             m->lhs = e;
-            m->ident = xstrdup_n(p->tok.start, p->tok.len);
+            m->ident = cc_strndup(p->tok.start, p->tok.len);
             if (m->ident == NULL) {
                 free_expr(m);
                 return NULL;
@@ -9743,7 +9734,7 @@ static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, in
     s->attr_flags = merged_attrs.flags;
     s->attr_align = merged_attrs.align;
     if (merged_attrs.section != NULL) {
-        s->attr_section = xstrdup_n(merged_attrs.section, strlen(merged_attrs.section));
+        s->attr_section = cc_strndup(merged_attrs.section, strlen(merged_attrs.section));
         if (s->attr_section == NULL) {
             decl_attrs_clear(&decl_attrs);
             decl_attrs_clear(&suffix_attrs);
@@ -9752,7 +9743,7 @@ static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, in
         }
     }
     if (merged_attrs.alias != NULL) {
-        s->attr_alias = xstrdup_n(merged_attrs.alias, strlen(merged_attrs.alias));
+        s->attr_alias = cc_strndup(merged_attrs.alias, strlen(merged_attrs.alias));
         if (s->attr_alias == NULL) {
             decl_attrs_clear(&decl_attrs);
             decl_attrs_clear(&suffix_attrs);
@@ -9960,7 +9951,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     free_stmt(&s);
                     return -1;
                 }
-                s.decl_name = xstrdup_n(p->tok.start, p->tok.len);
+                s.decl_name = cc_strndup(p->tok.start, p->tok.len);
                 if (s.decl_name == NULL) {
                     free_stmt(&s);
                     return -1;
@@ -9984,7 +9975,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             } else {
-                s.decl_name = xstrdup_n(p->tok.start, p->tok.len);
+                s.decl_name = cc_strndup(p->tok.start, p->tok.len);
                 if (s.decl_name == NULL) {
                     free_stmt(&s);
                     return -1;
@@ -10127,14 +10118,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         s.attr_flags = merged_attrs.flags;
         s.attr_align = merged_attrs.align;
         if (merged_attrs.section != NULL) {
-            s.attr_section = xstrdup_n(merged_attrs.section, strlen(merged_attrs.section));
+            s.attr_section = cc_strndup(merged_attrs.section, strlen(merged_attrs.section));
             if (s.attr_section == NULL) {
                 free_stmt(&s);
                 return -1;
             }
         }
         if (merged_attrs.alias != NULL) {
-            s.attr_alias = xstrdup_n(merged_attrs.alias, strlen(merged_attrs.alias));
+            s.attr_alias = cc_strndup(merged_attrs.alias, strlen(merged_attrs.alias));
             if (s.attr_alias == NULL) {
                 free_stmt(&s);
                 return -1;
@@ -11280,7 +11271,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             decl_attrs_clear(&spec_attrs);
             return -1;
         }
-        f->name = xstrdup_n(p->tok.start, p->tok.len);
+        f->name = cc_strndup(p->tok.start, p->tok.len);
         if (f->name == NULL) {
             decl_attrs_clear(&spec_attrs);
             return -1;
@@ -11353,7 +11344,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     f->attr_format_index = merged_attrs.format_index;
     f->attr_format_first_to_check = merged_attrs.format_first_to_check;
     if (merged_attrs.section != NULL) {
-        f->attr_section = xstrdup_n(merged_attrs.section, strlen(merged_attrs.section));
+        f->attr_section = cc_strndup(merged_attrs.section, strlen(merged_attrs.section));
         if (f->attr_section == NULL) {
             decl_attrs_clear(&spec_attrs);
             decl_attrs_clear(&suffix_attrs);
@@ -11362,7 +11353,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         }
     }
     if (merged_attrs.alias != NULL) {
-        f->attr_alias = xstrdup_n(merged_attrs.alias, strlen(merged_attrs.alias));
+        f->attr_alias = cc_strndup(merged_attrs.alias, strlen(merged_attrs.alias));
         if (f->attr_alias == NULL) {
             decl_attrs_clear(&spec_attrs);
             decl_attrs_clear(&suffix_attrs);
@@ -11554,7 +11545,7 @@ static int probe_is_function_head(parser_t *p) {
     const char *lf = p->lx.logical_file;
 
     q.diag = NULL;
-    q.lx.logical_file = lf != NULL ? xstrdup_n(lf, strlen(lf)) : NULL;
+    q.lx.logical_file = lf != NULL ? cc_strndup(lf, strlen(lf)) : NULL;
     if (lf != NULL && q.lx.logical_file == NULL) {
         return 0;
     }
@@ -11619,7 +11610,7 @@ static int probe_is_function_head(parser_t *p) {
         if (q.tok.kind != TOK_IDENT) {
             goto done;
         }
-        name = xstrdup_n(q.tok.start, q.tok.len);
+        name = cc_strndup(q.tok.start, q.tok.len);
         if (name == NULL) {
             goto done;
         }

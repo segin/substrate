@@ -1,24 +1,9 @@
 #include "cc_ssa.h"
+#include "cc_util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static char *xstrdup(const char *s) {
-    size_t n;
-    char *p;
-
-    if (s == NULL) {
-        return(NULL);
-    }
-    n = strlen(s) + 1;
-    p = (char *)malloc(n);
-    if (p == NULL) {
-        return(NULL);
-    }
-    memcpy(p, s, n);
-    return(p);
-}
 
 static void set_diag(cc_diag_t *diag, const char *msg) {
     if (diag == NULL || diag->message[0] != '\0') {
@@ -100,7 +85,7 @@ static int dup_str_array(char ***out, char *const *src, size_t n) {
     }
     for (i = 0; i < n; ++i) {
         if (src[i] != NULL) {
-            p[i] = xstrdup(src[i]);
+            p[i] = cc_strdup(src[i]);
             if (p[i] == NULL) {
                 size_t j;
                 for (j = 0; j < i; ++j) {
@@ -167,7 +152,7 @@ static int dup_instr(cc_ssa_instr_t *dst, const cc_ssa_instr_t *src) {
     dst->asm_goto_names = NULL;
 
     if (src->sym != NULL) {
-        dst->sym = xstrdup(src->sym);
+        dst->sym = cc_strdup(src->sym);
         if (dst->sym == NULL) {
             cc_ssa_instr_free(dst);
             return(-1);
