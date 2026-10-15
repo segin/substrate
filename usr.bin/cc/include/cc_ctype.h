@@ -280,7 +280,8 @@ struct cc_expr;
 
 /**
  * The type of an expression, where the parser recorded enough to know
- * it: a variable whose declaration gave its type, and any chain of `*`,
+ * it: a variable or member whose declaration gave its type (a member
+ * access has it once sema has checked it), and any chain of `*`,
  * subscripts and pointer + integer applied to one.  `*` applied to a
  * function designator gives the function again (C11 6.5.3.2p4,
  * 6.3.2.1p4).

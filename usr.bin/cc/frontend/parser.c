@@ -1377,6 +1377,21 @@ static int struct_ensure(parser_t *p, const char *tag, size_t len, int for_defin
     return (int)p->struct_count++;
 }
 
+/** A structure member's declarator, parsed: see parse_member_decl(). */
+typedef struct {
+    char *name;               /**< the name (owned), or NULL for an unnamed bit-field or aggregate */
+    const cc_ctype_t *ctype;  /**< the member's type */
+    cc_type_t elem_type;      /**< legacy: its type, or an array's element type */
+    int is_array;             /**< it is an array */
+    int unsized;              /**< an array of unknown bound (a flexible array member) */
+    long count;               /**< an array's element count (product of its bounds), else -1 */
+    int ndim;                 /**< legacy: its bounds, or those of the array a pointer points to */
+    long dims[CC_MAX_ARRAY_DIMS];
+} member_decl_t;
+
+static int parse_member_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
+                             const cc_ctype_t *base_alias, member_decl_t *out);
+
 static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t type, int type_struct_id,
                               long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long offset,
                               long size, int is_bitfield, int bit_width, int bit_offset, int bit_storage_bits,
@@ -1430,6 +1445,7 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
     sd->members[sd->member_count].bit_storage_bits = bit_storage_bits;
     sd->members[sd->member_count].bit_signed = bit_signed;
     sd->members[sd->member_count].bit_storage_size = bit_storage_size;
+    sd->members[sd->member_count].ctype = NULL;
     sd->member_count++;
     return 0;
 }
@@ -2322,6 +2338,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 int mbase_arr_ndim = 0;
                 long mbase_arr_dims[CC_MAX_ARRAY_DIMS];
                 int mtypedef = 0;
+                const cc_ctype_t *malias = NULL;
                 memset(mbase_arr_dims, 0, sizeof(mbase_arr_dims));
                 if (p->structs[sid].has_flexible_array) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
@@ -2373,15 +2390,16 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not allowed inside struct member list");
                     return -1;
                 }
+                malias = p->last_alias_ctype;
                 for (;;) {
                     cc_type_t mtype = mbase;
                     int mstruct = mbase_sid;
                     char *mname = NULL;
-                    long arr_count = mbase_arr_len >= 0 ? mbase_arr_len : 1;
-                    int arr_saw = mbase_arr_ndim > 0 ? 1 : 0;
-                    int arr_unsized = (mbase_arr_ndim > 0 && mbase_arr_len == 0) ? 1 : 0;
-                    int arr_ndim = mbase_arr_ndim;
-                    int arr_suffix_ndim = 0;
+                    member_decl_t md;
+                    long arr_count;
+                    int arr_saw;
+                    int arr_unsized;
+                    int arr_ndim;
                     long arr_dims[CC_MAX_ARRAY_DIMS];
                     long msize;
                     long malign;
@@ -2395,74 +2413,16 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     int skip_member_decl = 0;
                     decl_attrs_t mdecl_attrs;
                     decl_attrs_reset(&mdecl_attrs);
-                    memset(arr_dims, 0, sizeof(arr_dims));
-                    if (mbase_arr_ndim > 0) {
-                        memcpy(arr_dims, mbase_arr_dims, sizeof(arr_dims));
+                    if (parse_member_decl(p, mbase, mbase_sid, mbase_arr_ndim, mbase_arr_dims, malias, &md) != 0) {
+                        return -1;
                     }
-                    while (is_ptr_declarator_tok(p->tok.kind)) {
-                        mtype = ptr_of_type(mtype);
-                        if (mtype == CC_TYPE_VOID) {
-                            set_ptr_depth_diag(p, __LINE__);
-                            return -1;
-                        }
-                        if (next_tok(p) != 0) {
-                            return -1;
-                        }
-                        while (is_decl_qual_at_token(p)) {
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                        }
-                    }
-                    if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
-                        if (next_tok(p) != 0) {
-                            return -1;
-                        }
-                        while (is_ptr_declarator_tok(p->tok.kind)) {
-                            mtype = ptr_of_type(mtype);
-                            if (mtype == CC_TYPE_VOID) {
-                                set_ptr_depth_diag(p, __LINE__);
-                                return -1;
-                            }
-                            if (next_tok(p) != 0) {
-                                return -1;
-                            }
-                            while (is_decl_qual_at_token(p)) {
-                                if (next_tok(p) != 0) {
-                                    return -1;
-                                }
-                            }
-                        }
-                        if (p->tok.kind == TOK_IDENT) {
-                            mname = cc_strndup(p->tok.start, p->tok.len);
-                            if (mname == NULL) {
-                                return -1;
-                            }
-                            if (next_tok(p) != 0) {
-                                free(mname);
-                                return -1;
-                            }
-                        }
-                        if (expect(p, TOK_RPAREN, "expected ')' in struct member declarator") != 0) {
-                            free(mname);
-                            return -1;
-                        }
-                        while (p->tok.kind == TOK_LPAREN) {
-                            if (skip_balanced_parens(p) != 0) {
-                                free(mname);
-                                return -1;
-                            }
-                        }
-                    } else if (p->tok.kind == TOK_IDENT) {
-                        mname = cc_strndup(p->tok.start, p->tok.len);
-                        if (mname == NULL) {
-                            return -1;
-                        }
-                        if (next_tok(p) != 0) {
-                            free(mname);
-                            return -1;
-                        }
-                    }
+                    mname = md.name;
+                    mtype = md.elem_type;
+                    arr_saw = md.is_array;
+                    arr_unsized = md.unsized;
+                    arr_count = md.count;
+                    arr_ndim = md.ndim;
+                    memcpy(arr_dims, md.dims, sizeof(arr_dims));
                     if (p->tok.kind == TOK_COLON) {
                         cc_expr_t *bw_expr = NULL;
                         long bw = 0;
@@ -2495,30 +2455,6 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             free(mname);
                             return -1;
                         }
-                    } else {
-                        while (p->tok.kind == TOK_LBRACK) {
-                            long n = 1;
-                            int const_extent = 0;
-                            int empty_extent = (peek_kind(p) == TOK_RBRACK);
-                            if (parse_array_extent(p, &n, &const_extent, NULL) != 0) {
-                                free(mname);
-                                return -1;
-                            }
-                            arr_saw = 1;
-                            if (empty_extent) {
-                                arr_unsized = 1;
-                            }
-                            if (const_extent && arr_count >= 0) {
-                                arr_count *= n;
-                            }
-                            if (arr_ndim >= CC_MAX_ARRAY_DIMS) {
-                                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                                free(mname);
-                                return -1;
-                            }
-                            arr_dims[arr_ndim++] = const_extent ? n : 0;
-                            arr_suffix_ndim++;
-                        }
                     }
                     if (skip_decl_gnu_suffix(p, &mdecl_attrs) != 0) {
                         free(mname);
@@ -2543,17 +2479,6 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     msize = parser_type_size_bytes(p, mtype, mstruct);
                     malign = parser_type_align_bytes(p, mtype, mstruct);
-                    if (mbase_arr_ndim > 0 && is_pointer_type(mtype)) {
-                        cc_type_t elem_type = ptr_deref_type(mtype);
-                        long elem_size = parser_type_size_bytes(p, elem_type, mstruct);
-                        long elem_align = parser_type_align_bytes(p, elem_type, mstruct);
-                        if (elem_size > 0) {
-                            msize = elem_size;
-                        }
-                        if (elem_align > 0) {
-                            malign = elem_align;
-                        }
-                    }
                     if (msize < 0) {
                         msize = cc_target_pointer_size();
                     }
@@ -2671,18 +2596,17 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             bit_unit_bits_used = 0;
                         }
                         if (arr_saw) {
-                            /*
-                             * Base typedef arrays (e.g. `typedef T A[N]; A m;`) already
-                             * carry one pointer level in mtype. Only apply an extra
-                             * pointer level when this declarator adds bracket suffixes.
-                             */
-                            if (mbase_arr_ndim == 0 || arr_suffix_ndim > 0) {
+                            /* an array member is recorded with a pointer level per dimension, as a local is */
+                            int dim;
+                            for (dim = 0; dim < arr_ndim; ++dim) {
                                 cc_type_t ptype = ptr_of_type(mtype);
-                                if (ptype != CC_TYPE_VOID) {
-                                    mtype = ptype;
-                                } else {
-                                    mtype = CC_TYPE_PTR_VOID;
+                                if (ptype == CC_TYPE_VOID) {
+                                    set_ptr_depth_diag(p, __LINE__);
+                                    free(mname);
+                                    decl_attrs_clear(&mdecl_attrs);
+                                    return -1;
                                 }
+                                mtype = ptype;
                             }
                             if (arr_unsized) {
                                 if (is_union) {
@@ -2722,18 +2646,19 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
 
                     if (!skip_member_decl && mname != NULL) {
                         if (struct_member_push(p, sid, mname, mtype, mstruct, arr_saw ? arr_count : -1,
-                                               arr_saw ? arr_ndim : 0, arr_saw ? arr_dims : NULL, moff, msize,
+                                               arr_ndim, arr_ndim > 0 ? arr_dims : NULL, moff, msize,
                                                is_bitfield, bit_width, bit_offset, bit_storage_bits, bit_signed,
                                                bit_storage_size) != 0) {
                             free(mname);
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
                         }
+                        p->structs[sid].members[p->structs[sid].member_count - 1].ctype = md.ctype;
                         free(mname);
                     } else if (skip_member_decl && mname == NULL && mtype == CC_TYPE_VOID && mstruct >= 0 &&
                                (size_t)mstruct < p->struct_count && p->structs[mstruct].complete) {
                         if (struct_member_push(p, sid, NULL, mtype, mstruct, arr_saw ? arr_count : -1,
-                                               arr_saw ? arr_ndim : 0, arr_saw ? arr_dims : NULL, moff, msize,
+                                               arr_ndim, arr_ndim > 0 ? arr_dims : NULL, moff, msize,
                                                is_bitfield, bit_width, bit_offset, bit_storage_bits, bit_signed,
                                                bit_storage_size) != 0) {
                             decl_attrs_clear(&mdecl_attrs);
@@ -5637,7 +5562,8 @@ typedef struct {
 enum {
     DECL_ABSTRACT = 1u,       /**< the name may be left out */
     DECL_STOP_AT_PARAMS = 2u, /**< leave a parameter list right after a plain name unparsed */
-    DECL_PARAM = 4u           /**< a parameter's: `[static N]` bounds, `int (x)` names x */
+    DECL_PARAM = 4u,          /**< a parameter's: `[static N]` bounds, `int (x)` names x */
+    DECL_MEMBER = 8u          /**< a member's: any identifier is the name, which a bit-field may leave out */
 };
 
 static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags);
@@ -5920,7 +5846,8 @@ static int skip_attrs_within_declarator(parser_t *p) {
  * `int (*f)(void)`, rather than a parameter list, as in `int (void)`.
  * A parenthesized identifier that is not a typedef name is a nested
  * declarator unless the declarator must be abstract; in a parameter, as
- * `int (x)`, it names the parameter (C11 6.7.6.3p11).
+ * `int (x)`, it names the parameter (C11 6.7.6.3p11).  In a member any
+ * parenthesized identifier is one, as members may share typedef names.
  *
  * @param p      the parser, at `(`
  * @param flags  DECL_* as parse_declarator_into() was given them
@@ -5941,7 +5868,10 @@ static int starts_nested_declarator(parser_t *p, unsigned flags) {
     if (is_ptr_declarator_tok(q.tok.kind) || q.tok.kind == TOK_LPAREN || q.tok.kind == TOK_LBRACK) {
         return 1;
     }
-    return (!(flags & DECL_ABSTRACT) || (flags & DECL_PARAM)) && q.tok.kind == TOK_IDENT && !is_declspec_start(&q);
+    if (q.tok.kind != TOK_IDENT || ((flags & DECL_ABSTRACT) != 0 && (flags & (DECL_PARAM | DECL_MEMBER)) == 0)) {
+        return 0;
+    }
+    return (flags & DECL_MEMBER) != 0 || !is_declspec_start(&q);
 }
 
 /**
@@ -5989,14 +5919,15 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     }
     /* the direct declarator: a nested declarator, a name, or nothing */
     if (p->tok.kind == TOK_LPAREN && starts_nested_declarator(p, flags)) {
-        if (next_tok(p) != 0 || parse_declarator_into(p, &inner, flags & (DECL_ABSTRACT | DECL_PARAM)) != 0 ||
+        if (next_tok(p) != 0 ||
+            parse_declarator_into(p, &inner, flags & (DECL_ABSTRACT | DECL_PARAM | DECL_MEMBER)) != 0 ||
             expect(p, TOK_RPAREN, "expected ')' in declarator") != 0) {
             goto out;
         }
         d->nested = 1;
         d->inner_arrays = inner.inner_arrays + inner.outer_arrays;
         d->saw_restrict |= inner.saw_restrict;
-    } else if (p->tok.kind == TOK_IDENT && (!abstract || !is_declspec_start(p))) {
+    } else if (p->tok.kind == TOK_IDENT && (!abstract || (flags & DECL_MEMBER) != 0 || !is_declspec_start(p))) {
         /* after the specifiers an identifier is the name, even one that is also a typedef name */
         inner.name = cc_strndup(p->tok.start, p->tok.len);
         if (inner.name == NULL || next_tok(p) != 0) {
@@ -9359,6 +9290,100 @@ static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
     d.name = NULL;
     declarator_free(&d);
     return 0;
+}
+
+/**
+ * Parse the declarator of one structure member, after its specifiers and
+ * before any bit-field width, and give its type both as a type and in the
+ * legacy encoding the layout code reads.
+ *
+ * An array member is recorded as its element type with a pointer level
+ * per dimension, as a local is, plus its bounds and element count; any
+ * other member as its type, with the bounds of the array it points to if
+ * it is a pointer to an array.  This gives the element type; the layout
+ * code sizes the member from it and then adds the pointer levels.
+ *
+ * @param p           the parser, at the declarator
+ * @param base_type   the specifiers' type, legacy encoding
+ * @param base_sid    its struct id
+ * @param base_ndim   its array rank (a typedef'd array)
+ * @param base_dims   its bounds
+ * @param base_alias  the type of the typedef name the specifiers were, or
+ *                    NULL (see declspec_ctype())
+ * @param out         receives the member; free its name when done
+ * @return            0, or -1 on error (diagnosed)
+ */
+static int parse_member_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
+                             const cc_ctype_t *base_alias, member_decl_t *out) {
+    declarator_t d;
+    const cc_ctype_t *t;
+    const cc_ctype_t *e;
+    cc_ct_legacy_t leg;
+    size_t line = p->tok.line;
+    size_t col = p->tok.col;
+    unsigned k;
+
+    memset(out, 0, sizeof(*out));
+    out->count = -1;
+    memset(&d, 0, sizeof(d));
+    if (parse_declarator_into(p, &d, DECL_ABSTRACT | DECL_MEMBER) != 0) {
+        declarator_free(&d);
+        return -1;
+    }
+    t = declarator_type(&d, declspec_ctype(base_alias, base_type, base_sid, base_ndim, base_dims));
+    if (t == NULL) {
+        set_diag(p->diag, line, col, "out of memory building a member's type");
+        goto fail;
+    }
+    if (t->kind == CC_CT_FUNCTION) {
+        set_diag(p->diag, line, col, "a member cannot have function type");
+        goto fail;
+    }
+    e = t;
+    if (t->kind == CC_CT_ARRAY) {
+        out->is_array = 1;
+        out->count = 1;
+        for (; e->kind == CC_CT_ARRAY; e = e->of) {
+            if (out->ndim == CC_MAX_ARRAY_DIMS) {
+                set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
+                goto fail;
+            }
+            out->dims[out->ndim++] = e->count < 0 ? 0 : e->count;
+            if (e->count < 0) {
+                out->unsized |= (e == t);
+                out->count = 0;
+            } else if (out->count > 0 && e->count > 0 && out->count > LONG_MAX / e->count) {
+                out->count = 0;
+            } else {
+                out->count *= e->count;
+            }
+        }
+    }
+    if (cc_ct_to_legacy(e, &leg) != 0) {
+        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
+        goto fail;
+    }
+    out->elem_type = leg.base;
+    for (k = 0; k < leg.depth; ++k) {
+        out->elem_type = ptr_of_type(out->elem_type);
+        if (out->elem_type == CC_TYPE_VOID) {
+            set_ptr_depth_diag(p, __LINE__);
+            goto fail;
+        }
+    }
+    if (!out->is_array) {
+        out->ndim = leg.ndim;
+        memcpy(out->dims, leg.dims, sizeof(leg.dims));
+    }
+    out->ctype = t;
+    out->name = d.name;
+    d.name = NULL;
+    declarator_free(&d);
+    return 0;
+
+fail:
+    declarator_free(&d);
+    return -1;
 }
 
 static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int need_semi) {

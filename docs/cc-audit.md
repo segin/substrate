@@ -207,7 +207,7 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   held: `c ? (short)0 : v0` gave `f7d0710000000000`.  Found when local
   initializers began to be converted (CC-15), which moved the garbage.
   *Reproduced* (-m32).  `codegen/ternary_widen.c`.
-- [ ] **CC-34** `(*fp)(...)` shall call `fp` when `fp`'s function
+- [x] **CC-34** `(*fp)(...)` shall call `fp` when `fp`'s function
   returns a pointer.  `int *(*pf)(...)` has the pointer depth of a
   pointer to a function pointer, and lowering keeps the dereference for
   those, so it loads from the function's code and calls that: SIGSEGV.
@@ -217,8 +217,8 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   element of one (`(*pf)()`, `(**pf)()`, `(*arr[i])()`): those record
   their real type, typedef names included, and a `*` applied to a
   pointer to a function is dropped (`codegen/call_through_deref.c`).
-  Still open for a struct member, `(*s.f)()`, whose type is not yet
-  recorded.
+  Structure members record their real type too, so `(*s.f)()` and
+  `(*p->f)()` call f (`codegen/member_declarators.c`).
 - [ ] **CC-49** A GNU C nested function shall be able to use the
   enclosing function's locals.  `int x = 3; int inner(int y) { return
   x + y; }` gives "use of undeclared identifier: x"; gcc accepts it
@@ -244,7 +244,10 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-57** A local multi-dimensional array shall take a brace-nested
   initializer: `int a[2][2] = {{1, 2}, {3, 4}};` inside a function gives
   "initializer list cannot be used as runtime expression in lowering";
-  the flat `{1, 2, 3, 4}` works.  *Reproduced.*
+  the flat `{1, 2, 3, 4}` works.  *Reproduced.*  A `static` local
+  multi-dimensional array with any initializer, nested or flat, compiles
+  but the program dies of SIGSEGV: `static int a[3][4] = {1, 2, ...,
+  12};` then reading `a[2][1]` (a one-dimensional static local is fine).
 - [x] **CC-58** sizeof shall give the size of an array of pointers to
   arrays: for a local `int (*rows[2])[4]`, `sizeof rows` was 64 on x86-64
   (gcc: 16) and 32 on i386 (gcc: 8) -- the legacy type encoding sizes it
@@ -253,6 +256,19 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   declaration now records its real type, and `sizeof` of a local folds
   to that type's size.  `codegen/sizeof_locals.c`.  (Parameters and
   globals still go through the legacy encoding.)
+- [x] **CC-59** A structure member declared with a parenthesized
+  declarator shall get the type, size and offset gcc gives it.  A member
+  `int (*rowp)[4]` -- a pointer to an array -- was laid out as an array
+  of four pointers (32 bytes on x86-64, 16 on i386; gcc: 8 and 4), so it
+  and every member after it sat at the wrong offsets, breaking the
+  layout any other compiler gives the structure.  `int (*fns[2])(int)`
+  and `int (*(*gf)(void))(int)` were rejected ("expected ')' in struct
+  member declarator"), and a plain `int rows[2][4]` member could not be
+  indexed ("dereference requires pointer operand").  *Reproduced* (both
+  targets).  Members are now parsed by the real declarator parser and
+  record their type; a pointer-to-array member is laid out, read and
+  indexed as a pointer.  `codegen/member_declarators.c` checks layout
+  and access for twelve member shapes against gcc.
 
 ## 5. Driver and predefined macros
 
@@ -398,7 +414,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-58 requirements: 31 met, 27 open.
+59 requirements: 33 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

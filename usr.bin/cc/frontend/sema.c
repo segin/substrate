@@ -2195,6 +2195,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->member_bit_storage_bits = m->bit_storage_bits;
         e->member_bit_signed = m->bit_signed;
         e->member_bit_storage_size = m->bit_storage_size;
+        e->ctype = m->ctype;
         expr_set_array_meta_decl(e, m->array_len, m->array_ndim, m->array_dims);
         return 0;
     }

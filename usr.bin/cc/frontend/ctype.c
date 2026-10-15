@@ -435,7 +435,7 @@ const cc_ctype_t *cc_ct_of_expr(const cc_expr_t *e) {
     if (e == NULL) {
         return NULL;
     }
-    if (e->kind == CC_EXPR_IDENT) {
+    if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER) {
         return e->ctype;
     }
     if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_ADD) {

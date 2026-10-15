@@ -1811,9 +1811,10 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
             }
         }
     }
-    if (e->kind == CC_EXPR_MEMBER && is_synthetic_struct_array_member(tu, e)) {
+    if (e->kind == CC_EXPR_MEMBER && e->ident != NULL) {
+        /* a member's size is the storage its structure's layout gave it */
         const cc_struct_member_t *m = find_struct_member(tu, member_base_struct_id(e), e->ident);
-        if (m != NULL && m->size > 0) {
+        if (m != NULL && m->size > 0 && !m->is_bitfield) {
             return m->size;
         }
     }
@@ -1846,8 +1847,12 @@ static int is_synthetic_struct_array_member(const cc_translation_unit_t *tu, con
     if (m == NULL || !is_pointer_type(m->type)) {
         return 0;
     }
-    if (m->array_ndim > 0 || m->array_len >= 0) {
+    if (m->array_len >= 0) {
         return 1;
+    }
+    if (m->array_ndim > 0) {
+        /* bounds and no element count: a pointer to an array, not an array */
+        return 0;
     }
     if (m->size > 0 && m->size != cc_target_pointer_size()) {
         return 1;
@@ -1875,8 +1880,14 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
         }
     }
     if (e->kind == CC_EXPR_MEMBER) {
+        const cc_struct_member_t *m =
+            e->ident != NULL ? find_struct_member(tu, member_base_struct_id(e), e->ident) : NULL;
         if (is_synthetic_struct_array_member(tu, e)) {
             return 1;
+        }
+        if (m != NULL && m->array_len < 0 && m->array_ndim > 0) {
+            /* a pointer to an array: its value is the pointer */
+            return 0;
         }
         if (is_pointer_type(e->value_type) && e->array_ndim > 0) {
             return 1;

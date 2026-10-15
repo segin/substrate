@@ -325,7 +325,8 @@ struct cc_expr {
     long generic_selected;
     cc_stmt_t *stmt_expr_stmts;
     size_t stmt_expr_count;
-    const struct cc_ctype *ctype; /**< identifier: the variable's type, where its declaration recorded one; else NULL */
+    const struct cc_ctype *ctype; /**< identifier or member access: the variable's or member's type, where its
+                                       declaration recorded one; else NULL */
 };
 
 typedef enum {
@@ -423,6 +424,7 @@ typedef struct {
     int bit_storage_bits;
     int bit_signed;
     long bit_storage_size;
+    const struct cc_ctype *ctype; /**< its type, where its declaration recorded one; else NULL */
 } cc_struct_member_t;
 
 typedef struct {
