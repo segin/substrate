@@ -1,16 +1,18 @@
+#include "cc_diag.h"
 #include "cc_middle.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
+/**
+ * Record a legalization error, which has no source position; the first
+ * one recorded is kept.
+ *
+ * @param diag  the diagnostic
+ * @param msg   the message
+ */
 static void set_diag(cc_diag_t *diag, const char *msg) {
-    if (diag == NULL || diag->message[0] != '\0') {
-        return;
-    }
-    diag->path[0] = '\0';
-    diag->line = 0;
-    diag->col = 0;
-    snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    cc_diag_set(diag, "", 0, 0, msg);
 }
 
 static int legalize_function(cc_ssa_function_t *f, cc_diag_t *diag) {

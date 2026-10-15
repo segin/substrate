@@ -1,3 +1,4 @@
+#include "cc_diag.h"
 #include "cc_ssa.h"
 #include "cc_util.h"
 
@@ -5,14 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Record an SSA construction error, which has no source position; the
+ * first one recorded is kept.
+ *
+ * @param diag  the diagnostic
+ * @param msg   the message
+ */
 static void set_diag(cc_diag_t *diag, const char *msg) {
-    if (diag == NULL || diag->message[0] != '\0') {
-        return;
-    }
-    diag->path[0] = '\0';
-    diag->line = 0;
-    diag->col = 0;
-    snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    cc_diag_set(diag, "", 0, 0, msg);
 }
 
 static int dup_int_array(int **out, const int *src, size_t n) {

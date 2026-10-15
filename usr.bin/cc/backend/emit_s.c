@@ -1,4 +1,5 @@
 #include "cc_backend.h"
+#include "cc_diag.h"
 #include "cc_types.h"
 
 #include <float.h>
@@ -109,14 +110,15 @@ static const char *arg_reg64_xmm(size_t idx) {
     return regs[idx];
 }
 
+/**
+ * Record an emission error.  It has no line; the file being compiled is
+ * kept as its path.  The first one recorded is kept.
+ *
+ * @param d    the diagnostic
+ * @param msg  the message
+ */
 static void set_diag(cc_diag_t *d, const char *msg) {
-    if (d == NULL || d->message[0] != '\0') {
-        return;
-    }
-    d->line = 0;
-    d->col = 0;
-    /* a longer message is cut to fit */
-    snprintf(d->message, sizeof(d->message), "%.*s", (int)sizeof(d->message) - 1, msg);
+    cc_diag_set(d, NULL, 0, 0, msg);
 }
 
 static unsigned long next_aux_label_id(void) {

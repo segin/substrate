@@ -1,15 +1,21 @@
+#include "cc_diag.h"
 #include "cc_ssa.h"
 
 #include <stdio.h>
 
+/**
+ * Record an invalid-instruction error, naming the instruction; the
+ * first one recorded is kept.
+ *
+ * @param diag   the diagnostic
+ * @param msg    what is wrong
+ * @param index  the instruction's index in its function
+ */
 static void set_diag(cc_diag_t *diag, const char *msg, size_t index) {
-    if (diag == NULL || diag->message[0] != '\0') {
-        return;
-    }
-    diag->path[0] = '\0';
-    diag->line = 0;
-    diag->col = 0;
-    snprintf(diag->message, sizeof(diag->message), "%s at instruction %zu", msg, index);
+    char buf[sizeof(diag->message)];
+
+    snprintf(buf, sizeof(buf), "%s at instruction %zu", msg, index);
+    cc_diag_set(diag, "", 0, 0, buf);
 }
 
 int cc_ssa_opcode_is_terminator(cc_ssa_opcode_t op) {

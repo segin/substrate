@@ -1,16 +1,18 @@
 #include "cc_backend.h"
+#include "cc_diag.h"
 
 #include <limits.h>
 #include <stdio.h>
 
+/**
+ * Record a frame-layout error, which has no source position; the first
+ * one recorded is kept.
+ *
+ * @param diag  the diagnostic
+ * @param msg   the message
+ */
 static void set_diag(cc_diag_t *diag, const char *msg) {
-    if (diag == NULL || diag->message[0] != '\0') {
-        return;
-    }
-    diag->path[0] = '\0';
-    diag->line = 0;
-    diag->col = 0;
-    snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    cc_diag_set(diag, "", 0, 0, msg);
 }
 
 int cc_backend_checked_frame_add(int *raw_frame, int bytes, cc_diag_t *diag, const char *context) {

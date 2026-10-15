@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_diag.h"
 #include "cc_types.h"
 
 #include <limits.h>
@@ -72,64 +73,31 @@ typedef struct {
     size_t count;
 } name_list_t;
 
+/**
+ * Record a semantic error.  The first error recorded is the one
+ * reported; with no position given, it is placed at the construct being
+ * checked (set_diag_context).
+ *
+ * @param d    the diagnostic
+ * @param msg  the message
+ */
 static void set_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
     }
     if (d->line == 0 && d->col == 0) {
-        d->line = g_diag_ctx_line;
-        d->col = g_diag_ctx_col;
+        cc_diag_set(d, NULL, g_diag_ctx_line, g_diag_ctx_col, msg);
+    } else {
+        cc_diag_set(d, NULL, d->line, d->col, msg);
     }
-    snprintf(d->message, sizeof(d->message), "%s", msg);
 }
 
-static void sema_diag_clear(cc_diag_t *d) {
-    if (d == NULL) {
-        return;
-    }
-    d->line = 0;
-    d->col = 0;
-    d->message[0] = '\0';
-}
-
-static void sema_diag_print_source_line(const cc_diag_t *d) {
-    FILE *fp;
-    char buf[1024];
-    size_t cur = 1;
-    size_t i;
-    size_t col;
-    size_t len;
-
-    if (d == NULL || d->path[0] == '\0' || d->line == 0) {
-        return;
-    }
-    fp = fopen(d->path, "r");
-    if (fp == NULL) {
-        return;
-    }
-    while (cur < d->line && fgets(buf, sizeof(buf), fp) != NULL) {
-        cur++;
-    }
-    if (cur == d->line && fgets(buf, sizeof(buf), fp) != NULL) {
-        len = strlen(buf);
-        while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
-            buf[--len] = '\0';
-        }
-        fprintf(stderr, "    %s\n", buf);
-        col = d->col > 0 ? d->col : 1;
-        fprintf(stderr, "    ");
-        for (i = 1; i < col; ++i) {
-            if (i - 1 < len && buf[i - 1] == '\t') {
-                fputc('\t', stderr);
-            } else {
-                fputc(' ', stderr);
-            }
-        }
-        fprintf(stderr, "^\n");
-    }
-    fclose(fp);
-}
-
+/**
+ * Print the recorded semantic error, placed at the construct being
+ * checked if it has no position of its own, count it, and clear it.
+ *
+ * @param d  the diagnostic
+ */
 static void sema_diag_report_and_clear(cc_diag_t *d) {
     if (d == NULL || d->message[0] == '\0') {
         return;
@@ -138,20 +106,7 @@ static void sema_diag_report_and_clear(cc_diag_t *d) {
         d->line = g_diag_ctx_line;
         d->col = g_diag_ctx_col;
     }
-    if (d->line != 0) {
-        if (d->path[0] != '\0') {
-            fprintf(stderr, "%s:%zu:%zu: error: %s\n", d->path, d->line, d->col, d->message);
-            sema_diag_print_source_line(d);
-        } else {
-            fprintf(stderr, "cc:%zu:%zu: error: %s\n", d->line, d->col, d->message);
-        }
-    } else if (d->path[0] != '\0') {
-        fprintf(stderr, "%s: error: %s\n", d->path, d->message);
-    } else {
-        fprintf(stderr, "cc: error: %s\n", d->message);
-    }
-    d->error_count++;
-    sema_diag_clear(d);
+    cc_diag_report(d);
 }
 
 static void set_diag_context(size_t line, size_t col) {
@@ -162,15 +117,16 @@ static void set_diag_context(size_t line, size_t col) {
     g_diag_ctx_col = col;
 }
 
-/* "file:line:col: warning: msg", naming the file as errors do */
+/**
+ * Print a warning about the file being checked.
+ *
+ * @param diag  the diagnostic, for the file's path; may be NULL
+ * @param line  the line, or 0
+ * @param col   the column, or 0
+ * @param msg   the message
+ */
 static void print_warning(const cc_diag_t *diag, size_t line, size_t col, const char *msg) {
-    const char *where = (diag != NULL && diag->path[0] != '\0') ? diag->path : "cc";
-
-    if (line != 0) {
-        fprintf(stderr, "%s:%zu:%zu: warning: %s\n", where, line, col, msg);
-    } else {
-        fprintf(stderr, "%s: warning: %s\n", where, msg);
-    }
+    cc_diag_print("warning", diag != NULL ? diag->path : NULL, line, col, msg, 0);
 }
 
 static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg, int pedantic_only) {

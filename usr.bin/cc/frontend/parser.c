@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_diag.h"
 #include "cc_lexer.h"
 #include "cc_types.h"
 #include "cc_util.h"
@@ -53,18 +54,18 @@ typedef struct {
 
 static const char *g_parser_diag_file = NULL;
 
+/**
+ * Record a parse error at a position in the file being parsed.  A later
+ * error replaces an earlier one: the parser reports the error it stops
+ * at.
+ *
+ * @param d     the diagnostic
+ * @param line  the line
+ * @param col   the column
+ * @param msg   the message
+ */
 static void set_diag(cc_diag_t *d, size_t line, size_t col, const char *msg) {
-    if (d == NULL) {
-        return;
-    }
-    if (g_parser_diag_file != NULL && g_parser_diag_file[0] != '\0') {
-        snprintf(d->path, sizeof(d->path), "%s", g_parser_diag_file);
-    } else {
-        d->path[0] = '\0';
-    }
-    d->line = line;
-    d->col = col;
-    snprintf(d->message, sizeof(d->message), "%s", msg);
+    cc_diag_replace(d, g_parser_diag_file != NULL ? g_parser_diag_file : "", line, col, msg);
 }
 
 static int diag_is_oom(const cc_diag_t *d) {
@@ -74,73 +75,6 @@ static int diag_is_oom(const cc_diag_t *d) {
     return strstr(d->message, "out of memory") != NULL;
 }
 
-static void diag_clear(cc_diag_t *d) {
-    if (d == NULL) {
-        return;
-    }
-    d->path[0] = '\0';
-    d->line = 0;
-    d->col = 0;
-    d->message[0] = '\0';
-}
-
-static void diag_print_source_line(const cc_diag_t *d) {
-    FILE *fp;
-    char buf[1024];
-    size_t cur = 1;
-    size_t i;
-    size_t col;
-    size_t len;
-
-    if (d == NULL || d->path[0] == '\0' || d->line == 0) {
-        return;
-    }
-    fp = fopen(d->path, "r");
-    if (fp == NULL) {
-        return;
-    }
-    while (cur < d->line && fgets(buf, sizeof(buf), fp) != NULL) {
-        cur++;
-    }
-    if (cur == d->line && fgets(buf, sizeof(buf), fp) != NULL) {
-        len = strlen(buf);
-        while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
-            buf[--len] = '\0';
-        }
-        fprintf(stderr, "    %s\n", buf);
-        col = d->col > 0 ? d->col : 1;
-        fprintf(stderr, "    ");
-        for (i = 1; i < col; ++i) {
-            if (i - 1 < len && buf[i - 1] == '\t') {
-                fputc('\t', stderr);
-            } else {
-                fputc(' ', stderr);
-            }
-        }
-        fprintf(stderr, "^\n");
-    }
-    fclose(fp);
-}
-
-static void diag_report_and_clear(cc_diag_t *d) {
-    if (d == NULL || d->message[0] == '\0') {
-        return;
-    }
-    if (d->line != 0) {
-        if (d->path[0] != '\0') {
-            fprintf(stderr, "%s:%zu:%zu: error: %s\n", d->path, d->line, d->col, d->message);
-            diag_print_source_line(d);
-        } else {
-            fprintf(stderr, "cc:%zu:%zu: error: %s\n", d->line, d->col, d->message);
-        }
-    } else if (d->path[0] != '\0') {
-        fprintf(stderr, "%s: error: %s\n", d->path, d->message);
-    } else {
-        fprintf(stderr, "cc: error: %s\n", d->message);
-    }
-    d->error_count++;
-    diag_clear(d);
-}
 
 typedef struct {
     cc_lexer_t lx;
@@ -10356,7 +10290,7 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
                     p->scope_depth = saved_depth;
                     return -1;
                 }
-                diag_report_and_clear(p->diag);
+                cc_diag_report(p->diag);
                 if (parser_sync_block_stmt(p) != 0) {
                     typedef_pop_to_depth(p, saved_depth);
                     var_pop_to_depth(p, saved_depth);
@@ -10386,7 +10320,7 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
                         p->scope_depth = saved_depth;
                         return -1;
                     }
-                    diag_report_and_clear(p->diag);
+                    cc_diag_report(p->diag);
                     if (parser_sync_block_stmt(p) != 0) {
                         typedef_pop_to_depth(p, saved_depth);
                         var_pop_to_depth(p, saved_depth);
@@ -10413,7 +10347,7 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
                 p->scope_depth = saved_depth;
                 return -1;
             }
-            diag_report_and_clear(p->diag);
+            cc_diag_report(p->diag);
             if (parser_sync_block_stmt(p) != 0) {
                 typedef_pop_to_depth(p, saved_depth);
                 var_pop_to_depth(p, saved_depth);
@@ -11468,7 +11402,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
                 if (diag_is_oom(p->diag)) {
                     return -1;
                 }
-                diag_report_and_clear(p->diag);
+                cc_diag_report(p->diag);
                 if (parser_sync_block_stmt(p) != 0) {
                     return -1;
                 }
@@ -11496,7 +11430,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
                     if (diag_is_oom(p->diag)) {
                         return -1;
                     }
-                    diag_report_and_clear(p->diag);
+                    cc_diag_report(p->diag);
                     if (parser_sync_block_stmt(p) != 0) {
                         return -1;
                     }
@@ -11510,7 +11444,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             if (diag_is_oom(p->diag)) {
                 return -1;
             }
-            diag_report_and_clear(p->diag);
+            cc_diag_report(p->diag);
             if (parser_sync_block_stmt(p) != 0) {
                 return -1;
             }
@@ -11779,7 +11713,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                     cc_tu_free(out);
                     return -1;
                 }
-                diag_report_and_clear(diag);
+                cc_diag_report(diag);
                 if (parser_sync_toplevel(&p) != 0) {
                     cc_lexer_deinit(&p.lx);
                     parser_free_hoisted_funcs(&p);
@@ -11813,7 +11747,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                     cc_tu_free(out);
                     return -1;
                 }
-                diag_report_and_clear(diag);
+                cc_diag_report(diag);
                 if (parser_sync_toplevel(&p) != 0) {
                     cc_lexer_deinit(&p.lx);
                     parser_free_hoisted_funcs(&p);
@@ -11848,7 +11782,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                     cc_tu_free(out);
                     return -1;
                 }
-                diag_report_and_clear(diag);
+                cc_diag_report(diag);
                 if (parser_sync_toplevel(&p) != 0) {
                     cc_lexer_deinit(&p.lx);
                     parser_free_hoisted_funcs(&p);
@@ -11939,7 +11873,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 cc_tu_free(out);
                 return -1;
             }
-            diag_report_and_clear(diag);
+            cc_diag_report(diag);
             if (parser_sync_toplevel(&p) != 0) {
                 cc_lexer_deinit(&p.lx);
                 parser_free_hoisted_funcs(&p);

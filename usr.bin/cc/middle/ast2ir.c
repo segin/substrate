@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_diag.h"
 #include "cc_ssa.h"
 #include "cc_types.h"
 #include "cc_util.h"
@@ -383,14 +384,15 @@ static char *quote_c_string(const char *raw) {
     return out;
 }
 
+/**
+ * Record a lowering error, which has no source position; the first one
+ * recorded is kept.
+ *
+ * @param d    the diagnostic
+ * @param msg  the message
+ */
 static void set_diag(cc_diag_t *d, const char *msg) {
-    if (d == NULL || d->message[0] != '\0') {
-        return;
-    }
-    d->path[0] = '\0';
-    d->line = 0;
-    d->col = 0;
-    snprintf(d->message, sizeof(d->message), "%s", msg);
+    cc_diag_set(d, "", 0, 0, msg);
 }
 
 static cc_value_type_t type_to_val(cc_type_t t) {

@@ -3,6 +3,7 @@
 
 #include "cc_driver.h"
 #include "cc_frontend.h"
+#include "cc_diag.h"
 #include "cc_pipeline.h"
 #include "cc_util.h"
 
@@ -145,44 +146,6 @@ static void sigchld_guard_end(sigchld_guard_t *guard) {
     sigaction(SIGCHLD, &guard->old, NULL);
     guard->active = 0;
   }
-}
-
-static void print_diag_source_line(const char *path, size_t line, size_t col) {
-  FILE *fp;
-  char buf[1024];
-  size_t cur = 1;
-  size_t i;
-  size_t len;
-  size_t caret_col;
-
-  if (path == NULL || path[0] == '\0' || line == 0) {
-    return;
-  }
-  fp = fopen(path, "r");
-  if (fp == NULL) {
-    return;
-  }
-  while (cur < line && fgets(buf, sizeof(buf), fp) != NULL) {
-    cur++;
-  }
-  if (cur == line && fgets(buf, sizeof(buf), fp) != NULL) {
-    len = strlen(buf);
-    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
-      buf[--len] = '\0';
-    }
-    fprintf(stderr, "    %s\n", buf);
-    caret_col = col > 0 ? col : 1;
-    fprintf(stderr, "    ");
-    for (i = 1; i < caret_col; ++i) {
-      if (i - 1 < len && buf[i - 1] == '\t') {
-        fputc('\t', stderr);
-      } else {
-        fputc(' ', stderr);
-      }
-    }
-    fprintf(stderr, "^\n");
-  }
-  fclose(fp);
 }
 
 
@@ -1565,17 +1528,8 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
       unlink(stdin_tmp);
       free(stdin_tmp);
     }
-    if (diag.line != 0) {
-      if (diag.path[0] != '\0') {
-        fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line,
-                diag.col, diag.message);
-        print_diag_source_line(diag.path, diag.line, diag.col);
-      } else {
-        fprintf(stderr, "cpp:%zu:%zu: error: %s\n", diag.line, diag.col,
-                diag.message);
-      }
-    } else if (diag.message[0] != '\0') {
-      fprintf(stderr, "cpp: error: %s\n", diag.message);
+    if (diag.message[0] != '\0') {
+      cc_diag_print("error", diag.path, diag.line, diag.col, diag.message, 1);
     } else {
       fprintf(stderr, "cpp: error: preprocess failed\n");
     }
@@ -2313,17 +2267,9 @@ int cc_main(int argc, char **argv) {
               fprintf(stderr, "cc: error: %zu error(s) generated\n",
                       diag.error_count);
             }
-          } else if (diag.line != 0) {
-            if (diag.path[0] != '\0') {
-              fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line,
-                      diag.col, diag.message);
-              print_diag_source_line(diag.path, diag.line, diag.col);
-            } else {
-              fprintf(stderr, "cc:%zu:%zu: error: %s\n", diag.line, diag.col,
-                      diag.message);
-            }
           } else if (diag.message[0] != '\0') {
-            fprintf(stderr, "cc: error: %s\n", diag.message);
+            cc_diag_print("error", diag.path, diag.line, diag.col,
+                          diag.message, 1);
           } else {
             fprintf(stderr, "cc: error: native C pipeline failed\n");
           }

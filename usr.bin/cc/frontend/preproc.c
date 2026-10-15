@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "cc_frontend.h"
+#include "cc_diag.h"
 #include "cc_util.h"
 
 #include <ctype.h>
@@ -178,18 +179,17 @@ static int substrate_pp_join_root(char out[PATH_MAX], const char *root, const ch
 }
 #endif
 
+/**
+ * Record a preprocessing error in the file being read; the first one
+ * recorded is kept.
+ *
+ * @param diag  the diagnostic
+ * @param line  the line
+ * @param col   the column
+ * @param msg   the message
+ */
 static void set_diag(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
-    if (diag == NULL || diag->message[0] != '\0') {
-        return;
-    }
-    if (g_pp_diag_file != NULL && g_pp_diag_file[0] != '\0') {
-        snprintf(diag->path, sizeof(diag->path), "%s", g_pp_diag_file);
-    } else {
-        diag->path[0] = '\0';
-    }
-    diag->line = line;
-    diag->col = col;
-    snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    cc_diag_set(diag, g_pp_diag_file != NULL ? g_pp_diag_file : "", line, col, msg);
 }
 
 static int strvec_push_unique(cc_strvec_t *v, const char *s) {
