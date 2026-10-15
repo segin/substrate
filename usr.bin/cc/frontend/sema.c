@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 #include "cc_asm.h"
+#include "cc_consteval.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_options.h"
@@ -1850,244 +1851,64 @@ static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int 
     return array_type_size_bytes(tu, t, struct_id, array_ndim, array_dims);
 }
 
+/**
+ * The size in bytes of a sizeof expression, for the constant evaluator:
+ * of a string literal, an array, or any other expression or type.
+ *
+ * @param ctx  the translation unit
+ * @param e    the CC_EXPR_SIZEOF node
+ * @return     the size, or -1 if it is not known
+ */
+static long sema_const_sizeof(void *ctx, const cc_expr_t *e) {
+    const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
+
+    if (e->lhs == NULL) {
+        return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+    }
+    if (e->lhs->kind == CC_EXPR_STR) {
+        int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
+                    e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
+        size_t units = decoded_string_unit_count(e->lhs, wide);
+        cc_type_t elem_type = ptr_base_type(e->lhs->value_type);
+        long elem_size = type_size_bytes_struct(tu, elem_type, e->lhs->struct_id);
+        if (units < (size_t)LONG_MAX && elem_size > 0 && (long)(units + 1) <= LONG_MAX / elem_size) {
+            return (long)(units + 1) * elem_size;
+        }
+    }
+    if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
+        return array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim,
+                                     e->lhs->array_dims);
+    }
+    return type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+}
+
+/**
+ * The size of a type in bytes, for the constant evaluator.
+ *
+ * @param ctx        the translation unit
+ * @param t          the type
+ * @param struct_id  its struct id, or -1
+ * @return           the size, or <= 0 if not known
+ */
+static long sema_const_type_size(void *ctx, cc_type_t t, int struct_id) {
+    return type_size_bytes_struct((const cc_translation_unit_t *)ctx, t, struct_id);
+}
+
+/**
+ * Evaluate an integer constant expression in sema's context.
+ *
+ * @param tu   the translation unit
+ * @param e    the expression
+ * @param out  receives the value
+ * @return     0, or -1 if @p e is not an integer constant expression
+ */
 static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
-    long long a;
-    long long b;
+    cc_const_env_t env;
 
-    if (e == NULL || out == NULL) {
-        return -1;
-    }
-
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        *out = e->int_val;
-        return 0;
-
-    case CC_EXPR_BIN:
-        if (eval_const_int_expr(tu, e->lhs, &a) != 0 || eval_const_int_expr(tu, e->rhs, &b) != 0) {
-            return -1;
-        }
-        switch (e->op) {
-        case CC_BIN_ADD:
-            *out = a + b;
-            return 0;
-        case CC_BIN_SUB:
-            *out = a - b;
-            return 0;
-        case CC_BIN_MUL:
-            *out = a * b;
-            return 0;
-        case CC_BIN_DIV:
-            if (b == 0) {
-                return -1;
-            }
-            *out = a / b;
-            return 0;
-        case CC_BIN_MOD:
-            if (b == 0) {
-                return -1;
-            }
-            *out = a % b;
-            return 0;
-        case CC_BIN_SHL:
-            *out = a << (b & 63);
-            return 0;
-        case CC_BIN_SHR:
-            *out = a >> (b & 63);
-            return 0;
-        case CC_BIN_BAND:
-            *out = a & b;
-            return 0;
-        case CC_BIN_BOR:
-            *out = a | b;
-            return 0;
-        case CC_BIN_BXOR:
-            *out = a ^ b;
-            return 0;
-        case CC_BIN_EQ:
-            *out = (a == b) ? 1 : 0;
-            return 0;
-        case CC_BIN_NE:
-            *out = (a != b) ? 1 : 0;
-            return 0;
-        case CC_BIN_LT:
-            *out = (a < b) ? 1 : 0;
-            return 0;
-        case CC_BIN_LE:
-            *out = (a <= b) ? 1 : 0;
-            return 0;
-        case CC_BIN_GT:
-            *out = (a > b) ? 1 : 0;
-            return 0;
-        case CC_BIN_GE:
-            *out = (a >= b) ? 1 : 0;
-            return 0;
-        case CC_BIN_LAND:
-            *out = (a != 0 && b != 0) ? 1 : 0;
-            return 0;
-        case CC_BIN_LOR:
-            *out = (a != 0 || b != 0) ? 1 : 0;
-            return 0;
-        case CC_BIN_COMMA:
-            *out = b;
-            return 0;
-        default:
-            return -1;
-        }
-
-    case CC_EXPR_CAST:
-        if (e->aux_type == CC_TYPE_VOID) {
-            return -1;
-        }
-        if (eval_const_int_expr(tu, e->lhs, out) != 0) {
-            return -1;
-        }
-        if (cc_type_is_integral(e->aux_type) && !is_pointer_type(e->aux_type)) {
-            int bits = 0;
-            unsigned long long mask;
-            unsigned long long u;
-
-            if (e->aux_type == CC_TYPE_BOOL) {
-                *out = (*out != 0) ? 1 : 0;
-                return 0;
-            }
-
-            switch (e->aux_type) {
-            case CC_TYPE_CHAR:
-            case CC_TYPE_SCHAR:
-            case CC_TYPE_UCHAR:
-                bits = 8;
-                break;
-            case CC_TYPE_SHORT:
-            case CC_TYPE_USHORT:
-                bits = 16;
-                break;
-            case CC_TYPE_INT:
-            case CC_TYPE_UINT:
-            case CC_TYPE_ENUM:
-                bits = 32;
-                break;
-            case CC_TYPE_LONG:
-            case CC_TYPE_ULONG:
-            case CC_TYPE_LONG_LONG:
-            case CC_TYPE_ULONG_LONG:
-                bits = 64;
-                break;
-            default:
-                bits = 0;
-                break;
-            }
-
-            if (bits > 0 && bits < 64) {
-                mask = (1ULL << bits) - 1ULL;
-                u = (unsigned long long)(*out) & mask;
-                if (!(e->aux_type == CC_TYPE_UCHAR || e->aux_type == CC_TYPE_USHORT || e->aux_type == CC_TYPE_UINT) &&
-                    (u & (1ULL << (bits - 1))) != 0) {
-                    u |= ~mask;
-                }
-                *out = (long long)u;
-            }
-        }
-        return 0;
-
-    case CC_EXPR_CALL:
-        if (e->ident == NULL) {
-            return -1;
-        }
-        if (strcmp(e->ident, "__builtin_constant_p") == 0) {
-            if (e->arg_count != 1) {
-                return -1;
-            }
-            *out = (eval_const_int_expr(tu, e->args[0], &a) == 0) ? 1 : 0;
-            return 0;
-        }
-        if (strcmp(e->ident, "__builtin_expect") == 0) {
-            if (e->arg_count < 1) {
-                return -1;
-            }
-            return eval_const_int_expr(tu, e->args[0], out);
-        }
-        if (strcmp(e->ident, "__builtin_choose_expr") == 0) {
-            if (e->arg_count != 3) {
-                return -1;
-            }
-            if (eval_const_int_expr(tu, e->args[0], &a) != 0) {
-                return -1;
-            }
-            if (a != 0) {
-                return eval_const_int_expr(tu, e->args[1], out);
-            }
-            return eval_const_int_expr(tu, e->args[2], out);
-        }
-        {
-            int bswap_bits = builtin_bswap_bits(e->ident);
-            if (bswap_bits != 0) {
-                unsigned long long uv;
-                if (e->arg_count != 1 || eval_const_int_expr(tu, e->args[0], &a) != 0) {
-                    return -1;
-                }
-                uv = (unsigned long long)(unsigned long)a;
-                if (bswap_bits == 16) {
-                    uv = ((uv & 0x00ffULL) << 8) | ((uv & 0xff00ULL) >> 8);
-                    uv &= 0xffffULL;
-                } else if (bswap_bits == 32) {
-                    uv = ((uv & 0x000000ffULL) << 24) | ((uv & 0x0000ff00ULL) << 8) |
-                         ((uv & 0x00ff0000ULL) >> 8) | ((uv & 0xff000000ULL) >> 24);
-                    uv &= 0xffffffffULL;
-                } else if (bswap_bits == 64) {
-                    uv = ((uv & 0x00000000000000ffULL) << 56) | ((uv & 0x000000000000ff00ULL) << 40) |
-                         ((uv & 0x0000000000ff0000ULL) << 24) | ((uv & 0x00000000ff000000ULL) << 8) |
-                         ((uv & 0x000000ff00000000ULL) >> 8) | ((uv & 0x0000ff0000000000ULL) >> 24) |
-                         ((uv & 0x00ff000000000000ULL) >> 40) | ((uv & 0xff00000000000000ULL) >> 56);
-                } else {
-                    return -1;
-                }
-                *out = (long long)uv;
-                return 0;
-            }
-        }
-        return -1;
-
-    case CC_EXPR_SIZEOF:
-        if (e->lhs != NULL) {
-            if (e->lhs->kind == CC_EXPR_STR) {
-                int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
-                            e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
-                size_t units = decoded_string_unit_count(e->lhs, wide);
-                cc_type_t elem_type = ptr_base_type(e->lhs->value_type);
-                long elem_size = type_size_bytes_struct(tu, elem_type, e->lhs->struct_id);
-                if (units < (size_t)LONG_MAX && elem_size > 0 && (long)(units + 1) <= LONG_MAX / elem_size) {
-                    *out = (long)(units + 1) * elem_size;
-                    return 0;
-                }
-            }
-            if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
-                *out = array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id,
-                                             e->lhs->array_ndim, e->lhs->array_dims);
-            } else {
-                *out = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
-            }
-        } else {
-            *out = sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
-        }
-        return *out < 0 ? -1 : 0;
-
-    case CC_EXPR_TERNARY:
-        if (eval_const_int_expr(tu, e->lhs, &a) != 0) {
-            return -1;
-        }
-        if (a != 0) {
-            if (e->rhs == NULL) {
-                *out = a;
-                return 0;
-            }
-            return eval_const_int_expr(tu, e->rhs, out);
-        }
-        return eval_const_int_expr(tu, e->third, out);
-
-    default:
-        return -1;
-    }
+    env.sizeof_bytes = sema_const_sizeof;
+    env.type_size = sema_const_type_size;
+    env.ctx = (void *)tu;
+    return cc_const_eval_ll(&env, e, out);
 }
 
 enum {

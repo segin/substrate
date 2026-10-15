@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_consteval.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_lexer.h"
@@ -297,11 +298,7 @@ static void free_expr(cc_expr_t *e);
 static void free_stmt(cc_stmt_t *s);
 static int is_static_assert_tok(parser_t *p);
 static int parse_static_assert_decl(parser_t *p, int require_semi);
-typedef struct {
-    uint64_t bits;
-    cc_type_t type;
-    int struct_id;
-} parser_const_value_t;
+typedef cc_const_t parser_const_value_t;
 
 static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out);
 static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_value_t *out);
@@ -322,15 +319,10 @@ static int local_label_push(parser_t *p, const char *name, size_t len);
 static void local_label_pop_to_depth(parser_t *p, int depth);
 static void parser_free_local_labels(parser_t *p);
 
-static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e);
 static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id);
 static uint64_t parser_const_mask_bits(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
 static uint64_t parser_const_unsigned_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
 static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
-static uint64_t parser_const_cast_value_bits(const parser_t *p, uint64_t src_bits, cc_type_t src_type, int src_struct_id,
-                                             cc_type_t dst_type, int dst_struct_id, int *ok);
-static int parser_const_cast_expr_value(const parser_t *p, const parser_const_value_t *src, cc_type_t dst_type,
-                                        int dst_struct_id, parser_const_value_t *out);
 
 static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
     cc_function_t *next;
@@ -1075,87 +1067,6 @@ static uint64_t parser_const_unsigned_value(const parser_t *p, uint64_t bits, cc
     return parser_const_mask_bits(p, bits, t, struct_id);
 }
 
-static int parser_builtin_integral_width(const parser_t *p, const char *name) {
-    (void)p;
-    if (name == NULL) {
-        return 0;
-    }
-    if (strcmp(name, "__builtin_clzll") == 0 || strcmp(name, "__builtin_ctzll") == 0 ||
-        strcmp(name, "__builtin_ffsll") == 0 || strcmp(name, "__builtin_popcountll") == 0) {
-        return 64;
-    }
-    if (strcmp(name, "__builtin_clzl") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
-        strcmp(name, "__builtin_ffsl") == 0 || strcmp(name, "__builtin_popcountl") == 0) {
-        return cc_target_pointer_size() >= 8 ? 64 : 32;
-    }
-    if (strcmp(name, "__builtin_clz") == 0 || strcmp(name, "__builtin_ctz") == 0 ||
-        strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_popcount") == 0) {
-        return 32;
-    }
-    return 0;
-}
-
-static int parser_const_builtin_bitop(parser_t *p, const cc_expr_t *e, parser_const_value_t *out) {
-    parser_const_value_t arg;
-    uint64_t v;
-    int width;
-    int i;
-    int n = 0;
-
-    if (e == NULL || e->ident == NULL || out == NULL || e->arg_count != 1 || e->args == NULL || e->args[0] == NULL) {
-        return -1;
-    }
-    width = parser_builtin_integral_width(p, e->ident);
-    if (width <= 0 || width > 64) {
-        return -1;
-    }
-    if (eval_const_expr_value(p, e->args[0], &arg) != 0) {
-        return -1;
-    }
-    v = parser_const_unsigned_value(p, arg.bits, arg.type, arg.struct_id);
-    if (width < 64) {
-        v &= (1ULL << width) - 1ULL;
-    }
-
-    if (strncmp(e->ident, "__builtin_clz", 13) == 0) {
-        if (v == 0) {
-            return -1;
-        }
-        for (i = width - 1; i >= 0 && ((v & (1ULL << i)) == 0); --i) {
-            ++n;
-        }
-    } else if (strncmp(e->ident, "__builtin_ctz", 13) == 0) {
-        if (v == 0) {
-            return -1;
-        }
-        for (i = 0; i < width && ((v & (1ULL << i)) == 0); ++i) {
-            ++n;
-        }
-    } else if (strncmp(e->ident, "__builtin_ffs", 13) == 0) {
-        if (v == 0) {
-            n = 0;
-        } else {
-            for (i = 0; i < width && ((v & (1ULL << i)) == 0); ++i) {
-                ++n;
-            }
-            ++n;
-        }
-    } else if (strncmp(e->ident, "__builtin_popcount", 18) == 0) {
-        for (i = 0; i < width; ++i) {
-            if ((v & (1ULL << i)) != 0) {
-                ++n;
-            }
-        }
-    } else {
-        return -1;
-    }
-
-    out->type = CC_TYPE_INT;
-    out->struct_id = -1;
-    out->bits = parser_const_mask_bits(p, (uint64_t)n, out->type, out->struct_id);
-    return 0;
-}
-
 static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id) {
     int width = parser_const_type_bits(p, t, struct_id);
     uint64_t u = parser_const_mask_bits(p, bits, t, struct_id);
@@ -1168,99 +1079,6 @@ static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_ty
         u |= ~((1ULL << width) - 1ULL);
     }
     return (int64_t)u;
-}
-
-static uint64_t parser_const_cast_value_bits(const parser_t *p, uint64_t src_bits, cc_type_t src_type, int src_struct_id,
-                                             cc_type_t dst_type, int dst_struct_id, int *ok) {
-    uint64_t raw;
-
-    if (ok != NULL) {
-        *ok = 0;
-    }
-    if (dst_type == CC_TYPE_VOID) {
-        return 0;
-    }
-    if (dst_type == CC_TYPE_BOOL) {
-        if (ok != NULL) {
-            *ok = 1;
-        }
-        return ((cc_type_is_unsigned_integral(src_type) || is_pointer_type(src_type))
-                    ? parser_const_unsigned_value(p, src_bits, src_type, src_struct_id)
-                    : (uint64_t)parser_const_signed_value(p, src_bits, src_type, src_struct_id)) != 0
-                   ? 1
-                   : 0;
-    }
-    if (cc_type_is_unsigned_integral(src_type) || is_pointer_type(src_type)) {
-        raw = parser_const_unsigned_value(p, src_bits, src_type, src_struct_id);
-    } else {
-        raw = (uint64_t)parser_const_signed_value(p, src_bits, src_type, src_struct_id);
-    }
-    if (ok != NULL) {
-        *ok = 1;
-    }
-    return parser_const_mask_bits(p, raw, dst_type, dst_struct_id);
-}
-
-static int parser_const_cast_expr_value(const parser_t *p, const parser_const_value_t *src, cc_type_t dst_type,
-                                        int dst_struct_id, parser_const_value_t *out) {
-    int ok = 0;
-
-    if (src == NULL || out == NULL) {
-        return -1;
-    }
-    out->bits = parser_const_cast_value_bits(p, src->bits, src->type, src->struct_id, dst_type, dst_struct_id, &ok);
-    if (!ok) {
-        return -1;
-    }
-    out->type = dst_type;
-    out->struct_id = dst_struct_id;
-    return 0;
-}
-
-static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e) {
-    if (e == NULL) {
-        return CC_TYPE_INT;
-    }
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
-    case CC_EXPR_CAST:
-        return e->aux_type;
-    case CC_EXPR_SIZEOF:
-        return parser_size_type();
-    case CC_EXPR_TERNARY:
-        if (e->rhs != NULL && e->third != NULL) {
-            return parser_common_arith_type(parser_const_result_type(p, e->rhs), parser_const_result_type(p, e->third));
-        }
-        if (e->rhs != NULL) {
-            return parser_const_result_type(p, e->rhs);
-        }
-        if (e->third != NULL) {
-            return parser_const_result_type(p, e->third);
-        }
-        return CC_TYPE_INT;
-    case CC_EXPR_BIN:
-        switch (e->op) {
-        case CC_BIN_EQ:
-        case CC_BIN_NE:
-        case CC_BIN_LT:
-        case CC_BIN_LE:
-        case CC_BIN_GT:
-        case CC_BIN_GE:
-        case CC_BIN_LAND:
-        case CC_BIN_LOR:
-            return CC_TYPE_INT;
-        case CC_BIN_COMMA:
-            return parser_const_result_type(p, e->rhs);
-        case CC_BIN_SHL:
-        case CC_BIN_SHR:
-            return parser_const_result_type(p, e->lhs);
-        default:
-            return parser_common_arith_type(parser_const_result_type(p, e->lhs), parser_const_result_type(p, e->rhs));
-        }
-    default:
-        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
-    }
 }
 
 static int parser_is_bitfield_base_type(cc_type_t t) {
@@ -3973,430 +3791,207 @@ static int parser_expr_typeof_const_context(parser_t *p, const cc_expr_t *e, cc_
     }
 }
 
-static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_value_t *out) {
-    parser_const_value_t lhs;
-    parser_const_value_t rhs;
-    parser_const_value_t cond;
-    long sz;
+/**
+ * The size in bytes of an array: its element size times its bounds.
+ *
+ * @param p          the parser
+ * @param type       the array's type as the AST records it (a pointer to
+ *                   the element type)
+ * @param struct_id  the element's struct id, or -1
+ * @param ndim       the number of dimensions
+ * @param dims       the bounds
+ * @return           the size, or -1 if a bound or the element size is
+ *                   not known
+ */
+static long parser_array_bytes(parser_t *p, cc_type_t type, int struct_id, int ndim, const long *dims) {
+    cc_type_t elem_type = is_pointer_type(type) ? ptr_deref_type(type) : type;
+    long total = parser_type_size_bytes(p, elem_type, struct_id);
+    int i;
 
-    if (e == NULL || out == NULL) {
+    if (total <= 0) {
         return -1;
     }
-    memset(out, 0, sizeof(*out));
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        out->type = e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
-        out->struct_id = e->struct_id;
-        out->bits = parser_const_mask_bits(p, (uint64_t)e->int_val, out->type, out->struct_id);
-        return 0;
-    case CC_EXPR_CAST: {
-        int ok = 0;
-        if (e->aux_type == CC_TYPE_VOID) {
+    for (i = 0; i < ndim; ++i) {
+        if (dims[i] <= 0 || total > LONG_MAX / dims[i]) {
             return -1;
         }
-        if (eval_const_expr_value(p, e->lhs, &lhs) != 0) {
-            return -1;
-        }
-        out->type = e->aux_type;
-        out->struct_id = e->aux_struct_id;
-        out->bits = parser_const_cast_value_bits(p, lhs.bits, lhs.type, lhs.struct_id, out->type, out->struct_id, &ok);
-        return ok ? 0 : -1;
+        total *= dims[i];
     }
-    case CC_EXPR_SIZEOF:
-        out->type = parser_size_type();
-        out->struct_id = -1;
-        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_STR) {
-            long bound = parser_string_literal_array_bound(e->lhs);
-            cc_type_t elem_type = ptr_deref_type(e->lhs->value_type);
-            long elem_size = parser_type_size_bytes(p, elem_type, e->lhs->struct_id);
-            if (bound > 0 && elem_size > 0 && bound <= LONG_MAX / elem_size) {
-                out->bits = parser_const_mask_bits(p, (uint64_t)(bound * elem_size), out->type, out->struct_id);
-                return 0;
-            }
-        }
-        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
-            int vidx = var_find_visible_n(p, e->lhs->ident, strlen(e->lhs->ident));
-            if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
-                cc_type_t elem_type = p->vars[vidx].type;
-                long total;
-                long dims[CC_MAX_ARRAY_DIMS];
-                int i;
+    return total;
+}
 
-                memset(dims, 0, sizeof(dims));
-                memcpy(dims, p->vars[vidx].array_dims, sizeof(dims));
-                if (dims[0] <= 0 && p->tu != NULL && p->vars[vidx].name != NULL) {
-                    size_t gi;
-                    for (gi = 0; gi < p->tu->global_count; ++gi) {
-                        const cc_global_t *g = &p->tu->globals[gi];
-                        if (g->name == NULL || strcmp(g->name, p->vars[vidx].name) != 0) {
-                            continue;
-                        }
+/**
+ * Fill in an array's missing outer bound from a global's definition: its
+ * declared length, or the length of its initializer list.
+ *
+ * @param p     the parser
+ * @param g     the global
+ * @param dims  the bounds; dims[0] is set if it is not yet known
+ */
+static void parser_global_fill_bound(parser_t *p, const cc_global_t *g, long *dims) {
+    if (dims[0] <= 0 && g->array_len > 0) {
+        dims[0] = g->array_len;
+    }
+    if (dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST && g->init->arg_count > 0) {
+        dims[0] = parser_init_list_array_bound(p, g->type, g->type_struct_id, g->init);
+    }
+}
+
+/**
+ * The size in bytes of a sizeof expression, for the constant evaluator:
+ * of a string literal, an array the parser knows the bounds of (a local
+ * or global, or a compound literal), an array type name, or any other
+ * type.
+ *
+ * @param ctx  the parser
+ * @param e    the CC_EXPR_SIZEOF node
+ * @return     the size, or -1 if it is not known
+ */
+static long parser_const_sizeof(void *ctx, const cc_expr_t *e) {
+    parser_t *p = (parser_t *)ctx;
+    long sz;
+
+    if (e->lhs != NULL && e->lhs->kind == CC_EXPR_STR) {
+        long bound = parser_string_literal_array_bound(e->lhs);
+        cc_type_t elem_type = ptr_deref_type(e->lhs->value_type);
+        long elem_size = parser_type_size_bytes(p, elem_type, e->lhs->struct_id);
+        if (bound > 0 && elem_size > 0 && bound <= LONG_MAX / elem_size) {
+            return bound * elem_size;
+        }
+    }
+    if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
+        int vidx = var_find_visible_n(p, e->lhs->ident, strlen(e->lhs->ident));
+        long dims[CC_MAX_ARRAY_DIMS];
+        size_t gi;
+
+        if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
+            memcpy(dims, p->vars[vidx].array_dims, sizeof(dims));
+            /* a local `extern T a[];` takes its bound from the global */
+            if (dims[0] <= 0 && p->tu != NULL && p->vars[vidx].name != NULL) {
+                for (gi = 0; gi < p->tu->global_count; ++gi) {
+                    const cc_global_t *g = &p->tu->globals[gi];
+                    if (g->name != NULL && strcmp(g->name, p->vars[vidx].name) == 0) {
                         if (g->array_ndim > 0) {
                             memcpy(dims, g->array_dims, sizeof(dims));
                         }
-                        if (dims[0] <= 0 && g->array_len > 0) {
-                            dims[0] = g->array_len;
-                        }
-                        if (dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
-                            g->init->arg_count > 0) {
-                            dims[0] = parser_init_list_array_bound(p, g->type, g->type_struct_id, g->init);
-                        }
+                        parser_global_fill_bound(p, g, dims);
                         break;
                     }
                 }
-                if (is_pointer_type(elem_type)) {
-                    elem_type = ptr_deref_type(elem_type);
-                }
-                sz = parser_type_size_bytes(p, elem_type, p->vars[vidx].struct_id);
-                if (sz <= 0) {
-                    return -1;
-                }
-                total = sz;
-                for (i = 0; i < p->vars[vidx].array_ndim; ++i) {
-                    long dim = dims[i];
-                    if (dim <= 0) {
-                        return -1;
-                    }
-                    total *= dim;
-                }
-                out->bits = parser_const_mask_bits(p, (uint64_t)total, out->type, out->struct_id);
-                return 0;
             }
-            if (vidx < 0 && p->tu != NULL) {
-                size_t gi;
-                for (gi = 0; gi < p->tu->global_count; ++gi) {
-                    const cc_global_t *g = &p->tu->globals[gi];
-                    if (g->name == NULL || strcmp(g->name, e->lhs->ident) != 0) {
-                        continue;
-                    }
-                    {
-                        cc_type_t elem_type = g->type;
-                        long total;
-                        int i;
-                        int ndim = g->array_ndim;
-                        long dims[CC_MAX_ARRAY_DIMS];
-                        memset(dims, 0, sizeof(dims));
-                        if (g->array_ndim > 0) {
-                            memcpy(dims, g->array_dims, sizeof(dims));
-                        }
-                        if (ndim <= 0 && g->array_len > 0) {
-                            ndim = 1;
-                            dims[0] = g->array_len;
-                        }
-                        if (ndim > 0 && dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
-                            g->init->arg_count > 0) {
-                            dims[0] = parser_init_list_array_bound(p, g->type, g->type_struct_id, g->init);
-                        }
-                        if (ndim <= 0) {
-                            continue;
-                        }
-                        if (is_pointer_type(elem_type)) {
-                            elem_type = ptr_deref_type(elem_type);
-                        }
-                        sz = parser_type_size_bytes(p, elem_type, g->type_struct_id);
-                        if (sz <= 0) {
-                            return -1;
-                        }
-                        total = sz;
-                        for (i = 0; i < ndim; ++i) {
-                            long dim = dims[i];
-                            if (i == 0 && dim <= 0 && g->array_len > 0) {
-                                dim = g->array_len;
-                            }
-                            if (dim <= 0) {
-                                return -1;
-                            }
-                            total *= dim;
-                        }
-                        out->bits = parser_const_mask_bits(p, (uint64_t)total, out->type, out->struct_id);
-                        return 0;
-                    }
-                }
-            }
+            return parser_array_bytes(p, p->vars[vidx].type, p->vars[vidx].struct_id, p->vars[vidx].array_ndim,
+                                      dims);
         }
-        if (e->lhs != NULL && e->lhs->array_ndim > 0) {
-            cc_type_t elem_type = e->lhs->value_type;
-            long total;
-            long dims[CC_MAX_ARRAY_DIMS];
-            int i;
+        if (vidx < 0 && p->tu != NULL) {
+            for (gi = 0; gi < p->tu->global_count; ++gi) {
+                const cc_global_t *g = &p->tu->globals[gi];
+                int ndim = g->array_ndim;
 
-            memset(dims, 0, sizeof(dims));
-            memcpy(dims, e->lhs->array_dims, sizeof(dims));
-            if (dims[0] <= 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
-                e->lhs->lhs->kind == CC_EXPR_INIT_LIST) {
-                dims[0] = parser_init_list_array_bound(p, e->lhs->value_type, e->lhs->struct_id, e->lhs->lhs);
-            }
-            if (is_pointer_type(elem_type)) {
-                elem_type = ptr_deref_type(elem_type);
-            }
-            sz = parser_type_size_bytes(p, elem_type, e->lhs->struct_id);
-            if (sz <= 0) {
-                return -1;
-            }
-            total = sz;
-            for (i = 0; i < e->lhs->array_ndim; ++i) {
-                if (dims[i] <= 0) {
-                    return -1;
+                if (g->name == NULL || strcmp(g->name, e->lhs->ident) != 0) {
+                    continue;
                 }
-                total *= dims[i];
-            }
-            out->bits = parser_const_mask_bits(p, (uint64_t)total, out->type, out->struct_id);
-            return 0;
-        }
-        {
-            cc_type_t st = e->aux_type;
-            if (st == CC_TYPE_VOID && e->aux_struct_id < 0 && e->lhs != NULL) {
-                int ssid = -1;
-                if (parser_expr_typeof_const_context(p, e->lhs, &st, &ssid) != 0) {
-                    st = e->lhs->value_type;
-                    ssid = e->lhs->struct_id;
+                memset(dims, 0, sizeof(dims));
+                if (ndim > 0) {
+                    memcpy(dims, g->array_dims, sizeof(dims));
+                } else if (g->array_len > 0) {
+                    ndim = 1;
                 }
-                sz = parser_type_size_bytes(p, st, ssid);
-                if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && ssid >= 0))) {
-                    out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);
-                    return 0;
+                if (ndim <= 0) {
+                    continue;
                 }
-                if (st == CC_TYPE_VOID && ssid < 0) {
-                    out->bits = parser_const_mask_bits(p, 1u, out->type, out->struct_id);
-                    return 0;
-                }
-            }
-            if (e->lhs == NULL && st == CC_TYPE_VOID && e->aux_struct_id < 0 && e->array_ndim <= 0) {
-                /* sizeof(void) is 1, as gcc has it */
-                out->bits = parser_const_mask_bits(p, 1u, out->type, out->struct_id);
-                return 0;
-            }
-            sz = parser_type_size_bytes(p, st, e->aux_struct_id);
-            if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && e->aux_struct_id >= 0))) {
-                out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);
-                return 0;
-            }
-            if (is_pointer_type(st)) {
-                out->bits = parser_const_mask_bits(p, (uint64_t)cc_target_pointer_size(), out->type, out->struct_id);
-                return 0;
-            }
-            sz = cc_type_scalar_size(st);
-            if (sz > 0) {
-                out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);
-                return 0;
+                parser_global_fill_bound(p, g, dims);
+                return parser_array_bytes(p, g->type, g->type_struct_id, ndim, dims);
             }
         }
-        return -1;
-    case CC_EXPR_BIN:
-        if (e->op == CC_BIN_COMMA) {
-            return eval_const_expr_value(p, e->rhs, out);
-        }
-        if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
-            int lhs_true;
-            int rhs_true;
-            if (eval_const_expr_value(p, e->lhs, &lhs) != 0) {
-                return -1;
-            }
-            lhs_true = ((cc_type_is_unsigned_integral(lhs.type) || is_pointer_type(lhs.type))
-                            ? parser_const_unsigned_value(p, lhs.bits, lhs.type, lhs.struct_id)
-                            : (uint64_t)parser_const_signed_value(p, lhs.bits, lhs.type, lhs.struct_id)) != 0;
-            if (e->op == CC_BIN_LAND && !lhs_true) {
-                out->type = CC_TYPE_INT;
-                out->bits = 0;
-                out->struct_id = -1;
-                return 0;
-            }
-            if (e->op == CC_BIN_LOR && lhs_true) {
-                out->type = CC_TYPE_INT;
-                out->bits = 1;
-                out->struct_id = -1;
-                return 0;
-            }
-            if (eval_const_expr_value(p, e->rhs, &rhs) != 0) {
-                return -1;
-            }
-            rhs_true = ((cc_type_is_unsigned_integral(rhs.type) || is_pointer_type(rhs.type))
-                            ? parser_const_unsigned_value(p, rhs.bits, rhs.type, rhs.struct_id)
-                            : (uint64_t)parser_const_signed_value(p, rhs.bits, rhs.type, rhs.struct_id)) != 0;
-            out->type = CC_TYPE_INT;
-            out->bits = (e->op == CC_BIN_LAND) ? (rhs_true ? 1 : 0) : (rhs_true ? 1 : 0);
-            out->struct_id = -1;
-            return 0;
-        }
-        if (eval_const_expr_value(p, e->lhs, &lhs) != 0 || eval_const_expr_value(p, e->rhs, &rhs) != 0) {
-            return -1;
-        }
-        switch (e->op) {
-        case CC_BIN_ADD:
-        case CC_BIN_SUB:
-        case CC_BIN_MUL:
-        case CC_BIN_DIV:
-        case CC_BIN_MOD:
-        case CC_BIN_BAND:
-        case CC_BIN_BOR:
-        case CC_BIN_BXOR:
-        case CC_BIN_SHL:
-        case CC_BIN_SHR:
-        case CC_BIN_EQ:
-        case CC_BIN_NE:
-        case CC_BIN_LT:
-        case CC_BIN_LE:
-        case CC_BIN_GT:
-        case CC_BIN_GE: {
-            cc_type_t op_ty = (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR)
-                                  ? parser_const_result_type(p, e->lhs)
-                                  : parser_common_arith_type(parser_const_result_type(p, e->lhs),
-                                                             parser_const_result_type(p, e->rhs));
-            uint64_t lhs_bits;
-            uint64_t rhs_bits;
-            uint64_t ua;
-            uint64_t ub;
-            int64_t sa;
-            int64_t sb;
-            int ok_a = 0;
-            int ok_b = 0;
-
-            lhs_bits = parser_const_cast_value_bits(p, lhs.bits, lhs.type, lhs.struct_id, op_ty, -1, &ok_a);
-            rhs_bits = parser_const_cast_value_bits(p, rhs.bits, rhs.type, rhs.struct_id, op_ty, -1, &ok_b);
-            if (!ok_a || !ok_b) {
-                return -1;
-            }
-            ua = parser_const_unsigned_value(p, lhs_bits, op_ty, -1);
-            ub = parser_const_unsigned_value(p, rhs_bits, op_ty, -1);
-            sa = parser_const_signed_value(p, lhs_bits, op_ty, -1);
-            sb = parser_const_signed_value(p, rhs_bits, op_ty, -1);
-
-            switch (e->op) {
-            case CC_BIN_ADD:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua + ub) : (uint64_t)(sa + sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_SUB:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua - ub) : (uint64_t)(sa - sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_MUL:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua * ub) : (uint64_t)(sa * sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_DIV:
-                if ((cc_type_is_unsigned_integral(op_ty) ? ub : (uint64_t)sb) == 0) {
-                    return -1;
-                }
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua / ub) : (uint64_t)(sa / sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_MOD:
-                if ((cc_type_is_unsigned_integral(op_ty) ? ub : (uint64_t)sb) == 0) {
-                    return -1;
-                }
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua % ub) : (uint64_t)(sa % sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_SHL:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua << (ub & 63)) : (uint64_t)(sa << (ub & 63)),
-                    op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_SHR:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(
-                    p, cc_type_is_unsigned_integral(op_ty) ? (ua >> (ub & 63)) : (uint64_t)(sa >> (ub & 63)),
-                    op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_BAND:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(p, ua & ub, op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_BOR:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(p, ua | ub, op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_BXOR:
-                out->type = op_ty;
-                out->bits = parser_const_mask_bits(p, ua ^ ub, op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_EQ:
-                out->type = CC_TYPE_INT;
-                out->bits = (ua == ub) ? 1 : 0;
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_NE:
-                out->type = CC_TYPE_INT;
-                out->bits = (ua != ub) ? 1 : 0;
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_LT:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua < ub) ? 1 : 0) : ((sa < sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_LE:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua <= ub) ? 1 : 0) : ((sa <= sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_GT:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua > ub) ? 1 : 0) : ((sa > sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_GE:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua >= ub) ? 1 : 0) : ((sa >= sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            default:
-                return -1;
-            }
-        }
-        default:
-            return -1;
-        }
-    case CC_EXPR_CALL:
-        return parser_const_builtin_bitop(p, e, out);
-    case CC_EXPR_TERNARY:
-        if (eval_const_expr_value(p, e->lhs, &cond) != 0) {
-            return -1;
-        }
-        if (((cc_type_is_unsigned_integral(cond.type) || is_pointer_type(cond.type))
-                 ? parser_const_unsigned_value(p, cond.bits, cond.type, cond.struct_id)
-                 : (uint64_t)parser_const_signed_value(p, cond.bits, cond.type, cond.struct_id)) != 0) {
-            if (e->rhs == NULL) {
-                if (parser_const_cast_expr_value(p, &cond, e->value_type, e->struct_id, out) != 0) {
-                    return -1;
-                }
-                return 0;
-            }
-            if (eval_const_expr_value(p, e->rhs, out) != 0) {
-                return -1;
-            }
-            if (parser_const_cast_expr_value(p, out, e->value_type, e->struct_id, out) != 0) {
-                return -1;
-            }
-            return 0;
-        }
-        if (eval_const_expr_value(p, e->third, out) != 0) {
-            return -1;
-        }
-        if (parser_const_cast_expr_value(p, out, e->value_type, e->struct_id, out) != 0) {
-            return -1;
-        }
-        return 0;
-    default:
-        return -1;
     }
+    if (e->lhs != NULL && e->lhs->array_ndim > 0) {
+        long dims[CC_MAX_ARRAY_DIMS];
+
+        memcpy(dims, e->lhs->array_dims, sizeof(dims));
+        /* a compound literal (T[]){...} takes its bound from the list */
+        if (dims[0] <= 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
+            e->lhs->lhs->kind == CC_EXPR_INIT_LIST) {
+            dims[0] = parser_init_list_array_bound(p, e->lhs->value_type, e->lhs->struct_id, e->lhs->lhs);
+        }
+        return parser_array_bytes(p, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim, dims);
+    }
+    if (e->lhs == NULL && e->array_ndim > 0) {
+        return parser_array_bytes(p, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+    }
+    {
+        cc_type_t st = e->aux_type;
+        if (st == CC_TYPE_VOID && e->aux_struct_id < 0 && e->lhs != NULL) {
+            int ssid = -1;
+            if (parser_expr_typeof_const_context(p, e->lhs, &st, &ssid) != 0) {
+                st = e->lhs->value_type;
+                ssid = e->lhs->struct_id;
+            }
+            sz = parser_type_size_bytes(p, st, ssid);
+            if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && ssid >= 0))) {
+                return sz;
+            }
+            if (st == CC_TYPE_VOID && ssid < 0) {
+                return 1;
+            }
+        }
+        if (e->lhs == NULL && st == CC_TYPE_VOID && e->aux_struct_id < 0) {
+            /* sizeof(void) is 1, as gcc has it */
+            return 1;
+        }
+        sz = parser_type_size_bytes(p, st, e->aux_struct_id);
+        if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && e->aux_struct_id >= 0))) {
+            return sz;
+        }
+        if (is_pointer_type(st)) {
+            return cc_target_pointer_size();
+        }
+        sz = cc_type_scalar_size(st);
+        if (sz > 0) {
+            return sz;
+        }
+    }
+    return -1;
+}
+
+/**
+ * The size of a type in bytes, for the constant evaluator.
+ *
+ * @param ctx        the parser
+ * @param t          the type
+ * @param struct_id  its struct id, or -1
+ * @return           the size, or <= 0 if not known
+ */
+static long parser_const_type_size(void *ctx, cc_type_t t, int struct_id) {
+    return parser_type_size_bytes((parser_t *)ctx, t, struct_id);
+}
+
+/**
+ * The constant evaluator's view of the parser.
+ *
+ * @param p  the parser
+ * @return   an environment whose callbacks read @p p
+ */
+static cc_const_env_t parser_const_env(parser_t *p) {
+    cc_const_env_t env;
+
+    env.sizeof_bytes = parser_const_sizeof;
+    env.type_size = parser_const_type_size;
+    env.ctx = p;
+    return env;
+}
+
+/**
+ * Evaluate an integer constant expression in the parser's context.
+ *
+ * @param p    the parser
+ * @param e    the expression
+ * @param out  receives the value
+ * @return     0, or -1 if @p e is not an integer constant expression
+ */
+static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_value_t *out) {
+    cc_const_env_t env = parser_const_env(p);
+
+    return cc_const_eval(&env, e, out);
 }
 
 static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out) {

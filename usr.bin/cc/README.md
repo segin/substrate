@@ -70,7 +70,7 @@ On the host, the in-tree toolchain is installed under `/opt/substrate`:
 |---|---|
 | `cmd/` | the driver (`cc.c`) and the compile pipeline (`pipeline.c`) |
 | `common/` | target data layout (`target.c`), language modes (`lang.c`), compilation settings (`options.c`), diagnostics (`diag.c`), inline-asm constraints (`asm_constraint.c`), strings and vectors (`util.c`) |
-| `frontend/` | preprocessor, lexer, parser, sema, scalar type layout (`types.c`) |
+| `frontend/` | preprocessor, lexer, parser, sema, scalar type layout (`types.c`), integer constant expressions (`consteval.c`) |
 | `middle/` | AST to SSA (`ast2ir.c`), legalization, optimization passes, SSA utilities |
 | `backend/` | the assembly emitter for both targets |
 | `ir/` | a textual form of SSA with a verifier, normalizer and differ (`ir-verifier`, `ir-normalize`, `ir-diff`); cc does not write it yet |

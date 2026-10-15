@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 #include "cc_asm.h"
+#include "cc_consteval.h"
 #include "cc_diag.h"
 #include "cc_ssa.h"
 #include "cc_types.h"
@@ -388,14 +389,7 @@ static cc_value_type_t type_to_val(cc_type_t t) {
 
 static int is_pointer_type(cc_type_t t);
 
-typedef struct {
-    uint64_t bits;
-    cc_type_t type;
-    int struct_id;
-} const_integral_value_t;
-
-static int const_cast_eval_value(const cc_translation_unit_t *tu, const const_integral_value_t *src, cc_type_t dst_type,
-                                 int dst_struct_id, const_integral_value_t *out);
+typedef cc_const_t const_integral_value_t;
 
 static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
@@ -524,372 +518,69 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
     return -1;
 }
 
-static int const_type_bits(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
-    long sz;
+/**
+ * The size in bytes of a sizeof expression, for the constant evaluator:
+ * of a string literal, an array, or any other expression or type.
+ *
+ * @param ctx  the translation unit; may be NULL
+ * @param e    the CC_EXPR_SIZEOF node
+ * @return     the size, or -1 if it is not known
+ */
+static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
+    const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
 
-    if (t == CC_TYPE_BOOL) {
-        return 1;
+    if (e->lhs == NULL) {
+        return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
     }
-    if (is_pointer_type(t)) {
-        return cc_target_pointer_size() * 8;
-    }
-    sz = type_size_bytes_with_struct(tu, t, struct_id);
-    if (sz <= 0) {
-        return 0;
-    }
-    if (sz >= (long)(INT_MAX / 8)) {
-        return 0;
-    }
-    return (int)(sz * 8);
-}
+    if (e->lhs->kind == CC_EXPR_STR) {
+        int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
+                    e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
+        long elem_size = type_size_bytes_with_struct(tu, ptr_base_type(e->lhs->value_type), e->lhs->struct_id);
+        unsigned long *units = NULL;
+        size_t count = 0;
 
-static uint64_t const_mask_bits(const cc_translation_unit_t *tu, uint64_t bits, cc_type_t t, int struct_id) {
-    int width = const_type_bits(tu, t, struct_id);
-
-    if (width > 0 && width < 64) {
-        return bits & ((1ULL << width) - 1ULL);
-    }
-    return bits;
-}
-
-static uint64_t const_unsigned_value(const cc_translation_unit_t *tu, uint64_t bits, cc_type_t t, int struct_id) {
-    return const_mask_bits(tu, bits, t, struct_id);
-}
-
-static int64_t const_signed_value(const cc_translation_unit_t *tu, uint64_t bits, cc_type_t t, int struct_id) {
-    int width = const_type_bits(tu, t, struct_id);
-    uint64_t u = const_mask_bits(tu, bits, t, struct_id);
-
-    if (width <= 0) {
-        return 0;
-    }
-    if (width < 64 && !cc_type_is_unsigned_integral(t) && !is_pointer_type(t) && (u & (1ULL << (width - 1))) != 0) {
-        u |= ~((1ULL << width) - 1ULL);
-    }
-    return (int64_t)u;
-}
-
-static uint64_t const_cast_value_bits(const cc_translation_unit_t *tu, uint64_t src_bits, cc_type_t src_type,
-                                      int src_struct_id, cc_type_t dst_type, int dst_struct_id, int *ok) {
-    uint64_t raw;
-
-    if (ok != NULL) {
-        *ok = 0;
-    }
-    if (dst_type == CC_TYPE_VOID) {
-        return 0;
-    }
-    if (dst_type == CC_TYPE_BOOL) {
-        if (ok != NULL) {
-            *ok = 1;
+        if (elem_size > 0 && decode_string_units(e->lhs, wide, &units, &count) == 0) {
+            free(units);
+            if (count < (size_t)LONG_MAX && (long)(count + 1) <= LONG_MAX / elem_size) {
+                return (long)(count + 1) * elem_size;
+            }
         }
-        return ((cc_type_is_unsigned_integral(src_type) || is_pointer_type(src_type))
-                    ? const_unsigned_value(tu, src_bits, src_type, src_struct_id)
-                    : (uint64_t)const_signed_value(tu, src_bits, src_type, src_struct_id)) != 0
-                   ? 1
-                   : 0;
     }
-    if (cc_type_is_unsigned_integral(src_type) || is_pointer_type(src_type)) {
-        raw = const_unsigned_value(tu, src_bits, src_type, src_struct_id);
-    } else {
-        raw = (uint64_t)const_signed_value(tu, src_bits, src_type, src_struct_id);
+    if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
+        return array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim,
+                                     e->lhs->array_dims);
     }
-    if (ok != NULL) {
-        *ok = 1;
-    }
-    return const_mask_bits(tu, raw, dst_type, dst_struct_id);
+    return type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
 }
 
-static cc_type_t const_result_type(const cc_expr_t *e) {
-    if (e == NULL) {
-        return CC_TYPE_INT;
-    }
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
-    case CC_EXPR_CAST:
-        return e->aux_type;
-    case CC_EXPR_SIZEOF:
-        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_ULONG_LONG;
-    default:
-        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
-    }
+/**
+ * The size of a type in bytes, for the constant evaluator.
+ *
+ * @param ctx        the translation unit; may be NULL
+ * @param t          the type
+ * @param struct_id  its struct id, or -1
+ * @return           the size, or <= 0 if not known
+ */
+static long lower_const_type_size(void *ctx, cc_type_t t, int struct_id) {
+    return type_size_bytes_with_struct((const cc_translation_unit_t *)ctx, t, struct_id);
 }
 
+/**
+ * Evaluate an integer constant expression in lowering's context.
+ *
+ * @param tu   the translation unit; may be NULL
+ * @param e    the expression
+ * @param out  receives the value
+ * @return     0, or -1 if @p e is not an integer constant expression
+ */
 static int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const cc_expr_t *e,
                                           const_integral_value_t *out) {
-    const_integral_value_t lhs;
-    const_integral_value_t rhs;
-    const_integral_value_t cond;
+    cc_const_env_t env;
 
-    if (e == NULL || out == NULL) {
-        return -1;
-    }
-    memset(out, 0, sizeof(*out));
-
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        out->type = const_result_type(e);
-        out->struct_id = e->struct_id;
-        out->bits = const_mask_bits(tu, (uint64_t)e->int_val, out->type, out->struct_id);
-        return 0;
-
-    case CC_EXPR_CAST:
-        if (e->aux_type == CC_TYPE_VOID) {
-            return -1;
-        }
-        if (eval_const_integral_expr_value(tu, e->lhs, &lhs) != 0) {
-            return -1;
-        }
-        return const_cast_eval_value(tu, &lhs, e->aux_type, e->aux_struct_id, out);
-
-    case CC_EXPR_SIZEOF: {
-        long n;
-
-        out->type = const_result_type(e);
-        out->struct_id = e->struct_id;
-        if (e->lhs != NULL) {
-            if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
-                n = array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id,
-                                          e->lhs->array_ndim, e->lhs->array_dims);
-            } else {
-                n = type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
-            }
-        } else {
-            n = sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
-        }
-        if (n < 0) {
-            return -1;
-        }
-        out->bits = const_mask_bits(tu, (uint64_t)n, out->type, out->struct_id);
-        return 0;
-    }
-
-    case CC_EXPR_BIN:
-        if (e->op == CC_BIN_COMMA) {
-            return eval_const_integral_expr_value(tu, e->rhs, out);
-        }
-        if (eval_const_integral_expr_value(tu, e->lhs, &lhs) != 0 ||
-            eval_const_integral_expr_value(tu, e->rhs, &rhs) != 0) {
-            return -1;
-        }
-        switch (e->op) {
-        case CC_BIN_ADD:
-        case CC_BIN_SUB:
-        case CC_BIN_MUL:
-        case CC_BIN_DIV:
-        case CC_BIN_MOD:
-        case CC_BIN_BAND:
-        case CC_BIN_BOR:
-        case CC_BIN_BXOR:
-        case CC_BIN_SHL:
-        case CC_BIN_SHR:
-        case CC_BIN_EQ:
-        case CC_BIN_NE:
-        case CC_BIN_LT:
-        case CC_BIN_LE:
-        case CC_BIN_GT:
-        case CC_BIN_GE: {
-            cc_type_t op_ty = (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR)
-                                  ? const_result_type(e->lhs)
-                                  : common_integral_type(const_result_type(e->lhs), const_result_type(e->rhs));
-            uint64_t lhs_bits;
-            uint64_t rhs_bits;
-            uint64_t ua;
-            uint64_t ub;
-            int64_t sa;
-            int64_t sb;
-            int ok_a = 0;
-            int ok_b = 0;
-
-            lhs_bits = const_cast_value_bits(tu, lhs.bits, lhs.type, lhs.struct_id, op_ty, -1, &ok_a);
-            rhs_bits = const_cast_value_bits(tu, rhs.bits, rhs.type, rhs.struct_id, op_ty, -1, &ok_b);
-            if (!ok_a || !ok_b) {
-                return -1;
-            }
-            ua = const_unsigned_value(tu, lhs_bits, op_ty, -1);
-            ub = const_unsigned_value(tu, rhs_bits, op_ty, -1);
-            sa = const_signed_value(tu, lhs_bits, op_ty, -1);
-            sb = const_signed_value(tu, rhs_bits, op_ty, -1);
-
-            switch (e->op) {
-            case CC_BIN_ADD:
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua + ub) : (uint64_t)(sa + sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_SUB:
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua - ub) : (uint64_t)(sa - sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_MUL:
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua * ub) : (uint64_t)(sa * sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_DIV:
-                if ((cc_type_is_unsigned_integral(op_ty) ? ub : (uint64_t)sb) == 0) {
-                    return -1;
-                }
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua / ub) : (uint64_t)(sa / sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_MOD:
-                if ((cc_type_is_unsigned_integral(op_ty) ? ub : (uint64_t)sb) == 0) {
-                    return -1;
-                }
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua % ub) : (uint64_t)(sa % sb), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_SHL:
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua << (ub & 63)) : (uint64_t)(sa << (ub & 63)), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_SHR:
-                out->type = op_ty;
-                out->bits = const_mask_bits(
-                    tu, cc_type_is_unsigned_integral(op_ty) ? (ua >> (ub & 63)) : (uint64_t)(sa >> (ub & 63)), op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_BAND:
-                out->type = op_ty;
-                out->bits = const_mask_bits(tu, ua & ub, op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_BOR:
-                out->type = op_ty;
-                out->bits = const_mask_bits(tu, ua | ub, op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_BXOR:
-                out->type = op_ty;
-                out->bits = const_mask_bits(tu, ua ^ ub, op_ty, -1);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_EQ:
-                out->type = CC_TYPE_INT;
-                out->bits = (ua == ub) ? 1 : 0;
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_NE:
-                out->type = CC_TYPE_INT;
-                out->bits = (ua != ub) ? 1 : 0;
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_LT:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua < ub) ? 1 : 0) : ((sa < sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_LE:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua <= ub) ? 1 : 0) : ((sa <= sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_GT:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua > ub) ? 1 : 0) : ((sa > sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            case CC_BIN_GE:
-                out->type = CC_TYPE_INT;
-                out->bits = cc_type_is_unsigned_integral(op_ty) ? ((ua >= ub) ? 1 : 0) : ((sa >= sb) ? 1 : 0);
-                out->struct_id = -1;
-                return 0;
-            default:
-                return -1;
-            }
-        }
-
-        case CC_BIN_LAND:
-            out->type = CC_TYPE_INT;
-            out->bits = (((cc_type_is_unsigned_integral(lhs.type) || is_pointer_type(lhs.type))
-                              ? const_unsigned_value(tu, lhs.bits, lhs.type, lhs.struct_id)
-                              : (uint64_t)const_signed_value(tu, lhs.bits, lhs.type, lhs.struct_id)) != 0 &&
-                         ((cc_type_is_unsigned_integral(rhs.type) || is_pointer_type(rhs.type))
-                              ? const_unsigned_value(tu, rhs.bits, rhs.type, rhs.struct_id)
-                              : (uint64_t)const_signed_value(tu, rhs.bits, rhs.type, rhs.struct_id)) != 0)
-                            ? 1
-                            : 0;
-            out->struct_id = -1;
-            return 0;
-
-        case CC_BIN_LOR:
-            out->type = CC_TYPE_INT;
-            out->bits = (((cc_type_is_unsigned_integral(lhs.type) || is_pointer_type(lhs.type))
-                              ? const_unsigned_value(tu, lhs.bits, lhs.type, lhs.struct_id)
-                              : (uint64_t)const_signed_value(tu, lhs.bits, lhs.type, lhs.struct_id)) != 0 ||
-                         ((cc_type_is_unsigned_integral(rhs.type) || is_pointer_type(rhs.type))
-                              ? const_unsigned_value(tu, rhs.bits, rhs.type, rhs.struct_id)
-                              : (uint64_t)const_signed_value(tu, rhs.bits, rhs.type, rhs.struct_id)) != 0)
-                            ? 1
-                            : 0;
-            out->struct_id = -1;
-            return 0;
-
-        default:
-            return -1;
-        }
-
-    case CC_EXPR_TERNARY:
-        if (eval_const_integral_expr_value(tu, e->lhs, &cond) != 0) {
-            return -1;
-        }
-        if (((cc_type_is_unsigned_integral(cond.type) || is_pointer_type(cond.type))
-                 ? const_unsigned_value(tu, cond.bits, cond.type, cond.struct_id)
-                 : (uint64_t)const_signed_value(tu, cond.bits, cond.type, cond.struct_id)) != 0) {
-            if (e->rhs == NULL) {
-                return const_cast_eval_value(tu, &cond, const_result_type(e), e->struct_id, out);
-            }
-            if (eval_const_integral_expr_value(tu, e->rhs, out) != 0) {
-                return -1;
-            }
-            return const_cast_eval_value(tu, out, const_result_type(e), e->struct_id, out);
-        }
-        if (eval_const_integral_expr_value(tu, e->third, out) != 0) {
-            return -1;
-        }
-        return const_cast_eval_value(tu, out, const_result_type(e), e->struct_id, out);
-
-    case CC_EXPR_CALL:
-        if (e->ident != NULL && strcmp(e->ident, "__builtin_constant_p") == 0 && e->arg_count == 1 &&
-            e->args[0] != NULL) {
-            out->type = CC_TYPE_INT;
-            out->struct_id = -1;
-            out->bits = eval_const_integral_expr_value(tu, e->args[0], &lhs) == 0 ? 1 : 0;
-            return 0;
-        }
-        return -1;
-
-    default:
-        return -1;
-    }
-}
-
-static int const_cast_eval_value(const cc_translation_unit_t *tu, const const_integral_value_t *src, cc_type_t dst_type,
-                                 int dst_struct_id, const_integral_value_t *out) {
-    int ok = 0;
-
-    if (src == NULL || out == NULL) {
-        return -1;
-    }
-    out->bits = const_cast_value_bits(tu, src->bits, src->type, src->struct_id, dst_type, dst_struct_id, &ok);
-    if (!ok) {
-        return -1;
-    }
-    out->type = dst_type;
-    out->struct_id = dst_struct_id;
-    return 0;
+    env.sizeof_bytes = lower_const_sizeof;
+    env.type_size = lower_const_type_size;
+    env.ctx = (void *)tu;
+    return cc_const_eval(&env, e, out);
 }
 
 static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
@@ -1402,7 +1093,7 @@ static int eval_const_int_expr_simple(const cc_expr_t *e, long long *out) {
     if (eval_const_integral_expr_value(NULL, e, &value) != 0) {
         return -1;
     }
-    *out = (long long)const_signed_value(NULL, value.bits, value.type, value.struct_id);
+    *out = (long long)value.bits;
     return 0;
 }
 
@@ -3088,7 +2779,7 @@ static int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t 
     if (eval_const_integral_expr_value(tu, e, &value) != 0) {
         return -1;
     }
-    *out = (long long)const_signed_value(tu, value.bits, value.type, value.struct_id);
+    *out = (long long)value.bits;
     return 0;
 }
 
@@ -11751,9 +11442,9 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
     if (e->kind == CC_EXPR_MEMBER && e->lhs == NULL && e->rhs != NULL) {
         return eval_global_init_expr(tu, e->rhs, out_i, out_f, out_is_float, out_sym);
     }
-    if ((cc_type_is_integral(const_result_type(e)) || is_pointer_type(const_result_type(e)) || e->kind == CC_EXPR_SIZEOF) &&
+    if ((cc_type_is_integral(cc_const_type_of(e)) || is_pointer_type(cc_const_type_of(e))) &&
         eval_const_integral_expr_value(tu, e, &ivalue) == 0) {
-        *out_i = (long long)const_signed_value(tu, ivalue.bits, ivalue.type, ivalue.struct_id);
+        *out_i = (long long)ivalue.bits;
         *out_f = (double)*out_i;
         *out_is_float = 0;
         if (out_sym != NULL) {

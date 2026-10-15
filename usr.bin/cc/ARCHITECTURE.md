@@ -23,6 +23,7 @@ usr.bin/cc/
 │   ├── parser.c             # Recursive-descent parser
 │   ├── sema.c               # Type checking and semantic validation
 │   ├── builtin.c            # Builtin-function and intrinsic handling
+│   ├── consteval.c          # Integer constant expressions: the one evaluator
 │   └── types.c              # Scalar type sizes and alignments, for every phase
 ├── middle/
 │   ├── ast2ir.c             # AST -> SSA lowering
@@ -92,7 +93,7 @@ Deployment: Installed as `usr/bin/cc`; `cpp` is exposed as a symlink to the same
 
 Name: Preprocessor, lexer, parser, and semantic analysis
 
-Description: The frontend turns C translation units into typed ASTs. `frontend/preproc.c` enforces macro-expansion bounds, `frontend/parser.c` owns recursive-descent parsing, and `frontend/sema.c` applies type and language rules before lowering begins. `frontend/types.c` is the one place the size and alignment of a scalar type are decided, from the target description in `common/target.c` (`cc_target_select()` in the pipeline picks it); structure layout, `sizeof`, `_Alignof`, lowering and the emitter all ask it.
+Description: The frontend turns C translation units into typed ASTs. `frontend/preproc.c` enforces macro-expansion bounds, `frontend/parser.c` owns recursive-descent parsing, and `frontend/sema.c` applies type and language rules before lowering begins. `frontend/types.c` is the one place the size and alignment of a scalar type are decided, from the target description in `common/target.c` (`cc_target_select()` in the pipeline picks it); structure layout, `sizeof`, `_Alignof`, lowering and the emitter all ask it. `frontend/consteval.c` evaluates integer constant expressions (array bounds, enumerators, case labels, `_Static_assert`, static initializers) for the parser, sema and lowering alike; each supplies only what it alone knows, the size of a `sizeof` operand.
 
 Technologies: C, recursive-descent parsing, bounded macro expansion, semantic diagnostics
 
