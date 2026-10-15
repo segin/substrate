@@ -44,7 +44,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 5. Driver and predefined macros | 3 | 1 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. The restored suite itself | 12 | 5 |
-| 8. Documentation | 1 | 0 |
+| 8. Documentation | 1 | 1 |
 
 The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 `run_codegen_diff.sh`, and `run_codegen_random.sh`; CI's
@@ -355,13 +355,18 @@ they stand.  *Reproduced* unless marked.
 
 ## 8. Documentation
 
-- [ ] **CC-33** `usr.bin/cc/README.md` shall describe the compiler as it
-  is.  It describes "phase-9", a scalar-only subset, `-E` via the system
-  `cpp`, and `--bootstrap-gcc` as the way to compile ordinary C.
+- [x] **CC-33** `usr.bin/cc/README.md` shall describe the compiler as it
+  is.  It described "phase-9", a scalar-only subset, `-E` via the system
+  `cpp`, and `--bootstrap-gcc` as the way to compile ordinary C.  It is
+  rewritten from the code: the pipeline, the languages and targets, how
+  tools are found, how correctness is checked, what is known missing.
+  The phase roadmap (`docs/ROADMAP.md`, "Phase 0 (current)") is gone,
+  superseded by the two plans; the language task list moved to
+  `docs/language-tasklist.md`.
 
 ---
 
-55 requirements: 28 met, 27 open.
+55 requirements: 29 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

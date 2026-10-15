@@ -41,7 +41,7 @@ usr.bin/cc/
 ├── README.md                # Current capability/status overview
 ├── SPEC.md                  # Functional requirements
 ├── Makefile                 # Native/target build-mode split and utility builds
-└── TASKLIST_C_LANGUAGE_PREPROCESSOR_AND_EXTENSIONS.md
+└── docs/                    # refactor-plan.md, neutral-ir-plan.md, language-tasklist.md
 
 tests/usr.bin/cc/
 ├── conformance_c99/         # C99 conformance inputs
@@ -193,11 +193,9 @@ Integration role: The compiler is the coordinator for real-world toolchain tests
 
 ## 9. Future Considerations / Roadmap
 
-Language coverage: The native frontend continues to expand beyond the currently implemented slice of C99/C11/C17/C23 and GNU/Clang extensions.
+Structure: `docs/refactor-plan.md` is the order of work for the compiler as a whole -- one type representation, a typed AST from sema, one constant evaluator, a context in place of globals -- and `docs/neutral-ir-plan.md` for the IR and back ends: typed IR values, per-target ABI and legalization passes, thin emitters, with the `ir/` text form as the IR's dump format.
 
-Bootstrap reduction: Long-term direction is to reduce the need for `--bootstrap-gcc` by moving more real-world code onto the native pipeline.
-
-Backend growth: As target coverage broadens, the current x86-focused backend layering will need to stay modular enough for additional backends without collapsing driver/front-end assumptions.
+Correctness: open requirements are tracked in `docs/cc-audit.md` at the top of the tree; the language-level goals left from the original bring-up (building the kernel and bash with this cc, as, ld) are in `docs/language-tasklist.md`.
 
 ## 10. Project Identification
 
