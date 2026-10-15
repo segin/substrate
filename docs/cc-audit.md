@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 12 | 6 |
+| 4. ABI and other code generation | 13 | 6 |
 | 5. Driver and predefined macros | 3 | 1 |
 | 6. The restored suite's failing commands | 10 | 0 |
 | 7. The restored suite itself | 12 | 5 |
@@ -218,6 +218,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   x + y; }` gives "use of undeclared identifier: x"; gcc accepts it
   (and needs a trampoline when `inner`'s address escapes).  The suite
   had a test requiring the rejection; it is removed.  *Reproduced.*
+- [ ] **CC-56** On i386, `long double` arithmetic shall be done in x87
+  extended precision.  The i386 back end keeps every long double value
+  as a `double` and computes in double, converting to the 80-bit form
+  only where it loads or stores memory, so `1.0L + 0x1p-60L != 1.0L` is
+  false under `cc -m32` and true under gcc (and under `cc -m64`).
+  Results agree whenever the values fit in a double, which is why the
+  suite's long double tests, with values like 0.5, pass.  The fix is a
+  back-end change (x87 slots for long double values, as x86-64 has),
+  best done with the neutral-IR plan's typed values, where `f80` is a
+  type of its own.  *Reproduced* (-m32).
 - [ ] **CC-50** `sizeof` shall take an abstract function declarator:
   `sizeof(int(void))` (gcc: 1, with a `-Wpointer-arith` warning) gives
   "expected ')' after sizeof type".  *Reproduced.*
@@ -366,7 +376,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-55 requirements: 29 met, 26 open.
+56 requirements: 29 met, 27 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
