@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -876,578 +877,505 @@ static int i386_features_from_arch_name(const char *name, int *out_level,
   return 0;
 }
 
+/* ---- the command line ---------------------------------------------- */
+
+/** How an option takes its value. */
+typedef enum {
+  OPT_FLAG,   /**< the word alone: -c */
+  OPT_VALUE,  /**< WORD VALUE or WORD=VALUE: -march i686, -march=i686 */
+  OPT_LETTER, /**< the value joined on or next: -Idir, -I dir */
+  OPT_PREFIX  /**< whatever follows, perhaps nothing: -O2, -Wl,a,b */
+} opt_kind_t;
+
+/** The flag lists an option is passed on to, as it was written. */
+enum {
+  FWD_CPP = 1, /**< the preprocessor */
+  FWD_C = 2,   /**< the compiler proper (and the -### / bootstrap command) */
+  FWD_AS = 4,  /**< the assembler */
+  FWD_LD = 8   /**< the linker */
+};
+
+typedef struct driver_opt driver_opt_t;
+
+/**
+ * What an option does to the parsed command line.
+ *
+ * @param o    the command line being parsed
+ * @param d    the option's table entry
+ * @param as   the spelling that matched, for messages
+ * @param val  its value; NULL for OPT_FLAG
+ * @return     0, or -1 to reject the command line
+ */
+typedef int (*opt_set_fn)(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val);
+
+/** One entry of the option table. */
+struct driver_opt {
+  const char *names; /**< its spellings, between spaces */
+  opt_kind_t kind;
+  unsigned forward;  /**< FWD_* lists to pass it on to */
+  opt_set_fn set;    /**< NULL if passing it on is all it does */
+  size_t field;      /**< for the one-member setters: which member */
+  int n;             /**< and what to set it to; or the setter's own */
+};
+
+#define F(member) offsetof(cc_opts_t, member)
+
+/**
+ * Set the int member d->field to d->n.
+ *
+ * @return 0
+ */
+static int opt_int(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)as;
+  (void)val;
+  *(int *)((char *)o + d->field) = d->n;
+  return 0;
+}
+
+/**
+ * Set the string member d->field to the value.
+ *
+ * @return 0
+ */
+static int opt_str(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)as;
+  *(const char **)((char *)o + d->field) = val;
+  return 0;
+}
+
+/**
+ * Split a comma-separated value (-Wl,a,b) into the flag list d->field.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int opt_split(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  cc_strvec_t *v = (cc_strvec_t *)((char *)o + d->field);
+
+  (void)as;
+  while (*val != '\0') {
+    size_t n = strcspn(val, ",");
+    if (n > 0) {
+      char *piece = cc_strndup(val, n);
+      if (piece == NULL || cc_strvec_push(v, piece) != 0) {
+        free(piece);
+        return -1;
+      }
+      free(piece);
+    }
+    val += n;
+    if (*val == ',') {
+      ++val;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Add an input file.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int opt_input(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)val;
+  return cc_strvec_push(&o->inputs, as);
+}
+
+/**
+ * -std=: accept only a mode cc knows.
+ *
+ * @return 0, or -1 for an unknown mode
+ */
+static int opt_std(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  cc_lang_t lang;
+
+  (void)d;
+  (void)as;
+  if (cc_lang_from_std(val, &lang) != 0) {
+    return -1;
+  }
+  o->std = val;
+  return 0;
+}
+
+/**
+ * -pedantic-errors: -pedantic, with its warnings made errors.
+ *
+ * @return 0
+ */
+static int opt_pedantic_errors(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)as;
+  (void)val;
+  o->pedantic = 1;
+  o->pedantic_errors = 1;
+  return 0;
+}
+
+/**
+ * -f[no-]gnu89-inline: d->n says which.
+ *
+ * @return 0
+ */
+static int opt_gnu89_inline(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)as;
+  (void)val;
+  o->gnu89_inline_mode = d->n;
+  o->gnu89_inline_override = 1;
+  return 0;
+}
+
+/**
+ * -print-file-name NAME: answer where NAME is and do nothing else.
+ *
+ * @return 0
+ */
+static int opt_print_file_name(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)as;
+  o->query_print_file_name = 1;
+  o->print_file_name = val;
+  return 0;
+}
+
+/**
+ * -rdynamic: the linker's --export-dynamic.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int opt_rdynamic(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)as;
+  (void)val;
+  return cc_strvec_push(&o->ld_flags, "--export-dynamic");
+}
+
+/**
+ * -m32 / -m64 (d->n is the target).  -m32 without an -march so far
+ * means an i686 with MMX and no SSE.
+ *
+ * @return 0
+ */
+static int opt_target(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)as;
+  (void)val;
+  o->target = (cc_target_t)d->n;
+  if (o->target == CC_TARGET_I386 && !o->i386_arch_explicit) {
+    o->i386_isa_level = 6;
+    o->i386_has_sse = 0;
+    o->i386_has_sse2 = 0;
+    o->i386_has_mmx = 1;
+    o->i386_supports_sse = 0;
+    o->i386_supports_sse2 = 0;
+    o->i386_supports_mmx = 1;
+  }
+  return 0;
+}
+
+/**
+ * -march / -mcpu name the i386 ISA; -mtune is accepted and changes
+ * nothing.  An architecture cc does not know is passed over.
+ *
+ * @return 0
+ */
+static int opt_arch(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  int level = 0;
+  int has_sse = 0;
+  int has_sse2 = 0;
+  int has_mmx = 0;
+  int supports_sse = 0;
+  int supports_sse2 = 0;
+  int supports_mmx = 0;
+
+  (void)d;
+  if (strcmp(as, "-mtune") == 0 ||
+      !i386_features_from_arch_name(val, &level, &has_sse, &has_sse2, &has_mmx,
+                                    &supports_sse, &supports_sse2,
+                                    &supports_mmx)) {
+    return 0;
+  }
+  o->i386_isa_level = level;
+  o->i386_has_sse = has_sse;
+  o->i386_has_sse2 = has_sse2;
+  o->i386_has_mmx = has_mmx;
+  o->i386_supports_sse = supports_sse;
+  o->i386_supports_sse2 = supports_sse2;
+  o->i386_supports_mmx = supports_mmx;
+  o->i386_arch_explicit = 1;
+  return 0;
+}
+
+/**
+ * -m[no-]sse, -m[no-]sse2, -m[no-]mmx.  d->field is the has_ member,
+ * d->n the supports_ member's offset, and the spelling says on or off.
+ * Turning a feature on that the chosen -march lacks is an error on i386.
+ *
+ * @return 0, or -1 for a feature the architecture lacks
+ */
+static int opt_isa_feature(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  int on = strncmp(as, "-mno-", 5) != 0;
+  int supported = *(int *)((char *)o + d->n);
+
+  (void)val;
+  if (on && o->target == CC_TARGET_I386 && !supported) {
+    fprintf(stderr, "cc: error: %s is not supported for selected -march level\n", as);
+    return -1;
+  }
+  *(int *)((char *)o + d->field) = on;
+  return 0;
+}
+
+/**
+ * -mfpmath: sse or 387; another value is passed over.
+ *
+ * @return 0
+ */
+static int opt_fpmath(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)as;
+  if (strcmp(val, "387") == 0) {
+    o->i386_fp_math_mode = CC_FPMATH_387;
+  } else if (strcmp(val, "sse") == 0) {
+    o->i386_fp_math_mode = CC_FPMATH_SSE;
+  }
+  return 0;
+}
+
+/*
+ * The options cc knows.  Words (FLAG, VALUE) are tried first; then the
+ * prefixes (LETTER, PREFIX) in table order, so a longer prefix must come
+ * before a shorter one it begins with.  Any other argument beginning
+ * with '-' goes to the compiler proper's flags; the rest are inputs.
+ */
+static const driver_opt_t options[] = {
+    /* what to do */
+    {"-E", OPT_FLAG, 0, opt_int, F(mode_E), 1},
+    {"-S", OPT_FLAG, 0, opt_int, F(mode_S), 1},
+    {"-c", OPT_FLAG, 0, opt_int, F(mode_c), 1},
+    {"-o", OPT_LETTER, 0, opt_str, F(output), 0},
+    {"-x", OPT_LETTER, 0, opt_str, F(forced_lang), 0},
+    {"-v", OPT_FLAG, FWD_CPP, opt_int, F(verbose), 1},
+    {"--verbose", OPT_FLAG, 0, opt_int, F(verbose), 1},
+    {"-###", OPT_FLAG, 0, opt_int, F(dry_run), 1},
+    {"-emit-ssa", OPT_FLAG, 0, opt_int, F(emit_ssa), 1},
+    {"--bootstrap-gcc", OPT_FLAG, 0, opt_int, F(bootstrap_gcc), 1},
+    {"-print-file-name", OPT_VALUE, 0, opt_print_file_name, 0, 0},
+    {"-print-libgcc-file-name", OPT_FLAG, 0, opt_int, F(query_print_libgcc_file_name), 1},
+
+    /* the language and the warnings */
+    {"-std=", OPT_PREFIX, FWD_C, opt_std, 0, 0},
+    {"-O", OPT_PREFIX, FWD_C, opt_str, F(opt_level), 0},
+    {"-g", OPT_FLAG, FWD_C | FWD_AS, opt_int, F(debug), 1},
+    {"-Wall", OPT_FLAG, FWD_C, opt_int, F(wall), 1},
+    {"-Werror", OPT_FLAG, FWD_C, opt_int, F(werror), 1},
+    {"-pedantic", OPT_FLAG, FWD_C, opt_int, F(pedantic), 1},
+    {"-pedantic-errors", OPT_FLAG, FWD_C, opt_pedantic_errors, 0, 0},
+    {"-Werror=implicit-function-declaration", OPT_FLAG, FWD_C, opt_int, F(implicit_funcdecl_override), 0},
+    {"-Wno-implicit-function-declaration", OPT_FLAG, FWD_C, opt_int, F(implicit_funcdecl_override), 1},
+    {"-fgnu89-inline", OPT_FLAG, FWD_C, opt_gnu89_inline, 0, 1},
+    {"-fno-gnu89-inline", OPT_FLAG, FWD_C, opt_gnu89_inline, 0, 0},
+
+    /* the machine */
+    {"-m32", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_I386},
+    {"-m64", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_X86_64},
+    {"-march -mcpu -mtune", OPT_VALUE, FWD_C | FWD_CPP, opt_arch, 0, 0},
+    {"-msse -mno-sse", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse), (int)F(i386_supports_sse)},
+    {"-msse2 -mno-sse2", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse2), (int)F(i386_supports_sse2)},
+    {"-mmmx -mno-mmx", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_mmx), (int)F(i386_supports_mmx)},
+    {"-mavx -mno-avx -mavx2 -mno-avx2", OPT_FLAG, FWD_C | FWD_CPP, NULL, 0, 0},
+    {"-mfpmath", OPT_VALUE, FWD_C, opt_fpmath, 0, 0},
+    {"-fPIC", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
+
+    /* the preprocessor */
+    {"-I -D -U -iquote -isystem -idirafter", OPT_LETTER, FWD_CPP | FWD_C, NULL, 0, 0},
+    {"-include -imacros -MF -MT -MQ", OPT_LETTER, FWD_CPP, NULL, 0, 0},
+    {"-M -MM -dM", OPT_FLAG, FWD_CPP, opt_int, F(mode_E), 1},
+    {"-MD -MMD -P", OPT_FLAG, FWD_CPP, NULL, 0, 0},
+    {"-nostdinc", OPT_FLAG, FWD_CPP | FWD_C, opt_int, F(nostdinc), 1},
+    {"-fpp-max-include-depth -fpp-max-macro-depth -fpp-max-expand-passes "
+     "-fpp-max-expanded-bytes -fpp-max-output-bytes -fpp-max-tokens",
+     OPT_VALUE, FWD_CPP, NULL, 0, 0},
+    {"-Wp", OPT_VALUE, 0, opt_split, F(cpp_flags), 0},
+    {"-Wp,", OPT_PREFIX, 0, opt_split, F(cpp_flags), 0},
+
+    /* the assembler and the linker */
+    {"-Wa,", OPT_PREFIX, 0, opt_split, F(as_flags), 0},
+    {"-Wl,", OPT_PREFIX, 0, opt_split, F(ld_flags), 0},
+    {"-L -l", OPT_LETTER, FWD_LD, NULL, 0, 0},
+    {"-shared", OPT_FLAG, FWD_LD, opt_int, F(shared), 1},
+    {"-pthread", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pthread_flag), 1},
+    {"-rdynamic", OPT_FLAG, 0, opt_rdynamic, 0, 0},
+    {"-nostdlib", OPT_FLAG, FWD_C, opt_int, F(nostdlib), 1},
+    {"-nodefaultlibs", OPT_FLAG, FWD_C, opt_int, F(nodefaultlibs), 1},
+
+    /* standard input, and the warnings cc has no switch for */
+    {"-", OPT_FLAG, 0, opt_input, 0, 0},
+    {"-Werror= -Wno-error= -W", OPT_PREFIX, 0, NULL, 0, 0},
+};
+
+#undef F
+
+/**
+ * Whether argument @p a is option @p d under one of its spellings.
+ *
+ * @param d       the table entry
+ * @param a       the argument
+ * @param as      receives the spelling that matched
+ * @param as_cap  the size of @p as
+ * @param val     receives the value within @p a, or NULL if it has none
+ *                there (an OPT_VALUE or OPT_LETTER takes the next one)
+ * @return        1 if it is, else 0
+ */
+static int opt_matches(const driver_opt_t *d, const char *a, char *as,
+                       size_t as_cap, const char **val) {
+  const char *s = d->names;
+
+  while (*s != '\0') {
+    size_t n = strcspn(s, " ");
+
+    if (n < as_cap && strncmp(a, s, n) == 0) {
+      const char *rest = a + n;
+      int hit = 0;
+
+      *val = NULL;
+      switch (d->kind) {
+      case OPT_FLAG:
+        hit = rest[0] == '\0';
+        break;
+      case OPT_VALUE:
+        hit = rest[0] == '\0' || rest[0] == '=';
+        *val = rest[0] == '=' ? rest + 1 : NULL;
+        break;
+      case OPT_LETTER:
+        hit = 1;
+        *val = rest[0] != '\0' ? rest : NULL;
+        break;
+      case OPT_PREFIX:
+        hit = 1;
+        *val = rest;
+        break;
+      }
+      if (hit) {
+        memcpy(as, s, n);
+        as[n] = '\0';
+        return 1;
+      }
+    }
+    s += n;
+    s += strspn(s, " ");
+  }
+  return 0;
+}
+
+/**
+ * Find the table entry for an argument: the words first, then the
+ * prefixes in table order.
+ *
+ * @param a       the argument
+ * @param as      receives the spelling that matched
+ * @param as_cap  the size of @p as
+ * @param val     receives the value within @p a, if any
+ * @return        the entry, or NULL if no option is spelt so
+ */
+static const driver_opt_t *opt_find(const char *a, char *as, size_t as_cap,
+                                    const char **val) {
+  int pass;
+  size_t k;
+
+  for (pass = 0; pass < 2; ++pass) {
+    for (k = 0; k < sizeof(options) / sizeof(options[0]); ++k) {
+      const driver_opt_t *d = &options[k];
+      int is_prefix = d->kind == OPT_LETTER || d->kind == OPT_PREFIX;
+      if (is_prefix == (pass == 1) && opt_matches(d, a, as, as_cap, val)) {
+        return d;
+      }
+    }
+  }
+  return NULL;
+}
+
+/**
+ * Pass an option on, as it was written, to the flag lists d->forward
+ * names: one argument, or two when its value was the next one.
+ *
+ * @param o      the command line being parsed
+ * @param d      the option's entry
+ * @param a      the argument
+ * @param sep    the separate value, or NULL if the value was in @p a
+ * @return       0, or -1 when out of memory
+ */
+static int opt_forward(cc_opts_t *o, const driver_opt_t *d, const char *a,
+                       const char *sep) {
+  cc_strvec_t *lists[4];
+  size_t count = 0;
+  size_t k;
+
+  if (d->forward & FWD_CPP) {
+    lists[count++] = &o->cpp_flags;
+  }
+  if (d->forward & FWD_C) {
+    lists[count++] = &o->c_flags;
+  }
+  if (d->forward & FWD_AS) {
+    lists[count++] = &o->as_flags;
+  }
+  if (d->forward & FWD_LD) {
+    lists[count++] = &o->ld_flags;
+  }
+  for (k = 0; k < count; ++k) {
+    if (cc_strvec_push(lists[k], a) != 0 ||
+        (sep != NULL && cc_strvec_push(lists[k], sep) != 0)) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Read the command line into @p o.  On a mistake, o->parse_bad_arg
+ * names the argument at fault.
+ *
+ * @param argc  the argument count
+ * @param argv  the arguments
+ * @param o     the options to fill; initialised by the caller
+ * @return      0, or -1 if the command line is wrong
+ */
 static int parse_args(int argc, char **argv, cc_opts_t *o) {
   int i;
 
   o->parse_bad_arg = NULL;
   for (i = 1; i < argc; ++i) {
     const char *a = argv[i];
+    const char *val = NULL;
+    const char *sep = NULL;
+    const driver_opt_t *d;
+    char as[48];
+
     o->parse_bad_arg = a;
-
-    if (strcmp(a, "-E") == 0) {
-      o->mode_E = 1;
-      continue;
-    }
-    if (strcmp(a, "-S") == 0) {
-      o->mode_S = 1;
-      continue;
-    }
-    if (strcmp(a, "-c") == 0) {
-      o->mode_c = 1;
-      continue;
-    }
-    if (strcmp(a, "-v") == 0 || strcmp(a, "--verbose") == 0) {
-      o->verbose = 1;
-      if (strcmp(a, "-v") == 0) {
-        if (cc_strvec_push(&o->cpp_flags, a) != 0) {
-          return -1;
-        }
-      }
-      continue;
-    }
-    if (strcmp(a, "-###") == 0) {
-      o->dry_run = 1;
-      continue;
-    }
-    if (strcmp(a, "-Wall") == 0) {
-      o->wall = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-Werror") == 0) {
-      o->werror = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-Werror=implicit-function-declaration") == 0) {
-      o->implicit_funcdecl_override = 0;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strncmp(a, "-Werror=", 8) == 0 || strncmp(a, "-Wno-error=", 11) == 0) {
-      /*
-       * GCC/Clang compatibility: accept specific -Werror categories
-       * even if this frontend does not implement per-warning classes.
-       */
-      continue;
-    }
-    if (strcmp(a, "-Wno-implicit-function-declaration") == 0) {
-      o->implicit_funcdecl_override = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-pedantic") == 0) {
-      o->pedantic = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-pedantic-errors") == 0) {
-      o->pedantic = 1;
-      o->pedantic_errors = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-g") == 0) {
-      o->debug = 1;
-      cc_strvec_push(&o->c_flags, a);
-      cc_strvec_push(&o->as_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-fPIC") == 0) {
-      o->pic = 1;
-      cc_strvec_push(&o->c_flags, a);
-      cc_strvec_push(&o->ld_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-fgnu89-inline") == 0) {
-      o->gnu89_inline_mode = 1;
-      o->gnu89_inline_override = 1;
-      if (cc_strvec_push(&o->c_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-fno-gnu89-inline") == 0) {
-      o->gnu89_inline_mode = 0;
-      o->gnu89_inline_override = 1;
-      if (cc_strvec_push(&o->c_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-shared") == 0) {
-      o->shared = 1;
-      cc_strvec_push(&o->ld_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-pthread") == 0) {
-      o->pthread_flag = 1;
-      cc_strvec_push(&o->c_flags, a);
-      cc_strvec_push(&o->ld_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-emit-ssa") == 0) {
-      o->emit_ssa = 1;
-      continue;
-    }
-    if (strncmp(a, "-print-file-name=", 17) == 0) {
-      o->query_print_file_name = 1;
-      o->print_file_name = a + 17;
-      continue;
-    }
-    if (strcmp(a, "-print-file-name") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      o->query_print_file_name = 1;
-      o->print_file_name = argv[++i];
-      continue;
-    }
-    if (strcmp(a, "-print-libgcc-file-name") == 0) {
-      o->query_print_libgcc_file_name = 1;
-      continue;
-    }
-    if (strcmp(a, "--bootstrap-gcc") == 0) {
-      o->bootstrap_gcc = 1;
-      continue;
-    }
-    if (strcmp(a, "-nostdlib") == 0) {
-      o->nostdlib = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-nostdinc") == 0) {
-      o->nostdinc = 1;
-      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
-          cc_strvec_push(&o->c_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-P") == 0 || strcmp(a, "-dM") == 0) {
-      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      if (strcmp(a, "-dM") == 0) {
-        o->mode_E = 1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-M") == 0 || strcmp(a, "-MM") == 0 ||
-        strcmp(a, "-MD") == 0 || strcmp(a, "-MMD") == 0) {
-      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      if (strcmp(a, "-M") == 0 || strcmp(a, "-MM") == 0) {
-        o->mode_E = 1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-MF") == 0 || strcmp(a, "-MT") == 0 ||
-        strcmp(a, "-MQ") == 0 || strcmp(a, "-include") == 0 ||
-        strcmp(a, "-imacros") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
-        return -1;
-      }
-      ++i;
-      continue;
-    }
-    if (strncmp(a, "-MF", 3) == 0 || strncmp(a, "-MT", 3) == 0 ||
-        strncmp(a, "-MQ", 3) == 0 || strncmp(a, "-include", 8) == 0 ||
-        strncmp(a, "-imacros", 8) == 0) {
-      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-nodefaultlibs") == 0) {
-      o->nodefaultlibs = 1;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-
-    if (strcmp(a, "-o") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      o->output = argv[++i];
-      continue;
-    }
-    if (strcmp(a, "-x") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      o->forced_lang = argv[++i];
-      continue;
-    }
-    if (strncmp(a, "-x", 2) == 0 && a[2] != '\0') {
-      o->forced_lang = a + 2;
-      continue;
-    }
-
-    if (strncmp(a, "-std=", 5) == 0) {
-      cc_lang_t lang;
-      if (cc_lang_from_std(a + 5, &lang) != 0) {
-        return -1;
-      }
-      o->std = a + 5;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strncmp(a, "-O", 2) == 0) {
-      o->opt_level = a + 2;
-      cc_strvec_push(&o->c_flags, a);
-      continue;
-    }
-    if (strcmp(a, "-m32") == 0) {
-      o->target = CC_TARGET_I386;
-      if (!o->i386_arch_explicit) {
-        o->i386_isa_level = 6;
-        o->i386_has_sse = 0;
-        o->i386_has_sse2 = 0;
-        o->i386_has_mmx = 1;
-        o->i386_supports_sse = 0;
-        o->i386_supports_sse2 = 0;
-        o->i386_supports_mmx = 1;
-      }
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-m64") == 0) {
-      o->target = CC_TARGET_X86_64;
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-march") == 0 || strcmp(a, "-mcpu") == 0 ||
-        strcmp(a, "-mtune") == 0) {
-      int level = 0;
-      int has_sse = 0;
-      int has_sse2 = 0;
-      int has_mmx = 0;
-      int supports_sse = 0;
-      int supports_sse2 = 0;
-      int supports_mmx = 0;
-      int is_tune = strcmp(a, "-mtune") == 0;
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->c_flags, argv[i + 1]) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
-        return -1;
-      }
-      if (!is_tune && i386_features_from_arch_name(
-                          argv[i + 1], &level, &has_sse, &has_sse2, &has_mmx,
-                          &supports_sse, &supports_sse2, &supports_mmx)) {
-        o->i386_isa_level = level;
-        o->i386_has_sse = has_sse;
-        o->i386_has_sse2 = has_sse2;
-        o->i386_has_mmx = has_mmx;
-        o->i386_supports_sse = supports_sse;
-        o->i386_supports_sse2 = supports_sse2;
-        o->i386_supports_mmx = supports_mmx;
-        o->i386_arch_explicit = 1;
-      }
-      ++i;
-      continue;
-    }
-    if (strncmp(a, "-march=", 7) == 0 || strncmp(a, "-mcpu=", 6) == 0 ||
-        strncmp(a, "-mtune=", 7) == 0) {
-      int level = 0;
-      int has_sse = 0;
-      int has_sse2 = 0;
-      int has_mmx = 0;
-      int supports_sse = 0;
-      int supports_sse2 = 0;
-      int supports_mmx = 0;
-      const char *eq = strchr(a, '=');
-      int is_tune = strncmp(a, "-mtune=", 7) == 0;
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      if (!is_tune &&
-          i386_features_from_arch_name(
-              eq != NULL ? eq + 1 : NULL, &level, &has_sse, &has_sse2, &has_mmx,
-              &supports_sse, &supports_sse2, &supports_mmx)) {
-        o->i386_isa_level = level;
-        o->i386_has_sse = has_sse;
-        o->i386_has_sse2 = has_sse2;
-        o->i386_has_mmx = has_mmx;
-        o->i386_supports_sse = supports_sse;
-        o->i386_supports_sse2 = supports_sse2;
-        o->i386_supports_mmx = supports_mmx;
-        o->i386_arch_explicit = 1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-msse") == 0 || strcmp(a, "-mno-sse") == 0) {
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      if (strcmp(a, "-msse") == 0) {
-        if (o->target == CC_TARGET_I386 && !o->i386_supports_sse) {
-          fprintf(
-              stderr,
-              "cc: error: -msse is not supported for selected -march level\n");
-          return -1;
-        }
-        o->i386_has_sse = 1;
-      } else {
-        o->i386_has_sse = 0;
-      }
-      continue;
-    }
-    if (strcmp(a, "-msse2") == 0 || strcmp(a, "-mno-sse2") == 0) {
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      if (strcmp(a, "-msse2") == 0) {
-        if (o->target == CC_TARGET_I386 && !o->i386_supports_sse2) {
-          fprintf(
-              stderr,
-              "cc: error: -msse2 is not supported for selected -march level\n");
-          return -1;
-        }
-        o->i386_has_sse2 = 1;
-      } else {
-        o->i386_has_sse2 = 0;
-      }
-      continue;
-    }
-    if (strcmp(a, "-mmmx") == 0 || strcmp(a, "-mno-mmx") == 0) {
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      if (strcmp(a, "-mmmx") == 0) {
-        if (o->target == CC_TARGET_I386 && !o->i386_supports_mmx) {
-          fprintf(
-              stderr,
-              "cc: error: -mmmx is not supported for selected -march level\n");
-          return -1;
-        }
-        o->i386_has_mmx = 1;
-      } else {
-        o->i386_has_mmx = 0;
-      }
-      continue;
-    }
-    if (strcmp(a, "-mavx") == 0 || strcmp(a, "-mno-avx") == 0 ||
-        strcmp(a, "-mavx2") == 0 || strcmp(a, "-mno-avx2") == 0) {
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-mfpmath=sse") == 0 || strcmp(a, "-mfpmath=387") == 0) {
-      if (cc_strvec_push(&o->c_flags, a) != 0) {
-        return -1;
-      }
-      o->i386_fp_math_mode =
-          strcmp(a, "-mfpmath=387") == 0 ? CC_FPMATH_387 : CC_FPMATH_SSE;
-      continue;
-    }
-    if (strcmp(a, "-mfpmath") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      if (cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->c_flags, argv[i + 1]) != 0) {
-        return -1;
-      }
-      if (strcmp(argv[i + 1], "387") == 0) {
-        o->i386_fp_math_mode = CC_FPMATH_387;
-      } else if (strcmp(argv[i + 1], "sse") == 0) {
-        o->i386_fp_math_mode = CC_FPMATH_SSE;
-      }
-      ++i;
-      continue;
-    }
-
-    if (strcmp(a, "-I") == 0 || strcmp(a, "-D") == 0 || strcmp(a, "-U") == 0 ||
-        strcmp(a, "-iquote") == 0 || strcmp(a, "-isystem") == 0 ||
-        strcmp(a, "-idirafter") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0 ||
-          cc_strvec_push(&o->c_flags, a) != 0 ||
-          cc_strvec_push(&o->c_flags, argv[i + 1]) != 0) {
-        return -1;
-      }
-      ++i;
-      continue;
-    }
-
-    if (strncmp(a, "-I", 2) == 0 || strncmp(a, "-D", 2) == 0 ||
-      strncmp(a, "-U", 2) == 0 || strncmp(a, "-iquote", 7) == 0 ||
-      strncmp(a, "-isystem", 8) == 0 || strncmp(a, "-idirafter", 10) == 0) {
-      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
-          cc_strvec_push(&o->c_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strncmp(a, "-L", 2) == 0 || strncmp(a, "-l", 2) == 0) {
-      if (cc_strvec_push(&o->ld_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-rdynamic") == 0) {
-      if (cc_strvec_push(&o->ld_flags, "--export-dynamic") != 0) {
-        return -1;
-      }
-      continue;
-    }
-    if (strcmp(a, "-L") == 0 || strcmp(a, "-l") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      if (cc_strvec_push(&o->ld_flags, a) != 0 ||
-          cc_strvec_push(&o->ld_flags, argv[i + 1]) != 0) {
-        return -1;
-      }
-      ++i;
-      continue;
-    }
-    if (strncmp(a, "-Wl,", 4) == 0) {
-      char *csv = cc_strdup(a + 4);
-      char *tok;
-      if (csv == NULL) {
-        return -1;
-      }
-      tok = strtok(csv, ",");
-      while (tok != NULL) {
-        if (cc_strvec_push(&o->ld_flags, tok) != 0) {
-          free(csv);
-          return -1;
-        }
-        tok = strtok(NULL, ",");
-      }
-      free(csv);
-      continue;
-    }
-    if (strncmp(a, "-Wp,", 4) == 0) {
-      char *csv = cc_strdup(a + 4);
-      char *tok;
-      if (csv == NULL) {
-        return -1;
-      }
-      tok = strtok(csv, ",");
-      while (tok != NULL) {
-        if (cc_strvec_push(&o->cpp_flags, tok) != 0) {
-          free(csv);
-          return -1;
-        }
-        tok = strtok(NULL, ",");
-      }
-      free(csv);
-      continue;
-    }
-    if (strcmp(a, "-Wp") == 0) {
-      char *csv;
-      char *tok;
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      csv = cc_strdup(argv[++i]);
-      if (csv == NULL) {
-        return -1;
-      }
-      tok = strtok(csv, ",");
-      while (tok != NULL) {
-        if (cc_strvec_push(&o->cpp_flags, tok) != 0) {
-          free(csv);
-          return -1;
-        }
-        tok = strtok(NULL, ",");
-      }
-      free(csv);
-      continue;
-    }
-    if (strncmp(a, "-Wa,", 4) == 0) {
-      char *csv = cc_strdup(a + 4);
-      char *tok;
-      if (csv == NULL) {
-        return -1;
-      }
-      tok = strtok(csv, ",");
-      while (tok != NULL) {
-        if (cc_strvec_push(&o->as_flags, tok) != 0) {
-          free(csv);
-          return -1;
-        }
-        tok = strtok(NULL, ",");
-      }
-      free(csv);
-      continue;
-    }
-    if (strcmp(a, "-fpp-max-include-depth") == 0 ||
-        strcmp(a, "-fpp-max-macro-depth") == 0 ||
-        strcmp(a, "-fpp-max-expand-passes") == 0 ||
-        strcmp(a, "-fpp-max-expanded-bytes") == 0 ||
-        strcmp(a, "-fpp-max-output-bytes") == 0 ||
-        strcmp(a, "-fpp-max-tokens") == 0) {
-      if (i + 1 >= argc) {
-        return -1;
-      }
-      if (cc_strvec_push(&o->cpp_flags, a) != 0 ||
-          cc_strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
-        return -1;
-      }
-      ++i;
-      continue;
-    }
-    if (strncmp(a, "-fpp-max-include-depth=", 24) == 0 ||
-        strncmp(a, "-fpp-max-macro-depth=", 22) == 0 ||
-        strncmp(a, "-fpp-max-expand-passes=", 24) == 0 ||
-        strncmp(a, "-fpp-max-expanded-bytes=", 24) == 0 ||
-        strncmp(a, "-fpp-max-output-bytes=", 22) == 0 ||
-        strncmp(a, "-fpp-max-tokens=", 17) == 0) {
-      if (cc_strvec_push(&o->cpp_flags, a) != 0) {
-        return -1;
-      }
-      continue;
-    }
-
-    if (strcmp(a, "-") == 0) {
+    if (a[0] != '-') {
       if (cc_strvec_push(&o->inputs, a) != 0) {
         return -1;
       }
       continue;
     }
-    if (strncmp(a, "-W", 2) == 0) {
-      /*
-       * Accept unknown warning toggles as no-ops for build-system
-       * compatibility. Keep behavior deterministic by not forwarding.
-       */
-      continue;
-    }
-    if (a[0] == '-') {
+    d = opt_find(a, as, sizeof(as), &val);
+    if (d == NULL) {
       if (cc_strvec_push(&o->c_flags, a) != 0) {
         return -1;
       }
       continue;
     }
-
-    if (cc_strvec_push(&o->inputs, a) != 0) {
+    if (val == NULL && (d->kind == OPT_VALUE || d->kind == OPT_LETTER)) {
+      if (i + 1 >= argc) {
+        return -1;
+      }
+      sep = argv[++i];
+      val = sep;
+    }
+    if (opt_forward(o, d, a, sep) != 0) {
+      return -1;
+    }
+    if (d->set != NULL && d->set(o, d, as, val) != 0) {
       return -1;
     }
   }

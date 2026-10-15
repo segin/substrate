@@ -105,6 +105,8 @@ test:
 	! grep -q "^#define __SIZEOF_INT128__" /tmp/cc_pp_gnu11_predefs.i
 	! $(TOP)/usr.bin/cc/cc -E -std=bogus /dev/null -o /tmp/cc_pp_std_bogus.i 2>/tmp/cc_pp_std_bogus.err
 	grep -q -- "-std=bogus" /tmp/cc_pp_std_bogus.err
+	$(TOP)/usr.bin/cc/cc -### native_c99_const_qual.c -L /tmp -l m -o/tmp/cc_drv_prog > /tmp/cc_drv_sep.txt 2>&1
+	grep -q -- "-o /tmp/cc_drv_prog .*-L /tmp -l m" /tmp/cc_drv_sep.txt
 	$(TOP)/usr.bin/cc/cc native_c99_const_qual.c -o /tmp/cc_native_c99_const_qual
 	/tmp/cc_native_c99_const_qual
 	$(TOP)/usr.bin/cc/cc native_c99_composite_types.c -o /tmp/cc_native_c99_composite_types
