@@ -63,3 +63,12 @@ void cc_target_select(cc_target_t id) {
 const cc_target_desc_t *cc_target_current(void) {
     return g_current;
 }
+
+/**
+ * The size of a pointer on the target being compiled for.
+ *
+ * @return 4 or 8
+ */
+int cc_target_pointer_size(void) {
+    return g_current->pointer_size;
+}

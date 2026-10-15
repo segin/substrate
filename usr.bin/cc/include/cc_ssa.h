@@ -195,7 +195,5 @@ int cc_ssa_opcode_is_terminator(cc_ssa_opcode_t op);
 int cc_ssa_opcode_has_side_effect(cc_ssa_opcode_t op);
 int cc_ssa_instr_validate(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t index, cc_diag_t *diag);
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag);
-void cc_ssa_set_pointer_size(int bytes);
-int cc_ssa_pointer_size(void);
 
 #endif

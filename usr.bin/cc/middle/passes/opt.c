@@ -1,4 +1,5 @@
 #include "cc_middle.h"
+#include "cc_target.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +30,7 @@ static int value_is_ldouble(const cc_ssa_function_t *f, int v) {
  * instructions; folding it must do the same.
  */
 static int value_is_word32(const cc_ssa_function_t *f, int v) {
-    if (cc_ssa_pointer_size() != 4) {
+    if (cc_target_pointer_size() != 4) {
         return 0;
     }
     if (f->value_sizes == NULL || v < 0 || v >= f->value_count || f->value_sizes[v] == 0) {

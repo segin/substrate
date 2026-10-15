@@ -58,4 +58,12 @@ void cc_target_select(cc_target_t id);
  */
 const cc_target_desc_t *cc_target_current(void);
 
+/**
+ * The size in bytes of a pointer (and of `long` and `size_t`) on the
+ * target being compiled for.
+ *
+ * @return 4 or 8
+ */
+int cc_target_pointer_size(void);
+
 #endif

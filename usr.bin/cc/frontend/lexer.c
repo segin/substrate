@@ -1,4 +1,5 @@
 #include "cc_lexer.h"
+#include "cc_target.h"
 #include "cc_util.h"
 
 #include <ctype.h>
@@ -7,13 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int g_lexer_pointer_size_bytes = 8;
-
-void cc_lexer_set_pointer_size(int bytes) {
-    if (bytes == 4 || bytes == 8) {
-        g_lexer_pointer_size_bytes = bytes;
-    }
-}
 
 
 static int is_ident_start_ascii(int c) {
@@ -780,8 +774,8 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
         }
         val_u = strtoull(parse_s, NULL, base == 10 ? 0 : base);
         out->num = (long long)val_u;
-        long_signed_max = g_lexer_pointer_size_bytes >= 8 ? 0x7fffffffffffffffULL : 0x7fffffffULL;
-        long_unsigned_max = g_lexer_pointer_size_bytes >= 8 ? 0xffffffffffffffffULL : 0xffffffffULL;
+        long_signed_max = cc_target_pointer_size() >= 8 ? 0x7fffffffffffffffULL : 0x7fffffffULL;
+        long_unsigned_max = cc_target_pointer_size() >= 8 ? 0xffffffffffffffffULL : 0xffffffffULL;
         if (seen_u) {
             out->int_is_unsigned = 1;
             if (seen_l >= 2) {

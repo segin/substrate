@@ -154,12 +154,4 @@ void cc_lexer_deinit(cc_lexer_t *lx);
  */
 int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out);
 
-/**
- * Tell the lexer the target's pointer size, which decides the type of
- * integer constants with an `l` suffix.
- *
- * @param bytes  4 or 8; other values are ignored
- */
-void cc_lexer_set_pointer_size(int bytes);
-
 #endif

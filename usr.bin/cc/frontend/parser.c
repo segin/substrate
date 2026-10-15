@@ -266,7 +266,6 @@ typedef struct {
     char *alias;
 } decl_attrs_t;
 
-static int g_parser_pointer_size_bytes = 8;
 static int g_parser_enable_trigraphs = 1;
 static int g_parser_allow_oldstyle_funcdecl = 0;
 static int g_parser_allow_implicit_int = 0;
@@ -985,13 +984,13 @@ static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
  * @return `unsigned long` where pointers are 8 bytes, else `unsigned int`
  */
 static cc_type_t parser_size_type(void) {
-    return g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+    return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
 }
 
 static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id) {
     long n;
     if (is_pointer_type(t)) {
-        return g_parser_pointer_size_bytes;
+        return cc_target_pointer_size();
     }
     if (t == CC_TYPE_ATOMIC) {
         if (struct_id <= 0) {
@@ -1044,8 +1043,8 @@ static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_i
     if (n <= 0) {
         return -1;
     }
-    if (n > g_parser_pointer_size_bytes) {
-        n = g_parser_pointer_size_bytes;
+    if (n > cc_target_pointer_size()) {
+        n = cc_target_pointer_size();
     }
     return n;
 }
@@ -1057,7 +1056,7 @@ static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id)
         return 1;
     }
     if (is_pointer_type(t)) {
-        return g_parser_pointer_size_bytes * 8;
+        return cc_target_pointer_size() * 8;
     }
     sz = parser_type_size_bytes(p, t, struct_id);
     if (sz <= 0) {
@@ -1093,7 +1092,7 @@ static int parser_builtin_integral_width(const parser_t *p, const char *name) {
     }
     if (strcmp(name, "__builtin_clzl") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
         strcmp(name, "__builtin_ffsl") == 0 || strcmp(name, "__builtin_popcountl") == 0) {
-        return g_parser_pointer_size_bytes >= 8 ? 64 : 32;
+        return cc_target_pointer_size() >= 8 ? 64 : 32;
     }
     if (strcmp(name, "__builtin_clz") == 0 || strcmp(name, "__builtin_ctz") == 0 ||
         strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_popcount") == 0) {
@@ -1358,13 +1357,13 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
             msize = parser_type_size_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
         }
         if (msize < 0) {
-            msize = g_parser_pointer_size_bytes;
+            msize = cc_target_pointer_size();
         }
         if (malign <= 0) {
             if (msize == 0) {
                 malign = 1;
             } else {
-                malign = g_parser_pointer_size_bytes;
+                malign = cc_target_pointer_size();
             }
         }
         if (packed) {
@@ -1662,8 +1661,8 @@ static int tok_is_floatn_spelling(parser_t *p) {
 }
 
 static int builtin_typedef_type_n(const char *name, size_t len, cc_type_t *out_type) {
-    cc_type_t uptr = g_parser_pointer_size_bytes <= 4 ? CC_TYPE_UINT : CC_TYPE_ULONG;
-    cc_type_t sptr = g_parser_pointer_size_bytes <= 4 ? CC_TYPE_INT : CC_TYPE_LONG;
+    cc_type_t uptr = cc_target_pointer_size() <= 4 ? CC_TYPE_UINT : CC_TYPE_ULONG;
+    cc_type_t sptr = cc_target_pointer_size() <= 4 ? CC_TYPE_INT : CC_TYPE_LONG;
     if (name == NULL || out_type == NULL) {
         return 0;
     }
@@ -2010,7 +2009,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     align = parser_type_align_bytes(p, aty, asid);
                     if (align <= 0) {
-                        align = g_parser_pointer_size_bytes;
+                        align = cc_target_pointer_size();
                     }
                 } else {
                     ae = parse_cond(p);
@@ -2702,13 +2701,13 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         }
                     }
                     if (msize < 0) {
-                        msize = g_parser_pointer_size_bytes;
+                        msize = cc_target_pointer_size();
                     }
                     if (malign <= 0) {
                         if (msize == 0) {
                             malign = 1;
                         } else {
-                            malign = g_parser_pointer_size_bytes;
+                            malign = cc_target_pointer_size();
                         }
                     }
                     if ((mdecl_attrs.flags & CC_ATTR_PACKED) != 0) {
@@ -4179,7 +4178,7 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
                 return 0;
             }
             if (is_pointer_type(st)) {
-                out->bits = parser_const_mask_bits(p, (uint64_t)g_parser_pointer_size_bytes, out->type, out->struct_id);
+                out->bits = parser_const_mask_bits(p, (uint64_t)cc_target_pointer_size(), out->type, out->struct_id);
                 return 0;
             }
             sz = cc_type_scalar_size(st);
@@ -5949,7 +5948,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             out_attrs->flags |= CC_ATTR_MAY_ALIAS;
         }
         if (is_aligned) {
-            long align = (has_num && num > 0) ? num : g_parser_pointer_size_bytes;
+            long align = (has_num && num > 0) ? num : cc_target_pointer_size();
             out_attrs->flags |= CC_ATTR_ALIGNED;
             if (align > out_attrs->align) {
                 out_attrs->align = align;
@@ -8792,7 +8791,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             }
             align = parser_type_align_bytes(p, aty, asid);
             if (align <= 0) {
-                align = g_parser_pointer_size_bytes;
+                align = cc_target_pointer_size();
             }
             return new_int_expr(align);
         } else {
@@ -8808,7 +8807,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(ae);
         }
         if (align <= 0) {
-            align = g_parser_pointer_size_bytes;
+            align = cc_target_pointer_size();
         }
         return new_int_expr(align);
     }
@@ -11930,13 +11929,6 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     p.struct_cap = 0;
     free(buf);
     return 0;
-}
-
-void cc_parser_set_pointer_size(int bytes) {
-    if (bytes == 4 || bytes == 8) {
-        g_parser_pointer_size_bytes = bytes;
-        cc_lexer_set_pointer_size(bytes);
-    }
 }
 
 void cc_parser_set_std_mode(const char *std_mode) {

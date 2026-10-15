@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int g_pointer_size_bytes = 8;
 static int g_allow_implicit_funcdecl = 0;
 static int g_implicit_funcdecl_override = -1;
 static int g_warn_all = 0;
@@ -1057,7 +1056,7 @@ static cc_type_t pointer_ultimate_base_type(cc_type_t t) {
 }
 
 static cc_type_t size_type(void) {
-    return g_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+    return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
 }
 
 static int is_scalar_type(cc_type_t t) {
@@ -1819,7 +1818,7 @@ static long type_size_bytes(cc_type_t t) {
         return n;
     }
     if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
-        return g_pointer_size_bytes;
+        return cc_target_pointer_size();
     }
     return -1;
 }
@@ -4887,7 +4886,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "floating asm outputs are not supported yet");
                 return -1;
             }
-            if (asm_validate_constraint(s->asm_outputs[i2].constraint, 1, s->asm_output_count, g_pointer_size_bytes,
+            if (asm_validate_constraint(s->asm_outputs[i2].constraint, 1, s->asm_output_count, cc_target_pointer_size(),
                                         diag) != 0) {
                 return -1;
             }
@@ -4906,7 +4905,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "floating asm inputs are not supported yet");
                 return -1;
             }
-            if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, g_pointer_size_bytes,
+            if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, cc_target_pointer_size(),
                                         diag) != 0) {
                 return -1;
             }
@@ -5886,13 +5885,6 @@ fail_func:
     }
 
     return 0;
-}
-
-void cc_frontend_set_pointer_size(int bytes) {
-    if (bytes == 4 || bytes == 8) {
-        g_pointer_size_bytes = bytes;
-        cc_parser_set_pointer_size(bytes);
-    }
 }
 
 void cc_frontend_set_std_mode(const char *std_mode) {
