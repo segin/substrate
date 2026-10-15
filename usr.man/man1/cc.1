@@ -60,8 +60,14 @@ Emit dependency rules.
 Dependency output target controls.
 .It Fl std Ns = Ns Ar c90|c95|c99|c11|c17|c23
 Language mode.
-.It Fl O0 ... Fl O3
+.It Fl O0 , Fl O1 , Fl O2 , Fl O3 , Fl O
 Optimization level.
+.Fl O
+alone is
+.Fl O1 ,
+as in
+.Xr gcc 1 .
+Every level above 0 currently runs the same passes.
 .It Fl m32 , Fl m64
 Target i386 or x86_64 ABI.
 The default is the ABI

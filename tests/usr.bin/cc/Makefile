@@ -108,6 +108,11 @@ test:
 	$(TOP)/usr.bin/cc/cc -### native_c99_const_qual.c -L /tmp -l m -o/tmp/cc_drv_prog > /tmp/cc_drv_sep.txt 2>&1
 	grep -q -- "-o /tmp/cc_drv_prog .*-L /tmp -l m" /tmp/cc_drv_sep.txt
 	! $(TOP)/usr.bin/cc/cc -E -fpp-max-tokens=2 native_c99_const_qual.c -o /tmp/cc_pp_max_tokens.i
+	$(TOP)/usr.bin/cc/cc -S -O native_c99_const_qual.c -o /tmp/cc_opt_bare.s
+	$(TOP)/usr.bin/cc/cc -S -O1 native_c99_const_qual.c -o /tmp/cc_opt_1.s
+	$(TOP)/usr.bin/cc/cc -S -O0 native_c99_const_qual.c -o /tmp/cc_opt_0.s
+	cmp -s /tmp/cc_opt_bare.s /tmp/cc_opt_1.s
+	! cmp -s /tmp/cc_opt_bare.s /tmp/cc_opt_0.s
 	$(TOP)/usr.bin/cc/cc native_c99_const_qual.c -o /tmp/cc_native_c99_const_qual
 	/tmp/cc_native_c99_const_qual
 	$(TOP)/usr.bin/cc/cc native_c99_composite_types.c -o /tmp/cc_native_c99_composite_types

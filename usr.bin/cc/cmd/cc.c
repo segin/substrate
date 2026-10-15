@@ -113,9 +113,19 @@ static const char *target_gcc_flag(cc_target_t target) {
   return target == CC_TARGET_I386 ? "-m32" : "-m64";
 }
 
+/**
+ * The optimization level the command line asks for: 0 without -O, 1 for
+ * a bare -O (as gcc takes it), else the digit after -O.
+ *
+ * @param o  the parsed command line
+ * @return   0 to 3
+ */
 static int opt_level_num(const cc_opts_t *o) {
-  if (o->opt_level == NULL || o->opt_level[0] == '\0') {
+  if (o->opt_level == NULL) {
     return 0;
+  }
+  if (o->opt_level[0] == '\0') {
+    return 1;
   }
   if (o->opt_level[0] < '0' || o->opt_level[0] > '3') {
     return 0;
