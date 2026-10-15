@@ -6,10 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-void cc_parser_set_pointer_size(int bytes);
-void cc_parser_set_std_mode(const char *std_mode);
-void cc_parser_set_gnu89_inline(int enabled);
-
 static int g_pointer_size_bytes = 8;
 static int g_allow_implicit_funcdecl = 0;
 static int g_implicit_funcdecl_override = -1;
