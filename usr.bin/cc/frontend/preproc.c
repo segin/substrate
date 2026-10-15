@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -754,6 +755,36 @@ static int parse_limit_value(const char *s, size_t *out) {
     }
     *out = (size_t)v;
     return 0;
+}
+
+/**
+ * The limit a -fpp-max-* option sets.
+ *
+ * @param st    the preprocessor state
+ * @param name  the option, e.g. "-fpp-max-tokens"; need not end there
+ * @param len   the length of the name within @p name (before any '=')
+ * @return      the limit, or NULL if no option has that name
+ */
+static size_t *pp_limit_named(pp_state_t *st, const char *name, size_t len) {
+    static const struct {
+        const char *name;
+        size_t offset;
+    } limits[] = {
+        {"-fpp-max-include-depth", offsetof(pp_state_t, max_include_depth)},
+        {"-fpp-max-macro-depth", offsetof(pp_state_t, max_expand_depth)},
+        {"-fpp-max-expand-passes", offsetof(pp_state_t, max_expand_passes)},
+        {"-fpp-max-expanded-bytes", offsetof(pp_state_t, max_expanded_text)},
+        {"-fpp-max-output-bytes", offsetof(pp_state_t, max_output_size)},
+        {"-fpp-max-tokens", offsetof(pp_state_t, max_expanded_tokens)},
+    };
+    size_t k;
+
+    for (k = 0; k < sizeof(limits) / sizeof(limits[0]); ++k) {
+        if (strlen(limits[k].name) == len && strncmp(name, limits[k].name, len) == 0) {
+            return (size_t *)((char *)st + limits[k].offset);
+        }
+    }
+    return NULL;
 }
 
 static size_t count_pp_tokens(const char *src) {
@@ -2688,63 +2719,16 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
             st->no_default_includes = 1;
             continue;
         }
-        if (strcmp(f, "-fpp-max-include-depth") == 0 || strcmp(f, "-fpp-max-macro-depth") == 0 ||
-            strcmp(f, "-fpp-max-expand-passes") == 0 || strcmp(f, "-fpp-max-expanded-bytes") == 0 ||
-            strcmp(f, "-fpp-max-output-bytes") == 0 || strcmp(f, "-fpp-max-tokens") == 0) {
-            size_t val = 0;
-            if (i + 1 >= flag_count || parse_limit_value(flags[++i], &val) != 0) {
-                return -1;
+        if (strncmp(f, "-fpp-max-", 9) == 0) {
+            const char *eq = strchr(f, '=');
+            size_t *limit = pp_limit_named(st, f, eq != NULL ? (size_t)(eq - f) : strlen(f));
+            if (limit != NULL) {
+                const char *value = eq != NULL ? eq + 1 : (i + 1 < flag_count ? flags[++i] : NULL);
+                if (value == NULL || parse_limit_value(value, limit) != 0) {
+                    return -1;
+                }
+                continue;
             }
-            if (strcmp(f, "-fpp-max-include-depth") == 0) {
-                st->max_include_depth = val;
-            } else if (strcmp(f, "-fpp-max-macro-depth") == 0) {
-                st->max_expand_depth = val;
-            } else if (strcmp(f, "-fpp-max-expand-passes") == 0) {
-                st->max_expand_passes = val;
-            } else if (strcmp(f, "-fpp-max-expanded-bytes") == 0) {
-                st->max_expanded_text = val;
-            } else if (strcmp(f, "-fpp-max-output-bytes") == 0) {
-                st->max_output_size = val;
-            } else {
-                st->max_expanded_tokens = val;
-            }
-            continue;
-        }
-        if (strncmp(f, "-fpp-max-include-depth=", 24) == 0) {
-            if (parse_limit_value(f + 24, &st->max_include_depth) != 0) {
-                return -1;
-            }
-            continue;
-        }
-        if (strncmp(f, "-fpp-max-macro-depth=", 22) == 0) {
-            if (parse_limit_value(f + 22, &st->max_expand_depth) != 0) {
-                return -1;
-            }
-            continue;
-        }
-        if (strncmp(f, "-fpp-max-expand-passes=", 24) == 0) {
-            if (parse_limit_value(f + 24, &st->max_expand_passes) != 0) {
-                return -1;
-            }
-            continue;
-        }
-        if (strncmp(f, "-fpp-max-expanded-bytes=", 24) == 0) {
-            if (parse_limit_value(f + 24, &st->max_expanded_text) != 0) {
-                return -1;
-            }
-            continue;
-        }
-        if (strncmp(f, "-fpp-max-output-bytes=", 22) == 0) {
-            if (parse_limit_value(f + 22, &st->max_output_size) != 0) {
-                return -1;
-            }
-            continue;
-        }
-        if (strncmp(f, "-fpp-max-tokens=", 17) == 0) {
-            if (parse_limit_value(f + 17, &st->max_expanded_tokens) != 0) {
-                return -1;
-            }
-            continue;
         }
         if (strcmp(f, "-D") == 0) {
             if (i + 1 >= flag_count) {
