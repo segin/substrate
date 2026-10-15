@@ -3,6 +3,7 @@
 
 #include "cc_frontend.h"
 #include "cc_diag.h"
+#include "cc_lang.h"
 #include "cc_util.h"
 
 #include <ctype.h>
@@ -418,17 +419,6 @@ static size_t normalize_trigraphs(char *buf, size_t len) {
     return w;
 }
 
-static int std_mode_enable_trigraphs(const char *std_mode) {
-    if (std_mode == NULL || std_mode[0] == '\0') {
-        return 1;
-    }
-    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
-        strcmp(std_mode, "gnu2x") == 0) {
-        return 0;
-    }
-    return 1;
-}
-
 static const char *path_basename(const char *path) {
     const char *slash;
     if (path == NULL) {
@@ -438,97 +428,31 @@ static const char *path_basename(const char *path) {
     return slash != NULL ? slash + 1 : path;
 }
 
-static int std_mode_version(const char *std_mode, int *out_is_c11, int *out_is_c17, int *out_is_c23,
-                            int *out_is_gnu) {
-    int is_c11 = 0;
-    int is_c17 = 0;
-    int is_c23 = 0;
-    int is_gnu = 0;
-
-    if (std_mode == NULL || std_mode[0] == '\0') {
-        if (out_is_c11 != NULL) {
-            *out_is_c11 = is_c11;
-        }
-        if (out_is_c17 != NULL) {
-            *out_is_c17 = is_c17;
-        }
-        if (out_is_c23 != NULL) {
-            *out_is_c23 = is_c23;
-        }
-        if (out_is_gnu != NULL) {
-            *out_is_gnu = is_gnu;
-        }
-        return 199901;
+/**
+ * Set the preprocessor's language-mode fields -- the value of
+ * __STDC_VERSION__, which standards' features __has_feature and
+ * __VA_OPT__ see, and whether trigraphs are replaced -- from a mode.
+ *
+ * Modes before C11 all report 199901, as cc always has.
+ *
+ * @param st    the preprocessor state
+ * @param lang  the mode
+ */
+static void pp_set_lang(pp_state_t *st, const cc_lang_t *lang) {
+    st->std_is_c11 = lang->year >= 2011;
+    st->std_is_c17 = lang->year >= 2017;
+    st->std_is_c23 = lang->year >= 2023;
+    st->std_is_gnu = lang->gnu;
+    st->enable_trigraphs = lang->year < 2023;
+    if (lang->year >= 2023) {
+        st->std_version = 202311;
+    } else if (lang->year >= 2017) {
+        st->std_version = 201710;
+    } else if (lang->year >= 2011) {
+        st->std_version = 201112;
+    } else {
+        st->std_version = 199901;
     }
-    if (strncmp(std_mode, "gnu", 3) == 0) {
-        is_gnu = 1;
-    }
-    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
-        strcmp(std_mode, "gnu2x") == 0) {
-        is_c11 = 1;
-        is_c17 = 1;
-        is_c23 = 1;
-        if (out_is_c11 != NULL) {
-            *out_is_c11 = is_c11;
-        }
-        if (out_is_c17 != NULL) {
-            *out_is_c17 = is_c17;
-        }
-        if (out_is_c23 != NULL) {
-            *out_is_c23 = is_c23;
-        }
-        if (out_is_gnu != NULL) {
-            *out_is_gnu = is_gnu;
-        }
-        return 202311;
-    }
-    if (strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "gnu17") == 0 || strcmp(std_mode, "c18") == 0 ||
-        strcmp(std_mode, "gnu18") == 0) {
-        is_c11 = 1;
-        is_c17 = 1;
-        if (out_is_c11 != NULL) {
-            *out_is_c11 = is_c11;
-        }
-        if (out_is_c17 != NULL) {
-            *out_is_c17 = is_c17;
-        }
-        if (out_is_c23 != NULL) {
-            *out_is_c23 = is_c23;
-        }
-        if (out_is_gnu != NULL) {
-            *out_is_gnu = is_gnu;
-        }
-        return 201710;
-    }
-    if (strcmp(std_mode, "c11") == 0 || strcmp(std_mode, "gnu11") == 0) {
-        is_c11 = 1;
-        if (out_is_c11 != NULL) {
-            *out_is_c11 = is_c11;
-        }
-        if (out_is_c17 != NULL) {
-            *out_is_c17 = is_c17;
-        }
-        if (out_is_c23 != NULL) {
-            *out_is_c23 = is_c23;
-        }
-        if (out_is_gnu != NULL) {
-            *out_is_gnu = is_gnu;
-        }
-        return 201112;
-    }
-    if (out_is_c11 != NULL) {
-        *out_is_c11 = is_c11;
-    }
-    if (out_is_c17 != NULL) {
-        *out_is_c17 = is_c17;
-    }
-    if (out_is_c23 != NULL) {
-        *out_is_c23 = is_c23;
-    }
-    if (out_is_gnu != NULL) {
-        *out_is_gnu = is_gnu;
-    }
-    return 199901;
 }
 
 static pp_macro_t *macro_find(pp_macro_table_t *t, const char *name) {
@@ -6759,6 +6683,7 @@ fail:
 int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
                        const char *const *flags, size_t flag_count, cc_diag_t *diag) {
     pp_state_t st;
+    cc_lang_t lang;
     FILE *out = NULL;
     int rc = -1;
     size_t i;
@@ -6775,8 +6700,6 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     st.max_expanded_text = PP_MAX_EXPANDED_TEXT;
     st.max_output_size = PP_MAX_OUTPUT_SIZE;
     st.max_expanded_tokens = PP_MAX_EXPANDED_TOKENS;
-    st.enable_trigraphs = std_mode_enable_trigraphs(std_mode);
-    st.std_version = std_mode_version(std_mode, &st.std_is_c11, &st.std_is_c17, &st.std_is_c23, &st.std_is_gnu);
     if (diag != NULL) {
         diag->path[0] = '\0';
         diag->line = 0;
@@ -6784,6 +6707,13 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
         diag->error_count = 0;
         diag->message[0] = '\0';
     }
+    if (cc_lang_from_std(std_mode, &lang) != 0) {
+        char msg[160];
+        snprintf(msg, sizeof(msg), "unrecognized command-line option '-std=%s'", std_mode);
+        set_diag(diag, 0, 0, msg);
+        return -1;
+    }
+    pp_set_lang(&st, &lang);
 
     scan_target_flags(&st, flags, flag_count);
     if (add_builtin_macros(&st) != 0) {

@@ -1,5 +1,6 @@
 #include "cc_backend.h"
 #include "cc_frontend.h"
+#include "cc_lang.h"
 #include "cc_middle.h"
 #include "cc_pipeline.h"
 #include "cc_ssa.h"
@@ -22,6 +23,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
                       cc_diag_t *diag) {
     cc_translation_unit_t tu;
     cc_ssa_module_t ssa;
+    cc_lang_t lang;
     int rc = -1;
     int timings = getenv("CC_TIMINGS") != NULL;
     int debug_counts = getenv("CC_DEBUG_COUNTS") != NULL;
@@ -44,6 +46,14 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         diag->message[0] = '\0';
     }
 
+    if (cc_lang_from_std(std_mode, &lang) != 0) {
+        if (diag != NULL) {
+            snprintf(diag->message, sizeof(diag->message), "unrecognized command-line option '-std=%s'", std_mode);
+            diag->error_count = 1;
+        }
+        return -1;
+    }
+    cc_lang_select(&lang);
     cc_target_select(target);
     cc_frontend_set_std_mode(std_mode);
     cc_frontend_set_gnu89_inline_mode(gnu89_inline_mode, gnu89_inline_override);

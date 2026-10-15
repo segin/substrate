@@ -11,7 +11,11 @@ usr.bin/cc/
 │   ├── cc.c                 # Driver, tool resolution, stage orchestration, fork/exec glue
 │   └── pipeline.c           # C -> IR -> assembly coordination
 ├── common/
-│   └── target.c             # Per-target data layout (psABI sizes and alignments)
+│   ├── asm_constraint.c     # Inline-asm constraint classification
+│   ├── diag.c               # Diagnostics: record the first error, print it with its source line
+│   ├── lang.c               # C language modes: the one decoder of -std=
+│   ├── target.c             # Per-target data layout (psABI sizes and alignments)
+│   └── util.c               # String duplication and string vectors
 ├── frontend/
 │   ├── preproc.c            # Preprocessor helpers and expansion bounds
 │   ├── lexer.c              # C tokenization

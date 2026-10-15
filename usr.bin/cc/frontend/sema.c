@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_asm.h"
 #include "cc_diag.h"
+#include "cc_lang.h"
 #include "cc_types.h"
 
 #include <limits.h>
@@ -14,48 +15,9 @@ static int g_warn_all = 0;
 static int g_warn_error = 0;
 static int g_pedantic = 0;
 static int g_pedantic_errors = 0;
-static int g_std_gnu = 0;
-static int g_std_c17 = 0;
-static int g_std_c23 = 0;
 static int g_gnu89_inline_override = -1;
 static size_t g_diag_ctx_line = 0;
 static size_t g_diag_ctx_col = 0;
-
-static int std_mode_allows_implicit_function_decls(const char *std_mode) {
-    if (std_mode == NULL || std_mode[0] == '\0') {
-        return 0;
-    }
-    if (strncmp(std_mode, "gnu", 3) == 0) {
-        return 1;
-    }
-    if (strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
-        strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
-        return 1;
-    }
-    return 0;
-}
-
-static int std_mode_is_c23_or_newer(const char *std_mode) {
-    if (std_mode == NULL || std_mode[0] == '\0') {
-        return 0;
-    }
-    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
-        strcmp(std_mode, "gnu2x") == 0) {
-        return 1;
-    }
-    return 0;
-}
-
-static int std_mode_is_c17_or_newer(const char *std_mode) {
-    if (std_mode == NULL || std_mode[0] == '\0') {
-        return 0;
-    }
-    if (strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "gnu17") == 0 || strcmp(std_mode, "c18") == 0 ||
-        strcmp(std_mode, "gnu18") == 0 || std_mode_is_c23_or_newer(std_mode)) {
-        return 1;
-    }
-    return 0;
-}
 
 typedef struct {
     char *name;
@@ -4107,7 +4069,7 @@ static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *dia
         return init;
     }
     if (init->arg_count == 0) {
-        if (g_std_c23) {
+        if (cc_lang_at_least(2023)) {
             init->kind = CC_EXPR_INT;
             init->int_val = 0;
             init->value_type = CC_TYPE_INT;
@@ -4661,7 +4623,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "multiple storage-class specifiers in local declaration");
                 return -1;
             }
-            if (g_std_c17 && (s->storage & CC_STORAGE_REGISTER) != 0) {
+            if (cc_lang_at_least(2017) && (s->storage & CC_STORAGE_REGISTER) != 0) {
                 if (emit_warning(diag, s->line, s->col, "'register' storage-class specifier is obsolescent in C17", 1) !=
                     0) {
                     return -1;
@@ -4942,7 +4904,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (s->expr->value_type != CC_TYPE_VOID) {
-                    if (!g_std_gnu) {
+                    if (!cc_lang_gnu()) {
                         set_diag(diag, "void function returning a value");
                         return -1;
                     }
@@ -5592,7 +5554,7 @@ fail_global_item:
             }
             goto fail_decl;
         }
-        if (g_std_c17 && !g_std_c23 && f->has_body && f->has_oldstyle_param_decls) {
+        if (cc_lang_at_least(2017) && !cc_lang_at_least(2023) && f->has_body && f->has_oldstyle_param_decls) {
             char msg[256];
             snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
             if (emit_warning(diag, f->line, f->col, msg, 1) != 0) {
@@ -5809,7 +5771,7 @@ fail_decl:
                 set_diag(diag, "void is not valid for named parameter type");
                 goto fail_func;
             }
-            if (g_std_c17 && (f->params[j].storage & CC_STORAGE_REGISTER) != 0) {
+            if (cc_lang_at_least(2017) && (f->params[j].storage & CC_STORAGE_REGISTER) != 0) {
                 if (emit_warning(diag, f->line, f->col,
                                  "'register' storage-class specifier is obsolescent in C17", 1) != 0) {
                     goto fail_func;
@@ -5888,13 +5850,11 @@ fail_func:
 }
 
 void cc_frontend_set_std_mode(const char *std_mode) {
-    g_std_gnu = (std_mode != NULL && strncmp(std_mode, "gnu", 3) == 0) ? 1 : 0;
-    g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
+    /* implicit function declarations: C90 allows them, gcc's GNU modes still do */
+    g_allow_implicit_funcdecl = cc_lang_gnu() || !cc_lang_at_least(1999);
     if (g_implicit_funcdecl_override >= 0) {
         g_allow_implicit_funcdecl = g_implicit_funcdecl_override ? 1 : 0;
     }
-    g_std_c17 = std_mode_is_c17_or_newer(std_mode);
-    g_std_c23 = std_mode_is_c23_or_newer(std_mode);
     cc_parser_set_std_mode(std_mode);
     if (g_gnu89_inline_override >= 0) {
         cc_parser_set_gnu89_inline(g_gnu89_inline_override);

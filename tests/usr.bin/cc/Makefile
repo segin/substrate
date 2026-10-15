@@ -15,7 +15,7 @@ test:
 	# Compile and run test_ast2ir; a failed build must fail the suite,
 	# not leave an earlier binary to run
 	rm -f test_ast2ir_bin
-	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/common/asm_constraint.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/emit_s.c -o test_ast2ir_bin
+	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/common/asm_constraint.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/emit_s.c -o test_ast2ir_bin
 	./test_ast2ir_bin
 	$(TOP)/usr.bin/cc/ir-verifier valid.ir
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_missing_term.ir
@@ -103,6 +103,8 @@ test:
 	! grep -q "__INT8_TYPE__" /tmp/cc_native_host_stdint_inttypes.i
 	$(TOP)/usr.bin/cc/cc -E -dM -std=gnu11 /dev/null -o /tmp/cc_pp_gnu11_predefs.i
 	! grep -q "^#define __SIZEOF_INT128__" /tmp/cc_pp_gnu11_predefs.i
+	! $(TOP)/usr.bin/cc/cc -E -std=bogus /dev/null -o /tmp/cc_pp_std_bogus.i 2>/tmp/cc_pp_std_bogus.err
+	grep -q -- "-std=bogus" /tmp/cc_pp_std_bogus.err
 	$(TOP)/usr.bin/cc/cc native_c99_const_qual.c -o /tmp/cc_native_c99_const_qual
 	/tmp/cc_native_c99_const_qual
 	$(TOP)/usr.bin/cc/cc native_c99_composite_types.c -o /tmp/cc_native_c99_composite_types

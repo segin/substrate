@@ -4,6 +4,7 @@
 #include "cc_driver.h"
 #include "cc_frontend.h"
 #include "cc_diag.h"
+#include "cc_lang.h"
 #include "cc_pipeline.h"
 #include "cc_util.h"
 
@@ -1062,6 +1063,10 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
 
     if (strncmp(a, "-std=", 5) == 0) {
+      cc_lang_t lang;
+      if (cc_lang_from_std(a + 5, &lang) != 0) {
+        return -1;
+      }
       o->std = a + 5;
       cc_strvec_push(&o->c_flags, a);
       continue;

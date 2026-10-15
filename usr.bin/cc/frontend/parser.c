@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 #include "cc_diag.h"
+#include "cc_lang.h"
 #include "cc_lexer.h"
 #include "cc_types.h"
 #include "cc_util.h"
@@ -266,13 +267,6 @@ typedef struct {
     char *alias;
 } decl_attrs_t;
 
-static int g_parser_enable_trigraphs = 1;
-static int g_parser_allow_oldstyle_funcdecl = 0;
-static int g_parser_allow_implicit_int = 0;
-static int g_parser_std_c11 = 0;
-static int g_parser_std_c17 = 0;
-static int g_parser_std_c23 = 0;
-static int g_parser_std_gnu = 0;
 static int g_parser_gnu89_inline = 0;
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
@@ -385,15 +379,15 @@ static int tu_push_function(cc_translation_unit_t *tu, const cc_function_t *f) {
 }
 
 static int parser_is_c11_or_newer(void) {
-    return g_parser_std_c11 || g_parser_std_c17 || g_parser_std_c23;
+    return cc_lang_at_least(2011);
 }
 
 static int parser_is_c23_or_newer(void) {
-    return g_parser_std_c23;
+    return cc_lang_at_least(2023);
 }
 
 static int parser_is_gnu_mode(void) {
-    return g_parser_std_gnu;
+    return cc_lang_gnu();
 }
 
 static int parser_relax_static_asserts(void) {
@@ -3126,7 +3120,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         return -1;
     }
     if (!seen_type) {
-        if (g_parser_allow_implicit_int && seen) {
+        if (!cc_lang_at_least(1999) && seen) {
             /*
              * Implicit int in declaration-specifier lists such as
              * `extern foo();`: C89 has it, C99 removed it, and gcc (14
@@ -10933,7 +10927,7 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
 }
 
 static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names) {
-    if (allow_oldstyle_names && g_parser_allow_oldstyle_funcdecl && can_parse_oldstyle_param_names(p) &&
+    if (allow_oldstyle_names && can_parse_oldstyle_param_names(p) &&
         p->tok.kind == TOK_IDENT &&
         typedef_find_visible_n(p, p->tok.start, p->tok.len) < 0) {
         cc_tok_kind_t k = peek_kind(p);
@@ -11137,7 +11131,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             decl_attrs_clear(&spec_attrs);
             return -1;
         }
-    } else if (g_parser_allow_implicit_int) {
+    } else if (!cc_lang_at_least(1999)) {
         /*
          * An omitted return type (`main() { ... }` => `int main() { ... }`)
          * is implicit int: C89 only, as gcc has it.
@@ -11287,7 +11281,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         f->has_body = 0;
         return 0;
     }
-    if (g_parser_allow_oldstyle_funcdecl && !f->has_prototype && p->tok.kind != TOK_LBRACE && p->tok.kind != TOK_EOF &&
+    /* old-style (K&R) definitions: C up to C17, and gcc takes them in C23 too */
+    if (!f->has_prototype && p->tok.kind != TOK_LBRACE && p->tok.kind != TOK_EOF &&
         is_declspec_start(p)) {
         while (p->tok.kind != TOK_LBRACE) {
             if (p->tok.kind == TOK_EOF) {
@@ -11615,7 +11610,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     }
     buf[sz] = '\0';
     fclose(fp);
-    if (g_parser_enable_trigraphs) {
+    if (!cc_lang_at_least(2023)) {
         sz = normalize_c95_trigraphs(buf, sz);
         buf[sz] = '\0';
     }
@@ -11931,54 +11926,16 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     return 0;
 }
 
+/**
+ * Reset the parser's mode-dependent defaults for the selected language
+ * mode (cc_lang_current()): GNU89 `inline` semantics are the default in
+ * the GNU modes before C99.
+ *
+ * @param std_mode  unused; the mode comes from cc_lang_current()
+ */
 void cc_parser_set_std_mode(const char *std_mode) {
-    g_parser_std_c11 = 0;
-    g_parser_std_c17 = 0;
-    g_parser_std_c23 = 0;
-    g_parser_std_gnu = 0;
-
-    if (std_mode == NULL || std_mode[0] == '\0') {
-        /* the default is gnu17: old-style definitions are still C */
-        g_parser_enable_trigraphs = 1;
-        g_parser_allow_oldstyle_funcdecl = 1;
-        g_parser_allow_implicit_int = 0;
-        return;
-    }
-    if (strncmp(std_mode, "gnu", 3) == 0) {
-        g_parser_std_gnu = 1;
-    }
-    if (strcmp(std_mode, "c11") == 0 || strcmp(std_mode, "gnu11") == 0) {
-        g_parser_std_c11 = 1;
-    } else if (strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "gnu17") == 0 ||
-               strcmp(std_mode, "c18") == 0 || strcmp(std_mode, "gnu18") == 0) {
-        g_parser_std_c11 = 1;
-        g_parser_std_c17 = 1;
-    } else if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
-               strcmp(std_mode, "gnu2x") == 0) {
-        g_parser_std_c11 = 1;
-        g_parser_std_c17 = 1;
-        g_parser_std_c23 = 1;
-    }
-    if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
-        strcmp(std_mode, "gnu2x") == 0) {
-        g_parser_enable_trigraphs = 0;
-    } else {
-        g_parser_enable_trigraphs = 1;
-    }
-    /*
-     * Old-style (K&R) definitions are C up to C17.  C23 removed them,
-     * but gcc still accepts them there, and so does cc.
-     */
-    g_parser_allow_oldstyle_funcdecl = 1;
-    g_parser_allow_implicit_int =
-        strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
-        strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0 ||
-        strcmp(std_mode, "iso9899:1990") == 0 || strcmp(std_mode, "iso9899:199409") == 0;
-    if (strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
-        g_parser_gnu89_inline = 1;
-    } else {
-        g_parser_gnu89_inline = 0;
-    }
+    (void)std_mode;
+    g_parser_gnu89_inline = cc_lang_gnu() && !cc_lang_at_least(1999);
 }
 
 void cc_parser_set_gnu89_inline(int enabled) {
