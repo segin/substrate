@@ -1,4 +1,5 @@
 #include "cc_backend.h"
+#include "cc_ctype.h"
 #include "cc_frontend.h"
 #include "cc_middle.h"
 #include "cc_pipeline.h"
@@ -51,6 +52,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     }
 
     cc_options_select(opts);
+    cc_ct_reset();
 
     if (timings) {
         t0 = now_seconds();

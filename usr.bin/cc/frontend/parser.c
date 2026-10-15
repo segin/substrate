@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 #include "cc_consteval.h"
+#include "cc_ctype.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_lexer.h"
@@ -5693,132 +5694,513 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
     return 0;
 }
 
-static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                           int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                           const char *what) {
-    cc_type_t ty;
-    int sid = -1;
-    long decl_array_len = -1;
-    int decl_array_ndim = 0;
-    long decl_array_dims[CC_MAX_ARRAY_DIMS];
-    memset(decl_array_dims, 0, sizeof(decl_array_dims));
-    if (parse_declspec(p, &ty, &sid, &decl_array_len, &decl_array_ndim, decl_array_dims, allow_void, what, NULL, NULL,
-                       NULL) != 0) {
-        return -1;
+/* ---- declarators ------------------------------------------------------ */
+
+/** One step of a declarator: what it wraps around the type inside it. */
+typedef enum {
+    DECL_OP_POINTER,  /**< `*`, with its qualifiers */
+    DECL_OP_ARRAY,    /**< `[N]` */
+    DECL_OP_FUNCTION  /**< `(parameters)` */
+} decl_op_kind_t;
+
+/** A declarator step. */
+typedef struct {
+    decl_op_kind_t kind;
+    unsigned quals;                  /**< pointer: CC_CQ_* */
+    long count;                      /**< array: the bound, -1 if not a constant */
+    const cc_ctype_t **params;       /**< function: the adjusted parameter types (owned) */
+    size_t param_count;              /**< function: how many */
+    int variadic;                    /**< function: ends in `...` */
+    int prototyped;                  /**< function: has a parameter list */
+} decl_op_t;
+
+/**
+ * A parsed declarator: its steps, in the order they apply to the base
+ * type, and its name if it has one.
+ */
+typedef struct {
+    decl_op_t *ops;
+    size_t count;
+    size_t cap;
+    char *name;   /**< the declared name, or NULL for an abstract declarator */
+} declarator_t;
+
+static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract);
+
+/**
+ * Release a declarator's storage.
+ *
+ * @param d  the declarator; may be zeroed
+ */
+static void declarator_free(declarator_t *d) {
+    size_t i;
+
+    for (i = 0; i < d->count; ++i) {
+        free(d->ops[i].params);
     }
-    while (is_ptr_declarator_tok(p->tok.kind)) {
-        ty = ptr_of_type(ty);
-        if (ty == CC_TYPE_VOID) {
-            set_ptr_depth_diag(p, __LINE__);
+    free(d->ops);
+    free(d->name);
+    memset(d, 0, sizeof(*d));
+}
+
+/**
+ * Append a step to a declarator.
+ *
+ * @param d   the declarator
+ * @param op  the step; its params, if any, now belong to @p d
+ * @return    0, or -1 when out of memory (the params are freed)
+ */
+static int declarator_push(declarator_t *d, const decl_op_t *op) {
+    if (d->count == d->cap) {
+        size_t ncap = d->cap == 0 ? 8 : d->cap * 2;
+        decl_op_t *next = (decl_op_t *)realloc(d->ops, ncap * sizeof(*next));
+        if (next == NULL) {
+            free(op->params);
             return -1;
         }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        while (is_decl_qual_at_token(p)) {
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-        }
+        d->ops = next;
+        d->cap = ncap;
     }
-    if (p->tok.kind == TOK_LBRACK) {
-        long suffix_array_len = -1;
-        int suffix_array_ndim = 0;
-        long suffix_array_dims[CC_MAX_ARRAY_DIMS];
-        memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
-        if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims, NULL) != 0) {
-            return -1;
-        }
-        if (prepend_array_info(&decl_array_len, &decl_array_ndim, decl_array_dims, suffix_array_len, suffix_array_ndim,
-                               suffix_array_dims) != 0) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-            return -1;
-        }
-    }
-    while (p->tok.kind == TOK_LPAREN) {
-        parser_t q = *p;
-        int wrapped_ptr = 0;
-        q.diag = NULL;
-        if (next_tok(&q) != 0) {
-            return -1;
-        }
-        while (tok_is_gnu_attribute_kw(&q) || (q.tok.kind == TOK_LBRACK && peek_kind(&q) == TOK_LBRACK)) {
-            if (skip_decl_gnu_suffix(&q, NULL) != 0) {
-                wrapped_ptr = 0;
-                break;
-            }
-        }
-        if (is_ptr_declarator_tok(q.tok.kind)) {
-            wrapped_ptr = 1;
-        }
-        if (!wrapped_ptr) {
+    d->ops[d->count++] = *op;
+    return 0;
+}
+
+/**
+ * Build the type a declarator gives its base type.
+ *
+ * @param d     the declarator
+ * @param base  the type from the declaration specifiers
+ * @return      the type, or NULL when out of memory
+ */
+static const cc_ctype_t *declarator_type(const declarator_t *d, const cc_ctype_t *base) {
+    const cc_ctype_t *t = base;
+    size_t i;
+
+    for (i = 0; i < d->count && t != NULL; ++i) {
+        const decl_op_t *op = &d->ops[i];
+        switch (op->kind) {
+        case DECL_OP_POINTER:
+            t = cc_ct_qualified(cc_ct_pointer(t), op->quals);
+            break;
+        case DECL_OP_ARRAY:
+            t = cc_ct_array(t, op->count);
+            break;
+        case DECL_OP_FUNCTION:
+            t = cc_ct_function(t, op->params, op->param_count, op->variadic, op->prototyped);
             break;
         }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        while (tok_is_gnu_attribute_kw(p) || (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK)) {
+    }
+    return t;
+}
+
+/**
+ * The type the declaration specifiers' legacy outputs describe.
+ *
+ * @param ty    the type parse_declspec() gave
+ * @param sid   its struct id
+ * @param ndim  its array rank (a typedef'd array)
+ * @param dims  its bounds
+ * @return      the type, or NULL
+ */
+static const cc_ctype_t *declspec_ctype(cc_type_t ty, int sid, int ndim, const long *dims) {
+    return cc_ct_from_legacy(ty, sid, ndim, dims);
+}
+
+/**
+ * Read the qualifiers and attributes after a `*`.
+ *
+ * @param p          the parser, at the token after the `*`
+ * @param out_quals  receives the CC_CQ_* bits
+ * @return           0, or -1 on a syntax error
+ */
+static int parse_pointer_quals(parser_t *p, unsigned *out_quals) {
+    *out_quals = 0;
+    while (1) {
+        if (p->tok.kind == TOK_KW_CONST) {
+            *out_quals |= CC_CQ_CONST;
+        } else if (p->tok.kind == TOK_KW_VOLATILE) {
+            *out_quals |= CC_CQ_VOLATILE;
+        } else if (p->tok.kind == TOK_KW_RESTRICT) {
+            *out_quals |= CC_CQ_RESTRICT;
+        } else if (tok_is_ident(p, "_Atomic")) {
+            *out_quals |= CC_CQ_ATOMIC;
+        } else if (is_decl_qual_at_token(p)) {
+            /* another spelling of a qualifier this encoding does not keep */
+        } else if (tok_is_gnu_attribute_kw(p) || (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK)) {
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 return -1;
             }
+            continue;
+        } else {
+            return 0;
         }
-        while (is_ptr_declarator_tok(p->tok.kind)) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                return -1;
-            }
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-            while (is_decl_qual_at_token(p)) {
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
-            }
-        }
-        if (p->tok.kind == TOK_IDENT) {
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-        }
-        if (p->tok.kind == TOK_LBRACK) {
-            long suffix_array_len = -1;
-            int suffix_array_ndim = 0;
-            long suffix_array_dims[CC_MAX_ARRAY_DIMS];
-            memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
-            if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims, NULL) != 0) {
-                return -1;
-            }
-            if (prepend_array_info(&decl_array_len, &decl_array_ndim, decl_array_dims, suffix_array_len,
-                                   suffix_array_ndim, suffix_array_dims) != 0) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                return -1;
-            }
-        }
-        if (expect(p, TOK_RPAREN, "expected ')' in abstract declarator") != 0) {
+        if (next_tok(p) != 0) {
             return -1;
         }
-        while (p->tok.kind == TOK_LPAREN) {
-            if (skip_balanced_parens(p) != 0) {
+    }
+}
+
+/**
+ * Parse one parameter declaration and give its type as the function
+ * sees it: an array becomes a pointer to its element, a function a
+ * pointer to itself, and top-level qualifiers go.
+ *
+ * @param p    the parser, at the parameter's declaration specifiers
+ * @param out  receives the adjusted type
+ * @return     0, or -1 on error (diagnosed)
+ */
+static int parse_param_type(parser_t *p, const cc_ctype_t **out) {
+    cc_type_t ty = CC_TYPE_VOID;
+    int sid = -1;
+    long len = -1;
+    int ndim = 0;
+    long dims[CC_MAX_ARRAY_DIMS];
+    declarator_t d;
+    const cc_ctype_t *t;
+
+    memset(dims, 0, sizeof(dims));
+    memset(&d, 0, sizeof(d));
+    if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, 1, "expected parameter type", NULL, NULL, NULL) != 0) {
+        return -1;
+    }
+    if (parse_declarator_into(p, &d, 1) != 0) {
+        declarator_free(&d);
+        return -1;
+    }
+    t = declarator_type(&d, declspec_ctype(ty, sid, ndim, dims));
+    declarator_free(&d);
+    if (t == NULL) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory building a parameter type");
+        return -1;
+    }
+    *out = cc_ct_decay(t);
+    return 0;
+}
+
+/**
+ * Parse a function declarator's parameter list, after its `(`, through
+ * its `)`: a prototype, `(void)`, `()` or an identifier list.
+ *
+ * @param p   the parser, at the token after `(`
+ * @param op  receives the parameter types and flags
+ * @return    0, or -1 on error (diagnosed; nothing to free)
+ */
+static int parse_param_list(parser_t *p, decl_op_t *op) {
+    size_t cap = 0;
+
+    memset(op, 0, sizeof(*op));
+    op->kind = DECL_OP_FUNCTION;
+    if (p->tok.kind == TOK_RPAREN) {
+        return next_tok(p);
+    }
+    if (p->tok.kind == TOK_IDENT && !is_declspec_start(p)) {
+        /* an identifier list: names only, so no prototype */
+        while (p->tok.kind != TOK_RPAREN && p->tok.kind != TOK_EOF) {
+            if (next_tok(p) != 0) {
                 return -1;
             }
         }
+        return expect(p, TOK_RPAREN, "expected ')' after parameter names");
+    }
+    op->prototyped = 1;
+    while (1) {
+        const cc_ctype_t *t;
+
+        if (p->tok.kind == TOK_ELLIPSIS) {
+            op->variadic = 1;
+            if (next_tok(p) != 0) {
+                break;
+            }
+            if (expect(p, TOK_RPAREN, "expected ')' after '...'") != 0) {
+                break;
+            }
+            return 0;
+        }
+        if (parse_param_type(p, &t) != 0) {
+            break;
+        }
+        if (t->kind == CC_CT_VOID && op->param_count == 0 && p->tok.kind == TOK_RPAREN) {
+            /* (void): a prototype with no parameters */
+            return next_tok(p);
+        }
+        if (op->param_count == cap) {
+            size_t ncap = cap == 0 ? 4 : cap * 2;
+            const cc_ctype_t **next = (const cc_ctype_t **)realloc(op->params, ncap * sizeof(*next));
+            if (next == NULL) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "out of memory parsing parameters");
+                break;
+            }
+            op->params = next;
+            cap = ncap;
+        }
+        op->params[op->param_count++] = t;
+        if (p->tok.kind == TOK_COMMA) {
+            if (next_tok(p) != 0) {
+                break;
+            }
+            continue;
+        }
+        if (expect(p, TOK_RPAREN, "expected ',' or ')' in parameter list") != 0) {
+            break;
+        }
+        return 0;
+    }
+    free(op->params);
+    op->params = NULL;
+    return -1;
+}
+
+/**
+ * Whether the `(` at the parser starts a nested declarator, as in
+ * `int (*f)(void)`, rather than a parameter list, as in `int (void)`.
+ *
+ * @param p         the parser, at `(`
+ * @param abstract  nonzero if the declarator may be abstract
+ * @return          1 if it starts a nested declarator, else 0
+ */
+static int starts_nested_declarator(parser_t *p, int abstract) {
+    parser_t q = *p;
+
+    q.diag = NULL;
+    if (next_tok(&q) != 0) {
+        return 0;
+    }
+    while (tok_is_gnu_attribute_kw(&q) || (q.tok.kind == TOK_LBRACK && peek_kind(&q) == TOK_LBRACK)) {
+        if (skip_decl_gnu_suffix(&q, NULL) != 0) {
+            return 0;
+        }
+    }
+    if (is_ptr_declarator_tok(q.tok.kind) || q.tok.kind == TOK_LPAREN || q.tok.kind == TOK_LBRACK) {
+        return 1;
+    }
+    return !abstract && q.tok.kind == TOK_IDENT && !is_declspec_start(&q);
+}
+
+/**
+ * Parse a declarator (C11 6.7.6), or an abstract one (6.7.7), into the
+ * steps it applies to its base type.  `*`s bind looser than the suffixes
+ * after them, and a parenthesized declarator binds looser still, so
+ * `int *(*f[2])(void)` is an array of two pointers to functions
+ * returning pointers to int.
+ *
+ * @param p         the parser, at the declarator
+ * @param d         receives the steps (appended) and the name
+ * @param abstract  nonzero if the name may be left out
+ * @return          0, or -1 on error (diagnosed)
+ */
+static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract) {
+    decl_op_t ptrs[16];
+    size_t nptrs = 0;
+    declarator_t inner;
+    size_t i;
+    int rc = -1;
+
+    memset(&inner, 0, sizeof(inner));
+    while (is_ptr_declarator_tok(p->tok.kind)) {
+        decl_op_t op;
+
+        memset(&op, 0, sizeof(op));
+        op.kind = DECL_OP_POINTER;
+        if (next_tok(p) != 0 || parse_pointer_quals(p, &op.quals) != 0) {
+            return -1;
+        }
+        if (nptrs == sizeof(ptrs) / sizeof(ptrs[0])) {
+            set_ptr_depth_diag(p, __LINE__);
+            return -1;
+        }
+        ptrs[nptrs++] = op;
+    }
+    if (skip_decl_gnu_suffix(p, NULL) != 0) {
+        return -1;
+    }
+    /* the direct declarator: a nested declarator, a name, or nothing */
+    if (p->tok.kind == TOK_LPAREN && starts_nested_declarator(p, abstract)) {
+        if (next_tok(p) != 0 || parse_declarator_into(p, &inner, abstract) != 0 ||
+            expect(p, TOK_RPAREN, "expected ')' in declarator") != 0) {
+            goto out;
+        }
+    } else if (p->tok.kind == TOK_IDENT && !is_declspec_start(p)) {
+        inner.name = cc_strndup(p->tok.start, p->tok.len);
+        if (inner.name == NULL || next_tok(p) != 0) {
+            goto out;
+        }
+    } else if (!abstract) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier in declarator");
+        goto out;
+    }
+    if (skip_decl_gnu_suffix(p, NULL) != 0) {
+        goto out;
+    }
+    /*
+     * The suffixes apply before the pointers and the nested declarator do,
+     * the last one first: `[2][3]` is an array of 2 arrays of 3.
+     */
+    {
+        decl_op_t suffix[CC_MAX_ARRAY_DIMS * 4];
+        size_t nsuffix = 0;
+
+        while (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN) {
+            decl_op_t op;
+
+            memset(&op, 0, sizeof(op));
+            if (nsuffix == sizeof(suffix) / sizeof(suffix[0])) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "too many declarator suffixes");
+                goto suffix_fail;
+            }
+            if (p->tok.kind == TOK_LBRACK) {
+                long n = -1;
+                int const_n = 0;
+                cc_expr_t *bound = NULL;
+                if (parse_array_extent(p, &n, &const_n, &bound) != 0) {
+                    goto suffix_fail;
+                }
+                free_expr(bound);
+                op.kind = DECL_OP_ARRAY;
+                op.count = const_n ? n : -1;
+            } else {
+                if (next_tok(p) != 0 || parse_param_list(p, &op) != 0) {
+                    goto suffix_fail;
+                }
+            }
+            suffix[nsuffix++] = op;
+            if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                goto suffix_fail;
+            }
+        }
+        for (i = 0; i < nptrs; ++i) {
+            if (declarator_push(d, &ptrs[i]) != 0) {
+                goto suffix_fail;
+            }
+        }
+        while (nsuffix > 0) {
+            if (declarator_push(d, &suffix[--nsuffix]) != 0) {
+                goto suffix_fail;
+            }
+        }
+        goto suffix_done;
+    suffix_fail:
+        while (nsuffix > 0) {
+            free(suffix[--nsuffix].params);
+        }
+        goto out;
+    }
+suffix_done:
+    for (i = 0; i < inner.count; ++i) {
+        if (declarator_push(d, &inner.ops[i]) != 0) {
+            inner.ops[i].params = NULL;
+            goto out;
+        }
+        inner.ops[i].params = NULL;
+    }
+    if (inner.name != NULL) {
+        d->name = inner.name;
+        inner.name = NULL;
+    }
+    rc = 0;
+out:
+    declarator_free(&inner);
+    return rc;
+}
+
+/**
+ * Parse a type name (C11 6.7.7): declaration specifiers and an abstract
+ * declarator.
+ *
+ * @param p               the parser, at the type name
+ * @param out_type        receives the type in the legacy encoding
+ * @param out_struct_id   receives its struct id; may be NULL
+ * @param out_array_len   receives the product of its array bounds; may be NULL
+ * @param out_array_ndim  receives its array rank; may be NULL
+ * @param out_array_dims  receives its bounds; may be NULL
+ * @param allow_void      nonzero if `void` may be named
+ * @param what            the message for a missing type
+ * @param out_ctype       receives the type itself; NULL if the caller
+ *                        reads only the legacy encoding, in which case a
+ *                        function type (which that encoding would take
+ *                        for its return type) is rejected
+ * @return                0, or -1 on error (diagnosed)
+ */
+static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                              int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
+                              const char *what, const cc_ctype_t **out_ctype) {
+    cc_type_t ty = CC_TYPE_VOID;
+    int sid = -1;
+    long len = -1;
+    int ndim = 0;
+    long dims[CC_MAX_ARRAY_DIMS];
+    declarator_t d;
+    const cc_ctype_t *t;
+    cc_ct_legacy_t leg;
+    unsigned i;
+    size_t line = p->tok.line;
+    size_t col = p->tok.col;
+
+    memset(dims, 0, sizeof(dims));
+    memset(&d, 0, sizeof(d));
+    if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, allow_void, what, NULL, NULL, NULL) != 0) {
+        return -1;
+    }
+    if (parse_declarator_into(p, &d, 1) != 0) {
+        declarator_free(&d);
+        return -1;
+    }
+    if (d.name != NULL) {
+        set_diag(p->diag, line, col, "a type name declares no identifier");
+        declarator_free(&d);
+        return -1;
+    }
+    t = declarator_type(&d, declspec_ctype(ty, sid, ndim, dims));
+    declarator_free(&d);
+    if (t == NULL) {
+        set_diag(p->diag, line, col, "out of memory building a type");
+        return -1;
+    }
+    if (cc_ct_to_legacy(t, &leg) != 0) {
+        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
+        return -1;
+    }
+    if (out_ctype == NULL && t->kind == CC_CT_FUNCTION) {
+        char spelled[128];
+        char msg[200];
+        cc_ct_format(t, spelled, sizeof(spelled));
+        snprintf(msg, sizeof(msg), "type name '%s' is not yet supported here", spelled);
+        set_diag(p->diag, line, col, msg);
+        return -1;
+    }
+    ty = leg.base;
+    for (i = 0; i < leg.depth; ++i) {
+        ty = ptr_of_type(ty);
     }
     *out_type = ty;
     if (out_struct_id != NULL) {
-        *out_struct_id = sid;
+        *out_struct_id = leg.struct_id;
     }
     if (out_array_len != NULL) {
-        *out_array_len = decl_array_len;
+        *out_array_len = leg.array_len;
     }
     if (out_array_ndim != NULL) {
-        *out_array_ndim = decl_array_ndim;
+        *out_array_ndim = leg.ndim;
     }
     if (out_array_dims != NULL) {
-        memcpy(out_array_dims, decl_array_dims, sizeof(decl_array_dims));
+        memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
+    }
+    if (out_ctype != NULL) {
+        *out_ctype = t;
     }
     return 0;
+}
+
+/**
+ * Parse a type name for a caller that reads only the legacy encoding.
+ * See parse_type_name_ct().
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                           int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
+                           const char *what) {
+    return parse_type_name_ct(p, out_type, out_struct_id, out_array_len, out_array_ndim, out_array_dims, allow_void,
+                              what, NULL);
 }
 
 static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
@@ -8283,6 +8665,47 @@ static cc_expr_t *parse_postfix(parser_t *p) {
     return e;
 }
 
+/**
+ * Fold `sizeof (type-name)` into the integer constant it is, when the
+ * type has a size (not a variable-length array, not an incomplete type).
+ * The type must be complete where the sizeof is written, so its size is
+ * known now and is the same wherever the expression is used.
+ *
+ * Otherwise the node is left for sema and lowering, which read the legacy
+ * encoding -- unless it names a function type, which that encoding would
+ * take for the function's return type.
+ *
+ * @param p  the parser
+ * @param e  the CC_EXPR_SIZEOF node, its aux fields set from the type name
+ * @param t  the type named
+ * @return   0, or -1 on error (diagnosed)
+ */
+static int fold_sizeof_type(parser_t *p, cc_expr_t *e, const cc_ctype_t *t) {
+    long n = cc_ct_size(t, p->tu);
+
+    if (n >= 0) {
+        e->kind = CC_EXPR_INT;
+        e->int_val = n;
+        e->value_type = parser_size_type();
+        e->struct_id = -1;
+        e->aux_type = CC_TYPE_VOID;
+        e->aux_struct_id = -1;
+        e->array_ndim = 0;
+        memset(e->array_dims, 0, sizeof(e->array_dims));
+        return 0;
+    }
+    if (t->kind != CC_CT_FUNCTION) {
+        return 0;
+    }
+    {
+        char spelled[128];
+        char msg[200];
+        snprintf(msg, sizeof(msg), "sizeof of '%s' is not yet supported", cc_ct_format(t, spelled, sizeof(spelled)));
+        set_diag(p->diag, e->line, e->col, msg);
+    }
+    return -1;
+}
+
 static cc_expr_t *parse_unary(parser_t *p) {
     if (p->tok.kind == TOK_IDENT && parser_is_gnu_mode() && tok_is_ident(p, "__extension__")) {
         if (next_tok(p) != 0) {
@@ -8304,19 +8727,24 @@ static cc_expr_t *parse_unary(parser_t *p) {
             long sizeof_array_len = -1;
             int sizeof_array_ndim = 0;
             long sizeof_array_dims[CC_MAX_ARRAY_DIMS];
+            const cc_ctype_t *sizeof_ctype = NULL;
             memset(sizeof_array_dims, 0, sizeof(sizeof_array_dims));
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
-                                sizeof_array_dims, 1, "expected type name in sizeof") != 0) {
+            if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
+                                   sizeof_array_dims, 1, "expected type name in sizeof", &sizeof_ctype) != 0) {
                 free_expr(e);
                 return NULL;
             }
             e->array_ndim = sizeof_array_ndim;
             memcpy(e->array_dims, sizeof_array_dims, sizeof(e->array_dims));
             if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            if (p->tok.kind != TOK_LBRACE && fold_sizeof_type(p, e, sizeof_ctype) != 0) {
                 free_expr(e);
                 return NULL;
             }
@@ -8423,58 +8851,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
             }
             e->array_ndim = cast_array_ndim;
             memcpy(e->array_dims, cast_array_dims, sizeof(e->array_dims));
-            if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
-                if (next_tok(p) != 0) {
-                    free_expr(e);
-                    return NULL;
-                }
-                while (is_ptr_declarator_tok(p->tok.kind)) {
-                    cc_type_t pty = ptr_of_type(e->aux_type);
-                    if (pty == CC_TYPE_VOID) {
-                        set_ptr_depth_diag(p, __LINE__);
-                        free_expr(e);
-                        return NULL;
-                    }
-                    e->aux_type = pty;
-                    if (next_tok(p) != 0) {
-                        free_expr(e);
-                        return NULL;
-                    }
-                    while (is_decl_qual_at_token(p)) {
-                        if (next_tok(p) != 0) {
-                            free_expr(e);
-                            return NULL;
-                        }
-                    }
-                }
-                if (expect(p, TOK_RPAREN, "expected ')' in function pointer cast type") != 0) {
-                    free_expr(e);
-                    return NULL;
-                }
-                while (p->tok.kind == TOK_LPAREN) {
-                    if (skip_balanced_parens(p) != 0) {
-                        free_expr(e);
-                        return NULL;
-                    }
-                }
-            }
-            if (p->tok.kind == TOK_LBRACK) {
-                long arr_len = -1;
-                int arr_ndim = 0;
-                long arr_dims[CC_MAX_ARRAY_DIMS];
-                memset(arr_dims, 0, sizeof(arr_dims));
-                if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims, NULL) != 0) {
-                    free_expr(e);
-                    return NULL;
-                }
-                if (prepend_array_info(&cast_array_len, &cast_array_ndim, cast_array_dims, arr_len, arr_ndim, arr_dims) != 0) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                    free_expr(e);
-                    return NULL;
-                }
-                e->array_ndim = cast_array_ndim;
-                memcpy(e->array_dims, cast_array_dims, sizeof(e->array_dims));
-            }
             if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
                 free_expr(e);
                 return NULL;

@@ -499,6 +499,140 @@ const cc_ctype_t *cc_ct_from_scalar(cc_type_t t) {
 }
 
 /**
+ * The type under every pointer level of a legacy type.
+ *
+ * @param base       a legacy type that is not a pointer
+ * @param struct_id  its struct id, _BitInt width or _Atomic's type
+ * @return           the type, or NULL when there is no counterpart
+ */
+static const cc_ctype_t *ct_from_legacy_base(cc_type_t base, int struct_id) {
+    switch (base) {
+    case CC_TYPE_VOID:
+        return struct_id >= 0 ? cc_ct_record(struct_id) : cc_ct_basic(CC_CT_VOID);
+    case CC_TYPE_BITINT:
+        return cc_ct_bitint(struct_id > 0 ? struct_id : 1, 0);
+    case CC_TYPE_ATOMIC:
+        return cc_ct_qualified(ct_from_legacy_base(struct_id > 0 ? (cc_type_t)struct_id : CC_TYPE_INT, -1),
+                               CC_CQ_ATOMIC);
+    case CC_TYPE_ENUM:
+        return cc_ct_enum(struct_id);
+    case CC_TYPE_FUNC:
+        return cc_ct_function(cc_ct_basic(CC_CT_INT), NULL, 0, 0, 0);
+    default:
+        return cc_ct_from_scalar(base);
+    }
+}
+
+/**
+ * A type rebuilt from the legacy encoding.
+ *
+ * @param t          the legacy type
+ * @param struct_id  its struct id (or _BitInt width, or _Atomic's type)
+ * @param ndim       its number of array dimensions
+ * @param dims       their bounds, outermost first
+ * @return           the type, or NULL
+ */
+const cc_ctype_t *cc_ct_from_legacy(cc_type_t t, int struct_id, int ndim, const long *dims) {
+    unsigned depth = cc_type_pointer_depth(t);
+    const cc_ctype_t *ct;
+    unsigned i;
+    int d;
+
+    if (t == CC_TYPE_FUNC) {
+        /* a pointer to a function the encoding knows nothing more about */
+        return cc_ct_pointer(ct_from_legacy_base(CC_TYPE_FUNC, -1));
+    }
+    ct = ct_from_legacy_base(depth > 0 ? cc_type_pointer_base(t) : t, struct_id);
+    if (ndim < 0 || (unsigned)ndim > depth) {
+        ndim = (int)depth;
+    }
+    for (i = (unsigned)ndim; i < depth; ++i) {
+        ct = cc_ct_pointer(ct);
+    }
+    for (d = ndim - 1; d >= 0; --d) {
+        ct = cc_ct_array(ct, dims[d]);
+    }
+    return ct;
+}
+
+/**
+ * Project a type onto the legacy encoding.
+ *
+ * @param t    the type
+ * @param out  receives the encoding
+ * @return     0, or -1 if it has too many array dimensions or no
+ *             counterpart
+ */
+int cc_ct_to_legacy(const cc_ctype_t *t, cc_ct_legacy_t *out) {
+    int seen_pointer = 0;
+
+    memset(out, 0, sizeof(*out));
+    out->array_len = -1;
+    out->struct_id = -1;
+    while (t != NULL) {
+        if (t->kind == CC_CT_POINTER) {
+            ++out->depth;
+            seen_pointer = 1;
+        } else if (t->kind == CC_CT_ARRAY) {
+            long n = t->count < 0 ? 0 : t->count;
+            if (out->ndim >= CC_MAX_ARRAY_DIMS) {
+                return -1;
+            }
+            if (seen_pointer) {
+                out->lossy = 1;
+            }
+            out->dims[out->ndim++] = n;
+            ++out->depth;
+            if (out->array_len < 0) {
+                out->array_len = n;
+            } else if (out->array_len == 0 || n == 0 || out->array_len > LONG_MAX / n) {
+                out->array_len = 0;
+            } else {
+                out->array_len *= n;
+            }
+        } else if (t->kind != CC_CT_FUNCTION) {
+            break;
+        }
+        t = t->of;
+    }
+    if (t == NULL) {
+        return -1;
+    }
+    if (t->quals & CC_CQ_ATOMIC) {
+        out->base = CC_TYPE_ATOMIC;
+        out->struct_id = (int)cc_ct_legacy_kind(t->unqual->kind);
+        return 0;
+    }
+    switch (t->kind) {
+    case CC_CT_VOID:
+        out->base = CC_TYPE_VOID;
+        return 0;
+    case CC_CT_RECORD:
+        out->base = CC_TYPE_VOID;
+        out->struct_id = t->id;
+        return 0;
+    case CC_CT_ENUM:
+        out->base = CC_TYPE_ENUM;
+        out->struct_id = t->id;
+        return 0;
+    case CC_CT_BITINT:
+    case CC_CT_UBITINT:
+        out->base = CC_TYPE_BITINT;
+        out->struct_id = (int)t->count;
+        return 0;
+    case CC_CT_COMPLEX:
+        out->base = CC_TYPE_COMPLEX;
+        return 0;
+    case CC_CT_IMAGINARY:
+        out->base = CC_TYPE_IMAGINARY;
+        return 0;
+    default:
+        out->base = cc_ct_legacy_kind(t->kind);
+        return 0;
+    }
+}
+
+/**
  * The size of a _BitInt(width) in bytes: the smallest of 1, 2, 4 and 8
  * bytes that holds it, then whole 8-byte words, as the x86 psABIs have it.
  *

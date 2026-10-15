@@ -228,9 +228,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   back-end change (x87 slots for long double values, as x86-64 has),
   best done with the neutral-IR plan's typed values, where `f80` is a
   type of its own.  *Reproduced* (-m32).
-- [ ] **CC-50** `sizeof` shall take an abstract function declarator:
-  `sizeof(int(void))` (gcc: 1, with a `-Wpointer-arith` warning) gives
-  "expected ')' after sizeof type".  *Reproduced.*
+- [x] **CC-50** `sizeof` shall take an abstract function declarator:
+  `sizeof(int(void))` (gcc: 1, with a `-Wpointer-arith` warning) gave
+  "expected ')' after sizeof type".  *Reproduced.*  Type names are now
+  parsed by a real declarator parser into the interned type graph
+  (`frontend/ctype.c`) and `sizeof` of one folds to its size, so this,
+  `int (*)[7]`, `char (*)[4][5]` and `void (*(*)(int))(void)` all give
+  gcc's answer.  `codegen/sizeof_type_names.c`.
 
 ## 5. Driver and predefined macros
 
@@ -376,7 +380,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-56 requirements: 29 met, 27 open.
+56 requirements: 30 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
