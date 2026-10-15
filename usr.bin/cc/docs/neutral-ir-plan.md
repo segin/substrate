@@ -133,7 +133,7 @@ a bug, and that bug gets a regression test of its own.
 
 | Step | Work | Size |
 |---|---|---|
-| 0 | **Make the IR visible.**  `cc -fdump-ir` (a text form, after each pass with `-fdump-ir=all`), and golden-IR tests under `tests/usr.bin/cc/ir/`.  Decide the MIR's fate: delete `select.c` unless step 5 needs it. | small |
+| 0 | **Make the IR visible.**  The text form is the existing one the `ir-verifier`, `ir-normalize` and `ir-diff` tools read (typed, LLVM-like; see `tests/usr.bin/cc/valid.ir`), so those tools become the IR's verifier and the golden tests' normalizer and differ.  `cc -fdump-ir` writes it (after each pass with `-fdump-ir=all`); the verifier gains an opcode and type table and checks operand types, which it does not today; golden-IR tests under `tests/usr.bin/cc/ir/` compare normalized dumps.  Today's IR has no phi, so the dumps are the phi-free subset until locals are promoted.  Decide the MIR's fate: delete `select.c` unless step 5 needs it. | small |
 | 1 | **Typed values.**  Add the types and the conversion opcodes.  `ast2ir` writes them; the emitters accept them; the verifier checks them.  Remove `value_sizes` and the `shl`/`shr` conversions last. | large |
 | 2 | **Target descriptor.**  Replace `cc_target_t`, `g_pointer_size_bytes` and the front end's own size tables with descriptor queries.  Mechanical, but it touches every file. | medium |
 | 3 | **ABI pass.**  Calls carry C signatures; `ast2ir` stops classifying; `abi_x86_64.c` and `abi_i386.c` do it.  `emit_*_call` read the explicit result. | large |

@@ -70,8 +70,17 @@ disagreed until CC-48.
 **R9. Dead and stray code.**  The MIR (`backend/select.c`) is built,
 validated and freed; nothing reads it.  The top-level `ir.c`,
 `parser.c`, `verifier.c`, `serialize.c` and the `ir-verifier`,
-`ir-normalize`, `ir-diff` tools are a separate textual IR that `cc`
-does not use and nothing in the tree tests.  `README.md` describes
+`ir-normalize`, `ir-diff` tools are not dead but disconnected: they
+were the first thing written here (Feb 2026), a typed textual SSA
+format with a verifier for the CFG and SSA invariants (terminators,
+phi arity, unique definitions, dominance, reachability), a normalizer
+and a differ, tested in the suite on six fixtures -- but the compiler
+was built on a different in-memory SSA and never writes or reads the
+format.  The verifier checks no types or opcodes (it accepts `add` on
+an `i1`, a `ret i64` from an `i32` function, and an opcode named
+`frobnicate`), and its instructions are kept as strings.  They become
+the neutral IR's text form (`neutral-ir-plan.md` step 0), not
+deleted.  `README.md` describes
 "Phase-9" and a system `cpp` (CC-33); `TASKLIST_*.md` and `SPEC.md`
 have drifted.
 
@@ -146,7 +155,7 @@ relative.
 | Step | Work | Size |
 |---|---|---|
 | 0 | **Self-hosting (R11, CC-51).**  Find and fix what cc gets wrong compiling `parser.c`, `sema.c`, `ast2ir.c`, `emit_s.c`; each bug gets a reduced test in `codegen/`.  Add the stage-2 / stage-3 check to the suite and CI. | medium, unknown |
-| 1 | **Housekeeping (R9).**  Delete the MIR.  Move or delete the unused textual-IR tools (asked first: they are someone's work).  Rewrite README/ARCHITECTURE/SPEC to describe what exists (CC-33). | small |
+| 1 | **Housekeeping (R9).**  Delete the MIR.  Move the textual-IR tools out of the top level into `ir/`, kept: step 7 adopts them.  Rewrite README/ARCHITECTURE/SPEC to describe what exists (CC-33). | small |
 | 2 | **Common code (R2, R8).**  `common/util.c` and `common/diag.c`; delete the copies of `set_diag`, `xstrdup`, `strvec_*`.  The type predicates move to `frontend/types.c` *unchanged* (still the enum) so that step 5 has one place to change. | small |
 | 3 | **Context and driver (R6, R10).**  `cc_context_t` replaces the `g_*` variables and setters; `cc_compile_c_to_s` takes the context.  Option table for the driver, as `ld` got. | medium |
 | 4 | **One constant evaluator (R3)**, on today's AST, replacing the five.  Its tests: every constant-expression context, both targets. | medium |
