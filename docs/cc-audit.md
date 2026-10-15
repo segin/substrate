@@ -235,6 +235,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   (`frontend/ctype.c`) and `sizeof` of one folds to its size, so this,
   `int (*)[7]`, `char (*)[4][5]` and `void (*(*)(int))(void)` all give
   gcc's answer.  `codegen/sizeof_type_names.c`.
+- [ ] **CC-57** A local multi-dimensional array shall take a brace-nested
+  initializer: `int a[2][2] = {{1, 2}, {3, 4}};` inside a function gives
+  "initializer list cannot be used as runtime expression in lowering";
+  the flat `{1, 2, 3, 4}` works.  *Reproduced.*
+- [ ] **CC-58** sizeof shall give the size of an array of pointers to
+  arrays: for a local `int (*rows[2])[4]`, `sizeof rows` is 64 on x86-64
+  (gcc: 16) and 32 on i386 (gcc: 8) -- the legacy type encoding sizes it
+  as the array of arrays it cannot tell it from.  Indexing it works.
+  *Reproduced.*  The declaration's real type is now recorded
+  (`cc_stmt_t.ctype`); sizeof of an identifier has yet to read it.
 
 ## 5. Driver and predefined macros
 
@@ -380,7 +390,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-56 requirements: 30 met, 26 open.
+58 requirements: 30 met, 28 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

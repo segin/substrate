@@ -352,11 +352,14 @@ struct cc_asm_operand {
     cc_expr_t *expr;
 };
 
+struct cc_ctype;
+
 struct cc_stmt {
     size_t line;
     size_t col;
     cc_type_t type;
     int type_struct_id;
+    const struct cc_ctype *ctype; /**< a declaration's type (cc_ctype.h); NULL where not yet built */
     long array_len;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
