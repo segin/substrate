@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_asm.h"
 #include "cc_diag.h"
 #include "cc_types.h"
 
@@ -348,22 +349,6 @@ static int asm_valid_constraint_char(int ch) {
     return 0;
 }
 
-static int asm_constraint_allows_memory(const char *c) {
-    return c != NULL && (strchr(c, 'm') != NULL || strchr(c, 'o') != NULL || strchr(c, 'V') != NULL ||
-                         strchr(c, 'g') != NULL || strchr(c, 'X') != NULL);
-}
-
-static int asm_constraint_allows_register(const char *c) {
-    if (c == NULL) {
-        return 0;
-    }
-    return strchr(c, 'r') != NULL || strchr(c, 'q') != NULL || strchr(c, 'a') != NULL || strchr(c, 'b') != NULL ||
-           strchr(c, 'c') != NULL || strchr(c, 'd') != NULL || strchr(c, 'S') != NULL || strchr(c, 'D') != NULL ||
-           strchr(c, 'g') != NULL || strchr(c, 'X') != NULL || strchr(c, 'A') != NULL || strchr(c, 'l') != NULL ||
-           strchr(c, 'R') != NULL || strchr(c, 'Q') != NULL || strchr(c, 'U') != NULL || strchr(c, 'f') != NULL ||
-           strchr(c, 't') != NULL || strchr(c, 'u') != NULL || strchr(c, 'y') != NULL || strchr(c, 'x') != NULL;
-}
-
 static int asm_constraint_is_imm(const char *c) {
     size_t i;
     if (c == NULL)
@@ -402,21 +387,6 @@ static int asm_constraint_letter_supported(int ch) {
         return 1;
     }
     return 0;
-}
-
-static int asm_constraint_match_output(const char *c) {
-    long n = 0;
-    size_t i;
-    if (c == NULL || c[0] < '0' || c[0] > '9') {
-        return -1;
-    }
-    for (i = 0; c[i] >= '0' && c[i] <= '9'; ++i) {
-        n = n * 10 + (long)(c[i] - '0');
-    }
-    if (c[i] != '\0' || n < 0) {
-        return -1;
-    }
-    return (int)n;
 }
 
 static int asm_validate_constraint(const char *c, int is_output, size_t out_count, int pointer_size, cc_diag_t *diag) {
@@ -476,7 +446,7 @@ static int asm_validate_constraint(const char *c, int is_output, size_t out_coun
         set_diag(diag, "asm 'q' constraint requires x86 target");
         return -1;
     }
-    has_class = asm_constraint_allows_memory(c) || asm_constraint_allows_register(c) || asm_constraint_is_imm(c);
+    has_class = cc_asm_constraint_allows_memory(c) || cc_asm_constraint_names_register(c) || asm_constraint_is_imm(c);
     if (!has_class) {
         return 0;
     }
@@ -4940,7 +4910,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                                         diag) != 0) {
                 return -1;
             }
-            tied_out = asm_constraint_match_output(s->asm_inputs[i2].constraint);
+            tied_out = cc_asm_constraint_matched_operand(s->asm_inputs[i2].constraint);
             (void)tied_out;
         }
         for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {

@@ -7,7 +7,7 @@ PROGS = cc cpp ir-verifier ir-normalize ir-diff
 # the ir-verifier, ir-normalize and ir-diff tools built from them
 COMMON_SRCS = ir/ir.c ir/parse.c ir/verify.c ir/serialize.c
 COMMON_OBJS = $(COMMON_SRCS:.c=.o)
-CC_SRCS = cmd/cc.c cmd/pipeline.c common/diag.c common/target.c common/util.c \
+CC_SRCS = cmd/cc.c cmd/pipeline.c common/asm_constraint.c common/diag.c common/target.c common/util.c \
 	  frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/sema.c frontend/builtin.c frontend/types.c \
 	  middle/ast2ir.c middle/legalize.c \
 	  middle/passes/opt.c \
@@ -23,7 +23,7 @@ BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 CC_HEADERS = include/cc_driver.h include/cc_frontend.h include/cc_ssa.h \
 	     include/cc_backend.h include/cc_pipeline.h \
-	     include/cc_middle.h include/cc_target.h include/cc_types.h include/cc_lexer.h include/cc_util.h include/cc_diag.h
+	     include/cc_middle.h include/cc_target.h include/cc_types.h include/cc_lexer.h include/cc_util.h include/cc_diag.h include/cc_asm.h
 
 ifeq ($(NATIVE_BUILD),1)
     TOOL_CFLAGS = $(CFLAGS) -DCC_NATIVE_BUILD=1

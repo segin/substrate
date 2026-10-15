@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_asm.h"
 #include "cc_diag.h"
 #include "cc_ssa.h"
 #include "cc_types.h"
@@ -83,22 +84,6 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
                                   const long dims[CC_MAX_ARRAY_DIMS]);
 static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
                               const long dims[CC_MAX_ARRAY_DIMS]);
-
-static int asm_constraint_has(const char *c, char ch) {
-    return c != NULL && strchr(c, ch) != NULL;
-}
-
-static int asm_constraint_is_memory_only(const char *c) {
-    if (c == NULL) {
-        return 0;
-    }
-    if (asm_constraint_has(c, 'm') && !asm_constraint_has(c, 'r') && !asm_constraint_has(c, 'q') &&
-        !asm_constraint_has(c, 'a') && !asm_constraint_has(c, 'b') && !asm_constraint_has(c, 'c') &&
-        !asm_constraint_has(c, 'd') && !asm_constraint_has(c, 'S') && !asm_constraint_has(c, 'D')) {
-        return 1;
-    }
-    return 0;
-}
 
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     size_t i;
@@ -10578,7 +10563,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             int out_v = -1;
             const cc_asm_operand_t *op = &s->asm_outputs[i4];
             long out_sz = 0;
-            int is_mem_only = asm_constraint_is_memory_only(op->constraint);
+            int is_mem_only = cc_asm_constraint_is_memory_only(op->constraint);
             if (op->expr == NULL) {
                 free_asm_instr_fields(&in);
                 free(asm_out_store_ptr);

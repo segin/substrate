@@ -1,3 +1,4 @@
+#include "cc_asm.h"
 #include "cc_backend.h"
 #include "cc_diag.h"
 #include "cc_types.h"
@@ -213,10 +214,6 @@ static void emit_local_label(FILE *fp, const char *fn, int label) {
     fprintf(fp, ".L%s_%d", fn, label);
 }
 
-static int asm_constraint_has(const char *c, char ch) {
-    return c != NULL && strchr(c, ch) != NULL;
-}
-
 static int asm_constraint_is_immediate(const char *c) {
     size_t i;
     if (c == NULL) {
@@ -231,80 +228,26 @@ static int asm_constraint_is_immediate(const char *c) {
     return 0;
 }
 
-static int asm_constraint_allows_register(const char *c) {
-    if (c == NULL) {
-        return 1;
-    }
-    if (asm_constraint_has(c, 'r') || asm_constraint_has(c, 'q') || asm_constraint_has(c, 'a') ||
-        asm_constraint_has(c, 'b') || asm_constraint_has(c, 'c') || asm_constraint_has(c, 'd') ||
-        asm_constraint_has(c, 'S') || asm_constraint_has(c, 'D') || asm_constraint_has(c, 'g')) {
-        return 1;
-    }
-    return 0;
-}
-
-static int asm_constraint_allows_memory(const char *c) {
-    if (c == NULL) {
-        return 0;
-    }
-    if (asm_constraint_has(c, 'm') || asm_constraint_has(c, 'o') || asm_constraint_has(c, 'V') ||
-        asm_constraint_has(c, 'g')) {
-        return 1;
-    }
-    return 0;
-}
-
-static int asm_constraint_is_memory_only(const char *c) {
-    if (c == NULL) {
-        return 0;
-    }
-    if (asm_constraint_has(c, 'm') && !asm_constraint_has(c, 'r') && !asm_constraint_has(c, 'q') &&
-        !asm_constraint_has(c, 'a') && !asm_constraint_has(c, 'b') && !asm_constraint_has(c, 'c') &&
-        !asm_constraint_has(c, 'd') && !asm_constraint_has(c, 'S') && !asm_constraint_has(c, 'D')) {
-        return 1;
-    }
-    return 0;
-}
-
-static int asm_constraint_match_output(const char *c) {
-    long n = 0;
-    size_t i = 0;
-    if (c == NULL || c[0] < '0' || c[0] > '9') {
-        return -1;
-    }
-    while (c[i] >= '0' && c[i] <= '9') {
-        n = n * 10 + (long)(c[i] - '0');
-        i++;
-    }
-    if (c[i] != '\0') {
-        return -1;
-    }
-    if (n < 0 || n > INT32_MAX) {
-        return -1;
-    }
-    return (int)n;
-}
-
 static const char *asm_constraint_fixed_reg64(const char *c) {
     if (c == NULL) {
         return NULL;
     }
-    if (asm_constraint_has(c, 'a')) {
+    if (cc_asm_constraint_has(c, 'a')) {
         return "%rax";
     }
-    if (asm_constraint_has(c, 'b')) {
+    if (cc_asm_constraint_has(c, 'b')) {
         return "%rbx";
     }
-    if (asm_constraint_has(c, 'c')) {
+    if (cc_asm_constraint_has(c, 'c')) {
         return "%rcx";
     }
-    if (asm_constraint_has(c, 'd')) {
+    if (cc_asm_constraint_has(c, 'd')) {
         return "%rdx";
     }
-    if (asm_constraint_has(c, 'S')) {
+    if (cc_asm_constraint_has(c, 'S')) {
         return "%rsi";
     }
-    if (asm_constraint_has(c, 'D')) {
+    if (cc_asm_constraint_has(c, 'D')) {
         return "%rdi";
     }
     return NULL;
@@ -314,22 +257,22 @@ static const char *asm_constraint_fixed_reg32(const char *c) {
     if (c == NULL) {
         return NULL;
     }
-    if (asm_constraint_has(c, 'a')) {
+    if (cc_asm_constraint_has(c, 'a')) {
         return "%eax";
     }
-    if (asm_constraint_has(c, 'b')) {
+    if (cc_asm_constraint_has(c, 'b')) {
         return "%ebx";
     }
-    if (asm_constraint_has(c, 'c')) {
+    if (cc_asm_constraint_has(c, 'c')) {
         return "%ecx";
     }
-    if (asm_constraint_has(c, 'd')) {
+    if (cc_asm_constraint_has(c, 'd')) {
         return "%edx";
     }
-    if (asm_constraint_has(c, 'S')) {
+    if (cc_asm_constraint_has(c, 'S')) {
         return "%esi";
     }
-    if (asm_constraint_has(c, 'D')) {
+    if (cc_asm_constraint_has(c, 'D')) {
         return "%edi";
     }
     return NULL;
@@ -2523,7 +2466,7 @@ static const char *pick_nonconflict_constraint_reg(int is_64bit, const char *con
     size_t probe;
 
     if (is_64bit) {
-        if (asm_constraint_has(constraint, 'q')) {
+        if (cc_asm_constraint_has(constraint, 'q')) {
             set = regs64_q;
             set_n = sizeof(regs64_q) / sizeof(regs64_q[0]);
         } else {
@@ -2531,7 +2474,7 @@ static const char *pick_nonconflict_constraint_reg(int is_64bit, const char *con
             set_n = sizeof(regs64_g) / sizeof(regs64_g[0]);
         }
     } else {
-        if (asm_constraint_has(constraint, 'q') || op_size == 1) {
+        if (cc_asm_constraint_has(constraint, 'q') || op_size == 1) {
             set = regs32_q;
             set_n = sizeof(regs32_q) / sizeof(regs32_q[0]);
         } else {
@@ -2706,7 +2649,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     }
 
     for (i = 0; i < in_n; ++i) {
-        int tied = asm_constraint_match_output(in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL);
+        int tied = cc_asm_constraint_matched_operand(in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL);
         if (tied >= 0 && (size_t)tied < out_n) {
             out_tied_read[tied] = 1;
         }
@@ -2723,7 +2666,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         if (in->asm_out_names != NULL && in->asm_out_names[i] != NULL) {
             op_names[i] = in->asm_out_names[i];
         }
-        if (asm_constraint_is_memory_only(c)) {
+        if (cc_asm_constraint_is_memory_only(c)) {
             if (is_indirect) {
                 const char *areg = is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++);
                 char abuf[32];
@@ -2760,7 +2703,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         const char *c = in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL;
         int v = in->asm_in_values != NULL ? in->asm_in_values[i] : -1;
         size_t slot = out_n + i;
-        int tied = asm_constraint_match_output(c);
+        int tied = cc_asm_constraint_matched_operand(c);
         if (in->asm_in_names != NULL && in->asm_in_names[i] != NULL) {
             op_names[slot] = in->asm_in_names[i];
         }
@@ -2795,7 +2738,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 }
                 continue;
             }
-            if (!asm_constraint_allows_register(c) && !asm_constraint_allows_memory(c)) {
+            if (!cc_asm_constraint_allows_gpr(c) && !cc_asm_constraint_allows_memory(c)) {
                 /* Can't resolve to a constant. cc has no inliner, so a
                  * `static __always_inline` helper that takes its `i`-
                  * constrained input from a parameter (Linux's
@@ -2811,7 +2754,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 }
                 continue;
             }
-            if (asm_constraint_allows_memory(c) && !asm_constraint_allows_register(c)) {
+            if (cc_asm_constraint_allows_memory(c) && !cc_asm_constraint_allows_gpr(c)) {
                 long off = slot_off(lay, v);
                 op_text[slot] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
                 if (op_text[slot] == NULL) {
@@ -2820,7 +2763,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 continue;
             }
         }
-        if (asm_constraint_is_memory_only(c)) {
+        if (cc_asm_constraint_is_memory_only(c)) {
             long off = slot_off(lay, v);
             op_text[slot] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
             if (op_text[slot] == NULL) {
