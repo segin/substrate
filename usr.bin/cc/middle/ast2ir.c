@@ -3344,7 +3344,19 @@ static int builtin_bitop_width(const cc_expr_t *e) {
     return 32;
 }
 
-static int lower_popcount64(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
+/**
+ * Count the set bits of a value, in the usual SWAR steps: pairs, nibbles,
+ * bytes, then a multiply that sums the bytes into the top one.
+ *
+ * @param sf    the function being lowered
+ * @param v     the value; no bits may be set above @p bits
+ * @param bits  its width: up to 32 counts with 32-bit masks (which is
+ *              what an i386 register holds), else with 64-bit ones
+ * @param diag  receives an error
+ * @return      the value holding the count, or -1
+ */
+static int lower_popcount(cc_ssa_function_t *sf, int v, int bits, cc_diag_t *diag) {
+    int wide = bits > 32;
     int m1;
     int m2;
     int m4;
@@ -3352,18 +3364,27 @@ static int lower_popcount64(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     int c1;
     int c2;
     int c4;
-    int c56;
+    int ctop;
+    int cff;
     int t;
 
-    m1 = emit_const_u64_instr(sf, 0x5555555555555555ULL, diag);
-    m2 = emit_const_u64_instr(sf, 0x3333333333333333ULL, diag);
-    m4 = emit_const_u64_instr(sf, 0x0f0f0f0f0f0f0f0fULL, diag);
-    h01 = emit_const_u64_instr(sf, 0x0101010101010101ULL, diag);
+    if (wide) {
+        m1 = emit_const_u64_instr(sf, 0x5555555555555555ULL, diag);
+        m2 = emit_const_u64_instr(sf, 0x3333333333333333ULL, diag);
+        m4 = emit_const_u64_instr(sf, 0x0f0f0f0f0f0f0f0fULL, diag);
+        h01 = emit_const_u64_instr(sf, 0x0101010101010101ULL, diag);
+    } else {
+        m1 = emit_const_i64_instr(sf, 0x55555555);
+        m2 = emit_const_i64_instr(sf, 0x33333333);
+        m4 = emit_const_i64_instr(sf, 0x0f0f0f0f);
+        h01 = emit_const_i64_instr(sf, 0x01010101);
+    }
     c1 = emit_const_i64_instr(sf, 1);
     c2 = emit_const_i64_instr(sf, 2);
     c4 = emit_const_i64_instr(sf, 4);
-    c56 = emit_const_i64_instr(sf, 56);
-    if (m1 < 0 || m2 < 0 || m4 < 0 || h01 < 0 || c1 < 0 || c2 < 0 || c4 < 0 || c56 < 0) {
+    ctop = emit_const_i64_instr(sf, wide ? 56 : 24);
+    cff = wide ? emit_const_u64_instr(sf, 0xff, diag) : emit_const_i64_instr(sf, 0xff);
+    if (m1 < 0 || m2 < 0 || m4 < 0 || h01 < 0 || c1 < 0 || c2 < 0 || c4 < 0 || ctop < 0 || cff < 0) {
         return -1;
     }
 
@@ -3413,7 +3434,12 @@ static int lower_popcount64(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     if (v < 0) {
         return -1;
     }
-    return emit_i64_binop_instr(sf, CC_SSA_SHR, v, c56, 1, diag);
+    v = emit_i64_binop_instr(sf, CC_SSA_SHR, v, ctop, 1, diag);
+    if (v < 0) {
+        return -1;
+    }
+    /* in 64-bit arithmetic a 32-bit count leaves partial sums above the top byte */
+    return emit_i64_binop_instr(sf, CC_SSA_AND, v, cff, 0, diag);
 }
 
 static int lower_builtin_ctz_from_normalized(cc_ssa_function_t *sf, int x, int bits, cc_diag_t *diag) {
@@ -3426,8 +3452,12 @@ static int lower_builtin_ctz_from_normalized(cc_ssa_function_t *sf, int x, int b
         bits = 64;
     }
 
-    zero = emit_const_i64_instr(sf, 0);
-    one = emit_const_i64_instr(sf, 1);
+    /*
+     * The constants must be as wide as x: on i386 a 64-bit x is a register
+     * pair, and a 32-bit constant would leave the high half undefined.
+     */
+    zero = bits > 32 ? emit_const_u64_instr(sf, 0, diag) : emit_const_i64_instr(sf, 0);
+    one = bits > 32 ? emit_const_u64_instr(sf, 1, diag) : emit_const_i64_instr(sf, 1);
     if (zero < 0 || one < 0) {
         return -1;
     }
@@ -3457,7 +3487,7 @@ static int lower_builtin_ctz_from_normalized(cc_ssa_function_t *sf, int x, int b
         }
     }
 
-    return lower_popcount64(sf, v, diag);
+    return lower_popcount(sf, v, bits, diag);
 }
 
 static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
@@ -3542,7 +3572,8 @@ static int lower_builtin_ffs(const cc_translation_unit_t *tu, cc_ssa_function_t 
         }
     }
 
-    z = emit_const_i64_instr(sf, 0);
+    /* as wide as x, or i386 compares a 64-bit x against half a zero */
+    z = bits > 32 ? emit_const_u64_instr(sf, 0, diag) : emit_const_i64_instr(sf, 0);
     one = emit_const_i64_instr(sf, 1);
     if (z < 0 || one < 0) {
         return -1;
@@ -3690,7 +3721,7 @@ static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t 
         }
     }
 
-    pc = lower_popcount64(sf, x, diag);
+    pc = lower_popcount(sf, x, bits, diag);
     if (pc < 0) {
         return -1;
     }
@@ -5341,182 +5372,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 v = bin.dst;
             }
-            {
-                int c5555 = emit_const_i64_instr(sf, (long)0x5555555555555555ULL);
-                int c3333 = emit_const_i64_instr(sf, (long)0x3333333333333333ULL);
-                int c0f0f = emit_const_i64_instr(sf, (long)0x0F0F0F0F0F0F0F0FULL);
-                int c7f = emit_const_i64_instr(sf, 0x7F);
-                int t1, t2;
-                if (c5555 < 0 || c3333 < 0 || c0f0f < 0 || c7f < 0) {
-                    return -1;
-                }
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SHR;
-                bin.is_unsigned = 1;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = emit_const_i64_instr(sf, 1);
-                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = t1;
-                bin.rhs = c5555;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SUB;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = t1;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = c3333;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SHR;
-                bin.is_unsigned = 1;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = emit_const_i64_instr(sf, 2);
-                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t2 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = t2;
-                bin.rhs = c3333;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t2 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_ADD;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = t1;
-                bin.rhs = t2;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SHR;
-                bin.is_unsigned = 1;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = emit_const_i64_instr(sf, 4);
-                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_ADD;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = t1;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = c0f0f;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SHR;
-                bin.is_unsigned = 1;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = emit_const_i64_instr(sf, 8);
-                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_ADD;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = t1;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SHR;
-                bin.is_unsigned = 1;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = emit_const_i64_instr(sf, 16);
-                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_ADD;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = t1;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_SHR;
-                bin.is_unsigned = 1;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = emit_const_i64_instr(sf, 32);
-                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                t1 = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_ADD;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = t1;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = c7f;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                v = bin.dst;
-            }
-            return v;
+            return lower_popcount(sf, v, (int)mem_size * 8, diag);
         }
         if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW ||
             bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
