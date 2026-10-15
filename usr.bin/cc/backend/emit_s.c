@@ -6438,7 +6438,6 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path,
                 int emit_debug, cc_target_t target, int pic, cc_diag_t *diag) {
     FILE *fp;
-    cc_mir_module_t mir;
 
     if (diag != NULL) {
         diag->path[0] = '\0';
@@ -6453,24 +6452,6 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         set_diag(diag, "failed to open assembly output");
         return -1;
     }
-
-    cc_mir_module_init(&mir);
-    if (cc_backend_lower_to_mir(m, &mir, diag) != 0) {
-        if (diag != NULL && diag->message[0] == '\0') {
-            set_diag(diag, "MIR lowering failed");
-        }
-        fclose(fp);
-        return -1;
-    }
-    if (cc_backend_mir_validate(&mir, diag) != 0) {
-        if (diag != NULL && diag->message[0] == '\0') {
-            set_diag(diag, "MIR validation failed");
-        }
-        cc_mir_module_free(&mir);
-        fclose(fp);
-        return -1;
-    }
-    cc_mir_module_free(&mir);
 
     if (emit_debug && src_path != NULL) {
         fprintf(fp, ".file 1 \"%s\"\n", src_path);

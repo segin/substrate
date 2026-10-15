@@ -25,7 +25,6 @@ usr.bin/cc/
 │   ├── passes/opt.c         # Optimization passes
 │   └── ssa/                 # SSA module/function/block/instruction infrastructure
 ├── backend/
-│   ├── select.c             # Instruction selection
 │   ├── regalloc.c           # Register allocation and spill planning
 │   ├── frame.c              # Stack frame layout and slot compaction
 │   └── emit_s.c             # GAS-style assembly emission
@@ -103,7 +102,7 @@ Deployment: Shared between `cc` and standalone IR utilities (`ir-verifier`, `ir-
 
 Name: Instruction selection, register allocation, frame layout, and assembly emission
 
-Description: The backend converts legalized IR into GAS-style assembly for supported ABIs. `backend/select.c` chooses machine operations, `backend/regalloc.c` assigns registers and spill slots, `backend/frame.c` builds stack frames, and `backend/emit_s.c` writes the final `.s` stream.
+Description: The backend converts legalized IR into GAS-style assembly for supported ABIs. `backend/emit_s.c` selects instructions directly from the SSA and writes the `.s` stream, for x86-64 and i386 both; `backend/regalloc.c` chooses which register to spill and `backend/frame.c` checks and aligns frame sizes for it.
 
 Technologies: C, target-specific lowering for i386/x86_64, linear-scan style allocation, textual assembly emission
 

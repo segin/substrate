@@ -2,7 +2,6 @@
 #define CC_BACKEND_H
 
 #include "cc_frontend.h"
-#include "cc_mir.h"
 #include "cc_ssa.h"
 #include "cc_target.h"
 

@@ -10,7 +10,7 @@ CC_SRCS = cmd/cc.c cmd/pipeline.c common/target.c \
 	  middle/ast2ir.c middle/legalize.c \
 	  middle/passes/opt.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
-	  backend/select.c backend/regalloc.c backend/frame.c backend/emit_s.c
+	  backend/regalloc.c backend/frame.c backend/emit_s.c
 CC_OBJS = $(CC_SRCS:.c=.o)
 IR_VERIFIER_OBJS = ir-verifier.o $(COMMON_OBJS)
 IR_NORMALIZE_OBJS = ir-normalize.o $(COMMON_OBJS)
@@ -20,7 +20,7 @@ TOOL_CPPFLAGS = -Iinclude
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 CC_HEADERS = include/cc_driver.h include/cc_frontend.h include/cc_ssa.h \
-	     include/cc_backend.h include/cc_mir.h include/cc_pipeline.h \
+	     include/cc_backend.h include/cc_pipeline.h \
 	     include/cc_middle.h include/cc_target.h include/cc_types.h ir.h
 
 ifeq ($(NATIVE_BUILD),1)
