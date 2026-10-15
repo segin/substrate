@@ -4157,42 +4157,6 @@ static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, 
     return 0;
 }
 
-
-
-static int append_array_info(long *io_array_len, int *io_array_ndim, long io_array_dims[CC_MAX_ARRAY_DIMS],
-                             long inner_array_len, int inner_array_ndim,
-                             const long inner_array_dims[CC_MAX_ARRAY_DIMS]) {
-    int i;
-    int cur_ndim;
-
-    if (io_array_len == NULL || io_array_ndim == NULL || io_array_dims == NULL) {
-        return -1;
-    }
-    if (inner_array_ndim <= 0) {
-        return 0;
-    }
-    cur_ndim = *io_array_ndim;
-    if (cur_ndim + inner_array_ndim > CC_MAX_ARRAY_DIMS) {
-        return -1;
-    }
-    for (i = 0; i < inner_array_ndim; ++i) {
-        io_array_dims[cur_ndim + i] = inner_array_dims != NULL ? inner_array_dims[i] : 0;
-    }
-    *io_array_ndim = cur_ndim + inner_array_ndim;
-    if (*io_array_len >= 0 && inner_array_len >= 0) {
-        if (*io_array_len == 0 || inner_array_len == 0) {
-            *io_array_len = 0;
-        } else if (*io_array_len > LONG_MAX / inner_array_len) {
-            *io_array_len = 0;
-        } else {
-            *io_array_len *= inner_array_len;
-        }
-    } else if (*io_array_len < 0 && cur_ndim == 0 && inner_array_len >= 0) {
-        *io_array_len = inner_array_len;
-    }
-    return 0;
-}
-
 static int tok_is_ident(parser_t *p, const char *s) {
     size_t n = strlen(s);
     return p->tok.kind == TOK_IDENT && p->tok.len == n && strncmp(p->tok.start, s, n) == 0;
@@ -5642,9 +5606,17 @@ typedef struct {
     int nested;        /**< its direct part is a parenthesized declarator */
     int inner_arrays;  /**< array suffixes inside that parenthesized declarator */
     int outer_arrays;  /**< array suffixes after it (or after the name) */
+    int saw_restrict;  /**< a parameter's array bound held `restrict` (`int a[restrict]`) */
 } declarator_t;
 
-static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract, int stop_at_params);
+/** How parse_declarator_into() reads a declarator. */
+enum {
+    DECL_ABSTRACT = 1u,       /**< the name may be left out */
+    DECL_STOP_AT_PARAMS = 2u, /**< leave a parameter list right after a plain name unparsed */
+    DECL_PARAM = 4u           /**< a parameter's: `[static N]` bounds, `int (x)` names x */
+};
+
+static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags);
 
 /**
  * Free a declarator step's owned parts.
@@ -5795,7 +5767,7 @@ static int parse_param_type(parser_t *p, const cc_ctype_t **out) {
     if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, 1, "expected parameter type", NULL, NULL, NULL) != 0) {
         return -1;
     }
-    if (parse_declarator_into(p, &d, 1, 0) != 0) {
+    if (parse_declarator_into(p, &d, DECL_ABSTRACT | DECL_PARAM) != 0) {
         declarator_free(&d);
         return -1;
     }
@@ -5910,12 +5882,15 @@ static int skip_attrs_within_declarator(parser_t *p) {
 /**
  * Whether the `(` at the parser starts a nested declarator, as in
  * `int (*f)(void)`, rather than a parameter list, as in `int (void)`.
+ * A parenthesized identifier that is not a typedef name is a nested
+ * declarator unless the declarator must be abstract; in a parameter, as
+ * `int (x)`, it names the parameter (C11 6.7.6.3p11).
  *
- * @param p         the parser, at `(`
- * @param abstract  nonzero if the declarator may be abstract
- * @return          1 if it starts a nested declarator, else 0
+ * @param p      the parser, at `(`
+ * @param flags  DECL_* as parse_declarator_into() was given them
+ * @return       1 if it starts a nested declarator, else 0
  */
-static int starts_nested_declarator(parser_t *p, int abstract) {
+static int starts_nested_declarator(parser_t *p, unsigned flags) {
     parser_t q = *p;
 
     q.diag = NULL;
@@ -5930,7 +5905,7 @@ static int starts_nested_declarator(parser_t *p, int abstract) {
     if (is_ptr_declarator_tok(q.tok.kind) || q.tok.kind == TOK_LPAREN || q.tok.kind == TOK_LBRACK) {
         return 1;
     }
-    return !abstract && q.tok.kind == TOK_IDENT && !is_declspec_start(&q);
+    return (!(flags & DECL_ABSTRACT) || (flags & DECL_PARAM)) && q.tok.kind == TOK_IDENT && !is_declspec_start(&q);
 }
 
 /**
@@ -5940,16 +5915,18 @@ static int starts_nested_declarator(parser_t *p, int abstract) {
  * `int *(*f[2])(void)` is an array of two pointers to functions
  * returning pointers to int.
  *
- * @param p               the parser, at the declarator
- * @param d               receives the steps (appended), the name, and
- *                        the shape (nested, inner_arrays, outer_arrays)
- * @param abstract        nonzero if the name may be left out
- * @param stop_at_params  nonzero to leave a parameter list that directly
- *                        follows a plain name unparsed, as `f` in
- *                        `int f(void)`: the caller declares a function
- * @return                0, or -1 on error (diagnosed)
+ * @param p      the parser, at the declarator
+ * @param d      receives the steps (appended), the name, and the shape
+ *               (nested, inner_arrays, outer_arrays, saw_restrict)
+ * @param flags  DECL_ABSTRACT if the name may be left out;
+ *               DECL_STOP_AT_PARAMS to leave a parameter list that
+ *               directly follows a plain name unparsed, as `f` in
+ *               `int f(void)`, for the caller to declare a function;
+ *               DECL_PARAM for a parameter's declarator
+ * @return       0, or -1 on error (diagnosed)
  */
-static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract, int stop_at_params) {
+static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
+    int abstract = (flags & DECL_ABSTRACT) != 0;
     decl_op_t ptrs[16];
     size_t nptrs = 0;
     declarator_t inner;
@@ -5975,13 +5952,14 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract, int
         return -1;
     }
     /* the direct declarator: a nested declarator, a name, or nothing */
-    if (p->tok.kind == TOK_LPAREN && starts_nested_declarator(p, abstract)) {
-        if (next_tok(p) != 0 || parse_declarator_into(p, &inner, abstract, 0) != 0 ||
+    if (p->tok.kind == TOK_LPAREN && starts_nested_declarator(p, flags)) {
+        if (next_tok(p) != 0 || parse_declarator_into(p, &inner, flags & (DECL_ABSTRACT | DECL_PARAM)) != 0 ||
             expect(p, TOK_RPAREN, "expected ')' in declarator") != 0) {
             goto out;
         }
         d->nested = 1;
         d->inner_arrays = inner.inner_arrays + inner.outer_arrays;
+        d->saw_restrict |= inner.saw_restrict;
     } else if (p->tok.kind == TOK_IDENT && (!abstract || !is_declspec_start(p))) {
         /* after the specifiers an identifier is the name, even one that is also a typedef name */
         inner.name = cc_strndup(p->tok.start, p->tok.len);
@@ -6002,7 +5980,7 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract, int
     {
         decl_op_t suffix[CC_MAX_ARRAY_DIMS * 4];
         size_t nsuffix = 0;
-        int stop = stop_at_params && !d->nested && inner.name != NULL && p->tok.kind == TOK_LPAREN;
+        int stop = (flags & DECL_STOP_AT_PARAMS) && !d->nested && inner.name != NULL && p->tok.kind == TOK_LPAREN;
 
         while (!stop && (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN)) {
             decl_op_t op;
@@ -6015,7 +5993,12 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, int abstract, int
             if (p->tok.kind == TOK_LBRACK) {
                 long n = -1;
                 int const_n = 0;
-                if (parse_array_extent(p, &n, &const_n, &op.bound) != 0) {
+                if (flags & DECL_PARAM) {
+                    /* `[static N]`, `[const]`, `[restrict N]`: what a parameter's bound may hold */
+                    if (parse_param_array_extent(p, &n, &const_n, &d->saw_restrict) != 0) {
+                        goto suffix_fail;
+                    }
+                } else if (parse_array_extent(p, &n, &const_n, &op.bound) != 0) {
                     goto suffix_fail;
                 }
                 if (const_n) {
@@ -6110,7 +6093,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
     if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, allow_void, what, NULL, NULL, NULL) != 0) {
         return -1;
     }
-    if (parse_declarator_into(p, &d, 1, 0) != 0) {
+    if (parse_declarator_into(p, &d, DECL_ABSTRACT) != 0) {
         declarator_free(&d);
         return -1;
     }
@@ -6171,302 +6154,6 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                            const char *what) {
     return parse_type_name_ct(p, out_type, out_struct_id, out_array_len, out_array_ndim, out_array_dims, allow_void,
                               what, NULL);
-}
-
-static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
-                                  long *out_array_len, int *out_array_ndim,
-                                  long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict,
-                                  int *out_param_array_decl) {
-    cc_type_t ty = base_type;
-    int grouped_ptr_decl = 0;
-    int saw_restrict = 0;
-    long decl_array_len = -1;
-    int decl_array_ndim = 0;
-    long decl_array_dims[CC_MAX_ARRAY_DIMS];
-    memset(decl_array_dims, 0, sizeof(decl_array_dims));
-    *out_name = NULL;
-    if (out_array_len != NULL) {
-        *out_array_len = -1;
-    }
-    if (out_array_ndim != NULL) {
-        *out_array_ndim = 0;
-    }
-    if (out_array_dims != NULL) {
-        memset(out_array_dims, 0, sizeof(long) * CC_MAX_ARRAY_DIMS);
-    }
-    if (out_saw_restrict != NULL) {
-        *out_saw_restrict = 0;
-    }
-    if (out_param_array_decl != NULL) {
-        *out_param_array_decl = 0;
-    }
-    while (is_ptr_declarator_tok(p->tok.kind)) {
-        ty = ptr_of_type(ty);
-        if (ty == CC_TYPE_VOID) {
-            set_ptr_depth_diag(p, __LINE__);
-            return -1;
-        }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        if (consume_decl_quals(p, &saw_restrict) != 0) {
-            return -1;
-        }
-    }
-    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
-           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
-        if (skip_decl_gnu_suffix(p, NULL) != 0) {
-            return -1;
-        }
-    }
-    if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
-        grouped_ptr_decl = 1;
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        while (is_ptr_declarator_tok(p->tok.kind)) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                return -1;
-            }
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-            if (consume_decl_quals(p, &saw_restrict) != 0) {
-                return -1;
-            }
-        }
-        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
-               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
-            if (skip_decl_gnu_suffix(p, NULL) != 0) {
-                return -1;
-            }
-        }
-        if (p->tok.kind == TOK_IDENT) {
-            *out_name = cc_strndup(p->tok.start, p->tok.len);
-            if (*out_name == NULL) {
-                return -1;
-            }
-            if (next_tok(p) != 0) {
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-        }
-        while (p->tok.kind == TOK_LBRACK) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-            {
-                long dim = 1;
-                int dim_is_const = 0;
-                if (parse_param_array_extent(p, &dim, &dim_is_const, &saw_restrict) != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-                if (decl_array_ndim >= CC_MAX_ARRAY_DIMS) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-                decl_array_dims[decl_array_ndim++] = dim_is_const ? dim : 0;
-                if (dim_is_const) {
-                    if (decl_array_len < 0) {
-                        decl_array_len = dim;
-                    } else if (decl_array_len == 0 || dim == 0) {
-                        decl_array_len = 0;
-                    } else if (decl_array_len > LONG_MAX / dim) {
-                        decl_array_len = 0;
-                    } else {
-                        decl_array_len *= dim;
-                    }
-                } else if (decl_array_len < 0) {
-                    decl_array_len = 0;
-                } else {
-                    decl_array_len = 0;
-                }
-            }
-        }
-        if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-        while (p->tok.kind == TOK_LPAREN) {
-            if (skip_balanced_parens(p) != 0) {
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-        }
-    }
-    if (!grouped_ptr_decl && *out_name == NULL && p->tok.kind == TOK_LPAREN) {
-        parser_t q = *p;
-        q.diag = NULL;
-        if (next_tok(&q) == 0 && q.tok.kind == TOK_IDENT) {
-            const char *name_start = q.tok.start;
-            size_t name_len = q.tok.len;
-            if (next_tok(&q) == 0 && q.tok.kind == TOK_RPAREN) {
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
-                *out_name = cc_strndup(name_start, name_len);
-                if (*out_name == NULL) {
-                    return -1;
-                }
-                if (next_tok(p) != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-                if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-            }
-        }
-    }
-    if (p->tok.kind == TOK_IDENT) {
-        *out_name = cc_strndup(p->tok.start, p->tok.len);
-        if (*out_name == NULL) {
-            return -1;
-        }
-        if (next_tok(p) != 0) {
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-    }
-    if (!grouped_ptr_decl && *out_name == NULL && p->tok.kind == TOK_LPAREN) {
-        parser_t q = *p;
-        q.diag = NULL;
-        if (next_tok(&q) == 0 && q.tok.kind == TOK_IDENT) {
-            const char *name_start = q.tok.start;
-            size_t name_len = q.tok.len;
-            if (next_tok(&q) == 0 && q.tok.kind == TOK_LPAREN && skip_balanced_parens(&q) == 0 &&
-                q.tok.kind == TOK_RPAREN) {
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
-                *out_name = cc_strndup(name_start, name_len);
-                if (*out_name == NULL) {
-                    return -1;
-                }
-                if (next_tok(p) != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-                if (skip_balanced_parens(p) != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-                if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-                ty = ptr_of_type(ty);
-                if (ty == CC_TYPE_VOID) {
-                    set_ptr_depth_diag(p, __LINE__);
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-            }
-        }
-    }
-    while (p->tok.kind == TOK_LBRACK) {
-        if (out_param_array_decl != NULL && !grouped_ptr_decl) {
-            *out_param_array_decl = 1;
-        }
-        ty = ptr_of_type(ty);
-        if (ty == CC_TYPE_VOID) {
-            set_ptr_depth_diag(p, __LINE__);
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-        {
-            long dim = 1;
-            int dim_is_const = 0;
-            if (parse_param_array_extent(p, &dim, &dim_is_const, &saw_restrict) != 0) {
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-            if (decl_array_ndim >= CC_MAX_ARRAY_DIMS) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-            decl_array_dims[decl_array_ndim++] = dim_is_const ? dim : 0;
-            if (dim_is_const) {
-                if (decl_array_len < 0) {
-                    decl_array_len = dim;
-                } else if (decl_array_len == 0 || dim == 0) {
-                    decl_array_len = 0;
-                } else if (decl_array_len > LONG_MAX / dim) {
-                    decl_array_len = 0;
-                } else {
-                    decl_array_len *= dim;
-                }
-            } else if (decl_array_len < 0) {
-                decl_array_len = 0;
-            } else {
-                decl_array_len = 0;
-            }
-        }
-    }
-    while (p->tok.kind == TOK_LPAREN) {
-        if (skip_balanced_parens(p) != 0) {
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-        if (!grouped_ptr_decl) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-        }
-    }
-    if (grouped_ptr_decl && decl_array_ndim > 0) {
-        /*
-         * Parameter declarators of the form `(*p)[N]` are pointer objects
-         * whose pointee has array shape metadata. They are not array objects
-         * themselves, so leave array_len negative and keep the dimensions for
-         * later decay and stride calculations.
-         */
-        decl_array_len = -1;
-    }
-    *out_type = ty;
-    if (out_array_len != NULL) {
-        *out_array_len = decl_array_len;
-    }
-    if (out_array_ndim != NULL) {
-        *out_array_ndim = decl_array_ndim;
-    }
-    if (out_array_dims != NULL) {
-        memcpy(out_array_dims, decl_array_dims, sizeof(decl_array_dims));
-    }
-    if (out_saw_restrict != NULL) {
-        *out_saw_restrict = saw_restrict;
-    }
-    return 0;
 }
 
 static cc_expr_t *new_expr(cc_expr_kind_t kind) {
@@ -6588,6 +6275,7 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
         memset(f->params[f->param_count].array_dims, 0, sizeof(f->params[f->param_count].array_dims));
     }
     f->params[f->param_count].storage = storage;
+    f->params[f->param_count].ctype = NULL;
     f->param_count++;
     return 0;
 }
@@ -9590,7 +9278,7 @@ static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
 
     memset(out, 0, sizeof(*out));
     memset(&d, 0, sizeof(d));
-    if (parse_declarator_into(p, &d, 0, 1) != 0) {
+    if (parse_declarator_into(p, &d, DECL_STOP_AT_PARAMS) != 0) {
         declarator_free(&d);
         return -1;
     }
@@ -10642,6 +10330,86 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
     return 0;
 }
 
+/**
+ * Parse one parameter's declarator, after its specifiers, and give the
+ * parameter's type as the function sees it -- an array adjusted to a
+ * pointer to its element, a function to a pointer to itself (C11
+ * 6.7.6.3p7-8) -- both as a type and in the legacy encoding.
+ *
+ * In that encoding a parameter that is a pointer to an array, as the
+ * adjusted `int a[3][4]` and the written `int (*a)[4]` both are, has an
+ * array_len of -1 and its pointee's bounds, as the parser has always
+ * given it.
+ *
+ * @param p                 the parser, at the declarator (which may be
+ *                          abstract)
+ * @param base_type         the specifiers' type, legacy encoding
+ * @param base_sid          its struct id
+ * @param base_ndim         its array rank (a typedef'd array)
+ * @param base_dims         its bounds
+ * @param out_name          receives the name (owned), or NULL if none
+ * @param out_ctype         receives the adjusted type
+ * @param out_type          receives it in the legacy encoding
+ * @param out_array_len     receives its legacy array_len
+ * @param out_array_ndim    receives its legacy array rank
+ * @param out_array_dims    receives its legacy bounds
+ * @param out_saw_restrict  receives whether a pointer level, or the
+ *                          adjusted array, is restrict-qualified
+ * @return                  0, or -1 on error (diagnosed)
+ */
+static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
+                            char **out_name, const cc_ctype_t **out_ctype, cc_type_t *out_type, long *out_array_len,
+                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict) {
+    declarator_t d;
+    const cc_ctype_t *t;
+    cc_ct_legacy_t leg;
+    size_t line = p->tok.line;
+    size_t col = p->tok.col;
+    size_t i;
+    unsigned k;
+
+    *out_name = NULL;
+    memset(&d, 0, sizeof(d));
+    if (parse_declarator_into(p, &d, DECL_ABSTRACT | DECL_PARAM) != 0) {
+        declarator_free(&d);
+        return -1;
+    }
+    t = declarator_type(&d, declspec_ctype(base_type, base_sid, base_ndim, base_dims));
+    if (t != NULL && t->kind == CC_CT_ARRAY) {
+        t = cc_ct_qualified(cc_ct_pointer(t->of), d.saw_restrict ? CC_CQ_RESTRICT : 0);
+    } else if (t != NULL && t->kind == CC_CT_FUNCTION) {
+        t = cc_ct_pointer(t);
+    }
+    if (t == NULL) {
+        set_diag(p->diag, line, col, "out of memory building a parameter's type");
+        declarator_free(&d);
+        return -1;
+    }
+    if (cc_ct_to_legacy(t, &leg) != 0) {
+        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
+        declarator_free(&d);
+        return -1;
+    }
+    *out_type = leg.base;
+    for (k = 0; k < leg.depth; ++k) {
+        *out_type = ptr_of_type(*out_type);
+    }
+    *out_array_len = (t->kind == CC_CT_POINTER && leg.lossy) ? -1 : leg.array_len;
+    *out_array_ndim = leg.ndim;
+    memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
+    *out_saw_restrict = d.saw_restrict;
+    for (i = 0; i < d.count; ++i) {
+        if (d.ops[i].kind == DECL_OP_POINTER && (d.ops[i].quals & CC_CQ_RESTRICT) != 0) {
+            *out_saw_restrict = 1;
+        }
+    }
+    *out_ctype = t;
+    *out_name = d.name;
+    d.name = NULL;
+    declarator_free(&d);
+    return 0;
+}
+
 static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names) {
     if (allow_oldstyle_names && can_parse_oldstyle_param_names(p) &&
         p->tok.kind == TOK_IDENT &&
@@ -10693,9 +10461,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         int param_storage = 0;
         int ptype_restrict = 0;
         int dty_restrict = 0;
-        int pointee_array_decl = 0;
-        int param_array_decl = 0;
-        int decay_array_param = 0;
+        const cc_ctype_t *pctype = NULL;
         char anon_buf[32];
         memset(pbase_array_dims, 0, sizeof(pbase_array_dims));
         memset(darr_dims, 0, sizeof(darr_dims));
@@ -10715,35 +10481,9 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             return -1;
         }
         param_storage = p->last_storage;
-        if (parse_param_declarator(p, ptype, &dty, &pname, &darr_len, &darr_ndim, darr_dims, &dty_restrict,
-                                   &param_array_decl) != 0) {
+        if (parse_param_decl(p, ptype, ptype_sid, pbase_array_ndim, pbase_array_dims, &pname, &pctype, &dty,
+                             &darr_len, &darr_ndim, darr_dims, &dty_restrict) != 0) {
             return -1;
-        }
-        if (pbase_array_ndim > 0) {
-            if (append_array_info(&darr_len, &darr_ndim, darr_dims, pbase_array_len, pbase_array_ndim, pbase_array_dims) !=
-                0) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                free(pname);
-                return -1;
-            }
-            pointee_array_decl =
-                (cc_type_pointer_depth(dty) > cc_type_pointer_depth(ptype) && darr_ndim == pbase_array_ndim);
-            if (pointee_array_decl) {
-                darr_len = -1;
-            }
-        }
-        decay_array_param = param_array_decl ||
-                            (pbase_array_ndim > 0 && cc_type_pointer_depth(dty) == cc_type_pointer_depth(ptype));
-        if (decay_array_param && darr_ndim > 0) {
-            int i;
-            --darr_ndim;
-            for (i = 0; i < darr_ndim; ++i) {
-                darr_dims[i] = darr_dims[i + 1];
-            }
-            for (; i < CC_MAX_ARRAY_DIMS; ++i) {
-                darr_dims[i] = 0;
-            }
-            darr_len = -1;
         }
         if ((ptype_restrict || dty_restrict) && !is_pointer_type(dty)) {
             set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer parameter type");
@@ -10761,6 +10501,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             }
             if (f->param_count > 0) {
                 f->params[f->param_count - 1].type_struct_id = ptype_sid;
+                f->params[f->param_count - 1].ctype = pctype;
             }
         } else {
             if (push_param(f, dty, pname, strlen(pname), darr_len, darr_ndim, darr_dims, param_storage) != 0) {
@@ -10769,6 +10510,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             }
             if (f->param_count > 0) {
                 f->params[f->param_count - 1].type_struct_id = ptype_sid;
+                f->params[f->param_count - 1].ctype = pctype;
             }
             free(pname);
         }
@@ -11076,7 +10818,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         for (i = 0; i < f->param_count; ++i) {
             if (f->params[i].name != NULL &&
                 var_push(p, f->params[i].name, f->params[i].type, f->params[i].type_struct_id, f->params[i].array_ndim,
-                         f->params[i].array_dims, NULL) != 0) {
+                         f->params[i].array_dims, f->params[i].ctype) != 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking function parameters");
                 return -1;
             }

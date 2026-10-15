@@ -404,6 +404,7 @@ typedef struct {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
+    const struct cc_ctype *ctype; /**< its type as adjusted (arrays and functions as pointers); NULL if not built */
 } cc_param_t;
 
 typedef struct {
