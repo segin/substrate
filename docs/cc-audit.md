@@ -38,7 +38,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | Area | Requirements | Met |
 |---|---|---|
 | 1. Integer arithmetic and conversions | 8 | 8 |
-| 2. Programs on substrate | 3 | 2 |
+| 2. Programs on substrate | 5 | 4 |
 | 3. Tests | 2 | 1 |
 | 4. ABI and other code generation | 12 | 6 |
 | 5. Driver and predefined macros | 3 | 1 |
@@ -107,6 +107,27 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   gcc-built cc: `frontend/parser.c`, `frontend/sema.c`,
   `middle/ast2ir.c` and `backend/emit_s.c` each break it.  Step 0 of
   `usr.bin/cc/docs/refactor-plan.md`.  *Reproduced.*
+  Most of it was CC-52: with the layout fixed, `sema.c`, `ast2ir.c`
+  and `emit_s.c` compile correctly; `parser.c` still does not.
+- [x] **CC-52** Structure layout shall be the psABI's.  Alignment was
+  taken to be the size capped at the pointer size, so on x86-64 a
+  `long double` member was aligned to 8, not 16, and every member after
+  it was 8 bytes early -- the compiler's own `cc_token_t` was 104 bytes
+  where gcc makes it 112, which is what broke the self-built cc.  On
+  i386 `long double` was 16 bytes, not 12, and `_Decimal64` and
+  `_Decimal128` were under-aligned on both targets.  The four copies
+  of the scalar-size table (parser, sema, lowering, emitter) are
+  replaced by `frontend/types.c` over a per-target description in
+  `common/target.c`.  `float _Complex` and `long double _Complex` still
+  take `double _Complex`'s layout: cc has one complex kind (refactor
+  step 5).  *Reproduced* (both).  `codegen/struct_layout.c`.
+- [x] **CC-53** `offsetof` shall have type `size_t` and step through
+  an array member by its element.  It was `long long`, so on i386 it
+  passed 8 bytes to `printf("%zu")` and shifted every later argument;
+  a subscript stepped by the pointer size, not the element's
+  (`offsetof(struct s, v[2])` for `long double v[]` gave 32, not 48);
+  and a member of an array element (`offsetof(struct s, a[1].d)`) was
+  rejected.  *Reproduced* (both).  `codegen/struct_layout.c`.
 
 ## 3. Tests
 
@@ -322,7 +343,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-51 requirements: 23 met, 28 open.
+53 requirements: 25 met, 28 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

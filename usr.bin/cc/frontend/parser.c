@@ -1192,6 +1192,16 @@ static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
     return CC_TYPE_LONG_LONG;
 }
 
+/**
+ * The type `size_t` names on the target: the type of `sizeof`,
+ * `_Alignof` and `offsetof`.
+ *
+ * @return `unsigned long` where pointers are 8 bytes, else `unsigned int`
+ */
+static cc_type_t parser_size_type(void) {
+    return g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+}
+
 static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id) {
     long n;
     if (is_pointer_type(t)) {
@@ -1438,7 +1448,7 @@ static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e) {
     case CC_EXPR_CAST:
         return e->aux_type;
     case CC_EXPR_SIZEOF:
-        return g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+        return parser_size_type();
     case CC_EXPR_TERNARY:
         if (e->rhs != NULL && e->third != NULL) {
             return parser_common_arith_type(parser_const_result_type(p, e->rhs), parser_const_result_type(p, e->third));
@@ -4090,7 +4100,7 @@ static int parser_expr_typeof_const_context(parser_t *p, const cc_expr_t *e, cc_
         *out_struct_id = e->aux_struct_id;
         return 0;
     case CC_EXPR_SIZEOF:
-        *out_type = g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+        *out_type = parser_size_type();
         *out_struct_id = -1;
         return 0;
     case CC_EXPR_ADDR:
@@ -4214,7 +4224,7 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
         return ok ? 0 : -1;
     }
     case CC_EXPR_SIZEOF:
-        out->type = g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+        out->type = parser_size_type();
         out->struct_id = -1;
         if (e->lhs != NULL && e->lhs->kind == CC_EXPR_STR) {
             long bound = parser_string_literal_array_bound(e->lhs);
@@ -7888,7 +7898,9 @@ static cc_expr_t *parse_primary(parser_t *p) {
                             designator_dims[d] = m->array_dims[d];
                         }
                     }
-                    designator_base_type = m->type;
+                    /* an array member's type is a pointer to its element */
+                    designator_base_type = designator_ndim > 0 && is_pointer_type(m->type) ? ptr_deref_type(m->type)
+                                                                                           : m->type;
                     designator_base_sid = m->type_struct_id;
                     if (next_tok(p) != 0) {
                         free_expr(e);
@@ -7972,7 +7984,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                                 return NULL;
                             }
                             rhs_const->int_val = stride;
-                            rhs_const->value_type = CC_TYPE_LONG_LONG;
+                            rhs_const->value_type = parser_size_type();
                             term = new_bin_expr(CC_BIN_MUL, idx_expr, rhs_const);
                             if (term == NULL) {
                                 free_expr(dyn_off);
@@ -8000,7 +8012,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     if (p->tok.kind != TOK_DOT) {
                         break;
                     }
-                    if (designator_ndim != 0 || !(m->type == CC_TYPE_VOID && m->type_struct_id >= 0)) {
+                    if (designator_ndim != 0 || !(designator_base_type == CC_TYPE_VOID && designator_base_sid >= 0)) {
                         set_diag(p->diag, p->tok.line, p->tok.col,
                                  "nested __builtin_offsetof designator requires struct member");
                         free_expr(dyn_off);
@@ -8035,7 +8047,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                             return NULL;
                         }
                         base->int_val = total;
-                        base->value_type = CC_TYPE_LONG_LONG;
+                        base->value_type = parser_size_type();
                         dyn_off = new_bin_expr(CC_BIN_ADD, base, dyn_off);
                         if (dyn_off == NULL) {
                             return NULL;
@@ -8048,7 +8060,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                         return NULL;
                     }
                     e->int_val = total;
-                    e->value_type = CC_TYPE_LONG_LONG;
+                    e->value_type = parser_size_type();
                 }
                 return e;
             }
