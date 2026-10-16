@@ -588,8 +588,8 @@ test:
 	/tmp/cc_native_clang_ext_vector_attr
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_builtin_aliases.c -o /tmp/cc_native_clang_builtin_aliases
 	/tmp/cc_native_clang_builtin_aliases
-	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_attr_placement.c -o /tmp/cc_native_clang_attr_placement
-	/tmp/cc_native_clang_attr_placement
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_attr_placement.c -o /tmp/cc_native_gnu_attr_placement
+	/tmp/cc_native_gnu_attr_placement
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_asm_goto_quirks.c -o /tmp/cc_native_clang_asm_goto_quirks
 	/tmp/cc_native_clang_asm_goto_quirks
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_clang_asm_goto_quirks.c -o /tmp/cc_native_clang_asm_goto_quirks.s
@@ -897,7 +897,7 @@ clean:
 	      /tmp/cc_native_gnu_attr_type_parse /tmp/cc_native_gnu_attr_alias /tmp/cc_native_gnu_attr_alias.s \
 	      /tmp/cc_native_gnu_attr_label_enum_stmt /tmp/cc_native_clang_blocks_decl /tmp/cc_native_clang_blocks_decl_32.s \
 	      /tmp/cc_native_clang_ext_vector_attr /tmp/cc_native_clang_builtin_aliases \
-	      /tmp/cc_native_clang_attr_placement /tmp/cc_native_clang_asm_goto_quirks /tmp/cc_native_clang_asm_goto_quirks.s \
+	      /tmp/cc_native_gnu_attr_placement /tmp/cc_native_clang_asm_goto_quirks /tmp/cc_native_clang_asm_goto_quirks.s \
 	      /tmp/cc_native_bad_negative_array_bound.o /tmp/cc_native_bad_negative_array_bound.log \
 	      /tmp/cc_native_bad_gnu_int128.o /tmp/cc_native_bad_gnu_int128.log \
 	      /tmp/cc_no_such_as.o /tmp/cc_no_such_as.log \

@@ -5295,6 +5295,12 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             return -1;
         }
     }
+    if (is_vector_size || is_ext_vector_type) {
+        /* a vector type would be laid out and operated on as its element: refuse rather than miscompile */
+        free(sec);
+        set_diag(p->diag, p->tok.line, p->tok.col, "vector types are not supported");
+        return -1;
+    }
 
     if (out_attrs != NULL) {
         if (is_packed) {

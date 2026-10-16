@@ -232,6 +232,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   65535), with the C23 `wb`/`uwb` literal suffixes.  The IR's integers
   are 64-bit; since CC-22 cc rejects the wider types instead of
   miscompiling them, and `1wb` does not lex.  *Reproduced.*
+- [ ] **CC-71** GNU and clang vector types (`vector_size`,
+  `ext_vector_type`) shall work: their size and alignment, brace
+  initialization, subscripts and element-wise operators.  cc parsed the
+  attributes and laid the type out as its element -- `sizeof` of a
+  `vector_size(16)` int vector was 4 -- so vector code was silently
+  wrong; since CC-40 cc rejects the attributes and `__has_attribute`
+  reports them absent.  cc's own `<xmmintrin.h>` uses structs and is
+  unaffected.  *Reproduced.*
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -523,7 +531,7 @@ they stand.  *Reproduced* unless marked.
   already-preprocessed text is gone, and so is the `-trigraphs` the
   gcc bootstrap frontend forced; the two tests name `-std=c99`, and
   `run_pp_postc99.sh` checks gnu17 with and without `-trigraphs`.
-- [ ] **CC-40** A `clang_*` test shall pass under clang.  Of five, two
+- [x] **CC-40** A `clang_*` test shall pass under clang.  Of five, two
   do (`asm_goto_quirks`, `builtin_aliases`).
   `native_clang_blocks_decl.c` assigns a function to a block pointer,
   which clang rejects -- cc treats blocks as function pointers;
@@ -531,7 +539,14 @@ they stand.  *Reproduced* unless marked.
   one to, a scalar, which clang (and gcc) reject;
   `native_clang_attr_placement.c` uses `__attribute__((unused));` as a
   statement, which clang rejects and gcc accepts -- it tests gcc
-  behaviour under a clang name.
+  behaviour under a clang name.  Now: the blocks test declares, copies
+  and stores block pointers (valid with `clang -fblocks`); the vector
+  test uses `ext_vector_type` where `__has_attribute` says it exists and
+  a fallback where not; the placement test is `native_gnu_attr_placement.c`.
+  All four `clang_*` tests pass under clang and cc.  The vector test
+  showed cc had no vector types at all (CC-71): `vector_size(16)` gave
+  a 4-byte scalar.  cc now rejects both vector attributes ("vector types
+  are not supported") and `__has_attribute` says 0 for them.
 - [x] **CC-41** A negative test shall check that cc rejected the input
   for the reason named, not merely that it failed.  60 of 68 checked
   only the exit status, so a crash, or a tool that cannot run, passed:
@@ -593,7 +608,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 58 met, 12 open.
+71 requirements: 59 met, 12 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

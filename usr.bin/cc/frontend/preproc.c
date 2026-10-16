@@ -886,9 +886,8 @@ static int has_gnu_attribute_name(const char *name) {
         strcmp(name, "malloc") == 0 || strcmp(name, "alias") == 0 || strcmp(name, "weak") == 0 ||
         strcmp(name, "flatten") == 0 || strcmp(name, "target") == 0 || strcmp(name, "tls_model") == 0 ||
         strcmp(name, "cleanup") == 0 || strcmp(name, "visibility") == 0 ||
-        strcmp(name, "transparent_union") == 0 || strcmp(name, "vector_size") == 0 ||
-        strcmp(name, "ext_vector_type") == 0 ||
-        strcmp(name, "may_alias") == 0) {
+        strcmp(name, "transparent_union") == 0 || strcmp(name, "may_alias") == 0) {
+        /* not vector_size or ext_vector_type: cc has no vector types and rejects them */
         return 1;
     }
     return 0;

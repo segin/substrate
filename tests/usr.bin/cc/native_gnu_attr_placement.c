@@ -1,3 +1,7 @@
+/*
+ * GNU attribute placement: on a label, and as a null statement (which gcc
+ * accepts with a warning and clang rejects -- gcc behaviour, so a gnu test).
+ */
 int main(void) {
 	int out = 0;
 label_a: __attribute__((unused));
