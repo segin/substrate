@@ -5126,12 +5126,48 @@ static void emit_i386_sse_store_f64(FILE *fp, const slot_layout_t *lay, const ch
     fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", xmm, slot_off(lay, value));
 }
 
-static void emit_i386_x87_load_f64(FILE *fp, const slot_layout_t *lay, int value) {
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, value));
+/**
+ * Whether an i386 floating value is a long double.  A long double is kept
+ * in its slot in x87's 80-bit form (the slots are 16 bytes then, see
+ * i386_function_has_ext()), so it keeps its 64-bit mantissa between
+ * operations; a double is kept as a double.
+ *
+ * @param f  the function
+ * @param v  the value
+ * @return   1 or 0
+ */
+static int i386_fp_is_ext(const cc_ssa_function_t *f, int v) {
+    return v >= 0 && v < f->value_count && f->value_types[v] == CC_VAL_F64 && value_size_bytes(f, v, 8) >= 10;
 }
 
-static void emit_i386_x87_store_f64(FILE *fp, const slot_layout_t *lay, int value) {
-    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, value));
+/**
+ * Whether an instruction reads or writes a long double, and so must be
+ * done on the x87 even where doubles use SSE.
+ */
+static int i386_instr_has_ext(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
+    return i386_fp_is_ext(f, in->dst) || i386_fp_is_ext(f, in->lhs) || i386_fp_is_ext(f, in->rhs);
+}
+
+/** Whether a function has any long double value (its slots must then hold 80 bits). */
+static int i386_function_has_ext(const cc_ssa_function_t *f) {
+    int v;
+
+    for (v = 0; v < f->value_count; ++v) {
+        if (i386_fp_is_ext(f, v)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** Push a floating value onto the x87 stack from its slot: 80 bits for a long double, else a double. */
+static void emit_i386_x87_load_f64(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int value) {
+    fprintf(fp, "\t%s %d(%%ebp)\n", i386_fp_is_ext(f, value) ? "fldt" : "fldl", slot_off(lay, value));
+}
+
+/** Pop the x87 stack top into a floating value's slot, rounding to double unless it is a long double. */
+static void emit_i386_x87_store_f64(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int value) {
+    fprintf(fp, "\t%s %d(%%ebp)\n", i386_fp_is_ext(f, value) ? "fstpt" : "fstpl", slot_off(lay, value));
 }
 
 static int emit_i386_float_binop_sse(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, cc_diag_t *diag) {
@@ -5149,7 +5185,8 @@ static int emit_i386_float_binop_sse(FILE *fp, const slot_layout_t *lay, const c
     return 0;
 }
 
-static int emit_i386_float_binop_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, cc_diag_t *diag) {
+static int emit_i386_float_binop_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                     const cc_ssa_instr_t *in, cc_diag_t *diag) {
     const char *op = i386_float_binop_mnemonic(in->op, 1);
 
     if (op == NULL) {
@@ -5157,9 +5194,27 @@ static int emit_i386_float_binop_x87(FILE *fp, const slot_layout_t *lay, const c
         return -1;
     }
 
-    emit_i386_x87_load_f64(fp, lay, in->lhs);
+    if (i386_fp_is_ext(f, in->rhs)) {
+        /* no x87 arithmetic takes an 80-bit memory operand: both on the stack */
+        const char *pop = NULL;
+
+        if (in->op == CC_SSA_ADD) pop = "faddp";
+        else if (in->op == CC_SSA_SUB) pop = "fsubrp";
+        else if (in->op == CC_SSA_MUL) pop = "fmulp";
+        else if (in->op == CC_SSA_DIV) pop = "fdivrp";
+        if (pop == NULL) {
+            set_diag(diag, "invalid long double arithmetic opcode");
+            return -1;
+        }
+        emit_i386_x87_load_f64(fp, f, lay, in->lhs);
+        emit_i386_x87_load_f64(fp, f, lay, in->rhs);
+        fprintf(fp, "\t%s %%st, %%st(1)\n", pop);
+        emit_i386_x87_store_f64(fp, f, lay, in->dst);
+        return 0;
+    }
+    emit_i386_x87_load_f64(fp, f, lay, in->lhs);
     fprintf(fp, "\t%s %d(%%ebp)\n", op, slot_off(lay, in->rhs));
-    emit_i386_x87_store_f64(fp, lay, in->dst);
+    emit_i386_x87_store_f64(fp, f, lay, in->dst);
     return 0;
 }
 
@@ -5169,9 +5224,10 @@ static void emit_i386_cmp_float_flags_sse(FILE *fp, const slot_layout_t *lay, co
     fprintf(fp, "\tucomisd %d(%%ebp), %s\n", slot_off(lay, in->rhs), tmp);
 }
 
-static void emit_i386_cmp_float_flags_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
-    emit_i386_x87_load_f64(fp, lay, in->rhs);
-    emit_i386_x87_load_f64(fp, lay, in->lhs);
+static void emit_i386_cmp_float_flags_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                          const cc_ssa_instr_t *in) {
+    emit_i386_x87_load_f64(fp, f, lay, in->rhs);
+    emit_i386_x87_load_f64(fp, f, lay, in->lhs);
     fprintf(fp, "\tfucompp\n");
     fprintf(fp, "\tfnstsw %%ax\n");
     fprintf(fp, "\tsahf\n");
@@ -5197,7 +5253,7 @@ static int emit_i386_cmp_float_x87(FILE *fp, const cc_ssa_function_t *f, const s
 
     int_regs_flush(fp, f, lay, ist);
     int_regs_clobber_reg(fp, f, lay, ist, eax);
-    emit_i386_cmp_float_flags_x87(fp, lay, in);
+    emit_i386_cmp_float_flags_x87(fp, f, lay, in);
     return emit_i386_cmp_float_result(fp, f, lay, ist, in);
 }
 
@@ -5290,6 +5346,22 @@ static void emit_i386_i2f_sse(FILE *fp, const cc_ssa_function_t *f, const slot_l
 
 static void emit_i386_i2f_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                               const cc_ssa_instr_t *in, int scratch_off) {
+    if (value_size_bytes(f, in->lhs, 4) >= 8 && !is_stackalloc_value(lay, in->lhs)) {
+        /* a 64-bit integer: all of it from its slot; unsigned with the top bit set is 2^64 more */
+        int_regs_flush(fp, f, lay, ist);
+        fprintf(fp, "\tfildll %d(%%ebp)\n", slot_off(lay, in->lhs));
+        if (in->is_unsigned) {
+            unsigned long lid = next_aux_label_id();
+
+            fprintf(fp, "\tcmpl $0, %d(%%ebp)\n", slot_off(lay, in->lhs) + 4);
+            fprintf(fp, "\tjge .L__cc_u64tox87_%lu\n", lid);
+            fprintf(fp, "\tmovl $0x5f800000, %d(%%ebp)\n", scratch_off);
+            fprintf(fp, "\tfadds %d(%%ebp)\n", scratch_off);
+            fprintf(fp, ".L__cc_u64tox87_%lu:\n", lid);
+        }
+        emit_i386_x87_store_f64(fp, f, lay, in->dst);
+        return;
+    }
     if (in->is_unsigned) {
         unsigned long lid = next_aux_label_id();
         int eax = int_reg_index(ist, "%eax");
@@ -5318,7 +5390,7 @@ static void emit_i386_i2f_x87(FILE *fp, const cc_ssa_function_t *f, const slot_l
         fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist->regs[rl], scratch_off);
         fprintf(fp, "\tfildl %d(%%ebp)\n", scratch_off);
     }
-    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+    emit_i386_x87_store_f64(fp, f, lay, in->dst);
 }
 
 /*
@@ -5338,7 +5410,7 @@ static void emit_i386_f2i_x87(FILE *fp, const cc_ssa_function_t *f, const slot_l
     fprintf(fp, "\torw $0x0c00, %%ax\n");
     fprintf(fp, "\tmovw %%ax, %d(%%ebp)\n", scratch_off + 2);
     fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off + 2);
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
+    emit_i386_x87_load_f64(fp, f, lay, in->lhs);
     fprintf(fp, "\tfistpll %d(%%ebp)\n", scratch_off + 4);
     fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off);
     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", scratch_off + 4);
@@ -5357,11 +5429,12 @@ static void emit_i386_fround32_sse(FILE *fp, const slot_layout_t *lay, const cc_
     fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", tmp, slot_off(lay, in->dst));
 }
 
-static void emit_i386_fround32_x87(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int scratch_off) {
-    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
+static void emit_i386_fround32_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                   const cc_ssa_instr_t *in, int scratch_off) {
+    emit_i386_x87_load_f64(fp, f, lay, in->lhs);
     fprintf(fp, "\tfstps %d(%%ebp)\n", scratch_off);
     fprintf(fp, "\tflds %d(%%ebp)\n", scratch_off);
-    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+    emit_i386_x87_store_f64(fp, f, lay, in->dst);
 }
 
 static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
@@ -5377,7 +5450,7 @@ static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, con
         } else {
             fprintf(fp, "\tfldl (%s)\n", ist->regs[rp]);
         }
-        fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+        emit_i386_x87_store_f64(fp, f, lay, in->dst);
     } else {
         const char *tmp = i386_fp_tmp_reg();
         if (mem_size == 2) {
@@ -5409,7 +5482,7 @@ static void emit_i386_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, co
     int rp = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
 
     if (use_x87_fp) {
-        fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->rhs));
+        emit_i386_x87_load_f64(fp, f, lay, in->rhs);
         if (mem_size == 4) {
             fprintf(fp, "\tfstps (%s)\n", ist->regs[rp]);
         } else if (mem_size >= 10) {
@@ -5517,10 +5590,11 @@ static void emit_i386_const_i32(FILE *fp, const int_reg_state_t *ist, int rd, lo
     fprintf(fp, "\tmovl $%ld, %s\n", (long)(int)(unsigned int)imm, ist->regs[rd]);
 }
 
-static void emit_i386_mov_fp(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int use_x87_fp) {
+static void emit_i386_mov_fp(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
+                             int use_x87_fp) {
     if (use_x87_fp) {
-        fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->lhs));
-        fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+        emit_i386_x87_load_f64(fp, f, lay, in->lhs);
+        emit_i386_x87_store_f64(fp, f, lay, in->dst);
     } else {
         const char *tmp = i386_fp_tmp_reg();
         fprintf(fp, "\tmovsd %d(%%ebp), %s\n", slot_off(lay, in->lhs), tmp);
@@ -5889,7 +5963,7 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
 
     if (call_arg_is_ldouble_abi(in, arg_index)) {
         fprintf(fp, "\tsubl $12, %%esp\n");
-        fprintf(fp, "\tfldl %d(%%ebp)\n", off);
+        emit_i386_x87_load_f64(fp, f, lay, value);
         fprintf(fp, "\tfstpt (%%esp)\n");
         fprintf(fp, "\tmovw $0, 10(%%esp)\n");
         *stack_bytes += 12;
@@ -5902,6 +5976,12 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
             fprintf(fp, "\tpushl %ld(%%eax)\n", w * 4);
         }
         *stack_bytes += words * 4;
+    } else if (i386_fp_is_ext(f, value)) {
+        /* a long double passed as a double: rounded */
+        fprintf(fp, "\tsubl $8, %%esp\n");
+        emit_i386_x87_load_f64(fp, f, lay, value);
+        fprintf(fp, "\tfstpl (%%esp)\n");
+        *stack_bytes += 8;
     } else if (f->value_types[value] == CC_VAL_F64) {
         emit_i386_push_slot(fp, off + 4);
         emit_i386_push_slot(fp, off);
@@ -5956,7 +6036,7 @@ static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, 
         return;
     }
     if (f->value_types[in->dst] == CC_VAL_F64) {
-        fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+        emit_i386_x87_store_f64(fp, f, lay, in->dst);
     } else {
         long ret_bytes = in->imm > 0 ? in->imm : 4;
         int rd;
@@ -6011,7 +6091,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         int_reg_state_t ist;
         size_t j;
         int frame;
-        int use_x87_fp = 0;
+        int fn_x87_fp = 0; /* doubles on the x87, not SSE; a long double always is */
         int scratch_off;
 
         if (opts->i386_mmx && opts->i386_isa_level < 5) {
@@ -6023,13 +6103,14 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 set_diag(diag, "i386 -mfpmath=sse requires SSE2-enabled codegen");
                 return -1;
             }
-            use_x87_fp = 0;
+            fn_x87_fp = 0;
         } else if (opts->i386_fpmath == CC_FPMATH_387) {
-            use_x87_fp = 1;
+            fn_x87_fp = 1;
         } else {
-            use_x87_fp = opts->i386_sse2 ? 0 : 1;
+            fn_x87_fp = opts->i386_sse2 ? 0 : 1;
         }
-        if (build_slot_layout(f, 8, &lay, diag) != 0) {
+        /* a long double keeps its 80 bits in its slot */
+        if (build_slot_layout(f, i386_function_has_ext(f) ? 16 : 8, &lay, diag) != 0) {
             return -1;
         }
         frame = lay.frame_bytes;
@@ -6085,6 +6166,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
         for (j = 0; j < f->instr_count; ++j) {
             const cc_ssa_instr_t *in = &f->instrs[j];
+            int use_x87_fp = fn_x87_fp || i386_instr_has_ext(f, in);
             ist.cur_index = (int)j;
             int_regs_flush(fp, f, &lay, &ist);
 
@@ -6105,7 +6187,11 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 } else if (param_is_ldouble && f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tfldt %d(%%ebp)\n", poff);
-                    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(&lay, in->dst));
+                    emit_i386_x87_store_f64(fp, f, &lay, in->dst);
+                } else if (i386_fp_is_ext(f, in->dst)) {
+                    int_regs_flush(fp, f, &lay, &ist);
+                    fprintf(fp, "\tfldl %d(%%ebp)\n", poff);
+                    emit_i386_x87_store_f64(fp, f, &lay, in->dst);
                 } else if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     emit_i386_copy_f64_param_to_slot(fp, &lay, in->dst, poff);
@@ -6127,7 +6213,31 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_CONST:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
-                    emit_i386_const_f64(fp, &lay, in->dst, in->fimm);
+                    if (i386_fp_is_ext(f, in->dst)) {
+#if LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384
+                        /* the constant's 80 bits, as the host's long double holds them */
+                        unsigned char raw[12];
+                        uint32_t w[3];
+                        long double cvt = (in->is_unsigned && in->imm >= 1 && in->imm <= 3)
+                                              ? x86_64_special_ldouble_const(in->imm)
+                                              : in->fimm_ld;
+                        int k;
+
+                        memset(raw, 0, sizeof(raw));
+                        memcpy(raw, &cvt, 10);
+                        memcpy(w, raw, sizeof(w));
+                        for (k = 0; k < 3; ++k) {
+                            fprintf(fp, "\tmovl $0x%x, %d(%%ebp)\n", (unsigned)w[k], slot_off(&lay, in->dst) + 4 * k);
+                        }
+#else
+                        /* no 80-bit long double on this host: the constant as a double, widened */
+                        emit_i386_const_f64(fp, &lay, in->dst, in->fimm);
+                        fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(&lay, in->dst));
+                        fprintf(fp, "\tfstpt %d(%%ebp)\n", slot_off(&lay, in->dst));
+#endif
+                    } else {
+                        emit_i386_const_f64(fp, &lay, in->dst, in->fimm);
+                    }
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     emit_i386_const_i32(fp, &ist, rd, in->imm);
@@ -6148,7 +6258,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_MOV:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
-                    emit_i386_mov_fp(fp, &lay, in, use_x87_fp);
+                    emit_i386_mov_fp(fp, f, &lay, in, use_x87_fp);
                 } else {
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
@@ -6261,7 +6371,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         set_diag(diag, "bitwise/shift operation on floating value");
                         return -1;
                     }
-                    if ((use_x87_fp ? emit_i386_float_binop_x87(fp, &lay, in, diag)
+                    if ((use_x87_fp ? emit_i386_float_binop_x87(fp, f, &lay, in, diag)
                                     : emit_i386_float_binop_sse(fp, &lay, in, diag)) != 0) {
                         int_regs_free(&ist);
                         slot_layout_free(&lay);
@@ -6313,7 +6423,8 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             }
 
             case CC_SSA_I2F:
-                if (use_x87_fp) {
+                /* SSE2 on i386 converts only a 32-bit integer; a 64-bit one goes through the x87 */
+                if (use_x87_fp || value_size_bytes(f, in->lhs, 4) >= 8) {
                     emit_i386_i2f_x87(fp, f, &lay, &ist, in, scratch_off);
                 } else {
                     emit_i386_i2f_sse(fp, f, &lay, &ist, in);
@@ -6333,14 +6444,18 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_FROUND32:
                 if (use_x87_fp) {
-                    emit_i386_fround32_x87(fp, &lay, in, scratch_off);
+                    emit_i386_fround32_x87(fp, f, &lay, in, scratch_off);
                 } else {
                     emit_i386_fround32_sse(fp, &lay, in);
                 }
                 break;
 
             case CC_SSA_FROUND64:
-                emit_fround64(fp, f, &lay, in, "%ebp", 0);
+                /* a long double rounded to double: through a double's memory form */
+                emit_i386_x87_load_f64(fp, f, &lay, in->lhs);
+                fprintf(fp, "\tfstpl %d(%%ebp)\n", scratch_off + 4);
+                fprintf(fp, "\tfldl %d(%%ebp)\n", scratch_off + 4);
+                emit_i386_x87_store_f64(fp, f, &lay, in->dst);
                 break;
 
             case CC_SSA_LABEL:
@@ -6416,7 +6531,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(&lay, in->lhs));
+                        emit_i386_x87_load_f64(fp, f, &lay, in->lhs);
                     } else if (in->imm > 4 && in->imm <= 8) {
                         int_regs_flush(fp, f, &lay, &ist);
                         fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));

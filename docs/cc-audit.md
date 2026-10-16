@@ -185,9 +185,11 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   initializers were never converted to their integer type, so
   `long long x = d * 4` kept 32 bits.  *Reproduced* (-m32).
   `codegen/float_to_int.c`.
-- [ ] **CC-16** On i386, `long double` shall be 12 bytes with 64-bit
+- [x] **CC-16** On i386, `long double` shall be 12 bytes with 64-bit
   precision (the i386 psABI).  It is 16 bytes with double's precision.
-  *Reproduced* (-m32).
+  *Reproduced* (-m32).  The layout was already right (12 bytes, 4-aligned,
+  a structure's members placed as gcc places them); the precision is
+  CC-56's fix.
 - [x] **CC-17** A call through an element of an array of function
   pointers shall have the function's return type.  `t[i](6, 7)` was
   typed as a pointer, so `r * 100 + t[0](6, 7)` and `q + t[1](6, 7)`
@@ -330,7 +332,7 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   a non-capturing nested comparator passed to `qsort`, matching gcc at
   both widths.  Taking the address of a nested function that uses the
   enclosing function's variables is CC-73.
-- [ ] **CC-56** On i386, `long double` arithmetic shall be done in x87
+- [x] **CC-56** On i386, `long double` arithmetic shall be done in x87
   extended precision.  The i386 back end keeps every long double value
   as a `double` and computes in double, converting to the 80-bit form
   only where it loads or stores memory, so `1.0L + 0x1p-60L != 1.0L` is
@@ -339,7 +341,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   suite's long double tests, with values like 0.5, pass.  The fix is a
   back-end change (x87 slots for long double values, as x86-64 has),
   best done with the neutral-IR plan's typed values, where `f80` is a
-  type of its own.  *Reproduced* (-m32).
+  type of its own.  *Reproduced* (-m32).  Done as x86-64 does it: a
+  function with a long double value gets 16-byte slots, a long double
+  value is kept in its slot in the 80-bit form (fldt/fstpt), and every
+  instruction that touches one runs on the x87 even under
+  `-mfpmath=sse`: arithmetic (both operands on the stack, as no x87
+  operation takes an 80-bit memory operand), compares, conversions,
+  moves, loads and stores, parameters, arguments, returns, and
+  constants (written from the full long double value).  A 64-bit
+  integer converted to floating, which was truncated to its low 32 bits
+  on i386 (`(double)1234567890123456789LL` was 2112454933, also for
+  double), is converted whole (`fildll`).  `codegen/ldouble_precision.c`
+  matches gcc at -m32 and -m64, x87 and SSE.
 - [x] **CC-50** `sizeof` shall take an abstract function declarator:
   `sizeof(int(void))` (gcc: 1, with a `-Wpointer-arith` warning) gave
   "expected ')' after sizeof type".  *Reproduced.*  Type names are now
@@ -683,7 +696,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-73 requirements: 66 met, 7 open.
+73 requirements: 68 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
