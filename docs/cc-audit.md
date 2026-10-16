@@ -287,6 +287,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   expression whose type follows from its variables' declarations through
   `*`, `&`, subscripts and pointer + integer.
   `codegen/sizeof_expressions.c` checks 25 expressions against gcc.
+- [x] **CC-62** Pointer arithmetic shall step by the size of what the
+  pointer points to.  For `int (*rows[2])[4]`, `rows + 1` stepped 32
+  bytes on x86-64 (gcc: 8), so `rows[1] = p` wrote past the end of
+  `rows`; `&rows[0][1]` stepped 8 (gcc: 16); for `char grid[2][3][5]`,
+  `&grid[1] + 1` stepped 5 (gcc: 15); `(*grows[1])[1]` on such a global
+  died of SIGSEGV.  *Reproduced* (both targets).  The step is taken
+  from the operand's real type wherever it is known.
+  `codegen/pointer_steps.c` checks 21 expressions against gcc.
 
 ## 5. Driver and predefined macros
 
@@ -432,7 +440,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-61 requirements: 35 met, 26 open.
+62 requirements: 36 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

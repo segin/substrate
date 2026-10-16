@@ -686,12 +686,37 @@ static long array_dims_step_size_bytes(const cc_translation_unit_t *tu, cc_type_
     return scalar_size * stride;
 }
 
+/**
+ * The step of pointer arithmetic on an operand whose real type is known
+ * (see cc_ct_of_expr()): the size of what it points to, an array or a
+ * function decaying first.
+ *
+ * @param tu        the translation unit, for structure sizes
+ * @param ptr_expr  the pointer operand
+ * @return          the step in bytes, or -1 if the type is not known or
+ *                  what it points to has no size
+ */
+static long expr_real_step_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *ptr_expr) {
+    const cc_ctype_t *t = cc_ct_decay(cc_ct_of_expr(ptr_expr));
+    long n;
+
+    if (t == NULL || t->kind != CC_CT_POINTER) {
+        return -1;
+    }
+    n = cc_ct_size(t->of, tu);
+    return n > 0 ? n : -1;
+}
+
 static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                                        const cc_expr_t *ptr_expr, long fallback) {
     int dim_start;
     cc_type_t array_type;
     long dims[CC_MAX_ARRAY_DIMS];
+    long real_step = expr_real_step_size_bytes(tu, ptr_expr);
 
+    if (real_step > 0) {
+        return real_step;
+    }
     if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_ADDR && ptr_expr->lhs != NULL) {
         return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
     }
@@ -4158,9 +4183,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
 
-            elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
-            elem_size = expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
-            elem_size = expr_decl_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
+            elem_size = expr_real_step_size_bytes(tu, ptr_expr);
+            if (elem_size <= 0) {
+                elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
+                elem_size = expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
+                elem_size = expr_decl_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
+            }
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported pointer base type in lowering");
                 return -1;
