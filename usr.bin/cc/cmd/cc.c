@@ -2082,6 +2082,10 @@ int cc_main(int argc, char **argv) {
     fprintf(stderr, "cc: -E with -o requires exactly one input\n");
     goto out;
   }
+  if ((o.mode_E || o.mode_S) && o.output != NULL && strcmp(o.output, "-") == 0) {
+    /* as gcc: `-o -` with -E or -S is standard output (with -c or a link it is a file named -) */
+    o.output = "/dev/stdout";
+  }
 
   if (o.emit_ssa) {
     if (o.inputs.count != 1 || !has_ext(o.inputs.items[0], ".ir")) {

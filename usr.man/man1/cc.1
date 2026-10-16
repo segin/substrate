@@ -44,6 +44,20 @@ Compile to assembly.
 Compile and/or assemble only, do not link.
 .It Fl o Ar file
 Set output path.
+With
+.Fl E
+or
+.Fl S ,
+a
+.Ar file
+of
+.Ql -
+is standard output; with
+.Fl c
+or when linking it is a file named
+.Ql - ,
+as with
+.Xr gcc 1 .
 .It Fl I Ar dir , Fl D Ar name Ns Op =value , Fl U Ar name
 Preprocessor include/macro controls.
 .It Fl idirafter Ar dir

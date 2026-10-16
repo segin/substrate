@@ -108,6 +108,12 @@ test:
 	! grep -q "^#define __SIZEOF_INT128__" /tmp/cc_pp_gnu11_predefs.i
 	! $(TOP)/usr.bin/cc/cc -E -std=bogus /dev/null -o /tmp/cc_pp_std_bogus.i 2>/tmp/cc_pp_std_bogus.err
 	grep -q -- "-std=bogus" /tmp/cc_pp_std_bogus.err
+	rm -f ./-
+	$(TOP)/usr.bin/cc/cc -E native_c99_const_qual.c -o - > /tmp/cc_stdout_e.i
+	$(TOP)/usr.bin/cc/cc -S native_c99_const_qual.c -o - > /tmp/cc_stdout_s.s
+	test -s /tmp/cc_stdout_e.i
+	grep -q "main:" /tmp/cc_stdout_s.s
+	test ! -e ./-
 	$(TOP)/usr.bin/cc/cc -### native_c99_const_qual.c -L /tmp -l m -o/tmp/cc_drv_prog > /tmp/cc_drv_sep.txt 2>&1
 	grep -q -- "-o /tmp/cc_drv_prog .*-L /tmp -l m" /tmp/cc_drv_sep.txt
 	! $(TOP)/usr.bin/cc/cc -E -fpp-max-tokens=2 native_c99_const_qual.c -o /tmp/cc_pp_max_tokens.i
