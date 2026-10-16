@@ -4524,6 +4524,33 @@ static int append_string_piece(char **dst, const char *piece) {
     return 0;
 }
 
+/**
+ * Write a string literal's stored spelling, escapes decoded, as text for
+ * a diagnostic: printable ASCII as itself, anything else as `?`.
+ *
+ * @param stored  the literal as the lexer stores it (quotes included)
+ * @param out     receives the text, NUL-terminated
+ * @param cap     the size of @p out
+ */
+static void format_string_for_diag(const char *stored, char *out, size_t cap) {
+    size_t n = strlen(stored);
+    size_t i = 0;
+    size_t j = 0;
+
+    while (i < n && j + 1 < cap) {
+        unsigned c;
+        if (stored[i] == '\\' && i + 1 < n) {
+            size_t adv = 0;
+            c = parser_decode_escape_unit((const unsigned char *)stored + i + 1, n - i - 1, &adv);
+            i += 1 + (adv > 0 ? adv : 1);
+        } else {
+            c = (unsigned char)stored[i++];
+        }
+        out[j++] = (c >= 32 && c < 127) ? (char)c : '?';
+    }
+    out[j] = '\0';
+}
+
 static char *unescape_string_piece(const char *in) {
     size_t i;
     size_t j;
@@ -6781,7 +6808,11 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
             return 0;
         }
         if (msg_expr != NULL && msg_expr->kind == CC_EXPR_STR && msg_expr->ident != NULL) {
-            set_diag(p->diag, p->tok.line, p->tok.col, msg_expr->ident);
+            char text[160];
+            char msg[200];
+            format_string_for_diag(msg_expr->ident, text, sizeof(text));
+            snprintf(msg, sizeof(msg), "static assertion failed: %s", text);
+            set_diag(p->diag, p->tok.line, p->tok.col, msg);
         } else {
             set_diag(p->diag, p->tok.line, p->tok.col, "static assertion failed");
         }
