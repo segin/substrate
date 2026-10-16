@@ -304,6 +304,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   object and the offset into it are found from real types: arrays, `&`,
   subscripts and pointer +/- a constant.  `codegen/builtin_object_size.c`
   checks nine pointers against gcc -O2.
+- [x] **CC-64** A function definition shall take any declarator.  A
+  function returning a pointer to an array, `int (*row_of(int))[4] {
+  ... }`, was rejected ("expected function return type"), as was one
+  returning a pointer to a function returning a function pointer,
+  `int (*(*maker(void))(int))(int) { ... }` ("expected ';' after
+  declaration"): function definitions had their own declarator parser
+  that knew one level of parentheses and skipped what followed them.
+  *Reproduced* (both targets).  They are parsed by the real declarator
+  parser, which hands the parameter list after the name to the function
+  definition, and a call records its function's return type, so
+  `(*row_of(1))[2]`, `row_of(2)[0][3]` and `sizeof *row_of(0)` give gcc's
+  answers.  `codegen/function_declarators.c` checks eight functions.
 
 ## 5. Driver and predefined macros
 
@@ -449,7 +461,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-63 requirements: 37 met, 26 open.
+64 requirements: 38 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

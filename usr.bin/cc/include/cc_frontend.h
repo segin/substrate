@@ -325,8 +325,8 @@ struct cc_expr {
     long generic_selected;
     cc_stmt_t *stmt_expr_stmts;
     size_t stmt_expr_count;
-    const struct cc_ctype *ctype; /**< identifier or member access: the variable's or member's type, where its
-                                       declaration recorded one; else NULL */
+    const struct cc_ctype *ctype; /**< identifier, member access or direct call: the variable's or member's type,
+                                       or the function's return type, where its declaration recorded one; else NULL */
 };
 
 typedef enum {
@@ -449,6 +449,7 @@ typedef struct {
     size_t col;
     cc_type_t ret_type;
     int ret_struct_id;
+    const struct cc_ctype *ret_ctype; /**< the return type, where the declarator recorded it; else NULL */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;

@@ -3251,18 +3251,6 @@ static int is_decl_qual_at_token(parser_t *p) {
     return is_decl_qual_tok(p->tok.kind) || tok_is_ident(p, "_Atomic");
 }
 
-static int consume_decl_quals(parser_t *p, int *saw_restrict) {
-    while (is_decl_qual_at_token(p)) {
-        if (p->tok.kind == TOK_KW_RESTRICT && saw_restrict != NULL) {
-            *saw_restrict = 1;
-        }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
 static cc_type_t ptr_of_type(cc_type_t t) {
     return cc_type_make_pointer(t);
 }
@@ -3534,85 +3522,6 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
         *out_struct_id = e->struct_id;
         return 0;
     }
-}
-
-static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
-                                  const char *name_err, int *out_saw_restrict) {
-    cc_type_t ty = base_type;
-    int wrapped = 0;
-    int saw_restrict = 0;
-    if (out_saw_restrict != NULL) {
-        *out_saw_restrict = 0;
-    }
-    while (is_ptr_declarator_tok(p->tok.kind)) {
-        ty = ptr_of_type(ty);
-        if (ty == CC_TYPE_VOID) {
-            set_ptr_depth_diag(p, __LINE__);
-            return -1;
-        }
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        if (consume_decl_quals(p, &saw_restrict) != 0) {
-            return -1;
-        }
-    }
-    while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
-           tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
-        if (skip_decl_gnu_suffix(p, NULL) != 0) {
-            return -1;
-        }
-    }
-    if (p->tok.kind == TOK_LPAREN) {
-        wrapped = 1;
-        if (next_tok(p) != 0) {
-            return -1;
-        }
-        while (is_ptr_declarator_tok(p->tok.kind)) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                return -1;
-            }
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-            if (consume_decl_quals(p, &saw_restrict) != 0) {
-                return -1;
-            }
-        }
-        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
-               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
-            if (skip_decl_gnu_suffix(p, NULL) != 0) {
-                return -1;
-            }
-        }
-    }
-    if (p->tok.kind != TOK_IDENT) {
-        set_diag(p->diag, p->tok.line, p->tok.col, name_err);
-        return -1;
-    }
-    *out_name = cc_strndup(p->tok.start, p->tok.len);
-    if (*out_name == NULL) {
-        return -1;
-    }
-    *out_type = ty;
-    if (next_tok(p) != 0) {
-        free(*out_name);
-        *out_name = NULL;
-        return -1;
-    }
-    if (wrapped) {
-        if (expect(p, TOK_RPAREN, "expected ')' in declarator") != 0) {
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-    }
-    if (out_saw_restrict != NULL) {
-        *out_saw_restrict = saw_restrict;
-    }
-    return 0;
 }
 
 static int parser_expr_typeof_const_context(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
@@ -5556,6 +5465,13 @@ typedef struct {
     int inner_arrays;  /**< array suffixes inside that parenthesized declarator */
     int outer_arrays;  /**< array suffixes after it (or after the name) */
     int saw_restrict;  /**< a parameter's array bound held `restrict` (`int a[restrict]`) */
+    /**
+     * A function definition's: called at the parameter list that directly
+     * follows the name, wherever the name is nested, to parse it -- `(`
+     * through `)` -- into the function being defined.  NULL otherwise.
+     */
+    int (*name_params)(parser_t *p, void *ctx);
+    void *name_params_ctx; /**< passed to name_params */
 } declarator_t;
 
 /** How parse_declarator_into() reads a declarator. */
@@ -5919,6 +5835,8 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     }
     /* the direct declarator: a nested declarator, a name, or nothing */
     if (p->tok.kind == TOK_LPAREN && starts_nested_declarator(p, flags)) {
+        inner.name_params = d->name_params;
+        inner.name_params_ctx = d->name_params_ctx;
         if (next_tok(p) != 0 ||
             parse_declarator_into(p, &inner, flags & (DECL_ABSTRACT | DECL_PARAM | DECL_MEMBER)) != 0 ||
             expect(p, TOK_RPAREN, "expected ')' in declarator") != 0) {
@@ -5949,6 +5867,25 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
         size_t nsuffix = 0;
         int stop = (flags & DECL_STOP_AT_PARAMS) && !d->nested && inner.name != NULL && p->tok.kind == TOK_LPAREN;
 
+        if (d->name_params != NULL && inner.name != NULL && (!d->nested || inner.count == 0) &&
+            p->tok.kind == TOK_LPAREN) {
+            /*
+             * The defined function's own parameter list -- after the name, or
+             * after a parenthesized name, `(f)(void)` -- its caller parses it.
+             */
+            decl_op_t op;
+
+            memset(&op, 0, sizeof(op));
+            op.kind = DECL_OP_FUNCTION;
+            op.prototyped = 1;
+            if (d->name_params(p, d->name_params_ctx) != 0) {
+                goto out;
+            }
+            suffix[nsuffix++] = op;
+            if (skip_attrs_within_declarator(p) != 0) {
+                goto suffix_fail;
+            }
+        }
         while (!stop && (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN)) {
             decl_op_t op;
 
@@ -10625,12 +10562,100 @@ static cc_type_t adjust_oldstyle_param_type(cc_type_t ty, int array_ndim) {
     return ty;
 }
 
+/**
+ * Parse a function definition's (or declaration's) own parameter list,
+ * `(` through `)`, into the function: the declarator parser calls this
+ * at the list that directly follows the function's name.
+ *
+ * @param p    the parser, at `(`
+ * @param ctx  the cc_function_t being parsed
+ * @return     0, or -1 on error (diagnosed)
+ */
+static int parse_function_params(parser_t *p, void *ctx) {
+    cc_function_t *f = (cc_function_t *)ctx;
+
+    if (expect(p, TOK_LPAREN, "expected '(' after function name") != 0) {
+        return -1;
+    }
+    if (p->tok.kind != TOK_RPAREN && parse_params(p, f, 1) != 0) {
+        return -1;
+    }
+    if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
+        return -1;
+    }
+    if (parser_is_c23_or_newer() && f->param_count == 0 && !f->is_variadic && !f->has_prototype) {
+        /* in C23 an empty parameter list is a prototype for a parameterless function */
+        f->has_prototype = 1;
+    }
+    return 0;
+}
+
+/**
+ * Parse a function definition's declarator, after the return type's
+ * specifiers: the name, its parameter list (into f, by
+ * parse_function_params()), and whatever the declarator wraps around
+ * them -- `int (*f(void))[4]` returns a pointer to an array,
+ * `int (*(*f(void))(int))(int)` a pointer to a function returning a
+ * function pointer.  Gives the return type as a type and in the legacy
+ * encoding.
+ *
+ * @param p          the parser, at the declarator
+ * @param f          the function; receives name, params, ret_type, ret_ctype
+ * @param ftype      the specifiers' type, legacy encoding
+ * @param ftype_sid  its struct id
+ * @param alias      the type of the typedef name the specifiers were, or
+ *                   NULL (see declspec_ctype())
+ * @return           0, or -1 on error (diagnosed)
+ */
+static int parse_function_declarator(parser_t *p, cc_function_t *f, cc_type_t ftype, int ftype_sid,
+                                     const cc_ctype_t *alias) {
+    declarator_t d;
+    const cc_ctype_t *t;
+    cc_ct_legacy_t leg;
+    size_t line = p->tok.line;
+    size_t col = p->tok.col;
+    unsigned k;
+
+    memset(&d, 0, sizeof(d));
+    d.name_params = parse_function_params;
+    d.name_params_ctx = f;
+    if (parse_declarator_into(p, &d, 0) != 0) {
+        declarator_free(&d);
+        return -1;
+    }
+    t = declarator_type(&d, declspec_ctype(alias, ftype, ftype_sid, 0, NULL));
+    if (d.name == NULL || t == NULL || t->kind != CC_CT_FUNCTION) {
+        set_diag(p->diag, line, col, d.name == NULL ? "expected function name" : "expected '(' after function name");
+        declarator_free(&d);
+        return -1;
+    }
+    if (cc_ct_to_legacy(t->of, &leg) != 0) {
+        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
+        declarator_free(&d);
+        return -1;
+    }
+    f->ret_type = leg.base;
+    for (k = 0; k < leg.depth; ++k) {
+        f->ret_type = ptr_of_type(f->ret_type);
+        if (f->ret_type == CC_TYPE_VOID) {
+            set_ptr_depth_diag(p, __LINE__);
+            declarator_free(&d);
+            return -1;
+        }
+    }
+    f->ret_ctype = t->of;
+    f->name = d.name;
+    d.name = NULL;
+    declarator_free(&d);
+    return 0;
+}
+
 static int parse_function(parser_t *p, cc_function_t *f) {
     cc_type_t ftype;
     int ftype_sid = -1;
     int is_typedef = 0;
     int fn_storage = 0;
-    int wrapped_fn_ptr_decl = 0;
+    const cc_ctype_t *alias = NULL;
     int saved_depth = p->scope_depth;
     cc_stmt_t *oldstyle_decls = NULL;
     size_t oldstyle_decl_count = 0;
@@ -10654,6 +10679,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             return -1;
         }
         fn_storage = p->last_storage;
+        alias = p->last_alias_ctype;
         if (is_typedef) {
             set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
             decl_attrs_clear(&spec_attrs);
@@ -10672,53 +10698,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         set_diag(p->diag, p->tok.line, p->tok.col, "expected function return type");
         return -1;
     }
-    if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
-        wrapped_fn_ptr_decl = 1;
-        f->ret_type = ftype;
-        if (next_tok(p) != 0) {
-            decl_attrs_clear(&spec_attrs);
-            return -1;
-        }
-        while (is_ptr_declarator_tok(p->tok.kind)) {
-            f->ret_type = ptr_of_type(f->ret_type);
-            if (f->ret_type == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                decl_attrs_clear(&spec_attrs);
-                return -1;
-            }
-            if (next_tok(p) != 0) {
-                decl_attrs_clear(&spec_attrs);
-                return -1;
-            }
-            while (is_decl_qual_at_token(p)) {
-                if (next_tok(p) != 0) {
-                    decl_attrs_clear(&spec_attrs);
-                    return -1;
-                }
-            }
-        }
-        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
-               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
-            if (skip_decl_gnu_suffix(p, NULL) != 0) {
-                decl_attrs_clear(&spec_attrs);
-                return -1;
-            }
-        }
-        if (p->tok.kind != TOK_IDENT) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "expected function name");
-            decl_attrs_clear(&spec_attrs);
-            return -1;
-        }
-        f->name = cc_strndup(p->tok.start, p->tok.len);
-        if (f->name == NULL) {
-            decl_attrs_clear(&spec_attrs);
-            return -1;
-        }
-        if (next_tok(p) != 0) {
-            decl_attrs_clear(&spec_attrs);
-            return -1;
-        }
-    } else if (parse_named_declarator(p, ftype, &f->ret_type, &f->name, "expected function name", NULL) != 0) {
+    if (parse_function_declarator(p, f, ftype, ftype_sid, alias) != 0) {
         decl_attrs_clear(&spec_attrs);
         return -1;
     }
@@ -10731,40 +10711,6 @@ static int parse_function(parser_t *p, cc_function_t *f) {
          * visible unless explicitly static.
          */
         f->storage |= CC_STORAGE_EXTERN;
-    }
-
-    if (expect(p, TOK_LPAREN, "expected '(' after function name") != 0) {
-        decl_attrs_clear(&spec_attrs);
-        return -1;
-    }
-    if (p->tok.kind != TOK_RPAREN) {
-        if (parse_params(p, f, 1) != 0) {
-            decl_attrs_clear(&spec_attrs);
-            return -1;
-        }
-    }
-    if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
-        decl_attrs_clear(&spec_attrs);
-        return -1;
-    }
-    if (parser_is_c23_or_newer() && f->param_count == 0 && !f->is_variadic && !f->has_prototype) {
-        /*
-         * In C23 mode, an empty parameter list is a prototype for a
-         * parameterless function, not an old-style declaration.
-         */
-        f->has_prototype = 1;
-    }
-    if (wrapped_fn_ptr_decl) {
-        if (expect(p, TOK_RPAREN, "expected ')' in function declarator") != 0) {
-            decl_attrs_clear(&spec_attrs);
-            return -1;
-        }
-        while (p->tok.kind == TOK_LPAREN) {
-            if (skip_balanced_parens(p) != 0) {
-                decl_attrs_clear(&spec_attrs);
-                return -1;
-            }
-        }
     }
     if (skip_decl_gnu_suffix(p, &suffix_attrs) != 0) {
         decl_attrs_clear(&spec_attrs);
@@ -10972,14 +10918,33 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     return 0;
 }
 
+/**
+ * The parameter-list hook probe_is_function_head() gives the declarator
+ * parser: skip the list and note that the name had one.
+ *
+ * @param p    the parser, at `(`
+ * @param ctx  an int set to 1
+ * @return     0, or -1 if the list is unbalanced
+ */
+static int probe_skip_params(parser_t *p, void *ctx) {
+    *(int *)ctx = 1;
+    return skip_balanced_parens(p);
+}
+
+/**
+ * Whether the declaration at the parser declares a function -- its
+ * declarator's name directly followed by a parameter list -- rather than
+ * an object.  Parses a copy of the parser, so consumes nothing.
+ *
+ * @param p  the parser, at the declaration's specifiers
+ * @return   1 if it declares a function, else 0
+ */
 static int probe_is_function_head(parser_t *p) {
     parser_t q = *p;
-    parser_t probe;
     cc_type_t ty;
     int ty_sid = -1;
     int is_typedef = 0;
-    int prefixed_fn_ptr = 0;
-    char *name = NULL;
+    declarator_t d;
     int rc = 0;
     const char *lf = p->lx.logical_file;
 
@@ -11003,72 +10968,15 @@ static int probe_is_function_head(parser_t *p) {
     if (is_typedef) {
         goto done;
     }
-    if (is_ptr_declarator_tok(q.tok.kind)) {
-        probe = q;
-        probe.diag = NULL;
-        while (is_ptr_declarator_tok(probe.tok.kind)) {
-            if (next_tok(&probe) != 0) {
-                prefixed_fn_ptr = 0;
-                break;
-            }
-            while (is_decl_qual_at_token(&probe)) {
-                if (next_tok(&probe) != 0) {
-                    prefixed_fn_ptr = 0;
-                    break;
-                }
-            }
-        }
-        if (probe.tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(&probe))) {
-            prefixed_fn_ptr = 1;
-        }
+    /* a function iff the name is directly followed by a parameter list, however deeply it is nested */
+    memset(&d, 0, sizeof(d));
+    d.name_params = probe_skip_params;
+    d.name_params_ctx = &rc;
+    if (parse_declarator_into(&q, &d, 0) != 0) {
+        rc = 0;
     }
-    if (q.tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(&q))) {
-        if (next_tok(&q) != 0) {
-            goto done;
-        }
-        while (is_ptr_declarator_tok(q.tok.kind)) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                goto done;
-            }
-            if (next_tok(&q) != 0) {
-                goto done;
-            }
-            while (is_decl_qual_at_token(&q)) {
-                if (next_tok(&q) != 0) {
-                    goto done;
-                }
-            }
-        }
-        while ((q.tok.kind == TOK_LBRACK && peek_kind(&q) == TOK_LBRACK) || tok_is_gnu_attribute_kw(&q) ||
-               tok_is_ident(&q, "__asm__") || tok_is_ident(&q, "__asm") || tok_is_ident(&q, "asm")) {
-            if (skip_decl_gnu_suffix(&q, NULL) != 0) {
-                goto done;
-            }
-        }
-        if (q.tok.kind != TOK_IDENT) {
-            goto done;
-        }
-        name = cc_strndup(q.tok.start, q.tok.len);
-        if (name == NULL) {
-            goto done;
-        }
-        if (next_tok(&q) != 0) {
-            goto done;
-        }
-        rc = (q.tok.kind == TOK_LPAREN);
-    } else {
-        if (parse_named_declarator(&q, ty, &ty, &name, "", NULL) != 0) {
-            goto done;
-        }
-        if (prefixed_fn_ptr) {
-            rc = 0;
-        } else {
-            rc = (q.tok.kind == TOK_LPAREN);
-        }
-    }
+    declarator_free(&d);
 done:
-    free(name);
     parser_free_enum_consts(&q);
     parser_free_enum_tags(&q);
     parser_free_structs(&q);

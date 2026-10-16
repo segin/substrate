@@ -3172,6 +3172,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (callee != NULL) {
             e->value_type = callee->ret_type;
             e->struct_id = callee->ret_struct_id;
+            e->ctype = callee->ret_ctype;
+            if (callee->ret_ctype != NULL) {
+                /* a returned pointer to an array: the bounds behind it, as a pointer variable has them */
+                cc_ct_legacy_t leg;
+                if (cc_ct_to_legacy(callee->ret_ctype, &leg) == 0 && leg.ndim > 0) {
+                    expr_set_array_meta_decl(e, -1, leg.ndim, leg.dims);
+                }
+            }
             if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
                 char buf[192];
                 snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");

@@ -1843,8 +1843,15 @@ static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_
 
 static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                               const cc_expr_t *e) {
+    long real_size;
+
     if (e == NULL) {
         return -1;
+    }
+    /* the real type, where sema has found it (a call's result, say), is the answer */
+    real_size = cc_ct_size(cc_ct_of_expr(e), tu);
+    if (real_size > 0) {
+        return real_size;
     }
     if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
         int idx = var_find_visible(vars, var_count, e->ident, depth);
