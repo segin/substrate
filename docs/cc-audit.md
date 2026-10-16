@@ -240,9 +240,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   wrong; since CC-40 cc rejects the attributes and `__has_attribute`
   reports them absent.  cc's own `<xmmintrin.h>` uses structs and is
   unaffected.  *Reproduced.*
-- [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
+- [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
+  Three places held a target value in a host `long`, 32 bits on i386:
+  an unsigned mask converted through `(long)` (so `0xffffffff` became
+  -1), switch case values (so `case 0xffffffffu` matched -1), and the
+  value-size clamp, `size > (long)UINT32_MAX`, which on i386 compares
+  against -1 and so clamped every size.  Now 0 of 200 random -m64
+  programs are wrong, and a 32-bit-hosted cc writes the same assembly as
+  a 64-bit-hosted one for the whole corpus at -m64 and -m32;
+  `run_crosshost.sh` builds both and checks that for `codegen/`.
 - [x] **CC-35** Each arm of `?:` shall be converted to the result's
   type.  An arm narrower than an `unsigned long long` result was moved
   into it unconverted, so on i386 its high word was whatever the stack
@@ -619,7 +627,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-71 requirements: 61 met, 10 open.
+71 requirements: 62 met, 9 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

@@ -1290,8 +1290,9 @@ static void set_value_size(cc_ssa_function_t *f, int v, long size) {
     if (size <= 0) {
         size = cc_target_pointer_size();
     }
-    if (size > (long)UINT32_MAX) {
-        size = (long)UINT32_MAX;
+    /* compared unsigned: on a 32-bit host (long)UINT32_MAX is -1, and every size would be clamped */
+    if ((unsigned long)size > UINT32_MAX) {
+        size = (long)(UINT32_MAX >> 1);
     }
     f->value_sizes[v] = (uint32_t)size;
 }
@@ -2887,7 +2888,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
 
     if (want_unsigned) {
         unsigned long long mask_u = (1ULL << bits) - 1ULL;
-        c = emit_const_i64_instr(sf, (long)mask_u);
+        c = emit_const_i64_instr(sf, (long long)mask_u); /* not (long): a 32-bit host makes 0xffffffff -1 */
         if (c < 0) {
             return -1;
         }
@@ -6432,7 +6433,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             for (bi = 0; bi < nbytes; ++bi) {
                 unsigned long long mask_u = 0xffULL << (bi * 8);
                 int shift = ((nbytes - 1) - (2 * bi)) * 8;
-                int cmask = emit_const_i64_instr(sf, (long)mask_u);
+                int cmask = emit_const_i64_instr(sf, (long long)mask_u);
                 int part;
                 cc_ssa_instr_t bin;
                 int cshift;
@@ -8353,8 +8354,8 @@ static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, cc_type_t
 
 typedef struct {
     const cc_stmt_t *stmt;
-    long value;
-    long value_hi;
+    long long value;
+    long long value_hi;
     int has_range;
     int label;
     int is_default;
@@ -11311,8 +11312,8 @@ append_return:
         size_t j2;
         int *cmp_labels = NULL;
         int *case_labels = NULL;
-        long *case_values = NULL;
-        long *case_hi_values = NULL;
+        long long *case_values = NULL;
+        long long *case_hi_values = NULL;
         int *case_has_range = NULL;
         int cond;
 
@@ -11352,8 +11353,8 @@ append_return:
         } else {
             cmp_labels = (int *)calloc(case_count, sizeof(*cmp_labels));
             case_labels = (int *)calloc(case_count, sizeof(*case_labels));
-            case_values = (long *)calloc(case_count, sizeof(*case_values));
-            case_hi_values = (long *)calloc(case_count, sizeof(*case_hi_values));
+            case_values = (long long *)calloc(case_count, sizeof(*case_values));
+            case_hi_values = (long long *)calloc(case_count, sizeof(*case_hi_values));
             case_has_range = (int *)calloc(case_count, sizeof(*case_has_range));
             if (cmp_labels == NULL || case_labels == NULL || case_values == NULL || case_hi_values == NULL ||
                 case_has_range == NULL) {

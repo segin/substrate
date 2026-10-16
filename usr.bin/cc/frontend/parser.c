@@ -3957,6 +3957,30 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
     return 0;
 }
 
+/**
+ * Evaluate a case label's integer constant expression to a long long, a
+ * width every case value fits on any host (a host long may be 32 bits).
+ * An unsigned value keeps its bits: 0xffffffffu stays 4294967295.
+ *
+ * @param p    the parser
+ * @param e    the expression
+ * @param out  receives the value
+ * @return     0, or -1 if @p e is not an integer constant expression
+ */
+static int eval_const_case_value(parser_t *p, const cc_expr_t *e, long long *out) {
+    parser_const_value_t v;
+
+    if (e == NULL || out == NULL || eval_const_expr_value(p, e, &v) != 0) {
+        return -1;
+    }
+    if (cc_type_is_unsigned_integral(v.type) || is_pointer_type(v.type)) {
+        *out = (long long)parser_const_unsigned_value(p, v.bits, v.type, v.struct_id);
+    } else {
+        *out = (long long)parser_const_signed_value(p, v.bits, v.type, v.struct_id);
+    }
+    return 0;
+}
+
 static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n, cc_expr_t **out_bound_expr) {
     cc_expr_t *bound = NULL;
     long n = 1;
@@ -10222,7 +10246,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
 
     if (p->tok.kind == TOK_KW_CASE) {
         cc_expr_t *hi_expr;
-        long hi = 0;
+        long long hi = 0;
         s->kind = CC_STMT_CASE;
         if (next_tok(p) != 0) {
             return -1;
@@ -10243,7 +10267,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
             if (hi_expr == NULL) {
                 return -1;
             }
-            if (eval_const_array_bound_expr(p, hi_expr, &hi) != 0) {
+            if (eval_const_case_value(p, hi_expr, &hi) != 0) {
                 free_expr(hi_expr);
                 set_diag(p->diag, p->tok.line, p->tok.col, "case range upper bound must be an integer constant");
                 return -1;

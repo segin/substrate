@@ -384,7 +384,7 @@ struct cc_stmt {
     cc_stmt_t *else_branch;
     cc_stmt_t *block_stmts;
     size_t block_count;
-    long case_hi;
+    long long case_hi; /* long long, as a case value is: a host long can be 32 bits */
     int case_has_range;
     int asm_is_volatile;
     int asm_is_goto;
