@@ -5440,6 +5440,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             cc_type_t out_type;
             int out_bits = 0;
             long mem_size;
+            size_t first_instr;
             cc_ssa_instr_t bin;
 
             if (e->arg_count != 3 || e->args[0] == NULL || e->args[1] == NULL || e->args[2] == NULL) {
@@ -5466,6 +5467,22 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (av < 0 || bv < 0) {
                 return -1;
             }
+            /*
+             * The exact result is computed in 64 bits on both targets: each
+             * operand widened from its own type (on i386 an int is 32 bits,
+             * and a sum of two would wrap before it is compared).
+             */
+            av = normalize_integral_value(sf, av,
+                                          cc_type_is_unsigned_integral(e->args[0]->value_type) ? CC_TYPE_ULONG_LONG
+                                                                                               : CC_TYPE_LONG_LONG,
+                                          diag);
+            bv = normalize_integral_value(sf, bv,
+                                          cc_type_is_unsigned_integral(e->args[1]->value_type) ? CC_TYPE_ULONG_LONG
+                                                                                               : CC_TYPE_LONG_LONG,
+                                          diag);
+            if (av < 0 || bv < 0) {
+                return -1;
+            }
             if (has_store) {
                 pv = cast_value(sf, pv, CC_VAL_I64, diag);
                 if (pv < 0) {
@@ -5481,6 +5498,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                 return -1;
             }
+            set_value_size(sf, bin.dst, 8);
             rv_exact = bin.dst;
             rv = rv_exact;
 
@@ -5523,13 +5541,21 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
 
+            /* the overflow check: values from here on are 64-bit (see the end) */
+            first_instr = sf->instr_count;
             if (out_bits > 0 && out_bits < 64) {
+                /* overflowed if the result, widened back from its type, is not the exact one */
+                int rv_wide = normalize_integral_value(
+                    sf, rv, cc_type_is_unsigned_integral(out_type) ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG, diag);
+                if (rv_wide < 0) {
+                    return -1;
+                }
                 memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_CMP;
                 bin.cmp_kind = CC_CMP_NE;
                 bin.dst = new_value(sf, CC_VAL_I64);
                 bin.lhs = rv_exact;
-                bin.rhs = rv;
+                bin.rhs = rv_wide;
                 if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                     return -1;
                 }
@@ -5566,7 +5592,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                         return -1;
                     }
-                    cmp_z = bin.dst;
+                    cmp_z = normalize_integral_value(sf, bin.dst, CC_TYPE_ULONG_LONG, diag);
+                    if (cmp_z < 0) {
+                        return -1;
+                    }
                     memset(&bin, 0, sizeof(bin));
                     bin.op = CC_SSA_OR;
                     bin.dst = new_value(sf, CC_VAL_I64);
@@ -5576,6 +5605,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         return -1;
                     }
                     safe_bv = bin.dst;
+                    set_value_size(sf, safe_bv, 8);
                     memset(&bin, 0, sizeof(bin));
                     bin.op = CC_SSA_DIV;
                     bin.is_unsigned = 1;
@@ -5586,6 +5616,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         return -1;
                     }
                     qv = bin.dst;
+                    set_value_size(sf, qv, 8);
                     memset(&bin, 0, sizeof(bin));
                     bin.op = CC_SSA_CMP;
                     bin.cmp_kind = CC_CMP_NE;
@@ -5675,7 +5706,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                     return -1;
                 }
-                cmp_z = bin.dst;
+                cmp_z = normalize_integral_value(sf, bin.dst, CC_TYPE_ULONG_LONG, diag);
+                if (cmp_z < 0) {
+                    return -1;
+                }
                 memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_OR;
                 bin.dst = new_value(sf, CC_VAL_I64);
@@ -5685,6 +5719,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 safe_bv = bin.dst;
+                set_value_size(sf, safe_bv, 8);
                 memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_DIV;
                 bin.dst = new_value(sf, CC_VAL_I64);
@@ -5694,6 +5729,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 qv = bin.dst;
+                set_value_size(sf, qv, 8);
                 memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_CMP;
                 bin.cmp_kind = CC_CMP_NE;
@@ -5779,6 +5815,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 ov = bin.dst;
+            }
+            {
+                /* the check's constants are compared with 64-bit values; on
+                 * i386 a 4-byte constant would compare only the low words */
+                size_t k;
+                for (k = first_instr; k < sf->instr_count; ++k) {
+                    if (sf->instrs[k].op == CC_SSA_CONST && sf->instrs[k].dst >= 0) {
+                        set_value_size(sf, sf->instrs[k].dst, 8);
+                    }
+                }
             }
             return ov;
         }
