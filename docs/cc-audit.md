@@ -212,6 +212,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   calls with a 256 KB array exhaust a 1 GiB address space and the program
   dies of SIGSEGV, where gcc's build (the array on the stack) runs.
   *Reproduced.*
+- [ ] **CC-68** `_Complex` and `_Imaginary` objects shall hold both
+  parts and support complex arithmetic.  cc carries one part, as a
+  double, in a 16-byte object; a 16-byte access is taken for a long
+  double, so a complex object read through a pointer (`*pz`) gives 0 on
+  both targets and a global one gives 0 at -m64.  Locals read and write
+  their first part since CC-23.  *Reproduced.*
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -369,7 +375,12 @@ Command numbers are those `run_lines` gives the `test` recipe of
 `tests/usr.bin/cc/Makefile` at `ad09b201a`; all fail before this audit's
 changes as well.  *Suite.*
 
-- [ ] **CC-23** `native_c99_complex_decl` shall run successfully (98).
+- [x] **CC-23** `native_c99_complex_decl` shall run successfully (98).
+  At -m64 a `double _Complex` local was loaded and stored as a whole 16
+  bytes, which the back end takes for a long double: 7.0 was stored as a
+  double and read back with `fldt`.  A complex or imaginary local is now
+  accessed as the one double cc carries; its slot keeps the full size.
+  The general case is CC-68.
 - [x] **CC-24** `native_c11_alignas_zero.c` shall compile and run
   (200, 201).  `_Alignas` in a structure member's specifiers was parsed
   and dropped, so `struct { char c; _Alignas(int) char x; }` put x at
@@ -505,7 +516,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-67 requirements: 45 met, 22 open.
+68 requirements: 46 met, 22 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
