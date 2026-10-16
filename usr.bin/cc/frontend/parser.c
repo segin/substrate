@@ -2339,6 +2339,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 long mbase_arr_dims[CC_MAX_ARRAY_DIMS];
                 int mtypedef = 0;
                 const cc_ctype_t *malias = NULL;
+                decl_attrs_t mspec_attrs;
+                long mspec_align = 0;
                 memset(mbase_arr_dims, 0, sizeof(mbase_arr_dims));
                 if (p->structs[sid].has_flexible_array) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
@@ -2380,11 +2382,16 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     continue;
                 }
+                decl_attrs_reset(&mspec_attrs);
                 if (parse_declspec(p, &mbase, &mbase_sid, &mbase_arr_len, &mbase_arr_ndim, mbase_arr_dims, 1,
-                                   "expected member declaration type", &mtypedef, NULL, NULL) != 0) {
+                                   "expected member declaration type", &mtypedef, NULL, &mspec_attrs) != 0) {
+                    decl_attrs_clear(&mspec_attrs);
                     decl_attrs_clear(&struct_attrs);
                     return -1;
                 }
+                /* `_Alignas(T) char x;`: the specifiers' alignment applies to each member they declare */
+                mspec_align = (mspec_attrs.flags & CC_ATTR_ALIGNED) != 0 ? mspec_attrs.align : 0;
+                decl_attrs_clear(&mspec_attrs);
                 if (mtypedef) {
                     decl_attrs_clear(&struct_attrs);
                     set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not allowed inside struct member list");
@@ -2460,6 +2467,12 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         free(mname);
                         decl_attrs_clear(&mdecl_attrs);
                         return -1;
+                    }
+                    if (mspec_align > 0) {
+                        mdecl_attrs.flags |= CC_ATTR_ALIGNED;
+                        if (mspec_align > mdecl_attrs.align) {
+                            mdecl_attrs.align = mspec_align;
+                        }
                     }
                     if (mname == NULL && !is_bitfield) {
                         if (mtype == CC_TYPE_VOID) {

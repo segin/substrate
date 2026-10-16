@@ -370,8 +370,13 @@ Command numbers are those `run_lines` gives the `test` recipe of
 changes as well.  *Suite.*
 
 - [ ] **CC-23** `native_c99_complex_decl` shall run successfully (98).
-- [ ] **CC-24** `native_c11_alignas_zero.c` shall compile and run
-  (200, 201).
+- [x] **CC-24** `native_c11_alignas_zero.c` shall compile and run
+  (200, 201).  `_Alignas` in a structure member's specifiers was parsed
+  and dropped, so `struct { char c; _Alignas(int) char x; }` put x at
+  offset 1 and the test's static assertion failed.  The specifiers'
+  alignment now applies to each member they declare; member offsets with
+  `_Alignas(16)`, `_Alignas(long)` and `_Alignas(0)` match gcc on both
+  targets.
 - [ ] **CC-25** `native_c99_flexible_array_global_init` shall run
   successfully (321).
 - [x] **CC-26** `native_c99_consteval_limits.c` shall compile and run
@@ -496,7 +501,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-67 requirements: 43 met, 24 open.
+67 requirements: 44 met, 23 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
