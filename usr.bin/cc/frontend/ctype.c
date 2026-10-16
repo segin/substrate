@@ -691,26 +691,6 @@ int cc_ct_to_legacy(const cc_ctype_t *t, cc_ct_legacy_t *out) {
 }
 
 /**
- * The size of a _BitInt(width) in bytes: the smallest of 1, 2, 4 and 8
- * bytes that holds it, then whole 8-byte words, as the x86 psABIs have it.
- *
- * @param width  the number of bits
- * @return       the size
- */
-static long ct_bitint_size(long width) {
-    if (width <= 8) {
-        return 1;
-    }
-    if (width <= 16) {
-        return 2;
-    }
-    if (width <= 32) {
-        return 4;
-    }
-    return (width + 63) / 64 * 8;
-}
-
-/**
  * The size of a type in bytes.
  *
  * @param t   the type
@@ -728,7 +708,7 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
         return -1;
     case CC_CT_BITINT:
     case CC_CT_UBITINT:
-        return ct_bitint_size(t->count);
+        return cc_bitint_size(t->count);
     case CC_CT_COMPLEX:
         n = cc_ct_size(t->of, tu);
         return n < 0 ? -1 : 2 * n;
@@ -762,8 +742,6 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
  * @return    the alignment, or -1 if not known
  */
 long cc_ct_align(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
-    long n;
-
     if (t == NULL) {
         return -1;
     }
@@ -772,8 +750,7 @@ long cc_ct_align(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
         return -1;
     case CC_CT_BITINT:
     case CC_CT_UBITINT:
-        n = ct_bitint_size(t->count);
-        return n < 8 ? n : 8;
+        return cc_bitint_align(t->count);
     case CC_CT_COMPLEX:
     case CC_CT_IMAGINARY:
     case CC_CT_ARRAY:

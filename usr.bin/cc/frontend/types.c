@@ -109,6 +109,49 @@ long cc_type_scalar_align(cc_type_t t) {
 }
 
 /**
+ * Size of `_BitInt(N)` on the target being compiled for.
+ *
+ * @param width  N, the width in bits
+ * @return       its size in bytes, or -1 if @p width is not positive
+ */
+long cc_bitint_size(long width) {
+    long word = cc_target_current()->pointer_size;
+
+    if (width <= 0) {
+        return -1;
+    }
+    if (width <= 8) {
+        return 1;
+    }
+    if (width <= 16) {
+        return 2;
+    }
+    if (width <= 32) {
+        return 4;
+    }
+    if (width <= 64) {
+        return 8;
+    }
+    return (width + word * 8 - 1) / (word * 8) * word;
+}
+
+/**
+ * Alignment of `_BitInt(N)` on the target being compiled for.
+ *
+ * @param width  N, the width in bits
+ * @return       its alignment in bytes, or -1 if @p width is not positive
+ */
+long cc_bitint_align(long width) {
+    long size = cc_bitint_size(width);
+    long word = cc_target_current()->pointer_size;
+
+    if (size < 0) {
+        return -1;
+    }
+    return size < word ? size : word;
+}
+
+/**
  * Whether a type is an integer type.
  *
  * @param t  the type

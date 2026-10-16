@@ -1021,10 +1021,7 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
         return parser_type_size_bytes(p, (cc_type_t)struct_id, -1);
     }
     if (t == CC_TYPE_BITINT) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return (struct_id + 7) / 8;
+        return cc_bitint_size(struct_id);
     }
     n = cc_type_scalar_size(t);
     if (n > 0) {
@@ -1060,7 +1057,10 @@ static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_i
     if (n > 0) {
         return n;
     }
-    /* `_Atomic(T)` and `_BitInt(N)`: aligned as their size, at most a word */
+    if (t == CC_TYPE_BITINT) {
+        return cc_bitint_align(struct_id);
+    }
+    /* `_Atomic(T)`: aligned as its size, at most a word */
     n = parser_type_size_bytes(p, t, struct_id);
     if (n <= 0) {
         return -1;
@@ -2985,6 +2985,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     if (seen_bitint) {
         if (bitint_width <= 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width must be positive");
+            return -1;
+        }
+        if (!seen_unsigned && bitint_width < 2) {
+            /* the sign bit needs one of its own */
+            set_diag(p->diag, p->tok.line, p->tok.col, "signed _BitInt width must be at least 2");
             return -1;
         }
         if (bitint_width > INT_MAX) {

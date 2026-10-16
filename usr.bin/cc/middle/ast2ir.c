@@ -544,10 +544,7 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
         return type_size_bytes_with_struct(tu, (cc_type_t)struct_id, -1);
     }
     if (t == CC_TYPE_BITINT) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return (struct_id + 7) / 8;
+        return cc_bitint_size(struct_id);
     }
     long n = type_size_bytes(t);
     if (n > 0) {
@@ -633,10 +630,7 @@ static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t,
         return type_size_bytes_struct(tu, (cc_type_t)struct_id, -1);
     }
     if (t == CC_TYPE_BITINT) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return (struct_id + 7) / 8;
+        return cc_bitint_size(struct_id);
     }
     long n = type_size_bytes(t);
     if (n > 0) {

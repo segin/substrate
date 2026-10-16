@@ -26,6 +26,26 @@ long cc_type_scalar_size(cc_type_t t);
 long cc_type_scalar_align(cc_type_t t);
 
 /**
+ * Size of `_BitInt(N)` (either signedness) on the target being compiled
+ * for, as the psABI lays it out: up to 64 bits, the smallest of 1, 2, 4
+ * and 8 bytes that holds it; past 64 bits, whole 8-byte words on x86-64
+ * and whole 4-byte words on i386.
+ *
+ * @param width  N, the width in bits
+ * @return       its size in bytes, or -1 if @p width is not positive
+ */
+long cc_bitint_size(long width);
+
+/**
+ * Alignment of `_BitInt(N)` on the target being compiled for: its size
+ * up to the target's word (8 bytes on x86-64, 4 on i386).
+ *
+ * @param width  N, the width in bits
+ * @return       its alignment in bytes, or -1 if @p width is not positive
+ */
+long cc_bitint_align(long width);
+
+/**
  * Whether a type is an integer type: `_Bool`, the character, short, int,
  * long and long long types of either signedness, an enumeration or
  * `_BitInt`.
