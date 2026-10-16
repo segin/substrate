@@ -418,6 +418,30 @@ static int deref_operand_is_cast(const cc_expr_t *x) {
     return x != NULL && x->kind == CC_EXPR_CAST;
 }
 
+/**
+ * Whether an initializer list for a multi-dimensional array initializes
+ * rows as wholes -- a braced sub-list, `{{1, 2}, {3, 4}}`, or a string
+ * for a row of characters, `{"ab", "cd"}` -- rather than listing every
+ * element flat, `{1, 2, 3, 4}`.
+ *
+ * @param list  the initializer list
+ * @return      1 if any element is a braced list or a string, else 0
+ */
+static int init_list_has_row_initializer(const cc_expr_t *list) {
+    size_t i;
+
+    if (list == NULL || list->kind != CC_EXPR_INIT_LIST) {
+        return 0;
+    }
+    for (i = 0; i < list->arg_count; ++i) {
+        if (list->args[i] != NULL &&
+            (list->args[i]->kind == CC_EXPR_INIT_LIST || list->args[i]->kind == CC_EXPR_STR)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
     if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
         return 0;
@@ -8753,8 +8777,13 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                 return -1;
             }
             if (only->kind == CC_EXPR_STR) {
-                return lower_store_string_to_array_ptr(tu, sf, array_type, struct_id, array_ndim, array_dims, base_ptr,
-                                                       only, diag);
+                /* `{"text"}`: the string fills the array, and is the list's one element, now consumed */
+                if (lower_store_string_to_array_ptr(tu, sf, array_type, struct_id, array_ndim, array_dims, base_ptr,
+                                                    only, diag) != 0) {
+                    return -1;
+                }
+                *cursor = 1;
+                return 0;
             }
         }
 
@@ -9940,7 +9969,24 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     size_t ii;
                     int handled_string_init = 0;
-                    if (s->expr->arg_count == 1) {
+                    if (s->array_ndim > 1 && !is_runtime_vla && init_list_has_row_initializer(s->expr)) {
+                        /*
+                         * Rows initialized whole -- `{{1, 2}, {3, 4}}`, `{"ab", "cd"}`: the
+                         * compound-literal walk takes them, brace elision and all.
+                         */
+                        size_t cur = 0;
+                        if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth, s->type,
+                                                           s->type_struct_id, s->array_ndim, s->array_dims, s->expr,
+                                                           &cur, varv, diag) != 0) {
+                            return -1;
+                        }
+                        if (cur < s->expr->arg_count) {
+                            set_diag(diag, "too many initializers for local array");
+                            return -1;
+                        }
+                        handled_string_init = 1;
+                    }
+                    if (!handled_string_init && s->expr->arg_count == 1) {
                         const cc_expr_t *item_expr = unwrap_scalar_initializer_expr(s->expr->args[0], diag);
                         if (item_expr == NULL) {
                             return -1;

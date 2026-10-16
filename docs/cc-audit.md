@@ -241,11 +241,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   (`frontend/ctype.c`) and `sizeof` of one folds to its size, so this,
   `int (*)[7]`, `char (*)[4][5]` and `void (*(*)(int))(void)` all give
   gcc's answer.  `codegen/sizeof_type_names.c`.
-- [ ] **CC-57** A local multi-dimensional array shall take a brace-nested
-  initializer: `int a[2][2] = {{1, 2}, {3, 4}};` inside a function gives
+- [x] **CC-57** A local multi-dimensional array shall take a brace-nested
+  initializer: `int a[2][2] = {{1, 2}, {3, 4}};` inside a function gave
   "initializer list cannot be used as runtime expression in lowering";
-  the flat `{1, 2, 3, 4}` works.  *Reproduced.*  (A `static` local is a
-  separate, silent failure: CC-60.)
+  the flat `{1, 2, 3, 4}` worked.  A list of strings for rows of
+  characters, `char s[2][6] = {"hello", "world"};`, compiled and filled
+  the array with garbage, and the braced `{{"abc"}, {"de"}}` was
+  rejected.  *Reproduced* (both targets).  Rows initialized whole --
+  braced or by a string -- go through the walk compound literals use,
+  which takes brace elision too, and a braced string now counts as its
+  list's one element.  `codegen/local_array_init.c` checks nine arrays
+  against gcc.  (A `static` local was a separate failure: CC-60.)
 - [x] **CC-58** sizeof shall give the size of an array of pointers to
   arrays: for a local `int (*rows[2])[4]`, `sizeof rows` was 64 on x86-64
   (gcc: 16) and 32 on i386 (gcc: 8) -- the legacy type encoding sizes it
@@ -471,7 +477,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-65 requirements: 39 met, 26 open.
+65 requirements: 40 met, 25 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
