@@ -133,7 +133,7 @@ jobs:
   cc-codegen:
     name: cc code generation against gcc
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -156,3 +156,8 @@ jobs:
 
       - name: cc compiles itself (stage 2 passes the checks, stage 3 matches it)
         run: sh tests/usr.bin/cc/run_selfhost.sh
+
+      # Every program, negative case and script in the suite, run by the
+      # cc built above; any failing command fails the job.
+      - name: The whole cc test suite
+        run: make -C tests/usr.bin/cc

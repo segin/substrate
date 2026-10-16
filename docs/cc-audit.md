@@ -154,8 +154,11 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   the sources; CI built cc and never ran what it compiled.  The suite
   is restored (`bc68a0359`), the codegen and random runners added
   (`ad09b201a`, `9ce14449a`) and run by CI (`8999221a4`).
-- [ ] **CC-12** CI shall run the whole of `make -C tests/usr.bin/cc`.
-  It cannot until the failures in area 6 are gone.
+- [x] **CC-12** CI shall run the whole of `make -C tests/usr.bin/cc`.
+  It cannot until the failures in area 6 are gone.  They are: all 855
+  commands pass, and `make -C tests/usr.bin/cc` passes locally (about 4
+  minutes).  The `cc-codegen` job of `substrate-toolchain.yml` now runs
+  it after the self-host check, with the cc it built.
 
 ## 4. ABI and other code generation
 
@@ -566,7 +569,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 53 met, 17 open.
+70 requirements: 54 met, 16 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
