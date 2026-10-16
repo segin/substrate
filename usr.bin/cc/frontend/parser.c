@@ -6250,7 +6250,9 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->label_name);
     free(s->attr_section);
     free(s->attr_alias);
-    free_expr(s->array_bound_expr);
+    for (i = 0; i < CC_MAX_ARRAY_DIMS; ++i) {
+        free_expr(s->array_bound_exprs[i]);
+    }
     free_expr(s->expr);
     free(s->asm_template);
     for (i = 0; i < s->asm_output_count; ++i) {
@@ -7826,6 +7828,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         return 0;
     }
     *dst = *src;
+    memset(dst->array_bound_exprs, 0, sizeof(dst->array_bound_exprs));
     dst->decl_name = NULL;
     dst->label_name = NULL;
     dst->attr_section = NULL;
@@ -7882,11 +7885,13 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
             return -1;
         }
     }
-    if (src->array_bound_expr != NULL) {
-        dst->array_bound_expr = clone_expr(src->array_bound_expr);
-        if (dst->array_bound_expr == NULL) {
-            free_stmt(dst);
-            return -1;
+    for (i = 0; i < CC_MAX_ARRAY_DIMS; ++i) {
+        if (src->array_bound_exprs[i] != NULL) {
+            dst->array_bound_exprs[i] = clone_expr(src->array_bound_exprs[i]);
+            if (dst->array_bound_exprs[i] == NULL) {
+                free_stmt(dst);
+                return -1;
+            }
         }
     }
     if (src->asm_template != NULL) {
@@ -9280,7 +9285,8 @@ typedef struct {
     long array_len;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
-    cc_expr_t *vla_bound;          /**< the bound of a one-dimensional VLA (owned), or NULL */
+    /** a variable-length array's bounds (owned), outermost first; NULL where a bound is a constant */
+    cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS];
     int saw_restrict;              /**< a pointer level is restrict-qualified */
 } named_decl_t;
 
@@ -9304,7 +9310,7 @@ typedef struct {
  * @param base_alias the type of the typedef name the specifiers were, or
  *                   NULL (see declspec_ctype())
  * @param out        receives the declaration; free its name and
- *                   vla_bound when done with them
+ *                   vla_bounds when done with them
  * @return           0, or -1 on error (diagnosed)
  */
 static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
@@ -9348,10 +9354,23 @@ static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
         if (d.ops[i].kind == DECL_OP_POINTER && (d.ops[i].quals & CC_CQ_RESTRICT) != 0) {
             out->saw_restrict = 1;
         }
-        if (d.ops[i].kind == DECL_OP_ARRAY && d.ops[i].bound != NULL && leg.ndim == 1 && leg.dims[0] == 0 &&
-            out->vla_bound == NULL) {
-            out->vla_bound = d.ops[i].bound;
-            d.ops[i].bound = NULL;
+    }
+    /*
+     * The ops apply from the base outward, so the object's own dimensions,
+     * outermost first, are the array ops at the end of the list, last first:
+     * in `int a[n][m]` the ops are [m] then [n].  An array op with a
+     * pointer after it is the shape of what a pointer points to, not one
+     * of the object's dimensions.
+     */
+    for (k = 0; k < (unsigned)d.count && k < CC_MAX_ARRAY_DIMS && (int)k < leg.ndim; ++k) {
+        decl_op_t *op = &d.ops[d.count - 1 - k];
+
+        if (op->kind != DECL_OP_ARRAY) {
+            break;
+        }
+        if (op->bound != NULL && leg.dims[k] == 0) {
+            out->vla_bounds[k] = op->bound;
+            op->bound = NULL;
         }
     }
     out->name = d.name;
@@ -9541,7 +9560,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             s.array_len = nd.array_len;
             s.array_ndim = nd.array_ndim;
             memcpy(s.array_dims, nd.array_dims, sizeof(s.array_dims));
-            s.array_bound_expr = nd.vla_bound;
+            memcpy(s.array_bound_exprs, nd.vla_bounds, sizeof(s.array_bound_exprs));
             if ((base_saw_restrict || nd.saw_restrict) && !is_pointer_type(s.type)) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
                 free_stmt(&s);

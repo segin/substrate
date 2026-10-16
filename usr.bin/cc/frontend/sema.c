@@ -4581,11 +4581,16 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
-            if (s->array_bound_expr != NULL) {
-                if (check_expr(tu, s->array_bound_expr, *vars, *var_count, depth, diag) != 0) {
+            for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
+                cc_expr_t *bound = s->array_bound_exprs[b];
+
+                if (bound == NULL) {
+                    continue;
+                }
+                if (check_expr(tu, bound, *vars, *var_count, depth, diag) != 0) {
                     return -1;
                 }
-                if (!cc_type_is_integral(s->array_bound_expr->value_type)) {
+                if (!cc_type_is_integral(bound->value_type)) {
                     set_diag(diag, "variable-length array bound must be an integer expression");
                     return -1;
                 }

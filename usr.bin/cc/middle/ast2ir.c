@@ -31,6 +31,9 @@ typedef struct {
     char *static_sym;
     int depth;
     int vla_bytes; /**< a variable-length array's size in bytes, as the value computed for its allocation; else -1 */
+    /** a variable-length array's strides: the size in bytes of one element of each dimension, outermost
+     *  first, as values computed at its declaration; -1 past its rank, and every entry -1 if not a VLA */
+    int vla_strides[CC_MAX_ARRAY_DIMS];
 } var_entry_t;
 
 typedef struct {
@@ -1381,6 +1384,64 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
     return -1;
 }
 
+/**
+ * Whether an expression is a variable-length array variable or that array
+ * with subscripts applied -- `a`, `a[i]`, `a[i] + 1`, `*a` -- and if so
+ * which, and how many subscripts deep.  Subscripts reach lowering as
+ * `*(p + i)`, so each dereference is one level and pointer arithmetic
+ * keeps the level of its pointer operand.
+ *
+ * At level L the expression is an element of dimension L (the whole array
+ * at 0): its size is the stride of dimension L - 1 (the array's size at 0),
+ * and as a pointer it steps by the stride of dimension L.
+ *
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the block depth
+ * @param e          the expression
+ * @param level      receives the number of subscripts
+ * @return           the array's index in @p vars, or -1 if @p e is not one
+ */
+static int vla_subscript_level(var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, int *level) {
+    int idx;
+
+    if (e == NULL || vars == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_IDENT:
+        if (e->ident == NULL) {
+            return -1;
+        }
+        idx = var_find_visible(vars, var_count, e->ident, depth);
+        if (idx < 0 || vars[idx].vla_strides[0] < 0) {
+            return -1;
+        }
+        *level = 0;
+        return idx;
+    case CC_EXPR_DEREF:
+        idx = vla_subscript_level(vars, var_count, depth, e->lhs, level);
+        if (idx < 0 || *level + 1 > vars[idx].array_ndim) {
+            return -1;
+        }
+        ++*level;
+        return idx;
+    case CC_EXPR_BIN:
+        if (e->op != CC_BIN_ADD && e->op != CC_BIN_SUB) {
+            return -1;
+        }
+        if (e->lhs != NULL && is_pointer_type(e->lhs->value_type)) {
+            return vla_subscript_level(vars, var_count, depth, e->lhs, level);
+        }
+        if (e->op == CC_BIN_ADD && e->rhs != NULL && is_pointer_type(e->rhs->value_type)) {
+            return vla_subscript_level(vars, var_count, depth, e->rhs, level);
+        }
+        return -1;
+    default:
+        return -1;
+    }
+}
+
 static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
                       long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int value, int depth,
                       int is_static_storage, int is_parameter, const char *static_sym) {
@@ -1423,6 +1484,9 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].static_sym = sym_dup;
     (*vars)[*var_count].depth = depth;
     (*vars)[*var_count].vla_bytes = -1;
+    for (int k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
+        (*vars)[*var_count].vla_strides[k] = -1;
+    }
     (*var_count)++;
     return 0;
 }
@@ -2539,6 +2603,24 @@ static int emit_dynalloc_instr(cc_ssa_function_t *sf, int bytes_v, int reuse, cc
     return in.dst;
 }
 
+/**
+ * Whether a declaration is of a variable-length array: one of its bounds
+ * is not a constant.
+ *
+ * @param s  the declaration
+ * @return   1 or 0
+ */
+static int stmt_is_vla_decl(const cc_stmt_t *s) {
+    int k;
+
+    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
+        if (s->array_bound_exprs[k] != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
     if (s == NULL || s->kind != CC_STMT_DECL) {
         return 0;
@@ -2549,7 +2631,7 @@ static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
     if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
         return 1;
     }
-    if (s->array_bound_expr != NULL) {
+    if (stmt_is_vla_decl(s)) {
         return 0;
     }
     return is_array_object_decl(s->type, s->array_len, s->array_ndim);
@@ -4475,6 +4557,28 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             idxv = cast_value(sf, idxv, CC_VAL_I64, diag);
             if (ptrv < 0 || idxv < 0) {
                 return -1;
+            }
+
+            {
+                /* into a variable-length array: the step is a stride computed at its declaration */
+                int level;
+                int vidx = vla_subscript_level(vars, var_count, depth, ptr_expr, &level);
+
+                if (vidx >= 0 && level < vars[vidx].array_ndim) {
+                    idxv = emit_i64_binop_instr(sf, CC_SSA_MUL, idxv, vars[vidx].vla_strides[level], 0, diag);
+                    if (idxv < 0) {
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = ptrv;
+                    in.rhs = idxv;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        return -1;
+                    }
+                    return in.dst;
+                }
             }
 
             elem_size = expr_real_step_size_bytes(tu, ptr_expr);
@@ -7649,11 +7753,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_SIZEOF: {
         long n;
-        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
-            /* a variable-length array: its size is the one computed for its allocation */
-            int vidx = var_find_visible(vars, var_count, e->lhs->ident, depth);
-            if (vidx >= 0 && vars[vidx].vla_bytes >= 0) {
-                return cast_value(sf, vars[vidx].vla_bytes, type_to_val(e->value_type), diag);
+        {
+            /* a variable-length array, or an element of one: its size was computed at the declaration */
+            int level;
+            int vidx = vla_subscript_level(vars, var_count, depth, e->lhs, &level);
+
+            if (vidx >= 0) {
+                int size_v = level == 0 ? vars[vidx].vla_bytes : vars[vidx].vla_strides[level - 1];
+
+                return cast_value(sf, size_v, type_to_val(e->value_type), diag);
             }
         }
         if (e->lhs != NULL) {
@@ -9443,6 +9551,80 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
     return 0;
 }
 
+/**
+ * Compute a variable-length array's size and strides at its declaration.
+ *
+ * Each bound is evaluated, outermost first, and each constant bound taken
+ * from the declaration; then, from the innermost dimension outward, the
+ * stride of dimension k (the size of one of its elements) is the element
+ * size times the bounds inside it.  The strides are what indexing and
+ * sizeof use for the array (see vla_subscript_level()).
+ *
+ * @param tu         the translation unit
+ * @param sf         the function
+ * @param ctx        the lowering context
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the block depth
+ * @param s          the declaration
+ * @param strides    receives a value per dimension, -1 past the rank
+ * @param out_bytes  receives the size in bytes, a value
+ * @param diag       receives an error
+ * @return           0, or -1 on error
+ */
+static int lower_vla_layout(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                            var_entry_t *vars, size_t var_count, int depth, const cc_stmt_t *s,
+                            int strides[CC_MAX_ARRAY_DIMS], int *out_bytes, cc_diag_t *diag) {
+    int dims[CC_MAX_ARRAY_DIMS];
+    int ndim = s->array_ndim;
+    long elem_size;
+    int k;
+
+    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
+        strides[k] = -1;
+    }
+    if (ndim <= 0 || ndim > CC_MAX_ARRAY_DIMS) {
+        set_diag(diag, "unsupported variable-length array rank in lowering");
+        return -1;
+    }
+    elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, ndim);
+    if (elem_size <= 0) {
+        elem_size = type_size_bytes_with_struct(tu, ptr_base_type(s->type), s->type_struct_id);
+    }
+    if (elem_size <= 0) {
+        set_diag(diag, "unsupported variable-length array element type in lowering");
+        return -1;
+    }
+    for (k = 0; k < ndim; ++k) {
+        if (s->array_bound_exprs[k] != NULL) {
+            dims[k] = lower_expr(tu, sf, ctx, vars, var_count, depth, s->array_bound_exprs[k], diag);
+            if (dims[k] >= 0) {
+                dims[k] = cast_value(sf, dims[k], CC_VAL_I64, diag);
+            }
+        } else if (s->array_dims[k] > 0) {
+            dims[k] = emit_const_i64_instr(sf, s->array_dims[k]);
+        } else {
+            set_diag(diag, "variable-length array dimension has no bound");
+            return -1;
+        }
+        if (dims[k] < 0) {
+            return -1;
+        }
+    }
+    strides[ndim - 1] = emit_const_i64_instr(sf, elem_size);
+    if (strides[ndim - 1] < 0) {
+        return -1;
+    }
+    for (k = ndim - 2; k >= 0; --k) {
+        strides[k] = emit_i64_binop_instr(sf, CC_SSA_MUL, strides[k + 1], dims[k + 1], 1, diag);
+        if (strides[k] < 0) {
+            return -1;
+        }
+    }
+    *out_bytes = emit_i64_binop_instr(sf, CC_SSA_MUL, strides[0], dims[0], 1, diag);
+    return *out_bytes < 0 ? -1 : 0;
+}
+
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret,
@@ -10071,51 +10253,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             int prealloc = lower_find_hoisted_alloc(ctx, s);
             int is_runtime_vla = 0;
             int vla_bytes_v = -1;
+            int vla_strides[CC_MAX_ARRAY_DIMS];
 
             if (arr_elems <= 0) {
                 arr_elems = 1;
             }
-            if (total_size <= 0) {
-                if (s->array_bound_expr != NULL && s->array_ndim == 1) {
-                    int bound_v;
-                    int elem_v;
-                    int bytes_v;
-
+            if (total_size <= 0 || stmt_is_vla_decl(s)) {
+                if (stmt_is_vla_decl(s)) {
+                    if (lower_vla_layout(tu, sf, ctx, *vars, *var_count, depth, s, vla_strides, &vla_bytes_v, diag) !=
+                        0) {
+                        return -1;
+                    }
                     elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
-                    if (elem_size <= 0) {
-                        elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
-                    }
-                    if (elem_size <= 0) {
-                        set_diag(diag, "unsupported variable-length array element type in lowering");
-                        return -1;
-                    }
-                    bound_v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->array_bound_expr, diag);
-                    if (bound_v < 0) {
-                        return -1;
-                    }
-                    bound_v = cast_value(sf, bound_v, CC_VAL_I64, diag);
-                    if (bound_v < 0) {
-                        return -1;
-                    }
-                    bytes_v = bound_v;
-                    if (elem_size != 1) {
-                        elem_v = emit_const_i64_instr(sf, elem_size);
-                        if (elem_v < 0) {
-                            return -1;
-                        }
-                        memset(&st_in, 0, sizeof(st_in));
-                        st_in.op = CC_SSA_MUL;
-                        st_in.dst = new_value(sf, CC_VAL_I64);
-                        st_in.lhs = bound_v;
-                        st_in.rhs = elem_v;
-                        if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
-                            set_diag(diag, "out of memory lowering variable-length array size");
-                            return -1;
-                        }
-                        bytes_v = st_in.dst;
-                    }
-                    vla_bytes_v = bytes_v;
-                    varv = emit_dynalloc_instr(sf, bytes_v, 1, diag);
+                    varv = emit_dynalloc_instr(sf, vla_bytes_v, 1, diag);
                     if (varv < 0) {
                         return -1;
                     }
@@ -10387,6 +10537,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             (*vars)[*var_count - 1].vla_bytes = vla_bytes_v;
+            if (is_runtime_vla) {
+                memcpy((*vars)[*var_count - 1].vla_strides, vla_strides, sizeof(vla_strides));
+            }
             if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
                 return -1;
             }

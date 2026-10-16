@@ -205,10 +205,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   allocation, and sizeof of a type name with a run-time bound becomes
   `(size_t)n * sizeof (element)`, evaluated where the sizeof is.
   `codegen/vla_sizeof.c` checks eleven sizes against gcc.
-- [ ] **CC-66** A variable-length array shall have any number of
+- [x] **CC-66** A variable-length array shall have any number of
   dimensions.  Only one is lowered: `double b[n][3]`, `char c[n][m]` and
   `long d[2][m]` are all rejected ("invalid local array size in
-  lowering").  *Reproduced* (both targets).
+  lowering").  *Reproduced* (both targets).  The parser now keeps every
+  dimension's bound, not only a lone one, and the declaration computes a
+  stride per dimension (the size of one of its elements) along with the
+  total; subscripts, pointer steps and `sizeof` on the array or on any
+  element of it use those strides.  `codegen/vla_multidim.c` covers the
+  three shapes above, three dimensions, rows passed as pointers,
+  addresses of elements, structure elements, an array of pointers and a
+  VLA in a loop, matching gcc at both widths.
 - [x] **CC-67** A variable-length array's storage shall be released when
   its block is left.  It is taken with `malloc` (`kmalloc` freestanding)
   and never freed, so a function with `int a[n]` leaks n ints a call: 20000
@@ -246,6 +253,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   wrong; since CC-40 cc rejects the attributes and `__has_attribute`
   reports them absent.  cc's own `<xmmintrin.h>` uses structs and is
   unaffected.  *Reproduced.*
+- [ ] **CC-72** A pointer to a variable-length array, and a parameter
+  declared as one (`int a[n][m]`, adjusted to `int (*a)[m]`), shall step
+  by the array's run-time size.  cc steps by a constant computed with
+  each run-time bound taken as 1, silently: `int (*p)[m] = a; p[1][2]`
+  reads the wrong element, and `int get(int n, int m, int a[n][m])`
+  returns `a[i][j]` from the wrong row (5 for gcc's 13).
+  `sizeof(int[n][m])` is rejected ("sizeof unsupported for this type").
+  *Reproduced* (both targets; the parameter case predates CC-66).
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -633,7 +648,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-71 requirements: 63 met, 8 open.
+72 requirements: 64 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
