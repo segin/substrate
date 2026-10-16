@@ -5702,6 +5702,23 @@ fail_decl:
                 goto fail_func;
             }
         }
+        /* a parameter that points to a variable-length array: its bounds name earlier parameters */
+        for (j = 0; j < f->param_count; ++j) {
+            for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
+                cc_expr_t *bound = f->params[j].vla_bounds[b];
+
+                if (bound == NULL) {
+                    continue;
+                }
+                if (check_expr(tu, bound, vars, var_count, 0, diag) != 0) {
+                    goto fail_func;
+                }
+                if (!cc_type_is_integral(bound->value_type)) {
+                    set_diag(diag, "variable-length array bound must be an integer expression");
+                    goto fail_func;
+                }
+            }
+        }
         for (j = 0; j < f->stmt_count; ++j) {
             if (collect_labels_gotos_stmt(&f->stmts[j], &labels, &gotos, diag) != 0) {
                 goto fail_func;

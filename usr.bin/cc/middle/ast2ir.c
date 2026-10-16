@@ -32,8 +32,11 @@ typedef struct {
     int depth;
     int vla_bytes; /**< a variable-length array's size in bytes, as the value computed for its allocation; else -1 */
     /** a variable-length array's strides: the size in bytes of one element of each dimension, outermost
-     *  first, as values computed at its declaration; -1 past its rank, and every entry -1 if not a VLA */
+     *  first, as values computed at its declaration; -1 past its rank, and every entry -1 if not a VLA.
+     *  For a pointer to one, the first is the size of the array it points to, the rest the array's. */
     int vla_strides[CC_MAX_ARRAY_DIMS];
+    int vla_rank;       /**< the number of strides; 0 if neither a VLA nor a pointer to one */
+    int vla_is_pointer; /**< a pointer to a VLA, whose own size is a pointer's */
 } var_entry_t;
 
 typedef struct {
@@ -1385,15 +1388,15 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
 }
 
 /**
- * Whether an expression is a variable-length array variable or that array
- * with subscripts applied -- `a`, `a[i]`, `a[i] + 1`, `*a` -- and if so
- * which, and how many subscripts deep.  Subscripts reach lowering as
- * `*(p + i)`, so each dereference is one level and pointer arithmetic
- * keeps the level of its pointer operand.
+ * Whether an expression is a variable-length array variable, or a pointer
+ * to one, with any subscripts applied -- `a`, `a[i]`, `a[i] + 1`, `*a` --
+ * and if so which, and how many subscripts deep.  Subscripts reach
+ * lowering as `*(p + i)`, so each dereference is one level and pointer
+ * arithmetic keeps the level of its pointer operand.
  *
- * At level L the expression is an element of dimension L (the whole array
- * at 0): its size is the stride of dimension L - 1 (the array's size at 0),
- * and as a pointer it steps by the stride of dimension L.
+ * At level L the expression steps, as a pointer, by stride L, and for
+ * L >= 1 its size is stride L - 1.  At level 0 an array's size is the
+ * array's (vla_bytes) and a pointer's a pointer's.
  *
  * @param vars       the variables in scope
  * @param var_count  their number
@@ -1414,14 +1417,14 @@ static int vla_subscript_level(var_entry_t *vars, size_t var_count, int depth, c
             return -1;
         }
         idx = var_find_visible(vars, var_count, e->ident, depth);
-        if (idx < 0 || vars[idx].vla_strides[0] < 0) {
+        if (idx < 0 || vars[idx].vla_rank <= 0) {
             return -1;
         }
         *level = 0;
         return idx;
     case CC_EXPR_DEREF:
         idx = vla_subscript_level(vars, var_count, depth, e->lhs, level);
-        if (idx < 0 || *level + 1 > vars[idx].array_ndim) {
+        if (idx < 0 || *level + 1 > vars[idx].vla_rank) {
             return -1;
         }
         ++*level;
@@ -1487,6 +1490,8 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     for (int k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
         (*vars)[*var_count].vla_strides[k] = -1;
     }
+    (*vars)[*var_count].vla_rank = 0;
+    (*vars)[*var_count].vla_is_pointer = 0;
     (*var_count)++;
     return 0;
 }
@@ -4498,6 +4503,23 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             diffv = in.dst;
 
+            {
+                /* into a variable-length array: the element size is a stride computed at its declaration */
+                int level;
+                int vidx = vla_subscript_level(vars, var_count, depth, e->lhs, &level);
+
+                if (vidx < 0) {
+                    vidx = vla_subscript_level(vars, var_count, depth, e->rhs, &level);
+                }
+                if (vidx >= 0 && level < vars[vidx].vla_rank) {
+                    diffv = emit_i64_binop_instr(sf, CC_SSA_DIV, diffv, vars[vidx].vla_strides[level], 0, diag);
+                    if (diffv < 0) {
+                        return -1;
+                    }
+                    return cast_value(sf, diffv, type_to_val(e->value_type), diag);
+                }
+            }
+
             if (elem_size != 1) {
                 int csz = emit_const_i64_instr(sf, elem_size);
                 if (csz < 0) {
@@ -4564,7 +4586,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 int level;
                 int vidx = vla_subscript_level(vars, var_count, depth, ptr_expr, &level);
 
-                if (vidx >= 0 && level < vars[vidx].array_ndim) {
+                if (vidx >= 0 && level < vars[vidx].vla_rank) {
                     idxv = emit_i64_binop_instr(sf, CC_SSA_MUL, idxv, vars[vidx].vla_strides[level], 0, diag);
                     if (idxv < 0) {
                         return -1;
@@ -7303,7 +7325,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                 }
 
-                one = emit_const_i64_instr(sf, step);
+                if (vars[idx].vla_is_pointer) {
+                    /* a pointer to a variable-length array steps by the array's run-time size */
+                    one = vars[idx].vla_strides[0];
+                } else {
+                    one = emit_const_i64_instr(sf, step);
+                }
                 if (one < 0) {
                     return -1;
                 }
@@ -7758,7 +7785,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int level;
             int vidx = vla_subscript_level(vars, var_count, depth, e->lhs, &level);
 
-            if (vidx >= 0) {
+            if (vidx >= 0 && !(level == 0 && vars[vidx].vla_is_pointer)) {
                 int size_v = level == 0 ? vars[vidx].vla_bytes : vars[vidx].vla_strides[level - 1];
 
                 return cast_value(sf, size_v, type_to_val(e->value_type), diag);
@@ -9551,14 +9578,27 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
     return 0;
 }
 
+/** The shape of a variable-length array, or of the one a pointer points to. */
+typedef struct {
+    cc_type_t type;                          /**< the declared type, legacy encoding */
+    int struct_id;                           /**< its struct id */
+    int ndim;                                /**< the array's rank */
+    const long *dims;                        /**< its constant bounds, outermost first; 0 where run-time */
+    cc_expr_t *const *bounds;                /**< its run-time bounds; NULL where constant */
+    int is_pointer;                          /**< the declaration is a pointer to the array */
+} vla_shape_t;
+
 /**
- * Compute a variable-length array's size and strides at its declaration.
+ * Compute a variable-length array's size and strides where it is declared
+ * (a pointer parameter's, at function entry).
  *
  * Each bound is evaluated, outermost first, and each constant bound taken
  * from the declaration; then, from the innermost dimension outward, the
  * stride of dimension k (the size of one of its elements) is the element
- * size times the bounds inside it.  The strides are what indexing and
- * sizeof use for the array (see vla_subscript_level()).
+ * size times the bounds inside it.  For a pointer to the array the strides
+ * are the array's size followed by the array's strides, a pointer being
+ * one level further out.  The strides are what indexing and sizeof use
+ * (see vla_subscript_level()).
  *
  * @param tu         the translation unit
  * @param sf         the function
@@ -9566,43 +9606,43 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
  * @param vars       the variables in scope
  * @param var_count  their number
  * @param depth      the block depth
- * @param s          the declaration
- * @param strides    receives a value per dimension, -1 past the rank
- * @param out_bytes  receives the size in bytes, a value
+ * @param shape      the array
+ * @param strides    receives a value per level, -1 past the rank
+ * @param out_rank   receives the number of strides
+ * @param out_bytes  receives the array's size in bytes, a value
  * @param diag       receives an error
  * @return           0, or -1 on error
  */
 static int lower_vla_layout(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
-                            var_entry_t *vars, size_t var_count, int depth, const cc_stmt_t *s,
-                            int strides[CC_MAX_ARRAY_DIMS], int *out_bytes, cc_diag_t *diag) {
+                            var_entry_t *vars, size_t var_count, int depth, const vla_shape_t *shape,
+                            int strides[CC_MAX_ARRAY_DIMS], int *out_rank, int *out_bytes, cc_diag_t *diag) {
     int dims[CC_MAX_ARRAY_DIMS];
-    int ndim = s->array_ndim;
+    int own[CC_MAX_ARRAY_DIMS];
+    int ndim = shape->ndim;
+    int shift = shape->is_pointer ? 1 : 0;
     long elem_size;
     int k;
 
     for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
         strides[k] = -1;
     }
-    if (ndim <= 0 || ndim > CC_MAX_ARRAY_DIMS) {
+    if (ndim <= 0 || ndim + shift > CC_MAX_ARRAY_DIMS) {
         set_diag(diag, "unsupported variable-length array rank in lowering");
         return -1;
     }
-    elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, ndim);
-    if (elem_size <= 0) {
-        elem_size = type_size_bytes_with_struct(tu, ptr_base_type(s->type), s->type_struct_id);
-    }
+    elem_size = array_decl_scalar_size_bytes(tu, shape->type, shape->struct_id, ndim + shift);
     if (elem_size <= 0) {
         set_diag(diag, "unsupported variable-length array element type in lowering");
         return -1;
     }
     for (k = 0; k < ndim; ++k) {
-        if (s->array_bound_exprs[k] != NULL) {
-            dims[k] = lower_expr(tu, sf, ctx, vars, var_count, depth, s->array_bound_exprs[k], diag);
+        if (shape->bounds[k] != NULL) {
+            dims[k] = lower_expr(tu, sf, ctx, vars, var_count, depth, shape->bounds[k], diag);
             if (dims[k] >= 0) {
                 dims[k] = cast_value(sf, dims[k], CC_VAL_I64, diag);
             }
-        } else if (s->array_dims[k] > 0) {
-            dims[k] = emit_const_i64_instr(sf, s->array_dims[k]);
+        } else if (shape->dims[k] > 0) {
+            dims[k] = emit_const_i64_instr(sf, shape->dims[k]);
         } else {
             set_diag(diag, "variable-length array dimension has no bound");
             return -1;
@@ -9611,18 +9651,56 @@ static int lower_vla_layout(const cc_translation_unit_t *tu, cc_ssa_function_t *
             return -1;
         }
     }
-    strides[ndim - 1] = emit_const_i64_instr(sf, elem_size);
-    if (strides[ndim - 1] < 0) {
+    own[ndim - 1] = emit_const_i64_instr(sf, elem_size);
+    if (own[ndim - 1] < 0) {
         return -1;
     }
     for (k = ndim - 2; k >= 0; --k) {
-        strides[k] = emit_i64_binop_instr(sf, CC_SSA_MUL, strides[k + 1], dims[k + 1], 1, diag);
-        if (strides[k] < 0) {
+        own[k] = emit_i64_binop_instr(sf, CC_SSA_MUL, own[k + 1], dims[k + 1], 1, diag);
+        if (own[k] < 0) {
             return -1;
         }
     }
-    *out_bytes = emit_i64_binop_instr(sf, CC_SSA_MUL, strides[0], dims[0], 1, diag);
-    return *out_bytes < 0 ? -1 : 0;
+    *out_bytes = emit_i64_binop_instr(sf, CC_SSA_MUL, own[0], dims[0], 1, diag);
+    if (*out_bytes < 0) {
+        return -1;
+    }
+    if (shape->is_pointer) {
+        strides[0] = *out_bytes;
+    }
+    for (k = 0; k < ndim; ++k) {
+        strides[k + shift] = own[k];
+    }
+    *out_rank = ndim + shift;
+    return 0;
+}
+
+/**
+ * Give a variable its variable-length array shape: compute the strides of
+ * @p shape and record them, the rank and the size in the variable's entry.
+ *
+ * @param v      the variable
+ * @param shape  the array it is, or points to
+ * @return       0, or -1 on error
+ * (the other parameters are lower_vla_layout()'s)
+ */
+static int lower_vla_attach(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                            var_entry_t *vars, size_t var_count, int depth, size_t v, const vla_shape_t *shape,
+                            cc_diag_t *diag) {
+    int strides[CC_MAX_ARRAY_DIMS];
+    int rank;
+    int bytes;
+
+    if (lower_vla_layout(tu, sf, ctx, vars, var_count, depth, shape, strides, &rank, &bytes, diag) != 0) {
+        return -1;
+    }
+    memcpy(vars[v].vla_strides, strides, sizeof(strides));
+    vars[v].vla_rank = rank;
+    vars[v].vla_is_pointer = shape->is_pointer;
+    if (!shape->is_pointer) {
+        vars[v].vla_bytes = bytes;
+    }
+    return 0;
 }
 
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
@@ -10254,14 +10332,18 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             int is_runtime_vla = 0;
             int vla_bytes_v = -1;
             int vla_strides[CC_MAX_ARRAY_DIMS];
+            int vla_rank = 0;
 
             if (arr_elems <= 0) {
                 arr_elems = 1;
             }
             if (total_size <= 0 || stmt_is_vla_decl(s)) {
                 if (stmt_is_vla_decl(s)) {
-                    if (lower_vla_layout(tu, sf, ctx, *vars, *var_count, depth, s, vla_strides, &vla_bytes_v, diag) !=
-                        0) {
+                    vla_shape_t shape = {s->type, s->type_struct_id, s->array_ndim, s->array_dims, s->array_bound_exprs,
+                                         0};
+
+                    if (lower_vla_layout(tu, sf, ctx, *vars, *var_count, depth, &shape, vla_strides, &vla_rank,
+                                         &vla_bytes_v, diag) != 0) {
                         return -1;
                     }
                     elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
@@ -10539,6 +10621,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             (*vars)[*var_count - 1].vla_bytes = vla_bytes_v;
             if (is_runtime_vla) {
                 memcpy((*vars)[*var_count - 1].vla_strides, vla_strides, sizeof(vla_strides));
+                (*vars)[*var_count - 1].vla_rank = vla_rank;
             }
             if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
                 return -1;
@@ -10557,6 +10640,14 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                        NULL) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
+        }
+        if (stmt_is_vla_decl(s) && s->array_len == -1) {
+            /* a pointer to a variable-length array (array_len -1): it steps by the array's run-time size */
+            vla_shape_t shape = {s->type, s->type_struct_id, s->array_ndim, s->array_dims, s->array_bound_exprs, 1};
+
+            if (lower_vla_attach(tu, sf, ctx, *vars, *var_count, depth, *var_count - 1, &shape, diag) != 0) {
+                return -1;
+            }
         }
         if (s->expr != NULL) {
             v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
@@ -15122,6 +15213,28 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
             if (ensure_local_var_addressable(tu, sf, &vars[var_count - 1], diag) < 0) {
+                cc_ssa_module_free(out);
+                return -1;
+            }
+        }
+        /* a parameter that points to a variable-length array: its strides, from the parameters before it */
+        for (j = 0; j < af->param_count; ++j) {
+            const cc_param_t *pa = &af->params[j];
+            vla_shape_t shape = {pa->type, pa->type_struct_id, pa->array_ndim, pa->array_dims, pa->vla_bounds, 1};
+            int k;
+            int vidx;
+
+            for (k = 0; k < CC_MAX_ARRAY_DIMS && pa->vla_bounds[k] == NULL; ++k) {
+            }
+            if (k == CC_MAX_ARRAY_DIMS || pa->name == NULL) {
+                continue;
+            }
+            vidx = var_find_visible(vars, var_count, pa->name, 0);
+            if (vidx < 0 ||
+                lower_vla_attach(tu, sf, &lctx, vars, var_count, 0, (size_t)vidx, &shape, diag) != 0) {
+                if (vidx < 0) {
+                    set_diag(diag, "variable-length array parameter is not defined in lowering");
+                }
                 cc_ssa_module_free(out);
                 return -1;
             }

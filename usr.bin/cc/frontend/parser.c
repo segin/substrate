@@ -4036,14 +4036,29 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n, cc_exp
     return 0;
 }
 
-static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, int *io_saw_restrict) {
+/**
+ * Parse a parameter's array declarator, `[` to `]`, with the qualifiers and
+ * `static` a parameter's bound may carry, or `[*]`.
+ *
+ * @param p                the parser, at the `[`
+ * @param out_n            receives the bound, or 1 if it is not a constant
+ * @param out_const_n      receives whether it is a constant
+ * @param io_saw_restrict  set if the brackets hold `restrict`
+ * @param out_bound_expr   receives a bound that is not a constant (owned),
+ *                         or NULL; it gives a pointer to a variable-length
+ *                         array its run-time size
+ * @return                 0, or -1 on error (diagnosed)
+ */
+static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, int *io_saw_restrict,
+                                    cc_expr_t **out_bound_expr) {
     long n = 1;
     int is_const = 0;
     cc_expr_t *bound;
 
-    if (p == NULL || out_n == NULL || out_const_n == NULL || p->tok.kind != TOK_LBRACK) {
+    if (p == NULL || out_n == NULL || out_const_n == NULL || out_bound_expr == NULL || p->tok.kind != TOK_LBRACK) {
         return -1;
     }
+    *out_bound_expr = NULL;
     if (next_tok(p) != 0) {
         return -1;
     }
@@ -4090,9 +4105,14 @@ static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, 
             is_const = 1;
         }
     }
-    free_expr(bound);
     if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
+        free_expr(bound);
         return -1;
+    }
+    if (is_const) {
+        free_expr(bound);
+    } else {
+        *out_bound_expr = bound;
     }
     *out_n = is_const ? n : (n > 0 ? n : 1);
     *out_const_n = is_const;
@@ -6021,7 +6041,7 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
                 int const_n = 0;
                 if (flags & DECL_PARAM) {
                     /* `[static N]`, `[const]`, `[restrict N]`: what a parameter's bound may hold */
-                    if (parse_param_array_extent(p, &n, &const_n, &d->saw_restrict) != 0) {
+                    if (parse_param_array_extent(p, &n, &const_n, &d->saw_restrict, &op.bound) != 0) {
                         goto suffix_fail;
                     }
                 } else if (parse_array_extent(p, &n, &const_n, &op.bound) != 0) {
@@ -6082,6 +6102,42 @@ out:
 }
 
 /**
+ * Take the run-time bounds of the arrays a declarator's type has as its
+ * legacy dimensions, out of the declarator and into @p out.
+ *
+ * The ops apply from the base outward, so the dimensions, outermost
+ * first, are the array ops at the end of the list, last first: in
+ * `int a[n][m]` the ops are [m] then [n].  @p skip outermost ops are
+ * passed over first: the pointer of `int (*p)[m]`, or the outer array of
+ * a parameter `int a[n][m]`, which is adjusted to a pointer to `int[m]`
+ * (its bound is never part of the type).  The run of array ops ends at
+ * any other op.
+ *
+ * @param d     the declarator; the bounds taken are set to NULL in it
+ * @param leg   its type in the legacy encoding
+ * @param skip  the number of outermost ops that are not dimensions
+ * @param out   receives each dimension's bound (owned), or NULL where it
+ *              is a constant
+ */
+static void take_vla_bounds(declarator_t *d, const cc_ct_legacy_t *leg, size_t skip,
+                            cc_expr_t *out[CC_MAX_ARRAY_DIMS]) {
+    size_t k;
+
+    memset(out, 0, CC_MAX_ARRAY_DIMS * sizeof(out[0]));
+    for (k = 0; k < CC_MAX_ARRAY_DIMS && (int)k < leg->ndim && k + skip < d->count; ++k) {
+        decl_op_t *op = &d->ops[d->count - 1 - skip - k];
+
+        if (op->kind != DECL_OP_ARRAY) {
+            break;
+        }
+        if (op->bound != NULL && leg->dims[k] == 0) {
+            out[k] = op->bound;
+            op->bound = NULL;
+        }
+    }
+}
+
+/**
  * Parse a type name (C11 6.7.7): declaration specifiers and an abstract
  * declarator.
  *
@@ -6097,14 +6153,17 @@ out:
  *                        reads only the legacy encoding, in which case a
  *                        function type (which that encoding would take
  *                        for its return type) is rejected
- * @param out_vla_bound   when the type is an array whose bound is not a
- *                        constant, `int[n]`, receives that bound's
- *                        expression (owned); else NULL.  May be NULL.
+ * @param out_vla_bounds  when the type is an array with bounds that are
+ *                        not constants, `int[n][m]`, receives each array
+ *                        level's bound, outermost first (owned), NULL where
+ *                        a bound is a constant; all NULL otherwise.  May
+ *                        be NULL.
  * @return                0, or -1 on error (diagnosed)
  */
 static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                              const char *what, const cc_ctype_t **out_ctype, cc_expr_t **out_vla_bound) {
+                              const char *what, const cc_ctype_t **out_ctype,
+                              cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
     cc_type_t ty = CC_TYPE_VOID;
     int sid = -1;
     long len = -1;
@@ -6134,29 +6193,24 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         return -1;
     }
     t = declarator_type(&d, declspec_ctype(alias, ty, sid, ndim, dims));
-    if (out_vla_bound != NULL) {
-        *out_vla_bound = NULL;
-        if (t != NULL && t->kind == CC_CT_ARRAY && t->count < 0) {
-            /* the outermost array is the last step applied */
-            size_t k = d.count;
-            while (k > 0 && d.ops[k - 1].kind != DECL_OP_ARRAY) {
-                --k;
-            }
-            if (k > 0) {
-                *out_vla_bound = d.ops[k - 1].bound;
-                d.ops[k - 1].bound = NULL;
-            }
-        }
-    }
-    declarator_free(&d);
     if (t == NULL) {
+        declarator_free(&d);
         set_diag(p->diag, line, col, "out of memory building a type");
         return -1;
     }
     if (cc_ct_to_legacy(t, &leg) != 0) {
+        declarator_free(&d);
         set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
         return -1;
     }
+    if (out_vla_bounds != NULL) {
+        if (t->kind == CC_CT_ARRAY) {
+            take_vla_bounds(&d, &leg, 0, out_vla_bounds);
+        } else {
+            memset(out_vla_bounds, 0, CC_MAX_ARRAY_DIMS * sizeof(out_vla_bounds[0]));
+        }
+    }
+    declarator_free(&d);
     if (out_ctype == NULL && t->kind == CC_CT_FUNCTION) {
         char spelled[128];
         char msg[200];
@@ -6323,6 +6377,7 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
     }
     f->params[f->param_count].storage = storage;
     f->params[f->param_count].ctype = NULL;
+    memset(f->params[f->param_count].vla_bounds, 0, sizeof(f->params[f->param_count].vla_bounds));
     f->param_count++;
     return 0;
 }
@@ -7791,6 +7846,100 @@ static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
     return e;
 }
 
+/**
+ * Whether any of a type's array levels has a bound that is not a constant.
+ *
+ * @param bounds  the bounds, as parse_type_name_ct() gives them
+ * @return        1 or 0
+ */
+static int vla_bounds_any(cc_expr_t *const bounds[CC_MAX_ARRAY_DIMS]) {
+    size_t k;
+
+    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
+        if (bounds[k] != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * The size of an array type with run-time bounds, `sizeof (T[n][m])`, as
+ * an expression of type size_t: the product of each level's bound -- the
+ * expression where it is one, else the constant -- and the size of the
+ * element.  The bounds are evaluated where the sizeof is (C11 6.5.3.4p2).
+ *
+ * @param p       the parser
+ * @param t       the array type
+ * @param bounds  each level's run-time bound, outermost first, NULL where
+ *                a constant; all are consumed
+ * @return        the expression, or NULL on error (diagnosed)
+ */
+static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t *bounds[CC_MAX_ARRAY_DIMS]) {
+    cc_expr_t *acc = NULL;
+    long elem;
+    size_t k;
+
+    for (k = 0; t != NULL && t->kind == CC_CT_ARRAY; ++k, t = t->of) {
+        cc_expr_t *factor;
+
+        if (k < CC_MAX_ARRAY_DIMS && bounds[k] != NULL) {
+            factor = new_expr(CC_EXPR_CAST);
+            if (factor != NULL) {
+                factor->aux_type = parser_size_type();
+                factor->lhs = bounds[k];
+                bounds[k] = NULL;
+            }
+        } else if (t->count >= 0) {
+            factor = new_int_expr(t->count);
+        } else {
+            set_diag(p->diag, p->tok.line, p->tok.col, "sizeof of an array type with an unspecified bound");
+            factor = NULL;
+            free_expr(acc);
+            acc = NULL;
+            break;
+        }
+        if (factor == NULL) {
+            free_expr(acc);
+            acc = NULL;
+            break;
+        }
+        factor->value_type = parser_size_type();
+        acc = acc == NULL ? factor : new_bin_expr(CC_BIN_MUL, acc, factor);
+        if (acc == NULL) {
+            break;
+        }
+        acc->value_type = parser_size_type();
+    }
+    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
+        free_expr(bounds[k]);
+        bounds[k] = NULL;
+    }
+    if (acc == NULL) {
+        return NULL;
+    }
+    elem = cc_ct_size(t, p->tu);
+    if (elem <= 0) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "sizeof of an array of an incomplete type");
+        free_expr(acc);
+        return NULL;
+    }
+    {
+        cc_expr_t *scale = new_int_expr(elem);
+
+        if (scale == NULL) {
+            free_expr(acc);
+            return NULL;
+        }
+        scale->value_type = parser_size_type();
+        acc = new_bin_expr(CC_BIN_MUL, acc, scale);
+    }
+    if (acc != NULL) {
+        acc->value_type = parser_size_type();
+    }
+    return acc;
+}
+
 static cc_expr_t *new_update_ident_expr(const char *name, cc_binop_t op, int postfix) {
     cc_expr_t *e = new_expr(CC_EXPR_UPDATE);
     if (e == NULL) {
@@ -8428,7 +8577,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             int sizeof_array_ndim = 0;
             long sizeof_array_dims[CC_MAX_ARRAY_DIMS];
             const cc_ctype_t *sizeof_ctype = NULL;
-            cc_expr_t *vla_bound = NULL;
+            cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS] = {NULL};
             memset(sizeof_array_dims, 0, sizeof(sizeof_array_dims));
             if (next_tok(p) != 0) {
                 free_expr(e);
@@ -8436,44 +8585,29 @@ static cc_expr_t *parse_unary(parser_t *p) {
             }
             if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
                                    sizeof_array_dims, 1, "expected type name in sizeof", &sizeof_ctype,
-                                   &vla_bound) != 0) {
+                                   vla_bounds) != 0) {
                 free_expr(e);
                 return NULL;
             }
             e->array_ndim = sizeof_array_ndim;
             memcpy(e->array_dims, sizeof_array_dims, sizeof(e->array_dims));
             if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
-                free_expr(vla_bound);
+                for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
+                    free_expr(vla_bounds[b]);
+                }
                 free_expr(e);
                 return NULL;
             }
-            if (vla_bound != NULL && p->tok.kind != TOK_LBRACE) {
-                /* `sizeof (T[n])`: n elements of T, evaluated here (C11 6.5.3.4p2) */
-                long elem = cc_ct_size(sizeof_ctype->of, p->tu);
-                if (elem > 0) {
-                    cc_expr_t *count = new_expr(CC_EXPR_CAST);
-                    cc_expr_t *scale = new_int_expr(elem);
-                    cc_expr_t *bytes;
-                    if (count == NULL || scale == NULL) {
-                        free_expr(count);
-                        free_expr(scale);
-                        free_expr(vla_bound);
-                        free_expr(e);
-                        return NULL;
-                    }
-                    count->aux_type = parser_size_type();
-                    count->value_type = parser_size_type();
-                    count->lhs = vla_bound;
-                    scale->value_type = parser_size_type();
-                    bytes = new_bin_expr(CC_BIN_MUL, count, scale);
-                    if (bytes != NULL) {
-                        bytes->value_type = parser_size_type();
-                    }
-                    free_expr(e);
-                    return bytes;
-                }
+            if (p->tok.kind != TOK_LBRACE && vla_bounds_any(vla_bounds)) {
+                /* `sizeof (T[n][m])`: computed here, its bounds evaluated (C11 6.5.3.4p2) */
+                cc_expr_t *bytes = vla_type_size_expr(p, sizeof_ctype, vla_bounds);
+
+                free_expr(e);
+                return bytes;
             }
-            free_expr(vla_bound);
+            for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
+                free_expr(vla_bounds[b]);
+            }
             if (p->tok.kind != TOK_LBRACE && fold_sizeof_type(p, e, sizeof_ctype) != 0) {
                 free_expr(e);
                 return NULL;
@@ -9355,24 +9489,8 @@ static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
             out->saw_restrict = 1;
         }
     }
-    /*
-     * The ops apply from the base outward, so the object's own dimensions,
-     * outermost first, are the array ops at the end of the list, last first:
-     * in `int a[n][m]` the ops are [m] then [n].  An array op with a
-     * pointer after it is the shape of what a pointer points to, not one
-     * of the object's dimensions.
-     */
-    for (k = 0; k < (unsigned)d.count && k < CC_MAX_ARRAY_DIMS && (int)k < leg.ndim; ++k) {
-        decl_op_t *op = &d.ops[d.count - 1 - k];
-
-        if (op->kind != DECL_OP_ARRAY) {
-            break;
-        }
-        if (op->bound != NULL && leg.dims[k] == 0) {
-            out->vla_bounds[k] = op->bound;
-            op->bound = NULL;
-        }
-    }
+    /* a pointer to an array (array_len -1) has its pointer op outermost */
+    take_vla_bounds(&d, &leg, out->array_len == -1 ? 1 : 0, out->vla_bounds);
     out->name = d.name;
     d.name = NULL;
     declarator_free(&d);
@@ -10407,7 +10525,12 @@ static void free_func(cc_function_t *f) {
     free(f->attr_section);
     free(f->attr_alias);
     for (i = 0; i < f->param_count; ++i) {
+        size_t b;
+
         free(f->params[i].name);
+        for (b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
+            free_expr(f->params[i].vla_bounds[b]);
+        }
     }
     free(f->params);
     for (i = 0; i < f->stmt_count; ++i) {
@@ -10514,11 +10637,15 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
  * @param out_array_dims    receives its legacy bounds
  * @param out_saw_restrict  receives whether a pointer level, or the
  *                          adjusted array, is restrict-qualified
+ * @param out_vla_bounds    for a pointer to an array, receives the
+ *                          run-time bounds of that array (owned), NULL
+ *                          where a bound is a constant
  * @return                  0, or -1 on error (diagnosed)
  */
 static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
                             const cc_ctype_t *base_alias, char **out_name, const cc_ctype_t **out_ctype, cc_type_t *out_type, long *out_array_len,
-                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict) {
+                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict,
+                            cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
     declarator_t d;
     const cc_ctype_t *t;
     cc_ct_legacy_t leg;
@@ -10556,6 +10683,12 @@ static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
     *out_array_len = (t->kind == CC_CT_POINTER && leg.lossy) ? -1 : leg.array_len;
     *out_array_ndim = leg.ndim;
     memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
+    if (*out_array_len == -1) {
+        /* a pointer to an array: its outermost op is the pointer, or the array adjusted to one */
+        take_vla_bounds(&d, &leg, 1, out_vla_bounds);
+    } else {
+        memset(out_vla_bounds, 0, CC_MAX_ARRAY_DIMS * sizeof(out_vla_bounds[0]));
+    }
     *out_saw_restrict = d.saw_restrict;
     for (i = 0; i < d.count; ++i) {
         if (d.ops[i].kind == DECL_OP_POINTER && (d.ops[i].quals & CC_CQ_RESTRICT) != 0) {
@@ -10622,6 +10755,9 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         int dty_restrict = 0;
         const cc_ctype_t *pctype = NULL;
         char anon_buf[32];
+        cc_expr_t *pvla_bounds[CC_MAX_ARRAY_DIMS];
+        int pushed;
+        size_t b;
         memset(pbase_array_dims, 0, sizeof(pbase_array_dims));
         memset(darr_dims, 0, sizeof(darr_dims));
 
@@ -10642,38 +10778,33 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         param_storage = p->last_storage;
         if (parse_param_decl(p, ptype, ptype_sid, pbase_array_ndim, pbase_array_dims, p->last_alias_ctype, &pname,
                              &pctype, &dty,
-                             &darr_len, &darr_ndim, darr_dims, &dty_restrict) != 0) {
+                             &darr_len, &darr_ndim, darr_dims, &dty_restrict, pvla_bounds) != 0) {
             return -1;
         }
         if ((ptype_restrict || dty_restrict) && !is_pointer_type(dty)) {
             set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer parameter type");
-            free(pname);
-            return -1;
-        }
-        if (skip_decl_gnu_suffix(p, NULL) != 0) {
-            free(pname);
-            return -1;
-        }
-        if (pname == NULL) {
-            snprintf(anon_buf, sizeof(anon_buf), "__anon_param_%zu", f->param_count);
-            if (push_param(f, dty, anon_buf, strlen(anon_buf), darr_len, darr_ndim, darr_dims, param_storage) != 0) {
-                return -1;
-            }
-            if (f->param_count > 0) {
-                f->params[f->param_count - 1].type_struct_id = ptype_sid;
-                f->params[f->param_count - 1].ctype = pctype;
-            }
+            pushed = -1;
+        } else if (skip_decl_gnu_suffix(p, NULL) != 0) {
+            pushed = -1;
         } else {
-            if (push_param(f, dty, pname, strlen(pname), darr_len, darr_ndim, darr_dims, param_storage) != 0) {
-                free(pname);
-                return -1;
+            const char *name = pname;
+
+            if (name == NULL) {
+                snprintf(anon_buf, sizeof(anon_buf), "__anon_param_%zu", f->param_count);
+                name = anon_buf;
             }
-            if (f->param_count > 0) {
-                f->params[f->param_count - 1].type_struct_id = ptype_sid;
-                f->params[f->param_count - 1].ctype = pctype;
-            }
-            free(pname);
+            pushed = push_param(f, dty, name, strlen(name), darr_len, darr_ndim, darr_dims, param_storage);
         }
+        free(pname);
+        if (pushed != 0) {
+            for (b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
+                free_expr(pvla_bounds[b]);
+            }
+            return -1;
+        }
+        f->params[f->param_count - 1].type_struct_id = ptype_sid;
+        f->params[f->param_count - 1].ctype = pctype;
+        memcpy(f->params[f->param_count - 1].vla_bounds, pvla_bounds, sizeof(pvla_bounds));
         f->has_prototype = 1;
 
         if (p->tok.kind != TOK_COMMA) {

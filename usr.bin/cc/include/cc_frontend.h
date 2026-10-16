@@ -409,6 +409,9 @@ typedef struct {
     long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
     const struct cc_ctype *ctype; /**< its type as adjusted (arrays and functions as pointers); NULL if not built */
+    /** for a pointer to a variable-length array (as `int a[n][m]` is adjusted to be): the bounds of what it
+     *  points to (owned), outermost first, as array_dims gives them; NULL where a bound is a constant */
+    cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS];
 } cc_param_t;
 
 typedef struct {

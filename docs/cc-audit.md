@@ -253,7 +253,7 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   wrong; since CC-40 cc rejects the attributes and `__has_attribute`
   reports them absent.  cc's own `<xmmintrin.h>` uses structs and is
   unaffected.  *Reproduced.*
-- [ ] **CC-72** A pointer to a variable-length array, and a parameter
+- [x] **CC-72** A pointer to a variable-length array, and a parameter
   declared as one (`int a[n][m]`, adjusted to `int (*a)[m]`), shall step
   by the array's run-time size.  cc steps by a constant computed with
   each run-time bound taken as 1, silently: `int (*p)[m] = a; p[1][2]`
@@ -261,6 +261,15 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   returns `a[i][j]` from the wrong row (5 for gcc's 13).
   `sizeof(int[n][m])` is rejected ("sizeof unsupported for this type").
   *Reproduced* (both targets; the parameter case predates CC-66).
+  A parameter's declarator dropped its bounds; it now keeps them, the
+  parameter owns them, and at function entry the strides are computed
+  from the parameters before it.  A local pointer to a VLA gets its
+  strides at its declaration.  A pointer's first stride is the size of
+  the array it points to, so subscripts, `+`, `-`, `++`, `--`, the
+  difference of two such pointers and `sizeof *p` all use run-time
+  sizes.  `sizeof` of a type name with run-time bounds is the product of
+  every level's bound and the element size.  `codegen/vla_pointers.c`
+  covers these, matching gcc at both widths.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -648,7 +657,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-72 requirements: 64 met, 8 open.
+72 requirements: 65 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
