@@ -5975,11 +5975,14 @@ out:
  *                        reads only the legacy encoding, in which case a
  *                        function type (which that encoding would take
  *                        for its return type) is rejected
+ * @param out_vla_bound   when the type is an array whose bound is not a
+ *                        constant, `int[n]`, receives that bound's
+ *                        expression (owned); else NULL.  May be NULL.
  * @return                0, or -1 on error (diagnosed)
  */
 static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                              const char *what, const cc_ctype_t **out_ctype) {
+                              const char *what, const cc_ctype_t **out_ctype, cc_expr_t **out_vla_bound) {
     cc_type_t ty = CC_TYPE_VOID;
     int sid = -1;
     long len = -1;
@@ -6009,6 +6012,20 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         return -1;
     }
     t = declarator_type(&d, declspec_ctype(alias, ty, sid, ndim, dims));
+    if (out_vla_bound != NULL) {
+        *out_vla_bound = NULL;
+        if (t != NULL && t->kind == CC_CT_ARRAY && t->count < 0) {
+            /* the outermost array is the last step applied */
+            size_t k = d.count;
+            while (k > 0 && d.ops[k - 1].kind != DECL_OP_ARRAY) {
+                --k;
+            }
+            if (k > 0) {
+                *out_vla_bound = d.ops[k - 1].bound;
+                d.ops[k - 1].bound = NULL;
+            }
+        }
+    }
     declarator_free(&d);
     if (t == NULL) {
         set_diag(p->diag, line, col, "out of memory building a type");
@@ -6059,7 +6076,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
                            const char *what) {
     return parse_type_name_ct(p, out_type, out_struct_id, out_array_len, out_array_ndim, out_array_dims, allow_void,
-                              what, NULL);
+                              what, NULL, NULL);
 }
 
 static cc_expr_t *new_expr(cc_expr_kind_t kind) {
@@ -8324,22 +8341,52 @@ static cc_expr_t *parse_unary(parser_t *p) {
             int sizeof_array_ndim = 0;
             long sizeof_array_dims[CC_MAX_ARRAY_DIMS];
             const cc_ctype_t *sizeof_ctype = NULL;
+            cc_expr_t *vla_bound = NULL;
             memset(sizeof_array_dims, 0, sizeof(sizeof_array_dims));
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
             }
             if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
-                                   sizeof_array_dims, 1, "expected type name in sizeof", &sizeof_ctype) != 0) {
+                                   sizeof_array_dims, 1, "expected type name in sizeof", &sizeof_ctype,
+                                   &vla_bound) != 0) {
                 free_expr(e);
                 return NULL;
             }
             e->array_ndim = sizeof_array_ndim;
             memcpy(e->array_dims, sizeof_array_dims, sizeof(e->array_dims));
             if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
+                free_expr(vla_bound);
                 free_expr(e);
                 return NULL;
             }
+            if (vla_bound != NULL && p->tok.kind != TOK_LBRACE) {
+                /* `sizeof (T[n])`: n elements of T, evaluated here (C11 6.5.3.4p2) */
+                long elem = cc_ct_size(sizeof_ctype->of, p->tu);
+                if (elem > 0) {
+                    cc_expr_t *count = new_expr(CC_EXPR_CAST);
+                    cc_expr_t *scale = new_int_expr(elem);
+                    cc_expr_t *bytes;
+                    if (count == NULL || scale == NULL) {
+                        free_expr(count);
+                        free_expr(scale);
+                        free_expr(vla_bound);
+                        free_expr(e);
+                        return NULL;
+                    }
+                    count->aux_type = parser_size_type();
+                    count->value_type = parser_size_type();
+                    count->lhs = vla_bound;
+                    scale->value_type = parser_size_type();
+                    bytes = new_bin_expr(CC_BIN_MUL, count, scale);
+                    if (bytes != NULL) {
+                        bytes->value_type = parser_size_type();
+                    }
+                    free_expr(e);
+                    return bytes;
+                }
+            }
+            free_expr(vla_bound);
             if (p->tok.kind != TOK_LBRACE && fold_sizeof_type(p, e, sizeof_ctype) != 0) {
                 free_expr(e);
                 return NULL;
@@ -8442,7 +8489,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 return NULL;
             }
             if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &cast_array_len, &cast_array_ndim,
-                                   cast_array_dims, 1, "expected cast type", &e->ctype) != 0) {
+                                   cast_array_dims, 1, "expected cast type", &e->ctype, NULL) != 0) {
                 free_expr(e);
                 return NULL;
             }

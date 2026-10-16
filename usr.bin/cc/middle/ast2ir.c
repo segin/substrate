@@ -30,6 +30,7 @@ typedef struct {
     int is_parameter;
     char *static_sym;
     int depth;
+    int vla_bytes; /**< a variable-length array's size in bytes, as the value computed for its allocation; else -1 */
 } var_entry_t;
 
 typedef struct {
@@ -1405,6 +1406,7 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].is_parameter = is_parameter ? 1 : 0;
     (*vars)[*var_count].static_sym = sym_dup;
     (*vars)[*var_count].depth = depth;
+    (*vars)[*var_count].vla_bytes = -1;
     (*var_count)++;
     return 0;
 }
@@ -7448,6 +7450,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_SIZEOF: {
         long n;
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
+            /* a variable-length array: its size is the one computed for its allocation */
+            int vidx = var_find_visible(vars, var_count, e->lhs->ident, depth);
+            if (vidx >= 0 && vars[vidx].vla_bytes >= 0) {
+                return cast_value(sf, vars[vidx].vla_bytes, type_to_val(e->value_type), diag);
+            }
+        }
         if (e->lhs != NULL) {
             n = sizeof_expr_bytes(tu, vars, var_count, depth, e->lhs);
         } else {
@@ -9866,6 +9875,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             long total_size = array_type_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim, s->array_dims);
             int prealloc = lower_find_hoisted_alloc(ctx, s);
             int is_runtime_vla = 0;
+            int vla_bytes_v = -1;
 
             if (arr_elems <= 0) {
                 arr_elems = 1;
@@ -9923,6 +9933,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         return -1;
                     }
                     call_in.args[0] = bytes_v;
+                    vla_bytes_v = bytes_v;
                     if (push_instr(sf, call_in) != 0) {
                         free(call_in.sym);
                         free(call_in.args);
@@ -10200,6 +10211,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
+            (*vars)[*var_count - 1].vla_bytes = vla_bytes_v;
             if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
                 return -1;
             }

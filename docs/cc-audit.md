@@ -195,8 +195,22 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   one shall go to the next index.  `{[4] = 40, [1] = 10, 11}` put 11 at
   index 5, not 2: an undesignated element was always appended.
   *Reproduced* (all modes).  `codegen/designated_init.c`.
-- [ ] **CC-19** `sizeof` of a variable-length array shall be its run-time
-  size.  It is rejected: "unsupported sizeof operand in lowering".
+- [x] **CC-19** `sizeof` of a variable-length array shall be its run-time
+  size.  It was rejected: "unsupported sizeof operand in lowering", and
+  `sizeof(int[n])` with "sizeof unsupported for this type".
+  *Reproduced.*  sizeof of a VLA gives the byte count computed for its
+  allocation, and sizeof of a type name with a run-time bound becomes
+  `(size_t)n * sizeof (element)`, evaluated where the sizeof is.
+  `codegen/vla_sizeof.c` checks eleven sizes against gcc.
+- [ ] **CC-66** A variable-length array shall have any number of
+  dimensions.  Only one is lowered: `double b[n][3]`, `char c[n][m]` and
+  `long d[2][m]` are all rejected ("invalid local array size in
+  lowering").  *Reproduced* (both targets).
+- [ ] **CC-67** A variable-length array's storage shall be released when
+  its block is left.  It is taken with `malloc` (`kmalloc` freestanding)
+  and never freed, so a function with `int a[n]` leaks n ints a call: 20000
+  calls with a 256 KB array exhaust a 1 GiB address space and the program
+  dies of SIGSEGV, where gcc's build (the array on the stack) runs.
   *Reproduced.*
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
@@ -477,7 +491,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-65 requirements: 40 met, 25 open.
+67 requirements: 41 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
