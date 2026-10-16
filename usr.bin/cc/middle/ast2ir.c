@@ -5137,45 +5137,56 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return emit_const_f64_instr(sf, NAN);
         }
         if (bk == BUILTIN_POPCOUNT) {
-            int av;
+            /*
+             * The set bits of the argument converted to the builtin's width
+             * (unsigned int, unsigned long, unsigned long long): a wider one
+             * truncated, a narrower one sign- or zero-extended as its type is,
+             * so (signed char)-1 counts 32.  A narrower argument's own bits
+             * are counted, plus, when it is signed and negative, the bits the
+             * sign extension sets -- which needs no value wider than the
+             * argument (i386 has no 64-bit register to extend an int into).
+             */
+            int bits = builtin_bitop_width(e);
+            long arg_size;
+            int arg_bits;
+            int sign_extends;
             int v;
-            long mem_size;
-            cc_ssa_instr_t bin;
+            int cnt;
 
             if (e->arg_count != 1 || e->args[0] == NULL) {
                 set_diag(diag, "__builtin_popcount lowering expects 1 argument");
                 return -1;
             }
-            av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
-            if (av < 0) {
+            v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (v < 0 || (v = cast_value(sf, v, CC_VAL_I64, diag)) < 0) {
                 return -1;
             }
-            av = cast_value(sf, av, CC_VAL_I64, diag);
-            if (av < 0) {
-                return -1;
+            arg_size = type_size_bytes_with_struct(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            arg_bits = (arg_size > 0 && arg_size < 8) ? (int)arg_size * 8 : 64;
+            sign_extends = arg_bits < bits && !cc_type_is_unsigned_integral(e->args[0]->value_type) &&
+                           e->args[0]->value_type != CC_TYPE_BOOL;
+            if (arg_bits < bits) {
+                bits = arg_bits;
             }
-            mem_size = type_size_bytes_with_struct(tu, e->args[0]->value_type, e->args[0]->struct_id);
-            if (mem_size <= 0 || mem_size > 8) {
-                mem_size = 8;
-            }
-            v = av;
-            if (mem_size < 8) {
-                unsigned long long mask_u = (1ULL << (mem_size * 8)) - 1ULL;
-                int mask = emit_const_i64_instr(sf, (long)mask_u);
-                if (mask < 0) {
+            cnt = v;
+            if (bits < 64) {
+                int mask = emit_const_i64_instr(sf, (long long)((1ULL << bits) - 1ULL));
+                if (mask < 0 || (cnt = emit_i64_binop_instr(sf, CC_SSA_AND, v, mask, 1, diag)) < 0) {
                     return -1;
                 }
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = v;
-                bin.rhs = mask;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+            }
+            cnt = lower_popcount(sf, cnt, bits, diag);
+            if (cnt >= 0 && sign_extends) {
+                int zero = emit_const_i64_instr(sf, 0);
+                int ext = emit_const_i64_instr(sf, builtin_bitop_width(e) - arg_bits);
+                int neg = zero < 0 ? -1 : emit_cmp_instr(sf, CC_CMP_LT, v, zero, 0, diag);
+                if (ext < 0 || neg < 0 || (neg = cast_value(sf, neg, CC_VAL_I64, diag)) < 0 ||
+                    (ext = emit_i64_binop_instr(sf, CC_SSA_MUL, neg, ext, 0, diag)) < 0) {
                     return -1;
                 }
-                v = bin.dst;
+                cnt = emit_i64_binop_instr(sf, CC_SSA_ADD, cnt, ext, 0, diag);
             }
-            return lower_popcount(sf, v, (int)mem_size * 8, diag);
+            return cnt;
         }
         if (bk == BUILTIN_PARITY) {
             /* the low bit of the set-bit count, of the argument converted to the builtin's width */
