@@ -10988,6 +10988,13 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (rv < 0) {
                     return -1;
                 }
+                if (ctx != NULL && ctx->fn != NULL && cc_type_is_integral(ctx->fn->ret_type)) {
+                    /* `return 7;` from a long long function: the int is widened (on i386, its high word set) */
+                    rv = normalize_integral_value(sf, rv, ctx->fn->ret_type, diag);
+                    if (rv < 0) {
+                        return -1;
+                    }
+                }
                 if (ctx != NULL && ctx->fn != NULL) {
                     ret_size_hint = type_size_bytes_with_struct(tu, ctx->fn->ret_type, ctx->fn->ret_struct_id);
                     if (ret_size_hint <= 0) {
