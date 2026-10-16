@@ -1093,6 +1093,17 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
  * @return           the alignment in bytes, or -1 if @p t has none
  *                   (an incomplete or unknown type)
  */
+/**
+ * Whether an interned type is complex or imaginary -- the kinds whose
+ * layout the legacy encoding cannot give, since it has one of each.
+ *
+ * @param t  the type, or NULL
+ * @return   1 or 0
+ */
+static int ctype_is_complex(const cc_ctype_t *t) {
+    return t != NULL && (t->kind == CC_CT_COMPLEX || t->kind == CC_CT_IMAGINARY);
+}
+
 static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_id) {
     long n;
     if (t == CC_TYPE_VOID && struct_id >= 0 && (size_t)struct_id < p->struct_count && p->structs[struct_id].complete) {
@@ -1245,7 +1256,9 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
 
     for (i = 0; i < sd->member_count; ++i) {
         long msize = sd->members[i].size;
-        long malign = parser_type_align_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
+        long malign = ctype_is_complex(sd->members[i].ctype)
+                          ? cc_ct_align(sd->members[i].ctype, p->tu)
+                          : parser_type_align_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
         int is_bitfield = sd->members[i].is_bitfield;
         int bit_width = sd->members[i].bit_width;
         long bit_storage_size = sd->members[i].bit_storage_size;
@@ -2533,6 +2546,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     msize = parser_type_size_bytes(p, mtype, mstruct);
                     malign = parser_type_align_bytes(p, mtype, mstruct);
+                    if (ctype_is_complex(md.ctype)) {
+                        /* the legacy encoding has one complex kind; the type knows its element */
+                        msize = cc_ct_size(md.ctype, p->tu);
+                        malign = cc_ct_align(md.ctype, p->tu);
+                    }
                     if (msize < 0) {
                         msize = cc_target_pointer_size();
                     }
@@ -3116,6 +3134,15 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         if (out_struct_id != NULL) {
             *out_struct_id = -1;
         }
+        /*
+         * The legacy encoding has one complex kind; the type itself says
+         * which: _Complex of float, of double (also the bare `_Complex`),
+         * or of long double.
+         */
+        alias_type = *out_type;
+        alias_ctype = cc_ct_complex(seen_complex ? CC_CT_COMPLEX : CC_CT_IMAGINARY,
+                                    cc_ct_basic(seen_float ? CC_CT_FLOAT
+                                                           : (seen_long > 0 ? CC_CT_LDOUBLE : CC_CT_DOUBLE)));
         if (out_typedef != NULL) {
             *out_typedef = seen_typedef;
         } else if (seen_typedef) {
@@ -8664,14 +8691,20 @@ static cc_expr_t *parse_unary(parser_t *p) {
             return NULL;
         }
         if (is_declspec_start(p)) {
-            if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Alignof/alignof") !=
-                0) {
+            const cc_ctype_t *act = NULL;
+
+            if (parse_type_name_ct(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Alignof/alignof",
+                                   &act, NULL) != 0) {
                 return NULL;
             }
             if (expect(p, TOK_RPAREN, "expected ')' after _Alignof/alignof type") != 0) {
                 return NULL;
             }
-            align = parser_type_align_bytes(p, aty, asid);
+            /* the type itself, where it says more than the legacy encoding (a complex kind) */
+            align = act != NULL ? cc_ct_align(act, p->tu) : -1;
+            if (align <= 0) {
+                align = parser_type_align_bytes(p, aty, asid);
+            }
             if (align <= 0) {
                 align = cc_target_pointer_size();
             }

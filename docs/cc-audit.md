@@ -235,7 +235,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   double, in a 16-byte object; a 16-byte access is taken for a long
   double, so a complex object read through a pointer (`*pz`) gives 0 on
   both targets and a global one gives 0 at -m64.  Locals read and write
-  their first part since CC-23.  *Reproduced.*
+  their first part since CC-23.  *Reproduced.*  *Layout done* (refactor
+  step 5): a complex or imaginary type's element -- float, double or
+  long double -- is in its interned type, and sizes, alignment,
+  `_Alignof` and structure layout come from it (`float _Complex` was 16
+  bytes, gcc's 8; `codegen/complex_layout.c`).  The values themselves
+  (both parts, the arithmetic, the ABI) wait for typed values in lowering
+  (steps 6-7).
 - [ ] **CC-69** `_Decimal32`, `_Decimal64` and `_Decimal128` shall be
   decimal floating types in the encoding gcc uses (BID on x86).  cc
   carries all three as a binary double, so a decimal object's bytes are
