@@ -224,6 +224,11 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   not gcc's, decimal rounding is binary rounding, and a value passed to
   or from gcc-built code is wrong.  Sizes and alignments are right.
   *Reproduced* (`_Decimal64 d = 2.0` holds the bytes of the double 2.0).
+- [ ] **CC-70** Integers wider than 64 bits shall work: `__int128` on
+  x86-64 and `_BitInt(N)` up to a `BITINT_MAXWIDTH` above 64 (gcc's is
+  65535), with the C23 `wb`/`uwb` literal suffixes.  The IR's integers
+  are 64-bit; since CC-22 cc rejects the wider types instead of
+  miscompiling them, and `1wb` does not lex.  *Reproduced.*
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -370,10 +375,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   should be; the same diagnostic made an error by `-Werror` named the
   file.  Both warning paths now print the file, and the suite checks
   the location.  *Reproduced.*
-- [ ] **CC-22** The compiler shall predefine `__SIZEOF_INT128__` only if
+- [x] **CC-22** The compiler shall predefine `__SIZEOF_INT128__` only if
   `__int128` works.  It is predefined for -m64, and a program using
   `__int128` compiles and dies of SIGSEGV.  *Reproduced*; also suite
-  commands 87, 823 and 824.
+  commands 87, 823 and 824.  `__int128` was `_BitInt(128)`, and every
+  `_BitInt` wider than 64 bits is carried in a 64-bit value, so all of
+  them crashed (SIGSEGV on both targets for `unsigned _BitInt(100)`).
+  `__SIZEOF_INT128__` is no longer predefined, `__int128`,
+  `__int128_t` and `__uint128_t` are rejected ("__int128 is not
+  supported"), `__BITINT_MAXWIDTH__` is 64 and a wider `_BitInt` is
+  rejected.  Wider integers are CC-70.
 
 ## 6. The restored suite's failing commands
 
@@ -435,8 +446,10 @@ changes as well.  *Suite.*
   clang judge the tests, the test was wrong.  28ad3309e turned it into
   `native_attr_noreturn_nonvoid.c`, which expects it to compile, and it
   does.
-- [ ] **CC-32** The suite's `__int128` expectations shall match the
-  compiler's behaviour once CC-22 is settled (87, 823, 824).
+- [x] **CC-32** The suite's `__int128` expectations shall match the
+  compiler's behaviour once CC-22 is settled (87, 823, 824).  They do:
+  the suite expects no `__SIZEOF_INT128__` and the "__int128 is not
+  supported" diagnostic, which is what cc now does.
 
 ## 7. The restored suite itself
 
@@ -544,7 +557,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-69 requirements: 50 met, 19 open.
+70 requirements: 52 met, 18 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

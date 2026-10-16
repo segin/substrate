@@ -1817,17 +1817,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             }
             if (parser_is_gnu_mode() &&
                 (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t"))) {
-                seen = 1;
-                seen_type = 1;
-                seen_bitint = 1;
-                bitint_width = 128;
-                if (tok_is_ident(p, "__uint128_t")) {
-                    seen_unsigned = 1;
-                }
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
-                continue;
+                /* integers are at most 64 bits wide; __SIZEOF_INT128__ is not defined */
+                set_diag(p->diag, p->tok.line, p->tok.col, "__int128 is not supported");
+                return -1;
             }
             if (tok_is_ident(p, "_Thread_local") || (parser_is_c23_or_newer() && tok_is_ident(p, "thread_local"))) {
                 if (!parser_is_c11_or_newer()) {
@@ -2992,8 +2984,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             set_diag(p->diag, p->tok.line, p->tok.col, "signed _BitInt width must be at least 2");
             return -1;
         }
-        if (bitint_width > INT_MAX) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width is too large");
+        if (bitint_width > 64) {
+            /* BITINT_MAXWIDTH (__BITINT_MAXWIDTH__) is 64 */
+            set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt wider than 64 bits is not supported");
             return -1;
         }
         *out_type = CC_TYPE_BITINT;

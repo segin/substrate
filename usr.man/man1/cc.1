@@ -20,6 +20,18 @@ When invoked as
 .Nm cpp ,
 preprocessor-only mode is selected.
 .Pp
+Integers are at most 64 bits wide.
+.Dv __BITINT_MAXWIDTH__
+is 64, so
+.Vt _BitInt Ns Pq Ar N
+with
+.Ar N
+above 64 is rejected, and
+.Vt __int128
+is rejected with
+.Dv __SIZEOF_INT128__
+left undefined, so code that tests for it takes its fallback.
+.Pp
 Installed host-runnable copies of
 .Nm ,
 .Xr as 1 ,
