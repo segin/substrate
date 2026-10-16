@@ -5548,9 +5548,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (pointed_object_extent(tu, e->args[0], &obj_size, &obj_off)) {
                     /* what is left of the object past the pointer */
                     n = (obj_off >= 0 && obj_off <= obj_size) ? obj_size - obj_off : 0;
-                } else {
-                    n = sizeof_expr_bytes(tu, vars, var_count, depth, e->args[0]);
                 }
+                /* otherwise the object is not known (a pointer from malloc, say): leave n unknown */
             }
             if (n < 0) {
                 n = (mode & 2L) ? 0 : -1;
