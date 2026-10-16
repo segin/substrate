@@ -779,6 +779,13 @@ static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long 
         tu->structs[sid].complex_elem == CC_TYPE_LDOUBLE) {
         return is_return ? CC_ABI_RET_X87_COMPLEX : -1;
     }
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
+        /* a decimal floating value is SSE (psABI 3.2.3): _Decimal128 SSE and SSEUP, whole in one xmm register */
+        if (tu->structs[sid].decimal_bits == 128) {
+            return CC_ABI_SSE0 | CC_ABI_SSE1 | (is_return ? CC_ABI_RET_VEC128 : CC_ABI_VEC128);
+        }
+        return CC_ABI_SSE0;
+    }
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].vector_count > 0) {
         /*
          * A vector, by its size as gcc classes it: 16 bytes SSE and SSEUP,
@@ -842,9 +849,14 @@ static int i386_vector_abi(const cc_translation_unit_t *tu, int sid, long size, 
     return CC_CALL_ARG_ABI_AGG_MEM | (size >= 16 ? CC_ABI_STACK_VEC : 0);
 }
 
-/** CC_ABI_STACK_VEC for a vector of 16 bytes or more passed in memory (aligned to its size), else 0. */
+/**
+ * CC_ABI_STACK_VEC for a vector of 16 bytes or more, or a _Decimal128,
+ * passed in memory (aligned to its size, as gcc places them), else 0.
+ */
 static int vector_mem_flag(const cc_translation_unit_t *tu, int sid, long size) {
-    return sid_is_vector(tu, sid) && size >= 16 ? CC_ABI_STACK_VEC : 0;
+    int dec128 = tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits == 128;
+
+    return (sid_is_vector(tu, sid) || dec128) && size >= 16 ? CC_ABI_STACK_VEC : 0;
 }
 
 /**
@@ -862,6 +874,10 @@ static int agg_return_class(const cc_translation_unit_t *tu, int sid, long size)
     /* i386 psABI: a float _Complex comes back in %eax:%edx, as gcc has it; any other aggregate in memory */
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == CC_TYPE_FLOAT) {
         return CC_ABI_RET_EAX_EDX;
+    }
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
+        /* _Decimal32 in %eax, _Decimal64 in %eax:%edx, _Decimal128 in memory, as gcc returns them */
+        return tu->structs[sid].decimal_bits <= 64 ? CC_ABI_RET_EAX_EDX : 0;
     }
     if (sid_is_vector(tu, sid)) {
         /* a vector of 16 bytes in %xmm0, of 8 in %mm0, of 4 or fewer in %eax, as gcc returns one */
@@ -5364,6 +5380,308 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
     return ld.dst;
 }
 
+/** The width of the decimal floating type (@p t, @p sid): 32, 64 or 128; 0 if it is not one. */
+static int dec_bits_of(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
+    if (t != CC_TYPE_VOID || sid < 0 || (size_t)sid >= tu->struct_count) {
+        return 0;
+    }
+    return tu->structs[sid].decimal_bits;
+}
+
+/** libgcc's mode suffix of a decimal type: sd, dd or td. */
+static const char *dec_mode(int bits) {
+    return bits == 32 ? "sd" : bits == 64 ? "dd" : "td";
+}
+
+/** How a dec_libcall() argument or result travels. */
+typedef enum {
+    DEC_ARG_DEC,    /**< a decimal value, by the address of its storage */
+    DEC_ARG_INT,    /**< a 4-byte integer */
+    DEC_ARG_LLONG,  /**< an 8-byte integer */
+    DEC_ARG_FLOAT,  /**< a float (held as a double) */
+    DEC_ARG_DOUBLE, /**< a double */
+    DEC_ARG_LDOUBLE /**< a long double */
+} dec_arg_t;
+
+/**
+ * A call to libgcc's decimal helper @p name: arguments @p args of kinds
+ * @p kinds (a decimal's of type @p arg_sids), passed as gcc passes those
+ * types -- a decimal in an xmm register on x86-64, on i386 a _Decimal32
+ * as an int, the others in memory (_Decimal128 16-aligned) -- and a
+ * result of kind @p ret, a decimal one of structure @p ret_sid in new
+ * storage (%xmm0 on x86-64; %eax, %eax:%edx or a hidden pointer on i386).
+ *
+ * @return the result: a decimal's address, else its value; -1 on error
+ */
+static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const char *name, const int *args,
+                       const dec_arg_t *kinds, const int *arg_sids, size_t nargs, dec_arg_t ret, int ret_sid,
+                       cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int is64 = cc_target_pointer_size() == 8;
+    size_t i;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_CALL;
+    in.sym = cc_strdup(name);
+    in.arg_count = nargs;
+    in.args = (int *)calloc(nargs, sizeof(*in.args));
+    in.call_arg_abi = (unsigned char *)calloc(nargs, sizeof(*in.call_arg_abi));
+    in.call_arg_sizes = (uint32_t *)calloc(nargs, sizeof(*in.call_arg_sizes));
+    in.rhs = -1;
+    if (in.sym == NULL || in.args == NULL || in.call_arg_abi == NULL || in.call_arg_sizes == NULL) {
+        free(in.sym);
+        free(in.args);
+        free(in.call_arg_abi);
+        free(in.call_arg_sizes);
+        set_diag(diag, "out of memory emitting a decimal helper call");
+        return -1;
+    }
+    for (i = 0; i < nargs; ++i) {
+        int v = args[i];
+        unsigned char abi = CC_CALL_ARG_ABI_DEFAULT;
+        uint32_t size = 0;
+
+        switch (kinds[i]) {
+        case DEC_ARG_DEC: {
+            long dsize = tu->structs[arg_sids[i]].decimal_bits / 8;
+
+            size = (uint32_t)dsize;
+            if (is64) {
+                abi = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | abi64_aggregate_class(tu, arg_sids[i], dsize, 0));
+            } else if (dsize == 4) {
+                cc_ssa_instr_t ld;
+
+                memset(&ld, 0, sizeof(ld));
+                ld.op = CC_SSA_LOAD;
+                ld.dst = new_value(sf, CC_VAL_I64);
+                ld.lhs = v;
+                ld.rhs = -1;
+                ld.imm = 4;
+                ld.is_unsigned = 1;
+                if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+                    v = -1;
+                } else {
+                    set_value_size(sf, ld.dst, 4);
+                    v = ld.dst;
+                }
+            } else {
+                abi = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM | vector_mem_flag(tu, arg_sids[i], dsize));
+            }
+            break;
+        }
+        case DEC_ARG_INT:
+            size = 4;
+            break;
+        case DEC_ARG_LLONG:
+            size = 8;
+            break;
+        case DEC_ARG_FLOAT:
+            abi = CC_CALL_ARG_ABI_FLOAT;
+            size = 4;
+            break;
+        case DEC_ARG_DOUBLE:
+            size = 8;
+            break;
+        case DEC_ARG_LDOUBLE:
+            abi = CC_CALL_ARG_ABI_LDOUBLE;
+            size = 12;
+            break;
+        }
+        if (v < 0) {
+            free(in.sym);
+            free(in.args);
+            free(in.call_arg_abi);
+            free(in.call_arg_sizes);
+            return -1;
+        }
+        in.args[i] = v;
+        in.call_arg_abi[i] = abi;
+        in.call_arg_sizes[i] = size;
+    }
+    if (ret == DEC_ARG_DEC) {
+        long rsize = tu->structs[ret_sid].decimal_bits / 8;
+        int storage = emit_local_storage_alloc(sf, rsize, diag);
+
+        in.dst = storage;
+        in.rhs = storage;
+        in.imm = rsize;
+        in.is_unsigned = 1;
+        in.agg_class = agg_return_class(tu, ret_sid, rsize);
+    } else if (ret == DEC_ARG_FLOAT || ret == DEC_ARG_DOUBLE || ret == DEC_ARG_LDOUBLE) {
+        in.dst = new_value(sf, CC_VAL_F64);
+        in.imm = 8;
+        if (ret == DEC_ARG_FLOAT) {
+            in.agg_class = CC_ABI_RET_FLOAT;
+        }
+        if (ret == DEC_ARG_LDOUBLE) {
+            in.call_ret_x87 = 1;
+            in.imm = 16;
+        }
+    } else {
+        in.dst = new_value(sf, CC_VAL_I64);
+        in.imm = ret == DEC_ARG_LLONG ? 8 : 4;
+    }
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        free(in.sym);
+        free(in.args);
+        free(in.call_arg_abi);
+        free(in.call_arg_sizes);
+        set_diag(diag, "out of memory emitting a decimal helper call");
+        return -1;
+    }
+    if (ret == DEC_ARG_LDOUBLE) {
+        set_value_size(sf, in.dst, 16);
+    } else if (ret == DEC_ARG_INT) {
+        set_value_size(sf, in.dst, 4);
+    } else if (ret == DEC_ARG_LLONG) {
+        set_value_size(sf, in.dst, 8);
+    }
+    return in.dst;
+}
+
+/**
+ * A binary operator on decimal operands of one type (sema converts
+ * them): `+ - * /` by __bid_{add,sub,mul,div}<mode>3, a comparison by the
+ * matching __bid_<cmp><mode>2, whose result compares with 0 as the
+ * operator does (libgcc's convention, unordered operands failing).
+ */
+static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    static const struct {
+        cc_binop_t op;
+        const char *name;
+        int arity;
+    } ops[] = {{CC_BIN_ADD, "add", 3}, {CC_BIN_SUB, "sub", 3}, {CC_BIN_MUL, "mul", 3}, {CC_BIN_DIV, "div", 3},
+               {CC_BIN_EQ, "eq", 2},   {CC_BIN_NE, "ne", 2},   {CC_BIN_LT, "lt", 2},   {CC_BIN_LE, "le", 2},
+               {CC_BIN_GT, "gt", 2},   {CC_BIN_GE, "ge", 2}};
+    int sid = e->lhs->struct_id;
+    int bits = dec_bits_of(tu, e->lhs->value_type, sid);
+    dec_arg_t kinds[2] = {DEC_ARG_DEC, DEC_ARG_DEC};
+    int sids[2];
+    int args[2];
+    char name[32];
+    size_t k;
+
+    for (k = 0; k < sizeof(ops) / sizeof(ops[0]) && ops[k].op != e->op; ++k) {
+    }
+    if (bits == 0 || k == sizeof(ops) / sizeof(ops[0])) {
+        set_diag(diag, "malformed decimal floating operation in lowering");
+        return -1;
+    }
+    sids[0] = sid;
+    sids[1] = sid;
+    args[0] = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+    args[1] = args[0] < 0 ? -1 : lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+    if (args[1] < 0) {
+        return -1;
+    }
+    snprintf(name, sizeof(name), "__bid_%s%s%d", ops[k].name, dec_mode(bits), ops[k].arity);
+    if (ops[k].arity == 3) {
+        return dec_libcall(tu, sf, name, args, kinds, sids, 2, DEC_ARG_DEC, sid, diag);
+    }
+    {
+        int r = dec_libcall(tu, sf, name, args, kinds, sids, 2, DEC_ARG_INT, -1, diag);
+        int z = r < 0 ? -1 : emit_const_i64_instr(sf, 0);
+        int c;
+
+        if (z < 0) {
+            return -1;
+        }
+        set_value_size(sf, z, 4);
+        c = emit_cmp_instr(sf, vec_cmp_kind(e->op), r, z, 0, diag);
+        if (c >= 0) {
+            set_value_size(sf, c, 4);
+        }
+        return c;
+    }
+}
+
+/**
+ * A conversion to or from a decimal floating type (CC_EXPR_CAST), by
+ * libgcc: between decimal types __bid_extend/trunc<from><to>2, from an
+ * integer __bid_float[uns]{si,di}<mode>, to one __bid_fix[uns]<mode>{si,di},
+ * and to or from a binary floating type __bid_extend/trunc (sf, df, xf).
+ */
+static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    int to = dec_bits_of(tu, e->aux_type, e->aux_struct_id);
+    int from = dec_bits_of(tu, e->lhs->value_type, e->lhs->struct_id);
+    cc_type_t st = e->lhs->value_type;
+    cc_type_t dt = e->aux_type;
+    int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+    dec_arg_t kind;
+    int sids[1];
+    char name[40];
+
+    if (src < 0) {
+        return -1;
+    }
+    if (dt == CC_TYPE_VOID && e->aux_struct_id < 0) {
+        return src;
+    }
+    if (to != 0 && from != 0) {
+        if (to == from) {
+            return src;
+        }
+        snprintf(name, sizeof(name), "__bid_%s%s%s2", to > from ? "extend" : "trunc", dec_mode(from), dec_mode(to));
+        sids[0] = e->lhs->struct_id;
+        kind = DEC_ARG_DEC;
+        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, e->aux_struct_id, diag);
+    }
+    if (to != 0) {
+        /* to a decimal type: from an integer or a binary floating type */
+        sids[0] = -1;
+        if (st == CC_TYPE_FLOAT || st == CC_TYPE_DOUBLE || st == CC_TYPE_LDOUBLE) {
+            const char *bm = st == CC_TYPE_FLOAT ? "sf" : st == CC_TYPE_DOUBLE ? "df" : "xf";
+            int bw = st == CC_TYPE_FLOAT ? 32 : st == CC_TYPE_DOUBLE ? 64 : 80;
+
+            kind = st == CC_TYPE_FLOAT ? DEC_ARG_FLOAT : st == CC_TYPE_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+            snprintf(name, sizeof(name), "__bid_%s%s%s", bw <= to ? "extend" : "trunc", bm, dec_mode(to));
+        } else {
+            int wide = integral_type_bits(st) > 32;
+            int uns = cc_type_is_unsigned_integral(st);
+
+            src = cast_value(sf, src, CC_VAL_I64, diag);
+            src = src < 0 ? -1 : normalize_integral_value(sf, src, wide ? (uns ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG)
+                                                                        : (uns ? CC_TYPE_UINT : CC_TYPE_INT),
+                                                       diag);
+            if (src < 0) {
+                return -1;
+            }
+            set_value_size(sf, src, wide ? 8 : 4);
+            kind = wide ? DEC_ARG_LLONG : DEC_ARG_INT;
+            snprintf(name, sizeof(name), "__bid_float%s%s%s", uns ? "uns" : "", wide ? "di" : "si", dec_mode(to));
+        }
+        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, e->aux_struct_id, diag);
+    }
+    /* from a decimal type: to an integer or a binary floating type */
+    sids[0] = e->lhs->struct_id;
+    kind = DEC_ARG_DEC;
+    if (dt == CC_TYPE_FLOAT || dt == CC_TYPE_DOUBLE || dt == CC_TYPE_LDOUBLE) {
+        const char *bm = dt == CC_TYPE_FLOAT ? "sf" : dt == CC_TYPE_DOUBLE ? "df" : "xf";
+        int bw = dt == CC_TYPE_FLOAT ? 32 : dt == CC_TYPE_DOUBLE ? 64 : 80;
+        dec_arg_t rk = dt == CC_TYPE_FLOAT ? DEC_ARG_FLOAT : dt == CC_TYPE_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+        int r;
+
+        /* libgcc's names: trunc unless the binary type is the wider (sd to df and xf, dd to xf) */
+        snprintf(name, sizeof(name), "__bid_%s%s%s", bw <= from ? "trunc" : "extend", dec_mode(from), bm);
+        r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, rk, -1, diag);
+        if (r >= 0 && dt == CC_TYPE_FLOAT) {
+            r = normalize_float_value(sf, r, CC_TYPE_FLOAT, diag);
+        }
+        return r;
+    }
+    {
+        int wide = integral_type_bits(dt) > 32;
+        int uns = cc_type_is_unsigned_integral(dt);
+        int r;
+
+        snprintf(name, sizeof(name), "__bid_fix%s%s%s", uns ? "uns" : "", dec_mode(from), wide ? "di" : "si");
+        r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, wide ? DEC_ARG_LLONG : DEC_ARG_INT, -1, diag);
+        return r < 0 ? -1 : normalize_integral_value(sf, r, dt, diag);
+    }
+}
+
 /**
  * A conversion to or from a wide integer type (CC_EXPR_CAST): between wide
  * types limb by limb, from a narrower integer through its long long value,
@@ -5892,6 +6210,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 (vec_of(tu, e->lhs->value_type, e->lhs->struct_id, &vv) ||
                  (e->rhs != NULL && vec_of(tu, e->rhs->value_type, e->rhs->struct_id, &vv)))) {
                 return lower_vector_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
+            }
+            if (dec_bits_of(tu, e->lhs->value_type, e->lhs->struct_id) != 0) {
+                return lower_decimal_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
             if (wide_of(tu, e->lhs->value_type, e->lhs->struct_id, &ww)) {
                 return lower_wide_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
@@ -9329,6 +9650,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return lower_wide_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
         }
+        if (cast_src->kind != CC_EXPR_INIT_LIST && (dec_bits_of(tu, e->aux_type, e->aux_struct_id) != 0 ||
+                                                    dec_bits_of(tu, cast_src->value_type, cast_src->struct_id) != 0)) {
+            return lower_decimal_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
+        }
         if (cast_src->kind != CC_EXPR_INIT_LIST) {
             vec_t vd;
             vec_t vs;
@@ -10650,6 +10975,16 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
         }
 
         if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            if (item->args[ii]->kind != CC_EXPR_INIT_LIST && item->args[ii]->value_type == CC_TYPE_VOID &&
+                item->args[ii]->struct_id == m->type_struct_id) {
+                /* a value of the element's structure type (a decimal constant, say): copied in */
+                int src = lower_expr(tu, sf, ctx, vars, var_count, depth, item->args[ii], diag);
+
+                if (src < 0 || emit_memcpy_instr(sf, elem_ptr, src, elem_size, diag) != 0) {
+                    return -1;
+                }
+                continue;
+            }
             if (item->args[ii]->kind != CC_EXPR_INIT_LIST) {
                 if (is_zero_initializer_expr(item->args[ii])) {
                     continue;

@@ -61,6 +61,16 @@ as
 .Nm
 does.
 .Pp
+.Vt _Decimal32 ,
+.Vt _Decimal64
+and
+.Vt _Decimal128
+hold the BID encoding gcc uses, and their arithmetic and conversions
+call libgcc's
+.Fn __bid_*
+functions, so a program using them links only against a libgcc built
+with decimal floating point (a Linux host's is; substrate's is not).
+.Pp
 Installed host-runnable copies of
 .Nm ,
 .Xr as 1 ,

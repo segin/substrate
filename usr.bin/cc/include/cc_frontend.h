@@ -462,6 +462,9 @@ typedef struct {
     long vector_count;
     cc_type_t vector_elem; /**< such a vector's element type */
     int vector_cmp_sid;    /**< the vector type its comparisons give: signed integers of the element's size */
+    /** for the structure standing for a decimal floating type, `{ __bid; }` holding its BID
+     *  encoding (an integer, or two 64-bit halves low first for _Decimal128): 32, 64 or 128; else 0 */
+    int decimal_bits;
 } cc_struct_def_t;
 
 typedef struct {

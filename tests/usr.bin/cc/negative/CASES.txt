@@ -62,3 +62,5 @@ native_bad_c99_ucn_ident_basic.c|-std=c99|universal character \u0041 is not vali
 native_bad_vector_float_mod.c||invalid operands to an integer operator: a floating vector
 native_bad_vector_mismatch.c||invalid operands to a vector operation: the vector types differ
 native_bad_vector_size.c||invalid vector type: its size must be a power-of-two multiple
+native_bad_decimal_binary_mix.c||cannot mix operands of decimal floating and binary floating types
+native_bad_decimal_mod.c||invalid operands to a decimal floating operation

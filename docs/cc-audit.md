@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
-| 4. ABI and other code generation | 37 | 36 |
+| 4. ABI and other code generation | 37 | 37 |
 | 5. Driver and predefined macros | 3 | 3 |
 | 6. The restored suite's failing commands | 10 | 10 |
 | 7. The restored suite itself | 12 | 12 |
@@ -262,12 +262,38 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   Not done: `_Imaginary` as its own type (gcc does not support it
   either), complex integer types (`3i` is a double imaginary), and
   libgcc's rescaling of huge or tiny divisors.
-- [ ] **CC-69** `_Decimal32`, `_Decimal64` and `_Decimal128` shall be
+- [x] **CC-69** `_Decimal32`, `_Decimal64` and `_Decimal128` shall be
   decimal floating types in the encoding gcc uses (BID on x86).  cc
   carries all three as a binary double, so a decimal object's bytes are
   not gcc's, decimal rounding is binary rounding, and a value passed to
   or from gcc-built code is wrong.  Sizes and alignments are right.
   *Reproduced* (`_Decimal64 d = 2.0` holds the bytes of the double 2.0).
+  Each type is now a hidden structure holding its BID encoding.
+  `frontend/decimal.c` encodes constants: a `df`/`dd`/`dl` literal's
+  coefficient and exponent as written, rounded half to even to the
+  type's precision, clamped or overflowing to infinity at its exponent
+  range; an integer exactly; a binary floating constant as gcc folds one
+  (its exact decimal value, trailing zeros dropped but one digit kept
+  after the point, so `2.0` is 20e-1 and `0.1` its 16 or 34 rounded
+  digits).  Sema folds constant conversions and negations that way,
+  converts integer operands to the decimal type and the narrower decimal
+  operand to the wider, and rejects binary floating operands and integer
+  operators (C23 6.3.1.8).  Arithmetic, comparisons and every conversion
+  call libgcc's `__bid_*` functions, as gcc does; `++`/`--`, compound
+  assignment, truth values and static initializers (of scalars, arrays
+  and members) work.  Decimals are passed and returned as gcc does: in
+  xmm registers on x86-64 (`_Decimal128` whole in one); on i386
+  `_Decimal32` as an int and in `%eax`, `_Decimal64` on the stack and in
+  `%eax:%edx`, `_Decimal128` on the stack 16-aligned and in memory.  The
+  keywords are taken in every language mode, as gcc takes them.  Where cc
+  links against glibc it now names the dynamic linker `AS_NEEDED`, as
+  glibc's `libc.so` script does, since libgcc's decimal conversions use
+  TLS.  `codegen/decimal_ops.c` matches gcc to the bit at both widths
+  and levels; `codegen_abi/` passes the three types both ways.  Not
+  done: constant folding of decimal arithmetic (a static initializer
+  like `1.5DD + 2` is rejected), and a decimal program for substrate
+  needs a libgcc built with decimal float, which substrate's toolchain
+  does not have.
 - [x] **CC-70** Integers wider than 64 bits shall work: `__int128` on
   x86-64 and `_BitInt(N)` up to a `BITINT_MAXWIDTH` above 64 (gcc's is
   65535), with the C23 `wb`/`uwb` literal suffixes.  The IR's integers
@@ -839,7 +865,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-80 requirements: 79 met, 1 open.
+80 requirements: 80 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

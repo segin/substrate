@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_consteval.h"
 #include "cc_ctype.h"
+#include "cc_decimal.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_lexer.h"
@@ -1536,6 +1537,126 @@ static int parser_wide_struct(parser_t *p, long bits, int is_unsigned, int is_in
     return sid;
 }
 
+static cc_expr_t *new_expr(cc_expr_kind_t kind);
+static int push_arg(cc_expr_t *call, cc_expr_t *arg);
+
+/**
+ * The structure standing for the decimal floating type @p bits wide (32,
+ * 64 or 128): `{ unsigned __bid; }`, `{ unsigned long long __bid; }` or
+ * `{ unsigned long long __bid[2]; }` (low half first) holding its BID
+ * encoding, of the type's size and alignment.  Made once per width.
+ *
+ * @return the structure's id, or -1 when out of memory
+ */
+static int parser_decimal_struct(parser_t *p, int bits) {
+    long dims[CC_MAX_ARRAY_DIMS] = {0};
+    long size = bits / 8;
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+    int rc;
+
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].decimal_bits == bits) {
+            return (int)i;
+        }
+    }
+    p->scope_depth = 0;
+    sid = struct_ensure(p, NULL, 0, 1);
+    p->scope_depth = saved_depth;
+    if (sid < 0) {
+        return -1;
+    }
+    if (bits == 128) {
+        /* an array member is recorded with a pointer level for its dimension, as a declared one is */
+        dims[0] = 2;
+        rc = struct_member_push(p, sid, "__bid", ptr_of_type(CC_TYPE_ULONG_LONG), -1, 2, 1, dims, 0, 16, 0, 0, 0, 0,
+                                0, 0);
+        if (rc >= 0) {
+            p->structs[sid].members[0].ctype = cc_ct_array(cc_ct_basic(CC_CT_ULLONG), 2);
+        }
+    } else {
+        cc_type_t t = bits == 32 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
+
+        rc = struct_member_push(p, sid, "__bid", t, -1, -1, 0, NULL, 0, size, 0, 0, 0, 0, 0, 0);
+        if (rc >= 0) {
+            p->structs[sid].members[0].ctype = cc_ct_from_scalar(t);
+        }
+    }
+    if (rc < 0) {
+        return -1;
+    }
+    p->structs[sid].size = size;
+    p->structs[sid].align = size;
+    p->structs[sid].complete = 1;
+    p->structs[sid].decimal_bits = bits;
+    return sid;
+}
+
+/**
+ * The decimal floating constant at the current token (a df, dd or dl
+ * suffix): `(decimal type){ bid }`, its BID encoding worked out now --
+ * the coefficient and exponent as written, rounded to the type.
+ *
+ * @return the expression, or NULL on error (diagnosed)
+ */
+static cc_expr_t *parser_decimal_literal(parser_t *p) {
+    int bits = p->tok.float_is_decimal;
+    int sid = parser_decimal_struct(p, bits);
+    cc_dec_t *d = (cc_dec_t *)malloc(sizeof(*d));
+    uint64_t bid[2];
+    cc_expr_t *outer = new_expr(CC_EXPR_INIT_LIST);
+    cc_expr_t *list = outer;
+    cc_expr_t *e = new_expr(CC_EXPR_CAST);
+    int k;
+
+    if (sid < 0 || d == NULL || outer == NULL || e == NULL) {
+        free(d);
+        free_expr(outer);
+        free_expr(e);
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a decimal constant");
+        return NULL;
+    }
+    if (cc_dec_from_string(p->tok.start, p->tok.len, d) != 0) {
+        free(d);
+        free_expr(outer);
+        free_expr(e);
+        set_diag(p->diag, p->tok.line, p->tok.col, "malformed decimal floating constant");
+        return NULL;
+    }
+    cc_dec_encode_bid(d, bits, bid);
+    free(d);
+    if (bits == 128) {
+        /* the halves initialize the structure's one member, an array */
+        list = new_expr(CC_EXPR_INIT_LIST);
+        if (list == NULL || push_arg(outer, list) != 0) {
+            free_expr(list);
+            free_expr(outer);
+            free_expr(e);
+            return NULL;
+        }
+    }
+    for (k = 0; k < (bits == 128 ? 2 : 1); ++k) {
+        /* not new_int_expr(): its long is 32 bits where cc runs on i386 */
+        cc_expr_t *item = new_expr(CC_EXPR_INT);
+
+        if (item == NULL || push_arg(list, item) != 0) {
+            free_expr(item);
+            free_expr(outer);
+            free_expr(e);
+            return NULL;
+        }
+        item->int_val = (long long)bid[k];
+        item->value_type = bits == 32 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
+    }
+    e->aux_type = CC_TYPE_VOID;
+    e->aux_struct_id = sid;
+    e->value_type = CC_TYPE_VOID;
+    e->struct_id = sid;
+    e->lhs = outer;
+    return e;
+}
+
 /** The interned type of a vector element type (legacy @p t), or NULL if a vector cannot have it. */
 static const cc_ctype_t *parser_vector_elem_ctype(cc_type_t t) {
     switch (t) {
@@ -2251,8 +2372,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 }
                 continue;
             }
-            if (parser_is_c23_or_newer() &&
-                (tok_is_ident(p, "_Decimal32") || tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128"))) {
+            /* C23's decimal floating types; gcc takes them in every mode, as reserved identifiers */
+            if (tok_is_ident(p, "_Decimal32") || tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128")) {
                 seen = 1;
                 seen_type = 1;
                 seen_decimal = 1;
@@ -3456,10 +3577,21 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     }
 
     if (seen_decimal) {
-        *out_type = decimal_type;
-        if (out_struct_id != NULL) {
-            *out_struct_id = -1;
+        /* a structure holding the BID encoding (parser_decimal_struct()) */
+        int dsid = parser_decimal_struct(p, decimal_type == CC_TYPE_DECIMAL32   ? 32
+                                            : decimal_type == CC_TYPE_DECIMAL64 ? 64
+                                                                                : 128);
+
+        if (dsid < 0) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a decimal floating type");
+            return -1;
         }
+        *out_type = CC_TYPE_VOID;
+        if (out_struct_id != NULL) {
+            *out_struct_id = dsid;
+        }
+        alias_type = CC_TYPE_VOID;
+        alias_ctype = cc_ct_record(dsid);
         if (out_typedef != NULL) {
             *out_typedef = seen_typedef;
         } else if (seen_typedef) {
@@ -7660,6 +7792,14 @@ static cc_expr_t *parse_primary(parser_t *p) {
         return parse_unary(p);
     }
 
+    if (p->tok.kind == TOK_NUM && p->tok.is_float && p->tok.float_is_decimal != 0) {
+        e = parser_decimal_literal(p);
+        if (e != NULL && next_tok(p) != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        return e;
+    }
     if (p->tok.kind == TOK_NUM && p->tok.int_is_bitprecise && !p->tok.is_float) {
         e = parser_bitint_literal(p);
         if (e != NULL && next_tok(p) != 0) {

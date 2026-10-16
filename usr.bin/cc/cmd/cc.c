@@ -1918,6 +1918,21 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
       argv[at++] = libgcc;
     }
 #ifndef CC_SUBSTRATE_BUILD
+    {
+      /*
+       * glibc's libc.so script names the dynamic linker AS_NEEDED;
+       * libc.so.6 named directly does not, and libgcc's decimal
+       * conversions use TLS, which needs its __tls_get_addr.
+       */
+      const char *ldso = o->target == CC_TARGET_I386 ? "/lib/ld-linux.so.2"
+                                                     : "/lib64/ld-linux-x86-64.so.2";
+
+      if (access(ldso, R_OK) == 0) {
+        argv[at++] = "--as-needed";
+        argv[at++] = (char *)ldso;
+        argv[at++] = "--no-as-needed";
+      }
+    }
     argv[at++] = crtend;
     argv[at++] = crtn;
 #endif

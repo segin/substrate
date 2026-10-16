@@ -68,6 +68,20 @@ v2hi lib_v2(v2hi a);
 v8si lib_v8(int k, v8si a);
 int lib_v16(int x, v16si a, int y);
 v8qi lib_v8q(int x, v8qi a, v8qi b, v8qi c, v8qi d);
+_Decimal32 lib_d32(int n, _Decimal32 a, _Decimal32 b);
+_Decimal64 lib_d64(_Decimal64 a, double x, _Decimal64 b);
+_Decimal128 lib_d128(int n, _Decimal128 a, _Decimal64 b);
+
+/* decimal values across the call, printed as their encodings */
+static void decimals(void) {
+    _Decimal32 s = lib_d32(3, 1.25DF, 0.5DF);
+    _Decimal64 d = lib_d64(10.5DD, 0.25, 3);
+    _Decimal128 q = lib_d128(-7, 1.000000000000000000000000000001DL, 2.5DD);
+    unsigned long long w[2];
+
+    __builtin_memcpy(w, &q, 16);
+    printf("%08x %016llx %016llx%016llx\n", *(unsigned *)&s, *(unsigned long long *)&d, w[1], w[0]);
+}
 
 /* vectors across the call */
 static void vectors(void) {
@@ -162,6 +176,7 @@ int main(void) {
     printf("%d %lld\n", lib_sum(1, 2, 3, 4000000005LL, 1.5, arg), lib_wide(-5000000000LL, 0xfedcba9876543210ULL));
     classes();
     vectors();
+    decimals();
     vector_mmx();
     return 0;
 }

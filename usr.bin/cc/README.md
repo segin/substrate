@@ -46,8 +46,9 @@ The full option list is the man page, `usr.man/man1/cc.1`.
   diagnostic (`negative/CASES.txt`).
 
 gcc (or clang, for the clang-compatibility tests) is the judge of what
-is correct.  What is known not to work is the open items in
-`docs/cc-audit.md` at the top of the tree -- decimal floating point.
+is correct.  `docs/cc-audit.md` at the top of the tree lists what the
+audit found and how each item was met, with what each still does not
+do.
 
 ## Build and install
 

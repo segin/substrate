@@ -91,6 +91,15 @@ v8si lib_v8(int k, v8si a) { return a + k; }
 int lib_v16(int x, v16si a, int y) { return x + y + a[0] + a[15]; }
 v8qi lib_v8q(int x, v8qi a, v8qi b, v8qi c, v8qi d) { return a + b + c - d + (char)x; }
 
+/*
+ * Decimal floating types: in xmm registers on x86-64 (_Decimal128 whole in
+ * one); on i386 _Decimal32 as an int and in %eax, _Decimal64 on the stack
+ * and in %eax:%edx, _Decimal128 on the stack 16-aligned and in memory.
+ */
+_Decimal32 lib_d32(int n, _Decimal32 a, _Decimal32 b) { return a * b + n; }
+_Decimal64 lib_d64(_Decimal64 a, double x, _Decimal64 b) { return a / b - (_Decimal64)x; }
+_Decimal128 lib_d128(int n, _Decimal128 a, _Decimal64 b) { return a * b + n; }
+
 float _Complex lib_cf(float _Complex a, float _Complex b) { return a * b + 1.0f; }
 double _Complex lib_cd(double _Complex a, double _Complex b) { return a / b; }
 long double _Complex lib_cl(long double _Complex a, long double _Complex b) { return a * b - 1.0L; }

@@ -2,6 +2,7 @@
 #include "cc_asm.h"
 #include "cc_consteval.h"
 #include "cc_ctype.h"
+#include "cc_decimal.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_options.h"
@@ -2175,6 +2176,8 @@ static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, 
  * @return 1 if a cast was added, 0 if none was needed, -1 when out of memory
  */
 static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid);
+static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid);
+static cc_expr_t *sema_int_node(long long v, size_t line, size_t col);
 
 static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid) {
     cc_type_t de = sema_complex_elem(tu, t, sid);
@@ -2184,7 +2187,11 @@ static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_e
     if (*slot == NULL) {
         return 0;
     }
-    /* a wide integer on either side converts the same way */
+    /* a decimal floating or wide integer type on either side converts the same way */
+    wrc = sema_decimal_convert_for_assign(tu, slot, t, sid);
+    if (wrc != 0) {
+        return wrc;
+    }
     wrc = sema_wide_convert_for_assign(tu, slot, t, sid);
     if (wrc != 0) {
         return wrc;
@@ -2536,6 +2543,427 @@ static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_di
     }
     e->value_type = e->aux_type;
     e->struct_id = e->aux_struct_id;
+    return 0;
+}
+
+static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
+                      cc_diag_t *diag);
+
+/** The structure standing for the decimal floating type (@p t, @p sid) is, or NULL. */
+static const cc_struct_def_t *sema_decimal_def(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
+    if (t != CC_TYPE_VOID || sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count ||
+        tu->structs[sid].decimal_bits <= 0) {
+        return NULL;
+    }
+    return &tu->structs[sid];
+}
+
+/** Whether expression @p e has a decimal floating type. */
+static int sema_is_decimal(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return e != NULL && sema_decimal_def(tu, e->value_type, e->struct_id) != NULL;
+}
+
+/** The structure of the decimal floating type @p bits wide, or -1 if the program names none. */
+static int sema_decimal_sid(const cc_translation_unit_t *tu, int bits) {
+    size_t i;
+
+    for (i = 0; i < tu->struct_count; ++i) {
+        if (tu->structs[i].decimal_bits == bits) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Whether @p e is a decimal constant -- `(decimal type){ bid }`, as the
+ * parser makes a literal and sema a folded conversion -- and if so its
+ * width in *@p bits and its encoding in @p bid.
+ */
+static int sema_decimal_const(const cc_translation_unit_t *tu, const cc_expr_t *e, int *bits, uint64_t bid[2]) {
+    const cc_struct_def_t *dd;
+    const cc_expr_t *list;
+
+    if (e == NULL || e->kind != CC_EXPR_CAST || e->lhs == NULL || e->lhs->kind != CC_EXPR_INIT_LIST ||
+        (dd = sema_decimal_def(tu, e->aux_type, e->aux_struct_id)) == NULL) {
+        return 0;
+    }
+    list = e->lhs;
+    if (dd->decimal_bits == 128) {
+        if (list->arg_count != 1 || list->args[0] == NULL || list->args[0]->kind != CC_EXPR_INIT_LIST) {
+            return 0;
+        }
+        list = list->args[0];
+    }
+    if (list->arg_count != (size_t)(dd->decimal_bits == 128 ? 2 : 1) || list->args[0]->kind != CC_EXPR_INT ||
+        (dd->decimal_bits == 128 && list->args[1]->kind != CC_EXPR_INT)) {
+        return 0;
+    }
+    bid[0] = (uint64_t)list->args[0]->int_val;
+    bid[1] = dd->decimal_bits == 128 ? (uint64_t)list->args[1]->int_val : 0;
+    *bits = dd->decimal_bits;
+    return 1;
+}
+
+/**
+ * The brace list `{ bid }` (`{ { lo, hi } }` for _Decimal128) holding the
+ * encoding @p bid of a decimal type @p bits wide: a constant's
+ * initializer.
+ */
+static cc_expr_t *sema_decimal_list(int bits, const uint64_t bid[2], size_t line, size_t col) {
+    cc_expr_t *outer = (cc_expr_t *)calloc(1, sizeof(*outer));
+    cc_expr_t *list = bits == 128 ? (cc_expr_t *)calloc(1, sizeof(*list)) : outer;
+    int n = bits == 128 ? 2 : 1;
+    int k;
+
+    if (outer == NULL || list == NULL) {
+        free(outer);
+        if (list != outer) {
+            free(list);
+        }
+        return NULL;
+    }
+    outer->kind = CC_EXPR_INIT_LIST;
+    outer->struct_id = -1;
+    outer->line = line;
+    outer->col = col;
+    if (list != outer) {
+        list->kind = CC_EXPR_INIT_LIST;
+        list->struct_id = -1;
+        outer->args = (cc_expr_t **)calloc(1, sizeof(*outer->args));
+        if (outer->args == NULL) {
+            free(outer);
+            free(list);
+            return NULL;
+        }
+        outer->args[0] = list;
+        outer->arg_count = 1;
+    }
+    list->args = (cc_expr_t **)calloc((size_t)n, sizeof(*list->args));
+    if (list->args == NULL) {
+        cc_expr_free(outer);
+        return NULL;
+    }
+    for (k = 0; k < n; ++k) {
+        list->args[k] = sema_int_node((long long)bid[k], line, col);
+        if (list->args[k] == NULL) {
+            cc_expr_free(outer);
+            return NULL;
+        }
+        list->args[k]->value_type = bits == 32 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
+        list->arg_count = (size_t)(k + 1);
+    }
+    return outer;
+}
+
+/**
+ * Fold @p e, an arithmetic constant, to the decimal type of structure
+ * @p sid, as gcc does at compile time: an integer exactly (rounded to the
+ * type's precision), a binary floating constant through its exact decimal
+ * value (cc_dec_from_binary()), a decimal constant re-rounded, a negated
+ * one with its sign flipped.  The result goes to @p bid.
+ *
+ * @return 1 if folded, 0 if @p e is not such a constant
+ */
+static int sema_decimal_fold_value(const cc_translation_unit_t *tu, const cc_expr_t *e, int bits, uint64_t bid[2]) {
+    cc_dec_t *d;
+    uint64_t src[2];
+    int src_bits;
+    int ok = 1;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_MUL && e->lhs != NULL && e->lhs->kind == CC_EXPR_INT &&
+        e->lhs->int_val == -1 && e->rhs != NULL &&
+        (e->rhs->kind == CC_EXPR_FLOAT || sema_decimal_const(tu, e->rhs, &src_bits, src))) {
+        /* unary minus (parsed as -1 * x) on a floating constant: the constant, its sign flipped */
+        if (!sema_decimal_fold_value(tu, e->rhs, bits, bid)) {
+            return 0;
+        }
+        if (bits == 128) {
+            bid[1] ^= 0x8000000000000000ULL;
+        } else {
+            bid[0] ^= bits == 32 ? 0x80000000ULL : 0x8000000000000000ULL;
+        }
+        return 1;
+    }
+    d = (cc_dec_t *)malloc(sizeof(*d));
+    if (d == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_INT) {
+        int is_uns = cc_type_is_unsigned_integral(e->value_type);
+
+        if (is_uns || e->int_val >= 0) {
+            cc_dec_from_int((unsigned long long)e->int_val, 0, d);
+        } else {
+            cc_dec_from_int(0ULL - (unsigned long long)e->int_val, 1, d);
+        }
+    } else if (e->kind == CC_EXPR_FLOAT) {
+        cc_dec_from_binary(e->float_val, d);
+    } else if (sema_decimal_const(tu, e, &src_bits, src)) {
+        cc_dec_from_bid(src_bits, src, d);
+    } else {
+        ok = 0;
+    }
+    if (ok) {
+        cc_dec_encode_bid(d, bits, bid);
+    }
+    free(d);
+    return ok;
+}
+
+/**
+ * Convert the checked expression in @p slot to the decimal type of
+ * structure @p sid: a constant is folded to a decimal constant, anything
+ * else is cast.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_decimal_convert(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid) {
+    int bits = tu->structs[sid].decimal_bits;
+    uint64_t bid[2];
+
+    if (sema_decimal_fold_value(tu, *slot, bits, bid)) {
+        cc_expr_t *list = sema_decimal_list(bits, bid, (*slot)->line, (*slot)->col);
+        cc_expr_t *c = list == NULL ? NULL : (cc_expr_t *)calloc(1, sizeof(*c));
+
+        if (c == NULL) {
+            cc_expr_free(list);
+            return -1;
+        }
+        c->kind = CC_EXPR_CAST;
+        c->line = (*slot)->line;
+        c->col = (*slot)->col;
+        c->aux_type = CC_TYPE_VOID;
+        c->aux_struct_id = sid;
+        c->value_type = CC_TYPE_VOID;
+        c->struct_id = sid;
+        c->lhs = list;
+        cc_expr_free(*slot);
+        *slot = c;
+        /* the compound literal's own checks */
+        return check_expr(tu, c, NULL, 0, 0, NULL);
+    }
+    return sema_wrap_cast(slot, CC_TYPE_VOID, sid);
+}
+
+/** Whether @p t is a type that converts to a decimal floating type: an integer, or _Bool. */
+static int sema_decimal_partner_ok(cc_type_t t) {
+    return (cc_type_is_integral(t) && !is_pointer_type(t)) || t == CC_TYPE_BOOL || t == CC_TYPE_BITINT;
+}
+
+/** Whether @p t is a binary floating type (one a decimal operand cannot meet, C23 6.3.1.8). */
+static int sema_is_binary_fp(cc_type_t t) {
+    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE;
+}
+
+/**
+ * A binary operator with a decimal floating operand (C23 6.3.1.8): both
+ * operands go to the wider decimal type, an integer one converted (a
+ * constant folded), so lowering sees one decimal type.  `+ - * /` give
+ * it, comparisons int; a binary floating operand, or any other operator,
+ * is an error.  `-x` (parsed as -1 * x) of a decimal constant folds.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_struct_def_t *dl = sema_decimal_def(tu, e->lhs->value_type, e->lhs->struct_id);
+    const cc_struct_def_t *dr = sema_decimal_def(tu, e->rhs->value_type, e->rhs->struct_id);
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+    int bits;
+    int sid;
+    uint64_t bid[2];
+
+    if ((dl == NULL && sema_is_binary_fp(e->lhs->value_type)) || (dr == NULL && sema_is_binary_fp(e->rhs->value_type))) {
+        set_diag(diag, "cannot mix operands of decimal floating and binary floating types");
+        return -1;
+    }
+    if (!is_cmp && e->op != CC_BIN_ADD && e->op != CC_BIN_SUB && e->op != CC_BIN_MUL && e->op != CC_BIN_DIV) {
+        set_diag(diag, "invalid operands to a decimal floating operation");
+        return -1;
+    }
+    if ((dl == NULL && !sema_decimal_partner_ok(e->lhs->value_type)) ||
+        (dr == NULL && !sema_decimal_partner_ok(e->rhs->value_type))) {
+        set_diag(diag, "invalid operands to a decimal floating operation");
+        return -1;
+    }
+    bits = dl != NULL ? dl->decimal_bits : 0;
+    if (dr != NULL && dr->decimal_bits > bits) {
+        bits = dr->decimal_bits;
+    }
+    sid = sema_decimal_sid(tu, bits);
+    if (e->op == CC_BIN_MUL && dl == NULL && e->lhs->kind == CC_EXPR_INT && e->lhs->int_val == -1 &&
+        sema_decimal_fold_value(tu, e, bits, bid)) {
+        /* -c of a decimal constant: the constant negated */
+        cc_expr_t *list = sema_decimal_list(bits, bid, e->line, e->col);
+
+        if (list == NULL) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        cc_expr_free(e->lhs);
+        cc_expr_free(e->rhs);
+        e->kind = CC_EXPR_CAST;
+        e->op = 0;
+        e->rhs = NULL;
+        e->lhs = list;
+        e->aux_type = CC_TYPE_VOID;
+        e->aux_struct_id = sid;
+        e->value_type = CC_TYPE_VOID;
+        e->struct_id = sid;
+        return check_expr(tu, e, NULL, 0, 0, diag);
+    }
+    if ((dl == NULL || dl->decimal_bits != bits) && sema_decimal_convert(tu, &e->lhs, sid) != 0) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    if ((dr == NULL || dr->decimal_bits != bits) && sema_decimal_convert(tu, &e->rhs, sid) != 0) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    e->value_type = is_cmp ? CC_TYPE_INT : CC_TYPE_VOID;
+    e->struct_id = is_cmp ? -1 : sid;
+    return 0;
+}
+
+/**
+ * A decimal floating value where a truth value is wanted: `x != 0`.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_decimal_truth(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    cc_expr_t *ne;
+    cc_expr_t *zero;
+
+    if (!sema_is_decimal(tu, *slot)) {
+        return 0;
+    }
+    ne = (cc_expr_t *)calloc(1, sizeof(*ne));
+    zero = sema_int_node(0, (*slot)->line, (*slot)->col);
+    if (ne == NULL || zero == NULL) {
+        free(ne);
+        cc_expr_free(zero);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    ne->kind = CC_EXPR_BIN;
+    ne->op = CC_BIN_NE;
+    ne->line = (*slot)->line;
+    ne->col = (*slot)->col;
+    ne->lhs = *slot;
+    ne->rhs = zero;
+    *slot = ne;
+    return sema_decimal_binop(tu, ne, diag);
+}
+
+/**
+ * Where a value is converted by assignment to (@p t, @p sid) -- an
+ * initializer, an argument, a return -- and one of the two is decimal
+ * and they differ: the conversion, made explicit (a constant folded).
+ *
+ * @return 1 if a conversion was added, 0 if none was needed, -1 on error
+ */
+static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid) {
+    int dt = sema_decimal_def(tu, t, sid) != NULL;
+    int ds = sema_is_decimal(tu, *slot);
+
+    if (!dt && !ds) {
+        return 0;
+    }
+    if (dt && ds && (*slot)->struct_id == sid) {
+        return 0;
+    }
+    if (dt) {
+        if (!ds && !sema_decimal_partner_ok((*slot)->value_type) && !sema_is_binary_fp((*slot)->value_type)) {
+            return 0;
+        }
+        return sema_decimal_convert(tu, slot, sid) == 0 ? 1 : -1;
+    }
+    if (t == CC_TYPE_BOOL) {
+        return sema_decimal_truth(tu, slot, NULL) == 0 ? 1 : -1;
+    }
+    if (!sema_decimal_partner_ok(t) && !sema_is_binary_fp(t)) {
+        return 0;
+    }
+    return sema_wrap_cast(slot, t, -1) == 0 ? 1 : -1;
+}
+
+/**
+ * A cast to or from a decimal floating type: from or to an integer,
+ * a binary floating type, another decimal type or (to) _Bool; a constant
+ * converted to a decimal type is folded.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_struct_def_t *dt = sema_decimal_def(tu, e->aux_type, e->aux_struct_id);
+    int ds = sema_is_decimal(tu, e->lhs);
+    uint64_t bid[2];
+
+    if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
+        e->value_type = CC_TYPE_VOID;
+        e->struct_id = -1;
+        return 0;
+    }
+    if (dt != NULL) {
+        if (!ds && !sema_decimal_partner_ok(e->lhs->value_type) && !sema_is_binary_fp(e->lhs->value_type)) {
+            set_diag(diag, "invalid conversion to a decimal floating type");
+            return -1;
+        }
+        if (sema_decimal_fold_value(tu, e->lhs, dt->decimal_bits, bid)) {
+            cc_expr_t *list = sema_decimal_list(dt->decimal_bits, bid, e->line, e->col);
+
+            if (list == NULL) {
+                set_diag(diag, "out of memory");
+                return -1;
+            }
+            cc_expr_free(e->lhs);
+            e->lhs = list;
+            /* now a compound literal: its own checks */
+            return check_expr(tu, e, NULL, 0, 0, diag);
+        }
+        e->value_type = CC_TYPE_VOID;
+        e->struct_id = e->aux_struct_id;
+        return 0;
+    }
+    if (e->aux_type == CC_TYPE_BOOL) {
+        if (sema_decimal_truth(tu, &e->lhs, diag) != 0) {
+            return -1;
+        }
+    } else if (!sema_decimal_partner_ok(e->aux_type) && !sema_is_binary_fp(e->aux_type)) {
+        set_diag(diag, "invalid conversion of a decimal floating value");
+        return -1;
+    }
+    e->value_type = e->aux_type;
+    e->struct_id = -1;
+    return 0;
+}
+
+/**
+ * Make a checked initializer of a static decimal object of structure
+ * @p sid the brace list of its folded encoding.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_decimal_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid, cc_diag_t *diag) {
+    int bits = tu->structs[sid].decimal_bits;
+    uint64_t bid[2];
+    cc_expr_t *list;
+
+    if (!sema_decimal_fold_value(tu, *slot, bits, bid)) {
+        set_diag(diag, "initializer of a static decimal floating object is not a constant");
+        return -1;
+    }
+    list = sema_decimal_list(bits, bid, (*slot)->line, (*slot)->col);
+    if (list == NULL) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    cc_expr_free(*slot);
+    *slot = list;
     return 0;
 }
 
@@ -3125,6 +3553,9 @@ static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **sl
  * @return 0, or -1 with @p diag set when out of memory
  */
 static int sema_condition(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    if (sema_is_decimal(tu, *slot)) {
+        return sema_decimal_truth(tu, slot, diag);
+    }
     if (sema_is_wide(tu, *slot)) {
         return sema_wide_truth(tu, slot, diag);
     }
@@ -3518,6 +3949,16 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
         } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
             return sema_vector_binop(tu, e, diag);
+        }
+        if (sema_is_decimal(tu, e->lhs) || sema_is_decimal(tu, e->rhs)) {
+            if (is_logical_op(e->op)) {
+                if (sema_decimal_truth(tu, &e->lhs, diag) != 0 || sema_decimal_truth(tu, &e->rhs, diag) != 0) {
+                    return -1;
+                }
+                e->value_type = CC_TYPE_INT;
+                return 0;
+            }
+            return sema_decimal_binop(tu, e, diag);
         }
         if (sema_is_wide(tu, e->lhs) || sema_is_wide(tu, e->rhs)) {
             if (is_logical_op(e->op)) {
@@ -4900,7 +5341,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
             }
-        } else if (sema_wide_def(tu, t, t_struct_id) != NULL || sema_vector_def(tu, t, t_struct_id) != NULL) {
+        } else if (sema_wide_def(tu, t, t_struct_id) != NULL || sema_vector_def(tu, t, t_struct_id) != NULL ||
+                   sema_decimal_def(tu, t, t_struct_id) != NULL) {
             /* rewritten as the assignment it is; a vector's then goes element by element */
             return sema_wide_update(tu, e, vars, var_count, depth, diag);
         } else if (!cc_type_is_numeric(t)) {
@@ -4979,6 +5421,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, e->aux_type, e->aux_struct_id) != NULL) {
             return sema_vector_cast(tu, e, diag);
+        }
+        if (sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, e->aux_type, e->aux_struct_id) != NULL) {
+            return sema_decimal_cast(tu, e, diag);
         }
         if (sema_is_wide(tu, e->lhs) && sema_wide_def(tu, e->aux_type, e->aux_struct_id) == NULL) {
             /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */
@@ -5634,6 +6079,17 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             if (nested == NULL && check_expr(tu, item, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
+            if (nested == NULL && sema_decimal_def(tu, CC_TYPE_VOID, m->type_struct_id) != NULL) {
+                /* a decimal member initialized by an arithmetic value: converted (a constant folded) */
+                cc_expr_t **islot = init->args[i] == item ? &init->args[i]
+                                    : (init->args[i] != NULL && init->args[i]->rhs == item) ? &init->args[i]->rhs
+                                                                                            : NULL;
+
+                if (islot != NULL && sema_decimal_convert_for_assign(tu, islot, CC_TYPE_VOID, m->type_struct_id) < 0) {
+                    set_diag(diag, "out of memory");
+                    return -1;
+                }
+            }
             continue;
         }
         if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
@@ -5745,6 +6201,12 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                  * element shaping to lowering, which has full type/size context.
                  */
                 if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (sema_decimal_def(tu, CC_TYPE_VOID, array_struct_id) != NULL &&
+                    sema_decimal_convert_for_assign(tu, &init->args[i], CC_TYPE_VOID, array_struct_id) < 0) {
+                    /* a decimal element initialized by an arithmetic value: converted (a constant folded) */
+                    set_diag(diag, "out of memory");
                     return -1;
                 }
                 saw_nonlist_struct_item = 1;
@@ -6679,9 +7141,31 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
         }
         if (g->init != NULL) {
+            if (g->init->kind != CC_EXPR_INIT_LIST && sema_decimal_def(tu, g->type, g->type_struct_id) != NULL) {
+                /* a static decimal object: its folded encoding, as a brace list */
+                if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0 ||
+                    sema_decimal_static_init(tu, &g->init, g->type_struct_id, diag) != 0 ||
+                    check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                    goto fail_global_item;
+                }
+                continue;
+            }
             if (g->init->kind == CC_EXPR_INIT_LIST) {
                 cc_type_t celem = sema_complex_elem(tu, CC_TYPE_VOID, g->type_struct_id);
 
+                if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 &&
+                    sema_decimal_def(tu, CC_TYPE_VOID, g->type_struct_id) != NULL) {
+                    /* an array of decimal objects: each element not already braced is a constant to fold */
+                    size_t k;
+
+                    for (k = 0; k < g->init->arg_count; ++k) {
+                        if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
+                            (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
+                             sema_decimal_static_init(tu, &g->init->args[k], g->type_struct_id, diag) != 0)) {
+                            goto fail_global_item;
+                        }
+                    }
+                }
                 if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 &&
                     sema_wide_def(tu, CC_TYPE_VOID, g->type_struct_id) != NULL) {
                     /* an array of wide integers: each element not already braced is a constant to fold */

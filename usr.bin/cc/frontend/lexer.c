@@ -737,11 +737,22 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
     }
 
     if (saw_dot) {
+        int d0 = lx_peek(lx);
+        int d1 = lx_peekn(lx, 1);
+
+        if ((d0 == 'd' && (d1 == 'f' || d1 == 'd' || d1 == 'l')) ||
+            (d0 == 'D' && (d1 == 'F' || d1 == 'D' || d1 == 'L'))) {
+            /* a decimal floating constant: df, dd or dl (C23 6.4.4.2) */
+            out->float_is_decimal = (d1 == 'f' || d1 == 'F') ? 32 : (d1 == 'd' || d1 == 'D') ? 64 : 128;
+            lx_adv(lx);
+            lx_adv(lx);
+        }
         if (is_imaginary_suffix_char(lx_peek(lx))) {
             out->is_imaginary = 1;
             lx_adv(lx);
         }
-        if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F' || lx_peek(lx) == 'l' || lx_peek(lx) == 'L') {
+        if (out->float_is_decimal == 0 &&
+            (lx_peek(lx) == 'f' || lx_peek(lx) == 'F' || lx_peek(lx) == 'l' || lx_peek(lx) == 'L')) {
             if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F') {
                 out->float_is_single = 1;
             }
@@ -900,6 +911,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->int_is_bitprecise = 0;
     out->float_is_single = 0;
     out->float_is_long = 0;
+    out->float_is_decimal = 0;
     out->int_is_unsigned = 0;
     out->int_is_long = 0;
     out->int_is_longlong = 0;
