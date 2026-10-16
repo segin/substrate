@@ -2031,6 +2031,7 @@ static int add_builtin_macros(pp_state_t *st) {
 
 static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t flag_count) {
     size_t i;
+    int pass;
     int arch_explicit = 0;
 
     st->target_has_sse = 0;
@@ -2057,8 +2058,20 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         st->target_supports_avx2 = 0;
     }
 
+    /*
+     * Two passes, so the result does not depend on the order of the flags,
+     * as with gcc: first the target and -march (which set the defaults),
+     * then -m<feature> and -mno-<feature> on top of them.  Otherwise the
+     * driver's own -m64, or the user's, after -mavx would undo it.
+     */
+    for (pass = 0; pass < 2; ++pass)
     for (i = 0; i < flag_count; ++i) {
         const char *f = flags[i];
+        int is_base = strcmp(f, "-m32") == 0 || strcmp(f, "-m64") == 0 || strcmp(f, "-march") == 0 ||
+                      strcmp(f, "-mcpu") == 0 || strncmp(f, "-march=", 7) == 0 || strncmp(f, "-mcpu=", 6) == 0;
+        if (is_base != (pass == 0)) {
+            continue;
+        }
         if (strcmp(f, "-m32") == 0) {
             st->target_bits = 32;
             if (!arch_explicit) {
@@ -2075,16 +2088,19 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             }
         } else if (strcmp(f, "-m64") == 0) {
             st->target_bits = 64;
-            st->target_has_sse = 1;
-            st->target_has_sse2 = 1;
-            st->target_has_mmx = 1;
-            st->target_has_avx = 0;
-            st->target_has_avx2 = 0;
-            st->target_supports_sse = 1;
-            st->target_supports_sse2 = 1;
-            st->target_supports_mmx = 1;
-            st->target_supports_avx = 1;
-            st->target_supports_avx2 = 1;
+            if (!arch_explicit) {
+                /* the x86-64 baseline; an explicit -march keeps its own */
+                st->target_has_sse = 1;
+                st->target_has_sse2 = 1;
+                st->target_has_mmx = 1;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
+                st->target_supports_sse = 1;
+                st->target_supports_sse2 = 1;
+                st->target_supports_mmx = 1;
+                st->target_supports_avx = 1;
+                st->target_supports_avx2 = 1;
+            }
         } else if ((strcmp(f, "-march") == 0 || strcmp(f, "-mcpu") == 0) && i + 1 < flag_count) {
             const char *name = flags[++i];
             arch_explicit = 1;
@@ -2170,6 +2186,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
                 tmpv[0] = "-march";
                 tmpv[1] = name + 1;
                 scan_target_flags(st, tmpv, 2);
+                arch_explicit = 1;
             }
         } else if (strcmp(f, "-msse") == 0) {
             if (st->target_supports_sse) {
@@ -2190,20 +2207,25 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         } else if (strcmp(f, "-mno-mmx") == 0) {
             st->target_has_mmx = 0;
         } else if (strcmp(f, "-mavx") == 0) {
-            if (st->target_supports_avx) {
+            /* any x86-64 -march may add AVX by flag, as with gcc */
+            if (st->target_supports_avx || st->target_bits == 64) {
                 st->target_has_avx = 1;
             }
         } else if (strcmp(f, "-mno-avx") == 0) {
             st->target_has_avx = 0;
             st->target_has_avx2 = 0;
         } else if (strcmp(f, "-mavx2") == 0) {
-            if (st->target_supports_avx2) {
-                st->target_has_avx = 1;
+            if (st->target_supports_avx2 || st->target_bits == 64) {
                 st->target_has_avx2 = 1;
             }
         } else if (strcmp(f, "-mno-avx2") == 0) {
             st->target_has_avx2 = 0;
         }
+    }
+    /* AVX2 implies AVX, as in gcc: -mavx2 -mno-avx2 leaves neither, but an
+     * AVX that -mavx or -march gave stays */
+    if (st->target_has_avx2) {
+        st->target_has_avx = 1;
     }
 }
 

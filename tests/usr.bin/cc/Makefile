@@ -974,5 +974,6 @@ clean:
 	      /tmp/cc_pp_s4_host_gcc.i /tmp/cc_pp_s4_host_clang.i /tmp/cc_pp_s4_host_gcc.ab /tmp/cc_pp_s4_host_clang.ab \
 	      /tmp/cc_pp_s4_ours.ab
 	rm -f /tmp/cc_native_c99_simd_intrinsics /tmp/cc_native_c99_simd_intrinsics_32.o \
-	      /tmp/cc_simd_macro_probe.c /tmp/cc_simd_macro_none.i /tmp/cc_simd_macro_avx.i /tmp/cc_simd_macro_avx2.i
+	      /tmp/cc_simd_macro_probe.c /tmp/cc_simd_macro_none.i /tmp/cc_simd_macro_avx.i /tmp/cc_simd_macro_avx2.i \
+	      /tmp/cc_simd_macro_avx_m64.i /tmp/cc_simd_macro_avx2_off.i /tmp/cc_simd_macro_v3.i
 	rm -f test_ast2ir_bin test_ctype_bin

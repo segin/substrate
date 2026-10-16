@@ -37,6 +37,16 @@ grep -q '^int avx2 = 0;$' /tmp/cc_simd_macro_avx.i
 grep -q '^int avx = 1;$' /tmp/cc_simd_macro_avx2.i
 grep -q '^int avx2 = 1;$' /tmp/cc_simd_macro_avx2.i
 
+# as with gcc, the order of -m64 and the feature flags does not matter,
+# and AVX that only -mavx2 implied goes with -mno-avx2
+"$CC_BIN" -E -P -mavx -m64 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx_m64.i
+grep -q '^int avx = 1;$' /tmp/cc_simd_macro_avx_m64.i
+"$CC_BIN" -E -P -mavx2 -mno-avx2 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx2_off.i
+grep -q '^int avx = 0;$' /tmp/cc_simd_macro_avx2_off.i
+"$CC_BIN" -E -P -march=x86-64-v3 -mno-avx2 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_v3.i
+grep -q '^int avx = 1;$' /tmp/cc_simd_macro_v3.i
+grep -q '^int avx2 = 0;$' /tmp/cc_simd_macro_v3.i
+
 cat > /tmp/cc_host_x86intrin_pclmul.c <<'EOF'
 #include <x86intrin.h>
 int main(void) {

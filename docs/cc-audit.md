@@ -432,7 +432,16 @@ changes as well.  *Suite.*
   `native_c23_decimal_sizes.c`: at -m64 a `_Decimal128` local was read
   back as a long double, the CC-23 failure; it is accessed as the double
   cc carries.  The script passes.
-- [ ] **CC-29** `run_simd_intrinsics.sh` shall pass (789).
+- [x] **CC-29** `run_simd_intrinsics.sh` shall pass (789).  `-mavx`
+  did not define `__AVX__`: the preprocessor read the target flags in
+  order, and the driver appends its own `-m64`, which reset the ISA
+  features.  It now reads `-m32`/`-m64`/`-march` first and the feature
+  flags after, so their order does not matter, as with gcc; `-m64` keeps
+  an explicit `-march`'s features (`-march=x86-64-v3` gave no AVX
+  either); AVX2 implies AVX at the end, so `-mavx2 -mno-avx2` leaves
+  neither; and any x86-64 `-march` may add AVX by flag.  The x86-64
+  `__AVX__`/`__AVX2__` results match gcc for 16 flag orders, three of
+  them now in the script.
 - [x] **CC-30** If an asm input's constraint names the register of an
   early-clobber output, then cc shall reject it
   (`native_bad_gnu_asm_early_clobber_fixed.c`, 832, 833).  sema now
@@ -557,7 +566,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 52 met, 18 open.
+70 requirements: 53 met, 17 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
