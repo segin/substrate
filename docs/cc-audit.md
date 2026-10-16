@@ -408,9 +408,13 @@ changes as well.  *Suite.*
   targets on both targets.
 - [ ] **CC-28** `run_postc99_c23.sh` shall pass (764).
 - [ ] **CC-29** `run_simd_intrinsics.sh` shall pass (789).
-- [ ] **CC-30** If an asm input's constraint names the register of an
+- [x] **CC-30** If an asm input's constraint names the register of an
   early-clobber output, then cc shall reject it
-  (`native_bad_gnu_asm_early_clobber_fixed.c`, 832, 833).
+  (`native_bad_gnu_asm_early_clobber_fixed.c`, 832, 833).  sema now
+  rejects an input that can only be in the one register (`a`, `b`, `c`,
+  `d`, `S`, `D`) an early-clobber output is fixed to, as gcc does
+  ("impossible constraints"); a tied (`"0"`) or `r` input, another
+  register, or an output without `&` is still accepted, as by gcc.
 - [x] **CC-31** ~~If a `noreturn` function has a non-void return type,
   then cc shall reject it~~ -- withdrawn: gcc accepts such a function
   (C11 makes it no constraint violation), so by the rule that gcc and
@@ -526,7 +530,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-68 requirements: 48 met, 20 open.
+68 requirements: 49 met, 19 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

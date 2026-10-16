@@ -456,6 +456,58 @@ static size_t asm_goto_label_base(const cc_stmt_t *s) {
     return base;
 }
 
+/**
+ * The one register an asm constraint allows, when it allows nothing
+ * else: `a`, `b`, `c`, `d`, `S` or `D`, with modifiers (`=`, `&`, ...)
+ * around it.
+ *
+ * @param c  the constraint
+ * @return   the register's letter, or 0 if the operand has another choice
+ */
+static int asm_constraint_only_register(const char *c) {
+    int reg = 0;
+    if (c == NULL) {
+        return 0;
+    }
+    for (; *c != '\0'; ++c) {
+        if ((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z')) {
+            if (strchr("abcdSD", *c) == NULL || (reg != 0 && reg != *c)) {
+                return 0;
+            }
+            reg = *c;
+        }
+    }
+    return reg;
+}
+
+/**
+ * Reject an asm input that can only be in the register an early-clobber
+ * output is fixed to: the output is written before the inputs are all
+ * read, so the two cannot share it (gcc: "impossible constraints").
+ *
+ * @param s     the asm statement
+ * @param diag  receives the error
+ * @return      0, or -1 if an input conflicts
+ */
+static int asm_check_early_clobber_inputs(const cc_stmt_t *s, cc_diag_t *diag) {
+    size_t i;
+    size_t j;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        const char *oc = s->asm_outputs[i].constraint;
+        int oreg = asm_constraint_only_register(oc);
+        if (oreg == 0 || oc == NULL || strchr(oc, '&') == NULL) {
+            continue;
+        }
+        for (j = 0; j < s->asm_input_count; ++j) {
+            if (asm_constraint_only_register(s->asm_inputs[j].constraint) == oreg) {
+                set_diag(diag, "asm input constraint conflicts with early-clobber output register");
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
     size_t i = 0;
     size_t total = s->asm_output_count + s->asm_input_count;
@@ -4737,6 +4789,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             tied_out = cc_asm_constraint_matched_operand(s->asm_inputs[i2].constraint);
             (void)tied_out;
+        }
+        if (asm_check_early_clobber_inputs(s, diag) != 0) {
+            return -1;
         }
         for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {
             if (s->asm_clobbers[i2] == NULL || s->asm_clobbers[i2][0] == '\0') {
