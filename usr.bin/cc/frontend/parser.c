@@ -4266,8 +4266,15 @@ static cc_type_t string_token_char_type(const parser_t *p, const cc_token_t *tok
     }
     if (tok->start > p->lx.src) {
         char c1 = tok->start[-1];
-        if (c1 == 'L' || c1 == 'u' || c1 == 'U') {
+        /* wchar_t is int, char16_t unsigned short, char32_t unsigned int */
+        if (c1 == 'L') {
             return CC_TYPE_INT;
+        }
+        if (c1 == 'u') {
+            return CC_TYPE_USHORT;
+        }
+        if (c1 == 'U') {
+            return CC_TYPE_UINT;
         }
     }
     if (tok->start > p->lx.src + 1) {
@@ -4301,8 +4308,7 @@ static long parser_string_literal_array_bound(const cc_expr_t *e) {
     if (n < 2 || s[0] != '"' || s[n - 1] != '"') {
         return 0;
     }
-    wide = (e->aux_type == CC_TYPE_INT || e->aux_type == CC_TYPE_UINT || e->aux_type == CC_TYPE_LONG_LONG ||
-            e->aux_type == CC_TYPE_ULONG_LONG);
+    wide = cc_string_literal_is_wide(e);
     i = 1;
     n -= 1;
     units = 0;
@@ -4479,8 +4485,7 @@ static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int 
     if (init->arg_count == 1) {
         item = init->args[0];
         if (item != NULL && item->kind == CC_EXPR_STR) {
-            wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT ||
-                    item->aux_type == CC_TYPE_LONG_LONG || item->aux_type == CC_TYPE_ULONG_LONG);
+            wide = cc_string_literal_is_wide(item);
             if ((wide && cc_type_is_integral(elem_type)) ||
                 (!wide && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR))) {
                 inferred = parser_string_literal_array_bound(item);
@@ -7072,7 +7077,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
         }
         e->ident = lit;
         e->aux_type = str_ty;
-        e->value_type = str_ty == CC_TYPE_INT ? CC_TYPE_PTR_INT : CC_TYPE_PTR_CHAR;
+        e->value_type = cc_string_literal_pointer_type(str_ty);
         if (next_tok(p) != 0) {
             free_expr(e);
             return NULL;
@@ -7089,12 +7094,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             if (part_ty != str_ty) {
-                /* C99: adjacent narrow + wide literals are permitted; result uses wide element type. */
-                if ((str_ty == CC_TYPE_CHAR && part_ty == CC_TYPE_INT) ||
-                    (str_ty == CC_TYPE_INT && part_ty == CC_TYPE_CHAR)) {
-                    str_ty = CC_TYPE_CHAR;
-                    e->aux_type = CC_TYPE_CHAR;
-                    e->value_type = CC_TYPE_PTR_CHAR;
+                /* a narrow piece joins a wide literal, which the result is (C11 6.4.5p5) */
+                if (str_ty == CC_TYPE_CHAR || part_ty == CC_TYPE_CHAR) {
+                    str_ty = str_ty == CC_TYPE_CHAR ? part_ty : str_ty;
+                    e->aux_type = str_ty;
+                    e->value_type = cc_string_literal_pointer_type(str_ty);
                 } else {
                     free(part);
                     free_expr(e);

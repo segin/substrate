@@ -1298,8 +1298,7 @@ static int check_array_string_initializer(const char *name, cc_type_t array_type
         return 1;
     }
     elem_type = ptr_base_type(array_type);
-    wide = (init->aux_type == CC_TYPE_INT || init->aux_type == CC_TYPE_UINT || init->aux_type == CC_TYPE_LONG_LONG ||
-            init->aux_type == CC_TYPE_ULONG_LONG);
+    wide = cc_string_literal_is_wide(init);
     if (wide) {
         if (!cc_type_is_integral(elem_type)) {
             return 1;
@@ -1943,8 +1942,7 @@ static long sema_const_sizeof(void *ctx, const cc_expr_t *e) {
         return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
     }
     if (e->lhs->kind == CC_EXPR_STR) {
-        int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
-                    e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
+        int wide = cc_string_literal_is_wide(e->lhs);
         size_t units = decoded_string_unit_count(e->lhs, wide);
         cc_type_t elem_type = ptr_base_type(e->lhs->value_type);
         long elem_size = type_size_bytes_struct(tu, elem_type, e->lhs->struct_id);
@@ -2098,12 +2096,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         return 0;
 
     case CC_EXPR_STR:
-        if (e->aux_type == CC_TYPE_INT || e->aux_type == CC_TYPE_UINT || e->aux_type == CC_TYPE_LONG_LONG ||
-            e->aux_type == CC_TYPE_ULONG_LONG) {
-            e->value_type = CC_TYPE_PTR_INT;
-        } else {
-            e->value_type = CC_TYPE_PTR_CHAR;
-        }
+        e->value_type = cc_string_literal_pointer_type(cc_string_literal_is_wide(e) ? e->aux_type : CC_TYPE_CHAR);
         e->struct_id = -1;
         return 0;
 

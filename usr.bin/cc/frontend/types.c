@@ -136,6 +136,47 @@ long cc_bitint_size(long width) {
 }
 
 /**
+ * Whether a string literal expression is a wide one.
+ *
+ * @param e  a CC_EXPR_STR expression
+ * @return   1 if it is wide, else 0
+ */
+int cc_string_literal_is_wide(const cc_expr_t *e) {
+    if (e == NULL || e->kind != CC_EXPR_STR) {
+        return 0;
+    }
+    switch (e->aux_type) {
+    case CC_TYPE_USHORT:
+    case CC_TYPE_INT:
+    case CC_TYPE_UINT:
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * The pointer type a string literal of a given element type decays to.
+ *
+ * @param elem  the literal's element type
+ * @return      the pointer type
+ */
+cc_type_t cc_string_literal_pointer_type(cc_type_t elem) {
+    switch (elem) {
+    case CC_TYPE_USHORT:
+        return CC_TYPE_PTR_USHORT;
+    case CC_TYPE_INT:
+        return CC_TYPE_PTR_INT;
+    case CC_TYPE_UINT:
+        return CC_TYPE_PTR_UINT;
+    default:
+        return CC_TYPE_PTR_CHAR;
+    }
+}
+
+/**
  * Alignment of `_BitInt(N)` on the target being compiled for.
  *
  * @param width  N, the width in bits

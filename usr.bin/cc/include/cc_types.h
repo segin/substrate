@@ -46,6 +46,26 @@ long cc_bitint_size(long width);
 long cc_bitint_align(long width);
 
 /**
+ * Whether a string literal expression is a wide one (`L`, `u` or `U`
+ * prefix): its element type, in the expression's aux_type, is wider than
+ * a character.  A `u8` or unprefixed literal is narrow.
+ *
+ * @param e  a CC_EXPR_STR expression
+ * @return   1 if it is wide, else 0 (and 0 for anything else)
+ */
+int cc_string_literal_is_wide(const cc_expr_t *e);
+
+/**
+ * The pointer type a string literal of a given element type decays to:
+ * `char *`, `char16_t *` (unsigned short), `wchar_t *` (int) or
+ * `char32_t *` (unsigned int).
+ *
+ * @param elem  the literal's element type
+ * @return      the pointer type
+ */
+cc_type_t cc_string_literal_pointer_type(cc_type_t elem);
+
+/**
  * Whether a type is an integer type: `_Bool`, the character, short, int,
  * long and long long types of either signedness, an enumeration or
  * `_BitInt`.

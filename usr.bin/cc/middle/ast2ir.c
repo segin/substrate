@@ -189,6 +189,26 @@ static unsigned long decode_escape_unit(const unsigned char *s, size_t n, size_t
         }
         return v;
     }
+    if (s[0] == 'u' || s[0] == 'U') {
+        /* a universal character name, \uXXXX or \UXXXXXXXX: the code point
+         * (narrow literals reach here already in UTF-8) */
+        size_t digits = s[0] == 'u' ? 4 : 8;
+        i = 1;
+        while (i < n && i <= digits) {
+            unsigned char c = s[i];
+            unsigned d;
+            if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = 10u + (unsigned)(c - 'a');
+            else if (c >= 'A' && c <= 'F') d = 10u + (unsigned)(c - 'A');
+            else break;
+            v = (v << 4) | d;
+            i++;
+        }
+        if (adv_out != NULL) {
+            *adv_out = i;
+        }
+        return v;
+    }
     switch (s[0]) {
     case 'a': v = '\a'; break;
     case 'b': v = '\b'; break;
@@ -572,8 +592,7 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
         return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
     }
     if (e->lhs->kind == CC_EXPR_STR) {
-        int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
-                    e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
+        int wide = cc_string_literal_is_wide(e->lhs);
         long elem_size = type_size_bytes_with_struct(tu, ptr_base_type(e->lhs->value_type), e->lhs->struct_id);
         unsigned long *units = NULL;
         size_t count = 0;
@@ -1685,6 +1704,77 @@ static int is_hex_digit_char(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+/**
+ * A wide string literal (`L"..."`, `u"..."`, `U"..."`) as the narrow
+ * literal of its bytes, for the emitter, which writes a literal with
+ * `.asciz`: each unit little-endian in the element's size, as octal
+ * escapes, then the terminating unit's bytes but the last (which `.asciz`
+ * adds).
+ *
+ * @param tu  the translation unit
+ * @param e   the literal
+ * @return    the quoted text (caller frees), or NULL when @p e is not a
+ *            wide literal or on error
+ */
+static char *wide_string_as_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    unsigned long *units = NULL;
+    size_t count = 0;
+    long elem_size;
+    size_t nbytes;
+    size_t i;
+    char *out;
+    char *p;
+
+    if (e == NULL || e->kind != CC_EXPR_STR) {
+        return NULL;
+    }
+    elem_size = type_size_bytes_with_struct(tu, ptr_base_type(e->value_type), e->struct_id);
+    if (elem_size <= 1 || elem_size > 8) {
+        return NULL;
+    }
+    if (decode_string_units(e, 1, &units, &count) != 0) {
+        free(units);
+        return NULL;
+    }
+    nbytes = (count + 1) * (size_t)elem_size - 1;
+    out = (char *)malloc(nbytes * 4 + 3);
+    if (out == NULL) {
+        free(units);
+        return NULL;
+    }
+    p = out;
+    *p++ = '"';
+    for (i = 0; i < nbytes; ++i) {
+        size_t unit = i / (size_t)elem_size;
+        unsigned v = unit < count ? (unsigned)((units[unit] >> (8 * (i % (size_t)elem_size))) & 0xffu) : 0u;
+        p[0] = '\\';
+        p[1] = (char)('0' + ((v >> 6) & 7u));
+        p[2] = (char)('0' + ((v >> 3) & 7u));
+        p[3] = (char)('0' + (v & 7u));
+        p += 4;
+    }
+    *p++ = '"';
+    *p = '\0';
+    free(units);
+    return out;
+}
+
+/**
+ * The text the emitter writes for a string literal: a wide literal's
+ * bytes (wide_string_as_bytes()), or a narrow literal as it is.
+ *
+ * @param tu  the translation unit
+ * @param e   the literal
+ * @return    the quoted text (caller frees), or NULL out of memory
+ */
+static char *string_literal_emit_text(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    char *wide = wide_string_as_bytes(tu, e);
+    if (wide != NULL) {
+        return wide;
+    }
+    return cc_strdup(e != NULL && e->ident != NULL ? e->ident : "\"\"");
+}
+
 static long string_literal_size_bytes(const char *lit) {
     size_t i;
     long out_len = 0;
@@ -1754,8 +1844,7 @@ static long string_expr_size_bytes(const cc_translation_unit_t *tu, const cc_exp
     if (tu == NULL || e == NULL || e->kind != CC_EXPR_STR) {
         return -1;
     }
-    wide = (e->aux_type == CC_TYPE_INT || e->aux_type == CC_TYPE_UINT || e->aux_type == CC_TYPE_LONG_LONG ||
-            e->aux_type == CC_TYPE_ULONG_LONG);
+    wide = cc_string_literal_is_wide(e);
     if (decode_string_units(e, wide, &units, &unit_count) != 0) {
         free(units);
         return -1;
@@ -3738,7 +3827,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_STR:
         in.op = CC_SSA_STR;
         in.dst = new_value(sf, CC_VAL_I64);
-        in.sym = cc_strdup(e->ident != NULL ? e->ident : "\"\"");
+        in.sym = string_literal_emit_text(tu, e);
         if (in.sym == NULL) {
             return -1;
         }
@@ -8504,8 +8593,7 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
     if (max_items <= 0) {
         return -1;
     }
-    wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT || item->aux_type == CC_TYPE_LONG_LONG ||
-            item->aux_type == CC_TYPE_ULONG_LONG);
+    wide = cc_string_literal_is_wide(item);
     if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
         return -1;
     }
@@ -8692,8 +8780,7 @@ static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_s
         return -1;
     }
 
-    wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT || item->aux_type == CC_TYPE_LONG_LONG ||
-            item->aux_type == CC_TYPE_ULONG_LONG);
+    wide = cc_string_literal_is_wide(item);
     if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
         set_diag(diag, "narrow string initializer requires character array compound literal");
         return -1;
@@ -9503,9 +9590,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 unsigned long *units = NULL;
                                 size_t unit_count = 0;
                                 size_t si;
-                                int wide = (item_expr->aux_type == CC_TYPE_INT || item_expr->aux_type == CC_TYPE_UINT ||
-                                            item_expr->aux_type == CC_TYPE_LONG_LONG ||
-                                            item_expr->aux_type == CC_TYPE_ULONG_LONG);
+                                int wide = cc_string_literal_is_wide(item_expr);
                                 if (decode_string_units(item_expr, wide, &units, &unit_count) != 0) {
                                     set_diag(diag, "failed to decode static local array string initializer");
                                     return -1;
@@ -9618,9 +9703,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                     size_t si;
                                     size_t unit_count = 0;
                                     unsigned long *units = NULL;
-                                    int wide = (item_expr->aux_type == CC_TYPE_INT || item_expr->aux_type == CC_TYPE_UINT ||
-                                                item_expr->aux_type == CC_TYPE_LONG_LONG ||
-                                                item_expr->aux_type == CC_TYPE_ULONG_LONG);
+                                    int wide = cc_string_literal_is_wide(item_expr);
                                     int di;
                                     for (di = 0; di < s->array_ndim; ++di) {
                                         if (!is_pointer_type(scalar_type)) {
@@ -9714,9 +9797,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         unsigned long *units = NULL;
                         size_t unit_count = 0;
                         size_t si;
-                        int wide = (s->expr->aux_type == CC_TYPE_INT || s->expr->aux_type == CC_TYPE_UINT ||
-                                    s->expr->aux_type == CC_TYPE_LONG_LONG ||
-                                    s->expr->aux_type == CC_TYPE_ULONG_LONG);
+                        int wide = cc_string_literal_is_wide(s->expr);
                         if (decode_string_units(s->expr, wide, &units, &unit_count) != 0) {
                             set_diag(diag, "failed to decode static local array string initializer");
                             return -1;
@@ -10018,9 +10099,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             unsigned long *units = NULL;
                             size_t unit_count = 0;
                             size_t si;
-                            int wide = (item_expr->aux_type == CC_TYPE_INT || item_expr->aux_type == CC_TYPE_UINT ||
-                                        item_expr->aux_type == CC_TYPE_LONG_LONG ||
-                                        item_expr->aux_type == CC_TYPE_ULONG_LONG);
+                            int wide = cc_string_literal_is_wide(item_expr);
                             if (decode_string_units(item_expr, wide, &units, &unit_count) != 0) {
                                 set_diag(diag, "failed to decode local array string initializer");
                                 return -1;
@@ -10141,8 +10220,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     unsigned long *units = NULL;
                     size_t unit_count = 0;
                     size_t ii;
-                    int wide = (s->expr->aux_type == CC_TYPE_INT || s->expr->aux_type == CC_TYPE_UINT ||
-                                s->expr->aux_type == CC_TYPE_LONG_LONG || s->expr->aux_type == CC_TYPE_ULONG_LONG);
+                    int wide = cc_string_literal_is_wide(s->expr);
                     if (decode_string_units(s->expr, wide, &units, &unit_count) != 0) {
                         set_diag(diag, "failed to decode string initializer");
                         return -1;
@@ -12176,7 +12254,7 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
         return 0;
     case CC_EXPR_STR:
         out->init_is_string = 1;
-        out->init_str = cc_strdup(e->ident != NULL ? e->ident : "\"\"");
+        out->init_str = string_literal_emit_text(tu, e);
         return out->init_str == NULL ? -1 : 0;
     case CC_EXPR_CAST:
         return eval_global_init_item(tu, e->lhs, out);
@@ -12405,17 +12483,6 @@ static const cc_expr_t *flexible_init_string(const cc_expr_t *item) {
     return item != NULL && item->kind == CC_EXPR_STR ? item : NULL;
 }
 
-/**
- * Whether a string literal is a wide one (its elements wider than char).
- *
- * @param str  the literal
- * @return     1 if it is wide, else 0
- */
-static int string_literal_is_wide(const cc_expr_t *str) {
-    return str->aux_type == CC_TYPE_INT || str->aux_type == CC_TYPE_UINT || str->aux_type == CC_TYPE_LONG_LONG ||
-           str->aux_type == CC_TYPE_ULONG_LONG;
-}
-
 static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                               const cc_expr_t *item) {
     const cc_expr_t *str = flexible_init_string(item);
@@ -12438,7 +12505,7 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
         return -1;
     }
     if (str != NULL && elem_type != CC_TYPE_VOID) {
-        wide = string_literal_is_wide(str);
+        wide = cc_string_literal_is_wide(str);
         if (decode_string_units(str, wide, &units, &unit_count) != 0) {
             free(units);
             return -1;
@@ -12759,11 +12826,14 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
             set_diag(diag, "string scalar initializer requires pointer-sized pointer field");
             return -1;
         }
-        if (append_global_string_reloc(relocs, reloc_count, off, field_size,
-                                       expr->ident != NULL ? expr->ident : "\"\"", diag) != 0) {
+        char *text = string_literal_emit_text(tu, expr);
+        if (text == NULL ||
+            append_global_string_reloc(relocs, reloc_count, off, field_size, text, diag) != 0) {
+            free(text);
             free(sym);
             return -1;
         }
+        free(text);
         return 0;
     }
     if (expr != NULL && expr->kind == CC_EXPR_CAST && expr->lhs != NULL && expr->lhs->kind == CC_EXPR_INIT_LIST &&
@@ -12927,8 +12997,7 @@ static int fill_fixed_char_array_from_string(const cc_expr_t *expr, cc_type_t el
     if (expr == NULL || expr->kind != CC_EXPR_STR || max_elems < 0 || elem_size <= 0) {
         return -1;
     }
-    wide = (expr->aux_type == CC_TYPE_INT || expr->aux_type == CC_TYPE_UINT || expr->aux_type == CC_TYPE_LONG_LONG ||
-            expr->aux_type == CC_TYPE_ULONG_LONG);
+    wide = cc_string_literal_is_wide(expr);
     if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
         return -1;
     }
@@ -13012,7 +13081,7 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
         unsigned long *units = NULL;
         size_t count = 0;
         size_t u;
-        if (decode_string_units(str, string_literal_is_wide(str), &units, &count) != 0) {
+        if (decode_string_units(str, cc_string_literal_is_wide(str), &units, &count) != 0) {
             free(units);
             set_diag(diag, "invalid string initializer for flexible array member");
             return -1;
@@ -14463,7 +14532,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
             } else if (init != NULL && init->kind == CC_EXPR_STR) {
                 init_is_string = 1;
-                out->globals[i].init_str = cc_strdup(init->ident != NULL ? init->ident : "\"\"");
+                out->globals[i].init_str = string_literal_emit_text(tu, init);
                 if (out->globals[i].init_str == NULL) {
                     set_diag(diag, "out of memory duplicating global string initializer");
                     cc_ssa_module_free(out);
@@ -14472,7 +14541,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             } else if (init != NULL && init->kind == CC_EXPR_CAST && init->lhs != NULL &&
                        init->lhs->kind == CC_EXPR_STR && is_pointer_type(tu->globals[i].type)) {
                 init_is_string = 1;
-                out->globals[i].init_str = cc_strdup(init->lhs->ident != NULL ? init->lhs->ident : "\"\"");
+                out->globals[i].init_str = string_literal_emit_text(tu, init->lhs);
                 if (out->globals[i].init_str == NULL) {
                     set_diag(diag, "out of memory duplicating global string initializer");
                     cc_ssa_module_free(out);
