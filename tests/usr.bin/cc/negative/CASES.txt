@@ -57,3 +57,5 @@ native_bad_c99_pragma_stdc_bad.c|-std=c99|invalid #pragma STDC state
 native_gnu_sizeof_void.c|-pedantic-errors|error: invalid application of 'sizeof' to a void type
 native_bad_c11_static_assert_message.c|-std=c11|static assertion failed: "char is 1 byte, A
 native_bad_gnu_asm_goto_label_number.c|-std=gnu11|asm template goto-label index is out of range
+native_bad_gnu_static_nonconst_init.c|-std=gnu11|initializer element is not constant
+native_bad_c99_ucn_ident_basic.c|-std=c99|universal character \u0041 is not valid in an identifier

@@ -477,7 +477,7 @@ asserts and passed to gcc with `-pedantic-errors -Werror`; the scripts
 and the `grep` checks read.  189 of 205 runtime tests pass under gcc as
 they stand.  *Reproduced* unless marked.
 
-- [ ] **CC-36** A runtime test shall pass under gcc, unless it tests an
+- [x] **CC-36** A runtime test shall pass under gcc, unless it tests an
   extension gcc lacks.  Five assert acceptance of code gcc (and C)
   rejects: `native_c99_ucn_ident.c` (`A` names a basic-set
   character, forbidden by C11 6.4.3p2), `native_c99_wide_literals.c` (a
@@ -486,7 +486,15 @@ they stand.  *Reproduced* unless marked.
   unselected `__builtin_choose_expr` branch),
   `native_gnu_static_nonconst_init.c` (a non-constant static
   initializer) and `native_gnu_attr_type_parse.c` (a vector initialized
-  from an `int`).
+  from an `int`).  Three were test bugs, now valid C: the wide literal
+  goes to a `const wchar_t *` (which showed cc emitted every wide
+  literal as narrow bytes -- fixed), the unselected `choose_expr` arms
+  name a declared function, the vector is brace-initialized.  Two were cc
+  accepting what C forbids: cc now rejects a UCN for a basic-set
+  character in an identifier (the test uses `\u00e9` and
+  `\U000003b1`, a negative case `\u0041`) and a static object's
+  initializer that calls a function, assigns or increments (the test is
+  now a negative case).  All five pass under gcc.
 - [ ] **CC-37** A runtime test shall not depend on unspecified
   behaviour.  `native_c99_types.c`, `native_c99_inline_semantics.c` and
   `native_gnu89_inline.c` call a function with only an inline
@@ -573,7 +581,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 55 met, 15 open.
+70 requirements: 56 met, 14 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

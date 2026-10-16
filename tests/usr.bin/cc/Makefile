@@ -474,8 +474,7 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_types_choose.c -o /tmp/cc_native_gnu_types_choose
 	/tmp/cc_native_gnu_types_choose
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_types_choose.c -o /tmp/cc_native_gnu_types_choose.s
-	! grep -q "does_not_exist" /tmp/cc_native_gnu_types_choose.s
-	! grep -q "does_not_exist2" /tmp/cc_native_gnu_types_choose.s
+	! grep -q "never_called" /tmp/cc_native_gnu_types_choose.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_overflow.c -o /tmp/cc_native_gnu_overflow
 	/tmp/cc_native_gnu_overflow
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_overflow.c -o /tmp/cc_native_gnu_overflow.s
@@ -517,8 +516,6 @@ test:
 	/tmp/cc_native_gnu_void_ptr_arith
 	$(TOP)/usr.bin/cc/cc -std=c99 -pedantic -c native_gnu_void_ptr_arith.c -o /tmp/cc_native_gnu_void_ptr_arith_pedantic.o 2>/tmp/cc_native_gnu_void_ptr_arith_pedantic.log
 	grep -q "warning: arithmetic on 'void \\*' is a GNU extension" /tmp/cc_native_gnu_void_ptr_arith_pedantic.log
-	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_static_nonconst_init.c -o /tmp/cc_native_gnu_static_nonconst_init
-	/tmp/cc_native_gnu_static_nonconst_init
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline
 	/tmp/cc_native_gnu89_inline
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline -S native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline.s
@@ -892,7 +889,7 @@ clean:
 	      /tmp/cc_native_gnu_object_size_chk /tmp/cc_native_gnu_object_size_chk.s /tmp/cc_native_gnu_object_size_chk_32.s \
 	      /tmp/cc_native_gnu_trap_unreachable /tmp/cc_native_gnu_trap_unreachable.s /tmp/cc_native_gnu_trap_unreachable_32.s \
 	      /tmp/cc_native_gnu_nested_func /tmp/cc_native_gnu_union_cast /tmp/cc_native_gnu_zerolen_array \
-	      /tmp/cc_native_gnu_empty_struct /tmp/cc_native_gnu_static_nonconst_init /tmp/cc_native_gnu89_inline \
+	      /tmp/cc_native_gnu_empty_struct /tmp/cc_native_gnu89_inline \
 	      /tmp/cc_native_gnu89_inline.s /tmp/cc_native_gnu_attr_fn_codegen /tmp/cc_native_gnu_attr_fn_codegen.s \
 	      /tmp/cc_native_gnu_attr_var_codegen /tmp/cc_native_gnu_attr_var_codegen.s \
 	      /tmp/cc_native_gnu_attr_type_parse /tmp/cc_native_gnu_attr_alias /tmp/cc_native_gnu_attr_alias.s \

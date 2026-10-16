@@ -116,6 +116,7 @@ typedef struct {
 } parser_t;
 
 static int next_tok(parser_t *p);
+static int parser_hex_value(int c);
 
 static void set_ptr_depth_diag(parser_t *p, int marker_line) {
     (void)marker_line;
@@ -410,13 +411,61 @@ static int tok_is_typeof_spelling(parser_t *p) {
            tok_is_ident(p, "__typeof_unqual__");
 }
 
+/**
+ * Find a universal character name in an identifier that may not be
+ * there: one for a character of the basic set other than `$`, `@` and
+ * `` ` `` (C11 6.4.3p2), or for a surrogate (6.4.3p2 again).
+ *
+ * @param tok  an identifier token
+ * @param out  receives the bad UCN's spelling, NUL-terminated
+ * @param cap  the size of @p out (at least 11)
+ * @return     1 if one was found, else 0
+ */
+static int ident_invalid_ucn(const cc_token_t *tok, char *out, size_t cap) {
+    size_t i = 0;
+
+    while (i + 1 < tok->len) {
+        size_t digits;
+        size_t k;
+        unsigned long v = 0;
+        if (tok->start[i] != '\\' || (tok->start[i + 1] != 'u' && tok->start[i + 1] != 'U')) {
+            i++;
+            continue;
+        }
+        digits = tok->start[i + 1] == 'u' ? 4 : 8;
+        for (k = 0; k < digits && i + 2 + k < tok->len; ++k) {
+            int hv = parser_hex_value((unsigned char)tok->start[i + 2 + k]);
+            if (hv < 0) {
+                break;
+            }
+            v = (v << 4) | (unsigned long)hv;
+        }
+        if ((v < 0xa0 && v != 0x24 && v != 0x40 && v != 0x60) || (v >= 0xd800 && v <= 0xdfff)) {
+            size_t n = 2 + k < cap - 1 ? 2 + k : cap - 1;
+            memcpy(out, tok->start + i, n);
+            out[n] = '\0';
+            return 1;
+        }
+        i += 2 + k;
+    }
+    return 0;
+}
+
 static int next_tok(parser_t *p) {
+    char ucn[16];
+
     if (cc_lexer_next(&p->lx, &p->tok) != 0) {
         g_parser_diag_file = p->lx.logical_file;
         set_diag(p->diag, p->lx.line, p->lx.col, "invalid token");
         return -1;
     }
     g_parser_diag_file = p->tok.file;
+    if (p->tok.kind == TOK_IDENT && ident_invalid_ucn(&p->tok, ucn, sizeof(ucn))) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "universal character %s is not valid in an identifier", ucn);
+        set_diag(p->diag, p->tok.line, p->tok.col, msg);
+        return -1;
+    }
     return 0;
 }
 

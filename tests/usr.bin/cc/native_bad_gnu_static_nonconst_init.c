@@ -1,3 +1,8 @@
+/*
+ * A static object's initializer must be a constant expression (C11
+ * 6.7.9p4); gcc rejects a call there ("initializer element is not
+ * constant").  cc ran it once, under a guard, as C++ would.
+ */
 int calls;
 
 int seed(void) {

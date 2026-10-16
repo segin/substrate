@@ -10,7 +10,7 @@ static int pick(trans_u_t u) {
 }
 
 int main(void) {
-	vec4_t v = 0;
+	vec4_t v = {0};
 	(void)v;
 	return pick((trans_u_t)6) == 6 ? 0 : 1;
 }

@@ -1491,6 +1491,49 @@ static long var_scalar_access_size(const cc_translation_unit_t *tu, const var_en
     return var_object_size_bytes(tu, v);
 }
 
+/**
+ * Whether an initializer is certainly not a constant expression: it
+ * calls a function (a `__builtin_` aside), assigns, increments or
+ * decrements, or is a statement expression.  The operand of sizeof is not
+ * evaluated and is not looked at.  An initializer this says no to may
+ * still not fold; this finds only what no constant expression contains.
+ *
+ * @param e  the initializer
+ * @return   1 if it is certainly not constant, else 0
+ */
+static int expr_is_certainly_nonconstant(const cc_expr_t *e) {
+    size_t i;
+
+    if (e == NULL) {
+        return 0;
+    }
+    switch (e->kind) {
+    case CC_EXPR_SIZEOF:
+        return 0;
+    case CC_EXPR_ASSIGN:
+    case CC_EXPR_UPDATE:
+    case CC_EXPR_STMT:
+        return 1;
+    case CC_EXPR_CALL:
+        if (e->ident == NULL || strncmp(e->ident, "__builtin_", 10) != 0) {
+            return 1;
+        }
+        break;
+    default:
+        break;
+    }
+    if (expr_is_certainly_nonconstant(e->lhs) || expr_is_certainly_nonconstant(e->rhs) ||
+        expr_is_certainly_nonconstant(e->third)) {
+        return 1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (expr_is_certainly_nonconstant(e->args[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t *v, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int rhs;
@@ -9418,6 +9461,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             if (obj_size <= 0) {
                 set_diag(diag, "unsupported static local declaration type");
+                return -1;
+            }
+            if (expr_is_certainly_nonconstant(s->expr)) {
+                /* a static object is initialized once, before the program starts (C11 6.7.9p4) */
+                set_diag(diag, "initializer element is not constant");
                 return -1;
             }
             if (!is_array_obj && !is_struct_obj) {
