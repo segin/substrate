@@ -591,9 +591,15 @@ they stand.  *Reproduced* unless marked.
   right: the -m32 output of those tests is never assembled or run.
   Others look for `jne`, `movl` or `jmp`, which almost any function
   contains.  *Traced.*
-- [ ] **CC-47** The suite shall use a private temporary directory.  It
+- [x] **CC-47** The suite shall use a private temporary directory.  It
   writes 310 fixed `/tmp/cc_*` paths, so two runs (two CI jobs on one
-  host, or two users) overwrite each other's files.  *Traced.*
+  host, or two users) overwrite each other's files.  *Traced.*  The
+  Makefile makes one with `mktemp -d` (`CC_TMP`, which a caller may
+  set), exports it to the scripts and removes it when the run passes; a
+  failed run leaves it to be looked at.  Every `/tmp/cc_*` path in the
+  Makefile and the 14 scripts that wrote them is now under `CC_TMP`, and
+  each script makes and removes its own when run alone.  No fixed
+  `/tmp` path is left.
 
 ## 8. Documentation
 
@@ -608,7 +614,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-71 requirements: 59 met, 12 open.
+71 requirements: 60 met, 11 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

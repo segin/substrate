@@ -4,15 +4,20 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 TEST_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
+# a private directory for this run's files (the suite's Makefile passes its own)
+if [ -z "${CC_TMP:-}" ]; then
+	CC_TMP=$(mktemp -d "${TMPDIR:-/tmp}/cc_suite.XXXXXX")
+	trap 'rm -rf "$CC_TMP"' EXIT
+fi
 INC_DIR="-I$ROOT/include"
 
-"$CC_BIN" -std=gnu11 $INC_DIR "$TEST_DIR/native_c99_simd_intrinsics.c" -o /tmp/cc_native_c99_simd_intrinsics
-/tmp/cc_native_c99_simd_intrinsics
+"$CC_BIN" -std=gnu11 $INC_DIR "$TEST_DIR/native_c99_simd_intrinsics.c" -o $CC_TMP/cc_native_c99_simd_intrinsics
+$CC_TMP/cc_native_c99_simd_intrinsics
 
-"$CC_BIN" -std=gnu11 -m32 $INC_DIR -c "$TEST_DIR/native_c99_simd_intrinsics.c" -o /tmp/cc_native_c99_simd_intrinsics_32.o
-file /tmp/cc_native_c99_simd_intrinsics_32.o | grep -q "ELF 32-bit"
+"$CC_BIN" -std=gnu11 -m32 $INC_DIR -c "$TEST_DIR/native_c99_simd_intrinsics.c" -o $CC_TMP/cc_native_c99_simd_intrinsics_32.o
+file $CC_TMP/cc_native_c99_simd_intrinsics_32.o | grep -q "ELF 32-bit"
 
-cat > /tmp/cc_simd_macro_probe.c <<'EOF'
+cat > $CC_TMP/cc_simd_macro_probe.c <<'EOF'
 #ifdef __AVX__
 int avx = 1;
 #else
@@ -25,29 +30,29 @@ int avx2 = 0;
 #endif
 EOF
 
-"$CC_BIN" -E -P /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_none.i
-grep -q '^int avx = 0;$' /tmp/cc_simd_macro_none.i
-grep -q '^int avx2 = 0;$' /tmp/cc_simd_macro_none.i
+"$CC_BIN" -E -P $CC_TMP/cc_simd_macro_probe.c -o $CC_TMP/cc_simd_macro_none.i
+grep -q '^int avx = 0;$' $CC_TMP/cc_simd_macro_none.i
+grep -q '^int avx2 = 0;$' $CC_TMP/cc_simd_macro_none.i
 
-"$CC_BIN" -E -P -mavx /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx.i
-grep -q '^int avx = 1;$' /tmp/cc_simd_macro_avx.i
-grep -q '^int avx2 = 0;$' /tmp/cc_simd_macro_avx.i
+"$CC_BIN" -E -P -mavx $CC_TMP/cc_simd_macro_probe.c -o $CC_TMP/cc_simd_macro_avx.i
+grep -q '^int avx = 1;$' $CC_TMP/cc_simd_macro_avx.i
+grep -q '^int avx2 = 0;$' $CC_TMP/cc_simd_macro_avx.i
 
-"$CC_BIN" -E -P -mavx2 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx2.i
-grep -q '^int avx = 1;$' /tmp/cc_simd_macro_avx2.i
-grep -q '^int avx2 = 1;$' /tmp/cc_simd_macro_avx2.i
+"$CC_BIN" -E -P -mavx2 $CC_TMP/cc_simd_macro_probe.c -o $CC_TMP/cc_simd_macro_avx2.i
+grep -q '^int avx = 1;$' $CC_TMP/cc_simd_macro_avx2.i
+grep -q '^int avx2 = 1;$' $CC_TMP/cc_simd_macro_avx2.i
 
 # as with gcc, the order of -m64 and the feature flags does not matter,
 # and AVX that only -mavx2 implied goes with -mno-avx2
-"$CC_BIN" -E -P -mavx -m64 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx_m64.i
-grep -q '^int avx = 1;$' /tmp/cc_simd_macro_avx_m64.i
-"$CC_BIN" -E -P -mavx2 -mno-avx2 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx2_off.i
-grep -q '^int avx = 0;$' /tmp/cc_simd_macro_avx2_off.i
-"$CC_BIN" -E -P -march=x86-64-v3 -mno-avx2 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_v3.i
-grep -q '^int avx = 1;$' /tmp/cc_simd_macro_v3.i
-grep -q '^int avx2 = 0;$' /tmp/cc_simd_macro_v3.i
+"$CC_BIN" -E -P -mavx -m64 $CC_TMP/cc_simd_macro_probe.c -o $CC_TMP/cc_simd_macro_avx_m64.i
+grep -q '^int avx = 1;$' $CC_TMP/cc_simd_macro_avx_m64.i
+"$CC_BIN" -E -P -mavx2 -mno-avx2 $CC_TMP/cc_simd_macro_probe.c -o $CC_TMP/cc_simd_macro_avx2_off.i
+grep -q '^int avx = 0;$' $CC_TMP/cc_simd_macro_avx2_off.i
+"$CC_BIN" -E -P -march=x86-64-v3 -mno-avx2 $CC_TMP/cc_simd_macro_probe.c -o $CC_TMP/cc_simd_macro_v3.i
+grep -q '^int avx = 1;$' $CC_TMP/cc_simd_macro_v3.i
+grep -q '^int avx2 = 0;$' $CC_TMP/cc_simd_macro_v3.i
 
-cat > /tmp/cc_host_x86intrin_pclmul.c <<'EOF'
+cat > $CC_TMP/cc_host_x86intrin_pclmul.c <<'EOF'
 #include <x86intrin.h>
 int main(void) {
 	__m128i a = _mm_setzero_si128();
@@ -60,9 +65,9 @@ int main(void) {
 }
 EOF
 
-"$CC_BIN" -std=gnu11 -c /tmp/cc_host_x86intrin_pclmul.c -o /tmp/cc_host_x86intrin_pclmul.o
+"$CC_BIN" -std=gnu11 -c $CC_TMP/cc_host_x86intrin_pclmul.c -o $CC_TMP/cc_host_x86intrin_pclmul.o
 
-cat > /tmp/cc_host_x86intrin_target.c <<'EOF'
+cat > $CC_TMP/cc_host_x86intrin_target.c <<'EOF'
 #include <x86intrin.h>
 #if defined __GNUC__ || defined __clang__
 __attribute__((__target__("pclmul,avx")))
@@ -78,9 +83,9 @@ int probe(void) {
 }
 EOF
 
-"$CC_BIN" -std=gnu11 -c /tmp/cc_host_x86intrin_target.c -o /tmp/cc_host_x86intrin_target.o
+"$CC_BIN" -std=gnu11 -c $CC_TMP/cc_host_x86intrin_target.c -o $CC_TMP/cc_host_x86intrin_target.o
 
-cat > /tmp/cc_host_x86intrin_avx2.c <<'EOF'
+cat > $CC_TMP/cc_host_x86intrin_avx2.c <<'EOF'
 #include <x86intrin.h>
 int probe(void) {
 	__m256i matches = _mm256_setzero_si256();
@@ -89,9 +94,9 @@ int probe(void) {
 }
 EOF
 
-"$CC_BIN" -std=gnu11 -mavx2 -c /tmp/cc_host_x86intrin_avx2.c -o /tmp/cc_host_x86intrin_avx2.o
+"$CC_BIN" -std=gnu11 -mavx2 -c $CC_TMP/cc_host_x86intrin_avx2.c -o $CC_TMP/cc_host_x86intrin_avx2.o
 
-cat > /tmp/cc_host_x86intrin_avx512.c <<'EOF'
+cat > $CC_TMP/cc_host_x86intrin_avx512.c <<'EOF'
 #include <x86intrin.h>
 int probe(void) {
 	__m512i matches = _mm512_setzero_si512();
@@ -100,4 +105,4 @@ int probe(void) {
 }
 EOF
 
-"$CC_BIN" -std=gnu11 -mavx512bw -mavx512f -c /tmp/cc_host_x86intrin_avx512.c -o /tmp/cc_host_x86intrin_avx512.o
+"$CC_BIN" -std=gnu11 -mavx512bw -mavx512f -c $CC_TMP/cc_host_x86intrin_avx512.c -o $CC_TMP/cc_host_x86intrin_avx512.o

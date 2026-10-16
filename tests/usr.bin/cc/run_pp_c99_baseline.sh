@@ -3,42 +3,47 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
+# a private directory for this run's files (the suite's Makefile passes its own)
+if [ -z "${CC_TMP:-}" ]; then
+	CC_TMP=$(mktemp -d "${TMPDIR:-/tmp}/cc_suite.XXXXXX")
+	trap 'rm -rf "$CC_TMP"' EXIT
+fi
 
-"$CC_BIN" -E -I. -isystem . -iquote . -include pp_s3_force.h -imacros pp_s3_imacros.h pp_s3_main.c -o /tmp/cc_pp_s3.i
-grep -q "int var = 10;" /tmp/cc_pp_s3.i
-grep -q 'const char \*s = "hello";' /tmp/cc_pp_s3.i
-grep -q "int forced_visible = 7;" /tmp/cc_pp_s3.i
-grep -q "int imports = 1 + 2 + 7 + 5;" /tmp/cc_pp_s3.i
-grep -q '^#line ' /tmp/cc_pp_s3.i
-grep -q '#line 77 "virt.c"' /tmp/cc_pp_s3.i
-! grep -q "should_not_appear_from_imacros" /tmp/cc_pp_s3.i
+"$CC_BIN" -E -I. -isystem . -iquote . -include pp_s3_force.h -imacros pp_s3_imacros.h pp_s3_main.c -o $CC_TMP/cc_pp_s3.i
+grep -q "int var = 10;" $CC_TMP/cc_pp_s3.i
+grep -q 'const char \*s = "hello";' $CC_TMP/cc_pp_s3.i
+grep -q "int forced_visible = 7;" $CC_TMP/cc_pp_s3.i
+grep -q "int imports = 1 + 2 + 7 + 5;" $CC_TMP/cc_pp_s3.i
+grep -q '^#line ' $CC_TMP/cc_pp_s3.i
+grep -q '#line 77 "virt.c"' $CC_TMP/cc_pp_s3.i
+! grep -q "should_not_appear_from_imacros" $CC_TMP/cc_pp_s3.i
 
-"$CC_BIN" -E -P -I. -isystem . -iquote . -include pp_s3_force.h -imacros pp_s3_imacros.h pp_s3_main.c -o /tmp/cc_pp_s3_p.i
-! grep -q '^#line ' /tmp/cc_pp_s3_p.i
+"$CC_BIN" -E -P -I. -isystem . -iquote . -include pp_s3_force.h -imacros pp_s3_imacros.h pp_s3_main.c -o $CC_TMP/cc_pp_s3_p.i
+! grep -q '^#line ' $CC_TMP/cc_pp_s3_p.i
 
-"$CC_BIN" -E -dM -DUSERDEF=9 -I. -isystem . pp_s3_main.c -o /tmp/cc_pp_s3_dM.i
-grep -q '^#define USERDEF 9$' /tmp/cc_pp_s3_dM.i
-grep -q '^#define OBJ 10$' /tmp/cc_pp_s3_dM.i
+"$CC_BIN" -E -dM -DUSERDEF=9 -I. -isystem . pp_s3_main.c -o $CC_TMP/cc_pp_s3_dM.i
+grep -q '^#define USERDEF 9$' $CC_TMP/cc_pp_s3_dM.i
+grep -q '^#define OBJ 10$' $CC_TMP/cc_pp_s3_dM.i
 
-"$CC_BIN" -E -M -I. -isystem . pp_s3_main.c > /tmp/cc_pp_s3_m.d
-grep -q 'pp_s3_main.c' /tmp/cc_pp_s3_m.d
-grep -q 'pp_s3_quote.h' /tmp/cc_pp_s3_m.d
-grep -q 'pp_s3_system.h' /tmp/cc_pp_s3_m.d
+"$CC_BIN" -E -M -I. -isystem . pp_s3_main.c > $CC_TMP/cc_pp_s3_m.d
+grep -q 'pp_s3_main.c' $CC_TMP/cc_pp_s3_m.d
+grep -q 'pp_s3_quote.h' $CC_TMP/cc_pp_s3_m.d
+grep -q 'pp_s3_system.h' $CC_TMP/cc_pp_s3_m.d
 
-"$CC_BIN" -E -MM -I. -isystem . pp_s3_main.c > /tmp/cc_pp_s3_mm.d
-grep -q 'pp_s3_quote.h' /tmp/cc_pp_s3_mm.d
-! grep -q 'pp_s3_system.h' /tmp/cc_pp_s3_mm.d
+"$CC_BIN" -E -MM -I. -isystem . pp_s3_main.c > $CC_TMP/cc_pp_s3_mm.d
+grep -q 'pp_s3_quote.h' $CC_TMP/cc_pp_s3_mm.d
+! grep -q 'pp_s3_system.h' $CC_TMP/cc_pp_s3_mm.d
 
-"$CC_BIN" -E -MD -MF /tmp/cc_pp_s3_md.d -MT out.o -MQ '$dep:target' -I. -isystem . pp_s3_main.c -o /tmp/cc_pp_s3_md.i
-test -s /tmp/cc_pp_s3_md.d
-grep -q 'out.o' /tmp/cc_pp_s3_md.d
-grep -q '\$\$dep\\\\:target' /tmp/cc_pp_s3_md.d
+"$CC_BIN" -E -MD -MF $CC_TMP/cc_pp_s3_md.d -MT out.o -MQ '$dep:target' -I. -isystem . pp_s3_main.c -o $CC_TMP/cc_pp_s3_md.i
+test -s $CC_TMP/cc_pp_s3_md.d
+grep -q 'out.o' $CC_TMP/cc_pp_s3_md.d
+grep -q '\$\$dep\\\\:target' $CC_TMP/cc_pp_s3_md.d
 
-"$CC_BIN" -E -v -I. -isystem . pp_s3_main.c -o /tmp/cc_pp_s3_v.i 2>/tmp/cc_pp_s3_v.log
-grep -q 'cpp include search paths:' /tmp/cc_pp_s3_v.log
-grep -q '/usr/include' /tmp/cc_pp_s3_v.log
+"$CC_BIN" -E -v -I. -isystem . pp_s3_main.c -o $CC_TMP/cc_pp_s3_v.i 2>$CC_TMP/cc_pp_s3_v.log
+grep -q 'cpp include search paths:' $CC_TMP/cc_pp_s3_v.log
+grep -q '/usr/include' $CC_TMP/cc_pp_s3_v.log
 
-DEPTH_DIR=/tmp/cc_pp_depth_$$
+DEPTH_DIR=$CC_TMP/cc_pp_depth_$$
 mkdir -p "$DEPTH_DIR"
 i=0
 while [ $i -lt 130 ]; do
@@ -48,10 +53,10 @@ while [ $i -lt 130 ]; do
 done
 echo "int depth_ok = 1;" > "$DEPTH_DIR/h130.h"
 echo '#include "h0.h"' > "$DEPTH_DIR/main.c"
-! "$CC_BIN" -E -I"$DEPTH_DIR" "$DEPTH_DIR/main.c" -o /tmp/cc_pp_s3_depth.i
+! "$CC_BIN" -E -I"$DEPTH_DIR" "$DEPTH_DIR/main.c" -o $CC_TMP/cc_pp_s3_depth.i
 rm -rf "$DEPTH_DIR"
 
-MACRO_DEPTH=/tmp/cc_pp_macro_depth_$$.c
+MACRO_DEPTH=$CC_TMP/cc_pp_macro_depth_$$.c
 : > "$MACRO_DEPTH"
 i=0
 while [ $i -lt 40 ]; do
@@ -61,24 +66,24 @@ while [ $i -lt 40 ]; do
 done
 echo "#define M40 1" >> "$MACRO_DEPTH"
 echo "int macro_depth = M0;" >> "$MACRO_DEPTH"
-! "$CC_BIN" -E "$MACRO_DEPTH" -o /tmp/cc_pp_s3_macro.i
-! "$CC_BIN" -E -fpp-max-macro-depth=8 "$MACRO_DEPTH" -o /tmp/cc_pp_s3_macro_limit.i
+! "$CC_BIN" -E "$MACRO_DEPTH" -o $CC_TMP/cc_pp_s3_macro.i
+! "$CC_BIN" -E -fpp-max-macro-depth=8 "$MACRO_DEPTH" -o $CC_TMP/cc_pp_s3_macro_limit.i
 rm -f "$MACRO_DEPTH"
 
-TOK_LIMIT=/tmp/cc_pp_token_limit_$$.c
+TOK_LIMIT=$CC_TMP/cc_pp_token_limit_$$.c
 echo "int tok = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10 + 11 + 12;" > "$TOK_LIMIT"
-! "$CC_BIN" -E -fpp-max-tokens=8 "$TOK_LIMIT" -o /tmp/cc_pp_s3_token_limit.i
+! "$CC_BIN" -E -fpp-max-tokens=8 "$TOK_LIMIT" -o $CC_TMP/cc_pp_s3_token_limit.i
 rm -f "$TOK_LIMIT"
 
-! "$CC_BIN" -E -fpp-max-output-bytes=32 -I. pp_s3_main.c -o /tmp/cc_pp_s3_output_limit.i
+! "$CC_BIN" -E -fpp-max-output-bytes=32 -I. pp_s3_main.c -o $CC_TMP/cc_pp_s3_output_limit.i
 
-ln -sf "$CC_BIN" /tmp/cpp
-/tmp/cpp -DTESTVAL=1 driver_pp_input.c -o /tmp/cc_pp_cpp_mode.i
-grep -q "int x = 1;" /tmp/cc_pp_cpp_mode.i
+ln -sf "$CC_BIN" $CC_TMP/cpp
+$CC_TMP/cpp -DTESTVAL=1 driver_pp_input.c -o $CC_TMP/cc_pp_cpp_mode.i
+grep -q "int x = 1;" $CC_TMP/cc_pp_cpp_mode.i
 
-cat > /tmp/cc_pp_cpp_mode_input.h <<'EOF'
+cat > $CC_TMP/cc_pp_cpp_mode_input.h <<'EOF'
 #define ANSWER2 TESTVAL + 2
 int y = ANSWER2;
 EOF
-/tmp/cpp -DTESTVAL=3 /tmp/cc_pp_cpp_mode_input.h -o /tmp/cc_pp_cpp_mode_h.i
-grep -q "int y = 3 + 2;" /tmp/cc_pp_cpp_mode_h.i
+$CC_TMP/cpp -DTESTVAL=3 $CC_TMP/cc_pp_cpp_mode_input.h -o $CC_TMP/cc_pp_cpp_mode_h.i
+grep -q "int y = 3 + 2;" $CC_TMP/cc_pp_cpp_mode_h.i

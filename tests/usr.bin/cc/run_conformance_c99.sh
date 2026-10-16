@@ -3,9 +3,14 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
+# a private directory for this run's files (the suite's Makefile passes its own)
+if [ -z "${CC_TMP:-}" ]; then
+	CC_TMP=$(mktemp -d "${TMPDIR:-/tmp}/cc_suite.XXXXXX")
+	trap 'rm -rf "$CC_TMP"' EXIT
+fi
 BASE="$ROOT/tests/usr.bin/cc/conformance_c99"
-PASS_LOG="/tmp/cc_conformance_pass.log"
-XFAIL_LOG="/tmp/cc_conformance_xfail.log"
+PASS_LOG="$CC_TMP/cc_conformance_pass.log"
+XFAIL_LOG="$CC_TMP/cc_conformance_xfail.log"
 
 pass_ok=0
 pass_fail=0
@@ -29,7 +34,7 @@ parse_entry() {
 while IFS= read -r entry; do
 	parse_entry "$entry"
 	[ -z "$case_name" ] && continue
-	out="/tmp/cc_conformance_pass_$(basename "$case_name" .c).o"
+	out="$CC_TMP/cc_conformance_pass_$(basename "$case_name" .c).o"
 	if "$CC_BIN" -std=c99 -c "$BASE/$case_name" -o "$out" >"$PASS_LOG" 2>&1; then
 		pass_ok=$((pass_ok + 1))
 	else
@@ -43,7 +48,7 @@ done < "$BASE/PASS.txt"
 while IFS= read -r entry; do
 	parse_entry "$entry"
 	[ -z "$case_name" ] && continue
-	out="/tmp/cc_conformance_xfail_$(basename "$case_name" .c).o"
+	out="$CC_TMP/cc_conformance_xfail_$(basename "$case_name" .c).o"
 	if "$CC_BIN" -std=c99 -c "$BASE/$case_name" -o "$out" >"$XFAIL_LOG" 2>&1; then
 		if [ -n "$case_reason" ]; then
 			echo "conformance-c99: XPASS: $case_name ($case_reason)"

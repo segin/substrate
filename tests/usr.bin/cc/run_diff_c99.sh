@@ -3,6 +3,11 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
+# a private directory for this run's files (the suite's Makefile passes its own)
+if [ -z "${CC_TMP:-}" ]; then
+	CC_TMP=$(mktemp -d "${TMPDIR:-/tmp}/cc_suite.XXXXXX")
+	trap 'rm -rf "$CC_TMP"' EXIT
+fi
 BASE="$ROOT/tests/usr.bin/cc/diff_c99"
 CASES_FILE="$BASE/CASES.txt"
 XFAIL_FILE="$BASE/XFAIL.txt"
@@ -101,14 +106,14 @@ for hostcc in $HOST_CC_LIST; do
 			exit 1
 		fi
 		checked=$((checked + 1))
-		host_bin="/tmp/cc_diff_${hostcc}_$(basename "$case_name" .c)"
-		our_bin="/tmp/cc_diff_ours_$(basename "$case_name" .c)"
+		host_bin="$CC_TMP/cc_diff_${hostcc}_$(basename "$case_name" .c)"
+		our_bin="$CC_TMP/cc_diff_ours_$(basename "$case_name" .c)"
 		if [ "$case_mode" = "compile" ]; then
 			host_bin="${host_bin}.o"
 			our_bin="${our_bin}.o"
 		fi
-		host_log="/tmp/cc_diff_${hostcc}_$(basename "$case_name" .c).log"
-		our_log="/tmp/cc_diff_ours_$(basename "$case_name" .c).log"
+		host_log="$CC_TMP/cc_diff_${hostcc}_$(basename "$case_name" .c).log"
+		our_log="$CC_TMP/cc_diff_ours_$(basename "$case_name" .c).log"
 		host_rc=$(run_compile_status "$hostcc" "$BASE/$case_name" "$host_bin" "$host_log" "$case_mode")
 		our_rc=$(run_compile_status_ours "$BASE/$case_name" "$our_bin" "$our_log" "$case_mode")
 		if [ "$host_rc" -ne "$our_rc" ]; then
@@ -126,10 +131,10 @@ for hostcc in $HOST_CC_LIST; do
 			continue
 		fi
 		if [ "$case_mode" = "run" ] && [ "$host_rc" -eq 0 ]; then
-			host_out="/tmp/cc_diff_${hostcc}_$(basename "$case_name" .c).out"
-			our_out="/tmp/cc_diff_ours_$(basename "$case_name" .c).out"
-			host_rc_file="/tmp/cc_diff_${hostcc}_$(basename "$case_name" .c).rc"
-			our_rc_file="/tmp/cc_diff_ours_$(basename "$case_name" .c).rc"
+			host_out="$CC_TMP/cc_diff_${hostcc}_$(basename "$case_name" .c).out"
+			our_out="$CC_TMP/cc_diff_ours_$(basename "$case_name" .c).out"
+			host_rc_file="$CC_TMP/cc_diff_${hostcc}_$(basename "$case_name" .c).rc"
+			our_rc_file="$CC_TMP/cc_diff_ours_$(basename "$case_name" .c).rc"
 			run_program "$host_bin" "$host_out" "$host_rc_file"
 			run_program "$our_bin" "$our_out" "$our_rc_file"
 			host_run_rc=$(cat "$host_rc_file")

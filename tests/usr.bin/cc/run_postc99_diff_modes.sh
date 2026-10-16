@@ -3,18 +3,23 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
+# a private directory for this run's files (the suite's Makefile passes its own)
+if [ -z "${CC_TMP:-}" ]; then
+	CC_TMP=$(mktemp -d "${TMPDIR:-/tmp}/cc_suite.XXXXXX")
+	trap 'rm -rf "$CC_TMP"' EXIT
+fi
 
 probe_std_flag() {
     local cc="$1"
     local mode="$2"
-    local src="/tmp/cc_postc99_probe_${cc}_${mode}.c"
+    local src="$CC_TMP/cc_postc99_probe_${cc}_${mode}.c"
 
     echo 'int main(void){return 0;}' > "$src"
-    if "$cc" -std="$mode" -x c "$src" -o /tmp/cc_postc99_probe_bin >/dev/null 2>/dev/null; then
+    if "$cc" -std="$mode" -x c "$src" -o $CC_TMP/cc_postc99_probe_bin >/dev/null 2>/dev/null; then
         echo "-std=$mode"
         return 0
     fi
-    if [ "$mode" = "c23" ] && "$cc" -std=c2x -x c "$src" -o /tmp/cc_postc99_probe_bin >/dev/null 2>/dev/null; then
+    if [ "$mode" = "c23" ] && "$cc" -std=c2x -x c "$src" -o $CC_TMP/cc_postc99_probe_bin >/dev/null 2>/dev/null; then
         echo "-std=c2x"
         return 0
     fi
@@ -34,12 +39,12 @@ run_one_compiler() {
         return 0
     fi
 
-    "$CC_BIN" -std="$mode" "$src" -o "/tmp/cc_postc99_ours_${tag}"
-    "$host_cc" "$stdflag" "$src" -o "/tmp/cc_postc99_host_${tag}"
+    "$CC_BIN" -std="$mode" "$src" -o "$CC_TMP/cc_postc99_ours_${tag}"
+    "$host_cc" "$stdflag" "$src" -o "$CC_TMP/cc_postc99_host_${tag}"
 
-    "/tmp/cc_postc99_ours_${tag}"
+    "$CC_TMP/cc_postc99_ours_${tag}"
     ours_rc=$?
-    "/tmp/cc_postc99_host_${tag}"
+    "$CC_TMP/cc_postc99_host_${tag}"
     host_rc=$?
 
     test "$ours_rc" -eq "$host_rc"
