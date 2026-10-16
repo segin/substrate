@@ -119,6 +119,7 @@ typedef struct {
     int float_is_single;
     int float_is_long;
     int is_imaginary; /**< GNU `i`/`j` suffix: the literal is an imaginary constant */
+    int int_is_bitprecise; /**< C23 `wb`/`WB` suffix: a _BitInt constant (its value may need more than 64 bits) */
     int int_is_unsigned;
     int int_is_long;
     int int_is_longlong;

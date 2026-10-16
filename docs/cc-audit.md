@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
-| 4. ABI and other code generation | 36 | 33 |
+| 4. ABI and other code generation | 36 | 34 |
 | 5. Driver and predefined macros | 3 | 3 |
 | 6. The restored suite's failing commands | 10 | 10 |
 | 7. The restored suite itself | 12 | 12 |
@@ -268,11 +268,27 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   not gcc's, decimal rounding is binary rounding, and a value passed to
   or from gcc-built code is wrong.  Sizes and alignments are right.
   *Reproduced* (`_Decimal64 d = 2.0` holds the bytes of the double 2.0).
-- [ ] **CC-70** Integers wider than 64 bits shall work: `__int128` on
+- [x] **CC-70** Integers wider than 64 bits shall work: `__int128` on
   x86-64 and `_BitInt(N)` up to a `BITINT_MAXWIDTH` above 64 (gcc's is
   65535), with the C23 `wb`/`uwb` literal suffixes.  The IR's integers
   are 64-bit; since CC-22 cc rejects the wider types instead of
   miscompiling them, and `1wb` does not lex.  *Reproduced.*
+  A wide integer is now a hidden structure of pointer-sized limbs, as
+  gcc lays it out (`__int128` 16-aligned; `_BitInt` limbs 8 bytes on
+  x86-64, 4 on i386), and is passed and returned as that structure,
+  which is the psABI's rule for it.  Sema converts the operands of a
+  wide operator to their common type; lowering does `+ - & | ^`, shifts
+  and comparisons limb by limb, re-extends the top limb after each
+  operation, and calls libgcc's `__mulbitint3`, `__divmodbitint4`,
+  `__floatbitint*` and `__fix*bitint` for `* / %` and the floating
+  conversions.  `++`/`--`, compound assignment, `!`, `&&`, `||` and
+  conditions work; static initializers are folded at the type's width.
+  `wb` constants of any width lex, with the C23 type (`sizeof(5wb)` is
+  1).  `__SIZEOF_INT128__` is 16 and `__int128` accepted on x86-64
+  only; `__BITINT_MAXWIDTH__` is 65535.  `codegen/wide_int.c` matches
+  gcc to the bit at both widths and both optimization levels;
+  `codegen_abi/` passes `_BitInt(100)`, `(200)`, `(130)` and `__int128`
+  both ways.  A small `_BitInt` shifted keeps its width.
 - [ ] **CC-71** GNU and clang vector types (`vector_size`,
   `ext_vector_type`) shall work: their size and alignment, brace
   initialization, subscripts and element-wise operators.  cc parsed the
@@ -794,7 +810,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-79 requirements: 76 met, 3 open.
+79 requirements: 77 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

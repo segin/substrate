@@ -4531,6 +4531,667 @@ static int lower_complex_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
     return im < 0 ? -1 : complex_store_new(sf, re, im, elem, diag);
 }
 
+/*
+ * Integers wider than 64 bits.  A value of one is the address of its
+ * limbs (the structure parser_wide_struct() makes), least significant
+ * first, each a target word -- a limb is the pointer's size on both
+ * targets.  Every operation reads its operands' limbs and writes a new
+ * temporary's; the bits of the top limb above the width are kept as the
+ * sign (or zero) extension of the value, and are not trusted on input:
+ * reading the top limb extends it again (wide_ld()).  Multiplication,
+ * division and the floating conversions call libgcc's _BitInt helpers, as
+ * gcc does.
+ */
+
+/** A wide integer type's shape. */
+typedef struct {
+    long bits;       /**< its width N */
+    long n;          /**< limbs */
+    long limb;       /**< bytes in a limb (the pointer size) */
+    int is_unsigned; /**< unsigned */
+} wide_t;
+
+/** Fill @p w for (@p t, @p sid) if it is a wide integer type; return whether it is. */
+static int wide_of(const cc_translation_unit_t *tu, cc_type_t t, int sid, wide_t *w) {
+    const cc_struct_def_t *sd;
+
+    if (t != CC_TYPE_VOID || tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count) {
+        return 0;
+    }
+    sd = &tu->structs[sid];
+    if (sd->wide_bits <= 0) {
+        return 0;
+    }
+    w->bits = sd->wide_bits;
+    w->limb = cc_target_pointer_size();
+    w->n = (w->bits + w->limb * 8 - 1) / (w->limb * 8);
+    w->is_unsigned = sd->wide_unsigned;
+    return 1;
+}
+
+/** A limb-sized constant. */
+static int wide_k(cc_ssa_function_t *sf, long long v, const wide_t *w) {
+    int c = emit_const_i64_instr(sf, v);
+
+    if (c >= 0) {
+        set_value_size(sf, c, w->limb);
+    }
+    return c;
+}
+
+/** @p a @p op @p b on limbs (limb-sized: 32-bit operations on i386). */
+static int wide_op(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int a, int b, int is_unsigned, const wide_t *w,
+                   cc_diag_t *diag) {
+    int r = (a < 0 || b < 0) ? -1 : emit_i64_binop_instr(sf, op, a, b, is_unsigned, diag);
+
+    if (r >= 0) {
+        set_value_size(sf, r, w->limb);
+    }
+    return r;
+}
+
+/** A limb comparison, 1 or 0, limb-sized. */
+static int wide_cmp(cc_ssa_function_t *sf, cc_cmp_kind_t kind, int a, int b, int is_unsigned, const wide_t *w,
+                    cc_diag_t *diag) {
+    int r = (a < 0 || b < 0) ? -1 : emit_cmp_instr(sf, kind, a, b, is_unsigned, diag);
+
+    if (r >= 0) {
+        set_value_size(sf, r, w->limb);
+    }
+    return r;
+}
+
+/** The address of limb @p i of the wide value at @p base. */
+static int wide_addr(cc_ssa_function_t *sf, int base, long i, const wide_t *w, cc_diag_t *diag) {
+    return (base < 0 || i == 0) ? base : complex_part_addr(sf, base, i * w->limb, diag);
+}
+
+/**
+ * Limb @p i of the wide value at @p base.  The top limb comes back
+ * extended from the value's width -- sign-extended if the type is signed --
+ * whatever its stored padding bits.
+ */
+static int wide_ld(cc_ssa_function_t *sf, int base, long i, const wide_t *w, cc_diag_t *diag) {
+    cc_ssa_instr_t ld;
+    int p = wide_addr(sf, base, i, w, diag);
+    long top_bits = w->bits - (w->n - 1) * w->limb * 8;
+
+    if (p < 0) {
+        return -1;
+    }
+    memset(&ld, 0, sizeof(ld));
+    ld.op = CC_SSA_LOAD;
+    ld.dst = new_value(sf, CC_VAL_I64);
+    ld.lhs = p;
+    ld.rhs = -1;
+    ld.imm = w->limb;
+    ld.is_unsigned = 1;
+    if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+        set_diag(diag, "out of memory loading a limb");
+        return -1;
+    }
+    set_value_size(sf, ld.dst, w->limb);
+    if (i == w->n - 1 && top_bits < w->limb * 8) {
+        int sh = wide_k(sf, w->limb * 8 - top_bits, w);
+        int v = wide_op(sf, CC_SSA_SHL, ld.dst, sh, 1, w, diag);
+
+        return wide_op(sf, CC_SSA_SHR, v, sh, w->is_unsigned, w, diag);
+    }
+    return ld.dst;
+}
+
+/** Store limb value @p v as limb @p i of the wide value at @p base. */
+static int wide_st(cc_ssa_function_t *sf, int base, long i, int v, const wide_t *w, cc_diag_t *diag) {
+    cc_ssa_instr_t st;
+    int p = wide_addr(sf, base, i, w, diag);
+
+    if (p < 0 || v < 0) {
+        return -1;
+    }
+    memset(&st, 0, sizeof(st));
+    st.op = CC_SSA_STORE;
+    st.dst = -1;
+    st.lhs = p;
+    st.rhs = v;
+    st.imm = w->limb;
+    if (push_instr(sf, st) != 0) {
+        set_diag(diag, "out of memory storing a limb");
+        return -1;
+    }
+    return 0;
+}
+
+/** Re-extend the top limb of the wide value at @p addr from its width (after an operation that wrote it). */
+static int wide_fix_top(cc_ssa_function_t *sf, int addr, const wide_t *w, cc_diag_t *diag) {
+    if (w->bits % (w->limb * 8) == 0) {
+        return 0;
+    }
+    return wide_st(sf, addr, w->n - 1, wide_ld(sf, addr, w->n - 1, w, diag), w, diag);
+}
+
+/** The limb filling a widened value: all ones if signed and negative, else zero. */
+static int wide_fill(cc_ssa_function_t *sf, int addr, const wide_t *w, cc_diag_t *diag) {
+    if (w->is_unsigned) {
+        return wide_k(sf, 0, w);
+    }
+    return wide_op(sf, CC_SSA_SHR, wide_ld(sf, addr, w->n - 1, w, diag), wide_k(sf, w->limb * 8 - 1, w), 0, w,
+                   diag);
+}
+
+/**
+ * A call to a libgcc helper, `void`/scalar `name(args...)`.  @p abi gives
+ * each argument's ABI kind (NULL: all default); the returned value, if
+ * @p ret_vt is not -1, is a new value of that kind.
+ */
+static int wide_libcall(cc_ssa_function_t *sf, const char *name, const int *args, size_t nargs,
+                        const unsigned char *abi, int ret_vt, int ret_agg_class, int ret_x87, cc_diag_t *diag) {
+    cc_ssa_instr_t call_in;
+    size_t i;
+
+    memset(&call_in, 0, sizeof(call_in));
+    call_in.op = CC_SSA_CALL;
+    call_in.sym = cc_strdup(name);
+    call_in.arg_count = nargs;
+    call_in.args = (int *)calloc(nargs, sizeof(*call_in.args));
+    call_in.call_arg_abi = (unsigned char *)calloc(nargs, sizeof(*call_in.call_arg_abi));
+    call_in.call_arg_sizes = (uint32_t *)calloc(nargs, sizeof(*call_in.call_arg_sizes));
+    call_in.dst = new_value(sf, ret_vt >= 0 ? (cc_value_type_t)ret_vt : CC_VAL_I64);
+    call_in.rhs = -1;
+    call_in.agg_class = ret_agg_class;
+    call_in.call_ret_x87 = ret_x87;
+    if (call_in.sym == NULL || call_in.args == NULL || call_in.call_arg_abi == NULL || call_in.call_arg_sizes == NULL ||
+        call_in.dst < 0) {
+        free(call_in.sym);
+        free(call_in.args);
+        free(call_in.call_arg_abi);
+        free(call_in.call_arg_sizes);
+        set_diag(diag, "out of memory emitting a helper call");
+        return -1;
+    }
+    for (i = 0; i < nargs; ++i) {
+        if (args[i] < 0) {
+            free(call_in.sym);
+            free(call_in.args);
+            free(call_in.call_arg_abi);
+            free(call_in.call_arg_sizes);
+            return -1;
+        }
+        call_in.args[i] = args[i];
+        call_in.call_arg_abi[i] = abi != NULL ? abi[i] : CC_CALL_ARG_ABI_DEFAULT;
+        call_in.call_arg_sizes[i] = (uint32_t)(abi != NULL && abi[i] == CC_CALL_ARG_ABI_FLOAT ? 4
+                                               : abi != NULL && abi[i] == CC_CALL_ARG_ABI_LDOUBLE
+                                                   ? 12
+                                                   : value_size(sf, args[i]));
+    }
+    if (ret_x87) {
+        set_value_size(sf, call_in.dst, 16);
+    }
+    if (push_instr(sf, call_in) != 0) {
+        free(call_in.sym);
+        free(call_in.args);
+        free(call_in.call_arg_abi);
+        free(call_in.call_arg_sizes);
+        set_diag(diag, "out of memory emitting a helper call");
+        return -1;
+    }
+    return call_in.dst;
+}
+
+/** An int-sized argument to a libgcc helper (a precision): 4 bytes on both targets. */
+static int wide_int_arg(cc_ssa_function_t *sf, long v) {
+    int c = emit_const_i64_instr(sf, v);
+
+    if (c >= 0) {
+        set_value_size(sf, c, 4);
+    }
+    return c;
+}
+
+/** A new wide temporary of shape @p w. */
+static int wide_new(cc_ssa_function_t *sf, const wide_t *w, cc_diag_t *diag) {
+    return emit_local_storage_alloc(sf, w->n * w->limb, diag);
+}
+
+/**
+ * @p a + - & | ^ @p b, limb by limb with the carry or borrow, into a new
+ * temporary.
+ */
+static int wide_arith(cc_ssa_function_t *sf, cc_binop_t op, int a, int b, const wide_t *w, cc_diag_t *diag) {
+    int r = wide_new(sf, w, diag);
+    int carry = wide_k(sf, 0, w);
+    long i;
+
+    for (i = 0; r >= 0 && i < w->n; ++i) {
+        int x = wide_ld(sf, a, i, w, diag);
+        int y = wide_ld(sf, b, i, w, diag);
+        int v;
+
+        switch (op) {
+        case CC_BIN_ADD: {
+            int s = wide_op(sf, CC_SSA_ADD, x, y, 1, w, diag);
+            int c1 = wide_cmp(sf, CC_CMP_LT, s, x, 1, w, diag);
+            int s2 = wide_op(sf, CC_SSA_ADD, s, carry, 1, w, diag);
+            int c2 = wide_cmp(sf, CC_CMP_LT, s2, s, 1, w, diag);
+
+            carry = wide_op(sf, CC_SSA_OR, c1, c2, 1, w, diag);
+            v = s2;
+            break;
+        }
+        case CC_BIN_SUB: {
+            int d = wide_op(sf, CC_SSA_SUB, x, y, 1, w, diag);
+            int b1 = wide_cmp(sf, CC_CMP_LT, x, y, 1, w, diag);
+            int d2 = wide_op(sf, CC_SSA_SUB, d, carry, 1, w, diag);
+            int b2 = wide_cmp(sf, CC_CMP_LT, d, carry, 1, w, diag);
+
+            carry = wide_op(sf, CC_SSA_OR, b1, b2, 1, w, diag);
+            v = d2;
+            break;
+        }
+        case CC_BIN_BAND:
+            v = wide_op(sf, CC_SSA_AND, x, y, 1, w, diag);
+            break;
+        case CC_BIN_BOR:
+            v = wide_op(sf, CC_SSA_OR, x, y, 1, w, diag);
+            break;
+        default:
+            v = wide_op(sf, CC_SSA_XOR, x, y, 1, w, diag);
+            break;
+        }
+        if (wide_st(sf, r, i, v, w, diag) != 0) {
+            return -1;
+        }
+    }
+    return (r < 0 || wide_fix_top(sf, r, w, diag) != 0) ? -1 : r;
+}
+
+/** A wide zero, as a new temporary. */
+static int wide_zero(cc_ssa_function_t *sf, const wide_t *w, cc_diag_t *diag) {
+    int r = wide_new(sf, w, diag);
+    long i;
+
+    for (i = 0; r >= 0 && i < w->n; ++i) {
+        if (wide_st(sf, r, i, wide_k(sf, 0, w), w, diag) != 0) {
+            return -1;
+        }
+    }
+    return r;
+}
+
+/**
+ * @p a << or >> @p count (a long long value): the limbs are copied into
+ * the middle of a scratch area three times their length -- zeros below,
+ * the sign fill above -- so each result limb is two loads at a run-time
+ * offset, branch-free.  A count of the width or more is undefined in C; it
+ * is clamped to keep the loads inside the scratch area.
+ */
+static int wide_shift(cc_ssa_function_t *sf, int is_left, int a, int count, const wide_t *w, cc_diag_t *diag) {
+    long W = w->limb * 8;
+    cc_type_t word = w->limb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
+    wide_t s3 = *w;
+    int scratch;
+    int fill;
+    int q;
+    int r;
+    int qoff;
+    int wm1r;
+    int res;
+    long i;
+    int lt;
+    int l_clamp = new_label(sf);
+    int l_go = new_label(sf);
+
+    s3.n = 3 * w->n;
+    s3.bits = s3.n * W;
+    scratch = emit_local_storage_alloc(sf, s3.n * w->limb, diag);
+    fill = wide_fill(sf, a, w, diag);
+    for (i = 0; scratch >= 0 && fill >= 0 && i < w->n; ++i) {
+        if (wide_st(sf, scratch, i, wide_k(sf, 0, w), &s3, diag) != 0 ||
+            wide_st(sf, scratch, w->n + i, wide_ld(sf, a, i, w, diag), &s3, diag) != 0 ||
+            wide_st(sf, scratch, 2 * w->n + i, is_left ? wide_k(sf, 0, w) : fill, &s3, diag) != 0) {
+            return -1;
+        }
+    }
+    /* q whole limbs and r bits, as pointer-sized words */
+    q = normalize_integral_value(sf, emit_i64_binop_instr(sf, CC_SSA_SHR, count, emit_const_i64_instr(sf, W == 64 ? 6 : 5),
+                                                          1, diag),
+                                 word, diag);
+    r = normalize_integral_value(sf, emit_i64_binop_instr(sf, CC_SSA_AND, count, emit_const_i64_instr(sf, W - 1), 1, diag),
+                                 word, diag);
+    if (q < 0 || r < 0 || l_clamp < 0 || l_go < 0) {
+        return -1;
+    }
+    set_value_size(sf, q, w->limb);
+    set_value_size(sf, r, w->limb);
+    lt = wide_cmp(sf, CC_CMP_GT, q, wide_k(sf, w->n, w), 1, w, diag);
+    if (lt < 0 || emit_br_cond_instr(sf, lt, l_clamp, l_go) != 0 || emit_label_instr(sf, l_clamp) != 0 ||
+        emit_mov_instr(sf, q, wide_k(sf, w->n, w)) != 0 || emit_br_instr(sf, l_go) != 0 ||
+        emit_label_instr(sf, l_go) != 0) {
+        return -1;
+    }
+    qoff = wide_op(sf, CC_SSA_MUL, q, wide_k(sf, w->limb, w), 1, w, diag);
+    wm1r = wide_op(sf, CC_SSA_SUB, wide_k(sf, W - 1, w), r, 1, w, diag);
+    res = wide_new(sf, w, diag);
+    for (i = 0; res >= 0 && qoff >= 0 && wm1r >= 0 && i < w->n; ++i) {
+        int mid = complex_part_addr(sf, scratch, (w->n + i) * w->limb, diag);
+        int p0 = wide_op(sf, is_left ? CC_SSA_SUB : CC_SSA_ADD, mid, qoff, 1, w, diag);
+        int p1 = p0 < 0 ? -1 : complex_part_addr(sf, p0, is_left ? -w->limb : w->limb, diag);
+        int x = wide_ld(sf, p0, 0, &s3, diag);
+        int y = wide_ld(sf, p1, 0, &s3, diag);
+        int v;
+
+        if (is_left) {
+            /* x << r | (y >> 1) >> (W-1-r): no shift by W when r is 0 */
+            v = wide_op(sf, CC_SSA_OR, wide_op(sf, CC_SSA_SHL, x, r, 1, w, diag),
+                        wide_op(sf, CC_SSA_SHR, wide_op(sf, CC_SSA_SHR, y, wide_k(sf, 1, w), 1, w, diag), wm1r, 1, w,
+                                diag),
+                        1, w, diag);
+        } else {
+            v = wide_op(sf, CC_SSA_OR, wide_op(sf, CC_SSA_SHR, x, r, 1, w, diag),
+                        wide_op(sf, CC_SSA_SHL, wide_op(sf, CC_SSA_SHL, y, wide_k(sf, 1, w), 1, w, diag), wm1r, 1, w,
+                                diag),
+                        1, w, diag);
+        }
+        if (wide_st(sf, res, i, v, w, diag) != 0) {
+            return -1;
+        }
+    }
+    return (res < 0 || wide_fix_top(sf, res, w, diag) != 0) ? -1 : res;
+}
+
+/** @p a == != < <= > >= @p b, an int: equality on all limbs, order from the top limb down. */
+static int wide_compare(cc_ssa_function_t *sf, cc_binop_t op, int a, int b, const wide_t *w, cc_diag_t *diag) {
+    long i;
+
+    if (op == CC_BIN_EQ || op == CC_BIN_NE) {
+        int acc = wide_k(sf, 0, w);
+
+        for (i = 0; acc >= 0 && i < w->n; ++i) {
+            acc = wide_op(sf, CC_SSA_OR, acc,
+                          wide_op(sf, CC_SSA_XOR, wide_ld(sf, a, i, w, diag), wide_ld(sf, b, i, w, diag), 1, w, diag),
+                          1, w, diag);
+        }
+        return acc < 0 ? -1 : emit_cmp_instr(sf, op == CC_BIN_EQ ? CC_CMP_EQ : CC_CMP_NE, acc, wide_k(sf, 0, w), 1,
+                                             diag);
+    } else {
+        int res = new_value(sf, CC_VAL_I64);
+        int l_lt = new_label(sf);
+        int l_gt = new_label(sf);
+        int l_end = new_label(sf);
+        int when_lt = op == CC_BIN_LT || op == CC_BIN_LE;
+        int when_eq = op == CC_BIN_LE || op == CC_BIN_GE;
+
+        if (res < 0 || l_lt < 0 || l_gt < 0 || l_end < 0) {
+            return -1;
+        }
+        for (i = w->n - 1; i >= 0; --i) {
+            /* the top limb compares in the type's signedness, the rest unsigned */
+            int uns = i == w->n - 1 ? w->is_unsigned : 1;
+            int x = wide_ld(sf, a, i, w, diag);
+            int y = wide_ld(sf, b, i, w, diag);
+            int l1 = new_label(sf);
+            int l2 = new_label(sf);
+            int c1 = wide_cmp(sf, CC_CMP_LT, x, y, uns, w, diag);
+
+            if (c1 < 0 || l1 < 0 || l2 < 0 || emit_br_cond_instr(sf, c1, l_lt, l1) != 0 ||
+                emit_label_instr(sf, l1) != 0) {
+                return -1;
+            }
+            c1 = wide_cmp(sf, CC_CMP_GT, x, y, uns, w, diag);
+            if (c1 < 0 || emit_br_cond_instr(sf, c1, l_gt, l2) != 0 || emit_label_instr(sf, l2) != 0) {
+                return -1;
+            }
+        }
+        if (emit_mov_instr(sf, res, emit_const_i64_instr(sf, when_eq)) != 0 || emit_br_instr(sf, l_end) != 0 ||
+            emit_label_instr(sf, l_lt) != 0 || emit_mov_instr(sf, res, emit_const_i64_instr(sf, when_lt)) != 0 ||
+            emit_br_instr(sf, l_end) != 0 || emit_label_instr(sf, l_gt) != 0 ||
+            emit_mov_instr(sf, res, emit_const_i64_instr(sf, !when_lt)) != 0 || emit_br_instr(sf, l_end) != 0 ||
+            emit_label_instr(sf, l_end) != 0) {
+            return -1;
+        }
+        return res;
+    }
+}
+
+/** The precision a libgcc _BitInt helper takes for an operand of shape @p w: negative when signed. */
+static long wide_prec(const wide_t *w) {
+    return w->is_unsigned ? w->bits : -w->bits;
+}
+
+/** @p a * / % @p b by libgcc's __mulbitint3 and __divmodbitint4, into a new temporary. */
+static int wide_muldiv(cc_ssa_function_t *sf, cc_binop_t op, int a, int b, const wide_t *w, cc_diag_t *diag) {
+    int r = wide_new(sf, w, diag);
+    int null_ptr = emit_const_i64_instr(sf, 0);
+
+    if (r < 0 || null_ptr < 0) {
+        return -1;
+    }
+    set_value_size(sf, null_ptr, cc_target_pointer_size());
+    if (op == CC_BIN_MUL) {
+        int args[6];
+
+        args[0] = r;
+        args[1] = wide_int_arg(sf, w->bits);
+        args[2] = a;
+        args[3] = wide_int_arg(sf, wide_prec(w));
+        args[4] = b;
+        args[5] = wide_int_arg(sf, wide_prec(w));
+        if (wide_libcall(sf, "__mulbitint3", args, 6, NULL, -1, 0, 0, diag) < 0) {
+            return -1;
+        }
+    } else {
+        int args[8];
+
+        args[0] = op == CC_BIN_DIV ? r : null_ptr;
+        args[1] = wide_int_arg(sf, op == CC_BIN_DIV ? w->bits : 0);
+        args[2] = op == CC_BIN_MOD ? r : null_ptr;
+        args[3] = wide_int_arg(sf, op == CC_BIN_MOD ? w->bits : 0);
+        args[4] = a;
+        args[5] = wide_int_arg(sf, wide_prec(w));
+        args[6] = b;
+        args[7] = wide_int_arg(sf, wide_prec(w));
+        if (wide_libcall(sf, "__divmodbitint4", args, 8, NULL, -1, 0, 0, diag) < 0) {
+            return -1;
+        }
+    }
+    return wide_fix_top(sf, r, w, diag) != 0 ? -1 : r;
+}
+
+/** Whether @p e is the constant -1 converted (how `-x` reaches lowering: `-1 * x`). */
+static int wide_is_minus_one(const cc_expr_t *e) {
+    while (e != NULL && e->kind == CC_EXPR_CAST) {
+        e = e->lhs;
+    }
+    return e != NULL && e->kind == CC_EXPR_INT && e->int_val == -1;
+}
+
+/**
+ * A binary operator on wide integers (sema cast both operands to one wide
+ * type, or for a shift gave the count as a long long): a new temporary's
+ * address, or an int for a comparison.
+ */
+static int lower_wide_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                            var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    wide_t w;
+    int a;
+    int b;
+
+    if (!wide_of(tu, e->lhs->value_type, e->lhs->struct_id, &w)) {
+        set_diag(diag, "malformed wide integer operation in lowering");
+        return -1;
+    }
+    if (e->op == CC_BIN_MUL && wide_is_minus_one(e->lhs)) {
+        /* -x */
+        b = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+        return b < 0 ? -1 : wide_arith(sf, CC_BIN_SUB, wide_zero(sf, &w, diag), b, &w, diag);
+    }
+    a = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+    b = a < 0 ? -1 : lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+    if (b < 0) {
+        return -1;
+    }
+    switch (e->op) {
+    case CC_BIN_ADD:
+    case CC_BIN_SUB:
+    case CC_BIN_BAND:
+    case CC_BIN_BOR:
+    case CC_BIN_BXOR:
+        return wide_arith(sf, e->op, a, b, &w, diag);
+    case CC_BIN_MUL:
+    case CC_BIN_DIV:
+    case CC_BIN_MOD:
+        return wide_muldiv(sf, e->op, a, b, &w, diag);
+    case CC_BIN_SHL:
+    case CC_BIN_SHR:
+        return wide_shift(sf, e->op == CC_BIN_SHL, a, b, &w, diag);
+    case CC_BIN_EQ:
+    case CC_BIN_NE:
+    case CC_BIN_LT:
+    case CC_BIN_LE:
+    case CC_BIN_GT:
+    case CC_BIN_GE:
+        return wide_compare(sf, e->op, a, b, &w, diag);
+    default:
+        set_diag(diag, "invalid wide integer operation in lowering");
+        return -1;
+    }
+}
+
+/**
+ * A conversion to or from a wide integer type (CC_EXPR_CAST): between wide
+ * types limb by limb, from a narrower integer through its long long value,
+ * to one by its low 64 bits, and to or from a floating type by libgcc's
+ * __floatbitint* and __fix*bitint.
+ */
+static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                           var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    wide_t wd;
+    wide_t ws;
+    int to_wide = wide_of(tu, e->aux_type, e->aux_struct_id, &wd);
+    int from_wide = wide_of(tu, e->lhs->value_type, e->lhs->struct_id, &ws);
+    cc_type_t st = e->lhs->value_type;
+    long i;
+
+    if (to_wide && from_wide) {
+        int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        int r = src < 0 ? -1 : wide_new(sf, &wd, diag);
+        int fill = r < 0 ? -1 : wide_fill(sf, src, &ws, diag);
+
+        for (i = 0; fill >= 0 && i < wd.n; ++i) {
+            if (wide_st(sf, r, i, i < ws.n ? wide_ld(sf, src, i, &ws, diag) : fill, &wd, diag) != 0) {
+                return -1;
+            }
+        }
+        return (fill < 0 || wide_fix_top(sf, r, &wd, diag) != 0) ? -1 : r;
+    }
+    if (to_wide && (st == CC_TYPE_FLOAT || st == CC_TYPE_DOUBLE || st == CC_TYPE_LDOUBLE)) {
+        int r = wide_new(sf, &wd, diag);
+        int v = r < 0 ? -1 : lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        int args[3];
+        unsigned char abi[3] = {CC_CALL_ARG_ABI_DEFAULT, CC_CALL_ARG_ABI_DEFAULT, CC_CALL_ARG_ABI_DEFAULT};
+
+        if (v < 0) {
+            return -1;
+        }
+        if (st == CC_TYPE_LDOUBLE) {
+            v = promote_f64_to_ldouble_value(sf, v, diag);
+            abi[2] = CC_CALL_ARG_ABI_LDOUBLE;
+        } else {
+            v = demote_ldouble_to_f64_value(sf, v, diag);
+            abi[2] = st == CC_TYPE_FLOAT ? CC_CALL_ARG_ABI_FLOAT : CC_CALL_ARG_ABI_DEFAULT;
+        }
+        args[0] = r;
+        args[1] = wide_int_arg(sf, wide_prec(&wd));
+        args[2] = v;
+        if (wide_libcall(sf, st == CC_TYPE_FLOAT ? "__fixsfbitint" : st == CC_TYPE_DOUBLE ? "__fixdfbitint"
+                                                                                           : "__fixxfbitint",
+                         args, 3, abi, -1, 0, 0, diag) < 0) {
+            return -1;
+        }
+        return wide_fix_top(sf, r, &wd, diag) != 0 ? -1 : r;
+    }
+    if (to_wide) {
+        /* an integer: its value as a (unsigned) long long, sign- or zero-extended into the limbs */
+        int is_uns = cc_type_is_unsigned_integral(st) || st == CC_TYPE_BOOL;
+        cc_expr_t c;
+        int v;
+        int fill;
+        int r;
+
+        memset(&c, 0, sizeof(c));
+        c.kind = CC_EXPR_CAST;
+        c.aux_type = is_uns ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
+        c.aux_struct_id = -1;
+        c.value_type = c.aux_type;
+        c.struct_id = -1;
+        c.lhs = (cc_expr_t *)e->lhs;
+        v = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
+        fill = v < 0 ? -1 : (is_uns ? emit_const_i64_instr(sf, 0)
+                                    : emit_i64_binop_instr(sf, CC_SSA_SHR, v, emit_const_i64_instr(sf, 63), 0, diag));
+        r = fill < 0 ? -1 : wide_new(sf, &wd, diag);
+        if (r < 0) {
+            return -1;
+        }
+        set_value_size(sf, fill, 8);
+        for (i = 0; i < wd.n; ++i) {
+            int piece;
+
+            if (i * wd.limb * 8 >= 64) {
+                piece = fill;
+            } else if (i == 0) {
+                piece = v;
+            } else {
+                piece = emit_i64_binop_instr(sf, CC_SSA_SHR, v, emit_const_i64_instr(sf, i * wd.limb * 8), is_uns, diag);
+            }
+            if (wide_st(sf, r, i, piece, &wd, diag) != 0) {
+                return -1;
+            }
+        }
+        return wide_fix_top(sf, r, &wd, diag) != 0 ? -1 : r;
+    }
+    /* from a wide integer */
+    {
+        cc_type_t to = e->aux_type;
+        int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+
+        if (src < 0) {
+            return -1;
+        }
+        if (to == CC_TYPE_FLOAT || to == CC_TYPE_DOUBLE || to == CC_TYPE_LDOUBLE) {
+            int args[2];
+            int v;
+
+            args[0] = src;
+            args[1] = wide_int_arg(sf, wide_prec(&ws));
+            v = wide_libcall(sf, to == CC_TYPE_FLOAT ? "__floatbitintsf" : to == CC_TYPE_DOUBLE ? "__floatbitintdf"
+                                                                                                 : "__floatbitintxf",
+                             args, 2, NULL, CC_VAL_F64, to == CC_TYPE_FLOAT ? CC_ABI_RET_FLOAT : 0,
+                             to == CC_TYPE_LDOUBLE, diag);
+            return v;
+        }
+        if (to == CC_TYPE_VOID) {
+            return src;
+        }
+        {
+            /* an integer: the low 64 bits, then the target type's own conversion */
+            cc_ssa_instr_t ld;
+
+            memset(&ld, 0, sizeof(ld));
+            ld.op = CC_SSA_LOAD;
+            ld.dst = new_value(sf, CC_VAL_I64);
+            ld.lhs = src;
+            ld.rhs = -1;
+            ld.imm = 8;
+            ld.is_unsigned = 1;
+            if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+                set_diag(diag, "out of memory converting a wide integer");
+                return -1;
+            }
+            set_value_size(sf, ld.dst, 8);
+            return normalize_integral_value(sf, cast_value(sf, ld.dst, type_to_val(to), diag), to, diag);
+        }
+    }
+}
+
 static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                       var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     cc_ssa_instr_t in;
@@ -4915,6 +5576,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_BIN: {
         cc_value_type_t vt;
 
+        if (e->op != CC_BIN_COMMA && !is_logical_op(e->op) && e->lhs != NULL) {
+            wide_t ww;
+
+            if (wide_of(tu, e->lhs->value_type, e->lhs->struct_id, &ww)) {
+                return lower_wide_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
+            }
+        }
         if (e->op != CC_BIN_COMMA && !is_logical_op(e->op) &&
             (complex_elem_of(tu, e->value_type, e->struct_id) != CC_TYPE_VOID ||
              (e->lhs != NULL && complex_elem_of(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID) ||
@@ -8313,6 +8981,20 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (complex_elem_of(tu, e->aux_type, e->aux_struct_id) != CC_TYPE_VOID &&
             cast_src->kind != CC_EXPR_INIT_LIST) {
             return lower_complex_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
+        }
+        {
+            wide_t wd;
+            wide_t ws;
+            int to_wide = wide_of(tu, e->aux_type, e->aux_struct_id, &wd);
+            int from_wide = cast_src->kind != CC_EXPR_INIT_LIST &&
+                            wide_of(tu, cast_src->value_type, cast_src->struct_id, &ws);
+
+            if (from_wide && to_wide && e->aux_struct_id == cast_src->struct_id) {
+                return lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
+            }
+            if ((to_wide && cast_src->kind != CC_EXPR_INIT_LIST) || from_wide) {
+                return lower_wide_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
+            }
         }
         if (aggregate_cast_target) {
             const cc_struct_def_t *target_sd;

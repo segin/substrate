@@ -40,6 +40,15 @@ struct C13 lib_c13(struct C13 a);
 struct X1 lib_x1(struct X1 a, long double k);
 struct XI lib_xi(struct XI a);
 double lib_many(struct DD a, struct DD b, struct DD c, struct DD d, struct DD e, double f, struct FF g);
+#if __STDC_VERSION__ >= 202311L
+_BitInt(100) lib_b100(_BitInt(100) a, _BitInt(100) b);
+unsigned _BitInt(200) lib_b200(unsigned _BitInt(200) a, int k);
+_BitInt(130) lib_b130(long long x, _BitInt(130) y);
+#endif
+#ifdef __SIZEOF_INT128__
+__int128 lib_i128(__int128 a, unsigned __int128 b, long c);
+__int128 lib_i128s(long a, long b, long c, long d, long e, __int128 f);
+#endif
 float lib_fl(float a, double b, float c);
 double lib_fl10(float a, float b, float c, float d, float e, float f, float g, float h, float i, float j);
 float _Complex lib_cf(float _Complex a, float _Complex b);
@@ -78,6 +87,26 @@ static void classes(void) {
     printf("%g\n", lib_many(dd1, dd2, dd1, dd2, dd1, 0.5, ff1));
     printf("%g %g\n", (double)lib_fl(1.5f, 2.0, 0.25f),
            lib_fl10(0.5f, 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 6.5f, 7.5f, 8.5f, 9.5f));
+#if __STDC_VERSION__ >= 202311L
+    {
+        _BitInt(100) b100 = lib_b100((_BitInt(100))123456789012345LL * 1000003, -987654321);
+        unsigned _BitInt(200) b200 = lib_b200((unsigned _BitInt(200))0xfedcba9876543210ULL << 64, 70);
+        _BitInt(130) b130 = lib_b130(-5, (_BitInt(130))1 << 129);
+
+        printf("%llx %llx | %llx %llx %llx | %llx %llx\n", (unsigned long long)(b100 >> 64), (unsigned long long)b100,
+               (unsigned long long)(b200 >> 128), (unsigned long long)(b200 >> 64), (unsigned long long)b200,
+               (unsigned long long)(b130 >> 64), (unsigned long long)b130);
+    }
+#endif
+#ifdef __SIZEOF_INT128__
+    {
+        __int128 i1 = lib_i128((__int128)-3 << 70, ~(unsigned __int128)0, 9);
+        __int128 i2 = lib_i128s(1, 2, 3, 4, 5, (__int128)7 << 100);
+
+        printf("%llx %llx | %llx %llx\n", (unsigned long long)(i1 >> 64), (unsigned long long)i1,
+               (unsigned long long)(i2 >> 64), (unsigned long long)i2);
+    }
+#endif
     printf("%g %g | %.17g %.17g | %Lg %Lg\n", (double)__real__ cf, (double)__imag__ cf, __real__ cd, __imag__ cd,
            __real__ cl, __imag__ cl);
 }

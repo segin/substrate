@@ -2174,12 +2174,20 @@ static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, 
  *
  * @return 1 if a cast was added, 0 if none was needed, -1 when out of memory
  */
+static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid);
+
 static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid) {
     cc_type_t de = sema_complex_elem(tu, t, sid);
     cc_type_t se;
+    int wrc;
 
     if (*slot == NULL) {
         return 0;
+    }
+    /* a wide integer on either side converts the same way */
+    wrc = sema_wide_convert_for_assign(tu, slot, t, sid);
+    if (wrc != 0) {
+        return wrc;
     }
     se = sema_complex_elem(tu, (*slot)->value_type, (*slot)->struct_id);
     if ((de == CC_TYPE_VOID && se == CC_TYPE_VOID) || (de == se && de != CC_TYPE_VOID)) {
@@ -2279,8 +2287,272 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
     return 0;
 }
 
+/**
+ * The structure standing for an integer type wider than 64 bits
+ * (`__int128`, `_BitInt(N)`, N > 64) that (@p t, @p sid) is, or NULL.
+ */
+static const cc_struct_def_t *sema_wide_def(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
+    if (t != CC_TYPE_VOID || sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count ||
+        tu->structs[sid].wide_bits <= 0) {
+        return NULL;
+    }
+    return &tu->structs[sid];
+}
+
+/** Whether expression @p e has a wide integer type. */
+static int sema_is_wide(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return e != NULL && sema_wide_def(tu, e->value_type, e->struct_id) != NULL;
+}
+
+/**
+ * The wide integer type two operands convert to (C23 6.3.1.8): the wider;
+ * at the same width `__int128` (a standard-rank type) before `_BitInt`, and
+ * unsigned before signed.  Either may be narrow (NULL); not both.
+ */
+static int sema_wide_common(const cc_translation_unit_t *tu, int a, int b) {
+    const cc_struct_def_t *da = a >= 0 ? &tu->structs[a] : NULL;
+    const cc_struct_def_t *db = b >= 0 ? &tu->structs[b] : NULL;
+
+    if (da == NULL) {
+        return b;
+    }
+    if (db == NULL) {
+        return a;
+    }
+    if (da->wide_bits != db->wide_bits) {
+        return da->wide_bits > db->wide_bits ? a : b;
+    }
+    if (da->wide_is_int128 != db->wide_is_int128) {
+        return da->wide_is_int128 ? a : b;
+    }
+    return da->wide_unsigned ? a : b;
+}
+
+/** Whether (@p t) is an arithmetic type a wide integer can meet: an integer or a real floating type. */
+static int sema_wide_partner_ok(cc_type_t t) {
+    return (cc_type_is_integral(t) && !is_pointer_type(t)) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE ||
+           t == CC_TYPE_LDOUBLE || t == CC_TYPE_BOOL || t == CC_TYPE_BITINT;
+}
+
+/**
+ * A binary operator with a wide integer operand.  The usual arithmetic
+ * conversions are made explicit: both operands are cast to the common type
+ * (a floating type when the other operand is floating), so lowering sees
+ * operands of one wide type.  A shift keeps its left operand's type and
+ * takes its count as a long long.  Comparisons give int.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    int lw = sema_is_wide(tu, e->lhs);
+    int rw = sema_is_wide(tu, e->rhs);
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+    cc_type_t ft = CC_TYPE_VOID;
+    int sid;
+
+    if ((!lw && !sema_wide_partner_ok(e->lhs->value_type)) || (!rw && !sema_wide_partner_ok(e->rhs->value_type))) {
+        set_diag(diag, "invalid operands to a wide integer operation");
+        return -1;
+    }
+    if (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) {
+        if (rw && sema_wrap_cast(&e->rhs, CC_TYPE_LONG_LONG, -1) != 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        if (!lw) {
+            /* a narrow value shifted by a wide count: an ordinary shift */
+            e->value_type = e->lhs->value_type;
+            e->struct_id = e->lhs->struct_id;
+            return 0;
+        }
+        e->value_type = CC_TYPE_VOID;
+        e->struct_id = e->lhs->struct_id;
+        return 0;
+    }
+    if (!lw && (e->lhs->value_type == CC_TYPE_FLOAT || e->lhs->value_type == CC_TYPE_DOUBLE ||
+                e->lhs->value_type == CC_TYPE_LDOUBLE)) {
+        ft = e->lhs->value_type;
+    }
+    if (!rw && (e->rhs->value_type == CC_TYPE_FLOAT || e->rhs->value_type == CC_TYPE_DOUBLE ||
+                e->rhs->value_type == CC_TYPE_LDOUBLE)) {
+        ft = (ft == CC_TYPE_LDOUBLE || e->rhs->value_type == CC_TYPE_LDOUBLE) ? CC_TYPE_LDOUBLE
+             : (ft == CC_TYPE_DOUBLE || e->rhs->value_type == CC_TYPE_DOUBLE) ? CC_TYPE_DOUBLE
+                                                                               : CC_TYPE_FLOAT;
+    }
+    if (ft != CC_TYPE_VOID) {
+        /* with a floating operand: the wide one is converted to that floating type */
+        if ((lw && sema_wrap_cast(&e->lhs, ft, -1) != 0) || (rw && sema_wrap_cast(&e->rhs, ft, -1) != 0)) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        e->value_type = is_cmp ? CC_TYPE_INT : ft;
+        e->struct_id = -1;
+        return 0;
+    }
+    if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
+        set_diag(diag, "invalid wide integer operation");
+        return -1;
+    }
+    sid = sema_wide_common(tu, lw ? e->lhs->struct_id : -1, rw ? e->rhs->struct_id : -1);
+    if ((e->lhs->struct_id != sid || !lw) && sema_wrap_cast(&e->lhs, CC_TYPE_VOID, sid) != 0) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    if ((e->rhs->struct_id != sid || !rw) && sema_wrap_cast(&e->rhs, CC_TYPE_VOID, sid) != 0) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    e->value_type = is_cmp ? CC_TYPE_INT : CC_TYPE_VOID;
+    e->struct_id = is_cmp ? -1 : sid;
+    return 0;
+}
+
+/**
+ * A wide integer where a truth value is wanted: `x != 0`, converted.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_wide_truth(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    cc_expr_t *ne;
+    cc_expr_t *zero;
+
+    if (!sema_is_wide(tu, *slot)) {
+        return 0;
+    }
+    ne = (cc_expr_t *)calloc(1, sizeof(*ne));
+    zero = (cc_expr_t *)calloc(1, sizeof(*zero));
+    if (ne == NULL || zero == NULL) {
+        free(ne);
+        free(zero);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    zero->kind = CC_EXPR_INT;
+    zero->value_type = CC_TYPE_INT;
+    zero->struct_id = -1;
+    ne->kind = CC_EXPR_BIN;
+    ne->op = CC_BIN_NE;
+    ne->line = (*slot)->line;
+    ne->col = (*slot)->col;
+    ne->lhs = *slot;
+    ne->rhs = zero;
+    *slot = ne;
+    return sema_wide_binop(tu, ne, diag);
+}
+
+/**
+ * Where a value is converted to (@p t, @p sid) by assignment -- an
+ * initializer, an argument, a return -- and one of the two is a wide
+ * integer and they differ: put the conversion in as a cast (to _Bool, the
+ * truth test).
+ *
+ * @return 1 if a cast was added, 0 if none was needed, -1 when out of memory
+ */
+static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid) {
+    int dw = sema_wide_def(tu, t, sid) != NULL;
+    int sw = sema_is_wide(tu, *slot);
+
+    if (*slot == NULL || (!dw && !sw) || (dw && sw && (*slot)->struct_id == sid)) {
+        return 0;
+    }
+    if (dw ? !(sw || sema_wide_partner_ok((*slot)->value_type)) : !sema_wide_partner_ok(t)) {
+        return 0;
+    }
+    if (!dw && t == CC_TYPE_BOOL) {
+        return sema_wide_truth(tu, slot, NULL) == 0 ? 1 : -1;
+    }
+    return sema_wrap_cast(slot, t, dw ? sid : -1) == 0 ? 1 : -1;
+}
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag);
+
+/** A new integer constant node, or NULL when out of memory. */
+static cc_expr_t *sema_int_node(long long v, size_t line, size_t col) {
+    cc_expr_t *k = (cc_expr_t *)calloc(1, sizeof(*k));
+
+    if (k != NULL) {
+        k->kind = CC_EXPR_INT;
+        k->int_val = v;
+        k->line = line;
+        k->col = col;
+        k->value_type = CC_TYPE_INT;
+        k->struct_id = -1;
+    }
+    return k;
+}
+
+/**
+ * `++x`, `x--` and the like on a wide integer, rewritten in place as the
+ * assignment they are: `x = x + 1`, and for the postfix forms the old
+ * value, `(x = x + 1) - 1` (exact: the arithmetic is modulo the width).
+ * The second reading of a dereference or member target is a copy of it,
+ * as a compound assignment's is.  Then checked again.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_wide_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                            int depth, cc_diag_t *diag) {
+    cc_expr_t *read;
+    cc_expr_t *bin = (cc_expr_t *)calloc(1, sizeof(*bin));
+    cc_expr_t *one = sema_int_node(1, e->line, e->col);
+    cc_binop_t op = e->op;
+
+    if (e->ident != NULL) {
+        read = (cc_expr_t *)calloc(1, sizeof(*read));
+        if (read != NULL) {
+            read->kind = CC_EXPR_IDENT;
+            read->ident = cc_strdup(e->ident);
+            read->line = e->line;
+            read->col = e->col;
+            read->struct_id = -1;
+        }
+    } else {
+        read = cc_expr_clone(e->lhs);
+    }
+    if (bin == NULL || one == NULL || read == NULL || (e->ident != NULL && read->ident == NULL)) {
+        free(bin);
+        cc_expr_free(one);
+        cc_expr_free(read);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    bin->kind = CC_EXPR_BIN;
+    bin->op = op;
+    bin->line = e->line;
+    bin->col = e->col;
+    bin->lhs = read;
+    bin->rhs = one;
+    if (!e->update_postfix) {
+        e->kind = CC_EXPR_ASSIGN;
+        e->rhs = bin;
+    } else {
+        cc_expr_t *asg = (cc_expr_t *)calloc(1, sizeof(*asg));
+        cc_expr_t *undo = sema_int_node(1, e->line, e->col);
+
+        if (asg == NULL || undo == NULL) {
+            free(asg);
+            cc_expr_free(undo);
+            cc_expr_free(bin);
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        asg->kind = CC_EXPR_ASSIGN;
+        asg->line = e->line;
+        asg->col = e->col;
+        asg->ident = e->ident;
+        asg->lhs = e->lhs;
+        asg->rhs = bin;
+        e->kind = CC_EXPR_BIN;
+        e->op = op == CC_BIN_ADD ? CC_BIN_SUB : CC_BIN_ADD;
+        e->ident = NULL;
+        e->lhs = asg;
+        e->rhs = undo;
+        e->update_postfix = 0;
+    }
+    return check_expr(tu, e, vars, var_count, depth, diag);
+}
 
 /** @p v rounded to the floating type @p t (float, double or long double). */
 static long double sema_round_to(cc_type_t t, long double v) {
@@ -2456,6 +2728,264 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     return 0;
 }
 
+/** 32-bit words in a folded wide constant: enough for BITINT_MAXWIDTH bits and a sign word. */
+#define SEMA_BIG_WORDS (65535 / 32 + 2)
+
+/**
+ * Reduce the folded constant @p v to a type of @p bits bits, signed or
+ * not: drop the bits above, then extend from the top one kept.
+ */
+static void sema_big_reduce(unsigned int *v, long bits, int is_unsigned) {
+    long i;
+    long top = (bits - 1) / 32;
+    unsigned int keep = (unsigned int)(bits % 32 == 0 ? 0xffffffffu : ((1u << (bits % 32)) - 1u));
+    int neg;
+
+    v[top] &= keep;
+    neg = !is_unsigned && ((v[top] >> ((bits - 1) % 32)) & 1u);
+    if (neg) {
+        v[top] |= ~keep;
+    }
+    for (i = top + 1; i < SEMA_BIG_WORDS; ++i) {
+        v[i] = neg ? 0xffffffffu : 0;
+    }
+}
+
+/** The width and signedness of integer type (@p t, @p sid), wide or not; 0 bits if not an integer type. */
+static long sema_int_width(const cc_translation_unit_t *tu, const cc_expr_t *e, cc_type_t t, int sid, int *is_uns) {
+    const cc_struct_def_t *wd = sema_wide_def(tu, t, sid);
+
+    if (wd != NULL) {
+        *is_uns = wd->wide_unsigned;
+        return wd->wide_bits;
+    }
+    if (t == CC_TYPE_BITINT) {
+        *is_uns = e != NULL && e->ctype != NULL && e->ctype->kind == CC_CT_UBITINT;
+        return sid;
+    }
+    if (t == CC_TYPE_BOOL) {
+        *is_uns = 1;
+        return 1;
+    }
+    if (cc_type_is_integral(t) && !is_pointer_type(t)) {
+        *is_uns = cc_type_is_unsigned_integral(t);
+        return type_size_bytes(t) * 8;
+    }
+    return 0;
+}
+
+/**
+ * Fold an integer constant expression to its exact two's-complement value
+ * in @p out (SEMA_BIG_WORDS words, least significant first), each step
+ * reduced to its type: integer and bit-precise constants (`wb` ones of any
+ * width, as their compound literals of limbs), casts, negation, `~`, `+`,
+ * `-`, and `<<`/`>>` by a constant.  What a static wide integer's
+ * initializer must be.
+ *
+ * @return 0, or -1 if it is not such a constant
+ */
+static int sema_big_fold(const cc_translation_unit_t *tu, const cc_expr_t *e, unsigned int *out, int depth) {
+    int is_uns = 0;
+    long bits;
+    long i;
+
+    if (e == NULL || depth > 64) {
+        return -1;
+    }
+    memset(out, 0, SEMA_BIG_WORDS * sizeof(*out));
+    bits = sema_int_width(tu, e, e->value_type, e->struct_id, &is_uns);
+    switch (e->kind) {
+    case CC_EXPR_INT: {
+        unsigned long long v = (unsigned long long)e->int_val;
+
+        out[0] = (unsigned int)v;
+        out[1] = (unsigned int)(v >> 32);
+        for (i = 2; i < SEMA_BIG_WORDS; ++i) {
+            out[i] = (!is_uns && e->int_val < 0) ? 0xffffffffu : 0;
+        }
+        break;
+    }
+    case CC_EXPR_CAST:
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST && sema_wide_def(tu, e->aux_type, e->aux_struct_id)) {
+            /* a wide `wb` constant: (type){ { limbs } } */
+            const cc_expr_t *limbs = e->lhs->arg_count == 1 ? e->lhs->args[0] : NULL;
+            long lb = cc_target_pointer_size();
+
+            if (limbs == NULL || limbs->kind != CC_EXPR_INIT_LIST) {
+                return -1;
+            }
+            for (i = 0; i < (long)limbs->arg_count && i * lb / 4 < SEMA_BIG_WORDS - 1; ++i) {
+                unsigned long long v = (unsigned long long)limbs->args[i]->int_val;
+
+                out[i * lb / 4] = (unsigned int)v;
+                if (lb == 8) {
+                    out[i * 2 + 1] = (unsigned int)(v >> 32);
+                }
+            }
+            break;
+        }
+        if (sema_big_fold(tu, e->lhs, out, depth + 1) != 0) {
+            return -1;
+        }
+        break;
+    case CC_EXPR_BIN: {
+        unsigned int *b = (unsigned int *)calloc(SEMA_BIG_WORDS, sizeof(*b));
+        int rc = 0;
+
+        if (b == NULL || sema_big_fold(tu, e->lhs, out, depth + 1) != 0 || sema_big_fold(tu, e->rhs, b, depth + 1) != 0) {
+            free(b);
+            return -1;
+        }
+        if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
+            unsigned long long c = e->op == CC_BIN_SUB ? 1 : 0;
+
+            for (i = 0; i < SEMA_BIG_WORDS; ++i) {
+                unsigned long long s = (unsigned long long)out[i] + (e->op == CC_BIN_SUB ? (unsigned)~b[i] : b[i]) + c;
+
+                out[i] = (unsigned int)s;
+                c = s >> 32;
+            }
+        } else if (e->op == CC_BIN_BXOR || e->op == CC_BIN_BAND || e->op == CC_BIN_BOR) {
+            for (i = 0; i < SEMA_BIG_WORDS; ++i) {
+                out[i] = e->op == CC_BIN_BXOR ? out[i] ^ b[i] : e->op == CC_BIN_BAND ? out[i] & b[i] : out[i] | b[i];
+            }
+        } else if (e->op == CC_BIN_MUL && (b[SEMA_BIG_WORDS - 1] == 0xffffffffu && b[0] == 0xffffffffu)) {
+            /* -x, parsed as -1 * x */
+            unsigned long long c = 1;
+            long k;
+
+            for (k = 1; k < SEMA_BIG_WORDS && b[k] == 0xffffffffu; ++k) {
+            }
+            if (k != SEMA_BIG_WORDS) {
+                rc = -1;
+            }
+            for (i = 0; rc == 0 && i < SEMA_BIG_WORDS; ++i) {
+                unsigned long long s = (unsigned long long)(unsigned)~out[i] + c;
+
+                out[i] = (unsigned int)s;
+                c = s >> 32;
+            }
+        } else if (e->op == CC_BIN_MUL && (out[SEMA_BIG_WORDS - 1] == 0xffffffffu && out[0] == 0xffffffffu)) {
+            /* -1 * x, the other way round: fold again with the operands swapped */
+            cc_expr_t swapped = *e;
+
+            swapped.lhs = e->rhs;
+            swapped.rhs = e->lhs;
+            free(b);
+            return sema_big_fold(tu, &swapped, out, depth + 1);
+        } else if ((e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) && b[1] == 0 && b[0] < 65536) {
+            unsigned int *r = (unsigned int *)calloc(SEMA_BIG_WORDS, sizeof(*r));
+            long sh = (long)b[0];
+            int neg = (out[SEMA_BIG_WORDS - 1] >> 31) & 1u;
+
+            if (r == NULL) {
+                rc = -1;
+            }
+            for (i = 0; rc == 0 && i < SEMA_BIG_WORDS * 32; ++i) {
+                long from = e->op == CC_BIN_SHL ? i - sh : i + sh;
+                int bit = from < 0 ? 0 : from >= SEMA_BIG_WORDS * 32 ? neg : (int)((out[from / 32] >> (from % 32)) & 1u);
+
+                if (bit) {
+                    r[i / 32] |= 1u << (i % 32);
+                }
+            }
+            if (rc == 0) {
+                memcpy(out, r, SEMA_BIG_WORDS * sizeof(*out));
+            }
+            free(r);
+        } else {
+            rc = -1;
+        }
+        free(b);
+        if (rc != 0) {
+            return -1;
+        }
+        break;
+    }
+    default:
+        return -1;
+    }
+    if (bits > 0) {
+        sema_big_reduce(out, bits, is_uns);
+    }
+    return 0;
+}
+
+/**
+ * Make a checked initializer of a static wide integer of structure @p sid
+ * the brace list `{ { limbs } }` of its folded value, which the
+ * structure-initializer path lays out.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid, cc_diag_t *diag) {
+    const cc_struct_def_t *wd = &tu->structs[sid];
+    long lb = cc_target_pointer_size();
+    long n = (wd->wide_bits + lb * 8 - 1) / (lb * 8);
+    unsigned int *v = (unsigned int *)calloc(SEMA_BIG_WORDS, sizeof(*v));
+    cc_expr_t *outer = (cc_expr_t *)calloc(1, sizeof(*outer));
+    cc_expr_t *list = (cc_expr_t *)calloc(1, sizeof(*list));
+    long i;
+
+    if (v == NULL || outer == NULL || list == NULL) {
+        free(v);
+        free(outer);
+        free(list);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    if (sema_big_fold(tu, *slot, v, 0) != 0) {
+        free(v);
+        free(outer);
+        free(list);
+        set_diag(diag, "initializer of a static wide integer is not an integer constant");
+        return -1;
+    }
+    sema_big_reduce(v, wd->wide_bits, wd->wide_unsigned);
+    outer->args = (cc_expr_t **)calloc(1, sizeof(*outer->args));
+    list->args = (cc_expr_t **)calloc((size_t)n, sizeof(*list->args));
+    if (outer->args == NULL || list->args == NULL) {
+        free(outer->args);
+        free(list->args);
+        free(v);
+        free(outer);
+        free(list);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        unsigned long long limb = v[i * lb / 4];
+
+        if (lb == 8) {
+            limb |= (unsigned long long)v[i * 2 + 1] << 32;
+        }
+        list->args[i] = sema_int_node((long long)limb, (*slot)->line, (*slot)->col);
+        if (list->args[i] == NULL) {
+            list->arg_count = (size_t)i;
+            cc_expr_free(list);
+            free(outer->args);
+            free(outer);
+            free(v);
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        list->args[i]->value_type = lb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
+    }
+    free(v);
+    list->kind = CC_EXPR_INIT_LIST;
+    list->arg_count = (size_t)n;
+    list->struct_id = -1;
+    outer->kind = CC_EXPR_INIT_LIST;
+    outer->args[0] = list;
+    outer->arg_count = 1;
+    outer->struct_id = -1;
+    outer->line = list->line = (*slot)->line;
+    outer->col = list->col = (*slot)->col;
+    cc_expr_free(*slot);
+    *slot = outer;
+    return 0;
+}
+
 /**
  * A checked controlling expression (of if, while, do, for, ?:) as a
  * scalar: a complex one becomes the test of whether either part is
@@ -2464,6 +2994,9 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
  * @return 0, or -1 with @p diag set when out of memory
  */
 static int sema_condition(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    if (sema_is_wide(tu, *slot)) {
+        return sema_wide_truth(tu, slot, diag);
+    }
     if (*slot == NULL || sema_complex_elem(tu, (*slot)->value_type, (*slot)->struct_id) == CC_TYPE_VOID) {
         return 0;
     }
@@ -2628,10 +3161,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 
     switch (e->kind) {
     case CC_EXPR_INT:
-        if (!cc_type_is_integral(e->value_type)) {
+        if (!cc_type_is_integral(e->value_type) && e->value_type != CC_TYPE_BITINT) {
             e->value_type = CC_TYPE_INT;
         }
-        e->struct_id = -1;
+        if (e->value_type != CC_TYPE_BITINT) {
+            /* a bit-precise constant (`5wb`) keeps its width there */
+            e->struct_id = -1;
+        }
         return 0;
 
     case CC_EXPR_FLOAT:
@@ -2843,6 +3379,16 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             expr_copy_array_meta(e, e->rhs);
             return 0;
         }
+        if (sema_is_wide(tu, e->lhs) || sema_is_wide(tu, e->rhs)) {
+            if (is_logical_op(e->op)) {
+                if (sema_wide_truth(tu, &e->lhs, diag) != 0 || sema_wide_truth(tu, &e->rhs, diag) != 0) {
+                    return -1;
+                }
+                e->value_type = CC_TYPE_INT;
+                return 0;
+            }
+            return sema_wide_binop(tu, e, diag);
+        }
         if (sema_complex_elem(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID ||
             sema_complex_elem(tu, e->rhs->value_type, e->rhs->struct_id) != CC_TYPE_VOID) {
             if (is_logical_op(e->op)) {
@@ -2872,6 +3418,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (e->value_type == CC_TYPE_VOID) {
                 set_diag(diag, "void expression used in arithmetic operation");
                 return -1;
+            }
+            if (e->value_type == CC_TYPE_BITINT) {
+                /* a bit-precise operand is not promoted: the result keeps its width */
+                e->struct_id = e->lhs->struct_id;
             }
             return 0;
         }
@@ -4210,6 +4760,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
             }
+        } else if (sema_wide_def(tu, t, t_struct_id) != NULL) {
+            return sema_wide_update(tu, e, vars, var_count, depth, diag);
         } else if (!cc_type_is_numeric(t)) {
             set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
             return -1;
@@ -4283,6 +4835,29 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "out of memory");
                 return -1;
             }
+        }
+        if (sema_is_wide(tu, e->lhs) && sema_wide_def(tu, e->aux_type, e->aux_struct_id) == NULL) {
+            /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */
+            if (!sema_wide_partner_ok(e->aux_type) && !is_pointer_type(e->aux_type) && e->aux_type != CC_TYPE_VOID) {
+                set_diag(diag, "invalid conversion of a wide integer");
+                return -1;
+            }
+            if (e->aux_type == CC_TYPE_BOOL && sema_wide_truth(tu, &e->lhs, diag) != 0) {
+                return -1;
+            }
+            e->value_type = e->aux_type;
+            e->struct_id = e->aux_struct_id;
+            return 0;
+        }
+        if (sema_wide_def(tu, e->aux_type, e->aux_struct_id) != NULL) {
+            /* to a wide integer: from any integer or floating value */
+            if (!sema_is_wide(tu, e->lhs) && !sema_wide_partner_ok(e->lhs->value_type)) {
+                set_diag(diag, "invalid conversion to a wide integer");
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = e->aux_struct_id;
+            return 0;
         }
         if (sema_complex_elem(tu, e->aux_type, e->aux_struct_id) != CC_TYPE_VOID &&
             sema_complex_operand_rank(tu, e->lhs) < 0) {
@@ -5963,6 +6538,19 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (g->init->kind == CC_EXPR_INIT_LIST) {
                 cc_type_t celem = sema_complex_elem(tu, CC_TYPE_VOID, g->type_struct_id);
 
+                if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 &&
+                    sema_wide_def(tu, CC_TYPE_VOID, g->type_struct_id) != NULL) {
+                    /* an array of wide integers: each element not already braced is a constant to fold */
+                    size_t k;
+
+                    for (k = 0; k < g->init->arg_count; ++k) {
+                        if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
+                            (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
+                             sema_wide_static_init(tu, &g->init->args[k], g->type_struct_id, diag) != 0)) {
+                            goto fail_global_item;
+                        }
+                    }
+                }
                 if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 && celem != CC_TYPE_VOID) {
                     /* an array of complex: each element not already braced is a constant to fold */
                     size_t k;
@@ -6018,6 +6606,14 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 if (celem != CC_TYPE_VOID) {
                     /* a static complex object: its constant parts, as a brace list */
                     if (sema_complex_static_init(tu, &g->init, celem, diag) != 0 ||
+                        check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                        goto fail_global_item;
+                    }
+                    continue;
+                }
+                if (sema_wide_def(tu, g->type, g->type_struct_id) != NULL) {
+                    /* a static wide integer: its folded limbs, as a brace list */
+                    if (sema_wide_static_init(tu, &g->init, g->type_struct_id, diag) != 0 ||
                         check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
                         goto fail_global_item;
                     }

@@ -1564,8 +1564,11 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZEOF_LONG_LONG__", 0, 0, NULL, 0, "8") != 0) {
         return -1;
     }
-    /* no __SIZEOF_INT128__: cc has no integer wider than 64 bits */
-    if (macro_set(&st->macros, "__BITINT_MAXWIDTH__", 0, 0, NULL, 0, "64") != 0) {
+    /* __int128 on 64-bit targets only, as gcc */
+    if (st->target_bits != 32 && macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__BITINT_MAXWIDTH__", 0, 0, NULL, 0, "65535") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZEOF_SIZE_T__", 0, 0, NULL, 0, ptr_size) != 0) {

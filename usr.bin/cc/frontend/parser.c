@@ -1485,6 +1485,55 @@ static int parser_complex_struct(parser_t *p, cc_type_t elem) {
     return sid;
 }
 
+/**
+ * The structure standing for an integer type wider than 64 bits in the
+ * legacy encoding: `{ limb __limb[n]; }`, the value's limbs least
+ * significant first, a limb being the target's word (64 bits on x86-64, 32
+ * on i386) -- the layout and the psABI classification gcc gives
+ * `_BitInt(N)`.  `__int128` is the same but 16-aligned and a type of its
+ * own.  Made once per kind at file scope.
+ *
+ * @param p            the parser
+ * @param bits         the width, more than 64
+ * @param is_unsigned  nonzero for an unsigned type
+ * @param is_int128    nonzero for `__int128` (bits is 128)
+ * @return             the structure's index, or -1 when out of memory
+ */
+static int parser_wide_struct(parser_t *p, long bits, int is_unsigned, int is_int128) {
+    long limb = cc_target_pointer_size();
+    long n = (bits + limb * 8 - 1) / (limb * 8);
+    cc_type_t lt = limb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
+    long dims[CC_MAX_ARRAY_DIMS] = {0};
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+
+    for (i = 0; i < p->struct_count; ++i) {
+        const cc_struct_def_t *sd = &p->structs[i];
+
+        if (sd->wide_bits == bits && sd->wide_unsigned == (is_unsigned != 0) && sd->wide_is_int128 == (is_int128 != 0)) {
+            return (int)i;
+        }
+    }
+    dims[0] = n;
+    p->scope_depth = 0;
+    sid = struct_ensure(p, NULL, 0, 1);
+    p->scope_depth = saved_depth;
+    /* an array member is recorded with a pointer level for its dimension, as a declared one is */
+    if (sid < 0 ||
+        struct_member_push(p, sid, "__limb", ptr_of_type(lt), -1, n, 1, dims, 0, n * limb, 0, 0, 0, 0, 0, 0) < 0) {
+        return -1;
+    }
+    p->structs[sid].members[0].ctype = cc_ct_array(cc_ct_basic(limb == 8 ? CC_CT_ULLONG : CC_CT_UINT), n);
+    p->structs[sid].size = n * limb;
+    p->structs[sid].align = is_int128 ? 16 : limb;
+    p->structs[sid].complete = 1;
+    p->structs[sid].wide_bits = bits;
+    p->structs[sid].wide_unsigned = is_unsigned != 0;
+    p->structs[sid].wide_is_int128 = is_int128 != 0;
+    return sid;
+}
+
 /** A structure member's declarator, parsed: see parse_member_decl(). */
 typedef struct {
     char *name;               /**< the name (owned), or NULL for an unnamed bit-field or aggregate */
@@ -1683,10 +1732,13 @@ static int is_declspec_ident(parser_t *p) {
         tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128") || tok_is_floatn_spelling(p)) {
         return 1;
     }
+    /* __int128 is a reserved name, so gcc takes it in the ISO modes too */
+    if (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t")) {
+        return 1;
+    }
     if (parser_is_gnu_mode() &&
         (tok_is_ident(p, "__signed__") || tok_is_ident(p, "__signed") || tok_is_ident(p, "__unsigned__") ||
-         tok_is_ident(p, "__unsigned") || tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") ||
-         tok_is_ident(p, "__uint128_t") || tok_is_ident(p, "__auto_type"))) {
+         tok_is_ident(p, "__unsigned") || tok_is_ident(p, "__auto_type"))) {
         return 1;
     }
     if (parser_is_c23_or_newer() &&
@@ -1791,6 +1843,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     size_t enum_tag_pending_len = 0;
     int enum_defined = 0;
     long bitint_width = 0;
+    int seen_int128 = 0; /* GNU __int128 */
     int alias_struct_id = -1;
     int seen_struct_id = -1;
     cc_type_t alias_type = CC_TYPE_VOID;
@@ -1923,11 +1976,22 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 }
                 continue;
             }
-            if (parser_is_gnu_mode() &&
-                (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t"))) {
-                /* integers are at most 64 bits wide; __SIZEOF_INT128__ is not defined */
-                set_diag(p->diag, p->tok.line, p->tok.col, "__int128 is not supported");
-                return -1;
+            if (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t")) {
+                if (cc_target_pointer_size() < 8) {
+                    /* as gcc: only 64-bit targets have it */
+                    set_diag(p->diag, p->tok.line, p->tok.col, "__int128 is not supported on this target");
+                    return -1;
+                }
+                seen = 1;
+                seen_type = 1;
+                seen_int128 = 1;
+                if (tok_is_ident(p, "__uint128_t")) {
+                    seen_unsigned = 1;
+                }
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
             }
             if (tok_is_ident(p, "_Thread_local") || (parser_is_c23_or_newer() && tok_is_ident(p, "thread_local"))) {
                 if (!parser_is_c11_or_newer()) {
@@ -3087,6 +3151,29 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         RETURN_OK();
     }
 
+    if (seen_int128) {
+        /* GNU __int128, signed unless unsigned is said: a 16-aligned structure of two limbs */
+        int wsid = parser_wide_struct(p, 128, seen_unsigned, 1);
+
+        if (wsid < 0) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making __int128");
+            return -1;
+        }
+        *out_type = CC_TYPE_VOID;
+        if (out_struct_id != NULL) {
+            *out_struct_id = wsid;
+        }
+        alias_type = CC_TYPE_VOID;
+        alias_ctype = cc_ct_record(wsid);
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
+        RETURN_OK();
+    }
+
     if (seen_bitint) {
         if (bitint_width <= 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width must be positive");
@@ -3097,10 +3184,32 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             set_diag(p->diag, p->tok.line, p->tok.col, "signed _BitInt width must be at least 2");
             return -1;
         }
-        if (bitint_width > 64) {
-            /* BITINT_MAXWIDTH (__BITINT_MAXWIDTH__) is 64 */
-            set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt wider than 64 bits is not supported");
+        if (bitint_width > 65535) {
+            /* BITINT_MAXWIDTH (__BITINT_MAXWIDTH__), as gcc's */
+            set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width exceeds BITINT_MAXWIDTH (65535)");
             return -1;
+        }
+        if (bitint_width > 64) {
+            /* wider than a register: a structure of limbs (parser_wide_struct()) */
+            int wsid = parser_wide_struct(p, bitint_width, seen_unsigned, 0);
+
+            if (wsid < 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a _BitInt type");
+                return -1;
+            }
+            *out_type = CC_TYPE_VOID;
+            if (out_struct_id != NULL) {
+                *out_struct_id = wsid;
+            }
+            alias_type = CC_TYPE_VOID;
+            alias_ctype = cc_ct_record(wsid);
+            if (out_typedef != NULL) {
+                *out_typedef = seen_typedef;
+            } else if (seen_typedef) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+                return -1;
+            }
+            RETURN_OK();
         }
         *out_type = CC_TYPE_BITINT;
         if (out_struct_id != NULL) {
@@ -6394,6 +6503,12 @@ void cc_expr_free(cc_expr_t *e) {
     free_expr(e);
 }
 
+static cc_expr_t *clone_expr(const cc_expr_t *src);
+
+cc_expr_t *cc_expr_clone(const cc_expr_t *e) {
+    return clone_expr(e);
+}
+
 static void free_stmt(cc_stmt_t *s) {
     size_t i;
     if (s == NULL) {
@@ -7242,6 +7357,146 @@ static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
     return c;
 }
 
+/**
+ * A C23 bit-precise constant (`123wb`, `0xffuwb`): of type `_BitInt(N)`
+ * with N the bits its value needs plus a sign bit (at least 2), or
+ * `unsigned _BitInt(N)` with N the bits it needs (at least 1).  The digits
+ * are read again from the token, in any base, since the value may need up
+ * to BITINT_MAXWIDTH bits.  Up to 64 bits it is an integer constant node;
+ * wider, a compound literal of the wide type's limbs.
+ *
+ * @param p  the parser, at the number token
+ * @return   the expression, or NULL (diagnosed)
+ */
+static cc_expr_t *parser_bitint_literal(parser_t *p) {
+    enum { MAXW = 65535 / 32 + 2 };
+    unsigned int acc[MAXW];
+    size_t used = 1;
+    const char *s = p->tok.start;
+    const char *end = s + p->tok.len;
+    unsigned base = 10;
+    int is_uns = 0;
+    long bits = 0;
+    long width;
+    long i;
+    cc_expr_t *e;
+
+    memset(acc, 0, sizeof(acc));
+    /* the suffix -- wb or WB, with u or U on either side -- ends the digits (b is a hex digit) */
+    for (;;) {
+        if (end - s > 1 && (end[-1] == 'u' || end[-1] == 'U')) {
+            is_uns = 1;
+            --end;
+        } else if (end - s > 2 && ((end[-2] == 'w' && end[-1] == 'b') || (end[-2] == 'W' && end[-1] == 'B'))) {
+            end -= 2;
+        } else {
+            break;
+        }
+    }
+    if (end - s > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        base = 16;
+        s += 2;
+    } else if (end - s > 2 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) {
+        base = 2;
+        s += 2;
+    } else if (end - s > 1 && s[0] == '0') {
+        base = 8;
+    }
+    for (; s < end; ++s) {
+        unsigned d;
+        unsigned long long carry;
+        size_t k;
+
+        if (*s == '\'') {
+            continue;
+        }
+        if (*s >= '0' && *s <= '9') {
+            d = (unsigned)(*s - '0');
+        } else if (base == 16 && ((*s >= 'a' && *s <= 'f') || (*s >= 'A' && *s <= 'F'))) {
+            d = (unsigned)((*s | 0x20) - 'a' + 10);
+        } else {
+            continue;
+        }
+        carry = d;
+        for (k = 0; k < used; ++k) {
+            unsigned long long v = (unsigned long long)acc[k] * base + carry;
+
+            acc[k] = (unsigned int)v;
+            carry = v >> 32;
+        }
+        if (carry != 0) {
+            if (used == MAXW) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "bit-precise constant exceeds BITINT_MAXWIDTH");
+                return NULL;
+            }
+            acc[used++] = (unsigned int)carry;
+        }
+    }
+    for (i = (long)used * 32 - 1; i >= 0; --i) {
+        if ((acc[i / 32] >> (i % 32)) & 1u) {
+            bits = i + 1;
+            break;
+        }
+    }
+    width = is_uns ? (bits < 1 ? 1 : bits) : (bits + 1 < 2 ? 2 : bits + 1);
+    if (width > 65535) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "bit-precise constant exceeds BITINT_MAXWIDTH");
+        return NULL;
+    }
+    if (width <= 64) {
+        e = new_expr(CC_EXPR_INT);
+        if (e == NULL) {
+            return NULL;
+        }
+        e->int_val = (long long)((unsigned long long)acc[0] | ((unsigned long long)acc[1] << 32));
+        e->value_type = CC_TYPE_BITINT;
+        e->struct_id = (int)width;
+        e->ctype = cc_ct_bitint(width, is_uns);
+        return e;
+    } else {
+        /* (wide type){ limbs } */
+        int sid = parser_wide_struct(p, width, is_uns, 0);
+        long limb = cc_target_pointer_size();
+        long n = (width + limb * 8 - 1) / (limb * 8);
+        cc_expr_t *outer = new_expr(CC_EXPR_INIT_LIST);
+        cc_expr_t *list = new_expr(CC_EXPR_INIT_LIST);
+
+        e = new_expr(CC_EXPR_CAST);
+        if (sid < 0 || outer == NULL || list == NULL || e == NULL || push_arg(outer, list) != 0) {
+            free_expr(outer);
+            free_expr(list);
+            free_expr(e);
+            return NULL;
+        }
+        /* the limbs initialize the structure's one member, the limb array */
+        list = outer->args[0];
+        for (i = 0; i < n; ++i) {
+            unsigned long long v = acc[(size_t)(i * limb / 4)];
+            cc_expr_t *item;
+
+            if (limb == 8) {
+                v |= (unsigned long long)acc[(size_t)(i * 2 + 1)] << 32;
+            }
+            /* not new_int_expr(): its long is 32 bits where cc runs on i386 */
+            item = new_expr(CC_EXPR_INT);
+            if (item == NULL || push_arg(list, item) != 0) {
+                free_expr(item);
+                free_expr(outer);
+                free_expr(e);
+                return NULL;
+            }
+            item->int_val = (long long)v;
+            item->value_type = limb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
+        }
+        e->aux_type = CC_TYPE_VOID;
+        e->aux_struct_id = sid;
+        e->value_type = CC_TYPE_VOID;
+        e->struct_id = sid;
+        e->lhs = outer;
+        return e;
+    }
+}
+
 static cc_expr_t *parse_primary(parser_t *p) {
     cc_expr_t *e;
 
@@ -7258,6 +7513,14 @@ static cc_expr_t *parse_primary(parser_t *p) {
         return parse_unary(p);
     }
 
+    if (p->tok.kind == TOK_NUM && p->tok.int_is_bitprecise && !p->tok.is_float) {
+        e = parser_bitint_literal(p);
+        if (e != NULL && next_tok(p) != 0) {
+            free_expr(e);
+            return NULL;
+        }
+        return e;
+    }
     if (p->tok.kind == TOK_NUM) {
         if (p->tok.is_float) {
             e = new_expr(CC_EXPR_FLOAT);

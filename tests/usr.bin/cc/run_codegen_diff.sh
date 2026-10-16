@@ -31,8 +31,11 @@ fail=0
 runs=0
 for src in "$BASE"/*.c; do
 	name=$(basename "$src" .c)
+	# a test may name its language in a "cc-std: <std>" comment, for both compilers
+	std=$(sed -n 's/.*cc-std: *\([a-z0-9]*\).*/\1/p' "$src" | head -n 1)
+	cc_std=${std:+-std=$std}
 	for m in $modes; do
-		if ! "$HOST_CC" -m$m -std=gnu11 -w -o "$tmp/ref" "$src" 2>"$tmp/ref.log"; then
+		if ! "$HOST_CC" -m$m -std=${std:-gnu11} -w -o "$tmp/ref" "$src" 2>"$tmp/ref.log"; then
 			echo "FAIL $name -m$m: $HOST_CC cannot build it"
 			fail=1
 			continue
@@ -41,7 +44,7 @@ for src in "$BASE"/*.c; do
 		echo "exit $?" >>"$tmp/ref.out"
 		for o in O0 O2; do
 			runs=$((runs + 1))
-			if ! "$CC_BIN" -m$m -$o -o "$tmp/ours" "$src" >"$tmp/cc.log" 2>&1; then
+			if ! "$CC_BIN" -m$m $cc_std -$o -o "$tmp/ours" "$src" >"$tmp/cc.log" 2>&1; then
 				echo "FAIL $name -m$m -$o: cc rejected it"
 				sed -n '1,5s/^/    /p' "$tmp/cc.log"
 				fail=1

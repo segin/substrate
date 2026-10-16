@@ -755,7 +755,17 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
             lx_adv(lx);
         }
     } else {
-        while ((c = lx_peek(lx)) >= 0 && (is_int_suffix_char(c) || (!out->is_imaginary && is_imaginary_suffix_char(c)))) {
+        while ((c = lx_peek(lx)) >= 0 &&
+               (is_int_suffix_char(c) || (!out->is_imaginary && is_imaginary_suffix_char(c)) ||
+                (!out->int_is_bitprecise && ((c == 'w' && lx_peekn(lx, 1) == 'b') ||
+                                              (c == 'W' && lx_peekn(lx, 1) == 'B'))))) {
+            if (c == 'w' || c == 'W') {
+                /* C23 bit-precise suffix wb / WB */
+                out->int_is_bitprecise = 1;
+                lx_adv(lx);
+                lx_adv(lx);
+                continue;
+            }
             if (c == 'u' || c == 'U') {
                 seen_u = 1;
             } else if (c == 'l' || c == 'L') {
@@ -887,6 +897,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->fnum_ld = 0.0L;
     out->is_float = 0;
     out->is_imaginary = 0;
+    out->int_is_bitprecise = 0;
     out->float_is_single = 0;
     out->float_is_long = 0;
     out->int_is_unsigned = 0;

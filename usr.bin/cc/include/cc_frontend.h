@@ -451,6 +451,11 @@ typedef struct {
     /** for the structure standing for a complex type, `{ T __re, __im; }`: T (float, double or
      *  long double); CC_TYPE_VOID for any other structure */
     cc_type_t complex_elem;
+    /** for the structure standing for an integer type wider than 64 bits -- `_BitInt(N)` or
+     *  `__int128`, `{ limb __limb[n]; }` with limbs of the target's word -- its width N; else 0 */
+    long wide_bits;
+    int wide_unsigned;  /**< such an integer type is unsigned */
+    int wide_is_int128; /**< it is `__int128`, not `_BitInt(128)` (a distinct type, 16-aligned) */
 } cc_struct_def_t;
 
 typedef struct {
@@ -530,6 +535,15 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
  * @param e  the expression, or NULL
  */
 void cc_expr_free(cc_expr_t *e);
+
+/**
+ * A deep copy of an expression tree, as the parser makes for a compound
+ * assignment's second reading of its left operand.
+ *
+ * @param e  the expression
+ * @return   the copy, or NULL when out of memory (or @p e is NULL)
+ */
+cc_expr_t *cc_expr_clone(const cc_expr_t *e);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);

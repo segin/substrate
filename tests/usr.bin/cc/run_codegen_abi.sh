@@ -13,6 +13,8 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 CC_BIN=${CC_BIN:-"$ROOT/usr.bin/cc/cc"}
 BASE="$ROOT/tests/usr.bin/cc/codegen_abi"
 HOST_CC=${HOST_CC:-gcc}
+# one language for both compilers (the _BitInt cases need C23; gnu2x is the spelling older gccs know)
+STD=gnu2x
 # the native cc must run the host's as and ld, not substrate's
 : "${AS:=as}"
 : "${LD:=ld}"
@@ -31,7 +33,7 @@ fi
 fail=0
 runs=0
 for m in $modes; do
-	"$HOST_CC" -m$m -w -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
+	"$HOST_CC" -m$m -std=$STD -w -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
 	"$tmp/ref" >"$tmp/ref.out" 2>&1
 	for o in O0 O2; do
 		for mix in main lib; do
@@ -43,13 +45,13 @@ for m in $modes; do
 				ours="$BASE/abi_lib.c"
 				theirs="$BASE/abi_main.c"
 			fi
-			if ! "$CC_BIN" -m$m -$o -c -o "$tmp/ours.o" "$ours" >"$tmp/cc.log" 2>&1; then
+			if ! "$CC_BIN" -m$m -std=$STD -$o -c -o "$tmp/ours.o" "$ours" >"$tmp/cc.log" 2>&1; then
 				echo "FAIL -m$m -$o cc-built $mix: cc rejected it"
 				sed -n '1,5s/^/    /p' "$tmp/cc.log"
 				fail=1
 				continue
 			fi
-			"$HOST_CC" -m$m -w -c -o "$tmp/theirs.o" "$theirs" || exit 1
+			"$HOST_CC" -m$m -std=$STD -w -c -o "$tmp/theirs.o" "$theirs" || exit 1
 			"$HOST_CC" -m$m -no-pie -o "$tmp/mixed" "$tmp/ours.o" "$tmp/theirs.o" || exit 1
 			timeout 10 "$tmp/mixed" >"$tmp/mixed.out" 2>&1
 			if ! cmp -s "$tmp/ref.out" "$tmp/mixed.out"; then

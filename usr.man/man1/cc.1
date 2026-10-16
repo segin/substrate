@@ -20,17 +20,29 @@ When invoked as
 .Nm cpp ,
 preprocessor-only mode is selected.
 .Pp
-Integers are at most 64 bits wide.
 .Dv __BITINT_MAXWIDTH__
-is 64, so
+is 65535:
 .Vt _BitInt Ns Pq Ar N
-with
-.Ar N
-above 64 is rejected, and
+of any width up to it, and
+.Li wb
+and
+.Li uwb
+constants of any size, are laid out and passed as gcc does, with
+multiplication, division and the floating conversions done by
+libgcc's
+.Fn __mulbitint3 ,
+.Fn __divmodbitint4 ,
+.Fn __floatbitint*
+and
+.Fn __fix*bitint .
 .Vt __int128
-is rejected with
+and
+.Vt unsigned __int128
+exist on x86-64, where
 .Dv __SIZEOF_INT128__
-left undefined, so code that tests for it takes its fallback.
+is 16; on i386 they are rejected and
+.Dv __SIZEOF_INT128__
+is left undefined, as gcc does.
 .Pp
 Installed host-runnable copies of
 .Nm ,

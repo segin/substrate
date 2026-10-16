@@ -60,6 +60,18 @@ double lib_fl10(float a, float b, float c, float d, float e, float f, float g, f
     return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8 + i * 9 + j * 10;
 }
 
+#if __STDC_VERSION__ >= 202311L
+/* integers wider than 64 bits: in general registers up to 16 bytes, else in memory */
+_BitInt(100) lib_b100(_BitInt(100) a, _BitInt(100) b) { return a * b - (a >> 3); }
+unsigned _BitInt(200) lib_b200(unsigned _BitInt(200) a, int k) { return (a << k) / 7; }
+_BitInt(130) lib_b130(long long x, _BitInt(130) y) { return y + x; }
+#endif
+#ifdef __SIZEOF_INT128__
+__int128 lib_i128(__int128 a, unsigned __int128 b, long c) { return a * c + (__int128)(b >> 1); }
+/* six general registers used before it: the __int128 goes on the stack, 16-aligned */
+__int128 lib_i128s(long a, long b, long c, long d, long e, __int128 f) { return f + a + b + c + d + e; }
+#endif
+
 float _Complex lib_cf(float _Complex a, float _Complex b) { return a * b + 1.0f; }
 double _Complex lib_cd(double _Complex a, double _Complex b) { return a / b; }
 long double _Complex lib_cl(long double _Complex a, long double _Complex b) { return a * b - 1.0L; }

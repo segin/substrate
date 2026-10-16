@@ -120,7 +120,9 @@ test:
 	$(TOP)/usr.bin/cc/cc -E native_host_stdint_inttypes.c -o $(CC_TMP)/cc_native_host_stdint_inttypes.i
 	! grep -q "__INTMAX_TYPE__" $(CC_TMP)/cc_native_host_stdint_inttypes.i
 	! grep -q "__INT8_TYPE__" $(CC_TMP)/cc_native_host_stdint_inttypes.i
-	$(TOP)/usr.bin/cc/cc -E -dM -std=gnu11 /dev/null -o $(CC_TMP)/cc_pp_gnu11_predefs.i
+	$(TOP)/usr.bin/cc/cc -m64 -E -dM -std=gnu11 /dev/null -o $(CC_TMP)/cc_pp_gnu11_predefs.i
+	grep -q "^#define __SIZEOF_INT128__ 16" $(CC_TMP)/cc_pp_gnu11_predefs.i
+	$(TOP)/usr.bin/cc/cc -m32 -E -dM -std=gnu11 /dev/null -o $(CC_TMP)/cc_pp_gnu11_predefs.i
 	! grep -q "^#define __SIZEOF_INT128__" $(CC_TMP)/cc_pp_gnu11_predefs.i
 	! $(TOP)/usr.bin/cc/cc -E -std=bogus /dev/null -o $(CC_TMP)/cc_pp_std_bogus.i 2>$(CC_TMP)/cc_pp_std_bogus.err
 	grep -q -- "-std=bogus" $(CC_TMP)/cc_pp_std_bogus.err
@@ -905,8 +907,9 @@ test:
 	$(TOP)/usr.bin/cc/cc -c native_bad_ptr_depth5.c -o $(CC_TMP)/cc_native_bad_ptr_depth5.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_negative_array_bound.c -o $(CC_TMP)/cc_native_bad_negative_array_bound.o 2>$(CC_TMP)/cc_native_bad_negative_array_bound.log
 	grep -q "array bound must be positive" $(CC_TMP)/cc_native_bad_negative_array_bound.log
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_int128.c -o $(CC_TMP)/cc_native_bad_gnu_int128.o 2>$(CC_TMP)/cc_native_bad_gnu_int128.log
-	grep -q "__int128 is not supported" $(CC_TMP)/cc_native_bad_gnu_int128.log
+	! $(TOP)/usr.bin/cc/cc -m32 -std=gnu11 -c native_bad_gnu_int128.c -o $(CC_TMP)/cc_native_bad_gnu_int128.o 2>$(CC_TMP)/cc_native_bad_gnu_int128.log
+	grep -q "__int128 is not supported on this target" $(CC_TMP)/cc_native_bad_gnu_int128.log
+	$(TOP)/usr.bin/cc/cc -m64 -std=gnu11 native_bad_gnu_int128.c -o $(CC_TMP)/cc_native_gnu_int128_64 && $(CC_TMP)/cc_native_gnu_int128_64
 	! AS=/nonexistent/cc_no_such_as $(TOP)/usr.bin/cc/cc -c native_c99_complex_decl.c -o $(CC_TMP)/cc_no_such_as.o 2>$(CC_TMP)/cc_no_such_as.log
 	grep -q "cannot execute '/nonexistent/cc_no_such_as'" $(CC_TMP)/cc_no_such_as.log
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_constraint.c -o $(CC_TMP)/cc_native_bad_gnu_asm_constraint.o 2>$(CC_TMP)/cc_native_bad_gnu_asm_constraint.log
@@ -961,7 +964,7 @@ clean:
 	      $(CC_TMP)/cc_native_clang_ext_vector_attr $(CC_TMP)/cc_native_clang_builtin_aliases \
 	      $(CC_TMP)/cc_native_gnu_attr_placement $(CC_TMP)/cc_native_clang_asm_goto_quirks $(CC_TMP)/cc_native_clang_asm_goto_quirks.s \
 	      $(CC_TMP)/cc_native_bad_negative_array_bound.o $(CC_TMP)/cc_native_bad_negative_array_bound.log \
-	      $(CC_TMP)/cc_native_bad_gnu_int128.o $(CC_TMP)/cc_native_bad_gnu_int128.log \
+	      $(CC_TMP)/cc_native_bad_gnu_int128.o $(CC_TMP)/cc_native_bad_gnu_int128.log $(CC_TMP)/cc_native_gnu_int128_64 \
 	      $(CC_TMP)/cc_no_such_as.o $(CC_TMP)/cc_no_such_as.log \
 	      $(CC_TMP)/cc_native_gnu_asm_basic $(CC_TMP)/cc_native_gnu_asm_basic.s $(CC_TMP)/cc_native_gnu_asm_ext \
 	      $(CC_TMP)/cc_native_gnu_asm_ext.s $(CC_TMP)/cc_native_gnu_asm_ext_32.s \
