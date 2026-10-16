@@ -63,5 +63,14 @@ int main(void) {
     printf("%g %g %g %g\n", cast_d(0.75L), (double)cast_f(1.5L), ret_d(0.25L), (double)ret_f(0.125L));
     printf("%g %g %g %g %g\n", take_d(x), (double)take_f(x), st.d, (double)st.f, arr[1]);
     printf("%g %02x%02x\n", (double)(x * 2), u.b[7], u.b[6]);
+    {
+        /* long double members from int and double values: widened, not stored as a double's bytes */
+        struct {
+            long double a, b;
+        } m = {1, 2.5};
+
+        m.b = 4;
+        printf("%Lg %Lg\n", m.a, m.b);
+    }
     return 0;
 }

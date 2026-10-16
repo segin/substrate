@@ -153,6 +153,9 @@ static cc_ctype_t ct_key(cc_ctype_kind_t kind) {
 /**
  * Forget every type built so far.
  */
+/** The structures standing for float, double and long double _Complex; -1 where none is made. */
+static int ct_complex_records[3] = {-1, -1, -1};
+
 void cc_ct_reset(void) {
     size_t i;
 
@@ -163,6 +166,9 @@ void cc_ct_reset(void) {
     g_table = NULL;
     g_cap = 0;
     g_count = 0;
+    for (i = 0; i < sizeof(ct_complex_records) / sizeof(ct_complex_records[0]); ++i) {
+        ct_complex_records[i] = -1;
+    }
 }
 
 /**
@@ -214,6 +220,42 @@ const cc_ctype_t *cc_ct_complex(cc_ctype_kind_t kind, const cc_ctype_t *elem) {
     }
     k.of = elem->unqual;
     return ct_intern(&k);
+}
+
+/** The slot in ct_complex_records for an element kind, or -1. */
+static int ct_complex_slot(cc_ctype_kind_t elem) {
+    return elem == CC_CT_FLOAT ? 0 : (elem == CC_CT_DOUBLE ? 1 : (elem == CC_CT_LDOUBLE ? 2 : -1));
+}
+
+/**
+ * Record the structure, `{ T __re, __im; }`, that stands for _Complex T in
+ * the legacy encoding (which has no complex kind of its own per element).
+ *
+ * @param elem  float, double or long double
+ * @param id    the structure's index in the translation unit
+ */
+void cc_ct_set_complex_record(cc_ctype_kind_t elem, int id) {
+    int slot = ct_complex_slot(elem);
+
+    if (slot >= 0) {
+        ct_complex_records[slot] = id;
+    }
+}
+
+/**
+ * The structure standing for a complex type in the legacy encoding.
+ *
+ * @param t  a _Complex type
+ * @return   its index in the translation unit, or -1 if none was made
+ */
+int cc_ct_complex_record(const cc_ctype_t *t) {
+    int slot;
+
+    if (t == NULL || t->kind != CC_CT_COMPLEX || t->of == NULL) {
+        return -1;
+    }
+    slot = ct_complex_slot(t->of->kind);
+    return slot < 0 ? -1 : ct_complex_records[slot];
 }
 
 /**
@@ -679,6 +721,12 @@ int cc_ct_to_legacy(const cc_ctype_t *t, cc_ct_legacy_t *out) {
         out->struct_id = (int)t->count;
         return 0;
     case CC_CT_COMPLEX:
+        /* the structure that stands for it, where the parser made one */
+        if (cc_ct_complex_record(t) >= 0) {
+            out->base = CC_TYPE_VOID;
+            out->struct_id = cc_ct_complex_record(t);
+            return 0;
+        }
         out->base = CC_TYPE_COMPLEX;
         return 0;
     case CC_CT_IMAGINARY:

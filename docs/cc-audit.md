@@ -39,11 +39,11 @@ silent: the program compiled, ran and printed a wrong answer.
 |---|---|---|
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
-| 3. Tests | 2 | 1 |
-| 4. ABI and other code generation | 13 | 6 |
-| 5. Driver and predefined macros | 3 | 1 |
-| 6. The restored suite's failing commands | 10 | 0 |
-| 7. The restored suite itself | 12 | 5 |
+| 3. Tests | 2 | 2 |
+| 4. ABI and other code generation | 34 | 31 |
+| 5. Driver and predefined macros | 3 | 3 |
+| 6. The restored suite's failing commands | 10 | 10 |
+| 7. The restored suite itself | 12 | 12 |
 | 8. Documentation | 1 | 1 |
 
 The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
@@ -230,18 +230,38 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   there, so a VLA in a loop reuses its storage as gcc's does; `alloca`
   storage lasts until the function returns, as it should.  The repro runs,
   and `codegen/vla_stack.c` checks that a VLA in a loop stays in place.
-- [ ] **CC-68** `_Complex` and `_Imaginary` objects shall hold both
+- [x] **CC-68** `_Complex` and `_Imaginary` objects shall hold both
   parts and support complex arithmetic.  cc carries one part, as a
   double, in a 16-byte object; a 16-byte access is taken for a long
   double, so a complex object read through a pointer (`*pz`) gives 0 on
   both targets and a global one gives 0 at -m64.  Locals read and write
-  their first part since CC-23.  *Reproduced.*  *Layout done* (refactor
+  their first part since CC-23.  *Reproduced.*  *Layout* (refactor
   step 5): a complex or imaginary type's element -- float, double or
   long double -- is in its interned type, and sizes, alignment,
   `_Alignof` and structure layout come from it (`float _Complex` was 16
-  bytes, gcc's 8; `codegen/complex_layout.c`).  The values themselves
-  (both parts, the arithmetic, the ABI) wait for typed values in lowering
-  (steps 6-7).
+  bytes, gcc's 8; `codegen/complex_layout.c`).  *Values:* in the legacy
+  encoding a complex type is the structure `{ T __re, __im; }` standing
+  for it, so objects, copies, calls and returns are a structure's; sema
+  makes every real/complex conversion an explicit cast (assignment,
+  initialization, arguments, returns, casts, conditions and `!`), and
+  lowering does the arithmetic part by part in each operand's type:
+  + - * on every pairing of float, double and long double complex with
+  each other and with real and integer operands, a real operand kept
+  real (Annex G), division by Smith's method in libgcc's order (float
+  parts in double, as `__divsc3` does), `==`/`!=`, `~` as conjugation.
+  GNU `__real__`/`__imag__` (also as lvalues), imaginary constants
+  (`2.0i`, `1.0fi`, `<complex.h>`'s `I`), `__builtin_complex`, and
+  constant initializers of static complex objects and arrays are
+  supported.  The psABI special cases are kept: x86-64 returns
+  `long double _Complex` in `%st0`/`%st1`, i386 returns `float _Complex`
+  in `%eax`:`%edx`.  Two parser bugs went with it: `__imag__` was lexed
+  as the `_Imaginary` keyword, and the declaration probe recorded its
+  own complex structures over the real ones.  `codegen/complex_arith.c`
+  matches gcc to the bit at both widths and both optimization levels;
+  `codegen_abi/` checks the three complex types against gcc both ways.
+  Not done: `_Imaginary` as its own type (gcc does not support it
+  either), complex integer types (`3i` is a double imaginary), and
+  libgcc's rescaling of huge or tiny divisors.
 - [ ] **CC-69** `_Decimal32`, `_Decimal64` and `_Decimal128` shall be
   decimal floating types in the encoding gcc uses (BID on x86).  cc
   carries all three as a binary double, so a decimal object's bytes are
@@ -303,6 +323,50 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   gcc at both widths.  A variable-length array of the enclosing function
   is still rejected in a nested function (its strides are values of the
   enclosing function).
+- [x] **CC-74** On x86-64, a structure of 16 bytes or fewer shall be
+  passed and returned by the classes of its eightbytes (psABI 3.2.3):
+  one of floats and doubles in xmm registers, a mixed one in both kinds,
+  one holding a long double or packed in memory, a lone long double
+  returned in `%st0`.  cc put every such structure in general registers,
+  so `struct { double x, y; }`, `{ float x, y; }`, `{ double d; long l; }`
+  and the like came out as garbage in calls to and from gcc-built code,
+  both ways (`{1.5, 2.0} + {0.25, 4.0}` gave `1.4e+161 2.3e-129`).  The
+  tail of a 3-, 5-, 6- or 7-byte eightbyte was also moved with the next
+  smaller move, losing its last bytes.  *Reproduced* (found by CC-68's
+  cross-compiler test).  The lowering classifies each aggregate from its
+  members' types (`abi64_aggregate_class()`) and the IR carries the
+  classes in the argument's ABI byte and on a CALL or RET
+  (`agg_class`); the emitter puts each eightbyte in the next register of
+  its class, and odd tails a byte at a time.  `codegen_abi/` now passes
+  nine structure shapes, more SSE arguments than xmm registers, and the
+  three complex types, cc against gcc both ways at both widths.
+- [x] **CC-75** On i386, the stack shall be 16-byte aligned at every call
+  (the psABI as gcc and glibc assume it).  cc's frames left `%esp` 8
+  bytes off and calls pushed their arguments unpadded, so gcc-built code
+  that keeps a 16-byte value in its frame died: `movdqa` in a callee
+  copying a 16-byte structure faulted.  *Reproduced* (CC-74's test, -m32).
+  Frames are now 8 more than a multiple of 16, which leaves the body's
+  `%esp` aligned after the return address and saved `%ebp`, and each
+  call pads its arguments to a multiple of 16 first.
+- [x] **CC-76** A prototyped `float` parameter or return shall be single
+  precision across the call: in the low 32 bits of an xmm register on
+  x86-64, in a 4-byte stack slot on i386, as gcc passes it.  cc passed and
+  returned the double it holds a float in, so `crealf()`, `sinf()` and
+  every other float function of gcc-built code, called from cc or calling
+  cc's, got garbage: `fl(1.5f, 2.0, 0.25f)` gave `5.3e-315` (x86-64) and
+  `2` (i386) for 5.25.  *Reproduced* (both ways, both widths).  The IR has
+  an ABI kind for it, `CC_CALL_ARG_ABI_FLOAT`, on arguments, parameters
+  and returns, converted at the boundary (`cvtsd2ss`/`cvtss2sd`,
+  `fstps`/`flds`); an old-style definition's float parameters are still
+  promoted to double, as C says.  `codegen_abi/`'s `lib_fl` and
+  `lib_fl10` (ten floats, some on the stack).
+- [x] **CC-77** On x86-64, storing an integer or double value to a long
+  double member or through a long double pointer shall convert it.  The
+  store read the value's 8-byte slot as a 10-byte long double, so
+  `struct { long double a, b; } m = {1, 2.5}` held `1.7e-4932 1.7e-4932`.
+  Local and global scalars were right.  *Reproduced* (-m64).  The
+  assignment and the structure initializer now widen the value first.
+  `codegen/ldouble_convert.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -715,7 +779,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-73 requirements: 69 met, 4 open.
+77 requirements: 74 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

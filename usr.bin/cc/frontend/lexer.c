@@ -22,6 +22,11 @@ static int is_int_suffix_char(int c) {
     return c == 'u' || c == 'U' || c == 'l' || c == 'L';
 }
 
+/** Whether @p c is the GNU suffix making a number literal imaginary (`2.0i`, `3j`). */
+static int is_imaginary_suffix_char(int c) {
+    return c == 'i' || c == 'I' || c == 'j' || c == 'J';
+}
+
 static int is_hex_digit(int c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
@@ -448,10 +453,8 @@ static int lex_ident_or_keyword(cc_lexer_t *lx, cc_token_t *out, size_t line, si
                 out->start[2] == 'i' && out->start[3] == 'm' && out->start[4] == 'a' &&
                 out->start[5] == 'g' && out->start[6] == 'i' && out->start[7] == 'n' &&
                 out->start[8] == 'a' && out->start[9] == 'r' && out->start[10] == 'y' &&
-                out->start[11] == '_' && out->start[12] == '_') ||
-               (out->len == 8 && out->start[0] == '_' && out->start[1] == '_' &&
-                out->start[2] == 'i' && out->start[3] == 'm' && out->start[4] == 'a' &&
-                out->start[5] == 'g' && out->start[6] == '_' && out->start[7] == '_')) {
+                out->start[11] == '_' && out->start[12] == '_')) {
+        /* `__imag__` is not a spelling of it: that is GNU's imaginary-part operator */
         out->kind = TOK_KW_IMAGINARY;
     } else if ((out->len == 8 && out->start[0] == 'v' && out->start[1] == 'o' &&
                 out->start[2] == 'l' && out->start[3] == 'a' && out->start[4] == 't' &&
@@ -734,6 +737,10 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
     }
 
     if (saw_dot) {
+        if (is_imaginary_suffix_char(lx_peek(lx))) {
+            out->is_imaginary = 1;
+            lx_adv(lx);
+        }
         if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F' || lx_peek(lx) == 'l' || lx_peek(lx) == 'L') {
             if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F') {
                 out->float_is_single = 1;
@@ -743,12 +750,18 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
             }
             lx_adv(lx);
         }
+        if (!out->is_imaginary && is_imaginary_suffix_char(lx_peek(lx))) {
+            out->is_imaginary = 1;
+            lx_adv(lx);
+        }
     } else {
-        while ((c = lx_peek(lx)) >= 0 && is_int_suffix_char(c)) {
+        while ((c = lx_peek(lx)) >= 0 && (is_int_suffix_char(c) || (!out->is_imaginary && is_imaginary_suffix_char(c)))) {
             if (c == 'u' || c == 'U') {
                 seen_u = 1;
             } else if (c == 'l' || c == 'L') {
                 seen_l++;
+            } else if (is_imaginary_suffix_char(c)) {
+                out->is_imaginary = 1;
             }
             lx_adv(lx);
         }
@@ -867,6 +880,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->fnum = 0.0;
     out->fnum_ld = 0.0L;
     out->is_float = 0;
+    out->is_imaginary = 0;
     out->float_is_single = 0;
     out->float_is_long = 0;
     out->int_is_unsigned = 0;

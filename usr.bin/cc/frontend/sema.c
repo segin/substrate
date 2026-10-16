@@ -6,6 +6,7 @@
 #include "cc_lang.h"
 #include "cc_options.h"
 #include "cc_types.h"
+#include "cc_util.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -2055,6 +2056,551 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                       int switch_depth,
                       int *saw_return, cc_diag_t *diag);
 
+/**
+ * The element type of a complex type -- which the legacy encoding gives as
+ * the structure `{ T __re, __im; }` standing for it -- or CC_TYPE_VOID if
+ * @p t is not complex.
+ */
+static cc_type_t sema_complex_elem(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
+    if (t != CC_TYPE_VOID || sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count) {
+        return CC_TYPE_VOID;
+    }
+    return tu->structs[sid].complex_elem;
+}
+
+/** The structure standing for _Complex @p elem, or -1 if there is none. */
+static int sema_complex_sid(const cc_translation_unit_t *tu, cc_type_t elem) {
+    size_t i;
+
+    for (i = 0; tu != NULL && i < tu->struct_count; ++i) {
+        if (tu->structs[i].complex_elem == elem && elem != CC_TYPE_VOID) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * The floating rank a type contributes to a complex operation's result:
+ * 1 float, 2 double, 3 long double; 0 for an integer (C11 6.3.1.8: the
+ * complex operand's element decides then).
+ */
+static int sema_float_rank(cc_type_t t) {
+    return t == CC_TYPE_FLOAT ? 1 : (t == CC_TYPE_DOUBLE ? 2 : (t == CC_TYPE_LDOUBLE ? 3 : 0));
+}
+
+/**
+ * The type of an operand of a complex operation, as a floating rank, or -1
+ * if it may not be one (a pointer, a structure).
+ */
+static int sema_complex_operand_rank(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    cc_type_t ce = sema_complex_elem(tu, e->value_type, e->struct_id);
+
+    if (ce != CC_TYPE_VOID) {
+        return sema_float_rank(ce);
+    }
+    if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+        return 0;
+    }
+    if (e->value_type == CC_TYPE_FLOAT || e->value_type == CC_TYPE_DOUBLE || e->value_type == CC_TYPE_LDOUBLE) {
+        return sema_float_rank(e->value_type);
+    }
+    return -1;
+}
+
+/**
+ * Make an implicit conversion explicit: put a cast to (@p t, @p sid) above
+ * the expression in @p slot.  Lowering converts between a complex value and
+ * a real one only where a cast says so.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_wrap_cast(cc_expr_t **slot, cc_type_t t, int sid) {
+    cc_expr_t *c = (cc_expr_t *)calloc(1, sizeof(*c));
+
+    if (c == NULL) {
+        return -1;
+    }
+    c->kind = CC_EXPR_CAST;
+    c->line = (*slot)->line;
+    c->col = (*slot)->col;
+    c->aux_type = t;
+    c->aux_struct_id = sid;
+    c->value_type = t;
+    c->struct_id = sid;
+    c->lhs = *slot;
+    *slot = c;
+    return 0;
+}
+
+static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot);
+
+/**
+ * Read one part of a complex value: the member `__re` or `__im` of the
+ * structure standing for its type.  Replaces the expression in @p slot.
+ *
+ * @param tu    the translation unit
+ * @param slot  a complex expression, checked
+ * @param imag  0 for the real part, 1 for the imaginary
+ * @return      0, or -1 when out of memory
+ */
+static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, int imag) {
+    cc_type_t elem = sema_complex_elem(tu, (*slot)->value_type, (*slot)->struct_id);
+    cc_expr_t *m = (cc_expr_t *)calloc(1, sizeof(*m));
+
+    if (m == NULL) {
+        return -1;
+    }
+    m->ident = cc_strdup(imag ? "__im" : "__re");
+    if (m->ident == NULL) {
+        free(m);
+        return -1;
+    }
+    m->kind = CC_EXPR_MEMBER;
+    m->line = (*slot)->line;
+    m->col = (*slot)->col;
+    m->lhs = *slot;
+    m->member_offset = imag ? type_size_bytes(elem) : 0;
+    m->value_type = elem;
+    m->struct_id = -1;
+    *slot = m;
+    return 0;
+}
+
+/**
+ * Where a value of the source's type is converted to (@p t, @p sid) by
+ * assignment -- an initializer, an argument, a return -- and one of the two
+ * is complex and they differ: put the conversion in as a cast.
+ *
+ * @return 1 if a cast was added, 0 if none was needed, -1 when out of memory
+ */
+static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t t, int sid) {
+    cc_type_t de = sema_complex_elem(tu, t, sid);
+    cc_type_t se;
+
+    if (*slot == NULL) {
+        return 0;
+    }
+    se = sema_complex_elem(tu, (*slot)->value_type, (*slot)->struct_id);
+    if ((de == CC_TYPE_VOID && se == CC_TYPE_VOID) || (de == se && de != CC_TYPE_VOID)) {
+        return 0;
+    }
+    if (de != CC_TYPE_VOID ? sema_complex_operand_rank(tu, *slot) < 0
+                           : !(cc_type_is_integral(t) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE ||
+                               t == CC_TYPE_LDOUBLE || t == CC_TYPE_BOOL)) {
+        return 0;
+    }
+    if (de == CC_TYPE_VOID && t == CC_TYPE_BOOL) {
+        /* to _Bool: whether either part is nonzero */
+        return sema_complex_truth(tu, slot) == 0 ? 1 : -1;
+    }
+    if (de == CC_TYPE_VOID && sema_complex_part(tu, slot, 0) != 0) {
+        /* to a real type: the real part, converted */
+        return -1;
+    }
+    return sema_wrap_cast(slot, t, sid) == 0 ? 1 : -1;
+}
+
+/**
+ * A complex value where a truth value is wanted (`!z`, `z && x`, `if (z)`):
+ * compare it with zero, as C does (6.5.3.3, 6.8.4.1).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot) {
+    cc_expr_t *ne;
+    cc_expr_t *zero;
+
+    if (*slot == NULL || sema_complex_elem(tu, (*slot)->value_type, (*slot)->struct_id) == CC_TYPE_VOID) {
+        return 0;
+    }
+    ne = (cc_expr_t *)calloc(1, sizeof(*ne));
+    zero = (cc_expr_t *)calloc(1, sizeof(*zero));
+    if (ne == NULL || zero == NULL) {
+        free(ne);
+        free(zero);
+        return -1;
+    }
+    zero->kind = CC_EXPR_INT;
+    zero->value_type = CC_TYPE_INT;
+    zero->struct_id = -1;
+    ne->kind = CC_EXPR_BIN;
+    ne->op = CC_BIN_NE;
+    ne->line = (*slot)->line;
+    ne->col = (*slot)->col;
+    ne->lhs = *slot;
+    ne->rhs = zero;
+    ne->value_type = CC_TYPE_INT;
+    ne->struct_id = -1;
+    *slot = ne;
+    return 0;
+}
+
+/**
+ * A binary operator with a complex operand: +, -, *, / give the complex
+ * type of the operands' larger floating rank (an integer operand takes the
+ * complex one's), == and != give int, `~z` (GNU, parsed as z ^ -1) is the
+ * conjugate; any other operator is an error.  The operands keep their types;
+ * lowering converts a real one as it reads it.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    int lr = sema_complex_operand_rank(tu, e->lhs);
+    int rr = sema_complex_operand_rank(tu, e->rhs);
+    int rank;
+    int sid;
+
+    if (e->op == CC_BIN_BXOR && sema_complex_elem(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID &&
+        e->rhs->kind == CC_EXPR_INT && e->rhs->int_val == -1) {
+        e->value_type = e->lhs->value_type;
+        e->struct_id = e->lhs->struct_id;
+        return 0;
+    }
+    if (lr < 0 || rr < 0 ||
+        !(e->op == CC_BIN_ADD || e->op == CC_BIN_SUB || e->op == CC_BIN_MUL || e->op == CC_BIN_DIV ||
+          e->op == CC_BIN_EQ || e->op == CC_BIN_NE)) {
+        set_diag(diag, "invalid operands to a complex operation");
+        return -1;
+    }
+    if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
+        e->value_type = CC_TYPE_INT;
+        e->struct_id = -1;
+        return 0;
+    }
+    rank = lr > rr ? lr : rr;
+    sid = sema_complex_sid(tu, rank == 1 ? CC_TYPE_FLOAT : (rank == 3 ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE));
+    if (sid < 0) {
+        set_diag(diag, "complex result type is not available");
+        return -1;
+    }
+    e->value_type = CC_TYPE_VOID;
+    e->struct_id = sid;
+    return 0;
+}
+
+static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
+                      cc_diag_t *diag);
+
+/** @p v rounded to the floating type @p t (float, double or long double). */
+static long double sema_round_to(cc_type_t t, long double v) {
+    if (t == CC_TYPE_FLOAT) {
+        return (float)v;
+    }
+    return t == CC_TYPE_LDOUBLE ? v : (long double)(double)v;
+}
+
+/**
+ * Fold a checked arithmetic constant expression, real or complex, to its
+ * two parts, each operation rounded to its type: what a static complex
+ * object's initializer must be (C11 6.6p7).
+ *
+ * @return 0, or -1 if it is not such a constant
+ */
+static int sema_fold_complex(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *re, long double *im,
+                             int depth) {
+    cc_type_t elem;
+
+    if (e == NULL || depth > 64) {
+        return -1;
+    }
+    elem = sema_complex_elem(tu, e->value_type, e->struct_id);
+    if (elem == CC_TYPE_VOID) {
+        elem = e->value_type;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        *re = cc_type_is_unsigned_integral(e->value_type) ? (long double)(unsigned long long)e->int_val
+                                                           : (long double)e->int_val;
+        *im = 0;
+        return 0;
+    case CC_EXPR_FLOAT:
+        *re = e->value_type == CC_TYPE_LDOUBLE ? e->float_val_ld : (long double)e->float_val;
+        *im = 0;
+        return 0;
+    case CC_EXPR_COMPLEX: {
+        long double r1, i1, r2, i2;
+
+        if (sema_fold_complex(tu, e->lhs, &r1, &i1, depth + 1) != 0 ||
+            sema_fold_complex(tu, e->rhs, &r2, &i2, depth + 1) != 0) {
+            return -1;
+        }
+        *re = sema_round_to(elem, r1);
+        *im = sema_round_to(elem, r2);
+        return 0;
+    }
+    case CC_EXPR_CAST:
+        if (sema_fold_complex(tu, e->lhs, re, im, depth + 1) != 0) {
+            return -1;
+        }
+        if (sema_complex_elem(tu, e->value_type, e->struct_id) == CC_TYPE_VOID) {
+            *im = 0;
+            if (cc_type_is_integral(e->value_type)) {
+                *re = (long double)(long long)*re;
+                return 0;
+            }
+        }
+        *re = sema_round_to(elem, *re);
+        *im = sema_round_to(elem, *im);
+        return 0;
+    case CC_EXPR_BIN: {
+        long double a, b, c, d;
+
+        if (sema_fold_complex(tu, e->lhs, &a, &b, depth + 1) != 0 ||
+            sema_fold_complex(tu, e->rhs, &c, &d, depth + 1) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD:
+            *re = a + c;
+            *im = b + d;
+            break;
+        case CC_BIN_SUB:
+            *re = a - c;
+            *im = b - d;
+            break;
+        case CC_BIN_MUL:
+            *re = sema_round_to(elem, a * c) - sema_round_to(elem, b * d);
+            *im = sema_round_to(elem, a * d) + sema_round_to(elem, b * c);
+            if (b == 0 && d == 0) {
+                *im = 0;
+            }
+            break;
+        case CC_BIN_DIV:
+            if (d == 0 && c != 0) {
+                *re = a / c;
+                *im = b / c;
+            } else {
+                long double den = c * c + d * d;
+
+                if (den == 0) {
+                    return -1;
+                }
+                *re = (a * c + b * d) / den;
+                *im = (b * c - a * d) / den;
+            }
+            break;
+        default:
+            return -1;
+        }
+        *re = sema_round_to(elem, *re);
+        *im = sema_round_to(elem, *im);
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+/** A floating literal node of type @p t and value @p v, or NULL when out of memory. */
+static cc_expr_t *sema_float_literal(cc_type_t t, long double v, size_t line, size_t col) {
+    cc_expr_t *f = (cc_expr_t *)calloc(1, sizeof(*f));
+
+    if (f != NULL) {
+        f->kind = CC_EXPR_FLOAT;
+        f->line = line;
+        f->col = col;
+        f->float_val = (double)v;
+        f->float_val_ld = v;
+        f->value_type = t;
+        f->struct_id = -1;
+    }
+    return f;
+}
+
+/**
+ * Make a checked initializer of a static complex object of element type
+ * @p elem the brace list `{ re, im }` of its folded constant parts, which
+ * the structure-initializer path lays out.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_type_t elem,
+                                    cc_diag_t *diag) {
+    long double re;
+    long double im;
+    cc_expr_t *list;
+    cc_expr_t **items;
+
+    if (sema_fold_complex(tu, *slot, &re, &im, 0) != 0) {
+        set_diag(diag, "initializer of a static complex object is not an arithmetic constant");
+        return -1;
+    }
+    list = (cc_expr_t *)calloc(1, sizeof(*list));
+    items = (cc_expr_t **)calloc(2, sizeof(*items));
+    if (list == NULL || items == NULL) {
+        free(list);
+        free(items);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    items[0] = sema_float_literal(elem, sema_round_to(elem, re), (*slot)->line, (*slot)->col);
+    items[1] = sema_float_literal(elem, sema_round_to(elem, im), (*slot)->line, (*slot)->col);
+    if (items[0] == NULL || items[1] == NULL) {
+        free(items[0]);
+        free(items[1]);
+        free(items);
+        free(list);
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    list->kind = CC_EXPR_INIT_LIST;
+    list->line = (*slot)->line;
+    list->col = (*slot)->col;
+    list->args = items;
+    list->arg_count = 2;
+    list->value_type = CC_TYPE_VOID;
+    list->struct_id = -1;
+    cc_expr_free(*slot);
+    *slot = list;
+    return 0;
+}
+
+/**
+ * A checked controlling expression (of if, while, do, for, ?:) as a
+ * scalar: a complex one becomes the test of whether either part is
+ * nonzero (C11 6.8.4.1, 6.3.1.2).
+ *
+ * @return 0, or -1 with @p diag set when out of memory
+ */
+static int sema_condition(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    if (*slot == NULL || sema_complex_elem(tu, (*slot)->value_type, (*slot)->struct_id) == CC_TYPE_VOID) {
+        return 0;
+    }
+    if (sema_complex_truth(tu, slot) != 0) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Check a complex value built from its parts (CC_EXPR_COMPLEX, checked
+ * children): its type is _Complex of the parts' floating type, the wider
+ * if they differ (an integer part counts as double), and each part is
+ * converted to that.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    int lr = sema_complex_operand_rank(tu, e->lhs);
+    int rr = sema_complex_operand_rank(tu, e->rhs);
+    int rank;
+    cc_type_t elem;
+    int sid;
+
+    if (lr < 0 || rr < 0 || sema_complex_elem(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID ||
+        sema_complex_elem(tu, e->rhs->value_type, e->rhs->struct_id) != CC_TYPE_VOID) {
+        set_diag(diag, "the parts of a complex value must be real arithmetic values");
+        return -1;
+    }
+    rank = lr > rr ? lr : rr;
+    elem = rank == 1 ? CC_TYPE_FLOAT : (rank == 3 ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
+    sid = sema_complex_sid(tu, elem);
+    if (sid < 0) {
+        set_diag(diag, "complex type has no layout");
+        return -1;
+    }
+    if ((e->lhs->value_type != elem && sema_wrap_cast(&e->lhs, elem, -1) != 0) ||
+        (e->rhs->value_type != elem && sema_wrap_cast(&e->rhs, elem, -1) != 0)) {
+        set_diag(diag, "out of memory");
+        return -1;
+    }
+    e->value_type = CC_TYPE_VOID;
+    e->struct_id = sid;
+    return 0;
+}
+
+/**
+ * Check GNU __builtin_complex(re, im) and make it the CC_EXPR_COMPLEX it
+ * stands for.  As in gcc, both arguments must have the same real floating
+ * type.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_builtin_complex(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                                int depth, cc_diag_t *diag) {
+    cc_expr_t **args = e->args;
+
+    if (e->arg_count != 2) {
+        set_diag(diag, "__builtin_complex takes two arguments");
+        return -1;
+    }
+    if (check_expr(tu, args[0], vars, var_count, depth, diag) != 0 ||
+        check_expr(tu, args[1], vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_float_rank(args[0]->value_type) == 0 || args[0]->value_type != args[1]->value_type) {
+        set_diag(diag, "both arguments to '__builtin_complex' must have the same real floating type");
+        return -1;
+    }
+    free(e->ident);
+    e->ident = NULL;
+    e->kind = CC_EXPR_COMPLEX;
+    e->lhs = args[0];
+    e->rhs = args[1];
+    e->args = NULL;
+    e->arg_count = 0;
+    free(args);
+    return sema_check_complex_parts(tu, e, diag);
+}
+
+/**
+ * Check GNU __real__ x or __imag__ x (a member access marked
+ * member_is_part) where x is real: __real__ x is x, converted to its own
+ * type so it is no lvalue, and __imag__ x is zero after x is evaluated.
+ * A complex x needs nothing: the access names a member of its structure.
+ *
+ * @return 1 if handled here, 0 if x is complex, -1 with @p diag set
+ */
+static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
+                                  size_t var_count, int depth, cc_diag_t *diag) {
+    cc_expr_t *x = e->lhs;
+    cc_type_t t;
+
+    if (check_expr(tu, x, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_complex_elem(tu, x->value_type, x->struct_id) != CC_TYPE_VOID) {
+        return 0;
+    }
+    t = x->value_type;
+    if (is_pointer_type(t) || !(cc_type_is_integral(t) || sema_float_rank(t) > 0)) {
+        set_diag(diag, "__real__ and __imag__ need an arithmetic operand");
+        return -1;
+    }
+    if (strcmp(e->ident, "__im") == 0) {
+        cc_expr_t *zero = (cc_expr_t *)calloc(1, sizeof(*zero));
+
+        if (zero == NULL) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        zero->kind = CC_EXPR_INT;
+        zero->line = e->line;
+        zero->col = e->col;
+        zero->value_type = CC_TYPE_INT;
+        zero->struct_id = -1;
+        e->kind = CC_EXPR_BIN;
+        e->op = CC_BIN_COMMA;
+        e->rhs = zero;
+        if (sema_wrap_cast(&e->rhs, t, -1) != 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+    } else {
+        e->kind = CC_EXPR_CAST;
+        e->aux_type = t;
+        e->aux_struct_id = -1;
+    }
+    free(e->ident);
+    e->ident = NULL;
+    e->member_is_part = 0;
+    e->value_type = t;
+    e->struct_id = -1;
+    return 1;
+}
+
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
     size_t i;
@@ -2191,9 +2737,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
     }
 
+    case CC_EXPR_COMPLEX:
+        if (e->lhs == NULL || e->rhs == NULL || check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        return sema_check_complex_parts(tu, e, diag);
+
     case CC_EXPR_MEMBER: {
         const cc_struct_member_t *m;
         int sid = -1;
+        if (e->member_is_part && e->lhs != NULL && e->ident != NULL) {
+            int rc = sema_real_part_of_real(tu, e, vars, var_count, depth, diag);
+
+            if (rc != 0) {
+                return rc < 0 ? -1 : 0;
+            }
+        }
         if (e->lhs == NULL && e->rhs != NULL && e->ident != NULL) {
             if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
                 return -1;
@@ -2282,6 +2842,18 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = e->rhs->struct_id;
             expr_copy_array_meta(e, e->rhs);
             return 0;
+        }
+        if (sema_complex_elem(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID ||
+            sema_complex_elem(tu, e->rhs->value_type, e->rhs->struct_id) != CC_TYPE_VOID) {
+            if (is_logical_op(e->op)) {
+                if (sema_complex_truth(tu, &e->lhs) != 0 || sema_complex_truth(tu, &e->rhs) != 0) {
+                    set_diag(diag, "out of memory converting a complex operand");
+                    return -1;
+                }
+                e->value_type = CC_TYPE_INT;
+                return 0;
+            }
+            return sema_complex_binop(tu, e, diag);
         }
         if (is_logical_op(e->op)) {
             if (!is_scalar_type(e->lhs->value_type) || !is_scalar_type(e->rhs->value_type)) {
@@ -2458,6 +3030,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         cc_type_t elem_type;
         cc_type_t indirect_callee_type = CC_TYPE_VOID;
         int indirect_callee_struct_id = -1;
+        if (e->ident != NULL && strcmp(e->ident, "__builtin_complex") == 0) {
+            return sema_builtin_complex(tu, e, vars, var_count, depth, diag);
+        }
         if (e->ident != NULL) {
             callee = find_function(tu, e->ident);
         }
@@ -3194,6 +3769,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+                sema_complex_convert_for_assign(tu, &e->args[i], callee->params[i].type,
+                                                callee->params[i].type_struct_id) < 0) {
+                set_diag(diag, "out of memory");
+                return -1;
+            }
+            if (callee != NULL && callee->has_prototype && i < callee->param_count &&
                 !can_convert(callee->params[i].type, e->args[i]->value_type) &&
                 !(is_pointer_type(callee->params[i].type) && cc_type_is_integral(e->args[i]->value_type) &&
                   is_null_ptr_constant(e->args[i])) &&
@@ -3397,6 +3978,15 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
+        }
+        {
+            /* to or from a complex type: the conversion, explicit */
+            int conv = sema_complex_convert_for_assign(tu, &e->rhs, dst_type, dst_struct_id);
+
+            if (conv < 0) {
+                set_diag(diag, "out of memory converting to or from a complex type");
+                return -1;
+            }
         }
         assign_ok = can_convert(dst_type, e->rhs->value_type) ||
                     (is_pointer_type(dst_type) && cc_type_is_integral(e->rhs->value_type) && is_null_ptr_constant(e->rhs));
@@ -3685,6 +4275,20 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        if (sema_complex_elem(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID &&
+            cc_type_is_numeric(e->aux_type)) {
+            /* complex to real: the real part (C11 6.3.1.7); to _Bool: whether either part is nonzero */
+            if ((e->aux_type == CC_TYPE_BOOL ? sema_complex_truth(tu, &e->lhs)
+                                             : sema_complex_part(tu, &e->lhs, 0)) != 0) {
+                set_diag(diag, "out of memory");
+                return -1;
+            }
+        }
+        if (sema_complex_elem(tu, e->aux_type, e->aux_struct_id) != CC_TYPE_VOID &&
+            sema_complex_operand_rank(tu, e->lhs) < 0) {
+            set_diag(diag, "only an arithmetic value can be converted to a complex type");
+            return -1;
+        }
         if (e->aux_type == CC_TYPE_VOID) {
             if (e->aux_struct_id >= 0) {
                 const cc_struct_def_t *sd = find_struct_def(tu, e->aux_struct_id);
@@ -3830,6 +4434,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
             (e->rhs != NULL && check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) ||
             check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (sema_condition(tu, &e->lhs, diag) != 0) {
             return -1;
         }
         lhs_is_plain_void = (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id < 0);
@@ -4657,6 +5264,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         (*var_count)--;
                         return -1;
                     }
+                    if (sema_complex_convert_for_assign(tu, &s->expr, s->type, s->type_struct_id) > 0) {
+                        /* to or from a complex type: the conversion is now explicit */
+                        return 0;
+                    }
                     if (is_pointer_type(s->type) && s->array_len >= 0 && s->expr->kind == CC_EXPR_STR) {
                         long inferred_len = -1;
                         int rc = check_array_string_initializer(s->decl_name, s->type, &s->array_len, s->expr,
@@ -4835,6 +5446,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
+            if (sema_complex_convert_for_assign(tu, &s->expr, fn_ret_type, fn_ret_struct_id) < 0) {
+                set_diag(diag, "out of memory");
+                return -1;
+            }
             if (fn_ret_type == CC_TYPE_VOID && fn_ret_struct_id >= 0) {
                 if (!(s->expr->value_type == CC_TYPE_VOID && s->expr->struct_id == fn_ret_struct_id)) {
                     if (!(s->expr->kind == CC_EXPR_STMT && cc_type_is_integral(s->expr->value_type))) {
@@ -4859,6 +5474,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (sema_condition(tu, &s->expr, diag) != 0) {
             return -1;
         }
         if (s->expr->value_type == CC_TYPE_VOID) {
@@ -4926,6 +5544,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
+        if (sema_condition(tu, &s->expr, diag) != 0) {
+            return -1;
+        }
         if (s->expr->value_type == CC_TYPE_VOID) {
             set_diag(diag, "while condition cannot be void");
             return -1;
@@ -4948,6 +5569,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (maybe_warn_assignment_condition(s->expr, "do-while", diag) != 0) {
+            return -1;
+        }
+        if (sema_condition(tu, &s->expr, diag) != 0) {
             return -1;
         }
         if (s->expr->value_type == CC_TYPE_VOID) {
@@ -4989,6 +5613,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (check_expr(tu, s->expr, *vars, *var_count, for_depth, diag) != 0) {
+                    return -1;
+                }
+                if (sema_condition(tu, &s->expr, diag) != 0) {
                     return -1;
                 }
                 if (s->expr->value_type == CC_TYPE_VOID) {
@@ -5334,6 +5961,20 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
         }
         if (g->init != NULL) {
             if (g->init->kind == CC_EXPR_INIT_LIST) {
+                cc_type_t celem = sema_complex_elem(tu, CC_TYPE_VOID, g->type_struct_id);
+
+                if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 && celem != CC_TYPE_VOID) {
+                    /* an array of complex: each element not already braced is a constant to fold */
+                    size_t k;
+
+                    for (k = 0; k < g->init->arg_count; ++k) {
+                        if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
+                            (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
+                             sema_complex_static_init(tu, &g->init->args[k], celem, diag) != 0)) {
+                            goto fail_global_item;
+                        }
+                    }
+                }
                 if (is_pointer_type(g->type) && g->array_len >= 0) {
                     long inferred_len = -1;
                     if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->array_ndim,
@@ -5369,8 +6010,18 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     }
                 }
             } else {
+                cc_type_t celem = sema_complex_elem(tu, g->type, g->type_struct_id);
+
                 if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
                     goto fail_global_item;
+                }
+                if (celem != CC_TYPE_VOID) {
+                    /* a static complex object: its constant parts, as a brace list */
+                    if (sema_complex_static_init(tu, &g->init, celem, diag) != 0 ||
+                        check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                        goto fail_global_item;
+                    }
+                    continue;
                 }
                 if (is_pointer_type(g->type) && g->array_len >= 0 && g->init->kind == CC_EXPR_STR) {
                     long inferred_len = -1;

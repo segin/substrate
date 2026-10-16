@@ -96,6 +96,7 @@ typedef struct {
     cc_struct_def_t *structs;
     size_t struct_count;
     size_t struct_cap;
+    int is_probe; /**< a throwaway copy with its own struct table: records nothing for the interned types */
     enum_const_entry_t *enum_consts;
     size_t enum_const_count;
     size_t enum_const_cap;
@@ -1437,6 +1438,51 @@ static int struct_ensure(parser_t *p, const char *tag, size_t len, int for_defin
     p->structs[p->struct_count].depth = p->scope_depth;
     p->structs[p->struct_count].complete = 0;
     return (int)p->struct_count++;
+}
+
+static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t type, int type_struct_id,
+                              long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long offset,
+                              long size, int is_bitfield, int bit_width, int bit_offset, int bit_storage_bits,
+                              int bit_signed, long bit_storage_size);
+
+/**
+ * The structure standing for _Complex T in the legacy encoding:
+ * `{ T __re, __im; }`, made once per element type at file scope and
+ * recorded for the interned type (cc_ct_set_complex_record()).  Laid out
+ * as gcc lays out a complex value: the real part, then the imaginary.
+ *
+ * @param p     the parser
+ * @param elem  CC_TYPE_FLOAT, CC_TYPE_DOUBLE or CC_TYPE_LDOUBLE
+ * @return      the structure's index, or -1 when out of memory
+ */
+static int parser_complex_struct(parser_t *p, cc_type_t elem) {
+    cc_ctype_kind_t kind = elem == CC_TYPE_FLOAT ? CC_CT_FLOAT : (elem == CC_TYPE_LDOUBLE ? CC_CT_LDOUBLE : CC_CT_DOUBLE);
+    const cc_ctype_t *ct = cc_ct_basic(kind);
+    long es = cc_ct_size(ct, NULL);
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].complex_elem == elem) {
+            return (int)i;
+        }
+    }
+    p->scope_depth = 0;
+    sid = struct_ensure(p, NULL, 0, 1);
+    p->scope_depth = saved_depth;
+    if (sid < 0 || struct_member_push(p, sid, "__re", elem, -1, -1, 0, NULL, 0, es, 0, 0, 0, 0, 0, 0) < 0 ||
+        struct_member_push(p, sid, "__im", elem, -1, -1, 0, NULL, es, es, 0, 0, 0, 0, 0, 0) < 0) {
+        return -1;
+    }
+    p->structs[sid].size = 2 * es;
+    p->structs[sid].align = cc_ct_align(ct, NULL);
+    p->structs[sid].complete = 1;
+    p->structs[sid].complex_elem = elem;
+    if (!p->is_probe) {
+        cc_ct_set_complex_record(kind, sid);
+    }
+    return sid;
 }
 
 /** A structure member's declarator, parsed: see parse_member_decl(). */
@@ -3139,6 +3185,28 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
          * which: _Complex of float, of double (also the bare `_Complex`),
          * or of long double.
          */
+        if (seen_complex) {
+            /*
+             * A complex value is its two parts, as a structure of them.  All
+             * three kinds are made at once: an operation can yield a kind no
+             * declaration names (float _Complex times a double).
+             */
+            int csid = parser_complex_struct(p, seen_float ? CC_TYPE_FLOAT
+                                                           : (seen_long > 0 ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE));
+
+            if (parser_complex_struct(p, CC_TYPE_FLOAT) < 0 || parser_complex_struct(p, CC_TYPE_DOUBLE) < 0 ||
+                parser_complex_struct(p, CC_TYPE_LDOUBLE) < 0) {
+                csid = -1;
+            }
+            if (csid < 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a complex type");
+                return -1;
+            }
+            *out_type = CC_TYPE_VOID;
+            if (out_struct_id != NULL) {
+                *out_struct_id = csid;
+            }
+        }
         alias_type = *out_type;
         alias_ctype = cc_ct_complex(seen_complex ? CC_CT_COMPLEX : CC_CT_IMAGINARY,
                                     cc_ct_basic(seen_float ? CC_CT_FLOAT
@@ -6322,6 +6390,10 @@ static void free_expr(cc_expr_t *e) {
     free(e);
 }
 
+void cc_expr_free(cc_expr_t *e) {
+    free_expr(e);
+}
+
 static void free_stmt(cc_stmt_t *s) {
     size_t i;
     if (s == NULL) {
@@ -7130,6 +7202,46 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
 
 static cc_expr_t *parse_unary(parser_t *p);
 
+/**
+ * The GNU imaginary constant a number literal with an `i` or `j` suffix
+ * is: the complex value (0, @p lit) of the literal's floating type.  An
+ * integer literal is taken as a double, the compiler having no complex
+ * integer types.
+ *
+ * @param p    the parser
+ * @param lit  the literal, without its suffix's meaning; consumed
+ * @return     the CC_EXPR_COMPLEX node, or NULL when out of memory
+ */
+static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
+    cc_expr_t *zero = new_expr(CC_EXPR_FLOAT);
+    cc_expr_t *c = new_expr(CC_EXPR_COMPLEX);
+    int sid;
+
+    if (lit->kind == CC_EXPR_INT) {
+        lit->kind = CC_EXPR_FLOAT;
+        lit->float_val = (double)lit->int_val;
+        lit->float_val_ld = (long double)lit->int_val;
+        lit->value_type = CC_TYPE_DOUBLE;
+    }
+    sid = parser_complex_struct(p, lit->value_type);
+    if (zero == NULL || c == NULL || sid < 0 || parser_complex_struct(p, CC_TYPE_FLOAT) < 0 ||
+        parser_complex_struct(p, CC_TYPE_DOUBLE) < 0 || parser_complex_struct(p, CC_TYPE_LDOUBLE) < 0) {
+        free_expr(zero);
+        free_expr(c);
+        free_expr(lit);
+        return NULL;
+    }
+    zero->value_type = lit->value_type;
+    zero->struct_id = -1;
+    c->line = p->tok.line;
+    c->col = p->tok.col;
+    c->lhs = zero;
+    c->rhs = lit;
+    c->value_type = CC_TYPE_VOID;
+    c->struct_id = sid;
+    return c;
+}
+
 static cc_expr_t *parse_primary(parser_t *p) {
     cc_expr_t *e;
 
@@ -7173,6 +7285,12 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 e->value_type = p->tok.int_is_unsigned ? CC_TYPE_ULONG : CC_TYPE_LONG;
             } else {
                 e->value_type = p->tok.int_is_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
+            }
+        }
+        if (p->tok.is_imaginary) {
+            e = parser_imaginary_literal(p, e);
+            if (e == NULL) {
+                return NULL;
             }
         }
         if (next_tok(p) != 0) {
@@ -8879,6 +8997,36 @@ static cc_expr_t *parse_unary(parser_t *p) {
         return e;
     }
 
+    if (p->tok.kind == TOK_IDENT && (tok_is_ident(p, "__real__") || tok_is_ident(p, "__real") ||
+                                     tok_is_ident(p, "__imag__") || tok_is_ident(p, "__imag"))) {
+        /*
+         * GNU __real__ z and __imag__ z: the member of the structure standing
+         * for z's complex type, so they are lvalues as gcc has them.  Sema
+         * gives a real operand's meaning (itself, and zero).
+         */
+        int imag = p->tok.start[2] == 'i';
+        cc_expr_t *m = new_expr(CC_EXPR_MEMBER);
+        cc_expr_t *operand;
+
+        if (m == NULL) {
+            return NULL;
+        }
+        m->line = p->tok.line;
+        m->col = p->tok.col;
+        m->ident = cc_strdup(imag ? "__im" : "__re");
+        if (m->ident == NULL || next_tok(p) != 0) {
+            free_expr(m);
+            return NULL;
+        }
+        operand = parse_unary(p);
+        if (operand == NULL) {
+            free_expr(m);
+            return NULL;
+        }
+        m->lhs = operand;
+        m->member_is_part = 1;
+        return m;
+    }
     if (p->tok.kind == TOK_MINUS) {
         cc_expr_t *neg_one;
         cc_expr_t *rhs;
@@ -11278,6 +11426,7 @@ static int probe_is_function_head(parser_t *p) {
     q.structs = NULL;
     q.struct_count = 0;
     q.struct_cap = 0;
+    q.is_probe = 1;
     q.enum_consts = NULL;
     q.enum_const_count = 0;
     q.enum_const_cap = 0;

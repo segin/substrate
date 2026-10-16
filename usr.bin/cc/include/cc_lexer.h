@@ -118,6 +118,7 @@ typedef struct {
     int is_float;
     int float_is_single;
     int float_is_long;
+    int is_imaginary; /**< GNU `i`/`j` suffix: the literal is an imaginary constant */
     int int_is_unsigned;
     int int_is_long;
     int int_is_longlong;

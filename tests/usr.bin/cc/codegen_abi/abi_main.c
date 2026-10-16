@@ -20,6 +20,68 @@ struct R lib_r(int a, int b);
 int lib_sum(char c, short s, int i, long long ll, double d, struct Q q);
 long long lib_wide(long long a, unsigned long long b);
 
+struct DD { double x, y; };
+struct FF { float x, y; };
+struct FFF { float x, y, z; };
+struct DL { double x; long long y; };
+struct LD { long long x; double y; };
+struct C6 { char c[6]; };
+struct C13 { char c[13]; };
+struct X1 { long double v; };
+struct XI { long double v; int i; };
+
+struct DD lib_dd(struct DD a, struct DD b);
+struct FF lib_ff(struct FF a, struct FF b);
+struct FFF lib_fff(struct FFF a);
+struct DL lib_dl(struct DL a, struct LD b);
+struct LD lib_ld(struct LD a);
+struct C6 lib_c6(struct C6 a);
+struct C13 lib_c13(struct C13 a);
+struct X1 lib_x1(struct X1 a, long double k);
+struct XI lib_xi(struct XI a);
+double lib_many(struct DD a, struct DD b, struct DD c, struct DD d, struct DD e, double f, struct FF g);
+float lib_fl(float a, double b, float c);
+double lib_fl10(float a, float b, float c, float d, float e, float f, float g, float h, float i, float j);
+float _Complex lib_cf(float _Complex a, float _Complex b);
+double _Complex lib_cd(double _Complex a, double _Complex b);
+long double _Complex lib_cl(long double _Complex a, long double _Complex b);
+
+/* structures whose eightbytes travel in xmm registers, general ones, or memory; complex values */
+static void classes(void) {
+    struct DD dd1 = {1.5, 2.0}, dd2 = {0.25, 4.0}, dd = lib_dd(dd1, dd2);
+    struct FF ff1 = {1.5f, 2.0f}, ff2 = {0.25f, 4.0f}, ff = lib_ff(ff1, ff2);
+    struct FFF f3 = {1.0f, 2.0f, 3.0f}, fff = lib_fff(f3);
+    struct DL dl1 = {0.5, 7}, dl;
+    struct LD ld1 = {9, 3.0}, ld;
+    struct C6 c6 = {{1, 2, 3, 4, 5, 6}}, c6r = lib_c6(c6);
+    struct C13 c13 = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}}, c13r = lib_c13(c13);
+    struct X1 x1 = {2.5L}, x1r = lib_x1(x1, 3);
+    struct XI xi = {1.25L, 4}, xir = lib_xi(xi);
+    float _Complex cf = lib_cf(1.0f + 2.0fi, 3.0f - 1.0fi);
+    double _Complex cd = lib_cd(1.0 + 2.0i, 3.0 + 4.0i);
+    long double _Complex cl = lib_cl(1.5L - 2.0Li, 0.5L + 4.0Li);
+    int i;
+
+    dl = lib_dl(dl1, ld1);
+    ld = lib_ld(ld1);
+    printf("%g %g | %g %g | %g %g %g\n", dd.x, dd.y, (double)ff.x, (double)ff.y, (double)fff.x, (double)fff.y,
+           (double)fff.z);
+    printf("%g %lld | %lld %g |", dl.x, dl.y, ld.x, ld.y);
+    for (i = 0; i < 6; ++i) {
+        printf(" %d", c6r.c[i]);
+    }
+    printf(" |");
+    for (i = 0; i < 13; ++i) {
+        printf(" %d", c13r.c[i]);
+    }
+    printf("\n%Lg | %Lg %d\n", x1r.v, xir.v, xir.i);
+    printf("%g\n", lib_many(dd1, dd2, dd1, dd2, dd1, 0.5, ff1));
+    printf("%g %g\n", (double)lib_fl(1.5f, 2.0, 0.25f),
+           lib_fl10(0.5f, 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 6.5f, 7.5f, 8.5f, 9.5f));
+    printf("%g %g | %.17g %.17g | %Lg %Lg\n", (double)__real__ cf, (double)__imag__ cf, __real__ cd, __imag__ cd,
+           __real__ cl, __imag__ cl);
+}
+
 int main(void) {
     struct Q q = lib_q(5);
     struct R r = lib_r(3, 4);
@@ -30,5 +92,6 @@ int main(void) {
     printf("%d %d | %d %d %d %d %d\n", q.a, q.b, r.a, r.b, r.c, r.d, r.e);
     printf("%d %d %ld %ld\n", dv.quot, dv.rem, lv.quot, lv.rem);
     printf("%d %lld\n", lib_sum(1, 2, 3, 4000000005LL, 1.5, arg), lib_wide(-5000000000LL, 0xfedcba9876543210ULL));
+    classes();
     return 0;
 }

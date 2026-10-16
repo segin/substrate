@@ -588,6 +588,223 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
     return -1;
 }
 
+/** An eightbyte's x86-64 psABI class (System V psABI 3.2.3), in merge order. */
+enum { ABI64_NONE = 0, ABI64_SSE, ABI64_INTEGER, ABI64_X87, ABI64_MEMORY };
+
+/**
+ * Merge class @p c into an eightbyte's class: INTEGER beats SSE, and x87
+ * with anything else, or MEMORY anywhere, makes it MEMORY.
+ */
+static void abi64_merge(int *cls, int c) {
+    if (*cls == c || c == ABI64_NONE) {
+        return;
+    }
+    if (*cls == ABI64_NONE) {
+        *cls = c;
+    } else if (*cls == ABI64_MEMORY || c == ABI64_MEMORY || *cls == ABI64_X87 || c == ABI64_X87) {
+        *cls = ABI64_MEMORY;
+    } else {
+        *cls = ABI64_INTEGER;
+    }
+}
+
+/** Give the eightbytes @p size bytes at @p off cover class @p c. */
+static void abi64_cover(int cls[2], long off, long size, int c) {
+    long first = off / 8;
+    long last = (off + (size > 0 ? size : 1) - 1) / 8;
+    long i;
+
+    for (i = first; i <= last; ++i) {
+        if (i > 1) {
+            abi64_merge(&cls[1], ABI64_MEMORY);
+            return;
+        }
+        abi64_merge(&cls[i], c);
+    }
+}
+
+static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long off, int cls[2], int depth);
+
+/** The class of a scalar of legacy type @p t. */
+static int abi64_scalar_class(cc_type_t t) {
+    if (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_FLOAT16 || t == CC_TYPE_DECIMAL32 ||
+        t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128) {
+        return ABI64_SSE;
+    }
+    return t == CC_TYPE_LDOUBLE ? ABI64_X87 : ABI64_INTEGER;
+}
+
+/**
+ * Classify an object of interned type @p ct at offset @p off into the
+ * eightbytes @p cls.
+ *
+ * @return 0, or -1 if the type cannot be classified (then the caller keeps
+ *         the INTEGER default)
+ */
+static int abi64_classify_ctype(const cc_translation_unit_t *tu, const cc_ctype_t *ct, long off, int cls[2],
+                                int depth) {
+    long size = cc_ct_size(ct, tu);
+    long align = cc_ct_align(ct, tu);
+
+    if (depth > 32 || size < 0) {
+        return -1;
+    }
+    if (align > 0 && off % align != 0) {
+        /* an unaligned member (a packed structure) puts the whole in memory */
+        abi64_cover(cls, off, size, ABI64_MEMORY);
+        return 0;
+    }
+    switch (ct->kind) {
+    case CC_CT_FLOAT16:
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+    case CC_CT_DECIMAL32:
+    case CC_CT_DECIMAL64:
+    case CC_CT_DECIMAL128:
+        abi64_cover(cls, off, size, ABI64_SSE);
+        return 0;
+    case CC_CT_LDOUBLE:
+        abi64_cover(cls, off, size, ABI64_X87);
+        return 0;
+    case CC_CT_COMPLEX:
+    case CC_CT_IMAGINARY: {
+        long es = cc_ct_size(ct->of, tu);
+
+        if (es <= 0 || abi64_classify_ctype(tu, ct->of, off, cls, depth + 1) != 0) {
+            return -1;
+        }
+        return ct->kind == CC_CT_COMPLEX ? abi64_classify_ctype(tu, ct->of, off + es, cls, depth + 1) : 0;
+    }
+    case CC_CT_RECORD:
+        return abi64_classify_record(tu, ct->id, off, cls, depth + 1);
+    case CC_CT_ARRAY: {
+        long es = cc_ct_size(ct->of, tu);
+        long i;
+
+        if (ct->count < 0 || es <= 0) {
+            return ct->count <= 0 ? 0 : -1;
+        }
+        for (i = 0; i < ct->count && off + i * es < 16; ++i) {
+            if (abi64_classify_ctype(tu, ct->of, off + i * es, cls, depth + 1) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    case CC_CT_FUNCTION:
+    case CC_CT_VOID:
+        return -1;
+    default:
+        abi64_cover(cls, off, size, ABI64_INTEGER);
+        return 0;
+    }
+}
+
+/** Classify structure or union @p sid at offset @p off into @p cls; -1 if it cannot be. */
+static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long off, int cls[2], int depth) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    if (tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count || depth > 32) {
+        return -1;
+    }
+    sd = &tu->structs[sid];
+    if (sd->complex_elem != CC_TYPE_VOID) {
+        long es = type_size_bytes(sd->complex_elem);
+
+        abi64_cover(cls, off, es, abi64_scalar_class(sd->complex_elem));
+        abi64_cover(cls, off + es, es, abi64_scalar_class(sd->complex_elem));
+        return 0;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        long moff = off + m->offset;
+
+        if (m->is_bitfield) {
+            if (m->bit_width > 0) {
+                abi64_cover(cls, moff, m->bit_storage_size > 0 ? m->bit_storage_size : 1, ABI64_INTEGER);
+            }
+            continue;
+        }
+        if (m->ctype != NULL) {
+            if (abi64_classify_ctype(tu, m->ctype, moff, cls, depth) != 0) {
+                return -1;
+            }
+        } else if (m->array_ndim == 0 && m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            if (abi64_classify_record(tu, m->type_struct_id, moff, cls, depth + 1) != 0) {
+                return -1;
+            }
+        } else if (m->array_ndim == 0 && m->size > 0) {
+            abi64_cover(cls, moff, m->size, abi64_scalar_class(m->type));
+        } else {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * How an x86-64 aggregate of @p size bytes travels: for one of at most 16
+ * bytes that goes in registers, CC_ABI_SSE0 / CC_ABI_SSE1 for its
+ * eightbytes that are SSE (none set: all INTEGER, the old behaviour); for
+ * a returned one that goes in x87 registers CC_ABI_RET_X87 or
+ * CC_ABI_RET_X87_COMPLEX; -1 for one passed in memory, as anything over
+ * 16 bytes, containing a long double (as an argument), or packed is.
+ *
+ * @param tu         the translation unit
+ * @param sid        the structure, union or complex type's structure
+ * @param size       its size
+ * @param is_return  nonzero for a return value
+ */
+static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long size, int is_return) {
+    int cls[2] = {ABI64_NONE, ABI64_NONE};
+    int flags = 0;
+
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count &&
+        tu->structs[sid].complex_elem == CC_TYPE_LDOUBLE) {
+        return is_return ? CC_ABI_RET_X87_COMPLEX : -1;
+    }
+    if (size > 16 || size <= 0) {
+        return -1;
+    }
+    if (abi64_classify_record(tu, sid, 0, cls, 0) != 0) {
+        return 0;
+    }
+    if (cls[0] == ABI64_MEMORY || cls[1] == ABI64_MEMORY) {
+        return -1;
+    }
+    if (cls[0] == ABI64_X87 || cls[1] == ABI64_X87) {
+        /* one long double (X87 then X87UP) is returned in %st0; as an argument it is memory */
+        return (is_return && cls[0] == ABI64_X87 && size == 16) ? CC_ABI_RET_X87 : -1;
+    }
+    if (cls[0] == ABI64_SSE) {
+        flags |= CC_ABI_SSE0;
+    }
+    if (cls[1] == ABI64_SSE && size > 8) {
+        flags |= CC_ABI_SSE1;
+    }
+    return flags;
+}
+
+/**
+ * The agg_class of a CALL or RET of an aggregate: how the target returns
+ * one of structure @p sid and @p size bytes, where that is not the
+ * default (x86-64: in %rax/%rdx if 16 bytes or fewer, else by hidden
+ * pointer; i386: by hidden pointer).
+ */
+static int agg_return_class(const cc_translation_unit_t *tu, int sid, long size) {
+    if (cc_target_pointer_size() == 8) {
+        int c = abi64_aggregate_class(tu, sid, size, 1);
+
+        return c >= 0 ? c : (size <= 16 ? CC_ABI_RET_MEMORY : 0);
+    }
+    /* i386 psABI: a float _Complex comes back in %eax:%edx, as gcc has it; any other aggregate in memory */
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == CC_TYPE_FLOAT) {
+        return CC_ABI_RET_EAX_EDX;
+    }
+    return 0;
+}
+
 /**
  * The size in bytes of a sizeof expression, for the constant evaluator:
  * of a string literal, an array, or any other expression or type.
@@ -3935,6 +4152,363 @@ static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     return in.dst;
 }
 
+/**
+ * The element type of a complex type -- given in the legacy encoding as the
+ * structure `{ T __re, __im; }` standing for it -- or CC_TYPE_VOID.
+ */
+static cc_type_t complex_elem_of(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
+    if (t != CC_TYPE_VOID || sid < 0 || (size_t)sid >= tu->struct_count) {
+        return CC_TYPE_VOID;
+    }
+    return tu->structs[sid].complex_elem;
+}
+
+/** A floating value of type @p from as one of type @p to (float, double or long double). */
+static int complex_fp_convert(cc_ssa_function_t *sf, int v, cc_type_t from, cc_type_t to, cc_diag_t *diag) {
+    if (v < 0 || from == to) {
+        return v;
+    }
+    if (to == CC_TYPE_LDOUBLE) {
+        return promote_f64_to_ldouble_value(sf, v, diag);
+    }
+    v = demote_ldouble_to_f64_value(sf, v, diag);
+    return to == CC_TYPE_FLOAT ? normalize_float_value(sf, v, CC_TYPE_FLOAT, diag) : v;
+}
+
+/** @p addr + @p off, as a pointer (pointer-sized, as a member address is). */
+static int complex_part_addr(cc_ssa_function_t *sf, int addr, long off, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int offv = emit_const_i64_instr(sf, off);
+
+    if (offv < 0) {
+        return -1;
+    }
+    set_value_size(sf, offv, cc_target_pointer_size());
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ADD;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = addr;
+    in.rhs = offv;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory computing a complex part's address");
+        return -1;
+    }
+    set_value_size(sf, in.dst, cc_target_pointer_size());
+    return in.dst;
+}
+
+/** Load the real (@p imag 0) or imaginary part of the complex value at @p addr. */
+static int complex_load_part(cc_ssa_function_t *sf, int addr, cc_type_t elem, int imag, cc_diag_t *diag) {
+    long es = type_size_bytes(elem);
+    cc_ssa_instr_t ld;
+    int p = addr;
+
+    if (imag) {
+        p = complex_part_addr(sf, addr, es, diag);
+        if (p < 0) {
+            return -1;
+        }
+    }
+    memset(&ld, 0, sizeof(ld));
+    ld.op = CC_SSA_LOAD;
+    ld.dst = new_value(sf, CC_VAL_F64);
+    ld.lhs = p;
+    ld.rhs = -1;
+    ld.imm = es;
+    if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+        set_diag(diag, "out of memory loading a complex part");
+        return -1;
+    }
+    return ld.dst;
+}
+
+/** Store @p re and @p im, of type @p elem, as a new complex temporary; return its address. */
+static int complex_store_new(cc_ssa_function_t *sf, int re, int im, cc_type_t elem, cc_diag_t *diag) {
+    long es = type_size_bytes(elem);
+    int addr = emit_local_storage_alloc(sf, 2 * es, diag);
+    int ip = addr < 0 ? -1 : complex_part_addr(sf, addr, es, diag);
+    cc_ssa_instr_t st;
+
+    if (ip < 0) {
+        return -1;
+    }
+    memset(&st, 0, sizeof(st));
+    st.op = CC_SSA_STORE;
+    st.dst = -1;
+    st.lhs = addr;
+    st.rhs = re;
+    st.imm = es;
+    if (push_instr(sf, st) != 0) {
+        set_diag(diag, "out of memory storing a complex part");
+        return -1;
+    }
+    st.lhs = ip;
+    st.rhs = im;
+    if (push_instr(sf, st) != 0) {
+        set_diag(diag, "out of memory storing a complex part");
+        return -1;
+    }
+    return addr;
+}
+
+/** A floating zero of type @p elem. */
+static int complex_fp_zero(cc_ssa_function_t *sf, cc_type_t elem, cc_diag_t *diag) {
+    int z = emit_const_f64_instr(sf, 0.0);
+
+    return z < 0 ? -1 : complex_fp_convert(sf, z, CC_TYPE_DOUBLE, elem, diag);
+}
+
+/** @p a @p op @p b in the floating type @p elem, rounded to it. */
+static int complex_fop(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int a, int b, cc_type_t elem, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    if (a < 0 || b < 0) {
+        return -1;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = op;
+    in.dst = new_value(sf, CC_VAL_F64);
+    in.lhs = a;
+    in.rhs = b;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory in complex arithmetic");
+        return -1;
+    }
+    if (elem == CC_TYPE_LDOUBLE) {
+        set_value_size(sf, in.dst, 16);
+        return in.dst;
+    }
+    return elem == CC_TYPE_FLOAT ? normalize_float_value(sf, in.dst, CC_TYPE_FLOAT, diag) : in.dst;
+}
+
+/** -@p a, exactly (a zero's sign flips). */
+static int complex_fneg(cc_ssa_function_t *sf, int a, cc_type_t elem, cc_diag_t *diag) {
+    int m1 = emit_const_f64_instr(sf, -1.0);
+
+    m1 = m1 < 0 ? -1 : complex_fp_convert(sf, m1, CC_TYPE_DOUBLE, elem, diag);
+    return complex_fop(sf, CC_SSA_MUL, a, m1, elem, diag);
+}
+
+/**
+ * Read an operand of a complex operation as parts of type @p elem: a complex
+ * one's two parts, or a real one's value with *@p im set to -1 (there is no
+ * imaginary part to add: C11 Annex G.5 keeps a real operand real, so that
+ * signed zeros come out as they should).
+ */
+static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                           var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_type_t elem,
+                           int *re, int *im, cc_diag_t *diag) {
+    cc_type_t ce = complex_elem_of(tu, e->value_type, e->struct_id);
+
+    if (ce != CC_TYPE_VOID) {
+        int addr = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
+
+        *re = addr < 0 ? -1 : complex_fp_convert(sf, complex_load_part(sf, addr, ce, 0, diag), ce, elem, diag);
+        *im = addr < 0 ? -1 : complex_fp_convert(sf, complex_load_part(sf, addr, ce, 1, diag), ce, elem, diag);
+        return (*re < 0 || *im < 0) ? -1 : 0;
+    } else {
+        cc_expr_t c;
+
+        memset(&c, 0, sizeof(c));
+        c.kind = CC_EXPR_CAST;
+        c.aux_type = elem;
+        c.aux_struct_id = -1;
+        c.value_type = elem;
+        c.struct_id = -1;
+        c.lhs = (cc_expr_t *)e;
+        *re = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
+        *im = -1;
+        return *re < 0 ? -1 : 0;
+    }
+}
+
+/**
+ * (a + bi) / (c + di) as libgcc's __divdc3 computes it for finite operands
+ * (Smith's method, dividing by the larger of |c| and |d|), so that results
+ * are gcc's to the bit; its rescaling of huge or tiny operands and its
+ * recovery of infinities from NaN are not done.
+ */
+static int complex_div(cc_ssa_function_t *sf, int a, int b, int c, int d, cc_type_t elem, int *x, int *y,
+                       cc_diag_t *diag) {
+    int c2 = complex_fop(sf, CC_SSA_MUL, c, c, elem, diag);
+    int d2 = complex_fop(sf, CC_SSA_MUL, d, d, elem, diag);
+    int lt = (c2 < 0 || d2 < 0) ? -1 : emit_cmp_instr(sf, CC_CMP_LT, c2, d2, 0, diag);
+    int l_d = new_label(sf);
+    int l_c = new_label(sf);
+    int l_end = new_label(sf);
+    int ratio;
+    int denom;
+    int xv;
+    int yv;
+
+    *x = new_value(sf, CC_VAL_F64);
+    *y = new_value(sf, CC_VAL_F64);
+    if (lt < 0 || l_d < 0 || l_c < 0 || l_end < 0 || *x < 0 || *y < 0 ||
+        emit_br_cond_instr(sf, lt, l_d, l_c) != 0 || emit_label_instr(sf, l_d) != 0) {
+        return -1;
+    }
+    if (elem == CC_TYPE_LDOUBLE) {
+        set_value_size(sf, *x, 16);
+        set_value_size(sf, *y, 16);
+    }
+    /* |c| < |d|: ratio = c/d; denom = c*ratio + d; x = (a*ratio + b)/denom; y = (b*ratio - a)/denom */
+    ratio = complex_fop(sf, CC_SSA_DIV, c, d, elem, diag);
+    denom = complex_fop(sf, CC_SSA_ADD, complex_fop(sf, CC_SSA_MUL, c, ratio, elem, diag), d, elem, diag);
+    xv = complex_fop(sf, CC_SSA_DIV, complex_fop(sf, CC_SSA_ADD, complex_fop(sf, CC_SSA_MUL, a, ratio, elem, diag), b,
+                                                 elem, diag),
+                     denom, elem, diag);
+    yv = complex_fop(sf, CC_SSA_DIV, complex_fop(sf, CC_SSA_SUB, complex_fop(sf, CC_SSA_MUL, b, ratio, elem, diag), a,
+                                                 elem, diag),
+                     denom, elem, diag);
+    if (xv < 0 || yv < 0 || emit_mov_instr(sf, *x, xv) != 0 || emit_mov_instr(sf, *y, yv) != 0 ||
+        emit_br_instr(sf, l_end) != 0 || emit_label_instr(sf, l_c) != 0) {
+        return -1;
+    }
+    /* else: ratio = d/c; denom = d*ratio + c; x = (b*ratio + a)/denom; y = (b - a*ratio)/denom */
+    ratio = complex_fop(sf, CC_SSA_DIV, d, c, elem, diag);
+    denom = complex_fop(sf, CC_SSA_ADD, complex_fop(sf, CC_SSA_MUL, d, ratio, elem, diag), c, elem, diag);
+    xv = complex_fop(sf, CC_SSA_DIV, complex_fop(sf, CC_SSA_ADD, complex_fop(sf, CC_SSA_MUL, b, ratio, elem, diag), a,
+                                                 elem, diag),
+                     denom, elem, diag);
+    yv = complex_fop(sf, CC_SSA_DIV, complex_fop(sf, CC_SSA_SUB, b, complex_fop(sf, CC_SSA_MUL, a, ratio, elem, diag),
+                                                 elem, diag),
+                     denom, elem, diag);
+    if (xv < 0 || yv < 0 || emit_mov_instr(sf, *x, xv) != 0 || emit_mov_instr(sf, *y, yv) != 0 ||
+        emit_br_instr(sf, l_end) != 0 || emit_label_instr(sf, l_end) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * A binary operator with a complex operand (see sema_complex_binop()): +,
+ * -, *, / give a new complex temporary's address; == and != an int; `z ^ -1`
+ * (GNU `~z`) the conjugate.  A real operand stays real (Annex G.5.1).
+ */
+static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    cc_type_t elem = complex_elem_of(tu, e->value_type, e->struct_id);
+    int a, b, c, d;
+    int x = -1;
+    int y = -1;
+
+    if (elem == CC_TYPE_VOID) {
+        /* == or !=: compare in the wider of the operands' types */
+        cc_type_t le = complex_elem_of(tu, e->lhs->value_type, e->lhs->struct_id);
+        cc_type_t re = complex_elem_of(tu, e->rhs->value_type, e->rhs->struct_id);
+        cc_type_t lt = le != CC_TYPE_VOID ? le : (e->lhs->value_type == CC_TYPE_LDOUBLE ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
+        cc_type_t rt = re != CC_TYPE_VOID ? re : (e->rhs->value_type == CC_TYPE_LDOUBLE ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
+        int eq_re;
+        int eq_im;
+        int both;
+
+        elem = (lt == CC_TYPE_LDOUBLE || rt == CC_TYPE_LDOUBLE) ? CC_TYPE_LDOUBLE
+               : (lt == CC_TYPE_FLOAT && rt == CC_TYPE_FLOAT) ? CC_TYPE_FLOAT : CC_TYPE_DOUBLE;
+        if (complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, elem, &a, &b, diag) != 0 ||
+            complex_operand(tu, sf, ctx, vars, var_count, depth, e->rhs, elem, &c, &d, diag) != 0) {
+            return -1;
+        }
+        if (b < 0) {
+            b = complex_fp_zero(sf, elem, diag);
+        }
+        if (d < 0) {
+            d = complex_fp_zero(sf, elem, diag);
+        }
+        eq_re = emit_cmp_instr(sf, CC_CMP_EQ, a, c, 0, diag);
+        eq_im = emit_cmp_instr(sf, CC_CMP_EQ, b, d, 0, diag);
+        both = (eq_re < 0 || eq_im < 0) ? -1 : emit_i64_binop_instr(sf, CC_SSA_AND, eq_re, eq_im, 1, diag);
+        if (both < 0 || e->op == CC_BIN_EQ) {
+            return both;
+        }
+        return emit_i64_binop_instr(sf, CC_SSA_XOR, both, emit_const_i64_instr(sf, 1), 1, diag);
+    }
+    if (e->op == CC_BIN_BXOR) {
+        /* the conjugate */
+        if (complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, elem, &a, &b, diag) != 0) {
+            return -1;
+        }
+        return complex_store_new(sf, a, complex_fneg(sf, b, elem, diag), elem, diag);
+    }
+    if (complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, elem, &a, &b, diag) != 0 ||
+        complex_operand(tu, sf, ctx, vars, var_count, depth, e->rhs, elem, &c, &d, diag) != 0) {
+        return -1;
+    }
+    switch (e->op) {
+    case CC_BIN_ADD:
+        x = complex_fop(sf, CC_SSA_ADD, a, c, elem, diag);
+        y = b < 0 ? d : (d < 0 ? b : complex_fop(sf, CC_SSA_ADD, b, d, elem, diag));
+        break;
+    case CC_BIN_SUB:
+        x = complex_fop(sf, CC_SSA_SUB, a, c, elem, diag);
+        y = d < 0 ? b : (b < 0 ? complex_fneg(sf, d, elem, diag) : complex_fop(sf, CC_SSA_SUB, b, d, elem, diag));
+        break;
+    case CC_BIN_MUL:
+        if (b < 0) {
+            x = complex_fop(sf, CC_SSA_MUL, a, c, elem, diag);
+            y = complex_fop(sf, CC_SSA_MUL, a, d, elem, diag);
+        } else if (d < 0) {
+            x = complex_fop(sf, CC_SSA_MUL, a, c, elem, diag);
+            y = complex_fop(sf, CC_SSA_MUL, b, c, elem, diag);
+        } else {
+            int ac = complex_fop(sf, CC_SSA_MUL, a, c, elem, diag);
+            int bd = complex_fop(sf, CC_SSA_MUL, b, d, elem, diag);
+            int ad = complex_fop(sf, CC_SSA_MUL, a, d, elem, diag);
+            int bc = complex_fop(sf, CC_SSA_MUL, b, c, elem, diag);
+
+            x = complex_fop(sf, CC_SSA_SUB, ac, bd, elem, diag);
+            y = complex_fop(sf, CC_SSA_ADD, ad, bc, elem, diag);
+        }
+        break;
+    case CC_BIN_DIV:
+        if (d < 0) {
+            x = complex_fop(sf, CC_SSA_DIV, a, c, elem, diag);
+            y = complex_fop(sf, CC_SSA_DIV, b, c, elem, diag);
+        } else {
+            /* libgcc's __divsc3 divides float parts in double and rounds the results once */
+            cc_type_t work = elem == CC_TYPE_FLOAT ? CC_TYPE_DOUBLE : elem;
+
+            if (b < 0) {
+                b = complex_fp_zero(sf, work, diag);
+            }
+            if (complex_div(sf, a, b, c, d, work, &x, &y, diag) != 0) {
+                return -1;
+            }
+            if (work != elem) {
+                x = complex_fp_convert(sf, x, work, elem, diag);
+                y = complex_fp_convert(sf, y, work, elem, diag);
+            }
+        }
+        break;
+    default:
+        set_diag(diag, "invalid complex operation in lowering");
+        return -1;
+    }
+    if (x < 0 || y < 0) {
+        return -1;
+    }
+    return complex_store_new(sf, x, y, elem, diag);
+}
+
+/**
+ * A cast to a complex type: a new temporary holding the source converted --
+ * a complex source's two parts, read once, or a real source as the real
+ * part with a zero imaginary part.
+ */
+static int lower_complex_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    cc_type_t elem = complex_elem_of(tu, e->aux_type, e->aux_struct_id);
+    int re;
+    int im;
+
+    if (complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, elem, &re, &im, diag) != 0) {
+        return -1;
+    }
+    if (im < 0) {
+        im = complex_fp_zero(sf, elem, diag);
+    }
+    return im < 0 ? -1 : complex_store_new(sf, re, im, elem, diag);
+}
+
 static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                       var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     cc_ssa_instr_t in;
@@ -4301,9 +4875,30 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         return in.dst;
     }
 
+    case CC_EXPR_COMPLEX: {
+        /* sema converted both parts to the element type */
+        cc_type_t elem = complex_elem_of(tu, e->value_type, e->struct_id);
+        int re = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        int im = re < 0 ? -1 : lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+
+        if (im < 0 || elem == CC_TYPE_VOID) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "malformed complex value in lowering");
+            }
+            return -1;
+        }
+        return complex_store_new(sf, re, im, elem, diag);
+    }
+
     case CC_EXPR_BIN: {
         cc_value_type_t vt;
 
+        if (e->op != CC_BIN_COMMA && !is_logical_op(e->op) &&
+            (complex_elem_of(tu, e->value_type, e->struct_id) != CC_TYPE_VOID ||
+             (e->lhs != NULL && complex_elem_of(tu, e->lhs->value_type, e->lhs->struct_id) != CC_TYPE_VOID) ||
+             (e->rhs != NULL && complex_elem_of(tu, e->rhs->value_type, e->rhs->struct_id) != CC_TYPE_VOID))) {
+            return lower_complex_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
+        }
         if (is_logical_op(e->op)) {
             int dst;
             int zero;
@@ -6796,6 +7391,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             cc_value_type_t want;
             int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
             int arg_needs_ldouble_abi = 0;
+            int arg_needs_float_abi = 0;
             int arg_is_aggregate =
                 (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_VOID && e->args[i]->struct_id >= 0);
             int arg_is_variadic =
@@ -6821,6 +7417,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     int arg_is_same_aggregate = 0;
                     int pass_agg_mem = 0;
                     int pass_agg_reg = 0;
+                    int agg_cls = 0;
                     arg_size = cc_target_pointer_size();
                     if (callee->params[i].type_struct_id >= 0 &&
                         (size_t)callee->params[i].type_struct_id < tu->struct_count) {
@@ -6845,8 +7442,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         /* i386 psABI: a struct argument is copied onto the stack */
                         pass_agg_mem = 1;
                     } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 8 &&
-                               agg_size > cc_target_pointer_size() && agg_size <= 16) {
-                        pass_agg_reg = 1;
+                               agg_size > 0 && agg_size <= 16) {
+                        /* x86-64: by its eightbytes' classes, in general and xmm registers or memory */
+                        agg_cls = abi64_aggregate_class(tu, callee->params[i].type_struct_id, agg_size, 0);
+                        if (agg_cls < 0) {
+                            pass_agg_mem = 1;
+                        } else if (agg_size > 8 || agg_cls != 0) {
+                            pass_agg_reg = 1;
+                        }
                     }
                     av = cast_value(sf, av, CC_VAL_I64, diag);
                     if (av < 0) {
@@ -6856,7 +7459,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         free(in.call_arg_sizes);
                         return -1;
                     }
-                    if (!is_transparent_union && !pass_union_scalar && agg_size > 0 && agg_size <= cc_target_pointer_size()) {
+                    if (!is_transparent_union && !pass_union_scalar && !pass_agg_mem && !pass_agg_reg && agg_size > 0 &&
+                        agg_size <= cc_target_pointer_size()) {
                         cc_ssa_instr_t load_in;
                         memset(&load_in, 0, sizeof(load_in));
                         load_in.op = CC_SSA_LOAD;
@@ -6881,12 +7485,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         in.call_arg_abi[i] = CC_CALL_ARG_ABI_AGG_MEM;
                         arg_size = agg_size;
                     } else if (pass_agg_reg) {
-                        in.call_arg_abi[i] = CC_CALL_ARG_ABI_AGG_REG;
+                        in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | agg_cls);
                         arg_size = agg_size;
                     }
                 } else {
                     if (callee->params[i].type == CC_TYPE_LDOUBLE) {
                         arg_needs_ldouble_abi = 1;
+                    }
+                    if (callee->params[i].type == CC_TYPE_FLOAT && callee->has_prototype) {
+                        /* a prototyped float parameter takes a float, not the double it is held in */
+                        arg_needs_float_abi = 1;
                     }
                     arg_size =
                         type_size_bytes_with_struct(tu, callee->params[i].type, callee->params[i].type_struct_id);
@@ -6982,13 +7590,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 arg_needs_ldouble_abi = 1;
             }
             in.args[i] = av;
-            if (in.call_arg_abi[i] != CC_CALL_ARG_ABI_AGG_MEM && in.call_arg_abi[i] != CC_CALL_ARG_ABI_AGG_REG) {
-                in.call_arg_abi[i] =
-                    (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
+            if (in.call_arg_abi[i] != CC_CALL_ARG_ABI_AGG_MEM &&
+                CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_REG) {
+                in.call_arg_abi[i] = (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE
+                                                     : arg_needs_float_abi ? CC_CALL_ARG_ABI_FLOAT
+                                                                           : CC_CALL_ARG_ABI_DEFAULT);
             }
-            in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_size);
+            in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_needs_float_abi ? 4 : arg_size);
         }
         in.call_ret_x87 = (e->value_type == CC_TYPE_LDOUBLE) ? 1 : 0;
+        if (e->value_type == CC_TYPE_FLOAT) {
+            /* a float comes back in single precision */
+            in.agg_class = CC_ABI_RET_FLOAT;
+        }
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             long agg_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
             int agg_addr;
@@ -7012,6 +7626,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.rhs = agg_addr;
             in.imm = agg_size;
             in.is_unsigned = 1;
+            in.agg_class = agg_return_class(tu, e->struct_id, agg_size);
         } else if (e->value_type == CC_TYPE_VOID) {
             in.dst = new_value(sf, CC_VAL_I64);
             in.imm = cc_target_pointer_size();
@@ -7246,6 +7861,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             rhs = normalize_float_value(sf, rhs, e->lhs->value_type, diag);
             if (rhs < 0) {
                 return -1;
+            }
+            if (e->lhs->value_type == CC_TYPE_LDOUBLE && e->rhs != NULL && e->rhs->value_type != CC_TYPE_LDOUBLE) {
+                /* stored through a pointer or member as a long double: an int or double is widened first */
+                rhs = promote_f64_to_ldouble_value(sf, cast_value(sf, rhs, CC_VAL_F64, diag), diag);
+                if (rhs < 0) {
+                    return -1;
+                }
             }
             rhs = normalize_integral_value(sf, rhs, e->lhs->value_type, diag);
             if (rhs < 0) {
@@ -7665,6 +8287,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (cast_src->kind == CC_EXPR_INIT_LIST && e->array_ndim > 0 && is_pointer_type(e->aux_type)) {
             return lower_array_init_to_ptr(tu, sf, ctx, vars, var_count, depth, e->aux_type, e->aux_struct_id,
                                            e->array_ndim, e->array_dims, cast_src, diag);
+        }
+        if (complex_elem_of(tu, e->aux_type, e->aux_struct_id) != CC_TYPE_VOID &&
+            cast_src->kind != CC_EXPR_INIT_LIST) {
+            return lower_complex_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (aggregate_cast_target) {
             const cc_struct_def_t *target_sd;
@@ -9587,6 +10213,10 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 continue;
             }
             v = cast_value(sf, v, type_to_val(m->type), diag);
+            if (v >= 0 && m->type == CC_TYPE_LDOUBLE && item_expr->value_type != CC_TYPE_LDOUBLE) {
+                /* a long double member from an int or double: widened, not stored as the double's bytes */
+                v = promote_f64_to_ldouble_value(sf, v, diag);
+            }
             if (v < 0) {
                 return -1;
             }
@@ -11399,6 +12029,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         int rv = -1;
         int is_void_return = 0;
         long ret_size_hint = 0;
+        int ret_agg_class = 0;
 
         if (ctx != NULL && ctx->fn != NULL && ctx->fn->ret_type == CC_TYPE_VOID && ctx->fn->ret_struct_id < 0) {
             is_void_return = 1;
@@ -11420,6 +12051,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 rv = cast_value(sf, rv, CC_VAL_I64, diag);
                 if (rv < 0) {
                     return -1;
+                }
+                ret_agg_class = agg_return_class(tu, ctx->fn->ret_struct_id, ret_size);
+                if ((ret_agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)) != 0) {
+                    /* the backend reads the value from the structure rv points at */
+                    ret_size_hint = ret_size;
+                    goto append_return;
                 }
                 if (sf->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) {
                     /*
@@ -11451,6 +12088,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     ret_in.rhs = -1;
                     ret_in.imm = ret_size;
                     ret_in.param_index = -1;
+                    ret_in.agg_class = ret_agg_class;
                     if (push_instr(sf, ret_in) != 0) {
                         set_diag(diag, "out of memory appending aggregate return");
                         return -1;
@@ -11524,6 +12162,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     ret_in.rhs = hi.dst;
                     ret_in.imm = ret_size;
                     ret_in.param_index = -1;
+                    ret_in.agg_class = ret_agg_class;
                     if (push_instr(sf, ret_in) != 0) {
                         set_diag(diag, "out of memory appending aggregate return");
                         return -1;
@@ -11579,6 +12218,7 @@ append_return:
         ret_in.rhs = -1;
         ret_in.imm = ret_size_hint;
         ret_in.param_index = -1;
+        ret_in.agg_class = ret_agg_class;
         if (push_instr(sf, ret_in) != 0) {
             set_diag(diag, "out of memory appending SSA return instruction");
             return -1;
@@ -15328,9 +15968,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         af->ret_type == CC_TYPE_DECIMAL64 || af->ret_type == CC_TYPE_DECIMAL128)
                            ? CC_VAL_F64
                            : CC_VAL_I64;
-        sf->ret_abi = (unsigned char)(af->ret_type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
-        if (cc_target_pointer_size() <= 4 && af->ret_type == CC_TYPE_VOID && af->ret_struct_id >= 0) {
-            /* the i386 psABI returns every struct in memory */
+        sf->ret_abi = (unsigned char)(af->ret_type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE
+                                      : af->ret_type == CC_TYPE_FLOAT ? CC_CALL_ARG_ABI_FLOAT
+                                                                      : CC_CALL_ARG_ABI_DEFAULT);
+        if (cc_target_pointer_size() <= 4 && af->ret_type == CC_TYPE_VOID && af->ret_struct_id >= 0 &&
+            agg_return_class(tu, af->ret_struct_id, 8) != CC_ABI_RET_EAX_EDX) {
+            /* the i386 psABI returns every struct in memory; a float _Complex comes back in %eax:%edx */
             sf->ret_abi = CC_CALL_ARG_ABI_AGG_MEM;
         }
         sf->storage = af->storage;
@@ -15389,6 +16032,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             cc_ssa_instr_t in;
             long param_size;
             long aggregate_size = -1;
+            int agg_cls = 0;
             int is_aggregate_param = (af->params[j].type == CC_TYPE_VOID && af->params[j].type_struct_id >= 0);
             int use_agg_mem_abi = 0;
             int use_agg_reg_abi = 0;
@@ -15413,8 +16057,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 use_agg_mem_abi = 1;
             } else if (is_aggregate_param && cc_target_pointer_size() == 4 && param_size > 4) {
                 use_agg_mem_abi = 1;
-            } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size > cc_target_pointer_size() &&
-                       param_size <= 16) {
+            } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size <= 16 &&
+                       (agg_cls = abi64_aggregate_class(tu, af->params[j].type_struct_id, param_size, 0)) < 0) {
+                /* x86-64: an aggregate of 16 bytes or fewer in memory (a long double in it, packed) */
+                use_agg_mem_abi = 1;
+            } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size <= 16 &&
+                       (param_size > cc_target_pointer_size() || agg_cls != 0)) {
                 use_agg_reg_abi = 1;
             } else if (is_aggregate_param && param_size > cc_target_pointer_size()) {
                 param_size = cc_target_pointer_size();
@@ -15442,13 +16090,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if (use_agg_mem_abi) {
                 sf->param_abi[j] = CC_CALL_ARG_ABI_AGG_MEM;
             } else if (use_agg_reg_abi) {
-                sf->param_abi[j] = CC_CALL_ARG_ABI_AGG_REG;
+                sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | (agg_cls > 0 ? agg_cls : 0));
             } else if (is_aggregate_param && aggregate_size == 0) {
                 sf->param_abi[j] = CC_CALL_ARG_ABI_ZERO;
             } else {
-                sf->param_abi[j] =
-                    (unsigned char)(af->params[j].type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE
-                                                                          : CC_CALL_ARG_ABI_DEFAULT);
+                /* a float parameter arrives in single precision -- unless the definition is old-style (promoted) */
+                sf->param_abi[j] = (unsigned char)(af->params[j].type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE
+                                                   : (af->params[j].type == CC_TYPE_FLOAT && af->has_prototype)
+                                                       ? CC_CALL_ARG_ABI_FLOAT
+                                                       : CC_CALL_ARG_ABI_DEFAULT);
             }
             if (push_instr(sf, in) != 0) {
                 set_diag(diag, "out of memory appending SSA parameter instruction");
@@ -15483,7 +16133,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
                 if (agg_size == 0) {
                     /* No incoming ABI bytes exist for a GNU empty struct. */
-                } else if (agg_size <= cc_target_pointer_size()) {
+                } else if (agg_size <= cc_target_pointer_size() && sf->param_abi[j] != CC_CALL_ARG_ABI_AGG_MEM &&
+                           CC_ABI_KIND(sf->param_abi[j]) != CC_CALL_ARG_ABI_AGG_REG) {
+                    /* its bytes came in one integer register; otherwise v is the address of a copy */
                     cc_ssa_instr_t st;
                     memset(&st, 0, sizeof(st));
                     st.op = CC_SSA_STORE;

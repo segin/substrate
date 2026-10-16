@@ -117,6 +117,24 @@ const cc_ctype_t *cc_ct_complex(cc_ctype_kind_t kind, const cc_ctype_t *elem);
 const cc_ctype_t *cc_ct_record(int id);
 
 /**
+ * Record the structure, `{ T __re, __im; }`, that stands for _Complex T in
+ * the legacy encoding, for cc_ct_to_legacy().  cc_ct_reset() forgets it.
+ *
+ * @param elem  CC_CT_FLOAT, CC_CT_DOUBLE or CC_CT_LDOUBLE
+ * @param id    the structure's index in the translation unit's structs
+ */
+void cc_ct_set_complex_record(cc_ctype_kind_t elem, int id);
+
+/**
+ * The structure standing for a complex type in the legacy encoding.
+ *
+ * @param t  a _Complex type
+ * @return   its index in the translation unit's structs, or -1 if none was
+ *           recorded
+ */
+int cc_ct_complex_record(const cc_ctype_t *t);
+
+/**
  * An enumerated type.
  *
  * @param id  its id, or -1 when the parser has not given it one

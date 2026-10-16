@@ -27,3 +27,39 @@ int lib_sum(char c, short s, int i, long long ll, double d, struct Q q) {
 long long lib_wide(long long a, unsigned long long b) {
     return a * 3 + (long long)(b >> 4);
 }
+
+/* x86-64 classifies each eightbyte: these go in xmm registers, general ones, or both */
+struct DD { double x, y; };
+struct FF { float x, y; };
+struct FFF { float x, y, z; };
+struct DL { double x; long long y; };
+struct LD { long long x; double y; };
+struct C6 { char c[6]; };
+struct C13 { char c[13]; };
+struct X1 { long double v; };
+struct XI { long double v; int i; };
+
+struct DD lib_dd(struct DD a, struct DD b) { struct DD r = {a.x + b.x, a.y * b.y}; return r; }
+struct FF lib_ff(struct FF a, struct FF b) { struct FF r = {a.x + b.x, a.y * b.y}; return r; }
+struct FFF lib_fff(struct FFF a) { struct FFF r = {a.z, a.y, a.x}; return r; }
+struct DL lib_dl(struct DL a, struct LD b) { struct DL r = {a.x + b.y, a.y + b.x}; return r; }
+struct LD lib_ld(struct LD a) { struct LD r = {a.x * 2, a.y / 2}; return r; }
+struct C6 lib_c6(struct C6 a) { struct C6 r; int i; for (i = 0; i < 6; ++i) r.c[i] = (char)(a.c[5 - i] + 1); return r; }
+struct C13 lib_c13(struct C13 a) { struct C13 r; int i; for (i = 0; i < 13; ++i) r.c[i] = (char)(a.c[12 - i] + 1); return r; }
+struct X1 lib_x1(struct X1 a, long double k) { struct X1 r = {a.v * k}; return r; }
+struct XI lib_xi(struct XI a) { struct XI r = {a.v + a.i, a.i + 1}; return r; }
+
+/* more SSE arguments than there are xmm registers: the rest go on the stack */
+double lib_many(struct DD a, struct DD b, struct DD c, struct DD d, struct DD e, double f, struct FF g) {
+    return a.x + b.y + c.x + d.y + e.x + e.y + f + g.x + g.y;
+}
+
+/* a prototyped float is passed and returned in single precision */
+float lib_fl(float a, double b, float c) { return a * 2 + (float)b + c; }
+double lib_fl10(float a, float b, float c, float d, float e, float f, float g, float h, float i, float j) {
+    return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8 + i * 9 + j * 10;
+}
+
+float _Complex lib_cf(float _Complex a, float _Complex b) { return a * b + 1.0f; }
+double _Complex lib_cd(double _Complex a, double _Complex b) { return a / b; }
+long double _Complex lib_cl(long double _Complex a, long double _Complex b) { return a * b - 1.0L; }

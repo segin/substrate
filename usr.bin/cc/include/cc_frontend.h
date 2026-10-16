@@ -281,7 +281,8 @@ typedef enum {
     CC_EXPR_INIT_LIST,
     CC_EXPR_GENERIC,
     CC_EXPR_TERNARY,
-    CC_EXPR_STMT
+    CC_EXPR_STMT,
+    CC_EXPR_COMPLEX /**< a complex value from its parts: lhs real, rhs imaginary (`2.0i`, __builtin_complex) */
 } cc_expr_kind_t;
 
 typedef struct cc_expr cc_expr_t;
@@ -303,6 +304,7 @@ struct cc_expr {
     char *ident;
     cc_binop_t op;
     int member_is_arrow;
+    int member_is_part; /**< GNU __real__ / __imag__: the member is a complex value's part */
     long member_offset;
     int member_is_bitfield;
     int member_bit_width;
@@ -446,6 +448,9 @@ typedef struct {
     int is_union;
     int has_flexible_array;
     int complete;
+    /** for the structure standing for a complex type, `{ T __re, __im; }`: T (float, double or
+     *  long double); CC_TYPE_VOID for any other structure */
+    cc_type_t complex_elem;
 } cc_struct_def_t;
 
 typedef struct {
@@ -517,6 +522,14 @@ int cc_nested_uses_outer(const cc_translation_unit_t *tu, const cc_function_t *f
 const cc_function_t *cc_find_function_def(const cc_translation_unit_t *tu, const char *name);
 
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag);
+
+/**
+ * Free an expression tree: its nodes, their names, arguments and
+ * statement-expression bodies.  For a pass that replaces part of the tree.
+ *
+ * @param e  the expression, or NULL
+ */
+void cc_expr_free(cc_expr_t *e);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);

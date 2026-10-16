@@ -24,8 +24,24 @@ typedef enum {
     CC_CALL_ARG_ABI_LDOUBLE = 1,
     CC_CALL_ARG_ABI_AGG_MEM = 2,
     CC_CALL_ARG_ABI_AGG_REG = 3,
-    CC_CALL_ARG_ABI_ZERO = 4
+    CC_CALL_ARG_ABI_ZERO = 4,
+    CC_CALL_ARG_ABI_FLOAT = 5  /**< a prototyped float: single precision across the call (the value is a double) */
 } cc_call_arg_abi_t;
+
+/*
+ * An x86-64 aggregate's psABI classes, for the eightbytes of one that
+ * travels in registers.  In a call_arg_abi or param_abi byte they are
+ * or'ed onto CC_CALL_ARG_ABI_AGG_REG (only); in agg_class they describe a
+ * returned aggregate.  An eightbyte without its SSE bit is INTEGER.
+ */
+#define CC_ABI_KIND(b) ((b) & 0x0f)  /**< the cc_call_arg_abi_t in an ABI byte */
+#define CC_ABI_SSE0 0x10             /**< the first eightbyte is SSE: it goes in an xmm register */
+#define CC_ABI_SSE1 0x20             /**< the second eightbyte is SSE */
+#define CC_ABI_RET_X87 0x40          /**< returned in %st0: `struct { long double; }` */
+#define CC_ABI_RET_X87_COMPLEX 0x80  /**< returned in %st0 (real) and %st1 (imaginary): long double _Complex */
+#define CC_ABI_RET_EAX_EDX 0x100     /**< i386: returned in %eax:%edx, not by hidden pointer: float _Complex */
+#define CC_ABI_RET_MEMORY 0x200      /**< x86-64: returned by hidden pointer although it is 16 bytes or fewer */
+#define CC_ABI_RET_FLOAT 0x400       /**< CALL: the callee returns a float, in single precision */
 
 typedef enum {
     CC_SSA_PARAM = 0,
@@ -87,6 +103,7 @@ typedef struct {
     int call_fixed_count;
     int call_ret_x87;
     int call_chain;    /**< CALL: one more than the value to pass in the static chain register; 0 for none */
+    int agg_class;     /**< CALL, RET of an aggregate: CC_ABI_SSE0/SSE1/RET_* for how it is returned */
     char *sym;
     int *args;
     unsigned char *call_arg_abi;
