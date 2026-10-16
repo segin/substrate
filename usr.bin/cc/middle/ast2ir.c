@@ -1456,16 +1456,17 @@ static long var_object_size_bytes(const cc_translation_unit_t *tu, const var_ent
 
 /**
  * The size of a load or store of a scalar local.  It is the object's
- * size except for a complex or imaginary object: cc carries only one
- * part of one, as a double, so it accesses that part and not the whole
- * object (which a 16-byte access would treat as a long double).
+ * size except for a complex, imaginary or `_Decimal128` object: cc
+ * carries one of those as a double, so it accesses that double and not
+ * the whole 16-byte object (which a 16-byte access would treat as a long
+ * double).
  *
  * @param tu  the translation unit
  * @param v   the local
  * @return    the access size in bytes, or <= 0 if unknown
  */
 static long var_scalar_access_size(const cc_translation_unit_t *tu, const var_entry_t *v) {
-    if (v != NULL && cc_type_is_complex(v->type)) {
+    if (v != NULL && (cc_type_is_complex(v->type) || v->type == CC_TYPE_DECIMAL128)) {
         return type_size_bytes_with_struct(tu, CC_TYPE_DOUBLE, -1);
     }
     return var_object_size_bytes(tu, v);

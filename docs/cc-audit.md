@@ -218,6 +218,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   double, so a complex object read through a pointer (`*pz`) gives 0 on
   both targets and a global one gives 0 at -m64.  Locals read and write
   their first part since CC-23.  *Reproduced.*
+- [ ] **CC-69** `_Decimal32`, `_Decimal64` and `_Decimal128` shall be
+  decimal floating types in the encoding gcc uses (BID on x86).  cc
+  carries all three as a binary double, so a decimal object's bytes are
+  not gcc's, decimal rounding is binary rounding, and a value passed to
+  or from gcc-built code is wrong.  Sizes and alignments are right.
+  *Reproduced* (`_Decimal64 d = 2.0` holds the bytes of the double 2.0).
 - [ ] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -406,7 +412,15 @@ changes as well.  *Suite.*
   for its first label with a `+r` output, which gcc rejects; with the
   numbering of CC-38 it says `%l2`, and compiles, runs and emits both
   targets on both targets.
-- [ ] **CC-28** `run_postc99_c23.sh` shall pass (764).
+- [x] **CC-28** `run_postc99_c23.sh` shall pass (764).  Two failures:
+  `native_c23_bitint_size.c` expected sizes gcc rejects or contradicts
+  (a signed `_BitInt(1)`; 5 bytes for `unsigned _BitInt(33)`), and cc's
+  own layouts disagreed (sizeof 8 but `_Alignof` 5; 16 bytes for
+  `_BitInt(65)` on i386 where the psABI says 12).  One psABI layout now
+  serves every phase, and the test checks what gcc reports.  Then
+  `native_c23_decimal_sizes.c`: at -m64 a `_Decimal128` local was read
+  back as a long double, the CC-23 failure; it is accessed as the double
+  cc carries.  The script passes.
 - [ ] **CC-29** `run_simd_intrinsics.sh` shall pass (789).
 - [x] **CC-30** If an asm input's constraint names the register of an
   early-clobber output, then cc shall reject it
@@ -530,7 +544,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-68 requirements: 49 met, 19 open.
+69 requirements: 50 met, 19 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
