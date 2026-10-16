@@ -461,7 +461,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_stmt_expr.c -o $(CC_TMP)/cc_native_gnu_stmt_expr.s
 	grep -q "imulq" $(CC_TMP)/cc_native_gnu_stmt_expr.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_stmt_expr.c -o $(CC_TMP)/cc_native_gnu_stmt_expr_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_stmt_expr_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_stmt_expr.c -o $(CC_TMP)/cc_native_gnu_stmt_expr_32
+	$(CC_TMP)/cc_native_gnu_stmt_expr_32
 	grep -q "imull" $(CC_TMP)/cc_native_gnu_stmt_expr_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_extension_cast_stmt_expr.c -o $(CC_TMP)/cc_native_gnu_extension_cast_stmt_expr
 	$(CC_TMP)/cc_native_gnu_extension_cast_stmt_expr
@@ -470,14 +471,16 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_label_decl.c -o $(CC_TMP)/cc_native_gnu_label_decl.s
 	grep -Eq "leaq \\.Lmain_[0-9]+\\(%rip\\)" $(CC_TMP)/cc_native_gnu_label_decl.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_label_decl.c -o $(CC_TMP)/cc_native_gnu_label_decl_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_label_decl_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_label_decl.c -o $(CC_TMP)/cc_native_gnu_label_decl_32
+	$(CC_TMP)/cc_native_gnu_label_decl_32
 	grep -Eq "movl \\$$\\.Lmain_[0-9]+, %eax" $(CC_TMP)/cc_native_gnu_label_decl_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_elvis.c -o $(CC_TMP)/cc_native_gnu_elvis
 	$(CC_TMP)/cc_native_gnu_elvis
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_elvis.c -o $(CC_TMP)/cc_native_gnu_elvis.s
 	test "$$(grep -c "cmpq" $(CC_TMP)/cc_native_gnu_elvis.s)" -ge 2
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_elvis.c -o $(CC_TMP)/cc_native_gnu_elvis_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_elvis_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_elvis.c -o $(CC_TMP)/cc_native_gnu_elvis_32
+	$(CC_TMP)/cc_native_gnu_elvis_32
 	test "$$(grep -c "cmpl" $(CC_TMP)/cc_native_gnu_elvis_32.s)" -ge 2
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_case_range.c -o $(CC_TMP)/cc_native_gnu_case_range
 	$(CC_TMP)/cc_native_gnu_case_range
@@ -485,7 +488,8 @@ test:
 	grep -q "setge" $(CC_TMP)/cc_native_gnu_case_range.s
 	grep -q "setle" $(CC_TMP)/cc_native_gnu_case_range.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_case_range.c -o $(CC_TMP)/cc_native_gnu_case_range_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_case_range_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_case_range.c -o $(CC_TMP)/cc_native_gnu_case_range_32
+	$(CC_TMP)/cc_native_gnu_case_range_32
 	grep -q "setge" $(CC_TMP)/cc_native_gnu_case_range_32.s
 	grep -q "setle" $(CC_TMP)/cc_native_gnu_case_range_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_types_choose.c -o $(CC_TMP)/cc_native_gnu_types_choose
@@ -498,7 +502,8 @@ test:
 	grep -q "setb" $(CC_TMP)/cc_native_gnu_overflow.s
 	grep -q "imulq" $(CC_TMP)/cc_native_gnu_overflow.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_overflow.c -o $(CC_TMP)/cc_native_gnu_overflow_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_overflow_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_overflow.c -o $(CC_TMP)/cc_native_gnu_overflow_32
+	$(CC_TMP)/cc_native_gnu_overflow_32
 	grep -q "setb" $(CC_TMP)/cc_native_gnu_overflow_32.s
 	grep -q "imull" $(CC_TMP)/cc_native_gnu_overflow_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_object_size_chk.c -o $(CC_TMP)/cc_native_gnu_object_size_chk
@@ -509,7 +514,8 @@ test:
 	grep -q "call memmove" $(CC_TMP)/cc_native_gnu_object_size_chk.s
 	grep -q "call memset" $(CC_TMP)/cc_native_gnu_object_size_chk.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_object_size_chk.c -o $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_object_size_chk.c -o $(CC_TMP)/cc_native_gnu_object_size_chk_32
+	$(CC_TMP)/cc_native_gnu_object_size_chk_32
 	grep -q "ud2" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
 	grep -q "call memcpy" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
 	grep -q "call memmove" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
@@ -519,7 +525,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_trap_unreachable.c -o $(CC_TMP)/cc_native_gnu_trap_unreachable.s
 	grep -q "ud2" $(CC_TMP)/cc_native_gnu_trap_unreachable.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_trap_unreachable.c -o $(CC_TMP)/cc_native_gnu_trap_unreachable_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_trap_unreachable_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_trap_unreachable.c -o $(CC_TMP)/cc_native_gnu_trap_unreachable_32
+	$(CC_TMP)/cc_native_gnu_trap_unreachable_32
 	grep -q "ud2" $(CC_TMP)/cc_native_gnu_trap_unreachable_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_nested_func.c -o $(CC_TMP)/cc_native_gnu_nested_func
 	$(CC_TMP)/cc_native_gnu_nested_func
@@ -551,7 +558,8 @@ test:
 	grep -q "# asm clobber memory" $(CC_TMP)/cc_native_gnu_asm_ext.s
 	grep -q "# asm clobber cc" $(CC_TMP)/cc_native_gnu_asm_ext.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_asm_ext.c -o $(CC_TMP)/cc_native_gnu_asm_ext_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_asm_ext_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_asm_ext.c -o $(CC_TMP)/cc_native_gnu_asm_ext_32
+	$(CC_TMP)/cc_native_gnu_asm_ext_32
 	grep -q "add" $(CC_TMP)/cc_native_gnu_asm_ext_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_goto.c -o $(CC_TMP)/cc_native_gnu_asm_goto
 	$(CC_TMP)/cc_native_gnu_asm_goto
@@ -560,7 +568,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_goto.c -o $(CC_TMP)/cc_native_gnu_asm_goto.s
 	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" $(CC_TMP)/cc_native_gnu_asm_goto.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_asm_goto.c -o $(CC_TMP)/cc_native_gnu_asm_goto_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_gnu_asm_goto_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_asm_goto.c -o $(CC_TMP)/cc_native_gnu_asm_goto_32
+	$(CC_TMP)/cc_native_gnu_asm_goto_32
 	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" $(CC_TMP)/cc_native_gnu_asm_goto_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_early_clobber.c -o $(CC_TMP)/cc_native_gnu_asm_early_clobber
 	$(CC_TMP)/cc_native_gnu_asm_early_clobber
@@ -599,7 +608,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_blocks_decl.c -o $(CC_TMP)/cc_native_clang_blocks_decl
 	$(CC_TMP)/cc_native_clang_blocks_decl
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_clang_blocks_decl.c -o $(CC_TMP)/cc_native_clang_blocks_decl_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_clang_blocks_decl_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_clang_blocks_decl.c -o $(CC_TMP)/cc_native_clang_blocks_decl_32
+	$(CC_TMP)/cc_native_clang_blocks_decl_32
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_ext_vector_attr.c -o $(CC_TMP)/cc_native_clang_ext_vector_attr
 	$(CC_TMP)/cc_native_clang_ext_vector_attr
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_clang_builtin_aliases.c -o $(CC_TMP)/cc_native_clang_builtin_aliases
@@ -622,14 +632,17 @@ test:
 	grep -Fq 'movl $$8, ' $(CC_TMP)/cc_native_c99_va_args.s
 	grep -q 'addq %rcx, %rax' $(CC_TMP)/cc_native_c99_va_args.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_arith.c -o $(CC_TMP)/cc_native_arith_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_arith_32.s
+	grep -q "imull" $(CC_TMP)/cc_native_arith_32.s
 	grep -q "movl" $(CC_TMP)/cc_native_arith_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_if_else.c -o $(CC_TMP)/cc_native_if_else_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_if_else_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_if_else.c -o $(CC_TMP)/cc_native_if_else_32
+	$(CC_TMP)/cc_native_if_else_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c95_digraph.c -o $(CC_TMP)/cc_native_c95_digraph_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c95_digraph_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c95_digraph.c -o $(CC_TMP)/cc_native_c95_digraph_32
+	$(CC_TMP)/cc_native_c95_digraph_32
 	$(TOP)/usr.bin/cc/cc -std=c99 -m32 -S native_c95_trigraph.c -o $(CC_TMP)/cc_native_c95_trigraph_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_c95_trigraph_32.s
+	$(TOP)/usr.bin/cc/cc -std=c99 -m32 native_c95_trigraph.c -o $(CC_TMP)/cc_native_c95_trigraph_32
+	$(CC_TMP)/cc_native_c95_trigraph_32
 	$(TOP)/usr.bin/cc/cc -std=c99 -m32 -S native_c99_phase12_trigraph_splice.c -o $(CC_TMP)/cc_native_c99_phase12_trigraph_splice_32.s
 	grep -q "^main:" $(CC_TMP)/cc_native_c99_phase12_trigraph_splice_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ucn_ident.c -o $(CC_TMP)/cc_native_c99_ucn_ident_32.s
@@ -639,25 +652,32 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_line_comment.c -o $(CC_TMP)/cc_native_c99_line_comment_32.s
 	grep -q '\$$3' $(CC_TMP)/cc_native_c99_line_comment_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_integer_literals.c -o $(CC_TMP)/cc_native_c99_integer_literals_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_integer_literals_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_integer_literals.c -o $(CC_TMP)/cc_native_c99_integer_literals_32
+	$(CC_TMP)/cc_native_c99_integer_literals_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_hex_float_suffix.c -o $(CC_TMP)/cc_native_c99_hex_float_suffix_32.s
 	grep -Eq "ucomisd|fucompp" $(CC_TMP)/cc_native_c99_hex_float_suffix_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_wide_literals.c -o $(CC_TMP)/cc_native_c99_wide_literals_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_wide_literals_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_wide_literals.c -o $(CC_TMP)/cc_native_c99_wide_literals_32
+	$(CC_TMP)/cc_native_c99_wide_literals_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_do_while.c -o $(CC_TMP)/cc_native_do_while_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_do_while_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_do_while.c -o $(CC_TMP)/cc_native_do_while_32
+	$(CC_TMP)/cc_native_do_while_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_empty_stmt2.c -o $(CC_TMP)/cc_native_c99_empty_stmt2_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_c99_empty_stmt2_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_empty_stmt2.c -o $(CC_TMP)/cc_native_c99_empty_stmt2_32
+	$(CC_TMP)/cc_native_c99_empty_stmt2_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_switch.c -o $(CC_TMP)/cc_native_switch_32.s
 	grep -q "sete" $(CC_TMP)/cc_native_switch_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_for_decl.c -o $(CC_TMP)/cc_native_c99_for_decl_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_c99_for_decl_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_for_decl.c -o $(CC_TMP)/cc_native_c99_for_decl_32
+	$(CC_TMP)/cc_native_c99_for_decl_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_for_multi_decl.c -o $(CC_TMP)/cc_native_c99_for_multi_decl_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_c99_for_multi_decl_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_for_multi_decl.c -o $(CC_TMP)/cc_native_c99_for_multi_decl_32
+	$(CC_TMP)/cc_native_c99_for_multi_decl_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_types.c -o $(CC_TMP)/cc_native_c99_types_32.s
 	grep -q "call add_ll" $(CC_TMP)/cc_native_c99_types_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_const_qual.c -o $(CC_TMP)/cc_native_c99_const_qual_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_const_qual_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_const_qual.c -o $(CC_TMP)/cc_native_c99_const_qual_32
+	$(CC_TMP)/cc_native_c99_const_qual_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_composite_types.c -o $(CC_TMP)/cc_native_c99_composite_types_32.s
 	grep -q "call sum" $(CC_TMP)/cc_native_c99_composite_types_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -std=c99 -S native_c99_inline_semantics.c -o $(CC_TMP)/cc_native_c99_inline_semantics_32.s
@@ -670,7 +690,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_param_array_qual.c -o $(CC_TMP)/cc_native_c99_param_array_qual_32.s
 	grep -q "main:" $(CC_TMP)/cc_native_c99_param_array_qual_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_restrict_ptr.c -o $(CC_TMP)/cc_native_c99_restrict_ptr_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_restrict_ptr_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_restrict_ptr.c -o $(CC_TMP)/cc_native_c99_restrict_ptr_32
+	$(CC_TMP)/cc_native_c99_restrict_ptr_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_vla_decl.c -o $(CC_TMP)/cc_native_c99_vla_decl_32.s
 	grep -q "main:" $(CC_TMP)/cc_native_c99_vla_decl_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -std=c90 -S native_c90_oldstyle.c -o $(CC_TMP)/cc_native_c90_oldstyle_32.s
@@ -678,32 +699,41 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -std=c90 -S native_c90_unproto_call_promotions.c -o $(CC_TMP)/cc_native_c90_unproto_call_promotions_32.s
 	grep -q "call ext" $(CC_TMP)/cc_native_c90_unproto_call_promotions_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_typedef.c -o $(CC_TMP)/cc_native_c99_typedef_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_typedef_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_typedef.c -o $(CC_TMP)/cc_native_c99_typedef_32
+	$(CC_TMP)/cc_native_c99_typedef_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_multi_decl.c -o $(CC_TMP)/cc_native_c99_multi_decl_32.s
-	grep -q "movl" $(CC_TMP)/cc_native_c99_multi_decl_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_multi_decl.c -o $(CC_TMP)/cc_native_c99_multi_decl_32
+	$(CC_TMP)/cc_native_c99_multi_decl_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_logic.c -o $(CC_TMP)/cc_native_c99_logic_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_c99_logic_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_logic.c -o $(CC_TMP)/cc_native_c99_logic_32
+	$(CC_TMP)/cc_native_c99_logic_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_update.c -o $(CC_TMP)/cc_native_c99_update_32.s
 	grep -q "idivl" $(CC_TMP)/cc_native_c99_update_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_bitwise.c -o $(CC_TMP)/cc_native_c99_bitwise_32.s
 	grep -q "xorl" $(CC_TMP)/cc_native_c99_bitwise_32.s
 	grep -q "shll" $(CC_TMP)/cc_native_c99_bitwise_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_comma.c -o $(CC_TMP)/cc_native_c99_comma_32.s
-	grep -q "movl" $(CC_TMP)/cc_native_c99_comma_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_comma.c -o $(CC_TMP)/cc_native_c99_comma_32
+	$(CC_TMP)/cc_native_c99_comma_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_goto.c -o $(CC_TMP)/cc_native_c99_goto_32.s
-	grep -q "jmp" $(CC_TMP)/cc_native_c99_goto_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_goto.c -o $(CC_TMP)/cc_native_c99_goto_32
+	$(CC_TMP)/cc_native_c99_goto_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_goto_loop.c -o $(CC_TMP)/cc_native_c99_goto_loop_32.s
-	grep -q "jmp" $(CC_TMP)/cc_native_c99_goto_loop_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_goto_loop.c -o $(CC_TMP)/cc_native_c99_goto_loop_32
+	$(CC_TMP)/cc_native_c99_goto_loop_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ternary.c -o $(CC_TMP)/cc_native_c99_ternary_32.s
-	grep -q "jne" $(CC_TMP)/cc_native_c99_ternary_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_ternary.c -o $(CC_TMP)/cc_native_c99_ternary_32
+	$(CC_TMP)/cc_native_c99_ternary_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_cast_sizeof.c -o $(CC_TMP)/cc_native_c99_cast_sizeof_32.s
 	grep -Eq "cvttsd2sil|fistpl" $(CC_TMP)/cc_native_c99_cast_sizeof_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_expr_conversions.c -o $(CC_TMP)/cc_native_c99_expr_conversions_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_expr_conversions_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_expr_conversions.c -o $(CC_TMP)/cc_native_c99_expr_conversions_32
+	$(CC_TMP)/cc_native_c99_expr_conversions_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_sizeof_array.c -o $(CC_TMP)/cc_native_c99_sizeof_array_32.s
 	grep -A8 "main:" $(CC_TMP)/cc_native_c99_sizeof_array_32.s | grep -Eq '[$$](28|20)'
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_sizeof_unsigned.c -o $(CC_TMP)/cc_native_c99_sizeof_unsigned_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_sizeof_unsigned_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_sizeof_unsigned.c -o $(CC_TMP)/cc_native_c99_sizeof_unsigned_32
+	$(CC_TMP)/cc_native_c99_sizeof_unsigned_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_float_cmp.c -o $(CC_TMP)/cc_native_c99_float_cmp_32.s
 	grep -Eq "ucomisd|fucompp" $(CC_TMP)/cc_native_c99_float_cmp_32.s
 	grep -q "setnp" $(CC_TMP)/cc_native_c99_float_cmp_32.s
@@ -714,7 +744,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_unsigned_literals.c -o $(CC_TMP)/cc_native_c99_unsigned_literals_32.s
 	grep -q "seta" $(CC_TMP)/cc_native_c99_unsigned_literals_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_short.c -o $(CC_TMP)/cc_native_c99_short_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_short_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_short.c -o $(CC_TMP)/cc_native_c99_short_32
+	$(CC_TMP)/cc_native_c99_short_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_pointer.c -o $(CC_TMP)/cc_native_c99_pointer_32.s
 	grep -q "leal" $(CC_TMP)/cc_native_c99_pointer_32.s
 	grep -q "(%eax)" $(CC_TMP)/cc_native_c99_pointer_32.s
@@ -729,16 +760,20 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_pointer_diff.c -o $(CC_TMP)/cc_native_c99_pointer_diff_32.s
 	grep -q "idivl" $(CC_TMP)/cc_native_c99_pointer_diff_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ptr_cast.c -o $(CC_TMP)/cc_native_c99_ptr_cast_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_ptr_cast_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_ptr_cast.c -o $(CC_TMP)/cc_native_c99_ptr_cast_32
+	$(CC_TMP)/cc_native_c99_ptr_cast_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ptr_size.c -o $(CC_TMP)/cc_native_c99_ptr_size_32.s
 	grep -A6 "ptr_size:" $(CC_TMP)/cc_native_c99_ptr_size_32.s | grep -q '\$$4'
 	grep -A6 "ptrptr_size:" $(CC_TMP)/cc_native_c99_ptr_size_32.s | grep -q '\$$4'
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ptrptr.c -o $(CC_TMP)/cc_native_c99_ptrptr_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_ptrptr_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_ptrptr.c -o $(CC_TMP)/cc_native_c99_ptrptr_32
+	$(CC_TMP)/cc_native_c99_ptrptr_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ptrptrptr.c -o $(CC_TMP)/cc_native_c99_ptrptrptr_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_ptrptrptr_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_ptrptrptr.c -o $(CC_TMP)/cc_native_c99_ptrptrptr_32
+	$(CC_TMP)/cc_native_c99_ptrptrptr_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ptr4.c -o $(CC_TMP)/cc_native_c99_ptr4_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_ptr4_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_ptr4.c -o $(CC_TMP)/cc_native_c99_ptr4_32
+	$(CC_TMP)/cc_native_c99_ptr4_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_pointer_update.c -o $(CC_TMP)/cc_native_c99_pointer_update_32.s
 	grep -q "addl" $(CC_TMP)/cc_native_c99_pointer_update_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_global_array_init.c -o $(CC_TMP)/cc_native_c99_global_array_init_32.s
@@ -746,15 +781,18 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_global_init_list.c -o $(CC_TMP)/cc_native_c99_global_init_list_32.s
 	grep -q "\\.long" $(CC_TMP)/cc_native_c99_global_init_list_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_local_init_list.c -o $(CC_TMP)/cc_native_c99_local_init_list_32.s
-	grep -q "movl" $(CC_TMP)/cc_native_c99_local_init_list_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_local_init_list.c -o $(CC_TMP)/cc_native_c99_local_init_list_32
+	$(CC_TMP)/cc_native_c99_local_init_list_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_storage_tentative.c -o $(CC_TMP)/cc_native_c99_storage_tentative_32.s
 	grep -q "\\.bss" $(CC_TMP)/cc_native_c99_storage_tentative_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_designated_init.c -o $(CC_TMP)/cc_native_c99_designated_init_32.s
-	grep -q "movl" $(CC_TMP)/cc_native_c99_designated_init_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_designated_init.c -o $(CC_TMP)/cc_native_c99_designated_init_32
+	$(CC_TMP)/cc_native_c99_designated_init_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_compound_literal.c -o $(CC_TMP)/cc_native_c99_compound_literal_32.s
 	grep -Eq "movl %e[a-z]{2}, \\(%e[a-z]{2}\\)" $(CC_TMP)/cc_native_c99_compound_literal_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_flexible_array_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32
+	$(CC_TMP)/cc_native_c99_flexible_array_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_assign.c -o $(CC_TMP)/cc_native_c99_struct_assign_32.s
 	grep -q "call memcpy" $(CC_TMP)/cc_native_c99_struct_assign_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_ptr_arith.c -o $(CC_TMP)/cc_native_c99_struct_ptr_arith_32.s
@@ -777,15 +815,20 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_proto_extern.c -o $(CC_TMP)/cc_native_c99_proto_extern_32.s
 	grep -q "call extmul" $(CC_TMP)/cc_native_c99_proto_extern_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_decay.c -o $(CC_TMP)/cc_native_c99_decay_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_decay_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_decay.c -o $(CC_TMP)/cc_native_c99_decay_32
+	$(CC_TMP)/cc_native_c99_decay_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_block_scope_shadow.c -o $(CC_TMP)/cc_native_c99_block_scope_shadow_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_block_scope_shadow_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_block_scope_shadow.c -o $(CC_TMP)/cc_native_c99_block_scope_shadow_32
+	$(CC_TMP)/cc_native_c99_block_scope_shadow_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_mixed_decl_stmt.c -o $(CC_TMP)/cc_native_c99_mixed_decl_stmt_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_mixed_decl_stmt_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_mixed_decl_stmt.c -o $(CC_TMP)/cc_native_c99_mixed_decl_stmt_32
+	$(CC_TMP)/cc_native_c99_mixed_decl_stmt_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_return_conversion.c -o $(CC_TMP)/cc_native_c99_return_conversion_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_return_conversion_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_return_conversion.c -o $(CC_TMP)/cc_native_c99_return_conversion_32
+	$(CC_TMP)/cc_native_c99_return_conversion_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_stdc_pragma.c -o $(CC_TMP)/cc_native_c99_stdc_pragma_32.s
-	grep -q "\\.code32" $(CC_TMP)/cc_native_c99_stdc_pragma_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_stdc_pragma.c -o $(CC_TMP)/cc_native_c99_stdc_pragma_32
+	$(CC_TMP)/cc_native_c99_stdc_pragma_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_unproto_decl_call.c -o $(CC_TMP)/cc_native_c99_unproto_decl_call_32.s
 	grep -q "call addmix" $(CC_TMP)/cc_native_c99_unproto_decl_call_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_unproto_extern_call.c -o $(CC_TMP)/cc_native_c99_unproto_extern_call_32.s
@@ -793,7 +836,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_va_args.c -o $(CC_TMP)/cc_native_c99_va_args_32.s
 	grep -q "leal 12(%ebp), %eax" $(CC_TMP)/cc_native_c99_va_args_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_loops.c -o $(CC_TMP)/cc_native_loops_32.s
-	grep -q "jmp" $(CC_TMP)/cc_native_loops_32.s
+	$(TOP)/usr.bin/cc/cc -m32 native_loops.c -o $(CC_TMP)/cc_native_loops_32
+	$(CC_TMP)/cc_native_loops_32
 	$(TOP)/usr.bin/cc/cc -m32 -c native_arith.c -o $(CC_TMP)/cc_native_arith_32.o
 	file $(CC_TMP)/cc_native_arith_32.o | grep -q "ELF 32-bit"
 	$(TOP)/usr.bin/cc/cc -m32 -S native_double.c -o $(CC_TMP)/cc_native_double_32.s

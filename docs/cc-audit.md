@@ -585,12 +585,17 @@ they stand.  *Reproduced* unless marked.
   fail.  Its build ended in `|| true`, and the next command ran
   `./test_ast2ir_bin` -- a stale binary from an earlier run passed.
   The binary is now removed first and the build may not fail.
-- [ ] **CC-46** A check of generated assembly shall show the property
+- [x] **CC-46** A check of generated assembly shall show the property
   under test.  30 of the 190 `grep` checks only look for `.code32` in
   `-m32 -S` output, which shows the flag was read, not that the code is
   right: the -m32 output of those tests is never assembled or run.
   Others look for `jne`, `movl` or `jmp`, which almost any function
-  contains.  *Traced.*
+  contains.  *Traced.*  All 45 such checks are replaced: 44 programs are
+  now built at -m32 and run, and `native_arith.c` (no `main`) looks for
+  the `imull` its multiply needs.  Running them found two -m32
+  miscompiles the greps had hidden, both fixed: `return 7;` from a long
+  long function left the high word unset, and every signed 64-bit (and
+  every int) overflow builtin gave the wrong answer.
 - [x] **CC-47** The suite shall use a private temporary directory.  It
   writes 310 fixed `/tmp/cc_*` paths, so two runs (two CI jobs on one
   host, or two users) overwrite each other's files.  *Traced.*  The
@@ -614,7 +619,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-71 requirements: 60 met, 11 open.
+71 requirements: 61 met, 10 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
