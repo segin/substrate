@@ -2256,11 +2256,6 @@ int cc_main(int argc, char **argv) {
       } else {
         cc_diag_t diag;
         memset(&diag, 0, sizeof(diag));
-        if (strvec_has_flag(&o.c_flags, "-ffreestanding")) {
-          setenv("CC_FREESTANDING", "1", 1);
-        } else {
-          unsetenv("CC_FREESTANDING");
-        }
         cc_options_t copts;
         compile_options(&o, &copts);
         if (cc_compile_c_to_s(out_pp, in, out_s, &copts, &diag) != 0) {

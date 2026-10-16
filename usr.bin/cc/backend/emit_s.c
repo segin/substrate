@@ -708,6 +708,7 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_FROUND32: return "fround32";
     case CC_SSA_FROUND64: return "fround64";
     case CC_SSA_STACKALLOC: return "stackalloc";
+    case CC_SSA_DYNALLOC: return "dynalloc";
     case CC_SSA_LABEL: return "label";
     case CC_SSA_BR: return "br";
     case CC_SSA_BR_COND: return "br_cond";
@@ -2015,6 +2016,7 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
     case CC_SSA_FROUND64:
         return in->lhs == value;
     case CC_SSA_STORE:
+    case CC_SSA_DYNALLOC:
     case CC_SSA_ADD:
     case CC_SSA_SUB:
     case CC_SSA_MUL:
@@ -2177,6 +2179,97 @@ static int int_regs_remap_dst(FILE *fp, const cc_ssa_function_t *f, const slot_l
         int_regs_spill_reg(fp, f, lay, st, reg);
     }
     return int_regs_bind(st, dst, reg, 1);
+}
+
+/**
+ * Clear the save slot of every DYNALLOC that has one, so that the first
+ * execution of each finds no earlier allocation to give back.  Emitted once,
+ * right after the prologue.
+ *
+ * @param fp        output
+ * @param f         the function
+ * @param lay       its slot layout
+ * @param is_64bit  nonzero for x86-64
+ * @param diag      receives an error
+ * @return          0, or -1 if a save slot has no frame offset
+ */
+static int emit_dynalloc_slot_clears(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int is_64bit,
+                                     cc_diag_t *diag) {
+    size_t i;
+
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int off;
+
+        if (in->op != CC_SSA_DYNALLOC || in->rhs < 0) {
+            continue;
+        }
+        off = stackalloc_off(lay, in->rhs);
+        if (off == 0) {
+            set_diag(diag, "missing stack allocation offset for a dynamic allocation's save slot");
+            return -1;
+        }
+        fprintf(fp, is_64bit ? "\tmovq $0, %d(%%rbp)\n" : "\tmovl $0, %d(%%ebp)\n", off);
+    }
+    return 0;
+}
+
+/**
+ * Emit a DYNALLOC: take lhs bytes, rounded up to 16, off the stack and leave
+ * the block's (16-aligned) address in dst.  With a save slot (rhs), the stack pointer is
+ * first put back where the previous execution of this instruction found it,
+ * then recorded there; so a variable-length array declared in a loop reuses
+ * its storage instead of growing the stack each time round, and the storage
+ * of anything allocated after it on the previous pass (whose scope has ended)
+ * is given back with it.  Without one (alloca) the block lives until the
+ * function returns.  Both back ends address every slot from the frame
+ * pointer, so moving the stack pointer here disturbs nothing.
+ *
+ * @param fp        output
+ * @param f         the function
+ * @param lay       its slot layout
+ * @param st        the integer register state
+ * @param in        the instruction
+ * @param index     its index, to name a private label
+ * @param diag      receives an error
+ * @return          0, or -1 on error
+ */
+static int emit_dynalloc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st,
+                         const cc_ssa_instr_t *in, size_t index, cc_diag_t *diag) {
+    const char *sp = st->is_64bit ? "%rsp" : "%esp";
+    char sfx = st->is_64bit ? 'q' : 'l';
+    int rs;
+    int rd;
+
+    rs = int_regs_load(fp, f, lay, st, in->lhs, -1, -1);
+    rd = int_regs_define(fp, f, lay, st, in->dst, -1, rs);
+    if (rs < 0 || rd < 0) {
+        set_diag(diag, "out of registers for a dynamic stack allocation");
+        return -1;
+    }
+    if (in->rhs >= 0) {
+        int off = stackalloc_off(lay, in->rhs);
+        const char *fp_reg = st->is_64bit ? "%rbp" : "%ebp";
+
+        if (off == 0) {
+            set_diag(diag, "missing stack allocation offset for a dynamic allocation's save slot");
+            return -1;
+        }
+        fprintf(fp, "\tmov%c %d(%s), %s\n", sfx, off, fp_reg, st->regs[rd]);
+        fprintf(fp, "\ttest%c %s, %s\n", sfx, st->regs[rd], st->regs[rd]);
+        fprintf(fp, "\tjz .L__cc_dyn_%s_%zu\n", f->name, index);
+        fprintf(fp, "\tmov%c %s, %s\n", sfx, st->regs[rd], sp);
+        fprintf(fp, ".L__cc_dyn_%s_%zu:\n", f->name, index);
+        fprintf(fp, "\tmov%c %s, %d(%s)\n", sfx, sp, off, fp_reg);
+    }
+    fprintf(fp, "\tmov%c %s, %s\n", sfx, st->regs[rs], st->regs[rd]);
+    fprintf(fp, "\tadd%c $15, %s\n", sfx, st->regs[rd]);
+    fprintf(fp, "\tand%c $-16, %s\n", sfx, st->regs[rd]);
+    fprintf(fp, "\tsub%c %s, %s\n", sfx, st->regs[rd], sp);
+    /* the i386 back end does not keep the stack pointer 16-aligned; align the block itself */
+    fprintf(fp, "\tand%c $-16, %s\n", sfx, sp);
+    fprintf(fp, "\tmov%c %s, %s\n", sfx, sp, st->regs[rd]);
+    return 0;
 }
 
 static void slot_layout_free(slot_layout_t *lay) {
@@ -4254,6 +4347,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             fprintf(fp, "\tmovdqu %%xmm6, %d(%%rbp)\n", va_regsave_off + 144);
             fprintf(fp, "\tmovdqu %%xmm7, %d(%%rbp)\n", va_regsave_off + 160);
         }
+        if (emit_dynalloc_slot_clears(fp, f, &lay, 1, diag) != 0) {
+            slot_layout_free(&lay);
+            return -1;
+        }
         if (int_regs_init(&ist, f, emit_regs64, (int)(sizeof(emit_regs64) / sizeof(emit_regs64[0])), 1, diag) != 0) {
             slot_layout_free(&lay);
             if (diag != NULL && diag->message[0] == '\0') {
@@ -4494,6 +4591,14 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 fprintf(fp, "\tleaq %d(%%rbp), %s\n", off, ist.regs[rd]);
                 break;
             }
+
+            case CC_SSA_DYNALLOC:
+                if (emit_dynalloc(fp, f, &lay, &ist, in, j, diag) != 0) {
+                    int_regs_free(&ist);
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                break;
 
             case CC_SSA_ADDR:
                 /*
@@ -5969,6 +6074,10 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         if (frame > 0) {
             fprintf(fp, "\tsubl $%d, %%esp\n", frame);
         }
+        if (emit_dynalloc_slot_clears(fp, f, &lay, 0, diag) != 0) {
+            slot_layout_free(&lay);
+            return -1;
+        }
         if (int_regs_init(&ist, f, emit_regs32, (int)(sizeof(emit_regs32) / sizeof(emit_regs32[0])), 0, diag) != 0) {
             slot_layout_free(&lay);
             return -1;
@@ -6066,6 +6175,14 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 fprintf(fp, "\tleal %d(%%ebp), %s\n", off, ist.regs[rd]);
                 break;
             }
+
+            case CC_SSA_DYNALLOC:
+                if (emit_dynalloc(fp, f, &lay, &ist, in, j, diag) != 0) {
+                    int_regs_free(&ist);
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                break;
 
             case CC_SSA_ADDR:
                 /*

@@ -1110,6 +1110,7 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_ADDR:
         case CC_SSA_STR:
         case CC_SSA_STACKALLOC:
+        case CC_SSA_DYNALLOC:
         case CC_SSA_VA_START:
             f->value_is_unsigned[in.dst] = 1;
             break;
@@ -1139,6 +1140,7 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_ADDR:
         case CC_SSA_STR:
         case CC_SSA_STACKALLOC:
+        case CC_SSA_DYNALLOC:
         case CC_SSA_VA_START:
             set_value_size(f, in.dst, cc_target_pointer_size());
             break;
@@ -2478,14 +2480,6 @@ static builtin_kind_t builtin_kind(const char *name) {
     return BUILTIN_NONE;
 }
 
-static int is_freestanding_mode(void) {
-    const char *v = getenv("CC_FREESTANDING");
-    if (v == NULL || v[0] == '\0' || strcmp(v, "0") == 0) {
-        return 0;
-    }
-    return 1;
-}
-
 static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int dst;
@@ -2508,6 +2502,41 @@ static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_d
         return -1;
     }
     return dst;
+}
+
+/**
+ * Take @p bytes_v bytes off the stack at run time (a DYNALLOC).
+ *
+ * A variable-length array passes @p reuse = 1: the allocation gets a save
+ * slot, so each execution of its declaration first gives back what the
+ * previous one took, and a VLA declared in a loop does not grow the stack.
+ * alloca passes 0, and its storage lasts until the function returns.
+ *
+ * @param sf       the function
+ * @param bytes_v  the byte count, an integer value
+ * @param reuse    nonzero for a variable-length array
+ * @param diag     receives an error
+ * @return         the block's address, or -1 on error
+ */
+static int emit_dynalloc_instr(cc_ssa_function_t *sf, int bytes_v, int reuse, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_DYNALLOC;
+    in.lhs = bytes_v;
+    in.rhs = -1;
+    if (reuse) {
+        in.rhs = emit_local_storage_alloc(sf, cc_target_pointer_size(), diag);
+        if (in.rhs < 0) {
+            return -1;
+        }
+    }
+    in.dst = new_value(sf, CC_VAL_I64);
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering a dynamic stack allocation");
+        return -1;
+    }
+    return in.dst;
 }
 
 static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
@@ -5163,7 +5192,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return load_v;
         }
         if (bk == BUILTIN_ALLOCA) {
-            cc_ssa_instr_t call_in;
             int sizev;
             if (e->arg_count != 1 || e->args[0] == NULL) {
                 set_diag(diag, "__builtin_alloca lowering expects 1 argument");
@@ -5177,27 +5205,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (sizev < 0) {
                 return -1;
             }
-            memset(&call_in, 0, sizeof(call_in));
-            call_in.op = CC_SSA_CALL;
-            call_in.call_is_variadic = 0;
-            call_in.sym = cc_strdup(is_freestanding_mode() ? "kmalloc" : "malloc");
-            call_in.arg_count = 1;
-            call_in.args = (int *)calloc(1, sizeof(*call_in.args));
-            call_in.dst = new_value(sf, CC_VAL_I64);
-            if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory lowering __builtin_alloca");
-                return -1;
-            }
-            call_in.args[0] = sizev;
-            if (push_instr(sf, call_in) != 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory emitting __builtin_alloca call");
-                return -1;
-            }
-            return call_in.dst;
+            return emit_dynalloc_instr(sf, sizev, 0, diag);
         }
         if (bk == BUILTIN_EXPECT) {
             int v0;
@@ -10056,7 +10064,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         if (is_array_object_decl(s->type, s->array_len, s->array_ndim)) {
             cc_ssa_instr_t st_in;
-            cc_ssa_instr_t call_in;
             cc_type_t elem_type = ptr_base_type(s->type);
             long elem_size;
             long arr_elems = s->array_len > 0 ? s->array_len : 1;
@@ -10107,28 +10114,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         }
                         bytes_v = st_in.dst;
                     }
-                    memset(&call_in, 0, sizeof(call_in));
-                    call_in.op = CC_SSA_CALL;
-                    call_in.call_is_variadic = 0;
-                    call_in.sym = cc_strdup(is_freestanding_mode() ? "kmalloc" : "malloc");
-                    call_in.arg_count = 1;
-                    call_in.args = (int *)calloc(1, sizeof(*call_in.args));
-                    call_in.dst = new_value(sf, CC_VAL_I64);
-                    if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
-                        free(call_in.sym);
-                        free(call_in.args);
-                        set_diag(diag, "out of memory lowering variable-length array allocation");
-                        return -1;
-                    }
-                    call_in.args[0] = bytes_v;
                     vla_bytes_v = bytes_v;
-                    if (push_instr(sf, call_in) != 0) {
-                        free(call_in.sym);
-                        free(call_in.args);
-                        set_diag(diag, "out of memory emitting variable-length array allocation");
+                    varv = emit_dynalloc_instr(sf, bytes_v, 1, diag);
+                    if (varv < 0) {
                         return -1;
                     }
-                    varv = call_in.dst;
                     is_runtime_vla = 1;
                 } else {
                     char msg[256];

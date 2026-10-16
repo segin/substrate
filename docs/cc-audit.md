@@ -209,12 +209,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   dimensions.  Only one is lowered: `double b[n][3]`, `char c[n][m]` and
   `long d[2][m]` are all rejected ("invalid local array size in
   lowering").  *Reproduced* (both targets).
-- [ ] **CC-67** A variable-length array's storage shall be released when
+- [x] **CC-67** A variable-length array's storage shall be released when
   its block is left.  It is taken with `malloc` (`kmalloc` freestanding)
   and never freed, so a function with `int a[n]` leaks n ints a call: 20000
   calls with a 256 KB array exhaust a 1 GiB address space and the program
   dies of SIGSEGV, where gcc's build (the array on the stack) runs.
-  *Reproduced.*
+  *Reproduced.*  VLAs and `alloca` now take their storage off the stack
+  (a new IR operation, DYNALLOC), 16-aligned, so it goes when the function
+  returns.  A VLA's declaration also records the stack pointer it found
+  and, when it runs again (a loop), first puts the stack pointer back
+  there, so a VLA in a loop reuses its storage as gcc's does; `alloca`
+  storage lasts until the function returns, as it should.  The repro runs,
+  and `codegen/vla_stack.c` checks that a VLA in a loop stays in place.
 - [ ] **CC-68** `_Complex` and `_Imaginary` objects shall hold both
   parts and support complex arithmetic.  cc carries one part, as a
   double, in a 16-byte object; a 16-byte access is taken for a long
@@ -627,7 +633,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-71 requirements: 62 met, 9 open.
+71 requirements: 63 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

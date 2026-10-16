@@ -52,6 +52,7 @@ typedef enum {
     CC_SSA_FROUND32,
     CC_SSA_FROUND64,   /**< dst = lhs (a long double) rounded to double */
     CC_SSA_STACKALLOC,
+    CC_SSA_DYNALLOC,   /**< dst = lhs bytes taken off the stack; rhs, if >= 0, a STACKALLOC save slot (below) */
     CC_SSA_LABEL,
     CC_SSA_BR,
     CC_SSA_BR_COND,
