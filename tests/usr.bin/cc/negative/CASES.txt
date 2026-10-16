@@ -56,3 +56,4 @@ native_bad_c99_variadic_too_few.c|-std=c99|variadic call to takes_fixed has 0 ar
 native_bad_c99_pragma_stdc_bad.c|-std=c99|invalid #pragma STDC state
 native_gnu_sizeof_void.c|-pedantic-errors|error: invalid application of 'sizeof' to a void type
 native_bad_c11_static_assert_message.c|-std=c11|static assertion failed: "char is 1 byte, A
+native_bad_gnu_asm_goto_label_number.c|-std=gnu11|asm template goto-label index is out of range

@@ -401,8 +401,11 @@ changes as well.  *Suite.*
 - [x] **CC-26** `native_c99_consteval_limits.c` shall compile and run
   (350, 351).  It does, and matches gcc: met since the constant
   evaluators were made one (CC-50).
-- [ ] **CC-27** `native_gnu_asm_goto.c` shall compile, run, and emit its
-  `jz .L…` targets for -m64 and -m32 (497–505).
+- [x] **CC-27** `native_gnu_asm_goto.c` shall compile, run, and emit its
+  `jz .L…` targets for -m64 and -m32 (497–505).  The test wrote `%l0`
+  for its first label with a `+r` output, which gcc rejects; with the
+  numbering of CC-38 it says `%l2`, and compiles, runs and emits both
+  targets on both targets.
 - [ ] **CC-28** `run_postc99_c23.sh` shall pass (764).
 - [ ] **CC-29** `run_simd_intrinsics.sh` shall pass (789).
 - [ ] **CC-30** If an asm input's constraint names the register of an
@@ -442,10 +445,13 @@ they stand.  *Reproduced* unless marked.
   `native_gnu89_inline.c` call a function with only an inline
   definition; whether that uses the inline or an external definition is
   unspecified (C11 6.7.4p7), and gcc's build does not link.
-- [ ] **CC-38** `native_gnu_asm_goto.c` shall number asm-goto labels as
+- [x] **CC-38** `native_gnu_asm_goto.c` shall number asm-goto labels as
   GNU C does: after outputs and inputs, so with one `+r` output the
   first label is `%l2`, not `%l0`.  gcc rejects the test; cc fails it
-  too (CC-27).
+  too (CC-27).  cc numbered labels after the outputs and inputs but
+  counted a `+` output once; it now counts it twice, as an output and
+  its implicit input, in both the check (sema) and the rendering.  A
+  negative case checks that `%l0` is rejected.
 - [ ] **CC-39** The default `gnu17` mode shall treat trigraphs as gcc's
   GNU modes do, or the trigraph tests shall name an ISO mode:
   `native_c95_trigraph.c` and `native_c99_phase12_trigraph_splice.c`
@@ -520,7 +526,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-68 requirements: 46 met, 22 open.
+68 requirements: 48 met, 20 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

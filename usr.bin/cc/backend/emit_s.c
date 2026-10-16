@@ -304,9 +304,26 @@ static int find_named_goto_index(const char *name, char **names, size_t count) {
     return -1;
 }
 
+/**
+ * Render an inline asm template: replace each operand reference with its
+ * operand's text and each goto-label reference with the label.
+ *
+ * @param tmpl           the template
+ * @param operand_texts  each operand's text, outputs then inputs
+ * @param operand_names  each operand's `[name]`, or NULL
+ * @param op_count       how many operands
+ * @param label_base     the number of the first goto label, `%l<n>`:
+ *                       op_count plus one for each `+` output
+ * @param goto_labels    each goto label's IR block
+ * @param goto_names     each goto label's name
+ * @param goto_count     how many goto labels
+ * @param fn_name        the enclosing function, for local label names
+ * @param diag           receives an error
+ * @return               the rendered text (caller frees), or NULL
+ */
 static char *render_inline_asm_template(const char *tmpl, char **operand_texts, char **operand_names, size_t op_count,
-                                        const int *goto_labels, char **goto_names, size_t goto_count,
-                                        const char *fn_name, cc_diag_t *diag) {
+                                        size_t label_base, const int *goto_labels, char **goto_names,
+                                        size_t goto_count, const char *fn_name, cc_diag_t *diag) {
     size_t i = 0;
     size_t len = 0;
     size_t cap = 0;
@@ -377,31 +394,16 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                     n = n * 10 + (long)(tmpl[i] - '0');
                     i++;
                 }
-                if (goto_labels == NULL || n < 0) {
+                if (goto_labels == NULL || n < 0 || (size_t)n < label_base || (size_t)n - label_base >= goto_count) {
                     char msg[160];
-                    snprintf(msg, sizeof(msg), "asm template goto-label index is out of range (n=%ld operands=%zu labels=%zu)",
-                             n, op_count, goto_count);
+                    snprintf(msg, sizeof(msg),
+                             "asm template goto-label index is out of range (n=%ld first label=%zu labels=%zu)", n,
+                             label_base, goto_count);
                     set_diag(diag, msg);
                     free(out);
                     return NULL;
                 }
-                if ((size_t)n < op_count) {
-                    char msg[160];
-                    snprintf(msg, sizeof(msg), "asm template goto-label index is out of range (n=%ld operands=%zu labels=%zu)",
-                             n, op_count, goto_count);
-                    set_diag(diag, msg);
-                    free(out);
-                    return NULL;
-                }
-                n -= (long)op_count;
-                if ((size_t)n >= goto_count) {
-                    char msg[160];
-                    snprintf(msg, sizeof(msg), "asm template goto-label index is out of range (n=%ld operands=%zu labels=%zu)",
-                             n, op_count, goto_count);
-                    set_diag(diag, msg);
-                    free(out);
-                    return NULL;
-                }
+                n -= (long)label_base;
                 label_id = goto_labels[n];
             } else if (tmpl[i] == '[') {
                 size_t b = ++i;
@@ -2754,8 +2756,18 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         }
     }
 
-    rendered = render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total, in->asm_goto_labels,
-                                          in->asm_goto_names, in->asm_goto_count, f->name, diag);
+    {
+        size_t label_base = total;
+        for (i = 0; i < out_n; ++i) {
+            const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
+            if (c != NULL && strchr(c, '+') != NULL) {
+                label_base++; /* a `+` output is also an implicit input */
+            }
+        }
+        rendered = render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total, label_base,
+                                              in->asm_goto_labels, in->asm_goto_names, in->asm_goto_count, f->name,
+                                              diag);
+    }
     if (rendered == NULL) {
         if (diag != NULL && diag->message[0] == '\0') {
             char msg[384];

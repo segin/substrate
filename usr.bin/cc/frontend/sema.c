@@ -435,9 +435,31 @@ static int asm_find_goto_label(const cc_stmt_t *s, const char *name) {
     return 0;
 }
 
+/**
+ * The operand number of an asm goto statement's first label, `%l<n>`.
+ * As in GNU C, labels are numbered after every operand, and an output
+ * whose constraint has `+` counts twice: it is an output and an
+ * implicit input after the explicit ones.
+ *
+ * @param s  the asm statement
+ * @return   the number of its first label
+ */
+static size_t asm_goto_label_base(const cc_stmt_t *s) {
+    size_t base = s->asm_output_count + s->asm_input_count;
+    size_t i;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        const char *c = s->asm_outputs[i].constraint;
+        if (c != NULL && strchr(c, '+') != NULL) {
+            base++;
+        }
+    }
+    return base;
+}
+
 static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
     size_t i = 0;
     size_t total = s->asm_output_count + s->asm_input_count;
+    size_t label_base = asm_goto_label_base(s);
     const char *t = s->asm_template;
     if (t == NULL) {
         set_diag(diag, "asm statement missing template");
@@ -509,8 +531,8 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                     n = n * 10 + (long)(t[i] - '0');
                     i++;
                 }
-                if (n < 0 || (size_t)n < total ||
-                    (size_t)(n - (long)total) >= s->asm_goto_label_count) {
+                if (n < 0 || (size_t)n < label_base ||
+                    (size_t)(n - (long)label_base) >= s->asm_goto_label_count) {
                     set_diag(diag, "asm template goto-label index is out of range");
                     return -1;
                 }

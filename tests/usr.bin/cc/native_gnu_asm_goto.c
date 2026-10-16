@@ -1,6 +1,7 @@
 static int branch_if_zero(int x) {
 	int out = x;
-	__asm__ goto("test %0, %0; jz %l0" : "+r"(out) : : "cc" : is_zero);
+	/* labels follow the operands; the "+r" output is also input 1, so is_zero is %l2 */
+	__asm__ goto("test %0, %0; jz %l2" : "+r"(out) : : "cc" : is_zero);
 	return out + 7;
 is_zero:
 	return 0;
