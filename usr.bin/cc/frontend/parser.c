@@ -10522,6 +10522,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
 static void free_func(cc_function_t *f) {
     size_t i;
     free(f->name);
+    free(f->nest_parent);
     free(f->attr_section);
     free(f->attr_alias);
     for (i = 0; i < f->param_count; ++i) {
@@ -11145,7 +11146,10 @@ static int parse_function(parser_t *p, cc_function_t *f) {
                 continue;
             }
             nested.storage |= CC_STORAGE_STATIC;
-            if (parser_push_hoisted_func(p, &nested) != 0) {
+            /* where it is: what it sees of f is f's parameters and the declarations before it */
+            nested.nest_parent = f->name != NULL ? cc_strdup(f->name) : NULL;
+            nested.nest_stmt_index = f->stmt_count;
+            if ((f->name != NULL && nested.nest_parent == NULL) || parser_push_hoisted_func(p, &nested) != 0) {
                 free_func(&nested);
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory adding nested function");
                 return -1;

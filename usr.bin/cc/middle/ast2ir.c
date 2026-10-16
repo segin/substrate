@@ -75,6 +75,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret, cc_diag_t *diag);
 static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag);
+static int lower_nested_env(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t *vars,
+                            size_t var_count, const cc_function_t *callee, cc_diag_t *diag);
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
 static int eval_global_init_ld_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *out);
@@ -4058,6 +4060,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return in.dst;
             }
             fn = find_fn(tu, e->ident);
+            if (cc_nested_uses_outer(tu, cc_find_function_def(tu, e->ident))) {
+                set_diag(diag, "the address of a nested function that uses the enclosing function's variables "
+                               "cannot be taken (it would need a trampoline)");
+                return -1;
+            }
             if (fn != NULL) {
                 return emit_global_addr(sf, fn->name, diag);
             }
@@ -4145,6 +4152,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             const cc_global_t *g = find_global(tu, e->lhs->ident);
             if (g == NULL) {
                 const cc_function_t *fn = find_fn(tu, e->lhs->ident);
+                if (cc_nested_uses_outer(tu, cc_find_function_def(tu, e->lhs->ident))) {
+                    set_diag(diag, "the address of a nested function that uses the enclosing function's variables "
+                                   "cannot be taken (it would need a trampoline)");
+                    return -1;
+                }
                 if (fn != NULL) {
                     return emit_global_addr(sf, fn->name, diag);
                 }
@@ -4797,6 +4809,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         int indirect_callee = -1;
         int ident_var_idx = -1;
         const cc_global_t *ident_global = NULL;
+        size_t env_off = 0;
+        int nest_envv = -1;
         if (e->ident != NULL) {
             callee = find_fn(tu, e->ident);
             ident_var_idx = var_find_visible(vars, var_count, e->ident, depth);
@@ -6751,7 +6765,23 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
         }
-        in.arg_count = e->arg_count;
+        if (in.op == CC_SSA_CALL && ident_var_idx < 0) {
+            /* a GNU nested function using the caller's variables: their addresses go first */
+            const cc_function_t *nest_callee = cc_find_function_def(tu, e->ident);
+
+            if (cc_nested_uses_outer(tu, nest_callee)) {
+                nest_envv = lower_nested_env(tu, sf, vars, var_count, nest_callee, diag);
+                if (nest_envv < 0) {
+                    free(in.sym);
+                    return -1;
+                }
+                env_off = 1;
+                if (in.call_fixed_count > 0) {
+                    in.call_fixed_count += 1;
+                }
+            }
+        }
+        in.arg_count = e->arg_count + env_off;
         if (in.arg_count > 0) {
             in.args = (int *)calloc(in.arg_count, sizeof(*in.args));
             in.call_arg_abi = (unsigned char *)calloc(in.arg_count, sizeof(*in.call_arg_abi));
@@ -6764,15 +6794,21 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
         }
+        if (env_off) {
+            in.args[0] = nest_envv;
+            in.call_arg_abi[0] = CC_CALL_ARG_ABI_DEFAULT;
+            in.call_arg_sizes[0] = (uint32_t)cc_target_pointer_size();
+        }
 
-        for (i = 0; i < in.arg_count; ++i) {
+        for (i = 0; i < e->arg_count; ++i) {
+            size_t slot = i + env_off;
             cc_value_type_t want;
             int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
             int arg_needs_ldouble_abi = 0;
             int arg_is_aggregate =
                 (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_VOID && e->args[i]->struct_id >= 0);
             int arg_is_variadic =
-                (in.call_is_variadic && (int)i >= in.call_fixed_count) ? 1 : 0;
+                (in.call_is_variadic && (int)slot >= in.call_fixed_count) ? 1 : 0;
             long arg_size = e->args[i] != NULL ? type_size_bytes_with_struct(tu, e->args[i]->value_type, e->args[i]->struct_id)
                                                : cc_target_pointer_size();
             if (arg_size <= 0) {
@@ -6810,7 +6846,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         }
                     }
                     if (!is_transparent_union && !pass_union_scalar && agg_size == 0) {
-                        in.call_arg_abi[i] = CC_CALL_ARG_ABI_ZERO;
+                        in.call_arg_abi[slot] = CC_CALL_ARG_ABI_ZERO;
                         arg_size = 0;
                     } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 8 && agg_size > 16) {
                         pass_agg_mem = 1;
@@ -6851,10 +6887,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     want = CC_VAL_I64;
                     if (pass_agg_mem) {
-                        in.call_arg_abi[i] = CC_CALL_ARG_ABI_AGG_MEM;
+                        in.call_arg_abi[slot] = CC_CALL_ARG_ABI_AGG_MEM;
                         arg_size = agg_size;
                     } else if (pass_agg_reg) {
-                        in.call_arg_abi[i] = CC_CALL_ARG_ABI_AGG_REG;
+                        in.call_arg_abi[slot] = CC_CALL_ARG_ABI_AGG_REG;
                         arg_size = agg_size;
                     }
                 } else {
@@ -6954,12 +6990,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             } else if (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_LDOUBLE) {
                 arg_needs_ldouble_abi = 1;
             }
-            in.args[i] = av;
-            if (in.call_arg_abi[i] != CC_CALL_ARG_ABI_AGG_MEM && in.call_arg_abi[i] != CC_CALL_ARG_ABI_AGG_REG) {
-                in.call_arg_abi[i] =
+            in.args[slot] = av;
+            if (in.call_arg_abi[slot] != CC_CALL_ARG_ABI_AGG_MEM && in.call_arg_abi[slot] != CC_CALL_ARG_ABI_AGG_REG) {
+                in.call_arg_abi[slot] =
                     (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
             }
-            in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_size);
+            in.call_arg_sizes[slot] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_size);
         }
         in.call_ret_x87 = (e->value_type == CC_TYPE_LDOUBLE) ? 1 : 0;
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
@@ -9701,6 +9737,177 @@ static int lower_vla_attach(const cc_translation_unit_t *tu, cc_ssa_function_t *
         vars[v].vla_bytes = bytes;
     }
     return 0;
+}
+
+/**
+ * Build the environment a call passes to a GNU nested function that uses
+ * the enclosing function's variables: an array holding the address of each
+ * one cc_nested_outer_vars() lists, in that order, taken from the caller's
+ * scope -- the enclosing function's own variables, or, in another nested
+ * function, the addresses it was given.
+ *
+ * @param tu         the translation unit
+ * @param sf         the calling function
+ * @param vars       the caller's variables
+ * @param var_count  their number
+ * @param callee     the nested function
+ * @param diag       receives an error
+ * @return           the array's address, or -1 on error
+ */
+static int lower_nested_env(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t *vars,
+                            size_t var_count, const cc_function_t *callee, cc_diag_t *diag) {
+    cc_outer_var_t *outer;
+    size_t n;
+    size_t i;
+    long ps = cc_target_pointer_size();
+    int envv;
+
+    if (cc_nested_outer_vars(tu, callee, &outer, &n) != 0) {
+        set_diag(diag, "nested function's enclosing function is missing");
+        return -1;
+    }
+    envv = emit_local_storage_alloc(sf, n > 0 ? (long)n * ps : ps, diag);
+    for (i = 0; envv >= 0 && i < n; ++i) {
+        size_t k = var_count;
+        int idx = -1;
+        int addr;
+        int slot;
+        cc_ssa_instr_t st;
+
+        /* the enclosing function's top-level scope, not a block inside it */
+        while (k > 0) {
+            --k;
+            if (vars[k].depth == 0 && strcmp(vars[k].name, outer[i].name) == 0) {
+                idx = (int)k;
+                break;
+            }
+        }
+        if (idx < 0) {
+            set_diag(diag, "nested function is called where a variable it may use is not in scope");
+            envv = -1;
+            break;
+        }
+        if (vars[idx].vla_rank > 0) {
+            set_diag(diag, "a nested function cannot use a variable-length array of the function it is in");
+            envv = -1;
+            break;
+        }
+        if (vars[idx].is_static_storage) {
+            addr = emit_global_addr(sf, vars[idx].static_sym, diag);
+        } else {
+            addr = ensure_local_var_addressable(tu, sf, &vars[idx], diag);
+        }
+        slot = addr < 0 ? -1 : emit_const_i64_instr(sf, (long long)i * ps);
+        slot = slot < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_ADD, envv, slot, 1, diag);
+        if (slot < 0) {
+            envv = -1;
+            break;
+        }
+        memset(&st, 0, sizeof(st));
+        st.op = CC_SSA_STORE;
+        st.dst = -1;
+        st.lhs = slot;
+        st.rhs = addr;
+        st.imm = ps;
+        if (push_instr(sf, st) != 0) {
+            set_diag(diag, "out of memory building a nested function's environment");
+            envv = -1;
+            break;
+        }
+    }
+    free(outer);
+    return envv;
+}
+
+/**
+ * At the entry of a GNU nested function that takes an environment (see
+ * lower_nested_env()), make each of the enclosing function's variables a
+ * variable here whose storage is the address the environment holds, so
+ * reads and writes reach the enclosing function's object.  A parameter of
+ * the nested function hides an outer variable of its name.
+ *
+ * @param tu         the translation unit
+ * @param sf         the nested function
+ * @param vars       its variables, the parameters defined
+ * @param var_count  their number
+ * @param af         the nested function, its first parameter the environment
+ * @param diag       receives an error
+ * @return           0, or -1 on error
+ */
+static int lower_nested_bind_outer(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
+                                   size_t *var_count, const cc_function_t *af, cc_diag_t *diag) {
+    cc_outer_var_t *outer;
+    size_t n;
+    size_t i;
+    long ps = cc_target_pointer_size();
+    int env_idx = var_find_visible(*vars, *var_count, af->params[0].name, 0);
+    int envv;
+    int rc = 0;
+
+    if (env_idx < 0 || cc_nested_outer_vars(tu, af, &outer, &n) != 0) {
+        set_diag(diag, "nested function's environment is missing in lowering");
+        return -1;
+    }
+    envv = cast_value(sf, (*vars)[env_idx].value, CC_VAL_I64, diag);
+    for (i = 0; envv >= 0 && i < n; ++i) {
+        size_t j;
+        int hidden = 0;
+        int slot;
+        int addr;
+        var_entry_t *v;
+        cc_ssa_instr_t ld;
+
+        for (j = 1; j < af->param_count; ++j) {
+            if (af->params[j].name != NULL && strcmp(af->params[j].name, outer[i].name) == 0) {
+                hidden = 1;
+            }
+        }
+        if (hidden) {
+            continue;
+        }
+        slot = emit_const_i64_instr(sf, (long long)i * ps);
+        slot = slot < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_ADD, envv, slot, 1, diag);
+        if (slot < 0) {
+            rc = -1;
+            break;
+        }
+        memset(&ld, 0, sizeof(ld));
+        ld.op = CC_SSA_LOAD;
+        ld.dst = new_value(sf, CC_VAL_I64);
+        ld.lhs = slot;
+        ld.rhs = -1;
+        ld.imm = ps;
+        ld.is_unsigned = 1;
+        if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+            set_diag(diag, "out of memory reading a nested function's environment");
+            rc = -1;
+            break;
+        }
+        addr = ld.dst;
+        if (var_define(vars, var_count, outer[i].name, outer[i].type, outer[i].struct_id, outer[i].array_len,
+                       outer[i].array_ndim, outer[i].array_dims, addr, 0, 0, 0, NULL) != 0) {
+            set_diag(diag, "out of memory defining an enclosing function's variable");
+            rc = -1;
+            break;
+        }
+        v = &(*vars)[*var_count - 1];
+        v->addr_value = addr;
+        if (var_is_aggregate_or_array(tu, v)) {
+            v->addr_size = var_object_size_bytes(tu, v);
+        } else {
+            v->addr_size = var_scalar_access_size(tu, v);
+            v->value = emit_const_i64_instr(sf, 0);
+            if (v->value >= 0 && type_to_val(v->type) != CC_VAL_I64) {
+                v->value = cast_value(sf, v->value, type_to_val(v->type), diag);
+            }
+            if (v->value < 0) {
+                rc = -1;
+                break;
+            }
+        }
+    }
+    free(outer);
+    return envv < 0 ? -1 : rc;
 }
 
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
@@ -15001,9 +15208,35 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         long eff_attr_align;
         const char *eff_attr_section;
         const char *eff_attr_alias = NULL;
+        static char nest_env_name[] = "__nest_env";
+        cc_function_t nest_copy;
+        cc_param_t *nest_params = NULL;
 
         if (!af->has_body || should_skip_fn_body_for_codegen(tu, af)) {
             continue;
+        }
+        if (cc_nested_uses_outer(tu, af)) {
+            /*
+             * A nested function that uses the enclosing function's variables
+             * takes their addresses, an array, as a hidden first parameter.
+             */
+            nest_params = (cc_param_t *)calloc(af->param_count + 1, sizeof(*nest_params));
+            if (nest_params == NULL) {
+                set_diag(diag, "out of memory adding a nested function's environment parameter");
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            nest_params[0].name = nest_env_name;
+            nest_params[0].type = CC_TYPE_PTR_VOID;
+            nest_params[0].type_struct_id = -1;
+            nest_params[0].array_len = -1;
+            if (af->param_count > 0) {
+                memcpy(nest_params + 1, af->params, af->param_count * sizeof(*nest_params));
+            }
+            nest_copy = *af;
+            nest_copy.params = nest_params;
+            nest_copy.param_count = af->param_count + 1;
+            af = &nest_copy;
         }
         sf = &out->funcs[out_i++];
 
@@ -15239,6 +15472,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
         }
+        if (nest_params != NULL && lower_nested_bind_outer(tu, sf, &vars, &var_count, af, diag) != 0) {
+            cc_ssa_module_free(out);
+            return -1;
+        }
 
         for (j = 0; j < af->stmt_count; ++j) {
             if (lower_collect_labels(sf, &af->stmts[j], &lctx, diag) != 0) {
@@ -15286,6 +15523,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
         free(lctx.labels);
         free(lctx.hoisted_allocs);
+        free(nest_params);
     }
 
     return 0;

@@ -470,6 +470,8 @@ typedef struct {
     size_t param_count;
     cc_stmt_t *stmts;
     size_t stmt_count;
+    char *nest_parent;      /**< a GNU nested function: the name of the function it is defined in (owned); else NULL */
+    size_t nest_stmt_index; /**< where in that function's body: the number of its top-level statements before it */
 } cc_function_t;
 
 typedef struct {
@@ -497,6 +499,22 @@ typedef struct {
     cc_struct_def_t *structs;
     size_t struct_count;
 } cc_translation_unit_t;
+
+/** A variable of the function a GNU nested function is defined in, visible where it is defined. */
+typedef struct {
+    const char *name;
+    cc_type_t type;
+    int struct_id;
+    long array_len;
+    int array_ndim;
+    const long *array_dims;
+    int storage;
+} cc_outer_var_t;
+
+int cc_nested_outer_vars(const cc_translation_unit_t *tu, const cc_function_t *f, cc_outer_var_t **out,
+                         size_t *count);
+int cc_nested_uses_outer(const cc_translation_unit_t *tu, const cc_function_t *f);
+const cc_function_t *cc_find_function_def(const cc_translation_unit_t *tu, const char *name);
 
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);

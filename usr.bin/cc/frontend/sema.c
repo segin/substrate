@@ -5680,6 +5680,26 @@ fail_decl:
             }
         }
 
+        if (f->nest_parent != NULL) {
+            /* a GNU nested function: the enclosing function's variables, in a scope outside its own */
+            cc_outer_var_t *outer;
+            size_t outer_count;
+
+            if (cc_nested_outer_vars(tu, f, &outer, &outer_count) != 0) {
+                set_diag(diag, "nested function's enclosing function is missing");
+                goto fail_func;
+            }
+            for (k = 0; k < outer_count; ++k) {
+                if (vars_push(&vars, &var_count, outer[k].name, outer[k].type, outer[k].struct_id, outer[k].array_len,
+                              outer[k].array_ndim, outer[k].array_dims, outer[k].storage, -1) != 0) {
+                    free(outer);
+                    set_diag(diag, "out of memory adding the enclosing function's variables");
+                    goto fail_func;
+                }
+            }
+            free(outer);
+        }
+
         for (j = 0; j < f->param_count; ++j) {
             if (f->params[j].type == CC_TYPE_VOID && f->params[j].type_struct_id < 0) {
                 set_diag(diag, "void is not valid for named parameter type");

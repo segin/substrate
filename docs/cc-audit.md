@@ -270,6 +270,19 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   sizes.  `sizeof` of a type name with run-time bounds is the product of
   every level's bound and the element size.  `codegen/vla_pointers.c`
   covers these, matching gcc at both widths.
+- [ ] **CC-73** The address of a GNU nested function that uses the
+  enclosing function's variables shall be usable as a function pointer
+  (gcc builds a trampoline on the stack that loads the static chain).
+  cc passes those variables' addresses as a hidden first argument
+  (CC-49), which a call through a pointer would not supply, so it
+  rejects taking such a function's address: "the address of a nested
+  function that uses the enclosing function's variables cannot be taken
+  (it would need a trampoline)".  A nested function that uses none of
+  them is an ordinary function and its address works.  The fix needs a
+  trampoline (and an executable stack, or a page of trampolines) and a
+  static chain register the nested function reads instead of the hidden
+  argument.  A nested function using a variable-length array of the
+  enclosing function is also rejected.  *Reproduced.*
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -299,11 +312,24 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   pointer to a function is dropped (`codegen/call_through_deref.c`).
   Structure members record their real type too, so `(*s.f)()` and
   `(*p->f)()` call f (`codegen/member_declarators.c`).
-- [ ] **CC-49** A GNU C nested function shall be able to use the
+- [x] **CC-49** A GNU C nested function shall be able to use the
   enclosing function's locals.  `int x = 3; int inner(int y) { return
   x + y; }` gives "use of undeclared identifier: x"; gcc accepts it
   (and needs a trampoline when `inner`'s address escapes).  The suite
   had a test requiring the rejection; it is removed.  *Reproduced.*
+  A nested function records where it was defined; it sees the enclosing
+  function's parameters and the top-level declarations before it (and,
+  nested further, what its own enclosing function sees), which sema puts
+  in an outer scope.  One that uses any of them, or calls a nested
+  function that does, takes a hidden first argument: an array of their
+  addresses, built at each call from the caller's scope.  Reads and
+  writes go through those addresses, so they reach the enclosing
+  function's objects.  `codegen/nested_functions.c` covers scalars,
+  structures, arrays, a static local, a parameter, recursion, calls
+  between nested functions, a function nested in a nested function, and
+  a non-capturing nested comparator passed to `qsort`, matching gcc at
+  both widths.  Taking the address of a nested function that uses the
+  enclosing function's variables is CC-73.
 - [ ] **CC-56** On i386, `long double` arithmetic shall be done in x87
   extended precision.  The i386 back end keeps every long double value
   as a `double` and computes in double, converting to the 80-bit form
@@ -657,7 +683,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-72 requirements: 65 met, 7 open.
+73 requirements: 66 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
