@@ -72,6 +72,25 @@ __int128 lib_i128(__int128 a, unsigned __int128 b, long c) { return a * c + (__i
 __int128 lib_i128s(long a, long b, long c, long d, long e, __int128 f) { return f + a + b + c + d + e; }
 #endif
 
+/*
+ * Vectors: 16 bytes in one xmm register (the first three on i386, the
+ * rest on the stack 16-aligned), 8 bytes SSE on x86-64 and MMX on i386, 4
+ * bytes as an integer, 32 and 64 bytes in memory aligned to their size.
+ */
+typedef int v4si __attribute__((vector_size(16)));
+typedef float v4sf __attribute__((vector_size(16)));
+typedef char v8qi __attribute__((vector_size(8)));
+typedef short v2hi __attribute__((vector_size(4)));
+typedef int v8si __attribute__((vector_size(32)));
+typedef int v16si __attribute__((vector_size(64)));
+v4si lib_v4(v4si a, v4si b) { return a * b - a; }
+v4sf lib_v4f(int n, v4sf a, double d, v4sf b) { return a * b + (float)(n + d); }
+v4si lib_v4n(int x, v4si a, v4si b, v4si c, int y, v4si d) { return a + b + c + d + x * y; }
+v2hi lib_v2(v2hi a) { return a * a; }
+v8si lib_v8(int k, v8si a) { return a + k; }
+int lib_v16(int x, v16si a, int y) { return x + y + a[0] + a[15]; }
+v8qi lib_v8q(int x, v8qi a, v8qi b, v8qi c, v8qi d) { return a + b + c - d + (char)x; }
+
 float _Complex lib_cf(float _Complex a, float _Complex b) { return a * b + 1.0f; }
 double _Complex lib_cd(double _Complex a, double _Complex b) { return a / b; }
 long double _Complex lib_cl(long double _Complex a, long double _Complex b) { return a * b - 1.0L; }

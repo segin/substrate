@@ -296,6 +296,7 @@ struct cc_expr {
     cc_type_t value_type;
     int struct_id;
     unsigned char paren_wrapped;
+    unsigned char is_subscript; /**< a CC_BIN_ADD that is the `a + i` of a subscript `a[i]` */
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     long long int_val;
@@ -456,6 +457,11 @@ typedef struct {
     long wide_bits;
     int wide_unsigned;  /**< such an integer type is unsigned */
     int wide_is_int128; /**< it is `__int128`, not `_BitInt(128)` (a distinct type, 16-aligned) */
+    /** for the structure standing for a vector type (`vector_size`, `ext_vector_type`),
+     *  `{ T __vec[n]; }`: n, its element count; else 0 */
+    long vector_count;
+    cc_type_t vector_elem; /**< such a vector's element type */
+    int vector_cmp_sid;    /**< the vector type its comparisons give: signed integers of the element's size */
 } cc_struct_def_t;
 
 typedef struct {

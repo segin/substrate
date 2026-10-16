@@ -273,6 +273,8 @@ typedef struct {
     long format_first_to_check;
     char *section;
     char *alias;
+    long vector_bytes; /**< `vector_size(n)`: the vector's size in bytes; 0 for none */
+    long vector_elems; /**< `ext_vector_type(n)`: its element count; 0 for none */
 } decl_attrs_t;
 
 static int is_decl_qual_tok(cc_tok_kind_t k);
@@ -1532,6 +1534,130 @@ static int parser_wide_struct(parser_t *p, long bits, int is_unsigned, int is_in
     p->structs[sid].wide_unsigned = is_unsigned != 0;
     p->structs[sid].wide_is_int128 = is_int128 != 0;
     return sid;
+}
+
+/** The interned type of a vector element type (legacy @p t), or NULL if a vector cannot have it. */
+static const cc_ctype_t *parser_vector_elem_ctype(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
+    case CC_TYPE_UCHAR:
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+    case CC_TYPE_INT:
+    case CC_TYPE_UINT:
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+    case CC_TYPE_FLOAT:
+    case CC_TYPE_DOUBLE:
+        return cc_ct_from_scalar(t);
+    default:
+        return NULL;
+    }
+}
+
+/**
+ * The structure standing for the vector type of @p n elements of type
+ * @p elem: `{ elem __vec[n]; }`, aligned to its size up to 16 bytes, as
+ * gcc lays a vector out.  Made once per shape and found again after.  It
+ * comes with the vector of signed integers of the element's size and the
+ * same count, the type its comparisons give (itself for such a vector).
+ *
+ * @return the structure's id, or -1 when out of memory
+ */
+static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
+    static const cc_type_t cmp_by_size[9] = {CC_TYPE_VOID, CC_TYPE_CHAR,      CC_TYPE_SHORT, CC_TYPE_VOID,
+                                             CC_TYPE_INT,  CC_TYPE_VOID,      CC_TYPE_VOID,  CC_TYPE_VOID,
+                                             CC_TYPE_LONG_LONG};
+    long es = parser_type_size_bytes(p, elem, -1);
+    long dims[CC_MAX_ARRAY_DIMS] = {0};
+    cc_type_t cmp_elem;
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].vector_count == n && p->structs[i].vector_elem == elem) {
+            return (int)i;
+        }
+    }
+    dims[0] = n;
+    p->scope_depth = 0;
+    sid = struct_ensure(p, NULL, 0, 1);
+    p->scope_depth = saved_depth;
+    /* an array member is recorded with a pointer level for its dimension, as a declared one is */
+    if (sid < 0 ||
+        struct_member_push(p, sid, "__vec", ptr_of_type(elem), -1, n, 1, dims, 0, n * es, 0, 0, 0, 0, 0, 0) < 0) {
+        return -1;
+    }
+    p->structs[sid].members[0].ctype = cc_ct_array(parser_vector_elem_ctype(elem), n);
+    p->structs[sid].size = n * es;
+    p->structs[sid].align = n * es < 16 ? n * es : 16;
+    p->structs[sid].complete = 1;
+    p->structs[sid].vector_count = n;
+    p->structs[sid].vector_elem = elem;
+    p->structs[sid].vector_cmp_sid = sid;
+    cmp_elem = cmp_by_size[es];
+    if (cmp_elem != elem) {
+        int cs = parser_vector_struct(p, cmp_elem, n);
+
+        if (cs < 0) {
+            return -1;
+        }
+        p->structs[sid].vector_cmp_sid = cs;
+    }
+    return sid;
+}
+
+/**
+ * Apply a `vector_size(bytes)` or `ext_vector_type(count)` attribute in
+ * @p attrs to the type (*@p type, *@p sid, *@p ctype) it is written with:
+ * the type becomes the vector of that element type.  The size must be a
+ * power-of-two multiple of the element's (an ext_vector_type count rounds
+ * up to a power of two in size, as clang lays it out) and the element an
+ * integer or floating type.
+ *
+ * @return 0 (also when there is no such attribute), or -1 on error (diagnosed)
+ */
+static int parser_apply_vector_attr(parser_t *p, const decl_attrs_t *attrs, cc_type_t *type, int *sid,
+                                    const cc_ctype_t **ctype) {
+    long es;
+    long bytes;
+    long n;
+    int vs;
+
+    if (attrs == NULL || (attrs->vector_bytes <= 0 && attrs->vector_elems <= 0)) {
+        return 0;
+    }
+    if (parser_vector_elem_ctype(*type) == NULL || (*sid >= 0 && *type == CC_TYPE_VOID)) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "invalid vector type: the element must be an integer or floating type");
+        return -1;
+    }
+    es = parser_type_size_bytes(p, *type, -1);
+    if (attrs->vector_bytes > 0) {
+        bytes = attrs->vector_bytes;
+        n = bytes / es;
+    } else {
+        n = attrs->vector_elems;
+        for (bytes = es; bytes < n * es; bytes *= 2) {
+        }
+    }
+    if (bytes % es != 0 || (bytes & (bytes - 1)) != 0 || n < 1 || bytes > 1024) {
+        set_diag(p->diag, p->tok.line, p->tok.col,
+                 "invalid vector type: its size must be a power-of-two multiple of the element's");
+        return -1;
+    }
+    vs = parser_vector_struct(p, *type, bytes / es);
+    if (vs < 0) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a vector type");
+        return -1;
+    }
+    *type = CC_TYPE_VOID;
+    *sid = vs;
+    *ctype = cc_ct_record(vs);
+    return 0;
 }
 
 /** A structure member's declarator, parsed: see parse_member_decl(). */
@@ -3650,6 +3776,18 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
             *out_struct_id = rsid;
             return 0;
         }
+        if (!e->is_subscript && e->op != CC_BIN_LAND && e->op != CC_BIN_LOR &&
+            ((lt == CC_TYPE_VOID && lsid >= 0 && p->structs[lsid].vector_count > 0) ||
+             (rt == CC_TYPE_VOID && rsid >= 0 && p->structs[rsid].vector_count > 0))) {
+            /* an operator with a vector operand: that vector type, or a comparison's */
+            int vs = (lt == CC_TYPE_VOID && lsid >= 0 && p->structs[lsid].vector_count > 0) ? lsid : rsid;
+            int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                         e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+
+            *out_type = CC_TYPE_VOID;
+            *out_struct_id = is_cmp ? p->structs[vs].vector_cmp_sid : vs;
+            return 0;
+        }
         if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
             if (is_pointer_type(lt) && !is_pointer_type(rt)) {
                 *out_type = lt;
@@ -4362,6 +4500,8 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->format_first_to_check = 0;
     a->section = NULL;
     a->alias = NULL;
+    a->vector_bytes = 0;
+    a->vector_elems = 0;
 }
 
 static void decl_attrs_clear(decl_attrs_t *a) {
@@ -4376,6 +4516,8 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->align = 0;
     a->format_index = 0;
     a->format_first_to_check = 0;
+    a->vector_bytes = 0;
+    a->vector_elems = 0;
 }
 
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
@@ -4406,6 +4548,12 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     }
     if ((src->flags & CC_ATTR_FORMAT) != 0) {
         dst->format_first_to_check = src->format_first_to_check;
+    }
+    if (src->vector_bytes > 0) {
+        dst->vector_bytes = src->vector_bytes;
+    }
+    if (src->vector_elems > 0) {
+        dst->vector_elems = src->vector_elems;
     }
     if (sec_dup != NULL) {
         free(dst->section);
@@ -5543,10 +5691,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             return -1;
         }
     }
-    if (is_vector_size || is_ext_vector_type) {
-        /* a vector type would be laid out and operated on as its element: refuse rather than miscompile */
+    if ((is_vector_size || is_ext_vector_type) && (!has_num || num <= 0)) {
         free(sec);
-        set_diag(p->diag, p->tok.line, p->tok.col, "vector types are not supported");
+        set_diag(p->diag, attr_line, attr_col, "a vector type's size must be a positive integer constant");
         return -1;
     }
 
@@ -5627,13 +5774,13 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
                 out_attrs->align = align;
             }
         }
-        if (is_vector_size || is_ext_vector_type) {
-            if (has_num && num > 0) {
-                out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
-                if (num > out_attrs->align) {
-                    out_attrs->align = num;
-                }
-            }
+        if (is_vector_size) {
+            out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
+            out_attrs->vector_bytes = num;
+        }
+        if (is_ext_vector_type) {
+            out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
+            out_attrs->vector_elems = num;
         }
         if (is_section && sec != NULL) {
             out_attrs->flags |= CC_ATTR_SECTION;
@@ -8625,6 +8772,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
+    dst->is_subscript = src->is_subscript;
     dst->member_is_arrow = src->member_is_arrow;
     dst->member_offset = src->member_offset;
     dst->member_is_bitfield = src->member_is_bitfield;
@@ -8793,6 +8941,7 @@ static cc_expr_t *parse_postfix(parser_t *p) {
             if (add == NULL) {
                 return NULL;
             }
+            add->is_subscript = 1;
             deref = new_expr(CC_EXPR_DEREF);
             if (deref == NULL) {
                 free_expr(add);
@@ -10055,6 +10204,10 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     }
     decl_storage = p->last_storage;
     base_alias = p->last_alias_ctype;
+    if (parser_apply_vector_attr(p, &base_attrs, &base_type, &base_struct_id, &base_alias) != 0) {
+        decl_attrs_clear(&base_attrs);
+        return -1;
+    }
     if (p->tok.kind == TOK_SEMI) {
         if ((decl_storage & CC_STORAGE_AUTO_TYPE) != 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "auto type deduction requires an initializer");
@@ -10130,6 +10283,12 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             }
         }
         if (skip_decl_gnu_suffix(p, &suffix_attrs) != 0) {
+            free_stmt(&s);
+            return -1;
+        }
+        if (s.array_ndim == 0 &&
+            parser_apply_vector_attr(p, &suffix_attrs, &s.type, &s.type_struct_id, &s.ctype) != 0) {
+            decl_attrs_clear(&suffix_attrs);
             free_stmt(&s);
             return -1;
         }

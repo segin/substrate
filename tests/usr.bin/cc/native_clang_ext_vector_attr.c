@@ -1,7 +1,7 @@
 /*
  * __has_attribute(ext_vector_type) answers truly: where it says yes the
- * vector types work (clang), and where it says no (cc, which has no
- * vector types and rejects the attribute) the fallback is taken.  The
+ * vector types work (clang, cc), and where it says no (gcc, which ignores
+ * the attribute) the fallback is taken.  The
  * test once initialized a vector from, and cast one to, a scalar, which
  * clang and gcc reject.
  */

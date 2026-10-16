@@ -42,6 +42,11 @@ typedef enum {
 #define CC_ABI_RET_EAX_EDX 0x100     /**< i386: returned in %eax:%edx, not by hidden pointer: float _Complex */
 #define CC_ABI_RET_MEMORY 0x200      /**< x86-64: returned by hidden pointer although it is 16 bytes or fewer */
 #define CC_ABI_RET_FLOAT 0x400       /**< CALL: the callee returns a float, in single precision */
+#define CC_ABI_VEC128 0x40           /**< with AGG_REG: a 16-byte vector, whole in one xmm register */
+#define CC_ABI_VEC64 0x80            /**< with AGG_REG (i386): an 8-byte vector, whole in one MMX register */
+#define CC_ABI_STACK_VEC 0x40        /**< with AGG_MEM: a vector, its stack copy aligned to its size from 16 up */
+#define CC_ABI_RET_VEC128 0x800      /**< agg_class: a 16-byte vector, returned whole in %xmm0 */
+#define CC_ABI_RET_VEC64 0x1000      /**< agg_class (i386): an 8-byte vector, returned in %mm0 */
 
 typedef enum {
     CC_SSA_PARAM = 0,

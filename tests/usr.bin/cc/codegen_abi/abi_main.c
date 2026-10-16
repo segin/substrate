@@ -55,6 +55,45 @@ float _Complex lib_cf(float _Complex a, float _Complex b);
 double _Complex lib_cd(double _Complex a, double _Complex b);
 long double _Complex lib_cl(long double _Complex a, long double _Complex b);
 
+typedef int v4si __attribute__((vector_size(16)));
+typedef float v4sf __attribute__((vector_size(16)));
+typedef char v8qi __attribute__((vector_size(8)));
+typedef short v2hi __attribute__((vector_size(4)));
+typedef int v8si __attribute__((vector_size(32)));
+typedef int v16si __attribute__((vector_size(64)));
+v4si lib_v4(v4si a, v4si b);
+v4sf lib_v4f(int n, v4sf a, double d, v4sf b);
+v4si lib_v4n(int x, v4si a, v4si b, v4si c, int y, v4si d);
+v2hi lib_v2(v2hi a);
+v8si lib_v8(int k, v8si a);
+int lib_v16(int x, v16si a, int y);
+v8qi lib_v8q(int x, v8qi a, v8qi b, v8qi c, v8qi d);
+
+/* vectors across the call */
+static void vectors(void) {
+    v4si a = {1, -2, 3, 40}, b = {5, 6, -7, 8};
+    v4si m = lib_v4(a, b);
+    v4sf f = lib_v4f(2, (v4sf){1.5f, 2, 3, 4}, 0.25, (v4sf){2, -2, 0.5f, 8});
+    v4si n = lib_v4n(3, a, b, a, 5, b);
+    v2hi h = lib_v2((v2hi){-3, 7});
+    v8si w = lib_v8(100, (v8si){1, 2, 3, 4, 5, 6, 7, 8});
+    v16si big = {5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9};
+
+    printf("%d %d %d %d | %g %g %g %g | %d %d | %d %d | %d %d | %d\n", m[0], m[1], m[2], m[3], (double)f[0],
+           (double)f[1], (double)f[2], (double)f[3], n[0], n[3], h[0], h[1], w[0], w[7], lib_v16(1, big, 2));
+}
+
+/*
+ * An 8-byte vector comes back in %mm0 on i386, and gcc issues no emms
+ * after one, so its caller's x87 is unusable until the next: this runs
+ * last and prints integers only.
+ */
+static void vector_mmx(void) {
+    v8qi q = lib_v8q(1, (v8qi){1, 2, 3}, (v8qi){10, 20}, (v8qi){7, 0, 0, 0, 0, 0, 0, 9}, (v8qi){4, 5});
+
+    printf("%d %d %d %d\n", q[0], q[1], q[2], q[7]);
+}
+
 /* structures whose eightbytes travel in xmm registers, general ones, or memory; complex values */
 static void classes(void) {
     struct DD dd1 = {1.5, 2.0}, dd2 = {0.25, 4.0}, dd = lib_dd(dd1, dd2);
@@ -122,5 +161,7 @@ int main(void) {
     printf("%d %d %ld %ld\n", dv.quot, dv.rem, lv.quot, lv.rem);
     printf("%d %lld\n", lib_sum(1, 2, 3, 4000000005LL, 1.5, arg), lib_wide(-5000000000LL, 0xfedcba9876543210ULL));
     classes();
+    vectors();
+    vector_mmx();
     return 0;
 }

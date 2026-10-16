@@ -44,6 +44,23 @@ is 16; on i386 they are rejected and
 .Dv __SIZEOF_INT128__
 is left undefined, as gcc does.
 .Pp
+Vector types, GNU
+.Sq Li vector_size
+and clang's
+.Sq Li ext_vector_type ,
+are laid out, operated on element by element, and passed and returned
+as gcc (and clang) do: on i386 a 16-byte vector travels in
+.Li %xmm0
+to
+.Li %xmm2
+and an 8-byte one in an MMX register, so code that calls gcc-built
+functions taking 8-byte vectors must not rely on the x87 until the
+caller has issued
+.Li emms ,
+as
+.Nm
+does.
+.Pp
 Installed host-runnable copies of
 .Nm ,
 .Xr as 1 ,

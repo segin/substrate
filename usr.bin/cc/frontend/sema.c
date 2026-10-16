@@ -2408,6 +2408,137 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
     return 0;
 }
 
+/** The structure standing for the vector type (@p t, @p sid) is, or NULL. */
+static const cc_struct_def_t *sema_vector_def(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
+    if (t != CC_TYPE_VOID || sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count ||
+        tu->structs[sid].vector_count <= 0) {
+        return NULL;
+    }
+    return &tu->structs[sid];
+}
+
+/** Whether expression @p e has a vector type. */
+static int sema_is_vector(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return e != NULL && sema_vector_def(tu, e->value_type, e->struct_id) != NULL;
+}
+
+/**
+ * The vector operand of a subscript `v[i]` (the `+` it is parsed as):
+ * replaced by its element array, the member `__vec` of the structure
+ * standing for its type, which then indexes as any array does.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_vector_subscript(const cc_translation_unit_t *tu, cc_expr_t **slot) {
+    const cc_struct_def_t *vd = sema_vector_def(tu, (*slot)->value_type, (*slot)->struct_id);
+    const cc_struct_member_t *m = &vd->members[0];
+    cc_expr_t *me = (cc_expr_t *)calloc(1, sizeof(*me));
+
+    if (me == NULL) {
+        return -1;
+    }
+    me->ident = cc_strdup("__vec");
+    if (me->ident == NULL) {
+        free(me);
+        return -1;
+    }
+    me->kind = CC_EXPR_MEMBER;
+    me->line = (*slot)->line;
+    me->col = (*slot)->col;
+    me->lhs = *slot;
+    me->member_offset = 0;
+    me->value_type = m->type;
+    me->struct_id = m->type_struct_id;
+    me->ctype = m->ctype;
+    expr_set_array_meta_decl(me, m->array_len, m->array_ndim, m->array_dims);
+    *slot = me;
+    return 0;
+}
+
+/** Whether @p t is a type a scalar operand of a vector operation may have: an integer or real floating type. */
+static int sema_vector_scalar_ok(cc_type_t t) {
+    return (cc_type_is_integral(t) && !is_pointer_type(t)) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE ||
+           t == CC_TYPE_LDOUBLE || t == CC_TYPE_BOOL;
+}
+
+/**
+ * A binary operator with a vector operand (GCC's vector extension): it
+ * works element by element.  Two vector operands must have one type; a
+ * scalar operand is converted to the element type, to be used for every
+ * element.  An integer-only operator (`%`, a shift, a bitwise one) needs an
+ * integer element type.  A comparison gives the vector of signed integers
+ * of the element's size, each -1 (true) or 0.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_struct_def_t *vl = sema_vector_def(tu, e->lhs->value_type, e->lhs->struct_id);
+    const cc_struct_def_t *vr = sema_vector_def(tu, e->rhs->value_type, e->rhs->struct_id);
+    const cc_struct_def_t *vd = vl != NULL ? vl : vr;
+    int sid = vl != NULL ? e->lhs->struct_id : e->rhs->struct_id;
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+    int is_fp = vd->vector_elem == CC_TYPE_FLOAT || vd->vector_elem == CC_TYPE_DOUBLE;
+
+    if (is_logical_op(e->op)) {
+        set_diag(diag, "invalid operands to a logical operator: a vector");
+        return -1;
+    }
+    if (is_fp && (e->op == CC_BIN_MOD || e->op == CC_BIN_SHL || e->op == CC_BIN_SHR || e->op == CC_BIN_BAND ||
+                  e->op == CC_BIN_BOR || e->op == CC_BIN_BXOR)) {
+        set_diag(diag, "invalid operands to an integer operator: a floating vector");
+        return -1;
+    }
+    if (vl != NULL && vr != NULL) {
+        if (e->lhs->struct_id != e->rhs->struct_id) {
+            set_diag(diag, "invalid operands to a vector operation: the vector types differ");
+            return -1;
+        }
+    } else {
+        cc_expr_t **scalar = vl != NULL ? &e->rhs : &e->lhs;
+
+        if (!sema_vector_scalar_ok((*scalar)->value_type)) {
+            set_diag(diag, "invalid operands to a vector operation");
+            return -1;
+        }
+        if ((*scalar)->value_type != vd->vector_elem && sema_wrap_cast(scalar, vd->vector_elem, -1) != 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+    }
+    e->value_type = CC_TYPE_VOID;
+    e->struct_id = is_cmp ? vd->vector_cmp_sid : sid;
+    return 0;
+}
+
+/**
+ * A cast to or from a vector type: between vector types of one size, and
+ * between a vector and an integer of its size, the bits are kept.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_struct_def_t *vt = sema_vector_def(tu, e->aux_type, e->aux_struct_id);
+    const cc_struct_def_t *vs = sema_vector_def(tu, e->lhs->value_type, e->lhs->struct_id);
+    long ts = vt != NULL ? vt->size : type_size_bytes(e->aux_type);
+    long ss = vs != NULL ? vs->size : type_size_bytes(e->lhs->value_type);
+
+    if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
+        e->value_type = CC_TYPE_VOID;
+        e->struct_id = -1;
+        return 0;
+    }
+    if ((vt == NULL && !(cc_type_is_integral(e->aux_type) && !is_pointer_type(e->aux_type))) ||
+        (vs == NULL && !(cc_type_is_integral(e->lhs->value_type) && !is_pointer_type(e->lhs->value_type))) ||
+        ts != ss) {
+        set_diag(diag, "invalid conversion: a vector converts only to a vector or an integer of its size");
+        return -1;
+    }
+    e->value_type = e->aux_type;
+    e->struct_id = e->aux_struct_id;
+    return 0;
+}
+
 /**
  * A wide integer where a truth value is wanted: `x != 0`, converted.
  *
@@ -3378,6 +3509,15 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = e->rhs->struct_id;
             expr_copy_array_meta(e, e->rhs);
             return 0;
+        }
+        if (e->op == CC_BIN_ADD && e->is_subscript && (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs))) {
+            /* v[i]: an element of the vector's array */
+            if (sema_vector_subscript(tu, sema_is_vector(tu, e->lhs) ? &e->lhs : &e->rhs) != 0) {
+                set_diag(diag, "out of memory");
+                return -1;
+            }
+        } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
+            return sema_vector_binop(tu, e, diag);
         }
         if (sema_is_wide(tu, e->lhs) || sema_is_wide(tu, e->rhs)) {
             if (is_logical_op(e->op)) {
@@ -4760,7 +4900,8 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     return -1;
                 }
             }
-        } else if (sema_wide_def(tu, t, t_struct_id) != NULL) {
+        } else if (sema_wide_def(tu, t, t_struct_id) != NULL || sema_vector_def(tu, t, t_struct_id) != NULL) {
+            /* rewritten as the assignment it is; a vector's then goes element by element */
             return sema_wide_update(tu, e, vars, var_count, depth, diag);
         } else if (!cc_type_is_numeric(t)) {
             set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
@@ -4835,6 +4976,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "out of memory");
                 return -1;
             }
+        }
+        if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, e->aux_type, e->aux_struct_id) != NULL) {
+            return sema_vector_cast(tu, e, diag);
         }
         if (sema_is_wide(tu, e->lhs) && sema_wide_def(tu, e->aux_type, e->aux_struct_id) == NULL) {
             /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */

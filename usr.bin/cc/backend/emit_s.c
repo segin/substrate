@@ -25,9 +25,13 @@ typedef struct {
     unsigned sse;      /**< an aggregate in registers: bit k set when eightbyte k goes in an xmm register */
 } abi_loc_t;
 
-/** The SSE eightbytes (bit 0, bit 1) an aggregate's ABI byte names. */
+/** Bit of an abi_loc_t's sse: the two SSE eightbytes go whole in one xmm register (a 16-byte vector). */
+#define ABI_SSE_WHOLE 4u
+
+/** The SSE eightbytes (bit 0, bit 1) an aggregate's ABI byte names, and ABI_SSE_WHOLE for a vector's. */
 static unsigned abi64_sse_mask(unsigned char abi) {
-    return ((abi & CC_ABI_SSE0) != 0 ? 1u : 0u) | ((abi & CC_ABI_SSE1) != 0 ? 2u : 0u);
+    return ((abi & CC_ABI_SSE0) != 0 ? 1u : 0u) | ((abi & CC_ABI_SSE1) != 0 ? 2u : 0u) |
+           ((abi & CC_ABI_VEC128) != 0 ? ABI_SSE_WHOLE : 0u);
 }
 
 /**
@@ -40,6 +44,10 @@ static void abi64_agg_reg_need(size_t size, unsigned sse, size_t *ngpr, size_t *
 
     *ngpr = 0;
     *nxmm = 0;
+    if ((sse & ABI_SSE_WHOLE) != 0) {
+        *nxmm = 1;
+        return;
+    }
     for (k = 0; k < (n == 0 ? 1 : n) && k < 2; ++k) {
         if ((sse & (1u << k)) != 0) {
             ++*nxmm;
@@ -3230,6 +3238,18 @@ build_stackalloc_offsets:
             slot_layout_free(out);
             return -1;
         }
+        if (in->imm >= 16) {
+            /*
+             * 16 bytes or more (a vector, a 16-aligned structure, anything
+             * gcc-built code may use movaps on) on a 16-byte boundary: the
+             * frame pointer is on one on x86-64, 8 past one on i386.
+             */
+            int residue = cc_target_pointer_size() == 4 ? 8 : 0;
+
+            while (raw_frame % 16 != residue) {
+                raw_frame += 8;
+            }
+        }
         out->stackalloc_off[in->dst] = -raw_frame;
     }
     free(def_at);
@@ -3252,6 +3272,20 @@ build_stackalloc_offsets:
     return 0;
 }
 
+/**
+ * The stack alignment of an x86-64 aggregate argument with ABI byte
+ * @p abi and @p size bytes: a vector's is its size from 16 bytes up (one
+ * that went to memory, or a 16-byte one the xmm registers ran out for),
+ * as gcc places it; anything else's 8.
+ */
+static size_t abi64_stack_align(unsigned char abi, long size) {
+    if (size >= 16 && (((CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) && (abi & CC_ABI_STACK_VEC) != 0) ||
+                       ((CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG) && (abi & CC_ABI_VEC128) != 0))) {
+        return (size_t)size;
+    }
+    return 8;
+}
+
 static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start) {
     abi_loc_t loc;
     size_t gpr = gpr_start;
@@ -3266,7 +3300,7 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
 
     for (i = 0; i <= param_index; ++i) {
         int is_ldouble = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) ? 1 : 0;
-        int is_agg_mem = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) ? 1 : 0;
+        int is_agg_mem = (f->param_abi != NULL && CC_ABI_KIND(f->param_abi[i]) == CC_CALL_ARG_ABI_AGG_MEM) ? 1 : 0;
         int is_agg_reg = (f->param_abi != NULL && CC_ABI_KIND(f->param_abi[i]) == CC_CALL_ARG_ABI_AGG_REG) ? 1 : 0;
         int is_zero = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_ZERO) ? 1 : 0;
         cc_value_type_t vt = f->param_types[i];
@@ -3282,6 +3316,7 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
         if (is_agg_mem) {
             long size = x86_64_param_size_bytes(f, i, 8);
             size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
+            stack_bytes = align_up_size(stack_bytes, abi64_stack_align(f->param_abi[i], size));
             if (i == param_index) {
                 loc.kind = ABI_LOC_STACK;
                 loc.index = stack_bytes;
@@ -3311,6 +3346,7 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
                 xmm += nxmm;
             } else {
                 size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
+                stack_bytes = align_up_size(stack_bytes, abi64_stack_align(f->param_abi[i], size));
                 if (i == param_index) {
                     loc.kind = ABI_LOC_STACK;
                     loc.index = stack_bytes;
@@ -3385,7 +3421,7 @@ static int call_arg_is_agg_mem_abi(const cc_ssa_instr_t *in, size_t arg_index) {
     if (in == NULL || in->call_arg_abi == NULL || arg_index >= in->arg_count) {
         return 0;
     }
-    return in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_AGG_MEM ? 1 : 0;
+    return CC_ABI_KIND(in->call_arg_abi[arg_index]) == CC_CALL_ARG_ABI_AGG_MEM ? 1 : 0;
 }
 
 static int call_arg_is_agg_reg_abi(const cc_ssa_instr_t *in, size_t arg_index) {
@@ -3447,6 +3483,7 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
         if (call_arg_is_agg_mem_abi(in, i)) {
             long size = call_arg_size_bytes(in, i, 8);
             size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
+            stack_bytes = align_up_size(stack_bytes, abi64_stack_align(in->call_arg_abi[i], size));
             locs[i].kind = ABI_LOC_STACK;
             locs[i].index = stack_bytes;
             locs[i].size = size > 0 ? (size_t)size : 8;
@@ -3472,6 +3509,7 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
                 xmm += nxmm;
             } else {
                 size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
+                stack_bytes = align_up_size(stack_bytes, abi64_stack_align(in->call_arg_abi[i], size));
                 locs[i].kind = ABI_LOC_STACK;
                 locs[i].index = stack_bytes;
                 locs[i].size = size > 0 ? (size_t)size : 8;
@@ -4019,6 +4057,16 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
             size_t k;
 
             emit_x86_64_load_int_value_to_reg(fp, f, lay, value, "%r11");
+            if ((loc->sse & ABI_SSE_WHOLE) != 0) {
+                const char *r = arg_reg64_xmm(xi);
+
+                if (r == NULL) {
+                    set_diag(diag, "call with unsupported vector argument register index");
+                    return -1;
+                }
+                fprintf(fp, "\tmovups 0(%%r11), %s\n", r);
+                return 0;
+            }
             for (k = 0; k * 8 < size && k < 2; ++k) {
                 size_t part = size - k * 8 > 8 ? 8 : size - k * 8;
                 const char *r = (loc->sse & (1u << k)) != 0 ? arg_reg64_xmm(xi++) : arg_reg64_gpr(gi++);
@@ -4202,6 +4250,10 @@ static void emit_x86_64_store_aggregate_return(FILE *fp, const cc_ssa_function_t
         if ((cls & CC_ABI_RET_X87_COMPLEX) != 0) {
             fprintf(fp, "\tfstpt 16(%%r11)\n");
         }
+        return;
+    }
+    if ((cls & CC_ABI_RET_VEC128) != 0) {
+        fprintf(fp, "\tmovups %%xmm0, 0(%%r11)\n");
         return;
     }
     for (k = 0; k * 8 < agg_size && k < 2; ++k) {
@@ -4541,7 +4593,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 int param_is_agg_mem =
                     (f->param_abi != NULL && in->param_index >= 0 &&
                      (size_t)in->param_index < f->param_count &&
-                     f->param_abi[in->param_index] == CC_CALL_ARG_ABI_AGG_MEM)
+                     CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_AGG_MEM)
                         ? 1
                         : 0;
                 int param_is_agg_reg =
@@ -4588,6 +4640,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         size_t xi = loc.xmm_index;
                         size_t k;
 
+                        if ((loc.sse & ABI_SSE_WHOLE) != 0) {
+                            fprintf(fp, "\tmovups %s, %d(%%rbp)\n", arg_reg64_xmm(xi), storage_off);
+                            pbytes = 0;
+                        }
                         for (k = 0; k * 8 < (size_t)pbytes && k < 2; ++k) {
                             size_t part = (size_t)pbytes - k * 8 > 8 ? 8 : (size_t)pbytes - k * 8;
                             int is_sse = (loc.sse & (1u << k)) != 0;
@@ -5202,10 +5258,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         static const char *const xmms[] = {"%xmm0", "%xmm1"};
                         size_t gi = 0;
                         size_t xi = 0;
+                        int vec128 = (in->agg_class & CC_ABI_RET_VEC128) != 0;
                         int k;
 
                         int_regs_flush(fp, f, &lay, &ist);
-                        for (k = 0; k < 2; ++k) {
+                        if (vec128) {
+                            /* a 16-byte vector: both eightbytes in %xmm0 */
+                            fprintf(fp, "\tmovq %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                            fprintf(fp, "\tmovhps %d(%%rbp), %%xmm0\n", slot_off(&lay, in->rhs));
+                        }
+                        for (k = vec128 ? 2 : 0; k < 2; ++k) {
                             int part = k == 0 ? in->lhs : in->rhs;
 
                             if (k == 1 && (in->imm <= 8 || part < 0)) {
@@ -5269,48 +5331,78 @@ static int i386_param_slot_bytes(long size) {
     return (int)((size + 3) & ~3L);
 }
 
-static int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
-    int off = i386_first_param_offset(f);
-    int i;
-    for (i = 0; i < param_index; ++i) {
-        if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
-            off += 12;
-        } else if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_FLOAT) {
-            off += 4;
-        } else if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) {
-            off += i386_param_slot_bytes(x86_64_param_size_bytes(f, i, 4));
-        } else if (f->param_types[i] == CC_VAL_F64) {
-            off += 8;
-        } else {
-            off += i386_param_slot_bytes(value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4));
-        }
+/**
+ * The stack alignment of an i386 argument or parameter with ABI byte
+ * @p abi and @p size bytes: a vector's copy on the stack is aligned to its
+ * size from 16 bytes up, as gcc places it; everything else to 4.
+ */
+static long i386_stack_align(unsigned char abi, long size) {
+    if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM && (abi & CC_ABI_STACK_VEC) != 0 && size >= 16) {
+        return size;
     }
-    return off;
+    return 4;
+}
+
+/**
+ * The i386 stack layout of a function's parameters: the offset from %ebp
+ * of parameter @p want, or with @p want -1 the end of the first @p count.
+ * A vector that comes in a register takes no stack.
+ */
+static int i386_param_layout(const cc_ssa_function_t *f, int count, int want) {
+    /* offsets from the caller's %esp at the call (8 below %ebp): alignment is reckoned from there */
+    int base = 8;
+    long off = i386_first_param_offset(f) - base;
+    int i;
+
+    for (i = 0; i < count && i < (int)f->param_count; ++i) {
+        unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
+        long bytes;
+
+        if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_LDOUBLE) {
+            bytes = 12;
+        } else if (abi == CC_CALL_ARG_ABI_FLOAT) {
+            bytes = 4;
+        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG) {
+            bytes = 0;
+        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
+            long size = x86_64_param_size_bytes(f, i, 4);
+
+            off = (long)align_up_size((size_t)off, (size_t)i386_stack_align(abi, size));
+            bytes = i386_param_slot_bytes(size);
+        } else if (f->param_types[i] == CC_VAL_F64) {
+            bytes = 8;
+        } else {
+            bytes = i386_param_slot_bytes(value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4));
+        }
+        if (i == want) {
+            return base + (int)off;
+        }
+        off += bytes;
+    }
+    return base + (int)off;
+}
+
+static int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
+    return i386_param_layout(f, param_index + 1, param_index);
 }
 
 static int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count) {
-    int off = i386_first_param_offset(f);
+    return i386_param_layout(f, fixed_count < 0 ? 0 : fixed_count, -1);
+}
+
+/** The register (%xmmN or %mmN) i386 vector parameter @p param_index came in: its rank among its kind. */
+static int i386_vector_param_reg(const cc_ssa_function_t *f, int param_index) {
+    unsigned char want = f->param_abi[param_index] & (CC_ABI_VEC128 | CC_ABI_VEC64);
+    int n = 0;
     int i;
-    if (fixed_count < 0) {
-        fixed_count = 0;
-    }
-    if (fixed_count > (int)f->param_count) {
-        fixed_count = (int)f->param_count;
-    }
-    for (i = 0; i < fixed_count; ++i) {
-        if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
-            off += 12;
-        } else if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_FLOAT) {
-            off += 4;
-        } else if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) {
-            off += i386_param_slot_bytes(x86_64_param_size_bytes(f, i, 4));
-        } else if (f->param_types[i] == CC_VAL_F64) {
-            off += 8;
-        } else {
-            off += i386_param_slot_bytes(value_size_bytes(f, f->param_values != NULL ? f->param_values[i] : -1, 4));
+
+    for (i = 0; i < param_index; ++i) {
+        if (CC_ABI_KIND(f->param_abi[i]) == CC_CALL_ARG_ABI_AGG_REG &&
+            (f->param_abi[i] & (CC_ABI_VEC128 | CC_ABI_VEC64)) == want) {
+            ++n;
         }
     }
-    return off;
+    return n;
 }
 
 static int function_uses_f64(const cc_ssa_function_t *f) {
@@ -6238,6 +6330,10 @@ static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t 
     if (in->call_arg_abi != NULL && in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_FLOAT) {
         return 4;
     }
+    if (call_arg_is_agg_reg_abi(in, arg_index)) {
+        /* a vector in %xmm0-2 or %mm0-2 */
+        return 0;
+    }
     if (call_arg_is_agg_mem_abi(in, arg_index)) {
         return i386_param_slot_bytes(arg_size);
     }
@@ -6357,35 +6453,79 @@ static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, 
     }
 }
 
+/**
+ * An i386 call.  Each stack argument's offset from the call's %esp is
+ * worked out first -- a vector's aligned to its size, as gcc places it --
+ * and the arguments are pushed last to first with the padding between
+ * them, the whole 16-aligned (the psABI's alignment at a call).  Vectors
+ * that travel in %xmm0-2 or %mm0-2 are loaded after the pushes.  A struct
+ * result goes through the hidden pointer, except a float _Complex
+ * (%eax:%edx) and a vector of 4, 8 or 16 bytes (%eax, %mm0, %xmm0).
+ */
 static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                           const cc_ssa_instr_t *in) {
     long stack_bytes = 0;
     long a;
     /* a struct result: the i386 psABI passes the buffer's address first */
     int agg = in->dst >= 0 && in->rhs == in->dst && is_stackalloc_value(lay, in->dst) && in->imm > 0;
-    /* but a float _Complex comes back in %eax (real) and %edx (imaginary) */
+    int ret_vec = agg && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0;
     int in_regs = agg && (in->agg_class & CC_ABI_RET_EAX_EDX) != 0;
-    int sret = agg && !in_regs;
-    long pushed = sret ? 4 : 0;
-    long pad;
+    int sret = agg && !in_regs && !ret_vec;
+    long *offs = (long *)calloc(in->arg_count > 0 ? in->arg_count : 1, sizeof(*offs));
+    long pos = sret ? 4 : 0;
+    long cur;
+    int nx = 0;
+    int nm = 0;
 
+    if (offs == NULL) {
+        return -1;
+    }
     int_regs_flush(fp, f, lay, ist);
-    /* the body runs with %esp 16-aligned; the psABI wants it so again at the call */
     for (a = 0; a < (long)in->arg_count; ++a) {
-        pushed += i386_call_arg_bytes(f, lay, in, (size_t)a, in->args[a]);
+        long bytes = i386_call_arg_bytes(f, lay, in, (size_t)a, in->args[a]);
+        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+
+        if (bytes == 0) {
+            offs[a] = -1;
+            continue;
+        }
+        pos = (long)align_up_size((size_t)pos, (size_t)i386_stack_align(abi, call_arg_size_bytes(in, (size_t)a, 4)));
+        offs[a] = pos;
+        pos += bytes;
     }
-    pad = (16 - pushed % 16) % 16;
-    if (pad > 0) {
-        fprintf(fp, "\tsubl $%ld, %%esp\n", pad);
-        stack_bytes = pad;
+    /* the body runs with %esp 16-aligned; the psABI wants it so again at the call */
+    cur = (long)align_up_size((size_t)pos, 16);
+    for (a = (long)in->arg_count - 1; a >= -1; --a) {
+        long start = a >= 0 ? offs[a] : (sret ? 0 : -1);
+        long end = a >= 0 ? offs[a] + i386_call_arg_bytes(f, lay, in, (size_t)a, in->args[a]) : (sret ? 4 : 0);
+
+        if (start < 0 && a >= 0) {
+            continue;
+        }
+        if (cur > end) {
+            fprintf(fp, "\tsubl $%ld, %%esp\n", cur - end);
+            stack_bytes += cur - end;
+        }
+        if (a >= 0) {
+            emit_i386_push_call_arg(fp, f, lay, in, (size_t)a, in->args[a], &stack_bytes);
+        } else if (sret) {
+            fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->dst));
+            fprintf(fp, "\tpushl %%eax\n");
+        }
+        cur = start < 0 ? 0 : start;
     }
-    for (a = (long)in->arg_count - 1; a >= 0; --a) {
-        emit_i386_push_call_arg(fp, f, lay, in, (size_t)a, in->args[a], &stack_bytes);
+    for (a = 0; a < (long)in->arg_count; ++a) {
+        if (offs[a] >= 0) {
+            continue;
+        }
+        emit_load_ptr_value_reg(fp, lay, in->args[a], 0, "%eax");
+        if ((in->call_arg_abi[a] & CC_ABI_VEC128) != 0) {
+            fprintf(fp, "\tmovups (%%eax), %%xmm%d\n", nx++);
+        } else {
+            fprintf(fp, "\tmovq (%%eax), %%mm%d\n", nm++);
+        }
     }
-    if (sret) {
-        fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->dst));
-        fprintf(fp, "\tpushl %%eax\n");
-    }
+    free(offs);
 
     emit_i386_call_target(fp, f, lay, in);
 
@@ -6394,11 +6534,22 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         fprintf(fp, "\taddl $%ld, %%esp\n", stack_bytes);
     }
 
-    if (in_regs) {
+    if (ret_vec) {
+        int off = stackalloc_off(lay, in->dst);
+
+        if ((in->agg_class & CC_ABI_RET_VEC128) != 0) {
+            fprintf(fp, "\tmovups %%xmm0, %d(%%ebp)\n", off);
+        } else {
+            fprintf(fp, "\tmovq %%mm0, %d(%%ebp)\n", off);
+            fprintf(fp, "\temms\n");
+        }
+    } else if (in_regs) {
         int off = stackalloc_off(lay, in->dst);
 
         fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", off);
-        fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", off + 4);
+        if (in->imm > 4) {
+            fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", off + 4);
+        }
     } else if (!sret) {
         emit_i386_capture_call_result(fp, f, lay, ist, in);
     }
@@ -6511,10 +6662,28 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         ? 1
                         : 0;
                 if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
-                    f->param_abi[in->param_index] == CC_CALL_ARG_ABI_AGG_MEM) {
+                    CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_AGG_MEM) {
                     /* a struct passed by value is its copy on the stack */
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     fprintf(fp, "\tleal %d(%%ebp), %s\n", poff, ist.regs[rd]);
+                } else if (f->param_abi != NULL && in->param_index >= 0 &&
+                           (size_t)in->param_index < f->param_count &&
+                           CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_AGG_REG &&
+                           in->lhs >= 0 && is_stackalloc_value(&lay, in->lhs)) {
+                    /* a vector that came in %xmm0-2 or %mm0-2: into its storage, which is the value */
+                    int vreg = i386_vector_param_reg(f, in->param_index);
+                    int soff = stackalloc_off(&lay, in->lhs);
+                    int rd;
+
+                    int_regs_flush(fp, f, &lay, &ist);
+                    if ((f->param_abi[in->param_index] & CC_ABI_VEC128) != 0) {
+                        fprintf(fp, "\tmovups %%xmm%d, %d(%%ebp)\n", vreg, soff);
+                    } else {
+                        fprintf(fp, "\tmovq %%mm%d, %d(%%ebp)\n", vreg, soff);
+                        fprintf(fp, "\temms\n");
+                    }
+                    rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                    fprintf(fp, "\tleal %d(%%ebp), %s\n", soff, ist.regs[rd]);
                 } else if (param_is_ldouble && f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tfldt %d(%%ebp)\n", poff);
@@ -6873,7 +7042,16 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     fprintf(fp, "\tret $4\n");
                     break;
                 }
-                if (in->lhs >= 0) {
+                if (in->lhs >= 0 && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0) {
+                    /* a vector, from the storage lhs points at, to %xmm0 or %mm0 */
+                    int_regs_flush(fp, f, &lay, &ist);
+                    emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%eax");
+                    if ((in->agg_class & CC_ABI_RET_VEC128) != 0) {
+                        fprintf(fp, "\tmovups (%%eax), %%xmm0\n");
+                    } else {
+                        fprintf(fp, "\tmovq (%%eax), %%mm0\n");
+                    }
+                } else if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         emit_i386_x87_load_f64(fp, f, &lay, in->lhs);

@@ -3,7 +3,7 @@ typedef union __attribute__((transparent_union, may_alias)) trans_u {
 	void *p;
 } trans_u_t;
 
-/* cc has no vector types, and says so to __has_attribute */
+/* __has_attribute answers truly for vector_size */
 #if __has_attribute(vector_size)
 typedef int vec4_t __attribute__((vector_size(16)));
 #endif

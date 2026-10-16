@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
-| 4. ABI and other code generation | 37 | 35 |
+| 4. ABI and other code generation | 37 | 36 |
 | 5. Driver and predefined macros | 3 | 3 |
 | 6. The restored suite's failing commands | 10 | 10 |
 | 7. The restored suite itself | 12 | 12 |
@@ -289,7 +289,7 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   gcc to the bit at both widths and both optimization levels;
   `codegen_abi/` passes `_BitInt(100)`, `(200)`, `(130)` and `__int128`
   both ways.  A small `_BitInt` shifted keeps its width.
-- [ ] **CC-71** GNU and clang vector types (`vector_size`,
+- [x] **CC-71** GNU and clang vector types (`vector_size`,
   `ext_vector_type`) shall work: their size and alignment, brace
   initialization, subscripts and element-wise operators.  cc parsed the
   attributes and laid the type out as its element -- `sizeof` of a
@@ -297,6 +297,28 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   wrong; since CC-40 cc rejects the attributes and `__has_attribute`
   reports them absent.  cc's own `<xmmintrin.h>` uses structs and is
   unaffected.  *Reproduced.*
+  A vector is now a hidden structure `{ T __vec[n]; }` aligned to its
+  size up to 16, as gcc lays one out (`ext_vector_type(n)` rounds its
+  size up to a power of two, as clang does); the attribute applies
+  before or after the declarator, to typedefs, variables and members.
+  `v[i]` indexes the element array and is an lvalue.  Every operator
+  works element by element -- `+ - * / %`, the bitwise ones, shifts,
+  unary `- ~ +`, `++`/`--` and compound assignment -- with a scalar
+  operand used for every element; comparisons give -1 or 0 in the
+  signed vector of the element's size.  A cast between vectors, or to or
+  from an integer, of one size keeps the bits.  `typeof` of a vector
+  expression is its type.  Vectors are passed and returned as gcc does:
+  on x86-64 16 bytes whole in one xmm register, 8 SSE, 4 INTEGER, wider
+  in memory aligned to their size; on i386 the first three 16-byte
+  vectors in `%xmm0`-`%xmm2` and 8-byte ones in `%mm0`-`%mm2` (with
+  `emms` after), a 4-byte one as an int, the rest on the stack aligned
+  to their size, and the return in `%xmm0`, `%mm0` or `%eax`.  Stack
+  temporaries of 16 bytes or more are 16-aligned now, as gcc-built code
+  may `movaps` through a pointer to one.  `codegen/vector_ops.c`
+  matches gcc at both widths and levels, `codegen_abi/` passes vectors
+  of 4 to 64 bytes both ways, and `ext_vector_type` matches clang.  Not
+  done: clang's `.xyzw` swizzles, `__builtin_shuffle` and
+  `__builtin_convertvector`, and vector conditions in `?:`.
 - [x] **CC-72** A pointer to a variable-length array, and a parameter
   declared as one (`int a[n][m]`, adjusted to `int (*a)[m]`), shall step
   by the array's run-time size.  cc steps by a constant computed with
@@ -817,7 +839,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-80 requirements: 78 met, 2 open.
+80 requirements: 79 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

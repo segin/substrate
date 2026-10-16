@@ -779,6 +779,17 @@ static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long 
         tu->structs[sid].complex_elem == CC_TYPE_LDOUBLE) {
         return is_return ? CC_ABI_RET_X87_COMPLEX : -1;
     }
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].vector_count > 0) {
+        /*
+         * A vector, by its size as gcc classes it: 16 bytes SSE and SSEUP,
+         * whole in one xmm register; 8 bytes SSE; 4 or fewer INTEGER;
+         * wider (an AVX vector without AVX) in memory.
+         */
+        if (size == 16) {
+            return CC_ABI_SSE0 | CC_ABI_SSE1 | (is_return ? CC_ABI_RET_VEC128 : CC_ABI_VEC128);
+        }
+        return size == 8 ? CC_ABI_SSE0 : size < 8 ? 0 : -1;
+    }
     if (size > 16 || size <= 0) {
         return -1;
     }
@@ -801,6 +812,41 @@ static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long 
     return flags;
 }
 
+/** Whether structure @p sid stands for a vector type. */
+static int sid_is_vector(const cc_translation_unit_t *tu, int sid) {
+    return tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].vector_count > 0;
+}
+
+/**
+ * How an i386 vector argument or parameter of structure @p sid and
+ * @p size bytes travels, as gcc passes one: the first three 16-byte
+ * vectors in %xmm0-2 and the first three 8-byte ones in %mm0-2
+ * (CC_CALL_ARG_ABI_AGG_REG with CC_ABI_VEC128 or CC_ABI_VEC64); a wider
+ * one, or one the registers ran out for, on the stack aligned to its size
+ * (CC_ABI_STACK_VEC).  *@p n16 and *@p n8 count the registers taken.
+ *
+ * @return the ABI byte, or -1 if it travels as any aggregate of its size
+ */
+static int i386_vector_abi(const cc_translation_unit_t *tu, int sid, long size, int *n16, int *n8) {
+    if (!sid_is_vector(tu, sid) || size <= 4) {
+        return -1;
+    }
+    if (size == 16 && *n16 < 3) {
+        ++*n16;
+        return CC_CALL_ARG_ABI_AGG_REG | CC_ABI_VEC128;
+    }
+    if (size == 8 && *n8 < 3) {
+        ++*n8;
+        return CC_CALL_ARG_ABI_AGG_REG | CC_ABI_VEC64;
+    }
+    return CC_CALL_ARG_ABI_AGG_MEM | (size >= 16 ? CC_ABI_STACK_VEC : 0);
+}
+
+/** CC_ABI_STACK_VEC for a vector of 16 bytes or more passed in memory (aligned to its size), else 0. */
+static int vector_mem_flag(const cc_translation_unit_t *tu, int sid, long size) {
+    return sid_is_vector(tu, sid) && size >= 16 ? CC_ABI_STACK_VEC : 0;
+}
+
 /**
  * The agg_class of a CALL or RET of an aggregate: how the target returns
  * one of structure @p sid and @p size bytes, where that is not the
@@ -816,6 +862,12 @@ static int agg_return_class(const cc_translation_unit_t *tu, int sid, long size)
     /* i386 psABI: a float _Complex comes back in %eax:%edx, as gcc has it; any other aggregate in memory */
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == CC_TYPE_FLOAT) {
         return CC_ABI_RET_EAX_EDX;
+    }
+    if (sid_is_vector(tu, sid)) {
+        /* a vector of 16 bytes in %xmm0, of 8 in %mm0, of 4 or fewer in %eax, as gcc returns one */
+        long vsize = tu->structs[sid].size;
+
+        return vsize == 16 ? CC_ABI_RET_VEC128 : vsize == 8 ? CC_ABI_RET_VEC64 : vsize <= 4 ? CC_ABI_RET_EAX_EDX : 0;
     }
     return 0;
 }
@@ -5056,6 +5108,262 @@ static int lower_wide_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *
     }
 }
 
+/** The shape of a vector type: see vec_of(). */
+typedef struct {
+    long n;          /**< its element count */
+    long es;         /**< an element's size in bytes */
+    cc_type_t elem;  /**< the element type */
+    int is_fp;       /**< the elements are floating */
+    int is_unsigned; /**< the elements are unsigned integers */
+} vec_t;
+
+/** Whether (@p t, @p sid) is a vector type; if so its shape in *@p v. */
+static int vec_of(const cc_translation_unit_t *tu, cc_type_t t, int sid, vec_t *v) {
+    const cc_struct_def_t *sd;
+
+    if (t != CC_TYPE_VOID || sid < 0 || (size_t)sid >= tu->struct_count) {
+        return 0;
+    }
+    sd = &tu->structs[sid];
+    if (sd->vector_count <= 0) {
+        return 0;
+    }
+    v->n = sd->vector_count;
+    v->elem = sd->vector_elem;
+    v->es = type_size_bytes(v->elem);
+    v->is_fp = v->elem == CC_TYPE_FLOAT || v->elem == CC_TYPE_DOUBLE;
+    v->is_unsigned = cc_type_is_unsigned_integral(v->elem);
+    return 1;
+}
+
+/** Element @p i of the vector of shape @p v at @p base: a double for a floating one, else an integer. */
+static int vec_ld(cc_ssa_function_t *sf, int base, long i, const vec_t *v, cc_diag_t *diag) {
+    cc_ssa_instr_t ld;
+    int p = (base < 0 || i == 0) ? base : complex_part_addr(sf, base, i * v->es, diag);
+
+    if (p < 0) {
+        return -1;
+    }
+    memset(&ld, 0, sizeof(ld));
+    ld.op = CC_SSA_LOAD;
+    ld.dst = new_value(sf, v->is_fp ? CC_VAL_F64 : CC_VAL_I64);
+    ld.lhs = p;
+    ld.rhs = -1;
+    ld.imm = v->es;
+    ld.is_unsigned = v->is_unsigned;
+    if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+        set_diag(diag, "out of memory loading a vector element");
+        return -1;
+    }
+    if (!v->is_fp) {
+        set_value_size(sf, ld.dst, v->es == 8 ? 8 : 4);
+    }
+    return ld.dst;
+}
+
+/** Store @p val as element @p i (@p es bytes) of the vector at @p base. */
+static int vec_st(cc_ssa_function_t *sf, int base, long i, long es, int val, cc_diag_t *diag) {
+    cc_ssa_instr_t st;
+    int p = (base < 0 || i == 0) ? base : complex_part_addr(sf, base, i * es, diag);
+
+    if (p < 0 || val < 0) {
+        return -1;
+    }
+    memset(&st, 0, sizeof(st));
+    st.op = CC_SSA_STORE;
+    st.dst = -1;
+    st.lhs = p;
+    st.rhs = val;
+    st.imm = es;
+    if (push_instr(sf, st) != 0) {
+        set_diag(diag, "out of memory storing a vector element");
+        return -1;
+    }
+    return 0;
+}
+
+/** @p a @p op @p b on two integer elements of shape @p v (`%` as `a - a / b * b`). */
+static int vec_int_op(cc_ssa_function_t *sf, cc_binop_t op, int a, int b, const vec_t *v, cc_diag_t *diag) {
+    static const struct {
+        cc_binop_t op;
+        cc_ssa_opcode_t ssa;
+    } map[] = {{CC_BIN_ADD, CC_SSA_ADD}, {CC_BIN_SUB, CC_SSA_SUB}, {CC_BIN_MUL, CC_SSA_MUL},
+               {CC_BIN_DIV, CC_SSA_DIV}, {CC_BIN_BAND, CC_SSA_AND}, {CC_BIN_BOR, CC_SSA_OR},
+               {CC_BIN_BXOR, CC_SSA_XOR}, {CC_BIN_SHL, CC_SSA_SHL}, {CC_BIN_SHR, CC_SSA_SHR}};
+    long vs = v->es == 8 ? 8 : 4;
+    int r = -1;
+    size_t k;
+
+    if (a < 0 || b < 0) {
+        return -1;
+    }
+    if (op == CC_BIN_MOD) {
+        int q = vec_int_op(sf, CC_BIN_DIV, a, b, v, diag);
+        int m = vec_int_op(sf, CC_BIN_MUL, q, b, v, diag);
+
+        return vec_int_op(sf, CC_BIN_SUB, a, m, v, diag);
+    }
+    for (k = 0; k < sizeof(map) / sizeof(map[0]); ++k) {
+        if (map[k].op == op) {
+            r = emit_i64_binop_instr(sf, map[k].ssa, a, b, v->is_unsigned, diag);
+            break;
+        }
+    }
+    if (k == sizeof(map) / sizeof(map[0])) {
+        set_diag(diag, "invalid vector operation in lowering");
+        return -1;
+    }
+    if (r >= 0) {
+        set_value_size(sf, r, vs);
+    }
+    return r;
+}
+
+/** The comparison kind of comparison operator @p op. */
+static cc_cmp_kind_t vec_cmp_kind(cc_binop_t op) {
+    switch (op) {
+    case CC_BIN_EQ:
+        return CC_CMP_EQ;
+    case CC_BIN_NE:
+        return CC_CMP_NE;
+    case CC_BIN_LT:
+        return CC_CMP_LT;
+    case CC_BIN_LE:
+        return CC_CMP_LE;
+    case CC_BIN_GT:
+        return CC_CMP_GT;
+    default:
+        return CC_CMP_GE;
+    }
+}
+
+/**
+ * A vector operand of an element-wise operation: a vector's address
+ * (*@p is_vec 1), or a scalar's value (0), already of the element type,
+ * which every element is then combined with.
+ */
+static int vec_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                       var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, int *is_vec,
+                       cc_diag_t *diag) {
+    vec_t dummy;
+    int v = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
+
+    *is_vec = vec_of(tu, e->value_type, e->struct_id, &dummy);
+    if (v >= 0 && !*is_vec && value_type(sf, v) == CC_VAL_I64 && value_size(sf, v) < 4) {
+        set_value_size(sf, v, 4);
+    }
+    return v;
+}
+
+/**
+ * A binary operator on vectors (GCC's vector extension), element by
+ * element into a new temporary: arithmetic in the element type (floating
+ * elements rounded to it), a scalar operand used for every element, and a
+ * comparison giving -1 or 0 in signed integers of the element's size.
+ */
+static int lower_vector_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    vec_t v;
+    int lv;
+    int rv;
+    int a;
+    int b;
+    int r;
+    long i;
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+
+    if (!vec_of(tu, e->lhs->value_type, e->lhs->struct_id, &v) &&
+        !vec_of(tu, e->rhs->value_type, e->rhs->struct_id, &v)) {
+        set_diag(diag, "malformed vector operation in lowering");
+        return -1;
+    }
+    a = vec_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, &lv, diag);
+    b = a < 0 ? -1 : vec_operand(tu, sf, ctx, vars, var_count, depth, e->rhs, &rv, diag);
+    r = b < 0 ? -1 : emit_local_storage_alloc(sf, v.n * v.es, diag);
+    for (i = 0; r >= 0 && i < v.n; ++i) {
+        int x = lv ? vec_ld(sf, a, i, &v, diag) : a;
+        int y = rv ? vec_ld(sf, b, i, &v, diag) : b;
+        int val;
+
+        if (x < 0 || y < 0) {
+            return -1;
+        }
+        if (is_cmp) {
+            /* 1 or 0, made -1 or 0 and widened to the element's size */
+            int c = emit_cmp_instr(sf, vec_cmp_kind(e->op), x, y, v.is_unsigned, diag);
+            int z = c < 0 ? -1 : emit_const_i64_instr(sf, 0);
+
+            if (z >= 0) {
+                set_value_size(sf, c, 4);
+                set_value_size(sf, z, 4);
+            }
+            val = z < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_SUB, z, c, 0, diag);
+            if (val >= 0) {
+                set_value_size(sf, val, 4);
+                if (v.es == 8) {
+                    val = normalize_integral_value(sf, val, CC_TYPE_LONG_LONG, diag);
+                }
+            }
+        } else if (v.is_fp) {
+            static const cc_ssa_opcode_t fops[] = {CC_SSA_ADD, CC_SSA_SUB, CC_SSA_MUL, CC_SSA_DIV};
+            int k = e->op == CC_BIN_ADD ? 0 : e->op == CC_BIN_SUB ? 1 : e->op == CC_BIN_MUL ? 2 : 3;
+
+            val = complex_fop(sf, fops[k], x, y, v.elem, diag);
+        } else {
+            val = vec_int_op(sf, e->op, x, y, &v, diag);
+        }
+        if (vec_st(sf, r, i, v.es, val, diag) != 0) {
+            return -1;
+        }
+    }
+    return r;
+}
+
+/**
+ * A conversion to or from a vector type (CC_EXPR_CAST), keeping the bits:
+ * a vector copied into a new temporary of the target type, an integer of
+ * its size stored into one, or a vector read as an integer.
+ */
+static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    vec_t vt;
+    vec_t vs;
+    int to_vec = vec_of(tu, e->aux_type, e->aux_struct_id, &vt);
+    int from_vec = vec_of(tu, e->lhs->value_type, e->lhs->struct_id, &vs);
+    int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+    cc_ssa_instr_t ld;
+    int r;
+
+    if (src < 0) {
+        return -1;
+    }
+    if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
+        return src;
+    }
+    if (to_vec && from_vec) {
+        r = emit_local_storage_alloc(sf, vt.n * vt.es, diag);
+        return (r < 0 || emit_memcpy_instr(sf, r, src, vt.n * vt.es, diag) != 0) ? -1 : r;
+    }
+    if (to_vec) {
+        r = emit_local_storage_alloc(sf, vt.n * vt.es, diag);
+        return (r < 0 || vec_st(sf, r, 0, vt.n * vt.es, src, diag) != 0) ? -1 : r;
+    }
+    memset(&ld, 0, sizeof(ld));
+    ld.op = CC_SSA_LOAD;
+    ld.dst = new_value(sf, CC_VAL_I64);
+    ld.lhs = src;
+    ld.rhs = -1;
+    ld.imm = vs.n * vs.es;
+    ld.is_unsigned = cc_type_is_unsigned_integral(e->aux_type);
+    if (ld.dst < 0 || push_instr(sf, ld) != 0) {
+        set_diag(diag, "out of memory converting a vector");
+        return -1;
+    }
+    set_value_size(sf, ld.dst, vs.n * vs.es >= 8 ? 8 : 4);
+    return ld.dst;
+}
+
 /**
  * A conversion to or from a wide integer type (CC_EXPR_CAST): between wide
  * types limb by limb, from a narrower integer through its long long value,
@@ -5578,7 +5886,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
         if (e->op != CC_BIN_COMMA && !is_logical_op(e->op) && e->lhs != NULL) {
             wide_t ww;
+            vec_t vv;
 
+            if (vec_of(tu, e->value_type, e->struct_id, &vv) &&
+                (vec_of(tu, e->lhs->value_type, e->lhs->struct_id, &vv) ||
+                 (e->rhs != NULL && vec_of(tu, e->rhs->value_type, e->rhs->struct_id, &vv)))) {
+                return lower_vector_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
+            }
             if (wide_of(tu, e->lhs->value_type, e->lhs->struct_id, &ww)) {
                 return lower_wide_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
@@ -8077,6 +8391,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
 
+        /* i386: the vector arguments in %xmm0-2 and %mm0-2 so far */
+        int vec_n16 = 0;
+        int vec_n8 = 0;
+
         for (i = 0; i < e->arg_count; ++i) {
             cc_value_type_t want;
             int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
@@ -8123,7 +8441,20 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                             pass_union_scalar = 1;
                         }
                     }
-                    if (!is_transparent_union && !pass_union_scalar && agg_size == 0) {
+                    int vec_abi = cc_target_pointer_size() == 4
+                                      ? i386_vector_abi(tu, callee->params[i].type_struct_id, agg_size, &vec_n16,
+                                                        &vec_n8)
+                                      : -1;
+
+                    if (vec_abi >= 0) {
+                        /* an i386 vector: in an xmm or MMX register, or on the stack aligned to its size */
+                        if (CC_ABI_KIND(vec_abi) == CC_CALL_ARG_ABI_AGG_REG) {
+                            pass_agg_reg = 1;
+                            agg_cls = vec_abi & ~0x0f;
+                        } else {
+                            pass_agg_mem = 1;
+                        }
+                    } else if (!is_transparent_union && !pass_union_scalar && agg_size == 0) {
                         in.call_arg_abi[i] = CC_CALL_ARG_ABI_ZERO;
                         arg_size = 0;
                     } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 8 && agg_size > 16) {
@@ -8172,7 +8503,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     want = CC_VAL_I64;
                     if (pass_agg_mem) {
-                        in.call_arg_abi[i] = CC_CALL_ARG_ABI_AGG_MEM;
+                        in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
+                                                             vector_mem_flag(tu, callee->params[i].type_struct_id,
+                                                                             agg_size));
                         arg_size = agg_size;
                     } else if (pass_agg_reg) {
                         in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | agg_cls);
@@ -8280,7 +8613,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 arg_needs_ldouble_abi = 1;
             }
             in.args[i] = av;
-            if (in.call_arg_abi[i] != CC_CALL_ARG_ABI_AGG_MEM &&
+            if (CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_MEM &&
                 CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_REG) {
                 in.call_arg_abi[i] = (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE
                                                      : arg_needs_float_abi ? CC_CALL_ARG_ABI_FLOAT
@@ -8994,6 +9327,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             if ((to_wide && cast_src->kind != CC_EXPR_INIT_LIST) || from_wide) {
                 return lower_wide_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
+            }
+        }
+        if (cast_src->kind != CC_EXPR_INIT_LIST) {
+            vec_t vd;
+            vec_t vs;
+            int to_vec = vec_of(tu, e->aux_type, e->aux_struct_id, &vd);
+            int from_vec = vec_of(tu, cast_src->value_type, cast_src->struct_id, &vs);
+
+            if (to_vec && from_vec && e->aux_struct_id == cast_src->struct_id) {
+                return lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
+            }
+            if (to_vec || from_vec) {
+                return lower_vector_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
         }
         if (aggregate_cast_target) {
@@ -12759,7 +13105,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     return -1;
                 }
                 ret_agg_class = agg_return_class(tu, ctx->fn->ret_struct_id, ret_size);
-                if ((ret_agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)) != 0) {
+                if ((ret_agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)) != 0 ||
+                    (cc_target_pointer_size() == 4 && (ret_agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0)) {
                     /* the backend reads the value from the structure rv points at */
                     ret_size_hint = ret_size;
                     goto append_return;
@@ -16678,8 +17025,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                       : af->ret_type == CC_TYPE_FLOAT ? CC_CALL_ARG_ABI_FLOAT
                                                                       : CC_CALL_ARG_ABI_DEFAULT);
         if (cc_target_pointer_size() <= 4 && af->ret_type == CC_TYPE_VOID && af->ret_struct_id >= 0 &&
-            agg_return_class(tu, af->ret_struct_id, 8) != CC_ABI_RET_EAX_EDX) {
-            /* the i386 psABI returns every struct in memory; a float _Complex comes back in %eax:%edx */
+            agg_return_class(tu, af->ret_struct_id, 8) == 0) {
+            /*
+             * the i386 psABI returns every struct in memory; a float
+             * _Complex comes back in %eax:%edx, and a vector of 4, 8 or
+             * 16 bytes in a register
+             */
             sf->ret_abi = CC_CALL_ARG_ABI_AGG_MEM;
         }
         sf->storage = af->storage;
@@ -16734,6 +17085,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             nest_chain = ch.dst;
         }
 
+        /* i386: the vector parameters that came in %xmm0-2 and %mm0-2 so far */
+        int vec_n16 = 0;
+        int vec_n8 = 0;
+
         for (j = 0; j < af->param_count; ++j) {
             cc_ssa_instr_t in;
             long param_size;
@@ -16743,6 +17098,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             int use_agg_mem_abi = 0;
             int use_agg_reg_abi = 0;
             int agg_reg_storage = -1;
+            int vec_abi;
 
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_PARAM;
@@ -16757,7 +17113,18 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if (param_size <= 0) {
                 param_size = is_aggregate_param && aggregate_size == 0 ? 0 : cc_target_pointer_size();
             }
-            if (is_aggregate_param && aggregate_size == 0) {
+            vec_abi = (is_aggregate_param && cc_target_pointer_size() == 4)
+                          ? i386_vector_abi(tu, af->params[j].type_struct_id, param_size, &vec_n16, &vec_n8)
+                          : -1;
+            if (vec_abi >= 0) {
+                /* an i386 vector: from an xmm or MMX register, or the stack aligned to its size */
+                if (CC_ABI_KIND(vec_abi) == CC_CALL_ARG_ABI_AGG_REG) {
+                    use_agg_reg_abi = 1;
+                    agg_cls = vec_abi & ~0x0f;
+                } else {
+                    use_agg_mem_abi = 1;
+                }
+            } else if (is_aggregate_param && aggregate_size == 0) {
                 /* GNU C empty structs are zero-width ABI parameters. */
             } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size > 16) {
                 use_agg_mem_abi = 1;
@@ -16794,7 +17161,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             sf->param_values[j] = in.dst;
             sf->param_types[j] = type_to_val(af->params[j].type);
             if (use_agg_mem_abi) {
-                sf->param_abi[j] = CC_CALL_ARG_ABI_AGG_MEM;
+                sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
+                                                   vector_mem_flag(tu, af->params[j].type_struct_id, param_size));
             } else if (use_agg_reg_abi) {
                 sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | (agg_cls > 0 ? agg_cls : 0));
             } else if (is_aggregate_param && aggregate_size == 0) {
@@ -16811,8 +17179,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ssa_module_free(out);
                 return -1;
             }
-            if (use_agg_mem_abi) {
-                /* the value is the address of the struct's stack copy, not the struct */
+            if (use_agg_mem_abi || use_agg_reg_abi) {
+                /* the value is the address of the struct's stack copy or storage, not the struct */
                 set_value_size(sf, in.dst, cc_target_pointer_size());
             }
         }
@@ -16839,7 +17207,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
                 if (agg_size == 0) {
                     /* No incoming ABI bytes exist for a GNU empty struct. */
-                } else if (agg_size <= cc_target_pointer_size() && sf->param_abi[j] != CC_CALL_ARG_ABI_AGG_MEM &&
+                } else if (agg_size <= cc_target_pointer_size() &&
+                           CC_ABI_KIND(sf->param_abi[j]) != CC_CALL_ARG_ABI_AGG_MEM &&
                            CC_ABI_KIND(sf->param_abi[j]) != CC_CALL_ARG_ABI_AGG_REG) {
                     /* its bytes came in one integer register; otherwise v is the address of a copy */
                     cc_ssa_instr_t st;

@@ -33,7 +33,8 @@ fi
 fail=0
 runs=0
 for m in $modes; do
-	"$HOST_CC" -m$m -std=$STD -w -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
+	# -Wno-psabi: gcc notes the 32-byte vectors' ABI change (GCC 4.6) even under -w
+	"$HOST_CC" -m$m -std=$STD -w -Wno-psabi -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
 	"$tmp/ref" >"$tmp/ref.out" 2>&1
 	for o in O0 O2; do
 		for mix in main lib; do
@@ -51,7 +52,7 @@ for m in $modes; do
 				fail=1
 				continue
 			fi
-			"$HOST_CC" -m$m -std=$STD -w -c -o "$tmp/theirs.o" "$theirs" || exit 1
+			"$HOST_CC" -m$m -std=$STD -w -Wno-psabi -c -o "$tmp/theirs.o" "$theirs" || exit 1
 			"$HOST_CC" -m$m -no-pie -o "$tmp/mixed" "$tmp/ours.o" "$tmp/theirs.o" || exit 1
 			timeout 10 "$tmp/mixed" >"$tmp/mixed.out" 2>&1
 			if ! cmp -s "$tmp/ref.out" "$tmp/mixed.out"; then
