@@ -438,6 +438,11 @@ const cc_ctype_t *cc_ct_of_expr(const cc_expr_t *e) {
     if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER) {
         return e->ctype;
     }
+    if (e->kind == CC_EXPR_ADDR) {
+        /* `&x` points to x as it is, an array included (no decay) */
+        t = cc_ct_of_expr(e->lhs);
+        return t != NULL ? cc_ct_pointer(t) : NULL;
+    }
     if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_ADD) {
         /* pointer + integer, either way round, as `a[i]` is `*(a + i)` */
         t = cc_ct_decay(cc_ct_of_expr(e->lhs));

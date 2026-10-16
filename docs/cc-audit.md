@@ -278,6 +278,15 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   a file-scope array does, in any brace form; pointer and structure
   element types keep the first-call fill.  `codegen/static_local_tables.c`
   checks ten tables against gcc.
+- [x] **CC-61** sizeof shall give gcc's size for an expression built on
+  a variable with a nested declarator.  For `int (*rows[2])[4]`,
+  `sizeof rows[0]` was 32 on x86-64 (gcc: 8) and `sizeof *rows[0]` 8
+  (gcc: 16); for `char grid[2][3][5]`, `sizeof &grid[1]` was 30 (gcc: 8);
+  `sizeof (rows + 1)` was 64 (gcc: 8); the same for globals.
+  *Reproduced* (both targets).  sizeof folds from the real type of any
+  expression whose type follows from its variables' declarations through
+  `*`, `&`, subscripts and pointer + integer.
+  `codegen/sizeof_expressions.c` checks 25 expressions against gcc.
 
 ## 5. Driver and predefined macros
 
@@ -423,7 +432,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-60 requirements: 34 met, 26 open.
+61 requirements: 35 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

@@ -8335,28 +8335,25 @@ static int fold_sizeof_type(parser_t *p, cc_expr_t *e, const cc_ctype_t *t) {
 }
 
 /**
- * Fold `sizeof x`, for a variable x whose declaration recorded its type,
- * into the integer constant it is, when that type has a size (not a
- * variable-length array).  The declaration in scope here is the one the
- * expression names, so its size is the answer wherever the expression
- * is used.  Otherwise the node is left as it is.
+ * Fold `sizeof x` into the integer constant it is, when x's type is
+ * known from the declarations it names -- a variable, and `*`,
+ * subscripts, `&` and pointer + integer applied to one (see
+ * cc_ct_of_expr()) -- and that type has a size (not a variable-length
+ * array).  The declarations in scope here are the ones the expression
+ * names, so the size is the answer wherever the expression is used.
+ * Otherwise the node is left as it is.
  *
  * @param p  the parser
  * @param e  the CC_EXPR_SIZEOF node with its operand
  */
-static void fold_sizeof_variable(parser_t *p, cc_expr_t *e) {
-    const cc_expr_t *x = e->lhs;
-    int vidx;
+static void fold_sizeof_expr(parser_t *p, cc_expr_t *e) {
+    const cc_ctype_t *t = cc_ct_of_expr(e->lhs);
     long n;
 
-    if (x == NULL || x->kind != CC_EXPR_IDENT || x->ident == NULL) {
+    if (t == NULL) {
         return;
     }
-    vidx = var_find_visible_n(p, x->ident, strlen(x->ident));
-    if (vidx < 0 || p->vars[vidx].ctype == NULL) {
-        return;
-    }
-    n = cc_ct_size(p->vars[vidx].ctype, p->tu);
+    n = cc_ct_size(t, p->tu);
     if (n < 0) {
         return;
     }
@@ -8439,7 +8436,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         e->aux_type = CC_TYPE_VOID;
         e->aux_struct_id = -1;
-        fold_sizeof_variable(p, e);
+        fold_sizeof_expr(p, e);
         return e;
     }
 
