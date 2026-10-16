@@ -65,9 +65,9 @@ test:
 	/tmp/cc_native_if_abs
 	$(TOP)/usr.bin/cc/cc native_c95_digraph.c -o /tmp/cc_native_c95_digraph
 	/tmp/cc_native_c95_digraph
-	$(TOP)/usr.bin/cc/cc native_c95_trigraph.c -o /tmp/cc_native_c95_trigraph
+	$(TOP)/usr.bin/cc/cc -std=c99 native_c95_trigraph.c -o /tmp/cc_native_c95_trigraph
 	/tmp/cc_native_c95_trigraph
-	$(TOP)/usr.bin/cc/cc native_c99_phase12_trigraph_splice.c -o /tmp/cc_native_c99_phase12_trigraph_splice
+	$(TOP)/usr.bin/cc/cc -std=c99 native_c99_phase12_trigraph_splice.c -o /tmp/cc_native_c99_phase12_trigraph_splice
 	/tmp/cc_native_c99_phase12_trigraph_splice
 	$(TOP)/usr.bin/cc/cc -E -std=c23 native_c99_phase12_trigraph_splice.c -o /tmp/cc_native_c99_phase12_trigraph_splice_c23.pp
 	grep -Fq "??=define TG_RET 0" /tmp/cc_native_c99_phase12_trigraph_splice_c23.pp
@@ -612,9 +612,9 @@ test:
 	grep -q "jne" /tmp/cc_native_if_else_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c95_digraph.c -o /tmp/cc_native_c95_digraph_32.s
 	grep -q "\\.code32" /tmp/cc_native_c95_digraph_32.s
-	$(TOP)/usr.bin/cc/cc -m32 -S native_c95_trigraph.c -o /tmp/cc_native_c95_trigraph_32.s
+	$(TOP)/usr.bin/cc/cc -std=c99 -m32 -S native_c95_trigraph.c -o /tmp/cc_native_c95_trigraph_32.s
 	grep -q "jne" /tmp/cc_native_c95_trigraph_32.s
-	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_phase12_trigraph_splice.c -o /tmp/cc_native_c99_phase12_trigraph_splice_32.s
+	$(TOP)/usr.bin/cc/cc -std=c99 -m32 -S native_c99_phase12_trigraph_splice.c -o /tmp/cc_native_c99_phase12_trigraph_splice_32.s
 	grep -q "^main:" /tmp/cc_native_c99_phase12_trigraph_splice_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_ucn_ident.c -o /tmp/cc_native_c99_ucn_ident_32.s
 	grep -q "^main:" /tmp/cc_native_c99_ucn_ident_32.s
@@ -971,7 +971,8 @@ clean:
 	      /tmp/cc_pp_s4_warning_c23.log /tmp/cc_pp_s4_warning_c11.i /tmp/cc_pp_s4_has_c23.i /tmp/cc_pp_s4_has_c11.i /tmp/cc_pp_s4_vaopt_c23.i \
 	      /tmp/cc_pp_s4_vaopt_c11.i /tmp/cc_pp_s4_stdver_c99.i /tmp/cc_pp_s4_stdver_c11.i /tmp/cc_pp_s4_stdver_c17.i \
 	      /tmp/cc_pp_s4_stdver_c23.i /tmp/cc_pp_s4_stdver_gnu11.i /tmp/cc_pp_s4_stdver_gnu17.i /tmp/cc_pp_s4_stdver_gnu23.i \
-	      /tmp/cc_pp_s4_trigraph_c11.i /tmp/cc_pp_s4_trigraph_c23.i /tmp/cc_pp_s4_embed.bin /tmp/cc_pp_s4_embed.c /tmp/cc_pp_s4_embed.i /tmp/cc_pp_s4_embed_c11.i \
+	      /tmp/cc_pp_s4_trigraph_c11.i /tmp/cc_pp_s4_trigraph_c23.i /tmp/cc_pp_s4_trigraph_gnu17.i \
+	      /tmp/cc_pp_s4_trigraph_gnu17t.i /tmp/cc_pp_s4_embed.bin /tmp/cc_pp_s4_embed.c /tmp/cc_pp_s4_embed.i /tmp/cc_pp_s4_embed_c11.i \
 	      /tmp/cc_pp_s5_named_va.i /tmp/cc_pp_s5_named_va_c99.i /tmp/cc_pp_s5_dynmac.i /tmp/cc_pp_s5_include_next.i /tmp/cc_pp_s5_pragma.i \
 	      /tmp/cc_pp_s4_host_gcc.i /tmp/cc_pp_s4_host_clang.i /tmp/cc_pp_s4_host_gcc.ab /tmp/cc_pp_s4_host_clang.ab \
 	      /tmp/cc_pp_s4_ours.ab

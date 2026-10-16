@@ -50,6 +50,11 @@ grep -q '^int ef = 1;$' /tmp/cc_pp_s4_stdver_c23.i
 "$CC_BIN" -E -std=c23 -P pp_s4_trigraph.c -o /tmp/cc_pp_s4_trigraph_c23.i
 grep -q '^int tri = 9;$' /tmp/cc_pp_s4_trigraph_c11.i
 grep -q '^int tri = TRI;$' /tmp/cc_pp_s4_trigraph_c23.i
+# as with gcc, the GNU modes leave trigraphs alone unless -trigraphs is given
+"$CC_BIN" -E -std=gnu17 -P pp_s4_trigraph.c -o /tmp/cc_pp_s4_trigraph_gnu17.i
+"$CC_BIN" -E -std=gnu17 -trigraphs -P pp_s4_trigraph.c -o /tmp/cc_pp_s4_trigraph_gnu17t.i
+grep -q '^int tri = TRI;$' /tmp/cc_pp_s4_trigraph_gnu17.i
+grep -q '^int tri = 9;$' /tmp/cc_pp_s4_trigraph_gnu17t.i
 
 printf 'AB' > /tmp/cc_pp_s4_embed.bin
 cat > /tmp/cc_pp_s4_embed.c <<'EOF'

@@ -1238,7 +1238,7 @@ static const driver_opt_t options[] = {
     {"-I -D -U -iquote -isystem -idirafter", OPT_LETTER, FWD_CPP | FWD_C, NULL, 0, 0},
     {"-include -imacros -MF -MT -MQ", OPT_LETTER, FWD_CPP, NULL, 0, 0},
     {"-M -MM -dM", OPT_FLAG, FWD_CPP, opt_int, F(mode_E), 1},
-    {"-MD -MMD -P", OPT_FLAG, FWD_CPP, NULL, 0, 0},
+    {"-MD -MMD -P -trigraphs", OPT_FLAG, FWD_CPP, NULL, 0, 0},
     {"-nostdinc", OPT_FLAG, FWD_CPP | FWD_C, opt_int, F(nostdinc), 1},
     {"-fpp-max-include-depth -fpp-max-macro-depth -fpp-max-expand-passes "
      "-fpp-max-expanded-bytes -fpp-max-output-bytes -fpp-max-tokens",
@@ -1686,7 +1686,6 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
 static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c,
                                   const char *out_s) {
   char stdflag[64];
-  int want_trigraphs = 1;
   size_t argc = 13 + o->c_flags.count;
   char **argv;
   size_t i;
@@ -1706,9 +1705,6 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c,
   snprintf(stdflag, sizeof(stdflag), "-std=%s",
            o->std != NULL ? o->std : "gnu17");
   argv[at++] = stdflag;
-  if (want_trigraphs) {
-    argv[at++] = "-trigraphs";
-  }
   if (!o->pic && !o->shared) {
     argv[at++] = "-fno-pie";
     argv[at++] = "-no-pie";

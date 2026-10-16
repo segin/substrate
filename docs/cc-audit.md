@@ -514,10 +514,15 @@ they stand.  *Reproduced* unless marked.
   counted a `+` output once; it now counts it twice, as an output and
   its implicit input, in both the check (sema) and the rendering.  A
   negative case checks that `%l0` is rejected.
-- [ ] **CC-39** The default `gnu17` mode shall treat trigraphs as gcc's
+- [x] **CC-39** The default `gnu17` mode shall treat trigraphs as gcc's
   GNU modes do, or the trigraph tests shall name an ISO mode:
   `native_c95_trigraph.c` and `native_c99_phase12_trigraph_splice.c`
-  rely on trigraphs in `gnu17`, where gcc ignores them.
+  rely on trigraphs in `gnu17`, where gcc ignores them.  Both: the
+  preprocessor replaces trigraphs only in the ISO modes before C23, or
+  with `-trigraphs`, as gcc does; the parser's second trigraph pass over
+  already-preprocessed text is gone, and so is the `-trigraphs` the
+  gcc bootstrap frontend forced; the two tests name `-std=c99`, and
+  `run_pp_postc99.sh` checks gnu17 with and without `-trigraphs`.
 - [ ] **CC-40** A `clang_*` test shall pass under clang.  Of five, two
   do (`asm_goto_quirks`, `builtin_aliases`).
   `native_clang_blocks_decl.c` assigns a function to a block pointer,
@@ -588,7 +593,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 57 met, 13 open.
+70 requirements: 58 met, 12 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

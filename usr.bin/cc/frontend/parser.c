@@ -6397,49 +6397,6 @@ static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
     return 0;
 }
 
-static int trigraph_replacement(int c) {
-    switch (c) {
-    case '=':
-        return '#';
-    case '/':
-        return '\\';
-    case '\'':
-        return '^';
-    case '(':
-        return '[';
-    case ')':
-        return ']';
-    case '!':
-        return '|';
-    case '<':
-        return '{';
-    case '>':
-        return '}';
-    case '-':
-        return '~';
-    default:
-        return -1;
-    }
-}
-
-static size_t normalize_c95_trigraphs(char *buf, size_t len) {
-    size_t r = 0;
-    size_t w = 0;
-
-    while (r < len) {
-        if (r + 2 < len && buf[r] == '?' && buf[r + 1] == '?') {
-            int repl = trigraph_replacement((unsigned char)buf[r + 2]);
-            if (repl >= 0) {
-                buf[w++] = (char)repl;
-                r += 3;
-                continue;
-            }
-        }
-        buf[w++] = buf[r++];
-    }
-    return w;
-}
-
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_assign(parser_t *p);
 static int parse_stmt(parser_t *p, cc_stmt_t *s);
@@ -11194,10 +11151,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     }
     buf[sz] = '\0';
     fclose(fp);
-    if (!cc_lang_at_least(2023)) {
-        sz = normalize_c95_trigraphs(buf, sz);
-        buf[sz] = '\0';
-    }
+    /* trigraphs were the preprocessor's to replace (translation phase 1) */
 
     memset(&p, 0, sizeof(p));
     p.diag = diag;

@@ -445,7 +445,8 @@ static void pp_set_lang(pp_state_t *st, const cc_lang_t *lang) {
     st->std_is_c17 = lang->year >= 2017;
     st->std_is_c23 = lang->year >= 2023;
     st->std_is_gnu = lang->gnu;
-    st->enable_trigraphs = lang->year < 2023;
+    /* as gcc: the ISO modes before C23 replace trigraphs, the GNU modes do not (-trigraphs turns them on) */
+    st->enable_trigraphs = !lang->gnu && lang->year < 2023;
     if (lang->year >= 2023) {
         st->std_version = 202311;
     } else if (lang->year >= 2017) {
@@ -2609,6 +2610,10 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
         const char *f = flags[i];
         if (strcmp(f, "-P") == 0) {
             st->emit_line_markers = 0;
+            continue;
+        }
+        if (strcmp(f, "-trigraphs") == 0) {
+            st->enable_trigraphs = 1;
             continue;
         }
         if (strcmp(f, "-dM") == 0) {

@@ -78,6 +78,16 @@ Add a late include search path.
 Forced include/macro inputs.
 .It Fl P
 Suppress line markers in preprocessor output.
+.It Fl trigraphs
+Replace trigraphs
+.Pq Ql ??=
+for
+.Ql #
+and so on.
+As with
+.Xr gcc 1 ,
+they are replaced by default only in the ISO modes before C23
+.Pq Fl std Ns = Ns Ar c99 , not Ar gnu99 .
 .It Fl dM
 Dump macro definitions.
 .It Fl M , Fl MM , Fl MD , Fl MMD
