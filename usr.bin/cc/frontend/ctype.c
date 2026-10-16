@@ -435,7 +435,8 @@ const cc_ctype_t *cc_ct_of_expr(const cc_expr_t *e) {
     if (e == NULL) {
         return NULL;
     }
-    if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER || e->kind == CC_EXPR_CALL) {
+    if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER || e->kind == CC_EXPR_CALL ||
+        e->kind == CC_EXPR_CAST) {
         return e->ctype;
     }
     if (e->kind == CC_EXPR_ADDR) {

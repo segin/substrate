@@ -8441,8 +8441,13 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, &cast_array_len, &cast_array_ndim, cast_array_dims,
-                                1, "expected cast type") != 0) {
+            if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &cast_array_len, &cast_array_ndim,
+                                   cast_array_dims, 1, "expected cast type", &e->ctype) != 0) {
+                free_expr(e);
+                return NULL;
+            }
+            if (e->ctype != NULL && e->ctype->kind == CC_CT_FUNCTION) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "cast specifies function type");
                 free_expr(e);
                 return NULL;
             }

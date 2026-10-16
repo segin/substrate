@@ -403,6 +403,21 @@ static int pointer_depth(cc_type_t t) {
     return (int)cc_type_pointer_depth(t);
 }
 
+/**
+ * Whether the operand of a `*` is a cast, or a cast plus or minus an
+ * integer (a subscript of one): `*(T)p`, `((T)p)[i]`.
+ *
+ * @param x  the operand
+ * @return   1 if so, else 0
+ */
+static int deref_operand_is_cast(const cc_expr_t *x) {
+    if (x != NULL && x->kind == CC_EXPR_BIN && (x->op == CC_BIN_ADD || x->op == CC_BIN_SUB) && x->lhs != NULL &&
+        x->rhs != NULL) {
+        x = is_pointer_type(x->lhs->value_type) ? x->lhs : x->rhs;
+    }
+    return x != NULL && x->kind == CC_EXPR_CAST;
+}
+
 static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
     if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
         return 0;
@@ -3895,6 +3910,18 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (cc_ct_expr_designates_function(e->lhs)) {
             /* `*fp` is the function fp points to; as a value it is fp again */
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+        }
+        if (deref_operand_is_cast(e->lhs)) {
+            /*
+             * `*(T)p` or `((T)p)[i]`, T a pointer to an array: the result is
+             * that array, and as a value its address -- the operand again.
+             * Only through a cast: elsewhere the legacy array bounds carry
+             * this, and the paths that read them take the address themselves.
+             */
+            const cc_ctype_t *t = cc_ct_of_expr(e);
+            if (t != NULL && t->kind == CC_CT_ARRAY) {
+                return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+            }
         }
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);

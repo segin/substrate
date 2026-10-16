@@ -319,6 +319,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   definition, and a call records its function's return type, so
   `(*row_of(1))[2]`, `row_of(2)[0][3]` and `sizeof *row_of(0)` give gcc's
   answers.  `codegen/function_declarators.c` checks eight functions.
+- [x] **CC-65** A cast to a pointer to an array shall index and size as
+  gcc does.  `((int (*)[4])p)[2][1]` and `(*(int (*)[4])p)[3]` loaded
+  from the array instead of taking its address and died of SIGSEGV;
+  `sizeof ((int (*)[4])p)[1]` failed ("unsupported sizeof operand in
+  lowering").  *Reproduced* (both targets).  A cast records its type,
+  which sizeof, pointer steps and `*` follow.  `codegen/cast_declarators.c`
+  checks twelve expressions against gcc.
 
 ## 5. Driver and predefined macros
 
@@ -464,7 +471,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-64 requirements: 38 met, 26 open.
+65 requirements: 39 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
