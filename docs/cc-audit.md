@@ -295,6 +295,15 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   died of SIGSEGV.  *Reproduced* (both targets).  The step is taken
   from the operand's real type wherever it is known.
   `codegen/pointer_steps.c` checks 21 expressions against gcc.
+- [x] **CC-63** `__builtin_object_size(p, 0)` shall give the bytes left
+  in the object p points into.  It gave the size of the expression p:
+  for `char dst[8]`, 8 for `dst + 7` (gcc: 1) and `&dst[2]` (gcc: 6), so
+  `__builtin___memcpy_chk` let a copy past the end through; 32 for
+  `arr[1]` of a `long arr[3][4]` (gcc: 64); the pointer's own size for
+  `&x` and, on i386, for `&dst`.  *Reproduced* (both targets).  The
+  object and the offset into it are found from real types: arrays, `&`,
+  subscripts and pointer +/- a constant.  `codegen/builtin_object_size.c`
+  checks nine pointers against gcc -O2.
 
 ## 5. Driver and predefined macros
 
@@ -440,7 +449,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-62 requirements: 36 met, 26 open.
+63 requirements: 37 met, 26 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

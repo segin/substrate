@@ -1786,6 +1786,61 @@ static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int 
     return array_type_size_bytes(tu, t, struct_id, array_ndim, array_dims);
 }
 
+/**
+ * Find the object a pointer expression points into and how far into it,
+ * from real types: an array (which decays to its start), `&x`, and
+ * pointer + or - an integer constant, `&a[i]` included.
+ *
+ * @param tu          the translation unit, for structure sizes
+ * @param e           the pointer expression
+ * @param out_size    receives the object's size in bytes
+ * @param out_offset  receives the offset into it in bytes
+ * @return            1 if found, 0 if not
+ */
+static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_size,
+                                 long *out_offset) {
+    const cc_ctype_t *t;
+    long step;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_ADDR && e->lhs != NULL) {
+        const cc_expr_t *x = e->lhs;
+        if (x->kind == CC_EXPR_DEREF && x->lhs != NULL) {
+            return pointed_object_extent(tu, x->lhs, out_size, out_offset);  /* &*p, &a[i] */
+        }
+        t = cc_ct_of_expr(x);
+        *out_size = cc_ct_size(t, tu);
+        *out_offset = 0;
+        return *out_size > 0;
+    }
+    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && e->lhs != NULL &&
+        e->rhs != NULL && e->rhs->kind == CC_EXPR_INT) {
+        t = cc_ct_decay(cc_ct_of_expr(e->lhs));
+        if (t == NULL || t->kind != CC_CT_POINTER) {
+            return 0;
+        }
+        step = cc_ct_size(t->of, tu);
+        if (step <= 0 || !pointed_object_extent(tu, e->lhs, out_size, out_offset)) {
+            return 0;
+        }
+        *out_offset += (e->op == CC_BIN_ADD ? 1 : -1) * (long)e->rhs->int_val * step;
+        return 1;
+    }
+    t = cc_ct_of_expr(e);
+    if (t != NULL && t->kind == CC_CT_ARRAY) {
+        if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
+            /* a row, `a[i]`: part of the array it was taken from */
+            return pointed_object_extent(tu, e->lhs, out_size, out_offset);
+        }
+        *out_size = cc_ct_size(t, tu);
+        *out_offset = 0;
+        return *out_size > 0;
+    }
+    return 0;
+}
+
 static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                               const cc_expr_t *e) {
     if (e == NULL) {
@@ -5480,7 +5535,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
             }
-            n = sizeof_expr_bytes(tu, vars, var_count, depth, e->args[0]);
+            {
+                long obj_size;
+                long obj_off;
+                if (pointed_object_extent(tu, e->args[0], &obj_size, &obj_off)) {
+                    /* what is left of the object past the pointer */
+                    n = (obj_off >= 0 && obj_off <= obj_size) ? obj_size - obj_off : 0;
+                } else {
+                    n = sizeof_expr_bytes(tu, vars, var_count, depth, e->args[0]);
+                }
+            }
             if (n < 0) {
                 n = (mode & 2L) ? 0 : -1;
             }
