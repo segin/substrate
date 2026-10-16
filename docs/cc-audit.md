@@ -495,11 +495,18 @@ they stand.  *Reproduced* unless marked.
   `\U000003b1`, a negative case `\u0041`) and a static object's
   initializer that calls a function, assigns or increments (the test is
   now a negative case).  All five pass under gcc.
-- [ ] **CC-37** A runtime test shall not depend on unspecified
+- [x] **CC-37** A runtime test shall not depend on unspecified
   behaviour.  `native_c99_types.c`, `native_c99_inline_semantics.c` and
   `native_gnu89_inline.c` call a function with only an inline
   definition; whether that uses the inline or an external definition is
-  unspecified (C11 6.7.4p7), and gcc's build does not link.
+  unspecified (C11 6.7.4p7), and gcc's build does not link.  The tests
+  now call only functions with an external definition (or a static
+  inline one) and check the linkage rules in the assembly: C99 inline
+  alone, `extern inline`, and inline beside an `extern` declaration.
+  The gnu89 test asserted that `extern inline` is emitted externally,
+  the reverse of GNU89 -- and cc did so; it now emits it as a local copy
+  with no external symbol, as gcc emits none.  All three link and run
+  under gcc.
 - [x] **CC-38** `native_gnu_asm_goto.c` shall number asm-goto labels as
   GNU C does: after outputs and inputs, so with one `+r` output the
   first label is `%l2`, not `%l0`.  gcc rejects the test; cc fails it
@@ -581,7 +588,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 56 met, 14 open.
+70 requirements: 57 met, 13 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

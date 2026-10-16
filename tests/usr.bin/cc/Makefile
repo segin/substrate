@@ -138,6 +138,7 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=c99 -S native_c99_inline_semantics.c -o /tmp/cc_native_c99_inline_semantics.s
 	! grep -q "^\\.globl add_local$$" /tmp/cc_native_c99_inline_semantics.s
 	grep -q "^\\.globl add_ext$$" /tmp/cc_native_c99_inline_semantics.s
+	grep -q "^\\.globl add_both$$" /tmp/cc_native_c99_inline_semantics.s
 	$(TOP)/usr.bin/cc/cc native_c99_complex_decl.c -o /tmp/cc_native_c99_complex_decl
 	/tmp/cc_native_c99_complex_decl
 	$(TOP)/usr.bin/cc/cc native_c99_imaginary_decl.c -o /tmp/cc_native_c99_imaginary_decl
@@ -519,7 +520,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline
 	/tmp/cc_native_gnu89_inline
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline -S native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline.s
-	grep -q "^\\.globl add_inline" /tmp/cc_native_gnu89_inline.s
+	grep -q "^\\.globl add_inline$$" /tmp/cc_native_gnu89_inline.s
+	! grep -q "^\\.globl add_ext$$" /tmp/cc_native_gnu89_inline.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_basic.c -o /tmp/cc_native_gnu_asm_basic
 	/tmp/cc_native_gnu_asm_basic
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_basic.c -o /tmp/cc_native_gnu_asm_basic.s

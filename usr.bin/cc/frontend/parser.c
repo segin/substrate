@@ -10851,13 +10851,14 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     f->ret_struct_id = ftype_sid;
     f->storage = fn_storage;
-    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0 &&
-        cc_options_gnu89_inline()) {
+    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_STATIC) == 0 && cc_options_gnu89_inline()) {
         /*
-         * GNU89 inline mode keeps plain inline definitions externally
-         * visible unless explicitly static.
+         * GNU89 inline is C99's reversed: plain `inline` is an external
+         * definition, and `extern inline` is for inlining only -- what C99
+         * calls an inline definition, which cc emits as a local copy and
+         * no external symbol.
          */
-        f->storage |= CC_STORAGE_EXTERN;
+        f->storage ^= CC_STORAGE_EXTERN;
     }
     if (skip_decl_gnu_suffix(p, &suffix_attrs) != 0) {
         decl_attrs_clear(&spec_attrs);

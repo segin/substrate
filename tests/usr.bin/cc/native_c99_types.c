@@ -1,4 +1,5 @@
-inline long long add_ll(long long a, long long b) {
+/* static: an inline definition alone may leave a call to add_ll unresolved (C11 6.7.4p7) */
+static inline long long add_ll(long long a, long long b) {
     return a + b;
 }
 
