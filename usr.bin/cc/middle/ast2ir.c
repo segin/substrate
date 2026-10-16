@@ -8387,8 +8387,9 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t st
         return -1;
     }
 
-    if (store_size == 16) {
-        int off = emit_const_i64_instr(sf, 9);
+    {
+        /* the sign is the top bit of the last byte: float 3, double 7, long double 9 (80-bit) */
+        int off = emit_const_i64_instr(sf, store_size == 4 ? 3 : (store_size == 16 ? 9 : 7));
         if (off < 0) {
             return -1;
         }
@@ -8402,7 +8403,7 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t st
     in.op = CC_SSA_LOAD;
     in.dst = new_value(sf, CC_VAL_I64);
     in.lhs = tmp_ptr;
-    in.imm = store_size == 16 ? 1 : store_size;
+    in.imm = 1;
     in.is_unsigned = 1;
     if (in.dst < 0 || push_instr(sf, in) != 0) {
         set_diag(diag, "out of memory loading floating signbit bits");
@@ -8410,8 +8411,7 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t st
     }
     bits = in.dst;
 
-    mask = emit_const_u64_instr(
-        sf, store_size == 4 ? 0x80000000ULL : (store_size == 16 ? 0x80ULL : 0x8000000000000000ULL), diag);
+    mask = emit_const_u64_instr(sf, 0x80ULL, diag);
     if (mask < 0) {
         return -1;
     }
