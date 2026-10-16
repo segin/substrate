@@ -1500,6 +1500,7 @@ typedef enum {
     BUILTIN_CTZ,
     BUILTIN_FFS,
     BUILTIN_POPCOUNT,
+    BUILTIN_PARITY,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
     BUILTIN_MUL_OVERFLOW,
@@ -1604,6 +1605,10 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
         strcmp(name, "__builtin_popcountll") == 0) {
         return BUILTIN_POPCOUNT;
+    }
+    if (strcmp(name, "__builtin_parity") == 0 || strcmp(name, "__builtin_parityl") == 0 ||
+        strcmp(name, "__builtin_parityll") == 0) {
+        return BUILTIN_PARITY;
     }
     if (strcmp(name, "__builtin_add_overflow") == 0) {
         return BUILTIN_ADD_OVERFLOW;
@@ -2654,16 +2659,20 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
-        if (bk == BUILTIN_POPCOUNT) {
+        if (bk == BUILTIN_POPCOUNT || bk == BUILTIN_PARITY) {
+            const char *what = bk == BUILTIN_PARITY ? "__builtin_parity" : "__builtin_popcount";
+            char msg[96];
             if (e->arg_count != 1) {
-                set_diag(diag, "__builtin_popcount expects exactly 1 argument");
+                snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", what);
+                set_diag(diag, msg);
                 return -1;
             }
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             if (!cc_type_is_integral(e->args[0]->value_type)) {
-                set_diag(diag, "__builtin_popcount argument must be integral");
+                snprintf(msg, sizeof(msg), "%s argument must be integral", what);
+                set_diag(diag, msg);
                 return -1;
             }
             e->value_type = CC_TYPE_INT;

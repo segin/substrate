@@ -2035,6 +2035,7 @@ typedef enum {
     BUILTIN_CTZ,
     BUILTIN_FFS,
     BUILTIN_POPCOUNT,
+    BUILTIN_PARITY,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
     BUILTIN_MUL_OVERFLOW,
@@ -2139,6 +2140,10 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
         strcmp(name, "__builtin_popcountll") == 0) {
         return BUILTIN_POPCOUNT;
+    }
+    if (strcmp(name, "__builtin_parity") == 0 || strcmp(name, "__builtin_parityl") == 0 ||
+        strcmp(name, "__builtin_parityll") == 0) {
+        return BUILTIN_PARITY;
     }
     if (strcmp(name, "__builtin_add_overflow") == 0) {
         return BUILTIN_ADD_OVERFLOW;
@@ -5171,6 +5176,48 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 v = bin.dst;
             }
             return lower_popcount(sf, v, (int)mem_size * 8, diag);
+        }
+        if (bk == BUILTIN_PARITY) {
+            /* the low bit of the set-bit count, of the argument converted to the builtin's width */
+            int bits = builtin_bitop_width(e);
+            long arg_size;
+            int v;
+            int cnt;
+            int one;
+
+            if (e->arg_count != 1 || e->args[0] == NULL) {
+                set_diag(diag, "__builtin_parity lowering expects 1 argument");
+                return -1;
+            }
+            v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (v < 0 || (v = cast_value(sf, v, CC_VAL_I64, diag)) < 0) {
+                return -1;
+            }
+            arg_size = type_size_bytes_with_struct(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            if (arg_size <= 0 || arg_size > 8) {
+                arg_size = 8;
+            }
+            /*
+             * A wider argument is truncated to the builtin's width.  A narrower
+             * one is extended to it, which adds either no set bits or a multiple
+             * of 8 of them -- never changing the parity -- so its own bits are
+             * enough, and masking to them drops whatever the extension put above.
+             */
+            if (arg_size * 8 < bits) {
+                bits = (int)arg_size * 8;
+            }
+            if (bits < 64) {
+                int mask = emit_const_i64_instr(sf, (long long)((1ULL << bits) - 1ULL));
+                if (mask < 0 || (v = emit_i64_binop_instr(sf, CC_SSA_AND, v, mask, 1, diag)) < 0) {
+                    return -1;
+                }
+            }
+            cnt = lower_popcount(sf, v, bits, diag);
+            one = emit_const_i64_instr(sf, 1);
+            if (cnt < 0 || one < 0) {
+                return -1;
+            }
+            return emit_i64_binop_instr(sf, CC_SSA_AND, cnt, one, 1, diag);
         }
         if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW ||
             bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
