@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
-| 4. ABI and other code generation | 35 | 32 |
+| 4. ABI and other code generation | 36 | 33 |
 | 5. Driver and predefined macros | 3 | 3 |
 | 6. The restored suite's failing commands | 10 | 10 |
 | 7. The restored suite itself | 12 | 12 |
@@ -367,6 +367,11 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   Local and global scalars were right.  *Reproduced* (-m64).  The
   assignment and the structure initializer now widen the value first.
   `codegen/ldouble_convert.c`.
+- [x] **CC-78** A floating constant with an `f` suffix shall be the float
+  nearest its digits.  cc kept the double, so `0.1f` widened to double
+  was `0.10000000000000001` (gcc: `0.10000000149011612`) and `x == 0.1f`
+  was false for `float x = 0.1f`.  *Reproduced* (both widths).  The
+  lexer converts it with `strtof`.  `codegen/float_literal.c`.
 - [x] **CC-79** A floating value of 2^63 or more converted to
   `unsigned long long` shall be that value.  `cvttsd2si` and `fistpll`
   convert to a signed integer, so every such value became 2^63
@@ -789,7 +794,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-78 requirements: 75 met, 3 open.
+79 requirements: 76 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

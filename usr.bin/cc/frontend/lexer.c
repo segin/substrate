@@ -776,8 +776,14 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
         char tmp[128];
         copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
         out->is_float = 1;
-        out->fnum = strtod(tmp, NULL);
-        out->fnum_ld = strtold(tmp, NULL);
+        if (out->float_is_single) {
+            /* a float constant is the float nearest its digits, not the double */
+            out->fnum = (double)strtof(tmp, NULL);
+            out->fnum_ld = (long double)out->fnum;
+        } else {
+            out->fnum = strtod(tmp, NULL);
+            out->fnum_ld = strtold(tmp, NULL);
+        }
     } else {
         char tmp[128] = {0};
         char *parse_s = tmp;
