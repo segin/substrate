@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
-| 4. ABI and other code generation | 34 | 31 |
+| 4. ABI and other code generation | 35 | 32 |
 | 5. Driver and predefined macros | 3 | 3 |
 | 6. The restored suite's failing commands | 10 | 10 |
 | 7. The restored suite itself | 12 | 12 |
@@ -367,6 +367,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   Local and global scalars were right.  *Reproduced* (-m64).  The
   assignment and the structure initializer now widen the value first.
   `codegen/ldouble_convert.c`.
+- [x] **CC-79** A floating value of 2^63 or more converted to
+  `unsigned long long` shall be that value.  `cvttsd2si` and `fistpll`
+  convert to a signed integer, so every such value became 2^63
+  (`12345678901234567891.0` gave 9223372036854775808), at run time, in
+  the optimizer's folding and in static initializers.  *Reproduced* (both
+  widths).  The conversion compares with 2^63 and converts the excess
+  with the top bit set back, as gcc does; the folders convert through
+  `unsigned long long`, and the unsignedness stays on the conversion when
+  a later cast relabels its value (`(long long)(unsigned long long)d`).
+  `codegen/float_to_u64.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -779,7 +789,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-77 requirements: 74 met, 3 open.
+78 requirements: 75 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

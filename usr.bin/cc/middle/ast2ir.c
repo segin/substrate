@@ -588,6 +588,21 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
     return -1;
 }
 
+/**
+ * A floating constant converted to integer type @p t, as an initializer's
+ * bits: through unsigned long long for an unsigned type, since converting
+ * a value of 2^63 or more to long long is undefined (and gives 2^63).
+ */
+static long long fp_const_to_int(double v, cc_type_t t) {
+    if (t == CC_TYPE_BOOL) {
+        return v != 0.0;
+    }
+    if (cc_type_is_unsigned_integral(t) && v >= 0.0) {
+        return (long long)(unsigned long long)v;
+    }
+    return (long long)v;
+}
+
 /** An eightbyte's x86-64 psABI class (System V psABI 3.2.3), in merge order. */
 enum { ABI64_NONE = 0, ABI64_SSE, ABI64_INTEGER, ABI64_X87, ABI64_MEMORY };
 
@@ -3153,11 +3168,18 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
         int src_unsigned = value_is_unsigned(sf, v);
         size_t k;
 
-        /* a floating value converts straight to 64 bits; nothing to extend */
+        /*
+         * A floating value converts straight to 64 bits; nothing to
+         * extend.  Whether the conversion is to unsigned goes on the
+         * conversion itself: a later cast may relabel its value signed.
+         */
         for (k = sf->instr_count; k > 0; --k) {
             if (sf->instrs[k - 1].dst == v) {
                 if (sf->instrs[k - 1].op == CC_SSA_F2I) {
                     cur_size = 8;
+                    if (want_unsigned) {
+                        sf->instrs[k - 1].is_unsigned = 1;
+                    }
                 }
                 break;
             }
@@ -10722,7 +10744,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 init_f_ld = (long double)init_i;
                 init_is_float = 1;
             } else if (g.has_init && cc_type_is_integral(g.type) && init_is_float) {
-                init_i = g.type == CC_TYPE_BOOL ? init_f != 0.0 : (long long)init_f;
+                init_i = fp_const_to_int(init_f, g.type);
                 init_is_float = 0;
             }
             g.init_i = init_i;
@@ -15834,7 +15856,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     init_f_ld = (long double)init_i;
                     init_is_float = 1;
                 } else if (cc_type_is_integral(out->globals[i].type) && init_is_float) {
-                    init_i = (long long)init_f;
+                    init_i = fp_const_to_int(init_f, out->globals[i].type);
                     init_is_float = 0;
                 }
             }

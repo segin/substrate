@@ -233,10 +233,14 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_F2I:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_F64) {
                 long double src = value_is_ldouble(f, in->lhs) ? st[in->lhs].ld : (long double)st[in->lhs].f;
+                int to_unsigned = in->is_unsigned || (f->value_is_unsigned != NULL && f->value_is_unsigned[dst]);
+
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;
                 in->rhs = -1;
-                in->imm = (long long)src;
+                /* 2^63 and more fit only an unsigned long long; as long long the conversion is undefined */
+                in->imm = (to_unsigned && src >= 9223372036854775808.0L) ? (long long)(unsigned long long)src
+                                                                          : (long long)src;
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_I64;
                 st[dst].i = in->imm;

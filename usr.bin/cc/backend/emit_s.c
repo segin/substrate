@@ -128,6 +128,8 @@ static unsigned long next_aux_label_id(void) {
     return g_aux_label_serial++;
 }
 
+static void emit_x87_store_i64(FILE *fp, const char *base, int out, int k, int is_unsigned);
+
 static const char *setcc_int_mnemonic(cc_cmp_kind_t k, int is_unsigned) {
     switch (k) {
     case CC_CMP_EQ:
@@ -5046,6 +5048,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_F2I:
                 {
+                    int f2i_u64 = value_size_bytes(f, in->dst, 8) >= 8 &&
+                                  (in->is_unsigned || (f->value_is_unsigned != NULL && f->value_is_unsigned[in->dst]));
+
                     if (value_size_bytes(f, in->lhs, 8) >= 16) {
                         int rd;
                         int_regs_flush(fp, f, &lay, &ist);
@@ -5056,10 +5061,27 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         fprintf(fp, "\tmovw %%ax, -14(%%rsp)\n");
                         fprintf(fp, "\tfldcw -14(%%rsp)\n");
                         fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(&lay, in->lhs));
-                        fprintf(fp, "\tfistpll -8(%%rsp)\n");
+                        emit_x87_store_i64(fp, "%rsp", -8, -20, f2i_u64);
                         fprintf(fp, "\tfldcw -16(%%rsp)\n");
                         rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                         fprintf(fp, "\tmovq -8(%%rsp), %s\n", ist.regs[rd]);
+                    } else if (f2i_u64) {
+                        /* cvttsd2si is signed: from 2^63 up, convert less 2^63 and set the top bit back */
+                        unsigned long lid = next_aux_label_id();
+                        int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+
+                        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(&lay, in->lhs));
+                        fprintf(fp, "\tmovabsq $0x43e0000000000000, %s\n", ist.regs[rd]);
+                        fprintf(fp, "\tmovq %s, %%xmm14\n", ist.regs[rd]);
+                        fprintf(fp, "\tucomisd %%xmm14, %%xmm15\n");
+                        fprintf(fp, "\tjae .L__cc_d2u64_big_%lu\n", lid);
+                        fprintf(fp, "\tcvttsd2siq %%xmm15, %s\n", ist.regs[rd]);
+                        fprintf(fp, "\tjmp .L__cc_d2u64_done_%lu\n", lid);
+                        fprintf(fp, ".L__cc_d2u64_big_%lu:\n", lid);
+                        fprintf(fp, "\tsubsd %%xmm14, %%xmm15\n");
+                        fprintf(fp, "\tcvttsd2siq %%xmm15, %s\n", ist.regs[rd]);
+                        fprintf(fp, "\tbtcq $63, %s\n", ist.regs[rd]);
+                        fprintf(fp, ".L__cc_d2u64_done_%lu:\n", lid);
                     } else {
                         int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                         fprintf(fp, "\tcvttsd2siq %d(%%rbp), %s\n", slot_off(&lay, in->lhs), ist.regs[rd]);
@@ -5614,9 +5636,41 @@ static void emit_i386_i2f_x87(FILE *fp, const cc_ssa_function_t *f, const slot_l
  * straight to the destination's slot, as the flush leaves no register
  * bound.
  */
+/**
+ * Store %st0, truncated, as a 64-bit integer at @p out -- unsigned if
+ * @p is_unsigned: fistpll converts to a signed one, so a value of 2^63 or
+ * more is converted less 2^63 and given its top bit back.  @p k (4 bytes
+ * at it, base register @p base) holds the float 2^63 meanwhile.  Clobbers
+ * %eax.
+ */
+static void emit_x87_store_i64(FILE *fp, const char *base, int out, int k, int is_unsigned) {
+    unsigned long lid;
+
+    if (!is_unsigned) {
+        fprintf(fp, "\tfistpll %d(%s)\n", out, base);
+        return;
+    }
+    lid = next_aux_label_id();
+    fprintf(fp, "\tmovl $0x5f000000, %d(%s)\n", k, base);
+    fprintf(fp, "\tflds %d(%s)\n", k, base);
+    fprintf(fp, "\tfcomp %%st(1)\n");
+    fprintf(fp, "\tfnstsw %%ax\n");
+    fprintf(fp, "\tsahf\n");
+    fprintf(fp, "\tjbe .L__cc_f2u64_big_%lu\n", lid);
+    fprintf(fp, "\tfistpll %d(%s)\n", out, base);
+    fprintf(fp, "\tjmp .L__cc_f2u64_done_%lu\n", lid);
+    fprintf(fp, ".L__cc_f2u64_big_%lu:\n", lid);
+    fprintf(fp, "\tfsubs %d(%s)\n", k, base);
+    fprintf(fp, "\tfistpll %d(%s)\n", out, base);
+    fprintf(fp, "\txorl $0x80000000, %d(%s)\n", out + 4, base);
+    fprintf(fp, ".L__cc_f2u64_done_%lu:\n", lid);
+}
+
 static void emit_i386_f2i_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                               const cc_ssa_instr_t *in, int scratch_off) {
     int dst = slot_off(lay, in->dst);
+    int is_u64 = value_size_bytes(f, in->dst, 4) >= 8 &&
+                 (in->is_unsigned || (f->value_is_unsigned != NULL && f->value_is_unsigned[in->dst]));
 
     int_regs_flush(fp, f, lay, ist);
     fprintf(fp, "\tfnstcw %d(%%ebp)\n", scratch_off);
@@ -5625,7 +5679,7 @@ static void emit_i386_f2i_x87(FILE *fp, const cc_ssa_function_t *f, const slot_l
     fprintf(fp, "\tmovw %%ax, %d(%%ebp)\n", scratch_off + 2);
     fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off + 2);
     emit_i386_x87_load_f64(fp, f, lay, in->lhs);
-    fprintf(fp, "\tfistpll %d(%%ebp)\n", scratch_off + 4);
+    emit_x87_store_i64(fp, "%ebp", scratch_off + 4, scratch_off + 12, is_u64);
     fprintf(fp, "\tfldcw %d(%%ebp)\n", scratch_off);
     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", scratch_off + 4);
     fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dst);
