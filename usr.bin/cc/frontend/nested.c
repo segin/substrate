@@ -328,7 +328,7 @@ static int uses_outer_rec(const cc_translation_unit_t *tu, const cc_function_t *
 
 /**
  * Whether a nested function uses any of the enclosing function's variables,
- * and so takes their addresses as a hidden first argument: it names one --
+ * and so is given their addresses in the static chain register: it names one --
  * any identifier with an outer variable's name other than one of its own
  * parameters; one hidden by a local of it still counts, which costs only
  * the argument -- or calls a nested function that does.

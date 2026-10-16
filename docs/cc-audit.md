@@ -272,7 +272,7 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   sizes.  `sizeof` of a type name with run-time bounds is the product of
   every level's bound and the element size.  `codegen/vla_pointers.c`
   covers these, matching gcc at both widths.
-- [ ] **CC-73** The address of a GNU nested function that uses the
+- [x] **CC-73** The address of a GNU nested function that uses the
   enclosing function's variables shall be usable as a function pointer
   (gcc builds a trampoline on the stack that loads the static chain).
   cc passes those variables' addresses as a hidden first argument
@@ -284,7 +284,19 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   trampoline (and an executable stack, or a page of trampolines) and a
   static chain register the nested function reads instead of the hidden
   argument.  A nested function using a variable-length array of the
-  enclosing function is also rejected.  *Reproduced.*
+  enclosing function is also rejected.  *Reproduced.*  Done as gcc does
+  it: the nested function reads the array from the static chain
+  register (`%r10` on x86-64, `%ecx` on i386) at entry (a CHAIN
+  instruction), a direct call loads it there, and taking the function's
+  address builds a trampoline in the caller's frame -- `movabs $env,
+  %r10; movabs $fn, %r11; jmp *%r11`, or `movl $env, %ecx; movl $fn,
+  %eax; jmp *%eax` -- whose address is the function pointer.  The
+  object is marked as needing an executable stack (`.note.GNU-stack`
+  "x"), as gcc's is.  `codegen/nested_trampoline.c` calls through a
+  pointer and passes the function to qsort and to a callback, matching
+  gcc at both widths.  A variable-length array of the enclosing function
+  is still rejected in a nested function (its strides are values of the
+  enclosing function).
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -323,8 +335,9 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   function's parameters and the top-level declarations before it (and,
   nested further, what its own enclosing function sees), which sema puts
   in an outer scope.  One that uses any of them, or calls a nested
-  function that does, takes a hidden first argument: an array of their
-  addresses, built at each call from the caller's scope.  Reads and
+  function that does, is given an array of their addresses, built at
+  each call from the caller's scope, in the static chain register
+  (`%r10`, `%ecx`; since CC-73, before it a hidden first argument).  Reads and
   writes go through those addresses, so they reach the enclosing
   function's objects.  `codegen/nested_functions.c` covers scalars,
   structures, arrays, a static local, a parameter, recursion, calls
@@ -696,7 +709,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-73 requirements: 68 met, 5 open.
+73 requirements: 69 met, 4 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

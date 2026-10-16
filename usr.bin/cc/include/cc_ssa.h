@@ -53,6 +53,7 @@ typedef enum {
     CC_SSA_FROUND64,   /**< dst = lhs (a long double) rounded to double */
     CC_SSA_STACKALLOC,
     CC_SSA_DYNALLOC,   /**< dst = lhs bytes taken off the stack; rhs, if >= 0, a STACKALLOC save slot (below) */
+    CC_SSA_CHAIN,      /**< dst = the static chain register as the function was entered (the first instruction) */
     CC_SSA_LABEL,
     CC_SSA_BR,
     CC_SSA_BR_COND,
@@ -85,6 +86,7 @@ typedef struct {
     int call_is_variadic;
     int call_fixed_count;
     int call_ret_x87;
+    int call_chain;    /**< CALL: one more than the value to pass in the static chain register; 0 for none */
     char *sym;
     int *args;
     unsigned char *call_arg_abi;
@@ -181,6 +183,7 @@ typedef struct {
     size_t global_cap;
     cc_ssa_function_t *funcs;
     size_t func_count;
+    int needs_exec_stack; /**< a trampoline is built on the stack (a nested function's address) */
 } cc_ssa_module_t;
 
 void cc_ssa_module_init(cc_ssa_module_t *m);

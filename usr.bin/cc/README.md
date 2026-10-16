@@ -47,10 +47,8 @@ The full option list is the man page, `usr.man/man1/cc.1`.
 
 gcc (or clang, for the clang-compatibility tests) is the judge of what
 is correct.  What is known not to work is the open items in
-`docs/cc-audit.md` at the top of the tree -- among them the address of
-a nested function that uses the enclosing function's locals (it would
-need a trampoline), `__int128`, complex arithmetic, and i386 `long
-double` precision.
+`docs/cc-audit.md` at the top of the tree -- among them `__int128`,
+complex arithmetic, decimal floating point and vector types.
 
 ## Build and install
 

@@ -187,6 +187,7 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_LADDR:
         case CC_SSA_STACKALLOC:
         case CC_SSA_DYNALLOC:
+        case CC_SSA_CHAIN:
         case CC_SSA_LOAD:
             if (dst >= 0) {
                 st[dst].known = 0;
@@ -418,6 +419,9 @@ static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
     if (in->rhs >= 0) {
         uses[in->rhs]++;
     }
+    if (in->call_chain > 0) {
+        uses[in->call_chain - 1]++;
+    }
     for (i = 0; i < in->arg_count; ++i) {
         if (in->args[i] >= 0) {
             uses[in->args[i]]++;
@@ -471,6 +475,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_VA_START:
     case CC_SSA_STORE:
     case CC_SSA_DYNALLOC:
+    case CC_SSA_CHAIN:
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
     case CC_SSA_ASM:

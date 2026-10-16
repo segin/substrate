@@ -709,6 +709,7 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_FROUND64: return "fround64";
     case CC_SSA_STACKALLOC: return "stackalloc";
     case CC_SSA_DYNALLOC: return "dynalloc";
+    case CC_SSA_CHAIN: return "chain";
     case CC_SSA_LABEL: return "label";
     case CC_SSA_BR: return "br";
     case CC_SSA_BR_COND: return "br_cond";
@@ -2037,6 +2038,9 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
         }
         /* fallthrough */
     case CC_SSA_CALL:
+        if (in->call_chain > 0 && in->call_chain - 1 == value) {
+            return 1;
+        }
         for (i = 0; i < in->arg_count; ++i) {
             if (in->args[i] == value) {
                 return 1;
@@ -2369,6 +2373,7 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
         /* fallthrough */
     case CC_SSA_CALL:
+        if (in->call_chain > 0 && in->call_chain - 1 < f->value_count) fn(in->call_chain - 1, ctx);
         if (in->args != NULL) {
             for (i = 0; i < in->arg_count; ++i) {
                 if (in->args[i] >= 0 && in->args[i] < f->value_count) fn(in->args[i], ctx);
@@ -4147,6 +4152,10 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         emit_x86_64_load_int_value_to_reg(fp, f, lay, in->lhs, "%r11");
         fprintf(fp, "\tcall *%%r11\n");
     } else {
+        if (in->call_chain > 0) {
+            /* a GNU nested function's environment, in the static chain register */
+            emit_x86_64_load_int_value_to_reg(fp, f, lay, in->call_chain - 1, "%r10");
+        }
         fprintf(fp, "\tcall %s\n", in->sym);
     }
     if (stack_total > 0) {
@@ -4589,6 +4598,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 }
                 rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                 fprintf(fp, "\tleaq %d(%%rbp), %s\n", off, ist.regs[rd]);
+                break;
+            }
+
+            case CC_SSA_CHAIN: {
+                /* the static chain, as the function was entered: nothing has run before this */
+                int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                fprintf(fp, "\tmovq %%r10, %s\n", ist.regs[rd]);
                 break;
             }
 
@@ -6000,7 +6016,8 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
     }
 }
 
-static void emit_i386_call_target(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
+static void emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                  const cc_ssa_instr_t *in) {
     if (in->op == CC_SSA_CALLI) {
         if (is_stackalloc_value(lay, in->lhs)) {
             fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->lhs));
@@ -6008,8 +6025,13 @@ static void emit_i386_call_target(FILE *fp, const slot_layout_t *lay, const cc_s
         } else {
             fprintf(fp, "\tcall *%d(%%ebp)\n", slot_off(lay, in->lhs));
         }
-    } else
+    } else {
+        if (in->call_chain > 0) {
+            /* a GNU nested function's environment, in the static chain register */
+            emit_i386_load_int_value_to_reg(fp, f, lay, in->call_chain - 1, "%ecx");
+        }
         fprintf(fp, "\tcall %s\n", in->sym);
+    }
 }
 
 static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
@@ -6067,7 +6089,7 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         fprintf(fp, "\tpushl %%eax\n");
     }
 
-    emit_i386_call_target(fp, lay, in);
+    emit_i386_call_target(fp, f, lay, in);
 
     /* the callee popped the hidden pointer itself (ret $4) */
     if (stack_bytes > 0) {
@@ -6283,6 +6305,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 }
                 rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                 fprintf(fp, "\tleal %d(%%ebp), %s\n", off, ist.regs[rd]);
+                break;
+            }
+
+            case CC_SSA_CHAIN: {
+                /* the static chain, as the function was entered: nothing has run before this */
+                int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                fprintf(fp, "\tmovl %%ecx, %s\n", ist.regs[rd]);
                 break;
             }
 
@@ -6625,7 +6654,8 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         }
     }
 
-    fprintf(fp, "\n.section .note.GNU-stack,\"\",@progbits\n");
+    /* a nested function's trampoline runs on the stack */
+    fprintf(fp, "\n.section .note.GNU-stack,\"%s\",@progbits\n", m->needs_exec_stack ? "x" : "");
 
     if (fclose(fp) != 0) {
         set_diag(diag, "failed to finalize assembly output");
