@@ -374,8 +374,9 @@ changes as well.  *Suite.*
   (200, 201).
 - [ ] **CC-25** `native_c99_flexible_array_global_init` shall run
   successfully (321).
-- [ ] **CC-26** `native_c99_consteval_limits.c` shall compile and run
-  (350, 351).
+- [x] **CC-26** `native_c99_consteval_limits.c` shall compile and run
+  (350, 351).  It does, and matches gcc: met since the constant
+  evaluators were made one (CC-50).
 - [ ] **CC-27** `native_gnu_asm_goto.c` shall compile, run, and emit its
   `jz .L…` targets for -m64 and -m32 (497–505).
 - [ ] **CC-28** `run_postc99_c23.sh` shall pass (764).
@@ -383,8 +384,12 @@ changes as well.  *Suite.*
 - [ ] **CC-30** If an asm input's constraint names the register of an
   early-clobber output, then cc shall reject it
   (`native_bad_gnu_asm_early_clobber_fixed.c`, 832, 833).
-- [ ] **CC-31** If a `noreturn` function has a non-void return type,
-  then cc shall reject it (`native_bad_attr_noreturn_nonvoid.c`, 835).
+- [x] **CC-31** ~~If a `noreturn` function has a non-void return type,
+  then cc shall reject it~~ -- withdrawn: gcc accepts such a function
+  (C11 makes it no constraint violation), so by the rule that gcc and
+  clang judge the tests, the test was wrong.  28ad3309e turned it into
+  `native_attr_noreturn_nonvoid.c`, which expects it to compile, and it
+  does.
 - [ ] **CC-32** The suite's `__int128` expectations shall match the
   compiler's behaviour once CC-22 is settled (87, 823, 824).
 
@@ -491,7 +496,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-67 requirements: 41 met, 26 open.
+67 requirements: 43 met, 24 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
