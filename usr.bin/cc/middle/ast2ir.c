@@ -12930,6 +12930,75 @@ static int fill_fixed_char_array_from_string(const cc_expr_t *expr, cc_type_t el
 static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list,
                                             size_t *cursor, long base, unsigned char *buf, long buf_size,
                                             global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag);
+static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_type_t scalar_type, int scalar_struct_id,
+                                            const long *dims, int ndim, const cc_expr_t *list, size_t *cursor,
+                                            long base, unsigned char *buf, long buf_size, global_reloc_t **relocs,
+                                            size_t *reloc_count, cc_diag_t *diag);
+
+/**
+ * Write the initializer of a structure's flexible array member -- the
+ * GNU extension of initializing one in a static object -- into the
+ * object's bytes.  The object was sized for the elements given
+ * (infer_flexible_struct_tail_extra_bytes()).
+ *
+ * @param tu           the translation unit
+ * @param m            the flexible array member
+ * @param item         its initializer: a braced list (brace elision
+ *                     allowed for structure elements)
+ * @param elems        how many elements it gives
+ * @param base         the member's offset in the buffer
+ * @param buf          the object's bytes
+ * @param buf_size     their size
+ * @param relocs       receives relocations for address constants
+ * @param reloc_count  their count
+ * @param diag         receives an error
+ * @return             0, or -1 on error
+ */
+static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
+                                      const cc_expr_t *item, long elems, long base, unsigned char *buf, long buf_size,
+                                      global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
+    cc_type_t elem_type = ptr_base_type(m->type);
+    long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    size_t cur = 0;
+    long k;
+
+    if (item == NULL || item->kind != CC_EXPR_INIT_LIST || elems <= 0) {
+        return 0; /* a string or a lone scalar keeps the old (zero) contents */
+    }
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+    }
+    if (elem_size <= 0 || elems > (buf_size - base) / elem_size) {
+        set_diag(diag, "flexible array initializer exceeds its object");
+        return -1;
+    }
+    if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        for (k = 0; k < elems && cur < item->arg_count; ++k) {
+            const cc_expr_t *raw = item->args[cur];
+            const cc_expr_t *braced = extract_struct_init_list_expr(raw, m->type_struct_id);
+            long off = base + k * elem_size;
+            if (braced != NULL) {
+                size_t sub = 0;
+                if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, braced, &sub, off, buf, buf_size, relocs,
+                                                     reloc_count, diag) != 0) {
+                    return -1;
+                }
+                cur++;
+            } else if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, item, &cur, off, buf, buf_size, relocs,
+                                                        reloc_count, diag) != 0) {
+                /* brace elision: the element takes its members from the list itself */
+                return -1;
+            }
+        }
+        return 0;
+    }
+    {
+        long dims[1];
+        dims[0] = elems;
+        return flatten_scalar_array_init_cursor(tu, elem_type, -1, dims, 1, item, &cur, base, buf, buf_size, relocs,
+                                                reloc_count, diag);
+    }
+}
 
 static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                                        const cc_expr_t *src_list, size_t *cursor, long field_off,
@@ -13090,7 +13159,12 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             next_member = sd->member_count;
         }
         if (!is_nested_designator && struct_has_flexible_tail(sd) && member_idx + 1 == sd->member_count) {
-            /* GNU-compatible extension: accept and ignore flexible-array initializers. */
+            /* GNU extension: a static object's flexible array member takes the elements its initializer gives */
+            long elems = infer_flexible_array_member_elems(tu, m, item);
+            if (elems > 0 && flatten_flexible_tail_init(tu, m, item, elems, base + m->offset, buf, buf_size, relocs,
+                                                        reloc_count, diag) != 0) {
+                return -1;
+            }
             if (!consumed_item) {
                 i++;
             }

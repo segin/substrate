@@ -377,8 +377,12 @@ changes as well.  *Suite.*
   alignment now applies to each member they declare; member offsets with
   `_Alignas(16)`, `_Alignas(long)` and `_Alignas(0)` match gcc on both
   targets.
-- [ ] **CC-25** `native_c99_flexible_array_global_init` shall run
-  successfully (321).
+- [x] **CC-25** `native_c99_flexible_array_global_init` shall run
+  successfully (321).  A static object's flexible array member was sized
+  for the elements its initializer gave (GNU extension), but the
+  elements themselves were skipped and the tail emitted as zeros.  They
+  are now written: scalar elements, structure elements braced or with
+  brace elision, and address constants, matching gcc at -m64 and -m32.
 - [x] **CC-26** `native_c99_consteval_limits.c` shall compile and run
   (350, 351).  It does, and matches gcc: met since the constant
   evaluators were made one (CC-50).
@@ -501,7 +505,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-67 requirements: 44 met, 23 open.
+67 requirements: 45 met, 22 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
