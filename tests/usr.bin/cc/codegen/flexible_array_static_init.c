@@ -1,9 +1,11 @@
 /*
  * A static object's flexible array member given elements by its
  * initializer (a GNU extension).  The object was sized for them, but the
- * elements were dropped and the tail left zero.
+ * elements were dropped and the tail left zero.  A string was sized
+ * without its terminating null, and a braced string did not compile.
  */
 #include <stdio.h>
+#include <wchar.h>
 
 struct item {
     unsigned char a;
@@ -30,7 +32,23 @@ struct ptrs {
     int *ptr[];
 };
 
+struct text {
+    int n;
+    char s[];
+};
+
+struct wtext {
+    int n;
+    wchar_t s[];
+};
+
 static int g = 42;
+
+struct text t1 = {3, "abc"};
+char after_t1 = 'Z';
+struct text t2 = {2, {"hi"}};
+struct wtext wt = {1, L"wq"};
+struct ints one = {1, 5};
 
 struct packet pkt = {9, {1, 2, 3}};
 struct packet pkt2 = {7, {{4, 5}, {6}, 7, 8}};
@@ -50,6 +68,7 @@ int main(void) {
     printf("%d %d %d %d\n", vi.n, vi.v[0], vi.v[1], vi.v[2]);
     printf("%ld %d %d\n", w.tag, w.it[0].a, w.it[0].b);
     printf("%d %d %d\n", ps.n, *ps.ptr[0], ps.ptr[1] == 0);
+    printf("%s %s %c %d %d %d %d\n", t1.s, t2.s, after_t1, wt.s[0], wt.s[1], wt.s[2], one.v[0]);
     printf("%u %u\n", (unsigned)sizeof pkt, (unsigned)sizeof vi);
     return 0;
 }

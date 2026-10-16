@@ -394,6 +394,10 @@ changes as well.  *Suite.*
   elements themselves were skipped and the tail emitted as zeros.  They
   are now written: scalar elements, structure elements braced or with
   brace elision, and address constants, matching gcc at -m64 and -m32.
+  A string (`{3, "abc"}`) was still left zero and sized without its
+  terminating null, a braced string (`{2, {"hi"}}`) did not compile, and
+  a lone scalar by brace elision (`{1, 5}`) was zero; all three, and wide
+  strings, now match gcc too.
 - [x] **CC-26** `native_c99_consteval_limits.c` shall compile and run
   (350, 351).  It does, and matches gcc: met since the constant
   evaluators were made one (CC-50).

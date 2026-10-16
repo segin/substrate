@@ -12395,8 +12395,35 @@ static long infer_struct_array_len_from_init_list(const cc_translation_unit_t *t
     return elems > 0 ? elems : 1;
 }
 
+/**
+ * The string literal a flexible array member's initializer gives it,
+ * written bare (`"abc"`) or as the only item of a braced list
+ * (`{"abc"}`).
+ *
+ * @param item  the member's initializer
+ * @return      the literal, or NULL if it is not one
+ */
+static const cc_expr_t *flexible_init_string(const cc_expr_t *item) {
+    if (item != NULL && item->kind == CC_EXPR_INIT_LIST && item->arg_count == 1) {
+        item = item->args[0];
+    }
+    return item != NULL && item->kind == CC_EXPR_STR ? item : NULL;
+}
+
+/**
+ * Whether a string literal is a wide one (its elements wider than char).
+ *
+ * @param str  the literal
+ * @return     1 if it is wide, else 0
+ */
+static int string_literal_is_wide(const cc_expr_t *str) {
+    return str->aux_type == CC_TYPE_INT || str->aux_type == CC_TYPE_UINT || str->aux_type == CC_TYPE_LONG_LONG ||
+           str->aux_type == CC_TYPE_ULONG_LONG;
+}
+
 static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                               const cc_expr_t *item) {
+    const cc_expr_t *str = flexible_init_string(item);
     cc_type_t elem_type;
     long elem_size;
     unsigned long *units = NULL;
@@ -12415,15 +12442,14 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
     if (elem_size <= 0) {
         return -1;
     }
-    if (item->kind == CC_EXPR_STR) {
-        wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT || item->aux_type == CC_TYPE_LONG_LONG ||
-                item->aux_type == CC_TYPE_ULONG_LONG);
-        if (decode_string_units(item, wide, &units, &unit_count) != 0) {
+    if (str != NULL && elem_type != CC_TYPE_VOID) {
+        wide = string_literal_is_wide(str);
+        if (decode_string_units(str, wide, &units, &unit_count) != 0) {
             free(units);
             return -1;
         }
         free(units);
-        elems = (long)unit_count;
+        elems = (long)unit_count + 1; /* the terminating null */
     } else if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0 && item->kind == CC_EXPR_INIT_LIST) {
         elems = infer_struct_array_len_from_init_list(tu, m->type_struct_id, item);
     } else if (item->kind == CC_EXPR_INIT_LIST) {
@@ -12976,18 +13002,46 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
                                       global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
     cc_type_t elem_type = ptr_base_type(m->type);
     long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    const cc_expr_t *str = flexible_init_string(item);
     size_t cur = 0;
     long k;
 
-    if (item == NULL || item->kind != CC_EXPR_INIT_LIST || elems <= 0) {
-        return 0; /* a string or a lone scalar keeps the old (zero) contents */
-    }
     if (elem_size <= 0) {
         elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
     }
-    if (elem_size <= 0 || elems > (buf_size - base) / elem_size) {
+    if (elem_size <= 0 || elems <= 0 || elems > (buf_size - base) / elem_size) {
         set_diag(diag, "flexible array initializer exceeds its object");
         return -1;
+    }
+    if (str != NULL && elem_type != CC_TYPE_VOID) {
+        unsigned long *units = NULL;
+        size_t count = 0;
+        size_t u;
+        if (decode_string_units(str, string_literal_is_wide(str), &units, &count) != 0) {
+            free(units);
+            set_diag(diag, "invalid string initializer for flexible array member");
+            return -1;
+        }
+        for (u = 0; u < count && (long)u < elems; ++u) {
+            long b;
+            for (b = 0; b < elem_size && b < (long)sizeof(units[u]); ++b) {
+                buf[base + (long)u * elem_size + b] = (unsigned char)(units[u] >> (8 * b));
+            }
+        }
+        free(units);
+        return 0; /* the terminating null is already zero */
+    }
+    if (item == NULL) {
+        return 0;
+    }
+    if (item->kind != CC_EXPR_INIT_LIST) {
+        /* `{1, 5}` for `int v[]`: brace elision gives the array one element */
+        if (elem_type == CC_TYPE_VOID) {
+            set_diag(diag, "unsupported flexible array member initializer");
+            return -1;
+        }
+        return store_scalar_global_init(tu, elem_type, m->type_struct_id, elem_size, item, buf, buf_size, base, relocs,
+                                        reloc_count, diag);
     }
     if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
         for (k = 0; k < elems && cur < item->arg_count; ++k) {
