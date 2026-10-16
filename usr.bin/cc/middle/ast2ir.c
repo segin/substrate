@@ -9361,7 +9361,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         if (want == CC_VAL_I64) {
             long result_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
-            if (result_size <= 0 && is_pointer_type(e->value_type)) {
+            if ((result_size <= 0 && is_pointer_type(e->value_type)) ||
+                (e->value_type == CC_TYPE_VOID && e->struct_id >= 0)) {
+                /* a pointer, or an aggregate's value: its address */
                 result_size = cc_target_pointer_size();
             }
             set_value_size(sf, dst, result_size > 0 ? result_size : cc_target_pointer_size());

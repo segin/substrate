@@ -40,7 +40,7 @@ silent: the program compiled, ran and printed a wrong answer.
 | 1. Integer arithmetic and conversions | 8 | 8 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
-| 4. ABI and other code generation | 36 | 34 |
+| 4. ABI and other code generation | 37 | 35 |
 | 5. Driver and predefined macros | 3 | 3 |
 | 6. The restored suite's failing commands | 10 | 10 |
 | 7. The restored suite itself | 12 | 12 |
@@ -398,6 +398,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   `unsigned long long`, and the unsignedness stays on the conversion when
   a later cast relabels its value (`(long long)(unsigned long long)d`).
   `codegen/float_to_u64.c`.
+- [x] **CC-80** On i386, a conditional expression of structure type shall
+  give the structure.  Its result -- the address of whichever arm was
+  taken -- was given the structure's size as its value size, so a
+  16-byte structure's address was handled as a 64-bit pair, and copying
+  the result (`struct s p = c ? g : l;`) passed `memcpy` a garbled source
+  and died of SIGSEGV.  *Reproduced* (-m32).  The result is now
+  pointer-sized for any aggregate.  `codegen/struct_ternary.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -810,7 +817,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-79 requirements: 77 met, 2 open.
+80 requirements: 78 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
