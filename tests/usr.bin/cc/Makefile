@@ -108,6 +108,13 @@ test:
 	! grep -q "^#define __SIZEOF_INT128__" /tmp/cc_pp_gnu11_predefs.i
 	! $(TOP)/usr.bin/cc/cc -E -std=bogus /dev/null -o /tmp/cc_pp_std_bogus.i 2>/tmp/cc_pp_std_bogus.err
 	grep -q -- "-std=bogus" /tmp/cc_pp_std_bogus.err
+	$(TOP)/usr.bin/cc/cc -E -dM -std=c89 /dev/null -o /tmp/cc_pp_c89_predefs.i
+	! grep -q "__STDC_VERSION__" /tmp/cc_pp_c89_predefs.i
+	$(TOP)/usr.bin/cc/cc -E -dM -ansi /dev/null -o /tmp/cc_pp_ansi_predefs.i
+	grep -q "^#define __STRICT_ANSI__ 1" /tmp/cc_pp_ansi_predefs.i
+	! grep -q "__STDC_VERSION__" /tmp/cc_pp_ansi_predefs.i
+	$(TOP)/usr.bin/cc/cc -E -dM -std=iso9899:199409 /dev/null -o /tmp/cc_pp_c94_predefs.i
+	grep -q "^#define __STDC_VERSION__ 199409L" /tmp/cc_pp_c94_predefs.i
 	rm -f ./-
 	$(TOP)/usr.bin/cc/cc -E native_c99_const_qual.c -o - > /tmp/cc_stdout_e.i
 	$(TOP)/usr.bin/cc/cc -S native_c99_const_qual.c -o - > /tmp/cc_stdout_s.s

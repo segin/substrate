@@ -74,6 +74,12 @@ Emit dependency rules.
 Dependency output target controls.
 .It Fl std Ns = Ns Ar c90|c95|c99|c11|c17|c23
 Language mode.
+.Dv __STDC_VERSION__
+is not defined in C90 (as the standard has it), and is 199409L for
+.Ar iso9899:199409 .
+.It Fl ansi
+The same as
+.Fl std Ns = Ns Ar c89 .
 .It Fl O0 , Fl O1 , Fl O2 , Fl O3 , Fl O
 Optimization level.
 .Fl O

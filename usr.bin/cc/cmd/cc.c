@@ -1009,6 +1009,19 @@ static int opt_std(cc_opts_t *o, const driver_opt_t *d, const char *as, const ch
 }
 
 /**
+ * -ansi: for C, -std=c89, as gcc has it.
+ *
+ * @return 0
+ */
+static int opt_ansi(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  (void)as;
+  (void)val;
+  o->std = "c89";
+  return 0;
+}
+
+/**
  * -pedantic-errors: -pedantic, with its warnings made errors.
  *
  * @return 0
@@ -1174,6 +1187,7 @@ static const driver_opt_t options[] = {
 
     /* the language and the warnings */
     {"-std=", OPT_PREFIX, FWD_C, opt_std, 0, 0},
+    {"-ansi", OPT_FLAG, FWD_C, opt_ansi, 0, 0},
     {"-O", OPT_PREFIX, FWD_C, opt_str, F(opt_level), 0},
     {"-g", OPT_FLAG, FWD_C | FWD_AS, opt_int, F(debug), 1},
     {"-Wall", OPT_FLAG, FWD_C, opt_int, F(wall), 1},

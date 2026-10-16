@@ -434,7 +434,8 @@ static const char *path_basename(const char *path) {
  * __STDC_VERSION__, which standards' features __has_feature and
  * __VA_OPT__ see, and whether trigraphs are replaced -- from a mode.
  *
- * Modes before C11 all report 199901, as cc always has.
+ * C90 has no __STDC_VERSION__ (std_version 0: not defined); its 1994
+ * amendment introduced it as 199409L.
  *
  * @param st    the preprocessor state
  * @param lang  the mode
@@ -451,8 +452,12 @@ static void pp_set_lang(pp_state_t *st, const cc_lang_t *lang) {
         st->std_version = 201710;
     } else if (lang->year >= 2011) {
         st->std_version = 201112;
-    } else {
+    } else if (lang->year >= 1999) {
         st->std_version = 199901;
+    } else if (lang->year >= 1995) {
+        st->std_version = 199409;
+    } else {
+        st->std_version = 0;
     }
 }
 
@@ -1421,9 +1426,11 @@ static int add_builtin_macros(pp_state_t *st) {
             return -1;
         }
     }
-    snprintf(stdc_ver, sizeof(stdc_ver), "%dL", st->std_version);
-    if (macro_set(&st->macros, "__STDC_VERSION__", 0, 0, NULL, 0, stdc_ver) != 0) {
-        return -1;
+    if (st->std_version != 0) {
+        snprintf(stdc_ver, sizeof(stdc_ver), "%dL", st->std_version);
+        if (macro_set(&st->macros, "__STDC_VERSION__", 0, 0, NULL, 0, stdc_ver) != 0) {
+            return -1;
+        }
     }
     if (macro_set(&st->macros, "__FLT_EVAL_METHOD__", 0, 0, NULL, 0, flt_eval_method) != 0) {
         return -1;
