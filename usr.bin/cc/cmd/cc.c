@@ -198,6 +198,24 @@ static void opts_free(cc_opts_t *o) {
   cc_strvec_free(&o->temp_files);
 }
 
+/**
+ * In a forked child whose exec failed: say which tool could not be run
+ * and why, as gcc does, then exit 127.  write(2), not stdio, so the
+ * parent's buffered output is not flushed a second time by the child.
+ *
+ * @param tool  the program that could not be executed
+ * @param err   the errno exec failed with
+ */
+static void exec_failed_exit(const char *tool, int err) {
+  char msg[512];
+  int n = snprintf(msg, sizeof(msg), "cc: fatal error: cannot execute '%s': %s\n", tool, strerror(err));
+  if (n > 0) {
+    ssize_t w = write(STDERR_FILENO, msg, (size_t)n < sizeof(msg) ? (size_t)n : sizeof(msg) - 1);
+    (void)w;
+  }
+  _exit(127);
+}
+
 static int run_cmd(const cc_opts_t *o, char **argv) {
   pid_t pid;
   int status;
@@ -219,13 +237,14 @@ static int run_cmd(const cc_opts_t *o, char **argv) {
   sigchld_guard_begin(&sigchld_guard);
   pid = fork();
   if (pid < 0) {
+    fprintf(stderr, "cc: error: cannot run '%s': %s\n", argv[0], strerror(errno));
     sigchld_guard_end(&sigchld_guard);
     return -1;
   }
 
   if (pid == 0) {
     execvp(argv[0], argv);
-    _exit(127);
+    exec_failed_exit(argv[0], errno);
   }
 
   if (waitpid(pid, &status, 0) < 0) {
@@ -247,6 +266,11 @@ static int run_cmd(const cc_opts_t *o, char **argv) {
             status, WIFEXITED(status), WEXITSTATUS(status), WIFSIGNALED(status), WTERMSIG(status));
   }
 
+  if (WIFSIGNALED(status)) {
+    /* the tool printed nothing itself; say what became of it */
+    fprintf(stderr, "cc: error: %s terminated by signal %d (%s)\n", argv[0], WTERMSIG(status),
+            strsignal(WTERMSIG(status)));
+  }
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
     sigchld_guard_end(&sigchld_guard);
     return -1;
@@ -282,7 +306,7 @@ static int capture_cmd_output(char *const argv[], char *out, size_t outsz) {
     close(pipefd[0]);
     close(pipefd[1]);
     execvp(argv[0], argv);
-    _exit(127);
+    _exit(127); /* a probe: a missing program is an answer, not an error */
   }
 
   close(pipefd[1]);

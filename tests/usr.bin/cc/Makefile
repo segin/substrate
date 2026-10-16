@@ -847,6 +847,8 @@ test:
 	grep -q "array bound must be positive" /tmp/cc_native_bad_negative_array_bound.log
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_int128.c -o /tmp/cc_native_bad_gnu_int128.o 2>/tmp/cc_native_bad_gnu_int128.log
 	grep -q "__int128 is not supported" /tmp/cc_native_bad_gnu_int128.log
+	! AS=/nonexistent/cc_no_such_as $(TOP)/usr.bin/cc/cc -c native_c99_complex_decl.c -o /tmp/cc_no_such_as.o 2>/tmp/cc_no_such_as.log
+	grep -q "cannot execute '/nonexistent/cc_no_such_as'" /tmp/cc_no_such_as.log
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_constraint.c -o /tmp/cc_native_bad_gnu_asm_constraint.o 2>/tmp/cc_native_bad_gnu_asm_constraint.log
 	grep -q "asm operand constraint contains unsupported character" /tmp/cc_native_bad_gnu_asm_constraint.log
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_match_idx.c -o /tmp/cc_native_bad_gnu_asm_match_idx.o 2>/tmp/cc_native_bad_gnu_asm_match_idx.log
@@ -899,6 +901,7 @@ clean:
 	      /tmp/cc_native_clang_attr_placement /tmp/cc_native_clang_asm_goto_quirks /tmp/cc_native_clang_asm_goto_quirks.s \
 	      /tmp/cc_native_bad_negative_array_bound.o /tmp/cc_native_bad_negative_array_bound.log \
 	      /tmp/cc_native_bad_gnu_int128.o /tmp/cc_native_bad_gnu_int128.log \
+	      /tmp/cc_no_such_as.o /tmp/cc_no_such_as.log \
 	      /tmp/cc_native_gnu_asm_basic /tmp/cc_native_gnu_asm_basic.s /tmp/cc_native_gnu_asm_ext \
 	      /tmp/cc_native_gnu_asm_ext.s /tmp/cc_native_gnu_asm_ext_32.s \
 	      /tmp/cc_native_gnu_asm_goto /tmp/cc_native_gnu_asm_goto.s /tmp/cc_native_gnu_asm_goto_32.s /tmp/cc_native_gnu_asm_goto_outputs \

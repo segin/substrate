@@ -369,9 +369,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 
 ## 5. Driver and predefined macros
 
-- [ ] **CC-21** If a tool the driver runs cannot be executed, then the
+- [x] **CC-21** If a tool the driver runs cannot be executed, then the
   driver shall say so.  When `as` exited 127 (not runnable), cc exited 1
-  and printed nothing.  *Reproduced.*
+  and printed nothing.  *Reproduced.*  The forked child now reports a
+  failed exec as gcc does (`cc: fatal error: cannot execute '/x/as': No
+  such file or directory`), the driver reports a tool killed by a signal
+  and a failed fork, and cc(1) says so.  A suite check runs cc with
+  `AS` naming a missing program.
 - [x] **CC-48** A warning shall name the file it is about.  `cc -Wall`
   on `native_warn_assign_cond.c` printed `cc:3:2: warning: assignment
   used as condition in if` -- the program's name where the file's
@@ -569,7 +573,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-70 requirements: 54 met, 16 open.
+70 requirements: 55 met, 15 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

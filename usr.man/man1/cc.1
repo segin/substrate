@@ -147,6 +147,13 @@ Temporary C-to-assembly fallback via host gcc.
 .El
 .Sh EXIT STATUS
 .Ex -std
+If a tool
+.Nm
+runs
+.Pq Xr as 1 , Xr ld 1
+cannot be executed, or is killed by a signal,
+.Nm
+says so and exits non-zero.
 .Sh SEE ALSO
 .Xr as 1 ,
 .Xr cpp 1 ,
