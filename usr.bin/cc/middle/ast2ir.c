@@ -15819,22 +15819,38 @@ static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_l
     return raw->rhs;
 }
 
-static int fill_fixed_char_array_from_string(const cc_expr_t *expr, cc_type_t elem_type, long elem_size, long max_elems,
-                                             long field_off, unsigned char *buf, long buf_size, cc_diag_t *diag) {
+/**
+ * Write a string literal into a global's character array: its units, the
+ * terminating null if there is room, at most @p max_elems of them.
+ *
+ * @param expr       the literal
+ * @param elem       the array's element type (a character type, or an
+ *                   integer type for a wide literal)
+ * @param elem_size  its size
+ * @param max_elems  the array's length
+ * @param field_off  the array's offset in @p buf
+ * @param buf        the global's bytes
+ * @param buf_size   their size
+ * @param diag       receives an error
+ * @return           0, or -1 (with @p diag set on a real error)
+ */
+static int fill_fixed_char_array_from_string(const cc_expr_t *expr, const cc_ctype_t *elem, long elem_size,
+                                             long max_elems, long field_off, unsigned char *buf, long buf_size,
+                                             cc_diag_t *diag) {
     unsigned long *units = NULL;
     size_t unit_count = 0;
     size_t i;
     size_t ncopy;
     int wide;
 
-    if (expr == NULL || expr->kind != CC_EXPR_STR || max_elems < 0 || elem_size <= 0) {
+    if (expr == NULL || expr->kind != CC_EXPR_STR || max_elems < 0 || elem_size <= 0 || elem == NULL) {
         return -1;
     }
     wide = cc_string_literal_is_wide(expr);
-    if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+    if (!wide && !(elem->kind == CC_CT_CHAR || elem->kind == CC_CT_UCHAR)) {
         return -1;
     }
-    if (wide && !cc_type_is_integral(elem_type)) {
+    if (wide && !cc_ct_is_integer(elem)) {
         return -1;
     }
     if (decode_string_units(expr, wide, &units, &unit_count) != 0) {
@@ -16014,7 +16030,8 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
         }
 
         if (raw != NULL && raw->kind == CC_EXPR_STR) {
-            if (fill_fixed_char_array_from_string(raw, elem_type, elem_size, max_elems, field_off, buf, buf_size,
+            if (fill_fixed_char_array_from_string(raw, cc_ct_from_scalar(elem_type), elem_size, max_elems, field_off,
+                                                  buf, buf_size,
                                                   diag) != 0) {
                 return -1;
             }
@@ -16279,7 +16296,8 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                     elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
                 }
                 max_elems = elem_size > 0 ? (m->array_len > 0 ? m->array_len : (m->size / elem_size)) : 0;
-                if (fill_fixed_char_array_from_string(item, elem_type, elem_size, max_elems, field_off, buf, buf_size,
+                if (fill_fixed_char_array_from_string(item, cc_ct_from_scalar(elem_type), elem_size, max_elems,
+                                                      field_off, buf, buf_size,
                                                       diag) != 0) {
                     set_diag(diag, "invalid string initializer for fixed-size array struct member");
                     return -1;
@@ -16412,7 +16430,8 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
             const cc_expr_t *raw = list->args[*cursor];
             long sub_base = base + i * sub_size;
             if (raw != NULL && raw->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0) {
-                if (fill_fixed_char_array_from_string(raw, scalar_type, scalar_size, dims[1], sub_base, buf, buf_size,
+                if (fill_fixed_char_array_from_string(raw, cc_ct_from_scalar(scalar_type), scalar_size, dims[1],
+                                                      sub_base, buf, buf_size,
                                                       diag) != 0) {
                     return -1;
                 }
