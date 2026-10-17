@@ -272,7 +272,6 @@ typedef struct {
 
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
-static cc_type_t ptr_of_type(cc_type_t t);
 static int tok_is_ident(parser_t *p, const char *s);
 static int tok_is_gnu_attribute_kw(parser_t *p);
 static int is_ptr_declarator_tok(cc_tok_kind_t kind);
@@ -287,14 +286,9 @@ static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_
                                            int *out_has_num2);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
-static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                           int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                           const char *what);
 static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e);
-static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                              int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                              const char *what, const cc_ctype_t **out_ctype,
-                              cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]);
+static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out,
+                           cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
 static cc_expr_t *parse_unary(parser_t *p);
@@ -325,8 +319,6 @@ static void parser_free_local_labels(parser_t *p);
 static void parser_set_ctype(cc_expr_t *e, const cc_ctype_t *t);
 static cc_expr_t *new_const_expr(cc_expr_kind_t kind, const cc_ctype_t *t);
 static const cc_ctype_t *parser_size_ctype(void);
-static int parser_ctype_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS]);
 
 static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
     cc_function_t *next;
@@ -872,20 +864,6 @@ static void parser_free_local_labels(parser_t *p) {
     p->local_label_cap = 0;
 }
 
-static int is_pointer_type(cc_type_t t) {
-    return cc_type_is_pointer(t);
-}
-
-static int type_carries_struct_id(cc_type_t t) {
-    if (t == CC_TYPE_VOID) {
-        return 1;
-    }
-    if (!cc_type_is_pointer(t)) {
-        return 0;
-    }
-    return cc_type_pointer_base(t) == CC_TYPE_VOID;
-}
-
 static int struct_ids_compatible(const parser_t *p, int lhs, int rhs) {
     const char *ltag;
     const char *rtag;
@@ -904,24 +882,57 @@ static int struct_ids_compatible(const parser_t *p, int lhs, int rhs) {
     return 0;
 }
 
-static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_sid, int lhs_array_ndim,
-                                   cc_type_t rhs_t, int rhs_sid, int rhs_array_ndim) {
-    if (lhs_array_ndim != rhs_array_ndim) {
-        return 0;
-    }
-    if (lhs_t != rhs_t) {
-        return 0;
-    }
-    if (lhs_t == CC_TYPE_ATOMIC) {
-        return lhs_sid == rhs_sid;
-    }
-    if (lhs_t == CC_TYPE_BITINT) {
-        return lhs_sid == rhs_sid;
-    }
-    if (!type_carries_struct_id(lhs_t)) {
+/**
+ * Whether two types are compatible (C11 6.2.7), as
+ * `__builtin_types_compatible_p` asks: qualifiers count, an array of
+ * unknown bound matches any bound, structures match by tag, and an
+ * enumeration matches only itself.
+ *
+ * @param p      the parser
+ * @param a      one type
+ * @param b      the other
+ * @param depth  recursion depth so far
+ * @return       1 or 0
+ */
+static int parser_ct_compatible(const parser_t *p, const cc_ctype_t *a, const cc_ctype_t *b, int depth) {
+    size_t i;
+
+    if (a == b) {
         return 1;
     }
-    return struct_ids_compatible(p, lhs_sid, rhs_sid);
+    if (a == NULL || b == NULL || a->kind != b->kind || a->quals != b->quals || depth > 64) {
+        return 0;
+    }
+    switch (a->kind) {
+    case CC_CT_POINTER:
+    case CC_CT_COMPLEX:
+    case CC_CT_IMAGINARY:
+        return parser_ct_compatible(p, a->of, b->of, depth + 1);
+    case CC_CT_ARRAY:
+        return (a->count < 0 || b->count < 0 || a->count == b->count) &&
+               parser_ct_compatible(p, a->of, b->of, depth + 1);
+    case CC_CT_RECORD:
+        return struct_ids_compatible(p, a->id, b->id);
+    case CC_CT_FUNCTION:
+        if (!parser_ct_compatible(p, a->of, b->of, depth + 1)) {
+            return 0;
+        }
+        if (!a->prototyped || !b->prototyped) {
+            return 1;
+        }
+        if (a->param_count != b->param_count || a->variadic != b->variadic) {
+            return 0;
+        }
+        for (i = 0; i < a->param_count; ++i) {
+            if (!parser_ct_compatible(p, a->params[i]->unqual, b->params[i]->unqual, depth + 1)) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        /* the other kinds are interned whole: equal types are one object */
+        return 0;
+    }
 }
 
 static long parser_string_literal_array_bound(const cc_expr_t *e);
@@ -959,68 +970,6 @@ static cc_ctype_kind_t packed_enum_kind_from_range(long min_v, long max_v) {
         }
     }
     return CC_CT_LLONG;
-}
-
-static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id) {
-    long n;
-    if (is_pointer_type(t)) {
-        return cc_target_pointer_size();
-    }
-    if (t == CC_TYPE_ATOMIC) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return parser_type_size_bytes(p, (cc_type_t)struct_id, -1);
-    }
-    if (t == CC_TYPE_BITINT) {
-        return cc_bitint_size(struct_id);
-    }
-    n = cc_type_scalar_size(t);
-    if (n > 0) {
-        return n;
-    }
-    if (t == CC_TYPE_VOID && struct_id >= 0 && (size_t)struct_id < p->struct_count && p->structs[struct_id].complete) {
-        return p->structs[struct_id].size;
-    }
-    return -1;
-}
-
-/**
- * Alignment of a type as a structure member and for `_Alignof`.
- *
- * @param p          the parser, for its table of structures
- * @param t          the type
- * @param struct_id  the structure or union when @p t is one, else -1;
- *                   for `_Atomic` and `_BitInt` the extra datum those
- *                   kinds carry in it
- * @return           the alignment in bytes, or -1 if @p t has none
- *                   (an incomplete or unknown type)
- */
-static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_id) {
-    long n;
-    if (t == CC_TYPE_VOID && struct_id >= 0 && (size_t)struct_id < p->struct_count && p->structs[struct_id].complete) {
-        n = p->structs[struct_id].align;
-        if (n <= 0) {
-            n = 1;
-        }
-        return n;
-    }
-    n = cc_type_scalar_align(t);
-    if (n > 0) {
-        return n;
-    }
-    if (t == CC_TYPE_BITINT) {
-        return cc_bitint_align(struct_id);
-    }
-    /* `_Atomic(T)`: aligned as its size, at most a word */
-    n = parser_type_size_bytes(p, t, struct_id);
-    if (n <= 0) {
-        return -1;
-    }
-    if (n > cc_target_pointer_size()) {
-        n = cc_target_pointer_size();
-    }
-    return n;
 }
 
 /** Whether a bit-field may have type @p t: _Bool, a standard integer type or an enumeration. */
@@ -2070,8 +2019,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     return -1;
                 }
                 if (is_declspec_start(p)) {
-                    if (parse_type_name_ct(p, NULL, NULL, NULL, NULL, NULL, 1, "expected type name in _Alignas/alignas",
-                                           &aty, NULL) != 0) {
+                    if (parse_type_name(p, "expected type name in _Alignas/alignas", &aty, NULL) != 0) {
                         return -1;
                     }
                     align = parser_ct_align(p, aty);
@@ -2118,8 +2066,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     if (expect(p, TOK_LPAREN, "expected '(' after _Atomic") != 0) {
                         return -1;
                     }
-                    if (parse_type_name_ct(p, NULL, NULL, NULL, NULL, NULL, 1, "expected type name in _Atomic(...)",
-                                           &aty, NULL) != 0) {
+                    if (parse_type_name(p, "expected type name in _Atomic(...)", &aty, NULL) != 0) {
                         return -1;
                     }
                     if (expect(p, TOK_RPAREN, "expected ')' after _Atomic(...)") != 0) {
@@ -2221,8 +2168,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     return -1;
                 }
                 if (is_declspec_start(p)) {
-                    if (parse_type_name_ct(p, NULL, NULL, NULL, NULL, NULL, 1, "expected type name in typeof",
-                                           &typeof_ctype, NULL) != 0) {
+                    if (parse_type_name(p, "expected type name in typeof", &typeof_ctype, NULL) != 0) {
                         return -1;
                     }
                 } else {
@@ -2849,8 +2795,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 if (next_tok(p) != 0) {
                     return -1;
                 }
-                if (parse_type_name_ct(p, NULL, NULL, NULL, NULL, NULL, 1, "expected enum underlying type", &uty,
-                                       NULL) != 0) {
+                if (parse_type_name(p, "expected enum underlying type", &uty, NULL) != 0) {
                     return -1;
                 }
                 if (!cc_ct_is_integer(uty) || uty->unqual->kind == CC_CT_BITINT || uty->unqual->kind == CC_CT_UBITINT) {
@@ -3264,10 +3209,6 @@ static int is_decl_qual_at_token(parser_t *p) {
     return is_decl_qual_tok(p->tok.kind) || tok_is_ident(p, "_Atomic");
 }
 
-static cc_type_t ptr_of_type(cc_type_t t) {
-    return cc_type_make_pointer(t);
-}
-
 /**
  * The type of function @p f as declared, for the parser.
  *
@@ -3636,49 +3577,6 @@ static cc_expr_t *new_const_expr(cc_expr_kind_t kind, const cc_ctype_t *t) {
 /** The type of sizeof and _Alignof: size_t. */
 static const cc_ctype_t *parser_size_ctype(void) {
     return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT);
-}
-
-/**
- * The legacy encoding of a declared type, as the parser's legacy
- * declaration fields hold it.
- *
- * @param t               the type
- * @param out_type        receives the cc_type_t: the base with a pointer
- *                        level per pointer and per array dimension
- * @param out_struct_id   receives the struct id (or _BitInt width); may be NULL
- * @param out_array_len   receives the product of the bounds, -1 without
- *                        arrays; may be NULL
- * @param out_array_ndim  receives the number of array dimensions; may be NULL
- * @param out_array_dims  receives their bounds, outermost first; may be NULL
- * @return                0, or -1 if @p t has no legacy encoding
- */
-static int parser_ctype_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS]) {
-    cc_ct_legacy_t leg;
-    cc_type_t ty;
-    unsigned i;
-
-    if (cc_ct_to_legacy(t, &leg) != 0) {
-        return -1;
-    }
-    ty = leg.base;
-    for (i = 0; i < leg.depth; ++i) {
-        ty = ptr_of_type(ty);
-    }
-    *out_type = ty;
-    if (out_struct_id != NULL) {
-        *out_struct_id = leg.struct_id;
-    }
-    if (out_array_len != NULL) {
-        *out_array_len = leg.array_len;
-    }
-    if (out_array_ndim != NULL) {
-        *out_array_ndim = leg.ndim;
-    }
-    if (out_array_dims != NULL) {
-        memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
-    }
-    return 0;
 }
 
 /**
@@ -5845,17 +5743,8 @@ static void take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip,
  * declarator.
  *
  * @param p               the parser, at the type name
- * @param out_type        receives the type in the legacy encoding
- * @param out_struct_id   receives its struct id; may be NULL
- * @param out_array_len   receives the product of its array bounds; may be NULL
- * @param out_array_ndim  receives its array rank; may be NULL
- * @param out_array_dims  receives its bounds; may be NULL
- * @param allow_void      nonzero if `void` may be named
  * @param what            the message for a missing type
- * @param out_ctype       receives the type itself; NULL if the caller
- *                        reads only the legacy encoding, in which case a
- *                        function type (which that encoding would take
- *                        for its return type) is rejected
+ * @param out             receives the type
  * @param out_vla_bounds  when the type is an array with bounds that are
  *                        not constants, `int[n][m]`, receives each array
  *                        level's bound, outermost first (owned), NULL where
@@ -5863,19 +5752,16 @@ static void take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip,
  *                        be NULL.
  * @return                0, or -1 on error (diagnosed)
  */
-static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                              int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                              const char *what, const cc_ctype_t **out_ctype,
-                              cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
+static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out,
+                           cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
     declarator_t d;
     const cc_ctype_t *spec;
     const cc_ctype_t *t;
-    cc_ct_legacy_t leg;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
 
     memset(&d, 0, sizeof(d));
-    if (parse_declspec(p, &spec, allow_void, what, NULL, NULL, NULL) != 0) {
+    if (parse_declspec(p, &spec, 1, what, NULL, NULL, NULL) != 0) {
         return -1;
     }
     if (parse_declarator_into(p, &d, DECL_ABSTRACT) != 0) {
@@ -5893,7 +5779,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         set_diag(p->diag, line, col, "out of memory building a type");
         return -1;
     }
-    if (cc_ct_to_legacy(t, &leg) != 0) {
+    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
         declarator_free(&d);
         set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
         return -1;
@@ -5906,34 +5792,8 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         }
     }
     declarator_free(&d);
-    if (out_ctype == NULL && t->kind == CC_CT_FUNCTION) {
-        char spelled[128];
-        char msg[200];
-        cc_ct_format(t, spelled, sizeof(spelled));
-        snprintf(msg, sizeof(msg), "type name '%s' is not yet supported here", spelled);
-        set_diag(p->diag, line, col, msg);
-        return -1;
-    }
-    if (out_type != NULL) {
-        parser_ctype_legacy(t, out_type, out_struct_id, out_array_len, out_array_ndim, out_array_dims);
-    }
-    if (out_ctype != NULL) {
-        *out_ctype = t;
-    }
+    *out = t;
     return 0;
-}
-
-/**
- * Parse a type name for a caller that reads only the legacy encoding.
- * See parse_type_name_ct().
- *
- * @return 0, or -1 on error (diagnosed)
- */
-static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
-                           int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
-                           const char *what) {
-    return parse_type_name_ct(p, out_type, out_struct_id, out_array_len, out_array_ndim, out_array_dims, allow_void,
-                              what, NULL, NULL);
 }
 
 static cc_expr_t *new_expr(cc_expr_kind_t kind) {
@@ -6654,8 +6514,6 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
 
     while (p->tok.kind != TOK_RPAREN) {
         generic_assoc_t assoc;
-        cc_type_t aty;
-        int asid;
 
         memset(&assoc, 0, sizeof(assoc));
         if (p->tok.kind == TOK_KW_DEFAULT || (p->tok.kind == TOK_IDENT && tok_is_ident(p, "default"))) {
@@ -6665,8 +6523,7 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
                 free(items);
                 return NULL;
             }
-        } else if (parse_type_name_ct(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Generic",
-                                      &assoc.ctype, NULL) != 0) {
+        } else if (parse_type_name(p, "expected type name in _Generic", &assoc.ctype, NULL) != 0) {
             free_expr(control);
             free(items);
             return NULL;
@@ -7198,15 +7055,13 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             if (strcmp(e->ident, "__builtin_offsetof") == 0) {
-                cc_type_t sty = CC_TYPE_VOID;
                 const cc_ctype_t *sct = NULL;
                 const cc_ctype_t *cur; /* the type of what the designator names so far */
                 int ssid = -1;
                 long total = 0;
                 cc_expr_t *dyn_off = NULL;
 
-                if (parse_type_name_ct(p, &sty, NULL, NULL, NULL, NULL, 1, "expected type name in __builtin_offsetof",
-                                       &sct, NULL) != 0) {
+                if (parse_type_name(p, "expected type name in __builtin_offsetof", &sct, NULL) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -7380,21 +7235,10 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return e;
             }
             if (strcmp(e->ident, "__builtin_types_compatible_p") == 0) {
-                cc_type_t t1 = CC_TYPE_VOID;
-                cc_type_t t2 = CC_TYPE_VOID;
-                int s1 = -1;
-                int s2 = -1;
-                long a1len = -1;
-                long a2len = -1;
-                int a1ndim = 0;
-                int a2ndim = 0;
-                long a1dims[CC_MAX_ARRAY_DIMS];
-                long a2dims[CC_MAX_ARRAY_DIMS];
+                const cc_ctype_t *t1 = NULL;
+                const cc_ctype_t *t2 = NULL;
                 int same = 0;
-                memset(a1dims, 0, sizeof(a1dims));
-                memset(a2dims, 0, sizeof(a2dims));
-                if (parse_type_name(p, &t1, &s1, &a1len, &a1ndim, a1dims, 1,
-                                    "expected first type in __builtin_types_compatible_p") != 0) {
+                if (parse_type_name(p, "expected first type in __builtin_types_compatible_p", &t1, NULL) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -7402,8 +7246,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                if (parse_type_name(p, &t2, &s2, &a2len, &a2ndim, a2dims, 1,
-                                    "expected second type in __builtin_types_compatible_p") != 0) {
+                if (parse_type_name(p, "expected second type in __builtin_types_compatible_p", &t2, NULL) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -7411,7 +7254,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                same = parser_types_compatible(p, t1, s1, a1ndim, t2, s2, a2ndim) ? 1 : 0;
+                /* top-level qualifiers are ignored, as gcc ignores them */
+                same = parser_ct_compatible(p, t1->unqual, t2->unqual, 0);
                 free_expr(e);
                 e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
                 if (e == NULL) {
@@ -7520,8 +7364,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return e;
             }
             if (strcmp(e->ident, "__builtin_va_arg") == 0) {
-                cc_type_t aty = CC_TYPE_VOID;
-                int asid = -1;
                 cc_expr_t *ap;
                 if (p->tok.kind == TOK_RPAREN) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "__builtin_va_arg expects 2 arguments");
@@ -7541,8 +7383,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                if (parse_type_name_ct(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in __builtin_va_arg",
-                                       &e->ctype, NULL) != 0) {
+                if (parse_type_name(p, "expected type name in __builtin_va_arg", &e->ctype, NULL) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -8424,15 +8265,13 @@ static cc_expr_t *parse_unary(parser_t *p) {
             return NULL;
         }
         if (is_type_name_start_after_lparen(p)) {
-            cc_type_t sizeof_type;
             const cc_ctype_t *sizeof_ctype = NULL;
             cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS] = {NULL};
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name_ct(p, &sizeof_type, NULL, NULL, NULL, NULL, 1, "expected type name in sizeof",
-                                   &sizeof_ctype, vla_bounds) != 0) {
+            if (parse_type_name(p, "expected type name in sizeof", &sizeof_ctype, vla_bounds) != 0) {
                 free_expr(e);
                 return NULL;
             }
@@ -8489,8 +8328,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
     if (p->tok.kind == TOK_IDENT &&
         (tok_is_ident(p, "_Alignof") || (parser_is_c23_or_newer() && tok_is_ident(p, "alignof")) ||
          (parser_is_gnu_mode() && (tok_is_ident(p, "__alignof__") || tok_is_ident(p, "__alignof"))))) {
-        cc_type_t aty = CC_TYPE_VOID;
-        int asid = -1;
         long align;
         cc_expr_t *ae;
         int is_gnu_alignof = parser_is_gnu_mode() && (tok_is_ident(p, "__alignof__") || tok_is_ident(p, "__alignof"));
@@ -8507,18 +8344,13 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (is_declspec_start(p)) {
             const cc_ctype_t *act = NULL;
 
-            if (parse_type_name_ct(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Alignof/alignof",
-                                   &act, NULL) != 0) {
+            if (parse_type_name(p, "expected type name in _Alignof/alignof", &act, NULL) != 0) {
                 return NULL;
             }
             if (expect(p, TOK_RPAREN, "expected ')' after _Alignof/alignof type") != 0) {
                 return NULL;
             }
-            /* the type itself, where it says more than the legacy encoding (a complex kind) */
-            align = act != NULL ? cc_ct_align(act, p->tu) : -1;
-            if (align <= 0) {
-                align = parser_type_align_bytes(p, aty, asid);
-            }
+            align = parser_ct_align(p, act);
             if (align <= 0) {
                 align = cc_target_pointer_size();
             }
@@ -8545,7 +8377,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
         parser_t q = *p;
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
         if (next_tok(&q) == 0 && is_declspec_start(&q)) {
-            cc_type_t cast_type;
             if (e == NULL) {
                 return NULL;
             }
@@ -8553,7 +8384,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name_ct(p, &cast_type, NULL, NULL, NULL, NULL, 1, "expected cast type", &e->ctype, NULL) != 0) {
+            if (parse_type_name(p, "expected cast type", &e->ctype, NULL) != 0) {
                 free_expr(e);
                 return NULL;
             }
