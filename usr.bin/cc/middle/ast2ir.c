@@ -1509,7 +1509,7 @@ static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) 
 
 static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
     cc_ssa_instr_t in;
-    const char *tmpl = cc_target_pointer_size() == 8 ? "lock; orl $0, (%%rsp)" : "lock; orl $0, (%%esp)";
+    const char *tmpl = cc_target_current()->full_barrier_asm;
 
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_ASM;
@@ -6675,18 +6675,20 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
 
             /*
-             * On SysV x86-64 we model va_list as a pointer to the ABI state
-             * record ({gp_offset, fp_offset, overflow_arg_area, reg_save_area}).
-             * va_copy must duplicate that record so advancing one list does not
-             * mutate the other.
+             * Where a va_list points at the ABI's state record (x86-64:
+             * gp_offset, fp_offset, overflow_arg_area, reg_save_area),
+             * va_copy duplicates the record, so that advancing one list does
+             * not advance the other.
              */
-            if (cc_target_pointer_size() == 8) {
+            if (cc_target_current()->va_list_record_size > 0) {
+                long rec = cc_target_current()->va_list_record_size;
+
                 copy_src = srcv;
-                copy_dst = emit_local_storage_alloc(sf, 24, diag);
+                copy_dst = emit_local_storage_alloc(sf, rec, diag);
                 if (copy_dst < 0) {
                     return -1;
                 }
-                if (emit_memcpy_instr(sf, copy_dst, copy_src, 24, diag) != 0) {
+                if (emit_memcpy_instr(sf, copy_dst, copy_src, rec, diag) != 0) {
                     return -1;
                 }
                 srcv = copy_dst;
@@ -11619,8 +11621,9 @@ static int emit_store_const_at(cc_ssa_function_t *sf, int base, long off, long l
  * function, as gcc builds one.  It lives as long as the caller's frame, and
  * the stack must be executable to run it (the module is marked so).
  *
- *   x86-64:  movabs $env, %r10; movabs $fn, %r11; jmp *%r11
- *   i386:    movl $env, %ecx; movl $fn, %eax; jmp *%eax
+ * The code is the target's (cc_target_desc_t.trampoline): on x86-64
+ * `movabs $env, %r10; movabs $fn, %r11; jmp *%r11`, on i386
+ * `movl $env, %ecx; movl $fn, %eax; jmp *%eax`.
  *
  * @param tu         the translation unit
  * @param sf         the function taking the address
@@ -11638,24 +11641,19 @@ static int lower_nested_trampoline(const cc_translation_unit_t *tu, cc_ssa_funct
     int fnv = envv < 0 ? -1 : emit_global_addr(sf, callee->name, diag);
     int tramp = fnv < 0 ? -1 : emit_local_storage_alloc(sf, 32, diag);
 
+    const cc_target_tramp_store_t *ts;
+
     if (tramp < 0) {
         return -1;
     }
-    if (cc_target_pointer_size() == 8) {
-        if (emit_store_const_at(sf, tramp, 0, 0xba49, 2, diag) != 0 ||  /* movabs $imm64, %r10 */
-            emit_store_at(sf, tramp, 2, envv, 8, diag) != 0 ||
-            emit_store_const_at(sf, tramp, 10, 0xbb49, 2, diag) != 0 || /* movabs $imm64, %r11 */
-            emit_store_at(sf, tramp, 12, fnv, 8, diag) != 0 ||
-            emit_store_const_at(sf, tramp, 20, 0xff41, 2, diag) != 0 || /* jmp *%r11 */
-            emit_store_const_at(sf, tramp, 22, 0xe3, 1, diag) != 0) {
+    /* the target's code, with the environment and the function patched in */
+    for (ts = cc_target_current()->trampoline; ts->what != CC_TRAMP_END; ++ts) {
+        int rc = ts->what == CC_TRAMP_CONST ? emit_store_const_at(sf, tramp, ts->off, ts->value, ts->size, diag)
+                 : emit_store_at(sf, tramp, ts->off, ts->what == CC_TRAMP_ENV ? envv : fnv, ts->size, diag);
+
+        if (rc != 0) {
             return -1;
         }
-    } else if (emit_store_const_at(sf, tramp, 0, 0xb9, 1, diag) != 0 || /* movl $imm32, %ecx */
-               emit_store_at(sf, tramp, 1, envv, 4, diag) != 0 ||
-               emit_store_const_at(sf, tramp, 5, 0xb8, 1, diag) != 0 || /* movl $imm32, %eax */
-               emit_store_at(sf, tramp, 6, fnv, 4, diag) != 0 ||
-               emit_store_const_at(sf, tramp, 10, 0xe0ff, 2, diag) != 0) { /* jmp *%eax */
-        return -1;
     }
     if (ctx != NULL && ctx->mod != NULL) {
         ctx->mod->needs_exec_stack = 1;

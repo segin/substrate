@@ -14,6 +14,19 @@
 static const char *const g_x86_64_macros[] = {"__x86_64__", "__LP64__", "_LP64", NULL};
 static const char *const g_i386_macros[] = {"__i386__", "__ILP32__", "_ILP32", NULL};
 
+/* movabs $env, %r10; movabs $fn, %r11; jmp *%r11 */
+static const cc_target_tramp_store_t g_x86_64_tramp[] = {
+    {CC_TRAMP_CONST, 0, 2, 0xba49}, {CC_TRAMP_ENV, 2, 8, 0},     {CC_TRAMP_CONST, 10, 2, 0xbb49},
+    {CC_TRAMP_FN, 12, 8, 0},        {CC_TRAMP_CONST, 20, 2, 0xff41}, {CC_TRAMP_CONST, 22, 1, 0xe3},
+    {CC_TRAMP_END, 0, 0, 0},
+};
+
+/* movl $env, %ecx; movl $fn, %eax; jmp *%eax */
+static const cc_target_tramp_store_t g_i386_tramp[] = {
+    {CC_TRAMP_CONST, 0, 1, 0xb9}, {CC_TRAMP_ENV, 1, 4, 0},          {CC_TRAMP_CONST, 5, 1, 0xb8},
+    {CC_TRAMP_FN, 6, 4, 0},       {CC_TRAMP_CONST, 10, 2, 0xe0ff}, {CC_TRAMP_END, 0, 0, 0},
+};
+
 /* The typedefs' types are gcc's: LP64 on x86-64, ILP32 (with a long wchar_t) on i386. */
 static const cc_target_desc_t g_x86_64 = {
     CC_TARGET_X86_64,
@@ -38,6 +51,9 @@ static const cc_target_desc_t g_x86_64 = {
     "x86_64-pc-linux-gnu",
     "/lib64/ld-linux-x86-64.so.2",
     1, /* PIE */
+    "lock; orl $0, (%%rsp)",
+    24, /* {gp_offset, fp_offset, overflow_arg_area, reg_save_area} */
+    g_x86_64_tramp,
     cc_abi_x86_64_aggregate_arg,
     cc_abi_x86_64_aggregate_return,
 };
@@ -65,6 +81,9 @@ static const cc_target_desc_t g_i386 = {
     "i386-pc-linux-gnu",
     "/lib/ld-linux.so.2",
     0, /* absolute addressing: not a PIE */
+    "lock; orl $0, (%%esp)",
+    0, /* a va_list is the next argument's address */
+    g_i386_tramp,
     cc_abi_i386_aggregate_arg,
     cc_abi_i386_aggregate_return,
 };

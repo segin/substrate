@@ -37,6 +37,25 @@ typedef enum {
 struct cc_translation_unit;
 struct cc_abi_regs;
 
+/** What one store of a trampoline writes. */
+typedef enum {
+    CC_TRAMP_END = 0, /**< ends the list */
+    CC_TRAMP_CONST,   /**< the constant `value` (instruction bytes) */
+    CC_TRAMP_ENV,     /**< the static chain: the nested function's environment */
+    CC_TRAMP_FN       /**< the nested function's address */
+} cc_tramp_part_t;
+
+/**
+ * One store that builds a GNU nested function's trampoline in the
+ * caller's frame: @c size bytes at offset @c off.
+ */
+typedef struct {
+    cc_tramp_part_t what; /**< what is stored */
+    unsigned char off;    /**< offset in the trampoline */
+    unsigned char size;   /**< bytes stored */
+    long long value;      /**< CC_TRAMP_CONST: the bytes, little-endian */
+} cc_target_tramp_store_t;
+
 typedef struct {
     cc_target_t id;                            /**< which target this is */
     const char *name;                             /**< "x86_64" or "i386" */
@@ -60,6 +79,10 @@ typedef struct {
     const char *gnu_triple;                       /**< -dumpmachine on a GNU host */
     const char *host_ldso;                        /**< a GNU/Linux host's dynamic linker */
     int pie;                                      /**< executables link as PIEs (i386 code is not RIP-relative) */
+    const char *full_barrier_asm;                 /**< inline asm for a full memory barrier (seq_cst fence) */
+    int va_list_record_size;                      /**< bytes of the record a va_list points at, which va_copy
+                                                       duplicates; 0 when a va_list is a plain argument pointer */
+    const cc_target_tramp_store_t *trampoline;    /**< the stores that build a trampoline, CC_TRAMP_END-ended */
     /** how an aggregate argument travels (cc_abi.h: cc_abi_aggregate_arg()) */
     int (*abi_aggregate_arg)(const struct cc_translation_unit *tu, int sid, long size, struct cc_abi_regs *regs);
     /** how an aggregate is returned (cc_abi.h: cc_abi_aggregate_return()) */
