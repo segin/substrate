@@ -2182,13 +2182,38 @@ static int sema_complex_operand_rank(const cc_translation_unit_t *tu, const cc_e
 }
 
 /**
- * Make an implicit conversion explicit: put a cast to (@p t, @p sid) above
- * the expression in @p slot.  Lowering converts between a complex value and
- * a real one only where a cast says so.
+ * The legacy encoding of an arithmetic or structure type (no pointer or
+ * array): its enumerator, and the struct id it carries (the structure, or
+ * the hidden one of a complex, wide, decimal or vector type; a _BitInt's
+ * width).
  *
- * @return 0, or -1 when out of memory
+ * @param t    the type
+ * @param out  receives the enumerator
+ * @param sid  receives the struct id, or -1
  */
-static int sema_wrap_cast(cc_expr_t **slot, cc_type_t t, int sid) {
+static void sema_ct_legacy_scalar(const cc_ctype_t *t, cc_type_t *out, int *sid) {
+    if (sx_ct_record(t) >= 0) {
+        *out = CC_TYPE_VOID;
+        *sid = sx_ct_record(t);
+    } else if (ct_kind_is(t, CC_CT_BITINT) || ct_kind_is(t, CC_CT_UBITINT)) {
+        *out = CC_TYPE_BITINT;
+        *sid = (int)t->count;
+    } else {
+        *out = t != NULL ? cc_ct_legacy_kind(t->kind) : CC_TYPE_VOID;
+        *sid = -1;
+    }
+}
+
+/**
+ * Make an implicit conversion explicit: put a cast to arithmetic or
+ * structure type @p t above the expression in @p slot.  Lowering converts
+ * between a complex value and a real one only where a cast says so.
+ *
+ * @param slot  the expression
+ * @param t     the type converted to
+ * @return      0, or -1 when out of memory
+ */
+static int sema_wrap_cast(cc_expr_t **slot, const cc_ctype_t *t) {
     cc_expr_t *c = (cc_expr_t *)calloc(1, sizeof(*c));
 
     if (c == NULL) {
@@ -2197,17 +2222,18 @@ static int sema_wrap_cast(cc_expr_t **slot, cc_type_t t, int sid) {
     c->kind = CC_EXPR_CAST;
     c->line = (*slot)->line;
     c->col = (*slot)->col;
-    c->aux_type = t;
-    c->aux_struct_id = sid;
-    c->value_type = t;
-    c->struct_id = sid;
+    sema_ct_legacy_scalar(t, &c->aux_type, &c->aux_struct_id);
+    c->value_type = c->aux_type;
+    c->struct_id = c->aux_struct_id;
     c->lhs = *slot;
-    if (!is_pointer_type(t)) {
-        /* an arithmetic or structure type, which the encoding states exactly */
-        c->ctype = cc_ct_from_legacy(t, sid, 0, NULL);
-    }
+    c->ctype = t;
     *slot = c;
     return 0;
+}
+
+/** sema_wrap_cast() to arithmetic or structure type (@p t, @p sid) in the legacy encoding. */
+static int sema_wrap_cast_legacy(cc_expr_t **slot, cc_type_t t, int sid) {
+    return sema_wrap_cast(slot, cc_ct_from_legacy(t, sid, 0, NULL));
 }
 
 static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot);
@@ -2290,7 +2316,7 @@ static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_e
         /* to a real type: the real part, converted */
         return -1;
     }
-    return sema_wrap_cast(slot, t, sid) == 0 ? 1 : -1;
+    return sema_wrap_cast_legacy(slot, t, sid) == 0 ? 1 : -1;
 }
 
 /**
@@ -2440,7 +2466,7 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
         return -1;
     }
     if (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) {
-        if (rw && sema_wrap_cast(&e->rhs, CC_TYPE_LONG_LONG, -1) != 0) {
+        if (rw && sema_wrap_cast(&e->rhs, cc_ct_basic(CC_CT_LLONG)) != 0) {
             set_diag(diag, "out of memory");
             return -1;
         }
@@ -2466,7 +2492,8 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
     }
     if (ft != CC_TYPE_VOID) {
         /* with a floating operand: the wide one is converted to that floating type */
-        if ((lw && sema_wrap_cast(&e->lhs, ft, -1) != 0) || (rw && sema_wrap_cast(&e->rhs, ft, -1) != 0)) {
+        if ((lw && sema_wrap_cast_legacy(&e->lhs, ft, -1) != 0) ||
+            (rw && sema_wrap_cast_legacy(&e->rhs, ft, -1) != 0)) {
             set_diag(diag, "out of memory");
             return -1;
         }
@@ -2479,11 +2506,11 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
         return -1;
     }
     sid = sema_wide_common(tu, lw ? e->lhs->struct_id : -1, rw ? e->rhs->struct_id : -1);
-    if ((e->lhs->struct_id != sid || !lw) && sema_wrap_cast(&e->lhs, CC_TYPE_VOID, sid) != 0) {
+    if ((e->lhs->struct_id != sid || !lw) && sema_wrap_cast(&e->lhs, cc_ct_record(sid)) != 0) {
         set_diag(diag, "out of memory");
         return -1;
     }
-    if ((e->rhs->struct_id != sid || !rw) && sema_wrap_cast(&e->rhs, CC_TYPE_VOID, sid) != 0) {
+    if ((e->rhs->struct_id != sid || !rw) && sema_wrap_cast(&e->rhs, cc_ct_record(sid)) != 0) {
         set_diag(diag, "out of memory");
         return -1;
     }
@@ -2593,7 +2620,7 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
             return -1;
         }
         if (sx_vtype(*scalar) != cc_ct_from_scalar(vd->vector_elem) &&
-            sema_wrap_cast(scalar, vd->vector_elem, -1) != 0) {
+            sema_wrap_cast(scalar, cc_ct_from_scalar(vd->vector_elem)) != 0) {
             set_diag(diag, "out of memory");
             return -1;
         }
@@ -2830,7 +2857,7 @@ static int sema_decimal_convert(const cc_translation_unit_t *tu, cc_expr_t **slo
         /* the compound literal's own checks */
         return check_expr(tu, c, NULL, 0, 0, NULL);
     }
-    return sema_wrap_cast(slot, CC_TYPE_VOID, sid);
+    return sema_wrap_cast(slot, cc_ct_record(sid));
 }
 
 /** Whether @p t is a type that converts to a decimal floating type: an integer, or _Bool. */
@@ -2972,7 +2999,7 @@ static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_e
     if (!sema_decimal_partner_ok(t) && !sema_is_binary_fp(t)) {
         return 0;
     }
-    return sema_wrap_cast(slot, t, -1) == 0 ? 1 : -1;
+    return sema_wrap_cast_legacy(slot, t, -1) == 0 ? 1 : -1;
 }
 
 /**
@@ -3105,7 +3132,7 @@ static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr
     if (!dw && t == CC_TYPE_BOOL) {
         return sema_wide_truth(tu, slot, NULL) == 0 ? 1 : -1;
     }
-    return sema_wrap_cast(slot, t, dw ? sid : -1) == 0 ? 1 : -1;
+    return sema_wrap_cast_legacy(slot, t, dw ? sid : -1) == 0 ? 1 : -1;
 }
 
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
@@ -3680,8 +3707,8 @@ static int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *
         set_diag(diag, "complex type has no layout");
         return -1;
     }
-    if ((e->lhs->value_type != elem && sema_wrap_cast(&e->lhs, elem, -1) != 0) ||
-        (e->rhs->value_type != elem && sema_wrap_cast(&e->rhs, elem, -1) != 0)) {
+    if ((e->lhs->value_type != elem && sema_wrap_cast_legacy(&e->lhs, elem, -1) != 0) ||
+        (e->rhs->value_type != elem && sema_wrap_cast_legacy(&e->rhs, elem, -1) != 0)) {
         set_diag(diag, "out of memory");
         return -1;
     }
@@ -3763,7 +3790,7 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
         e->kind = CC_EXPR_BIN;
         e->op = CC_BIN_COMMA;
         e->rhs = zero;
-        if (sema_wrap_cast(&e->rhs, t, -1) != 0) {
+        if (sema_wrap_cast_legacy(&e->rhs, t, -1) != 0) {
             set_diag(diag, "out of memory");
             return -1;
         }
