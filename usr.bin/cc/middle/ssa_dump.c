@@ -256,6 +256,7 @@ static size_t instr_uses(const cc_ssa_instr_t *in, int *out, size_t cap) {
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
+    case CC_SSA_EXT:
     case CC_SSA_BR_COND:
     case CC_SSA_RET:
     case CC_SSA_VA_START:
@@ -530,6 +531,12 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
     case CC_SSA_FROUND64:
         fprintf(out, "fround64 %s ", t);
         put_value(out, in->lhs);
+        return;
+    case CC_SSA_EXT:
+        /* the low imm bits of the operand, extended to the result's type */
+        fprintf(out, "%s %s ", in->is_unsigned ? "zext" : "sext", t);
+        put_value(out, in->lhs);
+        fprintf(out, ", %lld", in->imm);
         return;
     case CC_SSA_STACKALLOC:
         fprintf(out, "stackalloc %s %lld", t, in->imm);

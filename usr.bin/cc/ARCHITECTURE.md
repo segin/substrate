@@ -27,7 +27,7 @@ usr.bin/cc/
 │   └── types.c              # Scalar type sizes and alignments, for every phase
 ├── middle/
 │   ├── ast2ir.c             # AST -> SSA lowering
-│   ├── legalize.c           # IR legality checks and normalization
+│   ├── legalize.c           # IR legality checks; expands EXT (integer conversions) for the target
 │   ├── ssa_dump.c           # SSA -> the ir/ text form, for cc -fdump-ir
 │   ├── passes/opt.c         # Optimization passes
 │   └── ssa/                 # SSA module/function/block/instruction infrastructure

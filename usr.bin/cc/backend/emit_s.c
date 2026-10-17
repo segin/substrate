@@ -743,6 +743,7 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_F2I: return "f2i";
     case CC_SSA_FROUND32: return "fround32";
     case CC_SSA_FROUND64: return "fround64";
+    case CC_SSA_EXT: return "ext";
     case CC_SSA_STACKALLOC: return "stackalloc";
     case CC_SSA_DYNALLOC: return "dynalloc";
     case CC_SSA_CHAIN: return "chain";
@@ -2033,6 +2034,7 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
+    case CC_SSA_EXT:
         return in->lhs == value;
     case CC_SSA_STORE:
     case CC_SSA_DYNALLOC:
@@ -2379,6 +2381,7 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
+    case CC_SSA_EXT:
     case CC_SSA_BR_COND:
     case CC_SSA_RET:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
@@ -5135,6 +5138,13 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 emit_fround64(fp, f, &lay, in, "%rbp", 1);
                 break;
 
+            case CC_SSA_EXT:
+                /* legalization expands every one */
+                int_regs_free(&ist);
+                slot_layout_free(&lay);
+                set_diag(diag, "x86_64: integer conversion reached the emitter unexpanded");
+                return -1;
+
             case CC_SSA_LABEL:
                 int_regs_flush(fp, f, &lay, &ist);
                 emit_local_label(fp, f->name, in->label);
@@ -6953,6 +6963,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 fprintf(fp, "\tfldl %d(%%ebp)\n", scratch_off + 4);
                 emit_i386_x87_store_f64(fp, f, &lay, in->dst);
                 break;
+
+            case CC_SSA_EXT:
+                /* legalization expands every one */
+                set_diag(diag, "i386: integer conversion reached the emitter unexpanded");
+                int_regs_free(&ist);
+                slot_layout_free(&lay);
+                return -1;
 
             case CC_SSA_LABEL:
                 int_regs_flush(fp, f, &lay, &ist);

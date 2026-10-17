@@ -188,6 +188,7 @@ typedef enum {
     FORM_BINARY,  /**< op T a, b */
     FORM_CMP,     /**< op PRED T a, b; the result is i1 */
     FORM_UNARY,   /**< op T a: a has the operand class */
+    FORM_EXT,     /**< op T a, bits: the low bits of a, extended to T */
     FORM_IMM,     /**< op T literal: param, const, fconst, laddr, stackalloc */
     FORM_TYPE,    /**< op T: undef, chain */
     FORM_SYM,     /**< op T @symbol or op T "string" */
@@ -240,6 +241,8 @@ static const op_info_t op_table[] = {
     {"fptoui", FORM_UNARY, TC_INT, TC_FP},
     {"fround32", FORM_UNARY, TC_FP, TC_FP},
     {"fround64", FORM_UNARY, TC_FP, TC_FP},
+    {"sext", FORM_EXT, TC_INT, TC_INT},
+    {"zext", FORM_EXT, TC_INT, TC_INT},
     {"mov", FORM_UNARY, TC_ANY, TC_ANY},
     {"addr", FORM_UNARY, TC_ADDR, TC_ANY},
     {"param", FORM_IMM, TC_ANY, TC_NONE},
@@ -536,6 +539,13 @@ static int check_instr_types(const ir_func_t *f, const def_loc_t *defs, size_t d
     case FORM_UNARY:
         if (tk.count != i + 1) {
             set_errf(err, in->line, "%s takes one operand", in->opcode);
+            return -1;
+        }
+        return check_operand(f, defs, def_count, in, tk.tok[i], op->operand, 0, err);
+    case FORM_EXT:
+        if (tk.count != i + 2 || !is_literal(tk.tok[i + 1]) || atoi(tk.tok[i + 1]) < 1 ||
+            atoi(tk.tok[i + 1]) > 128) {
+            set_errf(err, in->line, "%s takes a value and a bit count from 1 to 128", in->opcode);
             return -1;
         }
         return check_operand(f, defs, def_count, in, tk.tok[i], op->operand, 0, err);

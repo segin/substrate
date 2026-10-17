@@ -1821,39 +1821,55 @@ static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
     return 0;
 }
 
+/**
+ * Add a value to the function being lowered.
+ *
+ * @param f   the function
+ * @param vt  its register class
+ * @return    the value, or -1 when out of memory
+ */
 static int new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
-    int id = f->value_count;
-    f->value_count++;
+    return cc_ssa_function_new_value(f, vt);
+}
 
-    if ((size_t)f->value_count > f->value_cap) {
-        size_t ncap = f->value_cap == 0 ? 32 : f->value_cap * 2;
-        while (ncap < (size_t)f->value_count) {
-            ncap *= 2;
-        }
-        cc_value_type_t *next = (cc_value_type_t *)realloc(f->value_types, ncap * sizeof(*next));
-        unsigned char *next_unsigned;
-        uint32_t *next_sizes;
-        if (next == NULL) {
+/**
+ * Convert integer value @p v by keeping its low @p bits bits, zero- or
+ * sign-extended as @p is_unsigned says, in a new value of @p size bytes:
+ * one EXT, which legalization expands for the target.
+ *
+ * @param sf           the function
+ * @param v            the value
+ * @param bits         how many of its low bits to keep
+ * @param is_unsigned  zero-extend them, rather than sign-extend
+ * @param size         the size of the result in bytes
+ * @param diag         receives an error
+ * @return             the converted value, or -1
+ */
+static int emit_ext(cc_ssa_function_t *sf, int v, int bits, int is_unsigned, long size, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_EXT;
+    in.lhs = v;
+    in.rhs = -1;
+    in.imm = bits;
+    in.is_unsigned = is_unsigned ? 1 : 0;
+    if (cc_ssa_ext_needs_scratch(bits, in.is_unsigned, size, cc_target_pointer_size())) {
+        /* numbered before the result, as the expansion's instructions run */
+        in.rhs = new_value(sf, CC_VAL_I64);
+        if (in.rhs < 0) {
+            set_diag(diag, "out of memory converting an integer value");
             return -1;
         }
-        next_unsigned = (unsigned char *)realloc(f->value_is_unsigned, ncap * sizeof(*next_unsigned));
-        if (next_unsigned == NULL) {
-            return -1;
-        }
-        next_sizes = (uint32_t *)realloc(f->value_sizes, ncap * sizeof(*next_sizes));
-        if (next_sizes == NULL) {
-            return -1;
-        }
-        f->value_types = next;
-        f->value_is_unsigned = next_unsigned;
-        f->value_sizes = next_sizes;
-        f->value_cap = ncap;
     }
-
-    f->value_types[id] = vt;
-    f->value_is_unsigned[id] = 0;
-    f->value_sizes[id] = (uint32_t)(vt == CC_VAL_F64 ? 8 : cc_target_pointer_size());
-    return id;
+    in.dst = new_value(sf, CC_VAL_I64);
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory converting an integer value");
+        return -1;
+    }
+    set_value_size(sf, in.dst, size);
+    sf->value_is_unsigned[in.dst] = (unsigned char)in.is_unsigned;
+    return in.dst;
 }
 
 /**
@@ -3287,8 +3303,6 @@ static int integral_type_bits(const cc_ctype_t *t) {
  */
 static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *t, cc_diag_t *diag) {
     int bits;
-    int sh;
-    int c;
     cc_ssa_instr_t in;
     int want_unsigned;
 
@@ -3365,54 +3379,10 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype
             cur_size = cc_target_pointer_size();
         }
         if (cur_size > 0 && cur_size < 8) {
-            int src_bits = (int)(cur_size * 8);
-            if (src_unsigned) {
-                unsigned long long mask = (src_bits >= 64) ? ~0ULL : ((1ULL << src_bits) - 1ULL);
-                c = emit_const_i64_instr(sf, (long long)mask);
-                if (c < 0) {
-                    return -1;
-                }
-                set_value_size(sf, c, 8);
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_AND;
-                in.is_unsigned = 1;
-                in.dst = new_value(sf, CC_VAL_I64);
-                in.lhs = v;
-                in.rhs = c;
-                set_value_size(sf, in.dst, 8);
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
-                    set_diag(diag, "out of memory zero-extending integral value");
-                    return -1;
-                }
-                v = in.dst;
-            } else {
-                int ext_sh = 64 - src_bits;
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_SHL;
-                in.is_unsigned = 0;
-                in.dst = new_value(sf, CC_VAL_I64);
-                in.lhs = v;
-                in.rhs = -1;
-                in.imm = ext_sh;
-                set_value_size(sf, in.dst, 8);
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
-                    set_diag(diag, "out of memory sign-extending integral value");
-                    return -1;
-                }
-                v = in.dst;
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_SHR;
-                in.is_unsigned = 0;
-                in.dst = new_value(sf, CC_VAL_I64);
-                in.lhs = v;
-                in.rhs = -1;
-                in.imm = ext_sh;
-                set_value_size(sf, in.dst, 8);
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
-                    set_diag(diag, "out of memory sign-extending integral value");
-                    return -1;
-                }
-                v = in.dst;
+            /* widen: extend the source's bits as the source's signedness says */
+            v = emit_ext(sf, v, (int)(cur_size * 8), src_unsigned, 8, diag);
+            if (v < 0) {
+                return -1;
             }
         } else {
             set_value_size(sf, v, 8);
@@ -3423,82 +3393,14 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype
         return v;
     }
 
-    if (want_unsigned) {
-        unsigned long long mask_u = (1ULL << bits) - 1ULL;
-        c = emit_const_i64_instr(sf, (long long)mask_u); /* not (long): a 32-bit host makes 0xffffffff -1 */
-        if (c < 0) {
-            return -1;
-        }
-        memset(&in, 0, sizeof(in));
-        in.op = CC_SSA_AND;
-        in.is_unsigned = 1;
-        in.dst = new_value(sf, CC_VAL_I64);
-        in.lhs = v;
-        in.rhs = c;
-        set_value_size(sf, in.dst, (bits + 7) / 8);
-        if (in.dst < 0 || push_instr(sf, in) != 0) {
-            set_diag(diag, "out of memory normalizing unsigned integer value");
-            return -1;
-        }
-        return in.dst;
+    if (!want_unsigned && cc_target_pointer_size() <= 4 && bits == 32 && value_size(sf, v) <= 4) {
+        /* already a signed word: relabelling it is enough */
+        set_value_size(sf, v, 4);
+        sf->value_is_unsigned[v] = 0;
+        return v;
     }
-
-    if (cc_target_pointer_size() <= 4 && bits <= 32) {
-        if (bits == 32) {
-            if (value_size(sf, v) > 4) {
-                /*
-                 * Truncate into a new value: relabelling v would also
-                 * make the instruction that computes it 32-bit.
-                 */
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_MOV;
-                in.dst = new_value(sf, CC_VAL_I64);
-                in.lhs = v;
-                in.rhs = -1;
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
-                    set_diag(diag, "out of memory truncating integer value");
-                    return -1;
-                }
-                v = in.dst;
-            }
-            set_value_size(sf, v, 4);
-            if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
-                sf->value_is_unsigned[v] = 0;
-            }
-            return v;
-        }
-        sh = 32 - bits;
-    } else {
-        sh = 64 - bits;
-    }
-
-    memset(&in, 0, sizeof(in));
-    in.op = CC_SSA_SHL;
-    in.is_unsigned = 0;
-    in.dst = new_value(sf, CC_VAL_I64);
-    in.lhs = v;
-    in.rhs = -1;
-    in.imm = sh;
-    set_value_size(sf, in.dst, (cc_target_pointer_size() <= 4 && bits <= 32) ? 4 : 8);
-    if (in.dst < 0 || push_instr(sf, in) != 0) {
-        set_diag(diag, "out of memory normalizing signed integer value");
-        return -1;
-    }
-    v = in.dst;
-
-    memset(&in, 0, sizeof(in));
-    in.op = CC_SSA_SHR;
-    in.is_unsigned = 0;
-    in.dst = new_value(sf, CC_VAL_I64);
-    in.lhs = v;
-    in.rhs = -1;
-    in.imm = sh;
-    set_value_size(sf, in.dst, (bits + 7) / 8);
-    if (in.dst < 0 || push_instr(sf, in) != 0) {
-        set_diag(diag, "out of memory normalizing signed integer value");
-        return -1;
-    }
-    return in.dst;
+    /* narrow: keep the type's bits, extended as its signedness says */
+    return emit_ext(sf, v, bits, want_unsigned, (bits + 7) / 8, diag);
 }
 
 /**
@@ -3515,7 +3417,6 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype
  * @return      the converted value, or -1
  */
 static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag) {
-    cc_ssa_instr_t in;
     long size;
     int vbits;
     int n;
@@ -3535,55 +3436,7 @@ static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, 
         }
         return v;
     }
-    memset(&in, 0, sizeof(in));
-    in.rhs = -1;
-    if (uns) {
-        int c = emit_const_i64_instr(sf, (long long)((1ULL << n) - 1ULL));
-
-        if (c < 0) {
-            return -1;
-        }
-        set_value_size(sf, c, size);
-        in.op = CC_SSA_AND;
-        in.is_unsigned = 1;
-        in.lhs = v;
-        in.rhs = c;
-    } else {
-        in.op = CC_SSA_SHL;
-        in.lhs = v;
-        in.imm = vbits - n;
-    }
-    in.dst = new_value(sf, CC_VAL_I64);
-    if (in.dst < 0) {
-        return -1;
-    }
-    set_value_size(sf, in.dst, size);
-    if (push_instr(sf, in) != 0) {
-        set_diag(diag, "out of memory wrapping a bit-precise value");
-        return -1;
-    }
-    v = in.dst;
-    if (!uns) {
-        memset(&in, 0, sizeof(in));
-        in.op = CC_SSA_SHR;
-        in.lhs = v;
-        in.rhs = -1;
-        in.imm = vbits - n;
-        in.dst = new_value(sf, CC_VAL_I64);
-        if (in.dst < 0) {
-            return -1;
-        }
-        set_value_size(sf, in.dst, size);
-        if (push_instr(sf, in) != 0) {
-            set_diag(diag, "out of memory wrapping a bit-precise value");
-            return -1;
-        }
-        v = in.dst;
-    }
-    if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
-        sf->value_is_unsigned[v] = (unsigned char)uns;
-    }
-    return v;
+    return emit_ext(sf, v, n, uns, size, diag);
 }
 
 /**

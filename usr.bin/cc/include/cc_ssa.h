@@ -73,6 +73,10 @@ typedef enum {
     CC_SSA_F2I,
     CC_SSA_FROUND32,
     CC_SSA_FROUND64,   /**< dst = lhs (a long double) rounded to double */
+    CC_SSA_EXT,        /**< dst = the low imm bits of integer lhs, zero-extended if is_unsigned, else
+                            sign-extended, to dst's size: every integer conversion that changes a value.
+                            Legalization expands it for the target; rhs, if >= 0, is a value reserved for
+                            the expansion (cc_ssa_ext_needs_scratch()), so that values keep their numbers. */
     CC_SSA_STACKALLOC,
     CC_SSA_DYNALLOC,   /**< dst = lhs bytes taken off the stack; rhs, if >= 0, a STACKALLOC save slot (below) */
     CC_SSA_CHAIN,      /**< dst = the static chain register as the function was entered (the first instruction) */
@@ -86,6 +90,25 @@ typedef enum {
     CC_SSA_TRAP,
     CC_SSA_RET
 } cc_ssa_opcode_t;
+
+/**
+ * The width of the word an EXT of an x86 target works in: 64 bits on
+ * x86-64, and on i386 for a result of 8 bytes (a pair of words); else 32.
+ *
+ * @param size          the result's size in bytes
+ * @param pointer_size  the target's pointer size
+ */
+static inline int cc_ssa_ext_word_bits(long size, long pointer_size) {
+    return (size >= 8 || pointer_size >= 8) ? 64 : 32;
+}
+
+/**
+ * Whether expanding an EXT needs an intermediate value: all but a sign
+ * extension that keeps the whole word, which is a move.
+ */
+static inline int cc_ssa_ext_needs_scratch(int bits, int is_unsigned, long size, long pointer_size) {
+    return is_unsigned || bits < cc_ssa_ext_word_bits(size, pointer_size);
+}
 
 #define CC_SSA_ASM_MEM_INDIRECT_ENCODE(v) (-(int)((v) + 2))
 #define CC_SSA_ASM_MEM_INDIRECT_P(v) ((v) <= -2)
@@ -225,6 +248,16 @@ void cc_ssa_module_free(cc_ssa_module_t *m);
 void cc_ssa_instr_free(cc_ssa_instr_t *in);
 void cc_ssa_function_init(cc_ssa_function_t *f);
 void cc_ssa_function_free(cc_ssa_function_t *f);
+
+/**
+ * Add a value to a function: signed, and a word (the pointer size), or a
+ * double for CC_VAL_F64, until its definition says otherwise.
+ *
+ * @param f   the function
+ * @param vt  its register class
+ * @return    the new value, or -1 when out of memory
+ */
+int cc_ssa_function_new_value(cc_ssa_function_t *f, cc_value_type_t vt);
 int cc_ssa_function_append_instr(cc_ssa_function_t *f, const cc_ssa_instr_t *in, cc_diag_t *diag);
 int cc_ssa_function_has_label(const cc_ssa_function_t *f, int label);
 size_t cc_ssa_function_basic_block_count(const cc_ssa_function_t *f);

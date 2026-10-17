@@ -1,5 +1,6 @@
 #include "cc_diag.h"
 #include "cc_ssa.h"
+#include "cc_target.h"
 #include "cc_util.h"
 
 #include <stdio.h>
@@ -107,6 +108,43 @@ void cc_ssa_function_init(cc_ssa_function_t *f) {
         return;
     }
     memset(f, 0, sizeof(*f));
+}
+
+int cc_ssa_function_new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
+    int id = f->value_count;
+
+    if ((size_t)f->value_count + 1 > f->value_cap) {
+        size_t ncap = f->value_cap == 0 ? 32 : f->value_cap * 2;
+        cc_value_type_t *types;
+        unsigned char *uns;
+        uint32_t *sizes;
+
+        while (ncap < (size_t)f->value_count + 1) {
+            ncap *= 2;
+        }
+        /* each array is stored as soon as it grows, so that none is lost if a later one fails */
+        types = (cc_value_type_t *)realloc(f->value_types, ncap * sizeof(*types));
+        if (types == NULL) {
+            return -1;
+        }
+        f->value_types = types;
+        uns = (unsigned char *)realloc(f->value_is_unsigned, ncap * sizeof(*uns));
+        if (uns == NULL) {
+            return -1;
+        }
+        f->value_is_unsigned = uns;
+        sizes = (uint32_t *)realloc(f->value_sizes, ncap * sizeof(*sizes));
+        if (sizes == NULL) {
+            return -1;
+        }
+        f->value_sizes = sizes;
+        f->value_cap = ncap;
+    }
+    f->value_count++;
+    f->value_types[id] = vt;
+    f->value_is_unsigned[id] = 0;
+    f->value_sizes[id] = (uint32_t)(vt == CC_VAL_F64 ? 8 : cc_target_pointer_size());
+    return id;
 }
 
 void cc_ssa_function_free(cc_ssa_function_t *f) {

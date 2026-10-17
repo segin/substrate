@@ -269,6 +269,7 @@ static int fold_function(cc_ssa_function_t *f) {
             break;
 
         case CC_SSA_FROUND64:
+        case CC_SSA_EXT: /* legalization, which runs first, expands every one */
             /* not folded: the source's long double value is not tracked here */
             if (dst >= 0) {
                 st[dst].known = 0;
@@ -472,6 +473,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
+    case CC_SSA_EXT:
         return 1;
     case CC_SSA_LABEL:
     case CC_SSA_BR:
