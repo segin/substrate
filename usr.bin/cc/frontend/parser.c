@@ -985,6 +985,7 @@ static long parser_string_literal_array_bound(const cc_expr_t *e);
 static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init);
 static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const cc_expr_t *init);
 static long parser_ct_size(const parser_t *p, const cc_ctype_t *t);
+static long parser_ct_align(const parser_t *p, const cc_ctype_t *t);
 
 static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
     if (min_v >= 0) {
@@ -1370,11 +1371,11 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
  * as gcc lays out a complex value: the real part, then the imaginary.
  *
  * @param p     the parser
- * @param elem  CC_TYPE_FLOAT, CC_TYPE_DOUBLE or CC_TYPE_LDOUBLE
+ * @param kind  CC_CT_FLOAT, CC_CT_DOUBLE or CC_CT_LDOUBLE
  * @return      the structure's index, or -1 when out of memory
  */
-static int parser_complex_struct(parser_t *p, cc_type_t elem) {
-    cc_ctype_kind_t kind = elem == CC_TYPE_FLOAT ? CC_CT_FLOAT : (elem == CC_TYPE_LDOUBLE ? CC_CT_LDOUBLE : CC_CT_DOUBLE);
+static int parser_complex_struct(parser_t *p, cc_ctype_kind_t kind) {
+    cc_type_t elem = cc_ct_legacy_kind(kind);
     const cc_ctype_t *ct = cc_ct_basic(kind);
     long es = cc_ct_size(ct, NULL);
     size_t i;
@@ -3428,11 +3429,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
              * three kinds are made at once: an operation can yield a kind no
              * declaration names (float _Complex times a double).
              */
-            int csid = parser_complex_struct(p, seen_float ? CC_TYPE_FLOAT
-                                                           : (seen_long > 0 ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE));
+            int csid = parser_complex_struct(p, seen_float ? CC_CT_FLOAT
+                                                           : (seen_long > 0 ? CC_CT_LDOUBLE : CC_CT_DOUBLE));
 
-            if (parser_complex_struct(p, CC_TYPE_FLOAT) < 0 || parser_complex_struct(p, CC_TYPE_DOUBLE) < 0 ||
-                parser_complex_struct(p, CC_TYPE_LDOUBLE) < 0) {
+            if (parser_complex_struct(p, CC_CT_FLOAT) < 0 || parser_complex_struct(p, CC_CT_DOUBLE) < 0 ||
+                parser_complex_struct(p, CC_CT_LDOUBLE) < 0) {
                 csid = -1;
             }
             if (csid < 0) {
@@ -3929,6 +3930,24 @@ static long parser_ct_size(const parser_t *p, const cc_ctype_t *t) {
     view.structs = p->structs;
     view.struct_count = p->struct_count;
     return cc_ct_size(t, &view);
+}
+
+/**
+ * The alignment of type @p t as the parser knows it so far
+ * (parser_ct_size()).
+ *
+ * @return the alignment in bytes, or -1 if not known
+ */
+static long parser_ct_align(const parser_t *p, const cc_ctype_t *t) {
+    cc_translation_unit_t view;
+
+    if (t == NULL) {
+        return -1;
+    }
+    memset(&view, 0, sizeof(view));
+    view.structs = p->structs;
+    view.struct_count = p->struct_count;
+    return cc_ct_align(t, &view);
 }
 
 /**
@@ -4666,8 +4685,8 @@ static long parser_infer_struct_array_len_from_init_list(parser_t *p, int struct
             next_member = 0;
             continue;
         }
-        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->aux_type == CC_TYPE_VOID && raw->aux_struct_id == struct_id &&
-            raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
+        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->ctype != NULL && raw->ctype->unqual->kind == CC_CT_RECORD &&
+            raw->ctype->unqual->id == struct_id && raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
             elems++;
             cur++;
             next_member = 0;
@@ -7274,9 +7293,9 @@ static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
         lit->float_val_ld = (long double)lit->int_val;
         parser_set_ctype(lit, cc_ct_basic(CC_CT_DOUBLE));
     }
-    sid = parser_complex_struct(p, lit->value_type);
-    if (zero == NULL || c == NULL || sid < 0 || parser_complex_struct(p, CC_TYPE_FLOAT) < 0 ||
-        parser_complex_struct(p, CC_TYPE_DOUBLE) < 0 || parser_complex_struct(p, CC_TYPE_LDOUBLE) < 0) {
+    sid = parser_complex_struct(p, lit->ctype->kind);
+    if (zero == NULL || c == NULL || sid < 0 || parser_complex_struct(p, CC_CT_FLOAT) < 0 ||
+        parser_complex_struct(p, CC_CT_DOUBLE) < 0 || parser_complex_struct(p, CC_CT_LDOUBLE) < 0) {
         free_expr(zero);
         free_expr(c);
         free_expr(lit);
@@ -9091,7 +9110,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(ae);
                 return NULL;
             }
-            align = parser_type_align_bytes(p, ae->value_type, ae->struct_id);
+            align = parser_ct_align(p, parser_expr_ctype(p, ae));
             free_expr(ae);
         }
         if (align <= 0) {
