@@ -484,6 +484,23 @@ static int lower_is_unsigned(const cc_expr_t *e) {
     return cc_ct_is_unsigned(t) && t->kind != CC_CT_BOOL;
 }
 
+static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id);
+
+/**
+ * The size in bytes of an expression's value (an array or function used
+ * as a value is a pointer).
+ *
+ * @param tu  the translation unit, for structure sizes
+ * @param e   the expression
+ * @return    the size, or what the legacy encoding gives where the type
+ *            has none (void, an incomplete structure)
+ */
+static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    long n = cc_ct_size(lower_value_ctype(e), tu);
+
+    return n > 0 ? n : type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+}
+
 static cc_type_t ptr_base_type(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
@@ -5982,7 +5999,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.dst = new_value(sf, CC_VAL_I64);
         in.imm = e->int_val;
         in.is_unsigned = lower_is_unsigned(e) ? 1 : 0;
-        set_value_size(sf, in.dst, type_size_bytes_with_struct(tu, e->value_type, e->struct_id));
+        set_value_size(sf, in.dst, lower_value_size(tu, e));
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
@@ -6249,7 +6266,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        long mem_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+        long mem_size = lower_value_size(tu, e);
         if (mem_size <= 0) {
             set_diag(diag, "unsupported dereference type size in lowering");
             return -1;
@@ -9077,7 +9094,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.agg_class = CC_ABI_RET_FLOAT;
         }
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
-            long agg_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+            long agg_size = lower_value_size(tu, e);
             int agg_addr;
             if (agg_size <= 0) {
                 free(in.sym);
@@ -9106,7 +9123,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.is_unsigned = 1;
         } else {
             in.dst = new_value(sf, type_to_val(e->value_type));
-            in.imm = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+            in.imm = lower_value_size(tu, e);
             if (in.imm <= 0) {
                 in.imm = cc_target_pointer_size();
             }
@@ -9295,7 +9312,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
-            long mem_size = type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+            long mem_size = lower_value_size(tu, e->lhs);
             int ptrv;
             if (e->lhs->kind == CC_EXPR_DEREF) {
                 if (e->lhs->lhs == NULL) {
@@ -10160,7 +10177,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         if (want == CC_VAL_I64) {
-            long result_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+            long result_size = lower_value_size(tu, e);
             if ((result_size <= 0 && lower_is_pointer(e)) ||
                 (e->value_type == CC_TYPE_VOID && e->struct_id >= 0)) {
                 /* a pointer, or an aggregate's value: its address */
@@ -13237,7 +13254,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "asm output is missing expression");
                 return -1;
             }
-            out_sz = type_size_bytes_with_struct(tu, op->expr->value_type, op->expr->struct_id);
+            out_sz = lower_value_size(tu, op->expr);
             if (out_sz <= 0) {
                 out_sz = cc_target_pointer_size();
             }
@@ -13391,7 +13408,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             in.asm_in_values[i4] = av;
-            in_sz = type_size_bytes_with_struct(tu, op->expr->value_type, op->expr->struct_id);
+            in_sz = lower_value_size(tu, op->expr);
             if (in_sz <= 0) {
                 in_sz = cc_target_pointer_size();
             }
