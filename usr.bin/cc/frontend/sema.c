@@ -2074,6 +2074,32 @@ static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_e
 static cc_expr_t *sema_int_node(long long v, size_t line, size_t col);
 static cc_expr_t *sema_const_node(long long v, cc_ctype_kind_t kind, size_t line, size_t col);
 
+/**
+ * Conversion as if by assignment (C11 6.5.16.1) between real types: an
+ * arithmetic value to an arithmetic type, or any scalar to _Bool, made
+ * explicit (sema_convert()).  Pointer conversions need no code and are
+ * left as they are.
+ *
+ * @param slot  the value
+ * @param t     the type it is assigned to, unqualified
+ * @return      1 if it was converted, 0 if no conversion was needed, -1
+ *              when out of memory
+ */
+static int sema_scalar_convert_for_assign(cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_ctype_t *from = sx_vtype(*slot);
+    const cc_expr_t *before = *slot;
+    const cc_ctype_t *before_type = before->ctype;
+
+    if (from == NULL || !((cc_ct_is_arithmetic(t) && cc_ct_is_arithmetic(from)) ||
+                          (t->kind == CC_CT_BOOL && cc_ct_is_scalar(from)))) {
+        return 0;
+    }
+    if (sema_convert(slot, t) != 0) {
+        return -1;
+    }
+    return *slot != before || before->ctype != before_type;
+}
+
 static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t) {
     const cc_ctype_t *de;
     const cc_ctype_t *se;
@@ -2094,7 +2120,10 @@ static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_e
         return wrc;
     }
     se = sema_complex_elem(tu, sx_vtype(*slot));
-    if ((de == NULL && se == NULL) || (de == se && de != NULL)) {
+    if (de == NULL && se == NULL) {
+        return sema_scalar_convert_for_assign(slot, t);
+    }
+    if (de == se) {
         return 0;
     }
     if (de != NULL ? sema_complex_operand_rank(tu, *slot) < 0 : !(cc_ct_is_integer(t) || sema_float_rank(t) > 0)) {
