@@ -6222,6 +6222,40 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->lhs->kind == CC_EXPR_CAST && lower_record_id(e->lhs) >= 0) {
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         }
+        if (e->lhs->kind == CC_EXPR_CAST) {
+            /*
+             * A compound literal, the only cast sema lets `&` apply to (a
+             * scalar one checked into a cast of its value): an array's value
+             * is its storage; a scalar's is put in some.
+             */
+            const cc_ctype_t *lt = lower_cast_ctype(e->lhs);
+            long sz = cc_ct_size(lt, tu);
+            int v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
+            int p;
+
+            if (v < 0 || (lt != NULL && lt->kind == CC_CT_ARRAY)) {
+                return v;
+            }
+            if (sz <= 0) {
+                set_diag(diag, "compound literal of unknown size in address-of lowering");
+                return -1;
+            }
+            p = emit_local_storage_alloc(sf, sz, diag);
+            if (p < 0) {
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_STORE;
+            in.dst = -1;
+            in.lhs = p;
+            in.rhs = v;
+            in.imm = sz;
+            if (push_instr(sf, in) != 0) {
+                set_diag(diag, "out of memory storing a compound literal");
+                return -1;
+            }
+            return p;
+        }
         if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
         }

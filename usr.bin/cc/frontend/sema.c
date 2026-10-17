@@ -5417,11 +5417,15 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         return 0;
     }
 
-    case CC_EXPR_ADDR:
+    case CC_EXPR_ADDR: {
+        /* a compound literal, before checking turns a scalar one into a plain cast of its value */
+        int of_literal;
+
         if (e->lhs == NULL) {
             set_diag(diag, "malformed address-of expression");
             return -1;
         }
+        of_literal = e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL && e->lhs->lhs->kind == CC_EXPR_INIT_LIST;
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
@@ -5452,6 +5456,12 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             e->struct_id = e->lhs->struct_id;
             return 0;
         }
+        if (of_literal) {
+            /* a compound literal of any type is an lvalue (C11 6.5.2.5p4); its type is the pointer's target */
+            e->value_type = ptr_of_type(e->lhs->value_type);
+            e->struct_id = e->lhs->struct_id;
+            return 0;
+        }
         if (e->lhs->kind != CC_EXPR_IDENT && e->lhs->kind != CC_EXPR_MEMBER) {
             set_diag(diag, "address-of currently requires an identifier or member lvalue");
             return -1;
@@ -5463,6 +5473,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         }
         e->struct_id = e->lhs->struct_id;
         return 0;
+    }
 
     case CC_EXPR_LABEL_ADDR:
         if (e->ident == NULL || e->ident[0] == '\0') {

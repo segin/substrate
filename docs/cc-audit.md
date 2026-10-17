@@ -500,10 +500,20 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   ("invalid string initializer for fixed-size array struct member").
   *Reproduced* (both targets).  One predicate, `cc_ct_is_character()`,
   is used at all of them.  `codegen/schar_string_init.c`.
-- [ ] **CC-86** A file-scope pointer initialized with a compound literal,
-  `static const char *p = (char[]){"lit"};`, shall be accepted: it is an
-  address constant (C11 6.5.2.5p3, 6.6p9), and gcc accepts it.  cc
-  rejects it ("unsupported global initializer for p").  *Reproduced.*
+- [ ] **CC-86** A file-scope pointer initialized from a compound literal
+  -- an array one decaying, `static char *p = (char[]){"lit"};` or
+  `(int[]){1, 2}`, or the address of a scalar or array one,
+  `&(int){5}` -- shall be accepted: the literal has static storage and
+  its address is an address constant (C11 6.5.2.5p5, 6.6p9), as gcc has
+  it.  cc accepts only `&(struct S){...}` there ("unsupported global
+  initializer for p").  *Reproduced.*
+- [x] **CC-87** `&` shall apply to a compound literal of any type, which
+  is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
+  literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
+  ("address-of currently requires an identifier or member lvalue").
+  *Reproduced* (both targets).  Sema recognises the literal before its
+  check turns a scalar one into a cast of its value, and lowering puts a
+  scalar literal in storage of its own.  `codegen/compound_literal_address.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -916,7 +926,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-86 requirements: 85 met, 1 open.
+87 requirements: 86 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
