@@ -3570,6 +3570,23 @@ static int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t 
     return 0;
 }
 
+/**
+ * Whether value @p v is a constant made by one of the last few
+ * instructions -- where the helpers that build a constant for an
+ * operation put it.
+ */
+static int value_is_recent_const(const cc_ssa_function_t *sf, int v) {
+    size_t k;
+    size_t n = 0;
+
+    for (k = sf->instr_count; k > 0 && n < 16; --k, ++n) {
+        if (sf->instrs[k - 1].dst == v) {
+            return sf->instrs[k - 1].op == CC_SSA_CONST;
+        }
+    }
+    return 0;
+}
+
 static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int lhs, int rhs, int is_unsigned,
                                 cc_diag_t *diag) {
     cc_ssa_instr_t in;
@@ -3583,10 +3600,52 @@ static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int l
     if (in.dst >= 0 && sf->value_sizes != NULL) {
         long lsz = (lhs >= 0 && lhs < sf->value_count) ? (long)sf->value_sizes[lhs] : (long)cc_target_pointer_size();
         long rsz = (rhs >= 0 && rhs < sf->value_count) ? (long)sf->value_sizes[rhs] : (long)cc_target_pointer_size();
-        set_value_size(sf, in.dst, lsz > rsz ? lsz : rsz);
+        long width = lsz > rsz ? lsz : rsz;
+
+        set_value_size(sf, in.dst, width);
+        /*
+         * An operation wider than the word (i386's i64) works on word pairs: a
+         * constant made for it is as wide as it, not the word the helpers make.
+         */
+        if (width > cc_target_pointer_size()) {
+            if (lsz < width && value_is_recent_const(sf, lhs)) {
+                set_value_size(sf, lhs, width);
+            }
+            if (rsz < width && op != CC_SSA_SHL && op != CC_SSA_SHR && value_is_recent_const(sf, rhs)) {
+                set_value_size(sf, rhs, width);
+            }
+        }
     }
     if (in.dst < 0 || push_instr(sf, in) != 0) {
         set_diag(diag, "out of memory lowering integer builtin");
+        return -1;
+    }
+    return in.dst;
+}
+
+/**
+ * The new value of a `++` or `--`: @p cur stepped by @p step, a value of
+ * class @p want.
+ *
+ * @param sf      the function
+ * @param want    the operand's register class
+ * @param is_sub  `--` rather than `++`
+ * @param cur     the value before
+ * @param step    the step: 1, or a pointer's element size
+ * @param diag    receives an error
+ * @return        the value after, or -1
+ */
+static int emit_update_step(cc_ssa_function_t *sf, cc_value_type_t want, int is_sub, int cur, int step,
+                            cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = is_sub ? CC_SSA_SUB : CC_SSA_ADD;
+    in.dst = new_value(sf, want);
+    in.lhs = cur;
+    in.rhs = step;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering ++ or --");
         return -1;
     }
     return in.dst;
@@ -3607,16 +3666,17 @@ static int emit_const_u64_instr(cc_ssa_function_t *sf, unsigned long long v, cc_
     return c;
 }
 
-static int emit_bitfield_mask(cc_ssa_function_t *sf, int width, cc_diag_t *diag) {
-    unsigned long long mask_u;
-    if (width <= 0) {
-        return emit_const_i64_instr(sf, 0);
-    }
-    if (width >= 64) {
-        return emit_const_u64_instr(sf, ~0ULL, diag);
-    }
-    mask_u = (1ULL << width) - 1ULL;
-    return emit_const_u64_instr(sf, mask_u, diag);
+/**
+ * The width a bit-field's bits are worked on in: its storage unit's,
+ * rounded up to the word -- a word, or on i386 a word pair for an 8-byte
+ * unit.
+ *
+ * @param storage_size  the storage unit's size in bytes
+ */
+static long bitfield_work_size(long storage_size) {
+    long word = cc_target_pointer_size();
+
+    return storage_size > word ? 8 : word;
 }
 
 static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, cc_diag_t *diag) {
@@ -3624,7 +3684,6 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
     long storage_size;
     int v;
     int c;
-    int maskv;
 
     if (e == NULL || !e->member_is_bitfield) {
         set_diag(diag, "malformed bit-field read in lowering");
@@ -3663,18 +3722,17 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
             return -1;
         }
     }
-    maskv = emit_bitfield_mask(sf, e->member_bit_width, diag);
-    if (maskv < 0) {
-        return -1;
-    }
-    v = emit_i64_binop_instr(sf, CC_SSA_AND, v, maskv, 0, diag);
-    if (v < 0) {
-        return -1;
+    if (e->member_bit_width < 64) {
+        /* the field's bits */
+        v = emit_ext(sf, v, e->member_bit_width, 1, bitfield_work_size(storage_size), diag);
+        if (v < 0) {
+            return -1;
+        }
     }
 
     if (e->member_bit_signed && e->member_bit_width > 0 && e->member_bit_width < 64) {
         /* a signed field: its bits, sign-extended */
-        v = emit_ext(sf, v, e->member_bit_width, 0, 8, diag);
+        v = emit_ext(sf, v, e->member_bit_width, 0, bitfield_work_size(storage_size), diag);
         if (v < 0) {
             return -1;
         }
@@ -3693,7 +3751,6 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
 static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, int rhs, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     long storage_size;
-    int maskv;
     int rhsv;
     int oldv;
     int new_bits;
@@ -3731,13 +3788,12 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
             return -1;
         }
     }
-    maskv = emit_bitfield_mask(sf, e->member_bit_width, diag);
-    if (maskv < 0) {
-        return -1;
-    }
-    rhsv = emit_i64_binop_instr(sf, CC_SSA_AND, rhsv, maskv, 0, diag);
-    if (rhsv < 0) {
-        return -1;
+    if (e->member_bit_width < 64) {
+        /* the value's bits that fit the field */
+        rhsv = emit_ext(sf, rhsv, e->member_bit_width, 1, bitfield_work_size(storage_size), diag);
+        if (rhsv < 0) {
+            return -1;
+        }
     }
 
     if (e->member_bit_offset > 0) {
@@ -3774,6 +3830,7 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
     if (clear_mask < 0) {
         return -1;
     }
+    set_value_size(sf, clear_mask, bitfield_work_size(storage_size));
     old_cleared = emit_i64_binop_instr(sf, CC_SSA_AND, oldv, clear_mask, 0, diag);
     if (old_cleared < 0) {
         return -1;
@@ -3948,12 +4005,8 @@ static int lower_builtin_ctz_from_normalized(cc_ssa_function_t *sf, int x, int b
     }
 
     if (bits < 64) {
-        unsigned long long mask = (1ULL << bits) - 1ULL;
-        int cmask = emit_const_u64_instr(sf, mask, diag);
-        if (cmask < 0) {
-            return -1;
-        }
-        v = emit_i64_binop_instr(sf, CC_SSA_AND, v, cmask, 0, diag);
+        /* the operand's bits */
+        v = emit_ext(sf, v, bits, 1, 8, diag);
         if (v < 0) {
             return -1;
         }
@@ -3986,12 +4039,8 @@ static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t 
     }
 
     if (bits < 64) {
-        unsigned long long mask = (1ULL << bits) - 1ULL;
-        int cmask = emit_const_u64_instr(sf, mask, diag);
-        if (cmask < 0) {
-            return -1;
-        }
-        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        /* the operand's bits */
+        x = emit_ext(sf, x, bits, 1, 8, diag);
         if (x < 0) {
             return -1;
         }
@@ -4033,12 +4082,8 @@ static int lower_builtin_ffs(const cc_translation_unit_t *tu, cc_ssa_function_t 
     }
 
     if (bits < 64) {
-        unsigned long long mask = (1ULL << bits) - 1ULL;
-        int cmask = emit_const_u64_instr(sf, mask, diag);
-        if (cmask < 0) {
-            return -1;
-        }
-        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        /* the operand's bits */
+        x = emit_ext(sf, x, bits, 1, 8, diag);
         if (x < 0) {
             return -1;
         }
@@ -4120,12 +4165,8 @@ static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t 
     }
 
     if (bits < 64) {
-        unsigned long long mask = (1ULL << bits) - 1ULL;
-        int cmask = emit_const_u64_instr(sf, mask, diag);
-        if (cmask < 0) {
-            return -1;
-        }
-        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        /* the operand's bits */
+        x = emit_ext(sf, x, bits, 1, 8, diag);
         if (x < 0) {
             return -1;
         }
@@ -9332,15 +9373,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                 }
 
-                memset(&in, 0, sizeof(in));
-                in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
-                in.dst = new_value(sf, want);
-                in.lhs = cur;
-                in.rhs = one;
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                nextv = emit_update_step(sf, want, e->op == CC_BIN_SUB, cur, one, diag);
+                if (nextv < 0) {
                     return -1;
                 }
-                nextv = in.dst;
                 if (ct_has_kind(lower_var_ctype(&vars[idx]), CC_CT_FLOAT)) {
                     nextv = normalize_float_ct(sf, nextv, lower_var_ctype(&vars[idx]), diag);
                     if (nextv < 0) {
@@ -9448,15 +9484,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         return -1;
                     }
                 }
-                memset(&in, 0, sizeof(in));
-                in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
-                in.dst = new_value(sf, want);
-                in.lhs = cur;
-                in.rhs = one;
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                nextv = emit_update_step(sf, want, e->op == CC_BIN_SUB, cur, one, diag);
+                if (nextv < 0) {
                     return -1;
                 }
-                nextv = in.dst;
                 if (ct_has_kind(lower_global_ctype(g), CC_CT_FLOAT)) {
                     nextv = normalize_float_ct(sf, nextv, lower_global_ctype(g), diag);
                     if (nextv < 0) {
@@ -9529,15 +9560,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (one < 0) {
                     return -1;
                 }
-                memset(&in, 0, sizeof(in));
-                in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
-                in.dst = new_value(sf, want);
-                in.lhs = cur;
-                in.rhs = one;
-                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                nextv = emit_update_step(sf, want, e->op == CC_BIN_SUB, cur, one, diag);
+                if (nextv < 0) {
                     return -1;
                 }
-                nextv = in.dst;
                 nextv = normalize_int_ct(sf, nextv, lower_value_ctype(e), diag);
                 if (nextv < 0) {
                     return -1;
@@ -9578,15 +9604,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
 
-            memset(&in, 0, sizeof(in));
-            in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
-            in.dst = new_value(sf, want);
-            in.lhs = cur;
-            in.rhs = one;
-            if (in.dst < 0 || push_instr(sf, in) != 0) {
+            nextv = emit_update_step(sf, want, e->op == CC_BIN_SUB, cur, one, diag);
+            if (nextv < 0) {
                 return -1;
             }
-            nextv = in.dst;
             if (lower_has_kind(e, CC_CT_FLOAT)) {
                 nextv = normalize_float_ct(sf, nextv, lower_value_ctype(e), diag);
                 if (nextv < 0) {
@@ -10386,6 +10407,7 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, const cc_cty
     if (mask < 0) {
         return -1;
     }
+    set_value_size(sf, mask, 1); /* as wide as the byte it tests */
     masked = emit_i64_binop_instr(sf, CC_SSA_AND, bits, mask, 0, diag);
     if (masked < 0) {
         return -1;
@@ -10448,6 +10470,7 @@ static int emit_fp_negate_from_value(cc_ssa_function_t *sf, int v, const cc_ctyp
     if (mask < 0) {
         return -1;
     }
+    set_value_size(sf, mask, store_size == 16 ? 1 : store_size); /* as wide as the bits it flips */
     xored = emit_i64_binop_instr(sf, CC_SSA_XOR, bits, mask, 1, diag);
     if (xored < 0) {
         return -1;
