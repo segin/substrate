@@ -146,19 +146,21 @@ long cc_bitint_size(long width) {
  * @return   1 if it is wide, else 0
  */
 int cc_string_literal_is_wide(const cc_expr_t *e) {
-    if (e == NULL || e->kind != CC_EXPR_STR) {
-        return 0;
+    return cc_string_literal_elem(e)->kind != CC_CT_CHAR;
+}
+
+/**
+ * The element type of a string literal: char, or the character type of
+ * a wide one (char16_t, char32_t or wchar_t's type).
+ *
+ * @param e  a CC_EXPR_STR expression
+ * @return   the type; char for anything else
+ */
+const cc_ctype_t *cc_string_literal_elem(const cc_expr_t *e) {
+    if (e == NULL || e->kind != CC_EXPR_STR || e->aux_ctype == NULL) {
+        return cc_ct_basic(CC_CT_CHAR);
     }
-    switch (e->aux_type) {
-    case CC_TYPE_USHORT:
-    case CC_TYPE_INT:
-    case CC_TYPE_UINT:
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
-        return 1;
-    default:
-        return 0;
-    }
+    return e->aux_ctype;
 }
 
 /**
@@ -199,7 +201,7 @@ long cc_string_literal_units(const cc_expr_t *e) {
         return 0;
     }
     wide = cc_string_literal_is_wide(e);
-    utf16 = e->aux_type == CC_TYPE_USHORT;
+    utf16 = cc_string_literal_elem(e)->kind == CC_CT_USHORT;
     i = 1;
     n -= 1;
     units = 0;

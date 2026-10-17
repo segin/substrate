@@ -1,6 +1,7 @@
 #ifndef CC_TYPES_H
 #define CC_TYPES_H
 
+#include "cc_ctype.h"
 #include "cc_frontend.h"
 #include "cc_target.h"
 
@@ -47,13 +48,22 @@ long cc_bitint_align(long width);
 
 /**
  * Whether a string literal expression is a wide one (`L`, `u` or `U`
- * prefix): its element type, in the expression's aux_type, is wider than
- * a character.  A `u8` or unprefixed literal is narrow.
+ * prefix): its element type (cc_string_literal_elem()) is wider than a
+ * character.  A `u8` or unprefixed literal is narrow.
  *
  * @param e  a CC_EXPR_STR expression
  * @return   1 if it is wide, else 0 (and 0 for anything else)
  */
 int cc_string_literal_is_wide(const cc_expr_t *e);
+
+/**
+ * The element type of a string literal, which the parser records in the
+ * expression's aux_ctype: char, or a wide literal's character type.
+ *
+ * @param e  a CC_EXPR_STR expression
+ * @return   the type; char for anything else
+ */
+const cc_ctype_t *cc_string_literal_elem(const cc_expr_t *e);
 
 /**
  * The number of elements of the array a string literal is: its

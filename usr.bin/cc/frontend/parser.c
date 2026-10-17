@@ -3809,11 +3809,10 @@ static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
         return parser_ident_ctype(p, e->ident);
     case CC_EXPR_INT:
     case CC_EXPR_FLOAT:
-        return e->ctype != NULL ? e->ctype : cc_ct_from_scalar(e->value_type);
+        return e->ctype;
     case CC_EXPR_STR: {
         long n = parser_string_literal_array_bound(e);
-        const cc_ctype_t *elem =
-            cc_ct_from_scalar(cc_string_literal_is_wide(e) && e->aux_type != CC_TYPE_VOID ? e->aux_type : CC_TYPE_CHAR);
+        const cc_ctype_t *elem = cc_string_literal_elem(e);
 
         return n > 0 ? cc_ct_array(elem, n) : cc_ct_pointer(elem);
     }
@@ -7732,6 +7731,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
         }
         e->ident = lit;
         e->aux_type = str_ty;
+        e->aux_ctype = cc_ct_from_scalar(str_ty);
         e->value_type = cc_string_literal_pointer_type(str_ty);
         if (next_tok(p) != 0) {
             free_expr(e);
@@ -7753,6 +7753,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 if (str_ty == CC_TYPE_CHAR || part_ty == CC_TYPE_CHAR) {
                     str_ty = str_ty == CC_TYPE_CHAR ? part_ty : str_ty;
                     e->aux_type = str_ty;
+                    e->aux_ctype = cc_ct_from_scalar(str_ty);
                     e->value_type = cc_string_literal_pointer_type(str_ty);
                 } else {
                     free(part);

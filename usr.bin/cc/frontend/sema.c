@@ -1991,29 +1991,6 @@ static int sema_complex_operand_rank(const cc_translation_unit_t *tu, const cc_e
 }
 
 /**
- * The legacy encoding of an arithmetic or structure type (no pointer or
- * array): its enumerator, and the struct id it carries (the structure, or
- * the hidden one of a complex, wide, decimal or vector type; a _BitInt's
- * width).
- *
- * @param t    the type
- * @param out  receives the enumerator
- * @param sid  receives the struct id, or -1
- */
-static void sema_ct_legacy_scalar(const cc_ctype_t *t, cc_type_t *out, int *sid) {
-    if (sx_ct_record(t) >= 0) {
-        *out = CC_TYPE_VOID;
-        *sid = sx_ct_record(t);
-    } else if (ct_kind_is(t, CC_CT_BITINT) || ct_kind_is(t, CC_CT_UBITINT)) {
-        *out = CC_TYPE_BITINT;
-        *sid = (int)t->count;
-    } else {
-        *out = t != NULL ? cc_ct_legacy_kind(t->kind) : CC_TYPE_VOID;
-        *sid = -1;
-    }
-}
-
-/**
  * Make an implicit conversion explicit: put a cast to arithmetic or
  * structure type @p t above the expression in @p slot.  Lowering converts
  * between a complex value and a real one only where a cast says so.
@@ -2031,11 +2008,8 @@ static int sema_wrap_cast(cc_expr_t **slot, const cc_ctype_t *t) {
     c->kind = CC_EXPR_CAST;
     c->line = (*slot)->line;
     c->col = (*slot)->col;
-    sema_ct_legacy_scalar(t, &c->aux_type, &c->aux_struct_id);
-    c->value_type = c->aux_type;
-    c->struct_id = c->aux_struct_id;
     c->lhs = *slot;
-    c->ctype = t;
+    sema_set_type(c, t);
     *slot = c;
     return 0;
 }
@@ -2639,11 +2613,7 @@ static int sema_decimal_convert(const cc_translation_unit_t *tu, cc_expr_t **slo
         c->kind = CC_EXPR_CAST;
         c->line = (*slot)->line;
         c->col = (*slot)->col;
-        c->aux_type = CC_TYPE_VOID;
-        c->aux_struct_id = sid;
-        c->value_type = CC_TYPE_VOID;
-        c->struct_id = sid;
-        c->ctype = cc_ct_record(sid);
+        sema_set_type(c, cc_ct_record(sid));
         c->lhs = list;
         cc_expr_free(*slot);
         *slot = c;
@@ -2714,11 +2684,7 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         e->op = 0;
         e->rhs = NULL;
         e->lhs = list;
-        e->aux_type = CC_TYPE_VOID;
-        e->aux_struct_id = sid;
-        e->value_type = CC_TYPE_VOID;
-        e->struct_id = sid;
-        e->ctype = cc_ct_record(sid);
+        sema_set_type(e, cc_ct_record(sid));
         return check_expr(tu, e, NULL, 0, 0, diag);
     }
     if ((dl == NULL || dl->decimal_bits != bits) && sema_decimal_convert(tu, &e->lhs, sid) != 0) {
@@ -3578,8 +3544,6 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
                                   size_t var_count, int depth, cc_diag_t *diag) {
     cc_expr_t *x = e->lhs;
     const cc_ctype_t *tct;
-    cc_type_t t;
-    int tsid;
 
     if (check_expr(tu, x, vars, var_count, depth, diag) != 0) {
         return -1;
@@ -3592,7 +3556,6 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
         set_diag(diag, "__real__ and __imag__ need an arithmetic operand");
         return -1;
     }
-    sema_ct_legacy_scalar(tct, &t, &tsid);
     if (strcmp(e->ident, "__im") == 0) {
         cc_expr_t *zero = sema_int_node(0, e->line, e->col);
 
@@ -3609,15 +3572,11 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
         }
     } else {
         e->kind = CC_EXPR_CAST;
-        e->aux_type = t;
-        e->aux_struct_id = tsid;
     }
     free(e->ident);
     e->ident = NULL;
     e->member_is_part = 0;
-    e->value_type = t;
-    e->struct_id = tsid;
-    e->ctype = tct;
+    sema_set_type(e, tct);
     return 1;
 }
 
@@ -4812,10 +4771,8 @@ static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var
  */
 static void sema_type_literal(cc_expr_t *e) {
     if (e->kind == CC_EXPR_STR) {
-        int wide = cc_string_literal_is_wide(e);
         long n = cc_string_literal_units(e);
-
-        const cc_ctype_t *elem = cc_ct_from_scalar(wide && e->aux_type != CC_TYPE_VOID ? e->aux_type : CC_TYPE_CHAR);
+        const cc_ctype_t *elem = cc_string_literal_elem(e);
 
         sema_set_type(e, n > 0 ? cc_ct_array(elem, n) : cc_ct_pointer(elem));
         return;
