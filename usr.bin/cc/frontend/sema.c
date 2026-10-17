@@ -38,7 +38,7 @@ typedef struct {
  * @param d    the diagnostic
  * @param msg  the message
  */
-static void set_diag(cc_diag_t *d, const char *msg) {
+static void sema_diag(cc_diag_t *d, const char *msg) {
     if (d == NULL || d->message[0] != '\0') {
         return;
     }
@@ -352,7 +352,7 @@ static int asm_validate_constraint(const char *c, int is_output, size_t out_coun
     size_t i;
     int has_class = 0;
     if (c == NULL || c[0] == '\0') {
-        set_diag(diag, "asm operand constraint cannot be empty");
+        sema_diag(diag, "asm operand constraint cannot be empty");
         return -1;
     }
     if (!is_output && c[0] >= '0' && c[0] <= '9') {
@@ -361,17 +361,17 @@ static int asm_validate_constraint(const char *c, int is_output, size_t out_coun
             n = n * 10 + (long)(c[i] - '0');
         }
         if (n < 0 || (size_t)n >= out_count) {
-            set_diag(diag, "asm matching constraint references invalid output index");
+            sema_diag(diag, "asm matching constraint references invalid output index");
             return -1;
         }
         if (c[i] != '\0') {
-            set_diag(diag, "asm matching constraint must be a pure numeric index");
+            sema_diag(diag, "asm matching constraint must be a pure numeric index");
             return -1;
         }
         return 0;
     }
     if (is_output && strchr(c, '=') == NULL && strchr(c, '+') == NULL) {
-        set_diag(diag, "asm output constraint must contain '=' or '+'");
+        sema_diag(diag, "asm output constraint must contain '=' or '+'");
         return -1;
     }
     if (is_output && asm_constraint_is_flag_output(c)) {
@@ -402,7 +402,7 @@ static int asm_validate_constraint(const char *c, int is_output, size_t out_coun
         }
     }
     if (strchr(c, 'q') != NULL && pointer_size != 4 && pointer_size != 8) {
-        set_diag(diag, "asm 'q' constraint requires x86 target");
+        sema_diag(diag, "asm 'q' constraint requires x86 target");
         return -1;
     }
     has_class = cc_asm_constraint_allows_memory(c) || cc_asm_constraint_names_register(c) || asm_constraint_is_imm(c);
@@ -502,7 +502,7 @@ static int asm_check_early_clobber_inputs(const cc_stmt_t *s, cc_diag_t *diag) {
         }
         for (j = 0; j < s->asm_input_count; ++j) {
             if (asm_constraint_only_register(s->asm_inputs[j].constraint) == oreg) {
-                set_diag(diag, "asm input constraint conflicts with early-clobber output register");
+                sema_diag(diag, "asm input constraint conflicts with early-clobber output register");
                 return -1;
             }
         }
@@ -516,7 +516,7 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
     size_t label_base = asm_goto_label_base(s);
     const char *t = s->asm_template;
     if (t == NULL) {
-        set_diag(diag, "asm statement missing template");
+        sema_diag(diag, "asm statement missing template");
         return -1;
     }
     while (t[i] != '\0') {
@@ -541,7 +541,7 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                 i++;
             }
             if (n < 0 || (size_t)n >= total) {
-                set_diag(diag, "asm template operand index is out of range");
+                sema_diag(diag, "asm template operand index is out of range");
                 return -1;
             }
             continue;
@@ -552,24 +552,24 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                 i++;
             }
             if (t[i] != ']') {
-                set_diag(diag, "asm template has unterminated named operand");
+                sema_diag(diag, "asm template has unterminated named operand");
                 return -1;
             }
             if (i == b) {
-                set_diag(diag, "asm template has empty named operand");
+                sema_diag(diag, "asm template has empty named operand");
                 return -1;
             }
             {
                 char *nm = (char *)malloc(i - b + 1);
                 if (nm == NULL) {
-                    set_diag(diag, "out of memory validating asm template");
+                    sema_diag(diag, "out of memory validating asm template");
                     return -1;
                 }
                 memcpy(nm, t + b, i - b);
                 nm[i - b] = '\0';
                 if (!asm_find_named_operand(s, nm)) {
                     free(nm);
-                    set_diag(diag, "asm template references unknown named operand");
+                    sema_diag(diag, "asm template references unknown named operand");
                     return -1;
                 }
                 free(nm);
@@ -587,7 +587,7 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                 }
                 if (n < 0 || (size_t)n < label_base ||
                     (size_t)(n - (long)label_base) >= s->asm_goto_label_count) {
-                    set_diag(diag, "asm template goto-label index is out of range");
+                    sema_diag(diag, "asm template goto-label index is out of range");
                     return -1;
                 }
                 continue;
@@ -598,24 +598,24 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                     i++;
                 }
                 if (t[i] != ']') {
-                    set_diag(diag, "asm template has unterminated goto label");
+                    sema_diag(diag, "asm template has unterminated goto label");
                     return -1;
                 }
                 if (i == b) {
-                    set_diag(diag, "asm template has empty goto label");
+                    sema_diag(diag, "asm template has empty goto label");
                     return -1;
                 }
                 {
                     char *nm = (char *)malloc(i - b + 1);
                     if (nm == NULL) {
-                        set_diag(diag, "out of memory validating asm template");
+                        sema_diag(diag, "out of memory validating asm template");
                         return -1;
                     }
                     memcpy(nm, t + b, i - b);
                     nm[i - b] = '\0';
                     if (!asm_find_goto_label(s, nm)) {
                         free(nm);
-                        set_diag(diag, "asm template references unknown goto label");
+                        sema_diag(diag, "asm template references unknown goto label");
                         return -1;
                     }
                     free(nm);
@@ -623,7 +623,7 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                 i++;
                 continue;
             }
-            set_diag(diag, "asm template has malformed %l label reference");
+            sema_diag(diag, "asm template has malformed %l label reference");
             return -1;
         }
         if (t[i] == '[') {
@@ -632,24 +632,24 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                 i++;
             }
             if (t[i] != ']') {
-                set_diag(diag, "asm template has unterminated named operand");
+                sema_diag(diag, "asm template has unterminated named operand");
                 return -1;
             }
             if (i == b) {
-                set_diag(diag, "asm template has empty named operand");
+                sema_diag(diag, "asm template has empty named operand");
                 return -1;
             }
             {
                 char *nm = (char *)malloc(i - b + 1);
                 if (nm == NULL) {
-                    set_diag(diag, "out of memory validating asm template");
+                    sema_diag(diag, "out of memory validating asm template");
                     return -1;
                 }
                 memcpy(nm, t + b, i - b);
                 nm[i - b] = '\0';
                 if (!asm_find_named_operand(s, nm)) {
                     free(nm);
-                    set_diag(diag, "asm template references unknown named operand");
+                    sema_diag(diag, "asm template references unknown named operand");
                     return -1;
                 }
                 free(nm);
@@ -760,7 +760,7 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
     switch (s->kind) {
     case CC_STMT_LABEL:
         if (s->label_name == NULL || s->label_name[0] == '\0') {
-            set_diag(diag, "malformed label statement");
+            sema_diag(diag, "malformed label statement");
             return -1;
         }
         if (names_find(labels->items, labels->count, s->label_name) >= 0) {
@@ -770,7 +770,7 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
             return -1;
         }
         if (name_list_push(labels, s->label_name) != 0) {
-            set_diag(diag, "out of memory collecting labels");
+            sema_diag(diag, "out of memory collecting labels");
             return -1;
         }
         return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
@@ -780,11 +780,11 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
             return 0;
         }
         if (s->label_name == NULL || s->label_name[0] == '\0') {
-            set_diag(diag, "malformed goto statement");
+            sema_diag(diag, "malformed goto statement");
             return -1;
         }
         if (names_find(gotos->items, gotos->count, s->label_name) < 0 && name_list_push(gotos, s->label_name) != 0) {
-            set_diag(diag, "out of memory collecting goto targets");
+            sema_diag(diag, "out of memory collecting goto targets");
             return -1;
         }
         return 0;
@@ -793,11 +793,11 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
         for (i = 0; i < s->asm_goto_label_count; ++i) {
             const char *name = s->asm_goto_labels[i];
             if (name == NULL || name[0] == '\0') {
-                set_diag(diag, "malformed asm goto label");
+                sema_diag(diag, "malformed asm goto label");
                 return -1;
             }
             if (names_find(gotos->items, gotos->count, name) < 0 && name_list_push(gotos, name) != 0) {
-                set_diag(diag, "out of memory collecting asm goto targets");
+                sema_diag(diag, "out of memory collecting asm goto targets");
                 return -1;
             }
         }
@@ -1846,28 +1846,28 @@ static int atomic_memorder_check_arg(const cc_translation_unit_t *tu, cc_expr_t 
 
     if (arg == NULL) {
         snprintf(msg, sizeof(msg), "%s %s memory-order argument is missing", builtin_name, op_kind);
-        set_diag(diag, msg);
+        sema_diag(diag, msg);
         return -1;
     }
     if (eval_const_int_expr(tu, arg, &mo) != 0) {
         snprintf(msg, sizeof(msg), "%s %s memory-order argument must be an integer constant expression", builtin_name,
                  op_kind);
-        set_diag(diag, msg);
+        sema_diag(diag, msg);
         return -1;
     }
     if (!atomic_memorder_is_valid(mo)) {
         snprintf(msg, sizeof(msg), "%s %s memory-order argument must be in range [0,5]", builtin_name, op_kind);
-        set_diag(diag, msg);
+        sema_diag(diag, msg);
         return -1;
     }
     if (allow_load_orders && !atomic_memorder_valid_for_load(mo)) {
         snprintf(msg, sizeof(msg), "%s load memory order must be relaxed/consume/acquire/seq_cst", builtin_name);
-        set_diag(diag, msg);
+        sema_diag(diag, msg);
         return -1;
     }
     if (allow_store_orders && !atomic_memorder_valid_for_store(mo)) {
         snprintf(msg, sizeof(msg), "%s store memory order must be relaxed/release/seq_cst", builtin_name);
-        set_diag(diag, msg);
+        sema_diag(diag, msg);
         return -1;
     }
     return 0;
@@ -2194,7 +2194,7 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
     if (lr < 0 || rr < 0 ||
         !(e->op == CC_BIN_ADD || e->op == CC_BIN_SUB || e->op == CC_BIN_MUL || e->op == CC_BIN_DIV ||
           e->op == CC_BIN_EQ || e->op == CC_BIN_NE)) {
-        set_diag(diag, "invalid operands to a complex operation");
+        sema_diag(diag, "invalid operands to a complex operation");
         return -1;
     }
     if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
@@ -2204,7 +2204,7 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
     rank = lr > rr ? lr : rr;
     sid = sema_complex_sid(tu, sema_rank_float(rank));
     if (sid < 0) {
-        set_diag(diag, "complex result type is not available");
+        sema_diag(diag, "complex result type is not available");
         return -1;
     }
     sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, sema_rank_float(rank)));
@@ -2281,12 +2281,12 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
     int sid;
 
     if ((!lw && !sema_wide_partner_ok(sx_vtype(e->lhs))) || (!rw && !sema_wide_partner_ok(sx_vtype(e->rhs)))) {
-        set_diag(diag, "invalid operands to a wide integer operation");
+        sema_diag(diag, "invalid operands to a wide integer operation");
         return -1;
     }
     if (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) {
         if (rw && sema_wrap_cast(&e->rhs, cc_ct_basic(CC_CT_LLONG)) != 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         /* the left operand's type: a narrow value shifted by a wide count is an ordinary shift */
@@ -2304,23 +2304,23 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
         const cc_ctype_t *ft = sema_rank_float(rank);
 
         if ((lw && sema_wrap_cast(&e->lhs, ft) != 0) || (rw && sema_wrap_cast(&e->rhs, ft) != 0)) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : ft);
         return 0;
     }
     if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
-        set_diag(diag, "invalid wide integer operation");
+        sema_diag(diag, "invalid wide integer operation");
         return -1;
     }
     sid = sema_wide_common(tu, lw ? sx_ct_record(sx_vtype(e->lhs)) : -1, rw ? sx_ct_record(sx_vtype(e->rhs)) : -1);
     if ((!lw || sx_ct_record(sx_vtype(e->lhs)) != sid) && sema_wrap_cast(&e->lhs, cc_ct_record(sid)) != 0) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     if ((!rw || sx_ct_record(sx_vtype(e->rhs)) != sid) && sema_wrap_cast(&e->rhs, cc_ct_record(sid)) != 0) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
@@ -2404,28 +2404,28 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
     int is_fp = cc_ct_is_floating(vd->vector_elem);
 
     if (is_logical_op(e->op)) {
-        set_diag(diag, "invalid operands to a logical operator: a vector");
+        sema_diag(diag, "invalid operands to a logical operator: a vector");
         return -1;
     }
     if (is_fp && (e->op == CC_BIN_MOD || e->op == CC_BIN_SHL || e->op == CC_BIN_SHR || e->op == CC_BIN_BAND ||
                   e->op == CC_BIN_BOR || e->op == CC_BIN_BXOR)) {
-        set_diag(diag, "invalid operands to an integer operator: a floating vector");
+        sema_diag(diag, "invalid operands to an integer operator: a floating vector");
         return -1;
     }
     if (vl != NULL && vr != NULL) {
         if (vl != vr) {
-            set_diag(diag, "invalid operands to a vector operation: the vector types differ");
+            sema_diag(diag, "invalid operands to a vector operation: the vector types differ");
             return -1;
         }
     } else {
         cc_expr_t **scalar = vl != NULL ? &e->rhs : &e->lhs;
 
         if (!sema_vector_scalar_ok(sx_vtype(*scalar))) {
-            set_diag(diag, "invalid operands to a vector operation");
+            sema_diag(diag, "invalid operands to a vector operation");
             return -1;
         }
         if (sx_vtype(*scalar) != vd->vector_elem && sema_wrap_cast(scalar, vd->vector_elem) != 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
     }
@@ -2448,7 +2448,7 @@ static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_di
 
     if (!ct_kind_is(to->unqual, CC_CT_VOID) &&
         ((vt == NULL && !cc_ct_is_integer(to)) || (vs == NULL && !cc_ct_is_integer(sx_vtype(e->lhs))) || ts != ss)) {
-        set_diag(diag, "invalid conversion: a vector converts only to a vector or an integer of its size");
+        sema_diag(diag, "invalid conversion: a vector converts only to a vector or an integer of its size");
         return -1;
     }
     sema_set_type(e, to);
@@ -2689,16 +2689,16 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
     uint64_t bid[2];
 
     if ((dl == NULL && sema_is_binary_fp(sx_vtype(e->lhs))) || (dr == NULL && sema_is_binary_fp(sx_vtype(e->rhs)))) {
-        set_diag(diag, "cannot mix operands of decimal floating and binary floating types");
+        sema_diag(diag, "cannot mix operands of decimal floating and binary floating types");
         return -1;
     }
     if (!is_cmp && e->op != CC_BIN_ADD && e->op != CC_BIN_SUB && e->op != CC_BIN_MUL && e->op != CC_BIN_DIV) {
-        set_diag(diag, "invalid operands to a decimal floating operation");
+        sema_diag(diag, "invalid operands to a decimal floating operation");
         return -1;
     }
     if ((dl == NULL && !sema_decimal_partner_ok(sx_vtype(e->lhs))) ||
         (dr == NULL && !sema_decimal_partner_ok(sx_vtype(e->rhs)))) {
-        set_diag(diag, "invalid operands to a decimal floating operation");
+        sema_diag(diag, "invalid operands to a decimal floating operation");
         return -1;
     }
     bits = dl != NULL ? dl->decimal_bits : 0;
@@ -2712,7 +2712,7 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         cc_expr_t *list = sema_decimal_list(bits, bid, e->line, e->col);
 
         if (list == NULL) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         cc_expr_free(e->lhs);
@@ -2725,11 +2725,11 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         return check_expr(tu, e, NULL, 0, 0, diag);
     }
     if ((dl == NULL || dl->decimal_bits != bits) && sema_decimal_convert(tu, &e->lhs, sid) != 0) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     if ((dr == NULL || dr->decimal_bits != bits) && sema_decimal_convert(tu, &e->rhs, sid) != 0) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
@@ -2753,7 +2753,7 @@ static int sema_decimal_truth(const cc_translation_unit_t *tu, cc_expr_t **slot,
     if (ne == NULL || zero == NULL) {
         free(ne);
         cc_expr_free(zero);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     ne->kind = CC_EXPR_BIN;
@@ -2817,14 +2817,14 @@ static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
     }
     if (dt != NULL) {
         if (!ds && !sema_decimal_partner_ok(sx_vtype(e->lhs)) && !sema_is_binary_fp(sx_vtype(e->lhs))) {
-            set_diag(diag, "invalid conversion to a decimal floating type");
+            sema_diag(diag, "invalid conversion to a decimal floating type");
             return -1;
         }
         if (sema_decimal_fold_value(tu, e->lhs, dt->decimal_bits, bid)) {
             cc_expr_t *list = sema_decimal_list(dt->decimal_bits, bid, e->line, e->col);
 
             if (list == NULL) {
-                set_diag(diag, "out of memory");
+                sema_diag(diag, "out of memory");
                 return -1;
             }
             cc_expr_free(e->lhs);
@@ -2840,7 +2840,7 @@ static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
             return -1;
         }
     } else if (!sema_decimal_partner_ok(to) && !sema_is_binary_fp(to)) {
-        set_diag(diag, "invalid conversion of a decimal floating value");
+        sema_diag(diag, "invalid conversion of a decimal floating value");
         return -1;
     }
     sema_set_type(e, to);
@@ -2859,12 +2859,12 @@ static int sema_decimal_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     cc_expr_t *list;
 
     if (!sema_decimal_fold_value(tu, *slot, bits, bid)) {
-        set_diag(diag, "initializer of a static decimal floating object is not a constant");
+        sema_diag(diag, "initializer of a static decimal floating object is not a constant");
         return -1;
     }
     list = sema_decimal_list(bits, bid, (*slot)->line, (*slot)->col);
     if (list == NULL) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     cc_expr_free(*slot);
@@ -2889,7 +2889,7 @@ static int sema_wide_truth(const cc_translation_unit_t *tu, cc_expr_t **slot, cc
     if (ne == NULL || zero == NULL) {
         free(ne);
         cc_expr_free(zero);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     ne->kind = CC_EXPR_BIN;
@@ -2992,7 +2992,7 @@ static int sema_wide_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
         free(bin);
         cc_expr_free(one);
         cc_expr_free(read);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     bin->kind = CC_EXPR_BIN;
@@ -3012,7 +3012,7 @@ static int sema_wide_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
             free(asg);
             cc_expr_free(undo);
             cc_expr_free(bin);
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         asg->kind = CC_EXPR_ASSIGN;
@@ -3170,7 +3170,7 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     cc_expr_t **items;
 
     if (sema_fold_complex(tu, *slot, &re, &im, 0) != 0) {
-        set_diag(diag, "initializer of a static complex object is not an arithmetic constant");
+        sema_diag(diag, "initializer of a static complex object is not an arithmetic constant");
         return -1;
     }
     list = (cc_expr_t *)calloc(1, sizeof(*list));
@@ -3178,7 +3178,7 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     if (list == NULL || items == NULL) {
         free(list);
         free(items);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     items[0] = sema_float_literal(elem, sema_round_to(elem, re), (*slot)->line, (*slot)->col);
@@ -3188,7 +3188,7 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
         free(items[1]);
         free(items);
         free(list);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     list->kind = CC_EXPR_INIT_LIST;
@@ -3412,14 +3412,14 @@ static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **sl
         free(v);
         free(outer);
         free(list);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     if (sema_big_fold(tu, *slot, v, 0) != 0) {
         free(v);
         free(outer);
         free(list);
-        set_diag(diag, "initializer of a static wide integer is not an integer constant");
+        sema_diag(diag, "initializer of a static wide integer is not an integer constant");
         return -1;
     }
     sema_big_reduce(v, wd->wide_bits, wd->wide_unsigned);
@@ -3431,7 +3431,7 @@ static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **sl
         free(v);
         free(outer);
         free(list);
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     for (i = 0; i < n; ++i) {
@@ -3448,7 +3448,7 @@ static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **sl
             free(outer->args);
             free(outer);
             free(v);
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
     }
@@ -3483,7 +3483,7 @@ static int sema_condition(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_
         return 0;
     }
     if (sema_complex_truth(tu, slot) != 0) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     return 0;
@@ -3506,19 +3506,19 @@ static int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *
 
     if (lr < 0 || rr < 0 || sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL ||
         sema_complex_elem(tu, sx_vtype(e->rhs)) != NULL) {
-        set_diag(diag, "the parts of a complex value must be real arithmetic values");
+        sema_diag(diag, "the parts of a complex value must be real arithmetic values");
         return -1;
     }
     rank = lr > rr ? lr : rr;
     elem = sema_rank_float(rank);
     sid = sema_complex_sid(tu, elem);
     if (sid < 0) {
-        set_diag(diag, "complex type has no layout");
+        sema_diag(diag, "complex type has no layout");
         return -1;
     }
     if ((sx_vtype(e->lhs) != elem && sema_wrap_cast(&e->lhs, elem) != 0) ||
         (sx_vtype(e->rhs) != elem && sema_wrap_cast(&e->rhs, elem) != 0)) {
-        set_diag(diag, "out of memory");
+        sema_diag(diag, "out of memory");
         return -1;
     }
     sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, elem));
@@ -3537,7 +3537,7 @@ static int sema_builtin_complex(const cc_translation_unit_t *tu, cc_expr_t *e, v
     cc_expr_t **args = e->args;
 
     if (e->arg_count != 2) {
-        set_diag(diag, "__builtin_complex takes two arguments");
+        sema_diag(diag, "__builtin_complex takes two arguments");
         return -1;
     }
     if (check_expr(tu, args[0], vars, var_count, depth, diag) != 0 ||
@@ -3545,7 +3545,7 @@ static int sema_builtin_complex(const cc_translation_unit_t *tu, cc_expr_t *e, v
         return -1;
     }
     if (sema_float_rank(sx_vtype(args[0])) == 0 || sx_vtype(args[0])->unqual != sx_vtype(args[1])->unqual) {
-        set_diag(diag, "both arguments to '__builtin_complex' must have the same real floating type");
+        sema_diag(diag, "both arguments to '__builtin_complex' must have the same real floating type");
         return -1;
     }
     free(e->ident);
@@ -3580,21 +3580,21 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
     }
     tct = sx_vtype(x)->unqual;
     if (!(cc_ct_is_integer(tct) || sema_float_rank(tct) > 0)) {
-        set_diag(diag, "__real__ and __imag__ need an arithmetic operand");
+        sema_diag(diag, "__real__ and __imag__ need an arithmetic operand");
         return -1;
     }
     if (strcmp(e->ident, "__im") == 0) {
         cc_expr_t *zero = sema_int_node(0, e->line, e->col);
 
         if (zero == NULL) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         e->kind = CC_EXPR_BIN;
         e->op = CC_BIN_COMMA;
         e->rhs = zero;
         if (sema_wrap_cast(&e->rhs, tct) != 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
     } else {
@@ -3839,7 +3839,7 @@ static int sema_check_compare(const cc_translation_unit_t *tu, cc_expr_t *e, con
         if (sema_ptrs_match(tu, a, b)) {
             return 0;
         }
-        set_diag(diag, "incompatible pointer types in comparison");
+        sema_diag(diag, "incompatible pointer types in comparison");
         return -1;
     }
     if (eq && ((sema_is_ptr(a) && cc_ct_is_integer(b)) || (sema_is_ptr(b) && cc_ct_is_integer(a)))) {
@@ -3853,7 +3853,7 @@ static int sema_check_compare(const cc_translation_unit_t *tu, cc_expr_t *e, con
         }
         return 0;
     }
-    set_diag(diag, eq ? "comparison operators require compatible scalar operands"
+    sema_diag(diag, eq ? "comparison operators require compatible scalar operands"
                       : "ordered comparison operators require numeric or compatible pointer operands");
     return -1;
 }
@@ -3877,7 +3877,7 @@ static const cc_ctype_t *sema_pointer_arith(const cc_translation_unit_t *tu, cc_
             return NULL;
         }
         if (!sema_ptrs_match(tu, a, b)) {
-            set_diag(diag, "incompatible pointer types in subtraction");
+            sema_diag(diag, "incompatible pointer types in subtraction");
             return NULL;
         }
         /* ptrdiff_t */
@@ -3889,7 +3889,7 @@ static const cc_ctype_t *sema_pointer_arith(const cc_translation_unit_t *tu, cc_
     if (e->op == CC_BIN_ADD && cc_ct_is_integer(a) && sema_is_ptr(b)) {
         return sema_void_ptr_arith(b, e, diag) != 0 ? NULL : b;
     }
-    set_diag(diag, "unsupported pointer arithmetic form");
+    sema_diag(diag, "unsupported pointer arithmetic form");
     return NULL;
 }
 
@@ -3975,7 +3975,7 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
     if (e->op == CC_BIN_ADD && e->is_subscript && (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs))) {
         /* v[i]: an element of the vector's array */
         if (sema_vector_subscript(tu, sema_is_vector(tu, e->lhs) ? &e->lhs : &e->rhs) != 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
     } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
@@ -4006,7 +4006,7 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
             return sema_complex_binop(tu, e, diag);
         }
         if (sema_complex_truth(tu, &e->lhs) != 0 || sema_complex_truth(tu, &e->rhs) != 0) {
-            set_diag(diag, "out of memory converting a complex operand");
+            sema_diag(diag, "out of memory converting a complex operand");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -4016,13 +4016,13 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
     b = sx_vtype(e->rhs);
     if (is_logical_op(e->op)) {
         if (!cc_ct_is_scalar(a) || !cc_ct_is_scalar(b)) {
-            set_diag(diag, "logical operators require scalar operands");
+            sema_diag(diag, "logical operators require scalar operands");
             return -1;
         }
         t = cc_ct_basic(CC_CT_INT);
     } else if (is_shift_op(e->op) || is_bitwise_op(e->op)) {
         if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
-            set_diag(diag, is_shift_op(e->op) ? "shift operators require integer operands"
+            sema_diag(diag, is_shift_op(e->op) ? "shift operators require integer operands"
                                               : "bitwise operators require integer operands");
             return -1;
         }
@@ -4036,14 +4036,14 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
             const cc_ctype_t *c = sema_usual_arith(a, b);
 
             if (sema_convert(&e->lhs, c) != 0 || sema_convert(&e->rhs, c) != 0) {
-                set_diag(diag, "out of memory converting a comparison operand");
+                sema_diag(diag, "out of memory converting a comparison operand");
                 return -1;
             }
         }
         t = cc_ct_basic(CC_CT_INT);
     } else if (sema_is_ptr(a) || sema_is_ptr(b)) {
         if (e->op != CC_BIN_ADD && e->op != CC_BIN_SUB) {
-            set_diag(diag, "arithmetic operators require numeric operands");
+            sema_diag(diag, "arithmetic operators require numeric operands");
             return -1;
         }
         t = sema_pointer_arith(tu, e, a, b, diag);
@@ -4052,21 +4052,21 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
         }
     } else if (e->op == CC_BIN_MOD) {
         if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
-            set_diag(diag, "modulo operator requires integer operands");
+            sema_diag(diag, "modulo operator requires integer operands");
             return -1;
         }
         t = cc_ct_common_int(a, b);
     } else {
         t = sema_usual_arith(a, b);
         if (t == NULL) {
-            set_diag(diag, "void expression used in arithmetic operation");
+            sema_diag(diag, "void expression used in arithmetic operation");
             return -1;
         }
         t = sema_unary_or(e, a, b, t);
     }
     sema_set_type(e, t);
     if (sema_convert_operands(e, a, b) != 0) {
-        set_diag(diag, "out of memory converting an operand");
+        sema_diag(diag, "out of memory converting an operand");
         return -1;
     }
     return 0;
@@ -4086,7 +4086,7 @@ static int sema_check_addr(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     int of_literal;
 
     if (x == NULL) {
-        set_diag(diag, "malformed address-of expression");
+        sema_diag(diag, "malformed address-of expression");
         return -1;
     }
     of_literal = x->kind == CC_EXPR_CAST && x->lhs != NULL && x->lhs->kind == CC_EXPR_INIT_LIST;
@@ -4094,13 +4094,13 @@ static int sema_check_addr(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         return -1;
     }
     if (x->kind == CC_EXPR_MEMBER && x->member_is_bitfield) {
-        set_diag(diag, "cannot take address of bit-field");
+        sema_diag(diag, "cannot take address of bit-field");
         return -1;
     }
     if (x->kind == CC_EXPR_DEREF) {
         /* &*p is p, not an lvalue */
         if (!sema_is_ptr(sx_vtype(x->lhs))) {
-            set_diag(diag, "address-of dereference requires pointer operand");
+            sema_diag(diag, "address-of dereference requires pointer operand");
             return -1;
         }
         sema_set_type(e, sx_vtype(x->lhs));
@@ -4108,7 +4108,7 @@ static int sema_check_addr(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     }
     if (!of_literal && x->kind != CC_EXPR_IDENT && x->kind != CC_EXPR_MEMBER &&
         !(x->kind == CC_EXPR_CAST && sx_ct_record(x->ctype) >= 0)) {
-        set_diag(diag, "address-of currently requires an identifier or member lvalue");
+        sema_diag(diag, "address-of currently requires an identifier or member lvalue");
         return -1;
     }
     sema_set_type(e, cc_ct_pointer(x->ctype));
@@ -4127,7 +4127,7 @@ static int sema_check_deref(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
     const cc_ctype_t *p;
 
     if (e->lhs == NULL) {
-        set_diag(diag, "malformed dereference expression");
+        sema_diag(diag, "malformed dereference expression");
         return -1;
     }
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -4139,7 +4139,7 @@ static int sema_check_deref(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
     }
     p = sx_vtype(e->lhs);
     if (!sema_is_ptr(p)) {
-        set_diag(diag, "dereference requires pointer operand");
+        sema_diag(diag, "dereference requires pointer operand");
         return -1;
     }
     if (p->of->unqual->kind == CC_CT_VOID && cc_options_current()->pedantic &&
@@ -4201,7 +4201,7 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     int rid;
 
     if (e->lhs == NULL || to == NULL) {
-        set_diag(diag, "malformed cast expression");
+        sema_diag(diag, "malformed cast expression");
         return -1;
     }
     if (e->lhs->kind == CC_EXPR_INIT_LIST) {
@@ -4219,7 +4219,7 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         /* complex to real: the real part (C11 6.3.1.7); to _Bool: whether either part is nonzero */
         if ((ct_kind_is(to->unqual, CC_CT_BOOL) ? sema_complex_truth(tu, &e->lhs)
                                                 : sema_complex_part(tu, &e->lhs, 0)) != 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
     }
@@ -4234,7 +4234,7 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */
         if (!sema_wide_partner_ok(to) && !ct_kind_is(to->unqual, CC_CT_POINTER) &&
             !ct_kind_is(to->unqual, CC_CT_VOID)) {
-            set_diag(diag, "invalid conversion of a wide integer");
+            sema_diag(diag, "invalid conversion of a wide integer");
             return -1;
         }
         if (ct_kind_is(to->unqual, CC_CT_BOOL) && sema_wide_truth(tu, &e->lhs, diag) != 0) {
@@ -4243,24 +4243,24 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     } else if (sema_wide_def(tu, to) != NULL) {
         /* to a wide integer: from any integer or floating value */
         if (!sema_is_wide(tu, e->lhs) && !sema_wide_partner_ok(from)) {
-            set_diag(diag, "invalid conversion to a wide integer");
+            sema_diag(diag, "invalid conversion to a wide integer");
             return -1;
         }
     } else if (sema_complex_elem(tu, to) != NULL && sema_complex_operand_rank(tu, e->lhs) < 0) {
-        set_diag(diag, "only an arithmetic value can be converted to a complex type");
+        sema_diag(diag, "only an arithmetic value can be converted to a complex type");
         return -1;
     } else if ((rid = sx_ct_record(to)) >= 0) {
         const cc_struct_def_t *sd = find_struct_def(tu, rid);
 
         if (sd == NULL || !sd->complete) {
-            set_diag(diag, "cast targets unknown aggregate type");
+            sema_diag(diag, "cast targets unknown aggregate type");
             return -1;
         }
         if (sd->is_union) {
             const cc_struct_member_t *m = cc_ct_union_cast_member(tu, rid, e->lhs->ctype);
 
             if (m == NULL) {
-                set_diag(diag, "cast to union type from type not present in union");
+                sema_diag(diag, "cast to union type from type not present in union");
                 return -1;
             }
             e->member_offset = m->offset;
@@ -4268,7 +4268,7 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     } else if (!ct_kind_is(to->unqual, CC_CT_VOID) && !(cc_ct_is_arithmetic(from) && cc_ct_is_arithmetic(to)) &&
                !(sema_is_ptr(to) && (sema_is_ptr(from) || cc_ct_is_integer(from))) &&
                !(cc_ct_is_integer(to) && sema_is_ptr(from))) {
-        set_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
+        sema_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
         return -1;
     }
     sema_set_type(e, to);
@@ -4290,19 +4290,19 @@ static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_
             return -1;
         }
         if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
-            set_diag(diag, "sizeof cannot be applied to bit-field");
+            sema_diag(diag, "sizeof cannot be applied to bit-field");
             return -1;
         }
         /* an array with a bound that is no constant (a variable-length one) is sized when the program runs */
         for (t = e->lhs->ctype; t != NULL && t->kind == CC_CT_ARRAY && t->count >= 0; t = t->of) {
         }
         if (!(t != NULL && t->kind == CC_CT_ARRAY) && cc_ct_size(e->lhs->ctype, tu) < 0) {
-            set_diag(diag, "sizeof unsupported for this operand type");
+            sema_diag(diag, "sizeof unsupported for this operand type");
             return -1;
         }
     } else {
         if (cc_ct_sizeof_type(e->aux_ctype, tu) < 0) {
-            set_diag(diag, "sizeof unsupported for this type");
+            sema_diag(diag, "sizeof unsupported for this type");
             return -1;
         }
         if (e->aux_ctype->kind == CC_CT_VOID &&
@@ -4344,7 +4344,7 @@ static int sema_check_stmt_expr(const cc_translation_unit_t *tu, cc_expr_t *e, v
         return -1;
     }
     if (vars_clone(&lvars, vars, var_count) != 0) {
-        set_diag(diag, "out of memory cloning scope for statement expression");
+        sema_diag(diag, "out of memory cloning scope for statement expression");
         return -1;
     }
     for (j = 0; j < e->stmt_expr_count; ++j) {
@@ -4390,7 +4390,7 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
     int b_void;
 
     if (e->lhs == NULL || e->third == NULL) {
-        set_diag(diag, "malformed conditional expression");
+        sema_diag(diag, "malformed conditional expression");
         return -1;
     }
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
@@ -4402,7 +4402,7 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
         return -1;
     }
     if (!cc_ct_is_scalar(sx_vtype(e->lhs))) {
-        set_diag(diag, "conditional expression condition cannot be void");
+        sema_diag(diag, "conditional expression condition cannot be void");
         return -1;
     }
     if (e->rhs == NULL &&
@@ -4425,7 +4425,7 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
         t = a_void ? b : a;
     } else if (sema_is_ptr(a) && sema_is_ptr(b)) {
         if (!sema_ptrs_match(tu, a, b)) {
-            set_diag(diag, "incompatible pointer types in conditional expression");
+            sema_diag(diag, "incompatible pointer types in conditional expression");
             return -1;
         }
         t = a;
@@ -4435,16 +4435,16 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
         t = b;
     } else if (sx_ct_record(a) >= 0 && sx_ct_record(b) >= 0) {
         if (!struct_ids_compatible(tu, sx_ct_record(a), sx_ct_record(b))) {
-            set_diag(diag, "incompatible struct types in conditional expression");
+            sema_diag(diag, "incompatible struct types in conditional expression");
             return -1;
         }
         t = a;
     } else if (sx_ct_record(a) >= 0 || sx_ct_record(b) >= 0 || (t = sema_usual_arith(a, b)) == NULL) {
-        set_diag(diag, "incompatible types in conditional expression");
+        sema_diag(diag, "incompatible types in conditional expression");
         return -1;
     } else if (e->rhs != NULL && (sema_convert(&e->rhs, t) != 0 || sema_convert(&e->third, t) != 0)) {
         /* arithmetic arms: each converted to the result's type (C11 6.5.15p5); `c ?: b` keeps c, its condition */
-        set_diag(diag, "out of memory converting a conditional operand");
+        sema_diag(diag, "out of memory converting a conditional operand");
         return -1;
     }
     sema_set_type(e, t);
@@ -4562,7 +4562,7 @@ static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         dst = e->lhs->ctype;
         what[0] = '\0';
     } else {
-        set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
+        sema_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
         return -1;
     }
     if (sema_const_object(storage, dst)) {
@@ -4587,7 +4587,7 @@ static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_
     }
     /* to or from a complex type: the conversion, explicit */
     if (sema_complex_convert_for_assign(tu, &e->rhs, cc_ct_decay(dst)) < 0) {
-        set_diag(diag, "out of memory converting to or from a complex type");
+        sema_diag(diag, "out of memory converting to or from a complex type");
         return -1;
     }
     if (!sema_assignable(tu, dst, e->rhs) && !(e->ident != NULL && strcmp(e->ident, "__Fp") == 0)) {
@@ -4632,7 +4632,7 @@ static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         obj = idx >= 0 ? vars[idx].ctype : g->ctype;
         storage = idx >= 0 ? vars[idx].storage : g->storage;
         if (obj->kind == CC_CT_ARRAY) {
-            set_diag(diag, "array object is not a modifiable lvalue for ++/--");
+            sema_diag(diag, "array object is not a modifiable lvalue for ++/--");
             return -1;
         }
     } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
@@ -4641,12 +4641,12 @@ static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         }
         obj = e->lhs->ctype;
     } else {
-        set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
+        sema_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
         return -1;
     }
     t = cc_ct_decay(obj);
     if (sema_const_object(storage, obj)) {
-        set_diag(diag, "cannot modify const-qualified object with ++/--");
+        sema_diag(diag, "cannot modify const-qualified object with ++/--");
         return -1;
     }
     if (sema_is_ptr(t)) {
@@ -4657,7 +4657,7 @@ static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         /* rewritten as the assignment it is; a vector's then goes element by element */
         return sema_wide_update(tu, e, vars, var_count, depth, diag);
     } else if (!cc_ct_is_arithmetic(t) || sx_ct_record(t) >= 0) {
-        set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
+        sema_diag(diag, "++/-- currently require numeric or pointer scalar operands");
         return -1;
     }
     sema_set_type(e, obj->unqual);
@@ -4728,7 +4728,7 @@ static int sema_check_member(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         return 0;
     }
     if (e->lhs == NULL || e->ident == NULL) {
-        set_diag(diag, "malformed member expression");
+        sema_diag(diag, "malformed member expression");
         return -1;
     }
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -4737,14 +4737,14 @@ static int sema_check_member(const cc_translation_unit_t *tu, cc_expr_t *e, var_
     t = sx_vtype(e->lhs);
     if (e->member_is_arrow) {
         if (!sema_is_ptr(t)) {
-            set_diag(diag, "-> requires pointer operand");
+            sema_diag(diag, "-> requires pointer operand");
             return -1;
         }
         t = t->of;
     }
     sid = sx_ct_record(t);
     if (sid < 0) {
-        set_diag(diag, e->member_is_arrow ? "-> requires pointer to struct or union"
+        sema_diag(diag, e->member_is_arrow ? "-> requires pointer to struct or union"
                                           : ". requires struct or union operand");
         return -1;
     }
@@ -4781,7 +4781,7 @@ static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var
 
     if (e->lhs == NULL || e->args == NULL || e->arg_count == 0 || e->generic_count != e->arg_count ||
         e->generic_ctypes == NULL || e->generic_is_default == NULL) {
-        set_diag(diag, "malformed _Generic expression");
+        sema_diag(diag, "malformed _Generic expression");
         return -1;
     }
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -4922,7 +4922,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__builtin_va_start first argument must be a pointer");
+            sema_diag(diag, "__builtin_va_start first argument must be a pointer");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -4939,7 +4939,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__builtin_va_end argument must be a pointer");
+            sema_diag(diag, "__builtin_va_end argument must be a pointer");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -4948,7 +4948,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
         bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
         if (e->arg_count != 0) {
-            set_diag(diag, "floating huge-value/infinity builtin expects no arguments");
+            sema_diag(diag, "floating huge-value/infinity builtin expects no arguments");
             return -1;
         }
         sema_set_type(e, cc_ct_basic((bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF)   ? CC_CT_FLOAT
@@ -4958,7 +4958,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_LDBL_MIN || bk == BUILTIN_LDBL_DENORM_MIN || bk == BUILTIN_LDBL_MAX) {
         if (e->arg_count != 0) {
-            set_diag(diag, "long double limit builtin expects no arguments");
+            sema_diag(diag, "long double limit builtin expects no arguments");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_LDOUBLE));
@@ -4967,14 +4967,14 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
         bk == BUILTIN_SIGNBIT) {
         if (e->arg_count != 1) {
-            set_diag(diag, "floating classification builtin expects exactly 1 argument");
+            sema_diag(diag, "floating classification builtin expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_arith(e->args[0])) {
-            set_diag(diag, "floating classification builtin expects numeric argument");
+            sema_diag(diag, "floating classification builtin expects numeric argument");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -4982,7 +4982,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
         if (e->arg_count != 1) {
-            set_diag(diag, "floating NaN builtin expects exactly 1 argument");
+            sema_diag(diag, "floating NaN builtin expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
@@ -5005,7 +5005,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
                 return -1;
             }
             if (!sx_is_ptr(e->args[i])) {
-                set_diag(diag, "__builtin_va_copy arguments must be pointers");
+                sema_diag(diag, "__builtin_va_copy arguments must be pointers");
                 return -1;
             }
         }
@@ -5023,11 +5023,11 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__builtin_va_arg first operand must be a pointer");
+            sema_diag(diag, "__builtin_va_arg first operand must be a pointer");
             return -1;
         }
         if (e->ctype == NULL || e->ctype->unqual->kind == CC_CT_VOID) {
-            set_diag(diag, "__builtin_va_arg requires a non-void type");
+            sema_diag(diag, "__builtin_va_arg requires a non-void type");
             return -1;
         }
         sema_set_type(e, e->ctype);
@@ -5045,7 +5045,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_scalar(e->args[0]) || !sx_is_int(e->args[1])) {
-            set_diag(diag, "__builtin_expect expects (scalar, integer)");
+            sema_diag(diag, "__builtin_expect expects (scalar, integer)");
             return -1;
         }
         sema_set_type(e, sx_vtype(e->args[0]));
@@ -5066,7 +5066,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_TRAP) {
         if (e->arg_count != 0) {
-            set_diag(diag, "__builtin_trap expects exactly 0 arguments");
+            sema_diag(diag, "__builtin_trap expects exactly 0 arguments");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -5074,7 +5074,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_UNREACHABLE) {
         if (e->arg_count != 0) {
-            set_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
+            sema_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -5082,14 +5082,14 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_ASSUME) {
         if (e->arg_count != 1) {
-            set_diag(diag, "__builtin_assume expects exactly 1 argument");
+            sema_diag(diag, "__builtin_assume expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_scalar(e->args[0])) {
-            set_diag(diag, "__builtin_assume argument must be scalar");
+            sema_diag(diag, "__builtin_assume argument must be scalar");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -5097,7 +5097,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_ASSUME_ALIGNED) {
         if (e->arg_count < 2 || e->arg_count > 3) {
-            set_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
+            sema_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
             return -1;
         }
         for (i = 0; i < e->arg_count; ++i) {
@@ -5106,12 +5106,12 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
+            sema_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
             return -1;
         }
         if (!sx_is_int(e->args[1]) ||
             (e->arg_count == 3 && !sx_is_int(e->args[2]))) {
-            set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
+            sema_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
             return -1;
         }
         sema_set_type(e, sx_vtype(e->args[0]));
@@ -5119,14 +5119,14 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_UNPREDICTABLE) {
         if (e->arg_count != 1) {
-            set_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
+            sema_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_scalar(e->args[0])) {
-            set_diag(diag, "__builtin_unpredictable argument must be scalar");
+            sema_diag(diag, "__builtin_unpredictable argument must be scalar");
             return -1;
         }
         sema_set_type(e, sx_vtype(e->args[0]));
@@ -5142,7 +5142,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         if (e->arg_count != 1) {
             char msg[96];
             snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", builtin_name);
-            set_diag(diag, msg);
+            sema_diag(diag, msg);
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
@@ -5151,7 +5151,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         if (!sx_is_int(e->args[0])) {
             char msg[96];
             snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
-            set_diag(diag, msg);
+            sema_diag(diag, msg);
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5162,7 +5162,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         char msg[96];
         if (e->arg_count != 1) {
             snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", what);
-            set_diag(diag, msg);
+            sema_diag(diag, msg);
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
@@ -5170,7 +5170,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         }
         if (!sx_is_int(e->args[0])) {
             snprintf(msg, sizeof(msg), "%s argument must be integral", what);
-            set_diag(diag, msg);
+            sema_diag(diag, msg);
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5179,7 +5179,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
         const cc_ctype_t *out_elem;
         if (e->arg_count != 3) {
-            set_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
+            sema_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
             return -1;
         }
         for (i = 0; i < 3; ++i) {
@@ -5188,16 +5188,16 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[2])) {
-            set_diag(diag, "overflow builtin third argument must be a pointer");
+            sema_diag(diag, "overflow builtin third argument must be a pointer");
             return -1;
         }
         out_elem = sx_vtype(e->args[2])->of;
         if (!cc_ct_is_integer(out_elem)) {
-            set_diag(diag, "overflow builtin destination must point to an integer type");
+            sema_diag(diag, "overflow builtin destination must point to an integer type");
             return -1;
         }
         if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1])) {
-            set_diag(diag, "overflow builtin operands must be integers");
+            sema_diag(diag, "overflow builtin operands must be integers");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5205,7 +5205,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
         if (e->arg_count != 3) {
-            set_diag(diag, "__builtin_*_overflow_p expects exactly 3 arguments");
+            sema_diag(diag, "__builtin_*_overflow_p expects exactly 3 arguments");
             return -1;
         }
         for (i = 0; i < 3; ++i) {
@@ -5215,7 +5215,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         }
         if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1]) ||
             !sx_is_int(e->args[2])) {
-            set_diag(diag, "overflow_p builtin operands must be integral");
+            sema_diag(diag, "overflow_p builtin operands must be integral");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5223,7 +5223,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_OBJECT_SIZE) {
         if (e->arg_count != 2) {
-            set_diag(diag, "__builtin_object_size expects exactly 2 arguments");
+            sema_diag(diag, "__builtin_object_size expects exactly 2 arguments");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
@@ -5231,7 +5231,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_int(e->args[1])) {
-            set_diag(diag, "__builtin_object_size second argument must be integral");
+            sema_diag(diag, "__builtin_object_size second argument must be integral");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_ULLONG));
@@ -5239,7 +5239,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
         if (e->arg_count != 1) {
-            set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address expects 1 argument"
+            sema_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address expects 1 argument"
                                                         : "__builtin_frame_address expects 1 argument");
             return -1;
         }
@@ -5247,7 +5247,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_int(e->args[0])) {
-            set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
+            sema_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
                                                         : "__builtin_frame_address argument must be integral");
             return -1;
         }
@@ -5256,7 +5256,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_MEMCMP) {
         if (e->arg_count != 3) {
-            set_diag(diag, "__builtin_memcmp has wrong argument count");
+            sema_diag(diag, "__builtin_memcmp has wrong argument count");
             return -1;
         }
         for (i = 0; i < e->arg_count; ++i) {
@@ -5265,11 +5265,11 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0]) || !sx_is_ptr(e->args[1])) {
-            set_diag(diag, "__builtin_memcmp first two arguments must be pointers");
+            sema_diag(diag, "__builtin_memcmp first two arguments must be pointers");
             return -1;
         }
         if (!sx_is_int(e->args[2])) {
-            set_diag(diag, "__builtin_memcmp third argument must be integral");
+            sema_diag(diag, "__builtin_memcmp third argument must be integral");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5277,7 +5277,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_PREFETCH) {
         if (e->arg_count < 1 || e->arg_count > 3) {
-            set_diag(diag, "__builtin_prefetch expects 1 to 3 arguments");
+            sema_diag(diag, "__builtin_prefetch expects 1 to 3 arguments");
             return -1;
         }
         for (i = 0; i < e->arg_count; ++i) {
@@ -5286,15 +5286,15 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__builtin_prefetch first argument must be a pointer");
+            sema_diag(diag, "__builtin_prefetch first argument must be a pointer");
             return -1;
         }
         if (e->arg_count >= 2 && !sx_is_int(e->args[1])) {
-            set_diag(diag, "__builtin_prefetch rw argument must be integral");
+            sema_diag(diag, "__builtin_prefetch rw argument must be integral");
             return -1;
         }
         if (e->arg_count >= 3 && !sx_is_int(e->args[2])) {
-            set_diag(diag, "__builtin_prefetch locality argument must be integral");
+            sema_diag(diag, "__builtin_prefetch locality argument must be integral");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -5302,14 +5302,14 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_CPU_SUPPORTS) {
         if (e->arg_count != 1) {
-            set_diag(diag, "__builtin_cpu_supports expects exactly 1 argument");
+            sema_diag(diag, "__builtin_cpu_supports expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (e->args[0]->kind != CC_EXPR_STR) {
-            set_diag(diag, "__builtin_cpu_supports argument must be a string literal");
+            sema_diag(diag, "__builtin_cpu_supports argument must be a string literal");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5317,14 +5317,14 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_STRLEN) {
         if (e->arg_count != 1) {
-            set_diag(diag, "__builtin_strlen expects exactly 1 argument");
+            sema_diag(diag, "__builtin_strlen expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__builtin_strlen argument must be a pointer");
+            sema_diag(diag, "__builtin_strlen argument must be a pointer");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
@@ -5334,7 +5334,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
         size_t min_args = (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET) ? 3 : 4;
         if (e->arg_count < min_args) {
-            set_diag(diag, min_args == 3 ? "__builtin_mem* has wrong argument count"
+            sema_diag(diag, min_args == 3 ? "__builtin_mem* has wrong argument count"
                                          : "__builtin___mem*_chk has wrong argument count");
             return -1;
         }
@@ -5344,21 +5344,21 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "memory builtin first argument must be a pointer");
+            sema_diag(diag, "memory builtin first argument must be a pointer");
             return -1;
         }
         if ((bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMCPY_CHK ||
              bk == BUILTIN_MEMMOVE_CHK) &&
             !sx_is_ptr(e->args[1])) {
-            set_diag(diag, "memory builtin source argument must be a pointer");
+            sema_diag(diag, "memory builtin source argument must be a pointer");
             return -1;
         }
         if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !sx_is_int(e->args[1])) {
-            set_diag(diag, "memory builtin fill byte must be integral");
+            sema_diag(diag, "memory builtin fill byte must be integral");
             return -1;
         }
         if (!sx_is_int(e->args[2])) {
-            set_diag(diag, "memory builtin size argument must be integral");
+            sema_diag(diag, "memory builtin size argument must be integral");
             return -1;
         }
         sema_set_type(e, sx_vtype(e->args[0]));
@@ -5366,7 +5366,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
         if (e->arg_count != 0) {
-            set_diag(diag, "__sync_synchronize expects exactly 0 arguments");
+            sema_diag(diag, "__sync_synchronize expects exactly 0 arguments");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -5375,7 +5375,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
         const char *nm = bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence" : "__atomic_signal_fence";
         if (e->arg_count != 1) {
-            set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence expects exactly 1 argument"
+            sema_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence expects exactly 1 argument"
                                                               : "__atomic_signal_fence expects exactly 1 argument");
             return -1;
         }
@@ -5383,7 +5383,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_int(e->args[0])) {
-            set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
+            sema_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
                                ? "__atomic_thread_fence memory-order argument must be integral"
                                : "__atomic_signal_fence memory-order argument must be integral");
             return -1;
@@ -5396,14 +5396,14 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
         if (e->arg_count != 1) {
-            set_diag(diag, "__sync_lock_release expects exactly 1 argument");
+            sema_diag(diag, "__sync_lock_release expects exactly 1 argument");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__sync_lock_release first argument must be a pointer");
+            sema_diag(diag, "__sync_lock_release first argument must be a pointer");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
@@ -5417,7 +5417,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
                               ? 3
                               : 2;
         if (e->arg_count != (size_t)expect_argc) {
-            set_diag(diag, "atomic fetch/exchange builtin has wrong argument count");
+            sema_diag(diag, "atomic fetch/exchange builtin has wrong argument count");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
@@ -5430,12 +5430,12 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "atomic fetch/exchange first argument must be a pointer");
+            sema_diag(diag, "atomic fetch/exchange first argument must be a pointer");
             return -1;
         }
         atomic_elem = sema_atomic_elem(e->args[0]);
         if (!sema_assignable(tu, atomic_elem, e->args[1])) {
-            set_diag(diag, "atomic fetch/exchange value type mismatch");
+            sema_diag(diag, "atomic fetch/exchange value type mismatch");
             return -1;
         }
         if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
@@ -5443,7 +5443,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
                                  ? "__atomic_exchange_n"
                                  : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
             if (!sx_is_int(e->args[2])) {
-                set_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
+                sema_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
                 return -1;
             }
             if (atomic_memorder_check_arg(tu, e->args[2], nm, "operation", 0, 0, diag) != 0) {
@@ -5455,7 +5455,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_SYNC_BOOL_CAS) {
         if (e->arg_count != 3) {
-            set_diag(diag, "__sync_bool_compare_and_swap expects exactly 3 arguments");
+            sema_diag(diag, "__sync_bool_compare_and_swap expects exactly 3 arguments");
             return -1;
         }
         for (i = 0; i < 3; ++i) {
@@ -5464,12 +5464,12 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
+            sema_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
             return -1;
         }
         atomic_elem = sema_atomic_elem(e->args[0]);
         if (!sema_assignable(tu, atomic_elem, e->args[1]) || !sema_assignable(tu, atomic_elem, e->args[2])) {
-            set_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
+            sema_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
@@ -5477,7 +5477,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_ATOMIC_LOAD_N) {
         if (e->arg_count != 2) {
-            set_diag(diag, "__atomic_load_n expects exactly 2 arguments");
+            sema_diag(diag, "__atomic_load_n expects exactly 2 arguments");
             return -1;
         }
         if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
@@ -5485,12 +5485,12 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__atomic_load_n first argument must be a pointer");
+            sema_diag(diag, "__atomic_load_n first argument must be a pointer");
             return -1;
         }
         atomic_elem = sema_atomic_elem(e->args[0]);
         if (!sx_is_int(e->args[1])) {
-            set_diag(diag, "__atomic_load_n memory-order argument must be integral");
+            sema_diag(diag, "__atomic_load_n memory-order argument must be integral");
             return -1;
         }
         if (atomic_memorder_check_arg(tu, e->args[1], "__atomic_load_n", "load", 1, 0, diag) != 0) {
@@ -5501,7 +5501,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
     }
     if (bk == BUILTIN_ATOMIC_STORE_N) {
         if (e->arg_count != 3) {
-            set_diag(diag, "__atomic_store_n expects exactly 3 arguments");
+            sema_diag(diag, "__atomic_store_n expects exactly 3 arguments");
             return -1;
         }
         for (i = 0; i < 3; ++i) {
@@ -5510,16 +5510,16 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            set_diag(diag, "__atomic_store_n first argument must be a pointer");
+            sema_diag(diag, "__atomic_store_n first argument must be a pointer");
             return -1;
         }
         atomic_elem = sema_atomic_elem(e->args[0]);
         if (!sema_assignable(tu, atomic_elem, e->args[1])) {
-            set_diag(diag, "__atomic_store_n value type mismatch");
+            sema_diag(diag, "__atomic_store_n value type mismatch");
             return -1;
         }
         if (!sx_is_int(e->args[2])) {
-            set_diag(diag, "__atomic_store_n memory-order argument must be integral");
+            sema_diag(diag, "__atomic_store_n memory-order argument must be integral");
             return -1;
         }
         if (atomic_memorder_check_arg(tu, e->args[2], "__atomic_store_n", "store", 0, 1, diag) != 0) {
@@ -5539,7 +5539,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         if (!sx_is_int(e->args[0])) {
-            set_diag(diag, "byte-swap builtin requires integral argument");
+            sema_diag(diag, "byte-swap builtin requires integral argument");
             return -1;
         }
         sema_set_type(e, cc_ct_basic(bswap_bits == 16 ? CC_CT_USHORT : bswap_bits == 32 ? CC_CT_UINT
@@ -5583,7 +5583,7 @@ static int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     }
     if (e->ident == NULL) {
         if (e->lhs == NULL) {
-            set_diag(diag, "malformed call expression");
+            sema_diag(diag, "malformed call expression");
             return -1;
         }
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
@@ -5591,7 +5591,7 @@ static int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         }
         /* a function designator, *fp included, is used as a pointer to the function */
         if (!sx_is_ptr(e->lhs)) {
-            set_diag(diag, "call target must be a function pointer");
+            sema_diag(diag, "call target must be a function pointer");
             return -1;
         }
     }
@@ -5616,11 +5616,11 @@ static int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         }
         if (callee != NULL && callee->has_prototype && i < callee->param_count &&
             sema_complex_convert_for_assign(tu, &e->args[i], sema_param_ctype(&callee->params[i])) < 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         if (sema_convert_call_arg(tu, e, callee, i) != 0) {
-            set_diag(diag, "out of memory");
+            sema_diag(diag, "out of memory");
             return -1;
         }
         if (callee != NULL && callee->has_prototype && i < callee->param_count &&
@@ -5679,7 +5679,7 @@ static int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             const cc_ctype_t *ft = idx >= 0 ? vars[idx].ctype : g->ctype;
 
             if (!sema_is_ptr(cc_ct_decay(ft))) {
-                set_diag(diag, "call target must be a function pointer");
+                sema_diag(diag, "call target must be a function pointer");
                 return -1;
             }
             sema_set_type(e, sema_callee_ret_ctype(ft));
@@ -5735,7 +5735,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     }
 
     if (e == NULL) {
-        set_diag(diag, "null expression in semantic analysis");
+        sema_diag(diag, "null expression in semantic analysis");
         return -1;
     }
 
@@ -5777,7 +5777,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
 
     case CC_EXPR_LABEL_ADDR:
         if (e->ident == NULL || e->ident[0] == '\0') {
-            set_diag(diag, "malformed label-address expression");
+            sema_diag(diag, "malformed label-address expression");
             return -1;
         }
         sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
@@ -5811,7 +5811,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         return sema_check_ternary(tu, e, vars, var_count, depth, diag);
 
     default:
-        set_diag(diag, "unsupported expression kind");
+        sema_diag(diag, "unsupported expression kind");
         return -1;
     }
 }
@@ -5819,7 +5819,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag) {
     cc_expr_t *item;
     if (init == NULL) {
-        set_diag(diag, "initializer list is empty");
+        sema_diag(diag, "initializer list is empty");
         return NULL;
     }
     if (init->kind != CC_EXPR_INIT_LIST) {
@@ -5832,16 +5832,16 @@ static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *dia
             sema_set_type(init, cc_ct_basic(CC_CT_INT));
             return init;
         }
-        set_diag(diag, "initializer list is empty");
+        sema_diag(diag, "initializer list is empty");
         return NULL;
     }
     if (init->arg_count > 1) {
-        set_diag(diag, "too many elements in scalar initializer");
+        sema_diag(diag, "too many elements in scalar initializer");
         return NULL;
     }
     item = init->args[0];
     if (item != NULL && item->kind == CC_EXPR_MEMBER) {
-        set_diag(diag, "designated initializer is invalid for scalar type");
+        sema_diag(diag, "designated initializer is invalid for scalar type");
         return NULL;
     }
     return item;
@@ -6014,7 +6014,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
     const cc_struct_def_t *sd;
 
     if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
-        set_diag(diag, "struct initializer uses unknown struct type");
+        sema_diag(diag, "struct initializer uses unknown struct type");
         return -1;
     }
     if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
@@ -6167,7 +6167,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
                                                                                             : NULL;
 
                 if (islot != NULL && sema_decimal_convert_for_assign(tu, islot, m->ctype) < 0) {
-                    set_diag(diag, "out of memory");
+                    sema_diag(diag, "out of memory");
                     return -1;
                 }
             }
@@ -6215,7 +6215,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
     int saw_nonlist_struct_item = 0;
 
     if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
-        set_diag(diag, "array initializer must use an initializer list");
+        sema_diag(diag, "array initializer must use an initializer list");
         return -1;
     }
     if (arr == NULL || arr->kind != CC_CT_ARRAY) {
@@ -6230,7 +6230,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
     elem = arr->of;
     elem_sid = sx_ct_record(elem);
     if (ct_kind_is(elem->unqual, CC_CT_VOID)) {
-        set_diag(diag, "array initializer has unsupported element type");
+        sema_diag(diag, "array initializer has unsupported element type");
         return -1;
     }
     if (elem->kind != CC_CT_ARRAY && init->arg_count == 1) {
@@ -6307,7 +6307,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                 if (sema_decimal_def(tu, elem) != NULL &&
                     sema_decimal_convert_for_assign(tu, &init->args[i], elem) < 0) {
                     /* a decimal element initialized by an arithmetic value: converted (a constant folded) */
-                    set_diag(diag, "out of memory");
+                    sema_diag(diag, "out of memory");
                     return -1;
                 }
                 saw_nonlist_struct_item = 1;
@@ -6359,7 +6359,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
     }
     if (s != NULL && (s->attr_flags & CC_ATTR_FALLTHROUGH) != 0 && s->kind != CC_STMT_EXPR) {
-        set_diag(diag, "fallthrough attribute requires an empty statement");
+        sema_diag(diag, "fallthrough attribute requires an empty statement");
         return -1;
     }
 
@@ -6374,23 +6374,23 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                                             CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
                                             CC_ATTR_FLATTEN | CC_ATTR_TARGET | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR;
             if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
-                set_diag(diag, "noreturn attribute is only valid on functions");
+                sema_diag(diag, "noreturn attribute is only valid on functions");
                 return -1;
             }
             if ((s->attr_flags & fn_only_attrs) != 0) {
-                set_diag(diag, "function-only attribute used on local declaration");
+                sema_diag(diag, "function-only attribute used on local declaration");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_WEAK) != 0) {
-                set_diag(diag, "weak attribute is only supported on file-scope objects/functions");
+                sema_diag(diag, "weak attribute is only supported on file-scope objects/functions");
                 return -1;
             }
             if ((s->attr_flags & attr_visibility_mask()) != 0) {
-                set_diag(diag, "visibility attribute is only supported on file-scope objects/functions");
+                sema_diag(diag, "visibility attribute is only supported on file-scope objects/functions");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_ALIAS) != 0) {
-                set_diag(diag, "alias attribute is only supported on file-scope objects/functions");
+                sema_diag(diag, "alias attribute is only supported on file-scope objects/functions");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_SECTION) != 0 &&
@@ -6398,15 +6398,15 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 return -1;
             }
             if (has_multiple_visibility_attrs(s->attr_flags)) {
-                set_diag(diag, "conflicting visibility attributes on local declaration");
+                sema_diag(diag, "conflicting visibility attributes on local declaration");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (s->attr_flags & CC_ATTR_NOINLINE) != 0) {
-                set_diag(diag, "conflicting always_inline/noinline attributes");
+                sema_diag(diag, "conflicting always_inline/noinline attributes");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_HOT) != 0 && (s->attr_flags & CC_ATTR_COLD) != 0) {
-                set_diag(diag, "conflicting hot/cold attributes");
+                sema_diag(diag, "conflicting hot/cold attributes");
                 return -1;
             }
             if ((s->attr_flags & CC_ATTR_ALIGNED) != 0 &&
@@ -6414,7 +6414,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 return -1;
             }
             if (sc_count > 1) {
-                set_diag(diag, "multiple storage-class specifiers in local declaration");
+                sema_diag(diag, "multiple storage-class specifiers in local declaration");
                 return -1;
             }
             if (cc_lang_at_least(2017) && (s->storage & CC_STORAGE_REGISTER) != 0) {
@@ -6424,25 +6424,25 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 }
             }
             if ((s->storage & CC_STORAGE_INLINE) != 0) {
-                set_diag(diag, "inline is only valid on function declarations");
+                sema_diag(diag, "inline is only valid on function declarations");
                 return -1;
             }
             if ((s->storage & CC_STORAGE_THREAD_LOCAL) != 0 &&
                 (s->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0) {
-                set_diag(diag, "thread_local local declaration requires static or extern storage");
+                sema_diag(diag, "thread_local local declaration requires static or extern storage");
                 return -1;
             }
             if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->expr != NULL) {
-                set_diag(diag, "extern local declaration cannot have an initializer");
+                sema_diag(diag, "extern local declaration cannot have an initializer");
                 return -1;
             }
             if (auto_type_decl) {
                 if (s->expr == NULL) {
-                    set_diag(diag, "auto type deduction requires an initializer");
+                    sema_diag(diag, "auto type deduction requires an initializer");
                     return -1;
                 }
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
-                    set_diag(diag, "auto type deduction from initializer list is not supported");
+                    sema_diag(diag, "auto type deduction from initializer list is not supported");
                     return -1;
                 }
                 if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
@@ -6454,11 +6454,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             init_ct = s->ctype->kind == CC_CT_ARRAY ? s->ctype->of : s->ctype;
             if (ct_kind_is(s->ctype->unqual, CC_CT_VOID)) {
-                set_diag(diag, "void variable declarations are not supported");
+                sema_diag(diag, "void variable declarations are not supported");
                 return -1;
             }
             if (vars_find_depth(*vars, *var_count, s->decl_name, depth) >= 0) {
-                set_diag(diag, "duplicate local/parameter name");
+                sema_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
             for (size_t b = 0; b < s->array_bounds.count; ++b) {
@@ -6471,12 +6471,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (!sx_is_int(bound)) {
-                    set_diag(diag, "variable-length array bound must be an integer expression");
+                    sema_diag(diag, "variable-length array bound must be an integer expression");
                     return -1;
                 }
             }
             if (vars_push(vars, var_count, s->decl_name, s->storage, depth, s->ctype) != 0) {
-                set_diag(diag, "out of memory adding local variable");
+                sema_diag(diag, "out of memory adding local variable");
                 return -1;
             }
             if (s->expr != NULL) {
@@ -6567,11 +6567,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     case CC_STMT_EXPR:
         if ((s->attr_flags & CC_ATTR_FALLTHROUGH) != 0) {
             if (s->expr != NULL) {
-                set_diag(diag, "fallthrough attribute requires an empty statement");
+                sema_diag(diag, "fallthrough attribute requires an empty statement");
                 return -1;
             }
             if (switch_depth <= 0) {
-                set_diag(diag, "fallthrough attribute is only valid in switch statements");
+                sema_diag(diag, "fallthrough attribute is only valid in switch statements");
                 return -1;
             }
             return 0;
@@ -6601,15 +6601,15 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     case CC_STMT_ASM: {
         size_t i2;
         if (s->asm_template == NULL) {
-            set_diag(diag, "asm statement is missing a template");
+            sema_diag(diag, "asm statement is missing a template");
             return -1;
         }
         if (s->asm_is_goto && s->asm_goto_label_count == 0) {
-            set_diag(diag, "asm goto requires at least one destination label");
+            sema_diag(diag, "asm goto requires at least one destination label");
             return -1;
         }
         if (!s->asm_is_goto && s->asm_goto_label_count > 0) {
-            set_diag(diag, "asm goto label list requires 'asm goto'");
+            sema_diag(diag, "asm goto label list requires 'asm goto'");
             return -1;
         }
         if (asm_validate_template_refs(s, diag) != 0) {
@@ -6617,7 +6617,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         for (i2 = 0; i2 < s->asm_output_count; ++i2) {
             if (s->asm_outputs[i2].expr == NULL || !asm_operand_is_lvalue(s->asm_outputs[i2].expr)) {
-                set_diag(diag, "asm output operand must be an lvalue");
+                sema_diag(diag, "asm output operand must be an lvalue");
                 return -1;
             }
             if (check_expr(tu, s->asm_outputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
@@ -6625,7 +6625,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             if (sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 1 ||
                 sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 2) {
-                set_diag(diag, "floating asm outputs are not supported yet");
+                sema_diag(diag, "floating asm outputs are not supported yet");
                 return -1;
             }
             if (asm_validate_constraint(s->asm_outputs[i2].constraint, 1, s->asm_output_count, cc_target_pointer_size(),
@@ -6636,7 +6636,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         for (i2 = 0; i2 < s->asm_input_count; ++i2) {
             int tied_out = -1;
             if (s->asm_inputs[i2].expr == NULL) {
-                set_diag(diag, "asm input operand requires an expression");
+                sema_diag(diag, "asm input operand requires an expression");
                 return -1;
             }
             if (check_expr(tu, s->asm_inputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
@@ -6644,7 +6644,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             if (sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 1 ||
                 sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 2) {
-                set_diag(diag, "floating asm inputs are not supported yet");
+                sema_diag(diag, "floating asm inputs are not supported yet");
                 return -1;
             }
             if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, cc_target_pointer_size(),
@@ -6659,17 +6659,17 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {
             if (s->asm_clobbers[i2] == NULL || s->asm_clobbers[i2][0] == '\0') {
-                set_diag(diag, "asm clobber name cannot be empty");
+                sema_diag(diag, "asm clobber name cannot be empty");
                 return -1;
             }
             if (strchr(s->asm_clobbers[i2], '\n') != NULL || strchr(s->asm_clobbers[i2], '\r') != NULL) {
-                set_diag(diag, "asm clobber contains invalid characters");
+                sema_diag(diag, "asm clobber contains invalid characters");
                 return -1;
             }
         }
         for (i2 = 0; i2 < s->asm_goto_label_count; ++i2) {
             if (s->asm_goto_labels[i2] == NULL || s->asm_goto_labels[i2][0] == '\0') {
-                set_diag(diag, "asm goto label cannot be empty");
+                sema_diag(diag, "asm goto label cannot be empty");
                 return -1;
             }
         }
@@ -6678,7 +6678,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_RETURN:
         if ((fn_attr_flags & CC_ATTR_NORETURN) != 0) {
-            set_diag(diag, "noreturn function must not contain a return statement");
+            sema_diag(diag, "noreturn function must not contain a return statement");
             return -1;
         }
         if (ct_kind_is(fn_ret->unqual, CC_CT_VOID)) {
@@ -6688,7 +6688,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 }
                 if (!ct_kind_is(sx_vtype(s->expr), CC_CT_VOID)) {
                     if (!cc_lang_gnu()) {
-                        set_diag(diag, "void function returning a value");
+                        sema_diag(diag, "void function returning a value");
                         return -1;
                     }
                     if (emit_required_warning(diag, s->line, s->col,
@@ -6698,20 +6698,20 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
         } else {
             if (s->expr == NULL) {
-                set_diag(diag, "non-void function must return a value");
+                sema_diag(diag, "non-void function must return a value");
                 return -1;
             }
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
             if (sema_complex_convert_for_assign(tu, &s->expr, fn_ret) < 0) {
-                set_diag(diag, "out of memory");
+                sema_diag(diag, "out of memory");
                 return -1;
             }
             if (sx_ct_record(fn_ret) >= 0 ? sx_ct_record(sx_vtype(s->expr)) != sx_ct_record(fn_ret) &&
                                                 !(s->expr->kind == CC_EXPR_STMT && sx_is_int(s->expr))
                                           : !sema_assignable(tu, fn_ret, s->expr)) {
-                set_diag(diag, "return type mismatch");
+                sema_diag(diag, "return type mismatch");
                 return -1;
             }
         }
@@ -6720,7 +6720,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_IF:
         if (s->expr == NULL || s->then_branch == NULL) {
-            set_diag(diag, "malformed if statement");
+            sema_diag(diag, "malformed if statement");
             return -1;
         }
         if (maybe_warn_assignment_condition(s->expr, "if", diag) != 0) {
@@ -6733,7 +6733,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (!sx_is_scalar(s->expr)) {
-            set_diag(diag, "if condition cannot be void");
+            sema_diag(diag, "if condition cannot be void");
             return -1;
         }
         {
@@ -6788,7 +6788,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_WHILE:
         if (s->expr == NULL || s->then_branch == NULL) {
-            set_diag(diag, "malformed while statement");
+            sema_diag(diag, "malformed while statement");
             return -1;
         }
         if (maybe_warn_assignment_condition(s->expr, "while", diag) != 0) {
@@ -6801,7 +6801,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (!sx_is_scalar(s->expr)) {
-            set_diag(diag, "while condition cannot be void");
+            sema_diag(diag, "while condition cannot be void");
             return -1;
         }
         return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth + 1,
@@ -6810,7 +6810,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_DO:
         if (s->expr == NULL || s->then_branch == NULL) {
-            set_diag(diag, "malformed do-while statement");
+            sema_diag(diag, "malformed do-while statement");
             return -1;
         }
         if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth + 1,
@@ -6828,14 +6828,14 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             return -1;
         }
         if (!sx_is_scalar(s->expr)) {
-            set_diag(diag, "do-while condition cannot be void");
+            sema_diag(diag, "do-while condition cannot be void");
             return -1;
         }
         return 0;
 
     case CC_STMT_FOR:
         if (s->then_branch == NULL) {
-            set_diag(diag, "malformed for statement");
+            sema_diag(diag, "malformed for statement");
             return -1;
         }
         {
@@ -6872,7 +6872,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (!sx_is_scalar(s->expr)) {
-                    set_diag(diag, "for condition cannot be void");
+                    sema_diag(diag, "for condition cannot be void");
                     return -1;
                 }
             }
@@ -6893,18 +6893,18 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_SWITCH:
         if (s->expr == NULL || s->then_branch == NULL) {
-            set_diag(diag, "malformed switch statement");
+            sema_diag(diag, "malformed switch statement");
             return -1;
         }
         if (s->then_branch->kind != CC_STMT_BLOCK) {
-            set_diag(diag, "switch body must be a block statement");
+            sema_diag(diag, "switch body must be a block statement");
             return -1;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_int(s->expr)) {
-            set_diag(diag, "switch expression must be integer");
+            sema_diag(diag, "switch expression must be integer");
             return -1;
         }
         {
@@ -6916,7 +6916,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 long long vhi = 0;
                 if (ci->kind == CC_STMT_DEFAULT) {
                     if (seen_default) {
-                        set_diag(diag, "duplicate default label in switch");
+                        sema_diag(diag, "duplicate default label in switch");
                         return -1;
                     }
                     seen_default = 1;
@@ -6929,12 +6929,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (eval_const_int_expr(tu, ci->expr, &vi) != 0) {
-                    set_diag(diag, "case label must be an integer constant expression");
+                    sema_diag(diag, "case label must be an integer constant expression");
                     return -1;
                 }
                 vhi = ci->case_has_range ? ci->case_hi : vi;
                 if (ci->case_has_range && vhi < vi) {
-                    set_diag(diag, "case range upper bound must be >= lower bound");
+                    sema_diag(diag, "case range upper bound must be >= lower bound");
                     return -1;
                 }
                 {
@@ -6954,7 +6954,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             continue;
                         }
                         if (!(vhi < vj || vjhi < vi)) {
-                            set_diag(diag, "duplicate/overlapping case value in switch");
+                            sema_diag(diag, "duplicate/overlapping case value in switch");
                             return -1;
                         }
                     }
@@ -6967,23 +6967,23 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_CASE:
         if (switch_depth <= 0) {
-            set_diag(diag, "case label used outside switch");
+            sema_diag(diag, "case label used outside switch");
             return -1;
         }
         if (s->expr == NULL) {
-            set_diag(diag, "malformed case label");
+            sema_diag(diag, "malformed case label");
             return -1;
         }
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
         if (eval_const_int_expr(tu, s->expr, &s->expr->int_val) != 0) {
-            set_diag(diag, "case label must be an integer constant expression");
+            sema_diag(diag, "case label must be an integer constant expression");
             return -1;
         }
         if (s->case_has_range) {
             if (s->case_hi < s->expr->int_val) {
-                set_diag(diag, "case range upper bound must be >= lower bound");
+                sema_diag(diag, "case range upper bound must be >= lower bound");
                 return -1;
             }
             if (emit_warning(diag, s->line, s->col, "case ranges are a GNU extension (non-C99)", 1) != 0) {
@@ -6994,21 +6994,21 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_DEFAULT:
         if (switch_depth <= 0) {
-            set_diag(diag, "default label used outside switch");
+            sema_diag(diag, "default label used outside switch");
             return -1;
         }
         return 0;
 
     case CC_STMT_BREAK:
         if (loop_depth <= 0 && switch_depth <= 0) {
-            set_diag(diag, "break used outside loop/switch");
+            sema_diag(diag, "break used outside loop/switch");
             return -1;
         }
         return 0;
 
     case CC_STMT_CONTINUE:
         if (loop_depth <= 0) {
-            set_diag(diag, "continue used outside loop");
+            sema_diag(diag, "continue used outside loop");
             return -1;
         }
         return 0;
@@ -7022,7 +7022,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 return -1;
             }
             if (!sx_is_ptr(s->expr) && !sx_is_int(s->expr)) {
-                set_diag(diag, "computed goto requires pointer or integer target expression");
+                sema_diag(diag, "computed goto requires pointer or integer target expression");
                 return -1;
             }
         }
@@ -7030,7 +7030,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 
     case CC_STMT_LABEL:
         if (s->then_branch == NULL) {
-            set_diag(diag, "malformed labeled statement");
+            sema_diag(diag, "malformed labeled statement");
             return -1;
         }
         return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
@@ -7038,7 +7038,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                           saw_return, diag);
 
     default:
-        set_diag(diag, "unsupported statement kind");
+        sema_diag(diag, "unsupported statement kind");
         return -1;
     }
 }
@@ -7055,7 +7055,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     }
 
     if (tu == NULL) {
-        set_diag(diag, "invalid translation unit");
+        sema_diag(diag, "invalid translation unit");
         return -1;
     }
     if (tu->func_count == 0 && tu->global_count == 0) {
@@ -7072,7 +7072,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             diag->col = g->col;
         }
         if (g->name == NULL || g->name[0] == '\0') {
-            set_diag(diag, "file-scope declaration with missing name");
+            sema_diag(diag, "file-scope declaration with missing name");
             goto fail_global_item;
         }
         if (sc_count > 1) {
@@ -7328,7 +7328,7 @@ fail_global_item:
         }
 
         if (f->name == NULL || f->name[0] == '\0') {
-            set_diag(diag, "function with missing name");
+            sema_diag(diag, "function with missing name");
             goto fail_decl;
         }
         if ((f->attr_flags & CC_ATTR_PACKED) != 0) {
@@ -7598,13 +7598,13 @@ fail_decl:
             size_t outer_count;
 
             if (cc_nested_outer_vars(tu, f, &outer, &outer_count) != 0) {
-                set_diag(diag, "nested function's enclosing function is missing");
+                sema_diag(diag, "nested function's enclosing function is missing");
                 goto fail_func;
             }
             for (k = 0; k < outer_count; ++k) {
                 if (vars_push(&vars, &var_count, outer[k].name, outer[k].storage, -1, outer[k].ctype) != 0) {
                     free(outer);
-                    set_diag(diag, "out of memory adding the enclosing function's variables");
+                    sema_diag(diag, "out of memory adding the enclosing function's variables");
                     goto fail_func;
                 }
             }
@@ -7613,7 +7613,7 @@ fail_decl:
 
         for (j = 0; j < f->param_count; ++j) {
             if (ct_kind_is(sema_param_ctype(&f->params[j])->unqual, CC_CT_VOID)) {
-                set_diag(diag, "void is not valid for named parameter type");
+                sema_diag(diag, "void is not valid for named parameter type");
                 goto fail_func;
             }
             if (cc_lang_at_least(2017) && (f->params[j].storage & CC_STORAGE_REGISTER) != 0) {
@@ -7623,12 +7623,12 @@ fail_decl:
                 }
             }
             if (vars_find_depth(vars, var_count, f->params[j].name, 0) >= 0) {
-                set_diag(diag, "duplicate parameter name");
+                sema_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
             if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].storage, 0, sema_param_ctype(&f->params[j])) !=
                 0) {
-                set_diag(diag, "out of memory adding parameter");
+                sema_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }
         }
@@ -7644,7 +7644,7 @@ fail_decl:
                     goto fail_func;
                 }
                 if (!sx_is_int(bound)) {
-                    set_diag(diag, "variable-length array bound must be an integer expression");
+                    sema_diag(diag, "variable-length array bound must be an integer expression");
                     goto fail_func;
                 }
             }
