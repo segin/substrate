@@ -26,7 +26,9 @@ usr.bin/cc/
 │   ├── consteval.c          # Integer constant expressions: the one evaluator
 │   └── types.c              # Scalar type sizes and alignments, for every phase
 ├── middle/
-│   ├── ast2ir.c             # AST -> SSA lowering
+│   ├── ast2ir.c             # AST -> SSA lowering: functions, statements, expressions, data
+│   ├── lower_call.c         # Lowering a call: the builtins it expands, ordinary calls
+│   │                        # (cc_lower.h: what the lowering files share)
 │   ├── irbuild.c            # Appending IR instructions (cc_irbuild.h), for lowering and the ABI code
 │   ├── abi_x86_64.c         # x86-64 SysV: how aggregates are passed and returned; va_arg
 │   ├── abi_i386.c           # i386 SysV: the same (both reached through the target descriptor)
@@ -114,7 +116,7 @@ Deployment: Linked directly into the `cc` binary
 
 Name: AST-to-IR lowering, legalization, optimization, and shared SSA utilities
 
-Description: `middle/ast2ir.c` lowers the frontend AST into the compiler's SSA-like IR. It does not decide how an aggregate crosses a call: it asks the selected target (`cc_abi_aggregate_arg()`, `cc_abi_aggregate_return()` in `include/cc_abi.h`, the descriptor's hooks), and `middle/abi_x86_64.c` (the psABI eightbyte classification) or `middle/abi_i386.c` (the stack, with gcc's vector registers) answers with the ABI byte the emitters act on; `va_arg` is theirs too (`cc_abi_va_arg()`), built with `middle/irbuild.c`, the IR builder lowering also uses. The trampoline a nested function's address needs, the full fence, the va_list record `va_copy` duplicates and which returned aggregates the emitter reads through their address are descriptor data, so lowering never asks which target it is compiling for. After the shared legalization, the target's own runs (the descriptor's `legalize` hook): on i386, `middle/legalize_i386.c` turns every 64-bit integer operation into operations on its 32-bit words (`lo32`, `hi32`, `pair`, `umulw`, legal IR only) and 64-bit division into `__divdi3`/`__udivdi3` calls, so the i386 emitter selects word instructions and only moves 64-bit values. `middle/legalize.c` and `middle/passes/opt.c` normalize and optimize that IR so backend selection runs on constrained, verifiable input.
+Description: `middle/ast2ir.c` lowers the frontend AST into the compiler's SSA-like IR, one function per expression kind (`lower_expr()` dispatches); a call is `middle/lower_call.c`'s, which expands the builtins the compiler implements itself (`lower_builtin_call()`) and makes ordinary calls (`lower_call_expr()`). `include/cc_lower.h` holds what the two share. Lowering does not decide how an aggregate crosses a call: it asks the selected target (`cc_abi_aggregate_arg()`, `cc_abi_aggregate_return()` in `include/cc_abi.h`, the descriptor's hooks), and `middle/abi_x86_64.c` (the psABI eightbyte classification) or `middle/abi_i386.c` (the stack, with gcc's vector registers) answers with the ABI byte the emitters act on; `va_arg` is theirs too (`cc_abi_va_arg()`), built with `middle/irbuild.c`, the IR builder lowering also uses. The trampoline a nested function's address needs, the full fence, the va_list record `va_copy` duplicates and which returned aggregates the emitter reads through their address are descriptor data, so lowering never asks which target it is compiling for. After the shared legalization, the target's own runs (the descriptor's `legalize` hook): on i386, `middle/legalize_i386.c` turns every 64-bit integer operation into operations on its 32-bit words (`lo32`, `hi32`, `pair`, `umulw`, legal IR only) and 64-bit division into `__divdi3`/`__udivdi3` calls, so the i386 emitter selects word instructions and only moves 64-bit values. `middle/legalize.c` and `middle/passes/opt.c` normalize and optimize that IR so backend selection runs on constrained, verifiable input.
 
 Technologies: C, SSA-style IR, verifier-driven invariants, simple optimization passes
 
