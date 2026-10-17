@@ -3624,6 +3624,21 @@ static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int l
 }
 
 /**
+ * Ready integer value @p v to be stored as @p mem_size bytes of type
+ * @p ct.  A store writes a value's low bytes, and a value narrower than
+ * the word is held extended to the word, so only a store wider than the
+ * word (i386's long long) of a narrower value needs it converted.
+ *
+ * @return the value to store, or -1
+ */
+static int widen_for_store(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, long mem_size, cc_diag_t *diag) {
+    if (v >= 0 && cc_ct_is_integer(ct) && mem_size > cc_target_pointer_size() && value_size(sf, v) < mem_size) {
+        return normalize_int_ct(sf, v, ct, diag);
+    }
+    return v;
+}
+
+/**
  * The new value of a `++` or `--`: @p cur stepped by @p step.  An integer
  * steps at the wider of the two widths (emit_i64_binop_instr()), so that
  * an i386 long long steps as a word pair; a floating value is a value of
@@ -4095,11 +4110,13 @@ static int lower_builtin_ffs(const cc_translation_unit_t *tu, cc_ssa_function_t 
     }
 
     /* as wide as x, or i386 compares a 64-bit x against half a zero */
-    z = bits > 32 ? emit_const_u64_instr(sf, 0, diag) : emit_const_i64_instr(sf, 0);
+    z = emit_const_i64_instr(sf, 0);
     one = emit_const_i64_instr(sf, 1);
     if (z < 0 || one < 0) {
         return -1;
     }
+    set_value_size(sf, z, value_size(sf, x));
+    set_value_size(sf, one, value_size(sf, x));
 
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_CMP;
@@ -4243,6 +4260,7 @@ static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t 
     if (pc < 0) {
         return -1;
     }
+    set_value_size(sf, cbits, value_size(sf, pc)); /* made early, so as wide as the count it is taken from here */
     return emit_i64_binop_instr(sf, CC_SSA_SUB, cbits, pc, 0, diag);
 }
 
@@ -10154,7 +10172,15 @@ static int emit_const_ldouble_special_instr(cc_ssa_function_t *sf, long code) {
 static int emit_cmp_instr(cc_ssa_function_t *sf, cc_cmp_kind_t cmp_kind, int lhs, int rhs, int is_unsigned,
                           cc_diag_t *diag) {
     cc_ssa_instr_t in;
+    long lsz = value_size(sf, lhs);
+    long rsz = value_size(sf, rhs);
 
+    /* compared wider than the word (i386's i64), a constant made for it is as wide */
+    if (lsz > cc_target_pointer_size() && rsz < lsz && value_is_recent_const(sf, rhs)) {
+        set_value_size(sf, rhs, lsz);
+    } else if (rsz > cc_target_pointer_size() && lsz < rsz && value_is_recent_const(sf, lhs)) {
+        set_value_size(sf, lhs, rsz);
+    }
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_CMP;
     in.cmp_kind = cmp_kind;
@@ -11007,6 +11033,7 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
                 return -1;
             }
             v = cast_value(sf, v, ct_value_kind(elem), diag);
+            v = widen_for_store(sf, v, elem, elem_size, diag);
             if (v < 0) {
                 return -1;
             }
@@ -11249,6 +11276,7 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                     return -1;
                 }
                 v = cast_value(sf, v, ct_value_kind(cc_ct_decay(elem)), diag);
+                v = widen_for_store(sf, v, elem, elem_size, diag);
                 if (v < 0) {
                     return -1;
                 }
@@ -11625,6 +11653,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 /* a long double member from an int or double: widened, not stored as the double's bytes */
                 v = promote_f64_to_ldouble_value(sf, v, diag);
             }
+            v = widen_for_store(sf, v, lower_member_ctype(m), mem_size, diag);
             if (v < 0) {
                 return -1;
             }
