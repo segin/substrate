@@ -3886,6 +3886,37 @@ static const cc_ctype_t *sema_unary_or(const cc_expr_t *e, const cc_ctype_t *a, 
 }
 
 /**
+ * Make the conversions of an arithmetic, bitwise or shift operator's
+ * operands explicit, now that the operator is typed: both operands of
+ * `*`, `/`, `%`, `+`, `-`, `&`, `^` and `|` convert to its type (the usual
+ * arithmetic conversions, C11 6.3.1.8), and each operand of a shift is
+ * promoted on its own (6.5.7p3).  Pointer arithmetic, comparisons (see
+ * sema_check_bin()) and the logical operators convert nothing here.
+ *
+ * @param e  the operator, typed
+ * @param a  its left operand's type as a value
+ * @param b  its right operand's
+ * @return   0, or -1 when out of memory
+ */
+static int sema_convert_operands(cc_expr_t *e, const cc_ctype_t *a, const cc_ctype_t *b) {
+    if (!cc_ct_is_arithmetic(a) || !cc_ct_is_arithmetic(b) || is_logical_op(e->op) || is_cmp_op(e->op) ||
+        e->op == CC_BIN_COMMA) {
+        return 0;
+    }
+    if (e->unary_form == CC_UNARY_RHS) {
+        /* `-x`, `~x`, `+x`: the constant the parser put beside x is no operand of C's */
+        return sema_convert(&e->rhs, e->ctype);
+    }
+    if (e->unary_form == CC_UNARY_LHS) {
+        return sema_convert(&e->lhs, e->ctype);
+    }
+    if (is_shift_op(e->op)) {
+        return sema_convert(&e->lhs, cc_ct_promote(a)) != 0 || sema_convert(&e->rhs, cc_ct_promote(b)) != 0 ? -1 : 0;
+    }
+    return sema_convert(&e->lhs, e->ctype) != 0 || sema_convert(&e->rhs, e->ctype) != 0 ? -1 : 0;
+}
+
+/**
  * Check a binary operator (CC_EXPR_BIN) and type it.  An operand of a
  * vector, decimal, wide integer or complex type sends it to that type's
  * rewrite; the rest follow C11 6.5.5 to 6.5.17.
@@ -4005,6 +4036,10 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
         t = sema_unary_or(e, a, b, t);
     }
     sema_set_type(e, t);
+    if (sema_convert_operands(e, a, b) != 0) {
+        set_diag(diag, "out of memory converting an operand");
+        return -1;
+    }
     return 0;
 }
 
