@@ -493,6 +493,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   targets).  Sema and lowering share one rule,
   `cc_ct_union_cast_member()`, which compares the unqualified interned
   types.  `codegen/union_cast.c`, `native_bad_union_cast_type.c`.
+- [x] **CC-85** A string literal shall initialize an array of any
+  character type, signed char included (C11 6.7.9p14).  Every check that
+  admits a string into an array named only char and unsigned char, so a
+  `signed char` structure member initialized from a string was rejected
+  ("invalid string initializer for fixed-size array struct member").
+  *Reproduced* (both targets).  One predicate, `cc_ct_is_character()`,
+  is used at all of them.  `codegen/schar_string_init.c`.
+- [ ] **CC-86** A file-scope pointer initialized with a compound literal,
+  `static const char *p = (char[]){"lit"};`, shall be accepted: it is an
+  address constant (C11 6.5.2.5p3, 6.6p9), and gcc accepts it.  cc
+  rejects it ("unsupported global initializer for p").  *Reproduced.*
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -905,7 +916,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-84 requirements: 84 met, 0 open.
+86 requirements: 85 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

@@ -1344,7 +1344,7 @@ static int check_array_string_initializer(const char *name, cc_type_t array_type
         if (!cc_type_is_integral(elem_type)) {
             return 1;
         }
-    } else if (!(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+    } else if (!cc_ct_is_character(cc_ct_from_scalar(elem_type))) {
         return 1;
     }
 

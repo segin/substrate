@@ -707,8 +707,7 @@ static int lower_cast_record_id(const cc_expr_t *e) {
 static int lower_cast_is_char_array(const cc_expr_t *e) {
     const cc_ctype_t *t = lower_cast_ctype(e);
 
-    return t != NULL && (t->kind == CC_CT_ARRAY || t->kind == CC_CT_POINTER) && t->of != NULL &&
-           (t->of->kind == CC_CT_CHAR || t->of->kind == CC_CT_UCHAR);
+    return t != NULL && (t->kind == CC_CT_ARRAY || t->kind == CC_CT_POINTER) && cc_ct_is_character(t->of);
 }
 
 /**
@@ -11070,7 +11069,7 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
         return -1;
     }
     wide = cc_string_literal_is_wide(item);
-    if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+    if (!wide && !cc_ct_is_character(cc_ct_from_scalar(elem_type))) {
         return -1;
     }
     if (wide && !cc_type_is_integral(elem_type)) {
@@ -11266,7 +11265,7 @@ static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_s
     }
 
     wide = cc_string_literal_is_wide(item);
-    if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+    if (!wide && !cc_ct_is_character(cc_ct_from_scalar(elem_type))) {
         set_diag(diag, "narrow string initializer requires character array compound literal");
         return -1;
     }
@@ -15847,7 +15846,7 @@ static int fill_fixed_char_array_from_string(const cc_expr_t *expr, const cc_cty
         return -1;
     }
     wide = cc_string_literal_is_wide(expr);
-    if (!wide && !(elem->kind == CC_CT_CHAR || elem->kind == CC_CT_UCHAR)) {
+    if (!wide && !cc_ct_is_character(elem)) {
         return -1;
     }
     if (wide && !cc_ct_is_integer(elem)) {
@@ -17360,7 +17359,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 }
                 {
                     cc_type_t base_t = ptr_base_type(tu->globals[i].type);
-                    if (tu->globals[i].array_ndim == 1 && (base_t == CC_TYPE_CHAR || base_t == CC_TYPE_UCHAR)) {
+                    if (tu->globals[i].array_ndim == 1 && cc_ct_is_character(cc_ct_from_scalar(base_t))) {
                         long inferred_len = 0;
                         for (j = 0; j < init->arg_count; ++j) {
                             const cc_expr_t *it = init->args[j];

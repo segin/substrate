@@ -258,6 +258,15 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu);
 long cc_ct_sizeof_type(const cc_ctype_t *t, const cc_translation_unit_t *tu);
 
 /**
+ * Whether a type is a character type -- char, signed char or unsigned
+ * char -- whose arrays a narrow string literal may initialize.
+ *
+ * @param t  the type, or NULL
+ * @return   1 or 0
+ */
+int cc_ct_is_character(const cc_ctype_t *t);
+
+/**
  * The alignment of a type in bytes on the selected target.
  *
  * @param t   the type

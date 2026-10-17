@@ -922,6 +922,10 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
     }
 }
 
+int cc_ct_is_character(const cc_ctype_t *t) {
+    return t != NULL && (t->kind == CC_CT_CHAR || t->kind == CC_CT_SCHAR || t->kind == CC_CT_UCHAR);
+}
+
 long cc_ct_sizeof_type(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
     if (t == NULL) {
         return -1;
