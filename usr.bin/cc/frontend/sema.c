@@ -17,16 +17,12 @@
 static size_t g_diag_ctx_line = 0;
 static size_t g_diag_ctx_col = 0;
 
+/** A variable or parameter in scope. */
 typedef struct {
     char *name;
-    cc_type_t type;
-    int struct_id;
-    int storage;
-    long array_len;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
-    int depth;
-    const cc_ctype_t *ctype; /**< its declared type (cc_ctype.h); NULL where the declaration recorded none */
+    int storage;             /**< its CC_STORAGE_* flags */
+    int depth;               /**< the scope depth it was declared at */
+    const cc_ctype_t *ctype; /**< its declared type (cc_ctype.h) */
 } var_entry_t;
 
 typedef struct {
@@ -253,8 +249,18 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
     return -1;
 }
 
-static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, long array_len,
-                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int storage, int depth,
+/**
+ * Add variable @p name of type @p ctype to the scope.
+ *
+ * @param vars     the variables in scope, grown
+ * @param count    their count, incremented
+ * @param name     its name (copied)
+ * @param storage  its CC_STORAGE_* flags
+ * @param depth    the scope depth
+ * @param ctype    its type
+ * @return         0, or -1 when out of memory
+ */
+static int vars_push(var_entry_t **vars, size_t *count, const char *name, int storage, int depth,
                      const cc_ctype_t *ctype) {
     var_entry_t *next;
     char *dup;
@@ -274,16 +280,7 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
         snprintf(dup, len + 1, "%s", name);
     }
     (*vars)[*count].name = dup;
-    (*vars)[*count].type = type;
-    (*vars)[*count].struct_id = struct_id;
     (*vars)[*count].storage = storage;
-    (*vars)[*count].array_len = array_len;
-    (*vars)[*count].array_ndim = array_ndim;
-    if (array_dims != NULL) {
-        memcpy((*vars)[*count].array_dims, array_dims, sizeof((*vars)[*count].array_dims));
-    } else {
-        memset((*vars)[*count].array_dims, 0, sizeof((*vars)[*count].array_dims));
-    }
     (*vars)[*count].depth = depth;
     (*vars)[*count].ctype = ctype;
     (*count)++;
@@ -6353,8 +6350,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
             }
-            if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                          s->array_dims, s->storage, depth, s->ctype) != 0) {
+            if (vars_push(vars, var_count, s->decl_name, s->storage, depth, s->ctype) != 0) {
                 set_diag(diag, "out of memory adding local variable");
                 return -1;
             }
@@ -6371,10 +6367,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         if (s->array_len == 0 && inferred_len > 0) {
                             s->array_len = inferred_len;
                             s->ctype = sema_complete_array_ctype(s->ctype, inferred_len);
-                            (*vars)[*var_count - 1].array_len = inferred_len;
+                            (*vars)[*var_count - 1].ctype = s->ctype;
                             if (s->array_ndim > 0 && s->array_dims[0] == 0) {
                                 s->array_dims[0] = inferred_len;
-                                (*vars)[*var_count - 1].array_dims[0] = inferred_len;
                             }
                         }
                     } else if (sx_ct_record(s->ctype) >= 0) {
@@ -6427,11 +6422,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return -1;
                         }
                         if (rc == 0) {
-                            (*vars)[*var_count - 1].array_len = s->array_len;
                             s->ctype = sema_complete_array_ctype(s->ctype, s->array_len);
+                            (*vars)[*var_count - 1].ctype = s->ctype;
                             if (s->array_ndim > 0 && s->array_dims[0] == 0 && inferred_len > 0) {
                                 s->array_dims[0] = inferred_len;
-                                (*vars)[*var_count - 1].array_dims[0] = inferred_len;
                             }
                             return 0;
                         }
@@ -7528,8 +7522,7 @@ fail_decl:
                 goto fail_func;
             }
             for (k = 0; k < outer_count; ++k) {
-                if (vars_push(&vars, &var_count, outer[k].name, outer[k].type, outer[k].struct_id, outer[k].array_len,
-                              outer[k].array_ndim, outer[k].array_dims, outer[k].storage, -1, outer[k].ctype) != 0) {
+                if (vars_push(&vars, &var_count, outer[k].name, outer[k].storage, -1, outer[k].ctype) != 0) {
                     free(outer);
                     set_diag(diag, "out of memory adding the enclosing function's variables");
                     goto fail_func;
@@ -7553,9 +7546,8 @@ fail_decl:
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id,
-                          f->params[j].array_len, f->params[j].array_ndim, f->params[j].array_dims,
-                          f->params[j].storage, 0, f->params[j].ctype) != 0) {
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].storage, 0, sema_param_ctype(&f->params[j])) !=
+                0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }
