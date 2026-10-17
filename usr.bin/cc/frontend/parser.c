@@ -112,6 +112,7 @@ typedef struct {
     int parse_depth;
     int last_storage;
     const cc_ctype_t *last_alias_ctype; /**< the type of the typedef name the last specifiers were, else NULL */
+    const cc_ctype_t *last_spec_ctype;  /**< the type the last declaration specifiers named */
 } parser_t;
 
 static int next_tok(parser_t *p);
@@ -1961,6 +1962,10 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 *out_struct_id = (int)__atomic_base_type;                                                            \
             }                                                                                                         \
         }                                                                                                             \
+        p->last_spec_ctype = p->last_alias_ctype != NULL                                                             \
+                                 ? p->last_alias_ctype                                                               \
+                                 : cc_ct_from_legacy(*out_type, *out_struct_id, seen_alias ? alias_array_ndim : 0,   \
+                                                     alias_array_dims);                                              \
         if (out_saw_restrict != NULL) {                                                                              \
             *out_saw_restrict = seen_restrict;                                                                       \
         }                                                                                                             \
@@ -5805,24 +5810,20 @@ static int parse_pointer_quals(parser_t *p, unsigned *out_quals) {
 static int parse_param_type(parser_t *p, const cc_ctype_t **out) {
     cc_type_t ty = CC_TYPE_VOID;
     int sid = -1;
-    long len = -1;
-    int ndim = 0;
-    long dims[CC_MAX_ARRAY_DIMS];
     declarator_t d;
-    const cc_ctype_t *alias;
+    const cc_ctype_t *spec;
     const cc_ctype_t *t;
 
-    memset(dims, 0, sizeof(dims));
     memset(&d, 0, sizeof(d));
-    if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, 1, "expected parameter type", NULL, NULL, NULL) != 0) {
+    if (parse_declspec(p, &ty, &sid, NULL, NULL, NULL, 1, "expected parameter type", NULL, NULL, NULL) != 0) {
         return -1;
     }
-    alias = p->last_alias_ctype;
+    spec = p->last_spec_ctype;
     if (parse_declarator_into(p, &d, DECL_ABSTRACT | DECL_PARAM) != 0) {
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(alias, ty, sid, ndim, dims));
+    t = declarator_type(&d, spec);
     declarator_free(&d);
     if (t == NULL) {
         set_diag(p->diag, p->tok.line, p->tok.col, "out of memory building a parameter type");
@@ -6197,22 +6198,18 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
                               cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
     cc_type_t ty = CC_TYPE_VOID;
     int sid = -1;
-    long len = -1;
-    int ndim = 0;
-    long dims[CC_MAX_ARRAY_DIMS];
     declarator_t d;
-    const cc_ctype_t *alias;
+    const cc_ctype_t *spec;
     const cc_ctype_t *t;
     cc_ct_legacy_t leg;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
 
-    memset(dims, 0, sizeof(dims));
     memset(&d, 0, sizeof(d));
-    if (parse_declspec(p, &ty, &sid, &len, &ndim, dims, allow_void, what, NULL, NULL, NULL) != 0) {
+    if (parse_declspec(p, &ty, &sid, NULL, NULL, NULL, allow_void, what, NULL, NULL, NULL) != 0) {
         return -1;
     }
-    alias = p->last_alias_ctype;
+    spec = p->last_spec_ctype;
     if (parse_declarator_into(p, &d, DECL_ABSTRACT) != 0) {
         declarator_free(&d);
         return -1;
@@ -6222,7 +6219,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(alias, ty, sid, ndim, dims));
+    t = declarator_type(&d, spec);
     if (t == NULL) {
         declarator_free(&d);
         set_diag(p->diag, line, col, "out of memory building a type");
