@@ -689,6 +689,30 @@ static const cc_ctype_t *lower_cast_ctype(const cc_expr_t *e) {
 }
 
 /**
+ * The structure a cast or compound literal converts to (ct_record_id()).
+ *
+ * @param e  an expression, or NULL
+ * @return   the structure's index, or -1 if @p e is not a cast to one
+ */
+static int lower_cast_record_id(const cc_expr_t *e) {
+    return (e != NULL && e->kind == CC_EXPR_CAST) ? ct_record_id(lower_cast_ctype(e)) : -1;
+}
+
+/**
+ * Whether a cast or compound literal converts to an array of (or a
+ * pointer to) plain or unsigned char, as `(char[]){"..."}` does.
+ *
+ * @param e  the CC_EXPR_CAST
+ * @return   1 or 0
+ */
+static int lower_cast_is_char_array(const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_cast_ctype(e);
+
+    return t != NULL && (t->kind == CC_CT_ARRAY || t->kind == CC_CT_POINTER) && t->of != NULL &&
+           (t->of->kind == CC_CT_CHAR || t->of->kind == CC_CT_UCHAR);
+}
+
+/**
  * Whether an expression's value is of structure @p sid; with @p sid
  * negative, whether it is void.
  *
@@ -7014,7 +7038,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "__builtin_va_arg operand must be a local va_list variable");
                 return -1;
             }
-            mem_size = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
+            /* the value is of the type named, which is the expression's */
+            mem_size = lower_value_size(tu, e);
             if (mem_size <= 0) {
                 set_diag(diag, "unsupported __builtin_va_arg type size");
                 return -1;
@@ -7030,8 +7055,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 int fp_off;
                 int overflow_ptr;
                 int regsave_ptr;
-                int use_fp = (e->aux_type == CC_TYPE_DOUBLE || e->aux_type == CC_TYPE_FLOAT) ? 1 : 0;
-                int use_ldouble = (e->aux_type == CC_TYPE_LDOUBLE) ? 1 : 0;
+                int use_fp = lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_FLOAT);
+                int use_ldouble = lower_has_kind(e, CC_CT_LDOUBLE);
                 int off_ptr;
                 int offv;
                 int off_limit;
@@ -7051,7 +7076,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 int field_off_const;
                 long load_size = mem_size;
                 long stack_step;
-                int is_agg = (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) ? 1 : 0;
+                int is_agg = lower_record_id(e) >= 0;
                 cc_value_type_t dst_ty = is_agg ? CC_VAL_I64 : lower_value_kind(e);
 
                 ap_ptr = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
@@ -7376,7 +7401,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (cur_ap < 0) {
                 return -1;
             }
-            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
+            if (lower_record_id(e) >= 0) {
                 /*
                  * Aggregate varargs are passed as pointers in this SSA ABI.
                  * va_arg(T struct) therefore reads one pointer-sized slot and
@@ -10911,8 +10936,7 @@ static int expr_matches_struct_value(const cc_expr_t *e, int struct_id) {
     if (lower_is_record(e, struct_id)) {
         return 1;
     }
-    if (e->kind == CC_EXPR_CAST && e->aux_type == CC_TYPE_VOID && e->aux_struct_id == struct_id && e->lhs != NULL &&
-        lower_is_record(e->lhs, struct_id)) {
+    if (struct_id >= 0 && lower_cast_record_id(e) == struct_id && e->lhs != NULL && lower_is_record(e->lhs, struct_id)) {
         return 1;
     }
     return 0;
@@ -11377,8 +11401,7 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
 
             if (elem_type == CC_TYPE_VOID && struct_id >= 0) {
                 const cc_expr_t *elem_init = raw;
-                if (elem_init != NULL && elem_init->kind == CC_EXPR_CAST && elem_init->aux_type == CC_TYPE_VOID &&
-                    elem_init->aux_struct_id == struct_id && elem_init->lhs != NULL &&
+                if (struct_id >= 0 && lower_cast_record_id(elem_init) == struct_id && elem_init->lhs != NULL &&
                     elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                     elem_init = elem_init->lhs;
                 }
@@ -11625,8 +11648,8 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
 
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
             const cc_expr_t *nested_item = item;
-            if (item->kind == CC_EXPR_CAST && item->aux_type == CC_TYPE_VOID && item->aux_struct_id == m->type_struct_id &&
-                item->lhs != NULL && item->lhs->kind == CC_EXPR_INIT_LIST) {
+            if (lower_cast_record_id(item) == m->type_struct_id && item->lhs != NULL &&
+                item->lhs->kind == CC_EXPR_INIT_LIST) {
                 nested_item = item->lhs;
             }
             nested_item = unwrap_self_designated_init_list(nested_item, m->name);
@@ -11635,8 +11658,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                     int rhsv;
                     long sub_sz = type_size_bytes_with_struct(tu, CC_TYPE_VOID, m->type_struct_id);
                     const cc_expr_t *copy_expr = nested_item;
-                    if (copy_expr->kind == CC_EXPR_CAST && copy_expr->aux_type == CC_TYPE_VOID &&
-                        copy_expr->aux_struct_id == m->type_struct_id && copy_expr->lhs != NULL &&
+                    if (lower_cast_record_id(copy_expr) == m->type_struct_id && copy_expr->lhs != NULL &&
                         lower_is_record(copy_expr->lhs, m->type_struct_id)) {
                         copy_expr = copy_expr->lhs;
                     }
@@ -12517,9 +12539,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 const cc_expr_t *elem_init = s->expr->args[ii];
                                 const cc_expr_t *tmp_args[1];
                                 cc_expr_t tmp_list;
-                                if (elem_init->kind == CC_EXPR_CAST && elem_init->aux_type == CC_TYPE_VOID &&
-                                    elem_init->aux_struct_id == s->type_struct_id && elem_init->lhs != NULL &&
-                                    elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
+                                if (s->type_struct_id >= 0 && lower_cast_record_id(elem_init) == s->type_struct_id &&
+                                    elem_init->lhs != NULL && elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                                     elem_init = elem_init->lhs;
                                 }
                                 if (elem_init->kind != CC_EXPR_INIT_LIST) {
@@ -12974,9 +12995,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             const cc_expr_t *elem_init = s->expr->args[ii];
                             const cc_expr_t *tmp_args[1];
                             cc_expr_t tmp_list;
-                            if (elem_init->kind == CC_EXPR_CAST && elem_init->aux_type == CC_TYPE_VOID &&
-                                elem_init->aux_struct_id == s->type_struct_id && elem_init->lhs != NULL &&
-                                elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
+                            if (s->type_struct_id >= 0 && lower_cast_record_id(elem_init) == s->type_struct_id &&
+                                elem_init->lhs != NULL && elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                                 elem_init = elem_init->lhs;
                             }
                             if (elem_init->kind != CC_EXPR_INIT_LIST) {
@@ -15236,8 +15256,8 @@ static long infer_struct_array_len_from_init_list(const cc_translation_unit_t *t
             cur++;
             continue;
         }
-        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->aux_type == CC_TYPE_VOID && raw->aux_struct_id == struct_id &&
-            raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
+        if (struct_id >= 0 && lower_cast_record_id(raw) == struct_id && raw->lhs != NULL &&
+            raw->lhs->kind == CC_EXPR_INIT_LIST) {
             elems++;
             cur++;
             continue;
@@ -15630,7 +15650,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
         return 0;
     }
     if (expr != NULL && expr->kind == CC_EXPR_CAST && expr->lhs != NULL && expr->lhs->kind == CC_EXPR_INIT_LIST &&
-        (expr->aux_type == CC_TYPE_PTR_CHAR || expr->aux_type == CC_TYPE_PTR_UCHAR)) {
+        lower_cast_is_char_array(expr)) {
         char *quoted = global_char_list_to_quoted_string(tu, expr->lhs);
         if (quoted != NULL) {
             if (is_pointer_type(type) && field_size == cc_target_pointer_size()) {
@@ -15754,8 +15774,7 @@ static const cc_expr_t *extract_struct_init_list_expr(const cc_expr_t *e, int st
     if (e->kind == CC_EXPR_INIT_LIST) {
         return e;
     }
-    if (e->kind == CC_EXPR_CAST && e->aux_type == CC_TYPE_VOID && e->aux_struct_id == struct_id && e->lhs != NULL &&
-        e->lhs->kind == CC_EXPR_INIT_LIST) {
+    if (struct_id >= 0 && lower_cast_record_id(e) == struct_id && e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST) {
         return e->lhs;
     }
     return NULL;
@@ -16823,8 +16842,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     out->globals[i].init_sym = NULL;
                     continue;
                 }
-                if (tu->globals[i].type == CC_TYPE_VOID && init->kind == CC_EXPR_CAST && init->aux_type == CC_TYPE_VOID &&
-                    init->aux_struct_id == struct_id && init->lhs != NULL && init->lhs->kind == CC_EXPR_INIT_LIST) {
+                if (tu->globals[i].type == CC_TYPE_VOID && struct_id >= 0 && lower_cast_record_id(init) == struct_id &&
+                    init->lhs != NULL && init->lhs->kind == CC_EXPR_INIT_LIST) {
                     struct_init = init->lhs;
                 }
                 if (struct_init->kind != CC_EXPR_INIT_LIST) {
@@ -16935,14 +16954,14 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 continue;
             }
 
-            if (init != NULL && init->kind == CC_EXPR_ADDR && init->lhs != NULL && init->lhs->kind == CC_EXPR_CAST &&
-                init->lhs->aux_type == CC_TYPE_VOID && init->lhs->aux_struct_id >= 0 && init->lhs->lhs != NULL &&
+            if (init != NULL && init->kind == CC_EXPR_ADDR && init->lhs != NULL &&
+                lower_cast_record_id(init->lhs) >= 0 && init->lhs->lhs != NULL &&
                 init->lhs->lhs->kind == CC_EXPR_INIT_LIST) {
                 cc_ssa_global_t lit;
                 global_reloc_t *relocs = NULL;
                 size_t reloc_count = 0;
                 unsigned char *buf = NULL;
-                long lit_sid = init->lhs->aux_struct_id;
+                long lit_sid = lower_cast_record_id(init->lhs);
                 long lit_size;
                 int any_nonzero = 0;
                 size_t z;
