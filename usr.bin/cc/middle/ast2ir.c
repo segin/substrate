@@ -3624,7 +3624,9 @@ static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int l
 }
 
 /**
- * The new value of a `++` or `--`: @p cur stepped by @p step, a value of
+ * The new value of a `++` or `--`: @p cur stepped by @p step.  An integer
+ * steps at the wider of the two widths (emit_i64_binop_instr()), so that
+ * an i386 long long steps as a word pair; a floating value is a value of
  * class @p want.
  *
  * @param sf      the function
@@ -3639,6 +3641,9 @@ static int emit_update_step(cc_ssa_function_t *sf, cc_value_type_t want, int is_
                             cc_diag_t *diag) {
     cc_ssa_instr_t in;
 
+    if (want == CC_VAL_I64) {
+        return emit_i64_binop_instr(sf, is_sub ? CC_SSA_SUB : CC_SSA_ADD, cur, step, 0, diag);
+    }
     memset(&in, 0, sizeof(in));
     in.op = is_sub ? CC_SSA_SUB : CC_SSA_ADD;
     in.dst = new_value(sf, want);

@@ -37,7 +37,7 @@ silent: the program compiled, ran and printed a wrong answer.
 
 | Area | Requirements | Met |
 |---|---|---|
-| 1. Integer arithmetic and conversions | 9 | 9 |
+| 1. Integer arithmetic and conversions | 10 | 10 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
 | 4. ABI and other code generation | 37 | 37 |
@@ -97,6 +97,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   operation on an i64 operand.  A 64-bit swap's constants are 8 bytes
   wide, and every result is as wide as its widest operand.
   `codegen/bswap_width.c`.
+- [x] **CC-104** `++` and `--` on a 64-bit integer shall step all 64
+  bits.  On i386 the step was a word-size add, so the carry out of the
+  low word was lost: `unsigned long long n = 0xffffffff; n++;` gave 0,
+  for locals, globals, array elements, members and `*p` alike.
+  *Reproduced* (i386); found by the IR verifier's width checks (an i32
+  `add` of an i64 operand).  The step is as wide as its widest operand,
+  a word pair on i386.  `codegen/int64_update.c`.
 
 ## 2. Programs on substrate
 
@@ -1036,7 +1043,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-103 requirements: 94 met, 9 open.
+104 requirements: 95 met, 9 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
