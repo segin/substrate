@@ -125,22 +125,14 @@ static int const_convert(const cc_const_t *v, const cc_ctype_t *t, cc_const_t *o
 }
 
 /**
- * The type of an operand the evaluator does not look into: the type sema
- * recorded, else the one the parser gave it.
+ * The type of an operand the evaluator does not look into: the type the
+ * parser or sema recorded.
  *
  * @param e  the expression
- * @return   its type, unqualified; int where none is known
+ * @return   its type, unqualified; int where none is recorded yet
  */
 static const cc_ctype_t *const_leaf_type(const cc_expr_t *e) {
-    const cc_ctype_t *t = e->ctype;
-
-    if (t == NULL) {
-        if (e->value_type == CC_TYPE_VOID && e->struct_id < 0) {
-            return const_int();
-        }
-        t = cc_ct_from_legacy(e->value_type, e->struct_id, 0, NULL);
-    }
-    return t != NULL ? const_unqual(t) : const_int();
+    return e->ctype != NULL ? const_unqual(e->ctype) : const_int();
 }
 
 /**
@@ -150,12 +142,7 @@ static const cc_ctype_t *const_leaf_type(const cc_expr_t *e) {
  * @return   the type, unqualified; int where none is known
  */
 static const cc_ctype_t *const_cast_type(const cc_expr_t *e) {
-    const cc_ctype_t *t = e->ctype;
-
-    if (t == NULL) {
-        t = cc_ct_from_legacy(e->aux_type, e->aux_struct_id, 0, NULL);
-    }
-    return t != NULL ? const_unqual(t) : const_int();
+    return e->ctype != NULL ? const_unqual(e->ctype) : const_int();
 }
 
 /**
