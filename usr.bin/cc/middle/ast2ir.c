@@ -95,6 +95,7 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
                               const cc_expr_t *e);
 static long sizeof_type_name_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e);
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g);
+static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s);
 
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     size_t i;
@@ -411,13 +412,6 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     cc_diag_set(d, "", 0, 0, msg);
 }
 
-static cc_value_type_t type_to_val(cc_type_t t) {
-    return (t == CC_TYPE_FLOAT16 || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE || t == CC_TYPE_COMPLEX ||
-            t == CC_TYPE_IMAGINARY || t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128)
-               ? CC_VAL_F64
-               : CC_VAL_I64;
-}
-
 static int is_pointer_type(cc_type_t t);
 
 typedef cc_const_t const_integral_value_t;
@@ -538,12 +532,7 @@ static const cc_ctype_t *lower_param_ctype(const cc_param_t *p) {
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *lower_decl_ctype(const cc_stmt_t *s) {
-    const cc_ctype_t *t = s->ctype;
-
-    if (t == NULL) {
-        t = cc_ct_from_legacy(s->type, s->type_struct_id, s->array_ndim, s->array_dims);
-    }
-    return cc_ct_decay(t);
+    return cc_ct_decay(stmt_decl_ctype(s));
 }
 
 /**
@@ -12449,8 +12438,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     set_diag(diag, "unsupported static local array element type");
                     return -1;
                 }
-                if (s->array_len > 0) {
-                    arr_elems = s->array_len;
+                if (total_size > 0 && cc_ct_size(ct_array_scalar(decl_ct), tu) > 0) {
+                    /* the initializer may fill the innermost elements in order */
+                    arr_elems = total_size / cc_ct_size(ct_array_scalar(decl_ct), tu);
                 }
                 obj_size = total_size > 0 ? total_size : (elem_size * arr_elems);
             } else {
@@ -12614,10 +12604,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         int handled_string_init = 0;
                         if (ct_is_pointer(ct_array_scalar(decl_ct))) {
                             size_t cur = 0;
-                            if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth,
-                                                               cc_ct_from_legacy(s->type, s->type_struct_id,
-                                                                                 s->array_ndim, s->array_dims),
-                                                               s->expr, &cur, dst_addr, diag) != 0) {
+                            if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth, decl_ct, s->expr,
+                                                               &cur, dst_addr, diag) != 0) {
                                 return -1;
                             }
                             if (cur < s->expr->arg_count) {
@@ -12745,22 +12733,13 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 if (item_expr == NULL) {
                                     return -1;
                                 }
-                                if (s->array_ndim > 1 && item_expr->kind == CC_EXPR_STR) {
-                                    cc_type_t scalar_type = s->type;
+                                if (ct_has_kind(elem_ct, CC_CT_ARRAY) && item_expr->kind == CC_EXPR_STR) {
                                     long scalar_size;
                                     size_t si;
                                     size_t unit_count = 0;
                                     unsigned long *units = NULL;
                                     int wide = cc_string_literal_is_wide(item_expr);
-                                    int di;
-                                    for (di = 0; di < s->array_ndim; ++di) {
-                                        if (!is_pointer_type(scalar_type)) {
-                                            set_diag(diag, "unsupported multidimensional static local string array type");
-                                            return -1;
-                                        }
-                                        scalar_type = ptr_base_type(scalar_type);
-                                    }
-                                    scalar_size = type_size_bytes_with_struct(tu, scalar_type, s->type_struct_id);
+                                    scalar_size = cc_ct_size(ct_array_scalar(decl_ct), tu);
                                     if (scalar_size <= 0) {
                                         scalar_size = 1;
                                     }
@@ -12800,7 +12779,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                             free(units);
                                             return -1;
                                         }
-                                        cval = cast_value(sf, cval, type_to_val(scalar_type), diag);
+                                        cval = cast_value(sf, cval, ct_value_kind(ct_array_scalar(decl_ct)), diag);
                                         if (cval < 0) {
                                             free(units);
                                             return -1;
@@ -13318,8 +13297,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
-        if (stmt_is_vla_decl(s) && s->array_len == -1) {
-            /* a pointer to a variable-length array (array_len -1): it steps by the array's run-time size */
+        if (stmt_is_vla_decl(s) && ct_is_pointer(stmt_decl_ctype(s))) {
+            /* a pointer to a variable-length array: it steps by the array's run-time size */
             vla_shape_t shape = {stmt_decl_ctype(s), s->array_bound_exprs, 1};
 
             if (lower_vla_attach(tu, sf, ctx, *vars, *var_count, depth, *var_count - 1, &shape, diag) != 0) {
