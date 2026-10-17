@@ -3673,16 +3673,8 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
     }
 
     if (e->member_bit_signed && e->member_bit_width > 0 && e->member_bit_width < 64) {
-        int sh = 64 - e->member_bit_width;
-        c = emit_const_i64_instr(sf, sh);
-        if (c < 0) {
-            return -1;
-        }
-        v = emit_i64_binop_instr(sf, CC_SSA_SHL, v, c, 0, diag);
-        if (v < 0) {
-            return -1;
-        }
-        v = emit_i64_binop_instr(sf, CC_SSA_SHR, v, c, 0, diag);
+        /* a signed field: its bits, sign-extended */
+        v = emit_ext(sf, v, e->member_bit_width, 0, 8, diag);
         if (v < 0) {
             return -1;
         }
