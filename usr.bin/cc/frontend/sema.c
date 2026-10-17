@@ -1177,13 +1177,6 @@ static int pointer_depth(cc_type_t t) {
     return (int)cc_type_pointer_depth(t);
 }
 
-static cc_type_t pointer_ultimate_base_type(cc_type_t t) {
-    while (is_pointer_type(t)) {
-        t = ptr_base_type(t);
-    }
-    return t;
-}
-
 static cc_type_t size_type(void) {
     return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
 }
@@ -4670,6 +4663,116 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
 }
 
 /**
+ * Whether a value @p rhs may be assigned to an object of type @p dst (C11
+ * 6.5.16.1), as leniently as the checker has always allowed: between
+ * arithmetic types, between pointers that match (sema_ptrs_match()),
+ * between a pointer and an integer, between structures of one type, and
+ * an integer statement expression to a structure.
+ *
+ * @param tu   the translation unit
+ * @param dst  the object's type
+ * @param rhs  the value, checked
+ * @return     1 if it may, else 0
+ */
+static int sema_assignable(const cc_translation_unit_t *tu, const cc_ctype_t *dst, const cc_expr_t *rhs) {
+    const cc_ctype_t *d = cc_ct_decay(dst);
+    const cc_ctype_t *s = sx_vtype(rhs);
+    int dr = sx_ct_record(d);
+    int sr = sx_ct_record(s);
+
+    if (dr < 0 && sr < 0 && cc_ct_is_arithmetic(d) && cc_ct_is_arithmetic(s)) {
+        return 1;
+    }
+    if (sema_is_ptr(d) && sema_is_ptr(s)) {
+        return sema_ptrs_match(tu, d, s);
+    }
+    if ((sema_is_ptr(d) && cc_ct_is_integer(s)) || (cc_ct_is_integer(d) && sema_is_ptr(s))) {
+        return 1;
+    }
+    if (dr >= 0 && sr >= 0) {
+        return struct_ids_compatible(tu, dr, sr);
+    }
+    return dr >= 0 && cc_ct_is_integer(s) && rhs->kind == CC_EXPR_STMT;
+}
+
+/**
+ * Check an assignment `x = v` (CC_EXPR_ASSIGN) to a named object, or one
+ * reached through `*` or a member, and type it the object's type,
+ * unqualified (C11 6.5.16).  The object may be neither const nor an array;
+ * a conversion to or from a complex, decimal or wide type is made
+ * explicit.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    const cc_ctype_t *dst;
+    int storage = 0;
+    char what[160];
+
+    if (e->ident != NULL) {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+        if (idx < 0 && g == NULL) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s", e->ident);
+            }
+            return -1;
+        }
+        dst = idx >= 0 ? vars[idx].ctype : g->ctype;
+        storage = idx >= 0 ? vars[idx].storage : g->storage;
+        snprintf(what, sizeof(what), ": %s", e->ident);
+    } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        dst = e->lhs->ctype;
+        what[0] = '\0';
+    } else {
+        set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
+        return -1;
+    }
+    if ((storage & CC_STORAGE_CONST) != 0 && !sema_is_ptr(cc_ct_decay(dst))) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object%s", what);
+        }
+        return -1;
+    }
+    /*
+     * Linux's per_cpu/typeof macros declare temporaries with typeof(some
+     * array), which keeps the array type; gcc decays `__Fp = expr`'s array
+     * to a pointer, and so does lowering.
+     */
+    if (e->ident != NULL && dst->kind == CC_CT_ARRAY && strcmp(e->ident, "__Fp") != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue%s", what);
+        }
+        return -1;
+    }
+    if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    /* to or from a complex type: the conversion, explicit */
+    if (sema_complex_convert_for_assign(tu, &e->rhs, cc_ct_decay(dst)) < 0) {
+        set_diag(diag, "out of memory converting to or from a complex type");
+        return -1;
+    }
+    if (!sema_assignable(tu, dst, e->rhs) && !(e->ident != NULL && strcmp(e->ident, "__Fp") == 0)) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            if (e->ident != NULL) {
+                snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
+            } else {
+                snprintf(diag->message, sizeof(diag->message), "%s", "cannot assign expression through pointer");
+            }
+        }
+        return -1;
+    }
+    sema_set_type(e, dst->unqual);
+    return 0;
+}
+
+/**
  * Check expression @p e by its kind: its operands, the rules C sets for
  * them, and its legacy type (value_type, struct_id, array dimensions).
  *
@@ -5813,161 +5916,8 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         return 0;
     }
 
-    case CC_EXPR_ASSIGN: {
-        cc_type_t dst_type;
-        const cc_ctype_t *dst_ct = NULL;
-        int dst_struct_id = -1;
-        int dst_storage = 0;
-        int dst_is_array_object = 0;
-        int assign_ok;
-        if (e->ident != NULL) {
-            int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            if (idx >= 0) {
-                dst_type = vars[idx].type;
-                dst_ct = vars[idx].ctype;
-                dst_struct_id = vars[idx].struct_id;
-                dst_storage = vars[idx].storage;
-                dst_is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
-            } else {
-                const cc_global_t *g = find_global(tu, e->ident);
-                if (g == NULL) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s",
-                                 e->ident);
-                    }
-                    return -1;
-                }
-                dst_type = g->type;
-                dst_ct = g->ctype;
-                dst_struct_id = g->type_struct_id;
-                dst_storage = g->storage;
-                dst_is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
-            }
-        } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
-            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            dst_type = e->lhs->value_type;
-            dst_ct = sx_vtype(e->lhs);
-            dst_struct_id = e->lhs->struct_id;
-        } else {
-            set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
-            return -1;
-        }
-        if ((dst_storage & CC_STORAGE_CONST) != 0 && const_storage_applies_to_object(dst_type)) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                if (e->ident != NULL) {
-                    snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object: %s",
-                             e->ident);
-                } else {
-                    snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object");
-                }
-            }
-            return -1;
-        }
-        if (dst_is_array_object) {
-            /* Linux's per_cpu/typeof macros declare temporaries with
-             * typeof(some_array) which keeps array type. The subsequent
-             * `__Fp = expr` would be illegal in strict C but gcc decays
-             * the array to a pointer. Treat the array as a pointer for
-             * the purposes of the assignment; lowering already produces
-             * pointer-style stores. */
-            if (e->ident != NULL && strcmp(e->ident, "__Fp") == 0) {
-                /* fall through */
-            } else if (diag != NULL && diag->message[0] == '\0') {
-                if (e->ident != NULL) {
-                    snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue: %s",
-                             e->ident);
-                } else {
-                    snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue");
-                }
-                return -1;
-            } else {
-                return -1;
-            }
-        }
-        if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        {
-            /* to or from a complex type: the conversion, explicit */
-            int conv;
-
-            if (dst_ct == NULL) {
-                dst_ct = cc_ct_from_legacy(dst_type, dst_struct_id, 0, NULL);
-            }
-            conv = sema_complex_convert_for_assign(tu, &e->rhs, dst_ct);
-
-            if (conv < 0) {
-                set_diag(diag, "out of memory converting to or from a complex type");
-                return -1;
-            }
-        }
-        assign_ok = can_convert(dst_type, e->rhs->value_type) ||
-                    (is_pointer_type(dst_type) && cc_type_is_integral(e->rhs->value_type) && is_null_ptr_constant(e->rhs));
-        if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && e->rhs->value_type == CC_TYPE_VOID &&
-            struct_ids_compatible(tu, dst_struct_id, e->rhs->struct_id)) {
-            assign_ok = 1;
-        }
-        if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && cc_type_is_integral(e->rhs->value_type) &&
-            e->rhs->kind == CC_EXPR_STMT) {
-            assign_ok = 1;
-        }
-        if (!assign_ok && is_pointer_type(dst_type) && is_pointer_type(e->rhs->value_type) &&
-            e->rhs->kind == CC_EXPR_ADDR && e->rhs->lhs != NULL && e->rhs->lhs->array_ndim > 0 &&
-            pointer_ultimate_base_type(dst_type) == pointer_ultimate_base_type(e->rhs->value_type) &&
-            pointer_depth(dst_type) > pointer_depth(e->rhs->value_type)) {
-            assign_ok = 1;
-        }
-        if (!assign_ok) {
-            /* Linux's per_cpu / typeof macros assign through __Fp where
-             * the typeof has decayed differently than cc's strict view.
-             * Permit the assignment; downstream codegen has to cope with
-             * whatever the macro actually intends. */
-            if (e->ident != NULL && strcmp(e->ident, "__Fp") == 0) {
-                assign_ok = 1;
-            }
-        }
-        if (!assign_ok) {
-            if (getenv("CC_DEBUG_SEMA_ASSIGN") != NULL) {
-                fprintf(stderr,
-                        "cc-debug: bad assign dst_type=%d dst_sid=%d rhs_type=%d rhs_sid=%d lhs_kind=%d rhs_kind=%d\n",
-                        (int)dst_type, dst_struct_id, (int)e->rhs->value_type, e->rhs->struct_id,
-                        e->lhs != NULL ? (int)e->lhs->kind : -1, e->rhs != NULL ? (int)e->rhs->kind : -1);
-            }
-            if (diag != NULL && diag->message[0] == '\0') {
-                if (e->ident != NULL) {
-                    snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
-                } else {
-                    snprintf(diag->message, sizeof(diag->message), "%s", "cannot assign expression through pointer");
-                }
-            }
-            return -1;
-        }
-        e->value_type = dst_type;
-        e->struct_id = dst_struct_id;
-        if (e->ident != NULL) {
-            int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            if (idx >= 0) {
-                expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
-                e->ctype = vars[idx].ctype;
-            } else {
-                const cc_global_t *g = find_global(tu, e->ident);
-                if (g != NULL) {
-                    expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
-                    e->ctype = g->ctype;
-                }
-            }
-        } else {
-            expr_copy_array_meta(e, e->lhs);
-            e->ctype = e->lhs->ctype;
-        }
-        /* an assignment's value has the target's type, unqualified */
-        if (e->ctype != NULL) {
-            e->ctype = e->ctype->unqual;
-        }
-        return 0;
-    }
+    case CC_EXPR_ASSIGN:
+        return sema_check_assign(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_ADDR:
         return sema_check_addr(tu, e, vars, var_count, depth, diag);
