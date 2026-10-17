@@ -566,6 +566,15 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   rejects it: "pointer/integer type mismatch").  *Reproduced.*  The
   conditional is typed on its arms' interned types and the mismatch is
   an error.  `native_bad_ternary_ptr_int.c` (negative).
+- [ ] **CC-99** A bit-field shall be allocated as the System V psABI
+  (and gcc) allocate it: in the storage unit of its declared type that
+  holds the next free bit, which may be one an earlier non-bit-field
+  member already uses.  cc always opens a fresh unit aligned to the
+  bit-field's type, so `struct { char a; int b : 3; short e; }` is 12
+  bytes with `e` at 8 where gcc makes it 4 with `e` at 2 -- the layout
+  of every such structure disagrees with code gcc compiles.
+  *Reproduced* (both targets); found while checking member layout for
+  the interned-type refactor, and present before it.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -1001,7 +1010,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-98 requirements: 93 met, 5 open.
+99 requirements: 93 met, 6 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
