@@ -10708,27 +10708,13 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
  * Parse one parameter's declarator, after its specifiers, and give the
  * parameter's type as the function sees it -- an array adjusted to a
  * pointer to its element, a function to a pointer to itself (C11
- * 6.7.6.3p7-8) -- both as a type and in the legacy encoding.
- *
- * In that encoding a parameter that is a pointer to an array, as the
- * adjusted `int a[3][4]` and the written `int (*a)[4]` both are, has an
- * array_len of -1 and its pointee's bounds, as the parser has always
- * given it.
+ * 6.7.6.3p7-8).
  *
  * @param p                 the parser, at the declarator (which may be
  *                          abstract)
- * @param base_type         the specifiers' type, legacy encoding
- * @param base_sid          its struct id
- * @param base_ndim         its array rank (a typedef'd array)
- * @param base_dims         its bounds
- * @param base_alias        the type of the typedef name the specifiers
- *                          were, or NULL (see declspec_ctype())
+ * @param base              the specifiers' type (parser_t.last_spec_ctype)
  * @param out_name          receives the name (owned), or NULL if none
  * @param out_ctype         receives the adjusted type
- * @param out_type          receives it in the legacy encoding
- * @param out_array_len     receives its legacy array_len
- * @param out_array_ndim    receives its legacy array rank
- * @param out_array_dims    receives its legacy bounds
  * @param out_saw_restrict  receives whether a pointer level, or the
  *                          adjusted array, is restrict-qualified
  * @param out_vla_bounds    for a pointer to an array, receives the
@@ -10736,17 +10722,13 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
  *                          where a bound is a constant
  * @return                  0, or -1 on error (diagnosed)
  */
-static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
-                            const cc_ctype_t *base_alias, char **out_name, const cc_ctype_t **out_ctype, cc_type_t *out_type, long *out_array_len,
-                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict,
-                            cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
+static int parse_param_decl(parser_t *p, const cc_ctype_t *base, char **out_name, const cc_ctype_t **out_ctype,
+                            int *out_saw_restrict, cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
     declarator_t d;
     const cc_ctype_t *t;
-    cc_ct_legacy_t leg;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
     size_t i;
-    unsigned k;
 
     *out_name = NULL;
     memset(&d, 0, sizeof(d));
@@ -10754,7 +10736,7 @@ static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(base_alias, base_type, base_sid, base_ndim, base_dims));
+    t = declarator_type(&d, base);
     if (t != NULL && t->kind == CC_CT_ARRAY) {
         t = cc_ct_qualified(cc_ct_pointer(t->of), d.saw_restrict ? CC_CQ_RESTRICT : 0);
     } else if (t != NULL && t->kind == CC_CT_FUNCTION) {
@@ -10765,19 +10747,12 @@ static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
         declarator_free(&d);
         return -1;
     }
-    if (cc_ct_to_legacy(t, &leg) != 0) {
+    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
         set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
         declarator_free(&d);
         return -1;
     }
-    *out_type = leg.base;
-    for (k = 0; k < leg.depth; ++k) {
-        *out_type = ptr_of_type(*out_type);
-    }
-    *out_array_len = (t->kind == CC_CT_POINTER && leg.lossy) ? -1 : leg.array_len;
-    *out_array_ndim = leg.ndim;
-    memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
-    if (*out_array_len == -1) {
+    if (t->kind == CC_CT_POINTER) {
         /* a pointer to an array: its outermost op is the pointer, or the array adjusted to one */
         take_vla_bounds(&d, t->of, 1, out_vla_bounds);
     } else {
@@ -10836,14 +10811,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
     while (p->tok.kind != TOK_RPAREN) {
         cc_type_t ptype;
         int ptype_sid = -1;
-        cc_type_t dty;
         char *pname = NULL;
-        long pbase_array_len = -1;
-        int pbase_array_ndim = 0;
-        long pbase_array_dims[CC_MAX_ARRAY_DIMS];
-        long darr_len = -1;
-        int darr_ndim = 0;
-        long darr_dims[CC_MAX_ARRAY_DIMS];
         int param_storage = 0;
         int ptype_restrict = 0;
         int dty_restrict = 0;
@@ -10852,8 +10820,6 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         cc_expr_t *pvla_bounds[CC_MAX_ARRAY_DIMS];
         int pushed;
         size_t b;
-        memset(pbase_array_dims, 0, sizeof(pbase_array_dims));
-        memset(darr_dims, 0, sizeof(darr_dims));
 
         if (p->tok.kind == TOK_ELLIPSIS) {
             f->is_variadic = 1;
@@ -10864,15 +10830,12 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             break;
         }
 
-        if (parse_declspec(p, &ptype, &ptype_sid, &pbase_array_len, &pbase_array_ndim, pbase_array_dims, 1,
-                           "expected parameter type", NULL,
+        if (parse_declspec(p, &ptype, &ptype_sid, NULL, NULL, NULL, 1, "expected parameter type", NULL,
                            &ptype_restrict, NULL) != 0) {
             return -1;
         }
         param_storage = p->last_storage;
-        if (parse_param_decl(p, ptype, ptype_sid, pbase_array_ndim, pbase_array_dims, p->last_alias_ctype, &pname,
-                             &pctype, &dty,
-                             &darr_len, &darr_ndim, darr_dims, &dty_restrict, pvla_bounds) != 0) {
+        if (parse_param_decl(p, p->last_spec_ctype, &pname, &pctype, &dty_restrict, pvla_bounds) != 0) {
             return -1;
         }
         if ((ptype_restrict || dty_restrict) && (pctype == NULL || cc_ct_decay(pctype)->kind != CC_CT_POINTER)) {
