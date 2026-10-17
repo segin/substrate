@@ -37,7 +37,7 @@ silent: the program compiled, ran and printed a wrong answer.
 
 | Area | Requirements | Met |
 |---|---|---|
-| 1. Integer arithmetic and conversions | 8 | 8 |
+| 1. Integer arithmetic and conversions | 9 | 9 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
 | 4. ABI and other code generation | 37 | 37 |
@@ -89,6 +89,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   write 64-bit initializers whole.  `emit_integer_data` took a `long`;
   on substrate `long long a = 0x123456789` was written as `0x23456789`.
   *Reproduced* (on substrate and with a `gcc -m32` build).  `f02061db3`.
+- [x] **CC-103** `__builtin_bswap64` shall swap all eight bytes on every
+  target.  On i386 the swap's masks, shifts and results were 32-bit
+  values, so `__builtin_bswap64(0x0102030405060708)` gave `0x8070000`
+  (and glibc's `bswap_64`, which uses it, the same).  *Reproduced*
+  (i386); found by the IR verifier's width checks, which reject an i32
+  operation on an i64 operand.  A 64-bit swap's constants are 8 bytes
+  wide, and every result is as wide as its widest operand.
+  `codegen/bswap_width.c`.
 
 ## 2. Programs on substrate
 
@@ -1028,7 +1036,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-102 requirements: 93 met, 9 open.
+103 requirements: 94 met, 9 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

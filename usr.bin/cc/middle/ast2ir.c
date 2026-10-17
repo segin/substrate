@@ -8579,68 +8579,41 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (x < 0) {
                 return -1;
             }
+            /*
+             * res |= ((x & (0xff << 8*i)) shifted to the mirrored byte) for each byte i.
+             * A 64-bit swap works on 64-bit values: its constants are 8 bytes, which
+             * makes every result 8 (a pair of words on i386).
+             */
             res = emit_const_i64_instr(sf, 0);
             if (res < 0) {
                 return -1;
             }
+            if (bswap_bits == 64) {
+                set_value_size(sf, res, 8);
+            }
             for (bi = 0; bi < nbytes; ++bi) {
-                unsigned long long mask_u = 0xffULL << (bi * 8);
                 int shift = ((nbytes - 1) - (2 * bi)) * 8;
-                int cmask = emit_const_i64_instr(sf, (long long)mask_u);
-                int part;
-                cc_ssa_instr_t bin;
+                int cmask = emit_const_i64_instr(sf, (long long)(0xffULL << (bi * 8)));
                 int cshift;
+                int part;
+
                 if (cmask < 0) {
                     return -1;
                 }
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = x;
-                bin.rhs = cmask;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                if (bswap_bits == 64) {
+                    set_value_size(sf, cmask, 8);
+                }
+                part = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+                if (part >= 0 && shift != 0) {
+                    cshift = emit_const_i64_instr(sf, shift > 0 ? shift : -shift);
+                    part = cshift < 0 ? -1
+                                      : emit_i64_binop_instr(sf, shift > 0 ? CC_SSA_SHL : CC_SSA_SHR, part, cshift,
+                                                             shift < 0, diag);
+                }
+                res = part < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_OR, res, part, 0, diag);
+                if (res < 0) {
                     return -1;
                 }
-                part = bin.dst;
-                if (shift > 0) {
-                    cshift = emit_const_i64_instr(sf, shift);
-                    if (cshift < 0) {
-                        return -1;
-                    }
-                    memset(&bin, 0, sizeof(bin));
-                    bin.op = CC_SSA_SHL;
-                    bin.dst = new_value(sf, CC_VAL_I64);
-                    bin.lhs = part;
-                    bin.rhs = cshift;
-                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                        return -1;
-                    }
-                    part = bin.dst;
-                } else if (shift < 0) {
-                    cshift = emit_const_i64_instr(sf, -shift);
-                    if (cshift < 0) {
-                        return -1;
-                    }
-                    memset(&bin, 0, sizeof(bin));
-                    bin.op = CC_SSA_SHR;
-                    bin.is_unsigned = 1;
-                    bin.dst = new_value(sf, CC_VAL_I64);
-                    bin.lhs = part;
-                    bin.rhs = cshift;
-                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                        return -1;
-                    }
-                    part = bin.dst;
-                }
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_OR;
-                bin.dst = new_value(sf, CC_VAL_I64);
-                bin.lhs = res;
-                bin.rhs = part;
-                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
-                    return -1;
-                }
-                res = bin.dst;
             }
             return res;
         }
