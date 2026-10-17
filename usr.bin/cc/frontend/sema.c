@@ -1328,6 +1328,21 @@ static size_t decoded_string_unit_count(const cc_expr_t *e, int wide) {
     return units;
 }
 
+/**
+ * An array type with no bound, completed with the bound its initializer
+ * gives it (C11 6.7.9p22); any other type as it is.
+ *
+ * @param t  the declared type, or NULL
+ * @param n  the inferred number of elements
+ * @return   the completed type
+ */
+static const cc_ctype_t *sema_complete_array_ctype(const cc_ctype_t *t, long n) {
+    if (t != NULL && t->kind == CC_CT_ARRAY && t->count <= 0 && n > 0) {
+        return cc_ct_array(t->of, n);
+    }
+    return t;
+}
+
 static int check_array_string_initializer(const char *name, cc_type_t array_type, long *array_len_io, cc_expr_t *init,
                                           long *inferred_len_out, cc_diag_t *diag) {
     cc_type_t elem_type;
@@ -6663,6 +6678,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                         if (s->array_len == 0 && inferred_len > 0) {
                             s->array_len = inferred_len;
+                            s->ctype = sema_complete_array_ctype(s->ctype, inferred_len);
                             (*vars)[*var_count - 1].array_len = inferred_len;
                             if (s->array_ndim > 0 && s->array_dims[0] == 0) {
                                 s->array_dims[0] = inferred_len;
@@ -6722,6 +6738,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         }
                         if (rc == 0) {
                             (*vars)[*var_count - 1].array_len = s->array_len;
+                            s->ctype = sema_complete_array_ctype(s->ctype, s->array_len);
                             if (s->array_ndim > 0 && s->array_dims[0] == 0 && inferred_len > 0) {
                                 s->array_dims[0] = inferred_len;
                                 (*vars)[*var_count - 1].array_dims[0] = inferred_len;
@@ -7461,6 +7478,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     }
                     if (g->array_len == 0 && inferred_len > 0) {
                         g->array_len = inferred_len;
+                        g->ctype = sema_complete_array_ctype(g->ctype, inferred_len);
                         if (g->array_ndim > 0 && g->array_dims[0] == 0) {
                             g->array_dims[0] = inferred_len;
                         }
@@ -7517,6 +7535,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                         goto fail_global_item;
                     }
                     if (rc == 0) {
+                        g->ctype = sema_complete_array_ctype(g->ctype, g->array_len);
                         if (g->array_ndim > 0 && g->array_dims[0] == 0 && inferred_len > 0) {
                             g->array_dims[0] = inferred_len;
                         }
