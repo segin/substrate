@@ -98,6 +98,8 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
                                   const long dims[CC_MAX_ARRAY_DIMS]);
 static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
                               const long dims[CC_MAX_ARRAY_DIMS]);
+static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                              const cc_expr_t *e);
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g);
 
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
@@ -1164,32 +1166,7 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
     if (e->lhs == NULL) {
         return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
     }
-    if (e->lhs->ctype != NULL) {
-        /* the operand's type as sema recorded it, an array's whole size included */
-        long n = cc_ct_size(e->lhs->ctype, tu);
-
-        if (n > 0) {
-            return n;
-        }
-    }
-    if (e->lhs->kind == CC_EXPR_STR) {
-        int wide = cc_string_literal_is_wide(e->lhs);
-        long elem_size = lower_pointee_size(tu, e->lhs);
-        unsigned long *units = NULL;
-        size_t count = 0;
-
-        if (elem_size > 0 && decode_string_units(e->lhs, wide, &units, &count) == 0) {
-            free(units);
-            if (count < (size_t)LONG_MAX && (long)(count + 1) <= LONG_MAX / elem_size) {
-                return (long)(count + 1) * elem_size;
-            }
-        }
-    }
-    if (e->lhs->array_ndim > 0 && lower_is_pointer(e->lhs)) {
-        return array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim,
-                                     e->lhs->array_dims);
-    }
-    return type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+    return sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
 }
 
 
@@ -2323,10 +2300,6 @@ static const cc_struct_member_t *find_union_cast_member(const cc_translation_uni
 
 static int is_synthetic_struct_array_member(const cc_translation_unit_t *tu, const cc_expr_t *e);
 
-static int is_hex_digit_char(char c) {
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
 /**
  * A wide string literal (`L"..."`, `u"..."`, `U"..."`) as the narrow
  * literal of its bytes, for the emitter, which writes a literal with
@@ -2396,110 +2369,6 @@ static char *string_literal_emit_text(const cc_translation_unit_t *tu, const cc_
         return wide;
     }
     return cc_strdup(e != NULL && e->ident != NULL ? e->ident : "\"\"");
-}
-
-static long string_literal_size_bytes(const char *lit) {
-    size_t i;
-    long out_len = 0;
-    if (lit == NULL) {
-        return 1;
-    }
-    i = 0;
-    while (lit[i] != '\0' && lit[i] != '"') {
-        i++;
-    }
-    if (lit[i] != '"') {
-        size_t n = strlen(lit);
-        if (n >= (size_t)LONG_MAX) {
-            return -1;
-        }
-        return (long)(n + 1);
-    }
-    i++;
-    while (lit[i] != '\0') {
-        if (lit[i] == '"') {
-            return out_len + 1;
-        }
-        if (lit[i] == '\\') {
-            i++;
-            if (lit[i] == '\0') {
-                return -1;
-            }
-            if (lit[i] == 'x') {
-                i++;
-                if (!is_hex_digit_char(lit[i])) {
-                    return -1;
-                }
-                while (is_hex_digit_char(lit[i])) {
-                    i++;
-                }
-                out_len++;
-                continue;
-            }
-            if (lit[i] >= '0' && lit[i] <= '7') {
-                int oct = 1;
-                while (oct < 3 && lit[i + 1] >= '0' && lit[i + 1] <= '7') {
-                    i++;
-                    oct++;
-                }
-                i++;
-                out_len++;
-                continue;
-            }
-            i++;
-            out_len++;
-            continue;
-        }
-        i++;
-        out_len++;
-    }
-    return -1;
-}
-
-static long string_expr_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e) {
-    unsigned long *units = NULL;
-    size_t unit_count = 0;
-    int wide;
-    long elem_size;
-    long count;
-
-    if (tu == NULL || e == NULL || e->kind != CC_EXPR_STR) {
-        return -1;
-    }
-    wide = cc_string_literal_is_wide(e);
-    if (decode_string_units(e, wide, &units, &unit_count) != 0) {
-        free(units);
-        return -1;
-    }
-    free(units);
-    elem_size = lower_pointee_size(tu, e);
-    if (elem_size <= 0 || unit_count >= (size_t)LONG_MAX) {
-        return -1;
-    }
-    count = (long)unit_count + 1;
-    if (count <= 0 || elem_size > LONG_MAX / count) {
-        return -1;
-    }
-    return elem_size * count;
-}
-
-static long array_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id, long array_len) {
-    cc_type_t elem_type;
-    long elem_size;
-    long elem_count;
-    if (!is_pointer_type(array_type) || array_len < 0) {
-        return -1;
-    }
-    elem_type = ptr_base_type(array_type);
-    elem_size = type_size_bytes_with_struct(tu, elem_type, struct_id);
-    if (elem_size <= 0) {
-        return -1;
-    }
-    elem_count = array_len > 0 ? array_len : 1;
-    if (elem_count <= 0 || elem_size > LONG_MAX / elem_count) {
-        return -1;
-    }
-    return elem_size * elem_count;
 }
 
 static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
@@ -2604,82 +2473,32 @@ static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_
     return 0;
 }
 
+/**
+ * The value of `sizeof e`: the size of its operand's interned type, an
+ * array's whole size included (not decayed).  A node lowering built
+ * itself has no type recorded; its legacy fields stand in.  The legacy
+ * walks over variables, globals, members and string literals this used to
+ * make never decided a size once every checked expression had a type.
+ *
+ * @param tu         the translation unit
+ * @param vars       unused
+ * @param var_count  unused
+ * @param depth      unused
+ * @param e          the operand
+ * @return           the size, or -1 if it is not known
+ */
 static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                               const cc_expr_t *e) {
-    long real_size;
+    const cc_ctype_t *t;
 
+    (void)vars;
+    (void)var_count;
+    (void)depth;
     if (e == NULL) {
         return -1;
     }
-    /* the real type, where sema has found it, is the answer */
-    real_size = cc_ct_size(e->ctype != NULL ? e->ctype : cc_ct_of_expr(e), tu);
-    if (real_size > 0) {
-        return real_size;
-    }
-    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
-        int idx = var_find_visible(vars, var_count, e->ident, depth);
-        if (idx >= 0) {
-            if (!vars[idx].is_parameter) {
-                long n = vars[idx].array_ndim > 0
-                             ? array_type_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
-                                                     vars[idx].array_dims)
-                             : array_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_len);
-                if (n > 0) {
-                    return n;
-                }
-            }
-        } else {
-            const cc_global_t *g = find_global(tu, e->ident);
-            if (g != NULL) {
-                long n = g->array_ndim > 0 ? array_type_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim,
-                                                                   g->array_dims)
-                                           : array_size_bytes(tu, g->type, g->type_struct_id, g->array_len);
-                if (is_pointer_type(g->type) && g->array_len <= 0 && g->init != NULL) {
-                    cc_type_t elem_type = ptr_base_type(g->type);
-                    int elem_sid = (elem_type == CC_TYPE_VOID) ? g->type_struct_id : -1;
-                    long elem_size = type_size_bytes_with_struct(tu, elem_type, elem_sid);
-                    long count = 0;
-
-                    if (elem_size > 0) {
-                        if (g->init->kind == CC_EXPR_INIT_LIST) {
-                            if (g->init->arg_count == 1 && g->init->args[0] != NULL && g->init->args[0]->kind == CC_EXPR_STR &&
-                                (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
-                                count = string_literal_size_bytes(g->init->args[0]->ident);
-                            } else {
-                                count = (long)g->init->arg_count;
-                            }
-                        } else if (g->init->kind == CC_EXPR_STR && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
-                            count = string_literal_size_bytes(g->init->ident);
-                        }
-                        if (count > 0 && elem_size <= LONG_MAX / count) {
-                            return elem_size * count;
-                        }
-                    }
-                }
-                if (n > 0) {
-                    return n;
-                }
-            }
-        }
-    }
-    if (e->kind == CC_EXPR_MEMBER && e->ident != NULL) {
-        /* a member's size is the storage its structure's layout gave it */
-        const cc_struct_member_t *m = find_struct_member(tu, member_base_struct_id(e), e->ident);
-        if (m != NULL && m->size > 0 && !m->is_bitfield) {
-            return m->size;
-        }
-    }
-    if (e->kind == CC_EXPR_STR) {
-        long n = string_expr_size_bytes(tu, e);
-        if (n > 0) {
-            return n;
-        }
-        return string_literal_size_bytes(e->ident);
-    }
-    if (e->array_ndim > 0 && lower_is_pointer(e)) {
-        return array_type_size_bytes(tu, e->value_type, e->struct_id, e->array_ndim, e->array_dims);
-    }
-    return type_size_bytes_struct(tu, e->value_type, e->struct_id);
+    t = e->ctype != NULL ? e->ctype : cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims);
+    return cc_ct_size(t, tu);
 }
 
 /*
