@@ -15,8 +15,6 @@ static const cc_target_desc_t g_x86_64 = {
     {8, 8},   /* long long */
     {8, 8},   /* double */
     {16, 16}, /* long double */
-    {16, 8},  /* double _Complex */
-    {8, 8},   /* double _Imaginary */
     {8, 8},   /* _Decimal64 */
     {16, 16}, /* _Decimal128 */
 };
@@ -28,8 +26,6 @@ static const cc_target_desc_t g_i386 = {
     {8, 4},   /* long long */
     {8, 4},   /* double */
     {12, 4},  /* long double */
-    {16, 4},  /* double _Complex */
-    {8, 4},   /* double _Imaginary */
     {8, 8},   /* _Decimal64 */
     {16, 16}, /* _Decimal128 */
 };

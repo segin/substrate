@@ -8986,8 +8986,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.op = CC_SSA_CALLI;
             in.lhs = indirect_callee;
             /*
-             * Function-pointer signatures are not fully represented in cc_type_t
-             * yet; use variadic caller setup for CALLI so va_start-based callees
+             * A pointer without a prototype may reach a variadic function;
+             * use variadic caller setup for CALLI so va_start-based callees
              * receive the copied argument area and XMM count consistently.
              */
             in.call_is_variadic = 1;

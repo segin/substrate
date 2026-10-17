@@ -12,10 +12,10 @@
  * building the same type twice gives the same node, so two types are
  * the same type exactly when their pointers are equal.
  *
- * This replaces cc_type_t, which spelled pointer depth into the
- * enumerator and kept array bounds, struct identity and function
- * signatures beside it (or not at all).  The two live side by side
- * until every consumer has moved over.
+ * Every phase -- parser, sema, lowering -- carries types this way; it
+ * replaced an enumeration that spelled pointer depth into the enumerator
+ * and kept array bounds, struct identity and function signatures beside
+ * it, or not at all.
  */
 
 /** What kind of type a node is. */
@@ -297,62 +297,6 @@ const cc_struct_member_t *cc_ct_union_cast_member(const cc_translation_unit_t *t
  * @return     @p buf
  */
 const char *cc_ct_format(const cc_ctype_t *t, char *buf, size_t cap);
-
-/**
- * The type of the same scalar kind as a legacy enumerator, for code that
- * still holds a cc_type_t.
- *
- * @param t  a legacy type that is neither a pointer nor an aggregate
- * @return   the type, or NULL if @p t has no single interned counterpart
- */
-const cc_ctype_t *cc_ct_from_scalar(cc_type_t t);
-
-/**
- * A type rebuilt from the legacy encoding, for code that still produces
- * that encoding (the declaration specifiers, typedefs).  The encoding is
- * lossy -- an array of pointers and a pointer to an array, or a pointer
- * to a function and a pointer to its return type, come out the same --
- * so this gives the reading the parser has always meant: each array
- * dimension is one of the pointer levels, outermost first.
- *
- * @param t          the legacy type
- * @param struct_id  its struct id (or _BitInt width, or _Atomic's type)
- * @param ndim       its number of array dimensions
- * @param dims       their bounds, outermost first; 0 when not known
- * @return           the type, or NULL if @p t has no counterpart
- */
-const cc_ctype_t *cc_ct_from_legacy(cc_type_t t, int struct_id, int ndim, const long *dims);
-
-/** A type in the legacy encoding (see cc_ct_to_legacy()). */
-typedef struct {
-    cc_type_t base;    /**< the type under every pointer, array and function */
-    int struct_id;     /**< its struct id, _BitInt width or _Atomic's type */
-    unsigned depth;    /**< pointer levels to put on base: pointers plus array dimensions */
-    long array_len;    /**< the product of the bounds, 0 if one is unknown, -1 if no arrays */
-    int ndim;          /**< the number of array dimensions, outermost first */
-    long dims[CC_MAX_ARRAY_DIMS]; /**< their bounds, 0 when not known */
-    int lossy;         /**< a pointer to an array: the encoding cannot say which it is */
-} cc_ct_legacy_t;
-
-/**
- * Project a type onto the legacy encoding, as the parser has always
- * encoded a declarator: a pointer is a pointer level, an array dimension
- * is a pointer level and a bound, a function is its return type.
- *
- * @param t    the type
- * @param out  receives the encoding
- * @return     0, or -1 if @p t has more than CC_MAX_ARRAY_DIMS array
- *             dimensions or a base the encoding has no enumerator for
- */
-int cc_ct_to_legacy(const cc_ctype_t *t, cc_ct_legacy_t *out);
-
-/**
- * The legacy enumerator for a type's kind, for the layout table.
- *
- * @param kind  an arithmetic kind or CC_CT_VOID
- * @return      the enumerator, or CC_TYPE_VOID when there is none
- */
-cc_type_t cc_ct_legacy_kind(cc_ctype_kind_t kind);
 
 struct cc_expr;
 

@@ -28,9 +28,7 @@ typedef struct {
     cc_target_scalar_layout_t int64;              /**< `long long` */
     cc_target_scalar_layout_t float64;            /**< `double` */
     cc_target_scalar_layout_t long_double;        /**< x87 extended precision */
-    cc_target_scalar_layout_t complex_double;     /**< `double _Complex` */
-    cc_target_scalar_layout_t imaginary_double;   /**< `double _Imaginary` */
-    cc_target_scalar_layout_t decimal64;          /**< `_Decimal64` */
+    cc_target_scalar_layout_t decimal64;         /**< `_Decimal64` */
     cc_target_scalar_layout_t decimal128;         /**< `_Decimal128` */
 } cc_target_desc_t;
 
