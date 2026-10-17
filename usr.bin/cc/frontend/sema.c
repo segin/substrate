@@ -4078,6 +4078,319 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 }
 
 /**
+ * Give expression @p e type @p t, and the legacy fields (value_type,
+ * struct_id, array dimensions) the encoding gives that type.
+ *
+ * @param e  the expression
+ * @param t  its type
+ */
+static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
+    cc_ct_legacy_t leg;
+    cc_type_t ty;
+    unsigned i;
+
+    if (t == NULL && getenv("CC_EXP_SET") != NULL) {
+        fprintf(stderr, "SET-NULL kind=%d line=%zu\n", (int)e->kind, (size_t)e->line);
+        abort();
+    }
+    e->ctype = t;
+    if (t != NULL && t->unqual->kind == CC_CT_FUNCTION) {
+        e->value_type = CC_TYPE_FUNC;
+        e->struct_id = -1;
+        expr_clear_array_meta(e);
+        return;
+    }
+    if (t == NULL || cc_ct_to_legacy(t, &leg) != 0) {
+        return;
+    }
+    ty = leg.base;
+    for (i = 0; i < leg.depth; ++i) {
+        ty = ptr_of_type(ty);
+    }
+    e->value_type = ty;
+    e->struct_id = leg.struct_id;
+    expr_set_array_meta_decl(e, leg.array_len, leg.ndim, leg.dims);
+}
+
+/**
+ * The type the usual arithmetic conversions (C11 6.3.1.8) give real
+ * operands of types @p a and @p b: the wider floating type if either is
+ * floating, else the common integer type.
+ *
+ * @return the type, or NULL if either is not an arithmetic type
+ */
+static const cc_ctype_t *sema_usual_arith(const cc_ctype_t *a, const cc_ctype_t *b) {
+    static const cc_ctype_kind_t floats[] = {CC_CT_LDOUBLE, CC_CT_DOUBLE, CC_CT_FLOAT, CC_CT_FLOAT16};
+    size_t i;
+
+    if (!cc_ct_is_arithmetic(a) || !cc_ct_is_arithmetic(b)) {
+        return NULL;
+    }
+    for (i = 0; i < sizeof(floats) / sizeof(floats[0]); ++i) {
+        if (a->unqual->kind == floats[i] || b->unqual->kind == floats[i]) {
+            return cc_ct_basic(floats[i]);
+        }
+    }
+    return cc_ct_common_int(a->unqual, b->unqual);
+}
+
+/** Whether @p t (a value's type) is a pointer. */
+static int sema_is_ptr(const cc_ctype_t *t) {
+    return t != NULL && t->unqual->kind == CC_CT_POINTER;
+}
+
+/** Whether @p t (a value's type) is a pointer to void. */
+static int sema_is_void_ptr(const cc_ctype_t *t) {
+    return sema_is_ptr(t) && t->unqual->of != NULL && t->unqual->of->unqual->kind == CC_CT_VOID;
+}
+
+/**
+ * Whether objects of types @p a and @p b are close enough that pointers to
+ * them may be compared or subtracted.  This is laxer than compatibility
+ * (C11 6.2.7): integer types of one size match, as do any two structures,
+ * as the checker has always allowed.
+ *
+ * @param tu  the translation unit
+ * @param a   one pointed-to type
+ * @param b   the other
+ * @return    1 if they match, else 0
+ */
+static int sema_pointees_match(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b) {
+    a = a->unqual;
+    b = b->unqual;
+    if (a == b || a->kind == CC_CT_VOID || b->kind == CC_CT_VOID) {
+        return 1;
+    }
+    if (cc_ct_is_integer(a) && cc_ct_is_integer(b)) {
+        return cc_ct_size(a, tu) == cc_ct_size(b, tu);
+    }
+    if (a->kind != b->kind) {
+        return 0;
+    }
+    switch (a->kind) {
+    case CC_CT_RECORD:
+    case CC_CT_COMPLEX:
+    case CC_CT_FUNCTION:
+        return 1;
+    case CC_CT_POINTER:
+    case CC_CT_ARRAY:
+        return sema_pointees_match(tu, a->of, b->of);
+    default:
+        return 0;
+    }
+}
+
+/**
+ * Whether pointer types @p a and @p b may be compared or subtracted (see
+ * sema_pointees_match()).
+ */
+static int sema_ptrs_match(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b) {
+    return sema_pointees_match(tu, a->unqual->of, b->unqual->of);
+}
+
+/**
+ * Warn, under -pedantic, of arithmetic on a `void *` operand of type @p t.
+ *
+ * @return 0, or -1 if the warning is an error
+ */
+static int sema_void_ptr_arith(const cc_ctype_t *t, const cc_expr_t *e, cc_diag_t *diag) {
+    if (sema_is_void_ptr(t) && cc_options_current()->pedantic &&
+        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Type an equality or relational operator (C11 6.5.8, 6.5.9): arithmetic
+ * operands, pointers that match, or (for == and !=) a pointer and a null
+ * pointer constant; a GNU extension allows a pointer and any integer.
+ *
+ * @param tu    the translation unit
+ * @param e     the operator, its operands checked
+ * @param a     the left operand's type as a value
+ * @param b     the right operand's
+ * @param diag  receives the error
+ * @return      0, or -1 with @p diag set
+ */
+static int sema_check_compare(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_ctype_t *a,
+                              const cc_ctype_t *b, cc_diag_t *diag) {
+    int eq = e->op == CC_BIN_EQ || e->op == CC_BIN_NE;
+
+    if (cc_ct_is_arithmetic(a) && cc_ct_is_arithmetic(b)) {
+        return 0;
+    }
+    if (sema_is_ptr(a) && sema_is_ptr(b)) {
+        if (sema_ptrs_match(tu, a, b)) {
+            return 0;
+        }
+        set_diag(diag, "incompatible pointer types in comparison");
+        return -1;
+    }
+    if (eq && ((sema_is_ptr(a) && cc_ct_is_integer(b)) || (sema_is_ptr(b) && cc_ct_is_integer(a)))) {
+        if (is_null_ptr_constant(sema_is_ptr(a) ? e->rhs : e->lhs)) {
+            return 0;
+        }
+        if (cc_options_current()->pedantic &&
+            emit_warning(diag, e->line, e->col, "comparison between pointer and integer is a GNU extension", 1) !=
+                0) {
+            return -1;
+        }
+        return 0;
+    }
+    set_diag(diag, eq ? "comparison operators require compatible scalar operands"
+                      : "ordered comparison operators require numeric or compatible pointer operands");
+    return -1;
+}
+
+/**
+ * Type `+` or `-` with a pointer operand (C11 6.5.6): a pointer and an
+ * integer give the pointer's type, two pointers that match their
+ * difference.
+ *
+ * @param tu    the translation unit
+ * @param e     the operator, its operands checked
+ * @param a     the left operand's type as a value
+ * @param b     the right operand's
+ * @param diag  receives the error
+ * @return      the type, or NULL with @p diag set
+ */
+static const cc_ctype_t *sema_pointer_arith(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_ctype_t *a,
+                                            const cc_ctype_t *b, cc_diag_t *diag) {
+    if (e->op == CC_BIN_SUB && sema_is_ptr(a) && sema_is_ptr(b)) {
+        if (sema_void_ptr_arith(a, e, diag) != 0 || sema_void_ptr_arith(b, e, diag) != 0) {
+            return NULL;
+        }
+        if (!sema_ptrs_match(tu, a, b)) {
+            set_diag(diag, "incompatible pointer types in subtraction");
+            return NULL;
+        }
+        return cc_ct_basic(CC_CT_INT);
+    }
+    if (sema_is_ptr(a) && cc_ct_is_integer(b)) {
+        return sema_void_ptr_arith(a, e, diag) != 0 ? NULL : a;
+    }
+    if (e->op == CC_BIN_ADD && cc_ct_is_integer(a) && sema_is_ptr(b)) {
+        return sema_void_ptr_arith(b, e, diag) != 0 ? NULL : b;
+    }
+    set_diag(diag, "unsupported pointer arithmetic form");
+    return NULL;
+}
+
+/**
+ * Check a binary operator (CC_EXPR_BIN) and type it.  An operand of a
+ * vector, decimal, wide integer or complex type sends it to that type's
+ * rewrite; the rest follow C11 6.5.5 to 6.5.17.
+ *
+ * @param tu         the translation unit
+ * @param e          the operator
+ * @param vars       the variables in scope
+ * @param var_count  their count
+ * @param depth      the scope depth
+ * @param diag       receives the error
+ * @return           0, or -1 with @p diag set
+ */
+static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                          int depth, cc_diag_t *diag) {
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+    const cc_ctype_t *t;
+
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+        check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (e->op == CC_BIN_COMMA) {
+        sema_set_type(e, e->rhs->ctype);
+        return 0;
+    }
+    if (e->op == CC_BIN_ADD && e->is_subscript && (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs))) {
+        /* v[i]: an element of the vector's array */
+        if (sema_vector_subscript(tu, sema_is_vector(tu, e->lhs) ? &e->lhs : &e->rhs) != 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+    } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
+        return sema_vector_binop(tu, e, diag);
+    }
+    if (sema_is_decimal(tu, e->lhs) || sema_is_decimal(tu, e->rhs)) {
+        if (!is_logical_op(e->op)) {
+            return sema_decimal_binop(tu, e, diag);
+        }
+        if (sema_decimal_truth(tu, &e->lhs, diag) != 0 || sema_decimal_truth(tu, &e->rhs, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (sema_is_wide(tu, e->lhs) || sema_is_wide(tu, e->rhs)) {
+        if (!is_logical_op(e->op)) {
+            return sema_wide_binop(tu, e, diag);
+        }
+        if (sema_wide_truth(tu, &e->lhs, diag) != 0 || sema_wide_truth(tu, &e->rhs, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL || sema_complex_elem(tu, sx_vtype(e->rhs)) != NULL) {
+        if (!is_logical_op(e->op)) {
+            return sema_complex_binop(tu, e, diag);
+        }
+        if (sema_complex_truth(tu, &e->lhs) != 0 || sema_complex_truth(tu, &e->rhs) != 0) {
+            set_diag(diag, "out of memory converting a complex operand");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    a = sx_vtype(e->lhs);
+    b = sx_vtype(e->rhs);
+    if (is_logical_op(e->op)) {
+        if (!cc_ct_is_scalar(a) || !cc_ct_is_scalar(b)) {
+            set_diag(diag, "logical operators require scalar operands");
+            return -1;
+        }
+        t = cc_ct_basic(CC_CT_INT);
+    } else if (is_shift_op(e->op) || is_bitwise_op(e->op)) {
+        if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
+            set_diag(diag, is_shift_op(e->op) ? "shift operators require integer operands"
+                                              : "bitwise operators require integer operands");
+            return -1;
+        }
+        t = is_shift_op(e->op) ? cc_ct_promote(a) : cc_ct_common_int(a, b);
+    } else if (is_cmp_op(e->op)) {
+        if (sema_check_compare(tu, e, a, b, diag) != 0) {
+            return -1;
+        }
+        t = cc_ct_basic(CC_CT_INT);
+    } else if (sema_is_ptr(a) || sema_is_ptr(b)) {
+        if (e->op != CC_BIN_ADD && e->op != CC_BIN_SUB) {
+            set_diag(diag, "arithmetic operators require numeric operands");
+            return -1;
+        }
+        t = sema_pointer_arith(tu, e, a, b, diag);
+        if (t == NULL) {
+            return -1;
+        }
+    } else if (e->op == CC_BIN_MOD) {
+        if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
+            set_diag(diag, "modulo operator requires integer operands");
+            return -1;
+        }
+        t = cc_ct_common_int(a, b);
+    } else {
+        t = sema_usual_arith(a, b);
+        if (t == NULL) {
+            set_diag(diag, "void expression used in arithmetic operation");
+            return -1;
+        }
+    }
+    sema_set_type(e, t);
+    return 0;
+}
+
+/**
  * Check expression @p e by its kind: its operands, the rules C sets for
  * them, and its legacy type (value_type, struct_id, array dimensions).
  *
@@ -4327,231 +4640,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     }
 
     case CC_EXPR_BIN:
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        e->struct_id = -1;
-        if (e->op == CC_BIN_COMMA) {
-            e->value_type = e->rhs->value_type;
-            e->struct_id = e->rhs->struct_id;
-            expr_copy_array_meta(e, e->rhs);
-            return 0;
-        }
-        if (e->op == CC_BIN_ADD && e->is_subscript && (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs))) {
-            /* v[i]: an element of the vector's array */
-            if (sema_vector_subscript(tu, sema_is_vector(tu, e->lhs) ? &e->lhs : &e->rhs) != 0) {
-                set_diag(diag, "out of memory");
-                return -1;
-            }
-        } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
-            return sema_vector_binop(tu, e, diag);
-        }
-        if (sema_is_decimal(tu, e->lhs) || sema_is_decimal(tu, e->rhs)) {
-            if (is_logical_op(e->op)) {
-                if (sema_decimal_truth(tu, &e->lhs, diag) != 0 || sema_decimal_truth(tu, &e->rhs, diag) != 0) {
-                    return -1;
-                }
-                e->value_type = CC_TYPE_INT;
-                return 0;
-            }
-            return sema_decimal_binop(tu, e, diag);
-        }
-        if (sema_is_wide(tu, e->lhs) || sema_is_wide(tu, e->rhs)) {
-            if (is_logical_op(e->op)) {
-                if (sema_wide_truth(tu, &e->lhs, diag) != 0 || sema_wide_truth(tu, &e->rhs, diag) != 0) {
-                    return -1;
-                }
-                e->value_type = CC_TYPE_INT;
-                return 0;
-            }
-            return sema_wide_binop(tu, e, diag);
-        }
-        if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL ||
-            sema_complex_elem(tu, sx_vtype(e->rhs)) != NULL) {
-            if (is_logical_op(e->op)) {
-                if (sema_complex_truth(tu, &e->lhs) != 0 || sema_complex_truth(tu, &e->rhs) != 0) {
-                    set_diag(diag, "out of memory converting a complex operand");
-                    return -1;
-                }
-                e->value_type = CC_TYPE_INT;
-                return 0;
-            }
-            return sema_complex_binop(tu, e, diag);
-        }
-        if (is_logical_op(e->op)) {
-            if (!is_scalar_type(e->lhs->value_type) || !is_scalar_type(e->rhs->value_type)) {
-                set_diag(diag, "logical operators require scalar operands");
-                return -1;
-            }
-            e->value_type = CC_TYPE_INT;
-            return 0;
-        }
-        if (is_shift_op(e->op)) {
-            if (!cc_type_is_integral(e->lhs->value_type) || !cc_type_is_integral(e->rhs->value_type)) {
-                set_diag(diag, "shift operators require integer operands");
-                return -1;
-            }
-            e->value_type = cc_type_promote(e->lhs->value_type);
-            if (e->value_type == CC_TYPE_VOID) {
-                set_diag(diag, "void expression used in arithmetic operation");
-                return -1;
-            }
-            if (e->value_type == CC_TYPE_BITINT) {
-                /* a bit-precise operand is not promoted: the result keeps its width */
-                e->struct_id = e->lhs->struct_id;
-            }
-            return 0;
-        }
-        if (is_bitwise_op(e->op)) {
-            if (!cc_type_is_integral(e->lhs->value_type) || !cc_type_is_integral(e->rhs->value_type)) {
-                set_diag(diag, "bitwise operators require integer operands");
-                return -1;
-            }
-            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
-            if (e->value_type == CC_TYPE_VOID) {
-                set_diag(diag, "void expression used in arithmetic operation");
-                return -1;
-            }
-            return 0;
-        }
-        if (is_cmp_op(e->op)) {
-            if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
-                if (cc_type_is_numeric(e->lhs->value_type) && cc_type_is_numeric(e->rhs->value_type)) {
-                    e->value_type = CC_TYPE_INT;
-                    return 0;
-                }
-                if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
-                    if (can_convert(e->lhs->value_type, e->rhs->value_type) ||
-                        can_convert(e->rhs->value_type, e->lhs->value_type)) {
-                        e->value_type = CC_TYPE_INT;
-                        return 0;
-                    }
-                    set_diag(diag, "incompatible pointer types in comparison");
-                    return -1;
-                }
-                if (is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type) &&
-                    is_null_ptr_constant(e->rhs)) {
-                    e->value_type = CC_TYPE_INT;
-                    return 0;
-                }
-                if (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->lhs->value_type) &&
-                    is_null_ptr_constant(e->lhs)) {
-                    e->value_type = CC_TYPE_INT;
-                    return 0;
-                }
-                if ((is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type)) ||
-                    (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->lhs->value_type))) {
-                    if (cc_options_current()->pedantic && emit_warning(diag, e->line, e->col,
-                                                   "comparison between pointer and integer is a GNU extension", 1) != 0) {
-                        return -1;
-                    }
-                    e->value_type = CC_TYPE_INT;
-                    return 0;
-                }
-                if (getenv("CC_DEBUG_SEMA_CMP") != NULL) {
-                    fprintf(stderr,
-                            "cc-debug: eq/ne cmp lhs(kind=%d type=%d sid=%d ident=%s int=%lld) rhs(kind=%d type=%d sid=%d ident=%s int=%lld) line=%zu col=%zu\n",
-                            (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
-                            e->lhs->ident != NULL ? e->lhs->ident : "<null>", e->lhs->int_val, (int)e->rhs->kind,
-                            (int)e->rhs->value_type, e->rhs->struct_id, e->rhs->ident != NULL ? e->rhs->ident : "<null>",
-                            e->rhs->int_val, e->line, e->col);
-                }
-                set_diag(diag, "comparison operators require compatible scalar operands");
-                return -1;
-            }
-            if (cc_type_is_numeric(e->lhs->value_type) && cc_type_is_numeric(e->rhs->value_type)) {
-                e->value_type = CC_TYPE_INT;
-                return 0;
-            }
-            if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
-                if (can_convert(e->lhs->value_type, e->rhs->value_type) ||
-                    can_convert(e->rhs->value_type, e->lhs->value_type)) {
-                    e->value_type = CC_TYPE_INT;
-                    return 0;
-                }
-                set_diag(diag, "incompatible pointer types in comparison");
-                return -1;
-            }
-            if (getenv("CC_DEBUG_SEMA_CMP") != NULL) {
-                fprintf(stderr,
-                        "cc-debug: ordered cmp lhs(kind=%d type=%d sid=%d ident=%s) rhs(kind=%d type=%d sid=%d ident=%s) line=%zu col=%zu\n",
-                        (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
-                        e->lhs->ident != NULL ? e->lhs->ident : "<null>", (int)e->rhs->kind, (int)e->rhs->value_type,
-                        e->rhs->struct_id, e->rhs->ident != NULL ? e->rhs->ident : "<null>", e->line, e->col);
-            }
-            set_diag(diag, "ordered comparison operators require numeric or compatible pointer operands");
-            return -1;
-        }
-        if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
-            if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
-                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID || ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
-                    if (cc_options_current()->pedantic &&
-                        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
-                        return -1;
-                    }
-                }
-                if (!can_convert(e->lhs->value_type, e->rhs->value_type) &&
-                    !can_convert(e->rhs->value_type, e->lhs->value_type)) {
-                    set_diag(diag, "incompatible pointer types in subtraction");
-                    return -1;
-                }
-                e->value_type = CC_TYPE_INT;
-                e->struct_id = -1;
-                return 0;
-            }
-            if (is_pointer_type(e->lhs->value_type) && cc_type_is_integral(e->rhs->value_type)) {
-                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID) {
-                    if (cc_options_current()->pedantic &&
-                        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
-                        return -1;
-                    }
-                }
-                e->value_type = e->lhs->value_type;
-                e->struct_id = e->lhs->struct_id;
-                expr_copy_array_meta(e, e->lhs);
-                return 0;
-            }
-            if (e->op == CC_BIN_ADD && cc_type_is_integral(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
-                if (ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
-                    if (cc_options_current()->pedantic &&
-                        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
-                        return -1;
-                    }
-                }
-                e->value_type = e->rhs->value_type;
-                e->struct_id = e->rhs->struct_id;
-                expr_copy_array_meta(e, e->rhs);
-                return 0;
-            }
-            if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
-                set_diag(diag, "unsupported pointer arithmetic form");
-                return -1;
-            }
-        } else if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
-            set_diag(diag, "arithmetic operators require numeric operands");
-            return -1;
-        }
-        if (e->op == CC_BIN_MOD) {
-            if (!cc_type_is_integral(e->lhs->value_type) || !cc_type_is_integral(e->rhs->value_type)) {
-                set_diag(diag, "modulo operator requires integer operands");
-                return -1;
-            }
-            e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
-            if (e->value_type == CC_TYPE_VOID) {
-                set_diag(diag, "void expression used in arithmetic operation");
-                return -1;
-            }
-            return 0;
-        }
-        e->value_type = common_arith_type(e->lhs->value_type, e->rhs->value_type);
-        if (e->value_type == CC_TYPE_VOID) {
-            set_diag(diag, "void expression used in arithmetic operation");
-            return -1;
-        }
-        return 0;
+        return sema_check_bin(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_CALL: {
         const cc_function_t *callee = NULL;
