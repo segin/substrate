@@ -174,13 +174,13 @@ void cc_ct_reset(void) {
 /**
  * A type with no parts.
  *
- * @param kind  a void or arithmetic kind other than _BitInt, _Complex, _Imaginary
+ * @param kind  a void or arithmetic kind other than _BitInt, _Complex, _Imaginary; or nullptr_t
  * @return      the type, or NULL
  */
 const cc_ctype_t *cc_ct_basic(cc_ctype_kind_t kind) {
     cc_ctype_t k;
 
-    if (kind > CC_CT_DECIMAL128 || kind == CC_CT_BITINT || kind == CC_CT_UBITINT) {
+    if ((kind > CC_CT_DECIMAL128 && kind != CC_CT_NULLPTR) || kind == CC_CT_BITINT || kind == CC_CT_UBITINT) {
         return NULL;
     }
     k = ct_key(kind);
@@ -435,13 +435,13 @@ int cc_ct_is_arithmetic(const cc_ctype_t *t) {
 }
 
 /**
- * Whether a type is an arithmetic or pointer type.
+ * Whether a type is a scalar type: arithmetic, pointer or nullptr_t (C23 6.2.5).
  *
  * @param t  the type
  * @return   1 if it is, else 0
  */
 int cc_ct_is_scalar(const cc_ctype_t *t) {
-    return cc_ct_is_arithmetic(t) || (t != NULL && t->kind == CC_CT_POINTER);
+    return cc_ct_is_arithmetic(t) || (t != NULL && (t->kind == CC_CT_POINTER || t->kind == CC_CT_NULLPTR));
 }
 
 /**
@@ -481,6 +481,7 @@ long cc_ct_int_width(const cc_ctype_t *t) {
     case CC_CT_BOOL:
         return 1;
     case CC_CT_POINTER:
+    case CC_CT_NULLPTR:
         return (long)cc_target_pointer_size() * 8;
     case CC_CT_BITINT:
     case CC_CT_UBITINT:
@@ -692,6 +693,7 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
         }
         return tu->structs[t->id].size;
     case CC_CT_POINTER:
+    case CC_CT_NULLPTR:
         return cc_target_pointer_size();
     case CC_CT_ARRAY:
         n = cc_ct_size(t->of, tu);
@@ -744,6 +746,7 @@ long cc_ct_align(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
         }
         return tu->structs[t->id].align;
     case CC_CT_POINTER:
+    case CC_CT_NULLPTR:
         return cc_target_pointer_size();
     case CC_CT_FUNCTION:
         return 1;
@@ -845,6 +848,9 @@ static void ct_format_base(const cc_ctype_t *t, char *buf, size_t cap) {
         break;
     case CC_CT_RECORD:
         snprintf(tmp, sizeof(tmp), "struct #%d", t->id);
+        break;
+    case CC_CT_NULLPTR:
+        snprintf(tmp, sizeof(tmp), "nullptr_t");
         break;
     default:
         snprintf(tmp, sizeof(tmp), "%s", names[t->kind]);

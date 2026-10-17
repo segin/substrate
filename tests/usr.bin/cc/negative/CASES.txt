@@ -66,3 +66,7 @@ native_bad_vector_size.c||invalid vector type: its size must be a power-of-two m
 native_bad_decimal_binary_mix.c||cannot mix operands of decimal floating and binary floating types
 native_bad_decimal_mod.c||invalid operands to a decimal floating operation
 native_bad_union_cast_type.c||cast to union type from type not present in union
+native_bad_c23_nullptr_to_int.c|-std=c23|nullptr_t converts only to a pointer, bool or nullptr_t
+native_bad_c23_nullptr_arith.c|-std=c23|nullptr_t operand in arithmetic operation
+native_bad_c23_nullptr_cast.c|-std=c23|invalid cast involving nullptr_t
+native_bad_c23_nullptr_compare.c|-std=c23|invalid comparison with nullptr_t

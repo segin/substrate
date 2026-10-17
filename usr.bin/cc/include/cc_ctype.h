@@ -48,7 +48,8 @@ typedef enum {
     CC_CT_RECORD,    /**< a struct or union: id indexes the translation unit's structs */
     CC_CT_POINTER,   /**< pointer to of */
     CC_CT_ARRAY,     /**< count elements of of; count < 0 when the bound is unknown */
-    CC_CT_FUNCTION   /**< function returning of, taking params */
+    CC_CT_FUNCTION,  /**< function returning of, taking params */
+    CC_CT_NULLPTR    /**< nullptr_t, the type of nullptr: pointer-sized, converts only to pointers and bool */
 } cc_ctype_kind_t;
 
 /** Type qualifiers, which are part of a type's identity. */

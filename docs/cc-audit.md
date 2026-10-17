@@ -544,9 +544,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   from a non-constant, and an initializer not representable in its type
   (`constexpr unsigned char c = 300;` only draws an assembler truncation
   warning and yields 44) are all accepted.  *Reproduced.*
-- [ ] **CC-92** `nullptr` shall convert only to a pointer, `bool` or
-  `nullptr_t` (C23 6.3.2.4): `int n = nullptr;` is accepted; gcc
-  rejects it.  *Reproduced.*
+- [x] **CC-92** `nullptr` shall convert only to a pointer, `bool` or
+  `nullptr_t` (C23 6.3.2.4): `int n = nullptr;` was accepted; gcc
+  rejects it.  *Reproduced.*  `nullptr` was the integer constant 0 and
+  `nullptr_t` a typedef of `void *`, so `typeof (nullptr)` was `int` and
+  gcc's own `<stddef.h>` (`typedef typeof (nullptr) nullptr_t;`) failed
+  with a conflicting typedef.  nullptr_t is now a type of its own
+  (`CC_CT_NULLPTR`, pointer-sized and a scalar type): it converts to a
+  pointer, bool or itself, compares equal to those and to a null pointer
+  constant, and casts to void as well; arithmetic, other conversions and
+  other casts are diagnosed.  `codegen/nullptr_type.c` and four
+  `native_bad_c23_nullptr_*.c` negative tests.
 - [x] **CC-93** A static local array of integers wider than 64 bits
   shall hold the whole value of each initializer (C11 6.7.9p10):
   `static unsigned __int128 u[2] = {5, (unsigned __int128)1 << 100};`
@@ -1113,7 +1121,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-109 requirements: 101 met, 8 open.
+109 requirements: 102 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

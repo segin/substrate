@@ -3337,9 +3337,20 @@ static int sema_void_ptr_arith(const cc_ctype_t *t, const cc_expr_t *e, cc_diag_
 static int sema_check_compare(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_ctype_t *a,
                               const cc_ctype_t *b, cc_diag_t *diag) {
     int eq = e->op == CC_BIN_EQ || e->op == CC_BIN_NE;
+    int an = a != NULL && a->kind == CC_CT_NULLPTR;
+    int bn = b != NULL && b->kind == CC_CT_NULLPTR;
 
     if (cc_ct_is_arithmetic(a) && cc_ct_is_arithmetic(b)) {
         return 0;
+    }
+    if (an || bn) {
+        /* nullptr_t equals nullptr_t, a pointer or a null pointer constant (C23 6.5.10) */
+        if (eq && ((an && bn) || (an ? sema_is_ptr(b) || is_null_ptr_constant(e->rhs)
+                                     : sema_is_ptr(a) || is_null_ptr_constant(e->lhs)))) {
+            return 0;
+        }
+        sema_diag(diag, "invalid comparison with nullptr_t");
+        return -1;
     }
     if (sema_is_ptr(a) && sema_is_ptr(b)) {
         if (sema_ptrs_match(tu, a, b)) {
@@ -3565,7 +3576,9 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
     } else {
         t = sema_usual_arith(a, b);
         if (t == NULL) {
-            sema_diag(diag, "void expression used in arithmetic operation");
+            sema_diag(diag, (a != NULL && a->kind == CC_CT_NULLPTR) || (b != NULL && b->kind == CC_CT_NULLPTR)
+                                ? "nullptr_t operand in arithmetic operation"
+                                : "void expression used in arithmetic operation");
             return -1;
         }
         t = sema_unary_or(e, a, b, t);
@@ -3770,6 +3783,17 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 return -1;
             }
             e->member_offset = m->offset;
+        }
+    } else if (ct_kind_is(from, CC_CT_NULLPTR) || ct_kind_is(to->unqual, CC_CT_NULLPTR)) {
+        /* nullptr_t converts to void, bool, a pointer or itself; only it or 0 converts to it (C23 6.5.5) */
+        int ok = ct_kind_is(from, CC_CT_NULLPTR)
+                     ? ct_kind_is(to->unqual, CC_CT_VOID) || ct_kind_is(to->unqual, CC_CT_BOOL) ||
+                           sema_is_ptr(to) || ct_kind_is(to->unqual, CC_CT_NULLPTR)
+                     : is_null_ptr_constant(e->lhs);
+
+        if (!ok) {
+            sema_diag(diag, "invalid cast involving nullptr_t");
+            return -1;
         }
     } else if (!ct_kind_is(to->unqual, CC_CT_VOID) && !(cc_ct_is_arithmetic(from) && cc_ct_is_arithmetic(to)) &&
                !(sema_is_ptr(to) && (sema_is_ptr(from) || cc_ct_is_integer(from))) &&
@@ -3979,12 +4003,38 @@ static int sema_const_object(int storage, const cc_ctype_t *t) {
  * @param rhs  the value, checked
  * @return     1 if it may, else 0
  */
+/**
+ * Report that variable @p name cannot be initialized by @p init, naming
+ * the rule where the initializer is nullptr.
+ *
+ * @param diag  receives the error, unless it holds one already
+ * @param name  the variable, or NULL
+ * @param init  its initializer, checked
+ */
+static void sema_init_mismatch_diag(cc_diag_t *diag, const char *name, const cc_expr_t *init) {
+    if (diag == NULL || diag->message[0] != '\0') {
+        return;
+    }
+    snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'%s",
+             name != NULL ? name : "<anon>",
+             ct_kind_is(sx_vtype(init), CC_CT_NULLPTR) ? ": nullptr_t converts only to a pointer, bool or nullptr_t"
+                                                         : "");
+}
+
 int sema_assignable(const cc_translation_unit_t *tu, const cc_ctype_t *dst, const cc_expr_t *rhs) {
     const cc_ctype_t *d = cc_ct_decay(dst);
     const cc_ctype_t *s = sx_vtype(rhs);
     int dr = sx_ct_record(d);
     int sr = sx_ct_record(s);
 
+    if (s != NULL && s->kind == CC_CT_NULLPTR) {
+        /* nullptr_t converts to a pointer, bool or nullptr_t only (C23 6.3.2.4) */
+        return d != NULL && (d->kind == CC_CT_NULLPTR || sema_is_ptr(d) || d->kind == CC_CT_BOOL);
+    }
+    if (d != NULL && d->kind == CC_CT_NULLPTR) {
+        /* a nullptr_t object takes nullptr or a null pointer constant */
+        return cc_ct_is_integer(s) && rhs->kind == CC_EXPR_INT && rhs->int_val == 0;
+    }
     if (dr < 0 && sr < 0 && cc_ct_is_arithmetic(d) && cc_ct_is_arithmetic(s)) {
         return 1;
     }
@@ -5126,10 +5176,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return -1;
                         }
                         if (!sema_assignable(tu, init_ct, scalar_init)) {
-                            if (diag != NULL && diag->message[0] == '\0') {
-                                snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
-                                         s->decl_name != NULL ? s->decl_name : "<anon>");
-                            }
+                            sema_init_mismatch_diag(diag, s->decl_name, scalar_init);
                             free((*vars)[*var_count - 1].name);
                             (*var_count)--;
                             return -1;
@@ -5164,10 +5211,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     }
                     if (!init_checked && !sema_assignable(tu, init_ct, s->expr) &&
                         !(sema_is_ptr(cc_ct_decay(init_ct)) && sx_is_ptr(s->expr))) {
-                        if (diag != NULL && diag->message[0] == '\0') {
-                            snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
-                                     s->decl_name != NULL ? s->decl_name : "<anon>");
-                        }
+                        sema_init_mismatch_diag(diag, s->decl_name, s->expr);
                         free((*vars)[*var_count - 1].name);
                         (*var_count)--;
                         return -1;

@@ -6607,7 +6607,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return e;
         }
         if (parser_is_c23_or_newer() && tok_is_ident(p, "nullptr")) {
-            e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
+            /* the null pointer constant of type nullptr_t (C23 6.4.4.6) */
+            e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_NULLPTR));
             if (e == NULL) {
                 return NULL;
             }
@@ -10496,7 +10497,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         return -1;
     }
     if (parser_is_c23_or_newer() &&
-        typedef_push(&p, "nullptr_t", cc_ct_pointer(cc_ct_basic(CC_CT_VOID))) != 0) {
+        typedef_push(&p, "nullptr_t", cc_ct_basic(CC_CT_NULLPTR)) != 0) {
         cc_lexer_deinit(&p.lx);
         parser_free_hoisted_funcs(&p);
         parser_free_typedefs(&p);
