@@ -10,6 +10,7 @@
 #include "cc_diag.h"
 #include "cc_options.h"
 #include "cc_types.h"
+#include "cc_util.h"
 #include "cc_x86.h"
 
 #include <float.h>
@@ -1444,7 +1445,15 @@ static void emit_raw_bytes(FILE *fp, const unsigned char *bytes, long size) {
 }
 
 static void emit_float_data(FILE *fp, long size, long double value) {
-    if (size == 4) {
+    if (size == 2) {
+        /* _Float16 */
+        unsigned short bits = cc_float16_bits((double)value);
+        unsigned char b[2];
+
+        b[0] = (unsigned char)(bits & 0xff);
+        b[1] = (unsigned char)(bits >> 8);
+        emit_raw_bytes(fp, b, 2);
+    } else if (size == 4) {
         union {
             float f;
             unsigned char b[4];

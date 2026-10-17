@@ -969,6 +969,7 @@ static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
     switch (t != NULL ? t->kind : CC_CT_VOID) {
     case CC_CT_POINTER:
         return CC_SSA_DATA_POINTER;
+    case CC_CT_FLOAT16:
     case CC_CT_FLOAT:
     case CC_CT_DOUBLE:
     case CC_CT_LDOUBLE:
@@ -2414,82 +2415,6 @@ static int round_to_float(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
         return -1;
     }
     return in.dst;
-}
-
-static unsigned short float16_pack_bits(double value) {
-    union {
-        double d;
-        uint64_t u;
-    } cvt;
-    uint64_t sign;
-    uint64_t exp;
-    uint64_t frac;
-
-    cvt.d = value;
-    sign = (cvt.u >> 63) & 1u;
-    exp = (cvt.u >> 52) & 0x7ffu;
-    frac = cvt.u & ((1ULL << 52) - 1ULL);
-
-    if (exp == 0x7ffu) {
-        unsigned short out = (unsigned short)((sign << 15) | 0x7c00u | (unsigned short)(frac >> 42));
-        if (frac != 0 && (out & 0x03ffu) == 0) {
-            out |= 1u;
-        }
-        return out;
-    }
-
-    if (exp == 0) {
-        return (unsigned short)(sign << 15);
-    }
-
-    {
-        int32_t exp_unbiased = (int32_t)exp - 1023;
-        int32_t half_exp = exp_unbiased + 15;
-        uint64_t mant = frac;
-
-        if (half_exp >= 0x1f) {
-            return (unsigned short)((sign << 15) | 0x7c00u);
-        }
-
-        if (half_exp <= 0) {
-            int shift = 1 - half_exp;
-            uint64_t mantissa = mant | (1ULL << 52);
-            uint64_t rounded;
-            uint64_t rem_mask;
-            uint64_t rem;
-            uint64_t halfway;
-
-            if (shift > 24) {
-                return (unsigned short)(sign << 15);
-            }
-            rounded = mantissa >> (42 + shift);
-            rem_mask = (1ULL << (42 + shift)) - 1ULL;
-            rem = mantissa & rem_mask;
-            halfway = 1ULL << (41 + shift);
-            if (rem > halfway || (rem == halfway && (rounded & 1ULL) != 0)) {
-                rounded++;
-            }
-            return (unsigned short)((sign << 15) | (rounded & 0x03ffu));
-        }
-
-        {
-            uint64_t rounded = mant >> 42;
-            uint64_t rem = mant & ((1ULL << 42) - 1ULL);
-            uint64_t halfway = 1ULL << 41;
-
-            if (rem > halfway || (rem == halfway && (rounded & 1ULL) != 0)) {
-                rounded++;
-                if (rounded == 0x400u) {
-                    rounded = 0;
-                    half_exp++;
-                    if (half_exp >= 0x1f) {
-                        return (unsigned short)((sign << 15) | 0x7c00u);
-                    }
-                }
-            }
-            return (unsigned short)((sign << 15) | ((unsigned short)half_exp << 10) | (unsigned short)rounded);
-        }
-    }
 }
 
 int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
@@ -11293,6 +11218,35 @@ static int eval_global_init_ld_expr(const cc_translation_unit_t *tu, const cc_ex
     return 0;
 }
 
+/**
+ * Convert a static initializer item's constant from type @p from to type
+ * @p to, as assignment does: an integer to a floating type takes its value
+ * (unsigned if @p from is), a floating value to an integer type is
+ * truncated.  Symbols and strings are left alone.
+ *
+ * @param out   the item
+ * @param from  the type of the value it holds, or NULL if not known
+ * @param to    the type it initializes, or NULL if not known
+ */
+static void global_init_item_convert(cc_ssa_global_init_item_t *out, const cc_ctype_t *from, const cc_ctype_t *to) {
+    if (out->init_is_symbol || out->init_is_string || to == NULL) {
+        return;
+    }
+    if (cc_ct_is_floating(to) && !out->init_is_float) {
+        if (from != NULL && cc_ct_is_unsigned(from)) {
+            out->init_f = (double)(unsigned long long)out->init_i;
+            out->init_f_ld = (long double)(unsigned long long)out->init_i;
+        } else {
+            out->init_f = (double)out->init_i;
+            out->init_f_ld = (long double)out->init_i;
+        }
+        out->init_is_float = 1;
+    } else if (cc_ct_is_integer(to) && out->init_is_float) {
+        out->init_i = fp_const_to_int(out->init_f, to);
+        out->init_is_float = 0;
+    }
+}
+
 static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_t *e, cc_ssa_global_init_item_t *out) {
     if (out == NULL) {
         return -1;
@@ -11329,7 +11283,12 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
         out->init_str = string_literal_emit_text(tu, e);
         return out->init_str == NULL ? -1 : 0;
     case CC_EXPR_CAST:
-        return eval_global_init_item(tu, e->lhs, out);
+        /* the operand's value, converted as the cast says */
+        if (eval_global_init_item(tu, e->lhs, out) != 0) {
+            return -1;
+        }
+        global_init_item_convert(out, lower_value_ctype(e->lhs), lower_value_ctype(e));
+        return 0;
     case CC_EXPR_BIN:
         if (e->op == CC_BIN_COMMA) {
             return eval_global_init_item(tu, e->rhs, out);
@@ -11975,7 +11934,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, const cc_ct
 
     if (tk == CC_CT_FLOAT16 || tk == CC_CT_FLOAT || tk == CC_CT_DOUBLE || tk == CC_CT_LDOUBLE) {
         if (field_size == 2 && tk == CC_CT_FLOAT16) {
-            unsigned short raw = float16_pack_bits(isf ? fv : (double)iv);
+            unsigned short raw = cc_float16_bits(isf ? fv : (double)iv);
             store_const_bytes(buf, off, field_size, raw);
             return 0;
         }
@@ -13589,6 +13548,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         }
                         cc_ssa_module_free(out);
                         return -1;
+                    }
+                    if (ct_has_kind(global_decl_ctype(&tu->globals[i]), CC_CT_ARRAY)) {
+                        /* each item converted to the element type: `float a[] = {1}` holds 1.0f */
+                        global_init_item_convert(&out->globals[i].init_items[j], lower_value_ctype(init->args[j]),
+                                                 global_decl_ctype(&tu->globals[i])->of);
                     }
                 }
                 {

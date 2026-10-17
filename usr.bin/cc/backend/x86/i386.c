@@ -434,11 +434,50 @@ static void emit_i386_fround32_x87(FILE *fp, const cc_ssa_function_t *f, const s
     emit_i386_x87_store_f64(fp, f, lay, in->dst);
 }
 
+/**
+ * Load the `_Float16` at the address in register @p reg into value @p dst
+ * as a double: libgcc's __extendhfdf2, which takes the half on the stack
+ * and returns the double in st(0), as gcc calls it.
+ */
+static void emit_i386_load_half(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                const char *reg, int dst) {
+    int_regs_flush(fp, f, lay, ist);
+    fprintf(fp, "\tmovzwl (%s), %%eax\n", reg);
+    fprintf(fp, "\tsubl $12, %%esp\n");
+    fprintf(fp, "\tpushl %%eax\n");
+    fprintf(fp, "\tcall __extendhfdf2\n");
+    fprintf(fp, "\taddl $16, %%esp\n");
+    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, dst));
+}
+
+/**
+ * Store double value @p v as the `_Float16` at the address in register
+ * @p reg: libgcc's __truncdfhf2, which takes the double on the stack and
+ * returns the half in %xmm0, as gcc calls it.
+ */
+static void emit_i386_store_half(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                                 const char *reg, int v) {
+    int_regs_flush(fp, f, lay, ist);
+    fprintf(fp, "\tsubl $16, %%esp\n");
+    fprintf(fp, "\tmovl %s, 8(%%esp)\n", reg);
+    fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, v));
+    fprintf(fp, "\tfstpl (%%esp)\n");
+    fprintf(fp, "\tcall __truncdfhf2\n");
+    fprintf(fp, "\tmovl 8(%%esp), %%edx\n");
+    fprintf(fp, "\taddl $16, %%esp\n");
+    fprintf(fp, "\tmovd %%xmm0, %%eax\n");
+    fprintf(fp, "\tmovw %%ax, (%%edx)\n");
+}
+
 static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                        const cc_ssa_instr_t *in, int use_x87_fp) {
     long mem_size = in->imm > 0 ? in->imm : 8;
     int rp = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
 
+    if (mem_size == 2) {
+        emit_i386_load_half(fp, f, lay, ist, ist->regs[rp], in->dst);
+        return;
+    }
     if (use_x87_fp) {
         if (mem_size == 4) {
             fprintf(fp, "\tflds (%s)\n", ist->regs[rp]);
@@ -450,16 +489,7 @@ static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, con
         emit_i386_x87_store_f64(fp, f, lay, in->dst);
     } else {
         const char *tmp = i386_fp_tmp_reg();
-        if (mem_size == 2) {
-            int_regs_flush(fp, f, lay, ist);
-            fprintf(fp, "\tmovzwl (%s), %%eax\n", ist->regs[rp]);
-            fprintf(fp, "\tsubl $12, %%esp\n");
-            fprintf(fp, "\tmovl %%eax, (%%esp)\n");
-            fprintf(fp, "\tcall __extendhfdf2\n");
-            fprintf(fp, "\taddl $16, %%esp\n");
-            fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
-            return;
-        } else if (mem_size == 4) {
+        if (mem_size == 4) {
             fprintf(fp, "\tmovss (%s), %s\n", ist->regs[rp], tmp);
             fprintf(fp, "\tcvtss2sd %s, %s\n", tmp, tmp);
         } else if (mem_size >= 10) {
@@ -478,6 +508,10 @@ static void emit_i386_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, co
     long mem_size = in->imm > 0 ? in->imm : 8;
     int rp = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
 
+    if (mem_size == 2) {
+        emit_i386_store_half(fp, f, lay, ist, ist->regs[rp], in->rhs);
+        return;
+    }
     if (use_x87_fp) {
         emit_i386_x87_load_f64(fp, f, lay, in->rhs);
         if (mem_size == 4) {
@@ -489,17 +523,7 @@ static void emit_i386_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, co
         }
     } else {
         const char *tmp = i386_fp_tmp_reg();
-        if (mem_size == 2) {
-            int_regs_flush(fp, f, lay, ist);
-            fprintf(fp, "\tsubl $8, %%esp\n");
-            fprintf(fp, "\tmovl %s, 4(%%esp)\n", ist->regs[rp]);
-            fprintf(fp, "\tmovsd %d(%%ebp), %%xmm0\n", slot_off(lay, in->rhs));
-            fprintf(fp, "\tcall __truncdfhf2\n");
-            fprintf(fp, "\tmovl 4(%%esp), %%edx\n");
-            fprintf(fp, "\taddl $8, %%esp\n");
-            fprintf(fp, "\tmovd %%xmm0, %%eax\n");
-            fprintf(fp, "\tmovw %%ax, (%%edx)\n");
-        } else {
+        {
             fprintf(fp, "\tmovsd %d(%%ebp), %s\n", slot_off(lay, in->rhs), tmp);
             if (mem_size == 4) {
                 fprintf(fp, "\tcvtsd2ss %s, %s\n", tmp, tmp);

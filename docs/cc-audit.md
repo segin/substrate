@@ -570,11 +570,30 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   by the expression's interned type, and gives an array global its size
   from its interned type, which the emitter pads to.
   `native_array_of_array_pointers_size.c`.
-- [ ] **CC-95** A `_Float16` object shall hold the value it is
+- [x] **CC-95** A `_Float16` object shall hold the value it is
   initialized with, and `f16` shall be a floating suffix (C23 7.22,
-  Annex H): `_Float16 h = 1.5f;` at file scope is emitted as the integer
-  1 (`h` reads 5.96e-08; gcc 1.5), and `1.5f16` is rejected ("expected
-  ';' after declaration").  *Reproduced* (-m64).
+  Annex H): `_Float16 h = 1.5f;` at file scope was emitted as the integer
+  1 (`h` read 5.96e-08; gcc 1.5), and `1.5f16` was rejected ("expected
+  ';' after declaration").  *Reproduced* (-m64).  Three more were found
+  with it: every static floating array initialized by integers held their
+  bits, not their values (`float fa[2] = {1, -2};` read 1.4e-45 and NaN),
+  on both targets; on i386, `_Float16` loads and stores through memory
+  moved eight bytes as a double (the x87 path had no two-byte case); and
+  the i386 SSE path passed `__truncdfhf2` its argument in %xmm0 where
+  gcc passes it on the stack.  `_Float16` data is now floating data,
+  encoded by `cc_float16_bits()` (`common/util.c`, which also rounds a
+  subnormal up to the smallest normal and the values between 2^-25 and
+  2^-24 that the old encoder dropped); static array items are converted
+  to the element type; both i386 paths call the libgcc helpers as gcc
+  does; and the lexer reads `f16` (and `f32`, `f64`, `f128`, `f32x`,
+  `f64x`, as the parser maps those keywords).  `codegen/float16_data.c`.
+- [ ] **CC-107** `_Float32`, `_Float64`, `_Float128`, `_Float32x` and
+  `_Float64x` shall be types distinct from `float`, `double` and `long
+  double` (C23 6.2.5p10): cc makes `_Float32` an alias of `float`,
+  `_Float64` of `double` and the others of `long double`, so
+  `_Generic(1.0f32, float: 1, default: 0)` is 1 (gcc 0) and declarations
+  mixing the spellings are accepted as compatible.  *Reproduced* (both
+  targets); found while testing CC-95's suffixes, and present before.
 - [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
   as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
   object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
@@ -1076,7 +1095,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-106 requirements: 99 met, 7 open.
+107 requirements: 100 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

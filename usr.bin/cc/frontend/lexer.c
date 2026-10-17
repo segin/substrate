@@ -107,6 +107,43 @@ static int lx_peekn(const cc_lexer_t *lx, size_t n) {
     return (unsigned char)lx->src[lx->pos + n];
 }
 
+/**
+ * After a floating constant's `f`, read the rest of a C23 `_FloatN` suffix
+ * -- f16, f32, f64, f128, f32x, f64x -- and type the constant as the
+ * parser types those keywords: f16 _Float16, f32 float, f64 and f32x
+ * double, f128 and f64x long double.  A plain `f` reads nothing more.
+ *
+ * @param lx   the lexer, after the `f`
+ * @param out  the constant's token, float_is_single already set
+ */
+static void lex_floatn_suffix(cc_lexer_t *lx, cc_token_t *out) {
+    static const struct {
+        const char *digits;
+        int half;
+        int single;
+        int is_long;
+    } suffixes[] = {
+        {"16", 1, 0, 0}, {"32x", 0, 0, 0}, {"32", 0, 1, 0}, {"64x", 0, 0, 1}, {"64", 0, 0, 0}, {"128", 0, 0, 1},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
+        size_t n = strlen(suffixes[i].digits);
+        size_t k;
+
+        for (k = 0; k < n && lx_peekn(lx, k) == suffixes[i].digits[k]; ++k) {
+        }
+        if (k < n || is_ident_part_ascii(lx_peekn(lx, n))) {
+            continue;
+        }
+        out->float_is_half = suffixes[i].half;
+        out->float_is_single = suffixes[i].single;
+        out->float_is_long = suffixes[i].is_long;
+        lx_adv_n(lx, n);
+        return;
+    }
+}
+
 static int lx_at_directive_start(const cc_lexer_t *lx) {
     size_t i;
     if (lx->pos >= lx->len || lx->src[lx->pos] != '#') {
@@ -753,13 +790,17 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
         }
         if (out->float_is_decimal == 0 &&
             (lx_peek(lx) == 'f' || lx_peek(lx) == 'F' || lx_peek(lx) == 'l' || lx_peek(lx) == 'L')) {
-            if (lx_peek(lx) == 'f' || lx_peek(lx) == 'F') {
+            int is_f = lx_peek(lx) == 'f' || lx_peek(lx) == 'F';
+
+            if (is_f) {
                 out->float_is_single = 1;
-            }
-            if (lx_peek(lx) == 'l' || lx_peek(lx) == 'L') {
+            } else {
                 out->float_is_long = 1;
             }
             lx_adv(lx);
+            if (is_f) {
+                lex_floatn_suffix(lx, out);
+            }
         }
         if (!out->is_imaginary && is_imaginary_suffix_char(lx_peek(lx))) {
             out->is_imaginary = 1;
@@ -911,6 +952,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->int_is_bitprecise = 0;
     out->float_is_single = 0;
     out->float_is_long = 0;
+    out->float_is_half = 0;
     out->float_is_decimal = 0;
     out->int_is_unsigned = 0;
     out->int_is_long = 0;

@@ -57,4 +57,14 @@ int cc_strvec_contains(const cc_strvec_t *v, const char *s);
  */
 void cc_strvec_free(cc_strvec_t *v);
 
+/**
+ * The IEEE 754 binary16 encoding of @p value, as `_Float16` holds it:
+ * rounded to nearest, ties to even; overflow to infinity; values below
+ * 2^-14 as subnormals; infinities and NaNs (quiet) kept.
+ *
+ * @param value  the value
+ * @return       its 16 bits
+ */
+unsigned short cc_float16_bits(double value);
+
 #endif

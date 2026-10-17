@@ -6406,9 +6406,10 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
     if (p->tok.kind == TOK_NUM) {
         if (p->tok.is_float) {
-            cc_ctype_kind_t k = p->tok.float_is_single ? CC_CT_FLOAT
-                                : p->tok.float_is_long ? CC_CT_LDOUBLE
-                                                       : CC_CT_DOUBLE;
+            cc_ctype_kind_t k = p->tok.float_is_half     ? CC_CT_FLOAT16
+                                : p->tok.float_is_single ? CC_CT_FLOAT
+                                : p->tok.float_is_long   ? CC_CT_LDOUBLE
+                                                         : CC_CT_DOUBLE;
 
             e = new_const_expr(CC_EXPR_FLOAT, cc_ct_basic(k));
             if (e == NULL) {

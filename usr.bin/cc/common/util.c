@@ -1,9 +1,11 @@
 /*
- * util.c: string copies and string vectors, used throughout cc.
+ * util.c: string copies and string vectors, used throughout cc; the
+ * binary16 encoding lowering and the emitters write `_Float16` data in.
  */
 
 #include "cc_util.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -102,4 +104,59 @@ void cc_strvec_free(cc_strvec_t *v) {
     v->items = NULL;
     v->count = 0;
     v->cap = 0;
+}
+
+unsigned short cc_float16_bits(double value) {
+    union {
+        double d;
+        uint64_t u;
+    } cvt;
+    unsigned sign;
+    int exp;
+    uint64_t mant;
+    uint64_t q;
+    uint64_t rem;
+    uint64_t half;
+    int shift;
+
+    cvt.d = value;
+    sign = (unsigned)(cvt.u >> 63) << 15;
+    exp = (int)((cvt.u >> 52) & 0x7ff);
+    mant = cvt.u & ((1ULL << 52) - 1);
+    if (exp == 0x7ff) {
+        /* infinity, or a NaN: its top payload bits, never all zero */
+        unsigned payload = (unsigned)(mant >> 42);
+
+        return (unsigned short)(sign | 0x7c00 | (mant != 0 && payload == 0 ? 1 : payload));
+    }
+    if (exp == 0) {
+        /* zero, or a double subnormal: far below the smallest half */
+        return (unsigned short)sign;
+    }
+    mant |= 1ULL << 52;      /* the 53-bit significand */
+    exp -= 1023 - 15;        /* the half's biased exponent */
+    /* a normal half keeps 11 significant bits; a subnormal fewer, one less per step below 1 */
+    shift = 42 + (exp < 1 ? 1 - exp : 0);
+    if (shift > 63) {
+        return (unsigned short)sign;
+    }
+    q = mant >> shift;
+    rem = mant & ((1ULL << shift) - 1);
+    half = 1ULL << (shift - 1);
+    if (rem > half || (rem == half && (q & 1) != 0)) {
+        q++;
+    }
+    if (exp < 1) {
+        /* a subnormal, or the smallest normal (0x400) when it rounds up */
+        return (unsigned short)(sign | (unsigned)q);
+    }
+    if (q == 0x800) {
+        /* the rounding carried out of the significand */
+        q = 0x400;
+        exp++;
+    }
+    if (exp >= 0x1f) {
+        return (unsigned short)(sign | 0x7c00);
+    }
+    return (unsigned short)(sign | ((unsigned)exp << 10) | (unsigned)(q & 0x3ff));
 }
