@@ -1199,7 +1199,6 @@ static int is_pointer_type(cc_type_t t) {
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
-static long type_size_bytes(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
     return (int)cc_type_pointer_depth(t);
@@ -1802,87 +1801,8 @@ static builtin_kind_t builtin_kind(const char *name) {
 }
 
 /**
- * Size of a type known from its kind alone.
- *
- * @param t  the type
- * @return   the size in bytes of a scalar type; the pointer size for
- *           `_BitInt`, `_Atomic` and function types, whose real size
- *           this kind does not carry; -1 for anything else
- */
-static long type_size_bytes(cc_type_t t) {
-    long n = cc_type_scalar_size(t);
-
-    if (n >= 0) {
-        return n;
-    }
-    if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
-        return cc_target_pointer_size();
-    }
-    return -1;
-}
-
-static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
-    if (t == CC_TYPE_ATOMIC) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return type_size_bytes_struct(tu, (cc_type_t)struct_id, -1);
-    }
-    if (t == CC_TYPE_BITINT) {
-        return cc_bitint_size(struct_id);
-    }
-    long n = type_size_bytes(t);
-    if (n > 0) {
-        return n;
-    }
-    if (t == CC_TYPE_VOID && tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count &&
-        tu->structs[struct_id].complete) {
-        return tu->structs[struct_id].size;
-    }
-    return -1;
-}
-
-static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
-                                  const long array_dims[CC_MAX_ARRAY_DIMS]) {
-    cc_type_t elem_type;
-    int elem_struct_id;
-    long elem_size;
-    long count = 1;
-    int i;
-
-    if (array_ndim <= 0) {
-        return type_size_bytes_struct(tu, t, struct_id);
-    }
-    elem_type = t;
-    elem_struct_id = struct_id;
-    if (is_pointer_type(t)) {
-        for (i = 0; i < array_ndim; ++i) {
-            elem_type = ptr_base_type(elem_type);
-            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID && !is_pointer_type(elem_type)) {
-                elem_struct_id = -1;
-            }
-        }
-    }
-    elem_size = type_size_bytes_struct(tu, elem_type, elem_struct_id);
-    if (elem_size <= 0) {
-        return -1;
-    }
-    for (i = 0; i < array_ndim; ++i) {
-        long d = array_dims != NULL ? array_dims[i] : 0;
-        if (d <= 0 || count > LONG_MAX / d) {
-            return -1;
-        }
-        count *= d;
-    }
-    if (elem_size > LONG_MAX / count) {
-        return -1;
-    }
-    return elem_size * count;
-}
-
-/**
  * The size in bytes of a sizeof expression, for the constant evaluator:
- * of a string literal, an array, or any other expression or type.
+ * of the type named, or of the (checked) operand's type.
  *
  * @param ctx  the translation unit
  * @param e    the CC_EXPR_SIZEOF node
@@ -1891,23 +1811,7 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
 static long sema_const_sizeof(void *ctx, const cc_expr_t *e) {
     const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
 
-    if (e->lhs == NULL) {
-        return cc_ct_sizeof_type(e->aux_ctype, tu);
-    }
-    if (e->lhs->kind == CC_EXPR_STR) {
-        int wide = cc_string_literal_is_wide(e->lhs);
-        size_t units = decoded_string_unit_count(e->lhs, wide);
-        cc_type_t elem_type = ptr_base_type(e->lhs->value_type);
-        long elem_size = type_size_bytes_struct(tu, elem_type, e->lhs->struct_id);
-        if (units < (size_t)LONG_MAX && elem_size > 0 && (long)(units + 1) <= LONG_MAX / elem_size) {
-            return (long)(units + 1) * elem_size;
-        }
-    }
-    if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
-        return array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim,
-                                     e->lhs->array_dims);
-    }
-    return type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+    return e->lhs == NULL ? cc_ct_sizeof_type(e->aux_ctype, tu) : cc_ct_size(e->lhs->ctype, tu);
 }
 
 
@@ -6907,6 +6811,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 }
                 if (ci->kind != CC_STMT_CASE) {
                     continue;
+                }
+                if (ci->expr == NULL || check_expr(tu, ci->expr, *vars, *var_count, depth, diag) != 0) {
+                    return -1;
                 }
                 if (eval_const_int_expr(tu, ci->expr, &vi) != 0) {
                     set_diag(diag, "case label must be an integer constant expression");
