@@ -24,5 +24,20 @@ int main(void) {
            (unsigned)sizeof harr);
     printf("%u %u %u %u\n", (unsigned)sizeof(L"ab" "cd"), (unsigned)sizeof(u"ab"), (unsigned)sizeof(U"\U0001F600z"),
            (unsigned)sizeof(L"\u00e9"));
+    /* a universal character name is one character: UTF-8 bytes in a narrow literal, a surrogate pair in u"" */
+    {
+        __typeof__(u"\U0001F600") t16;
+        __typeof__(U"\U0001F600z") t32;
+
+        const char *n8 = "a\u00e9\u20ac\U0001F600";
+        int k;
+
+        printf("%u %u %u %u\n", (unsigned)sizeof("\u00e9"), (unsigned)sizeof(u"\U0001F600"), (unsigned)sizeof t16,
+               (unsigned)sizeof t32);
+        for (k = 0; n8[k] != '\0'; ++k) {
+            printf("%02x ", (unsigned char)n8[k]);
+        }
+        printf("%u\n", (unsigned)sizeof("a\u00e9\u20ac\U0001F600"));
+    }
     return 0;
 }

@@ -8,6 +8,10 @@
 
 #include "cc_types.h"
 
+#include <ctype.h>
+#include <limits.h>
+#include <string.h>
+
 /**
  * Look up the layout of a scalar type on a target.
  *
@@ -155,6 +159,107 @@ int cc_string_literal_is_wide(const cc_expr_t *e) {
     default:
         return 0;
     }
+}
+
+/**
+ * The length of the UTF-8 sequence a byte starts.
+ *
+ * @param b0  the first byte
+ * @return    1 to 4; 1 for a byte no sequence starts with
+ */
+static size_t utf8_seq_len(unsigned char b0) {
+    if ((b0 & 0x80u) == 0) return 1;
+    if ((b0 & 0xE0u) == 0xC0u) return 2;
+    if ((b0 & 0xF0u) == 0xE0u) return 3;
+    if ((b0 & 0xF8u) == 0xF0u) return 4;
+    return 1;
+}
+
+/**
+ * The number of elements of the array a string literal is.  See
+ * cc_types.h.
+ *
+ * @param e  a CC_EXPR_STR expression
+ * @return   the bound, or 0
+ */
+long cc_string_literal_units(const cc_expr_t *e) {
+    const unsigned char *s;
+    size_t n;
+    size_t i;
+    size_t units;
+    int wide;
+    int utf16;
+
+    if (e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
+        return 0;
+    }
+    s = (const unsigned char *)e->ident;
+    n = strlen(e->ident);
+    if (n < 2 || s[0] != '"' || s[n - 1] != '"') {
+        return 0;
+    }
+    wide = cc_string_literal_is_wide(e);
+    utf16 = e->aux_type == CC_TYPE_USHORT;
+    i = 1;
+    n -= 1;
+    units = 0;
+    while (i < n) {
+        if (s[i] == '\\') {
+            i++;
+            if (i >= n) {
+                return 0;
+            }
+            if (s[i] == 'x') {
+                i++;
+                while (i < n && isxdigit(s[i])) {
+                    i++;
+                }
+            } else if (s[i] >= '0' && s[i] <= '7') {
+                int k = 0;
+                while (i < n && k < 3 && s[i] >= '0' && s[i] <= '7') {
+                    i++;
+                    k++;
+                }
+            } else if (s[i] == 'u' || s[i] == 'U') {
+                /* a universal character name: one character, encoded as the literal's element type encodes it */
+                int digits = s[i] == 'u' ? 4 : 8;
+                unsigned long cp = 0;
+                int k;
+
+                i++;
+                for (k = 0; k < digits && i < n && isxdigit(s[i]); ++k, ++i) {
+                    cp = cp * 16 + (unsigned long)(isdigit(s[i]) ? s[i] - '0' : (tolower(s[i]) - 'a' + 10));
+                }
+                if (!wide) {
+                    units += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+                } else {
+                    units += (utf16 && cp > 0xFFFF) ? 2 : 1;
+                }
+                continue;
+            } else {
+                i++;
+            }
+            units++;
+            continue;
+        }
+        if (!wide) {
+            i++;
+            units++;
+            continue;
+        }
+        {
+            /* a source character in UTF-8: one element, or a surrogate pair in UTF-16 beyond the BMP */
+            size_t adv = utf8_seq_len(s[i]);
+            if (adv == 0) adv = 1;
+            if (i + adv > n) adv = 1;
+            i += adv;
+            units += (utf16 && adv == 4) ? 2 : 1;
+        }
+    }
+    if (units >= (size_t)LONG_MAX) {
+        return 0;
+    }
+    return (long)units + 1;
 }
 
 /**

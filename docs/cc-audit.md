@@ -466,6 +466,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   it spells as binary operators, so they keep the operand's type), and
   lowering wraps to N bits wherever a value is converted.
   `codegen/const_expr.c`, `codegen/bitint_narrow.c`.
+- [x] **CC-82** A universal character name in a string literal shall be
+  one character: its UTF-8 bytes in a narrow literal, one element in a
+  wide one, a surrogate pair in `u""` beyond the BMP.  A narrow literal
+  dropped the backslash -- `"é"` held the five bytes `u00e9`, not
+  `c3 a9` -- and the size of a literal counted each hex digit of a
+  `\u`/`\U` as a character, so `sizeof(u"\U0001F600")` was 4 and the
+  type `typeof(u"\U0001F600")` 20 bytes, not 6.  *Reproduced* (both
+  targets).  The parser encodes the name in UTF-8; one counter,
+  `cc_string_literal_units()`, measures every literal, and sema gives a
+  literal its array type from it.  `codegen/wide_string_literals.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -878,7 +888,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-81 requirements: 81 met, 0 open.
+82 requirements: 82 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

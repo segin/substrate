@@ -56,6 +56,16 @@ long cc_bitint_align(long width);
 int cc_string_literal_is_wide(const cc_expr_t *e);
 
 /**
+ * The number of elements of the array a string literal is: its
+ * characters (each escape one, each UTF-8 sequence one in a wide
+ * literal) and the terminating null.
+ *
+ * @param e  a CC_EXPR_STR expression
+ * @return   the bound, or 0 if @p e is not a quoted string literal
+ */
+long cc_string_literal_units(const cc_expr_t *e);
+
+/**
  * The pointer type a string literal of a given element type decays to:
  * `char *`, `char16_t *` (unsigned short), `wchar_t *` (int) or
  * `char32_t *` (unsigned int).

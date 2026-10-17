@@ -1133,7 +1133,7 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
     if (e->lhs == NULL) {
         return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
     }
-    if (e->lhs->ctype != NULL && e->lhs->kind != CC_EXPR_STR) {
+    if (e->lhs->ctype != NULL) {
         /* the operand's type as sema recorded it, an array's whole size included */
         long n = cc_ct_size(e->lhs->ctype, tu);
 
@@ -2638,8 +2638,8 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
     if (e == NULL) {
         return -1;
     }
-    /* the real type, where sema has found it, is the answer; a string literal's is measured below */
-    real_size = e->kind == CC_EXPR_STR ? -1 : cc_ct_size(e->ctype != NULL ? e->ctype : cc_ct_of_expr(e), tu);
+    /* the real type, where sema has found it, is the answer */
+    real_size = cc_ct_size(e->ctype != NULL ? e->ctype : cc_ct_of_expr(e), tu);
     if (real_size > 0) {
         return real_size;
     }

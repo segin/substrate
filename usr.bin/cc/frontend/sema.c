@@ -3832,6 +3832,14 @@ static void sema_settle_ctype(cc_expr_t *e) {
     if (e->ctype == NULL) {
         e->ctype = sema_pointer_shape_ctype(e);
     }
+    if (e->ctype == NULL && e->kind == CC_EXPR_STR) {
+        /* an array of its characters and the null, not the pointer the encoding gives it */
+        long n = cc_string_literal_units(e);
+
+        if (n > 0) {
+            e->ctype = cc_ct_array(cc_ct_from_scalar(e->aux_type != CC_TYPE_VOID ? e->aux_type : CC_TYPE_CHAR), n);
+        }
+    }
     /*
      * Where a declaration gives the type, none recorded for a pointer
      * means not known: the encoding would guess, and it spells a function

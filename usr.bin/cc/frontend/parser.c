@@ -4777,6 +4777,43 @@ static char *canonicalize_narrow_string_token(const cc_token_t *tok) {
     while (i < end) {
         unsigned ch;
         size_t adv = 1;
+        if (s[i] == '\\' && i + 1 < end && (s[i + 1] == 'u' || s[i + 1] == 'U')) {
+            /* a universal character name: the character's UTF-8 bytes, the execution character set's encoding */
+            int digits = s[i + 1] == 'u' ? 4 : 8;
+            unsigned long cp = 0;
+            unsigned char bytes[4];
+            int nb;
+            int k;
+
+            i += 2;
+            for (k = 0; k < digits && i < end && parser_hex_value(s[i]) >= 0; ++k, ++i) {
+                cp = (cp << 4) | (unsigned long)parser_hex_value(s[i]);
+            }
+            if (cp < 0x80) {
+                bytes[0] = (unsigned char)cp;
+                nb = 1;
+            } else if (cp < 0x800) {
+                bytes[0] = (unsigned char)(0xC0 | (cp >> 6));
+                bytes[1] = (unsigned char)(0x80 | (cp & 0x3F));
+                nb = 2;
+            } else if (cp < 0x10000) {
+                bytes[0] = (unsigned char)(0xE0 | (cp >> 12));
+                bytes[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+                bytes[2] = (unsigned char)(0x80 | (cp & 0x3F));
+                nb = 3;
+            } else {
+                bytes[0] = (unsigned char)(0xF0 | (cp >> 18));
+                bytes[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+                bytes[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+                bytes[3] = (unsigned char)(0x80 | (cp & 0x3F));
+                nb = 4;
+            }
+            for (k = 0; k < nb; ++k) {
+                snprintf(out + w, cap - w, "\\%03o", bytes[k]);
+                w += 4;
+            }
+            continue;
+        }
         if (s[i] == '\\') {
             i++;
             if (i >= end) {
@@ -4823,73 +4860,8 @@ static cc_type_t string_token_char_type(const parser_t *p, const cc_token_t *tok
     return CC_TYPE_CHAR;
 }
 
-static size_t parser_utf8_seq_len(unsigned char b0) {
-    if ((b0 & 0x80u) == 0) return 1;
-    if ((b0 & 0xE0u) == 0xC0u) return 2;
-    if ((b0 & 0xF0u) == 0xE0u) return 3;
-    if ((b0 & 0xF8u) == 0xF0u) return 4;
-    return 1;
-}
-
 static long parser_string_literal_array_bound(const cc_expr_t *e) {
-    const unsigned char *s;
-    size_t n;
-    size_t i;
-    size_t units;
-    int wide;
-
-    if (e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
-        return 0;
-    }
-    s = (const unsigned char *)e->ident;
-    n = strlen(e->ident);
-    if (n < 2 || s[0] != '"' || s[n - 1] != '"') {
-        return 0;
-    }
-    wide = cc_string_literal_is_wide(e);
-    i = 1;
-    n -= 1;
-    units = 0;
-    while (i < n) {
-        if (s[i] == '\\') {
-            i++;
-            if (i >= n) {
-                return 0;
-            }
-            if (s[i] == 'x') {
-                i++;
-                while (i < n && isxdigit(s[i])) {
-                    i++;
-                }
-            } else if (s[i] >= '0' && s[i] <= '7') {
-                int k = 0;
-                while (i < n && k < 3 && s[i] >= '0' && s[i] <= '7') {
-                    i++;
-                    k++;
-                }
-            } else {
-                i++;
-            }
-            units++;
-            continue;
-        }
-        if (!wide) {
-            i++;
-            units++;
-            continue;
-        }
-        {
-            size_t adv = parser_utf8_seq_len(s[i]);
-            if (adv == 0) adv = 1;
-            if (i + adv > n) adv = 1;
-            i += adv;
-            units++;
-        }
-    }
-    if (units >= (size_t)LONG_MAX) {
-        return 0;
-    }
-    return (long)units + 1;
+    return cc_string_literal_units(e);
 }
 
 static long parser_struct_next_init_member_index(const cc_struct_def_t *sd, size_t member_idx) {
