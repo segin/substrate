@@ -9403,13 +9403,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
             const cc_function_t *f = parser_find_function_decl(p, e->lhs->ident);
-            if (f != NULL) {
-                pty = ptr_of_type(f->ret_type);
-                if (pty != CC_TYPE_VOID) {
-                    e->value_type = pty;
-                    e->struct_id = type_carries_struct_id(pty) ? f->ret_struct_id : -1;
-                    return e;
-                }
+            if (f != NULL && f->ret_ctype != NULL) {
+                /* the legacy encoding takes a function for its return type */
+                parser_scalar_legacy(cc_ct_pointer(f->ret_ctype), &e->value_type, &e->struct_id);
+                return e;
             }
         }
         pty = ptr_of_type(e->lhs->value_type);
@@ -10404,8 +10401,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             memset(&fn_decl, 0, sizeof(fn_decl));
             fn_decl.line = s.line;
             fn_decl.col = s.col;
-            fn_decl.ret_type = s.type;
-            fn_decl.ret_struct_id = s.type_struct_id;
+            fn_decl.ret_ctype = s.ctype; /* the declarator ended at the name: the specifiers' type */
             fn_decl.storage = s.storage;
             fn_decl.attr_flags = s.attr_flags;
             fn_decl.attr_align = s.attr_align;
@@ -11562,11 +11558,10 @@ static int parse_function_params(parser_t *p, void *ctx) {
  * parse_function_params()), and whatever the declarator wraps around
  * them -- `int (*f(void))[4]` returns a pointer to an array,
  * `int (*(*f(void))(int))(int)` a pointer to a function returning a
- * function pointer.  Gives the return type as a type and in the legacy
- * encoding.
+ * function pointer.
  *
  * @param p          the parser, at the declarator
- * @param f          the function; receives name, params, ret_type, ret_ctype
+ * @param f          the function; receives name, params and ret_ctype
  * @param ftype      the specifiers' type, legacy encoding
  * @param ftype_sid  its struct id
  * @param alias      the type of the typedef name the specifiers were, or
@@ -11577,10 +11572,8 @@ static int parse_function_declarator(parser_t *p, cc_function_t *f, cc_type_t ft
                                      const cc_ctype_t *alias) {
     declarator_t d;
     const cc_ctype_t *t;
-    cc_ct_legacy_t leg;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
-    unsigned k;
 
     memset(&d, 0, sizeof(d));
     d.name_params = parse_function_params;
@@ -11594,20 +11587,6 @@ static int parse_function_declarator(parser_t *p, cc_function_t *f, cc_type_t ft
         set_diag(p->diag, line, col, d.name == NULL ? "expected function name" : "expected '(' after function name");
         declarator_free(&d);
         return -1;
-    }
-    if (cc_ct_to_legacy(t->of, &leg) != 0) {
-        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
-        declarator_free(&d);
-        return -1;
-    }
-    f->ret_type = leg.base;
-    for (k = 0; k < leg.depth; ++k) {
-        f->ret_type = ptr_of_type(f->ret_type);
-        if (f->ret_type == CC_TYPE_VOID) {
-            set_ptr_depth_diag(p, __LINE__);
-            declarator_free(&d);
-            return -1;
-        }
     }
     f->ret_ctype = t->of;
     f->name = d.name;
@@ -11668,7 +11647,6 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         decl_attrs_clear(&spec_attrs);
         return -1;
     }
-    f->ret_struct_id = ftype_sid;
     f->storage = fn_storage;
     if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_STATIC) == 0 && cc_options_gnu89_inline()) {
         /*

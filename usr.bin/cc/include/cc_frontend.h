@@ -482,9 +482,7 @@ typedef struct {
     char *name;
     size_t line;
     size_t col;
-    cc_type_t ret_type;
-    int ret_struct_id;
-    const struct cc_ctype *ret_ctype; /**< the return type, where the declarator recorded it; else NULL */
+    const struct cc_ctype *ret_ctype; /**< the return type */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;

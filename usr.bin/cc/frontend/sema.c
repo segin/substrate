@@ -1535,7 +1535,7 @@ static const cc_function_t *infer_callee_function_expr(const cc_translation_unit
         if (a == NULL || b == NULL) {
             return NULL;
         }
-        if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id) {
+        if (a->ret_ctype != b->ret_ctype) {
             return NULL;
         }
         return a;
@@ -7324,7 +7324,7 @@ fail_global_item:
             }
         }
         if ((f->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
-            if (!(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
+            if (f->ret_ctype == NULL || f->ret_ctype->unqual->kind != CC_CT_VOID) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message),
                              "constructor/destructor function '%s' must have void return type", f->name);
