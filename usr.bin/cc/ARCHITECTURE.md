@@ -40,7 +40,8 @@ usr.bin/cc/
 │   ├── ir.c / ir.h          # Module representation
 │   ├── parse.c              # Text -> module
 │   ├── verify.c             # CFG and SSA invariants (terminators, phi arity, dominance, reachability)
-│   │                        # and the opcode table: each opcode's form and its operands' type classes
+│   │                        # and the opcode table: each opcode's form and its operands' type classes,
+│   │                        # and for neutral IR (`stage neutral`) the integer width rules
 │   ├── serialize.c          # Module -> text, optionally with value names normalized
 │   ├── ir-verifier.c        # Tool: parse and verify
 │   ├── ir-normalize.c       # Tool: parse, verify, print normalized

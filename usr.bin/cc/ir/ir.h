@@ -53,6 +53,7 @@ typedef struct {
 typedef struct {
     char *name;
     char *target;
+    int legal;          /**< `stage legal`: legalized for the target, exempt from the integer width rules */
     ir_func_t *funcs;
     size_t func_count;
     size_t func_cap;

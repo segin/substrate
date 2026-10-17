@@ -1,5 +1,6 @@
 module "ir/arith.c" {
   target lp64;
+  stage legal;
 
   func @narrow : fn(i32, i32) -> i64 {
   entry:

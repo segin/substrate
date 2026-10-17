@@ -46,6 +46,11 @@ test:
 	grep -q "unknown opcode 'frobnicate'" $(CC_TMP)/cc_ir_op.log
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_operand_count.ir 2>$(CC_TMP)/cc_ir_count.log
 	grep -q "icmp takes two operands" $(CC_TMP)/cc_ir_count.log
+	$(TOP)/usr.bin/cc/ir-verifier valid_width.ir
+	! $(TOP)/usr.bin/cc/ir-verifier invalid_width_narrowing.ir 2>$(CC_TMP)/cc_ir_narrow.log
+	grep -q "add: operand %a is wider than the operation" $(CC_TMP)/cc_ir_narrow.log
+	! $(TOP)/usr.bin/cc/ir-verifier invalid_width_crossing.ir 2>$(CC_TMP)/cc_ir_cross.log
+	grep -q "add: operand %b is narrower than the word-crossing operation" $(CC_TMP)/cc_ir_cross.log
 	$(TOP)/usr.bin/cc/ir-normalize valid.ir > $(CC_TMP)/cc_valid.norm
 	$(TOP)/usr.bin/cc/ir-diff valid_equiv_a.ir valid_equiv_b.ir
 	$(TOP)/usr.bin/cc/cc -E -DTESTVAL=7 driver_pp_input.c -o $(CC_TMP)/cc_driver.pp

@@ -1,5 +1,6 @@
 module "ir/calls.c" {
   target lp64;
+  stage legal;
 
   func @twice : fn(i32) -> i64 {
   entry:

@@ -1,5 +1,6 @@
 module "ir/control.c" {
   target lp64;
+  stage legal;
 
   func @sum : fn(i32) -> i64 {
   entry:
@@ -100,11 +101,11 @@ module "ir/control.c" {
     %v4 = load i32 4, %v1;
     br L4;
   L4:
-    %v5 = const i64 1;
+    %v5 = const i32 1;
     %v6 = icmp eq i32 %v4, %v5;
     br_cond i32 %v6, L1, L5;
   L5:
-    %v7 = const i64 2;
+    %v7 = const i32 2;
     %v8 = icmp eq i32 %v4, %v7;
     br_cond i32 %v8, L2, L3;
   L1:

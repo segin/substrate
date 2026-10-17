@@ -1,5 +1,6 @@
 module "ir/agg.c" {
   target ilp32;
+  stage legal;
 
   func @mk : fn(i32) -> i64 {
   entry:

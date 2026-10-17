@@ -99,6 +99,9 @@ int ir_serialize_module(const ir_module_t *m, FILE *out, int normalize_ids) {
     if (m->target != NULL) {
         fprintf(out, "  target %s;\n", m->target);
     }
+    if (m->legal) {
+        fputs("  stage legal;\n", out);
+    }
 
     for (i = 0; i < m->func_count; ++i) {
         size_t b;

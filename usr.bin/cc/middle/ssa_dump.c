@@ -768,12 +768,12 @@ static int dump_function(const cc_ssa_function_t *f, FILE *out) {
     return 0;
 }
 
-int cc_ssa_dump_module(const cc_ssa_module_t *m, const char *name, int pointer_size, FILE *out) {
+int cc_ssa_dump_module(const cc_ssa_module_t *m, const char *name, int pointer_size, int legal, FILE *out) {
     size_t i;
 
     fputs("module ", out);
     put_escaped(out, name);
-    fprintf(out, " {\n  target %s;\n", pointer_size >= 8 ? "lp64" : "ilp32");
+    fprintf(out, " {\n  target %s;\n  stage %s;\n", pointer_size >= 8 ? "lp64" : "ilp32", legal ? "legal" : "neutral");
     for (i = 0; i < m->global_count; ++i) {
         const cc_ssa_global_t *g = &m->globals[i];
 

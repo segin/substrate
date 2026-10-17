@@ -521,6 +521,12 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
             continue;
         }
 
+        if (strncmp(p, "stage", 5) == 0 && curf == NULL) {
+            /* stage neutral (the default) or stage legal */
+            out->legal = strstr(p, "legal") != NULL;
+            continue;
+        }
+
         if (strncmp(p, "target", 6) == 0) {
             if (parse_target(out, p) != 0) {
                 set_err(err, line, "failed parsing target");

@@ -1,0 +1,9 @@
+module "m" {
+  target ilp32;
+  # on a 32-bit target an i64 add of an i32 operand crosses the word: widening needs a conversion
+  func @bad : fn(i64 %a, i32 %b) -> i64 {
+  entry:
+    %c = add i64 %a, %b;
+    ret i64 %c;
+  }
+}

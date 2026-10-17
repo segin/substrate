@@ -1,0 +1,9 @@
+module "m" {
+  target lp64;
+  # an i32 add of an i64 operand: narrowing needs a conversion (sext/zext)
+  func @bad : fn(i64 %a, i32 %b) -> i32 {
+  entry:
+    %c = add i32 %a, %b;
+    ret i32 %c;
+  }
+}

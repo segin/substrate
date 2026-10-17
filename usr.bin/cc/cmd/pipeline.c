@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 static double now_seconds(void) {
@@ -43,7 +44,10 @@ static int dump_ir_after(const cc_ssa_module_t *ssa, const cc_options_t *opts, c
         snprintf(path, sizeof(path), "%s.ir", opts->dump_ir);
     }
     fp = fopen(path, "w");
-    rc = fp != NULL ? cc_ssa_dump_module(ssa, display_src, opts->target == CC_TARGET_I386 ? 4 : 8, fp) : -1;
+    /* lowering's output is neutral; legalization and every pass after it give legal IR */
+    rc = fp != NULL ? cc_ssa_dump_module(ssa, display_src, opts->target == CC_TARGET_I386 ? 4 : 8,
+                                         strcmp(pass, "lower") != 0, fp)
+                    : -1;
     if (fp != NULL && fclose(fp) != 0) {
         rc = -1;
     }

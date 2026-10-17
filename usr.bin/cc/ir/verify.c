@@ -415,6 +415,91 @@ static type_class_t operand_class(const ir_func_t *f, const def_loc_t *defs, siz
     return t != NULL ? type_class(t) : TC_ANY;
 }
 
+/** The size in bytes of type @p t (i1 is a byte), or 0 when it has none. */
+static long type_width(const char *t) {
+    long n;
+
+    if (t[0] == 'i' || t[0] == 'f') {
+        n = atol(t + 1);
+        return n == 80 ? 10 : (n + 7) / 8;
+    }
+    if (strncmp(t, "agg", 3) == 0) {
+        return atol(t + 3);
+    }
+    if (strcmp(t, "ptr") == 0) {
+        return -1; /* the word, whatever it is */
+    }
+    return 0;
+}
+
+/**
+ * The size of value operand @p name, as its definition or the function's
+ * header types it; 0 when that is not known.
+ */
+static long operand_width(const ir_func_t *f, const def_loc_t *defs, size_t def_count, const char *name, long word) {
+    def_loc_t d;
+    size_t i;
+    tokens_t tk;
+    const char *t = NULL;
+    long w;
+
+    for (i = 0; i < f->arg_count; ++i) {
+        if (strcmp(f->args[i], name) == 0) {
+            t = f->arg_types != NULL ? f->arg_types[i] : NULL;
+            break;
+        }
+    }
+    if (i == f->arg_count && find_def(defs, def_count, name, &d)) {
+        t = result_type(&f->blocks[d.block_idx].instrs[d.instr_idx], &tk);
+    }
+    if (t == NULL) {
+        return 0;
+    }
+    w = type_width(t);
+    return w < 0 ? word : w;
+}
+
+/*
+ * The integer model the width checks hold the IR to.  An integer value
+ * narrower than the word (the target's pointer size) is held sign- or
+ * zero-extended to the word, so it may be an operand of an operation on
+ * any integer up to the word: C's integer promotions, which cost nothing.
+ * Every other change of width is an explicit conversion: making a value
+ * narrower (sext/zext of its low bits), and widening past the word (an
+ * i386 i64 from an i32).
+ */
+
+/**
+ * Check an integer operand's width against an operation's: no wider than
+ * it, and narrower only up to the word.
+ *
+ * @param width  the operation's width in bytes
+ * @return       0, or -1 with @p err set
+ */
+static int check_int_operand_width(const ir_func_t *f, const def_loc_t *defs, size_t def_count, const ir_instr_t *in,
+                                   const char *s, long width, long word, ir_error_t *err) {
+    long w;
+
+    if (word <= 0 || s[0] != '%' || operand_class(f, defs, def_count, s + 1) != TC_INT) {
+        return 0;
+    }
+    w = operand_width(f, defs, def_count, s + 1, word);
+    if (w == 0 || w == width) {
+        return 0;
+    }
+    if (w > width) {
+        set_errf(err, in->line, "%s: operand %s is wider than the operation; narrowing needs a conversion",
+                 in->opcode, s);
+        return -1;
+    }
+    if (width > word) {
+        set_errf(err, in->line, "%s: operand %s is narrower than the word-crossing operation; widening needs a conversion",
+                 in->opcode, s);
+        return -1;
+    }
+    return 0;
+}
+
 /** Whether token @p s is a literal number. */
 static int is_literal(const char *s) {
     char *end;
@@ -454,13 +539,15 @@ static int check_operand(const ir_func_t *f, const def_loc_t *defs, size_t def_c
 
 /**
  * Check one instruction against the opcode table: a known opcode, a
- * well-formed type of the right class, and operands of the right class
- * and number.
+ * well-formed type of the right class, operands of the right class and
+ * number, and integer operands of widths the integer model allows.
  *
- * @return 0, or -1 with @p err set
+ * @param word  the target's word (pointer) size in bytes; 0 for legal IR,
+ *              whose widths are the target's business
+ * @return      0, or -1 with @p err set
  */
 static int check_instr_types(const ir_func_t *f, const def_loc_t *defs, size_t def_count, const ir_instr_t *in,
-                             ir_error_t *err) {
+                             long word, ir_error_t *err) {
     const op_info_t *op = op_lookup(in->opcode);
     tokens_t tk;
     size_t i;
@@ -532,10 +619,34 @@ static int check_instr_types(const ir_func_t *f, const def_loc_t *defs, size_t d
                 return -1;
             }
         }
-        return check_operand(f, defs, def_count, in, tk.tok[i], op->operand, 1, err) != 0 ||
-                       check_operand(f, defs, def_count, in, tk.tok[i + 1], op->operand, 1, err) != 0
-                   ? -1
-                   : 0;
+        if (check_operand(f, defs, def_count, in, tk.tok[i], op->operand, 1, err) != 0 ||
+            check_operand(f, defs, def_count, in, tk.tok[i + 1], op->operand, 1, err) != 0) {
+            return -1;
+        }
+        if (op->form == FORM_BINARY && tc == TC_INT) {
+            /* a shift's count may be any width */
+            int counted = strcmp(in->opcode, "shl") == 0 || strcmp(in->opcode, "lshr") == 0 ||
+                          strcmp(in->opcode, "ashr") == 0;
+            long width = type_width(tk.tok[i - 1]);
+
+            return check_int_operand_width(f, defs, def_count, in, tk.tok[i], width, word, err) != 0 ||
+                           (!counted &&
+                            check_int_operand_width(f, defs, def_count, in, tk.tok[i + 1], width, word, err) != 0)
+                       ? -1
+                       : 0;
+        }
+        if (op->form == FORM_CMP && tc == TC_INT) {
+            /* compared at the wider operand's width */
+            long wa = tk.tok[i][0] == '%' ? operand_width(f, defs, def_count, tk.tok[i] + 1, word) : 0;
+            long wb = tk.tok[i + 1][0] == '%' ? operand_width(f, defs, def_count, tk.tok[i + 1] + 1, word) : 0;
+            long width = wa > wb ? wa : wb;
+
+            return check_int_operand_width(f, defs, def_count, in, tk.tok[i], width, word, err) != 0 ||
+                           check_int_operand_width(f, defs, def_count, in, tk.tok[i + 1], width, word, err) != 0
+                       ? -1
+                       : 0;
+        }
+        return 0;
     case FORM_UNARY:
         if (tk.count != i + 1) {
             set_errf(err, in->line, "%s takes one operand", in->opcode);
@@ -575,10 +686,20 @@ static int check_instr_types(const ir_func_t *f, const def_loc_t *defs, size_t d
             return -1;
         }
         if (op->form == FORM_STORE) {
-            return check_operand(f, defs, def_count, in, tk.tok[i + 1], tc, 1, err) != 0 ||
-                           check_operand(f, defs, def_count, in, tk.tok[i + 2], op->operand, 0, err) != 0
-                       ? -1
-                       : 0;
+            long vw = tk.tok[i + 1][0] == '%' ? operand_width(f, defs, def_count, tk.tok[i + 1] + 1, word) : 0;
+
+            if (check_operand(f, defs, def_count, in, tk.tok[i + 1], tc, 1, err) != 0 ||
+                check_operand(f, defs, def_count, in, tk.tok[i + 2], op->operand, 0, err) != 0) {
+                return -1;
+            }
+            /* a store writes the value's low bytes; more bytes than it has only up to the word */
+            if (word > 0 && tc == TC_INT && vw > 0 && vw < atol(tk.tok[i]) && atol(tk.tok[i]) > word &&
+                operand_class(f, defs, def_count, tk.tok[i + 1] + 1) == TC_INT) {
+                set_errf(err, in->line, "store: value %s has fewer bytes than the word-crossing store",
+                         tk.tok[i + 1]);
+                return -1;
+            }
+            return 0;
         }
         return check_operand(f, defs, def_count, in, tk.tok[i + 1], op->operand, 0, err);
     case FORM_DYNALLOC:
@@ -634,7 +755,7 @@ static int check_instr_types(const ir_func_t *f, const def_loc_t *defs, size_t d
     }
 }
 
-static int verify_function(const ir_func_t *f, ir_error_t *err) {
+static int verify_function(const ir_func_t *f, long word, ir_error_t *err) {
     size_t i;
     size_t j;
     def_loc_t *defs = NULL;
@@ -794,7 +915,7 @@ static int verify_function(const ir_func_t *f, ir_error_t *err) {
                 }
             }
 
-            if (check_instr_types(f, defs, def_count, in, err) != 0) {
+            if (check_instr_types(f, defs, def_count, in, word, err) != 0) {
                 free(reach);
                 free(dom);
                 free(defs);
@@ -822,7 +943,8 @@ int ir_verify_module(const ir_module_t *m, ir_error_t *err) {
     }
 
     for (i = 0; i < m->func_count; ++i) {
-        if (verify_function(&m->funcs[i], err) != 0) {
+        /* ilp32 has 4-byte words; lp64, and anything unknown, 8; legal IR is not width-checked (0) */
+        if (verify_function(&m->funcs[i], m->legal ? 0 : strcmp(m->target, "ilp32") == 0 ? 4 : 8, err) != 0) {
             return -1;
         }
     }

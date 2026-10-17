@@ -275,9 +275,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
  * @param m             the module
  * @param name          the module's name (the source file)
  * @param pointer_size  the target's pointer size, for its `target` line
+ * @param legal         the IR has been legalized for the target, for its
+ *                      `stage` line: the verifier holds neutral IR to the
+ *                      integer width rules, which legal IR need not meet
  * @param out           where to write
  * @return              0, or -1 when out of memory or on a write error
  */
-int cc_ssa_dump_module(const cc_ssa_module_t *m, const char *name, int pointer_size, FILE *out);
+int cc_ssa_dump_module(const cc_ssa_module_t *m, const char *name, int pointer_size, int legal, FILE *out);
 
 #endif

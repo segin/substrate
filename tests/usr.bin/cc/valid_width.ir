@@ -1,0 +1,12 @@
+module "m" {
+  target lp64;
+  # narrower operands up to the word are held extended (C's promotions);
+  # widening past them and narrowing are explicit
+  func @ok : fn(i32 %a, i8 %b, i64 %c) -> i32 {
+  entry:
+    %d = add i64 %a, %b;
+    %e = sub i64 %d, %c;
+    %f = sext i32 %e, 32;
+    ret i32 %f;
+  }
+}
