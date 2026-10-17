@@ -26,10 +26,10 @@ typedef struct {
     char *static_sym;
     int depth;
     int vla_bytes; /**< a variable-length array's size in bytes, as the value computed for its allocation; else -1 */
-    /** a variable-length array's strides: the size in bytes of one element of each dimension, outermost
-     *  first, as values computed at its declaration; -1 past its rank, and every entry -1 if not a VLA.
+    /** a variable-length array's strides (owned, vla_rank of them): the size in bytes of one element of
+     *  each dimension, outermost first, as values computed at its declaration; NULL if not a VLA.
      *  For a pointer to one, the first is the size of the array it points to, the rest the array's. */
-    int vla_strides[CC_MAX_ARRAY_DIMS];
+    int *vla_strides;
     int vla_rank;       /**< the number of strides; 0 if neither a VLA nor a pointer to one */
     int vla_is_pointer; /**< a pointer to a VLA, whose own size is a pointer's */
     const cc_ctype_t *ctype; /**< the variable's declared type; NULL where the declaration recorded none */
@@ -2127,13 +2127,65 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].static_sym = sym_dup;
     (*vars)[*var_count].depth = depth;
     (*vars)[*var_count].vla_bytes = -1;
-    for (int k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
-        (*vars)[*var_count].vla_strides[k] = -1;
-    }
+    (*vars)[*var_count].vla_strides = NULL;
     (*vars)[*var_count].vla_rank = 0;
     (*vars)[*var_count].vla_is_pointer = 0;
     (*vars)[*var_count].ctype = ctype;
     (*var_count)++;
+    return 0;
+}
+
+/**
+ * Free what a variable entry owns: its name, its static symbol and its
+ * variable-length array strides.
+ *
+ * @param v  the entry
+ */
+static void var_release(var_entry_t *v) {
+    free(v->name);
+    free(v->static_sym);
+    free(v->vla_strides);
+    v->name = NULL;
+    v->static_sym = NULL;
+    v->vla_strides = NULL;
+}
+
+/**
+ * Take the variables declared since a scope began out of scope.
+ *
+ * @param vars       the variables in scope
+ * @param var_count  their number; becomes @p saved
+ * @param saved      the number in scope when the scope began
+ */
+static void vars_pop_to(var_entry_t *vars, size_t *var_count, size_t saved) {
+    while (*var_count > saved) {
+        var_release(&vars[--*var_count]);
+    }
+}
+
+/**
+ * Copy a variable entry, with copies of what it owns.
+ *
+ * @param dst  receives the copy
+ * @param src  the entry
+ * @return     0, or -1 when out of memory (@p dst then owns nothing)
+ */
+static int var_clone(var_entry_t *dst, const var_entry_t *src) {
+    *dst = *src;
+    dst->name = cc_strdup(src->name);
+    dst->static_sym = src->static_sym != NULL ? cc_strdup(src->static_sym) : NULL;
+    dst->vla_strides = NULL;
+    if (src->vla_rank > 0 && src->vla_strides != NULL) {
+        dst->vla_strides = (int *)malloc((size_t)src->vla_rank * sizeof(dst->vla_strides[0]));
+        if (dst->vla_strides != NULL) {
+            memcpy(dst->vla_strides, src->vla_strides, (size_t)src->vla_rank * sizeof(dst->vla_strides[0]));
+        }
+    }
+    if (dst->name == NULL || (src->static_sym != NULL && dst->static_sym == NULL) ||
+        (src->vla_rank > 0 && src->vla_strides != NULL && dst->vla_strides == NULL)) {
+        var_release(dst);
+        return -1;
+    }
     return 0;
 }
 
@@ -3058,14 +3110,7 @@ static int emit_dynalloc_instr(cc_ssa_function_t *sf, int bytes_v, int reuse, cc
  * @return   1 or 0
  */
 static int stmt_is_vla_decl(const cc_stmt_t *s) {
-    int k;
-
-    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
-        if (s->array_bound_exprs[k] != NULL) {
-            return 1;
-        }
-    }
-    return 0;
+    return cc_bounds_any(&s->array_bounds);
 }
 
 /**
@@ -10187,31 +10232,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             for (j = 0; j < var_count; ++j) {
-                lvars[j] = vars[j];
-                lvars[j].name = cc_strdup(vars[j].name);
-                if (lvars[j].name == NULL) {
-                    size_t k;
-                    for (k = 0; k < j; ++k) {
-                        free(lvars[k].name);
-                        free(lvars[k].static_sym);
-                    }
+                if (var_clone(&lvars[j], &vars[j]) != 0) {
+                    vars_pop_to(lvars, &j, 0);
                     free(lvars);
                     set_diag(diag, "out of memory cloning scope for statement expression");
                     return -1;
-                }
-                if (vars[j].static_sym != NULL) {
-                    lvars[j].static_sym = cc_strdup(vars[j].static_sym);
-                    if (lvars[j].static_sym == NULL) {
-                        size_t k;
-                        free(lvars[j].name);
-                        for (k = 0; k < j; ++k) {
-                            free(lvars[k].name);
-                            free(lvars[k].static_sym);
-                        }
-                        free(lvars);
-                        set_diag(diag, "out of memory cloning scope for statement expression");
-                        return -1;
-                    }
                 }
             }
         }
@@ -10221,11 +10246,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (is_last && cur->kind == CC_STMT_EXPR && cur->expr != NULL) {
                 outv = lower_expr(tu, sf, ctx, lvars, lcount, depth + 1, cur->expr, diag);
                 if (outv < 0) {
-                    while (lcount > 0) {
-                        lcount--;
-                        free(lvars[lcount].name);
-                        free(lvars[lcount].static_sym);
-                    }
+                    vars_pop_to(lvars, &lcount, 0);
                     free(lvars);
                     return -1;
                 }
@@ -10233,11 +10254,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             if (lower_stmt(tu, sf, &lvars, &lcount, ctx, depth + 1, -1, -1, cur, &saw_ret_dummy,
                            diag) != 0) {
-                while (lcount > 0) {
-                    lcount--;
-                    free(lvars[lcount].name);
-                    free(lvars[lcount].static_sym);
-                }
+                vars_pop_to(lvars, &lcount, 0);
                 free(lvars);
                 return -1;
             }
@@ -10245,11 +10262,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (outv >= 0) {
             outv = cast_value(sf, outv, lower_value_kind(e), diag);
         }
-        while (lcount > 0) {
-            lcount--;
-            free(lvars[lcount].name);
-            free(lvars[lcount].static_sym);
-        }
+        vars_pop_to(lvars, &lcount, 0);
         free(lvars);
         if (outv < 0) {
             return emit_const_i64_instr(sf, 0);
@@ -11986,8 +11999,8 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
 /** The shape of a variable-length array, or of the one a pointer points to. */
 typedef struct {
     const cc_ctype_t *type;                  /**< the declared type: the array, or a pointer to it */
-    cc_expr_t *const *bounds;                /**< the run-time bounds, outermost first; NULL where constant */
-    int is_pointer;                          /**< the declaration is a pointer to the array */
+    const cc_bounds_t *bounds;               /**< its run-time bounds */
+    int is_pointer;                         /**< the declaration is a pointer to the array */
 } vla_shape_t;
 
 /**
@@ -12008,36 +12021,33 @@ typedef struct {
  * @param vars       the variables in scope
  * @param var_count  their number
  * @param depth      the block depth
- * @param shape      the array
- * @param strides    receives a value per level, -1 past the rank
- * @param out_rank   receives the number of strides
- * @param out_bytes  receives the array's size in bytes, a value
- * @param diag       receives an error
- * @return           0, or -1 on error
+ * @param shape        the array
+ * @param out_strides  receives the strides (owned), one per level
+ * @param out_rank     receives the number of strides
+ * @param out_bytes    receives the array's size in bytes, a value
+ * @param diag         receives an error
+ * @return             0, or -1 on error
  */
 static int lower_vla_layout(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                             var_entry_t *vars, size_t var_count, int depth, const vla_shape_t *shape,
-                            int strides[CC_MAX_ARRAY_DIMS], int *out_rank, int *out_bytes, cc_diag_t *diag) {
-    int dims[CC_MAX_ARRAY_DIMS];
-    int own[CC_MAX_ARRAY_DIMS];
-    const cc_ctype_t *level[CC_MAX_ARRAY_DIMS];
-    const cc_ctype_t *t = shape->type;
+                            int **out_strides, int *out_rank, int *out_bytes, cc_diag_t *diag) {
+    const cc_ctype_t *arr = shape->type;
+    const cc_ctype_t *t;
+    int *dims = NULL;    /* each level's bound, a value */
+    int *strides = NULL; /* the pointer's stride, if any, then each level's element size */
     int ndim = 0;
     int shift = shape->is_pointer ? 1 : 0;
     long elem_size;
     int k;
 
-    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
-        strides[k] = -1;
+    *out_strides = NULL;
+    if (shape->is_pointer && arr != NULL && arr->kind == CC_CT_POINTER) {
+        arr = arr->of;
     }
-    if (shape->is_pointer && t != NULL && t->kind == CC_CT_POINTER) {
-        t = t->of;
+    for (t = arr; t != NULL && t->kind == CC_CT_ARRAY; t = t->of) {
+        ++ndim;
     }
-    while (t != NULL && t->kind == CC_CT_ARRAY && ndim < CC_MAX_ARRAY_DIMS) {
-        level[ndim++] = t;
-        t = t->of;
-    }
-    if (ndim <= 0 || ndim + shift > CC_MAX_ARRAY_DIMS || (t != NULL && t->kind == CC_CT_ARRAY)) {
+    if (ndim <= 0) {
         set_diag(diag, "unsupported variable-length array rank in lowering");
         return -1;
     }
@@ -12046,44 +12056,57 @@ static int lower_vla_layout(const cc_translation_unit_t *tu, cc_ssa_function_t *
         set_diag(diag, "unsupported variable-length array element type in lowering");
         return -1;
     }
-    for (k = 0; k < ndim; ++k) {
-        if (shape->bounds != NULL && shape->bounds[k] != NULL) {
-            dims[k] = lower_expr(tu, sf, ctx, vars, var_count, depth, shape->bounds[k], diag);
+    dims = (int *)malloc((size_t)ndim * sizeof(dims[0]));
+    strides = (int *)malloc((size_t)(ndim + shift) * sizeof(strides[0]));
+    if (dims == NULL || strides == NULL) {
+        set_diag(diag, "out of memory laying out a variable-length array");
+        goto fail;
+    }
+    for (k = 0, t = arr; k < ndim; ++k, t = t->of) {
+        cc_expr_t *bound = cc_bounds_at(shape->bounds, (size_t)k);
+
+        if (bound != NULL) {
+            dims[k] = lower_expr(tu, sf, ctx, vars, var_count, depth, bound, diag);
             if (dims[k] >= 0) {
                 dims[k] = cast_value(sf, dims[k], CC_VAL_I64, diag);
             }
-        } else if (level[k]->count > 0) {
-            dims[k] = emit_const_i64_instr(sf, level[k]->count);
+        } else if (t->count > 0) {
+            dims[k] = emit_const_i64_instr(sf, t->count);
         } else {
             set_diag(diag, "variable-length array dimension has no bound");
-            return -1;
+            goto fail;
         }
         if (dims[k] < 0) {
-            return -1;
+            goto fail;
         }
     }
-    own[ndim - 1] = emit_const_i64_instr(sf, elem_size);
-    if (own[ndim - 1] < 0) {
-        return -1;
+    /* each level's element size, innermost first */
+    strides[shift + ndim - 1] = emit_const_i64_instr(sf, elem_size);
+    if (strides[shift + ndim - 1] < 0) {
+        goto fail;
     }
     for (k = ndim - 2; k >= 0; --k) {
-        own[k] = emit_i64_binop_instr(sf, CC_SSA_MUL, own[k + 1], dims[k + 1], 1, diag);
-        if (own[k] < 0) {
-            return -1;
+        strides[shift + k] = emit_i64_binop_instr(sf, CC_SSA_MUL, strides[shift + k + 1], dims[k + 1], 1, diag);
+        if (strides[shift + k] < 0) {
+            goto fail;
         }
     }
-    *out_bytes = emit_i64_binop_instr(sf, CC_SSA_MUL, own[0], dims[0], 1, diag);
+    *out_bytes = emit_i64_binop_instr(sf, CC_SSA_MUL, strides[shift], dims[0], 1, diag);
     if (*out_bytes < 0) {
-        return -1;
+        goto fail;
     }
     if (shape->is_pointer) {
         strides[0] = *out_bytes;
     }
-    for (k = 0; k < ndim; ++k) {
-        strides[k + shift] = own[k];
-    }
+    free(dims);
+    *out_strides = strides;
     *out_rank = ndim + shift;
     return 0;
+
+fail:
+    free(dims);
+    free(strides);
+    return -1;
 }
 
 /**
@@ -12098,14 +12121,15 @@ static int lower_vla_layout(const cc_translation_unit_t *tu, cc_ssa_function_t *
 static int lower_vla_attach(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                             var_entry_t *vars, size_t var_count, int depth, size_t v, const vla_shape_t *shape,
                             cc_diag_t *diag) {
-    int strides[CC_MAX_ARRAY_DIMS];
+    int *strides;
     int rank;
     int bytes;
 
-    if (lower_vla_layout(tu, sf, ctx, vars, var_count, depth, shape, strides, &rank, &bytes, diag) != 0) {
+    if (lower_vla_layout(tu, sf, ctx, vars, var_count, depth, shape, &strides, &rank, &bytes, diag) != 0) {
         return -1;
     }
-    memcpy(vars[v].vla_strides, strides, sizeof(strides));
+    free(vars[v].vla_strides);
+    vars[v].vla_strides = strides;
     vars[v].vla_rank = rank;
     vars[v].vla_is_pointer = shape->is_pointer;
     if (!shape->is_pointer) {
@@ -12975,7 +12999,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             int prealloc = lower_find_hoisted_alloc(ctx, s);
             int is_runtime_vla = 0;
             int vla_bytes_v = -1;
-            int vla_strides[CC_MAX_ARRAY_DIMS];
+            int *vla_strides = NULL; /* owned until the variable takes them (lower_vla_layout()) */
             int vla_rank = 0;
 
             if (arr_elems <= 0) {
@@ -12983,9 +13007,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             if (total_size <= 0 || stmt_is_vla_decl(s)) {
                 if (stmt_is_vla_decl(s)) {
-                    vla_shape_t shape = {dct, s->array_bound_exprs, 0};
+                    vla_shape_t shape = {dct, &s->array_bounds, 0};
 
-                    if (lower_vla_layout(tu, sf, ctx, *vars, *var_count, depth, &shape, vla_strides, &vla_rank,
+                    if (lower_vla_layout(tu, sf, ctx, *vars, *var_count, depth, &shape, &vla_strides, &vla_rank,
                                          &vla_bytes_v, diag) != 0) {
                         return -1;
                     }
@@ -13251,14 +13275,13 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
 
             if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
+                free(vla_strides);
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
             (*vars)[*var_count - 1].vla_bytes = vla_bytes_v;
-            if (is_runtime_vla) {
-                memcpy((*vars)[*var_count - 1].vla_strides, vla_strides, sizeof(vla_strides));
-                (*vars)[*var_count - 1].vla_rank = vla_rank;
-            }
+            (*vars)[*var_count - 1].vla_strides = vla_strides;
+            (*vars)[*var_count - 1].vla_rank = is_runtime_vla ? vla_rank : 0;
             if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
                 return -1;
             }
@@ -13278,7 +13301,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         if (stmt_is_vla_decl(s) && ct_is_pointer(stmt_decl_ctype(s))) {
             /* a pointer to a variable-length array: it steps by the array's run-time size */
-            vla_shape_t shape = {stmt_decl_ctype(s), s->array_bound_exprs, 1};
+            vla_shape_t shape = {stmt_decl_ctype(s), &s->array_bounds, 1};
 
             if (lower_vla_attach(tu, sf, ctx, *vars, *var_count, depth, *var_count - 1, &shape, diag) != 0) {
                 return -1;
@@ -13952,10 +13975,7 @@ append_return:
                            diag) != 0) {
                 return -1;
             }
-            while (*var_count > saved) {
-                (*var_count)--;
-                free((*vars)[*var_count].name);
-            }
+            vars_pop_to(*vars, var_count, saved);
         }
         if (emit_br_instr(sf, l_end) != 0) {
             return -1;
@@ -13971,10 +13991,7 @@ append_return:
                                diag) != 0) {
                     return -1;
                 }
-                while (*var_count > saved) {
-                    (*var_count)--;
-                    free((*vars)[*var_count].name);
-                }
+                vars_pop_to(*vars, var_count, saved);
             }
             if (emit_br_instr(sf, l_end) != 0) {
                 return -1;
@@ -14015,10 +14032,7 @@ append_return:
             if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
-            while (*var_count > saved) {
-                (*var_count)--;
-                free((*vars)[*var_count].name);
-            }
+            vars_pop_to(*vars, var_count, saved);
         }
         if (emit_br_instr(sf, l_cond) != 0) {
             return -1;
@@ -14043,10 +14057,7 @@ append_return:
             if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
-            while (*var_count > saved) {
-                (*var_count)--;
-                free((*vars)[*var_count].name);
-            }
+            vars_pop_to(*vars, var_count, saved);
         }
         if (emit_label_instr(sf, l_cond) != 0) {
             return -1;
@@ -14123,10 +14134,7 @@ append_return:
             if (lower_stmt(tu, sf, vars, var_count, ctx, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
-            while (*var_count > body_saved) {
-                (*var_count)--;
-                free((*vars)[*var_count].name);
-            }
+            vars_pop_to(*vars, var_count, body_saved);
         }
         if (emit_br_instr(sf, l_post) != 0) {
             return -1;
@@ -14143,10 +14151,7 @@ append_return:
         if (emit_label_instr(sf, l_end) != 0) {
             return -1;
         }
-        while (*var_count > saved) {
-            (*var_count)--;
-            free((*vars)[*var_count].name);
-        }
+        vars_pop_to(*vars, var_count, saved);
         return 0;
     }
 
@@ -14530,10 +14535,7 @@ append_return:
             }
         }
         if (!s->is_synthetic_block) {
-            while (*var_count > saved) {
-                (*var_count)--;
-                free((*vars)[*var_count].name);
-            }
+            vars_pop_to(*vars, var_count, saved);
         }
         return 0;
     }
@@ -16487,6 +16489,42 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
 }
 
 /**
+ * The bound of every array level of a type, outermost first, and the type
+ * under them all.
+ *
+ * @param t           the type
+ * @param out_nd      receives the number of levels, 0 if @p t is no array,
+ *                    -1 when out of memory
+ * @param out_scalar  receives the type under every level (@p t itself if
+ *                    it is no array)
+ * @return            the bounds (owned; free them), a level of unknown
+ *                    bound giving its count of -1; NULL when there are none
+ */
+static long *ct_array_bounds(const cc_ctype_t *t, int *out_nd, const cc_ctype_t **out_scalar) {
+    const cc_ctype_t *e;
+    long *dims;
+    int nd = 0;
+
+    for (e = t; e != NULL && e->kind == CC_CT_ARRAY; e = e->of) {
+        ++nd;
+    }
+    *out_scalar = e;
+    *out_nd = nd;
+    if (nd == 0) {
+        return NULL;
+    }
+    dims = (long *)malloc((size_t)nd * sizeof(dims[0]));
+    if (dims == NULL) {
+        *out_nd = -1;
+        return NULL;
+    }
+    for (nd = 0, e = t; e->kind == CC_CT_ARRAY; e = e->of) {
+        dims[nd++] = e->count;
+    }
+    return dims;
+}
+
+/**
  * Write a global array of scalars from its initializer list into its
  * bytes, the dimensions from @p dims, braces elided or not, a string
  * filling a row of characters.
@@ -16693,68 +16731,67 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
  *            back to filling the array at run time; -1 when out of memory
  */
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g) {
-    const cc_ctype_t *scalar = stmt_decl_ctype(s);
-    long dims[CC_MAX_ARRAY_DIMS];
-    int nd = 0;
+    const cc_ctype_t *scalar;
+    long *dims;
+    int nd;
     long scalar_size;
     long elem_count = 1;
-    unsigned char *buf;
+    unsigned char *buf = NULL;
     global_reloc_t *relocs = NULL;
     size_t reloc_count = 0;
     size_t cur = 0;
     cc_diag_t quiet;
     int d;
+    int rc = 0;
 
     if (s->expr == NULL || s->expr->kind != CC_EXPR_INIT_LIST) {
         return 0;
     }
-    while (scalar != NULL && scalar->kind == CC_CT_ARRAY) {
-        if (nd == CC_MAX_ARRAY_DIMS) {
-            return 0;
-        }
-        dims[nd++] = scalar->count;
-        scalar = scalar->of;
+    dims = ct_array_bounds(stmt_decl_ctype(s), &nd, &scalar);
+    if (nd < 0) {
+        return -1;
     }
     if (nd == 0 || !cc_ct_is_arithmetic(scalar) || ct_record_id(scalar) >= 0) {
         /* aggregates and pointers (string tables) keep their own initialization code */
-        return 0;
+        goto out;
     }
     scalar_size = cc_ct_size(scalar, tu);
     if (scalar_size <= 0) {
-        return 0;
+        goto out;
     }
     for (d = 0; d < nd; ++d) {
         if (dims[d] <= 0 || elem_count > LONG_MAX / dims[d]) {
-            return 0;
+            goto out;
         }
         elem_count *= dims[d];
     }
     if (scalar_size > LONG_MAX / elem_count) {
-        return 0;
+        goto out;
     }
     buf = (unsigned char *)calloc((size_t)(scalar_size * elem_count), 1);
     if (buf == NULL) {
-        return -1;
+        rc = -1;
+        goto out;
     }
     memset(&quiet, 0, sizeof(quiet));
     if (flatten_scalar_array_init_cursor(tu, scalar, dims, nd, s->expr, &cur, 0, buf, scalar_size * elem_count,
                                          &relocs, &reloc_count, &quiet) != 0 ||
         cur < s->expr->arg_count) {
         /* not a constant this can lay out: leave it to the run-time path and its diagnostics */
-        free(buf);
-        free_global_relocs(relocs, reloc_count);
-        return 0;
+        goto out;
     }
     if (build_global_stream_from_bytes(g, buf, scalar_size * elem_count, relocs, reloc_count, &quiet) != 0) {
-        free(buf);
-        free_global_relocs(relocs, reloc_count);
-        return -1;
+        rc = -1;
+        goto out;
     }
     ssa_global_set_bytes(g, scalar_size * elem_count);
     g->has_init = 1;
+    rc = 1;
+out:
     free(buf);
     free_global_relocs(relocs, reloc_count);
-    return 1;
+    free(dims);
+    return rc;
 }
 
 static int expr_uses_va_arg_pack(const cc_expr_t *e);
@@ -17246,9 +17283,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         }
                     }
                     if (needs_flatten) {
-                        const cc_ctype_t *scalar = gct;
-                        long dims[CC_MAX_ARRAY_DIMS];
-                        int nd = 0;
+                        const cc_ctype_t *scalar;
+                        int nd;
+                        long *dims = ct_array_bounds(gct, &nd, &scalar);
                         long scalar_size;
                         long elem_count = 1;
                         long total_size;
@@ -17260,14 +17297,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         size_t z;
                         int d;
 
-                        while (ct_has_kind(scalar, CC_CT_ARRAY)) {
-                            if (nd == CC_MAX_ARRAY_DIMS) {
-                                set_diag(diag, "array dimension count exceeds compiler limit");
-                                cc_ssa_module_free(out);
-                                return -1;
-                            }
-                            dims[nd++] = scalar->count;
-                            scalar = scalar->of;
+                        if (nd <= 0) {
+                            set_diag(diag, nd < 0 ? "out of memory reading a global array's bounds"
+                                                  : "invalid array dimension in global initializer");
+                            cc_ssa_module_free(out);
+                            return -1;
                         }
                         if (dims[0] <= 0) {
                             dims[0] = (long)init->arg_count;
@@ -17275,6 +17309,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         for (d = 0; d < nd; ++d) {
                             if (dims[d] <= 0) {
                                 set_diag(diag, "invalid array dimension in global initializer");
+                                free(dims);
                                 cc_ssa_module_free(out);
                                 return -1;
                             }
@@ -17282,12 +17317,14 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         scalar_size = cc_ct_size(scalar, tu);
                         if (scalar_size <= 0) {
                             set_diag(diag, "unsupported scalar array element type in global initializer");
+                            free(dims);
                             cc_ssa_module_free(out);
                             return -1;
                         }
                         for (d = 0; d < nd; ++d) {
                             if (elem_count > LONG_MAX / dims[d]) {
                                 set_diag(diag, "array element count overflow in global initializer");
+                                free(dims);
                                 cc_ssa_module_free(out);
                                 return -1;
                             }
@@ -17295,6 +17332,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         }
                         if (scalar_size > LONG_MAX / elem_count) {
                             set_diag(diag, "array byte-size overflow in global initializer");
+                            free(dims);
                             cc_ssa_module_free(out);
                             return -1;
                         }
@@ -17302,16 +17340,19 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         buf = (unsigned char *)calloc((size_t)total_size, 1);
                         if (buf == NULL) {
                             set_diag(diag, "out of memory allocating global array initializer buffer");
+                            free(dims);
                             cc_ssa_module_free(out);
                             return -1;
                         }
                         if (flatten_scalar_array_init_cursor(tu, scalar, dims, nd, init, &cur, 0, buf, total_size, &relocs,
                                                              &reloc_count, diag) != 0) {
                             free(buf);
+                            free(dims);
                             free_global_relocs(relocs, reloc_count);
                             cc_ssa_module_free(out);
                             return -1;
                         }
+                        free(dims);
                         if (cur < init->arg_count) {
                             set_diag(diag, "too many elements in global array initializer");
                             free(buf);
@@ -17822,13 +17863,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         /* a parameter that points to a variable-length array: its strides, from the parameters before it */
         for (j = 0; j < af->param_count; ++j) {
             const cc_param_t *pa = &af->params[j];
-            vla_shape_t shape = {lower_param_ctype(pa), pa->vla_bounds, 1};
-            int k;
+            vla_shape_t shape = {lower_param_ctype(pa), &pa->vla_bounds, 1};
             int vidx;
 
-            for (k = 0; k < CC_MAX_ARRAY_DIMS && pa->vla_bounds[k] == NULL; ++k) {
-            }
-            if (k == CC_MAX_ARRAY_DIMS || pa->name == NULL) {
+            if (!cc_bounds_any(&pa->vla_bounds) || pa->name == NULL) {
                 continue;
             }
             vidx = var_find_visible(vars, var_count, pa->name, 0);
@@ -17882,10 +17920,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             }
         }
 
-        for (j = 0; j < var_count; ++j) {
-            free(vars[j].name);
-            free(vars[j].static_sym);
-        }
+        vars_pop_to(vars, &var_count, 0);
         free(vars);
         for (j = 0; j < lctx.label_count; ++j) {
             free(lctx.labels[j].name);

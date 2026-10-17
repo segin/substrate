@@ -11,8 +11,6 @@ typedef struct {
     char message[256];
 } cc_diag_t;
 
-#define CC_MAX_ARRAY_DIMS 4
-
 /* cc_expr_t.unary_form: which operand of the binary spelling is the unary operator's */
 #define CC_UNARY_RHS 1
 #define CC_UNARY_LHS 2
@@ -110,6 +108,16 @@ typedef enum {
 
 typedef struct cc_expr cc_expr_t;
 typedef struct cc_stmt cc_stmt_t;
+
+/**
+ * The run-time bounds of a variable-length array type: one slot per array
+ * level, outermost first, NULL where that level's bound is a constant.
+ * Owns its expressions; empty (all zero) when no level has one.
+ */
+typedef struct {
+    cc_expr_t **at; /**< the bounds */
+    size_t count;   /**< the number of slots */
+} cc_bounds_t;
 typedef struct cc_asm_operand cc_asm_operand_t;
 
 struct cc_expr {
@@ -197,8 +205,8 @@ struct cc_stmt {
     int is_synthetic_block;
     char *decl_name;
     char *label_name;
-    /** a variable-length array's bounds, outermost first; NULL where a bound is a constant */
-    cc_expr_t *array_bound_exprs[CC_MAX_ARRAY_DIMS];
+    /** a declared variable-length array's run-time bounds (for a pointer to one, its pointee's) */
+    cc_bounds_t array_bounds;
     cc_expr_t *expr;
     cc_stmt_t *init_stmt;
     cc_expr_t *init_expr;
@@ -227,8 +235,8 @@ typedef struct {
     int storage;
     const struct cc_ctype *ctype; /**< its type as adjusted (arrays and functions as pointers) */
     /** for a pointer to a variable-length array (as `int a[n][m]` is adjusted to be): the bounds of what it
-     *  points to (owned), outermost first; NULL where a bound is a constant */
-    cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS];
+     *  points to */
+    cc_bounds_t vla_bounds;
 } cc_param_t;
 
 typedef struct {
@@ -353,6 +361,30 @@ void cc_expr_free(cc_expr_t *e);
  * @return   the copy, or NULL when out of memory (or @p e is NULL)
  */
 cc_expr_t *cc_expr_clone(const cc_expr_t *e);
+
+/**
+ * The run-time bound of one array level.
+ *
+ * @param b  the bounds, or NULL
+ * @param k  the level, 0 outermost
+ * @return   the bound, or NULL where it is a constant (or past the slots)
+ */
+cc_expr_t *cc_bounds_at(const cc_bounds_t *b, size_t k);
+
+/**
+ * Whether any level has a run-time bound.
+ *
+ * @param b  the bounds, or NULL
+ * @return   1 or 0
+ */
+int cc_bounds_any(const cc_bounds_t *b);
+
+/**
+ * Free the bounds' expressions and slots, leaving them empty.
+ *
+ * @param b  the bounds, or NULL
+ */
+void cc_bounds_free(cc_bounds_t *b);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);

@@ -112,11 +112,6 @@ typedef struct {
 static int next_tok(parser_t *p);
 static int parser_hex_value(int c);
 
-static void set_ptr_depth_diag(parser_t *p, int marker_line) {
-    (void)marker_line;
-    set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
-}
-
 static const cc_function_t *parser_find_function_decl(parser_t *p, const char *name) {
     const cc_function_t *best = NULL;
     int best_score = -1;
@@ -287,8 +282,7 @@ static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e);
-static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out,
-                           cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]);
+static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
 static cc_expr_t *parse_unary(parser_t *p);
@@ -939,7 +933,6 @@ static long parser_string_literal_array_bound(const cc_expr_t *e);
 static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const cc_expr_t *init);
 static long parser_ct_size(const parser_t *p, const cc_ctype_t *t);
 static long parser_ct_align(const parser_t *p, const cc_ctype_t *t);
-static int parser_array_rank(const cc_ctype_t *t);
 
 /**
  * The smallest integer kind that holds every enumerator of a packed
@@ -2179,11 +2172,6 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     typeof_ctype = parser_expr_ctype(p, te);
                     if (typeof_ctype == NULL) {
                         set_diag(p->diag, te->line, te->col, "cannot determine the type of typeof's operand");
-                        free_expr(te);
-                        return -1;
-                    }
-                    if (parser_array_rank(typeof_ctype) > CC_MAX_ARRAY_DIMS) {
-                        set_diag(p->diag, te->line, te->col, "array rank > 4 is not yet supported");
                         free_expr(te);
                         return -1;
                     }
@@ -3477,19 +3465,6 @@ static long parser_ct_size(const parser_t *p, const cc_ctype_t *t) {
     view.structs = p->structs;
     view.struct_count = p->struct_count;
     return cc_ct_size(t, &view);
-}
-
-/**
- * The number of array levels in type @p t, through its pointers and
- * arrays: `int (*a[2])[3][4]` has three.
- */
-static int parser_array_rank(const cc_ctype_t *t) {
-    int n = 0;
-
-    for (; t != NULL && (t->kind == CC_CT_ARRAY || t->kind == CC_CT_POINTER); t = t->of) {
-        n += t->kind == CC_CT_ARRAY;
-    }
-    return n;
 }
 
 /**
@@ -5548,29 +5523,26 @@ static int starts_nested_declarator(parser_t *p, unsigned flags) {
  */
 static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     int abstract = (flags & DECL_ABSTRACT) != 0;
-    decl_op_t ptrs[16];
-    size_t nptrs = 0;
+    declarator_t ptrs;   /* the pointer steps before the direct declarator, outermost first */
+    declarator_t suffix; /* the array and function suffixes after it, in source order */
     declarator_t inner;
     size_t i;
     int rc = -1;
 
     memset(&inner, 0, sizeof(inner));
+    memset(&ptrs, 0, sizeof(ptrs));
+    memset(&suffix, 0, sizeof(suffix));
     while (is_ptr_declarator_tok(p->tok.kind)) {
         decl_op_t op;
 
         memset(&op, 0, sizeof(op));
         op.kind = DECL_OP_POINTER;
-        if (next_tok(p) != 0 || parse_pointer_quals(p, &op.quals) != 0) {
-            return -1;
+        if (next_tok(p) != 0 || parse_pointer_quals(p, &op.quals) != 0 || declarator_push(&ptrs, &op) != 0) {
+            goto out;
         }
-        if (nptrs == sizeof(ptrs) / sizeof(ptrs[0])) {
-            set_ptr_depth_diag(p, __LINE__);
-            return -1;
-        }
-        ptrs[nptrs++] = op;
     }
     if (skip_decl_gnu_suffix(p, NULL) != 0) {
-        return -1;
+        goto out;
     }
     /* the direct declarator: a nested declarator, a name, or nothing */
     if (p->tok.kind == TOK_LPAREN && starts_nested_declarator(p, flags)) {
@@ -5602,8 +5574,6 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
      * the last one first: `[2][3]` is an array of 2 arrays of 3.
      */
     {
-        decl_op_t suffix[CC_MAX_ARRAY_DIMS * 4];
-        size_t nsuffix = 0;
         int stop = (flags & DECL_STOP_AT_PARAMS) && !d->nested && inner.name != NULL && p->tok.kind == TOK_LPAREN;
 
         if (d->name_params != NULL && inner.name != NULL && (!d->nested || inner.count == 0) &&
@@ -5617,32 +5587,25 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
             memset(&op, 0, sizeof(op));
             op.kind = DECL_OP_FUNCTION;
             op.prototyped = 1;
-            if (d->name_params(p, d->name_params_ctx) != 0) {
+            if (d->name_params(p, d->name_params_ctx) != 0 || declarator_push(&suffix, &op) != 0 ||
+                skip_attrs_within_declarator(p) != 0) {
                 goto out;
-            }
-            suffix[nsuffix++] = op;
-            if (skip_attrs_within_declarator(p) != 0) {
-                goto suffix_fail;
             }
         }
         while (!stop && (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN)) {
             decl_op_t op;
 
             memset(&op, 0, sizeof(op));
-            if (nsuffix == sizeof(suffix) / sizeof(suffix[0])) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "too many declarator suffixes");
-                goto suffix_fail;
-            }
             if (p->tok.kind == TOK_LBRACK) {
                 long n = -1;
                 int const_n = 0;
                 if (flags & DECL_PARAM) {
                     /* `[static N]`, `[const]`, `[restrict N]`: what a parameter's bound may hold */
                     if (parse_param_array_extent(p, &n, &const_n, &d->saw_restrict, &op.bound) != 0) {
-                        goto suffix_fail;
+                        goto out;
                     }
                 } else if (parse_array_extent(p, &n, &const_n, &op.bound) != 0) {
-                    goto suffix_fail;
+                    goto out;
                 }
                 if (const_n) {
                     free_expr(op.bound);
@@ -5653,32 +5616,27 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
                 ++d->outer_arrays;
             } else {
                 if (next_tok(p) != 0 || parse_param_list(p, &op) != 0) {
-                    goto suffix_fail;
+                    goto out;
                 }
             }
-            suffix[nsuffix++] = op;
-            if (skip_attrs_within_declarator(p) != 0) {
-                goto suffix_fail;
+            if (declarator_push(&suffix, &op) != 0 || skip_attrs_within_declarator(p) != 0) {
+                goto out;
             }
         }
-        for (i = 0; i < nptrs; ++i) {
-            if (declarator_push(d, &ptrs[i]) != 0) {
-                goto suffix_fail;
+        /* pointer steps own nothing, so they are copied; each suffix moves to d */
+        for (i = 0; i < ptrs.count; ++i) {
+            if (declarator_push(d, &ptrs.ops[i]) != 0) {
+                goto out;
             }
         }
-        while (nsuffix > 0) {
-            if (declarator_push(d, &suffix[--nsuffix]) != 0) {
-                goto suffix_fail;
+        while (suffix.count > 0) {
+            decl_op_t op = suffix.ops[--suffix.count];
+
+            if (declarator_push(d, &op) != 0) {
+                goto out;
             }
         }
-        goto suffix_done;
-    suffix_fail:
-        while (nsuffix > 0) {
-            decl_op_free(&suffix[--nsuffix]);
-        }
-        goto out;
     }
-suffix_done:
     for (i = 0; i < inner.count; ++i) {
         int pushed = declarator_push(d, &inner.ops[i]);
         /* either way the step's parts now belong to d, or are freed */
@@ -5695,6 +5653,8 @@ suffix_done:
     rc = 0;
 out:
     declarator_free(&inner);
+    declarator_free(&ptrs);
+    declarator_free(&suffix);
     return rc;
 }
 
@@ -5713,26 +5673,41 @@ out:
  * @param d     the declarator; the bounds taken are set to NULL in it
  * @param arr   the array type the dimensions are the levels of
  * @param skip  the number of outermost ops that are not dimensions
- * @param out   receives each dimension's bound (owned), or NULL where it
- *              is a constant
+ * @param out   receives each dimension's bound; left empty when every
+ *              bound is a constant
+ * @return      0, or -1 when out of memory
  */
-static void take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip,
-                            cc_expr_t *out[CC_MAX_ARRAY_DIMS]) {
+static int take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip, cc_bounds_t *out) {
+    const cc_ctype_t *t = arr;
+    size_t levels = 0;
     size_t k;
+    int any = 0;
 
-    memset(out, 0, CC_MAX_ARRAY_DIMS * sizeof(out[0]));
-    for (k = 0; k < CC_MAX_ARRAY_DIMS && arr != NULL && arr->kind == CC_CT_ARRAY && k + skip < d->count; ++k) {
+    memset(out, 0, sizeof(*out));
+    /* the run of array levels the declarator spells, and whether one is a run-time bound */
+    while (t != NULL && t->kind == CC_CT_ARRAY && levels + skip < d->count &&
+           d->ops[d->count - 1 - skip - levels].kind == DECL_OP_ARRAY) {
+        any |= d->ops[d->count - 1 - skip - levels].bound != NULL && t->count < 0;
+        ++levels;
+        t = t->of;
+    }
+    if (!any) {
+        return 0;
+    }
+    out->at = (cc_expr_t **)calloc(levels, sizeof(out->at[0]));
+    if (out->at == NULL) {
+        return -1;
+    }
+    out->count = levels;
+    for (k = 0, t = arr; k < levels; ++k, t = t->of) {
         decl_op_t *op = &d->ops[d->count - 1 - skip - k];
 
-        if (op->kind != DECL_OP_ARRAY) {
-            break;
-        }
-        if (op->bound != NULL && arr->count < 0) {
-            out[k] = op->bound;
+        if (op->bound != NULL && t->count < 0) {
+            out->at[k] = op->bound;
             op->bound = NULL;
         }
-        arr = arr->of;
     }
+    return 0;
 }
 
 /**
@@ -5743,14 +5718,11 @@ static void take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip,
  * @param what            the message for a missing type
  * @param out             receives the type
  * @param out_vla_bounds  when the type is an array with bounds that are
- *                        not constants, `int[n][m]`, receives each array
- *                        level's bound, outermost first (owned), NULL where
- *                        a bound is a constant; all NULL otherwise.  May
- *                        be NULL.
+ *                        not constants, `int[n][m]`, receives them (see
+ *                        cc_bounds_t); empty otherwise.  May be NULL.
  * @return                0, or -1 on error (diagnosed)
  */
-static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out,
-                           cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
+static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds) {
     declarator_t d;
     const cc_ctype_t *spec;
     const cc_ctype_t *t;
@@ -5776,16 +5748,12 @@ static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out
         set_diag(p->diag, line, col, "out of memory building a type");
         return -1;
     }
-    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
-        declarator_free(&d);
-        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
-        return -1;
-    }
     if (out_vla_bounds != NULL) {
-        if (t->kind == CC_CT_ARRAY) {
-            take_vla_bounds(&d, t, 0, out_vla_bounds);
-        } else {
-            memset(out_vla_bounds, 0, CC_MAX_ARRAY_DIMS * sizeof(out_vla_bounds[0]));
+        memset(out_vla_bounds, 0, sizeof(*out_vla_bounds));
+        if (t->kind == CC_CT_ARRAY && take_vla_bounds(&d, t, 0, out_vla_bounds) != 0) {
+            declarator_free(&d);
+            set_diag(p->diag, line, col, "out of memory recording array bounds");
+            return -1;
         }
     }
     declarator_free(&d);
@@ -5832,6 +5800,35 @@ void cc_expr_free(cc_expr_t *e) {
     free_expr(e);
 }
 
+cc_expr_t *cc_bounds_at(const cc_bounds_t *b, size_t k) {
+    return b != NULL && k < b->count ? b->at[k] : NULL;
+}
+
+int cc_bounds_any(const cc_bounds_t *b) {
+    size_t k;
+
+    for (k = 0; b != NULL && k < b->count; ++k) {
+        if (b->at[k] != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void cc_bounds_free(cc_bounds_t *b) {
+    size_t k;
+
+    if (b == NULL) {
+        return;
+    }
+    for (k = 0; k < b->count; ++k) {
+        free_expr(b->at[k]);
+    }
+    free(b->at);
+    b->at = NULL;
+    b->count = 0;
+}
+
 static cc_expr_t *clone_expr(const cc_expr_t *src);
 
 cc_expr_t *cc_expr_clone(const cc_expr_t *e) {
@@ -5847,9 +5844,7 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->label_name);
     free(s->attr_section);
     free(s->attr_alias);
-    for (i = 0; i < CC_MAX_ARRAY_DIMS; ++i) {
-        free_expr(s->array_bound_exprs[i]);
-    }
+    cc_bounds_free(&s->array_bounds);
     free_expr(s->expr);
     free(s->asm_template);
     for (i = 0; i < s->asm_output_count; ++i) {
@@ -5921,7 +5916,7 @@ static int push_param(cc_function_t *f, const cc_ctype_t *ctype, const char *nam
     }
     f->params[f->param_count].storage = storage;
     f->params[f->param_count].ctype = ctype;
-    memset(f->params[f->param_count].vla_bounds, 0, sizeof(f->params[f->param_count].vla_bounds));
+    memset(&f->params[f->param_count].vla_bounds, 0, sizeof(f->params[f->param_count].vla_bounds));
     f->param_count++;
     return 0;
 }
@@ -7532,23 +7527,6 @@ static cc_expr_t *mark_unary_form(cc_expr_t *e, unsigned char form) {
 }
 
 /**
- * Whether any of a type's array levels has a bound that is not a constant.
- *
- * @param bounds  the bounds, as parse_type_name_ct() gives them
- * @return        1 or 0
- */
-static int vla_bounds_any(cc_expr_t *const bounds[CC_MAX_ARRAY_DIMS]) {
-    size_t k;
-
-    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
-        if (bounds[k] != NULL) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-/**
  * The size of an array type with run-time bounds, `sizeof (T[n][m])`, as
  * an expression of type size_t: the product of each level's bound -- the
  * expression where it is one, else the constant -- and the size of the
@@ -7556,11 +7534,10 @@ static int vla_bounds_any(cc_expr_t *const bounds[CC_MAX_ARRAY_DIMS]) {
  *
  * @param p       the parser
  * @param t       the array type
- * @param bounds  each level's run-time bound, outermost first, NULL where
- *                a constant; all are consumed
+ * @param bounds  each level's run-time bound; all are consumed
  * @return        the expression, or NULL on error (diagnosed)
  */
-static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t *bounds[CC_MAX_ARRAY_DIMS]) {
+static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_bounds_t *bounds) {
     cc_expr_t *acc = NULL;
     long elem;
     size_t k;
@@ -7568,12 +7545,12 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
     for (k = 0; t != NULL && t->kind == CC_CT_ARRAY; ++k, t = t->of) {
         cc_expr_t *factor;
 
-        if (k < CC_MAX_ARRAY_DIMS && bounds[k] != NULL) {
+        if (cc_bounds_at(bounds, k) != NULL) {
             factor = new_expr(CC_EXPR_CAST);
             if (factor != NULL) {
                 parser_set_ctype(factor, parser_size_ctype());
-                factor->lhs = bounds[k];
-                bounds[k] = NULL;
+                factor->lhs = bounds->at[k];
+                bounds->at[k] = NULL;
             }
         } else if (t->count >= 0) {
             factor = new_const_expr(CC_EXPR_INT, parser_size_ctype());
@@ -7597,10 +7574,7 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
             break;
         }
     }
-    for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
-        free_expr(bounds[k]);
-        bounds[k] = NULL;
-    }
+    cc_bounds_free(bounds);
     if (acc == NULL) {
         return NULL;
     }
@@ -7660,7 +7634,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
         return 0;
     }
     *dst = *src;
-    memset(dst->array_bound_exprs, 0, sizeof(dst->array_bound_exprs));
+    memset(&dst->array_bounds, 0, sizeof(dst->array_bounds));
     dst->decl_name = NULL;
     dst->label_name = NULL;
     dst->attr_section = NULL;
@@ -7717,12 +7691,20 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
             return -1;
         }
     }
-    for (i = 0; i < CC_MAX_ARRAY_DIMS; ++i) {
-        if (src->array_bound_exprs[i] != NULL) {
-            dst->array_bound_exprs[i] = clone_expr(src->array_bound_exprs[i]);
-            if (dst->array_bound_exprs[i] == NULL) {
-                free_stmt(dst);
-                return -1;
+    if (src->array_bounds.count > 0) {
+        dst->array_bounds.at = (cc_expr_t **)calloc(src->array_bounds.count, sizeof(dst->array_bounds.at[0]));
+        if (dst->array_bounds.at == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+        dst->array_bounds.count = src->array_bounds.count;
+        for (i = 0; i < src->array_bounds.count; ++i) {
+            if (src->array_bounds.at[i] != NULL) {
+                dst->array_bounds.at[i] = clone_expr(src->array_bounds.at[i]);
+                if (dst->array_bounds.at[i] == NULL) {
+                    free_stmt(dst);
+                    return -1;
+                }
             }
         }
     }
@@ -8264,32 +8246,28 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         if (is_type_name_start_after_lparen(p)) {
             const cc_ctype_t *sizeof_ctype = NULL;
-            cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS] = {NULL};
+            cc_bounds_t vla_bounds;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name(p, "expected type name in sizeof", &sizeof_ctype, vla_bounds) != 0) {
+            if (parse_type_name(p, "expected type name in sizeof", &sizeof_ctype, &vla_bounds) != 0) {
                 free_expr(e);
                 return NULL;
             }
             if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
-                for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
-                    free_expr(vla_bounds[b]);
-                }
+                cc_bounds_free(&vla_bounds);
                 free_expr(e);
                 return NULL;
             }
-            if (p->tok.kind != TOK_LBRACE && vla_bounds_any(vla_bounds)) {
+            if (p->tok.kind != TOK_LBRACE && cc_bounds_any(&vla_bounds)) {
                 /* `sizeof (T[n][m])`: computed here, its bounds evaluated (C11 6.5.3.4p2) */
-                cc_expr_t *bytes = vla_type_size_expr(p, sizeof_ctype, vla_bounds);
+                cc_expr_t *bytes = vla_type_size_expr(p, sizeof_ctype, &vla_bounds);
 
                 free_expr(e);
                 return bytes;
             }
-            for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
-                free_expr(vla_bounds[b]);
-            }
+            cc_bounds_free(&vla_bounds);
             /* the type, for sema and lowering when it cannot be folded here (a structure not yet laid out) */
             e->aux_ctype = sizeof_ctype;
             if (p->tok.kind != TOK_LBRACE && fold_sizeof_type(p, e, sizeof_ctype) != 0) {
@@ -9091,8 +9069,7 @@ static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
 typedef struct {
     char *name;                    /**< the declared name (owned) */
     const cc_ctype_t *ctype;       /**< the type */
-    /** a variable-length array's bounds (owned), outermost first; NULL where a bound is a constant */
-    cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS];
+    cc_bounds_t vla_bounds;        /**< a variable-length array's (or its pointee's) run-time bounds */
     int saw_restrict;              /**< a pointer level is restrict-qualified */
 } named_decl_t;
 
@@ -9127,21 +9104,18 @@ static int parse_named_decl(parser_t *p, const cc_ctype_t *base, named_decl_t *o
         declarator_free(&d);
         return -1;
     }
-    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
-        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
-        declarator_free(&d);
-        return -1;
-    }
     for (i = 0; i < d.count; ++i) {
         if (d.ops[i].kind == DECL_OP_POINTER && (d.ops[i].quals & CC_CQ_RESTRICT) != 0) {
             out->saw_restrict = 1;
         }
     }
     /* `T (*p)[n]`, a pointer to an array: its pointer op is outermost */
-    if (d.nested && d.inner_arrays == 0 && t->kind == CC_CT_POINTER && t->of->kind == CC_CT_ARRAY) {
-        take_vla_bounds(&d, t->of, 1, out->vla_bounds);
-    } else {
-        take_vla_bounds(&d, t, 0, out->vla_bounds);
+    if ((d.nested && d.inner_arrays == 0 && t->kind == CC_CT_POINTER && t->of->kind == CC_CT_ARRAY)
+            ? take_vla_bounds(&d, t->of, 1, &out->vla_bounds) != 0
+            : take_vla_bounds(&d, t, 0, &out->vla_bounds) != 0) {
+        set_diag(p->diag, line, col, "out of memory recording array bounds");
+        declarator_free(&d);
+        return -1;
     }
     out->name = d.name;
     d.name = NULL;
@@ -9165,7 +9139,6 @@ static int parse_member_decl(parser_t *p, const cc_ctype_t *base, member_decl_t 
     const cc_ctype_t *e;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
-    int ndim = 0;
 
     memset(out, 0, sizeof(*out));
     out->count = -1;
@@ -9188,10 +9161,6 @@ static int parse_member_decl(parser_t *p, const cc_ctype_t *base, member_decl_t 
         out->is_array = 1;
         out->count = 1;
         for (; e->kind == CC_CT_ARRAY; e = e->of) {
-            if (ndim++ == CC_MAX_ARRAY_DIMS) {
-                set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
-                goto fail;
-            }
             if (e->count < 0) {
                 out->unsized |= (e == t);
                 out->count = 0;
@@ -9201,10 +9170,6 @@ static int parse_member_decl(parser_t *p, const cc_ctype_t *base, member_decl_t 
                 out->count *= e->count;
             }
         }
-    }
-    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
-        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
-        goto fail;
     }
     out->elem = e;
     out->ctype = t;
@@ -9295,7 +9260,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             }
             s.decl_name = nd.name;
             s.ctype = nd.ctype;
-            memcpy(s.array_bound_exprs, nd.vla_bounds, sizeof(s.array_bound_exprs));
+            s.array_bounds = nd.vla_bounds;
             if ((base_saw_restrict || nd.saw_restrict) && cc_ct_decay(s.ctype)->kind != CC_CT_POINTER) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
                 free_stmt(&s);
@@ -10140,12 +10105,8 @@ static void free_func(cc_function_t *f) {
     free(f->attr_section);
     free(f->attr_alias);
     for (i = 0; i < f->param_count; ++i) {
-        size_t b;
-
         free(f->params[i].name);
-        for (b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
-            free_expr(f->params[i].vla_bounds[b]);
-        }
+        cc_bounds_free(&f->params[i].vla_bounds);
     }
     free(f->params);
     for (i = 0; i < f->stmt_count; ++i) {
@@ -10239,12 +10200,11 @@ static int can_parse_oldstyle_param_names(parser_t *p) {
  * @param out_saw_restrict  receives whether a pointer level, or the
  *                          adjusted array, is restrict-qualified
  * @param out_vla_bounds    for a pointer to an array, receives the
- *                          run-time bounds of that array (owned), NULL
- *                          where a bound is a constant
+ *                          run-time bounds of that array; empty otherwise
  * @return                  0, or -1 on error (diagnosed)
  */
 static int parse_param_decl(parser_t *p, const cc_ctype_t *base, char **out_name, const cc_ctype_t **out_ctype,
-                            int *out_saw_restrict, cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]) {
+                            int *out_saw_restrict, cc_bounds_t *out_vla_bounds) {
     declarator_t d;
     const cc_ctype_t *t;
     size_t line = p->tok.line;
@@ -10252,6 +10212,7 @@ static int parse_param_decl(parser_t *p, const cc_ctype_t *base, char **out_name
     size_t i;
 
     *out_name = NULL;
+    memset(out_vla_bounds, 0, sizeof(*out_vla_bounds));
     memset(&d, 0, sizeof(d));
     if (parse_declarator_into(p, &d, DECL_ABSTRACT | DECL_PARAM) != 0) {
         declarator_free(&d);
@@ -10268,16 +10229,11 @@ static int parse_param_decl(parser_t *p, const cc_ctype_t *base, char **out_name
         declarator_free(&d);
         return -1;
     }
-    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
-        set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
+    /* a pointer to an array: its outermost op is the pointer, or the array adjusted to one */
+    if (t->kind == CC_CT_POINTER && take_vla_bounds(&d, t->of, 1, out_vla_bounds) != 0) {
+        set_diag(p->diag, line, col, "out of memory recording array bounds");
         declarator_free(&d);
         return -1;
-    }
-    if (t->kind == CC_CT_POINTER) {
-        /* a pointer to an array: its outermost op is the pointer, or the array adjusted to one */
-        take_vla_bounds(&d, t->of, 1, out_vla_bounds);
-    } else {
-        memset(out_vla_bounds, 0, CC_MAX_ARRAY_DIMS * sizeof(out_vla_bounds[0]));
     }
     *out_saw_restrict = d.saw_restrict;
     for (i = 0; i < d.count; ++i) {
@@ -10337,9 +10293,8 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         int dty_restrict = 0;
         const cc_ctype_t *pctype = NULL;
         char anon_buf[32];
-        cc_expr_t *pvla_bounds[CC_MAX_ARRAY_DIMS];
+        cc_bounds_t pvla_bounds;
         int pushed;
-        size_t b;
 
         if (p->tok.kind == TOK_ELLIPSIS) {
             f->is_variadic = 1;
@@ -10354,7 +10309,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             return -1;
         }
         param_storage = p->last_storage;
-        if (parse_param_decl(p, pspec, &pname, &pctype, &dty_restrict, pvla_bounds) != 0) {
+        if (parse_param_decl(p, pspec, &pname, &pctype, &dty_restrict, &pvla_bounds) != 0) {
             return -1;
         }
         if ((ptype_restrict || dty_restrict) && (pctype == NULL || cc_ct_decay(pctype)->kind != CC_CT_POINTER)) {
@@ -10373,12 +10328,10 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         }
         free(pname);
         if (pushed != 0) {
-            for (b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
-                free_expr(pvla_bounds[b]);
-            }
+            cc_bounds_free(&pvla_bounds);
             return -1;
         }
-        memcpy(f->params[f->param_count - 1].vla_bounds, pvla_bounds, sizeof(pvla_bounds));
+        f->params[f->param_count - 1].vla_bounds = pvla_bounds;
         f->has_prototype = 1;
 
         if (p->tok.kind != TOK_COMMA) {

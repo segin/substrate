@@ -233,8 +233,8 @@ static int stmt_uses_outer(const cc_stmt_t *s, const uses_walk_t *w) {
     if (s == NULL) {
         return 0;
     }
-    for (i = 0; i < CC_MAX_ARRAY_DIMS; ++i) {
-        if (expr_uses_outer(s->array_bound_exprs[i], w)) {
+    for (i = 0; i < s->array_bounds.count; ++i) {
+        if (expr_uses_outer(s->array_bounds.at[i], w)) {
             return 1;
         }
     }

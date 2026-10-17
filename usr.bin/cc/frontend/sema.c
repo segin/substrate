@@ -3607,8 +3607,8 @@ static void sema_settle_stmts(cc_stmt_t *s, size_t n) {
     size_t k;
 
     for (i = 0; s != NULL && i < n; ++i) {
-        for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
-            sema_settle_tree(s[i].array_bound_exprs[k]);
+        for (k = 0; k < s[i].array_bounds.count; ++k) {
+            sema_settle_tree(s[i].array_bounds.at[k]);
         }
         sema_settle_tree(s[i].expr);
         sema_settle_tree(s[i].init_expr);
@@ -6210,8 +6210,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "duplicate local/parameter name");
                 return -1;
             }
-            for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
-                cc_expr_t *bound = s->array_bound_exprs[b];
+            for (size_t b = 0; b < s->array_bounds.count; ++b) {
+                cc_expr_t *bound = s->array_bounds.at[b];
 
                 if (bound == NULL) {
                     continue;
@@ -7383,8 +7383,8 @@ fail_decl:
         }
         /* a parameter that points to a variable-length array: its bounds name earlier parameters */
         for (j = 0; j < f->param_count; ++j) {
-            for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
-                cc_expr_t *bound = f->params[j].vla_bounds[b];
+            for (size_t b = 0; b < f->params[j].vla_bounds.count; ++b) {
+                cc_expr_t *bound = f->params[j].vla_bounds.at[b];
 
                 if (bound == NULL) {
                     continue;
