@@ -276,6 +276,9 @@ typedef struct {
     size_t layout_cap;
     long size;
     long align;
+    /** what `_Alignof` gives, as gcc gives it: align, but an alignment that only vectors give capped at 16;
+     *  0 for align */
+    long c11_align;
     cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_alias;

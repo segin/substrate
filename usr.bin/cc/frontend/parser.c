@@ -903,6 +903,23 @@ static int bitfield_unit(const unsigned char *owned, long obj_size, long pos, in
 }
 
 /**
+ * What `_Alignof (T)` gives for type @p t, as gcc gives it: its
+ * alignment, except that an alignment only vectors give -- a vector's, a
+ * structure's that holds one -- is capped at 16.  One the program asks
+ * for with `_Alignas` or `aligned` is not capped.
+ */
+static long parser_ct_c11_align(parser_t *p, const cc_ctype_t *t) {
+    while (t != NULL && t->unqual->kind == CC_CT_ARRAY) {
+        t = t->unqual->of;
+    }
+    if (t != NULL && t->unqual->kind == CC_CT_RECORD && t->unqual->id >= 0 &&
+        (size_t)t->unqual->id < p->struct_count && p->structs[t->unqual->id].c11_align > 0) {
+        return p->structs[t->unqual->id].c11_align;
+    }
+    return parser_ct_align(p, t);
+}
+
+/**
  * Give each bit-field of structure @p sid, whose bit_offset holds its
  * first bit, the storage unit lowering accesses it through
  * (bitfield_unit()).  In a structure no unit touches an ordinary member's
@@ -982,6 +999,7 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
     cc_struct_def_t *sd = &p->structs[sid];
     long bits = 0; /* a structure's next free bit; a union's size in bits */
     long max_align = 1;
+    long max_c11 = 1; /* what _Alignof gives (parser_ct_c11_align()) */
     long size;
     size_t i;
 
@@ -1055,10 +1073,25 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
         if (align > max_align) {
             max_align = align;
         }
+        {
+            /* the same alignment, with a vector's natural one capped as _Alignof caps it */
+            long c11 = align;
+
+            if (!packed && it->align > 1 && it->bit_width < 0 && m != NULL) {
+                c11 = parser_ct_c11_align(p, m->ctype);
+                if (it->user_align > c11) {
+                    c11 = it->user_align;
+                }
+            }
+            if (c11 > max_c11) {
+                max_c11 = c11;
+            }
+        }
     }
     if (forced_align > max_align) {
         max_align = forced_align;
     }
+    sd->c11_align = forced_align > max_c11 ? forced_align : max_c11;
     size = align_up_long((bits + 7) / 8, max_align);
     if (struct_bitfield_units(p, sid, size) != 0) {
         return -1;
@@ -1402,8 +1435,8 @@ static const cc_ctype_t *parser_vector_elem_ctype(const cc_ctype_t *t) {
 
 /**
  * The structure standing for the vector type of @p n elements of type
- * @p elem: `{ elem __vec[n]; }`, aligned to its size up to 16 bytes, as
- * gcc lays a vector out.  Made once per shape and found again after.  It
+ * @p elem: `{ elem __vec[n]; }`, aligned to its size, as gcc lays a
+ * vector out.  Made once per shape and found again after.  It
  * comes with the vector of signed integers of the element's size and the
  * same count, the type its comparisons give (itself for such a vector).
  *
@@ -1430,7 +1463,9 @@ static int parser_vector_struct(parser_t *p, const cc_ctype_t *elem, long n) {
         return -1;
     }
     p->structs[sid].size = n * es;
-    p->structs[sid].align = n * es < 16 ? n * es : 16;
+    p->structs[sid].align = n * es;
+    /* gcc's _Alignof caps a vector's alignment at 16 (its BIGGEST_ALIGNMENT without AVX); layout does not */
+    p->structs[sid].c11_align = n * es < 16 ? n * es : 16;
     p->structs[sid].complete = 1;
     p->structs[sid].vector_count = n;
     p->structs[sid].vector_elem = elem;
@@ -8003,7 +8038,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
             if (expect(p, TOK_RPAREN, "expected ')' after _Alignof/alignof type") != 0) {
                 return NULL;
             }
-            align = parser_ct_align(p, act);
+            /* gcc: _Alignof caps a vector's natural alignment at 16, __alignof__ does not */
+            align = is_gnu_alignof ? parser_ct_align(p, act) : parser_ct_c11_align(p, act);
             if (align <= 0) {
                 align = cc_target_pointer_size();
             }
@@ -8017,7 +8053,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(ae);
                 return NULL;
             }
-            align = parser_ct_align(p, parser_expr_ctype(p, ae));
+            align = is_gnu_alignof ? parser_ct_align(p, parser_expr_ctype(p, ae))
+                                   : parser_ct_c11_align(p, parser_expr_ctype(p, ae));
             free_expr(ae);
         }
         if (align <= 0) {

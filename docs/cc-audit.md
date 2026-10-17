@@ -702,12 +702,21 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   (gcc 16, 16, 32).  *Reproduced* (both targets); found while testing
   CC-113.  A global carries its type's alignment (`type_align`, set with
   its layout) and the emitter takes it.  `codegen/global_align.c`.
-- [ ] **CC-113** A vector type shall be aligned to its size, as gcc aligns
+- [x] **CC-113** A vector type shall be aligned to its size, as gcc aligns
   it: `vector_size(32)` is 32-aligned, `vector_size(64)` 64 (gcc, both
-  targets); cc caps vector alignment at 16, so `struct { char c; v8 v; }`
-  is 48 bytes with `v` at 16 where gcc makes it 64 with `v` at 32 -- the
-  layout disagrees with gcc-built code.  *Reproduced* (both targets);
-  found while testing CC-111.
+  targets); cc capped vector alignment at 16, so `struct { char c; v8 v; }`
+  was 48 bytes with `v` at 16 where gcc makes it 64 with `v` at 32 -- the
+  layout disagreed with gcc-built code.  *Reproduced* (both targets);
+  found while testing CC-111.  A vector is aligned to its size; locals
+  (CC-111) and globals (CC-114) of it are placed so.  gcc's `_Alignof`
+  still reports 16 for an alignment only vectors give (its
+  `__alignof__` and layout do not cap it), so a structure records what
+  `_Alignof` gives beside its alignment (`c11_align`), and `_Alignof`
+  reads that, `__alignof__` the alignment.  `codegen/vector_align.c`.
+- [ ] **CC-115** An `aligned` attribute on a typedef shall give the type
+  that alignment (gcc): `typedef int ia __attribute__((aligned(32)));`
+  has `_Alignof(ia)` 4 (gcc 32), and objects declared with it are
+  4-aligned.  *Reproduced* (both targets); found while testing CC-113.
 - [ ] **CC-112** An attribute specifier sequence after an array
   declarator's `]` shall be accepted (C23 6.7.7.3): `char b[3]
   [[gnu::aligned(64)]];` is rejected ("expected primary expression");
@@ -1165,7 +1174,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-114 requirements: 106 met, 8 open.
+115 requirements: 107 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
