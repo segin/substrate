@@ -587,6 +587,24 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   to the element type; both i386 paths call the libgcc helpers as gcc
   does; and the lexer reads `f16` (and `f32`, `f64`, `f128`, `f32x`,
   `f64x`, as the parser maps those keywords).  `codegen/float16_data.c`.
+- [x] **CC-108** A store to a bit-field shall not write the bytes of an
+  ordinary member beside it, which is a memory location of its own (C11
+  3.14) another thread may be writing.  CC-99's layout puts a bit-field
+  in the bytes of the members around it, as gcc does, but kept
+  accessing it through the whole aligned unit of its type: storing `b`
+  in `struct { char a; int b : 3; short e; }` read and rewrote `a` and
+  `e`, losing a concurrent write to either.  *Traced* (both targets);
+  introduced by CC-99 (`703ffdfb9`) and reported by a side review.  A
+  bit-field's unit is now the smallest of 1, 2, 4 or 8 bytes that holds
+  it inside the object and touches no ordinary member's byte, so the
+  store to `b` is one byte.  `ir/bitfield_unit.c` (IR golden: the
+  stores' widths).
+- [ ] **CC-109** A store to a bit-field that no single 1, 2, 4 or 8-byte
+  unit can cover without an ordinary member's bytes shall still leave
+  those bytes alone: `int b : 24` between `char a` and `char c` is three
+  bytes, and gcc stores it as three byte stores; cc's lowering accesses a
+  field through one unit, so it rewrites `a` or `c`.  *Traced* (both
+  targets); what CC-108 leaves.  Needs lowering to split such an access.
 - [ ] **CC-107** `_Float32`, `_Float64`, `_Float128`, `_Float32x` and
   `_Float64x` shall be types distinct from `float`, `double` and `long
   double` (C23 6.2.5p10): cc makes `_Float32` an alias of `float`,
@@ -1095,7 +1113,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-107 requirements: 100 met, 7 open.
+109 requirements: 101 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

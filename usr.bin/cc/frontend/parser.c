@@ -849,43 +849,114 @@ static int struct_layout_push(parser_t *p, int sid, int member, const cc_ctype_t
 
 /**
  * The storage unit lowering reads and writes a bit-field through: the
- * aligned unit of its type that holds it (its type's alignment where a
- * type is wider than it is aligned, as i386's `long long` is, and the
- * field fits one such word), or for a packed field the smallest of 1, 2,
- * 4 or 8 bytes from the byte it starts in.
+ * smallest of 1, 2, 4 or 8 bytes that holds the field, inside the object,
+ * and -- where @p owned allows -- touching no byte of an ordinary member,
+ * which is a memory location of its own that another thread may be
+ * writing (C11 3.14); an aligned unit before an unaligned one.
  *
- * @param pos         its first bit, from the start of the structure
- * @param width       its width
- * @param type_size   its type's size in bytes
- * @param type_align  its type's alignment in bytes
- * @param packed      it is packed: it may start at any bit
- * @param out_start   receives the unit's offset in bytes
- * @param out_size    receives the unit's size in bytes
- * @return            0, or -1 if no unit of at most 8 bytes holds it
+ * @param owned      per byte of the object, whether an ordinary member holds it; NULL to ignore
+ * @param obj_size   the object's size in bytes
+ * @param pos        the field's first bit
+ * @param width      its width
+ * @param out_start  receives the unit's offset in bytes
+ * @param out_size   receives the unit's size in bytes
+ * @return           0, or -1 if no unit meets the conditions
  */
-static int bitfield_unit(long pos, int width, long type_size, long type_align, int packed, long *out_start,
+static int bitfield_unit(const unsigned char *owned, long obj_size, long pos, int width, long *out_start,
                          long *out_size) {
-    long start;
+    long first = pos / 8;
+    long last = (pos + width - 1) / 8;
     long size;
 
-    if (!packed) {
-        start = pos / (type_align * 8) * type_align;
-        size = type_size;
-        if (type_size > type_align && pos - start * 8 + width <= type_align * 8) {
-            size = type_align;
+    for (size = 1; size <= 8; size *= 2) {
+        long best = -1;
+        long start;
+
+        for (start = first; start >= 0 && start + size > last; --start) {
+            long b;
+
+            if (start + size > obj_size) {
+                continue;
+            }
+            for (b = start; owned != NULL && b < start + size && !owned[b]; ++b) {
+            }
+            if (owned != NULL && b < start + size) {
+                continue;
+            }
+            if (start % size == 0) {
+                best = start;
+                break;
+            }
+            if (best < 0) {
+                best = start;
+            }
         }
-    } else {
-        start = pos / 8;
-        size = 1;
-        while (size < 8 && size * 8 < pos % 8 + width) {
-            size *= 2;
+        if (best >= 0) {
+            *out_start = best;
+            *out_size = size;
+            return 0;
         }
     }
-    if (pos - start * 8 + width > size * 8) {
-        return -1;
+    return -1;
+}
+
+/**
+ * Give each bit-field of structure @p sid, whose bit_offset holds its
+ * first bit, the storage unit lowering accesses it through
+ * (bitfield_unit()).  In a structure no unit touches an ordinary member's
+ * bytes; where every unit that holds the field would (a field of three, or
+ * five to seven, bytes between two such members), the smallest unit
+ * inside the object is taken, and a store to the field rewrites those
+ * bytes with the values it read.  A union's members share their storage,
+ * so its units only stay inside it.
+ *
+ * @param p     the parser
+ * @param sid   the structure
+ * @param size  its size in bytes
+ * @return      0, or -1 on error (diagnosed)
+ */
+static int struct_bitfield_units(parser_t *p, int sid, long size) {
+    cc_struct_def_t *sd = &p->structs[sid];
+    unsigned char *owned = NULL;
+    size_t i;
+
+    if (!sd->is_union && size > 0) {
+        owned = (unsigned char *)calloc((size_t)size, 1);
+        if (owned == NULL) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory laying out a structure");
+            return -1;
+        }
+        for (i = 0; i < sd->member_count; ++i) {
+            const cc_struct_member_t *m = &sd->members[i];
+            long b;
+
+            for (b = m->offset; !m->is_bitfield && b < m->offset + m->size && b < size; ++b) {
+                owned[b] = 1;
+            }
+        }
     }
-    *out_start = start;
-    *out_size = size;
+    for (i = 0; i < sd->member_count; ++i) {
+        cc_struct_member_t *m = &sd->members[i];
+        long pos = m->bit_offset;
+        long start;
+        long unit;
+
+        if (!m->is_bitfield || m->bit_width <= 0) {
+            continue;
+        }
+        if (bitfield_unit(owned, size, pos, m->bit_width, &start, &unit) != 0 &&
+            bitfield_unit(NULL, size, pos, m->bit_width, &start, &unit) != 0) {
+            free(owned);
+            set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
+            return -1;
+        }
+        m->offset = start;
+        m->bit_offset = (int)(pos - start * 8);
+        m->bit_storage_size = unit;
+        m->bit_storage_bits = (int)(unit * 8);
+        m->size = unit;
+    }
+    free(owned);
     return 0;
 }
 
@@ -933,8 +1004,6 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
             long type_align = parser_ct_align(p, it->ctype);
             int bit_packed = packed || it->align < type_align;
             long pos = 0;
-            long start;
-            long unit;
 
             if (type_size <= 0 || type_align <= 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "unsupported bit-field storage type size");
@@ -961,15 +1030,9 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
             if (m == NULL) {
                 continue;
             }
-            if (bitfield_unit(pos, it->bit_width, type_size, type_align, bit_packed, &start, &unit) != 0) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
-                return -1;
-            }
-            m->offset = start;
-            m->bit_offset = (int)(pos - start * 8);
-            m->bit_storage_size = unit;
-            m->bit_storage_bits = (int)(unit * 8);
-            m->size = unit;
+            /* its first bit, until its unit is chosen below */
+            m->offset = 0;
+            m->bit_offset = (int)pos;
             if (!bit_packed && type_align > align) {
                 align = type_align;
             }
@@ -995,20 +1058,8 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
         max_align = forced_align;
     }
     size = align_up_long((bits + 7) / 8, max_align);
-    /* a unit reaching past the end moves back: lowering must not touch the bytes after the object */
-    for (i = 0; i < sd->member_count; ++i) {
-        cc_struct_member_t *m = &sd->members[i];
-
-        if (m->is_bitfield && m->bit_width > 0 && m->offset + m->bit_storage_size > size) {
-            long back = m->offset + m->bit_storage_size - size;
-
-            if (back > m->offset) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
-                return -1;
-            }
-            m->offset -= back;
-            m->bit_offset += (int)(back * 8);
-        }
+    if (struct_bitfield_units(p, sid, size) != 0) {
+        return -1;
     }
     sd->size = size;
     sd->align = max_align;
