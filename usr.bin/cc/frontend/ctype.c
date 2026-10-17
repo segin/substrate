@@ -922,6 +922,13 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
     }
 }
 
+long cc_ct_sizeof_type(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
+    if (t == NULL) {
+        return -1;
+    }
+    return t->kind == CC_CT_VOID ? 1 : cc_ct_size(t, tu);
+}
+
 /**
  * The alignment of a type in bytes.
  *

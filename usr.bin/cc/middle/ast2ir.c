@@ -96,10 +96,9 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
                                     const cc_expr_t *e);
 static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
                                   const long dims[CC_MAX_ARRAY_DIMS]);
-static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
-                              const long dims[CC_MAX_ARRAY_DIMS]);
 static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                               const cc_expr_t *e);
+static long sizeof_type_name_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e);
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g);
 
 static void free_asm_instr_fields(cc_ssa_instr_t *in) {
@@ -1231,7 +1230,7 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
     const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
 
     if (e->lhs == NULL) {
-        return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+        return sizeof_type_name_bytes(tu, e);
     }
     return sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
 }
@@ -2457,15 +2456,6 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     return elem_size * count;
 }
 
-/* sizeof(type): as gcc, sizeof(void) is 1 */
-static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
-                              const long array_dims[CC_MAX_ARRAY_DIMS]) {
-    if (t == CC_TYPE_VOID && struct_id < 0 && array_ndim <= 0) {
-        return 1;
-    }
-    return array_type_size_bytes(tu, t, struct_id, array_ndim, array_dims);
-}
-
 /**
  * Find the object a pointer expression points into and how far into it,
  * from real types: an array (which decays to its start), `&x`, and
@@ -2519,6 +2509,19 @@ static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_
         return *out_size > 0;
     }
     return 0;
+}
+
+/**
+ * The value of `sizeof (T)` the parser could not fold (T a structure not
+ * yet laid out then, or void): the size of the type it recorded, and 1
+ * for void, as gcc has it.
+ *
+ * @param tu  the translation unit
+ * @param e   the CC_EXPR_SIZEOF with no operand expression
+ * @return    the size, or -1 if it is not known
+ */
+static long sizeof_type_name_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return cc_ct_sizeof_type(e->aux_ctype, tu);
 }
 
 /**
@@ -10025,7 +10028,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->lhs != NULL) {
             n = sizeof_expr_bytes(tu, vars, var_count, depth, e->lhs);
         } else {
-            n = sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+            n = sizeof_type_name_bytes(tu, e);
         }
         if (n < 0) {
             set_diag(diag, "unsupported sizeof operand in lowering");
@@ -14745,7 +14748,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         if (e->lhs != NULL) {
             n = sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
         } else {
-            n = sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+            n = sizeof_type_name_bytes(tu, e);
         }
         if (n < 0) {
             return -1;

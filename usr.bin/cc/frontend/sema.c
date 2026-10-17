@@ -1938,15 +1938,6 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     return elem_size * count;
 }
 
-/* sizeof(type): as gcc, sizeof(void) is 1 */
-static long sizeof_type_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
-                              const long array_dims[CC_MAX_ARRAY_DIMS]) {
-    if (t == CC_TYPE_VOID && struct_id < 0 && array_ndim <= 0) {
-        return 1;
-    }
-    return array_type_size_bytes(tu, t, struct_id, array_ndim, array_dims);
-}
-
 /**
  * The size in bytes of a sizeof expression, for the constant evaluator:
  * of a string literal, an array, or any other expression or type.
@@ -1959,7 +1950,7 @@ static long sema_const_sizeof(void *ctx, const cc_expr_t *e) {
     const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
 
     if (e->lhs == NULL) {
-        return sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+        return cc_ct_sizeof_type(e->aux_ctype, tu);
     }
     if (e->lhs->kind == CC_EXPR_STR) {
         int wide = cc_string_literal_is_wide(e->lhs);
@@ -5775,11 +5766,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 return -1;
             }
         } else {
-            if (sizeof_type_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims) < 0) {
+            if (cc_ct_sizeof_type(e->aux_ctype, tu) < 0) {
                 set_diag(diag, "sizeof unsupported for this type");
                 return -1;
             }
-            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0 && e->array_ndim <= 0 &&
+            if (e->aux_ctype->kind == CC_CT_VOID &&
                 emit_warning(diag, e->line, e->col, "invalid application of 'sizeof' to a void type", 1) != 0) {
                 return -1;
             }

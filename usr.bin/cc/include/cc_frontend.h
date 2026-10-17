@@ -342,6 +342,7 @@ struct cc_expr {
     const struct cc_ctype *ctype; /**< identifier, member access, direct call or written cast: the variable's or
                                        member's type, the function's return type, or the cast's type, where it was
                                        recorded; else NULL */
+    const struct cc_ctype *aux_ctype; /**< the type a `sizeof (T)` names, which aux_type spells; else NULL */
 };
 
 typedef enum {

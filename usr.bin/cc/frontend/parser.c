@@ -8864,6 +8864,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->is_subscript = src->is_subscript;
     dst->unary_form = src->unary_form;
     dst->ctype = src->ctype;
+    dst->aux_ctype = src->aux_ctype;
     dst->member_is_arrow = src->member_is_arrow;
     dst->member_offset = src->member_offset;
     dst->member_is_bitfield = src->member_is_bitfield;
@@ -9156,6 +9157,7 @@ static int fold_sizeof_type(parser_t *p, cc_expr_t *e, const cc_ctype_t *t) {
         e->struct_id = -1;
         e->aux_type = CC_TYPE_VOID;
         e->aux_struct_id = -1;
+        e->aux_ctype = NULL;
         e->array_ndim = 0;
         memset(e->array_dims, 0, sizeof(e->array_dims));
         return 0;
@@ -9256,6 +9258,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
             for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
                 free_expr(vla_bounds[b]);
             }
+            /* the type, for sema and lowering when it cannot be folded here (a structure not yet laid out) */
+            e->aux_ctype = sizeof_ctype;
             if (p->tok.kind != TOK_LBRACE && fold_sizeof_type(p, e, sizeof_ctype) != 0) {
                 free_expr(e);
                 return NULL;
@@ -9280,6 +9284,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 e->lhs = ce;
                 e->aux_type = CC_TYPE_VOID;
                 e->aux_struct_id = -1;
+                e->aux_ctype = NULL;
             }
             return e;
         }

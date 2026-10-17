@@ -249,6 +249,15 @@ const cc_ctype_t *cc_ct_common_int(const cc_ctype_t *a, const cc_ctype_t *b);
 long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu);
 
 /**
+ * The value of `sizeof (T)`: cc_ct_size(), and 1 for void, as gcc has it.
+ *
+ * @param t   the type named, or NULL
+ * @param tu  the translation unit, for structure sizes
+ * @return    the size, or -1 for an incomplete type or NULL
+ */
+long cc_ct_sizeof_type(const cc_ctype_t *t, const cc_translation_unit_t *tu);
+
+/**
  * The alignment of a type in bytes on the selected target.
  *
  * @param t   the type
