@@ -332,6 +332,9 @@ static int local_label_push(parser_t *p, const char *name, size_t len);
 static void local_label_pop_to_depth(parser_t *p, int depth);
 static void parser_free_local_labels(parser_t *p);
 static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_sid);
+static void parser_set_ctype(cc_expr_t *e, const cc_ctype_t *t);
+static cc_expr_t *new_const_expr(cc_expr_kind_t kind, const cc_ctype_t *t);
+static const cc_ctype_t *parser_size_ctype(void);
 static int parser_ctype_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
                                int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS]);
 
@@ -1578,7 +1581,7 @@ static cc_expr_t *parser_decimal_literal(parser_t *p) {
     }
     for (k = 0; k < (bits == 128 ? 2 : 1); ++k) {
         /* not new_int_expr(): its long is 32 bits where cc runs on i386 */
-        cc_expr_t *item = new_expr(CC_EXPR_INT);
+        cc_expr_t *item = new_const_expr(CC_EXPR_INT, cc_ct_basic(bits == 32 ? CC_CT_UINT : CC_CT_ULLONG));
 
         if (item == NULL || push_arg(list, item) != 0) {
             free_expr(item);
@@ -1587,7 +1590,6 @@ static cc_expr_t *parser_decimal_literal(parser_t *p) {
             return NULL;
         }
         item->int_val = (long long)bid[k];
-        item->value_type = bits == 32 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
     }
     e->aux_type = CC_TYPE_VOID;
     e->aux_struct_id = sid;
@@ -4244,6 +4246,35 @@ static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *
     }
     *out_type = ty;
     *out_sid = leg.struct_id;
+}
+
+/**
+ * Give expression @p e the type @p t: its interned type, and the legacy
+ * fields still read alongside it derived from that.
+ */
+static void parser_set_ctype(cc_expr_t *e, const cc_ctype_t *t) {
+    e->ctype = t;
+    parser_scalar_legacy(t, &e->value_type, &e->struct_id);
+}
+
+/**
+ * A new constant of kind @p kind (CC_EXPR_INT or CC_EXPR_FLOAT) and
+ * type @p t, its value zero.
+ *
+ * @return the node, or NULL when out of memory
+ */
+static cc_expr_t *new_const_expr(cc_expr_kind_t kind, const cc_ctype_t *t) {
+    cc_expr_t *e = new_expr(kind);
+
+    if (e != NULL) {
+        parser_set_ctype(e, t);
+    }
+    return e;
+}
+
+/** The type of sizeof and _Alignof: size_t. */
+static const cc_ctype_t *parser_size_ctype(void) {
+    return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT);
 }
 
 /**
@@ -7448,7 +7479,7 @@ static cc_expr_t *parse_unary(parser_t *p);
  * @return     the CC_EXPR_COMPLEX node, or NULL when out of memory
  */
 static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
-    cc_expr_t *zero = new_expr(CC_EXPR_FLOAT);
+    cc_expr_t *zero = new_expr(CC_EXPR_FLOAT); /* typed below as the literal */
     cc_expr_t *c = new_expr(CC_EXPR_COMPLEX);
     int sid;
 
@@ -7456,7 +7487,7 @@ static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
         lit->kind = CC_EXPR_FLOAT;
         lit->float_val = (double)lit->int_val;
         lit->float_val_ld = (long double)lit->int_val;
-        lit->value_type = CC_TYPE_DOUBLE;
+        parser_set_ctype(lit, cc_ct_basic(CC_CT_DOUBLE));
     }
     sid = parser_complex_struct(p, lit->value_type);
     if (zero == NULL || c == NULL || sid < 0 || parser_complex_struct(p, CC_TYPE_FLOAT) < 0 ||
@@ -7466,8 +7497,7 @@ static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
         free_expr(lit);
         return NULL;
     }
-    zero->value_type = lit->value_type;
-    zero->struct_id = -1;
+    parser_set_ctype(zero, lit->ctype);
     c->line = p->tok.line;
     c->col = p->tok.col;
     c->lhs = zero;
@@ -7564,14 +7594,11 @@ static cc_expr_t *parser_bitint_literal(parser_t *p) {
         return NULL;
     }
     if (width <= 64) {
-        e = new_expr(CC_EXPR_INT);
+        e = new_const_expr(CC_EXPR_INT, cc_ct_bitint(width, is_uns));
         if (e == NULL) {
             return NULL;
         }
         e->int_val = (long long)((unsigned long long)acc[0] | ((unsigned long long)acc[1] << 32));
-        e->value_type = CC_TYPE_BITINT;
-        e->struct_id = (int)width;
-        e->ctype = cc_ct_bitint(width, is_uns);
         return e;
     } else {
         /* (wide type){ limbs } */
@@ -7598,7 +7625,7 @@ static cc_expr_t *parser_bitint_literal(parser_t *p) {
                 v |= (unsigned long long)acc[(size_t)(i * 2 + 1)] << 32;
             }
             /* not new_int_expr(): its long is 32 bits where cc runs on i386 */
-            item = new_expr(CC_EXPR_INT);
+            item = new_const_expr(CC_EXPR_INT, cc_ct_basic(limb == 8 ? CC_CT_ULLONG : CC_CT_UINT));
             if (item == NULL || push_arg(list, item) != 0) {
                 free_expr(item);
                 free_expr(outer);
@@ -7606,7 +7633,6 @@ static cc_expr_t *parser_bitint_literal(parser_t *p) {
                 return NULL;
             }
             item->int_val = (long long)v;
-            item->value_type = limb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
         }
         e->aux_type = CC_TYPE_VOID;
         e->aux_struct_id = sid;
@@ -7652,32 +7678,31 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
     if (p->tok.kind == TOK_NUM) {
         if (p->tok.is_float) {
-            e = new_expr(CC_EXPR_FLOAT);
+            cc_ctype_kind_t k = p->tok.float_is_single ? CC_CT_FLOAT
+                                : p->tok.float_is_long ? CC_CT_LDOUBLE
+                                                       : CC_CT_DOUBLE;
+
+            e = new_const_expr(CC_EXPR_FLOAT, cc_ct_basic(k));
             if (e == NULL) {
                 return NULL;
             }
             e->float_val = p->tok.fnum;
             e->float_val_ld = p->tok.fnum_ld;
-            if (p->tok.float_is_single) {
-                e->value_type = CC_TYPE_FLOAT;
-            } else if (p->tok.float_is_long) {
-                e->value_type = CC_TYPE_LDOUBLE;
-            } else {
-                e->value_type = CC_TYPE_DOUBLE;
-            }
         } else {
-            e = new_expr(CC_EXPR_INT);
+            cc_ctype_kind_t k;
+
+            if (p->tok.int_is_longlong) {
+                k = p->tok.int_is_unsigned ? CC_CT_ULLONG : CC_CT_LLONG;
+            } else if (p->tok.int_is_long) {
+                k = p->tok.int_is_unsigned ? CC_CT_ULONG : CC_CT_LONG;
+            } else {
+                k = p->tok.int_is_unsigned ? CC_CT_UINT : CC_CT_INT;
+            }
+            e = new_const_expr(CC_EXPR_INT, cc_ct_basic(k));
             if (e == NULL) {
                 return NULL;
             }
             e->int_val = p->tok.num;
-            if (p->tok.int_is_longlong) {
-                e->value_type = p->tok.int_is_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
-            } else if (p->tok.int_is_long) {
-                e->value_type = p->tok.int_is_unsigned ? CC_TYPE_ULONG : CC_TYPE_LONG;
-            } else {
-                e->value_type = p->tok.int_is_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
-            }
         }
         if (p->tok.is_imaginary) {
             e = parser_imaginary_literal(p, e);
@@ -7781,12 +7806,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
             builtin_typedef_type_n(p->tok.start, p->tok.len, &typedef_bty);
 
         if (parser_is_c23_or_newer() && tok_is_ident(p, "true")) {
-            e = new_expr(CC_EXPR_INT);
+            e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_BOOL));
             if (e == NULL) {
                 return NULL;
             }
             e->int_val = 1;
-            e->value_type = CC_TYPE_BOOL;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -7794,12 +7818,10 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return e;
         }
         if (parser_is_c23_or_newer() && tok_is_ident(p, "false")) {
-            e = new_expr(CC_EXPR_INT);
+            e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_BOOL));
             if (e == NULL) {
                 return NULL;
             }
-            e->int_val = 0;
-            e->value_type = CC_TYPE_BOOL;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -7807,12 +7829,10 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return e;
         }
         if (parser_is_c23_or_newer() && tok_is_ident(p, "nullptr")) {
-            e = new_expr(CC_EXPR_INT);
+            e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
             if (e == NULL) {
                 return NULL;
             }
-            e->int_val = 0;
-            e->value_type = CC_TYPE_INT;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -7827,13 +7847,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return NULL;
         }
         if (eidx >= 0) {
-            e = new_expr(CC_EXPR_INT);
+            e = new_const_expr(CC_EXPR_INT, p->enum_consts[eidx].ctype);
             if (e == NULL) {
                 return NULL;
             }
             e->int_val = (long long)p->enum_consts[eidx].bits;
-            e->ctype = p->enum_consts[eidx].ctype;
-            parser_scalar_legacy(e->ctype, &e->value_type, &e->struct_id);
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -7989,7 +8007,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                             }
                             total += idx * stride;
                         } else {
-                            rhs_const = new_expr(CC_EXPR_INT);
+                            rhs_const = new_const_expr(CC_EXPR_INT, parser_size_ctype());
                             if (rhs_const == NULL) {
                                 free_expr(idx_expr);
                                 free_expr(dyn_off);
@@ -7997,7 +8015,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
                                 return NULL;
                             }
                             rhs_const->int_val = stride;
-                            rhs_const->value_type = parser_size_type();
                             term = new_bin_expr(CC_BIN_MUL, idx_expr, rhs_const);
                             if (term == NULL) {
                                 free_expr(dyn_off);
@@ -8054,13 +8071,12 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 free_expr(e);
                 if (dyn_off != NULL) {
                     if (total != 0) {
-                        cc_expr_t *base = new_expr(CC_EXPR_INT);
+                        cc_expr_t *base = new_const_expr(CC_EXPR_INT, parser_size_ctype());
                         if (base == NULL) {
                             free_expr(dyn_off);
                             return NULL;
                         }
                         base->int_val = total;
-                        base->value_type = parser_size_type();
                         dyn_off = new_bin_expr(CC_BIN_ADD, base, dyn_off);
                         if (dyn_off == NULL) {
                             return NULL;
@@ -8068,12 +8084,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     }
                     e = dyn_off;
                 } else {
-                    e = new_expr(CC_EXPR_INT);
+                    e = new_const_expr(CC_EXPR_INT, parser_size_ctype());
                     if (e == NULL) {
                         return NULL;
                     }
                     e->int_val = total;
-                    e->value_type = parser_size_type();
                 }
                 return e;
             }
@@ -8111,12 +8126,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 }
                 same = parser_types_compatible(p, t1, s1, a1ndim, t2, s2, a2ndim) ? 1 : 0;
                 free_expr(e);
-                e = new_expr(CC_EXPR_INT);
+                e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
                 if (e == NULL) {
                     return NULL;
                 }
                 e->int_val = same;
-                e->value_type = CC_TYPE_INT;
                 return e;
             }
             if (strcmp(e->ident, "__builtin_choose_expr") == 0) {
@@ -8211,12 +8225,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 is_const = eval_const_array_bound_expr(p, arg, &cv) == 0;
                 free_expr(arg);
                 free_expr(e);
-                e = new_expr(CC_EXPR_INT);
+                e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
                 if (e == NULL) {
                     return NULL;
                 }
                 e->int_val = is_const ? 1 : 0;
-                e->value_type = CC_TYPE_INT;
                 return e;
             }
             if (strcmp(e->ident, "__builtin_va_arg") == 0) {
@@ -8348,11 +8361,12 @@ static cc_expr_t *parse_primary(parser_t *p) {
     return NULL;
 }
 
+/** A new `int` constant of value @p v, or NULL when out of memory. */
 static cc_expr_t *new_int_expr(long v) {
-    cc_expr_t *e = new_expr(CC_EXPR_INT);
+    cc_expr_t *e = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_INT));
+
     if (e != NULL) {
         e->int_val = v;
-        e->value_type = CC_TYPE_INT;
     }
     return e;
 }
@@ -8438,12 +8452,15 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
             factor = new_expr(CC_EXPR_CAST);
             if (factor != NULL) {
                 factor->aux_type = parser_size_type();
-                factor->ctype = cc_ct_from_scalar(factor->aux_type);
+                parser_set_ctype(factor, parser_size_ctype());
                 factor->lhs = bounds[k];
                 bounds[k] = NULL;
             }
         } else if (t->count >= 0) {
-            factor = new_int_expr(t->count);
+            factor = new_const_expr(CC_EXPR_INT, parser_size_ctype());
+            if (factor != NULL) {
+                factor->int_val = t->count;
+            }
         } else {
             set_diag(p->diag, p->tok.line, p->tok.col, "sizeof of an array type with an unspecified bound");
             factor = NULL;
@@ -8456,12 +8473,10 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
             acc = NULL;
             break;
         }
-        factor->value_type = parser_size_type();
         acc = acc == NULL ? factor : new_bin_expr(CC_BIN_MUL, acc, factor);
         if (acc == NULL) {
             break;
         }
-        acc->value_type = parser_size_type();
     }
     for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
         free_expr(bounds[k]);
@@ -8477,17 +8492,14 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
         return NULL;
     }
     {
-        cc_expr_t *scale = new_int_expr(elem);
+        cc_expr_t *scale = new_const_expr(CC_EXPR_INT, parser_size_ctype());
 
         if (scale == NULL) {
             free_expr(acc);
             return NULL;
         }
-        scale->value_type = parser_size_type();
+        scale->int_val = elem;
         acc = new_bin_expr(CC_BIN_MUL, acc, scale);
-    }
-    if (acc != NULL) {
-        acc->value_type = parser_size_type();
     }
     return acc;
 }
@@ -9059,8 +9071,7 @@ static int fold_sizeof_type(parser_t *p, cc_expr_t *e, const cc_ctype_t *t) {
     if (n >= 0) {
         e->kind = CC_EXPR_INT;
         e->int_val = n;
-        e->value_type = parser_size_type();
-        e->struct_id = -1;
+        parser_set_ctype(e, parser_size_ctype());
         e->aux_type = CC_TYPE_VOID;
         e->aux_struct_id = -1;
         e->aux_ctype = NULL;
@@ -9107,8 +9118,7 @@ static void fold_sizeof_expr(parser_t *p, cc_expr_t *e) {
     e->lhs = NULL;
     e->kind = CC_EXPR_INT;
     e->int_val = n;
-    e->value_type = parser_size_type();
-    e->struct_id = -1;
+    parser_set_ctype(e, parser_size_ctype());
 }
 
 /**

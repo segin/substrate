@@ -4837,9 +4837,9 @@ static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var
 }
 
 /**
- * Type a literal: an integer or floating constant has the type its
- * spelling gives it (which a bit-precise one records), a string literal
- * is an array of its characters and the null.
+ * Type a literal: an integer or floating constant keeps the type the
+ * parser gave it from its spelling, a string literal is an array of its
+ * characters and the null.
  *
  * @param e  the CC_EXPR_INT, CC_EXPR_FLOAT or CC_EXPR_STR
  */
@@ -4853,13 +4853,7 @@ static void sema_type_literal(cc_expr_t *e) {
         sema_set_type(e, n > 0 ? cc_ct_array(elem, n) : cc_ct_pointer(elem));
         return;
     }
-    if (e->kind == CC_EXPR_INT && !cc_type_is_integral(e->value_type) && e->value_type != CC_TYPE_BITINT) {
-        e->value_type = CC_TYPE_INT;
-    }
-    if (e->kind == CC_EXPR_FLOAT && !cc_type_is_floating(e->value_type)) {
-        e->value_type = CC_TYPE_DOUBLE;
-    }
-    sema_set_type(e, e->ctype != NULL ? e->ctype : cc_ct_from_scalar(e->value_type));
+    sema_set_type(e, e->ctype);
 }
 
 /**
@@ -5753,8 +5747,7 @@ static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *dia
         if (cc_lang_at_least(2023)) {
             init->kind = CC_EXPR_INT;
             init->int_val = 0;
-            init->value_type = CC_TYPE_INT;
-            init->struct_id = -1;
+            sema_set_type(init, cc_ct_basic(CC_CT_INT));
             return init;
         }
         set_diag(diag, "initializer list is empty");
