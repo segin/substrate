@@ -331,7 +331,6 @@ static char *local_label_dup_mapped_n(const parser_t *p, const char *name, size_
 static int local_label_push(parser_t *p, const char *name, size_t len);
 static void local_label_pop_to_depth(parser_t *p, int depth);
 static void parser_free_local_labels(parser_t *p);
-static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_sid);
 static void parser_set_ctype(cc_expr_t *e, const cc_ctype_t *t);
 static cc_expr_t *new_const_expr(cc_expr_kind_t kind, const cc_ctype_t *t);
 static const cc_ctype_t *parser_size_ctype(void);
@@ -1014,16 +1013,6 @@ static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
     return CC_TYPE_LONG_LONG;
 }
 
-/**
- * The type `size_t` names on the target: the type of `sizeof`,
- * `_Alignof` and `offsetof`.
- *
- * @return `unsigned long` where pointers are 8 bytes, else `unsigned int`
- */
-static cc_type_t parser_size_type(void) {
-    return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
-}
-
 static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id) {
     long n;
     if (is_pointer_type(t)) {
@@ -1566,10 +1555,6 @@ static cc_expr_t *parser_decimal_literal(parser_t *p) {
         }
         item->int_val = (long long)bid[k];
     }
-    e->aux_type = CC_TYPE_VOID;
-    e->aux_struct_id = sid;
-    e->value_type = CC_TYPE_VOID;
-    e->struct_id = sid;
     e->ctype = cc_ct_record(sid);
     e->lhs = outer;
     return e;
@@ -3993,38 +3978,10 @@ static cc_const_env_t parser_const_env(parser_t *p) {
 }
 
 /**
- * The legacy encoding of a scalar type: the cc_type_t and struct id an
- * expression of type @p t carries alongside it.
- *
- * @param t          the type; NULL reads as int
- * @param out_type   receives the cc_type_t
- * @param out_sid    receives the struct id (or _BitInt width), -1 if none
- */
-static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_sid) {
-    cc_ct_legacy_t leg;
-    cc_type_t ty;
-    unsigned i;
-
-    if (t == NULL || cc_ct_to_legacy(t, &leg) != 0) {
-        *out_type = CC_TYPE_INT;
-        *out_sid = -1;
-        return;
-    }
-    ty = leg.base;
-    for (i = 0; i < leg.depth; ++i) {
-        ty = ptr_of_type(ty);
-    }
-    *out_type = ty;
-    *out_sid = leg.struct_id;
-}
-
-/**
- * Give expression @p e the type @p t: its interned type, and the legacy
- * fields still read alongside it derived from that.
+ * Give expression @p e the type @p t.
  */
 static void parser_set_ctype(cc_expr_t *e, const cc_ctype_t *t) {
     e->ctype = t;
-    parser_scalar_legacy(t, &e->value_type, &e->struct_id);
 }
 
 /**
@@ -6428,12 +6385,8 @@ static cc_expr_t *new_expr(cc_expr_kind_t kind) {
         e->kind = kind;
         e->line = 0;
         e->col = 0;
-        e->value_type = CC_TYPE_INT;
-        e->struct_id = -1;
         e->member_is_arrow = 0;
         e->member_offset = 0;
-        e->aux_type = CC_TYPE_VOID;
-        e->aux_struct_id = -1;
         e->generic_selected = -1;
     }
     return e;
@@ -7306,8 +7259,6 @@ static cc_expr_t *parser_imaginary_literal(parser_t *p, cc_expr_t *lit) {
     c->col = p->tok.col;
     c->lhs = zero;
     c->rhs = lit;
-    c->value_type = CC_TYPE_VOID;
-    c->struct_id = sid;
     return c;
 }
 
@@ -7438,10 +7389,6 @@ static cc_expr_t *parser_bitint_literal(parser_t *p) {
             }
             item->int_val = (long long)v;
         }
-        e->aux_type = CC_TYPE_VOID;
-        e->aux_struct_id = sid;
-        e->value_type = CC_TYPE_VOID;
-        e->struct_id = sid;
         e->ctype = cc_ct_record(sid);
         e->lhs = outer;
         return e;
@@ -7535,9 +7482,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return NULL;
         }
         e->ident = lit;
-        e->aux_type = str_ty;
         e->aux_ctype = cc_ct_from_scalar(str_ty);
-        e->value_type = cc_string_literal_pointer_type(str_ty);
         if (next_tok(p) != 0) {
             free_expr(e);
             return NULL;
@@ -7557,9 +7502,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 /* a narrow piece joins a wide literal, which the result is (C11 6.4.5p5) */
                 if (str_ty == CC_TYPE_CHAR || part_ty == CC_TYPE_CHAR) {
                     str_ty = str_ty == CC_TYPE_CHAR ? part_ty : str_ty;
-                    e->aux_type = str_ty;
                     e->aux_ctype = cc_ct_from_scalar(str_ty);
-                    e->value_type = cc_string_literal_pointer_type(str_ty);
                 } else {
                     free(part);
                     free_expr(e);
@@ -8065,8 +8008,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                e->aux_type = aty;
-                e->aux_struct_id = asid;
                 if (expect(p, TOK_RPAREN, "expected ')' after __builtin_va_arg arguments") != 0) {
                     free_expr(e);
                     return NULL;
@@ -8109,10 +8050,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
         {
             int vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
             if (vidx >= 0) {
-                e->value_type = p->vars[vidx].type;
-                e->struct_id = p->vars[vidx].struct_id;
-                e->array_ndim = p->vars[vidx].array_ndim;
-                memcpy(e->array_dims, p->vars[vidx].array_dims, sizeof(e->array_dims));
                 e->ctype = p->vars[vidx].ctype;
             }
         }
@@ -8257,7 +8194,6 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
         if (k < CC_MAX_ARRAY_DIMS && bounds[k] != NULL) {
             factor = new_expr(CC_EXPR_CAST);
             if (factor != NULL) {
-                factor->aux_type = parser_size_type();
                 parser_set_ctype(factor, parser_size_ctype());
                 factor->lhs = bounds[k];
                 bounds[k] = NULL;
@@ -8579,10 +8515,6 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
         return NULL;
     }
 
-    dst->value_type = src->value_type;
-    dst->struct_id = src->struct_id;
-    dst->array_ndim = src->array_ndim;
-    memcpy(dst->array_dims, src->array_dims, sizeof(dst->array_dims));
     dst->int_val = src->int_val;
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
@@ -8600,8 +8532,6 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->member_bit_signed = src->member_bit_signed;
     dst->member_bit_storage_size = src->member_bit_storage_size;
     dst->update_postfix = src->update_postfix;
-    dst->aux_type = src->aux_type;
-    dst->aux_struct_id = src->aux_struct_id;
     dst->generic_selected = src->generic_selected;
 
     if (src->ident != NULL) {
@@ -8730,9 +8660,6 @@ static cc_expr_t *parse_postfix(parser_t *p) {
             cc_expr_t *idx;
             cc_expr_t *add;
             cc_expr_t *deref;
-            cc_type_t pty;
-            int psid;
-            cc_type_t dty;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -8747,12 +8674,6 @@ static cc_expr_t *parse_postfix(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            pty = e->value_type;
-            psid = e->struct_id;
-            if (!is_pointer_type(pty) && is_pointer_type(idx->value_type)) {
-                pty = idx->value_type;
-                psid = idx->struct_id;
-            }
             add = new_bin_expr(CC_BIN_ADD, e, idx);
             if (add == NULL) {
                 return NULL;
@@ -8764,11 +8685,6 @@ static cc_expr_t *parse_postfix(parser_t *p) {
                 return NULL;
             }
             deref->lhs = add;
-            dty = ptr_deref_type(pty);
-            if (is_pointer_type(pty)) {
-                deref->value_type = dty;
-                deref->struct_id = type_carries_struct_id(dty) ? psid : -1;
-            }
             e = deref;
             continue;
         }
@@ -8798,22 +8714,16 @@ static cc_expr_t *parse_postfix(parser_t *p) {
                 return NULL;
             }
             {
-                cc_type_t base_ty = m->lhs->value_type;
-                int base_sid = m->lhs->struct_id;
-                const cc_struct_member_t *sm = NULL;
-                if (is_arrow) {
-                    base_ty = ptr_deref_type(base_ty);
-                    if (!type_carries_struct_id(base_ty)) {
-                        base_sid = -1;
-                    }
+                const cc_ctype_t *base = cc_ct_decay(parser_expr_ctype(p, m->lhs));
+
+                if (base != NULL && is_arrow) {
+                    base = base->kind == CC_CT_POINTER ? base->of->unqual : NULL;
                 }
-                if (base_ty == CC_TYPE_VOID && base_sid >= 0) {
-                    sm = struct_member_find_n(p, base_sid, m->ident, strlen(m->ident));
+                if (base != NULL && base->unqual->kind == CC_CT_RECORD) {
+                    const cc_struct_member_t *sm =
+                        struct_member_find_n(p, base->unqual->id, m->ident, strlen(m->ident));
+
                     if (sm != NULL) {
-                        m->value_type = sm->type;
-                        m->struct_id = sm->type_struct_id;
-                        m->array_ndim = sm->array_ndim;
-                        memcpy(m->array_dims, sm->array_dims, sizeof(m->array_dims));
                         m->member_offset = sm->offset;
                     }
                 }
@@ -8878,11 +8788,7 @@ static int fold_sizeof_type(parser_t *p, cc_expr_t *e, const cc_ctype_t *t) {
         e->kind = CC_EXPR_INT;
         e->int_val = n;
         parser_set_ctype(e, parser_size_ctype());
-        e->aux_type = CC_TYPE_VOID;
-        e->aux_struct_id = -1;
         e->aux_ctype = NULL;
-        e->array_ndim = 0;
-        memset(e->array_dims, 0, sizeof(e->array_dims));
         return 0;
     }
     if (t->kind != CC_CT_FUNCTION) {
@@ -8950,11 +8856,11 @@ static int hoist_file_literal(parser_t *p, cc_expr_t *e, long array_len) {
     g.name = cc_strdup(name);
     g.line = e->line;
     g.col = e->col;
-    g.type = e->aux_type;
-    g.type_struct_id = e->aux_struct_id;
+    if (parser_ctype_legacy(e->ctype, &g.type, &g.type_struct_id, NULL, &g.array_ndim, g.array_dims) == 0 &&
+        g.array_ndim > 0 && g.array_dims[0] <= 0 && array_len > 0) {
+        g.array_dims[0] = array_len;
+    }
     g.array_len = array_len;
-    g.array_ndim = e->array_ndim;
-    memcpy(g.array_dims, e->array_dims, sizeof(g.array_dims));
     g.storage = CC_STORAGE_STATIC;
     g.init = e->lhs;
     g.ctype = e->ctype;
@@ -8965,8 +8871,6 @@ static int hoist_file_literal(parser_t *p, cc_expr_t *e, long array_len) {
     e->lhs = NULL;
     e->kind = CC_EXPR_IDENT;
     e->ident = cc_strdup(name);
-    e->aux_type = CC_TYPE_VOID;
-    e->aux_struct_id = -1;
     return e->ident != NULL ? 0 : -1;
 }
 
@@ -8988,24 +8892,18 @@ static cc_expr_t *parse_unary(parser_t *p) {
             return NULL;
         }
         if (is_type_name_start_after_lparen(p)) {
-            long sizeof_array_len = -1;
-            int sizeof_array_ndim = 0;
-            long sizeof_array_dims[CC_MAX_ARRAY_DIMS];
+            cc_type_t sizeof_type;
             const cc_ctype_t *sizeof_ctype = NULL;
             cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS] = {NULL};
-            memset(sizeof_array_dims, 0, sizeof(sizeof_array_dims));
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
-                                   sizeof_array_dims, 1, "expected type name in sizeof", &sizeof_ctype,
-                                   vla_bounds) != 0) {
+            if (parse_type_name_ct(p, &sizeof_type, NULL, NULL, NULL, NULL, 1, "expected type name in sizeof",
+                                   &sizeof_ctype, vla_bounds) != 0) {
                 free_expr(e);
                 return NULL;
             }
-            e->array_ndim = sizeof_array_ndim;
-            memcpy(e->array_dims, sizeof_array_dims, sizeof(e->array_dims));
             if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
                 for (size_t b = 0; b < CC_MAX_ARRAY_DIMS; ++b) {
                     free_expr(vla_bounds[b]);
@@ -9035,11 +8933,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                ce->aux_type = e->aux_type;
-                ce->aux_struct_id = e->aux_struct_id;
                 ce->ctype = sizeof_ctype;
-                ce->array_ndim = e->array_ndim;
-                memcpy(ce->array_dims, e->array_dims, sizeof(ce->array_dims));
                 ce->lhs = parse_initializer_expr(p);
                 if (ce->lhs == NULL) {
                     free_expr(ce);
@@ -9047,8 +8941,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
                     return NULL;
                 }
                 e->lhs = ce;
-                e->aux_type = CC_TYPE_VOID;
-                e->aux_struct_id = -1;
                 e->aux_ctype = NULL;
             }
             return e;
@@ -9058,8 +8950,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(e);
             return NULL;
         }
-        e->aux_type = CC_TYPE_VOID;
-        e->aux_struct_id = -1;
         fold_sizeof_expr(p, e);
         return e;
     }
@@ -9123,10 +9013,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
         parser_t q = *p;
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
         if (next_tok(&q) == 0 && is_declspec_start(&q)) {
+            cc_type_t cast_type;
             long cast_array_len = -1;
-            int cast_array_ndim = 0;
-            long cast_array_dims[CC_MAX_ARRAY_DIMS];
-            memset(cast_array_dims, 0, sizeof(cast_array_dims));
             if (e == NULL) {
                 return NULL;
             }
@@ -9134,8 +9022,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name_ct(p, &e->aux_type, &e->aux_struct_id, &cast_array_len, &cast_array_ndim,
-                                   cast_array_dims, 1, "expected cast type", &e->ctype, NULL) != 0) {
+            if (parse_type_name_ct(p, &cast_type, NULL, &cast_array_len, NULL, NULL, 1, "expected cast type", &e->ctype,
+                                   NULL) != 0) {
                 free_expr(e);
                 return NULL;
             }
@@ -9144,14 +9032,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            e->array_ndim = cast_array_ndim;
-            memcpy(e->array_dims, cast_array_dims, sizeof(e->array_dims));
             if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
                 free_expr(e);
                 return NULL;
             }
-            e->value_type = e->aux_type;
-            e->struct_id = e->aux_struct_id;
             if (p->tok.kind == TOK_LBRACE) {
                 e->lhs = parse_initializer_expr(p);
                 if (e->lhs == NULL) {
@@ -9160,11 +9044,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 }
                 /* `(T[]){...}`: the bound comes from the list (C11 6.5.2.5p4, 6.7.9p22) */
                 if (e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY && e->ctype->count < 0) {
-                    long n = parser_init_list_array_bound(p, e->value_type, e->struct_id, e->lhs);
+                    long n = parser_init_list_bound_ct(p, e->ctype->of, e->lhs);
 
                     if (n > 0) {
                         e->ctype = cc_ct_array(e->ctype->of, n);
-                        e->array_dims[0] = n;
                         cast_array_len = n;
                     }
                 }
@@ -9188,7 +9071,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
 
     if (p->tok.kind == TOK_AMP) {
         cc_expr_t *e = new_expr(CC_EXPR_ADDR);
-        cc_type_t pty;
         if (e == NULL) {
             return NULL;
         }
@@ -9206,21 +9088,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
             e->lhs->lhs->kind == CC_EXPR_INIT_LIST && hoist_file_literal(p, e->lhs, -1) != 0) {
             free_expr(e);
             return NULL;
-        }
-        if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
-            const cc_function_t *f = parser_find_function_decl(p, e->lhs->ident);
-            if (f != NULL && f->ret_ctype != NULL) {
-                /* the legacy encoding takes a function for its return type */
-                parser_scalar_legacy(cc_ct_pointer(f->ret_ctype), &e->value_type, &e->struct_id);
-                return e;
-            }
-        }
-        pty = ptr_of_type(e->lhs->value_type);
-        if (pty != CC_TYPE_VOID) {
-            e->value_type = pty;
-            e->struct_id = type_carries_struct_id(pty) ? e->lhs->struct_id : -1;
-            e->array_ndim = e->lhs->array_ndim;
-            memcpy(e->array_dims, e->lhs->array_dims, sizeof(e->array_dims));
         }
         return e;
     }
@@ -9253,7 +9120,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
 
     if (p->tok.kind == TOK_STAR) {
         cc_expr_t *e = new_expr(CC_EXPR_DEREF);
-        cc_type_t dty;
         if (e == NULL) {
             return NULL;
         }
@@ -9265,27 +9131,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (e->lhs == NULL) {
             free_expr(e);
             return NULL;
-        }
-        dty = ptr_deref_type(e->lhs->value_type);
-        if (dty != CC_TYPE_VOID || e->lhs->value_type == CC_TYPE_PTR_VOID) {
-            int i;
-            e->value_type = dty;
-            e->struct_id = type_carries_struct_id(dty) ? e->lhs->struct_id : -1;
-            if (e->lhs->array_ndim > 0 && is_pointer_type(e->value_type)) {
-                e->array_ndim = e->lhs->array_ndim - 1;
-                if (e->array_ndim < 0) {
-                    e->array_ndim = 0;
-                }
-                for (i = 0; i < e->array_ndim; ++i) {
-                    e->array_dims[i] = e->lhs->array_dims[i + 1];
-                }
-                for (; i < CC_MAX_ARRAY_DIMS; ++i) {
-                    e->array_dims[i] = 0;
-                }
-            } else {
-                e->array_ndim = 0;
-                memset(e->array_dims, 0, sizeof(e->array_dims));
-            }
         }
         return e;
     }

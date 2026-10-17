@@ -297,8 +297,6 @@ struct cc_expr {
     cc_expr_kind_t kind;
     size_t line;
     size_t col;
-    cc_type_t value_type;
-    int struct_id;
     unsigned char paren_wrapped;
     unsigned char is_subscript; /**< a CC_BIN_ADD that is the `a + i` of a subscript `a[i]` */
     /**
@@ -308,8 +306,6 @@ struct cc_expr {
      * type, not the usual arithmetic conversion's.
      */
     unsigned char unary_form;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
     long long int_val;
     double float_val;
     long double float_val_ld;
@@ -328,8 +324,6 @@ struct cc_expr {
     cc_expr_t *rhs;
     cc_expr_t *third;
     int update_postfix;
-    cc_type_t aux_type;
-    int aux_struct_id;
     cc_expr_t **args;
     size_t arg_count;
     const struct cc_ctype **generic_ctypes; /**< _Generic: each association's type, NULL for `default` */
@@ -338,10 +332,10 @@ struct cc_expr {
     long generic_selected;
     cc_stmt_t *stmt_expr_stmts;
     size_t stmt_expr_count;
-    const struct cc_ctype *ctype; /**< identifier, member access, direct call or written cast: the variable's or
-                                       member's type, the function's return type, or the cast's type, where it was
-                                       recorded; else NULL */
-    const struct cc_ctype *aux_ctype; /**< the type a `sizeof (T)` names, which aux_type spells; else NULL */
+    const struct cc_ctype *ctype; /**< the expression's type: what the parser gave a constant, cast or other
+                                       node it built, and what sema gives every expression it checks */
+    const struct cc_ctype *aux_ctype; /**< the type a `sizeof (T)` or `_Alignof (T)` names, or a string
+                                           literal's element type; else NULL */
 };
 
 typedef enum {
