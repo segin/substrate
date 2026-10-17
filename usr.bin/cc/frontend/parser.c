@@ -942,6 +942,7 @@ static long parser_string_literal_array_bound(const cc_expr_t *e);
 static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const cc_expr_t *init);
 static long parser_ct_size(const parser_t *p, const cc_ctype_t *t);
 static long parser_ct_align(const parser_t *p, const cc_ctype_t *t);
+static int parser_array_rank(const cc_ctype_t *t);
 
 static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
     if (min_v >= 0) {
@@ -3856,6 +3857,19 @@ static long parser_ct_size(const parser_t *p, const cc_ctype_t *t) {
 }
 
 /**
+ * The number of array levels in type @p t, through its pointers and
+ * arrays: `int (*a[2])[3][4]` has three.
+ */
+static int parser_array_rank(const cc_ctype_t *t) {
+    int n = 0;
+
+    for (; t != NULL && (t->kind == CC_CT_ARRAY || t->kind == CC_CT_POINTER); t = t->of) {
+        n += t->kind == CC_CT_ARRAY;
+    }
+    return n;
+}
+
+/**
  * The alignment of type @p t as the parser knows it so far
  * (parser_ct_size()).
  *
@@ -6134,8 +6148,8 @@ out:
 }
 
 /**
- * Take the run-time bounds of the arrays a declarator's type has as its
- * legacy dimensions, out of the declarator and into @p out.
+ * Take the run-time bounds of the array type @p arr a declarator builds
+ * (its levels of unknown bound), out of the declarator and into @p out.
  *
  * The ops apply from the base outward, so the dimensions, outermost
  * first, are the array ops at the end of the list, last first: in
@@ -6146,26 +6160,27 @@ out:
  * any other op.
  *
  * @param d     the declarator; the bounds taken are set to NULL in it
- * @param leg   its type in the legacy encoding
+ * @param arr   the array type the dimensions are the levels of
  * @param skip  the number of outermost ops that are not dimensions
  * @param out   receives each dimension's bound (owned), or NULL where it
  *              is a constant
  */
-static void take_vla_bounds(declarator_t *d, const cc_ct_legacy_t *leg, size_t skip,
+static void take_vla_bounds(declarator_t *d, const cc_ctype_t *arr, size_t skip,
                             cc_expr_t *out[CC_MAX_ARRAY_DIMS]) {
     size_t k;
 
     memset(out, 0, CC_MAX_ARRAY_DIMS * sizeof(out[0]));
-    for (k = 0; k < CC_MAX_ARRAY_DIMS && (int)k < leg->ndim && k + skip < d->count; ++k) {
+    for (k = 0; k < CC_MAX_ARRAY_DIMS && arr != NULL && arr->kind == CC_CT_ARRAY && k + skip < d->count; ++k) {
         decl_op_t *op = &d->ops[d->count - 1 - skip - k];
 
         if (op->kind != DECL_OP_ARRAY) {
             break;
         }
-        if (op->bound != NULL && leg->dims[k] == 0) {
+        if (op->bound != NULL && arr->count < 0) {
             out[k] = op->bound;
             op->bound = NULL;
         }
+        arr = arr->of;
     }
 }
 
@@ -6232,7 +6247,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
     }
     if (out_vla_bounds != NULL) {
         if (t->kind == CC_CT_ARRAY) {
-            take_vla_bounds(&d, &leg, 0, out_vla_bounds);
+            take_vla_bounds(&d, t, 0, out_vla_bounds);
         } else {
             memset(out_vla_bounds, 0, CC_MAX_ARRAY_DIMS * sizeof(out_vla_bounds[0]));
         }
@@ -9589,15 +9604,10 @@ static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
     return 0;
 }
 
-/** A named declarator's type, in both encodings, and what came with it. */
+/** A named declarator's type and what came with it. */
 typedef struct {
     char *name;                    /**< the declared name (owned) */
     const cc_ctype_t *ctype;       /**< the type */
-    cc_type_t type;                /**< the legacy encoding of it ... */
-    int struct_id;
-    long array_len;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
     /** a variable-length array's bounds (owned), outermost first; NULL where a bound is a constant */
     cc_expr_t *vla_bounds[CC_MAX_ARRAY_DIMS];
     int saw_restrict;              /**< a pointer level is restrict-qualified */
@@ -9605,35 +9615,21 @@ typedef struct {
 
 /**
  * Parse the declarator of one declaration, after its specifiers, and give
- * its type both as a type and in the legacy encoding.  A parameter list
- * right after the name is left for the caller, which declares a function.
+ * its type.  A parameter list right after the name is left for the
+ * caller, which declares a function.
  *
- * The legacy encoding is the one the parser has always produced for a
- * local declaration: each pointer and each array dimension a pointer
- * level, the bounds outermost first, and for `T (*p)[N]` -- a pointer to
- * an array, written with a parenthesized declarator holding no array of
- * its own -- an array_len of -1, which tells the consumers that p is a
- * pointer with an array's shape behind it, not an array.
- *
- * @param p          the parser, at the declarator
- * @param base_type  the specifiers' type, legacy encoding
- * @param base_sid   its struct id
- * @param base_ndim  its array rank (a typedef'd array)
- * @param base_dims  its bounds
- * @param base_alias the type of the typedef name the specifiers were, or
- *                   NULL (see declspec_ctype())
- * @param out        receives the declaration; free its name and
- *                   vla_bounds when done with them
- * @return           0, or -1 on error (diagnosed)
+ * @param p     the parser, at the declarator
+ * @param base  the specifiers' type (parser_t.last_spec_ctype)
+ * @param out   receives the declaration; free its name and vla_bounds
+ *              when done with them
+ * @return      0, or -1 on error (diagnosed)
  */
-static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
-                            const cc_ctype_t *base_alias, named_decl_t *out) {
+static int parse_named_decl(parser_t *p, const cc_ctype_t *base, named_decl_t *out) {
     declarator_t d;
-    cc_ct_legacy_t leg;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
     size_t i;
-    unsigned k;
+    const cc_ctype_t *t;
 
     memset(out, 0, sizeof(*out));
     memset(&d, 0, sizeof(d));
@@ -9641,35 +9637,29 @@ static int parse_named_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
         declarator_free(&d);
         return -1;
     }
-    out->ctype = declarator_type(&d, declspec_ctype(base_alias, base_type, base_sid, base_ndim, base_dims));
-    if (out->ctype == NULL) {
+    t = declarator_type(&d, base);
+    out->ctype = t;
+    if (t == NULL) {
         set_diag(p->diag, line, col, "out of memory building a declaration's type");
         declarator_free(&d);
         return -1;
     }
-    if (cc_ct_to_legacy(out->ctype, &leg) != 0) {
+    if (parser_array_rank(t) > CC_MAX_ARRAY_DIMS) {
         set_diag(p->diag, line, col, "array rank > 4 is not yet supported");
         declarator_free(&d);
         return -1;
-    }
-    out->type = leg.base;
-    for (k = 0; k < leg.depth; ++k) {
-        out->type = ptr_of_type(out->type);
-    }
-    out->struct_id = leg.struct_id;
-    out->array_len = leg.array_len;
-    out->array_ndim = leg.ndim;
-    memcpy(out->array_dims, leg.dims, sizeof(leg.dims));
-    if (d.nested && d.inner_arrays == 0 && d.outer_arrays > 0 && leg.ndim > 0) {
-        out->array_len = -1;
     }
     for (i = 0; i < d.count; ++i) {
         if (d.ops[i].kind == DECL_OP_POINTER && (d.ops[i].quals & CC_CQ_RESTRICT) != 0) {
             out->saw_restrict = 1;
         }
     }
-    /* a pointer to an array (array_len -1) has its pointer op outermost */
-    take_vla_bounds(&d, &leg, out->array_len == -1 ? 1 : 0, out->vla_bounds);
+    /* `T (*p)[n]`, a pointer to an array: its pointer op is outermost */
+    if (d.nested && d.inner_arrays == 0 && t->kind == CC_CT_POINTER && t->of->kind == CC_CT_ARRAY) {
+        take_vla_bounds(&d, t->of, 1, out->vla_bounds);
+    } else {
+        take_vla_bounds(&d, t, 0, out->vla_bounds);
+    }
     out->name = d.name;
     d.name = NULL;
     declarator_free(&d);
@@ -9773,31 +9763,25 @@ fail:
 static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int need_semi) {
     cc_type_t base_type;
     int base_struct_id = -1;
-    long base_array_len = -1;
-    int base_array_ndim = 0;
-    long base_array_dims[CC_MAX_ARRAY_DIMS];
     int is_typedef = 0;
     int base_saw_restrict = 0;
     int decl_storage = 0;
-    const cc_ctype_t *base_alias = NULL;
+    const cc_ctype_t *base_spec = NULL;
     decl_attrs_t base_attrs;
 
     decl_attrs_reset(&base_attrs);
-    memset(base_array_dims, 0, sizeof(base_array_dims));
-    if (parse_declspec(p, &base_type, &base_struct_id, &base_array_len, &base_array_ndim, base_array_dims, 1,
-                       "expected declaration type", &is_typedef, &base_saw_restrict, &base_attrs) != 0) {
+    if (parse_declspec(p, &base_type, &base_struct_id, NULL, NULL, NULL, 1, "expected declaration type", &is_typedef,
+                       &base_saw_restrict, &base_attrs) != 0) {
         return -1;
     }
     decl_storage = p->last_storage;
-    base_alias = p->last_alias_ctype;
+    base_spec = p->last_spec_ctype;
     if (base_attrs.vector_bytes > 0 || base_attrs.vector_elems > 0) {
-        base_alias = declspec_ctype(base_alias, base_type, base_struct_id, base_array_ndim, base_array_dims);
-        if (parser_apply_vector_attr(p, &base_attrs, &base_alias) != 0) {
+        if (parser_apply_vector_attr(p, &base_attrs, &base_spec) != 0) {
             decl_attrs_clear(&base_attrs);
             return -1;
         }
-        base_type = CC_TYPE_VOID;
-        base_struct_id = base_alias->id;
+        base_struct_id = base_spec->id;
     }
     if (p->tok.kind == TOK_SEMI) {
         if ((decl_storage & CC_STORAGE_AUTO_TYPE) != 0) {
@@ -9849,8 +9833,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         {
             named_decl_t nd;
 
-            if (parse_named_decl(p, base_type, base_struct_id, base_array_ndim, base_array_dims, base_alias, &nd) !=
-                0) {
+            if (parse_named_decl(p, base_spec, &nd) != 0) {
                 free_stmt(&s);
                 return -1;
             }
@@ -10861,7 +10844,7 @@ static int parse_param_decl(parser_t *p, cc_type_t base_type, int base_sid, int 
     memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
     if (*out_array_len == -1) {
         /* a pointer to an array: its outermost op is the pointer, or the array adjusted to one */
-        take_vla_bounds(&d, &leg, 1, out_vla_bounds);
+        take_vla_bounds(&d, t->of, 1, out_vla_bounds);
     } else {
         memset(out_vla_bounds, 0, CC_MAX_ARRAY_DIMS * sizeof(out_vla_bounds[0]));
     }
