@@ -429,6 +429,61 @@ static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
 }
 
+/**
+ * The type of an expression's value: its interned type with an array or
+ * a function decayed to a pointer, qualifiers dropped.  A node sema did
+ * not check -- one lowering made itself -- has none recorded; its legacy
+ * fields stand in.
+ *
+ * @param e  the expression
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *lower_value_ctype(const cc_expr_t *e) {
+    const cc_ctype_t *t = e->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims);
+    }
+    return cc_ct_decay(t);
+}
+
+/**
+ * Whether an expression's value is a pointer: a pointer, or an array or
+ * function used as a value.
+ *
+ * @param e  the expression
+ * @return   1 or 0
+ */
+static int lower_is_pointer(const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    return t != NULL && t->kind == CC_CT_POINTER;
+}
+
+/**
+ * Whether an expression's value is of an integer type, _Bool, an
+ * enumeration and the bit-precise types included.
+ *
+ * @param e  the expression
+ * @return   1 or 0
+ */
+static int lower_is_integer(const cc_expr_t *e) {
+    return cc_ct_is_integer(lower_value_ctype(e));
+}
+
+/**
+ * Whether an expression's value is of an unsigned integer type other
+ * than _Bool (whose one value bit never needs extending).
+ *
+ * @param e  the expression
+ * @return   1 or 0
+ */
+static int lower_is_unsigned(const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    return cc_ct_is_unsigned(t) && t->kind != CC_CT_BOOL;
+}
+
 static cc_type_t ptr_base_type(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
@@ -445,7 +500,7 @@ static int pointer_depth(cc_type_t t) {
 static int deref_operand_is_cast(const cc_expr_t *x) {
     if (x != NULL && x->kind == CC_EXPR_BIN && (x->op == CC_BIN_ADD || x->op == CC_BIN_SUB) && x->lhs != NULL &&
         x->rhs != NULL) {
-        x = is_pointer_type(x->lhs->value_type) ? x->lhs : x->rhs;
+        x = lower_is_pointer(x->lhs) ? x->lhs : x->rhs;
     }
     return x != NULL && x->kind == CC_EXPR_CAST;
 }
@@ -915,7 +970,7 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
             }
         }
     }
-    if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
+    if (e->lhs->array_ndim > 0 && lower_is_pointer(e->lhs)) {
         return array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim,
                                      e->lhs->array_dims);
     }
@@ -1079,24 +1134,24 @@ static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entr
          * size, e.g. ((char *)u32_array)[3] must advance three bytes, not three
          * uint32_t elements.
          */
-        if (is_pointer_type(ptr_expr->value_type)) {
+        if (lower_is_pointer(ptr_expr)) {
             return fallback;
         }
         return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
     }
     if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_BIN &&
-        (ptr_expr->op == CC_BIN_ADD || ptr_expr->op == CC_BIN_SUB) && is_pointer_type(ptr_expr->value_type)) {
-        if (ptr_expr->lhs != NULL && is_pointer_type(ptr_expr->lhs->value_type)) {
+        (ptr_expr->op == CC_BIN_ADD || ptr_expr->op == CC_BIN_SUB) && lower_is_pointer(ptr_expr)) {
+        if (ptr_expr->lhs != NULL && lower_is_pointer(ptr_expr->lhs)) {
             return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
         }
-        if (ptr_expr->rhs != NULL && is_pointer_type(ptr_expr->rhs->value_type)) {
+        if (ptr_expr->rhs != NULL && lower_is_pointer(ptr_expr->rhs)) {
             return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->rhs, fallback);
         }
     }
     if (ptr_expr == NULL || ptr_expr->array_ndim <= 0) {
         return fallback;
     }
-    if (ptr_expr->array_ndim > 1 && ptr_expr->array_dims[0] == 0 && is_pointer_type(ptr_expr->value_type)) {
+    if (ptr_expr->array_ndim > 1 && ptr_expr->array_dims[0] == 0 && lower_is_pointer(ptr_expr)) {
         memset(dims, 0, sizeof(dims));
         memcpy(dims, ptr_expr->array_dims + 1, (size_t)(ptr_expr->array_ndim - 1) * sizeof(dims[0]));
         array_type = ptr_base_type(ptr_expr->value_type);
@@ -1104,7 +1159,7 @@ static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entr
                                           fallback);
     }
     dim_start = expr_is_array_object_ref(tu, vars, var_count, depth, ptr_expr) ? 1 : 0;
-    if (dim_start == 0 && is_pointer_type(ptr_expr->value_type)) {
+    if (dim_start == 0 && lower_is_pointer(ptr_expr)) {
         array_type = ptr_base_type(ptr_expr->value_type);
         return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, ptr_expr->array_ndim, ptr_expr->array_dims,
                                           0, fallback);
@@ -1132,7 +1187,7 @@ static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var
     if (idx >= 0 && vars[idx].array_ndim > 0) {
         int is_array_obj = is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
         int dim_start = is_array_obj ? 1 : 0;
-        if (!is_array_obj && is_pointer_type(ptr_expr->value_type)) {
+        if (!is_array_obj && lower_is_pointer(ptr_expr)) {
             array_type = ptr_base_type(ptr_expr->value_type);
             return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, vars[idx].array_ndim,
                                               vars[idx].array_dims, 0, fallback);
@@ -1144,7 +1199,7 @@ static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var
     if (g != NULL && g->array_ndim > 0) {
         int is_array_obj = is_array_object_decl(g->type, g->array_len, g->array_ndim);
         int dim_start = is_array_obj ? 1 : 0;
-        if (!is_array_obj && is_pointer_type(ptr_expr->value_type)) {
+        if (!is_array_obj && lower_is_pointer(ptr_expr)) {
             array_type = ptr_base_type(ptr_expr->value_type);
             return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, g->array_ndim, g->array_dims, 0,
                                               fallback);
@@ -1726,10 +1781,10 @@ static int vla_subscript_level(var_entry_t *vars, size_t var_count, int depth, c
         if (e->op != CC_BIN_ADD && e->op != CC_BIN_SUB) {
             return -1;
         }
-        if (e->lhs != NULL && is_pointer_type(e->lhs->value_type)) {
+        if (e->lhs != NULL && lower_is_pointer(e->lhs)) {
             return vla_subscript_level(vars, var_count, depth, e->lhs, level);
         }
-        if (e->op == CC_BIN_ADD && e->rhs != NULL && is_pointer_type(e->rhs->value_type)) {
+        if (e->op == CC_BIN_ADD && e->rhs != NULL && lower_is_pointer(e->rhs)) {
             return vla_subscript_level(vars, var_count, depth, e->rhs, level);
         }
         return -1;
@@ -2463,7 +2518,7 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
         }
         return string_literal_size_bytes(e->ident);
     }
-    if (e->array_ndim > 0 && is_pointer_type(e->value_type)) {
+    if (e->array_ndim > 0 && lower_is_pointer(e)) {
         return array_type_size_bytes(tu, e->value_type, e->struct_id, e->array_ndim, e->array_dims);
     }
     return type_size_bytes_struct(tu, e->value_type, e->struct_id);
@@ -2527,11 +2582,11 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
             /* a pointer to an array: its value is the pointer */
             return 0;
         }
-        if (is_pointer_type(e->value_type) && e->array_ndim > 0) {
+        if (lower_is_pointer(e) && e->array_ndim > 0) {
             return 1;
         }
     }
-    if (e->kind == CC_EXPR_DEREF && is_pointer_type(e->value_type) && e->array_ndim > 0) {
+    if (e->kind == CC_EXPR_DEREF && lower_is_pointer(e) && e->array_ndim > 0) {
         return 1;
     }
     if (e->kind == CC_EXPR_ADDR && e->lhs != NULL) {
@@ -2551,10 +2606,10 @@ static int expr_is_array_pointer_chain(const cc_translation_unit_t *tu, var_entr
     if (expr_is_array_object_ref(tu, vars, var_count, depth, e)) {
         return 1;
     }
-    if (e->kind == CC_EXPR_DEREF && e->lhs != NULL && is_pointer_type(e->value_type)) {
+    if (e->kind == CC_EXPR_DEREF && e->lhs != NULL && lower_is_pointer(e)) {
         return expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs);
     }
-    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && is_pointer_type(e->value_type)) {
+    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && lower_is_pointer(e)) {
         if (expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs)) {
             return 1;
         }
@@ -3697,7 +3752,7 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
     if (v < 0) {
         return -1;
     }
-    if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+    if (lower_is_integer(e) && !lower_is_pointer(e)) {
         v = normalize_integral_value(sf, v, e->value_type, diag);
     }
     return v;
@@ -3737,7 +3792,7 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
     if (rhsv < 0) {
         return -1;
     }
-    if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+    if (lower_is_integer(e) && !lower_is_pointer(e)) {
         rhsv = normalize_integral_value(sf, rhsv, e->value_type, diag);
         if (rhsv < 0) {
             return -1;
@@ -5926,7 +5981,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.op = CC_SSA_CONST;
         in.dst = new_value(sf, CC_VAL_I64);
         in.imm = e->int_val;
-        in.is_unsigned = cc_type_is_unsigned_integral(e->value_type) ? 1 : 0;
+        in.is_unsigned = lower_is_unsigned(e) ? 1 : 0;
         set_value_size(sf, in.dst, type_size_bytes_with_struct(tu, e->value_type, e->struct_id));
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
@@ -6187,7 +6242,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        if (is_pointer_type(e->value_type) && e->array_ndim > 0) {
+        if (lower_is_pointer(e) && e->array_ndim > 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
@@ -6448,7 +6503,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
             if (cmp_vt == CC_VAL_I64) {
-                if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
+                if (lower_is_pointer(e->lhs) || lower_is_pointer(e->rhs)) {
                     cmp_it = cc_target_pointer_size() <= 4 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
                 } else {
                     cmp_it = common_integral_type(e->lhs->value_type, e->rhs->value_type);
@@ -6465,8 +6520,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.cmp_kind = bin_to_cmp(e->op);
             in.is_unsigned =
                 (cmp_vt == CC_VAL_I64 &&
-                 (cc_type_is_unsigned_integral(cmp_it) || is_pointer_type(e->lhs->value_type) ||
-                  is_pointer_type(e->rhs->value_type)))
+                 (cc_type_is_unsigned_integral(cmp_it) || lower_is_pointer(e->lhs) ||
+                  lower_is_pointer(e->rhs)))
                     ? 1
                     : 0;
             in.dst = new_value(sf, CC_VAL_I64);
@@ -6478,7 +6533,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return in.dst;
         }
 
-        if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+        if (e->op == CC_BIN_SUB && lower_is_pointer(e->lhs) && lower_is_pointer(e->rhs)) {
             long elem_size = pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id);
             int diffv;
             long lhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->lhs, -1);
@@ -6547,18 +6602,18 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return cast_value(sf, diffv, type_to_val(e->value_type), diag);
         }
 
-        if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && is_pointer_type(e->value_type)) {
+        if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && lower_is_pointer(e)) {
             int ptrv = -1;
             int idxv = -1;
             long elem_size;
             cc_ssa_instr_t mul;
             const cc_expr_t *ptr_expr = NULL;
 
-            if (is_pointer_type(e->lhs->value_type)) {
+            if (lower_is_pointer(e->lhs)) {
                 ptrv = lhs;
                 idxv = rhs;
                 ptr_expr = e->lhs;
-            } else if (e->op == CC_BIN_ADD && is_pointer_type(e->rhs->value_type)) {
+            } else if (e->op == CC_BIN_ADD && lower_is_pointer(e->rhs)) {
                 ptrv = rhs;
                 idxv = lhs;
                 ptr_expr = e->rhs;
@@ -6573,7 +6628,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * not the loaded first element value.
              */
             if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_DEREF && ptr_expr->lhs != NULL &&
-                is_pointer_type(ptr_expr->value_type) && ptr_expr->array_ndim > 0 &&
+                lower_is_pointer(ptr_expr) && ptr_expr->array_ndim > 0 &&
                 expr_is_array_pointer_chain(tu, vars, var_count, depth, ptr_expr->lhs)) {
                 int basev = lower_expr(tu, sf, ctx, vars, var_count, depth, ptr_expr->lhs, diag);
                 if (basev < 0) {
@@ -6660,7 +6715,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
         }
-        if (vt == CC_VAL_I64 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+        if (vt == CC_VAL_I64 && lower_is_integer(e) && !lower_is_pointer(e)) {
             lhs = normalize_integral_value(sf, lhs, e->value_type, diag);
             rhs = normalize_integral_value(sf, rhs, e->value_type, diag);
             if (lhs < 0 || rhs < 0) {
@@ -6680,7 +6735,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             break;
         case CC_BIN_DIV:
             in.op = CC_SSA_DIV;
-            in.is_unsigned = cc_type_is_unsigned_integral(e->value_type) ? 1 : 0;
+            in.is_unsigned = lower_is_unsigned(e) ? 1 : 0;
             break;
         case CC_BIN_BAND:
             lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
@@ -6725,7 +6780,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             in.op = CC_SSA_SHR;
-            in.is_unsigned = cc_type_is_unsigned_integral(e->value_type) ? 1 : 0;
+            in.is_unsigned = lower_is_unsigned(e) ? 1 : 0;
             vt = CC_VAL_I64;
             break;
         case CC_BIN_MOD: {
@@ -6739,7 +6794,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             memset(&q, 0, sizeof(q));
             q.op = CC_SSA_DIV;
-            q.is_unsigned = cc_type_is_unsigned_integral(e->value_type) ? 1 : 0;
+            q.is_unsigned = lower_is_unsigned(e) ? 1 : 0;
             q.dst = new_value(sf, CC_VAL_I64);
             q.lhs = lhs_i;
             q.rhs = rhs_i;
@@ -6767,7 +6822,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_value_size(sf, p.dst, 8);
                 set_value_size(sf, r.dst, 8);
             }
-            if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+            if (lower_is_integer(e) && !lower_is_pointer(e)) {
                 return normalize_integral_ct(sf, r.dst, e->ctype, e->value_type, diag);
             }
             return r.dst;
@@ -6788,10 +6843,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->value_type == CC_TYPE_FLOAT) {
             return normalize_float_value(sf, in.dst, e->value_type, diag);
         }
-        if (vt == CC_VAL_I64 && cc_type_is_integral(e->value_type) && integral_type_bits(e->value_type) >= 64) {
+        if (vt == CC_VAL_I64 && lower_is_integer(e) && integral_type_bits(e->value_type) >= 64) {
             set_value_size(sf, in.dst, 8);
         }
-        if (vt == CC_VAL_I64 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+        if (vt == CC_VAL_I64 && lower_is_integer(e) && !lower_is_pointer(e)) {
             return normalize_integral_ct(sf, in.dst, e->ctype, e->value_type, diag);
         }
         return in.dst;
@@ -8654,7 +8709,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         callee_expr = callee_expr->lhs;
                     }
                 } else if (callee_expr->kind == CC_EXPR_DEREF && callee_expr->lhs != NULL &&
-                           cc_ct_of_expr(callee_expr->lhs) == NULL && is_pointer_type(callee_expr->lhs->value_type)) {
+                           cc_ct_of_expr(callee_expr->lhs) == NULL && lower_is_pointer(callee_expr->lhs)) {
                     int keep_deref = 0;
                     const cc_expr_t *d = callee_expr->lhs;
                     if (pointer_depth(callee_expr->lhs->value_type) > 1) {
@@ -9565,7 +9620,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             long mem_size = type_size_bytes(e->lhs->value_type);
             int ptrv;
 
-            if (is_pointer_type(e->value_type)) {
+            if (lower_is_pointer(e)) {
                 step = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
                 if (step <= 0) {
                     set_diag(diag, "unsupported pointer ++/-- type in lowering");
@@ -9644,7 +9699,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (one < 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->value_type)) {
+            if (!lower_is_pointer(e)) {
                 one = cast_value(sf, one, want, diag);
                 if (one < 0) {
                     return -1;
@@ -9666,7 +9721,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
             }
-            if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+            if (lower_is_integer(e) && !lower_is_pointer(e)) {
                 nextv = normalize_integral_ct(sf, nextv, e->ctype, e->value_type, diag);
                 if (nextv < 0) {
                     return -1;
@@ -9857,7 +9912,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
         if (e->aux_type == CC_TYPE_LDOUBLE) {
-            if (cc_type_is_integral(cast_src->value_type) && !is_pointer_type(cast_src->value_type)) {
+            if (lower_is_integer(cast_src) && !lower_is_pointer(cast_src)) {
                 set_value_size(sf, v, 16);
             } else {
                 v = promote_f64_to_ldouble_value(sf, v, diag);
@@ -10038,7 +10093,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             sv = cast_value(sf, sv, want, diag);
-            if (sv >= 0 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+            if (sv >= 0 && lower_is_integer(e) && !lower_is_pointer(e)) {
                 sv = normalize_integral_ct(sf, sv, e->ctype, e->value_type, diag);
             }
             return sv;
@@ -10079,7 +10134,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         tv = cast_value(sf, tv, want, diag);
         /* each arm is converted to the result type: (c ? s : ull) widens s */
-        if (tv >= 0 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+        if (tv >= 0 && lower_is_integer(e) && !lower_is_pointer(e)) {
             tv = normalize_integral_ct(sf, tv, e->ctype, e->value_type, diag);
         }
         if (tv < 0 || emit_mov_instr(sf, dst, tv) != 0 || emit_br_instr(sf, l_end) != 0) {
@@ -10094,7 +10149,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         fv = cast_value(sf, fv, want, diag);
-        if (fv >= 0 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
+        if (fv >= 0 && lower_is_integer(e) && !lower_is_pointer(e)) {
             fv = normalize_integral_ct(sf, fv, e->ctype, e->value_type, diag);
         }
         if (fv < 0 || emit_mov_instr(sf, dst, fv) != 0 || emit_br_instr(sf, l_end) != 0) {
@@ -10106,7 +10161,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         if (want == CC_VAL_I64) {
             long result_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
-            if ((result_size <= 0 && is_pointer_type(e->value_type)) ||
+            if ((result_size <= 0 && lower_is_pointer(e)) ||
                 (e->value_type == CC_TYPE_VOID && e->struct_id >= 0)) {
                 /* a pointer, or an aggregate's value: its address */
                 result_size = cc_target_pointer_size();
@@ -14467,7 +14522,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 free(rsym);
                 return -1;
             }
-            step = is_pointer_type(e->lhs->value_type) ? pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id) : 1;
+            step = lower_is_pointer(e->lhs) ? pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id) : 1;
             step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->lhs, step);
             if (apply_global_ptr_addend(ladd, iv, step, e->op == CC_BIN_SUB, &ladd) != 0) {
                 free(lsym);
@@ -14483,7 +14538,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 free(lsym);
                 return -1;
             }
-            step = is_pointer_type(e->rhs->value_type) ? pointer_elem_size_bytes(tu, e->rhs->value_type, e->rhs->struct_id) : 1;
+            step = lower_is_pointer(e->rhs) ? pointer_elem_size_bytes(tu, e->rhs->value_type, e->rhs->struct_id) : 1;
             step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->rhs, step);
             if (apply_global_ptr_addend(radd, iv, step, 0, &radd) != 0) {
                 free(rsym);
