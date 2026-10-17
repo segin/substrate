@@ -484,6 +484,33 @@ static int lower_is_unsigned(const cc_expr_t *e) {
     return cc_ct_is_unsigned(t) && t->kind != CC_CT_BOOL;
 }
 
+/**
+ * The kind of IR value an expression's value is held in: F64 for a real
+ * binary floating type or an imaginary one (held as its one part), I64
+ * for everything else -- integers, pointers, and the structures that
+ * stand for complex, decimal, wide and vector values.
+ *
+ * @param e  the expression
+ * @return   CC_VAL_F64 or CC_VAL_I64
+ */
+static cc_value_type_t lower_value_kind(const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    if (t == NULL) {
+        return CC_VAL_I64;
+    }
+    switch (t->kind) {
+    case CC_CT_FLOAT16:
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+    case CC_CT_LDOUBLE:
+    case CC_CT_IMAGINARY:
+        return CC_VAL_F64;
+    default:
+        return CC_VAL_I64;
+    }
+}
+
 static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id);
 
 /**
@@ -3765,7 +3792,7 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
         }
     }
 
-    v = cast_value(sf, v, type_to_val(e->value_type), diag);
+    v = cast_value(sf, v, lower_value_kind(e), diag);
     if (v < 0) {
         return -1;
     }
@@ -6280,7 +6307,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         in.op = CC_SSA_LOAD;
-        in.dst = new_value(sf, type_to_val(e->value_type));
+        in.dst = new_value(sf, lower_value_kind(e));
         in.lhs = lhs;
         in.rhs = -1;
         in.imm = mem_size;
@@ -6319,7 +6346,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         in.op = CC_SSA_LOAD;
-        in.dst = new_value(sf, type_to_val(e->value_type));
+        in.dst = new_value(sf, lower_value_kind(e));
         in.lhs = ptrv;
         in.rhs = -1;
         in.imm = mem_size;
@@ -6595,7 +6622,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (diffv < 0) {
                         return -1;
                     }
-                    return cast_value(sf, diffv, type_to_val(e->value_type), diag);
+                    return cast_value(sf, diffv, lower_value_kind(e), diag);
                 }
             }
 
@@ -6616,7 +6643,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 diffv = in.dst;
             }
 
-            return cast_value(sf, diffv, type_to_val(e->value_type), diag);
+            return cast_value(sf, diffv, lower_value_kind(e), diag);
         }
 
         if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && lower_is_pointer(e)) {
@@ -6719,7 +6746,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return in.dst;
         }
 
-        vt = type_to_val(e->value_type);
+        vt = lower_value_kind(e);
         lhs = cast_value(sf, lhs, vt, diag);
         rhs = cast_value(sf, rhs, vt, diag);
         if (lhs < 0 || rhs < 0) {
@@ -9122,7 +9149,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.imm = cc_target_pointer_size();
             in.is_unsigned = 1;
         } else {
-            in.dst = new_value(sf, type_to_val(e->value_type));
+            in.dst = new_value(sf, lower_value_kind(e));
             in.imm = lower_value_size(tu, e);
             if (in.imm <= 0) {
                 in.imm = cc_target_pointer_size();
@@ -9151,7 +9178,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_ASSIGN: {
-        cc_value_type_t want = type_to_val(e->value_type);
+        cc_value_type_t want = lower_value_kind(e);
         rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
         if (rhs < 0) {
             return -1;
@@ -9387,7 +9414,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_UPDATE: {
-        cc_value_type_t want = type_to_val(e->value_type);
+        cc_value_type_t want = lower_value_kind(e);
         int one;
         int cur;
         int nextv;
@@ -9962,7 +9989,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (vidx >= 0 && !(level == 0 && vars[vidx].vla_is_pointer)) {
                 int size_v = level == 0 ? vars[vidx].vla_bytes : vars[vidx].vla_strides[level - 1];
 
-                return cast_value(sf, size_v, type_to_val(e->value_type), diag);
+                return cast_value(sf, size_v, lower_value_kind(e), diag);
             }
         }
         if (e->lhs != NULL) {
@@ -10063,7 +10090,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
         if (outv >= 0) {
-            outv = cast_value(sf, outv, type_to_val(e->value_type), diag);
+            outv = cast_value(sf, outv, lower_value_kind(e), diag);
         }
         while (lcount > 0) {
             lcount--;
@@ -10096,7 +10123,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
         if (eval_const_i64_expr(tu, e->lhs, &cond_const) == 0) {
             int sv;
-            cc_value_type_t want = type_to_val(e->value_type);
+            cc_value_type_t want = lower_value_kind(e);
             if (cond_const != 0) {
                 if (e->rhs == NULL) {
                     sv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
@@ -10125,7 +10152,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
 
-        want = type_to_val(e->value_type);
+        want = lower_value_kind(e);
         dst = new_value(sf, want);
         if (dst < 0) {
             set_diag(diag, "out of memory assigning ternary result");
@@ -13355,7 +13382,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (is_mem_only) {
                     out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(ptrv);
                 } else {
-                    int tmpv = new_value(sf, type_to_val(op->expr->value_type));
+                    int tmpv = new_value(sf, lower_value_kind(op->expr));
                     if (tmpv < 0) {
                         free_asm_instr_fields(&in);
                         free(asm_out_store_ptr);
