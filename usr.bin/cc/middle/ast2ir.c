@@ -16117,7 +16117,8 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
                                                        const cc_expr_t *src_list, size_t *cursor, long field_off,
                                                        unsigned char *buf, long buf_size, global_reloc_t **relocs,
                                                        size_t *reloc_count, cc_diag_t *diag) {
-    cc_type_t elem_type;
+    const cc_ctype_t *elem;
+    int elem_sid;
     long elem_size;
     long max_elems;
     long j;
@@ -16126,11 +16127,9 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
         set_diag(diag, "invalid array-like struct member initializer");
         return -1;
     }
-    elem_type = ptr_base_type(m->type);
+    elem = member_elem_ctype(m);
+    elem_sid = ct_record_id(elem);
     elem_size = member_elem_size(tu, m);
-    if (elem_size <= 0) {
-        elem_size = member_elem_size(tu, m);
-    }
     if (elem_size <= 0) {
         set_diag(diag, "invalid array-like struct member extent");
         return -1;
@@ -16158,20 +16157,18 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
         }
 
         if (raw != NULL && raw->kind == CC_EXPR_STR) {
-            if (fill_fixed_char_array_from_string(raw, cc_ct_from_scalar(elem_type), elem_size, max_elems, field_off,
-                                                  buf, buf_size,
-                                                  diag) != 0) {
+            if (fill_fixed_char_array_from_string(raw, elem, elem_size, max_elems, field_off, buf, buf_size, diag) != 0) {
                 return -1;
             }
             (*cursor)++;
             return 0;
         }
 
-        if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            const cc_expr_t *sl = extract_struct_init_list_expr(raw, m->type_struct_id);
+        if (elem_sid >= 0) {
+            const cc_expr_t *sl = extract_struct_init_list_expr(raw, elem_sid);
             if (sl != NULL) {
                 size_t sub = 0;
-                if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, sl, &sub, elem_off, buf, buf_size, relocs,
+                if (flatten_struct_init_bytes_cursor(tu, elem_sid, sl, &sub, elem_off, buf, buf_size, relocs,
                                                      reloc_count, diag) != 0) {
                     return -1;
                 }
@@ -16182,7 +16179,7 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
                 (*cursor)++;
                 continue;
             }
-            if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, src_list, cursor, elem_off, buf, buf_size,
+            if (flatten_struct_init_bytes_cursor(tu, elem_sid, src_list, cursor, elem_off, buf, buf_size,
                                                  relocs, reloc_count, diag) != 0) {
                 return -1;
             }
@@ -16195,8 +16192,7 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
                 return -1;
             }
         }
-        if (store_scalar_global_init(tu, cc_ct_from_legacy(elem_type, m->type_struct_id, 0, NULL), elem_size, elem_expr,
-                                     buf, buf_size, elem_off,
+        if (store_scalar_global_init(tu, cc_ct_decay(elem), elem_size, elem_expr, buf, buf_size, elem_off,
                                      relocs, reloc_count, diag) != 0) {
             return -1;
         }
@@ -16417,16 +16413,11 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                 continue;
             }
             if (item != NULL && item->kind == CC_EXPR_STR) {
-                cc_type_t elem_type = ptr_base_type(m->type);
                 long elem_size = member_elem_size(tu, m);
-                long max_elems;
-                if (elem_size <= 0) {
-                    elem_size = member_elem_size(tu, m);
-                }
-                max_elems = elem_size > 0 ? (m->array_len > 0 ? m->array_len : (m->size / elem_size)) : 0;
-                if (fill_fixed_char_array_from_string(item, cc_ct_from_scalar(elem_type), elem_size, max_elems,
-                                                      field_off, buf, buf_size,
-                                                      diag) != 0) {
+                long max_elems = elem_size > 0 ? (m->array_len > 0 ? m->array_len : (m->size / elem_size)) : 0;
+
+                if (fill_fixed_char_array_from_string(item, member_elem_ctype(m), elem_size, max_elems, field_off, buf,
+                                                      buf_size, diag) != 0) {
                     set_diag(diag, "invalid string initializer for fixed-size array struct member");
                     return -1;
                 }
