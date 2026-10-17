@@ -1442,6 +1442,7 @@ static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int normalize_float_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
+static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
 static cc_type_t fp_builtin_storage_type(cc_type_t t);
 static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
@@ -2172,7 +2173,7 @@ static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_
     if (rhs < 0) {
         return -1;
     }
-    rhs = normalize_integral_value(sf, rhs, v->type, diag);
+    rhs = normalize_int_ct(sf, rhs, lower_var_ctype(v), diag);
     if (rhs < 0) {
         return -1;
     }
@@ -3635,6 +3636,26 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
  * @param diag  receives an error
  * @return      the converted value, or -1
  */
+static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_type_t t, cc_diag_t *diag);
+
+/**
+ * Convert an integer value to integer type @p ct (normalize_integral_ct()),
+ * the legacy kind taken from the type itself; a value of any other type
+ * is left as it is.
+ *
+ * @param sf    the function
+ * @param v     the value
+ * @param ct    the type converted to; may be NULL
+ * @param diag  receives an error
+ * @return      the converted value, or -1
+ */
+static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag) {
+    if (!cc_ct_is_integer(ct)) {
+        return v;
+    }
+    return normalize_integral_ct(sf, v, ct, cc_ct_legacy_kind(ct->kind), diag);
+}
+
 static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_type_t t, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     long size;
@@ -3953,7 +3974,7 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
         return -1;
     }
     if (lower_is_integer(e) && !lower_is_pointer(e)) {
-        v = normalize_integral_value(sf, v, e->value_type, diag);
+        v = normalize_int_ct(sf, v, lower_value_ctype(e), diag);
     }
     return v;
 }
@@ -3993,7 +4014,7 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
         return -1;
     }
     if (lower_is_integer(e) && !lower_is_pointer(e)) {
-        rhsv = normalize_integral_value(sf, rhsv, e->value_type, diag);
+        rhsv = normalize_int_ct(sf, rhsv, lower_value_ctype(e), diag);
         if (rhsv < 0) {
             return -1;
         }
@@ -4247,7 +4268,7 @@ static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t 
     if (x < 0) {
         return -1;
     }
-    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    x = normalize_int_ct(sf, x, lower_value_ctype(e->args[0]), diag);
     if (x < 0) {
         return -1;
     }
@@ -4294,7 +4315,7 @@ static int lower_builtin_ffs(const cc_translation_unit_t *tu, cc_ssa_function_t 
     if (x < 0) {
         return -1;
     }
-    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    x = normalize_int_ct(sf, x, lower_value_ctype(e->args[0]), diag);
     if (x < 0) {
         return -1;
     }
@@ -4381,7 +4402,7 @@ static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t 
     if (x < 0) {
         return -1;
     }
-    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    x = normalize_int_ct(sf, x, lower_value_ctype(e->args[0]), diag);
     if (x < 0) {
         return -1;
     }
@@ -6923,8 +6944,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
         if (vt == CC_VAL_I64 && lower_is_integer(e) && !lower_is_pointer(e)) {
-            lhs = normalize_integral_value(sf, lhs, e->value_type, diag);
-            rhs = normalize_integral_value(sf, rhs, e->value_type, diag);
+            lhs = normalize_int_ct(sf, lhs, lower_value_ctype(e), diag);
+            rhs = normalize_int_ct(sf, rhs, lower_value_ctype(e), diag);
             if (lhs < 0 || rhs < 0) {
                 return -1;
             }
