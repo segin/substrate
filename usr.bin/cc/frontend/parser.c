@@ -809,17 +809,222 @@ static long align_up_long(long x, long a) {
     return x + (a - r);
 }
 
+/**
+ * Record a member declarator of structure @p sid for its layout.
+ *
+ * @param p           the parser
+ * @param sid         the structure
+ * @param member      the member it declares (an index into its members), or -1 for an unnamed bit-field
+ * @param ctype       a bit-field's declared type, else NULL
+ * @param size        an ordinary member's size in bytes
+ * @param align       its type's alignment, or 1 where it is `packed`
+ * @param user_align  the alignment `aligned` or `_Alignas` asks for, or 0
+ * @param bit_width   a bit-field's width, or -1 for an ordinary member
+ * @return            0, or -1 when out of memory
+ */
+static int struct_layout_push(parser_t *p, int sid, int member, const cc_ctype_t *ctype, long size, long align,
+                              long user_align, int bit_width) {
+    cc_struct_def_t *sd = &p->structs[sid];
+    cc_member_layout_t *it;
+
+    if (sd->layout_count == sd->layout_cap) {
+        size_t ncap = sd->layout_cap == 0 ? 8 : sd->layout_cap * 2;
+        cc_member_layout_t *next = (cc_member_layout_t *)realloc(sd->layout, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            return -1;
+        }
+        sd->layout = next;
+        sd->layout_cap = ncap;
+    }
+    it = &sd->layout[sd->layout_count++];
+    it->member = member;
+    it->ctype = ctype;
+    it->size = size;
+    it->align = align;
+    it->user_align = user_align;
+    it->bit_width = bit_width;
+    return 0;
+}
+
+/**
+ * The storage unit lowering reads and writes a bit-field through: the
+ * aligned unit of its type that holds it (its type's alignment where a
+ * type is wider than it is aligned, as i386's `long long` is, and the
+ * field fits one such word), or for a packed field the smallest of 1, 2,
+ * 4 or 8 bytes from the byte it starts in.
+ *
+ * @param pos         its first bit, from the start of the structure
+ * @param width       its width
+ * @param type_size   its type's size in bytes
+ * @param type_align  its type's alignment in bytes
+ * @param packed      it is packed: it may start at any bit
+ * @param out_start   receives the unit's offset in bytes
+ * @param out_size    receives the unit's size in bytes
+ * @return            0, or -1 if no unit of at most 8 bytes holds it
+ */
+static int bitfield_unit(long pos, int width, long type_size, long type_align, int packed, long *out_start,
+                         long *out_size) {
+    long start;
+    long size;
+
+    if (!packed) {
+        start = pos / (type_align * 8) * type_align;
+        size = type_size;
+        if (type_size > type_align && pos - start * 8 + width <= type_align * 8) {
+            size = type_align;
+        }
+    } else {
+        start = pos / 8;
+        size = 1;
+        while (size < 8 && size * 8 < pos % 8 + width) {
+            size *= 2;
+        }
+    }
+    if (pos - start * 8 + width > size * 8) {
+        return -1;
+    }
+    *out_start = start;
+    *out_size = size;
+    return 0;
+}
+
+/**
+ * Lay out structure or union @p sid from its member declarators, as gcc
+ * and the System V psABI do.  An ordinary member goes at the next offset
+ * its alignment allows.  A bit-field goes at the next free bit, unless it
+ * would then cross a boundary of its type's alignment that its type's
+ * size does not allow, when it goes to that boundary; so it may share the
+ * bytes of the members before it.  A zero-width bit-field moves the next
+ * one to its type's alignment; it and unnamed bit-fields do not raise the
+ * structure's alignment.  Packed bit-fields start at any bit.
+ *
+ * @param p             the parser
+ * @param sid           the structure
+ * @param packed        the structure is `packed`
+ * @param forced_align  the alignment `aligned` asks of the structure, or 0
+ * @return              0, or -1 on error (diagnosed)
+ */
+static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
+    cc_struct_def_t *sd = &p->structs[sid];
+    long bits = 0; /* a structure's next free bit; a union's size in bits */
+    long max_align = 1;
+    long size;
+    size_t i;
+
+    if (sd->layout_count == 0 && sd->member_count > 0) {
+        /* a structure the compiler made (complex, wide integer, vector, decimal): laid out already */
+        if (forced_align > sd->align) {
+            sd->align = forced_align;
+            sd->size = align_up_long(sd->size, forced_align);
+        }
+        return 0;
+    }
+    for (i = 0; i < sd->layout_count; ++i) {
+        const cc_member_layout_t *it = &sd->layout[i];
+        cc_struct_member_t *m = it->member >= 0 ? &sd->members[it->member] : NULL;
+        long align = packed ? 1 : it->align;
+
+        if (it->user_align > align) {
+            align = it->user_align;
+        }
+        if (it->bit_width >= 0) {
+            long type_size = parser_ct_size(p, it->ctype);
+            long type_align = parser_ct_align(p, it->ctype);
+            int bit_packed = packed || it->align < type_align;
+            long pos = 0;
+            long start;
+            long unit;
+
+            if (type_size <= 0 || type_align <= 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported bit-field storage type size");
+                return -1;
+            }
+            if (!sd->is_union) {
+                if (it->bit_width == 0) {
+                    bits = align_up_long(bits, type_align * 8);
+                    continue;
+                }
+                if (it->user_align > 0) {
+                    bits = align_up_long(bits, it->user_align * 8);
+                }
+                if (!bit_packed && (bits % (type_align * 8) + it->bit_width + type_align * 8 - 1) /
+                                           (type_align * 8) * (type_align * 8) >
+                                       type_size * 8) {
+                    bits = align_up_long(bits, type_align * 8);
+                }
+                pos = bits;
+                bits += it->bit_width;
+            } else if (it->bit_width > bits) {
+                bits = it->bit_width;
+            }
+            if (m == NULL) {
+                continue;
+            }
+            if (bitfield_unit(pos, it->bit_width, type_size, type_align, bit_packed, &start, &unit) != 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
+                return -1;
+            }
+            m->offset = start;
+            m->bit_offset = (int)(pos - start * 8);
+            m->bit_storage_size = unit;
+            m->bit_storage_bits = (int)(unit * 8);
+            m->size = unit;
+            if (!bit_packed && type_align > align) {
+                align = type_align;
+            }
+        } else if (sd->is_union) {
+            if (m != NULL) {
+                m->offset = 0;
+            }
+            if (it->size * 8 > bits) {
+                bits = it->size * 8;
+            }
+        } else {
+            bits = align_up_long(bits, align * 8);
+            if (m != NULL) {
+                m->offset = bits / 8;
+            }
+            bits += it->size * 8;
+        }
+        if (align > max_align) {
+            max_align = align;
+        }
+    }
+    if (forced_align > max_align) {
+        max_align = forced_align;
+    }
+    size = align_up_long((bits + 7) / 8, max_align);
+    /* a unit reaching past the end moves back: lowering must not touch the bytes after the object */
+    for (i = 0; i < sd->member_count; ++i) {
+        cc_struct_member_t *m = &sd->members[i];
+
+        if (m->is_bitfield && m->bit_width > 0 && m->offset + m->bit_storage_size > size) {
+            long back = m->offset + m->bit_storage_size - size;
+
+            if (back > m->offset) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
+                return -1;
+            }
+            m->offset -= back;
+            m->bit_offset += (int)(back * 8);
+        }
+    }
+    sd->size = size;
+    sd->align = max_align;
+    return 0;
+}
+
+/**
+ * Lay structure @p sid out again with the `packed` and `aligned`
+ * attributes of @p attrs added to those it has.
+ *
+ * @return 0, or -1 on error
+ */
 static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
     cc_struct_def_t *sd;
     int packed = 0;
     long forced_align = 0;
-    long off = 0;
-    long max_align = 1;
-    long bit_unit_off = -1;
-    long bit_unit_size = 0;
-    long bit_unit_align = 1;
-    int bit_unit_bits_used = 0;
-    size_t i;
 
     if (sid < 0 || (size_t)sid >= p->struct_count) {
         return -1;
@@ -838,110 +1043,10 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
         }
     }
 
-    for (i = 0; i < sd->member_count; ++i) {
-        long msize = sd->members[i].size;
-        long malign = parser_ct_align(p, sd->members[i].ctype);
-        int is_bitfield = sd->members[i].is_bitfield;
-        int bit_width = sd->members[i].bit_width;
-        long bit_storage_size = sd->members[i].bit_storage_size;
-        int bit_storage_bits = sd->members[i].bit_storage_bits;
-        if (msize <= 0) {
-            msize = parser_ct_size(p, sd->members[i].ctype);
-        }
-        if (msize < 0) {
-            msize = cc_target_pointer_size();
-        }
-        if (malign <= 0) {
-            if (msize == 0) {
-                malign = 1;
-            } else {
-                malign = cc_target_pointer_size();
-            }
-        }
-        if (packed) {
-            malign = 1;
-        }
-        if (sd->is_union) {
-            sd->members[i].offset = 0;
-            if (is_bitfield) {
-                if (bit_storage_size <= 0) {
-                    bit_storage_size = msize;
-                }
-                if (bit_storage_size > off) {
-                    off = bit_storage_size;
-                }
-                sd->members[i].bit_offset = 0;
-            } else if (msize > off) {
-                off = msize;
-            }
-        } else if (is_bitfield) {
-            if (bit_storage_size <= 0) {
-                bit_storage_size = msize;
-            }
-            if (bit_storage_bits <= 0) {
-                bit_storage_bits = (int)(bit_storage_size * 8);
-            }
-            if (bit_width == 0) {
-                if (bit_unit_off >= 0) {
-                    off = bit_unit_off + bit_unit_size;
-                }
-                off = align_up_long(off, malign);
-                sd->members[i].offset = off;
-                sd->members[i].bit_offset = 0;
-                bit_unit_off = -1;
-                bit_unit_size = 0;
-                bit_unit_align = 1;
-                bit_unit_bits_used = 0;
-            } else {
-                int need_new_unit = 0;
-                if (bit_unit_off < 0 || bit_unit_size != bit_storage_size || bit_unit_align != malign ||
-                    bit_unit_bits_used + bit_width > bit_storage_bits) {
-                    need_new_unit = 1;
-                }
-                if (need_new_unit) {
-                    if (bit_unit_off >= 0) {
-                        off = bit_unit_off + bit_unit_size;
-                    }
-                    off = align_up_long(off, malign);
-                    bit_unit_off = off;
-                    bit_unit_size = bit_storage_size;
-                    bit_unit_align = malign;
-                    bit_unit_bits_used = 0;
-                }
-                sd->members[i].offset = bit_unit_off;
-                sd->members[i].bit_offset = bit_unit_bits_used;
-                bit_unit_bits_used += bit_width;
-                {
-                    long end_off = bit_unit_off + bit_unit_size;
-                    if (end_off > off) {
-                        off = end_off;
-                    }
-                }
-            }
-        } else {
-            if (bit_unit_off >= 0) {
-                off = bit_unit_off + bit_unit_size;
-                bit_unit_off = -1;
-                bit_unit_size = 0;
-                bit_unit_align = 1;
-                bit_unit_bits_used = 0;
-            }
-            off = align_up_long(off, malign);
-            sd->members[i].offset = off;
-            off += msize;
-        }
-        if (malign > max_align) {
-            max_align = malign;
-        }
+    if (struct_layout(p, sid, packed, forced_align) != 0) {
+        return -1;
     }
-    if (forced_align > max_align) {
-        max_align = forced_align;
-    }
-    if (max_align <= 0) {
-        max_align = 1;
-    }
-    sd->size = align_up_long(off, max_align);
-    sd->align = max_align;
+    sd = &p->structs[sid];
     sd->attr_flags &= ~(CC_ATTR_PACKED | CC_ATTR_ALIGNED);
     if (packed) {
         sd->attr_flags |= CC_ATTR_PACKED;
@@ -1473,6 +1578,7 @@ static void parser_free_structs(parser_t *p) {
             free(p->structs[i].members[j].name);
         }
         free(p->structs[i].members);
+        free(p->structs[i].layout);
     }
     free(p->structs);
     p->structs = NULL;
@@ -2114,12 +2220,6 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
             int brace_depth = 0;
             const char *tag_start = NULL;
             size_t tag_len = 0;
-            long off = 0;
-            long max_align = 1;
-            long bit_unit_off = -1;
-            long bit_unit_size = 0;
-            long bit_unit_align = 1;
-            int bit_unit_bits_used = 0;
             int is_union = (p->tok.kind == TOK_KW_UNION);
             decl_attrs_t struct_attrs;
             decl_attrs_reset(&struct_attrs);
@@ -2172,6 +2272,11 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
             p->structs[sid].member_count = 0;
             free(p->structs[sid].members);
             p->structs[sid].members = NULL;
+            p->structs[sid].member_cap = 0;
+            free(p->structs[sid].layout);
+            p->structs[sid].layout = NULL;
+            p->structs[sid].layout_count = 0;
+            p->structs[sid].layout_cap = 0;
             p->structs[sid].is_union = is_union;
             p->structs[sid].has_flexible_array = 0;
             if (next_tok(p) != 0) {
@@ -2247,10 +2352,10 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     int arr_unsized;
                     long msize;
                     long malign;
-                    long moff;
+                    long muser_align = 0;
+                    int mindex;
                     int is_bitfield = 0;
                     int bit_width = -1;
-                    int bit_offset = 0;
                     int bit_storage_bits = 0;
                     int bit_signed = 0;
                     long bit_storage_size = 0;
@@ -2292,13 +2397,14 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         }
                         bit_width = (int)bw;
                         free_expr(bw_expr);
-                        if (p->tok.kind != TOK_COMMA && p->tok.kind != TOK_SEMI) {
-                            set_diag(p->diag, p->tok.line, p->tok.col, "malformed bit-field width expression");
-                            free(mname);
-                            return -1;
-                        }
                     }
                     if (skip_decl_gnu_suffix(p, &mdecl_attrs) != 0) {
+                        free(mname);
+                        decl_attrs_clear(&mdecl_attrs);
+                        return -1;
+                    }
+                    if (is_bitfield && p->tok.kind != TOK_COMMA && p->tok.kind != TOK_SEMI) {
+                        set_diag(p->diag, p->tok.line, p->tok.col, "malformed bit-field width expression");
                         free(mname);
                         decl_attrs_clear(&mdecl_attrs);
                         return -1;
@@ -2340,8 +2446,8 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     if ((mdecl_attrs.flags & CC_ATTR_PACKED) != 0) {
                         malign = 1;
                     }
-                    if ((mdecl_attrs.flags & CC_ATTR_ALIGNED) != 0 && mdecl_attrs.align > malign) {
-                        malign = mdecl_attrs.align;
+                    if ((mdecl_attrs.flags & CC_ATTR_ALIGNED) != 0) {
+                        muser_align = mdecl_attrs.align;
                     }
 
                     if (is_bitfield) {
@@ -2385,60 +2491,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                          */
                         bit_signed = parser_bitfield_is_signed(melem);
                         msize = bit_storage_size;
-
-                        if (is_union) {
-                            moff = 0;
-                            bit_offset = 0;
-                            if (bit_width == 0) {
-                                msize = 0;
-                            }
-                        } else {
-                            if (bit_width == 0) {
-                                if (bit_unit_off >= 0) {
-                                    off = bit_unit_off + bit_unit_size;
-                                }
-                                off = align_up_long(off, malign);
-                                bit_unit_off = -1;
-                                bit_unit_size = 0;
-                                bit_unit_align = 1;
-                                bit_unit_bits_used = 0;
-                                moff = off;
-                                msize = 0;
-                            } else {
-                                int need_new_unit = 0;
-                                if (bit_unit_off < 0 || bit_unit_size != bit_storage_size || bit_unit_align != malign ||
-                                    bit_unit_bits_used + bit_width > bit_storage_bits) {
-                                    need_new_unit = 1;
-                                }
-                                if (need_new_unit) {
-                                    if (bit_unit_off >= 0) {
-                                        off = bit_unit_off + bit_unit_size;
-                                    }
-                                    off = align_up_long(off, malign);
-                                    bit_unit_off = off;
-                                    bit_unit_size = bit_storage_size;
-                                    bit_unit_align = malign;
-                                    bit_unit_bits_used = 0;
-                                }
-                                moff = bit_unit_off;
-                                bit_offset = bit_unit_bits_used;
-                                bit_unit_bits_used += bit_width;
-                                {
-                                    long end_off = bit_unit_off + bit_unit_size;
-                                    if (end_off > off) {
-                                        off = end_off;
-                                    }
-                                }
-                            }
-                        }
                     } else {
-                        if (!is_union && bit_unit_off >= 0) {
-                            off = bit_unit_off + bit_unit_size;
-                            bit_unit_off = -1;
-                            bit_unit_size = 0;
-                            bit_unit_align = 1;
-                            bit_unit_bits_used = 0;
-                        }
                         if (arr_saw) {
                             if (arr_unsized) {
                                 if (is_union) {
@@ -2473,12 +2526,14 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                                 msize = 0;
                             }
                         }
-                        moff = is_union ? 0 : align_up_long(off, malign);
                     }
 
+                    /* placed when the structure is complete (struct_layout) */
+                    mindex = -1;
                     if (!skip_member_decl && mname != NULL) {
-                        if (struct_member_push(p, sid, mname, md.ctype, moff, msize, is_bitfield, bit_width,
-                                               bit_offset, bit_storage_bits, bit_signed, bit_storage_size) != 0) {
+                        mindex = (int)p->structs[sid].member_count;
+                        if (struct_member_push(p, sid, mname, md.ctype, 0, msize, is_bitfield, bit_width, 0,
+                                               bit_storage_bits, bit_signed, bit_storage_size) != 0) {
                             free(mname);
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
@@ -2486,32 +2541,18 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         free(mname);
                     } else if (skip_member_decl && mname == NULL && md.ctype->unqual->kind == CC_CT_RECORD &&
                                p->structs[md.ctype->unqual->id].complete) {
-                        if (struct_member_push(p, sid, NULL, md.ctype->unqual, moff, msize, is_bitfield,
-                                               bit_width, bit_offset, bit_storage_bits, bit_signed,
-                                               bit_storage_size) != 0) {
+                        mindex = (int)p->structs[sid].member_count;
+                        if (struct_member_push(p, sid, NULL, md.ctype->unqual, 0, msize, is_bitfield, bit_width, 0,
+                                               bit_storage_bits, bit_signed, bit_storage_size) != 0) {
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
                         }
                     }
-                    if (is_union) {
-                        if (is_bitfield) {
-                            if (bit_storage_size > off) {
-                                off = bit_storage_size;
-                            }
-                        } else if (msize > off) {
-                            off = msize;
-                        }
-                    } else if (!is_bitfield) {
-                        if (msize > 0) {
-                            off = moff + msize;
-                        }
-                    } else if (bit_width == 0) {
-                        if (moff > off) {
-                            off = moff;
-                        }
-                    }
-                    if (malign > max_align) {
-                        max_align = malign;
+                    if (struct_layout_push(p, sid, mindex, is_bitfield ? melem : NULL, is_bitfield ? 0 : msize,
+                                           malign, muser_align, is_bitfield ? bit_width : -1) != 0) {
+                        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory laying out a structure");
+                        decl_attrs_clear(&mdecl_attrs);
+                        return -1;
                     }
                     decl_attrs_clear(&mdecl_attrs);
                     if (p->tok.kind != TOK_COMMA) {
@@ -2530,8 +2571,6 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 decl_attrs_clear(&struct_attrs);
                 return -1;
             }
-            p->structs[sid].size = align_up_long(off, max_align);
-            p->structs[sid].align = max_align;
             p->structs[sid].complete = 1;
             if (decl_attrs_merge(out_attrs, &struct_attrs) != 0) {
                 decl_attrs_clear(&struct_attrs);
@@ -2542,6 +2581,9 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     decl_attrs_clear(&struct_attrs);
                     return -1;
                 }
+            } else if (struct_layout(p, sid, 0, 0) != 0) {
+                decl_attrs_clear(&struct_attrs);
+                return -1;
             }
             decl_attrs_clear(&struct_attrs);
             continue;
@@ -3584,7 +3626,8 @@ static long parser_struct_next_init_member_index(const cc_struct_def_t *sd, size
         return next;
     }
     off = sd->members[member_idx].offset;
-    while (next < sd->member_count && sd->members[next].offset == off) {
+    /* a union's members share its storage; a structure's bit-fields may share a member's bytes */
+    while (sd->is_union && next < sd->member_count && sd->members[next].offset == off) {
         next++;
     }
     return next;
@@ -9705,6 +9748,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
             free(tu->structs[i].members[j].name);
         }
         free(tu->structs[i].members);
+        free(tu->structs[i].layout);
     }
     free(tu->structs);
     tu->structs = NULL;

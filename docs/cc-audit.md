@@ -588,15 +588,23 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   rejects it: "pointer/integer type mismatch").  *Reproduced.*  The
   conditional is typed on its arms' interned types and the mismatch is
   an error.  `native_bad_ternary_ptr_int.c` (negative).
-- [ ] **CC-99** A bit-field shall be allocated as the System V psABI
+- [x] **CC-99** A bit-field shall be allocated as the System V psABI
   (and gcc) allocate it: in the storage unit of its declared type that
   holds the next free bit, which may be one an earlier non-bit-field
-  member already uses.  cc always opens a fresh unit aligned to the
-  bit-field's type, so `struct { char a; int b : 3; short e; }` is 12
+  member already uses.  cc always opened a fresh unit aligned to the
+  bit-field's type, so `struct { char a; int b : 3; short e; }` was 12
   bytes with `e` at 8 where gcc makes it 4 with `e` at 2 -- the layout
-  of every such structure disagrees with code gcc compiles.
+  of every such structure disagreed with code gcc compiles.
   *Reproduced* (both targets); found while checking member layout for
-  the interned-type refactor, and present before it.
+  the interned-type refactor, and present before it.  One layout routine
+  (`struct_layout()` in `frontend/parser.c`) now places every member
+  when the structure is complete, and again when attributes re-lay it
+  out, from a record of every declarator, unnamed bit-fields included.
+  It follows gcc: zero-width and unnamed bit-fields do not raise the
+  structure's alignment, `aligned` moves a bit-field, and packed
+  bit-fields start at any bit.  An attribute after a bit-field's width
+  (`int b : 4 __attribute__((aligned(8)))`) was rejected too; it is
+  accepted.  `codegen/bitfield_layout.c`.
 - [ ] **CC-100** A type qualifier among the declaration specifiers shall
   qualify the type they give (C11 6.7.3): cc keeps `const` and `volatile`
   there as storage bits beside the type, so `const int *` is a pointer to
@@ -1061,7 +1069,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-106 requirements: 97 met, 9 open.
+106 requirements: 98 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

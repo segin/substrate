@@ -4452,7 +4452,8 @@ static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_i
         return next;
     }
     off = sd->members[member_idx].offset;
-    while (next < sd->member_count && sd->members[next].offset == off) {
+    /* a union's members share its storage; a structure's bit-fields may share a member's bytes */
+    while (sd->is_union && next < sd->member_count && sd->members[next].offset == off) {
         next++;
     }
     return next;

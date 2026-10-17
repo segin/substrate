@@ -252,12 +252,28 @@ typedef struct {
     const struct cc_ctype *ctype; /**< its type, where its declaration recorded one; else NULL */
 } cc_struct_member_t;
 
+/**
+ * One member declarator of a structure or union, as its layout reads it:
+ * unnamed bit-fields, which are not members but take up room, included.
+ */
+typedef struct {
+    int member;                   /**< the member it places (an index into members), or -1 for none */
+    const struct cc_ctype *ctype; /**< a bit-field's declared type */
+    long size;                    /**< an ordinary member's size in bytes */
+    long align;                   /**< its type's alignment, or 1 where the declarator is `packed` */
+    long user_align;              /**< the alignment `aligned` or `_Alignas` asks for, or 0 */
+    int bit_width;                /**< a bit-field's width, or -1 for an ordinary member */
+} cc_member_layout_t;
+
 typedef struct {
     char *tag;
     int depth;
     cc_struct_member_t *members;
     size_t member_count;
     size_t member_cap;
+    cc_member_layout_t *layout;   /**< its member declarators in order, as declared */
+    size_t layout_count;
+    size_t layout_cap;
     long size;
     long align;
     cc_attr_flags_t attr_flags;
