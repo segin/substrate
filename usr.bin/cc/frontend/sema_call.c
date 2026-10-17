@@ -1,0 +1,7718 @@
+#include "cc_frontend.h"
+#include "cc_asm.h"
+#include "cc_consteval.h"
+#include "cc_ctype.h"
+#include "cc_decimal.h"
+#include "cc_diag.h"
+#include "cc_lang.h"
+#include "cc_options.h"
+#include "cc_types.h"
+#include "cc_util.h"
+
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static size_t g_diag_ctx_line = 0;
+static size_t g_diag_ctx_col = 0;
+
+/** A variable or parameter in scope. */
+typedef struct {
+    char *name;
+    int storage;             /**< its CC_STORAGE_* flags */
+    int depth;               /**< the scope depth it was declared at */
+    const cc_ctype_t *ctype; /**< its declared type (cc_ctype.h) */
+} var_entry_t;
+
+typedef struct {
+    char **items;
+    size_t count;
+} name_list_t;
+
+/**
+ * Record a semantic error.  The first error recorded is the one
+ * reported; with no position given, it is placed at the construct being
+ * checked (set_diag_context).
+ *
+ * @param d    the diagnostic
+ * @param msg  the message
+ */
+static void sema_diag(cc_diag_t *d, const char *msg) {
+    if (d == NULL || d->message[0] != '\0') {
+        return;
+    }
+    if (d->line == 0 && d->col == 0) {
+        cc_diag_set(d, NULL, g_diag_ctx_line, g_diag_ctx_col, msg);
+    } else {
+        cc_diag_set(d, NULL, d->line, d->col, msg);
+    }
+}
+
+/**
+ * Print the recorded semantic error, placed at the construct being
+ * checked if it has no position of its own, count it, and clear it.
+ *
+ * @param d  the diagnostic
+ */
+static void sema_diag_report_and_clear(cc_diag_t *d) {
+    if (d == NULL || d->message[0] == '\0') {
+        return;
+    }
+    if (d->line == 0 && d->col == 0) {
+        d->line = g_diag_ctx_line;
+        d->col = g_diag_ctx_col;
+    }
+    cc_diag_report(d);
+}
+
+static void set_diag_context(size_t line, size_t col) {
+    if (line == 0 && col == 0) {
+        return;
+    }
+    g_diag_ctx_line = line;
+    g_diag_ctx_col = col;
+}
+
+/**
+ * Print a warning about the file being checked.
+ *
+ * @param diag  the diagnostic, for the file's path; may be NULL
+ * @param line  the line, or 0
+ * @param col   the column, or 0
+ * @param msg   the message
+ */
+static void print_warning(const cc_diag_t *diag, size_t line, size_t col, const char *msg) {
+    cc_diag_print("warning", diag != NULL ? diag->path : NULL, line, col, msg, 0);
+}
+
+static int emit_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg, int pedantic_only) {
+    int as_error = cc_options_current()->warn_error || (pedantic_only && cc_options_current()->pedantic_errors);
+
+    if (pedantic_only) {
+        if (!cc_options_current()->pedantic) {
+            return 0;
+        }
+    } else if (!cc_options_current()->warn_all) {
+        return 0;
+    }
+
+    if (line == 0 && col == 0) {
+        line = g_diag_ctx_line;
+        col = g_diag_ctx_col;
+    }
+
+    print_warning(diag, line, col, msg);
+
+    if (!as_error) {
+        return 0;
+    }
+
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    }
+    return -1;
+}
+
+static int emit_required_warning(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
+    if (line == 0 && col == 0) {
+        line = g_diag_ctx_line;
+        col = g_diag_ctx_col;
+    }
+    print_warning(diag, line, col, msg);
+    if (!cc_options_current()->warn_error) {
+        return 0;
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        diag->line = line;
+        diag->col = col;
+        snprintf(diag->message, sizeof(diag->message), "%s", msg);
+    }
+    return -1;
+}
+
+static int maybe_warn_assignment_condition(const cc_expr_t *cond, const char *where, cc_diag_t *diag) {
+    char buf[160];
+
+    if (cond == NULL || cond->kind != CC_EXPR_ASSIGN || cond->paren_wrapped) {
+        return 0;
+    }
+    if (cond->ident != NULL && cond->rhs != NULL && cond->rhs->kind == CC_EXPR_BIN && cond->rhs->lhs != NULL &&
+        cond->rhs->lhs->kind == CC_EXPR_IDENT && cond->rhs->lhs->ident != NULL &&
+        strcmp(cond->ident, cond->rhs->lhs->ident) == 0) {
+        /*
+         * parse_assign lowers compound assignments (e.g. x /= y) into
+         * x = x / y. Do not warn on that form in conditions.
+         */
+        return 0;
+    }
+
+    snprintf(buf, sizeof(buf), "assignment used as condition in %s", where);
+    return emit_warning(diag, cond->line, cond->col, buf, 0);
+}
+
+static int is_power_of_two_long(long v) {
+    return v > 0 && (v & (v - 1)) == 0;
+}
+
+static int validate_attr_align(long align, cc_diag_t *diag, const char *what) {
+    if (is_power_of_two_long(align)) {
+        return 0;
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        snprintf(diag->message, sizeof(diag->message), "%s requires a positive power-of-two value", what);
+    }
+    return -1;
+}
+
+static int validate_attr_section(const char *section, cc_diag_t *diag, const char *what) {
+    if (section != NULL && section[0] != '\0' && strchr(section, '\n') == NULL && strchr(section, '\r') == NULL) {
+        return 0;
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        snprintf(diag->message, sizeof(diag->message), "%s requires a valid section name", what);
+    }
+    return -1;
+}
+
+static cc_attr_flags_t attr_visibility_mask(void) {
+    return CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+}
+
+static int has_multiple_visibility_attrs(cc_attr_flags_t flags) {
+    cc_attr_flags_t v = flags & attr_visibility_mask();
+    int n = 0;
+    if ((v & CC_ATTR_VIS_DEFAULT) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_HIDDEN) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_PROTECTED) != 0) {
+        n++;
+    }
+    if ((v & CC_ATTR_VIS_INTERNAL) != 0) {
+        n++;
+    }
+    return n > 1;
+}
+
+static int storage_class_count(int storage) {
+    int mask = storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN | CC_STORAGE_AUTO | CC_STORAGE_REGISTER);
+    int n = 0;
+    if ((mask & CC_STORAGE_STATIC) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_EXTERN) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_AUTO) != 0) {
+        n++;
+    }
+    if ((mask & CC_STORAGE_REGISTER) != 0) {
+        n++;
+    }
+    return n;
+}
+
+static int names_find(char **names, size_t count, const char *name) {
+    size_t i;
+    for (i = 0; i < count; ++i) {
+        if (strcmp(names[i], name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int vars_find_visible(var_entry_t *vars, size_t count, const char *name, int depth) {
+    size_t i = count;
+    (void)depth;
+    while (i > 0) {
+        i--;
+        if (strcmp(vars[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, int depth) {
+    size_t i;
+    for (i = 0; i < count; ++i) {
+        if (vars[i].depth == depth && strcmp(vars[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Add variable @p name of type @p ctype to the scope.
+ *
+ * @param vars     the variables in scope, grown
+ * @param count    their count, incremented
+ * @param name     its name (copied)
+ * @param storage  its CC_STORAGE_* flags
+ * @param depth    the scope depth
+ * @param ctype    its type
+ * @return         0, or -1 when out of memory
+ */
+static int vars_push(var_entry_t **vars, size_t *count, const char *name, int storage, int depth,
+                     const cc_ctype_t *ctype) {
+    var_entry_t *next;
+    char *dup;
+
+    next = (var_entry_t *)realloc(*vars, (*count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    *vars = next;
+
+    {
+        size_t len = strlen(name);
+        dup = (char *)malloc(len + 1);
+        if (dup == NULL) {
+            return -1;
+        }
+        snprintf(dup, len + 1, "%s", name);
+    }
+    (*vars)[*count].name = dup;
+    (*vars)[*count].storage = storage;
+    (*vars)[*count].depth = depth;
+    (*vars)[*count].ctype = ctype;
+    (*count)++;
+    return 0;
+}
+
+static int asm_operand_is_lvalue(const cc_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_DEREF || e->kind == CC_EXPR_MEMBER) {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_valid_constraint_char(int ch) {
+    if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+        return 1;
+    }
+    if (ch == '=' || ch == '+' || ch == '&' || ch == '%' || ch == '!' || ch == '*' || ch == '@' || ch == '?' ||
+        ch == '^' || ch == '$' || ch == '<' || ch == '>' || ch == '#' || ch == '|' || ch == '~' || ch == ',') {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_constraint_is_imm(const char *c) {
+    size_t i;
+    if (c == NULL)
+        return 0;
+    for (i = 0; c[i] != '\0'; ++i) {
+        int ch = (unsigned char)c[i];
+        if (ch == 'i' || ch == 'n' || ch == 'e')
+            return 1;
+        if (ch >= 'I' && ch <= 'P')
+            return 1;
+    }
+    return 0;
+}
+
+static int asm_constraint_is_flag_output(const char *c) {
+    return c != NULL && strncmp(c, "=@cc", 4) == 0;
+}
+
+static int asm_constraint_letter_supported(int ch) {
+    if (ch == 'r' || ch == 'q' || ch == 'a' || ch == 'b' || ch == 'c' || ch == 'd' || ch == 'S' || ch == 'D') {
+        return 1;
+    }
+    if (ch == 'm' || ch == 'o' || ch == 'V' || ch == 'g' || ch == 'X') {
+        return 1;
+    }
+    if (ch == 'i' || ch == 'n' || ch == 'e' || (ch >= 'I' && ch <= 'P')) {
+        return 1;
+    }
+    /* GCC x86-specific register-class letters Linux makes heavy use of:
+     *   A = EAX:EDX pair, B = EBX, R = legacy regs, Q = a/b/c/d byte-addr,
+     *   U = call-clobbered, l = index regs, f/t/u = x87, y = MMX, x = SSE. */
+    if (ch == 'A' || ch == 'B' || ch == 'R' || ch == 'Q' || ch == 'U') {
+        return 1;
+    }
+    if (ch == 'l' || ch == 'f' || ch == 't' || ch == 'u' || ch == 'y' || ch == 'x') {
+        return 1;
+    }
+    return 0;
+}
+
+static int asm_validate_constraint(const char *c, int is_output, size_t out_count, int pointer_size, cc_diag_t *diag) {
+    size_t i;
+    int has_class = 0;
+    if (c == NULL || c[0] == '\0') {
+        sema_diag(diag, "asm operand constraint cannot be empty");
+        return -1;
+    }
+    if (!is_output && c[0] >= '0' && c[0] <= '9') {
+        long n = 0;
+        for (i = 0; c[i] >= '0' && c[i] <= '9'; ++i) {
+            n = n * 10 + (long)(c[i] - '0');
+        }
+        if (n < 0 || (size_t)n >= out_count) {
+            sema_diag(diag, "asm matching constraint references invalid output index");
+            return -1;
+        }
+        if (c[i] != '\0') {
+            sema_diag(diag, "asm matching constraint must be a pure numeric index");
+            return -1;
+        }
+        return 0;
+    }
+    if (is_output && strchr(c, '=') == NULL && strchr(c, '+') == NULL) {
+        sema_diag(diag, "asm output constraint must contain '=' or '+'");
+        return -1;
+    }
+    if (is_output && asm_constraint_is_flag_output(c)) {
+        return 0;
+    }
+    for (i = 0; c[i] != '\0'; ++i) {
+        int ch = (unsigned char)c[i];
+        if (!asm_valid_constraint_char(ch)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                if (ch >= 32 && ch < 127) {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "asm operand constraint contains unsupported character '%c' in \"%s\"", ch, c);
+                } else {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "asm operand constraint contains unsupported byte 0x%02x in \"%s\"", ch, c);
+                }
+            }
+            return -1;
+        }
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+            if (!asm_constraint_letter_supported(ch)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "asm operand constraint contains unsupported character '%c' in \"%s\"", ch, c);
+                }
+                return -1;
+            }
+        }
+    }
+    if (strchr(c, 'q') != NULL && pointer_size != 4 && pointer_size != 8) {
+        sema_diag(diag, "asm 'q' constraint requires x86 target");
+        return -1;
+    }
+    has_class = cc_asm_constraint_allows_memory(c) || cc_asm_constraint_names_register(c) || asm_constraint_is_imm(c);
+    if (!has_class) {
+        return 0;
+    }
+    return 0;
+}
+
+static int asm_find_named_operand(const cc_stmt_t *s, const char *name) {
+    size_t i;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        if (s->asm_outputs[i].name != NULL && strcmp(s->asm_outputs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    for (i = 0; i < s->asm_input_count; ++i) {
+        if (s->asm_inputs[i].name != NULL && strcmp(s->asm_inputs[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int asm_find_goto_label(const cc_stmt_t *s, const char *name) {
+    size_t i;
+    for (i = 0; i < s->asm_goto_label_count; ++i) {
+        if (s->asm_goto_labels[i] != NULL && strcmp(s->asm_goto_labels[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * The operand number of an asm goto statement's first label, `%l<n>`.
+ * As in GNU C, labels are numbered after every operand, and an output
+ * whose constraint has `+` counts twice: it is an output and an
+ * implicit input after the explicit ones.
+ *
+ * @param s  the asm statement
+ * @return   the number of its first label
+ */
+static size_t asm_goto_label_base(const cc_stmt_t *s) {
+    size_t base = s->asm_output_count + s->asm_input_count;
+    size_t i;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        const char *c = s->asm_outputs[i].constraint;
+        if (c != NULL && strchr(c, '+') != NULL) {
+            base++;
+        }
+    }
+    return base;
+}
+
+/**
+ * The one register an asm constraint allows, when it allows nothing
+ * else: `a`, `b`, `c`, `d`, `S` or `D`, with modifiers (`=`, `&`, ...)
+ * around it.
+ *
+ * @param c  the constraint
+ * @return   the register's letter, or 0 if the operand has another choice
+ */
+static int asm_constraint_only_register(const char *c) {
+    int reg = 0;
+    if (c == NULL) {
+        return 0;
+    }
+    for (; *c != '\0'; ++c) {
+        if ((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z')) {
+            if (strchr("abcdSD", *c) == NULL || (reg != 0 && reg != *c)) {
+                return 0;
+            }
+            reg = *c;
+        }
+    }
+    return reg;
+}
+
+/**
+ * Reject an asm input that can only be in the register an early-clobber
+ * output is fixed to: the output is written before the inputs are all
+ * read, so the two cannot share it (gcc: "impossible constraints").
+ *
+ * @param s     the asm statement
+ * @param diag  receives the error
+ * @return      0, or -1 if an input conflicts
+ */
+static int asm_check_early_clobber_inputs(const cc_stmt_t *s, cc_diag_t *diag) {
+    size_t i;
+    size_t j;
+    for (i = 0; i < s->asm_output_count; ++i) {
+        const char *oc = s->asm_outputs[i].constraint;
+        int oreg = asm_constraint_only_register(oc);
+        if (oreg == 0 || oc == NULL || strchr(oc, '&') == NULL) {
+            continue;
+        }
+        for (j = 0; j < s->asm_input_count; ++j) {
+            if (asm_constraint_only_register(s->asm_inputs[j].constraint) == oreg) {
+                sema_diag(diag, "asm input constraint conflicts with early-clobber output register");
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
+    size_t i = 0;
+    size_t total = s->asm_output_count + s->asm_input_count;
+    size_t label_base = asm_goto_label_base(s);
+    const char *t = s->asm_template;
+    if (t == NULL) {
+        sema_diag(diag, "asm statement missing template");
+        return -1;
+    }
+    while (t[i] != '\0') {
+        int has_modifier = 0;
+        if (t[i] != '%') {
+            i++;
+            continue;
+        }
+        i++;
+        if (t[i] == '%') {
+            i++;
+            continue;
+        }
+        if (((t[i] >= 'A' && t[i] <= 'Z') || (t[i] >= 'a' && t[i] <= 'z')) && t[i] != 'l' && t[i] != 'L') {
+            has_modifier = 1;
+            i++;
+        }
+        if (t[i] >= '0' && t[i] <= '9') {
+            long n = 0;
+            while (t[i] >= '0' && t[i] <= '9') {
+                n = n * 10 + (long)(t[i] - '0');
+                i++;
+            }
+            if (n < 0 || (size_t)n >= total) {
+                sema_diag(diag, "asm template operand index is out of range");
+                return -1;
+            }
+            continue;
+        }
+        if (has_modifier && t[i] == '[') {
+            size_t b = ++i;
+            while (t[i] != '\0' && t[i] != ']') {
+                i++;
+            }
+            if (t[i] != ']') {
+                sema_diag(diag, "asm template has unterminated named operand");
+                return -1;
+            }
+            if (i == b) {
+                sema_diag(diag, "asm template has empty named operand");
+                return -1;
+            }
+            {
+                char *nm = (char *)malloc(i - b + 1);
+                if (nm == NULL) {
+                    sema_diag(diag, "out of memory validating asm template");
+                    return -1;
+                }
+                memcpy(nm, t + b, i - b);
+                nm[i - b] = '\0';
+                if (!asm_find_named_operand(s, nm)) {
+                    free(nm);
+                    sema_diag(diag, "asm template references unknown named operand");
+                    return -1;
+                }
+                free(nm);
+            }
+            i++;
+            continue;
+        }
+        if (t[i] == 'l') {
+            i++;
+            if (t[i] >= '0' && t[i] <= '9') {
+                long n = 0;
+                while (t[i] >= '0' && t[i] <= '9') {
+                    n = n * 10 + (long)(t[i] - '0');
+                    i++;
+                }
+                if (n < 0 || (size_t)n < label_base ||
+                    (size_t)(n - (long)label_base) >= s->asm_goto_label_count) {
+                    sema_diag(diag, "asm template goto-label index is out of range");
+                    return -1;
+                }
+                continue;
+            }
+            if (t[i] == '[') {
+                size_t b = ++i;
+                while (t[i] != '\0' && t[i] != ']') {
+                    i++;
+                }
+                if (t[i] != ']') {
+                    sema_diag(diag, "asm template has unterminated goto label");
+                    return -1;
+                }
+                if (i == b) {
+                    sema_diag(diag, "asm template has empty goto label");
+                    return -1;
+                }
+                {
+                    char *nm = (char *)malloc(i - b + 1);
+                    if (nm == NULL) {
+                        sema_diag(diag, "out of memory validating asm template");
+                        return -1;
+                    }
+                    memcpy(nm, t + b, i - b);
+                    nm[i - b] = '\0';
+                    if (!asm_find_goto_label(s, nm)) {
+                        free(nm);
+                        sema_diag(diag, "asm template references unknown goto label");
+                        return -1;
+                    }
+                    free(nm);
+                }
+                i++;
+                continue;
+            }
+            sema_diag(diag, "asm template has malformed %l label reference");
+            return -1;
+        }
+        if (t[i] == '[') {
+            size_t b = ++i;
+            while (t[i] != '\0' && t[i] != ']') {
+                i++;
+            }
+            if (t[i] != ']') {
+                sema_diag(diag, "asm template has unterminated named operand");
+                return -1;
+            }
+            if (i == b) {
+                sema_diag(diag, "asm template has empty named operand");
+                return -1;
+            }
+            {
+                char *nm = (char *)malloc(i - b + 1);
+                if (nm == NULL) {
+                    sema_diag(diag, "out of memory validating asm template");
+                    return -1;
+                }
+                memcpy(nm, t + b, i - b);
+                nm[i - b] = '\0';
+                if (!asm_find_named_operand(s, nm)) {
+                    free(nm);
+                    sema_diag(diag, "asm template references unknown named operand");
+                    return -1;
+                }
+                free(nm);
+            }
+            i++;
+            continue;
+        }
+        if (diag != NULL && diag->message[0] == '\0') {
+            unsigned char uc = (unsigned char)t[i];
+            if (t[i] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "asm template has dangling '%%' reference");
+            } else if (uc >= 32 && uc < 127) {
+                snprintf(diag->message, sizeof(diag->message), "asm template has unsupported '%%%c' reference", t[i]);
+            } else {
+                snprintf(diag->message, sizeof(diag->message),
+                         "asm template has unsupported '%%' reference byte 0x%02x", (unsigned)uc);
+            }
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int vars_clone(var_entry_t **out, const var_entry_t *src, size_t count) {
+    size_t i;
+    var_entry_t *dst;
+
+    *out = NULL;
+    if (count == 0) {
+        return 0;
+    }
+    dst = (var_entry_t *)calloc(count, sizeof(*dst));
+    if (dst == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        dst[i] = src[i];
+        dst[i].name = NULL;
+        if (src[i].name != NULL) {
+            {
+                size_t len = strlen(src[i].name);
+                dst[i].name = (char *)malloc(len + 1);
+                if (dst[i].name == NULL) {
+                    size_t j;
+                    for (j = 0; j < i; ++j) {
+                        free(dst[j].name);
+                    }
+                    free(dst);
+                    return -1;
+                }
+                snprintf(dst[i].name, len + 1, "%s", src[i].name);
+            }
+        }
+    }
+    *out = dst;
+    return 0;
+}
+
+static void vars_free(var_entry_t *vars, size_t count) {
+    size_t i;
+    if (vars == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        free(vars[i].name);
+    }
+    free(vars);
+}
+
+static void name_list_free(name_list_t *l) {
+    size_t i;
+    if (l == NULL) {
+        return;
+    }
+    for (i = 0; i < l->count; ++i) {
+        free(l->items[i]);
+    }
+    free(l->items);
+    l->items = NULL;
+    l->count = 0;
+}
+
+static int name_list_push(name_list_t *l, const char *name) {
+    char **next;
+    char *dup;
+    next = (char **)realloc(l->items, (l->count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    l->items = next;
+    {
+        size_t len = strlen(name);
+        dup = (char *)malloc(len + 1);
+        if (dup == NULL) {
+            return -1;
+        }
+        snprintf(dup, len + 1, "%s", name);
+    }
+    l->items[l->count++] = dup;
+    return 0;
+}
+
+static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, name_list_t *gotos, cc_diag_t *diag) {
+    size_t i;
+    if (s == NULL) {
+        return 0;
+    }
+    switch (s->kind) {
+    case CC_STMT_LABEL:
+        if (s->label_name == NULL || s->label_name[0] == '\0') {
+            sema_diag(diag, "malformed label statement");
+            return -1;
+        }
+        if (names_find(labels->items, labels->count, s->label_name) >= 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "duplicate label: %s", s->label_name);
+            }
+            return -1;
+        }
+        if (name_list_push(labels, s->label_name) != 0) {
+            sema_diag(diag, "out of memory collecting labels");
+            return -1;
+        }
+        return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
+
+    case CC_STMT_GOTO:
+        if (s->expr != NULL) {
+            return 0;
+        }
+        if (s->label_name == NULL || s->label_name[0] == '\0') {
+            sema_diag(diag, "malformed goto statement");
+            return -1;
+        }
+        if (names_find(gotos->items, gotos->count, s->label_name) < 0 && name_list_push(gotos, s->label_name) != 0) {
+            sema_diag(diag, "out of memory collecting goto targets");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_ASM:
+        for (i = 0; i < s->asm_goto_label_count; ++i) {
+            const char *name = s->asm_goto_labels[i];
+            if (name == NULL || name[0] == '\0') {
+                sema_diag(diag, "malformed asm goto label");
+                return -1;
+            }
+            if (names_find(gotos->items, gotos->count, name) < 0 && name_list_push(gotos, name) != 0) {
+                sema_diag(diag, "out of memory collecting asm goto targets");
+                return -1;
+            }
+        }
+        return 0;
+
+    case CC_STMT_IF:
+        if (collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag) != 0) {
+            return -1;
+        }
+        return collect_labels_gotos_stmt(s->else_branch, labels, gotos, diag);
+
+    case CC_STMT_WHILE:
+    case CC_STMT_DO:
+    case CC_STMT_SWITCH:
+        return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
+
+    case CC_STMT_FOR:
+        if (collect_labels_gotos_stmt(s->init_stmt, labels, gotos, diag) != 0) {
+            return -1;
+        }
+        return collect_labels_gotos_stmt(s->then_branch, labels, gotos, diag);
+
+    case CC_STMT_BLOCK:
+        for (i = 0; i < s->block_count; ++i) {
+            if (collect_labels_gotos_stmt(&s->block_stmts[i], labels, gotos, diag) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+
+    default:
+        return 0;
+    }
+}
+
+static const cc_function_t *find_function(const cc_translation_unit_t *tu, const char *name) {
+    size_t i;
+    const cc_function_t *best = NULL;
+    int best_score = -1;
+    for (i = 0; i < tu->func_count; ++i) {
+        const cc_function_t *f = &tu->funcs[i];
+        int score;
+        if (strcmp(f->name, name) != 0) {
+            continue;
+        }
+        score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
+        if (best == NULL || score > best_score) {
+            best = f;
+            best_score = score;
+        }
+    }
+    return best;
+}
+
+/**
+ * What a call through a callee of type @p t gives: the return type of the
+ * function @p t is, or points to.  A pointer to a function typedef
+ * (`typedef T fn_t(...); fn_t *p`) is recorded as a pointer to T, so a
+ * pointer to anything else gives what it points to.
+ *
+ * @return the type, or NULL if @p t is not known or is neither
+ */
+static const cc_ctype_t *sema_callee_ret_ctype(const cc_ctype_t *t) {
+    if (t != NULL && t->unqual->kind == CC_CT_POINTER) {
+        t = t->unqual->of;
+        if (t->unqual->kind != CC_CT_FUNCTION) {
+            return t;
+        }
+    }
+    return (t != NULL && t->unqual->kind == CC_CT_FUNCTION) ? t->unqual->of : NULL;
+}
+
+/**
+ * The type of function @p f (cc_ctype.h): its return type and its
+ * parameters' types, as declared.
+ *
+ * @return the type, or NULL where the declaration did not record its
+ *         return type or a parameter's
+ */
+static const cc_ctype_t *sema_function_ctype(const cc_function_t *f) {
+    const cc_ctype_t *params[64];
+    size_t i;
+
+    if (f == NULL || f->ret_ctype == NULL || f->param_count > sizeof(params) / sizeof(params[0])) {
+        return NULL;
+    }
+    for (i = 0; i < f->param_count; ++i) {
+        if (f->params[i].ctype == NULL) {
+            return NULL;
+        }
+        params[i] = f->params[i].ctype;
+    }
+    return cc_ct_function(f->ret_ctype, params, f->param_count, f->is_variadic, f->has_prototype);
+}
+
+/** The type of parameter @p p as adjusted. */
+static const cc_ctype_t *sema_param_ctype(const cc_param_t *p) {
+    return p->ctype;
+}
+
+static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
+    size_t i;
+    if (tu == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < tu->global_count; ++i) {
+        if (strcmp(tu->globals[i].name, name) == 0) {
+            return &tu->globals[i];
+        }
+    }
+    return NULL;
+}
+
+static int maybe_warn_deprecated_symbol(const cc_translation_unit_t *tu, const char *name, size_t line, size_t col,
+                                        cc_diag_t *diag) {
+    char buf[192];
+    const cc_function_t *f = find_function(tu, name);
+    const cc_global_t *g = find_global(tu, name);
+
+    if (f != NULL && (f->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+        snprintf(buf, sizeof(buf), "deprecated function used: %s", name != NULL ? name : "<anon>");
+        return emit_required_warning(diag, line, col, buf);
+    }
+    if (g != NULL && (g->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+        snprintf(buf, sizeof(buf), "deprecated object used: %s", name != NULL ? name : "<anon>");
+        return emit_required_warning(diag, line, col, buf);
+    }
+    return 0;
+}
+
+static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, int struct_id) {
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return NULL;
+    }
+    return &tu->structs[struct_id];
+}
+
+/**
+ * The type of checked expression @p e as a value: its interned type, an
+ * array or a function decayed to a pointer.
+ *
+ * @param e  the expression, or NULL
+ * @return   the type, or NULL
+ */
+static const cc_ctype_t *sx_vtype(const cc_expr_t *e) {
+    return e != NULL ? cc_ct_decay(e->ctype) : NULL;
+}
+
+static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t);
+static void sema_type_literal(cc_expr_t *e);
+
+/** Whether checked expression @p x has a pointer value (an array or function decays to one). */
+static int sx_is_ptr(const cc_expr_t *x) {
+    const cc_ctype_t *t = sx_vtype(x);
+
+    return t != NULL && t->unqual->kind == CC_CT_POINTER;
+}
+
+/** Whether checked expression @p x has an integer type. */
+static int sx_is_int(const cc_expr_t *x) {
+    return cc_ct_is_integer(sx_vtype(x));
+}
+
+/** Whether checked expression @p x has a scalar type: arithmetic or pointer. */
+static int sx_is_scalar(const cc_expr_t *x) {
+    return cc_ct_is_scalar(sx_vtype(x));
+}
+
+/** Whether checked expression @p x has an arithmetic type. */
+static int sx_is_arith(const cc_expr_t *x) {
+    return cc_ct_is_arithmetic(sx_vtype(x));
+}
+
+/** Whether @p t is of kind @p k. */
+static int ct_kind_is(const cc_ctype_t *t, cc_ctype_kind_t k) {
+    return t != NULL && t->kind == k;
+}
+
+/**
+ * The type a cast converts to, as written (the parser records it).
+ *
+ * @param e  the CC_EXPR_CAST
+ * @return   the type, or NULL
+ */
+static const cc_ctype_t *sema_cast_target_ctype(const cc_expr_t *e) {
+    return e->ctype;
+}
+
+/**
+ * The structure a value of type @p t is: a structure or union, or the
+ * hidden structure standing for a complex, wide, decimal or vector type.
+ *
+ * @param t  the type, or NULL
+ * @return   the structure's index, or -1
+ */
+static int sx_ct_record(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return -1;
+    }
+    if (t->kind == CC_CT_RECORD) {
+        return t->id;
+    }
+    return t->kind == CC_CT_COMPLEX ? cc_ct_complex_record(t) : -1;
+}
+
+static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth);
+
+/**
+ * Whether types @p a and @p b are the same type, structures and unions
+ * compared as compatible ones are (C11 6.2.7: one tag, or members that
+ * match); qualifiers are not compared.
+ *
+ * @param tu     the translation unit
+ * @param a      one type
+ * @param b      the other
+ * @param depth  the structure nesting, against cycles
+ * @return       1 if they are, else 0
+ */
+static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth) {
+    size_t i;
+
+    if (a == NULL || b == NULL) {
+        return a == b;
+    }
+    a = a->unqual;
+    b = b->unqual;
+    if (a == b) {
+        return 1;
+    }
+    if (a->kind != b->kind) {
+        return 0;
+    }
+    switch (a->kind) {
+    case CC_CT_RECORD:
+        return struct_ids_compatible_depth(tu, a->id, b->id, depth + 1);
+    case CC_CT_ARRAY:
+        return a->count == b->count && sema_same_type(tu, a->of, b->of, depth);
+    case CC_CT_POINTER:
+    case CC_CT_COMPLEX:
+    case CC_CT_IMAGINARY:
+        return sema_same_type(tu, a->of, b->of, depth);
+    case CC_CT_FUNCTION:
+        if (a->param_count != b->param_count || a->variadic != b->variadic || !sema_same_type(tu, a->of, b->of, depth)) {
+            return 0;
+        }
+        for (i = 0; i < a->param_count; ++i) {
+            if (!sema_same_type(tu, a->params[i], b->params[i], depth)) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int struct_members_compatible(const cc_translation_unit_t *tu, const cc_struct_def_t *lsd,
+                                     const cc_struct_def_t *rsd, int depth) {
+    size_t i;
+
+    if (lsd == NULL || rsd == NULL) {
+        return 0;
+    }
+    if (lsd->member_count != rsd->member_count) {
+        return 0;
+    }
+    for (i = 0; i < lsd->member_count; ++i) {
+        const cc_struct_member_t *lm = &lsd->members[i];
+        const cc_struct_member_t *rm = &rsd->members[i];
+        if (lm->name == NULL || rm->name == NULL) {
+            return 0;
+        }
+        if (strcmp(lm->name, rm->name) != 0) {
+            return 0;
+        }
+        if (lm->offset != rm->offset || lm->size != rm->size || lm->is_bitfield != rm->is_bitfield ||
+            lm->bit_width != rm->bit_width || lm->bit_offset != rm->bit_offset ||
+            lm->bit_storage_bits != rm->bit_storage_bits || lm->bit_signed != rm->bit_signed ||
+            lm->bit_storage_size != rm->bit_storage_size || !sema_same_type(tu, lm->ctype, rm->ctype, depth)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth) {
+    const cc_struct_def_t *lsd;
+    const cc_struct_def_t *rsd;
+
+    if (lhs == rhs) {
+        return 1;
+    }
+    if (lhs < 0 || rhs < 0 || depth > 32) {
+        return 0;
+    }
+    lsd = find_struct_def(tu, lhs);
+    rsd = find_struct_def(tu, rhs);
+    if (lsd == NULL || rsd == NULL) {
+        return 0;
+    }
+    if (lsd->is_union != rsd->is_union) {
+        return 0;
+    }
+    if (lsd->tag != NULL && rsd->tag != NULL && strcmp(lsd->tag, rsd->tag) == 0 && lsd->depth == rsd->depth) {
+        return 1;
+    }
+    if (!lsd->complete || !rsd->complete) {
+        return 0;
+    }
+    if (lsd->size != rsd->size || lsd->align != rsd->align) {
+        return 0;
+    }
+    return struct_members_compatible(tu, lsd, rsd, depth);
+}
+
+static int struct_ids_compatible(const cc_translation_unit_t *tu, int lhs, int rhs) {
+    return struct_ids_compatible_depth(tu, lhs, rhs, 0);
+}
+
+static int find_struct_member_recursive(const cc_translation_unit_t *tu, int struct_id, const char *name, int depth,
+                                        const cc_struct_member_t **out_member, long *out_offset) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    if (out_member != NULL) {
+        *out_member = NULL;
+    }
+    if (out_offset != NULL) {
+        *out_offset = 0;
+    }
+    if (depth > 32 || name == NULL) {
+        return -1;
+    }
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete) {
+        return -1;
+    }
+
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (m->name != NULL && strcmp(m->name, name) == 0) {
+            if (out_member != NULL) {
+                *out_member = m;
+            }
+            if (out_offset != NULL) {
+                *out_offset = m->offset;
+            }
+            return 0;
+        }
+    }
+
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        const cc_struct_def_t *inner;
+        const cc_struct_member_t *inner_m = NULL;
+        long inner_off = 0;
+
+        if (m->name != NULL || sx_ct_record(m->ctype) < 0) {
+            continue;
+        }
+        inner = find_struct_def(tu, sx_ct_record(m->ctype));
+        if (inner == NULL || !inner->complete) {
+            continue;
+        }
+        if (find_struct_member_recursive(tu, sx_ct_record(m->ctype), name, depth + 1, &inner_m, &inner_off) == 0) {
+            if (out_member != NULL) {
+                *out_member = inner_m;
+            }
+            if (out_offset != NULL) {
+                *out_offset = m->offset + inner_off;
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int find_struct_member_index(const cc_translation_unit_t *tu, int struct_id, const char *name) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete || name == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        if (sd->members[i].name != NULL && strcmp(sd->members[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * How two declarations of one file-scope object, of types @p a and @p b,
+ * conflict (C11 6.7p4): their array bounds, where both give one (a bound
+ * not given, `extern T a[]`, matches any), or the types under them.
+ *
+ * @return "array declarators" or "object types", or NULL if they agree
+ */
+static const char *sema_redecl_conflict(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b) {
+    a = a->unqual;
+    b = b->unqual;
+    while (a->kind == CC_CT_ARRAY && b->kind == CC_CT_ARRAY) {
+        if (a->count > 0 && b->count > 0 && a->count != b->count) {
+            return "array declarators";
+        }
+        a = a->of->unqual;
+        b = b->of->unqual;
+    }
+    if (a->kind == CC_CT_ARRAY || b->kind == CC_CT_ARRAY) {
+        return "array declarators";
+    }
+    return sema_same_type(tu, a, b, 0) ? NULL : "object types";
+}
+
+/**
+ * Whether two declarations of one function agree (C11 6.7.6.3p15): the
+ * same return type and, where both have prototypes, the same parameter
+ * types; a declaration without one must not be variadic.
+ *
+ * @return 1 if they do, else 0
+ */
+static int func_decl_compatible(const cc_translation_unit_t *tu, const cc_function_t *a, const cc_function_t *b) {
+    size_t i;
+    if (!sema_same_type(tu, a->ret_ctype, b->ret_ctype, 0)) {
+        return 0;
+    }
+    if (!a->has_prototype || !b->has_prototype) {
+        if (a->is_variadic || b->is_variadic) {
+            return 0;
+        }
+        return 1;
+    }
+    if (a->is_variadic != b->is_variadic || a->param_count != b->param_count) {
+        return 0;
+    }
+    for (i = 0; i < a->param_count; ++i) {
+        if (!sema_same_type(tu, sema_param_ctype(&a->params[i]), sema_param_ctype(&b->params[i]), 0)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int is_null_ptr_constant(const cc_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_INT && e->int_val == 0) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_CAST) {
+        return is_null_ptr_constant(e->lhs);
+    }
+    if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_COMMA) {
+        return is_null_ptr_constant(e->rhs);
+    }
+    return 0;
+}
+
+static size_t utf8_seq_len(unsigned char b0) {
+    if ((b0 & 0x80u) == 0) return 1;
+    if ((b0 & 0xE0u) == 0xC0u) return 2;
+    if ((b0 & 0xF0u) == 0xE0u) return 3;
+    if ((b0 & 0xF8u) == 0xF0u) return 4;
+    return 1;
+}
+
+static size_t decoded_string_unit_count(const cc_expr_t *e, int wide) {
+    const unsigned char *s;
+    size_t n = 0;
+    size_t i = 0;
+    size_t units = 0;
+
+    if (e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
+        return 0;
+    }
+    s = (const unsigned char *)e->ident;
+    n = strlen(e->ident);
+    if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
+        i = 1;
+        n -= 1;
+    }
+    while (i < n) {
+        if (s[i] == '\\') {
+            i++;
+            if (i >= n) {
+                break;
+            }
+            if (s[i] == 'x') {
+                i++;
+                while (i < n) {
+                    unsigned char c = s[i];
+                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                        break;
+                    }
+                    i++;
+                }
+            } else if (s[i] >= '0' && s[i] <= '7') {
+                int k = 0;
+                while (i < n && k < 3 && s[i] >= '0' && s[i] <= '7') {
+                    i++;
+                    k++;
+                }
+            } else {
+                i++;
+            }
+            units++;
+            continue;
+        }
+        if (!wide) {
+            i++;
+            units++;
+            continue;
+        }
+        {
+            size_t adv = utf8_seq_len(s[i]);
+            if (adv == 0) adv = 1;
+            if (i + adv > n) adv = 1;
+            i += adv;
+            units++;
+        }
+    }
+    return units;
+}
+
+/**
+ * An array type with no bound, completed with the bound its initializer
+ * gives it (C11 6.7.9p22); any other type as it is.
+ *
+ * @param t  the declared type, or NULL
+ * @param n  the inferred number of elements
+ * @return   the completed type
+ */
+static const cc_ctype_t *sema_complete_array_ctype(const cc_ctype_t *t, long n) {
+    if (t != NULL && t->kind == CC_CT_ARRAY && t->count <= 0 && n > 0) {
+        return cc_ct_array(t->of, n);
+    }
+    return t;
+}
+
+/**
+ * Check a string literal initializing an array of type @p arr (C11
+ * 6.7.9p14): its characters must fit, the null may not; an array of no
+ * bound takes the literal's length with the null.
+ *
+ * @param name              the object, for diagnostics
+ * @param arr               the array's type
+ * @param array_len_io      its bound, 0 if not known; receives the one inferred
+ * @param init              the initializer
+ * @param inferred_len_out  receives the inferred bound, or NULL
+ * @param diag              receives the error
+ * @return                  0 if @p init is such a string, 1 if it is not
+ *                          (another rule applies), -1 with @p diag set
+ */
+static int check_array_string_initializer(const char *name, const cc_ctype_t *arr, long *array_len_io, cc_expr_t *init,
+                                          long *inferred_len_out, cc_diag_t *diag) {
+    int wide;
+    size_t units;
+    long need;
+
+    if (arr == NULL || arr->kind != CC_CT_ARRAY || array_len_io == NULL || init == NULL || init->kind != CC_EXPR_STR) {
+        return 1;
+    }
+    wide = cc_string_literal_is_wide(init);
+    if (wide ? !cc_ct_is_integer(arr->of) : !cc_ct_is_character(arr->of->unqual)) {
+        return 1;
+    }
+
+    units = decoded_string_unit_count(init, wide);
+    need = (long)units + 1;
+    if (*array_len_io == 0) {
+        *array_len_io = need;
+        if (inferred_len_out != NULL) {
+            *inferred_len_out = need;
+        }
+        return 0;
+    }
+    if (*array_len_io > 0 && (long)units > *array_len_io) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "string initializer too long for array %s",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth);
+
+/**
+ * Whether a _Generic association of type @p assoc matches the controlling
+ * expression's type @p ctrl, which is taken after lvalue conversion (C11
+ * 6.5.1.1p2: qualifiers dropped, arrays and functions decayed): the types
+ * must be compatible.
+ */
+static int sema_generic_assoc_matches(const cc_translation_unit_t *tu, const cc_ctype_t *assoc,
+                                      const cc_ctype_t *ctrl) {
+    return sema_same_type(tu, assoc, ctrl, 0);
+}
+
+static int printf_like_format_index(const char *name, size_t *idx_out) {
+    if (name == NULL || idx_out == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "printf") == 0 || strcmp(name, "vprintf") == 0) {
+        *idx_out = 0;
+        return 1;
+    }
+    if (strcmp(name, "fprintf") == 0 || strcmp(name, "sprintf") == 0 || strcmp(name, "vfprintf") == 0 ||
+        strcmp(name, "vsprintf") == 0) {
+        *idx_out = 1;
+        return 1;
+    }
+    if (strcmp(name, "snprintf") == 0 || strcmp(name, "vsnprintf") == 0) {
+        *idx_out = 2;
+        return 1;
+    }
+    return 0;
+}
+
+static char *rewrite_printf_long_double_format(const char *literal) {
+    /*
+     * Keep literal format strings intact. Rewriting `%Lf` to `%f` breaks
+     * varargs ABI and causes argument desynchronization at runtime.
+     */
+    (void)literal;
+    return NULL;
+}
+
+static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_expr_t *sel;
+    if (tu == NULL || e == NULL || e->kind != CC_EXPR_GENERIC || e->args == NULL || e->arg_count == 0) {
+        return NULL;
+    }
+    if (e->generic_selected < 0 || (size_t)e->generic_selected >= e->arg_count) {
+        return NULL;
+    }
+    sel = e->args[e->generic_selected];
+    if (sel == NULL || sel->kind != CC_EXPR_IDENT || sel->ident == NULL) {
+        return NULL;
+    }
+    return find_function(tu, sel->ident);
+}
+
+static const cc_function_t *infer_callee_function_expr(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_function_t *a;
+    const cc_function_t *b;
+
+    if (tu == NULL || e == NULL) {
+        return NULL;
+    }
+    switch (e->kind) {
+    case CC_EXPR_IDENT:
+        if (e->ident == NULL) {
+            return NULL;
+        }
+        return find_function(tu, e->ident);
+    case CC_EXPR_ADDR:
+    case CC_EXPR_DEREF:
+    case CC_EXPR_CAST:
+        return infer_callee_function_expr(tu, e->lhs);
+    case CC_EXPR_TERNARY:
+        if (e->rhs == NULL || e->third == NULL) {
+            return NULL;
+        }
+        a = infer_callee_function_expr(tu, e->rhs);
+        b = infer_callee_function_expr(tu, e->third);
+        if (a == NULL || b == NULL) {
+            return NULL;
+        }
+        if (a->ret_ctype != b->ret_ctype) {
+            return NULL;
+        }
+        return a;
+    case CC_EXPR_GENERIC:
+        return generic_selected_function(tu, e);
+    default:
+        return NULL;
+    }
+}
+
+static int is_cmp_op(cc_binop_t op) {
+    return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
+           op == CC_BIN_GE;
+}
+
+static int is_logical_op(cc_binop_t op) {
+    return op == CC_BIN_LAND || op == CC_BIN_LOR;
+}
+
+static int is_shift_op(cc_binop_t op) {
+    return op == CC_BIN_SHL || op == CC_BIN_SHR;
+}
+
+static int is_bitwise_op(cc_binop_t op) {
+    return op == CC_BIN_BAND || op == CC_BIN_BXOR || op == CC_BIN_BOR;
+}
+
+static int builtin_bswap_bits(const char *name) {
+    return(cc_builtin_bswap_bits(name));
+}
+
+typedef enum {
+    BUILTIN_NONE = 0,
+    BUILTIN_VA_START,
+    BUILTIN_VA_END,
+    BUILTIN_VA_COPY,
+    BUILTIN_VA_ARG,
+    BUILTIN_EXPECT,
+    BUILTIN_CONSTANT_P,
+    BUILTIN_TRAP,
+    BUILTIN_UNREACHABLE,
+    BUILTIN_ASSUME,
+    BUILTIN_ASSUME_ALIGNED,
+    BUILTIN_UNPREDICTABLE,
+    BUILTIN_CLZ,
+    BUILTIN_CTZ,
+    BUILTIN_FFS,
+    BUILTIN_POPCOUNT,
+    BUILTIN_PARITY,
+    BUILTIN_ADD_OVERFLOW,
+    BUILTIN_SUB_OVERFLOW,
+    BUILTIN_MUL_OVERFLOW,
+    BUILTIN_ADD_OVERFLOW_P,
+    BUILTIN_SUB_OVERFLOW_P,
+    BUILTIN_MUL_OVERFLOW_P,
+    BUILTIN_OBJECT_SIZE,
+    BUILTIN_RETURN_ADDRESS,
+    BUILTIN_FRAME_ADDRESS,
+    BUILTIN_MEMCMP,
+    BUILTIN_PREFETCH,
+    BUILTIN_CPU_SUPPORTS,
+    BUILTIN_STRLEN,
+    BUILTIN_MEMCPY,
+    BUILTIN_MEMMOVE,
+    BUILTIN_MEMSET,
+    BUILTIN_MEMCPY_CHK,
+    BUILTIN_MEMMOVE_CHK,
+    BUILTIN_MEMSET_CHK,
+    BUILTIN_HUGE_VAL,
+    BUILTIN_HUGE_VALF,
+    BUILTIN_HUGE_VALL,
+    BUILTIN_INF,
+    BUILTIN_INFF,
+    BUILTIN_INFL,
+    BUILTIN_LDBL_MIN,
+    BUILTIN_LDBL_DENORM_MIN,
+    BUILTIN_LDBL_MAX,
+    BUILTIN_ISFINITE,
+    BUILTIN_ISINF,
+    BUILTIN_ISINF_SIGN,
+    BUILTIN_ISNAN,
+    BUILTIN_SIGNBIT,
+    BUILTIN_NANF,
+    BUILTIN_NAN,
+    BUILTIN_NANL,
+    BUILTIN_SYNC_FETCH_ADD,
+    BUILTIN_SYNC_FETCH_SUB,
+    BUILTIN_SYNC_SUB_AND_FETCH,
+    BUILTIN_SYNC_BOOL_CAS,
+    BUILTIN_SYNC_LOCK_TEST_AND_SET,
+    BUILTIN_SYNC_LOCK_RELEASE,
+    BUILTIN_SYNC_SYNCHRONIZE,
+    BUILTIN_ATOMIC_FETCH_ADD,
+    BUILTIN_ATOMIC_FETCH_SUB,
+    BUILTIN_ATOMIC_EXCHANGE_N,
+    BUILTIN_ATOMIC_LOAD_N,
+    BUILTIN_ATOMIC_STORE_N,
+    BUILTIN_ATOMIC_THREAD_FENCE,
+    BUILTIN_ATOMIC_SIGNAL_FENCE
+} builtin_kind_t;
+
+static builtin_kind_t builtin_kind(const char *name) {
+    if (name == NULL) {
+        return BUILTIN_NONE;
+    }
+    if (strcmp(name, "__builtin_va_start") == 0 || strcmp(name, "__builtin_c23_va_start") == 0) {
+        return BUILTIN_VA_START;
+    }
+    if (strcmp(name, "__builtin_va_end") == 0 || strcmp(name, "__builtin_c23_va_end") == 0) {
+        return BUILTIN_VA_END;
+    }
+    if (strcmp(name, "__builtin_va_copy") == 0 || strcmp(name, "__builtin_c23_va_copy") == 0) {
+        return BUILTIN_VA_COPY;
+    }
+    if (strcmp(name, "__builtin_va_arg") == 0 || strcmp(name, "__builtin_c23_va_arg") == 0) {
+        return BUILTIN_VA_ARG;
+    }
+    if (strcmp(name, "__builtin_expect") == 0) {
+        return BUILTIN_EXPECT;
+    }
+    if (strcmp(name, "__builtin_constant_p") == 0) {
+        return BUILTIN_CONSTANT_P;
+    }
+    if (strcmp(name, "__builtin_trap") == 0) {
+        return BUILTIN_TRAP;
+    }
+    if (strcmp(name, "__builtin_unreachable") == 0) {
+        return BUILTIN_UNREACHABLE;
+    }
+    if (strcmp(name, "__builtin_assume") == 0) {
+        return BUILTIN_ASSUME;
+    }
+    if (strcmp(name, "__builtin_assume_aligned") == 0) {
+        return BUILTIN_ASSUME_ALIGNED;
+    }
+    if (strcmp(name, "__builtin_unpredictable") == 0) {
+        return BUILTIN_UNPREDICTABLE;
+    }
+    if (strcmp(name, "__builtin_clz") == 0 || strcmp(name, "__builtin_clzl") == 0 ||
+        strcmp(name, "__builtin_clzll") == 0) {
+        return BUILTIN_CLZ;
+    }
+    if (strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
+        strcmp(name, "__builtin_ctzll") == 0) {
+        return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_ffsl") == 0 ||
+        strcmp(name, "__builtin_ffsll") == 0) {
+        return BUILTIN_FFS;
+    }
+    if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
+        strcmp(name, "__builtin_popcountll") == 0) {
+        return BUILTIN_POPCOUNT;
+    }
+    if (strcmp(name, "__builtin_parity") == 0 || strcmp(name, "__builtin_parityl") == 0 ||
+        strcmp(name, "__builtin_parityll") == 0) {
+        return BUILTIN_PARITY;
+    }
+    if (strcmp(name, "__builtin_add_overflow") == 0) {
+        return BUILTIN_ADD_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_sub_overflow") == 0) {
+        return BUILTIN_SUB_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_mul_overflow") == 0) {
+        return BUILTIN_MUL_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_add_overflow_p") == 0) {
+        return BUILTIN_ADD_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_sub_overflow_p") == 0) {
+        return BUILTIN_SUB_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_mul_overflow_p") == 0) {
+        return BUILTIN_MUL_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_object_size") == 0) {
+        return BUILTIN_OBJECT_SIZE;
+    }
+    if (strcmp(name, "__builtin_return_address") == 0) {
+        return BUILTIN_RETURN_ADDRESS;
+    }
+    if (strcmp(name, "__builtin_frame_address") == 0) {
+        return BUILTIN_FRAME_ADDRESS;
+    }
+    if (strcmp(name, "__builtin_memcmp") == 0) {
+        return BUILTIN_MEMCMP;
+    }
+    if (strcmp(name, "__builtin_prefetch") == 0) {
+        return BUILTIN_PREFETCH;
+    }
+    if (strcmp(name, "__builtin_cpu_supports") == 0) {
+        return BUILTIN_CPU_SUPPORTS;
+    }
+    if (strcmp(name, "__builtin_strlen") == 0) {
+        return BUILTIN_STRLEN;
+    }
+    if (strcmp(name, "__builtin_memcpy") == 0) {
+        return BUILTIN_MEMCPY;
+    }
+    if (strcmp(name, "__builtin_memmove") == 0) {
+        return BUILTIN_MEMMOVE;
+    }
+    if (strcmp(name, "__builtin_memset") == 0) {
+        return BUILTIN_MEMSET;
+    }
+    if (strcmp(name, "__builtin___memcpy_chk") == 0) {
+        return BUILTIN_MEMCPY_CHK;
+    }
+    if (strcmp(name, "__builtin___memmove_chk") == 0) {
+        return BUILTIN_MEMMOVE_CHK;
+    }
+    if (strcmp(name, "__builtin___memset_chk") == 0) {
+        return BUILTIN_MEMSET_CHK;
+    }
+    if (strcmp(name, "__builtin_huge_val") == 0) {
+        return BUILTIN_HUGE_VAL;
+    }
+    if (strcmp(name, "__builtin_huge_valf") == 0) {
+        return BUILTIN_HUGE_VALF;
+    }
+    if (strcmp(name, "__builtin_huge_vall") == 0) {
+        return BUILTIN_HUGE_VALL;
+    }
+    if (strcmp(name, "__builtin_inf") == 0) {
+        return BUILTIN_INF;
+    }
+    if (strcmp(name, "__builtin_inff") == 0) {
+        return BUILTIN_INFF;
+    }
+    if (strcmp(name, "__builtin_infl") == 0) {
+        return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_ldbl_min") == 0) {
+        return BUILTIN_LDBL_MIN;
+    }
+    if (strcmp(name, "__builtin_ldbl_denorm_min") == 0) {
+        return BUILTIN_LDBL_DENORM_MIN;
+    }
+    if (strcmp(name, "__builtin_ldbl_max") == 0) {
+        return BUILTIN_LDBL_MAX;
+    }
+    if (strcmp(name, "__builtin_isfinite") == 0) {
+        return BUILTIN_ISFINITE;
+    }
+    if (strcmp(name, "__builtin_isinf") == 0 || strcmp(name, "__builtin_isinff") == 0 ||
+        strcmp(name, "__builtin_isinfl") == 0) {
+        return BUILTIN_ISINF;
+    }
+    if (strcmp(name, "__builtin_isinf_sign") == 0) {
+        return BUILTIN_ISINF_SIGN;
+    }
+    if (strcmp(name, "__builtin_isnan") == 0 || strcmp(name, "__builtin_isnanf") == 0 ||
+        strcmp(name, "__builtin_isnanl") == 0) {
+        return BUILTIN_ISNAN;
+    }
+    if (strcmp(name, "__builtin_signbit") == 0 || strcmp(name, "__builtin_signbitf") == 0 ||
+        strcmp(name, "__builtin_signbitl") == 0) {
+        return BUILTIN_SIGNBIT;
+    }
+    if (strcmp(name, "__builtin_nanf") == 0 || strcmp(name, "__builtin_nansf") == 0) {
+        return BUILTIN_NANF;
+    }
+    if (strcmp(name, "__builtin_nan") == 0 || strcmp(name, "__builtin_nans") == 0) {
+        return BUILTIN_NAN;
+    }
+    if (strcmp(name, "__builtin_nanl") == 0 || strcmp(name, "__builtin_nansl") == 0) {
+        return BUILTIN_NANL;
+    }
+    if (strcmp(name, "__sync_fetch_and_add") == 0) {
+        return BUILTIN_SYNC_FETCH_ADD;
+    }
+    if (strcmp(name, "__sync_fetch_and_sub") == 0) {
+        return BUILTIN_SYNC_FETCH_SUB;
+    }
+    if (strcmp(name, "__sync_sub_and_fetch") == 0) {
+        return BUILTIN_SYNC_SUB_AND_FETCH;
+    }
+    if (strcmp(name, "__sync_bool_compare_and_swap") == 0) {
+        return BUILTIN_SYNC_BOOL_CAS;
+    }
+    if (strcmp(name, "__sync_lock_test_and_set") == 0) {
+        return BUILTIN_SYNC_LOCK_TEST_AND_SET;
+    }
+    if (strcmp(name, "__sync_lock_release") == 0) {
+        return BUILTIN_SYNC_LOCK_RELEASE;
+    }
+    if (strcmp(name, "__sync_synchronize") == 0) {
+        return BUILTIN_SYNC_SYNCHRONIZE;
+    }
+    if (strcmp(name, "__atomic_fetch_add") == 0) {
+        return BUILTIN_ATOMIC_FETCH_ADD;
+    }
+    if (strcmp(name, "__atomic_fetch_sub") == 0) {
+        return BUILTIN_ATOMIC_FETCH_SUB;
+    }
+    if (strcmp(name, "__atomic_exchange_n") == 0) {
+        return BUILTIN_ATOMIC_EXCHANGE_N;
+    }
+    if (strcmp(name, "__atomic_load_n") == 0) {
+        return BUILTIN_ATOMIC_LOAD_N;
+    }
+    if (strcmp(name, "__atomic_store_n") == 0) {
+        return BUILTIN_ATOMIC_STORE_N;
+    }
+    if (strcmp(name, "__atomic_thread_fence") == 0) {
+        return BUILTIN_ATOMIC_THREAD_FENCE;
+    }
+    if (strcmp(name, "__atomic_signal_fence") == 0) {
+        return BUILTIN_ATOMIC_SIGNAL_FENCE;
+    }
+    return BUILTIN_NONE;
+}
+
+/**
+ * The size in bytes of a sizeof expression, for the constant evaluator:
+ * of the type named, or of the (checked) operand's type.
+ *
+ * @param ctx  the translation unit
+ * @param e    the CC_EXPR_SIZEOF node
+ * @return     the size, or -1 if it is not known
+ */
+static long sema_const_sizeof(void *ctx, const cc_expr_t *e) {
+    const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
+
+    return e->lhs == NULL ? cc_ct_sizeof_type(e->aux_ctype, tu) : cc_ct_size(e->lhs->ctype, tu);
+}
+
+
+/**
+ * Evaluate an integer constant expression in sema's context.
+ *
+ * @param tu   the translation unit
+ * @param e    the expression
+ * @param out  receives the value
+ * @return     0, or -1 if @p e is not an integer constant expression
+ */
+static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
+    cc_const_env_t env;
+
+    env.sizeof_bytes = sema_const_sizeof;
+    env.ctx = (void *)tu;
+    return cc_const_eval_ll(&env, e, out);
+}
+
+enum {
+    CC_ATOMIC_RELAXED = 0,
+    CC_ATOMIC_CONSUME = 1,
+    CC_ATOMIC_ACQUIRE = 2,
+    CC_ATOMIC_RELEASE = 3,
+    CC_ATOMIC_ACQ_REL = 4,
+    CC_ATOMIC_SEQ_CST = 5
+};
+
+static int atomic_memorder_is_valid(long mo) {
+    return mo >= CC_ATOMIC_RELAXED && mo <= CC_ATOMIC_SEQ_CST;
+}
+
+static int atomic_memorder_valid_for_load(long mo) {
+    return mo == CC_ATOMIC_RELAXED || mo == CC_ATOMIC_CONSUME || mo == CC_ATOMIC_ACQUIRE ||
+           mo == CC_ATOMIC_SEQ_CST;
+}
+
+static int atomic_memorder_valid_for_store(long mo) {
+    return mo == CC_ATOMIC_RELAXED || mo == CC_ATOMIC_RELEASE || mo == CC_ATOMIC_SEQ_CST;
+}
+
+static int atomic_memorder_check_arg(const cc_translation_unit_t *tu, cc_expr_t *arg, const char *builtin_name,
+                                     const char *op_kind, int allow_load_orders, int allow_store_orders,
+                                     cc_diag_t *diag) {
+    long long mo = -1;
+    char msg[192];
+
+    if (arg == NULL) {
+        snprintf(msg, sizeof(msg), "%s %s memory-order argument is missing", builtin_name, op_kind);
+        sema_diag(diag, msg);
+        return -1;
+    }
+    if (eval_const_int_expr(tu, arg, &mo) != 0) {
+        snprintf(msg, sizeof(msg), "%s %s memory-order argument must be an integer constant expression", builtin_name,
+                 op_kind);
+        sema_diag(diag, msg);
+        return -1;
+    }
+    if (!atomic_memorder_is_valid(mo)) {
+        snprintf(msg, sizeof(msg), "%s %s memory-order argument must be in range [0,5]", builtin_name, op_kind);
+        sema_diag(diag, msg);
+        return -1;
+    }
+    if (allow_load_orders && !atomic_memorder_valid_for_load(mo)) {
+        snprintf(msg, sizeof(msg), "%s load memory order must be relaxed/consume/acquire/seq_cst", builtin_name);
+        sema_diag(diag, msg);
+        return -1;
+    }
+    if (allow_store_orders && !atomic_memorder_valid_for_store(mo)) {
+        snprintf(msg, sizeof(msg), "%s store memory order must be relaxed/release/seq_cst", builtin_name);
+        sema_diag(diag, msg);
+        return -1;
+    }
+    return 0;
+}
+
+static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
+                                    var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
+static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, const cc_ctype_t *arr,
+                                   cc_expr_t *init, var_entry_t *vars, size_t var_count, int depth,
+                                   long *out_inferred_len, cc_diag_t *diag);
+static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
+static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
+                      const cc_ctype_t *fn_ret, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      int switch_depth,
+                      int *saw_return, cc_diag_t *diag);
+
+/**
+ * The element type of complex type @p t (float, double or long double),
+ * which has its hidden structure `{ T __re, __im; }`.
+ *
+ * @param tu  the translation unit
+ * @param t   the type, or NULL
+ * @return    the element type, or NULL if @p t is not complex
+ */
+static const cc_ctype_t *sema_complex_elem(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    int sid = sx_ct_record(t);
+
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count) {
+        return NULL;
+    }
+    return tu->structs[sid].complex_elem;
+}
+
+
+/**
+ * The hidden structure standing for _Complex @p elem.
+ *
+ * @param tu    the translation unit
+ * @param elem  float, double or long double
+ * @return      the structure, or -1 if there is none
+ */
+static int sema_complex_sid(const cc_translation_unit_t *tu, const cc_ctype_t *elem) {
+    size_t i;
+
+    for (i = 0; tu != NULL && elem != NULL && i < tu->struct_count; ++i) {
+        if (tu->structs[i].complex_elem == elem->unqual) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * The floating rank a type contributes to a complex operation's result:
+ * 1 float, 2 double, 3 long double; 0 for an integer (C11 6.3.1.8: the
+ * complex operand's element decides then).
+ */
+static int sema_float_rank(const cc_ctype_t *t) {
+    return ct_kind_is(t, CC_CT_FLOAT) ? 1 : (ct_kind_is(t, CC_CT_DOUBLE) ? 2 : (ct_kind_is(t, CC_CT_LDOUBLE) ? 3 : 0));
+}
+
+/** The floating type of complex rank @p rank (1 float, 2 double, 3 long double). */
+static const cc_ctype_t *sema_rank_float(int rank) {
+    return cc_ct_basic(rank == 1 ? CC_CT_FLOAT : (rank == 3 ? CC_CT_LDOUBLE : CC_CT_DOUBLE));
+}
+
+/**
+ * The type of an operand of a complex operation, as a floating rank, or -1
+ * if it may not be one (a pointer, a structure).
+ */
+static int sema_complex_operand_rank(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_ctype_t *t = sx_vtype(e);
+    const cc_ctype_t *ce = sema_complex_elem(tu, t);
+
+    if (ce != NULL) {
+        return sema_float_rank(ce);
+    }
+    if (cc_ct_is_integer(t)) {
+        return 0;
+    }
+    if (sema_float_rank(t) > 0) {
+        return sema_float_rank(t);
+    }
+    return -1;
+}
+
+/**
+ * Make an implicit conversion explicit: put a cast to arithmetic or
+ * structure type @p t above the expression in @p slot.  Lowering converts
+ * between a complex value and a real one only where a cast says so.
+ *
+ * @param slot  the expression
+ * @param t     the type converted to
+ * @return      0, or -1 when out of memory
+ */
+static int sema_wrap_cast(cc_expr_t **slot, const cc_ctype_t *t) {
+    cc_expr_t *c = (cc_expr_t *)calloc(1, sizeof(*c));
+
+    if (c == NULL) {
+        return -1;
+    }
+    c->kind = CC_EXPR_CAST;
+    c->line = (*slot)->line;
+    c->col = (*slot)->col;
+    c->lhs = *slot;
+    sema_set_type(c, t);
+    *slot = c;
+    return 0;
+}
+
+/**
+ * The value an integer converts to in integer type @p t (C11 6.3.1.2,
+ * 6.3.1.3): zero or one for _Bool, else the low bits of its width,
+ * sign-extended if @p t is signed.
+ *
+ * @param v  the value (its bits, for an unsigned 64-bit one)
+ * @param t  the integer type, unqualified
+ * @return   the converted value
+ */
+static long long sema_int_convert(long long v, const cc_ctype_t *t) {
+    long bits;
+    unsigned long long u = (unsigned long long)v;
+
+    if (t->kind == CC_CT_BOOL) {
+        return v != 0;
+    }
+    bits = (t->kind == CC_CT_BITINT || t->kind == CC_CT_UBITINT) ? t->count : cc_ct_size(t, NULL) * 8;
+    if (bits <= 0 || bits >= 64) {
+        return v;
+    }
+    u &= (1ULL << bits) - 1;
+    if (!cc_ct_is_unsigned(t) && (u >> (bits - 1)) != 0) {
+        u |= ~0ULL << bits;
+    }
+    return (long long)u;
+}
+
+/**
+ * Convert the value in @p slot to type @p t where it has another type:
+ * an implicit conversion (C11 6.3) made an explicit cast, so lowering
+ * converts only where the tree says to.
+ *
+ * @param slot  a checked expression
+ * @param t     the type it is converted to
+ * @return      0, or -1 when out of memory
+ */
+static int sema_convert(cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_ctype_t *from = sx_vtype(*slot);
+
+    if (from == NULL || t == NULL || from->unqual == t->unqual) {
+        return 0;
+    }
+    if ((*slot)->kind == CC_EXPR_INT && cc_ct_is_integer(from) && cc_ct_is_integer(t)) {
+        /* an integer constant converts now: the constant of the new type */
+        (*slot)->int_val = sema_int_convert((*slot)->int_val, t->unqual);
+        sema_set_type(*slot, t->unqual);
+        return 0;
+    }
+    return sema_wrap_cast(slot, t->unqual);
+}
+
+static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot);
+
+/**
+ * Read one part of a complex value: the member `__re` or `__im` of the
+ * structure standing for its type.  Replaces the expression in @p slot.
+ *
+ * @param tu    the translation unit
+ * @param slot  a complex expression, checked
+ * @param imag  0 for the real part, 1 for the imaginary
+ * @return      0, or -1 when out of memory
+ */
+static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, int imag) {
+    const cc_ctype_t *elem = sema_complex_elem(tu, sx_vtype(*slot));
+    cc_expr_t *m = (cc_expr_t *)calloc(1, sizeof(*m));
+
+    if (m == NULL) {
+        return -1;
+    }
+    m->ident = cc_strdup(imag ? "__im" : "__re");
+    if (m->ident == NULL) {
+        free(m);
+        return -1;
+    }
+    m->kind = CC_EXPR_MEMBER;
+    m->line = (*slot)->line;
+    m->col = (*slot)->col;
+    m->lhs = *slot;
+    m->member_offset = imag ? cc_ct_size(elem, tu) : 0;
+    m->ctype = elem;
+    *slot = m;
+    return 0;
+}
+
+/**
+ * Where a value of the source's type is converted to (@p t, @p sid) by
+ * assignment -- an initializer, an argument, a return -- and one of the two
+ * is complex and they differ: put the conversion in as a cast.
+ *
+ * @return 1 if a cast was added, 0 if none was needed, -1 when out of memory
+ */
+static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t);
+static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t);
+static cc_expr_t *sema_int_node(long long v, size_t line, size_t col);
+static cc_expr_t *sema_const_node(long long v, cc_ctype_kind_t kind, size_t line, size_t col);
+
+/**
+ * Conversion as if by assignment (C11 6.5.16.1) between real types: an
+ * arithmetic value to an arithmetic type, or any scalar to _Bool, made
+ * explicit (sema_convert()).  Pointer conversions need no code and are
+ * left as they are.
+ *
+ * @param slot  the value
+ * @param t     the type it is assigned to, unqualified
+ * @return      1 if it was converted, 0 if no conversion was needed, -1
+ *              when out of memory
+ */
+static int sema_scalar_convert_for_assign(cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_ctype_t *from = sx_vtype(*slot);
+    const cc_expr_t *before = *slot;
+    const cc_ctype_t *before_type = before->ctype;
+
+    if (from == NULL || !((cc_ct_is_arithmetic(t) && cc_ct_is_arithmetic(from)) ||
+                          (t->kind == CC_CT_BOOL && cc_ct_is_scalar(from)))) {
+        return 0;
+    }
+    if (sema_convert(slot, t) != 0) {
+        return -1;
+    }
+    return *slot != before || before->ctype != before_type;
+}
+
+static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_ctype_t *de;
+    const cc_ctype_t *se;
+    int wrc;
+
+    if (*slot == NULL || t == NULL) {
+        return 0;
+    }
+    t = t->unqual;
+    de = sema_complex_elem(tu, t);
+    /* a decimal floating or wide integer type on either side converts the same way */
+    wrc = sema_decimal_convert_for_assign(tu, slot, t);
+    if (wrc != 0) {
+        return wrc;
+    }
+    wrc = sema_wide_convert_for_assign(tu, slot, t);
+    if (wrc != 0) {
+        return wrc;
+    }
+    se = sema_complex_elem(tu, sx_vtype(*slot));
+    if (de == NULL && se == NULL) {
+        return sema_scalar_convert_for_assign(slot, t);
+    }
+    if (de == se) {
+        return 0;
+    }
+    if (de != NULL ? sema_complex_operand_rank(tu, *slot) < 0 : !(cc_ct_is_integer(t) || sema_float_rank(t) > 0)) {
+        return 0;
+    }
+    if (de == NULL && t->kind == CC_CT_BOOL) {
+        /* to _Bool: whether either part is nonzero */
+        return sema_complex_truth(tu, slot) == 0 ? 1 : -1;
+    }
+    if (de == NULL && sema_complex_part(tu, slot, 0) != 0) {
+        /* to a real type: the real part, converted */
+        return -1;
+    }
+    return sema_wrap_cast(slot, t) == 0 ? 1 : -1;
+}
+
+/**
+ * A complex value where a truth value is wanted (`!z`, `z && x`, `if (z)`):
+ * compare it with zero, as C does (6.5.3.3, 6.8.4.1).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot) {
+    cc_expr_t *ne;
+    cc_expr_t *zero;
+
+    if (*slot == NULL || sema_complex_elem(tu, sx_vtype(*slot)) == NULL) {
+        return 0;
+    }
+    ne = (cc_expr_t *)calloc(1, sizeof(*ne));
+    zero = sema_int_node(0, 0, 0);
+    if (ne == NULL || zero == NULL) {
+        free(ne);
+        cc_expr_free(zero);
+        return -1;
+    }
+    ne->kind = CC_EXPR_BIN;
+    ne->op = CC_BIN_NE;
+    ne->line = (*slot)->line;
+    ne->col = (*slot)->col;
+    ne->lhs = *slot;
+    ne->rhs = zero;
+    ne->ctype = cc_ct_basic(CC_CT_INT);
+    *slot = ne;
+    return 0;
+}
+
+/**
+ * A binary operator with a complex operand: +, -, *, / give the complex
+ * type of the operands' larger floating rank (an integer operand takes the
+ * complex one's), == and != give int, `~z` (GNU, parsed as z ^ -1) is the
+ * conjugate; any other operator is an error.  The operands keep their types;
+ * lowering converts a real one as it reads it.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    int lr = sema_complex_operand_rank(tu, e->lhs);
+    int rr = sema_complex_operand_rank(tu, e->rhs);
+    int rank;
+    int sid;
+
+    if (e->op == CC_BIN_BXOR && sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL &&
+        e->rhs->kind == CC_EXPR_INT && e->rhs->int_val == -1) {
+        sema_set_type(e, sx_vtype(e->lhs));
+        return 0;
+    }
+    if (lr < 0 || rr < 0 ||
+        !(e->op == CC_BIN_ADD || e->op == CC_BIN_SUB || e->op == CC_BIN_MUL || e->op == CC_BIN_DIV ||
+          e->op == CC_BIN_EQ || e->op == CC_BIN_NE)) {
+        sema_diag(diag, "invalid operands to a complex operation");
+        return -1;
+    }
+    if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    rank = lr > rr ? lr : rr;
+    sid = sema_complex_sid(tu, sema_rank_float(rank));
+    if (sid < 0) {
+        sema_diag(diag, "complex result type is not available");
+        return -1;
+    }
+    sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, sema_rank_float(rank)));
+    return 0;
+}
+
+/**
+ * The hidden structure standing for integer type @p t when it is wider
+ * than 64 bits (`__int128`, `_BitInt(N)`, N > 64).
+ *
+ * @param tu  the translation unit
+ * @param t   the type, or NULL
+ * @return    the structure, or NULL if @p t is no wide integer type
+ */
+static const cc_struct_def_t *sema_wide_def(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    int sid = sx_ct_record(t);
+
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || tu->structs[sid].wide_bits <= 0) {
+        return NULL;
+    }
+    return &tu->structs[sid];
+}
+
+
+/** Whether expression @p e has a wide integer type. */
+static int sema_is_wide(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return e != NULL && sema_wide_def(tu, sx_vtype(e)) != NULL;
+}
+
+/**
+ * The wide integer type two operands convert to (C23 6.3.1.8): the wider;
+ * at the same width `__int128` (a standard-rank type) before `_BitInt`, and
+ * unsigned before signed.  Either may be narrow (NULL); not both.
+ */
+static int sema_wide_common(const cc_translation_unit_t *tu, int a, int b) {
+    const cc_struct_def_t *da = a >= 0 ? &tu->structs[a] : NULL;
+    const cc_struct_def_t *db = b >= 0 ? &tu->structs[b] : NULL;
+
+    if (da == NULL) {
+        return b;
+    }
+    if (db == NULL) {
+        return a;
+    }
+    if (da->wide_bits != db->wide_bits) {
+        return da->wide_bits > db->wide_bits ? a : b;
+    }
+    if (da->wide_is_int128 != db->wide_is_int128) {
+        return da->wide_is_int128 ? a : b;
+    }
+    return da->wide_unsigned ? a : b;
+}
+
+/** Whether (@p t) is an arithmetic type a wide integer can meet: an integer or a real floating type. */
+static int sema_wide_partner_ok(const cc_ctype_t *t) {
+    return cc_ct_is_integer(t) || sema_float_rank(t) > 0;
+}
+
+/**
+ * A binary operator with a wide integer operand.  The usual arithmetic
+ * conversions are made explicit: both operands are cast to the common type
+ * (a floating type when the other operand is floating), so lowering sees
+ * operands of one wide type.  A shift keeps its left operand's type and
+ * takes its count as a long long.  Comparisons give int.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    int lw = sema_is_wide(tu, e->lhs);
+    int rw = sema_is_wide(tu, e->rhs);
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+    int rank = 0;
+    int sid;
+
+    if ((!lw && !sema_wide_partner_ok(sx_vtype(e->lhs))) || (!rw && !sema_wide_partner_ok(sx_vtype(e->rhs)))) {
+        sema_diag(diag, "invalid operands to a wide integer operation");
+        return -1;
+    }
+    if (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) {
+        if (rw && sema_wrap_cast(&e->rhs, cc_ct_basic(CC_CT_LLONG)) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        /* the left operand's type: a narrow value shifted by a wide count is an ordinary shift */
+        sema_set_type(e, sx_vtype(e->lhs));
+        return 0;
+    }
+    if (!lw) {
+        rank = sema_float_rank(sx_vtype(e->lhs));
+    }
+    if (!rw && sema_float_rank(sx_vtype(e->rhs)) > rank) {
+        rank = sema_float_rank(sx_vtype(e->rhs));
+    }
+    if (rank > 0) {
+        /* with a floating operand: the wide one is converted to that floating type */
+        const cc_ctype_t *ft = sema_rank_float(rank);
+
+        if ((lw && sema_wrap_cast(&e->lhs, ft) != 0) || (rw && sema_wrap_cast(&e->rhs, ft) != 0)) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : ft);
+        return 0;
+    }
+    if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
+        sema_diag(diag, "invalid wide integer operation");
+        return -1;
+    }
+    sid = sema_wide_common(tu, lw ? sx_ct_record(sx_vtype(e->lhs)) : -1, rw ? sx_ct_record(sx_vtype(e->rhs)) : -1);
+    if ((!lw || sx_ct_record(sx_vtype(e->lhs)) != sid) && sema_wrap_cast(&e->lhs, cc_ct_record(sid)) != 0) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    if ((!rw || sx_ct_record(sx_vtype(e->rhs)) != sid) && sema_wrap_cast(&e->rhs, cc_ct_record(sid)) != 0) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
+    return 0;
+}
+
+/**
+ * The hidden structure standing for vector type @p t.
+ *
+ * @param tu  the translation unit
+ * @param t   the type, or NULL
+ * @return    the structure, or NULL if @p t is no vector type
+ */
+static const cc_struct_def_t *sema_vector_def(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    int sid = sx_ct_record(t);
+
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || tu->structs[sid].vector_count <= 0) {
+        return NULL;
+    }
+    return &tu->structs[sid];
+}
+
+/** Whether expression @p e has a vector type. */
+static int sema_is_vector(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return e != NULL && sema_vector_def(tu, sx_vtype(e)) != NULL;
+}
+
+/**
+ * The vector operand of a subscript `v[i]` (the `+` it is parsed as):
+ * replaced by its element array, the member `__vec` of the structure
+ * standing for its type, which then indexes as any array does.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_vector_subscript(const cc_translation_unit_t *tu, cc_expr_t **slot) {
+    const cc_struct_def_t *vd = sema_vector_def(tu, sx_vtype(*slot));
+    const cc_struct_member_t *m = &vd->members[0];
+    cc_expr_t *me = (cc_expr_t *)calloc(1, sizeof(*me));
+
+    if (me == NULL) {
+        return -1;
+    }
+    me->ident = cc_strdup("__vec");
+    if (me->ident == NULL) {
+        free(me);
+        return -1;
+    }
+    me->kind = CC_EXPR_MEMBER;
+    me->line = (*slot)->line;
+    me->col = (*slot)->col;
+    me->lhs = *slot;
+    me->member_offset = 0;
+    sema_set_type(me, m->ctype);
+    *slot = me;
+    return 0;
+}
+
+/** Whether @p t is a type a scalar operand of a vector operation may have: an integer or real floating type. */
+static int sema_vector_scalar_ok(const cc_ctype_t *t) {
+    return cc_ct_is_integer(t) || (t != NULL && (t->kind == CC_CT_FLOAT || t->kind == CC_CT_DOUBLE ||
+                                                 t->kind == CC_CT_LDOUBLE));
+}
+
+/**
+ * A binary operator with a vector operand (GCC's vector extension): it
+ * works element by element.  Two vector operands must have one type; a
+ * scalar operand is converted to the element type, to be used for every
+ * element.  An integer-only operator (`%`, a shift, a bitwise one) needs an
+ * integer element type.  A comparison gives the vector of signed integers
+ * of the element's size, each -1 (true) or 0.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_struct_def_t *vl = sema_vector_def(tu, sx_vtype(e->lhs));
+    const cc_struct_def_t *vr = sema_vector_def(tu, sx_vtype(e->rhs));
+    const cc_struct_def_t *vd = vl != NULL ? vl : vr;
+    int sid = (int)(vd - tu->structs);
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+    int is_fp = cc_ct_is_floating(vd->vector_elem);
+
+    if (is_logical_op(e->op)) {
+        sema_diag(diag, "invalid operands to a logical operator: a vector");
+        return -1;
+    }
+    if (is_fp && (e->op == CC_BIN_MOD || e->op == CC_BIN_SHL || e->op == CC_BIN_SHR || e->op == CC_BIN_BAND ||
+                  e->op == CC_BIN_BOR || e->op == CC_BIN_BXOR)) {
+        sema_diag(diag, "invalid operands to an integer operator: a floating vector");
+        return -1;
+    }
+    if (vl != NULL && vr != NULL) {
+        if (vl != vr) {
+            sema_diag(diag, "invalid operands to a vector operation: the vector types differ");
+            return -1;
+        }
+    } else {
+        cc_expr_t **scalar = vl != NULL ? &e->rhs : &e->lhs;
+
+        if (!sema_vector_scalar_ok(sx_vtype(*scalar))) {
+            sema_diag(diag, "invalid operands to a vector operation");
+            return -1;
+        }
+        if (sx_vtype(*scalar) != vd->vector_elem && sema_wrap_cast(scalar, vd->vector_elem) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+    }
+    sema_set_type(e, cc_ct_record(is_cmp ? vd->vector_cmp_sid : sid));
+    return 0;
+}
+
+/**
+ * A cast to or from a vector type: between vector types of one size, and
+ * between a vector and an integer of its size, the bits are kept.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_struct_def_t *vt = sema_vector_def(tu, to);
+    const cc_struct_def_t *vs = sema_vector_def(tu, sx_vtype(e->lhs));
+    long ts = vt != NULL ? vt->size : cc_ct_size(to, tu);
+    long ss = vs != NULL ? vs->size : cc_ct_size(sx_vtype(e->lhs), tu);
+
+    if (!ct_kind_is(to->unqual, CC_CT_VOID) &&
+        ((vt == NULL && !cc_ct_is_integer(to)) || (vs == NULL && !cc_ct_is_integer(sx_vtype(e->lhs))) || ts != ss)) {
+        sema_diag(diag, "invalid conversion: a vector converts only to a vector or an integer of its size");
+        return -1;
+    }
+    sema_set_type(e, to);
+    return 0;
+}
+
+static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
+                      cc_diag_t *diag);
+
+/**
+ * The hidden structure standing for decimal floating type @p t.
+ *
+ * @param tu  the translation unit
+ * @param t   the type, or NULL
+ * @return    the structure, or NULL if @p t is no decimal type
+ */
+static const cc_struct_def_t *sema_decimal_def(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    int sid = sx_ct_record(t);
+
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || tu->structs[sid].decimal_bits <= 0) {
+        return NULL;
+    }
+    return &tu->structs[sid];
+}
+
+
+/** Whether expression @p e has a decimal floating type. */
+static int sema_is_decimal(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    return e != NULL && sema_decimal_def(tu, sx_vtype(e)) != NULL;
+}
+
+/** The structure of the decimal floating type @p bits wide, or -1 if the program names none. */
+static int sema_decimal_sid(const cc_translation_unit_t *tu, int bits) {
+    size_t i;
+
+    for (i = 0; i < tu->struct_count; ++i) {
+        if (tu->structs[i].decimal_bits == bits) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Whether @p e is a decimal constant -- `(decimal type){ bid }`, as the
+ * parser makes a literal and sema a folded conversion -- and if so its
+ * width in *@p bits and its encoding in @p bid.
+ */
+static int sema_decimal_const(const cc_translation_unit_t *tu, const cc_expr_t *e, int *bits, uint64_t bid[2]) {
+    const cc_struct_def_t *dd;
+    const cc_expr_t *list;
+
+    if (e == NULL || e->kind != CC_EXPR_CAST || e->lhs == NULL || e->lhs->kind != CC_EXPR_INIT_LIST ||
+        (dd = sema_decimal_def(tu, sema_cast_target_ctype(e))) == NULL) {
+        return 0;
+    }
+    list = e->lhs;
+    if (dd->decimal_bits == 128) {
+        if (list->arg_count != 1 || list->args[0] == NULL || list->args[0]->kind != CC_EXPR_INIT_LIST) {
+            return 0;
+        }
+        list = list->args[0];
+    }
+    if (list->arg_count != (size_t)(dd->decimal_bits == 128 ? 2 : 1) || list->args[0]->kind != CC_EXPR_INT ||
+        (dd->decimal_bits == 128 && list->args[1]->kind != CC_EXPR_INT)) {
+        return 0;
+    }
+    bid[0] = (uint64_t)list->args[0]->int_val;
+    bid[1] = dd->decimal_bits == 128 ? (uint64_t)list->args[1]->int_val : 0;
+    *bits = dd->decimal_bits;
+    return 1;
+}
+
+/**
+ * The brace list `{ bid }` (`{ { lo, hi } }` for _Decimal128) holding the
+ * encoding @p bid of a decimal type @p bits wide: a constant's
+ * initializer.
+ */
+static cc_expr_t *sema_decimal_list(int bits, const uint64_t bid[2], size_t line, size_t col) {
+    cc_expr_t *outer = (cc_expr_t *)calloc(1, sizeof(*outer));
+    cc_expr_t *list = bits == 128 ? (cc_expr_t *)calloc(1, sizeof(*list)) : outer;
+    int n = bits == 128 ? 2 : 1;
+    int k;
+
+    if (outer == NULL || list == NULL) {
+        free(outer);
+        if (list != outer) {
+            free(list);
+        }
+        return NULL;
+    }
+    outer->kind = CC_EXPR_INIT_LIST;
+    outer->line = line;
+    outer->col = col;
+    if (list != outer) {
+        list->kind = CC_EXPR_INIT_LIST;
+        outer->args = (cc_expr_t **)calloc(1, sizeof(*outer->args));
+        if (outer->args == NULL) {
+            free(outer);
+            free(list);
+            return NULL;
+        }
+        outer->args[0] = list;
+        outer->arg_count = 1;
+    }
+    list->args = (cc_expr_t **)calloc((size_t)n, sizeof(*list->args));
+    if (list->args == NULL) {
+        cc_expr_free(outer);
+        return NULL;
+    }
+    for (k = 0; k < n; ++k) {
+        list->args[k] = sema_const_node((long long)bid[k], bits == 32 ? CC_CT_UINT : CC_CT_ULLONG, line, col);
+        if (list->args[k] == NULL) {
+            cc_expr_free(outer);
+            return NULL;
+        }
+        list->arg_count = (size_t)(k + 1);
+    }
+    return outer;
+}
+
+/**
+ * Fold @p e, an arithmetic constant, to the decimal type of structure
+ * @p sid, as gcc does at compile time: an integer exactly (rounded to the
+ * type's precision), a binary floating constant through its exact decimal
+ * value (cc_dec_from_binary()), a decimal constant re-rounded, a negated
+ * one with its sign flipped.  The result goes to @p bid.
+ *
+ * @return 1 if folded, 0 if @p e is not such a constant
+ */
+static int sema_decimal_fold_value(const cc_translation_unit_t *tu, const cc_expr_t *e, int bits, uint64_t bid[2]) {
+    cc_dec_t *d;
+    uint64_t src[2];
+    int src_bits;
+    int ok = 1;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_MUL && e->lhs != NULL && e->lhs->kind == CC_EXPR_INT &&
+        e->lhs->int_val == -1 && e->rhs != NULL &&
+        (e->rhs->kind == CC_EXPR_FLOAT || sema_decimal_const(tu, e->rhs, &src_bits, src))) {
+        /* unary minus (parsed as -1 * x) on a floating constant: the constant, its sign flipped */
+        if (!sema_decimal_fold_value(tu, e->rhs, bits, bid)) {
+            return 0;
+        }
+        if (bits == 128) {
+            bid[1] ^= 0x8000000000000000ULL;
+        } else {
+            bid[0] ^= bits == 32 ? 0x80000000ULL : 0x8000000000000000ULL;
+        }
+        return 1;
+    }
+    d = (cc_dec_t *)malloc(sizeof(*d));
+    if (d == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_INT) {
+        int is_uns = cc_ct_is_unsigned(e->ctype);
+
+        if (is_uns || e->int_val >= 0) {
+            cc_dec_from_int((unsigned long long)e->int_val, 0, d);
+        } else {
+            cc_dec_from_int(0ULL - (unsigned long long)e->int_val, 1, d);
+        }
+    } else if (e->kind == CC_EXPR_FLOAT) {
+        cc_dec_from_binary(e->float_val, d);
+    } else if (sema_decimal_const(tu, e, &src_bits, src)) {
+        cc_dec_from_bid(src_bits, src, d);
+    } else {
+        ok = 0;
+    }
+    if (ok) {
+        cc_dec_encode_bid(d, bits, bid);
+    }
+    free(d);
+    return ok;
+}
+
+/**
+ * Convert the checked expression in @p slot to the decimal type of
+ * structure @p sid: a constant is folded to a decimal constant, anything
+ * else is cast.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_decimal_convert(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid) {
+    int bits = tu->structs[sid].decimal_bits;
+    uint64_t bid[2];
+
+    if (sema_decimal_fold_value(tu, *slot, bits, bid)) {
+        cc_expr_t *list = sema_decimal_list(bits, bid, (*slot)->line, (*slot)->col);
+        cc_expr_t *c = list == NULL ? NULL : (cc_expr_t *)calloc(1, sizeof(*c));
+
+        if (c == NULL) {
+            cc_expr_free(list);
+            return -1;
+        }
+        c->kind = CC_EXPR_CAST;
+        c->line = (*slot)->line;
+        c->col = (*slot)->col;
+        sema_set_type(c, cc_ct_record(sid));
+        c->lhs = list;
+        cc_expr_free(*slot);
+        *slot = c;
+        /* the compound literal's own checks */
+        return check_expr(tu, c, NULL, 0, 0, NULL);
+    }
+    return sema_wrap_cast(slot, cc_ct_record(sid));
+}
+
+/** Whether @p t is a type that converts to a decimal floating type: an integer, or _Bool. */
+static int sema_decimal_partner_ok(const cc_ctype_t *t) {
+    return cc_ct_is_integer(t);
+}
+
+/** Whether @p t is a binary floating type (one a decimal operand cannot meet, C23 6.3.1.8). */
+static int sema_is_binary_fp(const cc_ctype_t *t) {
+    return sema_float_rank(t) > 0;
+}
+
+/**
+ * A binary operator with a decimal floating operand (C23 6.3.1.8): both
+ * operands go to the wider decimal type, an integer one converted (a
+ * constant folded), so lowering sees one decimal type.  `+ - * /` give
+ * it, comparisons int; a binary floating operand, or any other operator,
+ * is an error.  `-x` (parsed as -1 * x) of a decimal constant folds.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_struct_def_t *dl = sema_decimal_def(tu, sx_vtype(e->lhs));
+    const cc_struct_def_t *dr = sema_decimal_def(tu, sx_vtype(e->rhs));
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+    int bits;
+    int sid;
+    uint64_t bid[2];
+
+    if ((dl == NULL && sema_is_binary_fp(sx_vtype(e->lhs))) || (dr == NULL && sema_is_binary_fp(sx_vtype(e->rhs)))) {
+        sema_diag(diag, "cannot mix operands of decimal floating and binary floating types");
+        return -1;
+    }
+    if (!is_cmp && e->op != CC_BIN_ADD && e->op != CC_BIN_SUB && e->op != CC_BIN_MUL && e->op != CC_BIN_DIV) {
+        sema_diag(diag, "invalid operands to a decimal floating operation");
+        return -1;
+    }
+    if ((dl == NULL && !sema_decimal_partner_ok(sx_vtype(e->lhs))) ||
+        (dr == NULL && !sema_decimal_partner_ok(sx_vtype(e->rhs)))) {
+        sema_diag(diag, "invalid operands to a decimal floating operation");
+        return -1;
+    }
+    bits = dl != NULL ? dl->decimal_bits : 0;
+    if (dr != NULL && dr->decimal_bits > bits) {
+        bits = dr->decimal_bits;
+    }
+    sid = sema_decimal_sid(tu, bits);
+    if (e->op == CC_BIN_MUL && dl == NULL && e->lhs->kind == CC_EXPR_INT && e->lhs->int_val == -1 &&
+        sema_decimal_fold_value(tu, e, bits, bid)) {
+        /* -c of a decimal constant: the constant negated */
+        cc_expr_t *list = sema_decimal_list(bits, bid, e->line, e->col);
+
+        if (list == NULL) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        cc_expr_free(e->lhs);
+        cc_expr_free(e->rhs);
+        e->kind = CC_EXPR_CAST;
+        e->op = 0;
+        e->rhs = NULL;
+        e->lhs = list;
+        sema_set_type(e, cc_ct_record(sid));
+        return check_expr(tu, e, NULL, 0, 0, diag);
+    }
+    if ((dl == NULL || dl->decimal_bits != bits) && sema_decimal_convert(tu, &e->lhs, sid) != 0) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    if ((dr == NULL || dr->decimal_bits != bits) && sema_decimal_convert(tu, &e->rhs, sid) != 0) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
+    return 0;
+}
+
+/**
+ * A decimal floating value where a truth value is wanted: `x != 0`.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_decimal_truth(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    cc_expr_t *ne;
+    cc_expr_t *zero;
+
+    if (!sema_is_decimal(tu, *slot)) {
+        return 0;
+    }
+    ne = (cc_expr_t *)calloc(1, sizeof(*ne));
+    zero = sema_int_node(0, (*slot)->line, (*slot)->col);
+    if (ne == NULL || zero == NULL) {
+        free(ne);
+        cc_expr_free(zero);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    ne->kind = CC_EXPR_BIN;
+    ne->op = CC_BIN_NE;
+    ne->line = (*slot)->line;
+    ne->col = (*slot)->col;
+    ne->lhs = *slot;
+    ne->rhs = zero;
+    *slot = ne;
+    return sema_decimal_binop(tu, ne, diag);
+}
+
+/**
+ * Where a value is converted by assignment to (@p t, @p sid) -- an
+ * initializer, an argument, a return -- and one of the two is decimal
+ * and they differ: the conversion, made explicit (a constant folded).
+ *
+ * @return 1 if a conversion was added, 0 if none was needed, -1 on error
+ */
+static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_struct_def_t *dd = sema_decimal_def(tu, t);
+    const cc_struct_def_t *sd = sema_decimal_def(tu, sx_vtype(*slot));
+
+    if (dd == NULL && sd == NULL) {
+        return 0;
+    }
+    if (dd != NULL && sd == dd) {
+        return 0;
+    }
+    if (dd != NULL) {
+        if (sd == NULL && !sema_decimal_partner_ok(sx_vtype(*slot)) && !sema_is_binary_fp(sx_vtype(*slot))) {
+            return 0;
+        }
+        return sema_decimal_convert(tu, slot, (int)(dd - tu->structs)) == 0 ? 1 : -1;
+    }
+    if (ct_kind_is(t, CC_CT_BOOL)) {
+        return sema_decimal_truth(tu, slot, NULL) == 0 ? 1 : -1;
+    }
+    if (!sema_decimal_partner_ok(t) && !sema_is_binary_fp(t)) {
+        return 0;
+    }
+    return sema_wrap_cast(slot, t) == 0 ? 1 : -1;
+}
+
+/**
+ * A cast to or from a decimal floating type: from or to an integer,
+ * a binary floating type, another decimal type or (to) _Bool; a constant
+ * converted to a decimal type is folded.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_struct_def_t *dt = sema_decimal_def(tu, to);
+    int ds = sema_is_decimal(tu, e->lhs);
+    uint64_t bid[2];
+
+    if (ct_kind_is(to->unqual, CC_CT_VOID)) {
+        sema_set_type(e, to);
+        return 0;
+    }
+    if (dt != NULL) {
+        if (!ds && !sema_decimal_partner_ok(sx_vtype(e->lhs)) && !sema_is_binary_fp(sx_vtype(e->lhs))) {
+            sema_diag(diag, "invalid conversion to a decimal floating type");
+            return -1;
+        }
+        if (sema_decimal_fold_value(tu, e->lhs, dt->decimal_bits, bid)) {
+            cc_expr_t *list = sema_decimal_list(dt->decimal_bits, bid, e->line, e->col);
+
+            if (list == NULL) {
+                sema_diag(diag, "out of memory");
+                return -1;
+            }
+            cc_expr_free(e->lhs);
+            e->lhs = list;
+            /* now a compound literal: its own checks */
+            return check_expr(tu, e, NULL, 0, 0, diag);
+        }
+        sema_set_type(e, to);
+        return 0;
+    }
+    if (ct_kind_is(to->unqual, CC_CT_BOOL)) {
+        if (sema_decimal_truth(tu, &e->lhs, diag) != 0) {
+            return -1;
+        }
+    } else if (!sema_decimal_partner_ok(to) && !sema_is_binary_fp(to)) {
+        sema_diag(diag, "invalid conversion of a decimal floating value");
+        return -1;
+    }
+    sema_set_type(e, to);
+    return 0;
+}
+
+/**
+ * Make a checked initializer of a static decimal object of structure
+ * @p sid the brace list of its folded encoding.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_decimal_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid, cc_diag_t *diag) {
+    int bits = tu->structs[sid].decimal_bits;
+    uint64_t bid[2];
+    cc_expr_t *list;
+
+    if (!sema_decimal_fold_value(tu, *slot, bits, bid)) {
+        sema_diag(diag, "initializer of a static decimal floating object is not a constant");
+        return -1;
+    }
+    list = sema_decimal_list(bits, bid, (*slot)->line, (*slot)->col);
+    if (list == NULL) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    cc_expr_free(*slot);
+    *slot = list;
+    return 0;
+}
+
+/**
+ * A wide integer where a truth value is wanted: `x != 0`, converted.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_wide_truth(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    cc_expr_t *ne;
+    cc_expr_t *zero;
+
+    if (!sema_is_wide(tu, *slot)) {
+        return 0;
+    }
+    ne = (cc_expr_t *)calloc(1, sizeof(*ne));
+    zero = sema_int_node(0, 0, 0);
+    if (ne == NULL || zero == NULL) {
+        free(ne);
+        cc_expr_free(zero);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    ne->kind = CC_EXPR_BIN;
+    ne->op = CC_BIN_NE;
+    ne->line = (*slot)->line;
+    ne->col = (*slot)->col;
+    ne->lhs = *slot;
+    ne->rhs = zero;
+    *slot = ne;
+    return sema_wide_binop(tu, ne, diag);
+}
+
+/**
+ * Where a value is converted to (@p t, @p sid) by assignment -- an
+ * initializer, an argument, a return -- and one of the two is a wide
+ * integer and they differ: put the conversion in as a cast (to _Bool, the
+ * truth test).
+ *
+ * @return 1 if a cast was added, 0 if none was needed, -1 when out of memory
+ */
+static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_struct_def_t *dw;
+    const cc_struct_def_t *sw;
+
+    if (*slot == NULL) {
+        return 0;
+    }
+    dw = sema_wide_def(tu, t);
+    sw = sema_wide_def(tu, sx_vtype(*slot));
+    if ((dw == NULL && sw == NULL) || (dw != NULL && sw == dw)) {
+        return 0;
+    }
+    if (dw != NULL ? !(sw != NULL || sema_wide_partner_ok(sx_vtype(*slot))) : !sema_wide_partner_ok(t)) {
+        return 0;
+    }
+    if (dw == NULL && ct_kind_is(t, CC_CT_BOOL)) {
+        return sema_wide_truth(tu, slot, NULL) == 0 ? 1 : -1;
+    }
+    return sema_wrap_cast(slot, t) == 0 ? 1 : -1;
+}
+
+static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
+                      cc_diag_t *diag);
+
+/**
+ * A new integer constant node.
+ *
+ * @param v     its value
+ * @param kind  its integer type's kind
+ * @param line  its source line
+ * @param col   its source column
+ * @return      the node, or NULL when out of memory
+ */
+static cc_expr_t *sema_const_node(long long v, cc_ctype_kind_t kind, size_t line, size_t col) {
+    cc_expr_t *k = (cc_expr_t *)calloc(1, sizeof(*k));
+
+    if (k != NULL) {
+        k->kind = CC_EXPR_INT;
+        k->int_val = v;
+        k->line = line;
+        k->col = col;
+        k->ctype = cc_ct_basic(kind);
+    }
+    return k;
+}
+
+/** A new constant node of type int, or NULL when out of memory. */
+static cc_expr_t *sema_int_node(long long v, size_t line, size_t col) {
+    return sema_const_node(v, CC_CT_INT, line, col);
+}
+
+/**
+ * `++x`, `x--` and the like on a wide integer, rewritten in place as the
+ * assignment they are: `x = x + 1`, and for the postfix forms the old
+ * value, `(x = x + 1) - 1` (exact: the arithmetic is modulo the width).
+ * The second reading of a dereference or member target is a copy of it,
+ * as a compound assignment's is.  Then checked again.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_wide_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                            int depth, cc_diag_t *diag) {
+    cc_expr_t *read;
+    cc_expr_t *bin = (cc_expr_t *)calloc(1, sizeof(*bin));
+    cc_expr_t *one = sema_int_node(1, e->line, e->col);
+    cc_binop_t op = e->op;
+
+    if (e->ident != NULL) {
+        read = (cc_expr_t *)calloc(1, sizeof(*read));
+        if (read != NULL) {
+            read->kind = CC_EXPR_IDENT;
+            read->ident = cc_strdup(e->ident);
+            read->line = e->line;
+            read->col = e->col;
+        }
+    } else {
+        read = cc_expr_clone(e->lhs);
+    }
+    if (bin == NULL || one == NULL || read == NULL || (e->ident != NULL && read->ident == NULL)) {
+        free(bin);
+        cc_expr_free(one);
+        cc_expr_free(read);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    bin->kind = CC_EXPR_BIN;
+    bin->op = op;
+    bin->line = e->line;
+    bin->col = e->col;
+    bin->lhs = read;
+    bin->rhs = one;
+    if (!e->update_postfix) {
+        e->kind = CC_EXPR_ASSIGN;
+        e->rhs = bin;
+    } else {
+        cc_expr_t *asg = (cc_expr_t *)calloc(1, sizeof(*asg));
+        cc_expr_t *undo = sema_int_node(1, e->line, e->col);
+
+        if (asg == NULL || undo == NULL) {
+            free(asg);
+            cc_expr_free(undo);
+            cc_expr_free(bin);
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        asg->kind = CC_EXPR_ASSIGN;
+        asg->line = e->line;
+        asg->col = e->col;
+        asg->ident = e->ident;
+        asg->lhs = e->lhs;
+        asg->rhs = bin;
+        e->kind = CC_EXPR_BIN;
+        e->op = op == CC_BIN_ADD ? CC_BIN_SUB : CC_BIN_ADD;
+        e->ident = NULL;
+        e->lhs = asg;
+        e->rhs = undo;
+        e->update_postfix = 0;
+    }
+    return check_expr(tu, e, vars, var_count, depth, diag);
+}
+
+/** @p v rounded to the floating type @p t (float, double or long double). */
+static long double sema_round_to(const cc_ctype_t *t, long double v) {
+    if (ct_kind_is(t, CC_CT_FLOAT)) {
+        return (float)v;
+    }
+    return ct_kind_is(t, CC_CT_LDOUBLE) ? v : (long double)(double)v;
+}
+
+/**
+ * Fold a checked arithmetic constant expression, real or complex, to its
+ * two parts, each operation rounded to its type: what a static complex
+ * object's initializer must be (C11 6.6p7).
+ *
+ * @return 0, or -1 if it is not such a constant
+ */
+static int sema_fold_complex(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *re, long double *im,
+                             int depth) {
+    const cc_ctype_t *elem;
+
+    if (e == NULL || depth > 64) {
+        return -1;
+    }
+    elem = sema_complex_elem(tu, sx_vtype(e));
+    if (elem == NULL) {
+        elem = sx_vtype(e);
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        *re = cc_ct_is_unsigned(e->ctype) ? (long double)(unsigned long long)e->int_val : (long double)e->int_val;
+        *im = 0;
+        return 0;
+    case CC_EXPR_FLOAT:
+        *re = ct_kind_is(e->ctype, CC_CT_LDOUBLE) ? e->float_val_ld : (long double)e->float_val;
+        *im = 0;
+        return 0;
+    case CC_EXPR_COMPLEX: {
+        long double r1, i1, r2, i2;
+
+        if (sema_fold_complex(tu, e->lhs, &r1, &i1, depth + 1) != 0 ||
+            sema_fold_complex(tu, e->rhs, &r2, &i2, depth + 1) != 0) {
+            return -1;
+        }
+        *re = sema_round_to(elem, r1);
+        *im = sema_round_to(elem, r2);
+        return 0;
+    }
+    case CC_EXPR_CAST:
+        if (sema_fold_complex(tu, e->lhs, re, im, depth + 1) != 0) {
+            return -1;
+        }
+        if (sema_complex_elem(tu, sx_vtype(e)) == NULL) {
+            *im = 0;
+            if (cc_ct_is_integer(sx_vtype(e))) {
+                *re = (long double)(long long)*re;
+                return 0;
+            }
+        }
+        *re = sema_round_to(elem, *re);
+        *im = sema_round_to(elem, *im);
+        return 0;
+    case CC_EXPR_BIN: {
+        long double a, b, c, d;
+
+        if (sema_fold_complex(tu, e->lhs, &a, &b, depth + 1) != 0 ||
+            sema_fold_complex(tu, e->rhs, &c, &d, depth + 1) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD:
+            *re = a + c;
+            *im = b + d;
+            break;
+        case CC_BIN_SUB:
+            *re = a - c;
+            *im = b - d;
+            break;
+        case CC_BIN_MUL:
+            *re = sema_round_to(elem, a * c) - sema_round_to(elem, b * d);
+            *im = sema_round_to(elem, a * d) + sema_round_to(elem, b * c);
+            if (b == 0 && d == 0) {
+                *im = 0;
+            }
+            break;
+        case CC_BIN_DIV:
+            if (d == 0 && c != 0) {
+                *re = a / c;
+                *im = b / c;
+            } else {
+                long double den = c * c + d * d;
+
+                if (den == 0) {
+                    return -1;
+                }
+                *re = (a * c + b * d) / den;
+                *im = (b * c - a * d) / den;
+            }
+            break;
+        default:
+            return -1;
+        }
+        *re = sema_round_to(elem, *re);
+        *im = sema_round_to(elem, *im);
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+/** A floating literal node of type @p t and value @p v, or NULL when out of memory. */
+static cc_expr_t *sema_float_literal(const cc_ctype_t *t, long double v, size_t line, size_t col) {
+    cc_expr_t *f = (cc_expr_t *)calloc(1, sizeof(*f));
+
+    if (f != NULL) {
+        f->kind = CC_EXPR_FLOAT;
+        f->line = line;
+        f->col = col;
+        f->float_val = (double)v;
+        f->float_val_ld = v;
+        f->ctype = t;
+    }
+    return f;
+}
+
+/**
+ * Make a checked initializer of a static complex object of element type
+ * @p elem the brace list `{ re, im }` of its folded constant parts, which
+ * the structure-initializer path lays out.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *elem,
+                                    cc_diag_t *diag) {
+    long double re;
+    long double im;
+    cc_expr_t *list;
+    cc_expr_t **items;
+
+    if (sema_fold_complex(tu, *slot, &re, &im, 0) != 0) {
+        sema_diag(diag, "initializer of a static complex object is not an arithmetic constant");
+        return -1;
+    }
+    list = (cc_expr_t *)calloc(1, sizeof(*list));
+    items = (cc_expr_t **)calloc(2, sizeof(*items));
+    if (list == NULL || items == NULL) {
+        free(list);
+        free(items);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    items[0] = sema_float_literal(elem, sema_round_to(elem, re), (*slot)->line, (*slot)->col);
+    items[1] = sema_float_literal(elem, sema_round_to(elem, im), (*slot)->line, (*slot)->col);
+    if (items[0] == NULL || items[1] == NULL) {
+        free(items[0]);
+        free(items[1]);
+        free(items);
+        free(list);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    list->kind = CC_EXPR_INIT_LIST;
+    list->line = (*slot)->line;
+    list->col = (*slot)->col;
+    list->args = items;
+    list->arg_count = 2;
+    cc_expr_free(*slot);
+    *slot = list;
+    return 0;
+}
+
+/** 32-bit words in a folded wide constant: enough for BITINT_MAXWIDTH bits and a sign word. */
+#define SEMA_BIG_WORDS (65535 / 32 + 2)
+
+/**
+ * Reduce the folded constant @p v to a type of @p bits bits, signed or
+ * not: drop the bits above, then extend from the top one kept.
+ */
+static void sema_big_reduce(unsigned int *v, long bits, int is_unsigned) {
+    long i;
+    long top = (bits - 1) / 32;
+    unsigned int keep = (unsigned int)(bits % 32 == 0 ? 0xffffffffu : ((1u << (bits % 32)) - 1u));
+    int neg;
+
+    v[top] &= keep;
+    neg = !is_unsigned && ((v[top] >> ((bits - 1) % 32)) & 1u);
+    if (neg) {
+        v[top] |= ~keep;
+    }
+    for (i = top + 1; i < SEMA_BIG_WORDS; ++i) {
+        v[i] = neg ? 0xffffffffu : 0;
+    }
+}
+
+/**
+ * The width and signedness of the integer type of @p e, wide or not.
+ *
+ * @param tu      the translation unit
+ * @param e       the expression
+ * @param is_uns  receives whether the type is unsigned
+ * @return        the width in bits; 0 if @p e has no integer type
+ */
+static long sema_int_width(const cc_translation_unit_t *tu, const cc_expr_t *e, int *is_uns) {
+    const cc_ctype_t *t = sx_vtype(e);
+    const cc_struct_def_t *wd = sema_wide_def(tu, t);
+
+    if (wd != NULL) {
+        *is_uns = wd->wide_unsigned;
+        return wd->wide_bits;
+    }
+    if (ct_kind_is(t, CC_CT_BITINT) || ct_kind_is(t, CC_CT_UBITINT)) {
+        *is_uns = t->kind == CC_CT_UBITINT;
+        return t->count;
+    }
+    if (ct_kind_is(t, CC_CT_BOOL)) {
+        *is_uns = 1;
+        return 1;
+    }
+    if (cc_ct_is_integer(t)) {
+        *is_uns = cc_ct_is_unsigned(t);
+        return cc_ct_size(t, tu) * 8;
+    }
+    return 0;
+}
+
+/**
+ * Fold an integer constant expression to its exact two's-complement value
+ * in @p out (SEMA_BIG_WORDS words, least significant first), each step
+ * reduced to its type: integer and bit-precise constants (`wb` ones of any
+ * width, as their compound literals of limbs), casts, negation, `~`, `+`,
+ * `-`, and `<<`/`>>` by a constant.  What a static wide integer's
+ * initializer must be.
+ *
+ * @return 0, or -1 if it is not such a constant
+ */
+static int sema_big_fold(const cc_translation_unit_t *tu, const cc_expr_t *e, unsigned int *out, int depth) {
+    int is_uns = 0;
+    long bits;
+    long i;
+
+    if (e == NULL || depth > 64) {
+        return -1;
+    }
+    memset(out, 0, SEMA_BIG_WORDS * sizeof(*out));
+    bits = sema_int_width(tu, e, &is_uns);
+    switch (e->kind) {
+    case CC_EXPR_INT: {
+        unsigned long long v = (unsigned long long)e->int_val;
+
+        out[0] = (unsigned int)v;
+        out[1] = (unsigned int)(v >> 32);
+        for (i = 2; i < SEMA_BIG_WORDS; ++i) {
+            out[i] = (!is_uns && e->int_val < 0) ? 0xffffffffu : 0;
+        }
+        break;
+    }
+    case CC_EXPR_CAST:
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST && sema_wide_def(tu, sema_cast_target_ctype(e))) {
+            /* a wide `wb` constant: (type){ { limbs } } */
+            const cc_expr_t *limbs = e->lhs->arg_count == 1 ? e->lhs->args[0] : NULL;
+            long lb = cc_target_pointer_size();
+
+            if (limbs == NULL || limbs->kind != CC_EXPR_INIT_LIST) {
+                return -1;
+            }
+            for (i = 0; i < (long)limbs->arg_count && i * lb / 4 < SEMA_BIG_WORDS - 1; ++i) {
+                unsigned long long v = (unsigned long long)limbs->args[i]->int_val;
+
+                out[i * lb / 4] = (unsigned int)v;
+                if (lb == 8) {
+                    out[i * 2 + 1] = (unsigned int)(v >> 32);
+                }
+            }
+            break;
+        }
+        if (sema_big_fold(tu, e->lhs, out, depth + 1) != 0) {
+            return -1;
+        }
+        break;
+    case CC_EXPR_BIN: {
+        unsigned int *b = (unsigned int *)calloc(SEMA_BIG_WORDS, sizeof(*b));
+        int rc = 0;
+
+        if (b == NULL || sema_big_fold(tu, e->lhs, out, depth + 1) != 0 || sema_big_fold(tu, e->rhs, b, depth + 1) != 0) {
+            free(b);
+            return -1;
+        }
+        if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
+            unsigned long long c = e->op == CC_BIN_SUB ? 1 : 0;
+
+            for (i = 0; i < SEMA_BIG_WORDS; ++i) {
+                unsigned long long s = (unsigned long long)out[i] + (e->op == CC_BIN_SUB ? (unsigned)~b[i] : b[i]) + c;
+
+                out[i] = (unsigned int)s;
+                c = s >> 32;
+            }
+        } else if (e->op == CC_BIN_BXOR || e->op == CC_BIN_BAND || e->op == CC_BIN_BOR) {
+            for (i = 0; i < SEMA_BIG_WORDS; ++i) {
+                out[i] = e->op == CC_BIN_BXOR ? out[i] ^ b[i] : e->op == CC_BIN_BAND ? out[i] & b[i] : out[i] | b[i];
+            }
+        } else if (e->op == CC_BIN_MUL && (b[SEMA_BIG_WORDS - 1] == 0xffffffffu && b[0] == 0xffffffffu)) {
+            /* -x, parsed as -1 * x */
+            unsigned long long c = 1;
+            long k;
+
+            for (k = 1; k < SEMA_BIG_WORDS && b[k] == 0xffffffffu; ++k) {
+            }
+            if (k != SEMA_BIG_WORDS) {
+                rc = -1;
+            }
+            for (i = 0; rc == 0 && i < SEMA_BIG_WORDS; ++i) {
+                unsigned long long s = (unsigned long long)(unsigned)~out[i] + c;
+
+                out[i] = (unsigned int)s;
+                c = s >> 32;
+            }
+        } else if (e->op == CC_BIN_MUL && (out[SEMA_BIG_WORDS - 1] == 0xffffffffu && out[0] == 0xffffffffu)) {
+            /* -1 * x, the other way round: fold again with the operands swapped */
+            cc_expr_t swapped = *e;
+
+            swapped.lhs = e->rhs;
+            swapped.rhs = e->lhs;
+            free(b);
+            return sema_big_fold(tu, &swapped, out, depth + 1);
+        } else if ((e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) && b[1] == 0 && b[0] < 65536) {
+            unsigned int *r = (unsigned int *)calloc(SEMA_BIG_WORDS, sizeof(*r));
+            long sh = (long)b[0];
+            int neg = (out[SEMA_BIG_WORDS - 1] >> 31) & 1u;
+
+            if (r == NULL) {
+                rc = -1;
+            }
+            for (i = 0; rc == 0 && i < SEMA_BIG_WORDS * 32; ++i) {
+                long from = e->op == CC_BIN_SHL ? i - sh : i + sh;
+                int bit = from < 0 ? 0 : from >= SEMA_BIG_WORDS * 32 ? neg : (int)((out[from / 32] >> (from % 32)) & 1u);
+
+                if (bit) {
+                    r[i / 32] |= 1u << (i % 32);
+                }
+            }
+            if (rc == 0) {
+                memcpy(out, r, SEMA_BIG_WORDS * sizeof(*out));
+            }
+            free(r);
+        } else {
+            rc = -1;
+        }
+        free(b);
+        if (rc != 0) {
+            return -1;
+        }
+        break;
+    }
+    default:
+        return -1;
+    }
+    if (bits > 0) {
+        sema_big_reduce(out, bits, is_uns);
+    }
+    return 0;
+}
+
+/**
+ * Make a checked initializer of a static wide integer of structure @p sid
+ * the brace list `{ { limbs } }` of its folded value, which the
+ * structure-initializer path lays out.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid, cc_diag_t *diag) {
+    const cc_struct_def_t *wd = &tu->structs[sid];
+    long lb = cc_target_pointer_size();
+    long n = (wd->wide_bits + lb * 8 - 1) / (lb * 8);
+    unsigned int *v = (unsigned int *)calloc(SEMA_BIG_WORDS, sizeof(*v));
+    cc_expr_t *outer = (cc_expr_t *)calloc(1, sizeof(*outer));
+    cc_expr_t *list = (cc_expr_t *)calloc(1, sizeof(*list));
+    long i;
+
+    if (v == NULL || outer == NULL || list == NULL) {
+        free(v);
+        free(outer);
+        free(list);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    if (sema_big_fold(tu, *slot, v, 0) != 0) {
+        free(v);
+        free(outer);
+        free(list);
+        sema_diag(diag, "initializer of a static wide integer is not an integer constant");
+        return -1;
+    }
+    sema_big_reduce(v, wd->wide_bits, wd->wide_unsigned);
+    outer->args = (cc_expr_t **)calloc(1, sizeof(*outer->args));
+    list->args = (cc_expr_t **)calloc((size_t)n, sizeof(*list->args));
+    if (outer->args == NULL || list->args == NULL) {
+        free(outer->args);
+        free(list->args);
+        free(v);
+        free(outer);
+        free(list);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        unsigned long long limb = v[i * lb / 4];
+
+        if (lb == 8) {
+            limb |= (unsigned long long)v[i * 2 + 1] << 32;
+        }
+        list->args[i] = sema_const_node((long long)limb, lb == 8 ? CC_CT_ULLONG : CC_CT_UINT, (*slot)->line,
+                                        (*slot)->col);
+        if (list->args[i] == NULL) {
+            list->arg_count = (size_t)i;
+            cc_expr_free(list);
+            free(outer->args);
+            free(outer);
+            free(v);
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+    }
+    free(v);
+    list->kind = CC_EXPR_INIT_LIST;
+    list->arg_count = (size_t)n;
+    outer->kind = CC_EXPR_INIT_LIST;
+    outer->args[0] = list;
+    outer->arg_count = 1;
+    outer->line = list->line = (*slot)->line;
+    outer->col = list->col = (*slot)->col;
+    cc_expr_free(*slot);
+    *slot = outer;
+    return 0;
+}
+
+/**
+ * A checked controlling expression (of if, while, do, for, ?:) as a
+ * scalar: a complex one becomes the test of whether either part is
+ * nonzero (C11 6.8.4.1, 6.3.1.2).
+ *
+ * @return 0, or -1 with @p diag set when out of memory
+ */
+static int sema_condition(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    if (sema_is_decimal(tu, *slot)) {
+        return sema_decimal_truth(tu, slot, diag);
+    }
+    if (sema_is_wide(tu, *slot)) {
+        return sema_wide_truth(tu, slot, diag);
+    }
+    if (*slot == NULL || sema_complex_elem(tu, sx_vtype(*slot)) == NULL) {
+        return 0;
+    }
+    if (sema_complex_truth(tu, slot) != 0) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Check a complex value built from its parts (CC_EXPR_COMPLEX, checked
+ * children): its type is _Complex of the parts' floating type, the wider
+ * if they differ (an integer part counts as double), and each part is
+ * converted to that.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    int lr = sema_complex_operand_rank(tu, e->lhs);
+    int rr = sema_complex_operand_rank(tu, e->rhs);
+    int rank;
+    const cc_ctype_t *elem;
+    int sid;
+
+    if (lr < 0 || rr < 0 || sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL ||
+        sema_complex_elem(tu, sx_vtype(e->rhs)) != NULL) {
+        sema_diag(diag, "the parts of a complex value must be real arithmetic values");
+        return -1;
+    }
+    rank = lr > rr ? lr : rr;
+    elem = sema_rank_float(rank);
+    sid = sema_complex_sid(tu, elem);
+    if (sid < 0) {
+        sema_diag(diag, "complex type has no layout");
+        return -1;
+    }
+    if ((sx_vtype(e->lhs) != elem && sema_wrap_cast(&e->lhs, elem) != 0) ||
+        (sx_vtype(e->rhs) != elem && sema_wrap_cast(&e->rhs, elem) != 0)) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, elem));
+    return 0;
+}
+
+/**
+ * Check GNU __builtin_complex(re, im) and make it the CC_EXPR_COMPLEX it
+ * stands for.  As in gcc, both arguments must have the same real floating
+ * type.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_builtin_complex(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                                int depth, cc_diag_t *diag) {
+    cc_expr_t **args = e->args;
+
+    if (e->arg_count != 2) {
+        sema_diag(diag, "__builtin_complex takes two arguments");
+        return -1;
+    }
+    if (check_expr(tu, args[0], vars, var_count, depth, diag) != 0 ||
+        check_expr(tu, args[1], vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_float_rank(sx_vtype(args[0])) == 0 || sx_vtype(args[0])->unqual != sx_vtype(args[1])->unqual) {
+        sema_diag(diag, "both arguments to '__builtin_complex' must have the same real floating type");
+        return -1;
+    }
+    free(e->ident);
+    e->ident = NULL;
+    e->kind = CC_EXPR_COMPLEX;
+    e->lhs = args[0];
+    e->rhs = args[1];
+    e->args = NULL;
+    e->arg_count = 0;
+    free(args);
+    return sema_check_complex_parts(tu, e, diag);
+}
+
+/**
+ * Check GNU __real__ x or __imag__ x (a member access marked
+ * member_is_part) where x is real: __real__ x is x, converted to its own
+ * type so it is no lvalue, and __imag__ x is zero after x is evaluated.
+ * A complex x needs nothing: the access names a member of its structure.
+ *
+ * @return 1 if handled here, 0 if x is complex, -1 with @p diag set
+ */
+static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
+                                  size_t var_count, int depth, cc_diag_t *diag) {
+    cc_expr_t *x = e->lhs;
+    const cc_ctype_t *tct;
+
+    if (check_expr(tu, x, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_complex_elem(tu, sx_vtype(x)) != NULL) {
+        return 0;
+    }
+    tct = sx_vtype(x)->unqual;
+    if (!(cc_ct_is_integer(tct) || sema_float_rank(tct) > 0)) {
+        sema_diag(diag, "__real__ and __imag__ need an arithmetic operand");
+        return -1;
+    }
+    if (strcmp(e->ident, "__im") == 0) {
+        cc_expr_t *zero = sema_int_node(0, e->line, e->col);
+
+        if (zero == NULL) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        e->kind = CC_EXPR_BIN;
+        e->op = CC_BIN_COMMA;
+        e->rhs = zero;
+        if (sema_wrap_cast(&e->rhs, tct) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+    } else {
+        e->kind = CC_EXPR_CAST;
+    }
+    free(e->ident);
+    e->ident = NULL;
+    e->member_is_part = 0;
+    sema_set_type(e, tct);
+    return 1;
+}
+
+static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag);
+
+
+/**
+ * Type a node of an initializer that the initializer's check reads but
+ * never checks as an expression: a constant or string literal, a list, a
+ * designator (a member access with no object, the value in its rhs), an
+ * address constant.
+ *
+ * @param e  the node, its parts already typed
+ */
+static void sema_settle_ctype(cc_expr_t *e) {
+    if (e->ctype != NULL) {
+        return;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+    case CC_EXPR_FLOAT:
+    case CC_EXPR_STR:
+        sema_type_literal(e);
+        return;
+    case CC_EXPR_INIT_LIST:
+        sema_set_type(e, e->arg_count > 0 && e->args[0]->ctype != NULL ? e->args[0]->ctype : cc_ct_basic(CC_CT_INT));
+        return;
+    case CC_EXPR_MEMBER:
+        if (e->lhs == NULL && e->rhs != NULL) {
+            sema_set_type(e, e->rhs->ctype);
+            return;
+        }
+        break;
+    case CC_EXPR_ADDR:
+        if (e->lhs != NULL && e->lhs->ctype != NULL) {
+            sema_set_type(e, cc_ct_pointer(e->lhs->ctype));
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static void sema_settle_stmts(cc_stmt_t *s, size_t n);
+
+/**
+ * Give every node in the tree under @p e that has no interned type its
+ * type, operands first (sema_settle_ctype()): the parts of initializers
+ * that their checks read without checking them as expressions.
+ *
+ * @param e  the tree, or NULL
+ */
+static void sema_settle_tree(cc_expr_t *e) {
+    size_t i;
+
+    if (e == NULL) {
+        return;
+    }
+    sema_settle_tree(e->lhs);
+    sema_settle_tree(e->rhs);
+    sema_settle_tree(e->third);
+    for (i = 0; i < e->arg_count; ++i) {
+        sema_settle_tree(e->args[i]);
+    }
+    sema_settle_stmts(e->stmt_expr_stmts, e->stmt_expr_count);
+    if (e->ctype == NULL) {
+        sema_settle_ctype(e);
+    }
+}
+
+/**
+ * sema_settle_tree() over every expression in statements @p s[0..n).
+ *
+ * @param s  the statements, or NULL
+ * @param n  their count
+ */
+static void sema_settle_stmts(cc_stmt_t *s, size_t n) {
+    size_t i;
+    size_t k;
+
+    for (i = 0; s != NULL && i < n; ++i) {
+        for (k = 0; k < s[i].array_bounds.count; ++k) {
+            sema_settle_tree(s[i].array_bounds.at[k]);
+        }
+        sema_settle_tree(s[i].expr);
+        sema_settle_tree(s[i].init_expr);
+        sema_settle_tree(s[i].post_expr);
+        sema_settle_stmts(s[i].init_stmt, 1);
+        sema_settle_stmts(s[i].then_branch, 1);
+        sema_settle_stmts(s[i].else_branch, 1);
+        sema_settle_stmts(s[i].block_stmts, s[i].block_count);
+        for (k = 0; k < s[i].asm_output_count; ++k) {
+            sema_settle_tree(s[i].asm_outputs[k].expr);
+        }
+        for (k = 0; k < s[i].asm_input_count; ++k) {
+            sema_settle_tree(s[i].asm_inputs[k].expr);
+        }
+    }
+}
+
+/**
+ * Check expression @p e and give it its interned type (see
+ * check_expr_kind()).
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
+                      cc_diag_t *diag) {
+    return check_expr_kind(tu, e, vars, var_count, depth, diag);
+}
+
+/**
+ * Give expression @p e type @p t.
+ *
+ * @param e  the expression
+ * @param t  its type
+ */
+static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
+    e->ctype = t;
+}
+
+/**
+ * The type the usual arithmetic conversions (C11 6.3.1.8) give real
+ * operands of types @p a and @p b: the wider floating type if either is
+ * floating, else the common integer type.
+ *
+ * @return the type, or NULL if either is not an arithmetic type
+ */
+static const cc_ctype_t *sema_usual_arith(const cc_ctype_t *a, const cc_ctype_t *b) {
+    static const cc_ctype_kind_t floats[] = {CC_CT_LDOUBLE, CC_CT_DOUBLE, CC_CT_FLOAT, CC_CT_FLOAT16};
+    size_t i;
+
+    if (!cc_ct_is_arithmetic(a) || !cc_ct_is_arithmetic(b)) {
+        return NULL;
+    }
+    for (i = 0; i < sizeof(floats) / sizeof(floats[0]); ++i) {
+        if (a->unqual->kind == floats[i] || b->unqual->kind == floats[i]) {
+            return cc_ct_basic(floats[i]);
+        }
+    }
+    return cc_ct_common_int(a->unqual, b->unqual);
+}
+
+/** Whether @p t (a value's type) is a pointer. */
+static int sema_is_ptr(const cc_ctype_t *t) {
+    return t != NULL && t->unqual->kind == CC_CT_POINTER;
+}
+
+/** Whether @p t (a value's type) is a pointer to void. */
+static int sema_is_void_ptr(const cc_ctype_t *t) {
+    return sema_is_ptr(t) && t->unqual->of != NULL && t->unqual->of->unqual->kind == CC_CT_VOID;
+}
+
+/**
+ * Whether objects of types @p a and @p b are close enough that pointers to
+ * them may be compared or subtracted.  This is laxer than compatibility
+ * (C11 6.2.7): integer types of one size match, as do any two structures,
+ * as the checker has always allowed.
+ *
+ * @param tu  the translation unit
+ * @param a   one pointed-to type
+ * @param b   the other
+ * @return    1 if they match, else 0
+ */
+static int sema_pointees_match(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b) {
+    a = a->unqual;
+    b = b->unqual;
+    if (a == b || a->kind == CC_CT_VOID || b->kind == CC_CT_VOID) {
+        return 1;
+    }
+    if (cc_ct_is_integer(a) && cc_ct_is_integer(b)) {
+        return cc_ct_size(a, tu) == cc_ct_size(b, tu);
+    }
+    if (a->kind != b->kind) {
+        return 0;
+    }
+    switch (a->kind) {
+    case CC_CT_RECORD:
+    case CC_CT_COMPLEX:
+    case CC_CT_FUNCTION:
+        return 1;
+    case CC_CT_POINTER:
+    case CC_CT_ARRAY:
+        return sema_pointees_match(tu, a->of, b->of);
+    default:
+        return 0;
+    }
+}
+
+/**
+ * Whether pointer types @p a and @p b may be compared or subtracted (see
+ * sema_pointees_match()).
+ */
+static int sema_ptrs_match(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b) {
+    return sema_pointees_match(tu, a->unqual->of, b->unqual->of);
+}
+
+/**
+ * Warn, under -pedantic, of arithmetic on a `void *` operand of type @p t.
+ *
+ * @return 0, or -1 if the warning is an error
+ */
+static int sema_void_ptr_arith(const cc_ctype_t *t, const cc_expr_t *e, cc_diag_t *diag) {
+    if (sema_is_void_ptr(t) && cc_options_current()->pedantic &&
+        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Type an equality or relational operator (C11 6.5.8, 6.5.9): arithmetic
+ * operands, pointers that match, or (for == and !=) a pointer and a null
+ * pointer constant; a GNU extension allows a pointer and any integer.
+ *
+ * @param tu    the translation unit
+ * @param e     the operator, its operands checked
+ * @param a     the left operand's type as a value
+ * @param b     the right operand's
+ * @param diag  receives the error
+ * @return      0, or -1 with @p diag set
+ */
+static int sema_check_compare(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_ctype_t *a,
+                              const cc_ctype_t *b, cc_diag_t *diag) {
+    int eq = e->op == CC_BIN_EQ || e->op == CC_BIN_NE;
+
+    if (cc_ct_is_arithmetic(a) && cc_ct_is_arithmetic(b)) {
+        return 0;
+    }
+    if (sema_is_ptr(a) && sema_is_ptr(b)) {
+        if (sema_ptrs_match(tu, a, b)) {
+            return 0;
+        }
+        sema_diag(diag, "incompatible pointer types in comparison");
+        return -1;
+    }
+    if (eq && ((sema_is_ptr(a) && cc_ct_is_integer(b)) || (sema_is_ptr(b) && cc_ct_is_integer(a)))) {
+        if (is_null_ptr_constant(sema_is_ptr(a) ? e->rhs : e->lhs)) {
+            return 0;
+        }
+        if (cc_options_current()->pedantic &&
+            emit_warning(diag, e->line, e->col, "comparison between pointer and integer is a GNU extension", 1) !=
+                0) {
+            return -1;
+        }
+        return 0;
+    }
+    sema_diag(diag, eq ? "comparison operators require compatible scalar operands"
+                      : "ordered comparison operators require numeric or compatible pointer operands");
+    return -1;
+}
+
+/**
+ * Type `+` or `-` with a pointer operand (C11 6.5.6): a pointer and an
+ * integer give the pointer's type, two pointers that match their
+ * difference.
+ *
+ * @param tu    the translation unit
+ * @param e     the operator, its operands checked
+ * @param a     the left operand's type as a value
+ * @param b     the right operand's
+ * @param diag  receives the error
+ * @return      the type, or NULL with @p diag set
+ */
+static const cc_ctype_t *sema_pointer_arith(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_ctype_t *a,
+                                            const cc_ctype_t *b, cc_diag_t *diag) {
+    if (e->op == CC_BIN_SUB && sema_is_ptr(a) && sema_is_ptr(b)) {
+        if (sema_void_ptr_arith(a, e, diag) != 0 || sema_void_ptr_arith(b, e, diag) != 0) {
+            return NULL;
+        }
+        if (!sema_ptrs_match(tu, a, b)) {
+            sema_diag(diag, "incompatible pointer types in subtraction");
+            return NULL;
+        }
+        /* ptrdiff_t */
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_LONG : CC_CT_INT);
+    }
+    if (sema_is_ptr(a) && cc_ct_is_integer(b)) {
+        return sema_void_ptr_arith(a, e, diag) != 0 ? NULL : a;
+    }
+    if (e->op == CC_BIN_ADD && cc_ct_is_integer(a) && sema_is_ptr(b)) {
+        return sema_void_ptr_arith(b, e, diag) != 0 ? NULL : b;
+    }
+    sema_diag(diag, "unsupported pointer arithmetic form");
+    return NULL;
+}
+
+/**
+ * The type of `-x`, `~x` or `+x`, which the parser builds as a binary
+ * operator with a constant on the other side (unary_form says which):
+ * the operand's type, promoted.  For any other operator, @p t.
+ *
+ * @param e  the operator
+ * @param a  its left operand's type as a value
+ * @param b  its right operand's
+ * @param t  its type as a binary operator
+ */
+static const cc_ctype_t *sema_unary_or(const cc_expr_t *e, const cc_ctype_t *a, const cc_ctype_t *b,
+                                       const cc_ctype_t *t) {
+    if (e->unary_form == CC_UNARY_RHS && cc_ct_is_integer(b)) {
+        return cc_ct_promote(b);
+    }
+    if (e->unary_form == CC_UNARY_LHS && cc_ct_is_integer(a)) {
+        return cc_ct_promote(a);
+    }
+    return t;
+}
+
+/**
+ * Make the conversions of an arithmetic, bitwise or shift operator's
+ * operands explicit, now that the operator is typed: both operands of
+ * `*`, `/`, `%`, `+`, `-`, `&`, `^` and `|` convert to its type (the usual
+ * arithmetic conversions, C11 6.3.1.8), and each operand of a shift is
+ * promoted on its own (6.5.7p3).  Pointer arithmetic, comparisons (see
+ * sema_check_bin()) and the logical operators convert nothing here.
+ *
+ * @param e  the operator, typed
+ * @param a  its left operand's type as a value
+ * @param b  its right operand's
+ * @return   0, or -1 when out of memory
+ */
+static int sema_convert_operands(cc_expr_t *e, const cc_ctype_t *a, const cc_ctype_t *b) {
+    if (!cc_ct_is_arithmetic(a) || !cc_ct_is_arithmetic(b) || is_logical_op(e->op) || is_cmp_op(e->op) ||
+        e->op == CC_BIN_COMMA) {
+        return 0;
+    }
+    if (e->unary_form == CC_UNARY_RHS) {
+        /* `-x`, `~x`, `+x`: the constant the parser put beside x is no operand of C's */
+        return sema_convert(&e->rhs, e->ctype);
+    }
+    if (e->unary_form == CC_UNARY_LHS) {
+        return sema_convert(&e->lhs, e->ctype);
+    }
+    if (is_shift_op(e->op)) {
+        return sema_convert(&e->lhs, cc_ct_promote(a)) != 0 || sema_convert(&e->rhs, cc_ct_promote(b)) != 0 ? -1 : 0;
+    }
+    return sema_convert(&e->lhs, e->ctype) != 0 || sema_convert(&e->rhs, e->ctype) != 0 ? -1 : 0;
+}
+
+/**
+ * Check a binary operator (CC_EXPR_BIN) and type it.  An operand of a
+ * vector, decimal, wide integer or complex type sends it to that type's
+ * rewrite; the rest follow C11 6.5.5 to 6.5.17.
+ *
+ * @param tu         the translation unit
+ * @param e          the operator
+ * @param vars       the variables in scope
+ * @param var_count  their count
+ * @param depth      the scope depth
+ * @param diag       receives the error
+ * @return           0, or -1 with @p diag set
+ */
+static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                          int depth, cc_diag_t *diag) {
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+    const cc_ctype_t *t;
+
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+        check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (e->op == CC_BIN_COMMA) {
+        sema_set_type(e, e->rhs->ctype);
+        return 0;
+    }
+    if (e->op == CC_BIN_ADD && e->is_subscript && (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs))) {
+        /* v[i]: an element of the vector's array */
+        if (sema_vector_subscript(tu, sema_is_vector(tu, e->lhs) ? &e->lhs : &e->rhs) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+    } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
+        return sema_vector_binop(tu, e, diag);
+    }
+    if (sema_is_decimal(tu, e->lhs) || sema_is_decimal(tu, e->rhs)) {
+        if (!is_logical_op(e->op)) {
+            return sema_decimal_binop(tu, e, diag);
+        }
+        if (sema_decimal_truth(tu, &e->lhs, diag) != 0 || sema_decimal_truth(tu, &e->rhs, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (sema_is_wide(tu, e->lhs) || sema_is_wide(tu, e->rhs)) {
+        if (!is_logical_op(e->op)) {
+            return sema_wide_binop(tu, e, diag);
+        }
+        if (sema_wide_truth(tu, &e->lhs, diag) != 0 || sema_wide_truth(tu, &e->rhs, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL || sema_complex_elem(tu, sx_vtype(e->rhs)) != NULL) {
+        if (!is_logical_op(e->op)) {
+            return sema_complex_binop(tu, e, diag);
+        }
+        if (sema_complex_truth(tu, &e->lhs) != 0 || sema_complex_truth(tu, &e->rhs) != 0) {
+            sema_diag(diag, "out of memory converting a complex operand");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    a = sx_vtype(e->lhs);
+    b = sx_vtype(e->rhs);
+    if (is_logical_op(e->op)) {
+        if (!cc_ct_is_scalar(a) || !cc_ct_is_scalar(b)) {
+            sema_diag(diag, "logical operators require scalar operands");
+            return -1;
+        }
+        t = cc_ct_basic(CC_CT_INT);
+    } else if (is_shift_op(e->op) || is_bitwise_op(e->op)) {
+        if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
+            sema_diag(diag, is_shift_op(e->op) ? "shift operators require integer operands"
+                                              : "bitwise operators require integer operands");
+            return -1;
+        }
+        t = is_shift_op(e->op) ? cc_ct_promote(a) : sema_unary_or(e, a, b, cc_ct_common_int(a, b));
+    } else if (is_cmp_op(e->op)) {
+        if (sema_check_compare(tu, e, a, b, diag) != 0) {
+            return -1;
+        }
+        /* arithmetic operands are compared in their common type (C11 6.5.8p3, 6.5.9p4) */
+        if (cc_ct_is_arithmetic(a) && cc_ct_is_arithmetic(b)) {
+            const cc_ctype_t *c = sema_usual_arith(a, b);
+
+            if (sema_convert(&e->lhs, c) != 0 || sema_convert(&e->rhs, c) != 0) {
+                sema_diag(diag, "out of memory converting a comparison operand");
+                return -1;
+            }
+        }
+        t = cc_ct_basic(CC_CT_INT);
+    } else if (sema_is_ptr(a) || sema_is_ptr(b)) {
+        if (e->op != CC_BIN_ADD && e->op != CC_BIN_SUB) {
+            sema_diag(diag, "arithmetic operators require numeric operands");
+            return -1;
+        }
+        t = sema_pointer_arith(tu, e, a, b, diag);
+        if (t == NULL) {
+            return -1;
+        }
+    } else if (e->op == CC_BIN_MOD) {
+        if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
+            sema_diag(diag, "modulo operator requires integer operands");
+            return -1;
+        }
+        t = cc_ct_common_int(a, b);
+    } else {
+        t = sema_usual_arith(a, b);
+        if (t == NULL) {
+            sema_diag(diag, "void expression used in arithmetic operation");
+            return -1;
+        }
+        t = sema_unary_or(e, a, b, t);
+    }
+    sema_set_type(e, t);
+    if (sema_convert_operands(e, a, b) != 0) {
+        sema_diag(diag, "out of memory converting an operand");
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Check `&x` (CC_EXPR_ADDR) and type it a pointer to x's type (C11
+ * 6.5.3.2): x is a function, an object named or reached through a member
+ * or `*`, or a compound literal; never a bit-field.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_addr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    cc_expr_t *x = e->lhs;
+    /* a compound literal, before checking turns a scalar one into a plain cast of its value */
+    int of_literal;
+
+    if (x == NULL) {
+        sema_diag(diag, "malformed address-of expression");
+        return -1;
+    }
+    of_literal = x->kind == CC_EXPR_CAST && x->lhs != NULL && x->lhs->kind == CC_EXPR_INIT_LIST;
+    if (check_expr(tu, x, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (x->kind == CC_EXPR_MEMBER && x->member_is_bitfield) {
+        sema_diag(diag, "cannot take address of bit-field");
+        return -1;
+    }
+    if (x->kind == CC_EXPR_DEREF) {
+        /* &*p is p, not an lvalue */
+        if (!sema_is_ptr(sx_vtype(x->lhs))) {
+            sema_diag(diag, "address-of dereference requires pointer operand");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(x->lhs));
+        return 0;
+    }
+    if (!of_literal && x->kind != CC_EXPR_IDENT && x->kind != CC_EXPR_MEMBER &&
+        !(x->kind == CC_EXPR_CAST && sx_ct_record(x->ctype) >= 0)) {
+        sema_diag(diag, "address-of currently requires an identifier or member lvalue");
+        return -1;
+    }
+    sema_set_type(e, cc_ct_pointer(x->ctype));
+    return 0;
+}
+
+/**
+ * Check `*p` (CC_EXPR_DEREF) and type it what p points to (C11 6.5.3.2).
+ * `*f` of a function, or of a pointer to one, designates the function,
+ * which is used as f again.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_deref(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                            int depth, cc_diag_t *diag) {
+    const cc_ctype_t *p;
+
+    if (e->lhs == NULL) {
+        sema_diag(diag, "malformed dereference expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (cc_ct_expr_designates_function(e->lhs)) {
+        sema_set_type(e, e->lhs->ctype);
+        return 0;
+    }
+    p = sx_vtype(e->lhs);
+    if (!sema_is_ptr(p)) {
+        sema_diag(diag, "dereference requires pointer operand");
+        return -1;
+    }
+    if (p->of->unqual->kind == CC_CT_VOID && cc_options_current()->pedantic &&
+        emit_warning(diag, e->line, e->col, "dereferencing 'void *' is a GNU extension", 1) != 0) {
+        return -1;
+    }
+    sema_set_type(e, p->of);
+    return 0;
+}
+
+/**
+ * Check a compound literal (a CC_EXPR_CAST of an initializer list):
+ * its list against its type, an array's or a structure's; a scalar's
+ * list is unwrapped to the value it holds, which the caller then
+ * converts as a cast.
+ *
+ * @return 1 if the literal is an array or structure and checked, 0 if it
+ *         is a scalar (now a plain cast), -1 with @p diag set
+ */
+static int sema_check_compound_literal(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
+                                       size_t var_count, int depth, cc_diag_t *diag) {
+    const cc_ctype_t *t = e->ctype;
+    long inferred_len = -1;
+
+    if (t != NULL && t->kind == CC_CT_ARRAY) {
+        if (check_array_initializer(tu, "<compound-literal>", t, e->lhs, vars, var_count, depth, &inferred_len, diag) !=
+            0) {
+            return -1;
+        }
+        sema_set_type(e, sema_complete_array_ctype(t, inferred_len));
+        return 1;
+    }
+    if (sx_ct_record(t) >= 0) {
+        if (check_struct_initializer(tu, "<compound-literal>", sx_ct_record(t), e->lhs, vars, var_count, depth,
+                                     diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, t);
+        return 1;
+    }
+    e->lhs = unwrap_scalar_initializer_expr(e->lhs, diag);
+    return e->lhs == NULL ? -1 : 0;
+}
+
+/**
+ * Check a cast (CC_EXPR_CAST) to the type the parser recorded in its
+ * ctype, and type it that (C11 6.5.4): between arithmetic types, between
+ * pointers and integers, to void, to a structure (a compound literal) or
+ * to a union from one of its members' types (GNU).  A cast from or to a
+ * vector, decimal or wide integer type goes to that type's rewrite; one
+ * from a complex type to a real one takes the real part.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_ctype_t *from;
+    int rid;
+
+    if (e->lhs == NULL || to == NULL) {
+        sema_diag(diag, "malformed cast expression");
+        return -1;
+    }
+    if (e->lhs->kind == CC_EXPR_INIT_LIST) {
+        int rc = sema_check_compound_literal(tu, e, vars, var_count, depth, diag);
+
+        if (rc != 0) {
+            return rc < 0 ? -1 : 0;
+        }
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL && cc_ct_is_arithmetic(to) &&
+        sema_complex_elem(tu, to) == NULL) {
+        /* complex to real: the real part (C11 6.3.1.7); to _Bool: whether either part is nonzero */
+        if ((ct_kind_is(to->unqual, CC_CT_BOOL) ? sema_complex_truth(tu, &e->lhs)
+                                                : sema_complex_part(tu, &e->lhs, 0)) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+    }
+    if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, to) != NULL) {
+        return sema_vector_cast(tu, e, diag);
+    }
+    if (sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, to) != NULL) {
+        return sema_decimal_cast(tu, e, diag);
+    }
+    from = sx_vtype(e->lhs);
+    if (sema_is_wide(tu, e->lhs) && sema_wide_def(tu, to) == NULL) {
+        /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */
+        if (!sema_wide_partner_ok(to) && !ct_kind_is(to->unqual, CC_CT_POINTER) &&
+            !ct_kind_is(to->unqual, CC_CT_VOID)) {
+            sema_diag(diag, "invalid conversion of a wide integer");
+            return -1;
+        }
+        if (ct_kind_is(to->unqual, CC_CT_BOOL) && sema_wide_truth(tu, &e->lhs, diag) != 0) {
+            return -1;
+        }
+    } else if (sema_wide_def(tu, to) != NULL) {
+        /* to a wide integer: from any integer or floating value */
+        if (!sema_is_wide(tu, e->lhs) && !sema_wide_partner_ok(from)) {
+            sema_diag(diag, "invalid conversion to a wide integer");
+            return -1;
+        }
+    } else if (sema_complex_elem(tu, to) != NULL && sema_complex_operand_rank(tu, e->lhs) < 0) {
+        sema_diag(diag, "only an arithmetic value can be converted to a complex type");
+        return -1;
+    } else if ((rid = sx_ct_record(to)) >= 0) {
+        const cc_struct_def_t *sd = find_struct_def(tu, rid);
+
+        if (sd == NULL || !sd->complete) {
+            sema_diag(diag, "cast targets unknown aggregate type");
+            return -1;
+        }
+        if (sd->is_union) {
+            const cc_struct_member_t *m = cc_ct_union_cast_member(tu, rid, e->lhs->ctype);
+
+            if (m == NULL) {
+                sema_diag(diag, "cast to union type from type not present in union");
+                return -1;
+            }
+            e->member_offset = m->offset;
+        }
+    } else if (!ct_kind_is(to->unqual, CC_CT_VOID) && !(cc_ct_is_arithmetic(from) && cc_ct_is_arithmetic(to)) &&
+               !(sema_is_ptr(to) && (sema_is_ptr(from) || cc_ct_is_integer(from))) &&
+               !(cc_ct_is_integer(to) && sema_is_ptr(from))) {
+        sema_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
+        return -1;
+    }
+    sema_set_type(e, to);
+    return 0;
+}
+
+/**
+ * Check `sizeof x` or `sizeof (T)` (C11 6.5.3.4): not of a bit-field, a
+ * void expression or an incomplete type.  Its type is size_t.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    if (e->lhs != NULL) {
+        const cc_ctype_t *t;
+
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
+            sema_diag(diag, "sizeof cannot be applied to bit-field");
+            return -1;
+        }
+        /* an array with a bound that is no constant (a variable-length one) is sized when the program runs */
+        for (t = e->lhs->ctype; t != NULL && t->kind == CC_CT_ARRAY && t->count >= 0; t = t->of) {
+        }
+        if (!(t != NULL && t->kind == CC_CT_ARRAY) && cc_ct_size(e->lhs->ctype, tu) < 0) {
+            sema_diag(diag, "sizeof unsupported for this operand type");
+            return -1;
+        }
+    } else {
+        if (cc_ct_sizeof_type(e->aux_ctype, tu) < 0) {
+            sema_diag(diag, "sizeof unsupported for this type");
+            return -1;
+        }
+        if (e->aux_ctype->kind == CC_CT_VOID &&
+            emit_warning(diag, e->line, e->col, "invalid application of 'sizeof' to a void type", 1) != 0) {
+            return -1;
+        }
+    }
+    sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
+    {
+        /* a size known now is the constant it is; only a variable-length array's is computed at run time */
+        long n = e->lhs != NULL ? cc_ct_size(e->lhs->ctype, tu) : cc_ct_sizeof_type(e->aux_ctype, tu);
+
+        if (n >= 0) {
+            cc_expr_free(e->lhs);
+            e->lhs = NULL;
+            e->aux_ctype = NULL;
+            e->kind = CC_EXPR_INT;
+            e->int_val = n;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Check a GNU statement expression `({ ... })` in a scope of its own; its
+ * value is that of its last statement, if an expression, else void.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_stmt_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                                int depth, cc_diag_t *diag) {
+    var_entry_t *lvars = NULL;
+    size_t lcount = var_count;
+    int saw_return = 0;
+    const cc_stmt_t *last = NULL;
+    size_t j;
+
+    if (emit_warning(diag, e->line, e->col, "statement expression is a GNU extension (non-C99)", 1) != 0) {
+        return -1;
+    }
+    if (vars_clone(&lvars, vars, var_count) != 0) {
+        sema_diag(diag, "out of memory cloning scope for statement expression");
+        return -1;
+    }
+    for (j = 0; j < e->stmt_expr_count; ++j) {
+        if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, cc_ct_basic(CC_CT_INT), 0, 0, 0,
+                       &saw_return, diag) != 0) {
+            vars_free(lvars, lcount);
+            return -1;
+        }
+    }
+    vars_free(lvars, lcount);
+    if (e->stmt_expr_count > 0) {
+        /* labels chain through then_branch; the value is that of the statement they wrap */
+        last = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
+        while (last != NULL && last->kind == CC_STMT_LABEL) {
+            last = last->then_branch;
+        }
+    }
+    if (last != NULL && last->kind == CC_STMT_EXPR && last->expr != NULL) {
+        sema_set_type(e, sx_vtype(last->expr));
+    } else {
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+    }
+    return 0;
+}
+
+/**
+ * Check `c ? a : b` and GNU `c ?: b` (CC_EXPR_TERNARY, C11 6.5.15) and
+ * type it: two arithmetic arms by the usual arithmetic conversions, two
+ * structures of one type, two pointers that match or a pointer and a
+ * null pointer constant as the pointer, two void arms as void; one void
+ * arm (a GNU extension) as the other's type.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                              int depth, cc_diag_t *diag) {
+    cc_expr_t *x;
+    cc_expr_t *y;
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+    const cc_ctype_t *t;
+    int a_void;
+    int b_void;
+
+    if (e->lhs == NULL || e->third == NULL) {
+        sema_diag(diag, "malformed conditional expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+        (e->rhs != NULL && check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) ||
+        check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_condition(tu, &e->lhs, diag) != 0) {
+        return -1;
+    }
+    if (!cc_ct_is_scalar(sx_vtype(e->lhs))) {
+        sema_diag(diag, "conditional expression condition cannot be void");
+        return -1;
+    }
+    if (e->rhs == NULL &&
+        emit_warning(diag, e->line, e->col, "omitted middle operand in ?: is a GNU extension (non-C99)", 1) != 0) {
+        return -1;
+    }
+    /* `c ?: b` is c if c is nonzero */
+    x = e->rhs != NULL ? e->rhs : e->lhs;
+    y = e->third;
+    a = sx_vtype(x);
+    b = sx_vtype(y);
+    a_void = ct_kind_is(a, CC_CT_VOID);
+    b_void = ct_kind_is(b, CC_CT_VOID);
+    if (a_void || b_void) {
+        if (!(a_void && b_void) &&
+            emit_warning(diag, e->line, e->col, "conditional expression with one void arm is a GNU extension (non-C99)",
+                         1) != 0) {
+            return -1;
+        }
+        t = a_void ? b : a;
+    } else if (sema_is_ptr(a) && sema_is_ptr(b)) {
+        if (!sema_ptrs_match(tu, a, b)) {
+            sema_diag(diag, "incompatible pointer types in conditional expression");
+            return -1;
+        }
+        t = a;
+    } else if (sema_is_ptr(a) && cc_ct_is_integer(b) && is_null_ptr_constant(y)) {
+        t = a;
+    } else if (sema_is_ptr(b) && cc_ct_is_integer(a) && is_null_ptr_constant(x)) {
+        t = b;
+    } else if (sx_ct_record(a) >= 0 && sx_ct_record(b) >= 0) {
+        if (!struct_ids_compatible(tu, sx_ct_record(a), sx_ct_record(b))) {
+            sema_diag(diag, "incompatible struct types in conditional expression");
+            return -1;
+        }
+        t = a;
+    } else if (sx_ct_record(a) >= 0 || sx_ct_record(b) >= 0 || (t = sema_usual_arith(a, b)) == NULL) {
+        sema_diag(diag, "incompatible types in conditional expression");
+        return -1;
+    } else if (e->rhs != NULL && (sema_convert(&e->rhs, t) != 0 || sema_convert(&e->third, t) != 0)) {
+        /* arithmetic arms: each converted to the result's type (C11 6.5.15p5); `c ?: b` keeps c, its condition */
+        sema_diag(diag, "out of memory converting a conditional operand");
+        return -1;
+    }
+    sema_set_type(e, t);
+    return 0;
+}
+
+/**
+ * Whether a named object with storage flags @p storage and type @p t may
+ * not be modified.  Declarations record const/volatile/restrict for the
+ * declaration as a whole, not per level, so a pointer object is never
+ * taken to be const: that would reject `const char *p; p++;`.
+ */
+static int sema_const_object(int storage, const cc_ctype_t *t) {
+    return (storage & CC_STORAGE_CONST) != 0 && !sema_is_ptr(cc_ct_decay(t));
+}
+
+/**
+ * The type of the object an atomic builtin's pointer argument @p ptr
+ * points to; int for a `void *`, as gcc takes it.
+ */
+static const cc_ctype_t *sema_atomic_elem(const cc_expr_t *ptr) {
+    const cc_ctype_t *t = sx_vtype(ptr)->of->unqual;
+
+    return t->kind == CC_CT_VOID ? cc_ct_basic(CC_CT_INT) : t;
+}
+
+/**
+ * Whether a value @p rhs may be assigned to an object of type @p dst (C11
+ * 6.5.16.1), as leniently as the checker has always allowed: between
+ * arithmetic types, between pointers that match (sema_ptrs_match()),
+ * between a pointer and an integer, between structures of one type, and
+ * an integer statement expression to a structure.
+ *
+ * @param tu   the translation unit
+ * @param dst  the object's type
+ * @param rhs  the value, checked
+ * @return     1 if it may, else 0
+ */
+static int sema_assignable(const cc_translation_unit_t *tu, const cc_ctype_t *dst, const cc_expr_t *rhs) {
+    const cc_ctype_t *d = cc_ct_decay(dst);
+    const cc_ctype_t *s = sx_vtype(rhs);
+    int dr = sx_ct_record(d);
+    int sr = sx_ct_record(s);
+
+    if (dr < 0 && sr < 0 && cc_ct_is_arithmetic(d) && cc_ct_is_arithmetic(s)) {
+        return 1;
+    }
+    if (sema_is_ptr(d) && sema_is_ptr(s)) {
+        return sema_ptrs_match(tu, d, s);
+    }
+    if ((sema_is_ptr(d) && cc_ct_is_integer(s)) || (cc_ct_is_integer(d) && sema_is_ptr(s))) {
+        return 1;
+    }
+    if (dr >= 0 && sr >= 0) {
+        return struct_ids_compatible(tu, dr, sr);
+    }
+    return dr >= 0 && cc_ct_is_integer(s) && rhs->kind == CC_EXPR_STMT;
+}
+
+/**
+ * Whether argument @p arg may be passed for a parameter of union type
+ * @p sid as one of its members (GCC's transparent_union; a pointer is
+ * accepted for any union whose member it converts to).
+ *
+ * @return 1 if it may, else 0
+ */
+static int sema_transparent_union_accepts(const cc_translation_unit_t *tu, int sid, const cc_expr_t *arg) {
+    const cc_struct_def_t *sd = find_struct_def(tu, sid);
+    size_t i;
+
+    if (sd == NULL || !sd->complete || !sd->is_union ||
+        ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) == 0 && !sx_is_ptr(arg))) {
+        return 0;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        if (sema_assignable(tu, sd->members[i].ctype, arg)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Check an assignment `x = v` (CC_EXPR_ASSIGN) to a named object, or one
+ * reached through `*` or a member, and type it the object's type,
+ * unqualified (C11 6.5.16).  The object may be neither const nor an array;
+ * a conversion to or from a complex, decimal or wide type is made
+ * explicit.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    const cc_ctype_t *dst;
+    int storage = 0;
+    char what[160];
+
+    if (e->ident != NULL) {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+        if (idx < 0 && g == NULL) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "assignment to undeclared identifier: %s", e->ident);
+            }
+            return -1;
+        }
+        dst = idx >= 0 ? vars[idx].ctype : g->ctype;
+        storage = idx >= 0 ? vars[idx].storage : g->storage;
+        snprintf(what, sizeof(what), ": %s", e->ident);
+    } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        dst = e->lhs->ctype;
+        what[0] = '\0';
+    } else {
+        sema_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
+        return -1;
+    }
+    if (sema_const_object(storage, dst)) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object%s", what);
+        }
+        return -1;
+    }
+    /*
+     * Linux's per_cpu/typeof macros declare temporaries with typeof(some
+     * array), which keeps the array type; gcc decays `__Fp = expr`'s array
+     * to a pointer, and so does lowering.
+     */
+    if (e->ident != NULL && dst->kind == CC_CT_ARRAY && strcmp(e->ident, "__Fp") != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue%s", what);
+        }
+        return -1;
+    }
+    if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    /* to or from a complex type: the conversion, explicit */
+    if (sema_complex_convert_for_assign(tu, &e->rhs, cc_ct_decay(dst)) < 0) {
+        sema_diag(diag, "out of memory converting to or from a complex type");
+        return -1;
+    }
+    if (!sema_assignable(tu, dst, e->rhs) && !(e->ident != NULL && strcmp(e->ident, "__Fp") == 0)) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            if (e->ident != NULL) {
+                snprintf(diag->message, sizeof(diag->message), "cannot assign expression to %s", e->ident);
+            } else {
+                snprintf(diag->message, sizeof(diag->message), "%s", "cannot assign expression through pointer");
+            }
+        }
+        return -1;
+    }
+    sema_set_type(e, dst->unqual);
+    return 0;
+}
+
+/**
+ * Check `++x`, `x--` and the like (CC_EXPR_UPDATE, C11 6.5.2.4, 6.5.3.1)
+ * on a named object or one reached through `*` or a member: a real
+ * arithmetic or pointer object, neither const nor an array.  Its value
+ * has the object's type, unqualified.  On a wide integer, decimal or
+ * vector object it is rewritten as the assignment it is.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    const cc_ctype_t *obj;
+    const cc_ctype_t *t;
+    int storage = 0;
+
+    if (e->ident != NULL) {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+        if (idx < 0 && g == NULL) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s", e->ident);
+            }
+            return -1;
+        }
+        obj = idx >= 0 ? vars[idx].ctype : g->ctype;
+        storage = idx >= 0 ? vars[idx].storage : g->storage;
+        if (obj->kind == CC_CT_ARRAY) {
+            sema_diag(diag, "array object is not a modifiable lvalue for ++/--");
+            return -1;
+        }
+    } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        obj = e->lhs->ctype;
+    } else {
+        sema_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
+        return -1;
+    }
+    t = cc_ct_decay(obj);
+    if (sema_const_object(storage, obj)) {
+        sema_diag(diag, "cannot modify const-qualified object with ++/--");
+        return -1;
+    }
+    if (sema_is_ptr(t)) {
+        if (sema_void_ptr_arith(t, e, diag) != 0) {
+            return -1;
+        }
+    } else if (sema_wide_def(tu, t) != NULL || sema_vector_def(tu, t) != NULL || sema_decimal_def(tu, t) != NULL) {
+        /* rewritten as the assignment it is; a vector's then goes element by element */
+        return sema_wide_update(tu, e, vars, var_count, depth, diag);
+    } else if (!cc_ct_is_arithmetic(t) || sx_ct_record(t) >= 0) {
+        sema_diag(diag, "++/-- currently require numeric or pointer scalar operands");
+        return -1;
+    }
+    sema_set_type(e, obj->unqual);
+    return 0;
+}
+
+/**
+ * Check an identifier (CC_EXPR_IDENT) and type it what it names: a
+ * variable in scope, a file-scope object, a function, or `__func__` and
+ * its GNU spellings.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_ident(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                            int depth, cc_diag_t *diag) {
+    int idx = vars_find_visible(vars, var_count, e->ident, depth);
+    const cc_global_t *g;
+    const cc_function_t *f;
+
+    if (idx >= 0) {
+        sema_set_type(e, vars[idx].ctype);
+        return 0;
+    }
+    if (e->ident != NULL && (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
+                             strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_CHAR)));
+        return 0;
+    }
+    g = find_global(tu, e->ident);
+    f = g != NULL ? NULL : find_function(tu, e->ident);
+    if (g == NULL && f == NULL) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "use of undeclared identifier: %s",
+                     e->ident != NULL ? e->ident : "<null>");
+        }
+        return -1;
+    }
+    sema_set_type(e, g != NULL ? g->ctype : sema_function_ctype(f));
+    return maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0 ? -1 : 0;
+}
+
+/**
+ * Check a member access `s.m` or `p->m` (CC_EXPR_MEMBER), its bit-field
+ * shape included, and type it the member's type.  GNU __real__/__imag__
+ * of a real value is checked as what it stands for.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_member(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    const cc_struct_member_t *m = NULL;
+    const cc_ctype_t *t;
+    long member_off = 0;
+    int sid;
+
+    if (e->member_is_part && e->lhs != NULL && e->ident != NULL) {
+        int rc = sema_real_part_of_real(tu, e, vars, var_count, depth, diag);
+
+        if (rc != 0) {
+            return rc < 0 ? -1 : 0;
+        }
+    }
+    if (e->lhs == NULL && e->rhs != NULL && e->ident != NULL) {
+        if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, e->rhs->ctype);
+        return 0;
+    }
+    if (e->lhs == NULL || e->ident == NULL) {
+        sema_diag(diag, "malformed member expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    t = sx_vtype(e->lhs);
+    if (e->member_is_arrow) {
+        if (!sema_is_ptr(t)) {
+            sema_diag(diag, "-> requires pointer operand");
+            return -1;
+        }
+        t = t->of;
+    }
+    sid = sx_ct_record(t);
+    if (sid < 0) {
+        sema_diag(diag, e->member_is_arrow ? "-> requires pointer to struct or union"
+                                          : ". requires struct or union operand");
+        return -1;
+    }
+    if (find_struct_member_recursive(tu, sid, e->ident, 0, &m, &member_off) != 0 || m == NULL) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "no member named %s", e->ident);
+        }
+        return -1;
+    }
+    e->member_offset = member_off;
+    e->member_is_bitfield = m->is_bitfield;
+    e->member_bit_width = m->bit_width;
+    e->member_bit_offset = m->bit_offset;
+    e->member_bit_storage_bits = m->bit_storage_bits;
+    e->member_bit_signed = m->bit_signed;
+    e->member_bit_storage_size = m->bit_storage_size;
+    sema_set_type(e, m->ctype);
+    return 0;
+}
+
+/**
+ * Check a `_Generic` selection (C11 6.5.1.1): its controlling expression
+ * and associations; it is the association whose type matches, else the
+ * default.  Its type is the chosen association's.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                              int depth, cc_diag_t *diag) {
+    long default_idx = -1;
+    long first_match = -1;
+    size_t match_count = 0;
+    size_t i;
+
+    if (e->lhs == NULL || e->args == NULL || e->arg_count == 0 || e->generic_count != e->arg_count ||
+        e->generic_ctypes == NULL || e->generic_is_default == NULL) {
+        sema_diag(diag, "malformed _Generic expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->generic_is_default[i]) {
+            default_idx = (long)i;
+        } else if (sema_generic_assoc_matches(tu, e->generic_ctypes[i], sx_vtype(e->lhs))) {
+            if (first_match < 0) {
+                first_match = (long)i;
+            }
+            match_count++;
+        }
+    }
+    if (match_count == 0 || (match_count > 1 && sema_is_ptr(sx_vtype(e->lhs)) && default_idx >= 0)) {
+        e->generic_selected = default_idx;
+    } else {
+        e->generic_selected = first_match;
+    }
+    if (e->generic_selected < 0) {
+        e->generic_selected = 0;
+    }
+    sema_set_type(e, e->args[e->generic_selected]->ctype);
+    return 0;
+}
+
+/**
+ * Type a literal: an integer or floating constant keeps the type the
+ * parser gave it from its spelling, a string literal is an array of its
+ * characters and the null.
+ *
+ * @param e  the CC_EXPR_INT, CC_EXPR_FLOAT or CC_EXPR_STR
+ */
+static void sema_type_literal(cc_expr_t *e) {
+    if (e->kind == CC_EXPR_STR) {
+        long n = cc_string_literal_units(e);
+        const cc_ctype_t *elem = cc_string_literal_elem(e);
+
+        sema_set_type(e, n > 0 ? cc_ct_array(elem, n) : cc_ct_pointer(elem));
+        return;
+    }
+    sema_set_type(e, e->ctype);
+}
+
+/**
+ * Make a call argument's conversion explicit (C11 6.5.2.2p6-7): to the
+ * parameter's type where a prototype gives one, else the default
+ * argument promotions -- the integer promotions, and float to double.
+ * The function's type comes from the declaration called or from the
+ * pointer called through; an undeclared name (a builtin, or C89's
+ * implicit declaration) converts nothing here.
+ *
+ * @param tu      the translation unit
+ * @param e       the call, its arguments checked
+ * @param callee  the function the call names, or NULL
+ * @param i       the argument
+ * @return        0, or -1 when out of memory
+ */
+static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_function_t *callee,
+                                 size_t i) {
+    const cc_ctype_t *a = sx_vtype(e->args[i]);
+    int prototyped;
+    size_t nparams;
+    const cc_ctype_t *param = NULL;
+
+    if (callee != NULL) {
+        prototyped = callee->has_prototype;
+        nparams = callee->param_count;
+        if (prototyped && i < nparams) {
+            param = sema_param_ctype(&callee->params[i]);
+        }
+    } else {
+        const cc_ctype_t *fp = e->lhs != NULL ? sx_vtype(e->lhs) : NULL;
+        const cc_ctype_t *ft = fp != NULL && fp->unqual->kind == CC_CT_POINTER ? fp->unqual->of : NULL;
+
+        if (ft == NULL || ft->kind != CC_CT_FUNCTION) {
+            return 0;
+        }
+        prototyped = ft->prototyped;
+        nparams = ft->param_count;
+        if (prototyped && i < nparams) {
+            param = ft->params[i];
+        }
+    }
+    if (param != NULL) {
+        return sema_complex_convert_for_assign(tu, &e->args[i], param->unqual) < 0 ? -1 : 0;
+    }
+    if (a == NULL) {
+        return 0;
+    }
+    if (a->unqual->kind == CC_CT_FLOAT) {
+        return sema_convert(&e->args[i], cc_ct_basic(CC_CT_DOUBLE));
+    }
+    if (cc_ct_is_integer(a)) {
+        return sema_convert(&e->args[i], cc_ct_promote(a->unqual));
+    }
+    return 0;
+}
+
+/** sema_check_builtin_call() found no builtin to check: the call is an ordinary one. */
+#define SEMA_NOT_BUILTIN 1
+
+/**
+ * Check a call of a builtin the compiler implements itself: its operands
+ * and its type.
+ *
+ * @param tu          the translation unit
+ * @param e           the call
+ * @param vars        the variables in scope
+ * @param var_count   their number
+ * @param depth       the scope depth
+ * @param bk          which builtin it names, BUILTIN_NONE for none
+ * @param bswap_bits  the width of a __builtin_bswapN it names, else 0
+ * @param callee      the function its name declares, or NULL
+ * @param diag        receives an error
+ * @return            0, -1 with @p diag set, or SEMA_NOT_BUILTIN
+ */
+static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
+                                   size_t var_count, int depth, builtin_kind_t bk, int bswap_bits,
+                                   const cc_function_t *callee, cc_diag_t *diag) {
+    size_t i;
+    const cc_ctype_t *atomic_elem;
+
+    if (bk == BUILTIN_VA_START) {
+        if (e->arg_count != 2) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_start expects exactly 2 arguments");
+            }
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_va_start first argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_VA_END) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_end expects exactly 1 argument");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_va_end argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
+        bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
+        if (e->arg_count != 0) {
+            sema_diag(diag, "floating huge-value/infinity builtin expects no arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic((bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF)   ? CC_CT_FLOAT
+                                     : (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_CT_LDOUBLE
+                                                                                       : CC_CT_DOUBLE));
+        return 0;
+    }
+    if (bk == BUILTIN_LDBL_MIN || bk == BUILTIN_LDBL_DENORM_MIN || bk == BUILTIN_LDBL_MAX) {
+        if (e->arg_count != 0) {
+            sema_diag(diag, "long double limit builtin expects no arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_LDOUBLE));
+        return 0;
+    }
+    if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
+        bk == BUILTIN_SIGNBIT) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "floating classification builtin expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_arith(e->args[0])) {
+            sema_diag(diag, "floating classification builtin expects numeric argument");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "floating NaN builtin expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(bk == BUILTIN_NANF   ? CC_CT_FLOAT
+                                     : bk == BUILTIN_NANL ? CC_CT_LDOUBLE
+                                                          : CC_CT_DOUBLE));
+        return 0;
+    }
+    if (bk == BUILTIN_VA_COPY) {
+        if (e->arg_count != 2) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_copy expects exactly 2 arguments");
+            }
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!sx_is_ptr(e->args[i])) {
+                sema_diag(diag, "__builtin_va_copy arguments must be pointers");
+                return -1;
+            }
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_VA_ARG) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_arg expects va_list and a type");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_va_arg first operand must be a pointer");
+            return -1;
+        }
+        if (e->ctype == NULL || e->ctype->unqual->kind == CC_CT_VOID) {
+            sema_diag(diag, "__builtin_va_arg requires a non-void type");
+            return -1;
+        }
+        sema_set_type(e, e->ctype);
+        return 0;
+    }
+    if (bk == BUILTIN_EXPECT) {
+        if (e->arg_count != 2) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_expect expects exactly 2 arguments");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(e->args[0]) || !sx_is_int(e->args[1])) {
+            sema_diag(diag, "__builtin_expect expects (scalar, integer)");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_CONSTANT_P) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_constant_p expects exactly 1 argument");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_TRAP) {
+        if (e->arg_count != 0) {
+            sema_diag(diag, "__builtin_trap expects exactly 0 arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_UNREACHABLE) {
+        if (e->arg_count != 0) {
+            sema_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_ASSUME) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__builtin_assume expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(e->args[0])) {
+            sema_diag(diag, "__builtin_assume argument must be scalar");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_ASSUME_ALIGNED) {
+        if (e->arg_count < 2 || e->arg_count > 3) {
+            sema_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
+            return -1;
+        }
+        if (!sx_is_int(e->args[1]) ||
+            (e->arg_count == 3 && !sx_is_int(e->args[2]))) {
+            sema_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_UNPREDICTABLE) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(e->args[0])) {
+            sema_diag(diag, "__builtin_unpredictable argument must be scalar");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
+        const char *builtin_name = "__builtin_clz";
+        if (bk == BUILTIN_CTZ) {
+            builtin_name = "__builtin_ctz";
+        } else if (bk == BUILTIN_FFS) {
+            builtin_name = "__builtin_ffs";
+        }
+        if (e->arg_count != 1) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", builtin_name);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_POPCOUNT || bk == BUILTIN_PARITY) {
+        const char *what = bk == BUILTIN_PARITY ? "__builtin_parity" : "__builtin_popcount";
+        char msg[96];
+        if (e->arg_count != 1) {
+            snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", what);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            snprintf(msg, sizeof(msg), "%s argument must be integral", what);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
+        const cc_ctype_t *out_elem;
+        if (e->arg_count != 3) {
+            sema_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[2])) {
+            sema_diag(diag, "overflow builtin third argument must be a pointer");
+            return -1;
+        }
+        out_elem = sx_vtype(e->args[2])->of;
+        if (!cc_ct_is_integer(out_elem)) {
+            sema_diag(diag, "overflow builtin destination must point to an integer type");
+            return -1;
+        }
+        if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1])) {
+            sema_diag(diag, "overflow builtin operands must be integers");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
+        if (e->arg_count != 3) {
+            sema_diag(diag, "__builtin_*_overflow_p expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1]) ||
+            !sx_is_int(e->args[2])) {
+            sema_diag(diag, "overflow_p builtin operands must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_OBJECT_SIZE) {
+        if (e->arg_count != 2) {
+            sema_diag(diag, "__builtin_object_size expects exactly 2 arguments");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[1])) {
+            sema_diag(diag, "__builtin_object_size second argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_ULLONG));
+        return 0;
+    }
+    if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address expects 1 argument"
+                                                        : "__builtin_frame_address expects 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            sema_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
+                                                        : "__builtin_frame_address argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
+        return 0;
+    }
+    if (bk == BUILTIN_MEMCMP) {
+        if (e->arg_count != 3) {
+            sema_diag(diag, "__builtin_memcmp has wrong argument count");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0]) || !sx_is_ptr(e->args[1])) {
+            sema_diag(diag, "__builtin_memcmp first two arguments must be pointers");
+            return -1;
+        }
+        if (!sx_is_int(e->args[2])) {
+            sema_diag(diag, "__builtin_memcmp third argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_PREFETCH) {
+        if (e->arg_count < 1 || e->arg_count > 3) {
+            sema_diag(diag, "__builtin_prefetch expects 1 to 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_prefetch first argument must be a pointer");
+            return -1;
+        }
+        if (e->arg_count >= 2 && !sx_is_int(e->args[1])) {
+            sema_diag(diag, "__builtin_prefetch rw argument must be integral");
+            return -1;
+        }
+        if (e->arg_count >= 3 && !sx_is_int(e->args[2])) {
+            sema_diag(diag, "__builtin_prefetch locality argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_CPU_SUPPORTS) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__builtin_cpu_supports expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->args[0]->kind != CC_EXPR_STR) {
+            sema_diag(diag, "__builtin_cpu_supports argument must be a string literal");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_STRLEN) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__builtin_strlen expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_strlen argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
+        return 0;
+    }
+    if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||
+        bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
+        size_t min_args = (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET) ? 3 : 4;
+        if (e->arg_count < min_args) {
+            sema_diag(diag, min_args == 3 ? "__builtin_mem* has wrong argument count"
+                                         : "__builtin___mem*_chk has wrong argument count");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "memory builtin first argument must be a pointer");
+            return -1;
+        }
+        if ((bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMCPY_CHK ||
+             bk == BUILTIN_MEMMOVE_CHK) &&
+            !sx_is_ptr(e->args[1])) {
+            sema_diag(diag, "memory builtin source argument must be a pointer");
+            return -1;
+        }
+        if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !sx_is_int(e->args[1])) {
+            sema_diag(diag, "memory builtin fill byte must be integral");
+            return -1;
+        }
+        if (!sx_is_int(e->args[2])) {
+            sema_diag(diag, "memory builtin size argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
+        if (e->arg_count != 0) {
+            sema_diag(diag, "__sync_synchronize expects exactly 0 arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
+        const char *nm = bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence" : "__atomic_signal_fence";
+        if (e->arg_count != 1) {
+            sema_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence expects exactly 1 argument"
+                                                              : "__atomic_signal_fence expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            sema_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
+                               ? "__atomic_thread_fence memory-order argument must be integral"
+                               : "__atomic_signal_fence memory-order argument must be integral");
+            return -1;
+        }
+        if (atomic_memorder_check_arg(tu, e->args[0], nm, "fence", 0, 0, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__sync_lock_release expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__sync_lock_release first argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
+        bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_FETCH_ADD ||
+        bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
+        int expect_argc = (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
+                           bk == BUILTIN_ATOMIC_EXCHANGE_N)
+                              ? 3
+                              : 2;
+        if (e->arg_count != (size_t)expect_argc) {
+            sema_diag(diag, "atomic fetch/exchange builtin has wrong argument count");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if ((bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
+             bk == BUILTIN_ATOMIC_EXCHANGE_N) &&
+            check_expr(tu, e->args[2], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "atomic fetch/exchange first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sema_assignable(tu, atomic_elem, e->args[1])) {
+            sema_diag(diag, "atomic fetch/exchange value type mismatch");
+            return -1;
+        }
+        if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
+            const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
+                                 ? "__atomic_exchange_n"
+                                 : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
+            if (!sx_is_int(e->args[2])) {
+                sema_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
+                return -1;
+            }
+            if (atomic_memorder_check_arg(tu, e->args[2], nm, "operation", 0, 0, diag) != 0) {
+                return -1;
+            }
+        }
+        sema_set_type(e, atomic_elem);
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_BOOL_CAS) {
+        if (e->arg_count != 3) {
+            sema_diag(diag, "__sync_bool_compare_and_swap expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sema_assignable(tu, atomic_elem, e->args[1]) || !sema_assignable(tu, atomic_elem, e->args[2])) {
+            sema_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_ATOMIC_LOAD_N) {
+        if (e->arg_count != 2) {
+            sema_diag(diag, "__atomic_load_n expects exactly 2 arguments");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__atomic_load_n first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sx_is_int(e->args[1])) {
+            sema_diag(diag, "__atomic_load_n memory-order argument must be integral");
+            return -1;
+        }
+        if (atomic_memorder_check_arg(tu, e->args[1], "__atomic_load_n", "load", 1, 0, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, atomic_elem);
+        return 0;
+    }
+    if (bk == BUILTIN_ATOMIC_STORE_N) {
+        if (e->arg_count != 3) {
+            sema_diag(diag, "__atomic_store_n expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__atomic_store_n first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sema_assignable(tu, atomic_elem, e->args[1])) {
+            sema_diag(diag, "__atomic_store_n value type mismatch");
+            return -1;
+        }
+        if (!sx_is_int(e->args[2])) {
+            sema_diag(diag, "__atomic_store_n memory-order argument must be integral");
+            return -1;
+        }
+        if (atomic_memorder_check_arg(tu, e->args[2], "__atomic_store_n", "store", 0, 1, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (e->ident != NULL && callee == NULL && bswap_bits != 0) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "%s expects exactly 1 argument", e->ident);
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            sema_diag(diag, "byte-swap builtin requires integral argument");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(bswap_bits == 16 ? CC_CT_USHORT : bswap_bits == 32 ? CC_CT_UINT
+                                                                                      : CC_CT_ULLONG));
+        return 0;
+    }
+    return SEMA_NOT_BUILTIN;
+}
+
+/**
+ * Check a call: a builtin's operands and type, or the callee (a function,
+ * a function pointer, an old-style declaration), its arguments converted
+ * to its parameters (the default promotions past them), and the result type.
+ *
+ * @param tu         the translation unit
+ * @param e          the call
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the scope depth
+ * @param diag       receives an error
+ * @return           0, or -1 with @p diag set
+ */
+static int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    size_t i;
+    const cc_function_t *callee = NULL;
+    builtin_kind_t bk = builtin_kind(e->ident);
+    int bswap_bits = builtin_bswap_bits(e->ident);
+    if (e->ident != NULL && strcmp(e->ident, "__builtin_complex") == 0) {
+        return sema_builtin_complex(tu, e, vars, var_count, depth, diag);
+    }
+    if (e->ident != NULL) {
+        callee = find_function(tu, e->ident);
+    }
+    {
+        int rc = sema_check_builtin_call(tu, e, vars, var_count, depth, bk, bswap_bits, callee, diag);
+
+        if (rc != SEMA_NOT_BUILTIN) {
+            return rc;
+        }
+    }
+    if (e->ident == NULL) {
+        if (e->lhs == NULL) {
+            sema_diag(diag, "malformed call expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        /* a function designator, *fp included, is used as a pointer to the function */
+        if (!sx_is_ptr(e->lhs)) {
+            sema_diag(diag, "call target must be a function pointer");
+            return -1;
+        }
+    }
+    if (callee != NULL && callee->has_prototype && !callee->is_variadic && e->arg_count != callee->param_count) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
+                     e->arg_count, callee->param_count);
+        }
+        return -1;
+    }
+    if (callee != NULL && callee->has_prototype && callee->is_variadic && e->arg_count < callee->param_count) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message),
+                     "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
+                     callee->param_count);
+        }
+        return -1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+            sema_complex_convert_for_assign(tu, &e->args[i], sema_param_ctype(&callee->params[i])) < 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        if (sema_convert_call_arg(tu, e, callee, i) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+            !sema_assignable(tu, sema_param_ctype(&callee->params[i]), e->args[i]) &&
+            !sema_transparent_union_accepts(tu, sx_ct_record(sema_param_ctype(&callee->params[i])),
+                                            e->args[i])) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i + 1,
+                         e->ident);
+            }
+            return -1;
+        }
+    }
+    if (e->ident != NULL) {
+        size_t fmt_i;
+        if (printf_like_format_index(e->ident, &fmt_i) && fmt_i < e->arg_count && e->args[fmt_i] != NULL &&
+            e->args[fmt_i]->kind == CC_EXPR_STR && e->args[fmt_i]->ident != NULL) {
+            char *rw = rewrite_printf_long_double_format(e->args[fmt_i]->ident);
+            if (rw != NULL) {
+                free(e->args[fmt_i]->ident);
+                e->args[fmt_i]->ident = rw;
+            }
+        }
+    }
+    if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
+        char buf[192];
+        /*
+         * We currently record only the presence of nonnull, not its index list.
+         * Avoid false positives (e.g. strtok uses nonnull(2)) by checking
+         * only unambiguous single-parameter prototypes.
+         */
+        if (e->arg_count > 0 && callee->param_count == 1 && sema_is_ptr(sema_param_ctype(&callee->params[0])) &&
+            is_null_ptr_constant(e->args[0])) {
+            snprintf(buf, sizeof(buf), "nonnull argument 1 in call to %s is null",
+                     e->ident != NULL ? e->ident : "<indirect>");
+            if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
+                return -1;
+            }
+        }
+    }
+    if (callee != NULL) {
+        sema_set_type(e, callee->ret_ctype);
+        if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+            char buf[192];
+            snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");
+            if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
+                return -1;
+            }
+        }
+    } else if (e->ident != NULL) {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+        if (idx >= 0 || g != NULL) {
+            /* a call through a pointer object named directly */
+            const cc_ctype_t *ft = idx >= 0 ? vars[idx].ctype : g->ctype;
+
+            if (!sema_is_ptr(cc_ct_decay(ft))) {
+                sema_diag(diag, "call target must be a function pointer");
+                return -1;
+            }
+            sema_set_type(e, sema_callee_ret_ctype(ft));
+            return 0;
+        }
+        if (strncmp(e->ident, "__builtin_", 10) == 0 && !cc_builtin_is_recognized(e->ident)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
+            }
+            return -1;
+        }
+        if (strncmp(e->ident, "__builtin_", 10) != 0 && !cc_options_implicit_funcdecl()) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "implicit function declaration is not allowed in this mode: %s", e->ident);
+            }
+            return -1;
+        }
+        /* a builtin with no rule of its own, or C89's undeclared function: extern int f(...) */
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+    } else {
+        const cc_function_t *fn = generic_selected_function(tu, e->lhs);
+
+        if (fn == NULL) {
+            fn = infer_callee_function_expr(tu, e->lhs);
+        }
+        sema_set_type(e, fn != NULL ? fn->ret_ctype : sema_callee_ret_ctype(e->lhs->ctype));
+    }
+    return 0;
+}
+
+/**
+ * Check expression @p e by its kind: its operands, the rules C sets for
+ * them, and its type.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    size_t i;
+
+    if (e != NULL) {
+        set_diag_context(e->line, e->col);
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        if (e != NULL && (e->line != 0 || e->col != 0)) {
+            diag->line = e->line;
+            diag->col = e->col;
+        } else if (g_diag_ctx_line != 0 || g_diag_ctx_col != 0) {
+            diag->line = g_diag_ctx_line;
+            diag->col = g_diag_ctx_col;
+        }
+    }
+
+    if (e == NULL) {
+        sema_diag(diag, "null expression in semantic analysis");
+        return -1;
+    }
+
+    switch (e->kind) {
+    case CC_EXPR_INT:
+    case CC_EXPR_FLOAT:
+    case CC_EXPR_STR:
+        sema_type_literal(e);
+        return 0;
+
+    case CC_EXPR_GENERIC:
+        return sema_check_generic(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_IDENT:
+        return sema_check_ident(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_COMPLEX:
+        if (e->lhs == NULL || e->rhs == NULL || check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        return sema_check_complex_parts(tu, e, diag);
+
+    case CC_EXPR_MEMBER:
+        return sema_check_member(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_BIN:
+        return sema_check_bin(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_CALL: {
+        return sema_check_call(tu, e, vars, var_count, depth, diag);
+    }
+
+    case CC_EXPR_ASSIGN:
+        return sema_check_assign(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_ADDR:
+        return sema_check_addr(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_LABEL_ADDR:
+        if (e->ident == NULL || e->ident[0] == '\0') {
+            sema_diag(diag, "malformed label-address expression");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
+        return 0;
+
+    case CC_EXPR_DEREF:
+        return sema_check_deref(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_UPDATE:
+        return sema_check_update(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_CAST:
+        return sema_check_cast(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_SIZEOF:
+        return sema_check_sizeof(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_INIT_LIST:
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        sema_set_type(e, e->arg_count > 0 ? e->args[0]->ctype : cc_ct_basic(CC_CT_INT));
+        return 0;
+
+    case CC_EXPR_STMT:
+        return sema_check_stmt_expr(tu, e, vars, var_count, depth, diag);
+
+    case CC_EXPR_TERNARY:
+        return sema_check_ternary(tu, e, vars, var_count, depth, diag);
+
+    default:
+        sema_diag(diag, "unsupported expression kind");
+        return -1;
+    }
+}
+
+static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag) {
+    cc_expr_t *item;
+    if (init == NULL) {
+        sema_diag(diag, "initializer list is empty");
+        return NULL;
+    }
+    if (init->kind != CC_EXPR_INIT_LIST) {
+        return init;
+    }
+    if (init->arg_count == 0) {
+        if (cc_lang_at_least(2023)) {
+            init->kind = CC_EXPR_INT;
+            init->int_val = 0;
+            sema_set_type(init, cc_ct_basic(CC_CT_INT));
+            return init;
+        }
+        sema_diag(diag, "initializer list is empty");
+        return NULL;
+    }
+    if (init->arg_count > 1) {
+        sema_diag(diag, "too many elements in scalar initializer");
+        return NULL;
+    }
+    item = init->args[0];
+    if (item != NULL && item->kind == CC_EXPR_MEMBER) {
+        sema_diag(diag, "designated initializer is invalid for scalar type");
+        return NULL;
+    }
+    return item;
+}
+
+static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_idx) {
+    size_t next = member_idx + 1;
+    long off;
+    if (sd == NULL || member_idx >= sd->member_count) {
+        return next;
+    }
+    if (sd->members[member_idx].is_bitfield && sd->members[member_idx].bit_width > 0) {
+        return next;
+    }
+    if (sd->members[member_idx].size == 0) {
+        return next;
+    }
+    off = sd->members[member_idx].offset;
+    while (next < sd->member_count && sd->members[next].offset == off) {
+        next++;
+    }
+    return next;
+}
+
+/** Whether structure @p struct_id has a member of structure, union, complex or array type. */
+static int struct_has_aggregate_member(const cc_translation_unit_t *tu, int struct_id) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return 0;
+    }
+    sd = &tu->structs[struct_id];
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_ctype_t *t = sd->members[i].ctype;
+
+        if (sx_ct_record(t) >= 0 || (t != NULL && t->kind == CC_CT_ARRAY)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** Whether structure @p struct_id has an anonymous structure or union member. */
+static int struct_has_anonymous_aggregate_member(const cc_translation_unit_t *tu, int struct_id) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    sd = find_struct_def(tu, struct_id);
+    if (sd == NULL || !sd->complete) {
+        return 0;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (m->name == NULL && m->ctype != NULL && m->ctype->unqual->kind == CC_CT_RECORD) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static long sema_type_scalar_slots(const cc_translation_unit_t *tu, const cc_ctype_t *t, int depth);
+
+/**
+ * How many scalar initializers structure @p struct_id takes with its
+ * braces left out; a union takes one (sema_type_scalar_slots()).
+ *
+ * @return the count (at least 1), or -1 if too deep or too large
+ */
+static long struct_scalar_slots(const cc_translation_unit_t *tu, int struct_id, int depth) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    long slots = 0;
+    if (depth > 32 || tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return -1;
+    }
+    sd = &tu->structs[struct_id];
+    if (sd->is_union) {
+        return 1;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        long sub;
+
+        if (sd->has_flexible_array && i + 1 == sd->member_count) {
+            continue;
+        }
+        sub = sema_type_scalar_slots(tu, sd->members[i].ctype, depth + 1);
+        if (sub < 0 || slots > LONG_MAX - sub) {
+            return -1;
+        }
+        slots += sub;
+    }
+    if (slots <= 0) {
+        slots = 1;
+    }
+    return slots;
+}
+
+/**
+ * How many scalar initializers an object of type @p t takes with its
+ * braces left out (C11 6.7.9p20): one for a scalar or a union, an
+ * array's elements' times its bound (one element if the bound is not
+ * known), a structure's members' summed.
+ *
+ * @return the count, or -1 if too deep or too large
+ */
+static long sema_type_scalar_slots(const cc_translation_unit_t *tu, const cc_ctype_t *t, int depth) {
+    if (t != NULL && t->kind == CC_CT_ARRAY) {
+        long cnt = t->count > 0 ? t->count : 1;
+        long sub = sema_type_scalar_slots(tu, t->of, depth);
+
+        if (sub < 0 || sub > LONG_MAX / cnt) {
+            return -1;
+        }
+        return cnt * sub;
+    }
+    if (sx_ct_record(t) >= 0) {
+        return struct_scalar_slots(tu, sx_ct_record(t), depth);
+    }
+    return 1;
+}
+
+static long infer_struct_array_len_from_init(const cc_translation_unit_t *tu, int struct_id, cc_expr_t *init) {
+    long slots;
+    size_t cur = 0;
+    long elems = 0;
+    if (tu == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        return -1;
+    }
+    slots = struct_scalar_slots(tu, struct_id, 0);
+    if (slots <= 0) {
+        return -1;
+    }
+    while (cur < init->arg_count) {
+        cc_expr_t *raw = init->args[cur];
+        if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            continue;
+        }
+        if (raw != NULL && raw->kind == CC_EXPR_CAST && sx_ct_record(raw->ctype) == struct_id && raw->lhs != NULL &&
+            raw->lhs->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            continue;
+        }
+        {
+            long consumed = 0;
+            while (cur < init->arg_count && consumed < slots) {
+                cc_expr_t *it = init->args[cur];
+                if (consumed > 0 && it != NULL && it->kind == CC_EXPR_INIT_LIST) {
+                    break;
+                }
+                consumed++;
+                cur++;
+            }
+            if (consumed == 0) {
+                cur++;
+            }
+            elems++;
+        }
+    }
+    return elems > 0 ? elems : 1;
+}
+
+static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
+                                    var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag) {
+    size_t i;
+    size_t next_member = 0;
+    const cc_struct_def_t *sd;
+
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        sema_diag(diag, "struct initializer uses unknown struct type");
+        return -1;
+    }
+    if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "struct initializer for %s must use braces",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    sd = &tu->structs[struct_id];
+    (void)sd;
+    if (sd->is_union && init->arg_count > 1 && sd->member_count > 0) {
+        const cc_struct_member_t *um = &sd->members[0];
+        cc_expr_t *first = init->args[0];
+        int first_is_designator =
+            (first != NULL && first->kind == CC_EXPR_MEMBER && first->lhs == NULL && first->rhs != NULL && first->ident != NULL);
+        if (!first_is_designator) {
+            if (um->ctype->kind == CC_CT_ARRAY) {
+                if (check_array_initializer(tu, name, um->ctype, init, vars, var_count, depth, NULL, diag) != 0) {
+                    return -1;
+                }
+                return 0;
+            }
+            if (sx_ct_record(um->ctype) >= 0) {
+                if (check_struct_initializer(tu, name, sx_ct_record(um->ctype), init, vars, var_count, depth, diag) !=
+                    0) {
+                    return -1;
+                }
+                return 0;
+            }
+        }
+    }
+    for (i = 0; i < init->arg_count; ++i) {
+        cc_expr_t *raw = init->args[i];
+        cc_expr_t *item = raw;
+        const cc_struct_member_t *m;
+        size_t member_idx = next_member;
+        int raw_is_designator =
+            (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL);
+
+        if (sd->is_union && i > 0 && !raw_is_designator) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "too many initializers for union %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+
+        if (raw_is_designator) {
+            int didx = find_struct_member_index(tu, struct_id, raw->ident);
+            if (didx < 0) {
+                if (raw->rhs != NULL &&
+                    (raw->rhs->kind == CC_EXPR_INIT_LIST ||
+                     (raw->rhs->kind == CC_EXPR_CAST && raw->rhs->lhs != NULL &&
+                      raw->rhs->lhs->kind == CC_EXPR_INIT_LIST))) {
+                    /*
+                     * GNU-style nested aggregate initializers can legally route
+                     * designators through anonymous wrappers we don't model
+                     * precisely yet. Accept and continue conservatively.
+                     */
+                    continue;
+                }
+                if (struct_has_anonymous_aggregate_member(tu, struct_id)) {
+                    continue;
+                }
+                if (name != NULL && strcmp(name, "<compound-literal>") == 0) {
+                    continue;
+                }
+                if (raw->rhs != NULL) {
+                    continue;
+                }
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "unknown designated member '%s' for struct %s", raw->ident,
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            member_idx = (size_t)didx;
+            item = raw->rhs;
+        }
+        if (member_idx >= sd->member_count) {
+            if (!sd->is_union && struct_has_aggregate_member(tu, struct_id)) {
+                member_idx = sd->member_count - 1;
+            } else {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "too many initializers for struct %s",
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+        }
+
+        m = &sd->members[member_idx];
+        if (!sd->is_union) {
+            next_member = struct_next_init_member(sd, member_idx);
+        }
+        if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
+            if (vars == NULL) {
+                continue;
+            }
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "flexible array member cannot be initialized for %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+        if (m->ctype->kind == CC_CT_ARRAY) {
+            if (item->kind == CC_EXPR_INIT_LIST) {
+                if (check_array_initializer(tu, name, m->ctype, item, vars, var_count, depth, NULL, diag) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!sema_assignable(tu, m->ctype->of, item)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "cannot convert array member initializer %zu for %s",
+                             i, name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            continue;
+        }
+        if (sx_ct_record(m->ctype) >= 0) {
+            int msid = sx_ct_record(m->ctype);
+            cc_expr_t *nested = NULL;
+
+            if (item->kind == CC_EXPR_INIT_LIST) {
+                nested = item;
+            } else if (item->kind == CC_EXPR_CAST && sx_ct_record(item->ctype) == msid && item->lhs != NULL &&
+                       item->lhs->kind == CC_EXPR_INIT_LIST) {
+                /* a compound literal of the member's own type */
+                nested = item->lhs;
+            }
+            if (nested != NULL &&
+                check_struct_initializer(tu, name, msid, nested, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (nested == NULL && check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (nested == NULL && sema_decimal_def(tu, m->ctype) != NULL) {
+                /* a decimal member initialized by an arithmetic value: converted (a constant folded) */
+                cc_expr_t **islot = init->args[i] == item ? &init->args[i]
+                                    : (init->args[i] != NULL && init->args[i]->rhs == item) ? &init->args[i]->rhs
+                                                                                            : NULL;
+
+                if (islot != NULL && sema_decimal_convert_for_assign(tu, islot, m->ctype) < 0) {
+                    sema_diag(diag, "out of memory");
+                    return -1;
+                }
+            }
+            continue;
+        }
+        if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sema_assignable(tu, m->ctype, item)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "cannot convert member initializer %zu for struct %s", i,
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Check an initializer list for an array of type @p arr (C11 6.7.9): no
+ * more elements than the bound, each converting to the element type, a
+ * nested list for an element that is itself an array or a structure (or
+ * the elements brace-elided), or one string for an array of characters.
+ *
+ * @param tu                the translation unit
+ * @param name              the object, for diagnostics
+ * @param arr               the array's type
+ * @param init              the list
+ * @param vars              the variables in scope
+ * @param var_count         their count
+ * @param depth             the scope depth
+ * @param out_inferred_len  receives the bound the list gives an array of
+ *                          no bound, or NULL
+ * @param diag              receives the error
+ * @return                  0, or -1 with @p diag set
+ */
+static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, const cc_ctype_t *arr,
+                                   cc_expr_t *init, var_entry_t *vars, size_t var_count, int depth,
+                                   long *out_inferred_len, cc_diag_t *diag) {
+    size_t i;
+    const cc_ctype_t *elem;
+    long array_len;
+    int elem_sid;
+    int saw_nonlist_struct_item = 0;
+
+    if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        sema_diag(diag, "array initializer must use an initializer list");
+        return -1;
+    }
+    if (arr == NULL || arr->kind != CC_CT_ARRAY) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "cannot initialize non-array object %s with initializer list",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    /* a bound not known is 0: the list gives it */
+    array_len = arr->count > 0 ? arr->count : 0;
+    elem = arr->of;
+    elem_sid = sx_ct_record(elem);
+    if (ct_kind_is(elem->unqual, CC_CT_VOID)) {
+        sema_diag(diag, "array initializer has unsupported element type");
+        return -1;
+    }
+    if (elem->kind != CC_CT_ARRAY && init->arg_count == 1) {
+        long string_len = array_len;
+        long inferred_len = -1;
+        int rc = check_array_string_initializer(name, arr, &string_len, init->args[0], &inferred_len, diag);
+        if (rc < 0) {
+            return -1;
+        }
+        if (rc == 0) {
+            if (out_inferred_len != NULL && array_len == 0 && inferred_len > 0) {
+                *out_inferred_len = inferred_len;
+            }
+            return 0;
+        }
+    }
+    if (array_len > 0) {
+        long init_elems = (long)init->arg_count;
+        const cc_ctype_t *inner;
+
+        /* a list for an array of arrays may leave out the inner braces (C11 6.7.9p20): count scalars */
+        for (inner = elem; inner->kind == CC_CT_ARRAY && inner->count > 0; inner = inner->of) {
+            array_len *= inner->count;
+        }
+        if (elem_sid >= 0) {
+            init_elems = infer_struct_array_len_from_init(tu, elem_sid, init);
+            if (init_elems <= 0) {
+                init_elems = (long)init->arg_count;
+            }
+        }
+        if (init_elems > array_len) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "too many initializers for array %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+    }
+    if (array_len == 0 && init->arg_count == 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "cannot deduce array size for %s from empty initializer list",
+                     name != NULL ? name : "<anon>");
+        }
+        return -1;
+    }
+    for (i = 0; i < init->arg_count; ++i) {
+        cc_expr_t *item = init->args[i];
+        if (elem->kind == CC_CT_ARRAY) {
+            if (item->kind != CC_EXPR_INIT_LIST) {
+                /*
+                 * Accept brace-elided multidimensional initializers and
+                 * leave precise element shaping to lowering, which already
+                 * flattens with a cursor model.
+                 */
+                if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (check_array_initializer(tu, name, elem, item, vars, var_count, depth, NULL, diag) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (elem_sid >= 0) {
+            if (item->kind != CC_EXPR_INIT_LIST) {
+                /*
+                 * Accept brace-elided aggregate initializers and defer strict
+                 * element shaping to lowering, which has full type/size context.
+                 */
+                if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (sema_decimal_def(tu, elem) != NULL &&
+                    sema_decimal_convert_for_assign(tu, &init->args[i], elem) < 0) {
+                    /* a decimal element initialized by an arithmetic value: converted (a constant folded) */
+                    sema_diag(diag, "out of memory");
+                    return -1;
+                }
+                saw_nonlist_struct_item = 1;
+                continue;
+            }
+            if (check_struct_initializer(tu, name, elem_sid, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        } else {
+            if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!sema_assignable(tu, elem, item)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "cannot convert initializer %zu for array %s", i,
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+        }
+    }
+    if (out_inferred_len != NULL && array_len == 0) {
+        if (elem_sid >= 0 && saw_nonlist_struct_item) {
+            long inferred = infer_struct_array_len_from_init(tu, elem_sid, init);
+            *out_inferred_len = inferred > 0 ? inferred : 0;
+        } else {
+            *out_inferred_len = (long)init->arg_count;
+        }
+    }
+    return 0;
+}
+
+static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
+                      const cc_ctype_t *fn_ret, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      int switch_depth,
+                      int *saw_return, cc_diag_t *diag) {
+    size_t i;
+
+    if (s != NULL) {
+        set_diag_context(s->line, s->col);
+    }
+    if (diag != NULL && diag->message[0] == '\0') {
+        if (s != NULL && (s->line != 0 || s->col != 0)) {
+            diag->line = s->line;
+            diag->col = s->col;
+        } else if (g_diag_ctx_line != 0 || g_diag_ctx_col != 0) {
+            diag->line = g_diag_ctx_line;
+            diag->col = g_diag_ctx_col;
+        }
+    }
+    if (s != NULL && (s->attr_flags & CC_ATTR_FALLTHROUGH) != 0 && s->kind != CC_STMT_EXPR) {
+        sema_diag(diag, "fallthrough attribute requires an empty statement");
+        return -1;
+    }
+
+    switch (s->kind) {
+    case CC_STMT_DECL:
+        {
+            const cc_ctype_t *init_ct; /* the type an initializer converts to: the element's for an array */
+            int auto_type_decl = (s->storage & CC_STORAGE_AUTO_TYPE) != 0;
+            int init_checked = 0;
+            int sc_count = storage_class_count(s->storage);
+            cc_attr_flags_t fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
+                                            CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
+                                            CC_ATTR_FLATTEN | CC_ATTR_TARGET | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR;
+            if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
+                sema_diag(diag, "noreturn attribute is only valid on functions");
+                return -1;
+            }
+            if ((s->attr_flags & fn_only_attrs) != 0) {
+                sema_diag(diag, "function-only attribute used on local declaration");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_WEAK) != 0) {
+                sema_diag(diag, "weak attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & attr_visibility_mask()) != 0) {
+                sema_diag(diag, "visibility attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALIAS) != 0) {
+                sema_diag(diag, "alias attribute is only supported on file-scope objects/functions");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_SECTION) != 0 &&
+                validate_attr_section(s->attr_section, diag, "section attribute on local declaration") != 0) {
+                return -1;
+            }
+            if (has_multiple_visibility_attrs(s->attr_flags)) {
+                sema_diag(diag, "conflicting visibility attributes on local declaration");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (s->attr_flags & CC_ATTR_NOINLINE) != 0) {
+                sema_diag(diag, "conflicting always_inline/noinline attributes");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_HOT) != 0 && (s->attr_flags & CC_ATTR_COLD) != 0) {
+                sema_diag(diag, "conflicting hot/cold attributes");
+                return -1;
+            }
+            if ((s->attr_flags & CC_ATTR_ALIGNED) != 0 &&
+                validate_attr_align(s->attr_align, diag, "aligned attribute on local declaration") != 0) {
+                return -1;
+            }
+            if (sc_count > 1) {
+                sema_diag(diag, "multiple storage-class specifiers in local declaration");
+                return -1;
+            }
+            if (cc_lang_at_least(2017) && (s->storage & CC_STORAGE_REGISTER) != 0) {
+                if (emit_warning(diag, s->line, s->col, "'register' storage-class specifier is obsolescent in C17", 1) !=
+                    0) {
+                    return -1;
+                }
+            }
+            if ((s->storage & CC_STORAGE_INLINE) != 0) {
+                sema_diag(diag, "inline is only valid on function declarations");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_THREAD_LOCAL) != 0 &&
+                (s->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0) {
+                sema_diag(diag, "thread_local local declaration requires static or extern storage");
+                return -1;
+            }
+            if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->expr != NULL) {
+                sema_diag(diag, "extern local declaration cannot have an initializer");
+                return -1;
+            }
+            if (auto_type_decl) {
+                if (s->expr == NULL) {
+                    sema_diag(diag, "auto type deduction requires an initializer");
+                    return -1;
+                }
+                if (s->expr->kind == CC_EXPR_INIT_LIST) {
+                    sema_diag(diag, "auto type deduction from initializer list is not supported");
+                    return -1;
+                }
+                if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                s->ctype = sx_vtype(s->expr);
+                s->storage &= ~CC_STORAGE_AUTO_TYPE;
+                init_checked = 1;
+            }
+            init_ct = s->ctype->kind == CC_CT_ARRAY ? s->ctype->of : s->ctype;
+            if (ct_kind_is(s->ctype->unqual, CC_CT_VOID)) {
+                sema_diag(diag, "void variable declarations are not supported");
+                return -1;
+            }
+            if (vars_find_depth(*vars, *var_count, s->decl_name, depth) >= 0) {
+                sema_diag(diag, "duplicate local/parameter name");
+                return -1;
+            }
+            for (size_t b = 0; b < s->array_bounds.count; ++b) {
+                cc_expr_t *bound = s->array_bounds.at[b];
+
+                if (bound == NULL) {
+                    continue;
+                }
+                if (check_expr(tu, bound, *vars, *var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (!sx_is_int(bound)) {
+                    sema_diag(diag, "variable-length array bound must be an integer expression");
+                    return -1;
+                }
+            }
+            if (vars_push(vars, var_count, s->decl_name, s->storage, depth, s->ctype) != 0) {
+                sema_diag(diag, "out of memory adding local variable");
+                return -1;
+            }
+            if (s->expr != NULL) {
+                if (s->expr->kind == CC_EXPR_INIT_LIST) {
+                    if (s->ctype->kind == CC_CT_ARRAY) {
+                        long inferred_len = -1;
+                        if (check_array_initializer(tu, s->decl_name, s->ctype, s->expr, *vars, *var_count, depth,
+                                                    &inferred_len, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (s->ctype->count <= 0 && inferred_len > 0) {
+                            s->ctype = sema_complete_array_ctype(s->ctype, inferred_len);
+                            (*vars)[*var_count - 1].ctype = s->ctype;
+                        }
+                    } else if (sx_ct_record(s->ctype) >= 0) {
+                        if (check_struct_initializer(tu, s->decl_name, sx_ct_record(s->ctype), s->expr, *vars,
+                                                     *var_count, depth, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                    } else {
+                        cc_expr_t *scalar_init = unwrap_scalar_initializer_expr(s->expr, diag);
+                        if (scalar_init == NULL) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (check_expr(tu, scalar_init, *vars, *var_count, depth, diag) != 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (!sema_assignable(tu, init_ct, scalar_init)) {
+                            if (diag != NULL && diag->message[0] == '\0') {
+                                snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
+                                         s->decl_name != NULL ? s->decl_name : "<anon>");
+                            }
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        s->expr = scalar_init;
+                    }
+                } else {
+                    if (!init_checked && check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                        free((*vars)[*var_count - 1].name);
+                        (*var_count)--;
+                        return -1;
+                    }
+                    if (sema_complex_convert_for_assign(tu, &s->expr, s->ctype) > 0) {
+                        /* to or from a complex type: the conversion is now explicit */
+                        return 0;
+                    }
+                    if (s->ctype->kind == CC_CT_ARRAY && s->expr->kind == CC_EXPR_STR) {
+                        long inferred_len = -1;
+                        long len = s->ctype->count > 0 ? s->ctype->count : 0;
+                        int rc = check_array_string_initializer(s->decl_name, s->ctype, &len, s->expr,
+                                                                &inferred_len, diag);
+                        if (rc < 0) {
+                            free((*vars)[*var_count - 1].name);
+                            (*var_count)--;
+                            return -1;
+                        }
+                        if (rc == 0) {
+                            s->ctype = sema_complete_array_ctype(s->ctype, len);
+                            (*vars)[*var_count - 1].ctype = s->ctype;
+                            return 0;
+                        }
+                    }
+                    if (!init_checked && !sema_assignable(tu, init_ct, s->expr) &&
+                        !(sema_is_ptr(cc_ct_decay(init_ct)) && sx_is_ptr(s->expr))) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
+                                     s->decl_name != NULL ? s->decl_name : "<anon>");
+                        }
+                        free((*vars)[*var_count - 1].name);
+                        (*var_count)--;
+                        return -1;
+                    }
+                }
+            }
+            return 0;
+        }
+
+    case CC_STMT_EXPR:
+        if ((s->attr_flags & CC_ATTR_FALLTHROUGH) != 0) {
+            if (s->expr != NULL) {
+                sema_diag(diag, "fallthrough attribute requires an empty statement");
+                return -1;
+            }
+            if (switch_depth <= 0) {
+                sema_diag(diag, "fallthrough attribute is only valid in switch statements");
+                return -1;
+            }
+            return 0;
+        }
+        if (s->expr == NULL) {
+            return 0;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!(s->expr->kind == CC_EXPR_CAST && ct_kind_is(s->expr->ctype->unqual, CC_CT_VOID))) {
+            const cc_expr_t *ce = s->expr;
+            if (ce->kind == CC_EXPR_CALL && ce->ident != NULL) {
+                const cc_function_t *f = find_function(tu, ce->ident);
+                if (f != NULL && (f->attr_flags & CC_ATTR_NODISCARD) != 0) {
+                    char buf[192];
+                    snprintf(buf, sizeof(buf), "ignoring nodiscard return value from %s",
+                             f->name != NULL ? f->name : "<anon>");
+                    if (emit_required_warning(diag, ce->line, ce->col, buf) != 0) {
+                        return -1;
+                    }
+                }
+            }
+        }
+        return 0;
+
+    case CC_STMT_ASM: {
+        size_t i2;
+        if (s->asm_template == NULL) {
+            sema_diag(diag, "asm statement is missing a template");
+            return -1;
+        }
+        if (s->asm_is_goto && s->asm_goto_label_count == 0) {
+            sema_diag(diag, "asm goto requires at least one destination label");
+            return -1;
+        }
+        if (!s->asm_is_goto && s->asm_goto_label_count > 0) {
+            sema_diag(diag, "asm goto label list requires 'asm goto'");
+            return -1;
+        }
+        if (asm_validate_template_refs(s, diag) != 0) {
+            return -1;
+        }
+        for (i2 = 0; i2 < s->asm_output_count; ++i2) {
+            if (s->asm_outputs[i2].expr == NULL || !asm_operand_is_lvalue(s->asm_outputs[i2].expr)) {
+                sema_diag(diag, "asm output operand must be an lvalue");
+                return -1;
+            }
+            if (check_expr(tu, s->asm_outputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 1 ||
+                sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 2) {
+                sema_diag(diag, "floating asm outputs are not supported yet");
+                return -1;
+            }
+            if (asm_validate_constraint(s->asm_outputs[i2].constraint, 1, s->asm_output_count, cc_target_pointer_size(),
+                                        diag) != 0) {
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_input_count; ++i2) {
+            int tied_out = -1;
+            if (s->asm_inputs[i2].expr == NULL) {
+                sema_diag(diag, "asm input operand requires an expression");
+                return -1;
+            }
+            if (check_expr(tu, s->asm_inputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 1 ||
+                sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 2) {
+                sema_diag(diag, "floating asm inputs are not supported yet");
+                return -1;
+            }
+            if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, cc_target_pointer_size(),
+                                        diag) != 0) {
+                return -1;
+            }
+            tied_out = cc_asm_constraint_matched_operand(s->asm_inputs[i2].constraint);
+            (void)tied_out;
+        }
+        if (asm_check_early_clobber_inputs(s, diag) != 0) {
+            return -1;
+        }
+        for (i2 = 0; i2 < s->asm_clobber_count; ++i2) {
+            if (s->asm_clobbers[i2] == NULL || s->asm_clobbers[i2][0] == '\0') {
+                sema_diag(diag, "asm clobber name cannot be empty");
+                return -1;
+            }
+            if (strchr(s->asm_clobbers[i2], '\n') != NULL || strchr(s->asm_clobbers[i2], '\r') != NULL) {
+                sema_diag(diag, "asm clobber contains invalid characters");
+                return -1;
+            }
+        }
+        for (i2 = 0; i2 < s->asm_goto_label_count; ++i2) {
+            if (s->asm_goto_labels[i2] == NULL || s->asm_goto_labels[i2][0] == '\0') {
+                sema_diag(diag, "asm goto label cannot be empty");
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    case CC_STMT_RETURN:
+        if ((fn_attr_flags & CC_ATTR_NORETURN) != 0) {
+            sema_diag(diag, "noreturn function must not contain a return statement");
+            return -1;
+        }
+        if (ct_kind_is(fn_ret->unqual, CC_CT_VOID)) {
+            if (s->expr != NULL) {
+                if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (!ct_kind_is(sx_vtype(s->expr), CC_CT_VOID)) {
+                    if (!cc_lang_gnu()) {
+                        sema_diag(diag, "void function returning a value");
+                        return -1;
+                    }
+                    if (emit_required_warning(diag, s->line, s->col,
+                                              "void function returning a value is a GNU extension; value is ignored") != 0)
+                        return -1;
+                }
+            }
+        } else {
+            if (s->expr == NULL) {
+                sema_diag(diag, "non-void function must return a value");
+                return -1;
+            }
+            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (sema_complex_convert_for_assign(tu, &s->expr, fn_ret) < 0) {
+                sema_diag(diag, "out of memory");
+                return -1;
+            }
+            if (sx_ct_record(fn_ret) >= 0 ? sx_ct_record(sx_vtype(s->expr)) != sx_ct_record(fn_ret) &&
+                                                !(s->expr->kind == CC_EXPR_STMT && sx_is_int(s->expr))
+                                          : !sema_assignable(tu, fn_ret, s->expr)) {
+                sema_diag(diag, "return type mismatch");
+                return -1;
+            }
+        }
+        *saw_return = 1;
+        return 0;
+
+    case CC_STMT_IF:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            sema_diag(diag, "malformed if statement");
+            return -1;
+        }
+        if (maybe_warn_assignment_condition(s->expr, "if", diag) != 0) {
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (sema_condition(tu, &s->expr, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(s->expr)) {
+            sema_diag(diag, "if condition cannot be void");
+            return -1;
+        }
+        {
+            size_t saved = *var_count;
+            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
+                           switch_depth,
+                           saw_return, diag) != 0) {
+                return -1;
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+        }
+        if (s->else_branch != NULL) {
+            size_t saved = *var_count;
+            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
+                           switch_depth,
+                           saw_return, diag) != 0) {
+                return -1;
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+        }
+        return 0;
+
+    case CC_STMT_BLOCK:
+        {
+            size_t saved = *var_count;
+            int child_depth = depth + 1;
+            if (s->is_synthetic_block) {
+                child_depth = depth;
+            }
+            for (i = 0; i < s->block_count; ++i) {
+                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, child_depth, fn_ret, fn_attr_flags,
+                               loop_depth,
+                               switch_depth,
+                               saw_return, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!s->is_synthetic_block) {
+                for (i = saved; i < *var_count; ++i) {
+                    free((*vars)[i].name);
+                }
+                *var_count = saved;
+            }
+            return 0;
+        }
+
+    case CC_STMT_WHILE:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            sema_diag(diag, "malformed while statement");
+            return -1;
+        }
+        if (maybe_warn_assignment_condition(s->expr, "while", diag) != 0) {
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (sema_condition(tu, &s->expr, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(s->expr)) {
+            sema_diag(diag, "while condition cannot be void");
+            return -1;
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth + 1,
+                          switch_depth,
+                          saw_return, diag);
+
+    case CC_STMT_DO:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            sema_diag(diag, "malformed do-while statement");
+            return -1;
+        }
+        if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth + 1,
+                       switch_depth,
+                       saw_return, diag) != 0) {
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (maybe_warn_assignment_condition(s->expr, "do-while", diag) != 0) {
+            return -1;
+        }
+        if (sema_condition(tu, &s->expr, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(s->expr)) {
+            sema_diag(diag, "do-while condition cannot be void");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_FOR:
+        if (s->then_branch == NULL) {
+            sema_diag(diag, "malformed for statement");
+            return -1;
+        }
+        {
+            size_t saved = *var_count;
+            int for_depth = depth;
+
+            if (s->init_stmt != NULL) {
+                if (s->init_stmt->kind == CC_STMT_BLOCK) {
+                    for (i = 0; i < s->init_stmt->block_count; ++i) {
+                        if (check_stmt(tu, &s->init_stmt->block_stmts[i], vars, var_count, depth + 1, fn_ret,
+                                       fn_attr_flags, loop_depth, switch_depth, saw_return, diag) != 0) {
+                            return -1;
+                        }
+                    }
+                } else {
+                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret, fn_attr_flags,
+                                   loop_depth, switch_depth, saw_return, diag) != 0) {
+                        return -1;
+                    }
+                }
+                for_depth = depth + 1;
+            } else if (s->init_expr != NULL && check_expr(tu, s->init_expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+
+            if (s->expr != NULL) {
+                if (maybe_warn_assignment_condition(s->expr, "for", diag) != 0) {
+                    return -1;
+                }
+                if (check_expr(tu, s->expr, *vars, *var_count, for_depth, diag) != 0) {
+                    return -1;
+                }
+                if (sema_condition(tu, &s->expr, diag) != 0) {
+                    return -1;
+                }
+                if (!sx_is_scalar(s->expr)) {
+                    sema_diag(diag, "for condition cannot be void");
+                    return -1;
+                }
+            }
+            if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, for_depth, diag) != 0) {
+                return -1;
+            }
+            if (check_stmt(tu, s->then_branch, vars, var_count, for_depth, fn_ret, fn_attr_flags,
+                           loop_depth + 1, switch_depth,
+                           saw_return, diag) != 0) {
+                return -1;
+            }
+            for (i = saved; i < *var_count; ++i) {
+                free((*vars)[i].name);
+            }
+            *var_count = saved;
+            return 0;
+        }
+
+    case CC_STMT_SWITCH:
+        if (s->expr == NULL || s->then_branch == NULL) {
+            sema_diag(diag, "malformed switch statement");
+            return -1;
+        }
+        if (s->then_branch->kind != CC_STMT_BLOCK) {
+            sema_diag(diag, "switch body must be a block statement");
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(s->expr)) {
+            sema_diag(diag, "switch expression must be integer");
+            return -1;
+        }
+        {
+            size_t i1;
+            int seen_default = 0;
+            for (i1 = 0; i1 < s->then_branch->block_count; ++i1) {
+                const cc_stmt_t *ci = &s->then_branch->block_stmts[i1];
+                long long vi = 0;
+                long long vhi = 0;
+                if (ci->kind == CC_STMT_DEFAULT) {
+                    if (seen_default) {
+                        sema_diag(diag, "duplicate default label in switch");
+                        return -1;
+                    }
+                    seen_default = 1;
+                    continue;
+                }
+                if (ci->kind != CC_STMT_CASE) {
+                    continue;
+                }
+                if (ci->expr == NULL || check_expr(tu, ci->expr, *vars, *var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (eval_const_int_expr(tu, ci->expr, &vi) != 0) {
+                    sema_diag(diag, "case label must be an integer constant expression");
+                    return -1;
+                }
+                vhi = ci->case_has_range ? ci->case_hi : vi;
+                if (ci->case_has_range && vhi < vi) {
+                    sema_diag(diag, "case range upper bound must be >= lower bound");
+                    return -1;
+                }
+                {
+                    size_t i2;
+                    for (i2 = i1 + 1; i2 < s->then_branch->block_count; ++i2) {
+                        const cc_stmt_t *cj = &s->then_branch->block_stmts[i2];
+                        long long vj = 0;
+                        long long vjhi = 0;
+                        if (cj->kind != CC_STMT_CASE) {
+                            continue;
+                        }
+                        if (eval_const_int_expr(tu, cj->expr, &vj) != 0) {
+                            continue;
+                        }
+                        vjhi = cj->case_has_range ? cj->case_hi : vj;
+                        if (vjhi < vj) {
+                            continue;
+                        }
+                        if (!(vhi < vj || vjhi < vi)) {
+                            sema_diag(diag, "duplicate/overlapping case value in switch");
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
+                          switch_depth + 1,
+                          saw_return, diag);
+
+    case CC_STMT_CASE:
+        if (switch_depth <= 0) {
+            sema_diag(diag, "case label used outside switch");
+            return -1;
+        }
+        if (s->expr == NULL) {
+            sema_diag(diag, "malformed case label");
+            return -1;
+        }
+        if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (eval_const_int_expr(tu, s->expr, &s->expr->int_val) != 0) {
+            sema_diag(diag, "case label must be an integer constant expression");
+            return -1;
+        }
+        if (s->case_has_range) {
+            if (s->case_hi < s->expr->int_val) {
+                sema_diag(diag, "case range upper bound must be >= lower bound");
+                return -1;
+            }
+            if (emit_warning(diag, s->line, s->col, "case ranges are a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+
+    case CC_STMT_DEFAULT:
+        if (switch_depth <= 0) {
+            sema_diag(diag, "default label used outside switch");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_BREAK:
+        if (loop_depth <= 0 && switch_depth <= 0) {
+            sema_diag(diag, "break used outside loop/switch");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_CONTINUE:
+        if (loop_depth <= 0) {
+            sema_diag(diag, "continue used outside loop");
+            return -1;
+        }
+        return 0;
+
+    case CC_STMT_GOTO:
+        if (s->expr != NULL) {
+            if (emit_warning(diag, s->line, s->col, "computed goto is a GNU extension (non-C99)", 1) != 0) {
+                return -1;
+            }
+            if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!sx_is_ptr(s->expr) && !sx_is_int(s->expr)) {
+                sema_diag(diag, "computed goto requires pointer or integer target expression");
+                return -1;
+            }
+        }
+        return 0;
+
+    case CC_STMT_LABEL:
+        if (s->then_branch == NULL) {
+            sema_diag(diag, "malformed labeled statement");
+            return -1;
+        }
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
+                          switch_depth,
+                          saw_return, diag);
+
+    default:
+        sema_diag(diag, "unsupported statement kind");
+        return -1;
+    }
+}
+
+int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
+    size_t i;
+    int had_error = 0;
+
+    if (diag != NULL) {
+        diag->line = 0;
+        diag->col = 0;
+        diag->error_count = 0;
+        diag->message[0] = '\0';
+    }
+
+    if (tu == NULL) {
+        sema_diag(diag, "invalid translation unit");
+        return -1;
+    }
+    if (tu->func_count == 0 && tu->global_count == 0) {
+        return 0;
+    }
+
+    for (i = 0; i < tu->global_count; ++i) {
+        cc_global_t *g = &tu->globals[i];
+        int sc_count = storage_class_count(g->storage);
+        size_t j;
+        set_diag_context(g->line, g->col);
+        if (diag != NULL && diag->message[0] == '\0' && (g->line != 0 || g->col != 0)) {
+            diag->line = g->line;
+            diag->col = g->col;
+        }
+        if (g->name == NULL || g->name[0] == '\0') {
+            sema_diag(diag, "file-scope declaration with missing name");
+            goto fail_global_item;
+        }
+        if (sc_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "multiple storage-class specifiers in file-scope declaration: %s", g->name);
+            }
+            goto fail_global_item;
+        }
+        if ((g->storage & CC_STORAGE_AUTO) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "file-scope object cannot use auto storage: %s", g->name);
+            }
+            goto fail_global_item;
+        }
+        if ((g->storage & CC_STORAGE_INLINE) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "inline is only valid on function declarations: %s", g->name);
+            }
+            goto fail_global_item;
+        }
+        if (ct_kind_is(g->ctype->unqual, CC_CT_VOID) && !((g->storage & CC_STORAGE_EXTERN) != 0 && g->init == NULL)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "invalid void file-scope object: %s", g->name);
+            }
+            goto fail_global_item;
+        }
+        if (has_multiple_visibility_attrs(g->attr_flags)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for object '%s'",
+                         g->name);
+            }
+            goto fail_global_item;
+        }
+        if ((g->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "constructor/destructor attributes are only valid on functions: %s", g->name);
+            }
+            goto fail_global_item;
+        }
+        if ((g->attr_flags & CC_ATTR_ALIGNED) != 0 &&
+            validate_attr_align(g->attr_align, diag, "aligned attribute on file-scope object") != 0) {
+            goto fail_global_item;
+        }
+        if ((g->attr_flags & CC_ATTR_SECTION) != 0 &&
+            validate_attr_section(g->attr_section, diag, "section attribute on file-scope object") != 0) {
+            goto fail_global_item;
+        }
+        if ((g->attr_flags & CC_ATTR_ALIAS) != 0) {
+            if (g->attr_alias == NULL || g->attr_alias[0] == '\0') {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "alias attribute on object '%s' requires a target",
+                             g->name);
+                }
+                goto fail_global_item;
+            }
+            if (g->init != NULL) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "alias object '%s' cannot have an initializer", g->name);
+                }
+                goto fail_global_item;
+            }
+        }
+        for (j = 0; j < i; ++j) {
+            if (strcmp(tu->globals[j].name, g->name) == 0) {
+                const cc_global_t *prev = &tu->globals[j];
+                int prev_static = (prev->storage & CC_STORAGE_STATIC) != 0;
+                int cur_static = (g->storage & CC_STORAGE_STATIC) != 0;
+                {
+                    const char *conflict = sema_redecl_conflict(tu, prev->ctype, g->ctype);
+
+                    if (conflict != NULL) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message), "conflicting file-scope %s: %s", conflict,
+                                     g->name);
+                        }
+                        goto fail_global_item;
+                    }
+                }
+                if (prev_static != cur_static) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "conflicting linkage for file-scope object: %s",
+                                 g->name);
+                    }
+                    goto fail_global_item;
+                }
+                if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 || (g->attr_flags & CC_ATTR_ALIAS) != 0) {
+                    if ((prev->attr_flags & CC_ATTR_ALIAS) == 0 || (g->attr_flags & CC_ATTR_ALIAS) == 0 ||
+                        prev->attr_alias == NULL || g->attr_alias == NULL ||
+                        strcmp(prev->attr_alias, g->attr_alias) != 0) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message),
+                                     "conflicting alias targets for file-scope object: %s", g->name);
+                        }
+                        goto fail_global_item;
+                    }
+                }
+                if (prev->init != NULL && g->init != NULL) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "duplicate file-scope definition: %s", g->name);
+                    }
+                    goto fail_global_item;
+                }
+                break;
+            }
+        }
+        if (g->init != NULL) {
+            if (g->init->kind != CC_EXPR_INIT_LIST && sema_decimal_def(tu, g->ctype) != NULL) {
+                /* a static decimal object: its folded encoding, as a brace list */
+                if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0 ||
+                    sema_decimal_static_init(tu, &g->init, sx_ct_record(g->ctype), diag) != 0 ||
+                    check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) != 0) {
+                    goto fail_global_item;
+                }
+                continue;
+            }
+            if (g->init->kind == CC_EXPR_INIT_LIST) {
+                /* the element type of a one-dimensional array, whose unbraced elements are folded */
+                const cc_ctype_t *gelem =
+                    g->ctype->kind == CC_CT_ARRAY && g->ctype->of->kind != CC_CT_ARRAY ? g->ctype->of : NULL;
+                const cc_ctype_t *celem = gelem != NULL ? sema_complex_elem(tu, gelem) : NULL;
+
+                if (gelem != NULL && sema_decimal_def(tu, gelem) != NULL) {
+                    /* an array of decimal objects: each element not already braced is a constant to fold */
+                    size_t k;
+
+                    for (k = 0; k < g->init->arg_count; ++k) {
+                        if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
+                            (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
+                             sema_decimal_static_init(tu, &g->init->args[k], sx_ct_record(gelem), diag) != 0)) {
+                            goto fail_global_item;
+                        }
+                    }
+                }
+                if (gelem != NULL && sema_wide_def(tu, gelem) != NULL) {
+                    /* an array of wide integers: each element not already braced is a constant to fold */
+                    size_t k;
+
+                    for (k = 0; k < g->init->arg_count; ++k) {
+                        if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
+                            (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
+                             sema_wide_static_init(tu, &g->init->args[k], sx_ct_record(gelem), diag) != 0)) {
+                            goto fail_global_item;
+                        }
+                    }
+                }
+                if (celem != NULL) {
+                    /* an array of complex: each element not already braced is a constant to fold */
+                    size_t k;
+
+                    for (k = 0; k < g->init->arg_count; ++k) {
+                        if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
+                            (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
+                             sema_complex_static_init(tu, &g->init->args[k], celem, diag) != 0)) {
+                            goto fail_global_item;
+                        }
+                    }
+                }
+                if (g->ctype->kind == CC_CT_ARRAY) {
+                    long inferred_len = -1;
+                    if (check_array_initializer(tu, g->name, g->ctype, g->init, NULL, 0, 0, &inferred_len, diag) != 0) {
+                        goto fail_global_item;
+                    }
+                    if (g->ctype->count <= 0 && inferred_len > 0) {
+                        g->ctype = sema_complete_array_ctype(g->ctype, inferred_len);
+                    }
+                } else if (sx_ct_record(g->ctype) >= 0) {
+                    if (check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
+                        0) {
+                        goto fail_global_item;
+                    }
+                } else {
+                    cc_expr_t *scalar_init = unwrap_scalar_initializer_expr(g->init, diag);
+                    if (scalar_init == NULL) {
+                        goto fail_global_item;
+                    }
+                    if (check_expr(tu, scalar_init, NULL, 0, 0, diag) != 0) {
+                        goto fail_global_item;
+                    }
+                    if (!sema_assignable(tu, g->ctype, scalar_init)) {
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
+                                     g->name);
+                        }
+                        goto fail_global_item;
+                    }
+                }
+            } else {
+                const cc_ctype_t *celem = sema_complex_elem(tu, g->ctype);
+
+                if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
+                    goto fail_global_item;
+                }
+                if (celem != NULL) {
+                    /* a static complex object: its constant parts, as a brace list */
+                    if (sema_complex_static_init(tu, &g->init, celem, diag) != 0 ||
+                        check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
+                            0) {
+                        goto fail_global_item;
+                    }
+                    continue;
+                }
+                if (sema_wide_def(tu, g->ctype) != NULL) {
+                    /* a static wide integer: its folded limbs, as a brace list */
+                    if (sema_wide_static_init(tu, &g->init, sx_ct_record(g->ctype), diag) != 0 ||
+                        check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
+                            0) {
+                        goto fail_global_item;
+                    }
+                    continue;
+                }
+                if (g->ctype->kind == CC_CT_ARRAY && g->init->kind == CC_EXPR_STR) {
+                    long inferred_len = -1;
+                    long len = g->ctype->count > 0 ? g->ctype->count : 0;
+                    int rc = check_array_string_initializer(g->name, g->ctype, &len, g->init, &inferred_len, diag);
+                    if (rc < 0) {
+                        goto fail_global_item;
+                    }
+                    if (rc == 0) {
+                        g->ctype = sema_complete_array_ctype(g->ctype, len);
+                        continue;
+                    }
+                }
+                if (!sema_assignable(tu, g->ctype, g->init)) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
+                                 g->name);
+                    }
+                    goto fail_global_item;
+                }
+            }
+        }
+        continue;
+
+fail_global_item:
+        had_error = 1;
+        sema_diag_report_and_clear(diag);
+        continue;
+    }
+
+    for (i = 0; i < tu->func_count; ++i) {
+        cc_function_t *f = &tu->funcs[i];
+        int f_sc_count = storage_class_count(f->storage);
+        size_t j;
+        set_diag_context(f->line, f->col);
+        if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
+            diag->line = f->line;
+            diag->col = f->col;
+        }
+
+        if (f->name == NULL || f->name[0] == '\0') {
+            sema_diag(diag, "function with missing name");
+            goto fail_decl;
+        }
+        if ((f->attr_flags & CC_ATTR_PACKED) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "packed attribute is invalid for function '%s'",
+                         f->name);
+            }
+            goto fail_decl;
+        }
+        if (has_multiple_visibility_attrs(f->attr_flags)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for function '%s'",
+                         f->name);
+            }
+            goto fail_decl;
+        }
+        if ((f->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 && (f->attr_flags & CC_ATTR_NOINLINE) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function '%s' has conflicting always_inline/noinline attributes", f->name);
+            }
+            goto fail_decl;
+        }
+        if ((f->attr_flags & CC_ATTR_HOT) != 0 && (f->attr_flags & CC_ATTR_COLD) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function '%s' has conflicting hot/cold attributes", f->name);
+            }
+            goto fail_decl;
+        }
+        if (f_sc_count > 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "multiple storage-class specifiers in function declaration: %s", f->name);
+            }
+            goto fail_decl;
+        }
+        if ((f->storage & (CC_STORAGE_AUTO | CC_STORAGE_REGISTER)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function declaration cannot use auto/register storage: %s", f->name);
+            }
+            goto fail_decl;
+        }
+        if ((f->storage & CC_STORAGE_THREAD_LOCAL) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "function declaration cannot use thread_local storage: %s", f->name);
+            }
+            goto fail_decl;
+        }
+        if (cc_lang_at_least(2017) && !cc_lang_at_least(2023) && f->has_body && f->has_oldstyle_param_decls) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
+            if (emit_warning(diag, f->line, f->col, msg, 1) != 0) {
+                goto fail_decl;
+            }
+        }
+        if ((f->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
+            if (f->ret_ctype == NULL || f->ret_ctype->unqual->kind != CC_CT_VOID) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "constructor/destructor function '%s' must have void return type", f->name);
+                }
+                goto fail_decl;
+            }
+            if (!f->has_prototype || f->param_count != 0 || f->is_variadic) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "constructor/destructor function '%s' must have prototype void(void)", f->name);
+                }
+                goto fail_decl;
+            }
+        }
+        if ((f->attr_flags & CC_ATTR_ALIGNED) != 0 &&
+            validate_attr_align(f->attr_align, diag, "aligned attribute on function") != 0) {
+            goto fail_decl;
+        }
+        if ((f->attr_flags & CC_ATTR_SECTION) != 0 &&
+            validate_attr_section(f->attr_section, diag, "section attribute on function") != 0) {
+            goto fail_decl;
+        }
+        if ((f->attr_flags & CC_ATTR_MALLOC_FN) != 0 && !sema_is_ptr(f->ret_ctype)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "malloc function '%s' must return a pointer type",
+                         f->name);
+            }
+            goto fail_decl;
+        }
+        if ((f->attr_flags & CC_ATTR_FORMAT) != 0) {
+            long fmt_index = f->attr_format_index;
+            long first_to_check = f->attr_format_first_to_check;
+            if (!f->has_prototype) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "format function '%s' must have a prototype", f->name);
+                }
+                goto fail_decl;
+            }
+            if (f->param_count == 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "format function '%s' requires at least one named parameter", f->name);
+                }
+                goto fail_decl;
+            }
+            if (fmt_index > 0 && fmt_index > (long)f->param_count) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "format function '%s' has format index %ld out of range", f->name, fmt_index);
+                }
+                goto fail_decl;
+            }
+            if (!f->is_variadic) {
+                /*
+                 * GCC-compatible allowance for v* wrappers:
+                 *   __attribute__((format(..., fmt_index, 0)))
+                 * A non-zero third argument requires variadic parameters.
+                 */
+                if (first_to_check != 0) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "format function '%s' must be variadic or a v* wrapper", f->name);
+                    }
+                    goto fail_decl;
+                }
+            } else if (first_to_check > 0 && first_to_check < fmt_index + 1) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "format function '%s' has invalid first-to-check index", f->name);
+                }
+                goto fail_decl;
+            }
+        }
+        if ((f->attr_flags & CC_ATTR_NONNULL) != 0 && (!f->has_prototype || f->param_count == 0)) {
+            /* as gcc: with no pointer parameter to apply to, nonnull is harmless */
+            char wbuf[256];
+            snprintf(wbuf, sizeof(wbuf), "nonnull attribute on '%s' has no pointer parameter to apply to", f->name);
+            if (emit_warning(diag, f->line, f->col, wbuf, 0) != 0) {
+                goto fail_decl;
+            }
+        }
+        if ((f->attr_flags & CC_ATTR_ALIAS) != 0) {
+            if (f->has_body) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "alias function '%s' cannot have a definition body", f->name);
+                }
+                goto fail_decl;
+            }
+            if (f->attr_alias == NULL || f->attr_alias[0] == '\0') {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "alias function '%s' requires a target", f->name);
+                }
+                goto fail_decl;
+            }
+        }
+        for (j = 0; j < i; ++j) {
+            cc_function_t *prev = &tu->funcs[j];
+            int prev_static;
+            int cur_static;
+            int prev_extern;
+            int cur_extern;
+            if (strcmp(prev->name, f->name) != 0) {
+                continue;
+            }
+            if (!func_decl_compatible(tu, prev, f)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "conflicting declarations for function: %s",
+                             f->name);
+                }
+                goto fail_decl;
+            }
+            prev_static = ((prev->storage & CC_STORAGE_STATIC) != 0);
+            cur_static = ((f->storage & CC_STORAGE_STATIC) != 0);
+            prev_extern = ((prev->storage & CC_STORAGE_EXTERN) != 0);
+            cur_extern = ((f->storage & CC_STORAGE_EXTERN) != 0);
+            if ((prev_static && cur_extern) || (cur_static && prev_extern)) {
+                int prev_inline = ((prev->storage & CC_STORAGE_INLINE) != 0);
+                int cur_inline = ((f->storage & CC_STORAGE_INLINE) != 0);
+                if (prev_inline || cur_inline) {
+                    continue;
+                }
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "conflicting storage-class for function declaration: %s", f->name);
+                }
+                goto fail_decl;
+            }
+            /*
+             * C inline/linkage rule interaction:
+             * a prior extern declaration keeps a later plain inline definition
+             * externally visible in this TU.
+             */
+            if ((prev_extern || cur_extern) && !prev_static && !cur_static) {
+                prev->storage |= CC_STORAGE_EXTERN;
+                f->storage |= CC_STORAGE_EXTERN;
+            }
+            if (prev->has_body && f->has_body) {
+                int prev_inline = ((prev->storage & CC_STORAGE_INLINE) != 0);
+                int cur_inline = ((f->storage & CC_STORAGE_INLINE) != 0);
+                if (prev_inline || cur_inline) {
+                    if (!prev_inline && cur_inline) {
+                        f->has_body = 0;
+                    } else if (prev_inline && !cur_inline) {
+                        prev->has_body = 0;
+                    } else {
+                        f->has_body = 0;
+                    }
+                    continue;
+                }
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "duplicate function definition: %s", f->name);
+                }
+                goto fail_decl;
+            }
+            if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 || (f->attr_flags & CC_ATTR_ALIAS) != 0) {
+                if ((prev->attr_flags & CC_ATTR_ALIAS) != 0 && (f->attr_flags & CC_ATTR_ALIAS) != 0 &&
+                    (prev->attr_alias == NULL || f->attr_alias == NULL ||
+                     strcmp(prev->attr_alias, f->attr_alias) != 0)) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "conflicting alias targets for function: %s", f->name);
+                    }
+                    goto fail_decl;
+                }
+            }
+        }
+        continue;
+
+fail_decl:
+        had_error = 1;
+        sema_diag_report_and_clear(diag);
+        continue;
+    }
+
+    for (i = 0; i < tu->func_count; ++i) {
+        const cc_function_t *f = &tu->funcs[i];
+        var_entry_t *vars = NULL;
+        name_list_t labels = {0};
+        name_list_t gotos = {0};
+        size_t var_count = 0;
+        size_t j;
+        size_t k;
+        int saw_return = 0;
+        cc_attr_flags_t fn_attr_flags = f->attr_flags;
+
+        if (!f->has_body) {
+            continue;
+        }
+
+        set_diag_context(f->line, f->col);
+        if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
+            diag->line = f->line;
+            diag->col = f->col;
+        }
+
+        for (k = 0; k < tu->func_count; ++k) {
+            if (strcmp(tu->funcs[k].name, f->name) == 0) {
+                fn_attr_flags |= tu->funcs[k].attr_flags;
+            }
+        }
+
+        if (f->nest_parent != NULL) {
+            /* a GNU nested function: the enclosing function's variables, in a scope outside its own */
+            cc_outer_var_t *outer;
+            size_t outer_count;
+
+            if (cc_nested_outer_vars(tu, f, &outer, &outer_count) != 0) {
+                sema_diag(diag, "nested function's enclosing function is missing");
+                goto fail_func;
+            }
+            for (k = 0; k < outer_count; ++k) {
+                if (vars_push(&vars, &var_count, outer[k].name, outer[k].storage, -1, outer[k].ctype) != 0) {
+                    free(outer);
+                    sema_diag(diag, "out of memory adding the enclosing function's variables");
+                    goto fail_func;
+                }
+            }
+            free(outer);
+        }
+
+        for (j = 0; j < f->param_count; ++j) {
+            if (ct_kind_is(sema_param_ctype(&f->params[j])->unqual, CC_CT_VOID)) {
+                sema_diag(diag, "void is not valid for named parameter type");
+                goto fail_func;
+            }
+            if (cc_lang_at_least(2017) && (f->params[j].storage & CC_STORAGE_REGISTER) != 0) {
+                if (emit_warning(diag, f->line, f->col,
+                                 "'register' storage-class specifier is obsolescent in C17", 1) != 0) {
+                    goto fail_func;
+                }
+            }
+            if (vars_find_depth(vars, var_count, f->params[j].name, 0) >= 0) {
+                sema_diag(diag, "duplicate parameter name");
+                goto fail_func;
+            }
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].storage, 0, sema_param_ctype(&f->params[j])) !=
+                0) {
+                sema_diag(diag, "out of memory adding parameter");
+                goto fail_func;
+            }
+        }
+        /* a parameter that points to a variable-length array: its bounds name earlier parameters */
+        for (j = 0; j < f->param_count; ++j) {
+            for (size_t b = 0; b < f->params[j].vla_bounds.count; ++b) {
+                cc_expr_t *bound = f->params[j].vla_bounds.at[b];
+
+                if (bound == NULL) {
+                    continue;
+                }
+                if (check_expr(tu, bound, vars, var_count, 0, diag) != 0) {
+                    goto fail_func;
+                }
+                if (!sx_is_int(bound)) {
+                    sema_diag(diag, "variable-length array bound must be an integer expression");
+                    goto fail_func;
+                }
+            }
+        }
+        for (j = 0; j < f->stmt_count; ++j) {
+            if (collect_labels_gotos_stmt(&f->stmts[j], &labels, &gotos, diag) != 0) {
+                goto fail_func;
+            }
+        }
+        for (j = 0; j < gotos.count; ++j) {
+            if (names_find(labels.items, labels.count, gotos.items[j]) < 0) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "goto to unknown label: %s", gotos.items[j]);
+                }
+                goto fail_func;
+            }
+        }
+
+        for (j = 0; j < f->stmt_count; ++j) {
+            size_t saved_stmt_var_count = var_count;
+            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_ctype, fn_attr_flags, 0, 0, &saw_return,
+                           diag) != 0) {
+                size_t vi;
+                had_error = 1;
+                sema_diag_report_and_clear(diag);
+                for (vi = saved_stmt_var_count; vi < var_count; ++vi) {
+                    free(vars[vi].name);
+                }
+                var_count = saved_stmt_var_count;
+                continue;
+            }
+        }
+
+        (void)saw_return;
+
+        for (j = 0; j < var_count; ++j) {
+            free(vars[j].name);
+        }
+        free(vars);
+        name_list_free(&labels);
+        name_list_free(&gotos);
+        continue;
+
+fail_func:
+        for (j = 0; j < var_count; ++j) {
+            free(vars[j].name);
+        }
+        free(vars);
+        name_list_free(&labels);
+        name_list_free(&gotos);
+        had_error = 1;
+        sema_diag_report_and_clear(diag);
+        continue;
+    }
+
+    if (had_error) {
+        if (diag != NULL && diag->error_count > 0) {
+            snprintf(diag->message, sizeof(diag->message), "%zu error(s) generated", diag->error_count);
+        }
+        return -1;
+    }
+
+    for (i = 0; i < tu->global_count; ++i) {
+        sema_settle_tree(tu->globals[i].init);
+    }
+    for (i = 0; i < tu->func_count; ++i) {
+        sema_settle_stmts(tu->funcs[i].stmts, tu->funcs[i].stmt_count);
+    }
+    return 0;
+}
+
