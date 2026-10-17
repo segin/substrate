@@ -5716,29 +5716,6 @@ static const cc_ctype_t *declarator_type(const declarator_t *d, const cc_ctype_t
 }
 
 /**
- * The type the declaration specifiers describe: the typedef's own type
- * when they were a typedef name that recorded one, since the legacy
- * encoding loses function types (`typedef int (*op)(int)` reads as a
- * pointer to int); else the type the legacy outputs describe.
- *
- * @param alias  the type of the typedef name the specifiers were
- *               (parser_t.last_alias_ctype just after parse_declspec()),
- *               or NULL
- * @param ty     the type parse_declspec() gave
- * @param sid    its struct id
- * @param ndim   its array rank (a typedef'd array)
- * @param dims   its bounds
- * @return       the type, or NULL
- */
-static const cc_ctype_t *declspec_ctype(const cc_ctype_t *alias, cc_type_t ty, int sid, int ndim,
-                                        const long *dims) {
-    if (alias != NULL) {
-        return alias;
-    }
-    return cc_ct_from_legacy(ty, sid, ndim, dims);
-}
-
-/**
  * Read the qualifiers and attributes after a `*`.
  *
  * @param p          the parser, at the token after the `*`
@@ -10928,14 +10905,10 @@ static int parse_function_params(parser_t *p, void *ctx) {
  *
  * @param p          the parser, at the declarator
  * @param f          the function; receives name, params and ret_ctype
- * @param ftype      the specifiers' type, legacy encoding
- * @param ftype_sid  its struct id
- * @param alias      the type of the typedef name the specifiers were, or
- *                   NULL (see declspec_ctype())
+ * @param base       the specifiers' type
  * @return           0, or -1 on error (diagnosed)
  */
-static int parse_function_declarator(parser_t *p, cc_function_t *f, cc_type_t ftype, int ftype_sid,
-                                     const cc_ctype_t *alias) {
+static int parse_function_declarator(parser_t *p, cc_function_t *f, const cc_ctype_t *base) {
     declarator_t d;
     const cc_ctype_t *t;
     size_t line = p->tok.line;
@@ -10948,7 +10921,7 @@ static int parse_function_declarator(parser_t *p, cc_function_t *f, cc_type_t ft
         declarator_free(&d);
         return -1;
     }
-    t = declarator_type(&d, declspec_ctype(alias, ftype, ftype_sid, 0, NULL));
+    t = declarator_type(&d, base);
     if (d.name == NULL || t == NULL || t->kind != CC_CT_FUNCTION) {
         set_diag(p->diag, line, col, d.name == NULL ? "expected function name" : "expected '(' after function name");
         declarator_free(&d);
@@ -10966,7 +10939,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     int ftype_sid = -1;
     int is_typedef = 0;
     int fn_storage = 0;
-    const cc_ctype_t *alias = NULL;
+    const cc_ctype_t *base;
     int saved_depth = p->scope_depth;
     cc_stmt_t *oldstyle_decls = NULL;
     size_t oldstyle_decl_count = 0;
@@ -10990,7 +10963,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             return -1;
         }
         fn_storage = p->last_storage;
-        alias = p->last_alias_ctype;
+        base = p->last_spec_ctype;
         if (is_typedef) {
             set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
             decl_attrs_clear(&spec_attrs);
@@ -11001,15 +10974,14 @@ static int parse_function(parser_t *p, cc_function_t *f) {
          * An omitted return type (`main() { ... }` => `int main() { ... }`)
          * is implicit int: C89 only, as gcc has it.
          */
-        ftype = CC_TYPE_INT;
-        ftype_sid = -1;
+        base = cc_ct_basic(CC_CT_INT);
         fn_storage = 0;
         is_typedef = 0;
     } else {
         set_diag(p->diag, p->tok.line, p->tok.col, "expected function return type");
         return -1;
     }
-    if (parse_function_declarator(p, f, ftype, ftype_sid, alias) != 0) {
+    if (parse_function_declarator(p, f, base) != 0) {
         decl_attrs_clear(&spec_attrs);
         return -1;
     }
