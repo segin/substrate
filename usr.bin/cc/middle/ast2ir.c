@@ -15343,9 +15343,9 @@ static long struct_scalar_slots_for_init(const cc_translation_unit_t *tu, int st
         }
         if (member_is_array(m)) {
             long cnt = m->array_len > 0 ? m->array_len : 1;
-            cc_type_t elem = ptr_base_type(m->type);
-            if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
-                long sub = struct_scalar_slots_for_init(tu, m->type_struct_id, depth + 1);
+            int elem_sid = ct_record_id(member_elem_ctype(m));
+            if (elem_sid >= 0) {
+                long sub = struct_scalar_slots_for_init(tu, elem_sid, depth + 1);
                 if (sub < 0 || cnt > LONG_MAX / sub || slots > LONG_MAX - cnt * sub) {
                     return -1;
                 }
@@ -15436,7 +15436,7 @@ static const cc_expr_t *flexible_init_string(const cc_expr_t *item) {
 static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                               const cc_expr_t *item) {
     const cc_expr_t *str = flexible_init_string(item);
-    cc_type_t elem_type;
+    int elem_sid;
     long elem_size;
     unsigned long *units = NULL;
     size_t unit_count = 0;
@@ -15446,15 +15446,12 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
     if (tu == NULL || m == NULL || item == NULL) {
         return -1;
     }
-    elem_type = ptr_base_type(m->type);
+    elem_sid = ct_record_id(member_elem_ctype(m));
     elem_size = member_elem_size(tu, m);
-    if (elem_size <= 0) {
-        elem_size = member_elem_size(tu, m);
-    }
     if (elem_size <= 0) {
         return -1;
     }
-    if (str != NULL && elem_type != CC_TYPE_VOID) {
+    if (str != NULL && elem_sid < 0) {
         wide = cc_string_literal_is_wide(str);
         if (decode_string_units(str, wide, &units, &unit_count) != 0) {
             free(units);
@@ -15462,8 +15459,8 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
         }
         free(units);
         elems = (long)unit_count + 1; /* the terminating null */
-    } else if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0 && item->kind == CC_EXPR_INIT_LIST) {
-        elems = infer_struct_array_len_from_init_list(tu, m->type_struct_id, item);
+    } else if (elem_sid >= 0 && item->kind == CC_EXPR_INIT_LIST) {
+        elems = infer_struct_array_len_from_init_list(tu, elem_sid, item);
     } else if (item->kind == CC_EXPR_INIT_LIST) {
         elems = (long)item->arg_count;
     } else {
@@ -16020,7 +16017,7 @@ static int fill_fixed_char_array_from_string(const cc_expr_t *expr, const cc_cty
 static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list,
                                             size_t *cursor, long base, unsigned char *buf, long buf_size,
                                             global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag);
-static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_type_t scalar_type, int scalar_struct_id,
+static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, const cc_ctype_t *scalar,
                                             const long *dims, int ndim, const cc_expr_t *list, size_t *cursor,
                                             long base, unsigned char *buf, long buf_size, global_reloc_t **relocs,
                                             size_t *reloc_count, cc_diag_t *diag);
@@ -16047,20 +16044,18 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
 static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                       const cc_expr_t *item, long elems, long base, unsigned char *buf, long buf_size,
                                       global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
-    cc_type_t elem_type = ptr_base_type(m->type);
+    const cc_ctype_t *elem = member_elem_ctype(m);
+    int elem_sid = ct_record_id(elem);
     long elem_size = member_elem_size(tu, m);
     const cc_expr_t *str = flexible_init_string(item);
     size_t cur = 0;
     long k;
 
-    if (elem_size <= 0) {
-        elem_size = member_elem_size(tu, m);
-    }
     if (elem_size <= 0 || elems <= 0 || elems > (buf_size - base) / elem_size) {
         set_diag(diag, "flexible array initializer exceeds its object");
         return -1;
     }
-    if (str != NULL && elem_type != CC_TYPE_VOID) {
+    if (str != NULL && elem_sid < 0) {
         unsigned long *units = NULL;
         size_t count = 0;
         size_t u;
@@ -16083,27 +16078,26 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
     }
     if (item->kind != CC_EXPR_INIT_LIST) {
         /* `{1, 5}` for `int v[]`: brace elision gives the array one element */
-        if (elem_type == CC_TYPE_VOID) {
+        if (elem_sid >= 0 || elem == NULL || elem->kind == CC_CT_VOID) {
             set_diag(diag, "unsupported flexible array member initializer");
             return -1;
         }
-        return store_scalar_global_init(tu, cc_ct_from_legacy(elem_type, m->type_struct_id, 0, NULL), elem_size, item,
-                                        buf, buf_size, base, relocs,
+        return store_scalar_global_init(tu, cc_ct_decay(elem), elem_size, item, buf, buf_size, base, relocs,
                                         reloc_count, diag);
     }
-    if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+    if (elem_sid >= 0) {
         for (k = 0; k < elems && cur < item->arg_count; ++k) {
             const cc_expr_t *raw = item->args[cur];
-            const cc_expr_t *braced = extract_struct_init_list_expr(raw, m->type_struct_id);
+            const cc_expr_t *braced = extract_struct_init_list_expr(raw, elem_sid);
             long off = base + k * elem_size;
             if (braced != NULL) {
                 size_t sub = 0;
-                if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, braced, &sub, off, buf, buf_size, relocs,
+                if (flatten_struct_init_bytes_cursor(tu, elem_sid, braced, &sub, off, buf, buf_size, relocs,
                                                      reloc_count, diag) != 0) {
                     return -1;
                 }
                 cur++;
-            } else if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, item, &cur, off, buf, buf_size, relocs,
+            } else if (flatten_struct_init_bytes_cursor(tu, elem_sid, item, &cur, off, buf, buf_size, relocs,
                                                         reloc_count, diag) != 0) {
                 /* brace elision: the element takes its members from the list itself */
                 return -1;
@@ -16114,8 +16108,8 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
     {
         long dims[1];
         dims[0] = elems;
-        return flatten_scalar_array_init_cursor(tu, elem_type, -1, dims, 1, item, &cur, base, buf, buf_size, relocs,
-                                                reloc_count, diag);
+        return flatten_scalar_array_init_cursor(tu, cc_ct_decay(elem), dims, 1, item, &cur, base, buf, buf_size,
+                                                relocs, reloc_count, diag);
     }
 }
 
@@ -16502,7 +16496,26 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
     return 0;
 }
 
-static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_type_t scalar_type, int scalar_struct_id,
+/**
+ * Write a global array of scalars from its initializer list into its
+ * bytes, the dimensions from @p dims, braces elided or not, a string
+ * filling a row of characters.
+ *
+ * @param tu           the translation unit
+ * @param scalar       the element type under every dimension
+ * @param dims         the dimensions, outermost first
+ * @param ndim         their number
+ * @param list         the initializer list
+ * @param cursor       the next item of @p list to take, advanced
+ * @param base         the array's offset in @p buf
+ * @param buf          the global's bytes
+ * @param buf_size     their size
+ * @param relocs       receives relocations
+ * @param reloc_count  their count
+ * @param diag         receives an error
+ * @return             0, or -1 with @p diag set
+ */
+static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, const cc_ctype_t *scalar,
                                             const long *dims, int ndim, const cc_expr_t *list, size_t *cursor,
                                             long base, unsigned char *buf, long buf_size, global_reloc_t **relocs,
                                             size_t *reloc_count, cc_diag_t *diag) {
@@ -16513,7 +16526,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
         set_diag(diag, "invalid scalar array initializer");
         return -1;
     }
-    scalar_size = type_size_bytes_with_struct(tu, scalar_type, scalar_struct_id);
+    scalar_size = cc_ct_size(scalar, tu);
     if (scalar_size <= 0) {
         set_diag(diag, "unsupported scalar array element type in global initializer");
         return -1;
@@ -16533,8 +16546,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
                     return -1;
                 }
             }
-            if (store_scalar_global_init(tu, cc_ct_from_legacy(scalar_type, scalar_struct_id, 0, NULL), scalar_size, item,
-                                         buf, buf_size, elem_off,
+            if (store_scalar_global_init(tu, scalar, scalar_size, item, buf, buf_size, elem_off,
                                          relocs, reloc_count, diag) != 0) {
                 return -1;
             }
@@ -16564,7 +16576,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
             const cc_expr_t *raw = list->args[*cursor];
             long sub_base = base + i * sub_size;
             if (raw != NULL && raw->kind == CC_EXPR_STR && ndim == 2 && dims[1] >= 0) {
-                if (fill_fixed_char_array_from_string(raw, cc_ct_from_scalar(scalar_type), scalar_size, dims[1],
+                if (fill_fixed_char_array_from_string(raw, scalar, scalar_size, dims[1],
                                                       sub_base, buf, buf_size,
                                                       diag) != 0) {
                     return -1;
@@ -16575,7 +16587,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
             if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
                 size_t sub_cur = 0;
                 (*cursor)++;
-                if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_struct_id, dims + 1, ndim - 1, raw,
+                if (flatten_scalar_array_init_cursor(tu, scalar, dims + 1, ndim - 1, raw,
                                                      &sub_cur, sub_base, buf, buf_size, relocs, reloc_count, diag) != 0) {
                     return -1;
                 }
@@ -16584,7 +16596,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
                     return -1;
                 }
             } else {
-                if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_struct_id, dims + 1, ndim - 1, list,
+                if (flatten_scalar_array_init_cursor(tu, scalar, dims + 1, ndim - 1, list,
                                                      cursor, sub_base, buf, buf_size, relocs, reloc_count, diag) != 0) {
                     return -1;
                 }
@@ -16740,7 +16752,8 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
         return -1;
     }
     memset(&quiet, 0, sizeof(quiet));
-    if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_sid, dims, nd, s->expr, &cur, 0, buf,
+    if (flatten_scalar_array_init_cursor(tu, cc_ct_from_legacy(scalar_type, scalar_sid, 0, NULL), dims, nd, s->expr, &cur,
+                                         0, buf,
                                          scalar_size * elem_count, &relocs, &reloc_count, &quiet) != 0 ||
         cur < s->expr->arg_count) {
         /* not a constant this can lay out: leave it to the run-time path and its diagnostics */
@@ -17316,7 +17329,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             cc_ssa_module_free(out);
                             return -1;
                         }
-                        if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_sid, dims, nd, init, &cur, 0, buf,
+                        if (flatten_scalar_array_init_cursor(tu, cc_ct_from_legacy(scalar_type, scalar_sid, 0, NULL), dims, nd,
+                                                             init, &cur, 0, buf,
                                                              total_size, &relocs, &reloc_count, diag) != 0) {
                             free(buf);
                             free_global_relocs(relocs, reloc_count);
