@@ -18,11 +18,6 @@
 
 typedef struct {
     char *name;
-    cc_type_t type;
-    int struct_id;
-    long array_len;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
     int value;
     int addr_value;
     long addr_size;
@@ -511,19 +506,13 @@ static int lower_loads_unsigned(const cc_expr_t *e) {
 }
 
 /**
- * The type of a variable as a value: its declared type decayed, or, where
- * the declaration recorded none, the type its legacy fields describe.
+ * The type of a variable as a value: its declared type decayed.
  *
  * @param v  the variable
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *lower_var_ctype(const var_entry_t *v) {
-    const cc_ctype_t *t = v->ctype;
-
-    if (t == NULL) {
-        t = cc_ct_from_legacy(v->type, v->struct_id, v->array_ndim, v->array_dims);
-    }
-    return cc_ct_decay(t);
+    return cc_ct_decay(v->ctype);
 }
 
 /**
@@ -2096,9 +2085,22 @@ static int vla_subscript_level(var_entry_t *vars, size_t var_count, int depth, c
     }
 }
 
-static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
-                      long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int value, int depth,
-                      int is_static_storage, int is_parameter, const char *static_sym, const cc_ctype_t *ctype) {
+/**
+ * Bring a variable into scope.
+ *
+ * @param vars               the variables in scope, grown by one
+ * @param var_count          their number
+ * @param name               its name
+ * @param ctype              its declared type (a parameter's as adjusted)
+ * @param value              the value holding it, or its address; -1 for static storage
+ * @param depth              the block depth it is declared at
+ * @param is_static_storage  it has static storage (or is an extern declaration)
+ * @param is_parameter       it is a parameter
+ * @param static_sym         the symbol of its static storage, or NULL
+ * @return                   0, or -1 out of memory
+ */
+static int var_define(var_entry_t **vars, size_t *var_count, const char *name, const cc_ctype_t *ctype, int value,
+                      int depth, int is_static_storage, int is_parameter, const char *static_sym) {
     var_entry_t *next;
     char *dup;
     char *sym_dup = NULL;
@@ -2121,15 +2123,6 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
         }
     }
     (*vars)[*var_count].name = dup;
-    (*vars)[*var_count].type = type;
-    (*vars)[*var_count].struct_id = struct_id;
-    (*vars)[*var_count].array_len = array_len;
-    (*vars)[*var_count].array_ndim = array_ndim;
-    if (array_dims != NULL) {
-        memcpy((*vars)[*var_count].array_dims, array_dims, sizeof((*vars)[*var_count].array_dims));
-    } else {
-        memset((*vars)[*var_count].array_dims, 0, sizeof((*vars)[*var_count].array_dims));
-    }
     (*vars)[*var_count].value = value;
     (*vars)[*var_count].addr_value = -1;
     (*vars)[*var_count].addr_size = 0;
@@ -2155,7 +2148,7 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *var_decl_ctype(const var_entry_t *v) {
-    return v->ctype != NULL ? v->ctype : cc_ct_from_legacy(v->type, v->struct_id, v->array_ndim, v->array_dims);
+    return v->ctype;
 }
 
 /**
@@ -2223,7 +2216,8 @@ static long var_object_size_bytes(const cc_translation_unit_t *tu, const var_ent
  * @return    the access size in bytes, or <= 0 if unknown
  */
 static long var_scalar_access_size(const cc_translation_unit_t *tu, const var_entry_t *v) {
-    if (v != NULL && (cc_type_is_complex(v->type) || v->type == CC_TYPE_DECIMAL128)) {
+    if (v != NULL && (ct_has_kind(v->ctype, CC_CT_COMPLEX) || ct_has_kind(v->ctype, CC_CT_IMAGINARY) ||
+                      ct_has_kind(v->ctype, CC_CT_DECIMAL128))) {
         return type_size_bytes_with_struct(tu, CC_TYPE_DOUBLE, -1);
     }
     return var_object_size_bytes(tu, v);
@@ -2710,8 +2704,7 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
     if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
         idx = var_find_visible(vars, var_count, e->ident, depth);
         if (idx >= 0) {
-            return (vars[idx].array_ndim > 0 && vars[idx].array_len >= 0) ||
-                   is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
+            return ct_has_kind(vars[idx].ctype, CC_CT_ARRAY);
         }
         g = find_global(tu, e->ident);
         if (g != NULL) {
@@ -6300,8 +6293,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "malformed static local symbol in lowering");
                 return -1;
             }
-            if ((vars[idx].array_ndim > 0 && vars[idx].array_len >= 0) ||
-                is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim)) {
+            if (ct_has_kind(vars[idx].ctype, CC_CT_ARRAY)) {
                 return emit_global_addr(sf, vars[idx].static_sym, diag);
             }
             if (ct_record_id(lower_var_ctype(&vars[idx])) >= 0) {
@@ -12372,8 +12364,7 @@ static int lower_nested_bind_outer(const cc_translation_unit_t *tu, cc_ssa_funct
             break;
         }
         addr = ld.dst;
-        if (var_define(vars, var_count, outer[i].name, outer[i].type, outer[i].struct_id, outer[i].array_len,
-                       outer[i].array_ndim, outer[i].array_dims, addr, 0, 0, 0, NULL, outer[i].ctype) != 0) {
+        if (var_define(vars, var_count, outer[i].name, outer[i].ctype, addr, 0, 0, 0, NULL) != 0) {
             set_diag(diag, "out of memory defining an enclosing function's variable");
             rc = -1;
             break;
@@ -12414,8 +12405,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "extern local declaration cannot have an initializer");
                 return -1;
             }
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                           s->array_dims, -1, depth, 1, 0, s->decl_name, s->ctype) != 0) {
+            if (var_define(vars, var_count, s->decl_name, stmt_decl_ctype(s), -1, depth, 1, 0, s->decl_name) != 0) {
                 set_diag(diag, "out of memory defining extern local declaration");
                 return -1;
             }
@@ -12969,9 +12959,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id,
-                           is_array_obj ? s->array_len : -1, is_array_obj ? s->array_ndim : 0,
-                           is_array_obj ? s->array_dims : NULL, -1, depth, 1, 0, sym, s->ctype) != 0) {
+            if (var_define(vars, var_count, s->decl_name, decl_ct, -1, depth, 1, 0, sym) != 0) {
                 set_diag(diag, "out of memory defining static local variable");
                 return -1;
             }
@@ -13009,8 +12997,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                 }
             }
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
-                           NULL, s->ctype) != 0) {
+            if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
                 return -1;
             }
@@ -13305,8 +13292,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                           s->array_dims, varv, depth, 0, 0, NULL, s->ctype) != 0) {
+            if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
@@ -13328,8 +13314,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         if (ct_has_kind(lower_decl_ctype(s), CC_CT_LDOUBLE)) {
             set_value_size(sf, varv, 16);
         }
-        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
-                       NULL, s->ctype) != 0) {
+        if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
@@ -17880,9 +17865,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 v = agg_addr;
                 sf->param_values[j] = v;
             }
-            if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
-                           af->params[j].array_len, af->params[j].array_ndim, af->params[j].array_dims, v, 0, 0, 1,
-                           NULL, af->params[j].ctype) != 0) {
+            if (var_define(&vars, &var_count, af->params[j].name, lower_param_ctype(&af->params[j]), v, 0, 0, 1,
+                           NULL) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
                 cc_ssa_module_free(out);
                 return -1;
