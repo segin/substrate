@@ -7905,7 +7905,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int ov = -1;
             int overflow_op;
             int has_store;
-            cc_type_t out_type;
+            const cc_ctype_t *out_ct;
+            int out_unsigned;
             int out_bits = 0;
             long mem_size;
             size_t first_instr;
@@ -7970,33 +7971,29 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             rv_exact = bin.dst;
             rv = rv_exact;
 
+            /* the result's type: what the third operand points to, or for the _p forms the operand's own */
             if (has_store) {
-                out_type = ptr_base_type(e->args[2]->value_type);
-                if (out_type == CC_TYPE_VOID) {
-                    out_type = CC_TYPE_INT;
-                }
-                mem_size = pointer_elem_size_bytes(tu, e->args[2]->value_type, e->args[2]->struct_id);
-                if (mem_size <= 0) {
-                    mem_size = type_size_bytes_with_struct(tu, out_type, e->args[2]->struct_id);
-                }
+                out_ct = lower_atomic_elem_ctype(e->args[2]);
+                mem_size = lower_pointee_size(tu, e->args[2]);
                 if (mem_size <= 0) {
                     mem_size = cc_target_pointer_size();
                 }
             } else {
-                out_type = e->args[2]->value_type;
-                mem_size = type_size_bytes_with_struct(tu, out_type, e->args[2]->struct_id);
+                out_ct = lower_value_ctype(e->args[2]);
+                mem_size = cc_ct_size(out_ct, tu);
             }
+            out_unsigned = cc_ct_is_unsigned(out_ct) && out_ct->kind != CC_CT_BOOL;
 
-            rv = cast_value(sf, rv, type_to_val(out_type), diag);
+            rv = cast_value(sf, rv, ct_value_kind(out_ct), diag);
             if (rv < 0) {
                 return -1;
             }
-            if (cc_type_is_integral(out_type) && !is_pointer_type(out_type)) {
-                rv = normalize_integral_value(sf, rv, out_type, diag);
+            if (cc_ct_is_integer(out_ct)) {
+                rv = normalize_int_ct(sf, rv, out_ct, diag);
                 if (rv < 0) {
                     return -1;
                 }
-                out_bits = integral_type_bits(out_type);
+                out_bits = integral_type_bits(cc_ct_legacy_kind(out_ct->kind));
             }
             if (has_store) {
                 memset(&in, 0, sizeof(in));
@@ -8014,7 +8011,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (out_bits > 0 && out_bits < 64) {
                 /* overflowed if the result, widened back from its type, is not the exact one */
                 int rv_wide = normalize_integral_value(
-                    sf, rv, cc_type_is_unsigned_integral(out_type) ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG, diag);
+                    sf, rv, out_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG, diag);
                 if (rv_wide < 0) {
                     return -1;
                 }
@@ -8028,7 +8025,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 ov = bin.dst;
-            } else if (cc_type_is_unsigned_integral(out_type)) {
+            } else if (out_unsigned) {
                 if (overflow_op == 2) {
                     int z = emit_const_i64_instr(sf, 0);
                     int cmp_nz;
