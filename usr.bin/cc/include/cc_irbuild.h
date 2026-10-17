@@ -62,6 +62,19 @@ int cc_ir_new_label(cc_ssa_function_t *f);
 int cc_ir_stackalloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag);
 
 /**
+ * Append storage of @p total_size bytes aligned to @p align: a STACKALLOC
+ * where the frame's own 16-byte alignment is enough, else one @p align - 1
+ * bytes larger whose address is rounded up (`(p + align - 1) & -align`).
+ *
+ * @param sf          the function
+ * @param total_size  bytes; more than 0
+ * @param align       the alignment needed: a power of two, or 0 for the frame's
+ * @param diag        receives an error
+ * @return            the storage's address, or -1
+ */
+int cc_ir_stackalloc_aligned(cc_ssa_function_t *sf, long total_size, long align, cc_diag_t *diag);
+
+/**
  * Place @p label here.
  *
  * @param sf     the function

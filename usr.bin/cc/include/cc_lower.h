@@ -32,6 +32,7 @@ typedef struct {
     int vla_rank;       /**< the number of strides; 0 if neither a VLA nor a pointer to one */
     int vla_is_pointer; /**< a pointer to a VLA, whose own size is a pointer's */
     const cc_ctype_t *ctype; /**< the variable's declared type; NULL where the declaration recorded none */
+    long align; /**< the alignment `_Alignas` or `aligned` asks of it beyond its type's, or 0 */
 } var_entry_t;
 
 /** A C label of the function being lowered, and the IR label it is. */

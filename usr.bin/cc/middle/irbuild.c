@@ -153,6 +153,49 @@ int cc_ir_stackalloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag) {
     return dst;
 }
 
+int cc_ir_stackalloc_aligned(cc_ssa_function_t *sf, long total_size, long align, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int raw;
+    int k;
+
+    if (align <= 8) {
+        return cc_ir_stackalloc(sf, total_size, diag);
+    }
+    if (align == 16) {
+        /* the frame puts 16 bytes or more on a 16-byte boundary */
+        return cc_ir_stackalloc(sf, total_size < 16 ? 16 : total_size, diag);
+    }
+    /* 16-aligned storage align - 16 bytes larger holds an align-aligned object */
+    raw = cc_ir_stackalloc(sf, total_size + align - 16, diag);
+    k = raw < 0 ? -1 : cc_ir_const(sf, align - 1);
+    if (k < 0) {
+        return -1;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ADD;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = raw;
+    in.rhs = k;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        cc_diag_set(diag, "", 0, 0, "out of memory aligning local storage");
+        return -1;
+    }
+    raw = in.dst;
+    k = cc_ir_const(sf, -align);
+    if (k < 0) {
+        return -1;
+    }
+    in.op = CC_SSA_AND;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = raw;
+    in.rhs = k;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        cc_diag_set(diag, "", 0, 0, "out of memory aligning local storage");
+        return -1;
+    }
+    return in.dst;
+}
+
 int cc_ir_label(cc_ssa_function_t *sf, int label) {
     cc_ssa_instr_t in;
     memset(&in, 0, sizeof(in));

@@ -682,12 +682,25 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   targets); found while testing CC-101.  A `gnu::` or `__gnu__::`
   attribute now goes to the GNU attribute parser; another vendor's is
   read and ignored, as before.  `codegen/gnu_c23_attrs.c`.
-- [ ] **CC-111** An automatic object shall be aligned as its declaration
+- [x] **CC-111** An automatic object shall be aligned as its declaration
   asks (C11 6.7.5): `_Alignas(64) char a[3];` and `_Alignas(32) int b;`
-  in a function, and the GNU and `[[gnu::aligned]]` spellings, are only
+  in a function, and the GNU and `[[gnu::aligned]]` spellings, were only
   as aligned as the stack frame (16 bytes), on every call at both
   targets; gcc realigns the frame or the object.  *Reproduced* (both
-  targets); found while testing CC-110.
+  targets); found while testing CC-110.  The IR's stack allocation
+  carries only a size, so lowering asks `cc_ir_stackalloc_aligned()` for
+  each local's storage with the alignment its type and declaration need:
+  above 16 bytes it allocates that much more and rounds the address up
+  (`(p + a - 1) & -a`); a 16-aligned object smaller than 16 bytes is
+  padded to 16, which the frame aligns.  An address-taken scalar keeps
+  its declared alignment for the storage it gets.
+  `codegen/local_overalign.c`.
+- [ ] **CC-113** A vector type shall be aligned to its size, as gcc aligns
+  it: `vector_size(32)` is 32-aligned, `vector_size(64)` 64 (gcc, both
+  targets); cc caps vector alignment at 16, so `struct { char c; v8 v; }`
+  is 48 bytes with `v` at 16 where gcc makes it 64 with `v` at 32 -- the
+  layout disagrees with gcc-built code.  *Reproduced* (both targets);
+  found while testing CC-111.
 - [ ] **CC-112** An attribute specifier sequence after an array
   declarator's `]` shall be accepted (C23 6.7.7.3): `char b[3]
   [[gnu::aligned(64)]];` is rejected ("expected primary expression");
@@ -1145,7 +1158,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-112 requirements: 104 met, 8 open.
+113 requirements: 105 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

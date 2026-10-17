@@ -1459,8 +1459,22 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].vla_rank = 0;
     (*vars)[*var_count].vla_is_pointer = 0;
     (*vars)[*var_count].ctype = ctype;
+    (*vars)[*var_count].align = 0;
     (*var_count)++;
     return 0;
+}
+
+/**
+ * The alignment the automatic object declared by @p s needs: its type's,
+ * or more where `_Alignas` or `aligned` asks.
+ */
+static long stmt_decl_align(const cc_translation_unit_t *tu, const cc_stmt_t *s) {
+    long a = cc_ct_align(stmt_decl_ctype(s), tu);
+
+    if ((s->attr_flags & CC_ATTR_ALIGNED) != 0 && s->attr_align > a) {
+        a = s->attr_align;
+    }
+    return a;
 }
 
 /**
@@ -1664,7 +1678,7 @@ static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_
         set_diag(diag, "unsupported address-taken local type");
         return -1;
     }
-    v->addr_value = cc_ir_stackalloc(sf, var_object_size_bytes(tu, v), diag);
+    v->addr_value = cc_ir_stackalloc_aligned(sf, var_object_size_bytes(tu, v), v->align, diag);
     if (v->addr_value < 0) {
         return -1;
     }
@@ -2044,7 +2058,7 @@ static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_
             set_diag(diag, "unsupported hoisted local array element type");
             return -1;
         }
-        value = cc_ir_stackalloc(sf, total_size, diag);
+        value = cc_ir_stackalloc_aligned(sf, total_size, stmt_decl_align(tu, s), diag);
         if (value < 0) {
             return -1;
         }
@@ -8814,7 +8828,7 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             /* GNU empty-struct extension: materialize as 1-byte storage object. */
             sz = 1;
         }
-        varv = prealloc >= 0 ? prealloc : cc_ir_stackalloc(sf, sz, diag);
+        varv = prealloc >= 0 ? prealloc : cc_ir_stackalloc_aligned(sf, sz, stmt_decl_align(tu, s), diag);
         if (varv < 0) {
             return -1;
         }
@@ -8897,7 +8911,8 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             return -1;
         }
         if (!is_runtime_vla) {
-            varv = prealloc >= 0 ? prealloc : cc_ir_stackalloc(sf, total_size, diag);
+            varv = prealloc >= 0 ? prealloc
+                                 : cc_ir_stackalloc_aligned(sf, total_size, stmt_decl_align(tu, s), diag);
             if (varv < 0) {
                 return -1;
             }
@@ -9166,6 +9181,8 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         set_diag(diag, "out of memory defining local variable");
         return -1;
     }
+    /* the storage it gets if its address is taken (ensure_local_var_addressable()) */
+    (*vars)[*var_count - 1].align = stmt_decl_align(tu, s);
     if (stmt_is_vla_decl(s) && ct_is_pointer(stmt_decl_ctype(s))) {
         /* a pointer to a variable-length array: it steps by the array's run-time size */
         vla_shape_t shape = {stmt_decl_ctype(s), &s->array_bounds, 1};
