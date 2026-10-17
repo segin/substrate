@@ -7082,7 +7082,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_value_size(sf, r.dst, 8);
             }
             if (lower_is_integer(e) && !lower_is_pointer(e)) {
-                return normalize_integral_ct(sf, r.dst, e->ctype, e->value_type, diag);
+                return normalize_int_ct(sf, r.dst, lower_value_ctype(e), diag);
             }
             return r.dst;
         }
@@ -7106,7 +7106,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             set_value_size(sf, in.dst, 8);
         }
         if (vt == CC_VAL_I64 && lower_is_integer(e) && !lower_is_pointer(e)) {
-            return normalize_integral_ct(sf, in.dst, e->ctype, e->value_type, diag);
+            return normalize_int_ct(sf, in.dst, lower_value_ctype(e), diag);
         }
         return in.dst;
     }
@@ -7814,10 +7814,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (v < 0 || (v = cast_value(sf, v, CC_VAL_I64, diag)) < 0) {
                 return -1;
             }
-            arg_size = type_size_bytes_with_struct(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            arg_size = lower_value_size(tu, e->args[0]);
             arg_bits = (arg_size > 0 && arg_size < 8) ? (int)arg_size * 8 : 64;
-            sign_extends = arg_bits < bits && !cc_type_is_unsigned_integral(e->args[0]->value_type) &&
-                           e->args[0]->value_type != CC_TYPE_BOOL;
+            sign_extends = arg_bits < bits && !cc_ct_is_unsigned(lower_value_ctype(e->args[0]));
             if (arg_bits < bits) {
                 bits = arg_bits;
             }
@@ -7857,7 +7856,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (v < 0 || (v = cast_value(sf, v, CC_VAL_I64, diag)) < 0) {
                 return -1;
             }
-            arg_size = type_size_bytes_with_struct(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            arg_size = lower_value_size(tu, e->args[0]);
             if (arg_size <= 0 || arg_size > 8) {
                 arg_size = 8;
             }
@@ -7929,11 +7928,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * and a sum of two would wrap before it is compared).
              */
             av = normalize_integral_value(sf, av,
-                                          cc_type_is_unsigned_integral(e->args[0]->value_type) ? CC_TYPE_ULONG_LONG
+                                          lower_is_unsigned(e->args[0]) ? CC_TYPE_ULONG_LONG
                                                                                                : CC_TYPE_LONG_LONG,
                                           diag);
             bv = normalize_integral_value(sf, bv,
-                                          cc_type_is_unsigned_integral(e->args[1]->value_type) ? CC_TYPE_ULONG_LONG
+                                          lower_is_unsigned(e->args[1]) ? CC_TYPE_ULONG_LONG
                                                                                                : CC_TYPE_LONG_LONG,
                                           diag);
             if (av < 0 || bv < 0) {
@@ -9110,11 +9109,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int arg_needs_ldouble_abi = 0;
             int arg_needs_float_abi = 0;
             int arg_is_aggregate =
-                (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_VOID && e->args[i]->struct_id >= 0);
+                (e->args[i] != NULL && lower_record_id(e->args[i]) >= 0);
             int arg_is_variadic =
                 (in.call_is_variadic && (int)i >= in.call_fixed_count) ? 1 : 0;
-            long arg_size = e->args[i] != NULL ? type_size_bytes_with_struct(tu, e->args[i]->value_type, e->args[i]->struct_id)
-                                               : cc_target_pointer_size();
+            long arg_size = e->args[i] != NULL ? lower_value_size(tu, e->args[i]) : cc_target_pointer_size();
             if (arg_size <= 0) {
                 arg_size = cc_target_pointer_size();
             }
@@ -9142,8 +9140,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         if ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) != 0) {
                             is_transparent_union = 1;
                         }
-                        if (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_VOID &&
-                            e->args[i]->struct_id == callee->params[i].type_struct_id) {
+                        if (e->args[i] != NULL && lower_record_id(e->args[i]) >= 0 &&
+                            lower_record_id(e->args[i]) == callee->params[i].type_struct_id) {
                             arg_is_same_aggregate = 1;
                         }
                         if (sd->is_union && !arg_is_same_aggregate) {
@@ -9287,7 +9285,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 want = CC_VAL_I64;
                 arg_size = cc_target_pointer_size();
             } else if (in.op == CC_SSA_CALLI && arg_is_aggregate) {
-                long agg_size = type_size_bytes_with_struct(tu, e->args[i]->value_type, e->args[i]->struct_id);
+                long agg_size = lower_value_size(tu, e->args[i]);
                 arg_size = cc_target_pointer_size();
                 if (agg_size > 0 && agg_size <= cc_target_pointer_size()) {
                     cc_ssa_instr_t load_in;
@@ -9318,7 +9316,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     want = CC_VAL_I64;
                     arg_size = agg_size;
                 }
-            } else if (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_LDOUBLE) {
+            } else if (e->args[i] != NULL && lower_has_kind(e->args[i], CC_CT_LDOUBLE)) {
                 arg_needs_ldouble_abi = 1;
             }
             in.args[i] = av;
@@ -9928,7 +9926,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 nextv = in.dst;
-                nextv = normalize_integral_ct(sf, nextv, e->ctype, e->value_type, diag);
+                nextv = normalize_int_ct(sf, nextv, lower_value_ctype(e), diag);
                 if (nextv < 0) {
                     return -1;
                 }
@@ -9984,7 +9982,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
             if (lower_is_integer(e) && !lower_is_pointer(e)) {
-                nextv = normalize_integral_ct(sf, nextv, e->ctype, e->value_type, diag);
+                nextv = normalize_int_ct(sf, nextv, lower_value_ctype(e), diag);
                 if (nextv < 0) {
                     return -1;
                 }
@@ -10356,7 +10354,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             sv = cast_value(sf, sv, want, diag);
             if (sv >= 0 && lower_is_integer(e) && !lower_is_pointer(e)) {
-                sv = normalize_integral_ct(sf, sv, e->ctype, e->value_type, diag);
+                sv = normalize_int_ct(sf, sv, lower_value_ctype(e), diag);
             }
             return sv;
         }
@@ -10397,7 +10395,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         tv = cast_value(sf, tv, want, diag);
         /* each arm is converted to the result type: (c ? s : ull) widens s */
         if (tv >= 0 && lower_is_integer(e) && !lower_is_pointer(e)) {
-            tv = normalize_integral_ct(sf, tv, e->ctype, e->value_type, diag);
+            tv = normalize_int_ct(sf, tv, lower_value_ctype(e), diag);
         }
         if (tv < 0 || emit_mov_instr(sf, dst, tv) != 0 || emit_br_instr(sf, l_end) != 0) {
             return -1;
@@ -10412,7 +10410,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         fv = cast_value(sf, fv, want, diag);
         if (fv >= 0 && lower_is_integer(e) && !lower_is_pointer(e)) {
-            fv = normalize_integral_ct(sf, fv, e->ctype, e->value_type, diag);
+            fv = normalize_int_ct(sf, fv, lower_value_ctype(e), diag);
         }
         if (fv < 0 || emit_mov_instr(sf, dst, fv) != 0 || emit_br_instr(sf, l_end) != 0) {
             return -1;
