@@ -541,6 +541,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   by the expression's interned type, and gives an array global its size
   from its interned type, which the emitter pads to.
   `native_array_of_array_pointers_size.c`.
+- [ ] **CC-95** A `_Float16` object shall hold the value it is
+  initialized with, and `f16` shall be a floating suffix (C23 7.22,
+  Annex H): `_Float16 h = 1.5f;` at file scope is emitted as the integer
+  1 (`h` reads 5.96e-08; gcc 1.5), and `1.5f16` is rejected ("expected
+  ';' after declaration").  *Reproduced* (-m64).
+- [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
+  as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
+  object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
+  bytes of .data at -m64 (gcc 8).  *Reproduced.*  Lowering hands the
+  emitter each global's layout -- size, element size, what its data is --
+  from its interned type, and the emitter no longer reads the legacy
+  type.  `native_atomic_bitint_global_size.c`.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -976,7 +988,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-94 requirements: 90 met, 4 open.
+96 requirements: 91 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

@@ -146,11 +146,22 @@ typedef struct {
     char *init_sym;
 } cc_ssa_global_init_item_t;
 
+/** What a global's data (an array's elements) is, as its initializer is laid out. */
+typedef enum {
+    CC_SSA_DATA_OTHER = 0, /**< a structure or anything else laid out as bytes */
+    CC_SSA_DATA_INT,       /**< an integer other than those below */
+    CC_SSA_DATA_BOOL,      /**< _Bool: a floating initializer is true when non-zero */
+    CC_SSA_DATA_CHAR,      /**< char or unsigned char: a string may initialize an array of them */
+    CC_SSA_DATA_FLOAT,     /**< float, double or long double */
+    CC_SSA_DATA_POINTER    /**< a pointer */
+} cc_ssa_data_kind_t;
+
 typedef struct {
     char *name;
-    cc_type_t type;
-    int type_struct_id;
-    long array_len;
+    int is_array;                 /**< an array, whose elements are data_kind of elem_size bytes each */
+    cc_ssa_data_kind_t data_kind; /**< what the object, or an array's element, is */
+    long elem_size;               /**< the size of the object, or of an array's element; <= 0 if not known */
+    long array_len;               /**< an array's element count; 0 if not known; -1 for no array */
     long size_bytes;
     int storage;
     cc_attr_flags_t attr_flags;

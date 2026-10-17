@@ -55,6 +55,10 @@ test:
 	$(CC_TMP)/cc_native_aoap
 	$(TOP)/usr.bin/cc/cc -c native_array_of_array_pointers_size.c -o $(CC_TMP)/cc_native_aoap.o
 	test "$$(objdump -h $(CC_TMP)/cc_native_aoap.o | awk '$$2 == ".data" { print $$3 }')" = 00000010
+	$(TOP)/usr.bin/cc/cc -std=gnu23 native_atomic_bitint_global_size.c -o $(CC_TMP)/cc_native_abgs
+	$(CC_TMP)/cc_native_abgs
+	$(TOP)/usr.bin/cc/cc -std=gnu23 -c native_atomic_bitint_global_size.c -o $(CC_TMP)/cc_native_abgs.o
+	test "$$(objdump -h $(CC_TMP)/cc_native_abgs.o | awk '$$2 == ".data" { print $$3 }')" = 00000008
 	$(TOP)/usr.bin/cc/cc native_main.c -o $(CC_TMP)/cc_native_main
 	$(CC_TMP)/cc_native_main
 	$(TOP)/usr.bin/cc/cc native_phase1.c -o $(CC_TMP)/cc_native_phase1
@@ -644,6 +648,10 @@ test:
 	$(CC_TMP)/cc_native_aoap_32
 	$(TOP)/usr.bin/cc/cc -m32 -c native_array_of_array_pointers_size.c -o $(CC_TMP)/cc_native_aoap_32.o
 	test "$$(objdump -h $(CC_TMP)/cc_native_aoap_32.o | awk '$$2 == ".data" { print $$3 }')" = 00000008
+	$(TOP)/usr.bin/cc/cc -m32 -std=gnu23 native_atomic_bitint_global_size.c -o $(CC_TMP)/cc_native_abgs_32
+	$(CC_TMP)/cc_native_abgs_32
+	$(TOP)/usr.bin/cc/cc -m32 -std=gnu23 -c native_atomic_bitint_global_size.c -o $(CC_TMP)/cc_native_abgs_32.o
+	test "$$(objdump -h $(CC_TMP)/cc_native_abgs_32.o | awk '$$2 == ".data" { print $$3 }')" = 00000008
 	$(TOP)/usr.bin/cc/cc -m32 -S native_if_else.c -o $(CC_TMP)/cc_native_if_else_32.s
 	$(TOP)/usr.bin/cc/cc -m32 native_if_else.c -o $(CC_TMP)/cc_native_if_else_32
 	$(CC_TMP)/cc_native_if_else_32

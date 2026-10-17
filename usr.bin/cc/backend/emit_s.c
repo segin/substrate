@@ -1356,14 +1356,6 @@ static void emit_compiler_stamp(FILE *fp) {
     fprintf(fp, "\t.text\n");
 }
 
-static int is_pointer_type(cc_type_t t) {
-    return cc_type_is_pointer(t);
-}
-
-static cc_type_t ptr_base_type(cc_type_t t) {
-    return cc_type_deref_once(t);
-}
-
 static void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags) {
     if (name == NULL || name[0] == '\0') {
         return;
@@ -1383,27 +1375,6 @@ static void emit_lifecycle_attr(FILE *fp, const char *section, const char *secti
     }
     fprintf(fp, ".section %s,\"aw\",@%s\n", section, section_type);
     fprintf(fp, "%s %s\n", is_64bit ? ".quad" : ".long", name);
-}
-
-/**
- * Size of a global object's element type, known from its kind alone.
- *
- * @param t             the type
- * @param pointer_size  the target's pointer size
- * @return              the size in bytes of a scalar type; the pointer
- *                      size for `_BitInt`, `_Atomic` and function
- *                      types; -1 for anything else
- */
-static long global_type_size_bytes(cc_type_t t, int pointer_size) {
-    long n = cc_type_scalar_size(t);
-
-    if (n >= 0) {
-        return n;
-    }
-    if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
-        return pointer_size;
-    }
-    return -1;
 }
 
 static size_t decoded_c_string_len(const char *literal) {
@@ -1451,21 +1422,29 @@ static size_t decoded_c_string_len(const char *literal) {
     return n;
 }
 
+/**
+ * The size of a global object: the size lowering gave it, else its
+ * element size times its element count, the count taken from its
+ * initializer where the declaration left it out.
+ *
+ * @param g             the global
+ * @param pointer_size  the target's pointer size, for an object of no known size
+ * @return              the size in bytes
+ */
 static long global_object_size_bytes(const cc_ssa_global_t *g, int pointer_size) {
+    long sz;
+
     if (g->size_bytes > 0) {
         return g->size_bytes;
     }
-    long sz = global_type_size_bytes(g->type, pointer_size);
-    if (g->array_len >= 0 && is_pointer_type(g->type)) {
-        cc_type_t base = ptr_base_type(g->type);
-        long elem = global_type_size_bytes(base, pointer_size);
+    sz = g->elem_size;
+    if (g->is_array) {
+        long elem = g->elem_size > 0 ? g->elem_size : 1;
         long elems = g->array_len;
-        if (elem <= 0) {
-            elem = 1;
-        }
+
         if (elems <= 0 && g->init_item_count > 0) {
             elems = (long)g->init_item_count;
-        } else if (elems <= 0 && g->init_is_string && base == CC_TYPE_CHAR) {
+        } else if (elems <= 0 && g->init_is_string && g->data_kind == CC_SSA_DATA_CHAR) {
             elems = (long)(decoded_c_string_len(g->init_str) + 1);
         } else if (elems <= 0) {
             elems = 1;
@@ -1738,21 +1717,20 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             }
 
             size_t j;
-            cc_type_t elem_type;
+            cc_ssa_data_kind_t elem_kind = g->data_kind;
             long elem_size;
             long arr_elems;
-            if (!is_pointer_type(g->type) || g->array_len < 0) {
+            if (!g->is_array) {
                 set_diag(diag, "initializer list requires array global");
                 return -1;
             }
-            elem_type = ptr_base_type(g->type);
-            elem_size = global_type_size_bytes(elem_type, pointer_size);
+            elem_size = g->elem_size;
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported array element type in global initializer");
                 return -1;
             }
             arr_elems = g->array_len > 0 ? g->array_len : (long)g->init_item_count;
-            if (elem_size == 1 && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+            if (elem_size == 1 && elem_kind == CC_SSA_DATA_CHAR) {
                 long emitted_bytes = 0;
                 for (j = 0; j < g->init_item_count; ++j) {
                     const cc_ssa_global_init_item_t *it = &g->init_items[j];
@@ -1782,7 +1760,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 if (!it->init_is_string) {
                     continue;
                 }
-                if (!is_pointer_type(elem_type)) {
+                if (elem_kind != CC_SSA_DATA_POINTER) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message),
                                  "string element in initializer list for %s requires pointer element type",
@@ -1804,7 +1782,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                         fprintf(fp, "\t.quad .L__cc_garr_%zu_%zu\n", i, j);
                     }
                 } else if (it->init_is_symbol) {
-                    if (!is_pointer_type(elem_type)) {
+                    if (elem_kind != CC_SSA_DATA_POINTER) {
                         set_diag(diag, "symbol element in initializer list requires pointer element type");
                         return -1;
                     }
@@ -1813,10 +1791,9 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                     } else {
                         fprintf(fp, "\t.quad %s\n", it->init_sym != NULL ? it->init_sym : "0");
                     }
-                } else if (it->init_is_float &&
-                           (elem_type == CC_TYPE_FLOAT || elem_type == CC_TYPE_DOUBLE || elem_type == CC_TYPE_LDOUBLE)) {
+                } else if (it->init_is_float && elem_kind == CC_SSA_DATA_FLOAT) {
                     emit_float_data(fp, elem_size, it->init_f_ld);
-                } else if (it->init_is_float && elem_type == CC_TYPE_BOOL) {
+                } else if (it->init_is_float && elem_kind == CC_SSA_DATA_BOOL) {
                     /* 0.25 is true; its truncation to an integer is not */
                     emit_integer_data(fp, elem_size, it->init_f_ld != 0.0L);
                 } else {
@@ -1834,13 +1811,13 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             continue;
         }
         if (g->init_is_string) {
-            if (g->array_len >= 0 && is_pointer_type(g->type)) {
+            if (g->is_array) {
                 size_t slen = decoded_c_string_len(g->init_str);
                 emit_asciz_literal(fp, g->init_str);
                 if ((long)(slen + 1) < sz) {
                     fprintf(fp, "\t.zero %ld\n", sz - (long)(slen + 1));
                 }
-            } else if (is_pointer_type(g->type)) {
+            } else if (g->data_kind == CC_SSA_DATA_POINTER) {
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_gstr_%zu:\n", i);
                 emit_asciz_literal(fp, g->init_str);
@@ -1857,7 +1834,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             continue;
         }
         if (g->init_is_symbol) {
-            if (!is_pointer_type(g->type) && !cc_type_is_integral(g->type)) {
+            if (!g->is_array && (g->data_kind == CC_SSA_DATA_FLOAT || g->data_kind == CC_SSA_DATA_OTHER)) {
                 snprintf(diag->message, sizeof(diag->message), "symbol initializer requires pointer/integer global: %s",
                          g->name != NULL ? g->name : "<anon>");
                 return -1;
@@ -1869,7 +1846,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             }
             continue;
         }
-        if (g->init_is_float && (g->type == CC_TYPE_FLOAT || g->type == CC_TYPE_DOUBLE || g->type == CC_TYPE_LDOUBLE)) {
+        if (g->init_is_float && !g->is_array && g->data_kind == CC_SSA_DATA_FLOAT) {
             emit_float_data(fp, sz, g->init_f_ld);
             continue;
         }

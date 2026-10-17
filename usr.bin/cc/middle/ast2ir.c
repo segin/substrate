@@ -411,13 +411,7 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     cc_diag_set(d, "", 0, 0, msg);
 }
 
-static int is_pointer_type(cc_type_t t);
-
 typedef cc_const_t const_integral_value_t;
-
-static int is_pointer_type(cc_type_t t) {
-    return cc_type_is_pointer(t);
-}
 
 /**
  * The type of an expression's value: its interned type with an array or
@@ -1045,15 +1039,79 @@ static long type_size_bytes(cc_type_t t) {
  * A floating constant converted to integer type @p t, as an initializer's
  * bits: through unsigned long long for an unsigned type, since converting
  * a value of 2^63 or more to long long is undefined (and gives 2^63).
+ *
+ * @param v  the constant
+ * @param t  the integer type
+ * @return   the bits
  */
-static long long fp_const_to_int(double v, cc_type_t t) {
-    if (t == CC_TYPE_BOOL) {
+static long long fp_const_to_int(double v, const cc_ctype_t *t) {
+    if (ct_has_kind(t, CC_CT_BOOL)) {
         return v != 0.0;
     }
-    if (cc_type_is_unsigned_integral(t) && v >= 0.0) {
+    if (cc_ct_is_unsigned(t) && v >= 0.0) {
         return (long long)(unsigned long long)v;
     }
     return (long long)v;
+}
+
+/**
+ * What a value of type @p t is, as data the emitter lays out.
+ *
+ * @param t  the type
+ * @return   its kind of data
+ */
+static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
+    switch (t != NULL ? t->kind : CC_CT_VOID) {
+    case CC_CT_POINTER:
+        return CC_SSA_DATA_POINTER;
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+    case CC_CT_LDOUBLE:
+        return CC_SSA_DATA_FLOAT;
+    case CC_CT_BOOL:
+        return CC_SSA_DATA_BOOL;
+    case CC_CT_CHAR:
+    case CC_CT_UCHAR:
+        return CC_SSA_DATA_CHAR;
+    default:
+        return cc_ct_is_integer(t) ? CC_SSA_DATA_INT : CC_SSA_DATA_OTHER;
+    }
+}
+
+/**
+ * Lay out an SSA global as an object of type @p t: an array's elements,
+ * or a single object.
+ *
+ * @param g   the global
+ * @param t   its type
+ * @param tu  the translation unit
+ */
+static void ssa_global_set_layout(cc_ssa_global_t *g, const cc_ctype_t *t, const cc_translation_unit_t *tu) {
+    if (ct_has_kind(t, CC_CT_ARRAY)) {
+        g->is_array = 1;
+        g->data_kind = ssa_data_kind(t->of);
+        g->elem_size = cc_ct_size(t->of, tu);
+        g->array_len = t->count > 0 ? t->count : 0;
+    } else {
+        g->is_array = 0;
+        g->data_kind = ssa_data_kind(t);
+        g->elem_size = cc_ct_size(t, tu);
+        g->array_len = -1;
+    }
+}
+
+/**
+ * Lay out an SSA global as @p nbytes bytes, which its initializer's data
+ * fills.
+ *
+ * @param g       the global
+ * @param nbytes  its size
+ */
+static void ssa_global_set_bytes(cc_ssa_global_t *g, long nbytes) {
+    g->is_array = 1;
+    g->data_kind = CC_SSA_DATA_CHAR;
+    g->elem_size = 1;
+    g->array_len = nbytes;
 }
 
 /** An eightbyte's x86-64 psABI class (System V psABI 3.2.3), in merge order. */
@@ -12397,9 +12455,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
 
             memset(&g, 0, sizeof(g));
             g.name = cc_strdup(sym);
-            g.type = s->type;
-            g.type_struct_id = s->type_struct_id;
-            g.array_len = is_array_obj ? s->array_len : -1;
+            ssa_global_set_layout(&g, decl_ct, tu);
             g.size_bytes = obj_size;
             g.storage = CC_STORAGE_STATIC;
             g.attr_flags = s->attr_flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED | CC_ATTR_SECTION);
@@ -12408,13 +12464,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 g.attr_section = cc_strdup(s->attr_section);
             }
             g.has_init = have_const_init;
-            if (g.has_init && (g.type == CC_TYPE_FLOAT || g.type == CC_TYPE_DOUBLE || g.type == CC_TYPE_LDOUBLE) &&
-                !init_is_float) {
+            if (g.has_init && !g.is_array && g.data_kind == CC_SSA_DATA_FLOAT && !init_is_float) {
                 init_f = (double)init_i;
                 init_f_ld = (long double)init_i;
                 init_is_float = 1;
-            } else if (g.has_init && cc_type_is_integral(g.type) && init_is_float) {
-                init_i = fp_const_to_int(init_f, g.type);
+            } else if (g.has_init && cc_ct_is_integer(decl_ct) && init_is_float) {
+                init_i = fp_const_to_int(init_f, decl_ct);
                 init_is_float = 0;
             }
             g.init_i = init_i;
@@ -12465,9 +12520,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
                 memset(&guard, 0, sizeof(guard));
                 guard.name = cc_strdup(guard_sym);
-                guard.type = CC_TYPE_INT;
-                guard.type_struct_id = -1;
-                guard.array_len = -1;
+                ssa_global_set_layout(&guard, cc_ct_basic(CC_CT_INT), tu);
                 guard.size_bytes = 4;
                 guard.storage = CC_STORAGE_STATIC;
                 guard.has_init = 0;
@@ -16694,9 +16747,7 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
         free_global_relocs(relocs, reloc_count);
         return -1;
     }
-    g->type = CC_TYPE_PTR_UCHAR;
-    g->type_struct_id = -1;
-    g->array_len = scalar_size * elem_count;
+    ssa_global_set_bytes(g, scalar_size * elem_count);
     g->has_init = 1;
     free(buf);
     free_global_relocs(relocs, reloc_count);
@@ -16837,9 +16888,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             char *init_sym = NULL;
             const cc_expr_t *init = tu->globals[i].init;
             out->globals[i].name = cc_strdup(tu->globals[i].name);
-            out->globals[i].type = tu->globals[i].type;
-            out->globals[i].type_struct_id = tu->globals[i].type_struct_id;
-            out->globals[i].array_len = tu->globals[i].array_len;
+            ssa_global_set_layout(&out->globals[i], global_decl_ctype(&tu->globals[i]), tu);
             /*
              * An array's size, which the emitter's reading of the legacy type gets wrong for some
              * (an array of pointers to arrays).  A structure keeps the size its initializer gives
@@ -16955,9 +17004,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
 
-                out->globals[i].type = CC_TYPE_PTR_UCHAR;
-                out->globals[i].type_struct_id = -1;
-                out->globals[i].array_len = total_size;
+                ssa_global_set_bytes(&out->globals[i], total_size);
 
                 if (init == NULL) {
                     out->globals[i].has_init = 0;
@@ -17084,8 +17131,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
             if (init != NULL && init->kind == CC_EXPR_INIT_LIST) {
                 size_t j;
-                if (!is_pointer_type(out->globals[i].type) || out->globals[i].array_len < 0) {
-                    if (out->globals[i].type == CC_TYPE_VOID && out->globals[i].type_struct_id >= 0) {
+                if (!out->globals[i].is_array) {
+                    if (ct_record_id(global_decl_ctype(&tu->globals[i])) >= 0) {
                         if (init->arg_count == 0) {
                             force_bss_zero = 1;
                         } else if (init->arg_count == 1) {
@@ -17139,14 +17186,14 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                 cc_ssa_module_free(out);
                                 return -1;
                             }
-                            if (ssym != NULL && out->globals[i].type == CC_TYPE_BOOL) {
+                            if (ssym != NULL && out->globals[i].data_kind == CC_SSA_DATA_BOOL) {
                                 free(ssym);
                                 ssym = NULL;
                                 sv = 1;
                                 sf = 1.0;
                                 s_is_float = 0;
                             }
-                            if (s_is_float && out->globals[i].type == CC_TYPE_BOOL) {
+                            if (s_is_float && out->globals[i].data_kind == CC_SSA_DATA_BOOL) {
                                 sv = sf != 0.0;
                                 sf = (double)sv;
                                 s_is_float = 0;
@@ -17275,9 +17322,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                 break;
                             }
                         }
-                        out->globals[i].type = CC_TYPE_PTR_UCHAR;
-                        out->globals[i].type_struct_id = -1;
-                        out->globals[i].array_len = total_size;
+                        ssa_global_set_bytes(&out->globals[i], total_size);
                         if (!any_nonzero && reloc_count == 0) {
                             out->globals[i].has_init = 0;
                             out->globals[i].init_i = 0;
@@ -17390,7 +17435,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ssa_module_free(out);
                 return -1;
             }
-            if (init_sym != NULL && out->globals[i].type == CC_TYPE_BOOL) {
+            if (init_sym != NULL && !out->globals[i].is_array && out->globals[i].data_kind == CC_SSA_DATA_BOOL) {
                 free(init_sym);
                 init_sym = NULL;
                 init_i = 1;
@@ -17398,7 +17443,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 init_f_ld = 1.0L;
                 init_is_float = 0;
             }
-            if (init_is_float && out->globals[i].type == CC_TYPE_BOOL) {
+            if (init_is_float && !out->globals[i].is_array && out->globals[i].data_kind == CC_SSA_DATA_BOOL) {
                 init_i = init_f != 0.0;
                 init_f = (double)init_i;
                 init_f_ld = (long double)init_i;
@@ -17409,14 +17454,13 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             }
             out->globals[i].has_init = (init != NULL) && !force_bss_zero;
             if (out->globals[i].has_init && !out->globals[i].init_is_string && !out->globals[i].init_is_symbol) {
-                if ((out->globals[i].type == CC_TYPE_FLOAT || out->globals[i].type == CC_TYPE_DOUBLE ||
-                     out->globals[i].type == CC_TYPE_LDOUBLE) &&
-                    !init_is_float) {
+                if (!out->globals[i].is_array && out->globals[i].data_kind == CC_SSA_DATA_FLOAT && !init_is_float) {
                     init_f = (double)init_i;
                     init_f_ld = (long double)init_i;
                     init_is_float = 1;
-                } else if (cc_type_is_integral(out->globals[i].type) && init_is_float) {
-                    init_i = fp_const_to_int(init_f, out->globals[i].type);
+                } else if (!out->globals[i].is_array && cc_ct_is_integer(global_decl_ctype(&tu->globals[i])) &&
+                           init_is_float) {
+                    init_i = fp_const_to_int(init_f, global_decl_ctype(&tu->globals[i]));
                     init_is_float = 0;
                 }
             }
@@ -17439,9 +17483,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
         memset(&gdecl, 0, sizeof(gdecl));
         gdecl.name = cc_strdup(fdecl->name);
-        gdecl.type = CC_TYPE_PTR_VOID;
-        gdecl.type_struct_id = -1;
-        gdecl.array_len = -1;
+        ssa_global_set_layout(&gdecl, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)), tu);
         gdecl.storage = fdecl->storage | CC_STORAGE_EXTERN;
         gdecl.attr_flags = fdecl->attr_flags;
         gdecl.attr_align = fdecl->attr_align;
