@@ -1441,6 +1441,7 @@ static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
+static int normalize_float_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
 static cc_type_t fp_builtin_storage_type(cc_type_t t);
 static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
@@ -2167,7 +2168,7 @@ static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_
     }
 
     rhs = v->value;
-    rhs = normalize_float_value(sf, rhs, v->type, diag);
+    rhs = normalize_float_ct(sf, rhs, lower_var_ctype(v), diag);
     if (rhs < 0) {
         return -1;
     }
@@ -3704,6 +3705,20 @@ static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t 
         sf->value_is_unsigned[v] = (unsigned char)uns;
     }
     return v;
+}
+
+/**
+ * Convert a floating value to type @p ct: round it to single precision
+ * when @p ct is `float` (it is held as a double), else leave it.
+ *
+ * @param sf    the function
+ * @param v     the value
+ * @param ct    the type converted to; may be NULL
+ * @param diag  receives an error
+ * @return      the converted value, or -1
+ */
+static int normalize_float_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag) {
+    return (ct != NULL && ct->kind == CC_CT_FLOAT) ? normalize_float_value(sf, v, CC_TYPE_FLOAT, diag) : v;
 }
 
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag) {
@@ -7033,7 +7048,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             set_value_size(sf, in.dst, 16);
         }
         if (e->value_type == CC_TYPE_FLOAT) {
-            return normalize_float_value(sf, in.dst, e->value_type, diag);
+            return normalize_float_ct(sf, in.dst, lower_value_ctype(e), diag);
         }
         if (vt == CC_VAL_I64 && lower_is_integer(e) && integral_type_bits(e->value_type) >= 64) {
             set_value_size(sf, in.dst, 8);
@@ -9349,7 +9364,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         set_diag(diag, "unsupported static local assignment type");
                         return -1;
                     }
-                    rhs = normalize_float_value(sf, rhs, vars[idx].type, diag);
+                    rhs = normalize_float_ct(sf, rhs, lower_var_ctype(&vars[idx]), diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9382,7 +9397,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         set_diag(diag, "unsupported address-taken local assignment type");
                         return -1;
                     }
-                    rhs = normalize_float_value(sf, rhs, vars[idx].type, diag);
+                    rhs = normalize_float_ct(sf, rhs, lower_var_ctype(&vars[idx]), diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9413,7 +9428,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     return vars[idx].value;
                 } else {
-                    rhs = normalize_float_value(sf, rhs, vars[idx].type, diag);
+                    rhs = normalize_float_ct(sf, rhs, lower_var_ctype(&vars[idx]), diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9457,7 +9472,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (gaddr < 0) {
                     return -1;
                 }
-                rhs = normalize_float_value(sf, rhs, g->type, diag);
+                rhs = normalize_float_ct(sf, rhs, lower_global_ctype(g), diag);
                 if (rhs < 0) {
                     return -1;
                 }
@@ -9523,7 +9538,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, msg);
                 return -1;
             }
-            rhs = normalize_float_value(sf, rhs, e->lhs->value_type, diag);
+            rhs = normalize_float_ct(sf, rhs, lower_value_ctype(e->lhs), diag);
             if (rhs < 0) {
                 return -1;
             }
@@ -9665,7 +9680,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 nextv = in.dst;
                 if (vars[idx].type == CC_TYPE_FLOAT) {
-                    nextv = normalize_float_value(sf, nextv, vars[idx].type, diag);
+                    nextv = normalize_float_ct(sf, nextv, lower_var_ctype(&vars[idx]), diag);
                     if (nextv < 0) {
                         return -1;
                     }
@@ -9781,7 +9796,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 nextv = in.dst;
                 if (g->type == CC_TYPE_FLOAT) {
-                    nextv = normalize_float_value(sf, nextv, g->type, diag);
+                    nextv = normalize_float_ct(sf, nextv, lower_global_ctype(g), diag);
                     if (nextv < 0) {
                         return -1;
                     }
@@ -9911,7 +9926,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             nextv = in.dst;
             if (e->value_type == CC_TYPE_FLOAT) {
-                nextv = normalize_float_value(sf, nextv, e->value_type, diag);
+                nextv = normalize_float_ct(sf, nextv, lower_value_ctype(e), diag);
                 if (nextv < 0) {
                     return -1;
                 }
@@ -10122,7 +10137,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
         } else if (e->aux_type == CC_TYPE_FLOAT) {
-            v = normalize_float_value(sf, v, e->aux_type, diag);
+            v = normalize_float_ct(sf, v, lower_value_ctype(e), diag);
             if (v < 0) {
                 return -1;
             }
@@ -12865,7 +12880,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     if (v < 0) {
                         return -1;
                     }
-                    v = normalize_float_value(sf, v, s->type, diag);
+                    v = normalize_float_ct(sf, v, lower_decl_ctype(s), diag);
                     if (v >= 0 && cc_type_is_integral(s->type) && !is_pointer_type(s->type)) {
                         v = normalize_integral_ct(sf, v, s->ctype, s->type, diag);
                     }
@@ -13285,7 +13300,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     return -1;
                 }
             }
-            v = normalize_float_value(sf, v, s->type, diag);
+            v = normalize_float_ct(sf, v, lower_decl_ctype(s), diag);
             if (v >= 0 && cc_type_is_integral(s->type) && !is_pointer_type(s->type)) {
                 v = normalize_integral_ct(sf, v, s->ctype, s->type, diag);
             }
