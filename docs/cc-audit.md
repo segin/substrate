@@ -525,6 +525,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-92** `nullptr` shall convert only to a pointer, `bool` or
   `nullptr_t` (C23 6.3.2.4): `int n = nullptr;` is accepted; gcc
   rejects it.  *Reproduced.*
+- [ ] **CC-93** A static local array of integers wider than 64 bits
+  shall hold the whole value of each initializer (C11 6.7.9p10):
+  `static unsigned __int128 u[2] = {5, (unsigned __int128)1 << 100};`
+  and `static _BitInt(128) b[2] = {1, 0x123456789abcdef0123wb};` inside
+  a function lose each element's upper 64 bits (`u[1] >> 96` is 0, gcc
+  16).  File-scope arrays and scalars are laid out right.  *Reproduced*
+  (-m64).
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -960,7 +967,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-92 requirements: 89 met, 3 open.
+93 requirements: 89 met, 4 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
