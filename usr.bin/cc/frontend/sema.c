@@ -1198,6 +1198,29 @@ static int find_struct_member_index(const cc_translation_unit_t *tu, int struct_
 }
 
 /**
+ * How two declarations of one file-scope object, of types @p a and @p b,
+ * conflict (C11 6.7p4): their array bounds, where both give one (a bound
+ * not given, `extern T a[]`, matches any), or the types under them.
+ *
+ * @return "array declarators" or "object types", or NULL if they agree
+ */
+static const char *sema_redecl_conflict(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b) {
+    a = a->unqual;
+    b = b->unqual;
+    while (a->kind == CC_CT_ARRAY && b->kind == CC_CT_ARRAY) {
+        if (a->count > 0 && b->count > 0 && a->count != b->count) {
+            return "array declarators";
+        }
+        a = a->of->unqual;
+        b = b->of->unqual;
+    }
+    if (a->kind == CC_CT_ARRAY || b->kind == CC_CT_ARRAY) {
+        return "array declarators";
+    }
+    return sema_same_type(tu, a, b, 0) ? NULL : "object types";
+}
+
+/**
  * Whether two declarations of one function agree (C11 6.7.6.3p15): the
  * same return type and, where both have prototypes, the same parameter
  * types; a declaration without one must not be variadic.
@@ -7010,8 +7033,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global_item;
         }
-        if (g->type == CC_TYPE_VOID && g->type_struct_id < 0 &&
-            !((g->storage & CC_STORAGE_EXTERN) != 0 && g->init == NULL)) {
+        if (ct_kind_is(g->ctype->unqual, CC_CT_VOID) && !((g->storage & CC_STORAGE_EXTERN) != 0 && g->init == NULL)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "invalid void file-scope object: %s", g->name);
             }
@@ -7060,46 +7082,15 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 const cc_global_t *prev = &tu->globals[j];
                 int prev_static = (prev->storage & CC_STORAGE_STATIC) != 0;
                 int cur_static = (g->storage & CC_STORAGE_STATIC) != 0;
-                if (prev->type != g->type || prev->type_struct_id != g->type_struct_id) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message), "conflicting file-scope object types: %s",
-                                 g->name);
-                    }
-                    goto fail_global_item;
-                }
-                if (prev->array_ndim > 0 && g->array_ndim > 0) {
-                    int ad;
-                    if (prev->array_ndim != g->array_ndim) {
-                        if (getenv("CC_DEBUG_GLOBAL_ARRAY") != NULL) {
-                            fprintf(stderr, "cc-debug: array ndim mismatch %s prev_ndim=%d cur_ndim=%d\n", g->name,
-                                    prev->array_ndim, g->array_ndim);
-                        }
+                {
+                    const char *conflict = sema_redecl_conflict(tu, prev->ctype, g->ctype);
+
+                    if (conflict != NULL) {
                         if (diag != NULL && diag->message[0] == '\0') {
-                            snprintf(diag->message, sizeof(diag->message),
-                                     "conflicting file-scope array declarators: %s", g->name);
+                            snprintf(diag->message, sizeof(diag->message), "conflicting file-scope %s: %s", conflict,
+                                     g->name);
                         }
                         goto fail_global_item;
-                    }
-                    for (ad = 0; ad < prev->array_ndim; ++ad) {
-                        long pd = prev->array_dims[ad];
-                        long gd = g->array_dims[ad];
-                        /*
-                         * Treat zero-length dimensions as incomplete bounds
-                         * (`extern T a[]`) that are compatible with concrete
-                         * bounds in another declaration.
-                         */
-                        if (pd != 0 && gd != 0 && pd != gd) {
-                            if (getenv("CC_DEBUG_GLOBAL_ARRAY") != NULL) {
-                                fprintf(stderr,
-                                        "cc-debug: array dim mismatch %s dim=%d prev=%ld cur=%ld prev_len=%ld cur_len=%ld\n",
-                                        g->name, ad, pd, gd, prev->array_len, g->array_len);
-                            }
-                            if (diag != NULL && diag->message[0] == '\0') {
-                                snprintf(diag->message, sizeof(diag->message),
-                                         "conflicting file-scope array declarators: %s", g->name);
-                            }
-                            goto fail_global_item;
-                        }
                     }
                 }
                 if (prev_static != cur_static) {
@@ -7565,7 +7556,7 @@ fail_decl:
         }
 
         for (j = 0; j < f->param_count; ++j) {
-            if (f->params[j].type == CC_TYPE_VOID && f->params[j].type_struct_id < 0) {
+            if (ct_kind_is(sema_param_ctype(&f->params[j])->unqual, CC_CT_VOID)) {
                 set_diag(diag, "void is not valid for named parameter type");
                 goto fail_func;
             }
