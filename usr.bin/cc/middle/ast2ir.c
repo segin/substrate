@@ -1037,25 +1037,6 @@ static int init_list_has_row_initializer(const cc_expr_t *list) {
     return 0;
 }
 
-/**
- * Size of a type known from its kind alone.
- *
- * @param t  the type
- * @return   the size in bytes of a scalar type; the pointer size for
- *           `_BitInt`, `_Atomic` and function types, whose real size
- *           this kind does not carry; -1 for anything else
- */
-static long type_size_bytes(cc_type_t t) {
-    long n = cc_type_scalar_size(t);
-
-    if (n >= 0) {
-        return n;
-    }
-    if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
-        return cc_target_pointer_size();
-    }
-    return -1;
-}
 
 /**
  * A floating constant converted to integer type @p t, as an initializer's
@@ -1173,13 +1154,21 @@ static void abi64_cover(int cls[2], long off, long size, int c) {
 
 static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long off, int cls[2], int depth);
 
-/** The class of a scalar of legacy type @p t. */
-static int abi64_scalar_class(cc_type_t t) {
-    if (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_FLOAT16 || t == CC_TYPE_DECIMAL32 ||
-        t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128) {
+/** The class of a scalar of type @p t. */
+static int abi64_scalar_class(const cc_ctype_t *t) {
+    switch (t->unqual->kind) {
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+    case CC_CT_FLOAT16:
+    case CC_CT_DECIMAL32:
+    case CC_CT_DECIMAL64:
+    case CC_CT_DECIMAL128:
         return ABI64_SSE;
+    case CC_CT_LDOUBLE:
+        return ABI64_X87;
+    default:
+        return ABI64_INTEGER;
     }
-    return t == CC_TYPE_LDOUBLE ? ABI64_X87 : ABI64_INTEGER;
 }
 
 /**
@@ -1257,8 +1246,8 @@ static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long 
         return -1;
     }
     sd = &tu->structs[sid];
-    if (sd->complex_elem != CC_TYPE_VOID) {
-        long es = type_size_bytes(sd->complex_elem);
+    if (sd->complex_elem != NULL) {
+        long es = cc_ct_size(sd->complex_elem, tu);
 
         abi64_cover(cls, off, es, abi64_scalar_class(sd->complex_elem));
         abi64_cover(cls, off + es, es, abi64_scalar_class(sd->complex_elem));
@@ -1299,7 +1288,7 @@ static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long 
     int flags = 0;
 
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count &&
-        tu->structs[sid].complex_elem == CC_TYPE_LDOUBLE) {
+        tu->structs[sid].complex_elem == cc_ct_basic(CC_CT_LDOUBLE)) {
         return is_return ? CC_ABI_RET_X87_COMPLEX : -1;
     }
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
@@ -1395,7 +1384,7 @@ static int agg_return_class(const cc_translation_unit_t *tu, int sid, long size)
         return c >= 0 ? c : (size <= 16 ? CC_ABI_RET_MEMORY : 0);
     }
     /* i386 psABI: a float _Complex comes back in %eax:%edx, as gcc has it; any other aggregate in memory */
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == CC_TYPE_FLOAT) {
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == cc_ct_basic(CC_CT_FLOAT)) {
         return CC_ABI_RET_EAX_EDX;
     }
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
@@ -4537,10 +4526,10 @@ static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t 
  * @return     float, double or long double; NULL if @p sid is no complex type's
  */
 static const cc_ctype_t *complex_elem_of(const cc_translation_unit_t *tu, int sid) {
-    if (sid < 0 || (size_t)sid >= tu->struct_count || tu->structs[sid].complex_elem == CC_TYPE_VOID) {
+    if (sid < 0 || (size_t)sid >= tu->struct_count) {
         return NULL;
     }
-    return cc_ct_from_scalar(tu->structs[sid].complex_elem);
+    return tu->structs[sid].complex_elem;
 }
 
 /** A floating value of type @p from as one of type @p to (float, double or long double). */
@@ -5450,7 +5439,7 @@ static int vec_of(const cc_translation_unit_t *tu, int sid, vec_t *v) {
         return 0;
     }
     v->n = sd->vector_count;
-    v->elem = cc_ct_from_scalar(sd->vector_elem);
+    v->elem = sd->vector_elem;
     v->es = cc_ct_size(v->elem, tu);
     v->is_fp = ct_has_kind(v->elem, CC_CT_FLOAT) || ct_has_kind(v->elem, CC_CT_DOUBLE);
     v->is_unsigned = cc_ct_is_unsigned(v->elem);

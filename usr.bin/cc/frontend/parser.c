@@ -1408,7 +1408,7 @@ static int parser_complex_struct(parser_t *p, cc_type_t elem) {
     int saved_depth = p->scope_depth;
 
     for (i = 0; i < p->struct_count; ++i) {
-        if (p->structs[i].complex_elem == elem) {
+        if (p->structs[i].complex_elem == ct) {
             return (int)i;
         }
     }
@@ -1419,12 +1419,12 @@ static int parser_complex_struct(parser_t *p, cc_type_t elem) {
         struct_member_push(p, sid, "__im", elem, -1, -1, 0, NULL, es, es, 0, 0, 0, 0, 0, 0) < 0) {
         return -1;
     }
-    p->structs[sid].members[0].ctype = cc_ct_from_scalar(elem);
-    p->structs[sid].members[1].ctype = cc_ct_from_scalar(elem);
+    p->structs[sid].members[0].ctype = ct;
+    p->structs[sid].members[1].ctype = ct;
     p->structs[sid].size = 2 * es;
     p->structs[sid].align = cc_ct_align(ct, NULL);
     p->structs[sid].complete = 1;
-    p->structs[sid].complex_elem = elem;
+    p->structs[sid].complex_elem = ct;
     if (!p->is_probe) {
         cc_ct_set_complex_record(kind, sid);
     }
@@ -1643,7 +1643,7 @@ static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
     int saved_depth = p->scope_depth;
 
     for (i = 0; i < p->struct_count; ++i) {
-        if (p->structs[i].vector_count == n && p->structs[i].vector_elem == elem) {
+        if (p->structs[i].vector_count == n && p->structs[i].vector_elem == parser_vector_elem_ctype(elem)) {
             return (int)i;
         }
     }
@@ -1661,7 +1661,7 @@ static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
     p->structs[sid].align = n * es < 16 ? n * es : 16;
     p->structs[sid].complete = 1;
     p->structs[sid].vector_count = n;
-    p->structs[sid].vector_elem = elem;
+    p->structs[sid].vector_elem = parser_vector_elem_ctype(elem);
     p->structs[sid].vector_cmp_sid = sid;
     cmp_elem = cmp_by_size[es];
     if (cmp_elem != elem) {

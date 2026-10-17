@@ -461,8 +461,8 @@ typedef struct {
     int has_flexible_array;
     int complete;
     /** for the structure standing for a complex type, `{ T __re, __im; }`: T (float, double or
-     *  long double); CC_TYPE_VOID for any other structure */
-    cc_type_t complex_elem;
+     *  long double); NULL for any other structure */
+    const struct cc_ctype *complex_elem;
     /** for the structure standing for an integer type wider than 64 bits -- `_BitInt(N)` or
      *  `__int128`, `{ limb __limb[n]; }` with limbs of the target's word -- its width N; else 0 */
     long wide_bits;
@@ -471,7 +471,7 @@ typedef struct {
     /** for the structure standing for a vector type (`vector_size`, `ext_vector_type`),
      *  `{ T __vec[n]; }`: n, its element count; else 0 */
     long vector_count;
-    cc_type_t vector_elem; /**< such a vector's element type */
+    const struct cc_ctype *vector_elem; /**< such a vector's element type */
     int vector_cmp_sid;    /**< the vector type its comparisons give: signed integers of the element's size */
     /** for the structure standing for a decimal floating type, `{ __bid; }` holding its BID
      *  encoding (an integer, or two 64-bit halves low first for _Decimal128): 32, 64 or 128; else 0 */

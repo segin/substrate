@@ -1931,10 +1931,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
 static const cc_ctype_t *sema_complex_elem(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
     int sid = sx_ct_record(t);
 
-    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || tu->structs[sid].complex_elem == CC_TYPE_VOID) {
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count) {
         return NULL;
     }
-    return cc_ct_from_scalar(tu->structs[sid].complex_elem);
+    return tu->structs[sid].complex_elem;
 }
 
 
@@ -1949,7 +1949,7 @@ static int sema_complex_sid(const cc_translation_unit_t *tu, const cc_ctype_t *e
     size_t i;
 
     for (i = 0; tu != NULL && elem != NULL && i < tu->struct_count; ++i) {
-        if (tu->structs[i].complex_elem == cc_ct_legacy_kind(elem->kind) && tu->structs[i].complex_elem != CC_TYPE_VOID) {
+        if (tu->structs[i].complex_elem == elem->unqual) {
             return (int)i;
         }
     }
@@ -2387,7 +2387,7 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
     int sid = (int)(vd - tu->structs);
     int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
                  e->op == CC_BIN_GT || e->op == CC_BIN_GE;
-    int is_fp = vd->vector_elem == CC_TYPE_FLOAT || vd->vector_elem == CC_TYPE_DOUBLE;
+    int is_fp = cc_ct_is_floating(vd->vector_elem);
 
     if (is_logical_op(e->op)) {
         set_diag(diag, "invalid operands to a logical operator: a vector");
@@ -2410,8 +2410,7 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
             set_diag(diag, "invalid operands to a vector operation");
             return -1;
         }
-        if (sx_vtype(*scalar) != cc_ct_from_scalar(vd->vector_elem) &&
-            sema_wrap_cast(scalar, cc_ct_from_scalar(vd->vector_elem)) != 0) {
+        if (sx_vtype(*scalar) != vd->vector_elem && sema_wrap_cast(scalar, vd->vector_elem) != 0) {
             set_diag(diag, "out of memory");
             return -1;
         }
