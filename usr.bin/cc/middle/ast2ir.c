@@ -791,39 +791,6 @@ static cc_type_t ptr_base_type(cc_type_t t) {
     return cc_type_deref_once(t);
 }
 
-/* Conversion rank of a promoted integer type: int, long, long long. */
-/*
- * The usual arithmetic conversions for two integer operands (C11
- * 6.3.1.8).  A signed type of higher rank wins over an unsigned one
- * only when it can hold all of the unsigned type's values, which for
- * long against unsigned int depends on the target.
- */
-static cc_type_t common_integral_type(cc_type_t a, cc_type_t b) {
-    cc_type_t ap = cc_type_promote(a);
-    cc_type_t bp = cc_type_promote(b);
-    cc_type_t s;
-    cc_type_t u;
-
-    if (cc_type_integer_rank(ap) == 1) {
-        ap = cc_type_is_unsigned_integral(ap) ? CC_TYPE_UINT : CC_TYPE_INT;
-    }
-    if (cc_type_integer_rank(bp) == 1) {
-        bp = cc_type_is_unsigned_integral(bp) ? CC_TYPE_UINT : CC_TYPE_INT;
-    }
-    if (cc_type_is_unsigned_integral(ap) == cc_type_is_unsigned_integral(bp)) {
-        return cc_type_integer_rank(ap) >= cc_type_integer_rank(bp) ? ap : bp;
-    }
-    s = cc_type_is_unsigned_integral(ap) ? bp : ap;
-    u = cc_type_is_unsigned_integral(ap) ? ap : bp;
-    if (cc_type_integer_rank(u) >= cc_type_integer_rank(s)) {
-        return u;
-    }
-    if (cc_type_integer_rank_size(s) > cc_type_integer_rank_size(u)) {
-        return s;
-    }
-    return s == CC_TYPE_LONG ? CC_TYPE_ULONG : CC_TYPE_ULONG_LONG;
-}
-
 /**
  * Size of a type known from its kind alone.
  *
@@ -6754,7 +6721,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             cc_value_type_t cmp_vt = (cmp_ldouble || value_type(sf, lhs) == CC_VAL_F64 || value_type(sf, rhs) == CC_VAL_F64)
                                          ? CC_VAL_F64
                                          : CC_VAL_I64;
-            cc_type_t cmp_it = CC_TYPE_INT;
+            const cc_ctype_t *cmp_ct = cc_ct_basic(CC_CT_INT);
             lhs = cast_value(sf, lhs, cmp_vt, diag);
             rhs = cast_value(sf, rhs, cmp_vt, diag);
             if (lhs < 0 || rhs < 0) {
@@ -6768,25 +6735,23 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
             if (cmp_vt == CC_VAL_I64) {
+                /* pointers compare as the unsigned integer of their width; integers in their common type */
                 if (lower_is_pointer(e->lhs) || lower_is_pointer(e->rhs)) {
-                    cmp_it = cc_target_pointer_size() <= 4 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
+                    cmp_ct = cc_ct_basic(cc_target_pointer_size() <= 4 ? CC_CT_UINT : CC_CT_ULLONG);
                 } else {
-                    cmp_it = common_integral_type(e->lhs->value_type, e->rhs->value_type);
+                    cmp_ct = cc_ct_common_int(lower_value_ctype(e->lhs), lower_value_ctype(e->rhs));
                 }
-                if (cc_type_is_integral(cmp_it)) {
-                    lhs = normalize_integral_value(sf, lhs, cmp_it, diag);
-                    rhs = normalize_integral_value(sf, rhs, cmp_it, diag);
-                    if (lhs < 0 || rhs < 0) {
-                        return -1;
-                    }
+                lhs = normalize_int_ct(sf, lhs, cmp_ct, diag);
+                rhs = normalize_int_ct(sf, rhs, cmp_ct, diag);
+                if (lhs < 0 || rhs < 0) {
+                    return -1;
                 }
             }
             in.op = CC_SSA_CMP;
             in.cmp_kind = bin_to_cmp(e->op);
             in.is_unsigned =
                 (cmp_vt == CC_VAL_I64 &&
-                 (cc_type_is_unsigned_integral(cmp_it) || lower_is_pointer(e->lhs) ||
-                  lower_is_pointer(e->rhs)))
+                 (cc_ct_is_unsigned(cmp_ct) || lower_is_pointer(e->lhs) || lower_is_pointer(e->rhs)))
                     ? 1
                     : 0;
             in.dst = new_value(sf, CC_VAL_I64);
