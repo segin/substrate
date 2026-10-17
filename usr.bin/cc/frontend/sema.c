@@ -4392,6 +4392,84 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
 }
 
 /**
+ * Check `&x` (CC_EXPR_ADDR) and type it a pointer to x's type (C11
+ * 6.5.3.2): x is a function, an object named or reached through a member
+ * or `*`, or a compound literal; never a bit-field.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_addr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    cc_expr_t *x = e->lhs;
+    /* a compound literal, before checking turns a scalar one into a plain cast of its value */
+    int of_literal;
+
+    if (x == NULL) {
+        set_diag(diag, "malformed address-of expression");
+        return -1;
+    }
+    of_literal = x->kind == CC_EXPR_CAST && x->lhs != NULL && x->lhs->kind == CC_EXPR_INIT_LIST;
+    if (check_expr(tu, x, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (x->kind == CC_EXPR_MEMBER && x->member_is_bitfield) {
+        set_diag(diag, "cannot take address of bit-field");
+        return -1;
+    }
+    if (x->kind == CC_EXPR_DEREF) {
+        /* &*p is p, not an lvalue */
+        if (!sema_is_ptr(sx_vtype(x->lhs))) {
+            set_diag(diag, "address-of dereference requires pointer operand");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(x->lhs));
+        return 0;
+    }
+    if (!of_literal && x->kind != CC_EXPR_IDENT && x->kind != CC_EXPR_MEMBER &&
+        !(x->kind == CC_EXPR_CAST && sx_ct_record(x->ctype) >= 0)) {
+        set_diag(diag, "address-of currently requires an identifier or member lvalue");
+        return -1;
+    }
+    sema_set_type(e, cc_ct_pointer(x->ctype));
+    return 0;
+}
+
+/**
+ * Check `*p` (CC_EXPR_DEREF) and type it what p points to (C11 6.5.3.2).
+ * `*f` of a function, or of a pointer to one, designates the function,
+ * which is used as f again.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_deref(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                            int depth, cc_diag_t *diag) {
+    const cc_ctype_t *p;
+
+    if (e->lhs == NULL) {
+        set_diag(diag, "malformed dereference expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (cc_ct_expr_designates_function(e->lhs)) {
+        sema_set_type(e, e->lhs->ctype);
+        return 0;
+    }
+    p = sx_vtype(e->lhs);
+    if (!sema_is_ptr(p)) {
+        set_diag(diag, "dereference requires pointer operand");
+        return -1;
+    }
+    if (p->of->unqual->kind == CC_CT_VOID && cc_options_current()->pedantic &&
+        emit_warning(diag, e->line, e->col, "dereferencing 'void *' is a GNU extension", 1) != 0) {
+        return -1;
+    }
+    sema_set_type(e, p->of);
+    return 0;
+}
+
+/**
  * Check expression @p e by its kind: its operands, the rules C sets for
  * them, and its legacy type (value_type, struct_id, array dimensions).
  *
@@ -5691,128 +5769,19 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         return 0;
     }
 
-    case CC_EXPR_ADDR: {
-        /* a compound literal, before checking turns a scalar one into a plain cast of its value */
-        int of_literal;
-
-        if (e->lhs == NULL) {
-            set_diag(diag, "malformed address-of expression");
-            return -1;
-        }
-        of_literal = e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL && e->lhs->lhs->kind == CC_EXPR_INIT_LIST;
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
-            set_diag(diag, "cannot take address of bit-field");
-            return -1;
-        }
-        if (e->lhs->kind == CC_EXPR_DEREF) {
-            e->value_type = e->lhs->lhs != NULL ? e->lhs->lhs->value_type : CC_TYPE_VOID;
-            if (!is_pointer_type(e->value_type)) {
-                set_diag(diag, "address-of dereference requires pointer operand");
-                return -1;
-            }
-            e->struct_id = e->lhs->lhs != NULL ? e->lhs->lhs->struct_id : -1;
-            expr_copy_array_meta(e, e->lhs->lhs);
-            return 0;
-        }
-        if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
-            int vidx = vars_find_visible(vars, var_count, e->lhs->ident, depth);
-            if (vidx < 0 && find_function(tu, e->lhs->ident) != NULL) {
-                e->value_type = e->lhs->value_type;
-                e->struct_id = e->lhs->struct_id;
-                return 0;
-            }
-        }
-        if (e->lhs->kind == CC_EXPR_CAST && e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
-            e->value_type = CC_TYPE_PTR_VOID;
-            e->struct_id = e->lhs->struct_id;
-            return 0;
-        }
-        if (of_literal) {
-            /* a compound literal of any type is an lvalue (C11 6.5.2.5p4); its type is the pointer's target */
-            e->value_type = ptr_of_type(e->lhs->value_type);
-            e->struct_id = e->lhs->struct_id;
-            return 0;
-        }
-        if (e->lhs->kind != CC_EXPR_IDENT && e->lhs->kind != CC_EXPR_MEMBER) {
-            set_diag(diag, "address-of currently requires an identifier or member lvalue");
-            return -1;
-        }
-        e->value_type = ptr_of_type(e->lhs->value_type);
-        if (!is_pointer_type(e->value_type)) {
-            set_diag(diag, "cannot take address of this expression type");
-            return -1;
-        }
-        e->struct_id = e->lhs->struct_id;
-        return 0;
-    }
+    case CC_EXPR_ADDR:
+        return sema_check_addr(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_LABEL_ADDR:
         if (e->ident == NULL || e->ident[0] == '\0') {
             set_diag(diag, "malformed label-address expression");
             return -1;
         }
-        e->value_type = CC_TYPE_PTR_VOID;
-        e->struct_id = -1;
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
         return 0;
 
     case CC_EXPR_DEREF:
-        if (e->lhs == NULL) {
-            set_diag(diag, "malformed dereference expression");
-            return -1;
-        }
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (cc_ct_expr_designates_function(e->lhs)) {
-            /* `*fp` designates the function fp points to, which is used as fp again */
-            e->value_type = e->lhs->value_type;
-            e->struct_id = e->lhs->struct_id;
-            e->array_ndim = e->lhs->array_ndim;
-            memcpy(e->array_dims, e->lhs->array_dims, sizeof(e->array_dims));
-            return 0;
-        }
-        if (!is_pointer_type(e->lhs->value_type)) {
-            if (getenv("CC_DEBUG_SEMA_DEREF") != NULL) {
-                fprintf(stderr, "cc-debug: bad deref lhs kind=%d type=%d struct_id=%d ident=%s\n",
-                        (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
-                        e->lhs->ident != NULL ? e->lhs->ident : "<null>");
-            }
-            set_diag(diag, "dereference requires pointer operand");
-            return -1;
-        }
-        e->value_type = ptr_base_type(e->lhs->value_type);
-        e->struct_id = -1;
-        if (e->lhs->struct_id >= 0 && type_carries_struct_id(e->value_type)) {
-            e->struct_id = e->lhs->struct_id;
-        }
-        if (e->lhs->array_ndim > 0 && is_pointer_type(e->value_type)) {
-            int i;
-            e->array_ndim = e->lhs->array_ndim - 1;
-            if (e->array_ndim < 0) {
-                e->array_ndim = 0;
-            }
-            for (i = 0; i < e->array_ndim; ++i) {
-                e->array_dims[i] = e->lhs->array_dims[i + 1];
-            }
-            for (; i < CC_MAX_ARRAY_DIMS; ++i) {
-                e->array_dims[i] = 0;
-            }
-        }
-        if (e->value_type == CC_TYPE_VOID) {
-            if (e->struct_id >= 0) {
-                return 0;
-            }
-            if (cc_options_current()->pedantic) {
-                if (emit_warning(diag, e->line, e->col, "dereferencing 'void *' is a GNU extension", 1) != 0) {
-                    return -1;
-                }
-            }
-            return 0;
-        }
-        return 0;
+        return sema_check_deref(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_UPDATE: {
         cc_type_t t;
