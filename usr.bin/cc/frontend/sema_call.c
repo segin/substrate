@@ -61,18 +61,13 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
 
 /**
  * What a call through a callee of type @p t gives: the return type of the
- * function @p t is, or points to.  A pointer to a function typedef
- * (`typedef T fn_t(...); fn_t *p`) is recorded as a pointer to T, so a
- * pointer to anything else gives what it points to.
+ * function @p t is, or points to.
  *
  * @return the type, or NULL if @p t is not known or is neither
  */
 static const cc_ctype_t *sema_callee_ret_ctype(const cc_ctype_t *t) {
     if (t != NULL && t->unqual->kind == CC_CT_POINTER) {
         t = t->unqual->of;
-        if (t->unqual->kind != CC_CT_FUNCTION) {
-            return t;
-        }
     }
     return (t != NULL && t->unqual->kind == CC_CT_FUNCTION) ? t->unqual->of : NULL;
 }
@@ -1340,11 +1335,11 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
             /* a call through a pointer object named directly */
             const cc_ctype_t *ft = idx >= 0 ? vars[idx].ctype : g->ctype;
 
-            if (!sema_is_ptr(cc_ct_decay(ft))) {
+            if (!sema_is_ptr(cc_ct_decay(ft)) || sema_callee_ret_ctype(cc_ct_decay(ft)) == NULL) {
                 sema_diag(diag, "call target must be a function pointer");
                 return -1;
             }
-            sema_set_type(e, sema_callee_ret_ctype(ft));
+            sema_set_type(e, sema_callee_ret_ctype(cc_ct_decay(ft)));
             return 0;
         }
         if (strncmp(e->ident, "__builtin_", 10) == 0 && !cc_builtin_is_recognized(e->ident)) {
@@ -1368,7 +1363,11 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
         if (fn == NULL) {
             fn = infer_callee_function_expr(tu, e->lhs);
         }
-        sema_set_type(e, fn != NULL ? fn->ret_ctype : sema_callee_ret_ctype(e->lhs->ctype));
+        if (fn == NULL && sema_callee_ret_ctype(cc_ct_decay(e->lhs->ctype)) == NULL) {
+            sema_diag(diag, "called object is not a function or function pointer");
+            return -1;
+        }
+        sema_set_type(e, fn != NULL ? fn->ret_ctype : sema_callee_ret_ctype(cc_ct_decay(e->lhs->ctype)));
     }
     return 0;
 }

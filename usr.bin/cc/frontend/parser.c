@@ -9411,34 +9411,83 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             }
             fn_decl_hoisted = 1;
         }
+        if (!is_typedef && !is_fn_decl && s.decl_name != NULL && s.ctype != NULL &&
+            s.ctype->kind == CC_CT_FUNCTION) {
+            /* `fn_t f;`, a function type through a typedef: a function declaration (C11 6.7.8p3) */
+            cc_function_t fn_decl;
+            size_t pi;
+
+            memset(&fn_decl, 0, sizeof(fn_decl));
+            fn_decl.line = s.line;
+            fn_decl.col = s.col;
+            fn_decl.ret_ctype = s.ctype->of;
+            fn_decl.storage = s.storage;
+            fn_decl.attr_flags = s.attr_flags;
+            fn_decl.attr_align = s.attr_align;
+            fn_decl.attr_format_index = merged_format_index;
+            fn_decl.attr_format_first_to_check = merged_format_first_to_check;
+            fn_decl.has_body = 0;
+            fn_decl.is_variadic = s.ctype->variadic;
+            fn_decl.has_prototype = s.ctype->prototyped;
+            if (s.ctype->param_count > 0) {
+                fn_decl.params = (cc_param_t *)calloc(s.ctype->param_count, sizeof(*fn_decl.params));
+                if (fn_decl.params == NULL) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "out of memory declaring a function");
+                    free_stmt(&s);
+                    return -1;
+                }
+                fn_decl.param_count = s.ctype->param_count;
+                for (pi = 0; pi < s.ctype->param_count; ++pi) {
+                    fn_decl.params[pi].ctype = s.ctype->params[pi];
+                }
+            }
+            fn_decl.name = s.decl_name;
+            s.decl_name = NULL;
+            fn_decl.attr_section = s.attr_section;
+            s.attr_section = NULL;
+            fn_decl.attr_alias = s.attr_alias;
+            s.attr_alias = NULL;
+            if (parser_push_hoisted_func(p, &fn_decl) != 0) {
+                free_func(&fn_decl);
+                free_stmt(&s);
+                return -1;
+            }
+            is_fn_decl = 1;
+            fn_decl_hoisted = 1;
+        }
         if (is_typedef && p->tok.kind == TOK_LPAREN) {
-            int depth = 1;
-            /*
-             * Preserve the declarator base type for function typedefs.
-             * Examples: `typedef int fn_t(...);` and `typedef int fn_t();`
-             * should keep `int` so pointers to fn_t carry the correct
-             * call result type in the simplified type model.
-             */
+            /* `typedef T name(params)`: the name is the function type, its parameters as declared */
+            cc_function_t fn_type;
+            const cc_ctype_t *fct;
+
+            memset(&fn_type, 0, sizeof(fn_type));
+            fn_type.ret_ctype = s.ctype;
             if (next_tok(p) != 0) {
                 free_stmt(&s);
                 return -1;
             }
-            while (depth > 0) {
-                if (p->tok.kind == TOK_EOF) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "unterminated typedef parameter list");
-                    free_stmt(&s);
-                    return -1;
-                }
-                if (p->tok.kind == TOK_LPAREN) {
-                    depth++;
-                } else if (p->tok.kind == TOK_RPAREN) {
-                    depth--;
-                }
-                if (next_tok(p) != 0) {
-                    free_stmt(&s);
-                    return -1;
-                }
+            if (p->tok.kind != TOK_RPAREN && parse_params(p, &fn_type, 0) != 0) {
+                free_func(&fn_type);
+                free_stmt(&s);
+                return -1;
             }
+            if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
+                free_func(&fn_type);
+                free_stmt(&s);
+                return -1;
+            }
+            if (parser_is_c23_or_newer() && fn_type.param_count == 0 && !fn_type.is_variadic &&
+                !fn_type.has_prototype) {
+                fn_type.has_prototype = 1;
+            }
+            fct = parser_function_ctype(&fn_type);
+            free_func(&fn_type);
+            if (fct == NULL) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "cannot represent the function type of a typedef");
+                free_stmt(&s);
+                return -1;
+            }
+            s.ctype = fct;
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
                 free_stmt(&s);
                 return -1;

@@ -615,16 +615,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   rejected ("expected '=' after array designator"; gcc accepts it).
   *Reproduced* (both targets); found while testing arrays of more than
   four dimensions, and present before.
-- [ ] **CC-105** A pointer to a function typedef shall be a pointer to
+- [x] **CC-105** A pointer to a function typedef shall be a pointer to
   that function type (C11 6.7.8): after `typedef int fn_t(const char *,
   ...); fn_t *fp;`, `fp` is `int (*)(const char *, ...)`.  The parser
-  drops the typedef's parameter list, so cc types `fp` as `int *`;
+  dropped the typedef's parameter list, so cc typed `fp` as `int *`;
   `__builtin_types_compatible_p(__typeof__(fp), int (*)(const char *,
-  ...))` is 0 (gcc: 1).  Calls through `fp` still work: lowering takes
-  the call's result type from the callee expression, a workaround, not
-  a fix.  *Reproduced* (both targets); present before the interned-type
-  refactor.  To be fixed with the parser's conversion to syntax only
-  (refactor step 9).
+  ...))` was 0 (gcc: 1).  Calls through `fp` worked only because sema
+  took a pointer to anything as callable.  *Reproduced* (both targets);
+  present before the interned-type refactor.  The typedef now records
+  the function type, parameters and all; a declaration through it
+  (`fn_t f;`) declares a function; and sema calls only a function or a
+  pointer to one.  Fixed with refactor step 9.  `codegen/fn_typedef.c`.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -1060,7 +1061,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-106 requirements: 96 met, 10 open.
+106 requirements: 97 met, 9 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
