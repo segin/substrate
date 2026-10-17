@@ -2212,33 +2212,63 @@ static int is_complete_struct_object_type(const cc_translation_unit_t *tu, cc_ty
     return 1;
 }
 
+/**
+ * The declared type of a local, not decayed.
+ *
+ * @param v  the local
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *var_decl_ctype(const var_entry_t *v) {
+    return v->ctype != NULL ? v->ctype : cc_ct_from_legacy(v->type, v->struct_id, v->array_ndim, v->array_dims);
+}
+
+/**
+ * The complete structure a local is (its index), or -1.
+ *
+ * @param tu  the translation unit
+ * @param v   the local
+ * @return    the structure's index, or -1
+ */
+static int var_complete_record(const cc_translation_unit_t *tu, const var_entry_t *v) {
+    int sid = ct_record_id(var_decl_ctype(v));
+
+    return (sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complete) ? sid : -1;
+}
+
+/**
+ * Whether a local lives in memory as a whole: a complete structure or an
+ * array.
+ */
 static int var_is_aggregate_or_array(const cc_translation_unit_t *tu, const var_entry_t *v) {
+    const cc_ctype_t *t;
+
     if (v == NULL) {
         return 0;
     }
-    if (is_complete_struct_object_type(tu, v->type, v->struct_id)) {
-        return 1;
-    }
-    if ((v->array_ndim > 0 && v->array_len >= 0) ||
-        is_array_object_decl(v->type, v->array_len, v->array_ndim)) {
-        return 1;
-    }
-    return 0;
+    t = var_decl_ctype(v);
+    return var_complete_record(tu, v) >= 0 || (t != NULL && t->kind == CC_CT_ARRAY);
 }
 
+/**
+ * The size of a local: its structure's, or its value's (an array's is a
+ * pointer's, the pointer to its storage being what the local holds).
+ */
 static long var_object_size_bytes(const cc_translation_unit_t *tu, const var_entry_t *v) {
     long sz;
+    int sid;
+
     if (v == NULL) {
         return -1;
     }
-    if (is_complete_struct_object_type(tu, v->type, v->struct_id)) {
-        sz = tu->structs[v->struct_id].size;
+    sid = var_complete_record(tu, v);
+    if (sid >= 0) {
+        sz = tu->structs[sid].size;
         if (sz <= 0) {
             sz = 1;
         }
         return sz;
     }
-    sz = type_size_bytes_with_struct(tu, v->type, v->struct_id);
+    sz = cc_ct_size(lower_var_ctype(v), tu);
     if (sz <= 0) {
         sz = cc_target_pointer_size();
     }
