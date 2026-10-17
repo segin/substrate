@@ -508,6 +508,7 @@ typedef struct {
     char *attr_section;
     char *attr_alias;
     cc_expr_t *init;
+    const struct cc_ctype *ctype; /**< its declared type (cc_ctype.h); NULL where the declaration recorded none */
 } cc_global_t;
 
 typedef struct {
@@ -528,6 +529,7 @@ typedef struct {
     int array_ndim;
     const long *array_dims;
     int storage;
+    const struct cc_ctype *ctype; /**< its declared type (cc_ctype.h); NULL where none was recorded */
 } cc_outer_var_t;
 
 int cc_nested_outer_vars(const cc_translation_unit_t *tu, const cc_function_t *f, cc_outer_var_t **out,

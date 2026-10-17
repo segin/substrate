@@ -84,6 +84,7 @@ static int outer_push_decls(const cc_stmt_t *stmts, size_t n, cc_outer_var_t **l
             v.array_ndim = s->array_ndim;
             v.array_dims = s->array_dims;
             v.storage = s->storage;
+            v.ctype = s->ctype;
             if (outer_push(list, count, cap, &v) != 0) {
                 return -1;
             }
@@ -152,6 +153,7 @@ int cc_nested_outer_vars(const cc_translation_unit_t *tu, const cc_function_t *f
         v.array_ndim = pa->array_ndim;
         v.array_dims = pa->array_dims;
         v.storage = pa->storage;
+        v.ctype = pa->ctype;
         if (outer_push(&list, &n, &cap, &v) != 0) {
             free(list);
             return -1;

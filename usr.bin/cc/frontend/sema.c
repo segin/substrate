@@ -26,6 +26,7 @@ typedef struct {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int depth;
+    const cc_ctype_t *ctype; /**< its declared type (cc_ctype.h); NULL where the declaration recorded none */
 } var_entry_t;
 
 typedef struct {
@@ -253,7 +254,8 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
 }
 
 static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, long array_len,
-                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int storage, int depth) {
+                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int storage, int depth,
+                     const cc_ctype_t *ctype) {
     var_entry_t *next;
     char *dup;
 
@@ -283,6 +285,7 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
         memset((*vars)[*count].array_dims, 0, sizeof((*vars)[*count].array_dims));
     }
     (*vars)[*count].depth = depth;
+    (*vars)[*count].ctype = ctype;
     (*count)++;
     return 0;
 }
@@ -850,6 +853,42 @@ static const cc_function_t *find_function(const cc_translation_unit_t *tu, const
         }
     }
     return best;
+}
+
+/**
+ * What a call through a callee of type @p t gives: the return type of the
+ * function @p t is, or points to.
+ *
+ * @return the type, or NULL if @p t is not known or is neither
+ */
+static const cc_ctype_t *sema_callee_ret_ctype(const cc_ctype_t *t) {
+    if (t != NULL && t->kind == CC_CT_POINTER) {
+        t = t->of;
+    }
+    return (t != NULL && t->kind == CC_CT_FUNCTION) ? t->of : NULL;
+}
+
+/**
+ * The type of function @p f (cc_ctype.h): its return type and its
+ * parameters' types, as declared.
+ *
+ * @return the type, or NULL where the declaration did not record its
+ *         return type or a parameter's
+ */
+static const cc_ctype_t *sema_function_ctype(const cc_function_t *f) {
+    const cc_ctype_t *params[64];
+    size_t i;
+
+    if (f == NULL || f->ret_ctype == NULL || f->param_count > sizeof(params) / sizeof(params[0])) {
+        return NULL;
+    }
+    for (i = 0; i < f->param_count; ++i) {
+        if (f->params[i].ctype == NULL) {
+            return NULL;
+        }
+        params[i] = f->params[i].ctype;
+    }
+    return cc_ct_function(f->ret_ctype, params, f->param_count, f->is_variadic, f->has_prototype);
 }
 
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
@@ -2130,6 +2169,10 @@ static int sema_wrap_cast(cc_expr_t **slot, cc_type_t t, int sid) {
     c->value_type = t;
     c->struct_id = sid;
     c->lhs = *slot;
+    if (!is_pointer_type(t)) {
+        /* an arithmetic or structure type, which the encoding states exactly */
+        c->ctype = cc_ct_from_legacy(t, sid, 0, NULL);
+    }
     *slot = c;
     return 0;
 }
@@ -2164,6 +2207,7 @@ static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, 
     m->member_offset = imag ? type_size_bytes(elem) : 0;
     m->value_type = elem;
     m->struct_id = -1;
+    m->ctype = cc_ct_from_scalar(elem);
     *slot = m;
     return 0;
 }
@@ -3696,8 +3740,56 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
     return 1;
 }
 
+static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag);
+
+/**
+ * Give checked expression @p e an interned type (cc_ctype.h) if it has
+ * none: the one rebuilt from its legacy encoding.  A type recorded from a
+ * declaration (an identifier, a member, a call, a written cast) is kept:
+ * it says more than the encoding can, a function's type for one.
+ */
+static void sema_settle_ctype(cc_expr_t *e) {
+    /*
+     * Where a declaration gives the type, none recorded for a pointer
+     * means not known: the encoding would guess, and it spells a function
+     * pointer as the pointer its function returns.  An arithmetic or
+     * structure type it states exactly.
+     */
+    if ((e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER || e->kind == CC_EXPR_CALL ||
+         e->kind == CC_EXPR_CAST) &&
+        (is_pointer_type(e->value_type) || e->value_type == CC_TYPE_FUNC)) {
+        return;
+    }
+    if (e->ctype == NULL) {
+        e->ctype = cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims);
+    }
+}
+
+/**
+ * Check expression @p e (see check_expr_kind()), and give it its
+ * interned type.
+ *
+ * @return 0, or -1 with @p diag set
+ */
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
+    int rc = check_expr_kind(tu, e, vars, var_count, depth, diag);
+
+    if (rc == 0 && e != NULL) {
+        sema_settle_ctype(e);
+    }
+    return rc;
+}
+
+/**
+ * Check expression @p e by its kind: its operands, the rules C sets for
+ * them, and its legacy type (value_type, struct_id, array dimensions).
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
     size_t i;
 
     if (e != NULL) {
@@ -3798,6 +3890,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = vars[idx].struct_id;
             unwrap_atomic_expr_type(&e->value_type, &e->struct_id);
             expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
+            if (vars[idx].ctype != NULL) {
+                e->ctype = vars[idx].ctype;
+            }
             return 0;
         }
         if (e->ident != NULL &&
@@ -3805,6 +3900,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
              strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
             e->value_type = CC_TYPE_PTR_CHAR;
             e->struct_id = -1;
+            e->ctype = cc_ct_pointer(cc_ct_basic(CC_CT_CHAR));
             return 0;
         }
         {
@@ -3814,14 +3910,22 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 e->struct_id = g->type_struct_id;
                 unwrap_atomic_expr_type(&e->value_type, &e->struct_id);
                 expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
+                if (g->ctype != NULL) {
+                    e->ctype = g->ctype;
+                }
                 if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
                     return -1;
                 }
                 return 0;
             }
             if (find_function(tu, e->ident) != NULL) {
+                const cc_ctype_t *ft = sema_function_ctype(find_function(tu, e->ident));
+
                 e->value_type = CC_TYPE_FUNC;
                 e->struct_id = -1;
+                if (ft != NULL) {
+                    e->ctype = ft;
+                }
                 if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
                     return -1;
                 }
@@ -4385,6 +4489,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = e->args[0]->value_type;
             e->struct_id = e->args[0]->struct_id;
+            e->ctype = cc_ct_of_expr(e->args[0]);
             return 0;
         }
         if (bk == BUILTIN_UNPREDICTABLE) {
@@ -4644,6 +4749,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = e->args[0]->value_type;
             e->struct_id = e->args[0]->struct_id;
+            e->ctype = cc_ct_of_expr(e->args[0]);
             return 0;
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
@@ -4981,6 +5087,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 e->value_type = ptr_base_type(vars[idx].type);
                 e->struct_id = vars[idx].struct_id;
+                e->ctype = sema_callee_ret_ctype(vars[idx].ctype);
                 return 0;
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
@@ -4991,6 +5098,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     }
                     e->value_type = ptr_base_type(g->type);
                     e->struct_id = g->type_struct_id;
+                    e->ctype = sema_callee_ret_ctype(g->ctype);
                     return 0;
                 }
             }
@@ -5003,6 +5111,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 e->value_type = CC_TYPE_INT;
                 e->struct_id = -1;
+                e->ctype = cc_ct_basic(CC_CT_INT);
                 return 0;
             }
             if (!cc_options_implicit_funcdecl()) {
@@ -5015,16 +5124,19 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             /* C89-style fallback for undeclared functions: assume extern int f(...). */
             e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
+            e->ctype = cc_ct_basic(CC_CT_INT);
         } else {
             const cc_function_t *gfn = generic_selected_function(tu, e->lhs);
             if (gfn != NULL) {
                 e->value_type = gfn->ret_type;
                 e->struct_id = gfn->ret_struct_id;
+                e->ctype = gfn->ret_ctype;
             } else {
                 const cc_function_t *ifn = infer_callee_function_expr(tu, e->lhs);
                 if (ifn != NULL) {
                     e->value_type = ifn->ret_type;
                     e->struct_id = ifn->ret_struct_id;
+                    e->ctype = ifn->ret_ctype;
                     return 0;
                 }
                 e->value_type = ptr_base_type(indirect_callee_type);
@@ -5033,6 +5145,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                     (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
                     e->struct_id = indirect_callee_struct_id;
                 }
+                e->ctype = sema_callee_ret_ctype(cc_ct_of_expr(e->lhs));
             }
         }
         return 0;
@@ -6384,7 +6497,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 }
             }
             if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                          s->array_dims, s->storage, depth) != 0) {
+                          s->array_dims, s->storage, depth, s->ctype) != 0) {
                 set_diag(diag, "out of memory adding local variable");
                 return -1;
             }
@@ -7566,7 +7679,7 @@ fail_decl:
             }
             for (k = 0; k < outer_count; ++k) {
                 if (vars_push(&vars, &var_count, outer[k].name, outer[k].type, outer[k].struct_id, outer[k].array_len,
-                              outer[k].array_ndim, outer[k].array_dims, outer[k].storage, -1) != 0) {
+                              outer[k].array_ndim, outer[k].array_dims, outer[k].storage, -1, outer[k].ctype) != 0) {
                     free(outer);
                     set_diag(diag, "out of memory adding the enclosing function's variables");
                     goto fail_func;
@@ -7592,7 +7705,7 @@ fail_decl:
             }
             if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id,
                           f->params[j].array_len, f->params[j].array_ndim, f->params[j].array_dims,
-                          f->params[j].storage, 0) != 0) {
+                          f->params[j].storage, 0, f->params[j].ctype) != 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }

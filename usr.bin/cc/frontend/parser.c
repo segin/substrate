@@ -1478,6 +1478,8 @@ static int parser_complex_struct(parser_t *p, cc_type_t elem) {
         struct_member_push(p, sid, "__im", elem, -1, -1, 0, NULL, es, es, 0, 0, 0, 0, 0, 0) < 0) {
         return -1;
     }
+    p->structs[sid].members[0].ctype = cc_ct_from_scalar(elem);
+    p->structs[sid].members[1].ctype = cc_ct_from_scalar(elem);
     p->structs[sid].size = 2 * es;
     p->structs[sid].align = cc_ct_align(ct, NULL);
     p->structs[sid].complete = 1;
@@ -1653,6 +1655,7 @@ static cc_expr_t *parser_decimal_literal(parser_t *p) {
     e->aux_struct_id = sid;
     e->value_type = CC_TYPE_VOID;
     e->struct_id = sid;
+    e->ctype = cc_ct_record(sid);
     e->lhs = outer;
     return e;
 }
@@ -6869,7 +6872,8 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
         memset(f->params[f->param_count].array_dims, 0, sizeof(f->params[f->param_count].array_dims));
     }
     f->params[f->param_count].storage = storage;
-    f->params[f->param_count].ctype = NULL;
+    /* an old-style name, int until a declaration says otherwise; any other type the caller records */
+    f->params[f->param_count].ctype = is_pointer_type(type) ? NULL : cc_ct_from_legacy(type, -1, 0, NULL);
     memset(f->params[f->param_count].vla_bounds, 0, sizeof(f->params[f->param_count].vla_bounds));
     f->param_count++;
     return 0;
@@ -7771,6 +7775,7 @@ static cc_expr_t *parser_bitint_literal(parser_t *p) {
         e->aux_struct_id = sid;
         e->value_type = CC_TYPE_VOID;
         e->struct_id = sid;
+        e->ctype = cc_ct_record(sid);
         e->lhs = outer;
         return e;
     }
@@ -8399,8 +8404,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1,
-                                    "expected type name in __builtin_va_arg") != 0) {
+                if (parse_type_name_ct(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in __builtin_va_arg",
+                                       &e->ctype, NULL) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -8913,6 +8918,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
     dst->is_subscript = src->is_subscript;
+    dst->ctype = src->ctype;
     dst->member_is_arrow = src->member_is_arrow;
     dst->member_offset = src->member_offset;
     dst->member_is_bitfield = src->member_is_bitfield;
@@ -9317,6 +9323,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 }
                 ce->aux_type = e->aux_type;
                 ce->aux_struct_id = e->aux_struct_id;
+                ce->ctype = sizeof_ctype;
                 ce->array_ndim = e->array_ndim;
                 memcpy(ce->array_dims, e->array_dims, sizeof(ce->array_dims));
                 ce->lhs = parse_initializer_expr(p);
@@ -11824,6 +11831,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         f->params[pidx].array_len = ds->array_len;
         f->params[pidx].array_ndim = ds->array_ndim;
         memcpy(f->params[pidx].array_dims, ds->array_dims, sizeof(f->params[pidx].array_dims));
+        /* its declared type, adjusted as a parameter's is: an array or a function to a pointer */
+        f->params[pidx].ctype = ds->ctype != NULL ? cc_ct_decay(ds->ctype) : NULL;
     }
     for (oldstyle_i = 0; oldstyle_i < oldstyle_decl_count; ++oldstyle_i) {
         free_stmt(&oldstyle_decls[oldstyle_i]);
@@ -12279,6 +12288,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 decls[di].attr_alias = NULL;
                 g.init = decls[di].expr;
                 decls[di].expr = NULL;
+                g.ctype = decls[di].ctype;
                 if (push_global(out, g) != 0) {
                     while (di < decl_count) {
                         free_stmt(&decls[di]);
