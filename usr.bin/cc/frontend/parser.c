@@ -29,14 +29,11 @@ typedef struct {
     const cc_ctype_t *ctype; /**< the type it names, where its declaration recorded one; else NULL */
 } typedef_entry_t;
 
+/** A variable in scope, as the parser tracks it. */
 typedef struct {
-    char *name;
-    cc_type_t type;
-    int struct_id;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
-    int depth;
-    const cc_ctype_t *ctype; /**< the variable's type, where its declaration recorded one; else NULL */
+    char *name;               /**< its name */
+    int depth;                /**< the scope depth it was declared at */
+    const cc_ctype_t *ctype;  /**< its type */
 } var_entry_t;
 
 typedef struct {
@@ -627,36 +624,19 @@ static int var_find_visible_n(const parser_t *p, const char *name, size_t len) {
  * Declare a variable in the current scope, or redeclare one already
  * declared in it.
  *
- * @param p           the parser
- * @param name        its name; an empty or NULL name declares nothing
- * @param type        its type in the legacy encoding
- * @param struct_id   its struct id
- * @param array_ndim  its array rank
- * @param array_dims  its bounds
- * @param ctype       its type, or NULL when its declaration has not
- *                    built one
- * @return            0, or -1 when out of memory
+ * @param p      the parser
+ * @param name   its name; an empty or NULL name declares nothing
+ * @param ctype  its type
+ * @return       0, or -1 when out of memory
  */
-static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id, int array_ndim,
-                    const long array_dims[CC_MAX_ARRAY_DIMS], const cc_ctype_t *ctype) {
+static int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     var_entry_t *next;
     char *dup;
     int i;
     size_t len;
-    long norm_dims[CC_MAX_ARRAY_DIMS];
 
     if (name == NULL || name[0] == '\0') {
         return 0;
-    }
-    if (array_ndim < 0) {
-        array_ndim = 0;
-    }
-    if (array_ndim > CC_MAX_ARRAY_DIMS) {
-        array_ndim = CC_MAX_ARRAY_DIMS;
-    }
-    memset(norm_dims, 0, sizeof(norm_dims));
-    if (array_dims != NULL && array_ndim > 0) {
-        memcpy(norm_dims, array_dims, (size_t)array_ndim * sizeof(norm_dims[0]));
     }
     len = strlen(name);
     for (i = (int)p->var_count - 1; i >= 0; --i) {
@@ -665,10 +645,6 @@ static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id
         }
         if (p->vars[i].depth == p->scope_depth && strlen(p->vars[i].name) == len &&
             strncmp(p->vars[i].name, name, len) == 0) {
-            p->vars[i].type = type;
-            p->vars[i].struct_id = struct_id;
-            p->vars[i].array_ndim = array_ndim;
-            memcpy(p->vars[i].array_dims, norm_dims, sizeof(p->vars[i].array_dims));
             p->vars[i].ctype = ctype;
             return 0;
         }
@@ -687,10 +663,6 @@ static int var_push(parser_t *p, const char *name, cc_type_t type, int struct_id
         return -1;
     }
     p->vars[p->var_count].name = dup;
-    p->vars[p->var_count].type = type;
-    p->vars[p->var_count].struct_id = struct_id;
-    p->vars[p->var_count].array_ndim = array_ndim;
-    memcpy(p->vars[p->var_count].array_dims, norm_dims, sizeof(p->vars[p->var_count].array_dims));
     p->vars[p->var_count].depth = p->scope_depth;
     p->vars[p->var_count].ctype = ctype;
     p->var_count++;
@@ -10195,11 +10167,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         } else {
             track_var = (s.decl_name != NULL && !is_fn_decl);
             if (track_var) {
-                cc_type_t vty = s.type;
-                if (s.array_ndim > 0 && !is_pointer_type(vty)) {
-                    vty = ptr_of_type(vty);
-                }
-                if (var_push(p, s.decl_name, vty, s.type_struct_id, s.array_ndim, s.array_dims, s.ctype) != 0) {
+                if (var_push(p, s.decl_name, s.ctype) != 0) {
                     free_stmt(&s);
                     return -1;
                 }
@@ -11430,9 +11398,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     {
         size_t i;
         for (i = 0; i < f->param_count; ++i) {
-            if (f->params[i].name != NULL &&
-                var_push(p, f->params[i].name, f->params[i].type, f->params[i].type_struct_id, f->params[i].array_ndim,
-                         f->params[i].array_dims, f->params[i].ctype) != 0) {
+            if (f->params[i].name != NULL && var_push(p, f->params[i].name, f->params[i].ctype) != 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking function parameters");
                 return -1;
             }
