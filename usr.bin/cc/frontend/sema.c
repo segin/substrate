@@ -1186,16 +1186,6 @@ static int is_scalar_type(cc_type_t t) {
 }
 
 
-static void unwrap_atomic_expr_type(cc_type_t *t, int *sid) {
-    if (t == NULL || sid == NULL) {
-        return;
-    }
-    if (*t == CC_TYPE_ATOMIC && *sid >= 0) {
-        *t = (cc_type_t)*sid;
-        *sid = -1;
-    }
-}
-
 static int is_array_object_type(cc_type_t t, long array_len, int array_ndim) {
     if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
         return 0;
@@ -1238,18 +1228,6 @@ static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndi
     for (i = 0; i < array_ndim; ++i) {
         e->array_dims[i + 1] = array_dims[i];
     }
-}
-
-static void expr_copy_array_meta(cc_expr_t *dst, const cc_expr_t *src) {
-    if (dst == NULL) {
-        return;
-    }
-    if (src == NULL) {
-        expr_clear_array_meta(dst);
-        return;
-    }
-    dst->array_ndim = src->array_ndim;
-    memcpy(dst->array_dims, src->array_dims, sizeof(dst->array_dims));
 }
 
 static cc_type_t ptr_of_type(cc_type_t t) {
@@ -4834,6 +4812,181 @@ static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_
 }
 
 /**
+ * Check an identifier (CC_EXPR_IDENT) and type it what it names: a
+ * variable in scope, a file-scope object, a function, or `__func__` and
+ * its GNU spellings.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_ident(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                            int depth, cc_diag_t *diag) {
+    int idx = vars_find_visible(vars, var_count, e->ident, depth);
+    const cc_global_t *g;
+    const cc_function_t *f;
+
+    if (idx >= 0) {
+        sema_set_type(e, vars[idx].ctype);
+        return 0;
+    }
+    if (e->ident != NULL && (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
+                             strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_CHAR)));
+        return 0;
+    }
+    g = find_global(tu, e->ident);
+    f = g != NULL ? NULL : find_function(tu, e->ident);
+    if (g == NULL && f == NULL) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "use of undeclared identifier: %s",
+                     e->ident != NULL ? e->ident : "<null>");
+        }
+        return -1;
+    }
+    sema_set_type(e, g != NULL ? g->ctype : sema_function_ctype(f));
+    return maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0 ? -1 : 0;
+}
+
+/**
+ * Check a member access `s.m` or `p->m` (CC_EXPR_MEMBER), its bit-field
+ * shape included, and type it the member's type.  GNU __real__/__imag__
+ * of a real value is checked as what it stands for.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_member(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    const cc_struct_member_t *m = NULL;
+    const cc_ctype_t *t;
+    long member_off = 0;
+    int sid;
+
+    if (e->member_is_part && e->lhs != NULL && e->ident != NULL) {
+        int rc = sema_real_part_of_real(tu, e, vars, var_count, depth, diag);
+
+        if (rc != 0) {
+            return rc < 0 ? -1 : 0;
+        }
+    }
+    if (e->lhs == NULL && e->rhs != NULL && e->ident != NULL) {
+        if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, e->rhs->ctype);
+        return 0;
+    }
+    if (e->lhs == NULL || e->ident == NULL) {
+        set_diag(diag, "malformed member expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    t = sx_vtype(e->lhs);
+    if (e->member_is_arrow) {
+        if (!sema_is_ptr(t)) {
+            set_diag(diag, "-> requires pointer operand");
+            return -1;
+        }
+        t = t->of;
+    }
+    sid = sx_ct_record(t);
+    if (sid < 0) {
+        set_diag(diag, e->member_is_arrow ? "-> requires pointer to struct or union"
+                                          : ". requires struct or union operand");
+        return -1;
+    }
+    if (find_struct_member_recursive(tu, sid, e->ident, 0, &m, &member_off) != 0 || m == NULL) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "no member named %s", e->ident);
+        }
+        return -1;
+    }
+    e->member_offset = member_off;
+    e->member_is_bitfield = m->is_bitfield;
+    e->member_bit_width = m->bit_width;
+    e->member_bit_offset = m->bit_offset;
+    e->member_bit_storage_bits = m->bit_storage_bits;
+    e->member_bit_signed = m->bit_signed;
+    e->member_bit_storage_size = m->bit_storage_size;
+    sema_set_type(e, m->ctype);
+    return 0;
+}
+
+/**
+ * Check a `_Generic` selection (C11 6.5.1.1): its controlling expression
+ * and associations; it is the association whose type matches, else the
+ * default.  Its type is the chosen association's.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                              int depth, cc_diag_t *diag) {
+    long default_idx = -1;
+    long first_match = -1;
+    size_t match_count = 0;
+    size_t i;
+
+    if (e->lhs == NULL || e->args == NULL || e->arg_count == 0 || e->generic_count != e->arg_count ||
+        e->generic_types == NULL || e->generic_struct_ids == NULL || e->generic_is_default == NULL) {
+        set_diag(diag, "malformed _Generic expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->generic_is_default[i]) {
+            default_idx = (long)i;
+        } else if (generic_assoc_matches(e->generic_types[i], e->generic_struct_ids[i], e->lhs->value_type,
+                                         e->lhs->struct_id)) {
+            if (first_match < 0) {
+                first_match = (long)i;
+            }
+            match_count++;
+        }
+    }
+    if (match_count == 0 || (match_count > 1 && sema_is_ptr(sx_vtype(e->lhs)) && default_idx >= 0)) {
+        e->generic_selected = default_idx;
+    } else {
+        e->generic_selected = first_match;
+    }
+    if (e->generic_selected < 0) {
+        e->generic_selected = 0;
+    }
+    sema_set_type(e, e->args[e->generic_selected]->ctype);
+    return 0;
+}
+
+/**
+ * Type a literal: an integer or floating constant has the type its
+ * spelling gives it (which a bit-precise one records), a string literal
+ * is an array of its characters and the null.
+ *
+ * @param e  the CC_EXPR_INT, CC_EXPR_FLOAT or CC_EXPR_STR
+ */
+static void sema_type_literal(cc_expr_t *e) {
+    if (e->kind == CC_EXPR_STR) {
+        int wide = cc_string_literal_is_wide(e);
+        long n = cc_string_literal_units(e);
+
+        const cc_ctype_t *elem = cc_ct_from_scalar(wide && e->aux_type != CC_TYPE_VOID ? e->aux_type : CC_TYPE_CHAR);
+
+        sema_set_type(e, n > 0 ? cc_ct_array(elem, n) : cc_ct_pointer(elem));
+        return;
+    }
+    if (e->kind == CC_EXPR_INT && !cc_type_is_integral(e->value_type) && e->value_type != CC_TYPE_BITINT) {
+        e->value_type = CC_TYPE_INT;
+    }
+    if (e->kind == CC_EXPR_FLOAT && !cc_type_is_floating(e->value_type)) {
+        e->value_type = CC_TYPE_DOUBLE;
+    }
+    sema_set_type(e, e->ctype != NULL ? e->ctype : cc_ct_from_scalar(e->value_type));
+}
+
+/**
  * Check expression @p e by its kind: its operands, the rules C sets for
  * them, and its legacy type (value_type, struct_id, array dimensions).
  *
@@ -4866,129 +5019,16 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
 
     switch (e->kind) {
     case CC_EXPR_INT:
-        if (!cc_type_is_integral(e->value_type) && e->value_type != CC_TYPE_BITINT) {
-            e->value_type = CC_TYPE_INT;
-        }
-        if (e->value_type != CC_TYPE_BITINT) {
-            /* a bit-precise constant (`5wb`) keeps its width there */
-            e->struct_id = -1;
-        }
-        return 0;
-
     case CC_EXPR_FLOAT:
-        if (!cc_type_is_floating(e->value_type)) {
-            e->value_type = CC_TYPE_DOUBLE;
-        }
-        e->struct_id = -1;
-        return 0;
-
     case CC_EXPR_STR:
-        e->value_type = cc_string_literal_pointer_type(cc_string_literal_is_wide(e) ? e->aux_type : CC_TYPE_CHAR);
-        e->struct_id = -1;
+        sema_type_literal(e);
         return 0;
 
-    case CC_EXPR_GENERIC: {
-        long selected = -1;
-        long default_idx = -1;
-        long first_match = -1;
-        size_t match_count = 0;
+    case CC_EXPR_GENERIC:
+        return sema_check_generic(tu, e, vars, var_count, depth, diag);
 
-        if (e->lhs == NULL || e->args == NULL || e->arg_count == 0 || e->generic_count != e->arg_count ||
-            e->generic_types == NULL || e->generic_struct_ids == NULL || e->generic_is_default == NULL) {
-            set_diag(diag, "malformed _Generic expression");
-            return -1;
-        }
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        for (i = 0; i < e->arg_count; ++i) {
-            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (e->generic_is_default[i]) {
-                default_idx = (long)i;
-                continue;
-            }
-            if (generic_assoc_matches(e->generic_types[i], e->generic_struct_ids[i], e->lhs->value_type,
-                                      e->lhs->struct_id)) {
-                if (first_match < 0) {
-                    first_match = (long)i;
-                }
-                match_count++;
-            }
-        }
-        if (match_count == 0) {
-            selected = default_idx;
-        } else if (match_count > 1 && is_pointer_type(e->lhs->value_type) && default_idx >= 0) {
-            selected = default_idx;
-        } else {
-            selected = first_match;
-        }
-        if (selected < 0) {
-            selected = 0;
-        }
-        e->generic_selected = selected;
-        e->value_type = e->args[selected]->value_type;
-        e->struct_id = e->args[selected]->struct_id;
-        expr_copy_array_meta(e, e->args[selected]);
-        return 0;
-    }
-
-    case CC_EXPR_IDENT: {
-        int idx = vars_find_visible(vars, var_count, e->ident, depth);
-        if (idx >= 0) {
-            e->value_type = vars[idx].type;
-            e->struct_id = vars[idx].struct_id;
-            unwrap_atomic_expr_type(&e->value_type, &e->struct_id);
-            expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
-            if (vars[idx].ctype != NULL) {
-                e->ctype = vars[idx].ctype;
-            }
-            return 0;
-        }
-        if (e->ident != NULL &&
-            (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
-             strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
-            e->value_type = CC_TYPE_PTR_CHAR;
-            e->struct_id = -1;
-            e->ctype = cc_ct_pointer(cc_ct_basic(CC_CT_CHAR));
-            return 0;
-        }
-        {
-            const cc_global_t *g = find_global(tu, e->ident);
-            if (g != NULL) {
-                e->value_type = g->type;
-                e->struct_id = g->type_struct_id;
-                unwrap_atomic_expr_type(&e->value_type, &e->struct_id);
-                expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
-                if (g->ctype != NULL) {
-                    e->ctype = g->ctype;
-                }
-                if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
-                    return -1;
-                }
-                return 0;
-            }
-            if (find_function(tu, e->ident) != NULL) {
-                const cc_ctype_t *ft = sema_function_ctype(find_function(tu, e->ident));
-
-                e->value_type = CC_TYPE_FUNC;
-                e->struct_id = -1;
-                if (ft != NULL) {
-                    e->ctype = ft;
-                }
-                if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
-                    return -1;
-                }
-                return 0;
-            }
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "use of undeclared identifier: %s",
-                         e->ident != NULL ? e->ident : "<null>");
-            }
-            return -1;
-        }
-    }
+    case CC_EXPR_IDENT:
+        return sema_check_ident(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_COMPLEX:
         if (e->lhs == NULL || e->rhs == NULL || check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
@@ -4997,90 +5037,8 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         }
         return sema_check_complex_parts(tu, e, diag);
 
-    case CC_EXPR_MEMBER: {
-        const cc_struct_member_t *m;
-        int sid = -1;
-        if (e->member_is_part && e->lhs != NULL && e->ident != NULL) {
-            int rc = sema_real_part_of_real(tu, e, vars, var_count, depth, diag);
-
-            if (rc != 0) {
-                return rc < 0 ? -1 : 0;
-            }
-        }
-        if (e->lhs == NULL && e->rhs != NULL && e->ident != NULL) {
-            if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            e->value_type = e->rhs->value_type;
-            e->struct_id = e->rhs->struct_id;
-            return 0;
-        }
-        if (e->lhs == NULL || e->ident == NULL) {
-            set_diag(diag, "malformed member expression");
-            return -1;
-        }
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (e->member_is_arrow) {
-            if (!is_pointer_type(e->lhs->value_type)) {
-                if (getenv("CC_DEBUG_SEMA_MEMBER") != NULL) {
-                    fprintf(stderr, "cc-debug: stmt-expr-count=%zu\n", e->lhs->stmt_expr_count);
-                    if (e->lhs->kind == CC_EXPR_STMT && e->lhs->stmt_expr_count > 0) {
-                        const cc_stmt_t *ls = &e->lhs->stmt_expr_stmts[e->lhs->stmt_expr_count - 1];
-                        fprintf(stderr, "cc-debug: stmt-expr tail kind=%d tail-expr-kind=%d tail-expr-type=%d\n",
-                                (int)ls->kind, (ls->expr != NULL) ? (int)ls->expr->kind : -1,
-                                (ls->expr != NULL) ? (int)ls->expr->value_type : -1);
-                    }
-                    fprintf(stderr,
-                            "cc-debug: bad arrow lhs kind=%d type=%d struct_id=%d ident=%s member=%s line=%zu col=%zu\n",
-                            (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
-                            e->lhs->ident != NULL ? e->lhs->ident : "<null>", e->ident != NULL ? e->ident : "<null>",
-                            e->line, e->col);
-                }
-                set_diag(diag, "-> requires pointer operand");
-                return -1;
-            }
-            sid = e->lhs->struct_id;
-            if (sid < 0) {
-                set_diag(diag, "-> requires pointer to struct or union");
-                return -1;
-            }
-        } else {
-            sid = e->lhs->struct_id;
-            if (sid < 0) {
-                set_diag(diag, ". requires struct or union operand");
-                return -1;
-            }
-        }
-        {
-            long member_off = 0;
-            if (find_struct_member_recursive(tu, sid, e->ident, 0, &m, &member_off) != 0 || m == NULL) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "no member named %s", e->ident);
-                }
-                return -1;
-            }
-            e->member_offset = member_off;
-        }
-        if (m == NULL) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "no member named %s", e->ident);
-            }
-            return -1;
-        }
-        e->value_type = m->type;
-        e->struct_id = m->type_struct_id;
-        e->member_is_bitfield = m->is_bitfield;
-        e->member_bit_width = m->bit_width;
-        e->member_bit_offset = m->bit_offset;
-        e->member_bit_storage_bits = m->bit_storage_bits;
-        e->member_bit_signed = m->bit_signed;
-        e->member_bit_storage_size = m->bit_storage_size;
-        e->ctype = m->ctype;
-        expr_set_array_meta_decl(e, m->array_len, m->array_ndim, m->array_dims);
-        return 0;
-    }
+    case CC_EXPR_MEMBER:
+        return sema_check_member(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_BIN:
         return sema_check_bin(tu, e, vars, var_count, depth, diag);
