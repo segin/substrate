@@ -557,6 +557,21 @@ static const cc_ctype_t *lower_decl_ctype(const cc_stmt_t *s) {
 }
 
 /**
+ * The type of a structure member as a value (see lower_var_ctype()).
+ *
+ * @param m  the member
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *lower_member_ctype(const cc_struct_member_t *m) {
+    const cc_ctype_t *t = m->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(m->type, m->type_struct_id, m->array_ndim, m->array_dims);
+    }
+    return cc_ct_decay(t);
+}
+
+/**
  * The type of a file-scope variable as a value (see lower_var_ctype()).
  *
  * @param g  the variable
@@ -10021,7 +10036,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (storesrc < 0) {
                     return -1;
                 }
-                storesrc = cast_value(sf, storesrc, type_to_val(m->type), diag);
+                storesrc = cast_value(sf, storesrc, ct_value_kind(lower_member_ctype(m)), diag);
                 if (storesrc < 0) {
                     return -1;
                 }
@@ -11900,7 +11915,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 }
                 continue;
             }
-            v = cast_value(sf, v, type_to_val(m->type), diag);
+            v = cast_value(sf, v, ct_value_kind(lower_member_ctype(m)), diag);
             if (v >= 0 && m->type == CC_TYPE_LDOUBLE && item_expr->value_type != CC_TYPE_LDOUBLE) {
                 /* a long double member from an int or double: widened, not stored as the double's bytes */
                 v = promote_f64_to_ldouble_value(sf, v, diag);
