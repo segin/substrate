@@ -509,6 +509,16 @@ static const cc_ctype_t *lower_var_ctype(const var_entry_t *v) {
  * @param p  the parameter
  * @return   the type, or NULL if not known
  */
+/**
+ * A function's return type.
+ *
+ * @param f  the function
+ * @return   the type
+ */
+static const cc_ctype_t *fn_ret_ctype(const cc_function_t *f) {
+    return f->ret_ctype;
+}
+
 static const cc_ctype_t *lower_param_ctype(const cc_param_t *p) {
     return cc_ct_decay(p->ctype);
 }
@@ -1483,18 +1493,19 @@ static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, 
 static int eval_const_int_expr_simple(const cc_expr_t *e, long long *out);
 static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
-static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
-static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
+static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *t, cc_diag_t *diag);
+static int round_to_float(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
+static const cc_ctype_t *fn_ret_ctype(const cc_function_t *f);
 static int normalize_float_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
 static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
-static cc_type_t fp_builtin_storage_type(const cc_expr_t *e);
+static const cc_ctype_t *fp_builtin_storage_type(const cc_expr_t *e);
 static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                                 var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg,
-                                cc_type_t *out_storage_type, cc_diag_t *diag);
-static int emit_fp_negate_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag);
-static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag);
-static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag);
+                                const cc_ctype_t **out_storage_type, cc_diag_t *diag);
+static int emit_fp_negate_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag);
+static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag);
+static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag);
 static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                       var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag);
 static int lower_collect_labels_expr(cc_ssa_function_t *sf, const cc_expr_t *e, lower_ctx_t *ctx, cc_diag_t *diag);
@@ -3243,42 +3254,61 @@ static int demote_ldouble_to_f64_value(cc_ssa_function_t *sf, int v, cc_diag_t *
     return in.dst;
 }
 
-static int integral_type_bits(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_BOOL:
-    case CC_TYPE_CHAR:
-    case CC_TYPE_SCHAR:
-    case CC_TYPE_UCHAR:
+/**
+ * The width in bits of a standard integer type, as a value of it is
+ * narrowed to; 0 for any other type (a bit-precise or enumerated one
+ * included, whose values are left as they are).
+ *
+ * @param t  the type
+ * @return   the width, or 0
+ */
+static int integral_type_bits(const cc_ctype_t *t) {
+    switch (t != NULL ? t->kind : CC_CT_VOID) {
+    case CC_CT_BOOL:
+    case CC_CT_CHAR:
+    case CC_CT_SCHAR:
+    case CC_CT_UCHAR:
         return 8;
-    case CC_TYPE_SHORT:
-    case CC_TYPE_USHORT:
+    case CC_CT_SHORT:
+    case CC_CT_USHORT:
         return 16;
-    case CC_TYPE_INT:
-    case CC_TYPE_UINT:
+    case CC_CT_INT:
+    case CC_CT_UINT:
         return 32;
-    case CC_TYPE_LONG:
-    case CC_TYPE_ULONG:
+    case CC_CT_LONG:
+    case CC_CT_ULONG:
         return (int)(cc_target_pointer_size() * 8);
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
+    case CC_CT_LLONG:
+    case CC_CT_ULLONG:
         return 64;
     default:
         return 0;
     }
 }
 
-static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag) {
+/**
+ * Convert an integer value to standard integer type @p t: compare a
+ * `_Bool` with zero, otherwise keep the type's low bits, sign- or
+ * zero-extended (see normalize_int_ct() for the bit-precise types).
+ *
+ * @param sf    the function
+ * @param v     the value
+ * @param t     the type converted to; any type but an integer leaves @p v
+ * @param diag  receives an error
+ * @return      the converted value, or -1
+ */
+static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *t, cc_diag_t *diag) {
     int bits;
     int sh;
     int c;
     cc_ssa_instr_t in;
     int want_unsigned;
 
-    if (!cc_type_is_integral(t)) {
+    if (!cc_ct_is_integer(t)) {
         return v;
     }
 
-    if (t == CC_TYPE_BOOL) {
+    if (t->kind == CC_CT_BOOL) {
         int z;
         size_t k;
 
@@ -3318,7 +3348,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     }
 
     bits = integral_type_bits(t);
-    want_unsigned = cc_type_is_unsigned_integral(t) ? 1 : 0;
+    want_unsigned = cc_ct_is_unsigned(t);
     if (bits <= 0) {
         return v;
     }
@@ -3484,25 +3514,11 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
 }
 
 /**
- * Convert an integer value to integer type @p ct: as
- * normalize_integral_value() does for legacy type @p t, and for a
- * bit-precise type, which the legacy encoding cannot say the sign of,
- * keep the low N bits, sign-extended for `_BitInt(N)` and zero-extended
- * for `unsigned _BitInt(N)`, in a value of the size it already has.
- *
- * @param sf    the function
- * @param v     the value
- * @param ct    the type converted to, or NULL if not known
- * @param t     its legacy encoding
- * @param diag  receives an error
- * @return      the converted value, or -1
- */
-static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_type_t t, cc_diag_t *diag);
-
-/**
- * Convert an integer value to integer type @p ct (normalize_integral_ct()),
- * the legacy kind taken from the type itself; a value of any other type
- * is left as it is.
+ * Convert an integer value to integer type @p ct: a standard integer type
+ * as normalize_integral_value() does, and a bit-precise type by keeping
+ * the low N bits, sign-extended for `_BitInt(N)` and zero-extended for
+ * `unsigned _BitInt(N)`, in a value of the size it already has.  A value
+ * of any other type is left as it is.
  *
  * @param sf    the function
  * @param v     the value
@@ -3511,13 +3527,6 @@ static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t 
  * @return      the converted value, or -1
  */
 static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag) {
-    if (!cc_ct_is_integer(ct)) {
-        return v;
-    }
-    return normalize_integral_ct(sf, v, ct, cc_ct_legacy_kind(ct->kind), diag);
-}
-
-static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_type_t t, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     long size;
     int vbits;
@@ -3525,7 +3534,7 @@ static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t 
     int uns;
 
     if (ct == NULL || (ct->kind != CC_CT_BITINT && ct->kind != CC_CT_UBITINT)) {
-        return normalize_integral_value(sf, v, t, diag);
+        return normalize_integral_value(sf, v, ct, diag);
     }
     n = (int)ct->count;
     uns = ct->kind == CC_CT_UBITINT;
@@ -3600,14 +3609,21 @@ static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t 
  * @return      the converted value, or -1
  */
 static int normalize_float_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag) {
-    return (ct != NULL && ct->kind == CC_CT_FLOAT) ? normalize_float_value(sf, v, CC_TYPE_FLOAT, diag) : v;
+    return (ct != NULL && ct->kind == CC_CT_FLOAT) ? round_to_float(sf, v, diag) : v;
 }
 
-static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag) {
+/**
+ * Round a floating value to single precision (a `float` is held as a
+ * double).
+ *
+ * @param sf    the function
+ * @param v     the value
+ * @param diag  receives an error
+ * @return      the rounded value, or -1
+ */
+static int round_to_float(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     cc_ssa_instr_t in;
-    if (t != CC_TYPE_FLOAT) {
-        return v;
-    }
+
     v = demote_ldouble_to_f64_value(sf, v, diag);
     if (v < 0) {
         return -1;
@@ -4474,7 +4490,7 @@ static int complex_fp_convert(cc_ssa_function_t *sf, int v, cc_type_t from, cc_t
         return promote_f64_to_ldouble_value(sf, v, diag);
     }
     v = demote_ldouble_to_f64_value(sf, v, diag);
-    return to == CC_TYPE_FLOAT ? normalize_float_value(sf, v, CC_TYPE_FLOAT, diag) : v;
+    return to == CC_TYPE_FLOAT ? round_to_float(sf, v, diag) : v;
 }
 
 /** @p addr + @p off, as a pointer (pointer-sized, as a member address is). */
@@ -4580,7 +4596,7 @@ static int complex_fop(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int a, int b, 
         set_value_size(sf, in.dst, 16);
         return in.dst;
     }
-    return elem == CC_TYPE_FLOAT ? normalize_float_value(sf, in.dst, CC_TYPE_FLOAT, diag) : in.dst;
+    return elem == CC_TYPE_FLOAT ? round_to_float(sf, in.dst, diag) : in.dst;
 }
 
 /** -@p a, exactly (a zero's sign flips). */
@@ -5107,7 +5123,7 @@ static int wide_zero(cc_ssa_function_t *sf, const wide_t *w, cc_diag_t *diag) {
  */
 static int wide_shift(cc_ssa_function_t *sf, int is_left, int a, int count, const wide_t *w, cc_diag_t *diag) {
     long W = w->limb * 8;
-    cc_type_t word = w->limb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
+    const cc_ctype_t *word = cc_ct_basic(w->limb == 8 ? CC_CT_ULLONG : CC_CT_UINT);
     wide_t s3 = *w;
     int scratch;
     int fill;
@@ -5531,7 +5547,7 @@ static int lower_vector_binop(const cc_translation_unit_t *tu, cc_ssa_function_t
             if (val >= 0) {
                 set_value_size(sf, val, 4);
                 if (v.es == 8) {
-                    val = normalize_integral_value(sf, val, CC_TYPE_LONG_LONG, diag);
+                    val = normalize_integral_value(sf, val, cc_ct_basic(CC_CT_LLONG), diag);
                 }
             }
         } else if (v.is_fp) {
@@ -5859,9 +5875,11 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
             int uns = lower_is_unsigned(e->lhs);
 
             src = cast_value(sf, src, CC_VAL_I64, diag);
-            src = src < 0 ? -1 : normalize_integral_value(sf, src, wide ? (uns ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG)
-                                                                        : (uns ? CC_TYPE_UINT : CC_TYPE_INT),
-                                                       diag);
+            src = src < 0 ? -1
+                          : normalize_integral_value(sf, src,
+                                                     cc_ct_basic(wide ? (uns ? CC_CT_ULLONG : CC_CT_LLONG)
+                                                                      : (uns ? CC_CT_UINT : CC_CT_INT)),
+                                                     diag);
             if (src < 0) {
                 return -1;
             }
@@ -5884,7 +5902,7 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
         snprintf(name, sizeof(name), "__bid_%s%s%s", bw <= from ? "trunc" : "extend", dec_mode(from), bm);
         r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, rk, -1, diag);
         if (r >= 0 && dk == CC_CT_FLOAT) {
-            r = normalize_float_value(sf, r, CC_TYPE_FLOAT, diag);
+            r = round_to_float(sf, r, diag);
         }
         return r;
     }
@@ -6568,7 +6586,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             e->lhs->int_val == -1 &&
             (lower_has_kind(e->rhs, CC_CT_FLOAT) || lower_has_kind(e->rhs, CC_CT_DOUBLE) ||
              lower_has_kind(e->rhs, CC_CT_LDOUBLE))) {
-            cc_type_t store_t = fp_builtin_storage_type(e->rhs);
+            const cc_ctype_t *store_t = fp_builtin_storage_type(e->rhs);
             rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
             if (rhs < 0) {
                 return -1;
@@ -6579,7 +6597,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
             }
-            if (store_t == CC_TYPE_LDOUBLE) {
+            if (store_t->kind == CC_CT_LDOUBLE) {
                 rhs = promote_f64_to_ldouble_value(sf, rhs, diag);
                 if (rhs < 0) {
                     return -1;
@@ -7613,7 +7631,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
             bk == BUILTIN_SIGNBIT) {
             int arg_v;
-            cc_type_t store_t;
+            const cc_ctype_t *store_t;
 
             if (e->arg_count != 1 || e->args[0] == NULL) {
                 set_diag(diag, "floating classification builtin lowering expects 1 argument");
@@ -7794,13 +7812,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * and a sum of two would wrap before it is compared).
              */
             av = normalize_integral_value(sf, av,
-                                          lower_is_unsigned(e->args[0]) ? CC_TYPE_ULONG_LONG
-                                                                                               : CC_TYPE_LONG_LONG,
-                                          diag);
+                                          cc_ct_basic(lower_is_unsigned(e->args[0]) ? CC_CT_ULLONG : CC_CT_LLONG), diag);
             bv = normalize_integral_value(sf, bv,
-                                          lower_is_unsigned(e->args[1]) ? CC_TYPE_ULONG_LONG
-                                                                                               : CC_TYPE_LONG_LONG,
-                                          diag);
+                                          cc_ct_basic(lower_is_unsigned(e->args[1]) ? CC_CT_ULLONG : CC_CT_LLONG), diag);
             if (av < 0 || bv < 0) {
                 return -1;
             }
@@ -7845,7 +7859,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (rv < 0) {
                     return -1;
                 }
-                out_bits = integral_type_bits(cc_ct_legacy_kind(out_ct->kind));
+                out_bits = integral_type_bits(out_ct);
             }
             if (has_store) {
                 memset(&in, 0, sizeof(in));
@@ -7862,8 +7876,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             first_instr = sf->instr_count;
             if (out_bits > 0 && out_bits < 64) {
                 /* overflowed if the result, widened back from its type, is not the exact one */
-                int rv_wide = normalize_integral_value(
-                    sf, rv, out_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG, diag);
+                int rv_wide =
+                    normalize_integral_value(sf, rv, cc_ct_basic(out_unsigned ? CC_CT_ULLONG : CC_CT_LLONG), diag);
                 if (rv_wide < 0) {
                     return -1;
                 }
@@ -7909,7 +7923,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                         return -1;
                     }
-                    cmp_z = normalize_integral_value(sf, bin.dst, CC_TYPE_ULONG_LONG, diag);
+                    cmp_z = normalize_integral_value(sf, bin.dst, cc_ct_basic(CC_CT_ULLONG), diag);
                     if (cmp_z < 0) {
                         return -1;
                     }
@@ -8023,7 +8037,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                     return -1;
                 }
-                cmp_z = normalize_integral_value(sf, bin.dst, CC_TYPE_ULONG_LONG, diag);
+                cmp_z = normalize_integral_value(sf, bin.dst, cc_ct_basic(CC_CT_ULLONG), diag);
                 if (cmp_z < 0) {
                     return -1;
                 }
@@ -9103,7 +9117,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     } else if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_DOUBLE)) {
                         av = demote_ldouble_to_f64_value(sf, av, diag);
                     } else if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT)) {
-                        av = normalize_float_value(sf, av, CC_TYPE_FLOAT, diag);
+                        av = round_to_float(sf, av, diag);
                     }
                     if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_LDOUBLE) || ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_DOUBLE) ||
                         ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT)) {
@@ -10559,23 +10573,34 @@ static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
  * double operands, held as doubles).
  *
  * @param e  the operand
- * @return   CC_TYPE_FLOAT, CC_TYPE_LDOUBLE or CC_TYPE_DOUBLE
+ * @return   float, long double or double
  */
-static cc_type_t fp_builtin_storage_type(const cc_expr_t *e) {
+static const cc_ctype_t *fp_builtin_storage_type(const cc_expr_t *e) {
     if (lower_has_kind(e, CC_CT_FLOAT)) {
-        return CC_TYPE_FLOAT;
+        return cc_ct_basic(CC_CT_FLOAT);
     }
     if (lower_has_kind(e, CC_CT_LDOUBLE)) {
-        return CC_TYPE_LDOUBLE;
+        return cc_ct_basic(CC_CT_LDOUBLE);
     }
-    return CC_TYPE_DOUBLE;
+    return cc_ct_basic(CC_CT_DOUBLE);
+}
+
+/**
+ * The bytes a floating value of type @p t is stored in to inspect its
+ * bits.
+ *
+ * @param t  float, double or long double
+ * @return   4, 8 or 16
+ */
+static long fp_store_size(const cc_ctype_t *t) {
+    return t->kind == CC_CT_FLOAT ? 4 : (t->kind == CC_CT_LDOUBLE ? 16 : 8);
 }
 
 static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                                 var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg,
-                                cc_type_t *out_storage_type, cc_diag_t *diag) {
+                                const cc_ctype_t **out_storage_type, cc_diag_t *diag) {
     int v;
-    cc_type_t store_t;
+    const cc_ctype_t *store_t;
 
     if (arg == NULL) {
         set_diag(diag, "floating builtin missing operand");
@@ -10592,13 +10617,13 @@ static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function
             return -1;
         }
     }
-    if (store_t == CC_TYPE_LDOUBLE) {
+    if (store_t->kind == CC_CT_LDOUBLE) {
         v = promote_f64_to_ldouble_value(sf, v, diag);
         if (v < 0) {
             return -1;
         }
     }
-    v = normalize_float_value(sf, v, store_t, diag);
+    v = normalize_float_ct(sf, v, store_t, diag);
     if (v < 0) {
         return -1;
     }
@@ -10608,7 +10633,7 @@ static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function
     return v;
 }
 
-static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag) {
+static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     long store_size;
     int tmp_ptr;
@@ -10617,7 +10642,7 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t st
     int masked;
     int zero;
 
-    store_size = store_t == CC_TYPE_FLOAT ? 4 : (store_t == CC_TYPE_LDOUBLE ? 16 : 8);
+    store_size = fp_store_size(store_t);
     tmp_ptr = emit_local_storage_alloc(sf, store_size, diag);
     if (tmp_ptr < 0) {
         return -1;
@@ -10672,9 +10697,9 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t st
     return emit_cmp_instr(sf, CC_CMP_NE, masked, zero, 1, diag);
 }
 
-static int emit_fp_negate_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag) {
+static int emit_fp_negate_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag) {
     cc_ssa_instr_t in;
-    long store_size = store_t == CC_TYPE_FLOAT ? 4 : (store_t == CC_TYPE_LDOUBLE ? 16 : 8);
+    long store_size = fp_store_size(store_t);
     int tmp_ptr;
     int bit_ptr;
     int bits;
@@ -10750,10 +10775,10 @@ static int emit_fp_negate_from_value(cc_ssa_function_t *sf, int v, cc_type_t sto
     if (store_size == 16) {
         set_value_size(sf, in.dst, 16);
     }
-    return normalize_float_value(sf, in.dst, store_t, diag);
+    return normalize_float_ct(sf, in.dst, store_t, diag);
 }
 
-static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag) {
+static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag) {
     int pos_inf;
     int neg_inf;
     int pos_cmp;
@@ -10764,8 +10789,8 @@ static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, cc_type_t
     if (pos_inf < 0 || neg_inf < 0) {
         return -1;
     }
-    pos_inf = normalize_float_value(sf, pos_inf, store_t, diag);
-    neg_inf = normalize_float_value(sf, neg_inf, store_t, diag);
+    pos_inf = normalize_float_ct(sf, pos_inf, store_t, diag);
+    neg_inf = normalize_float_ct(sf, neg_inf, store_t, diag);
     if (pos_inf < 0 || neg_inf < 0) {
         return -1;
     }
@@ -13794,22 +13819,24 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (rv < 0) {
                     return -1;
                 }
-                if (ctx != NULL && ctx->fn != NULL && cc_type_is_integral(ctx->fn->ret_type)) {
+                if (ctx != NULL && ctx->fn != NULL) {
                     /* `return 7;` from a long long function: the int is widened (on i386, its high word set) */
-                    rv = normalize_integral_ct(sf, rv, ctx->fn->ret_ctype, ctx->fn->ret_type, diag);
+                    rv = normalize_int_ct(sf, rv, fn_ret_ctype(ctx->fn), diag);
                     if (rv < 0) {
                         return -1;
                     }
                 }
                 if (ctx != NULL && ctx->fn != NULL) {
-                    ret_size_hint = type_size_bytes_with_struct(tu, ctx->fn->ret_type, ctx->fn->ret_struct_id);
+                    ret_size_hint = cc_ct_size(fn_ret_ctype(ctx->fn), tu);
                     if (ret_size_hint <= 0) {
                         ret_size_hint = cc_target_pointer_size();
                     }
                     /* a long double returned from a double or float function is rounded to it */
-                    if (ctx->fn->ret_type == CC_TYPE_DOUBLE || ctx->fn->ret_type == CC_TYPE_FLOAT) {
-                        rv = ctx->fn->ret_type == CC_TYPE_FLOAT ? normalize_float_value(sf, rv, CC_TYPE_FLOAT, diag)
-                                                                : demote_ldouble_to_f64_value(sf, rv, diag);
+                    if (ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_DOUBLE) ||
+                        ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_FLOAT)) {
+                        rv = ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_FLOAT)
+                                 ? normalize_float_ct(sf, rv, fn_ret_ctype(ctx->fn), diag)
+                                 : demote_ldouble_to_f64_value(sf, rv, diag);
                         if (rv < 0) {
                             return -1;
                         }
