@@ -36,6 +36,9 @@ typedef enum {
 
 struct cc_translation_unit;
 struct cc_abi_regs;
+struct cc_abi_va_type;
+struct cc_ssa_function;
+struct cc_diag;
 
 /** What one store of a trampoline writes. */
 typedef enum {
@@ -83,10 +86,15 @@ typedef struct {
     int va_list_record_size;                      /**< bytes of the record a va_list points at, which va_copy
                                                        duplicates; 0 when a va_list is a plain argument pointer */
     const cc_target_tramp_store_t *trampoline;    /**< the stores that build a trampoline, CC_TRAMP_END-ended */
+    int ret_by_address_classes;                   /**< the agg_class bits (cc_ssa.h CC_ABI_RET_*) of a returned
+                                                       aggregate the emitter reads from the structure itself */
     /** how an aggregate argument travels (cc_abi.h: cc_abi_aggregate_arg()) */
     int (*abi_aggregate_arg)(const struct cc_translation_unit *tu, int sid, long size, struct cc_abi_regs *regs);
     /** how an aggregate is returned (cc_abi.h: cc_abi_aggregate_return()) */
     int (*abi_aggregate_return)(const struct cc_translation_unit *tu, int sid, long size);
+    /** the IR of va_arg (cc_abi.h: cc_abi_va_arg()) */
+    int (*abi_va_arg)(struct cc_ssa_function *sf, int ap, const struct cc_abi_va_type *t, int *next_ap,
+                      struct cc_diag *diag);
 } cc_target_desc_t;
 
 /**

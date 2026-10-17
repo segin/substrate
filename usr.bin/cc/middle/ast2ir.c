@@ -2680,13 +2680,6 @@ static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_
     }
 }
 
-static long align_up_long(long n, long a) {
-    if (a <= 1) {
-        return n;
-    }
-    return ((n + a - 1) / a) * a;
-}
-
 static int function_param_index_by_name(const lower_ctx_t *ctx, const char *name) {
     size_t i;
     if (ctx == NULL || ctx->fn == NULL || name == NULL) {
@@ -6538,10 +6531,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int ap_idx;
             int cur_ap;
             int load_v;
-            int step_v;
             int next_ap;
             long mem_size;
-            long step;
+            cc_abi_va_type_t va_type;
             if (e->arg_count != 1 || e->args[0] == NULL || e->args[0]->kind != CC_EXPR_IDENT) {
                 set_diag(diag, "__builtin_va_arg lowering expects va_list identifier");
                 return -1;
@@ -6557,354 +6549,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "unsupported __builtin_va_arg type size");
                 return -1;
             }
-
-            if (cc_target_pointer_size() == 8) {
-                int ap_ptr;
-                int gp_off_ptr;
-                int fp_off_ptr;
-                int overflow_ptr_ptr;
-                int regsave_ptr_ptr;
-                int gp_off;
-                int fp_off;
-                int overflow_ptr;
-                int regsave_ptr;
-                int use_fp = lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_FLOAT);
-                int use_ldouble = lower_has_kind(e, CC_CT_LDOUBLE);
-                int off_ptr;
-                int offv;
-                int off_limit;
-                int cmpv;
-                int dstv;
-                int addrv;
-                int reg_incv;
-                int stack_incv;
-                int next_off;
-                int next_overflow;
-                int reg_loaded;
-                int stack_loaded;
-                int l_reg;
-                int l_stack;
-                int l_end;
-                int ap_idx_const;
-                int field_off_const;
-                long load_size = mem_size;
-                long stack_step;
-                int is_agg = lower_record_id(e) >= 0;
-                cc_value_type_t dst_ty = is_agg ? CC_VAL_I64 : lower_value_kind(e);
-
-                ap_ptr = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
-                if (ap_ptr < 0) {
-                    return -1;
-                }
-                ap_ptr = cast_value(sf, ap_ptr, CC_VAL_I64, diag);
-                if (ap_ptr < 0) {
-                    return -1;
-                }
-
-                ap_idx_const = cc_ir_const(sf, 8);
-                if (ap_idx_const < 0) {
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_ADD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = ap_ptr;
-                in.rhs = ap_idx_const;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory computing va_list overflow_arg_area field pointer");
-                    return -1;
-                }
-                overflow_ptr_ptr = in.dst;
-
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_LOAD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = overflow_ptr_ptr;
-                in.imm = 8;
-                in.is_unsigned = 1;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory loading va_list overflow_arg_area");
-                    return -1;
-                }
-                overflow_ptr = in.dst;
-
-                if (use_ldouble) {
-                    int align_add;
-                    int align_mask;
-                    int aligned_tmp;
-                    int aligned_ptr;
-                    int next_overflow_ld;
-                    int dst_ld;
-
-                    align_add = cc_ir_const(sf, 15);
-                    align_mask = cc_ir_const(sf, -16);
-                    if (align_add < 0 || align_mask < 0) {
-                        return -1;
-                    }
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_ADD;
-                    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                    in.lhs = overflow_ptr;
-                    in.rhs = align_add;
-                    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory aligning va_arg long double pointer");
-                        return -1;
-                    }
-                    aligned_tmp = in.dst;
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_AND;
-                    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                    in.lhs = aligned_tmp;
-                    in.rhs = align_mask;
-                    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory masking va_arg long double pointer alignment");
-                        return -1;
-                    }
-                    aligned_ptr = in.dst;
-
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_LOAD;
-                    in.dst = cc_ir_new_value(sf, lower_value_kind(e));
-                    in.lhs = aligned_ptr;
-                    in.imm = mem_size;
-                    in.is_unsigned = 0;
-                    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory loading va_arg long double value");
-                        return -1;
-                    }
-                    dst_ld = in.dst;
-
-                    stack_incv = cc_ir_const(sf, align_up_long(mem_size, 8));
-                    if (stack_incv < 0) {
-                        return -1;
-                    }
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_ADD;
-                    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                    in.lhs = aligned_ptr;
-                    in.rhs = stack_incv;
-                    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory incrementing va_arg long double overflow pointer");
-                        return -1;
-                    }
-                    next_overflow_ld = in.dst;
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_STORE;
-                    in.lhs = overflow_ptr_ptr;
-                    in.rhs = next_overflow_ld;
-                    in.imm = 8;
-                    if (cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory storing va_arg long double overflow pointer update");
-                        return -1;
-                    }
-                    return dst_ld;
-                }
-
-                regsave_ptr_ptr = cc_ir_const(sf, 16);
-                if (regsave_ptr_ptr < 0) {
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_ADD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = ap_ptr;
-                in.rhs = regsave_ptr_ptr;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory computing va_list reg_save_area field pointer");
-                    return -1;
-                }
-                regsave_ptr_ptr = in.dst;
-
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_LOAD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = regsave_ptr_ptr;
-                in.imm = 8;
-                in.is_unsigned = 1;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory loading va_list reg_save_area");
-                    return -1;
-                }
-                regsave_ptr = in.dst;
-
-                field_off_const = cc_ir_const(sf, use_fp ? 4 : 0);
-                if (field_off_const < 0) {
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_ADD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = ap_ptr;
-                in.rhs = field_off_const;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory computing va_list offset field pointer");
-                    return -1;
-                }
-                if (use_fp) {
-                    fp_off_ptr = in.dst;
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_LOAD;
-                    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                    in.lhs = fp_off_ptr;
-                    in.imm = 4;
-                    in.is_unsigned = 1;
-                    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory loading va_list fp_offset");
-                        return -1;
-                    }
-                    fp_off = in.dst;
-                    off_ptr = fp_off_ptr;
-                    offv = fp_off;
-                    off_limit = cc_ir_const(sf, 160);
-                    reg_incv = cc_ir_const(sf, 16);
-                } else {
-                    gp_off_ptr = in.dst;
-                    memset(&in, 0, sizeof(in));
-                    in.op = CC_SSA_LOAD;
-                    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                    in.lhs = gp_off_ptr;
-                    in.imm = 4;
-                    in.is_unsigned = 1;
-                    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                        set_diag(diag, "out of memory loading va_list gp_offset");
-                        return -1;
-                    }
-                    gp_off = in.dst;
-                    off_ptr = gp_off_ptr;
-                    offv = gp_off;
-                    off_limit = cc_ir_const(sf, 40);
-                    reg_incv = cc_ir_const(sf, 8);
-                }
-                if (off_limit < 0 || reg_incv < 0) {
-                    return -1;
-                }
-
-                stack_step = use_fp ? 8 : align_up_long(mem_size, 8);
-                stack_incv = cc_ir_const(sf, stack_step);
-                if (stack_incv < 0) {
-                    return -1;
-                }
-
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_CMP;
-                in.cmp_kind = CC_CMP_LE;
-                in.is_unsigned = 1;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = offv;
-                in.rhs = off_limit;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory appending va_arg register-availability compare");
-                    return -1;
-                }
-                cmpv = in.dst;
-
-                dstv = cc_ir_new_value(sf, dst_ty);
-                addrv = cc_ir_new_value(sf, CC_VAL_I64);
-                if (dstv < 0 || addrv < 0) {
-                    set_diag(diag, "out of memory creating va_arg temporaries");
-                    return -1;
-                }
-                l_reg = cc_ir_new_label(sf);
-                l_stack = cc_ir_new_label(sf);
-                l_end = cc_ir_new_label(sf);
-                if (cc_ir_br_cond(sf, cmpv, l_reg, l_stack) != 0) {
-                    return -1;
-                }
-
-                if (cc_ir_label(sf, l_reg) != 0) {
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_ADD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = regsave_ptr;
-                in.rhs = offv;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory computing va_arg register-slot address");
-                    return -1;
-                }
-                if (cc_ir_mov(sf, addrv, in.dst) != 0) {
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_ADD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = offv;
-                in.rhs = reg_incv;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory incrementing va_arg register offset");
-                    return -1;
-                }
-                next_off = in.dst;
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_STORE;
-                in.lhs = off_ptr;
-                in.rhs = next_off;
-                in.imm = 4;
-                if (cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory storing va_arg offset update");
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_LOAD;
-                in.dst = cc_ir_new_value(sf, dst_ty);
-                in.lhs = addrv;
-                in.imm = is_agg ? cc_target_pointer_size() : load_size;
-                in.is_unsigned = is_agg ? 1 : (lower_loads_unsigned(e) ? 1 : 0);
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory loading va_arg register value");
-                    return -1;
-                }
-                reg_loaded = in.dst;
-                if (cc_ir_mov(sf, dstv, reg_loaded) != 0 || cc_ir_br(sf, l_end) != 0) {
-                    return -1;
-                }
-
-                if (cc_ir_label(sf, l_stack) != 0) {
-                    return -1;
-                }
-                if (cc_ir_mov(sf, addrv, overflow_ptr) != 0) {
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_ADD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = overflow_ptr;
-                in.rhs = stack_incv;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory incrementing va_arg overflow pointer");
-                    return -1;
-                }
-                next_overflow = in.dst;
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_STORE;
-                in.lhs = overflow_ptr_ptr;
-                in.rhs = next_overflow;
-                in.imm = 8;
-                if (cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory storing va_arg overflow pointer update");
-                    return -1;
-                }
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_LOAD;
-                in.dst = cc_ir_new_value(sf, dst_ty);
-                in.lhs = addrv;
-                in.imm = is_agg ? cc_target_pointer_size() : load_size;
-                in.is_unsigned = is_agg ? 1 : (lower_loads_unsigned(e) ? 1 : 0);
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory loading va_arg stack value");
-                    return -1;
-                }
-                stack_loaded = in.dst;
-                if (cc_ir_mov(sf, dstv, stack_loaded) != 0 || cc_ir_br(sf, l_end) != 0) {
-                    return -1;
-                }
-
-                if (cc_ir_label(sf, l_end) != 0) {
-                    return -1;
-                }
-                return dstv;
-            }
+            va_type.size = mem_size;
+            va_type.value_kind = lower_value_kind(e);
+            va_type.is_aggregate = lower_record_id(e) >= 0;
+            va_type.is_fp = lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_FLOAT);
+            va_type.is_ldouble = lower_has_kind(e, CC_CT_LDOUBLE);
+            va_type.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
 
             cur_ap = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
             if (cur_ap < 0) {
@@ -6914,55 +6564,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (cur_ap < 0) {
                 return -1;
             }
-            if (lower_record_id(e) >= 0) {
-                /*
-                 * Aggregate varargs are passed as pointers in this SSA ABI.
-                 * va_arg(T struct) therefore reads one pointer-sized slot and
-                 * yields the pointed object address.
-                 */
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_LOAD;
-                in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                in.lhs = cur_ap;
-                in.rhs = -1;
-                in.imm = cc_target_pointer_size();
-                in.is_unsigned = 1;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory appending va_arg aggregate pointer load");
-                    return -1;
-                }
-                load_v = in.dst;
-                step = cc_target_pointer_size();
-            } else {
-                memset(&in, 0, sizeof(in));
-                in.op = CC_SSA_LOAD;
-                in.dst = cc_ir_new_value(sf, lower_value_kind(e));
-                in.lhs = cur_ap;
-                in.rhs = -1;
-                in.imm = mem_size;
-                in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
-                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                    set_diag(diag, "out of memory appending va_arg load");
-                    return -1;
-                }
-                load_v = in.dst;
-                step = align_up_long(mem_size, cc_target_pointer_size());
-            }
-            step_v = cc_ir_const(sf, step);
-            if (step_v < 0) {
+            /* the target's ABI reads the argument and says how the va_list moves */
+            load_v = cc_abi_va_arg(sf, cur_ap, &va_type, &next_ap, diag);
+            if (load_v < 0) {
                 return -1;
             }
-            memset(&in, 0, sizeof(in));
-            in.op = CC_SSA_ADD;
-            in.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            in.lhs = cur_ap;
-            in.rhs = step_v;
-            if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
-                set_diag(diag, "out of memory appending va_arg pointer step");
-                return -1;
-            }
-            next_ap = in.dst;
-            if (emit_local_var_scalar_store(sf, &vars[ap_idx], next_ap, diag) != 0) {
+            if (next_ap >= 0 && emit_local_var_scalar_store(sf, &vars[ap_idx], next_ap, diag) != 0) {
                 set_diag(diag, "out of memory appending va_arg pointer update");
                 return -1;
             }
@@ -12891,7 +12498,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             if (!is_void_return && ctx != NULL && ctx->fn != NULL && ct_record_id(fn_ret_ctype(ctx->fn)) >= 0) {
                 long ret_size = cc_ct_size(fn_ret_ctype(ctx->fn), tu);
-                long reg_agg_limit = cc_target_pointer_size() <= 4 ? 8 : 16;
+                /* a returned aggregate fills at most two registers (%rax:%rdx, %eax:%edx) */
+                long reg_agg_limit = 2L * cc_target_pointer_size();
                 if (ret_size <= 0) {
                     set_diag(diag, "unsupported aggregate return size in return lowering");
                     return -1;
@@ -12901,8 +12509,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     return -1;
                 }
                 ret_agg_class = cc_abi_aggregate_return(tu, ct_record_id(fn_ret_ctype(ctx->fn)), ret_size);
-                if ((ret_agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)) != 0 ||
-                    (cc_target_pointer_size() == 4 && (ret_agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0)) {
+                if ((ret_agg_class & cc_target_current()->ret_by_address_classes) != 0) {
                     /* the backend reads the value from the structure rv points at */
                     ret_size_hint = ret_size;
                     goto append_return;

@@ -6,8 +6,10 @@
 
 #include "cc_abi.h"
 #include "cc_ctype.h"
+#include "cc_irbuild.h"
 
 #include <stddef.h>
+#include <string.h>
 
 /**
  * How an i386 vector argument or parameter of structure @p sid and
@@ -70,4 +72,51 @@ int cc_abi_i386_aggregate_return(const cc_translation_unit_t *tu, int sid, long 
         return vsize == 16 ? CC_ABI_RET_VEC128 : vsize == 8 ? CC_ABI_RET_VEC64 : vsize <= 4 ? CC_ABI_RET_EAX_EDX : 0;
     }
     return 0;
+}
+
+int cc_abi_i386_va_arg(cc_ssa_function_t *sf, int ap, const cc_abi_va_type_t *t, int *next_ap, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long step;
+    int v;
+    int stepv;
+
+    *next_ap = -1;
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_LOAD;
+    in.lhs = ap;
+    in.rhs = -1;
+    if (t->is_aggregate) {
+        /* an aggregate travels by address: its slot holds a pointer */
+        in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+        in.imm = 4;
+        in.is_unsigned = 1;
+        step = 4;
+    } else {
+        in.dst = cc_ir_new_value(sf, t->value_kind);
+        in.imm = t->size;
+        in.is_unsigned = t->is_unsigned ? 1 : 0;
+        step = ((t->size + 3) / 4) * 4;
+    }
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        goto oom;
+    }
+    v = in.dst;
+    stepv = cc_ir_const(sf, step);
+    if (stepv < 0) {
+        goto oom;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ADD;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = ap;
+    in.rhs = stepv;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        goto oom;
+    }
+    *next_ap = in.dst;
+    return v;
+
+oom:
+    cc_diag_set(diag, "", 0, 0, "out of memory lowering va_arg");
+    return -1;
 }

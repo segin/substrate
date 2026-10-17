@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-typedef struct {
+typedef struct cc_diag {
     char path[512];
     size_t line;
     size_t col;

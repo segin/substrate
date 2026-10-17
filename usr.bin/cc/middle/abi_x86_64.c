@@ -6,8 +6,10 @@
 
 #include "cc_abi.h"
 #include "cc_ctype.h"
+#include "cc_irbuild.h"
 
 #include <stddef.h>
+#include <string.h>
 
 /** An eightbyte's x86-64 psABI class (System V psABI 3.2.3), in merge order. */
 enum { ABI64_NONE = 0, ABI64_SSE, ABI64_INTEGER, ABI64_X87, ABI64_MEMORY };
@@ -254,4 +256,213 @@ int cc_abi_x86_64_aggregate_return(const cc_translation_unit_t *tu, int sid, lon
     int c = abi64_aggregate_class(tu, sid, size, 1);
 
     return c >= 0 ? c : (size <= 16 ? CC_ABI_RET_MEMORY : 0);
+}
+
+/** @p n rounded up to a multiple of @p a. */
+static long va_align_up(long n, long a) {
+    return ((n + a - 1) / a) * a;
+}
+
+/**
+ * Append `lhs op rhs` on words.
+ *
+ * @return the result, or -1 when out of memory
+ */
+static int va_binop(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int lhs, int rhs) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = op;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = lhs;
+    in.rhs = rhs;
+    return in.dst < 0 || cc_ir_push(sf, in) != 0 ? -1 : in.dst;
+}
+
+/**
+ * Append a load of @p size bytes at @p addr into a new value of class @p vt.
+ *
+ * @return the value, or -1 when out of memory
+ */
+static int va_load(cc_ssa_function_t *sf, cc_value_type_t vt, int addr, long size, int is_unsigned) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_LOAD;
+    in.dst = cc_ir_new_value(sf, vt);
+    in.lhs = addr;
+    in.imm = size;
+    in.is_unsigned = is_unsigned;
+    return in.dst < 0 || cc_ir_push(sf, in) != 0 ? -1 : in.dst;
+}
+
+/**
+ * Append a store of the low @p size bytes of @p v at @p addr.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int va_store(cc_ssa_function_t *sf, int addr, int v, long size) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STORE;
+    in.lhs = addr;
+    in.rhs = v;
+    in.imm = size;
+    return cc_ir_push(sf, in);
+}
+
+/**
+ * The address of the va_list record's field at @p off.
+ *
+ * @return the address, or -1 when out of memory
+ */
+static int va_field(cc_ssa_function_t *sf, int ap, long off) {
+    int c = cc_ir_const(sf, off);
+
+    return c < 0 ? -1 : va_binop(sf, CC_SSA_ADD, ap, c);
+}
+
+/**
+ * va_arg of a long double: always from the overflow area, aligned to 16.
+ *
+ * @param sf                the function
+ * @param overflow_ptr_ptr  the address of the record's overflow_arg_area
+ * @param overflow_ptr      its value
+ * @param t                 the type read
+ * @return                  the value, or -1 when out of memory
+ */
+static int va_arg_ldouble(cc_ssa_function_t *sf, int overflow_ptr_ptr, int overflow_ptr, const cc_abi_va_type_t *t) {
+    int align_add = cc_ir_const(sf, 15);
+    int align_mask = cc_ir_const(sf, -16);
+    int aligned;
+    int v;
+    int step;
+    int next;
+
+    if (align_add < 0 || align_mask < 0) {
+        return -1;
+    }
+    aligned = va_binop(sf, CC_SSA_ADD, overflow_ptr, align_add);
+    aligned = aligned < 0 ? -1 : va_binop(sf, CC_SSA_AND, aligned, align_mask);
+    v = aligned < 0 ? -1 : va_load(sf, t->value_kind, aligned, t->size, 0);
+    step = v < 0 ? -1 : cc_ir_const(sf, va_align_up(t->size, 8));
+    next = step < 0 ? -1 : va_binop(sf, CC_SSA_ADD, aligned, step);
+    if (next < 0 || va_store(sf, overflow_ptr_ptr, next, 8) != 0) {
+        return -1;
+    }
+    return v;
+}
+
+int cc_abi_x86_64_va_arg(cc_ssa_function_t *sf, int ap, const cc_abi_va_type_t *t, int *next_ap, cc_diag_t *diag) {
+    cc_value_type_t dst_ty = t->is_aggregate ? CC_VAL_I64 : t->value_kind;
+    long load_size = t->is_aggregate ? 8 : t->size;
+    int load_unsigned = t->is_aggregate ? 1 : t->is_unsigned;
+    int overflow_ptr_ptr;
+    int overflow_ptr;
+    int regsave_ptr;
+    int off_ptr;
+    int offv;
+    int off_limit;
+    int reg_incv;
+    int stack_incv;
+    int cmpv;
+    int dstv;
+    int addrv;
+    int v;
+    int l_reg;
+    int l_stack;
+    int l_end;
+    cc_ssa_instr_t in;
+
+    *next_ap = -1;
+    /* {gp_offset @0, fp_offset @4, overflow_arg_area @8, reg_save_area @16} */
+    overflow_ptr_ptr = va_field(sf, ap, 8);
+    overflow_ptr = overflow_ptr_ptr < 0 ? -1 : va_load(sf, CC_VAL_I64, overflow_ptr_ptr, 8, 1);
+    if (overflow_ptr < 0) {
+        goto oom;
+    }
+    if (t->is_ldouble) {
+        v = va_arg_ldouble(sf, overflow_ptr_ptr, overflow_ptr, t);
+        if (v < 0) {
+            goto oom;
+        }
+        return v;
+    }
+    regsave_ptr = va_field(sf, ap, 16);
+    regsave_ptr = regsave_ptr < 0 ? -1 : va_load(sf, CC_VAL_I64, regsave_ptr, 8, 1);
+    off_ptr = regsave_ptr < 0 ? -1 : va_field(sf, ap, t->is_fp ? 4 : 0);
+    offv = off_ptr < 0 ? -1 : va_load(sf, CC_VAL_I64, off_ptr, 4, 1);
+    if (offv < 0) {
+        goto oom;
+    }
+    /* the six general registers end at offset 48, the eight xmm ones at 176 */
+    off_limit = cc_ir_const(sf, t->is_fp ? 160 : 40);
+    reg_incv = cc_ir_const(sf, t->is_fp ? 16 : 8);
+    stack_incv = (off_limit < 0 || reg_incv < 0) ? -1 : cc_ir_const(sf, t->is_fp ? 8 : va_align_up(t->size, 8));
+    if (stack_incv < 0) {
+        goto oom;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_CMP;
+    in.cmp_kind = CC_CMP_LE;
+    in.is_unsigned = 1;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = offv;
+    in.rhs = off_limit;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        goto oom;
+    }
+    cmpv = in.dst;
+    dstv = cc_ir_new_value(sf, dst_ty);
+    addrv = cc_ir_new_value(sf, CC_VAL_I64);
+    if (dstv < 0 || addrv < 0) {
+        goto oom;
+    }
+    l_reg = cc_ir_new_label(sf);
+    l_stack = cc_ir_new_label(sf);
+    l_end = cc_ir_new_label(sf);
+    if (cc_ir_br_cond(sf, cmpv, l_reg, l_stack) != 0) {
+        goto oom;
+    }
+
+    /* from the register save area: advance the offset */
+    if (cc_ir_label(sf, l_reg) != 0) {
+        goto oom;
+    }
+    v = va_binop(sf, CC_SSA_ADD, regsave_ptr, offv);
+    if (v < 0 || cc_ir_mov(sf, addrv, v) != 0) {
+        goto oom;
+    }
+    v = va_binop(sf, CC_SSA_ADD, offv, reg_incv);
+    if (v < 0 || va_store(sf, off_ptr, v, 4) != 0) {
+        goto oom;
+    }
+    v = va_load(sf, dst_ty, addrv, load_size, load_unsigned);
+    if (v < 0 || cc_ir_mov(sf, dstv, v) != 0 || cc_ir_br(sf, l_end) != 0) {
+        goto oom;
+    }
+
+    /* from the overflow area: advance its pointer */
+    if (cc_ir_label(sf, l_stack) != 0 || cc_ir_mov(sf, addrv, overflow_ptr) != 0) {
+        goto oom;
+    }
+    v = va_binop(sf, CC_SSA_ADD, overflow_ptr, stack_incv);
+    if (v < 0 || va_store(sf, overflow_ptr_ptr, v, 8) != 0) {
+        goto oom;
+    }
+    v = va_load(sf, dst_ty, addrv, load_size, load_unsigned);
+    if (v < 0 || cc_ir_mov(sf, dstv, v) != 0 || cc_ir_br(sf, l_end) != 0) {
+        goto oom;
+    }
+
+    if (cc_ir_label(sf, l_end) != 0) {
+        goto oom;
+    }
+    return dstv;
+
+oom:
+    cc_diag_set(diag, "", 0, 0, "out of memory lowering va_arg");
+    return -1;
 }

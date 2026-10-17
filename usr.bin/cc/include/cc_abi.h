@@ -27,6 +27,16 @@ typedef struct cc_abi_regs {
     int vec8;  /**< MMX registers taken by vectors */
 } cc_abi_regs_t;
 
+/** The type va_arg reads, as the ABI needs to know it. */
+typedef struct cc_abi_va_type {
+    long size;                  /**< its size in bytes */
+    cc_value_type_t value_kind; /**< the register class of its value */
+    int is_aggregate;           /**< a structure or union: the value is its address */
+    int is_fp;                  /**< float or double */
+    int is_ldouble;             /**< long double */
+    int is_unsigned;            /**< read zero-extended */
+} cc_abi_va_type_t;
+
 /**
  * Whether structure @p sid stands for a vector type.
  *
@@ -102,6 +112,50 @@ int cc_abi_i386_aggregate_arg(const cc_translation_unit_t *tu, int sid, long siz
  * @return      the CC_ABI_* flags; 0 for the default (by hidden pointer)
  */
 int cc_abi_i386_aggregate_return(const cc_translation_unit_t *tu, int sid, long size);
+
+/**
+ * The x86-64 va_arg: from the register save area while the va_list
+ * record's gp_offset (or fp_offset) says registers remain, else from the
+ * overflow area; a long double always from the overflow area, aligned to
+ * 16.  The record is updated in place.
+ *
+ * @param sf       the function
+ * @param ap       the va_list: the record's address
+ * @param t        the type read
+ * @param next_ap  set to -1: the va_list itself does not change
+ * @param diag     receives an error
+ * @return         the value read (an aggregate's address), or -1
+ */
+int cc_abi_x86_64_va_arg(cc_ssa_function_t *sf, int ap, const cc_abi_va_type_t *t, int *next_ap, cc_diag_t *diag);
+
+/**
+ * The i386 va_arg: every argument is on the stack, in 4-byte slots, and
+ * an aggregate's slot holds its address.
+ *
+ * @param sf       the function
+ * @param ap       the va_list: the next argument's address
+ * @param t        the type read
+ * @param next_ap  receives the va_list's new value, past the argument
+ * @param diag     receives an error
+ * @return         the value read (an aggregate's address), or -1
+ */
+int cc_abi_i386_va_arg(cc_ssa_function_t *sf, int ap, const cc_abi_va_type_t *t, int *next_ap, cc_diag_t *diag);
+
+/**
+ * The selected target's va_arg.
+ *
+ * @param sf       the function
+ * @param ap       the va_list's value
+ * @param t        the type read
+ * @param next_ap  receives the va_list's new value, or -1 when the va_list
+ *                 itself is unchanged (its record was updated)
+ * @param diag     receives an error
+ * @return         the value read (an aggregate's address), or -1
+ */
+static inline int cc_abi_va_arg(cc_ssa_function_t *sf, int ap, const cc_abi_va_type_t *t, int *next_ap,
+                                cc_diag_t *diag) {
+    return cc_target_current()->abi_va_arg(sf, ap, t, next_ap, diag);
+}
 
 /**
  * How the selected target passes an aggregate argument (or receives an

@@ -220,7 +220,7 @@ typedef struct {
     size_t init_item_cap;
 } cc_ssa_global_t;
 
-typedef struct {
+typedef struct cc_ssa_function {
     char *name;
     cc_value_type_t ret_type;
     int storage;

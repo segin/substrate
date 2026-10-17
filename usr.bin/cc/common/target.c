@@ -54,8 +54,10 @@ static const cc_target_desc_t g_x86_64 = {
     "lock; orl $0, (%%rsp)",
     24, /* {gp_offset, fp_offset, overflow_arg_area, reg_save_area} */
     g_x86_64_tramp,
+    CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY,
     cc_abi_x86_64_aggregate_arg,
     cc_abi_x86_64_aggregate_return,
+    cc_abi_x86_64_va_arg,
 };
 
 static const cc_target_desc_t g_i386 = {
@@ -84,8 +86,11 @@ static const cc_target_desc_t g_i386 = {
     "lock; orl $0, (%%esp)",
     0, /* a va_list is the next argument's address */
     g_i386_tramp,
+    /* a vector returned in %xmm0 or %mm0 too */
+    CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY | CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64,
     cc_abi_i386_aggregate_arg,
     cc_abi_i386_aggregate_return,
+    cc_abi_i386_va_arg,
 };
 
 int cc_target_int_size(const cc_target_desc_t *tgt, cc_target_int_t t) {
