@@ -7099,7 +7099,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 }
 
 int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path,
-                int emit_debug, cc_target_t target, int pic, cc_diag_t *diag) {
+                int emit_debug, const cc_target_desc_t *tgt, int pic, cc_diag_t *diag) {
     FILE *fp;
 
     if (diag != NULL) {
@@ -7119,7 +7119,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
     if (emit_debug && src_path != NULL) {
         fprintf(fp, ".file 1 \"%s\"\n", src_path);
     }
-    if (emit_globals(fp, m, target == CC_TARGET_I386 ? 4 : 8, diag) != 0) {
+    if (emit_globals(fp, m, tgt->pointer_size, diag) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {
             set_diag(diag, "global emission failed");
         }
@@ -7128,7 +7128,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
     }
     emit_compiler_stamp(fp);
 
-    if (target == CC_TARGET_I386) {
+    if (tgt->id == CC_TARGET_I386) {
         fprintf(fp, ".code32\n");
         if (emit_i386(fp, m, src_path, emit_debug, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {

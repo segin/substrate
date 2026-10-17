@@ -45,7 +45,7 @@ static int dump_ir_after(const cc_ssa_module_t *ssa, const cc_options_t *opts, c
     }
     fp = fopen(path, "w");
     /* lowering's output is neutral; legalization and every pass after it give legal IR */
-    rc = fp != NULL ? cc_ssa_dump_module(ssa, display_src, opts->target == CC_TARGET_I386 ? 4 : 8,
+    rc = fp != NULL ? cc_ssa_dump_module(ssa, display_src, cc_target_current()->pointer_size,
                                          strcmp(pass, "lower") != 0, fp)
                     : -1;
     if (fp != NULL && fclose(fp) != 0) {
@@ -180,7 +180,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         fprintf(stderr, "cc: timing opt=%.3fs\n", t_opt);
         t0 = now_seconds();
     }
-    if (cc_emit_gas(&ssa, out_s, display_src, opts->debug, opts->target, opts->pic, diag) == 0) {
+    if (cc_emit_gas(&ssa, out_s, display_src, opts->debug, cc_target_current(), opts->pic, diag) == 0) {
         rc = 0;
     } else if (diag != NULL && diag->message[0] == '\0') {
         snprintf(diag->message, sizeof(diag->message), "backend emission failed");

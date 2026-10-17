@@ -51,6 +51,12 @@ typedef struct {
     int has_int128;                               /**< `__int128` exists */
     int sse_fp;                                   /**< floating point is always SSE, never x87 */
     const char *const *predefined;                /**< the target's own macros, each defined to 1; NULL-ended */
+    const char *m_flag;                           /**< the gcc option that selects it: "-m64", "-m32" */
+    const char *as_flag;                          /**< the GNU assembler's: "--64", "--32" */
+    const char *ld_emulation;                     /**< the GNU linker's -m: "elf_x86_64", "elf_i386" */
+    const char *gnu_triple;                       /**< -dumpmachine on a GNU host */
+    const char *host_ldso;                        /**< a GNU/Linux host's dynamic linker */
+    int pie;                                      /**< executables link as PIEs (i386 code is not RIP-relative) */
 } cc_target_desc_t;
 
 /**

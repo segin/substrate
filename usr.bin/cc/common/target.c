@@ -31,6 +31,12 @@ static const cc_target_desc_t g_x86_64 = {
     1,            /* __int128 */
     1,            /* SSE floating point */
     g_x86_64_macros,
+    "-m64",
+    "--64",
+    "elf_x86_64",
+    "x86_64-pc-linux-gnu",
+    "/lib64/ld-linux-x86-64.so.2",
+    1, /* PIE */
 };
 
 static const cc_target_desc_t g_i386 = {
@@ -50,6 +56,12 @@ static const cc_target_desc_t g_i386 = {
     0,            /* no __int128 */
     0,            /* x87 unless -mfpmath=sse */
     g_i386_macros,
+    "-m32",
+    "--32",
+    "elf_i386",
+    "i386-pc-linux-gnu",
+    "/lib/ld-linux.so.2",
+    0, /* absolute addressing: not a PIE */
 };
 
 int cc_target_int_size(const cc_target_desc_t *tgt, cc_target_int_t t) {

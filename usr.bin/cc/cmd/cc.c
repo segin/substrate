@@ -111,7 +111,7 @@ typedef struct {
 
 
 static const char *target_gcc_flag(cc_target_t target) {
-  return target == CC_TARGET_I386 ? "-m32" : "-m64";
+  return cc_target_get(target)->m_flag;
 }
 
 /**
@@ -1799,7 +1799,7 @@ static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
   if (pass_from_cc) {
     argv[at++] = "--from-cc";
   }
-  argv[at++] = o->target == CC_TARGET_I386 ? "--32" : "--64";
+  argv[at++] = (char *)cc_target_get(o->target)->as_flag;
   for (i = 0; i < o->as_flags.count; ++i) {
     argv[at++] = o->as_flags.items[i];
   }
@@ -1853,7 +1853,7 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
   ld_prog = resolve_tool_default(o, "LD", "ld", "ld", ld_path, sizeof(ld_path));
   argv[at++] = (char *)ld_prog;
   argv[at++] = "-m";
-  argv[at++] = o->target == CC_TARGET_I386 ? "elf_i386" : "elf_x86_64";
+  argv[at++] = (char *)cc_target_get(o->target)->ld_emulation;
   if (o->shared) {
     argv[at++] = "-shared";
   }
@@ -1880,7 +1880,7 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
      * addressing), so an i386 program is a non-PIE executable; as a PIE
      * its absolute addresses would be text relocations ld.so cannot
      * apply.  x86-64 code is RIP-relative and links as a PIE. */
-    argv[at++] = o->target == CC_TARGET_I386 ? "-no-pie" : "-pie";
+    argv[at++] = cc_target_get(o->target)->pie ? "-pie" : "-no-pie";
     argv[at++] = "-dynamic-linker";
     argv[at++] = o->target == CC_TARGET_I386 ? CC_SUBSTRATE_LDSO32
                                              : CC_SUBSTRATE_LDSO64;
@@ -1904,8 +1904,7 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
       libmvec_path[0] = '\0';
     }
     argv[at++] = "-dynamic-linker";
-    argv[at++] = o->target == CC_TARGET_I386 ? "/lib/ld-linux.so.2"
-                                             : "/lib64/ld-linux-x86-64.so.2";
+    argv[at++] = (char *)cc_target_get(o->target)->host_ldso;
     argv[at++] = crt1;
     argv[at++] = crti;
     argv[at++] = crtbegin;
@@ -1943,8 +1942,7 @@ static int run_ld(const cc_opts_t *o, const cc_strvec_t *objs, const char *out) 
        * libc.so.6 named directly does not, and libgcc's decimal
        * conversions use TLS, which needs its __tls_get_addr.
        */
-      const char *ldso = o->target == CC_TARGET_I386 ? "/lib/ld-linux.so.2"
-                                                     : "/lib64/ld-linux-x86-64.so.2";
+      const char *ldso = cc_target_get(o->target)->host_ldso;
 
       if (access(ldso, R_OK) == 0) {
         argv[at++] = "--as-needed";
@@ -2086,8 +2084,7 @@ static int maybe_print_info_and_exit(int argc, char **argv) {
     return 1;
   }
   if (strcmp(info, "-dumpmachine") == 0) {
-    printf("%s\n", target == CC_TARGET_I386 ? "i386-pc-linux-gnu"
-                                            : "x86_64-pc-linux-gnu");
+    printf("%s\n", cc_target_get(target)->gnu_triple);
     return 1;
   }
   return 0;
