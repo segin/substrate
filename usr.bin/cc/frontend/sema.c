@@ -4885,6 +4885,832 @@ static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, 
     return 0;
 }
 
+/** sema_check_builtin_call() found no builtin to check: the call is an ordinary one. */
+#define SEMA_NOT_BUILTIN 1
+
+/**
+ * Check a call of a builtin the compiler implements itself: its operands
+ * and its type.
+ *
+ * @param tu          the translation unit
+ * @param e           the call
+ * @param vars        the variables in scope
+ * @param var_count   their number
+ * @param depth       the scope depth
+ * @param bk          which builtin it names, BUILTIN_NONE for none
+ * @param bswap_bits  the width of a __builtin_bswapN it names, else 0
+ * @param callee      the function its name declares, or NULL
+ * @param diag        receives an error
+ * @return            0, -1 with @p diag set, or SEMA_NOT_BUILTIN
+ */
+static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
+                                   size_t var_count, int depth, builtin_kind_t bk, int bswap_bits,
+                                   const cc_function_t *callee, cc_diag_t *diag) {
+    size_t i;
+    const cc_ctype_t *atomic_elem;
+
+    if (bk == BUILTIN_VA_START) {
+        if (e->arg_count != 2) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_start expects exactly 2 arguments");
+            }
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__builtin_va_start first argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_VA_END) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_end expects exactly 1 argument");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__builtin_va_end argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
+        bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
+        if (e->arg_count != 0) {
+            set_diag(diag, "floating huge-value/infinity builtin expects no arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic((bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF)   ? CC_CT_FLOAT
+                                     : (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_CT_LDOUBLE
+                                                                                       : CC_CT_DOUBLE));
+        return 0;
+    }
+    if (bk == BUILTIN_LDBL_MIN || bk == BUILTIN_LDBL_DENORM_MIN || bk == BUILTIN_LDBL_MAX) {
+        if (e->arg_count != 0) {
+            set_diag(diag, "long double limit builtin expects no arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_LDOUBLE));
+        return 0;
+    }
+    if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
+        bk == BUILTIN_SIGNBIT) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "floating classification builtin expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_arith(e->args[0])) {
+            set_diag(diag, "floating classification builtin expects numeric argument");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "floating NaN builtin expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(bk == BUILTIN_NANF   ? CC_CT_FLOAT
+                                     : bk == BUILTIN_NANL ? CC_CT_LDOUBLE
+                                                          : CC_CT_DOUBLE));
+        return 0;
+    }
+    if (bk == BUILTIN_VA_COPY) {
+        if (e->arg_count != 2) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_copy expects exactly 2 arguments");
+            }
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!sx_is_ptr(e->args[i])) {
+                set_diag(diag, "__builtin_va_copy arguments must be pointers");
+                return -1;
+            }
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_VA_ARG) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_va_arg expects va_list and a type");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__builtin_va_arg first operand must be a pointer");
+            return -1;
+        }
+        if (e->ctype == NULL || e->ctype->unqual->kind == CC_CT_VOID) {
+            set_diag(diag, "__builtin_va_arg requires a non-void type");
+            return -1;
+        }
+        sema_set_type(e, e->ctype);
+        return 0;
+    }
+    if (bk == BUILTIN_EXPECT) {
+        if (e->arg_count != 2) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_expect expects exactly 2 arguments");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(e->args[0]) || !sx_is_int(e->args[1])) {
+            set_diag(diag, "__builtin_expect expects (scalar, integer)");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_CONSTANT_P) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "__builtin_constant_p expects exactly 1 argument");
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_TRAP) {
+        if (e->arg_count != 0) {
+            set_diag(diag, "__builtin_trap expects exactly 0 arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_UNREACHABLE) {
+        if (e->arg_count != 0) {
+            set_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_ASSUME) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "__builtin_assume expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(e->args[0])) {
+            set_diag(diag, "__builtin_assume argument must be scalar");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_ASSUME_ALIGNED) {
+        if (e->arg_count < 2 || e->arg_count > 3) {
+            set_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
+            return -1;
+        }
+        if (!sx_is_int(e->args[1]) ||
+            (e->arg_count == 3 && !sx_is_int(e->args[2]))) {
+            set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_UNPREDICTABLE) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_scalar(e->args[0])) {
+            set_diag(diag, "__builtin_unpredictable argument must be scalar");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
+        const char *builtin_name = "__builtin_clz";
+        if (bk == BUILTIN_CTZ) {
+            builtin_name = "__builtin_ctz";
+        } else if (bk == BUILTIN_FFS) {
+            builtin_name = "__builtin_ffs";
+        }
+        if (e->arg_count != 1) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", builtin_name);
+            set_diag(diag, msg);
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
+            set_diag(diag, msg);
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_POPCOUNT || bk == BUILTIN_PARITY) {
+        const char *what = bk == BUILTIN_PARITY ? "__builtin_parity" : "__builtin_popcount";
+        char msg[96];
+        if (e->arg_count != 1) {
+            snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", what);
+            set_diag(diag, msg);
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            snprintf(msg, sizeof(msg), "%s argument must be integral", what);
+            set_diag(diag, msg);
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
+        const cc_ctype_t *out_elem;
+        if (e->arg_count != 3) {
+            set_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[2])) {
+            set_diag(diag, "overflow builtin third argument must be a pointer");
+            return -1;
+        }
+        out_elem = sx_vtype(e->args[2])->of;
+        if (!cc_ct_is_integer(out_elem)) {
+            set_diag(diag, "overflow builtin destination must point to an integer type");
+            return -1;
+        }
+        if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1])) {
+            set_diag(diag, "overflow builtin operands must be integers");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
+        if (e->arg_count != 3) {
+            set_diag(diag, "__builtin_*_overflow_p expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1]) ||
+            !sx_is_int(e->args[2])) {
+            set_diag(diag, "overflow_p builtin operands must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_OBJECT_SIZE) {
+        if (e->arg_count != 2) {
+            set_diag(diag, "__builtin_object_size expects exactly 2 arguments");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[1])) {
+            set_diag(diag, "__builtin_object_size second argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_ULLONG));
+        return 0;
+    }
+    if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
+        if (e->arg_count != 1) {
+            set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address expects 1 argument"
+                                                        : "__builtin_frame_address expects 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
+                                                        : "__builtin_frame_address argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
+        return 0;
+    }
+    if (bk == BUILTIN_MEMCMP) {
+        if (e->arg_count != 3) {
+            set_diag(diag, "__builtin_memcmp has wrong argument count");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0]) || !sx_is_ptr(e->args[1])) {
+            set_diag(diag, "__builtin_memcmp first two arguments must be pointers");
+            return -1;
+        }
+        if (!sx_is_int(e->args[2])) {
+            set_diag(diag, "__builtin_memcmp third argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_PREFETCH) {
+        if (e->arg_count < 1 || e->arg_count > 3) {
+            set_diag(diag, "__builtin_prefetch expects 1 to 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__builtin_prefetch first argument must be a pointer");
+            return -1;
+        }
+        if (e->arg_count >= 2 && !sx_is_int(e->args[1])) {
+            set_diag(diag, "__builtin_prefetch rw argument must be integral");
+            return -1;
+        }
+        if (e->arg_count >= 3 && !sx_is_int(e->args[2])) {
+            set_diag(diag, "__builtin_prefetch locality argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_CPU_SUPPORTS) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "__builtin_cpu_supports expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->args[0]->kind != CC_EXPR_STR) {
+            set_diag(diag, "__builtin_cpu_supports argument must be a string literal");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_STRLEN) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "__builtin_strlen expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__builtin_strlen argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
+        return 0;
+    }
+    if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||
+        bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
+        size_t min_args = (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET) ? 3 : 4;
+        if (e->arg_count < min_args) {
+            set_diag(diag, min_args == 3 ? "__builtin_mem* has wrong argument count"
+                                         : "__builtin___mem*_chk has wrong argument count");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "memory builtin first argument must be a pointer");
+            return -1;
+        }
+        if ((bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMCPY_CHK ||
+             bk == BUILTIN_MEMMOVE_CHK) &&
+            !sx_is_ptr(e->args[1])) {
+            set_diag(diag, "memory builtin source argument must be a pointer");
+            return -1;
+        }
+        if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !sx_is_int(e->args[1])) {
+            set_diag(diag, "memory builtin fill byte must be integral");
+            return -1;
+        }
+        if (!sx_is_int(e->args[2])) {
+            set_diag(diag, "memory builtin size argument must be integral");
+            return -1;
+        }
+        sema_set_type(e, sx_vtype(e->args[0]));
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
+        if (e->arg_count != 0) {
+            set_diag(diag, "__sync_synchronize expects exactly 0 arguments");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
+        const char *nm = bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence" : "__atomic_signal_fence";
+        if (e->arg_count != 1) {
+            set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence expects exactly 1 argument"
+                                                              : "__atomic_signal_fence expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
+                               ? "__atomic_thread_fence memory-order argument must be integral"
+                               : "__atomic_signal_fence memory-order argument must be integral");
+            return -1;
+        }
+        if (atomic_memorder_check_arg(tu, e->args[0], nm, "fence", 0, 0, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
+        if (e->arg_count != 1) {
+            set_diag(diag, "__sync_lock_release expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__sync_lock_release first argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
+        bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_FETCH_ADD ||
+        bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
+        int expect_argc = (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
+                           bk == BUILTIN_ATOMIC_EXCHANGE_N)
+                              ? 3
+                              : 2;
+        if (e->arg_count != (size_t)expect_argc) {
+            set_diag(diag, "atomic fetch/exchange builtin has wrong argument count");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if ((bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
+             bk == BUILTIN_ATOMIC_EXCHANGE_N) &&
+            check_expr(tu, e->args[2], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "atomic fetch/exchange first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sema_assignable(tu, atomic_elem, e->args[1])) {
+            set_diag(diag, "atomic fetch/exchange value type mismatch");
+            return -1;
+        }
+        if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
+            const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
+                                 ? "__atomic_exchange_n"
+                                 : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
+            if (!sx_is_int(e->args[2])) {
+                set_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
+                return -1;
+            }
+            if (atomic_memorder_check_arg(tu, e->args[2], nm, "operation", 0, 0, diag) != 0) {
+                return -1;
+            }
+        }
+        sema_set_type(e, atomic_elem);
+        return 0;
+    }
+    if (bk == BUILTIN_SYNC_BOOL_CAS) {
+        if (e->arg_count != 3) {
+            set_diag(diag, "__sync_bool_compare_and_swap expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sema_assignable(tu, atomic_elem, e->args[1]) || !sema_assignable(tu, atomic_elem, e->args[2])) {
+            set_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_ATOMIC_LOAD_N) {
+        if (e->arg_count != 2) {
+            set_diag(diag, "__atomic_load_n expects exactly 2 arguments");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
+            check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__atomic_load_n first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sx_is_int(e->args[1])) {
+            set_diag(diag, "__atomic_load_n memory-order argument must be integral");
+            return -1;
+        }
+        if (atomic_memorder_check_arg(tu, e->args[1], "__atomic_load_n", "load", 1, 0, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, atomic_elem);
+        return 0;
+    }
+    if (bk == BUILTIN_ATOMIC_STORE_N) {
+        if (e->arg_count != 3) {
+            set_diag(diag, "__atomic_store_n expects exactly 3 arguments");
+            return -1;
+        }
+        for (i = 0; i < 3; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            set_diag(diag, "__atomic_store_n first argument must be a pointer");
+            return -1;
+        }
+        atomic_elem = sema_atomic_elem(e->args[0]);
+        if (!sema_assignable(tu, atomic_elem, e->args[1])) {
+            set_diag(diag, "__atomic_store_n value type mismatch");
+            return -1;
+        }
+        if (!sx_is_int(e->args[2])) {
+            set_diag(diag, "__atomic_store_n memory-order argument must be integral");
+            return -1;
+        }
+        if (atomic_memorder_check_arg(tu, e->args[2], "__atomic_store_n", "store", 0, 1, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
+    if (e->ident != NULL && callee == NULL && bswap_bits != 0) {
+        if (e->arg_count != 1) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "%s expects exactly 1 argument", e->ident);
+            }
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_int(e->args[0])) {
+            set_diag(diag, "byte-swap builtin requires integral argument");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(bswap_bits == 16 ? CC_CT_USHORT : bswap_bits == 32 ? CC_CT_UINT
+                                                                                      : CC_CT_ULLONG));
+        return 0;
+    }
+    return SEMA_NOT_BUILTIN;
+}
+
+/**
+ * Check a call: a builtin's operands and type, or the callee (a function,
+ * a function pointer, an old-style declaration), its arguments converted
+ * to its parameters (the default promotions past them), and the result type.
+ *
+ * @param tu         the translation unit
+ * @param e          the call
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the scope depth
+ * @param diag       receives an error
+ * @return           0, or -1 with @p diag set
+ */
+static int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    size_t i;
+    const cc_function_t *callee = NULL;
+    builtin_kind_t bk = builtin_kind(e->ident);
+    int bswap_bits = builtin_bswap_bits(e->ident);
+    if (e->ident != NULL && strcmp(e->ident, "__builtin_complex") == 0) {
+        return sema_builtin_complex(tu, e, vars, var_count, depth, diag);
+    }
+    if (e->ident != NULL) {
+        callee = find_function(tu, e->ident);
+    }
+    {
+        int rc = sema_check_builtin_call(tu, e, vars, var_count, depth, bk, bswap_bits, callee, diag);
+
+        if (rc != SEMA_NOT_BUILTIN) {
+            return rc;
+        }
+    }
+    if (e->ident == NULL) {
+        if (e->lhs == NULL) {
+            set_diag(diag, "malformed call expression");
+            return -1;
+        }
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        /* a function designator, *fp included, is used as a pointer to the function */
+        if (!sx_is_ptr(e->lhs)) {
+            set_diag(diag, "call target must be a function pointer");
+            return -1;
+        }
+    }
+    if (callee != NULL && callee->has_prototype && !callee->is_variadic && e->arg_count != callee->param_count) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
+                     e->arg_count, callee->param_count);
+        }
+        return -1;
+    }
+    if (callee != NULL && callee->has_prototype && callee->is_variadic && e->arg_count < callee->param_count) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message),
+                     "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
+                     callee->param_count);
+        }
+        return -1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+            sema_complex_convert_for_assign(tu, &e->args[i], sema_param_ctype(&callee->params[i])) < 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        if (sema_convert_call_arg(tu, e, callee, i) != 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+        if (callee != NULL && callee->has_prototype && i < callee->param_count &&
+            !sema_assignable(tu, sema_param_ctype(&callee->params[i]), e->args[i]) &&
+            !sema_transparent_union_accepts(tu, sx_ct_record(sema_param_ctype(&callee->params[i])),
+                                            e->args[i])) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i + 1,
+                         e->ident);
+            }
+            return -1;
+        }
+    }
+    if (e->ident != NULL) {
+        size_t fmt_i;
+        if (printf_like_format_index(e->ident, &fmt_i) && fmt_i < e->arg_count && e->args[fmt_i] != NULL &&
+            e->args[fmt_i]->kind == CC_EXPR_STR && e->args[fmt_i]->ident != NULL) {
+            char *rw = rewrite_printf_long_double_format(e->args[fmt_i]->ident);
+            if (rw != NULL) {
+                free(e->args[fmt_i]->ident);
+                e->args[fmt_i]->ident = rw;
+            }
+        }
+    }
+    if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
+        char buf[192];
+        /*
+         * We currently record only the presence of nonnull, not its index list.
+         * Avoid false positives (e.g. strtok uses nonnull(2)) by checking
+         * only unambiguous single-parameter prototypes.
+         */
+        if (e->arg_count > 0 && callee->param_count == 1 && sema_is_ptr(sema_param_ctype(&callee->params[0])) &&
+            is_null_ptr_constant(e->args[0])) {
+            snprintf(buf, sizeof(buf), "nonnull argument 1 in call to %s is null",
+                     e->ident != NULL ? e->ident : "<indirect>");
+            if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
+                return -1;
+            }
+        }
+    }
+    if (callee != NULL) {
+        sema_set_type(e, callee->ret_ctype);
+        if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
+            char buf[192];
+            snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");
+            if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
+                return -1;
+            }
+        }
+    } else if (e->ident != NULL) {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+        if (idx >= 0 || g != NULL) {
+            /* a call through a pointer object named directly */
+            const cc_ctype_t *ft = idx >= 0 ? vars[idx].ctype : g->ctype;
+
+            if (!sema_is_ptr(cc_ct_decay(ft))) {
+                set_diag(diag, "call target must be a function pointer");
+                return -1;
+            }
+            sema_set_type(e, sema_callee_ret_ctype(ft));
+            return 0;
+        }
+        if (strncmp(e->ident, "__builtin_", 10) == 0 && !cc_builtin_is_recognized(e->ident)) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
+            }
+            return -1;
+        }
+        if (strncmp(e->ident, "__builtin_", 10) != 0 && !cc_options_implicit_funcdecl()) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "implicit function declaration is not allowed in this mode: %s", e->ident);
+            }
+            return -1;
+        }
+        /* a builtin with no rule of its own, or C89's undeclared function: extern int f(...) */
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+    } else {
+        const cc_function_t *fn = generic_selected_function(tu, e->lhs);
+
+        if (fn == NULL) {
+            fn = infer_callee_function_expr(tu, e->lhs);
+        }
+        sema_set_type(e, fn != NULL ? fn->ret_ctype : sema_callee_ret_ctype(e->lhs->ctype));
+    }
+    return 0;
+}
+
 /**
  * Check expression @p e by its kind: its operands, the rules C sets for
  * them, and its type.
@@ -4940,781 +5766,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         return sema_check_bin(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_CALL: {
-        const cc_function_t *callee = NULL;
-        builtin_kind_t bk = builtin_kind(e->ident);
-        int bswap_bits = builtin_bswap_bits(e->ident);
-        const cc_ctype_t *atomic_elem;
-        if (e->ident != NULL && strcmp(e->ident, "__builtin_complex") == 0) {
-            return sema_builtin_complex(tu, e, vars, var_count, depth, diag);
-        }
-        if (e->ident != NULL) {
-            callee = find_function(tu, e->ident);
-        }
-        if (bk == BUILTIN_VA_START) {
-            if (e->arg_count != 2) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_start expects exactly 2 arguments");
-                }
-                return -1;
-            }
-            for (i = 0; i < e->arg_count; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__builtin_va_start first argument must be a pointer");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_VA_END) {
-            if (e->arg_count != 1) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_end expects exactly 1 argument");
-                }
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__builtin_va_end argument must be a pointer");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
-            bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
-            if (e->arg_count != 0) {
-                set_diag(diag, "floating huge-value/infinity builtin expects no arguments");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic((bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF)   ? CC_CT_FLOAT
-                                         : (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_CT_LDOUBLE
-                                                                                           : CC_CT_DOUBLE));
-            return 0;
-        }
-        if (bk == BUILTIN_LDBL_MIN || bk == BUILTIN_LDBL_DENORM_MIN || bk == BUILTIN_LDBL_MAX) {
-            if (e->arg_count != 0) {
-                set_diag(diag, "long double limit builtin expects no arguments");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_LDOUBLE));
-            return 0;
-        }
-        if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
-            bk == BUILTIN_SIGNBIT) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "floating classification builtin expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_arith(e->args[0])) {
-                set_diag(diag, "floating classification builtin expects numeric argument");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "floating NaN builtin expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(bk == BUILTIN_NANF   ? CC_CT_FLOAT
-                                         : bk == BUILTIN_NANL ? CC_CT_LDOUBLE
-                                                              : CC_CT_DOUBLE));
-            return 0;
-        }
-        if (bk == BUILTIN_VA_COPY) {
-            if (e->arg_count != 2) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_copy expects exactly 2 arguments");
-                }
-                return -1;
-            }
-            for (i = 0; i < e->arg_count; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-                if (!sx_is_ptr(e->args[i])) {
-                    set_diag(diag, "__builtin_va_copy arguments must be pointers");
-                    return -1;
-                }
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_VA_ARG) {
-            if (e->arg_count != 1) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "__builtin_va_arg expects va_list and a type");
-                }
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__builtin_va_arg first operand must be a pointer");
-                return -1;
-            }
-            if (e->ctype == NULL || e->ctype->unqual->kind == CC_CT_VOID) {
-                set_diag(diag, "__builtin_va_arg requires a non-void type");
-                return -1;
-            }
-            sema_set_type(e, e->ctype);
-            return 0;
-        }
-        if (bk == BUILTIN_EXPECT) {
-            if (e->arg_count != 2) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "__builtin_expect expects exactly 2 arguments");
-                }
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
-                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_scalar(e->args[0]) || !sx_is_int(e->args[1])) {
-                set_diag(diag, "__builtin_expect expects (scalar, integer)");
-                return -1;
-            }
-            sema_set_type(e, sx_vtype(e->args[0]));
-            return 0;
-        }
-        if (bk == BUILTIN_CONSTANT_P) {
-            if (e->arg_count != 1) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "__builtin_constant_p expects exactly 1 argument");
-                }
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_TRAP) {
-            if (e->arg_count != 0) {
-                set_diag(diag, "__builtin_trap expects exactly 0 arguments");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_UNREACHABLE) {
-            if (e->arg_count != 0) {
-                set_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_ASSUME) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "__builtin_assume expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_scalar(e->args[0])) {
-                set_diag(diag, "__builtin_assume argument must be scalar");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_ASSUME_ALIGNED) {
-            if (e->arg_count < 2 || e->arg_count > 3) {
-                set_diag(diag, "__builtin_assume_aligned expects 2 or 3 arguments");
-                return -1;
-            }
-            for (i = 0; i < e->arg_count; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
-                return -1;
-            }
-            if (!sx_is_int(e->args[1]) ||
-                (e->arg_count == 3 && !sx_is_int(e->args[2]))) {
-                set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
-                return -1;
-            }
-            sema_set_type(e, sx_vtype(e->args[0]));
-            return 0;
-        }
-        if (bk == BUILTIN_UNPREDICTABLE) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "__builtin_unpredictable expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_scalar(e->args[0])) {
-                set_diag(diag, "__builtin_unpredictable argument must be scalar");
-                return -1;
-            }
-            sema_set_type(e, sx_vtype(e->args[0]));
-            return 0;
-        }
-        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
-            const char *builtin_name = "__builtin_clz";
-            if (bk == BUILTIN_CTZ) {
-                builtin_name = "__builtin_ctz";
-            } else if (bk == BUILTIN_FFS) {
-                builtin_name = "__builtin_ffs";
-            }
-            if (e->arg_count != 1) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", builtin_name);
-                set_diag(diag, msg);
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_int(e->args[0])) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
-                set_diag(diag, msg);
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_POPCOUNT || bk == BUILTIN_PARITY) {
-            const char *what = bk == BUILTIN_PARITY ? "__builtin_parity" : "__builtin_popcount";
-            char msg[96];
-            if (e->arg_count != 1) {
-                snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", what);
-                set_diag(diag, msg);
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_int(e->args[0])) {
-                snprintf(msg, sizeof(msg), "%s argument must be integral", what);
-                set_diag(diag, msg);
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
-            const cc_ctype_t *out_elem;
-            if (e->arg_count != 3) {
-                set_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
-                return -1;
-            }
-            for (i = 0; i < 3; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[2])) {
-                set_diag(diag, "overflow builtin third argument must be a pointer");
-                return -1;
-            }
-            out_elem = sx_vtype(e->args[2])->of;
-            if (!cc_ct_is_integer(out_elem)) {
-                set_diag(diag, "overflow builtin destination must point to an integer type");
-                return -1;
-            }
-            if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1])) {
-                set_diag(diag, "overflow builtin operands must be integers");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
-            if (e->arg_count != 3) {
-                set_diag(diag, "__builtin_*_overflow_p expects exactly 3 arguments");
-                return -1;
-            }
-            for (i = 0; i < 3; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1]) ||
-                !sx_is_int(e->args[2])) {
-                set_diag(diag, "overflow_p builtin operands must be integral");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_OBJECT_SIZE) {
-            if (e->arg_count != 2) {
-                set_diag(diag, "__builtin_object_size expects exactly 2 arguments");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
-                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_int(e->args[1])) {
-                set_diag(diag, "__builtin_object_size second argument must be integral");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_ULLONG));
-            return 0;
-        }
-        if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
-            if (e->arg_count != 1) {
-                set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address expects 1 argument"
-                                                            : "__builtin_frame_address expects 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_int(e->args[0])) {
-                set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
-                                                            : "__builtin_frame_address argument must be integral");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
-            return 0;
-        }
-        if (bk == BUILTIN_MEMCMP) {
-            if (e->arg_count != 3) {
-                set_diag(diag, "__builtin_memcmp has wrong argument count");
-                return -1;
-            }
-            for (i = 0; i < e->arg_count; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0]) || !sx_is_ptr(e->args[1])) {
-                set_diag(diag, "__builtin_memcmp first two arguments must be pointers");
-                return -1;
-            }
-            if (!sx_is_int(e->args[2])) {
-                set_diag(diag, "__builtin_memcmp third argument must be integral");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_PREFETCH) {
-            if (e->arg_count < 1 || e->arg_count > 3) {
-                set_diag(diag, "__builtin_prefetch expects 1 to 3 arguments");
-                return -1;
-            }
-            for (i = 0; i < e->arg_count; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__builtin_prefetch first argument must be a pointer");
-                return -1;
-            }
-            if (e->arg_count >= 2 && !sx_is_int(e->args[1])) {
-                set_diag(diag, "__builtin_prefetch rw argument must be integral");
-                return -1;
-            }
-            if (e->arg_count >= 3 && !sx_is_int(e->args[2])) {
-                set_diag(diag, "__builtin_prefetch locality argument must be integral");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_CPU_SUPPORTS) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "__builtin_cpu_supports expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (e->args[0]->kind != CC_EXPR_STR) {
-                set_diag(diag, "__builtin_cpu_supports argument must be a string literal");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_STRLEN) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "__builtin_strlen expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__builtin_strlen argument must be a pointer");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
-            return 0;
-        }
-        if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||
-            bk == BUILTIN_MEMMOVE_CHK || bk == BUILTIN_MEMSET_CHK) {
-            size_t min_args = (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET) ? 3 : 4;
-            if (e->arg_count < min_args) {
-                set_diag(diag, min_args == 3 ? "__builtin_mem* has wrong argument count"
-                                             : "__builtin___mem*_chk has wrong argument count");
-                return -1;
-            }
-            for (i = 0; i < e->arg_count; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "memory builtin first argument must be a pointer");
-                return -1;
-            }
-            if ((bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMCPY_CHK ||
-                 bk == BUILTIN_MEMMOVE_CHK) &&
-                !sx_is_ptr(e->args[1])) {
-                set_diag(diag, "memory builtin source argument must be a pointer");
-                return -1;
-            }
-            if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !sx_is_int(e->args[1])) {
-                set_diag(diag, "memory builtin fill byte must be integral");
-                return -1;
-            }
-            if (!sx_is_int(e->args[2])) {
-                set_diag(diag, "memory builtin size argument must be integral");
-                return -1;
-            }
-            sema_set_type(e, sx_vtype(e->args[0]));
-            return 0;
-        }
-        if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
-            if (e->arg_count != 0) {
-                set_diag(diag, "__sync_synchronize expects exactly 0 arguments");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
-            const char *nm = bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence" : "__atomic_signal_fence";
-            if (e->arg_count != 1) {
-                set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence expects exactly 1 argument"
-                                                                  : "__atomic_signal_fence expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_int(e->args[0])) {
-                set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
-                                   ? "__atomic_thread_fence memory-order argument must be integral"
-                                   : "__atomic_signal_fence memory-order argument must be integral");
-                return -1;
-            }
-            if (atomic_memorder_check_arg(tu, e->args[0], nm, "fence", 0, 0, diag) != 0) {
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
-            if (e->arg_count != 1) {
-                set_diag(diag, "__sync_lock_release expects exactly 1 argument");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__sync_lock_release first argument must be a pointer");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
-            bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_FETCH_ADD ||
-            bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
-            int expect_argc = (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
-                               bk == BUILTIN_ATOMIC_EXCHANGE_N)
-                                  ? 3
-                                  : 2;
-            if (e->arg_count != (size_t)expect_argc) {
-                set_diag(diag, "atomic fetch/exchange builtin has wrong argument count");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
-                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if ((bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
-                 bk == BUILTIN_ATOMIC_EXCHANGE_N) &&
-                check_expr(tu, e->args[2], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "atomic fetch/exchange first argument must be a pointer");
-                return -1;
-            }
-            atomic_elem = sema_atomic_elem(e->args[0]);
-            if (!sema_assignable(tu, atomic_elem, e->args[1])) {
-                set_diag(diag, "atomic fetch/exchange value type mismatch");
-                return -1;
-            }
-            if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
-                const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
-                                     ? "__atomic_exchange_n"
-                                     : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
-                if (!sx_is_int(e->args[2])) {
-                    set_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
-                    return -1;
-                }
-                if (atomic_memorder_check_arg(tu, e->args[2], nm, "operation", 0, 0, diag) != 0) {
-                    return -1;
-                }
-            }
-            sema_set_type(e, atomic_elem);
-            return 0;
-        }
-        if (bk == BUILTIN_SYNC_BOOL_CAS) {
-            if (e->arg_count != 3) {
-                set_diag(diag, "__sync_bool_compare_and_swap expects exactly 3 arguments");
-                return -1;
-            }
-            for (i = 0; i < 3; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
-                return -1;
-            }
-            atomic_elem = sema_atomic_elem(e->args[0]);
-            if (!sema_assignable(tu, atomic_elem, e->args[1]) || !sema_assignable(tu, atomic_elem, e->args[2])) {
-                set_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-            return 0;
-        }
-        if (bk == BUILTIN_ATOMIC_LOAD_N) {
-            if (e->arg_count != 2) {
-                set_diag(diag, "__atomic_load_n expects exactly 2 arguments");
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0 ||
-                check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__atomic_load_n first argument must be a pointer");
-                return -1;
-            }
-            atomic_elem = sema_atomic_elem(e->args[0]);
-            if (!sx_is_int(e->args[1])) {
-                set_diag(diag, "__atomic_load_n memory-order argument must be integral");
-                return -1;
-            }
-            if (atomic_memorder_check_arg(tu, e->args[1], "__atomic_load_n", "load", 1, 0, diag) != 0) {
-                return -1;
-            }
-            sema_set_type(e, atomic_elem);
-            return 0;
-        }
-        if (bk == BUILTIN_ATOMIC_STORE_N) {
-            if (e->arg_count != 3) {
-                set_diag(diag, "__atomic_store_n expects exactly 3 arguments");
-                return -1;
-            }
-            for (i = 0; i < 3; ++i) {
-                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                    return -1;
-                }
-            }
-            if (!sx_is_ptr(e->args[0])) {
-                set_diag(diag, "__atomic_store_n first argument must be a pointer");
-                return -1;
-            }
-            atomic_elem = sema_atomic_elem(e->args[0]);
-            if (!sema_assignable(tu, atomic_elem, e->args[1])) {
-                set_diag(diag, "__atomic_store_n value type mismatch");
-                return -1;
-            }
-            if (!sx_is_int(e->args[2])) {
-                set_diag(diag, "__atomic_store_n memory-order argument must be integral");
-                return -1;
-            }
-            if (atomic_memorder_check_arg(tu, e->args[2], "__atomic_store_n", "store", 0, 1, diag) != 0) {
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
-            return 0;
-        }
-        if (e->ident != NULL && callee == NULL && bswap_bits != 0) {
-            if (e->arg_count != 1) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "%s expects exactly 1 argument", e->ident);
-                }
-                return -1;
-            }
-            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (!sx_is_int(e->args[0])) {
-                set_diag(diag, "byte-swap builtin requires integral argument");
-                return -1;
-            }
-            sema_set_type(e, cc_ct_basic(bswap_bits == 16 ? CC_CT_USHORT : bswap_bits == 32 ? CC_CT_UINT
-                                                                                          : CC_CT_ULLONG));
-            return 0;
-        }
-        if (e->ident == NULL) {
-            if (e->lhs == NULL) {
-                set_diag(diag, "malformed call expression");
-                return -1;
-            }
-            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            /* a function designator, *fp included, is used as a pointer to the function */
-            if (!sx_is_ptr(e->lhs)) {
-                set_diag(diag, "call target must be a function pointer");
-                return -1;
-            }
-        }
-        if (callee != NULL && callee->has_prototype && !callee->is_variadic && e->arg_count != callee->param_count) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "call to %s has %zu args but %zu required", e->ident,
-                         e->arg_count, callee->param_count);
-            }
-            return -1;
-        }
-        if (callee != NULL && callee->has_prototype && callee->is_variadic && e->arg_count < callee->param_count) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "variadic call to %s has %zu args but needs at least %zu", e->ident, e->arg_count,
-                         callee->param_count);
-            }
-            return -1;
-        }
-        for (i = 0; i < e->arg_count; ++i) {
-            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (callee != NULL && callee->has_prototype && i < callee->param_count &&
-                sema_complex_convert_for_assign(tu, &e->args[i], sema_param_ctype(&callee->params[i])) < 0) {
-                set_diag(diag, "out of memory");
-                return -1;
-            }
-            if (sema_convert_call_arg(tu, e, callee, i) != 0) {
-                set_diag(diag, "out of memory");
-                return -1;
-            }
-            if (callee != NULL && callee->has_prototype && i < callee->param_count &&
-                !sema_assignable(tu, sema_param_ctype(&callee->params[i]), e->args[i]) &&
-                !sema_transparent_union_accepts(tu, sx_ct_record(sema_param_ctype(&callee->params[i])),
-                                                e->args[i])) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i + 1,
-                             e->ident);
-                }
-                return -1;
-            }
-        }
-        if (e->ident != NULL) {
-            size_t fmt_i;
-            if (printf_like_format_index(e->ident, &fmt_i) && fmt_i < e->arg_count && e->args[fmt_i] != NULL &&
-                e->args[fmt_i]->kind == CC_EXPR_STR && e->args[fmt_i]->ident != NULL) {
-                char *rw = rewrite_printf_long_double_format(e->args[fmt_i]->ident);
-                if (rw != NULL) {
-                    free(e->args[fmt_i]->ident);
-                    e->args[fmt_i]->ident = rw;
-                }
-            }
-        }
-        if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
-            char buf[192];
-            /*
-             * We currently record only the presence of nonnull, not its index list.
-             * Avoid false positives (e.g. strtok uses nonnull(2)) by checking
-             * only unambiguous single-parameter prototypes.
-             */
-            if (e->arg_count > 0 && callee->param_count == 1 && sema_is_ptr(sema_param_ctype(&callee->params[0])) &&
-                is_null_ptr_constant(e->args[0])) {
-                snprintf(buf, sizeof(buf), "nonnull argument 1 in call to %s is null",
-                         e->ident != NULL ? e->ident : "<indirect>");
-                if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
-                    return -1;
-                }
-            }
-        }
-        if (callee != NULL) {
-            sema_set_type(e, callee->ret_ctype);
-            if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
-                char buf[192];
-                snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");
-                if (emit_required_warning(diag, e->line, e->col, buf) != 0) {
-                    return -1;
-                }
-            }
-        } else if (e->ident != NULL) {
-            int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
-
-            if (idx >= 0 || g != NULL) {
-                /* a call through a pointer object named directly */
-                const cc_ctype_t *ft = idx >= 0 ? vars[idx].ctype : g->ctype;
-
-                if (!sema_is_ptr(cc_ct_decay(ft))) {
-                    set_diag(diag, "call target must be a function pointer");
-                    return -1;
-                }
-                sema_set_type(e, sema_callee_ret_ctype(ft));
-                return 0;
-            }
-            if (strncmp(e->ident, "__builtin_", 10) == 0 && !cc_builtin_is_recognized(e->ident)) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
-                }
-                return -1;
-            }
-            if (strncmp(e->ident, "__builtin_", 10) != 0 && !cc_options_implicit_funcdecl()) {
-                if (diag != NULL && diag->message[0] == '\0') {
-                    snprintf(diag->message, sizeof(diag->message),
-                             "implicit function declaration is not allowed in this mode: %s", e->ident);
-                }
-                return -1;
-            }
-            /* a builtin with no rule of its own, or C89's undeclared function: extern int f(...) */
-            sema_set_type(e, cc_ct_basic(CC_CT_INT));
-        } else {
-            const cc_function_t *fn = generic_selected_function(tu, e->lhs);
-
-            if (fn == NULL) {
-                fn = infer_callee_function_expr(tu, e->lhs);
-            }
-            sema_set_type(e, fn != NULL ? fn->ret_ctype : sema_callee_ret_ctype(e->lhs->ctype));
-        }
-        return 0;
+        return sema_check_call(tu, e, vars, var_count, depth, diag);
     }
 
     case CC_EXPR_ASSIGN:
