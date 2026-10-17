@@ -4692,10 +4692,6 @@ static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *s
 
         memset(&c, 0, sizeof(c));
         c.kind = CC_EXPR_CAST;
-        c.aux_type = cc_ct_legacy_kind(elem->kind);
-        c.aux_struct_id = -1;
-        c.value_type = c.aux_type;
-        c.struct_id = -1;
         c.ctype = elem;
         c.lhs = (cc_expr_t *)e;
         *re = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
@@ -6068,10 +6064,6 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
 
         memset(&c, 0, sizeof(c));
         c.kind = CC_EXPR_CAST;
-        c.aux_type = is_uns ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
-        c.aux_struct_id = -1;
-        c.value_type = c.aux_type;
-        c.struct_id = -1;
         c.ctype = cc_ct_basic(is_uns ? CC_CT_ULLONG : CC_CT_LLONG);
         c.lhs = (cc_expr_t *)e->lhs;
         v = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
@@ -9313,7 +9305,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.rhs = agg_addr;
             in.imm = agg_size;
             in.is_unsigned = 1;
-            in.agg_class = agg_return_class(tu, e->struct_id, agg_size);
+            in.agg_class = agg_return_class(tu, lower_record_id(e), agg_size);
         } else if (lower_has_kind(e, CC_CT_VOID)) {
             in.dst = new_value(sf, CC_VAL_I64);
             in.imm = cc_target_pointer_size();
@@ -10183,9 +10175,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_INIT_LIST:
         if (getenv("CC_DEBUG_INIT_LIST") != NULL) {
-            fprintf(stderr, "cc-debug: init-list reached lower_expr in %s (value_type=%d struct_id=%d arg_count=%zu)\n",
-                    (sf != NULL && sf->name != NULL) ? sf->name : "<unknown>", (int)e->value_type, e->struct_id,
-                    e->arg_count);
+            char spelled[128];
+
+            cc_ct_format(e->ctype, spelled, sizeof(spelled));
+            fprintf(stderr, "cc-debug: init-list reached lower_expr in %s (type %s, arg_count=%zu)\n",
+                    (sf != NULL && sf->name != NULL) ? sf->name : "<unknown>", spelled, e->arg_count);
         }
         set_diag(diag, "initializer list cannot be used as runtime expression in lowering");
         return -1;
@@ -11964,7 +11958,6 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
             if (m->is_bitfield) {
                 cc_expr_t bf;
                 memset(&bf, 0, sizeof(bf));
-                bf.value_type = m->type;
                 bf.ctype = lower_member_ctype(m);
                 bf.member_is_bitfield = 1;
                 bf.member_bit_width = m->bit_width;
