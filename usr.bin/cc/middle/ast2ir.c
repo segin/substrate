@@ -492,24 +492,79 @@ static int lower_is_unsigned(const cc_expr_t *e) {
  * @param e  the expression
  * @return   1 or 0
  */
-static int lower_loads_unsigned(const cc_expr_t *e) {
-    const cc_ctype_t *t = lower_value_ctype(e);
+static int lower_loads_unsigned(const cc_expr_t *e);
 
+/**
+ * Whether loading a value of type @p t from memory zero-extends it: an
+ * unsigned integer, _Bool or a pointer.
+ *
+ * @param t  the type, decayed; may be NULL
+ * @return   1 or 0
+ */
+static int ct_loads_unsigned(const cc_ctype_t *t) {
     return cc_ct_is_unsigned(t) || (t != NULL && t->kind == CC_CT_POINTER);
 }
 
+static int lower_loads_unsigned(const cc_expr_t *e) {
+    return ct_loads_unsigned(lower_value_ctype(e));
+}
+
 /**
- * The kind of IR value an expression's value is held in: F64 for a real
+ * The type of a variable as a value: its declared type decayed, or, where
+ * the declaration recorded none, the type its legacy fields describe.
+ *
+ * @param v  the variable
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *lower_var_ctype(const var_entry_t *v) {
+    const cc_ctype_t *t = v->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(v->type, v->struct_id, v->array_ndim, v->array_dims);
+    }
+    return cc_ct_decay(t);
+}
+
+/**
+ * The type of a function parameter as a value (see lower_var_ctype()).
+ *
+ * @param p  the parameter
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *lower_param_ctype(const cc_param_t *p) {
+    const cc_ctype_t *t = p->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(p->type, p->type_struct_id, p->array_ndim, p->array_dims);
+    }
+    return cc_ct_decay(t);
+}
+
+/**
+ * The type of a file-scope variable as a value (see lower_var_ctype()).
+ *
+ * @param g  the variable
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
+    const cc_ctype_t *t = g->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(g->type, g->type_struct_id, g->array_ndim, g->array_dims);
+    }
+    return cc_ct_decay(t);
+}
+
+/**
+ * The kind of IR value a value of type @p t is held in: F64 for a real
  * binary floating type or an imaginary one (held as its one part), I64
  * for everything else -- integers, pointers, and the structures that
  * stand for complex, decimal, wide and vector values.
  *
- * @param e  the expression
+ * @param t  the type, decayed; may be NULL
  * @return   CC_VAL_F64 or CC_VAL_I64
  */
-static cc_value_type_t lower_value_kind(const cc_expr_t *e) {
-    const cc_ctype_t *t = lower_value_ctype(e);
-
+static cc_value_type_t ct_value_kind(const cc_ctype_t *t) {
     if (t == NULL) {
         return CC_VAL_I64;
     }
@@ -523,6 +578,16 @@ static cc_value_type_t lower_value_kind(const cc_expr_t *e) {
     default:
         return CC_VAL_I64;
     }
+}
+
+/**
+ * The kind of IR value an expression's value is held in (ct_value_kind()).
+ *
+ * @param e  the expression
+ * @return   CC_VAL_F64 or CC_VAL_I64
+ */
+static cc_value_type_t lower_value_kind(const cc_expr_t *e) {
+    return ct_value_kind(lower_value_ctype(e));
 }
 
 static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id);
@@ -2098,7 +2163,7 @@ static int emit_local_var_scalar_load(cc_ssa_function_t *sf, const var_entry_t *
         return v->value;
     }
 
-    vt = type_to_val(v->type);
+    vt = ct_value_kind(lower_var_ctype(v));
     size = v->addr_size > 0 ? v->addr_size : cc_target_pointer_size();
 
     memset(&in, 0, sizeof(in));
@@ -2107,7 +2172,7 @@ static int emit_local_var_scalar_load(cc_ssa_function_t *sf, const var_entry_t *
     in.lhs = v->addr_value;
     in.rhs = -1;
     in.imm = size;
-    in.is_unsigned = is_unsigned_load_type(v->type) ? 1 : 0;
+    in.is_unsigned = ct_loads_unsigned(lower_var_ctype(v)) ? 1 : 0;
     if (in.dst < 0 || push_instr(sf, in) != 0) {
         set_diag(diag, "out of memory loading local scalar variable");
         return -1;
@@ -2138,7 +2203,7 @@ static int emit_local_var_scalar_store(cc_ssa_function_t *sf, const var_entry_t 
     in.lhs = v->addr_value;
     in.rhs = rhs;
     in.imm = size;
-    in.is_unsigned = is_unsigned_load_type(v->type) ? 1 : 0;
+    in.is_unsigned = ct_loads_unsigned(lower_var_ctype(v)) ? 1 : 0;
     if (push_instr(sf, in) != 0) {
         set_diag(diag, "out of memory storing local scalar variable");
         return -1;
@@ -9488,7 +9553,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     in.lhs = saddr;
                     in.rhs = -1;
                     in.imm = mem_size;
-                    in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+                    in.is_unsigned = ct_loads_unsigned(lower_var_ctype(&vars[idx])) ? 1 : 0;
                     if (in.dst < 0 || push_instr(sf, in) != 0) {
                         set_diag(diag, "out of memory loading static local for ++/--");
                         return -1;
@@ -9506,7 +9571,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     in.lhs = vars[idx].addr_value;
                     in.rhs = -1;
                     in.imm = mem_size;
-                    in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+                    in.is_unsigned = ct_loads_unsigned(lower_var_ctype(&vars[idx])) ? 1 : 0;
                     if (in.dst < 0 || push_instr(sf, in) != 0) {
                         set_diag(diag, "out of memory loading address-taken local for ++/--");
                         return -1;
@@ -9652,7 +9717,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 load_in.lhs = gaddr;
                 load_in.rhs = -1;
                 load_in.imm = mem_size;
-                load_in.is_unsigned = is_unsigned_load_type(g->type) ? 1 : 0;
+                load_in.is_unsigned = ct_loads_unsigned(lower_global_ctype(g)) ? 1 : 0;
                 if (load_in.dst < 0 || push_instr(sf, load_in) != 0) {
                     return -1;
                 }
@@ -12203,8 +12268,8 @@ static int lower_nested_bind_outer(const cc_translation_unit_t *tu, cc_ssa_funct
         } else {
             v->addr_size = var_scalar_access_size(tu, v);
             v->value = emit_const_i64_instr(sf, 0);
-            if (v->value >= 0 && type_to_val(v->type) != CC_VAL_I64) {
-                v->value = cast_value(sf, v->value, type_to_val(v->type), diag);
+            if (v->value >= 0 && ct_value_kind(lower_var_ctype(v)) != CC_VAL_I64) {
+                v->value = cast_value(sf, v->value, ct_value_kind(lower_var_ctype(v)), diag);
             }
             if (v->value < 0) {
                 rc = -1;
@@ -17657,7 +17722,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_PARAM;
-            in.dst = new_value(sf, type_to_val(af->params[j].type));
+            in.dst = new_value(sf, ct_value_kind(lower_param_ctype(&af->params[j])));
             in.lhs = -1;
             in.rhs = -1;
             in.param_index = (int)j;
@@ -17704,7 +17769,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 in.lhs = agg_reg_storage;
             }
             in.imm = param_size;
-            in.is_unsigned = is_unsigned_load_type(af->params[j].type) ? 1 : 0;
+            in.is_unsigned = ct_loads_unsigned(lower_param_ctype(&af->params[j])) ? 1 : 0;
             if (in.dst < 0) {
                 set_diag(diag, "out of memory assigning param SSA value");
                 cc_ssa_module_free(out);
@@ -17714,7 +17779,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 set_value_size(sf, in.dst, 16);
             }
             sf->param_values[j] = in.dst;
-            sf->param_types[j] = type_to_val(af->params[j].type);
+            sf->param_types[j] = ct_value_kind(lower_param_ctype(&af->params[j]));
             if (use_agg_mem_abi) {
                 sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
                                                    vector_mem_flag(tu, af->params[j].type_struct_id, param_size));
