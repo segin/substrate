@@ -298,7 +298,6 @@ static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
                            const char *what);
-static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id);
 static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e);
 static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
@@ -333,6 +332,8 @@ static int local_label_push(parser_t *p, const char *name, size_t len);
 static void local_label_pop_to_depth(parser_t *p, int depth);
 static void parser_free_local_labels(parser_t *p);
 static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_sid);
+static int parser_ctype_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS]);
 
 static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
     cc_function_t *next;
@@ -975,19 +976,6 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
         return 1;
     }
     return struct_ids_compatible(p, lhs_sid, rhs_sid);
-}
-
-/**
- * Whether a _Generic association of type @p assoc matches a controlling
- * expression of type @p ctrl, as the parser can tell before the
- * expression is checked: the same type, qualifiers aside.
- */
-static int parser_generic_assoc_matches(const cc_ctype_t *assoc, const cc_ctype_t *ctrl) {
-    return assoc != NULL && ctrl != NULL && assoc->unqual == ctrl->unqual;
-}
-
-static int parser_is_numeric_type(cc_type_t t) {
-    return cc_type_is_integral(t) || cc_type_is_floating(t);
 }
 
 static long parser_string_literal_array_bound(const cc_expr_t *e);
@@ -2408,61 +2396,16 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         return -1;
                     }
                     typeof_ctype = parser_expr_ctype(p, te);
-                    if (infer_expr_type(p, te, &ty, &sid) != 0) {
-                        ty = te->value_type;
-                        sid = te->struct_id;
+                    if (typeof_ctype == NULL) {
+                        set_diag(p->diag, te->line, te->col, "cannot determine the type of typeof's operand");
+                        free_expr(te);
+                        return -1;
                     }
-                    if (te->kind == CC_EXPR_STR) {
-                        long bound = parser_string_literal_array_bound(te);
-                        if (bound > 0) {
-                            ty = te->value_type;
-                            sid = te->struct_id;
-                            type_array_ndim = 1;
-                            memset(type_array_dims, 0, sizeof(type_array_dims));
-                            type_array_dims[0] = bound;
-                            type_array_len = bound;
-                        }
-                    } else if (te->kind != CC_EXPR_ADDR && te->array_ndim > 0) {
-                        type_array_ndim = te->array_ndim;
-                        memcpy(type_array_dims, te->array_dims, sizeof(type_array_dims));
-                        type_array_len = type_array_dims[0];
-                    } else if (te->kind == CC_EXPR_CAST && te->lhs != NULL && te->lhs->kind == CC_EXPR_INIT_LIST &&
-                               te->array_ndim > 0) {
-                        ty = te->value_type;
-                        sid = te->struct_id;
-                        type_array_ndim = te->array_ndim;
-                        memcpy(type_array_dims, te->array_dims, sizeof(type_array_dims));
-                        if (type_array_ndim > 0) {
-                            type_array_len = type_array_dims[0];
-                        }
-                    } else if (te->kind == CC_EXPR_IDENT && te->ident != NULL) {
-                        int vidx = var_find_visible_n(p, te->ident, strlen(te->ident));
-                        if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
-                            type_array_ndim = p->vars[vidx].array_ndim;
-                            memcpy(type_array_dims, p->vars[vidx].array_dims, sizeof(type_array_dims));
-                            if (type_array_ndim > 0) {
-                                type_array_len = type_array_dims[0];
-                            }
-                        } else if (vidx < 0 && p->tu != NULL) {
-                            size_t gi;
-                            for (gi = 0; gi < p->tu->global_count; ++gi) {
-                                const cc_global_t *g = &p->tu->globals[gi];
-                                if (g->name == NULL || strcmp(g->name, te->ident) != 0) {
-                                    continue;
-                                }
-                                if (g->array_ndim > 0) {
-                                    type_array_ndim = g->array_ndim;
-                                    memcpy(type_array_dims, g->array_dims, sizeof(type_array_dims));
-                                    type_array_len = g->array_len;
-                                } else if (g->array_len > 0) {
-                                    type_array_ndim = 1;
-                                    memset(type_array_dims, 0, sizeof(type_array_dims));
-                                    type_array_dims[0] = g->array_len;
-                                    type_array_len = g->array_len;
-                                }
-                                break;
-                            }
-                        }
+                    if (parser_ctype_legacy(typeof_ctype, &ty, &sid, &type_array_len, &type_array_ndim,
+                                            type_array_dims) != 0) {
+                        set_diag(p->diag, te->line, te->col, "array rank > 4 is not yet supported");
+                        free_expr(te);
+                        return -1;
                     }
                     free_expr(te);
                 }
@@ -3957,286 +3900,6 @@ static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
     }
 }
 
-static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
-    cc_type_t lt;
-    cc_type_t rt;
-    int lsid;
-    int rsid;
-
-    if (out_type == NULL || out_struct_id == NULL) {
-        return -1;
-    }
-    *out_type = CC_TYPE_INT;
-    *out_struct_id = -1;
-    if (e == NULL) {
-        return -1;
-    }
-
-    switch (e->kind) {
-    case CC_EXPR_IDENT:
-        if (e->ident != NULL) {
-            int vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
-            if (vidx >= 0) {
-                *out_type = p->vars[vidx].type;
-                *out_struct_id = p->vars[vidx].struct_id;
-                return 0;
-            }
-            {
-                const cc_global_t *g = parser_find_global_decl(p, e->ident);
-                if (g != NULL) {
-                    *out_type = g->type;
-                    *out_struct_id = g->type_struct_id;
-                    return 0;
-                }
-            }
-            if (parser_find_function_decl(p, e->ident) != NULL) {
-                *out_type = CC_TYPE_FUNC;
-                *out_struct_id = -1;
-                return 0;
-            }
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_INT:
-    case CC_EXPR_FLOAT:
-    case CC_EXPR_STR:
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_CAST:
-        *out_type = e->aux_type;
-        *out_struct_id = e->aux_struct_id;
-        return 0;
-    case CC_EXPR_ADDR:
-        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
-            const cc_function_t *f = parser_find_function_decl(p, e->lhs->ident);
-            if (f != NULL) {
-                lt = ptr_of_type(f->ret_type);
-                if (lt != CC_TYPE_VOID) {
-                    *out_type = lt;
-                    *out_struct_id = type_carries_struct_id(lt) ? f->ret_struct_id : -1;
-                    return 0;
-                }
-            }
-        }
-        if (infer_expr_type(p, e->lhs, &lt, &lsid) != 0) {
-            *out_type = e->value_type;
-            *out_struct_id = e->struct_id;
-            return 0;
-        }
-        lt = ptr_of_type(lt);
-        if (lt != CC_TYPE_VOID) {
-            *out_type = lt;
-            *out_struct_id = type_carries_struct_id(lt) ? lsid : -1;
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_DEREF:
-        if (infer_expr_type(p, e->lhs, &lt, &lsid) != 0) {
-            *out_type = e->value_type;
-            *out_struct_id = e->struct_id;
-            return 0;
-        }
-        if (is_pointer_type(lt)) {
-            lt = ptr_deref_type(lt);
-            *out_type = lt;
-            *out_struct_id = type_carries_struct_id(lt) ? lsid : -1;
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_MEMBER: {
-        const cc_struct_member_t *sm = NULL;
-        if (infer_expr_type(p, e->lhs, &lt, &lsid) != 0) {
-            *out_type = e->value_type;
-            *out_struct_id = e->struct_id;
-            return 0;
-        }
-        if (e->member_is_arrow) {
-            lt = ptr_deref_type(lt);
-            if (!type_carries_struct_id(lt)) {
-                lsid = -1;
-            }
-        }
-        if (lt == CC_TYPE_VOID && lsid >= 0 && e->ident != NULL) {
-            sm = struct_member_find_n(p, lsid, e->ident, strlen(e->ident));
-            if (sm != NULL) {
-                *out_type = sm->type;
-                *out_struct_id = sm->type_struct_id;
-                return 0;
-            }
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    }
-    case CC_EXPR_BIN:
-        if (infer_expr_type(p, e->lhs, &lt, &lsid) != 0) {
-            lt = e->lhs != NULL ? e->lhs->value_type : CC_TYPE_INT;
-            lsid = e->lhs != NULL ? e->lhs->struct_id : -1;
-        }
-        if (infer_expr_type(p, e->rhs, &rt, &rsid) != 0) {
-            rt = e->rhs != NULL ? e->rhs->value_type : CC_TYPE_INT;
-            rsid = e->rhs != NULL ? e->rhs->struct_id : -1;
-        }
-        if (e->op == CC_BIN_COMMA) {
-            *out_type = rt;
-            *out_struct_id = rsid;
-            return 0;
-        }
-        if (!e->is_subscript && e->op != CC_BIN_LAND && e->op != CC_BIN_LOR &&
-            ((lt == CC_TYPE_VOID && lsid >= 0 && p->structs[lsid].vector_count > 0) ||
-             (rt == CC_TYPE_VOID && rsid >= 0 && p->structs[rsid].vector_count > 0))) {
-            /* an operator with a vector operand: that vector type, or a comparison's */
-            int vs = (lt == CC_TYPE_VOID && lsid >= 0 && p->structs[lsid].vector_count > 0) ? lsid : rsid;
-            int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
-                         e->op == CC_BIN_GT || e->op == CC_BIN_GE;
-
-            *out_type = CC_TYPE_VOID;
-            *out_struct_id = is_cmp ? p->structs[vs].vector_cmp_sid : vs;
-            return 0;
-        }
-        if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
-            if (is_pointer_type(lt) && !is_pointer_type(rt)) {
-                *out_type = lt;
-                *out_struct_id = lsid;
-                return 0;
-            }
-            if (e->op == CC_BIN_ADD && !is_pointer_type(lt) && is_pointer_type(rt)) {
-                *out_type = rt;
-                *out_struct_id = rsid;
-                return 0;
-            }
-            if (e->op == CC_BIN_SUB && is_pointer_type(lt) && is_pointer_type(rt)) {
-                *out_type = CC_TYPE_LONG_LONG;
-                *out_struct_id = -1;
-                return 0;
-            }
-        }
-        if (parser_is_numeric_type(lt) && parser_is_numeric_type(rt)) {
-            *out_type = parser_common_arith_type(lt, rt);
-            *out_struct_id = -1;
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_CALL:
-        if (e->ident != NULL) {
-            const cc_function_t *f = parser_find_function_decl(p, e->ident);
-            if (f != NULL) {
-                *out_type = f->ret_type;
-                *out_struct_id = f->ret_struct_id;
-                return 0;
-            }
-        }
-        if (e->lhs != NULL && infer_expr_type(p, e->lhs, &lt, &lsid) == 0 && is_pointer_type(lt)) {
-            *out_type = ptr_deref_type(lt);
-            *out_struct_id = type_carries_struct_id(*out_type) ? lsid : -1;
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_GENERIC: {
-        long selected = -1;
-        long default_idx = -1;
-        size_t i;
-        cc_type_t ctrl_type = CC_TYPE_INT;
-        int ctrl_sid = -1;
-
-        if (e->lhs != NULL) {
-            if (infer_expr_type(p, e->lhs, &ctrl_type, &ctrl_sid) != 0) {
-                ctrl_type = e->lhs->value_type;
-                ctrl_sid = e->lhs->struct_id;
-            }
-        }
-        for (i = 0; i < e->generic_count; ++i) {
-            if (e->generic_is_default != NULL && e->generic_is_default[i]) {
-                default_idx = (long)i;
-                continue;
-            }
-            if (parser_generic_assoc_matches(e->generic_ctypes[i], cc_ct_from_legacy(ctrl_type, ctrl_sid, 0, NULL))) {
-                selected = (long)i;
-                break;
-            }
-        }
-        if (selected < 0) {
-            selected = default_idx;
-        }
-        if (selected < 0 || (size_t)selected >= e->arg_count || e->args == NULL || e->args[selected] == NULL) {
-            *out_type = e->value_type;
-            *out_struct_id = e->struct_id;
-            return 0;
-        }
-        if (infer_expr_type(p, e->args[selected], out_type, out_struct_id) == 0) {
-            return 0;
-        }
-        *out_type = e->args[selected]->value_type;
-        *out_struct_id = e->args[selected]->struct_id;
-        return 0;
-    }
-    case CC_EXPR_ASSIGN:
-        if (e->rhs != NULL && infer_expr_type(p, e->rhs, out_type, out_struct_id) == 0) {
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_UPDATE:
-        if (e->lhs != NULL && infer_expr_type(p, e->lhs, out_type, out_struct_id) == 0) {
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_TERNARY:
-        if (e->rhs != NULL && infer_expr_type(p, e->rhs, &lt, &lsid) == 0 &&
-            e->third != NULL && infer_expr_type(p, e->third, &rt, &rsid) == 0) {
-            if (lt == rt && lsid == rsid) {
-                *out_type = lt;
-                *out_struct_id = lsid;
-                return 0;
-            }
-            if (is_pointer_type(lt) && is_pointer_type(rt) &&
-                (parser_types_compatible(p, lt, lsid, 0, rt, rsid, 0) ||
-                 parser_types_compatible(p, rt, rsid, 0, lt, lsid, 0))) {
-                *out_type = lt;
-                *out_struct_id = lsid;
-                return 0;
-            }
-        }
-        if (e->third != NULL && infer_expr_type(p, e->third, out_type, out_struct_id) == 0) {
-            return 0;
-        }
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_STMT:
-        if (e->stmt_expr_count > 0) {
-            const cc_stmt_t *tail = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
-            if (tail->kind == CC_STMT_EXPR && tail->expr != NULL) {
-                if (infer_expr_type(p, tail->expr, out_type, out_struct_id) == 0) {
-                    return 0;
-                }
-                *out_type = tail->expr->value_type;
-                *out_struct_id = tail->expr->struct_id;
-                return 0;
-            }
-        }
-        *out_type = CC_TYPE_VOID;
-        *out_struct_id = -1;
-        return 0;
-    default:
-        *out_type = e->value_type;
-        *out_struct_id = e->struct_id;
-        return 0;
-    }
-}
 
 static int parser_expr_typeof_const_context(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
     cc_type_t lt = CC_TYPE_VOID;
@@ -4581,6 +4244,49 @@ static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *
     }
     *out_type = ty;
     *out_sid = leg.struct_id;
+}
+
+/**
+ * The legacy encoding of a declared type, as the parser's legacy
+ * declaration fields hold it.
+ *
+ * @param t               the type
+ * @param out_type        receives the cc_type_t: the base with a pointer
+ *                        level per pointer and per array dimension
+ * @param out_struct_id   receives the struct id (or _BitInt width); may be NULL
+ * @param out_array_len   receives the product of the bounds, -1 without
+ *                        arrays; may be NULL
+ * @param out_array_ndim  receives the number of array dimensions; may be NULL
+ * @param out_array_dims  receives their bounds, outermost first; may be NULL
+ * @return                0, or -1 if @p t has no legacy encoding
+ */
+static int parser_ctype_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                               int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS]) {
+    cc_ct_legacy_t leg;
+    cc_type_t ty;
+    unsigned i;
+
+    if (cc_ct_to_legacy(t, &leg) != 0) {
+        return -1;
+    }
+    ty = leg.base;
+    for (i = 0; i < leg.depth; ++i) {
+        ty = ptr_of_type(ty);
+    }
+    *out_type = ty;
+    if (out_struct_id != NULL) {
+        *out_struct_id = leg.struct_id;
+    }
+    if (out_array_len != NULL) {
+        *out_array_len = leg.array_len;
+    }
+    if (out_array_ndim != NULL) {
+        *out_array_ndim = leg.ndim;
+    }
+    if (out_array_dims != NULL) {
+        memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
+    }
+    return 0;
 }
 
 /**
@@ -6816,7 +6522,6 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
     const cc_ctype_t *alias;
     const cc_ctype_t *t;
     cc_ct_legacy_t leg;
-    unsigned i;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
 
@@ -6862,23 +6567,7 @@ static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_
         set_diag(p->diag, line, col, msg);
         return -1;
     }
-    ty = leg.base;
-    for (i = 0; i < leg.depth; ++i) {
-        ty = ptr_of_type(ty);
-    }
-    *out_type = ty;
-    if (out_struct_id != NULL) {
-        *out_struct_id = leg.struct_id;
-    }
-    if (out_array_len != NULL) {
-        *out_array_len = leg.array_len;
-    }
-    if (out_array_ndim != NULL) {
-        *out_array_ndim = leg.ndim;
-    }
-    if (out_array_dims != NULL) {
-        memcpy(out_array_dims, leg.dims, sizeof(leg.dims));
-    }
+    parser_ctype_legacy(t, out_type, out_struct_id, out_array_len, out_array_ndim, out_array_dims);
     if (out_ctype != NULL) {
         *out_ctype = t;
     }
