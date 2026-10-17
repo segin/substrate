@@ -983,34 +983,8 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
 
 static long parser_string_literal_array_bound(const cc_expr_t *e);
 static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init);
-
-static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
-    long sa;
-    long sb;
-
-    if (cc_type_is_floating(a) || cc_type_is_floating(b)) {
-        if (a == CC_TYPE_LDOUBLE || b == CC_TYPE_LDOUBLE) return CC_TYPE_LDOUBLE;
-        if (a == CC_TYPE_DOUBLE || b == CC_TYPE_DOUBLE) return CC_TYPE_DOUBLE;
-        if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) return CC_TYPE_FLOAT;
-        if (a == CC_TYPE_FLOAT16 || b == CC_TYPE_FLOAT16) return CC_TYPE_FLOAT16;
-        if (a == CC_TYPE_DECIMAL128 || b == CC_TYPE_DECIMAL128) return CC_TYPE_DECIMAL128;
-        if (a == CC_TYPE_DECIMAL64 || b == CC_TYPE_DECIMAL64) return CC_TYPE_DECIMAL64;
-        if (a == CC_TYPE_DECIMAL32 || b == CC_TYPE_DECIMAL32) return CC_TYPE_DECIMAL32;
-        return CC_TYPE_DOUBLE;
-    }
-    if (!cc_type_is_integral(a) || !cc_type_is_integral(b)) {
-        return CC_TYPE_INT;
-    }
-    sa = cc_type_scalar_size(a);
-    sb = cc_type_scalar_size(b);
-    if (sa < 0) sa = 4;
-    if (sb < 0) sb = 4;
-    if (sa > sb) return a;
-    if (sb > sa) return b;
-    if (cc_type_is_unsigned_integral(a) && !cc_type_is_unsigned_integral(b)) return a;
-    if (cc_type_is_unsigned_integral(b) && !cc_type_is_unsigned_integral(a)) return b;
-    return a;
-}
+static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const cc_expr_t *init);
+static long parser_ct_size(const parser_t *p, const cc_ctype_t *t);
 
 static cc_type_t packed_enum_type_from_range(long min_v, long max_v) {
     if (min_v >= 0) {
@@ -3902,200 +3876,65 @@ static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
 }
 
 
-static int parser_expr_typeof_const_context(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
-    cc_type_t lt = CC_TYPE_VOID;
-    cc_type_t rt = CC_TYPE_VOID;
-    int ls = -1;
-    int rs = -1;
 
-    if (p == NULL || e == NULL || out_type == NULL || out_struct_id == NULL) {
-        return -1;
-    }
-    *out_type = CC_TYPE_VOID;
-    *out_struct_id = -1;
+/**
+ * The bound an array operand of sizeof has though its type leaves it out:
+ * a global's (`int g[] = {1, 2, 3}`, also when a block-scope `extern int
+ * g[];` names it) or a compound literal's (`(int[]){1, 2}`), from its
+ * initializer.
+ *
+ * @param p  the parser
+ * @param e  the operand
+ * @param t  its type, an array of unknown bound
+ * @return   the completed type, or @p t
+ */
+static const cc_ctype_t *parser_complete_operand_array(parser_t *p, const cc_expr_t *e, const cc_ctype_t *t) {
+    const cc_expr_t *init = NULL;
+    long n = 0;
 
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        *out_type = e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_STR:
-        *out_type = e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_PTR_CHAR;
-        *out_struct_id = e->struct_id;
-        return 0;
-    case CC_EXPR_IDENT: {
-        int vidx;
-        if (e->ident == NULL) {
-            return -1;
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        const cc_global_t *g = parser_find_global_decl(p, e->ident);
+
+        if (g == NULL) {
+            return t;
         }
-        vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
-        if (vidx >= 0) {
-            *out_type = p->vars[vidx].type;
-            *out_struct_id = p->vars[vidx].struct_id;
-            return 0;
+        if (g->ctype != NULL && g->ctype->kind == CC_CT_ARRAY && g->ctype->count > 0) {
+            return g->ctype;
         }
-        if (p->tu != NULL) {
-            size_t gi;
-            for (gi = 0; gi < p->tu->global_count; ++gi) {
-                if (p->tu->globals[gi].name != NULL && strcmp(p->tu->globals[gi].name, e->ident) == 0) {
-                    *out_type = p->tu->globals[gi].type;
-                    *out_struct_id = p->tu->globals[gi].type_struct_id;
-                    return 0;
-                }
-            }
+        if (g->array_len > 0) {
+            return cc_ct_array(t->of, g->array_len);
         }
-        return -1;
+        init = g->init;
+    } else if (e->kind == CC_EXPR_CAST) {
+        init = e->lhs;
     }
-    case CC_EXPR_CAST:
-        *out_type = e->aux_type;
-        *out_struct_id = e->aux_struct_id;
-        return 0;
-    case CC_EXPR_SIZEOF:
-        *out_type = parser_size_type();
-        *out_struct_id = -1;
-        return 0;
-    case CC_EXPR_ADDR:
-        if (parser_expr_typeof_const_context(p, e->lhs, &lt, &ls) != 0) {
-            return -1;
-        }
-        *out_type = ptr_of_type(lt);
-        *out_struct_id = type_carries_struct_id(*out_type) ? ls : -1;
-        return *out_type != CC_TYPE_VOID ? 0 : -1;
-    case CC_EXPR_DEREF:
-        if (parser_expr_typeof_const_context(p, e->lhs, &lt, &ls) != 0 || !is_pointer_type(lt)) {
-            return -1;
-        }
-        *out_type = ptr_deref_type(lt);
-        *out_struct_id = type_carries_struct_id(*out_type) ? ls : -1;
-        return 0;
-    case CC_EXPR_MEMBER:
-        if (e->value_type != CC_TYPE_VOID || e->struct_id >= 0) {
-            *out_type = e->value_type;
-            *out_struct_id = e->struct_id;
-            return 0;
-        }
-        return -1;
-    case CC_EXPR_BIN:
-        if (e->op == CC_BIN_COMMA) {
-            return parser_expr_typeof_const_context(p, e->rhs, out_type, out_struct_id);
-        }
-        if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
-            e->op == CC_BIN_GT || e->op == CC_BIN_GE || e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
-            *out_type = CC_TYPE_INT;
-            *out_struct_id = -1;
-            return 0;
-        }
-        if (parser_expr_typeof_const_context(p, e->lhs, &lt, &ls) != 0 ||
-            parser_expr_typeof_const_context(p, e->rhs, &rt, &rs) != 0) {
-            return -1;
-        }
-        if (is_pointer_type(lt) && e->op == CC_BIN_ADD) {
-            *out_type = lt;
-            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
-            return 0;
-        }
-        if (is_pointer_type(rt) && e->op == CC_BIN_ADD) {
-            *out_type = rt;
-            *out_struct_id = type_carries_struct_id(rt) ? rs : -1;
-            return 0;
-        }
-        if (is_pointer_type(lt) && e->op == CC_BIN_SUB) {
-            *out_type = lt;
-            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
-            return 0;
-        }
-        *out_type = parser_common_arith_type(lt, rt);
-        *out_struct_id = -1;
-        return 0;
-    case CC_EXPR_TERNARY:
-        if (e->rhs == NULL) {
-            return parser_expr_typeof_const_context(p, e->lhs, out_type, out_struct_id);
-        }
-        if (parser_expr_typeof_const_context(p, e->rhs, &lt, &ls) != 0 ||
-            parser_expr_typeof_const_context(p, e->third, &rt, &rs) != 0) {
-            return -1;
-        }
-        if (is_pointer_type(lt) && is_pointer_type(rt)) {
-            if (cc_type_pointer_base(lt) == CC_TYPE_VOID || cc_type_pointer_base(rt) == CC_TYPE_VOID) {
-                *out_type = ptr_of_type(CC_TYPE_VOID);
-                *out_struct_id = -1;
-                return 0;
-            }
-            *out_type = lt;
-            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
-            return 0;
-        }
-        if (is_pointer_type(lt) && rt == CC_TYPE_INT && e->third != NULL && e->third->kind == CC_EXPR_INT &&
-            e->third->int_val == 0) {
-            *out_type = lt;
-            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
-            return 0;
-        }
-        if (is_pointer_type(rt) && lt == CC_TYPE_INT && e->rhs != NULL && e->rhs->kind == CC_EXPR_INT &&
-            e->rhs->int_val == 0) {
-            *out_type = rt;
-            *out_struct_id = type_carries_struct_id(rt) ? rs : -1;
-            return 0;
-        }
-        *out_type = parser_common_arith_type(lt, rt);
-        *out_struct_id = -1;
-        return 0;
-    default:
-        return -1;
+    if (init != NULL && init->kind == CC_EXPR_INIT_LIST) {
+        n = parser_init_list_bound_ct(p, t->of, init);
+    } else if (init != NULL && init->kind == CC_EXPR_STR) {
+        n = parser_string_literal_array_bound(init);
     }
+    return n > 0 ? cc_ct_array(t->of, n) : t;
 }
 
 /**
- * The size in bytes of an array: its element size times its bounds.
+ * The size of type @p t as the parser knows it so far: its structures
+ * are the parser's, which the translation unit receives only at the end.
  *
- * @param p          the parser
- * @param type       the array's type as the AST records it (a pointer to
- *                   the element type)
- * @param struct_id  the element's struct id, or -1
- * @param ndim       the number of dimensions
- * @param dims       the bounds
- * @return           the size, or -1 if a bound or the element size is
- *                   not known
+ * @return the size in bytes, or -1 if not known
  */
-static long parser_array_bytes(parser_t *p, cc_type_t type, int struct_id, int ndim, const long *dims) {
-    cc_type_t elem_type = is_pointer_type(type) ? ptr_deref_type(type) : type;
-    long total = parser_type_size_bytes(p, elem_type, struct_id);
-    int i;
+static long parser_ct_size(const parser_t *p, const cc_ctype_t *t) {
+    cc_translation_unit_t view;
 
-    if (total <= 0) {
-        return -1;
-    }
-    for (i = 0; i < ndim; ++i) {
-        if (dims[i] <= 0 || total > LONG_MAX / dims[i]) {
-            return -1;
-        }
-        total *= dims[i];
-    }
-    return total;
-}
-
-/**
- * Fill in an array's missing outer bound from a global's definition: its
- * declared length, or the length of its initializer list.
- *
- * @param p     the parser
- * @param g     the global
- * @param dims  the bounds; dims[0] is set if it is not yet known
- */
-static void parser_global_fill_bound(parser_t *p, const cc_global_t *g, long *dims) {
-    if (dims[0] <= 0 && g->array_len > 0) {
-        dims[0] = g->array_len;
-    }
-    if (dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST && g->init->arg_count > 0) {
-        dims[0] = parser_init_list_array_bound(p, g->type, g->type_struct_id, g->init);
-    }
+    memset(&view, 0, sizeof(view));
+    view.structs = p->structs;
+    view.struct_count = p->struct_count;
+    return cc_ct_size(t, &view);
 }
 
 /**
  * The size in bytes of a sizeof expression, for the constant evaluator:
- * of a string literal, an array the parser knows the bounds of (a local
- * or global, or a compound literal), an array type name, or any other
- * type.
+ * of its operand's type -- an array's bound completed from its
+ * initializer where its type leaves it out -- or of the type it names.
  *
  * @param ctx  the parser
  * @param e    the CC_EXPR_SIZEOF node
@@ -4103,108 +3942,21 @@ static void parser_global_fill_bound(parser_t *p, const cc_global_t *g, long *di
  */
 static long parser_const_sizeof(void *ctx, const cc_expr_t *e) {
     parser_t *p = (parser_t *)ctx;
+    const cc_ctype_t *t = e->lhs != NULL ? parser_expr_ctype(p, e->lhs) : e->aux_ctype;
     long sz;
 
-    if (e->lhs != NULL && e->lhs->kind == CC_EXPR_STR) {
-        long bound = parser_string_literal_array_bound(e->lhs);
-        cc_type_t elem_type = ptr_deref_type(e->lhs->value_type);
-        long elem_size = parser_type_size_bytes(p, elem_type, e->lhs->struct_id);
-        if (bound > 0 && elem_size > 0 && bound <= LONG_MAX / elem_size) {
-            return bound * elem_size;
-        }
+    if (t != NULL && t->kind == CC_CT_ARRAY && t->count < 0 && e->lhs != NULL) {
+        t = parser_complete_operand_array(p, e->lhs, t);
     }
-    if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
-        int vidx = var_find_visible_n(p, e->lhs->ident, strlen(e->lhs->ident));
-        long dims[CC_MAX_ARRAY_DIMS];
-        size_t gi;
-
-        if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
-            memcpy(dims, p->vars[vidx].array_dims, sizeof(dims));
-            /* a local `extern T a[];` takes its bound from the global */
-            if (dims[0] <= 0 && p->tu != NULL && p->vars[vidx].name != NULL) {
-                for (gi = 0; gi < p->tu->global_count; ++gi) {
-                    const cc_global_t *g = &p->tu->globals[gi];
-                    if (g->name != NULL && strcmp(g->name, p->vars[vidx].name) == 0) {
-                        if (g->array_ndim > 0) {
-                            memcpy(dims, g->array_dims, sizeof(dims));
-                        }
-                        parser_global_fill_bound(p, g, dims);
-                        break;
-                    }
-                }
-            }
-            return parser_array_bytes(p, p->vars[vidx].type, p->vars[vidx].struct_id, p->vars[vidx].array_ndim,
-                                      dims);
-        }
-        if (vidx < 0 && p->tu != NULL) {
-            for (gi = 0; gi < p->tu->global_count; ++gi) {
-                const cc_global_t *g = &p->tu->globals[gi];
-                int ndim = g->array_ndim;
-
-                if (g->name == NULL || strcmp(g->name, e->lhs->ident) != 0) {
-                    continue;
-                }
-                memset(dims, 0, sizeof(dims));
-                if (ndim > 0) {
-                    memcpy(dims, g->array_dims, sizeof(dims));
-                } else if (g->array_len > 0) {
-                    ndim = 1;
-                }
-                if (ndim <= 0) {
-                    continue;
-                }
-                parser_global_fill_bound(p, g, dims);
-                return parser_array_bytes(p, g->type, g->type_struct_id, ndim, dims);
-            }
-        }
+    if (t == NULL) {
+        return -1;
     }
-    if (e->lhs != NULL && e->lhs->array_ndim > 0) {
-        long dims[CC_MAX_ARRAY_DIMS];
-
-        memcpy(dims, e->lhs->array_dims, sizeof(dims));
-        /* a compound literal (T[]){...} takes its bound from the list */
-        if (dims[0] <= 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
-            e->lhs->lhs->kind == CC_EXPR_INIT_LIST) {
-            dims[0] = parser_init_list_array_bound(p, e->lhs->value_type, e->lhs->struct_id, e->lhs->lhs);
-        }
-        return parser_array_bytes(p, e->lhs->value_type, e->lhs->struct_id, e->lhs->array_ndim, dims);
+    if (t->unqual->kind == CC_CT_VOID || t->unqual->kind == CC_CT_FUNCTION) {
+        /* sizeof of void or a function is 1, as gcc has it */
+        return 1;
     }
-    if (e->lhs == NULL && e->array_ndim > 0) {
-        return parser_array_bytes(p, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
-    }
-    {
-        cc_type_t st = e->aux_type;
-        if (st == CC_TYPE_VOID && e->aux_struct_id < 0 && e->lhs != NULL) {
-            int ssid = -1;
-            if (parser_expr_typeof_const_context(p, e->lhs, &st, &ssid) != 0) {
-                st = e->lhs->value_type;
-                ssid = e->lhs->struct_id;
-            }
-            sz = parser_type_size_bytes(p, st, ssid);
-            if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && ssid >= 0))) {
-                return sz;
-            }
-            if (st == CC_TYPE_VOID && ssid < 0) {
-                return 1;
-            }
-        }
-        if (e->lhs == NULL && st == CC_TYPE_VOID && e->aux_struct_id < 0) {
-            /* sizeof(void) is 1, as gcc has it */
-            return 1;
-        }
-        sz = parser_type_size_bytes(p, st, e->aux_struct_id);
-        if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && e->aux_struct_id >= 0))) {
-            return sz;
-        }
-        if (is_pointer_type(st)) {
-            return cc_target_pointer_size();
-        }
-        sz = cc_type_scalar_size(st);
-        if (sz > 0) {
-            return sz;
-        }
-    }
-    return -1;
+    sz = parser_ct_size(p, t);
+    return sz >= 0 ? sz : -1;
 }
 
 /**
@@ -4943,6 +4695,40 @@ static long parser_infer_struct_array_len_from_init_list(parser_t *p, int struct
         }
     }
     return elems > 0 ? elems : 1;
+}
+
+/**
+ * The bound an initializer list gives an array of unknown bound whose
+ * elements have type @p elem: a lone string literal's length for an
+ * array of characters, the structures a list of brace-elided members
+ * makes up, else the number of items.
+ *
+ * @param p     the parser
+ * @param elem  the element type
+ * @param init  the CC_EXPR_INIT_LIST
+ * @return      the bound, or 0 if it cannot be told
+ */
+static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const cc_expr_t *init) {
+    int sid;
+
+    if (elem == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST || init->arg_count == 0) {
+        return 0;
+    }
+    if (init->arg_count == 1 && init->args[0] != NULL && init->args[0]->kind == CC_EXPR_STR) {
+        int wide = cc_string_literal_is_wide(init->args[0]);
+        long n = parser_string_literal_array_bound(init->args[0]);
+
+        if (n > 0 && (wide ? cc_ct_is_integer(elem) : cc_ct_is_character(elem))) {
+            return n;
+        }
+    }
+    sid = elem->unqual->kind == CC_CT_RECORD ? elem->unqual->id : -1;
+    if (sid >= 0) {
+        long n = parser_infer_struct_array_len_from_init_list(p, sid, init);
+
+        return n > 0 ? n : 0;
+    }
+    return (long)init->arg_count;
 }
 
 static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init) {
