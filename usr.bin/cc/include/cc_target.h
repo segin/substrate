@@ -92,6 +92,8 @@ typedef struct {
     int (*abi_aggregate_arg)(const struct cc_translation_unit *tu, int sid, long size, struct cc_abi_regs *regs);
     /** how an aggregate is returned (cc_abi.h: cc_abi_aggregate_return()) */
     int (*abi_aggregate_return)(const struct cc_translation_unit *tu, int sid, long size);
+    /** the target's own legalization of a function, after the shared one; NULL for none */
+    int (*legalize)(struct cc_ssa_function *f, struct cc_diag *diag);
     /** the IR of va_arg (cc_abi.h: cc_abi_va_arg()) */
     int (*abi_va_arg)(struct cc_ssa_function *sf, int ap, const struct cc_abi_va_type *t, int *next_ap,
                       struct cc_diag *diag);

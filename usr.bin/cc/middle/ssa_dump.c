@@ -253,6 +253,8 @@ static size_t instr_uses(const cc_ssa_instr_t *in, int *out, size_t cap) {
     case CC_SSA_CMP:
     case CC_SSA_STORE:
     case CC_SSA_DYNALLOC:
+    case CC_SSA_PAIR:
+    case CC_SSA_UMULW:
         USE(in->lhs);
         USE(in->rhs);
         break;
@@ -264,6 +266,8 @@ static size_t instr_uses(const cc_ssa_instr_t *in, int *out, size_t cap) {
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
     case CC_SSA_EXT:
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
     case CC_SSA_BR_COND:
     case CC_SSA_RET:
     case CC_SSA_VA_START:
@@ -442,6 +446,10 @@ static const char *binop_name(const cc_ssa_instr_t *in, int is_float) {
         return "shl";
     case CC_SSA_SHR:
         return in->is_unsigned ? "lshr" : "ashr";
+    case CC_SSA_PAIR:
+        return "pair";
+    case CC_SSA_UMULW:
+        return "umulw";
     default:
         return NULL;
     }
@@ -537,6 +545,11 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
         return;
     case CC_SSA_FROUND64:
         fprintf(out, "fround64 %s ", t);
+        put_value(out, in->lhs);
+        return;
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
+        fprintf(out, "%s %s ", in->op == CC_SSA_LO32 ? "lo32" : "hi32", t);
         put_value(out, in->lhs);
         return;
     case CC_SSA_EXT:

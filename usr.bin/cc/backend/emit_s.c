@@ -744,6 +744,10 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_FROUND32: return "fround32";
     case CC_SSA_FROUND64: return "fround64";
     case CC_SSA_EXT: return "ext";
+    case CC_SSA_LO32: return "lo32";
+    case CC_SSA_HI32: return "hi32";
+    case CC_SSA_PAIR: return "pair";
+    case CC_SSA_UMULW: return "umulw";
     case CC_SSA_STACKALLOC: return "stackalloc";
     case CC_SSA_DYNALLOC: return "dynalloc";
     case CC_SSA_CHAIN: return "chain";
@@ -2035,7 +2039,11 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
     case CC_SSA_EXT:
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
         return in->lhs == value;
+    case CC_SSA_PAIR:
+    case CC_SSA_UMULW:
     case CC_SSA_STORE:
     case CC_SSA_DYNALLOC:
     case CC_SSA_ADD:
@@ -2193,6 +2201,23 @@ static int int_regs_define(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     int reg = int_regs_alloc(fp, f, lay, st, prefer, avoid);
     int_regs_bind(st, value, reg, 1);
     return reg;
+}
+
+/**
+ * Drop value @p v's register, without writing it back: its slot is about
+ * to be written directly.
+ *
+ * @param st  the register state
+ * @param v   the value
+ */
+static void int_regs_forget(int_reg_state_t *st, int v) {
+    int r = st->val_reg[v];
+
+    if (r >= 0 && r < st->reg_count && st->reg_val[r] == v) {
+        st->reg_val[r] = -1;
+        st->reg_dirty[r] = 0;
+    }
+    st->val_reg[v] = -1;
 }
 
 static int int_regs_remap_dst(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st, int dst, int reg) {
@@ -2371,6 +2396,8 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     case CC_SSA_SHL:
     case CC_SSA_SHR:
     case CC_SSA_CMP:
+    case CC_SSA_PAIR:
+    case CC_SSA_UMULW:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
         if (in->rhs >= 0 && in->rhs < f->value_count) fn(in->rhs, ctx);
         break;
@@ -2382,6 +2409,8 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     case CC_SSA_FROUND32:
     case CC_SSA_FROUND64:
     case CC_SSA_EXT:
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
     case CC_SSA_BR_COND:
     case CC_SSA_RET:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
@@ -5209,6 +5238,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 fprintf(fp, "\tud2\n");
                 break;
 
+            case CC_SSA_LO32:
+            case CC_SSA_HI32:
+            case CC_SSA_PAIR:
+            case CC_SSA_UMULW:
+                /* i386 legalization writes these; x86-64 has 64-bit registers */
+                set_diag(diag, "x86-64: word-pair operation in legal IR");
+                int_regs_free(&ist);
+                slot_layout_free(&lay);
+                return -1;
+
             case CC_SSA_RET:
                 if (has_sret) {
                     long copy_bytes = in->imm > 0 ? in->imm : sret_mem_size;
@@ -5577,41 +5616,6 @@ static int emit_i386_cmp_float_x87(FILE *fp, const cc_ssa_function_t *f, const s
     return emit_i386_cmp_float_result(fp, f, lay, ist, in);
 }
 
-/*
- * A compare of 64-bit operands, which live in stack slots as a low and
- * a high word: the high words decide unless they are equal, and then
- * the low words decide as unsigned numbers.
- */
-static void emit_i386_cmp_int64(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                const cc_ssa_instr_t *in) {
-    unsigned long id = next_aux_label_id();
-    int lo = slot_off(lay, in->lhs);
-    int rlo = slot_off(lay, in->rhs);
-
-    int_regs_flush(fp, f, lay, ist);
-    if (in->cmp_kind == CC_CMP_EQ || in->cmp_kind == CC_CMP_NE) {
-        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
-        fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", lo + 4);
-        fprintf(fp, "\txorl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\txorl %d(%%ebp), %%edx\n", rlo + 4);
-        fprintf(fp, "\torl %%edx, %%eax\n");
-        fprintf(fp, "\t%s %%al\n", in->cmp_kind == CC_CMP_EQ ? "sete" : "setne");
-    } else {
-        fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", lo + 4);
-        fprintf(fp, "\tcmpl %d(%%ebp), %%edx\n", rlo + 4);
-        fprintf(fp, "\tjne .L__cc_i386_cmp_hi_%lu\n", id);
-        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
-        fprintf(fp, "\tcmpl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\t%s %%al\n", setcc_int_mnemonic(in->cmp_kind, 1));
-        fprintf(fp, "\tjmp .L__cc_i386_cmp_done_%lu\n", id);
-        fprintf(fp, ".L__cc_i386_cmp_hi_%lu:\n", id);
-        fprintf(fp, "\t%s %%al\n", setcc_int_mnemonic(in->cmp_kind, in->is_unsigned));
-        fprintf(fp, ".L__cc_i386_cmp_done_%lu:\n", id);
-    }
-    fprintf(fp, "\tmovzbl %%al, %%eax\n");
-    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(lay, in->dst));
-}
-
 static int emit_i386_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                              const cc_ssa_instr_t *in) {
     const char *m = setcc_int_mnemonic(in->cmp_kind, in->is_unsigned);
@@ -5619,10 +5623,6 @@ static int emit_i386_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_la
     int rr;
     int rd;
 
-    if (value_size_bytes(f, in->lhs, 4) >= 8 && value_size_bytes(f, in->rhs, 4) >= 8) {
-        emit_i386_cmp_int64(fp, f, lay, ist, in);
-        return 0;
-    }
     rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
     rr = int_regs_load(fp, f, lay, ist, in->rhs, -1, rl);
     rd = int_regs_define(fp, f, lay, ist, in->dst, rl, rr);
@@ -6116,115 +6116,6 @@ static int i386_emit_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     fprintf(fp, "\t%s %%cl, %s\n", mnemonic, ist->regs[rl]);
     int_regs_remap_dst(fp, f, lay, ist, in->dst, rl);
     return 0;
-}
-
-static void emit_i386_int64_binop(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
-    unsigned long id = next_aux_label_id();
-    int lo = slot_off(lay, in->lhs);
-    int hi = lo + 4;
-    int rlo = slot_off(lay, in->rhs);
-    int rhi = rlo + 4;
-    int dlo = slot_off(lay, in->dst);
-    int dhi = dlo + 4;
-
-    if (in->op == CC_SSA_MUL) {
-        /* the low 64 bits of a * b: alo * blo + ((ahi * blo + alo * bhi) << 32) */
-        fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", hi);
-        fprintf(fp, "\timull %d(%%ebp), %%ecx\n", rlo);
-        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", rhi);
-        fprintf(fp, "\timull %d(%%ebp), %%eax\n", lo);
-        fprintf(fp, "\taddl %%eax, %%ecx\n");
-        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
-        fprintf(fp, "\tmull %d(%%ebp)\n", rlo);
-        fprintf(fp, "\taddl %%ecx, %%edx\n");
-        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dlo);
-        fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", dhi);
-        return;
-    }
-    if (in->op == CC_SSA_DIV) {
-        fprintf(fp, "\tpushl %d(%%ebp)\n", rhi);
-        fprintf(fp, "\tpushl %d(%%ebp)\n", rlo);
-        fprintf(fp, "\tpushl %d(%%ebp)\n", hi);
-        fprintf(fp, "\tpushl %d(%%ebp)\n", lo);
-        fprintf(fp, "\tcall %s\n", in->is_unsigned ? "__udivdi3" : "__divdi3");
-        fprintf(fp, "\taddl $16, %%esp\n");
-        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dlo);
-        fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", dhi);
-        return;
-    }
-
-    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", lo);
-    fprintf(fp, "\tmovl %d(%%ebp), %%edx\n", hi);
-    switch (in->op) {
-    case CC_SSA_ADD:
-        fprintf(fp, "\taddl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\tadcl %d(%%ebp), %%edx\n", rhi);
-        break;
-    case CC_SSA_SUB:
-        fprintf(fp, "\tsubl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\tsbbl %d(%%ebp), %%edx\n", rhi);
-        break;
-    case CC_SSA_AND:
-        fprintf(fp, "\tandl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\tandl %d(%%ebp), %%edx\n", rhi);
-        break;
-    case CC_SSA_OR:
-        fprintf(fp, "\torl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\torl %d(%%ebp), %%edx\n", rhi);
-        break;
-    case CC_SSA_XOR:
-        fprintf(fp, "\txorl %d(%%ebp), %%eax\n", rlo);
-        fprintf(fp, "\txorl %d(%%ebp), %%edx\n", rhi);
-        break;
-    case CC_SSA_SHL:
-        if (in->rhs < 0) {
-            fprintf(fp, "\tmovl $%u, %%ecx\n", (unsigned)(in->imm & 63));
-        } else {
-            fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", rlo);
-            fprintf(fp, "\tandl $63, %%ecx\n");
-        }
-        fprintf(fp, "\tcmpl $32, %%ecx\n");
-        fprintf(fp, "\tjae .L__cc_i386_shl_hi_%lu\n", id);
-        fprintf(fp, "\tshld %%cl, %%eax, %%edx\n");
-        fprintf(fp, "\tshll %%cl, %%eax\n");
-        fprintf(fp, "\tjmp .L__cc_i386_sh_done_%lu\n", id);
-        fprintf(fp, ".L__cc_i386_shl_hi_%lu:\n", id);
-        fprintf(fp, "\tmovl %%eax, %%edx\n");
-        fprintf(fp, "\txorl %%eax, %%eax\n");
-        fprintf(fp, "\tsubl $32, %%ecx\n");
-        fprintf(fp, "\tshll %%cl, %%edx\n");
-        fprintf(fp, ".L__cc_i386_sh_done_%lu:\n", id);
-        break;
-    case CC_SSA_SHR:
-        if (in->rhs < 0) {
-            fprintf(fp, "\tmovl $%u, %%ecx\n", (unsigned)(in->imm & 63));
-        } else {
-            fprintf(fp, "\tmovl %d(%%ebp), %%ecx\n", rlo);
-            fprintf(fp, "\tandl $63, %%ecx\n");
-        }
-        fprintf(fp, "\tcmpl $32, %%ecx\n");
-        fprintf(fp, "\tjae .L__cc_i386_shr_hi_%lu\n", id);
-        fprintf(fp, "\tshrd %%cl, %%edx, %%eax\n");
-        fprintf(fp, "\t%s %%cl, %%edx\n", in->is_unsigned ? "shrl" : "sarl");
-        fprintf(fp, "\tjmp .L__cc_i386_sh_done_%lu\n", id);
-        fprintf(fp, ".L__cc_i386_shr_hi_%lu:\n", id);
-        fprintf(fp, "\tmovl %%edx, %%eax\n");
-        if (in->is_unsigned) {
-            fprintf(fp, "\txorl %%edx, %%edx\n");
-            fprintf(fp, "\tsubl $32, %%ecx\n");
-            fprintf(fp, "\tshrl %%cl, %%eax\n");
-        } else {
-            fprintf(fp, "\tsarl $31, %%edx\n");
-            fprintf(fp, "\tsubl $32, %%ecx\n");
-            fprintf(fp, "\tsarl %%cl, %%eax\n");
-        }
-        fprintf(fp, ".L__cc_i386_sh_done_%lu:\n", id);
-        break;
-    default:
-        break;
-    }
-    fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dlo);
-    fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", dhi);
 }
 
 static int emit_i386_int_div_or_shift(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
@@ -6785,6 +6676,40 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
             }
 
+            case CC_SSA_LO32: {
+                /* the low word is the value as a register holds it */
+                int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
+                int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
+                break;
+            }
+
+            case CC_SSA_HI32: {
+                /* the high word of a 64-bit value is always in its slot */
+                int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                fprintf(fp, "\tmovl %d(%%ebp), %s\n", slot_off(&lay, in->lhs) + 4, ist.regs[rd]);
+                break;
+            }
+
+            case CC_SSA_PAIR: {
+                int rh = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, -1);
+                int rl;
+
+                fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist.regs[rh], slot_off(&lay, in->dst) + 4);
+                rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, rh);
+                int_regs_forget(&ist, in->dst);
+                fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist.regs[rl], slot_off(&lay, in->dst));
+                break;
+            }
+
+            case CC_SSA_UMULW:
+                /* mull: %edx:%eax = %eax * the operand */
+                int_regs_flush(fp, f, &lay, &ist);
+                fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(&lay, in->lhs));
+                fprintf(fp, "\tmull %d(%%ebp)\n", slot_off(&lay, in->rhs));
+                fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", slot_off(&lay, in->dst));
+                fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", slot_off(&lay, in->dst) + 4);
+                break;
+
             case CC_SSA_CHAIN: {
                 /* the static chain, as the function was entered: nothing has run before this */
                 int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
@@ -6884,15 +6809,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                         return -1;
                     }
                 } else {
-                    if (value_size_bytes(f, in->dst, 4) >= 8 &&
-                        (in->op == CC_SSA_ADD || in->op == CC_SSA_SUB || in->op == CC_SSA_AND ||
-                         in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_SHL ||
-                         in->op == CC_SSA_SHR ||
-                         ((in->op == CC_SSA_MUL || in->op == CC_SSA_DIV) && in->rhs >= 0))) {
-                        int_regs_flush(fp, f, &lay, &ist);
-                        emit_i386_int64_binop(fp, &lay, in);
-                        break;
-                    }
+                    /* words only: legalization split every 64-bit operation */
                     {
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rr;

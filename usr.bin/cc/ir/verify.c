@@ -229,6 +229,11 @@ static const op_info_t op_table[] = {
     {"shl", FORM_BINARY, TC_INT, TC_INT},
     {"lshr", FORM_BINARY, TC_INT, TC_INT},
     {"ashr", FORM_BINARY, TC_INT, TC_INT},
+    /* legal IR only: i386 64-bit integers as two words (legalize_i386.c) */
+    {"pair", FORM_BINARY, TC_INT, TC_INT},
+    {"umulw", FORM_BINARY, TC_INT, TC_INT},
+    {"lo32", FORM_UNARY, TC_INT, TC_INT},
+    {"hi32", FORM_UNARY, TC_INT, TC_INT},
     {"fadd", FORM_BINARY, TC_FP, TC_FP},
     {"fsub", FORM_BINARY, TC_FP, TC_FP},
     {"fmul", FORM_BINARY, TC_FP, TC_FP},

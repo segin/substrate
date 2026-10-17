@@ -8,6 +8,7 @@
 
 #include "cc_target.h"
 #include "cc_abi.h"
+#include "cc_middle.h"
 
 #include <stddef.h>
 
@@ -57,6 +58,7 @@ static const cc_target_desc_t g_x86_64 = {
     CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY,
     cc_abi_x86_64_aggregate_arg,
     cc_abi_x86_64_aggregate_return,
+    NULL, /* every integer is a register's width */
     cc_abi_x86_64_va_arg,
 };
 
@@ -90,6 +92,7 @@ static const cc_target_desc_t g_i386 = {
     CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY | CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64,
     cc_abi_i386_aggregate_arg,
     cc_abi_i386_aggregate_return,
+    cc_legalize_i386_function, /* 64-bit integers as two words */
     cc_abi_i386_va_arg,
 };
 

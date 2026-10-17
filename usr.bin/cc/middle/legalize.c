@@ -263,7 +263,11 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag) {
         return(0);
     }
     for (i = 0; i < m->func_count; ++i) {
-        if (legalize_ext(&m->funcs[i], diag) != 0 || legalize_function(&m->funcs[i], diag) != 0) {
+        const cc_target_desc_t *tgt = cc_target_current();
+
+        if (legalize_ext(&m->funcs[i], diag) != 0 ||
+            (tgt->legalize != NULL && tgt->legalize(&m->funcs[i], diag) != 0) ||
+            legalize_function(&m->funcs[i], diag) != 0) {
             return(-1);
         }
     }

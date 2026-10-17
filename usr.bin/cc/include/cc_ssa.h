@@ -102,7 +102,15 @@ typedef enum {
     CC_SSA_CALLI,
     CC_SSA_ASM,
     CC_SSA_TRAP,
-    CC_SSA_RET
+    CC_SSA_RET,
+    /*
+     * Legal IR only, written by a target's legalization (i386: 64-bit
+     * integers as two 32-bit words, legalize_i386.c).
+     */
+    CC_SSA_LO32,       /**< dst (4 bytes) = the low word of 64-bit lhs */
+    CC_SSA_HI32,       /**< dst (4 bytes) = the high word of 64-bit lhs */
+    CC_SSA_PAIR,       /**< dst (8 bytes) = lhs as the low word, rhs as the high word */
+    CC_SSA_UMULW       /**< dst (8 bytes) = the full product of words lhs and rhs, unsigned */
 } cc_ssa_opcode_t;
 
 /**
