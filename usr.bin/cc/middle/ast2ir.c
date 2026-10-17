@@ -1436,64 +1436,6 @@ static int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const
 }
 
 
-/**
- * The step of pointer arithmetic on an operand whose real type is known
- * (see cc_ct_of_expr()): the size of what it points to, an array or a
- * function decaying first.
- *
- * @param tu        the translation unit, for structure sizes
- * @param ptr_expr  the pointer operand
- * @return          the step in bytes, or -1 if the type is not known or
- *                  what it points to has no size
- */
-static long expr_real_step_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *ptr_expr) {
-    const cc_ctype_t *t = ptr_expr != NULL ? lower_value_ctype(ptr_expr) : NULL;
-    long n;
-
-    if (t == NULL || t->kind != CC_CT_POINTER) {
-        return -1;
-    }
-    n = cc_ct_size(t->of, tu);
-    return n > 0 ? n : -1;
-}
-
-/**
- * The step of pointer arithmetic on @p ptr_expr: the size of what its
- * interned type points to, an array pointee's whole size included.
- *
- * The legacy walks over array dimensions this replaced are gone: every
- * expression sema checked carries its type, and one that points to an
- * array says so.  A pointee with no size (a variable-length array, void)
- * gives @p fallback; a VLA's runtime stride is found elsewhere
- * (vla_subscript_level()).
- *
- * @param tu        the translation unit
- * @param vars      unused
- * @param var_count unused
- * @param depth     unused
- * @param ptr_expr  the pointer expression
- * @param fallback  what to return when the type gives no step
- * @return          the step in bytes, or @p fallback
- */
-static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
-                                       const cc_expr_t *ptr_expr, long fallback) {
-    long real_step = expr_real_step_size_bytes(tu, ptr_expr);
-
-    (void)vars;
-    (void)var_count;
-    (void)depth;
-    return real_step > 0 ? real_step : fallback;
-}
-
-/**
- * The step of pointer arithmetic on a variable named by @p ptr_expr; the
- * same as expr_array_step_size_bytes() now that the variable's type is
- * the expression's.
- */
-static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count,
-                                            int depth, const cc_expr_t *ptr_expr, long fallback) {
-    return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, fallback);
-}
 
 static int is_cmp_op(cc_binop_t op) {
     return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
@@ -6775,20 +6717,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (e->op == CC_BIN_SUB && lower_is_pointer(e->lhs) && lower_is_pointer(e->rhs)) {
-            long elem_size = lower_pointee_size(tu, e->lhs);
+            long elem_size = lower_pointer_step(tu, e->lhs); /* sema matched the two pointers */
             int diffv;
-
-            if (elem_size <= 0) {
-                long lhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->lhs, -1);
-                long rhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->rhs, -1);
-
-                elem_size = lower_pointer_step(tu, e->lhs);
-                if (lhs_step > 0) {
-                    elem_size = lhs_step;
-                } else if (rhs_step > 0) {
-                    elem_size = rhs_step;
-                }
-            }
 
             lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
             rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
@@ -6911,15 +6841,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
 
-            elem_size = expr_real_step_size_bytes(tu, ptr_expr);
-            if (elem_size <= 0) {
-                elem_size = lower_pointee_size(tu, e);
-            }
-            if (elem_size <= 0) {
-                elem_size = lower_pointer_step(tu, e);
-                elem_size = expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
-                elem_size = expr_decl_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
-            }
+            elem_size = lower_pointer_step(tu, ptr_expr);
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported pointer base type in lowering");
                 return -1;
@@ -14678,7 +14600,6 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 return -1;
             }
             step = lower_is_pointer(e->lhs) ? lower_pointer_step(tu, e->lhs) : 1;
-            step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->lhs, step);
             if (apply_global_ptr_addend(ladd, iv, step, e->op == CC_BIN_SUB, &ladd) != 0) {
                 free(lsym);
                 return -1;
@@ -14694,7 +14615,6 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 return -1;
             }
             step = lower_is_pointer(e->rhs) ? lower_pointer_step(tu, e->rhs) : 1;
-            step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->rhs, step);
             if (apply_global_ptr_addend(radd, iv, step, 0, &radd) != 0) {
                 free(rsym);
                 return -1;
