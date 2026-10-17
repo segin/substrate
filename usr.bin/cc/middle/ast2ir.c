@@ -650,27 +650,42 @@ static cc_value_type_t lower_value_kind(const cc_expr_t *e) {
 }
 
 /**
- * The structure behind an expression's value: the record its type is, or
- * the hidden structure that stands for a complex type (as for the wide,
- * vector and decimal types, which are records already).
+ * The structure behind a type: the record it is, or the hidden structure
+ * that stands for a complex type (as for the wide, vector and decimal
+ * types, which are records already).
+ *
+ * @param t  the type, or NULL
+ * @return   the structure's index, or -1 if the type is not one
+ */
+static int ct_record_id(const cc_ctype_t *t) {
+    if (t != NULL && t->kind == CC_CT_RECORD) {
+        return t->id;
+    }
+    if (t != NULL && t->kind == CC_CT_COMPLEX) {
+        return cc_ct_complex_record(t);
+    }
+    return -1;
+}
+
+/**
+ * The structure behind an expression's value (ct_record_id()).
  *
  * @param e  the expression
  * @return   the structure's index, or -1 if the value is not one
  */
 static int lower_record_id(const cc_expr_t *e) {
-    const cc_ctype_t *t = lower_value_ctype(e);
+    return ct_record_id(lower_value_ctype(e));
+}
 
-    if (t != NULL && t->kind == CC_CT_RECORD) {
-        return t->id;
-    }
-    if (t != NULL && t->kind == CC_CT_COMPLEX && cc_ct_complex_record(t) >= 0) {
-        return cc_ct_complex_record(t);
-    }
-    /* the legacy fields speak only for a node lowering built, which has no type recorded */
-    if (e->ctype != NULL) {
-        return -1;
-    }
-    return e->value_type == CC_TYPE_VOID ? e->struct_id : -1;
+/**
+ * The type a cast (or a compound literal, which is one) converts to, as
+ * written: not decayed, so `(int[]){...}` is an array.
+ *
+ * @param e  the CC_EXPR_CAST
+ * @return   the type
+ */
+static const cc_ctype_t *lower_cast_ctype(const cc_expr_t *e) {
+    return e->ctype != NULL ? e->ctype : cc_ct_from_legacy(e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
 }
 
 /**
@@ -4738,7 +4753,7 @@ static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_
  */
 static int lower_complex_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
-    cc_type_t elem = complex_elem_of(tu, e->aux_type, e->aux_struct_id);
+    cc_type_t elem = complex_elem_of(tu, CC_TYPE_VOID, ct_record_id(lower_cast_ctype(e)));
     int re;
     int im;
 
@@ -5497,7 +5512,8 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     vec_t vt;
     vec_t vs;
-    int to_vec = vec_of(tu, e->aux_type, e->aux_struct_id, &vt);
+    const cc_ctype_t *to = lower_cast_ctype(e);
+    int to_vec = vec_of(tu, CC_TYPE_VOID, ct_record_id(to), &vt);
     int from_vec = vec_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &vs);
     int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     cc_ssa_instr_t ld;
@@ -5506,7 +5522,7 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
     if (src < 0) {
         return -1;
     }
-    if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
+    if (to == NULL || to->kind == CC_CT_VOID) {
         return src;
     }
     if (to_vec && from_vec) {
@@ -5523,7 +5539,7 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
     ld.lhs = src;
     ld.rhs = -1;
     ld.imm = vs.n * vs.es;
-    ld.is_unsigned = cc_type_is_unsigned_integral(e->aux_type);
+    ld.is_unsigned = lower_is_unsigned(e);
     if (ld.dst < 0 || push_instr(sf, ld) != 0) {
         set_diag(diag, "out of memory converting a vector");
         return -1;
@@ -5756,7 +5772,8 @@ static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_
  */
 static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
-    int to = dec_bits_of(tu, e->aux_type, e->aux_struct_id);
+    int to_sid = ct_record_id(lower_cast_ctype(e));
+    int to = dec_bits_of(tu, CC_TYPE_VOID, to_sid);
     int from = dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs));
     const cc_ctype_t *st = lower_value_ctype(e->lhs);
     const cc_ctype_t *dt = lower_value_ctype(e);
@@ -5780,7 +5797,7 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
         snprintf(name, sizeof(name), "__bid_%s%s%s2", to > from ? "extend" : "trunc", dec_mode(from), dec_mode(to));
         sids[0] = lower_record_id(e->lhs);
         kind = DEC_ARG_DEC;
-        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, e->aux_struct_id, diag);
+        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, to_sid, diag);
     }
     if (to != 0) {
         /* to a decimal type: from an integer or a binary floating type */
@@ -5806,7 +5823,7 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
             kind = wide ? DEC_ARG_LLONG : DEC_ARG_INT;
             snprintf(name, sizeof(name), "__bid_float%s%s%s", uns ? "uns" : "", wide ? "di" : "si", dec_mode(to));
         }
-        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, e->aux_struct_id, diag);
+        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, to_sid, diag);
     }
     /* from a decimal type: to an integer or a binary floating type */
     sids[0] = lower_record_id(e->lhs);
@@ -5846,7 +5863,8 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                            var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     wide_t wd;
     wide_t ws;
-    int to_wide = wide_of(tu, e->aux_type, e->aux_struct_id, &wd);
+    const cc_ctype_t *tct = lower_cast_ctype(e);
+    int to_wide = wide_of(tu, CC_TYPE_VOID, ct_record_id(tct), &wd);
     int from_wide = wide_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &ws);
     const cc_ctype_t *sct = lower_value_ctype(e->lhs);
     cc_ctype_kind_t st = sct != NULL ? sct->kind : CC_CT_VOID;
@@ -5932,25 +5950,25 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     }
     /* from a wide integer */
     {
-        cc_type_t to = e->aux_type;
+        cc_ctype_kind_t to = tct != NULL ? tct->kind : CC_CT_VOID;
         int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
 
         if (src < 0) {
             return -1;
         }
-        if (to == CC_TYPE_FLOAT || to == CC_TYPE_DOUBLE || to == CC_TYPE_LDOUBLE) {
+        if (to == CC_CT_FLOAT || to == CC_CT_DOUBLE || to == CC_CT_LDOUBLE) {
             int args[2];
             int v;
 
             args[0] = src;
             args[1] = wide_int_arg(sf, wide_prec(&ws));
-            v = wide_libcall(sf, to == CC_TYPE_FLOAT ? "__floatbitintsf" : to == CC_TYPE_DOUBLE ? "__floatbitintdf"
-                                                                                                 : "__floatbitintxf",
-                             args, 2, NULL, CC_VAL_F64, to == CC_TYPE_FLOAT ? CC_ABI_RET_FLOAT : 0,
-                             to == CC_TYPE_LDOUBLE, diag);
+            v = wide_libcall(sf, to == CC_CT_FLOAT ? "__floatbitintsf" : to == CC_CT_DOUBLE ? "__floatbitintdf"
+                                                                                             : "__floatbitintxf",
+                             args, 2, NULL, CC_VAL_F64, to == CC_CT_FLOAT ? CC_ABI_RET_FLOAT : 0,
+                             to == CC_CT_LDOUBLE, diag);
             return v;
         }
-        if (to == CC_TYPE_VOID) {
+        if (to == CC_CT_VOID) {
             return src;
         }
         {
@@ -5969,7 +5987,7 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                 return -1;
             }
             set_value_size(sf, ld.dst, 8);
-            return normalize_integral_value(sf, cast_value(sf, ld.dst, type_to_val(to), diag), to, diag);
+            return normalize_int_ct(sf, cast_value(sf, ld.dst, ct_value_kind(tct), diag), tct, diag);
         }
     }
 }
@@ -9781,44 +9799,46 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_CAST: {
         int v;
         const cc_expr_t *cast_src = e->lhs;
-        int aggregate_cast_target = (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0);
+        const cc_ctype_t *cast_ct = lower_cast_ctype(e);
+        /* the structure the target is, or the hidden one behind a complex, wide, decimal or vector type */
+        int to_sid = ct_record_id(cast_ct);
+        int aggregate_cast_target = to_sid >= 0;
         if (e->lhs == NULL) {
             set_diag(diag, "malformed cast expression in lowering");
             return -1;
         }
-        if (cast_src->kind == CC_EXPR_INIT_LIST && e->array_ndim > 0 && is_pointer_type(e->aux_type)) {
+        if (cast_src->kind == CC_EXPR_INIT_LIST && cast_ct != NULL && cast_ct->kind == CC_CT_ARRAY) {
             return lower_array_init_to_ptr(tu, sf, ctx, vars, var_count, depth, e->aux_type, e->aux_struct_id,
                                            e->array_ndim, e->array_dims, cast_src, diag);
         }
-        if (complex_elem_of(tu, e->aux_type, e->aux_struct_id) != CC_TYPE_VOID &&
-            cast_src->kind != CC_EXPR_INIT_LIST) {
+        if (complex_elem_of(tu, CC_TYPE_VOID, to_sid) != CC_TYPE_VOID && cast_src->kind != CC_EXPR_INIT_LIST) {
             return lower_complex_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         {
             wide_t wd;
             wide_t ws;
-            int to_wide = wide_of(tu, e->aux_type, e->aux_struct_id, &wd);
+            int to_wide = wide_of(tu, CC_TYPE_VOID, to_sid, &wd);
             int from_wide = cast_src->kind != CC_EXPR_INIT_LIST &&
                             wide_of(tu, CC_TYPE_VOID, lower_record_id(cast_src), &ws);
 
-            if (from_wide && to_wide && e->aux_struct_id == cast_src->struct_id) {
+            if (from_wide && to_wide && to_sid == lower_record_id(cast_src)) {
                 return lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
             }
             if ((to_wide && cast_src->kind != CC_EXPR_INIT_LIST) || from_wide) {
                 return lower_wide_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
         }
-        if (cast_src->kind != CC_EXPR_INIT_LIST && (dec_bits_of(tu, e->aux_type, e->aux_struct_id) != 0 ||
+        if (cast_src->kind != CC_EXPR_INIT_LIST && (dec_bits_of(tu, CC_TYPE_VOID, to_sid) != 0 ||
                                                     dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(cast_src)) != 0)) {
             return lower_decimal_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (cast_src->kind != CC_EXPR_INIT_LIST) {
             vec_t vd;
             vec_t vs;
-            int to_vec = vec_of(tu, e->aux_type, e->aux_struct_id, &vd);
+            int to_vec = vec_of(tu, CC_TYPE_VOID, to_sid, &vd);
             int from_vec = vec_of(tu, CC_TYPE_VOID, lower_record_id(cast_src), &vs);
 
-            if (to_vec && from_vec && e->aux_struct_id == cast_src->struct_id) {
+            if (to_vec && from_vec && to_sid == lower_record_id(cast_src)) {
                 return lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
             }
             if (to_vec || from_vec) {
@@ -9830,12 +9850,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int dst_ptr;
             int storesrc;
             long store_size;
-            long sz = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
-            if ((size_t)e->aux_struct_id >= tu->struct_count) {
+            long sz = cc_ct_size(cast_ct, tu);
+            if ((size_t)to_sid >= tu->struct_count) {
                 set_diag(diag, "invalid aggregate cast target in lowering");
                 return -1;
             }
-            target_sd = &tu->structs[e->aux_struct_id];
+            target_sd = &tu->structs[to_sid];
             if (sz <= 0) {
                 sz = 1;
             }
@@ -9847,7 +9867,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (emit_memset_instr(sf, dst_ptr, 0, sz, diag) != 0) {
                     return -1;
                 }
-                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, dst_ptr, e->aux_struct_id, cast_src,
+                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, dst_ptr, to_sid, cast_src,
                                              diag) != 0) {
                     return -1;
                 }
@@ -9868,7 +9888,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return dst_ptr;
             }
             {
-                const cc_struct_member_t *m = cc_ct_union_cast_member(tu, e->aux_struct_id, lower_value_ctype(cast_src));
+                const cc_struct_member_t *m = cc_ct_union_cast_member(tu, to_sid, lower_value_ctype(cast_src));
                 cc_ssa_instr_t st;
                 if (m == NULL) {
                     set_diag(diag, "union cast lowering found no compatible member");
@@ -9927,20 +9947,20 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (v < 0) {
             return -1;
         }
-        if (e->aux_type == CC_TYPE_VOID) {
+        if (cast_ct == NULL || cast_ct->kind == CC_CT_VOID) {
             return v;
         }
         v = cast_value(sf, v, lower_value_kind(e), diag);
         if (v < 0) {
             return -1;
         }
-        if (e->aux_type == CC_TYPE_DOUBLE || e->aux_type == CC_TYPE_FLOAT) {
+        if (cast_ct->kind == CC_CT_DOUBLE || cast_ct->kind == CC_CT_FLOAT) {
             v = demote_ldouble_to_f64_value(sf, v, diag);
             if (v < 0) {
                 return -1;
             }
         }
-        if (e->aux_type == CC_TYPE_LDOUBLE) {
+        if (cast_ct->kind == CC_CT_LDOUBLE) {
             if (lower_is_integer(cast_src) && !lower_is_pointer(cast_src)) {
                 set_value_size(sf, v, 16);
             } else {
@@ -9950,13 +9970,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
         }
-        if (cc_type_is_integral(e->aux_type) && !is_pointer_type(e->aux_type)) {
-            v = normalize_integral_ct(sf, v, e->ctype, e->aux_type, diag);
+        if (cc_ct_is_integer(cast_ct)) {
+            v = normalize_int_ct(sf, v, cast_ct, diag);
             if (v < 0) {
                 return -1;
             }
-        } else if (e->aux_type == CC_TYPE_FLOAT) {
-            v = normalize_float_ct(sf, v, lower_value_ctype(e), diag);
+        } else if (cast_ct->kind == CC_CT_FLOAT) {
+            v = normalize_float_ct(sf, v, cast_ct, diag);
             if (v < 0) {
                 return -1;
             }
