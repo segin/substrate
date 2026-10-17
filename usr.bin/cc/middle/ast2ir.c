@@ -16734,10 +16734,9 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
  *            back to filling the array at run time; -1 when out of memory
  */
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g) {
-    cc_type_t scalar_type = s->type;
-    int scalar_sid = s->type_struct_id;
+    const cc_ctype_t *scalar = stmt_decl_ctype(s);
     long dims[CC_MAX_ARRAY_DIMS];
-    int nd = s->array_ndim;
+    int nd = 0;
     long scalar_size;
     long elem_count = 1;
     unsigned char *buf;
@@ -16747,25 +16746,21 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
     cc_diag_t quiet;
     int d;
 
-    if (s->expr == NULL || s->expr->kind != CC_EXPR_INIT_LIST || nd <= 0 || nd > CC_MAX_ARRAY_DIMS) {
+    if (s->expr == NULL || s->expr->kind != CC_EXPR_INIT_LIST) {
         return 0;
     }
-    for (d = 0; d < nd; ++d) {
-        if (!is_pointer_type(scalar_type)) {
+    while (scalar != NULL && scalar->kind == CC_CT_ARRAY) {
+        if (nd == CC_MAX_ARRAY_DIMS) {
             return 0;
         }
-        scalar_type = ptr_base_type(scalar_type);
-        dims[d] = s->array_dims[d];
+        dims[nd++] = scalar->count;
+        scalar = scalar->of;
     }
-    if (dims[0] <= 0 && s->array_len > 0 && nd == 1) {
-        dims[0] = s->array_len;
-    }
-    if (scalar_type == CC_TYPE_VOID || is_pointer_type(scalar_type)) {
+    if (nd == 0 || !cc_ct_is_arithmetic(scalar) || ct_record_id(scalar) >= 0) {
         /* aggregates and pointers (string tables) keep their own initialization code */
         return 0;
     }
-    scalar_sid = -1;
-    scalar_size = type_size_bytes_with_struct(tu, scalar_type, scalar_sid);
+    scalar_size = cc_ct_size(scalar, tu);
     if (scalar_size <= 0) {
         return 0;
     }
@@ -16783,9 +16778,8 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
         return -1;
     }
     memset(&quiet, 0, sizeof(quiet));
-    if (flatten_scalar_array_init_cursor(tu, cc_ct_from_legacy(scalar_type, scalar_sid, 0, NULL), dims, nd, s->expr, &cur,
-                                         0, buf,
-                                         scalar_size * elem_count, &relocs, &reloc_count, &quiet) != 0 ||
+    if (flatten_scalar_array_init_cursor(tu, scalar, dims, nd, s->expr, &cur, 0, buf, scalar_size * elem_count,
+                                         &relocs, &reloc_count, &quiet) != 0 ||
         cur < s->expr->arg_count) {
         /* not a constant this can lay out: leave it to the run-time path and its diagnostics */
         free(buf);
