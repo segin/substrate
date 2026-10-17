@@ -682,6 +682,16 @@ static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
 }
 
 /**
+ * The declared type of a file-scope variable, not decayed.
+ *
+ * @param g  the variable
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *global_decl_ctype(const cc_global_t *g) {
+    return g->ctype != NULL ? g->ctype : cc_ct_from_legacy(g->type, g->type_struct_id, g->array_ndim, g->array_dims);
+}
+
+/**
  * Whether a file-scope variable is a pointer object: its declared type,
  * not decayed, is a pointer (an array is not one).
  *
@@ -689,10 +699,29 @@ static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
  * @return   1 or 0
  */
 static int global_is_pointer_object(const cc_global_t *g) {
-    const cc_ctype_t *t = g->ctype != NULL ? g->ctype
-                                           : cc_ct_from_legacy(g->type, g->type_struct_id, g->array_ndim, g->array_dims);
+    const cc_ctype_t *t = global_decl_ctype(g);
 
     return t != NULL && t->kind == CC_CT_POINTER;
+}
+
+/**
+ * The structure a file-scope variable is, or is a one-dimensional array
+ * of (as @p *is_array says), its index; or -1.
+ *
+ * @param g         the variable
+ * @param is_array  receives 1 for an array of the structure, else 0
+ * @return          the structure's index, or -1
+ */
+static int global_struct_object(const cc_global_t *g, int *is_array) {
+    const cc_ctype_t *t = global_decl_ctype(g);
+    int sid = ct_record_id(t);
+
+    *is_array = 0;
+    if (sid < 0 && t != NULL && t->kind == CC_CT_ARRAY) {
+        sid = ct_record_id(t->of);
+        *is_array = sid >= 0;
+    }
+    return sid;
 }
 
 /**
@@ -17036,15 +17065,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 continue;
             }
 
-            if (tu->globals[i].type == CC_TYPE_VOID && tu->globals[i].type_struct_id >= 0) {
-                is_struct_global = 1;
-                struct_id = tu->globals[i].type_struct_id;
-                struct_elems = 1;
-            } else if (is_array_object_decl(tu->globals[i].type, tu->globals[i].array_len, tu->globals[i].array_ndim) &&
-                       ptr_base_type(tu->globals[i].type) == CC_TYPE_VOID && tu->globals[i].type_struct_id >= 0) {
-                is_struct_global = 1;
-                struct_id = tu->globals[i].type_struct_id;
-                struct_elems = tu->globals[i].array_len;
+            {
+                int of_array = 0;
+                int gsid = global_struct_object(&tu->globals[i], &of_array);
+
+                if (gsid >= 0) {
+                    is_struct_global = 1;
+                    struct_id = gsid;
+                    struct_elems = of_array ? tu->globals[i].array_len : 1;
+                }
             }
 
             if (is_struct_global) {
@@ -17078,8 +17107,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
                 struct_size = tu->structs[struct_id].size;
                 if (struct_elems <= 0) {
-                    if (init != NULL && init->kind == CC_EXPR_INIT_LIST && init->arg_count > 0 &&
-                        ptr_base_type(tu->globals[i].type) == CC_TYPE_VOID) {
+                    if (init != NULL && init->kind == CC_EXPR_INIT_LIST && init->arg_count > 0) {
                         struct_elems = (long)init->arg_count;
                     } else {
                         struct_elems = 1;
@@ -17115,7 +17143,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     out->globals[i].init_sym = NULL;
                     continue;
                 }
-                if (tu->globals[i].type == CC_TYPE_VOID && struct_id >= 0 && lower_cast_record_id(init) == struct_id &&
+                if (ct_record_id(global_decl_ctype(&tu->globals[i])) == struct_id && struct_id >= 0 &&
+                    lower_cast_record_id(init) == struct_id &&
                     init->lhs != NULL && init->lhs->kind == CC_EXPR_INIT_LIST) {
                     struct_init = init->lhs;
                 }
@@ -17135,7 +17164,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
 
-                if (tu->globals[i].type == CC_TYPE_VOID) {
+                if (ct_record_id(global_decl_ctype(&tu->globals[i])) >= 0) {
                     if (flatten_struct_init_bytes(tu, struct_id, struct_init, 0, buf, total_size, &relocs, &reloc_count,
                                                   diag) != 0) {
                         if (diag != NULL && strcmp(diag->message, "too many items in struct global initializer") == 0) {
