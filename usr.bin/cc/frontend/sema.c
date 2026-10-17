@@ -893,15 +893,9 @@ static const cc_ctype_t *sema_function_ctype(const cc_function_t *f) {
     return cc_ct_function(f->ret_ctype, params, f->param_count, f->is_variadic, f->has_prototype);
 }
 
-/**
- * The type of parameter @p p as adjusted: the one its declaration
- * recorded, else the one its legacy fields spell.
- */
+/** The type of parameter @p p as adjusted. */
 static const cc_ctype_t *sema_param_ctype(const cc_param_t *p) {
-    if (p->ctype != NULL) {
-        return p->ctype;
-    }
-    return cc_ct_from_legacy(p->type, p->type_struct_id, 0, NULL);
+    return p->ctype;
 }
 
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
@@ -1247,29 +1241,6 @@ static int func_decl_compatible(const cc_translation_unit_t *tu, const cc_functi
         }
     }
     return 1;
-}
-
-static int is_pointer_type(cc_type_t t) {
-    return cc_type_is_pointer(t);
-}
-
-
-static int pointer_depth(cc_type_t t) {
-    return (int)cc_type_pointer_depth(t);
-}
-
-
-
-static int is_array_object_type(cc_type_t t, long array_len, int array_ndim) {
-    if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
-        return 0;
-    }
-    /*
-     * Array declarators are encoded as pointer depth plus explicit array
-     * rank metadata. Arrays whose element type is itself a pointer (including
-     * function pointers in our lowered model) therefore have depth > rank.
-     */
-    return pointer_depth(t) >= array_ndim;
 }
 
 static void expr_clear_array_meta(cc_expr_t *e) {
@@ -2388,10 +2359,7 @@ static int sema_vector_subscript(const cc_translation_unit_t *tu, cc_expr_t **sl
     me->col = (*slot)->col;
     me->lhs = *slot;
     me->member_offset = 0;
-    me->value_type = m->type;
-    me->struct_id = m->type_struct_id;
-    me->ctype = m->ctype;
-    expr_set_array_meta_decl(me, m->array_len, m->array_ndim, m->array_dims);
+    sema_set_type(me, m->ctype);
     *slot = me;
     return 0;
 }
@@ -5784,26 +5752,26 @@ static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_i
     return next;
 }
 
+/** Whether structure @p struct_id has a member of structure, union, complex or array type. */
 static int struct_has_aggregate_member(const cc_translation_unit_t *tu, int struct_id) {
     const cc_struct_def_t *sd;
     size_t i;
-    (void)tu;
+
     if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
         return 0;
     }
     sd = &tu->structs[struct_id];
     for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            return 1;
-        }
-        if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
+        const cc_ctype_t *t = sd->members[i].ctype;
+
+        if (sx_ct_record(t) >= 0 || (t != NULL && t->kind == CC_CT_ARRAY)) {
             return 1;
         }
     }
     return 0;
 }
 
+/** Whether structure @p struct_id has an anonymous structure or union member. */
 static int struct_has_anonymous_aggregate_member(const cc_translation_unit_t *tu, int struct_id) {
     const cc_struct_def_t *sd;
     size_t i;
@@ -5814,7 +5782,7 @@ static int struct_has_anonymous_aggregate_member(const cc_translation_unit_t *tu
     }
     for (i = 0; i < sd->member_count; ++i) {
         const cc_struct_member_t *m = &sd->members[i];
-        if (m->name == NULL && m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        if (m->name == NULL && m->ctype != NULL && m->ctype->unqual->kind == CC_CT_RECORD) {
             return 1;
         }
     }
