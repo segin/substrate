@@ -465,6 +465,146 @@ const cc_ctype_t *cc_ct_decay(const cc_ctype_t *t) {
 }
 
 /**
+ * The width in bits of an integer or pointer type.
+ *
+ * @param t  the type
+ * @return   its width, 1 for _Bool; 0 if @p t is neither, or its size
+ *           is not known
+ */
+long cc_ct_int_width(const cc_ctype_t *t) {
+    long size;
+
+    if (t == NULL) {
+        return 0;
+    }
+    switch (t->kind) {
+    case CC_CT_BOOL:
+        return 1;
+    case CC_CT_POINTER:
+        return (long)cc_target_pointer_size() * 8;
+    case CC_CT_BITINT:
+    case CC_CT_UBITINT:
+        return t->count > 0 ? t->count : 0;
+    default:
+        break;
+    }
+    if (!cc_ct_is_integer(t)) {
+        return 0;
+    }
+    size = cc_ct_size(t, NULL);
+    return size > 0 ? size * 8 : 0;
+}
+
+/**
+ * The integer promotion of a type.  See cc_ctype.h.
+ *
+ * @param t  the type; NULL reads as int
+ * @return   the promoted type, unqualified
+ */
+const cc_ctype_t *cc_ct_promote(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return cc_ct_basic(CC_CT_INT);
+    }
+    switch (t->kind) {
+    case CC_CT_ENUM:
+    case CC_CT_BOOL:
+    case CC_CT_CHAR:
+    case CC_CT_SCHAR:
+    case CC_CT_UCHAR:
+    case CC_CT_SHORT:
+    case CC_CT_USHORT:
+        return cc_ct_basic(CC_CT_INT);
+    case CC_CT_POINTER:
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT);
+    default:
+        return t->unqual;
+    }
+}
+
+/**
+ * An integer type's conversion rank (C23 6.3.1.1), as a number to
+ * compare: wider types rank higher, and of two the same width a standard
+ * type ranks above a bit-precise one, `long long` above `long`.
+ *
+ * @param t  a promoted integer type
+ * @return   its rank
+ */
+static long ct_int_rank(const cc_ctype_t *t) {
+    long std;
+
+    switch (t->kind) {
+    case CC_CT_INT:
+    case CC_CT_UINT:
+        std = 1;
+        break;
+    case CC_CT_LONG:
+    case CC_CT_ULONG:
+        std = 2;
+        break;
+    case CC_CT_LLONG:
+    case CC_CT_ULLONG:
+        std = 3;
+        break;
+    default:
+        std = 0;
+        break;
+    }
+    return cc_ct_int_width(t) * 4 + std;
+}
+
+/**
+ * The unsigned type corresponding to a signed one.
+ *
+ * @param t  a promoted signed integer type
+ * @return   its unsigned counterpart
+ */
+static const cc_ctype_t *ct_unsigned_of(const cc_ctype_t *t) {
+    switch (t->kind) {
+    case CC_CT_LONG:
+        return cc_ct_basic(CC_CT_ULONG);
+    case CC_CT_LLONG:
+        return cc_ct_basic(CC_CT_ULLONG);
+    case CC_CT_BITINT:
+        return cc_ct_bitint(t->count, 1);
+    default:
+        return cc_ct_basic(CC_CT_UINT);
+    }
+}
+
+/**
+ * The common type of two integer operands.  See cc_ctype.h.
+ *
+ * @param a  one operand's type
+ * @param b  the other's
+ * @return   the common type
+ */
+const cc_ctype_t *cc_ct_common_int(const cc_ctype_t *a, const cc_ctype_t *b) {
+    const cc_ctype_t *u;
+    const cc_ctype_t *s;
+
+    a = cc_ct_promote(a);
+    b = cc_ct_promote(b);
+    if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
+        return cc_ct_basic(CC_CT_INT);
+    }
+    if (a == b) {
+        return a;
+    }
+    if (cc_ct_is_unsigned(a) == cc_ct_is_unsigned(b)) {
+        return ct_int_rank(a) >= ct_int_rank(b) ? a : b;
+    }
+    u = cc_ct_is_unsigned(a) ? a : b;
+    s = cc_ct_is_unsigned(a) ? b : a;
+    if (ct_int_rank(u) >= ct_int_rank(s)) {
+        return u;
+    }
+    if (cc_ct_int_width(s) > cc_ct_int_width(u)) {
+        return s;
+    }
+    return ct_unsigned_of(s);
+}
+
+/**
  * The type of an expression, where the parser recorded it.  See
  * cc_ctype.h.
  *

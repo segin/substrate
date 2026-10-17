@@ -13,6 +13,10 @@ typedef struct {
 
 #define CC_MAX_ARRAY_DIMS 4
 
+/* cc_expr_t.unary_form: which operand of the binary spelling is the unary operator's */
+#define CC_UNARY_RHS 1
+#define CC_UNARY_LHS 2
+
 typedef unsigned long long cc_attr_flags_t;
 
 #define CC_STORAGE_STATIC  (1 << 0)
@@ -297,6 +301,13 @@ struct cc_expr {
     int struct_id;
     unsigned char paren_wrapped;
     unsigned char is_subscript; /**< a CC_BIN_ADD that is the `a + i` of a subscript `a[i]` */
+    /**
+     * A unary operator the parser spelled as a binary one: CC_UNARY_RHS for
+     * `-x` and `+x` (`-1 * x`, `1 * x`), CC_UNARY_LHS for `~x` (`x ^ -1`);
+     * 0 for a real binary operator.  The result has the operand's promoted
+     * type, not the usual arithmetic conversion's.
+     */
+    unsigned char unary_form;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     long long int_val;

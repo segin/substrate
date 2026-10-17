@@ -3380,6 +3380,92 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     return in.dst;
 }
 
+/**
+ * Convert an integer value to integer type @p ct: as
+ * normalize_integral_value() does for legacy type @p t, and for a
+ * bit-precise type, which the legacy encoding cannot say the sign of,
+ * keep the low N bits, sign-extended for `_BitInt(N)` and zero-extended
+ * for `unsigned _BitInt(N)`, in a value of the size it already has.
+ *
+ * @param sf    the function
+ * @param v     the value
+ * @param ct    the type converted to, or NULL if not known
+ * @param t     its legacy encoding
+ * @param diag  receives an error
+ * @return      the converted value, or -1
+ */
+static int normalize_integral_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_type_t t, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long size;
+    int vbits;
+    int n;
+    int uns;
+
+    if (ct == NULL || (ct->kind != CC_CT_BITINT && ct->kind != CC_CT_UBITINT)) {
+        return normalize_integral_value(sf, v, t, diag);
+    }
+    n = (int)ct->count;
+    uns = ct->kind == CC_CT_UBITINT;
+    /* the register the value lives in, as normalize_integral_value() shifts it: a word, or a pair on i386 */
+    size = (cc_target_pointer_size() <= 4 && n <= 32) ? 4 : 8;
+    vbits = (int)size * 8;
+    if (n <= 0 || n >= vbits) {
+        if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
+            sf->value_is_unsigned[v] = (unsigned char)uns;
+        }
+        return v;
+    }
+    memset(&in, 0, sizeof(in));
+    in.rhs = -1;
+    if (uns) {
+        int c = emit_const_i64_instr(sf, (long long)((1ULL << n) - 1ULL));
+
+        if (c < 0) {
+            return -1;
+        }
+        set_value_size(sf, c, size);
+        in.op = CC_SSA_AND;
+        in.is_unsigned = 1;
+        in.lhs = v;
+        in.rhs = c;
+    } else {
+        in.op = CC_SSA_SHL;
+        in.lhs = v;
+        in.imm = vbits - n;
+    }
+    in.dst = new_value(sf, CC_VAL_I64);
+    if (in.dst < 0) {
+        return -1;
+    }
+    set_value_size(sf, in.dst, size);
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory wrapping a bit-precise value");
+        return -1;
+    }
+    v = in.dst;
+    if (!uns) {
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_SHR;
+        in.lhs = v;
+        in.rhs = -1;
+        in.imm = vbits - n;
+        in.dst = new_value(sf, CC_VAL_I64);
+        if (in.dst < 0) {
+            return -1;
+        }
+        set_value_size(sf, in.dst, size);
+        if (push_instr(sf, in) != 0) {
+            set_diag(diag, "out of memory wrapping a bit-precise value");
+            return -1;
+        }
+        v = in.dst;
+    }
+    if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
+        sf->value_is_unsigned[v] = (unsigned char)uns;
+    }
+    return v;
+}
+
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     if (t != CC_TYPE_FLOAT) {
@@ -6682,7 +6768,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_value_size(sf, r.dst, 8);
             }
             if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
-                return normalize_integral_value(sf, r.dst, e->value_type, diag);
+                return normalize_integral_ct(sf, r.dst, e->ctype, e->value_type, diag);
             }
             return r.dst;
         }
@@ -6706,7 +6792,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             set_value_size(sf, in.dst, 8);
         }
         if (vt == CC_VAL_I64 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
-            return normalize_integral_value(sf, in.dst, e->value_type, diag);
+            return normalize_integral_ct(sf, in.dst, e->ctype, e->value_type, diag);
         }
         return in.dst;
     }
@@ -8859,7 +8945,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                             return -1;
                         }
                     }
-                    av = normalize_integral_value(sf, av, callee->params[i].type, diag);
+                    av = normalize_integral_ct(sf, av, callee->params[i].ctype, callee->params[i].type, diag);
                     if (av < 0) {
                         free(in.sym);
                         free(in.args);
@@ -9020,7 +9106,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (rhs < 0) {
                         return -1;
                     }
-                    rhs = normalize_integral_value(sf, rhs, vars[idx].type, diag);
+                    rhs = normalize_integral_ct(sf, rhs, e->ctype, vars[idx].type, diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9053,7 +9139,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (rhs < 0) {
                         return -1;
                     }
-                    rhs = normalize_integral_value(sf, rhs, vars[idx].type, diag);
+                    rhs = normalize_integral_ct(sf, rhs, e->ctype, vars[idx].type, diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9084,7 +9170,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (rhs < 0) {
                         return -1;
                     }
-                    rhs = normalize_integral_value(sf, rhs, vars[idx].type, diag);
+                    rhs = normalize_integral_ct(sf, rhs, e->ctype, vars[idx].type, diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9128,7 +9214,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (rhs < 0) {
                     return -1;
                 }
-                rhs = normalize_integral_value(sf, rhs, g->type, diag);
+                rhs = normalize_integral_ct(sf, rhs, e->ctype, g->type, diag);
                 if (rhs < 0) {
                     return -1;
                 }
@@ -9201,7 +9287,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
             }
-            rhs = normalize_integral_value(sf, rhs, e->lhs->value_type, diag);
+            rhs = normalize_integral_ct(sf, rhs, e->ctype, e->lhs->value_type, diag);
             if (rhs < 0) {
                 return -1;
             }
@@ -9338,7 +9424,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                 }
                 if (cc_type_is_integral(vars[idx].type) && !is_pointer_type(vars[idx].type)) {
-                    nextv = normalize_integral_value(sf, nextv, vars[idx].type, diag);
+                    nextv = normalize_integral_ct(sf, nextv, e->ctype, vars[idx].type, diag);
                     if (nextv < 0) {
                         return -1;
                     }
@@ -9454,7 +9540,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                 }
                 if (cc_type_is_integral(g->type) && !is_pointer_type(g->type)) {
-                    nextv = normalize_integral_value(sf, nextv, g->type, diag);
+                    nextv = normalize_integral_ct(sf, nextv, e->ctype, g->type, diag);
                     if (nextv < 0) {
                         return -1;
                     }
@@ -9525,7 +9611,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 nextv = in.dst;
-                nextv = normalize_integral_value(sf, nextv, e->value_type, diag);
+                nextv = normalize_integral_ct(sf, nextv, e->ctype, e->value_type, diag);
                 if (nextv < 0) {
                     return -1;
                 }
@@ -9581,7 +9667,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
             if (cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
-                nextv = normalize_integral_value(sf, nextv, e->value_type, diag);
+                nextv = normalize_integral_ct(sf, nextv, e->ctype, e->value_type, diag);
                 if (nextv < 0) {
                     return -1;
                 }
@@ -9781,7 +9867,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
         if (cc_type_is_integral(e->aux_type) && !is_pointer_type(e->aux_type)) {
-            v = normalize_integral_value(sf, v, e->aux_type, diag);
+            v = normalize_integral_ct(sf, v, e->ctype, e->aux_type, diag);
             if (v < 0) {
                 return -1;
             }
@@ -9953,7 +10039,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             sv = cast_value(sf, sv, want, diag);
             if (sv >= 0 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
-                sv = normalize_integral_value(sf, sv, e->value_type, diag);
+                sv = normalize_integral_ct(sf, sv, e->ctype, e->value_type, diag);
             }
             return sv;
         }
@@ -9994,7 +10080,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         tv = cast_value(sf, tv, want, diag);
         /* each arm is converted to the result type: (c ? s : ull) widens s */
         if (tv >= 0 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
-            tv = normalize_integral_value(sf, tv, e->value_type, diag);
+            tv = normalize_integral_ct(sf, tv, e->ctype, e->value_type, diag);
         }
         if (tv < 0 || emit_mov_instr(sf, dst, tv) != 0 || emit_br_instr(sf, l_end) != 0) {
             return -1;
@@ -10009,7 +10095,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         fv = cast_value(sf, fv, want, diag);
         if (fv >= 0 && cc_type_is_integral(e->value_type) && !is_pointer_type(e->value_type)) {
-            fv = normalize_integral_value(sf, fv, e->value_type, diag);
+            fv = normalize_integral_ct(sf, fv, e->ctype, e->value_type, diag);
         }
         if (fv < 0 || emit_mov_instr(sf, dst, fv) != 0 || emit_br_instr(sf, l_end) != 0) {
             return -1;
@@ -12531,7 +12617,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                     v = normalize_float_value(sf, v, s->type, diag);
                     if (v >= 0 && cc_type_is_integral(s->type) && !is_pointer_type(s->type)) {
-                        v = normalize_integral_value(sf, v, s->type, diag);
+                        v = normalize_integral_ct(sf, v, s->ctype, s->type, diag);
                     }
                     if (v < 0) {
                         return -1;
@@ -12951,7 +13037,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             v = normalize_float_value(sf, v, s->type, diag);
             if (v >= 0 && cc_type_is_integral(s->type) && !is_pointer_type(s->type)) {
-                v = normalize_integral_value(sf, v, s->type, diag);
+                v = normalize_integral_ct(sf, v, s->ctype, s->type, diag);
             }
             if (v < 0) {
                 return -1;
@@ -13562,7 +13648,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
                 if (ctx != NULL && ctx->fn != NULL && cc_type_is_integral(ctx->fn->ret_type)) {
                     /* `return 7;` from a long long function: the int is widened (on i386, its high word set) */
-                    rv = normalize_integral_value(sf, rv, ctx->fn->ret_type, diag);
+                    rv = normalize_integral_ct(sf, rv, ctx->fn->ret_ctype, ctx->fn->ret_type, diag);
                     if (rv < 0) {
                         return -1;
                     }

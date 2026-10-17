@@ -3731,6 +3731,56 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
 static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
                            int depth, cc_diag_t *diag);
 
+/** Whether @p t is a bit-precise integer type, `_BitInt(N)` or `unsigned _BitInt(N)`. */
+static int sema_ct_is_bitint(const cc_ctype_t *t) {
+    return t != NULL && (t->kind == CC_CT_BITINT || t->kind == CC_CT_UBITINT);
+}
+
+/**
+ * Type an arithmetic, bitwise or shift operator, or a conditional, one of
+ * whose operands is bit-precise, by the rules on interned types: the
+ * legacy encoding holds a `_BitInt`'s width but not its sign, so
+ * `unsigned _BitInt(N)` arithmetic would come out signed.  The legacy
+ * fields are rewritten to agree.
+ *
+ * @param e  a checked expression whose operands have their types
+ * @return   1 if @p e was typed here, else 0
+ */
+static int sema_settle_bitint(cc_expr_t *e) {
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+    const cc_ctype_t *t;
+
+    if (e->kind == CC_EXPR_BIN && e->op <= CC_BIN_BOR && e->lhs != NULL && e->rhs != NULL) {
+        a = e->lhs->ctype;
+        b = e->rhs->ctype;
+    } else if (e->kind == CC_EXPR_TERNARY && e->third != NULL) {
+        a = (e->rhs != NULL ? e->rhs : e->lhs)->ctype;
+        b = e->third->ctype;
+    } else {
+        return 0;
+    }
+    if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b) || (!sema_ct_is_bitint(a) && !sema_ct_is_bitint(b))) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_BIN && e->unary_form == CC_UNARY_RHS) {
+        t = cc_ct_promote(b);
+    } else if (e->kind == CC_EXPR_BIN && (e->unary_form == CC_UNARY_LHS || e->op == CC_BIN_SHL || e->op == CC_BIN_SHR)) {
+        t = cc_ct_promote(a);
+    } else {
+        t = cc_ct_common_int(a, b);
+    }
+    e->ctype = t;
+    if (sema_ct_is_bitint(t)) {
+        e->value_type = CC_TYPE_BITINT;
+        e->struct_id = (int)t->count;
+    } else {
+        e->value_type = cc_ct_legacy_kind(t->kind);
+        e->struct_id = -1;
+    }
+    return 1;
+}
+
 /**
  * Give checked expression @p e an interned type (cc_ctype.h) if it has
  * none: the one rebuilt from its legacy encoding.  A type recorded from a
@@ -3738,6 +3788,9 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
  * it says more than the encoding can, a function's type for one.
  */
 static void sema_settle_ctype(cc_expr_t *e) {
+    if (sema_settle_bitint(e)) {
+        return;
+    }
     /*
      * Where a declaration gives the type, none recorded for a pointer
      * means not known: the encoding would guess, and it spells a function
@@ -5267,14 +5320,21 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
+                e->ctype = vars[idx].ctype;
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
                 if (g != NULL) {
                     expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
+                    e->ctype = g->ctype;
                 }
             }
         } else {
             expr_copy_array_meta(e, e->lhs);
+            e->ctype = e->lhs->ctype;
+        }
+        /* an assignment's value has the target's type, unqualified */
+        if (e->ctype != NULL) {
+            e->ctype = e->ctype->unqual;
         }
         return 0;
     }
@@ -5451,10 +5511,22 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             return -1;
         }
         e->value_type = t;
-        if (is_pointer_type(t) && t_struct_id >= 0) {
+        if ((is_pointer_type(t) && t_struct_id >= 0) || t == CC_TYPE_BITINT) {
             e->struct_id = t_struct_id;
         } else {
             e->struct_id = -1;
+        }
+        /* the value of `x++` has x's type, unqualified */
+        if (e->ident != NULL) {
+            int idx = vars_find_visible(vars, var_count, e->ident, depth);
+            const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+            e->ctype = idx >= 0 ? vars[idx].ctype : g != NULL ? g->ctype : NULL;
+        } else {
+            e->ctype = e->lhs->ctype;
+        }
+        if (e->ctype != NULL) {
+            e->ctype = e->ctype->unqual;
         }
         return 0;
     }

@@ -59,30 +59,9 @@ int cc_const_is_unsigned(const cc_const_t *v) {
  *           pointer, or is wider than 64 bits
  */
 static int const_type_width(const cc_ctype_t *t) {
-    long size;
+    long width = cc_ct_int_width(t);
 
-    if (t == NULL) {
-        return 0;
-    }
-    switch (t->kind) {
-    case CC_CT_BOOL:
-        return 1;
-    case CC_CT_POINTER:
-        return cc_target_pointer_size() * 8;
-    case CC_CT_BITINT:
-    case CC_CT_UBITINT:
-        return t->count >= 1 && t->count <= 64 ? (int)t->count : 0;
-    default:
-        break;
-    }
-    if (!cc_ct_is_integer(t)) {
-        return 0;
-    }
-    size = cc_ct_size(t, NULL);
-    if (size <= 0 || size > 8) {
-        return 0;
-    }
-    return (int)size * 8;
+    return width <= 64 ? (int)width : 0;
 }
 
 /**
@@ -143,118 +122,6 @@ static int const_convert(const cc_const_t *v, const cc_ctype_t *t, cc_const_t *o
         raw = raw != 0 ? 1 : 0;
     }
     return const_make(raw, t, out);
-}
-
-/**
- * The type an operand takes part in arithmetic as: the integer
- * promotions, with an enumeration as `int` and a pointer as the unsigned
- * integer of its width.  A bit-precise type is not promoted.
- *
- * @param t  the type
- * @return   the promoted type
- */
-static const cc_ctype_t *const_promote(const cc_ctype_t *t) {
-    t = const_unqual(t);
-    if (t == NULL) {
-        return const_int();
-    }
-    switch (t->kind) {
-    case CC_CT_ENUM:
-    case CC_CT_BOOL:
-    case CC_CT_CHAR:
-    case CC_CT_SCHAR:
-    case CC_CT_UCHAR:
-    case CC_CT_SHORT:
-    case CC_CT_USHORT:
-        return const_int();
-    case CC_CT_POINTER:
-        return const_uintptr();
-    default:
-        return t;
-    }
-}
-
-/**
- * An integer type's conversion rank (C23 6.3.1.1), as a number to
- * compare: wider types rank higher, and of two the same width a standard
- * type ranks above a bit-precise one, `long long` above `long`.
- *
- * @param t  a promoted integer type
- * @return   its rank
- */
-static int const_rank(const cc_ctype_t *t) {
-    int std;
-
-    switch (t->kind) {
-    case CC_CT_INT:
-    case CC_CT_UINT:
-        std = 1;
-        break;
-    case CC_CT_LONG:
-    case CC_CT_ULONG:
-        std = 2;
-        break;
-    case CC_CT_LLONG:
-    case CC_CT_ULLONG:
-        std = 3;
-        break;
-    default:
-        std = 0;
-        break;
-    }
-    return const_type_width(t) * 4 + std;
-}
-
-/**
- * The unsigned type corresponding to a signed one.
- *
- * @param t  a promoted signed integer type
- * @return   its unsigned counterpart
- */
-static const cc_ctype_t *const_unsigned_of(const cc_ctype_t *t) {
-    switch (t->kind) {
-    case CC_CT_LONG:
-        return cc_ct_basic(CC_CT_ULONG);
-    case CC_CT_LLONG:
-        return cc_ct_basic(CC_CT_ULLONG);
-    case CC_CT_BITINT:
-        return cc_ct_bitint(t->count, 1);
-    default:
-        return cc_ct_basic(CC_CT_UINT);
-    }
-}
-
-/**
- * The common type of two integer operands (C11 6.3.1.8).
- *
- * @param a  one operand's type
- * @param b  the other's
- * @return   the type both are converted to
- */
-static const cc_ctype_t *const_common_type(const cc_ctype_t *a, const cc_ctype_t *b) {
-    const cc_ctype_t *u;
-    const cc_ctype_t *s;
-
-    a = const_promote(a);
-    b = const_promote(b);
-    if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
-        return const_int();
-    }
-    if (a == b) {
-        return a;
-    }
-    if (cc_ct_is_unsigned(a) == cc_ct_is_unsigned(b)) {
-        return const_rank(a) >= const_rank(b) ? a : b;
-    }
-    u = cc_ct_is_unsigned(a) ? a : b;
-    s = cc_ct_is_unsigned(a) ? b : a;
-    if (const_rank(u) >= const_rank(s)) {
-        return u;
-    }
-    if (const_type_width(s) > const_type_width(u)) {
-        return s;
-    }
-    return const_unsigned_of(s);
 }
 
 /**
@@ -378,12 +245,12 @@ const cc_ctype_t *cc_const_type_of(const cc_expr_t *e) {
             return cc_const_type_of(e->rhs);
         case CC_BIN_SHL:
         case CC_BIN_SHR:
-            return const_promote(cc_const_type_of(e->lhs));
+            return cc_ct_promote(cc_const_type_of(e->lhs));
         default:
-            return const_common_type(cc_const_type_of(e->lhs), cc_const_type_of(e->rhs));
+            return cc_ct_common_int(cc_const_type_of(e->lhs), cc_const_type_of(e->rhs));
         }
     case CC_EXPR_TERNARY:
-        return const_common_type(cc_const_type_of(e->rhs != NULL ? e->rhs : e->lhs), cc_const_type_of(e->third));
+        return cc_ct_common_int(cc_const_type_of(e->rhs != NULL ? e->rhs : e->lhs), cc_const_type_of(e->third));
     case CC_EXPR_CALL:
         return e->ident != NULL ? const_builtin_type(e) : const_int();
     default:
@@ -546,7 +413,7 @@ static int const_eval_float_cast(const cc_expr_t *e, cc_const_t *out) {
  */
 static int const_eval_arith(const cc_expr_t *e, const cc_const_t *a, const cc_const_t *b, cc_const_t *out) {
     int shift = e->op == CC_BIN_SHL || e->op == CC_BIN_SHR;
-    const cc_ctype_t *t = shift ? const_promote(a->type) : const_common_type(a->type, b->type);
+    const cc_ctype_t *t = shift ? cc_ct_promote(a->type) : cc_ct_common_int(a->type, b->type);
     cc_const_t x;
     cc_const_t y;
     int is_unsigned;

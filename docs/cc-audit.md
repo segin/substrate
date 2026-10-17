@@ -453,6 +453,19 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   the result (`struct s p = c ? g : l;`) passed `memcpy` a garbled source
   and died of SIGSEGV.  *Reproduced* (-m32).  The result is now
   pointer-sized for any aggregate.  `codegen/struct_ternary.c`.
+- [x] **CC-81** A value converted to `_BitInt(N)`, N at most 64, shall
+  keep its low N bits sign-extended, and one converted to
+  `unsigned _BitInt(N)` its low N bits zero-extended.  Constants wrapped
+  at the type's size in bytes, run-time values not at all, and
+  `unsigned _BitInt(N)` was signed throughout: the legacy type encoding
+  kept a `_BitInt`'s width and not its sign, so `(_BitInt(7))100` was
+  100, not -28, and `(unsigned _BitInt(12))-1 >> 4` was -1, not 255.
+  *Reproduced* (both targets).  The parser records the precise type,
+  the constant evaluator and sema type bit-precise arithmetic by the
+  rules on interned types (the parser marks `-x`, `+x` and `~x`, which
+  it spells as binary operators, so they keep the operand's type), and
+  lowering wraps to N bits wherever a value is converted.
+  `codegen/const_expr.c`, `codegen/bitint_narrow.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -865,7 +878,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-80 requirements: 80 met, 0 open.
+81 requirements: 81 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

@@ -8505,6 +8505,20 @@ static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs) {
 }
 
 /**
+ * Mark a binary expression as the spelling of a unary operator.
+ *
+ * @param e     the expression, or NULL
+ * @param form  CC_UNARY_RHS or CC_UNARY_LHS: which operand is the operator's
+ * @return      @p e
+ */
+static cc_expr_t *mark_unary_form(cc_expr_t *e, unsigned char form) {
+    if (e != NULL) {
+        e->unary_form = form;
+    }
+    return e;
+}
+
+/**
  * Whether any of a type's array levels has a bound that is not a constant.
  *
  * @param bounds  the bounds, as parse_type_name_ct() gives them
@@ -8876,6 +8890,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
     dst->is_subscript = src->is_subscript;
+    dst->unary_form = src->unary_form;
     dst->ctype = src->ctype;
     dst->member_is_arrow = src->member_is_arrow;
     dst->member_offset = src->member_offset;
@@ -9559,7 +9574,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(rhs);
             return NULL;
         }
-        return new_bin_expr(CC_BIN_MUL, neg_one, rhs);
+        return mark_unary_form(new_bin_expr(CC_BIN_MUL, neg_one, rhs), CC_UNARY_RHS);
     }
     if (p->tok.kind == TOK_PLUS) {
         cc_expr_t *one;
@@ -9581,7 +9596,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(rhs);
             return NULL;
         }
-        return new_bin_expr(CC_BIN_MUL, one, rhs);
+        return mark_unary_form(new_bin_expr(CC_BIN_MUL, one, rhs), CC_UNARY_RHS);
     }
     if (p->tok.kind == TOK_BANG) {
         cc_expr_t *rhs;
@@ -9615,7 +9630,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(rhs);
             return NULL;
         }
-        return new_bin_expr(CC_BIN_BXOR, rhs, mask);
+        return mark_unary_form(new_bin_expr(CC_BIN_BXOR, rhs, mask), CC_UNARY_LHS);
     }
     if (p->tok.kind == TOK_PLUS_PLUS || p->tok.kind == TOK_MINUS_MINUS) {
         cc_tok_kind_t op = p->tok.kind;

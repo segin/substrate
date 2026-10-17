@@ -209,6 +209,35 @@ int cc_ct_is_scalar(const cc_ctype_t *t);
 const cc_ctype_t *cc_ct_decay(const cc_ctype_t *t);
 
 /**
+ * The width in bits of an integer or pointer type.
+ *
+ * @param t  the type
+ * @return   its width, 1 for _Bool; 0 if @p t is neither an integer type
+ *           nor a pointer, or its size is not known
+ */
+long cc_ct_int_width(const cc_ctype_t *t);
+
+/**
+ * The integer promotion of a type (C23 6.3.1.1): `int` for _Bool, the
+ * character and short types and an enumeration; the unsigned integer of
+ * a pointer's width for a pointer; a bit-precise type is not promoted.
+ *
+ * @param t  the type; NULL reads as int
+ * @return   the promoted type, unqualified
+ */
+const cc_ctype_t *cc_ct_promote(const cc_ctype_t *t);
+
+/**
+ * The common type of two integer operands after the usual arithmetic
+ * conversions (C23 6.3.1.8), bit-precise types included.
+ *
+ * @param a  one operand's type
+ * @param b  the other's
+ * @return   the common type; int if either is not an integer type
+ */
+const cc_ctype_t *cc_ct_common_int(const cc_ctype_t *a, const cc_ctype_t *b);
+
+/**
  * The size of a type in bytes on the selected target.
  *
  * @param t   the type
