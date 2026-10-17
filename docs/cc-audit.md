@@ -547,13 +547,20 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
 - [ ] **CC-92** `nullptr` shall convert only to a pointer, `bool` or
   `nullptr_t` (C23 6.3.2.4): `int n = nullptr;` is accepted; gcc
   rejects it.  *Reproduced.*
-- [ ] **CC-93** A static local array of integers wider than 64 bits
+- [x] **CC-93** A static local array of integers wider than 64 bits
   shall hold the whole value of each initializer (C11 6.7.9p10):
   `static unsigned __int128 u[2] = {5, (unsigned __int128)1 << 100};`
   and `static _BitInt(128) b[2] = {1, 0x123456789abcdef0123wb};` inside
-  a function lose each element's upper 64 bits (`u[1] >> 96` is 0, gcc
-  16).  File-scope arrays and scalars are laid out right.  *Reproduced*
-  (-m64).
+  a function lost each element's upper 64 bits (`u[1] >> 96` was 0, gcc
+  16).  File-scope arrays and scalars were laid out right.  *Reproduced*
+  (-m64).  Automatic arrays were wrong too: a wide element initialized
+  by a value of its type got that value's address in its low limb, and
+  one initialized by a narrower value was not sign-extended.  Sema folds
+  a static local array's elements into their limbs as it does a
+  file-scope array's, and converts a narrower element to the wide type;
+  lowering lays a static one out as data and copies a whole-element
+  value (a wide integer, or a structure) into an automatic one.
+  `codegen/wide_array_init.c`.
 - [x] **CC-94** An array of pointers to arrays shall hold pointers (C11
   6.7.6.2): for `int g[2][4]; int (*rows[2])[4] = {&g[0], &g[1]};` cc
   laid `rows` out at the size of the 2x4 array (64 bytes at -m64, gcc
@@ -1069,7 +1076,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-106 requirements: 98 met, 8 open.
+106 requirements: 99 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

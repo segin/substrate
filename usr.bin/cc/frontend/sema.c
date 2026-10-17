@@ -4903,6 +4903,11 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                     sema_diag(diag, "out of memory");
                     return -1;
                 }
+                if (sema_wide_convert_for_assign(tu, &init->args[i], elem) < 0) {
+                    /* a wide integer element initialized by a narrower value: converted, so all of it is set */
+                    sema_diag(diag, "out of memory");
+                    return -1;
+                }
                 saw_nonlist_struct_item = 1;
                 continue;
             }
@@ -5085,6 +5090,21 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         if (s->ctype->count <= 0 && inferred_len > 0) {
                             s->ctype = sema_complete_array_ctype(s->ctype, inferred_len);
                             (*vars)[*var_count - 1].ctype = s->ctype;
+                        }
+                        if ((s->storage & CC_STORAGE_STATIC) != 0 && sema_wide_def(tu, s->ctype->of) != NULL) {
+                            /* a static array of wide integers: each element not braced is a constant to fold,
+                             * as a file-scope array's are */
+                            size_t k;
+
+                            for (k = 0; k < s->expr->arg_count; ++k) {
+                                if (s->expr->args[k] != NULL && s->expr->args[k]->kind != CC_EXPR_INIT_LIST &&
+                                    sema_wide_static_init(tu, &s->expr->args[k], sx_ct_record(s->ctype->of), diag) !=
+                                        0) {
+                                    free((*vars)[*var_count - 1].name);
+                                    (*var_count)--;
+                                    return -1;
+                                }
+                            }
                         }
                     } else if (sx_ct_record(s->ctype) >= 0) {
                         if (check_struct_initializer(tu, s->decl_name, sx_ct_record(s->ctype), s->expr, *vars,

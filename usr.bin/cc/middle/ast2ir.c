@@ -7582,6 +7582,17 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                     elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                     elem_init = elem_init->lhs;
                 }
+                if (elem_init != NULL && elem_init->kind != CC_EXPR_INIT_LIST &&
+                    ct_record_id(lower_value_ctype(elem_init)) == elem_sid) {
+                    /* a value of the element's own type (a structure, a wide integer) is all of it */
+                    int v = lower_expr(tu, sf, ctx, vars, var_count, depth, elem_init, diag);
+
+                    if (v < 0 || emit_memcpy_instr(sf, elem_ptr, v, elem_size, diag) != 0) {
+                        return -1;
+                    }
+                    (*cursor)++;
+                    continue;
+                }
                 if (elem_init == NULL || elem_init->kind != CC_EXPR_INIT_LIST) {
                     if (is_zero_initializer_expr(raw)) {
                         (*cursor)++;
@@ -9082,6 +9093,15 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                         if (lower_cast_record_id(elem_init) == ct_record_id(elem_ct) && elem_init->lhs != NULL &&
                             elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                             elem_init = elem_init->lhs;
+                        }
+                        if (elem_init->kind != CC_EXPR_INIT_LIST &&
+                            ct_record_id(lower_value_ctype(elem_init)) == ct_record_id(elem_ct)) {
+                            /* a value of the element's own type (a structure, a wide integer) is all of it */
+                            v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, elem_init, diag);
+                            if (v < 0 || emit_memcpy_instr(sf, item_ptr, v, elem_size, diag) != 0) {
+                                return -1;
+                            }
+                            continue;
                         }
                         if (elem_init->kind != CC_EXPR_INIT_LIST) {
                             memset(&tmp_list, 0, sizeof(tmp_list));
@@ -12831,6 +12851,60 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
  *            constant array of scalars this handles, so the caller falls
  *            back to filling the array at run time; -1 when out of memory
  */
+/**
+ * Lay out the initializer of an array of @p elems structures (or of the
+ * wide integers and other types represented as structures) into @p buf:
+ * each element from its own braced list, or, where its braces are
+ * elided, from the list's next items.
+ *
+ * @param tu           the translation unit
+ * @param struct_id    the element structure
+ * @param struct_size  its size
+ * @param elems        the array's element count
+ * @param init         the array's initializer list
+ * @param buf          the array's bytes
+ * @param buf_size     their number
+ * @param relocs       receives the relocations addresses in it need
+ * @param reloc_count  their number
+ * @param diag         receives an error
+ * @return             0, or -1 on error
+ */
+static int flatten_record_array_init(const cc_translation_unit_t *tu, int struct_id, long struct_size, long elems,
+                                     const cc_expr_t *init, unsigned char *buf, long buf_size, global_reloc_t **relocs,
+                                     size_t *reloc_count, cc_diag_t *diag) {
+    size_t cur = 0;
+    long j;
+
+    for (j = 0; j < elems && cur < init->arg_count; ++j) {
+        const cc_expr_t *elem_list = extract_struct_init_list_expr(init->args[cur], struct_id);
+
+        if (elem_list != NULL) {
+            size_t sub = 0;
+
+            cur++;
+            if (flatten_struct_init_bytes_cursor(tu, struct_id, elem_list, &sub, j * struct_size, buf, buf_size,
+                                                 relocs, reloc_count, diag) != 0) {
+                return -1;
+            }
+            if (sub < elem_list->arg_count) {
+                set_diag(diag, "too many initializers in struct array element");
+                return -1;
+            }
+            continue;
+        }
+        /* the element's braces elided: its members take the list's next items */
+        if (flatten_struct_init_bytes_cursor(tu, struct_id, init, &cur, j * struct_size, buf, buf_size, relocs,
+                                             reloc_count, diag) != 0) {
+            return -1;
+        }
+    }
+    if (cur < init->arg_count) {
+        set_diag(diag, "too many struct elements in array initializer");
+        return -1;
+    }
+    return 0;
+}
+
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g) {
     const cc_ctype_t *scalar;
     long *dims;
@@ -12851,6 +12925,32 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
     dims = ct_array_bounds(stmt_decl_ctype(s), &nd, &scalar);
     if (nd < 0) {
         return -1;
+    }
+    if (nd == 1 && ct_record_id(scalar) >= 0 && tu->structs[ct_record_id(scalar)].wide_bits > 0) {
+        /* an integer wider than 64 bits is a structure of limbs, laid out as file-scope arrays of them are */
+        long elem_size = cc_ct_size(scalar, tu);
+
+        if (elem_size <= 0 || dims[0] <= 0 || elem_size > LONG_MAX / dims[0]) {
+            goto out;
+        }
+        buf = (unsigned char *)calloc((size_t)(elem_size * dims[0]), 1);
+        if (buf == NULL) {
+            rc = -1;
+            goto out;
+        }
+        memset(&quiet, 0, sizeof(quiet));
+        if (flatten_record_array_init(tu, ct_record_id(scalar), elem_size, dims[0], s->expr, buf,
+                                      elem_size * dims[0], &relocs, &reloc_count, &quiet) != 0) {
+            goto out;
+        }
+        if (build_global_stream_from_bytes(g, buf, elem_size * dims[0], relocs, reloc_count, &quiet) != 0) {
+            rc = -1;
+            goto out;
+        }
+        ssa_global_set_bytes(g, elem_size * dims[0]);
+        g->has_init = 1;
+        rc = 1;
+        goto out;
     }
     if (nd == 0 || !cc_ct_is_arithmetic(scalar) || ct_record_id(scalar) >= 0) {
         /* aggregates and pointers (string tables) keep their own initialization code */
@@ -13190,46 +13290,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         cc_ssa_module_free(out);
                         return -1;
                     }
-                } else {
-                    size_t cur = 0;
-                    long j;
-                    for (j = 0; j < struct_elems && cur < struct_init->arg_count; ++j) {
-                        const cc_expr_t *raw = struct_init->args[cur];
-                        const cc_expr_t *elem_list = extract_struct_init_list_expr(raw, struct_id);
-                        if (elem_list != NULL) {
-                            size_t sub = 0;
-                            cur++;
-                            if (flatten_struct_init_bytes_cursor(tu, struct_id, elem_list, &sub, j * struct_size, buf,
-                                                                 total_size, &relocs, &reloc_count, diag) != 0) {
-                                free(buf);
-                                free_global_relocs(relocs, reloc_count);
-                                cc_ssa_module_free(out);
-                                return -1;
-                            }
-                            if (sub < elem_list->arg_count) {
-                                set_diag(diag, "too many initializers in struct array element");
-                                free(buf);
-                                free_global_relocs(relocs, reloc_count);
-                                cc_ssa_module_free(out);
-                                return -1;
-                            }
-                            continue;
-                        }
-                        if (flatten_struct_init_bytes_cursor(tu, struct_id, struct_init, &cur, j * struct_size, buf, total_size,
-                                                             &relocs, &reloc_count, diag) != 0) {
-                            free(buf);
-                            free_global_relocs(relocs, reloc_count);
-                            cc_ssa_module_free(out);
-                            return -1;
-                        }
-                    }
-                    if (cur < struct_init->arg_count) {
-                        set_diag(diag, "too many struct elements in array initializer");
-                        free(buf);
-                        free_global_relocs(relocs, reloc_count);
-                        cc_ssa_module_free(out);
-                        return -1;
-                    }
+                } else if (flatten_record_array_init(tu, struct_id, struct_size, struct_elems, struct_init, buf,
+                                                     total_size, &relocs, &reloc_count, diag) != 0) {
+                    free(buf);
+                    free_global_relocs(relocs, reloc_count);
+                    cc_ssa_module_free(out);
+                    return -1;
                 }
 
                 for (z = 0; z < (size_t)total_size; ++z) {
