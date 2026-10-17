@@ -695,6 +695,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   padded to 16, which the frame aligns.  An address-taken scalar keeps
   its declared alignment for the storage it gets.
   `codegen/local_overalign.c`.
+- [x] **CC-114** An object with static storage shall be as aligned as its
+  type needs (C11 6.2.8): the emitter aligned a global by its size alone,
+  at most 8 bytes, so `long double`, `__int128` and a structure with an
+  `_Alignas(32)` member were 8-aligned at file scope and as static locals
+  (gcc 16, 16, 32).  *Reproduced* (both targets); found while testing
+  CC-113.  A global carries its type's alignment (`type_align`, set with
+  its layout) and the emitter takes it.  `codegen/global_align.c`.
 - [ ] **CC-113** A vector type shall be aligned to its size, as gcc aligns
   it: `vector_size(32)` is 32-aligned, `vector_size(64)` 64 (gcc, both
   targets); cc caps vector alignment at 16, so `struct { char c; v8 v; }`
@@ -1158,7 +1165,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-113 requirements: 105 met, 8 open.
+114 requirements: 106 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

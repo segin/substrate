@@ -986,13 +986,16 @@ static cc_ssa_data_kind_t ssa_data_kind(const cc_ctype_t *t) {
 
 /**
  * Lay out an SSA global as an object of type @p t: an array's elements,
- * or a single object.
+ * or a single object, as aligned as the type needs.
  *
  * @param g   the global
  * @param t   its type
  * @param tu  the translation unit
  */
 static void ssa_global_set_layout(cc_ssa_global_t *g, const cc_ctype_t *t, const cc_translation_unit_t *tu) {
+    long a = cc_ct_align(t, tu);
+
+    g->type_align = a > 0 ? a : 0;
     if (ct_has_kind(t, CC_CT_ARRAY)) {
         g->is_array = 1;
         g->data_kind = ssa_data_kind(t->of);

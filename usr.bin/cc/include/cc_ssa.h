@@ -209,6 +209,7 @@ typedef struct {
     long elem_size;               /**< the size of the object, or of an array's element; <= 0 if not known */
     long array_len;               /**< an array's element count; 0 if not known; -1 for no array */
     long size_bytes;
+    long type_align;              /**< the alignment its type needs; 0 if not known */
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;

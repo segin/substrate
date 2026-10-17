@@ -1567,6 +1567,10 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
         if ((g->attr_flags & CC_ATTR_PACKED) != 0) {
             align = 1;
         }
+        if (g->type_align > align) {
+            /* what its type needs: long double, __int128, vectors, members _Alignas raises */
+            align = g->type_align;
+        }
         if (g->attr_align > align) {
             align = g->attr_align;
         }
