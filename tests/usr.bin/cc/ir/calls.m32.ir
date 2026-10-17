@@ -1,0 +1,36 @@
+module "ir/calls.c" {
+  target ilp32;
+
+  func @twice : fn(i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = stackalloc i32 4;
+    store i32 4, %v0, %v1;
+    %v2 = load i32 4, %v1;
+    %v3 = load i32 4, %v1;
+    %v4 = add i32 %v2, %v3;
+    ret i32 %v4;
+  }
+
+  func @calls : fn(i32, i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = param i32 1;
+    %v2 = stackalloc i32 4;
+    store i32 4, %v0, %v2;
+    %v3 = stackalloc i32 4;
+    store i32 4, %v1, %v3;
+    %v4 = str i32 "\22\5c045\5c144\5c012\22";
+    %v5 = load i32 4, %v3;
+    %v6 = call.va i32 @printf(%v4, %v5);
+    %v7 = load i32 4, %v3;
+    %v8 = call i32 @twice(%v7);
+    %v9 = zload i32 4, %v2;
+    %v10 = load i32 4, %v3;
+    %v11 = call.va i32 %v9(%v10);
+    %v12 = load i32 4, %v3;
+    %v13 = call i32 @twice(%v12);
+    %v14 = add i32 %v11, %v13;
+    ret i32 %v14;
+  }
+}

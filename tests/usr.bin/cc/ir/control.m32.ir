@@ -1,0 +1,86 @@
+module "ir/control.c" {
+  target ilp32;
+
+  func @sum : fn(i32) -> i64 {
+  entry:
+    %v2 = undef i32;
+    %v5 = undef i32;
+    %v24 = undef i32;
+    %v0 = param i32 0;
+    %v1 = stackalloc i32 4;
+    store i32 4, %v0, %v1;
+    %v3 = const i32 0;
+    set i32 %v2, %v3;
+    %v4 = stackalloc i32 4;
+    store i32 4, %v2, %v4;
+    %v6 = const i32 0;
+    set i32 %v5, %v6;
+    %v7 = stackalloc i32 4;
+    store i32 4, %v5, %v7;
+    br L0;
+  L0:
+    %v8 = load i32 4, %v7;
+    %v9 = load i32 4, %v1;
+    %v10 = icmp slt i32 %v8, %v9;
+    %v11 = const i32 0;
+    %v12 = icmp ne i32 %v10, %v11;
+    br_cond i32 %v12, L1, L3;
+  L1:
+    %v13 = load i32 4, %v4;
+    %v14 = load i32 4, %v7;
+    %v15 = add i32 %v13, %v14;
+    store i32 4, %v15, %v4;
+    br L2;
+  L2:
+    %v16 = load i32 4, %v7;
+    %v17 = const i32 1;
+    %v18 = add i32 %v16, %v17;
+    store i32 4, %v18, %v7;
+    br L0;
+  L3:
+    %v19 = load i32 4, %v4;
+    %v20 = const i32 100;
+    %v21 = icmp sgt i32 %v19, %v20;
+    %v22 = const i32 0;
+    %v23 = icmp ne i32 %v21, %v22;
+    br_cond i32 %v23, L4, L5;
+  L4:
+    %v25 = const i32 100;
+    set i32 %v24, %v25;
+    br L6;
+  L5:
+    %v26 = load i32 4, %v4;
+    set i32 %v24, %v26;
+    br L6;
+  L6:
+    ret i32 %v24;
+  }
+
+  func @pick : fn(i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = stackalloc i32 4;
+    store i32 4, %v0, %v1;
+    %v2 = load i32 4, %v1;
+    br L4;
+  L4:
+    %v3 = const i32 1;
+    %v4 = icmp eq i32 %v2, %v3;
+    br_cond i32 %v4, L1, L5;
+  L5:
+    %v5 = const i32 2;
+    %v6 = icmp eq i32 %v2, %v5;
+    br_cond i32 %v6, L2, L3;
+  L1:
+    %v7 = const i32 10;
+    ret i32 %v7;
+  L2:
+    %v8 = const i32 20;
+    ret i32 %v8;
+  L3:
+    %v9 = const i32 -1;
+    %v10 = const i32 1;
+    %v11 = mul i32 %v9, %v10;
+    ret i32 %v11;
+  }
+}

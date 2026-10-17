@@ -1,6 +1,6 @@
 # cc: a target-neutral IR with per-target lowering
 
-Status: step 0 in progress (`cc -fdump-ir` writes the text form).  This document says what the compiler does
+Status: step 0 done (`cc -fdump-ir`, the opcode table, golden IR tests).  This document says what the compiler does
 today, the shape we want, and an order of work in which every step
 lands on its own with the test gate green.
 
@@ -133,7 +133,7 @@ a bug, and that bug gets a regression test of its own.
 
 | Step | Work | Size |
 |---|---|---|
-| 0 | **Make the IR visible.**  The text form is the existing one the `ir-verifier`, `ir-normalize` and `ir-diff` tools read (typed, LLVM-like; see `tests/usr.bin/cc/valid.ir`), so those tools become the IR's verifier and the golden tests' normalizer and differ.  `cc -fdump-ir` writes it (after each pass with `-fdump-ir=all`); the verifier gains an opcode and type table and checks operand types, which it does not today; golden-IR tests under `tests/usr.bin/cc/ir/` compare normalized dumps.  Today's IR has no phi, so the dumps are the phi-free subset until locals are promoted.  Decide the MIR's fate: delete `select.c` unless step 5 needs it. | small |
+| 0 | **Make the IR visible.**  The text form is the existing one the `ir-verifier`, `ir-normalize` and `ir-diff` tools read (typed, LLVM-like; see `tests/usr.bin/cc/valid.ir`), so those tools become the IR's verifier and the golden tests' normalizer and differ.  `cc -fdump-ir` writes it (after each pass with `-fdump-ir=all`); the verifier gains an opcode and type table and checks operand types, which it does not today; golden-IR tests under `tests/usr.bin/cc/ir/` compare normalized dumps.  Today's IR has no phi, so the dumps are the phi-free subset until locals are promoted.  Decide the MIR's fate: delete `select.c` unless step 5 needs it.  **Done.**  `middle/ssa_dump.c` writes the form; a value written more than once is a variable (`undef` at the entry, written by `set`), and an aggregate value is the address of its memory.  The opcode table checks classes (integer, floating, aggregate), not widths, until step 1.  `run_ir_golden.sh` compares `tests/usr.bin/cc/ir/*.c` with their `.m64.ir`/`.m32.ir` goldens and verifies every `codegen/` dump after each pass.  The MIR was deleted in refactor step 1. | small |
 | 1 | **Typed values.**  Add the types and the conversion opcodes.  `ast2ir` writes them; the emitters accept them; the verifier checks them.  Remove `value_sizes` and the `shl`/`shr` conversions last. | large |
 | 2 | **Target descriptor.**  Replace `cc_target_t`, `g_pointer_size_bytes` and the front end's own size tables with descriptor queries.  Mechanical, but it touches every file. | medium |
 | 3 | **ABI pass.**  Calls carry C signatures; `ast2ir` stops classifying; `abi_x86_64.c` and `abi_i386.c` do it.  `emit_*_call` read the explicit result. | large |

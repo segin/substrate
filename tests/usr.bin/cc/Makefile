@@ -930,6 +930,7 @@ test:
 	! grep -q "^#define __STRICT_ANSI__" $(CC_TMP)/cc_pp_strict_gnu11.i
 	sh run_simd_intrinsics.sh
 	sh run_negative.sh
+	sh run_ir_golden.sh
 	$(TOP)/usr.bin/cc/cc native_gnu_sizeof_void.c -o $(CC_TMP)/cc_native_gnu_sizeof_void
 	$(CC_TMP)/cc_native_gnu_sizeof_void
 	$(TOP)/usr.bin/cc/cc -m32 native_gnu_sizeof_void.c -o $(CC_TMP)/cc_native_gnu_sizeof_void_32

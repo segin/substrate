@@ -1,0 +1,134 @@
+module "ir/control.c" {
+  target lp64;
+
+  func @sum : fn(i32) -> i64 {
+  entry:
+    %v4 = undef i32;
+    %v11 = undef i32;
+    %v52 = undef i32;
+    %v0 = param i32 0;
+    %v1 = stackalloc i64 4;
+    %v2 = shl i64 %v0, 32;
+    %v3 = ashr i32 %v2, 32;
+    store i32 4, %v3, %v1;
+    %v5 = const i32 0;
+    %v6 = shl i64 %v5, 32;
+    %v7 = ashr i32 %v6, 32;
+    set i32 %v4, %v7;
+    %v8 = stackalloc i64 4;
+    %v9 = shl i64 %v4, 32;
+    %v10 = ashr i32 %v9, 32;
+    store i32 4, %v10, %v8;
+    %v12 = const i32 0;
+    %v13 = shl i64 %v12, 32;
+    %v14 = ashr i32 %v13, 32;
+    set i32 %v11, %v14;
+    %v15 = stackalloc i64 4;
+    %v16 = shl i64 %v11, 32;
+    %v17 = ashr i32 %v16, 32;
+    store i32 4, %v17, %v15;
+    br L0;
+  L0:
+    %v18 = load i32 4, %v15;
+    %v19 = load i32 4, %v1;
+    %v20 = shl i64 %v18, 32;
+    %v21 = ashr i32 %v20, 32;
+    %v22 = shl i64 %v19, 32;
+    %v23 = ashr i32 %v22, 32;
+    %v24 = icmp slt i32 %v21, %v23;
+    %v25 = const i64 0;
+    %v26 = icmp ne i32 %v24, %v25;
+    br_cond i32 %v26, L1, L3;
+  L1:
+    %v27 = load i32 4, %v8;
+    %v28 = load i32 4, %v15;
+    %v29 = shl i64 %v27, 32;
+    %v30 = ashr i32 %v29, 32;
+    %v31 = shl i64 %v28, 32;
+    %v32 = ashr i32 %v31, 32;
+    %v33 = add i64 %v30, %v32;
+    %v34 = shl i64 %v33, 32;
+    %v35 = ashr i32 %v34, 32;
+    %v36 = shl i64 %v35, 32;
+    %v37 = ashr i32 %v36, 32;
+    store i32 4, %v37, %v8;
+    br L2;
+  L2:
+    %v38 = load i32 4, %v15;
+    %v39 = const i64 1;
+    %v40 = add i64 %v38, %v39;
+    %v41 = shl i64 %v40, 32;
+    %v42 = ashr i32 %v41, 32;
+    store i32 4, %v42, %v15;
+    br L0;
+  L3:
+    %v43 = load i32 4, %v8;
+    %v44 = const i32 100;
+    %v45 = shl i64 %v43, 32;
+    %v46 = ashr i32 %v45, 32;
+    %v47 = shl i64 %v44, 32;
+    %v48 = ashr i32 %v47, 32;
+    %v49 = icmp sgt i32 %v46, %v48;
+    %v50 = const i64 0;
+    %v51 = icmp ne i32 %v49, %v50;
+    br_cond i32 %v51, L4, L5;
+  L4:
+    %v53 = const i32 100;
+    %v54 = shl i64 %v53, 32;
+    %v55 = ashr i32 %v54, 32;
+    set i32 %v52, %v55;
+    br L6;
+  L5:
+    %v56 = load i32 4, %v8;
+    %v57 = shl i64 %v56, 32;
+    %v58 = ashr i32 %v57, 32;
+    set i32 %v52, %v58;
+    br L6;
+  L6:
+    %v59 = shl i64 %v52, 32;
+    %v60 = ashr i32 %v59, 32;
+    ret i32 %v60;
+  }
+
+  func @pick : fn(i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = stackalloc i64 4;
+    %v2 = shl i64 %v0, 32;
+    %v3 = ashr i32 %v2, 32;
+    store i32 4, %v3, %v1;
+    %v4 = load i32 4, %v1;
+    br L4;
+  L4:
+    %v5 = const i64 1;
+    %v6 = icmp eq i32 %v4, %v5;
+    br_cond i32 %v6, L1, L5;
+  L5:
+    %v7 = const i64 2;
+    %v8 = icmp eq i32 %v4, %v7;
+    br_cond i32 %v8, L2, L3;
+  L1:
+    %v9 = const i32 10;
+    %v10 = shl i64 %v9, 32;
+    %v11 = ashr i32 %v10, 32;
+    ret i32 %v11;
+  L2:
+    %v12 = const i32 20;
+    %v13 = shl i64 %v12, 32;
+    %v14 = ashr i32 %v13, 32;
+    ret i32 %v14;
+  L3:
+    %v15 = const i32 -1;
+    %v16 = const i32 1;
+    %v17 = shl i64 %v15, 32;
+    %v18 = ashr i32 %v17, 32;
+    %v19 = shl i64 %v16, 32;
+    %v20 = ashr i32 %v19, 32;
+    %v21 = mul i64 %v18, %v20;
+    %v22 = shl i64 %v21, 32;
+    %v23 = ashr i32 %v22, 32;
+    %v24 = shl i64 %v23, 32;
+    %v25 = ashr i32 %v24, 32;
+    ret i32 %v25;
+  }
+}

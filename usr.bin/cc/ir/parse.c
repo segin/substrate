@@ -143,6 +143,10 @@ static int parse_target(ir_module_t *m, char *line) {
     char *p = line + 6;
 
     p = trim(p);
+    if (*p != '\0' && p[strlen(p) - 1] == ';') {
+        p[strlen(p) - 1] = '\0';
+        p = trim(p);
+    }
     if (m->target != NULL) {
         free(m->target);
     }

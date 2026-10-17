@@ -1,0 +1,60 @@
+module "ir/float.c" {
+  target ilp32;
+
+  func @avg : fn(i32, i32) -> f64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = param i32 1;
+    %v2 = stackalloc i32 4;
+    store i32 4, %v0, %v2;
+    %v3 = stackalloc i32 4;
+    store i32 4, %v1, %v3;
+    %v4 = load i32 4, %v2;
+    %v5 = load i32 4, %v3;
+    %v6 = add i32 %v4, %v5;
+    %v7 = sitofp f64 %v6;
+    %v8 = fconst f64 2;
+    %v9 = fdiv f64 %v7, %v8;
+    ret f64 %v9;
+  }
+
+  func @trunc_f : fn(f32) -> i64 {
+  entry:
+    %v0 = param f32 0;
+    %v1 = stackalloc i32 4;
+    %v2 = fround32 f64 %v0;
+    store f64 4, %v2, %v1;
+    %v3 = load f32 4, %v1;
+    %v4 = fptosi i32 %v3;
+    ret i32 %v4;
+  }
+
+  func @to_ul : fn(f64) -> i64 {
+  entry:
+    %v0 = param f64 0;
+    %v1 = stackalloc i32 8;
+    store f64 8, %v0, %v1;
+    %v2 = load f64 8, %v1;
+    %v3 = fptosi i32 %v2;
+    %v4 = const i32 4294967295;
+    %v5 = and i32 %v3, %v4;
+    %v6 = const i32 4294967295;
+    %v7 = and i32 %v5, %v6;
+    ret i32 %v7;
+  }
+
+  func @fless : fn(f64, f32) -> i64 {
+  entry:
+    %v0 = param f64 0;
+    %v1 = param f32 1;
+    %v2 = stackalloc i32 8;
+    store f64 8, %v0, %v2;
+    %v3 = stackalloc i32 4;
+    %v4 = fround32 f64 %v1;
+    store f64 4, %v4, %v3;
+    %v5 = load f64 8, %v2;
+    %v6 = load f32 4, %v3;
+    %v7 = fcmp olt f64 %v5, %v6;
+    ret i32 %v7;
+  }
+}

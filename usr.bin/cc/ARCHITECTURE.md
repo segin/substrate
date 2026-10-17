@@ -56,6 +56,7 @@ tests/usr.bin/cc/
 ├── diff_c99/                # Differential comparison inputs
 ├── native_*.c               # Positive and negative compiler coverage corpus
 ├── run_*.sh                 # Mode matrices, preprocessor, post-C99, ABI, and SSA scripts
+├── ir/                      # Golden IR: NAME.c and its -fdump-ir at -m64/-m32 (run_ir_golden.sh)
 └── invalid_*.ir / valid*.ir # IR verifier fixtures
 ```
 

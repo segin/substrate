@@ -1,0 +1,62 @@
+module "ir/agg.c" {
+  target ilp32;
+
+  func @mk : fn(i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = stackalloc i32 4;
+    store i32 4, %v0, %v1;
+    %v2 = stackalloc i32 12;
+    %v3 = const i32 0;
+    %v4 = const i32 12;
+    %v5 = call i32 @memset(%v2, %v3, %v4);
+    %v6 = load i32 4, %v1;
+    store i32 4, %v6, %v2;
+    %v7 = const i32 4;
+    %v8 = add i32 %v2, %v7;
+    %v9 = load i32 4, %v1;
+    %v10 = const i32 1;
+    %v11 = add i32 %v9, %v10;
+    store i32 4, %v11, %v8;
+    %v12 = const i32 8;
+    %v13 = add i32 %v2, %v12;
+    %v14 = load i32 4, %v1;
+    %v15 = const i32 2;
+    %v16 = add i32 %v14, %v15;
+    store i32 4, %v16, %v13;
+    ret i32 %v2;
+  }
+
+  func @sumpt : fn(i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = stackalloc i32 12;
+    %v2 = const i32 12;
+    %v3 = call i32 @memcpy(%v1, %v0, %v2);
+    %v4 = load i32 4, %v1;
+    %v5 = const i32 4;
+    %v6 = add i32 %v1, %v5;
+    %v7 = load i32 4, %v6;
+    %v8 = add i32 %v4, %v7;
+    %v9 = const i32 8;
+    %v10 = add i32 %v1, %v9;
+    %v11 = load i32 4, %v10;
+    %v12 = add i32 %v8, %v11;
+    ret i32 %v12;
+  }
+
+  func @use : fn() -> i64 {
+  entry:
+    %v2 = undef agg12;
+    %v0 = stackalloc i32 12;
+    %v1 = const i32 3;
+    %t0 = stackalloc agg12 12;
+    set agg12 %v2, %t0;
+    %t1 = call agg12 @mk(%v1) sret 12 %v2;
+    set agg12 %v2, %t1;
+    %v3 = const i32 12;
+    %v4 = call i32 @memcpy(%v0, %v2, %v3);
+    %v5 = call i32 @sumpt(%v0);
+    ret i32 %v5;
+  }
+}

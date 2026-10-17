@@ -1,0 +1,99 @@
+module "ir/agg.c" {
+  target lp64;
+
+  func @mk : fn(i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = stackalloc i64 4;
+    %v2 = shl i64 %v0, 32;
+    %v3 = ashr i32 %v2, 32;
+    store i32 4, %v3, %v1;
+    %v4 = stackalloc i64 12;
+    %v5 = const i64 0;
+    %v6 = const i64 12;
+    %v7 = call i64 @memset(%v4, %v5, %v6);
+    %v8 = load i32 4, %v1;
+    store i32 4, %v8, %v4;
+    %v9 = const i64 4;
+    %v10 = add i64 %v4, %v9;
+    %v11 = load i32 4, %v1;
+    %v12 = const i32 1;
+    %v13 = shl i64 %v11, 32;
+    %v14 = ashr i32 %v13, 32;
+    %v15 = shl i64 %v12, 32;
+    %v16 = ashr i32 %v15, 32;
+    %v17 = add i64 %v14, %v16;
+    %v18 = shl i64 %v17, 32;
+    %v19 = ashr i32 %v18, 32;
+    store i32 4, %v19, %v10;
+    %v20 = const i64 8;
+    %v21 = add i64 %v4, %v20;
+    %v22 = load i32 4, %v1;
+    %v23 = const i32 2;
+    %v24 = shl i64 %v22, 32;
+    %v25 = ashr i32 %v24, 32;
+    %v26 = shl i64 %v23, 32;
+    %v27 = ashr i32 %v26, 32;
+    %v28 = add i64 %v25, %v27;
+    %v29 = shl i64 %v28, 32;
+    %v30 = ashr i32 %v29, 32;
+    store i32 4, %v30, %v21;
+    %v31 = zload i64 8, %v4;
+    %v32 = const i64 8;
+    %v33 = add i64 %v4, %v32;
+    %v34 = zload i32 4, %v33;
+    ret i64 %v31;
+  }
+
+  func @sumpt : fn(i64) -> i64 {
+  entry:
+    %v1 = stackalloc i64 12;
+    %v0 = param i64 0;
+    %v2 = stackalloc i64 12;
+    %v3 = const i64 12;
+    %v4 = call i64 @memcpy(%v2, %v0, %v3);
+    %v5 = load i32 4, %v2;
+    %v6 = const i64 4;
+    %v7 = add i64 %v2, %v6;
+    %v8 = load i32 4, %v7;
+    %v9 = shl i64 %v5, 32;
+    %v10 = ashr i32 %v9, 32;
+    %v11 = shl i64 %v8, 32;
+    %v12 = ashr i32 %v11, 32;
+    %v13 = add i64 %v10, %v12;
+    %v14 = shl i64 %v13, 32;
+    %v15 = ashr i32 %v14, 32;
+    %v16 = const i64 8;
+    %v17 = add i64 %v2, %v16;
+    %v18 = load i32 4, %v17;
+    %v19 = shl i64 %v15, 32;
+    %v20 = ashr i32 %v19, 32;
+    %v21 = shl i64 %v18, 32;
+    %v22 = ashr i32 %v21, 32;
+    %v23 = add i64 %v20, %v22;
+    %v24 = shl i64 %v23, 32;
+    %v25 = ashr i32 %v24, 32;
+    %v26 = shl i64 %v25, 32;
+    %v27 = ashr i32 %v26, 32;
+    ret i32 %v27;
+  }
+
+  func @use : fn() -> i64 {
+  entry:
+    %v4 = undef agg12;
+    %v0 = stackalloc i64 12;
+    %v1 = const i32 3;
+    %v2 = shl i64 %v1, 32;
+    %v3 = ashr i32 %v2, 32;
+    %t0 = stackalloc agg12 12;
+    set agg12 %v4, %t0;
+    %t1 = call agg12 @mk(%v3) sret 12 %v4;
+    set agg12 %v4, %t1;
+    %v5 = const i64 12;
+    %v6 = call i64 @memcpy(%v0, %v4, %v5);
+    %v7 = call i32 @sumpt(%v0);
+    %v8 = shl i64 %v7, 32;
+    %v9 = ashr i32 %v8, 32;
+    ret i32 %v9;
+  }
+}

@@ -1,0 +1,84 @@
+module "ir/arith.c" {
+  target ilp32;
+
+  func @narrow : fn(i32, i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = param i32 1;
+    %v2 = stackalloc i32 4;
+    store i32 4, %v0, %v2;
+    %v3 = stackalloc i32 4;
+    store i32 4, %v1, %v3;
+    %v4 = load i32 4, %v2;
+    %v5 = load i32 4, %v3;
+    %v6 = mul i32 %v4, %v5;
+    %v7 = const i32 7;
+    %v8 = add i32 %v6, %v7;
+    %v9 = const i32 255;
+    %v10 = and i8 %v8, %v9;
+    %v11 = const i32 255;
+    %v12 = and i8 %v10, %v11;
+    ret i8 %v12;
+  }
+
+  func @shifts : fn(i32, i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = param i32 1;
+    %v2 = stackalloc i32 4;
+    store i32 4, %v0, %v2;
+    %v3 = stackalloc i32 4;
+    %v4 = const i32 4294967295;
+    %v5 = and i32 %v1, %v4;
+    store i32 4, %v5, %v3;
+    %v6 = load i32 4, %v2;
+    %v7 = const i32 3;
+    %v8 = shl i32 %v6, %v7;
+    %v9 = zload i32 4, %v3;
+    %v10 = const i32 2;
+    %v11 = const i32 4294967295;
+    %v12 = and i32 %v9, %v11;
+    %v13 = const i32 4294967295;
+    %v14 = and i32 %v10, %v13;
+    %v15 = lshr i32 %v12, %v14;
+    %v16 = const i32 4294967295;
+    %v17 = and i32 %v15, %v16;
+    %v18 = add i32 %v8, %v17;
+    %v19 = load i32 4, %v2;
+    %v20 = const i32 1;
+    %v21 = ashr i32 %v19, %v20;
+    %v22 = add i32 %v18, %v21;
+    ret i32 %v22;
+  }
+
+  func @cmp : fn(i32, i32, i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = param i32 1;
+    %v2 = param i32 2;
+    %v3 = stackalloc i32 4;
+    store i32 4, %v0, %v3;
+    %v4 = stackalloc i32 4;
+    %v5 = const i32 4294967295;
+    %v6 = and i32 %v1, %v5;
+    store i32 4, %v6, %v4;
+    %v7 = stackalloc i32 4;
+    store i32 4, %v2, %v7;
+    %v8 = load i32 4, %v3;
+    %v9 = const i32 0;
+    %v10 = icmp slt i32 %v8, %v9;
+    %v11 = zload i32 4, %v4;
+    %v12 = const i32 5;
+    %v13 = const i32 4294967295;
+    %v14 = and i32 %v11, %v13;
+    %v15 = const i32 4294967295;
+    %v16 = and i32 %v12, %v15;
+    %v17 = icmp ult i32 %v14, %v16;
+    %v18 = add i32 %v10, %v17;
+    %v19 = load i32 4, %v7;
+    %v20 = load i32 4, %v3;
+    %v21 = icmp sge i32 %v19, %v20;
+    %v22 = add i32 %v18, %v21;
+    ret i32 %v22;
+  }
+}

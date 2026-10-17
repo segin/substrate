@@ -398,13 +398,13 @@ static void put_value(FILE *out, int v) {
     }
 }
 
-/** Write @p s with every byte that is not a letter, digit or space as \xx. */
+/** Write @p s quoted, with every byte but a letter, digit, space or one of `_./-` as \xx. */
 static void put_escaped(FILE *out, const char *s) {
     fputc('"', out);
     for (; s != NULL && *s != '\0'; ++s) {
         unsigned char c = (unsigned char)*s;
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '_' ||
-            c == '.') {
+            c == '.' || c == '/' || c == '-') {
             fputc(c, out);
         } else {
             fprintf(out, "\\%02x", c);
