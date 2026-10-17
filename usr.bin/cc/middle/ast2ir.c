@@ -4471,26 +4471,31 @@ static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t 
 }
 
 /**
- * The element type of a complex type -- given in the legacy encoding as the
- * structure `{ T __re, __im; }` standing for it -- or CC_TYPE_VOID.
+ * The element type of a complex type, given as the hidden structure
+ * `{ T __re, __im; }` standing for it.
+ *
+ * @param tu   the translation unit
+ * @param sid  the structure, or -1
+ * @return     float, double or long double; NULL if @p sid is no complex type's
  */
-static cc_type_t complex_elem_of(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
-    if (t != CC_TYPE_VOID || sid < 0 || (size_t)sid >= tu->struct_count) {
-        return CC_TYPE_VOID;
+static const cc_ctype_t *complex_elem_of(const cc_translation_unit_t *tu, int sid) {
+    if (sid < 0 || (size_t)sid >= tu->struct_count || tu->structs[sid].complex_elem == CC_TYPE_VOID) {
+        return NULL;
     }
-    return tu->structs[sid].complex_elem;
+    return cc_ct_from_scalar(tu->structs[sid].complex_elem);
 }
 
 /** A floating value of type @p from as one of type @p to (float, double or long double). */
-static int complex_fp_convert(cc_ssa_function_t *sf, int v, cc_type_t from, cc_type_t to, cc_diag_t *diag) {
-    if (v < 0 || from == to) {
+static int complex_fp_convert(cc_ssa_function_t *sf, int v, const cc_ctype_t *from, const cc_ctype_t *to,
+                              cc_diag_t *diag) {
+    if (v < 0 || from->kind == to->kind) {
         return v;
     }
-    if (to == CC_TYPE_LDOUBLE) {
+    if (to->kind == CC_CT_LDOUBLE) {
         return promote_f64_to_ldouble_value(sf, v, diag);
     }
     v = demote_ldouble_to_f64_value(sf, v, diag);
-    return to == CC_TYPE_FLOAT ? round_to_float(sf, v, diag) : v;
+    return to->kind == CC_CT_FLOAT ? round_to_float(sf, v, diag) : v;
 }
 
 /** @p addr + @p off, as a pointer (pointer-sized, as a member address is). */
@@ -4516,8 +4521,8 @@ static int complex_part_addr(cc_ssa_function_t *sf, int addr, long off, cc_diag_
 }
 
 /** Load the real (@p imag 0) or imaginary part of the complex value at @p addr. */
-static int complex_load_part(cc_ssa_function_t *sf, int addr, cc_type_t elem, int imag, cc_diag_t *diag) {
-    long es = type_size_bytes(elem);
+static int complex_load_part(cc_ssa_function_t *sf, int addr, const cc_ctype_t *elem, int imag, cc_diag_t *diag) {
+    long es = cc_ct_size(elem, NULL);
     cc_ssa_instr_t ld;
     int p = addr;
 
@@ -4541,8 +4546,8 @@ static int complex_load_part(cc_ssa_function_t *sf, int addr, cc_type_t elem, in
 }
 
 /** Store @p re and @p im, of type @p elem, as a new complex temporary; return its address. */
-static int complex_store_new(cc_ssa_function_t *sf, int re, int im, cc_type_t elem, cc_diag_t *diag) {
-    long es = type_size_bytes(elem);
+static int complex_store_new(cc_ssa_function_t *sf, int re, int im, const cc_ctype_t *elem, cc_diag_t *diag) {
+    long es = cc_ct_size(elem, NULL);
     int addr = emit_local_storage_alloc(sf, 2 * es, diag);
     int ip = addr < 0 ? -1 : complex_part_addr(sf, addr, es, diag);
     cc_ssa_instr_t st;
@@ -4570,14 +4575,14 @@ static int complex_store_new(cc_ssa_function_t *sf, int re, int im, cc_type_t el
 }
 
 /** A floating zero of type @p elem. */
-static int complex_fp_zero(cc_ssa_function_t *sf, cc_type_t elem, cc_diag_t *diag) {
+static int complex_fp_zero(cc_ssa_function_t *sf, const cc_ctype_t *elem, cc_diag_t *diag) {
     int z = emit_const_f64_instr(sf, 0.0);
 
-    return z < 0 ? -1 : complex_fp_convert(sf, z, CC_TYPE_DOUBLE, elem, diag);
+    return z < 0 ? -1 : complex_fp_convert(sf, z, cc_ct_basic(CC_CT_DOUBLE), elem, diag);
 }
 
 /** @p a @p op @p b in the floating type @p elem, rounded to it. */
-static int complex_fop(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int a, int b, cc_type_t elem, cc_diag_t *diag) {
+static int complex_fop(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int a, int b, const cc_ctype_t *elem, cc_diag_t *diag) {
     cc_ssa_instr_t in;
 
     if (a < 0 || b < 0) {
@@ -4592,18 +4597,18 @@ static int complex_fop(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int a, int b, 
         set_diag(diag, "out of memory in complex arithmetic");
         return -1;
     }
-    if (elem == CC_TYPE_LDOUBLE) {
+    if (elem->kind == CC_CT_LDOUBLE) {
         set_value_size(sf, in.dst, 16);
         return in.dst;
     }
-    return elem == CC_TYPE_FLOAT ? round_to_float(sf, in.dst, diag) : in.dst;
+    return elem->kind == CC_CT_FLOAT ? round_to_float(sf, in.dst, diag) : in.dst;
 }
 
 /** -@p a, exactly (a zero's sign flips). */
-static int complex_fneg(cc_ssa_function_t *sf, int a, cc_type_t elem, cc_diag_t *diag) {
+static int complex_fneg(cc_ssa_function_t *sf, int a, const cc_ctype_t *elem, cc_diag_t *diag) {
     int m1 = emit_const_f64_instr(sf, -1.0);
 
-    m1 = m1 < 0 ? -1 : complex_fp_convert(sf, m1, CC_TYPE_DOUBLE, elem, diag);
+    m1 = m1 < 0 ? -1 : complex_fp_convert(sf, m1, cc_ct_basic(CC_CT_DOUBLE), elem, diag);
     return complex_fop(sf, CC_SSA_MUL, a, m1, elem, diag);
 }
 
@@ -4614,11 +4619,11 @@ static int complex_fneg(cc_ssa_function_t *sf, int a, cc_type_t elem, cc_diag_t 
  * signed zeros come out as they should).
  */
 static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
-                           var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_type_t elem,
+                           var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, const cc_ctype_t *elem,
                            int *re, int *im, cc_diag_t *diag) {
-    cc_type_t ce = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e));
+    const cc_ctype_t *ce = complex_elem_of(tu, lower_record_id(e));
 
-    if (ce != CC_TYPE_VOID) {
+    if (ce != NULL) {
         int addr = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
 
         *re = addr < 0 ? -1 : complex_fp_convert(sf, complex_load_part(sf, addr, ce, 0, diag), ce, elem, diag);
@@ -4629,11 +4634,11 @@ static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *s
 
         memset(&c, 0, sizeof(c));
         c.kind = CC_EXPR_CAST;
-        c.aux_type = elem;
+        c.aux_type = cc_ct_legacy_kind(elem->kind);
         c.aux_struct_id = -1;
-        c.value_type = elem;
+        c.value_type = c.aux_type;
         c.struct_id = -1;
-        c.ctype = cc_ct_from_scalar(elem);
+        c.ctype = elem;
         c.lhs = (cc_expr_t *)e;
         *re = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
         *im = -1;
@@ -4647,7 +4652,7 @@ static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *s
  * are gcc's to the bit; its rescaling of huge or tiny operands and its
  * recovery of infinities from NaN are not done.
  */
-static int complex_div(cc_ssa_function_t *sf, int a, int b, int c, int d, cc_type_t elem, int *x, int *y,
+static int complex_div(cc_ssa_function_t *sf, int a, int b, int c, int d, const cc_ctype_t *elem, int *x, int *y,
                        cc_diag_t *diag) {
     int c2 = complex_fop(sf, CC_SSA_MUL, c, c, elem, diag);
     int d2 = complex_fop(sf, CC_SSA_MUL, d, d, elem, diag);
@@ -4666,7 +4671,7 @@ static int complex_div(cc_ssa_function_t *sf, int a, int b, int c, int d, cc_typ
         emit_br_cond_instr(sf, lt, l_d, l_c) != 0 || emit_label_instr(sf, l_d) != 0) {
         return -1;
     }
-    if (elem == CC_TYPE_LDOUBLE) {
+    if (elem->kind == CC_CT_LDOUBLE) {
         set_value_size(sf, *x, 16);
         set_value_size(sf, *y, 16);
     }
@@ -4706,23 +4711,24 @@ static int complex_div(cc_ssa_function_t *sf, int a, int b, int c, int d, cc_typ
  */
 static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                                var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
-    cc_type_t elem = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e));
+    const cc_ctype_t *elem = complex_elem_of(tu,lower_record_id(e));
     int a, b, c, d;
     int x = -1;
     int y = -1;
 
-    if (elem == CC_TYPE_VOID) {
+    if (elem == NULL) {
         /* == or !=: compare in the wider of the operands' types */
-        cc_type_t le = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs));
-        cc_type_t re = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e->rhs));
-        cc_type_t lt = le != CC_TYPE_VOID ? le : (lower_has_kind(e->lhs, CC_CT_LDOUBLE) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
-        cc_type_t rt = re != CC_TYPE_VOID ? re : (lower_has_kind(e->rhs, CC_CT_LDOUBLE) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
+        const cc_ctype_t *le = complex_elem_of(tu, lower_record_id(e->lhs));
+        const cc_ctype_t *re = complex_elem_of(tu, lower_record_id(e->rhs));
+        cc_ctype_kind_t lt = le != NULL ? le->kind : (lower_has_kind(e->lhs, CC_CT_LDOUBLE) ? CC_CT_LDOUBLE : CC_CT_DOUBLE);
+        cc_ctype_kind_t rt = re != NULL ? re->kind : (lower_has_kind(e->rhs, CC_CT_LDOUBLE) ? CC_CT_LDOUBLE : CC_CT_DOUBLE);
         int eq_re;
         int eq_im;
         int both;
 
-        elem = (lt == CC_TYPE_LDOUBLE || rt == CC_TYPE_LDOUBLE) ? CC_TYPE_LDOUBLE
-               : (lt == CC_TYPE_FLOAT && rt == CC_TYPE_FLOAT) ? CC_TYPE_FLOAT : CC_TYPE_DOUBLE;
+        elem = cc_ct_basic((lt == CC_CT_LDOUBLE || rt == CC_CT_LDOUBLE)   ? CC_CT_LDOUBLE
+                           : (lt == CC_CT_FLOAT && rt == CC_CT_FLOAT) ? CC_CT_FLOAT
+                                                                      : CC_CT_DOUBLE);
         if (complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, elem, &a, &b, diag) != 0 ||
             complex_operand(tu, sf, ctx, vars, var_count, depth, e->rhs, elem, &c, &d, diag) != 0) {
             return -1;
@@ -4784,7 +4790,7 @@ static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_
             y = complex_fop(sf, CC_SSA_DIV, b, c, elem, diag);
         } else {
             /* libgcc's __divsc3 divides float parts in double and rounds the results once */
-            cc_type_t work = elem == CC_TYPE_FLOAT ? CC_TYPE_DOUBLE : elem;
+            const cc_ctype_t *work = elem->kind == CC_CT_FLOAT ? cc_ct_basic(CC_CT_DOUBLE) : elem;
 
             if (b < 0) {
                 b = complex_fp_zero(sf, work, diag);
@@ -4815,7 +4821,7 @@ static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_
  */
 static int lower_complex_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
-    cc_type_t elem = complex_elem_of(tu, CC_TYPE_VOID, ct_record_id(lower_cast_ctype(e)));
+    const cc_ctype_t *elem = complex_elem_of(tu,ct_record_id(lower_cast_ctype(e)));
     int re;
     int im;
 
@@ -5357,16 +5363,24 @@ static int lower_wide_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *
 typedef struct {
     long n;          /**< its element count */
     long es;         /**< an element's size in bytes */
-    cc_type_t elem;  /**< the element type */
-    int is_fp;       /**< the elements are floating */
-    int is_unsigned; /**< the elements are unsigned integers */
+    const cc_ctype_t *elem; /**< the element type */
+    int is_fp;              /**< the elements are floating */
+    int is_unsigned;        /**< the elements are unsigned integers */
 } vec_t;
 
-/** Whether (@p t, @p sid) is a vector type; if so its shape in *@p v. */
-static int vec_of(const cc_translation_unit_t *tu, cc_type_t t, int sid, vec_t *v) {
+/**
+ * Whether structure @p sid is the hidden one standing for a vector type;
+ * if so its shape in *@p v.
+ *
+ * @param tu   the translation unit
+ * @param sid  the structure, or -1
+ * @param v    receives the shape
+ * @return     1 if it is a vector type, else 0
+ */
+static int vec_of(const cc_translation_unit_t *tu, int sid, vec_t *v) {
     const cc_struct_def_t *sd;
 
-    if (t != CC_TYPE_VOID || sid < 0 || (size_t)sid >= tu->struct_count) {
+    if (sid < 0 || (size_t)sid >= tu->struct_count) {
         return 0;
     }
     sd = &tu->structs[sid];
@@ -5374,10 +5388,10 @@ static int vec_of(const cc_translation_unit_t *tu, cc_type_t t, int sid, vec_t *
         return 0;
     }
     v->n = sd->vector_count;
-    v->elem = sd->vector_elem;
-    v->es = type_size_bytes(v->elem);
-    v->is_fp = v->elem == CC_TYPE_FLOAT || v->elem == CC_TYPE_DOUBLE;
-    v->is_unsigned = cc_type_is_unsigned_integral(v->elem);
+    v->elem = cc_ct_from_scalar(sd->vector_elem);
+    v->es = cc_ct_size(v->elem, tu);
+    v->is_fp = ct_has_kind(v->elem, CC_CT_FLOAT) || ct_has_kind(v->elem, CC_CT_DOUBLE);
+    v->is_unsigned = cc_ct_is_unsigned(v->elem);
     return 1;
 }
 
@@ -5493,7 +5507,7 @@ static int vec_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
     vec_t dummy;
     int v = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
 
-    *is_vec = vec_of(tu, CC_TYPE_VOID, lower_record_id(e), &dummy);
+    *is_vec = vec_of(tu,lower_record_id(e), &dummy);
     if (v >= 0 && !*is_vec && value_type(sf, v) == CC_VAL_I64 && value_size(sf, v) < 4) {
         set_value_size(sf, v, 4);
     }
@@ -5518,8 +5532,8 @@ static int lower_vector_binop(const cc_translation_unit_t *tu, cc_ssa_function_t
     int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
                  e->op == CC_BIN_GT || e->op == CC_BIN_GE;
 
-    if (!vec_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &v) &&
-        !vec_of(tu, CC_TYPE_VOID, lower_record_id(e->rhs), &v)) {
+    if (!vec_of(tu,lower_record_id(e->lhs), &v) &&
+        !vec_of(tu,lower_record_id(e->rhs), &v)) {
         set_diag(diag, "malformed vector operation in lowering");
         return -1;
     }
@@ -5575,8 +5589,8 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
     vec_t vt;
     vec_t vs;
     const cc_ctype_t *to = lower_cast_ctype(e);
-    int to_vec = vec_of(tu, CC_TYPE_VOID, ct_record_id(to), &vt);
-    int from_vec = vec_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &vs);
+    int to_vec = vec_of(tu,ct_record_id(to), &vt);
+    int from_vec = vec_of(tu,lower_record_id(e->lhs), &vs);
     int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     cc_ssa_instr_t ld;
     int r;
@@ -6450,11 +6464,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_COMPLEX: {
         /* sema converted both parts to the element type */
-        cc_type_t elem = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e));
+        const cc_ctype_t *elem = complex_elem_of(tu,lower_record_id(e));
         int re = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         int im = re < 0 ? -1 : lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
 
-        if (im < 0 || elem == CC_TYPE_VOID) {
+        if (im < 0 || elem == NULL) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "malformed complex value in lowering");
             }
@@ -6470,9 +6484,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             wide_t ww;
             vec_t vv;
 
-            if (vec_of(tu, CC_TYPE_VOID, lower_record_id(e), &vv) &&
-                (vec_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &vv) ||
-                 (e->rhs != NULL && vec_of(tu, CC_TYPE_VOID, lower_record_id(e->rhs), &vv)))) {
+            if (vec_of(tu,lower_record_id(e), &vv) &&
+                (vec_of(tu,lower_record_id(e->lhs), &vv) ||
+                 (e->rhs != NULL && vec_of(tu,lower_record_id(e->rhs), &vv)))) {
                 return lower_vector_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
             if (dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs)) != 0) {
@@ -6483,9 +6497,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
         if (e->op != CC_BIN_COMMA && !is_logical_op(e->op) &&
-            (complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e)) != CC_TYPE_VOID ||
-             (e->lhs != NULL && complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs)) != CC_TYPE_VOID) ||
-             (e->rhs != NULL && complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e->rhs)) != CC_TYPE_VOID))) {
+            (complex_elem_of(tu, lower_record_id(e)) != NULL ||
+             (e->lhs != NULL && complex_elem_of(tu, lower_record_id(e->lhs)) != NULL) ||
+             (e->rhs != NULL && complex_elem_of(tu, lower_record_id(e->rhs)) != NULL))) {
             return lower_complex_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (is_logical_op(e->op)) {
@@ -9891,7 +9905,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (cast_src->kind == CC_EXPR_INIT_LIST && cast_ct != NULL && cast_ct->kind == CC_CT_ARRAY) {
             return lower_array_init_to_ptr(tu, sf, ctx, vars, var_count, depth, cast_ct, cast_src, diag);
         }
-        if (complex_elem_of(tu, CC_TYPE_VOID, to_sid) != CC_TYPE_VOID && cast_src->kind != CC_EXPR_INIT_LIST) {
+        if (complex_elem_of(tu, to_sid) != NULL && cast_src->kind != CC_EXPR_INIT_LIST) {
             return lower_complex_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         {
@@ -9915,8 +9929,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (cast_src->kind != CC_EXPR_INIT_LIST) {
             vec_t vd;
             vec_t vs;
-            int to_vec = vec_of(tu, CC_TYPE_VOID, to_sid, &vd);
-            int from_vec = vec_of(tu, CC_TYPE_VOID, lower_record_id(cast_src), &vs);
+            int to_vec = vec_of(tu,to_sid, &vd);
+            int from_vec = vec_of(tu,lower_record_id(cast_src), &vs);
 
             if (to_vec && from_vec && to_sid == lower_record_id(cast_src)) {
                 return lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
