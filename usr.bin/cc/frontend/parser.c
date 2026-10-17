@@ -1241,7 +1241,7 @@ static int struct_member_push(parser_t *p, int sid, const char *name, const cc_c
                               int bit_signed, long bit_storage_size);
 
 /**
- * The structure standing for _Complex T in the legacy encoding:
+ * The structure that holds a _Complex T in storage:
  * `{ T __re, __im; }`, made once per element type at file scope and
  * recorded for the interned type (cc_ct_set_complex_record()).  Laid out
  * as gcc lays out a complex value: the real part, then the imaginary.
@@ -1280,8 +1280,8 @@ static int parser_complex_struct(parser_t *p, cc_ctype_kind_t kind) {
 }
 
 /**
- * The structure standing for an integer type wider than 64 bits in the
- * legacy encoding: `{ limb __limb[n]; }`, the value's limbs least
+ * The structure that is an integer type wider than 64 bits:
+ * `{ limb __limb[n]; }`, the value's limbs least
  * significant first, a limb being the target's word (64 bits on x86-64, 32
  * on i386) -- the layout and the psABI classification gcc gives
  * `_BitInt(N)`.  `__int128` is the same but 16-aligned and a type of its
@@ -4058,29 +4058,26 @@ static char *canonicalize_narrow_string_token(const cc_token_t *tok) {
     return out;
 }
 
-static cc_type_t string_token_char_type(const parser_t *p, const cc_token_t *tok) {
-    if (p == NULL || tok == NULL || tok->kind != TOK_STR || tok->start == NULL) {
-        return CC_TYPE_CHAR;
-    }
-    if (tok->start > p->lx.src) {
-        char c1 = tok->start[-1];
-        /* wchar_t is int, char16_t unsigned short, char32_t unsigned int */
+/**
+ * The element type of a string literal token, from its encoding prefix:
+ * char for none and `u8`, wchar_t (int) for `L`, char16_t (unsigned
+ * short) for `u`, char32_t (unsigned int) for `U`.
+ */
+static const cc_ctype_t *string_token_char_type(const parser_t *p, const cc_token_t *tok) {
+    if (p != NULL && tok != NULL && tok->kind == TOK_STR && tok->start != NULL && tok->start > p->lx.src) {
+        char c1 = tok->start[-1]; /* `u8"..."` ends its prefix in '8': a char string */
+
         if (c1 == 'L') {
-            return CC_TYPE_INT;
+            return cc_ct_basic(CC_CT_INT);
         }
         if (c1 == 'u') {
-            return CC_TYPE_USHORT;
+            return cc_ct_basic(CC_CT_USHORT);
         }
         if (c1 == 'U') {
-            return CC_TYPE_UINT;
+            return cc_ct_basic(CC_CT_UINT);
         }
     }
-    if (tok->start > p->lx.src + 1) {
-        if (tok->start[-2] == 'u' && tok->start[-1] == '8') {
-            return CC_TYPE_CHAR;
-        }
-    }
-    return CC_TYPE_CHAR;
+    return cc_ct_basic(CC_CT_CHAR);
 }
 
 static long parser_string_literal_array_bound(const cc_expr_t *e) {
@@ -6901,24 +6898,25 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_STR) {
-        cc_type_t str_ty = string_token_char_type(p, &p->tok);
-        char *lit = str_ty == CC_TYPE_CHAR ? canonicalize_narrow_string_token(&p->tok)
-                                           : cc_strndup(p->tok.start, p->tok.len);
+        const cc_ctype_t *char_ty = cc_ct_basic(CC_CT_CHAR);
+        const cc_ctype_t *str_ty = string_token_char_type(p, &p->tok);
+        char *lit = str_ty == char_ty ? canonicalize_narrow_string_token(&p->tok)
+                                      : cc_strndup(p->tok.start, p->tok.len);
         e = new_expr(CC_EXPR_STR);
         if (e == NULL || lit == NULL) {
             free(lit);
             return NULL;
         }
         e->ident = lit;
-        e->aux_ctype = cc_ct_from_scalar(str_ty);
+        e->aux_ctype = str_ty;
         if (next_tok(p) != 0) {
             free_expr(e);
             return NULL;
         }
         while (p->tok.kind == TOK_STR) {
-            cc_type_t part_ty = string_token_char_type(p, &p->tok);
-            char *part = part_ty == CC_TYPE_CHAR ? canonicalize_narrow_string_token(&p->tok)
-                                                 : cc_strndup(p->tok.start, p->tok.len);
+            const cc_ctype_t *part_ty = string_token_char_type(p, &p->tok);
+            char *part = part_ty == char_ty ? canonicalize_narrow_string_token(&p->tok)
+                                            : cc_strndup(p->tok.start, p->tok.len);
             size_t alen;
             size_t plen;
             char *next_lit;
@@ -6928,9 +6926,9 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             if (part_ty != str_ty) {
                 /* a narrow piece joins a wide literal, which the result is (C11 6.4.5p5) */
-                if (str_ty == CC_TYPE_CHAR || part_ty == CC_TYPE_CHAR) {
-                    str_ty = str_ty == CC_TYPE_CHAR ? part_ty : str_ty;
-                    e->aux_ctype = cc_ct_from_scalar(str_ty);
+                if (str_ty == char_ty || part_ty == char_ty) {
+                    str_ty = str_ty == char_ty ? part_ty : str_ty;
+                    e->aux_ctype = str_ty;
                 } else {
                     free(part);
                     free_expr(e);
@@ -8151,9 +8149,9 @@ static cc_expr_t *parse_postfix(parser_t *p) {
  * The type must be complete where the sizeof is written, so its size is
  * known now and is the same wherever the expression is used.
  *
- * Otherwise the node is left for sema and lowering, which read the legacy
- * encoding -- unless it names a function type, which that encoding would
- * take for the function's return type.
+ * Otherwise the node is left for sema and lowering (a variable-length
+ * array's size is computed at run time) -- unless it names a function
+ * type, which has no size.
  *
  * @param p  the parser
  * @param e  the CC_EXPR_SIZEOF node, its aux fields set from the type name
