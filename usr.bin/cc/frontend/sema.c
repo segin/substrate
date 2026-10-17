@@ -1978,6 +1978,57 @@ static int sema_wrap_cast(cc_expr_t **slot, const cc_ctype_t *t) {
     return 0;
 }
 
+/**
+ * The value an integer converts to in integer type @p t (C11 6.3.1.2,
+ * 6.3.1.3): zero or one for _Bool, else the low bits of its width,
+ * sign-extended if @p t is signed.
+ *
+ * @param v  the value (its bits, for an unsigned 64-bit one)
+ * @param t  the integer type, unqualified
+ * @return   the converted value
+ */
+static long long sema_int_convert(long long v, const cc_ctype_t *t) {
+    long bits;
+    unsigned long long u = (unsigned long long)v;
+
+    if (t->kind == CC_CT_BOOL) {
+        return v != 0;
+    }
+    bits = (t->kind == CC_CT_BITINT || t->kind == CC_CT_UBITINT) ? t->count : cc_ct_size(t, NULL) * 8;
+    if (bits <= 0 || bits >= 64) {
+        return v;
+    }
+    u &= (1ULL << bits) - 1;
+    if (!cc_ct_is_unsigned(t) && (u >> (bits - 1)) != 0) {
+        u |= ~0ULL << bits;
+    }
+    return (long long)u;
+}
+
+/**
+ * Convert the value in @p slot to type @p t where it has another type:
+ * an implicit conversion (C11 6.3) made an explicit cast, so lowering
+ * converts only where the tree says to.
+ *
+ * @param slot  a checked expression
+ * @param t     the type it is converted to
+ * @return      0, or -1 when out of memory
+ */
+static int sema_convert(cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_ctype_t *from = sx_vtype(*slot);
+
+    if (from == NULL || t == NULL || from->unqual == t->unqual) {
+        return 0;
+    }
+    if ((*slot)->kind == CC_EXPR_INT && cc_ct_is_integer(from) && cc_ct_is_integer(t)) {
+        /* an integer constant converts now: the constant of the new type */
+        (*slot)->int_val = sema_int_convert((*slot)->int_val, t->unqual);
+        sema_set_type(*slot, t->unqual);
+        return 0;
+    }
+    return sema_wrap_cast(slot, t->unqual);
+}
+
 static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot);
 
 /**
@@ -3919,6 +3970,15 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
     } else if (is_cmp_op(e->op)) {
         if (sema_check_compare(tu, e, a, b, diag) != 0) {
             return -1;
+        }
+        /* arithmetic operands are compared in their common type (C11 6.5.8p3, 6.5.9p4) */
+        if (cc_ct_is_arithmetic(a) && cc_ct_is_arithmetic(b)) {
+            const cc_ctype_t *c = sema_usual_arith(a, b);
+
+            if (sema_convert(&e->lhs, c) != 0 || sema_convert(&e->rhs, c) != 0) {
+                set_diag(diag, "out of memory converting a comparison operand");
+                return -1;
+            }
         }
         t = cc_ct_basic(CC_CT_INT);
     } else if (sema_is_ptr(a) || sema_is_ptr(b)) {

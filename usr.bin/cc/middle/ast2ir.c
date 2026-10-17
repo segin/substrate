@@ -6732,11 +6732,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (is_cmp_op(e->op)) {
-            int cmp_ldouble = (lower_has_kind(e->lhs, CC_CT_LDOUBLE) || lower_has_kind(e->rhs, CC_CT_LDOUBLE));
-            cc_value_type_t cmp_vt = (cmp_ldouble || value_type(sf, lhs) == CC_VAL_F64 || value_type(sf, rhs) == CC_VAL_F64)
-                                         ? CC_VAL_F64
-                                         : CC_VAL_I64;
-            const cc_ctype_t *cmp_ct = cc_ct_basic(CC_CT_INT);
+            /*
+             * Sema converted arithmetic operands to their common type, so
+             * both have it; pointers (and a pointer against an integer)
+             * compare as the unsigned integer of their width.
+             */
+            int cmp_ptr = lower_is_pointer(e->lhs) || lower_is_pointer(e->rhs);
+            const cc_ctype_t *cmp_ct = cmp_ptr ? cc_ct_basic(cc_target_pointer_size() <= 4 ? CC_CT_UINT : CC_CT_ULLONG)
+                                               : lower_value_ctype(e->lhs);
+            int cmp_ldouble = ct_has_kind(cmp_ct, CC_CT_LDOUBLE);
+            cc_value_type_t cmp_vt = cmp_ptr ? CC_VAL_I64 : ct_value_kind(cmp_ct);
+
             lhs = cast_value(sf, lhs, cmp_vt, diag);
             rhs = cast_value(sf, rhs, cmp_vt, diag);
             if (lhs < 0 || rhs < 0) {
@@ -6750,12 +6756,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
             if (cmp_vt == CC_VAL_I64) {
-                /* pointers compare as the unsigned integer of their width; integers in their common type */
-                if (lower_is_pointer(e->lhs) || lower_is_pointer(e->rhs)) {
-                    cmp_ct = cc_ct_basic(cc_target_pointer_size() <= 4 ? CC_CT_UINT : CC_CT_ULLONG);
-                } else {
-                    cmp_ct = cc_ct_common_int(lower_value_ctype(e->lhs), lower_value_ctype(e->rhs));
-                }
                 lhs = normalize_int_ct(sf, lhs, cmp_ct, diag);
                 rhs = normalize_int_ct(sf, rhs, cmp_ct, diag);
                 if (lhs < 0 || rhs < 0) {
@@ -6764,11 +6764,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             in.op = CC_SSA_CMP;
             in.cmp_kind = bin_to_cmp(e->op);
-            in.is_unsigned =
-                (cmp_vt == CC_VAL_I64 &&
-                 (cc_ct_is_unsigned(cmp_ct) || lower_is_pointer(e->lhs) || lower_is_pointer(e->rhs)))
-                    ? 1
-                    : 0;
+            in.is_unsigned = cmp_vt == CC_VAL_I64 && cc_ct_is_unsigned(cmp_ct);
             in.dst = new_value(sf, CC_VAL_I64);
             in.lhs = lhs;
             in.rhs = rhs;
