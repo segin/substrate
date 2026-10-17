@@ -1472,42 +1472,6 @@ static long array_decl_scalar_size_bytes(const cc_translation_unit_t *tu, cc_typ
     return type_size_bytes_with_struct(tu, cur_type, cur_sid);
 }
 
-static long array_dims_step_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id,
-                                       int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int dim_start,
-                                       long fallback) {
-    long stride = 1;
-    long scalar_size;
-    int i;
-
-    if (array_ndim <= 0) {
-        return fallback;
-    }
-    if (dim_start < 0) {
-        dim_start = 0;
-    }
-    if (dim_start > array_ndim) {
-        return fallback;
-    }
-    scalar_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
-    if (scalar_size <= 0) {
-        return fallback;
-    }
-    for (i = dim_start; i < array_ndim; ++i) {
-        long dim = array_dims != NULL ? array_dims[i] : 0;
-        if (dim <= 0) {
-            dim = 1;
-        }
-        if (stride > LONG_MAX / dim) {
-            return fallback;
-        }
-        stride *= dim;
-    }
-    if (scalar_size > LONG_MAX / stride) {
-        return fallback;
-    }
-    return scalar_size * stride;
-}
-
 /**
  * The step of pointer arithmetic on an operand whose real type is known
  * (see cc_ct_of_expr()): the size of what it points to, an array or a
@@ -3191,6 +3155,20 @@ static int stmt_is_vla_decl(const cc_stmt_t *s) {
         }
     }
     return 0;
+}
+
+/**
+ * The type under every array dimension of @p t (@p t itself if it is no
+ * array).
+ *
+ * @param t  the type, or NULL
+ * @return   the element type, or NULL
+ */
+static const cc_ctype_t *ct_array_scalar(const cc_ctype_t *t) {
+    while (t != NULL && t->kind == CC_CT_ARRAY && t->of != NULL) {
+        t = t->of;
+    }
+    return t;
 }
 
 /**
@@ -11770,13 +11748,6 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
     return 0;
 }
 
-static cc_type_t array_scalar_type_after_dims(cc_type_t type, int ndim) {
-    while (ndim-- > 0 && is_pointer_type(type)) {
-        type = ptr_base_type(type);
-    }
-    return type;
-}
-
 static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                                    var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type, int struct_id,
                                    int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_expr_t *init,
@@ -12484,9 +12455,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             char sym[256];
             int have_const_init = 0;
             int needs_runtime_init = 0;
-            int is_array_obj = is_array_object_decl(s->type, s->array_len, s->array_ndim);
-            int is_struct_obj = is_complete_struct_object_type(tu, s->type, s->type_struct_id);
-            cc_type_t elem_type = CC_TYPE_VOID;
+            const cc_ctype_t *decl_ct = stmt_decl_ctype(s);
+            int decl_sid = ct_record_id(decl_ct);
+            int is_array_obj = decl_ct != NULL && decl_ct->kind == CC_CT_ARRAY;
+            int is_struct_obj = decl_sid >= 0 && (size_t)decl_sid < tu->struct_count && tu->structs[decl_sid].complete;
+            const cc_ctype_t *elem_ct = is_array_obj ? decl_ct->of : NULL;
             long elem_size = 0;
             long arr_elems = 1;
             long long init_i = 0;
@@ -12504,15 +12477,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             if (is_array_obj) {
-                long total_size = array_type_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim, s->array_dims);
-                elem_type = ptr_base_type(s->type);
-                elem_size = array_dims_step_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim, s->array_dims, 1,
-                                                       -1);
-                if (elem_size <= 0) {
-                    elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
-                }
-                if (elem_size <= 0 && elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
-                    elem_size = 1;
+                long total_size = cc_ct_size(decl_ct, tu);
+
+                elem_size = cc_ct_size(elem_ct, tu);
+                if (elem_size <= 0 && ct_record_id(elem_ct) >= 0) {
+                    elem_size = 1; /* an array of empty structures */
                 }
                 if (elem_size <= 0) {
                     set_diag(diag, "unsupported static local array element type");
@@ -12523,7 +12492,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
                 obj_size = total_size > 0 ? total_size : (elem_size * arr_elems);
             } else {
-                obj_size = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
+                obj_size = cc_ct_size(decl_ct, tu);
                 if (obj_size <= 0 && is_struct_obj) {
                     obj_size = 1;
                 }
@@ -12665,7 +12634,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (is_struct_obj) {
                     if (s->expr != NULL && s->expr->kind == CC_EXPR_INIT_LIST) {
                         if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, dst_addr,
-                                                     s->type_struct_id, s->expr, diag) != 0) {
+                                                     decl_sid, s->expr, diag) != 0) {
                             return -1;
                         }
                     } else {
@@ -12681,7 +12650,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     if (s->expr != NULL && s->expr->kind == CC_EXPR_INIT_LIST) {
                         size_t ii;
                         int handled_string_init = 0;
-                        if (s->array_ndim > 0 && is_pointer_type(array_scalar_type_after_dims(s->type, s->array_ndim))) {
+                        if (ct_is_pointer(ct_array_scalar(decl_ct))) {
                             size_t cur = 0;
                             if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth,
                                                                cc_ct_from_legacy(s->type, s->type_struct_id,
@@ -12746,7 +12715,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                         free(units);
                                         return -1;
                                     }
-                                    cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                                    cval = cast_value(sf, cval, ct_value_kind(cc_ct_decay(elem_ct)), diag);
                                     if (cval < 0) {
                                         free(units);
                                         return -1;
@@ -12789,11 +12758,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 }
                                 item_ptr = st_in.dst;
                             }
-                            if (elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+                            if (ct_record_id(elem_ct) >= 0) {
                                 const cc_expr_t *elem_init = s->expr->args[ii];
                                 const cc_expr_t *tmp_args[1];
                                 cc_expr_t tmp_list;
-                                if (s->type_struct_id >= 0 && lower_cast_record_id(elem_init) == s->type_struct_id &&
+                                if (lower_cast_record_id(elem_init) == ct_record_id(elem_ct) &&
                                     elem_init->lhs != NULL && elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                                     elem_init = elem_init->lhs;
                                 }
@@ -12806,7 +12775,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                     elem_init = &tmp_list;
                                 }
                                 if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, item_ptr,
-                                                             s->type_struct_id, elem_init, diag) != 0) {
+                                                             ct_record_id(elem_ct), elem_init, diag) != 0) {
                                     return -1;
                                 }
                             } else {
@@ -12893,7 +12862,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 if (v < 0) {
                                     return -1;
                                 }
-                                v = cast_value(sf, v, type_to_val(elem_type), diag);
+                                v = cast_value(sf, v, ct_value_kind(cc_ct_decay(elem_ct)), diag);
                                 if (v < 0) {
                                     return -1;
                                 }
@@ -12951,7 +12920,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 free(units);
                                 return -1;
                             }
-                            cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                            cval = cast_value(sf, cval, ct_value_kind(cc_ct_decay(elem_ct)), diag);
                             if (cval < 0) {
                                 free(units);
                                 return -1;
@@ -12974,7 +12943,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         if (v < 0) {
                             return -1;
                         }
-                        v = cast_value(sf, v, type_to_val(elem_type), diag);
+                        v = cast_value(sf, v, ct_value_kind(cc_ct_decay(elem_ct)), diag);
                         if (v < 0) {
                             return -1;
                         }
