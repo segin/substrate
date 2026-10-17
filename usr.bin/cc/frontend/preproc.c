@@ -4,6 +4,7 @@
 #include "cc_frontend.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
+#include "cc_target.h"
 #include "cc_util.h"
 
 #include <ctype.h>
@@ -95,7 +96,7 @@ typedef struct {
     char *dep_target;
     char *dep_file;
     int target_quote;
-    int target_bits;
+    const cc_target_desc_t *target; /**< -m32 / -m64: the data model and the target's own macros */
     int target_has_sse;
     int target_has_sse2;
     int target_has_mmx;
@@ -1377,10 +1378,42 @@ static int macro_set_builtin_fn1(pp_macro_table_t *t, const char *name, const ch
     return 0;
 }
 
+/** The C spelling of standard integer type @p t, as gcc writes it in `__SIZE_TYPE__` and the like. */
+static const char *tgt_int_name(cc_target_int_t t) {
+    static const char *const names[] = {"int",      "unsigned int",      "long int",
+                                        "long unsigned int", "long long int", "long long unsigned int"};
+
+    return names[t];
+}
+
+/** The suffix an integer constant of type @p t takes. */
+static const char *tgt_int_suffix(cc_target_int_t t) {
+    static const char *const suffixes[] = {"", "U", "L", "UL", "LL", "ULL"};
+
+    return suffixes[t];
+}
+
+/**
+ * Write the largest value of type @p t on the target, in decimal or hex,
+ * with its suffix.
+ */
+static void tgt_int_max(const cc_target_desc_t *tgt, cc_target_int_t t, int hex, char *buf, size_t cap) {
+    int bits = cc_target_int_size(tgt, t) * 8;
+    unsigned long long max = cc_target_int_is_unsigned(t) ? (bits >= 64 ? ~0ULL : (1ULL << bits) - 1ULL)
+                                                          : (1ULL << (bits - 1)) - 1ULL;
+
+    snprintf(buf, cap, hex ? "0x%llx%s" : "%llu%s", max, tgt_int_suffix(t));
+}
+
 static int add_builtin_macros(pp_state_t *st) {
-    const char *size_type = st->target_bits == 32 ? "unsigned int" : "unsigned long";
-    const char *ptrdiff_type = st->target_bits == 32 ? "int" : "long int";
-    const char *wchar_type = st->target_bits == 32 ? "long int" : "int";
+    /* the data model: what each typedef names, and the limits, come from the target */
+    const cc_target_desc_t *tgt = st->target;
+    cc_target_int_t uint64_t_type = cc_target_int_unsigned(tgt->int64_type);
+    cc_target_int_t uptr_t_type = cc_target_int_unsigned(tgt->ptrdiff_type);
+    cc_target_int_t ufast_t_type = cc_target_int_unsigned(tgt->int_fast16_type);
+    const char *size_type = tgt_int_name(tgt->size_type);
+    const char *ptrdiff_type = tgt_int_name(tgt->ptrdiff_type);
+    const char *wchar_type = tgt_int_name(tgt->wchar_type);
     const char *wint_type = "unsigned int";
     const char *sig_atomic_type = "int";
     const char *int8_type = "signed char";
@@ -1389,35 +1422,57 @@ static int add_builtin_macros(pp_state_t *st) {
     const char *uint16_type = "short unsigned int";
     const char *int32_type = "int";
     const char *uint32_type = "unsigned int";
-    const char *int64_type = st->target_bits == 32 ? "long long int" : "long int";
-    const char *uint64_type = st->target_bits == 32 ? "long long unsigned int" : "long unsigned int";
+    const char *int64_type = tgt_int_name(tgt->int64_type);
+    const char *uint64_type = tgt_int_name(uint64_t_type);
     const char *intptr_type = ptrdiff_type;
-    const char *uintptr_type = st->target_bits == 32 ? "unsigned int" : "long unsigned int";
+    const char *uintptr_type = tgt_int_name(uptr_t_type);
     const char *intmax_type = int64_type;
     const char *uintmax_type = uint64_type;
     const char *int_fast8_type = int8_type;
     const char *uint_fast8_type = uint8_type;
-    const char *int_fast16_type = st->target_bits == 32 ? "int" : "long int";
-    const char *uint_fast16_type = st->target_bits == 32 ? "unsigned int" : "long unsigned int";
+    const char *int_fast16_type = tgt_int_name(tgt->int_fast16_type);
+    const char *uint_fast16_type = tgt_int_name(ufast_t_type);
     const char *int_fast32_type = int_fast16_type;
     const char *uint_fast32_type = uint_fast16_type;
     const char *int_fast64_type = int64_type;
     const char *uint_fast64_type = uint64_type;
-    const char *ptr_size = st->target_bits == 32 ? "4" : "8";
-    const char *flt_eval_method = (st->target_bits == 64 || st->target_has_sse2) ? "0" : "2";
-    const char *long_max = st->target_bits == 32 ? "2147483647L" : "9223372036854775807L";
-    const char *size_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
-    const char *ptrdiff_max = st->target_bits == 32 ? "2147483647" : "9223372036854775807L";
-    const char *uintptr_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
-    const char *wchar_max = st->target_bits == 32 ? "0x7fffffffL" : "0x7fffffff";
-    const char *wchar_min = st->target_bits == 32 ? "(-0x7fffffffL - 1L)" : "(-0x7fffffff - 1)";
-    const char *int64_max = st->target_bits == 32 ? "0x7fffffffffffffffLL" : "0x7fffffffffffffffL";
-    const char *uint64_max = st->target_bits == 32 ? "0xffffffffffffffffULL" : "0xffffffffffffffffUL";
-    const char *int_fast_max = st->target_bits == 32 ? "0x7fffffff" : "0x7fffffffffffffffL";
-    const char *uint_fast_max = st->target_bits == 32 ? "0xffffffffU" : "0xffffffffffffffffUL";
-    const char *int64_c = st->target_bits == 32 ? "c ## LL" : "c ## L";
-    const char *uint64_c = st->target_bits == 32 ? "c ## ULL" : "c ## UL";
+    const char *flt_eval_method = (tgt->sse_fp || st->target_has_sse2) ? "0" : "2";
+    char ptr_size[16];
+    char long_size[16];
+    char long_max[32];
+    char size_max[32];
+    char ptrdiff_max[32];
+    char uintptr_max[32];
+    char wchar_max[32];
+    char wchar_min[48];
+    char int64_max[32];
+    char uint64_max[32];
+    char int_fast_max[32];
+    char uint_fast_max[32];
+    char int64_c[16];
+    char uint64_c[16];
+    char long_width[16];
+    char ptrdiff_width[16];
+    char size_width[16];
     char stdc_ver[32];
+
+    snprintf(ptr_size, sizeof(ptr_size), "%d", tgt->pointer_size);
+    snprintf(long_size, sizeof(long_size), "%d", cc_target_int_size(tgt, CC_TGT_LONG));
+    tgt_int_max(tgt, CC_TGT_LONG, 0, long_max, sizeof(long_max));
+    tgt_int_max(tgt, tgt->size_type, 0, size_max, sizeof(size_max));
+    tgt_int_max(tgt, tgt->ptrdiff_type, 0, ptrdiff_max, sizeof(ptrdiff_max));
+    tgt_int_max(tgt, uptr_t_type, 0, uintptr_max, sizeof(uintptr_max));
+    tgt_int_max(tgt, tgt->wchar_type, 1, wchar_max, sizeof(wchar_max));
+    snprintf(wchar_min, sizeof(wchar_min), "(-%s - 1%s)", wchar_max, tgt_int_suffix(tgt->wchar_type));
+    tgt_int_max(tgt, tgt->int64_type, 1, int64_max, sizeof(int64_max));
+    tgt_int_max(tgt, uint64_t_type, 1, uint64_max, sizeof(uint64_max));
+    tgt_int_max(tgt, tgt->int_fast16_type, 1, int_fast_max, sizeof(int_fast_max));
+    tgt_int_max(tgt, ufast_t_type, 1, uint_fast_max, sizeof(uint_fast_max));
+    snprintf(int64_c, sizeof(int64_c), "c ## %s", tgt_int_suffix(tgt->int64_type));
+    snprintf(uint64_c, sizeof(uint64_c), "c ## %s", tgt_int_suffix(uint64_t_type));
+    snprintf(long_width, sizeof(long_width), "%d", cc_target_int_size(tgt, CC_TGT_LONG) * 8);
+    snprintf(ptrdiff_width, sizeof(ptrdiff_width), "%d", cc_target_int_size(tgt, tgt->ptrdiff_type) * 8);
+    snprintf(size_width, sizeof(size_width), "%d", cc_target_int_size(tgt, tgt->size_type) * 8);
     if (macro_set(&st->macros, "__STDC__", 0, 0, NULL, 0, "1") != 0) {
         return -1;
     }
@@ -1558,14 +1613,14 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZEOF_INT__", 0, 0, NULL, 0, "4") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__SIZEOF_LONG__", 0, 0, NULL, 0, st->target_bits == 32 ? "4" : "8") != 0) {
+    if (macro_set(&st->macros, "__SIZEOF_LONG__", 0, 0, NULL, 0, long_size) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZEOF_LONG_LONG__", 0, 0, NULL, 0, "8") != 0) {
         return -1;
     }
     /* __int128 on 64-bit targets only, as gcc */
-    if (st->target_bits != 32 && macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
+    if (tgt->has_int128 && macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__BITINT_MAXWIDTH__", 0, 0, NULL, 0, "65535") != 0) {
@@ -1748,22 +1803,22 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__INT_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__LONG_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+    if (macro_set(&st->macros, "__LONG_WIDTH__", 0, 0, NULL, 0, long_width) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__LONG_LONG_WIDTH__", 0, 0, NULL, 0, "64") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__PTRDIFF_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+    if (macro_set(&st->macros, "__PTRDIFF_WIDTH__", 0, 0, NULL, 0, ptrdiff_width) != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__INTPTR_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+    if (macro_set(&st->macros, "__INTPTR_WIDTH__", 0, 0, NULL, 0, ptrdiff_width) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__INTMAX_WIDTH__", 0, 0, NULL, 0, "64") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__SIZE_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+    if (macro_set(&st->macros, "__SIZE_WIDTH__", 0, 0, NULL, 0, size_width) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__WCHAR_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
@@ -1959,67 +2014,30 @@ static int add_builtin_macros(pp_state_t *st) {
             return -1;
         }
     }
-    if (st->target_bits == 32) {
-        if (macro_set(&st->macros, "__i386__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "__ILP32__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "_ILP32", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (st->target_has_mmx) {
-            if (macro_set(&st->macros, "__MMX__", 0, 0, NULL, 0, "1") != 0) {
+    {
+        /* the target's own macros, then the ISA's: a target whose floating point is SSE has MMX to SSE2 always */
+        const char *const *p;
+        const char *isa[5];
+        int on[5];
+        size_t k;
+
+        for (p = tgt->predefined; p != NULL && *p != NULL; ++p) {
+            if (macro_set(&st->macros, *p, 0, 0, NULL, 0, "1") != 0) {
                 return -1;
             }
         }
-        if (st->target_has_sse) {
-            if (macro_set(&st->macros, "__SSE__", 0, 0, NULL, 0, "1") != 0) {
-                return -1;
-            }
-        }
-        if (st->target_has_sse2) {
-            if (macro_set(&st->macros, "__SSE2__", 0, 0, NULL, 0, "1") != 0) {
-                return -1;
-            }
-        }
-        if (st->target_has_avx) {
-            if (macro_set(&st->macros, "__AVX__", 0, 0, NULL, 0, "1") != 0) {
-                return -1;
-            }
-        }
-        if (st->target_has_avx2) {
-            if (macro_set(&st->macros, "__AVX2__", 0, 0, NULL, 0, "1") != 0) {
-                return -1;
-            }
-        }
-    } else {
-        if (macro_set(&st->macros, "__x86_64__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "__LP64__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "_LP64", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "__MMX__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "__SSE__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (macro_set(&st->macros, "__SSE2__", 0, 0, NULL, 0, "1") != 0) {
-            return -1;
-        }
-        if (st->target_has_avx) {
-            if (macro_set(&st->macros, "__AVX__", 0, 0, NULL, 0, "1") != 0) {
-                return -1;
-            }
-        }
-        if (st->target_has_avx2) {
-            if (macro_set(&st->macros, "__AVX2__", 0, 0, NULL, 0, "1") != 0) {
+        isa[0] = "__MMX__";
+        on[0] = tgt->sse_fp || st->target_has_mmx;
+        isa[1] = "__SSE__";
+        on[1] = tgt->sse_fp || st->target_has_sse;
+        isa[2] = "__SSE2__";
+        on[2] = tgt->sse_fp || st->target_has_sse2;
+        isa[3] = "__AVX__";
+        on[3] = st->target_has_avx;
+        isa[4] = "__AVX2__";
+        on[4] = st->target_has_avx2;
+        for (k = 0; k < 5; ++k) {
+            if (on[k] && macro_set(&st->macros, isa[k], 0, 0, NULL, 0, "1") != 0) {
                 return -1;
             }
         }
@@ -2048,7 +2066,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     st->target_supports_avx = 1;
     st->target_supports_avx2 = 1;
 
-    if (st->target_bits == 32) {
+    if (st->target->id == CC_TARGET_I386) {
         st->target_has_sse = 0;
         st->target_has_sse2 = 0;
         st->target_has_mmx = 1;
@@ -2076,7 +2094,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             continue;
         }
         if (strcmp(f, "-m32") == 0) {
-            st->target_bits = 32;
+            st->target = cc_target_get(CC_TARGET_I386);
             if (!arch_explicit) {
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
@@ -2090,7 +2108,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
                 st->target_supports_avx2 = 0;
             }
         } else if (strcmp(f, "-m64") == 0) {
-            st->target_bits = 64;
+            st->target = cc_target_get(CC_TARGET_X86_64);
             if (!arch_explicit) {
                 /* the x86-64 baseline; an explicit -march keeps its own */
                 st->target_has_sse = 1;
@@ -2211,14 +2229,14 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             st->target_has_mmx = 0;
         } else if (strcmp(f, "-mavx") == 0) {
             /* any x86-64 -march may add AVX by flag, as with gcc */
-            if (st->target_supports_avx || st->target_bits == 64) {
+            if (st->target_supports_avx || st->target->id == CC_TARGET_X86_64) {
                 st->target_has_avx = 1;
             }
         } else if (strcmp(f, "-mno-avx") == 0) {
             st->target_has_avx = 0;
             st->target_has_avx2 = 0;
         } else if (strcmp(f, "-mavx2") == 0) {
-            if (st->target_supports_avx2 || st->target_bits == 64) {
+            if (st->target_supports_avx2 || st->target->id == CC_TARGET_X86_64) {
                 st->target_has_avx2 = 1;
             }
         } else if (strcmp(f, "-mno-avx2") == 0) {
@@ -6710,7 +6728,7 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     size_t i;
 
     memset(&st, 0, sizeof(st));
-    st.target_bits = 64;
+    st.target = cc_target_get(CC_TARGET_X86_64);
     st.emit_line_markers = 1;
     st.base_file = in_path;
     st.include_level = 0;

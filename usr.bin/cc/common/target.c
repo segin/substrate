@@ -8,6 +8,12 @@
 
 #include "cc_target.h"
 
+#include <stddef.h>
+
+static const char *const g_x86_64_macros[] = {"__x86_64__", "__LP64__", "_LP64", NULL};
+static const char *const g_i386_macros[] = {"__i386__", "__ILP32__", "_ILP32", NULL};
+
+/* The typedefs' types are gcc's: LP64 on x86-64, ILP32 (with a long wchar_t) on i386. */
 static const cc_target_desc_t g_x86_64 = {
     CC_TARGET_X86_64,
     "x86_64",
@@ -17,6 +23,14 @@ static const cc_target_desc_t g_x86_64 = {
     {16, 16}, /* long double */
     {8, 8},   /* _Decimal64 */
     {16, 16}, /* _Decimal128 */
+    CC_TGT_ULONG, /* size_t */
+    CC_TGT_LONG,  /* ptrdiff_t */
+    CC_TGT_INT,   /* wchar_t */
+    CC_TGT_LONG,  /* int64_t */
+    CC_TGT_LONG,  /* int_fast16_t */
+    1,            /* __int128 */
+    1,            /* SSE floating point */
+    g_x86_64_macros,
 };
 
 static const cc_target_desc_t g_i386 = {
@@ -28,7 +42,28 @@ static const cc_target_desc_t g_i386 = {
     {12, 4},  /* long double */
     {8, 8},   /* _Decimal64 */
     {16, 16}, /* _Decimal128 */
+    CC_TGT_UINT,  /* size_t */
+    CC_TGT_INT,   /* ptrdiff_t */
+    CC_TGT_LONG,  /* wchar_t */
+    CC_TGT_LLONG, /* int64_t */
+    CC_TGT_INT,   /* int_fast16_t */
+    0,            /* no __int128 */
+    0,            /* x87 unless -mfpmath=sse */
+    g_i386_macros,
 };
+
+int cc_target_int_size(const cc_target_desc_t *tgt, cc_target_int_t t) {
+    switch (t) {
+    case CC_TGT_LONG:
+    case CC_TGT_ULONG:
+        return tgt->pointer_size;
+    case CC_TGT_LLONG:
+    case CC_TGT_ULLONG:
+        return tgt->int64.size;
+    default:
+        return 4;
+    }
+}
 
 static const cc_target_desc_t *g_current = &g_x86_64;
 
