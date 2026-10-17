@@ -609,6 +609,19 @@ static int member_is_array(const cc_struct_member_t *m) {
 }
 
 /**
+ * The type one level into a member: an array member's element (a row,
+ * for more dimensions), a pointer member's target.
+ *
+ * @param m  the member
+ * @return   the type, or NULL for a member that is neither
+ */
+static const cc_ctype_t *member_elem_ctype(const cc_struct_member_t *m) {
+    const cc_ctype_t *t = lower_member_ctype(m);
+
+    return (t != NULL && t->kind == CC_CT_POINTER) ? t->of : NULL;
+}
+
+/**
  * The size of a member's value: of its type decayed, so an array
  * member's is a pointer's (its layout's size is m->size).
  *
@@ -11166,7 +11179,7 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
                                                  const lower_ctx_t *ctx, var_entry_t *vars, size_t var_count,
                                                  int depth, int field_ptr, const cc_struct_member_t *m,
                                                  const cc_expr_t *item, cc_diag_t *diag) {
-    cc_type_t elem_type;
+    const cc_ctype_t *elem;
     long elem_size;
     long max_items;
     unsigned long *units = NULL;
@@ -11181,11 +11194,8 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
     if (m == NULL || item == NULL || item->kind != CC_EXPR_STR) {
         return -1;
     }
-    elem_type = ptr_base_type(m->type);
+    elem = member_elem_ctype(m);
     elem_size = member_elem_size(tu, m);
-    if (elem_size <= 0) {
-        elem_size = member_elem_size(tu, m);
-    }
     if (elem_size <= 0 || m->size <= 0) {
         return -1;
     }
@@ -11194,10 +11204,10 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
         return -1;
     }
     wide = cc_string_literal_is_wide(item);
-    if (!wide && !cc_ct_is_character(cc_ct_from_scalar(elem_type))) {
+    if (!wide && !cc_ct_is_character(elem)) {
         return -1;
     }
-    if (wide && !cc_type_is_integral(elem_type)) {
+    if (wide && !cc_ct_is_integer(elem)) {
         return -1;
     }
     if (decode_string_units(item, wide, &units, &unit_count) != 0) {
@@ -11236,7 +11246,7 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
             free(units);
             return -1;
         }
-        cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+        cval = cast_value(sf, cval, ct_value_kind(elem), diag);
         if (cval < 0) {
             free(units);
             return -1;
@@ -11261,7 +11271,8 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
                                                  const lower_ctx_t *ctx, var_entry_t *vars, size_t var_count,
                                                  int depth, int field_ptr, const cc_struct_member_t *m,
                                                  const cc_expr_t *item, cc_diag_t *diag) {
-    cc_type_t elem_type;
+    const cc_ctype_t *elem;
+    int elem_sid;
     long elem_size;
     long max_items;
     size_t ii;
@@ -11272,11 +11283,9 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
         return -1;
     }
 
-    elem_type = ptr_base_type(m->type);
+    elem = member_elem_ctype(m);
+    elem_sid = ct_record_id(elem);
     elem_size = member_elem_size(tu, m);
-    if (elem_size <= 0) {
-        elem_size = member_elem_size(tu, m);
-    }
     if (elem_size <= 0 || m->size <= 0) {
         set_diag(diag, "unsupported array-like struct member size in initializer lowering");
         return -1;
@@ -11312,8 +11321,8 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
             elem_ptr = in.dst;
         }
 
-        if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            if (item->args[ii]->kind != CC_EXPR_INIT_LIST && lower_is_record(item->args[ii], m->type_struct_id)) {
+        if (elem_sid >= 0) {
+            if (item->args[ii]->kind != CC_EXPR_INIT_LIST && lower_is_record(item->args[ii], elem_sid)) {
                 /* a value of the element's structure type (a decimal constant, say): copied in */
                 int src = lower_expr(tu, sf, ctx, vars, var_count, depth, item->args[ii], diag);
 
@@ -11329,7 +11338,7 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
                 set_diag(diag, "struct array member initializer element requires braces");
                 return -1;
             }
-            if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, elem_ptr, m->type_struct_id,
+            if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, elem_ptr, elem_sid,
                                          item->args[ii], diag) != 0) {
                 return -1;
             }
@@ -11343,7 +11352,7 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
             if (v < 0) {
                 return -1;
             }
-            v = cast_value(sf, v, type_to_val(elem_type), diag);
+            v = cast_value(sf, v, ct_value_kind(elem), diag);
             if (v < 0) {
                 return -1;
             }
