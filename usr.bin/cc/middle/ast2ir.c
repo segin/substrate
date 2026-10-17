@@ -6542,7 +6542,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return lower_bitfield_load_from_addr(sf, e, ptrv, diag);
         }
-        long mem_size = type_size_bytes(e->value_type);
+        long mem_size = lower_value_size(tu, e);
         int ptrv;
         if (expr_is_array_object_ref(tu, vars, var_count, depth, e)) {
             return lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
@@ -9878,7 +9878,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
-            long mem_size = type_size_bytes(e->lhs->value_type);
+            long mem_size = lower_value_size(tu, e->lhs);
             int ptrv;
 
             if (lower_is_pointer(e)) {

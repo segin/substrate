@@ -476,6 +476,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   targets).  The parser encodes the name in UTF-8; one counter,
   `cc_string_literal_units()`, measures every literal, and sema gives a
   literal its array type from it.  `codegen/wide_string_literals.c`.
+- [x] **CC-83** `*p` and `++*p` / `--*p` through a pointer to a
+  bit-precise object shall read and write the object's bytes and no
+  more.  They used a word, the size the legacy encoding gives every
+  `_BitInt`: `(*p)++` on a `_BitInt(7)` in a structure overwrote the
+  bytes after it.  *Reproduced* (both targets).  The load and the
+  update take the size of the value's interned type.
+  `codegen/bitint_narrow.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -888,7 +895,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-82 requirements: 82 met, 0 open.
+83 requirements: 83 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

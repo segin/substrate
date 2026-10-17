@@ -10,6 +10,12 @@
  */
 #include <stdio.h>
 
+/* a bit-precise object next to bytes it must not touch */
+struct guarded {
+    _BitInt(7) a;
+    unsigned char tail[7];
+};
+
 static _BitInt(7) g7;
 static unsigned _BitInt(12) gu;
 
@@ -38,5 +44,13 @@ int main(void) {
     printf("%u %d %u %u\n", (unsigned)twice(u), (int)id7(x), (unsigned)~u, (unsigned)-u);
     printf("%d %d %d\n", (int)(x ? a : b), u > 4000, (int)(a + b));
     printf("%d %u\n", (int)(_BitInt(7))x, (unsigned)(unsigned _BitInt(5))x);
+    {
+        /* ++ and loads through a pointer take the object's size, not a word's */
+        struct guarded gd = {-5, {1, 2, 3, 4, 5, 6, 7}};
+        _BitInt(7) *pp = &gd.a;
+
+        (*pp)++;
+        printf("%d %d %d\n", (int)*pp, gd.tail[0], gd.tail[6]);
+    }
     return 0;
 }
