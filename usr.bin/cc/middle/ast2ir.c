@@ -1176,7 +1176,7 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
     }
     if (e->lhs->kind == CC_EXPR_STR) {
         int wide = cc_string_literal_is_wide(e->lhs);
-        long elem_size = type_size_bytes_with_struct(tu, ptr_base_type(e->lhs->value_type), e->lhs->struct_id);
+        long elem_size = lower_pointee_size(tu, e->lhs);
         unsigned long *units = NULL;
         size_t count = 0;
 
@@ -2411,7 +2411,7 @@ static char *wide_string_as_bytes(const cc_translation_unit_t *tu, const cc_expr
     if (e == NULL || e->kind != CC_EXPR_STR) {
         return NULL;
     }
-    elem_size = type_size_bytes_with_struct(tu, ptr_base_type(e->value_type), e->struct_id);
+    elem_size = lower_pointee_size(tu, e);
     if (elem_size <= 1 || elem_size > 8) {
         return NULL;
     }
@@ -2520,7 +2520,6 @@ static long string_expr_size_bytes(const cc_translation_unit_t *tu, const cc_exp
     unsigned long *units = NULL;
     size_t unit_count = 0;
     int wide;
-    cc_type_t elem_type;
     long elem_size;
     long count;
 
@@ -2533,8 +2532,7 @@ static long string_expr_size_bytes(const cc_translation_unit_t *tu, const cc_exp
         return -1;
     }
     free(units);
-    elem_type = ptr_base_type(e->value_type);
-    elem_size = type_size_bytes_with_struct(tu, elem_type, e->struct_id);
+    elem_size = lower_pointee_size(tu, e);
     if (elem_size <= 0 || unit_count >= (size_t)LONG_MAX) {
         return -1;
     }
