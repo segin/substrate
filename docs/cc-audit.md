@@ -559,6 +559,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   was cut to 32 bits and sign-extended back.  *Reproduced* (-m64).
   Sema types the difference as the target's `ptrdiff_t`.
   `native_pointer_difference_type.c`.
+- [x] **CC-98** The arms of `?:` shall be both arithmetic, both
+  structures of one type, both void, or pointers that match, a pointer
+  and a null pointer constant (C11 6.5.15p3): cc accepted a pointer and
+  any other integer, `c ? p : 1`, and typed the result `int` (gcc 16
+  rejects it: "pointer/integer type mismatch").  *Reproduced.*  The
+  conditional is typed on its arms' interned types and the mismatch is
+  an error.  `native_bad_ternary_ptr_int.c` (negative).
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -994,7 +1001,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-97 requirements: 92 met, 5 open.
+98 requirements: 93 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

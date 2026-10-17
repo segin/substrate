@@ -28,6 +28,7 @@ native_bad_index_nonptr.c||dereference requires pointer operand
 native_bad_ptr_add_float.c||unsupported pointer arithmetic form
 native_bad_ptr_sub_incompat.c||incompatible pointer types in subtraction
 native_bad_ptr_cmp_incompat.c||incompatible pointer types in comparison
+native_bad_ternary_ptr_int.c||incompatible types in conditional expression
 native_bad_cast_ptr_float.c||cast currently supports numeric and pointer/integer conversions only
 native_bad_computed_goto_float.c||computed goto requires pointer or integer target expression
 native_bad_attr_noreturn_return.c||noreturn function must not contain a return statement

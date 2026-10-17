@@ -950,6 +950,8 @@ static const cc_ctype_t *sx_vtype(const cc_expr_t *e) {
     return e != NULL ? cc_ct_decay(e->ctype) : NULL;
 }
 
+static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t);
+
 /** Whether @p t is of kind @p k. */
 static int ct_kind_is(const cc_ctype_t *t, cc_ctype_kind_t k) {
     return t != NULL && t->kind == k;
@@ -1556,72 +1558,6 @@ static const cc_function_t *infer_callee_function_expr(const cc_translation_unit
     default:
         return NULL;
     }
-}
-
-/* Conversion rank of a promoted integer type: int, long, long long. */
-static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
-    cc_type_t ap;
-    cc_type_t bp;
-    cc_type_t s;
-    cc_type_t u;
-
-    if (a == CC_TYPE_VOID || b == CC_TYPE_VOID) {
-        return CC_TYPE_VOID;
-    }
-    if (a == CC_TYPE_COMPLEX || b == CC_TYPE_COMPLEX) {
-        return CC_TYPE_COMPLEX;
-    }
-    if (a == CC_TYPE_IMAGINARY || b == CC_TYPE_IMAGINARY) {
-        return CC_TYPE_IMAGINARY;
-    }
-    if (a == CC_TYPE_DECIMAL128 || b == CC_TYPE_DECIMAL128) {
-        return CC_TYPE_DECIMAL128;
-    }
-    if (a == CC_TYPE_DECIMAL64 || b == CC_TYPE_DECIMAL64) {
-        return CC_TYPE_DECIMAL64;
-    }
-    if (a == CC_TYPE_DECIMAL32 || b == CC_TYPE_DECIMAL32) {
-        return CC_TYPE_DECIMAL32;
-    }
-    if (a == CC_TYPE_LDOUBLE || b == CC_TYPE_LDOUBLE) {
-        return CC_TYPE_LDOUBLE;
-    }
-    if (a == CC_TYPE_DOUBLE || b == CC_TYPE_DOUBLE) {
-        return CC_TYPE_DOUBLE;
-    }
-    if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) {
-        return CC_TYPE_FLOAT;
-    }
-    if (a == CC_TYPE_FLOAT16 || b == CC_TYPE_FLOAT16) {
-        return CC_TYPE_FLOAT16;
-    }
-
-    ap = cc_type_promote(a);
-    bp = cc_type_promote(b);
-    if (cc_type_integer_rank(ap) == 1) {
-        ap = cc_type_is_unsigned_integral(ap) ? CC_TYPE_UINT : CC_TYPE_INT;
-    }
-    if (cc_type_integer_rank(bp) == 1) {
-        bp = cc_type_is_unsigned_integral(bp) ? CC_TYPE_UINT : CC_TYPE_INT;
-    }
-    if (cc_type_is_unsigned_integral(ap) == cc_type_is_unsigned_integral(bp)) {
-        return cc_type_integer_rank(ap) >= cc_type_integer_rank(bp) ? ap : bp;
-    }
-
-    /*
-     * Mixed signedness (C11 6.3.1.8): a signed type of higher rank
-     * wins only when it can hold all of the unsigned type's values,
-     * which for long against unsigned int depends on the target.
-     */
-    s = cc_type_is_unsigned_integral(ap) ? bp : ap;
-    u = cc_type_is_unsigned_integral(ap) ? ap : bp;
-    if (cc_type_integer_rank(u) >= cc_type_integer_rank(s)) {
-        return u;
-    }
-    if (cc_type_integer_rank_size(s) > cc_type_integer_rank_size(u)) {
-        return s;
-    }
-    return s == CC_TYPE_LONG ? CC_TYPE_ULONG : CC_TYPE_ULONG_LONG;
 }
 
 static int is_cmp_op(cc_binop_t op) {
@@ -2247,11 +2183,6 @@ static int sema_wrap_cast(cc_expr_t **slot, const cc_ctype_t *t) {
     return 0;
 }
 
-/** sema_wrap_cast() to arithmetic or structure type (@p t, @p sid) in the legacy encoding. */
-static int sema_wrap_cast_legacy(cc_expr_t **slot, cc_type_t t, int sid) {
-    return sema_wrap_cast(slot, cc_ct_from_legacy(t, sid, 0, NULL));
-}
-
 static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot);
 
 /**
@@ -2386,8 +2317,7 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
 
     if (e->op == CC_BIN_BXOR && sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL &&
         e->rhs->kind == CC_EXPR_INT && e->rhs->int_val == -1) {
-        e->value_type = e->lhs->value_type;
-        e->struct_id = e->lhs->struct_id;
+        sema_set_type(e, sx_vtype(e->lhs));
         return 0;
     }
     if (lr < 0 || rr < 0 ||
@@ -2397,8 +2327,7 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         return -1;
     }
     if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
-        e->value_type = CC_TYPE_INT;
-        e->struct_id = -1;
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
         return 0;
     }
     rank = lr > rr ? lr : rr;
@@ -2407,8 +2336,7 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         set_diag(diag, "complex result type is not available");
         return -1;
     }
-    e->value_type = CC_TYPE_VOID;
-    e->struct_id = sid;
+    sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, sema_rank_float(rank)));
     return 0;
 }
 
@@ -2482,7 +2410,7 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
     int rw = sema_is_wide(tu, e->rhs);
     int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
                  e->op == CC_BIN_GT || e->op == CC_BIN_GE;
-    cc_type_t ft = CC_TYPE_VOID;
+    int rank = 0;
     int sid;
 
     if ((!lw && !sema_wide_partner_ok(sx_vtype(e->lhs))) || (!rw && !sema_wide_partner_ok(sx_vtype(e->rhs)))) {
@@ -2494,52 +2422,41 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
             set_diag(diag, "out of memory");
             return -1;
         }
-        if (!lw) {
-            /* a narrow value shifted by a wide count: an ordinary shift */
-            e->value_type = e->lhs->value_type;
-            e->struct_id = e->lhs->struct_id;
-            return 0;
-        }
-        e->value_type = CC_TYPE_VOID;
-        e->struct_id = e->lhs->struct_id;
+        /* the left operand's type: a narrow value shifted by a wide count is an ordinary shift */
+        sema_set_type(e, sx_vtype(e->lhs));
         return 0;
     }
-    if (!lw && (e->lhs->value_type == CC_TYPE_FLOAT || e->lhs->value_type == CC_TYPE_DOUBLE ||
-                e->lhs->value_type == CC_TYPE_LDOUBLE)) {
-        ft = e->lhs->value_type;
+    if (!lw) {
+        rank = sema_float_rank(sx_vtype(e->lhs));
     }
-    if (!rw && (e->rhs->value_type == CC_TYPE_FLOAT || e->rhs->value_type == CC_TYPE_DOUBLE ||
-                e->rhs->value_type == CC_TYPE_LDOUBLE)) {
-        ft = (ft == CC_TYPE_LDOUBLE || e->rhs->value_type == CC_TYPE_LDOUBLE) ? CC_TYPE_LDOUBLE
-             : (ft == CC_TYPE_DOUBLE || e->rhs->value_type == CC_TYPE_DOUBLE) ? CC_TYPE_DOUBLE
-                                                                               : CC_TYPE_FLOAT;
+    if (!rw && sema_float_rank(sx_vtype(e->rhs)) > rank) {
+        rank = sema_float_rank(sx_vtype(e->rhs));
     }
-    if (ft != CC_TYPE_VOID) {
+    if (rank > 0) {
         /* with a floating operand: the wide one is converted to that floating type */
-        if ((lw && sema_wrap_cast_legacy(&e->lhs, ft, -1) != 0) ||
-            (rw && sema_wrap_cast_legacy(&e->rhs, ft, -1) != 0)) {
+        const cc_ctype_t *ft = sema_rank_float(rank);
+
+        if ((lw && sema_wrap_cast(&e->lhs, ft) != 0) || (rw && sema_wrap_cast(&e->rhs, ft) != 0)) {
             set_diag(diag, "out of memory");
             return -1;
         }
-        e->value_type = is_cmp ? CC_TYPE_INT : ft;
-        e->struct_id = -1;
+        sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : ft);
         return 0;
     }
     if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
         set_diag(diag, "invalid wide integer operation");
         return -1;
     }
-    sid = sema_wide_common(tu, lw ? e->lhs->struct_id : -1, rw ? e->rhs->struct_id : -1);
-    if ((e->lhs->struct_id != sid || !lw) && sema_wrap_cast(&e->lhs, cc_ct_record(sid)) != 0) {
+    sid = sema_wide_common(tu, lw ? sx_ct_record(sx_vtype(e->lhs)) : -1, rw ? sx_ct_record(sx_vtype(e->rhs)) : -1);
+    if ((!lw || sx_ct_record(sx_vtype(e->lhs)) != sid) && sema_wrap_cast(&e->lhs, cc_ct_record(sid)) != 0) {
         set_diag(diag, "out of memory");
         return -1;
     }
-    if ((e->rhs->struct_id != sid || !rw) && sema_wrap_cast(&e->rhs, cc_ct_record(sid)) != 0) {
+    if ((!rw || sx_ct_record(sx_vtype(e->rhs)) != sid) && sema_wrap_cast(&e->rhs, cc_ct_record(sid)) != 0) {
         set_diag(diag, "out of memory");
         return -1;
     }
-    e->value_type = is_cmp ? CC_TYPE_INT : CC_TYPE_VOID;
-    e->struct_id = is_cmp ? -1 : sid;
+    sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
     return 0;
 }
 
@@ -2649,8 +2566,7 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
             return -1;
         }
     }
-    e->value_type = CC_TYPE_VOID;
-    e->struct_id = is_cmp ? vd->vector_cmp_sid : sid;
+    sema_set_type(e, cc_ct_record(is_cmp ? vd->vector_cmp_sid : sid));
     return 0;
 }
 
@@ -2667,17 +2583,12 @@ static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_di
     long ts = vt != NULL ? vt->size : cc_ct_size(to, tu);
     long ss = vs != NULL ? vs->size : cc_ct_size(sx_vtype(e->lhs), tu);
 
-    if (ct_kind_is(to, CC_CT_VOID)) {
-        e->value_type = CC_TYPE_VOID;
-        e->struct_id = -1;
-        return 0;
-    }
-    if ((vt == NULL && !cc_ct_is_integer(to)) || (vs == NULL && !cc_ct_is_integer(sx_vtype(e->lhs))) || ts != ss) {
+    if (!ct_kind_is(to->unqual, CC_CT_VOID) &&
+        ((vt == NULL && !cc_ct_is_integer(to)) || (vs == NULL && !cc_ct_is_integer(sx_vtype(e->lhs))) || ts != ss)) {
         set_diag(diag, "invalid conversion: a vector converts only to a vector or an integer of its size");
         return -1;
     }
-    e->value_type = e->aux_type;
-    e->struct_id = e->aux_struct_id;
+    sema_set_type(e, to);
     return 0;
 }
 
@@ -2962,6 +2873,7 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         e->aux_struct_id = sid;
         e->value_type = CC_TYPE_VOID;
         e->struct_id = sid;
+        e->ctype = cc_ct_record(sid);
         return check_expr(tu, e, NULL, 0, 0, diag);
     }
     if ((dl == NULL || dl->decimal_bits != bits) && sema_decimal_convert(tu, &e->lhs, sid) != 0) {
@@ -2972,8 +2884,7 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         set_diag(diag, "out of memory");
         return -1;
     }
-    e->value_type = is_cmp ? CC_TYPE_INT : CC_TYPE_VOID;
-    e->struct_id = is_cmp ? -1 : sid;
+    sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
     return 0;
 }
 
@@ -3047,13 +2958,13 @@ static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_e
  * @return 0, or -1 with @p diag set
  */
 static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
-    const cc_struct_def_t *dt = sema_decimal_def(tu, sema_cast_target_ctype(e));
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_struct_def_t *dt = sema_decimal_def(tu, to);
     int ds = sema_is_decimal(tu, e->lhs);
     uint64_t bid[2];
 
-    if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
-        e->value_type = CC_TYPE_VOID;
-        e->struct_id = -1;
+    if (ct_kind_is(to->unqual, CC_CT_VOID)) {
+        sema_set_type(e, to);
         return 0;
     }
     if (dt != NULL) {
@@ -3073,20 +2984,18 @@ static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
             /* now a compound literal: its own checks */
             return check_expr(tu, e, NULL, 0, 0, diag);
         }
-        e->value_type = CC_TYPE_VOID;
-        e->struct_id = e->aux_struct_id;
+        sema_set_type(e, to);
         return 0;
     }
-    if (e->aux_type == CC_TYPE_BOOL) {
+    if (ct_kind_is(to->unqual, CC_CT_BOOL)) {
         if (sema_decimal_truth(tu, &e->lhs, diag) != 0) {
             return -1;
         }
-    } else if (!sema_decimal_partner_ok(sema_cast_target_ctype(e)) && !sema_is_binary_fp(sema_cast_target_ctype(e))) {
+    } else if (!sema_decimal_partner_ok(to) && !sema_is_binary_fp(to)) {
         set_diag(diag, "invalid conversion of a decimal floating value");
         return -1;
     }
-    e->value_type = e->aux_type;
-    e->struct_id = -1;
+    sema_set_type(e, to);
     return 0;
 }
 
@@ -4466,6 +4375,297 @@ static int sema_check_deref(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
         return -1;
     }
     sema_set_type(e, p->of);
+    return 0;
+}
+
+/**
+ * Check a compound literal (a CC_EXPR_CAST of an initializer list):
+ * its list against its type, an array's or a structure's; a scalar's
+ * list is unwrapped to the value it holds, which the caller then
+ * converts as a cast.
+ *
+ * @return 1 if the literal is an array or structure and checked, 0 if it
+ *         is a scalar (now a plain cast), -1 with @p diag set
+ */
+static int sema_check_compound_literal(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
+                                       size_t var_count, int depth, cc_diag_t *diag) {
+    const cc_ctype_t *t = e->ctype;
+    long inferred_len = -1;
+
+    if (t != NULL && t->kind == CC_CT_ARRAY) {
+        long known = e->array_ndim > 0 && e->array_dims[0] > 0 ? e->array_dims[0] : 0;
+        long fallback_dims[CC_MAX_ARRAY_DIMS] = {0, 0, 0, 0};
+
+        if (check_array_initializer(tu, "<compound-literal>", e->aux_type, e->aux_struct_id, known,
+                                    e->array_ndim > 0 ? e->array_ndim : 1,
+                                    e->array_ndim > 0 ? e->array_dims : fallback_dims, e->lhs, vars, var_count,
+                                    depth, &inferred_len, diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, sema_complete_array_ctype(t, inferred_len));
+        return 1;
+    }
+    if (sx_ct_record(t) >= 0) {
+        if (check_struct_initializer(tu, "<compound-literal>", sx_ct_record(t), e->lhs, vars, var_count, depth,
+                                     diag) != 0) {
+            return -1;
+        }
+        sema_set_type(e, t);
+        return 1;
+    }
+    e->lhs = unwrap_scalar_initializer_expr(e->lhs, diag);
+    return e->lhs == NULL ? -1 : 0;
+}
+
+/**
+ * Check a cast (CC_EXPR_CAST) to the type the parser recorded in its
+ * ctype, and type it that (C11 6.5.4): between arithmetic types, between
+ * pointers and integers, to void, to a structure (a compound literal) or
+ * to a union from one of its members' types (GNU).  A cast from or to a
+ * vector, decimal or wide integer type goes to that type's rewrite; one
+ * from a complex type to a real one takes the real part.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                           int depth, cc_diag_t *diag) {
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_ctype_t *from;
+    int rid;
+
+    if (e->lhs == NULL || to == NULL) {
+        set_diag(diag, "malformed cast expression");
+        return -1;
+    }
+    if (e->lhs->kind == CC_EXPR_INIT_LIST) {
+        int rc = sema_check_compound_literal(tu, e, vars, var_count, depth, diag);
+
+        if (rc != 0) {
+            return rc < 0 ? -1 : 0;
+        }
+    }
+    expr_clear_array_meta(e);
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL && cc_ct_is_arithmetic(to) &&
+        sema_complex_elem(tu, to) == NULL) {
+        /* complex to real: the real part (C11 6.3.1.7); to _Bool: whether either part is nonzero */
+        if ((ct_kind_is(to->unqual, CC_CT_BOOL) ? sema_complex_truth(tu, &e->lhs)
+                                                : sema_complex_part(tu, &e->lhs, 0)) != 0) {
+            set_diag(diag, "out of memory");
+            return -1;
+        }
+    }
+    if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, to) != NULL) {
+        return sema_vector_cast(tu, e, diag);
+    }
+    if (sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, to) != NULL) {
+        return sema_decimal_cast(tu, e, diag);
+    }
+    from = sx_vtype(e->lhs);
+    if (sema_is_wide(tu, e->lhs) && sema_wide_def(tu, to) == NULL) {
+        /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */
+        if (!sema_wide_partner_ok(to) && !ct_kind_is(to->unqual, CC_CT_POINTER) &&
+            !ct_kind_is(to->unqual, CC_CT_VOID)) {
+            set_diag(diag, "invalid conversion of a wide integer");
+            return -1;
+        }
+        if (ct_kind_is(to->unqual, CC_CT_BOOL) && sema_wide_truth(tu, &e->lhs, diag) != 0) {
+            return -1;
+        }
+    } else if (sema_wide_def(tu, to) != NULL) {
+        /* to a wide integer: from any integer or floating value */
+        if (!sema_is_wide(tu, e->lhs) && !sema_wide_partner_ok(from)) {
+            set_diag(diag, "invalid conversion to a wide integer");
+            return -1;
+        }
+    } else if (sema_complex_elem(tu, to) != NULL && sema_complex_operand_rank(tu, e->lhs) < 0) {
+        set_diag(diag, "only an arithmetic value can be converted to a complex type");
+        return -1;
+    } else if ((rid = sx_ct_record(to)) >= 0) {
+        const cc_struct_def_t *sd = find_struct_def(tu, rid);
+
+        if (sd == NULL || !sd->complete) {
+            set_diag(diag, "cast targets unknown aggregate type");
+            return -1;
+        }
+        if (sd->is_union) {
+            const cc_struct_member_t *m = cc_ct_union_cast_member(tu, rid, e->lhs->ctype);
+
+            if (m == NULL) {
+                set_diag(diag, "cast to union type from type not present in union");
+                return -1;
+            }
+            e->member_offset = m->offset;
+        }
+    } else if (!ct_kind_is(to->unqual, CC_CT_VOID) && !(cc_ct_is_arithmetic(from) && cc_ct_is_arithmetic(to)) &&
+               !(sema_is_ptr(to) && (sema_is_ptr(from) || cc_ct_is_integer(from))) &&
+               !(cc_ct_is_integer(to) && sema_is_ptr(from))) {
+        set_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
+        return -1;
+    }
+    sema_set_type(e, to);
+    return 0;
+}
+
+/**
+ * Check `sizeof x` or `sizeof (T)` (C11 6.5.3.4): not of a bit-field, a
+ * void expression or an incomplete type.  Its type is size_t.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    if (e->lhs != NULL) {
+        const cc_ctype_t *t;
+
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
+            set_diag(diag, "sizeof cannot be applied to bit-field");
+            return -1;
+        }
+        /* an array with a bound that is no constant (a variable-length one) is sized when the program runs */
+        for (t = e->lhs->ctype; t != NULL && t->kind == CC_CT_ARRAY && t->count >= 0; t = t->of) {
+        }
+        if (!(t != NULL && t->kind == CC_CT_ARRAY) && cc_ct_size(e->lhs->ctype, tu) < 0) {
+            set_diag(diag, "sizeof unsupported for this operand type");
+            return -1;
+        }
+    } else {
+        if (cc_ct_sizeof_type(e->aux_ctype, tu) < 0) {
+            set_diag(diag, "sizeof unsupported for this type");
+            return -1;
+        }
+        if (e->aux_ctype->kind == CC_CT_VOID &&
+            emit_warning(diag, e->line, e->col, "invalid application of 'sizeof' to a void type", 1) != 0) {
+            return -1;
+        }
+    }
+    sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
+    return 0;
+}
+
+/**
+ * Check a GNU statement expression `({ ... })` in a scope of its own; its
+ * value is that of its last statement, if an expression, else void.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_stmt_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                                int depth, cc_diag_t *diag) {
+    var_entry_t *lvars = NULL;
+    size_t lcount = var_count;
+    int saw_return = 0;
+    const cc_stmt_t *last = NULL;
+    size_t j;
+
+    if (emit_warning(diag, e->line, e->col, "statement expression is a GNU extension (non-C99)", 1) != 0) {
+        return -1;
+    }
+    if (vars_clone(&lvars, vars, var_count) != 0) {
+        set_diag(diag, "out of memory cloning scope for statement expression");
+        return -1;
+    }
+    for (j = 0; j < e->stmt_expr_count; ++j) {
+        if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, -1, 0, 0, 0,
+                       &saw_return, diag) != 0) {
+            vars_free(lvars, lcount);
+            return -1;
+        }
+    }
+    vars_free(lvars, lcount);
+    if (e->stmt_expr_count > 0) {
+        /* labels chain through then_branch; the value is that of the statement they wrap */
+        last = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
+        while (last != NULL && last->kind == CC_STMT_LABEL) {
+            last = last->then_branch;
+        }
+    }
+    if (last != NULL && last->kind == CC_STMT_EXPR && last->expr != NULL) {
+        sema_set_type(e, sx_vtype(last->expr));
+    } else {
+        sema_set_type(e, cc_ct_basic(CC_CT_VOID));
+    }
+    return 0;
+}
+
+/**
+ * Check `c ? a : b` and GNU `c ?: b` (CC_EXPR_TERNARY, C11 6.5.15) and
+ * type it: two arithmetic arms by the usual arithmetic conversions, two
+ * structures of one type, two pointers that match or a pointer and a
+ * null pointer constant as the pointer, two void arms as void; one void
+ * arm (a GNU extension) as the other's type.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                              int depth, cc_diag_t *diag) {
+    cc_expr_t *x;
+    cc_expr_t *y;
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+    const cc_ctype_t *t;
+    int a_void;
+    int b_void;
+
+    if (e->lhs == NULL || e->third == NULL) {
+        set_diag(diag, "malformed conditional expression");
+        return -1;
+    }
+    if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
+        (e->rhs != NULL && check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) ||
+        check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
+        return -1;
+    }
+    if (sema_condition(tu, &e->lhs, diag) != 0) {
+        return -1;
+    }
+    if (!cc_ct_is_scalar(sx_vtype(e->lhs))) {
+        set_diag(diag, "conditional expression condition cannot be void");
+        return -1;
+    }
+    if (e->rhs == NULL &&
+        emit_warning(diag, e->line, e->col, "omitted middle operand in ?: is a GNU extension (non-C99)", 1) != 0) {
+        return -1;
+    }
+    /* `c ?: b` is c if c is nonzero */
+    x = e->rhs != NULL ? e->rhs : e->lhs;
+    y = e->third;
+    a = sx_vtype(x);
+    b = sx_vtype(y);
+    a_void = ct_kind_is(a, CC_CT_VOID);
+    b_void = ct_kind_is(b, CC_CT_VOID);
+    if (a_void || b_void) {
+        if (!(a_void && b_void) &&
+            emit_warning(diag, e->line, e->col, "conditional expression with one void arm is a GNU extension (non-C99)",
+                         1) != 0) {
+            return -1;
+        }
+        t = a_void ? b : a;
+    } else if (sema_is_ptr(a) && sema_is_ptr(b)) {
+        if (!sema_ptrs_match(tu, a, b)) {
+            set_diag(diag, "incompatible pointer types in conditional expression");
+            return -1;
+        }
+        t = a;
+    } else if (sema_is_ptr(a) && cc_ct_is_integer(b) && is_null_ptr_constant(y)) {
+        t = a;
+    } else if (sema_is_ptr(b) && cc_ct_is_integer(a) && is_null_ptr_constant(x)) {
+        t = b;
+    } else if (sx_ct_record(a) >= 0 && sx_ct_record(b) >= 0) {
+        if (!struct_ids_compatible(tu, sx_ct_record(a), sx_ct_record(b))) {
+            set_diag(diag, "incompatible struct types in conditional expression");
+            return -1;
+        }
+        t = a;
+    } else if (sx_ct_record(a) >= 0 || sx_ct_record(b) >= 0 || (t = sema_usual_arith(a, b)) == NULL) {
+        set_diag(diag, "incompatible types in conditional expression");
+        return -1;
+    }
+    sema_set_type(e, t);
     return 0;
 }
 
@@ -5868,176 +6068,10 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     }
 
     case CC_EXPR_CAST:
-        if (!(e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST && e->array_ndim > 0 && is_pointer_type(e->aux_type))) {
-            expr_clear_array_meta(e);
-        }
-        if (e->lhs == NULL) {
-            set_diag(diag, "malformed cast expression");
-            return -1;
-        }
-        if (e->lhs->kind == CC_EXPR_INIT_LIST) {
-            if (e->array_ndim > 0 && is_pointer_type(e->aux_type)) {
-                long cast_array_len = e->array_dims[0] > 0 ? e->array_dims[0] : 0;
-                long inferred_len = -1;
-                if (check_array_initializer(tu, "<compound-literal>", e->aux_type, e->aux_struct_id, cast_array_len,
-                                            e->array_ndim, e->array_dims, e->lhs, vars, var_count, depth, &inferred_len,
-                                            diag) != 0) {
-                    return -1;
-                }
-                if (cast_array_len == 0 && inferred_len > 0) {
-                    e->array_dims[0] = inferred_len;
-                }
-                e->value_type = e->aux_type;
-                e->struct_id = e->aux_struct_id;
-                return 0;
-            }
-            if (is_pointer_type(e->aux_type)) {
-                long inferred_len = -1;
-                long fallback_dims[CC_MAX_ARRAY_DIMS] = {0, 0, 0, 0};
-                if (check_array_initializer(tu, "<compound-literal>", e->aux_type, e->aux_struct_id, 0, 1, fallback_dims,
-                                            e->lhs, vars, var_count, depth, &inferred_len, diag) != 0) {
-                    return -1;
-                }
-                e->value_type = e->aux_type;
-                e->struct_id = e->aux_struct_id;
-                return 0;
-            }
-            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
-                if (check_struct_initializer(tu, "<compound-literal>", e->aux_struct_id, e->lhs, vars, var_count,
-                                             depth, diag) != 0) {
-                    return -1;
-                }
-                e->value_type = CC_TYPE_VOID;
-                e->struct_id = e->aux_struct_id;
-                return 0;
-            }
-            e->lhs = unwrap_scalar_initializer_expr(e->lhs, diag);
-            if (e->lhs == NULL) {
-                return -1;
-            }
-        }
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL &&
-            cc_type_is_numeric(e->aux_type)) {
-            /* complex to real: the real part (C11 6.3.1.7); to _Bool: whether either part is nonzero */
-            if ((e->aux_type == CC_TYPE_BOOL ? sema_complex_truth(tu, &e->lhs)
-                                             : sema_complex_part(tu, &e->lhs, 0)) != 0) {
-                set_diag(diag, "out of memory");
-                return -1;
-            }
-        }
-        if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, sema_cast_target_ctype(e)) != NULL) {
-            return sema_vector_cast(tu, e, diag);
-        }
-        if (sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, sema_cast_target_ctype(e)) != NULL) {
-            return sema_decimal_cast(tu, e, diag);
-        }
-        if (sema_is_wide(tu, e->lhs) && sema_wide_def(tu, sema_cast_target_ctype(e)) == NULL) {
-            /* from a wide integer: to another integer or floating type, or to _Bool (the truth test) */
-            const cc_ctype_t *to = sema_cast_target_ctype(e);
-
-            if (!sema_wide_partner_ok(to) && !ct_kind_is(to, CC_CT_POINTER) && !ct_kind_is(to, CC_CT_VOID)) {
-                set_diag(diag, "invalid conversion of a wide integer");
-                return -1;
-            }
-            if (ct_kind_is(to, CC_CT_BOOL) && sema_wide_truth(tu, &e->lhs, diag) != 0) {
-                return -1;
-            }
-            e->value_type = e->aux_type;
-            e->struct_id = e->aux_struct_id;
-            return 0;
-        }
-        if (sema_wide_def(tu, sema_cast_target_ctype(e)) != NULL) {
-            /* to a wide integer: from any integer or floating value */
-            if (!sema_is_wide(tu, e->lhs) && !sema_wide_partner_ok(sx_vtype(e->lhs))) {
-                set_diag(diag, "invalid conversion to a wide integer");
-                return -1;
-            }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = e->aux_struct_id;
-            return 0;
-        }
-        if (sema_complex_elem(tu, sema_cast_target_ctype(e)) != NULL &&
-            sema_complex_operand_rank(tu, e->lhs) < 0) {
-            set_diag(diag, "only an arithmetic value can be converted to a complex type");
-            return -1;
-        }
-        if (e->aux_type == CC_TYPE_VOID) {
-            if (e->aux_struct_id >= 0) {
-                const cc_struct_def_t *sd = find_struct_def(tu, e->aux_struct_id);
-                if (sd == NULL || !sd->complete) {
-                    set_diag(diag, "cast targets unknown aggregate type");
-                    return -1;
-                }
-                if (sd->is_union && e->lhs->kind != CC_EXPR_INIT_LIST) {
-                    const cc_struct_member_t *m = cc_ct_union_cast_member(tu, e->aux_struct_id, e->lhs->ctype);
-                    if (m == NULL) {
-                        set_diag(diag, "cast to union type from type not present in union");
-                        return -1;
-                    }
-                    e->member_offset = m->offset;
-                    e->value_type = CC_TYPE_VOID;
-                    e->struct_id = e->aux_struct_id;
-                    return 0;
-                }
-                e->value_type = CC_TYPE_VOID;
-                e->struct_id = e->aux_struct_id;
-                return 0;
-            }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
-            return 0;
-        }
-        if (cc_type_is_numeric(e->lhs->value_type) && cc_type_is_numeric(e->aux_type)) {
-            e->value_type = e->aux_type;
-            e->struct_id = -1;
-            return 0;
-        }
-        if (is_pointer_type(e->aux_type) &&
-            (is_pointer_type(e->lhs->value_type) || cc_type_is_integral(e->lhs->value_type))) {
-            e->value_type = e->aux_type;
-            e->struct_id = e->aux_struct_id;
-            if (is_pointer_type(e->lhs->value_type)) {
-                expr_copy_array_meta(e, e->lhs);
-            }
-            return 0;
-        }
-        if (cc_type_is_integral(e->aux_type) && is_pointer_type(e->lhs->value_type)) {
-            e->value_type = e->aux_type;
-            e->struct_id = -1;
-            return 0;
-        }
-        set_diag(diag, "cast currently supports numeric and pointer/integer conversions only");
-        return -1;
+        return sema_check_cast(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_SIZEOF:
-        if (e->lhs != NULL) {
-            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
-                set_diag(diag, "sizeof cannot be applied to bit-field");
-                return -1;
-            }
-            if (type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id) < 0) {
-                set_diag(diag, "sizeof unsupported for this operand type");
-                return -1;
-            }
-        } else {
-            if (cc_ct_sizeof_type(e->aux_ctype, tu) < 0) {
-                set_diag(diag, "sizeof unsupported for this type");
-                return -1;
-            }
-            if (e->aux_ctype->kind == CC_CT_VOID &&
-                emit_warning(diag, e->line, e->col, "invalid application of 'sizeof' to a void type", 1) != 0) {
-                return -1;
-            }
-        }
-        e->value_type = size_type();
-        e->struct_id = -1;
-        return 0;
+        return sema_check_sizeof(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_INIT_LIST:
         for (i = 0; i < e->arg_count; ++i) {
@@ -6045,201 +6079,14 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 return -1;
             }
         }
-        if (e->arg_count > 0) {
-            e->value_type = e->args[0]->value_type;
-            e->struct_id = e->args[0]->struct_id;
-        } else {
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
-        }
+        sema_set_type(e, e->arg_count > 0 ? e->args[0]->ctype : cc_ct_basic(CC_CT_INT));
         return 0;
 
     case CC_EXPR_STMT:
-        {
-            var_entry_t *lvars = NULL;
-            size_t lcount = var_count;
-            int saw_return = 0;
-            size_t j;
-            if (emit_warning(diag, e->line, e->col, "statement expression is a GNU extension (non-C99)", 1) != 0) {
-                return -1;
-            }
-            if (vars_clone(&lvars, vars, var_count) != 0) {
-                set_diag(diag, "out of memory cloning scope for statement expression");
-                return -1;
-            }
-            for (j = 0; j < e->stmt_expr_count; ++j) {
-                if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, -1, 0, 0, 0,
-                               &saw_return, diag) != 0) {
-                    vars_free(lvars, lcount);
-                    return -1;
-                }
-            }
-            if (e->stmt_expr_count > 0) {
-                const cc_stmt_t *last = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
-                /* Labels chain through `then_branch`; the value of the
-                 * statement expression is whatever inner statement they
-                 * eventually wrap. */
-                while (last != NULL && last->kind == CC_STMT_LABEL) {
-                    last = last->then_branch;
-                }
-                if (last != NULL && last->kind == CC_STMT_EXPR && last->expr != NULL) {
-                    e->value_type = last->expr->value_type;
-                    e->struct_id = last->expr->struct_id;
-                } else {
-                    e->value_type = CC_TYPE_VOID;
-                    e->struct_id = -1;
-                }
-            } else {
-                e->value_type = CC_TYPE_VOID;
-                e->struct_id = -1;
-            }
-            vars_free(lvars, lcount);
-            return 0;
-        }
+        return sema_check_stmt_expr(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_TERNARY:
-        {
-            int lhs_is_plain_void;
-            int rhs_is_plain_void;
-            int third_is_plain_void;
-        if (e->lhs == NULL || e->third == NULL) {
-            set_diag(diag, "malformed conditional expression");
-            return -1;
-        }
-        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
-            (e->rhs != NULL && check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) ||
-            check_expr(tu, e->third, vars, var_count, depth, diag) != 0) {
-            return -1;
-        }
-        if (sema_condition(tu, &e->lhs, diag) != 0) {
-            return -1;
-        }
-        lhs_is_plain_void = (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id < 0);
-        rhs_is_plain_void = (e->rhs != NULL && e->rhs->value_type == CC_TYPE_VOID && e->rhs->struct_id < 0);
-        third_is_plain_void = (e->third->value_type == CC_TYPE_VOID && e->third->struct_id < 0);
-        if (e->lhs->value_type == CC_TYPE_VOID) {
-            set_diag(diag, "conditional expression condition cannot be void");
-            return -1;
-        }
-        if (e->rhs == NULL) {
-            if (emit_warning(diag, e->line, e->col, "omitted middle operand in ?: is a GNU extension (non-C99)", 1) !=
-                0) {
-                return -1;
-            }
-            if (lhs_is_plain_void || third_is_plain_void) {
-                if (lhs_is_plain_void && third_is_plain_void) {
-                    e->value_type = CC_TYPE_VOID;
-                    e->struct_id = -1;
-                    return 0;
-                }
-                if (emit_warning(diag, e->line, e->col,
-                                 "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
-                    return -1;
-                }
-                if (lhs_is_plain_void) {
-                    e->value_type = e->third->value_type;
-                    e->struct_id = e->third->struct_id;
-                } else {
-                    e->value_type = e->lhs->value_type;
-                    e->struct_id = e->lhs->struct_id;
-                }
-                return 0;
-            }
-            if (is_pointer_type(e->lhs->value_type) && is_pointer_type(e->third->value_type)) {
-                if (can_convert(e->lhs->value_type, e->third->value_type)) {
-                    e->value_type = e->lhs->value_type;
-                    e->struct_id = e->lhs->struct_id;
-                    return 0;
-                }
-                if (can_convert(e->third->value_type, e->lhs->value_type)) {
-                    e->value_type = e->third->value_type;
-                    e->struct_id = e->third->struct_id;
-                    return 0;
-                }
-                set_diag(diag, "incompatible pointer types in conditional expression");
-                return -1;
-            }
-            if (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0 && e->third->value_type == CC_TYPE_VOID &&
-                e->third->struct_id >= 0) {
-                if (!struct_ids_compatible(tu, e->lhs->struct_id, e->third->struct_id)) {
-                    set_diag(diag, "incompatible struct types in conditional expression");
-                    return -1;
-                }
-                e->value_type = CC_TYPE_VOID;
-                e->struct_id = e->lhs->struct_id;
-                return 0;
-            }
-            e->value_type = common_arith_type(e->lhs->value_type, e->third->value_type);
-            if (e->value_type == CC_TYPE_VOID) {
-                set_diag(diag, "incompatible types in conditional expression");
-                return -1;
-            }
-            e->struct_id = -1;
-            return 0;
-        }
-        if (rhs_is_plain_void || third_is_plain_void) {
-            if (rhs_is_plain_void && third_is_plain_void) {
-                e->value_type = CC_TYPE_VOID;
-                e->struct_id = -1;
-                return 0;
-            }
-            if (emit_warning(diag, e->line, e->col,
-                             "conditional expression with one void arm is a GNU extension (non-C99)", 1) != 0) {
-                return -1;
-            }
-            if (rhs_is_plain_void) {
-                e->value_type = e->third->value_type;
-                e->struct_id = e->third->struct_id;
-            } else {
-                e->value_type = e->rhs->value_type;
-                e->struct_id = e->rhs->struct_id;
-            }
-            return 0;
-        }
-        if (is_pointer_type(e->rhs->value_type) && is_pointer_type(e->third->value_type)) {
-            if (can_convert(e->rhs->value_type, e->third->value_type)) {
-                e->value_type = e->rhs->value_type;
-                e->struct_id = e->rhs->struct_id;
-                return 0;
-            }
-            if (can_convert(e->third->value_type, e->rhs->value_type)) {
-                e->value_type = e->third->value_type;
-                e->struct_id = e->third->struct_id;
-                return 0;
-            }
-            set_diag(diag, "incompatible pointer types in conditional expression");
-            return -1;
-        }
-        if (is_pointer_type(e->rhs->value_type) && cc_type_is_integral(e->third->value_type) &&
-            is_null_ptr_constant(e->third)) {
-            e->value_type = e->rhs->value_type;
-            e->struct_id = e->rhs->struct_id;
-            return 0;
-        }
-        if (is_pointer_type(e->third->value_type) && cc_type_is_integral(e->rhs->value_type) &&
-            is_null_ptr_constant(e->rhs)) {
-            e->value_type = e->third->value_type;
-            e->struct_id = e->third->struct_id;
-            return 0;
-        }
-        if (e->rhs->value_type == CC_TYPE_VOID && e->rhs->struct_id >= 0 && e->third->value_type == CC_TYPE_VOID &&
-            e->third->struct_id >= 0) {
-            if (!struct_ids_compatible(tu, e->rhs->struct_id, e->third->struct_id)) {
-                set_diag(diag, "incompatible struct types in conditional expression");
-                return -1;
-            }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = e->rhs->struct_id;
-            return 0;
-        }
-        e->value_type = common_arith_type(e->rhs->value_type, e->third->value_type);
-        if (e->value_type == CC_TYPE_VOID) {
-            set_diag(diag, "incompatible types in conditional expression");
-            return -1;
-        }
-        e->struct_id = -1;
-        return 0;
-        }
+        return sema_check_ternary(tu, e, vars, var_count, depth, diag);
 
     default:
         set_diag(diag, "unsupported expression kind");
