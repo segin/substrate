@@ -1816,83 +1816,79 @@ static int is_declspec_tok(cc_tok_kind_t k) {
     }
 }
 
-/**
- * Parse declaration specifiers (C11 6.7): storage classes, type
- * specifiers and qualifiers, function specifiers, alignment specifiers
- * and attributes, defining any structure, union or enumeration they
- * declare along the way.
- *
- * The type they give is also left in parser_t.last_spec_ctype, and the
- * storage class bits in parser_t.last_storage.
- *
- * @param p                 the parser, at the specifiers
- * @param out               receives the type; may be NULL
- * @param allow_void        nonzero if `void` may be named
- * @param what              the message when there are no specifiers
- * @param out_typedef       receives whether `typedef` was among them; NULL
- *                          if it may not be
- * @param out_saw_restrict  receives whether `restrict` was; may be NULL
- * @param out_attrs         receives their attributes; may be NULL
- * @return                  0, or -1 on error (diagnosed)
- */
 static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, const char *what, int *out_typedef,
-                          int *out_saw_restrict, decl_attrs_t *out_attrs) {
-    int storage_flags = 0;
-    int seen = 0;
-    int seen_type = 0;
-    int seen_void = 0;
-    int seen_bool = 0;
-    int seen_char = 0;
-    int seen_int = 0;
-    int seen_float = 0;
-    int seen_double = 0;
-    int seen_complex = 0;
-    int seen_imaginary = 0;
-    int seen_long = 0;
-    int seen_short = 0;
-    int seen_signed = 0;
-    int seen_unsigned = 0;
-    int seen_opaque_tag = 0;
-    int seen_typedef = 0;
-    int seen_alias = 0;
-    int seen_atomic = 0;
-    int seen_bitint = 0;
-    int seen_decimal = 0;
-    int seen_enum = 0;
-    int seen_restrict = 0;
-    int enum_known_type = 0;
-    int enum_has_values = 0;
-    long enum_min = 0;
-    long enum_max = 0;
-    const char *enum_tag_pending = NULL;
-    size_t enum_tag_pending_len = 0;
-    int enum_defined = 0;
-    long bitint_width = 0;
-    int seen_int128 = 0; /* GNU __int128 */
-    int seen_struct_id = -1;
-    const cc_ctype_t *enum_ctype = NULL; /* an enumeration's type, once known */
-    int decimal_bits = 64;
-    const cc_ctype_t *alias_ctype = NULL; /* the type a typedef name, typeof or the like gave */
-    const cc_ctype_t *spec = NULL;
+                          int *out_saw_restrict, decl_attrs_t *out_attrs);
 
-    p->last_storage = 0;
-    p->last_spec_ctype = NULL;
-    if (out_typedef != NULL) {
-        *out_typedef = 0;
-    }
-    if (out_saw_restrict != NULL) {
-        *out_saw_restrict = 0;
-    }
-    if (out_attrs != NULL) {
-        out_attrs->flags = 0;
-        out_attrs->align = 0;
-        out_attrs->section = NULL;
-        out_attrs->alias = NULL;
-    }
+/**
+ * What a list of declaration specifiers says, as declspec_accumulate()
+ * collects it token by token for declspec_resolve() to make a type of.
+ */
+typedef struct {
+    int storage_flags;
+    int seen;
+    int seen_type;
+    int seen_void;
+    int seen_bool;
+    int seen_char;
+    int seen_int;
+    int seen_float;
+    int seen_double;
+    int seen_complex;
+    int seen_imaginary;
+    int seen_long;
+    int seen_short;
+    int seen_signed;
+    int seen_unsigned;
+    int seen_opaque_tag;
+    int seen_typedef;
+    int seen_alias;
+    int seen_atomic;
+    int seen_bitint;
+    int seen_decimal;
+    int seen_enum;
+    int seen_restrict;
+    int enum_known_type;
+    int enum_has_values;
+    long enum_min;
+    long enum_max;
+    const char *enum_tag_pending;
+    size_t enum_tag_pending_len;
+    int enum_defined;
+    long bitint_width;
+    int seen_int128; /* GNU __int128 */
+    int seen_struct_id;
+    const cc_ctype_t *enum_ctype; /* an enumeration's type, once known */
+    int decimal_bits;
+    const cc_ctype_t *alias_ctype; /* the type a typedef name, typeof or the like gave */
+    const cc_ctype_t *spec;
+} declspec_acc_t;
 
+/**
+ * Start an empty specifier list.
+ *
+ * @param acc  the list
+ */
+static void declspec_acc_init(declspec_acc_t *acc) {
+    memset(acc, 0, sizeof(*acc));
+    acc->seen_struct_id = -1;
+    acc->decimal_bits = 64;
+}
+
+/**
+ * Read declaration specifiers into @p acc: storage classes, type
+ * specifiers and qualifiers, function and alignment specifiers and
+ * attributes, up to the first token that is none of them, defining any
+ * structure, union or enumeration they declare along the way.
+ *
+ * @param p          the parser, at the specifiers
+ * @param acc        receives what they say
+ * @param out_attrs  receives their attributes; may be NULL
+ * @return           0, or -1 on error (diagnosed)
+ */
+static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *out_attrs) {
     while (1) {
         if (p->tok.kind == TOK_KW_EXTENSION) {
-            seen = 1;
+            acc->seen = 1;
             if (next_tok(p) != 0) {
                 return -1;
             }
@@ -1911,11 +1907,11 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "__auto_type requires GNU mode");
                     return -1;
                 }
-                seen = 1;
-                seen_type = 1;
-                seen_alias = 1;
-                alias_ctype = cc_ct_basic(CC_CT_INT);
-                storage_flags |= CC_STORAGE_AUTO_TYPE;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_alias = 1;
+                acc->alias_ctype = cc_ct_basic(CC_CT_INT);
+                acc->storage_flags |= CC_STORAGE_AUTO_TYPE;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -1923,31 +1919,31 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             }
             if (p->tok.len == strlen("__builtin_va_list") &&
                 strncmp(p->tok.start, "__builtin_va_list", p->tok.len) == 0) {
-                if (seen_type) {
+                if (acc->seen_type) {
                     break;
                 }
-                seen = 1;
-                seen_type = 1;
-                seen_alias = 1;
-                alias_ctype = cc_ct_pointer(cc_ct_basic(CC_CT_VOID));
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_alias = 1;
+                acc->alias_ctype = cc_ct_pointer(cc_ct_basic(CC_CT_VOID));
                 if (next_tok(p) != 0) {
                     return -1;
                 }
                 continue;
             }
             if (parser_is_gnu_mode() && (tok_is_ident(p, "__signed__") || tok_is_ident(p, "__signed"))) {
-                seen = 1;
-                seen_type = 1;
-                seen_signed = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_signed = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
                 continue;
             }
             if (parser_is_gnu_mode() && (tok_is_ident(p, "__unsigned__") || tok_is_ident(p, "__unsigned"))) {
-                seen = 1;
-                seen_type = 1;
-                seen_unsigned = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_unsigned = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -1959,11 +1955,11 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "__int128 is not supported on this target");
                     return -1;
                 }
-                seen = 1;
-                seen_type = 1;
-                seen_int128 = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_int128 = 1;
                 if (tok_is_ident(p, "__uint128_t")) {
-                    seen_unsigned = 1;
+                    acc->seen_unsigned = 1;
                 }
                 if (next_tok(p) != 0) {
                     return -1;
@@ -1975,8 +1971,8 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "_Thread_local requires C11 or newer");
                     return -1;
                 }
-                seen = 1;
-                storage_flags |= CC_STORAGE_THREAD_LOCAL;
+                acc->seen = 1;
+                acc->storage_flags |= CC_STORAGE_THREAD_LOCAL;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -1987,7 +1983,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "_Noreturn requires C11 or newer");
                     return -1;
                 }
-                seen = 1;
+                acc->seen = 1;
                 if (out_attrs != NULL) {
                     out_attrs->flags |= CC_ATTR_NORETURN;
                 }
@@ -2004,7 +2000,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "_Alignas requires C11 or newer");
                     return -1;
                 }
-                seen = 1;
+                acc->seen = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2047,10 +2043,10 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "_Atomic requires C11 or newer");
                     return -1;
                 }
-                seen = 1;
+                acc->seen = 1;
                 if (peek_kind(p) == TOK_LPAREN) {
                     const cc_ctype_t *aty = NULL;
-                    if (seen_type) {
+                    if (acc->seen_type) {
                         break;
                     }
                     if (next_tok(p) != 0) {
@@ -2065,30 +2061,30 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     if (expect(p, TOK_RPAREN, "expected ')' after _Atomic(...)") != 0) {
                         return -1;
                     }
-                    seen_type = 1;
-                    seen_atomic = 1;
-                    seen_alias = 1;
-                    alias_ctype = aty;
+                    acc->seen_type = 1;
+                    acc->seen_atomic = 1;
+                    acc->seen_alias = 1;
+                    acc->alias_ctype = aty;
                     continue;
                 }
-                seen_atomic = 1;
+                acc->seen_atomic = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
                 continue;
             }
             if (parser_is_c23_or_newer() && tok_is_ident(p, "bool")) {
-                seen = 1;
-                seen_type = 1;
-                seen_bool = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_bool = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
                 continue;
             }
             if (parser_is_c23_or_newer() && tok_is_ident(p, "constexpr")) {
-                seen = 1;
-                storage_flags |= CC_STORAGE_STATIC;
+                acc->seen = 1;
+                acc->storage_flags |= CC_STORAGE_STATIC;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2096,15 +2092,15 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             }
             /* C23's decimal floating types; gcc takes them in every mode, as reserved identifiers */
             if (tok_is_ident(p, "_Decimal32") || tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128")) {
-                seen = 1;
-                seen_type = 1;
-                seen_decimal = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_decimal = 1;
                 if (tok_is_ident(p, "_Decimal32")) {
-                    decimal_bits = 32;
+                    acc->decimal_bits = 32;
                 } else if (tok_is_ident(p, "_Decimal64")) {
-                    decimal_bits = 64;
+                    acc->decimal_bits = 64;
                 } else {
-                    decimal_bits = 128;
+                    acc->decimal_bits = 128;
                 }
                 if (next_tok(p) != 0) {
                     return -1;
@@ -2118,9 +2114,9 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt requires C23 or newer");
                     return -1;
                 }
-                seen = 1;
-                seen_type = 1;
-                seen_bitint = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_bitint = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2140,18 +2136,18 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 if (expect(p, TOK_RPAREN, "expected ')' after _BitInt width") != 0) {
                     return -1;
                 }
-                bitint_width = w;
+                acc->bitint_width = w;
                 continue;
             }
             if ((parser_is_c23_or_newer() || parser_is_gnu_mode()) && tok_is_typeof_spelling(p)) {
                 const cc_ctype_t *typeof_ctype = NULL;
                 int drop_quals;
-                if (seen_type) {
+                if (acc->seen_type) {
                     break;
                 }
-                seen = 1;
-                seen_type = 1;
-                seen_alias = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_alias = 1;
                 drop_quals = tok_is_ident(p, "typeof_unqual") || tok_is_ident(p, "__typeof_unqual") ||
                                 tok_is_ident(p, "__typeof_unqual__");
                 if (next_tok(p) != 0) {
@@ -2180,14 +2176,14 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 if (expect(p, TOK_RPAREN, "expected ')' after typeof/typeof_unqual") != 0) {
                     return -1;
                 }
-                alias_ctype = drop_quals ? typeof_ctype->unqual : typeof_ctype;
+                acc->alias_ctype = drop_quals ? typeof_ctype->unqual : typeof_ctype;
                 continue;
             }
             if (tok_is_floatn_spelling(p)) {
                 cc_ctype_kind_t floatn_kind = CC_CT_LDOUBLE;
-                seen = 1;
-                seen_type = 1;
-                seen_alias = 1;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_alias = 1;
                 if (tok_is_ident(p, "_Float16")) {
                     floatn_kind = CC_CT_FLOAT16;
                 } else if (tok_is_ident(p, "_Float32")) {
@@ -2195,7 +2191,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 } else if (tok_is_ident(p, "_Float64")) {
                     floatn_kind = CC_CT_DOUBLE;
                 }
-                alias_ctype = cc_ct_basic(floatn_kind);
+                acc->alias_ctype = cc_ct_basic(floatn_kind);
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2203,13 +2199,13 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             }
             int tidx = typedef_find_visible_n(p, p->tok.start, p->tok.len);
             if (tidx >= 0) {
-                if (seen_type) {
+                if (acc->seen_type) {
                     break;
                 }
-                seen = 1;
-                seen_type = 1;
-                seen_alias = 1;
-                alias_ctype = p->typedefs[tidx].ctype;
+                acc->seen = 1;
+                acc->seen_type = 1;
+                acc->seen_alias = 1;
+                acc->alias_ctype = p->typedefs[tidx].ctype;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2218,13 +2214,13 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             {
                 const cc_ctype_t *bty;
                 if (builtin_typedef_type_n(p->tok.start, p->tok.len, &bty)) {
-                    if (seen_type) {
+                    if (acc->seen_type) {
                         break;
                     }
-                    seen = 1;
-                    seen_type = 1;
-                    seen_alias = 1;
-                    alias_ctype = bty;
+                    acc->seen = 1;
+                    acc->seen_type = 1;
+                    acc->seen_alias = 1;
+                    acc->alias_ctype = bty;
                     if (next_tok(p) != 0) {
                         return -1;
                     }
@@ -2235,90 +2231,90 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         if (!is_declspec_tok(p->tok.kind)) {
             break;
         }
-        seen = 1;
+        acc->seen = 1;
         switch (p->tok.kind) {
         case TOK_KW_VOID:
-            seen_void = 1;
-            seen_type = 1;
+            acc->seen_void = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_BOOL:
-            seen_bool = 1;
-            seen_type = 1;
+            acc->seen_bool = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_CHAR:
-            seen_char = 1;
-            seen_type = 1;
+            acc->seen_char = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_INT:
-            seen_int = 1;
-            seen_type = 1;
+            acc->seen_int = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_FLOAT:
-            seen_float = 1;
-            seen_type = 1;
+            acc->seen_float = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_DOUBLE:
-            seen_double = 1;
-            seen_type = 1;
+            acc->seen_double = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_COMPLEX:
-            seen_complex = 1;
-            seen_type = 1;
+            acc->seen_complex = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_IMAGINARY:
-            seen_imaginary = 1;
-            seen_type = 1;
+            acc->seen_imaginary = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_LONG:
-            seen_long++;
-            seen_type = 1;
+            acc->seen_long++;
+            acc->seen_type = 1;
             break;
         case TOK_KW_SHORT:
-            seen_short = 1;
-            seen_type = 1;
+            acc->seen_short = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_SIGNED:
-            seen_signed = 1;
-            seen_type = 1;
+            acc->seen_signed = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_UNSIGNED:
-            seen_unsigned = 1;
-            seen_type = 1;
+            acc->seen_unsigned = 1;
+            acc->seen_type = 1;
             break;
         case TOK_KW_TYPEDEF:
-            seen_typedef = 1;
+            acc->seen_typedef = 1;
             break;
         case TOK_KW_STATIC:
-            storage_flags |= CC_STORAGE_STATIC;
+            acc->storage_flags |= CC_STORAGE_STATIC;
             break;
         case TOK_KW_EXTERN:
-            storage_flags |= CC_STORAGE_EXTERN;
+            acc->storage_flags |= CC_STORAGE_EXTERN;
             break;
         case TOK_KW_AUTO:
-            if (parser_is_c23_or_newer() && !seen_type) {
-                seen_type = 1;
-                seen_alias = 1;
-                alias_ctype = cc_ct_basic(CC_CT_INT);
-                storage_flags |= CC_STORAGE_AUTO_TYPE;
+            if (parser_is_c23_or_newer() && !acc->seen_type) {
+                acc->seen_type = 1;
+                acc->seen_alias = 1;
+                acc->alias_ctype = cc_ct_basic(CC_CT_INT);
+                acc->storage_flags |= CC_STORAGE_AUTO_TYPE;
             } else {
-                storage_flags |= CC_STORAGE_AUTO;
+                acc->storage_flags |= CC_STORAGE_AUTO;
             }
             break;
         case TOK_KW_REGISTER:
-            storage_flags |= CC_STORAGE_REGISTER;
+            acc->storage_flags |= CC_STORAGE_REGISTER;
             break;
         case TOK_KW_INLINE:
-            storage_flags |= CC_STORAGE_INLINE;
+            acc->storage_flags |= CC_STORAGE_INLINE;
             break;
         case TOK_KW_CONST:
-            storage_flags |= CC_STORAGE_CONST;
+            acc->storage_flags |= CC_STORAGE_CONST;
             break;
         case TOK_KW_VOLATILE:
-            storage_flags |= CC_STORAGE_VOLATILE;
+            acc->storage_flags |= CC_STORAGE_VOLATILE;
             break;
         case TOK_KW_RESTRICT:
-            seen_restrict = 1;
-            storage_flags |= CC_STORAGE_RESTRICT;
+            acc->seen_restrict = 1;
+            acc->storage_flags |= CC_STORAGE_RESTRICT;
             break;
         case TOK_KW_STRUCT:
         case TOK_KW_UNION: {
@@ -2335,8 +2331,8 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             int is_union = (p->tok.kind == TOK_KW_UNION);
             decl_attrs_t struct_attrs;
             decl_attrs_reset(&struct_attrs);
-            seen_type = 1;
-            seen_opaque_tag = 1;
+            acc->seen_type = 1;
+            acc->seen_opaque_tag = 1;
             if (next_tok(p) != 0) {
                 return -1;
             }
@@ -2361,7 +2357,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 decl_attrs_clear(&struct_attrs);
                 return -1;
             }
-            seen_struct_id = sid;
+            acc->seen_struct_id = sid;
             if (p->tok.kind != TOK_LBRACE) {
                 if (decl_attrs_merge(out_attrs, &struct_attrs) != 0) {
                     decl_attrs_clear(&struct_attrs);
@@ -2763,11 +2759,11 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             const char *enum_tag_start = NULL;
             size_t enum_tag_len = 0;
 
-            seen_type = 1;
-            seen_int = 1;
-            seen_enum = 1;
-            seen_opaque_tag = 0;
-            seen_struct_id = -1;
+            acc->seen_type = 1;
+            acc->seen_int = 1;
+            acc->seen_enum = 1;
+            acc->seen_opaque_tag = 0;
+            acc->seen_struct_id = -1;
             if (next_tok(p) != 0) {
                 return -1;
             }
@@ -2790,15 +2786,15 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                     set_diag(p->diag, p->tok.line, p->tok.col, "enum underlying type must be an integer type");
                     return -1;
                 }
-                enum_known_type = 1;
-                enum_ctype = uty->unqual;
+                acc->enum_known_type = 1;
+                acc->enum_ctype = uty->unqual;
             }
             if (p->tok.kind != TOK_LBRACE) {
-                if (!enum_known_type && enum_tag_start != NULL && enum_tag_len > 0) {
+                if (!acc->enum_known_type && enum_tag_start != NULL && enum_tag_len > 0) {
                     int eidx = enum_tag_find_n(p, enum_tag_start, enum_tag_len);
                     if (eidx >= 0) {
-                        enum_known_type = 1;
-                        enum_ctype = p->enum_tags[eidx].ctype;
+                        acc->enum_known_type = 1;
+                        acc->enum_ctype = p->enum_tags[eidx].ctype;
                     }
                 }
                 continue;
@@ -2878,16 +2874,16 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                         }
                         decl_attrs_clear(&enum_attrs);
                     }
-                    if (!enum_has_values) {
-                        enum_min = enum_cur;
-                        enum_max = enum_cur;
-                        enum_has_values = 1;
+                    if (!acc->enum_has_values) {
+                        acc->enum_min = enum_cur;
+                        acc->enum_max = enum_cur;
+                        acc->enum_has_values = 1;
                     } else {
-                        if (enum_cur < enum_min) {
-                            enum_min = enum_cur;
+                        if (enum_cur < acc->enum_min) {
+                            acc->enum_min = enum_cur;
                         }
-                        if (enum_cur > enum_max) {
-                            enum_max = enum_cur;
+                        if (enum_cur > acc->enum_max) {
+                            acc->enum_max = enum_cur;
                         }
                     }
                     if (enum_next < LONG_MAX) {
@@ -2910,10 +2906,10 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 return -1;
             }
             if (enum_tag_start != NULL && enum_tag_len > 0) {
-                enum_tag_pending = enum_tag_start;
-                enum_tag_pending_len = enum_tag_len;
+                acc->enum_tag_pending = enum_tag_start;
+                acc->enum_tag_pending_len = enum_tag_len;
             }
-            enum_defined = 1;
+            acc->enum_defined = 1;
             continue;
         }
         default:
@@ -2923,8 +2919,24 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
             return -1;
         }
     }
+    return 0;
+}
 
-    if (!seen) {
+/**
+ * Make the type a list of declaration specifiers names (C11 6.7.2): check
+ * the combination and give the basic, enumerated, record, complex,
+ * decimal, _BitInt or wide type it is, or the one a typedef name gave.
+ *
+ * @param p           the parser, for diagnostics and the types it makes
+ * @param acc         the specifiers; acc->spec receives the type
+ * @param allow_void  nonzero if `void` may be named
+ * @param what        the message when there were no specifiers
+ * @param out_attrs   their attributes (`packed` sizes an enumeration); may be NULL
+ * @return            0, or -1 on error (diagnosed)
+ */
+static int declspec_resolve(parser_t *p, declspec_acc_t *acc, int allow_void, const char *what,
+                            const decl_attrs_t *out_attrs) {
+    if (!acc->seen) {
         char near_tok[40];
         size_t n = 0;
         near_tok[0] = '\0';
@@ -2942,15 +2954,15 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         }
         return -1;
     }
-    if (!seen_type) {
-        if (!cc_lang_at_least(1999) && seen) {
+    if (!acc->seen_type) {
+        if (!cc_lang_at_least(1999) && acc->seen) {
             /*
              * Implicit int in declaration-specifier lists such as
              * `extern foo();`: C89 has it, C99 removed it, and gcc (14
              * and later) rejects it in every later mode, GNU ones too.
              */
-            seen_int = 1;
-            seen_type = 1;
+            acc->seen_int = 1;
+            acc->seen_type = 1;
         } else {
             char near_tok[40];
             size_t n = 0;
@@ -2971,117 +2983,117 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         }
     }
 
-    if (seen_alias) {
-        if (seen_opaque_tag) {
+    if (acc->seen_alias) {
+        if (acc->seen_opaque_tag) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid typedef type combination");
             return -1;
         }
-        if (seen_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short ||
-            seen_signed || seen_unsigned) {
+        if (acc->seen_void || acc->seen_bool || acc->seen_char || acc->seen_int || acc->seen_float || acc->seen_double || acc->seen_long || acc->seen_short ||
+            acc->seen_signed || acc->seen_unsigned) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid typedef type combination");
             return -1;
         }
-        if (!allow_void && alias_ctype->kind == CC_CT_VOID) {
+        if (!allow_void && acc->alias_ctype->kind == CC_CT_VOID) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid use of void in declaration specifiers");
             return -1;
         }
-        spec = alias_ctype;
-        goto done;
+        acc->spec = acc->alias_ctype;
+        return 0;
     }
 
-    if (seen_int128) {
+    if (acc->seen_int128) {
         /* GNU __int128, signed unless unsigned is said: a 16-aligned structure of two limbs */
-        int wsid = parser_wide_struct(p, 128, seen_unsigned, 1);
+        int wsid = parser_wide_struct(p, 128, acc->seen_unsigned, 1);
 
         if (wsid < 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making __int128");
             return -1;
         }
-        spec = cc_ct_record(wsid);
-        goto done;
+        acc->spec = cc_ct_record(wsid);
+        return 0;
     }
 
-    if (seen_bitint) {
-        if (bitint_width <= 0) {
+    if (acc->seen_bitint) {
+        if (acc->bitint_width <= 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width must be positive");
             return -1;
         }
-        if (!seen_unsigned && bitint_width < 2) {
+        if (!acc->seen_unsigned && acc->bitint_width < 2) {
             /* the sign bit needs one of its own */
             set_diag(p->diag, p->tok.line, p->tok.col, "signed _BitInt width must be at least 2");
             return -1;
         }
-        if (bitint_width > 65535) {
+        if (acc->bitint_width > 65535) {
             /* BITINT_MAXWIDTH (__BITINT_MAXWIDTH__), as gcc's */
             set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width exceeds BITINT_MAXWIDTH (65535)");
             return -1;
         }
-        if (bitint_width > 64) {
+        if (acc->bitint_width > 64) {
             /* wider than a register: a structure of limbs (parser_wide_struct()) */
-            int wsid = parser_wide_struct(p, bitint_width, seen_unsigned, 0);
+            int wsid = parser_wide_struct(p, acc->bitint_width, acc->seen_unsigned, 0);
 
             if (wsid < 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a _BitInt type");
                 return -1;
             }
-            spec = cc_ct_record(wsid);
-            goto done;
+            acc->spec = cc_ct_record(wsid);
+            return 0;
         }
-        spec = cc_ct_bitint(bitint_width, seen_unsigned);
-        goto done;
+        acc->spec = cc_ct_bitint(acc->bitint_width, acc->seen_unsigned);
+        return 0;
     }
 
-    if (seen_void) {
-        if (!allow_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short) {
+    if (acc->seen_void) {
+        if (!allow_void || acc->seen_bool || acc->seen_char || acc->seen_int || acc->seen_float || acc->seen_double || acc->seen_long || acc->seen_short) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid use of void in declaration specifiers");
             return -1;
         }
-        spec = cc_ct_basic(CC_CT_VOID);
-        goto done;
+        acc->spec = cc_ct_basic(CC_CT_VOID);
+        return 0;
     }
 
-    if (seen_signed && seen_unsigned) {
+    if (acc->seen_signed && acc->seen_unsigned) {
         set_diag(p->diag, p->tok.line, p->tok.col, "conflicting signed/unsigned in declaration specifiers");
         return -1;
     }
-    if (seen_short && seen_long > 0) {
+    if (acc->seen_short && acc->seen_long > 0) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid short/long combination in declaration specifiers");
         return -1;
     }
 
-    if ((seen_signed || seen_unsigned) &&
-        (seen_float || seen_double || seen_decimal || seen_complex || seen_imaginary || seen_bool || seen_void)) {
+    if ((acc->seen_signed || acc->seen_unsigned) &&
+        (acc->seen_float || acc->seen_double || acc->seen_decimal || acc->seen_complex || acc->seen_imaginary || acc->seen_bool || acc->seen_void)) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid signed/unsigned type combination");
         return -1;
     }
-    if (seen_opaque_tag) {
-        if (seen_void || seen_bool || seen_char || seen_int || seen_float || seen_double || seen_long || seen_short ||
-            seen_complex || seen_imaginary || seen_signed || seen_unsigned) {
+    if (acc->seen_opaque_tag) {
+        if (acc->seen_void || acc->seen_bool || acc->seen_char || acc->seen_int || acc->seen_float || acc->seen_double || acc->seen_long || acc->seen_short ||
+            acc->seen_complex || acc->seen_imaginary || acc->seen_signed || acc->seen_unsigned) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid aggregate declaration specifiers");
             return -1;
         }
-        spec = cc_ct_record(seen_struct_id);
-        goto done;
+        acc->spec = cc_ct_record(acc->seen_struct_id);
+        return 0;
     }
 
-    if (seen_complex || seen_imaginary) {
-        if (seen_void || seen_bool || seen_char || seen_int || seen_short || seen_signed || seen_unsigned ||
-            seen_opaque_tag || seen_decimal) {
+    if (acc->seen_complex || acc->seen_imaginary) {
+        if (acc->seen_void || acc->seen_bool || acc->seen_char || acc->seen_int || acc->seen_short || acc->seen_signed || acc->seen_unsigned ||
+            acc->seen_opaque_tag || acc->seen_decimal) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid complex/imaginary type combination");
             return -1;
         }
-        if (seen_long > 0 && !seen_double) {
+        if (acc->seen_long > 0 && !acc->seen_double) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid complex/imaginary long type combination");
             return -1;
         }
-        if (seen_complex) {
+        if (acc->seen_complex) {
             /*
              * A complex value is its two parts, as a structure of them.  All
              * three kinds are made at once: an operation can yield a kind no
              * declaration names (float _Complex times a double).
              */
-            int csid = parser_complex_struct(p, seen_float ? CC_CT_FLOAT
-                                                           : (seen_long > 0 ? CC_CT_LDOUBLE : CC_CT_DOUBLE));
+            int csid = parser_complex_struct(p, acc->seen_float ? CC_CT_FLOAT
+                                                           : (acc->seen_long > 0 ? CC_CT_LDOUBLE : CC_CT_DOUBLE));
 
             if (parser_complex_struct(p, CC_CT_FLOAT) < 0 || parser_complex_struct(p, CC_CT_DOUBLE) < 0 ||
                 parser_complex_struct(p, CC_CT_LDOUBLE) < 0) {
@@ -3092,100 +3104,144 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
                 return -1;
             }
         }
-        spec = cc_ct_complex(seen_complex ? CC_CT_COMPLEX : CC_CT_IMAGINARY,
-                             cc_ct_basic(seen_float ? CC_CT_FLOAT : (seen_long > 0 ? CC_CT_LDOUBLE : CC_CT_DOUBLE)));
-        goto done;
+        acc->spec = cc_ct_complex(acc->seen_complex ? CC_CT_COMPLEX : CC_CT_IMAGINARY,
+                             cc_ct_basic(acc->seen_float ? CC_CT_FLOAT : (acc->seen_long > 0 ? CC_CT_LDOUBLE : CC_CT_DOUBLE)));
+        return 0;
     }
 
-    if (seen_decimal) {
+    if (acc->seen_decimal) {
         /* a structure holding the BID encoding (parser_decimal_struct()) */
-        int dsid = parser_decimal_struct(p, decimal_bits);
+        int dsid = parser_decimal_struct(p, acc->decimal_bits);
 
         if (dsid < 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a decimal floating type");
             return -1;
         }
-        spec = cc_ct_record(dsid);
-        goto done;
+        acc->spec = cc_ct_record(dsid);
+        return 0;
     }
 
-    if (seen_double) {
-        if (seen_long > 1) {
+    if (acc->seen_double) {
+        if (acc->seen_long > 1) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid long double type combination");
             return -1;
         }
-        spec = cc_ct_basic(seen_long ? CC_CT_LDOUBLE : CC_CT_DOUBLE);
-    } else if (seen_float) {
-        spec = cc_ct_basic(CC_CT_FLOAT);
-    } else if (seen_bool) {
-        spec = cc_ct_basic(CC_CT_BOOL);
-    } else if (seen_char) {
-        spec = cc_ct_basic(seen_unsigned ? CC_CT_UCHAR : seen_signed ? CC_CT_SCHAR : CC_CT_CHAR);
-    } else if (seen_long > 1) {
-        spec = cc_ct_basic(seen_unsigned ? CC_CT_ULLONG : CC_CT_LLONG);
-    } else if (seen_long > 0) {
-        spec = cc_ct_basic(seen_unsigned ? CC_CT_ULONG : CC_CT_LONG);
-    } else if (seen_short) {
-        spec = cc_ct_basic(seen_unsigned ? CC_CT_USHORT : CC_CT_SHORT);
-    } else if (seen_enum) {
-        if (!enum_known_type) {
+        acc->spec = cc_ct_basic(acc->seen_long ? CC_CT_LDOUBLE : CC_CT_DOUBLE);
+    } else if (acc->seen_float) {
+        acc->spec = cc_ct_basic(CC_CT_FLOAT);
+    } else if (acc->seen_bool) {
+        acc->spec = cc_ct_basic(CC_CT_BOOL);
+    } else if (acc->seen_char) {
+        acc->spec = cc_ct_basic(acc->seen_unsigned ? CC_CT_UCHAR : acc->seen_signed ? CC_CT_SCHAR : CC_CT_CHAR);
+    } else if (acc->seen_long > 1) {
+        acc->spec = cc_ct_basic(acc->seen_unsigned ? CC_CT_ULLONG : CC_CT_LLONG);
+    } else if (acc->seen_long > 0) {
+        acc->spec = cc_ct_basic(acc->seen_unsigned ? CC_CT_ULONG : CC_CT_LONG);
+    } else if (acc->seen_short) {
+        acc->spec = cc_ct_basic(acc->seen_unsigned ? CC_CT_USHORT : CC_CT_SHORT);
+    } else if (acc->seen_enum) {
+        if (!acc->enum_known_type) {
             int packed_enum = (out_attrs != NULL && (out_attrs->flags & CC_ATTR_PACKED) != 0);
-            if (packed_enum && enum_has_values) {
-                enum_ctype = cc_ct_basic(packed_enum_kind_from_range(enum_min, enum_max));
+            if (packed_enum && acc->enum_has_values) {
+                acc->enum_ctype = cc_ct_basic(packed_enum_kind_from_range(acc->enum_min, acc->enum_max));
             } else {
                 /* int-sized and wider enumerations are all the one enumerated type */
-                enum_ctype = cc_ct_enum(-1);
+                acc->enum_ctype = cc_ct_enum(-1);
             }
         }
-        switch (enum_ctype->kind) {
+        switch (acc->enum_ctype->kind) {
         case CC_CT_INT:
         case CC_CT_UINT:
         case CC_CT_LLONG:
         case CC_CT_ULLONG:
-            spec = cc_ct_enum(-1);
+            acc->spec = cc_ct_enum(-1);
             break;
         default:
-            spec = enum_ctype;
+            acc->spec = acc->enum_ctype;
             break;
         }
-        if (enum_defined && enum_tag_pending != NULL && enum_tag_pending_len > 0) {
-            if (enum_tag_set(p, enum_tag_pending, enum_tag_pending_len, spec, 1) != 0) {
+        if (acc->enum_defined && acc->enum_tag_pending != NULL && acc->enum_tag_pending_len > 0) {
+            if (enum_tag_set(p, acc->enum_tag_pending, acc->enum_tag_pending_len, acc->spec, 1) != 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking enum tag");
                 return -1;
             }
         }
     } else {
         /* `int`, `signed`, `unsigned`, or C89's implicit int */
-        spec = cc_ct_basic(seen_unsigned ? CC_CT_UINT : CC_CT_INT);
+        acc->spec = cc_ct_basic(acc->seen_unsigned ? CC_CT_UINT : CC_CT_INT);
+    }
+    return 0;
+}
+
+/**
+ * Parse declaration specifiers (C11 6.7): storage classes, type
+ * specifiers and qualifiers, function specifiers, alignment specifiers
+ * and attributes, defining any structure, union or enumeration they
+ * declare along the way.
+ *
+ * The type they give is also left in parser_t.last_spec_ctype, and the
+ * storage class bits in parser_t.last_storage.
+ *
+ * @param p                 the parser, at the specifiers
+ * @param out               receives the type; may be NULL
+ * @param allow_void        nonzero if `void` may be named
+ * @param what              the message when there are no specifiers
+ * @param out_typedef       receives whether `typedef` was among them; NULL
+ *                          if it may not be
+ * @param out_saw_restrict  receives whether `restrict` was; may be NULL
+ * @param out_attrs         receives their attributes; may be NULL
+ * @return                  0, or -1 on error (diagnosed)
+ */
+static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, const char *what, int *out_typedef,
+                          int *out_saw_restrict, decl_attrs_t *out_attrs) {
+    declspec_acc_t acc;
+
+    p->last_storage = 0;
+    p->last_spec_ctype = NULL;
+    if (out_typedef != NULL) {
+        *out_typedef = 0;
+    }
+    if (out_saw_restrict != NULL) {
+        *out_saw_restrict = 0;
+    }
+    if (out_attrs != NULL) {
+        out_attrs->flags = 0;
+        out_attrs->align = 0;
+        out_attrs->section = NULL;
+        out_attrs->alias = NULL;
     }
 
-done:
-    if (spec == NULL) {
+    declspec_acc_init(&acc);
+    if (declspec_accumulate(p, &acc, out_attrs) != 0 ||
+        declspec_resolve(p, &acc, allow_void, what, out_attrs) != 0) {
+        return -1;
+    }
+    if (acc.spec == NULL) {
         set_diag(p->diag, p->tok.line, p->tok.col, "out of memory building a type");
         return -1;
     }
     if (out_typedef != NULL) {
-        *out_typedef = seen_typedef;
-    } else if (seen_typedef) {
+        *out_typedef = acc.seen_typedef;
+    } else if (acc.seen_typedef) {
         set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
         return -1;
     }
-    if (seen_atomic && (spec->quals & CC_CQ_ATOMIC) == 0) {
-        cc_ctype_kind_t k = spec->unqual->kind;
+    if (acc.seen_atomic && (acc.spec->quals & CC_CQ_ATOMIC) == 0) {
+        cc_ctype_kind_t k = acc.spec->unqual->kind;
         if (k == CC_CT_RECORD || k == CC_CT_COMPLEX) {
             set_diag(p->diag, p->tok.line, p->tok.col, "_Atomic of aggregate type is not yet supported");
             return -1;
         }
-        spec = cc_ct_qualified(spec, CC_CQ_ATOMIC);
+        acc.spec = cc_ct_qualified(acc.spec, CC_CQ_ATOMIC);
     }
-    p->last_spec_ctype = spec;
+    p->last_spec_ctype = acc.spec;
     if (out != NULL) {
-        *out = spec;
+        *out = acc.spec;
     }
     if (out_saw_restrict != NULL) {
-        *out_saw_restrict = seen_restrict;
+        *out_saw_restrict = acc.seen_restrict;
     }
-    p->last_storage = storage_flags;
+    p->last_storage = acc.storage_flags;
     return 0;
 }
 
