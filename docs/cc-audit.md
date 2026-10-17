@@ -575,6 +575,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   of every such structure disagrees with code gcc compiles.
   *Reproduced* (both targets); found while checking member layout for
   the interned-type refactor, and present before it.
+- [ ] **CC-100** A type qualifier among the declaration specifiers shall
+  qualify the type they give (C11 6.7.3): cc keeps `const` and `volatile`
+  there as storage bits beside the type, so `const int *` is a pointer to
+  plain `int` wherever the type itself is compared --
+  `__builtin_types_compatible_p(int *, const int *)` is 1 (gcc 0).
+  *Reproduced* (both targets); present before the interned-type
+  refactor.
+- [ ] **CC-101** GNU attributes shall be accepted between `enum` and its
+  tag, as gcc accepts them: `enum __attribute__((packed)) e { A };` is
+  rejected ("expected ';' after declaration"); the attribute after the
+  closing brace works.  *Reproduced*; present before the interned-type
+  refactor.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -1010,7 +1022,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-99 requirements: 93 met, 6 open.
+101 requirements: 93 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
