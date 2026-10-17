@@ -1230,7 +1230,6 @@ static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
 }
 
-static cc_type_t ptr_base_type(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
     return (int)cc_type_pointer_depth(t);
@@ -1284,10 +1283,6 @@ static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndi
 
 static cc_type_t ptr_of_type(cc_type_t t) {
     return cc_type_make_pointer(t);
-}
-
-static cc_type_t ptr_base_type(cc_type_t t) {
-    return cc_type_deref_once(t);
 }
 
 static int is_null_ptr_constant(const cc_expr_t *e) {
@@ -5811,6 +5806,14 @@ static int struct_has_anonymous_aggregate_member(const cc_translation_unit_t *tu
     return 0;
 }
 
+static long sema_type_scalar_slots(const cc_translation_unit_t *tu, const cc_ctype_t *t, int depth);
+
+/**
+ * How many scalar initializers structure @p struct_id takes with its
+ * braces left out; a union takes one (sema_type_scalar_slots()).
+ *
+ * @return the count (at least 1), or -1 if too deep or too large
+ */
 static long struct_scalar_slots(const cc_translation_unit_t *tu, int struct_id, int depth) {
     const cc_struct_def_t *sd;
     size_t i;
@@ -5823,50 +5826,45 @@ static long struct_scalar_slots(const cc_translation_unit_t *tu, int struct_id, 
         return 1;
     }
     for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
+        long sub;
+
         if (sd->has_flexible_array && i + 1 == sd->member_count) {
             continue;
         }
-        if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
-            long cnt = m->array_len > 0 ? m->array_len : 1;
-            cc_type_t elem = ptr_base_type(m->type);
-            if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
-                long sub = struct_scalar_slots(tu, m->type_struct_id, depth + 1);
-                if (sub < 0) {
-                    return -1;
-                }
-                if (slots > LONG_MAX - cnt * sub) {
-                    return -1;
-                }
-                slots += cnt * sub;
-            } else {
-                if (slots > LONG_MAX - cnt) {
-                    return -1;
-                }
-                slots += cnt;
-            }
-            continue;
-        }
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            long sub = struct_scalar_slots(tu, m->type_struct_id, depth + 1);
-            if (sub < 0) {
-                return -1;
-            }
-            if (slots > LONG_MAX - sub) {
-                return -1;
-            }
-            slots += sub;
-            continue;
-        }
-        if (slots == LONG_MAX) {
+        sub = sema_type_scalar_slots(tu, sd->members[i].ctype, depth + 1);
+        if (sub < 0 || slots > LONG_MAX - sub) {
             return -1;
         }
-        slots++;
+        slots += sub;
     }
     if (slots <= 0) {
         slots = 1;
     }
     return slots;
+}
+
+/**
+ * How many scalar initializers an object of type @p t takes with its
+ * braces left out (C11 6.7.9p20): one for a scalar or a union, an
+ * array's elements' times its bound (one element if the bound is not
+ * known), a structure's members' summed.
+ *
+ * @return the count, or -1 if too deep or too large
+ */
+static long sema_type_scalar_slots(const cc_translation_unit_t *tu, const cc_ctype_t *t, int depth) {
+    if (t != NULL && t->kind == CC_CT_ARRAY) {
+        long cnt = t->count > 0 ? t->count : 1;
+        long sub = sema_type_scalar_slots(tu, t->of, depth);
+
+        if (sub < 0 || sub > LONG_MAX / cnt) {
+            return -1;
+        }
+        return cnt * sub;
+    }
+    if (sx_ct_record(t) >= 0) {
+        return struct_scalar_slots(tu, sx_ct_record(t), depth);
+    }
+    return 1;
 }
 
 static long infer_struct_array_len_from_init(const cc_translation_unit_t *tu, int struct_id, cc_expr_t *init) {
@@ -5887,8 +5885,8 @@ static long infer_struct_array_len_from_init(const cc_translation_unit_t *tu, in
             cur++;
             continue;
         }
-        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->aux_type == CC_TYPE_VOID && raw->aux_struct_id == struct_id &&
-            raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
+        if (raw != NULL && raw->kind == CC_EXPR_CAST && sx_ct_record(raw->ctype) == struct_id && raw->lhs != NULL &&
+            raw->lhs->kind == CC_EXPR_INIT_LIST) {
             elems++;
             cur++;
             continue;
