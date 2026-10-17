@@ -2587,6 +2587,10 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
     if (e == NULL) {
         return 0;
     }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL && e->ctype != NULL) {
+        /* the declaration's type, which the legacy dimensions spell the same for `T (*p)[n]` and `T p[n]` */
+        return e->ctype->kind == CC_CT_ARRAY;
+    }
     if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
         idx = var_find_visible(vars, var_count, e->ident, depth);
         if (idx >= 0) {
@@ -6092,7 +6096,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             const cc_function_t *fn;
             int gaddr;
             long mem_size;
-            int expr_is_array_obj = (e->array_ndim > 0);
+            /*
+             * The identifier's interned type is its declaration's: an array
+             * is used by its address.  The legacy dimensions cannot tell
+             * `int (*q)[2]` from `int q[2]`; they speak only where no type
+             * was recorded.
+             */
+            int expr_is_array_obj = e->ctype != NULL ? e->ctype->kind == CC_CT_ARRAY : (e->array_ndim > 0);
             int expr_is_struct_obj = (lower_record_id(e) >= 0);
             if (e->ident != NULL &&
                 (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
@@ -6118,8 +6128,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                  * bounds (e.g. typedef-backed extern declarations).
                  */
                 if (expr_is_array_obj ||
-                    (g->array_ndim > 0 && g->array_len >= 0) ||
-                    is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
+                    (e->ctype == NULL && ((g->array_ndim > 0 && g->array_len >= 0) ||
+                                          is_array_object_decl(g->type, g->array_len, g->array_ndim)))) {
                     return emit_global_addr(sf, g->name, diag);
                 }
                 if (expr_is_struct_obj || (g->type == CC_TYPE_VOID && g->type_struct_id >= 0)) {

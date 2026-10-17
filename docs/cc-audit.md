@@ -522,10 +522,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   literal's type from the list as it parses it; the bound inference also
   takes a signed char array from a string, as CC-85 requires.
   `codegen/compound_literal_bound.c`.
-- [ ] **CC-89** `(*q)[i]` through a file-scope pointer to an array,
-  `static int (*q)[2] = &arr;`, shall read the array's element.  cc reads
-  the pointer's value instead (`(*q)[0]` gives arr's address, `(*q)[1]`
-  0); through a local pointer it is right.  *Reproduced* (both targets).
+- [x] **CC-89** `(*q)[i]` through a file-scope pointer to an array,
+  `static int (*q)[2] = &arr;`, shall read the array's element.  cc read
+  the pointer's own address instead (`(*q)[0]` gave q's address,
+  `(*q)[1]` 0, and `l = q` stored q's address): the legacy encoding
+  gives `int (*q)[2]` the dimensions of `int q[2]`, and lowering took
+  either for an array used by its address.  *Reproduced* (both targets).
+  Lowering asks the identifier's interned type, its declaration's,
+  whether it is an array.  `codegen/global_array_pointer.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -938,7 +942,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-89 requirements: 87 met, 2 open.
+89 requirements: 88 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
