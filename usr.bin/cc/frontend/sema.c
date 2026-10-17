@@ -4815,6 +4815,61 @@ static void sema_type_literal(cc_expr_t *e) {
 }
 
 /**
+ * Make a call argument's conversion explicit (C11 6.5.2.2p6-7): to the
+ * parameter's type where a prototype gives one, else the default
+ * argument promotions -- the integer promotions, and float to double.
+ * The function's type comes from the declaration called or from the
+ * pointer called through; an undeclared name (a builtin, or C89's
+ * implicit declaration) converts nothing here.
+ *
+ * @param tu      the translation unit
+ * @param e       the call, its arguments checked
+ * @param callee  the function the call names, or NULL
+ * @param i       the argument
+ * @return        0, or -1 when out of memory
+ */
+static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_function_t *callee,
+                                 size_t i) {
+    const cc_ctype_t *a = sx_vtype(e->args[i]);
+    int prototyped;
+    size_t nparams;
+    const cc_ctype_t *param = NULL;
+
+    if (callee != NULL) {
+        prototyped = callee->has_prototype;
+        nparams = callee->param_count;
+        if (prototyped && i < nparams) {
+            param = sema_param_ctype(&callee->params[i]);
+        }
+    } else {
+        const cc_ctype_t *fp = e->lhs != NULL ? sx_vtype(e->lhs) : NULL;
+        const cc_ctype_t *ft = fp != NULL && fp->unqual->kind == CC_CT_POINTER ? fp->unqual->of : NULL;
+
+        if (ft == NULL || ft->kind != CC_CT_FUNCTION) {
+            return 0;
+        }
+        prototyped = ft->prototyped;
+        nparams = ft->param_count;
+        if (prototyped && i < nparams) {
+            param = ft->params[i];
+        }
+    }
+    if (param != NULL) {
+        return sema_complex_convert_for_assign(tu, &e->args[i], param->unqual) < 0 ? -1 : 0;
+    }
+    if (a == NULL) {
+        return 0;
+    }
+    if (a->unqual->kind == CC_CT_FLOAT) {
+        return sema_convert(&e->args[i], cc_ct_basic(CC_CT_DOUBLE));
+    }
+    if (cc_ct_is_integer(a)) {
+        return sema_convert(&e->args[i], cc_ct_promote(a->unqual));
+    }
+    return 0;
+}
+
+/**
  * Check expression @p e by its kind: its operands, the rules C sets for
  * them, and its type.
  *
@@ -5551,6 +5606,10 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             }
             if (callee != NULL && callee->has_prototype && i < callee->param_count &&
                 sema_complex_convert_for_assign(tu, &e->args[i], sema_param_ctype(&callee->params[i])) < 0) {
+                set_diag(diag, "out of memory");
+                return -1;
+            }
+            if (sema_convert_call_arg(tu, e, callee, i) != 0) {
                 set_diag(diag, "out of memory");
                 return -1;
             }
