@@ -9084,7 +9084,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         int vec_n8 = 0;
 
         for (i = 0; i < e->arg_count; ++i) {
-            cc_value_type_t want;
             int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
             int arg_needs_ldouble_abi = 0;
             int arg_needs_float_abi = 0;
@@ -9103,7 +9102,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 free(in.call_arg_sizes);
                 return -1;
             }
-            want = value_type(sf, av);
             if (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count) {
                 if (ct_record_id(lower_param_ctype(&callee->params[i])) >= 0) {
                     long agg_size = cc_ct_size(lower_param_ctype(&callee->params[i]), tu);
@@ -9188,7 +9186,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         av = load_in.dst;
                         arg_size = agg_size;
                     }
-                    want = CC_VAL_I64;
                     if (pass_agg_mem) {
                         in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
                                                              vector_mem_flag(tu, param_sid, agg_size));
@@ -9210,40 +9207,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (arg_size <= 0) {
                         arg_size = cc_target_pointer_size();
                     }
-                    want = ct_value_kind(lower_param_ctype(&callee->params[i]));
-                    av = cast_value(sf, av, want, diag);
-                    if (av < 0) {
-                        free(in.sym);
-                        free(in.args);
-                        free(in.call_arg_abi);
-                        free(in.call_arg_sizes);
-                        return -1;
-                    }
-                    if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_LDOUBLE)) {
-                        av = promote_f64_to_ldouble_value(sf, av, diag);
-                    } else if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_DOUBLE)) {
-                        av = demote_ldouble_to_f64_value(sf, av, diag);
-                    } else if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT)) {
-                        av = round_to_float(sf, av, diag);
-                    }
-                    if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_LDOUBLE) || ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_DOUBLE) ||
-                        ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT)) {
-                        if (av < 0) {
-                            free(in.sym);
-                            free(in.args);
-                            free(in.call_arg_abi);
-                            free(in.call_arg_sizes);
-                            return -1;
-                        }
-                    }
-                    av = normalize_int_ct(sf, av, lower_param_ctype(&callee->params[i]), diag);
-                    if (av < 0) {
-                        free(in.sym);
-                        free(in.args);
-                        free(in.call_arg_abi);
-                        free(in.call_arg_sizes);
-                        return -1;
-                    }
+                    /* the value: sema converted the argument to the parameter's type */
                 }
             } else if (arg_is_aggregate && arg_is_variadic && in.op != CC_SSA_CALLI) {
                 /*
@@ -9261,7 +9225,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     free(in.call_arg_sizes);
                     return -1;
                 }
-                want = CC_VAL_I64;
                 arg_size = cc_target_pointer_size();
             } else if (in.op == CC_SSA_CALLI && arg_is_aggregate) {
                 long agg_size = lower_value_size(tu, e->args[i]);
@@ -9292,7 +9255,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         return -1;
                     }
                     av = load_in.dst;
-                    want = CC_VAL_I64;
                     arg_size = agg_size;
                 }
             } else if (e->args[i] != NULL && lower_has_kind(e->args[i], CC_CT_LDOUBLE)) {
