@@ -89,9 +89,6 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
 static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_list, const char *member_name);
 static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                                     const cc_expr_t *e);
-static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
-                              const cc_expr_t *e);
-static long sizeof_type_name_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e);
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g);
 static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s);
 static const cc_ctype_t *member_decl_ctype(const cc_struct_member_t *m);
@@ -1401,25 +1398,10 @@ static int agg_return_class(const cc_translation_unit_t *tu, int sid, long size)
 }
 
 /**
- * The size in bytes of a sizeof expression, for the constant evaluator:
- * of a string literal, an array, or any other expression or type.
- *
- * @param ctx  the translation unit; may be NULL
- * @param e    the CC_EXPR_SIZEOF node
- * @return     the size, or -1 if it is not known
- */
-static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
-    const cc_translation_unit_t *tu = (const cc_translation_unit_t *)ctx;
-
-    if (e->lhs == NULL) {
-        return sizeof_type_name_bytes(tu, e);
-    }
-    return sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
-}
-
-
-/**
- * Evaluate an integer constant expression in lowering's context.
+ * Evaluate an integer constant expression in lowering's context.  Sema
+ * folded every sizeof whose size is known, so the evaluator needs no way
+ * to size one here: a sizeof left is a variable-length array's, which is
+ * no constant.
  *
  * @param tu   the translation unit; may be NULL
  * @param e    the expression
@@ -1430,7 +1412,7 @@ static int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const
                                           const_integral_value_t *out) {
     cc_const_env_t env;
 
-    env.sizeof_bytes = lower_const_sizeof;
+    env.sizeof_bytes = NULL;
     env.ctx = (void *)tu;
     return cc_const_eval(&env, e, out);
 }
@@ -2579,47 +2561,6 @@ static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_
         return *out_size > 0;
     }
     return 0;
-}
-
-/**
- * The value of `sizeof (T)` the parser could not fold (T a structure not
- * yet laid out then, or void): the size of the type it recorded, and 1
- * for void, as gcc has it.
- *
- * @param tu  the translation unit
- * @param e   the CC_EXPR_SIZEOF with no operand expression
- * @return    the size, or -1 if it is not known
- */
-static long sizeof_type_name_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e) {
-    return cc_ct_sizeof_type(e->aux_ctype, tu);
-}
-
-/**
- * The value of `sizeof e`: the size of its operand's interned type, an
- * array's whole size included (not decayed).  A node lowering built
- * itself has no type recorded; its legacy fields stand in.  The legacy
- * walks over variables, globals, members and string literals this used to
- * make never decided a size once every checked expression had a type.
- *
- * @param tu         the translation unit
- * @param vars       unused
- * @param var_count  unused
- * @param depth      unused
- * @param e          the operand
- * @return           the size, or -1 if it is not known
- */
-static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
-                              const cc_expr_t *e) {
-    const cc_ctype_t *t;
-
-    (void)vars;
-    (void)var_count;
-    (void)depth;
-    if (e == NULL) {
-        return -1;
-    }
-    t = e->ctype;
-    return cc_ct_size(t, tu);
 }
 
 /**
@@ -10074,35 +10015,21 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_SIZEOF: {
-        long n;
-        {
-            /* a variable-length array, or an element of one: its size was computed at the declaration */
-            int level;
-            int vidx = vla_subscript_level(vars, var_count, depth, e->lhs, &level);
+        /*
+         * Sema folded every sizeof whose size is known; what is left is a
+         * variable-length array's, or an element's of one, computed at its
+         * declaration.
+         */
+        int level;
+        int vidx = vla_subscript_level(vars, var_count, depth, e->lhs, &level);
 
-            if (vidx >= 0 && !(level == 0 && vars[vidx].vla_is_pointer)) {
-                int size_v = level == 0 ? vars[vidx].vla_bytes : vars[vidx].vla_strides[level - 1];
+        if (vidx >= 0 && !(level == 0 && vars[vidx].vla_is_pointer)) {
+            int size_v = level == 0 ? vars[vidx].vla_bytes : vars[vidx].vla_strides[level - 1];
 
-                return cast_value(sf, size_v, lower_value_kind(e), diag);
-            }
+            return cast_value(sf, size_v, lower_value_kind(e), diag);
         }
-        if (e->lhs != NULL) {
-            n = sizeof_expr_bytes(tu, vars, var_count, depth, e->lhs);
-        } else {
-            n = sizeof_type_name_bytes(tu, e);
-        }
-        if (n < 0) {
-            set_diag(diag, "unsupported sizeof operand in lowering");
-            return -1;
-        }
-        in.op = CC_SSA_CONST;
-        in.dst = new_value(sf, CC_VAL_I64);
-        in.imm = n;
-        in.is_unsigned = 1;
-        if (in.dst < 0 || push_instr(sf, in) != 0) {
-            return -1;
-        }
-        return in.dst;
+        set_diag(diag, "unsupported sizeof operand in lowering");
+        return -1;
     }
 
     case CC_EXPR_INIT_LIST:
@@ -14771,24 +14698,6 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
             }
         }
         return -1;
-    case CC_EXPR_SIZEOF: {
-        long n;
-        if (e->lhs != NULL) {
-            n = sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
-        } else {
-            n = sizeof_type_name_bytes(tu, e);
-        }
-        if (n < 0) {
-            return -1;
-        }
-        *out_i = n;
-        *out_f = (double)n;
-        *out_is_float = 0;
-        if (out_sym != NULL) {
-            *out_sym = NULL;
-        }
-        return 0;
-    }
     case CC_EXPR_TERNARY: {
         long long cv = 0;
         double cf = 0.0;

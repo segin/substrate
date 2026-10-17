@@ -4311,6 +4311,18 @@ static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         }
     }
     sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
+    {
+        /* a size known now is the constant it is; only a variable-length array's is computed at run time */
+        long n = e->lhs != NULL ? cc_ct_size(e->lhs->ctype, tu) : cc_ct_sizeof_type(e->aux_ctype, tu);
+
+        if (n >= 0) {
+            cc_expr_free(e->lhs);
+            e->lhs = NULL;
+            e->aux_ctype = NULL;
+            e->kind = CC_EXPR_INT;
+            e->int_val = n;
+        }
+    }
     return 0;
 }
 
