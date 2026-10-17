@@ -8,7 +8,7 @@ linker to produce objects, executables and shared objects.
 
 ```
 .c -> preprocessor -> lexer -> parser -> sema -> SSA -> passes -> GAS assembly -> as -> ld
-      frontend/preproc.c      frontend/         middle/          backend/emit_s.c
+      frontend/preproc.c      frontend/         middle/          backend/x86/
 ```
 
 - **Preprocessor** in-tree (`frontend/preproc.c`); `cc -E` and `cpp`

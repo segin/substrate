@@ -1,6 +1,6 @@
 # cc: a target-neutral IR with per-target lowering
 
-Status: steps 0 (the IR visible), 1 (typed values), 2 (target descriptor), 3 (the ABI per target) and 4 (i386 legalization) done.  This document says what the compiler does
+Status: steps 0 (the IR visible), 1 (typed values), 2 (target descriptor), 3 (the ABI per target), 4 (i386 legalization) and 5 (the emitter split) done; step 6 (a third target) is optional and not scheduled.  This document says what the compiler does
 today, the shape we want, and an order of work in which every step
 lands on its own with the test gate green.
 
@@ -141,6 +141,7 @@ a bug, and that bug gets a regression test of its own.
 | 4 | **i386 legalization.**  64-bit splitting and the division libcalls move from the emitter into `legalize_i386.c`; delete the emitter's word-pair paths. | large |
 | | **Done.**  The descriptor's `legalize` hook runs after the shared legalization; i386's (`middle/legalize_i386.c`) rewrites every operation with a 64-bit integer result, and every compare of two, into operations on 32-bit words: `lo32`/`hi32` take a word, `pair` builds a value from two, `umulw` is the full 32x32 product (`mull`).  Add and sub carry and borrow through an unsigned compare of the low words; mul is the three-multiply product; shifts move bits between the words, a variable count branching on 0, under 32, and 32 and over; compares decide on the high words unless they tie; div calls `__divdi3`/`__udivdi3`.  A word operand of a 64-bit operation (the AND of a zero extension) is extended as its signedness says.  The emitter's 64-bit arithmetic and compare (`emit_i386_int64_binop`, `emit_i386_cmp_int64`) are gone: it moves 64-bit values (load, store, move, constant, call, return, x87 conversion) and selects word instructions.  The four opcodes exist only in legal IR; the x86-64 emitter rejects them.  The cost is a compare and two more instructions for a 64-bit add or subtract than `adc`/`sbb`; `codegen/int64_words.c` covers every path. | |
 | 5 | **Split the emitter.**  `emit_s.c` into `backend/x86/{common,x86_64,i386}.c`, the code moved verbatim first (history kept with the git-cp trick), then reduced to selection over legalized IR. | medium |
+| | **Done.**  `emit_s.c` became `backend/x86/common.c` (renamed), and `x86_64.c` and `i386.c` were cut from copies of it, so all three keep its history.  `common.c` holds the shared frame layout, register cache, inline asm, sections, data and `cc_emit_gas()`; `x86_64.c` the x86-64 calling convention and selection; `i386.c` i386's.  `include/cc_x86.h` declares what they share.  The reduction to selection over legal IR is steps 3 and 4: the emitters no longer classify aggregates, do `va_arg`, or carry 64-bit arithmetic on i386.  The assembly is byte-identical across the split. | |
 | 6 | **Optional: a third target**, as proof the seams hold.  Nothing in substrate needs one now. | — |
 
 Step 1 is the one that pays for itself first: it removes the class of
