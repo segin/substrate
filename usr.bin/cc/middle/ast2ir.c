@@ -573,6 +573,75 @@ static const cc_ctype_t *lower_member_ctype(const cc_struct_member_t *m) {
 }
 
 /**
+ * The declared type of a structure member, not decayed: an array member
+ * is an array.
+ *
+ * @param m  the member
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *member_decl_ctype(const cc_struct_member_t *m) {
+    return m->ctype != NULL ? m->ctype : cc_ct_from_legacy(m->type, m->type_struct_id, m->array_ndim, m->array_dims);
+}
+
+static int ct_record_id(const cc_ctype_t *t);
+
+/**
+ * The structure a member is (a complex, wide, decimal or vector one's
+ * hidden structure included), not an array of them.
+ *
+ * @param m  the member
+ * @return   the structure's index, or -1
+ */
+static int member_record_id(const cc_struct_member_t *m) {
+    return ct_record_id(member_decl_ctype(m));
+}
+
+/**
+ * Whether a member is an array.
+ *
+ * @param m  the member
+ * @return   1 or 0
+ */
+static int member_is_array(const cc_struct_member_t *m) {
+    const cc_ctype_t *t = member_decl_ctype(m);
+
+    return t != NULL && t->kind == CC_CT_ARRAY;
+}
+
+/**
+ * The size of the elements a member's initializer fills: for an array,
+ * its innermost element (a row's, if that has no size); for a pointer,
+ * what it points to (1 for void).
+ *
+ * @param tu  the translation unit
+ * @param m   the member
+ * @return    the size, or -1
+ */
+static long member_elem_size(const cc_translation_unit_t *tu, const cc_struct_member_t *m) {
+    const cc_ctype_t *t = member_decl_ctype(m);
+    const cc_ctype_t *s;
+    long n;
+
+    if (t == NULL || t->of == NULL) {
+        return -1;
+    }
+    if (t->kind == CC_CT_ARRAY) {
+        for (s = t; s->kind == CC_CT_ARRAY && s->of != NULL; s = s->of) {
+        }
+        n = cc_ct_size(s, tu);
+        if (n <= 0) {
+            n = cc_ct_size(t->of, tu);
+        }
+        return n > 0 ? n : -1;
+    }
+    if (t->kind == CC_CT_POINTER) {
+        n = cc_ct_size(t->of, tu);
+        return n > 0 ? n : (t->of->kind == CC_CT_VOID ? 1 : -1);
+    }
+    return -1;
+}
+
+/**
  * The type of a file-scope variable as a value (see lower_var_ctype()).
  *
  * @param g  the variable
@@ -1074,7 +1143,7 @@ static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long 
             if (abi64_classify_ctype(tu, m->ctype, moff, cls, depth) != 0) {
                 return -1;
             }
-        } else if (m->array_ndim == 0 && m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        } else if (m->array_ndim == 0 && member_record_id(m) >= 0) {
             if (abi64_classify_record(tu, m->type_struct_id, moff, cls, depth + 1) != 0) {
                 return -1;
             }
@@ -11030,7 +11099,7 @@ static size_t estimate_struct_init_consumed(const cc_translation_unit_t *tu, int
             i++;
             continue;
         }
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        if (member_record_id(m) >= 0) {
             if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
                 i++;
                 continue;
@@ -11046,14 +11115,14 @@ static size_t estimate_struct_init_consumed(const cc_translation_unit_t *tu, int
             i += consumed;
             continue;
         }
-        if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+        if (member_is_array(m)) {
             if (item != NULL && (item->kind == CC_EXPR_INIT_LIST || item->kind == CC_EXPR_STR)) {
                 i++;
                 continue;
             }
-            elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+            elem_size = member_elem_size(tu, m);
             if (elem_size <= 0) {
-                elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+                elem_size = member_elem_size(tu, m);
             }
             max_items = m->array_len > 0 ? m->array_len : (elem_size > 0 ? (m->size / elem_size) : 1);
             if (max_items <= 0) {
@@ -11101,9 +11170,9 @@ static int lower_store_string_to_fixed_array_ptr(const cc_translation_unit_t *tu
         return -1;
     }
     elem_type = ptr_base_type(m->type);
-    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    elem_size = member_elem_size(tu, m);
     if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+        elem_size = member_elem_size(tu, m);
     }
     if (elem_size <= 0 || m->size <= 0) {
         return -1;
@@ -11191,9 +11260,9 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     }
 
     elem_type = ptr_base_type(m->type);
-    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    elem_size = member_elem_size(tu, m);
     if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+        elem_size = member_elem_size(tu, m);
     }
     if (elem_size <= 0 || m->size <= 0) {
         set_diag(diag, "unsupported array-like struct member size in initializer lowering");
@@ -11692,7 +11761,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
             field_ptr = in.dst;
         }
 
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        if (member_record_id(m) >= 0) {
             const cc_expr_t *nested_item = item;
             if (lower_cast_record_id(item) == m->type_struct_id && item->lhs != NULL &&
                 item->lhs->kind == CC_EXPR_INIT_LIST) {
@@ -11768,7 +11837,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 return -1;
             }
             if (item->kind == CC_EXPR_INIT_LIST) {
-                if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+                if (member_is_array(m)) {
                     if (lower_struct_array_member_init_to_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m, item,
                                                               diag) != 0) {
                         return -1;
@@ -11779,21 +11848,21 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 if (item_expr == NULL) {
                     return -1;
                 }
-            } else if (is_array_object_decl(m->type, m->array_len, m->array_ndim) && item->kind == CC_EXPR_STR) {
+            } else if (member_is_array(m) && item->kind == CC_EXPR_STR) {
                 if (lower_store_string_to_fixed_array_ptr(tu, sf, ctx, vars, var_count, depth, field_ptr, m, item,
                                                           diag) != 0) {
                     return -1;
                 }
                 continue;
-            } else if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+            } else if (member_is_array(m)) {
                 size_t consumed = 1;
-                long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+                long elem_size = member_elem_size(tu, m);
                 long max_items;
                 const cc_expr_t **tmp_args;
                 cc_expr_t tmp_list;
 
                 if (elem_size <= 0) {
-                    elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+                    elem_size = member_elem_size(tu, m);
                 }
                 max_items = m->array_len > 0 ? m->array_len : (elem_size > 0 ? (m->size / elem_size) : 1);
                 if (max_items <= 0) {
@@ -15250,7 +15319,7 @@ static long struct_scalar_slots_for_init(const cc_translation_unit_t *tu, int st
         if (sd->has_flexible_array && i + 1 == sd->member_count) {
             continue;
         }
-        if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+        if (member_is_array(m)) {
             long cnt = m->array_len > 0 ? m->array_len : 1;
             cc_type_t elem = ptr_base_type(m->type);
             if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
@@ -15267,7 +15336,7 @@ static long struct_scalar_slots_for_init(const cc_translation_unit_t *tu, int st
             }
             continue;
         }
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        if (member_record_id(m) >= 0) {
             long sub = struct_scalar_slots_for_init(tu, m->type_struct_id, depth + 1);
             if (sub < 0 || slots > LONG_MAX - sub) {
                 return -1;
@@ -15356,9 +15425,9 @@ static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, c
         return -1;
     }
     elem_type = ptr_base_type(m->type);
-    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    elem_size = member_elem_size(tu, m);
     if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+        elem_size = member_elem_size(tu, m);
     }
     if (elem_size <= 0) {
         return -1;
@@ -15417,10 +15486,10 @@ static long infer_flexible_struct_tail_extra_bytes(const cc_translation_unit_t *
             next_member = struct_next_init_member_index(sd, member_idx);
         }
         if (member_idx + 1 == sd->member_count && struct_has_flexible_tail(sd)) {
-            long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+            long elem_size = member_elem_size(tu, m);
             long elems;
             if (elem_size <= 0) {
-                elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+                elem_size = member_elem_size(tu, m);
             }
             elems = infer_flexible_array_member_elems(tu, m, item);
             if (elem_size <= 0 || elems <= 0 || elems > LONG_MAX / elem_size) {
@@ -15957,13 +16026,13 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
                                       const cc_expr_t *item, long elems, long base, unsigned char *buf, long buf_size,
                                       global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
     cc_type_t elem_type = ptr_base_type(m->type);
-    long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    long elem_size = member_elem_size(tu, m);
     const cc_expr_t *str = flexible_init_string(item);
     size_t cur = 0;
     long k;
 
     if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+        elem_size = member_elem_size(tu, m);
     }
     if (elem_size <= 0 || elems <= 0 || elems > (buf_size - base) / elem_size) {
         set_diag(diag, "flexible array initializer exceeds its object");
@@ -16042,9 +16111,9 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
         return -1;
     }
     elem_type = ptr_base_type(m->type);
-    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    elem_size = member_elem_size(tu, m);
     if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+        elem_size = member_elem_size(tu, m);
     }
     if (elem_size <= 0) {
         set_diag(diag, "invalid array-like struct member extent");
@@ -16209,7 +16278,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
         natural_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
 
         if (sd->is_union && item != NULL && item->kind == CC_EXPR_INIT_LIST && m->type != CC_TYPE_VOID &&
-            !is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+            !member_is_array(m)) {
             size_t ui;
             size_t pos = 0;
             for (ui = 0; ui < item->arg_count; ++ui) {
@@ -16233,7 +16302,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                     break;
                 }
                 um = &sd->members[u_idx];
-                if (um->type == CC_TYPE_VOID && um->type_struct_id >= 0) {
+                if (member_record_id(um) >= 0) {
                     const cc_expr_t *u_nested = extract_struct_init_list_expr(u_item, um->type_struct_id);
                     if (u_nested != NULL) {
                         size_t sub = 0;
@@ -16271,7 +16340,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             continue;
         }
 
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        if (member_record_id(m) >= 0) {
             const cc_expr_t *nested = extract_struct_init_list_expr(item, m->type_struct_id);
             if (m->name == NULL || m->type_struct_id < 0 || (size_t)m->type_struct_id >= tu->struct_count ||
                 find_struct_member_index_by_name(&tu->structs[m->type_struct_id], m->name) < 0) {
@@ -16314,7 +16383,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             continue;
         }
 
-        if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+        if (member_is_array(m)) {
             if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
                 size_t sub = 0;
                 if (!consumed_item) {
@@ -16333,10 +16402,10 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             }
             if (item != NULL && item->kind == CC_EXPR_STR) {
                 cc_type_t elem_type = ptr_base_type(m->type);
-                long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+                long elem_size = member_elem_size(tu, m);
                 long max_elems;
                 if (elem_size <= 0) {
-                    elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+                    elem_size = member_elem_size(tu, m);
                 }
                 max_elems = elem_size > 0 ? (m->array_len > 0 ? m->array_len : (m->size / elem_size)) : 0;
                 if (fill_fixed_char_array_from_string(item, cc_ct_from_scalar(elem_type), elem_size, max_elems,
