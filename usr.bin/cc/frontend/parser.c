@@ -317,7 +317,6 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
 static int can_parse_oldstyle_param_names(parser_t *p);
 static int parse_function(parser_t *p, cc_function_t *f);
 static int function_param_index_by_name(const cc_function_t *f, const char *name);
-static cc_type_t adjust_oldstyle_param_type(cc_type_t ty, int array_ndim);
 static int probe_is_function_head(parser_t *p);
 static void free_func(cc_function_t *f);
 static int enum_tag_find_n(const parser_t *p, const char *tag, size_t len);
@@ -6422,8 +6421,18 @@ static int push_arg(cc_expr_t *call, cc_expr_t *arg) {
     return 0;
 }
 
-static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t n, long array_len, int array_ndim,
-                      const long array_dims[CC_MAX_ARRAY_DIMS], int storage) {
+/**
+ * Add a parameter to function @p f.
+ *
+ * @param f        the function
+ * @param ctype    its type, as adjusted (an old-style name's is int until
+ *                 a declaration says otherwise)
+ * @param name     its name
+ * @param n        the name's length
+ * @param storage  its storage-class flags
+ * @return         0, or -1 when out of memory
+ */
+static int push_param(cc_function_t *f, const cc_ctype_t *ctype, const char *name, size_t n, int storage) {
     cc_param_t *next = (cc_param_t *)realloc(f->params, (f->param_count + 1) * sizeof(*next));
     if (next == NULL) {
         return -1;
@@ -6433,18 +6442,8 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
     if (f->params[f->param_count].name == NULL) {
         return -1;
     }
-    f->params[f->param_count].type = type;
-    f->params[f->param_count].type_struct_id = -1;
-    f->params[f->param_count].array_len = array_len;
-    f->params[f->param_count].array_ndim = array_ndim;
-    if (array_dims != NULL) {
-        memcpy(f->params[f->param_count].array_dims, array_dims, sizeof(f->params[f->param_count].array_dims));
-    } else {
-        memset(f->params[f->param_count].array_dims, 0, sizeof(f->params[f->param_count].array_dims));
-    }
     f->params[f->param_count].storage = storage;
-    /* an old-style name, int until a declaration says otherwise; any other type the caller records */
-    f->params[f->param_count].ctype = is_pointer_type(type) ? NULL : cc_ct_from_legacy(type, -1, 0, NULL);
+    f->params[f->param_count].ctype = ctype;
     memset(f->params[f->param_count].vla_bounds, 0, sizeof(f->params[f->param_count].vla_bounds));
     f->param_count++;
     return 0;
@@ -10944,7 +10943,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
                     set_diag(p->diag, p->tok.line, p->tok.col, "expected old-style parameter name");
                     return -1;
                 }
-                if (push_param(f, CC_TYPE_INT, p->tok.start, p->tok.len, -1, 0, NULL, 0) != 0) {
+                if (push_param(f, cc_ct_basic(CC_CT_INT), p->tok.start, p->tok.len, 0) != 0) {
                     return -1;
                 }
                 if (next_tok(p) != 0) {
@@ -11012,7 +11011,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
                              &darr_len, &darr_ndim, darr_dims, &dty_restrict, pvla_bounds) != 0) {
             return -1;
         }
-        if ((ptype_restrict || dty_restrict) && !is_pointer_type(dty)) {
+        if ((ptype_restrict || dty_restrict) && (pctype == NULL || cc_ct_decay(pctype)->kind != CC_CT_POINTER)) {
             set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer parameter type");
             pushed = -1;
         } else if (skip_decl_gnu_suffix(p, NULL) != 0) {
@@ -11024,7 +11023,7 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
                 snprintf(anon_buf, sizeof(anon_buf), "__anon_param_%zu", f->param_count);
                 name = anon_buf;
             }
-            pushed = push_param(f, dty, name, strlen(name), darr_len, darr_ndim, darr_dims, param_storage);
+            pushed = push_param(f, pctype, name, strlen(name), param_storage);
         }
         free(pname);
         if (pushed != 0) {
@@ -11033,8 +11032,6 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             }
             return -1;
         }
-        f->params[f->param_count - 1].type_struct_id = ptype_sid;
-        f->params[f->param_count - 1].ctype = pctype;
         memcpy(f->params[f->param_count - 1].vla_bounds, pvla_bounds, sizeof(pvla_bounds));
         f->has_prototype = 1;
 
@@ -11064,17 +11061,6 @@ static int function_param_index_by_name(const cc_function_t *f, const char *name
         }
     }
     return -1;
-}
-
-static cc_type_t adjust_oldstyle_param_type(cc_type_t ty, int array_ndim) {
-    if (array_ndim > 0 && !is_pointer_type(ty)) {
-        cc_type_t pty = ptr_of_type(ty);
-        if (pty != CC_TYPE_VOID) {
-            return pty;
-        }
-        return CC_TYPE_PTR_VOID;
-    }
-    return ty;
 }
 
 /**
@@ -11288,11 +11274,6 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             set_diag(p->diag, ds->line, ds->col, "declaration for non-parameter in old-style function definition");
             return -1;
         }
-        f->params[pidx].type = adjust_oldstyle_param_type(ds->type, ds->array_ndim);
-        f->params[pidx].type_struct_id = ds->type_struct_id;
-        f->params[pidx].array_len = ds->array_len;
-        f->params[pidx].array_ndim = ds->array_ndim;
-        memcpy(f->params[pidx].array_dims, ds->array_dims, sizeof(f->params[pidx].array_dims));
         /* its declared type, adjusted as a parameter's is: an array or a function to a pointer */
         f->params[pidx].ctype = ds->ctype != NULL ? cc_ct_decay(ds->ctype) : NULL;
     }
@@ -11318,7 +11299,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     {
         size_t i;
         for (i = 0; i < f->param_count; ++i) {
-            if (f->params[i].type == CC_TYPE_VOID && f->params[i].type_struct_id < 0) {
+            if (f->params[i].ctype != NULL && f->params[i].ctype->unqual->kind == CC_CT_VOID) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "void is not a valid named parameter type");
                 return -1;
             }
