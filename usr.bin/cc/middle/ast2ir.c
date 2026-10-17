@@ -881,7 +881,6 @@ static int lower_has_kind(const cc_expr_t *e, cc_ctype_kind_t k) {
     return t != NULL && t->kind == k;
 }
 
-static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id);
 
 /**
  * The size in bytes of an expression's value (an array or function used
@@ -1038,27 +1037,6 @@ static long type_size_bytes(cc_type_t t) {
     }
     if (t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC || t == CC_TYPE_FUNC) {
         return cc_target_pointer_size();
-    }
-    return -1;
-}
-
-static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
-    if (t == CC_TYPE_ATOMIC) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return type_size_bytes_with_struct(tu, (cc_type_t)struct_id, -1);
-    }
-    if (t == CC_TYPE_BITINT) {
-        return cc_bitint_size(struct_id);
-    }
-    long n = type_size_bytes(t);
-    if (n > 0) {
-        return n;
-    }
-    if (t == CC_TYPE_VOID && tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count &&
-        tu->structs[struct_id].complete) {
-        return tu->structs[struct_id].size;
     }
     return -1;
 }
@@ -2167,7 +2145,7 @@ static long var_object_size_bytes(const cc_translation_unit_t *tu, const var_ent
 static long var_scalar_access_size(const cc_translation_unit_t *tu, const var_entry_t *v) {
     if (v != NULL && (ct_has_kind(v->ctype, CC_CT_COMPLEX) || ct_has_kind(v->ctype, CC_CT_IMAGINARY) ||
                       ct_has_kind(v->ctype, CC_CT_DECIMAL128))) {
-        return type_size_bytes_with_struct(tu, CC_TYPE_DOUBLE, -1);
+        return cc_ct_size(cc_ct_basic(CC_CT_DOUBLE), tu);
     }
     return var_object_size_bytes(tu, v);
 }
@@ -4854,11 +4832,19 @@ typedef struct {
     int is_unsigned; /**< unsigned */
 } wide_t;
 
-/** Fill @p w for (@p t, @p sid) if it is a wide integer type; return whether it is. */
-static int wide_of(const cc_translation_unit_t *tu, cc_type_t t, int sid, wide_t *w) {
+/**
+ * Whether structure @p sid is the hidden one standing for an integer type
+ * wider than 64 bits; if so its shape in *@p w.
+ *
+ * @param tu   the translation unit
+ * @param sid  the structure, or -1
+ * @param w    receives the shape
+ * @return     1 if it is a wide integer type, else 0
+ */
+static int wide_of(const cc_translation_unit_t *tu, int sid, wide_t *w) {
     const cc_struct_def_t *sd;
 
-    if (t != CC_TYPE_VOID || tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count) {
+    if (tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count) {
         return 0;
     }
     sd = &tu->structs[sid];
@@ -5318,7 +5304,7 @@ static int lower_wide_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *
     int a;
     int b;
 
-    if (!wide_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &w)) {
+    if (!wide_of(tu,lower_record_id(e->lhs), &w)) {
         set_diag(diag, "malformed wide integer operation in lowering");
         return -1;
     }
@@ -5624,9 +5610,15 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
     return ld.dst;
 }
 
-/** The width of the decimal floating type (@p t, @p sid): 32, 64 or 128; 0 if it is not one. */
-static int dec_bits_of(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
-    if (t != CC_TYPE_VOID || sid < 0 || (size_t)sid >= tu->struct_count) {
+/**
+ * The width of the decimal floating type whose hidden structure is @p sid.
+ *
+ * @param tu   the translation unit
+ * @param sid  the structure, or -1
+ * @return     32, 64 or 128; 0 if it is no decimal type's
+ */
+static int dec_bits_of(const cc_translation_unit_t *tu, int sid) {
+    if (sid < 0 || (size_t)sid >= tu->struct_count) {
         return 0;
     }
     return tu->structs[sid].decimal_bits;
@@ -5799,7 +5791,7 @@ static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_
                {CC_BIN_EQ, "eq", 2},   {CC_BIN_NE, "ne", 2},   {CC_BIN_LT, "lt", 2},   {CC_BIN_LE, "le", 2},
                {CC_BIN_GT, "gt", 2},   {CC_BIN_GE, "ge", 2}};
     int sid = lower_record_id(e->lhs);
-    int bits = dec_bits_of(tu, CC_TYPE_VOID, sid);
+    int bits = dec_bits_of(tu,sid);
     dec_arg_t kinds[2] = {DEC_ARG_DEC, DEC_ARG_DEC};
     int sids[2];
     int args[2];
@@ -5849,8 +5841,8 @@ static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_
 static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     int to_sid = ct_record_id(lower_cast_ctype(e));
-    int to = dec_bits_of(tu, CC_TYPE_VOID, to_sid);
-    int from = dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs));
+    int to = dec_bits_of(tu,to_sid);
+    int from = dec_bits_of(tu,lower_record_id(e->lhs));
     const cc_ctype_t *st = lower_value_ctype(e->lhs);
     const cc_ctype_t *dt = lower_value_ctype(e);
     cc_ctype_kind_t sk = st != NULL ? st->kind : CC_CT_VOID;
@@ -5942,8 +5934,8 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     wide_t wd;
     wide_t ws;
     const cc_ctype_t *tct = lower_cast_ctype(e);
-    int to_wide = wide_of(tu, CC_TYPE_VOID, ct_record_id(tct), &wd);
-    int from_wide = wide_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &ws);
+    int to_wide = wide_of(tu,ct_record_id(tct), &wd);
+    int from_wide = wide_of(tu,lower_record_id(e->lhs), &ws);
     const cc_ctype_t *sct = lower_value_ctype(e->lhs);
     cc_ctype_kind_t st = sct != NULL ? sct->kind : CC_CT_VOID;
     long i;
@@ -6489,10 +6481,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                  (e->rhs != NULL && vec_of(tu,lower_record_id(e->rhs), &vv)))) {
                 return lower_vector_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
-            if (dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs)) != 0) {
+            if (dec_bits_of(tu,lower_record_id(e->lhs)) != 0) {
                 return lower_decimal_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
-            if (wide_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &ww)) {
+            if (wide_of(tu,lower_record_id(e->lhs), &ww)) {
                 return lower_wide_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
         }
@@ -9911,9 +9903,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         {
             wide_t wd;
             wide_t ws;
-            int to_wide = wide_of(tu, CC_TYPE_VOID, to_sid, &wd);
+            int to_wide = wide_of(tu,to_sid, &wd);
             int from_wide = cast_src->kind != CC_EXPR_INIT_LIST &&
-                            wide_of(tu, CC_TYPE_VOID, lower_record_id(cast_src), &ws);
+                            wide_of(tu,lower_record_id(cast_src), &ws);
 
             if (from_wide && to_wide && to_sid == lower_record_id(cast_src)) {
                 return lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
@@ -9922,8 +9914,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return lower_wide_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
         }
-        if (cast_src->kind != CC_EXPR_INIT_LIST && (dec_bits_of(tu, CC_TYPE_VOID, to_sid) != 0 ||
-                                                    dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(cast_src)) != 0)) {
+        if (cast_src->kind != CC_EXPR_INIT_LIST && (dec_bits_of(tu,to_sid) != 0 ||
+                                                    dec_bits_of(tu,lower_record_id(cast_src)) != 0)) {
             return lower_decimal_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (cast_src->kind != CC_EXPR_INIT_LIST) {
@@ -13679,7 +13671,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         long ret_size_hint = 0;
         int ret_agg_class = 0;
 
-        if (ctx != NULL && ctx->fn != NULL && ctx->fn->ret_type == CC_TYPE_VOID && ctx->fn->ret_struct_id < 0) {
+        if (ctx != NULL && ctx->fn != NULL && ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_VOID)) {
             is_void_return = 1;
         }
 
@@ -13688,9 +13680,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (rv < 0) {
                 return -1;
             }
-            if (!is_void_return && ctx != NULL && ctx->fn != NULL &&
-                ctx->fn->ret_type == CC_TYPE_VOID && ctx->fn->ret_struct_id >= 0) {
-                long ret_size = type_size_bytes_with_struct(tu, ctx->fn->ret_type, ctx->fn->ret_struct_id);
+            if (!is_void_return && ctx != NULL && ctx->fn != NULL && ct_record_id(fn_ret_ctype(ctx->fn)) >= 0) {
+                long ret_size = cc_ct_size(fn_ret_ctype(ctx->fn), tu);
                 long reg_agg_limit = cc_target_pointer_size() <= 4 ? 8 : 16;
                 if (ret_size <= 0) {
                     set_diag(diag, "unsupported aggregate return size in return lowering");
@@ -13700,7 +13691,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (rv < 0) {
                     return -1;
                 }
-                ret_agg_class = agg_return_class(tu, ctx->fn->ret_struct_id, ret_size);
+                ret_agg_class = agg_return_class(tu, ct_record_id(fn_ret_ctype(ctx->fn)), ret_size);
                 if ((ret_agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)) != 0 ||
                     (cc_target_pointer_size() == 4 && (ret_agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0)) {
                     /* the backend reads the value from the structure rv points at */
@@ -17554,16 +17545,19 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             cc_ssa_module_free(out);
             return -1;
         }
-        sf->ret_type = (af->ret_type == CC_TYPE_FLOAT || af->ret_type == CC_TYPE_DOUBLE ||
-                        af->ret_type == CC_TYPE_LDOUBLE || af->ret_type == CC_TYPE_DECIMAL32 ||
-                        af->ret_type == CC_TYPE_DECIMAL64 || af->ret_type == CC_TYPE_DECIMAL128)
-                           ? CC_VAL_F64
-                           : CC_VAL_I64;
-        sf->ret_abi = (unsigned char)(af->ret_type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE
-                                      : af->ret_type == CC_TYPE_FLOAT ? CC_CALL_ARG_ABI_FLOAT
-                                                                      : CC_CALL_ARG_ABI_DEFAULT);
-        if (cc_target_pointer_size() <= 4 && af->ret_type == CC_TYPE_VOID && af->ret_struct_id >= 0 &&
-            agg_return_class(tu, af->ret_struct_id, 8) == 0) {
+        {
+            cc_ctype_kind_t rk = fn_ret_ctype(af) != NULL ? fn_ret_ctype(af)->kind : CC_CT_VOID;
+
+            sf->ret_type = (rk == CC_CT_FLOAT || rk == CC_CT_DOUBLE || rk == CC_CT_LDOUBLE || rk == CC_CT_DECIMAL32 ||
+                            rk == CC_CT_DECIMAL64 || rk == CC_CT_DECIMAL128)
+                               ? CC_VAL_F64
+                               : CC_VAL_I64;
+            sf->ret_abi = (unsigned char)(rk == CC_CT_LDOUBLE  ? CC_CALL_ARG_ABI_LDOUBLE
+                                          : rk == CC_CT_FLOAT ? CC_CALL_ARG_ABI_FLOAT
+                                                              : CC_CALL_ARG_ABI_DEFAULT);
+        }
+        if (cc_target_pointer_size() <= 4 && ct_record_id(fn_ret_ctype(af)) >= 0 &&
+            agg_return_class(tu, ct_record_id(fn_ret_ctype(af)), 8) == 0) {
             /*
              * the i386 psABI returns every struct in memory; a float
              * _Complex comes back in %eax:%edx, and a vector of 4, 8 or
@@ -17632,7 +17626,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             long param_size;
             long aggregate_size = -1;
             int agg_cls = 0;
-            int is_aggregate_param = (af->params[j].type == CC_TYPE_VOID && af->params[j].type_struct_id >= 0);
+            int is_aggregate_param = ct_record_id(lower_param_ctype(&af->params[j])) >= 0;
             int use_agg_mem_abi = 0;
             int use_agg_reg_abi = 0;
             int agg_reg_storage = -1;
@@ -17644,7 +17638,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             in.lhs = -1;
             in.rhs = -1;
             in.param_index = (int)j;
-            param_size = type_size_bytes_with_struct(tu, af->params[j].type, af->params[j].type_struct_id);
+            param_size = cc_ct_size(lower_param_ctype(&af->params[j]), tu);
             if (is_aggregate_param) {
                 aggregate_size = param_size;
             }
@@ -17724,9 +17718,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
         for (j = 0; j < af->param_count; ++j) {
             int v = sf->param_values[j];
-            int is_aggregate_param = (af->params[j].type == CC_TYPE_VOID && af->params[j].type_struct_id >= 0);
+            int is_aggregate_param = ct_record_id(lower_param_ctype(&af->params[j])) >= 0;
             if (is_aggregate_param) {
-                long agg_size = type_size_bytes_with_struct(tu, af->params[j].type, af->params[j].type_struct_id);
+                long agg_size = cc_ct_size(lower_param_ctype(&af->params[j]), tu);
                 int agg_addr;
                 if (agg_size < 0) {
                     char msg[192];
