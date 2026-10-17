@@ -3856,6 +3856,65 @@ static void sema_settle_ctype(cc_expr_t *e) {
     }
 }
 
+static void sema_settle_stmts(cc_stmt_t *s, size_t n);
+
+/**
+ * Give every expression in the tree under @p e that has no interned type
+ * the one its legacy encoding states, operands first.  The rewrites of
+ * wide, decimal and complex arithmetic, of ++ and --, and of a bit-field's
+ * slot build their nodes after the parts were checked; this types them,
+ * so that lowering never has to read an expression's legacy type.
+ *
+ * @param e  the tree, or NULL
+ */
+static void sema_settle_tree(cc_expr_t *e) {
+    size_t i;
+
+    if (e == NULL) {
+        return;
+    }
+    sema_settle_tree(e->lhs);
+    sema_settle_tree(e->rhs);
+    sema_settle_tree(e->third);
+    for (i = 0; i < e->arg_count; ++i) {
+        sema_settle_tree(e->args[i]);
+    }
+    sema_settle_stmts(e->stmt_expr_stmts, e->stmt_expr_count);
+    if (e->ctype == NULL) {
+        sema_settle_ctype(e);
+    }
+}
+
+/**
+ * sema_settle_tree() over every expression in statements @p s[0..n).
+ *
+ * @param s  the statements, or NULL
+ * @param n  their count
+ */
+static void sema_settle_stmts(cc_stmt_t *s, size_t n) {
+    size_t i;
+    size_t k;
+
+    for (i = 0; s != NULL && i < n; ++i) {
+        for (k = 0; k < CC_MAX_ARRAY_DIMS; ++k) {
+            sema_settle_tree(s[i].array_bound_exprs[k]);
+        }
+        sema_settle_tree(s[i].expr);
+        sema_settle_tree(s[i].init_expr);
+        sema_settle_tree(s[i].post_expr);
+        sema_settle_stmts(s[i].init_stmt, 1);
+        sema_settle_stmts(s[i].then_branch, 1);
+        sema_settle_stmts(s[i].else_branch, 1);
+        sema_settle_stmts(s[i].block_stmts, s[i].block_count);
+        for (k = 0; k < s[i].asm_output_count; ++k) {
+            sema_settle_tree(s[i].asm_outputs[k].expr);
+        }
+        for (k = 0; k < s[i].asm_input_count; ++k) {
+            sema_settle_tree(s[i].asm_inputs[k].expr);
+        }
+    }
+}
+
 /**
  * Check expression @p e (see check_expr_kind()), and give it its
  * interned type.
@@ -7894,6 +7953,12 @@ fail_func:
         return -1;
     }
 
+    for (i = 0; i < tu->global_count; ++i) {
+        sema_settle_tree(tu->globals[i].init);
+    }
+    for (i = 0; i < tu->func_count; ++i) {
+        sema_settle_stmts(tu->funcs[i].stmts, tu->funcs[i].stmt_count);
+    }
     return 0;
 }
 

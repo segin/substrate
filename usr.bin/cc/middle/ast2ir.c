@@ -4550,6 +4550,7 @@ static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         c.aux_struct_id = -1;
         c.value_type = elem;
         c.struct_id = -1;
+        c.ctype = cc_ct_from_scalar(elem);
         c.lhs = (cc_expr_t *)e;
         *re = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
         *im = -1;
@@ -5894,6 +5895,7 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         c.aux_struct_id = -1;
         c.value_type = c.aux_type;
         c.struct_id = -1;
+        c.ctype = cc_ct_basic(is_uns ? CC_CT_ULLONG : CC_CT_LLONG);
         c.lhs = (cc_expr_t *)e->lhs;
         v = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
         fill = v < 0 ? -1 : (is_uns ? emit_const_i64_instr(sf, 0)
@@ -8787,6 +8789,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     memset(&callee_ref, 0, sizeof(callee_ref));
                     callee_ref.kind = CC_EXPR_IDENT;
                     callee_ref.ident = e->ident;
+                    callee_ref.ctype = ident_var_idx >= 0 ? lower_var_ctype(&vars[ident_var_idx])
+                                                          : lower_global_ctype(ident_global);
                     indirect_callee = lower_expr(tu, sf, ctx, vars, var_count, depth, &callee_ref, diag);
                 }
             }
@@ -11737,6 +11741,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 cc_expr_t bf;
                 memset(&bf, 0, sizeof(bf));
                 bf.value_type = m->type;
+                bf.ctype = lower_member_ctype(m);
                 bf.member_is_bitfield = 1;
                 bf.member_bit_width = m->bit_width;
                 bf.member_bit_offset = m->bit_offset;
