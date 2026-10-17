@@ -1005,21 +1005,6 @@ static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e
 static cc_type_t ptr_base_type(cc_type_t t);
 
 /**
- * Whether the operand of a `*` is a cast, or a cast plus or minus an
- * integer (a subscript of one): `*(T)p`, `((T)p)[i]`.
- *
- * @param x  the operand
- * @return   1 if so, else 0
- */
-static int deref_operand_is_cast(const cc_expr_t *x) {
-    if (x != NULL && x->kind == CC_EXPR_BIN && (x->op == CC_BIN_ADD || x->op == CC_BIN_SUB) && x->lhs != NULL &&
-        x->rhs != NULL) {
-        x = lower_is_pointer(x->lhs) ? x->lhs : x->rhs;
-    }
-    return x != NULL && x->kind == CC_EXPR_CAST;
-}
-
-/**
  * Whether an initializer list for a multi-dimensional array initializes
  * rows as wholes -- a braced sub-list, `{{1, 2}, {3, 4}}`, or a string
  * for a row of characters, `{"ab", "cd"}` -- rather than listing every
@@ -2703,12 +2688,11 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
             /* a pointer to an array: its value is the pointer */
             return 0;
         }
-        if (lower_is_pointer(e) && e->array_ndim > 0) {
-            return 1;
-        }
+        return ct_has_kind(e->ctype, CC_CT_ARRAY);
     }
-    if (e->kind == CC_EXPR_DEREF && lower_is_pointer(e) && e->array_ndim > 0) {
-        return 1;
+    if (e->kind == CC_EXPR_DEREF) {
+        /* `a[i]` is an array when a's elements are, not when they point to arrays */
+        return ct_has_kind(e->ctype, CC_CT_ARRAY);
     }
     if (e->kind == CC_EXPR_ADDR && e->lhs != NULL) {
         return expr_is_array_object_ref(tu, vars, var_count, depth, e->lhs);
@@ -6204,7 +6188,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * `int (*q)[2]` from `int q[2]`; they speak only where no type
              * was recorded.
              */
-            int expr_is_array_obj = e->ctype != NULL ? e->ctype->kind == CC_CT_ARRAY : (e->array_ndim > 0);
+            int expr_is_array_obj = ct_has_kind(e->ctype, CC_CT_ARRAY);
             int expr_is_struct_obj = (lower_record_id(e) >= 0);
             if (e->ident != NULL &&
                 (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
@@ -6438,26 +6422,20 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             /* `*fp` is the function fp points to; as a value it is fp again */
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         }
-        if (deref_operand_is_cast(e->lhs)) {
+        if (ct_has_kind(cc_ct_of_expr(e), CC_CT_ARRAY)) {
             /*
-             * `*(T)p` or `((T)p)[i]`, T a pointer to an array: the result is
-             * that array, and as a value its address -- the operand again.
-             * Only through a cast: elsewhere the legacy array bounds carry
-             * this, and the paths that read them take the address themselves.
+             * `*p` or `a[i]` where the result is an array (p points to one, a's
+             * elements are rows): as a value it is the array's address -- the
+             * operand's value again.  A pointer to an array is loaded like
+             * any other pointer.
              */
-            const cc_ctype_t *t = cc_ct_of_expr(e);
-            if (t != NULL && t->kind == CC_CT_ARRAY) {
-                return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
-            }
-        }
-        if (lower_record_id(e) >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        if (lower_is_pointer(e) && e->array_ndim > 0) {
+        if (lower_record_id(e) >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
@@ -6846,7 +6824,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * not the loaded first element value.
              */
             if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_DEREF && ptr_expr->lhs != NULL &&
-                lower_is_pointer(ptr_expr) && ptr_expr->array_ndim > 0 &&
+                ct_has_kind(cc_ct_of_expr(ptr_expr), CC_CT_ARRAY) &&
                 expr_is_array_pointer_chain(tu, vars, var_count, depth, ptr_expr->lhs)) {
                 int basev = lower_expr(tu, sf, ctx, vars, var_count, depth, ptr_expr->lhs, diag);
                 if (basev < 0) {
@@ -16907,6 +16885,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             out->globals[i].type = tu->globals[i].type;
             out->globals[i].type_struct_id = tu->globals[i].type_struct_id;
             out->globals[i].array_len = tu->globals[i].array_len;
+            /*
+             * An array's size, which the emitter's reading of the legacy type gets wrong for some
+             * (an array of pointers to arrays).  A structure keeps the size its initializer gives
+             * it: a flexible array member grows it.
+             */
+            if (ct_has_kind(global_decl_ctype(&tu->globals[i]), CC_CT_ARRAY) &&
+                cc_ct_size(global_decl_ctype(&tu->globals[i]), tu) > 0) {
+                out->globals[i].size_bytes = cc_ct_size(global_decl_ctype(&tu->globals[i]), tu);
+            }
             out->globals[i].storage = tu->globals[i].storage;
             out->globals[i].attr_flags = tu->globals[i].attr_flags;
             out->globals[i].attr_align = tu->globals[i].attr_align;

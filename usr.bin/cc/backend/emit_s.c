@@ -1823,7 +1823,12 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                     emit_integer_data(fp, elem_size, it->init_i);
                 }
             }
-            if (arr_elems > (long)g->init_item_count) {
+            if (g->size_bytes > 0) {
+                /* the object's own size, which the legacy element count can overstate */
+                if (sz > (long)g->init_item_count * elem_size) {
+                    fprintf(fp, "\t.zero %ld\n", sz - (long)g->init_item_count * elem_size);
+                }
+            } else if (arr_elems > (long)g->init_item_count) {
                 fprintf(fp, "\t.zero %ld\n", (arr_elems - (long)g->init_item_count) * elem_size);
             }
             continue;

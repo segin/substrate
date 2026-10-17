@@ -532,6 +532,15 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   a function lose each element's upper 64 bits (`u[1] >> 96` is 0, gcc
   16).  File-scope arrays and scalars are laid out right.  *Reproduced*
   (-m64).
+- [x] **CC-94** An array of pointers to arrays shall hold pointers (C11
+  6.7.6.2): for `int g[2][4]; int (*rows[2])[4] = {&g[0], &g[1]};` cc
+  laid `rows` out at the size of the 2x4 array (64 bytes at -m64, gcc
+  16) and read `rows[i]` as the element's address instead of loading
+  the pointer in it, so `*rows[1]` was not `g[1]`.  *Reproduced* (both
+  targets).  Lowering decides whether a subscript or `*` yields an array
+  by the expression's interned type, and gives an array global its size
+  from its interned type, which the emitter pads to.
+  `native_array_of_array_pointers_size.c`.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -967,7 +976,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-93 requirements: 89 met, 4 open.
+94 requirements: 90 met, 4 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
