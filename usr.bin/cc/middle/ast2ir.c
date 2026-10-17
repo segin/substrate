@@ -641,6 +641,19 @@ static int lower_record_id(const cc_expr_t *e) {
     return e->value_type == CC_TYPE_VOID ? e->struct_id : -1;
 }
 
+/**
+ * Whether an expression's value is of type kind @p k.
+ *
+ * @param e  the expression
+ * @param k  the kind
+ * @return   1 or 0
+ */
+static int lower_has_kind(const cc_expr_t *e, cc_ctype_kind_t k) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    return t != NULL && t->kind == k;
+}
+
 static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id);
 
 /**
@@ -4550,7 +4563,7 @@ static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t 
         base_ptr = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     } else if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
         base_ptr = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs->lhs, diag);
-    } else if (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
+    } else if (lower_record_id(e->lhs) >= 0) {
         base_ptr = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     } else if (e->lhs->kind == CC_EXPR_MEMBER) {
         base_ptr = lower_member_addr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
@@ -4856,8 +4869,8 @@ static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_
         /* == or !=: compare in the wider of the operands' types */
         cc_type_t le = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs));
         cc_type_t re = complex_elem_of(tu, CC_TYPE_VOID, lower_record_id(e->rhs));
-        cc_type_t lt = le != CC_TYPE_VOID ? le : (e->lhs->value_type == CC_TYPE_LDOUBLE ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
-        cc_type_t rt = re != CC_TYPE_VOID ? re : (e->rhs->value_type == CC_TYPE_LDOUBLE ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
+        cc_type_t lt = le != CC_TYPE_VOID ? le : (lower_has_kind(e->lhs, CC_CT_LDOUBLE) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
+        cc_type_t rt = re != CC_TYPE_VOID ? re : (lower_has_kind(e->rhs, CC_CT_LDOUBLE) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE);
         int eq_re;
         int eq_im;
         int both;
@@ -6234,7 +6247,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.dst = new_value(sf, CC_VAL_F64);
         in.fimm = e->float_val;
         in.fimm_ld = e->float_val_ld;
-        if (e->value_type == CC_TYPE_LDOUBLE) {
+        if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, in.dst, 16);
         }
         if (in.dst < 0 || push_instr(sf, in) != 0) {
@@ -6263,7 +6276,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int gaddr;
             long mem_size;
             int expr_is_array_obj = (e->array_ndim > 0);
-            int expr_is_struct_obj = (e->value_type == CC_TYPE_VOID && e->struct_id >= 0);
+            int expr_is_struct_obj = (lower_record_id(e) >= 0);
             if (e->ident != NULL &&
                 (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
                  strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
@@ -6377,7 +6390,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return in.dst;
         }
-        if (vars[idx].type == CC_TYPE_LDOUBLE || e->value_type == CC_TYPE_LDOUBLE) {
+        if (vars[idx].type == CC_TYPE_LDOUBLE || lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, vars[idx].value, 16);
         }
         return vars[idx].value;
@@ -6389,7 +6402,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             set_diag(diag, "malformed address-of expression in lowering");
             return -1;
         }
-        if (e->lhs->kind == CC_EXPR_CAST && e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
+        if (e->lhs->kind == CC_EXPR_CAST && lower_record_id(e->lhs) >= 0) {
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         }
         if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL) {
@@ -6476,7 +6489,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             }
         }
-        if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
+        if (lower_record_id(e) >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
@@ -6519,7 +6532,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->lhs == NULL && e->rhs != NULL && e->ident != NULL) {
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
         }
-        if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
+        if (lower_record_id(e) >= 0) {
             return lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (e->member_is_bitfield) {
@@ -6690,8 +6703,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
         if (e->op == CC_BIN_MUL && e->lhs != NULL && e->rhs != NULL && e->lhs->kind == CC_EXPR_INT &&
             e->lhs->int_val == -1 &&
-            (e->rhs->value_type == CC_TYPE_FLOAT || e->rhs->value_type == CC_TYPE_DOUBLE ||
-             e->rhs->value_type == CC_TYPE_LDOUBLE)) {
+            (lower_has_kind(e->rhs, CC_CT_FLOAT) || lower_has_kind(e->rhs, CC_CT_DOUBLE) ||
+             lower_has_kind(e->rhs, CC_CT_LDOUBLE))) {
             cc_type_t store_t = fp_builtin_storage_type(e->rhs->value_type);
             rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
             if (rhs < 0) {
@@ -6726,7 +6739,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (is_cmp_op(e->op)) {
-            int cmp_ldouble = (e->lhs->value_type == CC_TYPE_LDOUBLE || e->rhs->value_type == CC_TYPE_LDOUBLE);
+            int cmp_ldouble = (lower_has_kind(e->lhs, CC_CT_LDOUBLE) || lower_has_kind(e->rhs, CC_CT_LDOUBLE));
             cc_value_type_t cmp_vt = (cmp_ldouble || value_type(sf, lhs) == CC_VAL_F64 || value_type(sf, rhs) == CC_VAL_F64)
                                          ? CC_VAL_F64
                                          : CC_VAL_I64;
@@ -6956,7 +6969,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (lhs < 0 || rhs < 0) {
             return -1;
         }
-        if (e->value_type == CC_TYPE_LDOUBLE) {
+        if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             lhs = promote_f64_to_ldouble_value(sf, lhs, diag);
             rhs = promote_f64_to_ldouble_value(sf, rhs, diag);
             if (lhs < 0 || rhs < 0) {
@@ -7085,10 +7098,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
-        if (e->value_type == CC_TYPE_LDOUBLE) {
+        if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, in.dst, 16);
         }
-        if (e->value_type == CC_TYPE_FLOAT) {
+        if (lower_has_kind(e, CC_CT_FLOAT)) {
             return normalize_float_ct(sf, in.dst, lower_value_ctype(e), diag);
         }
         if (vt == CC_VAL_I64 && lower_is_integer(e) && integral_type_bits(e->value_type) >= 64) {
@@ -9319,12 +9332,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_needs_float_abi ? 4 : arg_size);
         }
-        in.call_ret_x87 = (e->value_type == CC_TYPE_LDOUBLE) ? 1 : 0;
-        if (e->value_type == CC_TYPE_FLOAT) {
+        in.call_ret_x87 = (lower_has_kind(e, CC_CT_LDOUBLE)) ? 1 : 0;
+        if (lower_has_kind(e, CC_CT_FLOAT)) {
             /* a float comes back in single precision */
             in.agg_class = CC_ABI_RET_FLOAT;
         }
-        if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
+        if (lower_record_id(e) >= 0) {
             long agg_size = lower_value_size(tu, e);
             int agg_addr;
             if (agg_size <= 0) {
@@ -9375,7 +9388,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             free(in.call_arg_sizes);
             return -1;
         }
-        if (e->value_type == CC_TYPE_LDOUBLE) {
+        if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, in.dst, 16);
         }
         return in.dst;
@@ -9583,7 +9596,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (rhs < 0) {
                 return -1;
             }
-            if (e->lhs->value_type == CC_TYPE_LDOUBLE && e->rhs != NULL && e->rhs->value_type != CC_TYPE_LDOUBLE) {
+            if (lower_has_kind(e->lhs, CC_CT_LDOUBLE) && e->rhs != NULL && e->rhs->value_type != CC_TYPE_LDOUBLE) {
                 /* stored through a pointer or member as a long double: an int or double is widened first */
                 rhs = promote_f64_to_ldouble_value(sf, cast_value(sf, rhs, CC_VAL_F64, diag), diag);
                 if (rhs < 0) {
@@ -9594,7 +9607,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (rhs < 0) {
                 return -1;
             }
-            if (e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
+            if (lower_record_id(e->lhs) >= 0) {
                 if (emit_memcpy_instr(sf, ptrv, rhs, mem_size, diag) != 0) {
                     return -1;
                 }
@@ -9966,7 +9979,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             nextv = in.dst;
-            if (e->value_type == CC_TYPE_FLOAT) {
+            if (lower_has_kind(e, CC_CT_FLOAT)) {
                 nextv = normalize_float_ct(sf, nextv, lower_value_ctype(e), diag);
                 if (nextv < 0) {
                     return -1;
@@ -10365,7 +10378,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             set_diag(diag, "out of memory assigning ternary result");
             return -1;
         }
-        if (e->value_type == CC_TYPE_LDOUBLE) {
+        if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, dst, 16);
         }
 
@@ -10413,7 +10426,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (want == CC_VAL_I64) {
             long result_size = lower_value_size(tu, e);
             if ((result_size <= 0 && lower_is_pointer(e)) ||
-                (e->value_type == CC_TYPE_VOID && e->struct_id >= 0)) {
+                (lower_record_id(e) >= 0)) {
                 /* a pointer, or an aggregate's value: its address */
                 result_size = cc_target_pointer_size();
             }
@@ -10421,7 +10434,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (sf->value_is_unsigned != NULL && dst >= 0 && dst < sf->value_count) {
                 sf->value_is_unsigned[dst] = lower_loads_unsigned(e) ? 1 : 0;
             }
-        } else if (e->value_type == CC_TYPE_LDOUBLE) {
+        } else if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, dst, 16);
         } else {
             set_value_size(sf, dst, 8);
@@ -15168,7 +15181,7 @@ static int eval_global_init_ld_expr(const cc_translation_unit_t *tu, const cc_ex
         *out = (long double)e->int_val;
         return 0;
     case CC_EXPR_FLOAT:
-        *out = e->value_type == CC_TYPE_LDOUBLE ? e->float_val_ld : (long double)e->float_val;
+        *out = lower_has_kind(e, CC_CT_LDOUBLE) ? e->float_val_ld : (long double)e->float_val;
         return 0;
     case CC_EXPR_CAST:
         return eval_global_init_ld_expr(tu, e->lhs, out);
@@ -15269,7 +15282,7 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
     case CC_EXPR_FLOAT:
         out->init_i = (long long)e->float_val;
         out->init_f = e->float_val;
-        out->init_f_ld = e->value_type == CC_TYPE_LDOUBLE ? e->float_val_ld : (long double)e->float_val;
+        out->init_f_ld = lower_has_kind(e, CC_CT_LDOUBLE) ? e->float_val_ld : (long double)e->float_val;
         out->init_is_float = 1;
         return 0;
     case CC_EXPR_STR:
