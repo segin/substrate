@@ -13939,6 +13939,8 @@ append_return:
                     set_diag(diag, "out of memory appending switch case constant");
                     return -1;
                 }
+                /* as wide as the controlling value: i386 compares a long long's words both */
+                set_value_size(sf, cv, value_size(sf, cond));
 
                 if (case_has_range[case_i]) {
                     int chv = emit_const_i64_instr(sf, case_hi_values[case_i]);
@@ -13954,6 +13956,7 @@ append_return:
                         set_diag(diag, "out of memory appending switch case-range constant");
                         return -1;
                     }
+                    set_value_size(sf, chv, value_size(sf, cond));
                     memset(&in, 0, sizeof(in));
                     in.op = CC_SSA_CMP;
                     in.cmp_kind = CC_CMP_GE;

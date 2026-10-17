@@ -37,7 +37,7 @@ silent: the program compiled, ran and printed a wrong answer.
 
 | Area | Requirements | Met |
 |---|---|---|
-| 1. Integer arithmetic and conversions | 10 | 10 |
+| 1. Integer arithmetic and conversions | 11 | 11 |
 | 2. Programs on substrate | 7 | 7 |
 | 3. Tests | 2 | 2 |
 | 4. ABI and other code generation | 37 | 37 |
@@ -104,6 +104,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   *Reproduced* (i386); found by the IR verifier's width checks (an i32
   `add` of an i64 operand).  The step is as wide as its widest operand,
   a word pair on i386.  `codegen/int64_update.c`.
+- [x] **CC-106** A `switch` on a 64-bit integer shall compare all 64
+  bits with each case.  On i386 the case constants were word-sized, so
+  only the low words were compared: `0x100000001` took `case 1`, and a
+  case range matched by its low words too.  *Reproduced* (i386); found
+  by the IR verifier's width checks (an i64 compare of an i32
+  constant).  The case constants are as wide as the controlling value.
+  `codegen/int64_switch.c`.
 
 ## 2. Programs on substrate
 
@@ -1053,7 +1060,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-105 requirements: 95 met, 10 open.
+106 requirements: 96 met, 10 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
