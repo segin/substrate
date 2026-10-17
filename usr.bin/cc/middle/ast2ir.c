@@ -951,6 +951,19 @@ static long lower_pointer_step(const cc_translation_unit_t *tu, const cc_expr_t 
 }
 
 /**
+ * Whether expression @p e is a function or a pointer to one, by its type.
+ *
+ * @param e  the expression, or NULL
+ * @return   1 or 0
+ */
+static int lower_designates_function(const cc_expr_t *e) {
+    const cc_ctype_t *t = e != NULL ? e->ctype : NULL;
+
+    return t != NULL && (t->kind == CC_CT_FUNCTION || (t->kind == CC_CT_POINTER && t->of != NULL &&
+                                                        t->of->kind == CC_CT_FUNCTION));
+}
+
+/**
  * The step of pointer arithmetic on a value of type @p t: the size of
  * what it points to, or 1 for a `void *` or a pointer to a function, as
  * GNU C counts them.
@@ -2532,14 +2545,14 @@ static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_
         if (x->kind == CC_EXPR_DEREF && x->lhs != NULL) {
             return pointed_object_extent(tu, x->lhs, out_size, out_offset);  /* &*p, &a[i] */
         }
-        t = cc_ct_of_expr(x);
+        t = x->ctype;
         *out_size = cc_ct_size(t, tu);
         *out_offset = 0;
         return *out_size > 0;
     }
     if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && e->lhs != NULL &&
         e->rhs != NULL && e->rhs->kind == CC_EXPR_INT) {
-        t = cc_ct_decay(cc_ct_of_expr(e->lhs));
+        t = cc_ct_decay(e->lhs->ctype);
         if (t == NULL || t->kind != CC_CT_POINTER) {
             return 0;
         }
@@ -2550,7 +2563,7 @@ static int pointed_object_extent(const cc_translation_unit_t *tu, const cc_expr_
         *out_offset += (e->op == CC_BIN_ADD ? 1 : -1) * (long)e->rhs->int_val * step;
         return 1;
     }
-    t = cc_ct_of_expr(e);
+    t = e->ctype;
     if (t != NULL && t->kind == CC_CT_ARRAY) {
         if (e->kind == CC_EXPR_DEREF && e->lhs != NULL) {
             /* a row, `a[i]`: part of the array it was taken from */
@@ -6355,11 +6368,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_DEREF:
     {
-        if (cc_ct_expr_designates_function(e->lhs)) {
+        if (lower_designates_function(e->lhs)) {
             /* `*fp` is the function fp points to; as a value it is fp again */
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         }
-        if (ct_has_kind(cc_ct_of_expr(e), CC_CT_ARRAY)) {
+        if (ct_has_kind(e->ctype, CC_CT_ARRAY)) {
             /*
              * `*p` or `a[i]` where the result is an array (p points to one, a's
              * elements are rows): as a value it is the array's address -- the
@@ -6745,7 +6758,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * not the loaded first element value.
              */
             if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_DEREF && ptr_expr->lhs != NULL &&
-                ct_has_kind(cc_ct_of_expr(ptr_expr), CC_CT_ARRAY) &&
+                ct_has_kind(ptr_expr->ctype, CC_CT_ARRAY) &&
                 expr_is_array_pointer_chain(tu, vars, var_count, depth, ptr_expr->lhs)) {
                 int basev = lower_expr(tu, sf, ctx, vars, var_count, depth, ptr_expr->lhs, diag);
                 if (basev < 0) {
@@ -8797,46 +8810,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     set_diag(diag, "malformed indirect call expression");
                     return -1;
                 }
-                if (callee_expr->kind == CC_EXPR_DEREF && cc_ct_expr_designates_function(callee_expr->lhs)) {
-                    /*
-                     * Where the operand's type is known, a `*` whose operand is a
-                     * pointer to a function (or is the function) changes nothing:
-                     * `(*fp)()` and `(**fp)()` call fp.
-                     */
-                    while (callee_expr->kind == CC_EXPR_DEREF && cc_ct_expr_designates_function(callee_expr->lhs)) {
-                        callee_expr = callee_expr->lhs;
-                    }
-                } else if (callee_expr->kind == CC_EXPR_DEREF && callee_expr->lhs != NULL &&
-                           cc_ct_of_expr(callee_expr->lhs) == NULL && lower_is_pointer(callee_expr->lhs)) {
-                    int keep_deref = 0;
-                    const cc_expr_t *d = callee_expr->lhs;
-                    const cc_ctype_t *dt = lower_value_ctype(callee_expr->lhs);
-
-                    if (dt != NULL && dt->kind == CC_CT_POINTER && dt->of != NULL && dt->of->kind == CC_CT_POINTER) {
-                        /*
-                         * Explicit indirect calls through pointer-to-function-pointer
-                         * chains need one real load before the final CALLI target is
-                         * available. Only elide the dereference for plain function
-                         * pointers, where `(*fp)()` is semantically just `fp()`.
-                         */
-                        keep_deref = 1;
-                    }
-                    if (expr_is_array_pointer_chain(tu, vars, var_count, depth, d)) {
-                        keep_deref = 1;
-                    }
-                    if (d->kind == CC_EXPR_BIN && (d->op == CC_BIN_ADD || d->op == CC_BIN_SUB)) {
-                        if (d->lhs != NULL && d->lhs->kind == CC_EXPR_DEREF && d->lhs->lhs != NULL &&
-                            expr_is_array_pointer_chain(tu, vars, var_count, depth, d->lhs->lhs)) {
-                            keep_deref = 1;
-                        }
-                        if (d->rhs != NULL && d->rhs->kind == CC_EXPR_DEREF && d->rhs->lhs != NULL &&
-                            expr_is_array_pointer_chain(tu, vars, var_count, depth, d->rhs->lhs)) {
-                            keep_deref = 1;
-                        }
-                    }
-                    if (!keep_deref) {
-                        callee_expr = callee_expr->lhs;
-                    }
+                /* a `*` whose operand is a function or a pointer to one changes nothing: (*fp)() and (**fp)() call fp */
+                while (callee_expr->kind == CC_EXPR_DEREF && lower_designates_function(callee_expr->lhs)) {
+                    callee_expr = callee_expr->lhs;
                 }
                 if (callee_expr->kind == CC_EXPR_BIN &&
                     (callee_expr->op == CC_BIN_ADD || callee_expr->op == CC_BIN_SUB) &&
