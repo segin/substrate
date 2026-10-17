@@ -160,6 +160,7 @@ static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_
                                            int *out_has_num2);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_gnu_attribute_spec(parser_t *p, decl_attrs_t *out_attrs);
+static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds);
 static cc_expr_t *parse_expr(parser_t *p);
@@ -4227,6 +4228,36 @@ static int parse_one_c23_attribute(parser_t *p, decl_attrs_t *out_attrs, int *ou
 
     if (p->tok.kind != TOK_IDENT) {
         return 0;
+    }
+    if (peek_kind(p) == TOK_COLON) {
+        /* a vendor's attribute, `prefix::name`: gnu's mean what their __attribute__ spelling means */
+        int is_gnu = tok_is_ident(p, "gnu") || tok_is_ident(p, "__gnu__");
+
+        if (next_tok(p) != 0 || expect(p, TOK_COLON, "expected '::' in attribute") != 0 ||
+            expect(p, TOK_COLON, "expected '::' in attribute") != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected attribute name after '::'");
+            return -1;
+        }
+        if (is_gnu) {
+            decl_attrs_t gnu_attrs;
+            int rc;
+
+            decl_attrs_reset(&gnu_attrs);
+            rc = parse_one_gnu_attribute(p, &gnu_attrs);
+            if (rc == 0 && out_attrs != NULL) {
+                rc = decl_attrs_merge(out_attrs, &gnu_attrs);
+            }
+            decl_attrs_clear(&gnu_attrs);
+            return rc;
+        }
+        /* another vendor's: its name and arguments are read, and it is ignored */
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        return p->tok.kind == TOK_LPAREN ? skip_balanced_parens(p) : 0;
     }
 
     is_deprecated = tok_is_ident(p, "deprecated");

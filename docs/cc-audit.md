@@ -673,13 +673,26 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   `packed` there makes the type as small as its values; between the tag
   and the list they are still rejected, as gcc rejects them.
   `codegen/enum_attr_placement.c`.
-- [ ] **CC-110** Vendor-prefixed C23 attributes shall mean what their GNU
+- [x] **CC-110** Vendor-prefixed C23 attributes shall mean what their GNU
   spelling means (C23 6.7.12.1; gcc): `[[gnu::aligned(64)]] char
-  buf[3];` is 1-aligned (gcc 64) and `struct [[gnu::packed]] s { char a;
-  int b; }` is 8 bytes (gcc 5).  The `[[...]]` parser knows only the
-  standard attributes; `gnu::` and `__gnu__::` ones are read and
+  buf[3];` was 1-aligned (gcc 64) and `struct [[gnu::packed]] s { char a;
+  int b; }` was 8 bytes (gcc 5).  The `[[...]]` parser knew only the
+  standard attributes; `gnu::` and `__gnu__::` ones were read and
   dropped, changing layout without a diagnostic.  *Reproduced* (both
-  targets); found while testing CC-101.
+  targets); found while testing CC-101.  A `gnu::` or `__gnu__::`
+  attribute now goes to the GNU attribute parser; another vendor's is
+  read and ignored, as before.  `codegen/gnu_c23_attrs.c`.
+- [ ] **CC-111** An automatic object shall be aligned as its declaration
+  asks (C11 6.7.5): `_Alignas(64) char a[3];` and `_Alignas(32) int b;`
+  in a function, and the GNU and `[[gnu::aligned]]` spellings, are only
+  as aligned as the stack frame (16 bytes), on every call at both
+  targets; gcc realigns the frame or the object.  *Reproduced* (both
+  targets); found while testing CC-110.
+- [ ] **CC-112** An attribute specifier sequence after an array
+  declarator's `]` shall be accepted (C23 6.7.7.3): `char b[3]
+  [[gnu::aligned(64)]];` is rejected ("expected primary expression");
+  gcc accepts it and aligns `b`.  *Reproduced*; found while testing
+  CC-110.
 - [ ] **CC-102** A designator list shall be any sequence of `[index]` and
   `.member` (C11 6.7.9p1): cc takes one array designator, optionally
   followed by member designators, so `int a[2][2] = {[1][1] = 5};` is
@@ -1132,7 +1145,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-110 requirements: 103 met, 7 open.
+112 requirements: 104 met, 8 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
