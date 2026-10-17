@@ -1,0 +1,8 @@
+module "m" {
+  target lp64;
+  func @bad : fn(i32 %a) -> i32 {
+  entry:
+    %c = frobnicate i32 %a, 1;
+    ret i32 %c;
+  }
+}

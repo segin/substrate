@@ -181,6 +181,8 @@ static int parse_func_header(ir_module_t *m, char *line, ir_func_t **out) {
 
         if (args_start != NULL && args_end != NULL) {
             char *p;
+            size_t type_count = 0;
+            size_t type_cap = 0;
             *args_end = '\0';
             p = trim(args_start + 1);
 
@@ -198,6 +200,12 @@ static int parse_func_header(ir_module_t *m, char *line, ir_func_t **out) {
                             e++;
                         }
                         *e = '\0';
+                        /* the type is what comes before the name: `i32 %a`; pushed first, so that
+                           arg_types has an entry for every argument even when out of memory */
+                        *pct = '\0';
+                        if (vec_push_str(&f->arg_types, &type_count, &type_cap, trim(p)) != 0) {
+                            return -1;
+                        }
                         if (vec_push_str(&f->args, &f->arg_count, &f->arg_cap, pct + 1) != 0) {
                             return -1;
                         }
@@ -429,9 +437,48 @@ static int wire_preds(ir_func_t *f) {
     return 0;
 }
 
+/**
+ * Read one line of any length, without its newline.
+ *
+ * @param fp   the file
+ * @param buf  the line buffer, grown as needed; free it when done
+ * @param cap  its size
+ * @return     1 for a line, 0 at the end of the file, -1 when out of memory
+ */
+static int read_line(FILE *fp, char **buf, size_t *cap) {
+    size_t len = 0;
+
+    if (*buf == NULL) {
+        *cap = 4096;
+        *buf = (char *)malloc(*cap);
+        if (*buf == NULL) {
+            return -1;
+        }
+    }
+    (*buf)[0] = '\0';
+    while (fgets(*buf + len, (int)(*cap - len), fp) != NULL) {
+        len += strlen(*buf + len);
+        if (len > 0 && (*buf)[len - 1] == '\n') {
+            (*buf)[len - 1] = '\0';
+            return 1;
+        }
+        if (len + 1 == *cap) {
+            char *next = (char *)realloc(*buf, *cap * 2);
+            if (next == NULL) {
+                return -1;
+            }
+            *buf = next;
+            *cap *= 2;
+        }
+    }
+    return len > 0 ? 1 : 0;
+}
+
 int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
     FILE *fp;
-    char buf[4096];
+    char *buf = NULL;
+    size_t buf_cap = 0;
+    int got;
     size_t line = 0;
     ir_func_t *curf = NULL;
     ir_block_t *curb = NULL;
@@ -442,7 +489,7 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
         return -1;
     }
 
-    while (fgets(buf, sizeof(buf), fp) != NULL) {
+    while ((got = read_line(fp, &buf, &buf_cap)) > 0) {
         char *p;
         char *comment;
         line++;
@@ -473,8 +520,7 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
         if (strncmp(p, "target", 6) == 0) {
             if (parse_target(out, p) != 0) {
                 set_err(err, line, "failed parsing target");
-                fclose(fp);
-                return -1;
+                goto fail;
             }
             continue;
         }
@@ -482,8 +528,7 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
         if (strncmp(p, "func", 4) == 0) {
             if (parse_func_header(out, p, &curf) != 0) {
                 set_err(err, line, "failed parsing function header");
-                fclose(fp);
-                return -1;
+                goto fail;
             }
             curb = NULL;
             continue;
@@ -498,8 +543,7 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
         if (curf != NULL && strchr(p, ':') != NULL && p[0] != '%') {
             if (parse_label(curf, p, &curb, line) != 0) {
                 set_err(err, line, "failed parsing block label");
-                fclose(fp);
-                return -1;
+                goto fail;
             }
             continue;
         }
@@ -507,14 +551,18 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
         if (curb != NULL) {
             if (parse_instr(curb, p, line) != 0) {
                 set_err(err, line, "failed parsing instruction");
-                fclose(fp);
-                return -1;
+                goto fail;
             }
             continue;
         }
     }
+    if (got < 0) {
+        set_err(err, line, "out of memory reading the IR");
+        goto fail;
+    }
 
     fclose(fp);
+    free(buf);
 
     {
         size_t i;
@@ -527,4 +575,9 @@ int ir_parse_file(const char *path, ir_module_t *out, ir_error_t *err) {
     }
 
     return 0;
+
+fail:
+    fclose(fp);
+    free(buf);
+    return -1;
 }

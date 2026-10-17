@@ -1,0 +1,9 @@
+module "m" {
+  target lp64;
+  # fadd takes floating operands; %a is an integer
+  func @bad : fn(i32 %a, f64 %b) -> f64 {
+  entry:
+    %c = fadd f64 %a, %b;
+    ret f64 %c;
+  }
+}

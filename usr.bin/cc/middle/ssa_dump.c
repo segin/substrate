@@ -245,11 +245,11 @@ static size_t instr_uses(const cc_ssa_instr_t *in, int *out, size_t cap) {
     case CC_SSA_SHR:
     case CC_SSA_CMP:
     case CC_SSA_STORE:
-    case CC_SSA_LOAD:
     case CC_SSA_DYNALLOC:
         USE(in->lhs);
         USE(in->rhs);
         break;
+    case CC_SSA_LOAD:
     case CC_SSA_ADDR:
     case CC_SSA_MOV:
     case CC_SSA_I2F:
@@ -501,12 +501,9 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
         put_value(out, in->lhs);
         return;
     case CC_SSA_LOAD:
+        /* rhs is not an operand of a load (some leave it 0) */
         fprintf(out, "%s %s %lld, ", in->is_unsigned ? "zload" : "load", t, in->imm);
         put_value(out, in->lhs);
-        if (in->rhs >= 0) {
-            fputs(", ", out);
-            put_value(out, in->rhs);
-        }
         return;
     case CC_SSA_MOV:
         fprintf(out, "mov %s ", t);

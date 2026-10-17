@@ -1,0 +1,13 @@
+module "m" {
+  target lp64;
+  # icmp takes a predicate, a type and two operands
+  func @bad : fn(i32 %a) -> i32 {
+  entry:
+    %c = icmp slt i32 %a;
+    br_cond i1 %c, yes, no;
+  yes:
+    ret i32 1;
+  no:
+    ret i32 0;
+  }
+}

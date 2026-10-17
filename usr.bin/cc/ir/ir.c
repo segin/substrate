@@ -35,8 +35,12 @@ static void ir_func_free(ir_func_t *f) {
     free(f->name);
     for (i = 0; i < f->arg_count; ++i) {
         free(f->args[i]);
+        if (f->arg_types != NULL) {
+            free(f->arg_types[i]);
+        }
     }
     free(f->args);
+    free(f->arg_types);
     for (i = 0; i < f->block_count; ++i) {
         ir_block_free(&f->blocks[i]);
     }

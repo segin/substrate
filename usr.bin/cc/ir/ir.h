@@ -41,6 +41,7 @@ typedef struct {
 typedef struct {
     char *name;
     char **args;
+    char **arg_types;   /**< each argument's type, as the header writes it; arg_count entries */
     size_t arg_count;
     size_t arg_cap;
 

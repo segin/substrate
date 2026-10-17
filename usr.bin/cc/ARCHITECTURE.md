@@ -39,7 +39,8 @@ usr.bin/cc/
 ├── ir/                      # The textual SSA IR (typed, LLVM-like; tests/usr.bin/cc/valid.ir)
 │   ├── ir.c / ir.h          # Module representation
 │   ├── parse.c              # Text -> module
-│   ├── verify.c             # CFG and SSA invariants: terminators, phi arity, dominance, reachability
+│   ├── verify.c             # CFG and SSA invariants (terminators, phi arity, dominance, reachability)
+│   │                        # and the opcode table: each opcode's form and its operands' type classes
 │   ├── serialize.c          # Module -> text, optionally with value names normalized
 │   ├── ir-verifier.c        # Tool: parse and verify
 │   ├── ir-normalize.c       # Tool: parse, verify, print normalized

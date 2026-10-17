@@ -40,6 +40,12 @@ test:
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_missing_term.ir
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_use_before_def.ir
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_phi_arity.ir
+	! $(TOP)/usr.bin/cc/ir-verifier invalid_type_class.ir 2>$(CC_TMP)/cc_ir_type.log
+	grep -q "fadd: operand %a has the wrong class of type" $(CC_TMP)/cc_ir_type.log
+	! $(TOP)/usr.bin/cc/ir-verifier invalid_unknown_opcode.ir 2>$(CC_TMP)/cc_ir_op.log
+	grep -q "unknown opcode 'frobnicate'" $(CC_TMP)/cc_ir_op.log
+	! $(TOP)/usr.bin/cc/ir-verifier invalid_operand_count.ir 2>$(CC_TMP)/cc_ir_count.log
+	grep -q "icmp takes two operands" $(CC_TMP)/cc_ir_count.log
 	$(TOP)/usr.bin/cc/ir-normalize valid.ir > $(CC_TMP)/cc_valid.norm
 	$(TOP)/usr.bin/cc/ir-diff valid_equiv_a.ir valid_equiv_b.ir
 	$(TOP)/usr.bin/cc/cc -E -DTESTVAL=7 driver_pp_input.c -o $(CC_TMP)/cc_driver.pp
