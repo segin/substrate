@@ -1998,17 +1998,6 @@ static long sema_const_sizeof(void *ctx, const cc_expr_t *e) {
     return type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
 }
 
-/**
- * The size of a type in bytes, for the constant evaluator.
- *
- * @param ctx        the translation unit
- * @param t          the type
- * @param struct_id  its struct id, or -1
- * @return           the size, or <= 0 if not known
- */
-static long sema_const_type_size(void *ctx, cc_type_t t, int struct_id) {
-    return type_size_bytes_struct((const cc_translation_unit_t *)ctx, t, struct_id);
-}
 
 /**
  * Evaluate an integer constant expression in sema's context.
@@ -2022,7 +2011,6 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
     cc_const_env_t env;
 
     env.sizeof_bytes = sema_const_sizeof;
-    env.type_size = sema_const_type_size;
     env.ctx = (void *)tu;
     return cc_const_eval_ll(&env, e, out);
 }

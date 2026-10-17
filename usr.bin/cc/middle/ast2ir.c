@@ -922,17 +922,6 @@ static long lower_const_sizeof(void *ctx, const cc_expr_t *e) {
     return type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
 }
 
-/**
- * The size of a type in bytes, for the constant evaluator.
- *
- * @param ctx        the translation unit; may be NULL
- * @param t          the type
- * @param struct_id  its struct id, or -1
- * @return           the size, or <= 0 if not known
- */
-static long lower_const_type_size(void *ctx, cc_type_t t, int struct_id) {
-    return type_size_bytes_with_struct((const cc_translation_unit_t *)ctx, t, struct_id);
-}
 
 /**
  * Evaluate an integer constant expression in lowering's context.
@@ -947,7 +936,6 @@ static int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const
     cc_const_env_t env;
 
     env.sizeof_bytes = lower_const_sizeof;
-    env.type_size = lower_const_type_size;
     env.ctx = (void *)tu;
     return cc_const_eval(&env, e, out);
 }
@@ -14449,7 +14437,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
     if (e->kind == CC_EXPR_MEMBER && e->lhs == NULL && e->rhs != NULL) {
         return eval_global_init_expr(tu, e->rhs, out_i, out_f, out_is_float, out_sym);
     }
-    if ((cc_type_is_integral(cc_const_type_of(e)) || is_pointer_type(cc_const_type_of(e))) &&
+    if ((cc_ct_is_integer(cc_const_type_of(e)) || cc_const_type_of(e)->kind == CC_CT_POINTER) &&
         eval_const_integral_expr_value(tu, e, &ivalue) == 0) {
         *out_i = (long long)ivalue.bits;
         *out_f = (double)*out_i;

@@ -11,43 +11,74 @@
 #include <string.h>
 
 /**
+ * A type without its qualifiers.
+ *
+ * @param t  the type, or NULL
+ * @return   its unqualified version; NULL for NULL
+ */
+static const cc_ctype_t *const_unqual(const cc_ctype_t *t) {
+    return t != NULL ? t->unqual : NULL;
+}
+
+/** @return `int` */
+static const cc_ctype_t *const_int(void) {
+    return cc_ct_basic(CC_CT_INT);
+}
+
+/** @return the unsigned type of a pointer's width: `size_t`'s type */
+static const cc_ctype_t *const_uintptr(void) {
+    return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT);
+}
+
+/**
  * Whether values of a type read as unsigned: the unsigned integer types,
  * _Bool and pointers.
  *
  * @param t  the type
  * @return   1 if they do, else 0
  */
-static int const_type_unsigned(cc_type_t t) {
-    return cc_type_is_unsigned_integral(t) || t == CC_TYPE_BOOL || cc_type_is_pointer(t);
+static int const_type_unsigned(const cc_ctype_t *t) {
+    return cc_ct_is_unsigned(t) || (t != NULL && t->kind == CC_CT_POINTER);
 }
 
 /**
- * The width in bits of an integral or pointer type.
+ * Whether a constant reads as unsigned.
  *
- * @param env        the context
- * @param t          the type
- * @param struct_id  its struct id, or -1
- * @return           1 to 64, or 0 if @p t is neither integral nor a
- *                   pointer, or its size is not known
+ * @param v  the constant
+ * @return   1 if it does, else 0
  */
-static int const_type_width(const cc_const_env_t *env, cc_type_t t, int struct_id) {
-    long size = 0;
+int cc_const_is_unsigned(const cc_const_t *v) {
+    return v != NULL && const_type_unsigned(v->type);
+}
 
-    if (t == CC_TYPE_BOOL) {
-        return 1;
-    }
-    if (cc_type_is_pointer(t)) {
-        return cc_target_pointer_size() * 8;
-    }
-    if (!cc_type_is_integral(t)) {
+/**
+ * The width in bits of an integer or pointer type.
+ *
+ * @param t  the type
+ * @return   1 to 64, or 0 if @p t is neither an integer type nor a
+ *           pointer, or is wider than 64 bits
+ */
+static int const_type_width(const cc_ctype_t *t) {
+    long size;
+
+    if (t == NULL) {
         return 0;
     }
-    if (env != NULL && env->type_size != NULL) {
-        size = env->type_size(env->ctx, t, struct_id);
+    switch (t->kind) {
+    case CC_CT_BOOL:
+        return 1;
+    case CC_CT_POINTER:
+        return cc_target_pointer_size() * 8;
+    case CC_CT_BITINT:
+    case CC_CT_UBITINT:
+        return t->count >= 1 && t->count <= 64 ? (int)t->count : 0;
+    default:
+        break;
     }
-    if (size <= 0) {
-        size = cc_type_scalar_size(t);
+    if (!cc_ct_is_integer(t)) {
+        return 0;
     }
+    size = cc_ct_size(t, NULL);
     if (size <= 0 || size > 8) {
         return 0;
     }
@@ -80,74 +111,116 @@ static uint64_t const_extend(uint64_t raw, int width, int is_unsigned) {
 /**
  * Make a constant of a type from 64 bits, wrapping them to its width.
  *
- * @param env        the context
- * @param raw        the bits
- * @param t          the type
- * @param struct_id  its struct id, or -1
- * @param out        receives the constant
- * @return           0, or -1 if @p t is not integral or a pointer
+ * @param raw  the bits
+ * @param t    the type
+ * @param out  receives the constant
+ * @return     0, or -1 if @p t is not an integer or pointer type
  */
-static int const_make(const cc_const_env_t *env, uint64_t raw, cc_type_t t, int struct_id, cc_const_t *out) {
-    int width = const_type_width(env, t, struct_id);
+static int const_make(uint64_t raw, const cc_ctype_t *t, cc_const_t *out) {
+    int width = const_type_width(t);
 
     if (width <= 0) {
         return -1;
     }
     out->bits = const_extend(raw, width, const_type_unsigned(t));
-    out->type = t;
-    out->struct_id = struct_id;
+    out->type = const_unqual(t);
     return 0;
 }
 
 /**
- * Convert a constant to another integral (or pointer) type.
+ * Convert a constant to another integer (or pointer) type, as a cast
+ * does.
  *
- * @param env        the context
- * @param v          the constant
- * @param t          the type to convert to
- * @param struct_id  its struct id, or -1
- * @param out        receives the result; may be @p v
- * @return           0, or -1 if @p t is not an integral or pointer type
+ * @param v    the constant
+ * @param t    the type to convert to
+ * @param out  receives the result; may be @p v
+ * @return     0, or -1 if @p t is not an integer or pointer type
  */
-int cc_const_convert(const cc_const_env_t *env, const cc_const_t *v, cc_type_t t, int struct_id, cc_const_t *out) {
+static int const_convert(const cc_const_t *v, const cc_ctype_t *t, cc_const_t *out) {
     uint64_t raw = v->bits;
 
-    if (t == CC_TYPE_BOOL) {
+    if (t != NULL && t->kind == CC_CT_BOOL) {
         raw = raw != 0 ? 1 : 0;
     }
-    return const_make(env, raw, t, struct_id, out);
+    return const_make(raw, t, out);
 }
 
 /**
- * The type an enum or bit-precise operand takes part in arithmetic as.
+ * The type an operand takes part in arithmetic as: the integer
+ * promotions, with an enumeration as `int` and a pointer as the unsigned
+ * integer of its width.  A bit-precise type is not promoted.
  *
  * @param t  the type
- * @return   @p t after the integer promotions
+ * @return   the promoted type
  */
-static cc_type_t const_promote(cc_type_t t) {
-    if (t == CC_TYPE_ENUM) {
-        return CC_TYPE_INT;
+static const cc_ctype_t *const_promote(const cc_ctype_t *t) {
+    t = const_unqual(t);
+    if (t == NULL) {
+        return const_int();
     }
-    if (cc_type_is_pointer(t)) {
-        return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+    switch (t->kind) {
+    case CC_CT_ENUM:
+    case CC_CT_BOOL:
+    case CC_CT_CHAR:
+    case CC_CT_SCHAR:
+    case CC_CT_UCHAR:
+    case CC_CT_SHORT:
+    case CC_CT_USHORT:
+        return const_int();
+    case CC_CT_POINTER:
+        return const_uintptr();
+    default:
+        return t;
     }
-    return cc_type_promote(t);
 }
 
 /**
- * The unsigned type of the same rank as a signed one.
+ * An integer type's conversion rank (C23 6.3.1.1), as a number to
+ * compare: wider types rank higher, and of two the same width a standard
+ * type ranks above a bit-precise one, `long long` above `long`.
  *
- * @param t  a signed integer type
+ * @param t  a promoted integer type
+ * @return   its rank
+ */
+static int const_rank(const cc_ctype_t *t) {
+    int std;
+
+    switch (t->kind) {
+    case CC_CT_INT:
+    case CC_CT_UINT:
+        std = 1;
+        break;
+    case CC_CT_LONG:
+    case CC_CT_ULONG:
+        std = 2;
+        break;
+    case CC_CT_LLONG:
+    case CC_CT_ULLONG:
+        std = 3;
+        break;
+    default:
+        std = 0;
+        break;
+    }
+    return const_type_width(t) * 4 + std;
+}
+
+/**
+ * The unsigned type corresponding to a signed one.
+ *
+ * @param t  a promoted signed integer type
  * @return   its unsigned counterpart
  */
-static cc_type_t const_unsigned_of(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_LONG:
-        return CC_TYPE_ULONG;
-    case CC_TYPE_LONG_LONG:
-        return CC_TYPE_ULONG_LONG;
+static const cc_ctype_t *const_unsigned_of(const cc_ctype_t *t) {
+    switch (t->kind) {
+    case CC_CT_LONG:
+        return cc_ct_basic(CC_CT_ULONG);
+    case CC_CT_LLONG:
+        return cc_ct_basic(CC_CT_ULLONG);
+    case CC_CT_BITINT:
+        return cc_ct_bitint(t->count, 1);
     default:
-        return CC_TYPE_UINT;
+        return cc_ct_basic(CC_CT_UINT);
     }
 }
 
@@ -158,30 +231,64 @@ static cc_type_t const_unsigned_of(cc_type_t t) {
  * @param b  the other's
  * @return   the type both are converted to
  */
-cc_type_t cc_const_common_type(cc_type_t a, cc_type_t b) {
-    cc_type_t u;
-    cc_type_t s;
+static const cc_ctype_t *const_common_type(const cc_ctype_t *a, const cc_ctype_t *b) {
+    const cc_ctype_t *u;
+    const cc_ctype_t *s;
 
     a = const_promote(a);
     b = const_promote(b);
-    if (!cc_type_is_integral(a) || !cc_type_is_integral(b)) {
-        return CC_TYPE_INT;
+    if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b)) {
+        return const_int();
     }
     if (a == b) {
         return a;
     }
-    if (cc_type_is_unsigned_integral(a) == cc_type_is_unsigned_integral(b)) {
-        return cc_type_integer_rank(a) >= cc_type_integer_rank(b) ? a : b;
+    if (cc_ct_is_unsigned(a) == cc_ct_is_unsigned(b)) {
+        return const_rank(a) >= const_rank(b) ? a : b;
     }
-    u = cc_type_is_unsigned_integral(a) ? a : b;
-    s = cc_type_is_unsigned_integral(a) ? b : a;
-    if (cc_type_integer_rank(u) >= cc_type_integer_rank(s)) {
+    u = cc_ct_is_unsigned(a) ? a : b;
+    s = cc_ct_is_unsigned(a) ? b : a;
+    if (const_rank(u) >= const_rank(s)) {
         return u;
     }
-    if (cc_type_scalar_size(s) > cc_type_scalar_size(u)) {
+    if (const_type_width(s) > const_type_width(u)) {
         return s;
     }
     return const_unsigned_of(s);
+}
+
+/**
+ * The type of an operand the evaluator does not look into: the type sema
+ * recorded, else the one the parser gave it.
+ *
+ * @param e  the expression
+ * @return   its type, unqualified; int where none is known
+ */
+static const cc_ctype_t *const_leaf_type(const cc_expr_t *e) {
+    const cc_ctype_t *t = e->ctype;
+
+    if (t == NULL) {
+        if (e->value_type == CC_TYPE_VOID && e->struct_id < 0) {
+            return const_int();
+        }
+        t = cc_ct_from_legacy(e->value_type, e->struct_id, 0, NULL);
+    }
+    return t != NULL ? const_unqual(t) : const_int();
+}
+
+/**
+ * The type a cast converts to.
+ *
+ * @param e  the cast
+ * @return   the type, unqualified; int where none is known
+ */
+static const cc_ctype_t *const_cast_type(const cc_expr_t *e) {
+    const cc_ctype_t *t = e->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(e->aux_type, e->aux_struct_id, 0, NULL);
+    }
+    return t != NULL ? const_unqual(t) : const_int();
 }
 
 /**
@@ -217,20 +324,20 @@ static int const_bitop_width(const char *name, const char *base) {
  * @param e  the call
  * @return   its type
  */
-static cc_type_t const_builtin_type(const cc_expr_t *e) {
+static const cc_ctype_t *const_builtin_type(const cc_expr_t *e) {
     const char *name = e->ident;
 
     if (strcmp(name, "__builtin_bswap16") == 0) {
-        return CC_TYPE_USHORT;
+        return cc_ct_basic(CC_CT_USHORT);
     }
     if (strcmp(name, "__builtin_bswap32") == 0) {
-        return CC_TYPE_UINT;
+        return cc_ct_basic(CC_CT_UINT);
     }
     if (strcmp(name, "__builtin_bswap64") == 0) {
-        return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_ULONG_LONG;
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_ULLONG);
     }
     if (strcmp(name, "__builtin_expect") == 0) {
-        return CC_TYPE_LONG;
+        return cc_ct_basic(CC_CT_LONG);
     }
     if (strcmp(name, "__builtin_choose_expr") == 0 && e->arg_count == 3) {
         cc_const_t c;
@@ -238,24 +345,24 @@ static cc_type_t const_builtin_type(const cc_expr_t *e) {
             return cc_const_type_of(c.bits != 0 ? e->args[1] : e->args[2]);
         }
     }
-    return CC_TYPE_INT;
+    return const_int();
 }
 
 /**
  * The type a constant expression has, without evaluating it.
  *
  * @param e  the expression
- * @return   its type; int where it cannot be told
+ * @return   its type, unqualified; int where it cannot be told
  */
-cc_type_t cc_const_type_of(const cc_expr_t *e) {
+const cc_ctype_t *cc_const_type_of(const cc_expr_t *e) {
     if (e == NULL) {
-        return CC_TYPE_INT;
+        return const_int();
     }
     switch (e->kind) {
     case CC_EXPR_CAST:
-        return e->aux_type;
+        return const_cast_type(e);
     case CC_EXPR_SIZEOF:
-        return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+        return const_uintptr();
     case CC_EXPR_BIN:
         switch (e->op) {
         case CC_BIN_EQ:
@@ -266,21 +373,21 @@ cc_type_t cc_const_type_of(const cc_expr_t *e) {
         case CC_BIN_GE:
         case CC_BIN_LAND:
         case CC_BIN_LOR:
-            return CC_TYPE_INT;
+            return const_int();
         case CC_BIN_COMMA:
             return cc_const_type_of(e->rhs);
         case CC_BIN_SHL:
         case CC_BIN_SHR:
             return const_promote(cc_const_type_of(e->lhs));
         default:
-            return cc_const_common_type(cc_const_type_of(e->lhs), cc_const_type_of(e->rhs));
+            return const_common_type(cc_const_type_of(e->lhs), cc_const_type_of(e->rhs));
         }
     case CC_EXPR_TERNARY:
-        return cc_const_common_type(cc_const_type_of(e->rhs != NULL ? e->rhs : e->lhs), cc_const_type_of(e->third));
+        return const_common_type(cc_const_type_of(e->rhs != NULL ? e->rhs : e->lhs), cc_const_type_of(e->third));
     case CC_EXPR_CALL:
-        return e->ident != NULL ? const_builtin_type(e) : CC_TYPE_INT;
+        return e->ident != NULL ? const_builtin_type(e) : const_int();
     default:
-        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
+        return const_leaf_type(e);
     }
 }
 
@@ -306,13 +413,13 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
         if (e->arg_count != 1) {
             return -1;
         }
-        return const_make(env, cc_const_eval(env, e->args[0], &arg) == 0 ? 1 : 0, CC_TYPE_INT, -1, out);
+        return const_make(cc_const_eval(env, e->args[0], &arg) == 0 ? 1 : 0, const_int(), out);
     }
     if (strcmp(name, "__builtin_expect") == 0) {
         if (e->arg_count != 2 || cc_const_eval(env, e->args[0], &arg) != 0) {
             return -1;
         }
-        return cc_const_convert(env, &arg, CC_TYPE_LONG, -1, out);
+        return const_convert(&arg, cc_ct_basic(CC_CT_LONG), out);
     }
     if (strcmp(name, "__builtin_choose_expr") == 0) {
         if (e->arg_count != 3 || cc_const_eval(env, e->args[0], &arg) != 0) {
@@ -324,8 +431,8 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
         return -1;
     }
     if (strncmp(name, "__builtin_bswap", 15) == 0) {
-        cc_type_t t = const_builtin_type(e);
-        int width = const_type_width(env, t, -1);
+        const cc_ctype_t *t = const_builtin_type(e);
+        int width = const_type_width(t);
         uint64_t v = arg.bits;
         uint64_t r = 0;
         int i;
@@ -336,7 +443,7 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
         for (i = 0; i < width / 8; ++i) {
             r = (r << 8) | ((v >> (8 * i)) & 0xffu);
         }
-        return const_make(env, r, t, -1, out);
+        return const_make(r, t, out);
     }
     for (k = 0; k < sizeof(bitops) / sizeof(bitops[0]); ++k) {
         int width = const_bitop_width(name, bitops[k]);
@@ -384,7 +491,7 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
             }
             break;
         }
-        return const_make(env, (uint64_t)n, CC_TYPE_INT, -1, out);
+        return const_make((uint64_t)n, const_int(), out);
     }
     return -1;
 }
@@ -394,23 +501,22 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
  * C allows floating constants as the immediate operands of casts in an
  * integer constant expression.
  *
- * @param env  the context
  * @param e    the cast
  * @param out  receives the value
  * @return     0, or -1 if the value does not fit the type
  */
-static int const_eval_float_cast(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out) {
+static int const_eval_float_cast(const cc_expr_t *e, cc_const_t *out) {
     long double d = e->lhs->float_val_ld != 0.0L ? e->lhs->float_val_ld : (long double)e->lhs->float_val;
-    cc_type_t t = e->aux_type;
-    int width = const_type_width(env, t, e->aux_struct_id);
+    const cc_ctype_t *t = const_cast_type(e);
+    int width = const_type_width(t);
     long double lo;
     long double hi;
 
     if (width <= 0) {
         return -1;
     }
-    if (t == CC_TYPE_BOOL) {
-        return const_make(env, d != 0.0L ? 1 : 0, t, e->aux_struct_id, out);
+    if (t->kind == CC_CT_BOOL) {
+        return const_make(d != 0.0L ? 1 : 0, t, out);
     }
     /* the value, truncated toward zero, must fit the type */
     if (const_type_unsigned(t)) {
@@ -424,36 +530,34 @@ static int const_eval_float_cast(const cc_const_env_t *env, const cc_expr_t *e, 
         return -1;
     }
     if (d < 0) {
-        return const_make(env, (uint64_t)(int64_t)d, t, e->aux_struct_id, out);
+        return const_make((uint64_t)(int64_t)d, t, out);
     }
-    return const_make(env, (uint64_t)d, t, e->aux_struct_id, out);
+    return const_make((uint64_t)d, t, out);
 }
 
 /**
  * Evaluate a binary operator other than && || and the comma.
  *
- * @param env  the context
  * @param e    the expression
  * @param a    its left operand's value
  * @param b    its right operand's value
  * @param out  receives the value
  * @return     0, or -1 if it is not a constant (division by zero)
  */
-static int const_eval_arith(const cc_const_env_t *env, const cc_expr_t *e, const cc_const_t *a, const cc_const_t *b,
-                            cc_const_t *out) {
+static int const_eval_arith(const cc_expr_t *e, const cc_const_t *a, const cc_const_t *b, cc_const_t *out) {
     int shift = e->op == CC_BIN_SHL || e->op == CC_BIN_SHR;
-    cc_type_t t = shift ? const_promote(a->type) : cc_const_common_type(a->type, b->type);
+    const cc_ctype_t *t = shift ? const_promote(a->type) : const_common_type(a->type, b->type);
     cc_const_t x;
     cc_const_t y;
     int is_unsigned;
     uint64_t r;
 
-    if (cc_const_convert(env, a, t, -1, &x) != 0) {
+    if (const_convert(a, t, &x) != 0) {
         return -1;
     }
     if (shift) {
         y = *b;
-    } else if (cc_const_convert(env, b, t, -1, &y) != 0) {
+    } else if (const_convert(b, t, &y) != 0) {
         return -1;
     }
     is_unsigned = const_type_unsigned(t);
@@ -498,31 +602,27 @@ static int const_eval_arith(const cc_const_env_t *env, const cc_expr_t *e, const
         r = x.bits ^ y.bits;
         break;
     case CC_BIN_EQ:
-        return const_make(env, x.bits == y.bits, CC_TYPE_INT, -1, out);
+        return const_make(x.bits == y.bits, const_int(), out);
     case CC_BIN_NE:
-        return const_make(env, x.bits != y.bits, CC_TYPE_INT, -1, out);
+        return const_make(x.bits != y.bits, const_int(), out);
     case CC_BIN_LT:
-        return const_make(env, is_unsigned ? x.bits < y.bits : (int64_t)x.bits < (int64_t)y.bits, CC_TYPE_INT, -1,
-                          out);
+        return const_make(is_unsigned ? x.bits < y.bits : (int64_t)x.bits < (int64_t)y.bits, const_int(), out);
     case CC_BIN_LE:
-        return const_make(env, is_unsigned ? x.bits <= y.bits : (int64_t)x.bits <= (int64_t)y.bits, CC_TYPE_INT,
-                          -1, out);
+        return const_make(is_unsigned ? x.bits <= y.bits : (int64_t)x.bits <= (int64_t)y.bits, const_int(), out);
     case CC_BIN_GT:
-        return const_make(env, is_unsigned ? x.bits > y.bits : (int64_t)x.bits > (int64_t)y.bits, CC_TYPE_INT, -1,
-                          out);
+        return const_make(is_unsigned ? x.bits > y.bits : (int64_t)x.bits > (int64_t)y.bits, const_int(), out);
     case CC_BIN_GE:
-        return const_make(env, is_unsigned ? x.bits >= y.bits : (int64_t)x.bits >= (int64_t)y.bits, CC_TYPE_INT,
-                          -1, out);
+        return const_make(is_unsigned ? x.bits >= y.bits : (int64_t)x.bits >= (int64_t)y.bits, const_int(), out);
     default:
         return -1;
     }
-    return const_make(env, r, t, -1, out);
+    return const_make(r, t, out);
 }
 
 /**
  * Evaluate an integer constant expression.
  *
- * @param env  the context; its callbacks may be NULL
+ * @param env  the context; its callback may be NULL
  * @param e    the expression
  * @param out  receives the value
  * @return     0, or -1 if @p e is not an integer constant expression
@@ -537,22 +637,21 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
     memset(out, 0, sizeof(*out));
     switch (e->kind) {
     case CC_EXPR_INT:
-        return const_make(env, (uint64_t)e->int_val, e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT,
-                          e->struct_id, out);
+        return const_make((uint64_t)e->int_val, const_leaf_type(e), out);
     case CC_EXPR_CAST:
         if (e->lhs != NULL && e->lhs->kind == CC_EXPR_FLOAT) {
-            return const_eval_float_cast(env, e, out);
+            return const_eval_float_cast(e, out);
         }
         if (cc_const_eval(env, e->lhs, &a) != 0) {
             return -1;
         }
-        return cc_const_convert(env, &a, e->aux_type, e->aux_struct_id, out);
+        return const_convert(&a, const_cast_type(e), out);
     case CC_EXPR_SIZEOF: {
         long n = env != NULL && env->sizeof_bytes != NULL ? env->sizeof_bytes(env->ctx, e) : -1;
         if (n < 0) {
             return -1;
         }
-        return const_make(env, (uint64_t)n, cc_const_type_of(e), -1, out);
+        return const_make((uint64_t)n, const_uintptr(), out);
     }
     case CC_EXPR_BIN:
         if (e->op == CC_BIN_COMMA) {
@@ -564,32 +663,32 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
         if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
             /* the right operand is evaluated only when it decides */
             if ((a.bits != 0) == (e->op == CC_BIN_LOR)) {
-                return const_make(env, e->op == CC_BIN_LOR, CC_TYPE_INT, -1, out);
+                return const_make(e->op == CC_BIN_LOR, const_int(), out);
             }
             if (cc_const_eval(env, e->rhs, &b) != 0) {
                 return -1;
             }
-            return const_make(env, b.bits != 0, CC_TYPE_INT, -1, out);
+            return const_make(b.bits != 0, const_int(), out);
         }
         if (cc_const_eval(env, e->rhs, &b) != 0) {
             return -1;
         }
-        return const_eval_arith(env, e, &a, &b, out);
+        return const_eval_arith(e, &a, &b, out);
     case CC_EXPR_TERNARY: {
-        cc_type_t t = cc_const_type_of(e);
+        const cc_ctype_t *t = cc_const_type_of(e);
         const cc_expr_t *arm;
 
         if (cc_const_eval(env, e->lhs, &a) != 0) {
             return -1;
         }
         if (a.bits != 0 && e->rhs == NULL) {
-            return cc_const_convert(env, &a, t, -1, out);
+            return const_convert(&a, t, out);
         }
         arm = a.bits != 0 ? e->rhs : e->third;
         if (cc_const_eval(env, arm, &b) != 0) {
             return -1;
         }
-        return cc_const_convert(env, &b, t, -1, out);
+        return const_convert(&b, t, out);
     }
     case CC_EXPR_CALL:
         if (e->ident == NULL) {

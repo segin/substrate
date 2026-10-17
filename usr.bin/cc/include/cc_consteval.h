@@ -3,13 +3,15 @@
 
 #include <stdint.h>
 
+#include "cc_ctype.h"
 #include "cc_frontend.h"
 
 /*
  * Integer constant expressions (C11 6.6): the one evaluator the parser,
  * sema and lowering share.  It works on the AST as the parser builds it;
- * what it cannot know by itself -- the size of a type or of the operand
- * of a sizeof -- it asks its caller through a cc_const_env_t.
+ * what it cannot know by itself -- the size of the operand of a sizeof --
+ * it asks its caller through a cc_const_env_t.  Types are interned types
+ * (cc_ctype.h).
  */
 
 /** An integer constant: a value and its type. */
@@ -20,8 +22,7 @@ typedef struct {
      * pointer.  (long long)bits is the value whenever it fits.
      */
     uint64_t bits;
-    cc_type_t type;
-    int struct_id;
+    const cc_ctype_t *type; /**< an integer or pointer type, unqualified */
 } cc_const_t;
 
 /** What the evaluator asks of the context it runs in. */
@@ -35,25 +36,13 @@ typedef struct {
      */
     long (*sizeof_bytes)(void *ctx, const cc_expr_t *e);
 
-    /**
-     * The size of an integral type in bytes, for the types whose size
-     * depends on a struct id (enums with a fixed underlying type,
-     * _BitInt).  NULL, or a result <= 0, means cc_type_scalar_size().
-     *
-     * @param ctx        the caller's context
-     * @param t          the type
-     * @param struct_id  its struct id, or -1
-     * @return           the size, or <= 0 if unknown
-     */
-    long (*type_size)(void *ctx, cc_type_t t, int struct_id);
-
-    void *ctx; /**< passed to the callbacks */
+    void *ctx; /**< passed to the callback */
 } cc_const_env_t;
 
 /**
  * Evaluate an integer constant expression.
  *
- * @param env  the context; its callbacks may be NULL
+ * @param env  the context; its callback may be NULL
  * @param e    the expression
  * @param out  receives the value
  * @return     0, or -1 if @p e is not an integer constant expression
@@ -73,35 +62,21 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
 int cc_const_eval_ll(const cc_const_env_t *env, const cc_expr_t *e, long long *out);
 
 /**
- * Convert a constant to another integral (or pointer) type, as a cast
- * does.
+ * Whether a constant reads as unsigned: its type is an unsigned integer
+ * type, _Bool or a pointer.
  *
- * @param env        the context
- * @param v          the constant
- * @param t          the type to convert to
- * @param struct_id  its struct id, or -1
- * @param out        receives the result; may be @p v
- * @return           0, or -1 if @p t is not an integral or pointer type
+ * @param v  the constant
+ * @return   1 if it does, else 0
  */
-int cc_const_convert(const cc_const_env_t *env, const cc_const_t *v, cc_type_t t, int struct_id, cc_const_t *out);
+int cc_const_is_unsigned(const cc_const_t *v);
 
 /**
  * The type a constant expression has, worked out without evaluating it
  * (a conditional's arms both count, though only one is evaluated).
  *
  * @param e  the expression
- * @return   its type; int where it cannot be told
+ * @return   its type, unqualified; int where it cannot be told
  */
-cc_type_t cc_const_type_of(const cc_expr_t *e);
-
-/**
- * The common type of two integer operands after the usual arithmetic
- * conversions (C11 6.3.1.8).
- *
- * @param a  one operand's type
- * @param b  the other's
- * @return   the type both are converted to
- */
-cc_type_t cc_const_common_type(cc_type_t a, cc_type_t b);
+const cc_ctype_t *cc_const_type_of(const cc_expr_t *e);
 
 #endif

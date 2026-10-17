@@ -43,8 +43,7 @@ typedef struct {
     char *name;
     long value;
     uint64_t bits;
-    cc_type_t type;
-    int struct_id;
+    const cc_ctype_t *ctype; /**< the type of its value */
 } enum_const_entry_t;
 
 typedef struct {
@@ -327,11 +326,7 @@ static char *local_label_dup_mapped_n(const parser_t *p, const char *name, size_
 static int local_label_push(parser_t *p, const char *name, size_t len);
 static void local_label_pop_to_depth(parser_t *p, int depth);
 static void parser_free_local_labels(parser_t *p);
-
-static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id);
-static uint64_t parser_const_mask_bits(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
-static uint64_t parser_const_unsigned_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
-static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
+static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_sid);
 
 static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
     cc_function_t *next;
@@ -760,8 +755,7 @@ static int enum_const_push(parser_t *p, const char *name, size_t len, long value
     p->enum_consts[p->enum_const_count].name = dup;
     p->enum_consts[p->enum_const_count].value = value;
     p->enum_consts[p->enum_const_count].bits = (uint64_t)value;
-    p->enum_consts[p->enum_const_count].type = CC_TYPE_INT;
-    p->enum_consts[p->enum_const_count].struct_id = -1;
+    p->enum_consts[p->enum_const_count].ctype = cc_ct_basic(CC_CT_INT);
     p->enum_const_count++;
     return 0;
 }
@@ -1133,52 +1127,6 @@ static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_i
         n = cc_target_pointer_size();
     }
     return n;
-}
-
-static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id) {
-    long sz;
-
-    if (t == CC_TYPE_BOOL) {
-        return 1;
-    }
-    if (is_pointer_type(t)) {
-        return cc_target_pointer_size() * 8;
-    }
-    sz = parser_type_size_bytes(p, t, struct_id);
-    if (sz <= 0) {
-        return 0;
-    }
-    if (sz >= (long)(INT_MAX / 8)) {
-        return 0;
-    }
-    return (int)(sz * 8);
-}
-
-static uint64_t parser_const_mask_bits(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id) {
-    int width = parser_const_type_bits(p, t, struct_id);
-
-    if (width > 0 && width < 64) {
-        return bits & ((1ULL << width) - 1ULL);
-    }
-    return bits;
-}
-
-static uint64_t parser_const_unsigned_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id) {
-    return parser_const_mask_bits(p, bits, t, struct_id);
-}
-
-static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id) {
-    int width = parser_const_type_bits(p, t, struct_id);
-    uint64_t u = parser_const_mask_bits(p, bits, t, struct_id);
-
-    if (width <= 0) {
-        return 0;
-    }
-    if (width < 64 && !cc_type_is_unsigned_integral(t) && !is_pointer_type(t) &&
-        (u & (1ULL << (width - 1))) != 0) {
-        u |= ~((1ULL << width) - 1ULL);
-    }
-    return (int64_t)u;
 }
 
 static int parser_is_bitfield_base_type(cc_type_t t) {
@@ -3243,11 +3191,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             return -1;
                         }
                         free_expr(enum_expr);
-                        if (cc_type_is_unsigned_integral(ev.type) || is_pointer_type(ev.type)) {
-                            uint64_t u = parser_const_unsigned_value(p, ev.bits, ev.type, ev.struct_id);
+                        if (cc_const_is_unsigned(&ev)) {
+                            uint64_t u = ev.bits;
                             v = u > (uint64_t)LONG_MAX ? LONG_MAX : (long)u;
                         } else {
-                            int64_t s = parser_const_signed_value(p, ev.bits, ev.type, ev.struct_id);
+                            int64_t s = (int64_t)ev.bits;
                             if (s < (int64_t)LONG_MIN) {
                                 v = LONG_MIN;
                             } else if (s > (int64_t)LONG_MAX) {
@@ -3260,8 +3208,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         enum_next = v;
                         p->enum_consts[p->enum_const_count - 1].value = enum_next;
                         p->enum_consts[p->enum_const_count - 1].bits = ev.bits;
-                        p->enum_consts[p->enum_const_count - 1].type = ev.type;
-                        p->enum_consts[p->enum_const_count - 1].struct_id = ev.struct_id;
+                        p->enum_consts[p->enum_const_count - 1].ctype = ev.type;
                     }
                     {
                         decl_attrs_t enum_attrs;
@@ -3465,6 +3412,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         if (out_struct_id != NULL) {
             *out_struct_id = (int)bitint_width;
         }
+        /* the encoding keeps only the width; the type keeps the sign too */
+        alias_type = CC_TYPE_BITINT;
+        alias_ctype = cc_ct_bitint(bitint_width, seen_unsigned);
         if (out_typedef != NULL) {
             *out_typedef = seen_typedef;
         } else if (seen_typedef) {
@@ -4367,30 +4317,43 @@ static long parser_const_sizeof(void *ctx, const cc_expr_t *e) {
 }
 
 /**
- * The size of a type in bytes, for the constant evaluator.
- *
- * @param ctx        the parser
- * @param t          the type
- * @param struct_id  its struct id, or -1
- * @return           the size, or <= 0 if not known
- */
-static long parser_const_type_size(void *ctx, cc_type_t t, int struct_id) {
-    return parser_type_size_bytes((parser_t *)ctx, t, struct_id);
-}
-
-/**
  * The constant evaluator's view of the parser.
  *
  * @param p  the parser
- * @return   an environment whose callbacks read @p p
+ * @return   an environment whose callback reads @p p
  */
 static cc_const_env_t parser_const_env(parser_t *p) {
     cc_const_env_t env;
 
     env.sizeof_bytes = parser_const_sizeof;
-    env.type_size = parser_const_type_size;
     env.ctx = p;
     return env;
+}
+
+/**
+ * The legacy encoding of a scalar type: the cc_type_t and struct id an
+ * expression of type @p t carries alongside it.
+ *
+ * @param t          the type; NULL reads as int
+ * @param out_type   receives the cc_type_t
+ * @param out_sid    receives the struct id (or _BitInt width), -1 if none
+ */
+static void parser_scalar_legacy(const cc_ctype_t *t, cc_type_t *out_type, int *out_sid) {
+    cc_ct_legacy_t leg;
+    cc_type_t ty;
+    unsigned i;
+
+    if (t == NULL || cc_ct_to_legacy(t, &leg) != 0) {
+        *out_type = CC_TYPE_INT;
+        *out_sid = -1;
+        return;
+    }
+    ty = leg.base;
+    for (i = 0; i < leg.depth; ++i) {
+        ty = ptr_of_type(ty);
+    }
+    *out_type = ty;
+    *out_sid = leg.struct_id;
 }
 
 /**
@@ -4409,7 +4372,6 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
 
 static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out) {
     parser_const_value_t v;
-    uint64_t u;
     int64_t s;
 
     if (e == NULL || out == NULL) {
@@ -4418,15 +4380,14 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
     if (eval_const_expr_value(p, e, &v) != 0) {
         return -1;
     }
-    if (cc_type_is_unsigned_integral(v.type) || is_pointer_type(v.type)) {
-        u = parser_const_unsigned_value(p, v.bits, v.type, v.struct_id);
-        if (u > (uint64_t)LONG_MAX) {
+    if (cc_const_is_unsigned(&v)) {
+        if (v.bits > (uint64_t)LONG_MAX) {
             return -1;
         }
-        *out = (long)u;
+        *out = (long)v.bits;
         return 0;
     }
-    s = parser_const_signed_value(p, v.bits, v.type, v.struct_id);
+    s = (int64_t)v.bits;
     if (s < (int64_t)LONG_MIN || s > (int64_t)LONG_MAX) {
         return -1;
     }
@@ -4450,11 +4411,8 @@ static int eval_const_case_value(parser_t *p, const cc_expr_t *e, long long *out
     if (e == NULL || out == NULL || eval_const_expr_value(p, e, &v) != 0) {
         return -1;
     }
-    if (cc_type_is_unsigned_integral(v.type) || is_pointer_type(v.type)) {
-        *out = (long long)parser_const_unsigned_value(p, v.bits, v.type, v.struct_id);
-    } else {
-        *out = (long long)parser_const_signed_value(p, v.bits, v.type, v.struct_id);
-    }
+    /* the bits are already extended as the type reads them */
+    *out = (long long)v.bits;
     return 0;
 }
 
@@ -7995,8 +7953,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             e->int_val = (long long)p->enum_consts[eidx].bits;
-            e->value_type = p->enum_consts[eidx].type;
-            e->struct_id = p->enum_consts[eidx].struct_id;
+            e->ctype = p->enum_consts[eidx].ctype;
+            parser_scalar_legacy(e->ctype, &e->value_type, &e->struct_id);
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
