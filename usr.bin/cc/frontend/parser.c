@@ -531,39 +531,29 @@ static int typedef_find_current_scope_n(const parser_t *p, const char *name, siz
  * Declare a typedef name in the current scope.  Redeclaring one with the
  * same type is allowed (C11 6.7p3).
  *
- * @param p           the parser
- * @param name        the name
- * @param type        the type it names, legacy encoding
- * @param struct_id   its struct id
- * @param array_len   its legacy array_len
- * @param array_ndim  its array rank
- * @param array_dims  its bounds, or NULL
- * @param ctype       the type it names, or NULL if not known
- * @return            0, 1 if it redeclares the name with another type,
- *                    or -1 when out of memory
+ * @param p      the parser
+ * @param name   the name
+ * @param ctype  the type it names
+ * @return       0, 1 if it redeclares the name with another type, or -1
+ *               when out of memory
  */
-static int typedef_push(parser_t *p, const char *name, cc_type_t type, int struct_id, long array_len,
-                        int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_ctype_t *ctype) {
+static int typedef_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     typedef_entry_t *next;
     char *dup;
     int existing;
-    long norm_dims[CC_MAX_ARRAY_DIMS];
-
-    if (array_dims != NULL) {
-        memcpy(norm_dims, array_dims, sizeof(norm_dims));
-    } else {
-        memset(norm_dims, 0, sizeof(norm_dims));
-    }
+    cc_type_t type = CC_TYPE_VOID;
+    int struct_id = -1;
+    long array_len = -1;
+    int array_ndim = 0;
+    long array_dims[CC_MAX_ARRAY_DIMS];
 
     existing = typedef_find_current_scope_n(p, name, strlen(name));
     if (existing >= 0) {
-        if (p->typedefs[existing].type == type && p->typedefs[existing].struct_id == struct_id &&
-            p->typedefs[existing].array_len == array_len && p->typedefs[existing].array_ndim == array_ndim &&
-            memcmp(p->typedefs[existing].array_dims, norm_dims, sizeof(p->typedefs[existing].array_dims)) == 0) {
-            return 0;
-        }
-        return 1;
+        return p->typedefs[existing].ctype == ctype ? 0 : 1;
     }
+    memset(array_dims, 0, sizeof(array_dims));
+    /* the legacy encoding parse_declspec() still reads alongside the type */
+    parser_ctype_legacy(ctype, &type, &struct_id, &array_len, &array_ndim, array_dims);
     if (p->typedef_count == p->typedef_cap) {
         size_t ncap = p->typedef_cap == 0 ? 16 : p->typedef_cap * 2;
         next = (typedef_entry_t *)realloc(p->typedefs, ncap * sizeof(*next));
@@ -582,7 +572,7 @@ static int typedef_push(parser_t *p, const char *name, cc_type_t type, int struc
     p->typedefs[p->typedef_count].struct_id = struct_id;
     p->typedefs[p->typedef_count].array_len = array_len;
     p->typedefs[p->typedef_count].array_ndim = array_ndim;
-    memcpy(p->typedefs[p->typedef_count].array_dims, norm_dims, sizeof(p->typedefs[p->typedef_count].array_dims));
+    memcpy(p->typedefs[p->typedef_count].array_dims, array_dims, sizeof(p->typedefs[p->typedef_count].array_dims));
     p->typedefs[p->typedef_count].depth = p->scope_depth;
     p->typedefs[p->typedef_count].ctype = ctype;
     p->typedef_count++;
@@ -909,10 +899,6 @@ static int type_carries_struct_id(cc_type_t t) {
     return cc_type_pointer_base(t) == CC_TYPE_VOID;
 }
 
-static cc_type_t ptr_deref_type(cc_type_t t) {
-    return cc_type_deref_once(t);
-}
-
 static int struct_ids_compatible(const parser_t *p, int lhs, int rhs) {
     const char *ltag;
     const char *rtag;
@@ -952,7 +938,6 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
 }
 
 static long parser_string_literal_array_bound(const cc_expr_t *e);
-static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init);
 static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const cc_expr_t *init);
 static long parser_ct_size(const parser_t *p, const cc_ctype_t *t);
 static long parser_ct_align(const parser_t *p, const cc_ctype_t *t);
@@ -1509,23 +1494,30 @@ static cc_expr_t *parser_decimal_literal(parser_t *p) {
     return e;
 }
 
-/** The interned type of a vector element type (legacy @p t), or NULL if a vector cannot have it. */
-static const cc_ctype_t *parser_vector_elem_ctype(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_CHAR:
-    case CC_TYPE_SCHAR:
-    case CC_TYPE_UCHAR:
-    case CC_TYPE_SHORT:
-    case CC_TYPE_USHORT:
-    case CC_TYPE_INT:
-    case CC_TYPE_UINT:
-    case CC_TYPE_LONG:
-    case CC_TYPE_ULONG:
-    case CC_TYPE_LONG_LONG:
-    case CC_TYPE_ULONG_LONG:
-    case CC_TYPE_FLOAT:
-    case CC_TYPE_DOUBLE:
-        return cc_ct_from_scalar(t);
+/**
+ * The element type a vector of @p t elements has: @p t unqualified, or
+ * NULL if a vector cannot have it (only the standard integer types but
+ * _Bool, float and double can be).
+ */
+static const cc_ctype_t *parser_vector_elem_ctype(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return NULL;
+    }
+    switch (t->unqual->kind) {
+    case CC_CT_CHAR:
+    case CC_CT_SCHAR:
+    case CC_CT_UCHAR:
+    case CC_CT_SHORT:
+    case CC_CT_USHORT:
+    case CC_CT_INT:
+    case CC_CT_UINT:
+    case CC_CT_LONG:
+    case CC_CT_ULONG:
+    case CC_CT_LLONG:
+    case CC_CT_ULLONG:
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+        return t->unqual;
     default:
         return NULL;
     }
@@ -1540,35 +1532,33 @@ static const cc_ctype_t *parser_vector_elem_ctype(cc_type_t t) {
  *
  * @return the structure's id, or -1 when out of memory
  */
-static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
-    static const cc_type_t cmp_by_size[9] = {CC_TYPE_VOID, CC_TYPE_CHAR,      CC_TYPE_SHORT, CC_TYPE_VOID,
-                                             CC_TYPE_INT,  CC_TYPE_VOID,      CC_TYPE_VOID,  CC_TYPE_VOID,
-                                             CC_TYPE_LONG_LONG};
-    long es = parser_type_size_bytes(p, elem, -1);
-    cc_type_t cmp_elem;
+static int parser_vector_struct(parser_t *p, const cc_ctype_t *elem, long n) {
+    static const cc_ctype_kind_t cmp_by_size[9] = {CC_CT_VOID, CC_CT_CHAR, CC_CT_SHORT, CC_CT_VOID, CC_CT_INT,
+                                                   CC_CT_VOID, CC_CT_VOID, CC_CT_VOID,  CC_CT_LLONG};
+    long es = parser_ct_size(p, elem);
+    const cc_ctype_t *cmp_elem;
     size_t i;
     int sid;
     int saved_depth = p->scope_depth;
 
     for (i = 0; i < p->struct_count; ++i) {
-        if (p->structs[i].vector_count == n && p->structs[i].vector_elem == parser_vector_elem_ctype(elem)) {
+        if (p->structs[i].vector_count == n && p->structs[i].vector_elem == elem) {
             return (int)i;
         }
     }
     p->scope_depth = 0;
     sid = struct_ensure(p, NULL, 0, 1);
     p->scope_depth = saved_depth;
-    if (sid < 0 || struct_member_push(p, sid, "__vec", cc_ct_array(parser_vector_elem_ctype(elem), n), 0, n * es, 0,
-                                      0, 0, 0, 0, 0) < 0) {
+    if (sid < 0 || struct_member_push(p, sid, "__vec", cc_ct_array(elem, n), 0, n * es, 0, 0, 0, 0, 0, 0) < 0) {
         return -1;
     }
     p->structs[sid].size = n * es;
     p->structs[sid].align = n * es < 16 ? n * es : 16;
     p->structs[sid].complete = 1;
     p->structs[sid].vector_count = n;
-    p->structs[sid].vector_elem = parser_vector_elem_ctype(elem);
+    p->structs[sid].vector_elem = elem;
     p->structs[sid].vector_cmp_sid = sid;
-    cmp_elem = cmp_by_size[es];
+    cmp_elem = cc_ct_basic(cmp_by_size[es]);
     if (cmp_elem != elem) {
         int cs = parser_vector_struct(p, cmp_elem, n);
 
@@ -1582,16 +1572,16 @@ static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
 
 /**
  * Apply a `vector_size(bytes)` or `ext_vector_type(count)` attribute in
- * @p attrs to the type (*@p type, *@p sid, *@p ctype) it is written with:
- * the type becomes the vector of that element type.  The size must be a
- * power-of-two multiple of the element's (an ext_vector_type count rounds
- * up to a power of two in size, as clang lays it out) and the element an
- * integer or floating type.
+ * @p attrs to the type *@p ctype it is written with: the type becomes the
+ * vector of that element type.  The size must be a power-of-two multiple
+ * of the element's (an ext_vector_type count rounds up to a power of two
+ * in size, as clang lays it out) and the element an integer or floating
+ * type.
  *
  * @return 0 (also when there is no such attribute), or -1 on error (diagnosed)
  */
-static int parser_apply_vector_attr(parser_t *p, const decl_attrs_t *attrs, cc_type_t *type, int *sid,
-                                    const cc_ctype_t **ctype) {
+static int parser_apply_vector_attr(parser_t *p, const decl_attrs_t *attrs, const cc_ctype_t **ctype) {
+    const cc_ctype_t *elem;
     long es;
     long bytes;
     long n;
@@ -1600,11 +1590,12 @@ static int parser_apply_vector_attr(parser_t *p, const decl_attrs_t *attrs, cc_t
     if (attrs == NULL || (attrs->vector_bytes <= 0 && attrs->vector_elems <= 0)) {
         return 0;
     }
-    if (parser_vector_elem_ctype(*type) == NULL || (*sid >= 0 && *type == CC_TYPE_VOID)) {
+    elem = parser_vector_elem_ctype(*ctype);
+    if (elem == NULL) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid vector type: the element must be an integer or floating type");
         return -1;
     }
-    es = parser_type_size_bytes(p, *type, -1);
+    es = parser_ct_size(p, elem);
     if (attrs->vector_bytes > 0) {
         bytes = attrs->vector_bytes;
         n = bytes / es;
@@ -1618,13 +1609,11 @@ static int parser_apply_vector_attr(parser_t *p, const decl_attrs_t *attrs, cc_t
                  "invalid vector type: its size must be a power-of-two multiple of the element's");
         return -1;
     }
-    vs = parser_vector_struct(p, *type, bytes / es);
+    vs = parser_vector_struct(p, elem, bytes / es);
     if (vs < 0) {
         set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a vector type");
         return -1;
     }
-    *type = CC_TYPE_VOID;
-    *sid = vs;
     *ctype = cc_ct_record(vs);
     return 0;
 }
@@ -4637,39 +4626,6 @@ static long parser_init_list_bound_ct(parser_t *p, const cc_ctype_t *elem, const
         long n = parser_infer_struct_array_len_from_init_list(p, sid, init);
 
         return n > 0 ? n : 0;
-    }
-    return (long)init->arg_count;
-}
-
-static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init) {
-    cc_type_t elem_type;
-    const cc_expr_t *item;
-    int wide;
-    long inferred;
-
-    if (!is_pointer_type(array_type) || init == NULL || init->kind != CC_EXPR_INIT_LIST || init->arg_count == 0) {
-        return 0;
-    }
-    elem_type = ptr_deref_type(array_type);
-    if (init->arg_count == 1) {
-        item = init->args[0];
-        if (item != NULL && item->kind == CC_EXPR_STR) {
-            wide = cc_string_literal_is_wide(item);
-            if ((wide && cc_type_is_integral(elem_type)) ||
-                (!wide && cc_ct_is_character(cc_ct_from_scalar(elem_type)))) {
-                inferred = parser_string_literal_array_bound(item);
-                if (inferred > 0) {
-                    return inferred;
-                }
-            }
-        }
-    }
-    if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
-        long struct_elems = parser_infer_struct_array_len_from_init_list(p, array_struct_id, init);
-        if (struct_elems > 0) {
-            return struct_elems;
-        }
-        return 0;
     }
     return (long)init->arg_count;
 }
@@ -9837,9 +9793,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     }
     decl_storage = p->last_storage;
     base_alias = p->last_alias_ctype;
-    if (parser_apply_vector_attr(p, &base_attrs, &base_type, &base_struct_id, &base_alias) != 0) {
-        decl_attrs_clear(&base_attrs);
-        return -1;
+    if (base_attrs.vector_bytes > 0 || base_attrs.vector_elems > 0) {
+        base_alias = declspec_ctype(base_alias, base_type, base_struct_id, base_array_ndim, base_array_dims);
+        if (parser_apply_vector_attr(p, &base_attrs, &base_alias) != 0) {
+            decl_attrs_clear(&base_attrs);
+            return -1;
+        }
+        base_type = CC_TYPE_VOID;
+        base_struct_id = base_alias->id;
     }
     if (p->tok.kind == TOK_SEMI) {
         if ((decl_storage & CC_STORAGE_AUTO_TYPE) != 0) {
@@ -9884,11 +9845,6 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         s.line = p->tok.line;
         s.col = p->tok.col;
         s.kind = CC_STMT_DECL;
-        s.type = base_type;
-        s.type_struct_id = base_struct_id;
-        s.array_len = base_array_len;
-        s.array_ndim = base_array_ndim;
-        memcpy(s.array_dims, base_array_dims, sizeof(s.array_dims));
         s.storage = decl_storage;
         decl_attrs_reset(&suffix_attrs);
         decl_attrs_reset(&merged_attrs);
@@ -9903,13 +9859,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             }
             s.decl_name = nd.name;
             s.ctype = nd.ctype;
-            s.type = nd.type;
-            s.type_struct_id = nd.struct_id;
-            s.array_len = nd.array_len;
-            s.array_ndim = nd.array_ndim;
-            memcpy(s.array_dims, nd.array_dims, sizeof(s.array_dims));
             memcpy(s.array_bound_exprs, nd.vla_bounds, sizeof(s.array_bound_exprs));
-            if ((base_saw_restrict || nd.saw_restrict) && !is_pointer_type(s.type)) {
+            if ((base_saw_restrict || nd.saw_restrict) && cc_ct_decay(s.ctype)->kind != CC_CT_POINTER) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
                 free_stmt(&s);
                 return -1;
@@ -9919,8 +9870,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             free_stmt(&s);
             return -1;
         }
-        if (s.array_ndim == 0 &&
-            parser_apply_vector_attr(p, &suffix_attrs, &s.type, &s.type_struct_id, &s.ctype) != 0) {
+        if (s.ctype != NULL && s.ctype->kind != CC_CT_ARRAY && parser_apply_vector_attr(p, &suffix_attrs, &s.ctype) != 0) {
             decl_attrs_clear(&suffix_attrs);
             free_stmt(&s);
             return -1;
@@ -10052,22 +10002,16 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             free_stmt(&s);
             return -1;
         }
-        if (s.array_ndim > 0 && s.array_dims[0] == 0 && s.expr != NULL) {
+        /* `T a[] = {...}`: the initializer completes the array type */
+        if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0 && s.expr != NULL) {
             long inferred = 0;
             if (s.expr->kind == CC_EXPR_INIT_LIST) {
-                inferred = parser_init_list_array_bound(p, s.type, s.type_struct_id, s.expr);
+                inferred = parser_init_list_bound_ct(p, s.ctype->of, s.expr);
             } else if (s.expr->kind == CC_EXPR_STR) {
                 inferred = parser_string_literal_array_bound(s.expr);
             }
             if (inferred > 0) {
-                s.array_dims[0] = inferred;
-                if (s.array_len <= 0) {
-                    s.array_len = inferred;
-                }
-                /* `T a[] = {...}`: the initializer completes the array type */
-                if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0) {
-                    s.ctype = cc_ct_array(s.ctype->of, inferred);
-                }
+                s.ctype = cc_ct_array(s.ctype->of, inferred);
             }
         }
         if (is_typedef) {
@@ -10077,17 +10021,20 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
-            trc = typedef_push(p, s.decl_name, s.type, s.type_struct_id, s.array_len, s.array_ndim, s.array_dims,
-                               s.ctype);
+            trc = typedef_push(p, s.decl_name, s.ctype);
             if (trc > 0) {
                 int existing = typedef_find_current_scope_n(p, s.decl_name, strlen(s.decl_name));
                 if (existing >= 0 && p->diag != NULL && p->diag->message[0] == '\0') {
+                    char old_spelled[96];
+                    char new_spelled[96];
+
+                    cc_ct_format(p->typedefs[existing].ctype, old_spelled, sizeof(old_spelled));
+                    cc_ct_format(s.ctype, new_spelled, sizeof(new_spelled));
                     p->diag->line = p->tok.line;
                     p->diag->col = p->tok.col;
                     snprintf(p->diag->message, sizeof(p->diag->message),
-                             "duplicate typedef name in this scope: %s (old type=%d sid=%d new type=%d sid=%d)",
-                             s.decl_name, (int)p->typedefs[existing].type, p->typedefs[existing].struct_id,
-                             (int)s.type, s.type_struct_id);
+                             "duplicate typedef name in this scope: %s (was '%s', now '%s')", s.decl_name,
+                             old_spelled, new_spelled);
                 } else {
                     set_diag(p->diag, p->tok.line, p->tok.col, "duplicate typedef name in this scope");
                 }
@@ -11551,7 +11498,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         return -1;
     }
     if (parser_is_c23_or_newer() &&
-        typedef_push(&p, "nullptr_t", CC_TYPE_PTR_VOID, -1, -1, 0, NULL, NULL) != 0) {
+        typedef_push(&p, "nullptr_t", cc_ct_pointer(cc_ct_basic(CC_CT_VOID))) != 0) {
         cc_lexer_deinit(&p.lx);
         parser_free_hoisted_funcs(&p);
         parser_free_typedefs(&p);
