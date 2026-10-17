@@ -642,6 +642,24 @@ static int lower_record_id(const cc_expr_t *e) {
 }
 
 /**
+ * Whether an expression's value is of structure @p sid; with @p sid
+ * negative, whether it is void.
+ *
+ * @param e    the expression
+ * @param sid  the structure's index, or -1
+ * @return     1 or 0
+ */
+static int lower_is_record(const cc_expr_t *e, int sid) {
+    const cc_ctype_t *t;
+
+    if (sid >= 0) {
+        return lower_record_id(e) == sid;
+    }
+    t = lower_value_ctype(e);
+    return t != NULL && t->kind == CC_CT_VOID;
+}
+
+/**
  * Whether an expression's value is of type kind @p k.
  *
  * @param e  the expression
@@ -9326,7 +9344,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.imm = agg_size;
             in.is_unsigned = 1;
             in.agg_class = agg_return_class(tu, e->struct_id, agg_size);
-        } else if (e->value_type == CC_TYPE_VOID) {
+        } else if (lower_has_kind(e, CC_CT_VOID)) {
             in.dst = new_value(sf, CC_VAL_I64);
             in.imm = cc_target_pointer_size();
             in.is_unsigned = 1;
@@ -11088,11 +11106,11 @@ static int expr_matches_struct_value(const cc_expr_t *e, int struct_id) {
     if (e == NULL) {
         return 0;
     }
-    if (e->value_type == CC_TYPE_VOID && e->struct_id == struct_id) {
+    if (lower_is_record(e, struct_id)) {
         return 1;
     }
     if (e->kind == CC_EXPR_CAST && e->aux_type == CC_TYPE_VOID && e->aux_struct_id == struct_id && e->lhs != NULL &&
-        e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id == struct_id) {
+        lower_is_record(e->lhs, struct_id)) {
         return 1;
     }
     return 0;
@@ -11341,8 +11359,7 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
         }
 
         if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            if (item->args[ii]->kind != CC_EXPR_INIT_LIST && item->args[ii]->value_type == CC_TYPE_VOID &&
-                item->args[ii]->struct_id == m->type_struct_id) {
+            if (item->args[ii]->kind != CC_EXPR_INIT_LIST && lower_is_record(item->args[ii], m->type_struct_id)) {
                 /* a value of the element's structure type (a decimal constant, say): copied in */
                 int src = lower_expr(tu, sf, ctx, vars, var_count, depth, item->args[ii], diag);
 
@@ -11812,13 +11829,13 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
             }
             nested_item = unwrap_self_designated_init_list(nested_item, m->name);
             if (nested_item->kind != CC_EXPR_INIT_LIST) {
-                if (nested_item->value_type == CC_TYPE_VOID && nested_item->struct_id == m->type_struct_id) {
+                if (lower_is_record(nested_item, m->type_struct_id)) {
                     int rhsv;
                     long sub_sz = type_size_bytes_with_struct(tu, CC_TYPE_VOID, m->type_struct_id);
                     const cc_expr_t *copy_expr = nested_item;
                     if (copy_expr->kind == CC_EXPR_CAST && copy_expr->aux_type == CC_TYPE_VOID &&
                         copy_expr->aux_struct_id == m->type_struct_id && copy_expr->lhs != NULL &&
-                        copy_expr->lhs->value_type == CC_TYPE_VOID && copy_expr->lhs->struct_id == m->type_struct_id) {
+                        lower_is_record(copy_expr->lhs, m->type_struct_id)) {
                         copy_expr = copy_expr->lhs;
                     }
                     if (sub_sz <= 0) {
