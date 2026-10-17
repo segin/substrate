@@ -89,8 +89,6 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
 static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_list, const char *member_name);
 static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                                     const cc_expr_t *e);
-static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
-                                  const long dims[CC_MAX_ARRAY_DIMS]);
 static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                               const cc_expr_t *e);
 static long sizeof_type_name_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e);
@@ -431,12 +429,7 @@ static int is_pointer_type(cc_type_t t) {
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *lower_value_ctype(const cc_expr_t *e) {
-    const cc_ctype_t *t = e->ctype;
-
-    if (t == NULL) {
-        t = cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims);
-    }
-    return cc_ct_decay(t);
+    return cc_ct_decay(e->ctype);
 }
 
 /**
@@ -517,12 +510,7 @@ static const cc_ctype_t *lower_var_ctype(const var_entry_t *v) {
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *lower_param_ctype(const cc_param_t *p) {
-    const cc_ctype_t *t = p->ctype;
-
-    if (t == NULL) {
-        t = cc_ct_from_legacy(p->type, p->type_struct_id, p->array_ndim, p->array_dims);
-    }
-    return cc_ct_decay(t);
+    return cc_ct_decay(p->ctype);
 }
 
 /**
@@ -826,7 +814,7 @@ static int lower_record_id(const cc_expr_t *e) {
  * @return   the type
  */
 static const cc_ctype_t *lower_cast_ctype(const cc_expr_t *e) {
-    return e->ctype != NULL ? e->ctype : cc_ct_from_legacy(e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+    return e->ctype;
 }
 
 /**
@@ -995,14 +983,10 @@ static const cc_ctype_t *lower_atomic_elem_ctype(const cc_expr_t *e) {
     return t->of->unqual;
 }
 
+/** The size of an expression's value (an array's is a pointer's), or <= 0 if it has none. */
 static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e) {
-    long n = cc_ct_size(lower_value_ctype(e), tu);
-
-    /* the legacy fields speak only for a node lowering built, which has no type recorded */
-    return (n > 0 || e->ctype != NULL) ? n : type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+    return cc_ct_size(lower_value_ctype(e), tu);
 }
-
-static cc_type_t ptr_base_type(cc_type_t t);
 
 /**
  * Whether an initializer list for a multi-dimensional array initializes
@@ -1026,12 +1010,6 @@ static int init_list_has_row_initializer(const cc_expr_t *list) {
         }
     }
     return 0;
-}
-
-static cc_type_t ptr_base_type(cc_type_t t);
-
-static cc_type_t ptr_base_type(cc_type_t t) {
-    return cc_type_deref_once(t);
 }
 
 /**
@@ -1400,26 +1378,6 @@ static int eval_const_integral_expr_value(const cc_translation_unit_t *tu, const
     return cc_const_eval(&env, e, out);
 }
 
-static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
-    if (t == CC_TYPE_ATOMIC) {
-        if (struct_id <= 0) {
-            return -1;
-        }
-        return type_size_bytes_struct(tu, (cc_type_t)struct_id, -1);
-    }
-    if (t == CC_TYPE_BITINT) {
-        return cc_bitint_size(struct_id);
-    }
-    long n = type_size_bytes(t);
-    if (n > 0) {
-        return n;
-    }
-    if (t == CC_TYPE_VOID && tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count &&
-        tu->structs[struct_id].complete) {
-        return tu->structs[struct_id].size;
-    }
-    return -1;
-}
 
 /**
  * The step of pointer arithmetic on an operand whose real type is known
@@ -2411,11 +2369,21 @@ static const cc_global_t *find_global(const cc_translation_unit_t *tu, const cha
     return best;
 }
 
+/**
+ * The structure a member access selects from: the operand's for `.`,
+ * what the operand points to for `->`.
+ *
+ * @param e  the CC_EXPR_MEMBER
+ * @return   the structure's index, or -1
+ */
 static int member_base_struct_id(const cc_expr_t *e) {
+    const cc_ctype_t *t;
+
     if (e == NULL || e->kind != CC_EXPR_MEMBER || e->lhs == NULL) {
         return -1;
     }
-    return e->lhs->struct_id;
+    t = lower_value_ctype(e->lhs);
+    return ct_record_id(ct_is_pointer(t) ? t->of : t);
 }
 
 static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int sid, const char *name) {
@@ -2505,43 +2473,6 @@ static char *string_literal_emit_text(const cc_translation_unit_t *tu, const cc_
     return cc_strdup(e != NULL && e->ident != NULL ? e->ident : "\"\"");
 }
 
-static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
-                                  const long array_dims[CC_MAX_ARRAY_DIMS]) {
-    cc_type_t elem_type;
-    int elem_struct_id;
-    long elem_size;
-    long count = 1;
-    int i;
-
-    if (array_ndim <= 0) {
-        return type_size_bytes_struct(tu, t, struct_id);
-    }
-    elem_type = t;
-    elem_struct_id = struct_id;
-    if (is_pointer_type(t)) {
-        for (i = 0; i < array_ndim; ++i) {
-            elem_type = ptr_base_type(elem_type);
-            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID && !is_pointer_type(elem_type)) {
-                elem_struct_id = -1;
-            }
-        }
-    }
-    elem_size = type_size_bytes_with_struct(tu, elem_type, elem_struct_id);
-    if (elem_size <= 0) {
-        return -1;
-    }
-    for (i = 0; i < array_ndim; ++i) {
-        long d = array_dims != NULL ? array_dims[i] : 0;
-        if (d <= 0 || count > LONG_MAX / d) {
-            return -1;
-        }
-        count *= d;
-    }
-    if (elem_size > LONG_MAX / count) {
-        return -1;
-    }
-    return elem_size * count;
-}
 
 /**
  * Find the object a pointer expression points into and how far into it,
@@ -2635,7 +2566,7 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
     if (e == NULL) {
         return -1;
     }
-    t = e->ctype != NULL ? e->ctype : cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims);
+    t = e->ctype;
     return cc_ct_size(t, tu);
 }
 
@@ -3100,7 +3031,7 @@ static const cc_ctype_t *ct_array_scalar(const cc_ctype_t *t) {
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s) {
-    return s->ctype != NULL ? s->ctype : cc_ct_from_legacy(s->type, s->type_struct_id, s->array_ndim, s->array_dims);
+    return s->ctype;
 }
 
 /** Whether a local declaration gets storage allocated up front: a structure, or an array of fixed size. */
@@ -4442,9 +4373,8 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                                     const cc_expr_t *init, cc_diag_t *diag);
 static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_diag_t *diag);
 static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
-                                   var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type, int struct_id,
-                                   int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_expr_t *init,
-                                   cc_diag_t *diag);
+                                   var_entry_t *vars, size_t var_count, int depth, const cc_ctype_t *arr,
+                                   const cc_expr_t *init, cc_diag_t *diag);
 
 static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
@@ -6207,14 +6137,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return in.dst;
             }
             if (g != NULL) {
-                /*
-                 * Use expression-level array metadata first. This keeps
-                 * lowering consistent with semantic analysis when a symbol has
-                 * multiple declarations and only some carry explicit array
-                 * bounds (e.g. typedef-backed extern declarations).
-                 */
-                if (expr_is_array_obj ||
-                    (e->ctype == NULL && ct_has_kind(global_decl_ctype(g), CC_CT_ARRAY))) {
+                /* an array's value is its address (the identifier's type, as sema settled it) */
+                if (expr_is_array_obj) {
                     return emit_global_addr(sf, g->name, diag);
                 }
                 if (expr_is_struct_obj || (ct_record_id(lower_global_ctype(g)) >= 0)) {
@@ -9514,12 +9438,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return rhs;
             }
             if (mem_size < 0) {
-                char msg[256];
-                snprintf(msg, sizeof(msg),
-                         "unsupported pointer store type size in lowering "
-                         "(value_type=%d struct_id=%d kind=%d ms=%ld)",
-                         (int)e->lhs->value_type, e->lhs->struct_id, (int)e->lhs->kind, mem_size);
-                set_diag(diag, msg);
+                set_diag(diag, "unsupported pointer store type size in lowering");
                 return -1;
             }
             rhs = normalize_float_ct(sf, rhs, lower_value_ctype(e->lhs), diag);
@@ -9956,8 +9875,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         if (cast_src->kind == CC_EXPR_INIT_LIST && cast_ct != NULL && cast_ct->kind == CC_CT_ARRAY) {
-            return lower_array_init_to_ptr(tu, sf, ctx, vars, var_count, depth, e->aux_type, e->aux_struct_id,
-                                           e->array_ndim, e->array_dims, cast_src, diag);
+            return lower_array_init_to_ptr(tu, sf, ctx, vars, var_count, depth, cast_ct, cast_src, diag);
         }
         if (complex_elem_of(tu, CC_TYPE_VOID, to_sid) != CC_TYPE_VOID && cast_src->kind != CC_EXPR_INIT_LIST) {
             return lower_complex_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
@@ -11662,21 +11580,28 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
     return 0;
 }
 
+/**
+ * Lower an array compound literal, `(T[n]){...}`: storage of its own,
+ * zeroed, then filled from the list.
+ *
+ * @param arr   the literal's array type
+ * @param init  its initializer list
+ * @return      the value holding the storage's address, or -1 on error
+ * (the other parameters are lower_expr()'s)
+ */
 static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
-                                   var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type, int struct_id,
-                                   int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_expr_t *init,
-                                   cc_diag_t *diag) {
+                                   var_entry_t *vars, size_t var_count, int depth, const cc_ctype_t *arr,
+                                   const cc_expr_t *init, cc_diag_t *diag) {
     long total_size;
     int base_ptr;
     size_t cursor = 0;
 
-    if (tu == NULL || sf == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST || !is_pointer_type(array_type) ||
-        array_ndim <= 0) {
+    if (tu == NULL || sf == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST || !ct_has_kind(arr, CC_CT_ARRAY)) {
         set_diag(diag, "invalid compound-literal array expression");
         return -1;
     }
 
-    total_size = array_type_size_bytes(tu, array_type, struct_id, array_ndim, array_dims);
+    total_size = cc_ct_size(arr, tu);
     if (total_size <= 0) {
         set_diag(diag, "unsupported compound-literal array size in lowering");
         return -1;
@@ -11689,9 +11614,7 @@ static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_funct
     if (emit_memset_instr(sf, base_ptr, 0, total_size, diag) != 0) {
         return -1;
     }
-    if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth,
-                                       cc_ct_from_legacy(array_type, struct_id, array_ndim, array_dims), init, &cursor,
-                                       base_ptr, diag) != 0) {
+    if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, arr, init, &cursor, base_ptr, diag) != 0) {
         return -1;
     }
     if (cursor < init->arg_count) {
