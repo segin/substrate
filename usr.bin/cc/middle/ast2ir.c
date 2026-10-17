@@ -680,13 +680,10 @@ static long member_elem_size(const cc_translation_unit_t *tu, const cc_struct_me
  * @param g  the variable
  * @return   the type, or NULL if not known
  */
-static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
-    const cc_ctype_t *t = g->ctype;
+static const cc_ctype_t *global_decl_ctype(const cc_global_t *g);
 
-    if (t == NULL) {
-        t = cc_ct_from_legacy(g->type, g->type_struct_id, g->array_ndim, g->array_dims);
-    }
-    return cc_ct_decay(t);
+static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
+    return cc_ct_decay(global_decl_ctype(g));
 }
 
 /**
@@ -696,7 +693,7 @@ static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
  * @return   the type, or NULL if not known
  */
 static const cc_ctype_t *global_decl_ctype(const cc_global_t *g) {
-    return g->ctype != NULL ? g->ctype : cc_ct_from_legacy(g->type, g->type_struct_id, g->array_ndim, g->array_dims);
+    return g->ctype;
 }
 
 /**
@@ -1007,10 +1004,6 @@ static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e
 
 static cc_type_t ptr_base_type(cc_type_t t);
 
-static int pointer_depth(cc_type_t t) {
-    return (int)cc_type_pointer_depth(t);
-}
-
 /**
  * Whether the operand of a `*` is a cast, or a cast plus or minus an
  * integer (a subscript of one): `*(T)p`, `((T)p)[i]`.
@@ -1048,13 +1041,6 @@ static int init_list_has_row_initializer(const cc_expr_t *list) {
         }
     }
     return 0;
-}
-
-static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
-    if (!is_pointer_type(t) || array_len < 0 || array_ndim <= 0) {
-        return 0;
-    }
-    return pointer_depth(t) >= array_ndim;
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
@@ -2423,11 +2409,9 @@ static const cc_global_t *find_global(const cc_translation_unit_t *tu, const cha
             if (g->init != NULL) {
                 score += 8;
             }
-            if (g->array_len > 0) {
-                score += 4;
-            }
-            if (g->array_ndim > 0) {
-                score += 2;
+            if (ct_has_kind(global_decl_ctype(g), CC_CT_ARRAY)) {
+                /* a declaration that gives the bound is preferred over one that leaves it out */
+                score += global_decl_ctype(g)->count > 0 ? 6 : 2;
             }
             if ((g->storage & CC_STORAGE_EXTERN) == 0) {
                 score += 1;
@@ -2706,8 +2690,7 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
         }
         g = find_global(tu, e->ident);
         if (g != NULL) {
-            return (g->array_ndim > 0 && g->array_len >= 0) ||
-                   is_array_object_decl(g->type, g->array_len, g->array_ndim);
+            return ct_has_kind(global_decl_ctype(g), CC_CT_ARRAY);
         }
     }
     if (e->kind == CC_EXPR_MEMBER) {
@@ -6247,8 +6230,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                  * bounds (e.g. typedef-backed extern declarations).
                  */
                 if (expr_is_array_obj ||
-                    (e->ctype == NULL && ((g->array_ndim > 0 && g->array_len >= 0) ||
-                                          is_array_object_decl(g->type, g->array_len, g->array_ndim)))) {
+                    (e->ctype == NULL && ct_has_kind(global_decl_ctype(g), CC_CT_ARRAY))) {
                     return emit_global_addr(sf, g->name, diag);
                 }
                 if (expr_is_struct_obj || (ct_record_id(lower_global_ctype(g)) >= 0)) {
@@ -9483,7 +9465,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     return -1;
                 }
-                if (is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
+                if (ct_has_kind(global_decl_ctype(g), CC_CT_ARRAY)) {
                     set_diag(diag, "assignment to array object is not supported");
                     return -1;
                 }
@@ -16928,13 +16910,6 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             out->globals[i].storage = tu->globals[i].storage;
             out->globals[i].attr_flags = tu->globals[i].attr_flags;
             out->globals[i].attr_align = tu->globals[i].attr_align;
-            if (getenv("CC_DEBUG_GLOBAL_TYPE") != NULL && tu->globals[i].name != NULL &&
-                strcmp(tu->globals[i].name, "sort_functions") == 0) {
-                fprintf(stderr, "cc-debug: sort_functions type=%d array_ndim=%d dims=%ld,%ld,%ld,%ld len=%ld\n",
-                        (int)tu->globals[i].type, tu->globals[i].array_ndim, tu->globals[i].array_dims[0],
-                        tu->globals[i].array_dims[1], tu->globals[i].array_dims[2], tu->globals[i].array_dims[3],
-                        tu->globals[i].array_len);
-            }
             if (tu->globals[i].attr_section != NULL) {
                 out->globals[i].attr_section = cc_strdup(tu->globals[i].attr_section);
                 if (out->globals[i].attr_section == NULL) {
@@ -16975,7 +16950,13 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 if (gsid >= 0) {
                     is_struct_global = 1;
                     struct_id = gsid;
-                    struct_elems = of_array ? tu->globals[i].array_len : 1;
+                    struct_elems = 1;
+                    if (of_array) {
+                        long each = cc_ct_size(cc_ct_record(gsid), tu);
+                        long total = cc_ct_size(global_decl_ctype(&tu->globals[i]), tu);
+
+                        struct_elems = each > 0 && total > 0 ? total / each : 0;
+                    }
                 }
             }
 
@@ -17261,9 +17242,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     out->globals[i].init_sym = NULL;
                     continue;
                 }
-                if (is_pointer_type(out->globals[i].type) && out->globals[i].array_len >= 0 &&
-                    tu->globals[i].array_ndim > 0 && ptr_base_type(tu->globals[i].type) != CC_TYPE_VOID) {
-                    int needs_flatten = tu->globals[i].array_ndim > 1;
+                if (ct_has_kind(global_decl_ctype(&tu->globals[i]), CC_CT_ARRAY) &&
+                    ct_record_id(global_decl_ctype(&tu->globals[i])->of) < 0) {
+                    const cc_ctype_t *gct = global_decl_ctype(&tu->globals[i]);
+                    int needs_flatten = ct_has_kind(gct->of, CC_CT_ARRAY);
                     size_t jj;
                     for (jj = 0; jj < init->arg_count; ++jj) {
                         if (init->args[jj] != NULL && init->args[jj]->kind == CC_EXPR_INIT_LIST) {
@@ -17272,10 +17254,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         }
                     }
                     if (needs_flatten) {
-                        cc_type_t scalar_type = tu->globals[i].type;
-                        int scalar_sid = tu->globals[i].type_struct_id;
+                        const cc_ctype_t *scalar = gct;
                         long dims[CC_MAX_ARRAY_DIMS];
-                        int nd = tu->globals[i].array_ndim;
+                        int nd = 0;
                         long scalar_size;
                         long elem_count = 1;
                         long total_size;
@@ -17287,16 +17268,17 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         size_t z;
                         int d;
 
-                        if (nd > CC_MAX_ARRAY_DIMS) {
-                            set_diag(diag, "array dimension count exceeds compiler limit");
-                            cc_ssa_module_free(out);
-                            return -1;
-                        }
-                        for (d = 0; d < nd; ++d) {
-                            dims[d] = tu->globals[i].array_dims[d];
+                        while (ct_has_kind(scalar, CC_CT_ARRAY)) {
+                            if (nd == CC_MAX_ARRAY_DIMS) {
+                                set_diag(diag, "array dimension count exceeds compiler limit");
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                            dims[nd++] = scalar->count;
+                            scalar = scalar->of;
                         }
                         if (dims[0] <= 0) {
-                            dims[0] = tu->globals[i].array_len > 0 ? tu->globals[i].array_len : (long)init->arg_count;
+                            dims[0] = (long)init->arg_count;
                         }
                         for (d = 0; d < nd; ++d) {
                             if (dims[d] <= 0) {
@@ -17305,18 +17287,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                 return -1;
                             }
                         }
-                        for (d = 0; d < nd; ++d) {
-                            if (!is_pointer_type(scalar_type)) {
-                                set_diag(diag, "malformed array type in global initializer");
-                                cc_ssa_module_free(out);
-                                return -1;
-                            }
-                            scalar_type = ptr_base_type(scalar_type);
-                            if (scalar_type != CC_TYPE_VOID) {
-                                scalar_sid = -1;
-                            }
-                        }
-                        scalar_size = type_size_bytes_with_struct(tu, scalar_type, scalar_sid);
+                        scalar_size = cc_ct_size(scalar, tu);
                         if (scalar_size <= 0) {
                             set_diag(diag, "unsupported scalar array element type in global initializer");
                             cc_ssa_module_free(out);
@@ -17342,9 +17313,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             cc_ssa_module_free(out);
                             return -1;
                         }
-                        if (flatten_scalar_array_init_cursor(tu, cc_ct_from_legacy(scalar_type, scalar_sid, 0, NULL), dims, nd,
-                                                             init, &cur, 0, buf,
-                                                             total_size, &relocs, &reloc_count, diag) != 0) {
+                        if (flatten_scalar_array_init_cursor(tu, scalar, dims, nd, init, &cur, 0, buf, total_size, &relocs,
+                                                             &reloc_count, diag) != 0) {
                             free(buf);
                             free_global_relocs(relocs, reloc_count);
                             cc_ssa_module_free(out);
@@ -17424,8 +17394,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     }
                 }
                 {
-                    cc_type_t base_t = ptr_base_type(tu->globals[i].type);
-                    if (tu->globals[i].array_ndim == 1 && cc_ct_is_character(cc_ct_from_scalar(base_t))) {
+                    const cc_ctype_t *gt = global_decl_ctype(&tu->globals[i]);
+                    if (ct_has_kind(gt, CC_CT_ARRAY) && cc_ct_is_character(gt->of)) {
                         long inferred_len = 0;
                         for (j = 0; j < init->arg_count; ++j) {
                             const cc_expr_t *it = init->args[j];
@@ -17461,7 +17431,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
             } else if (init != NULL && init->kind == CC_EXPR_CAST && init->lhs != NULL &&
-                       init->lhs->kind == CC_EXPR_STR && is_pointer_type(tu->globals[i].type)) {
+                       init->lhs->kind == CC_EXPR_STR && ct_is_pointer(lower_global_ctype(&tu->globals[i]))) {
                 init_is_string = 1;
                 out->globals[i].init_str = string_literal_emit_text(tu, init->lhs);
                 if (out->globals[i].init_str == NULL) {
