@@ -1457,7 +1457,7 @@ static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_d
 static int normalize_float_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
 static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
-static cc_type_t fp_builtin_storage_type(cc_type_t t);
+static cc_type_t fp_builtin_storage_type(const cc_expr_t *e);
 static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                                 var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg,
                                 cc_type_t *out_storage_type, cc_diag_t *diag);
@@ -6683,7 +6683,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             e->lhs->int_val == -1 &&
             (lower_has_kind(e->rhs, CC_CT_FLOAT) || lower_has_kind(e->rhs, CC_CT_DOUBLE) ||
              lower_has_kind(e->rhs, CC_CT_LDOUBLE))) {
-            cc_type_t store_t = fp_builtin_storage_type(e->rhs->value_type);
+            cc_type_t store_t = fp_builtin_storage_type(e->rhs);
             rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
             if (rhs < 0) {
                 return -1;
@@ -10667,11 +10667,19 @@ static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     return in.dst;
 }
 
-static cc_type_t fp_builtin_storage_type(cc_type_t t) {
-    if (t == CC_TYPE_FLOAT) {
+/**
+ * The floating type a floating builtin's operand is stored and inspected
+ * as: float, long double, or double for anything else (the integer and
+ * double operands, held as doubles).
+ *
+ * @param e  the operand
+ * @return   CC_TYPE_FLOAT, CC_TYPE_LDOUBLE or CC_TYPE_DOUBLE
+ */
+static cc_type_t fp_builtin_storage_type(const cc_expr_t *e) {
+    if (lower_has_kind(e, CC_CT_FLOAT)) {
         return CC_TYPE_FLOAT;
     }
-    if (t == CC_TYPE_LDOUBLE) {
+    if (lower_has_kind(e, CC_CT_LDOUBLE)) {
         return CC_TYPE_LDOUBLE;
     }
     return CC_TYPE_DOUBLE;
@@ -10691,7 +10699,7 @@ static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function
     if (v < 0) {
         return -1;
     }
-    store_t = fp_builtin_storage_type(arg->value_type);
+    store_t = fp_builtin_storage_type(arg);
     if (value_type(sf, v) != CC_VAL_F64) {
         v = cast_value(sf, v, CC_VAL_F64, diag);
         if (v < 0) {
