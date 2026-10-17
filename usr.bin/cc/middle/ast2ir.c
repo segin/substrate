@@ -5706,8 +5706,8 @@ static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_
     } ops[] = {{CC_BIN_ADD, "add", 3}, {CC_BIN_SUB, "sub", 3}, {CC_BIN_MUL, "mul", 3}, {CC_BIN_DIV, "div", 3},
                {CC_BIN_EQ, "eq", 2},   {CC_BIN_NE, "ne", 2},   {CC_BIN_LT, "lt", 2},   {CC_BIN_LE, "le", 2},
                {CC_BIN_GT, "gt", 2},   {CC_BIN_GE, "ge", 2}};
-    int sid = e->lhs->struct_id;
-    int bits = dec_bits_of(tu, e->lhs->value_type, sid);
+    int sid = lower_record_id(e->lhs);
+    int bits = dec_bits_of(tu, CC_TYPE_VOID, sid);
     dec_arg_t kinds[2] = {DEC_ARG_DEC, DEC_ARG_DEC};
     int sids[2];
     int args[2];
@@ -5758,8 +5758,10 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     int to = dec_bits_of(tu, e->aux_type, e->aux_struct_id);
     int from = dec_bits_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs));
-    cc_type_t st = e->lhs->value_type;
-    cc_type_t dt = e->aux_type;
+    const cc_ctype_t *st = lower_value_ctype(e->lhs);
+    const cc_ctype_t *dt = lower_value_ctype(e);
+    cc_ctype_kind_t sk = st != NULL ? st->kind : CC_CT_VOID;
+    cc_ctype_kind_t dk = dt != NULL ? dt->kind : CC_CT_VOID;
     int src = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
     dec_arg_t kind;
     int sids[1];
@@ -5768,7 +5770,7 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
     if (src < 0) {
         return -1;
     }
-    if (dt == CC_TYPE_VOID && e->aux_struct_id < 0) {
+    if (dk == CC_CT_VOID) {
         return src;
     }
     if (to != 0 && from != 0) {
@@ -5776,22 +5778,22 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
             return src;
         }
         snprintf(name, sizeof(name), "__bid_%s%s%s2", to > from ? "extend" : "trunc", dec_mode(from), dec_mode(to));
-        sids[0] = e->lhs->struct_id;
+        sids[0] = lower_record_id(e->lhs);
         kind = DEC_ARG_DEC;
         return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, e->aux_struct_id, diag);
     }
     if (to != 0) {
         /* to a decimal type: from an integer or a binary floating type */
         sids[0] = -1;
-        if (st == CC_TYPE_FLOAT || st == CC_TYPE_DOUBLE || st == CC_TYPE_LDOUBLE) {
-            const char *bm = st == CC_TYPE_FLOAT ? "sf" : st == CC_TYPE_DOUBLE ? "df" : "xf";
-            int bw = st == CC_TYPE_FLOAT ? 32 : st == CC_TYPE_DOUBLE ? 64 : 80;
+        if (sk == CC_CT_FLOAT || sk == CC_CT_DOUBLE || sk == CC_CT_LDOUBLE) {
+            const char *bm = sk == CC_CT_FLOAT ? "sf" : sk == CC_CT_DOUBLE ? "df" : "xf";
+            int bw = sk == CC_CT_FLOAT ? 32 : sk == CC_CT_DOUBLE ? 64 : 80;
 
-            kind = st == CC_TYPE_FLOAT ? DEC_ARG_FLOAT : st == CC_TYPE_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+            kind = sk == CC_CT_FLOAT ? DEC_ARG_FLOAT : sk == CC_CT_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
             snprintf(name, sizeof(name), "__bid_%s%s%s", bw <= to ? "extend" : "trunc", bm, dec_mode(to));
         } else {
-            int wide = integral_type_bits(st) > 32;
-            int uns = cc_type_is_unsigned_integral(st);
+            int wide = cc_ct_int_width(st) > 32;
+            int uns = lower_is_unsigned(e->lhs);
 
             src = cast_value(sf, src, CC_VAL_I64, diag);
             src = src < 0 ? -1 : normalize_integral_value(sf, src, wide ? (uns ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG)
@@ -5807,30 +5809,30 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
         return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, e->aux_struct_id, diag);
     }
     /* from a decimal type: to an integer or a binary floating type */
-    sids[0] = e->lhs->struct_id;
+    sids[0] = lower_record_id(e->lhs);
     kind = DEC_ARG_DEC;
-    if (dt == CC_TYPE_FLOAT || dt == CC_TYPE_DOUBLE || dt == CC_TYPE_LDOUBLE) {
-        const char *bm = dt == CC_TYPE_FLOAT ? "sf" : dt == CC_TYPE_DOUBLE ? "df" : "xf";
-        int bw = dt == CC_TYPE_FLOAT ? 32 : dt == CC_TYPE_DOUBLE ? 64 : 80;
-        dec_arg_t rk = dt == CC_TYPE_FLOAT ? DEC_ARG_FLOAT : dt == CC_TYPE_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+    if (dk == CC_CT_FLOAT || dk == CC_CT_DOUBLE || dk == CC_CT_LDOUBLE) {
+        const char *bm = dk == CC_CT_FLOAT ? "sf" : dk == CC_CT_DOUBLE ? "df" : "xf";
+        int bw = dk == CC_CT_FLOAT ? 32 : dk == CC_CT_DOUBLE ? 64 : 80;
+        dec_arg_t rk = dk == CC_CT_FLOAT ? DEC_ARG_FLOAT : dk == CC_CT_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
         int r;
 
         /* libgcc's names: trunc unless the binary type is the wider (sd to df and xf, dd to xf) */
         snprintf(name, sizeof(name), "__bid_%s%s%s", bw <= from ? "trunc" : "extend", dec_mode(from), bm);
         r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, rk, -1, diag);
-        if (r >= 0 && dt == CC_TYPE_FLOAT) {
+        if (r >= 0 && dk == CC_CT_FLOAT) {
             r = normalize_float_value(sf, r, CC_TYPE_FLOAT, diag);
         }
         return r;
     }
     {
-        int wide = integral_type_bits(dt) > 32;
-        int uns = cc_type_is_unsigned_integral(dt);
+        int wide = cc_ct_int_width(dt) > 32;
+        int uns = lower_is_unsigned(e);
         int r;
 
         snprintf(name, sizeof(name), "__bid_fix%s%s%s", uns ? "uns" : "", dec_mode(from), wide ? "di" : "si");
         r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, wide ? DEC_ARG_LLONG : DEC_ARG_INT, -1, diag);
-        return r < 0 ? -1 : normalize_integral_value(sf, r, dt, diag);
+        return r < 0 ? -1 : normalize_int_ct(sf, r, dt, diag);
     }
 }
 
@@ -5846,7 +5848,8 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     wide_t ws;
     int to_wide = wide_of(tu, e->aux_type, e->aux_struct_id, &wd);
     int from_wide = wide_of(tu, CC_TYPE_VOID, lower_record_id(e->lhs), &ws);
-    cc_type_t st = e->lhs->value_type;
+    const cc_ctype_t *sct = lower_value_ctype(e->lhs);
+    cc_ctype_kind_t st = sct != NULL ? sct->kind : CC_CT_VOID;
     long i;
 
     if (to_wide && from_wide) {
@@ -5861,7 +5864,7 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         }
         return (fill < 0 || wide_fix_top(sf, r, &wd, diag) != 0) ? -1 : r;
     }
-    if (to_wide && (st == CC_TYPE_FLOAT || st == CC_TYPE_DOUBLE || st == CC_TYPE_LDOUBLE)) {
+    if (to_wide && (st == CC_CT_FLOAT || st == CC_CT_DOUBLE || st == CC_CT_LDOUBLE)) {
         int r = wide_new(sf, &wd, diag);
         int v = r < 0 ? -1 : lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
         int args[3];
@@ -5870,18 +5873,18 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         if (v < 0) {
             return -1;
         }
-        if (st == CC_TYPE_LDOUBLE) {
+        if (st == CC_CT_LDOUBLE) {
             v = promote_f64_to_ldouble_value(sf, v, diag);
             abi[2] = CC_CALL_ARG_ABI_LDOUBLE;
         } else {
             v = demote_ldouble_to_f64_value(sf, v, diag);
-            abi[2] = st == CC_TYPE_FLOAT ? CC_CALL_ARG_ABI_FLOAT : CC_CALL_ARG_ABI_DEFAULT;
+            abi[2] = st == CC_CT_FLOAT ? CC_CALL_ARG_ABI_FLOAT : CC_CALL_ARG_ABI_DEFAULT;
         }
         args[0] = r;
         args[1] = wide_int_arg(sf, wide_prec(&wd));
         args[2] = v;
-        if (wide_libcall(sf, st == CC_TYPE_FLOAT ? "__fixsfbitint" : st == CC_TYPE_DOUBLE ? "__fixdfbitint"
-                                                                                           : "__fixxfbitint",
+        if (wide_libcall(sf, st == CC_CT_FLOAT ? "__fixsfbitint" : st == CC_CT_DOUBLE ? "__fixdfbitint"
+                                                                                       : "__fixxfbitint",
                          args, 3, abi, -1, 0, 0, diag) < 0) {
             return -1;
         }
@@ -5889,7 +5892,7 @@ static int lower_wide_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     }
     if (to_wide) {
         /* an integer: its value as a (unsigned) long long, sign- or zero-extended into the limbs */
-        int is_uns = cc_type_is_unsigned_integral(st) || st == CC_TYPE_BOOL;
+        int is_uns = cc_ct_is_unsigned(sct);
         cc_expr_t c;
         int v;
         int fill;
