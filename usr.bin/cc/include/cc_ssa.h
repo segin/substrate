@@ -11,6 +11,20 @@ typedef enum {
     CC_VAL_F64
 } cc_value_type_t;
 
+/** The kind of an IR value's type. */
+typedef enum {
+    CC_TY_INT = 0, /**< an integer of 1, 2, 4 or 8 bytes */
+    CC_TY_FLOAT,   /**< a floating value: float (4 bytes), double (8), long double (10 or more) */
+    CC_TY_AGG      /**< a structure, array or integer wider than 8 bytes, held as the address of its bytes */
+} cc_ssa_tykind_t;
+
+/** An IR value's type: its kind and size, and for an integer how it is held extended. */
+typedef struct {
+    unsigned char kind;        /**< a cc_ssa_tykind_t */
+    unsigned char is_unsigned; /**< an integer held zero-extended, not sign-extended */
+    uint32_t size;             /**< bytes; an aggregate's whole size */
+} cc_ssa_type_t;
+
 typedef enum {
     CC_CMP_EQ = 0,
     CC_CMP_NE,
@@ -226,9 +240,7 @@ typedef struct {
     size_t instr_count;
     size_t instr_cap;
 
-    cc_value_type_t *value_types;
-    unsigned char *value_is_unsigned;
-    uint32_t *value_sizes;     /**< bytes in each value; a structure value is its whole size */
+    cc_ssa_type_t *value_ty;   /**< each value's type: the accessors below read and write it */
     size_t value_cap;
     int value_count;
     int label_count;
@@ -242,6 +254,45 @@ typedef struct {
     size_t func_count;
     int needs_exec_stack; /**< a trampoline is built on the stack (a nested function's address) */
 } cc_ssa_module_t;
+
+/** The register class value @p v lives in: CC_VAL_F64 for a floating value, else CC_VAL_I64. */
+static inline cc_value_type_t cc_ssa_value_class(const cc_ssa_function_t *f, int v) {
+    return f->value_ty[v].kind == CC_TY_FLOAT ? CC_VAL_F64 : CC_VAL_I64;
+}
+
+/** How many bytes value @p v holds. */
+static inline uint32_t cc_ssa_value_size(const cc_ssa_function_t *f, int v) {
+    return f->value_ty[v].size;
+}
+
+/** Whether integer value @p v is held zero-extended. */
+static inline int cc_ssa_value_is_unsigned(const cc_ssa_function_t *f, int v) {
+    return f->value_ty[v].is_unsigned;
+}
+
+/** The kind a value of class @p vt and @p size bytes has. */
+static inline unsigned char cc_ssa_tykind_of(cc_value_type_t vt, uint32_t size) {
+    if (vt == CC_VAL_F64) {
+        return CC_TY_FLOAT;
+    }
+    return (size == 1 || size == 2 || size == 4 || size == 8) ? CC_TY_INT : CC_TY_AGG;
+}
+
+/** Make value @p v of register class @p vt, keeping its size. */
+static inline void cc_ssa_value_set_class(cc_ssa_function_t *f, int v, cc_value_type_t vt) {
+    f->value_ty[v].kind = cc_ssa_tykind_of(vt, f->value_ty[v].size);
+}
+
+/** Make value @p v @p size bytes, keeping its class. */
+static inline void cc_ssa_value_set_size(cc_ssa_function_t *f, int v, uint32_t size) {
+    f->value_ty[v].size = size;
+    f->value_ty[v].kind = cc_ssa_tykind_of(cc_ssa_value_class(f, v), size);
+}
+
+/** Say whether integer value @p v is held zero-extended. */
+static inline void cc_ssa_value_set_unsigned(cc_ssa_function_t *f, int v, int is_unsigned) {
+    f->value_ty[v].is_unsigned = (unsigned char)(is_unsigned ? 1 : 0);
+}
 
 void cc_ssa_module_init(cc_ssa_module_t *m);
 void cc_ssa_module_free(cc_ssa_module_t *m);

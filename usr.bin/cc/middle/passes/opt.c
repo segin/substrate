@@ -21,7 +21,7 @@ static void clear_known(const_state_t *st, int count) {
 }
 
 static int value_is_ldouble(const cc_ssa_function_t *f, int v) {
-    return f != NULL && f->value_sizes != NULL && v >= 0 && v < f->value_count && f->value_sizes[v] >= 16;
+    return f != NULL && v >= 0 && v < f->value_count && cc_ssa_value_size(f, v) >= 16;
 }
 
 /*
@@ -33,10 +33,10 @@ static int value_is_word32(const cc_ssa_function_t *f, int v) {
     if (cc_target_pointer_size() != 4) {
         return 0;
     }
-    if (f->value_sizes == NULL || v < 0 || v >= f->value_count || f->value_sizes[v] == 0) {
+    if (v < 0 || v >= f->value_count || cc_ssa_value_size(f, v) == 0) {
         return 1;
     }
-    return f->value_sizes[v] < 8;
+    return cc_ssa_value_size(f, v) < 8;
 }
 
 /*
@@ -159,7 +159,7 @@ static int fold_function(cc_ssa_function_t *f) {
         cc_value_type_t vt = CC_VAL_I64;
 
         if (dst >= 0 && (size_t)dst < (size_t)f->value_count) {
-            vt = f->value_types[dst];
+            vt = cc_ssa_value_class(f, dst);
         }
 
         switch (in->op) {
@@ -233,7 +233,7 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_F2I:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_F64) {
                 long double src = value_is_ldouble(f, in->lhs) ? st[in->lhs].ld : (long double)st[in->lhs].f;
-                int to_unsigned = in->is_unsigned || (f->value_is_unsigned != NULL && f->value_is_unsigned[dst]);
+                int to_unsigned = in->is_unsigned || cc_ssa_value_is_unsigned(f, dst);
 
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;

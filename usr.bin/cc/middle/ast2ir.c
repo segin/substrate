@@ -1659,7 +1659,7 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         f->instr_cap = ncap;
     }
     f->instrs[f->instr_count++] = in;
-    if (in.dst >= 0 && in.dst < f->value_count && f->value_types[in.dst] == CC_VAL_I64 && f->value_is_unsigned != NULL) {
+    if (in.dst >= 0 && in.dst < f->value_count && cc_ssa_value_class(f, in.dst) == CC_VAL_I64) {
         switch (in.op) {
         case CC_SSA_CONST:
         case CC_SSA_PARAM:
@@ -1676,11 +1676,11 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_CALL:
         case CC_SSA_CALLI:
         case CC_SSA_F2I:
-            f->value_is_unsigned[in.dst] = in.is_unsigned ? 1 : 0;
+            cc_ssa_value_set_unsigned(f, in.dst, in.is_unsigned);
             break;
         case CC_SSA_MOV:
             if (in.lhs >= 0 && in.lhs < f->value_count) {
-                f->value_is_unsigned[in.dst] = f->value_is_unsigned[in.lhs];
+                cc_ssa_value_set_unsigned(f, in.dst, cc_ssa_value_is_unsigned(f, in.lhs));
             }
             break;
         case CC_SSA_CMP:
@@ -1691,14 +1691,14 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_STACKALLOC:
         case CC_SSA_DYNALLOC:
         case CC_SSA_VA_START:
-            f->value_is_unsigned[in.dst] = 1;
+            cc_ssa_value_set_unsigned(f, in.dst, 1);
             break;
         default:
-            f->value_is_unsigned[in.dst] = 0;
+            cc_ssa_value_set_unsigned(f, in.dst, 0);
             break;
         }
     }
-    if (in.dst >= 0 && in.dst < f->value_count && f->value_sizes != NULL) {
+    if (in.dst >= 0 && in.dst < f->value_count) {
         switch (in.op) {
         case CC_SSA_PARAM:
         case CC_SSA_LOAD:
@@ -1708,7 +1708,7 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
             break;
         case CC_SSA_MOV:
             if (in.lhs >= 0 && in.lhs < f->value_count) {
-                set_value_size(f, in.dst, f->value_sizes[in.lhs]);
+                set_value_size(f, in.dst, cc_ssa_value_size(f, in.lhs));
             }
             break;
         case CC_SSA_CMP:
@@ -1736,7 +1736,7 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_F2I:
             break;
         default:
-            if (f->value_types[in.dst] == CC_VAL_F64) {
+            if (cc_ssa_value_class(f, in.dst) == CC_VAL_F64) {
                 set_value_size(f, in.dst, 8);
             }
             break;
@@ -1868,7 +1868,7 @@ static int emit_ext(cc_ssa_function_t *sf, int v, int bits, int is_unsigned, lon
         return -1;
     }
     set_value_size(sf, in.dst, size);
-    sf->value_is_unsigned[in.dst] = (unsigned char)in.is_unsigned;
+    cc_ssa_value_set_unsigned(sf, in.dst, in.is_unsigned);
     return in.dst;
 }
 
@@ -1881,7 +1881,7 @@ static int emit_ext(cc_ssa_function_t *sf, int v, int bits, int is_unsigned, lon
  *              less means "a word", the pointer size
  */
 static void set_value_size(cc_ssa_function_t *f, int v, long size) {
-    if (f == NULL || f->value_sizes == NULL || v < 0 || v >= f->value_count) {
+    if (f == NULL || v < 0 || v >= f->value_count) {
         return;
     }
     if (size <= 0) {
@@ -1891,14 +1891,15 @@ static void set_value_size(cc_ssa_function_t *f, int v, long size) {
     if ((unsigned long)size > UINT32_MAX) {
         size = (long)(UINT32_MAX >> 1);
     }
-    f->value_sizes[v] = (uint32_t)size;
+    cc_ssa_value_set_size(f, v, (uint32_t)size);
 }
 
+/** How many bytes value @p v holds; 0 for no value. */
 static long value_size(const cc_ssa_function_t *f, int v) {
-    if (f == NULL || f->value_sizes == NULL || v < 0 || v >= f->value_count || f->value_sizes[v] == 0) {
+    if (f == NULL || v < 0 || v >= f->value_count) {
         return 0;
     }
-    return f->value_sizes[v];
+    return cc_ssa_value_size(f, v);
 }
 
 static int new_label(cc_ssa_function_t *f) {
@@ -1955,14 +1956,14 @@ static cc_value_type_t value_type(const cc_ssa_function_t *f, int v) {
     if (v < 0 || (size_t)v >= (size_t)f->value_count) {
         return CC_VAL_I64;
     }
-    return f->value_types[v];
+    return cc_ssa_value_class(f, v);
 }
 
 static int value_is_unsigned(const cc_ssa_function_t *f, int v) {
-    if (f == NULL || v < 0 || (size_t)v >= (size_t)f->value_count || f->value_is_unsigned == NULL) {
+    if (f == NULL || v < 0 || (size_t)v >= (size_t)f->value_count) {
         return 0;
     }
-    return f->value_is_unsigned[v] ? 1 : 0;
+    return cc_ssa_value_is_unsigned(f, v);
 }
 
 static int var_find_visible(var_entry_t *vars, size_t var_count, const char *name, int depth) {
@@ -3355,7 +3356,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype
         return v;
     }
     if (bits >= 64) {
-        long cur_size = (sf->value_sizes != NULL && v >= 0 && v < sf->value_count) ? sf->value_sizes[v] : 0;
+        long cur_size = value_size(sf, v);
         int src_unsigned = value_is_unsigned(sf, v);
         size_t k;
 
@@ -3387,8 +3388,8 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype
         } else {
             set_value_size(sf, v, 8);
         }
-        if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
-            sf->value_is_unsigned[v] = want_unsigned ? 1 : 0;
+        if (v >= 0 && v < sf->value_count) {
+            cc_ssa_value_set_unsigned(sf, v, want_unsigned);
         }
         return v;
     }
@@ -3396,7 +3397,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype
     if (!want_unsigned && cc_target_pointer_size() <= 4 && bits == 32 && value_size(sf, v) <= 4) {
         /* already a signed word: relabelling it is enough */
         set_value_size(sf, v, 4);
-        sf->value_is_unsigned[v] = 0;
+        cc_ssa_value_set_unsigned(sf, v, 0);
         return v;
     }
     /* narrow: keep the type's bits, extended as its signedness says */
@@ -3431,8 +3432,8 @@ static int normalize_int_ct(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, 
     size = (cc_target_pointer_size() <= 4 && n <= 32) ? 4 : 8;
     vbits = (int)size * 8;
     if (n <= 0 || n >= vbits) {
-        if (sf->value_is_unsigned != NULL && v >= 0 && v < sf->value_count) {
-            sf->value_is_unsigned[v] = (unsigned char)uns;
+        if (v >= 0 && v < sf->value_count) {
+            cc_ssa_value_set_unsigned(sf, v, uns);
         }
         return v;
     }
@@ -3597,9 +3598,9 @@ static int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int l
     in.dst = new_value(sf, CC_VAL_I64);
     in.lhs = lhs;
     in.rhs = rhs;
-    if (in.dst >= 0 && sf->value_sizes != NULL) {
-        long lsz = (lhs >= 0 && lhs < sf->value_count) ? (long)sf->value_sizes[lhs] : (long)cc_target_pointer_size();
-        long rsz = (rhs >= 0 && rhs < sf->value_count) ? (long)sf->value_sizes[rhs] : (long)cc_target_pointer_size();
+    if (in.dst >= 0) {
+        long lsz = (lhs >= 0 && lhs < sf->value_count) ? value_size(sf, lhs) : (long)cc_target_pointer_size();
+        long rsz = (rhs >= 0 && rhs < sf->value_count) ? value_size(sf, rhs) : (long)cc_target_pointer_size();
         long width = lsz > rsz ? lsz : rsz;
 
         set_value_size(sf, in.dst, width);
@@ -10040,8 +10041,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 result_size = cc_target_pointer_size();
             }
             set_value_size(sf, dst, result_size > 0 ? result_size : cc_target_pointer_size());
-            if (sf->value_is_unsigned != NULL && dst >= 0 && dst < sf->value_count) {
-                sf->value_is_unsigned[dst] = lower_loads_unsigned(e) ? 1 : 0;
+            if (dst >= 0 && dst < sf->value_count) {
+                cc_ssa_value_set_unsigned(sf, dst, lower_loads_unsigned(e));
             }
         } else if (lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, dst, 16);

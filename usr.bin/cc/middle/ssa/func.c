@@ -115,35 +115,22 @@ int cc_ssa_function_new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
 
     if ((size_t)f->value_count + 1 > f->value_cap) {
         size_t ncap = f->value_cap == 0 ? 32 : f->value_cap * 2;
-        cc_value_type_t *types;
-        unsigned char *uns;
-        uint32_t *sizes;
+        cc_ssa_type_t *ty;
 
         while (ncap < (size_t)f->value_count + 1) {
             ncap *= 2;
         }
-        /* each array is stored as soon as it grows, so that none is lost if a later one fails */
-        types = (cc_value_type_t *)realloc(f->value_types, ncap * sizeof(*types));
-        if (types == NULL) {
+        ty = (cc_ssa_type_t *)realloc(f->value_ty, ncap * sizeof(*ty));
+        if (ty == NULL) {
             return -1;
         }
-        f->value_types = types;
-        uns = (unsigned char *)realloc(f->value_is_unsigned, ncap * sizeof(*uns));
-        if (uns == NULL) {
-            return -1;
-        }
-        f->value_is_unsigned = uns;
-        sizes = (uint32_t *)realloc(f->value_sizes, ncap * sizeof(*sizes));
-        if (sizes == NULL) {
-            return -1;
-        }
-        f->value_sizes = sizes;
+        f->value_ty = ty;
         f->value_cap = ncap;
     }
     f->value_count++;
-    f->value_types[id] = vt;
-    f->value_is_unsigned[id] = 0;
-    f->value_sizes[id] = (uint32_t)(vt == CC_VAL_F64 ? 8 : cc_target_pointer_size());
+    f->value_ty[id].size = (uint32_t)(vt == CC_VAL_F64 ? 8 : cc_target_pointer_size());
+    f->value_ty[id].is_unsigned = 0;
+    f->value_ty[id].kind = cc_ssa_tykind_of(vt, f->value_ty[id].size);
     return id;
 }
 
@@ -160,9 +147,7 @@ void cc_ssa_function_free(cc_ssa_function_t *f) {
     free(f->param_values);
     free(f->param_types);
     free(f->param_abi);
-    free(f->value_types);
-    free(f->value_is_unsigned);
-    free(f->value_sizes);
+    free(f->value_ty);
 
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_free(&f->instrs[i]);

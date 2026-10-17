@@ -27,9 +27,9 @@ static int ext_scratch(cc_ssa_function_t *f, const cc_ssa_instr_t *ext, long siz
     int v = ext->rhs;
 
     if (v >= 0 && v < f->value_count) {
-        f->value_types[v] = CC_VAL_I64;
-        f->value_is_unsigned[v] = 0;
-        f->value_sizes[v] = (uint32_t)size;
+        cc_ssa_value_set_class(f, v, CC_VAL_I64);
+        cc_ssa_value_set_unsigned(f, v, 0);
+        cc_ssa_value_set_size(f, v, (uint32_t)size);
         return v;
     }
     return -1;
@@ -54,7 +54,7 @@ static int ext_scratch(cc_ssa_function_t *f, const cc_ssa_instr_t *ext, long siz
  */
 static int expand_ext(cc_ssa_function_t *f, const cc_ssa_instr_t *ext, cc_ssa_instr_t out[2]) {
     long ptr = cc_target_pointer_size();
-    long dsize = f->value_sizes[ext->dst];
+    long dsize = cc_ssa_value_size(f, ext->dst);
     int bits = (int)ext->imm;
     int wbits = cc_ssa_ext_word_bits(dsize, ptr);
 

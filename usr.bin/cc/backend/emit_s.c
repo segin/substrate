@@ -774,7 +774,7 @@ static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_i
     if (value < 0 || value >= f->value_count) {
         return -1;
     }
-    if (f->value_types[value] != CC_VAL_I64) {
+    if (cc_ssa_value_class(f, value) != CC_VAL_I64) {
         return -1;
     }
     if (visiting[value]) {
@@ -1893,7 +1893,7 @@ static long value_size_bytes(const cc_ssa_function_t *f, int v, long fallback) {
     if (fallback <= 0) {
         fallback = 4;
     }
-    if (f == NULL || v < 0 || v >= f->value_count || f->value_sizes == NULL || f->value_sizes[v] == 0) {
+    if (f == NULL || v < 0 || v >= f->value_count || cc_ssa_value_size(f, v) == 0) {
         return fallback;
     }
     if (f->param_values != NULL && f->param_abi != NULL) {
@@ -1903,7 +1903,7 @@ static long value_size_bytes(const cc_ssa_function_t *f, int v, long fallback) {
             }
         }
     }
-    return f->value_sizes[v];
+    return cc_ssa_value_size(f, v);
 }
 
 static int is_stackalloc_value(const slot_layout_t *lay, int v) {
@@ -1995,7 +1995,7 @@ static int int_regs_spill_reg(FILE *fp, const cc_ssa_function_t *f, const slot_l
         st->reg_dirty[r] = 0;
         return 0;
     }
-    if (st->reg_dirty[r] && f->value_types[v] == CC_VAL_I64 && !is_stackalloc_value(lay, v)) {
+    if (st->reg_dirty[r] && cc_ssa_value_class(f, v) == CC_VAL_I64 && !is_stackalloc_value(lay, v)) {
         off = slot_off(lay, v);
         emit_frame_store_reg(fp, st->is_64bit, st->regs[r], off);
     }
@@ -3458,7 +3458,7 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
     size_t i;
 
     for (i = 0; i < in->arg_count; ++i) {
-        cc_value_type_t vt = f->value_types[in->args[i]];
+        cc_value_type_t vt = cc_ssa_value_class(f, in->args[i]);
         if (in->call_arg_abi != NULL && in->call_arg_abi[i] == CC_CALL_ARG_ABI_ZERO) {
             locs[i].kind = ABI_LOC_NONE;
             locs[i].index = 0;
@@ -3853,7 +3853,7 @@ static int emit_x86_64_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_
 
 static int emit_x86_64_cmp(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                            const cc_ssa_instr_t *in) {
-    if (f->value_types[in->lhs] == CC_VAL_F64 || f->value_types[in->rhs] == CC_VAL_F64) {
+    if (cc_ssa_value_class(f, in->lhs) == CC_VAL_F64 || cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) {
         return emit_x86_64_cmp_float(fp, f, lay, ist, in);
     } else {
         return emit_x86_64_cmp_int(fp, f, lay, ist, in);
@@ -3868,7 +3868,7 @@ static int emit_x86_64_store_value_to_rsp(FILE *fp, const cc_ssa_function_t *f, 
         set_diag(diag, "call argument value out of range");
         return -1;
     }
-    if (f->value_types[value] == CC_VAL_F64) {
+    if (cc_ssa_value_class(f, value) == CC_VAL_F64) {
         fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, value));
         fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off_rsp);
     } else {
@@ -3889,7 +3889,7 @@ static int emit_x86_64_store_ldouble_to_rsp(FILE *fp, const cc_ssa_function_t *f
         set_diag(diag, "call argument value out of range");
         return -1;
     }
-    if (f->value_types[value] != CC_VAL_F64) {
+    if (cc_ssa_value_class(f, value) != CC_VAL_F64) {
         set_diag(diag, "internal error: non-float assigned to long double argument");
         return -1;
     }
@@ -4016,7 +4016,7 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
             set_diag(diag, "call with unsupported floating argument index");
             return -1;
         }
-        if (f->value_types[value] != CC_VAL_F64) {
+        if (cc_ssa_value_class(f, value) != CC_VAL_F64) {
             set_diag(diag, "internal error: non-float assigned to XMM argument");
             return -1;
         }
@@ -4068,7 +4068,7 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
             }
             return 0;
         }
-        if (f->value_types[value] == CC_VAL_F64) {
+        if (cc_ssa_value_class(f, value) == CC_VAL_F64) {
             set_diag(diag, "internal error: float assigned to integer argument register");
             return -1;
         }
@@ -4350,7 +4350,7 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         return 0;
     }
     if (in->dst >= 0) {
-        if (f->value_types[in->dst] == CC_VAL_F64) {
+        if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
             if (in->call_ret_x87) {
                 if (value_size_bytes(f, in->dst, 8) >= 16) fprintf(fp, "\tfstpt %d(%%rbp)\n", slot_off(lay, in->dst));
                 else fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
@@ -4482,7 +4482,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             for (v = 0; v < f->value_count; ++v) {
                 long off = slot_off(&lay, v);
                 if (off != 0) {
-                    fprintf(fp, "\t# ccdbg slot v%d off=%ld ty=%d\n", v, off, (int)f->value_types[v]);
+                    fprintf(fp, "\t# ccdbg slot v%d off=%ld ty=%d\n", v, off, (int)cc_ssa_value_class(f, v));
                 }
             }
         }
@@ -4565,7 +4565,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             switch (in->op) {
             case CC_SSA_PARAM: {
                 abi_loc_t loc = abi64_param_loc(f, in->param_index, (size_t)param_gpr_bias);
-                cc_value_type_t vt = f->value_types[in->dst];
+                cc_value_type_t vt = cc_ssa_value_class(f, in->dst);
                 int param_is_float = f->param_abi != NULL && in->param_index >= 0 &&
                                      (size_t)in->param_index < f->param_count &&
                                      f->param_abi[in->param_index] == CC_CALL_ARG_ABI_FLOAT;
@@ -4737,7 +4737,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             }
 
             case CC_SSA_CONST:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     if (value_size_bytes(f, in->dst, 8) >= 16) {
                         unsigned char raw[16];
@@ -4777,7 +4777,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_STR:
                 emit_string_literal_label(fp, i, j, in->sym, func_sec);
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tleaq .L__cc_str_%zu_%zu(%%rip), %%rax\n", i, j);
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
@@ -4788,7 +4788,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_MOV:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     emit_x86_64_mov_fp(fp, f, &lay, in);
                 } else {
@@ -4832,7 +4832,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                  * current value to be materialized in its stack slot.
                  */
                 int_regs_flush(fp, f, &lay, &ist);
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     fprintf(fp, "\tleaq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
@@ -4843,7 +4843,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_GADDR: {
                 int use_got = pic || module_symbol_is_extern_global(m, in->sym);
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     if (use_got) {
                         fprintf(fp, "\tmovq %s@GOTPCREL(%%rip), %%rax\n", in->sym);
@@ -4863,7 +4863,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             }
 
             case CC_SSA_LADDR:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tleaq ");
                     emit_local_label(fp, f->name, in->label);
@@ -4883,7 +4883,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                  * aliased locals.
                  */
                 int_regs_flush(fp, f, &lay, &ist);
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     emit_x86_64_load_fp_indirect(fp, f, &lay, &ist, in);
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
@@ -4920,7 +4920,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                  * semantics correct by spilling/invalidating integer cache.
                  */
                 int_regs_flush(fp, f, &lay, &ist);
-                if (f->value_types[in->rhs] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) {
                     long mem_size = in->imm > 0 ? in->imm : 8;
                     emit_x86_64_store_fp_indirect(fp, f, &lay, &ist, in, mem_size);
                 } else {
@@ -4947,7 +4947,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_XOR:
             case CC_SSA_SHL:
             case CC_SSA_SHR:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     if (in->op == CC_SSA_AND || in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_SHL ||
                         in->op == CC_SSA_SHR) {
@@ -5090,7 +5090,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_F2I:
                 {
                     int f2i_u64 = value_size_bytes(f, in->dst, 8) >= 8 &&
-                                  (in->is_unsigned || (f->value_is_unsigned != NULL && f->value_is_unsigned[in->dst]));
+                                  (in->is_unsigned || cc_ssa_value_is_unsigned(f, in->dst));
 
                     if (value_size_bytes(f, in->lhs, 8) >= 16) {
                         int rd;
@@ -5408,7 +5408,7 @@ static int function_uses_f64(const cc_ssa_function_t *f) {
         }
     }
     for (i = 0; i < f->value_count; ++i) {
-        if (f->value_types[i] == CC_VAL_F64) {
+        if (cc_ssa_value_class(f, i) == CC_VAL_F64) {
             return 1;
         }
     }
@@ -5457,7 +5457,7 @@ static void emit_i386_sse_store_f64(FILE *fp, const slot_layout_t *lay, const ch
  * @return   1 or 0
  */
 static int i386_fp_is_ext(const cc_ssa_function_t *f, int v) {
-    return v >= 0 && v < f->value_count && f->value_types[v] == CC_VAL_F64 && value_size_bytes(f, v, 8) >= 10;
+    return v >= 0 && v < f->value_count && cc_ssa_value_class(f, v) == CC_VAL_F64 && value_size_bytes(f, v, 8) >= 10;
 }
 
 /**
@@ -5754,7 +5754,7 @@ static void emit_i386_f2i_x87(FILE *fp, const cc_ssa_function_t *f, const slot_l
                               const cc_ssa_instr_t *in, int scratch_off) {
     int dst = slot_off(lay, in->dst);
     int is_u64 = value_size_bytes(f, in->dst, 4) >= 8 &&
-                 (in->is_unsigned || (f->value_is_unsigned != NULL && f->value_is_unsigned[in->dst]));
+                 (in->is_unsigned || cc_ssa_value_is_unsigned(f, in->dst));
 
     int_regs_flush(fp, f, lay, ist);
     fprintf(fp, "\tfnstcw %d(%%ebp)\n", scratch_off);
@@ -6329,7 +6329,7 @@ static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t 
     if (call_arg_is_agg_mem_abi(in, arg_index)) {
         return i386_param_slot_bytes(arg_size);
     }
-    if (i386_fp_is_ext(f, value) || f->value_types[value] == CC_VAL_F64) {
+    if (i386_fp_is_ext(f, value) || cc_ssa_value_class(f, value) == CC_VAL_F64) {
         return 8;
     }
     if (is_stackalloc_value(lay, value)) {
@@ -6370,7 +6370,7 @@ static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const 
         emit_i386_x87_load_f64(fp, f, lay, value);
         fprintf(fp, "\tfstpl (%%esp)\n");
         *stack_bytes += 8;
-    } else if (f->value_types[value] == CC_VAL_F64) {
+    } else if (cc_ssa_value_class(f, value) == CC_VAL_F64) {
         emit_i386_push_slot(fp, off + 4);
         emit_i386_push_slot(fp, off);
         *stack_bytes += 8;
@@ -6429,7 +6429,7 @@ static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, 
         }
         return;
     }
-    if (f->value_types[in->dst] == CC_VAL_F64) {
+    if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
         emit_i386_x87_store_f64(fp, f, lay, in->dst);
     } else {
         long ret_bytes = in->imm > 0 ? in->imm : 4;
@@ -6676,13 +6676,13 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     }
                     rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     fprintf(fp, "\tleal %d(%%ebp), %s\n", soff, ist.regs[rd]);
-                } else if (param_is_ldouble && f->value_types[in->dst] == CC_VAL_F64) {
+                } else if (param_is_ldouble && cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tfldt %d(%%ebp)\n", poff);
                     emit_i386_x87_store_f64(fp, f, &lay, in->dst);
                 } else if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
                            f->param_abi[in->param_index] == CC_CALL_ARG_ABI_FLOAT &&
-                           f->value_types[in->dst] == CC_VAL_F64) {
+                           cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     /* it came as 4 bytes of single precision; the function holds it as a double */
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tflds %d(%%ebp)\n", poff);
@@ -6691,7 +6691,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     int_regs_flush(fp, f, &lay, &ist);
                     fprintf(fp, "\tfldl %d(%%ebp)\n", poff);
                     emit_i386_x87_store_f64(fp, f, &lay, in->dst);
-                } else if (f->value_types[in->dst] == CC_VAL_F64) {
+                } else if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     emit_i386_copy_f64_param_to_slot(fp, &lay, in->dst, poff);
                 } else {
@@ -6710,7 +6710,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             }
 
             case CC_SSA_CONST:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     if (i386_fp_is_ext(f, in->dst)) {
 #if LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384
@@ -6755,7 +6755,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_MOV:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     emit_i386_mov_fp(fp, f, &lay, in, use_x87_fp);
                 } else {
@@ -6825,7 +6825,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                  * aliased locals.
                  */
                 int_regs_flush(fp, f, &lay, &ist);
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     emit_i386_load_fp_indirect(fp, f, &lay, &ist, in, use_x87_fp);
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
@@ -6842,7 +6842,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                  * semantics correct by spilling/invalidating integer cache.
                  */
                 int_regs_flush(fp, f, &lay, &ist);
-                if (f->value_types[in->rhs] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) {
                     emit_i386_store_fp_indirect(fp, f, &lay, &ist, in, use_x87_fp);
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
@@ -6868,7 +6868,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_XOR:
             case CC_SSA_SHL:
             case CC_SSA_SHR:
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     if (in->op == CC_SSA_AND || in->op == CC_SSA_OR || in->op == CC_SSA_XOR || in->op == CC_SSA_SHL ||
                         in->op == CC_SSA_SHR) {
@@ -6916,7 +6916,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                 break;
 
             case CC_SSA_CMP: {
-                if (f->value_types[in->lhs] == CC_VAL_F64 || f->value_types[in->rhs] == CC_VAL_F64) {
+                if (cc_ssa_value_class(f, in->lhs) == CC_VAL_F64 || cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) {
                     if (use_x87_fp) {
                         emit_i386_cmp_float_x87(fp, f, &lay, &ist, in);
                     } else {
@@ -6940,7 +6940,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             case CC_SSA_F2I:
                 /* SSE2 on i386 converts only to a signed 32-bit integer */
                 if (use_x87_fp || value_size_bytes(f, in->dst, 4) >= 8 || in->is_unsigned ||
-                    (f->value_is_unsigned != NULL && f->value_is_unsigned[in->dst])) {
+                    cc_ssa_value_is_unsigned(f, in->dst)) {
                     emit_i386_f2i_x87(fp, f, &lay, &ist, in, scratch_off);
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);

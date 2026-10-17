@@ -56,16 +56,23 @@ typedef struct {
  * @return     @p buf
  */
 static const char *value_type_text(const cc_ssa_function_t *f, int v, char *buf, size_t cap) {
-    unsigned size = (v >= 0 && v < f->value_count && f->value_sizes != NULL) ? f->value_sizes[v] : 8;
+    unsigned size;
 
-    if (v < 0) {
+    if (v < 0 || v >= f->value_count) {
         snprintf(buf, cap, "void");
-    } else if (v < f->value_count && f->value_types[v] == CC_VAL_F64) {
+        return buf;
+    }
+    size = cc_ssa_value_size(f, v);
+    switch ((cc_ssa_tykind_t)f->value_ty[v].kind) {
+    case CC_TY_FLOAT:
         snprintf(buf, cap, "%s", size == 4 ? "f32" : size > 8 ? "f80" : "f64");
-    } else if (size == 1 || size == 2 || size == 4 || size == 8) {
+        break;
+    case CC_TY_INT:
         snprintf(buf, cap, "i%u", size * 8);
-    } else {
+        break;
+    default:
         snprintf(buf, cap, "agg%u", size);
+        break;
     }
     return buf;
 }
@@ -458,7 +465,7 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
     const cc_ssa_function_t *f = d->f;
     char t[16];
     char lt[16];
-    int lf = in->lhs >= 0 && in->lhs < f->value_count && f->value_types[in->lhs] == CC_VAL_F64;
+    int lf = in->lhs >= 0 && in->lhs < f->value_count && cc_ssa_value_class(f, in->lhs) == CC_VAL_F64;
     const char *bn;
     size_t k;
 
@@ -481,7 +488,7 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
         fprintf(out, "param %s %d", t, in->param_index);
         return;
     case CC_SSA_CONST:
-        if (f->value_types[in->dst] == CC_VAL_F64) {
+        if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
             fprintf(out, "fconst %s %.17g", t, in->fimm);
         } else {
             fprintf(out, "const %s %lld", t, in->imm);
