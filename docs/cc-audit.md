@@ -514,6 +514,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   *Reproduced* (both targets).  Sema recognises the literal before its
   check turns a scalar one into a cast of its value, and lowering puts a
   scalar literal in storage of its own.  `codegen/compound_literal_address.c`.
+- [x] **CC-88** A compound literal of array type with no bound,
+  `(T[]){...}`, shall take its bound from its initializer (C11
+  6.5.2.5p4, 6.7.9p22).  cc left its type incomplete, so
+  `sizeof((int[]){1, 2, 3})` was rejected ("unsupported sizeof operand
+  in lowering").  *Reproduced* (both targets).  The parser completes the
+  literal's type from the list as it parses it; the bound inference also
+  takes a signed char array from a string, as CC-85 requires.
+  `codegen/compound_literal_bound.c`.
+- [ ] **CC-89** `(*q)[i]` through a file-scope pointer to an array,
+  `static int (*q)[2] = &arr;`, shall read the array's element.  cc reads
+  the pointer's value instead (`(*q)[0]` gives arr's address, `(*q)[1]`
+  0); through a local pointer it is right.  *Reproduced* (both targets).
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -926,7 +938,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-87 requirements: 86 met, 1 open.
+89 requirements: 87 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

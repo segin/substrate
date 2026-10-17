@@ -4997,7 +4997,7 @@ static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int 
         if (item != NULL && item->kind == CC_EXPR_STR) {
             wide = cc_string_literal_is_wide(item);
             if ((wide && cc_type_is_integral(elem_type)) ||
-                (!wide && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR))) {
+                (!wide && cc_ct_is_character(cc_ct_from_scalar(elem_type)))) {
                 inferred = parser_string_literal_array_bound(item);
                 if (inferred > 0) {
                     return inferred;
@@ -9392,6 +9392,16 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 if (e->lhs == NULL) {
                     free_expr(e);
                     return NULL;
+                }
+                /* `(T[]){...}`: the bound comes from the list (C11 6.5.2.5p4, 6.7.9p22) */
+                if (e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY && e->ctype->count < 0) {
+                    long n = parser_init_list_array_bound(p, e->value_type, e->struct_id, e->lhs);
+
+                    if (n > 0) {
+                        e->ctype = cc_ct_array(e->ctype->of, n);
+                        e->array_dims[0] = n;
+                        cast_array_len = n;
+                    }
                 }
                 return e;
             }
