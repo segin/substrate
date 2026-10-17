@@ -3834,9 +3834,6 @@ static const cc_ctype_t *parser_complete_operand_array(parser_t *p, const cc_exp
         if (g->ctype != NULL && g->ctype->kind == CC_CT_ARRAY && g->ctype->count > 0) {
             return g->ctype;
         }
-        if (g->array_len > 0) {
-            return cc_ct_array(t->of, g->array_len);
-        }
         init = g->init;
     } else if (e->kind == CC_EXPR_CAST) {
         init = e->lhs;
@@ -6477,6 +6474,26 @@ static void free_global_decl(cc_global_t *g) {
     g->init = NULL;
 }
 
+/**
+ * Whether two declarations of one file-scope object agree on its type,
+ * qualifiers aside: the same type, or arrays of agreeing elements whose
+ * bounds are equal where both are given.
+ */
+static int parser_global_types_agree(const cc_ctype_t *a, const cc_ctype_t *b) {
+    if (a == NULL || b == NULL) {
+        return a == b;
+    }
+    a = a->unqual;
+    b = b->unqual;
+    if (a->kind == CC_CT_ARRAY && b->kind == CC_CT_ARRAY) {
+        if (a->count >= 0 && b->count >= 0 && a->count != b->count) {
+            return 0;
+        }
+        return parser_global_types_agree(a->of, b->of);
+    }
+    return a == b;
+}
+
 static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
     size_t i;
     for (i = 0; i < tu->global_count; ++i) {
@@ -6489,11 +6506,7 @@ static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
         if (strcmp(cur->name, g.name) != 0) {
             continue;
         }
-        if (cur->type != g.type || cur->type_struct_id != g.type_struct_id) {
-            break;
-        }
-        if (cur->array_ndim > 0 && g.array_ndim > 0 && cur->array_ndim == g.array_ndim &&
-            memcmp(cur->array_dims, g.array_dims, sizeof(cur->array_dims)) != 0) {
+        if (!parser_global_types_agree(cur->ctype, g.ctype)) {
             break;
         }
 
@@ -6512,12 +6525,10 @@ static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
             cur->init = g.init;
             g.init = NULL;
         }
-        if (cur->array_len == 0 && g.array_len > 0) {
-            cur->array_len = g.array_len;
-        }
-        if (cur->array_ndim == 0 && g.array_ndim > 0) {
-            cur->array_ndim = g.array_ndim;
-            memcpy(cur->array_dims, g.array_dims, sizeof(cur->array_dims));
+        /* the composite type: a bound one declaration gives completes the other's */
+        if (cur->ctype != NULL && cur->ctype->kind == CC_CT_ARRAY && cur->ctype->count < 0 && g.ctype != NULL &&
+            g.ctype->kind == CC_CT_ARRAY && g.ctype->count >= 0) {
+            cur->ctype = g.ctype;
         }
         if (cur_extern && !new_extern) {
             cur->storage &= ~CC_STORAGE_EXTERN;
@@ -8746,13 +8757,12 @@ static void fold_sizeof_expr(parser_t *p, cc_expr_t *e) {
  * address constant; the global initializer machinery then handles every
  * type of literal as it handles a named object's.
  *
- * @param p          the parser
- * @param e          the compound literal: a CC_EXPR_CAST whose operand is
- *                   its brace list
- * @param array_len  the literal's array length, or -1 if it is no array
- * @return           0, or -1 when out of memory
+ * @param p  the parser
+ * @param e  the compound literal: a CC_EXPR_CAST whose operand is its
+ *           brace list
+ * @return   0, or -1 when out of memory
  */
-static int hoist_file_literal(parser_t *p, cc_expr_t *e, long array_len) {
+static int hoist_file_literal(parser_t *p, cc_expr_t *e) {
     char name[48];
     cc_global_t g;
 
@@ -8761,11 +8771,6 @@ static int hoist_file_literal(parser_t *p, cc_expr_t *e, long array_len) {
     g.name = cc_strdup(name);
     g.line = e->line;
     g.col = e->col;
-    if (parser_ctype_legacy(e->ctype, &g.type, &g.type_struct_id, NULL, &g.array_ndim, g.array_dims) == 0 &&
-        g.array_ndim > 0 && g.array_dims[0] <= 0 && array_len > 0) {
-        g.array_dims[0] = array_len;
-    }
-    g.array_len = array_len;
     g.storage = CC_STORAGE_STATIC;
     g.init = e->lhs;
     g.ctype = e->ctype;
@@ -8919,7 +8924,6 @@ static cc_expr_t *parse_unary(parser_t *p) {
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
         if (next_tok(&q) == 0 && is_declspec_start(&q)) {
             cc_type_t cast_type;
-            long cast_array_len = -1;
             if (e == NULL) {
                 return NULL;
             }
@@ -8927,8 +8931,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name_ct(p, &cast_type, NULL, &cast_array_len, NULL, NULL, 1, "expected cast type", &e->ctype,
-                                   NULL) != 0) {
+            if (parse_type_name_ct(p, &cast_type, NULL, NULL, NULL, NULL, 1, "expected cast type", &e->ctype, NULL) != 0) {
                 free_expr(e);
                 return NULL;
             }
@@ -8953,12 +8956,11 @@ static cc_expr_t *parse_unary(parser_t *p) {
 
                     if (n > 0) {
                         e->ctype = cc_ct_array(e->ctype->of, n);
-                        cast_array_len = n;
                     }
                 }
                 /* a file-scope array literal stands for its address: an object of static storage */
                 if (p->scope_depth == 0 && e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY &&
-                    hoist_file_literal(p, e, cast_array_len) != 0) {
+                    hoist_file_literal(p, e) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -8990,7 +8992,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         /* the address of a file-scope compound literal: an object of static storage (an array one is already) */
         if (p->scope_depth == 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
-            e->lhs->lhs->kind == CC_EXPR_INIT_LIST && hoist_file_literal(p, e->lhs, -1) != 0) {
+            e->lhs->lhs->kind == CC_EXPR_INIT_LIST && hoist_file_literal(p, e->lhs) != 0) {
             free_expr(e);
             return NULL;
         }
@@ -11715,11 +11717,6 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 decls[di].decl_name = NULL;
                 g.line = decls[di].line;
                 g.col = decls[di].col;
-                g.type = decls[di].type;
-                g.type_struct_id = decls[di].type_struct_id;
-                g.array_len = decls[di].array_len;
-                g.array_ndim = decls[di].array_ndim;
-                memcpy(g.array_dims, decls[di].array_dims, sizeof(g.array_dims));
                 g.storage = decls[di].storage;
                 g.attr_flags = decls[di].attr_flags;
                 g.attr_align = decls[di].attr_align;

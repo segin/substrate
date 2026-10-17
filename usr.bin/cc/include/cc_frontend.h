@@ -490,18 +490,14 @@ typedef struct {
     char *name;
     size_t line;
     size_t col;
-    cc_type_t type;
-    int type_struct_id;
-    long array_len;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
     cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_section;
     char *attr_alias;
     cc_expr_t *init;
-    const struct cc_ctype *ctype; /**< its declared type (cc_ctype.h); NULL where the declaration recorded none */
+    const struct cc_ctype *ctype; /**< its type (cc_ctype.h): as declared, completed by a later declaration or,
+                                       by sema, from its initializer */
 } cc_global_t;
 
 typedef struct {
