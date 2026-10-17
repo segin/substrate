@@ -19,7 +19,7 @@ export AS=${AS:-as} LD=${LD:-ld}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cc_selfhost.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-srcs=$(sed -n '/^CC_SRCS/,/emit_s\.c$/p' "$CCDIR/Makefile" | tr -d '\\' | sed 's/CC_SRCS *=//')
+srcs=$(sed -n '/^CC_SRCS/,/[^\\]$/p' "$CCDIR/Makefile" | tr -d '\\' | sed 's/CC_SRCS *=//')
 [ -n "$srcs" ] || { echo "run_selfhost: no CC_SRCS in $CCDIR/Makefile"; exit 1; }
 
 # build_cc COMPILER DIR: compile cc's sources with COMPILER, link DIR/cc

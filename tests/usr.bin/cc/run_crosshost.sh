@@ -17,7 +17,7 @@ HOST_CC=${HOST_CC:-cc}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cc_crosshost.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-srcs=$(sed -n '/^CC_SRCS/,/emit_s\.c$/p' "$CCDIR/Makefile" | tr -d '\\' | sed 's/CC_SRCS *=//')
+srcs=$(sed -n '/^CC_SRCS/,/[^\\]$/p' "$CCDIR/Makefile" | tr -d '\\' | sed 's/CC_SRCS *=//')
 [ -n "$srcs" ] || { echo "run_crosshost: no CC_SRCS in $CCDIR/Makefile"; exit 1; }
 
 # build_cc FLAGS OUT: build cc with the host compiler and FLAGS into OUT
