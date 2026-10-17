@@ -614,6 +614,32 @@ static cc_value_type_t ct_value_kind(const cc_ctype_t *t) {
 }
 
 /**
+ * Whether a value of type @p t lives in memory and is moved by copying
+ * its bytes: a structure, union or array, and the types lowering keeps
+ * in a hidden structure -- complex, decimal floating, and integers wider
+ * than 64 bits.
+ *
+ * @param t  the type, or NULL
+ * @return   1 or 0
+ */
+static int ct_in_memory(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return 0;
+    }
+    switch (t->kind) {
+    case CC_CT_RECORD:
+    case CC_CT_ARRAY:
+    case CC_CT_COMPLEX:
+    case CC_CT_DECIMAL32:
+    case CC_CT_DECIMAL64:
+    case CC_CT_DECIMAL128:
+        return 1;
+    default:
+        return cc_ct_is_integer(t) && cc_ct_int_width(t) > 64;
+    }
+}
+
+/**
  * The kind of IR value an expression's value is held in (ct_value_kind()).
  *
  * @param e  the expression
@@ -709,6 +735,26 @@ static long lower_pointee_size(const cc_translation_unit_t *tu, const cc_expr_t 
     }
     n = cc_ct_size(t->of, tu);
     return n > 0 ? n : -1;
+}
+
+/**
+ * The step of pointer arithmetic on @p e: the size of what it points to,
+ * or 1 for a `void *` or a pointer to a function, as GNU C counts them.
+ *
+ * @param tu  the translation unit
+ * @param e   the pointer operand
+ * @return    the step, or -1 if @p e is not a pointer to a complete type
+ */
+static long lower_pointer_step(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    if (t == NULL || t->kind != CC_CT_POINTER || t->of == NULL) {
+        return -1;
+    }
+    if (t->of->kind == CC_CT_VOID || t->of->kind == CC_CT_FUNCTION) {
+        return 1;
+    }
+    return lower_pointee_size(tu, e);
 }
 
 /**
@@ -3709,7 +3755,8 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
     }
     storage_size = e->member_bit_storage_size;
     if (storage_size <= 0) {
-        storage_size = type_size_bytes(e->value_type);
+        /* a bit-field's type is scalar: its size needs no translation unit */
+        storage_size = cc_ct_size(lower_value_ctype(e), NULL);
     }
     if (storage_size <= 0) {
         set_diag(diag, "unsupported bit-field storage size");
@@ -3797,7 +3844,8 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
 
     storage_size = e->member_bit_storage_size;
     if (storage_size <= 0) {
-        storage_size = type_size_bytes(e->value_type);
+        /* a bit-field's type is scalar: its size needs no translation unit */
+        storage_size = cc_ct_size(lower_value_ctype(e), NULL);
     }
     if (storage_size <= 0) {
         set_diag(diag, "unsupported bit-field storage size");
@@ -6557,7 +6605,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 long lhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->lhs, -1);
                 long rhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->rhs, -1);
 
-                elem_size = pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id);
+                elem_size = lower_pointer_step(tu, e->lhs);
                 if (lhs_step > 0) {
                     elem_size = lhs_step;
                 } else if (rhs_step > 0) {
@@ -6568,10 +6616,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
             rhs = cast_value(sf, rhs, CC_VAL_I64, diag);
             if (lhs < 0 || rhs < 0) {
-                return -1;
-            }
-            if (elem_size <= 0) {
-                set_diag(diag, "unsupported pointer base type in subtraction lowering");
                 return -1;
             }
 
@@ -6602,6 +6646,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
 
+            /* otherwise the element size is a constant */
+            if (elem_size <= 0) {
+                set_diag(diag, "unsupported pointer base type in subtraction lowering");
+                return -1;
+            }
             if (elem_size != 1) {
                 int csz = emit_const_i64_instr(sf, elem_size);
                 if (csz < 0) {
@@ -6690,7 +6739,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 elem_size = lower_pointee_size(tu, e);
             }
             if (elem_size <= 0) {
-                elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
+                elem_size = lower_pointer_step(tu, e);
                 elem_size = expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
                 elem_size = expr_decl_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
             }
@@ -8320,7 +8369,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             elem_ct = lower_atomic_elem_ctype(e->args[0]);
             mem_size = lower_pointee_size(tu, e->args[0]);
             if (mem_size <= 0) {
-                mem_size = pointer_elem_size_bytes(tu, e->args[0]->value_type, e->args[0]->struct_id);
+                mem_size = lower_pointer_step(tu, e->args[0]);
             }
             if (mem_size <= 0) {
                 mem_size = cc_target_pointer_size();
@@ -8381,7 +8430,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             elem_ct = lower_atomic_elem_ctype(e->args[0]);
             mem_size = lower_pointee_size(tu, e->args[0]);
             if (mem_size <= 0) {
-                mem_size = pointer_elem_size_bytes(tu, e->args[0]->value_type, e->args[0]->struct_id);
+                mem_size = lower_pointer_step(tu, e->args[0]);
             }
             if (mem_size <= 0) {
                 mem_size = cc_target_pointer_size();
@@ -8725,7 +8774,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                            cc_ct_of_expr(callee_expr->lhs) == NULL && lower_is_pointer(callee_expr->lhs)) {
                     int keep_deref = 0;
                     const cc_expr_t *d = callee_expr->lhs;
-                    if (pointer_depth(callee_expr->lhs->value_type) > 1) {
+                    const cc_ctype_t *dt = lower_value_ctype(callee_expr->lhs);
+
+                    if (dt != NULL && dt->kind == CC_CT_POINTER && dt->of != NULL && dt->of->kind == CC_CT_POINTER) {
                         /*
                          * Explicit indirect calls through pointer-to-function-pointer
                          * chains need one real load before the final CALLI target is
@@ -9637,7 +9688,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (lower_is_pointer(e)) {
                 step = lower_pointee_size(tu, e);
                 if (step <= 0) {
-                    step = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
+                    step = lower_pointer_step(tu, e);
                 }
                 if (step <= 0) {
                     set_diag(diag, "unsupported pointer ++/-- type in lowering");
@@ -13163,8 +13214,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         size_t i4;
         int *asm_out_store_ptr = NULL;
         long *asm_out_store_size = NULL;
-        cc_type_t *asm_out_store_type = NULL;
-        int *asm_out_store_sid = NULL;
+        const cc_ctype_t **asm_out_store_type = NULL;
         memset(&in, 0, sizeof(in));
         in.op = CC_SSA_ASM;
         in.dst = -1;
@@ -13188,22 +13238,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             in.asm_out_names = (char **)calloc(in.asm_out_count, sizeof(*in.asm_out_names));
             asm_out_store_ptr = (int *)malloc(in.asm_out_count * sizeof(*asm_out_store_ptr));
             asm_out_store_size = (long *)calloc(in.asm_out_count, sizeof(*asm_out_store_size));
-            asm_out_store_type = (cc_type_t *)calloc(in.asm_out_count, sizeof(*asm_out_store_type));
-            asm_out_store_sid = (int *)calloc(in.asm_out_count, sizeof(*asm_out_store_sid));
+            asm_out_store_type = (const cc_ctype_t **)calloc(in.asm_out_count, sizeof(*asm_out_store_type));
             if (in.asm_out_values == NULL || in.asm_out_sizes == NULL || in.asm_out_constraints == NULL ||
                 in.asm_out_names == NULL || asm_out_store_ptr == NULL || asm_out_store_size == NULL ||
-                asm_out_store_type == NULL || asm_out_store_sid == NULL) {
+                asm_out_store_type == NULL) {
                 free_asm_instr_fields(&in);
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm outputs");
                 return -1;
             }
             for (i4 = 0; i4 < in.asm_out_count; ++i4) {
                 asm_out_store_ptr[i4] = -1;
-                asm_out_store_sid[i4] = -1;
             }
         }
         if (in.asm_in_count > 0) {
@@ -13217,7 +13264,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm inputs");
                 return -1;
             }
@@ -13229,7 +13275,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm clobbers");
                 return -1;
             }
@@ -13242,7 +13287,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm goto labels");
                 return -1;
             }
@@ -13258,7 +13302,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "asm output is missing expression");
                 return -1;
             }
@@ -13280,7 +13323,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             free(asm_out_store_ptr);
                             free(asm_out_store_size);
                             free(asm_out_store_type);
-                            free(asm_out_store_sid);
                             return -1;
                         }
                         out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(ptrv);
@@ -13289,8 +13331,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         if ((*vars)[vidx].addr_value >= 0) {
                             asm_out_store_ptr[i4] = (*vars)[vidx].addr_value;
                             asm_out_store_size[i4] = out_sz;
-                            asm_out_store_type[i4] = op->expr->value_type;
-                            asm_out_store_sid[i4] = op->expr->struct_id;
+                            asm_out_store_type[i4] = lower_value_ctype(op->expr);
                         }
                     }
                 } else if (is_mem_only) {
@@ -13302,7 +13343,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             free(asm_out_store_ptr);
                             free(asm_out_store_size);
                             free(asm_out_store_type);
-                            free(asm_out_store_sid);
                             return -1;
                         }
                         out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
@@ -13311,7 +13351,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         free(asm_out_store_ptr);
                         free(asm_out_store_size);
                         free(asm_out_store_type);
-                        free(asm_out_store_sid);
                         set_diag(diag, "asm output target must reference a local or global lvalue");
                         return -1;
                     }
@@ -13322,7 +13361,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         free(asm_out_store_ptr);
                         free(asm_out_store_size);
                         free(asm_out_store_type);
-                        free(asm_out_store_sid);
                         return -1;
                     }
                     out_v = av;
@@ -13335,7 +13373,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         free(asm_out_store_ptr);
                         free(asm_out_store_size);
                         free(asm_out_store_type);
-                        free(asm_out_store_sid);
                         set_diag(diag, "malformed asm output dereference target");
                         return -1;
                     }
@@ -13348,7 +13385,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(asm_out_store_ptr);
                     free(asm_out_store_size);
                     free(asm_out_store_type);
-                    free(asm_out_store_sid);
                     return -1;
                 }
                 ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
@@ -13357,7 +13393,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(asm_out_store_ptr);
                     free(asm_out_store_size);
                     free(asm_out_store_type);
-                    free(asm_out_store_sid);
                     return -1;
                 }
                 if (is_mem_only) {
@@ -13369,22 +13404,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         free(asm_out_store_ptr);
                         free(asm_out_store_size);
                         free(asm_out_store_type);
-                        free(asm_out_store_sid);
                         set_diag(diag, "out of memory allocating asm output temporary");
                         return -1;
                     }
                     out_v = tmpv;
                     asm_out_store_ptr[i4] = ptrv;
                     asm_out_store_size[i4] = out_sz;
-                    asm_out_store_type[i4] = op->expr->value_type;
-                    asm_out_store_sid[i4] = op->expr->struct_id;
+                    asm_out_store_type[i4] = lower_value_ctype(op->expr);
                 }
             } else {
                 free_asm_instr_fields(&in);
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "unsupported asm output target (requires identifier, dereference, or member lvalue)");
                 return -1;
             }
@@ -13398,7 +13430,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm output operand");
                 return -1;
             }
@@ -13412,7 +13443,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 return -1;
             }
             in.asm_in_values[i4] = av;
@@ -13433,7 +13463,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm input operand");
                 return -1;
             }
@@ -13445,7 +13474,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm clobber");
                 return -1;
             }
@@ -13458,7 +13486,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "asm goto label is malformed");
                 return -1;
             }
@@ -13468,7 +13495,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "asm goto references unknown label: %s", lname);
                 }
@@ -13481,7 +13507,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm goto label name");
                 return -1;
             }
@@ -13491,7 +13516,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             free(asm_out_store_ptr);
             free(asm_out_store_size);
             free(asm_out_store_type);
-            free(asm_out_store_sid);
             set_diag(diag, "out of memory appending SSA asm instruction");
             return -1;
         }
@@ -13507,10 +13531,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 return -1;
             }
-            if (asm_out_store_type[i4] == CC_TYPE_VOID && asm_out_store_sid[i4] >= 0) {
+            if (ct_in_memory(asm_out_store_type[i4])) {
                 /* Aggregate output: memcpy the asm result into the
                  * storeback pointer. Linux's perf perf_event_open uses
                  * an asm that returns a struct {u32, u32}; refusing
@@ -13520,26 +13543,23 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     free(asm_out_store_ptr);
                     free(asm_out_store_size);
                     free(asm_out_store_type);
-                    free(asm_out_store_sid);
                     return -1;
                 }
                 continue;
             }
             rhs = in.asm_out_values[i4];
-            rhs = normalize_float_value(sf, rhs, asm_out_store_type[i4], diag);
+            rhs = normalize_float_ct(sf, rhs, asm_out_store_type[i4], diag);
             if (rhs < 0) {
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 return -1;
             }
-            rhs = normalize_integral_value(sf, rhs, asm_out_store_type[i4], diag);
+            rhs = normalize_int_ct(sf, rhs, asm_out_store_type[i4], diag);
             if (rhs < 0) {
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 return -1;
             }
             memset(&st, 0, sizeof(st));
@@ -13553,7 +13573,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 free(asm_out_store_ptr);
                 free(asm_out_store_size);
                 free(asm_out_store_type);
-                free(asm_out_store_sid);
                 return -1;
             }
         }
@@ -13561,7 +13580,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         free(asm_out_store_ptr);
         free(asm_out_store_size);
         free(asm_out_store_type);
-        free(asm_out_store_sid);
         return 0;
     }
 
@@ -14547,7 +14565,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 free(rsym);
                 return -1;
             }
-            step = lower_is_pointer(e->lhs) ? pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id) : 1;
+            step = lower_is_pointer(e->lhs) ? lower_pointer_step(tu, e->lhs) : 1;
             step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->lhs, step);
             if (apply_global_ptr_addend(ladd, iv, step, e->op == CC_BIN_SUB, &ladd) != 0) {
                 free(lsym);
@@ -14563,7 +14581,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 free(lsym);
                 return -1;
             }
-            step = lower_is_pointer(e->rhs) ? pointer_elem_size_bytes(tu, e->rhs->value_type, e->rhs->struct_id) : 1;
+            step = lower_is_pointer(e->rhs) ? lower_pointer_step(tu, e->rhs) : 1;
             step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->rhs, step);
             if (apply_global_ptr_addend(radd, iv, step, 0, &radd) != 0) {
                 free(rsym);
