@@ -1275,32 +1275,6 @@ static int is_null_ptr_constant(const cc_expr_t *e) {
     return 0;
 }
 
-static int can_convert(cc_type_t dst, cc_type_t src) {
-    if (dst == src) {
-        return 1;
-    }
-    if (cc_type_is_numeric(dst) && cc_type_is_numeric(src)) {
-        return 1;
-    }
-    if (is_pointer_type(dst) && is_pointer_type(src)) {
-        cc_type_t dbase = ptr_base_type(dst);
-        cc_type_t sbase = ptr_base_type(src);
-        if (dbase == CC_TYPE_VOID || sbase == CC_TYPE_VOID || dbase == sbase) {
-            return 1;
-        }
-        if (cc_type_is_integral(dbase) && cc_type_is_integral(sbase) && type_size_bytes(dbase) == type_size_bytes(sbase)) {
-            return 1;
-        }
-    }
-    if (is_pointer_type(dst) && cc_type_is_integral(src)) {
-        return 1;
-    }
-    if (cc_type_is_integral(dst) && is_pointer_type(src)) {
-        return 1;
-    }
-    return 0;
-}
-
 static size_t utf8_seq_len(unsigned char b0) {
     if ((b0 & 0x80u) == 0) return 1;
     if ((b0 & 0xE0u) == 0xC0u) return 2;
@@ -2038,10 +2012,6 @@ static const cc_ctype_t *sema_complex_elem(const cc_translation_unit_t *tu, cons
     return cc_ct_from_scalar(tu->structs[sid].complex_elem);
 }
 
-/** sema_complex_elem() of the structure @p sid, or NULL. */
-static const cc_ctype_t *sema_complex_elem_sid(const cc_translation_unit_t *tu, int sid) {
-    return sid >= 0 ? sema_complex_elem(tu, cc_ct_record(sid)) : NULL;
-}
 
 /**
  * The hidden structure standing for _Complex @p elem.
@@ -2319,10 +2289,6 @@ static const cc_struct_def_t *sema_wide_def(const cc_translation_unit_t *tu, con
     return &tu->structs[sid];
 }
 
-/** sema_wide_def() of the structure @p sid, or NULL. */
-static const cc_struct_def_t *sema_wide_def_sid(const cc_translation_unit_t *tu, int sid) {
-    return sid >= 0 ? sema_wide_def(tu, cc_ct_record(sid)) : NULL;
-}
 
 /** Whether expression @p e has a wide integer type. */
 static int sema_is_wide(const cc_translation_unit_t *tu, const cc_expr_t *e) {
@@ -2573,10 +2539,6 @@ static const cc_struct_def_t *sema_decimal_def(const cc_translation_unit_t *tu, 
     return &tu->structs[sid];
 }
 
-/** sema_decimal_def() of the structure @p sid (a member's, an element's), or NULL. */
-static const cc_struct_def_t *sema_decimal_def_sid(const cc_translation_unit_t *tu, int sid) {
-    return sid >= 0 ? sema_decimal_def(tu, cc_ct_record(sid)) : NULL;
-}
 
 /** Whether expression @p e has a decimal floating type. */
 static int sema_is_decimal(const cc_translation_unit_t *tu, const cc_expr_t *e) {
@@ -2713,7 +2675,7 @@ static int sema_decimal_fold_value(const cc_translation_unit_t *tu, const cc_exp
         return 0;
     }
     if (e->kind == CC_EXPR_INT) {
-        int is_uns = cc_type_is_unsigned_integral(e->value_type);
+        int is_uns = cc_ct_is_unsigned(e->ctype);
 
         if (is_uns || e->int_val >= 0) {
             cc_dec_from_int((unsigned long long)e->int_val, 0, d);
@@ -3176,12 +3138,11 @@ static int sema_fold_complex(const cc_translation_unit_t *tu, const cc_expr_t *e
     }
     switch (e->kind) {
     case CC_EXPR_INT:
-        *re = cc_type_is_unsigned_integral(e->value_type) ? (long double)(unsigned long long)e->int_val
-                                                           : (long double)e->int_val;
+        *re = cc_ct_is_unsigned(e->ctype) ? (long double)(unsigned long long)e->int_val : (long double)e->int_val;
         *im = 0;
         return 0;
     case CC_EXPR_FLOAT:
-        *re = e->value_type == CC_TYPE_LDOUBLE ? e->float_val_ld : (long double)e->float_val;
+        *re = ct_kind_is(e->ctype, CC_CT_LDOUBLE) ? e->float_val_ld : (long double)e->float_val;
         *im = 0;
         return 0;
     case CC_EXPR_COMPLEX: {
@@ -7238,42 +7199,43 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (g->init->kind != CC_EXPR_INIT_LIST && sema_decimal_def(tu, g->ctype) != NULL) {
                 /* a static decimal object: its folded encoding, as a brace list */
                 if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0 ||
-                    sema_decimal_static_init(tu, &g->init, g->type_struct_id, diag) != 0 ||
-                    check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                    sema_decimal_static_init(tu, &g->init, sx_ct_record(g->ctype), diag) != 0 ||
+                    check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) != 0) {
                     goto fail_global_item;
                 }
                 continue;
             }
             if (g->init->kind == CC_EXPR_INIT_LIST) {
-                const cc_ctype_t *celem = sema_complex_elem_sid(tu, g->type_struct_id);
+                /* the element type of a one-dimensional array, whose unbraced elements are folded */
+                const cc_ctype_t *gelem =
+                    g->ctype->kind == CC_CT_ARRAY && g->ctype->of->kind != CC_CT_ARRAY ? g->ctype->of : NULL;
+                const cc_ctype_t *celem = gelem != NULL ? sema_complex_elem(tu, gelem) : NULL;
 
-                if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 &&
-                    sema_decimal_def_sid(tu, g->type_struct_id) != NULL) {
+                if (gelem != NULL && sema_decimal_def(tu, gelem) != NULL) {
                     /* an array of decimal objects: each element not already braced is a constant to fold */
                     size_t k;
 
                     for (k = 0; k < g->init->arg_count; ++k) {
                         if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
                             (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
-                             sema_decimal_static_init(tu, &g->init->args[k], g->type_struct_id, diag) != 0)) {
+                             sema_decimal_static_init(tu, &g->init->args[k], sx_ct_record(gelem), diag) != 0)) {
                             goto fail_global_item;
                         }
                     }
                 }
-                if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 &&
-                    sema_wide_def_sid(tu, g->type_struct_id) != NULL) {
+                if (gelem != NULL && sema_wide_def(tu, gelem) != NULL) {
                     /* an array of wide integers: each element not already braced is a constant to fold */
                     size_t k;
 
                     for (k = 0; k < g->init->arg_count; ++k) {
                         if (g->init->args[k] != NULL && g->init->args[k]->kind != CC_EXPR_INIT_LIST &&
                             (check_expr(tu, g->init->args[k], NULL, 0, 0, diag) != 0 ||
-                             sema_wide_static_init(tu, &g->init->args[k], g->type_struct_id, diag) != 0)) {
+                             sema_wide_static_init(tu, &g->init->args[k], sx_ct_record(gelem), diag) != 0)) {
                             goto fail_global_item;
                         }
                     }
                 }
-                if (is_pointer_type(g->type) && g->array_len >= 0 && g->array_ndim == 1 && celem != NULL) {
+                if (celem != NULL) {
                     /* an array of complex: each element not already braced is a constant to fold */
                     size_t k;
 
@@ -7285,7 +7247,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                         }
                     }
                 }
-                if (is_pointer_type(g->type) && g->array_len >= 0) {
+                if (g->ctype->kind == CC_CT_ARRAY) {
                     long inferred_len = -1;
                     if (check_array_initializer(tu, g->name, g->ctype, g->init, NULL, 0, 0, &inferred_len, diag) != 0) {
                         goto fail_global_item;
@@ -7297,8 +7259,9 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                             g->array_dims[0] = inferred_len;
                         }
                     }
-                } else if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
-                    if (check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                } else if (sx_ct_record(g->ctype) >= 0) {
+                    if (check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
+                        0) {
                         goto fail_global_item;
                     }
                 } else {
@@ -7309,9 +7272,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     if (check_expr(tu, scalar_init, NULL, 0, 0, diag) != 0) {
                         goto fail_global_item;
                     }
-                    if (!can_convert(g->type, scalar_init->value_type) &&
-                        !(is_pointer_type(g->type) && cc_type_is_integral(scalar_init->value_type) &&
-                          is_null_ptr_constant(scalar_init))) {
+                    if (!sema_assignable(tu, g->ctype, scalar_init)) {
                         if (diag != NULL && diag->message[0] == '\0') {
                             snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
                                      g->name);
@@ -7328,20 +7289,22 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 if (celem != NULL) {
                     /* a static complex object: its constant parts, as a brace list */
                     if (sema_complex_static_init(tu, &g->init, celem, diag) != 0 ||
-                        check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                        check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
+                            0) {
                         goto fail_global_item;
                     }
                     continue;
                 }
                 if (sema_wide_def(tu, g->ctype) != NULL) {
                     /* a static wide integer: its folded limbs, as a brace list */
-                    if (sema_wide_static_init(tu, &g->init, g->type_struct_id, diag) != 0 ||
-                        check_struct_initializer(tu, g->name, g->type_struct_id, g->init, NULL, 0, 0, diag) != 0) {
+                    if (sema_wide_static_init(tu, &g->init, sx_ct_record(g->ctype), diag) != 0 ||
+                        check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
+                            0) {
                         goto fail_global_item;
                     }
                     continue;
                 }
-                if (is_pointer_type(g->type) && g->array_len >= 0 && g->init->kind == CC_EXPR_STR) {
+                if (g->ctype->kind == CC_CT_ARRAY && g->init->kind == CC_EXPR_STR) {
                     long inferred_len = -1;
                     int rc = check_array_string_initializer(g->name, g->ctype, &g->array_len, g->init, &inferred_len,
                                                             diag);
@@ -7356,9 +7319,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                         continue;
                     }
                 }
-                if (!can_convert(g->type, g->init->value_type) &&
-                    !(is_pointer_type(g->type) && cc_type_is_integral(g->init->value_type) &&
-                      is_null_ptr_constant(g->init))) {
+                if (!sema_assignable(tu, g->ctype, g->init)) {
                     if (diag != NULL && diag->message[0] == '\0') {
                         snprintf(diag->message, sizeof(diag->message), "cannot initialize file-scope object %s",
                                  g->name);
@@ -7469,7 +7430,7 @@ fail_global_item:
             validate_attr_section(f->attr_section, diag, "section attribute on function") != 0) {
             goto fail_decl;
         }
-        if ((f->attr_flags & CC_ATTR_MALLOC_FN) != 0 && !is_pointer_type(f->ret_type)) {
+        if ((f->attr_flags & CC_ATTR_MALLOC_FN) != 0 && !sema_is_ptr(f->ret_ctype)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "malloc function '%s' must return a pointer type",
                          f->name);
@@ -7703,7 +7664,7 @@ fail_decl:
                 if (check_expr(tu, bound, vars, var_count, 0, diag) != 0) {
                     goto fail_func;
                 }
-                if (!cc_type_is_integral(bound->value_type)) {
+                if (!sx_is_int(bound)) {
                     set_diag(diag, "variable-length array bound must be an integer expression");
                     goto fail_func;
                 }
