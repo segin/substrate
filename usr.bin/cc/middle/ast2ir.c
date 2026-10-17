@@ -1319,7 +1319,7 @@ static long array_dims_step_size_bytes(const cc_translation_unit_t *tu, cc_type_
  *                  what it points to has no size
  */
 static long expr_real_step_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *ptr_expr) {
-    const cc_ctype_t *t = cc_ct_decay(cc_ct_of_expr(ptr_expr));
+    const cc_ctype_t *t = ptr_expr != NULL ? lower_value_ctype(ptr_expr) : NULL;
     long n;
 
     if (t == NULL || t->kind != CC_CT_POINTER) {
@@ -1329,100 +1329,42 @@ static long expr_real_step_size_bytes(const cc_translation_unit_t *tu, const cc_
     return n > 0 ? n : -1;
 }
 
+/**
+ * The step of pointer arithmetic on @p ptr_expr: the size of what its
+ * interned type points to, an array pointee's whole size included.
+ *
+ * The legacy walks over array dimensions this replaced are gone: every
+ * expression sema checked carries its type, and one that points to an
+ * array says so.  A pointee with no size (a variable-length array, void)
+ * gives @p fallback; a VLA's runtime stride is found elsewhere
+ * (vla_subscript_level()).
+ *
+ * @param tu        the translation unit
+ * @param vars      unused
+ * @param var_count unused
+ * @param depth     unused
+ * @param ptr_expr  the pointer expression
+ * @param fallback  what to return when the type gives no step
+ * @return          the step in bytes, or @p fallback
+ */
 static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                                        const cc_expr_t *ptr_expr, long fallback) {
-    int dim_start;
-    cc_type_t array_type;
-    long dims[CC_MAX_ARRAY_DIMS];
     long real_step = expr_real_step_size_bytes(tu, ptr_expr);
 
-    if (real_step > 0) {
-        return real_step;
-    }
-    if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_ADDR && ptr_expr->lhs != NULL) {
-        return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
-    }
-    if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_CAST && ptr_expr->lhs != NULL) {
-        /*
-         * An explicit pointer cast changes the arithmetic unit.  Do not let an
-         * array stride from the cast source override the cast result's pointee
-         * size, e.g. ((char *)u32_array)[3] must advance three bytes, not three
-         * uint32_t elements.
-         */
-        if (lower_is_pointer(ptr_expr)) {
-            return fallback;
-        }
-        return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
-    }
-    if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_BIN &&
-        (ptr_expr->op == CC_BIN_ADD || ptr_expr->op == CC_BIN_SUB) && lower_is_pointer(ptr_expr)) {
-        if (ptr_expr->lhs != NULL && lower_is_pointer(ptr_expr->lhs)) {
-            return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
-        }
-        if (ptr_expr->rhs != NULL && lower_is_pointer(ptr_expr->rhs)) {
-            return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->rhs, fallback);
-        }
-    }
-    if (ptr_expr == NULL || ptr_expr->array_ndim <= 0) {
-        return fallback;
-    }
-    if (ptr_expr->array_ndim > 1 && ptr_expr->array_dims[0] == 0 && lower_is_pointer(ptr_expr)) {
-        memset(dims, 0, sizeof(dims));
-        memcpy(dims, ptr_expr->array_dims + 1, (size_t)(ptr_expr->array_ndim - 1) * sizeof(dims[0]));
-        array_type = ptr_base_type(ptr_expr->value_type);
-        return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, ptr_expr->array_ndim - 1, dims, 0,
-                                          fallback);
-    }
-    dim_start = expr_is_array_object_ref(tu, vars, var_count, depth, ptr_expr) ? 1 : 0;
-    if (dim_start == 0 && lower_is_pointer(ptr_expr)) {
-        array_type = ptr_base_type(ptr_expr->value_type);
-        return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, ptr_expr->array_ndim, ptr_expr->array_dims,
-                                          0, fallback);
-    }
-    return array_dims_step_size_bytes(tu, ptr_expr->value_type, ptr_expr->struct_id, ptr_expr->array_ndim,
-                                      ptr_expr->array_dims, dim_start, fallback);
+    (void)vars;
+    (void)var_count;
+    (void)depth;
+    return real_step > 0 ? real_step : fallback;
 }
 
+/**
+ * The step of pointer arithmetic on a variable named by @p ptr_expr; the
+ * same as expr_array_step_size_bytes() now that the variable's type is
+ * the expression's.
+ */
 static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count,
                                             int depth, const cc_expr_t *ptr_expr, long fallback) {
-    int idx;
-    const cc_global_t *g;
-    const char *name;
-    cc_type_t array_type;
-
-    if (ptr_expr == NULL) {
-        return fallback;
-    }
-    if (ptr_expr->kind != CC_EXPR_IDENT || ptr_expr->ident == NULL) {
-        return fallback;
-    }
-    name = ptr_expr->ident;
-
-    idx = var_find_visible(vars, var_count, name, depth);
-    if (idx >= 0 && vars[idx].array_ndim > 0) {
-        int is_array_obj = is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
-        int dim_start = is_array_obj ? 1 : 0;
-        if (!is_array_obj && lower_is_pointer(ptr_expr)) {
-            array_type = ptr_base_type(ptr_expr->value_type);
-            return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, vars[idx].array_ndim,
-                                              vars[idx].array_dims, 0, fallback);
-        }
-        return array_dims_step_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
-                                          vars[idx].array_dims, dim_start, fallback);
-    }
-    g = find_global(tu, name);
-    if (g != NULL && g->array_ndim > 0) {
-        int is_array_obj = is_array_object_decl(g->type, g->array_len, g->array_ndim);
-        int dim_start = is_array_obj ? 1 : 0;
-        if (!is_array_obj && lower_is_pointer(ptr_expr)) {
-            array_type = ptr_base_type(ptr_expr->value_type);
-            return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, g->array_ndim, g->array_dims, 0,
-                                              fallback);
-        }
-        return array_dims_step_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim, g->array_dims, dim_start,
-                                          fallback);
-    }
-    return fallback;
+    return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, fallback);
 }
 
 static int is_cmp_op(cc_binop_t op) {
