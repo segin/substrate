@@ -3193,27 +3193,39 @@ static int stmt_is_vla_decl(const cc_stmt_t *s) {
     return 0;
 }
 
+/**
+ * The declared type of a declaration statement, not decayed.
+ *
+ * @param s  the declaration
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s) {
+    return s->ctype != NULL ? s->ctype : cc_ct_from_legacy(s->type, s->type_struct_id, s->array_ndim, s->array_dims);
+}
+
+/** Whether a local declaration gets storage allocated up front: a structure, or an array of fixed size. */
 static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
+    const cc_ctype_t *t;
+
     if (s == NULL || s->kind != CC_STMT_DECL) {
         return 0;
     }
     if ((s->storage & CC_STORAGE_STATIC) != 0) {
         return 0;
     }
-    if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+    t = stmt_decl_ctype(s);
+    if (ct_record_id(t) >= 0) {
         return 1;
     }
     if (stmt_is_vla_decl(s)) {
         return 0;
     }
-    return is_array_object_decl(s->type, s->array_len, s->array_ndim);
+    return t != NULL && t->kind == CC_CT_ARRAY;
 }
 
 static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, lower_ctx_t *ctx,
                                         const cc_stmt_t *s, cc_diag_t *diag) {
     long total_size;
-    long elem_size;
-    long elem_count;
     int value;
     size_t i;
 
@@ -3222,27 +3234,13 @@ static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_
     }
 
     if (stmt_needs_hoisted_alloc(s) && lower_find_hoisted_alloc(ctx, s) < 0) {
-        if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
-            total_size = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
-            if (total_size <= 0) {
-                total_size = 1;
-            }
-        } else {
-            cc_type_t elem_type = ptr_base_type(s->type);
-            elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
-            if (elem_size <= 0) {
-                elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
-            }
-            if (elem_size <= 0) {
-                set_diag(diag, "unsupported hoisted local array element type");
-                return -1;
-            }
-            elem_count = s->array_len > 0 ? s->array_len : 1;
-            if (elem_count <= 0 || elem_size > LONG_MAX / elem_count) {
-                set_diag(diag, "local array allocation size overflow");
-                return -1;
-            }
-            total_size = elem_size * elem_count;
+        total_size = cc_ct_size(stmt_decl_ctype(s), tu);
+        if (total_size <= 0 && ct_record_id(stmt_decl_ctype(s)) >= 0) {
+            total_size = 1; /* an empty structure still has an address */
+        }
+        if (total_size <= 0) {
+            set_diag(diag, "unsupported hoisted local array element type");
+            return -1;
         }
         value = emit_local_storage_alloc(sf, total_size, diag);
         if (value < 0) {
