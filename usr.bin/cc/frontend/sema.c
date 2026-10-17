@@ -3782,6 +3782,44 @@ static int sema_settle_bitint(cc_expr_t *e) {
 }
 
 /**
+ * The type of an address, an indirection or pointer arithmetic, from its
+ * operands' types: the legacy encoding cannot say what a pointer to an
+ * array points to, so `&a[1]` rebuilt from it would point to the element.
+ *
+ * @param e  a checked expression whose operands have their types
+ * @return   the type, or NULL if @p e is none of these or an operand's
+ *           type is not known
+ */
+static const cc_ctype_t *sema_pointer_shape_ctype(const cc_expr_t *e) {
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+
+    if (e->kind == CC_EXPR_ADDR && e->lhs != NULL && e->lhs->ctype != NULL) {
+        return cc_ct_pointer(e->lhs->ctype);
+    }
+    if (e->kind == CC_EXPR_DEREF && e->lhs != NULL && e->lhs->ctype != NULL) {
+        a = cc_ct_decay(e->lhs->ctype);
+        /* `*f` of a function, or of a pointer to one, is a function designator; its legacy type stands */
+        if (a == NULL || a->kind != CC_CT_POINTER || a->of == NULL || a->of->kind == CC_CT_FUNCTION) {
+            return NULL;
+        }
+        return a->of;
+    }
+    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && e->lhs != NULL &&
+        e->rhs != NULL && e->lhs->ctype != NULL && e->rhs->ctype != NULL) {
+        a = cc_ct_decay(e->lhs->ctype);
+        b = cc_ct_decay(e->rhs->ctype);
+        if (a != NULL && a->kind == CC_CT_POINTER && cc_ct_is_integer(b)) {
+            return a;
+        }
+        if (e->op == CC_BIN_ADD && b != NULL && b->kind == CC_CT_POINTER && cc_ct_is_integer(a)) {
+            return b;
+        }
+    }
+    return NULL;
+}
+
+/**
  * Give checked expression @p e an interned type (cc_ctype.h) if it has
  * none: the one rebuilt from its legacy encoding.  A type recorded from a
  * declaration (an identifier, a member, a call, a written cast) is kept:
@@ -3790,6 +3828,9 @@ static int sema_settle_bitint(cc_expr_t *e) {
 static void sema_settle_ctype(cc_expr_t *e) {
     if (sema_settle_bitint(e)) {
         return;
+    }
+    if (e->ctype == NULL) {
+        e->ctype = sema_pointer_shape_ctype(e);
     }
     /*
      * Where a declaration gives the type, none recorded for a pointer

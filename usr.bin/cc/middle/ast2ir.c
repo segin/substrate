@@ -522,6 +522,28 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
  * @return    the size, or what the legacy encoding gives where the type
  *            has none (void, an incomplete structure)
  */
+static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e);
+
+/**
+ * The size of what an expression's pointer value points to: the step of
+ * pointer arithmetic on it, an array pointee's whole size included.
+ *
+ * @param tu  the translation unit, for structure sizes
+ * @param e   an expression whose value is a pointer
+ * @return    the size, or -1 where the type does not give one (void, a
+ *            function, an incomplete type, a variable-length array)
+ */
+static long lower_pointee_size(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+    long n;
+
+    if (t == NULL || t->kind != CC_CT_POINTER || t->of == NULL || t->of->kind == CC_CT_FUNCTION) {
+        return -1;
+    }
+    n = cc_ct_size(t->of, tu);
+    return n > 0 ? n : -1;
+}
+
 static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e) {
     long n = cc_ct_size(lower_value_ctype(e), tu);
 
@@ -6578,15 +6600,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
 
         if (e->op == CC_BIN_SUB && lower_is_pointer(e->lhs) && lower_is_pointer(e->rhs)) {
-            long elem_size = pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id);
+            long elem_size = lower_pointee_size(tu, e->lhs);
             int diffv;
-            long lhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->lhs, -1);
-            long rhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->rhs, -1);
 
-            if (lhs_step > 0) {
-                elem_size = lhs_step;
-            } else if (rhs_step > 0) {
-                elem_size = rhs_step;
+            if (elem_size <= 0) {
+                long lhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->lhs, -1);
+                long rhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->rhs, -1);
+
+                elem_size = pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id);
+                if (lhs_step > 0) {
+                    elem_size = lhs_step;
+                } else if (rhs_step > 0) {
+                    elem_size = rhs_step;
+                }
             }
 
             lhs = cast_value(sf, lhs, CC_VAL_I64, diag);
@@ -6710,6 +6736,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
 
             elem_size = expr_real_step_size_bytes(tu, ptr_expr);
+            if (elem_size <= 0) {
+                elem_size = lower_pointee_size(tu, e);
+            }
             if (elem_size <= 0) {
                 elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
                 elem_size = expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
@@ -9665,7 +9694,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int ptrv;
 
             if (lower_is_pointer(e)) {
-                step = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
+                step = lower_pointee_size(tu, e);
+                if (step <= 0) {
+                    step = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
+                }
                 if (step <= 0) {
                     set_diag(diag, "unsupported pointer ++/-- type in lowering");
                     return -1;
