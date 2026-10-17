@@ -500,13 +500,31 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   ("invalid string initializer for fixed-size array struct member").
   *Reproduced* (both targets).  One predicate, `cc_ct_is_character()`,
   is used at all of them.  `codegen/schar_string_init.c`.
-- [ ] **CC-86** A file-scope pointer initialized from a compound literal
+- [x] **CC-86** A file-scope pointer initialized from a compound literal
   -- an array one decaying, `static char *p = (char[]){"lit"};` or
   `(int[]){1, 2}`, or the address of a scalar or array one,
   `&(int){5}` -- shall be accepted: the literal has static storage and
   its address is an address constant (C11 6.5.2.5p5, 6.6p9), as gcc has
-  it.  cc accepts only `&(struct S){...}` there ("unsupported global
-  initializer for p").  *Reproduced.*
+  it.  cc accepted only `&(struct S){...}` there ("unsupported global
+  initializer for p").  *Reproduced* (both targets).  The parser hoists
+  a file-scope array literal, and the operand of a file-scope `&`, into
+  an anonymous static global initialized by the literal's braces and
+  refers to it by name; lowering's own `&(struct S){...}` path is gone.
+  (A literal inside a file-scope `typeof` or `sizeof` becomes an unused
+  static object as well.)  `codegen/file_scope_compound_literal.c`.
+- [ ] **CC-90** A `constexpr` object shall be usable in an integer
+  constant expression (C23 6.6p7): `_Static_assert(N == 4, "")` and
+  `case N - 2:` are rejected ("static assertion condition must be an
+  integer constant", "case label must be an integer constant
+  expression"), though `int a[N]` works.  *Reproduced.*
+- [ ] **CC-91** The constraints on `constexpr` (C23 6.7.1, 6.7.10)
+  shall be diagnosed, as gcc does: assigning to one, initializing one
+  from a non-constant, and an initializer not representable in its type
+  (`constexpr unsigned char c = 300;` only draws an assembler truncation
+  warning and yields 44) are all accepted.  *Reproduced.*
+- [ ] **CC-92** `nullptr` shall convert only to a pointer, `bool` or
+  `nullptr_t` (C23 6.3.2.4): `int n = nullptr;` is accepted; gcc
+  rejects it.  *Reproduced.*
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -942,7 +960,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-89 requirements: 88 met, 1 open.
+92 requirements: 89 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

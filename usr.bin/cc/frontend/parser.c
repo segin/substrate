@@ -111,6 +111,7 @@ typedef struct {
     size_t hoisted_func_count;
     size_t hoisted_func_cap;
     int scope_depth;
+    size_t file_literal_count; /**< file-scope compound literals hoisted into globals so far */
     int parse_depth;
     int last_storage;
     const cc_ctype_t *last_alias_ctype; /**< the type of the typedef name the last specifiers were, else NULL */
@@ -9205,6 +9206,49 @@ static void fold_sizeof_expr(parser_t *p, cc_expr_t *e) {
     e->struct_id = -1;
 }
 
+/**
+ * Hoist a file-scope compound literal into an anonymous static global
+ * initialized by its braces, and turn @p e into a reference to it.  At
+ * file scope a compound literal has static storage (C11 6.5.2.5p5), so
+ * its address -- an array's decayed value, or `&` of any -- is an
+ * address constant; the global initializer machinery then handles every
+ * type of literal as it handles a named object's.
+ *
+ * @param p          the parser
+ * @param e          the compound literal: a CC_EXPR_CAST whose operand is
+ *                   its brace list
+ * @param array_len  the literal's array length, or -1 if it is no array
+ * @return           0, or -1 when out of memory
+ */
+static int hoist_file_literal(parser_t *p, cc_expr_t *e, long array_len) {
+    char name[48];
+    cc_global_t g;
+
+    snprintf(name, sizeof(name), "__cc_literal_%zu", p->file_literal_count++);
+    memset(&g, 0, sizeof(g));
+    g.name = cc_strdup(name);
+    g.line = e->line;
+    g.col = e->col;
+    g.type = e->aux_type;
+    g.type_struct_id = e->aux_struct_id;
+    g.array_len = array_len;
+    g.array_ndim = e->array_ndim;
+    memcpy(g.array_dims, e->array_dims, sizeof(g.array_dims));
+    g.storage = CC_STORAGE_STATIC;
+    g.init = e->lhs;
+    g.ctype = e->ctype;
+    if (g.name == NULL || push_global(p->tu, g) != 0) {
+        free(g.name);
+        return -1;
+    }
+    e->lhs = NULL;
+    e->kind = CC_EXPR_IDENT;
+    e->ident = cc_strdup(name);
+    e->aux_type = CC_TYPE_VOID;
+    e->aux_struct_id = -1;
+    return e->ident != NULL ? 0 : -1;
+}
+
 static cc_expr_t *parse_unary(parser_t *p) {
     if (p->tok.kind == TOK_IDENT && parser_is_gnu_mode() && tok_is_ident(p, "__extension__")) {
         if (next_tok(p) != 0) {
@@ -9403,6 +9447,12 @@ static cc_expr_t *parse_unary(parser_t *p) {
                         cast_array_len = n;
                     }
                 }
+                /* a file-scope array literal stands for its address: an object of static storage */
+                if (p->scope_depth == 0 && e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY &&
+                    hoist_file_literal(p, e, cast_array_len) != 0) {
+                    free_expr(e);
+                    return NULL;
+                }
                 return e;
             }
             e->lhs = parse_unary(p);
@@ -9427,6 +9477,12 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         e->lhs = parse_unary(p);
         if (e->lhs == NULL) {
+            free_expr(e);
+            return NULL;
+        }
+        /* the address of a file-scope compound literal: an object of static storage (an array one is already) */
+        if (p->scope_depth == 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
+            e->lhs->lhs->kind == CC_EXPR_INIT_LIST && hoist_file_literal(p, e->lhs, -1) != 0) {
             free_expr(e);
             return NULL;
         }
