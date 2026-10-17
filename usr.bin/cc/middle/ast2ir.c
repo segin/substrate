@@ -7072,7 +7072,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (r.dst < 0 || push_instr(sf, r) != 0) {
                 return -1;
             }
-            if (integral_type_bits(e->value_type) >= 64) {
+            if (cc_ct_int_width(lower_value_ctype(e)) >= 64) {
                 set_value_size(sf, q.dst, 8);
                 set_value_size(sf, p.dst, 8);
                 set_value_size(sf, r.dst, 8);
@@ -7098,7 +7098,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (lower_has_kind(e, CC_CT_FLOAT)) {
             return normalize_float_ct(sf, in.dst, lower_value_ctype(e), diag);
         }
-        if (vt == CC_VAL_I64 && lower_is_integer(e) && integral_type_bits(e->value_type) >= 64) {
+        if (vt == CC_VAL_I64 && lower_is_integer(e) && cc_ct_int_width(lower_value_ctype(e)) >= 64) {
             set_value_size(sf, in.dst, 8);
         }
         if (vt == CC_VAL_I64 && lower_is_integer(e) && !lower_is_pointer(e)) {
@@ -9579,14 +9579,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (rhs < 0) {
                 return -1;
             }
-            if (lower_has_kind(e->lhs, CC_CT_LDOUBLE) && e->rhs != NULL && e->rhs->value_type != CC_TYPE_LDOUBLE) {
+            if (lower_has_kind(e->lhs, CC_CT_LDOUBLE) && e->rhs != NULL && !lower_has_kind(e->rhs, CC_CT_LDOUBLE)) {
                 /* stored through a pointer or member as a long double: an int or double is widened first */
                 rhs = promote_f64_to_ldouble_value(sf, cast_value(sf, rhs, CC_VAL_F64, diag), diag);
                 if (rhs < 0) {
                     return -1;
                 }
             }
-            rhs = normalize_integral_ct(sf, rhs, e->ctype, e->lhs->value_type, diag);
+            rhs = normalize_int_ct(sf, rhs, lower_value_ctype(e), diag);
             if (rhs < 0) {
                 return -1;
             }
@@ -11983,7 +11983,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 continue;
             }
             v = cast_value(sf, v, ct_value_kind(lower_member_ctype(m)), diag);
-            if (v >= 0 && m->type == CC_TYPE_LDOUBLE && item_expr->value_type != CC_TYPE_LDOUBLE) {
+            if (v >= 0 && m->type == CC_TYPE_LDOUBLE && !lower_has_kind(item_expr, CC_CT_LDOUBLE)) {
                 /* a long double member from an int or double: widened, not stored as the double's bytes */
                 v = promote_f64_to_ldouble_value(sf, v, diag);
             }
