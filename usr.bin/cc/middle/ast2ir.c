@@ -1423,27 +1423,6 @@ static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t,
     return -1;
 }
 
-static long pointer_elem_size_bytes(const cc_translation_unit_t *tu, cc_type_t ptr_type, int ptr_struct_id) {
-    cc_type_t pbase;
-    long n;
-    if (!is_pointer_type(ptr_type)) {
-        return -1;
-    }
-    pbase = ptr_base_type(ptr_type);
-    if (pbase == CC_TYPE_VOID) {
-        n = type_size_bytes_struct(tu, CC_TYPE_VOID, ptr_struct_id);
-        if (n > 0) {
-            return n;
-        }
-        return 1;
-    }
-    n = type_size_bytes(pbase);
-    if (n > 0) {
-        return n;
-    }
-    return -1;
-}
-
 static long array_decl_scalar_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id,
                                          int array_ndim) {
     cc_type_t cur_type = array_type;
@@ -11457,10 +11436,23 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     return 0;
 }
 
-static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cc_type_t array_type,
-                                           int struct_id, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS],
-                                           int base_ptr, const cc_expr_t *item, cc_diag_t *diag) {
-    cc_type_t elem_type;
+/**
+ * Store a string literal into a local array of characters: its units,
+ * then the terminating null where there is room.
+ *
+ * @param tu        the translation unit
+ * @param sf        the function
+ * @param arr       the array's type: one dimension of a character (or,
+ *                  for a wide literal, an integer) type
+ * @param base_ptr  the array's address
+ * @param item      the literal
+ * @param diag      receives an error
+ * @return          0, or -1 with @p diag set
+ */
+static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf,
+                                           const cc_ctype_t *arr, int base_ptr, const cc_expr_t *item,
+                                           cc_diag_t *diag) {
+    const cc_ctype_t *elem;
     long elem_size;
     long max_items;
     unsigned long *units = NULL;
@@ -11468,28 +11460,26 @@ static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_s
     size_t i;
     int wide;
 
-    if (item == NULL || item->kind != CC_EXPR_STR || !is_pointer_type(array_type) || array_ndim != 1) {
+    if (item == NULL || item->kind != CC_EXPR_STR || arr == NULL || arr->kind != CC_CT_ARRAY || arr->of == NULL ||
+        arr->of->kind == CC_CT_ARRAY) {
         set_diag(diag, "invalid string compound-literal array initializer");
         return -1;
     }
 
-    elem_type = ptr_base_type(array_type);
-    elem_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
-    if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, array_type, struct_id);
-    }
-    max_items = array_dims != NULL && array_dims[0] > 0 ? array_dims[0] : 1;
+    elem = arr->of;
+    elem_size = cc_ct_size(elem, tu);
+    max_items = arr->count > 0 ? arr->count : 1;
     if (elem_size <= 0 || max_items <= 0) {
         set_diag(diag, "unsupported string compound-literal array initializer");
         return -1;
     }
 
     wide = cc_string_literal_is_wide(item);
-    if (!wide && !cc_ct_is_character(cc_ct_from_scalar(elem_type))) {
+    if (!wide && !cc_ct_is_character(elem)) {
         set_diag(diag, "narrow string initializer requires character array compound literal");
         return -1;
     }
-    if (wide && !cc_type_is_integral(elem_type)) {
+    if (wide && !cc_ct_is_integer(elem)) {
         set_diag(diag, "wide string initializer requires integral array compound literal");
         return -1;
     }
@@ -11533,7 +11523,7 @@ static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_s
             free(units);
             return -1;
         }
-        cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+        cval = cast_value(sf, cval, ct_value_kind(elem), diag);
         if (cval < 0) {
             free(units);
             return -1;
@@ -11556,33 +11546,53 @@ static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_s
     return 0;
 }
 
+/**
+ * Initialize a local array in place from (part of) an initializer list:
+ * its elements in order from @p cursor, rows by nested braces or elided
+ * braces, a row of characters from a string, structure elements by
+ * their own initializers.
+ *
+ * @param tu         the translation unit
+ * @param sf         the function
+ * @param ctx        the lowering context
+ * @param vars       the visible locals
+ * @param var_count  their number
+ * @param depth      the scope depth
+ * @param arr        the array's type
+ * @param list       the initializer list
+ * @param cursor     the next item of @p list to take, advanced
+ * @param base_ptr   the array's address
+ * @param diag       receives an error
+ * @return           0, or -1 with @p diag set
+ */
 static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
-                                          var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type,
-                                          int struct_id, int array_ndim, const long *array_dims, const cc_expr_t *list,
-                                          size_t *cursor, int base_ptr, cc_diag_t *diag) {
-    cc_type_t elem_type;
+                                          var_entry_t *vars, size_t var_count, int depth, const cc_ctype_t *arr,
+                                          const cc_expr_t *list, size_t *cursor, int base_ptr, cc_diag_t *diag) {
+    const cc_ctype_t *elem;
+    const cc_ctype_t *scalar;
+    int elem_sid;
     long elem_size;
     long max_items;
     long i;
 
-    if (tu == NULL || sf == NULL || array_dims == NULL || list == NULL || list->kind != CC_EXPR_INIT_LIST ||
-        cursor == NULL || !is_pointer_type(array_type) || array_ndim <= 0) {
+    if (tu == NULL || sf == NULL || list == NULL || list->kind != CC_EXPR_INIT_LIST || cursor == NULL ||
+        arr == NULL || arr->kind != CC_CT_ARRAY || arr->of == NULL) {
         set_diag(diag, "invalid compound-literal array initializer");
         return -1;
     }
 
-    elem_type = ptr_base_type(array_type);
-    elem_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
-    if (elem_size <= 0) {
-        elem_size = pointer_elem_size_bytes(tu, array_type, struct_id);
+    elem = arr->of;
+    for (scalar = elem; scalar->kind == CC_CT_ARRAY && scalar->of != NULL; scalar = scalar->of) {
     }
-    max_items = array_dims[0] > 0 ? array_dims[0] : 1;
+    elem_sid = ct_record_id(elem);
+    elem_size = cc_ct_size(scalar, tu);
+    max_items = arr->count > 0 ? arr->count : 1;
     if (elem_size <= 0 || max_items <= 0) {
         set_diag(diag, "unsupported compound-literal array element type");
         return -1;
     }
 
-    if (array_ndim == 1) {
+    if (elem->kind != CC_CT_ARRAY) {
         if (*cursor == 0 && list->arg_count == 1) {
             const cc_expr_t *only = unwrap_scalar_initializer_expr(list->args[0], diag);
             if (only == NULL) {
@@ -11590,8 +11600,7 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
             }
             if (only->kind == CC_EXPR_STR) {
                 /* `{"text"}`: the string fills the array, and is the list's one element, now consumed */
-                if (lower_store_string_to_array_ptr(tu, sf, array_type, struct_id, array_ndim, array_dims, base_ptr,
-                                                    only, diag) != 0) {
+                if (lower_store_string_to_array_ptr(tu, sf, arr, base_ptr, only, diag) != 0) {
                     return -1;
                 }
                 *cursor = 1;
@@ -11621,9 +11630,9 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                 elem_ptr = in.dst;
             }
 
-            if (elem_type == CC_TYPE_VOID && struct_id >= 0) {
+            if (elem_sid >= 0) {
                 const cc_expr_t *elem_init = raw;
-                if (struct_id >= 0 && lower_cast_record_id(elem_init) == struct_id && elem_init->lhs != NULL &&
+                if (lower_cast_record_id(elem_init) == elem_sid && elem_init->lhs != NULL &&
                     elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                     elem_init = elem_init->lhs;
                 }
@@ -11635,7 +11644,7 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                     set_diag(diag, "struct compound-literal array element requires braces");
                     return -1;
                 }
-                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, elem_ptr, struct_id, elem_init,
+                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, elem_ptr, elem_sid, elem_init,
                                              diag) != 0) {
                     return -1;
                 }
@@ -11649,7 +11658,7 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                 if (v < 0) {
                     return -1;
                 }
-                v = cast_value(sf, v, type_to_val(elem_type), diag);
+                v = cast_value(sf, v, ct_value_kind(cc_ct_decay(elem)), diag);
                 if (v < 0) {
                     return -1;
                 }
@@ -11671,9 +11680,8 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
     }
 
     {
-        cc_type_t sub_type = ptr_base_type(array_type);
-        int sub_sid = (sub_type == CC_TYPE_VOID || is_pointer_type(sub_type)) ? struct_id : -1;
-        long sub_size = array_dims_step_size_bytes(tu, sub_type, sub_sid, array_ndim - 1, array_dims + 1, 0, elem_size);
+        /* the rows: arrays themselves, of the size of their whole type */
+        long sub_size = cc_ct_size(elem, tu);
 
         if (sub_size <= 0) {
             set_diag(diag, "unsupported nested compound-literal array stride");
@@ -11702,27 +11710,21 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                 sub_ptr = in.dst;
             }
 
-            if (raw != NULL && raw->kind == CC_EXPR_STR && array_ndim == 2) {
-                cc_type_t row_scalar_type = sub_type;
-                int rd;
-                for (rd = 0; rd < array_ndim - 1 && is_pointer_type(row_scalar_type); ++rd) {
-                    row_scalar_type = ptr_base_type(row_scalar_type);
+            /* a row of scalars (not of pointers) taken from a string */
+            if (raw != NULL && raw->kind == CC_EXPR_STR && elem->of != NULL && elem->of->kind != CC_CT_ARRAY &&
+                elem->of->kind != CC_CT_POINTER) {
+                if (lower_store_string_to_array_ptr(tu, sf, elem, sub_ptr, raw, diag) != 0) {
+                    return -1;
                 }
-                if (!is_pointer_type(row_scalar_type)) {
-                    if (lower_store_string_to_array_ptr(tu, sf, sub_type, sub_sid, array_ndim - 1, array_dims + 1,
-                                                       sub_ptr, raw, diag) != 0) {
-                        return -1;
-                    }
-                    (*cursor)++;
-                    continue;
-                }
+                (*cursor)++;
+                continue;
             }
 
             if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
                 size_t sub_cur = 0;
                 (*cursor)++;
-                if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, sub_type, sub_sid,
-                                                   array_ndim - 1, array_dims + 1, raw, &sub_cur, sub_ptr, diag) != 0) {
+                if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, elem, raw, &sub_cur, sub_ptr,
+                                                   diag) != 0) {
                     return -1;
                 }
                 if (sub_cur < raw->arg_count) {
@@ -11730,8 +11732,8 @@ static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ss
                     return -1;
                 }
             } else {
-                if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, sub_type, sub_sid,
-                                                   array_ndim - 1, array_dims + 1, list, cursor, sub_ptr, diag) != 0) {
+                if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, elem, list, cursor, sub_ptr,
+                                                   diag) != 0) {
                     return -1;
                 }
             }
@@ -11775,8 +11777,9 @@ static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_funct
     if (emit_memset_instr(sf, base_ptr, 0, total_size, diag) != 0) {
         return -1;
     }
-    if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, array_type, struct_id, array_ndim,
-                                       array_dims, init, &cursor, base_ptr, diag) != 0) {
+    if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth,
+                                       cc_ct_from_legacy(array_type, struct_id, array_ndim, array_dims), init, &cursor,
+                                       base_ptr, diag) != 0) {
         return -1;
     }
     if (cursor < init->arg_count) {
@@ -12653,8 +12656,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         int handled_string_init = 0;
                         if (s->array_ndim > 0 && is_pointer_type(array_scalar_type_after_dims(s->type, s->array_ndim))) {
                             size_t cur = 0;
-                            if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth, s->type,
-                                                               s->type_struct_id, s->array_ndim, s->array_dims,
+                            if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth,
+                                                               cc_ct_from_legacy(s->type, s->type_struct_id,
+                                                                                 s->array_ndim, s->array_dims),
                                                                s->expr, &cur, dst_addr, diag) != 0) {
                                 return -1;
                             }
@@ -13119,9 +13123,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                          * compound-literal walk takes them, brace elision and all.
                          */
                         size_t cur = 0;
-                        if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth, s->type,
-                                                           s->type_struct_id, s->array_ndim, s->array_dims, s->expr,
-                                                           &cur, varv, diag) != 0) {
+                        if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth,
+                                                           cc_ct_from_legacy(s->type, s->type_struct_id, s->array_ndim,
+                                                                             s->array_dims),
+                                                           s->expr, &cur, varv, diag) != 0) {
                             return -1;
                         }
                         if (cur < s->expr->arg_count) {
