@@ -1243,42 +1243,6 @@ static int func_decl_compatible(const cc_translation_unit_t *tu, const cc_functi
     return 1;
 }
 
-static void expr_clear_array_meta(cc_expr_t *e) {
-    if (e == NULL) {
-        return;
-    }
-    e->array_ndim = 0;
-    memset(e->array_dims, 0, sizeof(e->array_dims));
-}
-
-static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndim,
-                                     const long array_dims[CC_MAX_ARRAY_DIMS]) {
-    int i;
-    if (e->kind != CC_EXPR_CAST && !(e->kind == CC_EXPR_SIZEOF && e->lhs == NULL)) {
-        expr_clear_array_meta(e);
-    }
-    if (e == NULL || array_ndim <= 0 || array_dims == NULL) {
-        return;
-    }
-    if (array_len >= 0) {
-        e->array_ndim = array_ndim;
-        memcpy(e->array_dims, array_dims, sizeof(e->array_dims));
-        return;
-    }
-    if (array_ndim + 1 > CC_MAX_ARRAY_DIMS) {
-        return;
-    }
-    e->array_ndim = array_ndim + 1;
-    e->array_dims[0] = 0;
-    for (i = 0; i < array_ndim; ++i) {
-        e->array_dims[i + 1] = array_dims[i];
-    }
-}
-
-static cc_type_t ptr_of_type(cc_type_t t) {
-    return cc_type_make_pointer(t);
-}
-
 static int is_null_ptr_constant(const cc_expr_t *e) {
     if (e == NULL) {
         return 0;
@@ -2042,8 +2006,6 @@ static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, 
     m->col = (*slot)->col;
     m->lhs = *slot;
     m->member_offset = imag ? cc_ct_size(elem, tu) : 0;
-    m->value_type = cc_ct_legacy_kind(elem->kind);
-    m->struct_id = -1;
     m->ctype = elem;
     *slot = m;
     return 0;
@@ -2124,8 +2086,6 @@ static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot)
     ne->col = (*slot)->col;
     ne->lhs = *slot;
     ne->rhs = zero;
-    ne->value_type = CC_TYPE_INT;
-    ne->struct_id = -1;
     ne->ctype = cc_ct_basic(CC_CT_INT);
     *slot = ne;
     return 0;
@@ -2501,12 +2461,10 @@ static cc_expr_t *sema_decimal_list(int bits, const uint64_t bid[2], size_t line
         return NULL;
     }
     outer->kind = CC_EXPR_INIT_LIST;
-    outer->struct_id = -1;
     outer->line = line;
     outer->col = col;
     if (list != outer) {
         list->kind = CC_EXPR_INIT_LIST;
-        list->struct_id = -1;
         outer->args = (cc_expr_t **)calloc(1, sizeof(*outer->args));
         if (outer->args == NULL) {
             free(outer);
@@ -2527,7 +2485,6 @@ static cc_expr_t *sema_decimal_list(int bits, const uint64_t bid[2], size_t line
             cc_expr_free(outer);
             return NULL;
         }
-        list->args[k]->value_type = bits == 32 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
         list->arg_count = (size_t)(k + 1);
     }
     return outer;
@@ -2914,8 +2871,6 @@ static cc_expr_t *sema_const_node(long long v, cc_ctype_kind_t kind, size_t line
         k->int_val = v;
         k->line = line;
         k->col = col;
-        k->value_type = cc_ct_legacy_kind(kind);
-        k->struct_id = -1;
         k->ctype = cc_ct_basic(kind);
     }
     return k;
@@ -2949,7 +2904,6 @@ static int sema_wide_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
             read->ident = cc_strdup(e->ident);
             read->line = e->line;
             read->col = e->col;
-            read->struct_id = -1;
         }
     } else {
         read = cc_expr_clone(e->lhs);
@@ -3116,8 +3070,6 @@ static cc_expr_t *sema_float_literal(const cc_ctype_t *t, long double v, size_t 
         f->col = col;
         f->float_val = (double)v;
         f->float_val_ld = v;
-        f->value_type = cc_ct_legacy_kind(t->kind);
-        f->struct_id = -1;
         f->ctype = t;
     }
     return f;
@@ -3164,8 +3116,6 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     list->col = (*slot)->col;
     list->args = items;
     list->arg_count = 2;
-    list->value_type = CC_TYPE_VOID;
-    list->struct_id = -1;
     cc_expr_free(*slot);
     *slot = list;
     return 0;
@@ -3421,16 +3371,13 @@ static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **sl
             set_diag(diag, "out of memory");
             return -1;
         }
-        list->args[i]->value_type = lb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
     }
     free(v);
     list->kind = CC_EXPR_INIT_LIST;
     list->arg_count = (size_t)n;
-    list->struct_id = -1;
     outer->kind = CC_EXPR_INIT_LIST;
     outer->args[0] = list;
     outer->arg_count = 1;
-    outer->struct_id = -1;
     outer->line = list->line = (*slot)->line;
     outer->col = list->col = (*slot)->col;
     cc_expr_free(*slot);
@@ -3691,49 +3638,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 }
 
 /**
- * The legacy encoding of type @p t: its enumerator (pointer levels and
- * array dimensions as pointer levels) and struct id.
- *
- * @param t    the type
- * @param ty   receives the enumerator
- * @param sid  receives the struct id
- * @param leg  receives the whole encoding, array bounds included
- * @return     0, or -1 (nothing written) if @p t has none
- */
-static int sema_project_legacy(const cc_ctype_t *t, cc_type_t *ty, int *sid, cc_ct_legacy_t *leg) {
-    unsigned i;
-
-    if (t == NULL || cc_ct_to_legacy(t, leg) != 0) {
-        return -1;
-    }
-    *ty = leg->base;
-    for (i = 0; i < leg->depth; ++i) {
-        *ty = ptr_of_type(*ty);
-    }
-    *sid = leg->struct_id;
-    return 0;
-}
-
-/**
- * Give expression @p e type @p t, and the legacy fields (value_type,
- * struct_id, array dimensions) the encoding gives that type.
+ * Give expression @p e type @p t.
  *
  * @param e  the expression
  * @param t  its type
  */
 static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
-    cc_ct_legacy_t leg;
-
     e->ctype = t;
-    if (t != NULL && t->unqual->kind == CC_CT_FUNCTION) {
-        e->value_type = CC_TYPE_FUNC;
-        e->struct_id = -1;
-        expr_clear_array_meta(e);
-        return;
-    }
-    if (sema_project_legacy(t, &e->value_type, &e->struct_id, &leg) == 0) {
-        expr_set_array_meta_decl(e, leg.array_len, leg.ndim, leg.dims);
-    }
 }
 
 /**
@@ -4176,7 +4087,6 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             return rc < 0 ? -1 : 0;
         }
     }
-    expr_clear_array_meta(e);
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
         return -1;
     }
@@ -4782,7 +4692,7 @@ static void sema_type_literal(cc_expr_t *e) {
 
 /**
  * Check expression @p e by its kind: its operands, the rules C sets for
- * them, and its legacy type (value_type, struct_id, array dimensions).
+ * them, and its type.
  *
  * @return 0, or -1 with @p diag set
  */
@@ -4806,9 +4716,6 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     if (e == NULL) {
         set_diag(diag, "null expression in semantic analysis");
         return -1;
-    }
-    if (e->kind != CC_EXPR_CAST && !(e->kind == CC_EXPR_SIZEOF && e->lhs == NULL)) {
-        expr_clear_array_meta(e);
     }
 
     switch (e->kind) {
@@ -6290,12 +6197,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                     return -1;
                 }
-                {
-                    cc_ct_legacy_t leg;
-
-                    s->ctype = sx_vtype(s->expr);
-                    sema_project_legacy(s->ctype, &s->type, &s->type_struct_id, &leg);
-                }
+                s->ctype = sx_vtype(s->expr);
                 s->storage &= ~CC_STORAGE_AUTO_TYPE;
                 init_checked = 1;
             }
@@ -6336,13 +6238,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             (*var_count)--;
                             return -1;
                         }
-                        if (s->array_len == 0 && inferred_len > 0) {
-                            s->array_len = inferred_len;
+                        if (s->ctype->count <= 0 && inferred_len > 0) {
                             s->ctype = sema_complete_array_ctype(s->ctype, inferred_len);
                             (*vars)[*var_count - 1].ctype = s->ctype;
-                            if (s->array_ndim > 0 && s->array_dims[0] == 0) {
-                                s->array_dims[0] = inferred_len;
-                            }
                         }
                     } else if (sx_ct_record(s->ctype) >= 0) {
                         if (check_struct_initializer(tu, s->decl_name, sx_ct_record(s->ctype), s->expr, *vars,
@@ -6386,7 +6284,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     }
                     if (s->ctype->kind == CC_CT_ARRAY && s->expr->kind == CC_EXPR_STR) {
                         long inferred_len = -1;
-                        int rc = check_array_string_initializer(s->decl_name, s->ctype, &s->array_len, s->expr,
+                        long len = s->ctype->count > 0 ? s->ctype->count : 0;
+                        int rc = check_array_string_initializer(s->decl_name, s->ctype, &len, s->expr,
                                                                 &inferred_len, diag);
                         if (rc < 0) {
                             free((*vars)[*var_count - 1].name);
@@ -6394,11 +6293,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return -1;
                         }
                         if (rc == 0) {
-                            s->ctype = sema_complete_array_ctype(s->ctype, s->array_len);
+                            s->ctype = sema_complete_array_ctype(s->ctype, len);
                             (*vars)[*var_count - 1].ctype = s->ctype;
-                            if (s->array_ndim > 0 && s->array_dims[0] == 0 && inferred_len > 0) {
-                                s->array_dims[0] = inferred_len;
-                            }
                             return 0;
                         }
                     }
@@ -7093,12 +6989,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     if (check_array_initializer(tu, g->name, g->ctype, g->init, NULL, 0, 0, &inferred_len, diag) != 0) {
                         goto fail_global_item;
                     }
-                    if (g->array_len == 0 && inferred_len > 0) {
-                        g->array_len = inferred_len;
+                    if (g->ctype->count <= 0 && inferred_len > 0) {
                         g->ctype = sema_complete_array_ctype(g->ctype, inferred_len);
-                        if (g->array_ndim > 0 && g->array_dims[0] == 0) {
-                            g->array_dims[0] = inferred_len;
-                        }
                     }
                 } else if (sx_ct_record(g->ctype) >= 0) {
                     if (check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
@@ -7147,16 +7039,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 }
                 if (g->ctype->kind == CC_CT_ARRAY && g->init->kind == CC_EXPR_STR) {
                     long inferred_len = -1;
-                    int rc = check_array_string_initializer(g->name, g->ctype, &g->array_len, g->init, &inferred_len,
-                                                            diag);
+                    long len = g->ctype->count > 0 ? g->ctype->count : 0;
+                    int rc = check_array_string_initializer(g->name, g->ctype, &len, g->init, &inferred_len, diag);
                     if (rc < 0) {
                         goto fail_global_item;
                     }
                     if (rc == 0) {
-                        g->ctype = sema_complete_array_ctype(g->ctype, g->array_len);
-                        if (g->array_ndim > 0 && g->array_dims[0] == 0 && inferred_len > 0) {
-                            g->array_dims[0] = inferred_len;
-                        }
+                        g->ctype = sema_complete_array_ctype(g->ctype, len);
                         continue;
                     }
                 }
