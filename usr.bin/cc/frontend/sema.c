@@ -1185,15 +1185,6 @@ static int is_scalar_type(cc_type_t t) {
     return cc_type_is_numeric(t) || is_pointer_type(t);
 }
 
-/*
- * Qualifier tracking currently stores const/volatile/restrict at declaration
- * granularity, without full top-level vs pointee qualifier separation.
- * Apply object mutability diagnostics only to non-pointer objects to avoid
- * rejecting valid updates such as `const char *p; p++;`.
- */
-static int const_storage_applies_to_object(cc_type_t t) {
-    return !is_pointer_type(t);
-}
 
 static void unwrap_atomic_expr_type(cc_type_t *t, int *sid) {
     if (t == NULL || sid == NULL) {
@@ -4663,6 +4654,16 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
 }
 
 /**
+ * Whether a named object with storage flags @p storage and type @p t may
+ * not be modified.  Declarations record const/volatile/restrict for the
+ * declaration as a whole, not per level, so a pointer object is never
+ * taken to be const: that would reject `const char *p; p++;`.
+ */
+static int sema_const_object(int storage, const cc_ctype_t *t) {
+    return (storage & CC_STORAGE_CONST) != 0 && !sema_is_ptr(cc_ct_decay(t));
+}
+
+/**
  * Whether a value @p rhs may be assigned to an object of type @p dst (C11
  * 6.5.16.1), as leniently as the checker has always allowed: between
  * arithmetic types, between pointers that match (sema_ptrs_match()),
@@ -4733,7 +4734,7 @@ static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
         return -1;
     }
-    if ((storage & CC_STORAGE_CONST) != 0 && !sema_is_ptr(cc_ct_decay(dst))) {
+    if (sema_const_object(storage, dst)) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object%s", what);
         }
@@ -4769,6 +4770,66 @@ static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         return -1;
     }
     sema_set_type(e, dst->unqual);
+    return 0;
+}
+
+/**
+ * Check `++x`, `x--` and the like (CC_EXPR_UPDATE, C11 6.5.2.4, 6.5.3.1)
+ * on a named object or one reached through `*` or a member: a real
+ * arithmetic or pointer object, neither const nor an array.  Its value
+ * has the object's type, unqualified.  On a wide integer, decimal or
+ * vector object it is rewritten as the assignment it is.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                             int depth, cc_diag_t *diag) {
+    const cc_ctype_t *obj;
+    const cc_ctype_t *t;
+    int storage = 0;
+
+    if (e->ident != NULL) {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+        if (idx < 0 && g == NULL) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s", e->ident);
+            }
+            return -1;
+        }
+        obj = idx >= 0 ? vars[idx].ctype : g->ctype;
+        storage = idx >= 0 ? vars[idx].storage : g->storage;
+        if (obj->kind == CC_CT_ARRAY) {
+            set_diag(diag, "array object is not a modifiable lvalue for ++/--");
+            return -1;
+        }
+    } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
+        if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        obj = e->lhs->ctype;
+    } else {
+        set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
+        return -1;
+    }
+    t = cc_ct_decay(obj);
+    if (sema_const_object(storage, obj)) {
+        set_diag(diag, "cannot modify const-qualified object with ++/--");
+        return -1;
+    }
+    if (sema_is_ptr(t)) {
+        if (sema_void_ptr_arith(t, e, diag) != 0) {
+            return -1;
+        }
+    } else if (sema_wide_def(tu, t) != NULL || sema_vector_def(tu, t) != NULL || sema_decimal_def(tu, t) != NULL) {
+        /* rewritten as the assignment it is; a vector's then goes element by element */
+        return sema_wide_update(tu, e, vars, var_count, depth, diag);
+    } else if (!cc_ct_is_arithmetic(t) || sx_ct_record(t) >= 0) {
+        set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
+        return -1;
+    }
+    sema_set_type(e, obj->unqual);
     return 0;
 }
 
@@ -5933,89 +5994,8 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     case CC_EXPR_DEREF:
         return sema_check_deref(tu, e, vars, var_count, depth, diag);
 
-    case CC_EXPR_UPDATE: {
-        cc_type_t t;
-        const cc_ctype_t *tct = NULL; /* the object's type, as a value */
-        int t_struct_id = -1;
-        int t_storage = 0;
-        int is_array_object = 0;
-        if (e->ident != NULL) {
-            int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            if (idx >= 0) {
-                tct = cc_ct_decay(vars[idx].ctype);
-                t = vars[idx].type;
-                t_struct_id = vars[idx].struct_id;
-                t_storage = vars[idx].storage;
-                is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
-            } else {
-                const cc_global_t *g = find_global(tu, e->ident);
-                if (g == NULL) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message), "update of undeclared identifier: %s",
-                                 e->ident ? e->ident : "<null>");
-                    }
-                    return -1;
-                }
-                tct = cc_ct_decay(g->ctype);
-                t = g->type;
-                t_struct_id = g->type_struct_id;
-                t_storage = g->storage;
-                is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
-            }
-        } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
-            if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
-                return -1;
-            }
-            tct = sx_vtype(e->lhs);
-            t = e->lhs->value_type;
-            t_struct_id = e->lhs->struct_id;
-        } else {
-            set_diag(diag, "++/-- target must be identifier, dereference, or member lvalue");
-            return -1;
-        }
-        if (is_array_object) {
-            set_diag(diag, "array object is not a modifiable lvalue for ++/--");
-            return -1;
-        }
-        if ((t_storage & CC_STORAGE_CONST) != 0 && const_storage_applies_to_object(t)) {
-            set_diag(diag, "cannot modify const-qualified object with ++/--");
-            return -1;
-        }
-        if (is_pointer_type(t)) {
-            if (ptr_base_type(t) == CC_TYPE_VOID) {
-                if (cc_options_current()->pedantic &&
-                    emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
-                    return -1;
-                }
-            }
-        } else if (sema_wide_def(tu, tct) != NULL || sema_vector_def(tu, tct) != NULL ||
-                   sema_decimal_def(tu, tct) != NULL) {
-            /* rewritten as the assignment it is; a vector's then goes element by element */
-            return sema_wide_update(tu, e, vars, var_count, depth, diag);
-        } else if (!cc_type_is_numeric(t)) {
-            set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
-            return -1;
-        }
-        e->value_type = t;
-        if ((is_pointer_type(t) && t_struct_id >= 0) || t == CC_TYPE_BITINT) {
-            e->struct_id = t_struct_id;
-        } else {
-            e->struct_id = -1;
-        }
-        /* the value of `x++` has x's type, unqualified */
-        if (e->ident != NULL) {
-            int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
-
-            e->ctype = idx >= 0 ? vars[idx].ctype : g != NULL ? g->ctype : NULL;
-        } else {
-            e->ctype = e->lhs->ctype;
-        }
-        if (e->ctype != NULL) {
-            e->ctype = e->ctype->unqual;
-        }
-        return 0;
-    }
+    case CC_EXPR_UPDATE:
+        return sema_check_update(tu, e, vars, var_count, depth, diag);
 
     case CC_EXPR_CAST:
         return sema_check_cast(tu, e, vars, var_count, depth, diag);
