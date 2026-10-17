@@ -956,6 +956,7 @@ static const cc_ctype_t *sx_vtype(const cc_expr_t *e) {
 }
 
 static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t);
+static void sema_type_literal(cc_expr_t *e);
 
 /** Whether checked expression @p x has a pointer value (an array or function decays to one). */
 static int sx_is_ptr(const cc_expr_t *x) {
@@ -3638,8 +3639,7 @@ static int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *
         set_diag(diag, "out of memory");
         return -1;
     }
-    e->value_type = CC_TYPE_VOID;
-    e->struct_id = sid;
+    sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, elem));
     return 0;
 }
 
@@ -3705,17 +3705,12 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
     }
     sema_ct_legacy_scalar(tct, &t, &tsid);
     if (strcmp(e->ident, "__im") == 0) {
-        cc_expr_t *zero = (cc_expr_t *)calloc(1, sizeof(*zero));
+        cc_expr_t *zero = sema_int_node(0, e->line, e->col);
 
         if (zero == NULL) {
             set_diag(diag, "out of memory");
             return -1;
         }
-        zero->kind = CC_EXPR_INT;
-        zero->line = e->line;
-        zero->col = e->col;
-        zero->value_type = CC_TYPE_INT;
-        zero->struct_id = -1;
         e->kind = CC_EXPR_BIN;
         e->op = CC_BIN_COMMA;
         e->rhs = zero;
@@ -3740,139 +3735,51 @@ static int sema_real_part_of_real(const cc_translation_unit_t *tu, cc_expr_t *e,
 static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
                            int depth, cc_diag_t *diag);
 
-/** Whether @p t is a bit-precise integer type, `_BitInt(N)` or `unsigned _BitInt(N)`. */
-static int sema_ct_is_bitint(const cc_ctype_t *t) {
-    return t != NULL && (t->kind == CC_CT_BITINT || t->kind == CC_CT_UBITINT);
-}
 
 /**
- * Type an arithmetic, bitwise or shift operator, or a conditional, one of
- * whose operands is bit-precise, by the rules on interned types: the
- * legacy encoding holds a `_BitInt`'s width but not its sign, so
- * `unsigned _BitInt(N)` arithmetic would come out signed.  The legacy
- * fields are rewritten to agree.
+ * Type a node of an initializer that the initializer's check reads but
+ * never checks as an expression: a constant or string literal, a list, a
+ * designator (a member access with no object, the value in its rhs), an
+ * address constant.
  *
- * @param e  a checked expression whose operands have their types
- * @return   1 if @p e was typed here, else 0
- */
-static int sema_settle_bitint(cc_expr_t *e) {
-    const cc_ctype_t *a;
-    const cc_ctype_t *b;
-    const cc_ctype_t *t;
-
-    if (e->kind == CC_EXPR_BIN && e->op <= CC_BIN_BOR && e->lhs != NULL && e->rhs != NULL) {
-        a = e->lhs->ctype;
-        b = e->rhs->ctype;
-    } else if (e->kind == CC_EXPR_TERNARY && e->third != NULL) {
-        a = (e->rhs != NULL ? e->rhs : e->lhs)->ctype;
-        b = e->third->ctype;
-    } else {
-        return 0;
-    }
-    if (!cc_ct_is_integer(a) || !cc_ct_is_integer(b) || (!sema_ct_is_bitint(a) && !sema_ct_is_bitint(b))) {
-        return 0;
-    }
-    if (e->kind == CC_EXPR_BIN && e->unary_form == CC_UNARY_RHS) {
-        t = cc_ct_promote(b);
-    } else if (e->kind == CC_EXPR_BIN && (e->unary_form == CC_UNARY_LHS || e->op == CC_BIN_SHL || e->op == CC_BIN_SHR)) {
-        t = cc_ct_promote(a);
-    } else {
-        t = cc_ct_common_int(a, b);
-    }
-    e->ctype = t;
-    if (sema_ct_is_bitint(t)) {
-        e->value_type = CC_TYPE_BITINT;
-        e->struct_id = (int)t->count;
-    } else {
-        e->value_type = cc_ct_legacy_kind(t->kind);
-        e->struct_id = -1;
-    }
-    return 1;
-}
-
-/**
- * The type of an address, an indirection or pointer arithmetic, from its
- * operands' types: the legacy encoding cannot say what a pointer to an
- * array points to, so `&a[1]` rebuilt from it would point to the element.
- *
- * @param e  a checked expression whose operands have their types
- * @return   the type, or NULL if @p e is none of these or an operand's
- *           type is not known
- */
-static const cc_ctype_t *sema_pointer_shape_ctype(const cc_expr_t *e) {
-    const cc_ctype_t *a;
-    const cc_ctype_t *b;
-
-    if (e->kind == CC_EXPR_ADDR && e->lhs != NULL && e->lhs->ctype != NULL) {
-        return cc_ct_pointer(e->lhs->ctype);
-    }
-    if (e->kind == CC_EXPR_DEREF && e->lhs != NULL && e->lhs->ctype != NULL) {
-        a = cc_ct_decay(e->lhs->ctype);
-        /* `*f` of a function, or of a pointer to one, is a function designator; its legacy type stands */
-        if (a == NULL || a->kind != CC_CT_POINTER || a->of == NULL || a->of->kind == CC_CT_FUNCTION) {
-            return NULL;
-        }
-        return a->of;
-    }
-    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && e->lhs != NULL &&
-        e->rhs != NULL && e->lhs->ctype != NULL && e->rhs->ctype != NULL) {
-        a = cc_ct_decay(e->lhs->ctype);
-        b = cc_ct_decay(e->rhs->ctype);
-        if (a != NULL && a->kind == CC_CT_POINTER && cc_ct_is_integer(b)) {
-            return a;
-        }
-        if (e->op == CC_BIN_ADD && b != NULL && b->kind == CC_CT_POINTER && cc_ct_is_integer(a)) {
-            return b;
-        }
-    }
-    return NULL;
-}
-
-/**
- * Give checked expression @p e an interned type (cc_ctype.h) if it has
- * none: the one rebuilt from its legacy encoding.  A type recorded from a
- * declaration (an identifier, a member, a call, a written cast) is kept:
- * it says more than the encoding can, a function's type for one.
+ * @param e  the node, its parts already typed
  */
 static void sema_settle_ctype(cc_expr_t *e) {
-    if (sema_settle_bitint(e)) {
+    if (e->ctype != NULL) {
         return;
     }
-    if (e->ctype == NULL) {
-        e->ctype = sema_pointer_shape_ctype(e);
-    }
-    if (e->ctype == NULL && e->kind == CC_EXPR_STR) {
-        /* an array of its characters and the null, not the pointer the encoding gives it */
-        long n = cc_string_literal_units(e);
-
-        if (n > 0) {
-            e->ctype = cc_ct_array(cc_ct_from_scalar(e->aux_type != CC_TYPE_VOID ? e->aux_type : CC_TYPE_CHAR), n);
+    switch (e->kind) {
+    case CC_EXPR_INT:
+    case CC_EXPR_FLOAT:
+    case CC_EXPR_STR:
+        sema_type_literal(e);
+        return;
+    case CC_EXPR_INIT_LIST:
+        sema_set_type(e, e->arg_count > 0 && e->args[0]->ctype != NULL ? e->args[0]->ctype : cc_ct_basic(CC_CT_INT));
+        return;
+    case CC_EXPR_MEMBER:
+        if (e->lhs == NULL && e->rhs != NULL) {
+            sema_set_type(e, e->rhs->ctype);
+            return;
         }
-    }
-    /*
-     * Where a declaration gives the type, none recorded for a pointer
-     * means not known: the encoding would guess, and it spells a function
-     * pointer as the pointer its function returns.  An arithmetic or
-     * structure type it states exactly.
-     */
-    if ((e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER || e->kind == CC_EXPR_CALL ||
-         e->kind == CC_EXPR_CAST) &&
-        (is_pointer_type(e->value_type) || e->value_type == CC_TYPE_FUNC)) {
-        return;
-    }
-    if (e->ctype == NULL) {
-        e->ctype = cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims);
+        break;
+    case CC_EXPR_ADDR:
+        if (e->lhs != NULL && e->lhs->ctype != NULL) {
+            sema_set_type(e, cc_ct_pointer(e->lhs->ctype));
+            return;
+        }
+        break;
+    default:
+        break;
     }
 }
 
 static void sema_settle_stmts(cc_stmt_t *s, size_t n);
 
 /**
- * Give every expression in the tree under @p e that has no interned type
- * the one its legacy encoding states, operands first.  The rewrites of
- * wide, decimal and complex arithmetic, of ++ and --, and of a bit-field's
- * slot build their nodes after the parts were checked; this types them,
- * so that lowering never has to read an expression's legacy type.
+ * Give every node in the tree under @p e that has no interned type its
+ * type, operands first (sema_settle_ctype()): the parts of initializers
+ * that their checks read without checking them as expressions.
  *
  * @param e  the tree, or NULL
  */
@@ -3925,19 +3832,14 @@ static void sema_settle_stmts(cc_stmt_t *s, size_t n) {
 }
 
 /**
- * Check expression @p e (see check_expr_kind()), and give it its
- * interned type.
+ * Check expression @p e and give it its interned type (see
+ * check_expr_kind()).
  *
  * @return 0, or -1 with @p diag set
  */
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag) {
-    int rc = check_expr_kind(tu, e, vars, var_count, depth, diag);
-
-    if (rc == 0 && e != NULL) {
-        sema_settle_ctype(e);
-    }
-    return rc;
+    return check_expr_kind(tu, e, vars, var_count, depth, diag);
 }
 
 /**
@@ -3952,10 +3854,6 @@ static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
     cc_type_t ty;
     unsigned i;
 
-    if (t == NULL && getenv("CC_EXP_SET") != NULL) {
-        fprintf(stderr, "SET-NULL kind=%d line=%zu\n", (int)e->kind, (size_t)e->line);
-        abort();
-    }
     e->ctype = t;
     if (t != NULL && t->unqual->kind == CC_CT_FUNCTION) {
         e->value_type = CC_TYPE_FUNC;
@@ -4142,6 +4040,27 @@ static const cc_ctype_t *sema_pointer_arith(const cc_translation_unit_t *tu, cc_
 }
 
 /**
+ * The type of `-x`, `~x` or `+x`, which the parser builds as a binary
+ * operator with a constant on the other side (unary_form says which):
+ * the operand's type, promoted.  For any other operator, @p t.
+ *
+ * @param e  the operator
+ * @param a  its left operand's type as a value
+ * @param b  its right operand's
+ * @param t  its type as a binary operator
+ */
+static const cc_ctype_t *sema_unary_or(const cc_expr_t *e, const cc_ctype_t *a, const cc_ctype_t *b,
+                                       const cc_ctype_t *t) {
+    if (e->unary_form == CC_UNARY_RHS && cc_ct_is_integer(b)) {
+        return cc_ct_promote(b);
+    }
+    if (e->unary_form == CC_UNARY_LHS && cc_ct_is_integer(a)) {
+        return cc_ct_promote(a);
+    }
+    return t;
+}
+
+/**
  * Check a binary operator (CC_EXPR_BIN) and type it.  An operand of a
  * vector, decimal, wide integer or complex type sends it to that type's
  * rewrite; the rest follow C11 6.5.5 to 6.5.17.
@@ -4222,7 +4141,7 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
                                               : "bitwise operators require integer operands");
             return -1;
         }
-        t = is_shift_op(e->op) ? cc_ct_promote(a) : cc_ct_common_int(a, b);
+        t = is_shift_op(e->op) ? cc_ct_promote(a) : sema_unary_or(e, a, b, cc_ct_common_int(a, b));
     } else if (is_cmp_op(e->op)) {
         if (sema_check_compare(tu, e, a, b, diag) != 0) {
             return -1;
@@ -4249,6 +4168,7 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
             set_diag(diag, "void expression used in arithmetic operation");
             return -1;
         }
+        t = sema_unary_or(e, a, b, t);
     }
     sema_set_type(e, t);
     return 0;
