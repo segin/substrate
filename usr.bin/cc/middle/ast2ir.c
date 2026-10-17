@@ -1,4 +1,5 @@
 #include "cc_frontend.h"
+#include "cc_abi.h"
 #include "cc_asm.h"
 #include "cc_consteval.h"
 #include "cc_ctype.h"
@@ -1125,289 +1126,6 @@ static void ssa_global_set_bytes(cc_ssa_global_t *g, long nbytes) {
     g->data_kind = CC_SSA_DATA_CHAR;
     g->elem_size = 1;
     g->array_len = nbytes;
-}
-
-/** An eightbyte's x86-64 psABI class (System V psABI 3.2.3), in merge order. */
-enum { ABI64_NONE = 0, ABI64_SSE, ABI64_INTEGER, ABI64_X87, ABI64_MEMORY };
-
-/**
- * Merge class @p c into an eightbyte's class: INTEGER beats SSE, and x87
- * with anything else, or MEMORY anywhere, makes it MEMORY.
- */
-static void abi64_merge(int *cls, int c) {
-    if (*cls == c || c == ABI64_NONE) {
-        return;
-    }
-    if (*cls == ABI64_NONE) {
-        *cls = c;
-    } else if (*cls == ABI64_MEMORY || c == ABI64_MEMORY || *cls == ABI64_X87 || c == ABI64_X87) {
-        *cls = ABI64_MEMORY;
-    } else {
-        *cls = ABI64_INTEGER;
-    }
-}
-
-/** Give the eightbytes @p size bytes at @p off cover class @p c. */
-static void abi64_cover(int cls[2], long off, long size, int c) {
-    long first = off / 8;
-    long last = (off + (size > 0 ? size : 1) - 1) / 8;
-    long i;
-
-    for (i = first; i <= last; ++i) {
-        if (i > 1) {
-            abi64_merge(&cls[1], ABI64_MEMORY);
-            return;
-        }
-        abi64_merge(&cls[i], c);
-    }
-}
-
-static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long off, int cls[2], int depth);
-
-/** The class of a scalar of type @p t. */
-static int abi64_scalar_class(const cc_ctype_t *t) {
-    switch (t->unqual->kind) {
-    case CC_CT_FLOAT:
-    case CC_CT_DOUBLE:
-    case CC_CT_FLOAT16:
-    case CC_CT_DECIMAL32:
-    case CC_CT_DECIMAL64:
-    case CC_CT_DECIMAL128:
-        return ABI64_SSE;
-    case CC_CT_LDOUBLE:
-        return ABI64_X87;
-    default:
-        return ABI64_INTEGER;
-    }
-}
-
-/**
- * Classify an object of interned type @p ct at offset @p off into the
- * eightbytes @p cls.
- *
- * @return 0, or -1 if the type cannot be classified (then the caller keeps
- *         the INTEGER default)
- */
-static int abi64_classify_ctype(const cc_translation_unit_t *tu, const cc_ctype_t *ct, long off, int cls[2],
-                                int depth) {
-    long size = cc_ct_size(ct, tu);
-    long align = cc_ct_align(ct, tu);
-
-    if (depth > 32 || size < 0) {
-        return -1;
-    }
-    if (align > 0 && off % align != 0) {
-        /* an unaligned member (a packed structure) puts the whole in memory */
-        abi64_cover(cls, off, size, ABI64_MEMORY);
-        return 0;
-    }
-    switch (ct->kind) {
-    case CC_CT_FLOAT16:
-    case CC_CT_FLOAT:
-    case CC_CT_DOUBLE:
-    case CC_CT_DECIMAL32:
-    case CC_CT_DECIMAL64:
-    case CC_CT_DECIMAL128:
-        abi64_cover(cls, off, size, ABI64_SSE);
-        return 0;
-    case CC_CT_LDOUBLE:
-        abi64_cover(cls, off, size, ABI64_X87);
-        return 0;
-    case CC_CT_COMPLEX:
-    case CC_CT_IMAGINARY: {
-        long es = cc_ct_size(ct->of, tu);
-
-        if (es <= 0 || abi64_classify_ctype(tu, ct->of, off, cls, depth + 1) != 0) {
-            return -1;
-        }
-        return ct->kind == CC_CT_COMPLEX ? abi64_classify_ctype(tu, ct->of, off + es, cls, depth + 1) : 0;
-    }
-    case CC_CT_RECORD:
-        return abi64_classify_record(tu, ct->id, off, cls, depth + 1);
-    case CC_CT_ARRAY: {
-        long es = cc_ct_size(ct->of, tu);
-        long i;
-
-        if (ct->count < 0 || es <= 0) {
-            return ct->count <= 0 ? 0 : -1;
-        }
-        for (i = 0; i < ct->count && off + i * es < 16; ++i) {
-            if (abi64_classify_ctype(tu, ct->of, off + i * es, cls, depth + 1) != 0) {
-                return -1;
-            }
-        }
-        return 0;
-    }
-    case CC_CT_FUNCTION:
-    case CC_CT_VOID:
-        return -1;
-    default:
-        abi64_cover(cls, off, size, ABI64_INTEGER);
-        return 0;
-    }
-}
-
-/** Classify structure or union @p sid at offset @p off into @p cls; -1 if it cannot be. */
-static int abi64_classify_record(const cc_translation_unit_t *tu, int sid, long off, int cls[2], int depth) {
-    const cc_struct_def_t *sd;
-    size_t i;
-
-    if (tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count || depth > 32) {
-        return -1;
-    }
-    sd = &tu->structs[sid];
-    if (sd->complex_elem != NULL) {
-        long es = cc_ct_size(sd->complex_elem, tu);
-
-        abi64_cover(cls, off, es, abi64_scalar_class(sd->complex_elem));
-        abi64_cover(cls, off + es, es, abi64_scalar_class(sd->complex_elem));
-        return 0;
-    }
-    for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
-        long moff = off + m->offset;
-
-        if (m->is_bitfield) {
-            if (m->bit_width > 0) {
-                abi64_cover(cls, moff, m->bit_storage_size > 0 ? m->bit_storage_size : 1, ABI64_INTEGER);
-            }
-            continue;
-        }
-        if (abi64_classify_ctype(tu, member_decl_ctype(m), moff, cls, depth) != 0) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
-/**
- * How an x86-64 aggregate of @p size bytes travels: for one of at most 16
- * bytes that goes in registers, CC_ABI_SSE0 / CC_ABI_SSE1 for its
- * eightbytes that are SSE (none set: all INTEGER, the old behaviour); for
- * a returned one that goes in x87 registers CC_ABI_RET_X87 or
- * CC_ABI_RET_X87_COMPLEX; -1 for one passed in memory, as anything over
- * 16 bytes, containing a long double (as an argument), or packed is.
- *
- * @param tu         the translation unit
- * @param sid        the structure, union or complex type's structure
- * @param size       its size
- * @param is_return  nonzero for a return value
- */
-static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long size, int is_return) {
-    int cls[2] = {ABI64_NONE, ABI64_NONE};
-    int flags = 0;
-
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count &&
-        tu->structs[sid].complex_elem == cc_ct_basic(CC_CT_LDOUBLE)) {
-        return is_return ? CC_ABI_RET_X87_COMPLEX : -1;
-    }
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
-        /* a decimal floating value is SSE (psABI 3.2.3): _Decimal128 SSE and SSEUP, whole in one xmm register */
-        if (tu->structs[sid].decimal_bits == 128) {
-            return CC_ABI_SSE0 | CC_ABI_SSE1 | (is_return ? CC_ABI_RET_VEC128 : CC_ABI_VEC128);
-        }
-        return CC_ABI_SSE0;
-    }
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].vector_count > 0) {
-        /*
-         * A vector, by its size as gcc classes it: 16 bytes SSE and SSEUP,
-         * whole in one xmm register; 8 bytes SSE; 4 or fewer INTEGER;
-         * wider (an AVX vector without AVX) in memory.
-         */
-        if (size == 16) {
-            return CC_ABI_SSE0 | CC_ABI_SSE1 | (is_return ? CC_ABI_RET_VEC128 : CC_ABI_VEC128);
-        }
-        return size == 8 ? CC_ABI_SSE0 : size < 8 ? 0 : -1;
-    }
-    if (size > 16 || size <= 0) {
-        return -1;
-    }
-    if (abi64_classify_record(tu, sid, 0, cls, 0) != 0) {
-        return 0;
-    }
-    if (cls[0] == ABI64_MEMORY || cls[1] == ABI64_MEMORY) {
-        return -1;
-    }
-    if (cls[0] == ABI64_X87 || cls[1] == ABI64_X87) {
-        /* one long double (X87 then X87UP) is returned in %st0; as an argument it is memory */
-        return (is_return && cls[0] == ABI64_X87 && size == 16) ? CC_ABI_RET_X87 : -1;
-    }
-    if (cls[0] == ABI64_SSE) {
-        flags |= CC_ABI_SSE0;
-    }
-    if (cls[1] == ABI64_SSE && size > 8) {
-        flags |= CC_ABI_SSE1;
-    }
-    return flags;
-}
-
-/** Whether structure @p sid stands for a vector type. */
-static int sid_is_vector(const cc_translation_unit_t *tu, int sid) {
-    return tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].vector_count > 0;
-}
-
-/**
- * How an i386 vector argument or parameter of structure @p sid and
- * @p size bytes travels, as gcc passes one: the first three 16-byte
- * vectors in %xmm0-2 and the first three 8-byte ones in %mm0-2
- * (CC_CALL_ARG_ABI_AGG_REG with CC_ABI_VEC128 or CC_ABI_VEC64); a wider
- * one, or one the registers ran out for, on the stack aligned to its size
- * (CC_ABI_STACK_VEC).  *@p n16 and *@p n8 count the registers taken.
- *
- * @return the ABI byte, or -1 if it travels as any aggregate of its size
- */
-static int i386_vector_abi(const cc_translation_unit_t *tu, int sid, long size, int *n16, int *n8) {
-    if (!sid_is_vector(tu, sid) || size <= 4) {
-        return -1;
-    }
-    if (size == 16 && *n16 < 3) {
-        ++*n16;
-        return CC_CALL_ARG_ABI_AGG_REG | CC_ABI_VEC128;
-    }
-    if (size == 8 && *n8 < 3) {
-        ++*n8;
-        return CC_CALL_ARG_ABI_AGG_REG | CC_ABI_VEC64;
-    }
-    return CC_CALL_ARG_ABI_AGG_MEM | (size >= 16 ? CC_ABI_STACK_VEC : 0);
-}
-
-/**
- * CC_ABI_STACK_VEC for a vector of 16 bytes or more, or a _Decimal128,
- * passed in memory (aligned to its size, as gcc places them), else 0.
- */
-static int vector_mem_flag(const cc_translation_unit_t *tu, int sid, long size) {
-    int dec128 = tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits == 128;
-
-    return (sid_is_vector(tu, sid) || dec128) && size >= 16 ? CC_ABI_STACK_VEC : 0;
-}
-
-/**
- * The agg_class of a CALL or RET of an aggregate: how the target returns
- * one of structure @p sid and @p size bytes, where that is not the
- * default (x86-64: in %rax/%rdx if 16 bytes or fewer, else by hidden
- * pointer; i386: by hidden pointer).
- */
-static int agg_return_class(const cc_translation_unit_t *tu, int sid, long size) {
-    if (cc_target_pointer_size() == 8) {
-        int c = abi64_aggregate_class(tu, sid, size, 1);
-
-        return c >= 0 ? c : (size <= 16 ? CC_ABI_RET_MEMORY : 0);
-    }
-    /* i386 psABI: a float _Complex comes back in %eax:%edx, as gcc has it; any other aggregate in memory */
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == cc_ct_basic(CC_CT_FLOAT)) {
-        return CC_ABI_RET_EAX_EDX;
-    }
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
-        /* _Decimal32 in %eax, _Decimal64 in %eax:%edx, _Decimal128 in memory, as gcc returns them */
-        return tu->structs[sid].decimal_bits <= 64 ? CC_ABI_RET_EAX_EDX : 0;
-    }
-    if (sid_is_vector(tu, sid)) {
-        /* a vector of 16 bytes in %xmm0, of 8 in %mm0, of 4 or fewer in %eax, as gcc returns one */
-        long vsize = tu->structs[sid].size;
-
-        return vsize == 16 ? CC_ABI_RET_VEC128 : vsize == 8 ? CC_ABI_RET_VEC64 : vsize <= 4 ? CC_ABI_RET_EAX_EDX : 0;
-    }
-    return 0;
 }
 
 /**
@@ -5569,7 +5287,7 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
                        const dec_arg_t *kinds, const int *arg_sids, size_t nargs, dec_arg_t ret, int ret_sid,
                        cc_diag_t *diag) {
     cc_ssa_instr_t in;
-    int is64 = cc_target_pointer_size() == 8;
+    cc_abi_regs_t regs = {0, 0};
     size_t i;
 
     memset(&in, 0, sizeof(in));
@@ -5598,9 +5316,9 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
             long dsize = tu->structs[arg_sids[i]].decimal_bits / 8;
 
             size = (uint32_t)dsize;
-            if (is64) {
-                abi = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | abi64_aggregate_class(tu, arg_sids[i], dsize, 0));
-            } else if (dsize == 4) {
+            abi = (unsigned char)cc_abi_aggregate_arg(tu, arg_sids[i], dsize, &regs);
+            if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT) {
+                /* travels as an integer: an i386 _Decimal32 */
                 cc_ssa_instr_t ld;
 
                 memset(&ld, 0, sizeof(ld));
@@ -5616,8 +5334,6 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
                     set_value_size(sf, ld.dst, 4);
                     v = ld.dst;
                 }
-            } else {
-                abi = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM | vector_mem_flag(tu, arg_sids[i], dsize));
             }
             break;
         }
@@ -5658,7 +5374,7 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
         in.rhs = storage;
         in.imm = rsize;
         in.is_unsigned = 1;
-        in.agg_class = agg_return_class(tu, ret_sid, rsize);
+        in.agg_class = cc_abi_aggregate_return(tu, ret_sid, rsize);
     } else if (ret == DEC_ARG_FLOAT || ret == DEC_ARG_DOUBLE || ret == DEC_ARG_LDOUBLE) {
         in.dst = new_value(sf, CC_VAL_F64);
         in.imm = 8;
@@ -8801,9 +8517,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
         }
 
-        /* i386: the vector arguments in %xmm0-2 and %mm0-2 so far */
-        int vec_n16 = 0;
-        int vec_n8 = 0;
+        /* the argument registers the aggregates so far took */
+        cc_abi_regs_t regs = {0, 0};
 
         for (i = 0; i < e->arg_count; ++i) {
             int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
@@ -8830,9 +8545,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     int is_transparent_union = 0;
                     int pass_union_scalar = 0;
                     int arg_is_same_aggregate = 0;
-                    int pass_agg_mem = 0;
-                    int pass_agg_reg = 0;
-                    int agg_cls = 0;
+                    int agg_abi = CC_CALL_ARG_ABI_DEFAULT;
                     int param_sid = param_record_id(&callee->params[i]);
 
                     arg_size = cc_target_pointer_size();
@@ -8849,35 +8562,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                             pass_union_scalar = 1;
                         }
                     }
-                    int vec_abi = cc_target_pointer_size() == 4
-                                      ? i386_vector_abi(tu, param_sid, agg_size, &vec_n16, &vec_n8)
-                                      : -1;
-
-                    if (vec_abi >= 0) {
-                        /* an i386 vector: in an xmm or MMX register, or on the stack aligned to its size */
-                        if (CC_ABI_KIND(vec_abi) == CC_CALL_ARG_ABI_AGG_REG) {
-                            pass_agg_reg = 1;
-                            agg_cls = vec_abi & ~0x0f;
-                        } else {
-                            pass_agg_mem = 1;
-                        }
-                    } else if (!is_transparent_union && !pass_union_scalar && agg_size == 0) {
+                    if (!is_transparent_union && !pass_union_scalar) {
+                        /* the target's ABI: in registers, in memory, or as an integer of its size */
+                        agg_abi = cc_abi_aggregate_arg(tu, param_sid, agg_size, &regs);
+                    }
+                    if (agg_abi == CC_CALL_ARG_ABI_ZERO) {
                         in.call_arg_abi[i] = CC_CALL_ARG_ABI_ZERO;
                         arg_size = 0;
-                    } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 8 && agg_size > 16) {
-                        pass_agg_mem = 1;
-                    } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 4 && agg_size > 4) {
-                        /* i386 psABI: a struct argument is copied onto the stack */
-                        pass_agg_mem = 1;
-                    } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 8 &&
-                               agg_size > 0 && agg_size <= 16) {
-                        /* x86-64: by its eightbytes' classes, in general and xmm registers or memory */
-                        agg_cls = abi64_aggregate_class(tu, param_sid, agg_size, 0);
-                        if (agg_cls < 0) {
-                            pass_agg_mem = 1;
-                        } else if (agg_size > 8 || agg_cls != 0) {
-                            pass_agg_reg = 1;
-                        }
                     }
                     av = cast_value(sf, av, CC_VAL_I64, diag);
                     if (av < 0) {
@@ -8887,8 +8578,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         free(in.call_arg_sizes);
                         return -1;
                     }
-                    if (!is_transparent_union && !pass_union_scalar && !pass_agg_mem && !pass_agg_reg && agg_size > 0 &&
-                        agg_size <= cc_target_pointer_size()) {
+                    if (!is_transparent_union && !pass_union_scalar && agg_abi == CC_CALL_ARG_ABI_DEFAULT &&
+                        agg_size > 0 && agg_size <= cc_target_pointer_size()) {
                         cc_ssa_instr_t load_in;
                         memset(&load_in, 0, sizeof(load_in));
                         load_in.op = CC_SSA_LOAD;
@@ -8908,12 +8599,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         av = load_in.dst;
                         arg_size = agg_size;
                     }
-                    if (pass_agg_mem) {
-                        in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
-                                                             vector_mem_flag(tu, param_sid, agg_size));
-                        arg_size = agg_size;
-                    } else if (pass_agg_reg) {
-                        in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | agg_cls);
+                    if (CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_MEM ||
+                        CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_REG) {
+                        in.call_arg_abi[i] = (unsigned char)agg_abi;
                         arg_size = agg_size;
                     }
                 } else {
@@ -9037,7 +8725,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.rhs = agg_addr;
             in.imm = agg_size;
             in.is_unsigned = 1;
-            in.agg_class = agg_return_class(tu, lower_record_id(e), agg_size);
+            in.agg_class = cc_abi_aggregate_return(tu, lower_record_id(e), agg_size);
         } else if (lower_has_kind(e, CC_CT_VOID)) {
             in.dst = new_value(sf, CC_VAL_I64);
             in.imm = cc_target_pointer_size();
@@ -13447,7 +13135,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (rv < 0) {
                     return -1;
                 }
-                ret_agg_class = agg_return_class(tu, ct_record_id(fn_ret_ctype(ctx->fn)), ret_size);
+                ret_agg_class = cc_abi_aggregate_return(tu, ct_record_id(fn_ret_ctype(ctx->fn)), ret_size);
                 if ((ret_agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)) != 0 ||
                     (cc_target_pointer_size() == 4 && (ret_agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0)) {
                     /* the backend reads the value from the structure rv points at */
@@ -17299,7 +16987,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                                               : CC_CALL_ARG_ABI_DEFAULT);
         }
         if (cc_target_pointer_size() <= 4 && ct_record_id(fn_ret_ctype(af)) >= 0 &&
-            agg_return_class(tu, ct_record_id(fn_ret_ctype(af)), 8) == 0) {
+            cc_abi_aggregate_return(tu, ct_record_id(fn_ret_ctype(af)), 8) == 0) {
             /*
              * the i386 psABI returns every struct in memory; a float
              * _Complex comes back in %eax:%edx, and a vector of 4, 8 or
@@ -17359,21 +17047,17 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             nest_chain = ch.dst;
         }
 
-        /* i386: the vector parameters that came in %xmm0-2 and %mm0-2 so far */
-        int vec_n16 = 0;
-        int vec_n8 = 0;
+        /* the argument registers the aggregate parameters so far came in */
+        cc_abi_regs_t regs = {0, 0};
 
         for (j = 0; j < af->param_count; ++j) {
             cc_ssa_instr_t in;
             long param_size;
             long aggregate_size = -1;
-            int agg_cls = 0;
             int param_sid = param_record_id(&af->params[j]);
             int is_aggregate_param = param_sid >= 0;
-            int use_agg_mem_abi = 0;
-            int use_agg_reg_abi = 0;
+            int agg_abi = CC_CALL_ARG_ABI_DEFAULT;
             int agg_reg_storage = -1;
-            int vec_abi;
 
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_PARAM;
@@ -17388,34 +17072,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if (param_size <= 0) {
                 param_size = is_aggregate_param && aggregate_size == 0 ? 0 : cc_target_pointer_size();
             }
-            vec_abi = (is_aggregate_param && cc_target_pointer_size() == 4)
-                          ? i386_vector_abi(tu, param_sid, param_size, &vec_n16, &vec_n8)
-                          : -1;
-            if (vec_abi >= 0) {
-                /* an i386 vector: from an xmm or MMX register, or the stack aligned to its size */
-                if (CC_ABI_KIND(vec_abi) == CC_CALL_ARG_ABI_AGG_REG) {
-                    use_agg_reg_abi = 1;
-                    agg_cls = vec_abi & ~0x0f;
-                } else {
-                    use_agg_mem_abi = 1;
-                }
-            } else if (is_aggregate_param && aggregate_size == 0) {
-                /* GNU C empty structs are zero-width ABI parameters. */
-            } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size > 16) {
-                use_agg_mem_abi = 1;
-            } else if (is_aggregate_param && cc_target_pointer_size() == 4 && param_size > 4) {
-                use_agg_mem_abi = 1;
-            } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size <= 16 &&
-                       (agg_cls = abi64_aggregate_class(tu, param_sid, param_size, 0)) < 0) {
-                /* x86-64: an aggregate of 16 bytes or fewer in memory (a long double in it, packed) */
-                use_agg_mem_abi = 1;
-            } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size <= 16 &&
-                       (param_size > cc_target_pointer_size() || agg_cls != 0)) {
-                use_agg_reg_abi = 1;
-            } else if (is_aggregate_param && param_size > cc_target_pointer_size()) {
-                param_size = cc_target_pointer_size();
+            if (is_aggregate_param) {
+                /* the target's ABI: from registers, from the stack, or as an integer of its size */
+                agg_abi = cc_abi_aggregate_arg(tu, param_sid, param_size, &regs);
             }
-            if (use_agg_reg_abi) {
+            if (CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_REG) {
                 agg_reg_storage = emit_local_storage_alloc(sf, param_size, diag);
                 if (agg_reg_storage < 0) {
                     cc_ssa_module_free(out);
@@ -17435,13 +17096,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             }
             sf->param_values[j] = in.dst;
             sf->param_types[j] = ct_value_kind(lower_param_ctype(&af->params[j]));
-            if (use_agg_mem_abi) {
-                sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
-                                                   vector_mem_flag(tu, param_sid, param_size));
-            } else if (use_agg_reg_abi) {
-                sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | (agg_cls > 0 ? agg_cls : 0));
-            } else if (is_aggregate_param && aggregate_size == 0) {
-                sf->param_abi[j] = CC_CALL_ARG_ABI_ZERO;
+            if (CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_MEM || CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_REG ||
+                agg_abi == CC_CALL_ARG_ABI_ZERO) {
+                /* GNU C empty structs are zero-width ABI parameters */
+                sf->param_abi[j] = (unsigned char)agg_abi;
             } else {
                 /* a float parameter arrives in single precision -- unless the definition is old-style (promoted) */
                 sf->param_abi[j] = (unsigned char)(param_is_kind(&af->params[j], CC_CT_LDOUBLE) ? CC_CALL_ARG_ABI_LDOUBLE
@@ -17454,7 +17112,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ssa_module_free(out);
                 return -1;
             }
-            if (use_agg_mem_abi || use_agg_reg_abi) {
+            if (CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_MEM || CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_REG) {
                 /* the value is the address of the struct's stack copy or storage, not the struct */
                 set_value_size(sf, in.dst, cc_target_pointer_size());
             }

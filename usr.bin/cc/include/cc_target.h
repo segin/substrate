@@ -34,8 +34,11 @@ typedef enum {
     CC_TGT_ULLONG
 } cc_target_int_t;
 
+struct cc_translation_unit;
+struct cc_abi_regs;
+
 typedef struct {
-    cc_target_t id;                               /**< which target this is */
+    cc_target_t id;                            /**< which target this is */
     const char *name;                             /**< "x86_64" or "i386" */
     int pointer_size;                             /**< pointers, `long`, `size_t` */
     cc_target_scalar_layout_t int64;              /**< `long long` */
@@ -57,6 +60,10 @@ typedef struct {
     const char *gnu_triple;                       /**< -dumpmachine on a GNU host */
     const char *host_ldso;                        /**< a GNU/Linux host's dynamic linker */
     int pie;                                      /**< executables link as PIEs (i386 code is not RIP-relative) */
+    /** how an aggregate argument travels (cc_abi.h: cc_abi_aggregate_arg()) */
+    int (*abi_aggregate_arg)(const struct cc_translation_unit *tu, int sid, long size, struct cc_abi_regs *regs);
+    /** how an aggregate is returned (cc_abi.h: cc_abi_aggregate_return()) */
+    int (*abi_aggregate_return)(const struct cc_translation_unit *tu, int sid, long size);
 } cc_target_desc_t;
 
 /**

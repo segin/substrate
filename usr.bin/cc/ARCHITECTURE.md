@@ -27,6 +27,8 @@ usr.bin/cc/
 │   └── types.c              # Scalar type sizes and alignments, for every phase
 ├── middle/
 │   ├── ast2ir.c             # AST -> SSA lowering
+│   ├── abi_x86_64.c         # x86-64 SysV: how aggregates are passed and returned
+│   ├── abi_i386.c           # i386 SysV: the same (both reached through the target descriptor)
 │   ├── legalize.c           # IR legality checks; expands EXT (integer conversions) for the target
 │   ├── ssa_dump.c           # SSA -> the ir/ text form, for cc -fdump-ir
 │   ├── passes/opt.c         # Optimization passes
@@ -107,7 +109,7 @@ Deployment: Linked directly into the `cc` binary
 
 Name: AST-to-IR lowering, legalization, optimization, and shared SSA utilities
 
-Description: `middle/ast2ir.c` lowers the frontend AST into the compiler's SSA-like IR. `middle/legalize.c` and `middle/passes/opt.c` normalize and optimize that IR so backend selection runs on constrained, verifiable input.
+Description: `middle/ast2ir.c` lowers the frontend AST into the compiler's SSA-like IR. It does not decide how an aggregate crosses a call: it asks the selected target (`cc_abi_aggregate_arg()`, `cc_abi_aggregate_return()` in `include/cc_abi.h`, the descriptor's hooks), and `middle/abi_x86_64.c` (the psABI eightbyte classification) or `middle/abi_i386.c` (the stack, with gcc's vector registers) answers with the ABI byte the emitters act on. `middle/legalize.c` and `middle/passes/opt.c` normalize and optimize that IR so backend selection runs on constrained, verifiable input.
 
 Technologies: C, SSA-style IR, verifier-driven invariants, simple optimization passes
 

@@ -7,6 +7,7 @@
  */
 
 #include "cc_target.h"
+#include "cc_abi.h"
 
 #include <stddef.h>
 
@@ -37,6 +38,8 @@ static const cc_target_desc_t g_x86_64 = {
     "x86_64-pc-linux-gnu",
     "/lib64/ld-linux-x86-64.so.2",
     1, /* PIE */
+    cc_abi_x86_64_aggregate_arg,
+    cc_abi_x86_64_aggregate_return,
 };
 
 static const cc_target_desc_t g_i386 = {
@@ -62,6 +65,8 @@ static const cc_target_desc_t g_i386 = {
     "i386-pc-linux-gnu",
     "/lib/ld-linux.so.2",
     0, /* absolute addressing: not a PIE */
+    cc_abi_i386_aggregate_arg,
+    cc_abi_i386_aggregate_return,
 };
 
 int cc_target_int_size(const cc_target_desc_t *tgt, cc_target_int_t t) {

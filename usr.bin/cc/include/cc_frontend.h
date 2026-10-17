@@ -322,7 +322,7 @@ typedef struct {
                                        by sema, from its initializer */
 } cc_global_t;
 
-typedef struct {
+typedef struct cc_translation_unit {
     cc_function_t *funcs;
     size_t func_count;
     cc_global_t *globals;
