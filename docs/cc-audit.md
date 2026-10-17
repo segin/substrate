@@ -587,6 +587,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   rejected ("expected ';' after declaration"); the attribute after the
   closing brace works.  *Reproduced*; present before the interned-type
   refactor.
+- [ ] **CC-102** A designator list shall be any sequence of `[index]` and
+  `.member` (C11 6.7.9p1): cc takes one array designator, optionally
+  followed by member designators, so `int a[2][2] = {[1][1] = 5};` is
+  rejected ("expected '=' after array designator"; gcc accepts it).
+  *Reproduced* (both targets); found while testing arrays of more than
+  four dimensions, and present before.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -1022,7 +1028,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-101 requirements: 93 met, 8 open.
+102 requirements: 93 met, 9 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
