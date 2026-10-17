@@ -664,11 +664,22 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   `__builtin_types_compatible_p(int *, const int *)` is 1 (gcc 0).
   *Reproduced* (both targets); present before the interned-type
   refactor.
-- [ ] **CC-101** GNU attributes shall be accepted between `enum` and its
-  tag, as gcc accepts them: `enum __attribute__((packed)) e { A };` is
+- [x] **CC-101** GNU attributes shall be accepted between `enum` and its
+  tag, as gcc accepts them: `enum __attribute__((packed)) e { A };` was
   rejected ("expected ';' after declaration"); the attribute after the
-  closing brace works.  *Reproduced*; present before the interned-type
-  refactor.
+  closing brace worked.  *Reproduced*; present before the interned-type
+  refactor.  Attributes after `enum` (GNU lists and `[[...]]`) are read
+  into the specifiers' attributes, as those after the list are, so
+  `packed` there makes the type as small as its values; between the tag
+  and the list they are still rejected, as gcc rejects them.
+  `codegen/enum_attr_placement.c`.
+- [ ] **CC-110** Vendor-prefixed C23 attributes shall mean what their GNU
+  spelling means (C23 6.7.12.1; gcc): `[[gnu::aligned(64)]] char
+  buf[3];` is 1-aligned (gcc 64) and `struct [[gnu::packed]] s { char a;
+  int b; }` is 8 bytes (gcc 5).  The `[[...]]` parser knows only the
+  standard attributes; `gnu::` and `__gnu__::` ones are read and
+  dropped, changing layout without a diagnostic.  *Reproduced* (both
+  targets); found while testing CC-101.
 - [ ] **CC-102** A designator list shall be any sequence of `[index]` and
   `.member` (C11 6.7.9p1): cc takes one array designator, optionally
   followed by member designators, so `int a[2][2] = {[1][1] = 5};` is
@@ -1121,7 +1132,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-109 requirements: 102 met, 7 open.
+110 requirements: 103 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

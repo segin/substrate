@@ -159,6 +159,7 @@ static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num
 static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2,
                                            int *out_has_num2);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
+static int parse_gnu_attribute_spec(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, const char *what, const cc_ctype_t **out, cc_bounds_t *out_vla_bounds);
 static cc_expr_t *parse_expr(parser_t *p);
@@ -1824,6 +1825,37 @@ static void declspec_acc_init(declspec_acc_t *acc) {
 }
 
 /**
+ * Read the attributes between `enum` and its tag or list -- GNU
+ * `__attribute__` lists and C23 `[[...]]` sequences -- into @p out_attrs, where they
+ * apply to the enumerated type as attributes after its list do (`packed`
+ * makes it as small as its values allow).
+ *
+ * @param p          the parser
+ * @param out_attrs  receives them; may be NULL to read and drop them
+ * @return           0, or -1 on error (diagnosed)
+ */
+static int parse_enum_head_attrs(parser_t *p, decl_attrs_t *out_attrs) {
+    decl_attrs_t attrs;
+    int rc = 0;
+
+    decl_attrs_reset(&attrs);
+    while (rc == 0) {
+        if (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) {
+            rc = parse_c23_attribute_seq(p, &attrs, NULL);
+        } else if (tok_is_gnu_attribute_kw(p)) {
+            rc = parse_gnu_attribute_spec(p, &attrs);
+        } else {
+            break;
+        }
+    }
+    if (rc == 0 && out_attrs != NULL) {
+        rc = decl_attrs_merge(out_attrs, &attrs);
+    }
+    decl_attrs_clear(&attrs);
+    return rc;
+}
+
+/**
  * Read declaration specifiers into @p acc: storage classes, type
  * specifiers and qualifiers, function and alignment specifiers and
  * attributes, up to the first token that is none of them, defining any
@@ -2650,6 +2682,10 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
             acc->seen_opaque_tag = 0;
             acc->seen_struct_id = -1;
             if (next_tok(p) != 0) {
+                return -1;
+            }
+            /* attributes before the tag, as gcc takes them: `enum __attribute__((packed)) e { ... }` */
+            if (parse_enum_head_attrs(p, out_attrs) != 0) {
                 return -1;
             }
             if (p->tok.kind == TOK_IDENT) {
