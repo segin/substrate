@@ -609,6 +609,18 @@ static int member_is_array(const cc_struct_member_t *m) {
 }
 
 /**
+ * The size of a member's value: of its type decayed, so an array
+ * member's is a pointer's (its layout's size is m->size).
+ *
+ * @param tu  the translation unit
+ * @param m   the member
+ * @return    the size, or -1
+ */
+static long member_value_size(const cc_translation_unit_t *tu, const cc_struct_member_t *m) {
+    return cc_ct_size(lower_member_ctype(m), tu);
+}
+
+/**
  * The size of the elements a member's initializer fills: for an array,
  * its innermost element (a row's, if that has no size); for a pointer,
  * what it points to (1 for void).
@@ -2633,7 +2645,7 @@ static int is_synthetic_struct_array_member(const cc_translation_unit_t *tu, con
     }
     sid = member_base_struct_id(e);
     m = find_struct_member(tu, sid, e->ident);
-    if (m == NULL || !is_pointer_type(m->type)) {
+    if (m == NULL || lower_member_ctype(m) == NULL || lower_member_ctype(m)->kind != CC_CT_POINTER) {
         return 0;
     }
     if (m->array_len >= 0) {
@@ -10042,7 +10054,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (storesrc < 0) {
                     return -1;
                 }
-                store_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
+                store_size = member_value_size(tu, m);
                 if (store_size <= 0) {
                     set_diag(diag, "unsupported union cast member size in lowering");
                     return -1;
@@ -11254,7 +11266,8 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     long max_items;
     size_t ii;
 
-    if (m == NULL || item == NULL || item->kind != CC_EXPR_INIT_LIST || !is_pointer_type(m->type)) {
+    if (m == NULL || item == NULL || item->kind != CC_EXPR_INIT_LIST || lower_member_ctype(m) == NULL ||
+        lower_member_ctype(m)->kind != CC_CT_POINTER) {
         set_diag(diag, "invalid array-like struct member initializer");
         return -1;
     }
@@ -11828,7 +11841,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
         } else {
             int v;
             const cc_expr_t *item_expr = item;
-            long mem_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
+            long mem_size = member_value_size(tu, m);
             if (mem_size <= 0) {
                 mem_size = m->size;
             }
@@ -11923,7 +11936,8 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 continue;
             }
             v = cast_value(sf, v, ct_value_kind(lower_member_ctype(m)), diag);
-            if (v >= 0 && m->type == CC_TYPE_LDOUBLE && !lower_has_kind(item_expr, CC_CT_LDOUBLE)) {
+            if (v >= 0 && lower_member_ctype(m) != NULL && lower_member_ctype(m)->kind == CC_CT_LDOUBLE &&
+                !lower_has_kind(item_expr, CC_CT_LDOUBLE)) {
                 /* a long double member from an int or double: widened, not stored as the double's bytes */
                 v = promote_f64_to_ldouble_value(sf, v, diag);
             }
@@ -15261,11 +15275,10 @@ static int find_struct_member_recursive(const cc_translation_unit_t *tu, int str
         if (m->name != NULL && m->name[0] != '\0') {
             continue;
         }
-        if (m->type != CC_TYPE_VOID || m->type_struct_id < 0 ||
-            (size_t)m->type_struct_id >= tu->struct_count) {
+        if (member_record_id(m) < 0 || (size_t)member_record_id(m) >= tu->struct_count) {
             continue;
         }
-        if (find_struct_member_recursive(tu, m->type_struct_id, name, &sub_m, &sub_off) == 0) {
+        if (find_struct_member_recursive(tu, member_record_id(m), name, &sub_m, &sub_off) == 0) {
             *out_member = sub_m;
             *out_off = m->offset + sub_off;
             return 0;
@@ -16275,9 +16288,9 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             return -1;
         }
 
-        natural_size = type_size_bytes_with_struct(tu, m->type, m->type_struct_id);
+        natural_size = member_value_size(tu, m);
 
-        if (sd->is_union && item != NULL && item->kind == CC_EXPR_INIT_LIST && m->type != CC_TYPE_VOID &&
+        if (sd->is_union && item != NULL && item->kind == CC_EXPR_INIT_LIST && member_record_id(m) < 0 &&
             !member_is_array(m)) {
             size_t ui;
             size_t pos = 0;
@@ -16320,7 +16333,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                         return -1;
                     }
                 }
-                u_size = type_size_bytes_with_struct(tu, um->type, um->type_struct_id);
+                u_size = member_value_size(tu, um);
                 if (u_size <= 0) {
                     u_size = um->size;
                 }
@@ -16328,7 +16341,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                     continue;
                 }
                 u_off = base + um->offset;
-                if (store_scalar_global_init(tu, cc_ct_from_legacy(um->type, um->type_struct_id, 0, NULL), u_size, u_item,
+                if (store_scalar_global_init(tu, lower_member_ctype(um), u_size, u_item,
                                              buf, buf_size, u_off,
                                              relocs, reloc_count, diag) != 0) {
                     return -1;
@@ -16454,7 +16467,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             }
             continue;
         }
-        if (store_scalar_global_init(tu, cc_ct_from_legacy(m->type, m->type_struct_id, 0, NULL), scalar_size, item, buf,
+        if (store_scalar_global_init(tu, lower_member_ctype(m), scalar_size, item, buf,
                                      buf_size, field_off,
                                      relocs, reloc_count, diag) != 0) {
             return -1;
