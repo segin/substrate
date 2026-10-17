@@ -532,13 +532,8 @@ typedef struct {
 /** A variable of the function a GNU nested function is defined in, visible where it is defined. */
 typedef struct {
     const char *name;
-    cc_type_t type;
-    int struct_id;
-    long array_len;
-    int array_ndim;
-    const long *array_dims;
     int storage;
-    const struct cc_ctype *ctype; /**< its declared type (cc_ctype.h); NULL where none was recorded */
+    const struct cc_ctype *ctype; /**< its declared type (cc_ctype.h) */
 } cc_outer_var_t;
 
 int cc_nested_outer_vars(const cc_translation_unit_t *tu, const cc_function_t *f, cc_outer_var_t **out,

@@ -78,11 +78,6 @@ static int outer_push_decls(const cc_stmt_t *stmts, size_t n, cc_outer_var_t **l
             cc_outer_var_t v;
 
             v.name = s->decl_name;
-            v.type = s->type;
-            v.struct_id = s->type_struct_id;
-            v.array_len = s->array_len;
-            v.array_ndim = s->array_ndim;
-            v.array_dims = s->array_dims;
             v.storage = s->storage;
             v.ctype = s->ctype;
             if (outer_push(list, count, cap, &v) != 0) {
@@ -147,11 +142,6 @@ int cc_nested_outer_vars(const cc_translation_unit_t *tu, const cc_function_t *f
             continue;
         }
         v.name = pa->name;
-        v.type = pa->type;
-        v.struct_id = pa->type_struct_id;
-        v.array_len = pa->array_len;
-        v.array_ndim = pa->array_ndim;
-        v.array_dims = pa->array_dims;
         v.storage = pa->storage;
         v.ctype = pa->ctype;
         if (outer_push(&list, &n, &cap, &v) != 0) {

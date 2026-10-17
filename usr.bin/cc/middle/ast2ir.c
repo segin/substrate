@@ -811,6 +811,28 @@ static int lower_record_id(const cc_expr_t *e) {
 }
 
 /**
+ * The structure a parameter is passed as (ct_record_id()).
+ *
+ * @param p  the parameter
+ * @return   the structure's index, or -1 if the parameter is not one
+ */
+static int param_record_id(const cc_param_t *p) {
+    return ct_record_id(lower_param_ctype(p));
+}
+
+/**
+ * Whether parameter @p p has arithmetic type @p kind (as adjusted).
+ *
+ * @param p     the parameter
+ * @param kind  CC_CT_FLOAT, CC_CT_LDOUBLE, ...
+ */
+static int param_is_kind(const cc_param_t *p, cc_ctype_kind_t kind) {
+    const cc_ctype_t *t = lower_param_ctype(p);
+
+    return t != NULL && t->unqual->kind == kind;
+}
+
+/**
  * The type a cast (or a compound literal, which is one) converts to, as
  * written: not decayed, so `(int[]){...}` is an array.
  *
@@ -9069,15 +9091,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     int pass_agg_mem = 0;
                     int pass_agg_reg = 0;
                     int agg_cls = 0;
+                    int param_sid = param_record_id(&callee->params[i]);
+
                     arg_size = cc_target_pointer_size();
-                    if (callee->params[i].type_struct_id >= 0 &&
-                        (size_t)callee->params[i].type_struct_id < tu->struct_count) {
-                        const cc_struct_def_t *sd = &tu->structs[callee->params[i].type_struct_id];
+                    if (param_sid >= 0 && (size_t)param_sid < tu->struct_count) {
+                        const cc_struct_def_t *sd = &tu->structs[param_sid];
                         if ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) != 0) {
                             is_transparent_union = 1;
                         }
                         if (e->args[i] != NULL && lower_record_id(e->args[i]) >= 0 &&
-                            lower_record_id(e->args[i]) == callee->params[i].type_struct_id) {
+                            lower_record_id(e->args[i]) == param_sid) {
                             arg_is_same_aggregate = 1;
                         }
                         if (sd->is_union && !arg_is_same_aggregate) {
@@ -9085,8 +9108,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         }
                     }
                     int vec_abi = cc_target_pointer_size() == 4
-                                      ? i386_vector_abi(tu, callee->params[i].type_struct_id, agg_size, &vec_n16,
-                                                        &vec_n8)
+                                      ? i386_vector_abi(tu, param_sid, agg_size, &vec_n16, &vec_n8)
                                       : -1;
 
                     if (vec_abi >= 0) {
@@ -9108,7 +9130,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     } else if (!is_transparent_union && !pass_union_scalar && cc_target_pointer_size() == 8 &&
                                agg_size > 0 && agg_size <= 16) {
                         /* x86-64: by its eightbytes' classes, in general and xmm registers or memory */
-                        agg_cls = abi64_aggregate_class(tu, callee->params[i].type_struct_id, agg_size, 0);
+                        agg_cls = abi64_aggregate_class(tu, param_sid, agg_size, 0);
                         if (agg_cls < 0) {
                             pass_agg_mem = 1;
                         } else if (agg_size > 8 || agg_cls != 0) {
@@ -9147,8 +9169,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     want = CC_VAL_I64;
                     if (pass_agg_mem) {
                         in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
-                                                             vector_mem_flag(tu, callee->params[i].type_struct_id,
-                                                                             agg_size));
+                                                             vector_mem_flag(tu, param_sid, agg_size));
                         arg_size = agg_size;
                     } else if (pass_agg_reg) {
                         in.call_arg_abi[i] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | agg_cls);
@@ -17668,7 +17689,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             long param_size;
             long aggregate_size = -1;
             int agg_cls = 0;
-            int is_aggregate_param = ct_record_id(lower_param_ctype(&af->params[j])) >= 0;
+            int param_sid = param_record_id(&af->params[j]);
+            int is_aggregate_param = param_sid >= 0;
             int use_agg_mem_abi = 0;
             int use_agg_reg_abi = 0;
             int agg_reg_storage = -1;
@@ -17688,7 +17710,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 param_size = is_aggregate_param && aggregate_size == 0 ? 0 : cc_target_pointer_size();
             }
             vec_abi = (is_aggregate_param && cc_target_pointer_size() == 4)
-                          ? i386_vector_abi(tu, af->params[j].type_struct_id, param_size, &vec_n16, &vec_n8)
+                          ? i386_vector_abi(tu, param_sid, param_size, &vec_n16, &vec_n8)
                           : -1;
             if (vec_abi >= 0) {
                 /* an i386 vector: from an xmm or MMX register, or the stack aligned to its size */
@@ -17705,7 +17727,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             } else if (is_aggregate_param && cc_target_pointer_size() == 4 && param_size > 4) {
                 use_agg_mem_abi = 1;
             } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size <= 16 &&
-                       (agg_cls = abi64_aggregate_class(tu, af->params[j].type_struct_id, param_size, 0)) < 0) {
+                       (agg_cls = abi64_aggregate_class(tu, param_sid, param_size, 0)) < 0) {
                 /* x86-64: an aggregate of 16 bytes or fewer in memory (a long double in it, packed) */
                 use_agg_mem_abi = 1;
             } else if (is_aggregate_param && cc_target_pointer_size() == 8 && param_size <= 16 &&
@@ -17729,22 +17751,22 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ssa_module_free(out);
                 return -1;
             }
-            if (af->params[j].type == CC_TYPE_LDOUBLE) {
+            if (param_is_kind(&af->params[j], CC_CT_LDOUBLE)) {
                 set_value_size(sf, in.dst, 16);
             }
             sf->param_values[j] = in.dst;
             sf->param_types[j] = ct_value_kind(lower_param_ctype(&af->params[j]));
             if (use_agg_mem_abi) {
                 sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_MEM |
-                                                   vector_mem_flag(tu, af->params[j].type_struct_id, param_size));
+                                                   vector_mem_flag(tu, param_sid, param_size));
             } else if (use_agg_reg_abi) {
                 sf->param_abi[j] = (unsigned char)(CC_CALL_ARG_ABI_AGG_REG | (agg_cls > 0 ? agg_cls : 0));
             } else if (is_aggregate_param && aggregate_size == 0) {
                 sf->param_abi[j] = CC_CALL_ARG_ABI_ZERO;
             } else {
                 /* a float parameter arrives in single precision -- unless the definition is old-style (promoted) */
-                sf->param_abi[j] = (unsigned char)(af->params[j].type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE
-                                                   : (af->params[j].type == CC_TYPE_FLOAT && af->has_prototype)
+                sf->param_abi[j] = (unsigned char)(param_is_kind(&af->params[j], CC_CT_LDOUBLE) ? CC_CALL_ARG_ABI_LDOUBLE
+                                                   : (param_is_kind(&af->params[j], CC_CT_FLOAT) && af->has_prototype)
                                                        ? CC_CALL_ARG_ABI_FLOAT
                                                        : CC_CALL_ARG_ABI_DEFAULT);
             }
@@ -17769,7 +17791,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     snprintf(msg, sizeof(msg), "unsupported aggregate parameter size for %s.%s (struct_id=%d size=%ld)",
                              af->name != NULL ? af->name : "<function>",
                              af->params[j].name != NULL ? af->params[j].name : "<anonymous>",
-                             af->params[j].type_struct_id, agg_size);
+                             param_record_id(&af->params[j]), agg_size);
                     set_diag(diag, msg);
                     cc_ssa_module_free(out);
                     return -1;
