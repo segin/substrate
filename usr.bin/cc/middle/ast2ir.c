@@ -9207,7 +9207,25 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (arg_size <= 0) {
                         arg_size = cc_target_pointer_size();
                     }
-                    /* the value: sema converted the argument to the parameter's type */
+                    /*
+                     * Sema converted the argument to the parameter's type; what
+                     * is left is its representation: the register kind, an
+                     * integer narrowed to its width, a float rounded.
+                     */
+                    av = cast_value(sf, av, ct_value_kind(lower_param_ctype(&callee->params[i])), diag);
+                    if (av >= 0) {
+                        av = normalize_int_ct(sf, av, lower_param_ctype(&callee->params[i]), diag);
+                    }
+                    if (av >= 0) {
+                        av = normalize_float_ct(sf, av, lower_param_ctype(&callee->params[i]), diag);
+                    }
+                    if (av < 0) {
+                        free(in.sym);
+                        free(in.args);
+                        free(in.call_arg_abi);
+                        free(in.call_arg_sizes);
+                        return -1;
+                    }
                 }
             } else if (arg_is_aggregate && arg_is_variadic && in.op != CC_SSA_CALLI) {
                 /*
@@ -13857,31 +13875,27 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
                 ret_size_hint = ret_size;
             } else if (!is_void_return) {
+                /*
+                 * Sema converted the value to the return type; what is left is
+                 * its representation: the register kind, an integer narrowed
+                 * to its width and a float rounded to its precision, which an
+                 * expression of that type does not leave them.
+                 */
                 rv = cast_value(sf, rv, sf->ret_type, diag);
                 if (rv < 0) {
                     return -1;
                 }
                 if (ctx != NULL && ctx->fn != NULL) {
-                    /* `return 7;` from a long long function: the int is widened (on i386, its high word set) */
                     rv = normalize_int_ct(sf, rv, fn_ret_ctype(ctx->fn), diag);
+                    if (rv >= 0) {
+                        rv = normalize_float_ct(sf, rv, fn_ret_ctype(ctx->fn), diag);
+                    }
                     if (rv < 0) {
                         return -1;
                     }
-                }
-                if (ctx != NULL && ctx->fn != NULL) {
                     ret_size_hint = cc_ct_size(fn_ret_ctype(ctx->fn), tu);
                     if (ret_size_hint <= 0) {
                         ret_size_hint = cc_target_pointer_size();
-                    }
-                    /* a long double returned from a double or float function is rounded to it */
-                    if (ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_DOUBLE) ||
-                        ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_FLOAT)) {
-                        rv = ct_has_kind(fn_ret_ctype(ctx->fn), CC_CT_FLOAT)
-                                 ? normalize_float_ct(sf, rv, fn_ret_ctype(ctx->fn), diag)
-                                 : demote_ldouble_to_f64_value(sf, rv, diag);
-                        if (rv < 0) {
-                            return -1;
-                        }
                     }
                 }
             } else {
