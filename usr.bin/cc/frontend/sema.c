@@ -4430,6 +4430,10 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
     } else if (sx_ct_record(a) >= 0 || sx_ct_record(b) >= 0 || (t = sema_usual_arith(a, b)) == NULL) {
         set_diag(diag, "incompatible types in conditional expression");
         return -1;
+    } else if (e->rhs != NULL && (sema_convert(&e->rhs, t) != 0 || sema_convert(&e->third, t) != 0)) {
+        /* arithmetic arms: each converted to the result's type (C11 6.5.15p5); `c ?: b` keeps c, its condition */
+        set_diag(diag, "out of memory converting a conditional operand");
+        return -1;
     }
     sema_set_type(e, t);
     return 0;
