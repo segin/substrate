@@ -640,6 +640,10 @@ static int lower_record_id(const cc_expr_t *e) {
     if (t != NULL && t->kind == CC_CT_COMPLEX && cc_ct_complex_record(t) >= 0) {
         return cc_ct_complex_record(t);
     }
+    /* the legacy fields speak only for a node lowering built, which has no type recorded */
+    if (e->ctype != NULL) {
+        return -1;
+    }
     return e->value_type == CC_TYPE_VOID ? e->struct_id : -1;
 }
 
@@ -727,7 +731,8 @@ static const cc_ctype_t *lower_atomic_elem_ctype(const cc_expr_t *e) {
 static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e) {
     long n = cc_ct_size(lower_value_ctype(e), tu);
 
-    return n > 0 ? n : type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+    /* the legacy fields speak only for a node lowering built, which has no type recorded */
+    return (n > 0 || e->ctype != NULL) ? n : type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
