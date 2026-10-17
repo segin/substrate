@@ -553,6 +553,12 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   emitter each global's layout -- size, element size, what its data is --
   from its interned type, and the emitter no longer reads the legacy
   type.  `native_atomic_bitint_global_size.c`.
+- [x] **CC-97** The difference of two pointers shall have type
+  `ptrdiff_t` (C11 6.5.6p9), `long` on x86-64: cc typed it `int` on both
+  targets, so `sizeof (p - q)` was 4 at -m64 (gcc 8) and the difference
+  was cut to 32 bits and sign-extended back.  *Reproduced* (-m64).
+  Sema types the difference as the target's `ptrdiff_t`.
+  `native_pointer_difference_type.c`.
 - [x] **CC-87** `&` shall apply to a compound literal of any type, which
   is an lvalue (C11 6.5.2.5p4).  cc took the address of structure
   literals only: `&(int){5}` and `&(int[2]){7, 8}` were rejected
@@ -988,7 +994,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-96 requirements: 91 met, 5 open.
+97 requirements: 92 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

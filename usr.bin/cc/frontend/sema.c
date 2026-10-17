@@ -4265,7 +4265,8 @@ static const cc_ctype_t *sema_pointer_arith(const cc_translation_unit_t *tu, cc_
             set_diag(diag, "incompatible pointer types in subtraction");
             return NULL;
         }
-        return cc_ct_basic(CC_CT_INT);
+        /* ptrdiff_t */
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_LONG : CC_CT_INT);
     }
     if (sema_is_ptr(a) && cc_ct_is_integer(b)) {
         return sema_void_ptr_arith(a, e, diag) != 0 ? NULL : a;
