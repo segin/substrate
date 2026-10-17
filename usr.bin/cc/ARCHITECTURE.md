@@ -28,6 +28,7 @@ usr.bin/cc/
 ├── middle/
 │   ├── ast2ir.c             # AST -> SSA lowering
 │   ├── legalize.c           # IR legality checks and normalization
+│   ├── ssa_dump.c           # SSA -> the ir/ text form, for cc -fdump-ir
 │   ├── passes/opt.c         # Optimization passes
 │   └── ssa/                 # SSA module/function/block/instruction infrastructure
 ├── backend/
@@ -43,7 +44,7 @@ usr.bin/cc/
 │   ├── ir-verifier.c        # Tool: parse and verify
 │   ├── ir-normalize.c       # Tool: parse, verify, print normalized
 │   └── ir-diff.c            # Tool: compare two files after normalizing
-│                            # (cc does not write this form yet: docs/neutral-ir-plan.md step 0)
+│                            # (cc -fdump-ir writes this form: middle/ssa_dump.c)
 ├── README.md                # Current capability/status overview
 ├── SPEC.md                  # Functional requirements
 ├── Makefile                 # Native/target build-mode split and utility builds

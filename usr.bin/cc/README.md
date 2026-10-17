@@ -83,5 +83,7 @@ On the host, the in-tree toolchain is installed under `/opt/substrate`:
 - `--bootstrap-gcc` compiles C with the host's gcc instead, then
   assembles and links as usual.  It predates the compiler handling
   ordinary C and is kept for comparison.
-- `-emit-ssa FILE.ir` runs `ir-verifier` on a textual IR file.  It does
-  not dump cc's own IR; that is planned (`docs/neutral-ir-plan.md`).
+- `-emit-ssa FILE.ir` runs `ir-verifier` on a textual IR file.
+- `-fdump-ir` writes cc's own IR, as the back end gets it, to `NAME.ir`
+  in that text form; `-fdump-ir=all` writes it after each middle-end
+  pass (`NAME.lower.ir`, `NAME.legalize.ir`, `NAME.opt.ir`).

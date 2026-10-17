@@ -194,6 +194,25 @@ Enable pthread compile/link behavior.
 .It Fl emit-ssa
 Validate input textual IR via
 .Xr ir-verifier 1 .
+.It Fl fdump-ir Ns Op = Ns Cm all
+Write the intermediate representation the back end is given, in the
+text form
+.Xr ir-verifier 1
+reads, to
+.Ar name Ns Pa .ir ,
+where
+.Ar name
+is the output file without its suffix when
+.Fl o
+names the assembly or object file, and otherwise the input's base
+name in the current directory.
+With
+.Cm all ,
+write it after each middle-end pass instead, to
+.Ar name Ns Pa .lower.ir ,
+.Ar name Ns Pa .legalize.ir
+and
+.Ar name Ns Pa .opt.ir .
 .It Fl v
 Verbose tool invocation.
 .It Fl ###

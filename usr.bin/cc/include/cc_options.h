@@ -35,6 +35,8 @@ typedef struct {
     int i386_sse2;           /**< -m[no-]sse2 */
     int i386_mmx;            /**< -m[no-]mmx */
     cc_fpmath_t i386_fpmath; /**< -mfpmath= */
+    const char *dump_ir;     /**< -fdump-ir: the dump files' name without .ir; NULL for none */
+    int dump_ir_all;         /**< -fdump-ir=all: one dump after each pass, not only the last */
 } cc_options_t;
 
 /**

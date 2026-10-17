@@ -16,6 +16,44 @@ static double now_seconds(void) {
 }
 
 /**
+ * Write the IR as it stands after a pass, for -fdump-ir: after every
+ * pass into <name>.<pass>.ir with -fdump-ir=all, otherwise after the
+ * last one only, into <name>.ir.
+ *
+ * @param ssa          the module
+ * @param opts         the settings, which name the dump
+ * @param pass         the pass just run
+ * @param last         this is the IR the backend gets
+ * @param display_src  the source file, the module's name
+ * @param diag         receives the error
+ * @return             0, or -1 when the file cannot be written
+ */
+static int dump_ir_after(const cc_ssa_module_t *ssa, const cc_options_t *opts, const char *pass, int last,
+                         const char *display_src, cc_diag_t *diag) {
+    char path[4096];
+    FILE *fp;
+    int rc;
+
+    if (opts->dump_ir == NULL || (!last && !opts->dump_ir_all)) {
+        return 0;
+    }
+    if (opts->dump_ir_all) {
+        snprintf(path, sizeof(path), "%s.%s.ir", opts->dump_ir, pass);
+    } else {
+        snprintf(path, sizeof(path), "%s.ir", opts->dump_ir);
+    }
+    fp = fopen(path, "w");
+    rc = fp != NULL ? cc_ssa_dump_module(ssa, display_src, opts->target == CC_TARGET_I386 ? 4 : 8, fp) : -1;
+    if (fp != NULL && fclose(fp) != 0) {
+        rc = -1;
+    }
+    if (rc != 0 && diag != NULL) {
+        snprintf(diag->message, sizeof(diag->message), "cannot write the IR dump %.200s", path);
+    }
+    return rc;
+}
+
+/**
  * Compile one preprocessed C file to assembly.
  *
  * @param in_c         the preprocessed source
@@ -94,10 +132,20 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         cc_tu_free(&tu);
         return -1;
     }
+    if (dump_ir_after(&ssa, opts, "lower", 0, display_src, diag) != 0) {
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return -1;
+    }
     if (cc_middle_legalize_module(&ssa, diag) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "SSA legalization failed");
         }
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return -1;
+    }
+    if (dump_ir_after(&ssa, opts, "legalize", 0, display_src, diag) != 0) {
         cc_ssa_module_free(&ssa);
         cc_tu_free(&tu);
         return -1;
@@ -114,6 +162,11 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "middle-end optimization failed");
         }
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return -1;
+    }
+    if (dump_ir_after(&ssa, opts, "opt", 1, display_src, diag) != 0) {
         cc_ssa_module_free(&ssa);
         cc_tu_free(&tu);
         return -1;

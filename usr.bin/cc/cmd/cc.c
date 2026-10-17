@@ -68,6 +68,7 @@ typedef struct {
   int pic;
   int pthread_flag;
   int emit_ssa;
+  int dump_ir; /**< -fdump-ir: 1; -fdump-ir=all: 2 */
   int bootstrap_gcc;
   int query_print_file_name;
   int query_print_libgcc_file_name;
@@ -819,6 +820,7 @@ static void usage(const char *prog) {
           "  -v                 verbose stages\n"
           "  -###               print commands without executing\n"
           "  -emit-ssa          run IR verification utility on input .ir\n"
+          "  -fdump-ir[=all]    write the IR to <name>.ir (after each pass with =all)\n"
           "  -print-file-name=<name>   print discovered runtime/include path\n"
           "  -print-libgcc-file-name   print discovered libgcc path\n"
           "  --bootstrap-gcc    temporary fallback C->.s via host gcc\n",
@@ -974,6 +976,21 @@ static int opt_int(cc_opts_t *o, const driver_opt_t *d, const char *as, const ch
 static int opt_str(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
   (void)as;
   *(const char **)((char *)o + d->field) = val;
+  return 0;
+}
+
+/**
+ * -fdump-ir=all: dump the IR after every middle-end pass.
+ *
+ * @return 0, or -1 for any other value
+ */
+static int opt_dump_ir(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (strcmp(val, "all") != 0) {
+    fprintf(stderr, "cc: error: unknown value '%s' in %s (expected all)\n", val, as);
+    return -1;
+  }
+  o->dump_ir = 2;
   return 0;
 }
 
@@ -1205,6 +1222,8 @@ static const driver_opt_t options[] = {
     {"--verbose", OPT_FLAG, 0, opt_int, F(verbose), 1},
     {"-###", OPT_FLAG, 0, opt_int, F(dry_run), 1},
     {"-emit-ssa", OPT_FLAG, 0, opt_int, F(emit_ssa), 1},
+    {"-fdump-ir", OPT_FLAG, 0, opt_int, F(dump_ir), 1},
+    {"-fdump-ir=", OPT_PREFIX, 0, opt_dump_ir, 0, 0},
     {"--bootstrap-gcc", OPT_FLAG, 0, opt_int, F(bootstrap_gcc), 1},
     {"-print-file-name", OPT_VALUE, 0, opt_print_file_name, 0, 0},
     {"-print-libgcc-file-name", OPT_FLAG, 0, opt_int, F(query_print_libgcc_file_name), 1},
@@ -2002,6 +2021,31 @@ static int derive_out(const char *in, const char *ext, char out[PATH_MAX]) {
   return 0;
 }
 
+/**
+ * The name of -fdump-ir's files, without their .ir, as gcc names its
+ * dumps: the output's name without its suffix when -o names the .s or
+ * .o, otherwise the input's base name in the current directory.
+ *
+ * @param o    the command line
+ * @param in   the input being compiled
+ * @param out  receives the name
+ * @return     0, or -1 when it is too long
+ */
+static int dump_ir_base(const cc_opts_t *o, const char *in, char out[PATH_MAX]) {
+  if (o->output != NULL && (o->mode_S || o->mode_c) && strcmp(o->output, "/dev/stdout") != 0) {
+    const char *slash = strrchr(o->output, '/');
+    const char *dot = strrchr(slash != NULL ? slash : o->output, '.');
+    size_t n = dot != NULL ? (size_t)(dot - o->output) : strlen(o->output);
+
+    if (n + 1 > PATH_MAX) {
+      return -1;
+    }
+    snprintf(out, PATH_MAX, "%.*s", (int)n, o->output);
+    return 0;
+  }
+  return derive_out(in, "", out);
+}
+
 static int maybe_print_info_and_exit(int argc, char **argv) {
   int i;
 #ifdef CC_SUBSTRATE_BUILD
@@ -2272,7 +2316,16 @@ int cc_main(int argc, char **argv) {
         cc_diag_t diag;
         memset(&diag, 0, sizeof(diag));
         cc_options_t copts;
+        char dump_base[PATH_MAX];
         compile_options(&o, &copts);
+        if (o.dump_ir) {
+          if (dump_ir_base(&o, in, dump_base) != 0) {
+            fprintf(stderr, "cc: failed to derive the IR dump's name\n");
+            goto out;
+          }
+          copts.dump_ir = dump_base;
+          copts.dump_ir_all = o.dump_ir == 2;
+        }
         if (cc_compile_c_to_s(out_pp, in, out_s, &copts, &diag) != 0) {
           if (diag.error_count > 0) {
             if (diag.message[0] != '\0') {

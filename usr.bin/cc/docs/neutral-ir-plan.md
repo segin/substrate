@@ -1,6 +1,6 @@
 # cc: a target-neutral IR with per-target lowering
 
-Status: plan, not started.  This document says what the compiler does
+Status: step 0 in progress (`cc -fdump-ir` writes the text form).  This document says what the compiler does
 today, the shape we want, and an order of work in which every step
 lands on its own with the test gate green.
 

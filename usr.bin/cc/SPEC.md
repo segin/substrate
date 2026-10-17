@@ -574,7 +574,7 @@ The compiler shall be crash-free for all inputs discovered by fuzzing (zero ASAN
 > As a **compiler developer**, I want to dump the SSA IR at each optimization pass so that I can diagnose miscompilations.
 
 **REQ-DS-06-A** *(Event-driven)*
-When `-emit-ssa` is specified, the compiler shall dump the IR after lowering to a `.ir` file.
+When `-fdump-ir=all` is specified, the compiler shall dump the IR after lowering and after each middle-end pass to `.ir` files; `-fdump-ir` dumps the IR the back end is given.
 
 **REQ-DS-06-B** *(Ubiquitous)*
 The `ir-verifier` tool shall validate SSA form, type consistency, and use-def chains.

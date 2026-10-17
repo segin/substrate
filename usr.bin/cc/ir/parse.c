@@ -306,7 +306,7 @@ static int parse_instr(ir_block_t *b, char *line, size_t line_no) {
 
     in->is_terminator = strcmp(in->opcode, "br") == 0 || strcmp(in->opcode, "br_cond") == 0 ||
                         strcmp(in->opcode, "ret") == 0 || strcmp(in->opcode, "switch") == 0 ||
-                        strcmp(in->opcode, "unreachable") == 0;
+                        strcmp(in->opcode, "unreachable") == 0 || strcmp(in->opcode, "asm_goto") == 0;
     in->is_phi = strcmp(in->opcode, "phi") == 0;
 
     {
@@ -355,6 +355,22 @@ static int parse_instr(ir_block_t *b, char *line, size_t line_no) {
                 if (label[0] != '\0' && vec_push_str(&b->succs, &b->succ_count, &b->succ_cap, label) != 0) {
                     return -1;
                 }
+            }
+        } else if (strcmp(in->opcode, "asm_goto") == 0) {
+            /* asm_goto ... to fallthrough, label, ...: its successors follow " to " */
+            char *p = strstr(rhs, " to ");
+            while (p != NULL) {
+                char label[256];
+                char *comma;
+
+                p += p[0] == ',' ? 1 : 4;
+                comma = strchr(p, ',');
+                snprintf(label, sizeof(label), "%.*s", comma != NULL ? (int)(comma - p) : (int)strlen(p), p);
+                clean_label(label);
+                if (label[0] != '\0' && vec_push_str(&b->succs, &b->succ_count, &b->succ_cap, label) != 0) {
+                    return -1;
+                }
+                p = comma;
             }
         } else if (strcmp(in->opcode, "br_cond") == 0) {
             char *c1 = strchr(rhs, ',');

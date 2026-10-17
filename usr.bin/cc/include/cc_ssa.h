@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "cc_frontend.h"
 
 typedef enum {
@@ -232,5 +233,18 @@ int cc_ssa_opcode_is_terminator(cc_ssa_opcode_t op);
 int cc_ssa_opcode_has_side_effect(cc_ssa_opcode_t op);
 int cc_ssa_instr_validate(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t index, cc_diag_t *diag);
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag);
+
+/**
+ * Write a module as text in the IR form the ir/ tools read (ir-verifier,
+ * ir-normalize, ir-diff); see middle/ssa_dump.c for how lowering's IR
+ * maps onto it.
+ *
+ * @param m             the module
+ * @param name          the module's name (the source file)
+ * @param pointer_size  the target's pointer size, for its `target` line
+ * @param out           where to write
+ * @return              0, or -1 when out of memory or on a write error
+ */
+int cc_ssa_dump_module(const cc_ssa_module_t *m, const char *name, int pointer_size, FILE *out);
 
 #endif
