@@ -2010,7 +2010,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                                    size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_ret_struct_id, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      const cc_ctype_t *fn_ret, cc_attr_flags_t fn_attr_flags, int loop_depth,
                       int switch_depth,
                       int *saw_return, cc_diag_t *diag);
 
@@ -3843,6 +3843,30 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
 }
 
 /**
+ * The legacy encoding of type @p t: its enumerator (pointer levels and
+ * array dimensions as pointer levels) and struct id.
+ *
+ * @param t    the type
+ * @param ty   receives the enumerator
+ * @param sid  receives the struct id
+ * @param leg  receives the whole encoding, array bounds included
+ * @return     0, or -1 (nothing written) if @p t has none
+ */
+static int sema_project_legacy(const cc_ctype_t *t, cc_type_t *ty, int *sid, cc_ct_legacy_t *leg) {
+    unsigned i;
+
+    if (t == NULL || cc_ct_to_legacy(t, leg) != 0) {
+        return -1;
+    }
+    *ty = leg->base;
+    for (i = 0; i < leg->depth; ++i) {
+        *ty = ptr_of_type(*ty);
+    }
+    *sid = leg->struct_id;
+    return 0;
+}
+
+/**
  * Give expression @p e type @p t, and the legacy fields (value_type,
  * struct_id, array dimensions) the encoding gives that type.
  *
@@ -3851,8 +3875,6 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
  */
 static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
     cc_ct_legacy_t leg;
-    cc_type_t ty;
-    unsigned i;
 
     e->ctype = t;
     if (t != NULL && t->unqual->kind == CC_CT_FUNCTION) {
@@ -3861,16 +3883,9 @@ static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
         expr_clear_array_meta(e);
         return;
     }
-    if (t == NULL || cc_ct_to_legacy(t, &leg) != 0) {
-        return;
+    if (sema_project_legacy(t, &e->value_type, &e->struct_id, &leg) == 0) {
+        expr_set_array_meta_decl(e, leg.array_len, leg.ndim, leg.dims);
     }
-    ty = leg.base;
-    for (i = 0; i < leg.depth; ++i) {
-        ty = ptr_of_type(ty);
-    }
-    e->value_type = ty;
-    e->struct_id = leg.struct_id;
-    expr_set_array_meta_decl(e, leg.array_len, leg.ndim, leg.dims);
 }
 
 /**
@@ -4444,7 +4459,7 @@ static int sema_check_stmt_expr(const cc_translation_unit_t *tu, cc_expr_t *e, v
         return -1;
     }
     for (j = 0; j < e->stmt_expr_count; ++j) {
-        if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, CC_TYPE_INT, -1, 0, 0, 0,
+        if (check_stmt(tu, &e->stmt_expr_stmts[j], &lvars, &lcount, depth + 1, cc_ct_basic(CC_CT_INT), 0, 0, 0,
                        &saw_return, diag) != 0) {
             vars_free(lvars, lcount);
             return -1;
@@ -6314,7 +6329,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
 }
 
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_ret_struct_id, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      const cc_ctype_t *fn_ret, cc_attr_flags_t fn_attr_flags, int loop_depth,
                       int switch_depth,
                       int *saw_return, cc_diag_t *diag) {
     size_t i;
@@ -6339,7 +6354,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     switch (s->kind) {
     case CC_STMT_DECL:
         {
-            cc_type_t init_type = s->type;
+            const cc_ctype_t *init_ct; /* the type an initializer converts to: the element's for an array */
             int auto_type_decl = (s->storage & CC_STORAGE_AUTO_TYPE) != 0;
             int init_checked = 0;
             int sc_count = storage_class_count(s->storage);
@@ -6421,20 +6436,17 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                     return -1;
                 }
-                s->type = s->expr->value_type;
-                s->type_struct_id = s->expr->struct_id;
-                s->storage &= ~CC_STORAGE_AUTO_TYPE;
-                init_type = s->type;
-                init_checked = 1;
-                if (getenv("CC_DEBUG_AUTO_TYPE") != NULL) {
-                    fprintf(stderr, "cc-debug: __auto_type %s deduced type=%d sid=%d\n",
-                            s->decl_name != NULL ? s->decl_name : "<anon>", (int)s->type, s->type_struct_id);
+                {
+                    cc_ct_legacy_t leg;
+
+                    s->ctype = sx_vtype(s->expr);
+                    sema_project_legacy(s->ctype, &s->type, &s->type_struct_id, &leg);
                 }
+                s->storage &= ~CC_STORAGE_AUTO_TYPE;
+                init_checked = 1;
             }
-            if (s->array_len >= 0 && is_pointer_type(s->type)) {
-                init_type = ptr_base_type(s->type);
-            }
-            if (s->type == CC_TYPE_VOID && s->type_struct_id < 0) {
+            init_ct = s->ctype->kind == CC_CT_ARRAY ? s->ctype->of : s->ctype;
+            if (ct_kind_is(s->ctype->unqual, CC_CT_VOID)) {
                 set_diag(diag, "void variable declarations are not supported");
                 return -1;
             }
@@ -6451,7 +6463,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (check_expr(tu, bound, *vars, *var_count, depth, diag) != 0) {
                     return -1;
                 }
-                if (!cc_type_is_integral(bound->value_type)) {
+                if (!sx_is_int(bound)) {
                     set_diag(diag, "variable-length array bound must be an integer expression");
                     return -1;
                 }
@@ -6463,7 +6475,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             if (s->expr != NULL) {
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
-                    if (is_pointer_type(s->type) && s->array_len >= 0) {
+                    if (s->ctype->kind == CC_CT_ARRAY) {
                         long inferred_len = -1;
                         if (check_array_initializer(tu, s->decl_name, s->type, s->type_struct_id, s->array_len,
                                                     s->array_ndim, s->array_dims, s->expr, *vars, *var_count, depth,
@@ -6481,9 +6493,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                                 (*vars)[*var_count - 1].array_dims[0] = inferred_len;
                             }
                         }
-                    } else if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
-                        if (check_struct_initializer(tu, s->decl_name, s->type_struct_id, s->expr, *vars, *var_count,
-                                                     depth, diag) != 0) {
+                    } else if (sx_ct_record(s->ctype) >= 0) {
+                        if (check_struct_initializer(tu, s->decl_name, sx_ct_record(s->ctype), s->expr, *vars,
+                                                     *var_count, depth, diag) != 0) {
                             free((*vars)[*var_count - 1].name);
                             (*var_count)--;
                             return -1;
@@ -6500,9 +6512,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             (*var_count)--;
                             return -1;
                         }
-                        if (!can_convert(init_type, scalar_init->value_type) &&
-                            !(is_pointer_type(init_type) && cc_type_is_integral(scalar_init->value_type) &&
-                              is_null_ptr_constant(scalar_init))) {
+                        if (!sema_assignable(tu, init_ct, scalar_init)) {
                             if (diag != NULL && diag->message[0] == '\0') {
                                 snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
                                          s->decl_name != NULL ? s->decl_name : "<anon>");
@@ -6519,13 +6529,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                         (*var_count)--;
                         return -1;
                     }
-                    if (sema_complex_convert_for_assign(
-                            tu, &s->expr,
-                            s->ctype != NULL ? s->ctype : cc_ct_from_legacy(s->type, s->type_struct_id, 0, NULL)) > 0) {
+                    if (sema_complex_convert_for_assign(tu, &s->expr, s->ctype) > 0) {
                         /* to or from a complex type: the conversion is now explicit */
                         return 0;
                     }
-                    if (is_pointer_type(s->type) && s->array_len >= 0 && s->expr->kind == CC_EXPR_STR) {
+                    if (s->ctype->kind == CC_CT_ARRAY && s->expr->kind == CC_EXPR_STR) {
                         long inferred_len = -1;
                         int rc = check_array_string_initializer(s->decl_name, s->type, &s->array_len, s->expr,
                                                                 &inferred_len, diag);
@@ -6544,16 +6552,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             return 0;
                         }
                     }
-                    if (!init_checked && !can_convert(init_type, s->expr->value_type) &&
-                        !(is_pointer_type(init_type) && cc_type_is_integral(s->expr->value_type) &&
-                          is_null_ptr_constant(s->expr)) &&
-                        !(is_pointer_type(init_type) && is_pointer_type(s->expr->value_type)) &&
-                        !(cc_type_is_integral(init_type) && cc_type_is_integral(s->expr->value_type))) {
+                    if (!init_checked && !sema_assignable(tu, init_ct, s->expr) &&
+                        !(sema_is_ptr(cc_ct_decay(init_ct)) && sx_is_ptr(s->expr))) {
                         if (diag != NULL && diag->message[0] == '\0') {
-                            snprintf(diag->message, sizeof(diag->message),
-                                     "cannot initialize variable '%s' (type=%d) with expression type=%d",
-                                     s->decl_name != NULL ? s->decl_name : "<anon>", (int)init_type,
-                                     (int)s->expr->value_type);
+                            snprintf(diag->message, sizeof(diag->message), "cannot initialize variable '%s'",
+                                     s->decl_name != NULL ? s->decl_name : "<anon>");
                         }
                         free((*vars)[*var_count - 1].name);
                         (*var_count)--;
@@ -6582,7 +6585,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        if (!(s->expr->kind == CC_EXPR_CAST && s->expr->aux_type == CC_TYPE_VOID)) {
+        if (!(s->expr->kind == CC_EXPR_CAST && ct_kind_is(s->expr->ctype->unqual, CC_CT_VOID))) {
             const cc_expr_t *ce = s->expr;
             if (ce->kind == CC_EXPR_CALL && ce->ident != NULL) {
                 const cc_function_t *f = find_function(tu, ce->ident);
@@ -6623,8 +6626,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->asm_outputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (s->asm_outputs[i2].expr->value_type == CC_TYPE_FLOAT ||
-                s->asm_outputs[i2].expr->value_type == CC_TYPE_DOUBLE) {
+            if (sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 1 ||
+                sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 2) {
                 set_diag(diag, "floating asm outputs are not supported yet");
                 return -1;
             }
@@ -6642,8 +6645,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->asm_inputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (s->asm_inputs[i2].expr->value_type == CC_TYPE_FLOAT ||
-                s->asm_inputs[i2].expr->value_type == CC_TYPE_DOUBLE) {
+            if (sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 1 ||
+                sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 2) {
                 set_diag(diag, "floating asm inputs are not supported yet");
                 return -1;
             }
@@ -6681,12 +6684,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "noreturn function must not contain a return statement");
             return -1;
         }
-        if (fn_ret_type == CC_TYPE_VOID && fn_ret_struct_id < 0) {
+        if (ct_kind_is(fn_ret->unqual, CC_CT_VOID)) {
             if (s->expr != NULL) {
                 if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                     return -1;
                 }
-                if (s->expr->value_type != CC_TYPE_VOID) {
+                if (!ct_kind_is(sx_vtype(s->expr), CC_CT_VOID)) {
                     if (!cc_lang_gnu()) {
                         set_diag(diag, "void function returning a value");
                         return -1;
@@ -6704,19 +6707,13 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (sema_complex_convert_for_assign(tu, &s->expr, cc_ct_from_legacy(fn_ret_type, fn_ret_struct_id, 0, NULL)) <
-                0) {
+            if (sema_complex_convert_for_assign(tu, &s->expr, fn_ret) < 0) {
                 set_diag(diag, "out of memory");
                 return -1;
             }
-            if (fn_ret_type == CC_TYPE_VOID && fn_ret_struct_id >= 0) {
-                if (!(s->expr->value_type == CC_TYPE_VOID && s->expr->struct_id == fn_ret_struct_id)) {
-                    if (!(s->expr->kind == CC_EXPR_STMT && cc_type_is_integral(s->expr->value_type))) {
-                        set_diag(diag, "return type mismatch");
-                        return -1;
-                    }
-                }
-            } else if (!can_convert(fn_ret_type, s->expr->value_type)) {
+            if (sx_ct_record(fn_ret) >= 0 ? sx_ct_record(sx_vtype(s->expr)) != sx_ct_record(fn_ret) &&
+                                                !(s->expr->kind == CC_EXPR_STMT && sx_is_int(s->expr))
+                                          : !sema_assignable(tu, fn_ret, s->expr)) {
                 set_diag(diag, "return type mismatch");
                 return -1;
             }
@@ -6738,13 +6735,13 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (sema_condition(tu, &s->expr, diag) != 0) {
             return -1;
         }
-        if (s->expr->value_type == CC_TYPE_VOID) {
+        if (!sx_is_scalar(s->expr)) {
             set_diag(diag, "if condition cannot be void");
             return -1;
         }
         {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
+            if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
                            switch_depth,
                            saw_return, diag) != 0) {
                 return -1;
@@ -6756,7 +6753,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         }
         if (s->else_branch != NULL) {
             size_t saved = *var_count;
-            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
+            if (check_stmt(tu, s->else_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
                            switch_depth,
                            saw_return, diag) != 0) {
                 return -1;
@@ -6776,7 +6773,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 child_depth = depth;
             }
             for (i = 0; i < s->block_count; ++i) {
-                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, child_depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
+                if (check_stmt(tu, &s->block_stmts[i], vars, var_count, child_depth, fn_ret, fn_attr_flags,
                                loop_depth,
                                switch_depth,
                                saw_return, diag) != 0) {
@@ -6806,11 +6803,11 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (sema_condition(tu, &s->expr, diag) != 0) {
             return -1;
         }
-        if (s->expr->value_type == CC_TYPE_VOID) {
+        if (!sx_is_scalar(s->expr)) {
             set_diag(diag, "while condition cannot be void");
             return -1;
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth + 1,
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth + 1,
                           switch_depth,
                           saw_return, diag);
 
@@ -6819,7 +6816,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed do-while statement");
             return -1;
         }
-        if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth + 1,
+        if (check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth + 1,
                        switch_depth,
                        saw_return, diag) != 0) {
             return -1;
@@ -6833,7 +6830,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (sema_condition(tu, &s->expr, diag) != 0) {
             return -1;
         }
-        if (s->expr->value_type == CC_TYPE_VOID) {
+        if (!sx_is_scalar(s->expr)) {
             set_diag(diag, "do-while condition cannot be void");
             return -1;
         }
@@ -6851,13 +6848,13 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (s->init_stmt != NULL) {
                 if (s->init_stmt->kind == CC_STMT_BLOCK) {
                     for (i = 0; i < s->init_stmt->block_count; ++i) {
-                        if (check_stmt(tu, &s->init_stmt->block_stmts[i], vars, var_count, depth + 1, fn_ret_type,
-                                       fn_ret_struct_id, fn_attr_flags, loop_depth, switch_depth, saw_return, diag) != 0) {
+                        if (check_stmt(tu, &s->init_stmt->block_stmts[i], vars, var_count, depth + 1, fn_ret,
+                                       fn_attr_flags, loop_depth, switch_depth, saw_return, diag) != 0) {
                             return -1;
                         }
                     }
                 } else {
-                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
+                    if (check_stmt(tu, s->init_stmt, vars, var_count, depth + 1, fn_ret, fn_attr_flags,
                                    loop_depth, switch_depth, saw_return, diag) != 0) {
                         return -1;
                     }
@@ -6877,7 +6874,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (sema_condition(tu, &s->expr, diag) != 0) {
                     return -1;
                 }
-                if (s->expr->value_type == CC_TYPE_VOID) {
+                if (!sx_is_scalar(s->expr)) {
                     set_diag(diag, "for condition cannot be void");
                     return -1;
                 }
@@ -6885,7 +6882,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (s->post_expr != NULL && check_expr(tu, s->post_expr, *vars, *var_count, for_depth, diag) != 0) {
                 return -1;
             }
-            if (check_stmt(tu, s->then_branch, vars, var_count, for_depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags,
+            if (check_stmt(tu, s->then_branch, vars, var_count, for_depth, fn_ret, fn_attr_flags,
                            loop_depth + 1, switch_depth,
                            saw_return, diag) != 0) {
                 return -1;
@@ -6909,7 +6906,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
         if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
             return -1;
         }
-        if (!cc_type_is_integral(s->expr->value_type)) {
+        if (!sx_is_int(s->expr)) {
             set_diag(diag, "switch expression must be integer");
             return -1;
         }
@@ -6964,7 +6961,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 }
             }
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
                           switch_depth + 1,
                           saw_return, diag);
 
@@ -7024,7 +7021,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(s->expr->value_type) && !cc_type_is_integral(s->expr->value_type)) {
+            if (!sx_is_ptr(s->expr) && !sx_is_int(s->expr)) {
                 set_diag(diag, "computed goto requires pointer or integer target expression");
                 return -1;
             }
@@ -7036,7 +7033,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             set_diag(diag, "malformed labeled statement");
             return -1;
         }
-        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret_type, fn_ret_struct_id, fn_attr_flags, loop_depth,
+        return check_stmt(tu, s->then_branch, vars, var_count, depth, fn_ret, fn_attr_flags, loop_depth,
                           switch_depth,
                           saw_return, diag);
 
@@ -7710,7 +7707,7 @@ fail_decl:
 
         for (j = 0; j < f->stmt_count; ++j) {
             size_t saved_stmt_var_count = var_count;
-            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_type, f->ret_struct_id, fn_attr_flags, 0, 0, &saw_return,
+            if (check_stmt(tu, &f->stmts[j], &vars, &var_count, 0, f->ret_ctype, fn_attr_flags, 0, 0, &saw_return,
                            diag) != 0) {
                 size_t vi;
                 had_error = 1;
