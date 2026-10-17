@@ -687,6 +687,23 @@ static long lower_pointee_size(const cc_translation_unit_t *tu, const cc_expr_t 
     return n > 0 ? n : -1;
 }
 
+/**
+ * The type of the object an atomic builtin's pointer operand points to,
+ * unqualified; `int` for a `void *` or an operand that is not a pointer,
+ * as the builtins take them.
+ *
+ * @param e  the pointer operand
+ * @return   the type
+ */
+static const cc_ctype_t *lower_atomic_elem_ctype(const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    if (t == NULL || t->kind != CC_CT_POINTER || t->of == NULL || t->of->kind == CC_CT_VOID) {
+        return cc_ct_basic(CC_CT_INT);
+    }
+    return t->of->unqual;
+}
+
 static long lower_value_size(const cc_translation_unit_t *tu, const cc_expr_t *e) {
     long n = cc_ct_size(lower_value_ctype(e), tu);
 
@@ -743,10 +760,6 @@ static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
         return 0;
     }
     return pointer_depth(t) >= array_ndim;
-}
-
-static int is_unsigned_load_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || cc_type_is_unsigned_integral(t) || is_pointer_type(t);
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
@@ -8543,7 +8556,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int p;
             int z;
             long mem_size;
-            cc_type_t elem_type;
+            const cc_ctype_t *elem_ct;
             if (e->arg_count != 1 || e->args[0] == NULL) {
                 set_diag(diag, "__sync_lock_release lowering expects 1 argument");
                 return -1;
@@ -8556,13 +8569,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (p < 0) {
                 return -1;
             }
-            elem_type = ptr_base_type(e->args[0]->value_type);
-            if (elem_type == CC_TYPE_VOID) {
-                elem_type = CC_TYPE_INT;
-            }
-            mem_size = pointer_elem_size_bytes(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            elem_ct = lower_atomic_elem_ctype(e->args[0]);
+            mem_size = lower_pointee_size(tu, e->args[0]);
             if (mem_size <= 0) {
-                mem_size = type_size_bytes_with_struct(tu, elem_type, e->args[0]->struct_id);
+                mem_size = pointer_elem_size_bytes(tu, e->args[0]->value_type, e->args[0]->struct_id);
             }
             if (mem_size <= 0) {
                 mem_size = cc_target_pointer_size();
@@ -8574,7 +8584,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (z < 0) {
                 return -1;
             }
-            z = cast_value(sf, z, type_to_val(elem_type), diag);
+            z = cast_value(sf, z, ct_value_kind(elem_ct), diag);
             if (z < 0) {
                 return -1;
             }
@@ -8606,7 +8616,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int need_post_compiler = 0;
             int need_pre_full = 0;
             int need_post_full = 0;
-            cc_type_t elem_type;
+            const cc_ctype_t *elem_ct;
             cc_ssa_instr_t bin;
             if (e->arg_count == 0 || e->args[0] == NULL) {
                 set_diag(diag, "atomic builtin requires pointer argument");
@@ -8620,13 +8630,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (p < 0) {
                 return -1;
             }
-            elem_type = ptr_base_type(e->args[0]->value_type);
-            if (elem_type == CC_TYPE_VOID) {
-                elem_type = CC_TYPE_INT;
-            }
-            mem_size = pointer_elem_size_bytes(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            elem_ct = lower_atomic_elem_ctype(e->args[0]);
+            mem_size = lower_pointee_size(tu, e->args[0]);
             if (mem_size <= 0) {
-                mem_size = type_size_bytes_with_struct(tu, elem_type, e->args[0]->struct_id);
+                mem_size = pointer_elem_size_bytes(tu, e->args[0]->value_type, e->args[0]->struct_id);
             }
             if (mem_size <= 0) {
                 mem_size = cc_target_pointer_size();
@@ -8685,11 +8692,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_LOAD;
-            in.dst = new_value(sf, type_to_val(elem_type));
+            in.dst = new_value(sf, ct_value_kind(elem_ct));
             in.lhs = p;
             in.rhs = -1;
             in.imm = mem_size;
-            in.is_unsigned = is_unsigned_load_type(elem_type) ? 1 : 0;
+            in.is_unsigned = ct_loads_unsigned(elem_ct) ? 1 : 0;
             if (in.dst < 0 || push_instr(sf, in) != 0) {
                 return -1;
             }
@@ -8714,7 +8721,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (rhsv < 0) {
                     return -1;
                 }
-                rhsv = cast_value(sf, rhsv, type_to_val(elem_type), diag);
+                rhsv = cast_value(sf, rhsv, ct_value_kind(elem_ct), diag);
                 if (rhsv < 0) {
                     return -1;
                 }
@@ -8723,7 +8730,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB) {
                 memset(&bin, 0, sizeof(bin));
                 bin.op = (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_ADD) ? CC_SSA_ADD : CC_SSA_SUB;
-                bin.dst = new_value(sf, type_to_val(elem_type));
+                bin.dst = new_value(sf, ct_value_kind(elem_ct));
                 bin.lhs = oldv;
                 bin.rhs = rhsv;
                 if (bin.dst < 0 || push_instr(sf, bin) != 0) {
@@ -8803,7 +8810,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (expectv < 0) {
                     return -1;
                 }
-                expectv = cast_value(sf, expectv, type_to_val(elem_type), diag);
+                expectv = cast_value(sf, expectv, ct_value_kind(elem_ct), diag);
                 if (expectv < 0) {
                     return -1;
                 }
@@ -8811,7 +8818,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (desiredv < 0) {
                     return -1;
                 }
-                desiredv = cast_value(sf, desiredv, type_to_val(elem_type), diag);
+                desiredv = cast_value(sf, desiredv, ct_value_kind(elem_ct), diag);
                 if (desiredv < 0) {
                     return -1;
                 }
