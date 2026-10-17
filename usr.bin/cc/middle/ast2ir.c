@@ -10668,8 +10668,8 @@ static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, 
  * A floating value converted to _Bool is whether it is non-zero (0.5
  * is true); truncating it to an integer first would make it false.
  */
-static int bool_from_floating(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag) {
-    if (t != CC_TYPE_BOOL || value_type(sf, v) != CC_VAL_F64) {
+static int bool_from_floating(cc_ssa_function_t *sf, int v, const cc_ctype_t *t, cc_diag_t *diag) {
+    if (!ct_has_kind(t, CC_CT_BOOL) || value_type(sf, v) != CC_VAL_F64) {
         return v;
     }
     return lower_truthy_value(sf, v, diag);
@@ -12933,7 +12933,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     if (v < 0) {
                         return -1;
                     }
-                    v = bool_from_floating(sf, v, s->type, diag);
+                    v = bool_from_floating(sf, v, lower_decl_ctype(s), diag);
                     if (v < 0) {
                         return -1;
                     }
@@ -12942,8 +12942,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                         return -1;
                     }
                     v = normalize_float_ct(sf, v, lower_decl_ctype(s), diag);
-                    if (v >= 0 && cc_type_is_integral(s->type) && !is_pointer_type(s->type)) {
-                        v = normalize_integral_ct(sf, v, s->ctype, s->type, diag);
+                    if (v >= 0 && cc_ct_is_integer(lower_decl_ctype(s))) {
+                        v = normalize_int_ct(sf, v, lower_decl_ctype(s), diag);
                     }
                     if (v < 0) {
                         return -1;
@@ -13325,7 +13325,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             set_diag(diag, "out of memory allocating local variable value");
             return -1;
         }
-        if (s->type == CC_TYPE_LDOUBLE) {
+        if (ct_has_kind(lower_decl_ctype(s), CC_CT_LDOUBLE)) {
             set_value_size(sf, varv, 16);
         }
         if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
@@ -13346,7 +13346,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (v < 0) {
                 return -1;
             }
-            v = bool_from_floating(sf, v, s->type, diag);
+            v = bool_from_floating(sf, v, lower_decl_ctype(s), diag);
             if (v < 0) {
                 return -1;
             }
@@ -13354,15 +13354,15 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (v < 0) {
                 return -1;
             }
-            if (s->type == CC_TYPE_LDOUBLE) {
+            if (ct_has_kind(lower_decl_ctype(s), CC_CT_LDOUBLE)) {
                 v = promote_f64_to_ldouble_value(sf, v, diag);
                 if (v < 0) {
                     return -1;
                 }
             }
             v = normalize_float_ct(sf, v, lower_decl_ctype(s), diag);
-            if (v >= 0 && cc_type_is_integral(s->type) && !is_pointer_type(s->type)) {
-                v = normalize_integral_ct(sf, v, s->ctype, s->type, diag);
+            if (v >= 0 && cc_ct_is_integer(lower_decl_ctype(s))) {
+                v = normalize_int_ct(sf, v, lower_decl_ctype(s), diag);
             }
             if (v < 0) {
                 return -1;
@@ -13371,7 +13371,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "out of memory appending declaration move");
                 return -1;
             }
-            if (s->type == CC_TYPE_LDOUBLE) {
+            if (ct_has_kind(lower_decl_ctype(s), CC_CT_LDOUBLE)) {
                 set_value_size(sf, varv, 16);
             }
         } else {
