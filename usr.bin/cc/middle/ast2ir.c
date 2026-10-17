@@ -541,6 +541,22 @@ static const cc_ctype_t *lower_param_ctype(const cc_param_t *p) {
 }
 
 /**
+ * The type a declaration statement declares, as a value (see
+ * lower_var_ctype()).
+ *
+ * @param s  the declaration
+ * @return   the type, or NULL if not known
+ */
+static const cc_ctype_t *lower_decl_ctype(const cc_stmt_t *s) {
+    const cc_ctype_t *t = s->ctype;
+
+    if (t == NULL) {
+        t = cc_ct_from_legacy(s->type, s->type_struct_id, s->array_ndim, s->array_dims);
+    }
+    return cc_ct_decay(t);
+}
+
+/**
  * The type of a file-scope variable as a value (see lower_var_ctype()).
  *
  * @param g  the variable
@@ -7154,7 +7170,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 long load_size = mem_size;
                 long stack_step;
                 int is_agg = (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) ? 1 : 0;
-                cc_value_type_t dst_ty = is_agg ? CC_VAL_I64 : type_to_val(e->aux_type);
+                cc_value_type_t dst_ty = is_agg ? CC_VAL_I64 : lower_value_kind(e);
 
                 ap_ptr = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
                 if (ap_ptr < 0) {
@@ -7228,7 +7244,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
                     memset(&in, 0, sizeof(in));
                     in.op = CC_SSA_LOAD;
-                    in.dst = new_value(sf, type_to_val(e->aux_type));
+                    in.dst = new_value(sf, lower_value_kind(e));
                     in.lhs = aligned_ptr;
                     in.imm = mem_size;
                     in.is_unsigned = 0;
@@ -7414,7 +7430,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 in.dst = new_value(sf, dst_ty);
                 in.lhs = addrv;
                 in.imm = is_agg ? cc_target_pointer_size() : load_size;
-                in.is_unsigned = is_agg ? 1 : (is_unsigned_load_type(e->aux_type) ? 1 : 0);
+                in.is_unsigned = is_agg ? 1 : (lower_loads_unsigned(e) ? 1 : 0);
                 if (in.dst < 0 || push_instr(sf, in) != 0) {
                     set_diag(diag, "out of memory loading va_arg register value");
                     return -1;
@@ -7454,7 +7470,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 in.dst = new_value(sf, dst_ty);
                 in.lhs = addrv;
                 in.imm = is_agg ? cc_target_pointer_size() : load_size;
-                in.is_unsigned = is_agg ? 1 : (is_unsigned_load_type(e->aux_type) ? 1 : 0);
+                in.is_unsigned = is_agg ? 1 : (lower_loads_unsigned(e) ? 1 : 0);
                 if (in.dst < 0 || push_instr(sf, in) != 0) {
                     set_diag(diag, "out of memory loading va_arg stack value");
                     return -1;
@@ -7500,11 +7516,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             } else {
                 memset(&in, 0, sizeof(in));
                 in.op = CC_SSA_LOAD;
-                in.dst = new_value(sf, type_to_val(e->aux_type));
+                in.dst = new_value(sf, lower_value_kind(e));
                 in.lhs = cur_ap;
                 in.rhs = -1;
                 in.imm = mem_size;
-                in.is_unsigned = is_unsigned_load_type(e->aux_type) ? 1 : 0;
+                in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
                 if (in.dst < 0 || push_instr(sf, in) != 0) {
                     set_diag(diag, "out of memory appending va_arg load");
                     return -1;
@@ -9127,7 +9143,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (arg_size <= 0) {
                         arg_size = cc_target_pointer_size();
                     }
-                    want = type_to_val(callee->params[i].type);
+                    want = ct_value_kind(lower_param_ctype(&callee->params[i]));
                     av = cast_value(sf, av, want, diag);
                     if (av < 0) {
                         free(in.sym);
@@ -10057,7 +10073,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->aux_type == CC_TYPE_VOID) {
             return v;
         }
-        v = cast_value(sf, v, type_to_val(e->aux_type), diag);
+        v = cast_value(sf, v, lower_value_kind(e), diag);
         if (v < 0) {
             return -1;
         }
@@ -12822,7 +12838,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     if (v < 0) {
                         return -1;
                     }
-                    v = cast_value(sf, v, type_to_val(s->type), diag);
+                    v = cast_value(sf, v, ct_value_kind(lower_decl_ctype(s)), diag);
                     if (v < 0) {
                         return -1;
                     }
@@ -13206,7 +13222,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return 0;
         }
-        varv = new_value(sf, type_to_val(s->type));
+        varv = new_value(sf, ct_value_kind(lower_decl_ctype(s)));
         if (varv < 0) {
             set_diag(diag, "out of memory allocating local variable value");
             return -1;
@@ -13236,7 +13252,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (v < 0) {
                 return -1;
             }
-            v = cast_value(sf, v, type_to_val(s->type), diag);
+            v = cast_value(sf, v, ct_value_kind(lower_decl_ctype(s)), diag);
             if (v < 0) {
                 return -1;
             }
