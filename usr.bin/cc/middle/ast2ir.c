@@ -682,6 +682,20 @@ static const cc_ctype_t *lower_global_ctype(const cc_global_t *g) {
 }
 
 /**
+ * Whether a file-scope variable is a pointer object: its declared type,
+ * not decayed, is a pointer (an array is not one).
+ *
+ * @param g  the variable
+ * @return   1 or 0
+ */
+static int global_is_pointer_object(const cc_global_t *g) {
+    const cc_ctype_t *t = g->ctype != NULL ? g->ctype
+                                           : cc_ct_from_legacy(g->type, g->type_struct_id, g->array_ndim, g->array_dims);
+
+    return t != NULL && t->kind == CC_CT_POINTER;
+}
+
+/**
  * The kind of IR value a value of type @p t is held in: F64 for a real
  * binary floating type or an imaginary one (held as its one part), I64
  * for everything else -- integers, pointers, and the structures that
@@ -8938,8 +8952,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.rhs = -1;
         if (e->ident == NULL ||
             (e->ident != NULL && callee == NULL && bk == BUILTIN_NONE && bswap_bits == 0 &&
-             (ident_var_idx >= 0 || (ident_global != NULL && ident_global->array_ndim <= 0 &&
-                                      cc_type_is_pointer(ident_global->type))))) {
+             (ident_var_idx >= 0 || (ident_global != NULL && global_is_pointer_object(ident_global))))) {
             if (e->ident == NULL) {
                 const cc_expr_t *callee_expr = e->lhs;
                 cc_expr_t callee_tmp;
@@ -8999,10 +9012,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 indirect_callee = lower_expr(tu, sf, ctx, vars, var_count, depth, callee_expr, diag);
             } else {
-                if (ident_global != NULL && ident_var_idx < 0 && ident_global->array_ndim <= 0 &&
-                    cc_type_is_pointer(ident_global->type)) {
+                if (ident_global != NULL && ident_var_idx < 0 && global_is_pointer_object(ident_global)) {
                     cc_ssa_instr_t load_fp;
-                    long mem_size = type_size_bytes_with_struct(tu, ident_global->type, ident_global->type_struct_id);
+                    long mem_size = cc_ct_size(lower_global_ctype(ident_global), tu);
                     int gaddr = emit_global_addr(sf, ident_global->name, diag);
                     if (gaddr < 0) {
                         return -1;
@@ -9119,8 +9131,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             want = value_type(sf, av);
             if (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count) {
-                if (callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0) {
-                    long agg_size = type_size_bytes_with_struct(tu, callee->params[i].type, callee->params[i].type_struct_id);
+                if (ct_record_id(lower_param_ctype(&callee->params[i])) >= 0) {
+                    long agg_size = cc_ct_size(lower_param_ctype(&callee->params[i]), tu);
                     int is_transparent_union = 0;
                     int pass_union_scalar = 0;
                     int arg_is_same_aggregate = 0;
@@ -9213,15 +9225,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         arg_size = agg_size;
                     }
                 } else {
-                    if (callee->params[i].type == CC_TYPE_LDOUBLE) {
+                    if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_LDOUBLE)) {
                         arg_needs_ldouble_abi = 1;
                     }
-                    if (callee->params[i].type == CC_TYPE_FLOAT && callee->has_prototype) {
+                    if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT) && callee->has_prototype) {
                         /* a prototyped float parameter takes a float, not the double it is held in */
                         arg_needs_float_abi = 1;
                     }
                     arg_size =
-                        type_size_bytes_with_struct(tu, callee->params[i].type, callee->params[i].type_struct_id);
+                        cc_ct_size(lower_param_ctype(&callee->params[i]), tu);
                     if (arg_size <= 0) {
                         arg_size = cc_target_pointer_size();
                     }
@@ -9234,15 +9246,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         free(in.call_arg_sizes);
                         return -1;
                     }
-                    if (callee->params[i].type == CC_TYPE_LDOUBLE) {
+                    if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_LDOUBLE)) {
                         av = promote_f64_to_ldouble_value(sf, av, diag);
-                    } else if (callee->params[i].type == CC_TYPE_DOUBLE) {
+                    } else if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_DOUBLE)) {
                         av = demote_ldouble_to_f64_value(sf, av, diag);
-                    } else if (callee->params[i].type == CC_TYPE_FLOAT) {
+                    } else if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT)) {
                         av = normalize_float_value(sf, av, CC_TYPE_FLOAT, diag);
                     }
-                    if (callee->params[i].type == CC_TYPE_LDOUBLE || callee->params[i].type == CC_TYPE_DOUBLE ||
-                        callee->params[i].type == CC_TYPE_FLOAT) {
+                    if (ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_LDOUBLE) || ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_DOUBLE) ||
+                        ct_has_kind(lower_param_ctype(&callee->params[i]), CC_CT_FLOAT)) {
                         if (av < 0) {
                             free(in.sym);
                             free(in.args);
@@ -9251,7 +9263,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                             return -1;
                         }
                     }
-                    av = normalize_integral_ct(sf, av, callee->params[i].ctype, callee->params[i].type, diag);
+                    av = normalize_int_ct(sf, av, lower_param_ctype(&callee->params[i]), diag);
                     if (av < 0) {
                         free(in.sym);
                         free(in.args);
