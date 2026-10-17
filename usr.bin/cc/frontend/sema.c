@@ -1382,23 +1382,31 @@ static const cc_ctype_t *sema_complete_array_ctype(const cc_ctype_t *t, long n) 
     return t;
 }
 
-static int check_array_string_initializer(const char *name, cc_type_t array_type, long *array_len_io, cc_expr_t *init,
+/**
+ * Check a string literal initializing an array of type @p arr (C11
+ * 6.7.9p14): its characters must fit, the null may not; an array of no
+ * bound takes the literal's length with the null.
+ *
+ * @param name              the object, for diagnostics
+ * @param arr               the array's type
+ * @param array_len_io      its bound, 0 if not known; receives the one inferred
+ * @param init              the initializer
+ * @param inferred_len_out  receives the inferred bound, or NULL
+ * @param diag              receives the error
+ * @return                  0 if @p init is such a string, 1 if it is not
+ *                          (another rule applies), -1 with @p diag set
+ */
+static int check_array_string_initializer(const char *name, const cc_ctype_t *arr, long *array_len_io, cc_expr_t *init,
                                           long *inferred_len_out, cc_diag_t *diag) {
-    cc_type_t elem_type;
     int wide;
     size_t units;
     long need;
 
-    if (!is_pointer_type(array_type) || array_len_io == NULL || init == NULL || init->kind != CC_EXPR_STR) {
+    if (arr == NULL || arr->kind != CC_CT_ARRAY || array_len_io == NULL || init == NULL || init->kind != CC_EXPR_STR) {
         return 1;
     }
-    elem_type = ptr_base_type(array_type);
     wide = cc_string_literal_is_wide(init);
-    if (wide) {
-        if (!cc_type_is_integral(elem_type)) {
-            return 1;
-        }
-    } else if (!cc_ct_is_character(cc_ct_from_scalar(elem_type))) {
+    if (wide ? !cc_ct_is_integer(arr->of) : !cc_ct_is_character(arr->of->unqual)) {
         return 1;
     }
 
@@ -2004,10 +2012,9 @@ static int atomic_memorder_check_arg(const cc_translation_unit_t *tu, cc_expr_t 
 
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
-static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, cc_type_t array_type,
-                                   int array_struct_id, long array_len, int array_ndim, const long *array_dims,
-                                   cc_expr_t *init, var_entry_t *vars,
-                                   size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag);
+static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, const cc_ctype_t *arr,
+                                   cc_expr_t *init, var_entry_t *vars, size_t var_count, int depth,
+                                   long *out_inferred_len, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
                       const cc_ctype_t *fn_ret, cc_attr_flags_t fn_attr_flags, int loop_depth,
@@ -4282,13 +4289,8 @@ static int sema_check_compound_literal(const cc_translation_unit_t *tu, cc_expr_
     long inferred_len = -1;
 
     if (t != NULL && t->kind == CC_CT_ARRAY) {
-        long known = e->array_ndim > 0 && e->array_dims[0] > 0 ? e->array_dims[0] : 0;
-        long fallback_dims[CC_MAX_ARRAY_DIMS] = {0, 0, 0, 0};
-
-        if (check_array_initializer(tu, "<compound-literal>", e->aux_type, e->aux_struct_id, known,
-                                    e->array_ndim > 0 ? e->array_ndim : 1,
-                                    e->array_ndim > 0 ? e->array_dims : fallback_dims, e->lhs, vars, var_count,
-                                    depth, &inferred_len, diag) != 0) {
+        if (check_array_initializer(tu, "<compound-literal>", t, e->lhs, vars, var_count, depth, &inferred_len, diag) !=
+            0) {
             return -1;
         }
         sema_set_type(e, sema_complete_array_ctype(t, inferred_len));
@@ -6038,15 +6040,15 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         int first_is_designator =
             (first != NULL && first->kind == CC_EXPR_MEMBER && first->lhs == NULL && first->rhs != NULL && first->ident != NULL);
         if (!first_is_designator) {
-            if (is_array_object_type(um->type, um->array_len, um->array_ndim)) {
-                if (check_array_initializer(tu, name, um->type, um->type_struct_id, um->array_len, um->array_ndim,
-                                            um->array_dims, init, vars, var_count, depth, NULL, diag) != 0) {
+            if (um->ctype->kind == CC_CT_ARRAY) {
+                if (check_array_initializer(tu, name, um->ctype, init, vars, var_count, depth, NULL, diag) != 0) {
                     return -1;
                 }
                 return 0;
             }
-            if (um->type == CC_TYPE_VOID && um->type_struct_id >= 0) {
-                if (check_struct_initializer(tu, name, um->type_struct_id, init, vars, var_count, depth, diag) != 0) {
+            if (sx_ct_record(um->ctype) >= 0) {
+                if (check_struct_initializer(tu, name, sx_ct_record(um->ctype), init, vars, var_count, depth, diag) !=
+                    0) {
                     return -1;
                 }
                 return 0;
@@ -6129,11 +6131,9 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             }
             return -1;
         }
-        if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
-            cc_type_t elem_type = ptr_base_type(m->type);
+        if (m->ctype->kind == CC_CT_ARRAY) {
             if (item->kind == CC_EXPR_INIT_LIST) {
-                if (check_array_initializer(tu, name, m->type, m->type_struct_id, m->array_len, m->array_ndim,
-                                            m->array_dims, item, vars, var_count, depth, NULL, diag) != 0) {
+                if (check_array_initializer(tu, name, m->ctype, item, vars, var_count, depth, NULL, diag) != 0) {
                     return -1;
                 }
                 continue;
@@ -6141,8 +6141,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!can_convert(elem_type, item->value_type) &&
-                !(is_pointer_type(elem_type) && cc_type_is_integral(item->value_type) && is_null_ptr_constant(item))) {
+            if (!sema_assignable(tu, m->ctype->of, item)) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "cannot convert array member initializer %zu for %s",
                              i, name != NULL ? name : "<anon>");
@@ -6151,29 +6150,31 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             }
             continue;
         }
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+        if (sx_ct_record(m->ctype) >= 0) {
+            int msid = sx_ct_record(m->ctype);
             cc_expr_t *nested = NULL;
+
             if (item->kind == CC_EXPR_INIT_LIST) {
                 nested = item;
-            } else if (item->kind == CC_EXPR_CAST && item->aux_type == CC_TYPE_VOID &&
-                       item->aux_struct_id == m->type_struct_id && item->lhs != NULL &&
+            } else if (item->kind == CC_EXPR_CAST && sx_ct_record(item->ctype) == msid && item->lhs != NULL &&
                        item->lhs->kind == CC_EXPR_INIT_LIST) {
+                /* a compound literal of the member's own type */
                 nested = item->lhs;
             }
             if (nested != NULL &&
-                check_struct_initializer(tu, name, m->type_struct_id, nested, vars, var_count, depth, diag) != 0) {
+                check_struct_initializer(tu, name, msid, nested, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             if (nested == NULL && check_expr(tu, item, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (nested == NULL && sema_decimal_def_sid(tu, m->type_struct_id) != NULL) {
+            if (nested == NULL && sema_decimal_def(tu, m->ctype) != NULL) {
                 /* a decimal member initialized by an arithmetic value: converted (a constant folded) */
                 cc_expr_t **islot = init->args[i] == item ? &init->args[i]
                                     : (init->args[i] != NULL && init->args[i]->rhs == item) ? &init->args[i]->rhs
                                                                                             : NULL;
 
-                if (islot != NULL && sema_decimal_convert_for_assign(tu, islot, cc_ct_record(m->type_struct_id)) < 0) {
+                if (islot != NULL && sema_decimal_convert_for_assign(tu, islot, m->ctype) < 0) {
                     set_diag(diag, "out of memory");
                     return -1;
                 }
@@ -6183,8 +6184,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
             return -1;
         }
-        if (!can_convert(m->type, item->value_type) &&
-            !(is_pointer_type(m->type) && cc_type_is_integral(item->value_type) && is_null_ptr_constant(item))) {
+        if (!sema_assignable(tu, m->ctype, item)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "cannot convert member initializer %zu for struct %s", i,
                          name != NULL ? name : "<anon>");
@@ -6195,35 +6195,56 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
     return 0;
 }
 
-static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, cc_type_t array_type,
-                                   int array_struct_id, long array_len, int array_ndim, const long *array_dims,
-                                   cc_expr_t *init, var_entry_t *vars,
-                                   size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag) {
+/**
+ * Check an initializer list for an array of type @p arr (C11 6.7.9): no
+ * more elements than the bound, each converting to the element type, a
+ * nested list for an element that is itself an array or a structure (or
+ * the elements brace-elided), or one string for an array of characters.
+ *
+ * @param tu                the translation unit
+ * @param name              the object, for diagnostics
+ * @param arr               the array's type
+ * @param init              the list
+ * @param vars              the variables in scope
+ * @param var_count         their count
+ * @param depth             the scope depth
+ * @param out_inferred_len  receives the bound the list gives an array of
+ *                          no bound, or NULL
+ * @param diag              receives the error
+ * @return                  0, or -1 with @p diag set
+ */
+static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, const cc_ctype_t *arr,
+                                   cc_expr_t *init, var_entry_t *vars, size_t var_count, int depth,
+                                   long *out_inferred_len, cc_diag_t *diag) {
     size_t i;
-    cc_type_t elem_type;
+    const cc_ctype_t *elem;
+    long array_len;
+    int elem_sid;
     int saw_nonlist_struct_item = 0;
 
     if (init == NULL || init->kind != CC_EXPR_INIT_LIST) {
         set_diag(diag, "array initializer must use an initializer list");
         return -1;
     }
-    if (!is_pointer_type(array_type) || array_len < 0) {
+    if (arr == NULL || arr->kind != CC_CT_ARRAY) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "cannot initialize non-array object %s with initializer list",
                      name != NULL ? name : "<anon>");
         }
         return -1;
     }
-
-    elem_type = ptr_base_type(array_type);
-    if (elem_type == CC_TYPE_VOID && array_struct_id < 0) {
+    /* a bound not known is 0: the list gives it */
+    array_len = arr->count > 0 ? arr->count : 0;
+    elem = arr->of;
+    elem_sid = sx_ct_record(elem);
+    if (ct_kind_is(elem->unqual, CC_CT_VOID)) {
         set_diag(diag, "array initializer has unsupported element type");
         return -1;
     }
-    if (array_ndim == 1 && init->arg_count == 1) {
+    if (elem->kind != CC_CT_ARRAY && init->arg_count == 1) {
         long string_len = array_len;
         long inferred_len = -1;
-        int rc = check_array_string_initializer(name, array_type, &string_len, init->args[0], &inferred_len, diag);
+        int rc = check_array_string_initializer(name, arr, &string_len, init->args[0], &inferred_len, diag);
         if (rc < 0) {
             return -1;
         }
@@ -6236,8 +6257,14 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
     }
     if (array_len > 0) {
         long init_elems = (long)init->arg_count;
-        if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
-            init_elems = infer_struct_array_len_from_init(tu, array_struct_id, init);
+        const cc_ctype_t *inner;
+
+        /* a list for an array of arrays may leave out the inner braces (C11 6.7.9p20): count scalars */
+        for (inner = elem; inner->kind == CC_CT_ARRAY && inner->count > 0; inner = inner->of) {
+            array_len *= inner->count;
+        }
+        if (elem_sid >= 0) {
+            init_elems = infer_struct_array_len_from_init(tu, elem_sid, init);
             if (init_elems <= 0) {
                 init_elems = (long)init->arg_count;
             }
@@ -6259,11 +6286,7 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
     }
     for (i = 0; i < init->arg_count; ++i) {
         cc_expr_t *item = init->args[i];
-        if (array_ndim > 1) {
-            long child_len = 0;
-            if (array_dims != NULL && array_ndim - 1 < CC_MAX_ARRAY_DIMS) {
-                child_len = array_dims[1];
-            }
+        if (elem->kind == CC_CT_ARRAY) {
             if (item->kind != CC_EXPR_INIT_LIST) {
                 /*
                  * Accept brace-elided multidimensional initializers and
@@ -6275,14 +6298,12 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                 }
                 continue;
             }
-            if (check_array_initializer(tu, name, elem_type, array_struct_id, child_len, array_ndim - 1,
-                                        array_dims != NULL ? array_dims + 1 : NULL, item, vars, var_count, depth, NULL,
-                                        diag) != 0) {
+            if (check_array_initializer(tu, name, elem, item, vars, var_count, depth, NULL, diag) != 0) {
                 return -1;
             }
             continue;
         }
-        if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
+        if (elem_sid >= 0) {
             if (item->kind != CC_EXPR_INIT_LIST) {
                 /*
                  * Accept brace-elided aggregate initializers and defer strict
@@ -6291,8 +6312,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                 if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
                     return -1;
                 }
-                if (sema_decimal_def_sid(tu, array_struct_id) != NULL &&
-                    sema_decimal_convert_for_assign(tu, &init->args[i], cc_ct_record(array_struct_id)) < 0) {
+                if (sema_decimal_def(tu, elem) != NULL &&
+                    sema_decimal_convert_for_assign(tu, &init->args[i], elem) < 0) {
                     /* a decimal element initialized by an arithmetic value: converted (a constant folded) */
                     set_diag(diag, "out of memory");
                     return -1;
@@ -6300,15 +6321,14 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                 saw_nonlist_struct_item = 1;
                 continue;
             }
-            if (check_struct_initializer(tu, name, array_struct_id, item, vars, var_count, depth, diag) != 0) {
+            if (check_struct_initializer(tu, name, elem_sid, item, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
         } else {
             if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!can_convert(elem_type, item->value_type) &&
-                !(is_pointer_type(elem_type) && cc_type_is_integral(item->value_type) && is_null_ptr_constant(item))) {
+            if (!sema_assignable(tu, elem, item)) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "cannot convert initializer %zu for array %s", i,
                              name != NULL ? name : "<anon>");
@@ -6318,8 +6338,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
         }
     }
     if (out_inferred_len != NULL && array_len == 0) {
-        if (elem_type == CC_TYPE_VOID && array_struct_id >= 0 && saw_nonlist_struct_item) {
-            long inferred = infer_struct_array_len_from_init(tu, array_struct_id, init);
+        if (elem_sid >= 0 && saw_nonlist_struct_item) {
+            long inferred = infer_struct_array_len_from_init(tu, elem_sid, init);
             *out_inferred_len = inferred > 0 ? inferred : 0;
         } else {
             *out_inferred_len = (long)init->arg_count;
@@ -6477,8 +6497,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     if (s->ctype->kind == CC_CT_ARRAY) {
                         long inferred_len = -1;
-                        if (check_array_initializer(tu, s->decl_name, s->type, s->type_struct_id, s->array_len,
-                                                    s->array_ndim, s->array_dims, s->expr, *vars, *var_count, depth,
+                        if (check_array_initializer(tu, s->decl_name, s->ctype, s->expr, *vars, *var_count, depth,
                                                     &inferred_len, diag) != 0) {
                             free((*vars)[*var_count - 1].name);
                             (*var_count)--;
@@ -6535,7 +6554,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     }
                     if (s->ctype->kind == CC_CT_ARRAY && s->expr->kind == CC_EXPR_STR) {
                         long inferred_len = -1;
-                        int rc = check_array_string_initializer(s->decl_name, s->type, &s->array_len, s->expr,
+                        int rc = check_array_string_initializer(s->decl_name, s->ctype, &s->array_len, s->expr,
                                                                 &inferred_len, diag);
                         if (rc < 0) {
                             free((*vars)[*var_count - 1].name);
@@ -7268,8 +7287,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 }
                 if (is_pointer_type(g->type) && g->array_len >= 0) {
                     long inferred_len = -1;
-                    if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->array_ndim,
-                                                g->array_dims, g->init, NULL, 0, 0, &inferred_len, diag) != 0) {
+                    if (check_array_initializer(tu, g->name, g->ctype, g->init, NULL, 0, 0, &inferred_len, diag) != 0) {
                         goto fail_global_item;
                     }
                     if (g->array_len == 0 && inferred_len > 0) {
@@ -7325,7 +7343,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 }
                 if (is_pointer_type(g->type) && g->array_len >= 0 && g->init->kind == CC_EXPR_STR) {
                     long inferred_len = -1;
-                    int rc = check_array_string_initializer(g->name, g->type, &g->array_len, g->init, &inferred_len,
+                    int rc = check_array_string_initializer(g->name, g->ctype, &g->array_len, g->init, &inferred_len,
                                                             diag);
                     if (rc < 0) {
                         goto fail_global_item;
