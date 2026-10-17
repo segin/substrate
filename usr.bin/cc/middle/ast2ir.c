@@ -15615,16 +15615,32 @@ static char *global_char_list_to_quoted_string(const cc_translation_unit_t *tu, 
     return out;
 }
 
-static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t type, int struct_id, long field_size,
+/**
+ * Write the constant value of a scalar initializer into a global's bytes:
+ * an integer or floating value in the field's size, or a relocation for
+ * an address (a string literal, a symbol plus addend).
+ *
+ * @param tu           the translation unit
+ * @param ct           the field's type
+ * @param field_size   its size in bytes
+ * @param expr         the initializer (a braced scalar is unwrapped)
+ * @param buf          the global's bytes
+ * @param buf_size     their size
+ * @param off          the field's offset in them
+ * @param relocs       receives relocations
+ * @param reloc_count  their count
+ * @param diag         receives an error
+ * @return             0, or -1 with @p diag set
+ */
+static int store_scalar_global_init(const cc_translation_unit_t *tu, const cc_ctype_t *ct, long field_size,
                                     const cc_expr_t *expr, unsigned char *buf, long buf_size, long off,
                                     global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
     long long iv = 0;
     double fv = 0.0;
     int isf = 0;
     char *sym = NULL;
-
-    (void)tu;
-    (void)struct_id;
+    cc_ctype_kind_t tk = ct != NULL ? ct->kind : CC_CT_VOID;
+    int is_ptr = tk == CC_CT_POINTER;
 
     if (expr != NULL && expr->kind == CC_EXPR_INIT_LIST) {
         expr = unwrap_scalar_initializer_expr(expr, diag);
@@ -15638,7 +15654,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
     }
 
     if (expr != NULL && expr->kind == CC_EXPR_STR) {
-        if (!is_pointer_type(type) || field_size != cc_target_pointer_size()) {
+        if (!is_ptr || field_size != cc_target_pointer_size()) {
             set_diag(diag, "string scalar initializer requires pointer-sized pointer field");
             return -1;
         }
@@ -15656,7 +15672,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
         lower_cast_is_char_array(expr)) {
         char *quoted = global_char_list_to_quoted_string(tu, expr->lhs);
         if (quoted != NULL) {
-            if (is_pointer_type(type) && field_size == cc_target_pointer_size()) {
+            if (is_ptr && field_size == cc_target_pointer_size()) {
                 if (append_global_string_reloc(relocs, reloc_count, off, field_size, quoted, diag) != 0) {
                     free(quoted);
                     return -1;
@@ -15683,13 +15699,15 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
     }
 
     if (sym != NULL) {
-        int ptr_sized_integral = cc_type_is_integral(type) && field_size == cc_target_pointer_size();
-        if ((!is_pointer_type(type) && !ptr_sized_integral) || field_size != cc_target_pointer_size()) {
+        int ptr_sized_integral = cc_ct_is_integer(ct) && field_size == cc_target_pointer_size();
+        if ((!is_ptr && !ptr_sized_integral) || field_size != cc_target_pointer_size()) {
             if (diag != NULL && diag->message[0] == '\0') {
+                char spelled[96];
+
                 snprintf(diag->message, sizeof(diag->message),
-                         "symbol initializer requires pointer-sized field (sym=%s type=%d size=%ld expr_kind=%d at %zu:%zu)",
-                         sym, (int)type, field_size, expr != NULL ? (int)expr->kind : -1, expr != NULL ? expr->line : 0,
-                         expr != NULL ? expr->col : 0);
+                         "symbol initializer requires pointer-sized field (sym=%s type=%s size=%ld at %zu:%zu)", sym,
+                         ct != NULL ? cc_ct_format(ct, spelled, sizeof(spelled)) : "?", field_size,
+                         expr != NULL ? expr->line : 0, expr != NULL ? expr->col : 0);
             }
             free(sym);
             return -1;
@@ -15702,8 +15720,8 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
         return 0;
     }
 
-    if (type == CC_TYPE_FLOAT16 || type == CC_TYPE_FLOAT || type == CC_TYPE_DOUBLE || type == CC_TYPE_LDOUBLE) {
-        if (field_size == 2 && type == CC_TYPE_FLOAT16) {
+    if (tk == CC_CT_FLOAT16 || tk == CC_CT_FLOAT || tk == CC_CT_DOUBLE || tk == CC_CT_LDOUBLE) {
+        if (field_size == 2 && tk == CC_CT_FLOAT16) {
             unsigned short raw = float16_pack_bits(isf ? fv : (double)iv);
             store_const_bytes(buf, off, field_size, raw);
             return 0;
@@ -15726,7 +15744,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
             store_const_bytes(buf, off, field_size, cvt.u);
             return 0;
         }
-        if (type == CC_TYPE_LDOUBLE) {
+        if (tk == CC_CT_LDOUBLE) {
             long double cvt = 0.0L;
             unsigned char raw[sizeof(long double)];
             long ncopy = field_size;
@@ -15919,7 +15937,8 @@ static int flatten_flexible_tail_init(const cc_translation_unit_t *tu, const cc_
             set_diag(diag, "unsupported flexible array member initializer");
             return -1;
         }
-        return store_scalar_global_init(tu, elem_type, m->type_struct_id, elem_size, item, buf, buf_size, base, relocs,
+        return store_scalar_global_init(tu, cc_ct_from_legacy(elem_type, m->type_struct_id, 0, NULL), elem_size, item,
+                                        buf, buf_size, base, relocs,
                                         reloc_count, diag);
     }
     if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0) {
@@ -16031,7 +16050,8 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
                 return -1;
             }
         }
-        if (store_scalar_global_init(tu, elem_type, m->type_struct_id, elem_size, elem_expr, buf, buf_size, elem_off,
+        if (store_scalar_global_init(tu, cc_ct_from_legacy(elem_type, m->type_struct_id, 0, NULL), elem_size, elem_expr,
+                                     buf, buf_size, elem_off,
                                      relocs, reloc_count, diag) != 0) {
             return -1;
         }
@@ -16179,7 +16199,8 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                     continue;
                 }
                 u_off = base + um->offset;
-                if (store_scalar_global_init(tu, um->type, um->type_struct_id, u_size, u_item, buf, buf_size, u_off,
+                if (store_scalar_global_init(tu, cc_ct_from_legacy(um->type, um->type_struct_id, 0, NULL), u_size, u_item,
+                                             buf, buf_size, u_off,
                                              relocs, reloc_count, diag) != 0) {
                     return -1;
                 }
@@ -16303,7 +16324,8 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             }
             continue;
         }
-        if (store_scalar_global_init(tu, m->type, m->type_struct_id, scalar_size, item, buf, buf_size, field_off,
+        if (store_scalar_global_init(tu, cc_ct_from_legacy(m->type, m->type_struct_id, 0, NULL), scalar_size, item, buf,
+                                     buf_size, field_off,
                                      relocs, reloc_count, diag) != 0) {
             return -1;
         }
@@ -16359,7 +16381,8 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
                     return -1;
                 }
             }
-            if (store_scalar_global_init(tu, scalar_type, scalar_struct_id, scalar_size, item, buf, buf_size, elem_off,
+            if (store_scalar_global_init(tu, cc_ct_from_legacy(scalar_type, scalar_struct_id, 0, NULL), scalar_size, item,
+                                         buf, buf_size, elem_off,
                                          relocs, reloc_count, diag) != 0) {
                 return -1;
             }
