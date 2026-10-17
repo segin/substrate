@@ -8308,16 +8308,13 @@ static int lower_nested_trampoline(const cc_translation_unit_t *tu, cc_ssa_funct
  * @param var_count       their number
  * @param ctx             the lowering context
  * @param depth           the scope depth
- * @param break_label     where `break` goes, or -1
- * @param continue_label  where `continue` goes, or -1
  * @param s               the statement
- * @param saw_ret         set when the statement returns
  * @param diag            receives an error
  * @return                0, or -1 on error
  */
 static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
-                           size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label,
-                           int continue_label, const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
+                           size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
+                           cc_diag_t *diag) {
     int v;
     int varv;
     const cc_ctype_t *dct;
@@ -9295,16 +9292,13 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
  * @param var_count       their number
  * @param ctx             the lowering context
  * @param depth           the scope depth
- * @param break_label     where `break` goes, or -1
- * @param continue_label  where `continue` goes, or -1
  * @param s               the statement
- * @param saw_ret         set when the statement returns
  * @param diag            receives an error
  * @return                0, or -1 on error
  */
 static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
-                          size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label,
-                          int continue_label, const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
+                          size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
+                          cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int pushed = 0;
     size_t i4;
@@ -9688,16 +9682,14 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
  * @param var_count       their number
  * @param ctx             the lowering context
  * @param depth           the scope depth
- * @param break_label     where `break` goes, or -1
- * @param continue_label  where `continue` goes, or -1
  * @param s               the statement
  * @param saw_ret         set when the statement returns
  * @param diag            receives an error
  * @return                0, or -1 on error
  */
 static int lower_return_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
-                             size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label,
-                             int continue_label, const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
+                             size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
+                             int *saw_ret, cc_diag_t *diag) {
     cc_ssa_instr_t ret_in;
     int rv = -1;
     int is_void_return = 0;
@@ -10001,7 +9993,6 @@ static int lower_for_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
  * @param var_count       their number
  * @param ctx             the lowering context
  * @param depth           the scope depth
- * @param break_label     where `break` goes, or -1
  * @param continue_label  where `continue` goes, or -1
  * @param s               the statement
  * @param saw_ret         set when the statement returns
@@ -10009,8 +10000,8 @@ static int lower_for_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
  * @return                0, or -1 on error
  */
 static int lower_switch_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
-                             size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label,
-                             int continue_label, const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
+                             size_t *var_count, const lower_ctx_t *ctx, int depth, int continue_label,
+                             const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
     switch_case_site_t *sites = NULL;
     size_t site_count = 0;
     int default_label = -1;
@@ -10279,16 +10270,13 @@ static int lower_switch_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
  * @param var_count       their number
  * @param ctx             the lowering context
  * @param depth           the scope depth
- * @param break_label     where `break` goes, or -1
- * @param continue_label  where `continue` goes, or -1
  * @param s               the statement
- * @param saw_ret         set when the statement returns
  * @param diag            receives an error
  * @return                0, or -1 on error
  */
 static int lower_goto_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
-                           size_t *var_count, const lower_ctx_t *ctx, int depth, int break_label,
-                           int continue_label, const cc_stmt_t *s, int *saw_ret, cc_diag_t *diag) {
+                           size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
+                           cc_diag_t *diag) {
     if (s->expr != NULL) {
         cc_ssa_instr_t in;
         int target;
@@ -10458,7 +10446,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     size_t j;
 
     if (s->kind == CC_STMT_DECL) {
-        return lower_decl_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+        return lower_decl_stmt(tu, sf, vars, var_count, ctx, depth, s, diag);
     }
 
     if (s->kind == CC_STMT_EXPR) {
@@ -10469,11 +10457,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     }
 
     if (s->kind == CC_STMT_ASM) {
-        return lower_asm_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+        return lower_asm_stmt(tu, sf, vars, var_count, ctx, depth, s, diag);
     }
 
     if (s->kind == CC_STMT_RETURN) {
-        return lower_return_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+        return lower_return_stmt(tu, sf, vars, var_count, ctx, depth, s, saw_ret, diag);
     }
 
     if (s->kind == CC_STMT_IF) {
@@ -10612,7 +10600,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     }
 
     if (s->kind == CC_STMT_SWITCH) {
-        return lower_switch_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+        return lower_switch_stmt(tu, sf, vars, var_count, ctx, depth, continue_label, s, saw_ret, diag);
     }
 
     if (s->kind == CC_STMT_BREAK) {
@@ -10632,7 +10620,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     }
 
     if (s->kind == CC_STMT_GOTO) {
-        return lower_goto_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s, saw_ret, diag);
+        return lower_goto_stmt(tu, sf, vars, var_count, ctx, depth, s, diag);
     }
 
     if (s->kind == CC_STMT_LABEL) {
