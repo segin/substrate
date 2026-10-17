@@ -8532,6 +8532,7 @@ static cc_expr_t *vla_type_size_expr(parser_t *p, const cc_ctype_t *t, cc_expr_t
             factor = new_expr(CC_EXPR_CAST);
             if (factor != NULL) {
                 factor->aux_type = parser_size_type();
+                factor->ctype = cc_ct_from_scalar(factor->aux_type);
                 factor->lhs = bounds[k];
                 bounds[k] = NULL;
             }

@@ -947,17 +947,7 @@ static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, i
  * @return   the type, or NULL
  */
 static const cc_ctype_t *sx_vtype(const cc_expr_t *e) {
-    if (e == NULL) {
-        return NULL;
-    }
-    if (e->ctype == NULL) {
-        if (getenv("CC_EXP_SX") != NULL) {
-            fprintf(stderr, "SX-NOCTYPE kind=%d line=%zu\n", (int)e->kind, (size_t)e->line);
-            abort();
-        }
-        return cc_ct_decay(cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims));
-    }
-    return cc_ct_decay(e->ctype);
+    return e != NULL ? cc_ct_decay(e->ctype) : NULL;
 }
 
 /** Whether @p t is of kind @p k. */
@@ -972,13 +962,6 @@ static int ct_kind_is(const cc_ctype_t *t, cc_ctype_kind_t k) {
  * @return   the type, or NULL
  */
 static const cc_ctype_t *sema_cast_target_ctype(const cc_expr_t *e) {
-    if (e->ctype == NULL) {
-        if (getenv("CC_EXP_SX") != NULL) {
-            fprintf(stderr, "SX-NOCAST line=%zu\n", (size_t)e->line);
-            abort();
-        }
-        return cc_ct_from_legacy(e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
-    }
     return e->ctype;
 }
 
@@ -2314,6 +2297,7 @@ static int sema_complex_part(const cc_translation_unit_t *tu, cc_expr_t **slot, 
 static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t);
 static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t);
 static cc_expr_t *sema_int_node(long long v, size_t line, size_t col);
+static cc_expr_t *sema_const_node(long long v, cc_ctype_kind_t kind, size_t line, size_t col);
 
 static int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t) {
     const cc_ctype_t *de;
@@ -2366,15 +2350,12 @@ static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot)
         return 0;
     }
     ne = (cc_expr_t *)calloc(1, sizeof(*ne));
-    zero = (cc_expr_t *)calloc(1, sizeof(*zero));
+    zero = sema_int_node(0, 0, 0);
     if (ne == NULL || zero == NULL) {
         free(ne);
-        free(zero);
+        cc_expr_free(zero);
         return -1;
     }
-    zero->kind = CC_EXPR_INT;
-    zero->value_type = CC_TYPE_INT;
-    zero->struct_id = -1;
     ne->kind = CC_EXPR_BIN;
     ne->op = CC_BIN_NE;
     ne->line = (*slot)->line;
@@ -2383,6 +2364,7 @@ static int sema_complex_truth(const cc_translation_unit_t *tu, cc_expr_t **slot)
     ne->rhs = zero;
     ne->value_type = CC_TYPE_INT;
     ne->struct_id = -1;
+    ne->ctype = cc_ct_basic(CC_CT_INT);
     *slot = ne;
     return 0;
 }
@@ -2810,7 +2792,7 @@ static cc_expr_t *sema_decimal_list(int bits, const uint64_t bid[2], size_t line
         return NULL;
     }
     for (k = 0; k < n; ++k) {
-        list->args[k] = sema_int_node((long long)bid[k], line, col);
+        list->args[k] = sema_const_node((long long)bid[k], bits == 32 ? CC_CT_UINT : CC_CT_ULLONG, line, col);
         if (list->args[k] == NULL) {
             cc_expr_free(outer);
             return NULL;
@@ -2905,6 +2887,7 @@ static int sema_decimal_convert(const cc_translation_unit_t *tu, cc_expr_t **slo
         c->aux_struct_id = sid;
         c->value_type = CC_TYPE_VOID;
         c->struct_id = sid;
+        c->ctype = cc_ct_record(sid);
         c->lhs = list;
         cc_expr_free(*slot);
         *slot = c;
@@ -3145,16 +3128,13 @@ static int sema_wide_truth(const cc_translation_unit_t *tu, cc_expr_t **slot, cc
         return 0;
     }
     ne = (cc_expr_t *)calloc(1, sizeof(*ne));
-    zero = (cc_expr_t *)calloc(1, sizeof(*zero));
+    zero = sema_int_node(0, 0, 0);
     if (ne == NULL || zero == NULL) {
         free(ne);
-        free(zero);
+        cc_expr_free(zero);
         set_diag(diag, "out of memory");
         return -1;
     }
-    zero->kind = CC_EXPR_INT;
-    zero->value_type = CC_TYPE_INT;
-    zero->struct_id = -1;
     ne->kind = CC_EXPR_BIN;
     ne->op = CC_BIN_NE;
     ne->line = (*slot)->line;
@@ -3197,8 +3177,16 @@ static int sema_wide_convert_for_assign(const cc_translation_unit_t *tu, cc_expr
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
                       cc_diag_t *diag);
 
-/** A new integer constant node, or NULL when out of memory. */
-static cc_expr_t *sema_int_node(long long v, size_t line, size_t col) {
+/**
+ * A new integer constant node.
+ *
+ * @param v     its value
+ * @param kind  its integer type's kind
+ * @param line  its source line
+ * @param col   its source column
+ * @return      the node, or NULL when out of memory
+ */
+static cc_expr_t *sema_const_node(long long v, cc_ctype_kind_t kind, size_t line, size_t col) {
     cc_expr_t *k = (cc_expr_t *)calloc(1, sizeof(*k));
 
     if (k != NULL) {
@@ -3206,10 +3194,16 @@ static cc_expr_t *sema_int_node(long long v, size_t line, size_t col) {
         k->int_val = v;
         k->line = line;
         k->col = col;
-        k->value_type = CC_TYPE_INT;
+        k->value_type = cc_ct_legacy_kind(kind);
         k->struct_id = -1;
+        k->ctype = cc_ct_basic(kind);
     }
     return k;
+}
+
+/** A new constant node of type int, or NULL when out of memory. */
+static cc_expr_t *sema_int_node(long long v, size_t line, size_t col) {
+    return sema_const_node(v, CC_CT_INT, line, col);
 }
 
 /**
@@ -3697,7 +3691,8 @@ static int sema_wide_static_init(const cc_translation_unit_t *tu, cc_expr_t **sl
         if (lb == 8) {
             limb |= (unsigned long long)v[i * 2 + 1] << 32;
         }
-        list->args[i] = sema_int_node((long long)limb, (*slot)->line, (*slot)->col);
+        list->args[i] = sema_const_node((long long)limb, lb == 8 ? CC_CT_ULLONG : CC_CT_UINT, (*slot)->line,
+                                        (*slot)->col);
         if (list->args[i] == NULL) {
             list->arg_count = (size_t)i;
             cc_expr_free(list);
