@@ -299,6 +299,11 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                            int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
                            const char *what);
 static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id);
+static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e);
+static int parse_type_name_ct(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                              int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
+                              const char *what, const cc_ctype_t **out_ctype,
+                              cc_expr_t *out_vla_bounds[CC_MAX_ARRAY_DIMS]);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
 static cc_expr_t *parse_unary(parser_t *p);
@@ -2370,6 +2375,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 continue;
             }
             if ((parser_is_c23_or_newer() || parser_is_gnu_mode()) && tok_is_typeof_spelling(p)) {
+                const cc_ctype_t *typeof_ctype = NULL;
+                int drop_quals;
                 cc_type_t ty = CC_TYPE_VOID;
                 int sid = -1;
                 long type_array_len = -1;
@@ -2382,6 +2389,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 seen_type = 1;
                 seen_alias = 1;
                 memset(type_array_dims, 0, sizeof(type_array_dims));
+                drop_quals = tok_is_ident(p, "typeof_unqual") || tok_is_ident(p, "__typeof_unqual") ||
+                                tok_is_ident(p, "__typeof_unqual__");
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2389,8 +2398,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     return -1;
                 }
                 if (is_declspec_start(p)) {
-                    if (parse_type_name(p, &ty, &sid, &type_array_len, &type_array_ndim, type_array_dims, 1,
-                                        "expected type name in typeof") != 0) {
+                    if (parse_type_name_ct(p, &ty, &sid, &type_array_len, &type_array_ndim, type_array_dims, 1,
+                                           "expected type name in typeof", &typeof_ctype, NULL) != 0) {
                         return -1;
                     }
                 } else {
@@ -2398,6 +2407,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     if (te == NULL) {
                         return -1;
                     }
+                    typeof_ctype = parser_expr_ctype(p, te);
                     if (infer_expr_type(p, te, &ty, &sid) != 0) {
                         ty = te->value_type;
                         sid = te->struct_id;
@@ -2461,6 +2471,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 }
                 alias_type = ty;
                 alias_struct_id = sid;
+                alias_ctype = (typeof_ctype != NULL && drop_quals) ? typeof_ctype->unqual : typeof_ctype;
                 alias_array_len = type_array_len;
                 alias_array_ndim = type_array_ndim;
                 memcpy(alias_array_dims, type_array_dims, sizeof(alias_array_dims));
@@ -3726,6 +3737,224 @@ static int is_decl_qual_at_token(parser_t *p) {
 
 static cc_type_t ptr_of_type(cc_type_t t) {
     return cc_type_make_pointer(t);
+}
+
+/**
+ * The type of function @p f as declared, for the parser.
+ *
+ * @return the type, or NULL where its declaration did not record it
+ */
+static const cc_ctype_t *parser_function_ctype(const cc_function_t *f) {
+    const cc_ctype_t *params[64];
+    size_t i;
+
+    if (f->ret_ctype == NULL || f->param_count > sizeof(params) / sizeof(params[0])) {
+        return NULL;
+    }
+    for (i = 0; i < f->param_count; ++i) {
+        if (f->params[i].ctype == NULL) {
+            return NULL;
+        }
+        params[i] = f->params[i].ctype;
+    }
+    return cc_ct_function(f->ret_ctype, params, f->param_count, f->is_variadic, f->has_prototype);
+}
+
+/** The type of a named object or function, as the parser knows it, or NULL. */
+static const cc_ctype_t *parser_ident_ctype(parser_t *p, const char *name) {
+    int vidx;
+    const cc_global_t *g;
+    const cc_function_t *f;
+
+    if (name == NULL) {
+        return NULL;
+    }
+    vidx = var_find_visible_n(p, name, strlen(name));
+    if (vidx >= 0) {
+        return p->vars[vidx].ctype;
+    }
+    g = parser_find_global_decl(p, name);
+    if (g != NULL) {
+        return g->ctype;
+    }
+    f = parser_find_function_decl(p, name);
+    return f != NULL ? parser_function_ctype(f) : NULL;
+}
+
+/** The type the usual arithmetic conversions give operands of types @p a and @p b, or NULL. */
+static const cc_ctype_t *parser_usual_arith(const cc_ctype_t *a, const cc_ctype_t *b) {
+    static const cc_ctype_kind_t floats[] = {CC_CT_LDOUBLE, CC_CT_DOUBLE, CC_CT_FLOAT, CC_CT_FLOAT16};
+    size_t i;
+
+    if (!cc_ct_is_arithmetic(a) || !cc_ct_is_arithmetic(b)) {
+        return NULL;
+    }
+    for (i = 0; i < sizeof(floats) / sizeof(floats[0]); ++i) {
+        if (a->unqual->kind == floats[i] || b->unqual->kind == floats[i]) {
+            return cc_ct_basic(floats[i]);
+        }
+    }
+    return cc_ct_common_int(a->unqual, b->unqual);
+}
+
+/** The type of binary operator @p e as the parser can tell it (parser_expr_ctype()), or NULL. */
+static const cc_ctype_t *parser_bin_ctype(parser_t *p, const cc_expr_t *e) {
+    const cc_ctype_t *a = cc_ct_decay(parser_expr_ctype(p, e->lhs));
+    const cc_ctype_t *b = cc_ct_decay(parser_expr_ctype(p, e->rhs));
+    int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+                 e->op == CC_BIN_GT || e->op == CC_BIN_GE;
+
+    if (e->op == CC_BIN_COMMA) {
+        return parser_expr_ctype(p, e->rhs);
+    }
+    if (a == NULL || b == NULL) {
+        return NULL;
+    }
+    if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR || (is_cmp && !(a->kind == CC_CT_RECORD &&
+                                                                    p->structs[a->id].vector_count > 0) &&
+                                                       !(b->kind == CC_CT_RECORD &&
+                                                         p->structs[b->id].vector_count > 0))) {
+        return cc_ct_basic(CC_CT_INT);
+    }
+    if (!e->is_subscript && ((a->kind == CC_CT_RECORD && p->structs[a->id].vector_count > 0) ||
+                             (b->kind == CC_CT_RECORD && p->structs[b->id].vector_count > 0))) {
+        /* an operator with a vector operand: that vector type, or a comparison's */
+        int vs = (a->kind == CC_CT_RECORD && p->structs[a->id].vector_count > 0) ? a->id : b->id;
+
+        return cc_ct_record(is_cmp ? p->structs[vs].vector_cmp_sid : vs);
+    }
+    if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && a->kind == CC_CT_POINTER && b->kind != CC_CT_POINTER) {
+        return a;
+    }
+    if (e->op == CC_BIN_ADD && a->kind != CC_CT_POINTER && b->kind == CC_CT_POINTER) {
+        return b;
+    }
+    if (e->op == CC_BIN_SUB && a->kind == CC_CT_POINTER && b->kind == CC_CT_POINTER) {
+        /* ptrdiff_t */
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_LONG : CC_CT_INT);
+    }
+    if (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR || (e->unary_form == CC_UNARY_LHS && cc_ct_is_integer(a))) {
+        return cc_ct_promote(a);
+    }
+    if (e->unary_form == CC_UNARY_RHS && cc_ct_is_integer(b)) {
+        return cc_ct_promote(b);
+    }
+    return parser_usual_arith(a, b);
+}
+
+/**
+ * The type of expression @p e as far as the parser can tell before sema
+ * checks it -- what `typeof (e)` names: a named object's or function's
+ * declared type, a literal's, a cast's, and the types C gives the
+ * operators applied to them.
+ *
+ * @param p  the parser
+ * @param e  the expression
+ * @return   the type, or NULL where the parser cannot tell it
+ */
+static const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
+    const cc_ctype_t *a;
+    const cc_ctype_t *b;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    switch (e->kind) {
+    case CC_EXPR_IDENT:
+        return parser_ident_ctype(p, e->ident);
+    case CC_EXPR_INT:
+    case CC_EXPR_FLOAT:
+        return e->ctype != NULL ? e->ctype : cc_ct_from_scalar(e->value_type);
+    case CC_EXPR_STR: {
+        long n = parser_string_literal_array_bound(e);
+        const cc_ctype_t *elem =
+            cc_ct_from_scalar(cc_string_literal_is_wide(e) && e->aux_type != CC_TYPE_VOID ? e->aux_type : CC_TYPE_CHAR);
+
+        return n > 0 ? cc_ct_array(elem, n) : cc_ct_pointer(elem);
+    }
+    case CC_EXPR_CAST:
+        return e->ctype;
+    case CC_EXPR_ADDR:
+        a = parser_expr_ctype(p, e->lhs);
+        return a != NULL ? cc_ct_pointer(a) : NULL;
+    case CC_EXPR_DEREF:
+        a = parser_expr_ctype(p, e->lhs);
+        if (a != NULL && a->unqual->kind == CC_CT_FUNCTION) {
+            return a;
+        }
+        a = cc_ct_decay(a);
+        return a != NULL && a->kind == CC_CT_POINTER ? a->of : NULL;
+    case CC_EXPR_MEMBER: {
+        const cc_struct_member_t *sm;
+
+        a = cc_ct_decay(parser_expr_ctype(p, e->lhs));
+        if (a != NULL && e->member_is_arrow) {
+            a = a->kind == CC_CT_POINTER ? a->of->unqual : NULL;
+        }
+        if (a == NULL || a->kind != CC_CT_RECORD || e->ident == NULL) {
+            return NULL;
+        }
+        sm = struct_member_find_n(p, a->id, e->ident, strlen(e->ident));
+        return sm != NULL ? sm->ctype : NULL;
+    }
+    case CC_EXPR_BIN:
+        return parser_bin_ctype(p, e);
+    case CC_EXPR_CALL:
+        if (e->ident != NULL) {
+            const cc_function_t *f = parser_find_function_decl(p, e->ident);
+
+            if (f != NULL) {
+                return f->ret_ctype;
+            }
+        }
+        a = parser_expr_ctype(p, e->ident != NULL ? NULL : e->lhs);
+        if (a == NULL && e->ident != NULL) {
+            a = parser_ident_ctype(p, e->ident);
+        }
+        if (a != NULL && a->unqual->kind == CC_CT_POINTER) {
+            a = a->unqual->of;
+            /* a pointer to a function typedef is recorded as a pointer to its return type */
+            return a->unqual->kind == CC_CT_FUNCTION ? a->unqual->of : a;
+        }
+        return a != NULL && a->unqual->kind == CC_CT_FUNCTION ? a->unqual->of : NULL;
+    case CC_EXPR_GENERIC: {
+        long selected = -1;
+        size_t i;
+
+        a = cc_ct_decay(parser_expr_ctype(p, e->lhs));
+        for (i = 0; i < e->generic_count; ++i) {
+            if (e->generic_is_default[i]) {
+                if (selected < 0) {
+                    selected = (long)i;
+                }
+            } else if (a != NULL && e->generic_ctypes[i] != NULL && e->generic_ctypes[i]->unqual == a) {
+                selected = (long)i;
+                break;
+            }
+        }
+        return selected >= 0 && (size_t)selected < e->arg_count ? parser_expr_ctype(p, e->args[selected]) : NULL;
+    }
+    case CC_EXPR_ASSIGN:
+    case CC_EXPR_UPDATE:
+        a = e->ident != NULL ? parser_ident_ctype(p, e->ident) : parser_expr_ctype(p, e->lhs);
+        return a != NULL ? a->unqual : NULL;
+    case CC_EXPR_TERNARY:
+        a = cc_ct_decay(parser_expr_ctype(p, e->rhs != NULL ? e->rhs : e->lhs));
+        b = cc_ct_decay(parser_expr_ctype(p, e->third));
+        if (a == NULL || b == NULL || a == b || (a->kind == CC_CT_POINTER && b->kind == CC_CT_POINTER)) {
+            return a != NULL ? a : b;
+        }
+        return parser_usual_arith(a, b) != NULL ? parser_usual_arith(a, b) : b;
+    case CC_EXPR_STMT:
+        if (e->stmt_expr_count > 0 && e->stmt_expr_stmts[e->stmt_expr_count - 1].kind == CC_STMT_EXPR) {
+            return parser_expr_ctype(p, e->stmt_expr_stmts[e->stmt_expr_count - 1].expr);
+        }
+        return cc_ct_basic(CC_CT_VOID);
+    case CC_EXPR_SIZEOF:
+        return cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT);
+    default:
+        return e->ctype;
+    }
 }
 
 static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
