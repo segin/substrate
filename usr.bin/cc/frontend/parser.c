@@ -3045,6 +3045,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
                         }
+                        p->structs[sid].members[p->structs[sid].member_count - 1].ctype = cc_ct_record(mstruct);
                     }
                     if (is_union) {
                         if (is_bitfield) {

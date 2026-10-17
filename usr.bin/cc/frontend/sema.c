@@ -1009,17 +1009,56 @@ static int sx_ct_record(const cc_ctype_t *t) {
     return t->kind == CC_CT_COMPLEX ? cc_ct_complex_record(t) : -1;
 }
 
-static int type_carries_struct_id(cc_type_t t) {
-    if (t == CC_TYPE_VOID || t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC) {
+static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth);
+
+/**
+ * Whether types @p a and @p b are the same type, structures and unions
+ * compared as compatible ones are (C11 6.2.7: one tag, or members that
+ * match); qualifiers are not compared.
+ *
+ * @param tu     the translation unit
+ * @param a      one type
+ * @param b      the other
+ * @param depth  the structure nesting, against cycles
+ * @return       1 if they are, else 0
+ */
+static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth) {
+    size_t i;
+
+    if (a == NULL || b == NULL) {
+        return a == b;
+    }
+    a = a->unqual;
+    b = b->unqual;
+    if (a == b) {
         return 1;
     }
-    if (!cc_type_is_pointer(t)) {
+    if (a->kind != b->kind) {
         return 0;
     }
-    return cc_type_pointer_base(t) == CC_TYPE_VOID;
+    switch (a->kind) {
+    case CC_CT_RECORD:
+        return struct_ids_compatible_depth(tu, a->id, b->id, depth + 1);
+    case CC_CT_ARRAY:
+        return a->count == b->count && sema_same_type(tu, a->of, b->of, depth);
+    case CC_CT_POINTER:
+    case CC_CT_COMPLEX:
+    case CC_CT_IMAGINARY:
+        return sema_same_type(tu, a->of, b->of, depth);
+    case CC_CT_FUNCTION:
+        if (a->param_count != b->param_count || a->variadic != b->variadic || !sema_same_type(tu, a->of, b->of, depth)) {
+            return 0;
+        }
+        for (i = 0; i < a->param_count; ++i) {
+            if (!sema_same_type(tu, a->params[i], b->params[i], depth)) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        return 0;
+    }
 }
-
-static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth);
 
 static int struct_members_compatible(const cc_translation_unit_t *tu, const cc_struct_def_t *lsd,
                                      const cc_struct_def_t *rsd, int depth) {
@@ -1040,21 +1079,10 @@ static int struct_members_compatible(const cc_translation_unit_t *tu, const cc_s
         if (strcmp(lm->name, rm->name) != 0) {
             return 0;
         }
-        if (lm->type != rm->type || lm->array_len != rm->array_len || lm->array_ndim != rm->array_ndim ||
-            lm->offset != rm->offset || lm->size != rm->size || lm->is_bitfield != rm->is_bitfield ||
+        if (lm->offset != rm->offset || lm->size != rm->size || lm->is_bitfield != rm->is_bitfield ||
             lm->bit_width != rm->bit_width || lm->bit_offset != rm->bit_offset ||
             lm->bit_storage_bits != rm->bit_storage_bits || lm->bit_signed != rm->bit_signed ||
-            lm->bit_storage_size != rm->bit_storage_size) {
-            return 0;
-        }
-        if (memcmp(lm->array_dims, rm->array_dims, sizeof(lm->array_dims)) != 0) {
-            return 0;
-        }
-        if (type_carries_struct_id(lm->type)) {
-            if (!struct_ids_compatible_depth(tu, lm->type_struct_id, rm->type_struct_id, depth + 1)) {
-                return 0;
-            }
-        } else if (lm->type_struct_id != rm->type_struct_id) {
+            lm->bit_storage_size != rm->bit_storage_size || !sema_same_type(tu, lm->ctype, rm->ctype, depth)) {
             return 0;
         }
     }
@@ -1133,14 +1161,14 @@ static int find_struct_member_recursive(const cc_translation_unit_t *tu, int str
         const cc_struct_member_t *inner_m = NULL;
         long inner_off = 0;
 
-        if (m->name != NULL || m->type != CC_TYPE_VOID || m->type_struct_id < 0) {
+        if (m->name != NULL || sx_ct_record(m->ctype) < 0) {
             continue;
         }
-        inner = find_struct_def(tu, m->type_struct_id);
+        inner = find_struct_def(tu, sx_ct_record(m->ctype));
         if (inner == NULL || !inner->complete) {
             continue;
         }
-        if (find_struct_member_recursive(tu, m->type_struct_id, name, depth + 1, &inner_m, &inner_off) == 0) {
+        if (find_struct_member_recursive(tu, sx_ct_record(m->ctype), name, depth + 1, &inner_m, &inner_off) == 0) {
             if (out_member != NULL) {
                 *out_member = inner_m;
             }
@@ -1169,9 +1197,16 @@ static int find_struct_member_index(const cc_translation_unit_t *tu, int struct_
     return -1;
 }
 
-static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) {
+/**
+ * Whether two declarations of one function agree (C11 6.7.6.3p15): the
+ * same return type and, where both have prototypes, the same parameter
+ * types; a declaration without one must not be variadic.
+ *
+ * @return 1 if they do, else 0
+ */
+static int func_decl_compatible(const cc_translation_unit_t *tu, const cc_function_t *a, const cc_function_t *b) {
     size_t i;
-    if (a->ret_type != b->ret_type || a->ret_struct_id != b->ret_struct_id) {
+    if (!sema_same_type(tu, a->ret_ctype, b->ret_ctype, 0)) {
         return 0;
     }
     if (!a->has_prototype || !b->has_prototype) {
@@ -1184,7 +1219,7 @@ static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) 
         return 0;
     }
     for (i = 0; i < a->param_count; ++i) {
-        if (a->params[i].type != b->params[i].type || a->params[i].type_struct_id != b->params[i].type_struct_id) {
+        if (!sema_same_type(tu, sema_param_ctype(&a->params[i]), sema_param_ctype(&b->params[i]), 0)) {
             return 0;
         }
     }
@@ -7415,7 +7450,7 @@ fail_global_item:
             if (strcmp(prev->name, f->name) != 0) {
                 continue;
             }
-            if (!func_decl_compatible(prev, f)) {
+            if (!func_decl_compatible(tu, prev, f)) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "conflicting declarations for function: %s",
                              f->name);
