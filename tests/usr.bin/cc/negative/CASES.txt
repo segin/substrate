@@ -64,3 +64,4 @@ native_bad_vector_mismatch.c||invalid operands to a vector operation: the vector
 native_bad_vector_size.c||invalid vector type: its size must be a power-of-two multiple
 native_bad_decimal_binary_mix.c||cannot mix operands of decimal floating and binary floating types
 native_bad_decimal_mod.c||invalid operands to a decimal floating operation
+native_bad_union_cast_type.c||cast to union type from type not present in union

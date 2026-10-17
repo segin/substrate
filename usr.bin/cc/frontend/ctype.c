@@ -957,6 +957,31 @@ long cc_ct_align(const cc_ctype_t *t, const cc_translation_unit_t *tu) {
     }
 }
 
+const cc_struct_member_t *cc_ct_union_cast_member(const cc_translation_unit_t *tu, int sid, const cc_ctype_t *src) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    src = cc_ct_decay(src);
+    if (tu == NULL || src == NULL || sid < 0 || (size_t)sid >= tu->struct_count) {
+        return NULL;
+    }
+    sd = &tu->structs[sid];
+    if (!sd->complete || !sd->is_union) {
+        return NULL;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        const cc_ctype_t *mt = m->ctype != NULL ? m->ctype
+                                                : cc_ct_from_legacy(m->type, m->type_struct_id, m->array_ndim,
+                                                                    m->array_dims);
+
+        if (mt != NULL && mt->unqual == src->unqual) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
 /**
  * Append a string to a buffer, cutting it short if it does not fit.
  *

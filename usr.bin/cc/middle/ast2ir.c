@@ -835,29 +835,6 @@ static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
 
 static cc_type_t ptr_base_type(cc_type_t t);
 
-static int can_convert_type(cc_type_t dst, cc_type_t src) {
-    if (dst == src) {
-        return 1;
-    }
-    if (cc_type_is_numeric(dst) && cc_type_is_numeric(src)) {
-        return 1;
-    }
-    if (is_pointer_type(dst) && is_pointer_type(src)) {
-        cc_type_t dbase = ptr_base_type(dst);
-        cc_type_t sbase = ptr_base_type(src);
-        if (dbase == CC_TYPE_VOID || sbase == CC_TYPE_VOID || dbase == sbase) {
-            return 1;
-        }
-    }
-    if (is_pointer_type(dst) && cc_type_is_integral(src)) {
-        return 1;
-    }
-    if (cc_type_is_integral(dst) && is_pointer_type(src)) {
-        return 1;
-    }
-    return 0;
-}
-
 static cc_type_t ptr_base_type(cc_type_t t) {
     return cc_type_deref_once(t);
 }
@@ -2325,25 +2302,6 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
         const char *mname = tu->structs[sid].members[i].name;
         if (mname != NULL && strcmp(mname, name) == 0) {
             return &tu->structs[sid].members[i];
-        }
-    }
-    return NULL;
-}
-
-static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int sid, cc_type_t src_type) {
-    const cc_struct_def_t *sd;
-    size_t i;
-    if (tu == NULL || sid < 0 || (size_t)sid >= tu->struct_count) {
-        return NULL;
-    }
-    sd = &tu->structs[sid];
-    if (!sd->complete || !sd->is_union) {
-        return NULL;
-    }
-    for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
-        if (can_convert_type(m->type, src_type)) {
-            return m;
         }
     }
     return NULL;
@@ -9893,7 +9851,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return dst_ptr;
             }
             if (!target_sd->is_union) {
-                if (cast_src->value_type != CC_TYPE_VOID || cast_src->struct_id < 0) {
+                if (lower_record_id(cast_src) < 0) {
                     set_diag(diag, "struct cast lowering requires aggregate source");
                     return -1;
                 }
@@ -9907,7 +9865,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return dst_ptr;
             }
             {
-                const cc_struct_member_t *m = find_union_cast_member(tu, e->aux_struct_id, cast_src->value_type);
+                const cc_struct_member_t *m = cc_ct_union_cast_member(tu, e->aux_struct_id, lower_value_ctype(cast_src));
                 cc_ssa_instr_t st;
                 if (m == NULL) {
                     set_diag(diag, "union cast lowering found no compatible member");

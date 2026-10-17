@@ -483,6 +483,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   bytes after it.  *Reproduced* (both targets).  The load and the
   update take the size of the value's interned type.
   `codegen/bitint_narrow.c`.
+- [x] **CC-84** A GNU cast to union type shall store the operand in
+  the member of its own type, and an operand of a type no member has
+  shall be rejected, as gcc does ("cast to union type from type not
+  present in union").  cc took the first member the value would
+  *convert* to: `(union { int i; double d; })2.5` stored the int 2, a
+  `long long` went into an `int` member, and `(union u)(short)1` or
+  `(union u)0` with no `int` member were accepted.  *Reproduced* (both
+  targets).  Sema and lowering share one rule,
+  `cc_ct_union_cast_member()`, which compares the unqualified interned
+  types.  `codegen/union_cast.c`, `native_bad_union_cast_type.c`.
 - [x] **CC-20** Where cc runs on i386 and writes x86-64 code (`-m64`),
   the code shall be what a 64-bit-hosted cc writes.  24 of 200 random
   -m64 builds by a `gcc -m32` build of cc are wrong.  *Reproduced.*
@@ -895,7 +905,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-83 requirements: 83 met, 0 open.
+84 requirements: 84 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

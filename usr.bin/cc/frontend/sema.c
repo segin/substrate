@@ -1409,27 +1409,6 @@ static char *rewrite_printf_long_double_format(const char *literal) {
     return NULL;
 }
 
-static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int struct_id,
-                                                        const cc_expr_t *src_expr) {
-    const cc_struct_def_t *sd;
-    size_t i;
-    if (tu == NULL || src_expr == NULL) {
-        return NULL;
-    }
-    sd = find_struct_def(tu, struct_id);
-    if (sd == NULL || !sd->complete || !sd->is_union) {
-        return NULL;
-    }
-    for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
-        if (can_convert(m->type, src_expr->value_type) ||
-            (is_pointer_type(m->type) && cc_type_is_integral(src_expr->value_type) && is_null_ptr_constant(src_expr))) {
-            return m;
-        }
-    }
-    return NULL;
-}
-
 static int transparent_union_accepts_type(const cc_translation_unit_t *tu, int struct_id, cc_type_t src_type,
                                           int src_struct_id) {
     const cc_struct_def_t *sd;
@@ -5742,9 +5721,9 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
                 if (sd->is_union && e->lhs->kind != CC_EXPR_INIT_LIST) {
-                    const cc_struct_member_t *m = find_union_cast_member(tu, e->aux_struct_id, e->lhs);
+                    const cc_struct_member_t *m = cc_ct_union_cast_member(tu, e->aux_struct_id, e->lhs->ctype);
                     if (m == NULL) {
-                        set_diag(diag, "GNU union cast has no compatible destination member");
+                        set_diag(diag, "cast to union type from type not present in union");
                         return -1;
                     }
                     e->member_offset = m->offset;

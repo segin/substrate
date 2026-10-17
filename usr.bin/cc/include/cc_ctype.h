@@ -258,6 +258,19 @@ long cc_ct_size(const cc_ctype_t *t, const cc_translation_unit_t *tu);
 long cc_ct_align(const cc_ctype_t *t, const cc_translation_unit_t *tu);
 
 /**
+ * The member a GNU cast to union type stores into: the first whose type,
+ * unqualified, is the operand's (after lvalue conversion), unqualified.
+ * gcc requires that one exists ("cast to union type from type not present
+ * in union"); a value is never converted to fit some other member.
+ *
+ * @param tu   the translation unit
+ * @param sid  the union's index in its structs
+ * @param src  the operand's type
+ * @return     the member, or NULL if the union has none of that type
+ */
+const cc_struct_member_t *cc_ct_union_cast_member(const cc_translation_unit_t *tu, int sid, const cc_ctype_t *src);
+
+/**
  * Spell a type as a C type name: "int (*)[7]", "char *const".
  *
  * @param t    the type
