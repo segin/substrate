@@ -857,15 +857,20 @@ static const cc_function_t *find_function(const cc_translation_unit_t *tu, const
 
 /**
  * What a call through a callee of type @p t gives: the return type of the
- * function @p t is, or points to.
+ * function @p t is, or points to.  A pointer to a function typedef
+ * (`typedef T fn_t(...); fn_t *p`) is recorded as a pointer to T, so a
+ * pointer to anything else gives what it points to.
  *
  * @return the type, or NULL if @p t is not known or is neither
  */
 static const cc_ctype_t *sema_callee_ret_ctype(const cc_ctype_t *t) {
-    if (t != NULL && t->kind == CC_CT_POINTER) {
-        t = t->of;
+    if (t != NULL && t->unqual->kind == CC_CT_POINTER) {
+        t = t->unqual->of;
+        if (t->unqual->kind != CC_CT_FUNCTION) {
+            return t;
+        }
     }
-    return (t != NULL && t->kind == CC_CT_FUNCTION) ? t->of : NULL;
+    return (t != NULL && t->unqual->kind == CC_CT_FUNCTION) ? t->unqual->of : NULL;
 }
 
 /**
@@ -951,6 +956,28 @@ static const cc_ctype_t *sx_vtype(const cc_expr_t *e) {
 }
 
 static void sema_set_type(cc_expr_t *e, const cc_ctype_t *t);
+
+/** Whether checked expression @p x has a pointer value (an array or function decays to one). */
+static int sx_is_ptr(const cc_expr_t *x) {
+    const cc_ctype_t *t = sx_vtype(x);
+
+    return t != NULL && t->unqual->kind == CC_CT_POINTER;
+}
+
+/** Whether checked expression @p x has an integer type. */
+static int sx_is_int(const cc_expr_t *x) {
+    return cc_ct_is_integer(sx_vtype(x));
+}
+
+/** Whether checked expression @p x has a scalar type: arithmetic or pointer. */
+static int sx_is_scalar(const cc_expr_t *x) {
+    return cc_ct_is_scalar(sx_vtype(x));
+}
+
+/** Whether checked expression @p x has an arithmetic type. */
+static int sx_is_arith(const cc_expr_t *x) {
+    return cc_ct_is_arithmetic(sx_vtype(x));
+}
 
 /** Whether @p t is of kind @p k. */
 static int ct_kind_is(const cc_ctype_t *t, cc_ctype_kind_t k) {
@@ -1177,13 +1204,6 @@ static int pointer_depth(cc_type_t t) {
     return (int)cc_type_pointer_depth(t);
 }
 
-static cc_type_t size_type(void) {
-    return cc_target_pointer_size() >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
-}
-
-static int is_scalar_type(cc_type_t t) {
-    return cc_type_is_numeric(t) || is_pointer_type(t);
-}
 
 
 static int is_array_object_type(cc_type_t t, long array_len, int array_ndim) {
@@ -1440,34 +1460,6 @@ static char *rewrite_printf_long_double_format(const char *literal) {
      */
     (void)literal;
     return NULL;
-}
-
-static int transparent_union_accepts_type(const cc_translation_unit_t *tu, int struct_id, cc_type_t src_type,
-                                          int src_struct_id) {
-    const cc_struct_def_t *sd;
-    size_t i;
-    if (tu == NULL || struct_id < 0) {
-        return 0;
-    }
-    sd = find_struct_def(tu, struct_id);
-    if (sd == NULL || !sd->complete || !sd->is_union) {
-        return 0;
-    }
-    if ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) == 0 && !is_pointer_type(src_type)) {
-        return 0;
-    }
-    for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
-        if (!can_convert(m->type, src_type)) {
-            continue;
-        }
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0 && src_type == CC_TYPE_VOID && src_struct_id >= 0 &&
-            m->type_struct_id != src_struct_id) {
-            continue;
-        }
-        return 1;
-    }
-    return 0;
 }
 
 static const cc_function_t *generic_selected_function(const cc_translation_unit_t *tu, const cc_expr_t *e) {
@@ -4642,6 +4634,16 @@ static int sema_const_object(int storage, const cc_ctype_t *t) {
 }
 
 /**
+ * The type of the object an atomic builtin's pointer argument @p ptr
+ * points to; int for a `void *`, as gcc takes it.
+ */
+static const cc_ctype_t *sema_atomic_elem(const cc_expr_t *ptr) {
+    const cc_ctype_t *t = sx_vtype(ptr)->of->unqual;
+
+    return t->kind == CC_CT_VOID ? cc_ct_basic(CC_CT_INT) : t;
+}
+
+/**
  * Whether a value @p rhs may be assigned to an object of type @p dst (C11
  * 6.5.16.1), as leniently as the checker has always allowed: between
  * arithmetic types, between pointers that match (sema_ptrs_match()),
@@ -4672,6 +4674,29 @@ static int sema_assignable(const cc_translation_unit_t *tu, const cc_ctype_t *ds
         return struct_ids_compatible(tu, dr, sr);
     }
     return dr >= 0 && cc_ct_is_integer(s) && rhs->kind == CC_EXPR_STMT;
+}
+
+/**
+ * Whether argument @p arg may be passed for a parameter of union type
+ * @p sid as one of its members (GCC's transparent_union; a pointer is
+ * accepted for any union whose member it converts to).
+ *
+ * @return 1 if it may, else 0
+ */
+static int sema_transparent_union_accepts(const cc_translation_unit_t *tu, int sid, const cc_expr_t *arg) {
+    const cc_struct_def_t *sd = find_struct_def(tu, sid);
+    size_t i;
+
+    if (sd == NULL || !sd->complete || !sd->is_union ||
+        ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) == 0 && !sx_is_ptr(arg))) {
+        return 0;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        if (sema_assignable(tu, sd->members[i].ctype, arg)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -5047,9 +5072,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         const cc_function_t *callee = NULL;
         builtin_kind_t bk = builtin_kind(e->ident);
         int bswap_bits = builtin_bswap_bits(e->ident);
-        cc_type_t elem_type;
-        cc_type_t indirect_callee_type = CC_TYPE_VOID;
-        int indirect_callee_struct_id = -1;
+        const cc_ctype_t *atomic_elem;
         if (e->ident != NULL && strcmp(e->ident, "__builtin_complex") == 0) {
             return sema_builtin_complex(tu, e, vars, var_count, depth, diag);
         }
@@ -5068,12 +5091,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__builtin_va_start first argument must be a pointer");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_VA_END) {
@@ -5086,12 +5108,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__builtin_va_end argument must be a pointer");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
@@ -5100,9 +5121,9 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 set_diag(diag, "floating huge-value/infinity builtin expects no arguments");
                 return -1;
             }
-            e->value_type = (bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF) ? CC_TYPE_FLOAT :
-                            (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic((bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF)   ? CC_CT_FLOAT
+                                         : (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_CT_LDOUBLE
+                                                                                           : CC_CT_DOUBLE));
             return 0;
         }
         if (bk == BUILTIN_LDBL_MIN || bk == BUILTIN_LDBL_DENORM_MIN || bk == BUILTIN_LDBL_MAX) {
@@ -5110,8 +5131,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 set_diag(diag, "long double limit builtin expects no arguments");
                 return -1;
             }
-            e->value_type = CC_TYPE_LDOUBLE;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_LDOUBLE));
             return 0;
         }
         if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
@@ -5123,12 +5143,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_numeric(e->args[0]->value_type)) {
+            if (!sx_is_arith(e->args[0])) {
                 set_diag(diag, "floating classification builtin expects numeric argument");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
@@ -5139,9 +5158,9 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            e->value_type = (bk == BUILTIN_NANF) ? CC_TYPE_FLOAT :
-                            (bk == BUILTIN_NANL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(bk == BUILTIN_NANF   ? CC_CT_FLOAT
+                                         : bk == BUILTIN_NANL ? CC_CT_LDOUBLE
+                                                              : CC_CT_DOUBLE));
             return 0;
         }
         if (bk == BUILTIN_VA_COPY) {
@@ -5155,13 +5174,12 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
                     return -1;
                 }
-                if (!is_pointer_type(e->args[i]->value_type)) {
+                if (!sx_is_ptr(e->args[i])) {
                     set_diag(diag, "__builtin_va_copy arguments must be pointers");
                     return -1;
                 }
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_VA_ARG) {
@@ -5174,16 +5192,15 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__builtin_va_arg first operand must be a pointer");
                 return -1;
             }
-            if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
+            if (e->ctype == NULL || e->ctype->unqual->kind == CC_CT_VOID) {
                 set_diag(diag, "__builtin_va_arg requires a non-void type");
                 return -1;
             }
-            e->value_type = e->aux_type;
-            e->struct_id = e->aux_struct_id;
+            sema_set_type(e, e->ctype);
             return 0;
         }
         if (bk == BUILTIN_EXPECT) {
@@ -5197,12 +5214,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_scalar_type(e->args[0]->value_type) || !cc_type_is_integral(e->args[1]->value_type)) {
+            if (!sx_is_scalar(e->args[0]) || !sx_is_int(e->args[1])) {
                 set_diag(diag, "__builtin_expect expects (scalar, integer)");
                 return -1;
             }
-            e->value_type = e->args[0]->value_type;
-            e->struct_id = e->args[0]->struct_id;
+            sema_set_type(e, sx_vtype(e->args[0]));
             return 0;
         }
         if (bk == BUILTIN_CONSTANT_P) {
@@ -5215,8 +5231,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_TRAP) {
@@ -5224,8 +5239,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 set_diag(diag, "__builtin_trap expects exactly 0 arguments");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_UNREACHABLE) {
@@ -5233,8 +5247,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 set_diag(diag, "__builtin_unreachable expects exactly 0 arguments");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_ASSUME) {
@@ -5245,12 +5258,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_scalar_type(e->args[0]->value_type)) {
+            if (!sx_is_scalar(e->args[0])) {
                 set_diag(diag, "__builtin_assume argument must be scalar");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_ASSUME_ALIGNED) {
@@ -5263,18 +5275,16 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__builtin_assume_aligned first argument must be a pointer");
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[1]->value_type) ||
-                (e->arg_count == 3 && !cc_type_is_integral(e->args[2]->value_type))) {
+            if (!sx_is_int(e->args[1]) ||
+                (e->arg_count == 3 && !sx_is_int(e->args[2]))) {
                 set_diag(diag, "__builtin_assume_aligned alignment/offset must be integral");
                 return -1;
             }
-            e->value_type = e->args[0]->value_type;
-            e->struct_id = e->args[0]->struct_id;
-            e->ctype = cc_ct_of_expr(e->args[0]);
+            sema_set_type(e, sx_vtype(e->args[0]));
             return 0;
         }
         if (bk == BUILTIN_UNPREDICTABLE) {
@@ -5285,12 +5295,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_scalar_type(e->args[0]->value_type)) {
+            if (!sx_is_scalar(e->args[0])) {
                 set_diag(diag, "__builtin_unpredictable argument must be scalar");
                 return -1;
             }
-            e->value_type = e->args[0]->value_type;
-            e->struct_id = e->args[0]->struct_id;
+            sema_set_type(e, sx_vtype(e->args[0]));
             return 0;
         }
         if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
@@ -5309,14 +5318,13 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[0]->value_type)) {
+            if (!sx_is_int(e->args[0])) {
                 char msg[96];
                 snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
                 set_diag(diag, msg);
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_POPCOUNT || bk == BUILTIN_PARITY) {
@@ -5330,17 +5338,16 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[0]->value_type)) {
+            if (!sx_is_int(e->args[0])) {
                 snprintf(msg, sizeof(msg), "%s argument must be integral", what);
                 set_diag(diag, msg);
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
-            cc_type_t out_elem;
+            const cc_ctype_t *out_elem;
             if (e->arg_count != 3) {
                 set_diag(diag, "__builtin_*_overflow expects exactly 3 arguments");
                 return -1;
@@ -5350,21 +5357,20 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[2]->value_type)) {
+            if (!sx_is_ptr(e->args[2])) {
                 set_diag(diag, "overflow builtin third argument must be a pointer");
                 return -1;
             }
-            out_elem = ptr_base_type(e->args[2]->value_type);
-            if (!cc_type_is_integral(out_elem)) {
+            out_elem = sx_vtype(e->args[2])->of;
+            if (!cc_ct_is_integer(out_elem)) {
                 set_diag(diag, "overflow builtin destination must point to an integer type");
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[0]->value_type) || !cc_type_is_integral(e->args[1]->value_type)) {
+            if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1])) {
                 set_diag(diag, "overflow builtin operands must be integers");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
@@ -5377,13 +5383,12 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!cc_type_is_integral(e->args[0]->value_type) || !cc_type_is_integral(e->args[1]->value_type) ||
-                !cc_type_is_integral(e->args[2]->value_type)) {
+            if (!sx_is_int(e->args[0]) || !sx_is_int(e->args[1]) ||
+                !sx_is_int(e->args[2])) {
                 set_diag(diag, "overflow_p builtin operands must be integral");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_OBJECT_SIZE) {
@@ -5395,12 +5400,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[1]->value_type)) {
+            if (!sx_is_int(e->args[1])) {
                 set_diag(diag, "__builtin_object_size second argument must be integral");
                 return -1;
             }
-            e->value_type = CC_TYPE_ULONG_LONG;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_ULLONG));
             return 0;
         }
         if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
@@ -5412,13 +5416,12 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[0]->value_type)) {
+            if (!sx_is_int(e->args[0])) {
                 set_diag(diag, bk == BUILTIN_RETURN_ADDRESS ? "__builtin_return_address argument must be integral"
                                                             : "__builtin_frame_address argument must be integral");
                 return -1;
             }
-            e->value_type = CC_TYPE_PTR_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
             return 0;
         }
         if (bk == BUILTIN_MEMCMP) {
@@ -5431,16 +5434,15 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type) || !is_pointer_type(e->args[1]->value_type)) {
+            if (!sx_is_ptr(e->args[0]) || !sx_is_ptr(e->args[1])) {
                 set_diag(diag, "__builtin_memcmp first two arguments must be pointers");
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[2]->value_type)) {
+            if (!sx_is_int(e->args[2])) {
                 set_diag(diag, "__builtin_memcmp third argument must be integral");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_PREFETCH) {
@@ -5453,20 +5455,19 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__builtin_prefetch first argument must be a pointer");
                 return -1;
             }
-            if (e->arg_count >= 2 && !cc_type_is_integral(e->args[1]->value_type)) {
+            if (e->arg_count >= 2 && !sx_is_int(e->args[1])) {
                 set_diag(diag, "__builtin_prefetch rw argument must be integral");
                 return -1;
             }
-            if (e->arg_count >= 3 && !cc_type_is_integral(e->args[2]->value_type)) {
+            if (e->arg_count >= 3 && !sx_is_int(e->args[2])) {
                 set_diag(diag, "__builtin_prefetch locality argument must be integral");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_CPU_SUPPORTS) {
@@ -5481,8 +5482,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 set_diag(diag, "__builtin_cpu_supports argument must be a string literal");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_STRLEN) {
@@ -5493,12 +5493,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__builtin_strlen argument must be a pointer");
                 return -1;
             }
-            e->value_type = size_type();
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
             return 0;
         }
         if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||
@@ -5514,27 +5513,25 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "memory builtin first argument must be a pointer");
                 return -1;
             }
             if ((bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMCPY_CHK ||
                  bk == BUILTIN_MEMMOVE_CHK) &&
-                !is_pointer_type(e->args[1]->value_type)) {
+                !sx_is_ptr(e->args[1])) {
                 set_diag(diag, "memory builtin source argument must be a pointer");
                 return -1;
             }
-            if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !cc_type_is_integral(e->args[1]->value_type)) {
+            if ((bk == BUILTIN_MEMSET || bk == BUILTIN_MEMSET_CHK) && !sx_is_int(e->args[1])) {
                 set_diag(diag, "memory builtin fill byte must be integral");
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[2]->value_type)) {
+            if (!sx_is_int(e->args[2])) {
                 set_diag(diag, "memory builtin size argument must be integral");
                 return -1;
             }
-            e->value_type = e->args[0]->value_type;
-            e->struct_id = e->args[0]->struct_id;
-            e->ctype = cc_ct_of_expr(e->args[0]);
+            sema_set_type(e, sx_vtype(e->args[0]));
             return 0;
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
@@ -5542,8 +5539,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 set_diag(diag, "__sync_synchronize expects exactly 0 arguments");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
@@ -5556,7 +5552,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[0]->value_type)) {
+            if (!sx_is_int(e->args[0])) {
                 set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
                                    ? "__atomic_thread_fence memory-order argument must be integral"
                                    : "__atomic_signal_fence memory-order argument must be integral");
@@ -5565,8 +5561,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (atomic_memorder_check_arg(tu, e->args[0], nm, "fence", 0, 0, diag) != 0) {
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
@@ -5577,12 +5572,11 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__sync_lock_release first argument must be a pointer");
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
@@ -5605,15 +5599,12 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 check_expr(tu, e->args[2], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "atomic fetch/exchange first argument must be a pointer");
                 return -1;
             }
-            elem_type = ptr_base_type(e->args[0]->value_type);
-            if (elem_type == CC_TYPE_VOID) {
-                elem_type = CC_TYPE_INT;
-            }
-            if (!can_convert(elem_type, e->args[1]->value_type)) {
+            atomic_elem = sema_atomic_elem(e->args[0]);
+            if (!sema_assignable(tu, atomic_elem, e->args[1])) {
                 set_diag(diag, "atomic fetch/exchange value type mismatch");
                 return -1;
             }
@@ -5621,7 +5612,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
                                      ? "__atomic_exchange_n"
                                      : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
-                if (!cc_type_is_integral(e->args[2]->value_type)) {
+                if (!sx_is_int(e->args[2])) {
                     set_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
                     return -1;
                 }
@@ -5629,8 +5620,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            e->value_type = elem_type;
-            e->struct_id = -1;
+            sema_set_type(e, atomic_elem);
             return 0;
         }
         if (bk == BUILTIN_SYNC_BOOL_CAS) {
@@ -5643,20 +5633,16 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
                 return -1;
             }
-            elem_type = ptr_base_type(e->args[0]->value_type);
-            if (elem_type == CC_TYPE_VOID) {
-                elem_type = CC_TYPE_INT;
-            }
-            if (!can_convert(elem_type, e->args[1]->value_type) || !can_convert(elem_type, e->args[2]->value_type)) {
+            atomic_elem = sema_atomic_elem(e->args[0]);
+            if (!sema_assignable(tu, atomic_elem, e->args[1]) || !sema_assignable(tu, atomic_elem, e->args[2])) {
                 set_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
                 return -1;
             }
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
             return 0;
         }
         if (bk == BUILTIN_ATOMIC_LOAD_N) {
@@ -5668,23 +5654,19 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__atomic_load_n first argument must be a pointer");
                 return -1;
             }
-            elem_type = ptr_base_type(e->args[0]->value_type);
-            if (elem_type == CC_TYPE_VOID) {
-                elem_type = CC_TYPE_INT;
-            }
-            if (!cc_type_is_integral(e->args[1]->value_type)) {
+            atomic_elem = sema_atomic_elem(e->args[0]);
+            if (!sx_is_int(e->args[1])) {
                 set_diag(diag, "__atomic_load_n memory-order argument must be integral");
                 return -1;
             }
             if (atomic_memorder_check_arg(tu, e->args[1], "__atomic_load_n", "load", 1, 0, diag) != 0) {
                 return -1;
             }
-            e->value_type = elem_type;
-            e->struct_id = -1;
+            sema_set_type(e, atomic_elem);
             return 0;
         }
         if (bk == BUILTIN_ATOMIC_STORE_N) {
@@ -5697,27 +5679,23 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-            if (!is_pointer_type(e->args[0]->value_type)) {
+            if (!sx_is_ptr(e->args[0])) {
                 set_diag(diag, "__atomic_store_n first argument must be a pointer");
                 return -1;
             }
-            elem_type = ptr_base_type(e->args[0]->value_type);
-            if (elem_type == CC_TYPE_VOID) {
-                elem_type = CC_TYPE_INT;
-            }
-            if (!can_convert(elem_type, e->args[1]->value_type)) {
+            atomic_elem = sema_atomic_elem(e->args[0]);
+            if (!sema_assignable(tu, atomic_elem, e->args[1])) {
                 set_diag(diag, "__atomic_store_n value type mismatch");
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[2]->value_type)) {
+            if (!sx_is_int(e->args[2])) {
                 set_diag(diag, "__atomic_store_n memory-order argument must be integral");
                 return -1;
             }
             if (atomic_memorder_check_arg(tu, e->args[2], "__atomic_store_n", "store", 0, 1, diag) != 0) {
                 return -1;
             }
-            e->value_type = CC_TYPE_VOID;
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(CC_CT_VOID));
             return 0;
         }
         if (e->ident != NULL && callee == NULL && bswap_bits != 0) {
@@ -5730,18 +5708,12 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (!cc_type_is_integral(e->args[0]->value_type)) {
+            if (!sx_is_int(e->args[0])) {
                 set_diag(diag, "byte-swap builtin requires integral argument");
                 return -1;
             }
-            if (bswap_bits == 16) {
-                e->value_type = CC_TYPE_USHORT;
-            } else if (bswap_bits == 32) {
-                e->value_type = CC_TYPE_UINT;
-            } else {
-                e->value_type = CC_TYPE_ULONG_LONG;
-            }
-            e->struct_id = -1;
+            sema_set_type(e, cc_ct_basic(bswap_bits == 16 ? CC_CT_USHORT : bswap_bits == 32 ? CC_CT_UINT
+                                                                                          : CC_CT_ULLONG));
             return 0;
         }
         if (e->ident == NULL) {
@@ -5752,21 +5724,8 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
-            /*
-             * (*fp)(...) calls through fp.  A subscript, fps[i](...), is
-             * parsed as *(fps + i); there the element itself is the
-             * function pointer, and stripping a further level of
-             * pointer would type the call's result as a pointer.
-             */
-            if (e->lhs->kind == CC_EXPR_DEREF && e->lhs->lhs != NULL && is_pointer_type(e->lhs->lhs->value_type) &&
-                !(e->lhs->lhs->kind == CC_EXPR_BIN &&
-                  (e->lhs->lhs->op == CC_BIN_ADD || e->lhs->lhs->op == CC_BIN_SUB) && is_pointer_type(e->lhs->value_type))) {
-                indirect_callee_type = e->lhs->lhs->value_type;
-                indirect_callee_struct_id = e->lhs->lhs->struct_id;
-            } else if (is_pointer_type(e->lhs->value_type)) {
-                indirect_callee_type = e->lhs->value_type;
-                indirect_callee_struct_id = e->lhs->struct_id;
-            } else {
+            /* a function designator, *fp included, is used as a pointer to the function */
+            if (!sx_is_ptr(e->lhs)) {
                 set_diag(diag, "call target must be a function pointer");
                 return -1;
             }
@@ -5796,20 +5755,9 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 return -1;
             }
             if (callee != NULL && callee->has_prototype && i < callee->param_count &&
-                !can_convert(callee->params[i].type, e->args[i]->value_type) &&
-                !(is_pointer_type(callee->params[i].type) && cc_type_is_integral(e->args[i]->value_type) &&
-                  is_null_ptr_constant(e->args[i])) &&
-                !(callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0 &&
-                  transparent_union_accepts_type(tu, callee->params[i].type_struct_id, e->args[i]->value_type,
-                                                 e->args[i]->struct_id)) &&
-                !(callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0 &&
-                  e->args[i]->kind == CC_EXPR_STMT && cc_type_is_integral(e->args[i]->value_type))) {
-                if (getenv("CC_DEBUG_CALL_ARGS") != NULL) {
-                    fprintf(stderr,
-                            "cc-debug: call %s arg%zu expect(type=%d sid=%d) got(type=%d sid=%d)\n",
-                            e->ident != NULL ? e->ident : "<indirect>", i + 1, (int)callee->params[i].type,
-                            callee->params[i].type_struct_id, (int)e->args[i]->value_type, e->args[i]->struct_id);
-                }
+                !sema_assignable(tu, sema_param_ctype(&callee->params[i]), e->args[i]) &&
+                !sema_transparent_union_accepts(tu, sx_ct_record(sema_param_ctype(&callee->params[i])),
+                                                e->args[i])) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "cannot convert arg %zu in call to %s", i + 1,
                              e->ident);
@@ -5835,7 +5783,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
              * Avoid false positives (e.g. strtok uses nonnull(2)) by checking
              * only unambiguous single-parameter prototypes.
              */
-            if (e->arg_count > 0 && callee->param_count == 1 && is_pointer_type(callee->params[0].type) &&
+            if (e->arg_count > 0 && callee->param_count == 1 && sema_is_ptr(sema_param_ctype(&callee->params[0])) &&
                 is_null_ptr_constant(e->args[0])) {
                 snprintf(buf, sizeof(buf), "nonnull argument 1 in call to %s is null",
                          e->ident != NULL ? e->ident : "<indirect>");
@@ -5845,16 +5793,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             }
         }
         if (callee != NULL) {
-            e->value_type = callee->ret_type;
-            e->struct_id = callee->ret_struct_id;
-            e->ctype = callee->ret_ctype;
-            if (callee->ret_ctype != NULL) {
-                /* a returned pointer to an array: the bounds behind it, as a pointer variable has them */
-                cc_ct_legacy_t leg;
-                if (cc_ct_to_legacy(callee->ret_ctype, &leg) == 0 && leg.ndim > 0) {
-                    expr_set_array_meta_decl(e, -1, leg.ndim, leg.dims);
-                }
-            }
+            sema_set_type(e, callee->ret_ctype);
             if ((callee->attr_flags & CC_ATTR_DEPRECATED) != 0) {
                 char buf[192];
                 snprintf(buf, sizeof(buf), "deprecated function used: %s", callee->name != NULL ? callee->name : "<anon>");
@@ -5864,73 +5803,41 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             }
         } else if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
-            if (idx >= 0) {
-                if (!is_pointer_type(vars[idx].type)) {
+            const cc_global_t *g = idx >= 0 ? NULL : find_global(tu, e->ident);
+
+            if (idx >= 0 || g != NULL) {
+                /* a call through a pointer object named directly */
+                const cc_ctype_t *ft = idx >= 0 ? vars[idx].ctype : g->ctype;
+
+                if (!sema_is_ptr(cc_ct_decay(ft))) {
                     set_diag(diag, "call target must be a function pointer");
                     return -1;
                 }
-                e->value_type = ptr_base_type(vars[idx].type);
-                e->struct_id = vars[idx].struct_id;
-                e->ctype = sema_callee_ret_ctype(vars[idx].ctype);
-                return 0;
-            } else {
-                const cc_global_t *g = find_global(tu, e->ident);
-                if (g != NULL) {
-                    if (!is_pointer_type(g->type)) {
-                        set_diag(diag, "call target must be a function pointer");
-                        return -1;
-                    }
-                    e->value_type = ptr_base_type(g->type);
-                    e->struct_id = g->type_struct_id;
-                    e->ctype = sema_callee_ret_ctype(g->ctype);
-                    return 0;
-                }
-            }
-            if (strncmp(e->ident, "__builtin_", 10) == 0) {
-                if (!cc_builtin_is_recognized(e->ident)) {
-                    if (diag != NULL && diag->message[0] == '\0') {
-                        snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
-                    }
-                    return -1;
-                }
-                e->value_type = CC_TYPE_INT;
-                e->struct_id = -1;
-                e->ctype = cc_ct_basic(CC_CT_INT);
+                sema_set_type(e, sema_callee_ret_ctype(ft));
                 return 0;
             }
-            if (!cc_options_implicit_funcdecl()) {
+            if (strncmp(e->ident, "__builtin_", 10) == 0 && !cc_builtin_is_recognized(e->ident)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
+                }
+                return -1;
+            }
+            if (strncmp(e->ident, "__builtin_", 10) != 0 && !cc_options_implicit_funcdecl()) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message),
                              "implicit function declaration is not allowed in this mode: %s", e->ident);
                 }
                 return -1;
             }
-            /* C89-style fallback for undeclared functions: assume extern int f(...). */
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
-            e->ctype = cc_ct_basic(CC_CT_INT);
+            /* a builtin with no rule of its own, or C89's undeclared function: extern int f(...) */
+            sema_set_type(e, cc_ct_basic(CC_CT_INT));
         } else {
-            const cc_function_t *gfn = generic_selected_function(tu, e->lhs);
-            if (gfn != NULL) {
-                e->value_type = gfn->ret_type;
-                e->struct_id = gfn->ret_struct_id;
-                e->ctype = gfn->ret_ctype;
-            } else {
-                const cc_function_t *ifn = infer_callee_function_expr(tu, e->lhs);
-                if (ifn != NULL) {
-                    e->value_type = ifn->ret_type;
-                    e->struct_id = ifn->ret_struct_id;
-                    e->ctype = ifn->ret_ctype;
-                    return 0;
-                }
-                e->value_type = ptr_base_type(indirect_callee_type);
-                e->struct_id = -1;
-                if (indirect_callee_struct_id >= 0 &&
-                    (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
-                    e->struct_id = indirect_callee_struct_id;
-                }
-                e->ctype = sema_callee_ret_ctype(cc_ct_of_expr(e->lhs));
+            const cc_function_t *fn = generic_selected_function(tu, e->lhs);
+
+            if (fn == NULL) {
+                fn = infer_callee_function_expr(tu, e->lhs);
             }
+            sema_set_type(e, fn != NULL ? fn->ret_ctype : sema_callee_ret_ctype(e->lhs->ctype));
         }
         return 0;
     }
