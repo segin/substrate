@@ -332,8 +332,7 @@ struct cc_expr {
     int aux_struct_id;
     cc_expr_t **args;
     size_t arg_count;
-    cc_type_t *generic_types;
-    int *generic_struct_ids;
+    const struct cc_ctype **generic_ctypes; /**< _Generic: each association's type, NULL for `default` */
     unsigned char *generic_is_default;
     size_t generic_count;
     long generic_selected;

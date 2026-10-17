@@ -1452,17 +1452,17 @@ static int check_array_string_initializer(const char *name, const cc_ctype_t *ar
     return 0;
 }
 
-static int generic_assoc_matches(cc_type_t assoc_type, int assoc_struct_id, cc_type_t ctrl_type, int ctrl_struct_id) {
-    if (assoc_type == ctrl_type && assoc_struct_id == ctrl_struct_id) {
-        return 1;
-    }
-    if (is_pointer_type(assoc_type) && is_pointer_type(ctrl_type)) {
-        if (assoc_type == ctrl_type && (assoc_struct_id == ctrl_struct_id || assoc_struct_id < 0 || ctrl_struct_id < 0)) {
-            return 1;
-        }
-        return 0;
-    }
-    return 0;
+static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth);
+
+/**
+ * Whether a _Generic association of type @p assoc matches the controlling
+ * expression's type @p ctrl, which is taken after lvalue conversion (C11
+ * 6.5.1.1p2: qualifiers dropped, arrays and functions decayed): the types
+ * must be compatible.
+ */
+static int sema_generic_assoc_matches(const cc_translation_unit_t *tu, const cc_ctype_t *assoc,
+                                      const cc_ctype_t *ctrl) {
+    return sema_same_type(tu, assoc, ctrl, 0);
 }
 
 static int printf_like_format_index(const char *name, size_t *idx_out) {
@@ -4804,7 +4804,7 @@ static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var
     size_t i;
 
     if (e->lhs == NULL || e->args == NULL || e->arg_count == 0 || e->generic_count != e->arg_count ||
-        e->generic_types == NULL || e->generic_struct_ids == NULL || e->generic_is_default == NULL) {
+        e->generic_ctypes == NULL || e->generic_is_default == NULL) {
         set_diag(diag, "malformed _Generic expression");
         return -1;
     }
@@ -4817,8 +4817,7 @@ static int sema_check_generic(const cc_translation_unit_t *tu, cc_expr_t *e, var
         }
         if (e->generic_is_default[i]) {
             default_idx = (long)i;
-        } else if (generic_assoc_matches(e->generic_types[i], e->generic_struct_ids[i], e->lhs->value_type,
-                                         e->lhs->struct_id)) {
+        } else if (sema_generic_assoc_matches(tu, e->generic_ctypes[i], sx_vtype(e->lhs))) {
             if (first_match < 0) {
                 first_match = (long)i;
             }

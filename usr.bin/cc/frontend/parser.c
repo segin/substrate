@@ -972,17 +972,13 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
     return struct_ids_compatible(p, lhs_sid, rhs_sid);
 }
 
-static int parser_generic_assoc_matches(cc_type_t assoc_type, int assoc_struct_id, cc_type_t ctrl_type, int ctrl_struct_id) {
-    if (assoc_type == ctrl_type && assoc_struct_id == ctrl_struct_id) {
-        return 1;
-    }
-    if (is_pointer_type(assoc_type) && is_pointer_type(ctrl_type)) {
-        if (assoc_type == ctrl_type && (assoc_struct_id == ctrl_struct_id || assoc_struct_id < 0 || ctrl_struct_id < 0)) {
-            return 1;
-        }
-        return 0;
-    }
-    return 0;
+/**
+ * Whether a _Generic association of type @p assoc matches a controlling
+ * expression of type @p ctrl, as the parser can tell before the
+ * expression is checked: the same type, qualifiers aside.
+ */
+static int parser_generic_assoc_matches(const cc_ctype_t *assoc, const cc_ctype_t *ctrl) {
+    return assoc != NULL && ctrl != NULL && assoc->unqual == ctrl->unqual;
 }
 
 static int parser_is_numeric_type(cc_type_t t) {
@@ -3935,7 +3931,7 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
                 default_idx = (long)i;
                 continue;
             }
-            if (parser_generic_assoc_matches(e->generic_types[i], e->generic_struct_ids[i], ctrl_type, ctrl_sid)) {
+            if (parser_generic_assoc_matches(e->generic_ctypes[i], cc_ct_from_legacy(ctrl_type, ctrl_sid, 0, NULL))) {
                 selected = (long)i;
                 break;
             }
@@ -6703,8 +6699,7 @@ static void free_expr(cc_expr_t *e) {
         free_expr(e->args[i]);
     }
     free(e->args);
-    free(e->generic_types);
-    free(e->generic_struct_ids);
+    free(e->generic_ctypes);
     free(e->generic_is_default);
     for (i = 0; i < e->stmt_expr_count; ++i) {
         free_stmt(&e->stmt_expr_stmts[i]);
@@ -7350,11 +7345,11 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
     return 0;
 }
 
+/** One association of a _Generic selection. */
 typedef struct {
-    int is_default;
-    cc_type_t type;
-    int struct_id;
-    cc_expr_t *expr;
+    int is_default;          /**< `default:` */
+    const cc_ctype_t *ctype; /**< the type named, else NULL */
+    cc_expr_t *expr;         /**< the expression it selects */
 } generic_assoc_t;
 
 static cc_expr_t *parse_generic_expr(parser_t *p) {
@@ -7382,10 +7377,10 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
 
     while (p->tok.kind != TOK_RPAREN) {
         generic_assoc_t assoc;
-        memset(&assoc, 0, sizeof(assoc));
-        assoc.type = CC_TYPE_VOID;
-        assoc.struct_id = -1;
+        cc_type_t aty;
+        int asid;
 
+        memset(&assoc, 0, sizeof(assoc));
         if (p->tok.kind == TOK_KW_DEFAULT || (p->tok.kind == TOK_IDENT && tok_is_ident(p, "default"))) {
             assoc.is_default = 1;
             if (next_tok(p) != 0) {
@@ -7393,20 +7388,15 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
                 free(items);
                 return NULL;
             }
-        } else if (parse_type_name(p, &assoc.type, &assoc.struct_id, NULL, NULL, NULL, 1,
-                                   "expected type name in _Generic") != 0) {
+        } else if (parse_type_name_ct(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Generic",
+                                      &assoc.ctype, NULL) != 0) {
             free_expr(control);
             free(items);
             return NULL;
         }
         while (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN) {
-            assoc.type = ptr_of_type(assoc.type);
-            if (assoc.type == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
-                free_expr(control);
-                free(items);
-                return NULL;
-            }
+            /* a suffix the type name left: taken as a pointer, as the type is used as a value */
+            assoc.ctype = cc_ct_pointer(assoc.ctype);
             if (p->tok.kind == TOK_LBRACK) {
                 if (next_tok(p) != 0) {
                     free_expr(control);
@@ -7505,11 +7495,9 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
     result->lhs = control;
     control = NULL;
     result->args = (cc_expr_t **)calloc(count, sizeof(*result->args));
-    result->generic_types = (cc_type_t *)calloc(count, sizeof(*result->generic_types));
-    result->generic_struct_ids = (int *)calloc(count, sizeof(*result->generic_struct_ids));
+    result->generic_ctypes = (const cc_ctype_t **)calloc(count, sizeof(*result->generic_ctypes));
     result->generic_is_default = (unsigned char *)calloc(count, sizeof(*result->generic_is_default));
-    if (result->args == NULL || result->generic_types == NULL || result->generic_struct_ids == NULL ||
-        result->generic_is_default == NULL) {
+    if (result->args == NULL || result->generic_ctypes == NULL || result->generic_is_default == NULL) {
         free_expr(result);
         for (i = 0; i < count; ++i) {
             free_expr(items[i].expr);
@@ -7522,8 +7510,7 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
     for (i = 0; i < count; ++i) {
         result->args[i] = items[i].expr;
         items[i].expr = NULL;
-        result->generic_types[i] = items[i].type;
-        result->generic_struct_ids[i] = items[i].struct_id;
+        result->generic_ctypes[i] = items[i].ctype;
         result->generic_is_default[i] = (unsigned char)(items[i].is_default ? 1 : 0);
     }
     free(items);
@@ -8927,15 +8914,13 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
         }
     }
     if (src->generic_count > 0) {
-        dst->generic_types = (cc_type_t *)calloc(src->generic_count, sizeof(*dst->generic_types));
-        dst->generic_struct_ids = (int *)calloc(src->generic_count, sizeof(*dst->generic_struct_ids));
+        dst->generic_ctypes = (const cc_ctype_t **)calloc(src->generic_count, sizeof(*dst->generic_ctypes));
         dst->generic_is_default = (unsigned char *)calloc(src->generic_count, sizeof(*dst->generic_is_default));
-        if (dst->generic_types == NULL || dst->generic_struct_ids == NULL || dst->generic_is_default == NULL) {
+        if (dst->generic_ctypes == NULL || dst->generic_is_default == NULL) {
             free_expr(dst);
             return NULL;
         }
-        memcpy(dst->generic_types, src->generic_types, src->generic_count * sizeof(*dst->generic_types));
-        memcpy(dst->generic_struct_ids, src->generic_struct_ids, src->generic_count * sizeof(*dst->generic_struct_ids));
+        memcpy(dst->generic_ctypes, src->generic_ctypes, src->generic_count * sizeof(*dst->generic_ctypes));
         memcpy(dst->generic_is_default, src->generic_is_default, src->generic_count * sizeof(*dst->generic_is_default));
         dst->generic_count = src->generic_count;
     }
