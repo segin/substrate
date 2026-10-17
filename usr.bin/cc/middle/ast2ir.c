@@ -37,6 +37,7 @@ typedef struct {
     int vla_strides[CC_MAX_ARRAY_DIMS];
     int vla_rank;       /**< the number of strides; 0 if neither a VLA nor a pointer to one */
     int vla_is_pointer; /**< a pointer to a VLA, whose own size is a pointer's */
+    const cc_ctype_t *ctype; /**< the variable's declared type; NULL where the declaration recorded none */
 } var_entry_t;
 
 typedef struct {
@@ -482,6 +483,19 @@ static int lower_is_unsigned(const cc_expr_t *e) {
     const cc_ctype_t *t = lower_value_ctype(e);
 
     return cc_ct_is_unsigned(t) && t->kind != CC_CT_BOOL;
+}
+
+/**
+ * Whether loading an expression's value from memory zero-extends it: an
+ * unsigned integer, _Bool or a pointer.
+ *
+ * @param e  the expression
+ * @return   1 or 0
+ */
+static int lower_loads_unsigned(const cc_expr_t *e) {
+    const cc_ctype_t *t = lower_value_ctype(e);
+
+    return cc_ct_is_unsigned(t) || (t != NULL && t->kind == CC_CT_POINTER);
 }
 
 /**
@@ -1861,7 +1875,7 @@ static int vla_subscript_level(var_entry_t *vars, size_t var_count, int depth, c
 
 static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
                       long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int value, int depth,
-                      int is_static_storage, int is_parameter, const char *static_sym) {
+                      int is_static_storage, int is_parameter, const char *static_sym, const cc_ctype_t *ctype) {
     var_entry_t *next;
     char *dup;
     char *sym_dup = NULL;
@@ -1906,6 +1920,7 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     }
     (*vars)[*var_count].vla_rank = 0;
     (*vars)[*var_count].vla_is_pointer = 0;
+    (*vars)[*var_count].ctype = ctype;
     (*var_count)++;
     return 0;
 }
@@ -6130,11 +6145,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 in.op = CC_SSA_LOAD;
-                in.dst = new_value(sf, type_to_val(g->type));
+                in.dst = new_value(sf, lower_value_kind(e));
                 in.lhs = gaddr;
                 in.rhs = -1;
                 in.imm = mem_size;
-                in.is_unsigned = is_unsigned_load_type(g->type) ? 1 : 0;
+                in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
                 if (in.dst < 0 || push_instr(sf, in) != 0) {
                     return -1;
                 }
@@ -6174,11 +6189,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             in.op = CC_SSA_LOAD;
-            in.dst = new_value(sf, type_to_val(vars[idx].type));
+            in.dst = new_value(sf, lower_value_kind(e));
             in.lhs = saddr;
             in.rhs = -1;
             in.imm = mem_size;
-            in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+            in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
             if (in.dst < 0 || push_instr(sf, in) != 0) {
                 return -1;
             }
@@ -6191,11 +6206,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             in.op = CC_SSA_LOAD;
-            in.dst = new_value(sf, type_to_val(vars[idx].type));
+            in.dst = new_value(sf, lower_value_kind(e));
             in.lhs = vars[idx].addr_value;
             in.rhs = -1;
             in.imm = mem_size;
-            in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+            in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
             if (in.dst < 0 || push_instr(sf, in) != 0) {
                 set_diag(diag, "out of memory loading address-taken local");
                 return -1;
@@ -6333,7 +6348,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.lhs = lhs;
         in.rhs = -1;
         in.imm = mem_size;
-        in.is_unsigned = is_unsigned_load_type(e->value_type) ? 1 : 0;
+        in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
@@ -6372,7 +6387,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.lhs = ptrv;
         in.rhs = -1;
         in.imm = mem_size;
-        in.is_unsigned = is_unsigned_load_type(e->value_type) ? 1 : 0;
+        in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
@@ -9183,7 +9198,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (in.imm <= 0) {
                 in.imm = cc_target_pointer_size();
             }
-            in.is_unsigned = is_unsigned_load_type(e->value_type) ? 1 : 0;
+            in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
         }
         if (in.dst < 0) {
             free(in.sym);
@@ -9765,7 +9780,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.lhs = ptrv;
             in.rhs = -1;
             in.imm = mem_size;
-            in.is_unsigned = is_unsigned_load_type(e->value_type) ? 1 : 0;
+            in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
             if (in.dst < 0 || push_instr(sf, in) != 0) {
                 return -1;
             }
@@ -10244,7 +10259,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             set_value_size(sf, dst, result_size > 0 ? result_size : cc_target_pointer_size());
             if (sf->value_is_unsigned != NULL && dst >= 0 && dst < sf->value_count) {
-                sf->value_is_unsigned[dst] = is_unsigned_load_type(e->value_type) ? 1 : 0;
+                sf->value_is_unsigned[dst] = lower_loads_unsigned(e) ? 1 : 0;
             }
         } else if (e->value_type == CC_TYPE_LDOUBLE) {
             set_value_size(sf, dst, 16);
@@ -12176,7 +12191,7 @@ static int lower_nested_bind_outer(const cc_translation_unit_t *tu, cc_ssa_funct
         }
         addr = ld.dst;
         if (var_define(vars, var_count, outer[i].name, outer[i].type, outer[i].struct_id, outer[i].array_len,
-                       outer[i].array_ndim, outer[i].array_dims, addr, 0, 0, 0, NULL) != 0) {
+                       outer[i].array_ndim, outer[i].array_dims, addr, 0, 0, 0, NULL, outer[i].ctype) != 0) {
             set_diag(diag, "out of memory defining an enclosing function's variable");
             rc = -1;
             break;
@@ -12216,7 +12231,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                           s->array_dims, -1, depth, 1, 0, s->decl_name) != 0) {
+                           s->array_dims, -1, depth, 1, 0, s->decl_name, s->ctype) != 0) {
                 set_diag(diag, "out of memory defining extern local declaration");
                 return -1;
             }
@@ -12774,7 +12789,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
 
             if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id,
                            is_array_obj ? s->array_len : -1, is_array_obj ? s->array_ndim : 0,
-                           is_array_obj ? s->array_dims : NULL, -1, depth, 1, 0, sym) != 0) {
+                           is_array_obj ? s->array_dims : NULL, -1, depth, 1, 0, sym, s->ctype) != 0) {
                 set_diag(diag, "out of memory defining static local variable");
                 return -1;
             }
@@ -12811,7 +12826,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
             if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
-                           NULL) != 0) {
+                           NULL, s->ctype) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
                 return -1;
             }
@@ -13112,7 +13127,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
 
             if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                           s->array_dims, varv, depth, 0, 0, NULL) != 0) {
+                           s->array_dims, varv, depth, 0, 0, NULL, s->ctype) != 0) {
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
@@ -13135,7 +13150,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             set_value_size(sf, varv, 16);
         }
         if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
-                       NULL) != 0) {
+                       NULL, s->ctype) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
         }
@@ -17772,7 +17787,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             }
             if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
                            af->params[j].array_len, af->params[j].array_ndim, af->params[j].array_dims, v, 0, 0, 1,
-                           NULL) != 0) {
+                           NULL, af->params[j].ctype) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
                 cc_ssa_module_free(out);
                 return -1;
