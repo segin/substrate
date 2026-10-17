@@ -424,11 +424,6 @@ typedef struct {
 
 typedef struct {
     char *name;
-    cc_type_t type;
-    int type_struct_id;
-    long array_len;
-    int array_ndim;
-    long array_dims[CC_MAX_ARRAY_DIMS];
     long offset;
     long size;
     int is_bitfield;

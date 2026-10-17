@@ -1137,15 +1137,13 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
 
     for (i = 0; i < sd->member_count; ++i) {
         long msize = sd->members[i].size;
-        long malign = ctype_is_complex(sd->members[i].ctype)
-                          ? cc_ct_align(sd->members[i].ctype, p->tu)
-                          : parser_type_align_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
+        long malign = parser_ct_align(p, sd->members[i].ctype);
         int is_bitfield = sd->members[i].is_bitfield;
         int bit_width = sd->members[i].bit_width;
         long bit_storage_size = sd->members[i].bit_storage_size;
         int bit_storage_bits = sd->members[i].bit_storage_bits;
         if (msize <= 0) {
-            msize = parser_type_size_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
+            msize = parser_ct_size(p, sd->members[i].ctype);
         }
         if (msize < 0) {
             msize = cc_target_pointer_size();
@@ -1320,8 +1318,7 @@ static int struct_ensure(parser_t *p, const char *tag, size_t len, int for_defin
     return (int)p->struct_count++;
 }
 
-static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t type, int type_struct_id,
-                              long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long offset,
+static int struct_member_push(parser_t *p, int sid, const char *name, const cc_ctype_t *ctype, long offset,
                               long size, int is_bitfield, int bit_width, int bit_offset, int bit_storage_bits,
                               int bit_signed, long bit_storage_size);
 
@@ -1336,7 +1333,6 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
  * @return      the structure's index, or -1 when out of memory
  */
 static int parser_complex_struct(parser_t *p, cc_ctype_kind_t kind) {
-    cc_type_t elem = cc_ct_legacy_kind(kind);
     const cc_ctype_t *ct = cc_ct_basic(kind);
     long es = cc_ct_size(ct, NULL);
     size_t i;
@@ -1351,12 +1347,10 @@ static int parser_complex_struct(parser_t *p, cc_ctype_kind_t kind) {
     p->scope_depth = 0;
     sid = struct_ensure(p, NULL, 0, 1);
     p->scope_depth = saved_depth;
-    if (sid < 0 || struct_member_push(p, sid, "__re", elem, -1, -1, 0, NULL, 0, es, 0, 0, 0, 0, 0, 0) < 0 ||
-        struct_member_push(p, sid, "__im", elem, -1, -1, 0, NULL, es, es, 0, 0, 0, 0, 0, 0) < 0) {
+    if (sid < 0 || struct_member_push(p, sid, "__re", ct, 0, es, 0, 0, 0, 0, 0, 0) < 0 ||
+        struct_member_push(p, sid, "__im", ct, es, es, 0, 0, 0, 0, 0, 0) < 0) {
         return -1;
     }
-    p->structs[sid].members[0].ctype = ct;
-    p->structs[sid].members[1].ctype = ct;
     p->structs[sid].size = 2 * es;
     p->structs[sid].align = cc_ct_align(ct, NULL);
     p->structs[sid].complete = 1;
@@ -1384,8 +1378,6 @@ static int parser_complex_struct(parser_t *p, cc_ctype_kind_t kind) {
 static int parser_wide_struct(parser_t *p, long bits, int is_unsigned, int is_int128) {
     long limb = cc_target_pointer_size();
     long n = (bits + limb * 8 - 1) / (limb * 8);
-    cc_type_t lt = limb == 8 ? CC_TYPE_ULONG_LONG : CC_TYPE_UINT;
-    long dims[CC_MAX_ARRAY_DIMS] = {0};
     size_t i;
     int sid;
     int saved_depth = p->scope_depth;
@@ -1397,16 +1389,13 @@ static int parser_wide_struct(parser_t *p, long bits, int is_unsigned, int is_in
             return (int)i;
         }
     }
-    dims[0] = n;
     p->scope_depth = 0;
     sid = struct_ensure(p, NULL, 0, 1);
     p->scope_depth = saved_depth;
-    /* an array member is recorded with a pointer level for its dimension, as a declared one is */
-    if (sid < 0 ||
-        struct_member_push(p, sid, "__limb", ptr_of_type(lt), -1, n, 1, dims, 0, n * limb, 0, 0, 0, 0, 0, 0) < 0) {
+    if (sid < 0 || struct_member_push(p, sid, "__limb", cc_ct_array(cc_ct_basic(limb == 8 ? CC_CT_ULLONG : CC_CT_UINT), n),
+                                      0, n * limb, 0, 0, 0, 0, 0, 0) < 0) {
         return -1;
     }
-    p->structs[sid].members[0].ctype = cc_ct_array(cc_ct_basic(limb == 8 ? CC_CT_ULLONG : CC_CT_UINT), n);
     p->structs[sid].size = n * limb;
     p->structs[sid].align = is_int128 ? 16 : limb;
     p->structs[sid].complete = 1;
@@ -1428,7 +1417,6 @@ static int push_arg(cc_expr_t *call, cc_expr_t *arg);
  * @return the structure's id, or -1 when out of memory
  */
 static int parser_decimal_struct(parser_t *p, int bits) {
-    long dims[CC_MAX_ARRAY_DIMS] = {0};
     long size = bits / 8;
     size_t i;
     int sid;
@@ -1447,20 +1435,10 @@ static int parser_decimal_struct(parser_t *p, int bits) {
         return -1;
     }
     if (bits == 128) {
-        /* an array member is recorded with a pointer level for its dimension, as a declared one is */
-        dims[0] = 2;
-        rc = struct_member_push(p, sid, "__bid", ptr_of_type(CC_TYPE_ULONG_LONG), -1, 2, 1, dims, 0, 16, 0, 0, 0, 0,
-                                0, 0);
-        if (rc >= 0) {
-            p->structs[sid].members[0].ctype = cc_ct_array(cc_ct_basic(CC_CT_ULLONG), 2);
-        }
+        rc = struct_member_push(p, sid, "__bid", cc_ct_array(cc_ct_basic(CC_CT_ULLONG), 2), 0, 16, 0, 0, 0, 0, 0, 0);
     } else {
-        cc_type_t t = bits == 32 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
-
-        rc = struct_member_push(p, sid, "__bid", t, -1, -1, 0, NULL, 0, size, 0, 0, 0, 0, 0, 0);
-        if (rc >= 0) {
-            p->structs[sid].members[0].ctype = cc_ct_from_scalar(t);
-        }
+        rc = struct_member_push(p, sid, "__bid", cc_ct_basic(bits == 32 ? CC_CT_UINT : CC_CT_ULLONG), 0, size, 0, 0,
+                                0, 0, 0, 0);
     }
     if (rc < 0) {
         return -1;
@@ -1568,7 +1546,6 @@ static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
                                              CC_TYPE_INT,  CC_TYPE_VOID,      CC_TYPE_VOID,  CC_TYPE_VOID,
                                              CC_TYPE_LONG_LONG};
     long es = parser_type_size_bytes(p, elem, -1);
-    long dims[CC_MAX_ARRAY_DIMS] = {0};
     cc_type_t cmp_elem;
     size_t i;
     int sid;
@@ -1579,16 +1556,13 @@ static int parser_vector_struct(parser_t *p, cc_type_t elem, long n) {
             return (int)i;
         }
     }
-    dims[0] = n;
     p->scope_depth = 0;
     sid = struct_ensure(p, NULL, 0, 1);
     p->scope_depth = saved_depth;
-    /* an array member is recorded with a pointer level for its dimension, as a declared one is */
-    if (sid < 0 ||
-        struct_member_push(p, sid, "__vec", ptr_of_type(elem), -1, n, 1, dims, 0, n * es, 0, 0, 0, 0, 0, 0) < 0) {
+    if (sid < 0 || struct_member_push(p, sid, "__vec", cc_ct_array(parser_vector_elem_ctype(elem), n), 0, n * es, 0,
+                                      0, 0, 0, 0, 0) < 0) {
         return -1;
     }
-    p->structs[sid].members[0].ctype = cc_ct_array(parser_vector_elem_ctype(elem), n);
     p->structs[sid].size = n * es;
     p->structs[sid].align = n * es < 16 ? n * es : 16;
     p->structs[sid].complete = 1;
@@ -1671,8 +1645,24 @@ typedef struct {
 static int parse_member_decl(parser_t *p, cc_type_t base_type, int base_sid, int base_ndim, const long *base_dims,
                              const cc_ctype_t *base_alias, member_decl_t *out);
 
-static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t type, int type_struct_id,
-                              long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long offset,
+/**
+ * Add a member to structure @p sid.
+ *
+ * @param p                 the parser
+ * @param sid               the structure
+ * @param name              its name, or NULL for an anonymous structure or union
+ * @param ctype             its type
+ * @param offset            its offset, where already laid out
+ * @param size              its size, 0 where not yet known
+ * @param is_bitfield       it is a bit-field
+ * @param bit_width         a bit-field's width
+ * @param bit_offset        a bit-field's offset in its storage unit
+ * @param bit_storage_bits  the bits of a bit-field's storage unit
+ * @param bit_signed        a bit-field is signed
+ * @param bit_storage_size  the bytes of a bit-field's storage unit
+ * @return                  0, or -1 when out of memory
+ */
+static int struct_member_push(parser_t *p, int sid, const char *name, const cc_ctype_t *ctype, long offset,
                               long size, int is_bitfield, int bit_width, int bit_offset, int bit_storage_bits,
                               int bit_signed, long bit_storage_size) {
     cc_struct_member_t *next;
@@ -1707,15 +1697,6 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
         }
     }
     sd->members[sd->member_count].name = dup;
-    sd->members[sd->member_count].type = type;
-    sd->members[sd->member_count].type_struct_id = type_struct_id;
-    sd->members[sd->member_count].array_len = array_len;
-    sd->members[sd->member_count].array_ndim = array_ndim;
-    if (array_dims != NULL) {
-        memcpy(sd->members[sd->member_count].array_dims, array_dims, sizeof(sd->members[sd->member_count].array_dims));
-    } else {
-        memset(sd->members[sd->member_count].array_dims, 0, sizeof(sd->members[sd->member_count].array_dims));
-    }
     sd->members[sd->member_count].offset = offset;
     sd->members[sd->member_count].size = size;
     sd->members[sd->member_count].is_bitfield = is_bitfield;
@@ -1724,7 +1705,7 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
     sd->members[sd->member_count].bit_storage_bits = bit_storage_bits;
     sd->members[sd->member_count].bit_signed = bit_signed;
     sd->members[sd->member_count].bit_storage_size = bit_storage_size;
-    sd->members[sd->member_count].ctype = NULL;
+    sd->members[sd->member_count].ctype = ctype;
     sd->member_count++;
     return 0;
 }
@@ -1761,10 +1742,10 @@ static const cc_struct_member_t *struct_member_find_offset_n_depth(const parser_
         const cc_struct_member_t *inner;
         long inner_off = 0;
 
-        if (m->name != NULL || m->type != CC_TYPE_VOID || m->type_struct_id < 0) {
+        if (m->name != NULL || m->ctype == NULL || m->ctype->unqual->kind != CC_CT_RECORD) {
             continue;
         }
-        inner = struct_member_find_offset_n_depth(p, m->type_struct_id, name, len, &inner_off, depth + 1);
+        inner = struct_member_find_offset_n_depth(p, m->ctype->unqual->id, name, len, &inner_off, depth + 1);
         if (inner != NULL) {
             if (out_offset != NULL) {
                 *out_offset = m->offset + inner_off;
@@ -2910,26 +2891,21 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
 
                     if (!skip_member_decl && mname != NULL) {
-                        if (struct_member_push(p, sid, mname, mtype, mstruct, arr_saw ? arr_count : -1,
-                                               arr_ndim, arr_ndim > 0 ? arr_dims : NULL, moff, msize,
-                                               is_bitfield, bit_width, bit_offset, bit_storage_bits, bit_signed,
-                                               bit_storage_size) != 0) {
+                        if (struct_member_push(p, sid, mname, md.ctype, moff, msize, is_bitfield, bit_width,
+                                               bit_offset, bit_storage_bits, bit_signed, bit_storage_size) != 0) {
                             free(mname);
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
                         }
-                        p->structs[sid].members[p->structs[sid].member_count - 1].ctype = md.ctype;
                         free(mname);
                     } else if (skip_member_decl && mname == NULL && mtype == CC_TYPE_VOID && mstruct >= 0 &&
                                (size_t)mstruct < p->struct_count && p->structs[mstruct].complete) {
-                        if (struct_member_push(p, sid, NULL, mtype, mstruct, arr_saw ? arr_count : -1,
-                                               arr_ndim, arr_ndim > 0 ? arr_dims : NULL, moff, msize,
-                                               is_bitfield, bit_width, bit_offset, bit_storage_bits, bit_signed,
+                        if (struct_member_push(p, sid, NULL, cc_ct_record(mstruct), moff, msize, is_bitfield,
+                                               bit_width, bit_offset, bit_storage_bits, bit_signed,
                                                bit_storage_size) != 0) {
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
                         }
-                        p->structs[sid].members[p->structs[sid].member_count - 1].ctype = cc_ct_record(mstruct);
                     }
                     if (is_union) {
                         if (is_bitfield) {
@@ -4554,39 +4530,29 @@ static long parser_struct_scalar_slots_for_init(parser_t *p, int struct_id, int 
     }
     sd = &p->structs[struct_id];
     for (i = 0; i < sd->member_count; ++i) {
-        const cc_struct_member_t *m = &sd->members[i];
+        const cc_ctype_t *t = sd->members[i].ctype;
+        long cnt = 1;
+        long sub = 1;
+
         if (sd->has_flexible_array && i + 1 == sd->member_count) {
             continue;
         }
-        if (m->array_ndim > 0 && is_pointer_type(m->type)) {
-            long cnt = m->array_len > 0 ? m->array_len : 1;
-            cc_type_t elem = ptr_deref_type(m->type);
-            if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
-                long sub = parser_struct_scalar_slots_for_init(p, m->type_struct_id, depth + 1);
-                if (sub < 0 || cnt > LONG_MAX / sub || slots > LONG_MAX - cnt * sub) {
-                    return -1;
-                }
-                slots += cnt * sub;
-            } else {
-                if (slots > LONG_MAX - cnt) {
-                    return -1;
-                }
-                slots += cnt;
-            }
-            continue;
-        }
-        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
-            long sub = parser_struct_scalar_slots_for_init(p, m->type_struct_id, depth + 1);
-            if (sub < 0 || slots > LONG_MAX - sub) {
+        /* an array takes its elements' slots, each level's bound (1 where unknown) times over */
+        for (; t != NULL && t->kind == CC_CT_ARRAY; t = t->of) {
+            long n = t->count > 0 ? t->count : 1;
+
+            if (cnt > LONG_MAX / n) {
                 return -1;
             }
-            slots += sub;
-            continue;
+            cnt *= n;
         }
-        if (slots == LONG_MAX) {
+        if (t != NULL && t->unqual->kind == CC_CT_RECORD) {
+            sub = parser_struct_scalar_slots_for_init(p, t->unqual->id, depth + 1);
+        }
+        if (sub < 0 || cnt > LONG_MAX / sub || slots > LONG_MAX - cnt * sub) {
             return -1;
         }
-        slots++;
+        slots += cnt * sub;
     }
     return slots > 0 ? slots : 1;
 }
@@ -7601,18 +7567,19 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             if (strcmp(e->ident, "__builtin_offsetof") == 0) {
                 cc_type_t sty = CC_TYPE_VOID;
+                const cc_ctype_t *sct = NULL;
+                const cc_ctype_t *cur; /* the type of what the designator names so far */
                 int ssid = -1;
                 long total = 0;
                 cc_expr_t *dyn_off = NULL;
-                long designator_dims[CC_MAX_ARRAY_DIMS];
-                int designator_ndim = 0;
-                cc_type_t designator_base_type = CC_TYPE_VOID;
-                int designator_base_sid = -1;
 
-                if (parse_type_name(p, &sty, &ssid, NULL, NULL, NULL, 1,
-                                    "expected type name in __builtin_offsetof") != 0) {
+                if (parse_type_name_ct(p, &sty, NULL, NULL, NULL, NULL, 1, "expected type name in __builtin_offsetof",
+                                       &sct, NULL) != 0) {
                     free_expr(e);
                     return NULL;
+                }
+                if (sct != NULL && sct->unqual->kind == CC_CT_RECORD) {
+                    ssid = sct->unqual->id;
                 }
                 if (ssid < 0) {
                     set_diag(p->diag, p->tok.line, p->tok.col,
@@ -7633,7 +7600,6 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 while (1) {
                     const cc_struct_member_t *m;
                     long member_off = 0;
-                    int d;
 
                     m = struct_member_find_offset_n_depth(p, ssid, p->tok.start, p->tok.len, &member_off, 0);
                     if (m == NULL) {
@@ -7643,31 +7609,20 @@ static cc_expr_t *parse_primary(parser_t *p) {
                         return NULL;
                     }
                     total += member_off;
-                    designator_ndim = m->array_ndim;
-                    memset(designator_dims, 0, sizeof(designator_dims));
-                    if (designator_ndim > 0 && designator_ndim <= CC_MAX_ARRAY_DIMS) {
-                        for (d = 0; d < designator_ndim; ++d) {
-                            designator_dims[d] = m->array_dims[d];
-                        }
-                    }
-                    /* an array member's type is a pointer to its element */
-                    designator_base_type = designator_ndim > 0 && is_pointer_type(m->type) ? ptr_deref_type(m->type)
-                                                                                           : m->type;
-                    designator_base_sid = m->type_struct_id;
+                    cur = m->ctype;
                     if (next_tok(p) != 0) {
                         free_expr(e);
                         return NULL;
                     }
                     while (p->tok.kind == TOK_LBRACK) {
                         long idx = 0;
-                        long elem = 0;
                         long stride = 0;
                         int idx_is_const = 0;
                         cc_expr_t *idx_expr = NULL;
                         cc_expr_t *rhs_const = NULL;
                         cc_expr_t *term = NULL;
 
-                        if (designator_ndim <= 0) {
+                        if (cur == NULL || cur->kind != CC_CT_ARRAY) {
                             set_diag(p->diag, p->tok.line, p->tok.col,
                                      "subscript in __builtin_offsetof requires array member");
                             free_expr(dyn_off);
@@ -7698,25 +7653,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
                             free_expr(e);
                             return NULL;
                         }
-                        elem = parser_type_size_bytes(p, designator_base_type, designator_base_sid);
-                        if (elem <= 0) {
-                            elem = 1;
-                        }
-                        stride = elem;
-                        for (d = 1; d < designator_ndim; ++d) {
-                            long dim = designator_dims[d];
-                            if (dim <= 0) {
-                                dim = 1;
-                            }
-                            if (stride > LONG_MAX / dim) {
-                                set_diag(p->diag, p->tok.line, p->tok.col,
-                                         "offsetof designator index overflow");
-                                free_expr(idx_expr);
-                                free_expr(dyn_off);
-                                free_expr(e);
-                                return NULL;
-                            }
-                            stride *= dim;
+                        /* a step of the array is one of its elements */
+                        cur = cur->of;
+                        stride = parser_ct_size(p, cur);
+                        if (stride <= 0) {
+                            stride = 1;
                         }
                         if (idx_is_const) {
                             if ((idx > 0 && stride > LONG_MAX / idx) || (idx < 0 && stride < LONG_MIN / idx)) {
@@ -7752,25 +7693,18 @@ static cc_expr_t *parse_primary(parser_t *p) {
                                 }
                             }
                         }
-                        for (d = 0; d + 1 < designator_ndim; ++d) {
-                            designator_dims[d] = designator_dims[d + 1];
-                        }
-                        if (designator_ndim > 0) {
-                            designator_dims[designator_ndim - 1] = 0;
-                            designator_ndim--;
-                        }
                     }
                     if (p->tok.kind != TOK_DOT) {
                         break;
                     }
-                    if (designator_ndim != 0 || !(designator_base_type == CC_TYPE_VOID && designator_base_sid >= 0)) {
+                    if (cur == NULL || cur->unqual->kind != CC_CT_RECORD) {
                         set_diag(p->diag, p->tok.line, p->tok.col,
                                  "nested __builtin_offsetof designator requires struct member");
                         free_expr(dyn_off);
                         free_expr(e);
                         return NULL;
                     }
-                    ssid = m->type_struct_id;
+                    ssid = cur->unqual->id;
                     if (next_tok(p) != 0) {
                         free_expr(dyn_off);
                         free_expr(e);
