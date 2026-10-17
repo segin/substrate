@@ -876,8 +876,33 @@ static long lower_pointee_size(const cc_translation_unit_t *tu, const cc_expr_t 
  * @param e   the pointer operand
  * @return    the step, or -1 if @p e is not a pointer to a complete type
  */
+static long ct_pointer_step(const cc_translation_unit_t *tu, const cc_ctype_t *t);
+
+/** Whether @p t is a pointer type (an array as a value is one). */
+static int ct_is_pointer(const cc_ctype_t *t) {
+    return t != NULL && t->kind == CC_CT_POINTER;
+}
+
+/** Whether @p t is of kind @p k. */
+static int ct_has_kind(const cc_ctype_t *t, cc_ctype_kind_t k) {
+    return t != NULL && t->kind == k;
+}
+
 static long lower_pointer_step(const cc_translation_unit_t *tu, const cc_expr_t *e) {
-    const cc_ctype_t *t = lower_value_ctype(e);
+    return ct_pointer_step(tu, lower_value_ctype(e));
+}
+
+/**
+ * The step of pointer arithmetic on a value of type @p t: the size of
+ * what it points to, or 1 for a `void *` or a pointer to a function, as
+ * GNU C counts them.
+ *
+ * @param tu  the translation unit
+ * @param t   the type
+ * @return    the step, or -1 if @p t is not a pointer to a complete type
+ */
+static long ct_pointer_step(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    long n;
 
     if (t == NULL || t->kind != CC_CT_POINTER || t->of == NULL) {
         return -1;
@@ -885,7 +910,24 @@ static long lower_pointer_step(const cc_translation_unit_t *tu, const cc_expr_t 
     if (t->of->kind == CC_CT_VOID || t->of->kind == CC_CT_FUNCTION) {
         return 1;
     }
-    return lower_pointee_size(tu, e);
+    n = cc_ct_size(t->of, tu);
+    return n > 0 ? n : -1;
+}
+
+/**
+ * The type a store to an object of type @p obj converts to: the
+ * expression's own where it is a bit-precise integer (which says more
+ * than a declaration rebuilt from the legacy encoding), else the object's.
+ *
+ * @param e    the assignment or update, or NULL
+ * @param obj  the object's type
+ * @return     the type
+ */
+static const cc_ctype_t *store_ctype(const cc_expr_t *e, const cc_ctype_t *obj) {
+    if (e != NULL && e->ctype != NULL && (e->ctype->kind == CC_CT_BITINT || e->ctype->kind == CC_CT_UBITINT)) {
+        return e->ctype;
+    }
+    return obj;
 }
 
 /**
@@ -4477,7 +4519,7 @@ static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     } else if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
         int idx = var_find_visible(vars, var_count, e->lhs->ident, depth);
         if (idx >= 0) {
-            if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
+            if (ct_record_id(lower_var_ctype(&vars[idx])) >= 0) {
                 base_ptr = vars[idx].value;
             } else {
                 memset(&in, 0, sizeof(in));
@@ -6226,10 +6268,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                                           is_array_object_decl(g->type, g->array_len, g->array_ndim)))) {
                     return emit_global_addr(sf, g->name, diag);
                 }
-                if (expr_is_struct_obj || (g->type == CC_TYPE_VOID && g->type_struct_id >= 0)) {
+                if (expr_is_struct_obj || (ct_record_id(lower_global_ctype(g)) >= 0)) {
                     return emit_global_addr(sf, g->name, diag);
                 }
-                mem_size = type_size_bytes_with_struct(tu, g->type, g->type_struct_id);
+                mem_size = cc_ct_size(lower_global_ctype(g), tu);
                 if (mem_size <= 0) {
                     set_diag(diag, "unsupported global object type in lowering");
                     return -1;
@@ -6270,10 +6312,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim)) {
                 return emit_global_addr(sf, vars[idx].static_sym, diag);
             }
-            if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
+            if (ct_record_id(lower_var_ctype(&vars[idx])) >= 0) {
                 return emit_global_addr(sf, vars[idx].static_sym, diag);
             }
-            mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+            mem_size = cc_ct_size(lower_var_ctype(&vars[idx]), tu);
             if (mem_size <= 0) {
                 set_diag(diag, "unsupported static local object type in lowering");
                 return -1;
@@ -6311,7 +6353,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return in.dst;
         }
-        if (vars[idx].type == CC_TYPE_LDOUBLE || lower_has_kind(e, CC_CT_LDOUBLE)) {
+        if (ct_has_kind(lower_var_ctype(&vars[idx]), CC_CT_LDOUBLE) || lower_has_kind(e, CC_CT_LDOUBLE)) {
             set_value_size(sf, vars[idx].value, 16);
         }
         return vars[idx].value;
@@ -9358,7 +9400,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (idx >= 0) {
                 if (vars[idx].is_static_storage) {
                     int saddr = emit_global_addr(sf, vars[idx].static_sym, diag);
-                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                    long mem_size = cc_ct_size(lower_var_ctype(&vars[idx]), tu);
                     if (saddr < 0) {
                         return -1;
                     }
@@ -9370,11 +9412,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (rhs < 0) {
                         return -1;
                     }
-                    rhs = normalize_integral_ct(sf, rhs, e->ctype, vars[idx].type, diag);
+                    rhs = normalize_int_ct(sf, rhs, store_ctype(e, lower_var_ctype(&vars[idx])), diag);
                     if (rhs < 0) {
                         return -1;
                     }
-                    if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
+                    if (ct_record_id(lower_var_ctype(&vars[idx])) >= 0) {
                         if (emit_memcpy_instr(sf, saddr, rhs, mem_size, diag) != 0) {
                             return -1;
                         }
@@ -9403,7 +9445,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (rhs < 0) {
                         return -1;
                     }
-                    rhs = normalize_integral_ct(sf, rhs, e->ctype, vars[idx].type, diag);
+                    rhs = normalize_int_ct(sf, rhs, store_ctype(e, lower_var_ctype(&vars[idx])), diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9419,8 +9461,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     return rhs;
                 }
-                if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
-                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                if (ct_record_id(lower_var_ctype(&vars[idx])) >= 0) {
+                    long mem_size = cc_ct_size(lower_var_ctype(&vars[idx]), tu);
                     if (mem_size <= 0) {
                         set_diag(diag, "unsupported local aggregate assignment type");
                         return -1;
@@ -9434,7 +9476,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (rhs < 0) {
                         return -1;
                     }
-                    rhs = normalize_integral_ct(sf, rhs, e->ctype, vars[idx].type, diag);
+                    rhs = normalize_int_ct(sf, rhs, store_ctype(e, lower_var_ctype(&vars[idx])), diag);
                     if (rhs < 0) {
                         return -1;
                     }
@@ -9465,7 +9507,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     set_diag(diag, "assignment to array object is not supported");
                     return -1;
                 }
-                mem_size = type_size_bytes_with_struct(tu, g->type, g->type_struct_id);
+                mem_size = cc_ct_size(lower_global_ctype(g), tu);
                 if (mem_size <= 0) {
                     set_diag(diag, "unsupported global assignment type in lowering");
                     return -1;
@@ -9478,11 +9520,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (rhs < 0) {
                     return -1;
                 }
-                rhs = normalize_integral_ct(sf, rhs, e->ctype, g->type, diag);
+                rhs = normalize_int_ct(sf, rhs, store_ctype(e, lower_global_ctype(g)), diag);
                 if (rhs < 0) {
                     return -1;
                 }
-                if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
+                if (ct_record_id(lower_global_ctype(g)) >= 0) {
                     if (emit_memcpy_instr(sf, gaddr, rhs, mem_size, diag) != 0) {
                         return -1;
                     }
@@ -9590,7 +9632,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (idx >= 0) {
                 if (vars[idx].is_static_storage) {
                     int saddr;
-                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                    long mem_size = cc_ct_size(lower_var_ctype(&vars[idx]), tu);
                     if (vars[idx].static_sym == NULL) {
                         set_diag(diag, "malformed static local symbol in lowering");
                         return -1;
@@ -9648,8 +9690,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                 }
 
-                if (is_pointer_type(vars[idx].type)) {
-                    step = pointer_elem_size_bytes(tu, vars[idx].type, vars[idx].struct_id);
+                /* a pointer to a variable-length array steps by a run-time stride, below */
+                if (ct_is_pointer(lower_var_ctype(&vars[idx])) && !vars[idx].vla_is_pointer) {
+                    step = ct_pointer_step(tu, lower_var_ctype(&vars[idx]));
                     if (step <= 0) {
                         set_diag(diag, "unsupported pointer ++/-- type in lowering");
                         return -1;
@@ -9665,7 +9708,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (one < 0) {
                     return -1;
                 }
-                if (!is_pointer_type(vars[idx].type)) {
+                if (!ct_is_pointer(lower_var_ctype(&vars[idx]))) {
                     one = cast_value(sf, one, want, diag);
                     if (one < 0) {
                         return -1;
@@ -9681,14 +9724,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 nextv = in.dst;
-                if (vars[idx].type == CC_TYPE_FLOAT) {
+                if (ct_has_kind(lower_var_ctype(&vars[idx]), CC_CT_FLOAT)) {
                     nextv = normalize_float_ct(sf, nextv, lower_var_ctype(&vars[idx]), diag);
                     if (nextv < 0) {
                         return -1;
                     }
                 }
-                if (cc_type_is_integral(vars[idx].type) && !is_pointer_type(vars[idx].type)) {
-                    nextv = normalize_integral_ct(sf, nextv, e->ctype, vars[idx].type, diag);
+                if (cc_ct_is_integer(lower_var_ctype(&vars[idx]))) {
+                    nextv = normalize_int_ct(sf, nextv, store_ctype(e, lower_var_ctype(&vars[idx])), diag);
                     if (nextv < 0) {
                         return -1;
                     }
@@ -9696,7 +9739,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
                 if (vars[idx].is_static_storage) {
                     int saddr = emit_global_addr(sf, vars[idx].static_sym, diag);
-                    long mem_size = type_size_bytes_with_struct(tu, vars[idx].type, vars[idx].struct_id);
+                    long mem_size = cc_ct_size(lower_var_ctype(&vars[idx]), tu);
                     if (saddr < 0) {
                         return -1;
                     }
@@ -9751,13 +9794,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     return -1;
                 }
-                mem_size = type_size_bytes_with_struct(tu, g->type, g->type_struct_id);
+                mem_size = cc_ct_size(lower_global_ctype(g), tu);
                 if (mem_size <= 0) {
                     set_diag(diag, "unsupported global update type in lowering");
                     return -1;
                 }
-                if (is_pointer_type(g->type)) {
-                    step = pointer_elem_size_bytes(tu, g->type, g->type_struct_id);
+                if (ct_is_pointer(lower_global_ctype(g))) {
+                    step = ct_pointer_step(tu, lower_global_ctype(g));
                     if (step <= 0) {
                         set_diag(diag, "unsupported pointer ++/-- type in lowering");
                         return -1;
@@ -9782,7 +9825,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (one < 0) {
                     return -1;
                 }
-                if (!is_pointer_type(g->type)) {
+                if (!ct_is_pointer(lower_global_ctype(g))) {
                     one = cast_value(sf, one, want, diag);
                     if (one < 0) {
                         return -1;
@@ -9797,14 +9840,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 nextv = in.dst;
-                if (g->type == CC_TYPE_FLOAT) {
+                if (ct_has_kind(lower_global_ctype(g), CC_CT_FLOAT)) {
                     nextv = normalize_float_ct(sf, nextv, lower_global_ctype(g), diag);
                     if (nextv < 0) {
                         return -1;
                     }
                 }
-                if (cc_type_is_integral(g->type) && !is_pointer_type(g->type)) {
-                    nextv = normalize_integral_ct(sf, nextv, e->ctype, g->type, diag);
+                if (cc_ct_is_integer(lower_global_ctype(g))) {
+                    nextv = normalize_int_ct(sf, nextv, store_ctype(e, lower_global_ctype(g)), diag);
                     if (nextv < 0) {
                         return -1;
                     }
