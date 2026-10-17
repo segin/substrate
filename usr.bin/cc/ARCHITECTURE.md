@@ -21,7 +21,8 @@ usr.bin/cc/
 │   ├── preproc.c            # Preprocessor helpers and expansion bounds
 │   ├── lexer.c              # C tokenization
 │   ├── parser.c             # Recursive-descent parser
-│   ├── sema.c               # Type checking and semantic validation
+│   ├── sema.c               # Type checking and semantic validation, a check per expression kind
+│   ├── sema_call.c          # Checking a call: builtins, callee, arguments (cc_sema.h: what the two share)
 │   ├── builtin.c            # Builtin-function and intrinsic handling
 │   ├── consteval.c          # Integer constant expressions: the one evaluator
 │   └── types.c              # Scalar type sizes and alignments, for every phase
