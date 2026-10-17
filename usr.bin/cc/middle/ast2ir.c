@@ -2168,22 +2168,6 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     return 0;
 }
 
-static int is_complete_struct_object_type(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
-    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
-        return 0;
-    }
-    if (!tu->structs[struct_id].complete) {
-        return 0;
-    }
-    if (is_pointer_type(t)) {
-        return 0;
-    }
-    if (t == CC_TYPE_ATOMIC || t == CC_TYPE_BITINT) {
-        return 0;
-    }
-    return 1;
-}
-
 /**
  * The declared type of a local, not decayed.
  *
@@ -12437,6 +12421,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     if (s->kind == CC_STMT_DECL) {
         int v;
         int varv;
+        const cc_ctype_t *dct;
+        int dsid;
         if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->decl_name != NULL) {
             if (s->expr != NULL) {
                 set_diag(diag, "extern local declaration cannot have an initializer");
@@ -13005,8 +12991,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return 0;
         }
-        if (is_complete_struct_object_type(tu, s->type, s->type_struct_id)) {
-            long sz = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
+        dct = stmt_decl_ctype(s);
+        dsid = ct_record_id(dct);
+        if (dsid >= 0 && (size_t)dsid < tu->struct_count && tu->structs[dsid].complete) {
+            long sz = cc_ct_size(dct, tu);
             int prealloc = lower_find_hoisted_alloc(ctx, s);
             if (sz <= 0) {
                 /* GNU empty-struct extension: materialize as 1-byte storage object. */
@@ -13021,8 +13009,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     if (emit_memset_instr(sf, varv, 0, sz, diag) != 0) {
                         return -1;
                     }
-                    if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, varv, s->type_struct_id,
-                                                 s->expr, diag) != 0) {
+                    if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, varv, dsid, s->expr,
+                                                 diag) != 0) {
                         return -1;
                     }
                 } else {
@@ -13045,12 +13033,14 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return 0;
         }
-        if (is_array_object_decl(s->type, s->array_len, s->array_ndim)) {
+        if (dct != NULL && dct->kind == CC_CT_ARRAY) {
             cc_ssa_instr_t st_in;
-            cc_type_t elem_type = ptr_base_type(s->type);
+            /* a flat initializer list fills the innermost elements in order */
+            const cc_ctype_t *elem_ct = ct_array_scalar(dct);
+            cc_value_type_t elem_kind = ct_value_kind(cc_ct_decay(elem_ct));
             long elem_size;
-            long arr_elems = s->array_len > 0 ? s->array_len : 1;
-            long total_size = array_type_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim, s->array_dims);
+            long total_size = cc_ct_size(dct, tu);
+            long arr_elems = total_size > 0 && cc_ct_size(elem_ct, tu) > 0 ? total_size / cc_ct_size(elem_ct, tu) : 1;
             int prealloc = lower_find_hoisted_alloc(ctx, s);
             int is_runtime_vla = 0;
             int vla_bytes_v = -1;
@@ -13076,12 +13066,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                     is_runtime_vla = 1;
                 } else {
-                    char msg[256];
-                    snprintf(msg, sizeof(msg),
-                             "invalid local array size in lowering (type=%d struct_id=%d ndim=%d dims=%ld,%ld,%ld,%ld len=%ld)",
-                             (int)s->type, s->type_struct_id, s->array_ndim, s->array_dims[0], s->array_dims[1],
-                             s->array_dims[2], s->array_dims[3], s->array_len);
-                    set_diag(diag, msg);
+                    set_diag(diag, "invalid local array size in lowering");
                     return -1;
                 }
             }
@@ -13093,7 +13078,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 elem_size = total_size / arr_elems;
             }
             if (elem_size <= 0) {
-                elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+                elem_size = cc_ct_size(elem_ct, tu);
             }
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported local array element type in lowering");
@@ -13113,16 +13098,15 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     size_t ii;
                     int handled_string_init = 0;
-                    if (s->array_ndim > 1 && !is_runtime_vla && init_list_has_row_initializer(s->expr)) {
+                    if (dct->of != NULL && dct->of->kind == CC_CT_ARRAY && !is_runtime_vla &&
+                        init_list_has_row_initializer(s->expr)) {
                         /*
                          * Rows initialized whole -- `{{1, 2}, {3, 4}}`, `{"ab", "cd"}`: the
                          * compound-literal walk takes them, brace elision and all.
                          */
                         size_t cur = 0;
-                        if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth,
-                                                           cc_ct_from_legacy(s->type, s->type_struct_id, s->array_ndim,
-                                                                             s->array_dims),
-                                                           s->expr, &cur, varv, diag) != 0) {
+                        if (lower_array_init_to_ptr_cursor(tu, sf, ctx, *vars, *var_count, depth, dct, s->expr, &cur,
+                                                           varv, diag) != 0) {
                             return -1;
                         }
                         if (cur < s->expr->arg_count) {
@@ -13176,7 +13160,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                     free(units);
                                     return -1;
                                 }
-                                cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                                cval = cast_value(sf, cval, elem_kind, diag);
                                 if (cval < 0) {
                                     free(units);
                                     return -1;
@@ -13215,12 +13199,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             }
                             item_ptr = st_in.dst;
                         }
-                        if (elem_type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+                        if (ct_record_id(elem_ct) >= 0) {
                             const cc_expr_t *elem_init = s->expr->args[ii];
                             const cc_expr_t *tmp_args[1];
                             cc_expr_t tmp_list;
-                            if (s->type_struct_id >= 0 && lower_cast_record_id(elem_init) == s->type_struct_id &&
-                                elem_init->lhs != NULL && elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
+                            if (lower_cast_record_id(elem_init) == ct_record_id(elem_ct) && elem_init->lhs != NULL &&
+                                elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
                                 elem_init = elem_init->lhs;
                             }
                             if (elem_init->kind != CC_EXPR_INIT_LIST) {
@@ -13232,7 +13216,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 elem_init = &tmp_list;
                             }
                             if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, item_ptr,
-                                                         s->type_struct_id, elem_init, diag) != 0) {
+                                                         ct_record_id(elem_ct), elem_init, diag) != 0) {
                                 return -1;
                             }
                         } else {
@@ -13240,7 +13224,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             if (v < 0) {
                                 return -1;
                             }
-                            v = cast_value(sf, v, type_to_val(elem_type), diag);
+                            v = cast_value(sf, v, elem_kind, diag);
                             if (v < 0) {
                                 return -1;
                             }
@@ -13296,7 +13280,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                             free(units);
                             return -1;
                         }
-                        cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                        cval = cast_value(sf, cval, elem_kind, diag);
                         if (cval < 0) {
                             free(units);
                             return -1;
@@ -13319,7 +13303,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     if (v < 0) {
                         return -1;
                     }
-                    v = cast_value(sf, v, type_to_val(elem_type), diag);
+                    v = cast_value(sf, v, elem_kind, diag);
                     if (v < 0) {
                         return -1;
                     }
