@@ -928,6 +928,66 @@ static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, i
     return &tu->structs[struct_id];
 }
 
+/**
+ * The type of checked expression @p e as a value: its interned type, an
+ * array or a function decayed to a pointer.
+ *
+ * @param e  the expression, or NULL
+ * @return   the type, or NULL
+ */
+static const cc_ctype_t *sx_vtype(const cc_expr_t *e) {
+    if (e == NULL) {
+        return NULL;
+    }
+    if (e->ctype == NULL) {
+        if (getenv("CC_EXP_SX") != NULL) {
+            fprintf(stderr, "SX-NOCTYPE kind=%d line=%zu\n", (int)e->kind, (size_t)e->line);
+            abort();
+        }
+        return cc_ct_decay(cc_ct_from_legacy(e->value_type, e->struct_id, e->array_ndim, e->array_dims));
+    }
+    return cc_ct_decay(e->ctype);
+}
+
+/** Whether @p t is of kind @p k. */
+static int ct_kind_is(const cc_ctype_t *t, cc_ctype_kind_t k) {
+    return t != NULL && t->kind == k;
+}
+
+/**
+ * The type a cast converts to, as written (the parser records it).
+ *
+ * @param e  the CC_EXPR_CAST
+ * @return   the type, or NULL
+ */
+static const cc_ctype_t *sema_cast_target_ctype(const cc_expr_t *e) {
+    if (e->ctype == NULL) {
+        if (getenv("CC_EXP_SX") != NULL) {
+            fprintf(stderr, "SX-NOCAST line=%zu\n", (size_t)e->line);
+            abort();
+        }
+        return cc_ct_from_legacy(e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
+    }
+    return e->ctype;
+}
+
+/**
+ * The structure a value of type @p t is: a structure or union, or the
+ * hidden structure standing for a complex, wide, decimal or vector type.
+ *
+ * @param t  the type, or NULL
+ * @return   the structure's index, or -1
+ */
+static int sx_ct_record(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return -1;
+    }
+    if (t->kind == CC_CT_RECORD) {
+        return t->id;
+    }
+    return t->kind == CC_CT_COMPLEX ? cc_ct_complex_record(t) : -1;
+}
+
 static int type_carries_struct_id(cc_type_t t) {
     if (t == CC_TYPE_VOID || t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC) {
         return 1;
@@ -2432,10 +2492,17 @@ static int sema_wide_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
     return 0;
 }
 
-/** The structure standing for the vector type (@p t, @p sid) is, or NULL. */
-static const cc_struct_def_t *sema_vector_def(const cc_translation_unit_t *tu, cc_type_t t, int sid) {
-    if (t != CC_TYPE_VOID || sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count ||
-        tu->structs[sid].vector_count <= 0) {
+/**
+ * The hidden structure standing for vector type @p t.
+ *
+ * @param tu  the translation unit
+ * @param t   the type, or NULL
+ * @return    the structure, or NULL if @p t is no vector type
+ */
+static const cc_struct_def_t *sema_vector_def(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    int sid = sx_ct_record(t);
+
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || tu->structs[sid].vector_count <= 0) {
         return NULL;
     }
     return &tu->structs[sid];
@@ -2443,7 +2510,7 @@ static const cc_struct_def_t *sema_vector_def(const cc_translation_unit_t *tu, c
 
 /** Whether expression @p e has a vector type. */
 static int sema_is_vector(const cc_translation_unit_t *tu, const cc_expr_t *e) {
-    return e != NULL && sema_vector_def(tu, e->value_type, e->struct_id) != NULL;
+    return e != NULL && sema_vector_def(tu, sx_vtype(e)) != NULL;
 }
 
 /**
@@ -2454,7 +2521,7 @@ static int sema_is_vector(const cc_translation_unit_t *tu, const cc_expr_t *e) {
  * @return 0, or -1 when out of memory
  */
 static int sema_vector_subscript(const cc_translation_unit_t *tu, cc_expr_t **slot) {
-    const cc_struct_def_t *vd = sema_vector_def(tu, (*slot)->value_type, (*slot)->struct_id);
+    const cc_struct_def_t *vd = sema_vector_def(tu, sx_vtype(*slot));
     const cc_struct_member_t *m = &vd->members[0];
     cc_expr_t *me = (cc_expr_t *)calloc(1, sizeof(*me));
 
@@ -2480,9 +2547,9 @@ static int sema_vector_subscript(const cc_translation_unit_t *tu, cc_expr_t **sl
 }
 
 /** Whether @p t is a type a scalar operand of a vector operation may have: an integer or real floating type. */
-static int sema_vector_scalar_ok(cc_type_t t) {
-    return (cc_type_is_integral(t) && !is_pointer_type(t)) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE ||
-           t == CC_TYPE_LDOUBLE || t == CC_TYPE_BOOL;
+static int sema_vector_scalar_ok(const cc_ctype_t *t) {
+    return cc_ct_is_integer(t) || (t != NULL && (t->kind == CC_CT_FLOAT || t->kind == CC_CT_DOUBLE ||
+                                                 t->kind == CC_CT_LDOUBLE));
 }
 
 /**
@@ -2496,10 +2563,10 @@ static int sema_vector_scalar_ok(cc_type_t t) {
  * @return 0, or -1 with @p diag set
  */
 static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
-    const cc_struct_def_t *vl = sema_vector_def(tu, e->lhs->value_type, e->lhs->struct_id);
-    const cc_struct_def_t *vr = sema_vector_def(tu, e->rhs->value_type, e->rhs->struct_id);
+    const cc_struct_def_t *vl = sema_vector_def(tu, sx_vtype(e->lhs));
+    const cc_struct_def_t *vr = sema_vector_def(tu, sx_vtype(e->rhs));
     const cc_struct_def_t *vd = vl != NULL ? vl : vr;
-    int sid = vl != NULL ? e->lhs->struct_id : e->rhs->struct_id;
+    int sid = (int)(vd - tu->structs);
     int is_cmp = e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
                  e->op == CC_BIN_GT || e->op == CC_BIN_GE;
     int is_fp = vd->vector_elem == CC_TYPE_FLOAT || vd->vector_elem == CC_TYPE_DOUBLE;
@@ -2514,18 +2581,19 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
         return -1;
     }
     if (vl != NULL && vr != NULL) {
-        if (e->lhs->struct_id != e->rhs->struct_id) {
+        if (vl != vr) {
             set_diag(diag, "invalid operands to a vector operation: the vector types differ");
             return -1;
         }
     } else {
         cc_expr_t **scalar = vl != NULL ? &e->rhs : &e->lhs;
 
-        if (!sema_vector_scalar_ok((*scalar)->value_type)) {
+        if (!sema_vector_scalar_ok(sx_vtype(*scalar))) {
             set_diag(diag, "invalid operands to a vector operation");
             return -1;
         }
-        if ((*scalar)->value_type != vd->vector_elem && sema_wrap_cast(scalar, vd->vector_elem, -1) != 0) {
+        if (sx_vtype(*scalar) != cc_ct_from_scalar(vd->vector_elem) &&
+            sema_wrap_cast(scalar, vd->vector_elem, -1) != 0) {
             set_diag(diag, "out of memory");
             return -1;
         }
@@ -2542,19 +2610,18 @@ static int sema_vector_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
  * @return 0, or -1 with @p diag set
  */
 static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
-    const cc_struct_def_t *vt = sema_vector_def(tu, e->aux_type, e->aux_struct_id);
-    const cc_struct_def_t *vs = sema_vector_def(tu, e->lhs->value_type, e->lhs->struct_id);
-    long ts = vt != NULL ? vt->size : type_size_bytes(e->aux_type);
-    long ss = vs != NULL ? vs->size : type_size_bytes(e->lhs->value_type);
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_struct_def_t *vt = sema_vector_def(tu, to);
+    const cc_struct_def_t *vs = sema_vector_def(tu, sx_vtype(e->lhs));
+    long ts = vt != NULL ? vt->size : cc_ct_size(to, tu);
+    long ss = vs != NULL ? vs->size : cc_ct_size(sx_vtype(e->lhs), tu);
 
-    if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id < 0) {
+    if (ct_kind_is(to, CC_CT_VOID)) {
         e->value_type = CC_TYPE_VOID;
         e->struct_id = -1;
         return 0;
     }
-    if ((vt == NULL && !(cc_type_is_integral(e->aux_type) && !is_pointer_type(e->aux_type))) ||
-        (vs == NULL && !(cc_type_is_integral(e->lhs->value_type) && !is_pointer_type(e->lhs->value_type))) ||
-        ts != ss) {
+    if ((vt == NULL && !cc_ct_is_integer(to)) || (vs == NULL && !cc_ct_is_integer(sx_vtype(e->lhs))) || ts != ss) {
         set_diag(diag, "invalid conversion: a vector converts only to a vector or an integer of its size");
         return -1;
     }
@@ -5557,12 +5624,14 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
 
     case CC_EXPR_UPDATE: {
         cc_type_t t;
+        const cc_ctype_t *tct = NULL; /* the object's type, as a value */
         int t_struct_id = -1;
         int t_storage = 0;
         int is_array_object = 0;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
+                tct = cc_ct_decay(vars[idx].ctype);
                 t = vars[idx].type;
                 t_struct_id = vars[idx].struct_id;
                 t_storage = vars[idx].storage;
@@ -5576,6 +5645,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     }
                     return -1;
                 }
+                tct = cc_ct_decay(g->ctype);
                 t = g->type;
                 t_struct_id = g->type_struct_id;
                 t_storage = g->storage;
@@ -5585,6 +5655,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
                 return -1;
             }
+            tct = sx_vtype(e->lhs);
             t = e->lhs->value_type;
             t_struct_id = e->lhs->struct_id;
         } else {
@@ -5606,7 +5677,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                     return -1;
                 }
             }
-        } else if (sema_wide_def(tu, t, t_struct_id) != NULL || sema_vector_def(tu, t, t_struct_id) != NULL ||
+        } else if (sema_wide_def(tu, t, t_struct_id) != NULL || sema_vector_def(tu, tct) != NULL ||
                    sema_decimal_def(tu, t, t_struct_id) != NULL) {
             /* rewritten as the assignment it is; a vector's then goes element by element */
             return sema_wide_update(tu, e, vars, var_count, depth, diag);
@@ -5696,7 +5767,7 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
                 return -1;
             }
         }
-        if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, e->aux_type, e->aux_struct_id) != NULL) {
+        if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, sema_cast_target_ctype(e)) != NULL) {
             return sema_vector_cast(tu, e, diag);
         }
         if (sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, e->aux_type, e->aux_struct_id) != NULL) {
