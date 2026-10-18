@@ -1,0 +1,48 @@
+module "ir/bitfield_split.c" {
+  target ilp32;
+  stage legal;
+
+  func @put : fn(i32, i32) -> i64 {
+  entry:
+    %v0 = param i32 0;
+    %v1 = param i32 1;
+    %v2 = stackalloc i32 4;
+    store i32 4, %v0, %v2;
+    %v3 = stackalloc i32 4;
+    store i32 4, %v1, %v3;
+    %v4 = load i32 4, %v3;
+    %v5 = zload i32 4, %v2;
+    %v6 = const i32 16777215;
+    %v7 = and i32 %v4, %v6;
+    %v8 = const i32 8;
+    %v9 = shl i32 %v7, %v8;
+    %v10 = zload i32 4, %v5;
+    %v11 = const i32 -4294967041;
+    %v12 = and i32 %v10, %v11;
+    %v13 = or i32 %v12, %v9;
+    %v14 = const i32 1;
+    %v15 = add i32 %v5, %v14;
+    %v16 = const i32 8;
+    %v17 = lshr i32 %v13, %v16;
+    store i32 1, %v17, %v15;
+    %v18 = const i32 2;
+    %v19 = add i32 %v5, %v18;
+    %v20 = const i32 16;
+    %v21 = lshr i32 %v13, %v20;
+    store i32 1, %v21, %v19;
+    %v22 = const i32 3;
+    %v23 = add i32 %v5, %v22;
+    %v24 = const i32 24;
+    %v25 = lshr i32 %v13, %v24;
+    store i32 1, %v25, %v23;
+    %v26 = zload i32 4, %v5;
+    %v27 = const i32 8;
+    %v28 = lshr i32 %v26, %v27;
+    %v29 = const i32 16777215;
+    %v30 = and i32 %v28, %v29;
+    %v31 = shl i32 %v30, 8;
+    %v32 = ashr i32 %v31, 8;
+    %v33 = const i32 0;
+    ret i32 %v33;
+  }
+}

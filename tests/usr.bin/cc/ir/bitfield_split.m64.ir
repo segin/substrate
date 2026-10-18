@@ -1,0 +1,54 @@
+module "ir/bitfield_split.c" {
+  target lp64;
+  stage legal;
+
+  func @put : fn(i64, i32) -> i64 {
+  entry:
+    %v0 = param i64 0;
+    %v1 = param i32 1;
+    %v2 = stackalloc i64 8;
+    store i64 8, %v0, %v2;
+    %v3 = stackalloc i64 4;
+    %v4 = shl i64 %v1, 32;
+    %v5 = ashr i32 %v4, 32;
+    store i32 4, %v5, %v3;
+    %v6 = load i32 4, %v3;
+    %v7 = zload i64 8, %v2;
+    %v8 = shl i64 %v6, 32;
+    %v9 = ashr i32 %v8, 32;
+    %v10 = const i64 16777215;
+    %v11 = and i64 %v9, %v10;
+    %v12 = const i64 8;
+    %v13 = shl i64 %v11, %v12;
+    %v14 = zload i32 4, %v7;
+    %v15 = const i64 -4294967041;
+    %v16 = and i64 %v14, %v15;
+    %v17 = or i64 %v16, %v13;
+    %v18 = const i64 1;
+    %v19 = add i64 %v7, %v18;
+    %v20 = const i64 8;
+    %v21 = lshr i64 %v17, %v20;
+    store i64 1, %v21, %v19;
+    %v22 = const i64 2;
+    %v23 = add i64 %v7, %v22;
+    %v24 = const i64 16;
+    %v25 = lshr i64 %v17, %v24;
+    store i64 1, %v25, %v23;
+    %v26 = const i64 3;
+    %v27 = add i64 %v7, %v26;
+    %v28 = const i64 24;
+    %v29 = lshr i64 %v17, %v28;
+    store i64 1, %v29, %v27;
+    %v30 = zload i32 4, %v7;
+    %v31 = const i64 8;
+    %v32 = lshr i64 %v30, %v31;
+    %v33 = const i64 16777215;
+    %v34 = and i64 %v32, %v33;
+    %v35 = shl i64 %v34, 40;
+    %v36 = ashr i64 %v35, 40;
+    %v37 = shl i64 %v36, 32;
+    %v38 = ashr i32 %v37, 32;
+    %v39 = const i64 0;
+    ret i64 %v39;
+  }
+}

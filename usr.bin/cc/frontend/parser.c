@@ -970,11 +970,15 @@ static int struct_bitfield_units(parser_t *p, int sid, long size) {
         if (!m->is_bitfield || m->bit_width <= 0) {
             continue;
         }
-        if (bitfield_unit(owned, size, pos, m->bit_width, &start, &unit) != 0 &&
-            bitfield_unit(NULL, size, pos, m->bit_width, &start, &unit) != 0) {
-            free(owned);
-            set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
-            return -1;
+        m->bit_split = 0;
+        if (bitfield_unit(owned, size, pos, m->bit_width, &start, &unit) != 0) {
+            /* `char a; int b : 24; char c;`: every unit holds a or c, so a store is split by byte */
+            if (bitfield_unit(NULL, size, pos, m->bit_width, &start, &unit) != 0) {
+                free(owned);
+                set_diag(p->diag, p->tok.line, p->tok.col, "unsupported packed bit-field layout");
+                return -1;
+            }
+            m->bit_split = 1;
         }
         m->offset = start;
         m->bit_offset = (int)(pos - start * 8);
@@ -7485,6 +7489,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->member_bit_storage_bits = src->member_bit_storage_bits;
     dst->member_bit_signed = src->member_bit_signed;
     dst->member_bit_storage_size = src->member_bit_storage_size;
+    dst->member_bit_split = src->member_bit_split;
     dst->update_postfix = src->update_postfix;
     dst->generic_selected = src->generic_selected;
 

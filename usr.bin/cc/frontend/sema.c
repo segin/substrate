@@ -4359,6 +4359,7 @@ static int sema_check_member(const cc_translation_unit_t *tu, cc_expr_t *e, var_
     e->member_bit_storage_bits = m->bit_storage_bits;
     e->member_bit_signed = m->bit_signed;
     e->member_bit_storage_size = m->bit_storage_size;
+    e->member_bit_split = m->bit_split;
     sema_set_type(e, m->ctype);
     return 0;
 }

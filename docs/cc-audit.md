@@ -620,12 +620,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   it inside the object and touches no ordinary member's byte, so the
   store to `b` is one byte.  `ir/bitfield_unit.c` (IR golden: the
   stores' widths).
-- [ ] **CC-109** A store to a bit-field that no single 1, 2, 4 or 8-byte
+- [x] **CC-109** A store to a bit-field that no single 1, 2, 4 or 8-byte
   unit can cover without an ordinary member's bytes shall still leave
   those bytes alone: `int b : 24` between `char a` and `char c` is three
-  bytes, and gcc stores it as three byte stores; cc's lowering accesses a
-  field through one unit, so it rewrites `a` or `c`.  *Traced* (both
-  targets); what CC-108 leaves.  Needs lowering to split such an access.
+  bytes, and gcc stores it as three byte stores; cc's lowering accessed a
+  field through one unit, so it rewrote `a` or `c` (with their own value
+  -- a race with a thread writing them, or a store to a `volatile`
+  neighbour).  *Traced* (both targets); what CC-108 leaves.  The layout
+  marks such a field `bit_split`, and lowering
+  (`lower_bitfield_store_bytes()`) writes back only the bytes the field
+  occupies, one byte store each; a load still reads the whole unit.
+  `ir/bitfield_split.c` (the stores), `codegen/bitfield_split_store.c`.
 - [ ] **CC-107** `_Float32`, `_Float64`, `_Float128`, `_Float32x` and
   `_Float64x` shall be types distinct from `float`, `double` and `long
   double` (C23 6.2.5p10): cc makes `_Float32` an alias of `float`,
@@ -1231,7 +1236,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-117 requirements: 115 met, 2 open.
+117 requirements: 116 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

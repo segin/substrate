@@ -157,6 +157,7 @@ struct cc_expr {
     int member_bit_storage_bits;
     int member_bit_signed;
     long member_bit_storage_size;
+    int member_bit_split; /**< the bit-field's cc_struct_member_t.bit_split */
     cc_expr_t *lhs;
     cc_expr_t *rhs;
     cc_expr_t *third;
@@ -261,6 +262,8 @@ typedef struct {
     int bit_storage_bits;
     int bit_signed;
     long bit_storage_size;
+    int bit_split; /**< a bit-field whose storage unit holds an ordinary member's bytes too: no unit could
+                        avoid them, so a store writes only the bytes the field occupies */
     const struct cc_ctype *ctype; /**< its type, where its declaration recorded one; else NULL */
 } cc_struct_member_t;
 

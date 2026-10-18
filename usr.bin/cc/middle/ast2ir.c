@@ -2645,6 +2645,9 @@ static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t 
     return v;
 }
 
+static int lower_bitfield_store_bytes(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, int merged,
+                                      cc_diag_t *diag);
+
 static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, int rhs, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     long storage_size;
@@ -2737,6 +2740,12 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
         return -1;
     }
 
+    if (e->member_bit_split) {
+        if (lower_bitfield_store_bytes(sf, e, ptrv, merged, diag) != 0) {
+            return -1;
+        }
+        return lower_bitfield_load_from_addr(sf, e, ptrv, diag);
+    }
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_STORE;
     in.dst = -1;
@@ -2748,6 +2757,55 @@ static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *
         return -1;
     }
     return lower_bitfield_load_from_addr(sf, e, ptrv, diag);
+}
+
+/**
+ * Store a bit-field's storage unit byte by byte, only the bytes the field
+ * occupies: its unit also holds an ordinary member's bytes, which a store
+ * of the whole unit would overwrite (`char a; int b : 24; char c;`, as
+ * gcc stores b).
+ *
+ * @param sf      the function
+ * @param e       the bit-field member access
+ * @param ptrv    the unit's address
+ * @param merged  the unit's new value, the field's bits merged in
+ * @param diag    receives an error
+ * @return        0, or -1 on error
+ */
+static int lower_bitfield_store_bytes(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, int merged,
+                                      cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long first = e->member_bit_offset / 8;
+    long last = (e->member_bit_offset + e->member_bit_width - 1) / 8;
+    long k;
+
+    for (k = first; k <= last; ++k) {
+        int at = ptrv;
+        int byte = merged;
+        int c;
+
+        if (k > 0) {
+            c = cc_ir_const(sf, k);
+            if (c < 0 || (at = emit_i64_binop_instr(sf, CC_SSA_ADD, ptrv, c, 0, diag)) < 0) {
+                return -1;
+            }
+            c = cc_ir_const(sf, k * 8);
+            if (c < 0 || (byte = emit_i64_binop_instr(sf, CC_SSA_SHR, merged, c, 1, diag)) < 0) {
+                return -1;
+            }
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_STORE;
+        in.dst = -1;
+        in.lhs = at;
+        in.rhs = byte;
+        in.imm = 1;
+        if (cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory storing bit-field");
+            return -1;
+        }
+    }
+    return 0;
 }
 
 int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *diag) {
@@ -7923,6 +7981,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 bf.member_bit_offset = m->bit_offset;
                 bf.member_bit_storage_bits = m->bit_storage_bits;
                 bf.member_bit_storage_size = m->bit_storage_size;
+                bf.member_bit_split = m->bit_split;
                 bf.member_bit_signed = m->bit_signed;
                 if (lower_bitfield_store_to_addr(sf, &bf, field_ptr, v, diag) < 0) {
                     return -1;
