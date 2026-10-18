@@ -6,6 +6,7 @@
 #include "cc_diag.h"
 #include "cc_lang.h"
 #include "cc_options.h"
+#include "cc_target.h"
 #include "cc_types.h"
 #include "cc_util.h"
 #include "cc_sema.h"
@@ -1612,10 +1613,93 @@ static long long sema_int_convert(long long v, const cc_ctype_t *t) {
  * @param t     the type it is converted to
  * @return      0, or -1 when out of memory
  */
+/**
+ * Whether floating operations are evaluated in long double, as the target
+ * says with FLT_EVAL_METHOD 2 (C11 5.2.4.2.2p9): on i386 when the x87
+ * does them, which is the backend's rule -- -mfpmath=387, or no
+ * -mfpmath and no SSE2.
+ *
+ * @return 1 if they are, else 0
+ */
+static int sema_eval_in_long_double(void) {
+    const cc_options_t *o = cc_options_current();
+    const cc_target_desc_t *tgt = cc_target_current();
+
+    if (tgt == NULL || tgt->id != CC_TARGET_I386 || o == NULL) {
+        return 0;
+    }
+    return o->i386_fpmath == CC_FPMATH_387 || (o->i386_fpmath == CC_FPMATH_AUTO && !o->i386_sse2);
+}
+
+/**
+ * The type a floating operation whose result has type @p t is evaluated
+ * in: long double where sema_eval_in_long_double() says so and @p t is a
+ * real floating type narrower than it, else @p t.
+ *
+ * @param t  the result's type
+ * @return   the evaluation type
+ */
+static const cc_ctype_t *sema_eval_type(const cc_ctype_t *t) {
+    if (t != NULL && (t->unqual->kind == CC_CT_FLOAT || t->unqual->kind == CC_CT_DOUBLE) &&
+        sema_eval_in_long_double()) {
+        return cc_ct_basic(CC_CT_LDOUBLE);
+    }
+    return t;
+}
+
+/**
+ * Give the long double value of operation @p e the type @p t without
+ * rounding it: @p e becomes an excess-precision cast (cc_expr_t's
+ * excess_precision) of a copy of itself.
+ *
+ * @param e  the operation, checked, typed long double
+ * @param t  the type it has in C
+ * @return   0, or -1 when out of memory
+ */
+static int sema_excess_wrap(cc_expr_t *e, const cc_ctype_t *t) {
+    cc_expr_t *op = (cc_expr_t *)malloc(sizeof(*op));
+
+    if (op == NULL) {
+        return -1;
+    }
+    *op = *e;
+    memset(e, 0, sizeof(*e));
+    e->kind = CC_EXPR_CAST;
+    e->line = op->line;
+    e->col = op->col;
+    e->lhs = op;
+    e->excess_precision = 1;
+    sema_set_type(e, t->unqual);
+    return 0;
+}
+
+/**
+ * Take a value's greater range and precision, not its type's: an
+ * excess-precision cast in @p slot is replaced by its operand.
+ *
+ * @param slot  the expression
+ */
+static void sema_excess_unwrap(cc_expr_t **slot) {
+    cc_expr_t *c = *slot;
+
+    if (c != NULL && c->kind == CC_EXPR_CAST && c->excess_precision && c->lhs != NULL) {
+        *slot = c->lhs;
+        free(c);
+    }
+}
+
 int sema_convert(cc_expr_t **slot, const cc_ctype_t *t) {
     const cc_ctype_t *from = sx_vtype(*slot);
 
     if (from == NULL || t == NULL || from->unqual == t->unqual) {
+        return 0;
+    }
+    /* an arithmetic conversion starts from the value, with its excess precision */
+    if (cc_ct_is_arithmetic(t)) {
+        sema_excess_unwrap(slot);
+    }
+    from = sx_vtype(*slot);
+    if (from->unqual == t->unqual) {
         return 0;
     }
     if ((*slot)->kind == CC_EXPR_INT && cc_ct_is_integer(from) && cc_ct_is_integer(t)) {
@@ -3556,6 +3640,7 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
     const cc_ctype_t *a;
     const cc_ctype_t *b;
     const cc_ctype_t *t;
+    const cc_ctype_t *eval = NULL; /* the type an arithmetic operation is evaluated in, if not t */
 
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0 ||
         check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
@@ -3626,7 +3711,7 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
         }
         /* arithmetic operands are compared in their common type (C11 6.5.8p3, 6.5.9p4) */
         if (cc_ct_is_arithmetic(a) && cc_ct_is_arithmetic(b)) {
-            const cc_ctype_t *c = sema_usual_arith(a, b);
+            const cc_ctype_t *c = sema_eval_type(sema_usual_arith(a, b));
 
             if (sema_convert(&e->lhs, c) != 0 || sema_convert(&e->rhs, c) != 0) {
                 sema_diag(diag, "out of memory converting a comparison operand");
@@ -3658,9 +3743,11 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
             return -1;
         }
         t = sema_unary_or(e, a, b, t);
+        /* evaluated in long double where the target says so; the result keeps its type, t */
+        eval = sema_eval_type(t);
     }
-    sema_set_type(e, t);
-    if (sema_convert_operands(e, a, b) != 0) {
+    sema_set_type(e, eval != NULL ? eval : t);
+    if (sema_convert_operands(e, a, b) != 0 || (eval != NULL && eval != t && sema_excess_wrap(e, t) != 0)) {
         sema_diag(diag, "out of memory converting an operand");
         return -1;
     }
@@ -3808,6 +3895,10 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     }
     if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
         return -1;
+    }
+    if (sx_vtype(e->lhs) != NULL && sx_vtype(e->lhs)->unqual != to->unqual && cc_ct_is_arithmetic(to)) {
+        /* `(double)(f / 3)` converts the quotient's value, with its excess precision (C11 6.3.1.8p2) */
+        sema_excess_unwrap(&e->lhs);
     }
     if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL && cc_ct_is_arithmetic(to) &&
         sema_complex_elem(tu, to) == NULL) {

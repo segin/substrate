@@ -655,13 +655,21 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   *Reproduced* (both targets); found while fixing CC-107.  Needs a
   binary128 type carried as the decimal types are (CC-69), with its
   constants encoded and its operations calling libgcc.
-- [ ] **CC-119** Floating arithmetic on i386 shall be evaluated as the
-  predefined `__FLT_EVAL_METHOD__` says: cc predefines 2, as gcc does
-  (operations in `long double`), but evaluates `float` at single
-  precision, so `(double)(f / 3)` for `float f = 1` is
+- [x] **CC-119** Floating arithmetic on i386 shall be evaluated as the
+  predefined `__FLT_EVAL_METHOD__` says: cc predefined 2, as gcc does
+  (operations in `long double`), but evaluated `float` at single
+  precision, so `(double)(f / 3)` for `float f = 1` was
   0.3333333432674408 (gcc 0.33333333333333331).  *Reproduced* (i386);
-  found while testing CC-107, and present before.  Either the operations
-  are made in x87 extended precision or the macro says what cc does.
+  found while testing CC-107, and present before.  Where the x87 does
+  floating point (the backend's rule, which the macro follows), sema
+  evaluates `float` and `double` operations and comparisons in `long
+  double` and puts an excess-precision cast (`cc_expr_t.excess_precision`)
+  over each result, which keeps its C type for `_Generic` and `sizeof`;
+  every arithmetic conversion -- assignment, cast, argument, return --
+  takes the operand's extended value instead, as gcc's
+  `-fexcess-precision=standard` does.  gcc's GNU-mode default `fast`
+  rounds at its own whim; the test compares with `-std=c11`.
+  `codegen/excess_precision.c`.
 - [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
   as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
   object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
@@ -1260,7 +1268,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-119 requirements: 117 met, 2 open.
+119 requirements: 118 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

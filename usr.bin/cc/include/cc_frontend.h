@@ -142,6 +142,13 @@ struct cc_expr {
      * type, not the usual arithmetic conversion's.
      */
     unsigned char unary_form;
+    /**
+     * A CC_EXPR_CAST sema put over a floating operation it evaluates in
+     * long double (FLT_EVAL_METHOD 2): the expression has the type the cast
+     * names, its value the operand's greater range and precision (C11
+     * 5.2.4.2.2p9), which a conversion takes from the operand, not the cast.
+     */
+    unsigned char excess_precision;
     long long int_val;
     long long int_val_hi; /**< an array designator `[lo ... hi]`'s hi (int_val is lo); lo for `[index]` */
     double float_val;

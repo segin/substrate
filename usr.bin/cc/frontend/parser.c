@@ -7482,6 +7482,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->int_val = src->int_val;
     dst->int_val_hi = src->int_val_hi;
     dst->named_const_type = src->named_const_type;
+    dst->excess_precision = src->excess_precision;
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
