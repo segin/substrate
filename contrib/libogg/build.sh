@@ -3,7 +3,7 @@
 # Configured as a linux host (CC stays the substrate cross gcc) so the bundled
 # libtool emits a shared library; the output is a substrate binary (OSABI 0x40).
 set -eu
-HERE="$(cd "$(dirname "$0")" && pwd)"; LIB="libogg"; VERSION="1.3.5"
+HERE="$(cd "$(dirname "$0")" && pwd)"; LIB="libogg"; VERSION="1.3.6"
 TREE="${HERE}/build/libogg-${VERSION}"; BS="${HERE}/build/bs"
 if [ -z "${SUBSTRATE_TOP:-}" ]; then p="${HERE}"; while [ "$p" != "/" ] && [ ! -f "$p/CLAUDE.md" ] && [ ! -f "$p/AGENTS.md" ]; do p=$(dirname "$p"); done; SUBSTRATE_TOP="$p"; fi
 : "${STAGE1_PREFIX:=/opt/substrate}"; SR="${STAGE1_PREFIX}/i386-unknown-substrate"

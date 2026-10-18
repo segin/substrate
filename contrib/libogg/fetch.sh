@@ -1,10 +1,11 @@
 #!/bin/sh
 # contrib/libogg/fetch.sh — fetch libogg, verify, extract, apply patches.
 set -eu
-VERSION="1.3.5"
+VERSION="1.3.6"
 TARBALL="libogg-${VERSION}.tar.gz"
 URL="https://downloads.xiph.org/releases/ogg/${TARBALL}"
-SHA256="0eb4b4b9420a0f51db142ba3f9c64b333f826532dc0f48c6410ae51f4799b664"
+# Matches downloads.xiph.org/releases/ogg/SHA256SUMS.
+SHA256="83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/libogg-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 [ -f "${TARBALL}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"; }
