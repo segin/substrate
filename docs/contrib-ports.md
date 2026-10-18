@@ -146,7 +146,7 @@ on the 64-bit kernel at all.
   *build host* and bakes in whatever it finds, which was nothing, leaving
   `https://` broken even once the store existed.
 - **libiconv 1.17** (`contrib/libiconv/`)
-- **zlib 1.3.1** (`contrib/zlib/`) — DEFLATE/gzip runtime, pulled in as
+- **zlib 1.3.2** (`contrib/zlib/`) — DEFLATE/gzip runtime, pulled in as
   a dependency of mandoc.
 - **tzdata 2024a** (`contrib/tzdata/`)
 - **inetutils** (`contrib/inetutils/`) — telnetd, ping, etc.

@@ -4,7 +4,7 @@ Mark Adler / Jean-loup Gailly's `zlib` compression library
 (<https://zlib.net/>).
 
 Upstream: <https://github.com/madler/zlib>
-Pinned version: **v1.3.1**
+Pinned version: **v1.3.2**
 License: zlib license (see `build/zlib-<ver>/LICENSE`).
 Substrate vendoring: tarball + patch series.
 

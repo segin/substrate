@@ -11,7 +11,7 @@
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION="1.3.1"
+VERSION="1.3.2"
 TREE_DIR="${HERE}/build/zlib-${VERSION}"
 
 if [ -z "${SUBSTRATE_TOP:-}" ]; then
