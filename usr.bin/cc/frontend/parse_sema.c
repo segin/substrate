@@ -136,6 +136,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
             strncmp(p->vars[i].name, name, len) == 0) {
             p->vars[i].ctype = ctype;
             p->vars[i].const_type = NULL;
+            p->vars[i].align = 0;
             return 0;
         }
     }
@@ -157,6 +158,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     p->vars[p->var_count].ctype = ctype;
     p->vars[p->var_count].const_type = NULL;
     p->vars[p->var_count].const_bits = 0;
+    p->vars[p->var_count].align = 0;
     p->var_count++;
     return 0;
 }
@@ -445,6 +447,74 @@ const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
     default:
         return e->ctype;
     }
+}
+
+/**
+ * The alignment member @p sm has in its structure, as its declaration
+ * placed it: its type's, 1 where it or the structure is `packed`, raised to
+ * what `aligned` or `_Alignas` asks.
+ *
+ * @return the alignment, or 0 where the parser has no layout for it
+ */
+static long parser_member_align(const parser_t *p, const cc_struct_member_t *sm) {
+    size_t i;
+
+    for (i = 0; i < p->struct_count; ++i) {
+        const cc_struct_def_t *sd = &p->structs[i];
+        size_t j;
+
+        if (sd->members == NULL || sm < sd->members || sm >= sd->members + sd->member_count) {
+            continue;
+        }
+        for (j = 0; j < sd->layout_count; ++j) {
+            const cc_member_layout_t *it = &sd->layout[j];
+            long align;
+
+            if (it->member != (int)(sm - sd->members) || it->bit_width >= 0) {
+                continue;
+            }
+            align = (sd->attr_flags & CC_ATTR_PACKED) != 0 ? 1 : it->align;
+            return it->user_align > align ? it->user_align : align;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+long parser_object_align(parser_t *p, const cc_expr_t *e, long align) {
+    if (e == NULL) {
+        return align;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        int vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
+
+        const cc_global_t *g;
+
+        if (vidx >= 0) {
+            return p->vars[vidx].align > align ? p->vars[vidx].align : align;
+        }
+        g = parser_find_global_decl(p, e->ident);
+        if (g != NULL && (g->attr_flags & CC_ATTR_ALIGNED) != 0 && g->attr_align > align) {
+            return g->attr_align;
+        }
+        return align;
+    }
+    if (e->kind == CC_EXPR_MEMBER && e->ident != NULL) {
+        const cc_ctype_t *a = cc_ct_decay(parser_expr_ctype(p, e->lhs));
+        const cc_struct_member_t *sm;
+        long malign;
+
+        if (a != NULL && e->member_is_arrow) {
+            a = a->kind == CC_CT_POINTER ? a->of->unqual : NULL;
+        }
+        if (a == NULL || a->kind != CC_CT_RECORD) {
+            return align;
+        }
+        sm = struct_member_find_n(p, a->id, e->ident, strlen(e->ident));
+        malign = sm != NULL ? parser_member_align(p, sm) : 0;
+        return malign > 0 ? malign : align;
+    }
+    return align;
 }
 
 /**

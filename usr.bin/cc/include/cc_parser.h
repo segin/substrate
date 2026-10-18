@@ -38,6 +38,7 @@ typedef struct {
     const cc_ctype_t *ctype;  /**< its type */
     const cc_ctype_t *const_type; /**< a constexpr integer object: its type, the value's; else NULL */
     uint64_t const_bits;      /**< that value's bits, before conversion to const_type */
+    long align;               /**< the alignment its declaration asks for (`aligned`, `_Alignas`, a typedef's), or 0 */
 } var_entry_t;
 
 /** An enumeration constant. */
@@ -202,6 +203,19 @@ void parser_free_vars(parser_t *p);
  * @return   the type, or NULL where the parser cannot tell it
  */
 const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e);
+
+/**
+ * The alignment `_Alignof` or `__alignof__` gives expression @p e, as gcc
+ * gives it: a named object's declared alignment (`aligned`, `_Alignas`, an
+ * aligned typedef) where above its type's, a member's as its structure
+ * placed it; else @p align, its type's.
+ *
+ * @param p      the parser
+ * @param e      the operand
+ * @param align  the alignment of its type
+ * @return       the alignment
+ */
+long parser_object_align(parser_t *p, const cc_expr_t *e, long align);
 
 /**
  * Evaluate an integer constant expression in the parser's context.

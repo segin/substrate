@@ -733,11 +733,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   targets); found while fixing CC-122.  `declspec_complex_alias()` makes the
   complex type of the type named, its declared type kept distinct.
   `codegen/complex_floatn.c`.
-- [ ] **CC-123** `_Alignof` and `__alignof__` of an object shall give the
+- [x] **CC-123** `_Alignof` and `__alignof__` of an object shall give the
   object's alignment, as gcc gives it: for `a16 x` (an aligned typedef),
   `int y __attribute__((aligned(32)))`, `_Alignas(64) char z` and a member
-  declared `aligned(8)` cc gives the type's (4, 4, 1, 4; gcc 16, 32, 64,
-  8).  *Reproduced* (both targets); left by CC-115.
+  declared `aligned(8)` cc gave the type's (4, 4, 1, 4; gcc 16, 32, 64,
+  8).  *Reproduced* (both targets); left by CC-115.  A local's declared
+  alignment is recorded with it (`var_entry_t.align`), a global's read from
+  its declaration, and a member's from its structure's layout -- 1 in a
+  packed one (`parser_object_align()`).  `codegen/alignof_object.c`.
 - [ ] **CC-124** A `constexpr` object of floating, complex or aggregate
   type shall be initialized by constant expressions (C23 6.7.1p5): `double
   y; ... constexpr double x = y;` and `constexpr struct s x = {v};` are
@@ -1345,7 +1348,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-128 requirements: 124 met, 4 open.
+128 requirements: 125 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

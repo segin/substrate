@@ -8174,6 +8174,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             }
             align = is_gnu_alignof ? parser_ct_align(p, parser_expr_ctype(p, ae))
                                    : parser_ct_c11_align(p, parser_expr_ctype(p, ae));
+            align = parser_object_align(p, ae, align);
             free_expr(ae);
         }
         if (align <= 0) {
@@ -9358,6 +9359,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     parser_note_constexpr(p, s.decl_name, s.ctype, s.expr) != 0) {
                     free_stmt(&s);
                     return -1;
+                }
+                if ((s.attr_flags & CC_ATTR_ALIGNED) != 0) {
+                    /* what _Alignof of the object gives (gcc) */
+                    int vidx = var_find_visible_n(p, s.decl_name, strlen(s.decl_name));
+
+                    if (vidx >= 0) {
+                        p->vars[vidx].align = s.attr_align;
+                    }
                 }
             }
             if (arr == NULL || count == NULL) {
