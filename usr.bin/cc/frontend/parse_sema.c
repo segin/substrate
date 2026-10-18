@@ -168,28 +168,6 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
 }
 
 /**
- * Whether an integer constant's value is one an integer type can hold.
- *
- * @param v  the constant
- * @param t  the integer type
- * @return   1 if it is, else 0
- */
-static int constexpr_representable(const parser_const_value_t *v, const cc_ctype_t *t) {
-    long width = cc_ct_int_width(t);
-    int neg = !cc_const_is_unsigned(v) && (int64_t)v->bits < 0;
-    uint64_t mag = neg ? (uint64_t)0 - v->bits : v->bits;
-
-    if (width <= 0 || width > 64) {
-        return 1;
-    }
-    if (t->unqual->kind == CC_CT_BOOL || cc_ct_is_unsigned(t)) {
-        return !neg && (width == 64 || mag <= ((uint64_t)1 << width) - 1);
-    }
-    /* signed: -2^(w-1) .. 2^(w-1) - 1 */
-    return neg ? mag <= (uint64_t)1 << (width - 1) : mag <= ((uint64_t)1 << (width - 1)) - 1;
-}
-
-/**
  * Whether @p e is a constant expression a constexpr object's initializer
  * may hold (C23 6.6, 6.7.1p5): literals, sizeof and _Alignof, named
  * constexpr objects and their members, enumeration constants, and the
@@ -315,7 +293,7 @@ int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype
                             : "initializer element is not constant");
         return -1;
     }
-    if (!constexpr_representable(&v, ctype)) {
+    if (!cc_const_fits(&v, ctype)) {
         parser_error(p, "'constexpr' initializer not representable in type of object");
         return -1;
     }

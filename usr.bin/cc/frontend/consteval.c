@@ -51,6 +51,21 @@ int cc_const_is_unsigned(const cc_const_t *v) {
     return v != NULL && const_type_unsigned(v->type);
 }
 
+int cc_const_fits(const cc_const_t *v, const cc_ctype_t *t) {
+    long width = cc_ct_int_width(t);
+    int neg = !cc_const_is_unsigned(v) && (int64_t)v->bits < 0;
+    uint64_t mag = neg ? (uint64_t)0 - v->bits : v->bits;
+
+    if (width <= 0 || width > 64) {
+        return 1;
+    }
+    if (t->unqual->kind == CC_CT_BOOL || cc_ct_is_unsigned(t)) {
+        return !neg && (width == 64 || mag <= ((uint64_t)1 << width) - 1);
+    }
+    /* signed: -2^(w-1) .. 2^(w-1) - 1 */
+    return neg ? mag <= (uint64_t)1 << (width - 1) : mag <= ((uint64_t)1 << (width - 1)) - 1;
+}
+
 /**
  * The width in bits of an integer or pointer type.
  *

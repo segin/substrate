@@ -71,6 +71,16 @@ int cc_const_eval_ll(const cc_const_env_t *env, const cc_expr_t *e, long long *o
 int cc_const_is_unsigned(const cc_const_t *v);
 
 /**
+ * Whether an integer constant's value is one integer type @p t can hold
+ * (a type wider than 64 bits holds any).
+ *
+ * @param v  the constant
+ * @param t  the integer type
+ * @return   1 if it is, else 0
+ */
+int cc_const_fits(const cc_const_t *v, const cc_ctype_t *t);
+
+/**
  * The type a constant expression has, worked out without evaluating it
  * (a conditional's arms both count, though only one is evaluated).
  *

@@ -764,11 +764,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   is not a bit-field records its value as a constexpr name's is
   (`parser_note_constexpr_member()`), a member the list leaves out zero.
   `codegen/constexpr_member.c`.
-- [ ] **CC-131** Each member of a constexpr aggregate shall keep its
+- [x] **CC-131** Each member of a constexpr aggregate shall keep its
   initializer's value (C23 6.7.1p6): `constexpr struct { _Bool f; unsigned
-  char c; } s = {5, 256};` is accepted; gcc rejects both members ("not
+  char c; } s = {5, 256};` was accepted; gcc rejects both members ("not
   representable in type of object").  Only a scalar constexpr object's
-  initializer is checked.  *Reproduced*; found while fixing CC-129.
+  initializer was checked.  *Reproduced*; found while fixing CC-129.
+  `sema_constexpr_parts_exact()` walks a constexpr array's or structure's
+  checked initializer, at either scope, and checks each integer part with
+  `cc_const_fits()` (moved from the parser, which shares it) and each
+  floating part as CC-125 does; unions, bit-fields and the structures
+  standing for complex, decimal, vector and wide types are left alone.
+  `native_bad_c23_constexpr_member_range.c`, `_element_range.c`,
+  `_member_float.c`.
 - [x] **CC-125** A `constexpr` floating object's initializer shall keep
   its value in the object's type (C23 6.7.10p6): `constexpr float f =
   1e40;` and `constexpr float g = 0.1;` were accepted; gcc rejects both
@@ -1385,7 +1392,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-131 requirements: 129 met, 2 open.
+131 requirements: 130 met, 1 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

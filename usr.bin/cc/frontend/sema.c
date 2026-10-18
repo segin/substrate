@@ -3253,6 +3253,75 @@ static int sema_constexpr_float_exact(const cc_translation_unit_t *tu, const cc_
     return 0;
 }
 
+/**
+ * Check that every part of the checked initializer @p e of a constexpr
+ * object, or part of one, of type @p t keeps its value in its own type (C23
+ * 6.7.1p6): an integer part's value must fit it, a float, double or long
+ * double part's survive rounding to it (sema_constexpr_float_exact()).
+ * Unions, bit-fields, and the structures that stand for complex, decimal,
+ * vector and wide types are left alone.
+ *
+ * @return 0, or -1 with the diagnostic set
+ */
+static int sema_constexpr_parts_exact(const cc_translation_unit_t *tu, const cc_ctype_t *t, const cc_expr_t *e,
+                                      cc_diag_t *diag, int depth) {
+    cc_const_env_t env;
+    cc_const_t v;
+    size_t i;
+
+    if (t == NULL || e == NULL || depth > 64) {
+        return 0;
+    }
+    t = t->unqual;
+    if (t->kind == CC_CT_ARRAY) {
+        if (e->kind != CC_EXPR_INIT_LIST) {
+            return 0;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (sema_constexpr_parts_exact(tu, t->of, e->args[i], diag, depth + 1) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    if (t->kind == CC_CT_RECORD) {
+        const cc_struct_def_t *sd;
+
+        if (t->id < 0 || (size_t)t->id >= tu->struct_count || e->kind != CC_EXPR_INIT_LIST) {
+            return 0;
+        }
+        sd = &tu->structs[t->id];
+        if (sd->is_union || sd->complex_elem != NULL || sd->vector_elem != NULL ||
+            cc_struct_soft_float_bits(sd) != 0 || sema_wide_def(tu, t) != NULL) {
+            return 0;
+        }
+        for (i = 0; i < e->arg_count && i < sd->member_count; ++i) {
+            if (!sd->members[i].is_bitfield &&
+                sema_constexpr_parts_exact(tu, sd->members[i].ctype, e->args[i], diag, depth + 1) != 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    if (e->kind == CC_EXPR_INIT_LIST) {
+        /* a braced scalar */
+        if (e->arg_count != 1) {
+            return 0;
+        }
+        e = e->args[0];
+    }
+    if (!cc_ct_is_integer(t)) {
+        return sema_constexpr_float_exact(tu, t, e, diag);
+    }
+    env.sizeof_bytes = NULL;
+    env.ctx = NULL;
+    if (cc_const_eval(&env, e, &v) == 0 && !cc_const_fits(&v, t)) {
+        sema_diag(diag, "'constexpr' initializer not representable in type of object");
+        return -1;
+    }
+    return 0;
+}
+
 /** A floating literal node of type @p t and value @p v, or NULL when out of memory. */
 static cc_expr_t *sema_float_literal(const cc_ctype_t *t, long double v, size_t line, size_t col) {
     cc_expr_t *f = (cc_expr_t *)calloc(1, sizeof(*f));
@@ -5876,11 +5945,19 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                                 }
                             }
                         }
+                        if ((s->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                            sema_constexpr_parts_exact(tu, s->ctype, s->expr, diag, 0) != 0) {
+                            return -1;
+                        }
                     } else if (sx_ct_record(s->ctype) >= 0) {
                         if (check_struct_initializer(tu, s->decl_name, sx_ct_record(s->ctype), s->expr, *vars,
                                                      *var_count, depth, diag) != 0) {
                             free((*vars)[*var_count - 1].name);
                             (*var_count)--;
+                            return -1;
+                        }
+                        if ((s->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                            sema_constexpr_parts_exact(tu, s->ctype, s->expr, diag, 0) != 0) {
                             return -1;
                         }
                     } else {
@@ -6628,9 +6705,17 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                     if (g->ctype->count <= 0 && inferred_len > 0) {
                         g->ctype = sema_complete_array_ctype(g->ctype, inferred_len);
                     }
+                    if ((g->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                        sema_constexpr_parts_exact(tu, g->ctype, g->init, diag, 0) != 0) {
+                        goto fail_global_item;
+                    }
                 } else if (sx_ct_record(g->ctype) >= 0) {
                     if (check_struct_initializer(tu, g->name, sx_ct_record(g->ctype), g->init, NULL, 0, 0, diag) !=
                         0) {
+                        goto fail_global_item;
+                    }
+                    if ((g->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                        sema_constexpr_parts_exact(tu, g->ctype, g->init, diag, 0) != 0) {
                         goto fail_global_item;
                     }
                 } else {
