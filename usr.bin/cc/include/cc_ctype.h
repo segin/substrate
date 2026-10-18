@@ -101,7 +101,10 @@ enum {
     CC_FLOATN_32 = 32,  /**< _Float32: float's format */
     CC_FLOATN_32X = 33, /**< _Float32x: double's */
     CC_FLOATN_64 = 64,  /**< _Float64: double's */
-    CC_FLOATN_64X = 65  /**< _Float64x: long double's */
+    CC_FLOATN_64X = 65, /**< _Float64x: long double's */
+    /** _Float128: binary128, no standard type's format, so a structure (cc_struct_def_t.binary_bits);
+     *  a constant's suffix names it, cc_ct_floatn() makes no type of it */
+    CC_FLOATN_128 = 128
 };
 
 /**

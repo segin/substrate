@@ -113,7 +113,7 @@ static int lx_peekn(const cc_lexer_t *lx, size_t n) {
  * -- f16, f32, f64, f128, f32x, f64x -- and type the constant as the
  * parser types those keywords: f16 _Float16, f32 _Float32, f64 _Float64,
  * f32x _Float32x, f64x _Float64x, each in its format's representation, and
- * f128 long double.  A plain `f` reads nothing more.
+ * f128 _Float128 (binary128).  A plain `f` reads nothing more.
  *
  * @param lx   the lexer, after the `f`
  * @param out  the constant's token, float_is_single already set
@@ -131,7 +131,7 @@ static void lex_floatn_suffix(cc_lexer_t *lx, cc_token_t *out) {
         {"32", 0, 1, 0, CC_FLOATN_32},
         {"64x", 0, 0, 1, CC_FLOATN_64X},
         {"64", 0, 0, 0, CC_FLOATN_64},
-        {"128", 0, 0, 1, 0},
+        {"128", 0, 0, 0, CC_FLOATN_128},
     };
     size_t i;
 
@@ -482,15 +482,6 @@ static int lex_ident_or_keyword(cc_lexer_t *lx, cc_token_t *out, size_t line, si
                out->start[2] == 'u' && out->start[3] == 'b' && out->start[4] == 'l' &&
                out->start[5] == 'e') {
         out->kind = TOK_KW_DOUBLE;
-    } else if ((out->len == 9 && out->start[0] == '_' && out->start[1] == 'F' &&
-                out->start[2] == 'l' && out->start[3] == 'o' && out->start[4] == 'a' &&
-                out->start[5] == 't' && out->start[6] == '1' && out->start[7] == '2' &&
-                out->start[8] == '8') ||
-               (out->len == 10 && out->start[0] == '_' && out->start[1] == '_' &&
-                out->start[2] == 'f' && out->start[3] == 'l' && out->start[4] == 'o' &&
-                out->start[5] == 'a' && out->start[6] == 't' && out->start[7] == '1' &&
-                out->start[8] == '2' && out->start[9] == '8')) {
-        out->kind = TOK_KW_DOUBLE;
     } else if ((out->len == 10 && out->start[0] == '_' && out->start[1] == 'I' &&
                 out->start[2] == 'm' && out->start[3] == 'a' && out->start[4] == 'g' &&
                 out->start[5] == 'i' && out->start[6] == 'n' && out->start[7] == 'a' &&
@@ -810,6 +801,10 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
             if (is_f) {
                 lex_floatn_suffix(lx, out);
             }
+        } else if (out->float_is_decimal == 0 && (lx_peek(lx) == 'q' || lx_peek(lx) == 'Q')) {
+            /* GNU: a __float128 constant */
+            out->float_variant = CC_FLOATN_128;
+            lx_adv(lx);
         }
         if (!out->is_imaginary && is_imaginary_suffix_char(lx_peek(lx))) {
             out->is_imaginary = 1;

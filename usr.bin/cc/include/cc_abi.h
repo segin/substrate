@@ -48,7 +48,7 @@ static inline int cc_abi_sid_is_vector(const cc_translation_unit_t *tu, int sid)
 }
 
 /**
- * CC_ABI_STACK_VEC for a vector of 16 bytes or more, or a _Decimal128,
+ * CC_ABI_STACK_VEC for a vector of 16 bytes or more, a _Decimal128 or a _Float128,
  * passed in memory (its copy aligned to its size, as gcc places them),
  * else 0.
  *
@@ -57,7 +57,8 @@ static inline int cc_abi_sid_is_vector(const cc_translation_unit_t *tu, int sid)
  * @param size  its size
  */
 static inline int cc_abi_stack_vec_flag(const cc_translation_unit_t *tu, int sid, long size) {
-    int dec128 = tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits == 128;
+    int dec128 = tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count &&
+                 cc_struct_soft_float_bits(&tu->structs[sid]) == 128;
 
     return (cc_abi_sid_is_vector(tu, sid) || dec128) && size >= 16 ? CC_ABI_STACK_VEC : 0;
 }

@@ -1,6 +1,7 @@
 #include "cc_frontend.h"
 #include "cc_consteval.h"
 #include "cc_ctype.h"
+#include "cc_binary128.h"
 #include "cc_decimal.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
@@ -1356,6 +1357,81 @@ static int parser_decimal_struct(parser_t *p, int bits) {
 }
 
 /**
+ * The structure standing for _Float128 (and __float128, gcc's other name
+ * for it): `{ unsigned long long __b128[2]; }`, low half first, holding its
+ * IEEE binary128 encoding, 16 bytes and 16-aligned.  Made once.
+ *
+ * @return the structure's id, or -1 when out of memory
+ */
+static int parser_binary128_struct(parser_t *p) {
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].binary_bits == 128) {
+            return (int)i;
+        }
+    }
+    p->scope_depth = 0;
+    sid = struct_ensure(p, NULL, 0, 1);
+    p->scope_depth = saved_depth;
+    if (sid < 0 ||
+        struct_member_push(p, sid, "__b128", cc_ct_array(cc_ct_basic(CC_CT_ULLONG), 2), 0, 16, 0, 0, 0, 0, 0, 0) < 0) {
+        return -1;
+    }
+    p->structs[sid].size = 16;
+    p->structs[sid].align = 16;
+    p->structs[sid].complete = 1;
+    p->structs[sid].binary_bits = 128;
+    return sid;
+}
+
+/**
+ * The _Float128 constant at the current token (an f128 or q suffix):
+ * `(_Float128){ { lo, hi } }`, its binary128 encoding worked out now from
+ * the text, rounded once (cc_b128_from_string()).
+ *
+ * @return the expression, or NULL on error (diagnosed)
+ */
+static cc_expr_t *parser_binary128_literal(parser_t *p) {
+    int sid = parser_binary128_struct(p);
+    uint64_t enc[2];
+    cc_expr_t *outer = new_expr(CC_EXPR_INIT_LIST);
+    cc_expr_t *list = new_expr(CC_EXPR_INIT_LIST);
+    cc_expr_t *e = new_expr(CC_EXPR_CAST);
+    int k;
+
+    if (sid < 0 || outer == NULL || list == NULL || e == NULL || push_arg(outer, list) != 0) {
+        free_expr(list);
+        free_expr(outer);
+        free_expr(e);
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a _Float128 constant");
+        return NULL;
+    }
+    if (cc_b128_from_string(p->tok.start, p->tok.len, enc) != 0) {
+        free_expr(outer);
+        free_expr(e);
+        set_diag(p->diag, p->tok.line, p->tok.col, "malformed _Float128 constant");
+        return NULL;
+    }
+    for (k = 0; k < 2; ++k) {
+        cc_expr_t *item = new_const_expr(CC_EXPR_INT, cc_ct_basic(CC_CT_ULLONG));
+
+        if (item == NULL || push_arg(list, item) != 0) {
+            free_expr(item);
+            free_expr(outer);
+            free_expr(e);
+            return NULL;
+        }
+        item->int_val = (long long)enc[k];
+    }
+    e->ctype = cc_ct_record(sid);
+    e->lhs = outer;
+    return e;
+}
+
+/**
  * The decimal floating constant at the current token (a df, dd or dl
  * suffix): `(decimal type){ bid }`, its BID encoding worked out now --
  * the coefficient and exponent as written, rounded to the type.
@@ -2230,6 +2306,19 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     floatn_variant = CC_FLOATN_32X;
                 } else if (tok_is_ident(p, "_Float64x")) {
                     floatn_variant = CC_FLOATN_64X;
+                } else if (tok_is_ident(p, "_Float128") || tok_is_ident(p, "__float128")) {
+                    /* IEEE binary128, carried in a structure (parser_binary128_struct()) */
+                    int bsid = parser_binary128_struct(p);
+
+                    if (bsid < 0) {
+                        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making _Float128");
+                        return -1;
+                    }
+                    acc->alias_ctype = cc_ct_record(bsid);
+                    if (next_tok(p) != 0) {
+                        return -1;
+                    }
+                    continue;
                 }
                 acc->alias_ctype = floatn_variant != 0 ? cc_ct_floatn(floatn_variant) : cc_ct_basic(floatn_kind);
                 if (next_tok(p) != 0) {
@@ -6429,8 +6518,9 @@ static cc_expr_t *parse_primary(parser_t *p) {
         return parse_unary(p);
     }
 
-    if (p->tok.kind == TOK_NUM && p->tok.is_float && p->tok.float_is_decimal != 0) {
-        e = parser_decimal_literal(p);
+    if (p->tok.kind == TOK_NUM && p->tok.is_float &&
+        (p->tok.float_is_decimal != 0 || p->tok.float_variant == CC_FLOATN_128)) {
+        e = p->tok.float_is_decimal != 0 ? parser_decimal_literal(p) : parser_binary128_literal(p);
         if (e != NULL && next_tok(p) != 0) {
             free_expr(e);
             return NULL;

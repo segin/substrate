@@ -185,9 +185,12 @@ static int abi64_aggregate_class(const cc_translation_unit_t *tu, int sid, long 
         tu->structs[sid].complex_elem == cc_ct_basic(CC_CT_LDOUBLE)) {
         return is_return ? CC_ABI_RET_X87_COMPLEX : -1;
     }
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
-        /* a decimal floating value is SSE (psABI 3.2.3): _Decimal128 SSE and SSEUP, whole in one xmm register */
-        if (tu->structs[sid].decimal_bits == 128) {
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && cc_struct_soft_float_bits(&tu->structs[sid]) > 0) {
+        /*
+         * A decimal floating value or a _Float128 is SSE (psABI 3.2.3):
+         * the 128-bit ones SSE and SSEUP, whole in one xmm register.
+         */
+        if (cc_struct_soft_float_bits(&tu->structs[sid]) == 128) {
             return CC_ABI_SSE0 | CC_ABI_SSE1 | (is_return ? CC_ABI_RET_VEC128 : CC_ABI_VEC128);
         }
         return CC_ABI_SSE0;

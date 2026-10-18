@@ -323,7 +323,22 @@ typedef struct {
     /** for the structure standing for a decimal floating type, `{ __bid; }` holding its BID
      *  encoding (an integer, or two 64-bit halves low first for _Decimal128): 32, 64 or 128; else 0 */
     int decimal_bits;
+    /** for the structure standing for _Float128 (`__float128`), `{ __b128[2]; }` holding its IEEE binary128
+     *  encoding, two 64-bit halves low first: 128; else 0 */
+    int binary_bits;
 } cc_struct_def_t;
+
+/**
+ * The width of the floating type a structure stands for when cc carries
+ * that type's encoding in one and libgcc operates on it: a decimal type's
+ * (32, 64, 128) or _Float128's (128).
+ *
+ * @param sd  the structure, or NULL
+ * @return    its width in bits, or 0 for any other structure
+ */
+static inline int cc_struct_soft_float_bits(const cc_struct_def_t *sd) {
+    return sd == NULL ? 0 : sd->decimal_bits > 0 ? sd->decimal_bits : sd->binary_bits;
+}
 
 typedef struct {
     char *name;

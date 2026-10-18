@@ -609,7 +609,7 @@ static const cc_struct_def_t *init_record(parser_t *p, const cc_ctype_t *t) {
         return NULL;
     }
     sd = &p->structs[t->unqual->id];
-    if (sd->wide_bits > 0 || sd->complex_elem != NULL || sd->vector_count > 0 || sd->decimal_bits > 0) {
+    if (sd->wide_bits > 0 || sd->complex_elem != NULL || sd->vector_count > 0 || cc_struct_soft_float_bits(sd) > 0) {
         return NULL;
     }
     return sd;

@@ -61,9 +61,9 @@ int cc_abi_i386_aggregate_return(const cc_translation_unit_t *tu, int sid, long 
     if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == cc_ct_basic(CC_CT_FLOAT)) {
         return CC_ABI_RET_EAX_EDX;
     }
-    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].decimal_bits > 0) {
-        /* _Decimal32 in %eax, _Decimal64 in %eax:%edx, _Decimal128 in memory, as gcc returns them */
-        return tu->structs[sid].decimal_bits <= 64 ? CC_ABI_RET_EAX_EDX : 0;
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && cc_struct_soft_float_bits(&tu->structs[sid]) > 0) {
+        /* _Decimal32 in %eax, _Decimal64 in %eax:%edx, _Decimal128 and _Float128 in memory, as gcc returns them */
+        return cc_struct_soft_float_bits(&tu->structs[sid]) <= 64 ? CC_ABI_RET_EAX_EDX : 0;
     }
     if (cc_abi_sid_is_vector(tu, sid)) {
         /* a vector of 16 bytes in %xmm0, of 8 in %mm0, of 4 or fewer in %eax, as gcc returns one */

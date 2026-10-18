@@ -1626,6 +1626,35 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__BITINT_MAXWIDTH__", 0, 0, NULL, 0, "65535") != 0) {
         return -1;
     }
+    {
+        /* _Float128, IEEE binary128 on both targets: gcc's description of it */
+        static const char *const f128[][2] = {
+            {"__SIZEOF_FLOAT128__", "16"},
+            {"__FLT128_MANT_DIG__", "113"},
+            {"__FLT128_DIG__", "33"},
+            {"__FLT128_DECIMAL_DIG__", "36"},
+            {"__FLT128_MIN_EXP__", "(-16381)"},
+            {"__FLT128_MIN_10_EXP__", "(-4931)"},
+            {"__FLT128_MAX_EXP__", "16384"},
+            {"__FLT128_MAX_10_EXP__", "4932"},
+            {"__FLT128_MAX__", "1.18973149535723176508575932662800702e+4932F128"},
+            {"__FLT128_NORM_MAX__", "1.18973149535723176508575932662800702e+4932F128"},
+            {"__FLT128_MIN__", "3.36210314311209350626267781732175260e-4932F128"},
+            {"__FLT128_EPSILON__", "1.92592994438723585305597794258492732e-34F128"},
+            {"__FLT128_DENORM_MIN__", "6.47517511943802511092443895822764655e-4966F128"},
+            {"__FLT128_HAS_DENORM__", "1"},
+            {"__FLT128_HAS_INFINITY__", "1"},
+            {"__FLT128_HAS_QUIET_NAN__", "1"},
+            {"__FLT128_IS_IEC_60559__", "1"},
+        };
+        size_t k;
+
+        for (k = 0; k < sizeof(f128) / sizeof(f128[0]); ++k) {
+            if (macro_set(&st->macros, f128[k][0], 0, 0, NULL, 0, f128[k][1]) != 0) {
+                return -1;
+            }
+        }
+    }
     if (macro_set(&st->macros, "__SIZEOF_SIZE_T__", 0, 0, NULL, 0, ptr_size) != 0) {
         return -1;
     }

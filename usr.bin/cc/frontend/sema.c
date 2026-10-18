@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 #include "cc_asm.h"
+#include "cc_binary128.h"
 #include "cc_consteval.h"
 #include "cc_ctype.h"
 #include "cc_decimal.h"
@@ -2139,20 +2140,35 @@ static int sema_vector_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_di
 
 
 /**
- * The hidden structure standing for decimal floating type @p t.
+ * The hidden structure standing for floating type @p t when cc carries its
+ * encoding in one and libgcc operates on it: a decimal type, or _Float128
+ * (cc_struct_def_t.binary_bits).  The functions below take both and hand
+ * _Float128 to its own rules, the sema_b128_*() ones.
  *
  * @param tu  the translation unit
  * @param t   the type, or NULL
- * @return    the structure, or NULL if @p t is no decimal type
+ * @return    the structure, or NULL if @p t is neither
  */
 static const cc_struct_def_t *sema_decimal_def(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
     int sid = sx_ct_record(t);
 
-    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || tu->structs[sid].decimal_bits <= 0) {
+    if (sid < 0 || tu == NULL || (size_t)sid >= tu->struct_count || cc_struct_soft_float_bits(&tu->structs[sid]) <= 0) {
         return NULL;
     }
     return &tu->structs[sid];
 }
+
+/** Whether type @p t is _Float128. */
+static int sema_is_b128_type(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    const cc_struct_def_t *d = sema_decimal_def(tu, t);
+
+    return d != NULL && d->binary_bits > 0;
+}
+
+static int sema_b128_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag);
+static int sema_b128_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t);
+static int sema_b128_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag);
+static int sema_b128_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid, cc_diag_t *diag);
 
 
 /** Whether expression @p e has a decimal floating type. */
@@ -2182,7 +2198,7 @@ static int sema_decimal_const(const cc_translation_unit_t *tu, const cc_expr_t *
     const cc_expr_t *list;
 
     if (e == NULL || e->kind != CC_EXPR_CAST || e->lhs == NULL || e->lhs->kind != CC_EXPR_INIT_LIST ||
-        (dd = sema_decimal_def(tu, sema_cast_target_ctype(e))) == NULL) {
+        (dd = sema_decimal_def(tu, sema_cast_target_ctype(e))) == NULL || dd->decimal_bits <= 0) {
         return 0;
     }
     list = e->lhs;
@@ -2368,6 +2384,9 @@ static int sema_decimal_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
     int sid;
     uint64_t bid[2];
 
+    if ((dl != NULL && dl->binary_bits > 0) || (dr != NULL && dr->binary_bits > 0)) {
+        return sema_b128_binop(tu, e, diag);
+    }
     if ((dl == NULL && sema_is_binary_fp(sx_vtype(e->lhs))) || (dr == NULL && sema_is_binary_fp(sx_vtype(e->rhs)))) {
         sema_diag(diag, "cannot mix operands of decimal floating and binary floating types");
         return -1;
@@ -2463,6 +2482,9 @@ static int sema_decimal_convert_for_assign(const cc_translation_unit_t *tu, cc_e
     if (dd != NULL && sd == dd) {
         return 0;
     }
+    if ((dd != NULL && dd->binary_bits > 0) || (sd != NULL && sd->binary_bits > 0)) {
+        return sema_b128_convert_for_assign(tu, slot, t);
+    }
     if (dd != NULL) {
         if (sd == NULL && !sema_decimal_partner_ok(sx_vtype(*slot)) && !sema_is_binary_fp(sx_vtype(*slot))) {
             return 0;
@@ -2491,6 +2513,9 @@ static int sema_decimal_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
     int ds = sema_is_decimal(tu, e->lhs);
     uint64_t bid[2];
 
+    if (sema_is_b128_type(tu, to) || sema_is_b128_type(tu, sx_vtype(e->lhs))) {
+        return sema_b128_cast(tu, e, diag);
+    }
     if (ct_kind_is(to->unqual, CC_CT_VOID)) {
         sema_set_type(e, to);
         return 0;
@@ -2538,11 +2563,340 @@ static int sema_decimal_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     uint64_t bid[2];
     cc_expr_t *list;
 
+    if (tu->structs[sid].binary_bits > 0) {
+        return sema_b128_static_init(tu, slot, sid, diag);
+    }
     if (!sema_decimal_fold_value(tu, *slot, bits, bid)) {
         sema_diag(diag, "initializer of a static decimal floating object is not a constant");
         return -1;
     }
     list = sema_decimal_list(bits, bid, (*slot)->line, (*slot)->col);
+    if (list == NULL) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    cc_expr_free(*slot);
+    *slot = list;
+    return 0;
+}
+
+/** The structure standing for _Float128, or -1 if the program names it nowhere. */
+static int sema_b128_sid(const cc_translation_unit_t *tu) {
+    size_t i;
+
+    for (i = 0; i < tu->struct_count; ++i) {
+        if (tu->structs[i].binary_bits == 128) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Whether @p e is a _Float128 constant -- `(_Float128){ { lo, hi } }`, as
+ * the parser makes a literal and sema a folded conversion -- and if so its
+ * encoding in @p enc.
+ */
+static int sema_b128_const(const cc_translation_unit_t *tu, const cc_expr_t *e, uint64_t enc[2]) {
+    const cc_expr_t *list;
+
+    if (e == NULL || e->kind != CC_EXPR_CAST || e->lhs == NULL || e->lhs->kind != CC_EXPR_INIT_LIST ||
+        !sema_is_b128_type(tu, sema_cast_target_ctype(e)) || e->lhs->arg_count != 1) {
+        return 0;
+    }
+    list = e->lhs->args[0];
+    if (list == NULL || list->kind != CC_EXPR_INIT_LIST || list->arg_count != 2 || list->args[0]->kind != CC_EXPR_INT ||
+        list->args[1]->kind != CC_EXPR_INT) {
+        return 0;
+    }
+    enc[0] = (uint64_t)list->args[0]->int_val;
+    enc[1] = (uint64_t)list->args[1]->int_val;
+    return 1;
+}
+
+/** Whether @p e is the integer -1 the parser puts beside a negated operand, converted or not. */
+static int sema_b128_is_minus_one(const cc_expr_t *e) {
+    while (e != NULL && e->kind == CC_EXPR_CAST && e->lhs != NULL) {
+        e = e->lhs;
+    }
+    return e != NULL && e->kind == CC_EXPR_INT && e->int_val == -1;
+}
+
+/**
+ * Whether cast @p e (to a type other than _Float128) keeps its operand's
+ * value, so that folding may look through it: an excess-precision cast, a
+ * floating type widened, or an integer converted to a floating type that
+ * holds it exactly.
+ */
+static int sema_b128_cast_is_exact(const cc_expr_t *e) {
+    const cc_ctype_t *to = e->ctype;
+    const cc_ctype_t *from = e->lhs->ctype;
+    int to_rank = sema_float_rank(to);
+
+    if (e->excess_precision) {
+        return 1;
+    }
+    if (to_rank == 0 || from == NULL) {
+        return 0;
+    }
+    if (sema_float_rank(from) > 0) {
+        return sema_float_rank(from) <= to_rank;
+    }
+    if (e->lhs->kind == CC_EXPR_INT && cc_ct_is_integer(from)) {
+        unsigned long long mag = cc_ct_is_unsigned(from) || e->lhs->int_val >= 0
+                                     ? (unsigned long long)e->lhs->int_val
+                                     : 0ULL - (unsigned long long)e->lhs->int_val;
+        int digits = to_rank == 1 ? 24 : to_rank == 2 ? 53 : 64;
+
+        return digits == 64 || mag <= 1ULL << digits;
+    }
+    return 0;
+}
+
+/**
+ * Fold @p e, an arithmetic constant, to _Float128, as gcc does at compile
+ * time: an integer or a binary floating constant exactly (every one of
+ * them is representable), a _Float128 constant as it is, a negated one
+ * with its sign flipped, an operation on _Float128 constants made in
+ * binary128 (cc_b128_arith()).
+ *
+ * @return 1 if folded into @p enc, 0 if @p e is not such a constant
+ */
+static int sema_b128_fold_value(const cc_translation_unit_t *tu, const cc_expr_t *e, uint64_t enc[2]) {
+    uint64_t rhs[2];
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_CAST && e->lhs != NULL && e->lhs->kind != CC_EXPR_INIT_LIST &&
+        sx_ct_record(e->ctype) < 0 && sema_b128_cast_is_exact(e)) {
+        /* an excess-precision cast, or a widening one: the operand's value */
+        return sema_b128_fold_value(tu, e->lhs, enc);
+    }
+    if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_MUL && e->lhs != NULL && sema_b128_is_minus_one(e->lhs) &&
+        e->rhs != NULL && e->rhs->kind != CC_EXPR_INT) {
+        /* unary minus (parsed as -1 * x) on a floating constant: the constant, its sign flipped */
+        if (!sema_b128_fold_value(tu, e->rhs, enc)) {
+            return 0;
+        }
+        enc[1] ^= 0x8000000000000000ULL;
+        return 1;
+    }
+    if (e->kind == CC_EXPR_BIN && sema_is_b128_type(tu, e->ctype) &&
+        (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB || e->op == CC_BIN_MUL || e->op == CC_BIN_DIV)) {
+        /* an operation on constants, made as gcc folds it: in binary128, rounded once */
+        return sema_b128_fold_value(tu, e->lhs, enc) && sema_b128_fold_value(tu, e->rhs, rhs) &&
+               cc_b128_arith(e->op == CC_BIN_ADD   ? '+'
+                             : e->op == CC_BIN_SUB ? '-'
+                             : e->op == CC_BIN_MUL ? '*'
+                                                   : '/',
+                             enc, rhs, enc) == 0;
+    }
+    if (e->kind == CC_EXPR_INT) {
+        if (cc_ct_is_unsigned(e->ctype) || e->int_val >= 0) {
+            cc_b128_from_int((unsigned long long)e->int_val, 0, enc);
+        } else {
+            cc_b128_from_int(0ULL - (unsigned long long)e->int_val, 1, enc);
+        }
+        return 1;
+    }
+    if (e->kind == CC_EXPR_FLOAT) {
+        if (e->ctype != NULL && e->ctype->unqual->kind == CC_CT_LDOUBLE) {
+            cc_b128_from_ld(e->float_val_ld, enc);
+        } else if (e->ctype != NULL && e->ctype->unqual->kind == CC_CT_FLOAT) {
+            cc_b128_from_double((double)(float)e->float_val, enc);
+        } else {
+            cc_b128_from_double(e->float_val, enc);
+        }
+        return 1;
+    }
+    return sema_b128_const(tu, e, enc);
+}
+
+/** Whether a value of type @p t converts to and from _Float128: an integer or a binary floating type. */
+static int sema_b128_partner_ok(const cc_ctype_t *t) {
+    return cc_ct_is_integer(t) || sema_is_binary_fp(t) || ct_kind_is(t, CC_CT_FLOAT16);
+}
+
+/**
+ * Convert the checked expression in @p slot, an integer or binary floating
+ * value, to _Float128 (structure @p sid): a constant is folded, anything
+ * else is cast -- a _Float16 through float, which holds it exactly.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int sema_b128_convert(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid) {
+    uint64_t enc[2];
+
+    sema_excess_unwrap(slot);
+    if (sema_b128_fold_value(tu, *slot, enc)) {
+        cc_expr_t *list = sema_decimal_list(128, enc, (*slot)->line, (*slot)->col);
+        cc_expr_t *c = list == NULL ? NULL : (cc_expr_t *)calloc(1, sizeof(*c));
+
+        if (c == NULL) {
+            cc_expr_free(list);
+            return -1;
+        }
+        c->kind = CC_EXPR_CAST;
+        c->line = (*slot)->line;
+        c->col = (*slot)->col;
+        sema_set_type(c, cc_ct_record(sid));
+        c->lhs = list;
+        cc_expr_free(*slot);
+        *slot = c;
+        return check_expr(tu, c, NULL, 0, 0, NULL);
+    }
+    if (ct_kind_is(sx_vtype(*slot), CC_CT_FLOAT16) && sema_wrap_cast(slot, cc_ct_basic(CC_CT_FLOAT)) != 0) {
+        return -1;
+    }
+    return sema_wrap_cast(slot, cc_ct_record(sid));
+}
+
+/**
+ * A binary operator with a _Float128 operand: the other one, an integer or
+ * binary floating value, goes to _Float128 too (a constant folded), as
+ * _Float128 outranks every other real floating type on x86.  `+ - * /`
+ * give _Float128, comparisons int; a decimal operand, or any other
+ * operator, is an error.  `-c` of a _Float128 constant folds.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_b128_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_ctype_t *lt = sx_vtype(e->lhs);
+    const cc_ctype_t *rt = sx_vtype(e->rhs);
+    int lb = sema_is_b128_type(tu, lt);
+    int rb = sema_is_b128_type(tu, rt);
+    int is_cmp = is_cmp_op(e->op);
+    int sid = sema_b128_sid(tu);
+    uint64_t enc[2];
+
+    if ((!lb && sema_decimal_def(tu, lt) != NULL) || (!rb && sema_decimal_def(tu, rt) != NULL)) {
+        /* gcc's words for it, _Float128 not being a standard binary type */
+        sema_diag(diag, "cannot mix operands of decimal floating and other floating types");
+        return -1;
+    }
+    if ((!is_cmp && e->op != CC_BIN_ADD && e->op != CC_BIN_SUB && e->op != CC_BIN_MUL && e->op != CC_BIN_DIV) ||
+        (!lb && !sema_b128_partner_ok(lt)) || (!rb && !sema_b128_partner_ok(rt)) || sid < 0) {
+        sema_diag(diag, "invalid operands to a _Float128 operation");
+        return -1;
+    }
+    if (e->op == CC_BIN_MUL && !lb && e->lhs->kind == CC_EXPR_INT && e->lhs->int_val == -1 &&
+        sema_b128_fold_value(tu, e, enc)) {
+        /* -c of a _Float128 constant: the constant negated */
+        cc_expr_t *list = sema_decimal_list(128, enc, e->line, e->col);
+
+        if (list == NULL) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        cc_expr_free(e->lhs);
+        cc_expr_free(e->rhs);
+        e->kind = CC_EXPR_CAST;
+        e->op = 0;
+        e->rhs = NULL;
+        e->unary_form = 0;
+        e->lhs = list;
+        sema_set_type(e, cc_ct_record(sid));
+        return check_expr(tu, e, NULL, 0, 0, diag);
+    }
+    if ((!lb && sema_b128_convert(tu, &e->lhs, sid) != 0) || (!rb && sema_b128_convert(tu, &e->rhs, sid) != 0)) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    e->unary_form = 0;
+    sema_set_type(e, is_cmp ? cc_ct_basic(CC_CT_INT) : cc_ct_record(sid));
+    return 0;
+}
+
+/**
+ * Where a value is converted by assignment to @p t and one of the two is
+ * _Float128: the conversion, made explicit (a constant folded).  Between
+ * _Float128 and a decimal type there is none.
+ *
+ * @return 1 if a conversion was added, 0 if none was needed, -1 on error
+ */
+static int sema_b128_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t **slot, const cc_ctype_t *t) {
+    const cc_ctype_t *from = sx_vtype(*slot);
+
+    if (sema_is_b128_type(tu, t)) {
+        if (sema_is_b128_type(tu, from) || !sema_b128_partner_ok(from)) {
+            return 0;
+        }
+        return sema_b128_convert(tu, slot, sx_ct_record(t)) == 0 ? 1 : -1;
+    }
+    if (ct_kind_is(t, CC_CT_BOOL)) {
+        return sema_decimal_truth(tu, slot, NULL) == 0 ? 1 : -1;
+    }
+    if (!sema_b128_partner_ok(t)) {
+        return 0;
+    }
+    if (ct_kind_is(t, CC_CT_FLOAT16)) {
+        /* through float: libgcc converts _Float128 to float, and float to _Float16 rounds once more */
+        if (sema_wrap_cast(slot, cc_ct_basic(CC_CT_FLOAT)) != 0) {
+            return -1;
+        }
+    }
+    return sema_wrap_cast(slot, t) == 0 ? 1 : -1;
+}
+
+/**
+ * A cast to or from _Float128: from or to an integer or a binary floating
+ * type, or (to) _Bool; a constant converted to _Float128 is folded.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_b128_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag) {
+    const cc_ctype_t *to = sema_cast_target_ctype(e);
+    const cc_ctype_t *from = sx_vtype(e->lhs);
+
+    if (ct_kind_is(to->unqual, CC_CT_VOID) || (sema_is_b128_type(tu, to) && sema_is_b128_type(tu, from))) {
+        sema_set_type(e, to);
+        return 0;
+    }
+    if (sema_is_b128_type(tu, to)) {
+        if (!sema_b128_partner_ok(from)) {
+            sema_diag(diag, "invalid conversion to _Float128");
+            return -1;
+        }
+        /* the operand converted (or folded) in place; the cast is then a no-op of one type */
+        if (sema_b128_convert(tu, &e->lhs, sx_ct_record(to)) != 0) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        sema_set_type(e, to);
+        return 0;
+    }
+    if (ct_kind_is(to->unqual, CC_CT_BOOL)) {
+        if (sema_decimal_truth(tu, &e->lhs, diag) != 0) {
+            return -1;
+        }
+    } else if (!sema_b128_partner_ok(to)) {
+        sema_diag(diag, "invalid conversion of a _Float128 value");
+        return -1;
+    } else if (ct_kind_is(to->unqual, CC_CT_FLOAT16) && sema_wrap_cast(&e->lhs, cc_ct_basic(CC_CT_FLOAT)) != 0) {
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    sema_set_type(e, to);
+    return 0;
+}
+
+/**
+ * Make a checked initializer of a static _Float128 object (structure
+ * @p sid) the brace list of its folded encoding.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_b128_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, int sid, cc_diag_t *diag) {
+    uint64_t enc[2];
+    cc_expr_t *list;
+
+    (void)sid;
+    if (!sema_b128_fold_value(tu, *slot, enc)) {
+        sema_diag(diag, "initializer of a static _Float128 object is not a constant");
+        return -1;
+    }
+    list = sema_decimal_list(128, enc, (*slot)->line, (*slot)->col);
     if (list == NULL) {
         sema_diag(diag, "out of memory");
         return -1;

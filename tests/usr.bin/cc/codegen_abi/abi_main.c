@@ -71,16 +71,22 @@ v8qi lib_v8q(int x, v8qi a, v8qi b, v8qi c, v8qi d);
 _Decimal32 lib_d32(int n, _Decimal32 a, _Decimal32 b);
 _Decimal64 lib_d64(_Decimal64 a, double x, _Decimal64 b);
 _Decimal128 lib_d128(int n, _Decimal128 a, _Decimal64 b);
+_Float128 lib_f128(int n, _Float128 a, double x, __float128 b);
+int lib_f128_lt(_Float128 a, _Float128 b, int k);
 
-/* decimal values across the call, printed as their encodings */
+/* decimal values and _Float128 across the call, printed as their encodings */
 static void decimals(void) {
     _Decimal32 s = lib_d32(3, 1.25DF, 0.5DF);
     _Decimal64 d = lib_d64(10.5DD, 0.25, 3);
     _Decimal128 q = lib_d128(-7, 1.000000000000000000000000000001DL, 2.5DD);
+    _Float128 f = lib_f128(5, 1.000000000000000000000000000001f128, 0.5, 3.0Q);
     unsigned long long w[2];
+    unsigned long long v[2];
 
     __builtin_memcpy(w, &q, 16);
-    printf("%08x %016llx %016llx%016llx\n", *(unsigned *)&s, *(unsigned long long *)&d, w[1], w[0]);
+    __builtin_memcpy(v, &f, 16);
+    printf("%08x %016llx %016llx%016llx %016llx%016llx %d\n", *(unsigned *)&s, *(unsigned long long *)&d, w[1], w[0],
+           v[1], v[0], lib_f128_lt(f, 8, 3));
 }
 
 /* vectors across the call */

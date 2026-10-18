@@ -4070,17 +4070,26 @@ static int lower_vector_cast(const cc_translation_unit_t *tu, cc_ssa_function_t 
 }
 
 /**
- * The width of the decimal floating type whose hidden structure is @p sid.
+ * The width of the floating type whose hidden structure is @p sid, when
+ * libgcc operates on it: a decimal type, or _Float128 (dec_is_binary()).
  *
  * @param tu   the translation unit
  * @param sid  the structure, or -1
- * @return     32, 64 or 128; 0 if it is no decimal type's
+ * @return     32, 64 or 128; 0 if it is neither's
  */
 static int dec_bits_of(const cc_translation_unit_t *tu, int sid) {
     if (sid < 0 || (size_t)sid >= tu->struct_count) {
         return 0;
     }
-    return tu->structs[sid].decimal_bits;
+    return cc_struct_soft_float_bits(&tu->structs[sid]);
+}
+
+/**
+ * Whether structure @p sid stands for _Float128, which libgcc's soft-fp
+ * routines (mode tf) operate on, rather than a decimal type.
+ */
+static int dec_is_binary(const cc_translation_unit_t *tu, int sid) {
+    return sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].binary_bits > 0;
 }
 
 /** libgcc's mode suffix of a decimal type: sd, dd or td. */
@@ -4138,7 +4147,7 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
 
         switch (kinds[i]) {
         case DEC_ARG_DEC: {
-            long dsize = tu->structs[arg_sids[i]].decimal_bits / 8;
+            long dsize = dec_bits_of(tu, arg_sids[i]) / 8;
 
             size = (uint32_t)dsize;
             abi = (unsigned char)cc_abi_aggregate_arg(tu, arg_sids[i], dsize, &regs);
@@ -4192,7 +4201,7 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
         in.call_arg_sizes[i] = size;
     }
     if (ret == DEC_ARG_DEC) {
-        long rsize = tu->structs[ret_sid].decimal_bits / 8;
+        long rsize = dec_bits_of(tu, ret_sid) / 8;
         int storage = cc_ir_stackalloc(sf, rsize, diag);
 
         in.dst = storage;
@@ -4268,7 +4277,12 @@ static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_
     if (args[1] < 0) {
         return -1;
     }
-    snprintf(name, sizeof(name), "__bid_%s%s%d", ops[k].name, dec_mode(bits), ops[k].arity);
+    if (dec_is_binary(tu, sid)) {
+        /* _Float128: libgcc's soft-fp, __addtf3, __eqtf2 and kin */
+        snprintf(name, sizeof(name), "__%stf%d", ops[k].name, ops[k].arity);
+    } else {
+        snprintf(name, sizeof(name), "__bid_%s%s%d", ops[k].name, dec_mode(bits), ops[k].arity);
+    }
     if (ops[k].arity == 3) {
         return dec_libcall(tu, sf, name, args, kinds, sids, 2, DEC_ARG_DEC, sid, diag);
     }
@@ -4287,6 +4301,83 @@ static int lower_decimal_binop(const cc_translation_unit_t *tu, cc_ssa_function_
         }
         return c;
     }
+}
+
+/**
+ * A conversion to or from _Float128 (CC_EXPR_CAST) of the lowered operand
+ * @p src, by libgcc's soft-fp: from a binary floating type
+ * __extend{sf,df,xf}tf2, to one __trunctf{sf,df,xf}2, from an integer
+ * __float[un]{si,di}tf, to one __fix[uns]tf{si,di}.  Sema leaves no other
+ * kind (a _Float16 goes through float, a decimal type has none).
+ *
+ * @return the result, or -1 with @p diag set
+ */
+static int lower_b128_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const cc_expr_t *e, int src,
+                           cc_diag_t *diag) {
+    int to_sid = ct_record_id(lower_cast_ctype(e));
+    int from_sid = lower_record_id(e->lhs);
+    const cc_ctype_t *st = lower_value_ctype(e->lhs);
+    const cc_ctype_t *dt = lower_value_ctype(e);
+    cc_ctype_kind_t sk = st != NULL ? st->kind : CC_CT_VOID;
+    cc_ctype_kind_t dk = dt != NULL ? dt->kind : CC_CT_VOID;
+    dec_arg_t kind;
+    int sids[1];
+    char name[40];
+
+    if (dec_is_binary(tu, to_sid) && dec_is_binary(tu, from_sid)) {
+        return src;
+    }
+    if (dec_is_binary(tu, to_sid)) {
+        sids[0] = -1;
+        if (sk == CC_CT_FLOAT || sk == CC_CT_DOUBLE || sk == CC_CT_LDOUBLE) {
+            kind = sk == CC_CT_FLOAT ? DEC_ARG_FLOAT : sk == CC_CT_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+            snprintf(name, sizeof(name), "__extend%stf2", sk == CC_CT_FLOAT ? "sf" : sk == CC_CT_DOUBLE ? "df" : "xf");
+        } else if (cc_ct_is_integer(st)) {
+            int wide = cc_ct_int_width(st) > 32;
+            int uns = lower_is_unsigned(e->lhs);
+
+            src = cast_value(sf, src, CC_VAL_I64, diag);
+            src = src < 0 ? -1
+                          : normalize_integral_value(sf, src,
+                                                     cc_ct_basic(wide ? (uns ? CC_CT_ULLONG : CC_CT_LLONG)
+                                                                      : (uns ? CC_CT_UINT : CC_CT_INT)),
+                                                     diag);
+            if (src < 0) {
+                return -1;
+            }
+            cc_ir_set_size(sf, src, wide ? 8 : 4);
+            kind = wide ? DEC_ARG_LLONG : DEC_ARG_INT;
+            snprintf(name, sizeof(name), "__float%s%stf", uns ? "un" : "", wide ? "di" : "si");
+        } else {
+            set_diag(diag, "unsupported conversion to _Float128");
+            return -1;
+        }
+        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, to_sid, diag);
+    }
+    sids[0] = from_sid;
+    kind = DEC_ARG_DEC;
+    if (dk == CC_CT_FLOAT || dk == CC_CT_DOUBLE || dk == CC_CT_LDOUBLE) {
+        dec_arg_t rk = dk == CC_CT_FLOAT ? DEC_ARG_FLOAT : dk == CC_CT_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+        int r;
+
+        snprintf(name, sizeof(name), "__trunctf%s2", dk == CC_CT_FLOAT ? "sf" : dk == CC_CT_DOUBLE ? "df" : "xf");
+        r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, rk, -1, diag);
+        if (r >= 0 && dk == CC_CT_FLOAT) {
+            r = round_to_float(sf, r, diag);
+        }
+        return r;
+    }
+    if (cc_ct_is_integer(dt)) {
+        int wide = cc_ct_int_width(dt) > 32;
+        int uns = lower_is_unsigned(e);
+        int r;
+
+        snprintf(name, sizeof(name), "__fix%stf%s", uns ? "uns" : "", wide ? "di" : "si");
+        r = dec_libcall(tu, sf, name, &src, &kind, sids, 1, wide ? DEC_ARG_LLONG : DEC_ARG_INT, -1, diag);
+        return r < 0 ? -1 : normalize_int_ct(sf, r, dt, diag);
+    }
+    set_diag(diag, "unsupported conversion from _Float128");
+    return -1;
 }
 
 /**
@@ -4314,6 +4405,9 @@ static int lower_decimal_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
     }
     if (dk == CC_CT_VOID) {
         return src;
+    }
+    if (dec_is_binary(tu, to_sid) || dec_is_binary(tu, lower_record_id(e->lhs))) {
+        return lower_b128_cast(tu, sf, e, src, diag);
     }
     if (to != 0 && from != 0) {
         if (to == from) {

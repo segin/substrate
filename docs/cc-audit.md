@@ -646,15 +646,27 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   one, as gcc does, and `_Float32` is not promoted as a variadic argument.
   `_Float128` is CC-118.  `codegen/floatn_types.c`;
   `native_bad_c23_floatn_redecl.c`.
-- [ ] **CC-118** `_Float128` and `__float128` shall be IEEE binary128
+- [x] **CC-118** `_Float128` and `__float128` shall be IEEE binary128
   (gcc on x86, both targets: 16 bytes, 16-aligned, 113-bit significand,
   arithmetic in libgcc's `__addtf3` and kin, an SSE-class argument on
-  x86-64): the lexer makes both spellings the `double` keyword, so they
-  are 8-byte doubles -- a silent precision and ABI difference with every
-  gcc-built object -- while the `f128` suffix gives a `long double`.
-  *Reproduced* (both targets); found while fixing CC-107.  Needs a
-  binary128 type carried as the decimal types are (CC-69), with its
-  constants encoded and its operations calling libgcc.
+  x86-64): the lexer made both spellings the `double` keyword, so they
+  were 8-byte doubles -- a silent precision and ABI difference with every
+  gcc-built object -- while the `f128` suffix gave a `long double`.
+  *Reproduced* (both targets); found while fixing CC-107.  The type is a
+  structure holding the encoding (`cc_struct_def_t.binary_bits`), carried
+  as `_Decimal128` is: in one xmm register on x86-64, on the stack
+  16-aligned and returned in memory on i386.  `frontend/binary128.c`
+  encodes its constants (the f128 suffix and GNU's q, decimal or
+  hexadecimal) from their text rounded once, integers and binary floating
+  constants exactly, and folds `+ - * /` on constants (checked against
+  libgcc on 200,000 random operations); sema mixes it with integers and
+  binary floating types, converting them to it, and rejects decimal
+  operands; lowering calls libgcc's soft-fp.  The `__FLT128_*` and
+  `__SIZEOF_FLOAT128__` macros are predefined, as gcc predefines them, so
+  glibc's `strtof128` and kin are usable.  `_Complex _Float128` and
+  conversions between `_Float128` and the decimal types are not done.
+  `codegen/float128.c`, the `lib_f128` cases of `codegen_abi/`,
+  `native_bad_c23_float128_decimal_mix.c`.
 - [x] **CC-119** Floating arithmetic on i386 shall be evaluated as the
   predefined `__FLT_EVAL_METHOD__` says: cc predefined 2, as gcc does
   (operations in `long double`), but evaluated `float` at single
@@ -1268,7 +1280,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-119 requirements: 118 met, 1 open.
+119 requirements: 119 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
