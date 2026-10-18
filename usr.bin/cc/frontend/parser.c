@@ -5306,7 +5306,8 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
                 goto out;
             }
         }
-        while (!stop && (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN)) {
+        /* `[[` is an attribute specifier sequence (C23 6.7.7.3), the declaration's to read, not another bound */
+        while (!stop && ((p->tok.kind == TOK_LBRACK && peek_kind(p) != TOK_LBRACK) || p->tok.kind == TOK_LPAREN)) {
             decl_op_t op;
 
             memset(&op, 0, sizeof(op));

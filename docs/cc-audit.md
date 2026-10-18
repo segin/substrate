@@ -717,11 +717,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   that alignment (gcc): `typedef int ia __attribute__((aligned(32)));`
   has `_Alignof(ia)` 4 (gcc 32), and objects declared with it are
   4-aligned.  *Reproduced* (both targets); found while testing CC-113.
-- [ ] **CC-112** An attribute specifier sequence after an array
+- [x] **CC-112** An attribute specifier sequence after an array
   declarator's `]` shall be accepted (C23 6.7.7.3): `char b[3]
-  [[gnu::aligned(64)]];` is rejected ("expected primary expression");
+  [[gnu::aligned(64)]];` was rejected ("expected primary expression");
   gcc accepts it and aligns `b`.  *Reproduced*; found while testing
-  CC-110.
+  CC-110.  The declarator took the `[` of `[[` for another bound; it
+  stops there, and the declaration reads the sequence, applying it to
+  the object declared -- as gcc does for an array of one dimension (gcc
+  applies it to the array type itself, so for `int m[2][2]
+  [[gnu::aligned(32)]]` it rejects an element alignment larger than the
+  element, which cc accepts).  `codegen/array_decl_attrs.c`.
 - [x] **CC-102** A designator list shall be any sequence of `[index]` and
   `.member` (C11 6.7.9p1): cc took one array designator, optionally
   followed by member designators, so `int a[2][2] = {[1][1] = 5};` was
@@ -1189,7 +1194,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-116 requirements: 109 met, 7 open.
+116 requirements: 110 met, 6 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
