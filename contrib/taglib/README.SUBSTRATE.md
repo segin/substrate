@@ -1,4 +1,4 @@
-# TagLib 2.0.2 — Substrate port
+# TagLib 2.3.2 — Substrate port
 
 TagLib is an audio-metadata library (ID3v1/2, Ogg comments, FLAC, MP4, ...).
 It is the one **required** (non-codec) dependency of **PsyMP3** that was still
@@ -15,8 +15,8 @@ C++ API is what PsyMP3 expects. TagLib 2.x requires **C++17** (substrate's
 
 ## Layout
 
-* `fetch.sh` — downloads + SHA-256-verifies the TagLib release tarball **and**
-  the pinned `utfcpp` submodule, extracts, and applies the `series` patches.
+* `fetch.sh` — downloads + SHA-256-verifies the TagLib release tarball,
+  extracts, and applies the `series` patches.
 * `build.sh` — CMake cross-build into `dist-overlay/dist-taglib/`, OSABI-stamps
   the produced `.so`, and mirrors libtag + headers + `taglib.pc` into the cross
   sysroot.
@@ -24,29 +24,19 @@ C++ API is what PsyMP3 expects. TagLib 2.x requires **C++17** (substrate's
 * `patches/` — patch files referenced by `series` (none required).
 
 ```
-./fetch.sh        # download + verify + extract + populate 3rdparty/utfcpp
+./fetch.sh        # download + verify + extract
 ./build.sh        # cross-compile, stage, OSABI-stamp, mirror to sysroot
 ```
 
-## utfcpp / utf8cpp (the one real gotcha)
+## utfcpp / utf8cpp
 
-TagLib 2.x depends on the header-only **utfcpp** (utf8cpp) library. The release
-tarball ships an **empty** `3rdparty/utfcpp/` directory — it is a git
-submodule, **not** vendored into the tarball. With nothing there, CMake's
-config step hits
-
-```
-CMake Error: utfcpp not found. Either install package ... or fetch the git
-submodule using `git submodule update --init`
-```
-
-TagLib 2.0.2 pins utfcpp at commit `df857efc5bbc2aa84012d865f7d7e9cccdc08562`
-(see the tarball's `.gitmodules` + the tree at tag `v2.0.2`). `fetch.sh`
-downloads that exact commit's tarball (SHA-256 verified) and drops it into
-`3rdparty/utfcpp/`. utfcpp ships its own `CMakeLists.txt` defining the
-`utf8::cpp` INTERFACE target, which is exactly what TagLib's
-`add_subdirectory("3rdparty/utfcpp")` fallback path consumes — so the build is
-fully offline and reproducible with no `git submodule` step.
+TagLib 2.x depends on the header-only **utfcpp** (utf8cpp) library.  The 2.0.x
+release tarballs shipped an empty `3rdparty/utfcpp/` (a git submodule) and the
+port fetched the pinned commit separately; since 2.1 the tarball carries it.
+utfcpp's own `CMakeLists.txt` defines the `utf8::cpp` INTERFACE target that
+TagLib's `add_subdirectory("3rdparty/utfcpp")` fallback consumes, so the build
+is offline with no `git submodule` step.  `fetch.sh` fails if a tarball ever
+arrives without it.
 
 ## CMake cross configuration
 
@@ -75,7 +65,7 @@ C++ runtime through explicitly and trust the shared libs' own DT_NEEDED:
 
 substrate's `libstdc++.so.6` already carries `libpthread.so.0` in its
 DT_NEEDED, so no explicit `-lpthread` was needed. The resulting
-`libtag.so.2.0.2` NEEDs `libz.so.1`, `libstdc++.so.6`, `libm.so.0`,
+`libtag.so.2` NEEDs `libz.so.1`, `libstdc++.so.6`, `libm.so.0`,
 `libc.so.0`.
 
 ## OSABI
@@ -87,7 +77,7 @@ dispatch routes on.
 
 ## Output
 
-* `dist-overlay/dist-taglib/usr/lib/libtag.so.2.0.2` (~22 MiB, `-g`),
+* `dist-overlay/dist-taglib/usr/lib/libtag.so.2.3.2`,
   with `libtag.so.2` and `libtag.so` symlinks. (Shared-only — no `libtag.a`,
   since `BUILD_SHARED_LIBS=ON`.)
 * `dist-overlay/dist-taglib/usr/include/taglib/*.h`
@@ -98,9 +88,7 @@ dispatch routes on.
 ## Upstream
 
 * TagLib: <https://taglib.org/> — release
-  `https://taglib.github.io/releases/taglib-2.0.2.tar.gz`
-  (fallback `https://github.com/taglib/taglib/releases/download/v2.0.2/taglib-2.0.2.tar.gz`),
-  SHA-256 `0de288d7fe34ba133199fd8512f19cc1100196826eafcb67a33b224ec3a59737`.
-* utfcpp: <https://github.com/nemtrif/utfcpp> @
-  `df857efc5bbc2aa84012d865f7d7e9cccdc08562`, SHA-256
-  `911ff4f13cc7bfece2b5f65e7468b962db19c9727f89d560b2617360af08f538`.
+  `https://github.com/taglib/taglib/releases/download/v2.3.2/taglib-2.3.2.tar.gz`
+  (fallback `https://taglib.github.io/releases/taglib-2.3.2.tar.gz`),
+  SHA-256 `3ca2d8afaa7f1cf7f6ed10e511ebc368bfacd6dcaa3dbfa690b89e502e8963dc`.
+* utfcpp: <https://github.com/nemtrif/utfcpp>, bundled in the tarball.

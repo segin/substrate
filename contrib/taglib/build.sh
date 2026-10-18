@@ -1,5 +1,5 @@
 #!/bin/sh
-# contrib/taglib/build.sh — cross-build TagLib 2.0.2 (C++, CMake) for substrate.
+# contrib/taglib/build.sh — cross-build TagLib 2.3.2 (C++, CMake) for substrate.
 #
 # Configured with CMAKE_SYSTEM_NAME=Linux so CMake (a) treats this as a
 # cross-compile (configure-time compile checks build but never execute) and
@@ -12,7 +12,7 @@
 #   sources:   #include <taglib/fileref.h> ...   link: -ltag
 set -eu
 
-HERE="$(cd "$(dirname "$0")" && pwd)"; LIB="taglib"; VERSION="2.0.2"
+HERE="$(cd "$(dirname "$0")" && pwd)"; LIB="taglib"; VERSION="2.3.2"
 TREE="${HERE}/build/taglib-${VERSION}"; BS="${HERE}/build/bs"
 if [ -z "${SUBSTRATE_TOP:-}" ]; then
   p="${HERE}"
