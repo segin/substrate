@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-VERSION="8.7.1"
+VERSION="8.23.0"
 TARBALL="curl-${VERSION}.tar.xz"
 URL="https://curl.se/download/${TARBALL}"
-# SHA-256 below verified via PGP signature (curl-8.7.1.tar.xz.asc)
+# SHA-256 below verified via PGP signature (curl-8.23.0.tar.xz.asc)
 # from curl.se, signed by Daniel Stenberg <daniel@haxx.se>
-# key 27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2 on 2024-03-27.
-SHA256="6fea2aac6a4610fbd0400afb0bcddbe7258a64c63f1f68e5855ebc0c659710cd"
+# key 27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.
+SHA256="8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"

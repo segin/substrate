@@ -1,9 +1,9 @@
 # curl on substrate
 
 Upstream:  https://curl.se/
-Pinned:    8.7.1   (released 2024-03-27)
-Tarball:   `https://curl.se/download/curl-8.7.1.tar.xz`
-SHA-256:   `6fea2aac6a4610fbd0400afb0bcddbe7258a64c63f1f68e5855ebc0c659710cd`
+Pinned:    8.23.0
+Tarball:   `https://curl.se/download/curl-8.23.0.tar.xz`
+SHA-256:   `8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5`
 
 ## Why
 

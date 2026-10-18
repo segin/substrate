@@ -15,7 +15,7 @@
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION="8.7.1"
+VERSION="8.23.0"
 TREE_DIR="${HERE}/build/curl-${VERSION}"
 BUILD_DIR="${HERE}/build/build-stage-substrate"
 
@@ -84,8 +84,8 @@ echo "==> configure"
     --without-libssh2 --without-libssh --without-rustls \
     --without-libpsl --without-libidn2 --without-brotli \
     --without-zstd --without-nghttp2 --without-nghttp3 \
-    --without-ngtcp2 --without-quiche --without-msh3 \
-    --without-libgsasl --without-librtmp \
+    --without-ngtcp2 --without-quiche \
+    --without-libgsasl \
     --disable-ldap --disable-ldaps \
     --disable-manual --disable-docs \
     --disable-ipv6 \
