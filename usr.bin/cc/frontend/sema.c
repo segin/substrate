@@ -2810,8 +2810,8 @@ static int sema_b128_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_dia
 
 /**
  * Where a value is converted by assignment to @p t and one of the two is
- * _Float128: the conversion, made explicit (a constant folded).  Between
- * _Float128 and a decimal type there is none.
+ * _Float128: the conversion, made explicit (a constant folded).  A
+ * decimal value converts too, as gcc converts it, by libgcc at run time.
  *
  * @return 1 if a conversion was added, 0 if none was needed, -1 on error
  */
@@ -2819,13 +2819,23 @@ static int sema_b128_convert_for_assign(const cc_translation_unit_t *tu, cc_expr
     const cc_ctype_t *from = sx_vtype(*slot);
 
     if (sema_is_b128_type(tu, t)) {
-        if (sema_is_b128_type(tu, from) || !sema_b128_partner_ok(from)) {
+        if (sema_is_b128_type(tu, from)) {
+            return 0;
+        }
+        if (sema_decimal_def(tu, from) != NULL) {
+            return sema_wrap_cast(slot, t->unqual) == 0 ? 1 : -1;
+        }
+        if (!sema_b128_partner_ok(from)) {
             return 0;
         }
         return sema_b128_convert(tu, slot, sx_ct_record(t)) == 0 ? 1 : -1;
     }
     if (ct_kind_is(t, CC_CT_BOOL)) {
         return sema_decimal_truth(tu, slot, NULL) == 0 ? 1 : -1;
+    }
+    if (sema_decimal_def(tu, t) != NULL) {
+        /* to a decimal type */
+        return sema_wrap_cast(slot, t->unqual) == 0 ? 1 : -1;
     }
     if (!sema_b128_partner_ok(t)) {
         return 0;
@@ -2850,6 +2860,11 @@ static int sema_b128_cast(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag
     const cc_ctype_t *from = sx_vtype(e->lhs);
 
     if (ct_kind_is(to->unqual, CC_CT_VOID) || (sema_is_b128_type(tu, to) && sema_is_b128_type(tu, from))) {
+        sema_set_type(e, to);
+        return 0;
+    }
+    if (sema_decimal_def(tu, to) != NULL || (sema_is_b128_type(tu, to) && sema_decimal_def(tu, from) != NULL)) {
+        /* between _Float128 and a decimal type: by libgcc at run time */
         sema_set_type(e, to);
         return 0;
     }

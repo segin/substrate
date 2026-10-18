@@ -682,6 +682,37 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   `-fexcess-precision=standard` does.  gcc's GNU-mode default `fast`
   rounds at its own whim; the test compares with `-std=c11`.
   `codegen/excess_precision.c`.
+- [x] **CC-120** A decimal floating value shall convert to and from
+  `_Float128`, by assignment and by cast, as gcc converts it (libgcc's
+  `__bid_extendddtf`, `__bid_trunctfdd` and kin): `_Float128 q = d;` for a
+  `_Decimal64 d` was rejected ("cannot initialize variable").
+  *Reproduced* (both targets); left by CC-118.  Sema lets the conversion
+  through (arithmetic mixing the two stays an error, as in gcc) and
+  `lower_b128_cast()` calls the libgcc function named by which format is
+  the wider.  `codegen/float128_decimal.c`.
+- [ ] **CC-121** A static `_Float128` initialized by a constant
+  expression of another floating type shall be that expression's value,
+  as gcc folds it: `static _Float128 s = 1.0 / 3;` is rejected
+  ("initializer of a static _Float128 object is not a constant").
+  *Reproduced* (both targets); left by CC-118.
+- [ ] **CC-122** `_Complex _Float128` shall be a complex type of two
+  binary128 parts, multiplied and divided by libgcc's `__multc3` and
+  `__divtc3`, as gcc has it: cc rejects it.  *Reproduced* (both targets);
+  left by CC-118.
+- [ ] **CC-123** `_Alignof` and `__alignof__` of an object shall give the
+  object's alignment, as gcc gives it: for `a16 x` (an aligned typedef),
+  `int y __attribute__((aligned(32)))`, `_Alignas(64) char z` and a member
+  declared `aligned(8)` cc gives the type's (4, 4, 1, 4; gcc 16, 32, 64,
+  8).  *Reproduced* (both targets); left by CC-115.
+- [ ] **CC-124** A `constexpr` object of floating, complex or aggregate
+  type shall be initialized by constant expressions (C23 6.7.1p5): `double
+  y; ... constexpr double x = y;` and `constexpr struct s x = {v};` are
+  accepted; gcc rejects both.  *Reproduced*; left by CC-91.
+- [ ] **CC-125** A `constexpr` floating object's initializer shall keep
+  its value in the object's type (C23 6.7.10p6): `constexpr float f =
+  1e40;` and `constexpr float g = 0.1;` are accepted; gcc rejects both
+  ("'constexpr' initializer not representable in type of object").
+  *Reproduced*; left by CC-91.
 - [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
   as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
   object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
@@ -1280,7 +1311,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-119 requirements: 119 met, 0 open.
+125 requirements: 120 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

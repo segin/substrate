@@ -4327,6 +4327,20 @@ static int lower_b128_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     if (dec_is_binary(tu, to_sid) && dec_is_binary(tu, from_sid)) {
         return src;
     }
+    if (dec_bits_of(tu, to_sid) > 0 && dec_bits_of(tu, from_sid) > 0) {
+        /* between a decimal type and _Float128: __bid_extend/trunc, named by which is the wider */
+        int dec_sid = dec_is_binary(tu, to_sid) ? from_sid : to_sid;
+        int bits = dec_bits_of(tu, dec_sid);
+
+        if (dec_is_binary(tu, to_sid)) {
+            snprintf(name, sizeof(name), "__bid_%s%stf", bits == 128 ? "trunc" : "extend", dec_mode(bits));
+        } else {
+            snprintf(name, sizeof(name), "__bid_%stf%s", bits == 128 ? "extend" : "trunc", dec_mode(bits));
+        }
+        sids[0] = from_sid;
+        kind = DEC_ARG_DEC;
+        return dec_libcall(tu, sf, name, &src, &kind, sids, 1, DEC_ARG_DEC, to_sid, diag);
+    }
     if (dec_is_binary(tu, to_sid)) {
         sids[0] = -1;
         if (sk == CC_CT_FLOAT || sk == CC_CT_DOUBLE || sk == CC_CT_LDOUBLE) {
