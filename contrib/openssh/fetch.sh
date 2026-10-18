@@ -36,12 +36,13 @@ fi
 echo "==> Verifying SHA-256"
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 
-if [ -d "${TREE_DIR}" ]; then
-    echo "==> ${TREE_DIR} already present"
-else
-    echo "==> Extracting"
-    tar -xzf "${TARBALL}"
-fi
+# Extract afresh every run.  A kept tree cannot take the series again --
+# build.sh replaces config.sub (substrate_config_sub_fix), so 0001 then
+# neither applies nor reverses -- and the build is out of tree
+# (build/build-stage-substrate), so nothing is lost.
+echo "==> Extracting"
+rm -rf "${TREE_DIR}"
+tar -xzf "${TARBALL}"
 
 if [ -s "${HERE}/series" ]; then
     echo "==> Applying patch series"
