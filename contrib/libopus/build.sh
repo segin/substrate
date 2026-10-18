@@ -4,7 +4,7 @@
 # libtool emits a shared library; the output is a substrate binary (OSABI 0x40).
 # libopus is standalone — the codec needs no libogg.
 set -eu
-HERE="$(cd "$(dirname "$0")" && pwd)"; LIB="libopus"; VERSION="1.5.2"
+HERE="$(cd "$(dirname "$0")" && pwd)"; LIB="libopus"; VERSION="1.6.1"
 TREE="${HERE}/build/opus-${VERSION}"; BS="${HERE}/build/bs"
 if [ -z "${SUBSTRATE_TOP:-}" ]; then p="${HERE}"; while [ "$p" != "/" ] && [ ! -f "$p/CLAUDE.md" ] && [ ! -f "$p/AGENTS.md" ]; do p=$(dirname "$p"); done; SUBSTRATE_TOP="$p"; fi
 : "${STAGE1_PREFIX:=/opt/substrate}"; SR="${STAGE1_PREFIX}/i386-unknown-substrate"

@@ -1,6 +1,6 @@
 # libopus on Substrate
 
-Cross-build of **libopus 1.5.2** (the Opus audio codec — RFC 6716).  Standalone:
+Cross-build of **libopus 1.6.1** (the Opus audio codec — RFC 6716).  Standalone:
 the codec needs no libogg.  Pulled in as a codec dependency of PsyMP3, which
 includes `<opus/opus.h>` and `<opus/opus_multistream.h>`.
 

@@ -1,10 +1,11 @@
 #!/bin/sh
 # contrib/libopus/fetch.sh — fetch libopus, verify, extract, apply patches.
 set -eu
-VERSION="1.5.2"
+VERSION="1.6.1"
 TARBALL="opus-${VERSION}.tar.gz"
 URL="https://downloads.xiph.org/releases/opus/${TARBALL}"
-SHA256="65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1"
+# Matches downloads.xiph.org/releases/opus/SHA256SUMS.txt.
+SHA256="6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/opus-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 [ -f "${TARBALL}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"; }
