@@ -1,10 +1,11 @@
 #!/bin/sh
-# contrib/harfbuzz/fetch.sh — HarfBuzz 2.6.8 (text shaping; pango 1.42 needs it).
+# contrib/harfbuzz/fetch.sh — HarfBuzz 14.6.0 (text shaping; pango and psymp3 need it).
 set -eu
-VERSION="2.6.8"
+VERSION="14.6.0"
 TARBALL="harfbuzz-${VERSION}.tar.xz"
 URL="https://github.com/harfbuzz/harfbuzz/releases/download/${VERSION}/${TARBALL}"
-SHA256="6648a571a27f186e47094121f0095e1b809e918b3037c630c7f38ffad86e3035"
+# Matches the release asset's digest as GitHub records it.
+SHA256="d07a007327277708a2a73ae437887cdbaf282937f6d03ca5467723e9099af586"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/harfbuzz-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
@@ -14,6 +15,4 @@ if [ ! -f "${TARBALL}" ]; then
 fi
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 [ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
-. "${HERE}/../substrate-autotools.sh"
-substrate_config_sub_fix "${TREE_DIR}"
 echo "==> harfbuzz ${VERSION} ready at ${TREE_DIR}"
