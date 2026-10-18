@@ -522,7 +522,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 
       app -> libSDL-1.2.so.0 -> libSDL2-2.0.so.0 -> libSDL3.so.0 -> X11 / audio
 
-  - **SDL 3.4.16** (`contrib/sdl3/`) — the base.  X11 video driver (dlopens
+  - **SDL 3.4.18** (`contrib/sdl3/`) — the base.  X11 video driver (dlopens
     `libX11.so.6`) and the NetBSD `/dev/audio` (Sun/SADA) audio backend;
     substrate is a first-class CMake platform (`CMAKE_SYSTEM_NAME=Substrate`)
     rather than being built as Linux.  Build it first.
@@ -545,7 +545,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   image's `libfreetype.so.6` links `libharfbuzz.so.0`, which links it back;
   ld.so resolves the cycle to one copy of each.  Ports built between the two
   passes link the first build, which has the same soname and symbols.
-- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.1.1-RELEASE` upstream tag
+- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.3-RELEASE` upstream tag
   with a vendored patch series) — a music player built on SDL3.  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`
@@ -584,8 +584,9 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   `src/psymp3.final.cpp`).  Patch `0005` extends the unity file's pugixml
   pragma to `-Wuninitialized`, the name GCC 16 gives a false positive
   upstream already silences as `-Wmaybe-uninitialized`.
-- **fdk-aac 2.0.3** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
-  library, encoder and decoder.  It is PsyMP3's AAC path as of 2.0-RC3,
+- **fdk-aac 3.0.0** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
+  library, encoder and decoder, plus (since 3.0.0) the separate xHE-AAC
+  encoder library `libfdk-xhe-aac`.  It is PsyMP3's AAC path as of 2.0-RC3,
   which asks for `fdk-aac` where 1.99.16 asked for `faad2`; the two
   coexist, so nothing still linking `-lfaad` is affected.  CMake-built
   like faad2.
