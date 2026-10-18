@@ -3214,6 +3214,11 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         }
         acc.spec = cc_ct_qualified(acc.spec, CC_CQ_ATOMIC);
     }
+    /* const and volatile among the specifiers qualify the type they give (C11 6.7.3) */
+    if ((acc.storage_flags & (CC_STORAGE_CONST | CC_STORAGE_VOLATILE)) != 0) {
+        acc.spec = cc_ct_qualified(acc.spec, ((acc.storage_flags & CC_STORAGE_CONST) != 0 ? CC_CQ_CONST : 0u) |
+                                                 ((acc.storage_flags & CC_STORAGE_VOLATILE) != 0 ? CC_CQ_VOLATILE : 0u));
+    }
     p->last_spec_ctype = acc.spec;
     if (out != NULL) {
         *out = acc.spec;

@@ -1357,6 +1357,7 @@ static int check_array_string_initializer(const char *name, const cc_ctype_t *ar
 }
 
 static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth);
+static int sema_compatible(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth);
 
 /**
  * Whether a _Generic association of type @p assoc matches the controlling
@@ -1366,7 +1367,60 @@ static int sema_same_type(const cc_translation_unit_t *tu, const cc_ctype_t *a, 
  */
 static int sema_generic_assoc_matches(const cc_translation_unit_t *tu, const cc_ctype_t *assoc,
                                       const cc_ctype_t *ctrl) {
-    return sema_same_type(tu, assoc, ctrl, 0);
+    return ctrl != NULL && sema_compatible(tu, assoc, ctrl->unqual, 0);
+}
+
+/**
+ * Whether two types are compatible (C11 6.2.7): qualifiers count at every
+ * level -- a pointer to `const int` is not compatible with a pointer to
+ * `int` (6.7.6.1p2) -- an array of unknown bound matches any bound,
+ * structures match as sema_same_type() matches them, and a parameter's
+ * own qualifiers do not count (6.7.6.3p15).
+ *
+ * @param tu     the translation unit
+ * @param a      one type
+ * @param b      the other
+ * @param depth  recursion depth so far
+ * @return       1 or 0
+ */
+static int sema_compatible(const cc_translation_unit_t *tu, const cc_ctype_t *a, const cc_ctype_t *b, int depth) {
+    size_t i;
+
+    if (a == b) {
+        return 1;
+    }
+    if (a == NULL || b == NULL || a->kind != b->kind || a->quals != b->quals || depth > 64) {
+        return 0;
+    }
+    switch (a->kind) {
+    case CC_CT_POINTER:
+    case CC_CT_COMPLEX:
+    case CC_CT_IMAGINARY:
+        return sema_compatible(tu, a->of, b->of, depth + 1);
+    case CC_CT_ARRAY:
+        return (a->count < 0 || b->count < 0 || a->count == b->count) && sema_compatible(tu, a->of, b->of, depth + 1);
+    case CC_CT_RECORD:
+        return sema_same_type(tu, a, b, depth);
+    case CC_CT_FUNCTION:
+        if (!sema_compatible(tu, a->of, b->of, depth + 1)) {
+            return 0;
+        }
+        if (!a->prototyped || !b->prototyped) {
+            return 1;
+        }
+        if (a->param_count != b->param_count || a->variadic != b->variadic) {
+            return 0;
+        }
+        for (i = 0; i < a->param_count; ++i) {
+            if (!sema_compatible(tu, a->params[i]->unqual, b->params[i]->unqual, depth + 1)) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        /* the other kinds are interned whole: equal types are one object */
+        return 0;
+    }
 }
 
 static int is_cmp_op(cc_binop_t op) {
@@ -3982,13 +4036,34 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
 }
 
 /**
- * Whether a named object with storage flags @p storage and type @p t may
- * not be modified.  Declarations record const/volatile/restrict for the
- * declaration as a whole, not per level, so a pointer object is never
- * taken to be const: that would reject `const char *p; p++;`.
+ * Whether an lvalue may not be modified (C11 6.3.2.1p1): its type is
+ * const-qualified, or it is a member of a structure or union that is --
+ * `v.a` of a `const struct s v`, `p->a` of a `const struct s *p`.  A
+ * pointer to const is itself modifiable: `const char *p; p++;`.
+ *
+ * @param storage  a named object's storage flags, or 0
+ * @param t        the lvalue's type
+ * @param lv       the lvalue when it is a dereference or member access,
+ *                 else NULL
+ * @return         1 if it may not be modified, else 0
  */
-static int sema_const_object(int storage, const cc_ctype_t *t) {
-    return (storage & CC_STORAGE_CONST) != 0 && !sema_is_ptr(cc_ct_decay(t));
+static int sema_const_object(int storage, const cc_ctype_t *t, const cc_expr_t *lv) {
+    const cc_ctype_t *base;
+
+    if (t != NULL && (t->quals & CC_CQ_CONST) != 0) {
+        return 1;
+    }
+    if ((storage & CC_STORAGE_CONST) != 0 && !sema_is_ptr(cc_ct_decay(t))) {
+        return 1;
+    }
+    while (lv != NULL && lv->kind == CC_EXPR_MEMBER && lv->lhs != NULL && lv->lhs->ctype != NULL) {
+        base = lv->member_is_arrow ? cc_ct_decay(lv->lhs->ctype)->of : lv->lhs->ctype;
+        if (base != NULL && (base->quals & CC_CQ_CONST) != 0) {
+            return 1;
+        }
+        lv = lv->member_is_arrow ? NULL : lv->lhs;
+    }
+    return 0;
 }
 
 /**
@@ -4088,7 +4163,7 @@ static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         sema_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
         return -1;
     }
-    if (sema_const_object(storage, dst)) {
+    if (sema_const_object(storage, dst, e->ident != NULL ? NULL : e->lhs)) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object%s", what);
         }
@@ -4168,7 +4243,7 @@ static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         return -1;
     }
     t = cc_ct_decay(obj);
-    if (sema_const_object(storage, obj)) {
+    if (sema_const_object(storage, obj, e->ident != NULL ? NULL : e->lhs)) {
         sema_diag(diag, "cannot modify const-qualified object with ++/--");
         return -1;
     }

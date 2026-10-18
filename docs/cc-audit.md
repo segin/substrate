@@ -670,13 +670,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   bit-fields start at any bit.  An attribute after a bit-field's width
   (`int b : 4 __attribute__((aligned(8)))`) was rejected too; it is
   accepted.  `codegen/bitfield_layout.c`.
-- [ ] **CC-100** A type qualifier among the declaration specifiers shall
-  qualify the type they give (C11 6.7.3): cc keeps `const` and `volatile`
-  there as storage bits beside the type, so `const int *` is a pointer to
-  plain `int` wherever the type itself is compared --
-  `__builtin_types_compatible_p(int *, const int *)` is 1 (gcc 0).
+- [x] **CC-100** A type qualifier among the declaration specifiers shall
+  qualify the type they give (C11 6.7.3): cc kept `const` and `volatile`
+  there as storage bits beside the type, so `const int *` was a pointer to
+  plain `int` wherever the type itself was compared --
+  `__builtin_types_compatible_p(int *, const int *)` was 1 (gcc 0).
   *Reproduced* (both targets); present before the interned-type
-  refactor.
+  refactor.  `parse_declspec()` qualifies the type it gives.  _Generic
+  then matched both `int *` and `const int *` for a `const int *`
+  operand and fell to `default`, as sema's type comparison drops
+  qualifiers at every level; it now asks `sema_compatible()`, C's
+  compatibility, in which a pointee's qualifiers count, after dropping
+  only the operand's own (6.5.1.1p2).  `codegen/spec_qualifiers.c`.
 - [x] **CC-101** GNU attributes shall be accepted between `enum` and its
   tag, as gcc accepts them: `enum __attribute__((packed)) e { A };` was
   rejected ("expected ';' after declaration"); the attribute after the
@@ -770,6 +775,16 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   without a diagnostic.  *Reproduced* (both targets); found while fixing
   CC-102, and fixed with it: designators are resolved with the type in
   hand, after the elided braces are restored.
+- [x] **CC-117** An lvalue whose type is const-qualified, or a member of a
+  const structure, shall not be assigned or incremented (C11 6.3.2.1p1,
+  6.5.16p2): only a named `const` object was rejected, so `*p = 1` for a
+  `const int *p`, `a[0] = 3` for a `const int a[2]`, `v.a = 2` for a
+  `const struct s v`, `p->a++` for a `const struct s *p` and `p = q` for
+  an `int *const p` were all accepted (gcc rejects each).  *Reproduced*
+  (both targets); found while fixing CC-100, which it needed: with the
+  qualifier now in the type, `sema_const_object()` reads it there and
+  walks member accesses to their structure.
+  `native_bad_c99_readonly_{element,member,arrow,deref,constptr}.c`.
 - [x] **CC-105** A pointer to a function typedef shall be a pointer to
   that function type (C11 6.7.8): after `typedef int fn_t(const char *,
   ...); fn_t *fp;`, `fp` is `int (*)(const char *, ...)`.  The parser
@@ -1216,7 +1231,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-116 requirements: 113 met, 3 open.
+117 requirements: 115 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
