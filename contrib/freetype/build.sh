@@ -1,8 +1,8 @@
 #!/bin/sh
-# contrib/freetype/build.sh — cross-compile FreeType 2.13.2 for substrate.
+# contrib/freetype/build.sh — cross-compile FreeType 2.15.0 for substrate.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION="2.13.2"; TREE_DIR="${HERE}/build/freetype-${VERSION}"
+VERSION="2.15.0"; TREE_DIR="${HERE}/build/freetype-${VERSION}"
 if [ -z "${SUBSTRATE_TOP:-}" ]; then
     p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
     SUBSTRATE_TOP="${p}"

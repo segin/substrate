@@ -1,4 +1,4 @@
-# freetype (2.13.2)
+# freetype (2.15.0)
 
 Font rasterizer for cairo/pango/fontconfig.  Cross-built against dist-zlib +
 dist-libpng via the substrate-autotools helpers; --without-brotli/bzip2.

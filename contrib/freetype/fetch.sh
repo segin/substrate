@@ -1,13 +1,15 @@
 #!/bin/sh
-# contrib/freetype/fetch.sh — FreeType 2.13.2 (font rasterizer; cairo/pango/fontconfig).
+# contrib/freetype/fetch.sh — FreeType 2.15.0 (font rasterizer; cairo/pango/fontconfig).
 set -eu
-VERSION="2.13.2"
+VERSION="2.15.0"
 TARBALL="freetype-${VERSION}.tar.xz"
 URL="https://download.savannah.gnu.org/releases/freetype/${TARBALL}"
 # savannah returned HTTP 504 mid-bootstrap and took the whole run with it.
 # SourceForge carries the byte-identical tarball (same SHA256, verified).
 URL_FALLBACK="https://downloads.sourceforge.net/freetype/${TARBALL}"
-SHA256="12991c4e55c506dd7f9b765933e62fd2be2e06d421505d7950a132e4f1bb484d"
+# Verified against the release's PGP signature (freetype-2.15.0.tar.xz.sig),
+# Werner Lemberg <wl@gnu.org>, key E30674707856409FF1948010BE6C3AAC63AD8E3F.
+SHA256="93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/freetype-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
