@@ -1428,6 +1428,7 @@ static cc_expr_t *parser_binary128_literal(parser_t *p) {
     }
     e->ctype = cc_ct_record(sid);
     e->lhs = outer;
+    e->encoded_literal = 1;
     return e;
 }
 
@@ -1488,6 +1489,7 @@ static cc_expr_t *parser_decimal_literal(parser_t *p) {
     }
     e->ctype = cc_ct_record(sid);
     e->lhs = outer;
+    e->encoded_literal = 1;
     return e;
 }
 
@@ -7573,6 +7575,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->int_val_hi = src->int_val_hi;
     dst->named_const_type = src->named_const_type;
     dst->excess_precision = src->excess_precision;
+    dst->encoded_literal = src->encoded_literal;
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;

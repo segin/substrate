@@ -149,6 +149,13 @@ struct cc_expr {
      * 5.2.4.2.2p9), which a conversion takes from the operand, not the cast.
      */
     unsigned char excess_precision;
+    /**
+     * A CC_EXPR_CAST to a decimal floating type or _Float128 whose brace list
+     * is the constant's encoding, as the parser makes a literal and sema a
+     * folded conversion -- not a compound literal the program wrote, whose
+     * list holds a value of the type.
+     */
+    unsigned char encoded_literal;
     long long int_val;
     long long int_val_hi; /**< an array designator `[lo ... hi]`'s hi (int_val is lo); lo for `[index]` */
     double float_val;

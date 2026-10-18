@@ -690,6 +690,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   through (arithmetic mixing the two stays an error, as in gcc) and
   `lower_b128_cast()` calls the libgcc function named by which format is
   the wider.  `codegen/float128_decimal.c`.
+- [x] **CC-126** A compound literal of a decimal floating type or of
+  `_Float128` shall hold the value its initializer converts to (C11
+  6.5.2.5): `(_Decimal64){ x }` for `double x = 1` was 1's bits taken for
+  a BID encoding (`0x0000000000000001`, a tiny subnormal; gcc
+  `0x31c0000000000001`, 1), and the same for every such literal of a
+  value -- silently, at every width.  *Reproduced* (both targets); found
+  while testing CC-120, present since CC-69.  cc spells its own constants
+  of these types as a compound literal of their encoding, and sema could
+  not tell a program's from its own; those it makes are now marked
+  (`cc_expr_t.encoded_literal`), and a program's is the cast of its value.
+  `codegen/soft_float_compound_literal.c`.
 - [ ] **CC-121** A static `_Float128` initialized by a constant
   expression of another floating type shall be that expression's value,
   as gcc folds it: `static _Float128 s = 1.0 / 3;` is rejected
@@ -1311,7 +1322,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-125 requirements: 120 met, 5 open.
+126 requirements: 121 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
