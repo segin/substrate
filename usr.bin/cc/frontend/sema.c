@@ -1492,6 +1492,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
  * @param t   the type, or NULL
  * @return    the element type, or NULL if @p t is not complex
  */
+static int sema_is_b128_type(const cc_translation_unit_t *tu, const cc_ctype_t *t);
+static int sema_b128_sid(const cc_translation_unit_t *tu);
+
 static const cc_ctype_t *sema_complex_elem(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
     int sid = sx_ct_record(t);
 
@@ -1543,7 +1546,11 @@ static int sema_complex_operand_rank(const cc_translation_unit_t *tu, const cc_e
     const cc_ctype_t *ce = sema_complex_elem(tu, t);
 
     if (ce != NULL) {
-        return sema_float_rank(ce);
+        return sema_is_b128_type(tu, ce) ? 4 : sema_float_rank(ce);
+    }
+    if (sema_is_b128_type(tu, t)) {
+        /* _Float128 outranks long double on x86 */
+        return 4;
     }
     if (cc_ct_is_integer(t)) {
         return 0;
@@ -1809,7 +1816,8 @@ int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t *
     if (de == se) {
         return 0;
     }
-    if (de != NULL ? sema_complex_operand_rank(tu, *slot) < 0 : !(cc_ct_is_integer(t) || sema_float_rank(t) > 0)) {
+    if (de != NULL ? sema_complex_operand_rank(tu, *slot) < 0
+                   : !(cc_ct_is_integer(t) || sema_float_rank(t) > 0 || sema_is_b128_type(tu, t))) {
         return 0;
     }
     if (de == NULL && t->kind == CC_CT_BOOL) {
@@ -1885,12 +1893,16 @@ static int sema_complex_binop(const cc_translation_unit_t *tu, cc_expr_t *e, cc_
         return 0;
     }
     rank = lr > rr ? lr : rr;
-    sid = sema_complex_sid(tu, sema_rank_float(rank));
-    if (sid < 0) {
-        sema_diag(diag, "complex result type is not available");
-        return -1;
+    {
+        const cc_ctype_t *elem = rank == 4 ? cc_ct_record(sema_b128_sid(tu)) : sema_rank_float(rank);
+
+        sid = sema_complex_sid(tu, elem);
+        if (sid < 0) {
+            sema_diag(diag, "complex result type is not available");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, elem));
     }
-    sema_set_type(e, cc_ct_complex(CC_CT_COMPLEX, sema_rank_float(rank)));
     return 0;
 }
 
@@ -2674,8 +2686,8 @@ static int sema_b128_fold_value(const cc_translation_unit_t *tu, const cc_expr_t
         return 0;
     }
     if (e->kind == CC_EXPR_CAST && e->lhs != NULL && e->lhs->kind != CC_EXPR_INIT_LIST &&
-        sx_ct_record(e->ctype) < 0 && sema_b128_cast_is_exact(e)) {
-        /* an excess-precision cast, or a widening one: the operand's value */
+        ((sx_ct_record(e->ctype) < 0 && sema_b128_cast_is_exact(e)) || sema_is_b128_type(tu, e->ctype))) {
+        /* an excess-precision cast, a widening one, or one to _Float128 (exact from any binary type): the value */
         return sema_b128_fold_value(tu, e->lhs, enc);
     }
     if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_MUL && e->lhs != NULL && sema_b128_is_minus_one(e->lhs) &&
@@ -3210,6 +3222,89 @@ static cc_expr_t *sema_float_literal(const cc_ctype_t *t, long double v, size_t 
 }
 
 /**
+ * Fold @p e, a constant of a complex or real type, to a _Complex _Float128
+ * value's parts, as gcc folds it: a complex value built of parts, one
+ * converted to the complex type, the sum or difference of two, a negated
+ * one, or a real constant (its imaginary part +0).
+ *
+ * @param re  receives the real part's encoding
+ * @param im  receives the imaginary part's
+ * @return    1 if folded, 0 if @p e is not such a constant
+ */
+static int sema_b128_complex_fold(const cc_translation_unit_t *tu, const cc_expr_t *e, uint64_t re[2], uint64_t im[2]) {
+    uint64_t r2[2];
+    uint64_t i2[2];
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_COMPLEX) {
+        return sema_b128_fold_value(tu, e->lhs, re) && sema_b128_fold_value(tu, e->rhs, im);
+    }
+    if (e->kind == CC_EXPR_CAST && sema_complex_elem(tu, e->ctype) != NULL && e->lhs != NULL) {
+        return sema_b128_complex_fold(tu, e->lhs, re, im);
+    }
+    if (e->kind == CC_EXPR_BIN && sema_complex_elem(tu, e->ctype) != NULL) {
+        if (e->op == CC_BIN_MUL && sema_b128_is_minus_one(e->lhs)) {
+            if (!sema_b128_complex_fold(tu, e->rhs, re, im)) {
+                return 0;
+            }
+            re[1] ^= 0x8000000000000000ULL;
+            im[1] ^= 0x8000000000000000ULL;
+            return 1;
+        }
+        if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) && sema_b128_complex_fold(tu, e->lhs, re, im) &&
+            sema_b128_complex_fold(tu, e->rhs, r2, i2)) {
+            int op = e->op == CC_BIN_ADD ? '+' : '-';
+
+            return cc_b128_arith(op, re, r2, re) == 0 && cc_b128_arith(op, im, i2, im) == 0;
+        }
+        return 0;
+    }
+    im[0] = 0;
+    im[1] = 0;
+    return sema_b128_fold_value(tu, e, re);
+}
+
+/**
+ * Make a checked initializer of a static _Complex _Float128 object the
+ * brace list `{ { { re } }, { { im } } }` of its folded parts' encodings.
+ *
+ * @return 0, or -1 with @p diag set if it is not a constant
+ */
+static int sema_b128_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t **slot, cc_diag_t *diag) {
+    uint64_t re[2];
+    uint64_t im[2];
+    cc_expr_t *list;
+    cc_expr_t **items;
+
+    if (!sema_b128_complex_fold(tu, *slot, re, im)) {
+        sema_diag(diag, "initializer of a static complex object is not an arithmetic constant");
+        return -1;
+    }
+    list = (cc_expr_t *)calloc(1, sizeof(*list));
+    items = (cc_expr_t **)calloc(2, sizeof(*items));
+    if (list == NULL || items == NULL || (items[0] = sema_decimal_list(128, re, (*slot)->line, (*slot)->col)) == NULL ||
+        (items[1] = sema_decimal_list(128, im, (*slot)->line, (*slot)->col)) == NULL) {
+        if (items != NULL) {
+            cc_expr_free(items[0]);
+        }
+        free(items);
+        free(list);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    list->kind = CC_EXPR_INIT_LIST;
+    list->line = (*slot)->line;
+    list->col = (*slot)->col;
+    list->args = items;
+    list->arg_count = 2;
+    cc_expr_free(*slot);
+    *slot = list;
+    return 0;
+}
+
+/**
  * Make a checked initializer of a static complex object of element type
  * @p elem the brace list `{ re, im }` of its folded constant parts, which
  * the structure-initializer path lays out.
@@ -3223,6 +3318,9 @@ static int sema_complex_static_init(const cc_translation_unit_t *tu, cc_expr_t *
     cc_expr_t *list;
     cc_expr_t **items;
 
+    if (sema_is_b128_type(tu, elem)) {
+        return sema_b128_complex_static_init(tu, slot, diag);
+    }
     if (sema_fold_complex(tu, *slot, &re, &im, 0) != 0) {
         sema_diag(diag, "initializer of a static complex object is not an arithmetic constant");
         return -1;
@@ -3565,7 +3663,7 @@ int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *e, cc_d
         return -1;
     }
     rank = lr > rr ? lr : rr;
-    elem = sema_rank_float(rank);
+    elem = rank == 4 ? cc_ct_record(sema_b128_sid(tu)) : sema_rank_float(rank);
     sid = sema_complex_sid(tu, elem);
     if (sid < 0) {
         sema_diag(diag, "complex type has no layout");
@@ -4036,7 +4134,9 @@ static int sema_check_bin(const cc_translation_unit_t *tu, cc_expr_t *e, var_ent
     } else if (sema_is_vector(tu, e->lhs) || sema_is_vector(tu, e->rhs)) {
         return sema_vector_binop(tu, e, diag);
     }
-    if (sema_is_decimal(tu, e->lhs) || sema_is_decimal(tu, e->rhs)) {
+    if ((sema_is_decimal(tu, e->lhs) || sema_is_decimal(tu, e->rhs)) &&
+        sema_complex_elem(tu, sx_vtype(e->lhs)) == NULL && sema_complex_elem(tu, sx_vtype(e->rhs)) == NULL) {
+        /* a _Float128 beside a complex operand is the complex operation's (below) */
         if (!is_logical_op(e->op)) {
             return sema_decimal_binop(tu, e, diag);
         }
@@ -4283,7 +4383,7 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         /* `(double)(f / 3)` converts the quotient's value, with its excess precision (C11 6.3.1.8p2) */
         sema_excess_unwrap(&e->lhs);
     }
-    if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL && cc_ct_is_arithmetic(to) &&
+    if (sema_complex_elem(tu, sx_vtype(e->lhs)) != NULL && (cc_ct_is_arithmetic(to) || sema_is_b128_type(tu, to)) &&
         sema_complex_elem(tu, to) == NULL) {
         /* complex to real: the real part (C11 6.3.1.7); to _Bool: whether either part is nonzero */
         if ((ct_kind_is(to->unqual, CC_CT_BOOL) ? sema_complex_truth(tu, &e->lhs)
@@ -4295,7 +4395,8 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
     if (sema_is_vector(tu, e->lhs) || sema_vector_def(tu, to) != NULL) {
         return sema_vector_cast(tu, e, diag);
     }
-    if (sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, to) != NULL) {
+    if ((sema_is_decimal(tu, e->lhs) || sema_decimal_def(tu, to) != NULL) && sema_complex_elem(tu, to) == NULL) {
+        /* (a _Float128 to a complex type is the complex conversion's, below) */
         return sema_decimal_cast(tu, e, diag);
     }
     from = sx_vtype(e->lhs);

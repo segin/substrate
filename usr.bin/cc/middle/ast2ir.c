@@ -2926,6 +2926,20 @@ static const cc_ctype_t *complex_elem_of(const cc_translation_unit_t *tu, int si
     return tu->structs[sid].complex_elem;
 }
 
+static int lower_complex_b128_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                    var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e,
+                                    cc_diag_t *diag);
+static int lower_complex_b128_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                   var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag);
+static int b128_to_real(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, int addr, const cc_ctype_t *to,
+                        cc_diag_t *diag);
+static int dec_is_binary(const cc_translation_unit_t *tu, int sid);
+
+/** Whether @p t, a complex type's element, is _Float128 (the structure standing for it). */
+static int complex_elem_is_b128(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    return t != NULL && t->unqual->kind == CC_CT_RECORD && dec_is_binary(tu, t->unqual->id);
+}
+
 /** A floating value of type @p from as one of type @p to (float, double or long double). */
 static int complex_fp_convert(cc_ssa_function_t *sf, int v, const cc_ctype_t *from, const cc_ctype_t *to,
                               cc_diag_t *diag) {
@@ -3064,6 +3078,15 @@ static int complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                            int *re, int *im, cc_diag_t *diag) {
     const cc_ctype_t *ce = complex_elem_of(tu, lower_record_id(e));
 
+    if (ce != NULL && complex_elem_is_b128(tu, ce)) {
+        /* a _Complex _Float128 read as a narrower complex type: each part by libgcc */
+        int addr = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
+        int ip = addr < 0 ? -1 : complex_part_addr(sf, addr, 16, diag);
+
+        *re = ip < 0 ? -1 : b128_to_real(tu, sf, addr, elem, diag);
+        *im = *re < 0 ? -1 : b128_to_real(tu, sf, ip, elem, diag);
+        return (*re < 0 || *im < 0) ? -1 : 0;
+    }
     if (ce != NULL) {
         int addr = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
 
@@ -3153,6 +3176,13 @@ static int lower_complex_binop(const cc_translation_unit_t *tu, cc_ssa_function_
     int x = -1;
     int y = -1;
 
+    if (complex_elem_is_b128(tu, elem) ||
+        (elem == NULL && (complex_elem_is_b128(tu, complex_elem_of(tu, lower_record_id(e->lhs))) ||
+                          complex_elem_is_b128(tu, complex_elem_of(tu, lower_record_id(e->rhs))) ||
+                          dec_is_binary(tu, lower_record_id(e->lhs)) || dec_is_binary(tu, lower_record_id(e->rhs))))) {
+        /* _Complex _Float128, or a comparison with one: by libgcc */
+        return lower_complex_b128_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
+    }
     if (elem == NULL) {
         /* == or !=: compare in the wider of the operands' types */
         const cc_ctype_t *le = complex_elem_of(tu, lower_record_id(e->lhs));
@@ -3262,6 +3292,9 @@ static int lower_complex_cast(const cc_translation_unit_t *tu, cc_ssa_function_t
     int re;
     int im;
 
+    if (complex_elem_is_b128(tu, elem)) {
+        return lower_complex_b128_cast(tu, sf, ctx, vars, var_count, depth, e, diag);
+    }
     if (complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, elem, &re, &im, diag) != 0) {
         return -1;
     }
@@ -4201,7 +4234,8 @@ static int dec_libcall(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, c
         in.call_arg_sizes[i] = size;
     }
     if (ret == DEC_ARG_DEC) {
-        long rsize = dec_bits_of(tu, ret_sid) / 8;
+        /* a soft floating value's size, or a structure's: _Complex _Float128 from __multc3 */
+        long rsize = dec_bits_of(tu, ret_sid) > 0 ? dec_bits_of(tu, ret_sid) / 8 : tu->structs[ret_sid].size;
         int storage = cc_ir_stackalloc(sf, rsize, diag);
 
         in.dst = storage;
@@ -4392,6 +4426,297 @@ static int lower_b128_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     }
     set_diag(diag, "unsupported conversion from _Float128");
     return -1;
+}
+
+/*
+ * _Complex _Float128: a value is the address of its two binary128 parts,
+ * `{ __re, __im }`, and so is each part.  Every operation on the parts is
+ * libgcc's soft-fp; a product or quotient of two complex values is
+ * __multc3's or __divtc3's, as gcc computes them.
+ */
+
+/** The structure standing for _Float128, or -1 if the program names it nowhere. */
+static int b128_sid(const cc_translation_unit_t *tu) {
+    size_t i;
+
+    for (i = 0; i < tu->struct_count; ++i) {
+        if (tu->structs[i].binary_bits > 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Call libgcc's @p name on the binary128 values at @p args.
+ *
+ * @param ret      what it returns: DEC_ARG_DEC (a value of structure
+ *                 @p ret_sid, in new storage) or DEC_ARG_INT
+ * @param ret_sid  the result's structure: _Float128's or the complex one's
+ * @return         the result (an address for DEC_ARG_DEC), or -1
+ */
+static int b128_call(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const char *name, const int *args,
+                     size_t nargs, dec_arg_t ret, int ret_sid, cc_diag_t *diag) {
+    dec_arg_t kinds[4] = {DEC_ARG_DEC, DEC_ARG_DEC, DEC_ARG_DEC, DEC_ARG_DEC};
+    int sid = b128_sid(tu);
+    int sids[4] = {sid, sid, sid, sid};
+    size_t i;
+
+    for (i = 0; i < nargs; ++i) {
+        if (args[i] < 0) {
+            return -1;
+        }
+    }
+    return dec_libcall(tu, sf, name, args, kinds, sids, nargs, ret, ret_sid, diag);
+}
+
+/** The binary128 value at @p addr converted to real floating type @p to (float, double, long double). */
+static int b128_to_real(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, int addr, const cc_ctype_t *to,
+                        cc_diag_t *diag) {
+    dec_arg_t kind = DEC_ARG_DEC;
+    int sid = b128_sid(tu);
+    dec_arg_t rk = to->kind == CC_CT_FLOAT ? DEC_ARG_FLOAT : to->kind == CC_CT_DOUBLE ? DEC_ARG_DOUBLE : DEC_ARG_LDOUBLE;
+    int r;
+
+    r = dec_libcall(tu, sf,
+                    to->kind == CC_CT_FLOAT    ? "__trunctfsf2"
+                    : to->kind == CC_CT_DOUBLE ? "__trunctfdf2"
+                                               : "__trunctfxf2",
+                    &addr, &kind, &sid, 1, rk, -1, diag);
+    return r >= 0 && to->kind == CC_CT_FLOAT ? round_to_float(sf, r, diag) : r;
+}
+
+/** The real floating value @p v, of type @p from (float, double or long double), as a binary128 value's address. */
+static int b128_from_real(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, int v, const cc_ctype_t *from,
+                          cc_diag_t *diag) {
+    dec_arg_t kind = from->kind == CC_CT_FLOAT    ? DEC_ARG_FLOAT
+                     : from->kind == CC_CT_DOUBLE ? DEC_ARG_DOUBLE
+                                                  : DEC_ARG_LDOUBLE;
+    int sid = -1;
+
+    if (v < 0) {
+        return -1;
+    }
+    return dec_libcall(tu, sf,
+                       from->kind == CC_CT_FLOAT    ? "__extendsftf2"
+                       : from->kind == CC_CT_DOUBLE ? "__extenddftf2"
+                                                    : "__extendxftf2",
+                       &v, &kind, &sid, 1, DEC_ARG_DEC, b128_sid(tu), diag);
+}
+
+/** A binary128 +0 in new storage; its address. */
+static int b128_zero(cc_ssa_function_t *sf, cc_diag_t *diag) {
+    int addr = cc_ir_stackalloc(sf, 16, diag);
+    int hi = addr < 0 ? -1 : complex_part_addr(sf, addr, 8, diag);
+    int z = hi < 0 ? -1 : cc_ir_const(sf, 0);
+    cc_ssa_instr_t st;
+
+    if (z < 0) {
+        return -1;
+    }
+    /* an 8-byte zero, two words on i386 */
+    cc_ir_set_size(sf, z, 8);
+    memset(&st, 0, sizeof(st));
+    st.op = CC_SSA_STORE;
+    st.dst = -1;
+    st.lhs = addr;
+    st.rhs = z;
+    st.imm = 8;
+    if (cc_ir_push(sf, st) != 0) {
+        set_diag(diag, "out of memory storing a zero");
+        return -1;
+    }
+    st.lhs = hi;
+    if (cc_ir_push(sf, st) != 0) {
+        set_diag(diag, "out of memory storing a zero");
+        return -1;
+    }
+    return addr;
+}
+
+/** A new _Complex _Float128 holding the parts at @p re and @p im; its address. */
+static int b128_store_pair(cc_ssa_function_t *sf, int re, int im, cc_diag_t *diag) {
+    int addr = (re < 0 || im < 0) ? -1 : cc_ir_stackalloc(sf, 32, diag);
+    int ip = addr < 0 ? -1 : complex_part_addr(sf, addr, 16, diag);
+
+    if (ip < 0 || emit_memcpy_instr(sf, addr, re, 16, diag) != 0 || emit_memcpy_instr(sf, ip, im, 16, diag) != 0) {
+        return -1;
+    }
+    return addr;
+}
+
+/**
+ * Read an operand of a _Complex _Float128 operation as the addresses of
+ * binary128 parts: a complex one's two (a narrower complex type's
+ * converted), a real one's value with *@p im set to -1 (Annex G.5).
+ */
+static int b128_complex_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, int *re, int *im,
+                                cc_diag_t *diag) {
+    const cc_ctype_t *ce = complex_elem_of(tu, lower_record_id(e));
+    int addr;
+
+    *im = -1;
+    if (ce != NULL) {
+        addr = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
+        if (addr < 0) {
+            return -1;
+        }
+        if (complex_elem_is_b128(tu, ce)) {
+            *re = addr;
+            *im = complex_part_addr(sf, addr, 16, diag);
+        } else {
+            *re = b128_from_real(tu, sf, complex_load_part(sf, addr, ce, 0, diag), ce, diag);
+            *im = *re < 0 ? -1 : b128_from_real(tu, sf, complex_load_part(sf, addr, ce, 1, diag), ce, diag);
+        }
+        return (*re < 0 || *im < 0) ? -1 : 0;
+    }
+    if (dec_is_binary(tu, lower_record_id(e))) {
+        *re = lower_expr(tu, sf, ctx, vars, var_count, depth, e, diag);
+    } else {
+        /* an integer or real floating operand: converted as a cast to _Float128 converts it */
+        cc_expr_t c;
+
+        memset(&c, 0, sizeof(c));
+        c.kind = CC_EXPR_CAST;
+        c.ctype = cc_ct_record(b128_sid(tu));
+        c.lhs = (cc_expr_t *)e;
+        *re = lower_expr(tu, sf, ctx, vars, var_count, depth, &c, diag);
+    }
+    return *re < 0 ? -1 : 0;
+}
+
+/** Whether the binary128 values at @p a and @p b compare equal: 1 or 0, by __eqtf2. */
+static int b128_equal(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, int a, int b, cc_diag_t *diag) {
+    int args[2] = {a, b};
+    int r = b128_call(tu, sf, "__eqtf2", args, 2, DEC_ARG_INT, -1, diag);
+    int z = r < 0 ? -1 : cc_ir_const(sf, 0);
+    int c;
+
+    if (z < 0) {
+        return -1;
+    }
+    cc_ir_set_size(sf, z, 4);
+    c = emit_cmp_instr(sf, CC_CMP_EQ, r, z, 0, diag);
+    if (c >= 0) {
+        cc_ir_set_size(sf, c, 4);
+    }
+    return c;
+}
+
+/**
+ * A binary operator of a _Complex _Float128 operation (see
+ * lower_complex_binop()): + - * / give a new complex value's address, ==
+ * and != an int, `z ^ -1` the conjugate.  A real operand stays real.
+ */
+static int lower_complex_b128_binop(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                    var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e,
+                                    cc_diag_t *diag) {
+    int csid = lower_record_id(e);
+    int a, b, c, d;
+    int x = -1;
+    int y = -1;
+    int args[4];
+
+    if (b128_complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, &a, &b, diag) != 0) {
+        return -1;
+    }
+    if (e->op == CC_BIN_BXOR) {
+        args[0] = b;
+        return b128_store_pair(sf, a, b128_call(tu, sf, "__negtf2", args, 1, DEC_ARG_DEC, b128_sid(tu), diag), diag);
+    }
+    if (b128_complex_operand(tu, sf, ctx, vars, var_count, depth, e->rhs, &c, &d, diag) != 0) {
+        return -1;
+    }
+    if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE) {
+        int eq_re;
+        int eq_im;
+        int both;
+
+        if (b < 0) {
+            b = b128_zero(sf, diag);
+        }
+        if (d < 0) {
+            d = b128_zero(sf, diag);
+        }
+        eq_re = b128_equal(tu, sf, a, c, diag);
+        eq_im = eq_re < 0 ? -1 : b128_equal(tu, sf, b, d, diag);
+        both = eq_im < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_AND, eq_re, eq_im, 1, diag);
+        if (both < 0 || e->op == CC_BIN_EQ) {
+            return both;
+        }
+        return emit_i64_binop_instr(sf, CC_SSA_XOR, both, cc_ir_const(sf, 1), 1, diag);
+    }
+#define B128_OP2(name, p, q) (args[0] = (p), args[1] = (q), b128_call(tu, sf, (name), args, 2, DEC_ARG_DEC, b128_sid(tu), diag))
+    switch (e->op) {
+    case CC_BIN_ADD:
+        x = B128_OP2("__addtf3", a, c);
+        y = b < 0 ? d : (d < 0 ? b : B128_OP2("__addtf3", b, d));
+        break;
+    case CC_BIN_SUB:
+        x = B128_OP2("__subtf3", a, c);
+        if (d < 0) {
+            y = b;
+        } else if (b < 0) {
+            args[0] = d;
+            y = b128_call(tu, sf, "__negtf2", args, 1, DEC_ARG_DEC, b128_sid(tu), diag);
+        } else {
+            y = B128_OP2("__subtf3", b, d);
+        }
+        break;
+    case CC_BIN_MUL:
+        if (b < 0) {
+            x = B128_OP2("__multf3", a, c);
+            y = B128_OP2("__multf3", a, d);
+        } else if (d < 0) {
+            x = B128_OP2("__multf3", a, c);
+            y = B128_OP2("__multf3", b, c);
+        } else {
+            args[0] = a;
+            args[1] = b;
+            args[2] = c;
+            args[3] = d;
+            return b128_call(tu, sf, "__multc3", args, 4, DEC_ARG_DEC, csid, diag);
+        }
+        break;
+    case CC_BIN_DIV:
+        if (d < 0) {
+            x = B128_OP2("__divtf3", a, c);
+            y = B128_OP2("__divtf3", b, c);
+        } else {
+            args[0] = a;
+            args[1] = b < 0 ? b128_zero(sf, diag) : b;
+            args[2] = c;
+            args[3] = d;
+            return b128_call(tu, sf, "__divtc3", args, 4, DEC_ARG_DEC, csid, diag);
+        }
+        break;
+    default:
+        set_diag(diag, "invalid _Complex _Float128 operation in lowering");
+        return -1;
+    }
+#undef B128_OP2
+    return b128_store_pair(sf, x, y, diag);
+}
+
+/**
+ * A cast to _Complex _Float128: a new value holding the source converted
+ * -- a complex source's two parts, a real one as the real part with a zero
+ * imaginary part.
+ */
+static int lower_complex_b128_cast(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                   var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e,
+                                   cc_diag_t *diag) {
+    int re;
+    int im;
+
+    if (b128_complex_operand(tu, sf, ctx, vars, var_count, depth, e->lhs, &re, &im, diag) != 0) {
+        return -1;
+    }
+    if (im < 0) {
+        im = b128_zero(sf, diag);
+    }
+    return b128_store_pair(sf, re, im, diag);
 }
 
 /**
@@ -4968,7 +5293,9 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
              (e->rhs != NULL && vec_of(tu,lower_record_id(e->rhs), &vv)))) {
             return lower_vector_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
-        if (dec_bits_of(tu,lower_record_id(e->lhs)) != 0) {
+        if (dec_bits_of(tu,lower_record_id(e->lhs)) != 0 && complex_elem_of(tu, lower_record_id(e)) == NULL &&
+            (e->rhs == NULL || complex_elem_of(tu, lower_record_id(e->rhs)) == NULL)) {
+            /* (a _Float128 beside a complex operand is the complex operation's) */
             return lower_decimal_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (wide_of(tu,lower_record_id(e->lhs), &ww)) {
@@ -6650,6 +6977,10 @@ int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const low
                 set_diag(diag, "malformed complex value in lowering");
             }
             return -1;
+        }
+        if (complex_elem_is_b128(tu, elem)) {
+            /* the parts are _Float128 values, each its storage's address */
+            return b128_store_pair(sf, re, im, diag);
         }
         return complex_store_new(sf, re, im, elem, diag);
     }

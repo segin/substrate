@@ -73,6 +73,7 @@ _Decimal64 lib_d64(_Decimal64 a, double x, _Decimal64 b);
 _Decimal128 lib_d128(int n, _Decimal128 a, _Decimal64 b);
 _Float128 lib_f128(int n, _Float128 a, double x, __float128 b);
 int lib_f128_lt(_Float128 a, _Float128 b, int k);
+_Complex _Float128 lib_cf128(int n, _Complex _Float128 a, _Float128 b);
 
 /* decimal values and _Float128 across the call, printed as their encodings */
 static void decimals(void) {
@@ -87,6 +88,13 @@ static void decimals(void) {
     __builtin_memcpy(v, &f, 16);
     printf("%08x %016llx %016llx%016llx %016llx%016llx %d\n", *(unsigned *)&s, *(unsigned long long *)&d, w[1], w[0],
            v[1], v[0], lib_f128_lt(f, 8, 3));
+    {
+        _Complex _Float128 z = lib_cf128(2, 1.5f128 + 2.0if128, 0.25f128);
+        unsigned long long c[4];
+
+        __builtin_memcpy(c, &z, 32);
+        printf("%016llx%016llx %016llx%016llx\n", c[1], c[0], c[3], c[2]);
+    }
 }
 
 /* vectors across the call */

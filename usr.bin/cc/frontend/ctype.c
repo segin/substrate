@@ -153,8 +153,8 @@ static cc_ctype_t ct_key(cc_ctype_kind_t kind) {
 /**
  * Forget every type built so far.
  */
-/** The structures standing for float, double and long double _Complex; -1 where none is made. */
-static int ct_complex_records[3] = {-1, -1, -1};
+/** The structures standing for float, double, long double and _Float128 _Complex; -1 where none is made. */
+static int ct_complex_records[4] = {-1, -1, -1, -1};
 
 void cc_ct_reset(void) {
     size_t i;
@@ -240,30 +240,36 @@ const cc_ctype_t *cc_ct_bitint(long width, int is_unsigned) {
  * _Complex or _Imaginary of a real floating type.
  *
  * @param kind  CC_CT_COMPLEX or CC_CT_IMAGINARY
- * @param elem  float, double or long double
+ * @param elem  float, double or long double (or a _FloatN of their formats),
+ *              or the structure standing for _Float128 (complex only)
  * @return      the type, or NULL
  */
 const cc_ctype_t *cc_ct_complex(cc_ctype_kind_t kind, const cc_ctype_t *elem) {
     cc_ctype_t k = ct_key(kind);
 
     if ((kind != CC_CT_COMPLEX && kind != CC_CT_IMAGINARY) || elem == NULL ||
-        (elem->kind != CC_CT_FLOAT && elem->kind != CC_CT_DOUBLE && elem->kind != CC_CT_LDOUBLE)) {
+        (elem->kind != CC_CT_FLOAT && elem->kind != CC_CT_DOUBLE && elem->kind != CC_CT_LDOUBLE &&
+         !(elem->kind == CC_CT_RECORD && kind == CC_CT_COMPLEX))) {
         return NULL;
     }
     k.of = elem->unqual;
     return ct_intern(&k);
 }
 
-/** The slot in ct_complex_records for an element kind, or -1. */
+/** The slot in ct_complex_records for an element kind (a structure: _Float128's), or -1. */
 static int ct_complex_slot(cc_ctype_kind_t elem) {
-    return elem == CC_CT_FLOAT ? 0 : (elem == CC_CT_DOUBLE ? 1 : (elem == CC_CT_LDOUBLE ? 2 : -1));
+    return elem == CC_CT_FLOAT    ? 0
+           : elem == CC_CT_DOUBLE  ? 1
+           : elem == CC_CT_LDOUBLE ? 2
+           : elem == CC_CT_RECORD  ? 3
+                                   : -1;
 }
 
 /**
  * Record the structure, `{ T __re, __im; }`, that stands for _Complex T in
  * the legacy encoding (which has no complex kind of its own per element).
  *
- * @param elem  float, double or long double
+ * @param elem  float, double or long double; CC_CT_RECORD for _Float128
  * @param id    the structure's index in the translation unit
  */
 void cc_ct_set_complex_record(cc_ctype_kind_t elem, int id) {
@@ -873,7 +879,7 @@ static void ct_format_base(const cc_ctype_t *t, char *buf, size_t cap) {
     case CC_CT_COMPLEX:
     case CC_CT_IMAGINARY:
         snprintf(tmp, sizeof(tmp), "%s %s", t->kind == CC_CT_COMPLEX ? "_Complex" : "_Imaginary",
-                 names[t->of->kind]);
+                 t->of->kind == CC_CT_RECORD ? "_Float128" : names[t->of->kind]);
         break;
     case CC_CT_ENUM:
         snprintf(tmp, sizeof(tmp), "enum #%d", t->id);

@@ -103,6 +103,8 @@ _Decimal128 lib_d128(int n, _Decimal128 a, _Decimal64 b) { return a * b + n; }
 /* _Float128 as _Decimal128 travels: in an xmm register on x86-64, on i386 on the stack 16-aligned and in memory */
 _Float128 lib_f128(int n, _Float128 a, double x, __float128 b) { return a * b + n - x; }
 int lib_f128_lt(_Float128 a, _Float128 b, int k) { return (a < b) * k; }
+/* _Complex _Float128 in memory on both targets, as any 32-byte structure */
+_Complex _Float128 lib_cf128(int n, _Complex _Float128 a, _Float128 b) { return a * b + n; }
 
 float _Complex lib_cf(float _Complex a, float _Complex b) { return a * b + 1.0f; }
 double _Complex lib_cd(double _Complex a, double _Complex b) { return a / b; }

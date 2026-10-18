@@ -60,6 +60,7 @@ typedef enum {
 #define CC_ABI_VEC128 0x40           /**< with AGG_REG: a 16-byte vector, whole in one xmm register */
 #define CC_ABI_VEC64 0x80            /**< with AGG_REG (i386): an 8-byte vector, whole in one MMX register */
 #define CC_ABI_STACK_VEC 0x40        /**< with AGG_MEM: a vector, its stack copy aligned to its size from 16 up */
+#define CC_ABI_STACK_16 0x80         /**< with AGG_MEM: its stack copy aligned to 16 (_Complex _Float128) */
 #define CC_ABI_RET_VEC128 0x800      /**< agg_class: a 16-byte vector, returned whole in %xmm0 */
 #define CC_ABI_RET_VEC64 0x1000      /**< agg_class (i386): an 8-byte vector, returned in %mm0 */
 

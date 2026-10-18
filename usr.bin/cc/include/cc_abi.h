@@ -11,6 +11,7 @@
  * descriptor's hooks.
  */
 
+#include "cc_ctype.h"
 #include "cc_frontend.h"
 #include "cc_ssa.h"
 #include "cc_target.h"
@@ -49,7 +50,8 @@ static inline int cc_abi_sid_is_vector(const cc_translation_unit_t *tu, int sid)
 
 /**
  * CC_ABI_STACK_VEC for a vector of 16 bytes or more, a _Decimal128 or a _Float128,
- * passed in memory (its copy aligned to its size, as gcc places them),
+ * passed in memory (its copy aligned to its size, as gcc places them);
+ * CC_ABI_STACK_16 for a _Complex _Float128 (its copy 16-aligned);
  * else 0.
  *
  * @param tu    the translation unit
@@ -60,6 +62,11 @@ static inline int cc_abi_stack_vec_flag(const cc_translation_unit_t *tu, int sid
     int dec128 = tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count &&
                  cc_struct_soft_float_bits(&tu->structs[sid]) == 128;
 
+    if (tu != NULL && sid >= 0 && (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem != NULL &&
+        tu->structs[sid].complex_elem->kind == CC_CT_RECORD) {
+        /* _Complex _Float128 (its parts' structure as the element): 16-aligned, not to its 32 bytes */
+        return CC_ABI_STACK_16;
+    }
     return (cc_abi_sid_is_vector(tu, sid) || dec128) && size >= 16 ? CC_ABI_STACK_VEC : 0;
 }
 

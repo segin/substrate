@@ -1388,15 +1388,95 @@ static int parser_binary128_struct(parser_t *p) {
 }
 
 /**
+ * The structure standing for _Complex _Float128: `{ _Float128 __re, __im; }`,
+ * 32 bytes and 16-aligned, as gcc lays it out.  Made once, with
+ * _Float128's own structure and the other complex types, which operations
+ * mixing them may yield.
+ *
+ * @return the structure's id, or -1 when out of memory
+ */
+static int parser_complex_b128_struct(parser_t *p) {
+    int bsid = parser_binary128_struct(p);
+    const cc_ctype_t *bt;
+    size_t i;
+    int sid;
+    int saved_depth = p->scope_depth;
+
+    if (bsid < 0 || parser_complex_struct(p, CC_CT_FLOAT) < 0 || parser_complex_struct(p, CC_CT_DOUBLE) < 0 ||
+        parser_complex_struct(p, CC_CT_LDOUBLE) < 0) {
+        return -1;
+    }
+    bt = cc_ct_record(bsid);
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].complex_elem == bt) {
+            return (int)i;
+        }
+    }
+    p->scope_depth = 0;
+    sid = struct_ensure(p, NULL, 0, 1);
+    p->scope_depth = saved_depth;
+    if (sid < 0 || struct_member_push(p, sid, "__re", bt, 0, 16, 0, 0, 0, 0, 0, 0) < 0 ||
+        struct_member_push(p, sid, "__im", bt, 16, 16, 0, 0, 0, 0, 0, 0) < 0) {
+        return -1;
+    }
+    p->structs[sid].size = 32;
+    p->structs[sid].align = 16;
+    p->structs[sid].complete = 1;
+    p->structs[sid].complex_elem = bt;
+    if (!p->is_probe) {
+        cc_ct_set_complex_record(CC_CT_RECORD, sid);
+    }
+    return sid;
+}
+
+/**
  * The _Float128 constant at the current token (an f128 or q suffix):
  * `(_Float128){ { lo, hi } }`, its binary128 encoding worked out now from
- * the text, rounded once (cc_b128_from_string()).
+ * the text, rounded once (cc_b128_from_string()); with an imaginary `i`
+ * suffix too, the _Complex _Float128 (0, that value).
  *
  * @return the expression, or NULL on error (diagnosed)
  */
+static cc_expr_t *parser_b128_const(parser_t *p, const uint64_t enc[2]);
+
 static cc_expr_t *parser_binary128_literal(parser_t *p) {
-    int sid = parser_binary128_struct(p);
     uint64_t enc[2];
+    uint64_t zero[2] = {0, 0};
+    cc_expr_t *e;
+    cc_expr_t *z;
+    cc_expr_t *c;
+
+    if (cc_b128_from_string(p->tok.start, p->tok.len, enc) != 0) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "malformed _Float128 constant");
+        return NULL;
+    }
+    e = parser_b128_const(p, enc);
+    if (e == NULL || !p->tok.is_imaginary) {
+        return e;
+    }
+    /* `2.0if128`: the complex value (0, 2.0) of _Complex _Float128 */
+    z = parser_complex_b128_struct(p) < 0 ? NULL : parser_b128_const(p, zero);
+    c = z == NULL ? NULL : new_expr(CC_EXPR_COMPLEX);
+    if (c == NULL) {
+        free_expr(z);
+        free_expr(e);
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a _Float128 constant");
+        return NULL;
+    }
+    c->line = p->tok.line;
+    c->col = p->tok.col;
+    c->lhs = z;
+    c->rhs = e;
+    return c;
+}
+
+/**
+ * The _Float128 constant of encoding @p enc: `(_Float128){ { lo, hi } }`.
+ *
+ * @return the expression, or NULL when out of memory (diagnosed)
+ */
+static cc_expr_t *parser_b128_const(parser_t *p, const uint64_t enc[2]) {
+    int sid = parser_binary128_struct(p);
     cc_expr_t *outer = new_expr(CC_EXPR_INIT_LIST);
     cc_expr_t *list = new_expr(CC_EXPR_INIT_LIST);
     cc_expr_t *e = new_expr(CC_EXPR_CAST);
@@ -1407,12 +1487,6 @@ static cc_expr_t *parser_binary128_literal(parser_t *p) {
         free_expr(outer);
         free_expr(e);
         set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a _Float128 constant");
-        return NULL;
-    }
-    if (cc_b128_from_string(p->tok.start, p->tok.len, enc) != 0) {
-        free_expr(outer);
-        free_expr(e);
-        set_diag(p->diag, p->tok.line, p->tok.col, "malformed _Float128 constant");
         return NULL;
     }
     for (k = 0; k < 2; ++k) {
@@ -3004,6 +3078,39 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
 }
 
 /**
+ * `_Complex` with a floating type the specifiers name by a name, not by
+ * `float` or `double` (C23 6.7.2p2: `_Complex _Float64` and the like):
+ * the complex type of it.  A _FloatN of a standard format is carried as
+ * that format's complex type, its declared type kept; _Float128 has a
+ * complex structure of its own (parser_complex_b128_struct()).
+ *
+ * @param p    the parser
+ * @param acc  the specifiers, alias_ctype the floating type; acc->spec
+ *             receives the complex type
+ * @return     0, or -1 on error (diagnosed)
+ */
+static int declspec_complex_alias(parser_t *p, declspec_acc_t *acc) {
+    const cc_ctype_t *elem = acc->alias_ctype->unqual;
+    int ok = 0;
+
+    if (elem->kind == CC_CT_FLOAT || elem->kind == CC_CT_DOUBLE || elem->kind == CC_CT_LDOUBLE) {
+        ok = parser_complex_struct(p, CC_CT_FLOAT) >= 0 && parser_complex_struct(p, CC_CT_DOUBLE) >= 0 &&
+             parser_complex_struct(p, CC_CT_LDOUBLE) >= 0;
+    } else if (elem->kind == CC_CT_RECORD && elem->id >= 0 && (size_t)elem->id < p->struct_count &&
+               p->structs[elem->id].binary_bits > 0) {
+        ok = parser_complex_b128_struct(p) >= 0;
+    } else {
+        set_diag(p->diag, p->tok.line, p->tok.col, "invalid complex/imaginary type combination");
+        return -1;
+    }
+    if (!ok || (acc->spec = cc_ct_complex(CC_CT_COMPLEX, elem)) == NULL) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory making a complex type");
+        return -1;
+    }
+    return 0;
+}
+
+/**
  * Make the type a list of declaration specifiers names (C11 6.7.2): check
  * the combination and give the basic, enumerated, record, complex,
  * decimal, _BitInt or wide type it is, or the one a typedef name gave.
@@ -3077,6 +3184,10 @@ static int declspec_resolve(parser_t *p, declspec_acc_t *acc, int allow_void, co
         if (!allow_void && acc->alias_ctype->kind == CC_CT_VOID) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid use of void in declaration specifiers");
             return -1;
+        }
+        if (acc->seen_complex) {
+            /* `_Complex _Float64`, `_Complex _Float128`: the complex type of that floating type */
+            return declspec_complex_alias(p, acc);
         }
         acc->spec = acc->alias_ctype;
         return 0;

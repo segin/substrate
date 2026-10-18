@@ -24,9 +24,12 @@ static const char *const emit_regs64[] = {"%rax", "%rcx", "%rdx", "%rsi", "%rdi"
  * The stack alignment of an x86-64 aggregate argument with ABI byte
  * @p abi and @p size bytes: a vector's is its size from 16 bytes up (one
  * that went to memory, or a 16-byte one the xmm registers ran out for),
- * as gcc places it; anything else's 8.
+ * as gcc places it; a _Complex _Float128's 16; anything else's 8.
  */
 static size_t abi64_stack_align(unsigned char abi, long size) {
+    if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM && (abi & CC_ABI_STACK_16) != 0) {
+        return 16;
+    }
     if (size >= 16 && (((CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) && (abi & CC_ABI_STACK_VEC) != 0) ||
                        ((CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG) && (abi & CC_ABI_VEC128) != 0))) {
         return (size_t)size;

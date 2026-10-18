@@ -40,11 +40,15 @@ static int i386_param_slot_bytes(long size) {
 /**
  * The stack alignment of an i386 argument or parameter with ABI byte
  * @p abi and @p size bytes: a vector's copy on the stack is aligned to its
- * size from 16 bytes up, as gcc places it; everything else to 4.
+ * size from 16 bytes up, as gcc places it, a _Complex _Float128's to 16;
+ * everything else to 4.
  */
 static long i386_stack_align(unsigned char abi, long size) {
     if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM && (abi & CC_ABI_STACK_VEC) != 0 && size >= 16) {
         return size;
+    }
+    if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM && (abi & CC_ABI_STACK_16) != 0) {
+        return 16;
     }
     return 4;
 }

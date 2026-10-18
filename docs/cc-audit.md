@@ -713,10 +713,26 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   as gcc folds it: `static _Float128 s = 1.0 / 3;` is rejected
   ("initializer of a static _Float128 object is not a constant").
   *Reproduced* (both targets); left by CC-118.
-- [ ] **CC-122** `_Complex _Float128` shall be a complex type of two
+- [x] **CC-122** `_Complex _Float128` shall be a complex type of two
   binary128 parts, multiplied and divided by libgcc's `__multc3` and
-  `__divtc3`, as gcc has it: cc rejects it.  *Reproduced* (both targets);
-  left by CC-118.
+  `__divtc3`, as gcc has it: cc rejected it.  *Reproduced* (both
+  targets); left by CC-118.  Its structure is `{ _Float128 __re, __im; }`
+  (32 bytes, 16-aligned, `parser_complex_b128_struct()`), _Float128 is
+  complex rank 4, above long double, and lowering
+  (`lower_complex_b128_binop()`, `lower_complex_b128_cast()`) works its
+  parts through libgcc's soft-fp, a full product or quotient through
+  `__multc3` or `__divtc3`, a real operand staying real (Annex G.5).
+  Imaginary `if128` constants and static initializers fold in binary128.
+  On i386 its stack copy is 16-aligned (`CC_ABI_STACK_16`), not aligned to
+  its size.  `codegen/complex_float128.c`, `complex_float128_const.c`, the
+  `lib_cf128` case of `codegen_abi/`.
+- [x] **CC-128** `_Complex` with a `_FloatN` type shall be a complex type
+  (C23 6.2.5p13): `_Complex _Float64 a;` was a plain `_Float64` (8 bytes,
+  gcc 16) -- the specifiers' path for a type named by name dropped
+  `_Complex` -- silently, for every `_FloatN`.  *Reproduced* (both
+  targets); found while fixing CC-122.  `declspec_complex_alias()` makes the
+  complex type of the type named, its declared type kept distinct.
+  `codegen/complex_floatn.c`.
 - [ ] **CC-123** `_Alignof` and `__alignof__` of an object shall give the
   object's alignment, as gcc gives it: for `a16 x` (an aligned typedef),
   `int y __attribute__((aligned(32)))`, `_Alignas(64) char z` and a member
@@ -1329,7 +1345,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-127 requirements: 122 met, 5 open.
+128 requirements: 124 met, 4 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
