@@ -27,10 +27,12 @@ fi
 echo "==> Verifying ${TARBALL}"
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 
-if [ ! -d "${TREE_DIR}" ]; then
-    echo "==> Extracting"
-    tar xf "${TARBALL}"
-fi
+# Extract afresh every run: build.sh replaces config.sub
+# (substrate_config_sub_fix), after which a kept tree's 0001 neither applies
+# nor reverses and a second fetch would fail.
+echo "==> Extracting"
+rm -rf "${TREE_DIR}"
+tar xf "${TARBALL}"
 
 if [ -f "${HERE}/series" ]; then
     cd "${TREE_DIR}"
