@@ -189,8 +189,9 @@ struct cc_expr {
                                        node it built, and what sema gives every expression it checks */
     const struct cc_ctype *aux_ctype; /**< the type a `sizeof (T)` or `_Alignof (T)` names, or a string
                                            literal's element type; else NULL */
-    const struct cc_ctype *named_const_type; /**< a CC_EXPR_IDENT naming a constexpr integer object: its
-                                                  type, int_val its value's bits; else NULL */
+    const struct cc_ctype *named_const_type; /**< a CC_EXPR_IDENT naming a constexpr integer object, or a
+                                                  CC_EXPR_MEMBER an integer member of a constexpr structure:
+                                                  its type, int_val its value's bits; else NULL */
 };
 
 typedef enum {

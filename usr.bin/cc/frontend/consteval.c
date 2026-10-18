@@ -550,7 +550,8 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
         }
         return const_eval_builtin(env, e, out);
     case CC_EXPR_IDENT:
-        /* a named constant (C23 6.6p7): a constexpr object, its value recorded where it is named */
+    case CC_EXPR_MEMBER:
+        /* a named constant (C23 6.6p7): a constexpr object or member, its value recorded where it is named */
         if (e->named_const_type == NULL) {
             return -1;
         }

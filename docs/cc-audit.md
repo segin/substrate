@@ -754,12 +754,21 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   assignment, increment, a call or the comma (`parser_constexpr_operand()`);
   a compound literal is not one.  `native_bad_c23_constexpr_float_nonconst.c`,
   `_struct_nonconst.c`, `_array_nonconst.c`; `codegen/constexpr_aggregate.c`.
-- [ ] **CC-129** A member of a constexpr structure shall be a named
+- [x] **CC-129** A member of a constexpr structure shall be a named
   constant (C23 6.6p7): `constexpr struct s a = {1}; constexpr int b =
-  a.x;` is rejected ("initializer element is not constant"), and `a.x`
-  cannot bound an array; gcc accepts both.  *Reproduced*; found while
-  fixing CC-124.  Only a constexpr integer's value is recorded; an
-  aggregate's is not.
+  a.x;` was rejected ("initializer element is not constant"), and `a.x`
+  could not bound an array; gcc accepts both.  *Reproduced*; found while
+  fixing CC-124.  A constexpr structure keeps its canonical initializer
+  (`var_entry_t.const_init`), and an access `a.x` or `a.b.x` -- through
+  anonymous members too, not through a union -- to an integer member that
+  is not a bit-field records its value as a constexpr name's is
+  (`parser_note_constexpr_member()`), a member the list leaves out zero.
+  `codegen/constexpr_member.c`.
+- [ ] **CC-131** Each member of a constexpr aggregate shall keep its
+  initializer's value (C23 6.7.1p6): `constexpr struct { _Bool f; unsigned
+  char c; } s = {5, 256};` is accepted; gcc rejects both members ("not
+  representable in type of object").  Only a scalar constexpr object's
+  initializer is checked.  *Reproduced*; found while fixing CC-129.
 - [x] **CC-125** A `constexpr` floating object's initializer shall keep
   its value in the object's type (C23 6.7.10p6): `constexpr float f =
   1e40;` and `constexpr float g = 0.1;` were accepted; gcc rejects both
@@ -1376,7 +1385,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-130 requirements: 128 met, 2 open.
+131 requirements: 129 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

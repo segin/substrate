@@ -7901,6 +7901,7 @@ static cc_expr_t *parse_postfix(parser_t *p) {
                     }
                 }
             }
+            parser_note_constexpr_member(p, m);
             e = m;
             if (next_tok(p) != 0) {
                 free_expr(e);

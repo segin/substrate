@@ -40,6 +40,7 @@ typedef struct {
     uint64_t const_bits;      /**< that value's bits, before conversion to const_type */
     long align;               /**< the alignment its declaration asks for (`aligned`, `_Alignas`, a typedef's), or 0 */
     int is_constexpr;         /**< a constexpr object: its name is a constant in another's initializer */
+    const cc_expr_t *const_init; /**< a constexpr structure: its canonical initializer (its declaration's); else NULL */
 } var_entry_t;
 
 /** An enumeration constant. */
@@ -186,6 +187,18 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype);
  * @return       0, or -1 with the parser's diagnostic set
  */
 int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init);
+
+/**
+ * Record on member access @p m (`a.x`, `a.b.x`) the value it names when
+ * it is a named constant (C23 6.6p7): an integer member, not a bit-field,
+ * of a constexpr structure, its value read from the structure's
+ * initializer -- so that the access is an integer constant expression.
+ * Anything else is left as it is.
+ *
+ * @param p  the parser
+ * @param m  the CC_EXPR_MEMBER just built
+ */
+void parser_note_constexpr_member(parser_t *p, cc_expr_t *m);
 
 /** End the scopes deeper than @p depth: forget the variables declared in them. */
 void var_pop_to_depth(parser_t *p, int depth);

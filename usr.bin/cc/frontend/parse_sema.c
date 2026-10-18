@@ -138,6 +138,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
             p->vars[i].const_type = NULL;
             p->vars[i].align = 0;
             p->vars[i].is_constexpr = 0;
+            p->vars[i].const_init = NULL;
             return 0;
         }
     }
@@ -161,6 +162,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     p->vars[p->var_count].const_bits = 0;
     p->vars[p->var_count].align = 0;
     p->vars[p->var_count].is_constexpr = 0;
+    p->vars[p->var_count].const_init = NULL;
     p->var_count++;
     return 0;
 }
@@ -279,6 +281,9 @@ int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype
     vidx = var_find_visible_n(p, name, strlen(name));
     if (vidx >= 0 && p->vars[vidx].depth == p->scope_depth) {
         p->vars[vidx].is_constexpr = 1;
+        if (ctype->unqual->kind == CC_CT_RECORD && init->kind == CC_EXPR_INIT_LIST) {
+            p->vars[vidx].const_init = init;
+        }
     }
     /* a scalar's initializer may be braced: `constexpr int n = {4};` */
     if (init->kind == CC_EXPR_INIT_LIST && init->arg_count == 1) {
@@ -938,6 +943,105 @@ static int init_member_path(parser_t *p, int sid, const char *name, long *path, 
         }
     }
     return 0;
+}
+
+/**
+ * Whether @p e designates a constexpr structure or a structure member of
+ * one, by name and `.` alone, and if so the initializer of what it
+ * designates: a part of the structure's canonical initializer, or NULL
+ * for a part the list leaves out (it is zero).  A union on the way gives
+ * up: its list's one initializer may be another member's.
+ *
+ * @param p     the parser
+ * @param e     the expression
+ * @param init  receives the initializer
+ * @return      1 if it does, else 0
+ */
+static int parser_constexpr_object_init(parser_t *p, const cc_expr_t *e, const cc_expr_t **init) {
+    const cc_expr_t *cur;
+    const cc_ctype_t *t;
+    long path[8];
+    int sid;
+    int n;
+    int k;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        int vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
+
+        if (vidx < 0 || !p->vars[vidx].is_constexpr || p->vars[vidx].const_init == NULL) {
+            return 0;
+        }
+        *init = p->vars[vidx].const_init;
+        return 1;
+    }
+    if (e->kind != CC_EXPR_MEMBER || e->member_is_arrow || e->ident == NULL ||
+        !parser_constexpr_object_init(p, e->lhs, &cur)) {
+        return 0;
+    }
+    t = parser_expr_ctype(p, e->lhs);
+    if (t == NULL || t->unqual->kind != CC_CT_RECORD) {
+        return 0;
+    }
+    sid = t->unqual->id;
+    n = init_member_path(p, sid, e->ident, path, (int)(sizeof(path) / sizeof(path[0])));
+    if (n <= 0) {
+        return 0;
+    }
+    for (k = 0; k < n; ++k) {
+        const cc_struct_def_t *sd = &p->structs[sid];
+
+        if (sd->is_union || (cur != NULL && cur->kind != CC_EXPR_INIT_LIST)) {
+            return 0;
+        }
+        if (cur != NULL) {
+            cur = path[k] < (long)cur->arg_count ? cur->args[path[k]] : NULL;
+        }
+        t = sd->members[path[k]].ctype;
+        if (k + 1 < n) {
+            /* an anonymous member on the way */
+            if (t == NULL || t->unqual->kind != CC_CT_RECORD) {
+                return 0;
+            }
+            sid = t->unqual->id;
+        }
+    }
+    *init = cur;
+    return 1;
+}
+
+void parser_note_constexpr_member(parser_t *p, cc_expr_t *m) {
+    const cc_struct_member_t *sm;
+    const cc_expr_t *init = NULL;
+    const cc_ctype_t *bt;
+    const cc_ctype_t *mt;
+    parser_const_value_t v;
+
+    if (m == NULL || m->kind != CC_EXPR_MEMBER || m->member_is_arrow || !parser_constexpr_object_init(p, m, &init)) {
+        return;
+    }
+    bt = parser_expr_ctype(p, m->lhs);
+    sm = bt != NULL && bt->unqual->kind == CC_CT_RECORD
+             ? struct_member_find_n(p, bt->unqual->id, m->ident, strlen(m->ident))
+             : NULL;
+    mt = sm != NULL ? sm->ctype : NULL;
+    if (mt == NULL || sm->is_bitfield || !cc_ct_is_integer(mt) || parser_ct_size(p, mt) > 8) {
+        return;
+    }
+    if (init != NULL && init->kind == CC_EXPR_INIT_LIST && init->arg_count == 1) {
+        /* a braced scalar */
+        init = init->args[0];
+    }
+    if (init == NULL) {
+        v.bits = 0;
+    } else if (eval_const_expr_value(p, init, &v) != 0) {
+        return;
+    }
+    m->named_const_type = mt->unqual;
+    /* the value converted to the member's type: a _Bool is whether it is nonzero, else its low bits */
+    m->int_val = (long long)(mt->unqual->kind == CC_CT_BOOL ? (uint64_t)(v.bits != 0) : v.bits);
 }
 
 /**
