@@ -52,9 +52,14 @@ substrate_config_sub_fix() {
 # + GNU ld + linux-like, so --enable-shared actually builds shared libraries
 # (otherwise substrate falls through every dispatch to static-only).
 substrate_libtool_fix() {
+    # The first two are libtool up to 2.5; libtool 2.6 lists ironclad*-gnu
+    # beside linux*, and two of its cases end in "| freebsd*)".  Each pattern
+    # needs what follows the last name, so running this twice changes nothing.
     sed -i \
       -e 's/linux\* | k\*bsd\*-gnu | kopensolaris\*-gnu | gnu\*)/linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | substrate*)/g' \
       -e 's/gnu\* | linux\* | tpf\* | k\*bsd\*-gnu | kopensolaris\*-gnu)/gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | substrate*)/g' \
+      -e 's/linux\* | ironclad\*-gnu | k\*bsd\*-gnu | kopensolaris\*-gnu | gnu\*\()\| | freebsd\*)\)/linux* | ironclad*-gnu | k*bsd*-gnu | kopensolaris*-gnu | gnu* | substrate*\1/g' \
+      -e 's/gnu\* | linux\* | tpf\* | ironclad\*-gnu | k\*bsd\*-gnu | kopensolaris\*-gnu)/gnu* | linux* | tpf* | ironclad*-gnu | k*bsd*-gnu | kopensolaris*-gnu | substrate*)/g' \
       "$1"
 }
 
