@@ -701,6 +701,13 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   not tell a program's from its own; those it makes are now marked
   (`cc_expr_t.encoded_literal`), and a program's is the cast of its value.
   `codegen/soft_float_compound_literal.c`.
+- [x] **CC-127** A compound literal of a wide integer type (`_BitInt`
+  wider than 64 bits, `__int128` where cc carries it in limbs) shall hold
+  the value its initializer converts to: `(unsigned _BitInt(128)){ k }`
+  for an int `k` of -7 took -7 for the low limb and left the others zero
+  (gcc 2^128 - 7), silently.  *Reproduced* (both targets); found beside
+  CC-126, the same confusion with cc's own `wb` constants, and fixed the
+  same way (`encoded_literal`).  `codegen/wide_compound_literal.c`.
 - [ ] **CC-121** A static `_Float128` initialized by a constant
   expression of another floating type shall be that expression's value,
   as gcc folds it: `static _Float128 s = 1.0 / 3;` is rejected
@@ -1322,7 +1329,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-126 requirements: 121 met, 5 open.
+127 requirements: 122 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

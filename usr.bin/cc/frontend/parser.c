@@ -6500,6 +6500,7 @@ static cc_expr_t *parser_bitint_literal(parser_t *p) {
         }
         e->ctype = cc_ct_record(sid);
         e->lhs = outer;
+        e->encoded_literal = 1;
         return e;
     }
 }

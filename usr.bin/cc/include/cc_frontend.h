@@ -150,8 +150,9 @@ struct cc_expr {
      */
     unsigned char excess_precision;
     /**
-     * A CC_EXPR_CAST to a decimal floating type or _Float128 whose brace list
-     * is the constant's encoding, as the parser makes a literal and sema a
+     * A CC_EXPR_CAST to a decimal floating type, _Float128 or a wide integer
+     * type whose brace list is the constant's encoding (its limbs, for a wide
+     * integer), as the parser makes a literal and sema a
      * folded conversion -- not a compound literal the program wrote, whose
      * list holds a value of the type.
      */

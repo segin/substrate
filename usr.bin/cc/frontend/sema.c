@@ -3341,7 +3341,8 @@ static int sema_big_fold(const cc_translation_unit_t *tu, const cc_expr_t *e, un
         break;
     }
     case CC_EXPR_CAST:
-        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST && sema_wide_def(tu, sema_cast_target_ctype(e))) {
+        if (e->encoded_literal && e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST &&
+            sema_wide_def(tu, sema_cast_target_ctype(e))) {
             /* a wide `wb` constant: (type){ { limbs } } */
             const cc_expr_t *limbs = e->lhs->arg_count == 1 ? e->lhs->args[0] : NULL;
             long lb = cc_target_pointer_size();
@@ -4230,8 +4231,9 @@ static int sema_check_compound_literal(const cc_translation_unit_t *tu, cc_expr_
         sema_set_type(e, sema_complete_array_ctype(t, inferred_len));
         return 1;
     }
-    if (sx_ct_record(t) >= 0 && sema_decimal_def(tu, t) != NULL && !e->encoded_literal) {
-        /* `(_Decimal64){ x }`, `(_Float128){ x }`: a scalar's compound literal, the cast of its value */
+    if (sx_ct_record(t) >= 0 && (sema_decimal_def(tu, t) != NULL || sema_wide_def(tu, t) != NULL) &&
+        !e->encoded_literal) {
+        /* `(_Decimal64){ x }`, `(_Float128){ x }`, `(_BitInt(128)){ x }`: a scalar's compound literal, the cast of its value */
         e->lhs = unwrap_scalar_initializer_expr(e->lhs, diag);
         return e->lhs == NULL ? -1 : 0;
     }
