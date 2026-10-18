@@ -35,6 +35,8 @@ typedef struct {
     char *name;               /**< its name */
     int depth;                /**< the scope depth it was declared at */
     const cc_ctype_t *ctype;  /**< its type */
+    const cc_ctype_t *const_type; /**< a constexpr integer object: its type, the value's; else NULL */
+    uint64_t const_bits;      /**< that value's bits, before conversion to const_type */
 } var_entry_t;
 
 /** An enumeration constant. */
@@ -164,6 +166,19 @@ int var_find_visible_n(const parser_t *p, const char *name, size_t len);
  * @return       0, or -1 when out of memory
  */
 int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype);
+
+/**
+ * Record the value of a constexpr object just declared in the current
+ * scope, so its name is an integer constant expression (C23 6.6p7).  Only
+ * an object of integer type no wider than 64 bits whose initializer is an
+ * integer constant expression gets one.
+ *
+ * @param p      the parser
+ * @param name   its name
+ * @param ctype  its type
+ * @param init   its initializer; may be NULL
+ */
+void parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init);
 
 /** End the scopes deeper than @p depth: forget the variables declared in them. */
 void var_pop_to_depth(parser_t *p, int depth);

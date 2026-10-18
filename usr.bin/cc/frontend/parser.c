@@ -2104,8 +2104,12 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 continue;
             }
             if (parser_is_c23_or_newer() && tok_is_ident(p, "constexpr")) {
+                /* const, its value a constant expression (C23 6.7.1); at file scope internal (6.2.2p3) */
                 acc->seen = 1;
-                acc->storage_flags |= CC_STORAGE_STATIC;
+                acc->storage_flags |= CC_STORAGE_CONST | CC_STORAGE_CONSTEXPR;
+                if (p->scope_depth == 0) {
+                    acc->storage_flags |= CC_STORAGE_STATIC;
+                }
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -6967,6 +6971,10 @@ static cc_expr_t *parse_primary(parser_t *p) {
             int vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
             if (vidx >= 0) {
                 e->ctype = p->vars[vidx].ctype;
+                if (p->vars[vidx].const_type != NULL) {
+                    e->named_const_type = p->vars[vidx].const_type;
+                    e->int_val = (long long)p->vars[vidx].const_bits;
+                }
             }
         }
         return e;
@@ -7420,6 +7428,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
 
     dst->int_val = src->int_val;
     dst->int_val_hi = src->int_val_hi;
+    dst->named_const_type = src->named_const_type;
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
@@ -9074,6 +9083,9 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 if (var_push(p, s.decl_name, s.ctype) != 0) {
                     free_stmt(&s);
                     return -1;
+                }
+                if ((s.storage & CC_STORAGE_CONSTEXPR) != 0) {
+                    parser_note_constexpr(p, s.decl_name, s.ctype, s.expr);
                 }
             }
             if (arr == NULL || count == NULL) {

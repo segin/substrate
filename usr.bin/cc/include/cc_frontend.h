@@ -27,6 +27,7 @@ typedef unsigned long long cc_attr_flags_t;
 #define CC_STORAGE_CONST (1 << 7)
 #define CC_STORAGE_VOLATILE (1 << 8)
 #define CC_STORAGE_RESTRICT (1 << 9)
+#define CC_STORAGE_CONSTEXPR (1 << 10) /**< C23 constexpr: a const object whose value is a constant expression */
 
 #define CC_ATTR_PACKED     (1ULL << 0)
 #define CC_ATTR_ALIGNED    (1ULL << 1)
@@ -172,6 +173,8 @@ struct cc_expr {
                                        node it built, and what sema gives every expression it checks */
     const struct cc_ctype *aux_ctype; /**< the type a `sizeof (T)` or `_Alignof (T)` names, or a string
                                            literal's element type; else NULL */
+    const struct cc_ctype *named_const_type; /**< a CC_EXPR_IDENT naming a constexpr integer object: its
+                                                  type, int_val its value's bits; else NULL */
 };
 
 typedef enum {

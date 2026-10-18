@@ -135,6 +135,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
         if (p->vars[i].depth == p->scope_depth && strlen(p->vars[i].name) == len &&
             strncmp(p->vars[i].name, name, len) == 0) {
             p->vars[i].ctype = ctype;
+            p->vars[i].const_type = NULL;
             return 0;
         }
     }
@@ -154,8 +155,32 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     p->vars[p->var_count].name = dup;
     p->vars[p->var_count].depth = p->scope_depth;
     p->vars[p->var_count].ctype = ctype;
+    p->vars[p->var_count].const_type = NULL;
+    p->vars[p->var_count].const_bits = 0;
     p->var_count++;
     return 0;
+}
+
+void parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init) {
+    parser_const_value_t v;
+    int vidx;
+
+    if (name == NULL || ctype == NULL || init == NULL || !cc_ct_is_integer(ctype)) {
+        return;
+    }
+    if (parser_ct_size(p, ctype) > 8) {
+        return;
+    }
+    /* a scalar's initializer may be braced: `constexpr int n = {4};` */
+    if (init->kind == CC_EXPR_INIT_LIST && init->arg_count == 1) {
+        init = init->args[0];
+    }
+    vidx = var_find_visible_n(p, name, strlen(name));
+    if (vidx < 0 || p->vars[vidx].depth != p->scope_depth || eval_const_expr_value(p, init, &v) != 0) {
+        return;
+    }
+    p->vars[vidx].const_type = ctype->unqual;
+    p->vars[vidx].const_bits = v.bits;
 }
 
 void var_pop_to_depth(parser_t *p, int depth) {

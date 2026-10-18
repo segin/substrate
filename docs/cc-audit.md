@@ -534,11 +534,17 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   refers to it by name; lowering's own `&(struct S){...}` path is gone.
   (A literal inside a file-scope `typeof` or `sizeof` becomes an unused
   static object as well.)  `codegen/file_scope_compound_literal.c`.
-- [ ] **CC-90** A `constexpr` object shall be usable in an integer
+- [x] **CC-90** A `constexpr` object shall be usable in an integer
   constant expression (C23 6.6p7): `_Static_assert(N == 4, "")` and
-  `case N - 2:` are rejected ("static assertion condition must be an
+  `case N - 2:` were rejected ("static assertion condition must be an
   integer constant", "case label must be an integer constant
-  expression"), though `int a[N]` works.  *Reproduced.*
+  expression"), though `int a[N]` worked.  *Reproduced.*  The parser
+  records a `constexpr` integer object's value with the variable, and
+  each identifier naming it carries that value (`named_const_type`), so
+  the one evaluator reads it in the parser, sema and lowering alike; a
+  name that shadows it carries none.  `constexpr` in a block no longer
+  gives the object static storage (only at file scope, where it has
+  internal linkage, C23 6.2.2p3).  `codegen/constexpr_ice.c`.
 - [ ] **CC-91** The constraints on `constexpr` (C23 6.7.1, 6.7.10)
   shall be diagnosed, as gcc does: assigning to one, initializing one
   from a non-constant, and an initializer not representable in its type
@@ -1194,7 +1200,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-116 requirements: 110 met, 6 open.
+116 requirements: 111 met, 5 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
