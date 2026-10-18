@@ -39,6 +39,7 @@ typedef struct {
     const cc_ctype_t *const_type; /**< a constexpr integer object: its type, the value's; else NULL */
     uint64_t const_bits;      /**< that value's bits, before conversion to const_type */
     long align;               /**< the alignment its declaration asks for (`aligned`, `_Alignas`, a typedef's), or 0 */
+    int is_constexpr;         /**< a constexpr object: its name is a constant in another's initializer */
 } var_entry_t;
 
 /** An enumeration constant. */

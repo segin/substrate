@@ -137,6 +137,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
             p->vars[i].ctype = ctype;
             p->vars[i].const_type = NULL;
             p->vars[i].align = 0;
+            p->vars[i].is_constexpr = 0;
             return 0;
         }
     }
@@ -159,6 +160,7 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     p->vars[p->var_count].const_type = NULL;
     p->vars[p->var_count].const_bits = 0;
     p->vars[p->var_count].align = 0;
+    p->vars[p->var_count].is_constexpr = 0;
     p->var_count++;
     return 0;
 }
@@ -185,6 +187,83 @@ static int constexpr_representable(const parser_const_value_t *v, const cc_ctype
     return neg ? mag <= (uint64_t)1 << (width - 1) : mag <= ((uint64_t)1 << (width - 1)) - 1;
 }
 
+/**
+ * Whether @p e is a constant expression a constexpr object's initializer
+ * may hold (C23 6.6, 6.7.1p5): literals, sizeof and _Alignof, named
+ * constexpr objects and their members, enumeration constants, and the
+ * operators other than assignment, increment, a call and the comma
+ * applied to them; for an aggregate, every part of its list.
+ *
+ * @param p  the parser
+ * @param e  the expression
+ * @return   1 if it is constant, 0 if not
+ */
+static int parser_constexpr_operand(parser_t *p, const cc_expr_t *e) {
+    parser_const_value_t v;
+    size_t i;
+
+    if (e == NULL) {
+        return 1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+    case CC_EXPR_FLOAT:
+    case CC_EXPR_STR:
+    case CC_EXPR_SIZEOF:
+        return 1;
+    case CC_EXPR_IDENT: {
+        const cc_global_t *g;
+        int vidx;
+
+        if (e->ident == NULL) {
+            return 0;
+        }
+        vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
+        if (vidx >= 0) {
+            return p->vars[vidx].is_constexpr;
+        }
+        if (eval_const_expr_value(p, e, &v) == 0) {
+            /* an enumeration constant */
+            return 1;
+        }
+        g = parser_find_global_decl(p, e->ident);
+        return g == NULL || (g->storage & CC_STORAGE_CONSTEXPR) != 0;
+    }
+    case CC_EXPR_MEMBER:
+        return !e->member_is_arrow && parser_constexpr_operand(p, e->lhs);
+    case CC_EXPR_CAST:
+        if (e->encoded_literal) {
+            return 1;
+        }
+        /* a compound literal is an object, not a constant */
+        return e->lhs != NULL && e->lhs->kind != CC_EXPR_INIT_LIST && parser_constexpr_operand(p, e->lhs);
+    case CC_EXPR_BIN:
+        return e->op != CC_BIN_COMMA && parser_constexpr_operand(p, e->lhs) && parser_constexpr_operand(p, e->rhs);
+    case CC_EXPR_TERNARY:
+        return parser_constexpr_operand(p, e->lhs) && parser_constexpr_operand(p, e->rhs) &&
+               parser_constexpr_operand(p, e->third);
+    case CC_EXPR_COMPLEX:
+        return parser_constexpr_operand(p, e->lhs) && parser_constexpr_operand(p, e->rhs);
+    case CC_EXPR_DESIGNATION:
+        return parser_constexpr_operand(p, e->rhs);
+    case CC_EXPR_INIT_LIST:
+        for (i = 0; i < e->arg_count; ++i) {
+            if (!parser_constexpr_operand(p, e->args[i])) {
+                return 0;
+            }
+        }
+        return 1;
+    case CC_EXPR_ASSIGN:
+    case CC_EXPR_UPDATE:
+    case CC_EXPR_CALL:
+    case CC_EXPR_STMT:
+        return 0;
+    default:
+        /* the rest (a _Generic, an address) are left to the checks that see them */
+        return 1;
+    }
+}
+
 int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init) {
     parser_const_value_t v;
     const cc_ctype_t *it;
@@ -197,9 +276,17 @@ int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype
         parser_error(p, "'constexpr' requires an initialized data declaration");
         return -1;
     }
+    vidx = var_find_visible_n(p, name, strlen(name));
+    if (vidx >= 0 && p->vars[vidx].depth == p->scope_depth) {
+        p->vars[vidx].is_constexpr = 1;
+    }
     /* a scalar's initializer may be braced: `constexpr int n = {4};` */
     if (init->kind == CC_EXPR_INIT_LIST && init->arg_count == 1) {
         init = init->args[0];
+    }
+    if (!parser_constexpr_operand(p, init)) {
+        parser_error(p, "initializer element is not constant");
+        return -1;
     }
     if (ctype->unqual->kind == CC_CT_POINTER) {
         /* only a null pointer: nullptr, or a null pointer constant (C23 6.7.1p5) */
@@ -227,7 +314,6 @@ int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype
         parser_error(p, "'constexpr' initializer not representable in type of object");
         return -1;
     }
-    vidx = var_find_visible_n(p, name, strlen(name));
     if (vidx >= 0 && p->vars[vidx].depth == p->scope_depth) {
         p->vars[vidx].const_type = ctype->unqual;
         p->vars[vidx].const_bits = v.bits;

@@ -741,10 +741,22 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   alignment is recorded with it (`var_entry_t.align`), a global's read from
   its declaration, and a member's from its structure's layout -- 1 in a
   packed one (`parser_object_align()`).  `codegen/alignof_object.c`.
-- [ ] **CC-124** A `constexpr` object of floating, complex or aggregate
+- [x] **CC-124** A `constexpr` object of floating, complex or aggregate
   type shall be initialized by constant expressions (C23 6.7.1p5): `double
-  y; ... constexpr double x = y;` and `constexpr struct s x = {v};` are
-  accepted; gcc rejects both.  *Reproduced*; left by CC-91.
+  y; ... constexpr double x = y;` and `constexpr struct s x = {v};` were
+  accepted; gcc rejects both.  *Reproduced*; left by CC-91.  Every
+  constexpr object is now marked (`var_entry_t.is_constexpr`), and its
+  initializer -- each part of a list -- must be built of literals, sizeof,
+  enumeration constants and constexpr objects by operators other than
+  assignment, increment, a call or the comma (`parser_constexpr_operand()`);
+  a compound literal is not one.  `native_bad_c23_constexpr_float_nonconst.c`,
+  `_struct_nonconst.c`, `_array_nonconst.c`; `codegen/constexpr_aggregate.c`.
+- [ ] **CC-129** A member of a constexpr structure shall be a named
+  constant (C23 6.6p7): `constexpr struct s a = {1}; constexpr int b =
+  a.x;` is rejected ("initializer element is not constant"), and `a.x`
+  cannot bound an array; gcc accepts both.  *Reproduced*; found while
+  fixing CC-124.  Only a constexpr integer's value is recorded; an
+  aggregate's is not.
 - [ ] **CC-125** A `constexpr` floating object's initializer shall keep
   its value in the object's type (C23 6.7.10p6): `constexpr float f =
   1e40;` and `constexpr float g = 0.1;` are accepted; gcc rejects both
@@ -1348,7 +1360,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-128 requirements: 125 met, 3 open.
+129 requirements: 126 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
