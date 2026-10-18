@@ -2670,12 +2670,16 @@ static int sema_b128_cast_is_exact(const cc_expr_t *e) {
     return 0;
 }
 
+static int sema_fold_complex(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *re, long double *im,
+                             int depth);
+
 /**
  * Fold @p e, an arithmetic constant, to _Float128, as gcc does at compile
  * time: an integer or a binary floating constant exactly (every one of
  * them is representable), a _Float128 constant as it is, a negated one
  * with its sign flipped, an operation on _Float128 constants made in
- * binary128 (cc_b128_arith()).
+ * binary128 (cc_b128_arith()), and a constant expression of another
+ * binary floating type as cc evaluates it (sema_fold_complex()).
  *
  * @return 1 if folded into @p enc, 0 if @p e is not such a constant
  */
@@ -2726,6 +2730,16 @@ static int sema_b128_fold_value(const cc_translation_unit_t *tu, const cc_expr_t
             cc_b128_from_double(e->float_val, enc);
         }
         return 1;
+    }
+    if (sema_is_binary_fp(sx_vtype(e)) && sema_complex_elem(tu, sx_vtype(e)) == NULL) {
+        /* a constant expression of a binary floating type: its value, which converts exactly */
+        long double re;
+        long double im;
+
+        if (sema_fold_complex(tu, e, &re, &im, 0) == 0 && im == 0) {
+            cc_b128_from_ld(re, enc);
+            return 1;
+        }
     }
     return sema_b128_const(tu, e, enc);
 }

@@ -708,11 +708,14 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   (gcc 2^128 - 7), silently.  *Reproduced* (both targets); found beside
   CC-126, the same confusion with cc's own `wb` constants, and fixed the
   same way (`encoded_literal`).  `codegen/wide_compound_literal.c`.
-- [ ] **CC-121** A static `_Float128` initialized by a constant
+- [x] **CC-121** A static `_Float128` initialized by a constant
   expression of another floating type shall be that expression's value,
-  as gcc folds it: `static _Float128 s = 1.0 / 3;` is rejected
+  as gcc folds it: `static _Float128 s = 1.0 / 3;` was rejected
   ("initializer of a static _Float128 object is not a constant").
-  *Reproduced* (both targets); left by CC-118.
+  *Reproduced* (both targets); left by CC-118.  `sema_b128_fold_value()`
+  folds such an expression as cc evaluates it (`sema_fold_complex()`) and
+  converts the value, exactly; on i386 that is the extended value, as
+  gcc's ISO modes give it.  `codegen/float128_static_fold.c`.
 - [x] **CC-122** `_Complex _Float128` shall be a complex type of two
   binary128 parts, multiplied and divided by libgcc's `__multc3` and
   `__divtc3`, as gcc has it: cc rejected it.  *Reproduced* (both
@@ -1373,7 +1376,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-130 requirements: 127 met, 3 open.
+130 requirements: 128 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
