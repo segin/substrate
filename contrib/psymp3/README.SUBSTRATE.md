@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned tag: `2.1.1-RELEASE` (commit `47d6b624038f20c2af9f53f29b2999d64fa25093`)
+* Pinned tag: `2.3-RELEASE` (commit `3b5c5ff4cf3a7cc4d0ba0f63538f13770febef20`)
 * License: ISC
 
 ## Build
@@ -46,12 +46,12 @@ Core (mandatory):
 
 | dep        | version | notes |
 |------------|---------|-------|
-| SDL2       | 2.30.9  | built with X11 video backend |
-| taglib     | 2.0.2   | metadata |
-| freetype2  | 26.1.20 | UI text |
-| harfbuzz   | 2.6.8   | text shaping (since 2.0-RC4) |
-| OpenSSL 3  | 3.0.13  | TLS for HTTP/Last.fm |
-| libcurl    | 8.7.1   | HTTP streaming |
+| SDL3       | 3.4.18  | built with X11 video backend |
+| taglib     | 2.3.2   | metadata |
+| freetype2  | 2.15.0  | UI text |
+| harfbuzz   | 14.6.0  | text shaping (since 2.0-RC4) |
+| OpenSSL 3  | 3.5.9   | TLS for HTTP/Last.fm |
+| libcurl    | 8.23.0  | HTTP streaming |
 
 Codecs (all enabled — every library is staged):
 
@@ -59,10 +59,10 @@ Codecs (all enabled — every library is staged):
 |------------------|--------------------|
 | MP3              | bundled minimp3 (no external dep) |
 | FLAC             | native decoder (no libFLAC dep)   |
-| Vorbis           | libvorbis 1.3.7 + libogg 1.3.5    |
-| Opus             | libopus 1.5.2 + libogg            |
+| Vorbis           | libvorbis 1.3.7 + libogg 1.3.6    |
+| Opus             | libopus 1.6.1 + libogg            |
 | Speex            | libspeex 1.2.1 + libogg           |
-| AAC              | faad2 2.11.1                      |
+| AAC              | fdk-aac 3.0.0                     |
 | G.722            | in-tree decoder (since 2.0-RC4)   |
 | G.711 A-law/u-law| native (no external dep)          |
 | MP2              | bundled kjmp2 (since 2.0-RELEASE) |
@@ -83,6 +83,15 @@ an external dependency; configure enables them all by default.
   link deps; not needed for the player itself.
 
 Everything else (all codecs, the full UI/widget stack, HTTP/Last.fm) is enabled.
+
+## File dialog and the host's Qt
+
+Since 2.3, when no `Qt6Widgets.pc` is found configure asks `qmake6` (or
+`qmake-qt6`) on `PATH` where Qt 6 lives, and on a build host with Qt 6
+installed that answer is the host's `/usr/include/qt6`.  `build.sh` sets
+`QMAKE6=/bin/false` -- `AC_PATH_PROGS` takes an absolute path as given and
+skips the search -- so configure moves on and takes the file-dialog toolkit
+from the cross sysroot (GTK 2 today).
 
 ## Unity build
 

@@ -163,6 +163,14 @@ for _pkg in Qt6Widgets Qt5Widgets QtGui gtk4 gtk+-3.0 gtk+-2.0; do
     fi
 done
 
+# Since 2.3, when no Qt6Widgets.pc is found configure asks qmake6 (or
+# qmake-qt6) on PATH where Qt 6 lives -- the build host's Qt, whose
+# /usr/include/qt6 the leak check below rejects.  AC_PATH_PROGS does not
+# search when QMAKE6 is already set to an absolute path (any other value is
+# ignored), and `/bin/false -query` prints nothing, so configure moves on to
+# the next toolkit.
+QMAKE6=/bin/false; export QMAKE6
+
 ./configure \
     --host=i386-unknown-linux-gnu \
     --prefix=/usr \
