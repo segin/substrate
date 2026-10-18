@@ -3288,9 +3288,25 @@ void sema_set_type(cc_expr_t *e, const cc_ctype_t *t) {
 }
 
 /**
+ * Of two floating types in one format, which the usual arithmetic
+ * conversions prefer, as gcc ranks them (C23 6.3.1.8): an interchange
+ * type (_Float32, _Float64), then the standard type, then an extended one
+ * (_Float32x, _Float64x).
+ *
+ * @param t  the type
+ * @return   2, 1 or 0
+ */
+static int sema_float_preference(const cc_ctype_t *t) {
+    int v = cc_ct_float_variant(t);
+
+    return v == 0 ? 1 : (v & 1) == 0 ? 2 : 0;
+}
+
+/**
  * The type the usual arithmetic conversions (C11 6.3.1.8) give real
  * operands of types @p a and @p b: the wider floating type if either is
- * floating, else the common integer type.
+ * floating -- of two in one format, the one sema_float_preference()
+ * prefers -- else the common integer type.
  *
  * @return the type, or NULL if either is not an arithmetic type
  */
@@ -3302,8 +3318,14 @@ static const cc_ctype_t *sema_usual_arith(const cc_ctype_t *a, const cc_ctype_t 
         return NULL;
     }
     for (i = 0; i < sizeof(floats) / sizeof(floats[0]); ++i) {
-        if (a->unqual->kind == floats[i] || b->unqual->kind == floats[i]) {
-            return cc_ct_basic(floats[i]);
+        int in_a = a->unqual->kind == floats[i];
+        int in_b = b->unqual->kind == floats[i];
+
+        if (in_a && in_b) {
+            return sema_float_preference(b) > sema_float_preference(a) ? b->unqual : a->unqual;
+        }
+        if (in_a || in_b) {
+            return in_a ? a->unqual : b->unqual;
         }
     }
     return cc_ct_common_int(a->unqual, b->unqual);

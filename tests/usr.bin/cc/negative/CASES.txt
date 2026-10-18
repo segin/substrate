@@ -82,3 +82,4 @@ native_bad_c99_readonly_member.c|-std=c99|cannot assign to const-qualified objec
 native_bad_c99_readonly_arrow.c|-std=c99|cannot modify const-qualified object with ++/--
 native_bad_c99_readonly_deref.c|-std=c99|cannot assign to const-qualified object
 native_bad_c99_readonly_constptr.c|-std=c99|cannot assign to const-qualified object: p
+native_bad_c23_floatn_redecl.c|-std=c23|conflicting declarations for function: g

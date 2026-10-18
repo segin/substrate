@@ -631,13 +631,37 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   (`lower_bitfield_store_bytes()`) writes back only the bytes the field
   occupies, one byte store each; a load still reads the whole unit.
   `ir/bitfield_split.c` (the stores), `codegen/bitfield_split_store.c`.
-- [ ] **CC-107** `_Float32`, `_Float64`, `_Float128`, `_Float32x` and
+- [x] **CC-107** `_Float32`, `_Float64`, `_Float128`, `_Float32x` and
   `_Float64x` shall be types distinct from `float`, `double` and `long
-  double` (C23 6.2.5p10): cc makes `_Float32` an alias of `float`,
+  double` (C23 6.2.5p10): cc made `_Float32` an alias of `float`,
   `_Float64` of `double` and the others of `long double`, so
-  `_Generic(1.0f32, float: 1, default: 0)` is 1 (gcc 0) and declarations
-  mixing the spellings are accepted as compatible.  *Reproduced* (both
-  targets); found while testing CC-95's suffixes, and present before.
+  `_Generic(1.0f32, float: 1, default: 0)` was 1 (gcc 0) and declarations
+  mixing the spellings were accepted as compatible; `_Float32x`, which
+  gcc gives double's format, was a 16-byte `long double`.  *Reproduced*
+  (both targets); found while testing CC-95's suffixes, and present
+  before.  `cc_ct_floatn()` interns each as a type of its own, kind its
+  format's, id its variant; the type names and the f32/f64/f32x/f64x
+  suffixes give them, the usual arithmetic conversions prefer, of two in
+  one format, the interchange type, then the standard, then the extended
+  one, as gcc does, and `_Float32` is not promoted as a variadic argument.
+  `_Float128` is CC-118.  `codegen/floatn_types.c`;
+  `native_bad_c23_floatn_redecl.c`.
+- [ ] **CC-118** `_Float128` and `__float128` shall be IEEE binary128
+  (gcc on x86, both targets: 16 bytes, 16-aligned, 113-bit significand,
+  arithmetic in libgcc's `__addtf3` and kin, an SSE-class argument on
+  x86-64): the lexer makes both spellings the `double` keyword, so they
+  are 8-byte doubles -- a silent precision and ABI difference with every
+  gcc-built object -- while the `f128` suffix gives a `long double`.
+  *Reproduced* (both targets); found while fixing CC-107.  Needs a
+  binary128 type carried as the decimal types are (CC-69), with its
+  constants encoded and its operations calling libgcc.
+- [ ] **CC-119** Floating arithmetic on i386 shall be evaluated as the
+  predefined `__FLT_EVAL_METHOD__` says: cc predefines 2, as gcc does
+  (operations in `long double`), but evaluates `float` at single
+  precision, so `(double)(f / 3)` for `float f = 1` is
+  0.3333333432674408 (gcc 0.33333333333333331).  *Reproduced* (i386);
+  found while testing CC-107, and present before.  Either the operations
+  are made in x87 extended precision or the macro says what cc does.
 - [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
   as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
   object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
@@ -1236,7 +1260,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-117 requirements: 116 met, 1 open.
+119 requirements: 117 met, 2 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

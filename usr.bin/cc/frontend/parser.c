@@ -2217,14 +2217,21 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 acc->seen = 1;
                 acc->seen_type = 1;
                 acc->seen_alias = 1;
+                int floatn_variant = 0;
+
+                /* each a type of its own, in a standard type's format (C23 6.2.5p10-13) */
                 if (tok_is_ident(p, "_Float16")) {
                     floatn_kind = CC_CT_FLOAT16;
                 } else if (tok_is_ident(p, "_Float32")) {
-                    floatn_kind = CC_CT_FLOAT;
+                    floatn_variant = CC_FLOATN_32;
                 } else if (tok_is_ident(p, "_Float64")) {
-                    floatn_kind = CC_CT_DOUBLE;
+                    floatn_variant = CC_FLOATN_64;
+                } else if (tok_is_ident(p, "_Float32x")) {
+                    floatn_variant = CC_FLOATN_32X;
+                } else if (tok_is_ident(p, "_Float64x")) {
+                    floatn_variant = CC_FLOATN_64X;
                 }
-                acc->alias_ctype = cc_ct_basic(floatn_kind);
+                acc->alias_ctype = floatn_variant != 0 ? cc_ct_floatn(floatn_variant) : cc_ct_basic(floatn_kind);
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -6445,7 +6452,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                                 : p->tok.float_is_long   ? CC_CT_LDOUBLE
                                                          : CC_CT_DOUBLE;
 
-            e = new_const_expr(CC_EXPR_FLOAT, cc_ct_basic(k));
+            e = new_const_expr(CC_EXPR_FLOAT, p->tok.float_variant != 0 ? cc_ct_floatn(p->tok.float_variant)
+                                                                         : cc_ct_basic(k));
             if (e == NULL) {
                 return NULL;
             }

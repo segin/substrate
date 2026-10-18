@@ -119,6 +119,7 @@ typedef struct {
     int float_is_single;
     int float_is_long;
     int float_is_half; /**< the `f16` suffix: a _Float16 constant */
+    int float_variant; /**< the `f32`, `f64`, `f32x` or `f64x` suffix: its CC_FLOATN_* type; else 0 */
     int float_is_decimal; /**< a decimal floating constant: 32, 64 or 128 (df, dd, dl); else 0 */
     int is_imaginary; /**< GNU `i`/`j` suffix: the literal is an imaginary constant */
     int int_is_bitprecise; /**< C23 `wb`/`WB` suffix: a _BitInt constant (its value may need more than 64 bits) */

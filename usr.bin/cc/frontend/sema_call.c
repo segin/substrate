@@ -536,7 +536,8 @@ static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, 
     if (a == NULL) {
         return 0;
     }
-    if (a->unqual->kind == CC_CT_FLOAT) {
+    /* float, but not _Float32, which keeps its type (C23 6.5.2.2p6) */
+    if (a->unqual->kind == CC_CT_FLOAT && cc_ct_float_variant(a) == 0) {
         return sema_convert(&e->args[i], cc_ct_basic(CC_CT_DOUBLE));
     }
     if (cc_ct_is_integer(a)) {

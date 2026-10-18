@@ -1,3 +1,4 @@
+#include "cc_ctype.h"
 #include "cc_lexer.h"
 #include "cc_target.h"
 #include "cc_util.h"
@@ -110,8 +111,9 @@ static int lx_peekn(const cc_lexer_t *lx, size_t n) {
 /**
  * After a floating constant's `f`, read the rest of a C23 `_FloatN` suffix
  * -- f16, f32, f64, f128, f32x, f64x -- and type the constant as the
- * parser types those keywords: f16 _Float16, f32 float, f64 and f32x
- * double, f128 and f64x long double.  A plain `f` reads nothing more.
+ * parser types those keywords: f16 _Float16, f32 _Float32, f64 _Float64,
+ * f32x _Float32x, f64x _Float64x, each in its format's representation, and
+ * f128 long double.  A plain `f` reads nothing more.
  *
  * @param lx   the lexer, after the `f`
  * @param out  the constant's token, float_is_single already set
@@ -122,8 +124,14 @@ static void lex_floatn_suffix(cc_lexer_t *lx, cc_token_t *out) {
         int half;
         int single;
         int is_long;
+        int variant;
     } suffixes[] = {
-        {"16", 1, 0, 0}, {"32x", 0, 0, 0}, {"32", 0, 1, 0}, {"64x", 0, 0, 1}, {"64", 0, 0, 0}, {"128", 0, 0, 1},
+        {"16", 1, 0, 0, 0},
+        {"32x", 0, 0, 0, CC_FLOATN_32X},
+        {"32", 0, 1, 0, CC_FLOATN_32},
+        {"64x", 0, 0, 1, CC_FLOATN_64X},
+        {"64", 0, 0, 0, CC_FLOATN_64},
+        {"128", 0, 0, 1, 0},
     };
     size_t i;
 
@@ -139,6 +147,7 @@ static void lex_floatn_suffix(cc_lexer_t *lx, cc_token_t *out) {
         out->float_is_half = suffixes[i].half;
         out->float_is_single = suffixes[i].single;
         out->float_is_long = suffixes[i].is_long;
+        out->float_variant = suffixes[i].variant;
         lx_adv_n(lx, n);
         return;
     }
@@ -953,6 +962,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->float_is_single = 0;
     out->float_is_long = 0;
     out->float_is_half = 0;
+    out->float_variant = 0;
     out->float_is_decimal = 0;
     out->int_is_unsigned = 0;
     out->int_is_long = 0;

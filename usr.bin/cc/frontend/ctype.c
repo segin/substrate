@@ -187,6 +187,38 @@ const cc_ctype_t *cc_ct_basic(cc_ctype_kind_t kind) {
     return ct_intern(&k);
 }
 
+const cc_ctype_t *cc_ct_floatn(int variant) {
+    cc_ctype_t k;
+
+    switch (variant) {
+    case CC_FLOATN_32:
+        k = ct_key(CC_CT_FLOAT);
+        break;
+    case CC_FLOATN_32X:
+    case CC_FLOATN_64:
+        k = ct_key(CC_CT_DOUBLE);
+        break;
+    case CC_FLOATN_64X:
+        k = ct_key(CC_CT_LDOUBLE);
+        break;
+    default:
+        return NULL;
+    }
+    k.id = variant;
+    return ct_intern(&k);
+}
+
+int cc_ct_float_variant(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return 0;
+    }
+    t = t->unqual;
+    if (t->kind != CC_CT_FLOAT && t->kind != CC_CT_DOUBLE && t->kind != CC_CT_LDOUBLE) {
+        return 0;
+    }
+    return t->id > 0 ? t->id : 0;
+}
+
 /**
  * _BitInt(width), signed or not.
  *
@@ -851,6 +883,17 @@ static void ct_format_base(const cc_ctype_t *t, char *buf, size_t cap) {
         break;
     case CC_CT_NULLPTR:
         snprintf(tmp, sizeof(tmp), "nullptr_t");
+        break;
+    case CC_CT_FLOAT:
+    case CC_CT_DOUBLE:
+    case CC_CT_LDOUBLE:
+        if (cc_ct_float_variant(t) != 0) {
+            /* _Float32, _Float64; 33 and 65 are _Float32x and _Float64x */
+            snprintf(tmp, sizeof(tmp), "_Float%d%s", cc_ct_float_variant(t) & ~1,
+                     (cc_ct_float_variant(t) & 1) != 0 ? "x" : "");
+            break;
+        }
+        snprintf(tmp, sizeof(tmp), "%s", names[t->kind]);
         break;
     default:
         snprintf(tmp, sizeof(tmp), "%s", names[t->kind]);

@@ -92,6 +92,36 @@ void cc_ct_reset(void);
 const cc_ctype_t *cc_ct_basic(cc_ctype_kind_t kind);
 
 /**
+ * The C23 interchange and extended floating types that share a standard
+ * type's format (C23 6.2.5p10-13) but are types of their own: their kind
+ * is the format's (CC_CT_FLOAT, CC_CT_DOUBLE, CC_CT_LDOUBLE), their id the
+ * variant.
+ */
+enum {
+    CC_FLOATN_32 = 32,  /**< _Float32: float's format */
+    CC_FLOATN_32X = 33, /**< _Float32x: double's */
+    CC_FLOATN_64 = 64,  /**< _Float64: double's */
+    CC_FLOATN_64X = 65  /**< _Float64x: long double's */
+};
+
+/**
+ * An interchange or extended floating type.
+ *
+ * @param variant  CC_FLOATN_*
+ * @return         the type, or NULL for another variant or out of memory
+ */
+const cc_ctype_t *cc_ct_floatn(int variant);
+
+/**
+ * Which _FloatN or _FloatNx type a type is.
+ *
+ * @param t  the type
+ * @return   its CC_FLOATN_* variant, or 0 for a standard floating type or
+ *           any other type
+ */
+int cc_ct_float_variant(const cc_ctype_t *t);
+
+/**
  * _BitInt(width), signed or not.
  *
  * @param width        the number of bits, at least 1
