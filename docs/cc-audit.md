@@ -726,10 +726,19 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   `__alignof__` and layout do not cap it), so a structure records what
   `_Alignof` gives beside its alignment (`c11_align`), and `_Alignof`
   reads that, `__alignof__` the alignment.  `codegen/vector_align.c`.
-- [ ] **CC-115** An `aligned` attribute on a typedef shall give the type
+- [x] **CC-115** An `aligned` attribute on a typedef shall give the type
   that alignment (gcc): `typedef int ia __attribute__((aligned(32)));`
-  has `_Alignof(ia)` 4 (gcc 32), and objects declared with it are
+  had `_Alignof(ia)` 4 (gcc 32), and objects declared with it were
   4-aligned.  *Reproduced* (both targets); found while testing CC-113.
+  The typedef name carries the alignment (`typedef_entry_t.align`), and
+  a declaration whose specifiers name it gives it to what each
+  declarator declares when that is an object of the named type, not a
+  pointer to it or an array: objects, members (lowered too, as gcc lays
+  out `typedef int u1 __attribute__((aligned(1)))`), a typedef of the
+  typedef, and `_Alignof`/`__alignof__` of the type name.  Types stay
+  interned without an alignment, so `_Alignof` of an *expression* of
+  such a type still gives the natural alignment.
+  `codegen/typedef_aligned.c`.
 - [x] **CC-112** An attribute specifier sequence after an array
   declarator's `]` shall be accepted (C23 6.7.7.3): `char b[3]
   [[gnu::aligned(64)]];` was rejected ("expected primary expression");
@@ -1207,7 +1216,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-116 requirements: 112 met, 4 open.
+116 requirements: 113 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.

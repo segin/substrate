@@ -28,6 +28,7 @@ typedef struct {
     char *name;              /**< its name */
     int depth;               /**< the scope depth it was declared at */
     const cc_ctype_t *ctype; /**< the type it names */
+    long align;              /**< the alignment its declaration's `aligned` gives the type, or 0 (gcc) */
 } typedef_entry_t;
 
 /** A variable in scope, as the parser tracks it. */
@@ -95,6 +96,7 @@ typedef struct {
     int parse_depth;
     int last_storage;
     const cc_ctype_t *last_spec_ctype;  /**< the type the last declaration specifiers named */
+    long last_spec_align; /**< the alignment of the typedef name they used (typedef_entry_t.align), or 0 */
 } parser_t;
 
 /** A constant expression's value, as the parser evaluates it. */

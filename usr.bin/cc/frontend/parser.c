@@ -156,6 +156,7 @@ static int is_ptr_declarator_tok(cc_tok_kind_t kind);
 static void decl_attrs_reset(decl_attrs_t *a);
 static void decl_attrs_clear(decl_attrs_t *a);
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src);
+static long typedef_align_for(long spec_align, const cc_ctype_t *spec, const cc_ctype_t *declared);
 static int parse_c23_attribute_seq(parser_t *p, decl_attrs_t *out_attrs, int *out_stmt_flags);
 static int skip_balanced_parens(parser_t *p);
 static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2, int *out_has_num2,
@@ -395,10 +396,11 @@ static int typedef_find_current_scope_n(const parser_t *p, const char *name, siz
  * @param p      the parser
  * @param name   the name
  * @param ctype  the type it names
+ * @param align  the alignment its `aligned` attribute gives, or 0
  * @return       0, 1 if it redeclares the name with another type, or -1
  *               when out of memory
  */
-static int typedef_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
+static int typedef_push(parser_t *p, const char *name, const cc_ctype_t *ctype, long align) {
     typedef_entry_t *next;
     char *dup;
     int existing;
@@ -423,6 +425,7 @@ static int typedef_push(parser_t *p, const char *name, const cc_ctype_t *ctype) 
     p->typedefs[p->typedef_count].name = dup;
     p->typedefs[p->typedef_count].depth = p->scope_depth;
     p->typedefs[p->typedef_count].ctype = ctype;
+    p->typedefs[p->typedef_count].align = align;
     p->typedef_count++;
     return 0;
 }
@@ -1850,6 +1853,7 @@ typedef struct {
     const cc_ctype_t *enum_ctype; /* an enumeration's type, once known */
     int decimal_bits;
     const cc_ctype_t *alias_ctype; /* the type a typedef name, typeof or the like gave */
+    long alias_align;              /* the typedef name's own alignment (typedef_entry_t.align), or 0 */
     const cc_ctype_t *spec;
 } declspec_acc_t;
 
@@ -2231,6 +2235,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 acc->seen_type = 1;
                 acc->seen_alias = 1;
                 acc->alias_ctype = p->typedefs[tidx].ctype;
+                acc->alias_align = p->typedefs[tidx].align;
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2415,6 +2420,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 const cc_ctype_t *mspec = NULL;
                 decl_attrs_t mspec_attrs;
                 long mspec_align = 0;
+                long mtypedef_align = 0; /* the alignment of a typedef name among the specifiers, or 0 */
                 if (p->structs[sid].has_flexible_array) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
                     decl_attrs_clear(&struct_attrs);
@@ -2464,6 +2470,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 }
                 /* `_Alignas(T) char x;`: the specifiers' alignment applies to each member they declare */
                 mspec_align = (mspec_attrs.flags & CC_ATTR_ALIGNED) != 0 ? mspec_attrs.align : 0;
+                mtypedef_align = p->last_spec_align;
                 decl_attrs_clear(&mspec_attrs);
                 if (mtypedef) {
                     decl_attrs_clear(&struct_attrs);
@@ -2542,6 +2549,10 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                             mdecl_attrs.align = mspec_align;
                         }
                     }
+                    if (typedef_align_for(mtypedef_align, mspec, md.ctype) > mdecl_attrs.align) {
+                        mdecl_attrs.flags |= CC_ATTR_ALIGNED;
+                        mdecl_attrs.align = mtypedef_align;
+                    }
                     if (mname == NULL && !is_bitfield) {
                         if (md.ctype->unqual->kind == CC_CT_RECORD) {
                             /* Anonymous aggregate member extension: accept and ignore layout details. */
@@ -2572,6 +2583,9 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     }
                     if ((mdecl_attrs.flags & CC_ATTR_PACKED) != 0) {
                         malign = 1;
+                    } else if (typedef_align_for(mtypedef_align, mspec, md.ctype) > 0 && mtypedef_align < malign) {
+                        /* a typedef's `aligned` may lower the alignment, as gcc lays such a member out */
+                        malign = mtypedef_align;
                     }
                     if ((mdecl_attrs.flags & CC_ATTR_ALIGNED) != 0) {
                         muser_align = mdecl_attrs.align;
@@ -3163,6 +3177,7 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
 
     p->last_storage = 0;
     p->last_spec_ctype = NULL;
+    p->last_spec_align = 0;
     if (out_typedef != NULL) {
         *out_typedef = 0;
     }
@@ -3207,7 +3222,28 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         *out_saw_restrict = acc.seen_restrict;
     }
     p->last_storage = acc.storage_flags;
+    p->last_spec_align = acc.alias_align;
     return 0;
+}
+
+/**
+ * The alignment a typedef name among the declaration specifiers gives
+ * what a declarator declares: the typedef's own (gcc's `typedef int a16
+ * __attribute__((aligned(16)));`), when the declarator declares an object
+ * of the type the specifiers name, not a pointer to it, an array or a
+ * function.
+ *
+ * @param spec_align  the typedef's alignment (parser_t.last_spec_align as
+ *                    the specifiers left it), or 0
+ * @param spec        the type the specifiers name
+ * @param declared    the type the declarator gives
+ * @return            the alignment, or 0 for none
+ */
+static long typedef_align_for(long spec_align, const cc_ctype_t *spec, const cc_ctype_t *declared) {
+    if (spec_align <= 0 || spec == NULL || declared == NULL || declared->unqual != spec->unqual) {
+        return 0;
+    }
+    return spec_align;
 }
 
 static int is_decl_qual_tok(cc_tok_kind_t k) {
@@ -7895,6 +7931,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
             }
             /* gcc: _Alignof caps a vector's natural alignment at 16, __alignof__ does not */
             align = is_gnu_alignof ? parser_ct_align(p, act) : parser_ct_c11_align(p, act);
+            if (typedef_align_for(p->last_spec_align, p->last_spec_ctype, act) > 0) {
+                /* a typedef name with its own alignment, raised or lowered (gcc) */
+                align = p->last_spec_align;
+            }
             if (align <= 0) {
                 align = cc_target_pointer_size();
             }
@@ -8761,6 +8801,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     int base_saw_restrict = 0;
     int decl_storage = 0;
     const cc_ctype_t *base_spec = NULL;
+    long base_typedef_align; /* the alignment of a typedef name among the specifiers, or 0 */
     int base_struct_id; /* the structure the specifiers name, else -1 */
     decl_attrs_t base_attrs;
 
@@ -8770,6 +8811,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         return -1;
     }
     decl_storage = p->last_storage;
+    base_typedef_align = p->last_spec_align;
     if (base_attrs.vector_bytes > 0 || base_attrs.vector_elems > 0) {
         if (parser_apply_vector_attr(p, &base_attrs, &base_spec) != 0) {
             decl_attrs_clear(&base_attrs);
@@ -8860,6 +8902,10 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = merged_attrs.flags;
         s.attr_align = merged_attrs.align;
+        if (typedef_align_for(base_typedef_align, base_spec, s.ctype) > s.attr_align) {
+            s.attr_flags |= CC_ATTR_ALIGNED;
+            s.attr_align = base_typedef_align;
+        }
         if (merged_attrs.section != NULL) {
             s.attr_section = cc_strndup(merged_attrs.section, strlen(merged_attrs.section));
             if (s.attr_section == NULL) {
@@ -9052,7 +9098,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
-            trc = typedef_push(p, s.decl_name, s.ctype);
+            trc = typedef_push(p, s.decl_name, s.ctype, (s.attr_flags & CC_ATTR_ALIGNED) != 0 ? s.attr_align : 0);
             if (trc > 0) {
                 int existing = typedef_find_current_scope_n(p, s.decl_name, strlen(s.decl_name));
                 if (existing >= 0 && p->diag != NULL && p->diag->message[0] == '\0') {
@@ -10473,7 +10519,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         return -1;
     }
     if (parser_is_c23_or_newer() &&
-        typedef_push(&p, "nullptr_t", cc_ct_basic(CC_CT_NULLPTR)) != 0) {
+        typedef_push(&p, "nullptr_t", cc_ct_basic(CC_CT_NULLPTR), 0) != 0) {
         cc_lexer_deinit(&p.lx);
         parser_free_hoisted_funcs(&p);
         parser_free_typedefs(&p);
