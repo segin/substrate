@@ -3147,6 +3147,10 @@ static int sema_fold_complex(const cc_translation_unit_t *tu, const cc_expr_t *e
         if (sema_fold_complex(tu, e->lhs, re, im, depth + 1) != 0) {
             return -1;
         }
+        if (e->excess_precision) {
+            /* the operation's extended value, which a conversion takes */
+            return 0;
+        }
         if (sema_complex_elem(tu, sx_vtype(e)) == NULL) {
             *im = 0;
             if (cc_ct_is_integer(sx_vtype(e))) {
@@ -3204,6 +3208,35 @@ static int sema_fold_complex(const cc_translation_unit_t *tu, const cc_expr_t *e
     default:
         return -1;
     }
+}
+
+/**
+ * Check that the checked initializer @p init of a constexpr object of type
+ * @p t keeps its value in that type (C23 6.7.1p6): a float, double or long
+ * double object's initializer, folded as cc evaluates it, must convert
+ * exactly -- `constexpr float f = 0.1;` and `= 1e40` do not.  An
+ * initializer that does not fold to a real value is left alone.
+ *
+ * @return 0, or -1 with the diagnostic set
+ */
+static int sema_constexpr_float_exact(const cc_translation_unit_t *tu, const cc_ctype_t *t, const cc_expr_t *init,
+                                      cc_diag_t *diag) {
+    long double re;
+    long double im;
+
+    if (t == NULL || init == NULL ||
+        !(ct_kind_is(t->unqual, CC_CT_FLOAT) || ct_kind_is(t->unqual, CC_CT_DOUBLE) ||
+          ct_kind_is(t->unqual, CC_CT_LDOUBLE))) {
+        return 0;
+    }
+    if (sema_fold_complex(tu, init, &re, &im, 0) != 0 || im != 0 || re != re) {
+        return 0;
+    }
+    if (sema_round_to(t->unqual, re) != re) {
+        sema_diag(diag, "'constexpr' initializer not representable in type of object");
+        return -1;
+    }
+    return 0;
 }
 
 /** A floating literal node of type @p t and value @p v, or NULL when out of memory. */
@@ -5854,12 +5887,20 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                             (*var_count)--;
                             return -1;
                         }
+                        if ((s->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                            sema_constexpr_float_exact(tu, s->ctype, scalar_init, diag) != 0) {
+                            return -1;
+                        }
                         s->expr = scalar_init;
                     }
                 } else {
                     if (!init_checked && check_expr(tu, s->expr, *vars, *var_count, depth, diag) != 0) {
                         free((*vars)[*var_count - 1].name);
                         (*var_count)--;
+                        return -1;
+                    }
+                    if ((s->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                        sema_constexpr_float_exact(tu, s->ctype, s->expr, diag) != 0) {
                         return -1;
                     }
                     if (sema_complex_convert_for_assign(tu, &s->expr, s->ctype) > 0) {
@@ -6593,11 +6634,19 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                         }
                         goto fail_global_item;
                     }
+                    if ((g->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                        sema_constexpr_float_exact(tu, g->ctype, scalar_init, diag) != 0) {
+                        goto fail_global_item;
+                    }
                 }
             } else {
                 const cc_ctype_t *celem = sema_complex_elem(tu, g->ctype);
 
                 if (check_expr(tu, g->init, NULL, 0, 0, diag) != 0) {
+                    goto fail_global_item;
+                }
+                if ((g->storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                    sema_constexpr_float_exact(tu, g->ctype, g->init, diag) != 0) {
                     goto fail_global_item;
                 }
                 if (celem != NULL) {

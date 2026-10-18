@@ -757,11 +757,24 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   cannot bound an array; gcc accepts both.  *Reproduced*; found while
   fixing CC-124.  Only a constexpr integer's value is recorded; an
   aggregate's is not.
-- [ ] **CC-125** A `constexpr` floating object's initializer shall keep
+- [x] **CC-125** A `constexpr` floating object's initializer shall keep
   its value in the object's type (C23 6.7.10p6): `constexpr float f =
-  1e40;` and `constexpr float g = 0.1;` are accepted; gcc rejects both
+  1e40;` and `constexpr float g = 0.1;` were accepted; gcc rejects both
   ("'constexpr' initializer not representable in type of object").
-  *Reproduced*; left by CC-91.
+  *Reproduced*; left by CC-91.  Sema folds a float, double or long double
+  constexpr object's initializer, at either scope, before converting it
+  (`sema_constexpr_float_exact()`), and the value must survive rounding to
+  the type; an i386 operation's extended value is the one folded, as a
+  conversion takes it.  `native_bad_c23_constexpr_float_inexact.c`,
+  `_float_range.c`, `_float_int.c`; `codegen/constexpr_float_exact.c`.
+- [ ] **CC-130** Where `__FLT_EVAL_METHOD__` is 2 (i386), a floating
+  constant shall have its value in long double's format (C11 6.4.4.2p5,
+  5.2.4.2.2p9), as gcc's `-fexcess-precision=standard` (its ISO modes)
+  gives it: `0.1 == 0.1L` is 1 with `gcc -m32 -std=c11`, 0 with cc, and
+  so `constexpr double d = 0.1;` is rejected by gcc there and accepted by
+  cc.  cc widens operations (CC-119) but not constants; gcc's GNU modes
+  widen neither, as cc does.  *Reproduced* (i386); found while fixing
+  CC-125.
 - [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
   as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
   object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
@@ -1360,7 +1373,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-129 requirements: 126 met, 3 open.
+130 requirements: 127 met, 3 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
