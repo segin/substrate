@@ -509,3 +509,532 @@ int eval_const_case_value(parser_t *p, const cc_expr_t *e, long long *out) {
     *out = (long long)v.bits;
     return 0;
 }
+
+/* ---- initializers: one canonical form (C11 6.7.9) ---------------------- */
+
+/** How deep the subobjects one initializer list reaches through may nest. */
+#define INIT_MAX_DEPTH 64
+
+/** One level of the object an initializer list is filling: an aggregate, its list, the part next in line. */
+typedef struct {
+    const cc_ctype_t *type; /**< the aggregate */
+    cc_expr_t *list;        /**< its canonical list, being built */
+    long idx;               /**< the part (element or member) the next undesignated initializer goes to */
+} init_frame_t;
+
+/**
+ * The structure or union @p t names, if it is one an initializer list
+ * fills member by member -- not one standing for a wide integer, complex,
+ * vector or decimal type, whose initializer is a value.
+ */
+static const cc_struct_def_t *init_record(parser_t *p, const cc_ctype_t *t) {
+    const cc_struct_def_t *sd;
+
+    if (t == NULL || t->unqual->kind != CC_CT_RECORD || t->unqual->id < 0 || (size_t)t->unqual->id >= p->struct_count) {
+        return NULL;
+    }
+    sd = &p->structs[t->unqual->id];
+    if (sd->wide_bits > 0 || sd->complex_elem != NULL || sd->vector_count > 0 || sd->decimal_bits > 0) {
+        return NULL;
+    }
+    return sd;
+}
+
+/** Whether an initializer list fills an object of type @p t part by part: an array, structure or union. */
+static int init_is_aggregate(parser_t *p, const cc_ctype_t *t) {
+    return t != NULL && (t->unqual->kind == CC_CT_ARRAY || init_record(p, t) != NULL);
+}
+
+/**
+ * How many parts undesignated initializers fill in aggregate @p t: an
+ * array's elements (without limit for one of unknown bound), a
+ * structure's members, a union's first member.
+ */
+static long init_part_count(parser_t *p, const cc_ctype_t *t) {
+    const cc_struct_def_t *sd = init_record(p, t);
+
+    if (sd == NULL) {
+        return t->unqual->count >= 0 ? t->unqual->count : LONG_MAX;
+    }
+    return sd->is_union ? (sd->member_count > 0 ? 1 : 0) : (long)sd->member_count;
+}
+
+/** The type of part @p idx of aggregate @p t: an element, or member @p idx. */
+static const cc_ctype_t *init_part_type(parser_t *p, const cc_ctype_t *t, long idx) {
+    const cc_struct_def_t *sd = init_record(p, t);
+
+    return sd == NULL ? t->unqual->of : sd->members[idx].ctype;
+}
+
+/** Whether initializer @p v is a string literal initializing @p t, an array of characters or wide characters. */
+static int init_is_string_for(const cc_ctype_t *t, const cc_expr_t *v) {
+    return v != NULL && v->kind == CC_EXPR_STR && t->unqual->kind == CC_CT_ARRAY && cc_ct_is_integer(t->unqual->of);
+}
+
+/** Whether non-list initializer @p v initializes all of structure or union @p t: an expression of its type. */
+static int init_is_whole(parser_t *p, const cc_ctype_t *t, cc_expr_t *v) {
+    const cc_ctype_t *vt = parser_expr_ctype(p, v);
+
+    return vt != NULL && vt->unqual->kind == CC_CT_RECORD && t->unqual->kind == CC_CT_RECORD &&
+           vt->unqual->id == t->unqual->id;
+}
+
+/** A new, empty initializer list. */
+static cc_expr_t *init_new_list(void) {
+    cc_expr_t *l = (cc_expr_t *)calloc(1, sizeof(*l));
+
+    if (l != NULL) {
+        l->kind = CC_EXPR_INIT_LIST;
+        l->generic_selected = -1;
+    }
+    return l;
+}
+
+/** The slot for part @p idx of the list @p f is building, the list grown to hold it; NULL when out of memory. */
+static cc_expr_t **init_slot(parser_t *p, init_frame_t *f, long idx) {
+    const cc_struct_def_t *sd = init_record(p, f->type);
+    size_t at = (sd != NULL && sd->is_union) ? 0 : (size_t)idx;
+
+    if (sd != NULL && sd->is_union && f->list->int_val != idx + 1) {
+        /* another member of the union: what the earlier one was given goes */
+        if (f->list->arg_count > 0) {
+            cc_expr_free(f->list->args[0]);
+            f->list->args[0] = NULL;
+        }
+        f->list->int_val = idx + 1;
+    }
+    if (at >= f->list->arg_count) {
+        cc_expr_t **next = (cc_expr_t **)realloc(f->list->args, (at + 1) * sizeof(*next));
+
+        if (next == NULL) {
+            return NULL;
+        }
+        memset(next + f->list->arg_count, 0, (at + 1 - f->list->arg_count) * sizeof(*next));
+        f->list->args = next;
+        f->list->arg_count = at + 1;
+    }
+    return &f->list->args[at];
+}
+
+static int init_canon_list(parser_t *p, const cc_ctype_t *t, cc_expr_t *in, cc_expr_t **out);
+
+/**
+ * Put initializer @p value (taken over) in part @p idx of the list @p f
+ * builds, replacing what was there: a brace-enclosed list for an
+ * aggregate part canonicalized, anything else as it is.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int init_store(parser_t *p, init_frame_t *f, long idx, cc_expr_t *value) {
+    const cc_ctype_t *sub = init_part_type(p, f->type, idx);
+    cc_expr_t **slot = init_slot(p, f, idx);
+
+    if (slot == NULL) {
+        cc_expr_free(value);
+        parser_error(p, "out of memory canonicalizing an initializer");
+        return -1;
+    }
+    if (value->kind == CC_EXPR_INIT_LIST && init_is_aggregate(p, sub)) {
+        cc_expr_t *canon = NULL;
+
+        if (init_canon_list(p, sub, value, &canon) != 0) {
+            return -1;
+        }
+        value = canon;
+    }
+    cc_expr_free(*slot);
+    *slot = value;
+    return 0;
+}
+
+/**
+ * The list building aggregate part @p idx of the list @p f builds, for an
+ * initializer reaching into the part: the one already there, or a new one.
+ *
+ * @return the list, or NULL on error (diagnosed)
+ */
+static cc_expr_t *init_child(parser_t *p, init_frame_t *f, long idx) {
+    cc_expr_t **slot = init_slot(p, f, idx);
+
+    if (slot == NULL) {
+        parser_error(p, "out of memory canonicalizing an initializer");
+        return NULL;
+    }
+    if (*slot == NULL) {
+        *slot = init_new_list();
+        if (*slot == NULL) {
+            parser_error(p, "out of memory canonicalizing an initializer");
+        }
+        return *slot;
+    }
+    if ((*slot)->kind != CC_EXPR_INIT_LIST) {
+        parser_error(p, "unsupported initializer: a designator into part of a subobject initialized as a whole");
+        return NULL;
+    }
+    return *slot;
+}
+
+/**
+ * Where member @p name of structure or union @p sid is, as the indexes of
+ * the members leading to it: one, or more through anonymous structures
+ * and unions.
+ *
+ * @return the number of indexes in @p path, or 0 if it has no such member
+ */
+static int init_member_path(parser_t *p, int sid, const char *name, long *path, int max) {
+    const cc_struct_def_t *sd = &p->structs[sid];
+    size_t i;
+
+    if (max <= 0) {
+        return 0;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        if (sd->members[i].name != NULL && strcmp(sd->members[i].name, name) == 0) {
+            path[0] = (long)i;
+            return 1;
+        }
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_ctype_t *mt = sd->members[i].ctype;
+
+        if (sd->members[i].name == NULL && mt != NULL && mt->unqual->kind == CC_CT_RECORD) {
+            int n = init_member_path(p, mt->unqual->id, name, path + 1, max - 1);
+
+            if (n > 0) {
+                path[0] = (long)i;
+                return n + 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Go from frame @p fr[*depth - 1] to its part @p idx: enter that part,
+ * an aggregate, as a new frame.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int init_enter(parser_t *p, init_frame_t *fr, int *depth, long idx) {
+    init_frame_t *f = &fr[*depth - 1];
+    cc_expr_t *child;
+
+    if (*depth >= INIT_MAX_DEPTH) {
+        parser_error(p, "initializer nests too deeply");
+        return -1;
+    }
+    f->idx = idx;
+    child = init_child(p, f, idx);
+    if (child == NULL) {
+        return -1;
+    }
+    fr[*depth].type = init_part_type(p, f->type, idx);
+    fr[*depth].list = child;
+    fr[*depth].idx = 0;
+    (*depth)++;
+    return 0;
+}
+
+/**
+ * Follow designation @p d from the list's own object, frame 0: every
+ * designator but the last enters the part it names; the last makes the
+ * part it names the current one.  A range is allowed last only.
+ *
+ * @param out_hi  receives the last designator's upper index (its own for one not a range)
+ * @return        0, or -1 on error (diagnosed)
+ */
+static int init_designate(parser_t *p, init_frame_t *fr, int *depth, const cc_expr_t *d, long *out_hi) {
+    size_t k;
+
+    *depth = 1;
+    for (k = 0; k < d->arg_count; ++k) {
+        const cc_expr_t *step = d->args[k];
+        init_frame_t *f = &fr[*depth - 1];
+        const cc_struct_def_t *sd = init_record(p, f->type);
+        long path[INIT_MAX_DEPTH];
+        int n = 1;
+        int j;
+
+        if (step->kind == CC_EXPR_MEMBER) {
+            if (sd == NULL) {
+                parser_error(p, "member designator for an object that is not a structure or union");
+                return -1;
+            }
+            n = init_member_path(p, f->type->unqual->id, step->ident, path, INIT_MAX_DEPTH);
+            if (n == 0) {
+                char msg[160];
+
+                snprintf(msg, sizeof(msg), "unknown member '%s' in designated initializer", step->ident);
+                parser_error(p, msg);
+                return -1;
+            }
+            *out_hi = path[n - 1];
+        } else {
+            if (f->type->unqual->kind != CC_CT_ARRAY) {
+                parser_error(p, "array designator for an object that is not an array");
+                return -1;
+            }
+            if (f->type->unqual->count >= 0 && step->int_val_hi >= f->type->unqual->count) {
+                parser_error(p, "array designator index exceeds the array bound");
+                return -1;
+            }
+            if (step->int_val != step->int_val_hi && k + 1 < d->arg_count) {
+                parser_error(p, "unsupported initializer: a designator range before another designator");
+                return -1;
+            }
+            path[0] = (long)step->int_val;
+            *out_hi = (long)step->int_val_hi;
+        }
+        /* through anonymous members to the one named, then into it unless it is the last designator */
+        for (j = 0; j < n; ++j) {
+            if (j + 1 < n || k + 1 < d->arg_count) {
+                if (!init_is_aggregate(p, init_part_type(p, fr[*depth - 1].type, path[j]))) {
+                    parser_error(p, "designator for a part of a scalar");
+                    return -1;
+                }
+                if (init_enter(p, fr, depth, path[j]) != 0) {
+                    return -1;
+                }
+            } else {
+                fr[*depth - 1].idx = path[j];
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Canonicalize brace-enclosed list @p in (taken over) for an aggregate of
+ * type @p t into @p out: each initializer goes to the part a designation
+ * names or, undesignated, the next part in order; one that is not a list,
+ * a string for an array of characters or a whole structure value, met at
+ * an aggregate part, fills that part's own parts in turn (its braces
+ * elided).
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int init_canon_list(parser_t *p, const cc_ctype_t *t, cc_expr_t *in, cc_expr_t **out) {
+    init_frame_t fr[INIT_MAX_DEPTH];
+    int depth = 1;
+    size_t i;
+
+    fr[0].type = t;
+    fr[0].list = init_new_list();
+    fr[0].idx = 0;
+    if (fr[0].list == NULL) {
+        cc_expr_free(in);
+        parser_error(p, "out of memory canonicalizing an initializer");
+        return -1;
+    }
+    fr[0].list->line = in->line;
+    fr[0].list->col = in->col;
+    if (in->arg_count == 1 && init_is_string_for(t, in->args[0])) {
+        /* `char s[] = {"abc"}`: the braced string, as it is */
+        cc_expr_free(fr[0].list);
+        *out = in;
+        return 0;
+    }
+    for (i = 0; i < in->arg_count; ++i) {
+        cc_expr_t *item = in->args[i];
+        cc_expr_t *value = item;
+        long hi = 0;
+        long k;
+
+        in->args[i] = NULL;
+        if (item->kind == CC_EXPR_DESIGNATION) {
+            value = item->rhs;
+            item->rhs = NULL;
+            if (init_designate(p, fr, &depth, item, &hi) != 0) {
+                cc_expr_free(item);
+                cc_expr_free(value);
+                goto fail;
+            }
+            cc_expr_free(item);
+        } else {
+            /* the next part: past the end of an aggregate entered by elision, the one after it */
+            while (fr[depth - 1].idx >= init_part_count(p, fr[depth - 1].type)) {
+                if (depth == 1) {
+                    const cc_struct_def_t *sd = init_record(p, t);
+
+                    cc_expr_free(value);
+                    parser_error(p, sd == NULL     ? "excess elements in array initializer"
+                                    : sd->is_union ? "excess elements in union initializer"
+                                                   : "excess elements in struct initializer");
+                    goto fail;
+                }
+                depth--;
+                fr[depth - 1].idx++;
+            }
+            hi = fr[depth - 1].idx;
+        }
+        /* brace elision: an initializer that is not the part's own list fills the part's first scalar */
+        for (;;) {
+            init_frame_t *f = &fr[depth - 1];
+            const cc_ctype_t *sub = init_part_type(p, f->type, f->idx);
+
+            if (!init_is_aggregate(p, sub) || value->kind == CC_EXPR_INIT_LIST || init_is_string_for(sub, value) ||
+                (init_record(p, sub) != NULL && init_is_whole(p, sub, value)) || hi != f->idx) {
+                break;
+            }
+            if (init_enter(p, fr, &depth, f->idx) != 0) {
+                cc_expr_free(value);
+                goto fail;
+            }
+            hi = 0;
+        }
+        /* a GNU range `[lo ... hi] = v` puts a copy in each */
+        for (k = fr[depth - 1].idx; k < hi; ++k) {
+            cc_expr_t *copy = cc_expr_clone(value);
+
+            if (copy == NULL || init_store(p, &fr[depth - 1], k, copy) != 0) {
+                cc_expr_free(value);
+                if (copy == NULL) {
+                    parser_error(p, "out of memory canonicalizing an initializer");
+                }
+                goto fail;
+            }
+        }
+        if (init_store(p, &fr[depth - 1], hi, value) != 0) {
+            goto fail;
+        }
+        fr[depth - 1].idx = init_record(p, fr[depth - 1].type) != NULL && init_record(p, fr[depth - 1].type)->is_union
+                                ? init_part_count(p, fr[depth - 1].type)
+                                : hi + 1;
+    }
+    cc_expr_free(in);
+    *out = fr[0].list;
+    return 0;
+fail:
+    cc_expr_free(in);
+    cc_expr_free(fr[0].list);
+    return -1;
+}
+
+/** A zero for a part no initializer named: `0`, or `{0}` for a vector or an aggregate. */
+static cc_expr_t *init_zero(parser_t *p, const cc_ctype_t *t) {
+    cc_expr_t *z = (cc_expr_t *)calloc(1, sizeof(*z));
+    const cc_struct_def_t *sd;
+
+    if (z == NULL) {
+        return NULL;
+    }
+    z->kind = CC_EXPR_INT;
+    z->generic_selected = -1;
+    z->ctype = cc_ct_basic(CC_CT_INT);
+    sd = t->unqual->kind == CC_CT_RECORD && t->unqual->id >= 0 ? &p->structs[t->unqual->id] : NULL;
+    if (init_is_aggregate(p, t) || (sd != NULL && sd->vector_count > 0)) {
+        cc_expr_t *l = init_new_list();
+
+        if (l == NULL) {
+            cc_expr_free(z);
+            return NULL;
+        }
+        l->args = (cc_expr_t **)malloc(sizeof(*l->args));
+        if (l->args == NULL) {
+            cc_expr_free(l);
+            cc_expr_free(z);
+            return NULL;
+        }
+        l->args[0] = z;
+        l->arg_count = 1;
+        return l;
+    }
+    return z;
+}
+
+/**
+ * Finish canonical list @p l for aggregate @p t, and the lists in it: a
+ * zero in each gap, and a union's one initializer designated where it is
+ * not its first member's.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int init_finish(parser_t *p, const cc_ctype_t *t, cc_expr_t *l) {
+    const cc_struct_def_t *sd = init_record(p, t);
+    size_t i;
+
+    if (sd != NULL && sd->is_union) {
+        long member = l->int_val - 1;
+
+        l->int_val = 0;
+        if (l->arg_count == 0 || member < 0) {
+            return 0;
+        }
+        if (l->args[0] != NULL && l->args[0]->kind == CC_EXPR_INIT_LIST &&
+            init_is_aggregate(p, sd->members[member].ctype) && init_finish(p, sd->members[member].ctype, l->args[0]) != 0) {
+            return -1;
+        }
+        if (member > 0) {
+            cc_expr_t *d = (cc_expr_t *)calloc(1, sizeof(*d));
+
+            if (sd->members[member].name == NULL) {
+                cc_expr_free(d);
+                parser_error(p, "unsupported initializer: an anonymous union member other than the first");
+                return -1;
+            }
+            if (d == NULL || (d->ident = cc_strndup(sd->members[member].name, strlen(sd->members[member].name))) == NULL) {
+                cc_expr_free(d);
+                parser_error(p, "out of memory canonicalizing an initializer");
+                return -1;
+            }
+            d->kind = CC_EXPR_MEMBER;
+            d->generic_selected = -1;
+            d->rhs = l->args[0];
+            l->args[0] = d;
+        }
+        return 0;
+    }
+    for (i = 0; i < l->arg_count; ++i) {
+        const cc_ctype_t *sub = init_part_type(p, t, (long)i);
+
+        if (l->args[i] == NULL) {
+            l->args[i] = init_zero(p, sub);
+            if (l->args[i] == NULL) {
+                parser_error(p, "out of memory canonicalizing an initializer");
+                return -1;
+            }
+        } else if (l->args[i]->kind == CC_EXPR_INIT_LIST && init_is_aggregate(p, sub) &&
+                   init_finish(p, sub, l->args[i]) != 0) {
+            return -1;
+        }
+    }
+    if (l->arg_count == 0 && init_part_count(p, t) > 0 && t->unqual->count != 0) {
+        /* a part that a designator reached into and left empty: all zero */
+        l->args = (cc_expr_t **)malloc(sizeof(*l->args));
+        if (l->args == NULL || (l->args[0] = init_zero(p, init_part_type(p, t, 0))) == NULL) {
+            parser_error(p, "out of memory canonicalizing an initializer");
+            return -1;
+        }
+        l->arg_count = 1;
+    }
+    return 0;
+}
+
+int parser_canon_initializer(parser_t *p, const cc_ctype_t *t, cc_expr_t **slot, long *out_len) {
+    cc_expr_t *canon = NULL;
+
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (t == NULL || slot == NULL || *slot == NULL || (*slot)->kind != CC_EXPR_INIT_LIST || !init_is_aggregate(p, t)) {
+        return 0;
+    }
+    if ((*slot)->arg_count == 1 && init_is_string_for(t, (*slot)->args[0])) {
+        if (out_len != NULL) {
+            *out_len = parser_string_literal_array_bound((*slot)->args[0]);
+        }
+        return 0;
+    }
+    if (init_canon_list(p, t, *slot, &canon) != 0) {
+        *slot = NULL;
+        return -1;
+    }
+    *slot = canon;
+    if (init_finish(p, t, canon) != 0) {
+        return -1;
+    }
+    if (out_len != NULL && t->unqual->kind == CC_CT_ARRAY) {
+        *out_len = (long)canon->arg_count;
+    }
+    return 0;
+}

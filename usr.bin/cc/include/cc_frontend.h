@@ -103,7 +103,15 @@ typedef enum {
     CC_EXPR_GENERIC,
     CC_EXPR_TERNARY,
     CC_EXPR_STMT,
-    CC_EXPR_COMPLEX /**< a complex value from its parts: lhs real, rhs imaginary (`2.0i`, __builtin_complex) */
+    CC_EXPR_COMPLEX, /**< a complex value from its parts: lhs real, rhs imaginary (`2.0i`, __builtin_complex) */
+    /**
+     * An initializer with a designation, `.a[2].b = v`, as the parser reads
+     * it: args are the designators -- CC_EXPR_MEMBER with ident for `.name`,
+     * CC_EXPR_INT with int_val (and int_val_hi, for GNU `[lo ... hi]`) for
+     * `[index]` -- and rhs the value.  parser_canon_initializer() resolves
+     * every one before anything else sees the initializer.
+     */
+    CC_EXPR_DESIGNATION
 } cc_expr_kind_t;
 
 typedef struct cc_expr cc_expr_t;
@@ -134,6 +142,7 @@ struct cc_expr {
      */
     unsigned char unary_form;
     long long int_val;
+    long long int_val_hi; /**< an array designator `[lo ... hi]`'s hi (int_val is lo); lo for `[index]` */
     double float_val;
     long double float_val_ld;
     char *ident;

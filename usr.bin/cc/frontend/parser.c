@@ -35,6 +35,10 @@ static void set_diag(cc_diag_t *d, size_t line, size_t col, const char *msg) {
     cc_diag_replace(d, g_parser_diag_file != NULL ? g_parser_diag_file : "", line, col, msg);
 }
 
+void parser_error(parser_t *p, const char *msg) {
+    set_diag(p->diag, p->tok.line, p->tok.col, msg);
+}
+
 static int diag_is_oom(const cc_diag_t *d) {
     if (d == NULL || d->message[0] == '\0') {
         return 0;
@@ -5755,125 +5759,121 @@ static cc_expr_t *parse_initializer_expr(parser_t *p);
 static cc_expr_t *parse_initializer_item(parser_t *p);
 static cc_expr_t *clone_expr(const cc_expr_t *src);
 
-static cc_expr_t *build_member_designator_expr(char **names, size_t count, cc_expr_t *value) {
-    cc_expr_t *cur = value;
-    size_t i;
+/**
+ * Read one designator of a designation: `.name`, `[index]` or GNU
+ * `[lo ... hi]`, the indexes integer constants.
+ *
+ * @return the designator (CC_EXPR_MEMBER or CC_EXPR_INT), or NULL on error (diagnosed)
+ */
+static cc_expr_t *parse_designator(parser_t *p) {
+    cc_expr_t *d;
+    cc_expr_t *ix;
+    long lo = 0;
+    long hi = 0;
 
-    if (names == NULL || count == 0 || value == NULL) {
+    if (p->tok.kind == TOK_DOT) {
+        if (next_tok(p) != 0) {
+            return NULL;
+        }
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
+            return NULL;
+        }
+        d = new_expr(CC_EXPR_MEMBER);
+        if (d == NULL || (d->ident = cc_strndup(p->tok.start, p->tok.len)) == NULL) {
+            free_expr(d);
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a designator");
+            return NULL;
+        }
+        if (next_tok(p) != 0) {
+            free_expr(d);
+            return NULL;
+        }
+        return d;
+    }
+    if (next_tok(p) != 0) {
         return NULL;
     }
-
-    for (i = count; i > 1; --i) {
-        cc_expr_t *nested_member = new_expr(CC_EXPR_MEMBER);
-        cc_expr_t *nested_list = new_expr(CC_EXPR_INIT_LIST);
-        if (nested_member == NULL || nested_list == NULL) {
-            free_expr(nested_member);
-            free_expr(nested_list);
-            return NULL;
-        }
-        nested_member->ident = names[i - 1];
-        names[i - 1] = NULL;
-        nested_member->rhs = cur;
-        if (push_arg(nested_list, nested_member) != 0) {
-            nested_member->rhs = NULL;
-            free_expr(nested_list);
-            free_expr(nested_member);
-            return NULL;
-        }
-        cur = nested_list;
+    ix = parse_cond(p);
+    if (ix == NULL) {
+        return NULL;
     }
-
-    {
-        cc_expr_t *item = new_expr(CC_EXPR_MEMBER);
-        if (item == NULL) {
+    if (eval_const_array_bound_expr(p, ix, &lo) != 0 || lo < 0) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "array designator index must be a non-negative integer constant");
+        free_expr(ix);
+        return NULL;
+    }
+    free_expr(ix);
+    hi = lo;
+    if (p->tok.kind == TOK_ELLIPSIS) {
+        if (next_tok(p) != 0 || (ix = parse_cond(p)) == NULL) {
             return NULL;
         }
-        item->ident = names[0];
-        names[0] = NULL;
-        item->rhs = cur;
-        return item;
+        if (eval_const_array_bound_expr(p, ix, &hi) != 0 || hi < lo) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "array designator range must be non-decreasing integer constants");
+            free_expr(ix);
+            return NULL;
+        }
+        free_expr(ix);
     }
+    if (expect(p, TOK_RBRACK, "expected ']' after array designator index") != 0) {
+        return NULL;
+    }
+    d = new_int_expr(lo);
+    if (d == NULL) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a designator");
+        return NULL;
+    }
+    d->int_val_hi = hi;
+    return d;
 }
 
+/**
+ * Read one item of an initializer list: an initializer, or a designation
+ * -- any sequence of `.name` and `[index]` designators -- `=` and one.
+ *
+ * @return the item (a CC_EXPR_DESIGNATION for a designated one), or NULL on error (diagnosed)
+ */
 static cc_expr_t *parse_initializer_item(parser_t *p) {
-    if (p->tok.kind == TOK_DOT) {
-        char **names = NULL;
-        size_t count = 0;
-        size_t cap = 0;
-        cc_expr_t *value = NULL;
-        cc_expr_t *cur = NULL;
-        cc_expr_t *item = NULL;
-        size_t i;
+    cc_expr_t *item;
 
-        while (p->tok.kind == TOK_DOT) {
-            char **next_names;
-            if (next_tok(p) != 0) {
-                goto fail;
-            }
-            if (p->tok.kind != TOK_IDENT) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
-                goto fail;
-            }
-            if (count == cap) {
-                size_t ncap = cap == 0 ? 4 : cap * 2;
-                next_names = (char **)realloc(names, ncap * sizeof(*next_names));
-                if (next_names == NULL) {
-                    goto fail;
-                }
-                names = next_names;
-                cap = ncap;
-            }
-            names[count] = cc_strndup(p->tok.start, p->tok.len);
-            if (names[count] == NULL) {
-                goto fail;
-            }
-            count++;
-            if (next_tok(p) != 0) {
-                goto fail;
-            }
+    if (p->tok.kind != TOK_DOT && p->tok.kind != TOK_LBRACK) {
+        return parse_initializer_expr(p);
+    }
+    item = new_expr(CC_EXPR_DESIGNATION);
+    if (item == NULL) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a designation");
+        return NULL;
+    }
+    item->line = p->tok.line;
+    item->col = p->tok.col;
+    while (p->tok.kind == TOK_DOT || p->tok.kind == TOK_LBRACK) {
+        cc_expr_t *d = parse_designator(p);
+
+        if (d == NULL || push_arg(item, d) != 0) {
+            free_expr(d);
+            free_expr(item);
+            return NULL;
         }
-        if (count == 0) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
-            goto fail;
-        }
-        if (expect(p, TOK_ASSIGN, "expected '=' after designated initializer") != 0) {
-            goto fail;
-        }
-        value = parse_initializer_expr(p);
-        if (value == NULL) {
-            goto fail;
-        }
-        item = build_member_designator_expr(names, count, value);
-        if (item == NULL) {
-            goto fail;
-        }
-        value = NULL;
-        cur = NULL;
-        free(names);
-        return item;
-fail:
-        if (names != NULL) {
-            for (i = 0; i < count; ++i) {
-                free(names[i]);
-            }
-        }
-        free(names);
-        free_expr(value);
-        free_expr(cur);
+    }
+    if (expect(p, TOK_ASSIGN, "expected '=' after designator") != 0 || (item->rhs = parse_initializer_expr(p)) == NULL) {
         free_expr(item);
         return NULL;
     }
-    return parse_initializer_expr(p);
+    return item;
 }
 
+/**
+ * Read an initializer: an expression, or a brace-enclosed list of
+ * initializers, each perhaps designated.  The list is kept as written --
+ * designators unresolved, braces elided -- for parser_canon_initializer(),
+ * which knows the type it initializes.
+ *
+ * @return the initializer, or NULL on error (diagnosed)
+ */
 static cc_expr_t *parse_initializer_expr(parser_t *p) {
     cc_expr_t *list = NULL;
-    char **member_names = NULL;
-    size_t member_count = 0;
-    size_t member_cap = 0;
-    size_t mi = 0;
-    /* where the next undesignated element goes: after the last one written */
-    size_t next_pos = 0;
+
     if (p->tok.kind != TOK_LBRACE) {
         return parse_assign(p);
     }
@@ -5892,170 +5892,12 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
         return list;
     }
     for (;;) {
-        if (p->tok.kind == TOK_LBRACK) {
-            cc_expr_t *idx_expr;
-            cc_expr_t *value;
-            cc_expr_t *designated = NULL;
-            long idx = -1;
-            long hi = -1;
-            int is_range = 0;
-            size_t fill_i;
-            member_names = NULL;
-            member_count = 0;
-            member_cap = 0;
+        cc_expr_t *item = parse_initializer_item(p);
 
-            if (next_tok(p) != 0) {
-                free_expr(list);
-                return NULL;
-            }
-            idx_expr = parse_expr(p);
-            if (idx_expr == NULL) {
-                free_expr(list);
-                return NULL;
-            }
-            if (eval_const_array_bound_expr(p, idx_expr, &idx) != 0 || idx < 0) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "array designator index must be a non-negative integer constant");
-                free_expr(idx_expr);
-                free_expr(list);
-                return NULL;
-            }
-            free_expr(idx_expr);
-            hi = idx;
-            if (p->tok.kind == TOK_ELLIPSIS) {
-                cc_expr_t *hi_expr;
-                if (next_tok(p) != 0) {
-                    free_expr(list);
-                    return NULL;
-                }
-                hi_expr = parse_expr(p);
-                if (hi_expr == NULL) {
-                    free_expr(list);
-                    return NULL;
-                }
-                if (eval_const_array_bound_expr(p, hi_expr, &hi) != 0 || hi < idx) {
-                    set_diag(p->diag, p->tok.line, p->tok.col,
-                             "array designator range must be non-decreasing integer constants");
-                    free_expr(hi_expr);
-                    free_expr(list);
-                    return NULL;
-                }
-                free_expr(hi_expr);
-                is_range = 1;
-            }
-            if (expect(p, TOK_RBRACK, "expected ']' after array designator index") != 0) {
-                free_expr(list);
-                return NULL;
-            }
-            while (p->tok.kind == TOK_DOT) {
-                char **next_names;
-                if (next_tok(p) != 0) {
-                    goto fail_array_designator;
-                }
-                if (p->tok.kind != TOK_IDENT) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "expected member name in designated initializer");
-                    goto fail_array_designator;
-                }
-                if (member_count == member_cap) {
-                    size_t ncap = member_cap == 0 ? 4 : member_cap * 2;
-                    next_names = (char **)realloc(member_names, ncap * sizeof(*next_names));
-                    if (next_names == NULL) {
-                        goto fail_array_designator;
-                    }
-                    member_names = next_names;
-                    member_cap = ncap;
-                }
-                member_names[member_count] = cc_strndup(p->tok.start, p->tok.len);
-                if (member_names[member_count] == NULL) {
-                    goto fail_array_designator;
-                }
-                member_count++;
-                if (next_tok(p) != 0) {
-                    goto fail_array_designator;
-                }
-            }
-            if (expect(p, TOK_ASSIGN, "expected '=' after array designator") != 0) {
-                goto fail_array_designator;
-            }
-            value = parse_initializer_expr(p);
-            if (value == NULL) {
-                goto fail_array_designator;
-            }
-            if (member_count > 0) {
-                designated = build_member_designator_expr(member_names, member_count, value);
-                if (designated == NULL) {
-                    free_expr(value);
-                    goto fail_array_designator;
-                }
-                value = designated;
-            }
-            for (fill_i = list->arg_count; fill_i < (size_t)idx; ++fill_i) {
-                cc_expr_t *z = new_int_expr(0);
-                if (z == NULL || push_arg(list, z) != 0) {
-                    free_expr(z);
-                    free_expr(value);
-                    goto fail_array_designator;
-                }
-            }
-            if (!is_range) {
-                if ((size_t)idx < list->arg_count) {
-                    free_expr(list->args[idx]);
-                    list->args[idx] = value;
-                } else if (push_arg(list, value) != 0) {
-                    free_expr(value);
-                    goto fail_array_designator;
-                }
-            } else {
-                long k;
-                for (k = idx; k <= hi; ++k) {
-                    cc_expr_t *cur = (k == idx) ? value : clone_expr(value);
-                    if (cur == NULL) {
-                        free_expr(value);
-                        goto fail_array_designator;
-                    }
-                    while ((size_t)k >= list->arg_count) {
-                        cc_expr_t *z = new_int_expr(0);
-                        if (z == NULL || push_arg(list, z) != 0) {
-                            free_expr(z);
-                            if (cur != value) {
-                                free_expr(cur);
-                            }
-                            free_expr(value);
-                            goto fail_array_designator;
-                        }
-                    }
-                    free_expr(list->args[k]);
-                    list->args[k] = cur;
-                }
-            }
-            next_pos = (size_t)hi + 1;
-            if (member_names != NULL) {
-                for (mi = 0; mi < member_count; ++mi) {
-                    free(member_names[mi]);
-                }
-            }
-            free(member_names);
-            member_names = NULL;
-            member_count = 0;
-            member_cap = 0;
-        } else {
-            cc_expr_t *item = parse_initializer_item(p);
-            if (item == NULL) {
-                free_expr(list);
-                return NULL;
-            }
-            /*
-             * After [4] = a, [1] = b, the next element is [2] (C11
-             * 6.7.9p17): it can land on one already written.
-             */
-            if (next_pos < list->arg_count) {
-                free_expr(list->args[next_pos]);
-                list->args[next_pos] = item;
-            } else if (push_arg(list, item) != 0) {
-                free_expr(item);
-                free_expr(list);
-                return NULL;
-            }
-            next_pos++;
+        if (item == NULL || push_arg(list, item) != 0) {
+            free_expr(item);
+            free_expr(list);
+            return NULL;
         }
         if (p->tok.kind != TOK_COMMA) {
             break;
@@ -6073,17 +5915,6 @@ static cc_expr_t *parse_initializer_expr(parser_t *p) {
         return NULL;
     }
     return list;
-
-fail_array_designator:
-    if (member_names != NULL) {
-        for (mi = 0; mi < member_count; ++mi) {
-            free(member_names[mi]);
-        }
-    }
-    free(member_names);
-    member_names = NULL;
-    free_expr(list);
-    return NULL;
 }
 
 static int is_static_assert_tok(parser_t *p) {
@@ -7587,6 +7418,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     }
 
     dst->int_val = src->int_val;
+    dst->int_val_hi = src->int_val_hi;
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
@@ -7999,6 +7831,19 @@ static cc_expr_t *parse_unary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
+                {
+                    /* `sizeof (T[]){...}`: the list in its one form, and the bound it gives */
+                    long n = 0;
+
+                    if (parser_canon_initializer(p, ce->ctype, &ce->lhs, &n) != 0) {
+                        free_expr(ce);
+                        free_expr(e);
+                        return NULL;
+                    }
+                    if (ce->ctype != NULL && ce->ctype->kind == CC_CT_ARRAY && ce->ctype->count < 0 && n > 0) {
+                        ce->ctype = cc_ct_array(ce->ctype->of, n);
+                    }
+                }
                 e->lhs = ce;
                 e->aux_ctype = NULL;
             }
@@ -8093,11 +7938,15 @@ static cc_expr_t *parse_unary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                /* `(T[]){...}`: the bound comes from the list (C11 6.5.2.5p4, 6.7.9p22) */
-                if (e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY && e->ctype->count < 0) {
-                    long n = parser_init_list_bound_ct(p, e->ctype->of, e->lhs);
+                /* the list in its one form; `(T[]){...}`: and the bound it gives (C11 6.5.2.5p4, 6.7.9p22) */
+                {
+                    long n = 0;
 
-                    if (n > 0) {
+                    if (parser_canon_initializer(p, e->ctype, &e->lhs, &n) != 0) {
+                        free_expr(e);
+                        return NULL;
+                    }
+                    if (e->ctype != NULL && e->ctype->kind == CC_CT_ARRAY && e->ctype->count < 0 && n > 0) {
                         e->ctype = cc_ct_array(e->ctype->of, n);
                     }
                 }
@@ -9166,14 +9015,22 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             free_stmt(&s);
             return -1;
         }
-        /* `T a[] = {...}`: the initializer completes the array type */
-        if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0 && s.expr != NULL) {
+        if (s.expr != NULL && s.expr->kind == CC_EXPR_INIT_LIST) {
+            /* the list in its one form; `T a[] = {...}`: and the bound it gives the array */
             long inferred = 0;
-            if (s.expr->kind == CC_EXPR_INIT_LIST) {
-                inferred = parser_init_list_bound_ct(p, s.ctype->of, s.expr);
-            } else if (s.expr->kind == CC_EXPR_STR) {
-                inferred = parser_string_literal_array_bound(s.expr);
+
+            if (parser_canon_initializer(p, s.ctype, &s.expr, &inferred) != 0) {
+                free_stmt(&s);
+                return -1;
             }
+            if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0 && inferred > 0) {
+                s.ctype = cc_ct_array(s.ctype->of, inferred);
+            }
+        } else if (s.ctype != NULL && s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0 && s.expr != NULL &&
+                   s.expr->kind == CC_EXPR_STR) {
+            /* `char s[] = "abc"`: the string completes the array type */
+            long inferred = parser_string_literal_array_bound(s.expr);
+
             if (inferred > 0) {
                 s.ctype = cc_ct_array(s.ctype->of, inferred);
             }

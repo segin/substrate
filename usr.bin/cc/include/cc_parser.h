@@ -100,6 +100,9 @@ typedef cc_const_t parser_const_value_t;
 
 /* parser.c */
 
+/** Report error @p msg at the parser's current token. */
+void parser_error(parser_t *p, const char *msg);
+
 /**
  * The member @p name (of @p len bytes) of structure @p sid, looked for in
  * its anonymous members too.
@@ -212,5 +215,23 @@ int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out);
  * @return     0, or -1 if @p e is not an integer constant expression
  */
 int eval_const_case_value(parser_t *p, const cc_expr_t *e, long long *out);
+
+/**
+ * Put the initializer list at @p slot for an object of type @p t in the one
+ * form the rest of the compiler reads (C11 6.7.9): every designator
+ * resolved, every elided brace put back, every aggregate a list of its
+ * parts in order -- a gap before the last part given holding a zero -- and
+ * a union's list its one member's initializer, designated where that is
+ * not the first member.  Nothing is changed where @p t is not an array or
+ * a structure, or the list is one string for an array of characters.
+ *
+ * @param p        the parser
+ * @param t        the object's type
+ * @param slot     the initializer; replaced by its canonical form
+ * @param out_len  receives an array's length as initialized (the bound an
+ *                 array of unknown bound takes), or 0; may be NULL
+ * @return         0, or -1 on error (diagnosed)
+ */
+int parser_canon_initializer(parser_t *p, const cc_ctype_t *t, cc_expr_t **slot, long *out_len);
 
 #endif

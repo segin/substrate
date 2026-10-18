@@ -722,12 +722,27 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   [[gnu::aligned(64)]];` is rejected ("expected primary expression");
   gcc accepts it and aligns `b`.  *Reproduced*; found while testing
   CC-110.
-- [ ] **CC-102** A designator list shall be any sequence of `[index]` and
-  `.member` (C11 6.7.9p1): cc takes one array designator, optionally
-  followed by member designators, so `int a[2][2] = {[1][1] = 5};` is
+- [x] **CC-102** A designator list shall be any sequence of `[index]` and
+  `.member` (C11 6.7.9p1): cc took one array designator, optionally
+  followed by member designators, so `int a[2][2] = {[1][1] = 5};` was
   rejected ("expected '=' after array designator"; gcc accepts it).
   *Reproduced* (both targets); found while testing arrays of more than
-  four dimensions, and present before.
+  four dimensions, and present before.  The parser keeps a designation
+  as written (`CC_EXPR_DESIGNATION`), and `parser_canon_initializer()`
+  (`frontend/parse_sema.c`), which knows the type the list initializes,
+  resolves every designator against the braces' object, continues after
+  the subobject it names, puts elided braces back and writes the one
+  fully-braced positional form the checks and lowering read (CC-116).
+  `codegen/designated_chains.c`; `native_bad_c99_designator_{member,bound}.c`.
+- [x] **CC-116** A designator after brace-elided initializers shall name
+  the subobject it designates (C11 6.7.9p17, p20): the parser placed an
+  array designator by its position in the list as written, so after
+  elided items it overwrote the wrong one -- `int a[2][2] = {1, 2, [1] =
+  {3, 4}};` gave `1 3 0 0` (gcc `1 2 3 4`), and `struct p c[2] = {1, 2,
+  [1] = {3, 4}};` lost `c[0].y` -- at file scope and in functions alike,
+  without a diagnostic.  *Reproduced* (both targets); found while fixing
+  CC-102, and fixed with it: designators are resolved with the type in
+  hand, after the elided braces are restored.
 - [x] **CC-105** A pointer to a function typedef shall be a pointer to
   that function type (C11 6.7.8): after `typedef int fn_t(const char *,
   ...); fn_t *fp;`, `fp` is `int (*)(const char *, ...)`.  The parser
@@ -1174,7 +1189,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-115 requirements: 107 met, 8 open.
+116 requirements: 109 met, 7 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
