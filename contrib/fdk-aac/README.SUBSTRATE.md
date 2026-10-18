@@ -1,7 +1,8 @@
 # Fraunhofer FDK AAC on Substrate
 
-**fdk-aac 2.0.3**, the Fraunhofer FDK AAC codec library — encoder and
-decoder.  Ported to replace `contrib/faad2` (decode-only) as PsyMP3's AAC
+**fdk-aac 3.0.0**, the Fraunhofer FDK AAC codec library — encoder and
+decoder (`libfdk-aac.so.2`), and since 3.0.0 a separate xHE-AAC encoder
+library (`libfdk-xhe-aac.so.0`), which PsyMP3 does not use.  Ported to replace `contrib/faad2` (decode-only) as PsyMP3's AAC
 path.  The two can coexist: this port stages and installs under different
 names, so nothing that links `-lfaad` today is disturbed.
 
@@ -33,7 +34,10 @@ variable points at the substrate cross toolchain, and the result is stamped
 
 ## Substrate-specific notes
 
-No patches — the `series` file is empty.  Three build flags carry the whole
+One patch.  `0001` gives the xHE-AAC library's two MXCSR helpers GCC's
+`target("sse")` attribute: they call `_mm_getcsr`/`_mm_setcsr` on every x86,
+which GCC will not inline into an i486 build, and their callers only run them
+after a runtime SSE check.  Otherwise three build flags carry the whole
 port:
 
 - **`-fno-stack-protector`.**  substrate's libc has no
@@ -92,8 +96,8 @@ should read `NOTICE` rather than assume the terms of the surrounding tree.
 
 ## Verifying
 
-    readelf -h  dist-overlay/dist-fdk-aac/usr/lib/libfdk-aac.so.2.0.3
-    readelf -d  dist-overlay/dist-fdk-aac/usr/lib/libfdk-aac.so.2.0.3
+    readelf -h  dist-overlay/dist-fdk-aac/usr/lib/libfdk-aac.so.2.0.4
+    readelf -d  dist-overlay/dist-fdk-aac/usr/lib/libfdk-aac.so.2.0.4
 
 should report `ELF32`, `Intel 80386`, `OS/ABI: <unknown: 40>`, and
 
@@ -101,8 +105,8 @@ should report `ELF32`, `Intel 80386`, `OS/ABI: <unknown: 40>`, and
     NEEDED  libm.so.0
     NEEDED  libc.so.0
 
-with **no** `libstdc++.so.6`.  The exported surface is 2680 functions
-including `aacDecoder_Open` / `aacDecoder_DecodeFrame` and `aacEncOpen` /
+with **no** `libstdc++.so.6`.  The exported surface (3.0.0) is 1216
+functions including `aacDecoder_Open` / `aacDecoder_DecodeFrame` and `aacEncOpen` /
 `aacEncEncode`.
 
 **Not yet runtime-tested on target.**  The library cross-builds, links and

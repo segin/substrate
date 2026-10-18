@@ -1,0 +1,39 @@
+Subject: xhe-aac: build the MXCSR helpers for SSE on x86 without -msse
+
+fdk-aac 3.0.0 adds the xHE-AAC encoder library, whose fpucontrol helpers
+call _mm_getcsr/_mm_setcsr on every x86.  Built for a CPU without SSE
+(substrate's i386 target is -march=i486) GCC refuses to inline them:
+
+    error: inlining failed in call to 'always_inline' '_mm_getcsr':
+    target specific option mismatch
+
+Their callers only run them after GetCPUInfo(HAS_CPU_SSE), so give the two
+helpers the "sse" target attribute under GCC.
+
+---
+--- a/xhe-aac/mathlib/src/opt/fpucontrol_opt.h
++++ b/xhe-aac/mathlib/src/opt/fpucontrol_opt.h
+@@ -101,15 +101,21 @@
+ #if (defined _M_IX86 || defined _M_X64 || defined __i386__ || defined __x86_64__)
+ #if defined(_MSC_VER)
+ #include <intrin.h>
++#define FPUCTRL_SSE_TARGET
+ #elif defined(__GNUC__)
+ #include <x86intrin.h>
++/* Callers check GetCPUInfo(HAS_CPU_SSE) first, so these may use SSE even
++   where the rest of the build targets a CPU without it (-march=i486). */
++#define FPUCTRL_SSE_TARGET __attribute__((target("sse")))
++#else
++#define FPUCTRL_SSE_TARGET
+ #endif
+ 
+-static unsigned int fpuctrl_getSSE_mxcsr(void) {
++static FPUCTRL_SSE_TARGET unsigned int fpuctrl_getSSE_mxcsr(void) {
+   return _mm_getcsr();
+ }
+ 
+-static unsigned int fpuctrl_setSSE_mxcsr(unsigned int ctrlWord) {
++static FPUCTRL_SSE_TARGET unsigned int fpuctrl_setSSE_mxcsr(unsigned int ctrlWord) {
+   _mm_setcsr(ctrlWord);
+   return _mm_getcsr();
+ }

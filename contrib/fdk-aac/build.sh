@@ -44,7 +44,7 @@ SUBSTRATE_TOP="$(cd "${HERE}/../.." && pwd)"
 SR="${STAGE1_PREFIX}/i386-unknown-substrate"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 
-VER="2.0.3"
+VER="3.0.0"
 TREE="${HERE}/build/fdk-aac-${VER}"
 DEST="${SUBSTRATE_TOP}/dist-overlay/dist-fdk-aac"
 

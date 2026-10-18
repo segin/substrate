@@ -9,11 +9,13 @@
 # bytes are stable over time.
 set -eu
 
-VER="2.0.3"
+VER="3.0.0"
 TB="fdk-aac-${VER}.tar.gz"
 URL="https://downloads.sourceforge.net/opencore-amr/${TB}"
 URL_FALLBACK="https://sourceforge.net/projects/opencore-amr/files/fdk-aac/${TB}/download"
-SHA256="829b6b89eef382409cda6857fd82af84fabb63417b08ede9ea7a553f811cb79e"
+# SourceForge publishes an MD5 only (16d5d48fc7286e7d235fa299da49a935 in
+# the project's file feed); the tarball fetched had it.
+SHA256="70b95857b958fb8f794489307a87845dde4cc1fcea060f3f29f40e4b2fe16c82"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"
