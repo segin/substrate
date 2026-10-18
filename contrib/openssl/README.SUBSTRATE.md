@@ -1,14 +1,14 @@
 # OpenSSL on substrate
 
 Upstream:  https://www.openssl.org/
-Pinned:    3.0.13  (LTS branch, released 2024-01-30)
-Tarball:   `https://www.openssl.org/source/openssl-3.0.13.tar.gz`
-SHA-256:   `88525753f79d3bec27d2fa7c66aa0b92b3aa9498dafd93d7cfa4b3780cdae313`
+Pinned:    3.5.9  (LTS branch)
+Tarball:   `https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz`
+SHA-256:   `603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a`
 
 ## Why
 
-Substrate currently has no TLS/SSL stack.  Pulling in OpenSSL 3.0.x
-(LTS) gives us:
+Substrate currently has no TLS/SSL stack.  Pulling in OpenSSL 3.x
+gives us:
 
 - `libcrypto.so` — hashes, AEAD ciphers, RNG seeding, X.509 parsing,
   ASN.1, BN big-integer math — used by future SSH/HTTPS/IMAP/POP3
@@ -21,7 +21,7 @@ Substrate currently has no TLS/SSL stack.  Pulling in OpenSSL 3.0.x
 
 ## Scope
 
-The default 3.0.x build will produce libcrypto.so.3, libssl.so.3,
+The default 3.x build will produce libcrypto.so.3, libssl.so.3,
 and the `openssl` driver.  Substrate target needs the usual
 "target-clang / linux-generic32" Configure recipe with
 `no-asm`, `no-engine`, `no-tests`, and an explicit `--cross-compile-

@@ -1,2 +1,3 @@
 # Substrate patches for OpenSSL.
-0001-apps-include-sys-select.patch
+# (none: 0001-apps-include-sys-select.patch is upstream since 3.x --
+# include/internal/sockets.h includes <sys/select.h> itself)

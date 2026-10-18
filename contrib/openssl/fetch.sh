@@ -2,14 +2,12 @@
 # Download + verify + extract + patch OpenSSL.  Idempotent.
 set -eu
 
-VERSION="3.0.13"
+VERSION="3.5.9"
 TARBALL="openssl-${VERSION}.tar.gz"
-URL="https://www.openssl.org/source/${TARBALL}"
-# SHA-256 below cross-checked against openssl.org's published
-# openssl-3.0.13.tar.gz.sha256 sidecar AND verified via PGP signature
-# (openssl-3.0.13.tar.gz.asc) signed by OpenSSL OMC <openssl-omc@openssl.org>
-# key EFC0A467D613CB83C7ED6D30D894E2CE8B3D79F5 on 2024-01-30.
-SHA256="88525753f79d3bec27d2fa7c66aa0b92b3aa9498dafd93d7cfa4b3780cdae313"
+URL="https://github.com/openssl/openssl/releases/download/openssl-${VERSION}/${TARBALL}"
+# SHA-256 below cross-checked against the release's published
+# openssl-3.5.9.tar.gz.sha256 sidecar.
+SHA256="603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"

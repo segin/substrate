@@ -14,7 +14,7 @@
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION="3.0.13"
+VERSION="3.5.9"
 TREE_DIR="${HERE}/build/openssl-${VERSION}"
 
 if [ -z "${SUBSTRATE_TOP:-}" ]; then
