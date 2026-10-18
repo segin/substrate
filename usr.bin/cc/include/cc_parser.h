@@ -168,17 +168,20 @@ int var_find_visible_n(const parser_t *p, const char *name, size_t len);
 int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype);
 
 /**
- * Record the value of a constexpr object just declared in the current
- * scope, so its name is an integer constant expression (C23 6.6p7).  Only
- * an object of integer type no wider than 64 bits whose initializer is an
- * integer constant expression gets one.
+ * Check a constexpr object just declared in the current scope against
+ * C23 6.7.1's constraints, and record its value so its name is an integer
+ * constant expression (C23 6.6p7).  It needs an initializer; an integer
+ * one's is an integer constant expression its type can represent, and a
+ * pointer's is null.  Only an integer object no wider than 64 bits gets a
+ * value recorded.
  *
  * @param p      the parser
  * @param name   its name
  * @param ctype  its type
  * @param init   its initializer; may be NULL
+ * @return       0, or -1 with the parser's diagnostic set
  */
-void parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init);
+int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init);
 
 /** End the scopes deeper than @p depth: forget the variables declared in them. */
 void var_pop_to_depth(parser_t *p, int depth);

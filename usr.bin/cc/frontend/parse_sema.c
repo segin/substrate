@@ -161,26 +161,76 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     return 0;
 }
 
-void parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init) {
+/**
+ * Whether an integer constant's value is one an integer type can hold.
+ *
+ * @param v  the constant
+ * @param t  the integer type
+ * @return   1 if it is, else 0
+ */
+static int constexpr_representable(const parser_const_value_t *v, const cc_ctype_t *t) {
+    long width = cc_ct_int_width(t);
+    int neg = !cc_const_is_unsigned(v) && (int64_t)v->bits < 0;
+    uint64_t mag = neg ? (uint64_t)0 - v->bits : v->bits;
+
+    if (width <= 0 || width > 64) {
+        return 1;
+    }
+    if (t->unqual->kind == CC_CT_BOOL || cc_ct_is_unsigned(t)) {
+        return !neg && (width == 64 || mag <= ((uint64_t)1 << width) - 1);
+    }
+    /* signed: -2^(w-1) .. 2^(w-1) - 1 */
+    return neg ? mag <= (uint64_t)1 << (width - 1) : mag <= ((uint64_t)1 << (width - 1)) - 1;
+}
+
+int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype, const cc_expr_t *init) {
     parser_const_value_t v;
+    const cc_ctype_t *it;
     int vidx;
 
-    if (name == NULL || ctype == NULL || init == NULL || !cc_ct_is_integer(ctype)) {
-        return;
+    if (name == NULL || ctype == NULL) {
+        return 0;
     }
-    if (parser_ct_size(p, ctype) > 8) {
-        return;
+    if (init == NULL) {
+        parser_error(p, "'constexpr' requires an initialized data declaration");
+        return -1;
     }
     /* a scalar's initializer may be braced: `constexpr int n = {4};` */
     if (init->kind == CC_EXPR_INIT_LIST && init->arg_count == 1) {
         init = init->args[0];
     }
-    vidx = var_find_visible_n(p, name, strlen(name));
-    if (vidx < 0 || p->vars[vidx].depth != p->scope_depth || eval_const_expr_value(p, init, &v) != 0) {
-        return;
+    if (ctype->unqual->kind == CC_CT_POINTER) {
+        /* only a null pointer: nullptr, or a null pointer constant (C23 6.7.1p5) */
+        it = parser_expr_ctype(p, init);
+        if (it != NULL && it->unqual->kind == CC_CT_NULLPTR) {
+            return 0;
+        }
+        if (eval_const_expr_value(p, init, &v) != 0 || v.bits != 0) {
+            parser_error(p, "'constexpr' pointer initializer is not null");
+            return -1;
+        }
+        return 0;
     }
-    p->vars[vidx].const_type = ctype->unqual;
-    p->vars[vidx].const_bits = v.bits;
+    if (!cc_ct_is_integer(ctype) || parser_ct_size(p, ctype) > 8) {
+        return 0;
+    }
+    if (eval_const_expr_value(p, init, &v) != 0) {
+        it = parser_expr_ctype(p, init);
+        parser_error(p, it != NULL && cc_ct_is_floating(it)
+                            ? "'constexpr' integer initializer is not an integer constant expression"
+                            : "initializer element is not constant");
+        return -1;
+    }
+    if (!constexpr_representable(&v, ctype)) {
+        parser_error(p, "'constexpr' initializer not representable in type of object");
+        return -1;
+    }
+    vidx = var_find_visible_n(p, name, strlen(name));
+    if (vidx >= 0 && p->vars[vidx].depth == p->scope_depth) {
+        p->vars[vidx].const_type = ctype->unqual;
+        p->vars[vidx].const_bits = v.bits;
+    }
+    return 0;
 }
 
 void var_pop_to_depth(parser_t *p, int depth) {

@@ -9084,8 +9084,10 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     free_stmt(&s);
                     return -1;
                 }
-                if ((s.storage & CC_STORAGE_CONSTEXPR) != 0) {
-                    parser_note_constexpr(p, s.decl_name, s.ctype, s.expr);
+                if ((s.storage & CC_STORAGE_CONSTEXPR) != 0 &&
+                    parser_note_constexpr(p, s.decl_name, s.ctype, s.expr) != 0) {
+                    free_stmt(&s);
+                    return -1;
                 }
             }
             if (arr == NULL || count == NULL) {

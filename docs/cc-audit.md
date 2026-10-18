@@ -545,11 +545,18 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   name that shadows it carries none.  `constexpr` in a block no longer
   gives the object static storage (only at file scope, where it has
   internal linkage, C23 6.2.2p3).  `codegen/constexpr_ice.c`.
-- [ ] **CC-91** The constraints on `constexpr` (C23 6.7.1, 6.7.10)
+- [x] **CC-91** The constraints on `constexpr` (C23 6.7.1, 6.7.10)
   shall be diagnosed, as gcc does: assigning to one, initializing one
   from a non-constant, and an initializer not representable in its type
-  (`constexpr unsigned char c = 300;` only draws an assembler truncation
-  warning and yields 44) are all accepted.  *Reproduced.*
+  (`constexpr unsigned char c = 300;` only drew an assembler truncation
+  warning and yielded 44) were all accepted.  *Reproduced.*  Assignment
+  and `++` are rejected now that `constexpr` makes the object const
+  (CC-90); `parser_note_constexpr()` rejects a missing initializer, a
+  non-constant one, a floating one for an integer, a value outside the
+  type's range (`_Bool` and `_BitInt` widths included) and a pointer
+  initializer that is not null, with gcc's messages.  An initializer of a
+  floating or aggregate `constexpr` is not yet checked for being
+  constant.  `native_bad_c23_constexpr_{noinit,nonconst,range,float,pointer}.c`.
 - [x] **CC-92** `nullptr` shall convert only to a pointer, `bool` or
   `nullptr_t` (C23 6.3.2.4): `int n = nullptr;` was accepted; gcc
   rejects it.  *Reproduced.*  `nullptr` was the integer constant 0 and
@@ -1200,7 +1207,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-116 requirements: 111 met, 5 open.
+116 requirements: 112 met, 4 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
