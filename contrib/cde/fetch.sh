@@ -51,7 +51,14 @@ echo "==> CDE at $(git -C "${TREE_DIR}" rev-parse --short HEAD)"
 [ -d "${CDE}" ] || { echo "fetch.sh: ${CDE} missing after clone" >&2; exit 1; }
 
 # --- substrate patch series ------------------------------------------------
+# Each applied patch leaves a stamp, and a stamped patch is not looked at
+# again.  Asking `patch -R --dry-run` whether a patch is in is not enough on
+# its own: 0017 edits the same dthelp Makefile.am lines as 0007, so once
+# both are in, 0007 no longer reverses cleanly and a re-run would apply it
+# a second time.  The dry run is kept for a tree patched before the stamps.
+STAMPS="${TREE_DIR}/.substrate-applied"
 if [ -f "${HERE}/series" ]; then
+    mkdir -p "${STAMPS}"
     cd "${CDE}"
     while IFS= read -r p; do
         case "$p" in
@@ -61,12 +68,18 @@ if [ -f "${HERE}/series" ]; then
             echo "fetch.sh: missing patch ${p}" >&2
             exit 1
         fi
+        if [ -f "${STAMPS}/${p}" ]; then
+            echo "==> Patch ${p} already applied"
+            continue
+        fi
         if patch -p1 --dry-run -s -R < "${HERE}/patches/${p}" >/dev/null 2>&1; then
             echo "==> Patch ${p} already applied"
+            touch "${STAMPS}/${p}"
             continue
         fi
         echo "==> Applying ${p}"
         patch -p1 < "${HERE}/patches/${p}"
+        touch "${STAMPS}/${p}"
     done < "${HERE}/series"
 fi
 
