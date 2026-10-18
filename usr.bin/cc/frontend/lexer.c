@@ -843,9 +843,10 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
         copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
         out->is_float = 1;
         if (out->float_is_single) {
-            /* a float constant is the float nearest its digits, not the double */
+            /* a float constant is the float nearest its digits, not the double; fnum_ld keeps the
+             * digits' long double value, which a constant evaluated in long double has */
             out->fnum = (double)strtof(tmp, NULL);
-            out->fnum_ld = (long double)out->fnum;
+            out->fnum_ld = strtold(tmp, NULL);
         } else {
             out->fnum = strtod(tmp, NULL);
             out->fnum_ld = strtold(tmp, NULL);

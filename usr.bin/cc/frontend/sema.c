@@ -1682,6 +1682,28 @@ static int sema_excess_wrap(cc_expr_t *e, const cc_ctype_t *t) {
 }
 
 /**
+ * Give floating constant @p e, of type float or double, its value in long
+ * double's format where operations are evaluated in long double (C11
+ * 6.4.4.2p5, 5.2.4.2.2p9), as gcc's ISO modes do: the constant becomes
+ * long double, its digits' value, under an excess-precision cast to its
+ * type.  gcc's GNU modes keep a constant in its type, and so does cc in
+ * them.
+ *
+ * @param e  the literal, typed
+ * @return   0, or -1 when out of memory
+ */
+static int sema_widen_float_constant(cc_expr_t *e) {
+    const cc_ctype_t *t = e->ctype;
+
+    if (t == NULL || !(t->unqual->kind == CC_CT_FLOAT || t->unqual->kind == CC_CT_DOUBLE) || cc_lang_gnu() ||
+        !sema_eval_in_long_double()) {
+        return 0;
+    }
+    sema_set_type(e, cc_ct_basic(CC_CT_LDOUBLE));
+    return sema_excess_wrap(e, t);
+}
+
+/**
  * Take a value's greater range and precision, not its type's: an
  * excess-precision cast in @p slot is replaced by its operand.
  *
@@ -5172,9 +5194,16 @@ static int check_expr_kind(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
 
     switch (e->kind) {
     case CC_EXPR_INT:
-    case CC_EXPR_FLOAT:
     case CC_EXPR_STR:
         sema_type_literal(e);
+        return 0;
+
+    case CC_EXPR_FLOAT:
+        sema_type_literal(e);
+        if (sema_widen_float_constant(e) != 0) {
+            sema_diag(diag, "out of memory widening a floating constant");
+            return -1;
+        }
         return 0;
 
     case CC_EXPR_GENERIC:

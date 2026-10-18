@@ -786,14 +786,20 @@ The regression tests are `tests/usr.bin/cc/codegen/*.c`, run by
   the type; an i386 operation's extended value is the one folded, as a
   conversion takes it.  `native_bad_c23_constexpr_float_inexact.c`,
   `_float_range.c`, `_float_int.c`; `codegen/constexpr_float_exact.c`.
-- [ ] **CC-130** Where `__FLT_EVAL_METHOD__` is 2 (i386), a floating
+- [x] **CC-130** Where `__FLT_EVAL_METHOD__` is 2 (i386), a floating
   constant shall have its value in long double's format (C11 6.4.4.2p5,
   5.2.4.2.2p9), as gcc's `-fexcess-precision=standard` (its ISO modes)
-  gives it: `0.1 == 0.1L` is 1 with `gcc -m32 -std=c11`, 0 with cc, and
-  so `constexpr double d = 0.1;` is rejected by gcc there and accepted by
-  cc.  cc widens operations (CC-119) but not constants; gcc's GNU modes
-  widen neither, as cc does.  *Reproduced* (i386); found while fixing
-  CC-125.
+  gives it: `0.1 == 0.1L` was 1 with `gcc -m32 -std=c11`, 0 with cc, and
+  so `constexpr double d = 0.1;` was rejected by gcc there and accepted by
+  cc.  cc widened operations (CC-119) but not constants.  *Reproduced*
+  (i386); found while fixing CC-125.  In an ISO mode sema makes a float or
+  double constant long double, its digits' value (the lexer now keeps a
+  float constant's too), under an excess-precision cast to its type
+  (`sema_widen_float_constant()`), so every conversion takes the extended
+  value and `sizeof` and `_Generic` still see its type.  In a GNU mode
+  constants keep their type, as gcc's do; cc still widens operations
+  there (gcc's `fast` does not), unchanged.
+  `codegen/excess_precision_const.c`.
 - [x] **CC-96** An `_Atomic` or `_BitInt` object at file scope shall be
   as big as its type (C11 6.2.5p27, C23 6.2.6.1): cc gave every such
   object the pointer size, so `_Atomic short` and `_BitInt(17)` took 16
@@ -1392,7 +1398,7 @@ they stand.  *Reproduced* unless marked.
 
 ---
 
-131 requirements: 130 met, 1 open.
+131 requirements: 131 met, 0 open.
 
 The structural refactor and the target-neutral IR are planned in
 `usr.bin/cc/docs/refactor-plan.md` and `usr.bin/cc/docs/neutral-ir-plan.md`.
