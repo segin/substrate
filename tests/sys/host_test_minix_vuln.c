@@ -36,7 +36,7 @@ void kfree(void *ptr, size_t size) {
 #include <vfs/vfs.h>
 
 // Mock read_fs
-size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     if (size > 0) {
         memset(buffer, 0, size);
@@ -53,12 +53,17 @@ size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     return 0;
 }
 
-size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
     return 0;
 }
 
 void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
+
+// The driver's lookup cache takes a spinlock; this test is single-threaded.
+#include <sys/lock.h>
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
 
 // Include the real source
 #include "../../sys/fs/minix/minix.c"
@@ -87,14 +92,17 @@ int main() {
     minix_fs_t fs;
     memset(&fs, 0, sizeof(fs));
     fs.sb.s_magic = MINIX_V1_Magic;
+    fs.sb.s_nzones = 1440;      /* zone 10 must pass minix_zone_ok */
     fs.block_device = &node;
 
     node.impl = (uintptr_t)&fs;
-    
-    struct minix_inode_v1 inode_v1;
-    memset(&inode_v1, 0, sizeof(inode_v1));
-    inode_v1.i_zone[0] = 10;
-    node.ptr = (struct fs_node *)&inode_v1;
+
+    /* readdir returns the dirent kept in the node's wrapper, after the
+     * raw inode: a bare inode here would be overrun. */
+    struct minix_inode_wrapper w;
+    memset(&w, 0, sizeof(w));
+    w.inode.v1.i_zone[0] = 10;
+    node.ptr = (struct fs_node *)&w;
 
     poison_stack();
 
