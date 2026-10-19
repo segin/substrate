@@ -192,6 +192,14 @@ lseekchk: lseekchk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# execfail: an exec that fails part way through loading (an x.out whose
+# entry lies outside its code segment) returns ENOEXEC to a caller whose
+# memory is intact, and does not leak.  Needs a Xenix/286 binary to copy:
+# run as `execfail /perso/xenix286s/bin/echo` with xenix286s.img mounted.
+execfail: execfail.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pipeleak: a pipe() that fails part way, or whose descriptors cannot be
 # copied out, leaves nothing allocated or open.  Runs on the host too.
 pipeleak: pipeleak.c

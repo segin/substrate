@@ -382,10 +382,16 @@ static int coff_load(int fd, const char *path, char *const argv[],
     char **kargv = NULL, **kenvp = NULL;
     int argc = 0, envc = 0, nlibs = 0, sun386 = 0;
     uint32_t brk = 0, sp = 0, entry;
+    struct exec_space es;
     pmap_t pmap;
     vm_map_t *map;
     int rc, i;
+    int perso_switched = 0;
+    int old_perso_id = 0;
+    uint8_t old_bitness = 0;
 
+    /* fail: may abort before exec_space_begin has run. */
+    memset(&es, 0, sizeof(es));
     img = kmalloc(sizeof(*img));
     libs = kmalloc(COFF_MAX_LIBS * COFF_LIB_PATH_MAX);
     if (!img || !libs) {
@@ -414,19 +420,13 @@ static int coff_load(int fd, const char *path, char *const argv[],
         goto fail;
     }
 
-    pmap = pmap_create();
-    if (!pmap) {
-        rc = -ENOMEM;
-        goto fail;
-    }
-    current_process->pmap = (struct pmap *)pmap;
-    pmap_activate(pmap);
     /* Text starts in the first page, so the map does too. */
-    map = vm_map_create(pmap, 0, USER32_VA_END);
-    if (!map) {
-        rc = -ENOMEM;
+    rc = exec_space_begin(&es, 0, USER32_VA_END);
+    if (rc != 0) {
         goto fail;
     }
+    pmap = es.pmap;
+    map = es.map;
 
     rc = coff_map_sections(pmap, map, fd, img, &brk);
     if (rc != 0) {
@@ -436,7 +436,11 @@ static int coff_load(int fd, const char *path, char *const argv[],
     /* The process is SVR3 from here, so that the libraries are looked for
      * under the personality's root -- or it is a Sun386i program, which
      * is SunOS's and not System V's at all, and has no libraries the
-     * kernel loads: its own startup code maps /lib/ld.so. */
+     * kernel loads: its own startup code maps /lib/ld.so.  A failure
+     * before the commit puts the caller's personality back. */
+    old_perso_id = current_process->perso_id;
+    old_bitness = current_process->bitness;
+    perso_switched = 1;
     current_process->perso_id = sun386 ? PERS_SUNOS : PERS_SVR3;
     current_process->bitness = BITNESS_32;
     for (i = 0; i < nlibs; i++) {
@@ -468,6 +472,16 @@ static int coff_load(int fd, const char *path, char *const argv[],
         }
     }
 
+    current_process->arg_start = 0;
+    current_process->arg_end = 0;
+    rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, 1, &sp);
+    if (rc != 0) {
+        goto fail;
+    }
+
+    /* Committed: the new image will run. */
+    exec_space_commit(&es);
+
     /* Caught signals revert to their defaults across exec, and the new
      * image starts with the FPU in its initial state. */
     proc_exec_reset_signals();
@@ -492,20 +506,10 @@ static int coff_load(int fd, const char *path, char *const argv[],
                 sizeof(current_process->exec_path));
     }
 
-    if (current_process->vm_map) {
-        vm_map_destroy(current_process->vm_map);
-    }
-    current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
-    current_process->arg_start = 0;
-    current_process->arg_end = 0;
     proc_capture_cmdline(current_process, kargv);
 
-    rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, 1, &sp);
-    if (rc != 0) {
-        goto fail;
-    }
     aout_free_vector(kargv, argc);
     aout_free_vector(kenvp, envc);
     kfree(libs, COFF_MAX_LIBS * COFF_LIB_PATH_MAX);
@@ -526,6 +530,11 @@ static int coff_load(int fd, const char *path, char *const argv[],
     return 0;   /* not reached */
 
 fail:
+    if (perso_switched) {
+        current_process->perso_id = old_perso_id;
+        current_process->bitness = old_bitness;
+    }
+    exec_space_abort(&es);
     aout_free_vector(kargv, argc);
     aout_free_vector(kenvp, envc);
     if (libs) {

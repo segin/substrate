@@ -434,6 +434,7 @@ static int aout_load(int fd, const char *path, char *const argv[],
     uint32_t magic;
     uint32_t txtaddr, txtoff, dataddr, dataoff, bssaddr, brk;
     int flat;
+    struct exec_space es;
     pmap_t pmap;
     vm_map_t *map;
     uint32_t sp;
@@ -498,24 +499,17 @@ static int aout_load(int fd, const char *path, char *const argv[],
         return rc;
     }
 
-    pmap = pmap_create();
-    if (!pmap) {
-        aout_free_vector(kargv, argc);
-        aout_free_vector(kenvp, envc);
-        kern_close(fd);
-        return -ENOMEM;
-    }
-    current_process->pmap = (struct pmap *)pmap;
-    pmap_activate(pmap);
     /* Linux ZMAGIC/OMAGIC place text at virtual address 0, so the user vm_map
      * must start at 0 (QMAGIC still leaves page 0 unmapped as its NULL guard). */
-    map = vm_map_create(pmap, 0, AOUT_USER_MAX);
-    if (!map) {
+    rc = exec_space_begin(&es, 0, AOUT_USER_MAX);
+    if (rc != 0) {
         aout_free_vector(kargv, argc);
         aout_free_vector(kenvp, envc);
         kern_close(fd);
-        return -ENOMEM;
+        return rc;
     }
+    pmap = es.pmap;
+    map = es.map;
 
     if (flat) {
         /* Linux's vm_brk() + read_code() path: one anonymous, zero-filled,
@@ -539,12 +533,20 @@ static int aout_load(int fd, const char *path, char *const argv[],
                                  fd, dataoff);
         }
     }
+    if (rc == 0) {
+        rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, 0, &sp);
+    }
+    aout_free_vector(kargv, argc);
+    aout_free_vector(kenvp, envc);
     if (rc != 0) {
-        aout_free_vector(kargv, argc);
-        aout_free_vector(kenvp, envc);
+        /* Nothing of the old image is gone yet: give it back. */
+        exec_space_abort(&es);
         kern_close(fd);
         return rc;
     }
+
+    /* Committed: the new image will run. */
+    exec_space_commit(&es);
 
     /* POSIX: caught signal handlers are reset to SIG_DFL across exec.  Without
      * this the a.out image inherits the previous image's handler pointers (e.g.
@@ -580,19 +582,7 @@ static int aout_load(int fd, const char *path, char *const argv[],
         }
     }
 
-    if (current_process->vm_map) {
-        vm_map_destroy(current_process->vm_map);
-    }
-    current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
-
-    rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, 0, &sp);
-    aout_free_vector(kargv, argc);
-    aout_free_vector(kenvp, envc);
-    if (rc != 0) {
-        kern_close(fd);
-        return rc;
-    }
 
     proc_close_cloexec(current_process);
     kern_close(fd);

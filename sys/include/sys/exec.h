@@ -64,6 +64,33 @@ void exec_maybe_unpin_current_thread(int from_user);
 int exec_cleanup_push(void (*free_fn)(void *), void *ptr);
 void exec_cleanup_drain(void);
 
+/*
+ * A loader's new address space, kept beside the caller's until the loader
+ * commits.  exec_space_begin() creates a pmap and a vm_map over [lo, hi),
+ * makes them the process's and switches to them.  Every step that can fail
+ * runs before exec_space_commit(), which destroys the caller's address
+ * space; a failure before that calls exec_space_abort(), which switches
+ * back to the caller's and destroys the new one, so the failed exec
+ * returns an error to the old image instead of leaving it on a half-built
+ * address space (or none).  The stack and argument bounds a loader records
+ * while building the new stack are put back too.
+ *
+ * exec_space_begin: 0, or -ENOMEM with nothing changed.
+ */
+struct pmap;
+struct vm_map;
+struct exec_space {
+    struct pmap *old_pmap;
+    struct vm_map *old_map;
+    struct pmap *pmap;
+    struct vm_map *map;
+    uintptr_t old_ustack_top, old_ustack_limit;
+    uint32_t old_arg_start, old_arg_end;
+};
+int exec_space_begin(struct exec_space *es, uintptr_t lo, uintptr_t hi);
+void exec_space_abort(struct exec_space *es);
+void exec_space_commit(struct exec_space *es);
+
 #ifdef HOST_TEST
 int exec_handler_registered(const char *name);
 #endif

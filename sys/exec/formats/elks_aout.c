@@ -341,10 +341,20 @@ elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
     return ldt_replace_process(proc, entries, entry_count);
 }
 
+/* A failure after exec_space_begin: back to the caller's address space. */
+static int elks_abort_load(struct exec_space *es, char **kargv, char **kenvp,
+                           int fd, int err, const char *msg) {
+    exec_space_abort(es);
+    elks_free_kernel_vector(kargv);
+    elks_free_kernel_vector(kenvp);
+    return elks_fail(fd, err, msg);
+}
+
 int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) {
     struct elks_exec hdr;
     struct elks_supl_hdr suph;
     struct elks_load_plan plan;
+    struct exec_space es;
     vm_map_t *map = NULL;
     char **kargv = NULL;
     char **kenvp = NULL;
@@ -452,47 +462,37 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         plan.text_limit = plan.data_limit;
     }
 
-    pmap_t pmap = pmap_create();
-    if (!pmap) {
+    ret = exec_space_begin(&es, 0x10000, USER32_VA_END);
+    if (ret != 0) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);
-        return elks_fail(fd, -ENOMEM, "ELKS: failed to create pmap");
+        return elks_fail(fd, ret, "ELKS: failed to create address space");
     }
-    
-    current_process->pmap = (struct pmap*)pmap;
-    pmap_activate(pmap);
-    map = vm_map_create(pmap, 0x10000, USER32_VA_END);
-    if (!map) {
-        elks_free_kernel_vector(kargv);
-        elks_free_kernel_vector(kenvp);
-        return elks_fail(fd, -ENOMEM, "ELKS: failed to create vm_map");
-    }
+    pmap_t pmap = es.pmap;
+    map = es.map;
 
     if (plan.combined) {
         ret = elks_map_object_pages(map, pmap, plan.text_base, plan.text_limit,
                                     VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE,
                                     NULL);
         if (ret != 0) {
-            elks_free_kernel_vector(kargv);
-            elks_free_kernel_vector(kenvp);
-            return elks_fail(fd, ret, "ELKS: failed to map combined text/data");
+            return elks_abort_load(&es, kargv, kenvp, fd, ret,
+                                   "ELKS: failed to map combined text/data");
         }
     } else {
         ret = elks_map_object_pages(map, pmap, plan.text_base, plan.text_limit,
                                     VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE,
                                     NULL);
         if (ret != 0) {
-            elks_free_kernel_vector(kargv);
-            elks_free_kernel_vector(kenvp);
-            return elks_fail(fd, ret, "ELKS: failed to map text");
+            return elks_abort_load(&es, kargv, kenvp, fd, ret,
+                                   "ELKS: failed to map text");
         }
 
         ret = elks_map_object_pages(map, pmap, plan.data_base, plan.data_limit,
                                     VM_PROT_READ | VM_PROT_WRITE, NULL);
         if (ret != 0) {
-            elks_free_kernel_vector(kargv);
-            elks_free_kernel_vector(kenvp);
-            return elks_fail(fd, ret, "ELKS: failed to map data/stack");
+            return elks_abort_load(&es, kargv, kenvp, fd, ret,
+                                   "ELKS: failed to map data/stack");
         }
     }
 
@@ -501,9 +501,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
                                     VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE,
                                     NULL);
         if (ret != 0) {
-            elks_free_kernel_vector(kargv);
-            elks_free_kernel_vector(kenvp);
-            return elks_fail(fd, ret, "ELKS: failed to map far text");
+            return elks_abort_load(&es, kargv, kenvp, fd, ret,
+                                   "ELKS: failed to map far text");
         }
     }
     
@@ -519,10 +518,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, plan.text_size);
 
             if (status != 0) {
-                elks_free_kernel_vector(kargv);
-                elks_free_kernel_vector(kenvp);
-                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
-                                 "ELKS: failed to read text segment");
+                return elks_abort_load(&es, kargv, kenvp, fd,
+                                       status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                       "ELKS: failed to read text segment");
             }
         }
     }
@@ -534,10 +532,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, plan.fartext_size);
 
             if (status != 0) {
-                elks_free_kernel_vector(kargv);
-                elks_free_kernel_vector(kenvp);
-                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
-                                 "ELKS: failed to read far text segment");
+                return elks_abort_load(&es, kargv, kenvp, fd,
+                                       status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                       "ELKS: failed to read far text segment");
             }
         }
     }
@@ -552,23 +549,39 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, plan.data_size);
 
             if (status != 0) {
-                elks_free_kernel_vector(kargv);
-                elks_free_kernel_vector(kenvp);
-                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
-                                 "ELKS: failed to read data segment");
+                return elks_abort_load(&es, kargv, kenvp, fd,
+                                       status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                       "ELKS: failed to read data segment");
             }
         }
         memset((void *)(uintptr_t)(data_load_base + plan.data_size), 0, plan.bss_size);
     }
-    
-    // Setup LDT
-    if (elks_setup_segments(current_process, &plan) != 0) {
-        elks_free_kernel_vector(kargv);
-        elks_free_kernel_vector(kenvp);
-        return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate or populate LDT");
+
+    // Stack setup: the 16-bit stack points to the end of the data segment.
+    uint16_t initial_sp = 0;
+    uint32_t user_sp;
+    struct elks_segment_layout layout;
+
+    memset(&layout, 0, sizeof(layout));
+    elks_build_segment_layout(&plan, &layout);
+    if (!elks_build_stack_image((uint8_t *)(uintptr_t)plan.data_base, &plan,
+                                kargv, kenvp, &initial_sp)) {
+        return elks_abort_load(&es, kargv, kenvp, fd, -E2BIG,
+                               "ELKS: failed to build startup stack image");
     }
+    user_sp = initial_sp;
+
+    /* The last step that can fail.  It replaces the LDT only once the new
+     * one is built, so a failure leaves the caller's in place. */
+    if (elks_setup_segments(current_process, &plan) != 0) {
+        return elks_abort_load(&es, kargv, kenvp, fd, -ENOMEM,
+                               "ELKS: failed to allocate or populate LDT");
+    }
+
+    /* Committed: the new image will run. */
+    exec_space_commit(&es);
     ldt_activate(current_process);
-    
+
     elks_apply_exec_state(current_process, &plan, path);
     /* Caught signals revert to their defaults across exec: a handler is
      * an address in the image that has just been replaced.  Without this
@@ -578,28 +591,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     proc_capture_cmdline(current_process, kargv);
     /* The new image starts with the FPU in its initial state. */
     fpu_thread_reset(current_thread);
-    if (current_process->vm_map) {
-        vm_map_destroy(current_process->vm_map);
-    }
-    current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
-    
-    // Stack setup (simplified for now)
-    // 16-bit stack points to end of Data segment
-    uint16_t initial_sp = 0;
-    uint32_t user_sp;
-    struct elks_segment_layout layout;
-    
-    memset(&layout, 0, sizeof(layout));
-    elks_build_segment_layout(&plan, &layout);
-    if (!elks_build_stack_image((uint8_t *)(uintptr_t)plan.data_base, &plan,
-                                kargv, kenvp, &initial_sp)) {
-        elks_free_kernel_vector(kargv);
-        elks_free_kernel_vector(kenvp);
-        return elks_fail(fd, -E2BIG, "ELKS: failed to build startup stack image");
-    }
-    user_sp = initial_sp;
-
 
     uint16_t elks_stack_size = 0;
     

@@ -29,6 +29,9 @@
 #include <sys/syscall_impl.h>
 #include <sys/types.h>
 #include <vfs/vfs.h>
+#include <vm/vm_commit.h>
+#include <vm/vm_map.h>
+#include <machine/pmap.h>
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
@@ -149,6 +152,62 @@ void exec_cleanup_drain(void) {
             free_fn(ptr);
         }
     }
+}
+
+int exec_space_begin(struct exec_space *es, uintptr_t lo, uintptr_t hi) {
+    memset(es, 0, sizeof(*es));
+    pmap_t pmap = pmap_create();
+    if (!pmap) {
+        return -ENOMEM;
+    }
+    vm_map_t *map = vm_map_create(pmap, lo, hi);
+    if (!map) {
+        pmap_destroy(pmap);
+        return -ENOMEM;
+    }
+    es->old_pmap = current_process->pmap;
+    es->old_map = current_process->vm_map;
+    es->pmap = pmap;
+    es->map = map;
+    es->old_ustack_top = current_process->ustack_top;
+    es->old_ustack_limit = current_process->ustack_limit;
+    es->old_arg_start = current_process->arg_start;
+    es->old_arg_end = current_process->arg_end;
+    /* The loader maps and faults against the new space from here on. */
+    current_process->pmap = pmap;
+    current_process->vm_map = map;
+    pmap_activate(pmap);
+    return 0;
+}
+
+void exec_space_abort(struct exec_space *es) {
+    if (!es->map) {
+        return;
+    }
+    if (es->old_pmap) {
+        pmap_activate(es->old_pmap);
+    }
+    current_process->pmap = es->old_pmap;
+    current_process->vm_map = es->old_map;
+    current_process->ustack_top = es->old_ustack_top;
+    current_process->ustack_limit = es->old_ustack_limit;
+    current_process->arg_start = es->old_arg_start;
+    current_process->arg_end = es->old_arg_end;
+    /* The map owns its pmap: this destroys both. */
+    vm_map_destroy(es->map);
+    memset(es, 0, sizeof(*es));
+}
+
+void exec_space_commit(struct exec_space *es) {
+    if (es->old_map) {
+        /* The old heap's commit charge is held by the process, not by a
+         * map entry, so vm_map_destroy does not return it (as in the ELF
+         * loader).  The new image starts with an empty heap. */
+        vm_commit_uncharge(current_process->brk_committed);
+        current_process->brk_committed = 0;
+        vm_map_destroy(es->old_map);
+    }
+    memset(es, 0, sizeof(*es));
 }
 
 /*

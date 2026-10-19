@@ -86,6 +86,12 @@ static int xout_fail(int fd, int err, const char *msg) {
     return err;
 }
 
+/* A failure after exec_space_begin: back to the caller's address space. */
+static int xout_abort(struct exec_space *es, int fd, int err, const char *msg) {
+    exec_space_abort(es);
+    return xout_fail(fd, err, msg);
+}
+
 /* Map [start, start+length) as fresh zero-filled anonymous pages, prot-mapped
  * into the given vm_map.  Mirrors elks_map_object_pages including the direct-
  * map ceiling guard. */
@@ -271,6 +277,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
     unsigned int nsegs, stride;
     unsigned int max_ldt_index = 0;
     gdt_entry_t entries[64];
+    struct exec_space es;
     pmap_t pmap;
     vm_map_t *map;
     uint16_t cs_sel = (uint16_t)0, ds_sel = 0;
@@ -338,17 +345,13 @@ static int xout_load(int fd, const char *path, char *const argv[],
     }
 
     /* --- address space --- */
-    pmap = pmap_create();
-    if (!pmap) {
-        return xout_fail(fd, -ENOMEM, "xout: pmap_create failed");
-    }
-    current_process->pmap = (struct pmap *)pmap;
-    pmap_activate(pmap);
     /* Text is linked at address 0, so the map starts there. */
-    map = vm_map_create(pmap, 0, USER32_VA_END);
-    if (!map) {
-        return xout_fail(fd, -ENOMEM, "xout: vm_map_create failed");
+    rc = exec_space_begin(&es, 0, USER32_VA_END);
+    if (rc != 0) {
+        return xout_fail(fd, rc, "xout: cannot create address space");
     }
+    pmap = es.pmap;
+    map = es.map;
 
     memset(entries, 0, sizeof(entries));
 
@@ -374,7 +377,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
         total = XOUT_ROUND_UP(vsize);
         if ((base & XOUT_PAGE_MASK) != 0 || total == 0 ||
             base >= USER32_VA_END || total > USER32_VA_END - base) {
-            return xout_fail(fd, -ENOEXEC, "xout: segment address out of range");
+            return xout_abort(&es, fd, -ENOEXEC, "xout: segment address out of range");
         }
         if (is_code) {
             if (base + total > image_end) {
@@ -398,7 +401,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
 
         rc = xout_insert_region(map, base, total, prot, &obj);
         if (rc != 0) {
-            return xout_fail(fd, rc, "xout: failed to map segment");
+            return xout_abort(&es, fd, rc, "xout: failed to map segment");
         }
 
         /* Eagerly back the on-disk image so kern_read writes to present pages;
@@ -406,7 +409,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
         if (psize > 0) {
             rc = xout_populate(map, pmap, obj, base, 0, psize, prot);
             if (rc != 0) {
-                return xout_fail(fd, rc, "xout: failed to back segment image");
+                return xout_abort(&es, fd, rc, "xout: failed to back segment image");
             }
         }
 
@@ -422,7 +425,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
                 char *bounce = kmalloc(XOUT_PAGE);
 
                 if (!bounce) {
-                    return xout_fail(fd, -ENOMEM, "xout: out of memory");
+                    return xout_abort(&es, fd, -ENOMEM, "xout: out of memory");
                 }
                 head = psize < XOUT_PAGE ? psize : XOUT_PAGE;
                 got = kern_read(fd, bounce, (int)head);
@@ -437,7 +440,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
                 got = more < 0 ? more : got + more;
             }
             if (got < 0) {
-                return xout_fail(fd, -EIO, "xout: read error on segment image");
+                return xout_abort(&es, fd, -EIO, "xout: read error on segment image");
             }
             /* A short read (e.g. a truncated `split` fragment) leaves the tail
              * zero-filled, which is the same state bss expects; tolerate it so
@@ -462,7 +465,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
     }
 
     if (cs_sel == 0 || ds_sel == 0) {
-        return xout_fail(fd, -ENOEXEC, "xout: missing entry or data segment");
+        return xout_abort(&es, fd, -ENOEXEC, "xout: missing entry or data segment");
     }
 
     /* --- the stack: below the data, or high up if there is no room --- */
@@ -485,14 +488,18 @@ static int xout_load(int fd, const char *path, char *const argv[],
                                tail, VM_PROT_READ | VM_PROT_WRITE);
         }
         if (rc != 0) {
-            return xout_fail(fd, rc, "xout: failed to map the stack");
+            return xout_abort(&es, fd, rc, "xout: failed to map the stack");
         }
     }
 
-    /* --- install the LDT --- */
+    /* --- install the LDT: the last step that can fail; it replaces the
+     * caller's LDT only once the new one is built --- */
     if (ldt_replace_process(current_process, entries, max_ldt_index + 1U) != 0) {
-        return xout_fail(fd, -ENOMEM, "xout: ldt_replace_process failed");
+        return xout_abort(&es, fd, -ENOMEM, "xout: ldt_replace_process failed");
     }
+
+    /* Committed: the new image will run. */
+    exec_space_commit(&es);
     ldt_activate(current_process);
 
     /* --- process state --- */
@@ -520,10 +527,6 @@ static int xout_load(int fd, const char *path, char *const argv[],
         }
     }
 
-    if (current_process->vm_map) {
-        vm_map_destroy(current_process->vm_map);
-    }
-    current_process->vm_map = map;
     /* The new image starts with the FPU in its initial state. */
     fpu_thread_reset(current_thread);
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
@@ -711,9 +714,11 @@ static int x286_fail(int fd, int err, const char *msg) {
     return err;
 }
 
-/* Same, for the failures that happen once argv/envp have been snapshotted. */
-static int x286_fail_v(int fd, char **kargv, char **kenvp, int err,
-                       const char *msg) {
+/* Same, for the failures that happen once argv/envp have been snapshotted
+ * and exec_space_begin has run: back to the caller's address space too. */
+static int x286_fail_v(struct exec_space *es, int fd, char **kargv,
+                       char **kenvp, int err, const char *msg) {
+    exec_space_abort(es);
     x286_free_vector(kargv);
     x286_free_vector(kenvp);
     return x286_fail(fd, err, msg);
@@ -961,6 +966,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
     unsigned int nsegs, s;
     unsigned int max_ldt_index = 0;
     unsigned int dgroup_index = 0;
+    struct exec_space es;
     pmap_t pmap;
     vm_map_t *map;
     uint16_t cs_sel = 0, ds_sel = 0;
@@ -1010,8 +1016,8 @@ static int x286_load(int fd, const char *path, char *const argv[],
         kprint(b);
     }
 
-    /* Validate every selector before we tear down the old address space:
-     * once pmap_create() runs there is no going back to the caller's image. */
+    /* Validate every selector before building a new address space: a bad
+     * image fails here, cheaply, with the caller's untouched. */
     for (s = 0; s < nsegs; s++) {
         const struct xseg *seg =
             (const struct xseg *)(segtab + s * XOUT_SEG_STRIDE);
@@ -1049,9 +1055,8 @@ static int x286_load(int fd, const char *path, char *const argv[],
      * This is what `cc` produces without -i, which is its default, so it is
      * the shape of every program built on the target unless the user knows to
      * ask otherwise.  Reserve the entry selector's LDT slot here, while
-     * failing is still free -- past pmap_create() there is no caller left to
-     * return to -- and alias the descriptor onto DGROUP once its base is
-     * known.
+     * failing is still cheap, and alias the descriptor onto DGROUP once its
+     * base is known.
      */
     if (!(hdr.x_renv & XE_SEP)) {
         unsigned int eidx = XOUT_SEL_INDEX(ext.xe_eseg);
@@ -1082,16 +1087,13 @@ static int x286_load(int fd, const char *path, char *const argv[],
     }
 
     /* --- address space --- */
-    pmap = pmap_create();
-    if (!pmap) {
-        return x286_fail_v(fd, kargv, kenvp, -ENOMEM, "xout286: pmap_create failed");
+    rc = exec_space_begin(&es, 0x10000, USER32_VA_END);
+    if (rc != 0) {
+        return x286_fail_v(&es, fd, kargv, kenvp, rc,
+                           "xout286: cannot create address space");
     }
-    current_process->pmap = (struct pmap *)pmap;
-    pmap_activate(pmap);
-    map = vm_map_create(pmap, 0x10000, USER32_VA_END);
-    if (!map) {
-        return x286_fail_v(fd, kargv, kenvp, -ENOMEM, "xout286: vm_map_create failed");
-    }
+    pmap = es.pmap;
+    map = es.map;
 
     memset(entries, 0, sizeof(entries));
 
@@ -1128,12 +1130,12 @@ static int x286_load(int fd, const char *path, char *const argv[],
 
         rc = x286_map_window(map, pmap, base, prot, &obj);
         if (rc != 0) {
-            return x286_fail_v(fd, kargv, kenvp, rc, "xout286: failed to map segment window");
+            return x286_fail_v(&es, fd, kargv, kenvp, rc, "xout286: failed to map segment window");
         }
         if (psize > 0) {
             rc = x286_populate(pmap, obj, base, 0, psize, prot);
             if (rc != 0) {
-                return x286_fail_v(fd, kargv, kenvp, rc, "xout286: failed to back image");
+                return x286_fail_v(&es, fd, kargv, kenvp, rc, "xout286: failed to back image");
             }
         }
 
@@ -1145,7 +1147,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
                                    X286_PAGE,
                                X286_STRING_CAP + X286_PAGE, prot);
             if (rc != 0) {
-                return x286_fail_v(fd, kargv, kenvp, rc, "xout286: failed to back stack");
+                return x286_fail_v(&es, fd, kargv, kenvp, rc, "xout286: failed to back stack");
             }
         }
 
@@ -1155,7 +1157,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
             kern_lseek(fd, seg->xs_filpos, 0);
             got = kern_read(fd, (void *)(uintptr_t)base, (int)psize);
             if (got < 0) {
-                return x286_fail_v(fd, kargv, kenvp, -EIO, "xout286: read error on segment");
+                return x286_fail_v(&es, fd, kargv, kenvp, -EIO, "xout286: read error on segment");
             }
             if ((uint32_t)got < psize && x286_debug_enabled()) {
                 char b[96];
@@ -1182,7 +1184,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
     }
 
     if (!have_dgroup) {
-        return x286_fail_v(fd, kargv, kenvp, -ENOEXEC, "xout286: no DGROUP data segment");
+        return x286_fail_v(&es, fd, kargv, kenvp, -ENOEXEC, "xout286: no DGROUP data segment");
     }
 
     /* Impure image: give xe_eseg a code descriptor over the very same bytes
@@ -1209,16 +1211,33 @@ static int x286_load(int fd, const char *path, char *const argv[],
     }
 
     if (cs_sel == 0) {
-        return x286_fail_v(fd, kargv, kenvp, -ENOEXEC, "xout286: entry segment not loaded");
+        return x286_fail_v(&es, fd, kargv, kenvp, -ENOEXEC, "xout286: entry segment not loaded");
     }
     if ((uint32_t)hdr.x_entry >= XOUT286_WINDOW_SIZE) {
-        return x286_fail_v(fd, kargv, kenvp, -ENOEXEC, "xout286: entry offset out of segment");
+        return x286_fail_v(&es, fd, kargv, kenvp, -ENOEXEC, "xout286: entry offset out of segment");
     }
 
-    /* --- install the LDT --- */
-    if (ldt_replace_process(current_process, entries, max_ldt_index + 1U) != 0) {
-        return x286_fail_v(fd, kargv, kenvp, -ENOMEM, "xout286: ldt_replace_process failed");
+    /* --- startup stack, written through DGROUP's linear window --- */
+    rc = x286_build_stack((uint8_t *)(uintptr_t)dgroup_base, kargv, kenvp,
+                          ds_sel, (hdr.x_renv & XE_LDATA) ? 1 : 0,
+                          &user_sp);
+    if (rc != 0) {
+        return x286_fail_v(&es, fd, kargv, kenvp, rc,
+                           "xout286: argv/envp too large for DGROUP");
     }
+    if ((uint32_t)user_sp <= dgroup_break) {
+        return x286_fail_v(&es, fd, kargv, kenvp, -E2BIG,
+                           "xout286: stack collides with bss");
+    }
+
+    /* --- install the LDT: the last step that can fail; it replaces the
+     * caller's LDT only once the new one is built --- */
+    if (ldt_replace_process(current_process, entries, max_ldt_index + 1U) != 0) {
+        return x286_fail_v(&es, fd, kargv, kenvp, -ENOMEM, "xout286: ldt_replace_process failed");
+    }
+
+    /* Committed: the new image will run. */
+    exec_space_commit(&es);
     ldt_activate(current_process);
 
     /* --- process state --- */
@@ -1252,10 +1271,6 @@ static int x286_load(int fd, const char *path, char *const argv[],
         }
     }
 
-    if (current_process->vm_map) {
-        vm_map_destroy(current_process->vm_map);
-    }
-    current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
     /* What ps and /proc/<pid>/cmdline report.  The process arrived here by
@@ -1267,19 +1282,8 @@ static int x286_load(int fd, const char *path, char *const argv[],
     current_process->arg_start = 0;
     current_process->arg_end = 0;
     proc_capture_cmdline(current_process, kargv);
-
-    /* --- startup stack, written through DGROUP's linear window --- */
-    rc = x286_build_stack((uint8_t *)(uintptr_t)dgroup_base, kargv, kenvp,
-                          ds_sel, (hdr.x_renv & XE_LDATA) ? 1 : 0,
-                          &user_sp);
     x286_free_vector(kargv);
     x286_free_vector(kenvp);
-    if (rc != 0) {
-        return x286_fail(fd, rc, "xout286: argv/envp too large for DGROUP");
-    }
-    if ((uint32_t)user_sp <= dgroup_break) {
-        return x286_fail(fd, -E2BIG, "xout286: stack collides with bss");
-    }
 
     proc_close_cloexec(current_process);
     kern_close(fd);
