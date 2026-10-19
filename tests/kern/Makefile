@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork
+all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -96,8 +96,15 @@ brkfork: brkfork.c
 brkfork.linux: brkfork.c
 	gcc -m32 -static -O2 $< -o $@
 
+# thrstart: thr_new with a stack the caller cannot write fails EFAULT
+# instead of panicking, and a thread with no TLS block starts.  Substrate
+# only.
+thrstart: thrstart.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux
+	      brkfork.linux thrstart
 
 .PHONY: all clean

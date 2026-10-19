@@ -1509,8 +1509,25 @@ int sys_thr_self(void) {
 int kern_thr_new(struct thr_param *param, int param_size) {
     if (!param || param_size < (int)sizeof(struct thr_param)) return -EINVAL;
     struct thr_param p = *param;
-    void *stack_top = (char*)p.stack_base + p.stack_size;
-    thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
+    uintptr_t top = (uintptr_t)p.stack_base + (uintptr_t)p.stack_size;
+    uintptr_t sp;
+    /* The thread's first call frame -- a return address of 0, and for a
+     * 32-bit thread the argument above it -- is written here with copyout,
+     * so a stack that is not the caller's writable memory fails the call
+     * with EFAULT; the trampoline that enters user mode then only loads
+     * the stack pointer.  It used to make these stores itself, in ring 0
+     * with no fault recovery, which panicked the kernel on a bad stack. */
+    if (top < (uintptr_t)p.stack_base) return -EFAULT;
+    if (proc_abi_is_amd64()) {
+        uint64_t frame64 = 0;
+        sp = (top & ~(uintptr_t)0xF) - sizeof(frame64);
+        if (copyout(&frame64, (void *)sp, sizeof(frame64)) != 0) return -EFAULT;
+    } else {
+        uint32_t frame32[2] = { 0, (uint32_t)(uintptr_t)p.arg };
+        sp = top - sizeof(frame32);
+        if (copyout(frame32, (void *)sp, sizeof(frame32)) != 0) return -EFAULT;
+    }
+    thread_t *t = sched_create_thread(current_process, p.start_func, (void *)sp, p.arg);
     if (!t) return -ENOMEM;
     if (p.child_tid) *p.child_tid = t->tid;
     /* Per-thread TLS: caller (libpthread) allocated a fresh TLS

@@ -433,14 +433,9 @@ new_user_thread_trampoline:
     mov %ax, %gs
     pop %eax                # restore user_arg
 
-    # Build the cdecl call frame on the *user* stack so the trampoline
-    # sees `arg` at [esp+4] like a normal call.
-    sub $4, %edx
-    movl %eax, (%edx)       # *user_stack = arg
-    sub $4, %edx
-    movl $0, (%edx)         # *user_stack = return-addr 0
-                            # (returning would _exit; trampoline does that
-                            #  itself via pthread_exit)
+    # user_stack already points at the cdecl call frame -- return address
+    # 0, then `arg` -- which kern_thr_new wrote with copyout: no ring-0
+    # store to user memory here, where a fault would have no recovery.
 
     # Build IRET frame: push in order [SS, ESP, EFLAGS, CS, EIP]
     push $0x23              # User SS

@@ -290,11 +290,8 @@ new_kernel_thread_trampoline:
 .global new_user_thread_trampoline
 new_user_thread_trampoline:
     cli
-    /* The cdecl frame on the user stack: arg, then return address 0. */
-    subl $4, %r14d
-    movl %r13d, (%r14)
-    subl $4, %r14d
-    movl $0, (%r14)
+    /* user_stack already points at the cdecl frame (return address 0,
+     * then arg), written by kern_thr_new with copyout. */
 
     movw $0x23, %ax
     movw %ax, %ds
@@ -437,7 +434,7 @@ jump_to_userspace64:
 
 /*
  * First entry of a new thread of a 64-bit process (thr_new):
- *   %r15 = entry, %r14 = top of its stack, %r13 = argument.
+ *   %r15 = entry, %r14 = its stack pointer, %r13 = argument.
  * The psABI's call-time state: argument in %rdi, and %rsp 16-byte aligned
  * before a return address, which is 0 -- the entry function does not
  * return.  %fs is the context switch's (the thread pointer).
@@ -445,9 +442,8 @@ jump_to_userspace64:
 .global new_user_thread_trampoline64
 new_user_thread_trampoline64:
     cli
-    andq $~0xF, %r14
-    subq $8, %r14
-    movq $0, (%r14)
+    /* %r14 already points at the return address 0 below a 16-byte
+     * aligned top, written by kern_thr_new with copyout. */
 
     movw $0x23, %ax
     movw %ax, %ds

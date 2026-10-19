@@ -28,16 +28,17 @@
  * %gs selector still loads but reads from the wrong (or zeroed) base.
  */
 static void i386_load_gs_slot(thread_t *t) {
-    /* Only touch the GDT TLS slot if this thread actually established a
-     * gs base via sysarch(I386_SET_GSBASE).  Kernel-only threads (swapper,
-     * syncer, USB poll, vm_pagedaemon, kinit before exec) never set one;
-     * unconditionally rewriting the slot to 0 on every context switch
-     * gains nothing and risks confusing whatever userspace thread held
-     * the slot's contents previously. */
+    /* The TLS slot is rewritten for every thread, base 0 included.  A
+     * thread that never set a base (one thr_new created without a TLS
+     * block, or one before rtld sets it) still loads %gs = 0x33 on its way
+     * to user mode: left alone, the slot was either never written -- an
+     * all-zero descriptor, so the ring-0 %gs load faults and the kernel
+     * panics -- or held the last thread's base, so this thread read
+     * another thread's TLS.  Every user thread is switched in through
+     * here, so rewriting it for kernel threads too costs nothing. */
     if (!t) return;
     if (t->fs_base_set)
         gdt_set_gate(GDT_FS_SLOT, t->fs_base, 0xFFFFF, 0xF2, 0xC0);
-    if (t->gs_base == 0) return;
     gdt_set_gate(GDT_TLS_START, t->gs_base, 0xFFFFF, 0xF2, 0xC0);
 }
 
