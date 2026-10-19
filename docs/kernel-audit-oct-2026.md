@@ -1105,7 +1105,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Fix: one post-commit exec hook beside `proc_close_cloexec` in every loader: `mq_proc_cleanup`, `ksem_proc_cleanup`, and an shm detach that drops the records without `vm_map_remove` (the old map is gone).  Stub it in `tests/Makefile` in the same commit.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-007a** *(Medium; confirmed — regression)* `make -C tests` (CI's host-testsuite job) shall build.
+- [x] **SYS-NEW-007a** *(Medium; confirmed — regression)* `make -C tests` (CI's host-testsuite job) shall build.
   Evidence: 7 targets (`test_runner`, `host_test_proc_tree`, `host_test_proc_exit`, `host_test_proc_lifecycle`, `host_test_proc_signal_state`, `host_test_fork_exec_wait`, `host_test_linux_signal`) fail to link on `mq_proc_fork`, `ksem_proc_fork`, `casuword32` and `sys_thr_self`, introduced by this remediation (3cd121605, c069a41ee, the KERN-012 futex change, a2ce8f109).  CI has failed on every run since 3cd121605.  Also `sys/exec/perso/personality.h` uses `size_t` with only `<stdint.h>`.
   Basis: observed (verifier + critic; `gh run list`).
 

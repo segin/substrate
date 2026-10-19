@@ -1,6 +1,7 @@
 #ifndef _EXEC_PERSO_H
 #define _EXEC_PERSO_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifndef MAX_SYSCALLS

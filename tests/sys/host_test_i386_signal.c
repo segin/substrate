@@ -152,6 +152,7 @@ static void assert_fpu_restored(void) {
         assert(fpu_restored_extra[i] == 0x3C);
 }
 
+#include "usersel_host.h"
 #include "../../sys/arch/i386/signal.c"
 
 static void test_legacy_sendsig_and_sigreturn(void) {
@@ -208,7 +209,8 @@ static void test_legacy_sendsig_and_sigreturn(void) {
     assert(regs.edi == saved.edi);
     assert(regs.ebp == saved.ebp);
     assert(regs.useresp == saved.useresp);
-    assert(thread.sig_mask == 0xA5A5A5A5u);
+    /* Restored, less SIGKILL and SIGSTOP, which no mask may hold. */
+    assert(thread.sig_mask == (0xA5A5A5A5u & ~SIG_CANTMASK));
 }
 
 static void test_siginfo_sendsig_and_rt_sigreturn(void) {
@@ -259,7 +261,7 @@ static void test_siginfo_sendsig_and_rt_sigreturn(void) {
     assert(regs.edi == saved.edi);
     assert(regs.ebp == saved.ebp);
     assert(regs.useresp == saved.useresp);
-    assert(thread.sig_mask == 0x55AA55AAu);
+    assert(thread.sig_mask == (0x55AA55AAu & ~SIG_CANTMASK));
 }
 
 static void test_siginfo_uses_trap_metadata(void) {

@@ -182,6 +182,20 @@ int copyout(const void *src, void *dst, size_t size) {
     return 0;
 }
 
+/* The real one is a fault-protected lock cmpxchg on a user word: here a
+ * plain atomic CAS on the host address, same contract (0 or EFAULT, *prev
+ * gets the value found).  futex.c's PI paths go through it. */
+int casuword32(volatile uint32_t *uaddr, uint32_t oldval, uint32_t newval,
+               uint32_t *prev) {
+    if ((void *)uaddr == mock_fault_addr || ((uintptr_t)uaddr & 3) != 0)
+        return 14; // EFAULT
+    uint32_t found = oldval;
+    __atomic_compare_exchange_n(uaddr, &found, newval, 0,
+                                __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    *prev = found;
+    return 0;
+}
+
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     size_t l = strlen(src);
     if (l >= maxlen) {
@@ -592,7 +606,9 @@ int kern_umtx_wake(void *uaddr, int n) { (void)uaddr; (void)n; return 0; }
 
 /* --- per-process IPC teardown hooks --- */
 void ksem_proc_cleanup(int pid) { (void)pid; }
+int ksem_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }
 void mq_proc_cleanup(int pid) { (void)pid; }
+int mq_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }
 void sem_proc_cleanup(int pid) { (void)pid; }
 void shm_proc_cleanup(int pid) { (void)pid; }
 

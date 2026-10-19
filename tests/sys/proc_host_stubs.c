@@ -48,7 +48,9 @@ __attribute__((weak)) void kfree(void *ptr, size_t size) { (void)ptr; (void)size
 __attribute__((weak)) void * kmalloc(size_t size) { (void)size; return NULL; }   /* sys/vm/vm_kmem.h */
 __attribute__((weak)) int kprintf(const char *fmt, ...) { (void)fmt; return 0; }   /* sys/drivers/console/console.h */
 __attribute__((weak)) void ksem_proc_cleanup(int pid) { (void)pid; }   /* sys/include/sys/posix_sem.h */
+__attribute__((weak)) int ksem_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }   /* sys/include/sys/posix_sem.h */
 __attribute__((weak)) void mq_proc_cleanup(int pid) { (void)pid; }   /* sys/include/sys/mqueue.h */
+__attribute__((weak)) int mq_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }   /* sys/include/sys/mqueue.h */
 __attribute__((weak)) unsigned long namecache_enter_count;   /* sys/vfs/vfs.h */
 __attribute__((weak)) unsigned long namecache_evict_count;   /* sys/vfs/vfs.h */
 __attribute__((weak)) unsigned long namecache_purge_count;   /* sys/vfs/vfs.h */

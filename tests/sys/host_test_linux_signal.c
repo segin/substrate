@@ -122,7 +122,23 @@ int sys_kill(int pid, int sig) {
     return 0;
 }
 
+/* gettid/tkill/tgkill (perso_linux.c): not exercised here. */
+int sys_thr_self(void) {
+    return current_thread ? current_thread->tid : 0;
+}
+
+thread_t *sched_get_thread(int tid) {
+    (void)tid;
+    return NULL;
+}
+
+int sys_thr_kill2(pid_t pid, abi_long_t tid, int sig) {
+    (void)pid; (void)tid; (void)sig;
+    return 0;
+}
+
 #define HOST_TEST 1
+#include "usersel_host.h"
 #include "../../sys/exec/perso/perso_linux.c"
 #include "../../sys/exec/perso/linux/linux_sig.c"
 
@@ -144,7 +160,13 @@ static void test_linux_rt_frame_uses_trap_siginfo(void) {
     assert(frame->info.si_signo == SIGSEGV);
     assert(frame->info.si_code == SEGV_ACCERR);
     assert((uintptr_t)frame->info._sifields._sigfault._addr == 0xBAD00BADu);
-    assert(frame->uc.uc_sigmask.sig[0] == 0xA5A5A5A5u);
+    /* The old mask, in Linux's signal numbering. */
+    {
+        linux_sigset_t want;
+        native_mask_to_linux_sigset(0xA5A5A5A5u, &want);
+        assert(frame->uc.uc_sigmask.sig[0] == want.sig[0]);
+        assert(frame->uc.uc_sigmask.sig[1] == want.sig[1]);
+    }
 }
 
 static void test_linux_rt_sigaction_translates_mask_and_restorer(void) {
@@ -188,8 +210,11 @@ static void test_linux_rt_sigprocmask_translates_sets(void) {
     memset(&set, 0, sizeof(set));
     set.sig[0] = sigmask(SIGUSR2) | sigmask(SIGCHLD);
 
-    assert(linux_sys_rt_sigprocmask(3, &set, &old, sizeof(linux_sigset_t)) == 0);
-    assert(last_kern_sigprocmask_how == 3);
+    /* Linux's SIG_SETMASK is 2 (BLOCK 0, UNBLOCK 1); it reaches the kernel
+     * as the native SIG_SETMASK.  3 is not a Linux `how` (EINVAL). */
+    assert(linux_sys_rt_sigprocmask(2, &set, &old, sizeof(linux_sigset_t)) == 0);
+    assert(last_kern_sigprocmask_how == SIG_SETMASK);
+    assert(linux_sys_rt_sigprocmask(3, &set, &old, sizeof(linux_sigset_t)) == -EINVAL);
     assert(last_kern_sigprocmask_set == (sigmask(SIGUSR2) | sigmask(SIGCHLD)));
     assert(old.sig[0] == (sigmask(SIGUSR1) | sigmask(SIGSEGV)));
 }
