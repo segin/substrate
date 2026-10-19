@@ -45,7 +45,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest thrkill truncperm shmgrow setredrop shmrange
+     vm86guest thrkill truncperm shmgrow setredrop shmrange rofault
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -162,9 +162,16 @@ shmrange: shmrange.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# rofault: a PI futex on a read-only page and a path string running into an
+# unmapped page fail with EFAULT instead of looping on the fault.
+# Substrate-only (native SYS_FUTEX).
+rofault: rofault.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
-	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange
+	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault
 
 .PHONY: all clean

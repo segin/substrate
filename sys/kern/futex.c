@@ -21,6 +21,7 @@
 #include <kern/time.h>
 #include <sys/amd64_abi.h>
 #include <sys/compat32.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
 #include <sys/proc.h>
@@ -136,35 +137,25 @@ static int futex_write_user(int *uaddr, int value) {
 
 /*
  * Safe userspace CMPXCHG for atomic operations
- * Returns old value, or sets *err on failure.
+ * Returns old value, or sets *err on failure.  casuword32 keeps its fault
+ * recovery inside its asm; a C `&&label` here could be folded into the
+ * success path, so a fault on a read-only page resumed into the cmpxchg
+ * again, forever.
  */
 static int futex_cmpxchg_user(int *uaddr, int oldval, int newval, int *err) {
     if (!validate_uaddr((uintptr_t)uaddr)) {
         *err = -EFAULT;
         return 0;
     }
-    
-    *err = 0;
-    
-    /* Set up fault handler for userspace access */
-    current_thread->on_fault = (uintptr_t)&&fault;
-    
-    /* Inline atomic cmpxchg on userspace memory */
-    int prev;
-    __asm__ volatile(
-        "lock cmpxchgl %2, %1"
-        : "=a"(prev), "+m"(*uaddr)
-        : "r"(newval), "0"(oldval)
-        : "memory"
-    );
-    
-    current_thread->on_fault = 0;
-    return prev;
 
-fault:
-    current_thread->on_fault = 0;
-    *err = -EFAULT;
-    return 0;
+    uint32_t prev = 0;
+    if (casuword32((volatile uint32_t *)uaddr, (uint32_t)oldval,
+                   (uint32_t)newval, &prev) != 0) {
+        *err = -EFAULT;
+        return 0;
+    }
+    *err = 0;
+    return (int)prev;
 }
 
 /* Forward declarations for PI functions */

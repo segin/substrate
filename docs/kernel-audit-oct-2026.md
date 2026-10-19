@@ -231,7 +231,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:1303-1407` allocates `char temp_buf[512];` on the kernel stack without `memset` and copies `reclen` (aligned up to 4 or 8 bytes) bytes into `dirp`, disclosing 1–7 bytes of uninitialized kernel stack per directory entry.
   Basis: traced.
 
-- [ ] **SYS-KERN-012** *(High; confirmed)* When setting `current_thread->on_fault` in `copyinstr` and `futex_cmpxchg_user`, the kernel shall place the fault recovery label inside the inline assembly block rather than taking the address of a C label (`&&fault`).
+- [x] **SYS-KERN-012** *(High; confirmed)* When setting `current_thread->on_fault` in `copyinstr` and `futex_cmpxchg_user`, the kernel shall place the fault recovery label inside the inline assembly block rather than taking the address of a C label (`&&fault`).
   Evidence: `sys/kern/subr_copy.c:216-243` (`copyinstr`) and `sys/kern/futex.c:150-168` (`futex_cmpxchg_user`) assign `current_thread->on_fault = (uintptr_t)&&fault;` around C loop bodies / separate asm statements, which `sys/kern/subr_copy.c:80-93` documents as unsafe under GCC basic-block folding and register allocation across traps.
   Basis: traced.
 

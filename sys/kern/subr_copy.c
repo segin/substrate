@@ -192,6 +192,33 @@ int casuword32(volatile uint32_t *uaddr, uint32_t oldval, uint32_t newval,
 }
 
 /*
+ * Read one byte of user memory into *out; 0, or EFAULT if the read faults.
+ * The fault label lives in the asm for the reason given at copyout().
+ */
+static int fetch_user_byte(const char *src, char *out) {
+    int result;
+    unsigned char c = 0;
+    __asm__ volatile (
+        COPY_MOVP " $1f, (%[on_fault])\n\t"
+        "movb (%[src]), %[c]\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
+        "xorl %[result], %[result]\n\t"
+        "jmp 2f\n"
+        "1:\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
+        "movl %[efault], %[result]\n"
+        "2:\n\t"
+        : [c] "+q"(c), [result] "=&r"(result)
+        : [src] "r"(src),
+          [on_fault] "r"(&current_thread->on_fault),
+          [efault] "i"(EFAULT)
+        : "memory"
+    );
+    *out = (char)c;
+    return result;
+}
+
+/*
  * copyinstr - Copy string from user space to kernel space
  *
  * Safely copies a null-terminated string from 'src' in user space
@@ -212,21 +239,13 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
         return ENAMETOOLONG;
     }
 
-    /* Set up fault handler */
-    current_thread->on_fault = (uintptr_t)&&fault;
-
     for (i = 0; i < maxlen; i++) {
-        if (validate_user_addr(s, 1) != 0) {
-            current_thread->on_fault = 0;
+        char c;
+        if (validate_user_addr(s, 1) != 0 || fetch_user_byte(s, &c) != 0)
             return EFAULT;
-        }
-
-        /* This access may trigger a page fault */
-        char c = *s;
         if (d) *d = c;
         if (c == '\0') {
             if (len) *len = i + 1;
-            current_thread->on_fault = 0;
             return 0;
         }
         s++;
@@ -234,11 +253,6 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     }
 
     /* Buffer full but no null terminator found */
-    current_thread->on_fault = 0;
     if (len) *len = maxlen;
     return ENAMETOOLONG;
-
-fault:
-    current_thread->on_fault = 0;
-    return EFAULT;
 }
