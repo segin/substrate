@@ -339,7 +339,7 @@ SYS-DRV-003 are Critical and not listed.
 
 ## 5. Filesystems (`sys/fs/`)
 
-- [ ] **SYS-FS-001** *(Critical; confirmed)* While a `shmfs` object has active memory mappings (`inode->map_count > 0`), `shmfs_grow` shall refuse to reallocate and free `inode->data` (`pmm_free_contiguous`).
+- [x] **SYS-FS-001** *(Critical; confirmed)* While a `shmfs` object has active memory mappings (`inode->map_count > 0`), `shmfs_grow` shall refuse to reallocate and free `inode->data` (`pmm_free_contiguous`).
   Evidence: `sys/fs/shmfs.c:161-182` (`shmfs_grow`) allocates new contiguous physical pages, copies `inode->data`, and calls `pmm_free_contiguous(inode->data, inode->data_cap >> 12)` without checking `inode->map_count > 0`, leaving existing user `mmap` PTEs pointing at freed physical pages that are reallocated by the kernel.
   Basis: traced.
 

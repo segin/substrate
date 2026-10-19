@@ -62,11 +62,21 @@
 /* --------------------------------------------------------------
  * Per-inode state.  One per shm object plus the root directory.
  * -------------------------------------------------------------- */
+/* A backing buffer replaced by a grow while the object was mapped: user
+ * PTEs may still point at its frames, so it is kept until the object's
+ * last mapping is gone (shmfs_free_retired). */
+typedef struct shmfs_retired {
+    uint8_t *data;
+    size_t   cap;
+    struct shmfs_retired *next;
+} shmfs_retired_t;
+
 typedef struct shmfs_inode {
     char     name[SHMFS_NAME_MAX];
     uint8_t *data;            /* kernel direct-map VA of the backing pages */
     uintptr_t data_phys;      /* physical base of the backing pages       */
     size_t   data_cap;        /* allocated bytes (always page-multiple)    */
+    shmfs_retired_t *retired; /* old buffers still mapped somewhere        */
     int      refcount;        /* open fd count; freed when 0 + unlinked */
     int      map_count;       /* live mmap device objects referencing us   */
     int      unlinked;        /* set true after directory removal */
@@ -171,7 +181,23 @@ static int shmfs_grow(shmfs_inode_t *inode, size_t want) {
     if (!nb) return -ENOMEM;
     if (inode->data && inode->data_cap > 0) {
         memcpy(nb, inode->data, inode->data_cap);
-        pmm_free_contiguous(inode->data, inode->data_cap >> 12);
+        if (inode->map_count > 0) {
+            /* Mapped: user PTEs point at the old frames, and freeing them
+             * would hand those processes whatever the allocator puts there
+             * next.  Keep them until the last mapping goes. */
+            shmfs_retired_t *r = (shmfs_retired_t *)kmalloc(sizeof(*r));
+            if (!r) {
+                pmm_free_contiguous(nb, npages);
+                return -ENOMEM;
+            }
+            r->data = inode->data;
+            r->cap = inode->data_cap;
+            r->next = inode->retired;
+            inode->retired = r;
+            shmfs_resident += (uint64_t)inode->data_cap;  /* still held */
+        } else {
+            pmm_free_contiguous(inode->data, inode->data_cap >> 12);
+        }
     }
     memset(nb + (inode->data_cap), 0, newcap - inode->data_cap);
     shmfs_resident += (uint64_t)newcap - (uint64_t)inode->data_cap;
@@ -217,8 +243,21 @@ static size_t shmfs_write(fs_node_t *node, off_t off, size_t sz, const uint8_t *
  * dispatch to these for every fd lifecycle event.  An inode's
  * buffer outlives unlink as long as someone still has it open.
  * -------------------------------------------------------------- */
+/* Free the buffers shmfs_grow retired; only once nothing maps the
+ * object any more.  Caller holds shmfs_lock. */
+static void shmfs_free_retired(shmfs_inode_t *inode) {
+    while (inode->retired) {
+        shmfs_retired_t *r = inode->retired;
+        inode->retired = r->next;
+        if (shmfs_resident >= r->cap) shmfs_resident -= r->cap;
+        pmm_free_contiguous(r->data, r->cap >> 12);
+        kfree(r, sizeof(*r));
+    }
+}
+
 static void shmfs_free_inode(shmfs_inode_t *inode) {
     if (!inode) return;
+    shmfs_free_retired(inode);
     if (inode->data && inode->data_cap > 0) {
         if (shmfs_resident >= inode->data_cap)
             shmfs_resident -= inode->data_cap;
@@ -274,6 +313,7 @@ static void shmfs_map_release(void *arg) {
     if (!inode) return;
     mutex_lock(&shmfs_lock);
     if (inode->map_count > 0) inode->map_count--;
+    if (inode->map_count == 0) shmfs_free_retired(inode);
     shmfs_maybe_free_inode(inode);
     mutex_unlock(&shmfs_lock);
 }
@@ -429,6 +469,7 @@ static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
 fail:
     mutex_lock(&shmfs_lock);
     if (inode->map_count > 0) inode->map_count--;
+    if (inode->map_count == 0) shmfs_free_retired(inode);
     shmfs_maybe_free_inode(inode);
     mutex_unlock(&shmfs_lock);
     return (void *)-1;

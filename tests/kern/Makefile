@@ -45,7 +45,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest thrkill truncperm
+     vm86guest thrkill truncperm shmgrow
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -128,8 +128,14 @@ truncperm: truncperm.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# shmgrow: growing a mapped shm object keeps the frames the mapping
+# uses.  Runs on the host too (-lrt).
+shmgrow: shmgrow.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm
+	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow
 
 .PHONY: all clean
