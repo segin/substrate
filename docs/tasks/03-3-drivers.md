@@ -1450,7 +1450,7 @@
             - [ ] Security model documentation. (REQ: REQ-03-1148)
             - [ ] Performance tuning guide. (REQ: REQ-03-1149)
 
-- [ ] **USB Stack Audit vs FreeBSD/NetBSD (2026-08)** — findings and citations in `docs/usb-audit-2026-08.md`.
+- [ ] **USB Stack Audit vs FreeBSD/NetBSD (2026-08)** — findings and citations were in `docs/usb-audit-2026-08.md` (removed 2026-10-18; see git history).
     - [ ] **HIGH**
         - [x] USB-01: xHCI slot context sets no Route String / Hub / NumPorts / MTT / TT fields, so no device behind an external hub can be addressed.
         - [x] USB-02: every EHCI queue head is built high-speed with no split-transaction fields, so no full/low-speed device behind a hub can transfer.

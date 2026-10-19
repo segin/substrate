@@ -3,7 +3,7 @@
 Design-panel output: four independent lenses (EHCI internal structure,
 cross-HCD unification, API/error model, testability) proposed 32 refactorings
 against sys/drivers/usb/{uhci,ehci,xhci}.c after the EHCI spec audit
-(docs/ehci-audit-2026-08.md); an adversarial critic then verified every
+(docs/ehci-audit-2026-08.md, since removed; see git history); an adversarial critic then verified every
 file:line claim against the tree, merged overlaps, and ranked what survived.
 None were killed for false premises; three were corrected (noted inline).
 Suggestions only -- nothing here has been implemented.
