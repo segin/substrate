@@ -34,6 +34,14 @@ uint16_t memtrack_record_alloc(uintptr_t pc, uint32_t pages);
 void memtrack_record_free(uint16_t idx, uint32_t pages);
 
 /*
+ * Move `pages` pages already recorded against site `idx` to caller `pc`;
+ * returns pc's site index.  vm_phys records every allocation against its
+ * own caller, and a wrapper such as pmm_alloc_block uses this to charge
+ * the pages to the code that called the wrapper instead.
+ */
+uint16_t memtrack_retag(uint16_t idx, uintptr_t pc, uint32_t pages);
+
+/*
  * Copy up to `max` in-use records into `out`.  Returns how many were
  * written.  Safe to call from any context.
  */

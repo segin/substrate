@@ -22,6 +22,50 @@ CPU information: processor type, vendor, MHz, cache size, and capabilities.
 .B /proc/meminfo
 Memory usage statistics: total, free, buffers, cached, swap.
 .TP
+.B /proc/memtrack
+Physical-page accounting by allocating call site.
+One line per site:
+.BI site= address
+(the caller's return address, to be resolved against the kernel's symbols),
+.BI alloc= n
+and
+.BI free= n
+(pages over the site's lifetime) and
+.BI live= n
+(pages still allocated).
+Every page leaving and returning to the buddy allocator is counted, so a site
+whose
+.I live
+count keeps climbing is leaking.
+A final
+.B total
+line adds
+.BI free_pages= n ,
+the free page count read at the same moment: the sum of total
+.I live
+and
+.I free_pages
+stays constant while every allocation path is accounted.
+.TP
+.B /proc/uma
+The slab allocator's zones, one per line (cf. Linux
+.IR /proc/slabinfo ):
+the zone's name,
+.BI size= bytes
+per object,
+.B allocs=
+and
+.B frees=
+over its lifetime,
+.B cur=
+objects in use,
+.B cached=
+objects freed but held in the per-CPU and depot caches, and the
+.B slabs=
+and
+.B pages=
+the zone holds.
+.TP
 .B /proc/uptime
 System uptime in seconds and idle time.
 .TP

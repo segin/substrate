@@ -198,6 +198,13 @@ int uma_zone_reserve(uma_zone_t *zone, int count);
 /* Zone statistics */
 void uma_zone_stat(uma_zone_t *zone, uint64_t *allocs, uint64_t *frees, int *cur);
 
+/*
+ * One line per zone into buf (like /proc/slabinfo): object size, lifetime
+ * allocs and frees, objects in use, objects held in caches, and the slabs
+ * and pages the zone holds.  Returns the length the full report needs.
+ */
+size_t uma_zone_report(char *buf, size_t size);
+
 /* Recover the user-visible allocation size for a UMA-managed item. */
 size_t uma_item_size(void *item);
 

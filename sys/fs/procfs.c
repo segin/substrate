@@ -34,6 +34,7 @@
 #include <vfs/buf.h>
 #include <vfs/vfs.h>
 #include <vm/phys_mem.h>
+#include <vm/uma.h>
 #include <vm/vm_commit.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
@@ -170,23 +171,36 @@ static uint32_t gen_memtrack(char *buf, size_t size, void *opaque) {
         total_a += recs[i].pages_alloc;
         total_f += recs[i].pages_free;
         int live = (int)((long)recs[i].pages_alloc - (long)recs[i].pages_free);
+        /* Full pointer width: %08x cut x86_64 sites to their low half. */
         int len = snprintf(line, sizeof line,
-                           "site=0x%08x alloc=%u free=%u live=%d\n",
-                           (unsigned)recs[i].pc,
+                           "site=0x%0*lx alloc=%u free=%u live=%d\n",
+                           (int)(2 * sizeof(uintptr_t)),
+                           (unsigned long)recs[i].pc,
                            (unsigned)recs[i].pages_alloc,
                            (unsigned)recs[i].pages_free, live);
         if (off < size) off += (size_t)snprintf(buf + off, size - off, "%s", line);
         else            off += (size_t)len;
     }
     {
+        /* With the buddy free count beside it: live + free_pages stays
+         * constant while every allocation path is tracked, so a drift
+         * between two reads means an untracked path. */
         int len = snprintf(line, sizeof line,
-                           "total alloc=%u free=%u live=%d\n",
+                           "total alloc=%u free=%u live=%d free_pages=%lu\n",
                            (unsigned)total_a, (unsigned)total_f,
-                           (int)((long)total_a - (long)total_f));
+                           (int)((long)total_a - (long)total_f),
+                           (unsigned long)vm_phys_get_free());
         if (off < size) off += (size_t)snprintf(buf + off, size - off, "%s", line);
         else            off += (size_t)len;
     }
     return (uint32_t)off;
+}
+
+/* /proc/uma — per-zone slab allocator state (cf. Linux /proc/slabinfo):
+ * what /proc/memtrack shows only as pages charged to uma_slab_alloc. */
+static uint32_t gen_uma(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)uma_zone_report(buf, size);
 }
 
 static uint32_t gen_uptime(char *buf, size_t size, void *opaque) {
@@ -495,6 +509,7 @@ static uint32_t gen_kmsg(char *buf, size_t size, void *opaque) {
 static struct procfs_runtime_entry procfs_entries[] = {
     { "meminfo",     gen_meminfo,       NULL },
     { "memtrack",    gen_memtrack,      NULL },
+    { "uma",         gen_uma,           NULL },
     { "kmsg",        gen_kmsg,          NULL },
     { "uptime",      gen_uptime,        NULL },
     { "cmdline",     gen_cmdline,       NULL },

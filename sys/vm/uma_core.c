@@ -9,6 +9,7 @@
 #include <machine/pmm.h>
 #include <kern/console.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <sys/smp.h>
@@ -1536,6 +1537,48 @@ void uma_zone_stat(uma_zone_t *zone, uint64_t *allocs, uint64_t *frees, int *cur
 
 int uma_zone_get_cur(uma_zone_t *zone) {
     return zone->uz_count;
+}
+
+/* Count a slab list's slabs and the free objects in them; lock held. */
+static void uma_count_slabs(uma_slab_t *s, uint32_t *slabs, uint32_t *free) {
+    for (; s; s = s->us_next) {
+        (*slabs)++;
+        *free += s->us_freecount;
+    }
+}
+
+size_t uma_zone_report(char *buf, size_t size) {
+    size_t off = 0;
+    unsigned long f = uma_slab_lock_acquire();
+
+    for (uma_zone_t *z = uma_zones; z; z = z->uz_next) {
+        uint32_t slabs = 0, slab_free = 0;
+        uma_count_slabs(z->uz_full_slabs, &slabs, &slab_free);
+        uma_count_slabs(z->uz_part_slabs, &slabs, &slab_free);
+        uma_count_slabs(z->uz_free_slabs, &slabs, &slab_free);
+
+        uint32_t per_slab = 1;
+        if (z->uz_flags & UMA_ZONE_OFFPAGE)
+            per_slab = (uint32_t)((z->uz_rsize * z->uz_ipers + 4095) / 4096);
+        /* Objects taken out of slabs but not in use: in the per-CPU and
+         * depot caches. */
+        uint32_t held = slabs * (uint32_t)z->uz_ipers - slab_free;
+        uint32_t cached = held > z->uz_count ? held - z->uz_count : 0;
+
+        int n = snprintf(buf + (off < size ? off : size),
+                         off < size ? size - off : 0,
+                         "%-20s size=%u allocs=%llu frees=%llu cur=%u "
+                         "cached=%u slabs=%u pages=%u\n",
+                         z->uz_name ? z->uz_name : "?",
+                         (unsigned)z->uz_size,
+                         (unsigned long long)z->uz_allocs,
+                         (unsigned long long)z->uz_frees,
+                         (unsigned)z->uz_count, (unsigned)cached,
+                         (unsigned)slabs, (unsigned)(slabs * per_slab));
+        if (n > 0) off += (size_t)n;
+    }
+    uma_slab_lock_release(f);
+    return off;
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) {

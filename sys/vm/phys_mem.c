@@ -3,6 +3,7 @@
 
 #include <machine/intr.h>
 #include <kern/console.h>
+#include <kern/memtrack.h>
 #include <kern/panic.h>
 #include <sys/lock.h>
 #include <vm/phys_mem.h>
@@ -381,6 +382,25 @@ void vm_phys_add_range(uintptr_t start, uintptr_t end) {
     intr_restore(flags);
 }
 
+/*
+ * Every page leaving and entering the buddy allocator is accounted in
+ * kern/memtrack.c: allocations against the caller's return address, frees
+ * against the site stamped on the page.  (pmm_alloc_* re-attribute to
+ * their own callers.)
+ */
+static void vm_phys_track_alloc(vm_page_t *page, size_t pages, uintptr_t pc) {
+    if (!page) return;
+    uint16_t site = memtrack_record_alloc(pc, (uint32_t)pages);
+    for (size_t i = 0; i < pages; i++)
+        page[i].memtrack_site = site;
+}
+
+/* A page really returning to the buddy allocator; vm_phys_lock is held. */
+static void vm_phys_track_free(vm_page_t *page) {
+    memtrack_record_free(page->memtrack_site, 1);
+    page->memtrack_site = 0;
+}
+
 vm_page_t *vm_phys_alloc_page(void) {
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
@@ -390,6 +410,7 @@ vm_page_t *vm_phys_alloc_page(void) {
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
+    vm_phys_track_alloc(page, 1, (uintptr_t)__builtin_return_address(0));
 
     if (page && free_left < vm_phys_low_watermark) {
         vm_page_wakeup_daemon();
@@ -407,6 +428,7 @@ vm_page_t *vm_phys_alloc_page_below(uintptr_t phys_limit) {
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
+    vm_phys_track_alloc(page, 1, (uintptr_t)__builtin_return_address(0));
 
     if (page && free_left < vm_phys_low_watermark) {
         vm_page_wakeup_daemon();
@@ -440,6 +462,7 @@ void vm_phys_free_page(vm_page_t *page) {
         }
         page->flags &= ~PG_PMM_ALLOC;
         page->ref_count = 0;
+        vm_phys_track_free(page);
         vm_phys_free_locked(page, 0);
     }
 
@@ -461,6 +484,9 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
+    /* The whole power-of-two block leaves the allocator. */
+    vm_phys_track_alloc(page, (size_t)1U << order,
+                        (uintptr_t)__builtin_return_address(0));
 
     if (page && free_left < vm_phys_low_watermark) {
         vm_page_wakeup_daemon();
@@ -483,6 +509,8 @@ vm_page_t *vm_phys_alloc_contiguous_below(size_t count, uintptr_t phys_limit) {
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
+    vm_phys_track_alloc(page, (size_t)1U << order,
+                        (uintptr_t)__builtin_return_address(0));
 
     if (page && free_left < vm_phys_low_watermark) {
         vm_page_wakeup_daemon();
@@ -511,6 +539,7 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
                  panic("vm_phys: free of unallocated page");
              }
              page[i].flags &= ~PG_PMM_ALLOC;
+             vm_phys_track_free(&page[i]);
          }
          vm_phys_free_locked(page, order);
      }

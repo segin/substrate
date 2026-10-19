@@ -212,7 +212,8 @@ int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count) {
     for (size_t i = 0; i < n && slabs && out_n < cap; i++) {
         sys_slabinfo_t si;
         memset(&si, 0, sizeof(si));
-        snprintf(si.name, sizeof(si.name), "pc=0x%08x", (unsigned)recs[i].pc);
+        snprintf(si.name, sizeof(si.name), "pc=0x%0*lx",
+                 (int)(2 * sizeof(uintptr_t)), (unsigned long)recs[i].pc);
         si.objsize        = PAGE_SIZE;
         si.total          = (uint32_t)recs[i].pages_alloc;
         si.active         = (uint32_t)(recs[i].pages_alloc - recs[i].pages_free);

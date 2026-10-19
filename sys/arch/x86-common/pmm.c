@@ -1230,9 +1230,9 @@ uint32_t pmm_get_free_memory(void) {
 void* pmm_alloc_block(void) {
     vm_page_t *p = vm_phys_alloc_page_below(PMM_DIRECTMAP_PHYS_LIMIT);
     if (!p) return NULL;
-    /* Charge the page to the caller's site so a later free can be
-     * attributed back to it (see kern/memtrack.c). */
-    p->memtrack_site = memtrack_record_alloc(
+    /* vm_phys charged the page to us; charge it to our caller instead,
+     * whose site the free is attributed back to (see kern/memtrack.c). */
+    p->memtrack_site = memtrack_retag(p->memtrack_site,
         (uintptr_t)__builtin_return_address(0), 1);
     return P2V(p->phys_addr);
 }
@@ -1249,19 +1249,22 @@ void pmm_free_block(void* p) {
         kprint("PMM: ignoring free of unknown direct-mapped page.\n");
         return;
     }
-    memtrack_record_free(page->memtrack_site, 1);
-    page->memtrack_site = 0;
+    /* vm_phys_free_page accounts the free -- only if the page is really
+     * freed, not when this drops one of several references. */
     vm_phys_free_page(page);
 }
 
 void* pmm_alloc_contiguous(size_t count) {
     vm_page_t *p = vm_phys_alloc_contiguous_below(count, PMM_DIRECTMAP_PHYS_LIMIT);
     if (!p) return NULL;
-    /* Stamp every frame of the run with the caller's site so a free
-     * of the run (or any aligned sub-block) attributes correctly. */
-    uint16_t site = memtrack_record_alloc(
-        (uintptr_t)__builtin_return_address(0), (uint32_t)count);
-    for (size_t i = 0; i < count; i++) {
+    /* vm_phys charged the whole power-of-two block to us; charge it to
+     * our caller instead, and stamp every frame so a free of the run (or
+     * any aligned sub-block) attributes correctly. */
+    size_t block = 1;
+    while (block < count) block <<= 1;
+    uint16_t site = memtrack_retag(p->memtrack_site,
+        (uintptr_t)__builtin_return_address(0), (uint32_t)block);
+    for (size_t i = 0; i < block; i++) {
         vm_page_t *q = vm_phys_paddr_to_page(p->phys_addr + i * PMM_BLOCK_SIZE);
         if (q) q->memtrack_site = site;
     }
@@ -1299,11 +1302,7 @@ void pmm_free_contiguous(void* p, size_t count) {
          kprint("PMM: ignoring free of unknown direct-mapped range.\n");
          return;
      }
-     memtrack_record_free(page->memtrack_site, (uint32_t)count);
-     for (size_t i = 0; i < count; i++) {
-         vm_page_t *q = vm_phys_paddr_to_page(page->phys_addr + i * PMM_BLOCK_SIZE);
-         if (q) q->memtrack_site = 0;
-     }
+     /* vm_phys_free_contiguous accounts the free, frame by frame. */
      vm_phys_free_contiguous(page, count);
 }
 
