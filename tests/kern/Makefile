@@ -45,7 +45,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest thrkill
+     vm86guest thrkill truncperm
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -122,8 +122,14 @@ thrkill: thrkill.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# truncperm: truncate(2) needs write permission and refuses a directory.
+# Run as root (on the host too).
+truncperm: truncperm.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart vm86guest thrkill tidkern.linux
+	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm
 
 .PHONY: all clean

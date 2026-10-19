@@ -299,7 +299,7 @@ SYS-DRV-003 are Critical and not listed.
 
 ## 4. VFS Layer & Block Cache (`sys/vfs/`, `sys/kern/syscall.c`)
 
-- [ ] **SYS-VFS-001** *(Critical; partly confirmed)* When truncating a file by path in `sys_truncate`, the kernel shall resolve relative paths from `current_process->cwd_node`, reject directories with `-EISDIR`, reject read-only mounts with `-EROFS`, verify write permission via `vfs_check_permissions_groups`, and enforce `RLIMIT_FSIZE`.
+- [x] **SYS-VFS-001** *(Critical; partly confirmed)* When truncating a file by path in `sys_truncate`, the kernel shall resolve relative paths from `current_process->cwd_node`, reject directories with `-EISDIR`, reject read-only mounts with `-EROFS`, verify write permission via `vfs_check_permissions_groups`, and enforce `RLIMIT_FSIZE`.
   Evidence: `sys/kern/syscall.c:1204-1213` (`sys_truncate`) resolves `kpath` from `root` (ignoring `cwd_node` for relative paths) and calls `truncate_fs(node, length)` immediately with no permission check, no `vfs_is_rdonly` check, no directory check, and no `RLIMIT_FSIZE` check. Any unprivileged user can truncate `/etc/passwd` or `/sbin/init`.
   Basis: traced.
 

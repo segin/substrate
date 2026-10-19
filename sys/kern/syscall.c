@@ -1207,8 +1207,27 @@ int sys_truncate(const char *path, uint32_t lo, uint32_t hi) {
     
     fs_node_t *node = vfs_lookup(current_process->root_node ? current_process->root_node : fs_root, kpath);
     if (!node) return -2; // ENOENT
-    
+
     off_t length = ((off_t)hi << 32) | lo;
+    if (length < 0) return -EINVAL;
+    if ((node->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
+
+    /* truncate(2) needs write permission on the file, which ftruncate(2)
+     * has by holding a descriptor open for writing.  Without this any
+     * process could empty /etc/passwd. */
+    if (vfs_check_permissions_groups(node, current_process->euid,
+                                     current_process->egid,
+                                     current_process->supp_groups,
+                                     current_process->n_supp_groups,
+                                     W_OK) != 0)
+        return -EACCES;
+
+    /* RLIMIT_FSIZE caps growing a file by any route (see sys_ftruncate). */
+    rlim_t soft = current_process->rlimits[RLIMIT_FSIZE].rlim_cur;
+    if (soft != RLIM_INFINITY && (uint64_t)length > (uint64_t)soft) {
+        psignal(current_process, SIGXFSZ);
+        return -EFBIG;
+    }
     return truncate_fs(node, length);
 }
 
