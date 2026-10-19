@@ -148,6 +148,21 @@ static void ext2_node_close(fs_node_t *node) {
         (void)ext2_release_inode_blocks(dead_fs, dead_ino, &ctx->inode, 1);
         ext2_free_inode(dead_fs, dead_ino,
                         ctx->was_dir_at_unlink ? 1 : 0);
+        /* The read scratch buffers go too.  ext2_alloc_node frees a
+         * recycled slot's buffers only while ctx->fs is set, and it is
+         * cleared above, so a slot torn down here leaked its four blocks
+         * (4 KiB at 1 KiB blocks) every time it was reused. */
+        {
+            /* Under the node lock, which ext2_inode_read/write hold while
+             * they use these buffers. */
+            uint32_t bs = dead_fs->block_size;
+            mutex_lock(&ctx->lock);
+            if (ctx->block_buf) { kfree(ctx->block_buf, bs); ctx->block_buf = NULL; }
+            if (ctx->indirect_buf) { kfree(ctx->indirect_buf, bs); ctx->indirect_buf = NULL; }
+            if (ctx->dindirect_buf) { kfree(ctx->dindirect_buf, bs); ctx->dindirect_buf = NULL; }
+            if (ctx->tindirect_buf) { kfree(ctx->tindirect_buf, bs); ctx->tindirect_buf = NULL; }
+            mutex_unlock(&ctx->lock);
+        }
         memset(&ctx->inode, 0, sizeof(ctx->inode));
         node->length = 0;
         ctx->orphaned = 0;
@@ -1484,8 +1499,14 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
     uint64_t isize = ext2_inode_get_size(inode);
     if ((uint64_t)offset >= isize) return 0;
     if ((uint64_t)offset + size > isize) size = (uint32_t)(isize - offset);
-    
+
     mutex_lock(&node->lock);
+    /* Deleted since the check above: its scratch buffers are gone and
+     * must not be allocated again (they would leak with the slot). */
+    if (!node->fs) {
+        mutex_unlock(&node->lock);
+        return 0;
+    }
 
     // Lazy allocate scratch buffers
     uint32_t block_size = fs->block_size;
@@ -1902,6 +1923,12 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
      * which already routes extent files to ext4_extent_resolve.  */
 
     mutex_lock(&node->lock);
+    /* Deleted since the check above: see ext2_inode_read. */
+    if (!node->fs) {
+        mutex_unlock(&node->lock);
+        if (errp) *errp = -ENOENT;
+        return 0;
+    }
 
     // Lazy allocate
     uint32_t block_size = fs->block_size;
@@ -2819,6 +2846,9 @@ static uint32_t ext2_scan_leaf(uint8_t *block, uint32_t block_size,
 static int ext2_htree_lookup(ext2_node_t *ctx, const char *name,
                              size_t name_len, uint32_t *out_inode) {
     ext2_fs_t *fs = ctx->fs;
+    /* Deleted since the caller checked (the deferred delete can run while
+     * the caller sleeps on I/O): no index to use. */
+    if (!fs) return -1;
     if (!(fs->sb.s_feature_compat & EXT2F_COMPAT_DIRHASHINDEX)) return -1;
     if (!(ctx->inode.i_flags & EXT2_INDEX_FL))                  return -1;
 
@@ -3283,6 +3313,7 @@ static int ext2_dir_grow_block(ext2_fs_t *fs, ext2_node_t *ctx,
 static int ext2_htree_insert(ext2_node_t *ctx, const char *name,
                              uint32_t name_len, uint32_t inode, uint8_t ft) {
     ext2_fs_t *fs = ctx->fs;
+    if (!fs) return -ENOENT;    /* deleted meanwhile: see ext2_htree_lookup */
     uint32_t bs = fs->block_size;
     struct ext2_dx_frame frames[2];
     struct ext2_dx_map *map = NULL;
@@ -3565,6 +3596,13 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
      * itself holds -- an unsynchronised bump can be lost against a
      * concurrent close and leave the slot recyclable mid-walk. */
     mutex_lock(&ext2_node_cache_lock);
+    /* The check at entry can be stale: the deferred delete may have torn
+     * the slot down since (it clears fs under this lock, and only at pin 0,
+     * so once pinned here it cannot start).  Recheck under the pin. */
+    if (!ctx->fs) {
+        mutex_unlock(&ext2_node_cache_lock);
+        return NULL;
+    }
     ctx->pin_count++;
     mutex_unlock(&ext2_node_cache_lock);
 
