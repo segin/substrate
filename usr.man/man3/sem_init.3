@@ -1,0 +1,133 @@
+.\"
+.\" SEM_INIT(3) - Substrate Pthreads Library
+.\"
+.TH SEM_INIT 3 "2026-10-19" "Substrate OS" "Library Functions"
+.SH NAME
+sem_init, sem_destroy \- initialise and destroy an unnamed semaphore
+.SH LIBRARY
+POSIX threads library
+.RI ( libpthread ", " \-lpthread )
+.SH SYNOPSIS
+.nf
+.B #include <semaphore.h>
+.PP
+.BI "int sem_init(sem_t *" sem ", int " pshared ", unsigned int " value ");"
+.BI "int sem_destroy(sem_t *" sem ");"
+.fi
+.SH DESCRIPTION
+.BR sem_init ()
+initialises the unnamed semaphore at
+.I sem
+with the count
+.IR value ,
+for use with
+.BR sem_wait (3),
+.BR sem_post (3)
+and
+.BR sem_getvalue (3).
+.PP
+With
+.I pshared
+equal to 0 the semaphore is shared only by the threads of the calling
+process.  It is a futex word inside
+.I sem
+and stays in user space until a thread has to block.
+.PP
+With
+.I pshared
+nonzero the semaphore may be shared between processes.  It is backed by a
+kernel semaphore
+.RB ( ksem_init (2))
+bound to the memory
+.I sem
+lives in, so
+.I sem
+should be in memory the processes share: a
+.B MAP_SHARED
+mapping of the same file or shared-memory object, a shared anonymous
+mapping inherited across
+.BR fork (2),
+or an attached System V shared-memory segment.  A process may use the
+semaphore when it maps that memory, whatever address it maps it at, and a
+child forked after
+.BR sem_init ()
+may use it through the reference it inherits.  No other process can,
+even if it learns the kernel's identifier for it.
+.PP
+.BR sem_destroy ()
+destroys an unnamed semaphore.  For a process-shared one it drops the
+calling process's reference; the kernel object goes away once no process
+holds one.  Destroying a semaphore other threads are blocked on is
+undefined.
+.SH RETURN VALUE
+Both return 0 on success.  On failure they return \-1 and set
+.I errno
+to indicate the error.
+.SH ERRORS
+.TP
+.B EFAULT
+.RB ( sem_init ()
+with
+.I pshared
+nonzero)
+.I sem
+is not a mapped address.
+.TP
+.B EINVAL
+.I sem
+is
+.BR NULL ,
+.I value
+exceeds
+.BR SEM_VALUE_MAX ,
+or
+.RB ( sem_destroy ())
+.I sem
+is a named semaphore, which is closed with
+.BR sem_close (3)
+instead.
+.TP
+.B ENOSPC
+.I pshared
+is nonzero and the system-wide limit on kernel semaphores would be
+exceeded, or
+.I pshared
+is 0 and the process already has
+.B SEM_NSEMS_MAX
+unnamed semaphores.
+.SH EXAMPLE
+A parent and its child share a semaphore in a shared anonymous mapping:
+.PP
+.RS 4
+.EX
+#include <semaphore.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int main(void)
+{
+    sem_t *s = mmap(NULL, sizeof(*s), PROT_READ | PROT_WRITE,
+                    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    sem_init(s, 1, 0);
+    if (fork() == 0) {
+        sem_post(s);        /* wake the parent */
+        _exit(0);
+    }
+    sem_wait(s);            /* blocks until the child posts */
+    wait(NULL);
+    sem_destroy(s);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR sem_open (3),
+.BR sem_wait (3),
+.BR sem_post (3),
+.BR sem_getvalue (3),
+.BR ksem_open (2),
+.BR mmap (2),
+.BR shmat (2)
+.SH STANDARDS
+POSIX.1-2017.

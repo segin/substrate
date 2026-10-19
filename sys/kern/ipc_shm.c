@@ -33,6 +33,7 @@
 #include <sys/ipc.h>
 #include <sys/kern_syscalls.h>
 #include <sys/lock.h>
+#include <sys/posix_sem.h>
 #include <sys/proc.h>
 #include <sys/shm.h>
 #include <sys/types.h>
@@ -133,8 +134,10 @@ static time_t shm_now(void)
  * Only call once nattch has reached 0. */
 static void shm_free_seg(struct kshmseg *s)
 {
-    if (s->kvaddr && s->npages)
+    if (s->kvaddr && s->npages) {
+        ksem_unbind_memory(s->phys, (size_t)s->npages << 12);
         pmm_free_contiguous(s->kvaddr, s->npages);
+    }
     s->kvaddr = NULL;
     s->phys = 0;
     s->npages = 0;

@@ -468,14 +468,14 @@ long netbsd_sys_ksem_unlink(const char *name) {
  * anonymous ksem once its last reference goes away. */
 long netbsd_sys_ksem_close(int id)   { return kern_ksem_close(ksem_decode(id)); }
 long netbsd_sys_ksem_destroy(int id) { return kern_ksem_close(ksem_decode(id)); }
-long netbsd_sys_ksem_post(int id)    { return kern_ksem_post(ksem_decode(id)); }
-long netbsd_sys_ksem_wait(int id)    { return kern_ksem_wait(ksem_decode(id)); }
-long netbsd_sys_ksem_trywait(int id) { return kern_ksem_trywait(ksem_decode(id)); }
+long netbsd_sys_ksem_post(int id)    { return kern_ksem_post(ksem_decode(id), NULL); }
+long netbsd_sys_ksem_wait(int id)    { return kern_ksem_wait(ksem_decode(id), NULL); }
+long netbsd_sys_ksem_trywait(int id) { return kern_ksem_trywait(ksem_decode(id), NULL); }
 
 /* _ksem_getvalue(intptr_t id, unsigned int *value). */
 long netbsd_sys_ksem_getvalue(int id, unsigned int *value) {
     int kv = 0;
-    int rc = kern_ksem_getvalue(ksem_decode(id), &kv);
+    int rc = kern_ksem_getvalue(ksem_decode(id), &kv, NULL);
     if (rc != 0)
         return rc;
     unsigned int uv = (unsigned int)kv;
@@ -496,7 +496,7 @@ long netbsd_sys_ksem_timedwait(int id, const struct timespec *abstime) {
             return -EFAULT;
         ktsp = &kts;
     }
-    return kern_ksem_timedwait(ksem_decode(id), ktsp);
+    return kern_ksem_timedwait(ksem_decode(id), ktsp, NULL);
 }
 
 /* _lwp_setprivate(addr) — NetBSD's i386 TLS install.  ld.elf_so calls

@@ -33,7 +33,7 @@ endif
 TESTS = torture_ipc torture_pipe torture_sem torture_shm torture_ksem
 # Substrate-only (raw SYS_KSEM_* calls).
 ifneq ($(CROSS),)
-  TESTS += ksemforeign
+  TESTS += ksemforeign ksemmap
 endif
 
 all: $(TESTS)
@@ -48,6 +48,12 @@ torture_ksem: torture_ksem.c
 # ksemforeign: semaphore ops need an open reference or permission; the
 # reference is inherited across fork.  Needs root.
 ksemforeign: ksemforeign.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# ksemmap: a sem_init(pshared) semaphore is usable through the memory it is
+# in (or an inherited reference) and by no one else, also after that memory
+# is freed and reused.  Needs root.
+ksemmap: ksemmap.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_pipe: torture_pipe.c

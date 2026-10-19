@@ -1,10 +1,11 @@
 .\"
 .\" KSEM_OPEN(2) - Substrate Native Personality
 .\"
-.TH KSEM_OPEN 2 "2026-07-01" "Substrate OS" "System Calls"
+.TH KSEM_OPEN 2 "2026-10-19" "Substrate OS" "System Calls"
 .SH NAME
-ksem_open, ksem_close, ksem_unlink, ksem_wait, ksem_trywait, ksem_timedwait,
-ksem_post, ksem_getvalue \- kernel-backed POSIX semaphore objects
+ksem_open, ksem_init, ksem_close, ksem_unlink, ksem_wait, ksem_trywait,
+ksem_timedwait, ksem_post, ksem_getvalue \- kernel-backed POSIX semaphore
+objects
 .SH LIBRARY
 Standard C library
 .RI ( libc ", " \-lc )
@@ -15,13 +16,15 @@ Standard C library
 .PP
 .BI "int syscall(SYS_KSEM_OPEN, const char *" name ", int " oflag ,
 .BI "            mode_t " mode ", unsigned int " value ");"
+.BI "int syscall(SYS_KSEM_INIT, const sem_t *" sem ", unsigned int " value ");"
 .BI "int syscall(SYS_KSEM_CLOSE, int " id ");"
 .BI "int syscall(SYS_KSEM_UNLINK, const char *" name ");"
-.BI "int syscall(SYS_KSEM_WAIT, int " id ");"
-.BI "int syscall(SYS_KSEM_TRYWAIT, int " id ");"
-.BI "int syscall(SYS_KSEM_TIMEDWAIT, int " id ", const struct timespec *" abstime ");"
-.BI "int syscall(SYS_KSEM_POST, int " id ");"
-.BI "int syscall(SYS_KSEM_GETVALUE, int " id ", int *" sval ");"
+.BI "int syscall(SYS_KSEM_WAIT, int " id ", const sem_t *" sem ");"
+.BI "int syscall(SYS_KSEM_TRYWAIT, int " id ", const sem_t *" sem ");"
+.BI "int syscall(SYS_KSEM_TIMEDWAIT, int " id ", const struct timespec *" abstime ,
+.BI "            const sem_t *" sem ");"
+.BI "int syscall(SYS_KSEM_POST, int " id ", const sem_t *" sem ");"
+.BI "int syscall(SYS_KSEM_GETVALUE, int " id ", int *" sval ", const sem_t *" sem ");"
 .fi
 .SH DESCRIPTION
 The
@@ -45,9 +48,7 @@ creates or attaches to a semaphore and returns a non-negative
 .I name
 is
 .B NULL
-an anonymous, unnamed object is created (this backs process-shared
-.BR sem_init (3));
-otherwise
+an anonymous, unnamed object is created; otherwise
 .I name
 must begin with a slash
 .RB ( / )
@@ -64,6 +65,27 @@ and
 (with
 .BR O_CREAT ,
 fail if the name already exists).  Each open adds one reference.
+.PP
+.BR ksem_init ()
+creates the anonymous semaphore behind a process-shared
+.BR sem_init (3),
+with initial
+.IR value ,
+and returns its
+.IR id .
+It is bound to the memory
+.I sem
+lives in: any process that maps that same memory (a
+.B MAP_SHARED
+mapping of the same file or shared object, an inherited shared anonymous
+mapping, or the same System V shared-memory segment) may use it by passing
+its own address of that
+.BR sem_t ,
+whatever address it is mapped at.  The semaphore has no permission bits
+(mode 0), so a process that does not map the memory, does not hold the
+semaphore open, and is not the superuser cannot use it, even knowing its
+.IR id .
+The creating process holds one reference.
 .PP
 .BR ksem_close ()
 drops one reference held by the calling process.  When the last reference is
@@ -91,16 +113,27 @@ stores the current value in
 .PP
 The wait calls and
 .BR ksem_post ()
-need the caller to hold the semaphore open, or to have write permission
-on it;
+need the caller to hold the semaphore open, to map the memory a
+.BR ksem_init ()
+semaphore is bound to (the
+.I sem
+argument), or to have write permission on it;
 .BR ksem_getvalue ()
-needs it open or read permission.
+needs one of the first two or read permission.
+.I sem
+may be
+.B NULL
+when the caller has no
+.BR sem_t ;
+the other two ways in still apply.
 .BR fork (2)
 gives the child a reference to each semaphore the parent holds open.
 A process's still-open descriptors are dropped automatically when it exits.
 .SH RETURN VALUE
 .BR ksem_open ()
-returns a non-negative descriptor.  The others return 0.  All return a negative
+and
+.BR ksem_init ()
+return a non-negative descriptor.  The others return 0.  All return a negative
 errno value on failure (the C library negates it into
 .I errno
 and returns \-1).
@@ -122,11 +155,17 @@ were set but the name already exists.
 .B EINVAL
 Bad
 .IR id ,
-or one the caller neither holds open nor has permission to use;
+or one the caller neither holds open, nor maps the memory of, nor has
+permission to use;
 .I name
 does not begin with a slash and a character; or
 .I value
 exceeds the maximum.
+.TP
+.B EFAULT
+.RB ( ksem_init ())
+.I sem
+is not a mapped address.
 .TP
 .B EINTR
 A blocking wait was interrupted by a signal.
@@ -164,8 +203,8 @@ directly.
 
 int id = syscall(SYS_KSEM_OPEN, "/demo", O_CREAT | O_RDWR, 0666, 0);
 if (id < 0) { /* -id is the errno */ }
-syscall(SYS_KSEM_POST, id);
-syscall(SYS_KSEM_WAIT, id);
+syscall(SYS_KSEM_POST, id, NULL);
+syscall(SYS_KSEM_WAIT, id, NULL);
 syscall(SYS_KSEM_CLOSE, id);
 syscall(SYS_KSEM_UNLINK, "/demo");
 .EE

@@ -65,9 +65,9 @@ int main(void)
         if (read(pfd[0], &id, sizeof(id)) != sizeof(id))
             _exit(0x41);
         int bad = 0;
-        bad |= (syscall(SYS_KSEM_POST, id) != -EINVAL) << 0;
-        bad |= (syscall(SYS_KSEM_TRYWAIT, id) != -EINVAL) << 1;
-        bad |= (syscall(SYS_KSEM_WAIT, id) != -EINVAL) << 2;
+        bad |= (syscall(SYS_KSEM_POST, id, 0L) != -EINVAL) << 0;
+        bad |= (syscall(SYS_KSEM_TRYWAIT, id, 0L) != -EINVAL) << 1;
+        bad |= (syscall(SYS_KSEM_WAIT, id, 0L) != -EINVAL) << 2;
         bad |= (getvalue(id) != -EINVAL) << 3;
         _exit(bad);
     }

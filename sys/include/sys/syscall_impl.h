@@ -170,11 +170,12 @@ struct timespec;
 extern int sys_ksem_open(const char *, int, mode_t, unsigned int);
 extern int sys_ksem_close(int);
 extern int sys_ksem_unlink(const char *);
-extern int sys_ksem_wait(int);
-extern int sys_ksem_trywait(int);
-extern int sys_ksem_timedwait(int, const struct timespec *);
-extern int sys_ksem_post(int);
-extern int sys_ksem_getvalue(int, int *);
+extern int sys_ksem_init(const void *, unsigned int);
+extern int sys_ksem_wait(int, const void *);
+extern int sys_ksem_trywait(int, const void *);
+extern int sys_ksem_timedwait(int, const struct timespec *, const void *);
+extern int sys_ksem_post(int, const void *);
+extern int sys_ksem_getvalue(int, int *, const void *);
 /* POSIX message queues (sys/kern/posix_mqueue.c) */
 struct mq_attr;
 struct sigevent;

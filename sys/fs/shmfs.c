@@ -48,6 +48,7 @@
 #include <sys/lock.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/posix_sem.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
@@ -196,6 +197,7 @@ static int shmfs_grow(shmfs_inode_t *inode, size_t want) {
             inode->retired = r;
             shmfs_resident += (uint64_t)inode->data_cap;  /* still held */
         } else {
+            ksem_unbind_memory(inode->data_phys, inode->data_cap);
             pmm_free_contiguous(inode->data, inode->data_cap >> 12);
         }
     }
@@ -250,6 +252,7 @@ static void shmfs_free_retired(shmfs_inode_t *inode) {
         shmfs_retired_t *r = inode->retired;
         inode->retired = r->next;
         if (shmfs_resident >= r->cap) shmfs_resident -= r->cap;
+        ksem_unbind_memory((uintptr_t)V2P(r->data), r->cap);
         pmm_free_contiguous(r->data, r->cap >> 12);
         kfree(r, sizeof(*r));
     }
@@ -261,6 +264,7 @@ static void shmfs_free_inode(shmfs_inode_t *inode) {
     if (inode->data && inode->data_cap > 0) {
         if (shmfs_resident >= inode->data_cap)
             shmfs_resident -= inode->data_cap;
+        ksem_unbind_memory(inode->data_phys, inode->data_cap);
         pmm_free_contiguous(inode->data, inode->data_cap >> 12);
     }
     kfree(inode, sizeof(*inode));

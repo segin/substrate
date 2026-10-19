@@ -83,10 +83,11 @@ int sem_init(sem_t *sem, int pshared, unsigned int value)
     }
 
     if (pshared) {
-        /* Process-shared: back it with an anonymous kernel ksem so it is
-         * correct across fork/exec, not a per-process futex word. */
-        long id = syscall(SYS_KSEM_OPEN, (long)0 /* no name */, 0,
-                          (long)0666, (long)value);
+        /* Process-shared: back it with a kernel ksem, not a per-process
+         * futex word.  The kernel binds it to the memory this sem_t is in,
+         * so exactly the processes that map that memory (and children
+         * that inherit it across fork) can use it. */
+        long id = syscall(SYS_KSEM_INIT, (long)sem, (long)value);
         if (id < 0) {
             errno = (int)-id;
             return -1;
@@ -280,7 +281,7 @@ int sem_post(sem_t *sem)
         return -1;
     }
     if (sem->__sem_kind != __SEM_LOCAL)
-        return ksem_ret(syscall(SYS_KSEM_POST, (long)sem->__sem_id));
+        return ksem_ret(syscall(SYS_KSEM_POST, (long)sem->__sem_id, (long)sem));
 
     __sync_fetch_and_add(&sem->__sem_id, 1);
     syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAKE, 1, 0, 0, 0);
@@ -294,7 +295,8 @@ int sem_trywait(sem_t *sem)
         return -1;
     }
     if (sem->__sem_kind != __SEM_LOCAL)
-        return ksem_ret(syscall(SYS_KSEM_TRYWAIT, (long)sem->__sem_id));
+        return ksem_ret(syscall(SYS_KSEM_TRYWAIT, (long)sem->__sem_id,
+                                (long)sem));
 
     for (;;) {
         int v = sem->__sem_id;
@@ -315,7 +317,7 @@ int sem_wait(sem_t *sem)
         return -1;
     }
     if (sem->__sem_kind != __SEM_LOCAL)
-        return ksem_ret(syscall(SYS_KSEM_WAIT, (long)sem->__sem_id));
+        return ksem_ret(syscall(SYS_KSEM_WAIT, (long)sem->__sem_id, (long)sem));
 
     for (;;) {
         int v = sem->__sem_id;
@@ -343,7 +345,7 @@ int sem_timedwait(sem_t *restrict sem, const struct timespec *restrict abs_timeo
         /* The kernel ksem takes the absolute CLOCK_REALTIME deadline directly
          * and returns ETIMEDOUT when it lapses. */
         return ksem_ret(syscall(SYS_KSEM_TIMEDWAIT, (long)sem->__sem_id,
-                                (long)abs_timeout));
+                                (long)abs_timeout, (long)sem));
     }
 
     for (;;) {
@@ -388,7 +390,7 @@ int sem_getvalue(sem_t *restrict sem, int *restrict sval)
     }
     if (sem->__sem_kind != __SEM_LOCAL)
         return ksem_ret(syscall(SYS_KSEM_GETVALUE, (long)sem->__sem_id,
-                                (long)sval));
+                                (long)sval, (long)sem));
 
     int v = sem->__sem_id;
     *sval = v < 0 ? 0 : v;

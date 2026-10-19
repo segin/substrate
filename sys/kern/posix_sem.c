@@ -59,6 +59,7 @@ struct kposix_sem {
     unsigned int    seq;                    /* bumped each (re)allocation of this slot */
     int             refs;                   /* number of open descriptors */
     int             ncnt;                   /* threads blocked in wait */
+    struct vm_shared_key key;               /* the sem_t's memory (sem_init) */
 };
 
 /* One record per successful open, so a process that dies with the semaphore
@@ -139,18 +140,23 @@ static int ksem_has_open(int pid, int index, unsigned int seq)
 /*
  * Resolve an id for a wait/post/getvalue by the calling process: the caller
  * must hold the semaphore open (sem_open, sem_init, or inherited across
- * fork) or have the permission the operation needs (want: 4 read, 2 alter).
- * Ids are small and sequential, so without this any process could post,
- * drain or read any other process's semaphore.  A semaphore the caller may
- * not use is reported like a nonexistent one, EINVAL.
+ * fork), map the memory a sem_init semaphore lives in (`key`, the caller's
+ * sem_t address resolved by vm_map_shared_key, or NULL), or have the
+ * permission the operation needs (want: 4 read, 2 alter).  Ids are small and
+ * sequential, so without this any process could post, drain or read any
+ * other process's semaphore.  A semaphore the caller may not use is
+ * reported like a nonexistent one, EINVAL.
  */
-static struct kposix_sem *ksem_lookup_use(int id, int want, int *err)
+static struct kposix_sem *ksem_lookup_use(int id, int want,
+                                          const struct vm_shared_key *key,
+                                          int *err)
 {
     struct kposix_sem *s = ksem_lookup(id, err);
     if (!s)
         return NULL;
     int pid = current_process ? current_process->pid : 0;
     if (!ksem_has_open(pid, (int)(s - posix_sems), s->seq) &&
+        !vm_shared_key_equal(&s->key, key) &&
         !ksem_perm_ok(s, want)) {
         *err = EINVAL;
         return NULL;
@@ -168,6 +174,7 @@ static void ksem_free_slot(struct kposix_sem *s)
     s->value    = 0;
     s->refs     = 0;
     s->ncnt     = 0;
+    vm_shared_key_release(&s->key);
     s->seq++;               /* invalidate outstanding ids */
 }
 
@@ -304,6 +311,48 @@ int kern_ksem_open(const char *kname, int oflag, mode_t mode, unsigned int value
     return ksem_make_id(index, seq);
 }
 
+/*
+ * sem_init(pshared): an anonymous semaphore, mode 0, bound to `key` -- the
+ * memory its sem_t lives in.  Any process that maps that memory may use it
+ * (POSIX), with no permission bits that would let anyone else in.  Takes
+ * over the caller's reference in *key whatever happens.
+ */
+int kern_ksem_init(struct vm_shared_key *key, unsigned int value)
+{
+    int id = kern_ksem_open(NULL, 0, 0, value);
+    if (id < 0) {
+        vm_shared_key_release(key);
+        return id;
+    }
+    mutex_lock(&ksem_lock);
+    struct kposix_sem *s = &posix_sems[id % KSEM_MAX];
+    s->key = *key;
+    key->obj = NULL;
+    mutex_unlock(&ksem_lock);
+    return id;
+}
+
+/*
+ * The physical memory [pa, pa + len) is being released (a SysV segment or a
+ * shared-memory file going away).  A sem_init semaphore keyed by an address
+ * in it loses that binding -- the frames may next back someone else's
+ * memory, whose owner would otherwise match the old key.  Its open and
+ * inherited references keep working.
+ */
+void ksem_unbind_memory(uintptr_t pa, size_t len)
+{
+    if (!ksem_ready || len == 0)
+        return;
+    mutex_lock(&ksem_lock);
+    for (int i = 0; i < KSEM_MAX; i++) {
+        struct kposix_sem *s = &posix_sems[i];
+        if (s->in_use && vm_shared_key_is_phys(&s->key) &&
+            s->key.off >= pa && s->key.off - pa < len)
+            vm_shared_key_release(&s->key);
+    }
+    mutex_unlock(&ksem_lock);
+}
+
 int kern_ksem_close(int id)
 {
     ksem_lazy_init();
@@ -355,12 +404,12 @@ int kern_ksem_unlink(const char *kname)
     return 0;
 }
 
-int kern_ksem_trywait(int id)
+int kern_ksem_trywait(int id, const struct vm_shared_key *key)
 {
     ksem_lazy_init();
     mutex_lock(&ksem_lock);
     int err = 0;
-    struct kposix_sem *s = ksem_lookup_use(id, 2, &err);
+    struct kposix_sem *s = ksem_lookup_use(id, 2, key, &err);
     if (!s) { mutex_unlock(&ksem_lock); return -err; }
     if (s->value > 0) {
         s->value--;
@@ -377,12 +426,13 @@ int kern_ksem_trywait(int id)
  * cannot be freed under a blocked waiter because the waiter holds an open
  * descriptor (refs >= 1), but we re-resolve the id on every loop for safety.
  */
-static int ksem_wait_common(int id, uint64_t deadline)
+static int ksem_wait_common(int id, uint64_t deadline,
+                            const struct vm_shared_key *key)
 {
     mutex_lock(&ksem_lock);
     for (;;) {
         int err = 0;
-        struct kposix_sem *s = ksem_lookup_use(id, 2, &err);
+        struct kposix_sem *s = ksem_lookup_use(id, 2, key, &err);
         if (!s) { mutex_unlock(&ksem_lock); return -err; }
 
         if (s->value > 0) {
@@ -462,17 +512,18 @@ static int ksem_wait_common(int id, uint64_t deadline)
     }
 }
 
-int kern_ksem_wait(int id)
+int kern_ksem_wait(int id, const struct vm_shared_key *key)
 {
     ksem_lazy_init();
-    return ksem_wait_common(id, 0);
+    return ksem_wait_common(id, 0, key);
 }
 
-int kern_ksem_timedwait(int id, const struct timespec *kabstime)
+int kern_ksem_timedwait(int id, const struct timespec *kabstime,
+                        const struct vm_shared_key *key)
 {
     ksem_lazy_init();
     if (!kabstime)
-        return ksem_wait_common(id, 0);
+        return ksem_wait_common(id, 0, key);
     if (kabstime->tv_nsec < 0 || kabstime->tv_nsec >= 1000000000L)
         return -EINVAL;
 
@@ -492,15 +543,15 @@ int kern_ksem_timedwait(int id, const struct timespec *kabstime)
         if (ticks == 0) ticks = 1;
         deadline = get_ticks() + ticks;
     }
-    return ksem_wait_common(id, deadline);
+    return ksem_wait_common(id, deadline, key);
 }
 
-int kern_ksem_post(int id)
+int kern_ksem_post(int id, const struct vm_shared_key *key)
 {
     ksem_lazy_init();
     mutex_lock(&ksem_lock);
     int err = 0;
-    struct kposix_sem *s = ksem_lookup_use(id, 2, &err);
+    struct kposix_sem *s = ksem_lookup_use(id, 2, key, &err);
     if (!s) { mutex_unlock(&ksem_lock); return -err; }
     if (s->value >= KSEM_VALUE_MAX) { mutex_unlock(&ksem_lock); return -ERANGE; }
     s->value++;
@@ -509,12 +560,12 @@ int kern_ksem_post(int id)
     return 0;
 }
 
-int kern_ksem_getvalue(int id, int *ksval)
+int kern_ksem_getvalue(int id, int *ksval, const struct vm_shared_key *key)
 {
     ksem_lazy_init();
     mutex_lock(&ksem_lock);
     int err = 0;
-    struct kposix_sem *s = ksem_lookup_use(id, 4, &err);
+    struct kposix_sem *s = ksem_lookup_use(id, 4, key, &err);
     if (!s) { mutex_unlock(&ksem_lock); return -err; }
     *ksval = (int)s->value;
     mutex_unlock(&ksem_lock);
@@ -617,35 +668,79 @@ int sys_ksem_unlink(const char *uname)
     return kern_ksem_unlink(kname);
 }
 
-int sys_ksem_wait(int id)
+/*
+ * Resolve the caller's sem_t address to the memory it lives in.  Touching
+ * it first faults in a device page (a SysV segment) the key is taken from.
+ * -1, leaving *key empty, for a NULL or unmapped address: the caller then
+ * has only its open references and the permission bits to go on.
+ */
+static int ksem_user_key(const void *usem, struct vm_shared_key *key)
 {
-    return kern_ksem_wait(id);
+    unsigned char probe;
+    key->id = NULL;
+    key->obj = NULL;
+    if (!usem || !current_process || !current_process->vm_map)
+        return -1;
+    if (copyin(usem, &probe, sizeof(probe)) != 0)
+        return -1;
+    return vm_map_shared_key(current_process->vm_map, (uintptr_t)usem, key);
 }
 
-int sys_ksem_trywait(int id)
+int sys_ksem_init(const void *usem, unsigned int value)
 {
-    return kern_ksem_trywait(id);
+    struct vm_shared_key key;
+    if (ksem_user_key(usem, &key) != 0)
+        return -EFAULT;
+    return kern_ksem_init(&key, value);
 }
 
-int sys_ksem_timedwait(int id, const struct timespec *uabstime)
+int sys_ksem_wait(int id, const void *usem)
+{
+    struct vm_shared_key key;
+    ksem_user_key(usem, &key);
+    int r = kern_ksem_wait(id, &key);
+    vm_shared_key_release(&key);
+    return r;
+}
+
+int sys_ksem_trywait(int id, const void *usem)
+{
+    struct vm_shared_key key;
+    ksem_user_key(usem, &key);
+    int r = kern_ksem_trywait(id, &key);
+    vm_shared_key_release(&key);
+    return r;
+}
+
+int sys_ksem_timedwait(int id, const struct timespec *uabstime,
+                       const void *usem)
 {
     struct timespec kts;
-    if (!uabstime)
-        return kern_ksem_timedwait(id, NULL);
-    if (timespec_copyin(uabstime, &kts) != 0)
+    if (uabstime && timespec_copyin(uabstime, &kts) != 0)
         return -EFAULT;
-    return kern_ksem_timedwait(id, &kts);
+    struct vm_shared_key key;
+    ksem_user_key(usem, &key);
+    int r = kern_ksem_timedwait(id, uabstime ? &kts : NULL, &key);
+    vm_shared_key_release(&key);
+    return r;
 }
 
-int sys_ksem_post(int id)
+int sys_ksem_post(int id, const void *usem)
 {
-    return kern_ksem_post(id);
+    struct vm_shared_key key;
+    ksem_user_key(usem, &key);
+    int r = kern_ksem_post(id, &key);
+    vm_shared_key_release(&key);
+    return r;
 }
 
-int sys_ksem_getvalue(int id, int *usval)
+int sys_ksem_getvalue(int id, int *usval, const void *usem)
 {
     int v = 0;
-    int r = kern_ksem_getvalue(id, &v);
+    struct vm_shared_key key;
+    ksem_user_key(usem, &key);
+    int r = kern_ksem_getvalue(id, &v, &key);
+    vm_shared_key_release(&key);
     if (r < 0)
         return r;
     if (copyout(&v, usval, sizeof(v)) != 0)

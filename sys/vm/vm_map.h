@@ -89,6 +89,29 @@ int vm_map_range_is_free(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_find_space_from(vm_map_t *map, uintptr_t base, uintptr_t *addr,
                            size_t length);
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va);
+
+/*
+ * The memory behind a user address, named the same way in every process
+ * that maps it: (object, offset into it) for anonymous and file memory, and
+ * the physical address for device memory (a SysV segment, which gets a new
+ * device object on every attach but always the same pinned frames).  `obj`
+ * is the object `id` names, referenced for the caller, or NULL for device
+ * memory; release it with vm_shared_key_release().
+ */
+struct vm_shared_key {
+    const void       *id;
+    uint64_t          off;
+    struct vm_object *obj;
+};
+/* 0, or -1 if nothing (or nothing resident, for device memory) is at va. */
+int  vm_map_shared_key(vm_map_t *map, uintptr_t va, struct vm_shared_key *key);
+int  vm_shared_key_equal(const struct vm_shared_key *a,
+                         const struct vm_shared_key *b);
+/* Nonzero for the physical-address form (off is then the address).  Whoever
+ * frees such memory must forget keys into it (ksem_unbind_memory). */
+int  vm_shared_key_is_phys(const struct vm_shared_key *key);
+void vm_shared_key_release(struct vm_shared_key *key);
+
 void vm_map_destroy(vm_map_t *map);
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot);
 int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheritance);

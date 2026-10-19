@@ -24,6 +24,7 @@
 
 #include <sys/types.h>
 #include <sys/time.h>
+#include <vm/vm_map.h>
 
 /* Implementation limits. */
 #define KSEM_MAX        128            /* max ksem objects system-wide */
@@ -34,32 +35,44 @@
  * Native-ABI syscall entry points (registered in perso_native).  Each does the
  * copyin / copyout and then calls the personality-agnostic core below.  The
  * open family returns a ksem id (>= 0) on success; the rest return 0.  All
- * return -errno on failure.
+ * return -errno on failure.  `usem` is the caller's sem_t (NULL for none):
+ * a semaphore made by ksem_init may be used by any process that maps the
+ * memory it was made in.
  */
 int sys_ksem_open(const char *uname, int oflag, mode_t mode, unsigned int value);
+int sys_ksem_init(const void *usem, unsigned int value);
 int sys_ksem_close(int id);
 int sys_ksem_unlink(const char *uname);
-int sys_ksem_wait(int id);
-int sys_ksem_trywait(int id);
-int sys_ksem_timedwait(int id, const struct timespec *uabstime);
-int sys_ksem_post(int id);
-int sys_ksem_getvalue(int id, int *usval);
+int sys_ksem_wait(int id, const void *usem);
+int sys_ksem_trywait(int id, const void *usem);
+int sys_ksem_timedwait(int id, const struct timespec *uabstime,
+                       const void *usem);
+int sys_ksem_post(int id, const void *usem);
+int sys_ksem_getvalue(int id, int *usval, const void *usem);
 
 /*
  * Personality-agnostic core — operates on KERNEL memory only.  `kname` is a
  * NUL-terminated kernel buffer beginning with '/'; a NULL name creates an
- * anonymous (unnamed) ksem, which is how process-shared sem_init is backed.
- * `kabstime` is an absolute CLOCK_REALTIME deadline in kernel memory
- * (NULL = wait forever).  Each returns 0 / ksem id or -errno.
+ * anonymous (unnamed) ksem.  kern_ksem_init makes the one process-shared
+ * sem_init uses, bound to the memory `key` names (and takes over its
+ * reference).  `kabstime` is an absolute CLOCK_REALTIME deadline in kernel
+ * memory (NULL = wait forever).  `key` on the operations is the memory the
+ * caller's sem_t is in, or NULL.  Each returns 0 / ksem id or -errno.
  */
 int kern_ksem_open(const char *kname, int oflag, mode_t mode, unsigned int value);
+int kern_ksem_init(struct vm_shared_key *key, unsigned int value);
 int kern_ksem_close(int id);
 int kern_ksem_unlink(const char *kname);
-int kern_ksem_wait(int id);
-int kern_ksem_trywait(int id);
-int kern_ksem_timedwait(int id, const struct timespec *kabstime);
-int kern_ksem_post(int id);
-int kern_ksem_getvalue(int id, int *ksval);
+int kern_ksem_wait(int id, const struct vm_shared_key *key);
+int kern_ksem_trywait(int id, const struct vm_shared_key *key);
+int kern_ksem_timedwait(int id, const struct timespec *kabstime,
+                        const struct vm_shared_key *key);
+int kern_ksem_post(int id, const struct vm_shared_key *key);
+int kern_ksem_getvalue(int id, int *ksval, const struct vm_shared_key *key);
+
+/* Physical memory [pa, pa + len) is being freed: unbind sem_init semaphores
+ * keyed into it, so its next owner cannot match them. */
+void ksem_unbind_memory(uintptr_t pa, size_t len);
 
 /* Drop this pid's still-open descriptors at process exit. */
 void ksem_proc_cleanup(int pid);

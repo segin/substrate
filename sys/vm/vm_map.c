@@ -1149,6 +1149,68 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
     return NULL;
 }
 
+/* Tags the physical-address form of a vm_shared_key. */
+static const char vm_shared_key_phys;
+
+int vm_map_shared_key(vm_map_t *map, uintptr_t va, struct vm_shared_key *key) {
+    if (!map || !key) return -1;
+    key->id = NULL;
+    key->off = 0;
+    key->obj = NULL;
+
+    vm_map_lock_read(map);
+    vm_map_entry_t *entry = vm_map_lookup(map, va);
+    if (!entry || !entry->object) {
+        vm_map_unlock_read(map);
+        return -1;
+    }
+    vm_object_t *obj = entry->object;
+    int rc = 0;
+    switch (obj->type) {
+    case VM_OBJ_TYPE_DEVICE:
+    case VM_OBJ_TYPE_PHYS: {
+        uintptr_t pa = pmap_extract(map->pmap, va & ~(uintptr_t)0xFFF);
+        if (pa == 0) {
+            rc = -1;
+            break;
+        }
+        key->id = &vm_shared_key_phys;
+        key->off = (uint64_t)(pa & ~(uintptr_t)0xFFF) + (va & 0xFFF);
+        break;
+    }
+    case VM_OBJ_TYPE_DEFAULT:
+    case VM_OBJ_TYPE_VNODE:
+        vm_object_reference(obj);
+        key->id = obj;
+        key->off = entry->offset + (va - entry->start);
+        key->obj = obj;
+        break;
+    default:
+        rc = -1;
+        break;
+    }
+    vm_map_unlock_read(map);
+    return rc;
+}
+
+int vm_shared_key_equal(const struct vm_shared_key *a,
+                        const struct vm_shared_key *b) {
+    return a && b && a->id && a->id == b->id && a->off == b->off;
+}
+
+int vm_shared_key_is_phys(const struct vm_shared_key *key) {
+    return key && key->id == &vm_shared_key_phys;
+}
+
+void vm_shared_key_release(struct vm_shared_key *key) {
+    if (key && key->obj) {
+        vm_object_deallocate(key->obj);
+        key->obj = NULL;
+    }
+    if (key)
+        key->id = NULL;
+}
+
 static void free_holes_tree(vm_map_hole_t *node) {
     if (!node) return;
     free_holes_tree(node->left);

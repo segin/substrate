@@ -316,6 +316,12 @@
 #define SYS_GETRESUID        534
 #define SYS_GETRESGID        535
 
+/* sem_init(pshared): a kernel semaphore bound to the memory its sem_t is
+ * in (sys/kern/posix_sem.c), usable by every process that maps that memory
+ * and by no one else.  The SYS_KSEM_* waits, post and getvalue take the
+ * caller's sem_t address as an extra last argument for the same check. */
+#define SYS_KSEM_INIT        536
+
 void syscall_init(void);
 
 // GDT TLS entries
