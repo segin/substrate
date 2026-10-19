@@ -66,6 +66,7 @@ HOST_TESTS += host_test_udf_read_fsd
 HOST_TESTS += host_test_udf_read_tag
 HOST_TESTS += host_test_udf_read_vds
 HOST_TESTS += host_test_udf_truncate_expand
+HOST_TESTS += host_test_udf_dirfid
 
 # Filesystems — ext2
 HOST_TESTS += host_test_ext2_alloc_inode_block
@@ -456,6 +457,11 @@ host_test_udf_large_write: host_test_udf_large_write.c
 
 host_test_udf_truncate_expand: host_test_udf_truncate_expand.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_truncate_expand.c -o $@
+
+# Directory FIDs in the directory's data, not over its File Entry; open
+# nodes not recycled by the node table.
+host_test_udf_dirfid: host_test_udf_dirfid.c
+	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_dirfid.c -o $@
 
 host_test_udf_read_vds: host_test_udf_read_vds.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_read_vds.c -o $@

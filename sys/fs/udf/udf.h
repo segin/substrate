@@ -399,6 +399,9 @@ int udf_create_fe(struct udf_fs *fs, uint32_t block, uint8_t file_type, uint32_t
 int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
 int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block, const char *name);
 int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block, uint32_t offset, uint32_t size, const uint8_t *data);
+/* Read file data through its allocation descriptors; `fe` is the whole FE
+ * sector (the allocation area follows the header). */
+uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t offset, uint32_t size, uint8_t *buffer);
 int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block, uint64_t new_size);
 
 #endif /* _FS_UDF_UDF_H */

@@ -10,6 +10,7 @@
 #include <fs/udf/udf.h>
 #include <kern/console.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
@@ -484,11 +485,29 @@ typedef struct {
     uint8_t fe_sector[UDF_SECTOR_SIZE]; /* Full on-disk FE sector (includes alloc descriptors) */
 } udf_node_t;
 
+/*
+ * Nodes come from a fixed table, recycled round robin -- but only a slot
+ * nothing has open: open_fs/close_fs (an open file, a working directory)
+ * pin one through udf_vfs_open/udf_vfs_close.  The table used to recycle
+ * blindly, so the 65th lookup overwrote whatever had been handed out 64
+ * lookups ago, the mount's root and open files included.  A mount's root
+ * is allocated on its own and never recycled.
+ */
 #define UDF_NODE_CACHE_SIZE 64
 static udf_node_t udf_node_cache[UDF_NODE_CACHE_SIZE];
 static fs_node_t udf_fs_node_cache[UDF_NODE_CACHE_SIZE];
+static int udf_node_opens[UDF_NODE_CACHE_SIZE];
 static int udf_node_cache_idx = 0;
+static spinlock_t udf_node_lock = SPINLOCK_INIT("udf_node");
 static struct dirent udf_dirent;
+
+/* Free a mount's state: the bitmap and the udf_fs itself. */
+static void udf_fs_free(struct udf_fs *fs) {
+    if (!fs) return;
+    if (fs->space_bitmap_base && fs->space_bitmap_alloc)
+        kfree(fs->space_bitmap_base, fs->space_bitmap_alloc);
+    kfree(fs, sizeof(struct udf_fs));
+}
 
 /* Forward declarations for VFS operations */
 /* Forward declarations for VFS operations */
@@ -508,13 +527,54 @@ struct vnodeops udf_vnodeops = {
 
 /* UDF context defined in udf.c, declared in udf.h */
 
+static void udf_vfs_open(fs_node_t *node);
+static void udf_vfs_close(fs_node_t *node);
+
+/* Fill `node`/`ctx` for the file whose FE sector is `fe_sector`. */
+static void udf_init_node(fs_node_t *node, udf_node_t *ctx, struct udf_fs *fs,
+                          struct udf_long_ad *icb, uint8_t *fe_sector);
+
+/* A table slot index for a node, or -1 for a root node (not in the table). */
+static int udf_node_slot(fs_node_t *node) {
+    if (node >= udf_fs_node_cache &&
+        node < udf_fs_node_cache + UDF_NODE_CACHE_SIZE)
+        return (int)(node - udf_fs_node_cache);
+    return -1;
+}
+
+static void udf_vfs_open(fs_node_t *node) {
+    int s = udf_node_slot(node);
+    if (s >= 0) __sync_fetch_and_add(&udf_node_opens[s], 1);
+}
+
+static void udf_vfs_close(fs_node_t *node) {
+    int s = udf_node_slot(node);
+    if (s >= 0 && udf_node_opens[s] > 0)
+        __sync_fetch_and_sub(&udf_node_opens[s], 1);
+}
+
 static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, uint8_t *fe_sector) {
-    int idx = udf_node_cache_idx++ % UDF_NODE_CACHE_SIZE;
-    
-    udf_node_t *ctx = &udf_node_cache[idx];
+    int idx = -1;
+    spinlock_acquire(&udf_node_lock);
+    for (int tries = 0; tries < UDF_NODE_CACHE_SIZE; tries++) {
+        int i = udf_node_cache_idx++ % UDF_NODE_CACHE_SIZE;
+        if (udf_node_opens[i] == 0) {
+            idx = i;
+            break;
+        }
+    }
+    spinlock_release(&udf_node_lock);
+    if (idx < 0) return NULL;          /* every slot is open */
+
     fs_node_t *node = &udf_fs_node_cache[idx];
+    udf_init_node(node, &udf_node_cache[idx], fs, icb, fe_sector);
+    return node;
+}
+
+static void udf_init_node(fs_node_t *node, udf_node_t *ctx, struct udf_fs *fs,
+                          struct udf_long_ad *icb, uint8_t *fe_sector) {
     struct udf_fe *fe = (struct udf_fe *)fe_sector;
-    
+
     ctx->fs = fs;
     memcpy(&ctx->icb, icb, sizeof(struct udf_long_ad));
     memcpy(ctx->fe_sector, fe_sector, UDF_SECTOR_SIZE);
@@ -524,7 +584,9 @@ static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, uin
     node->uid = fe->uid;
     node->gid = fe->gid;
     node->impl = (uintptr_t)ctx;
-    
+    node->open = udf_vfs_open;
+    node->close = udf_vfs_close;
+
     if (fe->icb_tag.file_type == UDF_FILETYPE_DIR) {
         node->flags = FS_DIRECTORY;
         node->readdir = udf_vfs_readdir;
@@ -534,13 +596,18 @@ static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, uin
         node->flags = FS_FILE;
         node->read = udf_vfs_read;
     }
-    
-    return node;
 }
 
 static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
-    return udf_read_file(ctx->fs, (struct udf_fe *)ctx->fe_sector, (uint32_t)offset, size, buffer);
+    struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
+    /* A negative offset, or one past the end, reads nothing; a read
+     * running past the end stops there (the allocation descriptors may
+     * describe more than the file holds). */
+    if (offset < 0 || (uint64_t)offset >= fe->info_length) return 0;
+    if ((uint64_t)size > fe->info_length - (uint64_t)offset)
+        size = (size_t)(fe->info_length - (uint64_t)offset);
+    return udf_read_file(ctx->fs, fe, (uint32_t)offset, (uint32_t)size, buffer);
 }
 
 /*
@@ -664,9 +731,10 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
                 uint8_t fe_sec[UDF_SECTOR_SIZE];
                 if (udf_read_fe_sector(ctx->fs, &fid->icb, fe_sec) == 0) {
                     fs_node_t *result = udf_alloc_node(ctx->fs, &fid->icb, fe_sec);
-                    /* Ensure null-termination and prevent buffer overflow by truncating if necessary */
-                    strlcpy(result->name, fname, sizeof(result->name));
-                    result->name[sizeof(result->name) - 1] = '\0';
+                    if (result) {
+                        strlcpy(result->name, fname, sizeof(result->name));
+                        result->name[sizeof(result->name) - 1] = '\0';
+                    }
                     kfree(dir_buf, buf_size);
                     return result;
                 }
@@ -713,6 +781,11 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
         udf_free_block(fs, block);
         return -EIO;
     }
+    /* The node keeps the parent's whole FE sector -- for an inline
+     * directory, the entries themselves -- and the write refreshed only
+     * the header: read it back so a lookup sees the new entry. */
+    if (udf_read_fe_sector(fs, &pctx->icb, pctx->fe_sector) != 0)
+        return -EIO;
     
     /* Add . and .. to new directory */
     struct udf_fe new_fe;
@@ -737,15 +810,23 @@ static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct component
     if (dvp->v_type != VDIR)
         return ENOTDIR;
 
-    /* Call the internal legacy-style mkdir for now as it handles the UDF specific logic */
-    /* Note: conversion of cnp->cn_nameptr and vap->va_mode */
-    error = udf_vfs_mkdir((fs_node_t *)dvp, cnp->cn_nameptr, (uint16_t)vap->va_mode);
+    /* The legacy-style mkdir and finddir take an fs_node_t whose impl is
+     * the udf_node_t; a vnode carries that udf_node_t in v_data (see
+     * below).  Casting the vnode itself to an fs_node_t, as this did,
+     * read the vnode's fields as a node's. */
+    fs_node_t dnode;
+    memset(&dnode, 0, sizeof(dnode));
+    dnode.impl = (uintptr_t)dvp->v_data;
+    if (!dvp->v_data)
+        return EINVAL;
+
+    error = udf_vfs_mkdir(&dnode, cnp->cn_nameptr, (uint16_t)vap->va_mode);
     if (error)
         return error;
 
     /* After successful creation, we need to return the new vnode */
     /* We lookup the newly created directory to get its ICB/FE */
-    fs_node_t *new_node = udf_vfs_finddir((fs_node_t *)dvp, cnp->cn_nameptr);
+    fs_node_t *new_node = udf_vfs_finddir(&dnode, cnp->cn_nameptr);
     if (!new_node)
         return EIO;
 
@@ -770,14 +851,20 @@ static int udf_unmount(fs_node_t *root) {
     if (!fs) return -EINVAL;
 
     // Invalidate node cache for this filesystem
+    spinlock_acquire(&udf_node_lock);
     for (int i = 0; i < UDF_NODE_CACHE_SIZE; i++) {
         if (udf_node_cache[i].fs == fs) {
             memset(&udf_node_cache[i], 0, sizeof(udf_node_t));
             memset(&udf_fs_node_cache[i], 0, sizeof(fs_node_t));
+            udf_node_opens[i] = 0;
         }
     }
+    spinlock_release(&udf_node_lock);
 
-    kfree(fs, sizeof(struct udf_fs));
+    /* The root came from udf_mount, not the table. */
+    kfree(ctx, sizeof(udf_node_t));
+    kfree(root, sizeof(fs_node_t));
+    udf_fs_free(fs);
     return 0;
 }
 
@@ -925,26 +1012,31 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     /* Read File Set Descriptor */
     struct udf_fsd fsd;
     if (udf_read_fsd(dev, fs, &lvd, &fsd) != 0) {
-        kfree(fs, sizeof(struct udf_fs));
+        udf_fs_free(fs);
         return NULL;
     }
-    
+
     /* Save root ICB */
     memcpy(&fs->root_icb, &fsd.root_dir_icb, sizeof(struct udf_long_ad));
-    
+
     /* Read root directory file entry (full sector) */
     uint8_t root_fe_sector[UDF_SECTOR_SIZE];
     if (udf_read_fe_sector(fs, &fs->root_icb, root_fe_sector) != 0) {
         kprint("UDF: Failed to read root directory\n");
-        kfree(fs, sizeof(struct udf_fs));
+        udf_fs_free(fs);
         return NULL;
     }
-    /* Set up root node */
-    fs_node_t *root_node = udf_alloc_node(fs, &fs->root_icb, root_fe_sector);
-    if (!root_node) {
-        kfree(fs, sizeof(struct udf_fs));
+    /* Set up root node: its own allocation, so the table never recycles
+     * it while the filesystem is mounted. */
+    fs_node_t *root_node = kmalloc(sizeof(fs_node_t));
+    udf_node_t *root_ctx = kmalloc(sizeof(udf_node_t));
+    if (!root_node || !root_ctx) {
+        if (root_node) kfree(root_node, sizeof(fs_node_t));
+        if (root_ctx) kfree(root_ctx, sizeof(udf_node_t));
+        udf_fs_free(fs);
         return NULL;
     }
+    udf_init_node(root_node, root_ctx, fs, &fs->root_icb, root_fe_sector);
     
     strlcpy(root_node->name, "/", sizeof(root_node->name));
     root_node->name[sizeof(root_node->name) - 1] = '\0';

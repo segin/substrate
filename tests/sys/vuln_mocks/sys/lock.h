@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 typedef int spinlock_t;
+#define SPINLOCK_INIT(name) 0
 
 /*
  * Minimal stand-in for the kernel's lockmgr lock.  vnode.h embeds a

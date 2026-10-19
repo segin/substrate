@@ -892,72 +892,63 @@ int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 /*
  * Add a File Identifier Descriptor to a directory
  */
+/*
+ * A directory's FIDs are its file data: inside the File Entry's allocation
+ * area for an inline directory (after the FE header and extended
+ * attributes), or in the extents its allocation descriptors name.  They
+ * used to be read and written at offset 0 of the FE sector itself, so the
+ * first FID added overwrote the directory's own File Entry, and an
+ * extent-backed directory was never touched where its entries live.  The
+ * file read/write routines know all the layouts (and convert an inline
+ * directory that outgrows the FE), so the FIDs go through them.
+ *
+ * `dir_fe` is updated with the directory's FE header as written; a caller
+ * that keeps the whole FE sector must re-read it.  `dir_block` is the
+ * directory's FE block.
+ */
+#define UDF_MAX_DIR_SIZE (1U << 20)
+
 int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                 const char *name, struct udf_long_ad *icb, uint8_t characteristics) {
-    uint8_t *dir_buf = kmalloc(4096);
-    if (!dir_buf) return -1;
-    
-    off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
-    uint32_t dir_size = (uint32_t)dir_fe->info_length;
+    size_t name_len = strlen(name);
+    if (name_len == 0 || name_len > 254) return -1;
 
-    /* Calculate new FID size */
-    uint8_t name_len = strlen(name);
-    uint32_t fid_size = 38 + 0 + (name_len + 1);  /* +1 for compression type */
-    fid_size = (fid_size + 3) & ~3;  /* Pad to 4 bytes */
-
-    /* Bounds check: ensure FID fits in buffer (guard each term so a bogus
-     * info_length cannot wrap the sum). */
-    if (dir_size > 4096 || fid_size > 4096 || dir_size + fid_size > 4096) {
+    uint64_t dir_size = dir_fe->info_length;
+    /* 38-byte header, compression id + name, padded to 4. */
+    uint32_t fid_size = (38 + (uint32_t)name_len + 1 + 3) & ~3U;
+    if (dir_size > UDF_MAX_DIR_SIZE - fid_size) {
         kprint("UDF: Directory full, cannot add entry\n");
-        kfree(dir_buf, 4096);
         return -1;
     }
 
-    /* The directory may span more than one sector (info_length up to
-     * 4096 = 2 sectors).  Read every sector we will index into — not just
-     * the first — so the FID is never written into uninitialised heap, and
-     * persist that same span below.  Otherwise a multi-sector directory
-     * gets a garbage-checksummed, half-persisted entry. */
-    uint32_t used_sectors = (dir_size + fid_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-    if (used_sectors == 0) used_sectors = 1;
-    for (uint32_t i = 0; i < used_sectors; i++) {
-        fs->device->read(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
-                         UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
-    }
+    uint8_t *buf = kmalloc(fid_size);
+    if (!buf) return -1;
+    memset(buf, 0, fid_size);
 
-    /* Create FID at end of directory */
-    struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
-    memset(fid, 0, fid_size);
-    
+    struct udf_fid *fid = (struct udf_fid *)buf;
     fid->tag.tag_id = UDF_TAG_FID;
     fid->tag.tag_location = fs->partition_start + dir_block;
     fid->file_version = 1;
     fid->characteristics = characteristics;
-    fid->file_id_length = name_len + 1;  /* Include compression byte */
+    fid->file_id_length = (uint8_t)(name_len + 1);  /* + compression byte */
     memcpy(&fid->icb, icb, sizeof(struct udf_long_ad));
-    
-    /* Copy name with OSTA compression type prefix */
+
+    /* Name with the OSTA compression id prefix (8: 8-bit characters). */
     char *name_ptr = (char *)fid + 38;
-    name_ptr[0] = 8;  /* Type 8 = 8-bit characters */
+    name_ptr[0] = 8;
     memcpy(name_ptr + 1, name, name_len);
-    
-    /* Calculate tag checksum */
+
     uint8_t *p = (uint8_t *)&fid->tag;
     uint8_t sum = 0;
     for (int i = 0; i < 4; i++) sum += p[i];
     for (int i = 5; i < 16; i++) sum += p[i];
     fid->tag.tag_checksum = sum;
-    
-    /* Update directory size */
-    dir_fe->info_length = dir_size + fid_size;
 
-    /* Write back every sector we touched (see the read above). */
-    for (uint32_t i = 0; i < used_sectors; i++) {
-        fs->device->write(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
-                          UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
-    }
-
-    return 0;
+    /* Append: the write grows the directory's info_length. */
+    int rc = udf_write_file(fs, dir_fe, dir_block, (uint32_t)dir_size,
+                            fid_size, buf);
+    kfree(buf, fid_size);
+    return rc;
 }
 
 /*
@@ -965,26 +956,29 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
  */
 int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                    const char *name) {
-    enum { UDF_REMOVE_FID_BUFSZ = 4096 };
-    uint8_t *dir_buf = kmalloc(UDF_REMOVE_FID_BUFSZ);
-    if (!dir_buf) return -1;
+    /* udf_read_file needs the whole FE sector (the allocation area follows
+     * the header); `dir_fe` may be the header alone, so read the sector. */
+    uint8_t *fe_sec = kmalloc(UDF_SECTOR_SIZE);
+    if (!fe_sec) return -1;
+    off_t fe_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
+    if (fs->device->read(fs->device, fe_off, UDF_SECTOR_SIZE, fe_sec) !=
+        UDF_SECTOR_SIZE) {
+        kfree(fe_sec, UDF_SECTOR_SIZE);
+        return -1;
+    }
 
-    off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
-    fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-
-    /* dir_buf is a POINTER, so the old `sizeof(dir_buf)` was 4 -- dir_size was
-     * clamped to 4 bytes and the `pos + 38 <= dir_size` scan below never
-     * executed, so udf_remove_fid() always reported "not found" and unlink()
-     * and rmdir() on UDF ALWAYS failed.  (The same sizeof-on-a-pointer bug was
-     * already fixed in udf_vfs_readdir/finddir; this site was missed.)
-     *
-     * Only one sector was read, so bound by that as well as by the buffer --
-     * scanning past what we actually read would walk uninitialised heap. */
-    uint32_t dir_size = (uint32_t)dir_fe->info_length;
-    if (dir_size > UDF_SECTOR_SIZE)
-        dir_size = UDF_SECTOR_SIZE;
+    uint64_t full = ((struct udf_fe *)fe_sec)->info_length;
+    uint32_t alloc_size = full > UDF_MAX_DIR_SIZE ? UDF_MAX_DIR_SIZE : (uint32_t)full;
+    uint8_t *dir_buf = alloc_size ? kmalloc(alloc_size) : NULL;
+    if (alloc_size && !dir_buf) {
+        kfree(fe_sec, UDF_SECTOR_SIZE);
+        return -1;
+    }
+    /* Only what was actually read is scanned. */
+    uint32_t dir_size = alloc_size ?
+        udf_read_file(fs, (struct udf_fe *)fe_sec, 0, alloc_size, dir_buf) : 0;
     uint32_t pos = 0;
-    
+
     while (pos + 38 <= dir_size) {
         struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
         
@@ -1007,19 +1001,27 @@ int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
         }
         
         if (strcmp(fname, name) == 0) {
-            /* Mark as deleted */
+            /* Mark it deleted (the UDF way: the slot stays) and recompute
+             * its tag checksum, then write that one FID back where it is. */
             fid->characteristics |= UDF_FID_DELETED;
-            
-            /* Write back */
-            fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-            kfree(dir_buf, 4096);
-            return 0;
+            uint8_t *p = (uint8_t *)&fid->tag;
+            uint8_t sum = 0;
+            for (int i = 0; i < 4; i++) sum += p[i];
+            for (int i = 5; i < 16; i++) sum += p[i];
+            fid->tag.tag_checksum = sum;
+            int rc = udf_write_file(fs, dir_fe, dir_block, pos, fid_size,
+                                    dir_buf + pos);
+            kfree(dir_buf, alloc_size);
+            kfree(fe_sec, UDF_SECTOR_SIZE);
+            return rc;
         }
-        
+
         pos += fid_size;
     }
-    
-    kfree(dir_buf, 4096);
+
+    if (dir_buf)
+        kfree(dir_buf, alloc_size);
+    kfree(fe_sec, UDF_SECTOR_SIZE);
     return -1;  /* Not found */
 }
 

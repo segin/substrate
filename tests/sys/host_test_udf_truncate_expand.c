@@ -38,6 +38,14 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
+/* udf_remove_fid reads the directory through udf.c's reader; this test
+ * does not remove entries. */
+uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t offset,
+                       uint32_t size, uint8_t *buffer) {
+    (void)fs; (void)fe; (void)offset; (void)size; (void)buffer;
+    return 0;
+}
+
 // Include source (real file)
 #include "../../sys/fs/udf/udf_write.c"
 

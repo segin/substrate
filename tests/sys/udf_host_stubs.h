@@ -30,4 +30,10 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                 const char *name, struct udf_long_ad *icb,
                 uint8_t characteristics) { return 0; }
 
+/* udf.c guards its node table with a spinlock; these tests are single-
+ * threaded. */
+#include <sys/lock.h>
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+
 #endif /* UDF_HOST_STUBS_H */

@@ -6,6 +6,7 @@ typedef struct {
     uint32_t cpu_id;
     const char *name;
 } spinlock_t;
+#define SPINLOCK_INIT(name) { 0, 0xFFFFFFFF, (name) }
 void spinlock_init(spinlock_t *lock, const char *name);
 void spinlock_acquire(spinlock_t *lock);
 int spinlock_try_acquire(spinlock_t *lock);
