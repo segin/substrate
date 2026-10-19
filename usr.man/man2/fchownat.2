@@ -39,6 +39,8 @@ and
 .I gid
 arguments specify the new owner and group.
 Passing \-1 leaves the respective ID unchanged.
+Who may change what follows
+.BR chown (2).
 .PP
 .B lchownat()
 is similar to
@@ -95,7 +97,11 @@ The file does not exist, or a component of the path does not exist.
 A component of the path prefix is not a directory.
 .TP
 .B EPERM
-The effective user ID is not root, and the caller does not own the file.
+The caller is not the superuser, and either does not own the file, asked
+for a different owner, or asked for a group it is not a member of.
+.TP
+.B EROFS
+The file is on a read-only file system.
 .SH EXAMPLES
 Change ownership of
 .I file
@@ -111,5 +117,6 @@ Change ownership of a symbolic link itself:
 .SH SEE ALSO
 .BR intro (2),
 .BR chown (1),
+.BR chown (2),
 .BR lchown (2),
 .BR fchown (2)

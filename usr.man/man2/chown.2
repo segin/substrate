@@ -1,0 +1,89 @@
+.TH CHOWN 2 "2026-10-19" "Substrate" "System Calls"
+.SH NAME
+chown, fchown, lchown \- change the owner and group of a file
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "int chown(const char *" pathname ", uid_t " owner ", gid_t " group );
+.BI "int fchown(int " fd ", uid_t " owner ", gid_t " group );
+.BI "int lchown(const char *" pathname ", uid_t " owner ", gid_t " group );
+.fi
+.SH DESCRIPTION
+These calls change the owner and group of a file:
+.BR chown ()
+the file
+.I pathname
+names, following symbolic links;
+.BR fchown ()
+the open file
+.IR fd ;
+.BR lchown ()
+like
+.BR chown ()
+but a symbolic link itself, not its target.
+An
+.I owner
+or
+.I group
+of \-1 leaves that ID as it is.
+.PP
+The superuser may set any owner and group.
+The file's owner may set the owner only to itself, and the group only to
+its effective group ID or one of its supplementary groups.
+No other process may change either.
+.PP
+When anyone but the superuser changes the owner or group, the
+set-user-ID and set-group-ID bits of the file's mode are cleared.
+The file's change time is updated, and the change is written to the file
+system.
+.SH RETURN VALUE
+On success, zero is returned.
+On error, \-1 is returned, and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EBADF
+.RB ( fchown ())
+.I fd
+is not an open file descriptor.
+.TP
+.B EFAULT
+.I pathname
+points outside the accessible address space.
+.TP
+.B EINVAL
+.I owner
+or
+.I group
+is negative and not \-1.
+.TP
+.B ENOENT
+The file does not exist.
+.TP
+.B EPERM
+The caller is not the superuser, and either does not own the file, asked
+for a different owner, or asked for a group it is not a member of.
+.TP
+.B EROFS
+The file is on a read-only file system.
+.SH EXAMPLE
+Give a file to the group
+.B staff
+(gid 50), of which the calling user is a member, keeping its owner:
+.PP
+.RS 4
+.EX
+if (chown("report.txt", (uid_t)\-1, 50) == \-1)
+    perror("chown");
+.EE
+.RE
+.SH SEE ALSO
+.BR chown (1),
+.BR chmod (2),
+.BR fchownat (2),
+.BR setgroups (2),
+.BR stat (2)

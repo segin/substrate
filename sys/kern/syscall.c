@@ -3610,30 +3610,67 @@ int kern_chmodat(int dirfd, const char *path, int mode, int flags) {
     return ret;
 }
 
+/* Is gid the caller's effective group or one of its supplementary ones? */
+static int chown_in_group(uint32_t gid) {
+    if (gid == current_process->egid) return 1;
+    int n = current_process->n_supp_groups;
+    int cap = (int)(sizeof(current_process->supp_groups) /
+                    sizeof(current_process->supp_groups[0]));
+    for (int i = 0; i < n && i < cap; i++) {
+        if (current_process->supp_groups[i] == gid) return 1;
+    }
+    return 0;
+}
+
+/*
+ * Every chown entry point ends here.  POSIX rules: the superuser may set
+ * any owner and group; the file's owner may "change" the owner only to
+ * itself and the group only to its effective group or a supplementary
+ * one; anyone else may change nothing.  A change by anyone but the
+ * superuser clears the set-user-ID and set-group-ID bits.  The change goes
+ * through setattr_fs, so the filesystem records it -- assigning node->uid
+ * and node->gid changed only the in-memory copy.
+ */
+static int chown_node(fs_node_t *node, int uid, int gid) {
+    if (!node) return -ENOENT;
+    if (uid < -1 || gid < -1) return -EINVAL;
+    if (vfs_node_rdonly(node)) return -EROFS;
+    if (uid == -1 && gid == -1) return 0;
+
+    int root = current_process->euid == 0;
+    if (!root) {
+        if (current_process->euid != node->uid) return -EPERM;
+        if (uid != -1 && (uint32_t)uid != node->uid) return -EPERM;
+        if (gid != -1 && (uint32_t)gid != node->gid &&
+            !chown_in_group((uint32_t)gid))
+            return -EPERM;
+    }
+
+    struct fs_attr a;
+    memset(&a, 0, sizeof(a));
+    a.mask = FS_ATTR_CTIME;
+    a.ctime = get_time();
+    if (uid != -1) {
+        a.mask |= FS_ATTR_UID;
+        a.uid = (uint32_t)uid;
+    }
+    if (gid != -1) {
+        a.mask |= FS_ATTR_GID;
+        a.gid = (uint32_t)gid;
+    }
+    if (!root && (node->mask & (04000 | 02000))) {
+        a.mask |= FS_ATTR_MODE;
+        a.mode = node->mask & ~(uint32_t)(04000 | 02000);
+    }
+    return setattr_fs(node, &a);
+}
+
 int sys_lchown(const char *path, int uid, int gid) {
     char kpath[256];
-    fs_node_t *node;
 
     if (uid < -1 || gid < -1) return -EINVAL;
     COPYIN_STR(path, kpath);
-    node = sys_lookup_path(kpath, 0);
-    if (!node) return -ENOENT;
-    if (vfs_node_rdonly(node)) return -EROFS;
-
-    /* Match fchown's current policy until supplementary groups exist. */
-    if (uid != -1 && current_process->euid != 0)
-        return -EPERM;
-    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
-        return -EPERM;
-
-    if (uid != -1) node->uid = (uint32_t)uid;
-    if (gid != -1) node->gid = (uint32_t)gid;
-
-    if (current_process->euid != 0)
-        node->mask &= ~(uint32_t)(04000 | 02000);
-
-    node->ctime = get_time();
-    return 0;
+    return chown_node(sys_lookup_path(kpath, 0), uid, gid);
 }
 
 int sys_fchmod(int fd, int mode) {
@@ -3664,28 +3701,7 @@ int sys_fchown(int fd, int uid, int gid) {
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -EBADF;
 
-    fs_node_t *node = (fs_node_t *)f->f_data;
-
-    if (vfs_node_rdonly(node))
-        return -EROFS;
-
-    /* Only root may change file owner */
-    if (uid != -1 && current_process->euid != 0)
-        return -EPERM;
-
-    /* Only root or file owner may change group */
-    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
-        return -EPERM;
-
-    if (uid != -1) node->uid = (uint32_t)uid;
-    if (gid != -1) node->gid = (uint32_t)gid;
-
-    /* Clear setuid/setgid bits on chown by non-root (POSIX requirement) */
-    if (current_process->euid != 0)
-        node->mask &= ~(uint32_t)(04000 | 02000);
-
-    node->ctime = get_time();
-    return 0;
+    return chown_node((fs_node_t *)f->f_data, uid, gid);
 }
 
 int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
@@ -3715,40 +3731,10 @@ int kern_fchownat(int dirfd, const char *kpath, int uid, int gid, int flag) {
         fs_node_t *node = parent->finddir(parent, name);
         if (!node) return -ENOENT;
 
-        if (vfs_node_rdonly(node) || vfs_node_rdonly(parent))
+        if (vfs_node_rdonly(parent))
             return -EROFS;
-        /* If it's a symlink and AT_SYMLINK_NOFOLLOW is set, operate on the link */
-        if ((node->flags & 0x7) == FS_SYMLINK) {
-            /* Match fchown's current policy until supplementary groups exist. */
-            if (uid != -1 && current_process->euid != 0)
-                return -EPERM;
-            if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
-                return -EPERM;
-
-            if (uid != -1) node->uid = (uint32_t)uid;
-            if (gid != -1) node->gid = (uint32_t)gid;
-
-            if (current_process->euid != 0)
-                node->mask &= ~(uint32_t)(04000 | 02000);
-
-            node->ctime = get_time();
-            return 0;
-        }
-
-        /* Otherwise, do fchown-style operation on the resolved node */
-        if (uid != -1 && current_process->euid != 0)
-            return -EPERM;
-        if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
-            return -EPERM;
-
-        if (uid != -1) node->uid = (uint32_t)uid;
-        if (gid != -1) node->gid = (uint32_t)gid;
-
-        if (current_process->euid != 0)
-            node->mask &= ~(uint32_t)(04000 | 02000);
-
-        node->ctime = get_time();
-        return 0;
+        /* A symlink itself, or whatever the name is: never followed. */
+        return chown_node(node, uid, gid);
     }
 
     /* Default case (no AT_SYMLINK_NOFOLLOW): follow symlinks, but resolve
@@ -3760,22 +3746,7 @@ int kern_fchownat(int dirfd, const char *kpath, int uid, int gid, int flag) {
     if (ret != 0) return ret;
     fs_node_t *node = vfs_perso_lookup(froot, fcwd, kpath);
     if (!node) return vfs_lookup_error((kpath[0] == '/') ? froot : fcwd, kpath);
-    if (vfs_node_rdonly(node)) return -EROFS;
-
-    /* Match fchown's current policy until supplementary groups exist. */
-    if (uid != -1 && current_process->euid != 0)
-        return -EPERM;
-    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
-        return -EPERM;
-
-    if (uid != -1) node->uid = (uint32_t)uid;
-    if (gid != -1) node->gid = (uint32_t)gid;
-
-    if (current_process->euid != 0)
-        node->mask &= ~(uint32_t)(04000 | 02000);
-
-    node->ctime = get_time();
-    return 0;
+    return chown_node(node, uid, gid);
 }
 
 int sys_lchownat(int dirfd, const char *path, int uid, int gid, int flag) {
@@ -3800,22 +3771,8 @@ int sys_lchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     if ((node->flags & 0x7) != FS_SYMLINK && !(flag & AT_REMOVEDIR)) {
         /* Even for non-symlinks, we allow setting ownership */
     }
-    if (vfs_node_rdonly(node) || vfs_node_rdonly(parent)) return -EROFS;
-
-    /* Match fchown's current policy until supplementary groups exist. */
-    if (uid != -1 && current_process->euid != 0)
-        return -EPERM;
-    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
-        return -EPERM;
-
-    if (uid != -1) node->uid = (uint32_t)uid;
-    if (gid != -1) node->gid = (uint32_t)gid;
-
-    if (current_process->euid != 0)
-        node->mask &= ~(uint32_t)(04000 | 02000);
-
-    node->ctime = get_time();
-    return 0;
+    if (vfs_node_rdonly(parent)) return -EROFS;
+    return chown_node(node, uid, gid);
 }
 
 int sys_fcntl(int fd, int cmd, int arg) {

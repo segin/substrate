@@ -169,6 +169,13 @@ rofault: rofault.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# chownperm: chown's POSIX permission rules (group membership, no giving
+# away, setuid/setgid cleared) and the change reaching ext2.  Needs root;
+# runs on the host too.
+chownperm: chownperm.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # cowkeep: a page made private by a COW fault keeps its contents across
 # later forks.  Runs on the host too.
 cowkeep: cowkeep.c

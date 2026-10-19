@@ -303,7 +303,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:1204-1213` (`sys_truncate`) resolves `kpath` from `root` (ignoring `cwd_node` for relative paths) and calls `truncate_fs(node, length)` immediately with no permission check, no `vfs_is_rdonly` check, no directory check, and no `RLIMIT_FSIZE` check. Any unprivileged user can truncate `/etc/passwd` or `/sbin/init`.
   Basis: traced.
 
-- [ ] **SYS-VFS-002** *(High; confirmed)* When changing file ownership via `chown`, `fchown`, `lchown`, or `fchownat`, the kernel shall verify that a non-root owner's target `gid` equals `current_process->egid` or is in `current_process->supp_groups`, clear `S_ISUID | S_ISGID` on non-root calls, reject read-only mounts, and persist changes via `setattr_fs`.
+- [x] **SYS-VFS-002** *(High; confirmed)* When changing file ownership via `chown`, `fchown`, `lchown`, or `fchownat`, the kernel shall verify that a non-root owner's target `gid` equals `current_process->egid` or is in `current_process->supp_groups`, clear `S_ISUID | S_ISGID` on non-root calls, reject read-only mounts, and persist changes via `setattr_fs`.
   Evidence: `sys/kern/syscall.c:3570-3776` (`sys_lchown`, `sys_fchown`, `kern_fchownat`, `sys_lchownat`) allows a non-root file owner (`euid == node->uid`) to set `gid` to any group (including `gid = 0`), and mutates only the in-memory `node->uid`/`node->gid` without calling `setattr_fs(node, &attr)`, so ownership changes are never written to disk on `ext2`.
   Basis: traced.
 
