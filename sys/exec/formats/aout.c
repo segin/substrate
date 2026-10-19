@@ -287,10 +287,20 @@ int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
         return -ENOMEM;
     }
 
-    /* Eager-back the file-backed pages so kern_read hits present memory. */
+    /*
+     * Eager-back the file-backed pages and read the image into them through
+     * their kernel mapping.  It used to be read through the user address,
+     * but ZMAGIC text starts at address 0, and a read into a buffer at 0
+     * delivers nothing while still reporting success (to the code under
+     * kern_read it is a NULL pointer; xout.c bounces its page 0 for the
+     * same reason).  The first page of every such program came up
+     * zero-filled, and the program ran off into its data and hung or
+     * crashed.
+     */
     for (o = start; o < file_end; o += AOUT_PAGE) {
         vm_page_t *page = vm_page_alloc(obj, (uint64_t)((o - start) >> 12), 0);
-        void *kva;
+        uint8_t *kva;
+        uint32_t lo, hi;
         if (!page) {
             return -ENOMEM;
         }
@@ -303,12 +313,16 @@ int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
         if (pmap_enter(pmap, o, page->phys_addr, prot, 0) < 0) {
             return -ENOMEM;
         }
-    }
 
-    if (filesz > 0) {
-        kern_lseek(fd, (off_t)foff, 0);
-        if (kern_read(fd, (void *)(uintptr_t)va, (int)filesz) != (int)filesz) {
-            return -EIO;
+        /* The part of [va, va + filesz) on this page. */
+        lo = o > va ? o : va;
+        hi = o + AOUT_PAGE < va + filesz ? o + AOUT_PAGE : va + filesz;
+        if (lo < hi) {
+            kern_lseek(fd, (off_t)foff + (lo - va), 0);
+            if (kern_read(fd, (char *)kva + (lo - o), (int)(hi - lo)) !=
+                (int)(hi - lo)) {
+                return -EIO;
+            }
         }
     }
     return 0;

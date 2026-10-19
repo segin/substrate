@@ -212,6 +212,12 @@ aoutstack: aoutstack.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# aoutrun: a Linux ZMAGIC a.out (text at address 0) runs and prints.
+# Run as `aoutrun /perso/linux/usr/bin/printenv` with Slackware 1.1.2 mounted.
+aoutrun: aoutrun.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # fatops: on a FAT mount, an empty file truncated larger reads zeros, a
 # case-only rename keeps the file, and a write at 4 GiB does not wrap to 0.
 # Run as `fatops <dir on FAT>`, then fsck.fat -n the image.
