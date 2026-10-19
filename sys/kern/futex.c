@@ -1314,10 +1314,12 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
         }
         
         if (oldval == 0) {
-            /* Got it! */
+            /* Got it!  Become the owner before leaving the waiter list:
+             * pi_remove_waiter frees a pi_state left with no waiters and
+             * no owner, and the stores below would land in freed memory. */
             pi_spinlock();
-            pi_remove_waiter(ps, current_thread);
             ps->owner = current_thread;
+            pi_remove_waiter(ps, current_thread);
             ps->owner_tid = tid;
             ps->owner_prio = current_thread->priority;
             ps->boosted_prio = -1;
@@ -1329,8 +1331,8 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
             newval = tid | (oldval & FUTEX_WAITERS);
             if (futex_cmpxchg_user(uaddr, oldval, newval, &err) == oldval) {
                 pi_spinlock();
+                ps->owner = current_thread;     /* first: see above */
                 pi_remove_waiter(ps, current_thread);
-                ps->owner = current_thread;
                 ps->owner_tid = tid;
                 ps->owner_prio = current_thread->priority;
                 ps->boosted_prio = -1;
