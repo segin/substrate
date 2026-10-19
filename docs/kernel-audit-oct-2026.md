@@ -1057,3 +1057,37 @@ are `subr_copy.c:14`, `boot.S:2`, `multiboot_hdr.S:2`, `ext2_hash.c:21` and
 **SYS-RULE-003** — confirmed, Low.  `pipe.c` also defines `O_ACCMODE`.
 `<sys/mman.h>` resolves to the userland header; there is no
 `sys/include/sys/mman.h`.
+
+## 9. Found while fixing the above
+
+Defects met while fixing this audit's findings (October 2026), outside any
+finding above.  Same form as sections 1–7; none has been verified by a
+second reader.
+
+- [ ] **SYS-NEW-001** *(High)* While a path walk holds an `fs_node_t` it got from `finddir`, no filesystem shall free that node.
+  Evidence: the VFS takes no reference for a lookup in progress (only `open_fs`/`close_fs` pin a node), so a filesystem freeing a node nobody has *open* can free one a walk is still using.  Remaining cases: `minix_ncache_forget` frees an inode's node when the inode is freed (`sys/fs/minix/minix.c`, unlink during a walk); `procfs_release_pid_nodes` frees a reaped process's node block when nothing has it open (`sys/fs/procfs.c`, a walk paused inside `/proc/<pid>`); ext2's node handling has not been checked for the same pattern.  The Minix cache stopped evicting in 7d81065bb, and procfs's per-fd/per-thread entries are never freed early, for this reason.  The real fix is a lookup reference in the VFS (cf. the vnode layer).
+  Basis: traced.
+
+- [ ] **SYS-NEW-002** *(Medium)* `link(2)` / `linkat` without `AT_SYMLINK_FOLLOW` shall link a symlink itself, not its target.
+  Evidence: on ext2 and Minix alike, `ln -P dangling new` fails `ENOENT` and `ln -P good new` makes a hard link to the symlink's target (`ls -l` shows the target's mode and link count).
+  Basis: observed.
+
+- [ ] **SYS-NEW-003** *(Medium; to investigate)* A process that has exited and been reaped shall give back its memory on x86_64 as on i386.
+  Evidence: 200 `sleep 0 &` + `wait` cycles from the shell lower MemFree by about 8.5 MB on x86_64 (~40 KB each), with or without `/proc` access, against about 1 MB on i386.  It may be a cache (page cache, slab) rather than a leak; not yet run long enough to tell.
+  Basis: observed.
+
+- [ ] **SYS-NEW-004** *(Medium)* A Linux thread's `exit` (`SYS_exit`, not `exit_group`) shall end only that thread.
+  Evidence: found writing the PI-futex test (KERN-005): a glibc-linked Linux program's thread exit took the whole process down.
+  Basis: observed.
+
+- [ ] **SYS-NEW-005** *(Medium)* A statically linked libpthread program shall get working thread-local storage in its threads.
+  Evidence: found writing the PI-futex test (KERN-005): static libpthread threads crash on first TLS access; the test was rewritten to link dynamically.
+  Basis: observed.
+
+- [ ] **SYS-NEW-006** *(Low)* `exec` shall close POSIX message-queue descriptors (they are not inherited across exec).
+  Evidence: found fixing KERN-007: `mq_proc_fork` gives the child the parent's handles, but nothing drops them at exec.
+  Basis: traced.
+
+- [ ] **SYS-NEW-007** *(Low)* The host and unit tests that cover the kernel shall build.
+  Evidence: `tests/sys/tests.o` fails in `personality.h` (`size_t` used without its header); `host_test_fat_vuln`, `host_test_fat_lfn_overflow` and `host_test_fat_lfn_truncation` have no rule and fall to make's implicit one with kernel flags; `host_test_perso_elks` no longer compiles and calls none of the syscall wrappers; `torture_fat_persist.c` is built by nothing.
+  Basis: observed.
