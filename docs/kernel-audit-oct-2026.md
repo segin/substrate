@@ -203,7 +203,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/futex.c:380-384` (`sys_set_tid_address`) stores `tidptr` without validation, and `futex_wake_exited_thread` (`sys/kern/futex.c:354-370`) checks only `futex_get_key((uintptr_t)uaddr)` (`pmap_extract`) before executing `*uaddr = 1;` in Ring 0. Because kernel virtual addresses (`>= 0xC0000000` on i386) are mapped in every user `pmap`, `pmap_extract` returns non-zero for kernel addresses and `*uaddr = 1` overwrites arbitrary kernel memory on thread exit.
   Basis: traced.
 
-- [ ] **SYS-KERN-005** *(Critical → High; confirmed)* When a contended waiter acquires a priority-inheritance futex in `futex_lock_pi`, the kernel shall assign `ps->owner = current_thread` before calling `pi_remove_waiter(ps, current_thread)` so `pi_remove_waiter` does not free `ps` while it is still being initialized.
+- [x] **SYS-KERN-005** *(Critical → High; confirmed)* When a contended waiter acquires a priority-inheritance futex in `futex_lock_pi`, the kernel shall assign `ps->owner = current_thread` before calling `pi_remove_waiter(ps, current_thread)` so `pi_remove_waiter` does not free `ps` while it is still being initialized.
   Evidence: `sys/kern/futex.c:1404-1405` (`futex_unlock_pi`) clears `ps->owner = NULL` before waking the waiter. When the woken waiter in `futex_lock_pi` (`sys/kern/futex.c:1313-1319` and `:1326-1333`) calls `pi_remove_waiter(ps, current_thread)` (`:1008-1035`) before setting `ps->owner = current_thread`, `pi_remove_waiter` sees `ps->waiters == NULL && ps->owner == NULL` (`:1020`) and frees `ps` via `pi_state_free(ps)`. Lines 1315–1318 then write `ps->owner`, `ps->owner_tid`, `ps->owner_prio`, and `ps->boosted_prio` into the freed slab object.
   Basis: traced.
 
