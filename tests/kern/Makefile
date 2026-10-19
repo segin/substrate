@@ -176,6 +176,16 @@ chownperm: chownperm.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# chrootesc: absolute symlinks inside a chroot resolve inside it, natively
+# and (chrootesc.linux, static i386 Linux) under a personality.  Needs
+# root; runs on the host too.
+chrootesc: chrootesc.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
+chrootesc.linux: chrootesc.c
+	gcc -m32 -static -O2 $< -o $@
+
 # cowkeep: a page made private by a COW fault keeps its contents across
 # later forks.  Runs on the host too.
 cowkeep: cowkeep.c

@@ -719,6 +719,14 @@ struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out) {
 // Internal with follow control
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks);
 
+/* Where an absolute name starts for the calling process: its chroot root,
+ * or the system's. */
+static fs_node_t *vfs_proc_root(void) {
+    if (current_process && current_process->root_node)
+        return current_process->root_node;
+    return fs_root;
+}
+
 /*
  * Check if a filesystem is busy.
  *
@@ -906,7 +914,10 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                 }
                 if (current_thread) current_thread->vfs_symlink_depth++;
                 if (link_target[0] == '/') {
-                    target = vfs_lookup(fs_root, link_target);
+                    /* Absolute: from the process's root, which inside a
+                     * chroot is not the system's -- or a link to "/"
+                     * walks out of the jail. */
+                    target = vfs_lookup(vfs_proc_root(), link_target);
                 } else {
                     target = vfs_lookup(node, link_target);
                 }
@@ -958,6 +969,11 @@ static fs_node_t *vfs_perso_shadow(const char *path,
                                    fs_node_t *(*lookup)(fs_node_t *, const char *)) {
     if (!(current_process && current_process->perso_id != 0 && path[0] == '/' &&
           strncmp(path, "/perso/", 7) != 0))
+        return NULL;
+    /* The personality tree is the system's /perso/<name>, outside a chroot:
+     * a chrooted process sees only what is under its root.  (root_node is
+     * often fs_root itself, inherited from init; that is no chroot.) */
+    if (current_process->root_node && current_process->root_node != fs_root)
         return NULL;
     /*
      * /dev is the kernel's for a personality that says so (native_dev):
@@ -1073,7 +1089,7 @@ static fs_node_t *vfs_perso_component(fs_node_t *dir, char *component,
         return NULL;
     }
     if (current_thread) current_thread->vfs_symlink_depth++;
-    n = lookup(fs_root, full);
+    n = lookup(vfs_proc_root(), full);
     if (current_thread) current_thread->vfs_symlink_depth--;
     kfree(full, 512);
     return n;

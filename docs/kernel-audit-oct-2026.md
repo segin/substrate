@@ -307,7 +307,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:3570-3776` (`sys_lchown`, `sys_fchown`, `kern_fchownat`, `sys_lchownat`) allows a non-root file owner (`euid == node->uid`) to set `gid` to any group (including `gid = 0`), and mutates only the in-memory `node->uid`/`node->gid` without calling `setattr_fs(node, &attr)`, so ownership changes are never written to disk on `ext2`.
   Basis: traced.
 
-- [ ] **SYS-VFS-003** *(High; partly confirmed)* While a process has a chroot root (`current_process->root_node != NULL`), the VFS lookup routines (`finddir_fs_internal`, `vfs_perso_component`, `vfs_perso_shadow`, and `namei`) shall resolve absolute symlinks against `current_process->root_node`, bypass global `/perso/<name>` shadowing, and preserve the `'/'` separator when expanding mid-path symlinks.
+- [x] **SYS-VFS-003** *(High; partly confirmed)* While a process has a chroot root (`current_process->root_node != NULL`), the VFS lookup routines (`finddir_fs_internal`, `vfs_perso_component`, `vfs_perso_shadow`, and `namei`) shall resolve absolute symlinks against `current_process->root_node`, bypass global `/perso/<name>` shadowing, and preserve the `'/'` separator when expanding mid-path symlinks.
   Evidence: `sys/vfs/vfs.c:909` (`finddir_fs_internal`) and `:1076` (`vfs_perso_component`) resolve `link_target[0] == '/'` against global `fs_root` instead of `current_process->root_node`. `vfs_perso_shadow` (`sys/vfs/vfs.c:957-976`) resolves `/perso/<name>/...` against `fs_root` even when chrooted. In `sys/vfs/vfs_lookup.c:274` (`namei`), `target` and remaining path `p` (after `while (*p == '/') p++;` at `:143`) are concatenated without a `'/'` separator.
   Basis: traced.
 

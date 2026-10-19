@@ -258,8 +258,13 @@ namei(struct nameidata *ndp)
             /*
              * Combine target with remaining path.
              */
+            /* The rest of the path has had its leading '/' skipped, so put
+             * one back between the target and it: "dir" + "file" must not
+             * become "dirfile". */
             size_t rem_len = strlen(p);
-            if (target_len + rem_len >= 1024) {
+            size_t sep = (rem_len > 0 && target_len > 0 &&
+                          target[target_len - 1] != '/') ? 1 : 0;
+            if (target_len + sep + rem_len >= 1024) {
                 if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
                 vrele(ndp->ni_vp);
                 vrele(dp);
@@ -277,7 +282,9 @@ namei(struct nameidata *ndp)
             }
 
             memcpy(new_path, target, target_len);
-            strlcpy(new_path + target_len, p, 1024 - target_len);
+            if (sep)
+                new_path[target_len] = '/';
+            strlcpy(new_path + target_len + sep, p, 1024 - target_len - sep);
             new_path[1023] = '\0';
 
             if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
