@@ -45,7 +45,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest
+     vm86guest thrkill
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -110,8 +110,14 @@ vm86guest: vm86guest.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# thrkill: thr_kill2 follows kill(2)'s permission rule and init's
+# protection.  Run as root.  Substrate only.
+thrkill: thrkill.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart vm86guest
+	      brkfork.linux thrstart vm86guest thrkill
 
 .PHONY: all clean

@@ -187,7 +187,7 @@ SYS-DRV-003 are Critical and not listed.
 
 ## 3. Kernel Core, Syscalls, Process Management & IPC (`sys/kern/`, `sys/pm/`)
 
-- [ ] **SYS-KERN-001** *(Critical; confirmed)* When sending a signal to a thread in another process via `sys_thr_kill2`, the kernel shall verify caller permissions with `signal_can_send(current_process, target_proc)`, enforce PID 1 signal restrictions, and hold `thread_registry_lock()` while iterating `threads[]`.
+- [x] **SYS-KERN-001** *(Critical; confirmed)* When sending a signal to a thread in another process via `sys_thr_kill2`, the kernel shall verify caller permissions with `signal_can_send(current_process, target_proc)`, enforce PID 1 signal restrictions, and hold `thread_registry_lock()` while iterating `threads[]`.
   Evidence: `sys/kern/syscall.c:1661-1678` (`sys_thr_kill2`) looks up `target_proc = proc_find(pid)` and posts `sig` via `signal_post_thread` without calling `signal_can_send` and without checking `target_proc->pid == 1`. Any unprivileged user can send `SIGKILL` to any root process or `init` (PID 1). The `id == -1` loop (`:1667-1671`) also iterates `threads[]` without acquiring `thread_registry_lock()`.
   Basis: traced.
 

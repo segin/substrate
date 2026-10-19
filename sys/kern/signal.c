@@ -1149,6 +1149,15 @@ int signal_sleep_interrupted(void) {
  * (kill) path is best-effort: the signal still posts (the already-queued
  * instances will deliver), and 0 is returned.
  */
+/* Init protection: SIGKILL, SIGTERM and SIGSTOP to pid 1 are dropped
+ * unless it installed a handler for them.  Every path that posts a
+ * signal -- psignal, and the thread-directed thr_kill2 -- asks this. */
+int signal_init_protected(process_t *p, int sig) {
+    if (!p || p->pid != 1) return 0;
+    if (sig != SIGKILL && sig != SIGTERM && sig != SIGSTOP) return 0;
+    return p->sig_actions[sig - 1].sa_handler == SIG_DFL;
+}
+
 static int psignal_info(process_t *p, int sig, int si_code,
                         const union sigval *valp) {
     /* Validate process pointer and signal number */
@@ -1160,13 +1169,8 @@ static int psignal_info(process_t *p, int sig, int si_code,
     }
 
     /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
-    if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
-        // Allow delivery if explicit handler is installed (not SIG_DFL)
-        // Note: SIGKILL/SIGSTOP cannot usually be caught, so they remain blocked here
-        // unless sys_sigaction laws change. SIGTERM can be caught.
-        if (p->sig_actions[sig - 1].sa_handler == SIG_DFL) {
-            return 0;
-        }
+    if (signal_init_protected(p, sig)) {
+        return 0;
     }
 
     /* Handle SIGCONT: Resume stopped process and clear pending stop signals */
@@ -1532,6 +1536,12 @@ static int signal_can_send(process_t *caller, process_t *target) {
            caller->uid == target->euid ||
            caller->euid == target->uid ||
            caller->euid == target->euid;
+}
+
+/* kill(2)'s permission rule, for the calls that post to a thread
+ * directly instead of through psignal (thr_kill2). */
+int signal_permitted(process_t *target) {
+    return signal_can_send(current_process, target);
 }
 
 static void signal_record_match(process_t *target, int *matched, int *permitted,

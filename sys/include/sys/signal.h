@@ -288,6 +288,11 @@ int signal_rt_post(struct process *p, int sig);
 void signal_post_thread(struct thread *t, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
+/* kill(2)'s permission rule: may the current process signal `target`? */
+int signal_permitted(struct process *target);
+/* Whether `sig` to `p` is dropped by init protection (pid 1, SIGKILL,
+ * SIGTERM or SIGSTOP with no handler installed). */
+int signal_init_protected(struct process *p, int sig);
 void sigexit(struct process *p, int sig);
 void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 

@@ -1679,6 +1679,11 @@ int sys_thr_kill2(pid_t pid, abi_long_t id, int sig) {
     if (sig < 0 || sig >= NSIG) return -22;
     process_t *target_proc = (pid == 0) ? current_process : proc_find(pid);
     if (!target_proc) return -3;
+    /* kill(2)'s rules: the caller must be allowed to signal the process,
+     * and init keeps its protection.  This posts straight to the thread,
+     * past psignal, so both are checked here. */
+    if (!signal_permitted(target_proc)) return -EPERM;
+    if (signal_init_protected(target_proc, sig)) return 0;
     if (id == -1) {
         struct thr_kill_ctx c = { target_proc, NULL, sig };
         sched_iterate_threads(thr_kill_visit, &c);
