@@ -352,15 +352,20 @@ void futex_exit_cleanup(void) {
 }
 
 void futex_wake_exited_thread(int *uaddr) {
-    if (!uaddr) return;
+    if (!uaddr || ((uintptr_t)uaddr & (sizeof(int) - 1))) return;
 
     /* We assume the caller is the scheduler and we are still in the pmap
      * of the exiting thread. */
     void *key = futex_get_key((uintptr_t)uaddr);
     if (!key) return;
 
-    /* Write 1 to signify exit */
-    *uaddr = 1;
+    /* Write 1 to signify exit.  The address is whatever the thread gave
+     * set_tid_address or clone, so it is stored with copyout: that refuses
+     * anything outside user space (a kernel address made this a store of
+     * 1 to arbitrary kernel memory) and recovers from a page the thread
+     * may not write.  An address that fails wakes no one. */
+    int exited = 1;
+    if (copyout(&exited, uaddr, sizeof(exited)) != 0) return;
 
     /* Wake all waiters on the per-process private sleepq (futexes key by
      * virtual address scoped to the process — see futex_get_key/sys_futex).

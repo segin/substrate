@@ -97,6 +97,12 @@ brkfork: brkfork.c
 brkfork.linux: brkfork.c
 	gcc -m32 -static -O2 $< -o $@
 
+# tidkern.linux: the exit store set_tid_address arranges never reaches
+# kernel memory.  A static i386 Linux program (set_tid_address is a Linux
+# call); takes the kernel_hostname address of the kernel under test.
+tidkern.linux: tidkern.c
+	gcc -m32 -static -O2 $< -o $@
+
 # thrstart: thr_new with a stack the caller cannot write fails EFAULT
 # instead of panicking, and a thread with no TLS block starts.  Substrate
 # only.
@@ -118,6 +124,6 @@ thrkill: thrkill.c
 
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart vm86guest thrkill
+	      brkfork.linux thrstart vm86guest thrkill tidkern.linux
 
 .PHONY: all clean

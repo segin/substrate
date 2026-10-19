@@ -199,7 +199,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:4053-4063` (`sys_revoke`) resolves `kpath` from `fs_root`, checks no credentials, and passes `(struct tty *)node->ptr` directly to `tty_revoke` without checking `(node->flags & 0x7) == FS_CHARDEVICE` or `tty->magic == TTY_MAGIC`. Calling `revoke("/etc/passwd")` passes an `ext2` inode context pointer as a `struct tty *`.
   Basis: traced.
 
-- [ ] **SYS-KERN-004** *(Critical; confirmed)* When clearing and waking `exit_tid_ptr` in `futex_wake_exited_thread`, the kernel shall write to user memory through `futex_write_user` (`validate_uaddr` + `copyout`) rather than dereferencing `uaddr` directly in Ring 0.
+- [x] **SYS-KERN-004** *(Critical; confirmed)* When clearing and waking `exit_tid_ptr` in `futex_wake_exited_thread`, the kernel shall write to user memory through `futex_write_user` (`validate_uaddr` + `copyout`) rather than dereferencing `uaddr` directly in Ring 0.
   Evidence: `sys/kern/futex.c:380-384` (`sys_set_tid_address`) stores `tidptr` without validation, and `futex_wake_exited_thread` (`sys/kern/futex.c:354-370`) checks only `futex_get_key((uintptr_t)uaddr)` (`pmap_extract`) before executing `*uaddr = 1;` in Ring 0. Because kernel virtual addresses (`>= 0xC0000000` on i386) are mapped in every user `pmap`, `pmap_extract` returns non-zero for kernel addresses and `*uaddr = 1` overwrites arbitrary kernel memory on thread exit.
   Basis: traced.
 
