@@ -323,7 +323,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:1150-1190` dereferences `((fs_node_t *)f->f_data)->length` without a NULL check at line 1179, allows negative `f->f_offset` (which downstream filesystems cast to unsigned `uint32_t`/`size_t`), and declares `int kern_lseek(...)` at line 1188, truncating offsets `>= 2 GiB`.
   Basis: traced.
 
-- [ ] **SYS-VFS-007** *(Medium → High; confirmed)* If file descriptor allocation, `file_t` allocation, or `copyout` fails in `kern_pipe` or `sys_pipe2`, then the kernel shall close all allocated pipe `fs_node_t` endpoints and file descriptors before returning.
+- [x] **SYS-VFS-007** *(Medium → High; confirmed)* If file descriptor allocation, `file_t` allocation, or `copyout` fails in `kern_pipe` or `sys_pipe2`, then the kernel shall close all allocated pipe `fs_node_t` endpoints and file descriptors before returning.
   Evidence: `sys/kern/syscall.c:3351-3407` (`kern_pipe`) leaks `read_node` and `write_node` when `f1 == -1`, `f2 == -1`, or `!rf`, and leaks `write_node` when `!wf`. `sys_pipe2` (`:3488`) returns `-EFAULT` on `copyout` failure without calling `kern_close(kfds[0])` and `kern_close(kfds[1])`.
   Basis: traced.
 

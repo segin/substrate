@@ -3402,10 +3402,19 @@ int sys_sync(void) {
 int sys_pipe(int *fds) {
     int kfds[2];
     int ret = kern_pipe(kfds);
-    if (ret == 0) {
-        if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -14;
+    if (ret == 0 && copyout(kfds, fds, 2 * sizeof(int)) != 0) {
+        /* The caller never learns the descriptors: don't leave them open. */
+        kern_close(kfds[0]);
+        kern_close(kfds[1]);
+        return -EFAULT;
     }
     return ret;
+}
+
+/* Release a pipe end no file holds yet.  pipe_close frees the endpoint,
+ * and the pipe and its buffer once both ends are gone. */
+static void pipe_node_release(fs_node_t *node) {
+    if (node && node->close) node->close(node);
 }
 
 int kern_pipe(int *fds) {
@@ -3413,23 +3422,21 @@ int kern_pipe(int *fds) {
 
     fs_node_t *read_node, *write_node;
     pipe_create(&read_node, &write_node);
+    if (!read_node || !write_node) return -ENOMEM;
 
+    /* Every failure below gives back all it took: the descriptors, the
+     * files, and both pipe ends (and with them the pipe and its buffer). */
     int f1 = proc_alloc_fd(current_process);
-    if (f1 == -1) return -EMFILE;
+    if (f1 == -1) {
+        pipe_node_release(read_node);
+        pipe_node_release(write_node);
+        return -EMFILE;
+    }
     int f2 = proc_alloc_fd(current_process);
     if (f2 == -1) {
-        // No second FD, but we already "allocated" f1.
-        // next_fd was updated. We should probably clear f1 if we can't get both.
-        // However, the previous code also had this potential issue if it only found one.
-        // Actually the previous code checked if both were found.
-        // Let's be safe.
-        // Wait, the previous code didn't actually "allocate" until it found both.
-        // My proc_alloc_fd updates next_fd.
-        // Let's just find both first if possible.
-        // Actually, for simplicity, I'll just use proc_alloc_fd twice.
-        // If the second fails, we should free the first.
-        // Since we didn't set the pointer yet, we just need to clear the bit.
         proc_clear_fd(current_process, f1);
+        pipe_node_release(read_node);
+        pipe_node_release(write_node);
         return -EMFILE;
     }
 
@@ -3437,6 +3444,8 @@ int kern_pipe(int *fds) {
     if (!rf) {
         proc_clear_fd(current_process, f1);
         proc_clear_fd(current_process, f2);
+        pipe_node_release(read_node);
+        pipe_node_release(write_node);
         return -ENOMEM;
     }
     rf->f_data = read_node;
@@ -3447,12 +3456,11 @@ int kern_pipe(int *fds) {
 
     file_t *wf = file_alloc();
     if (!wf) {
-        // rf is already in fds[f1], so proc_clear_fd will close it?
-        // No, proc_clear_fd doesn't call file_close_ptr.
-        // We should close rf.
+        /* Closing rf releases the read end; the write end has no file. */
         file_close_ptr(rf);
         proc_clear_fd(current_process, f1);
         proc_clear_fd(current_process, f2);
+        pipe_node_release(write_node);
         return -ENOMEM;
     }
     wf->f_data = write_node;
@@ -3545,7 +3553,11 @@ int sys_pipe2(int *fds, int flags) {
             if (f->f_data) pipe_set_nonblock((fs_node_t *)f->f_data, 1);
         }
     }
-    if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -EFAULT;
+    if (copyout(kfds, fds, 2 * sizeof(int)) != 0) {
+        kern_close(kfds[0]);
+        kern_close(kfds[1]);
+        return -EFAULT;
+    }
     return 0;
 }
 

@@ -192,6 +192,12 @@ lseekchk: lseekchk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# pipeleak: a pipe() that fails part way, or whose descriptors cannot be
+# copied out, leaves nothing allocated or open.  Runs on the host too.
+pipeleak: pipeleak.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # cowkeep: a page made private by a COW fault keeps its contents across
 # later forks.  Runs on the host too.
 cowkeep: cowkeep.c
