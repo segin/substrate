@@ -376,7 +376,7 @@ SYS-DRV-003 are Critical and not listed.
   4. `sys/fs/fat/fat.c:495` (`fat_readdir`) leaks `dir_buf` on cluster-loop abort, and `:1072` (`fat_mount`) sets `fs->fat_table = NULL` without calling `kfree`.
   Basis: traced.
 
-- [ ] **SYS-FS-007** *(High; partly confirmed)* When `procfs` nodes are opened, read, or reclaimed in `sys/fs/procfs.c`, the driver shall reference-count `procfs_pid_nodes_t` across open file descriptors, avoid mutating shared static `proc_task_tid_*_node` and `nodes->fd_link` structs in place, redact `WaitChan` in `/proc/<pid>/task/<tid>/status` when `!proc_may_inspect(p)`, and reject negative offsets in `proc_pid_stat_read` and `proc_pid_cmdline_read`.
+- [x] **SYS-FS-007** *(High; partly confirmed)* When `procfs` nodes are opened, read, or reclaimed in `sys/fs/procfs.c`, the driver shall reference-count `procfs_pid_nodes_t` across open file descriptors, avoid mutating shared static `proc_task_tid_*_node` and `nodes->fd_link` structs in place, redact `WaitChan` in `/proc/<pid>/task/<tid>/status` when `!proc_may_inspect(p)`, and reject negative offsets in `proc_pid_stat_read` and `proc_pid_cmdline_read`.
   Evidence:
   1. `sys/fs/procfs.c:874-895` (`procfs_release_pid_nodes`) calls `kfree(nodes, sizeof(*nodes))` during `wait_reap()` while open `file_t` descriptors may still hold pointers to `&nodes->status`, `&nodes->maps`, etc. (use-after-free).
   2. `sys/fs/procfs.c:1631-1634, 1753-1817` (`proc_task_tid_*_node`) and `:1464-1475` (`nodes->fd_link`) overwrite singleton `fs_node_t` structures in place on every lookup.

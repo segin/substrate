@@ -525,6 +525,35 @@ static fs_node_t procfs_driver_nodes[PROCFS_MAX_DRIVER_ENTRIES];
 static fs_node_t procfs_self_node;
 static size_t procfs_driver_entry_count = 0;
 
+/*
+ * Nodes made per open fd (/proc/<pid>/fd/<n>) and per thread
+ * (/proc/<pid>/task/<tid> and its files).  These used to be one scratch
+ * node per pid for fds, and four static nodes shared by every process for
+ * threads, rewritten on each lookup: a file held open on one thread's
+ * status went on to read whichever thread was looked up next.  Now each
+ * fd or tid has its own entry, kept with its pid's nodes.  An entry is
+ * never freed before its pid's nodes are, since a path walk may hold a
+ * node without opening it; past PROCFS_DYN_KEEP of a kind, one nobody has
+ * open is rewritten for the next instead (staleness, not a dangling
+ * pointer, for a walk that was holding it).
+ */
+#define PROCFS_DYN_FD   1
+#define PROCFS_DYN_TID  2
+
+/* For a TID entry: */
+#define PROCFS_TID_DIR     0
+#define PROCFS_TID_COMM    1
+#define PROCFS_TID_STATUS  2
+#define PROCFS_TID_STAT    3
+
+typedef struct procfs_dyn {
+    struct procfs_dyn *next;
+    int kind;               /* PROCFS_DYN_FD or PROCFS_DYN_TID */
+    int key;                /* the fd, or the tid */
+    int refs;               /* open_fs holds on these nodes */
+    fs_node_t node[4];      /* FD: [0] the link; TID: PROCFS_TID_* */
+} procfs_dyn_t;
+
 typedef struct procfs_pid_nodes {
     int pid;
     fs_node_t dir;
@@ -535,14 +564,19 @@ typedef struct procfs_pid_nodes {
     fs_node_t exe;
     fs_node_t cwd;
     fs_node_t fd_dir;
-    /* Only OPEN fds are ever exposed under /proc/<pid>/fd, so we don't
-     * pre-allocate a node per possible fd (a MAX_FD-sized array would be
-     * over a megabyte per pid).  finddir repopulates this single symlink
-     * node for whichever open fd is being looked up. */
-    fs_node_t fd_link;
     fs_node_t task_dir;
+    procfs_dyn_t *dyn;      /* per-fd and per-thread nodes */
+    /*
+     * open_fs holds on any of these nodes (open files, working
+     * directories).  The block used to be freed when its process was
+     * reaped, under whatever still held it open; now a reaped block with
+     * holders waits on procfs_dead_nodes for its last close.
+     */
+    int refs;
+    struct procfs_pid_nodes *next_dead;
 } procfs_pid_nodes_t;
 
+static procfs_pid_nodes_t *procfs_dead_nodes = NULL;
 static procfs_pid_nodes_t **procfs_pid_nodes = NULL;
 static size_t procfs_pid_nodes_count = 0;
 static size_t procfs_pid_nodes_capacity = 0;
@@ -591,6 +625,153 @@ int procfs_register_entry(const char *name, procfs_entry_generator_t generator, 
     return 0;
 }
 
+static void procfs_node_open(fs_node_t *node);
+static void procfs_node_close(fs_node_t *node);
+
+static void procfs_lock(void) {
+    if (!procfs_pid_nodes_lock_init) {
+        spinlock_init(&procfs_pid_nodes_lock, "procfs_pid");
+        procfs_pid_nodes_lock_init = 1;
+    }
+    spinlock_acquire(&procfs_pid_nodes_lock);
+}
+
+static int procfs_node_in(const fs_node_t *node, const void *obj, size_t size) {
+    return (uintptr_t)node >= (uintptr_t)obj &&
+           (uintptr_t)node < (uintptr_t)obj + size;
+}
+
+/* The block (and entry, if any) a node lives in; the caller holds the lock. */
+static procfs_pid_nodes_t *procfs_owner_locked(const fs_node_t *node,
+                                               procfs_dyn_t **dyn_out) {
+    *dyn_out = NULL;
+    for (int pass = 0; pass < 2; pass++) {
+        procfs_pid_nodes_t *blk = NULL;
+        size_t i = 0;
+
+        for (;;) {
+            if (pass == 0) {
+                if (i >= procfs_pid_nodes_count) break;
+                blk = procfs_pid_nodes[i++];
+                if (!blk) continue;
+            } else {
+                blk = blk ? blk->next_dead : procfs_dead_nodes;
+                if (!blk) break;
+            }
+            if (procfs_node_in(node, blk, sizeof(*blk))) return blk;
+            for (procfs_dyn_t *d = blk->dyn; d; d = d->next) {
+                if (procfs_node_in(node, d, sizeof(*d))) {
+                    *dyn_out = d;
+                    return blk;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+static void procfs_free_block(procfs_pid_nodes_t *blk) {
+    procfs_dyn_t *d = blk->dyn;
+
+    while (d) {
+        procfs_dyn_t *next = d->next;
+        kfree(d, sizeof(*d));
+        d = next;
+    }
+    kfree(blk, sizeof(*blk));
+}
+
+static void procfs_node_open(fs_node_t *node) {
+    procfs_dyn_t *d;
+    procfs_pid_nodes_t *blk;
+
+    procfs_lock();
+    blk = procfs_owner_locked(node, &d);
+    if (blk) {
+        blk->refs++;
+        if (d) d->refs++;
+    }
+    spinlock_release(&procfs_pid_nodes_lock);
+}
+
+static void procfs_node_close(fs_node_t *node) {
+    procfs_dyn_t *d;
+    procfs_pid_nodes_t *blk, *dead = NULL;
+
+    procfs_lock();
+    blk = procfs_owner_locked(node, &d);
+    if (blk) {
+        if (d && d->refs > 0) d->refs--;
+        if (blk->refs > 0) blk->refs--;
+        if (blk->refs == 0) {
+            /* Reaped and now closed for the last time: free it. */
+            for (procfs_pid_nodes_t **pp = &procfs_dead_nodes; *pp;
+                 pp = &(*pp)->next_dead) {
+                if (*pp == blk) {
+                    *pp = blk->next_dead;
+                    dead = blk;
+                    break;
+                }
+            }
+        }
+    }
+    spinlock_release(&procfs_pid_nodes_lock);
+    if (dead) procfs_free_block(dead);
+}
+
+/* Give a procfs node the open/close that pin its block. */
+static void procfs_pin_ops(fs_node_t *node) {
+    node->open = &procfs_node_open;
+    node->close = &procfs_node_close;
+}
+
+/* Entries of one kind a process keeps before reusing one nobody holds. */
+#define PROCFS_DYN_KEEP 32
+
+/*
+ * The entry for (kind, key) in `blk`: the existing one, else a new one,
+ * else -- once PROCFS_DYN_KEEP of the kind exist -- one nobody has open,
+ * rewritten.  `spare` is a zeroed entry the caller allocated outside the
+ * lock; it is used for a new one and set to NULL if so.  NULL if there is
+ * neither.  The lock is held.
+ */
+static procfs_dyn_t *procfs_dyn_get_locked(procfs_pid_nodes_t *blk, int kind,
+                                           int key, procfs_dyn_t **spare) {
+    procfs_dyn_t *reuse = NULL;
+    int count = 0;
+
+    for (procfs_dyn_t *d = blk->dyn; d; d = d->next) {
+        if (d->kind != kind) continue;
+        if (d->key == key) return d;
+        count++;
+        if (!reuse && d->refs == 0) reuse = d;
+    }
+    if (count < PROCFS_DYN_KEEP && *spare) reuse = NULL;
+    if (reuse) {
+        procfs_dyn_t *next = reuse->next;
+
+        memset(reuse, 0, sizeof(*reuse));
+        reuse->next = next;
+    } else {
+        if (!*spare) return NULL;
+        reuse = *spare;
+        *spare = NULL;
+        reuse->next = blk->dyn;
+        blk->dyn = reuse;
+    }
+    reuse->kind = kind;
+    reuse->key = key;
+    return reuse;
+}
+
+/* Is `blk` still in the table (its process not yet reaped)?  Lock held. */
+static int procfs_block_live_locked(const procfs_pid_nodes_t *blk) {
+    for (size_t i = 0; i < procfs_pid_nodes_count; i++)
+        if (procfs_pid_nodes[i] == blk) return 1;
+    return 0;
+}
+
+
 static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     procfs_pid_nodes_t **new_nodes;
     procfs_pid_nodes_t *nodes;
@@ -605,11 +786,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
         return NULL;
     }
 
-    if (!procfs_pid_nodes_lock_init) {
-        spinlock_init(&procfs_pid_nodes_lock, "procfs_pid");
-        procfs_pid_nodes_lock_init = 1;
-    }
-    spinlock_acquire(&procfs_pid_nodes_lock);
+    procfs_lock();
 
     for (size_t i = 0; i < procfs_pid_nodes_count; i++) {
         if (procfs_pid_nodes[i] && procfs_pid_nodes[i]->pid == pid) {
@@ -722,6 +899,14 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     nodes->task_dir.readdir = &proc_pid_task_readdir;
     nodes->task_dir.finddir = &proc_pid_task_finddir;
     procfs_refresh_timestamps(&nodes->task_dir);
+
+    {
+        fs_node_t *all[] = { &nodes->dir, &nodes->status, &nodes->cmdline,
+                             &nodes->stat, &nodes->maps, &nodes->exe,
+                             &nodes->cwd, &nodes->fd_dir, &nodes->task_dir };
+        for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++)
+            procfs_pin_ops(all[i]);
+    }
 
     spinlock_release(&procfs_pid_nodes_lock);
     return nodes;
@@ -886,8 +1071,16 @@ void procfs_release_pid_nodes(int pid) {
             procfs_pid_nodes[i] = procfs_pid_nodes[procfs_pid_nodes_count - 1];
             procfs_pid_nodes[procfs_pid_nodes_count - 1] = NULL;
             procfs_pid_nodes_count--;
+            /* Still open somewhere (a file, a working directory): its
+             * last close frees it.  Freeing it here left those holders
+             * with freed nodes. */
+            if (nodes->refs > 0) {
+                nodes->next_dead = procfs_dead_nodes;
+                procfs_dead_nodes = nodes;
+                nodes = NULL;
+            }
             spinlock_release(&procfs_pid_nodes_lock);
-            kfree(nodes, sizeof(*nodes));
+            if (nodes) procfs_free_block(nodes);
             return;
         }
     }
@@ -1232,7 +1425,7 @@ static int proc_generate_stat(char *b, size_t s, process_t *proc) {
 static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = proc_find(pid);
-    if (!p) return 0;
+    if (!p || offset < 0) return 0;
 
     char tmp[512];
     int len = proc_generate_stat(tmp, sizeof(tmp), p);
@@ -1270,7 +1463,7 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
     char cmdline[PROC_CMDLINE_MAX];
     size_t total_len;
 
-    if (!p) return 0;
+    if (!p || offset < 0) return 0;
     /* The live-argv path below reads the target's address space
      * with pmap_copyin_other.  That is a cross-process memory read and needs
      * the same permission as attaching to it. */
@@ -1461,18 +1654,31 @@ static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
         return NULL;
     }
 
-    /* Repopulate the single reusable symlink node for this fd. */
-    memset(&nodes->fd_link, 0, sizeof(nodes->fd_link));
-    snprintf(nodes->fd_link.name, sizeof(nodes->fd_link.name), "%d", fd);
-    nodes->fd_link.flags = FS_SYMLINK;
-    nodes->fd_link.mask = 0700;
-    nodes->fd_link.uid = p->uid;
-    nodes->fd_link.gid = p->gid;
-    nodes->fd_link.inode = node->inode;
-    nodes->fd_link.impl = (uintptr_t)fd;
-    nodes->fd_link.readlink = &proc_pid_fd_readlink;
-    procfs_refresh_timestamps(&nodes->fd_link);
-    return &nodes->fd_link;
+    /* This fd's own link node (see procfs_dyn_t). */
+    procfs_dyn_t *spare = kmalloc(sizeof(*spare));
+    procfs_dyn_t *d = NULL;
+    fs_node_t *link = NULL;
+
+    if (spare) memset(spare, 0, sizeof(*spare));
+    procfs_lock();
+    if (procfs_block_live_locked(nodes))
+        d = procfs_dyn_get_locked(nodes, PROCFS_DYN_FD, fd, &spare);
+    if (d) {
+        link = &d->node[0];
+        snprintf(link->name, sizeof(link->name), "%d", fd);
+        link->flags = FS_SYMLINK;
+        link->mask = 0700;
+        link->uid = p->uid;
+        link->gid = p->gid;
+        link->inode = node->inode;
+        link->impl = (uintptr_t)fd;
+        link->readlink = &proc_pid_fd_readlink;
+        procfs_pin_ops(link);
+        procfs_refresh_timestamps(link);
+    }
+    spinlock_release(&procfs_pid_nodes_lock);
+    if (spare) kfree(spare, sizeof(*spare));
+    return link;
 }
 
 /* Root /proc directory operations */
@@ -1619,19 +1825,57 @@ static fs_node_t *procfs_mount(const char *device, uint32_t flags, void *data) {
  *   /proc/<pid>/task/<tid>/status      multi-line key:value status
  *   /proc/<pid>/task/<tid>/stat        Linux-style /proc/<pid>/stat line
  *
- * Thread identity is encoded into the static per-tid nodes as
+ * Thread identity is encoded into each thread's nodes as
  *   inode = pid    (so proc_find still works)
  *   impl  = tid    (consumed by the read callbacks).
- *
- * Like other procfs subtrees, lookups use shared static node
- * scratch space; concurrent readdir/finddir from multiple threads
- * already share proc_dirent globally, so no new race is introduced.
+ * The nodes are the thread's own (procfs_tid_node), not shared scratch.
  * ============================================================ */
 
-static fs_node_t proc_task_tid_dir_node;
-static fs_node_t proc_task_tid_comm_node;
-static fs_node_t proc_task_tid_status_node;
-static fs_node_t proc_task_tid_stat_node;
+/*
+ * Node `which` (PROCFS_TID_*) of thread `tid` of `pid`, in that thread's
+ * own entry (see procfs_dyn_t).  These were four static nodes shared by
+ * every process and rewritten on each lookup.
+ */
+static fs_node_t *procfs_tid_node(int pid, int tid, int which) {
+    static const char *const names[] = { "", "comm", "status", "stat" };
+    process_t *p = proc_find(pid);
+    procfs_pid_nodes_t *nodes = procfs_get_pid_nodes(pid);
+    procfs_dyn_t *spare, *d = NULL;
+    fs_node_t *n = NULL;
+
+    if (!p || !nodes) return NULL;
+    spare = kmalloc(sizeof(*spare));
+    if (spare) memset(spare, 0, sizeof(*spare));
+    procfs_lock();
+    if (procfs_block_live_locked(nodes))
+        d = procfs_dyn_get_locked(nodes, PROCFS_DYN_TID, tid, &spare);
+    if (d) {
+        n = &d->node[which];
+        if (which == PROCFS_TID_DIR) {
+            snprintf(n->name, sizeof(n->name), "%d", tid);
+            n->flags = FS_DIRECTORY;
+            n->mask = 0555;
+            n->readdir = &proc_pid_task_tid_readdir;
+            n->finddir = &proc_pid_task_tid_finddir;
+        } else {
+            strlcpy(n->name, names[which], sizeof(n->name));
+            n->flags = FS_FILE;
+            n->mask = 0444;
+            n->read = which == PROCFS_TID_COMM ? &proc_pid_task_comm_read
+                    : which == PROCFS_TID_STATUS ? &proc_pid_task_status_read
+                    : &proc_pid_task_stat_read;
+        }
+        n->uid = p->uid;
+        n->gid = p->gid;
+        n->inode = (uint64_t)pid;
+        n->impl = (uintptr_t)tid;
+        procfs_pin_ops(n);
+        procfs_refresh_timestamps(n);
+    }
+    spinlock_release(&procfs_pid_nodes_lock);
+    if (spare) kfree(spare, sizeof(*spare));
+    return n;
+}
 
 struct procfs_task_index {
     int       pid;
@@ -1749,21 +1993,7 @@ static fs_node_t *proc_pid_task_finddir(fs_node_t *node, char *name) {
     sched_iterate_threads(procfs_tid_lookup_visit, &l);
     if (!l.found) return NULL;
 
-    process_t *p = proc_find(pid);
-    memset(&proc_task_tid_dir_node, 0, sizeof(proc_task_tid_dir_node));
-    snprintf(proc_task_tid_dir_node.name, sizeof(proc_task_tid_dir_node.name), "%d", tid);
-    proc_task_tid_dir_node.flags = FS_DIRECTORY;
-    proc_task_tid_dir_node.mask = 0555;
-    if (p) {
-        proc_task_tid_dir_node.uid = p->uid;
-        proc_task_tid_dir_node.gid = p->gid;
-    }
-    proc_task_tid_dir_node.inode = pid;
-    proc_task_tid_dir_node.impl  = (uintptr_t)tid;
-    proc_task_tid_dir_node.readdir = &proc_pid_task_tid_readdir;
-    proc_task_tid_dir_node.finddir = &proc_pid_task_tid_finddir;
-    procfs_refresh_timestamps(&proc_task_tid_dir_node);
-    return &proc_task_tid_dir_node;
+    return procfs_tid_node(pid, tid, PROCFS_TID_DIR);
 }
 
 static struct dirent *proc_pid_task_tid_readdir(fs_node_t *node, uint64_t index) {
@@ -1788,32 +2018,17 @@ static fs_node_t *proc_pid_task_tid_finddir(fs_node_t *node, char *name) {
         return &nodes->task_dir;
     }
 
-    fs_node_t *out = NULL;
+    int which;
     if (strcmp(name, "comm") == 0) {
-        out = &proc_task_tid_comm_node;
-        memset(out, 0, sizeof(*out));
-        strlcpy(out->name, "comm", sizeof(out->name));
-        out->read = &proc_pid_task_comm_read;
+        which = PROCFS_TID_COMM;
     } else if (strcmp(name, "status") == 0) {
-        out = &proc_task_tid_status_node;
-        memset(out, 0, sizeof(*out));
-        strlcpy(out->name, "status", sizeof(out->name));
-        out->read = &proc_pid_task_status_read;
+        which = PROCFS_TID_STATUS;
     } else if (strcmp(name, "stat") == 0) {
-        out = &proc_task_tid_stat_node;
-        memset(out, 0, sizeof(*out));
-        strlcpy(out->name, "stat", sizeof(out->name));
-        out->read = &proc_pid_task_stat_read;
+        which = PROCFS_TID_STAT;
     } else {
         return NULL;
     }
-
-    out->flags = FS_FILE;
-    out->mask  = 0444;
-    out->inode = node->inode;
-    out->impl  = node->impl;
-    procfs_refresh_timestamps(out);
-    return out;
+    return procfs_tid_node((int)node->inode, (int)node->impl, which);
 }
 
 /* Common helper: collect a thread snapshot and return -1 if not found. */
@@ -1850,6 +2065,12 @@ static size_t proc_pid_task_comm_read(fs_node_t *node, off_t offset, size_t size
 static size_t proc_pid_task_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     struct procfs_tid_lookup l;
     if (procfs_task_collect(node, &l) < 0) return 0;
+    /* The file is world-readable, and WaitChan is a kernel address: show
+     * it only to those who may inspect the process (cf. maps, mode 0400). */
+    {
+        process_t *p = proc_find(l.pid);
+        if (!p || !proc_may_inspect(p)) l.wait_chan = 0;
+    }
     char buf[512];
     /* The values line up in one column at the second tab stop: a label
      * shorter than a tab stop is followed by two tabs, a longer one by
