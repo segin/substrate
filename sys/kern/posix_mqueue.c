@@ -15,12 +15,20 @@
  *                           once the last descriptor closes and the name has
  *                           been unlinked.
  *
- *   mqdescs[MQ_DESC_MAX]  — the open descriptors.  mq_open() returns an
- *                           opaque mqd_t = seq*MQ_DESC_MAX + index (so a
- *                           stale, closed-and-reused descriptor is rejected
- *                           with EBADF).  The per-open O_NONBLOCK flag and
- *                           access mode live here, matching POSIX's
- *                           per-description mq_flags.
+ *   mqdescs[MQ_DESC_MAX]  — the open queue descriptions.  The per-open
+ *                           O_NONBLOCK flag and access mode live here,
+ *                           matching POSIX's per-description mq_flags.  A
+ *                           description is shared by every process that
+ *                           inherited it across fork() and counted by them.
+ *
+ *   mqhandles[MQ_HANDLE_MAX] — the per-process descriptors: (pid, mqd_t)
+ *                           -> description.  mq_open() returns an opaque
+ *                           mqd_t = seq*MQ_HANDLE_MAX + index (so a stale,
+ *                           closed-and-reused descriptor is rejected with
+ *                           EBADF); fork() copies the parent's handles to
+ *                           the child under the same values.  A lookup only
+ *                           matches the caller's own handles, so one process
+ *                           cannot use, or close, another's mqd_t.
  *
  * Blocking send/receive uses the same interruptible-sleepq idiom as pipe.c:
  * register on the queue's wait channel, arm a fallback deadline (plus the
@@ -91,15 +99,23 @@ struct mqueue {
 
 struct mqdesc {
     int            in_use;
-    unsigned short seq;          /* bumped each (re)allocation of this slot */
+    unsigned       refs;         /* handles referring to this description */
     int            qindex;       /* queue slot this descriptor refers to */
     unsigned short qseq;         /* queue's seq at open time */
     int            oflag;        /* O_RDONLY/O_WRONLY/O_RDWR | O_NONBLOCK */
-    int            pid;          /* owning pid (for proc-exit cleanup) */
+};
+
+struct mqhandle {
+    int            in_use;
+    unsigned short seq;          /* bumped each (re)allocation of this slot */
+    int            pid;          /* the process this mqd_t belongs to */
+    int            mqd;          /* the mqd_t value that process sees */
+    int            dindex;       /* the open description it refers to */
 };
 
 static struct mqueue mqueues[MQ_OPEN_MAX];
 static struct mqdesc mqdescs[MQ_DESC_MAX];
+static struct mqhandle mqhandles[MQ_HANDLE_MAX];
 static mutex_t mq_lock;
 static int     mq_ready;
 
@@ -121,18 +137,32 @@ static void mq_lazy_init(void)
 
 static int mqd_make(int index, unsigned short seq)
 {
-    return (int)seq * MQ_DESC_MAX + index;
+    return (int)seq * MQ_HANDLE_MAX + index;
+}
+
+static int mq_cur_pid(void)
+{
+    return current_process ? current_process->pid : 0;
+}
+
+/* The caller's handle for mqd, or NULL. */
+static struct mqhandle *mqh_find(int pid, int mqd)
+{
+    if (mqd < 0)
+        return NULL;
+    for (int i = 0; i < MQ_HANDLE_MAX; i++) {
+        struct mqhandle *h = &mqhandles[i];
+        if (h->in_use && h->pid == pid && h->mqd == mqd)
+            return h;
+    }
+    return NULL;
 }
 
 static struct mqdesc *mqd_lookup(int mqd, int *err)
 {
-    if (mqd < 0) { *err = EBADF; return NULL; }
-    int index = mqd % MQ_DESC_MAX;
-    unsigned short seq = (unsigned short)(mqd / MQ_DESC_MAX);
-    struct mqdesc *d = &mqdescs[index];
-    if (!d->in_use)   { *err = EBADF; return NULL; }
-    if (d->seq != seq) { *err = EBADF; return NULL; }
-    return d;
+    struct mqhandle *h = mqh_find(mq_cur_pid(), mqd);
+    if (!h) { *err = EBADF; return NULL; }
+    return &mqdescs[h->dindex];
 }
 
 /* Resolve the queue a descriptor refers to.  NULL if the queue is gone. */
@@ -191,6 +221,23 @@ static void mq_queue_unref(struct mqueue *q)
         q->refs--;
     if (q->refs == 0 && q->unlinked)
         mq_free_queue(q);
+}
+
+/* Release a handle; the last handle on a description closes it and drops
+ * its queue reference (caller holds mq_lock). */
+static void mqh_release(struct mqhandle *h)
+{
+    struct mqdesc *d = &mqdescs[h->dindex];
+    h->in_use = 0;
+    h->seq++;                    /* invalidate this mqd */
+    if (d->refs > 0)
+        d->refs--;
+    if (d->refs == 0) {
+        struct mqueue *q = mq_from_desc(d);
+        d->in_use = 0;
+        if (q)
+            mq_queue_unref(q);
+    }
 }
 
 /* Distinct wait channels per queue and direction, so a blocked sender and a
@@ -361,11 +408,13 @@ int kern_mq_open(const char *name, int oflag, mode_t mode,
         created = 1;
     }
 
-    /* Allocate a descriptor. */
-    int free_d = -1;
+    /* Allocate an open description and the caller's handle for it. */
+    int free_d = -1, free_h = -1;
     for (int i = 0; i < MQ_DESC_MAX; i++)
         if (!mqdescs[i].in_use) { free_d = i; break; }
-    if (free_d < 0) {
+    for (int i = 0; i < MQ_HANDLE_MAX; i++)
+        if (!mqhandles[i].in_use) { free_h = i; break; }
+    if (free_d < 0 || free_h < 0) {
         /* No descriptor free.  Roll back a queue we created this call. */
         if (created)
             mq_free_queue(q);
@@ -374,17 +423,26 @@ int kern_mq_open(const char *name, int oflag, mode_t mode,
     }
 
     struct mqdesc *d = &mqdescs[free_d];
-    unsigned short dseq = d->seq;
     memset(d, 0, sizeof(*d));
-    d->seq    = dseq;
     d->in_use = 1;
+    d->refs   = 1;
     d->qindex = (int)(q - mqueues);
     d->qseq   = q->seq;
     d->oflag  = (accmode) | (oflag & O_NONBLOCK);
-    d->pid    = current_process ? current_process->pid : 0;
     q->refs++;
 
-    int mqd = mqd_make(free_d, d->seq);
+    /* A handle inherited across fork() keeps the value its slot had in
+     * the parent, so skip a value this process already holds. */
+    int pid = mq_cur_pid();
+    struct mqhandle *h = &mqhandles[free_h];
+    while (mqh_find(pid, mqd_make(free_h, h->seq)))
+        h->seq++;
+    h->in_use = 1;
+    h->pid    = pid;
+    h->mqd    = mqd_make(free_h, h->seq);
+    h->dindex = free_d;
+
+    int mqd = h->mqd;
     mutex_unlock(&mq_lock);
     return mqd;
 }
@@ -430,19 +488,15 @@ int kern_mq_close(int mqd)
 {
     mq_lazy_init();
     mutex_lock(&mq_lock);
-    int err = 0;
-    struct mqdesc *d = mqd_lookup(mqd, &err);
-    if (!d) { mutex_unlock(&mq_lock); return -err; }
-    struct mqueue *q = mq_from_desc(d);
+    struct mqhandle *h = mqh_find(mq_cur_pid(), mqd);
+    if (!h) { mutex_unlock(&mq_lock); return -EBADF; }
+    struct mqueue *q = mq_from_desc(&mqdescs[h->dindex]);
     /* If this descriptor held the notify registration, clear it. */
     if (q && q->notify.active && q->notify.pid ==
         (current_process ? current_process->pid : -1)) {
         memset(&q->notify, 0, sizeof(q->notify));
     }
-    d->in_use = 0;
-    d->seq++;                    /* invalidate this mqd */
-    if (q)
-        mq_queue_unref(q);
+    mqh_release(h);
     mutex_unlock(&mq_lock);
     return 0;
 }
@@ -763,17 +817,53 @@ void mq_proc_cleanup(int pid)
             memset(&q->notify, 0, sizeof(q->notify));
     }
     /* Close descriptors owned by this pid. */
-    for (int i = 0; i < MQ_DESC_MAX; i++) {
-        struct mqdesc *d = &mqdescs[i];
-        if (d->in_use && d->pid == pid) {
-            struct mqueue *q = mq_from_desc(d);
-            d->in_use = 0;
-            d->seq++;
-            if (q)
-                mq_queue_unref(q);
-        }
+    for (int i = 0; i < MQ_HANDLE_MAX; i++) {
+        struct mqhandle *h = &mqhandles[i];
+        if (h->in_use && h->pid == pid)
+            mqh_release(h);
     }
     mutex_unlock(&mq_lock);
+}
+
+/*
+ * fork(): the child gets a handle for each of the parent's descriptors,
+ * under the same mqd_t value and sharing the open description (so its
+ * O_NONBLOCK flag is shared, as POSIX requires).  Fails with -EAGAIN,
+ * having given the child nothing, if the handle table is full.
+ */
+int mq_proc_fork(int parent_pid, int child_pid)
+{
+    if (!mq_ready)
+        return 0;
+    mutex_lock(&mq_lock);
+    int need = 0, avail = 0;
+    for (int i = 0; i < MQ_HANDLE_MAX; i++) {
+        if (!mqhandles[i].in_use)
+            avail++;
+        else if (mqhandles[i].pid == parent_pid)
+            need++;
+    }
+    if (need > avail) {
+        mutex_unlock(&mq_lock);
+        return -EAGAIN;
+    }
+    int next = 0;
+    for (int i = 0; i < MQ_HANDLE_MAX && need > 0; i++) {
+        struct mqhandle *ph = &mqhandles[i];
+        if (!ph->in_use || ph->pid != parent_pid)
+            continue;
+        while (mqhandles[next].in_use)
+            next++;
+        struct mqhandle *ch = &mqhandles[next];
+        ch->in_use = 1;
+        ch->pid    = child_pid;
+        ch->mqd    = ph->mqd;
+        ch->dindex = ph->dindex;
+        mqdescs[ph->dindex].refs++;
+        need--;
+    }
+    mutex_unlock(&mq_lock);
+    return 0;
 }
 
 /* ---- native-ABI syscall wrappers ---- */

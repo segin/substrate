@@ -60,6 +60,14 @@ a NULL
 .I attr
 selects the kernel defaults.  The descriptor encodes a slot index and a
 sequence number so a stale (closed and reused) descriptor is rejected.
+A descriptor belongs to the process that opened it: another process using
+the same value gets
+.BR EBADF .
+.BR fork (2)
+gives the child the parent's descriptors under the same values, sharing
+each open description (and so its
+.B O_NONBLOCK
+flag) with the parent.
 .PP
 .B SYS_MQ_CLOSE
 releases the descriptor's reference; the queue is destroyed once its last
@@ -119,7 +127,8 @@ The caller lacks permission for the queue.
 A non-blocking send/receive could not proceed (queue full/empty).
 .TP
 .B EBADF
-The descriptor is invalid or not open in the required direction.
+The descriptor is invalid, is not one the calling process opened or
+inherited, or is not open in the required direction.
 .TP
 .B EEXIST
 .B O_CREAT | O_EXCL

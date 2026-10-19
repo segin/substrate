@@ -24,7 +24,7 @@ LIBS = -Wl,--start-group \
        -L$(TOP)/lib/sys -l:libsys.a \
        -Wl,--end-group $(LIBGCC)
 
-all: mqtest
+all: mqtest mqforeign
 
 mqtest: mqtest.o
 	$(CC) $(LDFLAGS) -o $@ mqtest.o $(CRT0) $(LIBS)
@@ -33,7 +33,16 @@ mqtest: mqtest.o
 mqtest.o: mqtest.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# mqforeign: a process can only use the mq descriptors it opened or
+# inherited across fork().
+mqforeign: mqforeign.o
+	$(CC) $(LDFLAGS) -o $@ mqforeign.o $(CRT0) $(LIBS)
+	$(call BRAND_SUBSTRATE,$@)
+
+mqforeign.o: mqforeign.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
-	rm -f mqtest mqtest.o
+	rm -f mqtest mqtest.o mqforeign mqforeign.o
 
 .PHONY: all clean

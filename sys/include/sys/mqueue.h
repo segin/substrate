@@ -39,7 +39,8 @@ ABI32_ASSERT_SIZE(struct mq_attr, 16);
 /* Implementation limits.  Values follow FreeBSD's mqueuefs (the BSD way):
  * MQ_PRIO_MAX 64, and the kern.mqueue.maxmsg / maxmsgsize defaults. */
 #define MQ_OPEN_MAX      16      /* max message queues system-wide */
-#define MQ_DESC_MAX      64      /* max open descriptors system-wide */
+#define MQ_DESC_MAX      64      /* max open queue descriptions system-wide */
+#define MQ_HANDLE_MAX    256     /* max per-process mqd_t handles system-wide */
 #define MQ_PRIO_MAX      64      /* priorities 0 .. MQ_PRIO_MAX-1 (FreeBSD) */
 #define MQ_NAME_MAX      255     /* max characters in a queue name */
 #define MQ_MAXMSG_LIMIT  100     /* ceiling for mq_maxmsg (FreeBSD kern.mqueue.maxmsg) */
@@ -87,6 +88,8 @@ int  kern_mq_setattr(int mqd, const struct mq_attr *newattr,
 
 /* Close descriptors + drop notify registration at process exit. */
 void mq_proc_cleanup(int pid);
+/* Give a forked child the parent's descriptors (same mqd_t values). */
+int  mq_proc_fork(int parent_pid, int child_pid);
 
 void mq_init(void);
 

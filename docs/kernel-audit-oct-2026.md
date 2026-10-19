@@ -211,7 +211,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:2081-2126` (`setreuid_ids`, `setregid_ids`) computes `int ruid_changed = (ruid != -1 && new_ruid != p->uid);`. When a setuid-root process (`uid = 1000, euid = 0, suid = 0`) calls `setreuid(1000, 1000)` to drop privileges, `new_ruid != p->uid` is false and `new_euid != p->uid` is false, leaving `p->suid = 0` so the process can later regain root via `seteuid(0)`.
   Basis: traced.
 
-- [ ] **SYS-KERN-007** *(High; confirmed)* When looking up a POSIX message queue descriptor in `mqd_lookup`, the kernel shall verify that `d->pid == current_process->pid`.
+- [x] **SYS-KERN-007** *(High; confirmed)* When looking up a POSIX message queue descriptor in `mqd_lookup`, the kernel shall verify that `d->pid == current_process->pid`.
   Evidence: `sys/kern/posix_mqueue.c:127-136` (`mqd_lookup`) indexes the global `mqdescs[]` table and verifies `d->in_use` and `d->seq == seq`, but never checks `d->pid == current_process->pid` (recorded at `:384`), allowing any process to read, write, modify, or close another process's `mqd_t`.
   Basis: traced.
 
