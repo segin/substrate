@@ -13,6 +13,9 @@
 #define FAT_ATTR_ARCHIVE   0x20
 #define FAT_ATTR_LFN       0x0F
 
+/* The directory entry's size field is 32 bits. */
+#define FAT_MAX_FILE_SIZE  0xFFFFFFFFULL
+
 // BIOS Parameter Block (common to all FAT variants)
 typedef struct {
     uint8_t  jmp[3];

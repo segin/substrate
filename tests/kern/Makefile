@@ -212,6 +212,13 @@ aoutstack: aoutstack.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# fatops: on a FAT mount, an empty file truncated larger reads zeros, a
+# case-only rename keeps the file, and a write at 4 GiB does not wrap to 0.
+# Run as `fatops <dir on FAT>`, then fsck.fat -n the image.
+fatops: fatops.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pipeleak: a pipe() that fails part way, or whose descriptors cannot be
 # copied out, leaves nothing allocated or open.  Runs on the host too.
 pipeleak: pipeleak.c

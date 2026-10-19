@@ -339,10 +339,14 @@ int fat_parse_lfn(fat_lfn_t *lfn, char *buffer, int max_len) {
 size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
-    
-    if ((uint32_t)offset >= ctx->size) return 0;
-    if (offset + size > ctx->size) size = ctx->size - offset;
-    
+
+    /* Compared in 64 bits: an offset of 4 GiB + n used to be read as n. */
+    if (offset < 0 || (uint64_t)offset >= ctx->size) return 0;
+    if ((uint64_t)offset + size > ctx->size) size = ctx->size - (uint32_t)offset;
+    /* A file with data but no valid first cluster is damage: cluster 0 or
+     * 1 used to be read from sector 0 of the volume. */
+    if (!fat_cluster_valid(fs, ctx->first_cluster)) return 0;
+
     uint32_t cluster = ctx->first_cluster;
     uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
     uint32_t total_read = 0;
@@ -362,10 +366,10 @@ size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer
     uint8_t *cluster_buf = kmalloc(fs->cluster_size);
     if (!cluster_buf) return 0;
 
-    while (size > 0 && cluster < 0x0FFFFFFF) {
+    while (size > 0 && fat_cluster_valid(fs, cluster)) {
         if (++visited > fs->total_clusters) break; // Cycle detection
         uint32_t sector = fat_cluster_to_sector(fs, cluster);
-        
+
         if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, cluster_buf) != 0) {
             break;
         }
@@ -492,7 +496,7 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     uint32_t visited = 0;
     
     while (cluster < 0x0FFFFFFF) {
-        if (++visited > fs->total_clusters) return NULL; // Cycle detection
+        if (++visited > fs->total_clusters) break; // Cycle detection
         uint32_t sector = fat_cluster_to_sector(fs, cluster);
         if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, dir_buf) != 0) {
             kfree(dir_buf, fs->cluster_size);
@@ -566,7 +570,9 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
         
         cluster = fat_get_next_cluster(fs, cluster);
     }
-    
+
+    /* End of the chain, or a cycle: dir_buf used to leak on both. */
+    kfree(dir_buf, fs->cluster_size);
     return NULL;
 }
 
@@ -1069,6 +1075,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     if (fs->fat_table) {
         if (fat_read_sectors(fs, fs->fat_start_sector, fat_size, fs->fat_table) != 0) {
             kprint("FAT: Warning - failed to cache FAT table\n");
+            kfree(fs->fat_table, fat_table_size);   /* was dropped, not freed */
             fs->fat_table = NULL;
             fs->fat_table_size = 0;
         }
@@ -1439,9 +1446,15 @@ static size_t fat_file_write_locked(fs_node_t *node, off_t offset, size_t size, 
     uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
 
     if (size == 0) return 0;
+    /* A FAT file ends at 4 GiB - 1: write what fits below that.  The end
+     * used to be cast to 32 bits, so a write near 4 GiB wrapped and its
+     * data went to the start of the file. */
+    if (offset < 0 || (uint64_t)offset >= FAT_MAX_FILE_SIZE) return 0;
+    if ((uint64_t)size > FAT_MAX_FILE_SIZE - (uint64_t)offset)
+        size = (size_t)(FAT_MAX_FILE_SIZE - (uint64_t)offset);
 
     /* Extend cluster chain if needed */
-    uint32_t needed_end = (uint32_t)(offset + size);
+    uint32_t needed_end = (uint32_t)((uint64_t)offset + size);
     uint32_t needed_clusters = (needed_end + cluster_size - 1) / cluster_size;
 
     /* If no clusters yet, allocate first */
@@ -1489,7 +1502,7 @@ static size_t fat_file_write_locked(fs_node_t *node, off_t offset, size_t size, 
     size_t total_written = 0;
     static uint8_t cluster_buf[32768];
     visited = 0;
-    while (size > 0 && cluster < 0x0FFFFFF8) {
+    while (size > 0 && fat_cluster_valid(fs, cluster)) {
         if (++visited > fs->total_clusters) break;
         uint32_t sector = fat_cluster_to_sector(fs, cluster);
 
@@ -1529,7 +1542,13 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
     uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
-    uint32_t needed_clusters = new_size > 0 ? ((uint32_t)new_size + cluster_size - 1) / cluster_size : 0;
+    uint32_t needed_clusters;
+
+    if (new_size < 0) return -EINVAL;
+    /* A FAT file's size is 32 bits. */
+    if ((uint64_t)new_size > FAT_MAX_FILE_SIZE) return -EFBIG;
+    needed_clusters = new_size > 0
+        ? (uint32_t)(((uint64_t)new_size + cluster_size - 1) / cluster_size) : 0;
 
     if (new_size == 0) {
         /* Free entire chain */
@@ -1542,16 +1561,28 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
         return 0;
     }
 
+    /* An empty file has no chain to walk: give it its first cluster.  It
+     * used to walk from cluster 0 -- writing an end-of-chain mark into FAT
+     * entry 0 -- and keep first_cluster 0 with a non-zero size, so reads
+     * then came from sector 0 of the volume. */
+    if (ctx->first_cluster < 2) {
+        uint32_t nc = fat_alloc_cluster(fs);
+        if (nc == 0) return -ENOSPC;
+        (void)fat_zero_cluster(fs, nc);
+        ctx->first_cluster = nc;
+        node->inode = nc;
+    }
+
     /* Walk to the needed_clusters-th cluster, free the rest */
     uint32_t cluster = ctx->first_cluster;
     uint32_t visited = 0;
     for (uint32_t i = 1; i < needed_clusters; i++) {
-        if (++visited > fs->total_clusters) return -1;
+        if (++visited > fs->total_clusters) return -EIO;
         uint32_t next = fat_get_next_cluster(fs, cluster);
         if (next >= 0x0FFFFFF8) {
             /* Extend if truncating to larger size */
             uint32_t nc = fat_alloc_cluster(fs);
-            if (nc == 0) return -1;
+            if (nc == 0) return -ENOSPC;
             (void)fat_zero_cluster(fs, nc);
             fat_set_fat_entry(fs, cluster, nc);
             fat_set_fat_entry(fs, nc, fat_eoc(fs));
@@ -2095,8 +2126,21 @@ static int fat_rename(fs_node_t *old_parent, const char *old_name,
     if (!src) return -ENOENT;
     fat_node_t *src_ctx = (fat_node_t *)(uintptr_t)src->impl;
 
-    /* If destination exists, remove it */
+    /* If destination exists, remove it -- unless it is the source itself.
+     * Lookups ignore case, so "mv foo.txt FOO.TXT" finds the source as
+     * the destination; freeing its chain destroyed the file. */
     fs_node_t *dst = fat_finddir(new_parent, (char *)new_name);
+    if (dst) {
+        fat_node_t *dctx = (fat_node_t *)(uintptr_t)dst->impl;
+
+        if (dctx->dirent_sector != 0 &&
+            dctx->dirent_sector == src_ctx->dirent_sector &&
+            dctx->dirent_off == src_ctx->dirent_off) {
+            if (strcmp(old_name, new_name) == 0)
+                return 0;
+            dst = NULL;     /* a change of case: just rename the entry */
+        }
+    }
     if (dst) {
         fat_node_t *dctx = (fat_node_t *)(uintptr_t)dst->impl;
         fat_dir_remove_entry(fs, npctx->first_cluster, new_name);
@@ -2109,6 +2153,21 @@ static int fat_rename(fs_node_t *old_parent, const char *old_name,
     uint8_t attr = src_ctx->attr;
     uint32_t first_cluster = src_ctx->first_cluster;
     uint32_t size = src_ctx->size;
+
+    if (opctx->first_cluster == npctx->first_cluster &&
+        fat_name_matches(old_name, new_name)) {
+        /* Same directory, same name but for case: the new entry would
+         * collide with the old one, so take the old one out first and
+         * put it back if the new one cannot be added. */
+        fat_dir_remove_entry(fs, opctx->first_cluster, old_name);
+        if (fat_dir_add_entry(fs, npctx->first_cluster, new_name, attr,
+                              first_cluster, size) != 0) {
+            (void)fat_dir_add_entry(fs, opctx->first_cluster, old_name, attr,
+                                    first_cluster, size);
+            return -EIO;
+        }
+        return 0;
+    }
 
     if (fat_dir_add_entry(fs, npctx->first_cluster, new_name, attr, first_cluster, size) != 0)
         return -1;
