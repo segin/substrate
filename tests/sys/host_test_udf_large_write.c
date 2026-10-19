@@ -75,9 +75,11 @@ int main() {
     sbm->num_bits = 64;
     sbm->num_bytes = 8;
 
-    // Mark sector 0 and 1 as allocated
+    // Mark sector 0 and 1 as allocated.  A SET bit is a FREE block
+    // (ECMA-167 4/14.12.1.1): all start set, the two in use are cleared.
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    bitmap_data[0] = 0x03;
+    memset(bitmap_data, 0xFF, 8);
+    bitmap_data[0] = 0xFC;
 
     // Setup UDF context
     udf_ctx.device = &mock_dev;

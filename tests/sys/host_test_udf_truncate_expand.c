@@ -84,9 +84,12 @@ int main() {
     sbm->num_bits = 1024;
     sbm->num_bytes = 128;
 
-    // Mark sector 0 (SBM), 1 (FE), 2 (Initial data) as allocated
+    // Mark sector 0 (SBM), 1 (FE), 2 (Initial data) as allocated.  A SET
+    // bit is a FREE block (ECMA-167 4/14.12.1.1), so all start set and the
+    // three in use are cleared.
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    bitmap_data[0] = 0x07;
+    memset(bitmap_data, 0xFF, 128);
+    bitmap_data[0] = 0xF8;
 
     // Setup UDF context
     udf_ctx.device = &mock_dev;
@@ -146,9 +149,9 @@ int main() {
     }
 
     // Verify blocks were freed in bitmap
-    // Sectors 3, 4, 5 should be free now.
-    if (bitmap_data[0] & 0x38) { // 0x38 = 00111000 in binary (bits 3, 4, 5)
-        printf("FAILED: Blocks not freed in bitmap: 0x%02x (expected flags 0x38 to be clear)\n", bitmap_data[0]);
+    // Sectors 3, 4, 5 should be free now: their bits set again.
+    if ((bitmap_data[0] & 0x38) != 0x38) { // 0x38 = 00111000 (bits 3, 4, 5)
+        printf("FAILED: Blocks not freed in bitmap: 0x%02x (expected bits 0x38 set)\n", bitmap_data[0]);
         return 1;
     }
 
