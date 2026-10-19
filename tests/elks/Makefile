@@ -1,5 +1,7 @@
 PYTHON = python3
 CC = ia16-elf-gcc
+# The .S programs are plain .code16 and also build with the host's binutils:
+#   make AS='as --32' LD=ld OBJCOPY=objcopy ds_span_elks
 AS = ia16-elf-as
 LD = ia16-elf-ld
 OBJCOPY = ia16-elf-objcopy
@@ -10,7 +12,8 @@ LDFLAGS = -melf_i386 -Ttext 0x0 -e _start -nostdlib
 ELKS_BUILD = $(CURDIR)/build
 MKELKS = $(CURDIR)/mkelks.py
 
-ASM_SOURCES = hello.S sleep.S fileio.S fork.S bounds_test.S fuzz_syscalls.S
+ASM_SOURCES = hello.S sleep.S fileio.S fork.S bounds_test.S fuzz_syscalls.S \
+              ds_span.S
 C_SOURCES = cat.c
 NATIVE_SOURCES = native_spawn_elks.c native_linux_sh_elks_sh.c
 

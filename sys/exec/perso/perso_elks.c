@@ -1113,7 +1113,8 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
     int ret;
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
-    if (elks_ds_pointer(buf_off, &linear) != 0) {
+    /* The whole buffer must lie in the data segment, not just its start. */
+    if (elks_ds_span(buf_off, (size_t)count, &linear) != 0) {
         return -EFAULT;
     }
     if (elks_is_kmem_fd((int)fd)) {
@@ -1138,19 +1139,7 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
         }
         avail = kmem_size - (size_t)current_process->fds[fd]->f_offset;
         to_copy = (size_t)count < avail ? (size_t)count : avail;
-        /* elks_ds_pointer() validated only the START offset; the copy writes
-         * to_copy bytes into the user's DS segment, so confirm the LAST byte
-         * is in-segment too (and that buf_off+to_copy doesn't wrap the 16-bit
-         * ELKS offset space).  Otherwise a large count overruns the segment
-         * into adjacent memory — an OOB write via /dev/kmem. */
-        if (to_copy > 0) {
-            uintptr_t end_linear;
-            if ((uint64_t)buf_off + to_copy > 0x10000ULL ||
-                elks_ds_pointer(buf_off + (uint32_t)to_copy - 1U, &end_linear) != 0) {
-                kfree(kmem, ELKS_KMEM_IMAGE_CAP);
-                return -EFAULT;
-            }
-        }
+        /* to_copy <= count, and the span check above covered count bytes. */
         memcpy((void *)(uintptr_t)linear, kmem + current_process->fds[fd]->f_offset, to_copy);
         current_process->fds[fd]->f_offset += (off_t)to_copy;
         kfree(kmem, ELKS_KMEM_IMAGE_CAP);
@@ -1165,7 +1154,7 @@ static int elks_sys_write(uint32_t fd, uint32_t buf_off, uint32_t count,
     uintptr_t linear = 0;
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
-    if (elks_ds_pointer(buf_off, &linear) != 0) {
+    if (elks_ds_span(buf_off, (size_t)count, &linear) != 0) {
         return -EFAULT;
     }
     return sys_write((int)fd, (const char *)(uintptr_t)linear, (size_t)count);
@@ -1505,7 +1494,7 @@ static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
     if (status_off != 0) {
-        if (elks_ds_pointer(status_off, &linear) != 0) {
+        if (elks_ds_span(status_off, sizeof(uint16_t), &linear) != 0) {
             return -EFAULT;
         }
     }
@@ -1534,7 +1523,7 @@ static int elks_sys_getpid(uint32_t ppid_off, uint32_t unused1, uint32_t unused2
         return pid;
     }
     if (ppid_off != 0) {
-        if (elks_ds_pointer(ppid_off, &linear) != 0) {
+        if (elks_ds_span(ppid_off, sizeof(uint16_t), &linear) != 0) {
             return -EFAULT;
         }
         *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_getppid();
@@ -1556,7 +1545,7 @@ static int elks_sys_getuid(uint32_t euid_off, uint32_t unused1, uint32_t unused2
         return uid;
     }
     if (euid_off != 0) {
-        if (elks_ds_pointer(euid_off, &linear) != 0) {
+        if (elks_ds_span(euid_off, sizeof(uint16_t), &linear) != 0) {
             return -EFAULT;
         }
         *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_geteuid();
@@ -1578,7 +1567,7 @@ static int elks_sys_getgid(uint32_t egid_off, uint32_t unused1, uint32_t unused2
         return gid;
     }
     if (egid_off != 0) {
-        if (elks_ds_pointer(egid_off, &linear) != 0) {
+        if (elks_ds_span(egid_off, sizeof(uint16_t), &linear) != 0) {
             return -EFAULT;
         }
         *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_getegid();
@@ -2289,6 +2278,28 @@ static int elks_sys_signal(uint32_t sig, uint32_t handler_off, uint32_t handler_
     return 2;
 }
 
+/*
+ * Bytes of the data segment an ioctl reads or writes at its argument.  The
+ * kernel stores and copies the /dev/kmem and termios requests itself, so the
+ * whole object must lie in the segment.  Anything else goes to kern_ioctl,
+ * whose copyin/copyout fault safely; only its start is checked here.
+ */
+static size_t elks_ioctl_arg_size(uint32_t fd, uint32_t request) {
+    if (elks_is_kmem_fd((int)fd)) {
+        return request == ELKS_MEM_GETUSAGE ? sizeof(struct elks_mem_usage)
+                                            : sizeof(uint16_t);
+    }
+    switch (request) {
+        case TCGETS:
+        case TCSETS:
+        case TCSETSW:
+        case TCSETSF:
+            return ELKS_TERMIOS_BYTES;
+        default:
+            return 1;
+    }
+}
+
 static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
                           uint32_t unused6, uint32_t unused7) {
@@ -2298,7 +2309,8 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
     if (arg_off != 0) {
-        if (elks_ds_pointer(arg_off, &linear) != 0) {
+        if (elks_ds_span(arg_off, elks_ioctl_arg_size(fd, request),
+                         &linear) != 0) {
             return -EFAULT;
         }
         arg = (void *)(uintptr_t)linear;

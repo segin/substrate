@@ -432,7 +432,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/exec/perso/linux/linux_sig.c:186-193, 216-223`, `sys/exec/perso/freebsd/freebsd_sig.c:457-465`, `sys/exec/perso/netbsd/netbsd_sig.c:241-249`, and `sys/exec/perso/openbsd/openbsd_sig.c:220-228` assign `regs->cs = sc.cs | 3`, `regs->ds = sc.ds | 3`, etc. without validating descriptor bounds/types, do not strip `SIGKILL`/`SIGSTOP` from `sig_mask`, and `linux_sig.c` / `openbsd_sig.c` omit `current_thread->frame_replaced = 1` and Linux signal bitmask translation.
   Basis: traced.
 
-- [ ] **SYS-EXEC-005** *(High; partly confirmed)* When copying multi-byte buffers between the kernel and a 16-bit ELKS process in `sys/exec/perso/perso_elks.c`, the personality layer shall validate the entire buffer range with `elks_ds_span` rather than single-byte `elks_ds_pointer`.
+- [x] **SYS-EXEC-005** *(High; partly confirmed)* When copying multi-byte buffers between the kernel and a 16-bit ELKS process in `sys/exec/perso/perso_elks.c`, the personality layer shall validate the entire buffer range with `elks_ds_span` rather than single-byte `elks_ds_pointer`.
   Evidence: `sys/exec/perso/perso_elks.c:1159, 1171, 1518, 1540, 1562, 1584, 2351, 2381, 2397` (`elks_sys_read`, `elks_sys_write`, `elks_sys_waitpid`, `elks_sys_getpid`, `elks_sys_getuid`, `elks_sys_getgid`, `elks_sys_ioctl`) call `elks_ds_pointer(off, &linear)` (which checks only `off <= limit`) before multi-byte `copyin`/`copyout`/`memcpy`.
   Basis: traced.
 
