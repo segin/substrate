@@ -90,12 +90,25 @@ static int vm_user_range_valid(uintptr_t start, size_t length) {
     return 0;
 }
 
+/*
+ * Give back the heap pages in [start, end).  pmap_remove drops this
+ * mapping's hold; the page's own allocation reference is dropped only
+ * when that was the last mapping -- after fork a heap page is still
+ * mapped by the other process, and freeing it here left that process a
+ * PTE to a frame the allocator hands out again.  A page that belongs to
+ * an object (a file mapped over the old heap) is the object's to free.
+ * This is the rule pmap_destroy uses for the pages it frees.
+ */
 static void brk_unmap_free_pages(pmap_t pmap, uintptr_t start, uintptr_t end) {
     for (uintptr_t va = start; va < end; va += 0x1000) {
         uintptr_t pa = pmap_extract(pmap, va);
         if (pa != 0) {
+            vm_page_t *page = pmm_get_page(pa & ~0xFFFU);
             pmap_remove(pmap, va);
-            pmm_free_block(P2V(pa & ~0xFFFU));
+            if (page && page->ref_count <= 1 && page->pv_list == NULL &&
+                page->object == NULL) {
+                pmm_free_block(P2V(pa & ~0xFFFU));
+            }
         }
     }
 }

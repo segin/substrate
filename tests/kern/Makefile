@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow
+all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -85,7 +85,19 @@ pokecow: pokecow.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# brkfork: shrinking the heap does not free a page a process forked from
+# this one still maps.  Runs on the host too.  The native personality has
+# no brk (sbrk fails ENOSYS), so on substrate run brkfork.linux, a static
+# i386 Linux build that reaches sys_brk through the Linux personality.
+brkfork: brkfork.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
+brkfork.linux: brkfork.c
+	gcc -m32 -static -O2 $< -o $@
+
 clean:
-	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow
+	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
+	      brkfork.linux
 
 .PHONY: all clean
