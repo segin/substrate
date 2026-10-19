@@ -239,6 +239,13 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# unlinkread: files read, unlinked while open and closed give back their
+# memory (ext2 leaked the node slot's 4 KiB of read buffers; the block
+# cache grew new headers while empty ones sat unused).  Guest only.
+unlinkread: unlinkread.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # fatops: on a FAT mount, an empty file truncated larger reads zeros, a
 # case-only rename keeps the file, and a write at 4 GiB does not wrap to 0.
 # Run as `fatops <dir on FAT>`, then fsck.fat -n the image.

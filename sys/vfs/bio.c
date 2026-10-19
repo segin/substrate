@@ -394,7 +394,16 @@ retry_lookup:
 
     bio_misses++;
 
-    if (bio_can_grow_locked(size)) {
+    /*
+     * An empty buffer (no data: invalidated, e.g. its block was freed) is
+     * taken before the pool grows.  The pool used to grow whenever it was
+     * under its ceiling, so each freed block left an empty header behind
+     * and its replacement got a new one: deleting files piled up empty
+     * headers toward the ceiling (~115k at 512 MiB, ~15 MB holding no
+     * data).
+     */
+    bp = TAILQ_FIRST(&bio_queues[BQ_EMPTY]);
+    if (!bp && bio_can_grow_locked(size)) {
         bp = kmalloc(sizeof(*bp));
         if (!bp) {
             spinlock_release(&bio_lock);
@@ -404,7 +413,8 @@ retry_lookup:
         bp->b_qindex = -1;
         bio_nbuf++;
     } else {
-        bp = bio_reuse_candidate_locked();
+        if (!bp)
+            bp = bio_reuse_candidate_locked();
         if (!bp) {
             spinlock_release(&bio_lock);
             return NULL;
