@@ -89,6 +89,9 @@ int vm_map_range_is_free(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_find_space_from(vm_map_t *map, uintptr_t base, uintptr_t *addr,
                            size_t length);
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va);
+/* Put the private page a COW fault gave `va` into the mapping's object
+ * when that is this map's own anonymous shadow (see vm_map.c). */
+void vm_map_cow_adopt(vm_map_t *map, uintptr_t va, vm_page_t *page);
 
 /*
  * The memory behind a user address, named the same way in every process

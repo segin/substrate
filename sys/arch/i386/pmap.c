@@ -2514,25 +2514,6 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
          * read-only page of a process writable once it had been read. */
         if (!vm_map_write_permitted(current_process->vm_map, cr2)) return 0;
 
-        // Perform COW copy
-        // 1. Allocate new page (returns virtual address)
-        void *virt_new = pmm_alloc_block();
-        if (!virt_new) {
-            kprint("pmap_fault: OOM during COW\n");
-            return 0;
-        }
-        
-        // 2. Map new page temporarily to copy
-        // OPTIMIZED: virt_new is already a virtual address (Kernel Direct Map)
-        // so we can copy directly without mapping to scratch.
-        
-        uint32_t phys_new = (uint32_t)virt_new - 0xC0000000;
-        
-        // Copy from faulting address (readable) to new page (writable)
-        memcpy(virt_new, (void*)(cr2 & 0xFFFFF000), 0x1000);
-
-        // 3. Update mappings.
-        //
         // Single-mapper optimization: if nobody else holds page_old we
         // can just upgrade permissions.  ref_count==2 here means alloc
         // + this pmap's pmap_enter hold; no second mapper.  (ref_count>2
@@ -2555,14 +2536,21 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
             (page_old->object == NULL ||
              page_old->object->type == VM_OBJ_TYPE_DEFAULT);
         if (single_mapper_safe) {
-             // Free the unused new page we allocated up front.
-             vm_page_free(pmm_get_page((uintptr_t)phys_new));
-
-             // Just upgrade permissions in place.
+             // Just upgrade permissions in place: no copy needed.
              pt[pti] |= PTE_W;
              pmap_invalidate_page(cr2);
              return 1;
         }
+
+        // Perform COW copy.  virt_new is a kernel direct-map address, so
+        // the faulting page (readable) copies straight into it.
+        void *virt_new = pmm_alloc_block();
+        if (!virt_new) {
+            kprint("pmap_fault: OOM during COW\n");
+            return 0;
+        }
+        uint32_t phys_new = (uint32_t)virt_new - 0xC0000000;
+        memcpy(virt_new, (void*)(cr2 & 0xFFFFF000), 0x1000);
 
         /*
          * Multiple-mapper case: build a private copy.  Critical that
@@ -2587,7 +2575,10 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         }
         pt[pti] = (uint32_t)phys_new | PTE_P | PTE_W | PTE_U | PTE_A | PTE_D;
         pmap_invalidate_page(cr2);
-        
+
+        /* The private copy belongs in the mapping's object too. */
+        vm_map_cow_adopt(current_process->vm_map, cr2 & 0xFFFFF000, page_new);
+
         pmap_stat_inc(pmap, offsetof(struct pmap_stats, cow_faults));
         pmap_stat_inc(pmap, offsetof(struct pmap_stats, cow_duplications));  // New: track duplications
         pmap_stat_inc(pmap, offsetof(struct pmap_stats, faults)); // Also a general fault

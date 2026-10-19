@@ -1149,6 +1149,29 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
     return NULL;
 }
 
+/*
+ * A COW write fault gave `va` the private page `page` in the page tables.
+ * Record it in the mapping's object too, when that object is this map's
+ * own anonymous shadow, so the object describes what the process sees: a
+ * shadow that has been written must not look "never written" (page_count
+ * 0) to vm_map_fork, and anything that rebuilds the mapping from the
+ * object must find the copy, not the page from before the write.  An
+ * object shared with another map, or one that already has a page there,
+ * is left alone.
+ */
+void vm_map_cow_adopt(vm_map_t *map, uintptr_t va, vm_page_t *page) {
+    if (!map || !page || page->object) return;
+    vm_map_lock_read(map);
+    vm_map_entry_t *entry = vm_map_lookup(map, va);
+    vm_object_t *obj = entry ? entry->object : NULL;
+    if (obj && obj->type == VM_OBJ_TYPE_DEFAULT && obj->ref_count == 1) {
+        uint64_t pindex = (entry->offset + (va - entry->start)) >> 12;
+        if (!vm_object_lookup_page(obj, pindex))
+            vm_page_insert(page, obj, pindex);
+    }
+    vm_map_unlock_read(map);
+}
+
 /* Tags the physical-address form of a vm_shared_key. */
 static const char vm_shared_key_phys;
 

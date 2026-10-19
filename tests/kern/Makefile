@@ -169,6 +169,12 @@ rofault: rofault.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# cowkeep: a page made private by a COW fault keeps its contents across
+# later forks.  Runs on the host too.
+cowkeep: cowkeep.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # sigretsel.linux: sigreturn kills a process whose handler planted a bad
 # selector (instead of faulting the kernel), keeps SIGKILL and SIGSTOP
 # unblockable, and keeps Linux signal numbers in the saved mask.  A static

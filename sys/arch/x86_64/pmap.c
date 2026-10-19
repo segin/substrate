@@ -1223,6 +1223,9 @@ int pmap_fault(uint32_t err_code, uintptr_t cr2) {
     *pte = phys_new | PTE_P | PTE_W | PTE_U | PTE_A | PTE_D;
     pmap_invalidate_page(va);
 
+    /* The private copy belongs in the mapping's object too. */
+    vm_map_cow_adopt(current_process->vm_map, va, page_new);
+
     pmap_stat_inc(pmap, offsetof(struct pmap_stats, cow_faults));
     pmap_stat_inc(pmap, offsetof(struct pmap_stats, cow_duplications));
     pmap_stat_inc(pmap, offsetof(struct pmap_stats, faults));
