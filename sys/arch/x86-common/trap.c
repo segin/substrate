@@ -347,7 +347,9 @@ void isr_handler(registers_t *regs) {
 #ifndef SUBSTRATE_ARCH_X86_64
         // VM86 Mode Check for GPF (13).  Long mode has no virtual-8086 mode.
         if (regs->int_no == 13 && (regs->eflags & CPU_EFLAGS_VM)) {
-            vm86_gpf_handler(regs);
+            if (vm86_gpf_handler(regs)) {
+                signal_handle_pending(regs);    /* the guest is ended */
+            }
             return;
         }
 #endif

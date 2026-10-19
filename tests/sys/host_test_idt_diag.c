@@ -115,9 +115,10 @@ int i386_trap_to_signal(const registers_t *regs, uintptr_t cr2, int *sig, int *c
     (void)regs; (void)cr2; (void)sig; (void)code; (void)addr; return 0;
 }
 
-void vm86_gpf_handler(registers_t *regs) {
+int vm86_gpf_handler(registers_t *regs) {
     vm86_dispatch_count++;
     regs->eip += 1;
+    return 0;
 }
 
 int irq_dispatch(unsigned int irq, void *frame) { (void)irq; (void)frame; return 0; }

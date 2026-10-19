@@ -5,7 +5,9 @@
 
 struct vm86_struct;
 
-void vm86_gpf_handler(registers_t *regs);
+/* Emulate the sensitive instruction a VM86 guest trapped on.  Returns 1
+ * when the guest cannot go on and a signal was posted to end it. */
+int vm86_gpf_handler(registers_t *regs);
 int vm86_init_bsd(void *args);
 
 /* Assembly stubs (vm86_asm.S) */

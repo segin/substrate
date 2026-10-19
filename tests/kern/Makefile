@@ -44,7 +44,8 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart
+all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
+     vm86guest
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -103,8 +104,14 @@ thrstart: thrstart.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# vm86guest: a VM86 guest the monitor cannot carry on with is ended by a
+# signal, and gets no IOPL or NT however it asks.  Substrate i386 only.
+vm86guest: vm86guest.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart
+	      brkfork.linux thrstart vm86guest
 
 .PHONY: all clean

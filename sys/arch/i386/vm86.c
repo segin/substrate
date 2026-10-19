@@ -7,6 +7,7 @@
 #include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/proc.h>
+#include <sys/signal.h>
 #include <sys/sysarch.h>
 #include <sys/types.h>
 #include <sys/vm86.h>
@@ -42,7 +43,11 @@ static struct vm86_monitor *current_vm86_monitor;
 static uint8_t vm86_port_space[65536];
 
 enum {
-    VM86_ENTRY_EFLAGS = 0x20200U
+    VM86_ENTRY_EFLAGS = 0x20200U,   /* VM | IF */
+    /* IOPL and NT are never the guest's to set.  IOPL 3 lets CLI, STI,
+     * INT n and port I/O run natively instead of trapping here, so the
+     * guest would drive the real hardware's ports. */
+    VM86_EFLAGS_PRIV  = 0x7000U
 };
 
 #ifdef HOST_TEST
@@ -69,7 +74,41 @@ static uint8_t *vm86_linear_ptr(uint32_t linear, size_t size) {
 }
 
 static void vm86_prepare_entry(struct vm86_struct *info) {
-    info->regs.eflags |= VM86_ENTRY_EFLAGS;
+    info->regs.eflags = (info->regs.eflags & ~VM86_EFLAGS_PRIV) | VM86_ENTRY_EFLAGS;
+}
+
+/* A user VM86 guest, as opposed to the kernel's own BIOS calls. */
+static int vm86_guest_is_user(void) {
+    return !(current_vm86_monitor && current_vm86_monitor->in_kernel_bios);
+}
+
+/*
+ * Guest memory is the user's low megabyte: read and written with copyin
+ * and copyout, which recover from a fault, so a guest whose CS:IP, SS:SP
+ * or IVT points at memory it has not mapped (or may not write) gets a
+ * signal instead of a ring-0 fault.  The kernel's BIOS calls run on its
+ * own identity map of low memory and use it directly.
+ */
+static int vm86_read(uint32_t linear, void *buf, size_t size) {
+#ifndef HOST_TEST
+    if (vm86_guest_is_user())
+        return copyin((const void *)(uintptr_t)linear, buf, size) == 0 ? 0 : -1;
+#endif
+    uint8_t *p = vm86_linear_ptr(linear, size);
+    if (!p) return -1;
+    memcpy(buf, p, size);
+    return 0;
+}
+
+static int vm86_write(uint32_t linear, const void *buf, size_t size) {
+#ifndef HOST_TEST
+    if (vm86_guest_is_user())
+        return copyout(buf, (void *)(uintptr_t)linear, size) == 0 ? 0 : -1;
+#endif
+    uint8_t *p = vm86_linear_ptr(linear, size);
+    if (!p) return -1;
+    memcpy(p, buf, size);
+    return 0;
 }
 
 /*
@@ -126,7 +165,13 @@ int sys_vm86(struct vm86_struct *info) {
     }
 
     vm86_prepare_entry(&k_info);
-    
+
+    /* A user guest's memory is the process's low megabyte, below where
+     * copyin/copyout normally refuse to go; the monitor reaches it with
+     * those helpers, so let them (as for a.out images mapped at 0). */
+    if (vm86_guest_is_user() && current_process)
+        current_process->low_va_valid = 1;
+
     /* Call assembly helper to build stack frame and execute IRET */
     vm86_enter(&k_info);
     
@@ -153,60 +198,78 @@ int vm86_init_bsd(void *args) {
     return -EINVAL;
 }
 
-void vm86_gpf_handler(registers_t *regs) {
+/*
+ * The guest did something the monitor cannot carry out -- an instruction
+ * it does not emulate, or a reference to memory it cannot reach.  Simply
+ * returning re-executes the instruction and traps again, forever.  A user
+ * guest has nothing to return to (sys_vm86 does not come back), so it is
+ * ended by the signal's default action whatever handler it has: a handler
+ * would be entered on the guest's VM86 frame.  Returns 1 if a signal was
+ * posted, for the trap path to act on.
+ */
+static int vm86_fail(registers_t *regs, uint32_t opcode, int sig, int code) {
+    vm86_monitor_signal_fault(regs->eip, opcode);
+    if (!vm86_guest_is_user() || !current_process) return 0;
+    current_process->sig_actions[sig - 1].sa_handler = SIG_DFL;
+    current_process->sig_actions[sig - 1].sa_flags = 0;
+    if (current_thread)
+        current_thread->trap_addr = ((regs->cs & 0xFFFFU) << 4) + (regs->eip & 0xFFFFU);
+    trapsignal(current_process, sig, code);
+    return 1;
+}
+
+int vm86_gpf_handler(registers_t *regs) {
     // We trapped here because of a sensitive instruction in VM86 mode (INT n, CLI, STI, IN/OUT)
     // We need to emulate it or reflect it to the monitor process.
-    
+
     // 1. Fetch instruction byte(s) from CS:IP
     // Need linear address: (CS << 4) + EIP
     uint32_t cs = regs->cs & 0xFFFF;
     uint32_t ip = regs->eip & 0xFFFF;
     uint32_t linear = (cs << 4) + ip;
-    
-    uint8_t *code = vm86_linear_ptr(linear, 2);
-    if (!code) {
-        vm86_monitor_signal_fault(regs->eip, 0xFFFFFFFFU);
-        return;
+
+    uint8_t code[2] = { 0, 0 };
+    if (vm86_read(linear, code, 1) != 0) {
+        return vm86_fail(regs, 0xFFFFFFFFU, SIGSEGV, SEGV_MAPERR);
     }
     uint8_t opcode = code[0];
-    
-    // Valid IO/mem access check needed (skip for now, assuming permissive)
-    
+    /* The opcodes that take an imm8 (INT n, IN/OUT imm8) need the second
+     * byte; only they read it, so a one-byte opcode at the end of the
+     * guest's memory is not refused for the byte after it. */
+    if ((opcode == 0xCD || opcode == 0xE4 || opcode == 0xE6) &&
+        vm86_read(linear + 1, &code[1], 1) != 0) {
+        return vm86_fail(regs, opcode, SIGSEGV, SEGV_MAPERR);
+    }
+
     if (opcode == 0xCD) { // INT n
         uint8_t int_no = code[1];
         // Emulate interrupt:
         // Push FLAGS, CS, IP to VM86 Stack
         // Jump to IVT[n]
-        
+
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
         uint32_t stack_linear = (ss << 4) + sp;
-        uint16_t *stack = (uint16_t *)vm86_linear_ptr(stack_linear - 6U, 6);
-        uint16_t *ivt;
+        uint16_t frame[3];
+        uint16_t vec[2];
 
-        if (!stack) {
-            vm86_monitor_signal_fault(regs->eip, opcode);
-            return;
+        frame[0] = (uint16_t)(regs->eip + 2); /* Return after INT n */
+        frame[1] = (uint16_t)regs->cs;
+        frame[2] = (uint16_t)regs->eflags;
+
+        // New CS:IP from the IVT (at 0x0000)
+        if (vm86_read(int_no * 4U, vec, sizeof(vec)) != 0 ||
+            vm86_write(stack_linear - 6U, frame, sizeof(frame)) != 0) {
+            return vm86_fail(regs, opcode, SIGSEGV, SEGV_MAPERR);
         }
 
-        stack[0] = (uint16_t)(regs->eip + 2); /* Return after INT n */
-        stack[1] = (uint16_t)regs->cs;
-        stack[2] = (uint16_t)regs->eflags;
-        
-        regs->useresp = (uint32_t)(sp - 6);
-        
-        // Load new CS:IP from IVT (at 0x0000)
-        ivt = (uint16_t *)vm86_linear_ptr(0, 4U * 256U);
-        if (!ivt) {
-            vm86_monitor_signal_fault(regs->eip, opcode);
-            return;
-        }
-        regs->eip = ivt[int_no * 2];
-        regs->cs  = ivt[int_no * 2 + 1];
-        
+        regs->useresp = (uint32_t)(uint16_t)(sp - 6);
+        regs->eip = vec[0];
+        regs->cs  = vec[1];
+
         // Clear IF and TF
         regs->eflags &= ~(0x200 | 0x100);
-        return;
+        return 0;
     }
     
     /* TASKS.md L574: CLI / STI emulation */
@@ -215,95 +278,95 @@ void vm86_gpf_handler(registers_t *regs) {
         /* VIF is bit 19 (0x80000) in EFLAGS for VM86 */
         regs->eflags &= ~0x200;  /* Clear virtual IF */
         regs->eip += 1;          /* Advance past CLI opcode */
-        return;
+        return 0;
     }
-    
-    if (opcode == 0xFB) { // STI - Set Interrupt Flag  
+
+    if (opcode == 0xFB) { // STI - Set Interrupt Flag
         /* Set VIF (Virtual Interrupt Flag) */
         regs->eflags |= 0x200;   /* Set virtual IF */
         regs->eip += 1;          /* Advance past STI opcode */
-        return;
+        return 0;
     }
-    
+
     /* TASKS.md L575: PUSHF / POPF emulation */
     if (opcode == 0x9C) { // PUSHF - Push FLAGS register
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
         uint32_t stack_linear = (ss << 4) + sp;
-        uint16_t *stack = (uint16_t *)vm86_linear_ptr(stack_linear - 2U, 2);
-        if (!stack) {
-            vm86_monitor_signal_fault(regs->eip, opcode);
-            return;
+        uint16_t flags = (uint16_t)regs->eflags;
+
+        if (vm86_write(stack_linear - 2U, &flags, sizeof(flags)) != 0) {
+            return vm86_fail(regs, opcode, SIGSEGV, SEGV_MAPERR);
         }
 
-        stack[0] = (uint16_t)regs->eflags;
-        
-        regs->useresp = sp - 2;
+        regs->useresp = (uint16_t)(sp - 2);
         regs->eip += 1;
-        return;
+        return 0;
     }
-    
+
     if (opcode == 0x9D) { // POPF - Pop FLAGS register
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
         uint32_t stack_linear = (ss << 4) + sp;
-        uint16_t *stack = (uint16_t *)vm86_linear_ptr(stack_linear, 2);
-        if (!stack) {
-            vm86_monitor_signal_fault(regs->eip, opcode);
-            return;
+        uint16_t flags;
+
+        if (vm86_read(stack_linear, &flags, sizeof(flags)) != 0) {
+            return vm86_fail(regs, opcode, SIGSEGV, SEGV_MAPERR);
         }
-        
-        /* Preserve VM, IOPL, and other privileged bits */
-        uint32_t flags = *stack;
-        regs->eflags = (regs->eflags & 0xFFFE3000) | (flags & ~0xFFFE3000);
-        
-        regs->useresp = sp + 2;
+
+        /* Preserve VM, IOPL, NT and the other privileged bits */
+        regs->eflags = (regs->eflags & (0xFFFE0000U | VM86_EFLAGS_PRIV)) |
+                       (flags & ~(0xFFFE0000U | VM86_EFLAGS_PRIV));
+
+        regs->useresp = (uint16_t)(sp + 2);
         regs->eip += 1;
-        return;
+        return 0;
     }
 
     if (opcode == 0xCF) { // IRET
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
-        uint16_t *stack = (uint16_t *)vm86_linear_ptr((ss << 4) + sp, 6);
-        if (!stack) {
-            vm86_monitor_signal_fault(regs->eip, opcode);
-            return;
+        uint16_t frame[3];
+
+        if (vm86_read((ss << 4) + sp, frame, sizeof(frame)) != 0) {
+            return vm86_fail(regs, opcode, SIGSEGV, SEGV_MAPERR);
         }
 
-        regs->eip = stack[0];
-        regs->cs = stack[1];
-        regs->eflags = (regs->eflags & 0xFFFF0000U) | stack[2];
-        regs->useresp = sp + 6;
-        return;
+        regs->eip = frame[0];
+        regs->cs = frame[1];
+        /* As POPF: the guest's flags image does not get to set IOPL or NT */
+        regs->eflags = (regs->eflags & (0xFFFF0000U | VM86_EFLAGS_PRIV)) |
+                       (frame[2] & ~VM86_EFLAGS_PRIV);
+        regs->useresp = (uint16_t)(sp + 6);
+        return 0;
     }
 
     if (opcode == 0xE4) { // IN AL, imm8
         uint8_t port = code[1];
         regs->eax = (regs->eax & 0xFFFFFF00U) | vm86_port_space[port];
         regs->eip += 2;
-        return;
+        return 0;
     }
 
     if (opcode == 0xE6) { // OUT imm8, AL
         uint8_t port = code[1];
         vm86_port_space[port] = (uint8_t)(regs->eax & 0xFFU);
         regs->eip += 2;
-        return;
+        return 0;
     }
 
     if (opcode == 0xEC) { // IN AL, DX
         uint16_t port = (uint16_t)(regs->edx & 0xFFFFU);
         regs->eax = (regs->eax & 0xFFFFFF00U) | vm86_port_space[port];
         regs->eip += 1;
-        return;
+        return 0;
     }
 
     if (opcode == 0xEE) { // OUT DX, AL
         uint16_t port = (uint16_t)(regs->edx & 0xFFFFU);
         vm86_port_space[port] = (uint8_t)(regs->eax & 0xFFU);
         regs->eip += 1;
-        return;
+        return 0;
     }
     
     /* Handle HLT (0xF4) as exit from VM86 BIOS callback */
@@ -391,18 +454,17 @@ void vm86_gpf_handler(registers_t *regs) {
               */
              regs->eip = (uint32_t)vm86_bios_ret_point;
              regs->cs = 0x08; // Kernel Code
-             
-             return;
+
+             return 0;
         }
-        
+
         kprint("VM86: HLT opcode in user VM86\n");
-        vm86_monitor_signal_fault(regs->eip, opcode);
-        return;
+        return vm86_fail(regs, opcode, SIGILL, ILL_PRVOPC);
     }
-    
-    kprintf("VM86: Unhandled opcode in GPF (CS:IP %04X:%04X Op %02X)\n", 
+
+    kprintf("VM86: Unhandled opcode in GPF (CS:IP %04X:%04X Op %02X)\n",
            (unsigned)regs->cs, (unsigned)regs->eip, (unsigned)opcode);
-    vm86_monitor_signal_fault(regs->eip, opcode);
+    return vm86_fail(regs, opcode, SIGILL, ILL_PRVOPC);
 }
 
 /* Kernel BIOS Call Helper */
@@ -442,6 +504,7 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     /* 4. Write Stub Code: INT n; HLT */
     uint8_t *stub = vm86_linear_ptr(code_base, 3); // Identity mapped
     if (!stub) {
+        current_vm86_monitor = NULL;
         return -EFAULT;
     }
     stub[0] = 0xCD;       // INT
@@ -451,6 +514,9 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     /* 5. Enter VM86 */
     /* This will verify segments and jump. It returns when HLT is hit via trampoline. */
     sys_vm86(&info);
+    /* mon is this frame's: do not leave it current once the call is over,
+     * or a later user guest would be taken for a kernel BIOS call. */
+    current_vm86_monitor = NULL;
     
     /* 6. Copy back registers */
     /*

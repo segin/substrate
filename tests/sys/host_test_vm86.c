@@ -55,6 +55,15 @@ void vm86_enter(struct vm86_struct *info) {
 void vm86_bios_ret_point(void) {
 }
 
+static int trapped_sig;
+static int trapped_code;
+
+void trapsignal(process_t *p, int sig, int code) {
+    (void)p;
+    trapped_sig = sig;
+    trapped_code = code;
+}
+
 #define HOST_TEST 1
 #include "../../sys/arch/i386/vm86.c"
 
@@ -63,6 +72,10 @@ static void reset_state(void) {
     memset(&entered_vm86, 0, sizeof(entered_vm86));
     vm86_enter_called = 0;
     vm86_host_set_memory(lowmem, sizeof(lowmem));
+    current_vm86_monitor = NULL;    /* a user guest unless a test says not */
+    current_process = NULL;
+    trapped_sig = 0;
+    trapped_code = 0;
 }
 
 static void test_monitor_basics(void) {
@@ -92,7 +105,8 @@ static void test_sys_vm86_copies_input(void) {
     assert(vm86_enter_called == 1);
     assert(entered_vm86.regs.eip == info.regs.eip);
     assert(entered_vm86.regs.cs == info.regs.cs);
-    assert(entered_vm86.regs.eflags == (info.regs.eflags | 0x20200U));
+    /* 0x55AA has NT and an IOPL bit set: the guest gets neither. */
+    assert(entered_vm86.regs.eflags == ((info.regs.eflags & ~0x7000U) | 0x20200U));
 }
 
 static void test_vm86_init_bsd_copies_args(void) {
@@ -176,7 +190,8 @@ static void test_flag_and_stack_opcodes(void) {
     lowmem[0x10000] = 0x9D;
     stack[0] = 0x5678;
     vm86_gpf_handler(&regs);
-    assert((regs.eflags & 0xFFFFU) == 0x5678);
+    /* POPF takes the flags image but not its IOPL/NT bits (0x7000). */
+    assert((regs.eflags & 0xFFFFU) == ((0x1234U & 0x7000U) | (0x5678U & ~0x7000U)));
     assert(regs.useresp == 0x0200);
 
     regs.eip = 0;
@@ -185,11 +200,47 @@ static void test_flag_and_stack_opcodes(void) {
     stack[0] = 0xAAAA;
     stack[1] = 0xBBBB;
     stack[2] = 0xCCCC;
+    uint32_t before = regs.eflags;
     vm86_gpf_handler(&regs);
     assert(regs.eip == 0xAAAA);
     assert(regs.cs == 0xBBBB);
-    assert((regs.eflags & 0xFFFFU) == 0xCCCC);
+    /* Nor does IRET's (0xCCCC sets IOPL 0 and NT 1 over before's). */
+    assert((regs.eflags & 0xFFFFU) == ((before & 0x7000U) | (0xCCCCU & ~0x7000U)));
     assert(regs.useresp == 0x0206);
+}
+
+/* A user guest the monitor cannot carry on with is ended by a signal,
+ * instead of re-trapping on the same instruction forever. */
+static void test_user_guest_failures(void) {
+    static process_t proc;
+    registers_t regs;
+
+    reset_state();
+    memset(&proc, 0, sizeof(proc));
+    current_process = &proc;
+    proc.sig_actions[SIGILL - 1].sa_handler = (sig_t)1;   /* a handler */
+
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1000;
+    regs.eip = 0;
+    lowmem[0x10000] = 0x0F;                 /* not emulated */
+    assert(vm86_gpf_handler(&regs) == 1);
+    assert(trapped_sig == SIGILL && trapped_code == ILL_PRVOPC);
+    assert(proc.sig_actions[SIGILL - 1].sa_handler == SIG_DFL);
+
+    trapped_sig = 0;
+    regs.eip = 0;
+    lowmem[0x10000] = 0xF4;                 /* HLT outside a BIOS call */
+    assert(vm86_gpf_handler(&regs) == 1);
+    assert(trapped_sig == SIGILL);
+
+    trapped_sig = 0;
+    regs.eip = 0;
+    regs.ss = 0xFFFF;                       /* stack past the guest's memory */
+    regs.useresp = 0xFFFF;
+    lowmem[0x10000] = 0x9C;                 /* PUSHF */
+    assert(vm86_gpf_handler(&regs) == 1);
+    assert(trapped_sig == SIGSEGV && trapped_code == SEGV_MAPERR);
 }
 
 static void test_port_io_opcodes(void) {
@@ -272,6 +323,7 @@ int main(void) {
     test_flag_and_stack_opcodes();
     test_port_io_opcodes();
     test_hlt_kernel_bios_exit();
+    test_user_guest_failures();
     puts("host_test_vm86: PASS");
     return 0;
 }

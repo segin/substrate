@@ -167,7 +167,7 @@ SYS-DRV-003 are Critical and not listed.
   2. `sys/arch/x86_64/gdt.c:155` (`gdt_init_percpu`) leaves GDT slot 6 (`0x30`, selector `0x33`) zeroed (not present), and `i386_load_gs_slot` (`sys/arch/i386/sysarch.c:40`) returns early when `t->gs_base == 0`. When a 32-bit compatibility thread starts with `gs_base == 0`, `movw $0x33, %ax; movw %ax, %gs` in `sys/arch/x86_64/isr.S:304` faults in Ring 0 with `#NP`.
   Basis: traced.
 
-- [ ] **SYS-ARCH-004** *(Critical; confirmed)* When entering or emulating Virtual-8086 mode in `sys_vm86` and `vm86_gpf_handler`, the kernel shall mask `IOPL` and `NT` from user-supplied `eflags`, access guest memory exclusively through fault-safe user copy helpers, and terminate VM86 execution on unhandled opcodes.
+- [x] **SYS-ARCH-004** *(Critical; confirmed)* When entering or emulating Virtual-8086 mode in `sys_vm86` and `vm86_gpf_handler`, the kernel shall mask `IOPL` and `NT` from user-supplied `eflags`, access guest memory exclusively through fault-safe user copy helpers, and terminate VM86 execution on unhandled opcodes.
   Evidence: `sys/arch/i386/vm86.c:120-138` (`sys_vm86`) passes `k_info.regs.eflags | 0x20200` to `vm86_enter` (`sys/arch/i386/vm86_asm.S:44-114`) without clearing `IOPL` (`0x3000`) or `NT` (`0x4000`). `vm86_gpf_handler` (`sys/arch/i386/vm86.c:156-406`) directly dereferences user pointers `(cs << 4) + ip`, `(ss << 4) + sp`, and the real-mode IVT at virtual address `0x00000000` (`:199`) in Ring 0 without `copyin`/`copyout`. On an unhandled opcode (`default:` at `:399`), `eip` is not advanced and VM86 mode is not exited, causing an infinite Ring 0 GPF loop.
   Basis: traced.
 
