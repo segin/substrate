@@ -8,15 +8,25 @@
  * Such a failure came back to a caller running on a half-built address
  * space: it died on its first instruction, or ran on, leaking the new one.
  *
- * Usage: execfail <good x.out (Xenix/286) binary>
+ * Usage: execfail <kind> <binary> [<binary to run after>]
  *
- * The good binary is copied with its entry offset moved out of the code
- * segment.  Its header still passes the early checks, so the loader builds
- * the new address space and loads the segments before it notices.
+ * Each kind makes an exec of <binary> fail after its loader has built the
+ * new address space:
  *
- *   A. a child execs the bad copy: ENOEXEC, its memory (data, heap,
- *      stack) intact, and it can then exec the good binary, which exits 0;
- *   B. 300 failed execs in a row do not use up memory.
+ *   x286-entry  copy of a Xenix/286 x.out, entry offset moved out of its
+ *               code segment                                   (ENOEXEC)
+ *   x386-eseg   copy of a Xenix/386 x.out, entry segment selector naming
+ *               no segment                                     (ENOEXEC)
+ *   truncate    copy of an ELKS (or other) program cut off part way
+ *               through its text                               (ENOEXEC)
+ *   env         <binary> itself, with a 12 MiB environment: the a.out and
+ *               COFF loaders refuse it while building the stack  (E2BIG)
+ *
+ *   A. a child execs it: the expected error, its data, heap and stack
+ *      intact; then, if given, it execs the third argument, which must
+ *      exit 0;
+ *   B. failed execs in a row return the same error and do not use up
+ *      memory.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -27,12 +37,18 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define BAD_PATH   "/tmp/execfail.bad"
-#define ENTRY_OFF  24           /* struct xexec: x_entry */
-#define ROUNDS     300
+#define BAD_PATH        "/tmp/execfail.bad"
+#define X286_ENTRY_OFF  24      /* struct xexec: x_entry */
+#define X386_ESEG_OFF   72      /* struct xexec (32) + struct xext: xe_eseg */
+#define TRUNC_LEN       40      /* 32-byte ELKS header + 8 bytes of text */
+#define ENV_KIB         (12 * 1024)
+#define VAR_LEN         1000
 
 static int fails;
 static char data_pattern[4096];
+static const char *bad_path;
+static char **bad_env;
+static int want_errno;
 
 static void check(int ok, const char *what)
 {
@@ -56,21 +72,26 @@ static long mem_free_kb(void)
     return kb;
 }
 
-static int make_bad_copy(const char *good)
+/* Copy `src` to BAD_PATH, keep `len` bytes (0 = all), patch `patch_len`
+ * bytes at `patch_off` with `patch`. */
+static int make_copy(const char *src, size_t len, size_t patch_off,
+                     const void *patch, size_t patch_len)
 {
     static char buf[256 * 1024];
     int in, out;
     ssize_t n;
-    unsigned int entry = 0x20000;   /* past any 64 KiB segment */
 
-    in = open(good, O_RDONLY);
+    in = open(src, O_RDONLY);
     if (in < 0)
         return -1;
     n = read(in, buf, sizeof(buf));
     close(in);
-    if (n <= ENTRY_OFF + 4)
+    if (n <= 0 || (patch_len && (size_t)n < patch_off + patch_len))
         return -1;
-    memcpy(buf + ENTRY_OFF, &entry, 4);
+    if (len && (size_t)n > len)
+        n = (ssize_t)len;
+    if (patch_len)
+        memcpy(buf + patch_off, patch, patch_len);
     out = open(BAD_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0755);
     if (out < 0)
         return -1;
@@ -80,6 +101,23 @@ static int make_bad_copy(const char *good)
     }
     close(out);
     return chmod(BAD_PATH, 0755);
+}
+
+static char **make_env(int kib)
+{
+    int n = (int)((long)kib * 1024 / VAR_LEN) + 1;
+    char **env = calloc((size_t)n + 1, sizeof(char *));
+    char *block = malloc((size_t)n * VAR_LEN);
+
+    if (!env || !block)
+        return NULL;
+    for (int i = 0; i < n; i++) {
+        env[i] = block + (size_t)i * VAR_LEN;
+        snprintf(env[i], VAR_LEN, "V%07d=", i);
+        memset(env[i] + 9, 'x', VAR_LEN - 10);
+        env[i][VAR_LEN - 1] = '\0';
+    }
+    return env;
 }
 
 static int pattern_ok(const unsigned char *p, size_t len, unsigned char seed)
@@ -96,11 +134,18 @@ static void fill(unsigned char *p, size_t len, unsigned char seed)
         p[i] = (unsigned char)(seed + i);
 }
 
-/* Child of A: exit 0 only through the good binary. */
-static void child_a(const char *good)
+static int exec_bad(void)
 {
-    char *bad_argv[] = { "bad", NULL };
-    char *good_argv[] = { "echo", "ok    good exec after the failed one", NULL };
+    char *argv[] = { (char *)bad_path, NULL };
+
+    return execve(bad_path, argv, bad_env);
+}
+
+/* Child of A: exit 0 only if all is well (through `after`, if given). */
+static void child_a(const char *after)
+{
+    char *after_argv[] = { "echo", "ok    good exec after the failed one",
+                           NULL };
     char *envp[] = { NULL };
     unsigned char stack_pattern[2048];
     unsigned char *heap = malloc(8192);
@@ -112,10 +157,11 @@ static void child_a(const char *good)
     fill(heap, 8192, 31);
     fill(stack_pattern, sizeof(stack_pattern), 99);
 
-    rc = execve(BAD_PATH, bad_argv, envp);
+    rc = exec_bad();
     err = errno;
-    if (rc != -1 || err != ENOEXEC) {
-        printf("FAIL  bad exec gave %d errno %d\n", rc, err);
+    if (rc != -1 || err != want_errno) {
+        printf("FAIL  bad exec gave %d errno %d, want errno %d\n", rc, err,
+               want_errno);
         _exit(11);
     }
     if (!pattern_ok((unsigned char *)data_pattern, sizeof(data_pattern), 7) ||
@@ -124,56 +170,81 @@ static void child_a(const char *good)
         printf("FAIL  memory changed across the failed exec\n");
         _exit(12);
     }
-    printf("ok    child: ENOEXEC, memory intact\n");
-    fflush(stdout);
-    execve(good, good_argv, envp);
+    printf("ok    child: errno %d, memory intact\n", err);
+    if (!after)
+        _exit(0);
+    execve(after, after_argv, envp);
     printf("FAIL  good exec after a failed one: errno %d\n", errno);
     _exit(13);
 }
 
 int main(int argc, char **argv)
 {
-    const char *good;
-    int status = 0;
+    const char *kind, *bin, *after;
+    static char *empty_env[] = { NULL };
+    int status = 0, rounds = 300, rc = 0;
     pid_t pid;
-    long before, after;
+    long before, after_kb;
     int i, wrong = 0;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc < 2) {
-        fprintf(stderr, "usage: execfail <good x.out binary>\n");
+    if (argc < 3) {
+        fprintf(stderr, "usage: execfail x286-entry|x386-eseg|truncate|env "
+                        "<binary> [<binary to run after>]\n");
         return 2;
     }
-    good = argv[1];
-    if (make_bad_copy(good) != 0) {
-        printf("FAIL  cannot make the bad copy of %s: errno %d\n", good, errno);
+    kind = argv[1];
+    bin = argv[2];
+    after = argc > 3 ? argv[3] : NULL;
+    bad_path = BAD_PATH;
+    bad_env = empty_env;
+    want_errno = ENOEXEC;
+
+    if (strcmp(kind, "x286-entry") == 0) {
+        unsigned int entry = 0x20000;   /* past any 64 KiB segment */
+        rc = make_copy(bin, 0, X286_ENTRY_OFF, &entry, sizeof(entry));
+    } else if (strcmp(kind, "x386-eseg") == 0) {
+        unsigned short eseg = 0xfff8;   /* no segment has it */
+        rc = make_copy(bin, 0, X386_ESEG_OFF, &eseg, sizeof(eseg));
+    } else if (strcmp(kind, "truncate") == 0) {
+        rc = make_copy(bin, TRUNC_LEN, 0, NULL, 0);
+    } else if (strcmp(kind, "env") == 0) {
+        bad_path = bin;
+        bad_env = make_env(ENV_KIB);
+        want_errno = E2BIG;
+        rounds = 20;    /* each one copies 12 MiB in */
+        if (!bad_env)
+            rc = -1;
+    } else {
+        fprintf(stderr, "execfail: unknown kind %s\n", kind);
+        return 2;
+    }
+    if (rc != 0) {
+        printf("FAIL  cannot prepare %s from %s: errno %d\n", kind, bin, errno);
         return 1;
     }
 
     /* A */
     pid = fork();
     if (pid == 0)
-        child_a(good);
+        child_a(after);
     check(pid > 0 && waitpid(pid, &status, 0) == pid, "A: child reaped");
     check(WIFEXITED(status) && WEXITSTATUS(status) == 0,
-          "A: failed exec returned, then the good binary ran and exited 0");
+          after ? "A: failed exec returned, then the good binary ran"
+                : "A: failed exec returned to an intact caller");
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
         printf("      status 0x%x\n", status);
 
     /* B: the failures happen in this process, which must keep running. */
     before = mem_free_kb();
-    for (i = 0; i < ROUNDS; i++) {
-        char *bad_argv[] = { "bad", NULL };
-        char *envp[] = { NULL };
-
-        if (execve(BAD_PATH, bad_argv, envp) != -1 || errno != ENOEXEC)
+    for (i = 0; i < rounds; i++)
+        if (exec_bad() != -1 || errno != want_errno)
             wrong++;
-    }
-    after = mem_free_kb();
-    check(wrong == 0, "B: every failed exec returned ENOEXEC");
+    after_kb = mem_free_kb();
+    check(wrong == 0, "B: every failed exec returned the same error");
     printf("      MemFree %ld -> %ld kB over %d failed execs\n",
-           before, after, ROUNDS);
-    check(before < 0 || after < 0 || before - after < 2048,
+           before, after_kb, rounds);
+    check(before < 0 || after_kb < 0 || before - after_kb < 2048,
           "B: failed execs do not leak memory");
 
     unlink(BAD_PATH);

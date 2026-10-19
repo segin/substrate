@@ -192,10 +192,14 @@ lseekchk: lseekchk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
-# execfail: an exec that fails part way through loading (an x.out whose
-# entry lies outside its code segment) returns ENOEXEC to a caller whose
-# memory is intact, and does not leak.  Needs a Xenix/286 binary to copy:
-# run as `execfail /perso/xenix286s/bin/echo` with xenix286s.img mounted.
+# execfail: an exec that fails part way through loading returns to a caller
+# whose memory is intact, and does not leak.  One broken program per loader,
+# made from a good one (see the usage comment in execfail.c), e.g.
+#   execfail x286-entry /perso/xenix286s/bin/echo /perso/xenix286s/bin/echo
+#   execfail x386-eseg  /perso/xenix/bin/ls     (a 386 x.out there)
+#   execfail truncate   /hello_elks              (tests/elks)
+#   execfail env        /perso/linux/usr/bin/printenv   (a.out)
+#   execfail env        /perso/svr3/bin/echo            (COFF)
 execfail: execfail.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
