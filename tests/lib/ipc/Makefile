@@ -31,6 +31,10 @@ else
 endif
 
 TESTS = torture_ipc torture_pipe torture_sem torture_shm torture_ksem
+# Substrate-only (raw SYS_KSEM_* calls).
+ifneq ($(CROSS),)
+  TESTS += ksemforeign
+endif
 
 all: $(TESTS)
 
@@ -39,6 +43,11 @@ torture_ipc: torture_ipc.c
 
 # torture_ksem uses sem_open/sem_*/sem_init(pshared) — needs libpthread.
 torture_ksem: torture_ksem.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# ksemforeign: semaphore ops need an open reference or permission; the
+# reference is inherited across fork.  Needs root.
+ksemforeign: ksemforeign.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_pipe: torture_pipe.c

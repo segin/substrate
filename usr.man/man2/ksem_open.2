@@ -89,6 +89,14 @@ increments the value and wakes one waiter.
 stores the current value in
 .IR *sval .
 .PP
+The wait calls and
+.BR ksem_post ()
+need the caller to hold the semaphore open, or to have write permission
+on it;
+.BR ksem_getvalue ()
+needs it open or read permission.
+.BR fork (2)
+gives the child a reference to each semaphore the parent holds open.
 A process's still-open descriptors are dropped automatically when it exits.
 .SH RETURN VALUE
 .BR ksem_open ()
@@ -113,7 +121,8 @@ were set but the name already exists.
 .TP
 .B EINVAL
 Bad
-.IR id ;
+.IR id ,
+or one the caller neither holds open nor has permission to use;
 .I name
 does not begin with a slash and a character; or
 .I value

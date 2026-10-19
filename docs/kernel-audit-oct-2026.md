@@ -215,7 +215,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/posix_mqueue.c:127-136` (`mqd_lookup`) indexes the global `mqdescs[]` table and verifies `d->in_use` and `d->seq == seq`, but never checks `d->pid == current_process->pid` (recorded at `:384`), allowing any process to read, write, modify, or close another process's `mqd_t`.
   Basis: traced.
 
-- [ ] **SYS-KERN-008** *(High; confirmed)* When performing wait, post, or getvalue operations on a POSIX semaphore in `sys/kern/posix_sem.c`, the kernel shall verify that the calling process holds an open reference in `ksem_open_list` or satisfies `ksem_perm_ok`.
+- [x] **SYS-KERN-008** *(High; confirmed)* When performing wait, post, or getvalue operations on a POSIX semaphore in `sys/kern/posix_sem.c`, the kernel shall verify that the calling process holds an open reference in `ksem_open_list` or satisfies `ksem_perm_ok`.
   Evidence: `sys/kern/posix_sem.c:99-108, 325-489` (`kern_ksem_trywait`, `kern_ksem_wait`, `kern_ksem_timedwait`, `kern_ksem_post`, `kern_ksem_getvalue`) look up global `ksem` IDs via `ksem_lookup` without checking `ksem_perm_ok` or `ksem_open_list`.
   Basis: traced.
 

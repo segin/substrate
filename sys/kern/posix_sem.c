@@ -18,7 +18,9 @@
  *
  * Lifetime (POSIX persistence): each sem_open bumps an open-descriptor
  * refcount and records a (pid, slot) so a process that exits without closing is
- * cleaned up (ksem_proc_cleanup, from proc_exit).  sem_unlink removes the name
+ * cleaned up (ksem_proc_cleanup, from proc_exit); fork() copies the parent's
+ * records to the child (ksem_proc_fork).  Wait, post and getvalue need an
+ * open record or the matching permission bits.  sem_unlink removes the name
  * so future opens miss it, but the object survives — existing descriptors keep
  * working — until the last descriptor is closed, at which point the slot is
  * freed.  An anonymous ksem has no name, so it is freed as soon as its refcount
@@ -123,6 +125,37 @@ static int ksem_perm_ok(struct kposix_sem *s, int want)
     else
         granted = mode & 7;
     return (granted & want) == want;
+}
+
+/* Does pid hold an open descriptor for the object in slot index? */
+static int ksem_has_open(int pid, int index, unsigned int seq)
+{
+    for (struct ksem_open *o = ksem_open_list; o; o = o->next)
+        if (o->pid == pid && o->index == index && o->seq == seq)
+            return 1;
+    return 0;
+}
+
+/*
+ * Resolve an id for a wait/post/getvalue by the calling process: the caller
+ * must hold the semaphore open (sem_open, sem_init, or inherited across
+ * fork) or have the permission the operation needs (want: 4 read, 2 alter).
+ * Ids are small and sequential, so without this any process could post,
+ * drain or read any other process's semaphore.  A semaphore the caller may
+ * not use is reported like a nonexistent one, EINVAL.
+ */
+static struct kposix_sem *ksem_lookup_use(int id, int want, int *err)
+{
+    struct kposix_sem *s = ksem_lookup(id, err);
+    if (!s)
+        return NULL;
+    int pid = current_process ? current_process->pid : 0;
+    if (!ksem_has_open(pid, (int)(s - posix_sems), s->seq) &&
+        !ksem_perm_ok(s, want)) {
+        *err = EINVAL;
+        return NULL;
+    }
+    return s;
 }
 
 /* Release a slot and invalidate outstanding ids (caller holds ksem_lock).
@@ -327,7 +360,7 @@ int kern_ksem_trywait(int id)
     ksem_lazy_init();
     mutex_lock(&ksem_lock);
     int err = 0;
-    struct kposix_sem *s = ksem_lookup(id, &err);
+    struct kposix_sem *s = ksem_lookup_use(id, 2, &err);
     if (!s) { mutex_unlock(&ksem_lock); return -err; }
     if (s->value > 0) {
         s->value--;
@@ -349,7 +382,7 @@ static int ksem_wait_common(int id, uint64_t deadline)
     mutex_lock(&ksem_lock);
     for (;;) {
         int err = 0;
-        struct kposix_sem *s = ksem_lookup(id, &err);
+        struct kposix_sem *s = ksem_lookup_use(id, 2, &err);
         if (!s) { mutex_unlock(&ksem_lock); return -err; }
 
         if (s->value > 0) {
@@ -467,7 +500,7 @@ int kern_ksem_post(int id)
     ksem_lazy_init();
     mutex_lock(&ksem_lock);
     int err = 0;
-    struct kposix_sem *s = ksem_lookup(id, &err);
+    struct kposix_sem *s = ksem_lookup_use(id, 2, &err);
     if (!s) { mutex_unlock(&ksem_lock); return -err; }
     if (s->value >= KSEM_VALUE_MAX) { mutex_unlock(&ksem_lock); return -ERANGE; }
     s->value++;
@@ -481,7 +514,7 @@ int kern_ksem_getvalue(int id, int *ksval)
     ksem_lazy_init();
     mutex_lock(&ksem_lock);
     int err = 0;
-    struct kposix_sem *s = ksem_lookup(id, &err);
+    struct kposix_sem *s = ksem_lookup_use(id, 4, &err);
     if (!s) { mutex_unlock(&ksem_lock); return -err; }
     *ksval = (int)s->value;
     mutex_unlock(&ksem_lock);
@@ -509,6 +542,48 @@ void ksem_proc_cleanup(int pid)
             ksem_free_slot(s);
     }
     mutex_unlock(&ksem_lock);
+}
+
+/*
+ * fork(): semaphores open in the parent are open in the child (POSIX), so
+ * the child gets a copy of each of the parent's open records and the
+ * reference that goes with it.  On allocation failure the child is given
+ * nothing and fork fails with -ENOMEM.
+ */
+int ksem_proc_fork(int parent_pid, int child_pid)
+{
+    if (!ksem_ready) return 0;
+    mutex_lock(&ksem_lock);
+    struct ksem_open *added = NULL;
+    for (struct ksem_open *o = ksem_open_list; o; o = o->next) {
+        if (o->pid != parent_pid)
+            continue;
+        struct ksem_open *c = (struct ksem_open *)kmalloc(sizeof(*c));
+        if (!c) {
+            while (added) {
+                struct ksem_open *n = added->next;
+                kfree(added, sizeof(*added));
+                added = n;
+            }
+            mutex_unlock(&ksem_lock);
+            return -ENOMEM;
+        }
+        c->pid   = child_pid;
+        c->index = o->index;
+        c->seq   = o->seq;
+        c->next  = added;
+        added = c;
+    }
+    /* All allocated: link them in and take the references. */
+    while (added) {
+        struct ksem_open *n = added->next;
+        added->next = ksem_open_list;
+        ksem_open_list = added;
+        posix_sems[added->index].refs++;
+        added = n;
+    }
+    mutex_unlock(&ksem_lock);
+    return 0;
 }
 
 /* ---- native-ABI syscall wrappers ---- */

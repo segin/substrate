@@ -692,10 +692,16 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
      */
     proc_add_child(parent, child_proc);
 
-    /* POSIX message-queue descriptors are inherited, under the same values. */
+    /* POSIX message-queue descriptors (under the same values) and open
+     * POSIX semaphores are inherited. */
     int fork_result = mq_proc_fork(parent->pid, child_proc->pid);
     if (fork_result == 0) {
-        fork_result = sched_fork_thread(child_proc, stack);
+        fork_result = ksem_proc_fork(parent->pid, child_proc->pid);
+        if (fork_result == 0) {
+            fork_result = sched_fork_thread(child_proc, stack);
+            if (fork_result < 0)
+                ksem_proc_cleanup(child_proc->pid);
+        }
         if (fork_result < 0)
             mq_proc_cleanup(child_proc->pid);
     }

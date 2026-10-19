@@ -63,6 +63,8 @@ int kern_ksem_getvalue(int id, int *ksval);
 
 /* Drop this pid's still-open descriptors at process exit. */
 void ksem_proc_cleanup(int pid);
+/* Give a forked child the parent's open semaphores. */
+int  ksem_proc_fork(int parent_pid, int child_pid);
 
 void ksem_init(void);
 
