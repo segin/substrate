@@ -1067,7 +1067,7 @@ verdicts, corrections and splits are recorded with each finding, and the
 critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
 006b, 007b.
 
-- [ ] **SYS-NEW-001a** *(High; confirmed)* No ext2 vnode op shall dereference `ctx->fs` of a node whose inode has been deleted.
+- [x] **SYS-NEW-001a** *(High; confirmed)* No ext2 vnode op shall dereference `ctx->fs` of a node whose inode has been deleted.
   Evidence: `ext2_node_close`'s deferred delete (`sys/fs/ext2/ext2.c:115-137`, reached from rmdir at :6780-6784 and unlink at :6616-6624) sets `ctx->fs = NULL` but leaves `node->finddir` set; a path walk sitting in a directory that is rmdir'ed calls `ext2_finddir`, which dereferences `fs->mp` at :3539-3542 — a kernel NULL dereference in the root filesystem.  Other ext2 ops reading `ctx->fs` unchecked need the same guard.  Interim mitigation for SYS-NEW-001b.
   Basis: traced (verifier + critic).
 

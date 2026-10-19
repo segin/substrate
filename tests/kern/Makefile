@@ -232,6 +232,13 @@ forkleak: forkleak.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# rmdirwalk: path walks through a directory being removed (and finished
+# off at its last close) neither crash the kernel nor wedge.  Runs on the
+# host too.
+rmdirwalk: rmdirwalk.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # fatops: on a FAT mount, an empty file truncated larger reads zeros, a
 # case-only rename keeps the file, and a write at 4 GiB does not wrap to 0.
 # Run as `fatops <dir on FAT>`, then fsck.fat -n the image.

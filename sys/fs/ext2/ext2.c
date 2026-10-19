@@ -1476,6 +1476,7 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
      * lseek(fd, -100, SEEK_SET); write(fd, buf, 64). */
     if (offset < 0) return 0;
     ext2_fs_t *fs = node->fs;
+    if (!fs) return 0;                      /* deleted: see ext2_finddir */
     ext2_inode_t *inode = &node->inode;
 
     /* 64-bit size — a >4 GiB file made by Linux used to
@@ -1884,6 +1885,10 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
         return 0;
     }
     ext2_fs_t *fs = node->fs;
+    if (!fs) {                              /* deleted: see ext2_finddir */
+        if (errp) *errp = -ENOENT;
+        return 0;
+    }
     ext2_inode_t *inode = &node->inode;
 
     /* Extent-flagged inodes use a completely different on-disk
@@ -2530,6 +2535,7 @@ static int ext2_symlink_is_fast(const ext2_fs_t *fs,
 // Read symlink target
 int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return -ENOENT;   /* deleted: see ext2_finddir */
     ext2_inode_t *inode = &ctx->inode;
 
     /* A symlink target must fit in the caller's buffer with room for
@@ -2651,6 +2657,7 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
 // Read directory entry at index
 struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return NULL;      /* deleted: see ext2_finddir */
     ext2_fs_t *fs = ctx->fs;
 
     // Lazily set mount pointer in filesystem context
@@ -3536,6 +3543,10 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
 
     ext2_finddir_calls++;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    /* A deleted directory's slot has fs == NULL (ext2_node_close's
+     * deferred delete); a path walk sitting in it used to dereference it
+     * here.  It has no entries any more. */
+    if (!ctx || !ctx->fs) return NULL;
     ext2_fs_t *fs = ctx->fs;
 
     // Lazily set mount pointer in filesystem context
@@ -5457,6 +5468,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx) return -EINVAL;
     fs = ctx->fs;
+    if (!fs) return -ENOENT;                /* deleted: see ext2_finddir */
     if (EXT2_RO_REFUSE(fs)) return -EROFS;
     /* Truncation is forbidden on both immutable and append-only files. */
     if (EXT2_IS_IMMUTABLE(ctx) || EXT2_IS_APPEND(ctx)) return -EPERM;
@@ -5539,6 +5551,8 @@ int ext2_truncate(fs_node_t *node, off_t length) {
 // Add directory entry
 static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint8_t file_type) {
     if (!dir || !name || inode == 0) return -EINVAL;
+    if (!dir->impl || !((ext2_node_t *)(uintptr_t)dir->impl)->fs)
+        return -ENOENT;                     /* deleted: see ext2_finddir */
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
@@ -5856,6 +5870,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
     if ((source->flags & 0x7) == FS_DIRECTORY) return -EPERM; // POSIX doesn't allow hard links to directories
     {
         ext2_node_t *pc = (ext2_node_t *)(uintptr_t)parent->impl;
+        if (pc && !pc->fs) return -ENOENT;     /* deleted: see ext2_finddir */
         if (pc && EXT2_RO_REFUSE(pc->fs)) return -EROFS;
     }
 
@@ -5912,6 +5927,9 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         return -EINVAL;
     {
         ext2_node_t *oc = (ext2_node_t *)(uintptr_t)old_parent->impl;
+        ext2_node_t *nc = (ext2_node_t *)(uintptr_t)new_parent->impl;
+        /* Either directory deleted: see ext2_finddir. */
+        if ((oc && !oc->fs) || (nc && !nc->fs)) return -ENOENT;
         if (oc && EXT2_RO_REFUSE(oc->fs)) return -EROFS;
     }
 
@@ -6119,8 +6137,9 @@ out:
 // Remove directory entry
 static int ext2_remove_entry(fs_node_t *dir, const char *name) {
     if (!dir || !name) return -EINVAL;
-    
+
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
+    if (!ctx || !ctx->fs) return -ENOENT;   /* deleted: see ext2_finddir */
     ext2_fs_t *fs = ctx->fs;
     // Optimization: Calculate strlen once
     size_t name_len = strlen(name);
@@ -6264,6 +6283,7 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
          * on a volume mounted -o ro, or force-mounted read-only because it
          * carries RO_COMPAT features this driver does not implement. */
         ext2_node_t *roc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (roc && !roc->fs) return -ENOENT;   /* deleted: see ext2_finddir */
         if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
     }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
@@ -6324,6 +6344,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     {
         /* See ext2_mknod(): read-only mounts must refuse this too. */
         ext2_node_t *roc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (roc && !roc->fs) return -ENOENT;   /* deleted: see ext2_finddir */
         if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
     }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
@@ -6433,6 +6454,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
     {
         ext2_node_t *dc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (dc && !dc->fs) return -ENOENT;     /* deleted: see ext2_finddir */
         if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
     }
     if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
@@ -6566,6 +6588,7 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     {
         ext2_node_t *dc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (dc && !dc->fs) return -ENOENT;     /* deleted: see ext2_finddir */
         if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
     }
 
@@ -6718,6 +6741,7 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
     {
         ext2_node_t *dc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (dc && !dc->fs) return -ENOENT;     /* deleted: see ext2_finddir */
         if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
     }
 
@@ -6790,6 +6814,7 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx) return -EINVAL;
     ext2_fs_t *fs = ctx->fs;
+    if (!fs) return -ENOENT;                /* deleted: see ext2_finddir */
 
     buf->f_type         = EXT2_SUPER_MAGIC;
     buf->f_bsize        = fs->block_size;
