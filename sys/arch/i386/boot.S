@@ -128,10 +128,13 @@ _start:
 	# Restore page directory pointer
 	mov $(boot_page_directory - 0xC0000000), %edx
 
-	# 3. Enable Paging
+	# 3. Enable Paging, with CR0.WP so ring 0 honours read-only PTEs:
+	# without it a copyout into a copy-on-write or read-only user page
+	# writes the shared frame instead of faulting.  The APs copy this
+	# CR0 (smp_discovery.c), so they get WP too.
 	mov %edx, %cr3
 	mov %cr0, %eax
-	or $0x80000000, %eax
+	or $0x80010000, %eax        # CR0.PG | CR0.WP
 	mov %eax, %cr0
 
 	# Restore magic

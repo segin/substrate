@@ -106,7 +106,7 @@ SYS-DRV-003 are Critical and not listed.
 
 ## 1. Virtual Memory, Pmap & Allocators (`sys/vm/`, `sys/arch/*/pmap.c`)
 
-- [ ] **SYS-VM-001** *(Critical; confirmed)* While the i386 kernel is running with paging enabled, the processor shall have `CR0.WP` (bit 16, `0x00010000`) set on the bootstrap processor and all application processors.
+- [x] **SYS-VM-001** *(Critical; confirmed)* While the i386 kernel is running with paging enabled, the processor shall have `CR0.WP` (bit 16, `0x00010000`) set on the bootstrap processor and all application processors.
   Evidence: `sys/arch/i386/boot.S:133-135` enables paging with `orl $0x80000000, %eax` (`CR0_PG` only) and `sys/arch/i386/efi_boot.c:433-436` sets `cr0 |= 0x80000000U`, whereas `sys/arch/x86_64/boot/boot.S:203-205` sets `CR0_PG | CR0_WP`. Because `CR0.WP == 0` on i386, Ring 0 stores in `copyout` (`sys/kern/subr_copy.c:99`), `casuword32` (`sys/kern/subr_copy.c:176`), and `futex_cmpxchg_user` (`sys/kern/futex.c:155`) bypass `PTE_W == 0` without raising `#PF`. Passing a fork-COW buffer or a `PROT_READ` `MAP_PRIVATE` buffer backed by `mmap_get_shared_backing_object` (`sys/vm/vm_syscalls.c:156-205`) to `read()` silently overwrites the shared physical page across processes.
   Basis: traced.
 

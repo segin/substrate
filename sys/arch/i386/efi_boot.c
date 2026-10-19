@@ -432,7 +432,7 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     uint32_t cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
-    cr0 |= 0x80000000;
+    cr0 |= 0x80010000;      /* CR0.PG | CR0.WP, as boot.S */
     __asm__ volatile("mov %0, %%cr0" :: "r"(cr0));
 
     // 9. Jump to Kernel

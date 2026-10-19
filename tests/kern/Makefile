@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock opencreat mmapshared
+all: soak_reap trapsig advlock opencreat mmapshared cowwrite
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -72,7 +72,13 @@ mmapshared: mmapshared.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# cowwrite: the kernel's stores into user memory (read(2) into a buffer)
+# respect copy-on-write and read-only pages.  Runs on the host too.
+cowwrite: cowwrite.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
-	rm -f soak_reap trapsig advlock opencreat mmapshared
+	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite
 
 .PHONY: all clean
