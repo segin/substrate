@@ -23,7 +23,8 @@ struct minix_inode_wrapper {
     struct dirent dirent;
     int opens;      /* open_fs references (open files, working directories) */
     int is_root;    /* the mount's root: freed by unmount, not by close */
-    int cached;     /* in minix_ncache: freed by eviction, not by close */
+    int cached;     /* in minix_ncache: freed with its inode or volume */
+    struct fs_node *ncache_next;    /* minix_ncache bucket chain */
 };
 
 /* Forward declarations */
@@ -612,72 +613,75 @@ static void minix_node_destroy(fs_node_t *node) {
  * Lookup cache: one node per (volume, inode).  Path walks look every
  * component up and never close the nodes they pass through, so a node per
  * lookup leaked on every open; a lookup now returns the inode's cached
- * node.  An entry nothing has open may be evicted when the table is full,
- * and an inode's entry goes when the inode is freed (so a new file reusing
- * the number does not get the old node).
+ * node.  Nothing is evicted: a walk holds the nodes it passes through
+ * without opening them, so freeing one nobody had open could free it under
+ * a walk.  An entry goes only when its inode is freed (so a new file reusing
+ * the number does not get the old node) or its volume is unmounted.  The
+ * cache is bounded by the inodes looked up, at most the volume's count.
  */
-#define MINIX_NCACHE_SIZE 128
-static fs_node_t *minix_ncache[MINIX_NCACHE_SIZE];
-static int minix_ncache_next;
+#define MINIX_NCACHE_BUCKETS 256
+static fs_node_t *minix_ncache[MINIX_NCACHE_BUCKETS];
 static spinlock_t minix_ncache_lock = SPINLOCK_INIT("minix_ncache");
 
 static struct minix_inode_wrapper *minix_w(fs_node_t *node) {
     return node ? (struct minix_inode_wrapper *)node->ptr : NULL;
 }
 
+static unsigned int minix_ncache_bucket(minix_fs_t *fs, uint64_t ino) {
+    return (unsigned int)(((uintptr_t)fs >> 4) ^ ino) % MINIX_NCACHE_BUCKETS;
+}
+
+/* The cached node for (fs, ino), or NULL; the lock is held. */
+static fs_node_t *minix_ncache_find_locked(minix_fs_t *fs, uint64_t ino) {
+    for (fs_node_t *n = minix_ncache[minix_ncache_bucket(fs, ino)]; n;
+         n = minix_w(n)->ncache_next) {
+        if (n->impl == (uintptr_t)fs && n->inode == ino) return n;
+    }
+    return NULL;
+}
+
 /* The cached node for (fs, ino), or NULL. */
 static fs_node_t *minix_ncache_find(minix_fs_t *fs, uint32_t ino) {
-    fs_node_t *hit = NULL;
     spinlock_acquire(&minix_ncache_lock);
-    for (int i = 0; i < MINIX_NCACHE_SIZE; i++) {
-        fs_node_t *n = minix_ncache[i];
-        if (n && n->impl == (uintptr_t)fs && n->inode == ino) {
-            hit = n;
-            break;
-        }
-    }
+    fs_node_t *hit = minix_ncache_find_locked(fs, ino);
     spinlock_release(&minix_ncache_lock);
     return hit;
 }
 
 /* Cache `node` (fresh from minix_read_inode).  Returns the node to use: an
- * entry another lookup cached meanwhile, or `node` itself, cached if a slot
- * was free or could be freed. */
+ * entry another lookup cached meanwhile, or `node` itself, now cached. */
 static fs_node_t *minix_ncache_insert(minix_fs_t *fs, fs_node_t *node) {
-    fs_node_t *evicted = NULL, *existing = NULL;
     spinlock_acquire(&minix_ncache_lock);
-    int slot = -1;
-    for (int i = 0; i < MINIX_NCACHE_SIZE; i++) {
-        fs_node_t *n = minix_ncache[i];
-        if (n && n->impl == (uintptr_t)fs && n->inode == node->inode) {
-            existing = n;
-            break;
-        }
-        if (!n && slot < 0) slot = i;
-    }
-    if (!existing && slot < 0) {
-        for (int tries = 0; tries < MINIX_NCACHE_SIZE; tries++) {
-            int i = minix_ncache_next++ % MINIX_NCACHE_SIZE;
-            struct minix_inode_wrapper *w = minix_w(minix_ncache[i]);
-            if (w && w->opens == 0) {
-                evicted = minix_ncache[i];
-                w->cached = 0;
-                slot = i;
-                break;
-            }
-        }
-    }
-    if (!existing && slot >= 0) {
-        minix_ncache[slot] = node;
+    fs_node_t *existing = minix_ncache_find_locked(fs, node->inode);
+    if (!existing) {
+        unsigned int b = minix_ncache_bucket(fs, node->inode);
+        minix_w(node)->ncache_next = minix_ncache[b];
         minix_w(node)->cached = 1;
+        minix_ncache[b] = node;
     }
     spinlock_release(&minix_ncache_lock);
-    if (evicted) minix_node_destroy(evicted);
     if (existing) {
         minix_node_destroy(node);
         return existing;
     }
     return node;
+}
+
+/* Unlink `node` from its bucket; the lock is held. */
+static void minix_ncache_unlink_locked(fs_node_t *node) {
+    struct minix_inode_wrapper *w = minix_w(node);
+    fs_node_t **pp = &minix_ncache[minix_ncache_bucket(
+        (minix_fs_t *)(uintptr_t)node->impl, node->inode)];
+
+    while (*pp) {
+        if (*pp == node) {
+            *pp = w->ncache_next;
+            break;
+        }
+        pp = &minix_w(*pp)->ncache_next;
+    }
+    w->ncache_next = NULL;
+    w->cached = 0;
 }
 
 /* Drop `node` from the cache; free it now unless it is open (its last
@@ -686,9 +690,7 @@ static void minix_ncache_drop(fs_node_t *node) {
     struct minix_inode_wrapper *w = minix_w(node);
     if (!w) return;
     spinlock_acquire(&minix_ncache_lock);
-    for (int i = 0; i < MINIX_NCACHE_SIZE; i++)
-        if (minix_ncache[i] == node) minix_ncache[i] = NULL;
-    w->cached = 0;
+    if (w->cached) minix_ncache_unlink_locked(node);
     int open = w->opens > 0 || w->is_root;
     spinlock_release(&minix_ncache_lock);
     if (!open) minix_node_destroy(node);
@@ -1243,18 +1245,29 @@ static int minix_unmount(fs_node_t *root) {
     if (!root) return -EINVAL;
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)root->impl;
 
-    /* Cached nodes of this volume go with it. */
-    fs_node_t *dead[MINIX_NCACHE_SIZE];
-    int ndead = 0;
+    /* Cached nodes of this volume go with it: detach them onto a chain of
+     * their own under the lock, free them after. */
+    fs_node_t *dead = NULL;
     spinlock_acquire(&minix_ncache_lock);
-    for (int i = 0; i < MINIX_NCACHE_SIZE; i++) {
-        if (minix_ncache[i] && minix_ncache[i]->impl == (uintptr_t)fs) {
-            dead[ndead++] = minix_ncache[i];
-            minix_ncache[i] = NULL;
+    for (int b = 0; b < MINIX_NCACHE_BUCKETS; b++) {
+        fs_node_t **pp = &minix_ncache[b];
+        while (*pp) {
+            fs_node_t *n = *pp;
+            if (n->impl == (uintptr_t)fs) {
+                *pp = minix_w(n)->ncache_next;
+                minix_w(n)->ncache_next = dead;
+                dead = n;
+            } else {
+                pp = &minix_w(n)->ncache_next;
+            }
         }
     }
     spinlock_release(&minix_ncache_lock);
-    for (int i = 0; i < ndead; i++) minix_node_destroy(dead[i]);
+    while (dead) {
+        fs_node_t *next = minix_w(dead)->ncache_next;
+        minix_node_destroy(dead);
+        dead = next;
+    }
 
     if (root->ptr) {
         kfree(root->ptr, sizeof(struct minix_inode_wrapper));

@@ -179,6 +179,28 @@ static void one_variant(const char *label, const char *mkfs_args,
     /* One node per inode, however often it is looked up. */
     CHECK(minix_finddir(root, "fifo") == fifo, "second lookup made a new node");
 
+    /* A node held without being opened -- as a path walk holds the
+     * directories it passes through -- is not freed by later lookups.
+     * A 128-entry cache used to evict it once others filled the table. */
+    {
+        char nm[16];
+        int made = 0;
+
+        for (int i = 0; i < 200; i++) {
+            snprintf(nm, sizeof(nm), "n%d", i);
+            if (minix_mknod(root, nm, S_IFIFO | 0644, 0) == 0) made++;
+            (void)minix_finddir(root, nm);
+        }
+        CHECK(made == 200, "made %d of 200 fifos", made);
+        CHECK(minix_finddir(root, "fifo") == fifo &&
+              fifo->inode != 0 && (fifo->flags & 0x7) == FS_PIPE,
+              "a held node survived 200 other lookups");
+        for (int i = 0; i < 200; i++) {
+            snprintf(nm, sizeof(nm), "n%d", i);
+            minix_unlink(root, nm);
+        }
+    }
+
     if (long_names) {
         const char *longname = "a_name_of_twenty_six_chars";
         CHECK(minix_mknod(root, longname, S_IFIFO | 0644, 0) == 0,
