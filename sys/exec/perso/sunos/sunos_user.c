@@ -806,6 +806,9 @@ int sunos_sys_ioctl(int fd, uint32_t request, void *arg) {
     uint32_t key = SUNOS_IOC_KEY(request);
     int64_t result = 0;
 
+    /* Never a kernel address: see freebsd_sys_ioctl. */
+    if ((uintptr_t)arg >= USER32_VA_END) return -EFAULT;
+
     switch (key) {
     case SUNOS_TCGETS: case SUNOS_TCSETS: case SUNOS_TCSETSW:
     case SUNOS_TCSETSF:

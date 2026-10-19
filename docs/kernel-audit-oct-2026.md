@@ -492,7 +492,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/devices/ntsync.c:1263-1294` (`ntsync_open_callback`, `ntsync_close`) stores the per-open `struct ntsync_instance *` in global `ntsync_device.impl`, overwriting and leaking prior instances on every `open("/dev/ntsync")` and freeing `ntsync_device.impl` on the first `close()`, causing a use-after-free for all other open descriptors. `sys/drivers/console/pty.c:868-915` (`ptmx_open`) similarly overwrites global `ptmx_node.impl`.
   Basis: traced.
 
-- [ ] **SYS-DRV-003** *(High → Critical; partly confirmed)* When handling terminal ioctls in `tty_ioctl` (`sys/drivers/console/tty.c`) and personality ioctl entry points (`freebsd_sys_ioctl`, `elks_sys_ioctl`), the kernel shall not bypass `copyin`/`copyout` merely because a user-supplied `arg` is `>= KERN_BASE`.
+- [x] **SYS-DRV-003** *(High → Critical; partly confirmed)* When handling terminal ioctls in `tty_ioctl` (`sys/drivers/console/tty.c`) and personality ioctl entry points (`freebsd_sys_ioctl`, `elks_sys_ioctl`), the kernel shall not bypass `copyin`/`copyout` merely because a user-supplied `arg` is `>= KERN_BASE`.
   Evidence: `sys/drivers/console/tty.c:1369-1400` sets `int kernel_arg = ((uintptr_t)arg >= KERN_BASE);` and uses `memcpy` when true, while `freebsd_sys_ioctl` (`sys/exec/perso/compat.c`) passes user `arg` directly to `kern_ioctl` without checking `arg < KERN_BASE`.
   Basis: traced.
 

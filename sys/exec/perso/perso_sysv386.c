@@ -736,6 +736,9 @@ static int64_t sysv386_sys_ioctl(struct sysv386_frame *f) {
     struct sysv_termio user;
     int rc;
 
+    /* Never a kernel address: see freebsd_sys_ioctl. */
+    if (arg >= USER32_VA_END) return -EFAULT;
+
     switch (cmd) {
     case SYSV_TCGETA:
         rc = kern_ioctl(fd, TCGETS, &native);

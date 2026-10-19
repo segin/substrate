@@ -103,6 +103,18 @@ brkfork.linux: brkfork.c
 tidkern.linux: tidkern.c
 	gcc -m32 -static -O2 $< -o $@
 
+# ioctlkern.linux: a user's tty ioctl argument is never used as a kernel
+# buffer.  A static i386 Linux program; takes the kernel_hostname address.
+ioctlkern.linux: ioctlkern.c
+	gcc -m32 -static -O2 $< -o $@
+
+# ioctlkern_fbsd: the same through the FreeBSD personality (also NetBSD's
+# ioctl).  Freestanding, branded ELFOSABI_FREEBSD (9).
+ioctlkern_fbsd: ioctlkern_fbsd.c
+	gcc -m32 -static -nostdlib -ffreestanding -fno-builtin -fno-pie -no-pie \
+	    -fno-stack-protector -O2 $< -o $@
+	printf '\011' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
+
 # thrstart: thr_new with a stack the caller cannot write fails EFAULT
 # instead of panicking, and a thread with no TLS block starts.  Substrate
 # only.
@@ -136,6 +148,7 @@ shmgrow: shmgrow.c
 
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
-	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow
+	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
+	      ioctlkern.linux ioctlkern_fbsd
 
 .PHONY: all clean

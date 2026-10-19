@@ -556,6 +556,10 @@ static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
     int32_t pgrp;
     int rc;
 
+    /* Never a kernel address (see freebsd_sys_ioctl); checked before the
+     * STREAMS and tty handlers, which take the same argument. */
+    if (arg >= USER32_VA_END) return -EFAULT;
+
     if (svr4_streams_ioctl(f, &result) || svr4_tty_ioctl(f, &result)) {
         return result;
     }

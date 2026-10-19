@@ -2604,7 +2604,7 @@ static int64_t xenix386_sys_ioctl(struct sysv386_frame *f, int *known) {
         return 0;
     }
     if (arg >= USER32_VA_END) {
-        arg = 0;
+        return -EFAULT;     /* never a kernel address: see freebsd_sys_ioctl */
     }
     return kern_ioctl((int)f->a[0], f->a[1], (void *)(uintptr_t)arg);
 }

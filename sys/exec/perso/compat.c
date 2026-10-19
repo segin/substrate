@@ -2075,6 +2075,11 @@ static int freebsd_fiodtype(int fd, void *arg) {
 }
 
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg) {
+    /* As native sys_ioctl: the user's argument is never a kernel address.
+     * The tty layer takes an argument at or above KERN_BASE to be one of
+     * the kernel's own buffers and uses it without copyin/copyout, so a
+     * user argument there would read and write kernel memory. */
+    if ((uintptr_t)arg >= USER32_VA_END) return -EFAULT;
     switch (request) {
     /* Generic file-layer ioctls (same meaning on every fd) stay central. */
     case FBSD_FIONREAD: return kern_ioctl(fd, 0x541B, arg);

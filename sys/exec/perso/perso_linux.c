@@ -990,6 +990,8 @@ static int linux_sys_vm86(int func, void *ptr) {
 
 /* Dispatch ioctls based on type/magic */
 static int __attribute__((unused)) linux_sys_ioctl(int fd, uint32_t request, void *arg) {
+    /* Never a kernel address: see freebsd_sys_ioctl. */
+    if ((uintptr_t)arg >= USER32_VA_END) return -EFAULT;
     /* 0x54XX = 'T' << 8 (TTY) */
     if ((request & 0xFF00) == 0x5400) {
         return linux_ioctl_tty(fd, request, arg);
