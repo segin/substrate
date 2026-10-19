@@ -727,7 +727,7 @@ int sys_sigpending(void *set) {
 int kern_sigsuspend(const uint32_t *mask) {
     uint32_t old_mask = current_thread->sig_mask;
     if (mask) {
-        current_thread->sig_mask = *mask;
+        current_thread->sig_mask = *mask & ~SIG_CANTMASK;
     }
 
     /* Mark interruptible so psignal() can wake us */

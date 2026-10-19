@@ -213,7 +213,7 @@ int amd64_sys_sigreturn(void *ucp) {
             return -EINVAL;
     }
 
-    current_thread->sig_mask = uc.uc_sigmask.bits[0];
+    current_thread->sig_mask = uc.uc_sigmask.bits[0] & ~SIG_CANTMASK;
     current_thread->sig_on_stack = 0;
     current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
 

@@ -2,6 +2,7 @@
 
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
+#include <machine/usersel.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 #include <sys/copy.h>
 #include <sys/kern_syscalls.h>
@@ -225,6 +226,14 @@ int netbsd_sys_sigreturn(void *regs_ptr) {
     if (copyin(ucp, &uc, sizeof(uc)) != 0) return -1;
 
     const uint32_t *g = uc.uc_mcontext.__gregs;
+    /* A selector user mode cannot load would fault the kernel's return to
+     * user mode; a frame like that has nowhere to return to. */
+    if (!user_frame_selectors_ok(g[NBSD_REG_CS], g[NBSD_REG_SS],
+                                 g[NBSD_REG_DS], g[NBSD_REG_ES],
+                                 g[NBSD_REG_FS], g[NBSD_REG_GS])) {
+        sigexit(current_process, SIGSEGV);
+        return -1;
+    }
     regs->eip     = g[NBSD_REG_EIP];
     regs->eax     = g[NBSD_REG_EAX];
     regs->ebx     = g[NBSD_REG_EBX];
@@ -246,7 +255,8 @@ int netbsd_sys_sigreturn(void *regs_ptr) {
     regs->gs      = g[NBSD_REG_GS] | 3;
 
     /* uc_sigmask is a NetBSD-numbered set; the kernel mask is native. */
-    current_thread->sig_mask = netbsd_to_native_sigmask(uc.uc_sigmask[0]);
+    current_thread->sig_mask = netbsd_to_native_sigmask(uc.uc_sigmask[0]) &
+                               ~SIG_CANTMASK;
     /* Trapframe is now the restored user context — the dispatcher must
      * not apply its eax/edx/CF writebacks (see sys_sigreturn). */
     current_thread->frame_replaced = 1;

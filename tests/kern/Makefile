@@ -169,9 +169,17 @@ rofault: rofault.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# sigretsel.linux: sigreturn kills a process whose handler planted a bad
+# selector (instead of faulting the kernel), keeps SIGKILL and SIGSTOP
+# unblockable, and keeps Linux signal numbers in the saved mask.  A static
+# i386 Linux program; runs on the host too.
+sigretsel.linux: sigretsel.c
+	gcc -m32 -static -O2 $< -o $@
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
-	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault
+	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
+	      sigretsel.linux
 
 .PHONY: all clean

@@ -2,6 +2,7 @@
 
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
+#include <machine/usersel.h>
 #include <exec/perso/openbsd/openbsd_user.h>
 #include <sys/copy.h>
 #include <sys/kern_syscalls.h>
@@ -203,6 +204,13 @@ int openbsd_sys_sigreturn(void *regs_ptr) {
 
     struct openbsd_sigcontext sc;
     if (copyin(scp_user, &sc, sizeof(sc)) != 0) return -1;
+    /* A selector user mode cannot load would fault the kernel's return to
+     * user mode; a frame like that has nowhere to return to. */
+    if (!user_frame_selectors_ok(sc.sc_cs, sc.sc_ss, sc.sc_ds, sc.sc_es,
+                                 sc.sc_fs, sc.sc_gs)) {
+        sigexit(current_process, SIGSEGV);
+        return -1;
+    }
 
     regs->eip = sc.sc_eip;
     regs->eax = sc.sc_eax;
@@ -225,7 +233,8 @@ int openbsd_sys_sigreturn(void *regs_ptr) {
     regs->gs = sc.sc_gs | 3;
 
     /* sc_mask is an OpenBSD-numbered set; the kernel mask is native. */
-    current_thread->sig_mask = openbsd_to_native_sigmask(sc.sc_mask);
+    current_thread->sig_mask = openbsd_to_native_sigmask(sc.sc_mask) &
+                               ~SIG_CANTMASK;
     return regs->eax;
 }
 

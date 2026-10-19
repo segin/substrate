@@ -191,6 +191,9 @@ struct rtsig_entry {
 
 // Signal bits
 #define sigmask(sig) (1U << ((sig) - 1))
+/* Never blocked, whatever mask a program installs -- by sigprocmask or by
+ * the saved mask a sigreturn restores. */
+#define SIG_CANTMASK (sigmask(SIGKILL) | sigmask(SIGSTOP))
 
 /* Signal property flags for the kernel-internal sigprop[] table.
  * These are NOT sa_flags — they classify default disposition per

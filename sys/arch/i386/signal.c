@@ -36,6 +36,7 @@
 #include <machine/gdt.h>
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
+#include <machine/usersel.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
 #include <sys/proc.h>
@@ -667,14 +668,22 @@ int sys_sigreturn(void *scp_ptr) {
         kprint("sys_sigreturn: Invalid SS RPL\n");
         return -1;  /* EPERM */
     }
-    
+    /* RPL 3 is not enough: a selector past the table, or naming a system
+     * or kernel segment, faults the kernel's own return to user mode.  A
+     * frame like that has nowhere to return to, so the process dies. */
+    if (!user_frame_selectors_ok(sc.cs, sc.user_ss, sc.ds, sc.es,
+                                 sc.fs, sc.gs)) {
+        sigexit(current_process, SIGSEGV);
+        return -1;
+    }
+
     /*
      * Restore general-purpose registers
      */
-    syscall_regs->gs = sc.gs;
-    syscall_regs->fs = sc.fs;
-    syscall_regs->es = sc.es;
-    syscall_regs->ds = sc.ds;
+    syscall_regs->gs = sc.gs | 3;
+    syscall_regs->fs = sc.fs | 3;
+    syscall_regs->es = sc.es | 3;
+    syscall_regs->ds = sc.ds | 3;
     syscall_regs->edi = sc.edi;
     syscall_regs->esi = sc.esi;
     syscall_regs->ebp = sc.ebp;
@@ -727,7 +736,7 @@ int sys_sigreturn(void *scp_ptr) {
      * Restore signal mask
      */
     if (current_thread) {
-        current_thread->sig_mask = sc.oldmask;
+        current_thread->sig_mask = sc.oldmask & ~SIG_CANTMASK;
         
         /* Clear sig_on_stack flag - we're returning from handler */
         current_thread->sig_on_stack = 0;
@@ -824,14 +833,20 @@ int sys_rt_sigreturn(void *ucp_ptr) {
         kprint("sys_rt_sigreturn: Invalid SS RPL\n");
         return -1;  /* EPERM */
     }
-    
+    /* See sys_sigreturn: every selector must be one user mode can load. */
+    if (!user_frame_selectors_ok(mc->mc_cs, mc->mc_ss, mc->mc_ds, mc->mc_es,
+                                 mc->mc_fs, mc->mc_gs)) {
+        sigexit(current_process, SIGSEGV);
+        return -1;
+    }
+
     /*
      * Restore segment registers
      */
-    syscall_regs->gs = mc->mc_gs;
-    syscall_regs->fs = mc->mc_fs;
-    syscall_regs->es = mc->mc_es;
-    syscall_regs->ds = mc->mc_ds;
+    syscall_regs->gs = mc->mc_gs | 3;
+    syscall_regs->fs = mc->mc_fs | 3;
+    syscall_regs->es = mc->mc_es | 3;
+    syscall_regs->ds = mc->mc_ds | 3;
     
     /*
      * Restore general-purpose registers
@@ -871,7 +886,7 @@ int sys_rt_sigreturn(void *ucp_ptr) {
      * Restore signal mask from ucontext
      */
     if (current_thread) {
-        current_thread->sig_mask = uc.uc_sigmask;
+        current_thread->sig_mask = uc.uc_sigmask & ~SIG_CANTMASK;
         
         /* Clear sig_on_stack flag - we're returning from handler */
         current_thread->sig_on_stack = 0;

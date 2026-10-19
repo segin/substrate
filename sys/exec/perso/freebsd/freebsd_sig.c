@@ -2,6 +2,7 @@
 
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
+#include <machine/usersel.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -440,6 +441,13 @@ static int freebsd_sigreturn_from(registers_t *regs,
     if (copyin(uc_user, &uc, sizeof(uc)) != 0) return -EFAULT;
 
     struct freebsd_mcontext *mc = &uc.uc_mcontext;
+    /* A selector user mode cannot load would fault the kernel's return to
+     * user mode; a frame like that has nowhere to return to. */
+    if (!user_frame_selectors_ok(mc->mc_cs, mc->mc_ss, mc->mc_ds, mc->mc_es,
+                                 freebsd_fs_selector(mc->mc_fs), mc->mc_gs)) {
+        sigexit(current_process, SIGSEGV);
+        return -EINVAL;
+    }
 
     regs->eip     = mc->mc_eip;
     regs->eax     = mc->mc_eax;
@@ -462,7 +470,8 @@ static int freebsd_sigreturn_from(registers_t *regs,
     regs->gs = mc->mc_gs | 3;
 
     /* uc_sigmask is a FreeBSD-numbered set; the kernel mask is native. */
-    current_thread->sig_mask = freebsd_to_native_sigmask(uc.uc_sigmask.__bits[0]);
+    current_thread->sig_mask = freebsd_to_native_sigmask(uc.uc_sigmask.__bits[0]) &
+                               ~SIG_CANTMASK;
     current_thread->sig_on_stack = 0;
     current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     /* Trapframe is now the restored user context -- the dispatcher must not

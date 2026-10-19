@@ -4,6 +4,7 @@
 
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
+#include <machine/usersel.h>
 #include <exec/perso/linux/linux_user.h>
 #include <sys/copy.h>
 #include <sys/proc.h>
@@ -85,7 +86,8 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
             frame.uc.uc_stack.ss_flags = current_thread->sig_alt_stack.ss_flags;
         }
 
-        frame.uc.uc_sigmask.sig[0] = mask;
+        /* The saved mask is in Linux's numbering, as the program reads it. */
+        native_mask_to_linux_sigset(mask, &frame.uc.uc_sigmask);
         frame.uc.uc_mcontext.eip = regs->eip;
         frame.uc.uc_mcontext.eax = regs->eax;
         frame.uc.uc_mcontext.ebx = regs->ebx;
@@ -102,7 +104,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         frame.uc.uc_mcontext.es = regs->es;
         frame.uc.uc_mcontext.fs = regs->fs;
         frame.uc.uc_mcontext.gs = regs->gs;
-        frame.uc.uc_mcontext.oldmask = mask;
+        frame.uc.uc_mcontext.oldmask = frame.uc.uc_sigmask.sig[0];
 
         /* Linux expects a return trampoline */
         /* For now we use the kernel-mapped trampoline if it matches Linux ABI */
@@ -147,7 +149,11 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         frame.sc.es = regs->es;
         frame.sc.fs = regs->fs;
         frame.sc.gs = regs->gs;
-        frame.sc.oldmask = mask;
+        {
+            linux_sigset_t ls;
+            native_mask_to_linux_sigset(mask, &ls);
+            frame.sc.oldmask = ls.sig[0];
+        }
 
         frame.pretcode = restorer ? restorer : LINUX_SIG_TRAMPOLINE_ADDR;
 
@@ -167,6 +173,12 @@ int linux_sys_sigreturn(void *regs_ptr) {
     struct linux_sigcontext sc;
 
     if (copyin(&frame->sc, &sc, sizeof(sc)) != 0) return -1;
+    /* A selector user mode cannot load would fault the kernel's return to
+     * user mode; a frame like that has nowhere to return to. */
+    if (!user_frame_selectors_ok(sc.cs, sc.ss, sc.ds, sc.es, sc.fs, sc.gs)) {
+        sigexit(current_process, SIGSEGV);
+        return -1;
+    }
 
     regs->eip = sc.eip;
     regs->eax = sc.eax;
@@ -190,7 +202,11 @@ int linux_sys_sigreturn(void *regs_ptr) {
     regs->fs = sc.fs | 3;
     regs->gs = sc.gs | 3;
 
-    current_thread->sig_mask = sc.oldmask;
+    {
+        linux_sigset_t ls = { { sc.oldmask, 0 } };
+        current_thread->sig_mask = linux_sigset_to_native_mask(&ls) &
+                                   ~SIG_CANTMASK;
+    }
     return regs->eax;
 }
 
@@ -200,6 +216,13 @@ int linux_sys_rt_sigreturn(void *regs_ptr) {
     struct linux_ucontext uc;
 
     if (copyin(&frame->uc, &uc, sizeof(uc)) != 0) return -1;
+    /* See linux_sys_sigreturn. */
+    if (!user_frame_selectors_ok(uc.uc_mcontext.cs, uc.uc_mcontext.ss,
+                                 uc.uc_mcontext.ds, uc.uc_mcontext.es,
+                                 uc.uc_mcontext.fs, uc.uc_mcontext.gs)) {
+        sigexit(current_process, SIGSEGV);
+        return -1;
+    }
 
     regs->eip = uc.uc_mcontext.eip;
     regs->eax = uc.uc_mcontext.eax;
@@ -220,6 +243,7 @@ int linux_sys_rt_sigreturn(void *regs_ptr) {
     regs->fs = uc.uc_mcontext.fs | 3;
     regs->gs = uc.uc_mcontext.gs | 3;
 
-    current_thread->sig_mask = uc.uc_sigmask.sig[0];
+    current_thread->sig_mask = linux_sigset_to_native_mask(&uc.uc_sigmask) &
+                               ~SIG_CANTMASK;
     return regs->eax;
 }
