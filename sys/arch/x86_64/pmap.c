@@ -752,6 +752,46 @@ uintptr_t pmap_extract(pmap_t pmap, uintptr_t va) {
     return pmap ? pmap_translate(pmap, va) : 0;
 }
 
+/* The physical page a write into `pmap` at `va` may land on: the mapped
+ * page itself when its PTE is writable or it is an anonymous page no one
+ * else maps, otherwise a private copy put in its place with the same
+ * permissions -- as the i386 pmap_private_page().  `pa` is what `va`
+ * translates to; a large page (no 4K PTE) has no per-page owner and is
+ * written in place.  0 if no copy could be made. */
+static uintptr_t pmap_private_page(pmap_t pmap, uintptr_t va, uintptr_t pa) {
+    pt_entry_t *pte = pmap_pte(pmap, va & ~(PAGE_4K - 1), 0);
+    uintptr_t phys_old;
+    vm_page_t *page_old;
+
+    if (!pte || !(*pte & PTE_P)) return pa & ~(uintptr_t)(PAGE_4K - 1);
+    phys_old = *pte & PTE_FRAME;
+    if (*pte & PTE_W) return phys_old;
+    page_old = pmm_get_page(phys_old);
+    if (!page_old) return 0;
+    if (page_old->ref_count <= 2 &&
+        (page_old->object == NULL ||
+         page_old->object->type == VM_OBJ_TYPE_DEFAULT)) {
+        return phys_old;
+    }
+
+    void *virt_new = pmm_alloc_block();
+    if (!virt_new) return 0;
+    memcpy(virt_new, P2V(phys_old), PAGE_4K);
+    uintptr_t phys_new = V2P(virt_new);
+    vm_page_t *page_new = pmm_get_page(phys_new);
+
+    va &= ~(PAGE_4K - 1);
+    pv_remove(page_old, pmap, va);
+    vm_page_unhold(page_old);
+    if (page_new) {
+        vm_page_hold(page_new);
+        pv_insert(page_new, pmap, va);
+    }
+    *pte = phys_new | (*pte & ~PTE_FRAME);
+    if (pmap_is_current(pmap)) pmap_invalidate_page(va);
+    return phys_new;
+}
+
 static size_t pmap_copy_other(pmap_t pmap, uintptr_t uva, uint8_t *buf, size_t len,
                               int to_user) {
     size_t done = 0;
@@ -768,6 +808,13 @@ static size_t pmap_copy_other(pmap_t pmap, uintptr_t uva, uint8_t *buf, size_t l
 
         if (pa == 0 || pa >= PMAP_DMAP_LIMIT) {
             break;
+        }
+        if (to_user) {
+            uintptr_t page = pmap_private_page(pmap, va, pa);
+            if (page == 0 || page >= PMAP_DMAP_LIMIT) {
+                break;
+            }
+            pa = page + (va & (PAGE_4K - 1));
         }
         chunk = PAGE_4K - (va & (PAGE_4K - 1));
         if (chunk > len - done) {
@@ -787,8 +834,8 @@ size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len) {
     return pmap_copy_other(pmap, uva, (uint8_t *)dst, len, 0);
 }
 
-/* The write lands on the backing physical page directly: it bypasses PTE
- * write protection and does not break copy-on-write (ptrace POKE). */
+/* The write bypasses PTE write protection (ptrace POKE into text), but a
+ * page shared with another mapper gets a private copy first. */
 size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t len) {
     return pmap_copy_other(pmap, uva, (uint8_t *)(uintptr_t)src, len, 1);
 }

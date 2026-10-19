@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock opencreat mmapshared cowwrite
+all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -78,7 +78,14 @@ cowwrite: cowwrite.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# pokecow: a ptrace POKE into data or text the tracee shares (with its
+# parent after fork, or with every process running the same file)
+# changes the tracee's copy only.  Runs on the host too.
+pokecow: pokecow.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
-	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite
+	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow
 
 .PHONY: all clean

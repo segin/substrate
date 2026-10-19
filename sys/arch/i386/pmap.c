@@ -1549,12 +1549,64 @@ size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len) {
     return got;
 }
 
+/* The physical page a write into `pmap` at `va` through PTE `*ptep` may
+ * land on.  A writable PTE is the process's own page, or a shared mapping
+ * whose other users are meant to see the store, so it is written in
+ * place, as is an anonymous page no one else maps.  Anything else -- a
+ * page still shared after fork, or a page of a file (text, rodata, which
+ * every process running that file executes) -- is first replaced in this
+ * pmap by a private copy, keeping the PTE's permissions.  Returns the
+ * physical address of the page, or 0 if no copy could be made. */
+static uint32_t pmap_private_page(pmap_t pmap, uintptr_t va, uint32_t *ptep) {
+    uint32_t pte = *ptep;
+    uint32_t phys_old = pte & 0xFFFFF000;
+    vm_page_t *page_old;
+    void *virt_new;
+    uint32_t phys_new;
+    vm_page_t *page_new;
+
+    if (pte & PTE_W) {
+        return phys_old;
+    }
+    page_old = pmm_get_page(phys_old);
+    if (!page_old) {
+        return 0;
+    }
+    if (page_old->ref_count <= 2 &&
+        (page_old->object == NULL ||
+         page_old->object->type == VM_OBJ_TYPE_DEFAULT)) {
+        return phys_old;
+    }
+
+    virt_new = pmm_alloc_block();
+    if (!virt_new) {
+        return 0;
+    }
+    memcpy(virt_new, (const void *)(phys_old + 0xC0000000), 0x1000);
+    phys_new = (uint32_t)virt_new - 0xC0000000;
+    page_new = pmm_get_page(phys_new);
+
+    va &= 0xFFFFF000;
+    pv_remove(page_old, pmap, va);
+    vm_page_unhold(page_old);
+    if (page_new) {
+        vm_page_hold(page_new);
+        pv_insert(page_new, pmap, va);
+    }
+    *ptep = phys_new | (pte & 0xFFF);
+    if (current_process && current_process->pmap == pmap) {
+        pmap_invalidate_page(va);
+    }
+    return phys_new;
+}
+
 /* Copy `len` bytes from kernel buffer `src` into user vaddr `uva` in a possibly
  * NON-active pmap, walking the target's page tables through the physical direct
- * map.  The write lands straight on the backing physical page (bypassing PTE
- * write-protection), so a ptrace POKE can patch a read-only text page — it does
- * NOT break copy-on-write, so a page still shared with a sibling is modified in
- * place.  Stops at the first unmapped page; returns the bytes written. */
+ * map.  The write bypasses PTE write-protection, so a ptrace POKE can patch a
+ * read-only text page, but a page shared with another mapper is first given
+ * a private copy (pmap_private_page), so neither a sibling after fork nor
+ * another process running the same file sees the store.  Stops at the first
+ * unmapped page; returns the bytes written. */
 size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t len) {
     const uint8_t *s = (const uint8_t *)src;
     size_t put = 0;
@@ -1583,18 +1635,25 @@ size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t le
             break;
         }
         if (pde & PTE_PS) {
+            /* pmap_enter_large: physical memory with no per-page owner
+             * to copy for; written in place, as before. */
             pa = (pde & 0xFFC00000) + (va & 0x3FFFFF);
         } else {
             uint32_t pt_phys = pde & 0xFFFFF000;
-            uint32_t pte;
+            uint32_t *ptep;
+            uint32_t page;
             if (pt_phys >= 0x40000000) {
                 break;
             }
-            pte = ((uint32_t *)(pt_phys + 0xC0000000))[PT_INDEX(va)];
-            if (!(pte & PTE_P)) {
+            ptep = &((uint32_t *)(pt_phys + 0xC0000000))[PT_INDEX(va)];
+            if (!(*ptep & PTE_P) || (*ptep & 0xFFFFF000) >= 0x40000000) {
                 break;
             }
-            pa = (pte & 0xFFFFF000) + (va & 0xFFF);
+            page = pmap_private_page(pmap, va, ptep);
+            if (page == 0) {
+                break;
+            }
+            pa = page + (va & 0xFFF);
         }
         if (pa >= 0x40000000) {
             break;
