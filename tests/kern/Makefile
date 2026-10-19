@@ -45,7 +45,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest thrkill truncperm shmgrow
+     vm86guest thrkill truncperm shmgrow setredrop
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -150,9 +150,15 @@ shmgrow: shmgrow.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# setredrop: setreuid(getuid(), getuid()) in a set-user-ID program drops
+# the saved uid too (likewise setregid).  Needs root; runs on the host too.
+setredrop: setredrop.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
-	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux
+	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop
 
 .PHONY: all clean

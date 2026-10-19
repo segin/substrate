@@ -2114,9 +2114,11 @@ static int setegid_ids(int egid) {
  * setreuid(2): set the real and/or effective uid (-1 leaves a field
  * unchanged).  Unprivileged rules (4.4BSD/POSIX): the real uid may become
  * the current real or effective uid; the effective uid may become the
- * current real, effective or saved uid.  Whenever the real uid is changed,
- * or the effective uid is set to a value other than the previous real uid,
- * the saved uid is set to the new effective uid.  The superuser may set
+ * current real, effective or saved uid.  Whenever the real uid is set
+ * (ruid != -1, even to its current value), or the effective uid is set to
+ * a value other than the previous real uid, the saved uid is set to the new
+ * effective uid -- so setreuid(getuid(), getuid()) drops a set-user-ID
+ * program's saved uid too.  The superuser may set
  * either to any value.
  */
 static int setreuid_ids(int ruid, int euid) {
@@ -2134,10 +2136,10 @@ static int setreuid_ids(int ruid, int euid) {
             return -EPERM;
     }
 
-    int ruid_changed = (ruid != -1 && new_ruid != p->uid);
+    uint32_t old_ruid = p->uid;
     p->uid = new_ruid;
     p->euid = new_euid;
-    if (ruid_changed || (euid != -1 && new_euid != p->uid))
+    if (ruid != -1 || (euid != -1 && new_euid != old_ruid))
         p->suid = new_euid;
     return 0;
 }
@@ -2158,10 +2160,10 @@ static int setregid_ids(int rgid, int egid) {
             return -EPERM;
     }
 
-    int rgid_changed = (rgid != -1 && new_rgid != p->gid);
+    uint32_t old_rgid = p->gid;
     p->gid = new_rgid;
     p->egid = new_egid;
-    if (rgid_changed || (egid != -1 && new_egid != p->gid))
+    if (rgid != -1 || (egid != -1 && new_egid != old_rgid))
         p->sgid = new_egid;
     return 0;
 }

@@ -207,7 +207,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/futex.c:1404-1405` (`futex_unlock_pi`) clears `ps->owner = NULL` before waking the waiter. When the woken waiter in `futex_lock_pi` (`sys/kern/futex.c:1313-1319` and `:1326-1333`) calls `pi_remove_waiter(ps, current_thread)` (`:1008-1035`) before setting `ps->owner = current_thread`, `pi_remove_waiter` sees `ps->waiters == NULL && ps->owner == NULL` (`:1020`) and frees `ps` via `pi_state_free(ps)`. Lines 1315–1318 then write `ps->owner`, `ps->owner_tid`, `ps->owner_prio`, and `ps->boosted_prio` into the freed slab object.
   Basis: traced.
 
-- [ ] **SYS-KERN-006** *(High; confirmed)* When `setreuid` or `setregid` is called with `ruid != (uid_t)-1` (`rgid != (gid_t)-1`) or with a new effective ID not equal to the prior real ID, the kernel shall update the saved set-user-ID (`p->suid`) or saved set-group-ID (`p->sgid`) to the new effective ID.
+- [x] **SYS-KERN-006** *(High; confirmed)* When `setreuid` or `setregid` is called with `ruid != (uid_t)-1` (`rgid != (gid_t)-1`) or with a new effective ID not equal to the prior real ID, the kernel shall update the saved set-user-ID (`p->suid`) or saved set-group-ID (`p->sgid`) to the new effective ID.
   Evidence: `sys/kern/syscall.c:2081-2126` (`setreuid_ids`, `setregid_ids`) computes `int ruid_changed = (ruid != -1 && new_ruid != p->uid);`. When a setuid-root process (`uid = 1000, euid = 0, suid = 0`) calls `setreuid(1000, 1000)` to drop privileges, `new_ruid != p->uid` is false and `new_euid != p->uid` is false, leaving `p->suid = 0` so the process can later regain root via `seteuid(0)`.
   Basis: traced.
 

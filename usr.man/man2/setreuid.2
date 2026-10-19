@@ -25,8 +25,12 @@ Any other process may set the real ID only to its current real or
 effective ID, and the effective ID only to its current real, effective or
 saved ID.
 .PP
-If the real ID is changed, or the effective ID is set to a value that is
-not the real ID, the saved ID is set to the new effective ID.
+If the real ID is set (\fIruid\fP or \fIrgid\fP is not \-1, even when
+it names the current real ID), or the effective ID is set to a value other
+than the previous real ID, the saved ID is set to the new effective ID.
+So a set-user-ID program that calls
+.B setreuid(getuid(), getuid())
+gives up its saved ID as well and cannot regain the privilege.
 .SH RETURN VALUE
 On success, 0 is returned.  On error, \-1 is returned, and
 .I errno
