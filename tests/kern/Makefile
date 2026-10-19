@@ -108,6 +108,11 @@ tidkern.linux: tidkern.c
 ioctlkern.linux: ioctlkern.c
 	gcc -m32 -static -O2 $< -o $@
 
+# linuxptr.linux: the Linux personality's calls copy user memory in and
+# out.  A static i386 Linux program; takes the kernel_hostname address.
+linuxptr.linux: linuxptr.c
+	gcc -m32 -static -O2 $< -o $@
+
 # ioctlkern_fbsd: the same through the FreeBSD personality (also NetBSD's
 # ioctl).  Freestanding, branded ELFOSABI_FREEBSD (9).
 ioctlkern_fbsd: ioctlkern_fbsd.c
@@ -149,6 +154,6 @@ shmgrow: shmgrow.c
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
-	      ioctlkern.linux ioctlkern_fbsd
+	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux
 
 .PHONY: all clean
