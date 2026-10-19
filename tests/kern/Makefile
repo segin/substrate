@@ -186,6 +186,12 @@ chrootesc: chrootesc.c
 chrootesc.linux: chrootesc.c
 	gcc -m32 -static -O2 $< -o $@
 
+# lseekchk: lseek refuses a position before the start or past the largest
+# off_t, and keeps 64-bit positions.  Runs on the host too.
+lseekchk: lseekchk.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # cowkeep: a page made private by a COW fault keeps its contents across
 # later forks.  Runs on the host too.
 cowkeep: cowkeep.c

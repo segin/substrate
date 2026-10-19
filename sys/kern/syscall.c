@@ -1172,21 +1172,38 @@ int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
         if (ftype == FS_PIPE || ftype == FS_SOCKET) return -ESPIPE;
     }
 
-    off_t off = ((off_t)off_hi << 32) | off_lo;
+    off_t off = (off_t)(((uint64_t)off_hi << 32) | off_lo);
+    off_t base;
 
-    if (w == 0) f->f_offset = off; // SEEK_SET
-    else if (w == 1) f->f_offset += off; // SEEK_CUR
-    else if (w == 2) f->f_offset = ((fs_node_t*)f->f_data)->length + off; // SEEK_END
-    /* Deliberately tolerate an out-of-range whence as a no-op that returns the
-     * current offset: /sbin/ld.so's ld_lseek() calls SYS_lseek with only three
-     * arguments, so the kernel's 4th parameter (w) is an uninitialized register
-     * for that caller.  Rejecting it with EINVAL broke dynamic loading. */
+    if (w == 0) {                       /* SEEK_SET */
+        base = 0;
+    } else if (w == 1) {                /* SEEK_CUR */
+        base = f->f_offset;
+    } else if (w == 2) {                /* SEEK_END */
+        if (!f->f_data) return -EINVAL; /* no file behind it */
+        base = (off_t)((fs_node_t *)f->f_data)->length;
+    } else {
+        /* Deliberately tolerate an out-of-range whence as a no-op that
+         * returns the current offset: /sbin/ld.so's ld_lseek() calls
+         * SYS_lseek with only three arguments, so the kernel's 4th parameter
+         * (w) is an uninitialized register for that caller.  Rejecting it
+         * with EINVAL broke dynamic loading. */
+        return f->f_offset;
+    }
 
+    /* A position before the start is EINVAL and one past the largest
+     * off_t is EOVERFLOW (POSIX); either way the offset stays as it was.
+     * A negative offset reached the filesystems, which take it unsigned. */
+    off_t pos;
+    if (__builtin_add_overflow(base, off, &pos)) return -EOVERFLOW;
+    if (pos < 0) return -EINVAL;
+    f->f_offset = pos;
     return f->f_offset;
 }
 
-int kern_lseek(int fd, off_t offset, int whence) {
-    return (int)sys_lseek(fd, (uint32_t)offset, (uint32_t)((uint64_t)offset >> 32), whence);
+off_t kern_lseek(int fd, off_t offset, int whence) {
+    return (off_t)sys_lseek(fd, (uint32_t)offset,
+                            (uint32_t)((uint64_t)offset >> 32), whence);
 }
 
 int sys_umask(int newmask) {

@@ -319,7 +319,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/vfs/vnode_fsnode.c:131-132` calls `finddir_fs(dn, name)` under the inaccurate comment `/* finddir_fs() does not follow symlinks */` (`finddir_fs` in `sys/vfs/vfs.c:819` passes `follow_symlinks = 1`).
   Basis: traced.
 
-- [ ] **SYS-VFS-006** *(High; confirmed)* When seeking on a file descriptor in `sys_lseek` and `kern_lseek`, the kernel shall check `f->f_data != NULL` on `SEEK_END`, reject negative resulting offsets and signed 64-bit overflow with `-EINVAL`, and return a 64-bit `off_t` from `kern_lseek`.
+- [x] **SYS-VFS-006** *(High; confirmed)* When seeking on a file descriptor in `sys_lseek` and `kern_lseek`, the kernel shall check `f->f_data != NULL` on `SEEK_END`, reject negative resulting offsets and signed 64-bit overflow with `-EINVAL`, and return a 64-bit `off_t` from `kern_lseek`.
   Evidence: `sys/kern/syscall.c:1150-1190` dereferences `((fs_node_t *)f->f_data)->length` without a NULL check at line 1179, allows negative `f->f_offset` (which downstream filesystems cast to unsigned `uint32_t`/`size_t`), and declares `int kern_lseek(...)` at line 1188, truncating offsets `>= 2 GiB`.
   Basis: traced.
 

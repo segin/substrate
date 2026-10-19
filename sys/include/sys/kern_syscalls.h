@@ -42,7 +42,7 @@ int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags);
  * array of two, or NULL for the current time. */
 int kern_utimensat(int dirfd, const char *path, const struct timespec *times,
                    int flags);
-int kern_lseek(int fd, off_t offset, int whence);
+off_t kern_lseek(int fd, off_t offset, int whence);
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 int kern_sigaltstack(const stack_t *ss, stack_t *oss);
 int kern_getdents(unsigned int fd, void *dirp, unsigned int count);

@@ -1076,7 +1076,7 @@ abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int
                                        abi_ulong_t len, unsigned int flags) {
     struct stat st;
     int64_t inoff = 0, outoff = 0;
-    int in_saved = 0, out_saved = 0;
+    off_t in_saved = 0, out_saved = 0;
     size_t done = 0;
     char *kbuf;
     int rc = 0;
@@ -1111,16 +1111,17 @@ abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int
     }
     /* With an offset given, the file is read or written there and its
      * position put back afterwards. */
+    /* Offsets are 64-bit: keep them in off_t and turn only an error into
+     * rc, or a position past 2 GiB would read as a negative errno. */
     if (inoffp != NULL) {
         in_saved = kern_lseek(infd, 0, SEEK_CUR);
-        rc = in_saved < 0 ? in_saved : kern_lseek(infd, (off_t)inoff, SEEK_SET);
+        off_t r = in_saved < 0 ? in_saved : kern_lseek(infd, (off_t)inoff, SEEK_SET);
+        rc = r < 0 ? (int)r : 0;
     }
     if (rc >= 0 && outoffp != NULL) {
         out_saved = kern_lseek(outfd, 0, SEEK_CUR);
-        rc = out_saved < 0 ? out_saved : kern_lseek(outfd, (off_t)outoff, SEEK_SET);
-    }
-    if (rc > 0) {
-        rc = 0;
+        off_t r = out_saved < 0 ? out_saved : kern_lseek(outfd, (off_t)outoff, SEEK_SET);
+        rc = r < 0 ? (int)r : 0;
     }
     /* A call may copy less than it was asked to, and one that copies a
      * megabyte and comes back lets a signal in. */
