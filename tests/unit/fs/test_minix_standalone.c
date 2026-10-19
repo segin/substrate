@@ -47,6 +47,11 @@ void vfs_register_filesystem(filesystem_t *fs) {
     (void)fs;
 }
 
+// The driver's lookup cache takes a spinlock; this test is single-threaded.
+#include <sys/lock.h>
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+
 // Rename colliding kernel function
 #define vasprintf kernel_vasprintf
 
@@ -168,8 +173,7 @@ bool test_minix_link_v1(void) {
         return false;
     }
     kfree(file1_fresh.ptr, sizeof(struct minix_inode_v1));
-    kfree(file1->ptr, sizeof(struct minix_inode_v1));
-    kfree(file1, sizeof(fs_node_t));
+    /* file1 belongs to the driver's lookup cache; unmount frees it. */
     minix_unmount(root);
     return true;
 }
@@ -205,8 +209,7 @@ bool test_minix_link_v2(void) {
         return false;
     }
     kfree(file2_fresh.ptr, sizeof(struct minix_inode_v2));
-    kfree(file2->ptr, sizeof(struct minix_inode_v2));
-    kfree(file2, sizeof(fs_node_t));
+    /* file2 belongs to the driver's lookup cache; unmount frees it. */
     minix_unmount(root);
     return true;
 }
@@ -218,7 +221,7 @@ bool test_minix_symlink_v1(void) {
     fs_node_t *root = minix_mount("ramdisk", 0, &ramdisk_node);
     if (!root) return false;
 
-    int ret = minix_symlink(root, "mylink", "/target/path");
+    int ret = minix_symlink(root, "/target/path", "mylink");
     if (ret != 0) {
         printf("FAIL: minix_symlink returned %d\n", ret);
         return false;
@@ -241,8 +244,7 @@ bool test_minix_symlink_v1(void) {
         return false;
     }
 
-    kfree(link_node->ptr, sizeof(struct minix_inode_v1));
-    kfree(link_node, sizeof(fs_node_t));
+    /* link_node belongs to the driver's lookup cache; unmount frees it. */
     minix_unmount(root);
     return true;
 }
@@ -254,7 +256,7 @@ bool test_minix_symlink_v2(void) {
     fs_node_t *root = minix_mount("ramdisk", 0, &ramdisk_node);
     if (!root) return false;
 
-    int ret = minix_symlink(root, "mylink_v2", "/target/path/v2");
+    int ret = minix_symlink(root, "/target/path/v2", "mylink_v2");
     if (ret != 0) {
         printf("FAIL: minix_symlink returned %d\n", ret);
         return false;
@@ -277,8 +279,7 @@ bool test_minix_symlink_v2(void) {
         return false;
     }
 
-    kfree(link_node->ptr, sizeof(struct minix_inode_v2));
-    kfree(link_node, sizeof(fs_node_t));
+    /* link_node belongs to the driver's lookup cache; unmount frees it. */
     minix_unmount(root);
     return true;
 }
@@ -321,8 +322,7 @@ bool test_minix_chmod_v1(void) {
     }
 
     kfree(file_fresh.ptr, sizeof(struct minix_inode_v1));
-    kfree(file->ptr, sizeof(struct minix_inode_v1));
-    kfree(file, sizeof(fs_node_t));
+    /* file belongs to the driver's lookup cache; unmount frees it. */
     minix_unmount(root);
     return true;
 }
@@ -365,8 +365,7 @@ bool test_minix_chmod_v2(void) {
     }
 
     kfree(file_fresh.ptr, sizeof(struct minix_inode_v2));
-    kfree(file->ptr, sizeof(struct minix_inode_v2));
-    kfree(file, sizeof(fs_node_t));
+    /* file belongs to the driver's lookup cache; unmount frees it. */
     minix_unmount(root);
     return true;
 }

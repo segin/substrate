@@ -83,6 +83,7 @@ HOST_TESTS += host_test_fat_get_next_cluster
 HOST_TESTS += host_test_fat_inode_identity
 HOST_TESTS += host_test_fat_mount
 HOST_TESTS += host_test_minix_vuln
+HOST_TESTS += host_test_minix_ops
 HOST_TESTS += host_test_procfs
 HOST_TESTS += host_test_sysfs_health
 
@@ -504,6 +505,9 @@ host_test_fat_get_next_cluster: host_test_fat_get_next_cluster.c
 
 host_test_minix_vuln: host_test_minix_vuln.c
 	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_minix_vuln.c -o $@
+
+host_test_minix_ops: host_test_minix_ops.c ../../sys/fs/minix/minix.c ../../sys/fs/minix/minix.h
+	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_minix_ops.c -o $@
 
 host_test_crc32: host_test_crc32.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_crc32.c -o $@

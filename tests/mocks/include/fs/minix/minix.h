@@ -9,10 +9,10 @@
 #define MINIX_BLOCK_SIZE 1024
 
 /* Magic numbers */
-#define MINIX_V1_Magic      0x137F  /* 30 char names */
-#define MINIX_V1_Magic_14   0x138F  /* 14 char names */
-#define MINIX_V2_Magic      0x2468  /* 30 char names */
-#define MINIX_V2_Magic_14   0x2478  /* 14 char names */
+#define MINIX_V1_Magic      0x138F  /* 30 char names */
+#define MINIX_V1_Magic_14   0x137F  /* 14 char names */
+#define MINIX_V2_Magic      0x2478  /* 30 char names */
+#define MINIX_V2_Magic_14   0x2468  /* 14 char names */
 #define MINIX_V3_Magic      0x4D5A
 
 /* Superblock structure */

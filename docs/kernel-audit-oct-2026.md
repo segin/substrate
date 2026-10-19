@@ -352,7 +352,7 @@ SYS-DRV-003 are Critical and not listed.
   5. `sys/fs/udf/udf.c:765-782` (`udf_unmount`) and error paths in `udf_mount` (`:928-945`) leak `fs->space_bitmap_base` (`8 KiB`).
   Basis: traced.
 
-- [ ] **SYS-FS-003** *(Critical → High; partly confirmed)* In the Minix filesystem (`sys/fs/minix/minix.c`), double-indirect and indirect zone numbers shall be validated with `minix_zone_ok` and 64-bit `minix_zone_off`, `minix_dir_add` shall use `minix_dirent_size(fs)` on 14-char volumes, `minix_link` shall not cast V2 directory inodes to `struct minix_inode_v1 *`, `s_log_zone_size` and negative read offsets shall be validated, and `fs_node_t` allocations shall be reclaimed on close.
+- [x] **SYS-FS-003** *(Critical → High; partly confirmed)* In the Minix filesystem (`sys/fs/minix/minix.c`), double-indirect and indirect zone numbers shall be validated with `minix_zone_ok` and 64-bit `minix_zone_off`, `minix_dir_add` shall use `minix_dirent_size(fs)` on 14-char volumes, `minix_link` shall not cast V2 directory inodes to `struct minix_inode_v1 *`, `s_log_zone_size` and negative read offsets shall be validated, and `fs_node_t` allocations shall be reclaimed on close.
   Evidence:
   1. `sys/fs/minix/minix.c:174` (`minix_get_zone_v1`) and `:223` (`minix_get_zone_v2`) return `buf[double_indirect_index % entries_per_block]` without calling `minix_zone_ok(fs, out)`; `minix_set_zone_v1/v2` (`:405-515`) and `minix_free_all_zones` (`:701-834`) multiply zone indices by `MINIX_BLOCK_SIZE` in 32-bit without `minix_zone_ok` or `minix_zone_off`.
   2. `sys/fs/minix/minix.c:1109-1131` (`minix_dir_add`) hardcodes 32-byte `struct minix_dirent_v1`, corrupting 16-byte directory slots on 14-character Minix filesystems.
