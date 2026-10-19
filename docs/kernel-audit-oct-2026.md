@@ -219,7 +219,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/posix_sem.c:99-108, 325-489` (`kern_ksem_trywait`, `kern_ksem_wait`, `kern_ksem_timedwait`, `kern_ksem_post`, `kern_ksem_getvalue`) look up global `ksem` IDs via `ksem_lookup` without checking `ksem_perm_ok` or `ksem_open_list`.
   Basis: traced.
 
-- [ ] **SYS-KERN-009** *(High; confirmed)* When attaching a System V shared memory segment at a caller-specified `shmaddr` in `kern_shmat`, the kernel shall verify that `[virt, virt + length)` does not wrap and lies within `[map->min_offset, map->max_offset]` before calling `vm_map_remove`.
+- [x] **SYS-KERN-009** *(High; confirmed)* When attaching a System V shared memory segment at a caller-specified `shmaddr` in `kern_shmat`, the kernel shall verify that `[virt, virt + length)` does not wrap and lies within `[map->min_offset, map->max_offset]` before calling `vm_map_remove`.
   Evidence: `sys/kern/ipc_shm.c:255-317` (`kern_shmat`) checks only `virt & 0xFFF` when `have_addr` is true and immediately calls `vm_map_remove(map, virt, virt + length)` at line 308 without bounds or wrap-around validation.
   Basis: traced.
 

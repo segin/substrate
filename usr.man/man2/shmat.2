@@ -90,7 +90,9 @@ is not a valid identifier,
 .I shmaddr
 is misaligned (and
 .B SHM_RND
-was not given), or (for
+was not given), the segment would not fit in the user address space at
+.I shmaddr
+(it would run past the end or wrap around), or (for
 .BR shmdt ())
 no segment is attached at
 .IR shmaddr .

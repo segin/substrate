@@ -45,7 +45,7 @@ else
 endif
 
 all: soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork thrstart \
-     vm86guest thrkill truncperm shmgrow setredrop
+     vm86guest thrkill truncperm shmgrow setredrop shmrange
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -156,9 +156,15 @@ setredrop: setredrop.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# shmrange: shmat at an explicit address refuses a segment that would run
+# past the top of user space or wrap.  Runs on the host too.
+shmrange: shmrange.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
-	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop
+	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange
 
 .PHONY: all clean

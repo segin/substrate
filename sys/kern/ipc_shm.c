@@ -282,6 +282,13 @@ void *kern_shmat(int shmid, const void *shmaddr, int shmflg, int *err)
         if (shmflg & SHM_RND)
             virt &= ~((uintptr_t)SHMLBA - 1);
         if (virt & 0xFFF) { mutex_unlock(&shm_lock); *err = EINVAL; return (void *)-1; }
+        /* The whole segment must fit in the user map, without wrapping:
+         * the vm_map_remove below would otherwise tear down whatever a
+         * wrapped or out-of-map range covers. */
+        if (virt < map->min_offset || virt >= map->max_offset ||
+            length > map->max_offset - virt) {
+            mutex_unlock(&shm_lock); *err = EINVAL; return (void *)-1;
+        }
     }
 
     /*
