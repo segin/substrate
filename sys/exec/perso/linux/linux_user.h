@@ -413,5 +413,8 @@ int  linux_domain_to_native(int domain);
 int  native_domain_to_linux(int domain);
 int  native_to_linux_signal(int sig);
 int  linux_to_native_signal(int sig);
+/* Whole masks, renumbering each signal (16, 23, 29 and 30 differ). */
+uint32_t linux_sigset_to_native_mask(const linux_sigset_t *set);
+void     native_mask_to_linux_sigset(uint32_t native_mask, linux_sigset_t *set);
 
 #endif /* _LINUX_USER_H */

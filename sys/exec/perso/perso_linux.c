@@ -128,22 +128,22 @@ static int native_to_linux_sigtbl[LINUX_SIGTBLSZ + 1] = {
     LINUX_SIGPIPE,   /* SIGPIPE */
     LINUX_SIGALRM,   /* SIGALRM */
     LINUX_SIGTERM,   /* SIGTERM */
-    0,               /* 16 unused in native ABI */
+    23,              /* SIGURG */
     LINUX_SIGCHLD,   /* SIGCHLD */
     LINUX_SIGCONT,   /* SIGCONT */
     LINUX_SIGSTOP,   /* SIGSTOP */
     LINUX_SIGTSTP,   /* SIGTSTP */
     LINUX_SIGTTIN,   /* SIGTTIN */
     LINUX_SIGTTOU,   /* SIGTTOU */
-    0,               /* 23 unused */
-    0,               /* 24 unused */
-    0,               /* 25 unused */
-    0,               /* 26 unused */
-    0,               /* 27 unused */
+    29,              /* SIGPOLL (SIGIO) */
+    24,              /* SIGXCPU */
+    25,              /* SIGXFSZ */
+    26,              /* SIGVTALRM */
+    27,              /* SIGPROF */
     LINUX_SIGWINCH,  /* SIGWINCH */
-    0,               /* 29 reserved for mapped RT signal */
-    0,               /* 30 unused */
-    0                /* 31 unused */
+    0,               /* 29 SIGRTMIN: native_to_linux_signal maps it */
+    0,               /* 30 SIGRTMAX: likewise */
+    31               /* SIGSYS */
 };
 
 static int linux_to_native_sigtbl[LINUX_SIGTBLSZ + 1] = {
@@ -170,40 +170,39 @@ static int linux_to_native_sigtbl[LINUX_SIGTBLSZ + 1] = {
     SIGTSTP,   /* LINUX_SIGTSTP */
     SIGTTIN,   /* LINUX_SIGTTIN */
     SIGTTOU,   /* LINUX_SIGTTOU */
-    0,         /* LINUX_SIGURG */
-    0,         /* LINUX_SIGXCPU */
-    0,         /* LINUX_SIGXFSZ */
-    0,         /* LINUX_SIGVTALARM */
-    0,         /* LINUX_SIGPROF */
+    SIGURG,    /* LINUX_SIGURG */
+    SIGXCPU,   /* LINUX_SIGXCPU */
+    SIGXFSZ,   /* LINUX_SIGXFSZ */
+    SIGVTALRM, /* LINUX_SIGVTALARM */
+    SIGPROF,   /* LINUX_SIGPROF */
     SIGWINCH,  /* LINUX_SIGWINCH */
-    0,         /* LINUX_SIGIO */
+    SIGPOLL,   /* LINUX_SIGIO */
     0,         /* LINUX_SIGPWR */
-    0          /* LINUX_SIGSYS */
+    SIGSYS     /* LINUX_SIGSYS */
 };
 
 int linux_to_native_signal(int sig) {
     if (sig > 0 && sig <= LINUX_SIGTBLSZ)
         return linux_to_native_sigtbl[sig];
 
-    /* Map Linux RT signals (32-33) to unused native signals */
-    /* Available native slots: 16 (Undefined), 29 (SIGIO/unused) */
-    if (sig == LINUX_SIGRTMIN + 0) return 16;
-    if (sig == LINUX_SIGRTMIN + 1) return 29;
+    /* The native ABI has two real-time signals, SIGRTMIN and SIGRTMAX:
+     * they carry Linux's first two (glibc's SIGCANCEL and SIGSETXID). */
+    if (sig == LINUX_SIGRTMIN + 0) return SIGRTMIN;
+    if (sig == LINUX_SIGRTMIN + 1) return SIGRTMAX;
 
     return 0; // Invalid or unsupported RT signal
 }
 
 int native_to_linux_signal(int sig) {
-    /* Handle mapped RT signals */
-    if (sig == 16) return LINUX_SIGRTMIN + 0;
-    if (sig == 29) return LINUX_SIGRTMIN + 1;
+    if (sig == SIGRTMIN) return LINUX_SIGRTMIN + 0;
+    if (sig == SIGRTMAX) return LINUX_SIGRTMIN + 1;
 
     if (sig > 0 && sig <= LINUX_SIGTBLSZ)
         return native_to_linux_sigtbl[sig];
     return 0; // Invalid or RT signal
 }
 
-static uint32_t linux_sigset_to_native_mask(const linux_sigset_t *set) {
+uint32_t linux_sigset_to_native_mask(const linux_sigset_t *set) {
     uint32_t native = 0;
 
     if (!set) {
@@ -225,7 +224,7 @@ static uint32_t linux_sigset_to_native_mask(const linux_sigset_t *set) {
     return native;
 }
 
-static void native_mask_to_linux_sigset(uint32_t native_mask, linux_sigset_t *set) {
+void native_mask_to_linux_sigset(uint32_t native_mask, linux_sigset_t *set) {
     if (!set) {
         return;
     }
@@ -372,6 +371,74 @@ int linux_sys_rt_sigaction(int sig, const struct linux_sigaction *act,
     return 0;
 }
 
+/* Linux SIG_BLOCK/SIG_UNBLOCK/SIG_SETMASK (0/1/2) -> native, or -1. */
+static int linux_sigprocmask_how(int how) {
+    switch (how) {
+    case 0: return SIG_BLOCK;
+    case 1: return SIG_UNBLOCK;
+    case 2: return SIG_SETMASK;
+    default: return -1;
+    }
+}
+
+/* sigprocmask(2), syscall 126: the old 32-bit Linux mask. */
+static int linux_sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
+    uint32_t native_set = 0, native_oset = 0;
+    int native_how = SIG_BLOCK;
+
+    if (set) {
+        linux_sigset_t ls = { { 0, 0 } };
+        native_how = linux_sigprocmask_how(how);
+        if (native_how < 0) {
+            return -EINVAL;
+        }
+        if (copyin(set, &ls.sig[0], sizeof(ls.sig[0])) != 0) {
+            return -EFAULT;
+        }
+        native_set = linux_sigset_to_native_mask(&ls);
+    }
+    int ret = kern_sigprocmask(native_how, set ? &native_set : NULL,
+                               oset ? &native_oset : NULL);
+    if (ret < 0) {
+        return ret;
+    }
+    if (oset) {
+        linux_sigset_t ls;
+        native_mask_to_linux_sigset(native_oset, &ls);
+        if (copyout(&ls.sig[0], oset, sizeof(ls.sig[0])) != 0) {
+            return -EFAULT;
+        }
+    }
+    return 0;
+}
+
+/* gettid(2): the calling thread's id. */
+static int linux_sys_gettid(void) {
+    return sys_thr_self();
+}
+
+/* tgkill(2): signal thread `tid` of thread group (process) `tgid`. */
+static int linux_sys_tgkill(int tgid, int tid, int sig) {
+    int nsig = sig ? linux_to_native_signal(sig) : 0;
+    if (tgid <= 0 || tid <= 0 || (sig && nsig <= 0)) {
+        return -EINVAL;
+    }
+    return sys_thr_kill2(tgid, tid, nsig);
+}
+
+/* tkill(2): signal thread `tid`, in whatever process it is. */
+static int linux_sys_tkill(int tid, int sig) {
+    int nsig = sig ? linux_to_native_signal(sig) : 0;
+    if (tid <= 0 || (sig && nsig <= 0)) {
+        return -EINVAL;
+    }
+    thread_t *t = sched_get_thread(tid);
+    if (!t || !t->proc) {
+        return -ESRCH;
+    }
+    return sys_thr_kill2(t->proc->pid, tid, nsig);
+}
+
 int linux_sys_rt_sigprocmask(int how, const linux_sigset_t *set,
                              linux_sigset_t *oset, size_t sigsetsize) {
     linux_sigset_t kset;
@@ -384,18 +451,22 @@ int linux_sys_rt_sigprocmask(int how, const linux_sigset_t *set,
         return -EINVAL;
     }
 
-    if (how != 1 && how != 2 && how != 3) {
-        return -EINVAL;
-    }
-
+    /* Linux numbers SIG_BLOCK/SIG_UNBLOCK/SIG_SETMASK 0/1/2, native 1/2/3;
+     * like Linux, `how` matters (and is checked) only when there is a set. */
+    int native_how = SIG_BLOCK;
     if (set) {
+        native_how = linux_sigprocmask_how(how);
+        if (native_how < 0) {
+            return -EINVAL;
+        }
         if (copyin(set, &kset, sizeof(kset)) != 0) {
             return -EFAULT;
         }
         native_set = linux_sigset_to_native_mask(&kset);
     }
 
-    ret = kern_sigprocmask(how, set ? &native_set : NULL, oset ? &native_oset : NULL);
+    ret = kern_sigprocmask(native_how, set ? &native_set : NULL,
+                           oset ? &native_oset : NULL);
     if (ret < 0) {
         return ret;
     }
@@ -1119,7 +1190,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_modify_ldt]     = (void *)&sys_modify_ldt,
     [LINUX_SYS_adjtimex]       = NULL,
     [LINUX_SYS_mprotect]       = (void *)&sys_mprotect,
-    [LINUX_SYS_sigprocmask]    = (void *)&sys_sigprocmask,
+    [LINUX_SYS_sigprocmask]    = (void *)&linux_sys_sigprocmask,
     [LINUX_SYS_quotactl]       = NULL,
     [LINUX_SYS_getpgid]        = (void *)&sys_getpgid,
     [LINUX_SYS_fchdir]         = (void *)&sys_fchdir,
@@ -1166,6 +1237,9 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_rt_sigreturn]   = (void *)&linux_sys_rt_sigreturn,
     [LINUX_SYS_rt_sigaction]   = (void *)&linux_sys_rt_sigaction,
     [LINUX_SYS_rt_sigprocmask] = (void *)&linux_sys_rt_sigprocmask,
+    [LINUX_SYS_gettid]         = (void *)&linux_sys_gettid,
+    [LINUX_SYS_tkill]          = (void *)&linux_sys_tkill,
+    [LINUX_SYS_tgkill]         = (void *)&linux_sys_tgkill,
     [LINUX_SYS_rt_sigpending]  = (void *)&sys_sigpending,
     [LINUX_SYS_rt_sigtimedwait] = (void *)&sys_sigtimedwait,
     [LINUX_SYS_rt_sigqueueinfo] = NULL,
