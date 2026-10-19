@@ -1407,6 +1407,59 @@ void pmap_fork_clear_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     }
 }
 
+/*
+ * Remove every mapping of `page`, in whatever pmap, by its pv list: clear
+ * each PTE that maps it, drop the pv entry and the hold that went with it.
+ * Page tables are reached through the direct map, so the pmaps need not
+ * be current; a foreign pmap's TLB is reloaded when it is next scheduled.
+ * Returns 1 if any of the mappings had been written through (PTE_D), 0 if
+ * none, -1 if the pv list could not be walked; the caller decides what a
+ * dirty page needs before it can go.
+ */
+int pmap_page_remove_all(vm_page_t *page) {
+    uint32_t cr3;
+    int dirty = 0;
+
+    if (!page) {
+        return 0;
+    }
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    while (page->pv_list) {
+        struct pv_entry *pv = page->pv_list;
+        pmap_t pmap = pv->pmap;
+        uint32_t va = (uint32_t)pv->va & 0xFFFFF000U;
+        int mapped = 0;
+
+        if (pmap && pmap->pdir_phys) {
+            uint32_t *pd = (uint32_t *)P2V(pmap->pdir_phys);
+            uint32_t pde = pd[PD_INDEX(va)];
+            if ((pde & PTE_P) && !(pde & PTE_PS)) {
+                uint32_t *pt = (uint32_t *)P2V(pde & PTE_FRAME);
+                uint32_t pte = pt[PT_INDEX(va)];
+                if ((pte & PTE_P) && (pte & PTE_FRAME) == page->phys_addr) {
+                    if (pte & PTE_D) {
+                        dirty = 1;
+                    }
+                    pt[PT_INDEX(va)] = 0;
+                    pmap_count_map_remove(pmap, 1);
+                    if (pmap->pdir_phys == cr3) {
+                        pmap_invalidate_page(va);
+                    }
+                    mapped = 1;
+                }
+            }
+        }
+        pv_remove(page, pmap, va);
+        if (page->pv_list == pv) {
+            return -1;          /* the entry would not come off */
+        }
+        if (mapped) {
+            vm_page_unhold(page);
+        }
+    }
+    return dirty;
+}
+
 static int pmap_page_mapping_count(vm_page_t *page) {
     int count = 0;
 

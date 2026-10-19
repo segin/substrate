@@ -1,4 +1,5 @@
 #include <vm/vm_page.h>
+#include <vm/vm_object.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -63,7 +64,14 @@ bool test_vm_page_try_to_free(void) {
     if (vm_page_try_to_free(p) != 0) return false;
     p->wire_count = 0;
 
-    // Valid page check (should succeed and free the page correctly to the VM subsystem)
+    // An anonymous page cannot be read back, so it is kept
+    if (vm_page_try_to_free(p) != 0) return false;
+
+    // A clean, unmapped page of a file (should succeed and free the page
+    // correctly to the VM subsystem)
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, 1);
+    if (!obj) return false;
+    vm_page_insert(p, obj, 0);
     int result = vm_page_try_to_free(p);
 
     if (result != 1) return false;

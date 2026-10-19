@@ -105,6 +105,10 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
 void pmap_remove(pmap_t pmap, uintptr_t va);
 void pmap_remove_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
 void pmap_fork_clear_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
+/* Remove every mapping of a page in every pmap, by its pv list.  Returns 1
+ * if one had been written through, 0 if not, -1 if the pv list is bad. */
+struct vm_page;
+int pmap_page_remove_all(struct vm_page *page);
 uintptr_t pmap_extract(pmap_t pmap, uintptr_t va);
 size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len);
 size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t len);

@@ -733,6 +733,34 @@ void pmap_fork_clear_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) {
     pmap_count_map_remove(pmap, cleared);
 }
 
+/* Remove every mapping of `page`, in whatever pmap, by its pv list: the
+ * i386 pmap_page_remove_all().  pmap_pte reaches the tables through the
+ * direct map, so the pmaps need not be current. */
+int pmap_page_remove_all(vm_page_t *page) {
+    int dirty = 0;
+
+    if (!page) return 0;
+    while (page->pv_list) {
+        struct pv_entry *pv = page->pv_list;
+        pmap_t pmap = pv->pmap;
+        uintptr_t va = pv->va & ~(uintptr_t)(PAGE_4K - 1);
+        int mapped = 0;
+
+        pt_entry_t *pte = pmap ? pmap_pte(pmap, va, 0) : NULL;
+        if (pte && (*pte & PTE_P) && (*pte & PTE_FRAME) == page->phys_addr) {
+            if (*pte & PTE_D) dirty = 1;
+            *pte = 0;
+            pmap_count_map_remove(pmap, 1);
+            if (pmap_is_current(pmap)) pmap_invalidate_page(va);
+            mapped = 1;
+        }
+        pv_remove(page, pmap, va);
+        if (page->pv_list == pv) return -1;     /* would not come off */
+        if (mapped) vm_page_unhold(page);
+    }
+    return dirty;
+}
+
 void pmap_kenter(uintptr_t va, uintptr_t pa) {
     pt_entry_t *pte = pmap_pte(kernel_pmap_ptr, va, 1);
     if (!pte) return;  // OOM - should not happen for kernel

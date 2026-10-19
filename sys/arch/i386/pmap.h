@@ -108,6 +108,10 @@ void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva);
  * a freshly-forked child pmap (drops the pv + hold pmap_fork added, zeros the
  * PTE).  Safe on a not-current pmap.  Called from vm_map_fork(). */
 void pmap_fork_clear_range(pmap_t pmap, uint32_t sva, uint32_t eva);
+/* Remove every mapping of a page in every pmap, by its pv list.  Returns 1
+ * if one had been written through, 0 if not, -1 if the pv list is bad. */
+struct vm_page;
+int pmap_page_remove_all(struct vm_page *page);
 uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
 /* Copy `len` bytes from user vaddr `uva` in a possibly NON-active pmap into the
  * kernel buffer `dst`, walking the target's page tables through the physical

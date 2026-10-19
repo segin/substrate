@@ -445,7 +445,18 @@ static void test_vm_page_try_to_free(void) {
     TEST_ASSERT(vm_page_try_to_free(page) == 0, "try_to_free: freed a wired page");
     page->wire_count = 0;
 
-    // Test clean, inactive page (should succeed and free it)
+    // An anonymous page has nowhere to be read back from: kept
+    TEST_ASSERT(vm_page_try_to_free(page) == 0, "try_to_free: freed an anonymous page");
+
+    // A page of a file that something still maps: kept
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, 1);
+    TEST_ASSERT(obj != NULL, "try_to_free: object alloc failed");
+    vm_page_insert(page, obj, 0);
+    pv_insert(page, (struct pmap *)(uintptr_t)0x1000, 0x4000);
+    TEST_ASSERT(vm_page_try_to_free(page) == 0, "try_to_free: freed a mapped page");
+    pv_remove(page, (struct pmap *)(uintptr_t)0x1000, 0x4000);
+
+    // A clean, unmapped page of a file (should succeed and free it)
     TEST_ASSERT(vm_page_try_to_free(page) == 1, "try_to_free: failed to free a clean inactive page");
 
     TEST_PASS("vm_page_try_to_free");

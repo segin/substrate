@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <machine/intr.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
 #include <drivers/console/console.h>
@@ -858,20 +859,39 @@ int vm_pageout_scan(int max_scan) {
 
 // Try to free a clean inactive page
 // Returns 1 if page was freed, 0 otherwise
+//
+// Only a page of a file can go: its contents can be read back, where an
+// anonymous page's would be lost (there is no swap).  Every mapping of it
+// is removed first -- freeing a frame user PTEs still point at hands those
+// processes whatever the allocator puts there next -- and a mapping that
+// was written through marks it dirty, which keeps it until it is laundered.
+// The unmap, the re-check and the free run with interrupts off so no fault
+// can map the page again in between (the APs never run threads).
 int vm_page_try_to_free(vm_page_t *m) {
 	if(!m) return(0);
+	if(!m->object || m->object->type != VM_OBJ_TYPE_VNODE) return(0);
 
-	// Cannot free dirty pages directly
-	if(m->flags & PG_DIRTY) return(0);
+	uint32_t f = intr_disable();
+	if(m->pv_list) {
+		int dirty = pmap_page_remove_all(m);
+		if(dirty < 0) {
+			intr_restore(f);
+			return(0);
+		}
+		if(dirty) m->flags |= PG_DIRTY;
+	}
 
-	// Cannot free busy pages
-	if(m->flags & PG_BUSY) return(0);
-
-	// Cannot free wired pages
-	if(m->wire_count > 0) return(0);
+	// Cannot free dirty, busy or wired pages, nor one still held by a
+	// mapping or the kernel (ref_count 1 is the object's own).
+	if((m->flags & (PG_DIRTY | PG_BUSY)) || m->wire_count > 0 ||
+	   m->pv_list || m->ref_count > 1) {
+		intr_restore(f);
+		return(0);
+	}
 
 	// Free the page back to PMM
 	vm_page_free(m);
+	intr_restore(f);
 	return(1);
 }
 
@@ -891,15 +911,19 @@ static int vm_page_reclaim_inactive_clean(int target) {
 
 		if((m->flags & PG_INACTIVE) && !(m->flags & PG_DIRTY) &&
 		   !(m->flags & PG_BUSY) && m->wire_count == 0) {
-			dequeue(&inactive_queue, m);
-			m->flags &= ~PG_INACTIVE;
+			// Left on the queue: vm_page_free takes it off if the
+			// page goes, and one that cannot go stays inactive.
 			spinlock_release_irq(&vm_page_queue_lock, f);
 
-			if(vm_page_try_to_free(m)) {
+			int gone = vm_page_try_to_free(m);
+			if(gone) {
 				freed++;
 			}
 
 			f = spinlock_acquire_irq(&vm_page_queue_lock);
+			if(!gone && (m->flags & PG_INACTIVE)) {
+				next = m->next;	/* still queued: its link is current */
+			}
 		}
 
 		m = next;

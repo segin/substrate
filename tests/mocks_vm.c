@@ -248,6 +248,7 @@ int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)
 int pmap_test_and_clear_ref(struct vm_page *m) { (void)m; return 0; }
 int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) { (void)pmap; (void)sva; (void)eva; return 0; }
 int pmap_test_and_clear_modify(struct vm_page *m) { (void)m; return 0; }
+int pmap_page_remove_all(struct vm_page *m) { (void)m; return 0; }
 
 void pmap_copy_page(uintptr_t src, uintptr_t dst) { (void)src; (void)dst; }
 void pmap_zero_page(uintptr_t pa) { (void)pa; }
