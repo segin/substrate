@@ -200,6 +200,14 @@ execfail: execfail.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# aoutstack: the a.out initial stack is sized to argv/envp, and an exec whose
+# arguments are too large fails with E2BIG instead of writing past it.
+# Needs an a.out or COFF echo (both use aout_build_stack): run as
+# `aoutstack /perso/svr3/bin/echo` with svr3-323.img mounted.
+aoutstack: aoutstack.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pipeleak: a pipe() that fails part way, or whose descriptors cannot be
 # copied out, leaves nothing allocated or open.  Runs on the host too.
 pipeleak: pipeleak.c

@@ -323,8 +323,8 @@ int aout_build_stack(pmap_t pmap, char **kargv, int argc,
                      char **kenvp, int envc, int inline_vectors,
                      uint32_t *sp_out) {
     const uint32_t top = AOUT_USER_MAX;
-    const uint32_t eager = 32;                 /* 128 KiB mapped up front */
-    uint32_t base = top - eager * AOUT_PAGE;
+    uint32_t eager = 32;                       /* at least 128 KiB up front */
+    uint32_t base;
     /* argv/envp user-pointer arrays are heap-allocated: at ARG_MAX_COUNT
      * entries they are 16 KiB each, far too large for the 16 KiB kernel
      * stack (a real environment overflowed it and corrupted the return
@@ -332,6 +332,7 @@ int aout_build_stack(pmap_t pmap, char **kargv, int argc,
     uint32_t *argv_ua = kmalloc(sizeof(uint32_t) * (size_t)(argc + 1));
     uint32_t *envp_ua = kmalloc(sizeof(uint32_t) * (size_t)(envc + 1));
     uint32_t sp;
+    uint64_t need;
     int i;
 
     if (!argv_ua || !envp_ua) {
@@ -339,6 +340,48 @@ int aout_build_stack(pmap_t pmap, char **kargv, int argc,
         if (envp_ua) kfree(envp_ua, sizeof(uint32_t) * (size_t)(envc + 1));
         return -ENOMEM;
     }
+
+    /*
+     * Size the whole image -- strings, the two pointer arrays, the
+     * alignment and the argc frame -- before writing any of it, and map
+     * that much.  The image used to be copied into a fixed 128 KiB with no
+     * bound: past it the copy leaned on the stack-growth fault handler,
+     * and past the 8 MiB stack region (the vectors may hold up to 32 MiB)
+     * the kernel faulted.  Refuse what Linux refuses: more than a quarter
+     * of the stack limit, and never less than 128 KiB allowed.
+     */
+    need = 3U + 15U + 12U + 4U +
+           ((uint64_t)envc + 1U + (uint64_t)argc + 1U) * 4U;
+    for (i = 0; i < envc; i++) {
+        need += (uint64_t)strlen(kenvp[i]) + 1U;
+    }
+    for (i = 0; i < argc; i++) {
+        need += (uint64_t)strlen(kargv[i]) + 1U;
+    }
+    {
+        uint64_t limit = USER_STACK_MAX;
+
+        if (current_process) {
+            rlim_t soft = current_process->rlimits[RLIMIT_STACK].rlim_cur;
+
+            if (soft != RLIM_INFINITY && (uint64_t)soft < limit) {
+                limit = soft;
+            }
+        }
+        limit /= 4U;
+        if (limit < (uint64_t)eager * AOUT_PAGE) {
+            limit = (uint64_t)eager * AOUT_PAGE;
+        }
+        if (need > limit) {
+            kfree(argv_ua, sizeof(uint32_t) * (size_t)(argc + 1));
+            kfree(envp_ua, sizeof(uint32_t) * (size_t)(envc + 1));
+            return -E2BIG;
+        }
+    }
+    if (need > (uint64_t)eager * AOUT_PAGE) {
+        eager = (uint32_t)((need + AOUT_PAGE - 1U) / AOUT_PAGE);
+    }
+    base = top - eager * AOUT_PAGE;
 
     for (uint32_t i2 = 0; i2 < eager; i2++) {
         void *pa = pmm_alloc_block();
@@ -421,6 +464,8 @@ int aout_build_stack(pmap_t pmap, char **kargv, int argc,
     return 0;
 
 oom:
+    /* The pages already mapped go with the new pmap: the caller aborts the
+     * exec (exec_space_abort), which destroys it and frees them. */
     kfree(argv_ua, sizeof(uint32_t) * (size_t)(argc + 1));
     kfree(envp_ua, sizeof(uint32_t) * (size_t)(envc + 1));
     return -ENOMEM;
