@@ -1304,8 +1304,18 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
             return -EINTR;
         }
 
-        /* Woken: try to acquire */
-        oldval = futex_cmpxchg_user(uaddr, 0, tid, &err);
+        /* Woken: try to acquire.  futex_unlock_pi left the word 0, so
+         * with other waiters still queued the new owner must put
+         * FUTEX_WAITERS back: a bare tid would let its release take the
+         * userspace tid -> 0 path and never wake them.  A stale bit (the
+         * others leave first) only costs one FUTEX_UNLOCK_PI. */
+        pi_spinlock();
+        int others = ps->waiters && (ps->waiters->task != current_thread ||
+                                     ps->waiters->next);
+        pi_unlock();
+        oldval = futex_cmpxchg_user(uaddr, 0,
+                                    others ? (int)(tid | FUTEX_WAITERS) : tid,
+                                    &err);
         if (err) {
             pi_spinlock();
             pi_remove_waiter(ps, current_thread);

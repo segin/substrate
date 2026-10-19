@@ -41,7 +41,8 @@ else
 endif
 
 TESTS_PORTABLE = torture_kernel
-TESTS_SUBSTRATE = torture_pthread torture_recmutex torture_pthread_ext
+TESTS_SUBSTRATE = torture_pthread torture_recmutex torture_pthread_ext \
+                  torture_pifutex
 
 # Default: just the portable suite.  Substrate-specific tests are
 # only built when CROSS is set.
@@ -59,6 +60,10 @@ torture_kernel: torture_kernel.c
 
 # Substrate-target only.
 torture_pthread: torture_pthread.c
+	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# Contended FUTEX_LOCK_PI / FUTEX_UNLOCK_PI from native threads.
+torture_pifutex: torture_pifutex.c
 	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_recmutex: torture_recmutex.c
