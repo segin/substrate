@@ -1061,33 +1061,54 @@ are `subr_copy.c:14`, `boot.S:2`, `multiboot_hdr.S:2`, `ext2_hash.c:21` and
 ## 9. Found while fixing the above
 
 Defects met while fixing this audit's findings (October 2026), outside any
-finding above.  Same form as sections 1–7; none has been verified by a
-second reader.
+finding above.  Same form as sections 1–7.  Each was then checked by an
+independent read-only verifier and a completeness critic (2026-10-19); the
+verdicts, corrections and splits are recorded with each finding, and the
+critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
+006b, 007b.
 
-- [ ] **SYS-NEW-001** *(High)* While a path walk holds an `fs_node_t` it got from `finddir`, no filesystem shall free that node.
-  Evidence: the VFS takes no reference for a lookup in progress (only `open_fs`/`close_fs` pin a node), so a filesystem freeing a node nobody has *open* can free one a walk is still using.  Remaining cases: `minix_ncache_forget` frees an inode's node when the inode is freed (`sys/fs/minix/minix.c`, unlink during a walk); `procfs_release_pid_nodes` frees a reaped process's node block when nothing has it open (`sys/fs/procfs.c`, a walk paused inside `/proc/<pid>`); ext2's node handling has not been checked for the same pattern.  The Minix cache stopped evicting in 7d81065bb, and procfs's per-fd/per-thread entries are never freed early, for this reason.  The real fix is a lookup reference in the VFS (cf. the vnode layer).
-  Basis: traced.
+- [ ] **SYS-NEW-001a** *(High; confirmed)* No ext2 vnode op shall dereference `ctx->fs` of a node whose inode has been deleted.
+  Evidence: `ext2_node_close`'s deferred delete (`sys/fs/ext2/ext2.c:115-137`, reached from rmdir at :6780-6784 and unlink at :6616-6624) sets `ctx->fs = NULL` but leaves `node->finddir` set; a path walk sitting in a directory that is rmdir'ed calls `ext2_finddir`, which dereferences `fs->mp` at :3539-3542 — a kernel NULL dereference in the root filesystem.  Other ext2 ops reading `ctx->fs` unchecked need the same guard.  Interim mitigation for SYS-NEW-001b.
+  Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-002** *(Medium)* `link(2)` / `linkat` without `AT_SYMLINK_FOLLOW` shall link a symlink itself, not its target.
-  Evidence: on ext2 and Minix alike, `ln -P dangling new` fails `ENOENT` and `ln -P good new` makes a hard link to the symlink's target (`ls -l` shows the target's mode and link count).
-  Basis: observed.
+- [ ] **SYS-NEW-001b** *(High; confirmed)* While a path walk holds an `fs_node_t` it got from `finddir`, no filesystem shall free, recycle or repopulate that node.
+  Evidence: the live walk (`vfs_lookup`/`vfs_lookup_lstat`/`finddir_fs_internal`, `sys/vfs/vfs.c:1118, 1277, 851`) carries bare node pointers between `finddir` calls; the only pin is `open_fs`, taken after the walk (`vfs_lookup_ref` :1254, `sys_open` `syscall.c:904`) or never (readlink :3245, truncate :1225, statfs, the parent lookups of unlink/mkdir/link).  Lookups sleep on I/O and the kernel is preemptible.  Exposed: ext2 (`ext2_finddir` returns children unpinned, `ext2.c:2861-2866`; `ext2_alloc_node` recycles any `pin_count==0` slot, :2286, silently retargeting a walk); FAT (`fat.c:663-685`, which also memsets a slot on a cache hit), exFAT (`exfat.c:716-737`, likewise), UDF (`udf.c:556-570`); Minix (`minix_ncache_forget`, `minix.c:695-703`, unlink during a walk — eviction itself was removed in 7d81065bb); procfs (`procfs_release_pid_nodes` frees the block when unopened, `procfs.c:1059-1087`); shmfs (`shmfs.c:285-289` via unlink :638, and finddir drops the lock before returning, :557-563); devfs alias nodes (`devfs.c:556` via `device.c:329`); pty slave nodes (`drivers/console/pty.c:316-321` via `pty_destroy` :507).  Not exposed: sysv (leaks unopened nodes instead), sysfs, 9p, fuse.  `open_fs` is also the wrong primitive for a reference: `stat()` through `vfs_lookup_ref` runs a pty slave's real open hook (`pty.c:522`).
+  Fix: side-effect-free `hold`/`rele` ops on `fs_node_t` (NULL for static nodes) mapped to each driver's pin; `finddir` returns its child held; the walk holds `root` and releases each step's predecessor (also for `..`, mount crossing, symlinks, perso shadowing); every `vfs_lookup*`/`finddir_fs` caller (about 57 sites) releases; `sys_open` turns the walk's hold into the open pin; `vfs_lookup_ref` uses hold/rele instead of open/close.
+  Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-003** *(Medium; to investigate)* A process that has exited and been reaped shall give back its memory on x86_64 as on i386.
-  Evidence: 200 `sleep 0 &` + `wait` cycles from the shell lower MemFree by about 8.5 MB on x86_64 (~40 KB each), with or without `/proc` access, against about 1 MB on i386.  It may be a cache (page cache, slab) rather than a leak; not yet run long enough to tell.
-  Basis: observed.
+- [ ] **SYS-NEW-002** *(Medium; confirmed)* `link(2)` shall link a symlink in the old path itself, not its target; a BSD `linkat` shall follow only with `AT_SYMLINK_FOLLOW`.
+  Evidence: every link entry point ends in `kern_link`, which resolves the old path with `vfs_lookup` (`sys/kern/syscall.c:3088`) and so follows its final symlink: `ln -P dangling new` fails `ENOENT`, `ln -P good new` links the target.  Not a userland cause (`ln -P` lstat()s and calls `link()`), and not ext2/Minix-specific.  There is no native `linkat`/`AT_SYMLINK_FOLLOW`; FreeBSD and NetBSD `linkat` discard the flag (`freebsd_user.c:373`, `netbsd_user.c:775`, whose comments call following intended); Linux `linkat` (303) is named but not dispatched (ENOSYS).
+  Fix: give `kern_link` a follow flag choosing `vfs_lookup_lstat` for the old path; pass `AT_SYMLINK_FOLLOW` through from the BSD `linkat`s; dispatch Linux `linkat`.  Check first that every filesystem's link op still rejects a directory source.
+  Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-004** *(Medium)* A Linux thread's `exit` (`SYS_exit`, not `exit_group`) shall end only that thread.
-  Evidence: found writing the PI-futex test (KERN-005): a glibc-linked Linux program's thread exit took the whole process down.
-  Basis: observed.
+- [ ] **SYS-NEW-003** *(High; confirmed — raised from Medium)* The pv (reverse-map) code shall accept every valid kernel pointer on x86_64.
+  Evidence: `pv_entry_ptr_sane` (`sys/vm/vm_page.c:360-380`) rejects any pointer `>= 0xFF000000U`, which on x86_64 is every kernel pointer.  So `pv_insert` drops a page's existing list and `pv_remove` drops it without freeing (:460, 479, 486, 503, 510): every pv entry leaks (the static pool, then kmem-32), and x86_64 has effectively no reverse map — `pmap_page_remove_all` and the `pmap_protect` multi-mapper COW guard (x86_64 `pmap.c:739, 897`) see at most one mapping.  This is the ~40 KB per fork+exit seen from the shell (a slab leak, not a cache; MemFree counts only buddy-free pages), and any frame-reclaim path relying on the pv list rather than `ref_count` is a use-after-free candidate on x86_64.  The silent "insane" recovery is what hid it.  i386's ~1 MB drift over 200 cycles is unexplained (likely cache or noise).
+  Fix: a per-arch upper bound (or none on x86_64), rate-limited logging in the "insane" branches, and a boot-time self-check.
+  Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-005** *(Medium)* A statically linked libpthread program shall get working thread-local storage in its threads.
-  Evidence: found writing the PI-futex test (KERN-005): static libpthread threads crash on first TLS access; the test was rewritten to link dynamically.
-  Basis: observed.
+- [ ] **SYS-NEW-004** *(Medium; confirmed)* A Linux thread's `exit` (`SYS_exit`, not `exit_group`) shall end only that thread, and its `CLONE_CHILD_CLEARTID` word shall be cleared to 0.
+  Evidence: Linux `exit` (1) and `exit_group` (252) both map to `sys_exit` → `proc_exit`, which kills every thread (`sys/exec/perso/perso_linux.c`); glibc threads end with `SYS_exit`, so the first thread exit ends the process.  Companion bug: `futex_wake_exited_thread` writes 1, not 0, to the clear-tid word (`sys/kern/futex.c:358`, since ef53a85f2; the comment at :372 says "zeroes"), which would hang glibc `pthread_join` once threads stop killing the process.  No Linux x86_64 personality exists; the i386 table is built into both kernels.  Also: `sys_thr_exit` (`syscall.c:1580`) has no last-thread check, so a process whose last thread leaves through `thr_exit`/`_lwp_exit` never reaches `proc_exit` — the only caller of the mq/ksem/shm exit cleanup.
+  Fix: `linux_sys_exit`: the last live thread calls `proc_exit`; otherwise run the robust-list cleanup, mark the thread detached and exit it alone; write 0 to the clear-tid word.  The same last-thread rule in `sys_thr_exit`.
+  Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-006** *(Low)* `exec` shall close POSIX message-queue descriptors (they are not inherited across exec).
-  Evidence: found fixing KERN-007: `mq_proc_fork` gives the child the parent's handles, but nothing drops them at exec.
-  Basis: traced.
+- [ ] **SYS-NEW-005** *(Medium → Low; confirmed, i386 only)* A statically linked i386 program shall get thread-local storage, for its main thread and its threads.
+  Evidence: `lib/c/src/tls_static.c` (static TLS from PT_TLS) is under `#if defined(__x86_64__)` ("every i386 program is dynamically linked" — not so); i386 `crt0.S` has no TLS step, so a static i386 program's main thread has no TLS image and threads get `tls_base == NULL` (gs base 0).  libpthread's own TLS (cancel state, cleanup stack, keys) then faults — a thread at the latest on exit, the main thread on any such call — and the program's `__thread` variables are never initialised.  amd64 static programs are fine.  Narrower than first thought: `-lpthread` now resolves to the shared library (`install-specs.sh`), so only explicit `-static` links are hit.
+  Fix: port `tls_static.c` to i386 (Elf32 phdrs from auxv, variant II as ld.so builds, `SYS_SET_GSBASE`) and call it from i386 `crt0.S`; add a static i386 TLS test.
+  Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-007** *(Low)* The host and unit tests that cover the kernel shall build.
-  Evidence: `tests/sys/tests.o` fails in `personality.h` (`size_t` used without its header); `host_test_fat_vuln`, `host_test_fat_lfn_overflow` and `host_test_fat_lfn_truncation` have no rule and fall to make's implicit one with kernel flags; `host_test_perso_elks` no longer compiles and calls none of the syscall wrappers; `torture_fat_persist.c` is built by nothing.
-  Basis: observed.
+- [ ] **SYS-NEW-006a** *(Medium; confirmed)* `exec` shall detach the process's SysV shared-memory segments.
+  Evidence: `shm_proc_cleanup` (`sys/kern/ipc_shm.c:479`) runs only at exit (`process.c:1978`); attach records and `nattch` survive exec, and a later `shmdt` in the new image (`kern_shmdt` :373 → `shm_detach_one` :344) can `vm_map_remove` an unrelated range of it.
+  Basis: traced (verifier + critic).
+
+- [ ] **SYS-NEW-006b** *(Low; confirmed)* `exec` shall close POSIX message-queue descriptors (dropping `mq_notify` registrations) and named semaphores.
+  Evidence: mq handles live in a global table keyed by pid (`posix_mqueue.c:108-118`) and are released only by `mq_close` and `mq_proc_cleanup` at exit (`process.c:1988`); no loader calls into it.  All descriptors survive exec, not only inherited ones, and an old `mq_notify` registration still signals the new image, whose handlers exec reset to default (e.g. SIGUSR1 kills it).  `ksem_proc_cleanup` (`posix_sem.c:577`) is likewise exit/fork-rollback only.  POSIX timers are cleared correctly.
+  Fix: one post-commit exec hook beside `proc_close_cloexec` in every loader: `mq_proc_cleanup`, `ksem_proc_cleanup`, and an shm detach that drops the records without `vm_map_remove` (the old map is gone).  Stub it in `tests/Makefile` in the same commit.
+  Basis: traced (verifier + critic).
+
+- [ ] **SYS-NEW-007a** *(Medium; confirmed — regression)* `make -C tests` (CI's host-testsuite job) shall build.
+  Evidence: 7 targets (`test_runner`, `host_test_proc_tree`, `host_test_proc_exit`, `host_test_proc_lifecycle`, `host_test_proc_signal_state`, `host_test_fork_exec_wait`, `host_test_linux_signal`) fail to link on `mq_proc_fork`, `ksem_proc_fork`, `casuword32` and `sys_thr_self`, introduced by this remediation (3cd121605, c069a41ee, the KERN-012 futex change, a2ce8f109).  CI has failed on every run since 3cd121605.  Also `sys/exec/perso/personality.h` uses `size_t` with only `<stdint.h>`.
+  Basis: observed (verifier + critic; `gh run list`).
+
+- [ ] **SYS-NEW-007b** *(Low; confirmed)* The tests under `tests/sys` shall build or be removed.
+  Evidence: 53 of the 136 `HOST_TESTS` fail to build, most for months (e.g. `RTSIG_QUEUE_MAX`, `fpu_switch`, `poll_notify`, `xout_init_handler` drift).  `host_test_perso_elks` does exercise the syscall table but no longer compiles (stale `stub_sys_stat`/`readdir_fs` prototypes).  The three FAT tests are in no list and need source updates as well as rules.  28 of 31 `tests/sys/torture_*.c`, `torture_fat_persist.c` among them, are built by nothing.  `tests/kern` and `tests/elks` build (except `cat_elks`, which needs ia16-elf-gcc).
+  Basis: observed (verifier + critic).
