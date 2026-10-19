@@ -87,9 +87,8 @@ pokecow: pokecow.c
 	$(if $(BRAND),$(BRAND),)
 
 # brkfork: shrinking the heap does not free a page a process forked from
-# this one still maps.  Runs on the host too.  The native personality has
-# no brk (sbrk fails ENOSYS), so on substrate run brkfork.linux, a static
-# i386 Linux build that reaches sys_brk through the Linux personality.
+# this one still maps.  Runs on the host too; brkfork.linux, a static
+# i386 Linux build, checks the same through the Linux personality.
 brkfork: brkfork.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)

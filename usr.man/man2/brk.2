@@ -1,0 +1,73 @@
+.TH BRK 2 "2026-10-18" "Substrate" "System Calls"
+.SH NAME
+brk, sbrk \- change the end of the data segment
+.SH LIBRARY
+Substrate libc
+.SH SYNOPSIS
+.nf
+#include <unistd.h>
+
+int brk(void *addr);
+void *sbrk(intptr_t increment);
+.fi
+.SH DESCRIPTION
+The
+.I program break
+is the end of the process's heap: the first address after its data
+segment.
+It starts at the end of the program's loaded image.
+.P
+.BR brk ()
+moves the break to
+.IR addr .
+Growing the heap maps new zero-filled pages; shrinking it gives the pages
+above the new break back to the system.
+.P
+.BR sbrk ()
+moves the break by
+.I increment
+bytes and returns the old break, so the new memory begins at the value
+returned.
+.BR sbrk (0)
+returns the current break without changing it.
+.P
+Both are built on the
+.B SYS_BRK
+system call, which takes the requested break (0 to query) and returns the
+break in effect afterwards.
+.SH RETURN VALUE
+.BR brk ()
+returns 0 on success.
+On error it returns \-1 and sets
+.IR errno .
+.P
+.BR sbrk ()
+returns the previous break on success.
+On error it returns
+.B (void *) \-1
+and sets
+.IR errno .
+.SH ERRORS
+.TP
+.B ENOMEM
+The break could not be moved: the requested range would run into another
+mapping or past the user address space, or memory to back it could not be
+committed.
+.SH NOTES
+The C library's
+.BR malloc (3)
+allocates with
+.BR mmap (2)
+and does not use the program break, so a program that mixes the two only
+has to keep its own
+.BR sbrk ()
+calls consistent.
+.P
+Shrinking the break releases only pages the process maps alone: after
+.BR fork (2),
+a heap page the other process still maps stays allocated until both have
+given it up.
+.SH SEE ALSO
+.BR fork (2),
+.BR mmap (2),
+.BR malloc (3)

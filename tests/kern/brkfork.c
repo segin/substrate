@@ -18,9 +18,8 @@
  *
  *      cc -o brkfork brkfork.c && ./brkfork
  *
- * Native substrate programs have no brk, so on substrate this runs as a
- * static i386 Linux program (make brkfork.linux), through the Linux
- * personality's brk.
+ * On substrate it runs natively, and as a static i386 Linux program
+ * (make brkfork.linux) through the Linux personality's brk.
  */
 #include <stdint.h>
 #include <stdio.h>
