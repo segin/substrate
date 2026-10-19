@@ -22,6 +22,12 @@
 /* Lowest kernel virtual address: the start of the upper canonical half. */
 #define KERNEL_VA_START     0xFFFF800000000000UL
 
+/* End (exclusive) of where a kernel object can live: the direct map, the
+ * heap and the image all lie in the upper half, so only the last page is
+ * excluded.  Pointer sanity checks bound with this, not a literal: i386's
+ * 0xFF000000 rejected every x86_64 kernel pointer. */
+#define KERNEL_DATA_VA_END  0xFFFFFFFFFFFFF000UL
+
 /* End of a 32-bit process's address space (exclusive), as on i386. */
 #define USER32_VA_END       0xC0000000UL
 

@@ -1081,7 +1081,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Fix: give `kern_link` a follow flag choosing `vfs_lookup_lstat` for the old path; pass `AT_SYMLINK_FOLLOW` through from the BSD `linkat`s; dispatch Linux `linkat`.  Check first that every filesystem's link op still rejects a directory source.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-003** *(High; confirmed — raised from Medium)* The pv (reverse-map) code shall accept every valid kernel pointer on x86_64.
+- [x] **SYS-NEW-003** *(High; confirmed — raised from Medium)* The pv (reverse-map) code shall accept every valid kernel pointer on x86_64.
   Evidence: `pv_entry_ptr_sane` (`sys/vm/vm_page.c:360-380`) rejects any pointer `>= 0xFF000000U`, which on x86_64 is every kernel pointer.  So `pv_insert` drops a page's existing list and `pv_remove` drops it without freeing (:460, 479, 486, 503, 510): every pv entry leaks (the static pool, then kmem-32), and x86_64 has effectively no reverse map — `pmap_page_remove_all` and the `pmap_protect` multi-mapper COW guard (x86_64 `pmap.c:739, 897`) see at most one mapping.  This is the ~40 KB per fork+exit seen from the shell (a slab leak, not a cache; MemFree counts only buddy-free pages), and any frame-reclaim path relying on the pv list rather than `ref_count` is a use-after-free candidate on x86_64.  The silent "insane" recovery is what hid it.  i386's ~1 MB drift over 200 cycles is unexplained (likely cache or noise).
   Fix: a per-arch upper bound (or none on x86_64), rate-limited logging in the "insane" branches, and a boot-time self-check.
   Basis: traced (verifier + critic).

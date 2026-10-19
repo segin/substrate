@@ -17,6 +17,11 @@
 /* Lowest kernel virtual address: anything at or above is kernel. */
 #define KERNEL_VA_START     0xC0000000U
 
+/* End (exclusive) of where a kernel object -- heap, image, direct map --
+ * can live; above it are the page-table and fixed windows.  Pointer
+ * sanity checks bound with this, not a literal. */
+#define KERNEL_DATA_VA_END  0xFF000000U
+
 /* End of a 32-bit process's address space (exclusive). */
 #define USER32_VA_END       0xC0000000U
 

@@ -1,10 +1,12 @@
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <machine/intr.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
 #include <drivers/console/console.h>
+#include <kern/panic.h>
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <pm/pm.h>
@@ -368,7 +370,11 @@ static int pv_entry_ptr_sane(const struct pv_entry *entry) {
         return 0;
     }
 
-    if (addr >= 0xFF000000U) {
+    /* Per architecture: the literal 0xFF000000 that stood here is i386's,
+     * and on x86_64 it rejected every kernel pointer -- each page's pv
+     * list was then dropped (pv_insert) or abandoned (pv_remove), so every
+     * pv entry leaked and the reverse map held at most one mapping. */
+    if (addr >= KERNEL_DATA_VA_END) {
         return 0;
     }
 
@@ -379,6 +385,26 @@ static int pv_entry_ptr_sane(const struct pv_entry *entry) {
     return 1;
 }
 
+/*
+ * A pv list was found corrupt and is being dropped.  Say so: the drop
+ * loses (leaks) whatever entries the list held, and it used to happen
+ * silently -- which hid the x86_64 bound above for months.  The first few
+ * are reported; the count goes on.
+ */
+static unsigned long pv_insane_count;
+
+static void pv_report_insane(const char *where, const void *page,
+                             const void *entry) {
+    unsigned long n = __sync_add_and_fetch(&pv_insane_count, 1);
+
+    if (n <= 8) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s: bad pv entry %p on page %p "
+                 "(list dropped, %lu so far)\n", where, entry, page, n);
+        kprint(buf);
+    }
+}
+
 static void pv_pool_init(void) {
 	if(pv_pool_initialized) return;
 	for(int i = 0; i < PV_POOL_SIZE; i++) {
@@ -386,6 +412,10 @@ static void pv_pool_init(void) {
 		pv_free_list = &pv_pool[i];
 	}
 	pv_pool_initialized = 1;
+	/* The pool is a kernel object: if the sanity check refuses it, every
+	 * pv operation will fail the same way. */
+	if (!pv_entry_ptr_sane(&pv_pool[0]))
+		panic("pv_pool_init: pv_entry_ptr_sane rejects the kernel's own pool");
 }
 
 static struct pv_entry *pv_alloc(void) {
@@ -458,6 +488,7 @@ void pv_insert(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 	if(!page || !pmap) return;
 
 	if (!pv_entry_ptr_sane(page->pv_list)) {
+		pv_report_insane("pv_insert", page, page->pv_list);
 		page->pv_list = NULL;
 	}
 
@@ -477,6 +508,7 @@ void pv_remove(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 	if(!page) return;
 
 	if (!pv_entry_ptr_sane(page->pv_list)) {
+		pv_report_insane("pv_remove", page, page->pv_list);
 		page->pv_list = NULL;
 		return;
 	}
@@ -484,6 +516,7 @@ void pv_remove(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 	struct pv_entry **pp = &page->pv_list;
 	while(*pp) {
 		if (!pv_entry_ptr_sane(*pp)) {
+			pv_report_insane("pv_remove", page, *pp);
 			*pp = NULL;
 			return;
 		}
@@ -501,6 +534,7 @@ void pv_remove_all(vm_page_t *page) {
 	if(!page) return;
 
 	if (!pv_entry_ptr_sane(page->pv_list)) {
+		pv_report_insane("pv_remove_all", page, page->pv_list);
 		page->pv_list = NULL;
 		return;
 	}
@@ -508,6 +542,7 @@ void pv_remove_all(vm_page_t *page) {
 	struct pv_entry *entry = page->pv_list;
 	while(entry) {
 		if (!pv_entry_ptr_sane(entry)) {
+			pv_report_insane("pv_remove_all", page, entry);
 			page->pv_list = NULL;
 			return;
 		}
