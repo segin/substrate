@@ -316,6 +316,11 @@ static int uas_attach(usb_device_t *dev)
     u->scsi_link.priv = u;
     if (scsi_register_link(&u->scsi_link) != 0) {
         kprintf("uas: failed to register SCSI link\n");
+        /* The slot goes back to the pool: its IU buffers with it. */
+        kfree(u->cmd_iu, UAS_CMD_IU_SIZE);
+        kfree(u->status_iu, UAS_STATUS_IU_SIZE);
+        u->cmd_iu = NULL;
+        u->status_iu = NULL;
         u->active = 0;
         return -1;
     }

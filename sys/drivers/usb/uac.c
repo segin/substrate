@@ -632,6 +632,46 @@ static uac_dev_t *uac_alloc(void)
 	return NULL;
 }
 
+/*
+ * Stop the feeder, reclaim the iso stream, free the ring and FIFO and give
+ * the slot back: the teardown half of uac_detach, also needed when attach
+ * fails after the feeder has started.  The caller has already made sure
+ * the audio layer will not call in (unregistered, or never registered).
+ */
+static void uac_teardown(uac_dev_t *d, usb_device_t *dev)
+{
+	/* Ask the feeder to stop and JOIN it before touching anything it uses.
+	 * The feeder dereferences d->udev (== dev) and the DMA ring every
+	 * iteration; if we freed those or let the USB core free dev while the
+	 * feeder was still unwinding, its next usb_frame_number/usb_iso_schedule
+	 * would be a use-after-free.  Wait (bounded) for feeder_exited. */
+	d->running = 0;
+	d->active = 0;
+	sched_wakeup((void *)&d->running);
+
+	if (d->feeder) {
+		int spins = 0;
+		while (!d->feeder_exited && spins++ < 1000) {
+			sched_sleep_until((void *)&d->feeder_exited,
+			    get_ticks() + (get_hz() ? get_hz() / 100 + 1 : 1));
+		}
+	}
+
+	/* Feeder is gone (or timed out): dev is still valid here, so reclaim any
+	 * iso packets it left scheduled, then stop the iso stream. */
+	uac_reclaim_all(d);
+	(void)usb_set_interface(dev, d->as_iface, 0);
+
+	/* Release the DMA ring and FIFO now that no one references them. */
+	dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_MAX);
+	kfree(d->fifo_buf, UAC_FIFO_BYTES);
+	d->ring = NULL;
+	d->fifo_buf = NULL;
+
+	d->feeder = NULL;
+	d->in_use = 0;   /* return the slot to the pool */
+}
+
 static int uac_attach(usb_device_t *dev)
 {
 	uac_parse_t p;
@@ -738,8 +778,9 @@ static int uac_attach(usb_device_t *dev)
 	rc = audio_register_device(&d->audio);
 	if (rc != 0) {
 		kprintf("uac: audio_register_device failed (%d)\n", rc);
-		d->running = 0;
-		d->in_use = 0;
+		/* The feeder is running: join it before the slot and its
+		 * buffers go (they leaked, and the slot was reused under it). */
+		uac_teardown(d, dev);
 		return -1;
 	}
 
@@ -763,37 +804,8 @@ static void uac_detach(usb_device_t *dev)
 	 * new writes revive the feeder while we tear it down. */
 	audio_unregister_device(&d->audio);
 
-	/* Ask the feeder to stop and JOIN it before touching anything it uses.
-	 * The feeder dereferences d->udev (== dev) and the DMA ring every
-	 * iteration; if we freed those or let the USB core free dev while the
-	 * feeder was still unwinding, its next usb_frame_number/usb_iso_schedule
-	 * would be a use-after-free.  Wait (bounded) for feeder_exited. */
-	d->running = 0;
-	d->active = 0;
-	sched_wakeup((void *)&d->running);
-
-	if (d->feeder) {
-		int spins = 0;
-		while (!d->feeder_exited && spins++ < 1000) {
-			sched_sleep_until((void *)&d->feeder_exited,
-			    get_ticks() + (get_hz() ? get_hz() / 100 + 1 : 1));
-		}
-	}
-
-	/* Feeder is gone (or timed out): dev is still valid here, so reclaim any
-	 * iso packets it left scheduled, then stop the iso stream. */
-	uac_reclaim_all(d);
-	(void)usb_set_interface(dev, d->as_iface, 0);
-
-	/* Release the DMA ring and FIFO now that no one references them. */
-	dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_MAX);
-	kfree(d->fifo_buf, UAC_FIFO_BYTES);
-	d->ring = NULL;
-	d->fifo_buf = NULL;
-
+	uac_teardown(d, dev);
 	dev->driver_data = NULL;
-	d->feeder = NULL;
-	d->in_use = 0;   /* return the slot to the pool */
 }
 
 static usb_class_driver_t uac_driver = {

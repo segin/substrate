@@ -538,7 +538,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/virtio/virtio_gpu.c:203-306` passes `V2P(&cmd)` for stack variables to the DMA ring without locking `vq_ctrl`; `virtio_9p.c:39-144`, `virtio_scsi.c:697-800`, and `virtio_gpu.c:308-340` never set `PCI_COMMAND_MASTER`; `virtio_scsi.c:689-695` never reads `VIRTIO_REG_ISR_STATUS`; and `virtio_scsi.c:769-792` leaks `dev->ctrl_buf`, `dev->req_buf`, and `dev->extra_req_bufs[]` if a later `pmm_alloc_block()` fails.
   Basis: traced.
 
-- [ ] **SYS-DRV-013** *(Medium → Low; partly confirmed)* In the USB drivers (`sys/drivers/usb/uac.c`, `usb_msc.c`, `uas.c`), attach error paths shall stop any spawned kernel thread (`uac-feed`), free all allocated DMA and FIFO buffers, and terminate `uac_feeder` via `kthread_exit()`.
+- [x] **SYS-DRV-013** *(Medium → Low; partly confirmed)* In the USB drivers (`sys/drivers/usb/uac.c`, `usb_msc.c`, `uas.c`), attach error paths shall stop any spawned kernel thread (`uac-feed`), free all allocated DMA and FIFO buffers, and terminate `uac_feeder` via `kthread_exit()`.
   Evidence: `sys/drivers/usb/uac.c:738-744` sets `d->in_use = 0` on `audio_register_device` failure while `uac-feed` is still running and leaks `d->fifo_buf` (64 KiB) and `d->ring`; `uac_feeder` (`:279`) returns instead of calling `kthread_exit()`; `sys/drivers/usb/usb_msc.c:565-569` and `sys/drivers/usb/uas.c:317-321` leak DMA buffers when `scsi_register_link` fails.
   Basis: traced.
 

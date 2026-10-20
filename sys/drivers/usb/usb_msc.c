@@ -564,6 +564,13 @@ static int usb_msc_attach(usb_device_t *dev)
 
     if (scsi_register_link(&msc->scsi_link) != 0) {
         kprintf("usb_msc: failed to register SCSI link\n");
+        /* The slot goes back to the pool: its DMA buffers with it. */
+        dma_free_coherent(msc->cbw, sizeof(struct usb_msc_cbw));
+        dma_free_coherent(msc->csw, sizeof(struct usb_msc_csw));
+        dma_free_coherent(msc->bounce_buf, USB_MSC_BOUNCE_SIZE);
+        msc->cbw = NULL;
+        msc->csw = NULL;
+        msc->bounce_buf = NULL;
         msc->active = 0;
         return -1;
     }
