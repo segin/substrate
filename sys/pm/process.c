@@ -876,6 +876,7 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
      * memory + the saved trap frame. */
     void *stack = pmm_alloc_contiguous(4);
     if (!stack) {
+        proc_destroy(child);
         return -1;
     }
     void *stack_top = (uint8_t*)stack + 16384;
@@ -884,6 +885,7 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
     if (!t) {
         pmm_free_contiguous(stack, 4);
+        proc_destroy(child);
         return -1;
     }
 

@@ -284,7 +284,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/sysinfo.c:215` formats `pc=0x%08x` (`recs[i].pc`) into `si.name` and copies it out to any unprivileged caller.
   Basis: traced.
 
-- [ ] **SYS-KERN-025** *(Low; confirmed)* If kernel stack or thread allocation fails in `sched_spawn_kernel_process`, then the process manager shall destroy the newly created `process_t` (`proc_destroy(child)`) before returning.
+- [x] **SYS-KERN-025** *(Low; confirmed)* If kernel stack or thread allocation fails in `sched_spawn_kernel_process`, then the process manager shall destroy the newly created `process_t` (`proc_destroy(child)`) before returning.
   Evidence: `sys/pm/process.c:848-884` allocates `child = proc_create(PERS_NATIVE)` at line 852 and returns `-1` at lines 866 and 873 without calling `proc_destroy(child)`.
   Basis: traced.
 
