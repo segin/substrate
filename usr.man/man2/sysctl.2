@@ -131,6 +131,9 @@ The MIB path does not correspond to any registered parameter.
 is non-NULL but the parameter is read-only
 .RB ( CTLFLAG_WR
 not set), or the caller is not root.
+Also returned for an attempt to lower
+.B kern.securelevel
+while it is greater than zero.
 .SH NOTES
 .BR sysctl (3)
 provides typed convenience wrappers

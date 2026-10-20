@@ -235,7 +235,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/subr_copy.c:216-243` (`copyinstr`) and `sys/kern/futex.c:150-168` (`futex_cmpxchg_user`) assign `current_thread->on_fault = (uintptr_t)&&fault;` around C loop bodies / separate asm statements, which `sys/kern/subr_copy.c:80-93` documents as unsafe under GCC basic-block folding and register allocation across traps.
   Basis: traced.
 
-- [ ] **SYS-KERN-013** *(High → Medium; confirmed)* While `securelevel > 0`, the sysctl subsystem shall reject any attempt to write a smaller value to `kern.securelevel` with `EPERM`.
+- [x] **SYS-KERN-013** *(High → Medium; confirmed)* While `securelevel > 0`, the sysctl subsystem shall reject any attempt to write a smaller value to `kern.securelevel` with `EPERM`.
   Evidence: `sys/kern/sysctl.c:48` registers `kern.securelevel` with generic `sysctl_handle_int` (`:303-330`) and `CTLFLAG_RW`, allowing root to lower `securelevel` back to `0` or `-1`.
   Basis: traced.
 

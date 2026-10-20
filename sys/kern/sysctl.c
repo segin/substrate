@@ -45,7 +45,39 @@ static int kernel_maxproc = 1000; // placeholder
 static char kernel_hostname[256] = "localhost";
 static char kernel_domainname[256] = "localdomain";
 
-SYSCTL_INT(kern, KERN_SECURELVL, securelevel, CTLFLAG_RW, &securelevel, 0, "System security level");
+/*
+ * kern.securelevel only rises while it is above zero: lowering it would
+ * undo the protection it exists to give, so it comes back down only with
+ * a reboot.
+ */
+static int sysctl_handle_securelevel(struct sysctl_oid *oidp, void *arg1, int arg2,
+                                     struct sysctl_req *req)
+{
+    int error, newval;
+
+    (void)arg2;
+    if (req->oldptr) {
+        if (req->oldlen < sizeof(int)) return ENOMEM;
+        error = copyout(arg1, req->oldptr, sizeof(int));
+        if (error) return error;
+        req->oldidx = sizeof(int);
+    }
+    if (req->newptr) {
+        if (req->newlen < sizeof(int)) return EINVAL;
+        error = copyin(req->newptr, &newval, sizeof(int));
+        if (error) return error;
+        if (securelevel > 0 && newval < securelevel) return EPERM;
+        *(int *)arg1 = newval;
+    }
+    (void)oidp;
+    return 0;
+}
+
+struct sysctl_oid sysctl_kern_securelevel = {
+    &sysctl_kern_children, NULL, "securelevel", KERN_SECURELVL,
+    CTLTYPE_INT|CTLFLAG_RW, &securelevel, 0, "I", sysctl_handle_securelevel,
+    "System security level", 0
+};
 SYSCTL_STRING(kern, KERN_OSTYPE, ostype, CTLFLAG_RD, kernel_ostype, 0, "Operating system type");
 SYSCTL_STRING(kern, KERN_OSRELEASE, osrelease, CTLFLAG_RD, kernel_osrelease, 0, "Operating system release");
 SYSCTL_INT(kern, KERN_OSREV, osrevision, CTLFLAG_RD, NULL, 202601, "Operating system revision");

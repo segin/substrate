@@ -278,6 +278,12 @@ sysctlstr: sysctlstr.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# seclevel: kern.securelevel cannot be lowered once above zero.  Substrate
+# only; leaves the level raised until reboot.
+seclevel: seclevel.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # bigtrunc: shrinking a file of 4 GiB or more keeps the right size (ext2's
 # i_size_high).  Runs on the host too.
 bigtrunc: bigtrunc.c
