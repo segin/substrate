@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -134,6 +135,26 @@ thread_t *sched_get_thread(int tid) {
 
 int sys_thr_kill2(pid_t pid, abi_long_t tid, int sig) {
     (void)pid; (void)tid; (void)sig;
+    return 0;
+}
+
+/* exit(2) and linkat(2) (perso_linux.c): not exercised here. */
+int kern_thread_exit(void *retval, int last_code) {
+    (void)retval; (void)last_code;
+    return 0;
+}
+
+int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
+    size_t n = strnlen((const char *)src, maxlen);
+    if (n >= maxlen) return -ENAMETOOLONG;
+    memcpy(dst, src, n + 1);
+    if (len) *len = n + 1;
+    return 0;
+}
+
+int kern_linkat(int olddirfd, const char *oldpath, int newdirfd,
+                const char *newpath, int follow) {
+    (void)olddirfd; (void)oldpath; (void)newdirfd; (void)newpath; (void)follow;
     return 0;
 }
 
