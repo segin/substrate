@@ -14,9 +14,10 @@ int cpu_count = 0;
 static uint32_t mock_lapic_id;
 
 void kprint(const char *msg) { (void)msg; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 uint32_t lapic_get_id(void) { return mock_lapic_id; }
 
-#include "../../sys/arch/i386/percpu.c"
+#include "../../sys/arch/x86-common/percpu.c"
 
 static void reset_env(void) {
     memset(cpus, 0, sizeof(cpus));

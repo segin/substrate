@@ -10,6 +10,10 @@ int smp_get_cpu_id(void) {
     return current_cpu_id;
 }
 
+/* Only its address is taken (syscall_msr_init, which the test never calls). */
+void syscall_entry64(void) {
+}
+
 #define HOST_TEST 1
 #include "../../sys/arch/x86_64/gdt.c"
 

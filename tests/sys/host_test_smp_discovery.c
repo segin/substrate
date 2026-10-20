@@ -8,6 +8,9 @@
 #include <arch/i386/pmap.h>
 #include <arch/x86-common/ioapic.h>
 #include <arch/x86-common/lapic.h>
+#include <arch/x86-common/multiboot.h>
+#include <kern/cmdline.h>
+#include <kern/resource.h>
 
 int i386_cpu_has_apic(void) {
     return 1;
@@ -54,6 +57,27 @@ void ioapic_register_isa_override(uint8_t bus, uint8_t source_irq, uint32_t gsi,
     (void)source_irq;
     (void)gsi;
     (void)flags;
+}
+
+/* Only reached by the default mapper and the ACPI paths, which the tests
+ * bypass with test_mapper. */
+void *ioremap(resource_size_t phys_addr, size_t size) {
+    (void)phys_addr;
+    (void)size;
+    return NULL;
+}
+
+void iounmap(void *addr) {
+    (void)addr;
+}
+
+int cmdline_has(const char *key) {
+    (void)key;
+    return 0;
+}
+
+const void *multiboot_get_acpi_rsdp(void) {
+    return NULL;
 }
 
 static void *test_mapper(uint32_t phys, uint32_t map_limit) {

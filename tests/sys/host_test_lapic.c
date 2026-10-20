@@ -16,6 +16,8 @@ void kprint(const char *s) {
     (void)s;
 }
 
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+
 int i386_cpu_has_apic(void) {
     return 1;
 }

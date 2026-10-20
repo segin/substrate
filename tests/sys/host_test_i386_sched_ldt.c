@@ -47,6 +47,7 @@ void fork_child_return(void) {}
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFEB000U; }
 process_t *kernel_process;
 void i386_load_gs_for_thread(thread_t *t) { (void)t; }
+void fpu_switch(struct thread *next) { (void)next; }
 process_t *proc_bootstrap_kernel(int pid, int perso_id) { (void)pid; (void)perso_id; return NULL; }
 void new_kernel_thread_trampoline(void) {}
 void new_user_thread_trampoline(void) {}

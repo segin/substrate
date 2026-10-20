@@ -7,8 +7,10 @@
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
 
 process_t *current_process;
+thread_t *current_thread;
 
 static struct percpu_data cpu0;
 static int kfree_calls;
@@ -29,10 +31,15 @@ void sched_periodic_balance(void) {}
 int sched_can_run_on_cpu(thread_t *t, int cpu_id) { (void)t; (void)cpu_id; return 1; }
 void arch_set_kernel_stack(uintptr_t stack) { (void)stack; }
 void arch_switch_to(thread_t *prev, thread_t *next) { (void)prev; (void)next; }
-void pmap_activate(void *pmap) { (void)pmap; }
+void pmap_activate(pmap_t pmap) { (void)pmap; }
 void futex_wake_exited_thread(int *uaddr) { (void)uaddr; }
 uint64_t get_ticks(void) { return 0; }
 uint32_t get_hz(void) { return 100; }
+void fpu_thread_inherit(struct thread *parent, struct thread *child) { (void)parent; (void)child; }
+void fpu_thread_free(struct thread *t) { (void)t; }
+int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
+int mutex_release_owned_by_thread(struct thread *owner) { (void)owner; return 0; }
+int smp_get_cpu_count(void) { return 1; }
 
 struct percpu_data *percpu_get(void) { return &cpu0; }
 struct percpu_data *percpu_get_cpu(int cpu_id) { (void)cpu_id; return &cpu0; }

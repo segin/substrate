@@ -5,6 +5,7 @@
 
 #define HOST_TEST 1
 
+#include <kern/runqueue.h>
 #include <kern/sched.h>
 #include <sys/proc.h>
 
@@ -37,18 +38,27 @@ void lapic_send_eoi(void) {
     eoi_count++;
 }
 
-thread_t *runqueue_peek(void *rq) {
+thread_t *runqueue_peek(runqueue_t *rq) {
     (void)rq;
     return NULL;
 }
 
-void *sched_get_current_runqueue(void) {
+runqueue_t *sched_get_current_runqueue(void) {
     return NULL;
 }
 
 #include "../../sys/kern/sched_ipi.c"
 
+/* Logical CPU index -> LAPIC id; deliberately not the identity so the
+ * tests catch an IPI addressed by index instead of by LAPIC id. */
+#define TEST_LAPIC_ID(cpu) ((cpu) + 0x10)
+cpu_info_t cpus[MAX_CPUS];
+
 static void reset_env(void) {
+    for (int i = 0; i < MAX_CPUS; i++) {
+        cpus[i].lapic_id = (uint8_t)TEST_LAPIC_ID(i);
+        cpus[i].processor_id = (uint8_t)i;
+    }
     memset(&thread0, 0, sizeof(thread0));
     current_thread = &thread0;
     current_thread->state = THREAD_RUNNING;
@@ -65,7 +75,7 @@ static void test_remote_ipi_send_and_broadcast(void) {
 
     sched_send_preempt_ipi(2);
     assert(ipi_send_count == 1);
-    assert(last_ipi_dest == 2);
+    assert(last_ipi_dest == TEST_LAPIC_ID(2));
     assert(last_ipi_vector == SCHED_IPI_VECTOR);
 
     sched_send_preempt_all();
@@ -84,7 +94,7 @@ static void test_local_and_remote_resched_requests(void) {
     sched_resched_cpu(3);
     assert(current_thread->needs_resched == 0);
     assert(ipi_send_count == 1);
-    assert(last_ipi_dest == 3);
+    assert(last_ipi_dest == TEST_LAPIC_ID(3));
     assert(last_ipi_vector == SCHED_IPI_VECTOR);
 }
 

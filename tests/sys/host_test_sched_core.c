@@ -39,6 +39,7 @@ void panic(const char *msg) {
 void preempt_disable(void) {}
 void preempt_enable_noresched(void) {}
 void sched_poll_wake_pollers(void) {}
+void poll_notify(void *chan) { (void)chan; }
 void *kmalloc(size_t size) { return malloc(size); }
 
 #include "../../sys/kern/runqueue.c"
@@ -108,8 +109,10 @@ static void test_turnstile_priority_inheritance_restore(void) {
     turnstile_release(&lockobj);
 
     assert(owner.priority == owner.base_priority);
-    assert(waiter_lo.state == THREAD_READY);
-    assert(waiter_hi.state == THREAD_READY);
+    /* The turnstile only carries the priority boost; waking the waiters is
+     * left to the lock's sleepq, so release must not touch their state. */
+    assert(waiter_lo.state == THREAD_BLOCKED);
+    assert(waiter_hi.state == THREAD_BLOCKED);
     assert(turnstile_get_inherited_priority(&owner) == 0);
 }
 

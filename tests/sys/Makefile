@@ -288,8 +288,9 @@ host_test_gdt_iomap: host_test_gdt_iomap.c
 host_test_vm86: host_test_vm86.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_vm86.c -o $@
 
+# -m32: panic.c's i386 register dump reads %cr2 into a 32-bit register.
 host_test_panic_diag: host_test_panic_diag.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_panic_diag.c -o $@
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_panic_diag.c -o $@
 
 host_test_idt_diag: host_test_idt_diag.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_idt_diag.c -o $@

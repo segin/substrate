@@ -14,6 +14,10 @@ static struct personality test_pers;
 void syscall_entry(void) {
 }
 
+void vfs_holds_check(int nr) {
+    (void)nr;
+}
+
 struct personality *perso_lookup(int id) {
     return id == 77 ? &test_pers : NULL;
 }

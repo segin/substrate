@@ -19,6 +19,8 @@ int percpu_get_cpu_id(void) {
 #include <kern/runqueue.h>
 #include <kern/sched.h>
 
+thread_t *current_thread;
+
 // Mock spinlocks
 void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;

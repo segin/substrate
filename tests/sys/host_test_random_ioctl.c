@@ -13,6 +13,7 @@
 /* Mocks for kernel infrastructure that random.c expects. */
 
 void kprint(const char *str) { (void)str; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 void sched_wakeup(void *chan) { (void)chan; }
 void sched_sleep(void *chan) { (void)chan; }
 
@@ -36,6 +37,9 @@ bool spinlock_is_held(spinlock_t *lock) { return lock->locked != 0; }
 int i386_cpu_has_cpuid(void) { return 0; }
 int i386_cpu_has_rdrand(void) { return 0; }
 int i386_cpu_has_rdseed(void) { return 0; }
+/* Claim a TSC so random_init()'s jitter fallback reads the stubbed cycle
+ * counter instead of latching the i8254 with port I/O. */
+int i386_cpu_has_tsc(void) { return 1; }
 uint64_t i386_cpu_cycle_counter(void) { return 0; }
 int percpu_get_cpu_id(void) { return 0; }
 void *kmalloc(size_t size) { return malloc(size); }

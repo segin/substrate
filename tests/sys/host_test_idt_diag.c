@@ -1,9 +1,7 @@
-#define _GNU_SOURCE
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/mman.h>
 
 /*
  * idt.c carries its own `extern int copyin(const void *, void *,
@@ -30,6 +28,10 @@ int copyin(const void *src, void *dst, unsigned int size) {
 #include <sys/exec.h>
 #include <exec/perso/personality.h>
 #include <vm/vm_fault.h>
+#include <sys/irq.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <arch/x86-common/lapic.h>
 
 static char outbuf[8192];
 static size_t outlen;
@@ -38,6 +40,7 @@ process_t *current_process;
 thread_t *current_thread;
 static int vm86_dispatch_count;
 static const char *panic_msg;
+static const registers_t *panic_regs;
 uint32_t idt_host_cr2;
 
 static void append_output(const char *s) {
@@ -127,7 +130,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     (void)map; (void)va; (void)prot; return -1;
 }
 void panic_with_regs(const char *msg, const registers_t *regs) {
-    (void)regs; panic_msg = msg;
+    panic_regs = regs; panic_msg = msg;
 }
 void isr_panic_ipi(void) {}
 
@@ -139,7 +142,18 @@ DECL_ISR(24) DECL_ISR(25) DECL_ISR(26) DECL_ISR(27) DECL_ISR(28) DECL_ISR(29) DE
 DECL_ISR(32) DECL_ISR(33) DECL_ISR(34) DECL_ISR(35) DECL_ISR(36) DECL_ISR(37) DECL_ISR(38) DECL_ISR(39)
 DECL_ISR(40) DECL_ISR(41) DECL_ISR(42) DECL_ISR(43) DECL_ISR(44) DECL_ISR(45) DECL_ISR(46) DECL_ISR(47)
 void isr128(void) {}
+void isr253(void) {}
+void isr254(void) {}
+void isr_spurious(void) {}
+void *msi_isr_stubs[IRQ_VECTOR_LAST - IRQ_VECTOR_FIRST + 1];
 void idt_flush(uint32_t ptr) { (void)ptr; }
+
+void lapic_send_eoi(void) {}
+void sched_ipi_handler(void) {}
+void pmap_shootdown_handler(void) {}
+void sched_vruntime_tick(thread_t *t) { (void)t; }
+void vm_fault_note_pc(uint32_t pc) { (void)pc; }
+int panic_addr_readable(uintptr_t va, size_t len) { (void)va; (void)len; return 0; }
 
 #include "../../sys/arch/i386/idt.c"
 #include "../../sys/arch/x86-common/trap.c"
@@ -152,15 +166,9 @@ static void reset_state(void) {
     current_thread = NULL;
     vm86_dispatch_count = 0;
     panic_msg = NULL;
+    panic_regs = NULL;
 }
 
-static uint8_t *map_low_page(void) {
-    void *addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
-    assert(addr != MAP_FAILED);
-    assert((uintptr_t)addr <= 0xFFFFFFFFu);
-    return (uint8_t *)addr;
-}
 
 static void test_vm86_dispatch(void) {
     registers_t regs;
@@ -183,20 +191,20 @@ static void test_vm86_dispatch(void) {
     assert(panic_msg == NULL);
 }
 
-static void test_invalid_opcode_dump(void) {
+/*
+ * A kernel-mode exception goes straight to panic_with_regs(), which prints
+ * the one arbitrated register dump (covered by host_test_panic_diag).  The
+ * dispatcher must not print its own unserialised user-fault block first:
+ * on SMP the two interleaved into an unreadable dump.
+ */
+static void test_kernel_fault_panics_with_regs(void) {
     registers_t regs;
-    uint8_t *code;
 
     reset_state();
     memset(&regs, 0, sizeof(regs));
-    code = map_low_page();
-    for (int i = 0; i < 16; i++) {
-        code[i] = (uint8_t)(0x90 + i);
-    }
-
     regs.int_no = 6;
     regs.cs = 0x0008;
-    regs.eip = (uint32_t)(uintptr_t)code;
+    regs.eip = 0xC0101234u;
     regs.err_code = 0xBEEF;
     regs.eax = 0x11;
     regs.ebx = 0x22;
@@ -208,16 +216,15 @@ static void test_invalid_opcode_dump(void) {
     regs.esp = 0x88;
 
     isr_handler(&regs);
-    assert(strstr(outbuf, "EXCEPTION: Invalid Opcode (in kernel)") != NULL);
-    assert(strstr(outbuf, "EAX: 0x00000011  EBX: 0x00000022  ECX: 0x00000033  EDX: 0x00000044") != NULL);
-    assert(strstr(outbuf, "Instruction bytes at EIP: 90 91 92 93 94 95 96 97 98 99 9A 9B 9C 9D 9E 9F") != NULL);
     assert(panic_msg != NULL);
-    munmap(code, 4096);
+    assert(strcmp(panic_msg, "Unhandled Kernel Exception") == 0);
+    assert(panic_regs == &regs);
+    assert(strstr(outbuf, "EXCEPTION:") == NULL);
 }
 
 int main(void) {
     test_vm86_dispatch();
-    test_invalid_opcode_dump();
+    test_kernel_fault_panics_with_regs();
     puts("host_test_idt_diag: PASS");
     return 0;
 }

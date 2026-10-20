@@ -10,6 +10,8 @@
 #include <kern/sched.h>
 #include <sys/lock.h>
 #include <sys/proc.h>
+#include <vm/vm_fault.h>
+#include <vm/vm_map.h>
 #include <vm/vm_page.h>
 
 static int mock_cpu_count = 4;
@@ -138,12 +140,26 @@ void pmap_hal_cpuid(uint32_t code, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, 
     *edx = 0;
 }
 
+/* The CPU the code under test believes it is running on.  The initiator is
+ * CPU 0; each simulated remote handler runs as its own CPU so the per-CPU
+ * acknowledgement pmap_shootdown_wait() polls for is recorded. */
+static int mock_cpu_id;
+
+int percpu_get_cpu_id(void) {
+    return mock_cpu_id;
+}
+
+void preempt_disable(void) {}
+void preempt_enable_noresched(void) {}
+
 void lapic_send_ipi_all_excl_self(uint8_t vector) {
     ipi_broadcast_count++;
     last_ipi_vector = vector;
     for (int i = 1; i < mock_cpu_count; i++) {
+        mock_cpu_id = i;
         pmap_shootdown_handler();
     }
+    mock_cpu_id = 0;
 }
 
 struct process *current_process = NULL;
@@ -166,6 +182,8 @@ void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 thread_t *thread_first(void) { return NULL; }
 thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
+int vm_map_write_permitted(vm_map_t *map, uintptr_t va) { (void)map; (void)va; return 0; }
+void vm_map_cow_adopt(vm_map_t *map, uintptr_t va, vm_page_t *page) { (void)map; (void)va; (void)page; }
 
 #include "../../sys/arch/i386/pmap.c"
 
