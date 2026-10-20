@@ -31,8 +31,17 @@ static int test_split_v1_defaults(void) {
         fprintf(stderr, "FAIL: split text limit wrong\n");
         return 0;
     }
-    if (plan.data_limit != (uint16_t)(hdr.dseg + hdr.bseg + ELKS_INIT_STACK + ELKS_INIT_HEAP)) {
+    /*
+     * The data/stack segment is widened to a near-64K window whatever the
+     * header asks for (ELKS programs fault on exec otherwise), so a small
+     * image gets the 0xFFF0 floor rather than dseg + bseg + stack + heap.
+     */
+    if (plan.data_limit != 0xFFF0U) {
         fprintf(stderr, "FAIL: split data limit wrong\n");
+        return 0;
+    }
+    if (plan.stack_top != (uint16_t)(plan.data_limit & ~1U)) {
+        fprintf(stderr, "FAIL: split stack top not at the data limit\n");
         return 0;
     }
     return 1;

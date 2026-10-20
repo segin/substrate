@@ -431,8 +431,12 @@ host_test_x86_64_idt: host_test_x86_64_idt.c
 host_test_x86_64_syscall: host_test_x86_64_syscall.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/x86_64 -I. host_test_x86_64_syscall.c -o $@
 
-host_test_x86_64_asm:
-	sh host_test_x86_64_asm.sh
+# The checks assemble the x86_64 sources and inspect their symbols, so the
+# "binary" is the script itself, installed under the test's name so it runs
+# like every other entry in HOST_TESTS.
+host_test_x86_64_asm: host_test_x86_64_asm.sh
+	cp host_test_x86_64_asm.sh $@
+	chmod +x $@
 
 all: tests.o $(HOST_TESTS)
 

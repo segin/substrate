@@ -12,6 +12,7 @@
  * the driver can still find what it wrote.
  *
  * Usage: host_test_ext2_htree <image> <indexed-dir>
+ *        host_test_ext2_htree          (runs tests/ci/test-ext2-htree.sh)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -101,6 +102,18 @@ int ext2_xattr_list(fs_node_t *n, void *out, size_t sz, size_t *used) {
 
 #define FAIL(...) do { printf("FAILED: " __VA_ARGS__); return 1; } while (0)
 
+/*
+ * finddir hands back its child held (a pin on one of ext2's 256 node-cache
+ * slots), so a lookup that is only asking "does this name exist" has to
+ * drop the hold again or the cache runs dry after 256 of them.
+ */
+static int resolves(fs_node_t *dir, const char *name) {
+    fs_node_t *n = dir->finddir(dir, (char *)name);
+    if (!n) return 0;
+    if (n->rele) n->rele(n);
+    return 1;
+}
+
 /* How many entries to add.  A 1 KiB-block leaf holds roughly 60 short
  * names and the root indexes ~124 of them, so the default exercises
  * leaf splitting only.  Set HTREE_ADD high enough to overflow the root
@@ -109,8 +122,21 @@ int ext2_xattr_list(fs_node_t *n, void *out, size_t sz, size_t *used) {
 #define NADD_DEFAULT 1500
 
 int main(int argc, char **argv) {
+    if (argc == 1) {
+        /* Run bare (as the HOST_TESTS sweep does): hand over to the
+         * wrapper, which builds the indexed and linear images, runs this
+         * program on each and has e2fsck judge the result. */
+        char cmd[4096];
+        const char *slash = strrchr(argv[0], '/');
+        int dlen = slash ? (int)(slash - argv[0]) : 1;
+        const char *dir = slash ? argv[0] : ".";
+        snprintf(cmd, sizeof(cmd), "sh '%.*s/../ci/test-ext2-htree.sh'",
+                 dlen, dir);
+        int st = system(cmd);
+        return (st == 0) ? 0 : 1;
+    }
     if (argc < 3) {
-        printf("usage: %s <image> <dir> [--allow-linear]\n", argv[0]);
+        printf("usage: %s [<image> <dir> [--allow-linear]]\n", argv[0]);
         return 2;
     }
     const char *img = argv[1], *dirname = argv[2];
@@ -169,10 +195,9 @@ int main(int argc, char **argv) {
     /* Every name must come back through the index. */
     for (int i = 0; i < NADD; i++) {
         snprintf(nm, sizeof(nm), "htree_add_%05d", i);
-        fs_node_t *n = dir->finddir(dir, nm);
-        if (!n) FAIL("finddir('%s') missed after insert\n", nm);
+        if (!resolves(dir, nm)) FAIL("finddir('%s') missed after insert\n", nm);
     }
-    if (!dir->finddir(dir, ".deps")) FAIL("finddir('.deps') missed\n");
+    if (!resolves(dir, ".deps")) FAIL("finddir('.deps') missed\n");
     printf("  all %d names resolve through the index\n", NADD + 1);
 
     /* A duplicate must still be refused. */
@@ -187,15 +212,15 @@ int main(int argc, char **argv) {
     }
     for (int i = 0; i < NADD; i += 3) {
         snprintf(nm, sizeof(nm), "htree_add_%05d", i);
-        if (dir->finddir(dir, nm)) FAIL("finddir('%s') still hits after unlink\n", nm);
+        if (resolves(dir, nm)) FAIL("finddir('%s') still hits after unlink\n", nm);
     }
     printf("  deleted %d entries and they no longer resolve\n", (NADD + 2) / 3);
 
     /* Rename within the indexed directory. */
     rc = dir->rename(dir, "htree_add_00001", dir, "htree_renamed");
     if (rc != 0) FAIL("rename in an indexed dir returned %d\n", rc);
-    if (dir->finddir(dir, "htree_add_00001")) FAIL("old rename name still resolves\n");
-    if (!dir->finddir(dir, "htree_renamed"))  FAIL("renamed entry does not resolve\n");
+    if (resolves(dir, "htree_add_00001")) FAIL("old rename name still resolves\n");
+    if (!resolves(dir, "htree_renamed"))  FAIL("renamed entry does not resolve\n");
     printf("  rename OK\n");
 
     /* Publish the cached free counts and group descriptors before the

@@ -164,8 +164,13 @@ static void test_first_controller_uses_primary_secondary_pair(void) {
     assert(channels[1].ctrl_base == 0x376);
     assert(channels[0].bm_base == 0xF000);
     assert(channels[1].bm_base == 0xF008);
-    assert(channels[0].dma_capable == 1);
-    assert(channels[1].dma_capable == 1);
+    /*
+     * PCI discovery records the bus-master base but leaves the channel on
+     * PIO: DMA is switched on later, by the probe, and only for a channel
+     * whose IRQ handler is installed.
+     */
+    assert(channels[0].dma_capable == 0);
+    assert(channels[1].dma_capable == 0);
     assert((mock_command[0] & (PCI_COMMAND_IO | PCI_COMMAND_MASTER)) ==
            (PCI_COMMAND_IO | PCI_COMMAND_MASTER));
     assert(channels[0].irq == 14);
@@ -200,8 +205,8 @@ static void test_second_controller_claims_tertiary_quaternary_pair(void) {
     assert(channels[3].ctrl_base == 0x0E402);
     assert(channels[2].bm_base == 0xD000);
     assert(channels[3].bm_base == 0xD008);
-    assert(channels[2].dma_capable == 1);
-    assert(channels[3].dma_capable == 1);
+    assert(channels[2].dma_capable == 0);
+    assert(channels[3].dma_capable == 0);
     assert(channels[2].irq == 11);
     assert(channels[3].irq == 11);
     assert(irq_shared[2] == 1);
@@ -237,8 +242,8 @@ static void test_compatibility_mode_still_imports_bus_master_bars(void) {
     assert(channels[1].irq == ATA_SECONDARY_IRQ);
     assert(channels[0].bm_base == 0xF000);
     assert(channels[1].bm_base == 0xF008);
-    assert(channels[0].dma_capable == 1);
-    assert(channels[1].dma_capable == 1);
+    assert(channels[0].dma_capable == 0);
+    assert(channels[1].dma_capable == 0);
     assert((mock_command[0] & (PCI_COMMAND_IO | PCI_COMMAND_MASTER)) ==
            (PCI_COMMAND_IO | PCI_COMMAND_MASTER));
     assert(irq_shared[0] == 0);

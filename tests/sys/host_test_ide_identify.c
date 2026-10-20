@@ -30,12 +30,16 @@ static void test_parse_identify_ata(void) {
     buf[63] = 0x0007;
     buf[76] = (1U << 8);
     buf[82] = (1U << 0);
-    buf[83] = (1U << 10);
+    /* Word 83 counts only with its validity bits (15:14) reading 01. */
+    buf[83] = (1U << 14) | (1U << 10);
     buf[88] = 0x003F;
+    /* 80-conductor cable: UDMA above mode 2 is allowed. */
+    buf[93] = (1U << 13);
+    /* A 48-bit LBA count: word 103 must be zero. */
     buf[100] = 0x4444;
     buf[101] = 0x3333;
     buf[102] = 0x2222;
-    buf[103] = 0x1111;
+    buf[103] = 0x0000;
     buf[169] = 0x0001;
 
     encode_ata_string(buf + 10, 10, "SERIAL-123");
@@ -52,7 +56,7 @@ static void test_parse_identify_ata(void) {
     assert(strcmp(dev.serial, "SERIAL-123") == 0);
     assert(strcmp(dev.firmware, "FW1.0") == 0);
     assert(strcmp(dev.model, "Substrate ATA Disk") == 0);
-    assert(dev.size == 0x1111222233334444ULL);
+    assert(dev.size == 0x0000222233334444ULL);
     assert((dev.feature_flags & IDE_FEATURE_DMA) != 0);
     assert((dev.feature_flags & IDE_FEATURE_LBA48) != 0);
     assert((dev.feature_flags & IDE_FEATURE_SMART) != 0);
@@ -67,6 +71,33 @@ static void test_parse_identify_ata(void) {
         assert(ide_select_dma_transfer_mode(&dev, &mode) == 0);
         assert(mode == (uint8_t)(ATA_XFER_MODE_UDMA_BASE + 5));
     }
+}
+
+/*
+ * IDENTIFY words the driver must not take at face value: word 83 without
+ * its 01 validity pattern (a floating bus reads all ones), a capacity of
+ * 2^48 sectors or more, and UDMA above mode 2 without an 80-conductor cable.
+ */
+static void test_parse_identify_ata_untrusted_words(void) {
+    uint16_t buf[256];
+    ide_device_t dev;
+
+    memset(buf, 0, sizeof(buf));
+    buf[60] = 0x5678;
+    buf[61] = 0x1234;
+    buf[83] = (1U << 10);
+    buf[88] = 0x003F;
+    buf[100] = 0x4444;
+    buf[101] = 0x3333;
+    buf[102] = 0x2222;
+    ide_parse_identify_data(&dev, buf, 0, 0, 0);
+    assert(dev.size == 0x12345678ULL);
+    assert(dev.udma_modes == 0x07);
+
+    buf[83] = (1U << 14) | (1U << 10);
+    buf[103] = 0x0001;
+    ide_parse_identify_data(&dev, buf, 0, 0, 0);
+    assert(dev.size == 0);
 }
 
 static void test_parse_identify_ata_lba28_only(void) {
@@ -152,6 +183,7 @@ int main(void) {
     assert(IDE_DEVICE_INDEX(3, 1) == 7);
 
     test_parse_identify_ata();
+    test_parse_identify_ata_untrusted_words();
     test_parse_identify_ata_lba28_only();
     test_parse_identify_atapi();
     test_decode_error_bits();

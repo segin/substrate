@@ -36,6 +36,12 @@ int copyout(const void *kaddr, void *uaddr, size_t len) {
  */
 #include "../../sys/exec/perso/perso_netbsd.c"
 
+/*
+ * netbsd_sys_getrusage() is the COMPAT_50 entry and copies out a 72-byte
+ * struct rusage50 (32-bit timevals), not the native struct rusage, so the
+ * tests below read the result through that layout.
+ */
+
 /* Now we can define kern_times using the real struct tms type */
 clock_t kern_times(struct tms *buf) {
     if (mock_kern_times_ret == (clock_t)-1) return (clock_t)-1;
@@ -64,7 +70,7 @@ int sys_close(int fd) { (void)fd; return 0; }
 
 void test_getrusage_invalid_who() {
     printf("Test: netbsd_sys_getrusage invalid who...\n");
-    struct rusage ru;
+    struct netbsd_rusage50 ru;
     int ret = netbsd_sys_getrusage(999, &ru);
     assert(ret == -EINVAL);
     printf("PASS\n");
@@ -73,9 +79,10 @@ void test_getrusage_invalid_who() {
 void test_getrusage_kern_times_fail() {
     printf("Test: netbsd_sys_getrusage kern_times failure...\n");
     mock_kern_times_ret = (clock_t)-1;
-    struct rusage ru;
+    struct netbsd_rusage50 ru;
     int ret = netbsd_sys_getrusage(RUSAGE_SELF, &ru);
-    assert(ret == -1);
+    /* Kernel entry points return a negative errno, never a bare -1. */
+    assert(ret == -EFAULT);
     mock_kern_times_ret = 0; // reset
     printf("PASS\n");
 }
@@ -90,7 +97,7 @@ void test_getrusage_success_self() {
     mock_t.tms_stime = 64;  // 0.5 second
     mock_tms_val_ptr = &mock_t;
 
-    struct rusage ru;
+    struct netbsd_rusage50 ru;
     memset(&ru, 0, sizeof(ru));
 
     int ret = netbsd_sys_getrusage(RUSAGE_SELF, &ru);
@@ -112,7 +119,7 @@ void test_getrusage_success_children() {
     mock_t.tms_cstime = 192; // 1.5 seconds
     mock_tms_val_ptr = &mock_t;
 
-    struct rusage ru;
+    struct netbsd_rusage50 ru;
     memset(&ru, 0, sizeof(ru));
 
     int ret = netbsd_sys_getrusage(RUSAGE_CHILDREN, &ru);
@@ -129,7 +136,7 @@ void test_getrusage_copyout_fail() {
     mock_kern_times_ret = 0;
     mock_copyout_ret = -14; // EFAULT
 
-    struct rusage ru;
+    struct netbsd_rusage50 ru;
     int ret = netbsd_sys_getrusage(RUSAGE_SELF, &ru);
     assert(ret == -14);
 
