@@ -351,11 +351,14 @@ static int devfs_symlink_readlink(fs_node_t *node, char *buf, size_t size) {
         return -EINVAL;
     }
 
+    /* Under the tree lock: re-registering the alias rewrites the target. */
+    spinlock_acquire(&devfs_lock);
     len = strlen(entry->link_target);
     if (len > size) {
         len = size;
     }
     memcpy(buf, entry->link_target, len);
+    spinlock_release(&devfs_lock);
     return (int)len;
 }
 
@@ -833,18 +836,10 @@ int devfs_register_alias_perso(const char *path, const char *target,
         return 0;
     }
 
-    /* Reuse an existing entry only when its mask matches — otherwise a
-     * personality-specific alias must coexist with a universal one. */
-    entry = devfs_lookup_path(path, perso_mask);
-    if (entry != NULL && entry->perso_mask == perso_mask) {
-        if (entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
-            return -1;
-        }
-        strlcpy(entry->link_target, target, sizeof(entry->link_target));
-        entry->link_target[sizeof(entry->link_target) - 1] = '\0';
-        return 0;
-    }
-
+    /* The new node is made first, outside the lock; the tree is looked at
+     * and changed only under it (the contract stated at devfs_lock): this
+     * walked and spliced the child lists with no lock at all, against
+     * finddir, readdir and a hotplug unregister doing the same. */
     node = kmalloc(sizeof(fs_node_t));
     if (node == NULL) {
         return -1;
@@ -860,19 +855,31 @@ int devfs_register_alias_perso(const char *path, const char *target,
     node->rele = devfs_alias_rele;
     devfs_refresh_timestamps(node);
 
-    if (devfs_add_entry(path, node, perso_mask) != 0) {
+    spinlock_acquire(&devfs_lock);
+    /* Reuse an existing entry only when its mask matches — otherwise a
+     * personality-specific alias must coexist with a universal one. */
+    entry = devfs_lookup_path(path, perso_mask);
+    if (entry != NULL && entry->perso_mask == perso_mask) {
+        int ok = entry->node != NULL && (entry->node->flags & 0x7) == FS_SYMLINK;
+        if (ok) {
+            strlcpy(entry->link_target, target, sizeof(entry->link_target));
+            entry->link_target[sizeof(entry->link_target) - 1] = '\0';
+        }
+        spinlock_release(&devfs_lock);
         kfree(node, sizeof(*node));
-        return -1;
+        return ok ? 0 : -1;
     }
 
-    entry = (devfs_entry_t *)node->impl;
-    if (entry == NULL) {
+    if (devfs_add_entry(path, node, perso_mask) != 0 ||
+        (entry = (devfs_entry_t *)node->impl) == NULL) {
+        spinlock_release(&devfs_lock);
         kfree(node, sizeof(*node));
         return -1;
     }
     entry->owns_node = 1;
     strlcpy(entry->link_target, target, sizeof(entry->link_target));
     entry->link_target[sizeof(entry->link_target) - 1] = '\0';
+    spinlock_release(&devfs_lock);
     return 0;
 }
 

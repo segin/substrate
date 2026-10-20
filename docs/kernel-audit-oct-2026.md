@@ -389,9 +389,10 @@ SYS-DRV-003 are Critical and not listed.
   Basis: traced.
   Fixed: mount refuses `s_isize <= 2` or `s_fsize <= s_isize`; `s_isize` is now taken as the first data block (as V7 and Linux do -- the driver added 2 to it, overcounting inodes and misplacing `first_data_block`); inode numbers past the table and block numbers outside `[first_data_block, nblocks)` fail.  Nodes are refcounted (lookups' hold/rele and opens alike) and freed whole at the last release, so a walk's nodes no longer leak.  `g_dirent` is safe as it is: `readdir_fs` copies it out under the VFS readdir lock.  Test: `tests/kern/mksysvimg.py` + `sysvfs.sh` (the pre-remediation kernel returns data for an inode past the table).
 
-- [ ] **SYS-FS-009** *(Medium; confirmed)* When `fat_alloc_node` (`sys/fs/fat/fat.c:675-685`) or `exfat_alloc_node` (`sys/fs/exfat/exfat.c:707-740`) finds an existing cached node with `pin > 0`, the driver shall not `memset` the in-use `fs_node_t` and context struct or match an `orphaned` slot.
+- [x] **SYS-FS-009** *(Medium; confirmed)* When `fat_alloc_node` (`sys/fs/fat/fat.c:675-685`) or `exfat_alloc_node` (`sys/fs/exfat/exfat.c:707-740`) finds an existing cached node with `pin > 0`, the driver shall not `memset` the in-use `fs_node_t` and context struct or match an `orphaned` slot.
   Evidence: Both `fat_alloc_node` (`fat.c:680-681`) and `exfat_alloc_node` (`exfat.c:736-739`) execute `memset(ctx, 0, sizeof(*ctx)); memset(node, 0, sizeof(*node));` on a cache hit even when `keep_pin > 0`, and `exfat_alloc_node` (`:710`) does not exclude `exfat_node_cache[i].orphaned` from `(fs, inode)` matches.
   Basis: traced.
+  Fixed with SYS-NEW-001b (a6e0e3c23, 9318b0c16): a pinned slot is returned as it is, never rebuilt; a pinned slot that is orphaned or whose first cluster differs is another file, and the new one gets its own slot.
 
 - [ ] **SYS-FS-010** *(Medium → Low; partly confirmed)* In `sys/fs/ext2/ext2.c`, `ext2_read_blocks` shall check `fs->block_size * count` for multiplication overflow and shall not `memset` the caller's buffer with an unchecked product on out-of-range block errors, and `ext2_setattr` shall enforce `EXT2_IS_IMMUTABLE(ctx)`.
   Evidence: `sys/fs/ext2/ext2.c:297-301` executes `if (buffer) memset(buffer, 0, fs->block_size * count);` on the invalid-block error path without overflow checking, and `ext2_setattr` (`:2407-2475`) omits `if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;`.
@@ -401,7 +402,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/fs/9p.c:104-108` ignores the payload of `P9_RVERSION`, `p9_vfs_read` (`:174, 231`) casts signed `off_t` to `uint64_t` without checking `offset < 0`, and `p9_alloc_tag`/`p9_alloc_fid` (`:29-51`) increment `fs->next_tag` and `fs->next_fid` without locking.
   Basis: traced.
 
-- [ ] **SYS-FS-012** *(Medium; confirmed)* When registering a device alias in `devfs_register_alias_perso`, `sys/fs/devfs.c` shall hold `devfs_lock` around `devfs_lookup_path` and `devfs_add_entry`.
+- [x] **SYS-FS-012** *(Medium; confirmed)* When registering a device alias in `devfs_register_alias_perso`, `sys/fs/devfs.c` shall hold `devfs_lock` around `devfs_lookup_path` and `devfs_add_entry`.
   Evidence: `sys/fs/devfs.c:745-808` (`devfs_register_alias_perso`) mutates the devfs tree without acquiring `devfs_lock`, violating the locking contract documented at line 121.
   Basis: traced.
 
