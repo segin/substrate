@@ -3,15 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/*
- * Suppress <sys/copy.h>'s prototypes.  The kernel's canonical copyin is
- * size_t, but sys/kern/core.c carries a stale local
- * `extern int copyin(const void *, void *, unsigned int)`.  On the 32-bit
- * target the two are identical; on this 64-bit host they conflict.  We
- * provide our own copyin/copyout stubs that match core.c's local extern.
- */
-#define _SYS_COPY_H
-
+#include <sys/copy.h>
 #include <sys/core.h>
 #include <sys/proc.h>
 #include <sys/ldt.h>
@@ -53,7 +45,7 @@ uint32_t get_hz(void) { return 128; }
  * behaviour: report failure so coredump skips the dump (memcpy'ing from
  * 0xFF0 would segfault the host test).
  */
-int copyin(const void *src, void *dst, unsigned int size) { (void)src; (void)dst; (void)size; return -1; }
+int copyin(const void *src, void *dst, size_t size) { (void)src; (void)dst; (void)size; return -1; }
 int copyout(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 struct personality *perso_lookup(int id) { (void)id; return NULL; }
@@ -61,7 +53,7 @@ const char *perso_name(int id) { (void)id; return "test"; }
 struct pgrp *pgrp_find(int pgid) { (void)pgid; return NULL; }
 void pgrp_signal(struct pgrp *pgrp, int sig) { (void)pgrp; (void)sig; }
 int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
-void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
+void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs) {
     (void)handler; (void)sig; (void)mask; (void)flags; (void)regs;
 }
 void proc_exit(int status) { proc_exit_called = 1; proc_exit_status = status; }
@@ -70,8 +62,6 @@ thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
 process_t *proc_find(int pid) { (void)pid; return NULL; }
 process_t *proc_first(void) { return NULL; }
 process_t *proc_next(process_t *p) { (void)p; return NULL; }
-int cmdline_has(const char *key) { (void)key; return 0; }
-int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
 void kprint(const char *msg) {
     /* Accumulate: coredump() emits several kprint() lines and the test
      * matches against an early one, so the buffer must retain history

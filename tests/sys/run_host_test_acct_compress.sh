@@ -6,10 +6,9 @@ cd "$DIR"
 
 echo "Compiling and running host_test_acct_compress..."
 
-# We utilize mock_include which now has the required mocks.
 gcc -o host_test_acct_compress host_test_acct_compress.c \
     -DHOST_TEST \
-    -Imock_include \
+    -I../../sys/include -I../../include -I../../sys \
     -I. \
     -Wall -Wextra
 

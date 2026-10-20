@@ -3,7 +3,16 @@
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <sys/stat.h>
+#include <sys/copy.h>
+#include <sys/kern_syscalls.h>
 #include <vfs/vfs.h>
+#include <vm/vm_commit.h>
+#include <vm/vm_map.h>
+#include <machine/pmap.h>
+#include <exec/formats/aout.h>
+#include <exec/formats/coff.h>
+#include <exec/formats/xout.h>
+#include <kern/cmdline.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -69,11 +78,56 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     return -ENOEXEC;
 }
 
-int kern_open(const char *path, int flags, int mode) {
+void xout_init_handler(void) {
+}
+
+void aout_init_handler(void) {
+}
+
+void coff_init_handler(void) {
+}
+
+int kern_open_exec(const char *path) {
     (void)path;
-    (void)flags;
-    (void)mode;
     return 0;
+}
+
+int cmdline_debug_enabled(const char *channel) {
+    (void)channel;
+    return 0;
+}
+
+/* exec_space_* and exec_vec_ptr are not exercised here. */
+int copyin(const void *src, void *dst, size_t size) {
+    memcpy(dst, src, size);
+    return 0;
+}
+
+pmap_t pmap_create(void) {
+    return NULL;
+}
+
+void pmap_destroy(pmap_t pmap) {
+    (void)pmap;
+}
+
+void pmap_activate(pmap_t pmap) {
+    (void)pmap;
+}
+
+vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
+    (void)pmap;
+    (void)min;
+    (void)max;
+    return NULL;
+}
+
+void vm_map_destroy(vm_map_t *map) {
+    (void)map;
+}
+
+void vm_commit_uncharge(size_t npages) {
+    (void)npages;
 }
 
 int kern_close(int fd) {
@@ -81,7 +135,7 @@ int kern_close(int fd) {
     return 0;
 }
 
-int kern_read(int fd, char *buf, size_t count) {
+ssize_t kern_read(int fd, char *buf, size_t count) {
     (void)fd;
     if (count >= 4) {
         buf[0] = 0x7f;

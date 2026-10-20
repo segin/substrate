@@ -345,8 +345,46 @@ void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx) {
 // Stub set_kernel_stack
 void set_kernel_stack(uint32_t stack) {}
 
+// SVR4 page zero (elf.c); <exec/formats/aout.h> hides the prototype under
+// HOST_TEST, so this definition is also its declaration.
+int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
+                    uint32_t filesz, uint32_t memsz, uint8_t prot,
+                    int fd, uint32_t foff) {
+    (void)pmap; (void)map; (void)va; (void)filesz; (void)memsz;
+    (void)prot; (void)fd; (void)foff;
+    return 0;
+}
+
 // Include elf.c
 #include "../../sys/exec/formats/elf.c"
+
+// Single-threaded test: the image-cache lock has nothing to exclude.
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+
+// The test's vectors are host arrays; read them directly.
+int exec_vec_ptr(char *const array[], int index, char **out) {
+    *out = array[index];
+    return 0;
+}
+
+// Reached only on the i386 elf_execve path: open the mocked file as fd 0.
+int kern_open_exec(const char *path) {
+    static file_t exec_file;
+    memset(&exec_file, 0, sizeof(exec_file));
+    exec_file.f_data = vfs_lookup(fs_root, path);
+    current_process->fds[0] = &exec_file;
+    return 0;
+}
+void proc_ptimers_clear(struct process *p) { (void)p; }
+int vm_map_add_low_range(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    (void)map; (void)start; (void)end;
+    return 0;
+}
+void vfs_rele(fs_node_t *node) { (void)node; }
+void arch_set_kernel_stack(uintptr_t stack) { (void)stack; }
+void vm_commit_uncharge(size_t npages) { (void)npages; }
+void fpu_thread_reset(struct thread *t) { (void)t; }
 
 static void reset_elf_cache_state(void) {
     memset(elf_image_cache, 0, sizeof(elf_image_cache));

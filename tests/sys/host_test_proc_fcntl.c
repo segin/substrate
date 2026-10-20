@@ -132,6 +132,26 @@ struct vm_map *vm_map_fork(struct vm_map *src, pmap_t pmap) {
 
 #include "../../sys/pm/process.c"
 
+/* Reached from fork/exec/exit and the other process.c paths this test
+ * does not drive; link stubs only. */
+void *kmalloc(size_t size) { return malloc(size); }
+void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
+int copyin(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
+uint64_t get_ticks(void) { return 0; }
+int sched_sleep_until(void *chan, uint64_t deadline_tick) { (void)chan; (void)deadline_tick; return 0; }
+int sched_thread_running_remote(thread_t *t) { (void)t; return 0; }
+void fpu_forget_process(struct process *p) { (void)p; }
+void vm_map_reference(vm_map_t *map) { (void)map; }
+void vm_commit_uncharge(size_t npages) { (void)npages; }
+int afinet_setown(int fd, int owner) { (void)fd; (void)owner; return 0; }
+int afinet_getown(int fd, int *owner) { (void)fd; (void)owner; return 0; }
+int mq_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }
+void mq_proc_cleanup(int pid) { (void)pid; }
+int ksem_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }
+void ksem_proc_cleanup(int pid) { (void)pid; }
+void shm_proc_exec(int pid) { (void)pid; }
+void shm_proc_cleanup(int pid) { (void)pid; }
+
 static void reset_env(void) {
     memset(processes, 0, sizeof(processes));
     memset(threads, 0, sizeof(threads));
@@ -155,6 +175,10 @@ static process_t *init_proc(int slot, int pid) {
     memset(p, 0, sizeof(*p));
     p->pid = pid;
     p->next_fd = 0;
+    /* The descriptor allocators honour RLIMIT_NOFILE; a zeroed limit
+     * would leave no descriptor free. */
+    p->rlimits[RLIMIT_NOFILE].rlim_cur = RLIM_INFINITY;
+    p->rlimits[RLIMIT_NOFILE].rlim_max = RLIM_INFINITY;
     return p;
 }
 

@@ -1,18 +1,15 @@
-#define _GNU_SOURCE
-
 #include <assert.h>
-#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/errno.h>
 #include <sys/mman.h>
-#include <sys/types.h>
 
 #define MAX_THREADS 64
 #define MAX_WAITQS 32
-#define ETIMEDOUT_SUBSTRATE 110
+#define ETIMEDOUT_SUBSTRATE ETIMEDOUT
 
 #include <sys/proc.h>
 #include <sys/futex.h>
@@ -36,11 +33,6 @@ thread_t threads[MAX_THREADS];
 static mock_waitq_t waitqs[MAX_WAITQS];
 static int waitq_count = 0;
 static yield_hook_t yield_hook = NULL;
-
-/* Robust-list `next` link fields whose 4-byte copyin reads must be
- * zero-extended (see copyin below). */
-static const void *robust_link_lo;
-static const void *robust_link_hi;
 
 static mock_waitq_t *waitq_lookup(void *chan, int private_flag, int pid, int create) {
     int i;
@@ -94,8 +86,6 @@ static void reset_env(void) {
     current_thread = NULL;
     current_process = NULL;
     yield_hook = NULL;
-    robust_link_lo = NULL;
-    robust_link_hi = NULL;
 }
 
 static void setup_thread(int index, int tid, int uid, int pid, int priority, process_t *proc) {
@@ -110,32 +100,15 @@ static void setup_thread(int index, int tid, int uid, int pid, int priority, pro
     threads[index].proc = proc;
 }
 
-uintptr_t pmap_extract(void *pmap, uintptr_t va) {
+uintptr_t pmap_extract(pmap_t pmap, uintptr_t va) {
     (void)pmap;
     return va;
 }
 
-/* futex.c now reads/writes user memory through copyin/copyout (with an
- * on_fault recovery landing pad) instead of direct dereferences.  In the
- * host test the "user" pointers are plain host addresses, so a memcpy
- * faithfully models a successful access.
- *
- * One wrinkle: futex.c's robust-list walk reads each entry's `next` LINK
- * with a target-pointer-width (4-byte) copyin into a host pointer
- * variable.  On the real 32-bit target a pointer is 4 bytes; on this
- * 64-bit host the destination is 8 bytes, so a plain 4-byte memcpy
- * leaves the high half uninitialised and the traversal dereferences a
- * corrupt pointer.  The robust structures are placed in MAP_32BIT low
- * memory (see test_futex_robust_cleanup_on_exit), so when a 4-byte read
- * targets an 8-byte-aligned destination we zero-extend it — faithfully
- * reconstructing the low-memory link as a valid host pointer. */
+/* futex.c reads/writes user memory through copyin/copyout.  In the host
+ * test the "user" pointers are plain host addresses, so a memcpy
+ * faithfully models a successful access. */
 int copyin(const void *uaddr, void *kdst, size_t len) {
-    if (len == sizeof(int) &&
-        (uaddr == robust_link_lo || uaddr == robust_link_hi)) {
-        /* Reading a robust-list `next` link: zero-extend the (low-memory)
-         * 32-bit pointer into the 8-byte host destination. */
-        *(uintptr_t *)kdst = 0;
-    }
     memcpy(kdst, uaddr, len);
     return 0;
 }
@@ -366,6 +339,27 @@ int sleepq_requeue_private(void *src_chan, void *dst_chan, int wake_n, int reque
 
 #include "../../sys/kern/futex.c"
 
+/* User memory is host memory here, laid out as the host lays it out: the
+ * test hands futex.c host struct timespec, pointer and size_t objects. */
+int casuword32(volatile uint32_t *uaddr, uint32_t oldval, uint32_t newval,
+               uint32_t *prev) {
+    uint32_t found = __sync_val_compare_and_swap(uaddr, oldval, newval);
+    if (prev) *prev = found;
+    return 0;
+}
+
+int timespec_copyin(const void *uaddr, struct timespec *k) {
+    return copyin(uaddr, k, sizeof(*k));
+}
+
+int uptr_copyout(uintptr_t v, void *uaddr) {
+    return copyout(&v, uaddr, sizeof(v));
+}
+
+int usize_copyout(size_t v, void *uaddr) {
+    return copyout(&v, uaddr, sizeof(v));
+}
+
 #define RUN_TEST(fn) \
     do { \
         printf("Running %s...\n", #fn); \
@@ -385,8 +379,9 @@ static void test_sys_get_robust_list_current_thread(void) {
     current_thread = &threads[0];
     current_process = &proc;
 
+    /* An i386 process registers the 32-bit layout of the head. */
     head = (void *)0x1000;
-    len = sizeof(*head);
+    len = sizeof(struct robust_list_head32);
     assert(sys_set_robust_list(head, len) == 0);
     assert(sys_get_robust_list(0, &out_head, &out_len) == 0);
     assert(out_head == head);
@@ -427,15 +422,18 @@ static void test_sys_get_robust_list_permissions(void) {
     assert(sys_get_robust_list(999, &out_head, &out_len) == -ESRCH);
 }
 
+/* Every futex is keyed per process, so the waker is another thread of the
+ * waiter's process. */
 static void wake_shared_waiter(void) {
     int *futex_word = (int *)current_thread->robust_list;
     thread_t *waiter = current_thread;
     process_t *waiter_proc = current_process;
-    process_t waker_proc;
 
-    setup_thread(1, 200, 1000, 20, 20, &waker_proc);
+    memset(&threads[1], 0, sizeof(threads[1]));
+    threads[1].tid = 200;
+    threads[1].priority = 20;
+    threads[1].proc = waiter_proc;
     current_thread = &threads[1];
-    current_process = &waker_proc;
     assert(sys_futex(futex_word, FUTEX_WAKE, 1, NULL, NULL, 0) == 1);
     current_thread = waiter;
     current_process = waiter_proc;
@@ -457,7 +455,7 @@ static void test_futex_wait_wake_handshake(void) {
     yield_hook = wake_shared_waiter;
 
     assert(sys_futex(&futex_word, FUTEX_WAIT, 42, NULL, NULL, 0) == 0);
-    assert(!sleepq_has_waiters((void *)(uintptr_t)&futex_word));
+    assert(!sleepq_has_waiters_private((void *)(uintptr_t)&futex_word));
 }
 
 static void test_futex_wait_timeout(void) {
@@ -486,65 +484,65 @@ static void test_futex_requeue_moves_waiters(void) {
     current_thread = &threads[0];
     current_process = &proc;
 
-    sleepq_add((void *)(uintptr_t)&futex1, current_thread);
-    assert(sleepq_has_waiters((void *)(uintptr_t)&futex1));
+    sleepq_add_private((void *)(uintptr_t)&futex1, current_thread);
+    assert(sleepq_has_waiters_private((void *)(uintptr_t)&futex1));
     assert(sys_futex(&futex1, FUTEX_REQUEUE, 0, (void *)1, &futex2, 0) == 0);
-    assert(!sleepq_has_waiters((void *)(uintptr_t)&futex1));
-    assert(sleepq_has_waiters((void *)(uintptr_t)&futex2));
+    assert(!sleepq_has_waiters_private((void *)(uintptr_t)&futex1));
+    assert(sleepq_has_waiters_private((void *)(uintptr_t)&futex2));
 }
 
-struct robust_node {
-    struct robust_list list;
-    int futex;
+/* A lock entry as an i386 process lays it out: a 32-bit next link. */
+struct robust_node32 {
+    uptr32_t next;
+    int32_t futex;
 };
+
+/* Linux's MAP_32BIT; <sys/mman.h> here is Substrate's, whose MAP_32BIT
+ * is FreeBSD's value. */
+#define HOST_MAP_32BIT 0x40
 
 static void test_futex_robust_cleanup_on_exit(void) {
     process_t owner_proc;
-    process_t waiter_proc;
-    struct robust_list_head *head;
-    struct robust_node *node;
+    struct robust_list_head32 *head;
+    struct robust_node32 *node;
     void *low;
 
     reset_env();
     setup_thread(0, 100, 1000, 10, 20, &owner_proc);
-    setup_thread(1, 200, 1000, 20, 20, &waiter_proc);
+    /* The waiter is a thread of the owner's process: futexes are keyed
+     * per process. */
+    threads[1].tid = 200;
+    threads[1].priority = 20;
+    threads[1].proc = &owner_proc;
     current_thread = &threads[0];
     current_process = &owner_proc;
 
-    /* The robust-list walk in futex.c reads each entry's `next` link with a
-     * pointer-width (target = 4-byte) access via copyin().  On a 32-bit
-     * target a pointer is 4 bytes; on this 64-bit host build it is 8, so the
-     * link pointers must live below 4 GiB or the truncated read corrupts the
-     * traversal.  MAP_32BIT keeps head/node in low memory, faithfully
-     * modelling the 32-bit target's pointer width. */
+    /* The process registers the 32-bit layout of the list, whose links
+     * are 32-bit pointers, so head and node must live below 4 GiB. */
     low = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-               MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+               MAP_PRIVATE | MAP_ANONYMOUS | HOST_MAP_32BIT, -1, 0);
     assert(low != MAP_FAILED);
-    head = (struct robust_list_head *)low;
-    node = (struct robust_node *)((char *)low + sizeof(*head));
+    assert((uintptr_t)low < 0x100000000ULL);
+    head = (struct robust_list_head32 *)low;
+    node = (struct robust_node32 *)((char *)low + sizeof(*head));
 
     memset(head, 0, sizeof(*head));
     memset(node, 0, sizeof(*node));
-    head->list.next = &node->list;
-    head->futex_offset = offsetof(struct robust_node, futex);
-    node->list.next = &head->list;
+    head->list_next = (uptr32_t)(uintptr_t)&node->next;
+    head->futex_offset = offsetof(struct robust_node32, futex);
+    node->next = (uptr32_t)(uintptr_t)head;
     node->futex = threads[0].tid;
-    threads[0].robust_list = head;
+    threads[0].robust_list = (struct robust_list_head *)head;
     threads[0].robust_list_len = sizeof(*head);
 
-    /* Tell copyin() which `next` link fields to zero-extend (see the
-     * comment on copyin above). */
-    robust_link_lo = &node->list.next;
-    robust_link_hi = &head->list.next;
-
-    sleepq_add((void *)(uintptr_t)&node->futex, &threads[1]);
-    assert(sleepq_has_waiters((void *)(uintptr_t)&node->futex));
+    sleepq_add_private((void *)(uintptr_t)&node->futex, &threads[1]);
+    assert(sleepq_has_waiters_private((void *)(uintptr_t)&node->futex));
 
     futex_thread_exit(&threads[0]);
 
     assert((node->futex & FUTEX_OWNER_DIED) != 0);
     assert((node->futex & FUTEX_TID_MASK) == 0);
-    assert(!sleepq_has_waiters((void *)(uintptr_t)&node->futex));
+    assert(!sleepq_has_waiters_private((void *)(uintptr_t)&node->futex));
 
     munmap(low, 4096);
 }
@@ -565,19 +563,22 @@ static void unlock_pi_from_owner(void) {
 }
 
 static void test_futex_pi_inheritance(void) {
-    process_t owner_proc;
-    process_t waiter_proc;
+    process_t proc;
     int futex_word;
     const int owner_priority = 10;
     const int waiter_priority = 50;
 
+    /* Owner and waiter are threads of one process: PI state, like every
+     * futex, is keyed per process. */
     reset_env();
-    setup_thread(0, 100, 1000, 10, owner_priority, &owner_proc);
-    setup_thread(1, 200, 1000, 20, waiter_priority, &waiter_proc);
+    setup_thread(0, 100, 1000, 10, owner_priority, &proc);
+    threads[1].tid = 200;
+    threads[1].priority = waiter_priority;
+    threads[1].proc = &proc;
     futex_word = threads[0].tid;
 
     current_thread = &threads[1];
-    current_process = &waiter_proc;
+    current_process = &proc;
     current_thread->robust_list = (struct robust_list_head *)(uintptr_t)&futex_word;
     yield_hook = unlock_pi_from_owner;
 

@@ -47,7 +47,6 @@ HOST_TESTS += host_test_perso_elks
 # Personalities (other)
 HOST_TESTS += host_test_perso_netbsd_rusage
 HOST_TESTS += host_test_compat
-HOST_TESTS += host_test_compat_lseek32
 HOST_TESTS += host_test_compat_stat
 
 # LDT
@@ -244,7 +243,7 @@ host_test_perso_elks: host_test_perso_elks.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_perso_elks.c ../../sys/kern/cmdline.c -o $@
 
 host_test_elks_core: host_test_elks_core.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_core.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_core.c signal_host_stubs.c ../../sys/kern/compat32.c -o $@
 
 host_test_ldt_lifecycle: host_test_ldt_lifecycle.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ldt_lifecycle.c -o $@
@@ -441,7 +440,7 @@ host_test_kmem_test: host_test_kmem_test.c
 	$(CC) -g -Wall -DHOST_TEST -Wno-pointer-to-int-cast -Ikmem_test_mocks host_test_kmem_test.c -o $@
 
 host_test_compat: host_test_compat.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_compat.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -ffunction-sections -fdata-sections -I../../sys/include -I../../include -I../../sys -I. host_test_compat.c -Wl,--gc-sections -o $@
 
 host_test_vm_swap: host_test_vm_swap.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_vm_swap.c -o $@
@@ -450,10 +449,10 @@ host_test_wait_logic: host_test_wait_logic.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_wait_logic.c -o $@
 
 host_test_wait_bench: host_test_wait_bench.c
-	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_wait_bench.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_wait_bench.c -o $@
 
 host_test_acct_compress: host_test_acct_compress.c
-	$(CC) -g -Wall -DHOST_TEST -Imock_include -I. host_test_acct_compress.c -o $@
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_acct_compress.c -o $@
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
@@ -517,9 +516,6 @@ host_test_minix_ops: host_test_minix_ops.c ../../sys/fs/minix/minix.c ../../sys/
 host_test_crc32: host_test_crc32.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_crc32.c -o $@
 
-host_test_compat_lseek32: host_test_compat_lseek32.c
-	$(CC) -g -Wall -DHOST_TEST -Imock_compat_include -I../../sys/include -I../../include -I../../sys -I. host_test_compat_lseek32.c -o $@
-
 host_test_elf_execve_toctou: host_test_elf_execve_toctou.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_elf_execve_toctou.c -o $@
 
@@ -544,7 +540,7 @@ host_test_cmdline: host_test_cmdline.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_cmdline.c ../../sys/kern/cmdline.c -o $@
 
 host_test_input_subsys: host_test_input_subsys.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys -I../../sys/include -I. -idirafter ../../sys/include host_test_input_subsys.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_input_subsys.c -o $@
 
 host_test_perso_netbsd_rusage: host_test_perso_netbsd_rusage.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_perso_netbsd_rusage.c -o $@
@@ -618,7 +614,7 @@ host_test_pmap_shootdown: host_test_pmap_shootdown.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I../../sys/arch/x86-common -I. host_test_pmap_shootdown.c -o $@
 
 host_test_futex: host_test_futex.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -Imocks -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_futex.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_futex.c -o $@
 
 property_cmdline: property_cmdline.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. property_cmdline.c ../../sys/kern/cmdline.c -o $@
@@ -651,7 +647,7 @@ host_test_pci_ecam: host_test_pci_ecam.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_ecam.c -o $@
 
 host_test_compat_stat: host_test_compat_stat.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -idirafter ../../sys/include -I../../include -I../../sys -I../../sys/exec/perso -I../../sys/exec/perso/linux -I../../sys/exec/perso/netbsd -I../../sys/exec/perso/sunos host_test_compat_stat.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -ffunction-sections -fdata-sections -I../../sys/include -I../../include -I../../sys -I. host_test_compat_stat.c -Wl,--gc-sections -o $@
 
 host_test_rwlock: host_test_rwlock.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@

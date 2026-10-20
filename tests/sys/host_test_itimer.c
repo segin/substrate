@@ -39,6 +39,12 @@ int copyout(const void *src, void *dst, size_t size) {
     return 0;
 }
 
+/* timer_create(2) only; not exercised here. */
+int sigevent_copyin(const void *uaddr, struct sigevent *k) {
+    (void)uaddr; (void)k;
+    return -1;
+}
+
 void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name; }
 void spinlock_acquire(spinlock_t *lock) { (void)lock; }
 void spinlock_release(spinlock_t *lock) { (void)lock; }

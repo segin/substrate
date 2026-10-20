@@ -1,102 +1,35 @@
-#define _GNU_SOURCE
-
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <unistd.h>
 #include <time.h>
-#include <errno.h>
-#include <assert.h>
 
-// Mock Kernel Types before they are needed
-typedef int mutex_t;
-typedef int spinlock_t;
-typedef int rwlock_t;   // vm_map.h now embeds an rwlock_t; lock.h is mocked out below
-
-// Mock kernel-specific defines
-#define AC_COMM_LEN 16
-#define NSIG 32
-// MAX_FD is defined by sys/proc.h (4096); do not redefine it here.
-#define MAX_THREADS 64
-
-// Mock Forward Declarations
-struct personality;
-struct fs_node;
-typedef struct fs_node fs_node_t;
-struct runqueue;
-struct file;
-typedef struct file file_t;
-struct pmap;
-struct registers;
-struct vm_area;
-struct vm_map;
-struct tty;
-
-// We need to define _SYS_LOCK_H to skip kernel sys/lock.h if it conflicts or if we want to mock it simply.
-// sys/lock.h usually defines mutex_t, spinlock_t.
-// If we define them above, we should skip sys/lock.h.
-#define _SYS_LOCK_H
-
-// Helper macro to skip sys/sched.h?
-// sys/pm/wait.c includes <kern/sched.h>.
-// We need to provide a mock for it.
-// We can't prevent include by macro unless it has a guard we know.
-// kern/sched.h likely has _KERN_SCHED_H.
-#define _KERN_SCHED_H
-// But we need to define sched_sleep decl.
-void sched_sleep(void *chan);
-
-
-// Include Kernel headers
-// sys/types.h handles HOST_TEST
-#include "../../sys/include/sys/types.h"
-#include "../../sys/include/sys/proc.h"
-
-// Undefine host macros before including kernel wait.h
-#undef WIFEXITED
-#undef WEXITSTATUS
-#undef WIFSIGNALED
-#undef WTERMSIG
-#undef WCOREDUMP
-#undef WIFSTOPPED
-#undef WSTOPSIG
-#undef WIFCONTINUED
-
-#include "../../sys/include/sys/wait.h"
-#include "../../sys/include/sys/resource.h"
-#include "../../sys/include/sys/session.h"
+#include <pm/pm.h>
+#include <kern/sched.h>
+#include <sys/wait.h>
+#include <sys/session.h>
+#include <arch/i386/pmap.h>
+#include <vm/vm_map.h>
 
 // Globals required by wait.c
 process_t *current_process = NULL;
 thread_t *current_thread = NULL;
+mutex_t proctree_lock;
 
-// wait.c now enumerates threads via FOREACH_THREAD / thread_first /
-// thread_next (the dynamic allthread list) instead of a fixed table.
-// This benchmark has no live threads, so iteration is empty and
-// wait_threads_all_zombie() trivially returns 1.
+// wait.c enumerates threads via FOREACH_THREAD / thread_first /
+// thread_next (the dynamic allthread list).  This benchmark has no live
+// threads, so iteration is empty and wait_threads_all_zombie()
+// trivially returns 1.
 thread_t *thread_first(void) { return NULL; }
 thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
-#define FOREACH_THREAD(var) \
-    for (thread_t *var = thread_first(); (var) != NULL; (var) = thread_next(var))
+
+void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
+void mutex_lock(mutex_t *m) { (void)m; }
+void mutex_unlock(mutex_t *m) { (void)m; }
 
 void sched_yield(void) {}
+void sched_sleep(void *chan) { (void)chan; }
 void sched_reap_process_threads(process_t *proc) { (void)proc; }
-
-// Mock Functions
-void kprint(const char *msg) {
-    (void)msg;
-}
-
-void panic(const char *msg) {
-    printf("PANIC: %s\n", msg);
-    exit(1);
-}
-
-void sched_sleep(void *chan) {
-    (void)chan;
-}
 
 void proc_remove_child(process_t *parent, process_t *child) {
     if (!parent || !child) return;
@@ -119,25 +52,7 @@ int copyout(const void *kaddr, void *uaddr, size_t len) {
     return 0;
 }
 
-// Mock other functions used by wait.c?
-// wait.c uses:
-// - current_process
-// - sched_sleep
-// - find_waitable_child (static)
-// - proc_remove_child
-// - pgrp_remove_proc
-// - copyout
-// - pid_t, process_t, etc.
-
-// It includes sys/kern_syscalls.h.
-// We need to make sure that doesn't fail.
-// It declares function prototypes. Should be fine.
-
-// Include the implementation
-#include "../../sys/pm/wait.c"
-
-// Reap-path mocks (pmap_t / vm_map_t are now in scope from the headers
-// wait.c pulled in above).
+// Reap-path mocks
 pmap_t pmap_kernel(void) { return (pmap_t)0xABCDEF00; }
 void pmap_release(pmap_t pmap) { (void)pmap; }
 void vm_map_destroy(vm_map_t *map) { (void)map; }
@@ -146,20 +61,24 @@ void procfs_release_pid_nodes(int pid) { (void)pid; }
 void proc_destroy(process_t *p) { free(p); }
 uint64_t get_ticks(void) { return 0; }
 
+// Include the implementation
+#include "../../sys/pm/wait.c"
+
 // Helpers for benchmark
-process_t *create_mock_process(int pid) {
+static process_t *create_mock_process(int pid) {
     process_t *p = calloc(1, sizeof(process_t));
+    assert(p != NULL);
     p->pid = pid;
     return p;
 }
 
-void add_child(process_t *parent, process_t *child) {
+static void add_child(process_t *parent, process_t *child) {
     child->p_parent = parent;
     child->p_sibling = parent->p_children;
     parent->p_children = child;
 }
 
-double get_time_sec() {
+static double get_time_sec(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec / 1e9;
@@ -182,6 +101,7 @@ int main(int argc, char **argv) {
         parent.pid = 1;
         current_process = &parent;
         thread_t thread;
+        memset(&thread, 0, sizeof(thread));
         current_thread = &thread;
 
         // Create N children

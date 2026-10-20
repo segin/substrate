@@ -66,6 +66,23 @@ int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
     return vfs_perm_result;
 }
 
+/* The mocked lookup only ever fails for a missing path. */
+int vfs_lookup_error(fs_node_t *base, const char *path) {
+    (void)base;
+    (void)path;
+    return -ENOENT;
+}
+
+void vfs_rele(fs_node_t *node) { (void)node; }
+
+ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    (void)node;
+    (void)offset;
+    (void)size;
+    (void)buffer;
+    return 0;
+}
+
 struct personality *perso_lookup(int id) { (void)id; return NULL; }
 int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }

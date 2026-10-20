@@ -229,7 +229,7 @@ int stub_sys_stime(time_t *a) {
     return 53;
 }
 unsigned int stub_sys_alarm(unsigned int a) { (void)a; return 0; }
-int stub_sys_fstat(int a, void *b) { (void)a; (void)b; return -1; }
+int stub_sys_fstat(int a, struct stat *b) { (void)a; (void)b; return -1; }
 int stub_sys_pause(void) { return -1; }
 int stub_sys_access(const char *a, int b) {
     last_name = "access";
@@ -311,7 +311,7 @@ int stub_kern_ioctl(int a, uint32_t b, void *c) {
 }
 int stub_sys_fcntl(int a, int b, int c) { (void)a; (void)b; (void)c; return -1; }
 int stub_sys_umask(int a) { (void)a; return -1; }
-int stub_sys_stat(const char *a, void *b) { (void)a; (void)b; return -1; }
+int stub_sys_stat(const char *a, struct stat *b) { (void)a; (void)b; return -1; }
 int stub_sys_dup2(int a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_getppid(void) { return 654; }
 int stub_sys_getpgrp(void) { return -1; }
@@ -562,16 +562,21 @@ int kern_pipe(int *fds) {
     return 0;
 }
 
-struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
+struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out) {
     (void)node;
     if (index != 0) {
         return NULL;
     }
-    memset(&stub_dirent, 0, sizeof(stub_dirent));
-    stub_dirent.d_ino = 0xAABBCCDDU;
-    stub_dirent.d_namlen = 4;
-    strcpy(stub_dirent.d_name, "init");
-    return &stub_dirent;
+    memset(out, 0, sizeof(*out));
+    out->d_ino = 0xAABBCCDDU;
+    out->d_namlen = 4;
+    strcpy(out->d_name, "init");
+    return out;
+}
+
+/* The node's own hook only has to be non-NULL; reads go via readdir_fs. */
+static struct dirent *stub_node_readdir(fs_node_t *node, uint64_t index) {
+    return readdir_fs(node, index, &stub_dirent);
 }
 
 static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
@@ -624,9 +629,12 @@ int main(void) {
     uint16_t ss_sel = (uint16_t)((ELKS_LDT_SS_INDEX << 3) | 4U | 3U);
 
     ds_mem_size = 4096;
-#ifdef MAP_32BIT
+#if defined(__linux__) && defined(__x86_64__)
+    /* The data segment base is a 32-bit LDT field, so the buffer must sit
+     * below 4 GiB.  <sys/mman.h> here is Substrate's, whose MAP_32BIT is
+     * FreeBSD's value; the host's mmap wants Linux's (0x40). */
     ds_mem = mmap(NULL, ds_mem_size, PROT_READ | PROT_WRITE,
-                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+                  MAP_PRIVATE | MAP_ANONYMOUS | 0x40, -1, 0);
 #else
     ds_mem = mmap(NULL, ds_mem_size, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -665,7 +673,7 @@ int main(void) {
     memset(&stub_kmem_file, 0, sizeof(stub_kmem_file));
     memset(&stub_dir_node, 0, sizeof(stub_dir_node));
     memset(&stub_kmem_node, 0, sizeof(stub_kmem_node));
-    stub_dir_node.readdir = readdir_fs;
+    stub_dir_node.readdir = stub_node_readdir;
     stub_kmem_node.flags = FS_CHARDEVICE;
     stub_kmem_node.rdev = (1U << 8) | 2U;
     stub_file.f_data = &stub_dir_node;

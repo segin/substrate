@@ -1,48 +1,13 @@
-#define _GNU_SOURCE
-
+#include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <unistd.h>
-#include <assert.h>
-#include <limits.h>
 
-// Host system headers for types and constants
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <signal.h>
-#include <errno.h>
-#include <dirent.h>
-
-// Guard kernel headers to prevent conflict with host headers
-// We use the guards from the actual kernel headers (Substrate)
-#ifndef _SUBSTRATE_SYS_TYPES_H
-#define _SUBSTRATE_SYS_TYPES_H
-#endif
-#ifndef _SUBSTRATE_SYS_TIME_H
-#define _SUBSTRATE_SYS_TIME_H
-#endif
-#ifndef _SUBSTRATE_SYS_RESOURCE_H
-#define _SUBSTRATE_SYS_RESOURCE_H
-#endif
-#ifndef _SUBSTRATE_SYS_SIGNAL_H
-#define _SUBSTRATE_SYS_SIGNAL_H
-#endif
-#ifndef _SYS_DIRENT_H
-#define _SYS_DIRENT_H
-#endif
-
-// Mock kprint
-void kprint(const char *str) {
-    printf("[KERNEL] %s", str);
-}
-
-// Forward declarations for kernel structures
-struct fs_node;
-typedef struct fs_node fs_node_t;
+#include <sys/acct.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
+#include <kern/time.h>
 
 // Global state for mocks
 static fs_node_t *mock_acct_file = NULL;
@@ -63,7 +28,7 @@ void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
     open_fs_called++;
 }
 
-size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
     if (size > sizeof(last_write_buffer)) {
         printf("Error: Write too large for mock buffer (%zu > %zu)\n", size, sizeof(last_write_buffer));
@@ -82,9 +47,13 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return NULL;
 }
 
+void vfs_rele(fs_node_t *node) {
+    (void)node;
+}
+
 // Mock get_time
-static uint32_t mock_time = 1000;
-uint32_t get_time(void) {
+static time_t mock_time = 1000;
+time_t get_time(void) {
     return mock_time;
 }
 
