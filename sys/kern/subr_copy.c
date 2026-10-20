@@ -10,8 +10,7 @@
 #include <sys/errno.h>
 #include <sys/param.h>
 #include <sys/proc.h>
-
-#include "sched.h"
+#include <kern/sched.h>
 
 /*
  * validate_user_addr - Check if address range is valid user-space

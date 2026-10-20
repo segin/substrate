@@ -1,5 +1,5 @@
 #define ASM_FILE 1
-#include "multiboot.h"
+#include <arch/x86-common/multiboot.h>
 
 /*
  * The multiboot header lives in arch/i386/multiboot_hdr.S so the same

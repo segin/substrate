@@ -11,9 +11,9 @@
 #include <stdint.h>
 
 #include <arch/i386/efi.h>
+#include <arch/x86-common/multiboot.h>
 #include <kern/main.h>
 #include <sys/kernel_layout.h>
-#include <multiboot.h>
 
 // --------------------------------------------------------------------------------
 // Globals and Imports

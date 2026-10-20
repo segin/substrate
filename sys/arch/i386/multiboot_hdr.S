@@ -1,5 +1,5 @@
 #define ASM_FILE 1
-#include "multiboot.h"
+#include <arch/x86-common/multiboot.h>
 
 /*
  * Multiboot 1 header.  Two variants are built from this single source:

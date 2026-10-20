@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <ext2/ext2.h>
+#include <fs/ext2/ext2.h>
 
 /* MD4 helpers (per the licensing notice in FreeBSD's source: this
  * portion is derived from RSA Data Security's MD4 Message-Digest

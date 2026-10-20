@@ -99,6 +99,7 @@ HOST_TESTS += host_test_uma_single_item_slab
 HOST_TESTS += host_test_uma_small_items
 HOST_TESTS += host_test_uma_zdestroy
 HOST_TESTS += host_test_bdf_unterminated
+HOST_TESTS += host_test_kmutex
 HOST_TESTS += host_test_uma_redzone
 HOST_TESTS += host_test_vm_kmem
 HOST_TESTS += host_test_vm_swap
@@ -583,6 +584,9 @@ host_test_uma_zdestroy: test_uma_zdestroy.c ../../sys/vm/uma_core.c
 # host's <sys/mman.h>, not Substrate's.
 host_test_bdf_unterminated: host_test_bdf_unterminated.c ../../sys/drivers/video/bdf_pcf.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys host_test_bdf_unterminated.c -o $@
+
+host_test_kmutex: host_test_kmutex.c ../../sys/kern/mutex.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_kmutex.c -o $@
 
 host_test_fat_inode_identity: host_test_fat_inode_identity.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_inode_identity.c -o $@

@@ -10,8 +10,8 @@
 #include <kern/sched.h>
 
 /* Host test only — kernel proper no longer has a static thread array. */
-#define HOST_TEST_HOST_TEST_MAX_THREADS 64
-static thread_t threads[HOST_TEST_HOST_TEST_MAX_THREADS];
+#define HOST_TEST_MAX_THREADS 64
+static thread_t threads[HOST_TEST_MAX_THREADS];
 thread_t *current_thread;
 
 static int wake_one_calls;
@@ -35,7 +35,12 @@ void panic(const char *msg) {
     longjmp(panic_jmp, 1);
 }
 
-#include "../sys/kern/mutex.c"
+int kprintf(const char *fmt, ...) {
+    (void)fmt;
+    return 0;
+}
+
+#include "../../sys/kern/mutex.c"
 
 static void reset_env(void) {
     memset(threads, 0, sizeof(threads));
@@ -148,6 +153,6 @@ int main(void) {
     test_mutex_release_owned_by_thread_multiple_threads();
     test_mutex_release_owned_by_thread_null();
     test_mutex_release_owned_by_thread_empty();
-    puts("host_test_mutex: PASS");
+    puts("host_test_kmutex: PASS");
     return 0;
 }

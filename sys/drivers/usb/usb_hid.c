@@ -18,9 +18,9 @@
 
 #include <drivers/usb/usb.h>
 #include <kern/console.h>
+#include <drivers/input/keyboard.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include <keyboard.h>
 #include <sys/input.h>
 #include <sys/keycodes.h>
 #include <sys/kthread.h>

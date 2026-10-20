@@ -36,7 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ext2/ext2.h>
+#include <fs/ext2/ext2.h>
 #include <vfs/vfs.h>
 
 void *kmalloc(size_t);
