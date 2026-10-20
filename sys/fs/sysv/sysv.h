@@ -42,33 +42,46 @@ typedef enum sysv_variant {
 #define SYSV_ROOT_INO  2
 
 /*
- * Superblock magic + location:
+ * Superblock magic + location (as Linux fs/sysv finds them):
  *
- *   Xenix    — magic 0x012FF7B5 (little-endian: 0xb5 0xf7 0x2f 0x01)
- *              at offset 0x1F8 of a 1024-byte superblock that lives
- *              at logical block 1 (=offset 512 on disk).
- *   SysV 2/3 — magic 0xfd187e20 at offset 0x1F8.
+ *   Xenix    — a 1024-byte superblock at disk offset 1024, magic
+ *              0x002B5544 at its offset 0x3F8 and the type word at
+ *              0x3FC.
+ *   SysV     — a superblock at disk offset 512, magic 0xFD187E20 at
+ *              its offset 0x1F8 and the type word at 0x1FC.  Release 2
+ *              and Release 4 differ in s_fsize: Release 2 has it right
+ *              after s_isize (offset 2), Release 4 after a 2-byte pad
+ *              (offset 4).  Release 4's s_time is at offset 420, where
+ *              Release 2 keeps small device-information words: a value
+ *              there before 1980 means Release 2.
  *   Coherent — no magic; identified by other signatures.  We
  *              don't auto-probe coherent today; only mount it if
  *              the user asks for "coherent" explicitly (not yet
  *              wired through the mount API).
  *
- * The "type" word at offset 0x1FC determines block size:
- *   1  → 512-byte blocks (Xenix V1 only)
+ * The type word determines block size:
+ *   1  → 512-byte blocks
  *   2  → 1024-byte blocks
  *   3  → 2048-byte blocks (rare; SysV AFS)
  */
-#define SYSV_MAGIC_XENIX  0x012FF7B5U
+#define SYSV_MAGIC_XENIX  0x002B5544U
 #define SYSV_MAGIC_SYSV4  0xFD187E20U
 
+#define XENIX_SB_OFFSET    1024
+#define XENIX_MAGIC_OFFSET 0x3F8
+#define XENIX_TYPE_OFFSET  0x3FC
+
+#define SYSV_SB_OFFSET    512
 #define SYSV_MAGIC_OFFSET 0x1F8
 #define SYSV_TYPE_OFFSET  0x1FC
+#define SYSV4_TIME_OFFSET 420
+#define SYSV_TIME_1980    315532800U   /* 1980-01-01, as Linux's JAN_1_1980 */
 
 /*
  * Xenix on-disk superblock (truncated — we only care about fields
  * we'd actually read).  Total length 1024 bytes on disk; we read
- * the whole block and key off fixed offsets for magic/type so we
- * don't have to chase the variant-specific layout when probing.
+ * the whole block and key off fixed offsets for magic/type.  The
+ * System V Release 2 superblock starts the same way.
  */
 struct xenix_super_block {
     uint16_t s_isize;          /* zones reserved for inodes */

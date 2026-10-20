@@ -17,7 +17,7 @@ mount support for the V7-derived family of on-disk layouts:
 .IP \[bu] 2
 .B Xenix
 (Microsoft Xenix and SCO Xenix 86 / 286 / 386 \(em V7 filesystem with the
-0x012FF7B5 superblock magic).
+0x2B5544 superblock magic).
 .IP \[bu]
 .B System V
 release 2 / 3 / 4 (0xFD187E20 superblock magic).
@@ -33,15 +33,34 @@ or
 .BR mount (8)
 invocation.
 .SS On-disk format
-The superblock is a 1024-byte block at disk offset 512.  Magic and "type" words
-sit at offsets 0x1F8 and 0x1FC respectively:
 .TP
-.B Magic
-0x012FF7B5 means Xenix; 0xFD187E20 means SystemV; anything else is rejected.
+.B Xenix
+The superblock is a 1024-byte block at disk offset 1024, with the magic
+0x2B5544 at its offset 0x3F8 and the type word at 0x3FC.
+.TP
+.B System V
+The superblock is at disk offset 512, with the magic 0xFD187E20 at its offset
+0x1F8 and the type word at 0x1FC.
+Release 2 keeps the volume size
+.RB ( s_fsize )
+right after
+.B s_isize
+at offset 2; Release 4 pads
+.B s_isize
+and keeps it at offset 4.
+The driver tells them apart as Linux does: Release 4's
+.B s_time
+(offset 420) holds a date after 1980, where Release 2 has small device words.
 .TP
 .B Type
-1 = 512-byte logical blocks (Xenix V1 only), 2 = 1024-byte (Xenix V2 and
-SystemV), 3 = 2048-byte (SystemV "AFS").
+1 = 512-byte logical blocks, 2 = 1024-byte, 3 = 2048-byte (System V "AFS").
+A 512-byte Xenix filesystem is refused: its inode table would start on top of
+its own superblock, and its real mapping is unverified.
+.PP
+Anything else is rejected, leaving the device to other drivers.
+.BR statfs (2)
+reports the block size, the data blocks and the inode count; the free counts
+are 0, as the driver does not read the free lists.
 .PP
 Each inode is 64 bytes; the root inode is number 2 (V7 convention).  Direct
 and indirect block pointers in
@@ -52,8 +71,8 @@ encoding.  The driver unpacks these at inode-read time and caches the resulting
 32-bit block numbers in the per-node state.
 .SS Features
 .IP \[bu] 2
-Variants: Xenix V1 (512-byte block), Xenix V2 / SystemV (1024-byte block),
-SystemV AFS (2048-byte block).
+Variants: Xenix (1024-byte block), System V Release 2 and 4 (512- or
+1024-byte block), System V AFS (2048-byte block).
 .IP \[bu]
 Directory traversal:
 .BR readdir (3)

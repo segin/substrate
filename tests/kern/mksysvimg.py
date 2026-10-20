@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-mksysvimg.py -- write a small System V (release 2 layout) filesystem image
-for the sysv driver's tests (tests/kern/sysvfs.sh).
+mksysvimg.py -- write a small System V filesystem image for the sysv
+driver's tests (tests/kern/sysvfs.sh).
 
-  mksysvimg.py <out.img>
-  mksysvimg.py --big <out>      write only /big's contents, for comparison
+  mksysvimg.py <out.img>          Release 2 superblock: s_fsize at offset 2
+  mksysvimg.py --svr4 <out.img>   Release 4 superblock: s_fsize at offset 4,
+                                  after a pad, and an s_time after 1980
+  mksysvimg.py --big <out>        write only /big's contents, for comparison
 
 Layout: 1 KiB blocks (type 2), magic 0xfd187e20 at 512+0x1f8, s_isize = 10
 (the inode table is blocks 2..9, 128 inodes; data from block 10),
@@ -26,6 +28,8 @@ if sys.argv[1] == "--big":
     with open(sys.argv[2], "wb") as f:
         f.write(BIG)
     sys.exit(0)
+SVR4 = sys.argv[1] == "--svr4"
+OUT = sys.argv[-1]
 
 BS = 1024
 NBLOCKS = 512
@@ -124,8 +128,12 @@ assert next_ino <= INODES and next_block <= NBLOCKS
 
 sb = 512
 img[sb:sb + 2] = struct.pack("<H", ISIZE)
-img[sb + 2:sb + 6] = struct.pack("<I", NBLOCKS)
+if SVR4:
+    img[sb + 4:sb + 8] = struct.pack("<I", NBLOCKS)
+    img[sb + 420:sb + 424] = struct.pack("<I", 1000000000)   # s_time, 2001
+else:
+    img[sb + 2:sb + 6] = struct.pack("<I", NBLOCKS)
 img[sb + 0x1F8:sb + 0x200] = struct.pack("<II", 0xFD187E20, 2)
 
-with open(sys.argv[1], "wb") as f:
+with open(OUT, "wb") as f:
     f.write(img)

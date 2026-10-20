@@ -2,11 +2,11 @@
  * sys/fs/sysv/sysv.c — read-only mount for V7-derived filesystems
  * (Xenix / SystemV / Coherent).
  *
- * Mount is the only side that probes for a variant — we read the
- * 1024-byte superblock at disk offset 512, check the magic at
- * offset 0x1F8, and decide between Xenix and SysV based on the
- * value.  Block size comes from the "type" word at 0x1FC (1 = 512,
- * 2 = 1024, 3 = 2048).
+ * Mount is the only side that probes for a variant — a Xenix
+ * superblock at disk offset 1024 (magic at +0x3F8), else a System V
+ * one at 512 (magic at +0x1F8); sysv.h has the layouts.  Block size
+ * comes from the "type" word after the magic (1 = 512, 2 = 1024,
+ * 3 = 2048).
  *
  * Read paths shared across variants: inode lookup (4 inodes per
  * 256-byte chunk; SYSV_ROOT_INO at the start of the inode table),
@@ -24,10 +24,10 @@
 #include <fs/sysv/sysv.h>
 #include <kern/console.h>
 #include <sys/dirent.h>
-#include <sys/stat.h>
-#include <sys/statfs.h>
-#include <vm/vm_kmem.h>
 #include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <vm/vm_kmem.h>
 
 /* ===================================================================
  * Forward decls
@@ -178,6 +178,21 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
     return sysv_unpack_zone(indir + (logical % ppb) * 3);
 }
 
+/* The volume's size from its superblock.  Free counts are left at zero:
+ * the driver is read-only and does not walk the free lists. */
+static int sysv_statfs(fs_node_t *node, struct statfs *buf) {
+    sysv_fs_t *fs = node ? (sysv_fs_t *)(uintptr_t)node->impl : NULL;
+    if (!fs || !buf) return -EINVAL;
+    memset(buf, 0, sizeof(*buf));
+    buf->f_bsize  = fs->block_size;
+    buf->f_iosize = fs->block_size;
+    buf->f_blocks = fs->nblocks > fs->first_data_block
+                  ? fs->nblocks - fs->first_data_block : 0;
+    buf->f_files  = fs->ninodes;
+    strncpy(buf->f_fstypename, "sysv", sizeof(buf->f_fstypename));
+    return 0;
+}
+
 /* ===================================================================
  * Inode read
  * =================================================================== */
@@ -240,6 +255,7 @@ static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
     node->rele    = sysv_unref;
     node->readdir = (node->flags == FS_DIRECTORY) ? sysv_readdir : NULL;
     node->finddir = (node->flags == FS_DIRECTORY) ? sysv_finddir : NULL;
+    node->statfs  = sysv_statfs;
     return 0;
 }
 
@@ -417,47 +433,72 @@ static void sysv_unref(fs_node_t *node) {
 /* ===================================================================
  * Mount / unmount
  * =================================================================== */
+
+/* Little-endian fields at any alignment (s_fsize is at offset 2). */
+static uint16_t sysv_le16(const uint8_t *p) {
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+static uint32_t sysv_le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags;
     fs_node_t *dev = (fs_node_t *)data;
     if (!dev) return NULL;
 
-    /* The superblock is 1024 bytes at disk offset 512 for all
-     * V7-derived layouts (block 1 in a 512-byte-block scheme; the
-     * first half of block 1 in a 1024-byte scheme, with the
-     * second half holding the start of the free-list cache).
-     * Read the whole 1024 bytes so the magic at +0x1F8 and the
-     * type word at +0x1FC are in our buffer. */
+    /*
+     * Xenix keeps a 1024-byte superblock at disk offset 1024 with its
+     * magic near the end; System V one at offset 512 with the magic at
+     * +0x1F8 (see sysv.h).  Try Xenix first: its magic is at a place a
+     * System V superblock leaves as fill.
+     */
     uint8_t sb[1024];
-    if (read_fs(dev, 512, sizeof(sb), sb) != sizeof(sb)) {
-        return NULL;
-    }
-
-    uint32_t magic = ((uint32_t)sb[SYSV_MAGIC_OFFSET])
-                   | ((uint32_t)sb[SYSV_MAGIC_OFFSET + 1] << 8)
-                   | ((uint32_t)sb[SYSV_MAGIC_OFFSET + 2] << 16)
-                   | ((uint32_t)sb[SYSV_MAGIC_OFFSET + 3] << 24);
-    uint32_t type  = ((uint32_t)sb[SYSV_TYPE_OFFSET])
-                   | ((uint32_t)sb[SYSV_TYPE_OFFSET + 1] << 8)
-                   | ((uint32_t)sb[SYSV_TYPE_OFFSET + 2] << 16)
-                   | ((uint32_t)sb[SYSV_TYPE_OFFSET + 3] << 24);
-
     sysv_variant_t variant;
-    uint32_t       block_size;
-    switch (magic) {
-    case SYSV_MAGIC_XENIX: variant = SYSV_VARIANT_XENIX; break;
-    case SYSV_MAGIC_SYSV4: variant = SYSV_VARIANT_SYSV4; break;
-    default:
+    uint32_t       type;
+    uint16_t       s_isize;
+    uint32_t       s_fsize;
+
+    if (read_fs(dev, XENIX_SB_OFFSET, sizeof(sb), sb) == sizeof(sb) &&
+        sysv_le32(sb + XENIX_MAGIC_OFFSET) == SYSV_MAGIC_XENIX) {
+        variant = SYSV_VARIANT_XENIX;
+        type    = sysv_le32(sb + XENIX_TYPE_OFFSET);
+        s_isize = sysv_le16(sb);
+        s_fsize = sysv_le32(sb + 2);
+    } else if (read_fs(dev, SYSV_SB_OFFSET, sizeof(sb), sb) == sizeof(sb) &&
+               sysv_le32(sb + SYSV_MAGIC_OFFSET) == SYSV_MAGIC_SYSV4) {
+        variant = SYSV_VARIANT_SYSV4;
+        type    = sysv_le32(sb + SYSV_TYPE_OFFSET);
+        s_isize = sysv_le16(sb);
+        /* Release 4 pads s_isize to four bytes; Release 2 does not.
+         * Which one this is shows in Release 4's s_time (sysv.h). */
+        if (sysv_le32(sb + SYSV4_TIME_OFFSET) >= SYSV_TIME_1980)
+            s_fsize = sysv_le32(sb + 4);
+        else
+            s_fsize = sysv_le32(sb + 2);
+    } else {
         return NULL;        /* unknown — let another driver have a go */
     }
+
+    uint32_t block_size;
     switch (type) {
-    case 1: block_size = 512;  break;
+    case 1:
+        /* 512-byte zones put a Xenix inode table (block 2) on top of its
+         * own superblock; Linux maps those differently, and we have none
+         * to check a mapping against. */
+        if (variant == SYSV_VARIANT_XENIX) {
+            kprintf("sysv: 512-byte Xenix filesystems are not supported\n");
+            return NULL;
+        }
+        block_size = 512;
+        break;
     case 2: block_size = 1024; break;
     case 3: block_size = 2048; break;
     default:
-        /* Old Xenix V1 disks sometimes have type=0; assume 512. */
-        block_size = (variant == SYSV_VARIANT_XENIX) ? 512 : 1024;
-        break;
+        kprintf("sysv: unknown filesystem type %u\n", (unsigned)type);
+        return NULL;
     }
 
     sysv_fs_t *fs = (sysv_fs_t *)kmalloc(sizeof(*fs));
@@ -468,15 +509,6 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
     fs->block_size = block_size;
     fs->inode_size = 64;
     fs->name_len   = SYSV_NAMELEN;
-    /* The first two bytes of the SB are s_isize (inode-zone count
-     * in zones, big-endian on some variants — but Xenix/SVR4 are
-     * LE) and the next four are s_fsize.  We trust the LE
-     * convention. */
-    uint16_t s_isize = (uint16_t)sb[0] | ((uint16_t)sb[1] << 8);
-    uint32_t s_fsize = (uint32_t)sb[2]
-                     | ((uint32_t)sb[3] << 8)
-                     | ((uint32_t)sb[4] << 16)
-                     | ((uint32_t)sb[5] << 24);
     /* The geometry every bound below rests on: an inode table from block
      * 2, data blocks after it.  s_isize is the number of the first data
      * block (V7's "size of the i-list", counted from block 0), not a count

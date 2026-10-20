@@ -3,7 +3,8 @@
 #
 #   sysvfs.sh <device> <a copy of /big, as mksysvimg.py --big writes it>
 #
-# Mounts the image, reads every kind of file on it, and checks that a
+# Run it on both layouts (mksysvimg.py and mksysvimg.py --svr4).
+# Mounts the image, checks its size, reads every kind of file on it, and checks that a
 # corrupt entry (an inode past the inode table) and a corrupt file (a block
 # past the volume) fail instead of returning other data.  Then looks every
 # file up again and unmounts: every node the lookups made must have been
@@ -15,6 +16,9 @@ check() { if [ "$1" = "$2" ]; then echo "ok    $3"; else echo "FAIL  $3 (got '$1
 
 mkdir -p /mnt/sysv
 mount "$dev" /mnt/sysv sysv; check $? 0 "mount"
+# 512 blocks, the first data block 10: 502 KiB of data blocks.  A Release 4
+# superblock (mksysvimg.py --svr4) has s_fsize two bytes further on.
+check "$(df -k /mnt/sysv | awk 'NR == 2 { print $2 }')" 502 "the volume's size"
 check "$(cat /mnt/sysv/small)" hello "small file"
 check "$(cat /mnt/sysv/a/b/c/d/e/target)" deep "deep path"
 check "$(ls /mnt/sysv/many | wc -l | tr -d ' ')" 60 "60 entries"
