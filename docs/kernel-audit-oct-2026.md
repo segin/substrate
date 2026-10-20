@@ -157,7 +157,7 @@ SYS-DRV-003 are Critical and not listed.
   3. `sys/arch/i386/signal.c:662-676, 819-835` does not validate `ds`, `es`, `fs`, or `gs`, and only checks `(cs & 3) == 3` and `(ss & 3) == 3`. Popping a non-present, out-of-bounds, or system selector in `isr_exit` (`sys/arch/i386/isr.S:259-270`) triggers a Ring 0 `#GP` or `#NP` panic.
   Basis: traced.
 
-- [ ] **SYS-ARCH-002** *(Critical → not a defect; refuted)* When an exception occurs at a kernel `iret` or `iretq` instruction during user return, `is_iret_at_ip` shall recognize both 32-bit `iret` (`0xCF`) and 64-bit `iretq` (`0x48 0xCF`).
+- [x] **SYS-ARCH-002** *(Critical → not a defect; refuted — closed, no change)* When an exception occurs at a kernel `iret` or `iretq` instruction during user return, `is_iret_at_ip` shall recognize both 32-bit `iret` (`0xCF`) and 64-bit `iretq` (`0x48 0xCF`).
   Evidence: `sys/arch/x86-common/trap.c:29-33` (`is_iret_at_ip`) tests only `*(const uint8_t *)ip == 0xCF`. On x86_64 (`sys/arch/x86_64/isr.S:222`), `iretq` is encoded as `0x48 0xCF`, so `*(const uint8_t *)ip` is `0x48` and `is_iret_at_ip` always returns `0`, turning any user-recoverable `iretq` fault into a Ring 0 kernel panic.
   Basis: traced.
 
@@ -291,7 +291,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/futex.c:718-732` performs a non-atomic `futex_read_user` followed by `futex_write_user`.
   Basis: traced.
 
-- [ ] **SYS-KERN-027** *(Low → not a defect; refuted)* If a thread attempts to recursively lock a non-recursive `mutex_t` on the slow path in `mutex_lock`, then the kernel shall panic, matching the fast-path check.
+- [x] **SYS-KERN-027** *(Low → not a defect; refuted — closed, no change)* If a thread attempts to recursively lock a non-recursive `mutex_t` on the slow path in `mutex_lock`, then the kernel shall panic, matching the fast-path check.
   Evidence: `sys/kern/mutex.c:110-115` checks `if (m->owner == me)` with an empty comment body and proceeds to enqueue `me` on `m->turnstile` (self-deadlock), unlike line 58 which panics.
   Basis: traced.
 
@@ -327,7 +327,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:3351-3407` (`kern_pipe`) leaks `read_node` and `write_node` when `f1 == -1`, `f2 == -1`, or `!rf`, and leaks `write_node` when `!wf`. `sys_pipe2` (`:3488`) returns `-EFAULT` on `copyout` failure without calling `kern_close(kfds[0])` and `kern_close(kfds[1])`.
   Basis: traced.
 
-- [ ] **SYS-VFS-008** *(Medium → not a defect; refuted)* When waiting for a busy buffer in `biowait`, `binval_vnode`, `bio_dev_invalidate`, and `bio_dev_purge`, the block cache (`sys/vfs/bio.c`) shall sleep via `sched_sleep(bp)` (matching `getblk`) rather than calling `sleepq_add` followed by `sched_yield()`.
+- [x] **SYS-VFS-008** *(Medium → not a defect; refuted — closed, no change)* When waiting for a busy buffer in `biowait`, `binval_vnode`, `bio_dev_invalidate`, and `bio_dev_purge`, the block cache (`sys/vfs/bio.c`) shall sleep via `sched_sleep(bp)` (matching `getblk`) rather than calling `sleepq_add` followed by `sched_yield()`.
   Evidence: `sys/vfs/bio.c:469-471, 729-731, 851-853, 895-897` call `sleepq_add(bp, current_thread); mutex_unlock(&bio_lock); sched_yield();` without `sleepq_remove_thread`, unlike `getblk` (`:356`) which calls `sched_sleep(bp)`.
   Basis: traced.
 
@@ -360,7 +360,7 @@ SYS-DRV-003 are Critical and not listed.
   4. `sys/fs/minix/minix.c:313` (`minix_statfs`) shifts by unvalidated `fs->sb.s_log_zone_size`; `minix_read` (`:838`) does not reject `offset < 0`; `minix_finddir` (`:996`) and `minix_read_inode` (`:575`) allocate `fs_node_t` and `minix_inode_wrapper` with no `node->close` callback, and `minix_rmdir` (`:1523-1559`) frees `target->ptr` without freeing `target`.
   Basis: traced.
 
-- [ ] **SYS-FS-004** *(High → not a defect; refuted)* When reading or listing extended attributes in `sys/fs/ext2/ext2_xattr.c`, the ext2 driver shall restrict the `trusted.*` (`EXT4_XATTR_INDEX_TRUSTED`) namespace to superuser callers (`current_process->euid == 0`).
+- [x] **SYS-FS-004** *(High → not a defect; refuted — closed, no change)* When reading or listing extended attributes in `sys/fs/ext2/ext2_xattr.c`, the ext2 driver shall restrict the `trusted.*` (`EXT4_XATTR_INDEX_TRUSTED`) namespace to superuser callers (`current_process->euid == 0`).
   Evidence: `sys/fs/ext2/ext2_xattr.c:370-433` (`ext2_xattr_get`, `ext2_xattr_list`) serves and lists `EXT4_XATTR_INDEX_TRUSTED` attributes without checking `current_process->euid == 0`.
   Basis: traced.
 
@@ -442,11 +442,11 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/exec/perso/compat.c:169-183` checks only `align_shift > 12`. Passing `align_shift >= 31` causes shift UB in `(size_t)1 << align_shift`, integer overflow in `over = len + align`, and integer underflow in `tail = over - head - len`, passing a huge `tail` to `sys_munmap`.
   Basis: traced.
 
-- [ ] **SYS-EXEC-007** *(High → not a defect; refuted)* When loading `a.out` or COFF binaries in `aout_load` and `coff_map_sections`, the loader shall reject segments whose `bss_end` or `sec_end` exceeds `USER32_VA_END` (`0xC0000000`).
+- [x] **SYS-EXEC-007** *(High → not a defect; refuted — closed, no change)* When loading `a.out` or COFF binaries in `aout_load` and `coff_map_sections`, the loader shall reject segments whose `bss_end` or `sec_end` exceeds `USER32_VA_END` (`0xC0000000`).
   Evidence: `sys/exec/formats/aout.c:468-478` checks `bss_end < data_end` but never `bss_end > aout_User_End` (`0xC0000000`), and `sys/exec/formats/coff.c:260-275` checks `sec_end < sec_start` but never `sec_end > 0xC0000000`.
   Basis: traced.
 
-- [ ] **SYS-EXEC-008** *(Medium → not a defect; refuted)* When `script_load` invokes `kern_execve` with a kernel-stack `new_argv` vector for an `a.out` or COFF interpreter, `aout_capture_vector` shall accept kernel-space vector pointers (`>= KERN_BASE`), matching `elf.c` and `xout.c`.
+- [x] **SYS-EXEC-008** *(Medium → not a defect; refuted — closed, no change)* When `script_load` invokes `kern_execve` with a kernel-stack `new_argv` vector for an `a.out` or COFF interpreter, `aout_capture_vector` shall accept kernel-space vector pointers (`>= KERN_BASE`), matching `elf.c` and `xout.c`.
   Evidence: `sys/exec/formats/script.c:96-117` builds `new_argv[4]` on the kernel stack, and `aout_capture_vector` (`sys/exec/formats/aout.c:171-225`) unconditionally passes `uvec` to `copyin`/`copyinstr`, failing with `-EFAULT`.
   Basis: traced.
 
@@ -490,7 +490,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/devices/mem.c:124, 166` compares signed `off_t offset >= MEM_DIRECT_MAP_LIMIT` without checking `offset < 0`; `sys/drivers/devices/kmem.c:100-158` copies from `kva_start >= 0xC0000000` without verifying `pmap_extract`; and `mem_mmap` (`mem.c:83-85`), `fb_fs_mmap` (`sys/drivers/video/fb.c:984-987`), and `ac97_mmap` (`sys/drivers/audio/ac97.c:737-744`) pass unvalidated `MAP_FIXED` addresses to `vm_map_remove` and `vm_map_insert`.
   Basis: traced.
 
-- [ ] **SYS-DRV-002** *(Critical → not a defect; refuted)* When `/dev/ntsync` or `/dev/ptmx` is opened via `open(2)`, the driver shall allocate a private per-open `fs_node_t` rather than overwriting and freeing the global devfs singleton `fs_node_t.impl`.
+- [x] **SYS-DRV-002** *(Critical → not a defect; refuted — closed, no change)* When `/dev/ntsync` or `/dev/ptmx` is opened via `open(2)`, the driver shall allocate a private per-open `fs_node_t` rather than overwriting and freeing the global devfs singleton `fs_node_t.impl`.
   Evidence: `sys/drivers/devices/ntsync.c:1263-1294` (`ntsync_open_callback`, `ntsync_close`) stores the per-open `struct ntsync_instance *` in global `ntsync_device.impl`, overwriting and leaking prior instances on every `open("/dev/ntsync")` and freeing `ntsync_device.impl` on the first `close()`, causing a use-after-free for all other open descriptors. `sys/drivers/console/pty.c:868-915` (`ptmx_open`) similarly overwrites global `ptmx_node.impl`.
   Basis: traced.
 
