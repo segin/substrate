@@ -163,7 +163,7 @@ the node takes its own `open_fs` first. A thread's outstanding holds are
 counted (`vfs_holds`) and checked as each system call returns
 (`vfs_holds_check`), which names a syscall that leaks or over-drops.
 Drivers map hold/rele to their pin (ext2's `pin_count`, FAT's and exFAT's
-`pin`), so a
+`pin`, UDF's and Minix's open counts), so a
 held slot of their node cache is never recycled or rebuilt; a node with no
 hold op lives as long as its filesystem.
 The drivers still to be given hold ops are listed under SYS-NEW-001b in

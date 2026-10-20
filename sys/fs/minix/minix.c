@@ -613,9 +613,9 @@ static void minix_node_destroy(fs_node_t *node) {
  * Lookup cache: one node per (volume, inode).  Path walks look every
  * component up and never close the nodes they pass through, so a node per
  * lookup leaked on every open; a lookup now returns the inode's cached
- * node.  Nothing is evicted: a walk holds the nodes it passes through
- * without opening them, so freeing one nobody had open could free it under
- * a walk.  An entry goes only when its inode is freed (so a new file reusing
+ * node, held (`opens`, which a walk's reference counts in too, so a node
+ * dropped while a walk stands in it is freed at the walk's release, not
+ * under it).  Nothing is evicted.  An entry goes only when its inode is freed (so a new file reusing
  * the number does not get the old node) or its volume is unmounted.  The
  * cache is bounded by the inodes looked up, at most the volume's count.
  */
@@ -648,8 +648,18 @@ static fs_node_t *minix_ncache_find(minix_fs_t *fs, uint32_t ino) {
     return hit;
 }
 
-/* Cache `node` (fresh from minix_read_inode).  Returns the node to use: an
- * entry another lookup cached meanwhile, or `node` itself, now cached. */
+/* The same, held (a lookup reference: minix_node_close drops it).  Taken
+ * under the cache lock, so minix_ncache_drop cannot free it first. */
+static fs_node_t *minix_ncache_find_held(minix_fs_t *fs, uint32_t ino) {
+    spinlock_acquire(&minix_ncache_lock);
+    fs_node_t *hit = minix_ncache_find_locked(fs, ino);
+    if (hit) minix_w(hit)->opens++;
+    spinlock_release(&minix_ncache_lock);
+    return hit;
+}
+
+/* Cache `node` (fresh from minix_read_inode).  Returns the node to use, held:
+ * an entry another lookup cached meanwhile, or `node` itself, now cached. */
 static fs_node_t *minix_ncache_insert(minix_fs_t *fs, fs_node_t *node) {
     spinlock_acquire(&minix_ncache_lock);
     fs_node_t *existing = minix_ncache_find_locked(fs, node->inode);
@@ -657,7 +667,10 @@ static fs_node_t *minix_ncache_insert(minix_fs_t *fs, fs_node_t *node) {
         unsigned int b = minix_ncache_bucket(fs, node->inode);
         minix_w(node)->ncache_next = minix_ncache[b];
         minix_w(node)->cached = 1;
+        minix_w(node)->opens = 1;
         minix_ncache[b] = node;
+    } else {
+        minix_w(existing)->opens++;
     }
     spinlock_release(&minix_ncache_lock);
     if (existing) {
@@ -785,6 +798,10 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
     node->chmod = minix_chmod;
     node->open = minix_node_open;
     node->close = minix_node_close;
+    /* The open count is what keeps a node from being freed: it is the
+     * lookup reference too. */
+    node->hold = minix_node_open;
+    node->rele = minix_node_close;
 
     // Hook operations (the type is a value: see minix_type_bits_from_flags)
     uint32_t type = node->flags & 0x7;
@@ -1164,7 +1181,8 @@ static fs_node_t *minix_finddir(fs_node_t *node, char *name) {
     while ((d = minix_readdir(node, index++)) != NULL) {
         if (strcmp(d->d_name, name) == 0) {
             minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
-            fs_node_t *hit = minix_ncache_find(fs, d->d_ino);
+            /* Returned held, as a lookup's result is. */
+            fs_node_t *hit = minix_ncache_find_held(fs, d->d_ino);
             if (hit) return hit;
             result = (fs_node_t *)kmalloc(sizeof(fs_node_t));
             if (result == NULL) {
@@ -1747,11 +1765,11 @@ static int minix_rmdir(fs_node_t *dir, const char *name) {
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
 
+    /* Held by minix_finddir: removing the entry frees the inode, which
+     * drops its cached node -- this one.  The close at each exit lets it
+     * go. */
     target = minix_finddir(dir, (char *)name);
     if (!target) return -ENOENT;
-    /* Hold it: removing the entry frees the inode, which drops its cached
-     * node -- this one.  The close at each exit lets it go. */
-    minix_node_open(target);
     if ((target->flags & 0x7) != FS_DIRECTORY) {
         minix_node_close(target);
         return -ENOTDIR;
