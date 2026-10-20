@@ -137,4 +137,13 @@ int nvme_io_write(nvme_controller_t *ctrl, uint32_t nsid, uint64_t slba,
 size_t nvme_controller_count(void);
 const nvme_controller_t *nvme_get_controller(size_t index);
 
+#ifdef HOST_TEST
+/* The register accesses and doorbell kicks of a scripted controller,
+ * supplied by the host test that builds nvme.c. */
+uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg);
+void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value);
+void nvme_test_admin_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
+void nvme_test_io_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
+#endif
+
 #endif

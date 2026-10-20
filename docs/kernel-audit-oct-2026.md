@@ -542,7 +542,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/usb/uac.c:738-744` sets `d->in_use = 0` on `audio_register_device` failure while `uac-feed` is still running and leaks `d->fifo_buf` (64 KiB) and `d->ring`; `uac_feeder` (`:279`) returns instead of calling `kthread_exit()`; `sys/drivers/usb/usb_msc.c:565-569` and `sys/drivers/usb/uas.c:317-321` leak DMA buffers when `scsi_register_link` fails.
   Basis: traced.
 
-- [ ] **SYS-RULE-001** *(Low; partly confirmed)* Kernel C source files under `sys/` shall not contain `extern` declarations, declaring shared functions and variables in headers instead (Kernel Code Style Rule 2).
+- [x] **SYS-RULE-001** *(Low; partly confirmed)* Kernel C source files under `sys/` shall not contain `extern` declarations, declaring shared functions and variables in headers instead (Kernel Code Style Rule 2).
   Evidence: 27 non-generated `extern` declarations appear across `.c` files in `sys/`, including `sys/arch/i386/efi_boot.c:439`, `sys/arch/x86-common/trap.c:84`, `sys/arch/x86-common/pmm.c:217-218, 608`, `sys/arch/x86-common/lapic.c:20-21, 181-182`, `sys/arch/x86-common/pci.c:31-34`, `sys/boot/stage2.c:19-20`, `sys/kern/efi_runtime.c:65`, `sys/kern/panic.c:60`, `sys/exec/formats/elf.c:41`, `sys/exec/perso/perso_freebsd.c:56`, `sys/exec/perso/svr4/svr4_streams.c:13-14`, `sys/drivers/console/console.c:16`, `sys/drivers/devices/cpuid.c:19`, `sys/drivers/devices/pseudo.c:20`, `sys/drivers/storage/ide/ide.c:112`, `sys/drivers/storage/nvme/nvme.c:46-49`, `sys/drivers/usb/ehci.c:45-46`, `sys/drivers/usb/uhci.c:44-46`, `sys/drivers/video/bga.c:35`, `sys/drivers/video/fb.c:46, 52`, `sys/drivers/video/fb_console.c:16-17, 134`, and `sys/drivers/video/vga.c:775, 1110`.
   Basis: reproduced.
 

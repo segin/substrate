@@ -16,9 +16,7 @@ static bool lapic_initialized = false;
 #define LAPIC_READ_MEM(base, reg)       (*((volatile uint32_t*)((base) + (reg))))
 #define LAPIC_WRITE_MEM(base, reg, val) (*((volatile uint32_t*)((base) + (reg))) = (val))
 #else
-// For unit testing, these must be defined by the includer
-extern uint32_t test_lapic_read(uintptr_t base, uint32_t reg);
-extern void test_lapic_write(uintptr_t base, uint32_t reg, uint32_t val);
+// For unit testing, these must be defined by the includer (lapic.h)
 #define LAPIC_READ_MEM(base, reg)       test_lapic_read(base, reg)
 #define LAPIC_WRITE_MEM(base, reg, val) test_lapic_write(base, reg, val)
 #endif
@@ -178,8 +176,7 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 #else
-extern void test_outb(uint16_t port, uint8_t val);
-extern uint8_t test_inb(uint16_t port);
+/* test_outb/test_inb: lapic.h */
 #define outb(port, val) test_outb(port, val)
 #define inb(port)       test_inb(port)
 #endif

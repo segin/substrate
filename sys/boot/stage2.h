@@ -116,4 +116,8 @@ struct elf32_phdr {
 	uint32_t p_align;
 } __attribute__((packed));
 
+/* stage2's BSS, from stage2.ld: zeroed at entry. */
+extern uint8_t __bss_start[];
+extern uint8_t __bss_end[];
+
 #endif /* _STAGE2_H_ */

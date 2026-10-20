@@ -8,6 +8,7 @@
 #include <arch/x86-common/multiboot.h>
 #include <kern/console.h>
 #include <kern/memtrack.h>
+#include <sys/kernel_layout.h>
 #include <sys/lock.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_page.h>
@@ -214,11 +215,8 @@ static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg);
  * region that must be excluded from the free memory pool.
  */
 static void pmm_init_kernel_bounds(void) {
-    extern uint32_t _kernel_start;
-    extern uint32_t _kernel_end;
-
-    kernel_phys_start = (phys_addr_t)V2P(&_kernel_start);
-    kernel_phys_end = (phys_addr_t)V2P(&_kernel_end);
+    kernel_phys_start = (phys_addr_t)V2P(_kernel_start);
+    kernel_phys_end = (phys_addr_t)V2P(_kernel_end);
     
     /* Round to page boundaries for safety */
     kernel_phys_start &= ~(PMM_BLOCK_SIZE - 1);
@@ -605,9 +603,8 @@ static void pmm_reserve_kernel(void) {
 
 // Reclaim setup memory
 void pmm_reclaim_setup(void) {
-    extern uint32_t _setup_start, _setup_end;
-    uintptr_t start = (uintptr_t)&_setup_start;
-    uintptr_t end = (uintptr_t)&_setup_end;
+    uintptr_t start = (uintptr_t)_setup_start;
+    uintptr_t end = (uintptr_t)_setup_end;
     
     kprint("Freeing setup memory... ");
     // ... printing logic omitted for brevity, just reclaim ...

@@ -16,8 +16,6 @@ static uint8_t g_drive;
 static uint32_t g_e820_count;
 static struct e820_entry *g_e820_map;
 static char cmdline_buf[256];
-extern uint8_t __bss_start[];
-extern uint8_t __bss_end[];
 
 /* Simple bump heap from 0x60000, above stage2.  stage1 puts the stack at
  * 0x90000, growing down; the heap stops 64 KiB short of it. */

@@ -12,6 +12,7 @@
 
 #include <arch/i386/efi.h>
 #include <kern/main.h>
+#include <sys/kernel_layout.h>
 #include <multiboot.h>
 
 // --------------------------------------------------------------------------------
@@ -435,9 +436,7 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     cr0 |= 0x80010000;      /* CR0.PG | CR0.WP, as boot.S */
     __asm__ volatile("mov %0, %%cr0" :: "r"(cr0));
 
-    // 9. Jump to Kernel
-    extern char stack_top[];
-
+    // 9. Jump to Kernel (stack_top: <sys/kernel_layout.h>)
     __asm__ volatile (
         "mov %0, %%esp \n\t"
         "push %1 \n\t"        // addr (mbi)

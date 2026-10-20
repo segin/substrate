@@ -87,10 +87,7 @@ static uint8_t ehci_instances;
  * HOST_TEST pattern; the capability-region derefs are attach-path only,
  * which the harness never runs.
  */
-#ifdef HOST_TEST
-extern uint32_t ehci_test_op_rd(ehci_hc_t *hc, uint32_t reg);
-extern void ehci_test_op_wr(ehci_hc_t *hc, uint32_t reg, uint32_t val);
-#endif
+/* HOST_TEST: ehci_test_op_rd/ehci_test_op_wr, ehci.h */
 static inline uint32_t ehci_op_rd(ehci_hc_t *hc, uint32_t reg)
 {
 #ifdef HOST_TEST

@@ -81,8 +81,7 @@ const char *trap_exception_name(unsigned int vector) {
 
 static uintptr_t trap_read_cr2(void) {
 #ifdef HOST_TEST
-    extern uint32_t idt_host_cr2;
-    return idt_host_cr2;
+    return idt_host_cr2;            /* <machine/idt.h> */
 #else
     uintptr_t cr2;
     __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));

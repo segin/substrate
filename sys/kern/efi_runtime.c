@@ -61,9 +61,6 @@ int efi_set_variable(const char *name, const uint8_t vendor[16],
 #include <machine/efi.h>
 #include <machine/vmparam.h>
 
-/* Symbols exported by efi_boot.c (NULL when not EFI-booted). */
-extern EFI_RUNTIME_SERVICES *efi_saved_runtime_services __attribute__((weak));
-
 /* Mapped (virtual) pointer to the runtime services table. */
 static EFI_RUNTIME_SERVICES *rt = NULL;
 

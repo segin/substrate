@@ -188,4 +188,13 @@ struct uhci_qh {
  */
 void uhci_init(void);
 
+#ifdef HOST_TEST
+/* Port accesses of a scripted controller, supplied by the host test that
+ * builds uhci.c. */
+struct uhci_hc;
+uint16_t uhci_test_readw(struct uhci_hc *hc, uint16_t reg);
+void uhci_test_writew(struct uhci_hc *hc, uint16_t reg, uint16_t val);
+void uhci_test_writel(struct uhci_hc *hc, uint16_t reg, uint32_t val);
+#endif
+
 #endif /* _UHCI_H */

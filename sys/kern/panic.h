@@ -19,4 +19,10 @@ void panic_with_regs(const char *msg, const struct registers *regs);
  */
 int panic_addr_readable(uintptr_t va, size_t len);
 
+#ifdef HOST_TEST
+/* The host test drives this to exercise the owner/secondary/recursive
+ * arbitration without needing real CPUs. */
+extern int panic_test_cpu_id;
+#endif
+
 #endif

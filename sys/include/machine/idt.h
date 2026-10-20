@@ -10,3 +10,9 @@
 #else
 #include <arch/i386/idt.h>
 #endif
+
+#ifdef HOST_TEST
+#include <stdint.h>
+/* The fault address trap.c reads in place of CR2, set by the host test. */
+extern uint32_t idt_host_cr2;
+#endif

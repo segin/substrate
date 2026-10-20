@@ -124,11 +124,7 @@ static uint8_t uhci_instances;
 /* Register access funnels through these three so a host-side test
  * build can substitute a scripted fake controller -- the ehci.c/nvme.c
  * HOST_TEST pattern, over I/O ports instead of MMIO. */
-#ifdef HOST_TEST
-extern uint16_t uhci_test_readw(uhci_hc_t *hc, uint16_t reg);
-extern void uhci_test_writew(uhci_hc_t *hc, uint16_t reg, uint16_t val);
-extern void uhci_test_writel(uhci_hc_t *hc, uint16_t reg, uint32_t val);
-#endif
+/* HOST_TEST: uhci_test_readw/writew/writel, uhci.h */
 static inline void uhci_writew(uhci_hc_t *hc, uint16_t reg, uint16_t val)
 {
 #ifdef HOST_TEST

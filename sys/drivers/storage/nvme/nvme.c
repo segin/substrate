@@ -56,12 +56,6 @@ typedef struct nvme_cqe {
 static nvme_controller_t nvme_controllers[NVME_MAX_CONTROLLERS];
 static size_t nvme_controller_total;
 
-#ifdef HOST_TEST
-extern uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg);
-extern void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value);
-extern void nvme_test_admin_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
-#endif
-
 static uint64_t nvme_mmio_read64(volatile uint8_t *mmio, uint32_t reg) {
     volatile uint32_t *regs = (volatile uint32_t *)(mmio + reg);
 
@@ -672,10 +666,6 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
     dma_free_coherent(id_data, 4096U);
     return 0;
 }
-
-#ifdef HOST_TEST
-extern void nvme_test_io_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
-#endif
 
 static int nvme_io_submit_sync_locked(nvme_controller_t *ctrl,
                                       nvme_admin_cmd_t *cmd,

@@ -54,12 +54,6 @@ static volatile int panic_owner = PANIC_NO_OWNER;
 static volatile int panic_depth = 0;
 static volatile int panic_dump_done = 0;
 
-#ifdef HOST_TEST
-/* The host test drives this to exercise the owner/secondary/recursive
- * arbitration without needing real CPUs. */
-extern int panic_test_cpu_id;
-#endif
-
 static int panic_cpu_id(void) {
 #ifdef HOST_TEST
     return panic_test_cpu_id;

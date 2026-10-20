@@ -181,4 +181,12 @@ struct ehci_qh {
 #define EHCI_QH_PORT_SHIFT       23          /* endp_cap: TT hub port (7 bits) */
 #define EHCI_QH_NRL_SHIFT        28          /* endp_char: NAK count reload */
 
+#ifdef HOST_TEST
+/* Operational-register accesses of a scripted controller, supplied by the
+ * host test that builds ehci.c. */
+struct ehci_hc;
+uint32_t ehci_test_op_rd(struct ehci_hc *hc, uint32_t reg);
+void ehci_test_op_wr(struct ehci_hc *hc, uint32_t reg, uint32_t val);
+#endif
+
 #endif /* _EHCI_H */

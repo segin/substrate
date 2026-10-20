@@ -138,4 +138,15 @@ void lapic_send_sipi(uint8_t dest_cpu, uint8_t start_page);
 void lapic_send_nmi(uint8_t dest_cpu);
 void lapic_send_nmi_all_excl_self(void);
 
+/* Supplied by a unit test that builds lapic.c with LAPIC_ACCESS_OPS or
+ * PORT_IO_OPS in place of the hardware accesses. */
+#ifdef LAPIC_ACCESS_OPS
+uint32_t test_lapic_read(uintptr_t base, uint32_t reg);
+void test_lapic_write(uintptr_t base, uint32_t reg, uint32_t val);
+#endif
+#ifdef PORT_IO_OPS
+void test_outb(uint16_t port, uint8_t val);
+uint8_t test_inb(uint16_t port);
+#endif
+
 #endif /* _ARCH_X86_LAPIC_H */

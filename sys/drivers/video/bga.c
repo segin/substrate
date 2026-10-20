@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include <arch/x86-common/io.h>
+#include <drivers/video/bga.h>
 #include <drivers/video/fb.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
@@ -118,7 +119,7 @@ static void *bga_map_lfb(uint32_t phys, size_t size) {
 }
 
 #ifdef HOST_TEST
-extern volatile uint8_t *bga_test_bank_window;
+/* bga_test_bank_window: bga.h */
 #define BGA_BANK_WINDOW ((volatile uint8_t *)bga_test_bank_window)
 #else
 #define BGA_BANK_WINDOW ((volatile uint8_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT)

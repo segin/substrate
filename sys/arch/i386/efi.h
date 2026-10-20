@@ -320,4 +320,9 @@ struct EFI_RUNTIME_SERVICES {
     void *QueryVariableInfo;
 };
 
+/* The firmware's runtime services table, saved by the EFI stub
+ * (efi_boot.c).  Weak: a kernel not built with the stub has none, and the
+ * symbol's address is then NULL. */
+extern EFI_RUNTIME_SERVICES *efi_saved_runtime_services __attribute__((weak));
+
 #endif

@@ -28,11 +28,7 @@ static void pci_io_write32(uint32_t address, uint32_t value) {
     outl(PCI_CONFIG_DATA_PORT, value);
 }
 #else
-extern void pci_test_config_select(uint32_t address);
-extern uint32_t pci_test_config_readback(void);
-extern uint32_t pci_test_data_read32(void);
-extern void pci_test_data_write32(uint32_t value);
-
+/* The pci_test_* hooks: arch/x86-common/pci.h. */
 static void pci_select_address(uint32_t address) {
     pci_test_config_select(address);
 }
