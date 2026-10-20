@@ -259,7 +259,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/umtx.c:363-378` loops `for (int i = 0; i < count; i++)` up to `INT_MAX` with `(char *)obj + i * 4`, which overflows signed `int` at `i = 0x20000000` and spins uninterruptibly in Ring 0.
   Basis: traced.
 
-- [ ] **SYS-KERN-019** *(Medium; confirmed)* When looking up an existing System V shared memory segment (`kern_shmget`) or semaphore set (`kern_semget`), the IPC subsystem shall check only the access mode bits requested in `shmflg & 0777` (`semflg & 0777`) rather than unconditionally demanding read+write (`4 | 2`).
+- [x] **SYS-KERN-019** *(Medium; confirmed)* When looking up an existing System V shared memory segment (`kern_shmget`) or semaphore set (`kern_semget`), the IPC subsystem shall check only the access mode bits requested in `shmflg & 0777` (`semflg & 0777`) rather than unconditionally demanding read+write (`4 | 2`).
   Evidence: `sys/kern/ipc_shm.c:174` and `sys/kern/ipc_sem.c:196` call `shm_perm_ok(s, 4 | 2)` and `sem_perm_ok(s, 4 | 2)` unconditionally, causing read-only `shmget(key, 0, 0444)` or `shmget(key, 0, 0)` by non-owners to fail with `-EACCES`.
   Basis: traced.
 

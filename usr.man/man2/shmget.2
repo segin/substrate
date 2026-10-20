@@ -64,7 +64,12 @@ is set to indicate the error.
 .B EACCES
 A segment exists for
 .I key
-but the caller lacks permission.
+but the caller lacks an access that the permission bits of
+.I shmflg
+ask for.
+Only those are checked: a
+.I shmflg
+of 0 finds any existing segment, and 0444 one the caller may read.
 .TP
 .B EEXIST
 .B IPC_CREAT

@@ -174,7 +174,10 @@ int kern_shmget(key_t key, size_t size, int shmflg)
             int err = 0;
             if ((shmflg & IPC_CREAT) && (shmflg & IPC_EXCL))      err = EEXIST;
             else if (size != 0 && size > s->size)                err = EINVAL;
-            else if (!shm_perm_ok(s, 4 | 2))                      err = EACCES;
+            /* Only the access the caller asked for in shmflg's mode bits:
+             * shmget(key, 0, 0) by a reader must find a read-only segment. */
+            else if (!shm_perm_ok(s, ((shmflg >> 6) | (shmflg >> 3) | shmflg) & 7))
+                err = EACCES;
             int ret = err ? -err : shm_make_id((int)(s - shmsegs), s->seq);
             mutex_unlock(&shm_lock);
             return ret;

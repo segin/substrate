@@ -193,7 +193,9 @@ int kern_semget(key_t key, int nsems, int semflg)
             int err = 0;
             if ((semflg & IPC_CREAT) && (semflg & IPC_EXCL)) err = EEXIST;
             else if (nsems > 0 && nsems > s->nsems)          err = EINVAL;
-            else if (!sem_perm_ok(s, 4 | (2)))               err = EACCES;
+            /* Only the access the caller asked for in semflg's mode bits. */
+            else if (!sem_perm_ok(s, ((semflg >> 6) | (semflg >> 3) | semflg) & 7))
+                err = EACCES;
             int ret = err ? -err : sem_make_id((int)(s - semsets), s->seq);
             mutex_unlock(&sem_lock);
             return ret;

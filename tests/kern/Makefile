@@ -282,6 +282,11 @@ sysctlstr: sysctlstr.c
 acctpath.linux: acctpath.c
 	gcc -m32 -static -O2 $< -o $@
 
+# ipcgetperm.linux: shmget/semget on an existing key check only the access
+# asked for.  Runs on the host too (as root).
+ipcgetperm.linux: ipcgetperm.c
+	gcc -m32 -static -O2 $< -o $@
+
 # longtimeout: far-off futex and mq timeouts wait; a negative relative one
 # is EINVAL.  Substrate only.
 longtimeout: longtimeout.c

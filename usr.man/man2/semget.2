@@ -59,7 +59,12 @@ is set to indicate the error.
 .B EACCES
 A set exists for
 .I key
-but the caller lacks permission.
+but the caller lacks an access that the permission bits of
+.I semflg
+ask for.
+Only those are checked: a
+.I semflg
+of 0 finds any existing set.
 .TP
 .B EEXIST
 .B IPC_CREAT
