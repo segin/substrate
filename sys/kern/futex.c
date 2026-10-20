@@ -24,6 +24,7 @@
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
+#include <sys/preempt.h>
 #include <sys/proc.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
@@ -884,13 +885,18 @@ static volatile uint32_t pi_lock = 0;
  * Now: kmalloc on alloc, kfree on the matching free path.
  */
 
+/* A holder switched away by a timer tick would leave every other PI
+ * caller spinning on it, so the lock holds preemption off like any other
+ * spinlock; nothing allocates while holding it. */
 static inline void pi_spinlock(void) {
+    preempt_disable();
     while (__sync_lock_test_and_set(&pi_lock, 1))
         while (pi_lock) __asm__ volatile("pause");
 }
 
 static inline void pi_unlock(void) {
     __sync_lock_release(&pi_lock);
+    preempt_enable_noresched();
 }
 
 static inline int pi_hash_func(void *key, int type, int pid) {
@@ -947,14 +953,17 @@ static pi_state_t *pi_lookup(void *key, int type, int pid) {
     return NULL;
 }
 
-static pi_state_t *pi_get_or_create(void *key, int type, int pid) {
+/* *spare, allocated before pi_lock was taken, becomes the new state if
+ * none exists yet; whatever is left in it is the caller's to free. */
+static pi_state_t *pi_get_or_create(void *key, int type, int pid,
+                                    pi_state_t **spare) {
     int hash = pi_hash_func(key, type, pid);
     pi_state_t *ps = pi_lookup(key, type, pid);
     if (ps) return ps;
-    
-    ps = pi_state_alloc();
-    if (!ps) return NULL;
-    
+
+    ps = *spare;
+    *spare = NULL;
+
     ps->key = key;
     ps->type = type;
     ps->pid = pid;
@@ -1145,15 +1154,19 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
     }
 
     int pid = private ? current_process->pid : 0;
-    
-    pi_spinlock();
-    
-    pi_state_t *ps = pi_get_or_create(key, private, pid);
-    if (!ps) {
-        pi_unlock();
+
+    pi_state_t *spare = pi_state_alloc();
+    pi_waiter_t *pw = pi_waiter_alloc();
+    if (!spare || !pw) {
+        pi_state_free(spare);
+        pi_waiter_free(pw);
         return -ENOMEM;
     }
-    
+
+    pi_spinlock();
+
+    pi_state_t *ps = pi_get_or_create(key, private, pid, &spare);
+
     /* Track owner if not already tracked */
     if (!ps->owner) {
         int owner_tid = oldval & FUTEX_TID_MASK;
@@ -1165,13 +1178,6 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
         }
     }
     
-    /* Create waiter entry */
-    pi_waiter_t *pw = pi_waiter_alloc();
-    if (!pw) {
-        pi_unlock();
-        return -ENOMEM;
-    }
-    
     pw->task = current_thread;
     pw->priority = current_thread->priority;
     pw->key = key;
@@ -1180,9 +1186,10 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
     
     /* Boost owner's priority */
     pi_boost_owner(ps);
-    
+
     pi_unlock();
-    
+    pi_state_free(spare);
+
     /* Loop until we acquire */
     for (;;) {
         if (futex_read_user(uaddr, &oldval) != 0) {

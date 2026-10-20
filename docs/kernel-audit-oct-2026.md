@@ -247,7 +247,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:4592-4596` (`proc_inspect_allowed`) checks only `target->uid == current_process->euid` (ignoring `P_SUGID` and `target->euid`), and `sys_proc_threads` (`:4485`), `sys_proc_cwd` (`:4648`), `sys_proc_exe` (`:4663`), and `sys_proc_thr_list` (`:4678`) omit `proc_inspect_allowed`.
   Basis: traced.
 
-- [ ] **SYS-KERN-016** *(Medium; partly confirmed)* When acquiring `pi_lock` in `sys/kern/futex.c`, the kernel shall disable preemption and shall not invoke `kmalloc` while holding `pi_lock`.
+- [x] **SYS-KERN-016** *(Medium; partly confirmed)* When acquiring `pi_lock` in `sys/kern/futex.c`, the kernel shall disable preemption and shall not invoke `kmalloc` while holding `pi_lock`.
   Evidence: `sys/kern/futex.c:889-896` (`pi_spinlock`) spins with `__sync_lock_test_and_set` without calling `preempt_disable()`, and `pi_waiter_alloc` (`:926`) and `pi_get_or_create` (`:957`) call `kmalloc` while holding `pi_lock`.
   Basis: traced.
 
