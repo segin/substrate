@@ -2896,6 +2896,8 @@ static int64_t pcix_sys_ustat(struct x286_frame *f) {
     if (rc != 0) {
         return rc;
     }
+    /* Held until the last use of mp: an unmount waits for it. */
+    vfs_mountlist_lock();
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
         /* The number a PC/IX program was given by stat: 16 bits of it. */
         if ((uint16_t)mp->mnt_dev == (uint16_t)f->cx && mp->mnt_node_root) {
@@ -2903,11 +2905,13 @@ static int64_t pcix_sys_ustat(struct x286_frame *f) {
         }
     }
     if (mp == NULL) {
+        vfs_mountlist_unlock();
         return -EINVAL;
     }
     memset(&ns, 0, sizeof(ns));
     rc = statfs_fs(mp->mnt_node_root, &ns);
     if (rc != 0) {
+        vfs_mountlist_unlock();
         return rc;
     }
     memset(&out, 0, sizeof(out));
@@ -2918,6 +2922,7 @@ static int64_t pcix_sys_ustat(struct x286_frame *f) {
     name = (name && name[1]) ? name + 1 : "root";
     len = strlen(name);             /* six bytes, not terminated at six */
     memcpy(out.f_fname, name, len < sizeof(out.f_fname) ? len : sizeof(out.f_fname));
+    vfs_mountlist_unlock();
     memcpy((void *)dst, &out, sizeof(out));
     return 0;
 }

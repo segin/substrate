@@ -176,6 +176,15 @@ of their own, so the VFS refuses a pair from different mounts with `EXDEV`
 before calling them (`link_fs` in `sys/vfs/vfs.c`, `kern_rename`), and
 `link_fs` refuses a directory source with `EPERM` for every filesystem.
 
+*The mount list.* `mountlist` (one `struct mount` per mounted filesystem)
+has two locks in `sys/vfs/vfs.c`. The `vfs_mount_lock` spinlock covers
+short reads that never sleep (path lookups crossing a mount point, matching
+a mount by path). A walk that sleeps while it holds an entry (`/proc/mounts`,
+`sync`, the personalities' `getfsstat`/`ustat`) holds the
+`vfs_mountlist_lock` mutex for the whole walk. Mount and unmount take that
+mutex, then the spinlock, to add or remove an entry, so an unmount cannot
+free an entry, or unmount its filesystem, under such a walker.
+
 **Drivers** (`sys/drivers/`):
 
 - *PCI and interrupts.* Drivers that need an interrupt (`hda`, `e1000e`,

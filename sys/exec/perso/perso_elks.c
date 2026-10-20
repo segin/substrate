@@ -2032,15 +2032,20 @@ static int elks_sys_ustatfs(uint32_t dev, uint32_t statfs_off, uint32_t flags,
 
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
+    /* Held until the last use of mp: an unmount waits for it. */
+    vfs_mountlist_lock();
     mp = elks_mount_by_index((unsigned int)dev);
     if (!mp) {
+        vfs_mountlist_unlock();
         return -EINVAL;
     }
     fstype = elks_mount_fstype(mp);
     if (statfs_off == 0) {
+        vfs_mountlist_unlock();
         return fstype;
     }
     if (elks_ds_span(statfs_off, sizeof(elks), &linear) != 0) {
+        vfs_mountlist_unlock();
         return -EFAULT;
     }
 
@@ -2058,6 +2063,7 @@ static int elks_sys_ustatfs(uint32_t dev, uint32_t statfs_off, uint32_t flags,
     elks.f_ffree = (int32_t)mp->mnt_stat.f_ffree;
     elks_copy_cstr(elks.f_mntonname, sizeof(elks.f_mntonname),
                    mp->mnt_stat.f_mntonname[0] ? mp->mnt_stat.f_mntonname : mp->mnt_stat_path);
+    vfs_mountlist_unlock();
     memcpy((void *)(uintptr_t)linear, &elks, sizeof(elks));
     return 0;
 }

@@ -928,6 +928,8 @@ int netbsd_sys_getvfsstat(void *buf, abi_size_t bufsize, int flags) {
             return -ENOMEM;
         }
     }
+    /* statfs and copyout sleep: the mountlist lock keeps each entry. */
+    vfs_mountlist_lock();
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
         struct statfs ns;
 
@@ -963,6 +965,7 @@ int netbsd_sys_getvfsstat(void *buf, abi_size_t bufsize, int flags) {
         }
         count++;
     }
+    vfs_mountlist_unlock();
     if (n != NULL) {
         kfree(n, sizeof(*n));
     }

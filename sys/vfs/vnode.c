@@ -617,31 +617,40 @@ int vinvalbuf(struct vnode *vp, int flags)
  */
 int vflush(struct mount *mp, struct vnode *skipvp, int flags)
 {
-    struct vnode *vp, *nvp;
-    int busy = 0;
+    struct vnode *vp, *v;
+    int busy;
 
     /*
-     * Walk the mount's vnode list. We use the safe variant since
-     * vrele/vgone may remove vnodes from the list.
+     * Walk the mount's vnode list under vnode_mntlist_lock, choosing one
+     * vnode at a time.  The lock cannot be held across vinvalbuf/vgone
+     * (vgone frees the vnode and takes the lock itself), and a successor
+     * remembered across them may have been freed -- so each pass starts
+     * from the head again.  A vnode already processed carries VDOOMED
+     * (vgone sets it; one still referenced stays listed) and is passed
+     * over, so the walk ends.
      */
-    TAILQ_FOREACH_SAFE(vp, &mp->mnt_vnodelist, v_mntlist, nvp) {
-        /* Skip the designated vnode (usually root) */
-        if(vp == skipvp)
-            continue;
-
-        spinlock_acquire(&vp->v_interlock);
-
-        /*
-         * If vnode has active references and we're not forcing,
-         * mark as busy and skip.
-         */
-        if(vp->v_usecount > 0 && !(flags & FORCECLOSE)) {
-            busy++;
-            spinlock_release(&vp->v_interlock);
-            continue;
+    for (;;) {
+        busy = 0;
+        vp = NULL;
+        spinlock_acquire(&vnode_mntlist_lock);
+        TAILQ_FOREACH(v, &mp->mnt_vnodelist, v_mntlist) {
+            /* Skip the designated vnode (usually root) */
+            if(v == skipvp || (v->v_flag & VDOOMED))
+                continue;
+            /*
+             * If vnode has active references and we're not forcing,
+             * count it busy and leave it.
+             */
+            if(v->v_usecount > 0 && !(flags & FORCECLOSE)) {
+                busy++;
+                continue;
+            }
+            vp = v;
+            break;
         }
-
-        spinlock_release(&vp->v_interlock);
+        spinlock_release(&vnode_mntlist_lock);
+        if(vp == NULL)
+            break;
 
         /* Invalidate buffers for this vnode */
         vinvalbuf(vp, 0);

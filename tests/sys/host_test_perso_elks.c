@@ -28,6 +28,9 @@ process_t *current_process;
 thread_t *current_thread;
 process_t processes[NTEST_PROCS];
 struct mountlist mountlist;
+/* One thread: the mount list needs no lock here. */
+void vfs_mountlist_lock(void) {}
+void vfs_mountlist_unlock(void) {}
 
 static const char *last_name;
 static uintptr_t last_ptr;

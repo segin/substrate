@@ -52,6 +52,39 @@ struct vnode *rootvnode = NULL;
 static spinlock_t vfs_mount_lock = SPINLOCK_INIT("vfs_mount");
 
 /*
+ * vfs_mountlist_mutex keeps every struct mount on mountlist alive for a
+ * walker that may sleep -- one that calls a filesystem's statfs, or
+ * copies out to user memory -- which vfs_mount_lock, a spinlock, cannot
+ * be held across.  Such walkers hold it for the whole walk
+ * (vfs_mountlist_lock); mount and unmount take it around adding and
+ * removing an entry, outside vfs_mount_lock, so once it is released no
+ * walker can still be holding an entry about to be freed.
+ */
+static mutex_t vfs_mountlist_mutex;
+
+void vfs_mountlist_lock(void) {
+    mutex_lock(&vfs_mountlist_mutex);
+}
+
+void vfs_mountlist_unlock(void) {
+    mutex_unlock(&vfs_mountlist_mutex);
+}
+
+/* For the BSD mount layer, which cannot see vfs_mount_lock: add or remove
+ * an entry with both locks.  The caller holds vfs_mountlist_lock. */
+void vfs_mountlist_insert(struct mount *mp) {
+    spinlock_acquire(&vfs_mount_lock);
+    TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+    spinlock_release(&vfs_mount_lock);
+}
+
+void vfs_mountlist_remove(struct mount *mp) {
+    spinlock_acquire(&vfs_mount_lock);
+    TAILQ_REMOVE(&mountlist, mp, mnt_list);
+    spinlock_release(&vfs_mount_lock);
+}
+
+/*
  * Device numbers for mounts.  stat(2) reports the mount's as st_dev for
  * every file in it, which is what makes (st_dev, st_ino) name one file and
  * no other: inode numbers are a filesystem's own, and two mounts both
@@ -171,6 +204,7 @@ void vfs_init(void) {
     kprint("VFS: Ready.\n");
     namei_init();
     nchinit();
+    mutex_init(&vfs_mountlist_mutex, "mountlist");
     TAILQ_INIT(&mountlist);
 }
 
@@ -540,9 +574,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         // Set mount reference on root node
         root->mp = mp;
 
-        spinlock_acquire(&vfs_mount_lock);
-        TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
-        spinlock_release(&vfs_mount_lock);
+        vfs_mountlist_lock();
+        vfs_mountlist_insert(mp);
+        vfs_mountlist_unlock();
         kprintf("VFS: mount table add %s (%s)\n",
                 mp->mnt_stat.f_mntonname,
                 mp->mnt_stat.f_fstypename[0] ? mp->mnt_stat.f_fstypename : "unknown");
@@ -1684,26 +1718,21 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
  */
 void vfs_sync_all(void) {
     /*
-     * syncfs sleeps (it writes metadata), so the
-     * walk cannot hold vfs_mount_lock across the call — that lock is a
-     * spinlock and a concurrent umount would TAILQ_REMOVE and kfree the
-     * record we are standing on.  Snapshot the root nodes under the
-     * lock, then call out with it released.
+     * syncfs sleeps (it writes metadata), so the walk cannot hold
+     * vfs_mount_lock, a spinlock.  It holds the mountlist mutex instead,
+     * which keeps an unmount from removing and freeing the mount -- and
+     * from unmounting its filesystem -- until the walk is done.  (A
+     * snapshot of the root nodes taken under the spinlock could be
+     * unmounted before syncfs reached it, and was capped at 32 mounts.)
      */
-    fs_node_t *roots[32];
-    int n = 0;
-
-    spinlock_acquire(&vfs_mount_lock);
     struct mount *mnt;
-    TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
-        if (n >= (int)(sizeof(roots) / sizeof(roots[0]))) break;
-        if (mnt->mnt_node_root && mnt->mnt_node_root->syncfs)
-            roots[n++] = mnt->mnt_node_root;
-    }
-    spinlock_release(&vfs_mount_lock);
 
-    for (int i = 0; i < n; i++)
-        (void)roots[i]->syncfs(roots[i]);
+    vfs_mountlist_lock();
+    TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+        if (mnt->mnt_node_root && mnt->mnt_node_root->syncfs)
+            (void)mnt->mnt_node_root->syncfs(mnt->mnt_node_root);
+    }
+    vfs_mountlist_unlock();
 }
 
 int statfs_fs(fs_node_t *node, struct statfs *buf) {
@@ -2169,6 +2198,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
 
         if (!(flags & MNT_FORCE)) return -EBUSY;
 
+        vfs_mountlist_lock();
         spinlock_acquire(&vfs_mount_lock);
         TAILQ_FOREACH(mp_scan, &mountlist, mnt_list) {
             if (strcmp(mp_scan->mnt_stat_path, "/") == 0) {
@@ -2178,6 +2208,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
         }
         if (root_mp) TAILQ_REMOVE(&mountlist, root_mp, mnt_list);
         spinlock_release(&vfs_mount_lock);
+        vfs_mountlist_unlock();
 
         /* Run the filesystem's unmount hook so it can flush metadata and
          * mark itself clean.  fs_root is deliberately left pointing at the
@@ -2329,10 +2360,12 @@ static int vfs_unmount_covered(fs_node_t *mountpoint, const char *path,
      * ptr already NULL, which would race-deref NULL.  The TAILQ unlink joins
      * the same section so a path-lookup traversal never walks it mid-splice.
      */
+    vfs_mountlist_lock();
     spinlock_acquire(&vfs_mount_lock);
     if (!(mountpoint->flags & FS_MOUNTPOINT)) {
         /* Another unmount claimed it between the gather above and here. */
         spinlock_release(&vfs_mount_lock);
+        vfs_mountlist_unlock();
         return -EINVAL;
     }
     mountpoint->flags &= ~FS_MOUNTPOINT;
@@ -2341,6 +2374,7 @@ static int vfs_unmount_covered(fs_node_t *mountpoint, const char *path,
         TAILQ_REMOVE(&mountlist, target_mp, mnt_list);
     }
     spinlock_release(&vfs_mount_lock);
+    vfs_mountlist_unlock();
 
     // Cleanup fs instance
     if (root && root->unmount) {

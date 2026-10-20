@@ -32,6 +32,9 @@ process_t processes[NTEST_PROCS];
 process_t *current_process;
 mutex_t proctree_lock;
 struct mountlist mountlist;
+/* One thread: the mount list needs no lock here. */
+void vfs_mountlist_lock(void) {}
+void vfs_mountlist_unlock(void) {}
 int kmalloc_should_fail = 0;
 static time_t mock_now = 123456789;
 static time_t mock_boot = 111111111;

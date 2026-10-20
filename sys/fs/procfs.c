@@ -434,6 +434,9 @@ static uint32_t gen_mounts(char *buf, size_t size, void *opaque) {
     size_t off = 0;
     struct mount *mp;
 
+    /* Entries stay allocated while the mountlist lock is held: an unmount
+     * waits for it before it frees one. */
+    vfs_mountlist_lock();
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
         const char *from = mp->mnt_stat.f_mntfromname[0] ? mp->mnt_stat.f_mntfromname : mp->mnt_stat.f_fstypename;
         const char *to = mp->mnt_stat.f_mntonname[0] ? mp->mnt_stat.f_mntonname : mp->mnt_stat_path;
@@ -460,6 +463,7 @@ static uint32_t gen_mounts(char *buf, size_t size, void *opaque) {
         if (off < size) off += (size_t)snprintf(buf + off, size - off, "%s 0 0\n", opts);
         else off += strlen(opts) + strlen(" 0 0\n");
     }
+    vfs_mountlist_unlock();
 
     return (uint32_t)off;
 }

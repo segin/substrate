@@ -333,7 +333,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/vfs/bio.c:469-471, 729-731, 851-853, 895-897` call `sleepq_add(bp, current_thread); mutex_unlock(&bio_lock); sched_yield();` without `sleepq_remove_thread`, unlike `getblk` (`:356`) which calls `sched_sleep(bp)`.
   Basis: traced.
 
-- [ ] **SYS-VFS-009** *(Medium; partly confirmed)* While traversing or modifying `mountlist` in `vfs_mount.c` and `procfs.c`, or `mp->mnt_vnodelist` in `vflush`, the VFS subsystem shall hold the corresponding list lock (`vfs_mount_lock` / `vnode_mntlist_lock`).
+- [x] **SYS-VFS-009** *(Medium; partly confirmed)* While traversing or modifying `mountlist` in `vfs_mount.c` and `procfs.c`, or `mp->mnt_vnodelist` in `vflush`, the VFS subsystem shall hold the corresponding list lock (`vfs_mount_lock` / `vnode_mntlist_lock`).
   Evidence: `sys/vfs/vfs_mount.c:104, 181, 252` and `sys/fs/procfs.c:423` access `mountlist` without `vfs_mount_lock` (`static` in `sys/vfs/vfs.c`), and `vflush` (`sys/vfs/vnode.c:627`) iterates `mp->mnt_vnodelist` without `vnode_mntlist_lock`.
   Basis: traced.
 

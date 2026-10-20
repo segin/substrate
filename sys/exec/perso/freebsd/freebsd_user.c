@@ -879,6 +879,8 @@ int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mo
     long maxent = buf ? (bufsize / (long)sizeof(struct freebsd_statfs)) : 0;
     (void)mode;  /* MNT_WAIT / MNT_NOWAIT — substrate statfs is synchronous */
 
+    /* statfs and copyout sleep: the mountlist lock keeps each entry. */
+    vfs_mountlist_lock();
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
         if (buf) {
             if (count >= maxent) break;
@@ -905,10 +907,14 @@ int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mo
                                                   : "/dev/root",
                     sizeof(fs.f_mntfromname));
 
-            if (copyout(&fs, &buf[count], sizeof(fs)) != 0) return -EFAULT;
+            if (copyout(&fs, &buf[count], sizeof(fs)) != 0) {
+                vfs_mountlist_unlock();
+                return -EFAULT;
+            }
         }
         count++;
     }
+    vfs_mountlist_unlock();
     return count;
 }
 

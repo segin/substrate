@@ -249,6 +249,12 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
 int statfs_fs(fs_node_t *node, struct statfs *buf);
 /* Walk every mount and flush driver-private deferred metadata. */
 void vfs_sync_all(void);
+/* Hold across any walk of mountlist that may sleep (statfs, copyout);
+ * entries stay allocated while it is held. */
+void vfs_mountlist_lock(void);
+void vfs_mountlist_unlock(void);
+void vfs_mountlist_insert(struct mount *mp);   /* caller holds the lock */
+void vfs_mountlist_remove(struct mount *mp);   /* caller holds the lock */
 int statvfs_fs(fs_node_t *node, struct statvfs *buf);
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev);
 int vfs_mkdir(const char *path, uint16_t permission);

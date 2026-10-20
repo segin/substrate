@@ -5,6 +5,7 @@
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/types.h>
+#include <vfs/vfs.h>
 #include <vfs/vnode.h>
 #include <vm/vm_kmem.h>
 
@@ -101,7 +102,9 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
     }
 
     /* Add to global mount list */
-    TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+    vfs_mountlist_lock();
+    vfs_mountlist_insert(mp);
+    vfs_mountlist_unlock();
 
     return 0;
 }
@@ -177,8 +180,11 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
         vrele(mp->mnt_vnodecovered);
     }
 
-    /* Remove from global list and free */
-    TAILQ_REMOVE(&mountlist, mp, mnt_list);
+    /* Remove from global list and free: once the mountlist lock has been
+     * taken and dropped, no walker still holds mp. */
+    vfs_mountlist_lock();
+    vfs_mountlist_remove(mp);
+    vfs_mountlist_unlock();
     rw_wunlock(&mp->mnt_lock);
     kfree(mp, sizeof(struct mount));
 
@@ -248,12 +254,16 @@ vfs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct thread *td)
         /* Sync all filesystems */
         struct mount *mnt;
         int error, final_error = 0;
-        
+
+        /* Each filesystem's sync sleeps: the mountlist lock, not the
+         * spinlock, keeps the entries for the walk. */
+        vfs_mountlist_lock();
         TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
             error = vfs_sync(mnt, waitfor, cred, td);
             if (error)
                 final_error = error;
         }
+        vfs_mountlist_unlock();
         return final_error;
     }
 
