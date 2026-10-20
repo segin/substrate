@@ -59,7 +59,10 @@ Return the value of semaphore
 Set the value of semaphore
 .I semnum
 to
-.IR arg.val .
+.IR arg.val ,
+and discard every process's pending
+.B SEM_UNDO
+adjustment for it.
 .TP
 .B GETALL
 Store all semaphore values into
@@ -67,7 +70,11 @@ Store all semaphore values into
 .TP
 .B SETALL
 Set all semaphore values from
-.IR arg.array .
+.IR arg.array ,
+and discard every process's pending
+.B SEM_UNDO
+adjustments for the set.
+If any value is out of range, none is set.
 .TP
 .B GETPID
 Return the pid of the process that last operated on semaphore

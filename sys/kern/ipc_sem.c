@@ -145,6 +145,23 @@ static struct sem_undo *sem_undo_find(int pid, int index, unsigned short seq,
     return u;
 }
 
+/* SETVAL and SETALL set a value outright: what every process would have
+ * undone on that semaphore (semnum >= 0) or on the whole set (-1) no
+ * longer applies. */
+static void sem_undo_clear(int index, unsigned short seq, int semnum)
+{
+    for (struct sem_undo *u = undo_list; u; u = u->next) {
+        if (u->index != index || u->seq != seq)
+            continue;
+        if (semnum >= 0) {
+            if (semnum < u->nsems)
+                u->adj[semnum] = 0;
+        } else {
+            memset(u->adj, 0, sizeof(short) * u->nsems);
+        }
+    }
+}
+
 /* Drop every undo record referring to slot `index`. */
 static void sem_undo_drop_set(int index)
 {
@@ -322,8 +339,12 @@ int kern_semop(int semid, const struct sembuf *ksops, size_t nsops)
             int want_undo = 0;
             for (size_t i = 0; i < nsops; i++)
                 if (ksops[i].sem_flg & SEM_UNDO) { want_undo = 1; break; }
-            if (want_undo)
+            if (want_undo) {
                 undo = sem_undo_find(pid, index, s->seq, s->nsems, 1);
+                /* Without the record the change could never be undone:
+                 * refuse it rather than apply it half-promised. */
+                if (!undo) { mutex_unlock(&sem_lock); return -ENOMEM; }
+            }
 
             for (int i = 0; i < s->nsems; i++)
                 s->sems[i].val = tmp[i];
@@ -509,6 +530,7 @@ int kern_sem_setval(int semid, int semnum, int val)
     int index = (int)(s - semsets);
     s->sems[semnum].val = val;
     s->sems[semnum].pid = current_process ? current_process->pid : 0;
+    sem_undo_clear(index, s->seq, semnum);
     s->ctime = sem_now();
     sleepq_wake_all(&semsets[index]);
     mutex_unlock(&sem_lock);
@@ -540,11 +562,13 @@ int kern_sem_setall(int semid, const unsigned short *kbuf, size_t n)
     if (!s) { mutex_unlock(&sem_lock); return -err; }
     if (!sem_perm_ok(s, 2)) { mutex_unlock(&sem_lock); return -EACCES; }
     if (n != (size_t)s->nsems) { mutex_unlock(&sem_lock); return -EINVAL; }
-    for (int i = 0; i < s->nsems; i++) {
+    /* All or nothing: check every value before setting any. */
+    for (int i = 0; i < s->nsems; i++)
         if (kbuf[i] > SEMVMX) { mutex_unlock(&sem_lock); return -ERANGE; }
+    for (int i = 0; i < s->nsems; i++)
         s->sems[i].val = kbuf[i];
-    }
     int index = (int)(s - semsets);
+    sem_undo_clear(index, s->seq, -1);
     s->ctime = sem_now();
     sleepq_wake_all(&semsets[index]);
     mutex_unlock(&sem_lock);

@@ -107,6 +107,11 @@ is invalid, or
 .I nsops
 is 0.
 .TP
+.B ENOMEM
+.B SEM_UNDO
+was requested but there was no memory to record the adjustment;
+no operation was performed.
+.TP
 .B ERANGE
 An operation would make a semaphore value exceed
 .BR SEMVMX .

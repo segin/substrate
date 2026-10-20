@@ -263,7 +263,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/ipc_shm.c:174` and `sys/kern/ipc_sem.c:196` call `shm_perm_ok(s, 4 | 2)` and `sem_perm_ok(s, 4 | 2)` unconditionally, causing read-only `shmget(key, 0, 0444)` or `shmget(key, 0, 0)` by non-owners to fail with `-EACCES`.
   Basis: traced.
 
-- [ ] **SYS-KERN-020** *(Medium; confirmed)* When `SEM_UNDO` is requested in `kern_semop`, the kernel shall fail with `-ENOMEM` if `sem_undo_find` cannot allocate an undo structure, and `kern_sem_setval` / `kern_sem_setall` shall clear existing `sem_undo` adjustments for the modified semaphore(s).
+- [x] **SYS-KERN-020** *(Medium; confirmed)* When `SEM_UNDO` is requested in `kern_semop`, the kernel shall fail with `-ENOMEM` if `sem_undo_find` cannot allocate an undo structure, and `kern_sem_setval` / `kern_sem_setall` shall clear existing `sem_undo` adjustments for the modified semaphore(s).
   Evidence: `sys/kern/ipc_sem.c:323-338` ignores a `NULL` return from `sem_undo_find` and commits semaphore changes without recording the undo delta; `kern_sem_setval` (`:497-514`) and `kern_sem_setall` (`:532-550`) leave stale `u->adj[semnum]` entries intact.
   Basis: traced.
 

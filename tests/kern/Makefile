@@ -287,6 +287,11 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# semundoset.linux: SETVAL/SETALL discard pending SEM_UNDO adjustments.
+# Runs on the host too.
+semundoset.linux: semundoset.c
+	gcc -m32 -static -O2 $< -o $@
+
 # longtimeout: far-off futex and mq timeouts wait; a negative relative one
 # is EINVAL.  Substrate only.
 longtimeout: longtimeout.c
