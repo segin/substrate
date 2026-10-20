@@ -167,6 +167,27 @@ size_t klog_size(void) { return 0; }
 size_t klog_read(char *dst, size_t dstlen) { (void)dst; (void)dstlen; return 0; }
 size_t memtrack_snapshot(memtrack_rec_t *out, size_t max) { (void)out; (void)max; return 0; }
 
+/* Memory accounting sources behind /proc/meminfo and /proc/uma. */
+#include <vfs/buf.h>
+#include <vm/phys_mem.h>
+#include <vm/uma.h>
+#include <vm/vm_commit.h>
+#include <vm/vm_swap.h>
+size_t vm_phys_get_free(void) { return 0; }
+size_t vm_phys_get_used(void) { return 0; }
+size_t vm_commit_limit(void) { return 0; }
+size_t vm_commit_current(void) { return 0; }
+void bio_get_stats(struct bio_stats *out) { memset(out, 0, sizeof(*out)); }
+uint64_t shmfs_resident_bytes(void) { return 0; }
+void vm_swap_get_stats(uint64_t *total_pages, uint64_t *free_pages) {
+    *total_pages = 0;
+    *free_pages = 0;
+}
+size_t uma_zone_report(char *buf, size_t size) {
+    if (size) buf[0] = '\0';
+    return 0;
+}
+
 /* pmap COW/destroy debug counters consumed by /proc/cow_stats. */
 uint64_t pmap_destroy_calls;
 uint64_t pmap_destroy_anon_freed;
@@ -404,7 +425,8 @@ void test_procfs_self_dynamic_target(void) {
     int len = self->readlink(self, target, sizeof(target));
     assert(len > 0);
     target[len] = '\0';
-    assert(strcmp(target, "/proc/1/") == 0);
+    /* Linux form: no trailing slash. */
+    assert(strcmp(target, "/proc/1") == 0);
     if (self->close) self->close(self);
 
     current_process = &processes[1]; /* PID 123 */
@@ -414,7 +436,7 @@ void test_procfs_self_dynamic_target(void) {
     assert(len > 0);
     target[len] = '\0';
     char expected[64];
-    snprintf(expected, sizeof(expected), "/proc/%d/", current_process->pid);
+    snprintf(expected, sizeof(expected), "/proc/%d", current_process->pid);
     assert(strcmp(target, expected) == 0);
     if (self->close) self->close(self);
 
