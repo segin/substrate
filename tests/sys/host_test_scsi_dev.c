@@ -17,11 +17,18 @@ static uint32_t last_data_len;
 static uint16_t last_flags;
 static int read_capacity_calls;
 static int execute_failures_before_success;
+static int read_capacity_fails;
 static int sync_cache_calls;
 
 void kprint(const char *str) { (void)str; }
 
 void blkdev_register_disk(blkdev_t *dev) {
+    register_calls++;
+    last_registered = dev;
+}
+
+/* Optical and empty-slot devices skip the partition scan. */
+void blkdev_register(blkdev_t *dev) {
     register_calls++;
     last_registered = dev;
 }
@@ -98,6 +105,9 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
     uint8_t buf[8];
 
     cdb[0] = SCSI_CMD_READ_CAPACITY_10;
+    if (read_capacity_fails) {
+        return -1;
+    }
     if (scsi_execute_sync(dev, cdb, 10, buf, sizeof(buf), SCSI_REQ_READ, 10000) < 0) {
         return -1;
     }
@@ -135,6 +145,7 @@ static void reset_state(void) {
     last_flags = 0;
     read_capacity_calls = 0;
     execute_failures_before_success = 0;
+    read_capacity_fails = 0;
     sync_cache_calls = 0;
     scsi_dev_init();
 }
@@ -163,6 +174,10 @@ static void test_attach_disk_and_lookup(void) {
     assert(sbd->scsi_dev == &dev);
 }
 
+/*
+ * A reported sector size is trusted for optical units too; 2048 is only the
+ * fallback when the drive gives none and READ CAPACITY cannot supply one.
+ */
 static void test_attach_cdrom_uses_2048_sector_size(void) {
     scsi_device_t dev;
 
@@ -170,7 +185,8 @@ static void test_attach_cdrom_uses_2048_sector_size(void) {
     memset(&dev, 0, sizeof(dev));
     dev.type = SCSI_TYPE_ROM;
     dev.capacity = 123;
-    dev.sector_size = 512;
+    dev.sector_size = 0;
+    read_capacity_fails = 1;
 
     assert(scsi_dev_attach(&dev) == 0);
     assert(last_registered != NULL);

@@ -226,6 +226,8 @@ void linear_fb_putpixel(int x, int y, uint32_t color) {
     fb_mem[(size_t)y * TEST_FB_WIDTH + (size_t)x] = color;
 }
 void fb_planar_present_userfb(void) {}
+/* No client ever maps /dev/fb0 here, so the console always owns the screen. */
+int fb_client_onscreen(void) { return 0; }
 size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len) {
     (void)tty; (void)buf; return len;
 }

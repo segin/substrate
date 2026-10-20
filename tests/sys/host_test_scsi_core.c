@@ -4,6 +4,7 @@
 #include <stdarg.h>
 
 #include "../../sys/drivers/storage/scsi/scsi.h"
+#include <sys/lock.h>
 
 static int execute_calls;
 static int detach_calls;
@@ -63,6 +64,14 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
     detach_calls++;
     return 0;
 }
+
+/* scsi_ctl.c owns the /dev/scsi/genN nodes; nothing here creates one. */
+void scsi_destroy_generic_node(scsi_device_t *dev) {
+    (void)dev;
+}
+
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
 
 static void record_callback(scsi_request_t *req) {
     callback_calls++;
@@ -651,28 +660,28 @@ static void test_scan_bus_falls_back_to_sequential_luns(void) {
 }
 
 static void test_request_pool_invariant_and_reuse(void) {
-    scsi_request_t *reqs[32];
+    scsi_request_t *reqs[SCSI_REQUEST_POOL_SIZE];
     size_t i;
 
     reset_state();
     memset(reqs, 0, sizeof(reqs));
-    assert(count_free_requests() == 32);
+    assert(count_free_requests() == SCSI_REQUEST_POOL_SIZE);
 
-    for (i = 0; i < 32; i++) {
+    for (i = 0; i < SCSI_REQUEST_POOL_SIZE; i++) {
         reqs[i] = scsi_request_alloc();
         assert(reqs[i] != NULL);
-        assert(count_free_requests() == 31 - i);
+        assert(count_free_requests() == SCSI_REQUEST_POOL_SIZE - 1 - i);
     }
 
     assert(scsi_request_alloc() == NULL);
 
-    for (i = 0; i < 32; i += 2) {
+    for (i = 0; i < SCSI_REQUEST_POOL_SIZE; i += 2) {
         scsi_request_free(reqs[i]);
         reqs[i] = NULL;
     }
-    assert(count_free_requests() == 16);
+    assert(count_free_requests() == SCSI_REQUEST_POOL_SIZE / 2);
 
-    for (i = 0; i < 16; i++) {
+    for (i = 0; i < SCSI_REQUEST_POOL_SIZE / 2; i++) {
         scsi_request_t *req = scsi_request_alloc();
 
         assert(req != NULL);

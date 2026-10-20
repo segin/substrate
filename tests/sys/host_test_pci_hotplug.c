@@ -40,8 +40,20 @@ void kobject_uevent(const char *action, const char *subsystem, const char *name)
 void devfs_register_device(struct fs_node *node) { (void)node; }
 void devfs_unregister_device(struct fs_node *node) { (void)node; }
 int devfs_register_alias(const char *path, const char *target) { (void)path; (void)target; return 0; }
-void devfs_unregister_alias(const char *path) { (void)path; }
+void devfs_unregister_alias(const char *path, uint32_t perso_mask) { (void)path; (void)perso_mask; }
 int i386_cpu_pat_wc_enabled(void) { return 0; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+void timer_busywait_ms(unsigned ms) { (void)ms; }
+/* No IO-APIC here, so pci_route_intx() reports -ENODEV. */
+int ioapic_get_count(void) { return 0; }
+void ioapic_set_routing_ex(uint32_t gsi, uint8_t vector, uint32_t dest_cpu,
+                           uint8_t delivery_mode, uint8_t dest_mode,
+                           uint8_t polarity, uint8_t trigger) {
+    (void)gsi; (void)vector; (void)dest_cpu; (void)delivery_mode;
+    (void)dest_mode; (void)polarity; (void)trigger;
+}
+void ioapic_set_mask(uint8_t irq, bool mask) { (void)irq; (void)mask; }
+int irq_alloc_vector(void) { return -1; }
 
 #define HOST_TEST 1
 #include "../../sys/kern/bus.c"

@@ -27,6 +27,7 @@
 /* Forward declarations for scsi_ctl.c mocks */
 void kprint(const char *str) { printf("[K] %s", str); }
 void devfs_register_device(fs_node_t *node) { (void)node; }
+void devfs_unregister_device(fs_node_t *node) { (void)node; }
 void scsi_dev_init(void) {}
 int scsi_dev_attach(scsi_device_t *dev) { (void)dev; return 0; }
 int scsi_scan_bus(scsi_link_t *link, uint8_t bus) { (void)link; (void)bus; return 0; }
@@ -166,7 +167,7 @@ void test_send_cmd() {
     cmd.direction = 1; /* READ */
     cmd.data_len = 100;
     char data_buf[100];
-    cmd.data = data_buf;
+    cmd.data = (uptr32_t)(uintptr_t)data_buf;
     current_process->euid = 0;
     mock_execute_ret = 0;
     mock_execute_status = SCSI_STATUS_GOOD;
@@ -278,7 +279,7 @@ void test_send_cmd_permissions() {
     cmd.cdb[0] = SCSI_CMD_INQUIRY;
     cmd.direction = 1;
     cmd.data_len = sizeof(data_buf);
-    cmd.data = data_buf;
+    cmd.data = (uptr32_t)(uintptr_t)data_buf;
 
     current_process->euid = 1000;
     ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
@@ -309,7 +310,7 @@ void test_send_cmd_cdb_overflow() {
     cmd.direction = 1; /* READ */
     cmd.data_len = 100;
     char data_buf[100];
-    cmd.data = data_buf;
+    cmd.data = (uptr32_t)(uintptr_t)data_buf;
     cmd.cdb_len = 20; /* Larger than 16 */
 
     int ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
@@ -353,7 +354,7 @@ void test_send_cmd_invalid_shape() {
 
     cmd.direction = 1;
     cmd.data_len = 16;
-    cmd.data = NULL;
+    cmd.data = 0;
     ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
     assert(ret == -EINVAL);
 

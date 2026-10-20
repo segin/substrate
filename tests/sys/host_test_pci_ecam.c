@@ -12,7 +12,7 @@ uint32_t pci_test_data_read32(void) { return 0xFFFFFFFFU; }
 void pci_test_data_write32(uint32_t value) { (void)value; }
 
 #define HOST_TEST 1
-#include "../../sys/arch/i386/pci.c"
+#include "../../sys/arch/x86-common/pci.c"
 
 int main(void) {
     memset(ecam_space, 0, sizeof(ecam_space));

@@ -60,6 +60,11 @@ static void ps2_mock_outb(uint16_t port, uint8_t value) {
     mock_write_count++;
 }
 
+/* ps2_read_data_ms() paces its polls with this; no real delay is needed. */
+void timer_busywait_ms(unsigned ms) {
+    (void)ms;
+}
+
 void kprint(const char *str) {
     size_t used = strlen(mock_log);
     snprintf(mock_log + used, sizeof(mock_log) - used, "%s", str);
@@ -137,7 +142,16 @@ static void test_io_primitives(void) {
     assert_write(0, PS2_COMMAND_PORT, PS2_CMD_SELF_TEST);
 }
 
+/* One Set Sample Rate pair of the IntelliMouse knock, ACKed by a plain mouse. */
+static void push_aux_acked(void) {
+    push_status(0); /* aux write command */
+    push_status(0); /* aux write data */
+    push_status(PS2_STATUS_OUTPUT_BUFFER_FULL);
+    push_data(PS2_DEV_ACK);
+}
+
 static void load_dual_channel_init_script(int retry_self_test, uint8_t p2_result) {
+    push_status(0); /* controller presence probe */
     push_status(0); /* disable p1 */
     push_status(0); /* disable p2 */
     push_status(PS2_STATUS_OUTPUT_BUFFER_FULL); /* flush */
@@ -195,6 +209,16 @@ static void load_dual_channel_init_script(int retry_self_test, uint8_t p2_result
         push_data(PS2_DEV_ACK);
         push_status(PS2_STATUS_OUTPUT_BUFFER_FULL);
         push_data(0xAA);
+        push_status(PS2_STATUS_OUTPUT_BUFFER_FULL);
+        push_data(0x00);
+        /*
+         * IntelliMouse knock (F3 200, F3 100, F3 80): a plain mouse ACKs
+         * every byte, then reports device type 0x00 to Read Device Type.
+         */
+        for (int i = 0; i < 6; i++) {
+            push_aux_acked();
+        }
+        push_aux_acked(); /* F2 read device type */
         push_status(PS2_STATUS_OUTPUT_BUFFER_FULL);
         push_data(0x00);
         push_status(0); /* aux scan-on command */

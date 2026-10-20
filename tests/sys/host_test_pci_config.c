@@ -61,7 +61,7 @@ void pci_test_data_write32(uint32_t value) {
 }
 
 #define HOST_TEST 1
-#include "../../sys/arch/i386/pci.c"
+#include "../../sys/arch/x86-common/pci.c"
 
 static void reset_config(void) {
     memset(mock_config, 0xFF, sizeof(mock_config));

@@ -325,8 +325,9 @@ host_test_tty_jobctl: host_test_tty_jobctl.c
 host_test_kobject: host_test_kobject.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_kobject.c -o $@
 
+# -m32: scsi_ioctl_cmd_t carries the user buffer as a 32-bit uptr32_t.
 host_test_scsi_ctl: host_test_scsi_ctl.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_ctl.c -o $@
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_ctl.c -o $@
 
 host_test_scsi_core: host_test_scsi_core.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_core.c -o $@
