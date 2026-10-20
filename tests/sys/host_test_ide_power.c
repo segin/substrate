@@ -137,6 +137,7 @@ void kfree(void *ptr, size_t size) { (void)ptr; (void)size; }
 void blkdev_register(blkdev_t *dev) { (void)dev; }
 void blkdev_unregister(blkdev_t *dev) { (void)dev; }
 void blkdev_scan_partitions(blkdev_t *dev) { (void)dev; }
+void blkdev_attach_partitions(blkdev_t *dev) { (void)dev; }
 int irq_install_handler(int irq, irq_handler_t handler) { (void)irq; (void)handler; return 0; }
 int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
                 const char *name, void *dev) {

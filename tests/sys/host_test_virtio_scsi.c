@@ -57,6 +57,12 @@ void kprint(const char *str) {
     (void)str;
 }
 
+void virtio_pci_enable(uint8_t bus, uint8_t slot, uint8_t func) {
+    (void)bus;
+    (void)slot;
+    (void)func;
+}
+
 uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func) {
     (void)bus;
     (void)slot;
