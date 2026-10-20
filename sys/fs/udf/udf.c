@@ -553,6 +553,12 @@ static void udf_vfs_close(fs_node_t *node) {
         __sync_fetch_and_sub(&udf_node_opens[s], 1);
 }
 
+/*
+ * A free slot for a lookup's result, returned pinned (the lookup reference,
+ * dropped by udf_vfs_close).  The pin is taken under the lock that chose
+ * the slot: until then another lookup could choose it too, and it is filled
+ * in after the lock is dropped.
+ */
 static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, uint8_t *fe_sector) {
     int idx = -1;
     spinlock_acquire(&udf_node_lock);
@@ -560,6 +566,7 @@ static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, uin
         int i = udf_node_cache_idx++ % UDF_NODE_CACHE_SIZE;
         if (udf_node_opens[i] == 0) {
             idx = i;
+            udf_node_opens[i] = 1;
             break;
         }
     }
@@ -586,6 +593,10 @@ static void udf_init_node(fs_node_t *node, udf_node_t *ctx, struct udf_fs *fs,
     node->impl = (uintptr_t)ctx;
     node->open = udf_vfs_open;
     node->close = udf_vfs_close;
+    /* The open count is only a pin: it is the lookup reference too.  (A
+     * mount's root is not in the table, and both are no-ops for it.) */
+    node->hold = udf_vfs_open;
+    node->rele = udf_vfs_close;
 
     if (fe->icb_tag.file_type == UDF_FILETYPE_DIR) {
         node->flags = FS_DIRECTORY;
@@ -831,7 +842,9 @@ static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct component
         return EIO;
 
     udf_node_t *nctx = (udf_node_t *)new_node->impl;
-    
+    /* The vnode keeps nctx unpinned, as it always has. */
+    udf_vfs_close(new_node);
+
     error = getnewvnode("udf", dvp->v_mount, &udf_vnodeops, vpp);
     if (error)
         return error;

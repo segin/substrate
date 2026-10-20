@@ -14,6 +14,9 @@
  *
  * Usage: walkrecycle [seconds] [dir]   (default 20, /tmp).  Runs on the
  * host too.
+ *        walkrecycle -x seconds tree   walks a tree made beforehand, for a
+ *            read-only filesystem: tree/a/b/c/d/e/f/g/h/target and
+ *            tree/churn/f0 .. f599, as `walkrecycle -m tree` makes it.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -69,22 +72,16 @@ static int walk(time_t end, ino_t dir_ino, ino_t file_ino)
     return bad ? 1 : fail ? 2 : 0;
 }
 
-int main(int argc, char **argv)
+static const char *parts[] = { "", "/a", "/a/b", "/a/b/c", "/a/b/c/d",
+                                "/a/b/c/d/e", "/a/b/c/d/e/f", "/a/b/c/d/e/f/g",
+                                "/a/b/c/d/e/f/g/h", "/churn" };
+#define NPARTS ((int)(sizeof(parts) / sizeof(parts[0])))
+
+static int make_tree(void)
 {
-    int secs = argc > 1 ? atoi(argv[1]) : 20;
-    const char *top = argc > 2 ? argv[2] : "/tmp";
-    struct stat st;
     char p[300];
 
-    snprintf(base, sizeof(base), "%s/walkrecycle.%d", top, (int)getpid());
-    snprintf(deep, sizeof(deep), "%s/a/b/c/d/e/f/g/h", base);
-    snprintf(target, sizeof(target), "%s/target", deep);
-    snprintf(churn_dir, sizeof(churn_dir), "%s/churn", base);
-
-    const char *parts[] = { "", "/a", "/a/b", "/a/b/c", "/a/b/c/d",
-                            "/a/b/c/d/e", "/a/b/c/d/e/f", "/a/b/c/d/e/f/g",
-                            "/a/b/c/d/e/f/g/h", "/churn" };
-    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+    for (int i = 0; i < NPARTS; i++) {
         snprintf(p, sizeof(p), "%s%s", base, parts[i]);
         if (mkdir(p, 0755) != 0) {
             perror(p);
@@ -101,6 +98,39 @@ int main(int argc, char **argv)
         snprintf(p, sizeof(p), "%s/f%d", churn_dir, i);
         fd = open(p, O_WRONLY | O_CREAT, 0644);
         if (fd >= 0) close(fd);
+    }
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    int existing = argc > 1 && strcmp(argv[1], "-x") == 0;
+    int make_only = argc > 1 && strcmp(argv[1], "-m") == 0;
+    int secs = 20;
+    struct stat st;
+    char p[300];
+
+    if (existing || make_only) {
+        if (argc < (existing ? 4 : 3)) {
+            fprintf(stderr, "usage: walkrecycle -x seconds tree | -m tree\n");
+            return 3;
+        }
+        if (existing) secs = atoi(argv[2]);
+        snprintf(base, sizeof(base), "%s", argv[existing ? 3 : 2]);
+    } else {
+        const char *top = argc > 2 ? argv[2] : "/tmp";
+        if (argc > 1) secs = atoi(argv[1]);
+        snprintf(base, sizeof(base), "%s/walkrecycle.%d", top, (int)getpid());
+    }
+    snprintf(deep, sizeof(deep), "%s/a/b/c/d/e/f/g/h", base);
+    snprintf(target, sizeof(target), "%s/target", deep);
+    snprintf(churn_dir, sizeof(churn_dir), "%s/churn", base);
+
+    if (make_only)
+        return make_tree();
+    if (!existing) {
+        int r = make_tree();
+        if (r) return r;
     }
 
     ino_t dir_ino, file_ino;
@@ -136,12 +166,12 @@ int main(int argc, char **argv)
         waitpid(churners[i], NULL, 0);
     }
 
-    for (int i = 0; i < NCHURN_FILES; i++) {
+    for (int i = 0; !existing && i < NCHURN_FILES; i++) {
         snprintf(p, sizeof(p), "%s/f%d", churn_dir, i);
         unlink(p);
     }
-    unlink(target);
-    for (int i = (int)(sizeof(parts) / sizeof(parts[0])) - 1; i >= 0; i--) {
+    if (!existing) unlink(target);
+    for (int i = NPARTS - 1; !existing && i >= 0; i--) {
         snprintf(p, sizeof(p), "%s%s", base, parts[i]);
         rmdir(p);
     }
