@@ -271,7 +271,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/pm/pgrp.c:307-321` (`sys_setlogin`) overwrites `s_login` without checking `current_process->euid == 0`.
   Basis: traced.
 
-- [ ] **SYS-KERN-022** *(Medium → Low; partly confirmed)* When `sys_kill` or `pgrp_find` is called with `pid == INT_MIN` or a negative `pgid`, the kernel shall reject the value with `-ESRCH` without signed negation overflow or negative hash indexing.
+- [x] **SYS-KERN-022** *(Medium → Low; partly confirmed)* When `sys_kill` or `pgrp_find` is called with `pid == INT_MIN` or a negative `pgid`, the kernel shall reject the value with `-ESRCH` without signed negation overflow or negative hash indexing.
   Evidence: `sys/kern/signal.c:1628` evaluates `-pid` (which overflows signed `int` when `pid == INT_MIN` and remains `INT_MIN`), and `pgrp_hashval` (`sys/pm/pgrp.c:30-32`) computes `pgid % PGRP_HASH_SIZE`, returning a negative array index for negative `pgid`.
   Basis: traced.
 

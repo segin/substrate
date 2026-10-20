@@ -1633,8 +1633,9 @@ int sys_kill(int pid, int sig) {
         return 0;
     }
     else {
-        // pid < -1: Send to process group -pid
+        // pid < -1: Send to process group -pid.  -INT_MIN does not exist.
 
+        if (pid == (int)0x80000000) return -ESRCH;
         struct pgrp *pgrp = pgrp_find(-pid);
         int permitted = 0;
         int matched = 0;
