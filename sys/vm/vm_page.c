@@ -335,6 +335,25 @@ static void enqueue(vm_page_t **head, vm_page_t *page) {
 	*head = page;
 }
 
+// Pages on a queue.  Caller MUST hold vm_page_queue_lock.
+static int queue_len(const vm_page_t *head) {
+	int n = 0;
+	for(; head; head = head->next) {
+		n++;
+	}
+	return(n);
+}
+
+// Where a walk goes on from m once it has re-taken vm_page_queue_lock
+// after dropping it: m's successor if m is still on the queue (`flag`
+// says which), else the queue's head again.  A successor read before the
+// lock was dropped may since have been freed, and vm_page_t.next is then
+// a buddy free-list link.  Walks that can restart bound themselves by a
+// scan budget.
+static vm_page_t *queue_resume(const vm_page_t *m, uint32_t flag, vm_page_t *head) {
+	return((m->flags & flag) ? m->next : head);
+}
+
 // Internal helper to remove a page from a queue.
 // Caller MUST hold vm_page_queue_lock (raw splice, no internal locking).
 static void dequeue(vm_page_t **head, vm_page_t *page) {
@@ -784,20 +803,23 @@ static int vm_pageout_scan_clock(int max_scan) {
 	int scanned = 0;
 	int deactivated = 0;
 
+	// The head and every ->next are read under the queue lock (see
+	// queue_resume); it is dropped only for the pmap probe.
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = active_queue;
 
 	while(m && scanned < max_scan) {
-		vm_page_t *next = m->next;  // Save next before potential dequeue
 		scanned++;
 
 		// Skip wired pages (shouldn't be on active queue but check anyway)
 		if(m->wire_count > 0) {
-			m = next;
+			m = m->next;
 			continue;
 		}
 
 		// Check if page was recently accessed via PTE A bit (pmap probe
 		// stays OUTSIDE the queue lock — leaf discipline).
+		spinlock_release_irq(&vm_page_queue_lock, f);
 		int referenced = pmap_page_is_referenced(m);
 		if(referenced) {
 			pmap_page_clear_reference(m);
@@ -805,12 +827,12 @@ static int vm_pageout_scan_clock(int max_scan) {
 
 		// Splice under the lock, re-validating the page is still on the
 		// active queue (a concurrent free/mutator may have moved it).
-		unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+		f = spinlock_acquire_irq(&vm_page_queue_lock);
 		if(!(m->flags & PG_ACTIVE)) {
-			spinlock_release_irq(&vm_page_queue_lock, f);
-			m = next;
+			m = queue_resume(m, PG_ACTIVE, active_queue);
 			continue;
 		}
+		vm_page_t *next = m->next;
 		if(referenced) {
 			// Page was accessed - give it second chance (move to head).
 			dequeue(&active_queue, m);
@@ -824,10 +846,10 @@ static int vm_pageout_scan_clock(int max_scan) {
 			m->flags |= PG_INACTIVE;
 			deactivated++;
 		}
-		spinlock_release_irq(&vm_page_queue_lock, f);
 
 		m = next;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	return(deactivated);
 }
@@ -835,28 +857,29 @@ static int vm_pageout_scan_clock(int max_scan) {
 static int vm_pageout_scan_lru(int max_scan) {
 	int scanned = 0;
 	int deactivated = 0;
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = active_queue;
 
 	while (m && scanned < max_scan) {
-		vm_page_t *next = m->next;
 		scanned++;
 
 		if (m->wire_count > 0) {
-			m = next;
+			m = m->next;
 			continue;
 		}
 
+		spinlock_release_irq(&vm_page_queue_lock, f);
 		int referenced = pmap_page_is_referenced(m);
 		if (referenced) {
 			pmap_page_clear_reference(m);
 		}
 
-		unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+		f = spinlock_acquire_irq(&vm_page_queue_lock);
 		if (!(m->flags & PG_ACTIVE)) {
-			spinlock_release_irq(&vm_page_queue_lock, f);
-			m = next;
+			m = queue_resume(m, PG_ACTIVE, active_queue);
 			continue;
 		}
+		vm_page_t *next = m->next;
 		if (referenced) {
 			m->age = VM_PAGE_AGE_MAX;
 			dequeue(&active_queue, m);
@@ -872,10 +895,10 @@ static int vm_pageout_scan_lru(int max_scan) {
 			m->flags |= PG_INACTIVE;
 			deactivated++;
 		}
-		spinlock_release_irq(&vm_page_queue_lock, f);
 
 		m = next;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	return deactivated;
 }
@@ -941,7 +964,10 @@ static int vm_page_reclaim_inactive_clean(int target) {
 	// it also calls pmm), then re-acquired to advance.
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = inactive_queue;
-	while(m && freed < target) {
+	// A freed page sends the walk back to the head (queue_resume), past
+	// the pages it has already turned down: bound the visits.
+	int budget = 2 * queue_len(inactive_queue) + target;
+	while(m && freed < target && budget-- > 0) {
 		vm_page_t *next = m->next;
 
 		if((m->flags & PG_INACTIVE) && !(m->flags & PG_DIRTY) &&
@@ -956,9 +982,7 @@ static int vm_page_reclaim_inactive_clean(int target) {
 			}
 
 			f = spinlock_acquire_irq(&vm_page_queue_lock);
-			if(!gone && (m->flags & PG_INACTIVE)) {
-				next = m->next;	/* still queued: its link is current */
-			}
+			next = queue_resume(m, PG_INACTIVE, inactive_queue);
 		}
 
 		m = next;
@@ -975,7 +999,8 @@ static int vm_page_launder_inactive_dirty(int target) {
 	// only for vm_page_launder / vm_page_free, which take it themselves.
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = inactive_queue;
-	while(m && freed < target) {
+	int budget = 2 * queue_len(inactive_queue) + target;	// see reclaim
+	while(m && freed < target && budget-- > 0) {
 		vm_page_t *next = m->next;
 
 		if((m->flags & PG_DIRTY) && !(m->flags & PG_BUSY)) {
@@ -987,6 +1012,7 @@ static int vm_page_launder_inactive_dirty(int target) {
 			}
 
 			f = spinlock_acquire_irq(&vm_page_queue_lock);
+			next = queue_resume(m, PG_INACTIVE, inactive_queue);
 		}
 
 		m = next;
@@ -1191,12 +1217,13 @@ void vm_page_age_scan(void) {
 	// The lock is dropped only for the pmap A-bit probe (leaf discipline).
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = active_queue;
-	while(m) {
-		vm_page_t *next = m->next;
-
+	// A page leaving the queue meanwhile restarts the walk at the head
+	// (queue_resume): bound the visits.
+	int budget = 2 * queue_len(active_queue) + 16;
+	while(m && budget-- > 0) {
 		// Skip wired pages
 		if(m->wire_count > 0) {
-			m = next;
+			m = m->next;
 			continue;
 		}
 
@@ -1207,6 +1234,7 @@ void vm_page_age_scan(void) {
 		}
 		f = spinlock_acquire_irq(&vm_page_queue_lock);
 
+		vm_page_t *next = queue_resume(m, PG_ACTIVE, active_queue);
 		if(referenced) {
 			// Page was accessed - reset age to max
 			m->age = VM_PAGE_AGE_MAX;
@@ -1228,12 +1256,11 @@ void vm_page_age_scan(void) {
 
 	// Scan inactive queue - further age inactive pages
 	m = inactive_queue;
-	while(m) {
-		vm_page_t *next = m->next;
-
+	budget = 2 * queue_len(inactive_queue) + 16;
+	while(m && budget-- > 0) {
 		// Skip wired pages
 		if(m->wire_count > 0) {
-			m = next;
+			m = m->next;
 			continue;
 		}
 
@@ -1244,6 +1271,7 @@ void vm_page_age_scan(void) {
 		}
 		f = spinlock_acquire_irq(&vm_page_queue_lock);
 
+		vm_page_t *next = queue_resume(m, PG_INACTIVE, inactive_queue);
 		// Check if page was accessed while inactive
 		if(referenced) {
 			// Reactivate under the queue lock.
@@ -1379,18 +1407,25 @@ int vm_page_estimate_working_set(void) {
 	int count = 0;
 
 	// Active pages with age > 0 are part of working set
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = active_queue;
 	while(m) {
 		if(m->age > 0) count++;
 		m = m->next;
 	}
 
-	// Recently reactivated inactive pages
+	// Recently reactivated inactive pages.  The pmap probe runs outside
+	// the queue lock; the walk resumes as vm_page_age_scan's does.
 	m = inactive_queue;
-	while(m) {
-		if(pmap_page_is_referenced(m)) count++;  // About to be reactivated
-		m = m->next;
+	int budget = 2 * queue_len(inactive_queue) + 16;
+	while(m && budget-- > 0) {
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		int referenced = pmap_page_is_referenced(m);
+		f = spinlock_acquire_irq(&vm_page_queue_lock);
+		if(referenced) count++;  // About to be reactivated
+		m = queue_resume(m, PG_INACTIVE, inactive_queue);
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	return(count);
 }
