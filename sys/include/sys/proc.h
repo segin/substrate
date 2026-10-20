@@ -620,6 +620,10 @@ typedef struct thread {
      * (an SMP use-after-free).  void* to avoid pulling <kern/sched.h> here. */
     void        *poll_ents;
     unsigned int poll_nents;
+
+    /* Lookup references (vfs_hold/vfs_rele) taken and not yet dropped; a
+     * system call returns with this where it found it (vfs_holds_check). */
+    int          vfs_holds;
 } thread_t;
 
 // Globals

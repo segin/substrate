@@ -150,13 +150,21 @@ so no filesystem or driver carries caching logic
 (`docs/design/block-cache-consolidation.md`); it is bounded at an eighth of
 RAM and reuses empty buffers before growing.
 
-*Node lifetime.* A filesystem's `fs_node_t` stays valid while it is open:
-`open_fs`/`close_fs` call the node's `open`/`close`, and drivers pin on
-them (ext2's `pin_count`, procfs's per-pid node blocks, which outlive their
-process while held, Minix's per-inode lookup cache). A path walk takes no
-reference on the nodes it passes through, so a driver must not free or
-recycle a node merely because nothing has it open; the remaining cases and
-the planned lookup reference are SYS-NEW-001b in
+*Node lifetime.* A filesystem's `fs_node_t` stays valid while it is open
+or held. `open_fs`/`close_fs` call the node's `open`/`close` and are for
+references that outlive a system call (an open file, a cwd, a chroot root,
+the accounting file, a mapped file's pager). Lookups use the side-effect-free
+`hold`/`rele` ops instead (`vfs_hold`/`vfs_rele`): a driver's `finddir`
+returns its child held, `vfs_lookup`, `vfs_lookup_lstat` and `finddir_fs`
+return held nodes, and the walk holds the directory it stands on and
+drops each one as it steps past it (also across `..`, mount crossings and
+symlinks). Every caller drops what a lookup gave it, and one that keeps
+the node takes its own `open_fs` first. A thread's outstanding holds are
+counted (`vfs_holds`) and checked as each system call returns
+(`vfs_holds_check`), which names a syscall that leaks or over-drops.
+Drivers map hold/rele to their pin (ext2: `pin_count`, so a held slot is
+never recycled); a node with no hold op lives as long as its filesystem.
+The drivers still to be given hold ops are listed under SYS-NEW-001b in
 `docs/kernel-audit-oct-2026.md`.
 
 *Cross-filesystem operations.* A driver's directory ops read the other

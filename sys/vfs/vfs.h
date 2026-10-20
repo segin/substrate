@@ -146,6 +146,16 @@ typedef struct fs_node {
                      void *out, size_t out_size, size_t *result_size);
     struct fs_node *ptr; // Used by mountpoints and symlinks.
     struct mount *mp;    // Mount point this node belongs to.
+    /*
+     * Lookup references.  finddir returns its child held, and the node must
+     * then stay valid -- not freed, recycled or repopulated as another
+     * file -- until rele.  Unlike open/close these have no side effects: a
+     * device's or pty's open hook does not run, and rele never frees what
+     * an open file still uses.  NULL for a node that lives as long as its
+     * filesystem (static nodes).  Use vfs_hold()/vfs_rele(), not these.
+     */
+    void (*hold)(struct fs_node *node);
+    void (*rele)(struct fs_node *node);
 } fs_node_t;
 
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
@@ -223,7 +233,7 @@ void close_fs(fs_node_t *node);
  * back a buffer they reuse, so a shared one races concurrent readers. */
 struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out);
 void vfs_readdir_init(void);
-fs_node_t *finddir_fs(fs_node_t *node, char *name);
+fs_node_t *finddir_fs(fs_node_t *node, char *name);    /* held: vfs_rele */
 int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
 int poll_fs(fs_node_t *node, void *waiter);
@@ -264,25 +274,25 @@ void vfs_unmount_all(void);
 /* Force-unmount every filesystem backed by a removed block device (hot-unplug);
  * called from blkdev_unregister before the blkdev is torn down. */
 void vfs_force_unmount_dev(struct blkdev *dev);
+/*
+ * Path lookup.  The node returned is held: the filesystem keeps it valid
+ * until the caller drops it with vfs_rele().  `root` is the caller's (a
+ * cwd, a chroot root, or a node it holds) and is not consumed.  A caller
+ * that keeps the node past the system call (a cwd, an open file) takes
+ * its own open_fs() reference and still drops the lookup's.
+ */
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 /* The errno (negative) for a lookup of path from base that returned NULL:
  * -ENOENT, -ENOTDIR, -ELOOP or -ENAMETOOLONG. */
 int vfs_lookup_error(fs_node_t *base, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
-
-/*
- * Reference-counted lookup variants.  On success the returned node
- * has had open_fs() called on it, and the caller MUST balance with
- * close_fs() once it stops using the node.  Use these (rather than
- * vfs_lookup / vfs_lookup_lstat) whenever the caller intends to
- * close_fs the result — otherwise the unbalanced close drops a
- * reference borrowed from somewhere else (notably fs_root, which
- * the mount path pinned at boot) and silently turns the affected
- * cache slot into a recyclable one.  See sys/kern/syscall.c
- * kern_stat / kern_lstat / kern_readlink for the canonical use.
- */
-fs_node_t *vfs_lookup_ref(fs_node_t *root, const char *path);
-fs_node_t *vfs_lookup_lstat_ref(fs_node_t *root, const char *path);
+void vfs_hold(fs_node_t *node);
+void vfs_rele(fs_node_t *node);             /* NULL is ignored */
+/* A directory's own finddir, without symlink or mount crossing; held. */
+fs_node_t *vfs_finddir(fs_node_t *dir, const char *name);
+int vfs_entry_exists(fs_node_t *dir, const char *name);
+/* At system-call return: report lookup references taken and not dropped. */
+void vfs_holds_check(int nr);
 void vfs_init(void);
 
 void devfs_init(void);

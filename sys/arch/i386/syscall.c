@@ -683,6 +683,7 @@ void syscall_handler(registers_t *regs) {
     uint64_t t0 = syscall_rdtsc();
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     uint64_t dt = syscall_rdtsc() - t0;
+    vfs_holds_check((int)syscall_num);
     if (p->id < SCSTAT_MAX_PERSO && syscall_num < SCSTAT_MAX_NR) {
         struct syscall_stat *s = &scstat[p->id][syscall_num];
         s->count++;

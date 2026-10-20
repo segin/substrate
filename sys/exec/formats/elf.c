@@ -1648,11 +1648,13 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     int ret;
 
     fs_node_t *file = NULL;
+    if (!(fd >= 0 && fd < MAX_FD && current_process && current_process->fds[fd])) {
+        /* exec_dispatch passes an open fd.  Without one, open the file, so
+         * the descriptor (closed on every exit below) keeps it pinned. */
+        fd = kern_open_exec(path);
+    }
     if (fd >= 0 && fd < MAX_FD && current_process && current_process->fds[fd]) {
         file = (fs_node_t *)current_process->fds[fd]->f_data;
-    } else {
-        // Fallback or error if fd is invalid (though exec_dispatch should pass a valid fd)
-        file = vfs_lookup(root, path);
     }
 
     if (!file) {
@@ -1859,6 +1861,8 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 
         uint32_t interp_base = 0x40000000;
         uint32_t interp_entry = elf_load(interp_file, interp_base, 0, NULL, NULL);
+        /* Its mappings pin it through the vnode pager (open_fs). */
+        vfs_rele(interp_file);
         if (interp_entry == 0) {
             kprint("execve: Failed to load interpreter\n");
             error_code = -ENOEXEC;

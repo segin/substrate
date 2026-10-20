@@ -207,6 +207,8 @@ size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffe
 size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
 fs_node_t *ext2_finddir(fs_node_t *node, char *name);
+static fs_node_t *ext2_alloc_node_pin(ext2_fs_t *fs, uint32_t inode_num,
+                                      ext2_inode_t *inode, int pin);
 int ext2_readlink(fs_node_t *node, char *buf, size_t size);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev);
@@ -2174,6 +2176,10 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
     node->mp = fs->mp;
     node->open = ext2_node_open;
     node->close = ext2_node_close;
+    /* An ext2 open is nothing but a pin, so it serves as the lookup
+     * reference too (ext2_finddir returns its child pinned). */
+    node->hold = ext2_node_open;
+    node->rele = ext2_node_close;
     node->chmod = ext2_chmod;
     node->setattr = ext2_setattr;
     node->getattr = ext2_getattr;
@@ -2220,6 +2226,17 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
 }
 
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
+    return ext2_alloc_node_pin(fs, inode_num, inode, 0);
+}
+
+/*
+ * The node for inode_num, from the cache or a recycled slot.  With pin set
+ * the slot comes back pinned (a lookup reference, dropped by
+ * ext2_node_close), taken under the cache lock that chose it: pinned any
+ * later, another lookup could recycle it first.
+ */
+static fs_node_t *ext2_alloc_node_pin(ext2_fs_t *fs, uint32_t inode_num,
+                                      ext2_inode_t *inode, int pin) {
     int idx = -1;
 
     /* Serialize the whole select-or-populate sequence.  Slot lookup,
@@ -2302,10 +2319,12 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
                 ext2_alloc_node_hits++;
                 fs_node_t *rebuilt = ext2_node_build_from_inode(&ext2_fs_node_cache[i],
                         &ext2_node_cache[i], inode, inode_num, fs, i);
+                ext2_node_cache[i].pin_count += pin;
                 mutex_unlock(&ext2_node_cache_lock);
                 return rebuilt;
             }
             ext2_alloc_node_hits++;
+            ext2_node_cache[i].pin_count += pin;
             mutex_unlock(&ext2_node_cache_lock);
             return &ext2_fs_node_cache[i];
         }
@@ -2394,7 +2413,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->dcache_idx = 0;
     memset(ctx->dcache, 0, sizeof(ctx->dcache));
 
-    ctx->pin_count = 0;
+    ctx->pin_count = (uint16_t)pin;
     fs_node_t *built = ext2_node_build_from_inode(node, ctx, inode, inode_num, fs, idx);
     mutex_unlock(&ext2_node_cache_lock);
     return built;
@@ -3569,6 +3588,19 @@ out:
 }
 
 // Find entry by name in directory
+/* Does dir have an entry called name?  Drops the pin ext2_finddir took. */
+static int ext2_entry_exists(fs_node_t *dir, const char *name) {
+    fs_node_t *n = ext2_finddir(dir, (char *)name);
+
+    if (n) ext2_node_close(n);
+    return n != NULL;
+}
+
+/*
+ * The entry `name` of directory `node`, returned pinned: the caller drops
+ * it with ext2_node_close (the VFS: vfs_rele), and until then the slot is
+ * not recycled.
+ */
 fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     if (!node || !name) return NULL;
 
@@ -3629,7 +3661,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
 
             ext2_inode_t inode;
             if (ext2_read_inode(fs, ctx->dcache[k].inode_num, &inode) == 0) {
-                result_node = ext2_alloc_node(fs, ctx->dcache[k].inode_num, &inode);
+                result_node = ext2_alloc_node_pin(fs, ctx->dcache[k].inode_num, &inode, 1);
                 if (!result_node) goto cleanup;
                 // Copy name
                 size_t len = name_len;
@@ -3676,7 +3708,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         if (htr > 0) {
             ext2_inode_t inode;
             if (ext2_read_inode(fs, htree_inum, &inode) == 0) {
-                result_node = ext2_alloc_node(fs, htree_inum, &inode);
+                result_node = ext2_alloc_node_pin(fs, htree_inum, &inode, 1);
                 if (result_node) {
                     size_t len = name_len;
                     if (len >= sizeof(result_node->name))
@@ -3744,7 +3776,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                     // Found it - read the inode and return a node
                     ext2_inode_t inode;
                     if (ext2_read_inode(fs, de->inode, &inode) == 0) {
-                        result_node = ext2_alloc_node(fs, de->inode, &inode);
+                        result_node = ext2_alloc_node_pin(fs, de->inode, &inode, 1);
                         if (!result_node) goto cleanup;
                         // Copy name
                         uint32_t len = de->name_len;
@@ -5916,7 +5948,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
     ext2_node_t *source_ctx = (ext2_node_t *)(uintptr_t)source->impl;
     ext2_fs_t *fs = dir_ctx->fs;
 
-    if (ext2_finddir(parent, (char *)name) != NULL) return -EEXIST;
+    if (ext2_entry_exists(parent, name)) return -EEXIST;
 
     // Increment links_count (RMW + commit under the lock)
     mutex_lock(&source_ctx->lock);
@@ -5974,15 +6006,14 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     fs_node_t *old_node = ext2_finddir(old_parent, (char *)old_name);
     if (!old_node) return -ENOENT;
 
-    /* old_parent, new_parent and old_node are all bare node-cache
-     * slots that we keep dereferencing across the finddir/alloc_node/
-     * unlink/rmdir calls below — every one of which can recycle an
-     * unpinned slot.  Pin them for the whole operation so none is reused
-     * out from under us, and release them at the single `out:` exit.
-     * (new_node is pinned separately once found.) */
+    /* old_parent, new_parent and old_node are all node-cache slots that we
+     * keep dereferencing across the finddir/alloc_node/unlink/rmdir calls
+     * below — every one of which can recycle an unpinned slot.  Pin the
+     * parents for the whole operation (old_node came back pinned from
+     * ext2_finddir, as does new_node), and release them all at the single
+     * `out:` exit. */
     ext2_node_open(old_parent);
     ext2_node_open(new_parent);
-    ext2_node_open(old_node);
 
     ext2_node_t *old_node_ctx = (ext2_node_t *)(uintptr_t)old_node->impl;
     fs_node_t *new_node = NULL;
@@ -6011,8 +6042,8 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     /* Reject moving a directory into itself or into one of its own
      * descendants — that splices a detached cycle out of the tree (POSIX
      * EINVAL).  Only a directory can create a loop.  Walk new_parent's
-     * ancestry via ".."; each ext2_finddir() pins its own parent for the
-     * duration of that lookup, so this walk is safe. */
+     * ancestry via ".."; the walk keeps the directory it stands on pinned
+     * (ext2_finddir returns ".." pinned) and drops it as it steps up. */
     if ((old_node->flags & 0x7) == FS_DIRECTORY) {
         /* The walk must REACH the root to prove
          * the destination is not inside the directory being moved.  It
@@ -6022,23 +6053,29 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         fs_node_t *anc = new_parent;
         int guard = 0;
         int proved = 0;
+        int loop = 0;
         while (anc && guard++ < EXT2_NODE_CACHE_SIZE) {
             ext2_node_t *ac = (ext2_node_t *)(uintptr_t)anc->impl;
             if (!ac) break;
-            if (ac->inode_num == old_node_ctx->inode_num) { rc = -EINVAL; goto out; }
+            if (ac->inode_num == old_node_ctx->inode_num) { loop = 1; break; }
             if (ac->inode_num == EXT2_ROOT_INO) { proved = 1; break; }
             fs_node_t *parent = ext2_finddir(anc, "..");
-            if (!parent || parent == anc) break;
+            if (parent == anc) {
+                ext2_node_close(parent);
+                break;
+            }
+            if (anc != new_parent) ext2_node_close(anc);
             anc = parent;
+            if (!parent) break;
         }
-        if (!proved) { rc = -EINVAL; goto out; }
+        if (anc && anc != new_parent) ext2_node_close(anc);
+        if (loop || !proved) { rc = -EINVAL; goto out; }
     }
 
     // Check if new path exists and handle replacement
     new_node = ext2_finddir(new_parent, (char *)new_name);
     if (new_node) {
-        ext2_node_open(new_node);
-        new_node_pinned = 1;
+        new_node_pinned = 1;          /* by ext2_finddir */
         /* POSIX — when old and new resolve to the
          * same existing file (the same entry, or two hard links to one
          * inode), rename succeeds and performs NO other action.  Without
@@ -6325,7 +6362,7 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
         if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
     }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
-    if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
+    if (ext2_entry_exists(dir, name)) return -EEXIST;
 
     type = mode & S_IFMT;
     if (type == 0) {
@@ -6386,7 +6423,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
         if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
     }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
-    if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
+    if (ext2_entry_exists(dir, name)) return -EEXIST;
 
     ext2_node_t *dir_ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = dir_ctx->fs;
@@ -6495,7 +6532,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         if (dc && !dc->fs) return -ENOENT;     /* deleted: see ext2_finddir */
         if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
     }
-    if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
+    if (ext2_entry_exists(dir, name)) return -EEXIST;
 
     dir_ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     fs = dir_ctx->fs;
@@ -6630,22 +6667,24 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
         if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
     }
 
+    /* Pinned by ext2_finddir: everything below sleeps on disk I/O, and an
+     * unpinned slot could be handed to another inode meanwhile, after which
+     * we would decrement a stranger's link count. */
     victim = ext2_finddir(dir, (char *)name);
     if (!victim) return -ENOENT;
-    if ((victim->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
+    if ((victim->flags & 0x7) == FS_DIRECTORY) {
+        ext2_node_close(victim);
+        return -EISDIR;
+    }
 
     /* An immutable or append-only file cannot be unlinked. */
     {
         ext2_node_t *vc = (ext2_node_t *)(uintptr_t)victim->impl;
-        if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc)))
+        if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc))) {
+            ext2_node_close(victim);
             return -EPERM;
+        }
     }
-
-    /* finddir returns children UNPINNED, and
-     * everything below sleeps on disk I/O — the slot recycler is free
-     * to hand this slot to another inode in the meantime, after which
-     * we would decrement a stranger's link count.  Hold it. */
-    ext2_node_open(victim);
 
     victim_ctx = (ext2_node_t *)(uintptr_t)victim->impl;
     fs = victim_ctx->fs;
@@ -6783,21 +6822,24 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
         if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
     }
 
+    /* Pinned by ext2_finddir, before the emptiness scan: that scan sleeps
+     * on disk I/O, and an unpinned slot could be handed to another inode,
+     * which we would then go on to delete. */
     victim = ext2_finddir(dir, (char *)name);
     if (!victim) return -ENOENT;
-    if ((victim->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    if ((victim->flags & 0x7) != FS_DIRECTORY) {
+        ext2_node_close(victim);
+        return -ENOTDIR;
+    }
     /* The immutable/append guard applies to rmdir as well as to unlink
      * and the rename source. */
     {
         ext2_node_t *vc = (ext2_node_t *)(uintptr_t)victim->impl;
-        if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc)))
+        if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc))) {
+            ext2_node_close(victim);
             return -EPERM;
+        }
     }
-
-    /* Pin before the emptiness scan — that scan
-     * sleeps on disk I/O with the slot unpinned, so the recycler could
-     * hand it to another inode and we would go on to delete that one. */
-    ext2_node_open(victim);
 
     if (!ext2_dir_is_empty(victim)) { ext2_node_close(victim); return -ENOTEMPTY; }
 

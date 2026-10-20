@@ -888,7 +888,9 @@ int netbsd_sys_statvfs1(const char *path, void *buf, int flags) {
     root = current_process->root_node ? current_process->root_node : fs_root;
     node = vfs_lookup(kpath[0] == '/' || !current_process->cwd_node
                           ? root : current_process->cwd_node, kpath);
-    return netbsd_statvfs_out(&k, node ? node->mp : NULL, buf);
+    struct mount *mp = node ? node->mp : NULL;
+    vfs_rele(node);
+    return netbsd_statvfs_out(&k, mp, buf);
 }
 
 int netbsd_sys_fstatvfs1(int fd, void *buf, int flags) {

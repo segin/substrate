@@ -343,6 +343,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 
     // Lookup device node if device path is specified
     fs_node_t *dev_node = NULL;
+    int dev_held = 0;           /* dev_node came from a lookup: vfs_rele it */
     if (device && device[0] == '/') {
         // Parse path like /dev/storage/ram0
         // Start from devfs if path begins with /dev/
@@ -354,6 +355,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
                 // Parse path components
                 char component[64];
                 fs_node_t *current = devfs_root;
+                vfs_hold(current);
                 while (*subpath && current) {
                     // Get next component
                     int i = 0;
@@ -362,13 +364,16 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
                     }
                     component[i] = '\0';
                     if (*subpath == '/') subpath++;
-                    
+
                     if (i > 0 && current->finddir) {
-                        current = current->finddir(current, component);
+                        fs_node_t *next = vfs_finddir(current, component);
+                        vfs_rele(current);
+                        current = next;
                         if (!current) break;
                     }
                 }
                 dev_node = current;
+                dev_held = current != NULL;
             }
         }
 
@@ -396,6 +401,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         root = fs->mount_opts(device, flags, dev_node, (const char *)data);
     else
         root = fs->mount(device, flags, dev_node ? dev_node : data);
+    /* A filesystem keeps its device by the block layer, not by this node. */
+    if (dev_held)
+        vfs_rele(dev_node);
     if (!root) {
         kprintf("VFS: mount(%s on %s): filesystem init failed\n",
                 type, path);
@@ -443,6 +451,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         if ((mountpoint->flags & 0x7) != FS_DIRECTORY) {
              kprintf("VFS: mount(%s on %s): mount point is not a directory\n",
                      type, path);
+             vfs_rele(mountpoint);
              if (root->unmount) {
                  root->unmount(root);
              }
@@ -467,6 +476,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
             spinlock_release(&vfs_mount_lock);
             kprintf("VFS: mount(%s on %s): already a mount point\n",
                     type, path);
+            vfs_rele(mountpoint);
             if (root->unmount) {
                 root->unmount(root);
             }
@@ -541,6 +551,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
                 path ? path : "(null)", type ? type : "unknown");
     }
 
+    /* The covered directory is known by its (mp, inode) identity from here
+     * on (mnt_covered_*), not by the lookup's reference. */
+    vfs_rele(mountpoint);
     return 0;
 }
 
@@ -824,6 +837,75 @@ static void vfs_detach_mount_refs(struct mount *mp) {
     proc_registry_unlock();
 }
 
+/*
+ * Lookup references (fs_node_t hold/rele).  A node a lookup hands out is
+ * held: the filesystem keeps it valid until vfs_rele.  current_thread's
+ * vfs_holds counts the references the thread has taken and not dropped;
+ * every system call should leave it where it found it, and
+ * vfs_holds_check() reports one that does not.
+ */
+void vfs_hold(fs_node_t *node) {
+    if (!node) return;
+    if (node->hold) node->hold(node);
+    if (current_thread) current_thread->vfs_holds++;
+}
+
+void vfs_rele(fs_node_t *node) {
+    if (!node) return;
+    if (current_thread) current_thread->vfs_holds--;
+    if (node->rele) node->rele(node);
+}
+
+/* The driver's finddir, whose result is held. */
+fs_node_t *vfs_finddir(fs_node_t *dir, const char *name) {
+    char buf[256];
+    fs_node_t *n;
+
+    if (!dir || !dir->finddir || !name) return NULL;
+    if (strlcpy(buf, name, sizeof(buf)) >= sizeof(buf)) return NULL;
+    n = dir->finddir(dir, buf);
+    if (n && current_thread) current_thread->vfs_holds++;
+    return n;
+}
+
+/* Does dir have an entry called name?  Drops the reference it finds. */
+int vfs_entry_exists(fs_node_t *dir, const char *name) {
+    fs_node_t *n = vfs_finddir(dir, name);
+
+    vfs_rele(n);
+    return n != NULL;
+}
+
+/*
+ * Called as a system call returns: report references it took and did not
+ * drop (a leak that keeps a filesystem's node pinned for good, or one
+ * dropped twice, which unpins a node someone else holds).
+ */
+void vfs_holds_check(int nr) {
+    static int reported;
+
+    if (!current_thread || current_thread->vfs_holds == 0) return;
+    if (reported < 20) {
+        reported++;
+        kprintf("vfs: syscall %d in pid %d returned with %d lookup references\n",
+                nr, current_process ? current_process->pid : -1,
+                current_thread->vfs_holds);
+    }
+    current_thread->vfs_holds = 0;
+}
+
+/* Replace a held node by the root of what is mounted on it, if anything:
+ * the result is held and `node`'s reference is dropped. */
+static fs_node_t *vfs_cross_held(fs_node_t *node) {
+    fs_node_t *t = vfs_cross_mountpoint(node);
+
+    if (t != node) {
+        vfs_hold(t);
+        vfs_rele(node);
+    }
+    return t;
+}
+
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return finddir_fs_internal(node, name, 0, 1);
 }
@@ -848,14 +930,19 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
  */
 #define MAX_SYMLINK_DEPTH 8
 
+/*
+ * Look `name` up in directory `node` (which the caller holds).  The result
+ * is held; the caller drops it with vfs_rele.
+ */
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks) {
     if (!node) return 0; // Safety
 
-    // If this is a mountpoint, cross into the mounted filesystem
+    /* If this is a mountpoint, cross into the mounted filesystem.  Its root
+     * lives as long as the mount; this call does not need a reference. */
     node = vfs_cross_mountpoint(node);
 
     if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0) {
-        fs_node_t *result = node->finddir(node, name);
+        fs_node_t *result = vfs_finddir(node, name);
 
         if (result && !result->mp) {
             result->mp = node->mp;
@@ -865,7 +952,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
          * Mountpoint crossing for terminal lookups:
          * path "/dev" should resolve to devfs root, not the covered directory.
          */
-        result = vfs_cross_mountpoint(result);
+        result = vfs_cross_held(result);
 
         // Resolve symlinks (with depth limit)
         if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
@@ -879,11 +966,14 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                  * symlink loop was indistinguishable from a missing file.
                  * The flag lets the syscall layer answer ELOOP. */
                 if (current_thread) current_thread->vfs_symlink_eloop = 1;
+                vfs_rele(result);
                 return NULL;
             }
-            
+
             char link_target[256];
             int len = result->readlink(result, link_target, sizeof(link_target) - 1);
+            /* The link itself is not needed past its text. */
+            vfs_rele(result);
             if (len <= 0) {
                 return NULL;
             }
@@ -1070,9 +1160,11 @@ static fs_node_t *vfs_perso_component(fs_node_t *dir, char *component,
     }
     full = kmalloc(512);
     if (!full) {
+        vfs_rele(n);
         return finddir_fs_internal(dir, component, 0, 1);
     }
     len = n->readlink(n, full, 255);
+    vfs_rele(n);
     if (len <= 0 || len >= 256 || full[0] != '/' ||
         (size_t)len + 1U + strlen(rest) >= 512U) {
         kfree(full, 512);
@@ -1103,20 +1195,33 @@ static const char *vfs_perso_rest(const char *p) {
     return *p ? p : NULL;
 }
 
-// Lookup a path from a root node
-fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
+/*
+ * Walk path from root, which the caller holds (or which is static).  A
+ * final symlink is followed when follow_last is set (vfs_lookup) and
+ * returned itself when not (vfs_lookup_lstat); others always are.
+ *
+ * The walk holds the node it stands on and drops each one as it steps
+ * past it, so no filesystem can free, recycle or repopulate a directory
+ * while the walk is in it.  The result is held: the caller drops it with
+ * vfs_rele once it is done with the node.
+ */
+static fs_node_t *vfs_walk(fs_node_t *root, const char *path, int follow_last) {
+    fs_node_t *(*self)(fs_node_t *, const char *) =
+        follow_last ? vfs_lookup : vfs_lookup_lstat;
+
     if (!path || !root) return NULL;
 
-    fs_node_t *shadow = vfs_perso_shadow(path, vfs_lookup);
+    fs_node_t *shadow = vfs_perso_shadow(path, self);
     if (shadow) return shadow;
 
     if (path[0] == '/') path++; // Skip leading /
+    vfs_hold(root);
     if (path[0] == '\0') return root; // Root itself
 
     fs_node_t *current = root;
     char component[256];
     const char *p = path;
-    
+
     while (*p) {
         // Extract next path component
         int i = 0;
@@ -1142,6 +1247,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
          * path.
          */
         if (i == 255 && *p != '\0' && *p != '/') {
+            vfs_rele(current);
             return NULL;
         }
 
@@ -1157,7 +1263,8 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
             /*
-             * ".." at the *process root* stays put.  For a chroot'ed process
+             * ".." at the *process root* stays put (lstat as much as
+             * lookup: neither may be a way out of the jail).  For a chroot'ed process
              * that is what confines it: without the check, ".." followed the
              * filesystem's real parent link straight out of the jail, and
              * "/../../etc/master.passwd" resolved outside it for any process
@@ -1195,24 +1302,35 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
              * (e.g. /proc/.. -> /); otherwise the normal in-fs parent. */
             fs_node_t *esc = vfs_mount_root_parent(current);
             fs_node_t *parent = esc ? esc : finddir_fs(current, "..");
-            if (parent) current = parent;
+            if (parent) {
+                vfs_rele(current);
+                current = parent;
+            }
             if (*p == '/') p++;
             continue;
         }
-        
-        // Lookup this component
+
+        /* Lookup this component.  The last one of an lstat is not
+         * followed if it is a symlink. */
         {
             const char *rest = vfs_perso_rest(p);
+            int follow = follow_last || *p != '\0';
+            fs_node_t *next;
 
             if (rest) {
                 int done;
 
-                current = vfs_perso_component(current, component, rest,
-                                              vfs_lookup, &done);
-                if (done) return current;
+                next = vfs_perso_component(current, component, rest,
+                                           self, &done);
+                if (done) {
+                    vfs_rele(current);
+                    return next;
+                }
             } else {
-                current = finddir_fs(current, component);
+                next = finddir_fs_internal(current, component, 0, follow);
             }
+            vfs_rele(current);
+            current = next;
         }
         if (!current) return NULL;
 
@@ -1229,20 +1347,26 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
          */
         {
             struct mount *mnt;
+            fs_node_t *mroot = NULL;
             spinlock_acquire(&vfs_mount_lock);
             TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
                 if (mnt->mnt_covered_ino != 0 &&
                     current->inode == mnt->mnt_covered_ino &&
                     current->mp == mnt->mnt_covered_mp) {
-                    current = mnt->mnt_node_root;
+                    mroot = mnt->mnt_node_root;
                     break;
                 }
             }
             spinlock_release(&vfs_mount_lock);
+            if (mroot && mroot != current) {
+                vfs_hold(mroot);
+                vfs_rele(current);
+                current = mroot;
+            }
         }
 
         /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
-        current = vfs_cross_mountpoint(current);
+        current = vfs_cross_held(current);
 
         // Skip trailing slash
         if (*p == '/') p++;
@@ -1251,138 +1375,14 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     return current;
 }
 
-fs_node_t *vfs_lookup_ref(fs_node_t *root, const char *path) {
-    fs_node_t *n = vfs_lookup(root, path);
-    if (n) open_fs(n, 1, 0);
-    return n;
+// Lookup a path from a root node; the result is held (vfs_rele).
+fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
+    return vfs_walk(root, path, 1);
 }
 
-fs_node_t *vfs_lookup_lstat_ref(fs_node_t *root, const char *path) {
-    fs_node_t *n = vfs_lookup_lstat(root, path);
-    if (n) open_fs(n, 1, 0);
-    return n;
-}
-
+// The same, not following a final symlink.
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
-    if (!path || !root) return NULL;
-
-    fs_node_t *shadow = vfs_perso_shadow(path, vfs_lookup_lstat);
-    if (shadow) return shadow;
-
-    if (path[0] == '/') path++; // Skip leading /
-    if (path[0] == '\0') return root; // Root itself
-    
-    fs_node_t *current = root;
-    char component[256];
-    const char *p = path;
-    
-    while (*p) {
-        // Extract next path component
-        int i = 0;
-        while (*p && *p != '/' && i < 255) {
-            component[i++] = *p++;
-        }
-        component[i] = '\0';
-
-        /*
-         * The copy loop stops at 255 with *p still in the MIDDLE of
-         * the component, so the next iteration used to carry on from there
-         * and treat the remainder as a fresh component: a 300-character
-         * name silently became a lookup of its first 255 characters followed
-         * by a lookup of the last 45 *inside that result*.  That does not
-         * merely fail -- it can resolve to a real but entirely different
-         * file, which is a correctness and containment problem, not a
-         * cosmetic one.
-         *
-         * A component this long cannot be named here.  These functions
-         * report failure as NULL (callers map it to ENOENT; there is no
-         * error channel to return ENAMETOOLONG through without changing
-         * every caller), so fail the lookup rather than resolve the wrong
-         * path.
-         */
-        if (i == 255 && *p != '\0' && *p != '/') {
-            return NULL;
-        }
-
-        if (i == 0) {
-            if (*p == '/') p++;
-            continue;
-        }
-
-        if (component[0] == '.' && component[1] == '\0') {
-            if (*p == '/') p++;
-            continue;
-        }
-
-        if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
-            /* Same process-root containment as vfs_lookup(); lstat must not
-             * be a way around the jail either.  And the same boundary: the
-             * process root, not `root`, which for a relative path is only
-             * where the lookup started.  Pinned there, ".." was ".", so
-             * lstat("../x") looked for x in the current directory -- `ls
-             * ../x` failed from anywhere, and a program finding its own
-             * path by walking ".." saw every directory as its own parent. */
-            fs_node_t *proc_root = (current_process && current_process->root_node)
-                                 ? (fs_node_t *)current_process->root_node
-                                 : fs_root;
-            if (proc_root && current &&
-                current->inode == proc_root->inode &&
-                current->mp == proc_root->mp) {
-                if (*p == '/') p++;
-                continue;
-            }
-            /* At a mount root, ".." escapes to the mountpoint's parent
-             * (e.g. /proc/.. -> /); otherwise the normal in-fs parent. */
-            fs_node_t *esc = vfs_mount_root_parent(current);
-            fs_node_t *parent = esc ? esc : finddir_fs_internal(current, "..", 0, 1);
-            if (parent) current = parent;
-            if (*p == '/') p++;
-            continue;
-        }
-        
-        // Check if this is the last component
-        int is_last = (*p == '\0');
-        
-        // Lookup this component
-        // If last, DO NOT follow symlinks
-        {
-            const char *rest = is_last ? NULL : vfs_perso_rest(p);
-
-            if (rest) {
-                int done;
-
-                current = vfs_perso_component(current, component, rest,
-                                              vfs_lookup_lstat, &done);
-                if (done) return current;
-            } else {
-                current = finddir_fs_internal(current, component, 0, !is_last);
-            }
-        }
-        if (!current) return NULL;
-
-        /* Mount crossing by node identity (see vfs_lookup comment) */
-        {
-            struct mount *mnt;
-            spinlock_acquire(&vfs_mount_lock);
-            TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
-                if (mnt->mnt_covered_ino != 0 &&
-                    current->inode == mnt->mnt_covered_ino &&
-                    current->mp == mnt->mnt_covered_mp) {
-                    current = mnt->mnt_node_root;
-                    break;
-                }
-            }
-            spinlock_release(&vfs_mount_lock);
-        }
-
-        /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
-        current = vfs_cross_mountpoint(current);
-
-        // Skip trailing slash
-        if (*p == '/') p++;
-    }
-    
-    return current;
+    return vfs_walk(root, path, 0);
 }
 
 
@@ -1544,20 +1544,17 @@ int vfs_may_delete(fs_node_t *dir, fs_node_t *victim) {
     return 0;
 }
 
-/* The entry `name` of `dir`, or NULL. */
-static fs_node_t *vfs_entry(fs_node_t *dir, const char *name) {
-    char buf[256];
-    size_t n = 0;
+/*
+ * vfs_may_delete for entry `name` of `dir`.  The entry's reference is
+ * dropped before the caller removes it: held, it would make ext2 defer the
+ * delete to the reference's release.
+ */
+static int vfs_may_delete_entry(fs_node_t *dir, const char *name) {
+    fs_node_t *victim = vfs_finddir(dir, name);
+    int ret = vfs_may_delete(dir, victim);
 
-    if (dir == NULL || dir->finddir == NULL || name == NULL) {
-        return NULL;
-    }
-    while (name[n] != '\0' && n < sizeof(buf) - 1) {
-        buf[n] = name[n];
-        n++;
-    }
-    buf[n] = '\0';
-    return dir->finddir(dir, buf);
+    vfs_rele(victim);
+    return ret;
 }
 
 int vfs_chmod_node(fs_node_t *node, uint32_t mode) {
@@ -1634,7 +1631,7 @@ int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
  */
 int unlink_fs(fs_node_t *node, const char *name) {
     if (node && node->unlink) {
-        int ret = vfs_may_delete(node, vfs_entry(node, name));
+        int ret = vfs_may_delete_entry(node, name);
         if (ret != 0) return ret;
         return node->unlink(node, name);
     }
@@ -1643,7 +1640,7 @@ int unlink_fs(fs_node_t *node, const char *name) {
 
 int rmdir_fs(fs_node_t *node, const char *name) {
     if (node && node->rmdir) {
-        int ret = vfs_may_delete(node, vfs_entry(node, name));
+        int ret = vfs_may_delete_entry(node, name);
         if (ret != 0) return ret;
         return node->rmdir(node, name);
     }
@@ -1652,17 +1649,18 @@ int rmdir_fs(fs_node_t *node, const char *name) {
 
 int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
     if (old_parent && old_parent->rename) {
-        fs_node_t *src = vfs_entry(old_parent, old_name);
+        fs_node_t *src = vfs_finddir(old_parent, old_name);
         int ret = vfs_may_delete(old_parent, src);
         if (ret == 0 && new_parent != old_parent)
             ret = vfs_may_modify_dir(new_parent);
         /* Replacing an existing entry removes it: the sticky rule applies. */
         if (ret == 0)
-            ret = vfs_may_delete(new_parent, vfs_entry(new_parent, new_name));
+            ret = vfs_may_delete_entry(new_parent, new_name);
         /* Moving a directory to a new parent rewrites its "..". */
         if (ret == 0 && src && (src->flags & 0x7) == FS_DIRECTORY &&
             new_parent != old_parent)
             ret = vfs_may_modify_dir(src);
+        vfs_rele(src);
         if (ret != 0) return ret;
         return old_parent->rename(old_parent, old_name, new_parent, new_name);
     }
@@ -1786,11 +1784,15 @@ int vfs_lookup_error(fs_node_t *base, const char *path) {
             }
             return -ENOENT;
         }
+        int is_dir = (node->flags & 0x7) == FS_DIRECTORY;
+        vfs_rele(node);
         /* Every component before the last must be a directory. */
-        if (end < len && (node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+        if (end < len && !is_dir) return -ENOTDIR;
     }
     return -ENOENT;
 }
+
+/* The parent directory of path is returned held (vfs_rele). */
 
 static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
                                    char *name_out, size_t name_out_size) {
@@ -1819,11 +1821,13 @@ static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
         if (strlcpy(name_out, path, name_out_size) >= name_out_size) {
             return -ENAMETOOLONG;
         }
+        vfs_hold(parent);
     } else if (last_slash == path) {
         parent = root;
         if (strlcpy(name_out, path + 1, name_out_size) >= name_out_size) {
             return -ENAMETOOLONG;
         }
+        vfs_hold(parent);
     } else {
         size_t dirlen = (size_t)(last_slash - path);
         fs_node_t *lookup_root = (path[0] == '/') ? root : cwd;
@@ -1846,6 +1850,7 @@ static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
         return -ENOENT;
     }
     if (name_out[0] == '\0') {
+        vfs_rele(parent);
         return -EINVAL;
     }
 
@@ -1992,6 +1997,27 @@ static int vfs_strip_trailing_slashes(const char *path, char *out, size_t outsz)
     return 0;
 }
 
+static int vfs_mkdir_in(fs_node_t *parent_node, const char *name,
+                        uint16_t permission) {
+    int ret;
+
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+    if (vfs_entry_exists(parent_node, name)) {
+        return -EEXIST;
+    }
+    if (!parent_node->mkdir) {
+        return -EOPNOTSUPP;
+    }
+    ret = vfs_may_modify_dir(parent_node);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return parent_node->mkdir(parent_node, name, permission);
+}
+
 int vfs_mkdir(const char *path, uint16_t permission) {
     fs_node_t *parent_node = NULL;
     char name[128];
@@ -2006,21 +2032,39 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     if (ret != 0) {
         return ret;
     }
+    ret = vfs_mkdir_in(parent_node, name, permission);
+    vfs_rele(parent_node);
+    return ret;
+}
+
+static int vfs_rmdir_in(fs_node_t *parent_node, const char *name) {
+    int ret;
+
     if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
         return -ENOTDIR;
     }
-    if (parent_node->finddir && parent_node->finddir(parent_node, name) != NULL) {
-        return -EEXIST;
+
+    // Check if it exists
+    fs_node_t *node = vfs_finddir(parent_node, name);
+    if (!node) {
+        return -ENOENT;
     }
-    if (!parent_node->mkdir) {
-        return -EOPNOTSUPP;
+    int is_dir = (node->flags & 0x7) == FS_DIRECTORY;
+    ret = vfs_may_delete(parent_node, node);
+    /* Dropped before the removal, which ext2 would otherwise defer. */
+    vfs_rele(node);
+    if (!is_dir) {
+        return -ENOTDIR;
     }
-    ret = vfs_may_modify_dir(parent_node);
+
+    if (!parent_node->rmdir) {
+        return -EPERM;   /* file system does not allow removal */
+    }
     if (ret != 0) {
         return ret;
     }
 
-    return parent_node->mkdir(parent_node, name, permission);
+    return parent_node->rmdir(parent_node, name);
 }
 
 int vfs_rmdir(const char *path) {
@@ -2037,43 +2081,19 @@ int vfs_rmdir(const char *path) {
     if (ret != 0) {
         return ret;
     }
-    if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
-        return -ENOTDIR;
-    }
-    
-    // Check if it exists
-    fs_node_t *node = parent_node->finddir(parent_node, name);
-    if (!node) {
-        return -ENOENT;
-    }
-    if ((node->flags & 0x7) != FS_DIRECTORY) {
-        return -ENOTDIR;
-    }
-    
-    if (!parent_node->rmdir) {
-        return -EPERM;   /* file system does not allow removal */
-    }
-    ret = vfs_may_delete(parent_node, node);
-    if (ret != 0) {
-        return ret;
-    }
-
-    return parent_node->rmdir(parent_node, name);
+    ret = vfs_rmdir_in(parent_node, name);
+    vfs_rele(parent_node);
+    return ret;
 }
 
-int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
-    fs_node_t *parent_node = NULL;
-    char name[128];
+static int vfs_mknod_in(fs_node_t *parent_node, const char *name,
+                        uint16_t mode, uint32_t dev) {
     int ret;
 
-    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
-    if (ret != 0) {
-        return ret;
-    }
     if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
         return -ENOTDIR;
     }
-    if (parent_node->finddir && parent_node->finddir(parent_node, name) != NULL) {
+    if (vfs_entry_exists(parent_node, name)) {
         return -EEXIST;
     }
     if (!parent_node->mknod) {
@@ -2087,9 +2107,28 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
     return parent_node->mknod(parent_node, name, mode, dev);
 }
 
+int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
+    fs_node_t *parent_node = NULL;
+    char name[128];
+    int ret;
+
+    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
+    if (ret != 0) {
+        return ret;
+    }
+    ret = vfs_mknod_in(parent_node, name, mode, dev);
+    vfs_rele(parent_node);
+    return ret;
+}
+
 int vfs_unmount_legacy(const char *path) {
     return vfs_unmount_legacy_flags(path, 0);
 }
+
+static int vfs_unmount_in(fs_node_t *parent_node, char *name,
+                          const char *path, int flags);
+static int vfs_unmount_covered(fs_node_t *mountpoint, const char *path,
+                               int flags);
 
 int vfs_unmount_legacy_flags(const char *path, int flags) {
     if (!path) return -EINVAL;
@@ -2185,27 +2224,42 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
         if (path_buf[0] == '\0') {
              // "/foo" -> parent is root
              parent_node = fs_root;
+             vfs_hold(parent_node);
         } else {
              parent_node = vfs_lookup(fs_root, path_buf);
         }
     } else {
         // "foo" -> parent is root (cwd not fully supported here yet)
         parent_node = fs_root;
+        vfs_hold(parent_node);
         name = path_buf;
     }
-    
+
     if (!parent_node) return -ENOENT;
+    int ret = vfs_unmount_in(parent_node, name, path, flags);
+    vfs_rele(parent_node);
+    return ret;
+}
+
+static int vfs_unmount_in(fs_node_t *parent_node, char *name,
+                          const char *path, int flags) {
     if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
-    
+
     // Now find child 'name' in 'parent_node'
     // But DO NOT traverse if it is a mountpoint.
     // We need access to the underlying finddir.
-    
+
     if (!parent_node->finddir) return -ENOTDIR;
-    
-    fs_node_t *mountpoint = parent_node->finddir(parent_node, name);
+
+    fs_node_t *mountpoint = vfs_finddir(parent_node, name);
     if (!mountpoint) return -ENOENT;
-    
+    int ret = vfs_unmount_covered(mountpoint, path, flags);
+    vfs_rele(mountpoint);
+    return ret;
+}
+
+static int vfs_unmount_covered(fs_node_t *mountpoint, const char *path,
+                               int flags) {
     /*
      * Read the mount state under the lock.
      *

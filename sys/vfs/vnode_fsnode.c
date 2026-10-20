@@ -155,7 +155,11 @@ static int fsnode_vop_lookup(struct vnode *dvp, struct vnode **vpp,
     if (!child)
         return -ENOENT;
 
-    return fsnode_vget(dvp->v_mount, child, vpp);
+    /* The bridge does not govern fs_node_t lifetime (see fsnode_vget), so
+     * the lookup's reference is not kept with the vnode. */
+    int error = fsnode_vget(dvp->v_mount, child, vpp);
+    vfs_rele(child);
+    return error;
 }
 
 static int fsnode_vop_getattr(struct vnode *vp, struct vattr *vap,

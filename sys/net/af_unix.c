@@ -1346,6 +1346,7 @@ int sys_bind(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
          * the resolved file identity, not just the literal path string. */
         fs_node_t *bnode = vfs_lookup(fs_root, kpath);
         s->bound_inode = bnode ? bnode->inode : 0;
+        vfs_rele(bnode);
     } else {
         /* Abstract / autobind socket: no filesystem presence, so the in-core
          * name table is the only arbiter of the namespace. */
@@ -1548,6 +1549,7 @@ int kern_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
         fs_node_t *cnode = vfs_lookup(fs_root, kpath);
         if (cnode == NULL) return -ENOENT;           /* path doesn't exist */
         server = afunix_find_bound_by_inode(cnode->inode);  /* transient ref */
+        vfs_rele(cnode);
         if (!server) return -ECONNREFUSED;           /* node exists, no listener */
     } else if (!server) {
         return -ECONNREFUSED;                          /* abstract name, no binding */
@@ -2078,6 +2080,7 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
                 fs_node_t *dnode = vfs_lookup(fs_root, kpath);
                 if (dnode == NULL) return -ENOENT;
                 dst = afunix_find_bound_by_inode(dnode->inode);  /* transient ref */
+                vfs_rele(dnode);
                 if (!dst) return -ECONNREFUSED;
             } else if (!dst) {
                 return -ECONNREFUSED;

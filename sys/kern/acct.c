@@ -50,10 +50,18 @@ int kern_acct(const char *path) {
     if (!node) return -ENOENT;
 
     // Should verify it's a regular file
-    if ((node->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
+    if ((node->flags & 0x7) == FS_DIRECTORY) {
+        vfs_rele(node);
+        return -EISDIR;
+    }
 
+    /* Kept open (open_fs) while accounting is on; the lookup's reference
+     * goes now, and so does the file accounting wrote to before. */
+    open_fs(node, 1, 1); // Open for writing
+    vfs_rele(node);
+    if (acct_node)
+        close_fs(acct_node);
     acct_node = node;
-    open_fs(acct_node, 1, 1); // Open for writing
     return 0;
 }
 

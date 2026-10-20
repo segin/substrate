@@ -4,6 +4,7 @@
 #include <arch/x86_64/syscall.h>
 #include <exec/perso/personality.h>
 #include <sys/proc.h>
+#include <vfs/vfs.h>
 
 #ifdef HOST_TEST
 struct syscall64_host_snapshot {
@@ -71,6 +72,7 @@ void syscall_handler_64(uint64_t syscall_number, uint64_t arg1, uint64_t arg2, u
                 typedef uint64_t (*sys_func_t)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
                 sys_func_t f = (sys_func_t)func;
                 ret = f(arg1, arg2, arg3, arg4, arg5, arg6);
+                vfs_holds_check((int)syscall_number);
             }
         }
     }

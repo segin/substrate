@@ -978,6 +978,7 @@ static void init_root_fs(void) {
             kprint(pseudo_mounts[i]);
             kprint("\n");
         }
+        vfs_rele(mp);
     }
 
     // Mount pseudo-filesystems AFTER root is established.

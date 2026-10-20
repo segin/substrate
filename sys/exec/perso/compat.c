@@ -459,6 +459,8 @@ int sys_pause(void) {
  */
 
 
+static int utime_node(fs_node_t *node, void *times);
+
 int sys_utime(const char *path, void *times) {
     char kpath[256];
     COPYIN_STR(path, kpath);
@@ -470,6 +472,12 @@ int sys_utime(const char *path, void *times) {
     fs_node_t *node = vfs_lookup(start, kpath);
     if (!node) return -ENOENT;
 
+    int ret = utime_node(node, times);
+    vfs_rele(node);
+    return ret;
+}
+
+static int utime_node(fs_node_t *node, void *times) {
     /* Permission: owner or root, or times==NULL and write permission */
     if (current_process->euid != 0 && current_process->euid != node->uid) {
         if (times != NULL) {

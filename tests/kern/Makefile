@@ -262,6 +262,12 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# walkrecycle: a path walk keeps the nodes it passes through while other
+# lookups cycle the ext2 node cache.  Runs on the host too.
+walkrecycle: walkrecycle.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # unlinkread: files read, unlinked while open and closed give back their
 # memory (ext2 leaked the node slot's 4 KiB of read buffers; the block
 # cache grew new headers while empty ones sat unused).  Guest only.
