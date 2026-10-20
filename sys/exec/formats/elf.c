@@ -2099,6 +2099,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         entry_ebx = tf.ebx;
     }
 
+    /* Free what the personality's execve pushed (path, argv, envp): there
+     * is no return path after the jump to do it. */
+    exec_cleanup_drain();
 #ifdef SUBSTRATE_ARCH_X86_64
     if (current_process && current_process->bitness == BITNESS_64) {
         jump_to_userspace64(entry, sp);

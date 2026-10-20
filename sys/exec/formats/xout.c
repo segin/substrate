@@ -561,6 +561,10 @@ static int xout_load(int fd, const char *path, char *const argv[],
     pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
     ldt_activate(current_process);
 
+    /* Free what the personality's execve pushed (path, argv, envp): there
+     * is no return path after the jump to do it. */
+    exec_cleanup_drain();
+
     /* The program is told where its break is in EAX: crt0's first
      * instruction stores it, and sbrk(2) counts up from there. */
     jump_to_elks(entry_off, user_sp, cs_sel, ds_sel, ds_sel, ds_sel, 0,
@@ -1302,6 +1306,8 @@ static int x286_load(int fd, const char *path, char *const argv[],
     pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
     ldt_activate(current_process);
 
+    /* Free what the personality's execve pushed: no return path after. */
+    exec_cleanup_drain();
     jump_to_elks((uint32_t)hdr.x_entry, (uint32_t)user_sp, cs_sel, ds_sel,
                  ds_sel, ds_sel, 0, 0);
 

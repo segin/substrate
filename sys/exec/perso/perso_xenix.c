@@ -1464,6 +1464,29 @@ static int x286_copy_vector(struct x286_frame *f, uint32_t off, char ***out,
     return 0;
 }
 
+/* exec cleanup callbacks: a NULL-terminated vector knows its own size. */
+static void x286_free_vector_v(void *p) {
+    char **vec = p;
+    size_t n = 0;
+
+    if (!vec) {
+        return;
+    }
+    while (vec[n]) {
+        n++;
+    }
+    x286_free_vector(vec, n + 1U);
+}
+
+static void x286_free_string_v(void *p) {
+    x286_free_string(p);
+}
+
+/*
+ * A successful exec never returns here, so the kernel copies of the path
+ * and vectors go on the exec cleanup list: the loader frees them just
+ * before it enters the new program, and kern_execve on failure.
+ */
 static int64_t x286_sys_execve(struct x286_frame *f) {
     char *path = NULL;
     char **argv = NULL;
@@ -1474,9 +1497,29 @@ static int64_t x286_sys_execve(struct x286_frame *f) {
     if (rc != 0) {
         return rc;
     }
+    if (exec_cleanup_push(x286_free_string_v, path) < 0) {
+        x286_free_string(path);
+        return -ENOMEM;
+    }
     rc = x286_copy_vector(f, f->cx, &argv, &argv_slots);
-    if (rc == 0) {
-        rc = x286_copy_vector(f, f->si, &envp, &envp_slots);
+    if (rc != 0) {
+        exec_cleanup_drain();
+        return rc;
+    }
+    if (exec_cleanup_push(x286_free_vector_v, argv) < 0) {
+        exec_cleanup_drain();
+        x286_free_vector(argv, argv_slots);
+        return -ENOMEM;
+    }
+    rc = x286_copy_vector(f, f->si, &envp, &envp_slots);
+    if (rc != 0) {
+        exec_cleanup_drain();
+        return rc;
+    }
+    if (exec_cleanup_push(x286_free_vector_v, envp) < 0) {
+        exec_cleanup_drain();
+        x286_free_vector(envp, envp_slots);
+        return -ENOMEM;
     }
     if (x286_trace_enabled()) {
         char buf[160];
@@ -1489,13 +1532,7 @@ static int64_t x286_sys_execve(struct x286_frame *f) {
                  path, (argv && argv[0]) ? argv[0] : "");
         kprint(buf);
     }
-    if (rc == 0) {
-        rc = kern_execve(path, argv, envp);
-    }
-    x286_free_vector(argv, argv_slots);
-    x286_free_vector(envp, envp_slots);
-    x286_free_string(path);
-    return rc;
+    return kern_execve(path, argv, envp);
 }
 
 static int64_t x286_sys_exec(struct x286_frame *f) {

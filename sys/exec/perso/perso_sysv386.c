@@ -41,6 +41,7 @@
 #include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/exec.h>
 #include <sys/fcntl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
@@ -867,6 +868,29 @@ static int sysv386_copy_vector(uint32_t addr, char ***out, size_t *slots_out) {
     return 0;
 }
 
+/* exec cleanup callbacks: a NULL-terminated vector knows its own size. */
+static void sysv386_free_vector_v(void *p) {
+    char **vec = p;
+    size_t n = 0;
+
+    if (!vec) {
+        return;
+    }
+    while (vec[n]) {
+        n++;
+    }
+    sysv386_free_vector(vec, n + 1U);
+}
+
+static void sysv386_free_string_v(void *p) {
+    sysv386_free_string(p);
+}
+
+/*
+ * A successful exec never returns here, so the kernel copies of the path
+ * and vectors go on the exec cleanup list: the loader frees them just
+ * before it enters the new program, and kern_execve on failure.
+ */
 static int64_t sysv386_sys_execve(struct sysv386_frame *f) {
     char *path = NULL;
     char **argv = NULL, **envp = NULL;
@@ -876,17 +900,31 @@ static int64_t sysv386_sys_execve(struct sysv386_frame *f) {
     if (rc != 0) {
         return rc;
     }
+    if (exec_cleanup_push(sysv386_free_string_v, path) < 0) {
+        sysv386_free_string(path);
+        return -ENOMEM;
+    }
     rc = sysv386_copy_vector(f->a[1], &argv, &argv_slots);
-    if (rc == 0) {
-        rc = sysv386_copy_vector(f->a[2], &envp, &envp_slots);
+    if (rc != 0) {
+        exec_cleanup_drain();
+        return rc;
     }
-    if (rc == 0) {
-        rc = kern_execve(path, argv, envp);
+    if (exec_cleanup_push(sysv386_free_vector_v, argv) < 0) {
+        exec_cleanup_drain();
+        sysv386_free_vector(argv, argv_slots);
+        return -ENOMEM;
     }
-    sysv386_free_vector(argv, argv_slots);
-    sysv386_free_vector(envp, envp_slots);
-    sysv386_free_string(path);
-    return rc;
+    rc = sysv386_copy_vector(f->a[2], &envp, &envp_slots);
+    if (rc != 0) {
+        exec_cleanup_drain();
+        return rc;
+    }
+    if (exec_cleanup_push(sysv386_free_vector_v, envp) < 0) {
+        exec_cleanup_drain();
+        sysv386_free_vector(envp, envp_slots);
+        return -ENOMEM;
+    }
+    return kern_execve(path, argv, envp);
 }
 
 static int64_t sysv386_sys_exec(struct sysv386_frame *f) {

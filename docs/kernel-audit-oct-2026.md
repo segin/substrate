@@ -456,7 +456,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/exec/formats/elf.c:778-799` computes `uint32_t file_off = phdr[i].p_offset + (va - phdr[i].p_vaddr);` at `va = start` (`p_vaddr & ~0xFFF`), which wraps around `0` if `p_offset < (p_vaddr & 0xFFF)`.
   Basis: traced.
 
-- [ ] **SYS-EXEC-010** *(Medium; partly confirmed)* When a personality `execve` wrapper allocates temporary path or argument buffers, those buffers shall be registered with `exec_cleanup_push`, and all executable loaders (`aout`, `coff`, `xout`, `x286`) shall call `exec_cleanup_drain` on success.
+- [x] **SYS-EXEC-010** *(Medium; partly confirmed)* When a personality `execve` wrapper allocates temporary path or argument buffers, those buffers shall be registered with `exec_cleanup_push`, and all executable loaders (`aout`, `coff`, `xout`, `x286`) shall call `exec_cleanup_drain` on success.
   Evidence: `sys/exec/perso/perso_sysv386.c:867-887`, `perso_xenix.c:1467-1499`, `perso_linux.c:559-564`, `freebsd/freebsd_user.c:309-313`, and `sunos/sunos_user.c:412-426` allocate buffers freed only after `kern_execve` returns, and `aout.c`, `coff.c`, and `xout.c` never call `exec_cleanup_drain()`.
   Basis: traced.
 

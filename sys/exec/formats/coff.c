@@ -525,6 +525,9 @@ static int coff_load(int fd, const char *path, char *const argv[],
         kprint(b);
     }
 
+    /* Free what the personality's execve pushed (path, argv, envp): there
+     * is no return path after the jump to do it. */
+    exec_cleanup_drain();
     pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
     jump_to_userspace(entry, sp, 0);
     return 0;   /* not reached */
