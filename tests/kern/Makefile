@@ -287,6 +287,11 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# setidneg.linux: setuid(-1) and setgid(-1) are EINVAL.  Runs on the host
+# too (as root).
+setidneg.linux: setidneg.c
+	gcc -m32 -static -O2 $< -o $@
+
 # semundoset.linux: SETVAL/SETALL discard pending SEM_UNDO adjustments.
 # Runs on the host too.
 semundoset.linux: semundoset.c

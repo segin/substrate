@@ -2169,7 +2169,13 @@ int sys_setregid(int rgid, int egid)           { CRED_CALL(setregid_ids(rgid, eg
 int sys_setresuid(int ruid, int euid, int suid) { CRED_CALL(setresuid_ids(ruid, euid, suid)); }
 int sys_setresgid(int rgid, int egid, int sgid) { CRED_CALL(setresgid_ids(rgid, egid, sgid)); }
 
+/*
+ * (uid_t)-1 is never an id: setre*id and setres*id read it as "leave this
+ * one alone", so one stored here would be impossible to name again.
+ * Other high ids (65534, 4294967294) are ordinary, as on Linux and BSD.
+ */
 static int setuid_ids(int u) {
+    if (u == -1) return -EINVAL;
     if (current_process->euid == 0) {
         current_process->uid = u;
         current_process->euid = u;
@@ -2183,6 +2189,7 @@ static int setuid_ids(int u) {
     return -EPERM;
 }
 static int setgid_ids(int g) {
+    if (g == -1) return -EINVAL;
     if (current_process->euid == 0) {
         current_process->gid = g;
         current_process->egid = g;
@@ -2203,6 +2210,7 @@ static int setgid_ids(int g) {
  */
 static int seteuid_ids(int euid) {
     process_t *p = current_process;
+    if (euid == -1) return -EINVAL;
     if (p->euid == 0 ||
         (uint32_t)euid == p->uid ||
         (uint32_t)euid == p->euid ||
@@ -2216,6 +2224,7 @@ static int seteuid_ids(int euid) {
 /* setegid(2): the gid analogue of seteuid(2). */
 static int setegid_ids(int egid) {
     process_t *p = current_process;
+    if (egid == -1) return -EINVAL;
     if (p->euid == 0 ||
         (uint32_t)egid == p->gid ||
         (uint32_t)egid == p->egid ||

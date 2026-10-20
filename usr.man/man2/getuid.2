@@ -46,6 +46,13 @@ On success, these functions return the requested ID or 0.  On error,
 is set appropriately.
 .SH ERRORS
 .TP
+.B EINVAL
+The ID given to
+.BR setuid ()
+or
+.BR setgid ()
+is \-1.
+.TP
 .B EPERM
 The calling process is not privileged and tried to change its IDs to
 values it is not allowed to change them to.

@@ -275,9 +275,10 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/signal.c:1628` evaluates `-pid` (which overflows signed `int` when `pid == INT_MIN` and remains `INT_MIN`), and `pgrp_hashval` (`sys/pm/pgrp.c:30-32`) computes `pgid % PGRP_HASH_SIZE`, returning a negative array index for negative `pgid`.
   Basis: traced.
 
-- [ ] **SYS-KERN-023** *(Medium → Low; partly confirmed)* When changing user or group IDs in `setuid`, `setgid`, `setreuid`, `setregid`, `setresuid`, and `setresgid`, the kernel shall reject negative IDs (other than `-1` where permitted) with `-EINVAL`.
+- [x] **SYS-KERN-023** *(Medium → Low; partly confirmed)* When changing user or group IDs in `setuid`, `setgid`, `setreuid`, `setregid`, `setresuid`, and `setresgid`, the kernel shall reject negative IDs (other than `-1` where permitted) with `-EINVAL`.
   Evidence: `sys/kern/syscall.c:2015-2040` (`setuid_ids`, `setgid_ids`) accepts negative values such as `-1`, and `setre*`/`setres*` (`:2042-2126`) accept values `< -1`.
   Basis: traced.
+  Resolution: `setuid`, `setgid`, `seteuid` and `setegid` refuse `-1` with `EINVAL`.  Other values `< -1` are kept: as a `uid_t` they are ordinary high ids (4294967294 is a common "nobody"), which Linux and the BSDs accept too.
 
 - [ ] **SYS-KERN-024** *(Medium → Low; partly confirmed)* When returning slab allocation site records in `sys_vm_slabs`, the kernel shall redact kernel text return addresses (`recs[i].pc`) for unprivileged callers (`current_process->euid != 0`).
   Evidence: `sys/kern/sysinfo.c:215` formats `pc=0x%08x` (`recs[i].pc`) into `si.name` and copies it out to any unprivileged caller.

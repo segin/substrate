@@ -31,6 +31,9 @@ On success, 0 is returned.  On error, \-1 is returned, and
 is set appropriately.
 .SH ERRORS
 .TP
+.B EINVAL
+The ID is \-1, which is never an ID.
+.TP
 .B EPERM
 The process is not privileged and the ID is not one of its real,
 effective or saved IDs.
