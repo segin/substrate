@@ -81,6 +81,15 @@ uint32_t crc32c_update(uint32_t crc, const void *buf, size_t len) {
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     (void)dev; (void)offset; (void)size; (void)buffer; return 0;
 }
+void blkdev_invalidate_node(fs_node_t *node) { (void)node; }
+
+#include <crc16.h>
+uint16_t crc16_update(uint16_t crc, const void *data, size_t len) {
+    (void)data; (void)len; return crc;
+}
+
+#include <sys/proc.h>
+process_t *current_process = NULL;
 
 #include <fs/ext2/ext2.h>
 int ext2_htree_hash(const char *name, int len, const uint32_t *hash_seed,
@@ -123,7 +132,10 @@ int main(void) {
     fs.device = &device_node;
     fs.block_size = 1024;
     fs.inodes_per_group = 100;
-    fs.blocks_per_group = 10000;
+    /* One 1 KiB bitmap block covers 8192 blocks; the allocator refuses
+     * block numbers at or beyond s_blocks_count. */
+    fs.blocks_per_group = 8192;
+    fs.sb.s_blocks_count = 8193;
     fs.sb.s_free_blocks_count = 1000;
     fs.sb.s_first_data_block = 1;
 
