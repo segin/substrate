@@ -517,7 +517,13 @@ uma_zone_t *uma_zcreate(
     }
     
     if (zone->uz_ipers == 0) {
-        zone->uz_ipers = 1; 
+        zone->uz_ipers = 1;
+    }
+    /* A free-chain index is a byte, and 0xFE/0xFF are the item markers:
+     * every index (0 .. uz_ipers - 1) must stay below them.  Only zones
+     * of items under ~16 bytes would fit more on a page. */
+    if (zone->uz_ipers > UMA_ITEM_BUCKETED) {
+        zone->uz_ipers = UMA_ITEM_BUCKETED;
     }
     
     /* Check if we need off-page slab headers */

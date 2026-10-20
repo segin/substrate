@@ -134,7 +134,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/arch/x86-common/trap.c:130-134` calls `pmap_enter(p->pmap, va, pa_phys, VM_PROT_WRITE, 0)` at line 130 and `memset(pa, 0, 0x1000)` at line 134, leaving uninitialized physical memory mapped and writable to concurrent threads in `p` during the window between `pmap_enter` and `memset`.
   Basis: traced.
 
-- [ ] **SYS-VM-008** *(High → Low; partly confirmed)* When creating a UMA zone in `uma_zcreate`, the slab allocator shall cap `zone->uz_ipers` below `UMA_ITEM_BUCKETED` (`254`).
+- [x] **SYS-VM-008** *(High → Low; partly confirmed)* When creating a UMA zone in `uma_zcreate`, the slab allocator shall cap `zone->uz_ipers` below `UMA_ITEM_BUCKETED` (`254`).
   Evidence: `sys/vm/uma_core.c:36-37` reserves `0xFE` (`254`) and `0xFF` (`255`) in `uint8_t us_freelist[]` for `UMA_ITEM_BUCKETED` and `UMA_ITEM_ALLOCED`, but `uma_zcreate` (`sys/vm/uma_core.c:508-520`) computes `zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / (zone->uz_rsize + 1)` without an upper bound. For zones with `uz_rsize <= 12` (`uz_ipers >= 254`), `us_freelist[i]` wraps `uint8_t` and collides with `0xFE`/`0xFF` at `uma_core.c:776-778`.
   Basis: traced.
 
