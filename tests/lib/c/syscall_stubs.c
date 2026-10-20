@@ -66,3 +66,11 @@ int64_t _syscall6(int sys_num, uintptr_t a1, uintptr_t a2, uintptr_t a3,
     (void)sys_num; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
     return -1;
 }
+
+/* stdstreams.c's __stdio_init sets up a static program's TLS block
+ * (src/tls_static.c, which reads the program's own ELF headers); a host
+ * test has its TLS from glibc already. */
+void __libc_static_tls_init(char **envp)
+{
+    (void)envp;
+}
