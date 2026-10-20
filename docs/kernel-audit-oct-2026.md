@@ -473,7 +473,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/net/af_packet.c:199-211` calls `netdev_unsubscribe(s->sub)` (which `kfree`s `sub->ring` and `sub` in `sys/net/netdev.c:423-425`) while concurrent threads in `afpkt_node_read` (`:67-106`) or `afpacket_recvfrom` (`:279-343`) read `s->sub` and sleep on `netdev_sub_wait_chan(s->sub)` without a lock.
   Basis: traced.
 
-- [ ] **SYS-NET-003** *(High → Medium; confirmed)* When replying to an ICMPv6 Echo Request in `icmp6_handle_echo`, the network stack shall not allocate a 1500-byte buffer on the hard-IRQ stack and shall compute the ICMPv6 pseudo-header checksum using the unicast source address (`dev->ip6_addr`) when the request destination `daddr` is multicast.
+- [x] **SYS-NET-003** *(High → Medium; confirmed)* When replying to an ICMPv6 Echo Request in `icmp6_handle_echo`, the network stack shall not allocate a 1500-byte buffer on the hard-IRQ stack and shall compute the ICMPv6 pseudo-header checksum using the unicast source address (`dev->ip6_addr`) when the request destination `daddr` is multicast.
   Evidence: `sys/net/icmp.c:445` allocates `uint8_t reply[1500];` on the stack in hard-IRQ context (`netdev_rx -> ip6_input -> icmp6_input`), and line 456 passes multicast `daddr` as the source address to `inet_csum_pseudo6` even though `ip6_output` (`sys/net/inet6.c:427`) substitutes `dev->ip6_addr`.
   Basis: traced.
 

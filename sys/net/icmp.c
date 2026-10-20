@@ -445,20 +445,26 @@ static void icmp6_handle_na(netdev_t *dev, const uint8_t *pkt, size_t len) {
 static void icmp6_handle_echo(const uint8_t saddr[16], const uint8_t daddr[16],
                               const uint8_t *pkt, size_t len) {
     (void)daddr;
-    uint8_t reply[1500];
+    /* Too big for an interrupt stack, which is where this runs from
+     * (netdev_rx -> ip6_input -> icmp6_input): static, and built and sent
+     * with interrupts off, as the IPv4 echo reply is. */
+    static uint8_t reply[1500];
     if (len > sizeof(reply)) return;
+    /* The checksum covers the source ip6_output will write, which is the
+     * routed interface's address -- not daddr, which for a ping of a
+     * multicast group is the group. */
+    uint8_t src[16];
+    if (ip6_source_for(saddr, src) != 0) return;
+    uint32_t fl = intr_disable();
     memcpy(reply, pkt, len);
     struct icmp6_hdr *rh = (struct icmp6_hdr *)reply;
     rh->type = ICMP6_ECHO_REPLY;
     rh->code = 0;
     rh->check = 0;
-    /* checksum is computed in ip6_output via pseudo-header; we set 0
-     * here and the caller will replace.  But ip6_output doesn't know
-     * about ICMPv6's checksum slot, so we compute it now using daddr
-     * as source (we'll send from daddr→saddr). */
-    rh->check = inet_csum_pseudo6(daddr, saddr, IPPROTO_ICMPV6,
+    rh->check = inet_csum_pseudo6(src, saddr, IPPROTO_ICMPV6,
                                   (uint32_t)len, reply);
     ip6_output(saddr, IPPROTO_ICMPV6, reply, len);
+    intr_restore(fl);
 }
 
 void icmp6_input(netdev_t *dev, const uint8_t saddr[16], const uint8_t daddr[16],
