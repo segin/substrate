@@ -465,7 +465,7 @@ SYS-DRV-003 are Critical and not listed.
   Basis: traced.
   Resolution: SVR4 lchown calls the new `kern_lchown`.  `kern_pread`/`kern_pwrite` (and `sys_pread_at`, `sys_preadv_at`, ...) do positioned I/O; the FreeBSD and NetBSD pread/pwrite/preadv/pwritev and FreeBSD `copy_file_range` use them.  `sys_utime` (no caller) checks write permission for `times == NULL`.  Linux `SHMAT` is left as it was: Linux itself keeps the segment attached when the result cannot be written back (checked on a Linux host, `shm_nattch` 1).
 
-- [ ] **SYS-NET-001** *(High → Medium; confirmed)* When `sendmsg_kiov` on an `AF_UNIX` socket processes `SCM_RIGHTS` descriptors (`sys/net/af_unix.c`), the socket layer shall release rolled-back descriptors via `file_close_ptr` rather than raw `__sync_fetch_and_sub(&qf->f_count, 1)`, and shall not leave descriptors queued in `peer->rx_fdq` when the payload send fails.
+- [x] **SYS-NET-001** *(High → Medium; confirmed)* When `sendmsg_kiov` on an `AF_UNIX` socket processes `SCM_RIGHTS` descriptors (`sys/net/af_unix.c`), the socket layer shall release rolled-back descriptors via `file_close_ptr` rather than raw `__sync_fetch_and_sub(&qf->f_count, 1)`, and shall not leave descriptors queued in `peer->rx_fdq` when the payload send fails.
   Evidence: `sys/net/af_unix.c:2388-2392` (`fd_fail:`) decrements `qf->f_count` directly without calling `file_close_ptr(qf)` if a concurrent `close()` dropped the last user reference, and lines 2372–2437 enqueue descriptors into `peer->rx_fdq` before `sock_dgram_sendv` / `sys_send` can fail.
   Basis: traced.
 

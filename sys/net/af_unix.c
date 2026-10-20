@@ -2304,9 +2304,41 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
     return r;
 }
 
+/*
+ * Take back descriptors this sendmsg queued on `peer` for a message that
+ * then failed: off the queue (unless a recvmsg already took them), then
+ * their references dropped with file_close_ptr -- outside peer->lock, since
+ * closing a file can be closing a socket and take socket locks.
+ */
+static void afunix_fdq_withdraw(afunix_sock_t *peer, file_t **mine, int n) {
+    mutex_lock(&peer->lock);
+    for (int k = n - 1; k >= 0; k--) {
+        int found = -1;
+        for (int i = peer->rx_fdq_count - 1; i >= 0; i--) {
+            if (peer->rx_fdq[i] == mine[k]) { found = i; break; }
+        }
+        if (found < 0) {
+            mine[k] = NULL;             /* already received: the receiver's */
+            continue;
+        }
+        for (int i = found; i + 1 < peer->rx_fdq_count; i++)
+            peer->rx_fdq[i] = peer->rx_fdq[i + 1];
+        peer->rx_fdq[--peer->rx_fdq_count] = NULL;
+    }
+    mutex_unlock(&peer->lock);
+    for (int k = 0; k < n; k++)
+        if (mine[k]) file_close_ptr(mine[k]);
+}
+
+static ssize_t sendmsg_payload(int fd, struct msghdr *msg, struct iovec *kiov,
+                               int flags);
+
 static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
                             int flags) {
     afunix_sock_t *s = afunix_from_fd(fd);
+    /* Every descriptor this call queued, for taking back on failure. */
+    file_t *mine[AFUNIX_FDQ_MAX];
+    int nmine = 0;
 
     /*
      * Pin the peer before touching it.
@@ -2378,6 +2410,7 @@ static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
                     cmsg_err = -EMSGSIZE; goto cmsg_done;
                 }
                 int queued = 0;
+                file_t *undo[AFUNIX_FDQ_MAX];
                 for (int i = 0; i < nfds; i++) {
                     if (fds[i] < 0 || fds[i] >= MAX_FD) goto fd_fail;
                     file_t *f = current_process->fds[fds[i]];
@@ -2387,15 +2420,20 @@ static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
                     queued++;
                     continue;
                 fd_fail:
-                    /* Roll back. */
+                    /* Roll back: off the queue under the lock, the
+                     * references dropped after it (see afunix_fdq_withdraw;
+                     * a close() meanwhile may have left ours the last). */
                     for (int j = 0; j < queued; j++) {
-                        file_t *qf = peer->rx_fdq[peer->rx_fdq_count + j];
-                        if (qf && qf->f_count > 0) __sync_fetch_and_sub(&qf->f_count, 1);
+                        undo[j] = peer->rx_fdq[peer->rx_fdq_count + j];
                         peer->rx_fdq[peer->rx_fdq_count + j] = NULL;
                     }
                     mutex_unlock(&peer->lock);
+                    for (int j = 0; j < queued; j++)
+                        file_close_ptr(undo[j]);
                     cmsg_err = -EBADF; goto cmsg_done;
                 }
+                for (int j = 0; j < queued; j++)
+                    mine[nmine++] = peer->rx_fdq[peer->rx_fdq_count + j];
                 peer->rx_fdq_count += queued;
                 mutex_unlock(&peer->lock);
             }
@@ -2404,9 +2442,20 @@ static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
     }
 
 cmsg_done:
+    ;
+    /* A message that is not sent takes none of its descriptors with it:
+     * an earlier SCM_RIGHTS block when a later one fails, or all of them
+     * when the payload cannot be sent. */
+    ssize_t ret = cmsg_err ? cmsg_err : sendmsg_payload(fd, msg, kiov, flags);
+    if (ret < 0 && nmine > 0)
+        afunix_fdq_withdraw(peer, mine, nmine);
     afunix_unref(peer);
-    if (cmsg_err) return cmsg_err;
+    return ret;
+}
 
+/* sendmsg's data, after its control messages. */
+static ssize_t sendmsg_payload(int fd, struct msghdr *msg, struct iovec *kiov,
+                               int flags) {
     ssize_t total = 0;
     /* kiov was copied in above; iov_base entries are still user pointers,
      * but sys_send/sys_sendto copyin them on their own. */

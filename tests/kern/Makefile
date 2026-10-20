@@ -287,6 +287,12 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# scmfail: a failed sendmsg leaves no SCM_RIGHTS descriptor queued.  Runs
+# on the host too.
+scmfail: scmfail.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # elfwrap: a native ELF whose PT_LOAD is not page-congruent loads and exits
 # 42.  Generated, not compiled.
 elfwrap: mkelfwrap.py
