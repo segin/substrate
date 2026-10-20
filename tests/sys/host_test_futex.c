@@ -15,6 +15,7 @@
 #include <sys/futex.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <kern/time.h>
 #include <arch/i386/pmap.h>
 
 typedef struct {
@@ -159,6 +160,29 @@ uint64_t get_ticks(void) {
 uint32_t get_hz(void) {
     return 1000;
 }
+
+/* kern/time.c's conversions, at this test's 1000 Hz. */
+uint64_t timespan_ticks(uint64_t sec, long nsec) {
+    if (sec >= TICKS_FOREVER / 1000)
+        return TICKS_FOREVER;
+    return sec * 1000 + ((uint64_t)nsec * 1000 + 999999999ULL) / 1000000000ULL;
+}
+
+uint64_t abstime_ticks(int64_t sec, long nsec, int64_t now_sec, long now_nsec) {
+    if (sec < now_sec || (sec == now_sec && nsec <= now_nsec))
+        return 0;
+    uint64_t dsec = (uint64_t)sec - (uint64_t)now_sec;
+    long dnsec = nsec - now_nsec;
+    if (dnsec < 0) {
+        dsec--;
+        dnsec += 1000000000L;
+    }
+    return timespan_ticks(dsec, dnsec);
+}
+
+/* One thread at a time here: nothing to preempt. */
+void preempt_disable(void) {}
+void preempt_enable_noresched(void) {}
 
 void sleepq_init(void) {
     memset(waitqs, 0, sizeof(waitqs));

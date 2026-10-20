@@ -39,9 +39,9 @@ ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buff
     return size;
 }
 
-fs_node_t *finddir_fs(fs_node_t *node, char *name) {
+fs_node_t *vfs_lookup(fs_node_t *node, const char *path) {
     (void)node;
-    if (strcmp(name, "acctfile") == 0) {
+    if (strcmp(path, "/acctfile") == 0 || strcmp(path, "acctfile") == 0) {
         return mock_acct_file;
     }
     return NULL;
