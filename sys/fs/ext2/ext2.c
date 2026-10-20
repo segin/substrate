@@ -5474,7 +5474,7 @@ io_error:
 
 static int ext2_truncate_blocks(ext2_fs_t *fs, uint32_t inode_num,
                                 ext2_inode_t *inode, uint32_t keep,
-                                uint32_t new_size) {
+                                uint64_t new_size) {
     if (inode->i_flags & EXT4_EXTENTS_FL)
         return -EOPNOTSUPP;      /* extent trim: see TASKS.md */
 
@@ -5493,7 +5493,10 @@ static int ext2_truncate_blocks(ext2_fs_t *fs, uint32_t inode_num,
     if (b1 >= keep) inode->i_block[12] = 0;
     if (b2 >= keep) inode->i_block[13] = 0;
     if (b3 >= keep) inode->i_block[14] = 0;
-    inode->i_size = new_size;
+    /* All 64 bits: storing only i_size left i_size_high (i_dir_acl) as it
+     * was, so shrinking a file of 4 GiB or more to below it kept the old
+     * high word -- a size up to 4 GiB too large. */
+    ext2_inode_set_size(inode, new_size);
     if (ext2_write_inode(fs, inode_num, inode) != 0) {
         *inode = snap;
         return -EIO;
@@ -5587,7 +5590,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
          * zeros there rather than the old contents. */
         uint32_t keep = (uint32_t)((length + fs->block_size - 1) / fs->block_size);
         ret = ext2_truncate_blocks(fs, ctx->inode_num, &ctx->inode,
-                                   keep, (uint32_t)length);
+                                   keep, (uint64_t)length);
         if (ret == 0) {
             uint32_t tail = (uint32_t)length % fs->block_size;
             if (tail != 0) {
@@ -5615,7 +5618,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
         uint32_t now = (uint32_t)get_time();
         ctx->inode.i_mtime = now;
         ctx->inode.i_ctime = now;
-        node->length = (uint32_t)length;
+        node->length = length;
         ret = ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
         if (ret != 0) {
             ret = -EIO;

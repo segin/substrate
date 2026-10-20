@@ -364,7 +364,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/fs/ext2/ext2_xattr.c:370-433` (`ext2_xattr_get`, `ext2_xattr_list`) serves and lists `EXT4_XATTR_INDEX_TRUSTED` attributes without checking `current_process->euid == 0`.
   Basis: traced.
 
-- [ ] **SYS-FS-005** *(High → Medium; partly confirmed)* When truncating or extending an ext2 file in `ext2_truncate` and `ext2_truncate_blocks`, the ext2 driver shall preserve all 64 bits of `length` via `ext2_inode_set_size`.
+- [x] **SYS-FS-005** *(High → Medium; partly confirmed)* When truncating or extending an ext2 file in `ext2_truncate` and `ext2_truncate_blocks`, the ext2 driver shall preserve all 64 bits of `length` via `ext2_inode_set_size`.
   Evidence: `sys/fs/ext2/ext2.c:5387-5409, 5500-5501, 5529` casts `length` to `(uint32_t)length` and writes `inode->i_size = new_size` and `node->length = (uint32_t)length` without updating `i_dir_acl` (`i_size_high`), corrupting files `>= 4 GiB`.
   Basis: traced.
 

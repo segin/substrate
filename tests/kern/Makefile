@@ -262,6 +262,12 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# bigtrunc: shrinking a file of 4 GiB or more keeps the right size (ext2's
+# i_size_high).  Runs on the host too.
+bigtrunc: bigtrunc.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # tlsstatic: a statically linked program's __thread variables, in its main
 # thread and its threads, and libpthread's own TLS.  Runs on the host too.
 tlsstatic: tlsstatic.c
