@@ -477,7 +477,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/net/icmp.c:445` allocates `uint8_t reply[1500];` on the stack in hard-IRQ context (`netdev_rx -> ip6_input -> icmp6_input`), and line 456 passes multicast `daddr` as the source address to `inet_csum_pseudo6` even though `ip6_output` (`sys/net/inet6.c:427`) substitutes `dev->ip6_addr`.
   Basis: traced.
 
-- [ ] **SYS-NET-004** *(Medium → Low; partly confirmed)* In `ip6_input` (`sys/net/inet6.c`), packets exceeding the 8-header extension limit shall be dropped, and raw socket delivery via `afinet_deliver_v6` shall receive the upper-layer protocol `nh` and payload `(p, plen)`.
+- [x] **SYS-NET-004** *(Medium → Low; partly confirmed)* In `ip6_input` (`sys/net/inet6.c`), packets exceeding the 8-header extension limit shall be dropped, and raw socket delivery via `afinet_deliver_v6` shall receive the upper-layer protocol `nh` and payload `(p, plen)`.
   Evidence: `sys/net/inet6.c:364-386` exits the 8-iteration extension header loop without dropping the packet when `nh` is still an extension header, and line 401 passes `h->next_header, data, len` instead of `nh, p, plen` to `afinet_deliver_v6`.
   Basis: traced.
 

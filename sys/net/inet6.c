@@ -384,6 +384,10 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
             break;
         }
     }
+    /* Still in the extension headers after eight: more than we follow,
+     * so the packet is dropped rather than handed on as if nh were the
+     * upper layer. */
+    if (nh == 0 || nh == 43 || nh == 60 || nh == 44) return;
 
     const uint8_t *l4 = pkt + off;
     size_t l4_len = end - off;
@@ -398,6 +402,8 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
         default:
             break;
     }
-    afinet_deliver_v6(h->src, h->dst, h->next_header, pkt, sizeof(*h) + plen, /*for_dgram=*/0,
+    /* A raw IPv6 socket matches the upper-layer protocol and is given the
+     * payload after the extension headers, as on Linux and the BSDs. */
+    afinet_deliver_v6(h->src, h->dst, nh, l4, l4_len, /*for_dgram=*/0,
                       /*fanout=*/0);
 }
