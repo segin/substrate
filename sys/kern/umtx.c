@@ -262,6 +262,45 @@ static int umtx_mutex_wait(volatile uint32_t *uaddr, const void *utime) {
     return 0;
 }
 
+/* Set UMUTEX_CONTESTED in the lock word at `uaddr`, unless `only_if_owned`
+ * and it is unowned.  Returns 0 or -EFAULT. */
+static int umtx_mark_contested(volatile uint32_t *uaddr, int only_if_owned) {
+    uint32_t owner, found;
+
+    if (umtx_read32(uaddr, &owner) != 0) return -EFAULT;
+    while (!(owner & UMUTEX_CONTESTED)) {
+        if (only_if_owned && owner == UMUTEX_UNOWNED) return 0;
+        if (casuword32(uaddr, owner, owner | UMUTEX_CONTESTED, &found) != 0)
+            return -EFAULT;
+        if (found == owner) break;
+        owner = found;
+    }
+    return 0;
+}
+
+/*
+ * UMTX_OP_MUTEX_WAKE2: libthr's unlock has already stored UMUTEX_UNOWNED,
+ * clearing the contested bit with the owner, and asks for one waiter.  As
+ * FreeBSD's do_wake2_umutex does, put the bit back while waiters remain:
+ * the waiter woken may lose the word to a fast-path locker or take it
+ * itself, and either way the word then says "uncontested", so the next
+ * unlock would wake no one and the remaining waiters slept for ever (a
+ * lost wake-up: torture_pthread's 32-thread mutex test stalled).  With one
+ * waiter, the bit goes back only if the word is owned again.
+ */
+static int umtx_mutex_wake2(volatile uint32_t *uaddr) {
+    void *key = umtx_key((uintptr_t)uaddr);
+    if (!key) return -EFAULT;
+
+    int had = sleepq_has_waiters_private(key);
+    int woken = kern_umtx_wake((void *)uaddr, 1);
+    if (had) {
+        int more = sleepq_has_waiters_private(key);
+        if (umtx_mark_contested(uaddr, !more) != 0) return -EFAULT;
+    }
+    return woken < 0 ? woken : 0;
+}
+
 /*
  * kern_umtx_op — dispatch a single _umtx_op() request.
  *
@@ -298,11 +337,10 @@ int kern_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2
 
     case UMTX_OP_MUTEX_WAKE:
     case UMTX_OP_MUTEX_WAKE2:
-        /* Wake a waiter on a contended umutex.  libthr's unlock fast path
-         * clears the owner word in userspace, then calls WAKE2 to release one
-         * blocked acquirer.  Waking all parked waiters is correct (they
-         * re-contend via cmpset); waking one is the optimization. */
-        return kern_umtx_wake(obj, (int)val > 0 ? (int)val : 1);
+        /* Wake a waiter on a contended umutex (libthr's unlock clears the
+         * word, then asks for this), keeping the contested bit set while
+         * waiters remain.  val is the mutex flags, not a count. */
+        return umtx_mutex_wake2((volatile uint32_t *)obj);
 
     case UMTX_OP_CV_WAIT: {
         /*
