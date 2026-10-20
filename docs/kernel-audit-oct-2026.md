@@ -1113,7 +1113,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Evidence: 7 targets (`test_runner`, `host_test_proc_tree`, `host_test_proc_exit`, `host_test_proc_lifecycle`, `host_test_proc_signal_state`, `host_test_fork_exec_wait`, `host_test_linux_signal`) fail to link on `mq_proc_fork`, `ksem_proc_fork`, `casuword32` and `sys_thr_self`, introduced by this remediation (3cd121605, c069a41ee, the KERN-012 futex change, a2ce8f109).  CI has failed on every run since 3cd121605.  Also `sys/exec/perso/personality.h` uses `size_t` with only `<stdint.h>`.
   Basis: observed (verifier + critic; `gh run list`).
 
-- [ ] **SYS-NEW-007b** *(Low; confirmed)* The tests under `tests/sys` shall build or be removed.
+- [x] **SYS-NEW-007b** *(Low; confirmed)* The tests under `tests/sys` shall build or be removed.
   Evidence: 53 of the 136 `HOST_TESTS` fail to build, most for months (e.g. `RTSIG_QUEUE_MAX`, `fpu_switch`, `poll_notify`, `xout_init_handler` drift).  `host_test_perso_elks` does exercise the syscall table but no longer compiles (stale `stub_sys_stat`/`readdir_fs` prototypes).  The three FAT tests are in no list and need source updates as well as rules.  28 of 31 `tests/sys/torture_*.c`, `torture_fat_persist.c` among them, are built by nothing.  `tests/kern` and `tests/elks` build (except `cat_elks`, which needs ia16-elf-gcc).
   Basis: observed (verifier + critic).
 
@@ -1130,3 +1130,11 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
 - [ ] **SYS-NEW-010** *(Medium; confirmed)* The sysv driver shall recognise the on-disk Xenix and System V superblocks it claims to.
   Evidence: `SYSV_MAGIC_XENIX` (`sys/fs/sysv/sysv.h`) is 0x012FF7B5, which is Linux's statfs `f_type` for System V 4, not a value ever written to a disk; a real Xenix filesystem has magic 0x2B5544 at offset 0x3F8 of a superblock at byte 1024, which the probe (1 KiB read at byte 512, magic at +0x1F8) never looks at.  So no real Xenix volume mounts.  Of the disks with magic 0xFD187E20, the driver reads `s_fsize` at offset 2 -- right for the System V Release 2 layout, wrong for Release 4, whose `s_fsize` follows a 2-byte pad at offset 4.  None of the images in the tree carries such a filesystem (their personality trees are ext2), so this was found by reading, and the driver had been exercised only by synthetic images.  Found while fixing SYS-FS-008.
   Basis: traced (against Linux `fs/sysv`).
+
+- [ ] **SYS-NEW-011** *(Low; confirmed)* Minix shall support `mkdir(2)`.
+  Evidence: `minix_init_node` (`sys/fs/minix/minix.c`) gives a directory node symlink, link, unlink, rmdir and mknod but never `mkdir`, so `vfs_mkdir_in` and `kern_mkdirat` answer EOPNOTSUPP on every Minix volume (V1 and V2), though `minix_mknod` can already make a directory from an `S_IFDIR` mode.  Found when the `tests/sys` torture tests were wired up: `torture_minix` fails there, its other 13 checks passing.
+  Basis: observed.
+
+- [ ] **SYS-NEW-012** *(Low; observed)* The AC97 driver shall honour `O_NONBLOCK`.
+  Evidence: on AC97, `torture_audio_nonblock` never sees EAGAIN -- writes on a non-blocking descriptor go on accepting (blocking) for the whole fill window and the run stalls -- and `torture_audio_share` gets EBUSY from a write.  Only `hda.c` checks the flag (`hda_nonblock`, added by f2ac3e2d5).  Not root-caused.
+  Basis: observed.
