@@ -522,7 +522,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/storage/ide/ide_probe.c:796, 809-811, 831-833` calls `ide_register_blkdev` (which calls `blkdev_register` -> `geom_scan_partitions`) and then calls `geom_scan_partitions(&ide_blkdevs[idx])` again, leaking the first `geom_disk_t` and registering duplicate partition devices.
   Basis: traced.
 
-- [ ] **SYS-DRV-009** *(High → Medium; partly confirmed)* When executing non-data (`data_len == 0`) ATAPI/SATAPI SCSI commands in `ahci_scsi_execute` (`sys/drivers/storage/ahci/ahci.c`) and `ide_atapi_packet` (`sys/drivers/storage/ide/ide_atapi.c`), the drivers shall issue the command with zero data phase rather than failing or waiting for `ATA_SR_DRQ`.
+- [x] **SYS-DRV-009** *(High → Medium; partly confirmed)* When executing non-data (`data_len == 0`) ATAPI/SATAPI SCSI commands in `ahci_scsi_execute` (`sys/drivers/storage/ahci/ahci.c`) and `ide_atapi_packet` (`sys/drivers/storage/ide/ide_atapi.c`), the drivers shall issue the command with zero data phase rather than failing or waiting for `ATA_SR_DRQ`.
   Evidence: `sys/drivers/storage/ahci/ahci.c:1418` rejects `cmd->data_len == 0 || cmd->data == NULL` with `-1`, and `sys/drivers/storage/ide/ide_atapi.c:57-62, 95` waits for `ATA_SR_DRQ` during the data phase even when `len == 0`.
   Basis: traced.
 

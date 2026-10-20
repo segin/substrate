@@ -1413,9 +1413,11 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
      * before building the command.  The ATAPI byte-count-limit is 16 bits
      * (so 0 and >= 65536 are both unrepresentable -- BCL 0 is illegal per
      * ACS-3), and the PRDT dbc field is 22 bits, so anything above 4 MiB
-     * truncates silently.
+     * truncates silently.  A command with no data at all (TEST UNIT READY,
+     * START STOP UNIT, PREVENT ALLOW MEDIUM REMOVAL) has no data phase and
+     * so no byte count: it is issued below without one.
      */
-    if (req->data_len == 0 || req->data_len > 65534u) {
+    if (req->data_len > 65534u) {
         kprintf("ahci: rejecting ATAPI transfer of %u bytes "
                 "(byte-count-limit is 16-bit, 1..65534)\n", req->data_len);
         req->status = SCSI_STATUS_CHECK_CONDITION;
@@ -1468,8 +1470,8 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
      * that enumerates fine and then fails every read.  ap->dmadir comes from
      * the IDENTIFY PACKET issued at probe.
      */
-    fis->featurel = 0x01;                            /* DMA */
-    if (ap->dmadir && !(req->flags & SCSI_REQ_WRITE))
+    fis->featurel = req->data_len ? 0x01 : 0x00;     /* DMA, if any data */
+    if (req->data_len && ap->dmadir && !(req->flags & SCSI_REQ_WRITE))
         fis->featurel |= 0x04;                       /* DMADIR: device -> host */
     /*
      * The ATAPI byte-count-limit is 16 bits, and req->data_len is a

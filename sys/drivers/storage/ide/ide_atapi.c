@@ -58,8 +58,11 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     if (bcl > 0xFFFEU)
         bcl = 0xFFFEU;
     bcl &= ~1U;                     /* BCL must be even */
-    if (bcl == 0)
-        return -1;                  /* a zero limit is not expressible */
+    /* A zero limit is not expressible for a transfer -- but a command with
+     * no data (TEST UNIT READY) has no data phase to limit, and takes the
+     * non-data path after the CDB below. */
+    if (bcl == 0 && buffer_len != 0 && buffer != NULL)
+        return -1;
 
     ide_write_reg(channel, ATA_REG_LBA_MID, bcl & 0xFF);
     ide_write_reg(channel, ATA_REG_LBA_HIGH, (bcl >> 8) & 0xFF);

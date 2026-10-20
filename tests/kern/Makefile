@@ -287,6 +287,12 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# atapitur: TEST UNIT READY (no data) reaches an ATAPI drive.  Substrate
+# only; run as root.
+atapitur: atapitur.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ntsyncintr: an untimed ntsync wait ends on a signal.  Substrate only.
 ntsyncintr: ntsyncintr.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
