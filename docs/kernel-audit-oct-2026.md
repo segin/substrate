@@ -267,7 +267,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/ipc_sem.c:323-338` ignores a `NULL` return from `sem_undo_find` and commits semaphore changes without recording the undo delta; `kern_sem_setval` (`:497-514`) and `kern_sem_setall` (`:532-550`) leave stale `u->adj[semnum]` entries intact.
   Basis: traced.
 
-- [ ] **SYS-KERN-021** *(Medium → Low; partly confirmed)* When setting the session login name in `sys_setlogin`, the kernel shall require superuser privileges (`current_process->euid == 0`).
+- [x] **SYS-KERN-021** *(Medium → Low; partly confirmed)* When setting the session login name in `sys_setlogin`, the kernel shall require superuser privileges (`current_process->euid == 0`).
   Evidence: `sys/pm/pgrp.c:307-321` (`sys_setlogin`) overwrites `s_login` without checking `current_process->euid == 0`.
   Basis: traced.
 

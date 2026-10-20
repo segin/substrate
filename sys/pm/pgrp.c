@@ -125,6 +125,10 @@ void pgrp_free(struct pgrp *pgrp) {
  * pgrp_find - Find a process group by ID
  */
 struct pgrp *pgrp_find(int pgid) {
+    /* No group has an id below 1, and a negative one would index the hash
+     * table below its start. */
+    if (pgid <= 0)
+        return NULL;
     mutex_lock(&proctree_lock);
     int hash = pgrp_hashval(pgid);
     struct pgrp *pgrp = pgrp_hash[hash];
@@ -300,14 +304,17 @@ int sys_getsid(int pid) {
  *
  * FreeBSD setlogin(2) records the session login name (read back by
  * getlogin(2)); init(8) calls setlogin("root") at startup and login(1)
- * sets it per session.  Store it in the session's s_login.  We don't
- * enforce FreeBSD's session-leader/root privilege checks -- a permissive
- * store keeps the personality callers working without a full cred model.
+ * sets it per session.  Store it in the session's s_login.  Only root may:
+ * any user could otherwise rename the session getlogin(2) reports to
+ * every process in it.
  */
 int sys_setlogin(const char *name) {
     char kname[MAXLOGNAME];
     struct session *sess;
 
+    if (current_process->euid != 0) {
+        return -EPERM;
+    }
     if (copyinstr(name, kname, sizeof(kname), NULL) != 0) {
         return -EFAULT;
     }
