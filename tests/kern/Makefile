@@ -309,6 +309,11 @@ ptyopost: ptyopost.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptyff: a 0xFF byte passes through a pty as data, raw and canonical.
+ptyff: ptyff.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pktrebind: an AF_PACKET reader asleep in recv survives a bind.  Substrate
 # only; run as root.
 pktrebind: pktrebind.c

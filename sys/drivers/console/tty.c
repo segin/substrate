@@ -228,10 +228,11 @@ void tty_free(struct tty *tty) {
  * process context and interrupt (keyboard IRQ) context.  Do not call these
  * helpers without holding the lock.
  */
-static int tty_buf_put(tty_buffer_t *tb, char c) {
+static int tty_buf_put_slot(tty_buffer_t *tb, char c, uint8_t delim) {
     int next = (tb->head + 1) % TTY_BUF_SIZE;
     if (next != tb->tail) {
         tb->data[tb->head] = c;
+        tb->delim[tb->head] = delim;
         tb->head = next;
         tb->count++;
         return 0; // Success
@@ -239,12 +240,30 @@ static int tty_buf_put(tty_buffer_t *tb, char c) {
     return -1; // Full
 }
 
+static int tty_buf_put(tty_buffer_t *tb, char c) {
+    return tty_buf_put_slot(tb, c, 0);
+}
+
+/* A canonical line delimiter.  It used to be an in-band 0xFF, so a real
+ * 0xFF byte read as one: raw reads dropped it, canonical reads ended a
+ * line there, and PARMRK's 0xFF 0x00 marks never reached the reader. */
+static int tty_buf_put_delim(tty_buffer_t *tb) {
+    return tty_buf_put_slot(tb, 0, 1);
+}
+
+#define TTY_BUF_DATA  1
+#define TTY_BUF_DELIM 2
+
+/* 0 when empty; else TTY_BUF_DATA with the byte in *c, or TTY_BUF_DELIM
+ * for a line delimiter (both nonzero, so `while (tty_buf_get(...))`
+ * drains a buffer). */
 static int tty_buf_get(tty_buffer_t *tb, char *c) {
     if (tb->head == tb->tail) return 0;
+    int delim = tb->delim[tb->tail];
     *c = tb->data[tb->tail];
     tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
     tb->count--;
-    return 1;
+    return delim ? TTY_BUF_DELIM : TTY_BUF_DATA;
 }
 
 static int tty_canon_len(struct tty *tty) {
@@ -257,9 +276,10 @@ static int tty_canon_len(struct tty *tty) {
 
     for (int i = 0; i < count; i++) {
         char c = tty->raw_buf.data[idx];
+        int delim = tty->raw_buf.delim[idx];
         idx = (idx + 1) % TTY_BUF_SIZE;
 
-        if (c == (char)0xFF) {
+        if (delim) {
             line_len = 0;
             continue;
         }
@@ -486,10 +506,11 @@ static int canon(struct tty *tp, uint32_t *flags_ptr) {
         }
     }
     
-    while (tty_buf_get(&tp->raw_buf, &c)) {
-        if (c == (char)0xFF) { // internal delimiter (0377)
+    int got;
+    while ((got = tty_buf_get(&tp->raw_buf, &c)) != 0) {
+        if (got == TTY_BUF_DELIM) { // end of the line
             tp->delct--;
-            break; 
+            break;
         }
         
         if (!(tp->termios.c_lflag & ICANON)) {
@@ -766,7 +787,7 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
                (tty->termios.c_cc[VEOL2] != 0 &&
                 c == tty->termios.c_cc[VEOL2])) {
         // Add delimiter
-        if (tty_buf_put(&tty->raw_buf, (char)0xFF) == 0) {
+        if (tty_buf_put_delim(&tty->raw_buf) == 0) {
             tty->delct++;
             wake_readers = 1;
         }
@@ -913,13 +934,12 @@ int tty_read(struct tty *tty, char *buf, int len) {
             /* Polling: return whatever is in raw_buf now */
             while (count < len && tty->raw_buf.head != tty->raw_buf.tail) {
                 char c;
-                if (tty_buf_get(&tty->raw_buf, &c)) {
-                    if (c == (char)0xFF) {
-                        tty->delct--;
-                        continue;
-                    }
-                    buf[count++] = c;
+                int got = tty_buf_get(&tty->raw_buf, &c);
+                if (got == TTY_BUF_DELIM) {
+                    tty->delct--;       /* left from canonical mode */
+                    continue;
                 }
+                if (got) buf[count++] = c;
             }
             TTY_UNLOCK(tty);
             return count;
@@ -935,11 +955,12 @@ int tty_read(struct tty *tty, char *buf, int len) {
             /* Try to read from raw_buf */
             while (count < len && tty->raw_buf.head != tty->raw_buf.tail) {
                 char c;
-                if (tty_buf_get(&tty->raw_buf, &c)) {
-                    if (c == (char)0xFF) {
-                        tty->delct--;
-                        continue;
-                    }
+                int got = tty_buf_get(&tty->raw_buf, &c);
+                if (got == TTY_BUF_DELIM) {
+                    tty->delct--;       /* left from canonical mode */
+                    continue;
+                }
+                if (got) {
                     buf[count++] = c;
                     /* MIN>0, TIME>0: start timer after first char */
                     if (vmin > 0 && vtime > 0 && !timer_started) {

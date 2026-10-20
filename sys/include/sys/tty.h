@@ -17,6 +17,9 @@ struct tty;
 
 typedef struct tty_buffer {
     char data[TTY_BUF_SIZE];
+    /* Set on a slot that is a canonical line delimiter rather than data.
+     * Out of band, so every byte value -- 0xFF included -- is data. */
+    uint8_t delim[TTY_BUF_SIZE];
     int head;
     int tail;
     int count;
