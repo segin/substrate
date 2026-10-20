@@ -31,6 +31,9 @@ void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
 
 process_t *current_process = NULL;
 
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+
 // Mock console_get_node
 struct fs_node;
 struct fs_node *console_get_node(void) { return NULL; }
@@ -49,6 +52,7 @@ struct tty;
 int tty_read(struct tty *tty, char *buf, int len) { return 0; }
 int tty_write(struct tty *tty, const char *buf, int len) { return 0; }
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) { return 0; }
+int tty_poll(struct tty *tty, void *waiter) { (void)tty; (void)waiter; return 0; }
 
 // Include the source under test
 #include "../../sys/fs/devfs.c"
@@ -186,7 +190,7 @@ int main() {
     }
     printf("PASS: Alias /dev/by-id/test-mouse points to /dev/input/mouse0\n");
 
-    devfs_unregister_alias("by-id/test-mouse");
+    devfs_unregister_alias("by-id/test-mouse", 0);
     if (devfs_find_child(by_id, "test-mouse") != NULL) {
         printf("FAIL: alias removal failed\n");
         return 1;

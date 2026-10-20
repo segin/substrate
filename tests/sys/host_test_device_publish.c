@@ -33,6 +33,7 @@ void vfs_register_filesystem(struct filesystem *fs) { (void)fs; }
 int tty_read(struct tty *tty, char *buf, int len) { (void)tty; (void)buf; (void)len; return 0; }
 int tty_write(struct tty *tty, const char *buf, int len) { (void)tty; (void)buf; (void)len; return 0; }
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) { (void)tty; (void)cmd; (void)arg; return 0; }
+int tty_poll(struct tty *tty, void *waiter) { (void)tty; (void)waiter; return 0; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 time_t get_time(void) { return mock_now; }
 time_t get_boot_time(void) { return mock_boot; }

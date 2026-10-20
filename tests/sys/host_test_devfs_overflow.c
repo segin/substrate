@@ -19,6 +19,7 @@ typedef struct tty tty_t;
 int tty_read(tty_t *tty, char *buf, int len) { return 0; }
 int tty_write(tty_t *tty, const char *buf, int len) { return 0; }
 int tty_ioctl(tty_t *tty, uint32_t cmd, unsigned long arg) { return 0; }
+int tty_poll(tty_t *tty, void *waiter) { (void)tty; (void)waiter; return 0; }
 
 struct fs_node;
 struct fs_node *console_get_node(void) { return NULL; }
@@ -43,6 +44,9 @@ time_t get_boot_time(void) { return 3500; }
 
 // Define current_process (extern in sys/proc.h)
 process_t *current_process = NULL;
+
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
 
 // -----------------------------------------------------------------------------
 // Test
