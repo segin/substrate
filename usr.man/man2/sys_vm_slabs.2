@@ -1,6 +1,6 @@
 .TH SYS_VM_SLABS 2 "2026-05-09" "Substrate" "System Calls Manual"
 .SH NAME
-sys_vm_slabs \- query slab allocator statistics
+sys_vm_slabs \- query physical page use by allocation site
 .SH LIBRARY
 System library (libsys, \-lsys)
 .SH SYNOPSIS
@@ -9,8 +9,9 @@ System library (libsys, \-lsys)
 .BI "int sys_vm_slabs(sys_slabinfo_t *" slabs ", size_t *" count ");"
 .SH DESCRIPTION
 .BR sys_vm_slabs ()
-enumerates UMA zones (Substrate's slab allocator).  Each entry is
-a
+reports the kernel's page accounting table: one entry per kernel call
+site that has allocated physical pages.
+Each entry is a
 .B sys_slabinfo_t :
 .PP
 .RS
@@ -26,13 +27,32 @@ typedef struct sys_slabinfo {
 .fi
 .RE
 .PP
+.TP
+.I name
+The call site: its kernel address,
+.RI \(dq pc=0x ...\(dq,
+for root; for anyone else only its position in the table,
+.RI \(dq "site " N\(dq,
+since a kernel text address shows where the kernel is loaded.
+.TP
+.I objsize
+The page size.
+.TP
+.I total
+Pages the site has allocated.
+.TP
+.I active
+Pages it still holds.
+.TP
+.I slabs
+Pages it has freed.
+.TP
+.I pages_per_slab
+Always 1.
+.PP
 On entry
 .I *count
-is the array capacity; on return it is the actual number of UMA
-zones.  Until UMA grows a public iterator the syscall returns
-.IR *count " = 0"
-and writes nothing — a graceful "no data" answer rather than
-.BR ENOSYS .
+is the array capacity; on return it is the number of entries written.
 .SH RETURN VALUE
 0 on success; on failure -1 and
 .I errno

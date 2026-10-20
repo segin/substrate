@@ -193,7 +193,8 @@ int sys_vm_buffers(sys_bufinfo_t *buf) {
 
 /* sys_vm_slabs: report the per-call-site physical-page accounting
  * table (kern/memtrack.c).  Each record maps to one sys_slabinfo_t:
- *   name           "pc=0x........" — the allocating call site
+ *   name           "pc=0x........" — the allocating call site (root;
+ *                  others get "site N")
  *   objsize        page size (these are page-granular allocations)
  *   total          pages allocated from this site over its lifetime
  *   active         pages still outstanding (alloc - free) — the leak
@@ -212,8 +213,13 @@ int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count) {
     for (size_t i = 0; i < n && slabs && out_n < cap; i++) {
         sys_slabinfo_t si;
         memset(&si, 0, sizeof(si));
-        snprintf(si.name, sizeof(si.name), "pc=0x%0*lx",
-                 (int)(2 * sizeof(uintptr_t)), (unsigned long)recs[i].pc);
+        /* A kernel text address tells an ordinary user where the kernel
+         * sits; it gets a site number instead. */
+        if (current_process && current_process->euid != 0)
+            snprintf(si.name, sizeof(si.name), "site %u", (unsigned)i);
+        else
+            snprintf(si.name, sizeof(si.name), "pc=0x%0*lx",
+                     (int)(2 * sizeof(uintptr_t)), (unsigned long)recs[i].pc);
         si.objsize        = PAGE_SIZE;
         si.total          = (uint32_t)recs[i].pages_alloc;
         si.active         = (uint32_t)(recs[i].pages_alloc - recs[i].pages_free);

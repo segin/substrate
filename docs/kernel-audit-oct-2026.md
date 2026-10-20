@@ -280,7 +280,7 @@ SYS-DRV-003 are Critical and not listed.
   Basis: traced.
   Resolution: `setuid`, `setgid`, `seteuid` and `setegid` refuse `-1` with `EINVAL`.  Other values `< -1` are kept: as a `uid_t` they are ordinary high ids (4294967294 is a common "nobody"), which Linux and the BSDs accept too.
 
-- [ ] **SYS-KERN-024** *(Medium → Low; partly confirmed)* When returning slab allocation site records in `sys_vm_slabs`, the kernel shall redact kernel text return addresses (`recs[i].pc`) for unprivileged callers (`current_process->euid != 0`).
+- [x] **SYS-KERN-024** *(Medium → Low; partly confirmed)* When returning slab allocation site records in `sys_vm_slabs`, the kernel shall redact kernel text return addresses (`recs[i].pc`) for unprivileged callers (`current_process->euid != 0`).
   Evidence: `sys/kern/sysinfo.c:215` formats `pc=0x%08x` (`recs[i].pc`) into `si.name` and copies it out to any unprivileged caller.
   Basis: traced.
 

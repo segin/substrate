@@ -287,6 +287,12 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# slabsredact: sys_vm_slabs shows kernel addresses to root only.  Substrate
+# only; run as root.
+slabsredact: slabsredact.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # setidneg.linux: setuid(-1) and setgid(-1) are EINVAL.  Runs on the host
 # too (as root).
 setidneg.linux: setidneg.c
