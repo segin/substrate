@@ -89,6 +89,13 @@ void kernel_kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 // Include first to get real blkdev_t definition
 #include "../../sys/vfs/vfs.c"
 
+void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
+void mutex_lock(mutex_t *m) { (void)m; }
+void mutex_unlock(mutex_t *m) { (void)m; }
+void proc_registry_lock(void) {}
+void proc_registry_unlock(void) {}
+struct personality *perso_lookup(int id) { (void)id; return NULL; }
+
 
 static blkdev_t mock_blkdev_root;
 static blkdev_t mock_blkdev_ram1;
@@ -196,7 +203,16 @@ int main() {
     ASSERT_EQ(vfs_mount_legacy("dev", "/dir", "dummy", 0, NULL), 0);
     ASSERT_EQ(unmount_called, 0);
 
+    /* Replacing a mounted root is refused; only the initial (boot) root
+     * mount, with fs_root still NULL, succeeds. */
+    unmount_called = 0;
+    ASSERT_EQ(vfs_mount_legacy("dev", "/", "dummy", 0, NULL), -EBUSY);
+    ASSERT_EQ(unmount_called, 1);
+    ASSERT_EQ(fs_root, &my_root);
+
+    fs_root = NULL;
     ASSERT_EQ(vfs_mount_legacy("dev", "/", "dummy", 0, NULL), 0);
+    ASSERT_EQ(fs_root, &dummy_root);
     fs_root = &my_root;
 
     // Test label resolution (LABEL=root)
@@ -204,6 +220,9 @@ int main() {
     mock_blkdev_root.next = &mock_blkdev_ram1;
     strncpy(mock_blkdev_ram1.name, "ram1", sizeof(mock_blkdev_ram1.name));
     mock_blkdev_ram1.next = NULL;
+    /* Label resolution skips devices with no media. */
+    mock_blkdev_root.total_sectors = 1;
+    mock_blkdev_ram1.total_sectors = 1;
 
     last_mount_dev_node = NULL;
 
@@ -234,6 +253,7 @@ int main() {
     // Test kmalloc failure for mount entry allocation
     fail_kmalloc = 1;
     // Expected to return 0 because mount is structurally successful, but a warning is printed.
+    fs_root = NULL;
     ASSERT_EQ(vfs_mount_legacy("dev", "/", "dummy", 0, NULL), 0);
     fail_kmalloc = 0;
 
