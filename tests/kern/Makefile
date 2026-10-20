@@ -262,6 +262,16 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# thrwake: thr_wake reaches only the caller's own threads.  Substrate only.
+thrwake: thrwake.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
+# getdentspad.linux: getdents64 entries carry no kernel stack in their
+# padding.  Runs on the host too.
+getdentspad.linux: getdentspad.c
+	gcc -m32 -static -O2 $< -o $@
+
 # sysctlstr: a string sysctl takes a value without its NUL, and an empty one.
 # Substrate only.
 sysctlstr: sysctlstr.c

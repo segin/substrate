@@ -1858,7 +1858,11 @@ int sys_thr_suspend(const struct timespec *timeout) {
 
 int sys_thr_wake(abi_long_t id) {
     if (id == 0) id = current_thread->tid;
-    thread_t *t = sched_get_thread((int)id);
+    /* One of the caller's own threads, as thr_kill and thr_set_name look
+     * them up: any tid used to do, so a process could set the wake bit on,
+     * and wake out of whatever sleep it was in, a thread of another
+     * process or of the kernel. */
+    thread_t *t = thr_lookup_in_proc(id, current_process);
     if (!t) return -3;
     /* Set the latched-wake bit so a subsequent thr_suspend returns
      * immediately (FreeBSD-style wake-before-sleep race fix). */

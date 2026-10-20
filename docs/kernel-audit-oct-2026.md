@@ -223,11 +223,11 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/ipc_shm.c:255-317` (`kern_shmat`) checks only `virt & 0xFFF` when `have_addr` is true and immediately calls `vm_map_remove(map, virt, virt + length)` at line 308 without bounds or wrap-around validation.
   Basis: traced.
 
-- [ ] **SYS-KERN-010** *(High → Medium; partly confirmed)* When waking a thread in `sys_thr_wake`, the kernel shall restrict lookup to threads belonging to `current_process` via `thr_lookup_in_proc(id, current_process)`.
+- [x] **SYS-KERN-010** *(High → Medium; partly confirmed)* When waking a thread in `sys_thr_wake`, the kernel shall restrict lookup to threads belonging to `current_process` via `thr_lookup_in_proc(id, current_process)`.
   Evidence: `sys/kern/syscall.c:1721-1730` (`sys_thr_wake`) calls global `sched_get_thread((int)id)` without checking `t->proc == current_process`, allowing any process to wake threads in other processes or kernel threads.
   Basis: traced.
 
-- [ ] **SYS-KERN-011** *(High → Medium; partly confirmed)* Before copying directory entries to user space in `kern_getdents` and `kern_getdents64`, the kernel shall zero the alignment padding bytes of each entry.
+- [x] **SYS-KERN-011** *(High → Medium; partly confirmed)* Before copying directory entries to user space in `kern_getdents` and `kern_getdents64`, the kernel shall zero the alignment padding bytes of each entry.
   Evidence: `sys/kern/syscall.c:1303-1407` allocates `char temp_buf[512];` on the kernel stack without `memset` and copies `reclen` (aligned up to 4 or 8 bytes) bytes into `dirp`, disclosing 1–7 bytes of uninitialized kernel stack per directory entry.
   Basis: traced.
 
