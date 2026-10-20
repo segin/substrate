@@ -230,7 +230,7 @@ static void test_tty_canon_buffer_receives_cooked_line(void) {
     assert(tty_buf_put(&tty.raw_buf, 'a') == 0);
     assert(tty_buf_put(&tty.raw_buf, 't') == 0);
     assert(tty_buf_put(&tty.raw_buf, '\n') == 0);
-    assert(tty_buf_put(&tty.raw_buf, (char)0xFF) == 0);
+    assert(tty_buf_put_delim(&tty.raw_buf) == 0);
     tty.delct = 1;
 
     assert(canon(&tty, &flags) == 0);
@@ -299,7 +299,7 @@ static void test_tty_ixoff_high_and_low_water_marks(void) {
     assert(tty_buf_put(&tty.raw_buf, 'o') == 0);
     assert(tty_buf_put(&tty.raw_buf, 'k') == 0);
     assert(tty_buf_put(&tty.raw_buf, '\n') == 0);
-    assert(tty_buf_put(&tty.raw_buf, (char)0xFF) == 0);
+    assert(tty_buf_put_delim(&tty.raw_buf) == 0);
     tty.delct = 1;
 
     assert(canon(&tty, &flags) == 0);
@@ -469,7 +469,7 @@ static void test_tty_input_parity_checks_and_stripping(void) {
 
     /*
      * ISTRIP clears the high bit: 0xE1 arrives as 0x61.  c_lflag is 0, so
-     * ICANON is off and this is raw mode -- no 0xFF line delimiter is
+     * ICANON is off and this is raw mode -- no line delimiter is
      * appended and delct stays 0.  The delimiter only goes in for a line
      * terminator in canonical mode, and 'a' would not be one even then.
      * This test asserted two bytes and delct == 1.
