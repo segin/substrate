@@ -287,6 +287,11 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# ldtfork.linux: an LDT survives fork, with LDT-less processes switched in
+# between.
+ldtfork.linux: ldtfork.c
+	gcc -m32 -static -O2 $< -o $@
+
 # wakeopatomic.linux: FUTEX_WAKE_OP's update of *uaddr2 loses no
 # concurrent increment.  Runs on the host too.
 wakeopatomic.linux: wakeopatomic.c

@@ -300,12 +300,11 @@ static void ldt_warn_suspicious(const struct user_desc *info) {
 }
 
 void ldt_activate(process_t *proc) {
-    if (!proc) {
-        ldt_load_selector(0);
-        return;
-    }
-    if (!proc->ldt || proc->ldt_entry_count <= 0) {
-        ldt_load_selector(0);
+    /* No LDT: ldt_activate_locked(NULL) loads a null LDTR and, on
+     * x86_64, also clears the GDT's LDT descriptor, which would otherwise
+     * still describe the previous process's (perhaps freed) table. */
+    if (!proc || !proc->ldt || proc->ldt_entry_count <= 0) {
+        ldt_activate_locked(NULL);
         return;
     }
     spinlock_acquire(&proc->ldt_lock);
@@ -386,7 +385,8 @@ int ldt_clone_process(process_t *dst, const process_t *src) {
         spinlock_acquire((spinlock_t *)&src_proc->ldt_lock);
         if (!src_proc->ldt || src_proc->ldt_entry_count != src_entry_count) {
             spinlock_release((spinlock_t *)&src_proc->ldt_lock);
-            kfree(new_ldt, bytes);
+            /* A full-size LDT came from ldt_full_zone, not kmalloc. */
+            ldt_free_storage(new_ldt, src_entry_count, new_is_uma);
             continue;
         }
         memcpy(new_ldt, src_proc->ldt, bytes);

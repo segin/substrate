@@ -175,7 +175,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/arch/x86-common/fpu.c:72-88, 515-571` tracks lazy ownership in `fpu_owner[MAX_CPUS]`. If thread `T` dirties the FPU on CPU A (`fpu_owner[A] == T`) and migrates to CPU B, `fpu_handler` on CPU B restores `T->fpu_area` from memory before CPU A has saved its live registers. `fpu_forget_process` (`sys/arch/x86-common/fpu.c:272-279`) also modifies `fpu_owner[cpu]` without disabling interrupts.
   Basis: traced.
 
-- [ ] **SYS-ARCH-006** *(High → Low; partly confirmed)* When cloning or deactivating a process LDT in `sys/arch/i386/ldt.c`, the kernel shall release LDT storage through `ldt_free_storage` and clear the GDT LDT descriptor on x86_64 when switching to a process without an LDT.
+- [x] **SYS-ARCH-006** *(High → Low; partly confirmed)* When cloning or deactivating a process LDT in `sys/arch/i386/ldt.c`, the kernel shall release LDT storage through `ldt_free_storage` and clear the GDT LDT descriptor on x86_64 when switching to a process without an LDT.
   Evidence: `sys/arch/i386/ldt.c:389` (`ldt_clone_process`) calls `kfree(new_ldt, bytes)` instead of `ldt_free_storage(new_ldt, src_entry_count, new_is_uma)` when `src_entry_count == 8192` (`new_is_uma == 1`, allocated from `ldt_full_zone`). `ldt_activate` (`sys/arch/i386/ldt.c:302-310`) returns after `ldt_load_selector(0)` when `proc->ldt == NULL`, leaving the previous process's 16-byte LDT descriptor marked `GDT_PRESENT` in the x86_64 GDT.
   Basis: traced.
 
