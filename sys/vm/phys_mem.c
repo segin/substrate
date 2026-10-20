@@ -700,22 +700,24 @@ void vm_phys_mark_used(uintptr_t pa) {
     head->flags |= PG_PMM_ALLOC;
     head->order = 0;
     head->ref_count = 1;
-    if (vm_phys_free_count > 0) vm_phys_free_count--;
+    /* The counter of the zone the page is in: a page above 4 GiB came
+     * off the high lists. */
+    size_t *count = vm_phys_count_of(head);
+    if (*count > 0) (*count)--;
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
 }
 
-int vm_phys_check_integrity(void) {
+/* One zone's free lists agree with themselves and with its counter.
+ * Caller holds vm_phys_lock. */
+static int vm_phys_check_zone(vm_page_t **lists, size_t free_count) {
     int ok = 1;
     size_t accounted_free = 0;
 
-    uint32_t flags = intr_disable();
-    spinlock_acquire(&vm_phys_lock);
-
     for (int order = 0; order < PMM_MAX_ORDER && ok; order++) {
-        vm_page_t *slow = vm_phys_free_lists[order];
-        vm_page_t *fast = vm_phys_free_lists[order];
+        vm_page_t *slow = lists[order];
+        vm_page_t *fast = lists[order];
 
         while (fast && fast->next) {
             slow = slow->next;
@@ -726,7 +728,7 @@ int vm_phys_check_integrity(void) {
             }
         }
 
-        for (vm_page_t *page = vm_phys_free_lists[order]; page; page = page->next) {
+        for (vm_page_t *page = lists[order]; page; page = page->next) {
             uintptr_t block_size = ((uintptr_t)1 << order) * PMM_BLOCK_SIZE;
 
             if (!vm_page_valid(page)) {
@@ -754,9 +756,19 @@ int vm_phys_check_integrity(void) {
         }
     }
 
-    if (ok && accounted_free != vm_phys_free_count) {
+    if (ok && accounted_free != free_count) {
         ok = 0;
     }
+    return ok;
+}
+
+/* Both zones: below 4 GiB, and the high lists above it. */
+int vm_phys_check_integrity(void) {
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+
+    int ok = vm_phys_check_zone(vm_phys_free_lists, vm_phys_free_count) &&
+             vm_phys_check_zone(vm_phys_hi_free_lists, vm_phys_hi_free_count);
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);

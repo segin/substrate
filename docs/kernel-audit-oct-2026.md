@@ -142,7 +142,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/vm/uma_core.c:576-625` (`uma_zdestroy`) frees slabs and `zone` without calling `uma_bucket_detach_full_for_zone(zone)` or draining `zone->uz_cpu[i]`, leaving dangling `ub_zone` pointers in `uma_bucket_full_depot`. `uma_slab_free` (`sys/vm/uma_core.c:826-832`) calls `uz_fini(obj, zone->uz_size)` instead of `uz_fini(obj + UMA_REDZONE_SIZE, zone->uz_size)`.
   Basis: traced.
 
-- [ ] **SYS-VM-010** *(Medium → Low; partly confirmed)* When marking a physical page used in `vm_phys_mark_used` or verifying free-list integrity in `vm_phys_check_integrity`, the physical memory manager shall update and inspect the zone counter corresponding to the page's buddy zone.
+- [x] **SYS-VM-010** *(Medium → Low; partly confirmed)* When marking a physical page used in `vm_phys_mark_used` or verifying free-list integrity in `vm_phys_check_integrity`, the physical memory manager shall update and inspect the zone counter corresponding to the page's buddy zone.
   Evidence: `sys/vm/phys_mem.c:674` decrements `vm_phys_free_count` instead of `*vm_phys_count_of(head)` (underflowing the low-zone counter when marking a `>= 4 GiB` high-zone page used), and `vm_phys_check_integrity` (`:680-735`) only inspects `vm_phys_free_lists` and ignores `vm_phys_hi_free_lists`.
   Basis: traced.
 
