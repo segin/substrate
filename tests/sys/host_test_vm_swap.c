@@ -46,7 +46,7 @@ void kfree(void *ptr, size_t size) {
 static uint8_t *mock_disk_buffer = NULL;
 static size_t mock_disk_size = 0;
 
-size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (offset + size > mock_disk_size) {
         if (offset >= (off_t)mock_disk_size) return 0;
@@ -58,7 +58,7 @@ size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     return size;
 }
 
-size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     if (offset + size > mock_disk_size) {
         return 0; // Error
