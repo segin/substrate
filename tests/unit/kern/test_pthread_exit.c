@@ -18,9 +18,13 @@ bool test_pthread_exit_logic(void) {
     }
     if (!current_process) return false;
 
-    // Allocate a new thread structure
+    // Allocate a new thread structure, and a live sibling: the last thread
+    // of a process to exit ends the process instead (proc_exit).
     thread_t *t = sched_alloc_thread(current_process);
     if (!t) return false;
+    thread_t *sib = sched_alloc_thread(current_process);
+    if (!sib) return false;
+    sib->state = THREAD_RUNNING;
 
     // Manually set up the thread as if it's running
     t->state = THREAD_RUNNING;
@@ -41,6 +45,8 @@ bool test_pthread_exit_logic(void) {
     // Cleanup and Restore
     current_thread = saved_current;
     t->tid = -1; // Mark as free for next tests
+    sib->state = THREAD_ZOMBIE;
+    sib->tid = -1;
 
     return success;
 }

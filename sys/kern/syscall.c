@@ -34,6 +34,7 @@
 #include <sys/acct.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/futex.h>
 #include <sys/exec.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
@@ -1577,7 +1578,50 @@ int kern_thr_new(struct thr_param *param, int param_size) {
     return 0;
 }
 
+/*
+ * Is the caller the last of its process's threads still running?  If not,
+ * mark it exiting -- in the same critical section, so that of two threads
+ * leaving at once exactly one sees itself as the last.
+ */
+static int thread_exit_claim_last(void) {
+    int others = 0;
+    unsigned long f = thread_registry_lock();
+    FOREACH_THREAD(t) {
+        if (t == current_thread || t->proc != current_process)
+            continue;
+        if (t->state == THREAD_ZOMBIE || (t->flags & THREAD_F_EXITING))
+            continue;
+        others++;
+    }
+    if (others)
+        current_thread->flags |= THREAD_F_EXITING;
+    thread_registry_unlock(f);
+    return others == 0;
+}
+
+/*
+ * End the calling thread; the process ends (status `last_code`) if it was
+ * the last one running.  sys_thr_exit used to end only the thread even
+ * then, so a process whose threads all left that way (NetBSD _lwp_exit,
+ * FreeBSD thr_exit) never exited -- nor ran proc_exit's per-process
+ * cleanup (IPC handles, robust futexes of the others).  The thread's own
+ * robust futexes are released here (proc_exit does it for every thread).
+ */
+int kern_thread_exit(void *retval, int last_code) {
+    if (thread_exit_claim_last()) {
+        proc_exit(last_code);
+        return 0;   /* not reached */
+    }
+    futex_thread_exit(current_thread);
+    return sys_thr_exit_now(retval);
+}
+
 int sys_thr_exit(void *retval) {
+    /* POSIX: the process exits with status 0 when its last thread does. */
+    return kern_thread_exit(retval, 0);
+}
+
+int sys_thr_exit_now(void *retval) {
     current_thread->retval = retval;
     /*
      * Become non-preemptible before publishing THREAD_ZOMBIE.  The instant we
@@ -1597,11 +1641,12 @@ int sys_thr_exit(void *retval) {
      */
     preempt_disable();
     current_thread->state = THREAD_ZOMBIE;
-    /* A detached LWP (NetBSD LWP_DETACHED / _lwp_detach) has no joiner to
-     * reap it, so hand it to sched_yield()'s deferred detached-zombie reaper;
-     * a joinable thread stays a zombie until sys_thr_join()/_lwp_wait reaps
-     * it.  Only NetBSD threads ever set THREAD_F_DETACHED, so the native and
-     * FreeBSD paths are unaffected. */
+    /* A detached thread has no kernel joiner to reap it, so hand it to
+     * sched_yield()'s deferred detached-zombie reaper; a joinable thread
+     * stays a zombie until sys_thr_join()/_lwp_wait reaps it.  Detached are
+     * NetBSD LWPs (LWP_DETACHED / _lwp_detach) and every Linux thread,
+     * which is joined through its clear-tid word instead (linux_sys_exit);
+     * native and FreeBSD threads are not. */
     if (current_thread->flags & THREAD_F_DETACHED)
         sched_mark_detached_zombie();
     sleepq_wake_all(current_thread);

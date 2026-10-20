@@ -407,6 +407,10 @@ typedef struct thread {
  */
 #define THREAD_F_IO_NONBLOCK   0x0020 // MSG_DONTWAIT for the in-flight socket call
                                       // (distinct from job-control THREAD_STOPPED)
+/* Leaving through a thread-only exit (kern_thread_exit): no longer counted
+ * as one of the process's live threads, so of two threads exiting at once
+ * exactly one finds itself the last and ends the process. */
+#define THREAD_F_EXITING       0x0040
 
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level

@@ -412,6 +412,19 @@ static int linux_sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
     return 0;
 }
 
+/*
+ * exit(2): end the calling thread only; exit_group(2) ends the process.
+ * Both used to end the process, and glibc ends every thread with exit, so
+ * a threaded program died with its first thread.  The last thread's exit
+ * still ends the process, with its status.  The thread is detached: Linux
+ * threads are joined through their clear-tid word, not thr_join, so the
+ * deferred reaper frees it.
+ */
+static int linux_sys_exit(int code) {
+    current_thread->flags |= THREAD_F_DETACHED;
+    return kern_thread_exit(NULL, code);
+}
+
 /* gettid(2): the calling thread's id. */
 static int linux_sys_gettid(void) {
     return sys_thr_self();
@@ -1077,7 +1090,7 @@ static int __attribute__((unused)) linux_sys_ioctl(int fd, uint32_t request, voi
 }
 
 static void *linux_syscalls[MAX_SYSCALLS] = {
-    [LINUX_SYS_exit]           = (void *)&sys_exit,
+    [LINUX_SYS_exit]           = (void *)&linux_sys_exit,
     [LINUX_SYS_fork]           = (void *)&sys_fork,
     [LINUX_SYS_read]           = (void *)&sys_read,
     [LINUX_SYS_write]          = (void *)&sys_write,

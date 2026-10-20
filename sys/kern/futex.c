@@ -350,12 +350,14 @@ void futex_wake_exited_thread(int *uaddr) {
     void *key = futex_get_key((uintptr_t)uaddr);
     if (!key) return;
 
-    /* Write 1 to signify exit.  The address is whatever the thread gave
+    /* Clear the word to 0, as Linux does for CLONE_CHILD_CLEARTID and
+     * set_tid_address (the only users): glibc's pthread_join waits while
+     * the word is non-zero, so the 1 written here would have left every
+     * joiner asleep.  The address is whatever the thread gave
      * set_tid_address or clone, so it is stored with copyout: that refuses
-     * anything outside user space (a kernel address made this a store of
-     * 1 to arbitrary kernel memory) and recovers from a page the thread
-     * may not write.  An address that fails wakes no one. */
-    int exited = 1;
+     * anything outside user space and recovers from a page the thread may
+     * not write.  An address that fails wakes no one. */
+    int exited = 0;
     if (copyout(&exited, uaddr, sizeof(exited)) != 0) return;
 
     /* Wake all waiters on the per-process private sleepq (futexes key by

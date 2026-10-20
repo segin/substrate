@@ -48,6 +48,12 @@ int kern_sigaltstack(const stack_t *ss, stack_t *oss);
 int kern_getdents(unsigned int fd, void *dirp, unsigned int count);
 int kern_getdents64(unsigned int fd, void *dirp, unsigned int count);
 void proc_exec_reset_signals(void);
+
+/* End the calling thread, or the process (status last_code) when it is the
+ * last thread running; sys_thr_exit is kern_thread_exit(retval, 0). */
+int kern_thread_exit(void *retval, int last_code);
+/* The thread-only exit itself, after kern_thread_exit's checks. */
+int sys_thr_exit_now(void *retval);
 int kern_uname(struct utsname *buf);
 int kern_thr_new(struct thr_param *param, int param_size);
 int kern_chroot(const char *path);

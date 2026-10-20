@@ -1086,7 +1086,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Fix: a per-arch upper bound (or none on x86_64), rate-limited logging in the "insane" branches, and a boot-time self-check.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-004** *(Medium; confirmed)* A Linux thread's `exit` (`SYS_exit`, not `exit_group`) shall end only that thread, and its `CLONE_CHILD_CLEARTID` word shall be cleared to 0.
+- [x] **SYS-NEW-004** *(Medium; confirmed)* A Linux thread's `exit` (`SYS_exit`, not `exit_group`) shall end only that thread, and its `CLONE_CHILD_CLEARTID` word shall be cleared to 0.
   Evidence: Linux `exit` (1) and `exit_group` (252) both map to `sys_exit` → `proc_exit`, which kills every thread (`sys/exec/perso/perso_linux.c`); glibc threads end with `SYS_exit`, so the first thread exit ends the process.  Companion bug: `futex_wake_exited_thread` writes 1, not 0, to the clear-tid word (`sys/kern/futex.c:358`, since ef53a85f2; the comment at :372 says "zeroes"), which would hang glibc `pthread_join` once threads stop killing the process.  No Linux x86_64 personality exists; the i386 table is built into both kernels.  Also: `sys_thr_exit` (`syscall.c:1580`) has no last-thread check, so a process whose last thread leaves through `thr_exit`/`_lwp_exit` never reaches `proc_exit` — the only caller of the mq/ksem/shm exit cleanup.
   Fix: `linux_sys_exit`: the last live thread calls `proc_exit`; otherwise run the robust-list cleanup, mark the thread detached and exit it alone; write 0 to the clear-tid word.  The same last-thread rule in `sys_thr_exit`.
   Basis: traced (verifier + critic).
@@ -1112,3 +1112,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
 - [ ] **SYS-NEW-007b** *(Low; confirmed)* The tests under `tests/sys` shall build or be removed.
   Evidence: 53 of the 136 `HOST_TESTS` fail to build, most for months (e.g. `RTSIG_QUEUE_MAX`, `fpu_switch`, `poll_notify`, `xout_init_handler` drift).  `host_test_perso_elks` does exercise the syscall table but no longer compiles (stale `stub_sys_stat`/`readdir_fs` prototypes).  The three FAT tests are in no list and need source updates as well as rules.  28 of 31 `tests/sys/torture_*.c`, `torture_fat_persist.c` among them, are built by nothing.  `tests/kern` and `tests/elks` build (except `cat_elks`, which needs ia16-elf-gcc).
   Basis: observed (verifier + critic).
+
+- [ ] **SYS-NEW-008** *(Medium)* FreeBSD `libthr` mutex contention shall not lose a wake-up.
+  Evidence: `torture-cross/freebsd32/torture_pthread` (built on FreeBSD 14 i386, run under `/perso/freebsd`) stalls in its first test, 32 threads contending on one mutex: most of them asleep on the mutex word (one user address in every thread's WaitChan) while the holders have exited.  On the kernel from before the October 2026 remediation it hangs in 2 runs of 3 and passes in the third; a build at `b61a15847` once crashed the test with SIGSEGV instead.  So it is an old, nondeterministic race in the FreeBSD umtx emulation (`sys/exec/perso/compat.c`, `kern_umtx_*`), not a regression.  A simple FreeBSD threads test (join, `pthread_exit`, exit status, last-thread exit; `tests/kern/linuxthrexit.c` built on FreeBSD) passes.
+  Basis: observed.

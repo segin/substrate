@@ -186,6 +186,12 @@ chrootesc: chrootesc.c
 chrootesc.linux: chrootesc.c
 	gcc -m32 -static -O2 $< -o $@
 
+# linuxthrexit.linux: a glibc program's threads end one at a time (exit(2)
+# ended the process) and pthread_join returns (the clear-tid word was set to
+# 1, not 0).  Runs on the host too.
+linuxthrexit.linux: linuxthrexit.c
+	gcc -m32 -static -O2 -pthread $< -o $@
+
 # lseekchk: lseek refuses a position before the start or past the largest
 # off_t, and keeps 64-bit positions.  Runs on the host too.
 lseekchk: lseekchk.c

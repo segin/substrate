@@ -95,14 +95,27 @@ found through a pid hash plus an all-processes list; there is no
 process-table limit. SMP discovery parses the ACPI MADT (or MP tables) for
 CPUs, I/O APICs and interrupt overrides; application processors are started
 but then halt, so scheduling is single-CPU. `nosmp` keeps them from
-starting but still registers the I/O APICs.
+starting but still registers the I/O APICs. Every thread-only exit
+(`sys_thr_exit`, NetBSD `_lwp_exit`, FreeBSD `thr_exit`, Linux `exit`) goes
+through `kern_thread_exit()` (`sys/kern/syscall.c`), which decides
+atomically under the thread registry lock whether the caller is the
+process's last running thread; the last one ends the process through
+`proc_exit()`, so per-process cleanup always runs. Linux `exit_group` ends
+the process; Linux threads are detached and joined through their
+clear-tid word, which the scheduler zeroes and futex-wakes as the thread
+leaves the CPU.
 
 **Inter-process communication** (`sys/kern/`): System V semaphores
 (`ipc_sem.c`) and shared memory (`ipc_shm.c`); POSIX message queues
 (`posix_mqueue.c`) — a fixed table of named queues with priority-ordered
 messages, per-queue `ipc_perm`, `SIGEV_SIGNAL` notification, and
 interruptible, timeout-aware blocking — whose userspace side (`mq_*`) is in
-`lib/rt`; POSIX semaphores (`posix_sem.c`); and futexes (`futex.c`).
+`lib/rt`, split into open descriptions (shared across `fork`) and
+per-process handles; POSIX semaphores (`posix_sem.c`), where a named
+semaphore is reachable only through an open of it and a `sem_init`
+semaphore is keyed by the identity of the memory holding it (vm object
+and offset, or physical address), so only processes sharing that memory
+share it; and futexes (`futex.c`).
 Terminals and ptys are drivers, under `sys/drivers/console`.
 
 **Memory** (`sys/vm/`): physical page allocator, a two-level i386 pmap with
@@ -112,7 +125,19 @@ magic canary, a buddy-allocator double-allocation check, a UMA
 double-free guard, and a `vm_map` auditor — turn heap corruption into an
 immediate panic at the point it happens. Kernel stacks are 16 KiB, enough
 for the deepest nesting (the network transmit path interrupted by a
-receive interrupt).
+receive interrupt). Each physical page carries a reverse map (pv entries:
+every pmap and address it is mapped at), which COW and page reclaim
+consult; pointer sanity checks bound kernel objects with the per-arch
+`KERNEL_DATA_VA_END` from `<machine/vmparam.h>`, never a literal.
+
+*Memory accounting.* `kern/memtrack.c` charges every page leaving the
+buddy allocator (`vm_phys_alloc_*`) to the calling code's return address,
+stamped on the page, and every page returning (`vm_phys_free_*`) back to
+that site; `pmm_alloc_*` re-attribute to their own callers.
+`/proc/memtrack` lists pages allocated, freed and live per site, with the
+free page count beside the total so the books can be checked to balance;
+`/proc/uma` lists the slab zones (objects in use, objects held in caches,
+pages). Together they locate any leak to a call site (`proc(5)`).
 
 **Filesystems** (`sys/vfs/`, `sys/fs/`): ext2 read-write, including
 extent-mapped and htree-indexed directories; FAT and exFAT read-write
@@ -122,7 +147,17 @@ and devfs, procfs, sysfs and shmfs, which the kernel mounts itself after
 the root. The block cache (`sys/vfs/bio.c`) sits under the block-device
 layer, keyed by device and sector with read coalescing and write-through,
 so no filesystem or driver carries caching logic
-(`docs/design/block-cache-consolidation.md`).
+(`docs/design/block-cache-consolidation.md`); it is bounded at an eighth of
+RAM and reuses empty buffers before growing.
+
+*Node lifetime.* A filesystem's `fs_node_t` stays valid while it is open:
+`open_fs`/`close_fs` call the node's `open`/`close`, and drivers pin on
+them (ext2's `pin_count`, procfs's per-pid node blocks, which outlive their
+process while held, Minix's per-inode lookup cache). A path walk takes no
+reference on the nodes it passes through, so a driver must not free or
+recycle a node merely because nothing has it open; the remaining cases and
+the planned lookup reference are SYS-NEW-001b in
+`docs/kernel-audit-oct-2026.md`.
 
 **Drivers** (`sys/drivers/`):
 
@@ -176,7 +211,12 @@ resegments when it shrinks.
 **Executables and personalities** (`sys/exec/`): the loader picks a
 personality from the ELF OSABI byte, an a.out header's machine ID, or an
 `x.out` header's CPU field, and each personality supplies the system-call
-table and process setup for its ABI. Foreign binaries see their own
+table and process setup for its ABI. A loader builds the new address space
+beside the caller's (`exec_space_begin`/`_commit`/`_abort` in
+`sys/exec/exec.c`, used by the a.out, COFF, ELKS and x.out loaders; ELF
+does the same inline): every step that can fail runs before the commit,
+and a failure switches back, so a failed `exec` returns its error to the
+intact old image. Foreign binaries see their own
 system's files through `/perso/<name>/` trees. The segmented 16-bit
 personalities — ELKS (`elks_aout.c`) and 16-bit Xenix (`xout.c`) — run
 in real LDT segments rather than a flattened address space, so the
@@ -488,7 +528,11 @@ the toolchain is cached between runs).
   silent corruption from propagating.
 - **Kernel interfaces.** System calls validate user pointers through
   `copyin`/`copyout`; `/dev/kmem` is read-only; `O_NOFOLLOW` and
-  `O_DIRECTORY` are enforced at open.
+  `O_DIRECTORY` are enforced at open. Every `sigreturn` (native and each
+  personality's) checks the segment selectors in the frame with `LAR`
+  (`<machine/usersel.h>`) and kills the process on a bad one rather than
+  faulting in the kernel, and no restored mask may block SIGKILL or SIGSTOP.
+  A chrooted process resolves absolute symlinks from its own root.
 - **Randomness.** `/dev/random` and `/dev/urandom` come from a CSPRNG
   seeded from RDRAND/RDSEED where present, and from timer jitter where not;
   the TCP initial sequence numbers and IP identification fields use it.
