@@ -24,12 +24,18 @@ struct p9_fs {
     uint32_t root_fid;
     uint32_t msize;
     uint16_t next_tag;
+    uint8_t  dotl;          /* the server agreed to 9P2000.L */
 };
 
+/* Atomically: a read of a mount can run beside another (the transport is
+ * serialised, the tag counter was not), and two requests given one tag
+ * cannot tell their replies apart. */
 static uint16_t p9_alloc_tag(struct p9_fs *fs) {
-    uint16_t tag = fs->next_tag++;
-    if (fs->next_tag == P9_NOTAG)
-        fs->next_tag = 0;
+    uint16_t tag;
+
+    do {
+        tag = __sync_fetch_and_add(&fs->next_tag, 1);
+    } while (tag == P9_NOTAG);
     return tag;
 }
 
@@ -45,9 +51,16 @@ static uint16_t p9_alloc_tag(struct p9_fs *fs) {
  * single place a real free list has to go.
  */
 static uint32_t p9_alloc_fid(struct p9_fs *fs) {
-    if (fs->next_fid >= P9_NOFID)
-        return P9_NOFID;
-    return fs->next_fid++;
+    uint32_t fid = fs->next_fid;
+
+    for (;;) {
+        if (fid >= P9_NOFID)
+            return P9_NOFID;
+        uint32_t seen = __sync_val_compare_and_swap(&fs->next_fid, fid, fid + 1);
+        if (seen == fid)
+            return fid;
+        fid = seen;
+    }
 }
 
 /*
@@ -101,9 +114,28 @@ static int p9_version(struct p9_fs *fs) {
     int rlen = virtio_9p_send(msg, msize, rmsg, rsize_max);
     /* Tversion is the one message that legitimately uses NOTAG, and the
      * server must echo it. */
-    if (p9_reply_ok(rmsg, rlen, P9_RVERSION, P9_NOTAG)) {
-        success = 1;
-        // Ideally we should check the negotiated version and msize
+    if (p9_reply_ok(rmsg, rlen, P9_RVERSION, P9_NOTAG) && rlen >= 13) {
+        /*
+         * Rversion's msize[4] and version[s] were never read: the mount
+         * went on with the msize it had proposed, though the server may
+         * only accept less (every Tread is sized from it), and with a
+         * protocol the server may have refused ("unknown").  The server's
+         * msize must be no more than proposed and big enough to carry a
+         * read; the version must be one this client speaks.
+         */
+        uint32_t smsize;
+        uint16_t vlen;
+
+        memcpy(&smsize, rmsg + 7, sizeof(smsize));
+        memcpy(&vlen, rmsg + 11, sizeof(vlen));
+        if (vlen <= rlen - 13 && smsize <= fs->msize &&
+            smsize > P9_RREAD_HDR_LEN + 256 &&
+            ((vlen == 8 && memcmp(rmsg + 13, "9P2000.L", 8) == 0) ||
+             (vlen == 6 && memcmp(rmsg + 13, "9P2000", 6) == 0))) {
+            fs->msize = smsize;
+            fs->dotl = (vlen == 8);
+            success = 1;
+        }
     }
 
     kfree(msg, msize);
@@ -124,7 +156,11 @@ static uint32_t p9_attach(struct p9_fs *fs) {
     uint16_t uname_len = strlen(uname);
     uint16_t aname_len = strlen(aname);
 
-    uint32_t msize = 4 + 1 + 2 + 4 + 4 + 2 + uname_len + 2 + aname_len;
+    /* 9P2000.L's Tattach ends with n_uname[4], the numeric user; without
+     * it a .L server cannot decode the message (QEMU's says so and never
+     * replies, and the mount waited for ever). */
+    uint32_t msize = 4 + 1 + 2 + 4 + 4 + 2 + uname_len + 2 + aname_len +
+                     (fs->dotl ? 4 : 0);
     uint8_t *msg = kmalloc(msize);
     if (!msg) return P9_NOFID;
 
@@ -138,7 +174,9 @@ static uint32_t p9_attach(struct p9_fs *fs) {
     *(uint16_t*)p = uname_len; p += 2;
     memcpy(p, uname, uname_len); p += uname_len;
     *(uint16_t*)p = aname_len; p += 2;
-    memcpy(p, aname, aname_len);
+    memcpy(p, aname, aname_len); p += aname_len;
+    if (fs->dotl)
+        *(uint32_t*)p = 0;              /* n_uname: uid 0, as uname says */
 
     // Rattach: size[4] Rattach[1] tag[2] qid[13]
     uint32_t rsize_max = 4 + 1 + 2 + 13;
@@ -188,6 +226,10 @@ static size_t p9_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *b
     uint8_t *p = msg;
 
     if (!node || !buffer)
+        return 0;
+    /* Tread's offset is unsigned on the wire: a negative off_t would ask
+     * the server for an offset near 2^64. */
+    if (offset < 0)
         return 0;
 
     fs = (struct p9_fs *)node->impl;

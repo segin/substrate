@@ -398,7 +398,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/fs/ext2/ext2.c:297-301` executes `if (buffer) memset(buffer, 0, fs->block_size * count);` on the invalid-block error path without overflow checking, and `ext2_setattr` (`:2407-2475`) omits `if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;`.
   Basis: traced.
 
-- [ ] **SYS-FS-011** *(Medium → Low; confirmed)* In the 9P filesystem (`sys/fs/9p.c`), `p9_version` shall validate the server's negotiated `msize` and version string, `p9_vfs_read` shall reject negative `offset`, and `next_tag`/`next_fid` allocation shall be synchronized.
+- [x] **SYS-FS-011** *(Medium → Low; confirmed)* In the 9P filesystem (`sys/fs/9p.c`), `p9_version` shall validate the server's negotiated `msize` and version string, `p9_vfs_read` shall reject negative `offset`, and `next_tag`/`next_fid` allocation shall be synchronized.
   Evidence: `sys/fs/9p.c:104-108` ignores the payload of `P9_RVERSION`, `p9_vfs_read` (`:174, 231`) casts signed `off_t` to `uint64_t` without checking `offset < 0`, and `p9_alloc_tag`/`p9_alloc_fid` (`:29-51`) increment `fs->next_tag` and `fs->next_fid` without locking.
   Basis: traced.
 

@@ -117,6 +117,13 @@ void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     v9p.desc = (struct vring_desc *)q_mem;
     v9p.avail = (struct vring_avail *)((char*)q_mem + 16 * q_size);
     v9p.used = (struct vring_used *)((char*)q_mem + used_ring_offset);
+    /* This driver polls the used ring and installs no interrupt handler.
+     * Left enabled, each completion raised the device's level-triggered
+     * INTx and nothing deasserted it (that takes a read of the ISR
+     * register): on a line shared with a handled device the interrupt
+     * fired for ever, and the machine stopped right after the first
+     * 9P reply -- a mount that never returned. */
+    v9p.avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
 
     // Write PFN - MUST be physical address!
     q_phys = (uint32_t)V2P(q_mem);
@@ -209,14 +216,20 @@ int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_le
      * no way out.  Bound it; a 9P server that has not answered in this many
      * spins is not going to.
      */
+    /* The device writes used->idx behind the compiler's back: read it
+     * through a volatile lvalue every time round.  The plain read could be
+     * hoisted out of the loop (the pause had no memory clobber either), and
+     * then the loop spun its whole bound on a stale copy -- a mount that
+     * seemed to hang, or gave up on a reply that had arrived. */
     spins = 0;
-    while (v9p.last_used_idx == v9p.used->idx) {
+    while (v9p.last_used_idx == *(volatile uint16_t *)&v9p.used->idx) {
         if (++spins > VIRTIO_9P_WAIT_SPINS) {
             mutex_unlock(&v9p_lock);
             return -1;
         }
-        __asm__ volatile("pause");
+        __asm__ volatile("pause" ::: "memory");
     }
+    __asm__ volatile("" ::: "memory");   /* the element after the index */
 
     /*
      * [9P-09] The used-ring element carries how many bytes the device
@@ -229,6 +242,8 @@ int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_le
      */
     used_len = v9p.used->ring[v9p.last_used_idx % v9p.q_size].len;
     v9p.last_used_idx++;
+    /* NO_INTERRUPT is only a hint: deassert anything raised regardless. */
+    (void)inb(v9p.io_base + VIRTIO_REG_ISR_STATUS);
 
     /* The device must never claim to have written more than we offered. */
     if (used_len > in_len)
