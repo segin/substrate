@@ -440,7 +440,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/exec/perso/perso_elks.c:1159, 1171, 1518, 1540, 1562, 1584, 2351, 2381, 2397` (`elks_sys_read`, `elks_sys_write`, `elks_sys_waitpid`, `elks_sys_getpid`, `elks_sys_getuid`, `elks_sys_getgid`, `elks_sys_ioctl`) call `elks_ds_pointer(off, &linear)` (which checks only `off <= limit`) before multi-byte `copyin`/`copyout`/`memcpy`.
   Basis: traced.
 
-- [ ] **SYS-EXEC-006** *(High → Low; partly confirmed)* When handling `MAP_ALIGNED(n)` in `freebsd_sys_mmap` (`sys/exec/perso/compat.c`), the kernel shall reject alignment shifts `>= 28` (or `>= 31`), page-align `len`, and check `len + align` for overflow before mapping and unmapping trim regions.
+- [x] **SYS-EXEC-006** *(High → Low; partly confirmed)* When handling `MAP_ALIGNED(n)` in `freebsd_sys_mmap` (`sys/exec/perso/compat.c`), the kernel shall reject alignment shifts `>= 28` (or `>= 31`), page-align `len`, and check `len + align` for overflow before mapping and unmapping trim regions.
   Evidence: `sys/exec/perso/compat.c:169-183` checks only `align_shift > 12`. Passing `align_shift >= 31` causes shift UB in `(size_t)1 << align_shift`, integer overflow in `over = len + align`, and integer underflow in `tail = over - head - len`, passing a huge `tail` to `sys_munmap`.
   Basis: traced.
 

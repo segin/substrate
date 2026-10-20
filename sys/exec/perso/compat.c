@@ -167,18 +167,27 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
      * the alignment shift; MAP_ALIGNMENT_SHIFT = 24 on FreeBSD.)
      */
     unsigned align_shift = ((unsigned)flags >> 24) & 0xff;
+    /* As FreeBSD: 0 is none, 1 is MAP_ALIGNED_SUPER (a hint, taken as
+     * none), and otherwise the shift must be from a page (12) to below the
+     * width of the process's pointers (32). */
+    if (align_shift != 0 && align_shift != 1 &&
+        (align_shift < 12 || align_shift >= 32))
+        return (void *)(intptr_t)(-EINVAL);
     if (align_shift > 12 && !(flags & FREEBSD_MAP_FIXED)) {
         size_t align = (size_t)1 << align_shift;
-        size_t over  = len + align;
+        size_t plen  = (len + 4095) & ~(size_t)4095;
+        if (len == 0 || plen < len || plen > SIZE_MAX - align)
+            return (void *)(intptr_t)(len == 0 ? -EINVAL : -ENOMEM);
+        size_t over  = plen + align;
         char *base = (char *)sys_mmap(NULL, over, prot, kflags, fd, offset);
-        if (base == (char *)-1 || (uintptr_t)base > (uintptr_t)-4096)
-            return (void *)-1;
+        if ((uintptr_t)base > (uintptr_t)-4096)
+            return base;                /* its -errno */
         uintptr_t raw     = (uintptr_t)base;
         uintptr_t aligned = (raw + align - 1) & ~(uintptr_t)(align - 1);
         size_t head = aligned - raw;
-        size_t tail = over - head - len;
+        size_t tail = over - head - plen;
         if (head) sys_munmap(base, head);
-        if (tail) sys_munmap((void *)(aligned + len), tail);
+        if (tail) sys_munmap((void *)(aligned + plen), tail);
         return (void *)aligned;
     }
 
