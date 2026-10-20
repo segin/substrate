@@ -61,8 +61,8 @@ int main(void) {
 
     assert(fat_make_synth_inode(&fs, 9, 1, 32, 77) == 77);
 
-    node_a = fat_alloc_node(&fs, "FILE.TXT", root_slot_a, 0, 123, 0);
-    node_b = fat_alloc_node(&fs, "FILE.TXT", root_slot_a, 0, 123, 0);
+    node_a = fat_alloc_node(&fs, "FILE.TXT", root_slot_a, 0, 123, 0, 0);
+    node_b = fat_alloc_node(&fs, "FILE.TXT", root_slot_a, 0, 123, 0, 0);
     assert(node_a != NULL);
     assert(node_b != NULL);
     assert(node_a->inode == root_slot_a);
