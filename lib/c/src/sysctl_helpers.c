@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/syscall.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <sys_local.h>
-#define SYS_SYSCTL 243 // Matches sys/syscall.h syscall table
 
 int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     if (!name || namelen < 1 || namelen > CTL_MAXNAME) {
