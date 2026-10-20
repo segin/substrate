@@ -107,7 +107,23 @@ void sysctl_init(void) {
 /*
  * Implementation of sys_sysctl System Call
  */
+static int sysctl_call(int *name, unsigned int namelen, void *oldp,
+                       abi_size_t *oldlenp, void *newp, size_t newlen);
+
+/*
+ * sysctl(2).  The handlers keep BSD's positive errnos; a system call
+ * returns a negative one.  This returned them positive, which both libc
+ * wrappers read as success: a failed sysctl() returned 0 and left the
+ * caller's buffer and length as they were.
+ */
 int sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen) {
+    int error = sysctl_call(name, namelen, oldp, oldlenp, newp, newlen);
+
+    return error > 0 ? -error : error;
+}
+
+static int sysctl_call(int *name, unsigned int namelen, void *oldp,
+                       abi_size_t *oldlenp, void *newp, size_t newlen) {
     int error = 0;
     struct sysctl_oid *oid;
     struct sysctl_req req;
@@ -346,11 +362,16 @@ int sysctl_handle_string(struct sysctl_oid *oidp, void *arg1, int arg2, struct s
 
     if (req->newptr) {
         size_t newlen = req->newlen;
+        if (!str || arg2 <= 0) return EINVAL;
         if (newlen > (size_t)arg2) return ENAMETOOLONG; // arg2 is max len for string
         // Copy in new string
         error = copyin(req->newptr, str, newlen);
         if (error) return error;
-        str[newlen-1] = '\0'; // Ensure termination
+        /* Terminate after what was given.  This wrote str[newlen - 1], so an
+         * empty new value (newlen 0) wrote a byte before the buffer, and a
+         * value passed without its NUL lost its last character.  Only a value
+         * that fills the whole buffer gives up its last byte. */
+        str[newlen < (size_t)arg2 ? newlen : (size_t)arg2 - 1] = '\0';
     }
     return 0;
 }

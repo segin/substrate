@@ -191,7 +191,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/syscall.c:1661-1678` (`sys_thr_kill2`) looks up `target_proc = proc_find(pid)` and posts `sig` via `signal_post_thread` without calling `signal_can_send` and without checking `target_proc->pid == 1`. Any unprivileged user can send `SIGKILL` to any root process or `init` (PID 1). The `id == -1` loop (`:1667-1671`) also iterates `threads[]` without acquiring `thread_registry_lock()`.
   Basis: traced.
 
-- [ ] **SYS-KERN-002** *(Critical → Medium; partly confirmed)* When handling a string write in `sysctl_handle_string`, the sysctl subsystem shall not index before the beginning of the destination buffer when `req->newlen == 0`.
+- [x] **SYS-KERN-002** *(Critical → Medium; partly confirmed)* When handling a string write in `sysctl_handle_string`, the sysctl subsystem shall not index before the beginning of the destination buffer when `req->newlen == 0`.
   Evidence: `sys/kern/sysctl.c:347-354` checks `if (req->newlen > (size_t)arg2) return ENAMETOOLONG;`, calls `sysctl_new_kernel(req, str, req->newlen)` (which returns `0` for `newlen == 0`), and executes `str[req->newlen - 1] = '\0'`, writing a NUL byte to `str[-1]`.
   Basis: traced.
 

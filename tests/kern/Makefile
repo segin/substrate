@@ -262,6 +262,12 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# sysctlstr: a string sysctl takes a value without its NUL, and an empty one.
+# Substrate only.
+sysctlstr: sysctlstr.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # bigtrunc: shrinking a file of 4 GiB or more keeps the right size (ext2's
 # i_size_high).  Runs on the host too.
 bigtrunc: bigtrunc.c
