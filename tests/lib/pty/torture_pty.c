@@ -38,6 +38,7 @@
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -874,15 +875,27 @@ TEST(tcflush_both) {
     return 0;
 }
 
-/* Drain bytes off a non-blocking fd until it would block, then return;
- * lets a peer's output flush without the drainer itself blocking. */
+/* Drain the 8 bytes tcdrain_slave writes off a non-blocking fd, polling
+ * for at most about a second; lets the peer's output flush without the
+ * drainer itself blocking.  Bounded by bytes and by elapsed time, not by
+ * a count of 1 ms naps: a 1 ms usleep() lasts two clock ticks on a
+ * kernel without high-resolution timers (8 ms at HZ=250), and a thousand
+ * of them outlived the test's watchdog. */
 static void *short_drainer(void *a) {
     int fd = *(int *)a;
     char b[256];
-    for (int i = 0; i < 1000; i++) {
+    size_t got = 0;
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    while (got < 8) {
         ssize_t r = read(fd, b, sizeof(b));
-        if (r > 0) continue;
-        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) { usleep(1000); continue; }
+        if (r > 0) { got += (size_t)r; continue; }
+        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            if (t1.tv_sec - t0.tv_sec > 1) break;
+            usleep(1000);
+            continue;
+        }
         break;
     }
     return NULL;
