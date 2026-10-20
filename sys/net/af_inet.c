@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <machine/intr.h>
 #include <kern/console.h>
 #include <kern/file.h>
 #include <kern/sched.h>
@@ -408,16 +409,23 @@ static int afinet_add_alias(void *arg) {
     if (!a || !afinet_ifaddr_ok(dev, a)) return -EINVAL;
     if (!m) m = afinet_classful_mask(a);
     if (ip4_dev_has_addr(dev, a)) return -EEXIST;
+    /* The receive path reads the address table from the NIC interrupt
+     * (ip4_dev_entry): change it with interrupts off, so it never sees an
+     * entry counted before it is written, or an address without its mask. */
+    uint32_t fl = intr_disable();
+    int rc = 0;
     if (!dev->ip4_addr) {
         dev->ip4_addr = a;
         dev->ip4_netmask = m;
-        return 0;
+    } else if (dev->ip4_nalias >= NETDEV_IP4_ALIASES) {
+        rc = -ENOSPC;
+    } else {
+        dev->ip4_alias[dev->ip4_nalias].addr = a;
+        dev->ip4_alias[dev->ip4_nalias].mask = m;
+        dev->ip4_nalias++;
     }
-    if (dev->ip4_nalias >= NETDEV_IP4_ALIASES) return -ENOSPC;
-    dev->ip4_alias[dev->ip4_nalias].addr = a;
-    dev->ip4_alias[dev->ip4_nalias].mask = m;
-    dev->ip4_nalias++;
-    return 0;
+    intr_restore(fl);
+    return rc;
 }
 
 static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
@@ -679,6 +687,9 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
              * SIOCSIFADDR instead. */
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
             if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
+            /* Interrupts off: the receive path reads the table from the
+             * NIC interrupt, and the shift below moves entries under it. */
+            uint32_t fl = intr_disable();
             for (unsigned i = 0; i < dev->ip4_nalias; i++) {
                 if (dev->ip4_alias[i].addr != sin->sin_addr) continue;
                 for (unsigned j = i + 1; j < dev->ip4_nalias; j++)
@@ -686,8 +697,10 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
                 dev->ip4_nalias--;
                 dev->ip4_alias[dev->ip4_nalias].addr = 0;
                 dev->ip4_alias[dev->ip4_nalias].mask = 0;
+                intr_restore(fl);
                 return 0;
             }
+            intr_restore(fl);
             return -EADDRNOTAVAIL;
         }
         case SIOCSIFNETMASK: {

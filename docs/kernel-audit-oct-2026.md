@@ -481,9 +481,10 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/net/inet6.c:364-386` exits the 8-iteration extension header loop without dropping the packet when `nh` is still an extension header, and line 401 passes `h->next_header, data, len` instead of `nh, p, plen` to `afinet_deliver_v6`.
   Basis: traced.
 
-- [ ] **SYS-NET-005** *(Medium → Low; partly confirmed)* In `sys/net/icmp.c`, `sys/net/netdev.c`, and `sys/net/af_inet.c`, ICMP reply transmission shall not call `ip4_output_opts` / `ip6_output` with interrupts disabled around static buffers (which blocks ARP/ND6 resolution), and `g_netdevs` / `dev->ip4_alias[]` accesses shall be synchronized against concurrent readers.
+- [x] **SYS-NET-005** *(Medium → Low; partly confirmed)* In `sys/net/icmp.c`, `sys/net/netdev.c`, and `sys/net/af_inet.c`, ICMP reply transmission shall not call `ip4_output_opts` / `ip6_output` with interrupts disabled around static buffers (which blocks ARP/ND6 resolution), and `g_netdevs` / `dev->ip4_alias[]` accesses shall be synchronized against concurrent readers.
   Evidence: `sys/net/icmp.c:223-249, 354-365` holds `intr_disable()` across `ip4_output_opts`/`ip6_output` (which return `-EHOSTUNREACH` whenever `!intr_enabled()` and ARP/ND6 is uncached); `sys/net/netdev.c:124-140` walks `g_netdevs` without `g_netdev_lock`; and `sys/net/af_inet.c:416-420` mutates `dev->ip4_alias[]` without IRQ synchronization.
   Basis: traced.
+  Resolution: adding and removing an address (`SIOCAIFADDR`, `SIOCDIFADDR`) now runs with interrupts disabled, so the receive path, which reads the table from the NIC interrupt, never sees it half changed.  Not changed: the ICMP replies already run in interrupt context, so the `intr_disable` there changes nothing, and dropping a reply to an unresolved next hop after sending the ARP/ND request is by design (it cannot wait in an interrupt).  The netdev list only grows, so lockless readers are safe.
 
 ---
 
