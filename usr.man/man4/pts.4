@@ -27,6 +27,17 @@ until the caller issues
 .BR TIOCSPTLCK
 with a value of 0
 .RB ( unlockpt (3)).
+.PP
+Bytes written to the master become the slave's input.  While the slave
+is open in non-canonical mode and its input buffer (2 KiB) is full, a
+master
+.BR write (2)
+waits for the slave to read; with
+.B O_NONBLOCK
+set on the master it returns a short count or fails with
+.BR EAGAIN .
+In canonical mode a line longer than the buffer cannot be read, so its
+excess is discarded instead.
 .SS /dev/pts/<N>
 The slave behaves like a regular controlling terminal.  All termios
 flags (canonical mode, echo, signal generation, software flow
