@@ -239,7 +239,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/sysctl.c:48` registers `kern.securelevel` with generic `sysctl_handle_int` (`:303-330`) and `CTLFLAG_RW`, allowing root to lower `securelevel` back to `0` or `-1`.
   Basis: traced.
 
-- [ ] **SYS-KERN-014** *(Medium → Low; partly confirmed)* When writing a process accounting record in `acct_process` or enabling accounting in `kern_acct`, the kernel shall zero `struct acct ac`, require a regular file resolved via `vfs_lookup`, and close any previously active `acct_node`.
+- [x] **SYS-KERN-014** *(Medium → Low; partly confirmed)* When writing a process accounting record in `acct_process` or enabling accounting in `kern_acct`, the kernel shall zero `struct acct ac`, require a regular file resolved via `vfs_lookup`, and close any previously active `acct_node`.
   Evidence: `sys/kern/acct.c:73-97` (`acct_process`) leaves `ac.ac_exitcode` and struct padding in `struct acct ac` uninitialized on the stack before `write_fs`; `kern_acct` (`:48-57`) overwrites `acct_node` without closing the prior node and uses single-component `finddir_fs(fs_root, ...)`.
   Basis: traced.
 

@@ -18,8 +18,30 @@ system call enables or disables process accounting. If called with the name of a
 If
 .I filename
 is NULL, accounting is turned off.
+A relative
+.I filename
+is resolved from the caller's working directory.
+Turning accounting on with a new file stops writing to the old one.
 .SH RETURN VALUE
-On success, zero is returned. On error, -1 is returned.
+On success, zero is returned. On error, \-1 is returned, and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+.I filename
+is not a regular file.
+.TP
+.B EFAULT
+.I filename
+points outside the accessible address space.
+.TP
+.B ENOENT
+.I filename
+does not exist.
+.TP
+.B EPERM
+The caller is not the superuser.
 
 .SH SEE ALSO
 .BR intro(2)

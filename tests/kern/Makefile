@@ -278,6 +278,10 @@ sysctlstr: sysctlstr.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# acctpath.linux: acct(2) takes a whole path, and only a regular file.
+acctpath.linux: acctpath.c
+	gcc -m32 -static -O2 $< -o $@
+
 # seclevel: kern.securelevel cannot be lowered once above zero.  Substrate
 # only; leaves the level raised until reboot.
 seclevel: seclevel.c

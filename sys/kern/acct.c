@@ -5,6 +5,7 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
+#include <string.h>
 #include <vfs/vfs.h>
 #include <kern/sched.h>
 #include <kern/time.h>
@@ -45,14 +46,20 @@ int kern_acct(const char *path) {
         return 0;
     }
 
-    // In a real kernel, we would check permissions here.
-    fs_node_t *node = finddir_fs(fs_root, (char*)path); // Simple path lookup
+    /* A whole path, from the caller's root or working directory. */
+    fs_node_t *root = fs_root, *start;
+    if (current_process && current_process->root_node)
+        root = current_process->root_node;
+    start = root;
+    if (path[0] != '/' && current_process && current_process->cwd_node)
+        start = current_process->cwd_node;
+    fs_node_t *node = vfs_lookup(start, path);
     if (!node) return -ENOENT;
 
-    // Should verify it's a regular file
-    if ((node->flags & 0x7) == FS_DIRECTORY) {
+    /* Records go only to a regular file. */
+    if ((node->flags & 0x7) != FS_FILE) {
         vfs_rele(node);
-        return -EISDIR;
+        return -EACCES;
     }
 
     /* Kept open (open_fs) while accounting is on; the lookup's reference
@@ -80,6 +87,9 @@ void acct_process(int exitcode) {
 
     struct acct ac;
     process_t *p = current_process;
+
+    /* The padding goes to the file too. */
+    memset(&ac, 0, sizeof(ac));
 
     // Copy comm
     for (int i = 0; i < AC_COMM_LEN; i++) ac.ac_comm[i] = p->comm[i];
