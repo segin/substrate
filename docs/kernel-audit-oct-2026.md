@@ -452,7 +452,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/exec/formats/script.c:96-117` builds `new_argv[4]` on the kernel stack, and `aout_capture_vector` (`sys/exec/formats/aout.c:171-225`) unconditionally passes `uvec` to `copyin`/`copyinstr`, failing with `-EFAULT`.
   Basis: traced.
 
-- [ ] **SYS-EXEC-009** *(Medium → Low; partly confirmed)* When loading an ELF `PT_LOAD` segment in `elf_load`, the loader shall not underflow `uint32_t file_off = phdr[i].p_offset + (va - phdr[i].p_vaddr)` when `va < phdr[i].p_vaddr` and `phdr[i].p_offset < (phdr[i].p_vaddr - va)`.
+- [x] **SYS-EXEC-009** *(Medium → Low; partly confirmed)* When loading an ELF `PT_LOAD` segment in `elf_load`, the loader shall not underflow `uint32_t file_off = phdr[i].p_offset + (va - phdr[i].p_vaddr)` when `va < phdr[i].p_vaddr` and `phdr[i].p_offset < (phdr[i].p_vaddr - va)`.
   Evidence: `sys/exec/formats/elf.c:778-799` computes `uint32_t file_off = phdr[i].p_offset + (va - phdr[i].p_vaddr);` at `va = start` (`p_vaddr & ~0xFFF`), which wraps around `0` if `p_offset < (p_vaddr & 0xFFF)`.
   Basis: traced.
 

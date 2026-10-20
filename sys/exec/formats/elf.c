@@ -775,8 +775,13 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
              * Falls back to the per-page pmm_alloc_block + read loop
              * below if the fast path can't be used.
              */
+            /* Only a segment that is page-congruent (and so cannot start
+             * before byte 0 of the file) can be mapped from it; one that
+             * is not would wrap file_off below, and is read in by the
+             * per-page loop instead. */
             if (current_process && current_process->vm_map &&
-                phdr.p_filesz == phdr.p_memsz && phdr.p_filesz > 0) {
+                phdr.p_filesz == phdr.p_memsz && phdr.p_filesz > 0 &&
+                ((uint64_t)phdr.p_offset & 0xFFF) == ((uint64_t)vaddr & 0xFFF)) {
                 /* p_offset and p_vaddr must be page-congruent (ELF spec
                  * §"Program Loading"); the file offset for va_start is
                  * therefore p_offset minus the same in-page slack. */

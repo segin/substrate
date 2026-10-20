@@ -287,6 +287,12 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# elfwrap: a native ELF whose PT_LOAD is not page-congruent loads and exits
+# 42.  Generated, not compiled.
+elfwrap: mkelfwrap.py
+	python3 mkelfwrap.py $@
+	chmod +x $@
+
 # fpuexit.linux: FPU values stay each process's own while FPU-holding
 # processes are killed or exit.  Runs on the host too.
 fpuexit.linux: fpuexit.c
