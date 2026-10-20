@@ -163,16 +163,67 @@ static uint64_t nvme_get_le64(const uint8_t *buf) {
            ((uint64_t)nvme_get_le32(buf + 4) << 32);
 }
 
+/*
+ * A queue's tail, head, phase and next command id are one submitter's at a
+ * time: two interleaving would write the same slot or consume each other's
+ * completions.  The submit paths poll for completion anyway, so a spinning
+ * lock costs nothing they did not already spend.
+ */
+static void nvme_queue_lock(volatile int *lock) {
+    while (__sync_lock_test_and_set(lock, 1)) {
+        while (*lock) __asm__ volatile("pause");
+    }
+}
+
+static void nvme_queue_unlock(volatile int *lock) {
+    __sync_lock_release(lock);
+}
+
+/* Wait for the controller to post the entry at `slot` with this lap's
+ * phase.  The entry is written by the device: read it through an atomic
+ * load, and only after the phase matches read the rest of it. */
+static int nvme_cq_wait(nvme_cqe_t *slot, uint8_t phase, uint32_t timeout_ms,
+                        nvme_cqe_t *out) {
+    uint64_t start_ms = (uint64_t)get_uptime_ms();
+    while ((__atomic_load_n(&slot->status, __ATOMIC_ACQUIRE) &
+            NVME_CQE_STATUS_PHASE) != phase) {
+        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    *out = *(volatile nvme_cqe_t *)slot;
+    return 0;
+}
+
+static int nvme_admin_submit_sync_locked(nvme_controller_t *ctrl,
+                                         nvme_admin_cmd_t *cmd,
+                                         nvme_cqe_t *cqe,
+                                         uint32_t timeout_ms);
+
 static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
                                   nvme_admin_cmd_t *cmd,
                                   nvme_cqe_t *cqe,
                                   uint32_t timeout_ms) {
+    if (ctrl == NULL) {
+        return -1;
+    }
+    nvme_queue_lock(&ctrl->admin_lock);
+    int rc = nvme_admin_submit_sync_locked(ctrl, cmd, cqe, timeout_ms);
+    nvme_queue_unlock(&ctrl->admin_lock);
+    return rc;
+}
+
+static int nvme_admin_submit_sync_locked(nvme_controller_t *ctrl,
+                                         nvme_admin_cmd_t *cmd,
+                                         nvme_cqe_t *cqe,
+                                         uint32_t timeout_ms) {
     nvme_admin_cmd_t *sq;
     nvme_cqe_t *cq;
     uint16_t tail;
     uint16_t head;
     uint16_t cid;
-    uint64_t start_ms;
 
     if (ctrl == NULL || cmd == NULL || cqe == NULL) {
         return -1;
@@ -200,15 +251,9 @@ static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
     nvme_test_admin_kick(ctrl, tail);
 #endif
 
-    start_ms = (uint64_t)get_uptime_ms();
-    while ((cq[head].status & NVME_CQE_STATUS_PHASE) != ctrl->admin_cq_phase) {
-        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
-            return -1;
-        }
-        __asm__ volatile("pause");
+    if (nvme_cq_wait(&cq[head], ctrl->admin_cq_phase, timeout_ms, cqe) != 0) {
+        return -1;
     }
-
-    *cqe = cq[head];
 
     /*
      * CONSUME the entry before judging it.  A non-zero status or a
@@ -632,17 +677,34 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
 extern void nvme_test_io_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
 #endif
 
+static int nvme_io_submit_sync_locked(nvme_controller_t *ctrl,
+                                      nvme_admin_cmd_t *cmd,
+                                      nvme_cqe_t *cqe,
+                                      uint32_t timeout_ms);
+
 static int nvme_io_submit_sync(nvme_controller_t *ctrl,
                                nvme_admin_cmd_t *cmd,
                                nvme_cqe_t *cqe,
                                uint32_t timeout_ms) {
+    if (ctrl == NULL) {
+        return -1;
+    }
+    nvme_queue_lock(&ctrl->io_queue.lock);
+    int rc = nvme_io_submit_sync_locked(ctrl, cmd, cqe, timeout_ms);
+    nvme_queue_unlock(&ctrl->io_queue.lock);
+    return rc;
+}
+
+static int nvme_io_submit_sync_locked(nvme_controller_t *ctrl,
+                                      nvme_admin_cmd_t *cmd,
+                                      nvme_cqe_t *cqe,
+                                      uint32_t timeout_ms) {
     nvme_io_queue_t *q;
     nvme_admin_cmd_t *sq;
     nvme_cqe_t *cq;
     uint16_t tail;
     uint16_t head;
     uint16_t cid;
-    uint64_t start_ms;
 
     if (ctrl == NULL || cmd == NULL || cqe == NULL) {
         return -1;
@@ -669,15 +731,9 @@ static int nvme_io_submit_sync(nvme_controller_t *ctrl,
     nvme_test_io_kick(ctrl, tail);
 #endif
 
-    start_ms = (uint64_t)get_uptime_ms();
-    while ((cq[head].status & NVME_CQE_STATUS_PHASE) != q->cq_phase) {
-        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
-            return -1;
-        }
-        __asm__ volatile("pause");
+    if (nvme_cq_wait(&cq[head], q->cq_phase, timeout_ms, cqe) != 0) {
+        return -1;
     }
-
-    *cqe = cq[head];
 
     /* As on the admin path: consume the CQE before
      * judging it, and never zero a consumed entry -- the phase bit is the

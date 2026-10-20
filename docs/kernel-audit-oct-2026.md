@@ -526,7 +526,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/storage/ahci/ahci.c:1418` rejects `cmd->data_len == 0 || cmd->data == NULL` with `-1`, and `sys/drivers/storage/ide/ide_atapi.c:57-62, 95` waits for `ATA_SR_DRQ` during the data phase even when `len == 0`.
   Basis: traced.
 
-- [ ] **SYS-DRV-010** *(High → Low; partly confirmed)* When submitting commands and polling completion queues in `nvme_admin_submit_sync` and `nvme_io_submit_sync` (`sys/drivers/storage/nvme/nvme.c`), the NVMe driver shall serialize queue access with a lock and read completion queue entries through `volatile` / memory barriers.
+- [x] **SYS-DRV-010** *(High → Low; partly confirmed)* When submitting commands and polling completion queues in `nvme_admin_submit_sync` and `nvme_io_submit_sync` (`sys/drivers/storage/nvme/nvme.c`), the NVMe driver shall serialize queue access with a lock and read completion queue entries through `volatile` / memory barriers.
   Evidence: `sys/drivers/storage/nvme/nvme.c:166-237, 635-695` mutates `sq_tail`, `cq_head`, and `next_cid` without any lock and polls `cqe->status` via a non-`volatile` pointer.
   Basis: traced.
 

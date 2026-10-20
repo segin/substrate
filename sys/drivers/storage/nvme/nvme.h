@@ -72,6 +72,7 @@ typedef struct nvme_io_queue {
     uint16_t cid_next;
     uint8_t cq_phase;
     uint8_t valid;
+    volatile int lock;      /* one submitter at a time (nvme_io_submit_sync) */
 } nvme_io_queue_t;
 
 typedef struct nvme_controller {
@@ -101,6 +102,7 @@ typedef struct nvme_controller {
     uint16_t admin_cq_head;
     uint16_t admin_cid_next;
     uint8_t admin_cq_phase;
+    volatile int admin_lock;    /* one admin submitter at a time */
     uint8_t identify_valid;
     uint16_t controller_id;
     uint32_t namespace_count;
