@@ -41,7 +41,8 @@ static fs_node_t       *sysv_alloc_node(sysv_fs_t *fs, uint32_t ino);
 static size_t           sysv_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static struct dirent   *sysv_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t       *sysv_finddir(fs_node_t *node, char *name);
-static void             sysv_close(fs_node_t *node);
+static void             sysv_ref(fs_node_t *node);
+static void             sysv_unref(fs_node_t *node);
 static void             sysv_free_fs(sysv_fs_t *fs);
 
 static filesystem_t sysv_filesystem = {
@@ -94,6 +95,10 @@ static size_t sysv_read_block_range(sysv_fs_t *fs, uint32_t block_no,
         memset(buf, 0, nbytes);
         return nbytes;
     }
+    /* A block number from an inode or an indirect block is the disk's
+     * word: one in the boot, super or inode blocks, or past the end of
+     * the volume, is corruption, not data. */
+    if (block_no < fs->first_data_block || block_no >= fs->nblocks) return 0;
     off_t off = (off_t)block_no * (off_t)fs->block_size + (off_t)within;
     return read_fs(fs->device, off, nbytes, buf);
 }
@@ -177,7 +182,9 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
  * Inode read
  * =================================================================== */
 static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
-    if (!fs || !node || ino == 0) return -1;
+    /* An inode number from a directory entry is the disk's word: past the
+     * inode table it would read data blocks as an inode. */
+    if (!fs || !node || ino == 0 || ino > fs->ninodes) return -1;
 
     /* Inodes are 64 bytes; the inode table starts at
      * fs->inode_block_start (V7 convention: block 2). */
@@ -200,7 +207,7 @@ static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
     nd->ino = ino;
     /* See sysv_fs_t::live_nodes -- unmount must not free the
      * mount state out from under this node. */
-    fs->live_nodes++;
+    __sync_fetch_and_add(&fs->live_nodes, 1);
     for (int i = 0; i < 13; i++) {
         nd->addr[i] = sysv_unpack_zone(&raw.i_addr[i * 3]);
     }
@@ -227,7 +234,10 @@ static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
     else                       node->flags = FS_FILE;
 
     node->read    = sysv_file_read;
-    node->close   = sysv_close;
+    node->open    = sysv_ref;
+    node->close   = sysv_unref;
+    node->hold    = sysv_ref;
+    node->rele    = sysv_unref;
     node->readdir = (node->flags == FS_DIRECTORY) ? sysv_readdir : NULL;
     node->finddir = (node->flags == FS_DIRECTORY) ? sysv_finddir : NULL;
     return 0;
@@ -241,6 +251,7 @@ static fs_node_t *sysv_alloc_node(sysv_fs_t *fs, uint32_t ino) {
         kfree(n, sizeof(*n));
         return NULL;
     }
+    ((sysv_node_t *)n->ptr)->refs = 1;      /* the lookup's reference */
     return n;
 }
 
@@ -374,34 +385,33 @@ static fs_node_t *sysv_finddir(fs_node_t *node, char *name) {
 }
 
 /*
- * Release the per-node state.
+ * References on a node: its open/close and its hold/rele (fs_node_t).
  *
- * sysv_read_inode kmalloc's a sysv_node_t for every node it fills in, and
- * nothing ever freed it -- so each finddir() that resolved a name leaked one.
- * close_fs() calls this for a node that was actually opened, which covers the
- * common file/directory case.
- *
- * NOT covered: an intermediate node the path walk creates and discards
- * without ever opening.  That is the VFS-wide node-lifetime contract tracked
- * in #393/#407, not something this driver can decide on its own -- freeing
- * here unilaterally would be guessing about who owns the fs_node_t.
+ * sysv_read_inode kmalloc's a node and its sysv_node_t for every finddir,
+ * and only a node that was opened was ever freed -- by its close, which also
+ * freed it under any other holder, and never freed the fs_node_t itself.  A
+ * node a path walk made and passed through leaked whole, and kept
+ * live_nodes up so the volume could not be unmounted.  Lookups now hand the
+ * node out held, and the last release, whichever kind, frees both.
  */
-static void sysv_close(fs_node_t *node) {
-    sysv_node_t *nd;
+static void sysv_ref(fs_node_t *node) {
+    sysv_node_t *nd = node ? (sysv_node_t *)node->ptr : NULL;
+
+    if (nd) __sync_fetch_and_add(&nd->refs, 1);
+}
+
+static void sysv_unref(fs_node_t *node) {
+    sysv_node_t *nd = node ? (sysv_node_t *)node->ptr : NULL;
     sysv_fs_t *fs;
 
-    if (!node)
-        return;
-    nd = (sysv_node_t *)node->ptr;
-    if (!nd)
-        return;
+    if (!nd) return;
+    if (__sync_sub_and_fetch(&nd->refs, 1) > 0 || nd->is_root) return;
 
     fs = nd->fs;
     node->ptr = NULL;
     kfree(nd, sizeof(*nd));
-
-    if (fs && fs->live_nodes > 0)
-        fs->live_nodes--;
+    kfree(node, sizeof(*node));
+    if (fs) __sync_fetch_and_sub(&fs->live_nodes, 1);
 }
 
 /* ===================================================================
@@ -467,10 +477,21 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
                      | ((uint32_t)sb[3] << 8)
                      | ((uint32_t)sb[4] << 16)
                      | ((uint32_t)sb[5] << 24);
+    /* The geometry every bound below rests on: an inode table from block
+     * 2, data blocks after it.  s_isize is the number of the first data
+     * block (V7's "size of the i-list", counted from block 0), not a count
+     * of inode blocks: this used to add 2 to it, which put two blocks of
+     * data in the inode count and moved first_data_block past them. */
+    if (s_isize <= 2 || s_fsize <= s_isize) {
+        kprintf("sysv: bad superblock geometry (s_isize %u, s_fsize %u)\n",
+                (unsigned)s_isize, (unsigned)s_fsize);
+        kfree(fs, sizeof(*fs));
+        return NULL;
+    }
     fs->nblocks          = s_fsize;
     fs->inode_block_start = 2;             /* boot=0, super=1, inodes=2.. */
-    fs->ninodes          = (uint32_t)s_isize * (fs->block_size / fs->inode_size);
-    fs->first_data_block = 2 + s_isize;
+    fs->ninodes          = (uint32_t)(s_isize - 2) * (fs->block_size / fs->inode_size);
+    fs->first_data_block = s_isize;
 
     /* One block-sized scratch buffer each for the data path and the
      * indirect-block walk, on the heap rather than ~4 KiB of kernel stack. */
@@ -502,6 +523,8 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
     }
     snprintf(root->name, sizeof(root->name), "sysv_root");
     root->unmount = sysv_unmount;
+    ((sysv_node_t *)root->ptr)->is_root = 1;    /* the mount's: unmount frees it */
+    ((sysv_node_t *)root->ptr)->refs = 1;
     return root;
 }
 

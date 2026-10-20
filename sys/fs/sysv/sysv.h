@@ -188,6 +188,11 @@ typedef struct sysv_node {
      * inode-read time so file_read can index them without going
      * back to disk. */
     uint32_t   addr[13];
+    /* References: lookups (hold/rele) and opens (open/close) alike.  Each
+     * finddir makes a node of its own, freed at its last release; the
+     * root's is the mount's, freed by unmount. */
+    int        refs;
+    uint8_t    is_root;
 } sysv_node_t;
 
 /* Driver entry points. */
