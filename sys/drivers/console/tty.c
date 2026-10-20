@@ -1265,15 +1265,94 @@ void tty_start(struct tty *tty) {
  */
 #define TTY_IOCTL_UNHANDLED  0x7FFFFFFF
 
+/* tcflush(TCIFLUSH): discard input received but not read. */
+static void tty_flush_input_locked(struct tty *tty) {
+    tty->raw_buf.head = tty->raw_buf.tail = tty->raw_buf.count = 0;
+    tty->read_buf.head = tty->read_buf.tail = tty->read_buf.count = 0;
+    tty->delct = 0;
+    tty->canon_len = 0;
+    if ((tty->termios.c_iflag & IXOFF) && tty->input_stopped) {
+        tty->input_stopped = 0;
+        tty_send_xchar(tty, tty->termios.c_cc[VSTART]);
+    }
+    sched_wakeup(&tty->input_wait);
+}
+
+/* tcflush(TCOFLUSH): discard output written but not yet transmitted. */
+static void tty_flush_output_locked(struct tty *tty) {
+    tty->write_buf.head = tty->write_buf.tail = tty->write_buf.count = 0;
+    sched_wakeup(&tty->write_wait);
+}
+
+/*
+ * tcdrain(3) / tcsendbreak(3), TCSBRK: wait until everything written has
+ * gone to the driver.  The break itself (arg 0) has no meaning on the
+ * consoles and ptys and is accepted as a no-op, as for a pty on Linux.
+ */
+static int tty_drain(struct tty *tty) {
+    TTY_LOCK(tty);
+    while (tty->write_buf.count > 0) {
+        tty_start_locked(tty);
+        if (tty->write_buf.count == 0 || tty->hung_up) {
+            break;
+        }
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            TTY_UNLOCK(tty);
+            return -EINTR;
+        }
+        /* write_wait is kicked when the consumer (a pty master's read)
+         * makes room -- the same wait tty_write uses. */
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        current_thread->wait_chan = &tty->write_wait;
+        current_thread->state = THREAD_BLOCKED;
+        spinlock_release(&tty->lock);
+        intr_restore(_flags);
+        sched_yield();
+        _flags = intr_disable();
+        spinlock_acquire(&tty->lock);
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    }
+    TTY_UNLOCK(tty);
+    return 0;
+}
+
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     if (!tty_valid(tty)) return -EIO;
     int ret = TTY_IOCTL_UNHANDLED;
     int do_hangup = 0;
     int winch_pgrp = 0;
 
+    if (cmd == TCSBRK) {
+        return tty_drain(tty);
+    }
+
     TTY_LOCK(tty);
 
     switch (cmd) {
+        case TCFLSH:
+            if (arg == TCIFLUSH || arg == TCIOFLUSH) {
+                tty_flush_input_locked(tty);
+            }
+            if (arg == TCOFLUSH || arg == TCIOFLUSH) {
+                tty_flush_output_locked(tty);
+            }
+            ret = (arg <= TCIOFLUSH) ? 0 : -EINVAL;
+            break;
+        case TCXONC:
+            ret = 0;
+            if (arg == TCOOFF) {
+                tty->stopped = 1;
+            } else if (arg == TCOON) {
+                tty->stopped = 0;
+                tty_start_locked(tty);
+            } else if (arg == TCIOFF) {
+                tty_send_xchar(tty, tty->termios.c_cc[VSTOP]);
+            } else if (arg == TCION) {
+                tty_send_xchar(tty, tty->termios.c_cc[VSTART]);
+            } else {
+                ret = -EINVAL;
+            }
+            break;
         case TCGETS:
             if (arg) *(struct termios*)arg = tty->termios;
             ret = 0;

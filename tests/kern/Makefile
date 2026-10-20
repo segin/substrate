@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptyflush: tcflush, tcdrain and tcflow work on a pty slave.
+ptyflush: ptyflush.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptyburst: a master write bigger than the slave's buffer arrives whole.
 ptyburst: ptyburst.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@

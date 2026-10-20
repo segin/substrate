@@ -41,7 +41,16 @@ excess is discarded instead.
 .SS /dev/pts/<N>
 The slave behaves like a regular controlling terminal.  All termios
 flags (canonical mode, echo, signal generation, software flow
-control, etc.) apply normally.
+control, etc.) apply normally, as do
+.BR tcflush (3)
+.RB ( TCFLSH :
+input not yet read, output not yet passed to the master, or both),
+.BR tcdrain (3)
+.RB ( TCSBRK ,
+which waits until the slave's output has reached the master; a break
+request is accepted and ignored) and
+.BR tcflow (3)
+.RB ( TCXONC ).
 .SH IOCTLS
 .TP
 .B TIOCGPTN
