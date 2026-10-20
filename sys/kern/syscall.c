@@ -1409,6 +1409,9 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
          * skipping surviving entries when deletions renumber them. */
         uint64_t cur_off = (uint64_t)f->f_offset;
         uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
+        /* reclen is rounded up past the name's NUL: those bytes went out
+         * as whatever the kernel stack held before. */
+        memset(temp_buf, 0, (size_t)reclen);
         kld->d_ino = d->d_ino;
         kld->d_off = next_off; // Stable cursor to the NEXT entry
         kld->d_reclen = reclen;
@@ -1458,6 +1461,7 @@ int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
          * index-based filesystems leave it 0 and fall back to +1. */
         uint64_t cur_off = (uint64_t)f->f_offset;
         uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
+        memset(temp_buf, 0, (size_t)reclen);    /* the padding, as above */
         kld->d_ino = d->d_ino;
         kld->d_off = (int64_t)next_off;
         kld->d_reclen = (unsigned short)reclen;
