@@ -41,6 +41,12 @@ static void ntsync_obj_close(fs_node_t *node);
  * ============================================================
  */
 
+/* An unblocked signal is waiting for the calling thread. */
+static inline int ntsync_signal_pending(void) {
+    return current_thread &&
+           (current_thread->sig_pending & ~current_thread->sig_mask) != 0;
+}
+
 static inline void ntsync_spinlock_acquire(volatile int *lock) {
     while (__sync_lock_test_and_set(lock, 1)) {
         while (*lock) {
@@ -819,8 +825,14 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
 
         if (any_woken) break;
 
+        /* A signal ends the wait (EINTR below): an untimed wait would
+         * otherwise leave the thread unkillable. */
+        if (ntsync_signal_pending()) break;
+
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         if (has_deadline) {
             int ret = sched_sleep_until(current_thread, deadline);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
 
             /* Check signals again after wake */
             for (uint32_t i = 0; i < total_waiters; i++) {
@@ -837,6 +849,7 @@ static int ntsync_wait_any(ntsync_instance_t *inst, struct ntsync_wait_args *arg
             }
         } else {
             sched_sleep(current_thread);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         }
     }
     
@@ -1182,14 +1195,23 @@ static int ntsync_wait_all(ntsync_instance_t *inst, struct ntsync_wait_args *arg
             continue;
         }
 
+        /* A signal ends the wait: see ntsync_wait_any. */
+        if (ntsync_signal_pending()) {
+            ret_code = -EINTR;
+            goto cleanup;
+        }
+
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         if (has_deadline) {
             int r = sched_sleep_until(current_thread, deadline);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
             if (r == -ETIMEDOUT) {
                 ret_code = -ETIMEDOUT;
                 goto cleanup;
             }
         } else {
             sched_sleep(current_thread);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         }
     }
 

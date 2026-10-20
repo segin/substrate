@@ -287,6 +287,11 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# ntsyncintr: an untimed ntsync wait ends on a signal.  Substrate only.
+ntsyncintr: ntsyncintr.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # kmemhole: /dev/kmem reads an unmapped kernel page as EFAULT.  Substrate
 # only; run as root.
 kmemhole: kmemhole.c

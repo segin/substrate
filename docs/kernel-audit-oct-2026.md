@@ -506,7 +506,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/input/input_subsys.c:170-176` calls `sys_gettimeofday(&tv, NULL)` with a kernel stack pointer `&tv` (which fails `copyout` with `-EFAULT`, leaving `tv` uninitialized and leaking 8 bytes of kernel stack per event), and `input_read` (`:451-479`) copies to user `buffer` while holding `input_lock` with interrupts disabled.
   Basis: traced.
 
-- [ ] **SYS-DRV-005** *(High → Medium; partly confirmed)* When waiting for an event in `ntsync_wait_any` and `ntsync_wait_all` (`sys/drivers/devices/ntsync.c`), the driver shall not drop `inst->lock` before entering the sleep queue and shall abort the wait when a signal is pending.
+- [x] **SYS-DRV-005** *(High → Medium; partly confirmed)* When waiting for an event in `ntsync_wait_any` and `ntsync_wait_all` (`sys/drivers/devices/ntsync.c`), the driver shall not drop `inst->lock` before entering the sleep queue and shall abort the wait when a signal is pending.
   Evidence: `sys/drivers/devices/ntsync.c:811-841, 1172-1194` releases `inst->lock` before calling `sched_sleep(&q.triggered)` (losing wakeups that arrive in the window) and never checks for pending signals when `timeout == UINT64_MAX`.
   Basis: traced.
 
