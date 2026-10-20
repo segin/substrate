@@ -744,7 +744,11 @@ static int fb_shadow_ensure(void) {
 static void fb_client_register(pmap_t pmap, uintptr_t va, size_t len,
                                vm_pager_t *pager, uintptr_t fb_offset,
                                void *owner) {
+    /* The registration holds a reference on the pmap, so a VT switch can
+     * still drop PTEs in it after the process exits or execs. */
+    pmap_reference(pmap);
     spinlock_acquire(&fb_shadow_lock);
+    pmap_t old = fb_client.active ? fb_client.pmap : NULL;
     fb_client.active = 1;
     fb_client.pmap = pmap;
     fb_client.va = va;
@@ -754,6 +758,7 @@ static void fb_client_register(pmap_t pmap, uintptr_t va, size_t len,
     fb_client.owner = owner;
     fb_is_offscreen = 0;     /* a fresh mapping always points at real video */
     spinlock_release(&fb_shadow_lock);
+    pmap_release(old);
     /* The shadow is allocated lazily, only the first time X is actually
      * backgrounded (see fb_set_offscreen).  Allocating it here would burn a
      * 4 MiB contiguous block at X startup — exactly when an X session is
@@ -803,6 +808,9 @@ void fb_set_offscreen(int offscreen) {
     pager  = fb_client.pager;
     target = (offscreen ? fb_shadow_phys : fb.phys) + fb_client.fb_offset;
     present = !offscreen;
+    /* Keep the pmap for pmap_remove_range below, after the lock is
+     * dropped: the client may exit or exec meanwhile. */
+    pmap_reference(pmap);
 
     /* Going offscreen: seed the shadow with the frame that is on screen
      * right now, before the redirect takes effect.  From here on the
@@ -836,6 +844,7 @@ void fb_set_offscreen(int offscreen) {
      * switch the client is not the running process, so its TLB is flushed
      * naturally by the CR3 reload when it is next scheduled. */
     pmap_remove_range(pmap, (uint32_t)va, (uint32_t)(va + len));
+    pmap_release(pmap);
 }
 
 /*
@@ -880,16 +889,22 @@ int fb_client_onscreen(void) {
 }
 
 /* Drop the registration when the owning process exits (called from the
- * graphics-release path).  Never touches the dying address space. */
+ * graphics-release path) or execs (proc_exec_commit: the mapping is gone
+ * with the old image).  Never touches the dying address space; only drops
+ * the registration's reference on it. */
 void fb_client_clear(void *owner) {
+    pmap_t old = NULL;
+
     spinlock_acquire(&fb_shadow_lock);
     if (fb_client.active && fb_client.owner == owner) {
+        old = fb_client.pmap;
         fb_client.active = 0;
         fb_client.pager = NULL;
         fb_client.pmap = NULL;
         fb_is_offscreen = 0;
     }
     spinlock_release(&fb_shadow_lock);
+    pmap_release(old);
 }
 
 /* ===== Linear /dev/fb0 shim for planar framebuffers (VGA/EGA) =====
@@ -1220,9 +1235,6 @@ void fb_init(multiboot_info_t *mbi) {
     
     /* Register all known drivers */
     video_register_driver(&mb_driver);
-    #ifdef ENABLE_BGA
-    bga_install();
-    #endif
     bga_install();
     vga_install();
 

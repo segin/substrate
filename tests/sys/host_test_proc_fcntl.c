@@ -150,6 +150,7 @@ void mq_proc_cleanup(int pid) { (void)pid; }
 int ksem_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }
 void ksem_proc_cleanup(int pid) { (void)pid; }
 void shm_proc_exec(int pid) { (void)pid; }
+void fb_client_clear(void *owner) { (void)owner; }
 void shm_proc_cleanup(int pid) { (void)pid; }
 
 static void reset_env(void) {

@@ -42,6 +42,12 @@ int vt_get_active(void) { return 0; }
 vt_state_t *vt_get_state(int n) { (void)n; return NULL; }
 
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz) { (void)tv; (void)tz; return 0; }
+int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
+    (void)tz;
+    tv->tv_sec = 0;
+    tv->tv_usec = 0;
+    return 0;
+}
 void kprint(const char *fmt) { (void)fmt; }
 
 #include "../../sys/drivers/input/input_subsys.c"

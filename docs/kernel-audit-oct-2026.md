@@ -510,7 +510,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/devices/ntsync.c:811-841, 1172-1194` releases `inst->lock` before calling `sched_sleep(&q.triggered)` (losing wakeups that arrive in the window) and never checks for pending signals when `timeout == UINT64_MAX`.
   Basis: traced.
 
-- [ ] **SYS-DRV-006** *(High; partly confirmed)* In `sys/drivers/video/fb.c`, `fb_init` shall register `bga_install()` only once, and `fb_client.pmap` shall be cleared on `execve` and synchronized before `pmap_remove_range`.
+- [x] **SYS-DRV-006** *(High; partly confirmed)* In `sys/drivers/video/fb.c`, `fb_init` shall register `bga_install()` only once, and `fb_client.pmap` shall be cleared on `execve` and synchronized before `pmap_remove_range`.
   Evidence: `sys/drivers/video/fb.c:1223-1226` calls `bga_install()` inside `#ifdef ENABLE_BGA` and immediately calls `bga_install()` a second time, linking `bga_driver.next = &bga_driver` in an infinite loop. `fb_set_offscreen` (`:786-839`) drops `fb_shadow_lock` before calling `pmap_remove_range(pmap, ...)`, and `execve` does not clear `fb_client`.
   Basis: traced.
 

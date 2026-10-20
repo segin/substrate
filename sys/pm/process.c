@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #endif
 
+#include <drivers/video/fb.h>
 #include <sys/acct.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
@@ -1691,6 +1692,8 @@ void proc_exec_commit(process_t *p) {
     shm_proc_exec(p->pid);
     ksem_proc_cleanup(p->pid);
     mq_proc_cleanup(p->pid);
+    /* A /dev/fb0 mapping went with the old image. */
+    fb_client_clear(p);
 }
 
 /*

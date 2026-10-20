@@ -67,6 +67,7 @@ __attribute__((weak)) int sched_thread_running_remote(thread_t *t) { (void)t; re
 __attribute__((weak)) void sem_proc_cleanup(int pid) { (void)pid; }   /* sys/include/sys/sem.h */
 __attribute__((weak)) void shm_proc_cleanup(int pid) { (void)pid; }   /* sys/include/sys/shm.h */
 __attribute__((weak)) void shm_proc_exec(int pid) { (void)pid; }      /* sys/include/sys/shm.h */
+__attribute__((weak)) void fb_client_clear(void *owner) { (void)owner; }   /* drivers/video/fb.h */
 __attribute__((weak)) void syscall_stats_dump(int reset) { (void)reset; }   /* sys/include/kern/main.h */
 __attribute__((weak)) thread_t * thread_first(void) { return NULL; }   /* sys/kern/sched.h */
 __attribute__((weak)) thread_t * thread_next(thread_t *t) { (void)t; return NULL; }   /* sys/kern/sched.h */
