@@ -138,7 +138,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/vm/uma_core.c:36-37` reserves `0xFE` (`254`) and `0xFF` (`255`) in `uint8_t us_freelist[]` for `UMA_ITEM_BUCKETED` and `UMA_ITEM_ALLOCED`, but `uma_zcreate` (`sys/vm/uma_core.c:508-520`) computes `zone->uz_ipers = (4096 - sizeof(uma_slab_t)) / (zone->uz_rsize + 1)` without an upper bound. For zones with `uz_rsize <= 12` (`uz_ipers >= 254`), `us_freelist[i]` wraps `uint8_t` and collides with `0xFE`/`0xFF` at `uma_core.c:776-778`.
   Basis: traced.
 
-- [ ] **SYS-VM-009** *(Medium → Low; confirmed)* When destroying a UMA zone in `uma_zdestroy` or invoking `uz_fini` in `uma_slab_free`, the slab allocator shall drain all per-CPU and depot buckets for the zone and pass the redzone-adjusted object pointer to `uz_fini`.
+- [x] **SYS-VM-009** *(Medium → Low; confirmed)* When destroying a UMA zone in `uma_zdestroy` or invoking `uz_fini` in `uma_slab_free`, the slab allocator shall drain all per-CPU and depot buckets for the zone and pass the redzone-adjusted object pointer to `uz_fini`.
   Evidence: `sys/vm/uma_core.c:576-625` (`uma_zdestroy`) frees slabs and `zone` without calling `uma_bucket_detach_full_for_zone(zone)` or draining `zone->uz_cpu[i]`, leaving dangling `ub_zone` pointers in `uma_bucket_full_depot`. `uma_slab_free` (`sys/vm/uma_core.c:826-832`) calls `uz_fini(obj, zone->uz_size)` instead of `uz_fini(obj + UMA_REDZONE_SIZE, zone->uz_size)`.
   Basis: traced.
 

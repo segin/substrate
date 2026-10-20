@@ -582,7 +582,31 @@ uma_zone_t *uma_zcreate(
  */
 void uma_zdestroy(uma_zone_t *zone) {
     if (!zone) return;
-    
+
+    /*
+     * Hand back every bucket still holding the zone's items -- each CPU's
+     * pair and the full ones in the shared depot.  Their items die with
+     * the slabs below; the buckets themselves would otherwise stay
+     * installed (or depot-listed with ub_zone pointing at the freed zone)
+     * and be reused as if they still held live items.
+     */
+    for (int i = 0; i < UMA_MAX_CPUS; i++) {
+        struct uma_bucket *b;
+
+        if ((b = zone->uz_cpu[i].uc_allocbucket) != NULL) {
+            zone->uz_cpu[i].uc_allocbucket = NULL;
+            uma_bucket_put_empty(b);
+        }
+        if ((b = zone->uz_cpu[i].uc_freebucket) != NULL) {
+            zone->uz_cpu[i].uc_freebucket = NULL;
+            uma_bucket_put_empty(b);
+        }
+    }
+    for (struct uma_bucket *b = uma_bucket_detach_full_for_zone(zone), *bn; b; b = bn) {
+        bn = b->ub_next;
+        uma_bucket_put_empty(b);
+    }
+
     /* Free all slabs.  Under the slab lock: these walks read uz_*_slabs while a
      * concurrent uma_zfree_slab could be relinking the very same lists. */
     uma_slab_t *slab, *next;
@@ -834,6 +858,9 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
             void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
                                  i * zone->uz_rsize);
+            /* The item uz_init was given: past the leading redzone. */
+            if (zone->uz_flags & UMA_ZONE_REDZONE)
+                obj = (void *)((uintptr_t)obj + UMA_REDZONE_SIZE);
             zone->uz_fini(obj, zone->uz_size);
         }
     }
