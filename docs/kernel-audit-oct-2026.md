@@ -195,7 +195,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/sysctl.c:347-354` checks `if (req->newlen > (size_t)arg2) return ENAMETOOLONG;`, calls `sysctl_new_kernel(req, str, req->newlen)` (which returns `0` for `newlen == 0`), and executes `str[req->newlen - 1] = '\0'`, writing a NUL byte to `str[-1]`.
   Basis: traced.
 
-- [ ] **SYS-KERN-003** *(Critical → Medium; partly confirmed)* When revoking a terminal in `sys_revoke`, the kernel shall resolve relative paths from `current_process->cwd_node`, verify that the caller is root or the file owner (`euid == 0 || euid == node->uid`), and verify that `node` is a character device backed by a valid `struct tty` (`tty->magic == TTY_MAGIC`).
+- [x] **SYS-KERN-003** *(Critical → Medium; partly confirmed)* When revoking a terminal in `sys_revoke`, the kernel shall resolve relative paths from `current_process->cwd_node`, verify that the caller is root or the file owner (`euid == 0 || euid == node->uid`), and verify that `node` is a character device backed by a valid `struct tty` (`tty->magic == TTY_MAGIC`).
   Evidence: `sys/kern/syscall.c:4053-4063` (`sys_revoke`) resolves `kpath` from `fs_root`, checks no credentials, and passes `(struct tty *)node->ptr` directly to `tty_revoke` without checking `(node->flags & 0x7) == FS_CHARDEVICE` or `tty->magic == TTY_MAGIC`. Calling `revoke("/etc/passwd")` passes an `ext2` inode context pointer as a `struct tty *`.
   Basis: traced.
 

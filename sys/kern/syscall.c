@@ -4207,12 +4207,28 @@ int sys_revoke(const char *path) {
     char kpath[256];
     COPYIN_STR(path, kpath);
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *node = vfs_lookup(root, kpath);
-    if (!node) return -ENOENT;
-    /* /dev/console is a façade vnode with no struct tty in ->ptr; it
-     * resolves the live console TTY on demand. */
-    int ret = (node == console_get_node()) ? console_revoke()
-                                           : tty_revoke((struct tty *)node->ptr);
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *base = kpath[0] == '/' ? root : cwd;
+    fs_node_t *node = vfs_lookup(base, kpath);
+    if (!node) return vfs_lookup_error(base, kpath);
+    /*
+     * As on BSD: a character device, revoked by its owner or root.  This
+     * walked even a relative path from the root, checked no credentials,
+     * and handed any file's ->ptr to tty_revoke as a struct tty -- an ext2
+     * file's, for revoke("/etc/passwd").
+     */
+    int ret;
+    if ((node->flags & 0x7) != FS_CHARDEVICE) {
+        ret = -EINVAL;
+    } else if (current_process->euid != 0 && current_process->euid != node->uid) {
+        ret = -EPERM;
+    } else if (node == console_get_node()) {
+        /* /dev/console is a façade vnode with no struct tty in ->ptr; it
+         * resolves the live console TTY on demand. */
+        ret = console_revoke();
+    } else {
+        ret = tty_revoke((struct tty *)node->ptr);
+    }
     vfs_rele(node);
     return ret;
 }
