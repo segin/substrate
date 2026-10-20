@@ -6,6 +6,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <sys/errno.h>
+#include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/major.h>
 #include <sys/param.h>
@@ -1607,37 +1608,26 @@ static void tty_attach_first_opener_locked(struct tty *tty) {
     if (tty->session != 0) return;          /* already claimed */
     if (!p->p_pgrp || !p->p_pgrp->pg_session) return;
 
-    /*
-     * Never auto-attach a pseudo-terminal.  The first-opener hack exists
-     * for real console VTs (and serial consoles) where no getty/login runs
-     * a TIOCSCTTY and ^C/^Z would otherwise be dropped.  A PTY always has a
-     * userspace owner that manages the session explicitly: the slave is
-     * claimed by its session leader via TIOCSCTTY (e.g. login, or luit's
-     * setsid'd child opening the slave O_NOCTTY then TIOCSCTTY).  If we
-     * auto-claim the slave for whichever leader opens it first — luit's
-     * PARENT opens the slave to set it up before forking — the pair is
-     * pinned to the parent's session and the child's later TIOCSCTTY fails
-     * with EPERM, so the shell never gets a controlling terminal and the
-     * xterm/luit chain dies.  Leave PTYs entirely to explicit TIOCSCTTY.
-     */
-    if (tty->driver && tty->driver->driver_name &&
-        (strcmp(tty->driver->driver_name, "ptyslave") == 0 ||
-         strcmp(tty->driver->driver_name, "ptmx") == 0)) {
-        return;
-    }
+    /* The opener asked not to acquire it. */
+    if (current_thread && (current_thread->open_flags & O_NOCTTY)) return;
 
     /*
-     * POSIX: a controlling terminal is acquired only by a SESSION LEADER
-     * that does not already have one.  A non-leader (e.g. Xfbdev opening
-     * its VT) must not pin the tty to its session.
+     * POSIX 11.1.3: a controlling terminal is acquired only by a SESSION
+     * LEADER that does not already have one.  A non-leader (e.g. Xfbdev
+     * opening its VT) must not pin the tty to its session, and nor must a
+     * leader that already has a terminal: luit, running on xterm's pty,
+     * opens a second pty's slave before forking, and claiming that one for
+     * luit's session made its child's TIOCSCTTY fail with EPERM.  That
+     * missing test once led to ptys being excluded here altogether, so a
+     * new session's first open of a pty slave never gave it a controlling
+     * terminal, as it does on Linux and the BSDs.
      */
     if (p->p_pgrp->pg_session->s_leader != p) return;
+    if (p->tty) return;
 
     tty->session = p->p_pgrp->pg_session->s_sid;
     tty->pgrp    = p->p_pgrp->pg_id;
-    if (!p->tty) {
-        p->tty = tty;
-    }
+    p->tty = tty;
 }
 
 int tty_open(struct tty *tty) {

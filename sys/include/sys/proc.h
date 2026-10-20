@@ -454,6 +454,11 @@ typedef struct thread {
      * caller when the driver returns so a deeper-stack driver
      * call doesn't see a stale outer-call file. */
     struct file  *io_file;
+    /* open(2) flags (native O_*) of the open whose device callback is
+     * running, 0 otherwise.  The callback gets only the fs_node_t; the
+     * tty layer reads O_NOCTTY here to decide whether the opener
+     * acquires the terminal as its controlling terminal. */
+    int           open_flags;
 
     // Sleep Timeout
     uint64_t      sleep_expiry; // Absolute tick count when sleep expires (0 = none)

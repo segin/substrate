@@ -1047,7 +1047,12 @@ static int kern_open_node(fs_node_t *node, int fd, const char *path, int flags,
     if (flags & O_CLOEXEC) {
         fdset_set(current_process->fd_cloexec, fd);
     }
-    open_fs(open_node, 1, 0); // Open read/write?
+    {
+        int prev_open_flags = current_thread ? current_thread->open_flags : 0;
+        if (current_thread) current_thread->open_flags = flags;
+        open_fs(open_node, 1, 0); // Open read/write?
+        if (current_thread) current_thread->open_flags = prev_open_flags;
+    }
     if ((flags & O_TRUNC) && ((flags & O_ACCMODE) != O_RDONLY) &&
         ((open_node->flags & 0x7) == FS_FILE)) {
         int error = truncate_fs(open_node, 0);

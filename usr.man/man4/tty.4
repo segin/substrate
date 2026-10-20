@@ -13,6 +13,15 @@ is a synonym for the controlling terminal of the current process.
 It can be used by programs that need to access the terminal explicitly,
 regardless of standard input/output redirection.
 .PP
+A session leader that has no controlling terminal acquires one by
+opening a terminal \(em a virtual console, a serial line or a pty slave
+\(em that no other session controls, unless it passes
+.BR O_NOCTTY .
+A session leader that already has a controlling terminal keeps it when it
+opens another.
+.B TIOCSCTTY
+claims a terminal explicitly.
+.PP
 On the kernel text console, keyboard input and
 .B /dev/console
 I/O resolve against the active virtual terminal first so the visible VT and

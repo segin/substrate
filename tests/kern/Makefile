@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptyctty: opening a pty slave makes it a new session's controlling tty.
+ptyctty: ptyctty.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptyflush: tcflush, tcdrain and tcflow work on a pty slave.
 ptyflush: ptyflush.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@

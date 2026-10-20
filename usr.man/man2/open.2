@@ -46,6 +46,13 @@ If the file exists, truncate it to length 0.
 .TP
 .B O_APPEND
 Append mode.
+.TP
+.B O_NOCTTY
+If
+.I pathname
+is a terminal, do not make it the controlling terminal of the calling
+process, even if it is a session leader without one (see
+.BR tty (4)).
 .SH RETURN VALUE
 On success, the new file descriptor is returned.
 .PP
