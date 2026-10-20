@@ -45,6 +45,11 @@ On failure, a negated errno is returned.
 .I pid
 does not refer to an existing process.
 .TP
+.B EPERM
+The caller is not root, and the process is not its own: its real or
+effective user id differs from the caller's effective one, or it has
+changed credentials (set-id exec).
+.TP
 .B EFAULT
 .I tids
 or

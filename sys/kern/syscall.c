@@ -4678,9 +4678,27 @@ static int proc_count_put(abi_size_t *ucount, size_t count) {
     return 0;
 }
 
+/*
+ * Inspecting another process's threads / fds / memory map / argv / cwd /
+ * executable leaks privileged information (open files, ASLR layout,
+ * secrets passed on the command line).  Permit it only for root, or for a
+ * process whose real and effective ids are both the caller's and which
+ * has not changed credentials (a set-id program keeps what its owner gave
+ * it), matching the usual /proc visibility model.
+ */
+static int proc_inspect_allowed(process_t *target) {
+    if (!current_process) return 1;              /* kernel/early context */
+    if (current_process->euid == 0) return 1;    /* root sees all */
+    if (target == current_process) return 1;
+    if (target->p_flag & P_SUGID) return 0;
+    return target->uid == current_process->euid &&
+           target->euid == current_process->euid;
+}
+
 int sys_proc_threads(pid_t pid, tid_t *tids, abi_size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
+    if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t cap = 0;
     if (proc_count_get(count, &cap) != 0) return -14;
@@ -4761,6 +4779,7 @@ static void proc_thr_fill_cb(thread_t *t, void *arg) {
 int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
+    if (!proc_inspect_allowed(target)) return -EPERM;
     if (!array) return -22;                              /* -EINVAL */
     if (size_bytes % sizeof(sys_thrinfo_t)) return -22;
     size_t cap = size_bytes / sizeof(sys_thrinfo_t);
@@ -4777,18 +4796,6 @@ int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
     sched_iterate_threads(proc_thr_fill_cb, &c);
     if (c.copy_err) return c.copy_err;
     return 0;
-}
-
-/*
- * Inspecting another process's fds / memory map / argv leaks privileged
- * information (open files, ASLR layout, secrets passed on the command
- * line).  Permit it only for one's own processes or root, matching the
- * usual /proc visibility model.
- */
-static int proc_inspect_allowed(process_t *target) {
-    if (!current_process) return 1;              /* kernel/early context */
-    if (current_process->euid == 0) return 1;    /* root sees all */
-    return target->uid == current_process->euid; /* otherwise same owner */
 }
 
 int sys_proc_fds(pid_t pid, sys_fd_t *fds, abi_size_t *count) {
@@ -4856,9 +4863,10 @@ int sys_proc_cwd(pid_t pid, char *buf, size_t len) {
     if (!buf || len == 0) return -14;
     
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
-    
+
     if (!target) return -3; // ESRCH
-    
+    if (!proc_inspect_allowed(target)) return -EPERM;
+
     size_t path_len = strlen(target->cwd_path) + 1;
     if (len < path_len) return -34; // ERANGE
     
@@ -4870,9 +4878,10 @@ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
     if (!buf || len == 0) return -14;
     
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
-    
+
     if (!target) return -3; // ESRCH
-    
+    if (!proc_inspect_allowed(target)) return -EPERM;
+
     size_t path_len = strlen(target->exec_path) + 1;
     if (len < path_len) return -34; // ERANGE
     

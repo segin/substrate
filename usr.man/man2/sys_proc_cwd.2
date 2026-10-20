@@ -18,13 +18,27 @@ At most
 bytes are written including the terminating NUL.
 .SH RETURN VALUE
 On success, 0 is returned.
-On error, a negative value is returned by the current implementation.
+On error, a negated errno is returned.
 .SH ERRORS
 .TP
-.B ENOSYS
-Current kernel implementation is a stub.
-.SH NOTES
-Wired in native dispatch, currently unimplemented in kernel.
+.B EFAULT
+.I buf
+is NULL or points outside the caller's address space, or
+.I len
+is zero.
+.TP
+.B EPERM
+The caller is not root, and the process is not its own: its real or
+effective user id differs from the caller's effective one, or it has
+changed credentials (set-id exec).
+.TP
+.B ERANGE
+.I len
+is too small for the path and its NUL.
+.TP
+.B ESRCH
+.I pid
+does not refer to an existing process.
 .SH SEE ALSO
 .BR getcwd (2),
 .BR sys_proc_exe (2),

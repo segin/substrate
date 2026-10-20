@@ -282,6 +282,12 @@ sysctlstr: sysctlstr.c
 acctpath.linux: acctpath.c
 	gcc -m32 -static -O2 $< -o $@
 
+# procinspect: sys_proc_* show another user's or a set-id process only to
+# root.  Substrate only; run as root.
+procinspect: procinspect.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # seclevel: kern.securelevel cannot be lowered once above zero.  Substrate
 # only; leaves the level raised until reboot.
 seclevel: seclevel.c

@@ -243,7 +243,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/acct.c:73-97` (`acct_process`) leaves `ac.ac_exitcode` and struct padding in `struct acct ac` uninitialized on the stack before `write_fs`; `kern_acct` (`:48-57`) overwrites `acct_node` without closing the prior node and uses single-component `finddir_fs(fs_root, ...)`.
   Basis: traced.
 
-- [ ] **SYS-KERN-015** *(Medium; confirmed)* When inspecting another process via `sys_proc_*` syscalls, `proc_inspect_allowed` shall deny non-root access to `P_SUGID` processes and shall be enforced on `sys_proc_threads`, `sys_proc_cwd`, `sys_proc_exe`, and `sys_proc_thr_list`.
+- [x] **SYS-KERN-015** *(Medium; confirmed)* When inspecting another process via `sys_proc_*` syscalls, `proc_inspect_allowed` shall deny non-root access to `P_SUGID` processes and shall be enforced on `sys_proc_threads`, `sys_proc_cwd`, `sys_proc_exe`, and `sys_proc_thr_list`.
   Evidence: `sys/kern/syscall.c:4592-4596` (`proc_inspect_allowed`) checks only `target->uid == current_process->euid` (ignoring `P_SUGID` and `target->euid`), and `sys_proc_threads` (`:4485`), `sys_proc_cwd` (`:4648`), `sys_proc_exe` (`:4663`), and `sys_proc_thr_list` (`:4678`) omit `proc_inspect_allowed`.
   Basis: traced.
 
