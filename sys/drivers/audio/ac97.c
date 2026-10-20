@@ -26,6 +26,7 @@
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
 #include <sys/mman.h>
@@ -375,9 +376,11 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 			ac97_kick_locked(d);
 			spinlock_release_irq(&d->feed_lock, f);
 			/* Wake any producer blocked in ac97_write waiting for
-			 * FIFO space to free up.  Cheap when nobody is sleeping
-			 * (no-op for empty channels) so safe every BCIS. */
+			 * FIFO space to free up, and any poll() waiting on the
+			 * device (audio.wait_chan).  Cheap when nobody is
+			 * sleeping (no-op for empty channels) so safe every BCIS. */
 			(void)sleepq_wake_all(d);
+			sched_wakeup(d);
 		}
 		ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
 		                sr & (AC97_SR_BCIS | AC97_SR_LVBCI |
@@ -493,6 +496,14 @@ static int ac97_set_params(audio_dev_t *adev, audio_info_t *info)
 	return 0;
 }
 
+/* The write()'s descriptor is non-blocking (the file_t the read/write
+ * path publishes on the thread; see hda_nonblock). */
+static int ac97_nonblock(void)
+{
+	return current_thread && current_thread->io_file &&
+	       (current_thread->io_file->f_flag & FNONBLOCK);
+}
+
 static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 {
 	ac97_dev_t *d = adev->driver_data;
@@ -534,6 +545,12 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 			break;
 		}
 
+		/* FIFO full on a non-blocking descriptor: take what fitted
+		 * (EAGAIN below if nothing did), as hda_write does. */
+		if (ac97_nonblock()) {
+			break;
+		}
+
 		/*
 		 * FIFO full — block until the IRQ feeder drains a chunk and
 		 * frees space.  Race-free: enqueue, then re-check with acquire
@@ -559,6 +576,9 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 		}
 	}
 
+	if (total_consumed == 0 && ac97_nonblock()) {
+		return -EAGAIN;
+	}
 	if (total_consumed == 0 && current_thread &&
 	    (current_thread->sig_pending & ~current_thread->sig_mask)) {
 		return -EINTR;
@@ -646,6 +666,19 @@ static int ac97_flush(audio_dev_t *adev)
 	 * half reset. */
 	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, AC97_CR_RR);
+	/* As at attach: Reset Registers clears the PCM-out registers, the
+	 * buffer descriptor list's base among them, so wait for it to finish
+	 * and point the engine at the list again.  Without this, playback
+	 * after a flush (SNDCTL_DSP_RESET) had no list to play from. */
+	for (int spin = 0; spin < 100000; spin++) {
+		uint8_t cr = inb((uint16_t)(d->nabmbar + AC97_BM_PO_BASE + AC97_BM_CR));
+		if ((cr & AC97_CR_RR) == 0) break;
+	}
+	ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+	                AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE);
+	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, 0);
+	ac97_bm_write32(d, AC97_BM_PO_BASE + AC97_BM_BDBAR,
+	                (uint32_t)d->bdl_phys);
 	d->next_idx = 0;
 	d->lvi = 0;
 	d->writes_queued = 0;
@@ -690,6 +723,13 @@ static int ac97_get_ospace(audio_dev_t *adev, int *fragsize, int *fragstotal,
 
 	if (d->fifo_buf == NULL) {
 		return -EINVAL;
+	}
+	/* Stage what the ring has played out (and restart a halted bus
+	 * master) before measuring, as a blocked write does each time it
+	 * wakes: poll() asks this on every recheck, and without it a
+	 * stalled ring would never show the FIFO draining. */
+	if (!d->mmap_mode) {
+		ac97_kick(d);
 	}
 	freeb = audio_fifo_free(&d->fifo);
 	*fragsize   = (int)AC97_CHUNK_BYTES;
@@ -961,8 +1001,14 @@ static int ac97_attach(pci_device_t *pdev)
 		 * exclusively here made whichever driver probed LATER fail with
 		 * -EBUSY -- that is how virtio-net lost its IRQ and eth0 never
 		 * appeared under --boot=uefi. */
-		(void)request_irq((unsigned int)d->irq, ac97_irq_handler,
-		                  IRQF_SHARED, "ac97", d);
+		if (request_irq((unsigned int)d->irq, ac97_irq_handler,
+		                IRQF_SHARED, "ac97", d) == 0) {
+			/* The completion interrupt wakes d as FIFO space frees
+			 * (ac97_irq_handler), which poll() can wait on.  With no
+			 * interrupt nothing would wake it, and poll() goes on
+			 * reporting the device writable. */
+			d->audio.wait_chan = d;
+		}
 	}
 
 	/* Hand off to the audio framework. */

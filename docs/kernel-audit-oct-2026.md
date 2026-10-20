@@ -1139,6 +1139,6 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Evidence: `minix_init_node` (`sys/fs/minix/minix.c`) gives a directory node symlink, link, unlink, rmdir and mknod but never `mkdir`, so `vfs_mkdir_in` and `kern_mkdirat` answer EOPNOTSUPP on every Minix volume (V1 and V2), though `minix_mknod` can already make a directory from an `S_IFDIR` mode.  Found when the `tests/sys` torture tests were wired up: `torture_minix` fails there, its other 13 checks passing.
   Basis: observed.
 
-- [ ] **SYS-NEW-012** *(Low; observed)* The AC97 driver shall honour `O_NONBLOCK`.
+- [x] **SYS-NEW-012** *(Low; observed)* The AC97 driver shall honour `O_NONBLOCK`.
   Evidence: on AC97, `torture_audio_nonblock` never sees EAGAIN -- writes on a non-blocking descriptor go on accepting (blocking) for the whole fill window and the run stalls -- and `torture_audio_share` gets EBUSY from a write.  Only `hda.c` checks the flag (`hda_nonblock`, added by f2ac3e2d5).  Not root-caused.
   Basis: observed.
