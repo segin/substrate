@@ -101,7 +101,10 @@ static int exfat_defer_or_free(exfat_fs_t *fs, uint64_t inode,
     int deferred = 0;
     mutex_lock(&exfat_node_cache_lock);
     for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
+        /* Not a slot already orphaned: that is a file deleted earlier from
+         * the same entry, which a lookup reference may still hold. */
         if (exfat_node_cache[i].fs == fs && exfat_node_cache[i].pin > 0 &&
+            !exfat_node_cache[i].orphaned &&
             exfat_fs_node_cache[i].inode == inode) {
             exfat_node_cache[i].orphaned     = 1;
             exfat_node_cache[i].orphan_first = first;
@@ -128,6 +131,7 @@ static void exfat_relocate_cached(exfat_fs_t *fs, uint64_t old_inode,
     mutex_lock(&exfat_node_cache_lock);
     for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
         if (exfat_node_cache[i].fs == fs && exfat_node_cache[i].pin > 0 &&
+            !exfat_node_cache[i].orphaned &&
             exfat_fs_node_cache[i].inode == old_inode) {
             exfat_node_cache[i].dir_cluster     = new_dir_cluster;
             exfat_node_cache[i].dir_no_fat_chain = new_dir_nfc;
@@ -686,8 +690,16 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
                                    int64_t crt, int64_t mod, int64_t acc,
                                    uint8_t has_dir_entry, uint32_t dir_cluster,
                                    uint8_t dir_no_fat_chain, uint64_t primary_index,
-                                   uint8_t secondary_count) {
+                                   uint8_t secondary_count, int pin) {
     /*
+     * With pin set the node comes back pinned (a lookup reference, dropped
+     * by exfat_node_close), taken under the lock that chose it.  A pinned
+     * slot is in use -- an open file, a walk standing in it -- and is never
+     * rebuilt under its holders.  The inode number names a directory-entry
+     * position, so a pinned slot that is orphaned (deleted while open) or
+     * whose first cluster differs is another file: the new one gets a slot
+     * of its own.
+     *
      * The node cache is a fixed slot ring shared by
      * all exFAT mounts.  The old code hardcoded the root to slot 0 (shared
      * across every mount, so a second mount aliased then freed the first
@@ -707,11 +719,19 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
     for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
         if (exfat_node_cache[i].fs == fs &&
             exfat_fs_node_cache[i].inode == inode &&
-            exfat_fs_node_cache[i].name[0] != '\0') {
+            exfat_fs_node_cache[i].name[0] != '\0' &&
+            (exfat_node_cache[i].pin == 0 ||
+             (!exfat_node_cache[i].orphaned &&
+              exfat_node_cache[i].first_cluster == first_cluster))) {
             ctx = &exfat_node_cache[i];
             node = &exfat_fs_node_cache[i];
             break;
         }
+    }
+    if (ctx && ctx->pin > 0) {
+        ctx->pin += (uint32_t)pin;
+        mutex_unlock(&exfat_node_cache_lock);
+        return node;
     }
     /* Else take the next UNPINNED slot, round-robin over the whole ring. */
     if (!ctx) {
@@ -733,10 +753,10 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
         return NULL;
     }
 
-    uint32_t keep_pin = ctx->pin;
+    /* Unpinned here, so no one else is using it. */
     memset(ctx, 0, sizeof(*ctx));
     memset(node, 0, sizeof(*node));
-    ctx->pin = keep_pin;   /* re-populating a slot must not drop its pins */
+    ctx->pin = (uint32_t)pin;
 
     ctx->fs = fs;
     ctx->first_cluster = first_cluster;
@@ -762,6 +782,9 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
     node->statfs = exfat_statfs;
     node->open   = exfat_node_open;
     node->close  = exfat_node_close;
+    /* An exFAT open is only a pin: it is the lookup reference too. */
+    node->hold   = exfat_node_open;
+    node->rele   = exfat_node_close;
 
     if (attr & EXFAT_ATTR_DIRECTORY) {
         node->flags = FS_DIRECTORY;
@@ -1026,7 +1049,7 @@ static fs_node_t *exfat_finddir(fs_node_t *node, char *name) {
                             info.size, info.attr, info.no_fat_chain,
                             info.crt, info.mod, info.acc,
                             1, ctx->first_cluster, ctx->no_fat_chain,
-                            info.dir_entry_index, info.secondary_count);
+                            info.dir_entry_index, info.secondary_count, 1);
 }
 
 static size_t exfat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
@@ -2231,7 +2254,7 @@ static fs_node_t *exfat_mount(const char *device, uint32_t flags, void *data) {
                                        0 /* size unknown; bounded by EOD */,
                                        EXFAT_ATTR_DIRECTORY, 0 /* uses FAT chain */,
                                        0, 0, 0,
-                                       0, 0, 0, 0, 0);
+                                       0, 0, 0, 0, 0, 0);
     if (!root) {
         if (fs->bitmap) kfree(fs->bitmap, fs->bitmap_bytes);
         if (fs->upcase) kfree(fs->upcase, 65536 * sizeof(uint16_t));
