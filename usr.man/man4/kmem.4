@@ -69,7 +69,10 @@ Permission denied.
 The process does not have sufficient privileges, or the operation is disallowed by policy or securelevel.
 .It Bq Er EFAULT
 Bad address.
-The specified address is not a valid kernel virtual address or caused a page fault.
+The specified address is below the kernel's address space, or nothing is
+mapped at it.
+A transfer that runs into an unmapped page stops there and returns what it
+copied before it.
 .It Bq Er EINVAL
 Invalid argument.
 Attempted to

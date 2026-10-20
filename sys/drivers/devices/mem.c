@@ -118,6 +118,11 @@ static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buff
     if (!mem_allow && current_process->euid != 0) {
         return -EPERM;
     }
+    /* A physical address is never negative; one would pass the signed
+     * direct-map test below and index below the direct map. */
+    if (offset < 0) {
+        return (size_t)-EINVAL;
+    }
 
     while (size > 0) {
         size_t chunk;
@@ -159,6 +164,9 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
 
     if (mem_secure_level > 0) {
         return -EPERM; /* Writes denied in secure mode */
+    }
+    if (offset < 0) {
+        return (size_t)-EINVAL;     /* see mem_read */
     }
 
     while (size > 0) {

@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/pmap.h>
 #include <machine/vmparam.h>
 #include <kern/console.h>
 #include <sys/copy.h>
@@ -79,6 +80,38 @@ static void kmem_open(fs_node_t *node) {
 }
 
 /*
+ * Is the kernel page holding `va` mapped?  Asked of the running address
+ * space, whose kernel half every process shares: pmap_extract on the
+ * kernel's own pmap answers only while its CR3 is loaded.  The low bit
+ * keeps a mapping of physical page 0 from reading as "unmapped".
+ */
+static int kmem_page_mapped(uintptr_t va) {
+    pmap_t pm = (current_process && current_process->pmap)
+                ? (pmap_t)current_process->pmap : pmap_kernel();
+    return pmap_extract(pm, (va & ~(uintptr_t)0xFFF) | 1) != 0;
+}
+
+/* Copy `size` bytes at kernel address `kva` to or from `buf`, a page at a
+ * time, stopping at the first page with nothing mapped: what was copied,
+ * or -EFAULT if that was the first. */
+static size_t kmem_copy(uintptr_t kva, uint8_t *buf, size_t size, int to_kernel) {
+    size_t done = 0;
+    while (done < size) {
+        uintptr_t va = kva + done;
+        size_t chunk = 0x1000 - (va & 0xFFF);
+        if (chunk > size - done) chunk = size - done;
+        if (!kmem_page_mapped(va))
+            return done ? done : (size_t)-EFAULT;
+        if (to_kernel)
+            memcpy((void *)va, buf + done, chunk);
+        else
+            memcpy(buf + done, (const void *)va, chunk);
+        done += chunk;
+    }
+    return done;
+}
+
+/*
  * kmem_read
  * Reads from Kernel Virtual Address Space to User Buffer.
  */
@@ -105,18 +138,10 @@ static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         return (size_t)-EFAULT;
     }
 
-    /* 4. Perform Copy */
-    /*
-     * copyout(src, dst, size)
-     * src = Kernel Address (offset)
-     * dst = User Buffer (buffer)
-     */
-    void *kva = (void *)(uintptr_t)offset;
-
-    /* buffer is a kernel pointer here (sys_read double-buffers via IO_CHUNK_SIZE) */
-    memcpy(buffer, kva, size);
-
-    return size;
+    /* 4. Perform Copy, page by page: an unmapped kernel page would fault
+     * in kernel mode.  buffer is a kernel pointer here (sys_read
+     * double-buffers via IO_CHUNK_SIZE). */
+    return kmem_copy(kva_start, buffer, size, 0);
 }
 
 /*
@@ -143,18 +168,9 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
         return (size_t)-EFAULT;
     }
 
-    /* 4. Perform Copy */
-    /*
-     * copyin(src, dst, size)
-     * src = User Buffer (buffer)
-     * dst = Kernel Address (offset)
-     */
-    void *kva = (void *)(uintptr_t)offset;
-
-    /* buffer is a kernel pointer here (sys_write double-buffers via IO_CHUNK_SIZE) */
-    memcpy(kva, (void *)buffer, size);
-
-    return size;
+    /* 4. Perform Copy, page by page, as kmem_read.  buffer is a kernel
+     * pointer here (sys_write double-buffers via IO_CHUNK_SIZE). */
+    return kmem_copy(kva_start, (uint8_t *)buffer, size, 1);
 }
 
 /*

@@ -287,6 +287,12 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# kmemhole: /dev/kmem reads an unmapped kernel page as EFAULT.  Substrate
+# only; run as root.
+kmemhole: kmemhole.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pktrebind: an AF_PACKET reader asleep in recv survives a bind.  Substrate
 # only; run as root.
 pktrebind: pktrebind.c

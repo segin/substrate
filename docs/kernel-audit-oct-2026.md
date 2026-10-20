@@ -490,7 +490,7 @@ SYS-DRV-003 are Critical and not listed.
 
 ## 7. Device Drivers & Kernel Coding Rules (`sys/drivers/`, style rules)
 
-- [ ] **SYS-DRV-001** *(Critical → Low; partly confirmed)* In `/dev/mem`, `/dev/kmem`, `/dev/fb0`, and AC'97 device drivers, `mem_read` and `mem_write` shall reject negative offsets, `kmem_read` and `kmem_write` shall verify `pmap_extract(pmap_kernel(), va)` per page before `memcpy`, and `MAP_FIXED` device `mmap` handlers shall validate that `[addr, addr + length)` lies within user virtual address bounds.
+- [x] **SYS-DRV-001** *(Critical → Low; partly confirmed)* In `/dev/mem`, `/dev/kmem`, `/dev/fb0`, and AC'97 device drivers, `mem_read` and `mem_write` shall reject negative offsets, `kmem_read` and `kmem_write` shall verify `pmap_extract(pmap_kernel(), va)` per page before `memcpy`, and `MAP_FIXED` device `mmap` handlers shall validate that `[addr, addr + length)` lies within user virtual address bounds.
   Evidence: `sys/drivers/devices/mem.c:124, 166` compares signed `off_t offset >= MEM_DIRECT_MAP_LIMIT` without checking `offset < 0`; `sys/drivers/devices/kmem.c:100-158` copies from `kva_start >= 0xC0000000` without verifying `pmap_extract`; and `mem_mmap` (`mem.c:83-85`), `fb_fs_mmap` (`sys/drivers/video/fb.c:984-987`), and `ac97_mmap` (`sys/drivers/audio/ac97.c:737-744`) pass unvalidated `MAP_FIXED` addresses to `vm_map_remove` and `vm_map_insert`.
   Basis: traced.
 
