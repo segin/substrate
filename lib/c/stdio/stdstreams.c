@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <tls_local.h>
 
 FILE *stdin;
 FILE *stdout;
@@ -37,6 +38,9 @@ void __stdio_init(void) {
 	 * startup and restore it so main() begins with a pristine value.
 	 */
 	int saved_errno = errno;
+	/* A static program's thread-local storage, before anything can use
+	 * it (crt0 has set environ).  A no-op under the dynamic linker. */
+	__libc_static_tls_init(environ);
 	if (!stdin)  stdin  = fdopen(0, "r");
 	if (!stdout) stdout = fdopen(1, "w");
 	if (!stderr) stderr = fdopen(2, "w");

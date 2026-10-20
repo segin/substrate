@@ -22,7 +22,6 @@
     .extern environ
     .extern __stdio_init
     .extern __init_stack_guard
-    .extern __libc_static_tls_init
 
     .text
 _start:
@@ -60,12 +59,10 @@ _start:
     call __init_stack_guard@PLT
     addl $4, %esp                /* drop the argument */
 
-    /* Thread-local storage for a statically linked program (a no-op when
-     * the dynamic linker has already set it up).  envp is at [esp+8]. */
-    pushl 8(%esp)
-    call __libc_static_tls_init@PLT
-    addl $4, %esp
-
+    /* __stdio_init also sets up a static program's thread-local storage
+     * (__libc_static_tls_init).  It is not called from here: a program
+     * whose crt0 named that function would not start against a libc.so.0
+     * older than it. */
     call __stdio_init@PLT
 
     /* main(argc, argv, envp) — args still on stack. */

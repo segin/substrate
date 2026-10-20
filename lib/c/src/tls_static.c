@@ -30,6 +30,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <tls_local.h>
 
 #define TLS_AT_NULL   0
 #define TLS_AT_PHDR   3
@@ -86,9 +87,21 @@ void *__libc_alloc_tls(void) {
     return tls_build(mem);
 }
 
-/* Called from crt0 before any libc initialisation, with the environment
- * pointer the auxiliary vector follows. */
+/*
+ * Called first thing in __stdio_init, which crt0 calls (and which is also
+ * libc's constructor), with the environment pointer the auxiliary vector
+ * follows.  amd64's crt0 calls it as well, so it runs only once.
+ *
+ * i386's crt0 does not call it: a program linked with a crt0 that named
+ * this function could not start against a libc.so.0 from before it
+ * existed.  Reached through __stdio_init, a newly linked program needs
+ * nothing an older libc lacks, and a static one still links it in.
+ */
 void __libc_static_tls_init(char **envp) {
+    static int done;
+
+    if (done) return;
+    done = 1;
     if (__ldso_alloc_tls) return;       /* the dynamic linker did it */
     if (!envp) return;
 
