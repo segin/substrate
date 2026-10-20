@@ -316,6 +316,7 @@ int virtio_gpu_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     if (!vgpu_dev.io_base) {
         return -1;
     }
+    virtio_pci_enable(bus, slot, func);
 
     outb(vgpu_dev.io_base + VIRTIO_REG_DEVICE_STATUS, 0);
     outb(vgpu_dev.io_base + VIRTIO_REG_DEVICE_STATUS,

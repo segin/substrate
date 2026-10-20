@@ -83,6 +83,8 @@ struct vring_used {
 void virtio_init(void);
 uint32_t virtio_pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func);
+/* Turn on I/O decoding and bus mastering, which the device needs to DMA. */
+void virtio_pci_enable(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO Block
 void virtio_blk_init(void);

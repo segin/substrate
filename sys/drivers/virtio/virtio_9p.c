@@ -42,7 +42,8 @@ void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func) {
 
     v9p.io_base = virtio_get_io_base(bus, slot, func);
     if (!v9p.io_base) return;
-    
+    virtio_pci_enable(bus, slot, func);
+
     // Reset & Ack
     outb(v9p.io_base + VIRTIO_REG_DEVICE_STATUS, 0);
     outb(v9p.io_base + VIRTIO_REG_DEVICE_STATUS, 

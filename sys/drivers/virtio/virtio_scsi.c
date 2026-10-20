@@ -706,6 +706,7 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         kprint("virtio_scsi: no I/O base found\n");
         return;
     }
+    virtio_pci_enable(bus, slot, func);
     
     /* 1. Reset device */
     outb(dev->io_base + VIRTIO_REG_DEVICE_STATUS, 0);
@@ -770,7 +771,7 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     dev->req_buf = pmm_alloc_block();
     if (!dev->ctrl_buf || !dev->req_buf) {
         kprint("virtio_scsi: failed to allocate DMA staging buffers\n");
-        return;
+        goto free_bufs;
     }
     memset(dev->ctrl_buf, 0, 4096);
     memset(dev->req_buf, 0, 4096);
@@ -779,7 +780,7 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         dev->extra_req_bufs[i - 1] = pmm_alloc_block();
         if (!dev->extra_req_bufs[i - 1]) {
             kprint("virtio_scsi: failed to allocate per-queue DMA staging buffer\n");
-            return;
+            goto free_bufs;
         }
         memset(dev->extra_req_bufs[i - 1], 0, 4096);
     }
@@ -788,7 +789,7 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         dev->event_bufs = (struct virtio_scsi_event *)pmm_alloc_block();
         if (!dev->event_bufs) {
             kprint("virtio_scsi: failed to allocate event buffers\n");
-            return;
+            goto free_bufs;
         }
         memset(dev->event_bufs, 0, 4096);
     }
@@ -828,8 +829,21 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     
     /* Scan for devices */
     scsi_scan_bus(&dev->link, 0);
-    
+
     vscsi_initialized = 1;
+    return;
+
+free_bufs:
+    /* A staging buffer failed: give back the ones already taken rather
+     * than leave them to a driver that will never run. */
+    if (dev->ctrl_buf) pmm_free_block(dev->ctrl_buf);
+    if (dev->req_buf) pmm_free_block(dev->req_buf);
+    for (uint16_t i = 1; i < dev->req_queue_count; i++) {
+        if (dev->extra_req_bufs[i - 1]) pmm_free_block(dev->extra_req_bufs[i - 1]);
+        dev->extra_req_bufs[i - 1] = NULL;
+    }
+    dev->ctrl_buf = NULL;
+    dev->req_buf = NULL;
 }
 
 /*

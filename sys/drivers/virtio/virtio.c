@@ -133,6 +133,16 @@ uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func) {
     return 0;
 }
 
+/* I/O decoding and bus mastering for a legacy virtio device.  Without
+ * MASTER the device can never DMA: it accepts the queue and the notify,
+ * never fetches a descriptor, and every completion poll spins forever
+ * (virtio_blk's first read hung exactly so). */
+void virtio_pci_enable(uint8_t bus, uint8_t slot, uint8_t func) {
+    uint32_t cmd = pci_read(bus, slot, func, PCI_CONFIG_COMMAND);
+    pci_write(bus, slot, func, PCI_CONFIG_COMMAND,
+              cmd | PCI_COMMAND_IO | PCI_COMMAND_MASTER);
+}
+
 void virtio_init(void) {
     static int virtio_drivers_registered;
     uint64_t start_tsc, end_tsc;
