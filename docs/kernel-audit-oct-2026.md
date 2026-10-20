@@ -255,7 +255,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/posix_mqueue.c:256-268`, `sys/kern/posix_sem.c:450-460`, and `sys/kern/futex.c:546, 1132` overflow signed `int64_t` on `dsec * 1000000000LL` or `total_ns * hz`, and `sys/kern/futex.c:532, 554` and `sys/kern/umtx.c:120, 128` do not check `ts.tv_sec < 0` on relative timeouts.
   Basis: traced.
 
-- [ ] **SYS-KERN-018** *(Medium → Low; partly confirmed)* When executing `UMTX_OP_NWAKE_PRIVATE` in `sys/kern/umtx.c`, the kernel shall bound `count` and compute pointer offsets without 32-bit signed integer overflow.
+- [x] **SYS-KERN-018** *(Medium → Low; partly confirmed)* When executing `UMTX_OP_NWAKE_PRIVATE` in `sys/kern/umtx.c`, the kernel shall bound `count` and compute pointer offsets without 32-bit signed integer overflow.
   Evidence: `sys/kern/umtx.c:363-378` loops `for (int i = 0; i < count; i++)` up to `INT_MAX` with `(char *)obj + i * 4`, which overflows signed `int` at `i = 0x20000000` and spins uninterruptibly in Ring 0.
   Basis: traced.
 

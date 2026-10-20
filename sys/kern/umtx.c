@@ -404,10 +404,16 @@ int kern_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2
          * priority-propagation mutexes at thread exit; if the array is
          * unreadable we just report success (nothing to wake).
          */
-        int count = (int)val;
-        for (int i = 0; i < count; i++) {
+        uintptr_t base = (uintptr_t)obj;
+        if (base > USER_SPACE_MAX) return 0;
+        /* No more entries than fit between obj and the top of user space:
+         * a wild count ends there rather than wrapping. */
+        uint32_t count = (int)val < 0 ? 0 : (uint32_t)val;
+        uint32_t room = (uint32_t)((USER_SPACE_MAX - base) / 4 + 1);
+        if (count > room) count = room;
+        for (uint32_t i = 0; i < count; i++) {
             uint32_t aptr;
-            if (umtx_read32((volatile uint32_t *)((char *)obj + i * 4), &aptr) != 0)
+            if (umtx_read32((volatile uint32_t *)(base + (uintptr_t)i * 4), &aptr) != 0)
                 break;
             if (aptr) kern_umtx_wake((void *)(uintptr_t)aptr, 1);
         }
