@@ -9,15 +9,18 @@
  * block, and point the thread register at it before any code touches a
  * __thread variable.
  *
- * Layout: variant II (docs/specs/abi-amd64.md, section 8).  The TLS image
+ * Layout: variant II on both i386 and amd64 (docs/specs/abi-amd64.md,
+ * section 8; ld.so's ld_tls.c lays i386 out the same way).  The TLS image
  * sits immediately below the thread pointer, at tp - round_up(memsz, align);
- * tp[0] is the thread pointer itself and tp[1] the DTV slot, unused here
- * because a static link resolves every access to a fixed offset.
+ * tp[0] is the thread pointer itself (%gs:0 on i386, %fs:0 on amd64) and
+ * tp[1] the DTV slot, unused here because a static link resolves every
+ * access to a fixed offset.
  *
- * amd64 only for now: every i386 program is dynamically linked.
+ * This used to be amd64 only, on the belief that every i386 program is
+ * dynamically linked.  A static i386 program then had no TLS image and its
+ * threads a NULL TLS base: libpthread's own TLS faulted and the program's
+ * __thread variables were never initialised.
  */
-#if defined(__x86_64__)
-
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -33,6 +36,12 @@
 #define TLS_AT_PHENT  4
 #define TLS_AT_PHNUM  5
 #define TLS_TCB_SIZE  64        /* self pointer, DTV slot, spare */
+
+#if defined(__x86_64__)
+typedef Elf64_Phdr tls_phdr_t;
+#else
+typedef Elf32_Phdr tls_phdr_t;
+#endif
 
 extern void *__ldso_alloc_tls(void) __attribute__((weak));
 
@@ -86,19 +95,19 @@ void __libc_static_tls_init(char **envp) {
     char **p = envp;
     while (*p) p++;
     const uintptr_t *aux = (const uintptr_t *)(p + 1);
-    const Elf64_Phdr *phdr = NULL;
-    size_t phnum = 0, phent = sizeof(Elf64_Phdr);
+    const tls_phdr_t *phdr = NULL;
+    size_t phnum = 0, phent = sizeof(tls_phdr_t);
 
     for (; aux[0] != TLS_AT_NULL; aux += 2) {
-        if (aux[0] == TLS_AT_PHDR) phdr = (const Elf64_Phdr *)aux[1];
+        if (aux[0] == TLS_AT_PHDR) phdr = (const tls_phdr_t *)aux[1];
         else if (aux[0] == TLS_AT_PHNUM) phnum = aux[1];
         else if (aux[0] == TLS_AT_PHENT) phent = aux[1];
     }
     if (!phdr) return;
 
     for (size_t i = 0; i < phnum; i++) {
-        const Elf64_Phdr *ph =
-            (const Elf64_Phdr *)((const char *)phdr + i * phent);
+        const tls_phdr_t *ph =
+            (const tls_phdr_t *)((const char *)phdr + i * phent);
         if (ph->p_type != PT_TLS) continue;
         tls_image = (const void *)(uintptr_t)ph->p_vaddr;
         tls_filesz = ph->p_filesz;
@@ -116,5 +125,3 @@ void __libc_static_tls_init(char **envp) {
     if (mem == MAP_FAILED) return;
     syscall(SYS_SET_GSBASE, (uintptr_t)tls_build(mem));
 }
-
-#endif /* __x86_64__ */

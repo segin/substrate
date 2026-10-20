@@ -1093,7 +1093,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Fix: `linux_sys_exit`: the last live thread calls `proc_exit`; otherwise run the robust-list cleanup, mark the thread detached and exit it alone; write 0 to the clear-tid word.  The same last-thread rule in `sys_thr_exit`.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-005** *(Medium → Low; confirmed, i386 only)* A statically linked i386 program shall get thread-local storage, for its main thread and its threads.
+- [x] **SYS-NEW-005** *(Medium → Low; confirmed, i386 only)* A statically linked i386 program shall get thread-local storage, for its main thread and its threads.
   Evidence: `lib/c/src/tls_static.c` (static TLS from PT_TLS) is under `#if defined(__x86_64__)` ("every i386 program is dynamically linked" — not so); i386 `crt0.S` has no TLS step, so a static i386 program's main thread has no TLS image and threads get `tls_base == NULL` (gs base 0).  libpthread's own TLS (cancel state, cleanup stack, keys) then faults — a thread at the latest on exit, the main thread on any such call — and the program's `__thread` variables are never initialised.  amd64 static programs are fine.  Narrower than first thought: `-lpthread` now resolves to the shared library (`install-specs.sh`), so only explicit `-static` links are hit.
   Fix: port `tls_static.c` to i386 (Elf32 phdrs from auxv, variant II as ld.so builds, `SYS_SET_GSBASE`) and call it from i386 `crt0.S`; add a static i386 TLS test.
   Basis: traced (verifier + critic).

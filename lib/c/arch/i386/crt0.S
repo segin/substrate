@@ -22,6 +22,7 @@
     .extern environ
     .extern __stdio_init
     .extern __init_stack_guard
+    .extern __libc_static_tls_init
 
     .text
 _start:
@@ -58,6 +59,12 @@ _start:
     pushl 8(%esp)                /* envp argument */
     call __init_stack_guard@PLT
     addl $4, %esp                /* drop the argument */
+
+    /* Thread-local storage for a statically linked program (a no-op when
+     * the dynamic linker has already set it up).  envp is at [esp+8]. */
+    pushl 8(%esp)
+    call __libc_static_tls_init@PLT
+    addl $4, %esp
 
     call __stdio_init@PLT
 

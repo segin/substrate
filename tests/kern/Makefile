@@ -262,6 +262,12 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# tlsstatic: a statically linked program's __thread variables, in its main
+# thread and its threads, and libpthread's own TLS.  Runs on the host too.
+tlsstatic: tlsstatic.c
+	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptsrace: /dev/pts/N looked up while ptys are made and destroyed.  Runs on
 # the host too.
 ptsrace: ptsrace.c

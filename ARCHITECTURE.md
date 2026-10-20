@@ -347,7 +347,10 @@ program, PIE or not. It:
   TLS_TPOFF);
 - sets up variant-II thread-local storage, setting the GS base with the
   native `sys_set_gsbase` call, including for libraries loaded later with
-  `dlopen`;
+  `dlopen` (a statically linked program, which has no ld.so, gets the same
+  layout from libc: crt0 calls `__libc_static_tls_init`, which finds the
+  executable's `PT_TLS` through the auxiliary vector, and libpthread asks
+  `__libc_alloc_tls` for each thread's block; both i386 and amd64);
 - runs `DT_INIT_ARRAY`, and `DT_FINI_ARRAY` at exit through a weak hook
   libc calls from `exit()`;
 - provides `dlopen`/`dlsym`/`dlclose` and `dl_iterate_phdr(3)`;
