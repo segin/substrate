@@ -352,7 +352,7 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
     uint32_t index = (inode_num - 1) % fs->inodes_per_group;
     
-    if (group >= fs->group_count) return -1;
+    if (group >= fs->group_count) return -EIO;     /* inode number past the volume */
     
     // Get inode table location from block group descriptor
     uint32_t inode_table_block = fs->bgd[group].bg_inode_table;
@@ -1087,7 +1087,7 @@ static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
     uint32_t index = (inode_num - 1) % fs->inodes_per_group;
     
-    if (group >= fs->group_count) return -1;
+    if (group >= fs->group_count) return -EIO;     /* inode number past the volume */
     
     // Get inode table location from block group descriptor
     uint32_t inode_table_block = fs->bgd[group].bg_inode_table;
@@ -6258,7 +6258,7 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
 
     if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
         mutex_unlock(&ctx->lock);
-        return -1;
+        return -ENOMEM;     /* a bare -1 reached userspace as EPERM */
     }
 
     uint8_t *block_buf = ctx->block_buf;

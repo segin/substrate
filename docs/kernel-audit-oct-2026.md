@@ -406,7 +406,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/fs/devfs.c:745-808` (`devfs_register_alias_perso`) mutates the devfs tree without acquiring `devfs_lock`, violating the locking contract documented at line 121.
   Basis: traced.
 
-- [ ] **SYS-FS-013** *(Low; confirmed)* When `ext2_read_inode`, `ext2_write_inode_ex`, or `ext2_remove_entry` fails in `sys/fs/ext2/ext2.c`, the function shall return a negative errno (`-EIO` or `-ENOMEM`) rather than `-1` (`-EPERM`).
+- [x] **SYS-FS-013** *(Low; confirmed)* When `ext2_read_inode`, `ext2_write_inode_ex`, or `ext2_remove_entry` fails in `sys/fs/ext2/ext2.c`, the function shall return a negative errno (`-EIO` or `-ENOMEM`) rather than `-1` (`-EPERM`).
   Evidence: `sys/fs/ext2/ext2.c:334, 1069` return `-1` when `group >= fs->group_count`, and line 6160 returns `-1` on `kmalloc` failure.
   Basis: traced.
 
