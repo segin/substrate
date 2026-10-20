@@ -410,7 +410,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/fs/ext2/ext2.c:334, 1069` return `-1` when `group >= fs->group_count`, and line 6160 returns `-1` on `kmalloc` failure.
   Basis: traced.
 
-- [ ] **SYS-FS-014** *(Low; partly confirmed)* In `sys/fs/shmfs.c` and `sys/fs/sysfs.c`, `shmfs_root_readdir` shall populate `d_ino`, and `shmfs_root_finddir` / `sysfs_finddir` / `sysfs_leaf_finddir` shall handle `"."` and `".."`.
+- [x] **SYS-FS-014** *(Low; partly confirmed)* In `sys/fs/shmfs.c` and `sys/fs/sysfs.c`, `shmfs_root_readdir` shall populate `d_ino`, and `shmfs_root_finddir` / `sysfs_finddir` / `sysfs_leaf_finddir` shall handle `"."` and `".."`.
   Evidence: `sys/fs/shmfs.c:471-487` leaves `shmfs_dirent.d_ino` unset, and `shmfs_root_finddir` (`:512-519`) and `sysfs_finddir` (`sys/fs/sysfs.c:86-132`) do not resolve `"."` or `".."`.
   Basis: traced.
 

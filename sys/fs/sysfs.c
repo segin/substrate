@@ -90,8 +90,13 @@ static struct dirent *sysfs_leaf_readdir(fs_node_t *node, uint64_t index) {
     return &sys_dirent;
 }
 
+/* A leaf has only its dot entries, which readdir lists and lookup must
+ * find too: "." is itself, ".." the sysfs root. */
 static fs_node_t *sysfs_leaf_finddir(fs_node_t *node, char *name) {
-    (void)node; (void)name;
+    if (name[0] == '.' && name[1] == '\0')
+        return node;
+    if (name[0] == '.' && name[1] == '.' && name[2] == '\0')
+        return &sysfs_root_node;
     return NULL;
 }
 
@@ -108,7 +113,16 @@ static void sysfs_init_subnode(fs_node_t *n, const char *name, uint64_t ino) {
 }
 
 static fs_node_t *sysfs_finddir(fs_node_t *node, char *name) {
-    (void)node;
+    /* "." is the root; ".." at a mount root is the covered directory,
+     * held as a lookup's result is. */
+    if (name[0] == '.' && name[1] == '\0')
+        return node;
+    if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        fs_node_t *up = (node->mp && node->mp->mnt_node_covered)
+                      ? node->mp->mnt_node_covered : node;
+        if (up->hold) up->hold(up);
+        return up;
+    }
     if (!sysfs_subnodes_inited) {
         sysfs_init_subnode(&sysfs_bus_node, "bus", SYSFS_INO_BUS);
         sysfs_init_subnode(&sysfs_class_node, "class", SYSFS_INO_CLASS);

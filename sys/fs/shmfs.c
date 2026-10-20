@@ -514,15 +514,20 @@ static int shmfs_truncate(fs_node_t *node, off_t len) {
  * Root directory operations: readdir, finddir, mknod, unlink.
  * -------------------------------------------------------------- */
 static struct dirent *shmfs_root_readdir(fs_node_t *node, uint64_t index) {
-    (void)node;
-    if (index == 0) { strlcpy(shmfs_dirent.d_name, ".", sizeof(shmfs_dirent.d_name));  return &shmfs_dirent; }
-    if (index == 1) { strlcpy(shmfs_dirent.d_name, "..", sizeof(shmfs_dirent.d_name)); return &shmfs_dirent; }
+    /* d_ino was never set, so every entry reported whatever the last call
+     * left there: "." and ".." are the root's, the rest their own. */
+    if (index == 0 || index == 1) {
+        strlcpy(shmfs_dirent.d_name, index ? ".." : ".", sizeof(shmfs_dirent.d_name));
+        shmfs_dirent.d_ino = node ? node->inode : 0;
+        return &shmfs_dirent;
+    }
     mutex_lock(&shmfs_lock);
     uint64_t i = 2;
     for (shmfs_inode_t *e = shmfs_children; e; e = e->next, i++) {
         if (i == index) {
             strlcpy(shmfs_dirent.d_name, e->name, sizeof(shmfs_dirent.d_name));
             shmfs_dirent.d_name[sizeof(shmfs_dirent.d_name) - 1] = '\0';
+            shmfs_dirent.d_ino = e->node.inode;
             mutex_unlock(&shmfs_lock);
             return &shmfs_dirent;
         }
@@ -555,7 +560,17 @@ static void shmfs_hash_remove(shmfs_inode_t *victim) {
 }
 
 static fs_node_t *shmfs_root_finddir(fs_node_t *node, char *name) {
-    (void)node;
+    /* "." is the root itself; ".." at a mount root is the covered
+     * directory, held as a lookup's result is.  Neither resolved before,
+     * so "/dev/shm/." was "no such file". */
+    if (name[0] == '.' && name[1] == '\0')
+        return node;
+    if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        fs_node_t *up = (node->mp && node->mp->mnt_node_covered)
+                      ? node->mp->mnt_node_covered : node;
+        if (up->hold) up->hold(up);
+        return up;
+    }
     mutex_lock(&shmfs_lock);
     shmfs_inode_t *e = shmfs_find_child(name);
     fs_node_t *n = e ? &e->node : NULL;
