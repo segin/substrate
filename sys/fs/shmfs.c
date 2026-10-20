@@ -559,6 +559,9 @@ static fs_node_t *shmfs_root_finddir(fs_node_t *node, char *name) {
     mutex_lock(&shmfs_lock);
     shmfs_inode_t *e = shmfs_find_child(name);
     fs_node_t *n = e ? &e->node : NULL;
+    /* Returned held (refcount, as an open is): an unlink meanwhile then
+     * leaves the inode for the lookup's release to free. */
+    if (e) e->refcount++;
     mutex_unlock(&shmfs_lock);
     return n;
 }
@@ -591,6 +594,8 @@ static int shmfs_root_mknod(fs_node_t *parent, const char *name, uint16_t mode, 
     ino->node.truncate = shmfs_truncate;
     ino->node.open     = shmfs_node_open;
     ino->node.close    = shmfs_node_close;
+    ino->node.hold     = shmfs_node_open;   /* a pure count: the lookup */
+    ino->node.rele     = shmfs_node_close;  /* reference too */
     ino->node.mmap     = shmfs_node_mmap;
     shmfs_refresh_timestamps(&ino->node);
 
