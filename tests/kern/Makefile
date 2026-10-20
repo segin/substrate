@@ -309,6 +309,11 @@ ptyopost: ptyopost.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptyvmin: a raw VMIN=1 read waits for input whatever its length.
+ptyvmin: ptyvmin.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptyff: a 0xFF byte passes through a pty as data, raw and canonical.
 ptyff: ptyff.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@

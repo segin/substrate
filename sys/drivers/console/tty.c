@@ -926,7 +926,9 @@ int tty_read(struct tty *tty, char *buf, int len) {
          */
         cc_t vmin = tty->termios.c_cc[VMIN];
         cc_t vtime = tty->termios.c_cc[VTIME];
-        int minchars = (vmin < (cc_t)len) ? vmin : (cc_t)len;
+        /* Compare as ints: a len cast to cc_t truncates, and a read of a
+         * multiple of 256 bytes then wanted 0 chars and returned 0. */
+        int minchars = ((int)vmin < len) ? (int)vmin : len;
         uint64_t deadline = 0;
         int timer_started = 0;
 
