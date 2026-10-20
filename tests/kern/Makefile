@@ -287,6 +287,11 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# wakeopatomic.linux: FUTEX_WAKE_OP's update of *uaddr2 loses no
+# concurrent increment.  Runs on the host too.
+wakeopatomic.linux: wakeopatomic.c
+	gcc -m32 -static -O2 -pthread $< -o $@
+
 # slabsredact: sys_vm_slabs shows kernel addresses to root only.  Substrate
 # only; run as root.
 slabsredact: slabsredact.c

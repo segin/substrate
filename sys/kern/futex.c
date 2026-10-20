@@ -126,16 +126,6 @@ static int futex_read_user(int *uaddr, int *value) {
     return 0;
 }
 
-static int futex_write_user(int *uaddr, int value) {
-    if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
-
-    /* Use copyout() for safe userspace access with fault handling */
-    if (copyout(&value, uaddr, sizeof(int)) != 0)
-        return -EFAULT;
-
-    return 0;
-}
-
 /*
  * Safe userspace CMPXCHG for atomic operations
  * Returns old value, or sets *err on failure.  casuword32 keeps its fault
@@ -713,22 +703,30 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 oparg = 1 << oparg;
             }
 
+            if (op > FUTEX_OP_XOR || cmp > FUTEX_OP_CMP_GE)
+                return -ENOSYS;
+
+            /* Read-modify-write *uaddr2 as one atomic step: another thread
+             * storing to the word in between must not be overwritten. */
             int oldval;
             if (futex_read_user(uaddr2, &oldval) != 0)
                 return -EFAULT;
-
-            int newval;
-            switch (op) {
-                case FUTEX_OP_SET:  newval = oparg;            break;
-                case FUTEX_OP_ADD:  newval = oldval + oparg;   break;
-                case FUTEX_OP_OR:   newval = oldval | oparg;   break;
-                case FUTEX_OP_ANDN: newval = oldval & ~oparg;  break;
-                case FUTEX_OP_XOR:  newval = oldval ^ oparg;   break;
-                default:            return -ENOSYS;
+            for (;;) {
+                int newval, cerr;
+                switch (op) {
+                    case FUTEX_OP_SET:  newval = oparg;            break;
+                    case FUTEX_OP_ADD:  newval = oldval + oparg;   break;
+                    case FUTEX_OP_OR:   newval = oldval | oparg;   break;
+                    case FUTEX_OP_ANDN: newval = oldval & ~oparg;  break;
+                    default:            newval = oldval ^ oparg;   break;
+                }
+                int seen = futex_cmpxchg_user(uaddr2, oldval, newval, &cerr);
+                if (cerr)
+                    return cerr;
+                if (seen == oldval)
+                    break;
+                oldval = seen;
             }
-
-            if (futex_write_user(uaddr2, newval) != 0)
-                return -EFAULT;
 
             int cmp_result;
             switch (cmp) {

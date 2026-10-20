@@ -288,7 +288,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/pm/process.c:848-884` allocates `child = proc_create(PERS_NATIVE)` at line 852 and returns `-1` at lines 866 and 873 without calling `proc_destroy(child)`.
   Basis: traced.
 
-- [ ] **SYS-KERN-026** *(Low; confirmed)* When executing `FUTEX_WAKE_OP` in `sys_futex`, the kernel shall update `*uaddr2` using an atomic compare-and-swap loop (`casuword32`).
+- [x] **SYS-KERN-026** *(Low; confirmed)* When executing `FUTEX_WAKE_OP` in `sys_futex`, the kernel shall update `*uaddr2` using an atomic compare-and-swap loop (`casuword32`).
   Evidence: `sys/kern/futex.c:718-732` performs a non-atomic `futex_read_user` followed by `futex_write_user`.
   Basis: traced.
 
