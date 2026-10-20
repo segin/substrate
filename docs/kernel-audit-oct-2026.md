@@ -469,7 +469,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/net/af_unix.c:2388-2392` (`fd_fail:`) decrements `qf->f_count` directly without calling `file_close_ptr(qf)` if a concurrent `close()` dropped the last user reference, and lines 2372–2437 enqueue descriptors into `peer->rx_fdq` before `sock_dgram_sendv` / `sys_send` can fail.
   Basis: traced.
 
-- [ ] **SYS-NET-002** *(High → Medium; confirmed)* When rebinding an `AF_PACKET` socket in `afpacket_bind`, the socket layer shall synchronize `s->sub` teardown against concurrent readers in `afpkt_node_read` and `afpacket_recvfrom`.
+- [x] **SYS-NET-002** *(High → Medium; confirmed)* When rebinding an `AF_PACKET` socket in `afpacket_bind`, the socket layer shall synchronize `s->sub` teardown against concurrent readers in `afpkt_node_read` and `afpacket_recvfrom`.
   Evidence: `sys/net/af_packet.c:199-211` calls `netdev_unsubscribe(s->sub)` (which `kfree`s `sub->ring` and `sub` in `sys/net/netdev.c:423-425`) while concurrent threads in `afpkt_node_read` (`:67-106`) or `afpacket_recvfrom` (`:279-343`) read `s->sub` and sleep on `netdev_sub_wait_chan(s->sub)` without a lock.
   Basis: traced.
 

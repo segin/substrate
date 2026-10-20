@@ -51,11 +51,32 @@ struct sockaddr_ll_kern {
 #endif
 
 typedef struct afpkt_sock {
+    /* Replaced by bind and cleared by close under `lock`; a reader takes
+     * it with afpkt_sub_get, which holds it while the reader uses it. */
     struct netdev_sub *sub;
+    spinlock_t         lock;
     int                ifindex_bound;   /* 0 = all NICs */
     fs_node_t          node;
     int                closed;
 } afpkt_sock_t;
+
+/* The socket's current subscription, held (netdev_sub_rele), or NULL. */
+static struct netdev_sub *afpkt_sub_get(afpkt_sock_t *s) {
+    spinlock_acquire(&s->lock);
+    struct netdev_sub *sub = s->sub;
+    netdev_sub_hold(sub);
+    spinlock_release(&s->lock);
+    return sub;
+}
+
+/* Put `sub` in the socket (NULL on close) and retire the old one. */
+static void afpkt_sub_swap(afpkt_sock_t *s, struct netdev_sub *sub) {
+    spinlock_acquire(&s->lock);
+    struct netdev_sub *old = s->sub;
+    s->sub = sub;
+    spinlock_release(&s->lock);
+    netdev_unsubscribe(old);            /* wakes its sleepers; NULL is ok */
+}
 
 /* ------------------------------------------------------------------ */
 /* fs_node adapter — read(2)/write(2)/close(2) on the socket fd      */
@@ -89,16 +110,24 @@ size_t afpkt_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
 
     for (;;) {
         uint32_t ifindex;
-        ssize_t n = netdev_sub_recv(s->sub, buf, size, &ifindex);
-        if (n > 0) return (size_t)n;
-        if (n < 0) return (size_t)n;
-        if (nonblock) return (size_t)-EAGAIN;
+        /* Held across the receive and the sleep: a bind or close
+         * meanwhile retires it and wakes us, and we take the new one. */
+        struct netdev_sub *sub = afpkt_sub_get(s);
+        if (!sub) return 0;
+        ssize_t n = netdev_sub_recv(sub, buf, size, &ifindex);
+        if (n != 0 || nonblock) {
+            netdev_sub_rele(sub);
+            if (n > 0) return (size_t)n;
+            if (n < 0) return (size_t)n;
+            return (size_t)-EAGAIN;
+        }
         /* No data — sleep on the subscriber's wake channel until a
          * frame arrives.  Interruptible so SIGINT yanks us out. */
-        void *chan = netdev_sub_wait_chan(s->sub);
+        void *chan = netdev_sub_wait_chan(sub);
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(chan);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        netdev_sub_rele(sub);
         if (current_thread->sig_pending & ~current_thread->sig_mask)
             return (size_t)-EINTR;
         if (s->closed) return 0;
@@ -124,11 +153,7 @@ static void afpkt_node_close(fs_node_t *node) {
     afpkt_sock_t *s = (afpkt_sock_t *)(uintptr_t)node->impl;
     if (!s) return;
     s->closed = 1;
-    if (s->sub) {
-        sched_wakeup(netdev_sub_wait_chan(s->sub));
-        netdev_unsubscribe(s->sub);
-        s->sub = NULL;
-    }
+    afpkt_sub_swap(s, NULL);
     kfree(s, sizeof(*s));
     node->impl = 0;
 }
@@ -175,6 +200,7 @@ int afpacket_socket(int type, int protocol) {
     afpkt_sock_t *s = (afpkt_sock_t *)kmalloc(sizeof(*s));
     if (!s) return -ENOMEM;
     memset(s, 0, sizeof(*s));
+    spinlock_init(&s->lock, "afpacket");
     s->sub = netdev_subscribe(0);   /* all NICs by default */
     if (!s->sub) { kfree(s, sizeof(*s)); return -ENOMEM; }
 
@@ -202,11 +228,12 @@ int afpacket_bind(int fd, const struct sockaddr_ll_kern *sll, socklen_t len) {
     if (!sll || len < (socklen_t)sizeof(*sll)) return -EINVAL;
     if (sll->sll_family != AF_PACKET) return -EAFNOSUPPORT;
 
-    /* Replace subscriber with one filtered to the chosen ifindex. */
-    if (s->sub) netdev_unsubscribe(s->sub);
+    /* Replace subscriber with one filtered to the chosen ifindex.  The new
+     * one is made first, so a failure leaves the socket as it was. */
+    struct netdev_sub *sub = netdev_subscribe((uint32_t)sll->sll_ifindex);
+    if (!sub) return -ENOMEM;
     s->ifindex_bound = sll->sll_ifindex;
-    s->sub = netdev_subscribe((uint32_t)sll->sll_ifindex);
-    if (!s->sub) return -ENOMEM;
+    afpkt_sub_swap(s, sub);
     return 0;
 }
 
@@ -289,36 +316,20 @@ ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
      * unconditional -- see the O_NONBLOCK note in afpkt_node_read above for the
      * dhclient hang this produced.
      */
-    {
-        int nb = (flags & MSG_DONTWAIT) != 0;
-        if (!nb && fd >= 0 && fd < MAX_FD && current_process) {
-            file_t *f = current_process->fds[fd];
-            nb = (f && (f->f_flag & FNONBLOCK)) ? 1 : 0;
-        }
-        if (nb) {
-            uint32_t ifindex;
-            ssize_t n = netdev_sub_recv(s->sub, buf, len, &ifindex);
-            if (n == 0) return -EAGAIN;
-            if (n < 0) return n;
-            if (from && fromlen && *fromlen >= (socklen_t)sizeof(*from)) {
-                memset(from, 0, sizeof(*from));
-                from->sll_family = AF_PACKET;
-                from->sll_ifindex = (int32_t)ifindex;
-                netdev_t *d = netdev_by_index(ifindex);
-                if (d) {
-                    from->sll_halen = NETDEV_HWADDR_LEN;
-                    memcpy(from->sll_addr, d->hwaddr, NETDEV_HWADDR_LEN);
-                }
-                *fromlen = (socklen_t)sizeof(*from);
-            }
-            return n;
-        }
+    int nb = (flags & MSG_DONTWAIT) != 0;
+    if (!nb && fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        nb = (f && (f->f_flag & FNONBLOCK)) ? 1 : 0;
     }
 
     for (;;) {
         uint32_t ifindex;
-        ssize_t n = netdev_sub_recv(s->sub, buf, len, &ifindex);
+        /* Held across the receive and the sleep (see afpkt_node_read). */
+        struct netdev_sub *sub = afpkt_sub_get(s);
+        if (!sub) return 0;
+        ssize_t n = netdev_sub_recv(sub, buf, len, &ifindex);
         if (n > 0) {
+            netdev_sub_rele(sub);
             if (from && fromlen && *fromlen >= (socklen_t)sizeof(*from)) {
                 memset(from, 0, sizeof(*from));
                 from->sll_family = AF_PACKET;
@@ -332,10 +343,14 @@ ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
             }
             return n;
         }
-        if (n < 0) return n;
+        if (n < 0 || nb) {
+            netdev_sub_rele(sub);
+            return n < 0 ? n : -EAGAIN;
+        }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(netdev_sub_wait_chan(s->sub));
+        sched_sleep(netdev_sub_wait_chan(sub));
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        netdev_sub_rele(sub);
         if (current_thread->sig_pending & ~current_thread->sig_mask)
             return -EINTR;
         if (s->closed) return 0;

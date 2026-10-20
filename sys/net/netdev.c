@@ -183,6 +183,10 @@ typedef struct netdev_sub {
      * sleeping, so a spinlock is appropriate. */
     spinlock_t      lock;
     int             lock_inited;
+    /* The subscriber's own reference plus one per reader inside
+     * netdev_sub_recv or asleep on wait_chan (netdev_sub_hold); the
+     * memory goes when the last is dropped, not at unsubscribe. */
+    uint32_t        refs;
     struct netdev_sub *next;
 } netdev_sub_t;
 
@@ -208,6 +212,7 @@ netdev_sub_t *netdev_subscribe(uint32_t ifindex) {
     if (!s->ring) { kfree(s, sizeof(*s)); return NULL; }
     s->ifindex_filter = ifindex;
     s->wait_chan = &s->count;
+    s->refs = 1;
     spinlock_init(&s->lock, "netdev_sub_q");
     s->lock_inited = 1;
 
@@ -225,6 +230,18 @@ void netdev_unsubscribe(netdev_sub_t *sub) {
     while (*link && *link != sub) link = &(*link)->next;
     if (*link == sub) *link = sub->next;
     spinlock_release_irq(&g_sub_lock, fl);
+    /* Off the list, so no more frames; anyone asleep on it wakes to find
+     * that out, and the last of them frees it. */
+    sched_wakeup(sub->wait_chan);
+    netdev_sub_rele(sub);
+}
+
+void netdev_sub_hold(netdev_sub_t *sub) {
+    if (sub) __sync_fetch_and_add(&sub->refs, 1);
+}
+
+void netdev_sub_rele(netdev_sub_t *sub) {
+    if (!sub || __sync_sub_and_fetch(&sub->refs, 1) != 0) return;
     if (sub->ring) kfree(sub->ring, sizeof(netdev_frame_t) * NETDEV_SUB_RING_FRAMES);
     kfree(sub, sizeof(*sub));
 }

@@ -287,6 +287,12 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# pktrebind: an AF_PACKET reader asleep in recv survives a bind.  Substrate
+# only; run as root.
+pktrebind: pktrebind.c
+	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # scmfail: a failed sendmsg leaves no SCM_RIGHTS descriptor queued.  Runs
 # on the host too.
 scmfail: scmfail.c

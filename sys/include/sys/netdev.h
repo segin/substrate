@@ -139,7 +139,12 @@ int netdev_xmit(netdev_t *dev, const void *frame, size_t len);
  * the ring is full, the frame is dropped (counted in rx_dropped). */
 struct netdev_sub;
 struct netdev_sub *netdev_subscribe(uint32_t ifindex);
+/* Takes the subscriber off the list and drops its own reference. */
 void               netdev_unsubscribe(struct netdev_sub *sub);
+/* A reader holds the subscription across netdev_sub_recv and a sleep on
+ * its wait channel, so an unsubscribe meanwhile cannot free it. */
+void               netdev_sub_hold(struct netdev_sub *sub);
+void               netdev_sub_rele(struct netdev_sub *sub);
 
 /* Returns >0 = bytes copied (truncated to caller's buf size), 0 = no
  * frame currently available (caller should sleep on the channel
