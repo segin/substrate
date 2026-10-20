@@ -308,6 +308,10 @@ uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
 // caches and coalesces underneath.
 uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
+    /* A span whose byte length does not fit 32 bits is no request any
+     * caller can hold a buffer for: the memset below and the read would
+     * both be given the wrapped length. */
+    if (fs->block_size == 0 || count > UINT32_MAX / fs->block_size) return 0;
     /* Same untrusted-block-number guard as ext2_read_block, extended to
      * the [block_num, block_num+count) span.  Guard against overflow in
      * the end-of-range computation as well as the start. */
@@ -2461,6 +2465,9 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
     if (!ctx || !ctx->fs) return -EINVAL;
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
     if (a->mask == 0) return 0;
+    /* An immutable file's attributes do not change either -- owner, mode,
+     * times -- as ext2_chmod and every write path already refuse. */
+    if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;
 
     /* SIZE — truncation needs to free data blocks; route through the existing
      * truncate path.  This refusal used to sit at the *end* of the

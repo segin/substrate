@@ -394,7 +394,7 @@ SYS-DRV-003 are Critical and not listed.
   Basis: traced.
   Fixed with SYS-NEW-001b (a6e0e3c23, 9318b0c16): a pinned slot is returned as it is, never rebuilt; a pinned slot that is orphaned or whose first cluster differs is another file, and the new one gets its own slot.
 
-- [ ] **SYS-FS-010** *(Medium → Low; partly confirmed)* In `sys/fs/ext2/ext2.c`, `ext2_read_blocks` shall check `fs->block_size * count` for multiplication overflow and shall not `memset` the caller's buffer with an unchecked product on out-of-range block errors, and `ext2_setattr` shall enforce `EXT2_IS_IMMUTABLE(ctx)`.
+- [x] **SYS-FS-010** *(Medium → Low; partly confirmed)* In `sys/fs/ext2/ext2.c`, `ext2_read_blocks` shall check `fs->block_size * count` for multiplication overflow and shall not `memset` the caller's buffer with an unchecked product on out-of-range block errors, and `ext2_setattr` shall enforce `EXT2_IS_IMMUTABLE(ctx)`.
   Evidence: `sys/fs/ext2/ext2.c:297-301` executes `if (buffer) memset(buffer, 0, fs->block_size * count);` on the invalid-block error path without overflow checking, and `ext2_setattr` (`:2407-2475`) omits `if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;`.
   Basis: traced.
 
