@@ -474,14 +474,13 @@ int kern_shm_lock(int shmid, int lock)
     return 0;
 }
 
-/* ---- attachment reversal at process exit ---- */
+/* ---- attachment reversal at process exit and exec ---- */
 
-void shm_proc_cleanup(int pid)
+/* Drop every attach record pid holds, unmapping each from map (NULL: the
+ * mappings are already gone). */
+static void shm_proc_detach_all(int pid, vm_map_t *map)
 {
     if (!shm_ready) return;
-    process_t *p = current_process;
-    vm_map_t *map = (p && p->pid == pid) ? p->vm_map : NULL;
-
     mutex_lock(&shm_lock);
     struct shm_attach **pp = &shm_attach_list;
     while (*pp) {
@@ -493,6 +492,22 @@ void shm_proc_cleanup(int pid)
         }
     }
     mutex_unlock(&shm_lock);
+}
+
+void shm_proc_cleanup(int pid)
+{
+    process_t *p = current_process;
+    shm_proc_detach_all(pid, (p && p->pid == pid) ? p->vm_map : NULL);
+}
+
+/*
+ * exec: the old address space, and with it every attached mapping, has
+ * already been destroyed, so only the records and nattch go.  Unmapping
+ * through p->vm_map here would hit the new image.
+ */
+void shm_proc_exec(int pid)
+{
+    shm_proc_detach_all(pid, NULL);
 }
 
 /* ---- native-ABI syscall wrappers ---- */

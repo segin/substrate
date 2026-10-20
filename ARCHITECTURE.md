@@ -216,7 +216,12 @@ beside the caller's (`exec_space_begin`/`_commit`/`_abort` in
 `sys/exec/exec.c`, used by the a.out, COFF, ELKS and x.out loaders; ELF
 does the same inline): every step that can fail runs before the commit,
 and a failure switches back, so a failed `exec` returns its error to the
-intact old image. Foreign binaries see their own
+intact old image. After the commit every loader calls
+`proc_exec_commit` (`sys/pm/process.c`), which closes close-on-exec
+descriptors and drops what belonged to the old image: System V
+shared-memory attachments (records only; the mappings went with the old
+address space), POSIX message-queue descriptors with their `mq_notify`
+registrations, and named or process-shared semaphores. Foreign binaries see their own
 system's files through `/perso/<name>/` trees. The segmented 16-bit
 personalities — ELKS (`elks_aout.c`) and 16-bit Xenix (`xout.c`) — run
 in real LDT segments rather than a flattened address space, so the

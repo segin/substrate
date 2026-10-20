@@ -63,7 +63,8 @@ been marked for removal with
 .BR shmctl (2)
 .B IPC_RMID
 is detached, the segment's backing pages are freed.  All of a process's
-attachments are detached automatically when it exits.
+attachments are detached automatically when it exits or calls
+.BR execve (2).
 .SH RETURN VALUE
 On success
 .BR shmat ()

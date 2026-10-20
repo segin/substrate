@@ -323,7 +323,7 @@ void proc_capture_cmdline(process_t *proc, char *const argv[]) {
 void ldt_free_process(process_t *proc) {
     (void)proc;
 }
-void proc_close_cloexec(process_t *proc) {
+void proc_exec_commit(process_t *proc) {
     (void)proc;
 }
 void pmap_destroy(pmap_t pmap) {

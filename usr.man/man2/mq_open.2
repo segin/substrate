@@ -68,6 +68,8 @@ gives the child the parent's descriptors under the same values, sharing
 each open description (and so its
 .B O_NONBLOCK
 flag) with the parent.
+.BR execve (2)
+closes all of the process's descriptors, as process exit does.
 .PP
 .B SYS_MQ_CLOSE
 releases the descriptor's reference; the queue is destroyed once its last

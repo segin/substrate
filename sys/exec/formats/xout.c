@@ -546,7 +546,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
     x286_free_vector((char **)argv);
     x286_free_vector((char **)envp);
 
-    proc_close_cloexec(current_process);
+    proc_exec_commit(current_process);
     kern_close(fd);
 
     if (xout_debug_enabled()) {
@@ -1285,7 +1285,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
     x286_free_vector(kargv);
     x286_free_vector(kenvp);
 
-    proc_close_cloexec(current_process);
+    proc_exec_commit(current_process);
     kern_close(fd);
 
     if (x286_debug_enabled()) {

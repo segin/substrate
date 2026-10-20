@@ -85,7 +85,9 @@ adds one open reference.  The semaphore persists until it is removed with
 .I and
 every open descriptor has been closed with
 .BR sem_close (3),
-matching POSIX persistence semantics.
+matching POSIX persistence semantics.  Process exit and
+.BR execve (2)
+close every semaphore the process has open.
 .SH RETURN VALUE
 On success
 .BR sem_open ()

@@ -1674,6 +1674,24 @@ void proc_close_cloexec(process_t *p) {
 }
 
 /*
+ * What exec drops once the new image is committed: close-on-exec
+ * descriptors, System V shared-memory attachments (the mappings went with
+ * the old address space), POSIX message-queue descriptors with any
+ * mq_notify registration, and named or process-shared semaphores.  SEM_UNDO
+ * adjustments survive exec, as POSIX says; POSIX timers are deleted with
+ * exec's signal reset (proc_ptimers_clear).
+ */
+void proc_exec_commit(process_t *p) {
+    if (!p) {
+        return;
+    }
+    proc_close_cloexec(p);
+    shm_proc_exec(p->pid);
+    ksem_proc_cleanup(p->pid);
+    mq_proc_cleanup(p->pid);
+}
+
+/*
  * Close every descriptor a process holds, cloexec or not.
  *
  * Used by the reboot path (proc_teardown_userspace): an open descriptor pins

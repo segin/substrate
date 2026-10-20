@@ -85,6 +85,8 @@ int    kern_shm_lock(int shmid, int lock);               /* lock!=0 => SHM_LOCK 
 
 /* Reverse every attachment this process still holds, at proc_exit(). */
 void   shm_proc_cleanup(int pid);
+/* Drop them at exec, after the old address space is gone (no unmapping). */
+void   shm_proc_exec(int pid);
 
 void   shm_init(void);
 

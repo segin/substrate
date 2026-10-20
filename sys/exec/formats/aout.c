@@ -643,7 +643,7 @@ static int aout_load(int fd, const char *path, char *const argv[],
 
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
-    proc_close_cloexec(current_process);
+    proc_exec_commit(current_process);
     kern_close(fd);
 
     if (aout_debug_enabled()) {

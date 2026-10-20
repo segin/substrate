@@ -96,6 +96,9 @@ void advlock_release_file(struct file *f);
 void advlock_release_by_owner(struct file *f, int owner);
 int proc_fd_set_nonblock(int fd, int on);
 void proc_close_cloexec(process_t *p);
+/* exec, once the new image is committed: close-on-exec fds and the process's
+ * shm attachments, mq descriptors and POSIX semaphores (see process.c). */
+void proc_exec_commit(process_t *p);
 /* Close every descriptor `p` holds (reboot teardown; see process.c). */
 void proc_close_all_fds(process_t *p);
 

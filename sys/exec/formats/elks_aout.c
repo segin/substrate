@@ -595,7 +595,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
 
     uint16_t elks_stack_size = 0;
     
-    proc_close_cloexec(current_process);
+    proc_exec_commit(current_process);
     elks_free_kernel_vector(kargv);
     elks_free_kernel_vector(kenvp);
     kern_close(fd);

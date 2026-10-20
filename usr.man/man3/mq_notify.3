@@ -49,7 +49,8 @@ must be issued to re-register.
 If
 .I sevp
 is NULL and the calling process is currently registered, its registration is
-removed.
+removed.  A registration is also removed when the process exits or calls
+.BR execve (2).
 .SH RETURN VALUE
 On success 0 is returned.  On error \-1 is returned and
 .I errno

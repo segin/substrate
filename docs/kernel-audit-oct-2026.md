@@ -1096,11 +1096,11 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Fix: port `tls_static.c` to i386 (Elf32 phdrs from auxv, variant II as ld.so builds, `SYS_SET_GSBASE`) and call it from i386 `crt0.S`; add a static i386 TLS test.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-006a** *(Medium; confirmed)* `exec` shall detach the process's SysV shared-memory segments.
+- [x] **SYS-NEW-006a** *(Medium; confirmed)* `exec` shall detach the process's SysV shared-memory segments.
   Evidence: `shm_proc_cleanup` (`sys/kern/ipc_shm.c:479`) runs only at exit (`process.c:1978`); attach records and `nattch` survive exec, and a later `shmdt` in the new image (`kern_shmdt` :373 → `shm_detach_one` :344) can `vm_map_remove` an unrelated range of it.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-006b** *(Low; confirmed)* `exec` shall close POSIX message-queue descriptors (dropping `mq_notify` registrations) and named semaphores.
+- [x] **SYS-NEW-006b** *(Low; confirmed)* `exec` shall close POSIX message-queue descriptors (dropping `mq_notify` registrations) and named semaphores.
   Evidence: mq handles live in a global table keyed by pid (`posix_mqueue.c:108-118`) and are released only by `mq_close` and `mq_proc_cleanup` at exit (`process.c:1988`); no loader calls into it.  All descriptors survive exec, not only inherited ones, and an old `mq_notify` registration still signals the new image, whose handlers exec reset to default (e.g. SIGUSR1 kills it).  `ksem_proc_cleanup` (`posix_sem.c:577`) is likewise exit/fork-rollback only.  POSIX timers are cleared correctly.
   Fix: one post-commit exec hook beside `proc_close_cloexec` in every loader: `mq_proc_cleanup`, `ksem_proc_cleanup`, and an shm detach that drops the records without `vm_map_remove` (the old map is gone).  Stub it in `tests/Makefile` in the same commit.
   Basis: traced (verifier + critic).

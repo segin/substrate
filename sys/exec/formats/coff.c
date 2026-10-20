@@ -515,7 +515,7 @@ static int coff_load(int fd, const char *path, char *const argv[],
     kfree(libs, COFF_MAX_LIBS * COFF_LIB_PATH_MAX);
     kfree(img, sizeof(*img));
 
-    proc_close_cloexec(current_process);
+    proc_exec_commit(current_process);
     kern_close(fd);
 
     if (coff_debug_enabled()) {

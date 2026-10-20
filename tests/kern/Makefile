@@ -25,6 +25,7 @@ ifeq ($(CROSS),)
   CC      = cc
   CFLAGS  = -Wall -Wextra -O2 -g
   LIBS    = $(if $(THREADS),-pthread,)
+  RTLIBS  = -lrt -pthread
   INC     =
 else
   TOP     = ../..
@@ -38,6 +39,10 @@ else
   CRT0    = $(SR)/lib/crt0.o
   PLIB    = $(if $(THREADS),-l:libpthread.a,)
   LIBS    = $(CRT0) -Wl,--start-group -L$(SR)/lib $(PLIB) \
+            -l:libc.a -l:libm.a -l:libsys.a -Wl,--end-group \
+            $(shell $(CC) -m32 -print-libgcc-file-name)
+  # librt (mq_*) and libpthread (sem_*), for the IPC tests.
+  RTLIBS  = $(CRT0) -Wl,--start-group -L$(SR)/lib -l:librt.a -l:libpthread.a \
             -l:libc.a -l:libm.a -l:libsys.a -Wl,--end-group \
             $(shell $(CC) -m32 -print-libgcc-file-name)
   # Brand OSABI = ELFOSABI_SUBSTRATE (0x40) so the native loader accepts it.
@@ -192,6 +197,12 @@ chrootesc.linux: chrootesc.c
 linuxthrexit.linux: linuxthrexit.c
 	gcc -m32 -static -O2 -pthread $< -o $@
 
+# execipc: exec drops shm attachments, mq descriptors with their mq_notify
+# registration, and named semaphores.  Substrate only.
+execipc: execipc.c
+	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # lseekchk: lseek refuses a position before the start or past the largest
 # off_t, and keeps 64-bit positions.  Runs on the host too.
 lseekchk: lseekchk.c
@@ -282,6 +293,6 @@ clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
-	      sigretsel.linux
+	      sigretsel.linux execipc
 
 .PHONY: all clean

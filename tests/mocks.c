@@ -611,6 +611,7 @@ void mq_proc_cleanup(int pid) { (void)pid; }
 int mq_proc_fork(int parent_pid, int child_pid) { (void)parent_pid; (void)child_pid; return 0; }
 void sem_proc_cleanup(int pid) { (void)pid; }
 void shm_proc_cleanup(int pid) { (void)pid; }
+void shm_proc_exec(int pid) { (void)pid; }
 
 /* --- memtrack (kern/memtrack.h) --- */
 size_t memtrack_snapshot(memtrack_rec_t *out, size_t max)
