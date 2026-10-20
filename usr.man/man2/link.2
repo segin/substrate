@@ -20,6 +20,17 @@ exists, it will
 .I not
 be overwritten.
 .PP
+If
+.I oldpath
+names a symbolic link, the new name is a link to the symbolic link
+itself, not to the file it points to; a dangling symbolic link can be
+linked.  (Linux does the same.  The FreeBSD, OpenBSD, System V and SunOS
+personalities follow the symbolic link, as those systems do; their
+.BR linkat ()
+follows it only when given
+.BR AT_SYMLINK_FOLLOW ,
+as does the Linux personality's.)
+.PP
 This new name may be used exactly as the old one for any operation;
 both names refer to the same file and it is impossible to tell
 which name was the "original".
@@ -48,6 +59,10 @@ A directory component in
 or
 .I newpath
 does not exist.
+.TP
+.B EPERM
+.I oldpath
+is a directory.
 .TP
 .B EXDEV
 .I oldpath

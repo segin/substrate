@@ -3019,6 +3019,15 @@ int sys_link(const char *oldpath, const char *newpath) {
     return kern_link(kold, knew);
 }
 
+/* link(2) as FreeBSD and OpenBSD define it: a final symlink in oldpath is
+ * followed. */
+int sys_link_follow(const char *oldpath, const char *newpath) {
+    char kold[256], knew[256];
+    COPYIN_STR(oldpath, kold);
+    COPYIN_STR(newpath, knew);
+    return kern_linkat(AT_FDCWD, kold, AT_FDCWD, knew, 1);
+}
+
 int sys_rename(const char *oldpath, const char *newpath) {
     char kold[256], knew[256];
     COPYIN_STR(oldpath, kold);
@@ -3118,52 +3127,39 @@ int sys_fstatvfs(int fd, struct statvfs *buf) {
     return error;
 }
 
-int kern_link(const char *oldpath, const char *newpath) {
-    if (!oldpath || !newpath) return -EINVAL;
-
-    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
-
-    /* vfs_lookup strips a leading '/' but walks from its first arg —
-     * so an absolute path with `cwd` as the root resolves as
-     * <cwd>/<rest>, not /<rest>.  Pick root vs cwd by leading slash
-     * the same way kern_resolve_parent_at does.  Without this, an
-     * X server running from a non-root cwd hits link("/tmp/.tX0-lock",
-     * "/tmp/.X0-lock") -> ENOENT and crashes at LockServer. */
-    fs_node_t *source = vfs_lookup(oldpath[0] == '/' ? root : cwd, oldpath);
-    if (!source) return vfs_lookup_error(oldpath[0] == '/' ? root : cwd, oldpath);
-
-    // Resolve newpath to parent directory and name
-    char dir[256];
+/*
+ * linkat(2): a relative path is resolved against its dirfd (AT_FDCWD: the
+ * current directory).  A symlink at the end of oldpath is linked itself
+ * unless follow is set, as for link(2) on Linux and NetBSD; FreeBSD's,
+ * OpenBSD's and System V's link(2) follow it.
+ */
+int kern_linkat(int olddirfd, const char *oldpath, int newdirfd,
+                const char *newpath, int follow) {
+    fs_node_t *root, *cwd, *source, *parent;
     char file[128];
-    const char *last_slash = NULL;
-    for (const char *p = newpath; *p; p++) {
-        if (*p == '/') last_slash = p;
-    }
+    int ret;
 
-    fs_node_t *parent = NULL;
-    if (!last_slash) {
-        parent = cwd;
-        if (strlcpy(file, newpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-    } else if (last_slash == newpath) {
-        parent = root;
-        if (strlcpy(file, newpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-    } else {
-        size_t dirlen = (size_t)(last_slash - newpath);
-        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
-        memcpy(dir, newpath, dirlen);
-        dir[dirlen] = '\0';
-        
-        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-        parent = vfs_lookup((newpath[0] == '/') ? root : cwd, dir);
-    }
+    if (!oldpath || !newpath) return -EINVAL;
+    if (oldpath[0] == '\0') return -ENOENT;
 
-    if (!parent) return -ENOENT;
+    ret = kern_path_roots_from_dirfd(olddirfd, oldpath, &root, &cwd);
+    if (ret != 0) return ret;
+    /* vfs_lookup walks from its first argument even for an absolute
+     * path, so pick root or cwd by the leading slash. */
+    fs_node_t *base = oldpath[0] == '/' ? root : cwd;
+    source = follow ? vfs_lookup(base, oldpath) : vfs_lookup_lstat(base, oldpath);
+    if (!source) return vfs_lookup_error(base, oldpath);
+
+    ret = kern_resolve_parent_dirfd(newdirfd, newpath, &parent, file, sizeof(file));
+    if (ret != 0) return ret;
     if (!file[0]) return -EINVAL;
-    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
     if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
     return link_fs(parent, source, file);
+}
+
+int kern_link(const char *oldpath, const char *newpath) {
+    return kern_linkat(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0);
 }
 
 int sys_symlink(const char *target, const char *linkpath) {

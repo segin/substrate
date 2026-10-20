@@ -188,7 +188,9 @@ int sunos_sys_creat(const char *path, int mode) {
 }
 
 int sunos_sys_link(const char *from, const char *to) {
-    SUNOS_WITH_PATHS(from, to, kern_link(path1_, path2_));
+    /* SunOS 4, like 4.3BSD, links the target of a final symlink. */
+    SUNOS_WITH_PATHS(from, to, kern_linkat(AT_FDCWD, path1_, AT_FDCWD,
+                                           path2_, 1));
 }
 
 int sunos_sys_rename(const char *from, const char *to) {

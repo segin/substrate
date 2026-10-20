@@ -70,6 +70,8 @@ int kern_ioctl(int fd, uint32_t request, void *arg);
 int kern_unlink(const char *path);
 int kern_unlinkat(int dirfd, const char *path, int flags);
 int kern_link(const char *oldpath, const char *newpath);
+int kern_linkat(int olddirfd, const char *oldpath, int newdirfd,
+                const char *newpath, int follow);
 int kern_rename(const char *oldpath, const char *newpath);
 int kern_rmdir(const char *path);
 int kern_symlink(const char *target, const char *linkpath);

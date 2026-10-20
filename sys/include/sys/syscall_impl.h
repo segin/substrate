@@ -118,6 +118,7 @@ extern int sys_fstatvfs(int, void*);
 
 /* File system operations */
 extern int sys_link(const char*, const char*);
+extern int sys_link_follow(const char*, const char*);   /* BSD link(2) */
 extern int sys_rename(const char*, const char*);
 extern int sys_symlink(const char*, const char*);
 extern int sys_symlinkat(const char*, int, const char*);

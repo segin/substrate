@@ -1076,9 +1076,10 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Fix: side-effect-free `hold`/`rele` ops on `fs_node_t` (NULL for static nodes) mapped to each driver's pin; `finddir` returns its child held; the walk holds `root` and releases each step's predecessor (also for `..`, mount crossing, symlinks, perso shadowing); every `vfs_lookup*`/`finddir_fs` caller (about 57 sites) releases; `sys_open` turns the walk's hold into the open pin; `vfs_lookup_ref` uses hold/rele instead of open/close.
   Basis: traced (verifier + critic).
 
-- [ ] **SYS-NEW-002** *(Medium; confirmed)* `link(2)` shall link a symlink in the old path itself, not its target; a BSD `linkat` shall follow only with `AT_SYMLINK_FOLLOW`.
+- [x] **SYS-NEW-002** *(Medium; confirmed)* `link(2)` shall link a symlink in the old path itself, not its target; a BSD `linkat` shall follow only with `AT_SYMLINK_FOLLOW`.
   Evidence: every link entry point ends in `kern_link`, which resolves the old path with `vfs_lookup` (`sys/kern/syscall.c:3088`) and so follows its final symlink: `ln -P dangling new` fails `ENOENT`, `ln -P good new` links the target.  Not a userland cause (`ln -P` lstat()s and calls `link()`), and not ext2/Minix-specific.  There is no native `linkat`/`AT_SYMLINK_FOLLOW`; FreeBSD and NetBSD `linkat` discard the flag (`freebsd_user.c:373`, `netbsd_user.c:775`, whose comments call following intended); Linux `linkat` (303) is named but not dispatched (ENOSYS).
   Fix: give `kern_link` a follow flag choosing `vfs_lookup_lstat` for the old path; pass `AT_SYMLINK_FOLLOW` through from the BSD `linkat`s; dispatch Linux `linkat`.  Check first that every filesystem's link op still rejects a directory source.
+  Done: `kern_linkat` (dirfds + follow flag); FreeBSD/OpenBSD/SVR4/SunOS `link` keep following, as those systems do.  The check found more: Minix's link op accepted a directory, and neither ext2's nor Minix's checked that the source was on the same mount, so `link("/dev/null", "/tmp/x")` handed a devfs node to ext2 as its own; `link_fs` now refuses both (`EPERM`, `EXDEV`).  Test: `tests/kern/linkfollow.c` (Linux build, and a FreeBSD build under `/perso/freebsd`).
   Basis: traced (verifier + critic).
 
 - [x] **SYS-NEW-003** *(High; confirmed — raised from Medium)* The pv (reverse-map) code shall accept every valid kernel pointer on x86_64.

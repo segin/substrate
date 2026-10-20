@@ -1609,7 +1609,16 @@ int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
     return -ENOSYS;
 }
 
+/*
+ * A hard link names a node of the directory's own filesystem, never a
+ * directory.  Each driver's link op reads source->impl as its own node
+ * type, so a node from another mount must not get that far.
+ */
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
+    if (parent && source && (source->flags & 0x7) == FS_DIRECTORY)
+        return -EPERM;
+    if (parent && source && source->mp != parent->mp)
+        return -EXDEV;
     if (parent && parent->link) {
         int ret = vfs_may_modify_dir(parent);
         if (ret != 0) return ret;

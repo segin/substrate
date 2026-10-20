@@ -383,7 +383,7 @@ static int64_t sysv386_sys_link(struct sysv386_frame *f) {
         rc = sysv386_string(f->a[1], &newp);
     }
     if (rc == 0) {
-        rc = kern_link(oldp, newp);
+        rc = kern_linkat(AT_FDCWD, oldp, AT_FDCWD, newp, 1);  /* SVR4 follows */
     }
     sysv386_free_string(oldp);
     sysv386_free_string(newp);

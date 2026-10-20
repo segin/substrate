@@ -763,20 +763,17 @@ int netbsd_sys_clock_nanosleep(int clock_id, int flags, const void *rqtp, void *
 
 /*
  * linkat(fd1, name1, fd2, name2, flags), which is what ln(1) calls.  A
- * name that is absolute, or relative to the current directory
- * (AT_FDCWD), is link(2)'s; one relative to another directory is not
- * done here.
+ * final symlink in name1 is followed only with AT_SYMLINK_FOLLOW.
  */
 int netbsd_sys_linkat(int fd1, const char *name1, int fd2, const char *name2, int flags) {
     char kold[256], knew[256];
 
     COPYIN_STR(name1, kold);
     COPYIN_STR(name2, knew);
-    (void)flags;                        /* AT_SYMLINK_FOLLOW: link(2) follows */
-    if ((fd1 != AT_FDCWD && kold[0] != '/') || (fd2 != AT_FDCWD && knew[0] != '/')) {
-        return -ENOSYS;
+    if (flags & ~NBSD_AT_SYMLINK_FOLLOW) {
+        return -EINVAL;
     }
-    return kern_link(kold, knew);
+    return kern_linkat(fd1, kold, fd2, knew, (flags & NBSD_AT_SYMLINK_FOLLOW) != 0);
 }
 
 /*

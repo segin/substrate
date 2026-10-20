@@ -425,6 +425,29 @@ static int linux_sys_exit(int code) {
     return kern_thread_exit(NULL, code);
 }
 
+/*
+ * linkat(2): a final symlink in oldpath is followed only with
+ * AT_SYMLINK_FOLLOW.  AT_EMPTY_PATH (link the file open on olddirfd) needs
+ * CAP_DAC_READ_SEARCH on Linux, which is ENOENT without it.
+ */
+#define LINUX_AT_SYMLINK_FOLLOW 0x400
+#define LINUX_AT_EMPTY_PATH     0x1000
+static int linux_sys_linkat(int olddirfd, const char *oldpath, int newdirfd,
+                            const char *newpath, int flags) {
+    char kold[256], knew[256];
+
+    if (flags & ~(LINUX_AT_SYMLINK_FOLLOW | LINUX_AT_EMPTY_PATH)) {
+        return -EINVAL;
+    }
+    COPYIN_STR(oldpath, kold);
+    COPYIN_STR(newpath, knew);
+    if ((flags & LINUX_AT_EMPTY_PATH) && kold[0] == '\0') {
+        return -ENOENT;
+    }
+    return kern_linkat(olddirfd, kold, newdirfd, knew,
+                       (flags & LINUX_AT_SYMLINK_FOLLOW) != 0);
+}
+
 /* gettid(2): the calling thread's id. */
 static int linux_sys_gettid(void) {
     return sys_thr_self();
@@ -1164,6 +1187,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_oldselect]      = (void *)&linux_sys_oldselect,
     [LINUX_SYS_symlink]        = (void *)&sys_symlink,
     [LINUX_SYS_symlinkat]      = (void *)&sys_symlinkat,   /* AT_FDCWD is -100 on both */
+    [LINUX_SYS_linkat]         = (void *)&linux_sys_linkat,
     [LINUX_SYS_lstat]          = (void *)linux_sys_lstat,
     [LINUX_SYS_readlink]       = (void *)&sys_readlink,
     [LINUX_SYS_uselib]         = (void *)&aout_sys_uselib,

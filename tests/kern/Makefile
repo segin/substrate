@@ -197,6 +197,12 @@ chrootesc.linux: chrootesc.c
 linuxthrexit.linux: linuxthrexit.c
 	gcc -m32 -static -O2 -pthread $< -o $@
 
+# linkfollow.linux: link(2) links a final symlink itself, linkat(2) follows
+# it only with AT_SYMLINK_FOLLOW, and no link crosses filesystems.  Runs on
+# the host too, and builds on FreeBSD.
+linkfollow.linux: linkfollow.c
+	gcc -m32 -static -O2 $< -o $@
+
 # execipc: exec drops shm attachments, mq descriptors with their mq_notify
 # registration, and named semaphores.  Substrate only.
 execipc: execipc.c
@@ -293,6 +299,6 @@ clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
-	      sigretsel.linux execipc
+	      sigretsel.linux execipc linkfollow.linux
 
 .PHONY: all clean

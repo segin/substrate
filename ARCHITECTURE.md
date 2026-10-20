@@ -159,6 +159,12 @@ recycle a node merely because nothing has it open; the remaining cases and
 the planned lookup reference are SYS-NEW-001b in
 `docs/kernel-audit-oct-2026.md`.
 
+*Cross-filesystem operations.* A driver's directory ops read the other
+node they are given (`link`'s source, `rename`'s target directory) as one
+of their own, so the VFS refuses a pair from different mounts with `EXDEV`
+before calling them (`link_fs` in `sys/vfs/vfs.c`, `kern_rename`), and
+`link_fs` refuses a directory source with `EPERM` for every filesystem.
+
 **Drivers** (`sys/drivers/`):
 
 - *PCI and interrupts.* Drivers that need an interrupt (`hda`, `e1000e`,

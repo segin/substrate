@@ -370,9 +370,9 @@ int freebsd_sys_linkat(int olddir, const char *oldpath, int newdir, const char *
     char kold[256], knew[256];
     COPYIN_STR(oldpath, kold);
     COPYIN_STR(newpath, knew);
-    (void)flag;  /* AT_SYMLINK_FOLLOW currently default */
-    if (olddir == AT_FDCWD && newdir == AT_FDCWD) return kern_link(kold, knew);
-    return -ENOSYS;
+    if (flag & ~FBSD_AT_SYMLINK_FOLLOW) return -EINVAL;
+    return kern_linkat(olddir, kold, newdir, knew,
+                       (flag & FBSD_AT_SYMLINK_FOLLOW) != 0);
 }
 
 int freebsd_sys_mkdirat(int dirfd, const char *path, int mode) {
