@@ -275,9 +275,30 @@ static int hex_digit(char c)
     return -1;
 }
 
+static int bdf_parse_text(const char *data, size_t size, struct font_info *out);
+
+/*
+ * The scanners below (starts_with, parse_int, the per-field walks) stop at
+ * a NUL, not at `end`: a font file that does not end in one would be read
+ * past.  Parse a copy that does.
+ */
 int bdf_parse(const void *data, size_t size, struct font_info *out)
 {
-    const char *p = (const char *)data;
+    if (!data || size == 0 || size == (size_t)-1)
+        return -1;
+    char *text = kmalloc(size + 1);
+    if (!text)
+        return -1;
+    memcpy(text, data, size);
+    text[size] = '\0';
+    int rc = bdf_parse_text(text, size, out);
+    kfree(text, size + 1);
+    return rc;
+}
+
+static int bdf_parse_text(const char *data, size_t size, struct font_info *out)
+{
+    const char *p = data;
     const char *end = p + size;
 
     /* First pass: find FONTBOUNDINGBOX for dimensions and CHARS for count */
@@ -292,7 +313,9 @@ int bdf_parse(const void *data, size_t size, struct font_info *out)
             args = skip_ws(args);
             while (*args && *args != ' ' && *args != '\t') args++;
             bb_height = (uint32_t)parse_int(args);
-        } else if (starts_with(scan, "CHARS ")) {
+        } else if (starts_with(scan, "CHARS")) {
+            /* Not "CHARS ": starts_with wants whitespace after the keyword,
+             * and after "CHARS " comes the count, so no font matched. */
             num_chars = (uint32_t)parse_int(scan + 5);
         }
         scan = next_line(scan, end);
