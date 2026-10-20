@@ -617,6 +617,10 @@ void shm_proc_exec(int pid) { (void)pid; }
 size_t memtrack_snapshot(memtrack_rec_t *out, size_t max)
 { (void)out; (void)max; return 0; }
 
+/* --- slab zones (vm/uma.h): /proc/uma --- */
+size_t uma_zone_report(char *buf, size_t size)
+{ if (buf && size) buf[0] = '\0'; return 0; }
+
 /* --- arch entry points (arch/i386/intr.h, percpu.h) --- */
 void new_kernel_thread_trampoline(void) { }
 void new_user_thread_trampoline(void) { }

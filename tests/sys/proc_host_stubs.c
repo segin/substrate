@@ -95,6 +95,12 @@ __attribute__((weak)) int kern_open_exec(const char *path) { (void)path; return 
 /* sys/vm/vm_map.h: a child that shares its parent's address space. */
 struct vm_map;
 __attribute__((weak)) void vm_map_reference(struct vm_map *map) { (void)map; }
+/* exec_space_begin (sys/exec/exec.c): a host test never gets that far, so
+ * creating the new address space just fails. */
+__attribute__((weak)) void *pmap_create(void) { return NULL; }   /* arch/i386/pmap.h */
+__attribute__((weak)) void pmap_destroy(void *pmap) { (void)pmap; }
+__attribute__((weak)) struct vm_map *vm_map_create(void *pmap, uintptr_t min, uintptr_t max)
+{ (void)pmap; (void)min; (void)max; return NULL; }                /* sys/vm/vm_map.h */
 __attribute__((weak)) int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid,
         uint32_t gid, const uint32_t *groups, int ngroups, int mode)
 { (void)node; (void)uid; (void)gid; (void)groups; (void)ngroups; (void)mode; return 0; }
