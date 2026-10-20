@@ -635,8 +635,14 @@ static void fat_node_close(fs_node_t *node) {
     mutex_unlock(&fat_node_cache_lock);
 }
 
+/*
+ * The node for a directory entry, from the cache or an unpinned slot.  With
+ * pin set it comes back pinned (a lookup reference, dropped by
+ * fat_node_close), taken under the lock that chose it.
+ */
 static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
-                                 uint32_t first_cluster, uint32_t size, uint8_t attr) {
+                                 uint32_t first_cluster, uint32_t size, uint8_t attr,
+                                 int pin) {
     fat_node_t *ctx = NULL;
     fs_node_t *node = NULL;
 
@@ -647,17 +653,31 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
      * memset of whatever was there.  Now: reuse the slot that already
      * describes this (fs, inode) if there is one, else take an unpinned slot,
      * all under the cache lock.
+     *
+     * A pinned slot is in use -- an open file, or a walk standing in it --
+     * and is never rebuilt under its holders: it already describes this
+     * file, and its in-core size may be newer than the entry's.  The inode
+     * number names a directory-entry position, so a pinned slot whose first
+     * cluster differs is a file since deleted from that entry; the new one
+     * gets a slot of its own.
      */
     fat_node_cache_lock_ensure();
     mutex_lock(&fat_node_cache_lock);
 
     for (int i = 0; i < FAT_NODE_CACHE_SIZE; i++) {
         if (fat_node_cache[i].fs == fs && fat_fs_node_cache[i].inode == inode &&
-            fat_fs_node_cache[i].name[0] != '\0') {
+            fat_fs_node_cache[i].name[0] != '\0' &&
+            (fat_node_cache[i].pin == 0 ||
+             fat_node_cache[i].first_cluster == first_cluster)) {
             ctx  = &fat_node_cache[i];
             node = &fat_fs_node_cache[i];
             break;
         }
+    }
+    if (ctx && ctx->pin > 0) {
+        ctx->pin += (uint32_t)pin;
+        mutex_unlock(&fat_node_cache_lock);
+        return node;
     }
 
     if (!ctx) {
@@ -682,18 +702,17 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
         return NULL;
     }
 
-    uint32_t keep_pin = ctx->pin;
+    /* Unpinned here, so no one else is using it: rebuild it, still under
+     * the lock so a concurrent lookup never sees it half built. */
     memset(node, 0, sizeof(fs_node_t));
     memset(ctx, 0, sizeof(fat_node_t));
-    ctx->pin = keep_pin;        /* re-populating a slot must not drop its pins */
-    mutex_unlock(&fat_node_cache_lock);
-    
+    ctx->pin = (uint32_t)pin;
+
     ctx->fs = fs;
     ctx->first_cluster = first_cluster;
     ctx->size = size;
     ctx->attr = attr;
-    
-    memset(node, 0, sizeof(fs_node_t));
+
     strlcpy(node->name, name, sizeof(node->name));
     node->name[127] = '\0';
     node->impl = (uintptr_t)ctx;
@@ -705,6 +724,9 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     node->statfs = fat_statfs;
     node->open   = fat_node_open;
     node->close  = fat_node_close;
+    /* A FAT open is only a pin: it is the lookup reference too. */
+    node->hold   = fat_node_open;
+    node->rele   = fat_node_close;
 
     if (attr & FAT_ATTR_DIRECTORY) {
         node->flags = FS_DIRECTORY;
@@ -721,7 +743,8 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
         node->write = fat_file_write;
         node->truncate = fat_truncate;
     }
-    
+    mutex_unlock(&fat_node_cache_lock);
+
     return node;
 }
 
@@ -799,7 +822,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                         cluster_num = fs->ext_bpb.root_cluster;
                     }
                     uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
-                    fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
+                    fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr, 1);
                     if (ret) {
                         fat_node_t *rc = (fat_node_t *)(uintptr_t)ret->impl;
                         rc->dirent_sector = fs->root_dir_first_sector + sector_i;
@@ -900,7 +923,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                         cluster_num = fs->ext_bpb.root_cluster;
                     }
                 uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
-                fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
+                fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr, 1);
                 if (ret) {
                     fat_node_t *rc = (fat_node_t *)(uintptr_t)ret->impl;
                     rc->dirent_sector = fat_cluster_to_sector(fs, cluster) + i / bytes_per_sector;
@@ -1119,7 +1142,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     }
 
     uint32_t root_cluster = (fs->fat_type == 32) ? fs->ext_bpb.root_cluster : 0;
-    fs_node_t *tmp = fat_alloc_node(fs, "/", FAT_ROOT_INO, root_cluster, 0, FAT_ATTR_DIRECTORY);
+    fs_node_t *tmp = fat_alloc_node(fs, "/", FAT_ROOT_INO, root_cluster, 0, FAT_ATTR_DIRECTORY, 0);
     if (tmp) {
         /* Copy the root out of the recycling ring cache into dedicated storage:
          * fat_alloc_node hands back a slot that is reused every
@@ -1134,6 +1157,9 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
             rn->impl    = (uintptr_t)rc;
             rn->unmount = fat_unmount;
             rn->syncfs  = fat_syncfs;
+            /* Lives as long as the mount: no lookup references. */
+            rn->hold    = NULL;
+            rn->rele    = NULL;
             fs->root_node = rn;
         } else {
             if (rn) kfree(rn, sizeof(fs_node_t));
@@ -2077,6 +2103,7 @@ static int fat_unlink(fs_node_t *parent, const char *name) {
     if (!child) return -ENOENT;
     fat_node_t *cctx = (fat_node_t *)(uintptr_t)child->impl;
     uint32_t first_cluster = cctx->first_cluster;
+    fat_node_close(child);          /* fat_finddir's pin */
 
     /* Remove dir entry */
     if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -EIO;
@@ -2100,13 +2127,14 @@ static int fat_rmdir_vfs(fs_node_t *parent, const char *name) {
 
     /* readdir index 0 should be ".", index 1 "..", index 2 should be NULL */
     struct dirent *de = fat_readdir(child, 2);
+    uint32_t dir_cluster = cctx->first_cluster;
+    fat_node_close(child);          /* fat_finddir's pin */
     /* [errno sweep] This already knew it meant ENOTEMPTY -- it said so in the
      * comment -- but returned a bare -1, which libc negates into EPERM.  So
      * `rmdir` on a non-empty FAT directory reported "Operation not
      * permitted". */
     if (de != NULL) return -ENOTEMPTY;
 
-    uint32_t dir_cluster = cctx->first_cluster;
     if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -EIO;
     if (dir_cluster >= 2)
         fat_free_chain(fs, dir_cluster);
@@ -2136,23 +2164,30 @@ static int fat_rename(fs_node_t *old_parent, const char *old_name,
         if (dctx->dirent_sector != 0 &&
             dctx->dirent_sector == src_ctx->dirent_sector &&
             dctx->dirent_off == src_ctx->dirent_off) {
-            if (strcmp(old_name, new_name) == 0)
+            fat_node_close(dst);    /* fat_finddir's pins, here and below */
+            if (strcmp(old_name, new_name) == 0) {
+                fat_node_close(src);
                 return 0;
+            }
             dst = NULL;     /* a change of case: just rename the entry */
         }
     }
     if (dst) {
         fat_node_t *dctx = (fat_node_t *)(uintptr_t)dst->impl;
+        uint8_t dattr = dctx->attr;
+        uint32_t dcluster = dctx->first_cluster;
+        fat_node_close(dst);
         fat_dir_remove_entry(fs, npctx->first_cluster, new_name);
         /* If it was a file, free its clusters; if dir we don't free (caller should ensure empty) */
-        if (!(dctx->attr & FAT_ATTR_DIRECTORY) && dctx->first_cluster >= 2)
-            fat_free_chain(fs, dctx->first_cluster);
+        if (!(dattr & FAT_ATTR_DIRECTORY) && dcluster >= 2)
+            fat_free_chain(fs, dcluster);
     }
 
     /* Add new entry */
     uint8_t attr = src_ctx->attr;
     uint32_t first_cluster = src_ctx->first_cluster;
     uint32_t size = src_ctx->size;
+    fat_node_close(src);
 
     if (opctx->first_cluster == npctx->first_cluster &&
         fat_name_matches(old_name, new_name)) {

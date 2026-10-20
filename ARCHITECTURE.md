@@ -162,8 +162,9 @@ symlinks). Every caller drops what a lookup gave it, and one that keeps
 the node takes its own `open_fs` first. A thread's outstanding holds are
 counted (`vfs_holds`) and checked as each system call returns
 (`vfs_holds_check`), which names a syscall that leaks or over-drops.
-Drivers map hold/rele to their pin (ext2: `pin_count`, so a held slot is
-never recycled); a node with no hold op lives as long as its filesystem.
+Drivers map hold/rele to their pin (ext2's `pin_count`, FAT's `pin`), so a
+held slot of their node cache is never recycled or rebuilt; a node with no
+hold op lives as long as its filesystem.
 The drivers still to be given hold ops are listed under SYS-NEW-001b in
 `docs/kernel-audit-oct-2026.md`.
 
