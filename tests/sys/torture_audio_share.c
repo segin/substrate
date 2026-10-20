@@ -5,10 +5,11 @@
  *                Half a second in, a child opens /dev/dsp (whose open used
  *                to apply 8 kHz U8 mono defaults to the running stream) and
  *                tries to set 8 kHz itself, which must fail with EBUSY.
- *   1500 Hz 0.5 s played by a second child that opens the device the
- *                moment the parent starts closing -- while its close is
- *                still draining.  The drain's teardown used to reset the
- *                ring under the newcomer.
+ *   1500 Hz 0.5 s played by a second child that opens the device at 0.8 s,
+ *                after the parent (done with the intruder) has started
+ *                closing -- while its close is still draining.  The
+ *                drain's teardown used to reset the ring under the
+ *                newcomer.
  *
  * The capture (qemu -audiodev wav) must show 2 s of 1000 Hz at one pitch
  * followed by 0.5 s of 1500 Hz.  Prints a "Result:" line.
@@ -125,14 +126,20 @@ int main(void)
 		return 1;
 	}
 	play(fd, 1000.0, 2.0);
-	close(fd);
-
+	/*
+	 * Keep the stream open until the intruder has tried: when all 2 s
+	 * fit in the device's buffers (AC97's 380 KB do), play() returns at
+	 * once, and a close here would start the drain before 0.4 s.  A new
+	 * open waits out a drain, after which there is no stream left for
+	 * the format change to disturb -- the intruder must meet a live one.
+	 */
 	if (waitpid(intruder, &st, 0) < 0 || !WIFEXITED(st) ||
 	    WEXITSTATUS(st) != 0) {
 		printf("FAIL: second opener (status %d): format change not "
 		       "refused\n", WIFEXITED(st) ? WEXITSTATUS(st) : -1);
 		failures++;
 	}
+	close(fd);
 	if (waitpid(follower, &st, 0) < 0 || !WIFEXITED(st) ||
 	    WEXITSTATUS(st) != 0) {
 		printf("FAIL: follower exited with %d\n",
