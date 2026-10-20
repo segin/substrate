@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptyburst: a master write bigger than the slave's buffer arrives whole.
+ptyburst: ptyburst.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptyff: a 0xFF byte passes through a pty as data, raw and canonical.
 ptyff: ptyff.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@

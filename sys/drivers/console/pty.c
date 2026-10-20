@@ -731,8 +731,17 @@ size_t pty_master_node_write(fs_node_t *node, off_t offset, size_t size,
 
     if (!p || p->magic != PTY_MAGIC || p->dead) return 0;
 
-    /* Forward each byte through the slave's line discipline. */
+    /*
+     * Forward each byte through the slave's line discipline, waiting for
+     * the slave's reader when its input buffer is full -- pushing anyway
+     * dropped everything past the first 2 KiB of a burst while write()
+     * reported it all sent.
+     */
     for (size_t i = 0; i < size; i++) {
+        int r = tty_input_wait_room(p->slave_tty, p->master_nonblock);
+        if (r < 0) {
+            return i > 0 ? i : (size_t)r;
+        }
         tty_flip_buffer_push(p->slave_tty, (char)buffer[i]);
     }
     return size;

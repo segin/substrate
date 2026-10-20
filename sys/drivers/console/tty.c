@@ -556,6 +556,8 @@ static int canon(struct tty *tp, uint32_t *flags_ptr) {
         }
     }
     
+    sched_wakeup(&tp->input_wait);  /* raw_buf has room again */
+
     // Input Flow Control: resume if LWM reached
     if ((tp->termios.c_iflag & IXOFF) && tp->input_stopped) {
         if (tp->raw_buf.count <= (TTY_BUF_SIZE / 4)) {
@@ -824,6 +826,39 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     tty_flip_buffer_push_status(tty, c, 0);
 }
 
+/* Room one input byte can need: PARMRK's 0xFF 0x00 mark plus the byte,
+ * or a doubled 0xFF; a canonical delimiter adds one more. */
+#define TTY_INPUT_MARGIN 4
+
+int tty_input_wait_room(struct tty *tty, int nonblock) {
+    if (!tty_valid(tty)) return 0;
+
+    TTY_LOCK(tty);
+    while (!(tty->termios.c_lflag & ICANON) && tty->count > 0 &&
+           tty->raw_buf.count >= TTY_BUF_SIZE - 1 - TTY_INPUT_MARGIN) {
+        if (nonblock) {
+            TTY_UNLOCK(tty);
+            return -EAGAIN;
+        }
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            TTY_UNLOCK(tty);
+            return -EINTR;
+        }
+        /* Same sleep protocol as tty_read: interruptible before blocked. */
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        current_thread->wait_chan = &tty->input_wait;
+        current_thread->state = THREAD_BLOCKED;
+        spinlock_release(&tty->lock);
+        intr_restore(_flags);
+        sched_yield();
+        _flags = intr_disable();
+        spinlock_acquire(&tty->lock);
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    }
+    TTY_UNLOCK(tty);
+    return 0;
+}
+
 // Job Control Checks
 /*
  * Is `tty` the calling process's controlling terminal?
@@ -943,6 +978,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
                 }
                 if (got) buf[count++] = c;
             }
+            if (count > 0) sched_wakeup(&tty->input_wait);
             TTY_UNLOCK(tty);
             return count;
         }
@@ -971,6 +1007,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
                     }
                 }
             }
+            if (count > 0) sched_wakeup(&tty->input_wait);
 
             /* Check completion conditions */
             if (vmin == 0) {
@@ -1245,6 +1282,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
         case TCSETSW:
         case TCSETSF:
             if (arg) tty->termios = *(struct termios*)arg;
+            sched_wakeup(&tty->input_wait); /* ICANON may have changed */
             if (tty->driver &&
                 tty_driver_cb_valid((const void *)tty->driver->set_termios)) {
                 tty->driver->set_termios(tty);
@@ -1588,6 +1626,7 @@ void tty_close(struct tty *tty) {
             TTY_UNLOCK(tty);
             return;
         }
+        sched_wakeup(&tty->input_wait); /* no reader left to wait for */
 
         tty->lifecycle_busy = 1;
         /*

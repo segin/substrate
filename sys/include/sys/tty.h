@@ -80,6 +80,7 @@ struct tty {
     void *read_wait;
     void *write_wait;
     void *poll_wait;
+    void *input_wait;  // input writers (a pty master) waiting for raw_buf room
     
     // State flags
     int stopped; // Output stopped (IXON)
@@ -121,6 +122,16 @@ int tty_check_change(struct tty *tty);
 
 // Input processing (called by driver interrupt/worker)
 void tty_flip_buffer_push(struct tty *tty, char c);
+/*
+ * tty_input_wait_room - wait, in process context, until the tty can take
+ * one more input byte through tty_flip_buffer_push().  For a writer that
+ * may sleep (a pty master); interrupt-context drivers must not call it.
+ * Waits only in non-canonical mode while the tty is open: a canonical
+ * line that fills the buffer can never be read, so there the excess is
+ * dropped as before.  Returns 0 when there is room, -EAGAIN if `nonblock`
+ * and full, -EINTR on a pending signal.
+ */
+int tty_input_wait_room(struct tty *tty, int nonblock);
 void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status);
 
 /*
