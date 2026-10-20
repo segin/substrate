@@ -10,6 +10,7 @@
 #include <sys/errno.h>
 #include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/mman.h>
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
@@ -19,21 +20,6 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
-
-// mman.h flag definitions (duplicated here for kernel use)
-#define PROT_NONE  0x0
-#define PROT_READ  0x1
-#define PROT_WRITE 0x2
-#define PROT_EXEC  0x4
-
-#define MAP_SHARED    0x001
-#define MAP_PRIVATE   0x002
-#define MAP_FIXED     0x010
-#define MAP_ANONYMOUS 0x020
-#define MAP_NORESERVE 0x0040  /* FreeBSD historical value */
-
-#define MCL_CURRENT   0x01    /* mlockall(2): lock current mappings */
-#define MCL_FUTURE    0x02    /* mlockall(2): lock future mappings */
 
 /*
  * mlockall(MCL_CURRENT): lock every page already mapped into the address
@@ -718,11 +704,6 @@ static void *sys_brk_locked(void *addr) {
     
     return (void *)(uintptr_t)new_brk;
 }
-
-// msync flags (from sys/mman.h)
-#define MS_ASYNC      1
-#define MS_SYNC       2
-#define MS_INVALIDATE 4
 
 int sys_msync(void *addr, size_t length, int flags) {
     /* Return a real negated errno, not a bare -1 (the libc wrapper negates the

@@ -92,18 +92,7 @@ void sched_init(void) {
 }
 
 int sched_fork_thread(process_t *proc, void *parent_regs) {
-    // Cast parent_regs to registers_t pointer
-    // Cast parent_regs to registers_t pointer
-    typedef struct {
-        uint32_t gs;
-        uint32_t fs, es;
-        uint32_t ds;
-        uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
-        uint32_t int_no, err_code;
-        uint32_t eip, cs, eflags, useresp, ss;
-    } fork_regs_t;
-    
-    fork_regs_t *regs = (fork_regs_t *)parent_regs;
+    registers_t *regs = (registers_t *)parent_regs;
     
     thread_t *t = sched_alloc_thread(proc);
     if (!t) return -1;
@@ -203,16 +192,7 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
  */
 int sched_clone_thread(process_t *proc, void *parent_regs, uint32_t tls_base,
                        int *clear_child_tid) {
-    typedef struct {
-        uint32_t gs;
-        uint32_t fs, es;
-        uint32_t ds;
-        uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
-        uint32_t int_no, err_code;
-        uint32_t eip, cs, eflags, useresp, ss;
-    } fork_regs_t;
-
-    fork_regs_t *regs = (fork_regs_t *)parent_regs;
+    registers_t *regs = (registers_t *)parent_regs;
 
     thread_t *t = sched_alloc_thread(proc);
     if (!t) return -1;

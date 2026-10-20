@@ -550,7 +550,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: Quoted/relative includes appear in `sys/kern/subr_copy.c:14` (`#include "sched.h"`), `sys/arch/i386/boot.S:2`, `sys/arch/i386/multiboot_hdr.S:2`, `sys/exec/formats/aout.c:23` (`#include "../perso/freebsd/freebsd_user.h"`), `sys/exec/formats/coff.c:1`, `sys/fs/ext2/ext2_xattr.c:39` (`<ext2/ext2.h>` instead of `<fs/ext2/ext2.h>`), `sys/fs/ext2/ext2_hash.c:21`, and across `sys/exec/perso/*/*.c`, `sys/drivers/storage/ide/*.c`, `sys/drivers/storage/scsi/*.c`, `sys/drivers/video/*.c`, and `sys/drivers/virtio/*.c`.
   Basis: reproduced.
 
-- [ ] **SYS-RULE-003** *(Low; confirmed)* Kernel C source files under `sys/` shall not duplicate or define shared interface macros, constants, or structures that belong in header files (Kernel Code Style Rule 4).
+- [x] **SYS-RULE-003** *(Low; confirmed)* Kernel C source files under `sys/` shall not duplicate or define shared interface macros, constants, or structures that belong in header files (Kernel Code Style Rule 4).
   Evidence: `sys/vm/vm_syscalls.c:24-36, 710-712` redefines `PROT_*`, `MAP_*`, `MCL_*`, and `MS_*` instead of including `<sys/mman.h>`; `sys/fs/pipe.c:562-576` redefines `O_RDONLY`, `O_WRONLY`, `O_RDWR`, and `O_NONBLOCK` instead of including `<sys/fcntl.h>`; `sys/fs/minix/minix.c:1299-1302, 1404-1407` redefines `struct minix_dirent_v1` locally inside functions despite `<fs/minix/minix.h>`; and `sys/arch/i386/sched.c:97-104, 206-213` defines `fork_regs_t` locally instead of using `registers_t` from `<arch/i386/idt.h>`.
   Basis: reproduced.
 

@@ -1620,11 +1620,6 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
 
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)dir->impl;
 
-    struct minix_dirent_v1 {
-        uint16_t inode;
-        char name[30];
-    } __attribute__((packed));
-
     // 1. Find a free directory entry
     uint32_t offset = 0;
     uint32_t dir_size = dir->length;
@@ -1733,10 +1728,7 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
 
 static int minix_remove_entry(fs_node_t *dir, const char *name, int is_rmdir) {
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)dir->impl;
-    struct minix_dirent_v1 {
-        uint16_t inode;
-        char name[30];
-    } __attribute__((packed)) entry;
+    struct minix_dirent_v1 entry;
 
     uint32_t offset = 0;
     bool v2 = (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14);

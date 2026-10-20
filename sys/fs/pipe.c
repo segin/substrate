@@ -6,6 +6,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <sys/errno.h>
+#include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/poll.h>
@@ -555,25 +556,6 @@ int pipe_set_nonblock(fs_node_t *node, int nonblock) {
  *             can read AND write since the endpoint isn't role-
  *             pinned at this level).
  * ------------------------------------------------------------------ */
-
-/* O_* flag values match include/fcntl.h.  We can't include that
- * here without dragging userspace headers into the kernel; mirror
- * the bits inline. */
-#ifndef O_RDONLY
-#define O_RDONLY    0x00
-#endif
-#ifndef O_WRONLY
-#define O_WRONLY    0x01
-#endif
-#ifndef O_RDWR
-#define O_RDWR      0x02
-#endif
-#ifndef O_ACCMODE
-#define O_ACCMODE   0x03
-#endif
-#ifndef O_NONBLOCK
-#define O_NONBLOCK  0x800
-#endif
 
 static fifo_reg_t *fifo_lookup_or_create(const void *mp, uint64_t inum) {
     fifo_reg_lock_init();
