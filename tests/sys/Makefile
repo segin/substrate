@@ -81,7 +81,10 @@ HOST_TESTS += host_test_ext2_readlink
 HOST_TESTS += host_test_fat_file_read
 HOST_TESTS += host_test_fat_get_next_cluster
 HOST_TESTS += host_test_fat_inode_identity
+HOST_TESTS += host_test_fat_lfn_overflow
+HOST_TESTS += host_test_fat_lfn_truncation
 HOST_TESTS += host_test_fat_mount
+HOST_TESTS += host_test_fat_vuln
 HOST_TESTS += host_test_minix_vuln
 HOST_TESTS += host_test_minix_ops
 HOST_TESTS += host_test_procfs
@@ -577,6 +580,15 @@ host_test_fat_mount: host_test_fat_mount.c
 
 host_test_fat_file_read: host_test_fat_file_read.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_file_read.c -o $@
+
+host_test_fat_lfn_overflow: host_test_fat_lfn_overflow.c
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_lfn_overflow.c -o $@
+
+host_test_fat_lfn_truncation: host_test_fat_lfn_truncation.c
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_lfn_truncation.c -o $@
+
+host_test_fat_vuln: host_test_fat_vuln.c
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_vuln.c -o $@
 
 host_test_vm_kmem: host_test_vm_kmem.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -Ivm_kmem_mocks -I../../sys/include -I../../include -I../../sys -I. host_test_vm_kmem.c -o $@

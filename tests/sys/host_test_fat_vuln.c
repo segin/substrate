@@ -1,146 +1,123 @@
-#define HOST_TEST
+/*
+ * host_test_fat_vuln - fat_mount() must not size the FAT cache with a
+ * 32-bit product that wraps.
+ *
+ * The cache is fat_size * bytes_per_sector bytes.  With fat_size_32 =
+ * 8388609 (0x800001) and 512-byte sectors that is 0x100000200, which used
+ * to wrap to 512: the driver allocated 512 bytes and then read the whole
+ * FAT into them.  A mount of such a volume must leave the FAT uncached,
+ * while an ordinary volume still gets a cache of the full size.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <stdarg.h>
 
-// Include necessary kernel headers
-// We rely on -I sys -idirafter sys/include
 #include <vfs/vfs.h>
 
-// Mocks
 void kprint(const char *str) {
-    printf("[KERNEL] %s", str);
+    (void)str;
 }
 
-static size_t kmalloc_size_log = 0;
-
+/*
+ * fat_mount() reads a whole boot sector into the 36-byte BPB at the head
+ * of a kmalloc'ed fat_fs_t; the kernel allocator rounds that up to a full
+ * slab, so round host allocations up too (as host_test_fat_mount does).
+ * Refuse anything large rather than really allocating it.
+ */
 void *kmalloc(size_t size) {
-    kmalloc_size_log = size;
-    // We don't actually need to allocate 4GB for the test to pass/fail logic check.
-    // If size is huge, return NULL or handle it.
-    // But for the bug reproduction, the size will be small (wrapped).
-    if (size < 100000) {
-        return malloc(size);
-    }
-    return NULL; // Simulate failure for huge allocs
+    if (size > 16u * 1024 * 1024) return NULL;
+    return calloc(1, size < 4096 ? 4096 : size);
 }
 
-void kfree(void *ptr) {
+void kfree(void *ptr, size_t size) {
+    (void)size;
     free(ptr);
 }
 
 void vfs_register_filesystem(filesystem_t *fs) {
-    printf("Registered filesystem: %s\n", fs->name);
+    (void)fs;
 }
 
-// Global to control mock read behavior
-static uint32_t mock_fat_size_32 = 0;
-static uint16_t mock_bytes_per_sector = 0;
+#include "../../sys/fs/fat/fat.c"
+#include "fat_host_stubs.h"
 
-size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    // fat_mount reads BPB at offset 0 (sizeof fat_bpb_t)
-    // and Extended BPB if needed.
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
+    (void)dev; (void)offset; (void)size; (void)buffer;
+    return 0;
+}
 
-    // Structure sizes (packed) from fat.h need to match exactly.
-    // We will include fat.h later via fat.c, so we rely on offsets.
+/* Sector 0 holds the boot sector; every other byte of the device is zero. */
+static uint8_t boot_sector[512];
 
-    // For simplicity, we just fill the buffer with zeros first
+static size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    (void)node;
     memset(buffer, 0, size);
-
-    if (offset == 0 && size >= 90) { // BPB read
-        // set bytes_per_sector at offset 11 (uint16_t)
-        // set fat_size_16 at offset 22 (uint16_t) -> 0 to force FAT32
-        // set total_sectors_32 at offset 32 (uint32_t)
-
-        uint16_t *bps = (uint16_t *)(buffer + 11);
-        *bps = mock_bytes_per_sector;
-
-        uint8_t *spc = (uint8_t *)(buffer + 13);
-        *spc = 1; // 1 sector per cluster
-
-        uint16_t *fs16 = (uint16_t *)(buffer + 22);
-        *fs16 = 0; // Use FAT32
-
-        uint8_t *fat_count = (uint8_t *)(buffer + 16);
-        *fat_count = 1;
-
-        uint16_t *reserved = (uint16_t *)(buffer + 14);
-        *reserved = 32;
-
-        // Make total sectors large enough to be FAT32
-        uint32_t *tot32 = (uint32_t *)(buffer + 32);
-        *tot32 = 10000000;
-
-        return size;
+    if (offset >= 0 && (size_t)offset < sizeof(boot_sector)) {
+        size_t n = sizeof(boot_sector) - (size_t)offset;
+        if (n > size) n = size;
+        memcpy(buffer, boot_sector + offset, n);
     }
-
-    if (offset == 36 && size >= 48) { // Extended BPB read (offset 36?)
-        // In fat.c:
-        // off_t ext_offset = sizeof(fat_bpb_t);
-        // sizeof(fat_bpb_t) is 36 bytes (packed).
-        // dev->read(dev, ext_offset, sizeof(fat32_ext_bpb_t), ...);
-
-        // set fat_size_32 at offset 0 of this read
-        uint32_t *fs32 = (uint32_t *)buffer;
-        *fs32 = mock_fat_size_32;
-
-        return size;
-    }
-
     return size;
 }
 
-// Include fat.c source
-// We need to define expected macros/includes
-#include "../../sys/fs/fat/fat.c"
+/* A FAT32 boot sector: 512-byte sectors, one sector per cluster, one FAT. */
+static void make_boot_sector(uint32_t fat_size_32, uint32_t total_sectors) {
+    fat_bpb_t *bpb = (fat_bpb_t *)boot_sector;
+    fat32_ext_bpb_t *ext = (fat32_ext_bpb_t *)(boot_sector + sizeof(fat_bpb_t));
 
-int main() {
-    // Unbuffer stdout to ensure we see output before any potential crash
-    setvbuf(stdout, NULL, _IONBF, 0);
+    memset(boot_sector, 0, sizeof(boot_sector));
+    bpb->bytes_per_sector = 512;
+    bpb->sectors_per_cluster = 1;
+    bpb->reserved_sectors = 32;
+    bpb->fat_count = 1;
+    bpb->fat_size_16 = 0;                /* FAT32: size is in the ext BPB */
+    bpb->total_sectors_32 = total_sectors;
+    ext->fat_size_32 = fat_size_32;
+    ext->root_cluster = 2;
+}
+
+static fat_fs_t *mount_fs(fs_node_t *device) {
+    fs_node_t *root = fat_mount(NULL, 0, device);
+    if (!root) return NULL;
+    return ((fat_node_t *)(uintptr_t)root->impl)->fs;
+}
+
+int main(void) {
+    static fs_node_t device_node;
+    fat_fs_t *fs;
+
+    device_node.read = mock_device_read;
 
     printf("Running FAT Vulnerability Test (Integer Overflow)...\n");
 
-    // Setup mock device
-    fs_node_t device_node;
-    memset(&device_node, 0, sizeof(device_node));
-    device_node.read = mock_device_read;
-
-    // Case 1: Overflow
-    // fat_size_32 = 8388609 (0x800001)
-    // bytes_per_sector = 512 (0x200)
-    // Product = 0x100000200 = 4294967808
-    // 32-bit wrap = 0x200 = 512
-
-    mock_fat_size_32 = 8388609;
-    mock_bytes_per_sector = 512;
-    kmalloc_size_log = 0;
-
-    // Initialize global FS state to allow initial read
-    // fat_mount relies on fat_read_sectors which relies on bpb.bytes_per_sector
-    fat_global_fs.bpb.bytes_per_sector = 512;
-
-    printf("Mounting with fat_size=%u, bps=%u (Should overflow 32-bit if not fixed)...\n", mock_fat_size_32, mock_bytes_per_sector);
-    fs_node_t *mount_node = fat_mount(NULL, 0, &device_node);
-
-    printf("kmalloc called with size: %zu\n", kmalloc_size_log);
-
-    if (kmalloc_size_log == 512) {
-        printf("VULNERABILITY CONFIRMED: kmalloc size wrapped to 512!\n");
+    /* 8388609 * 512 = 0x100000200: wraps to 512 in 32 bits. */
+    make_boot_sector(8388609, 10000000);
+    fs = mount_fs(&device_node);
+    if (!fs) {
+        printf("FAIL: mount of the oversized-FAT volume failed\n");
         return 1;
-    } else if (kmalloc_size_log > 4000000000UL) {
-        printf("SUCCESS: kmalloc size is large (fixed): %zu\n", kmalloc_size_log);
-        return 0;
-    } else if (kmalloc_size_log == 0) {
-        printf("SUCCESS: kmalloc not called (mount detected overflow/size and skipped allocation)\n");
-        return 0;
-    } else {
-        printf("Unexpected size: %zu\n", kmalloc_size_log);
+    }
+    if (fs->fat_table != NULL || fs->fat_table_size != 0) {
+        printf("FAIL: oversized FAT was cached (fat_table_size=%u)\n", fs->fat_table_size);
         return 1;
     }
 
+    /* Control: a 1000-sector FAT is cached whole. */
+    make_boot_sector(1000, 100000);
+    fs = mount_fs(&device_node);
+    if (!fs) {
+        printf("FAIL: mount of the ordinary volume failed\n");
+        return 1;
+    }
+    if (fs->fat_table == NULL || fs->fat_table_size != 1000u * 512) {
+        printf("FAIL: ordinary FAT not cached in full (fat_table_size=%u)\n",
+               fs->fat_table_size);
+        return 1;
+    }
+
+    printf("host_test_fat_vuln: PASS\n");
     return 0;
 }
