@@ -287,6 +287,11 @@ acctpath.linux: acctpath.c
 ipcgetperm.linux: ipcgetperm.c
 	gcc -m32 -static -O2 $< -o $@
 
+# fpuexit.linux: FPU values stay each process's own while FPU-holding
+# processes are killed or exit.  Runs on the host too.
+fpuexit.linux: fpuexit.c
+	gcc -m32 -static -O2 $< -o $@
+
 # ldtfork.linux: an LDT survives fork, with LDT-less processes switched in
 # between.
 ldtfork.linux: ldtfork.c

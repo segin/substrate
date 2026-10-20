@@ -270,12 +270,17 @@ void fpu_switch(thread_t *next) {
  * read.  The threads' areas are freed as each is reaped (fpu_thread_free).
  */
 void fpu_forget_process(struct process *p) {
+    /* With interrupts off, as fpu_thread_free: a switch landing between the
+     * test and the store would see (or set) this CPU's owner mid-change and
+     * leave TS clear for a thread that does not own the registers. */
+    unsigned long flags = intr_disable();
     for (int i = 0; i < MAX_CPUS; i++) {
         if (fpu_owner[i] && fpu_owner[i]->proc == p) {
             fpu_owner[i] = NULL;
             if (i == fpu_cpu()) fpu_set_ts();
         }
     }
+    intr_restore(flags);
 }
 
 /* A thread's storage is about to be freed. */
