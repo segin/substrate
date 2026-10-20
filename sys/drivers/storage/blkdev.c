@@ -622,6 +622,18 @@ void blkdev_register_disk(blkdev_t *dev) {
     if (dev->sector_size == 0)
         return;                 /* blkdev_register() would refuse it too */
     blkdev_register(dev);
+    blkdev_attach_partitions(dev);
+}
+
+/*
+ * Scan a registered disk for partitions and link them back to it: the
+ * second half of blkdev_register_disk(), for a driver that registers its
+ * disks first and scans them later (IDE, once its interrupts are unmasked).
+ * Once only: a disk already scanned is left alone.
+ */
+void blkdev_attach_partitions(blkdev_t *dev) {
+    if (!dev || dev->sector_size == 0)
+        return;
     if (dev->geom)
         return;                 /* already scanned; re-scan would leak */
 

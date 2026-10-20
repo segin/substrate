@@ -788,13 +788,11 @@ int ide_scan_controller(void) {
                  * blkdev_register_disk() would scan, which is both pointless
                  * and, before the sniffers were bounded, fatal: a 2048-byte
                  * sector read overran their 512-byte stack buffers.  ATA
-                 * disks are scanned below via partition_scan[].
+                 * disks are registered now and scanned below, once, via
+                 * partition_scan[] (scanning here as well registered every
+                 * partition twice and orphaned the first GEOM disk).
                  */
-                if (type == 1) {
-                    blkdev_register(bdev);
-                } else {
-                    blkdev_register_disk(bdev);
-                }
+                blkdev_register(bdev);
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");
@@ -829,7 +827,7 @@ int ide_scan_controller(void) {
     }
 
     for (size_t i = 0; i < partition_scan_count; i++) {
-        blkdev_scan_partitions(partition_scan[i]);
+        blkdev_attach_partitions(partition_scan[i]);
     }
 
     ide_attached = 1;

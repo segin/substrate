@@ -99,6 +99,9 @@ void blkdev_register(blkdev_t *dev);
 void blkdev_unregister(blkdev_t *dev);
 void blkdev_scan_partitions(blkdev_t *dev);
 void blkdev_register_disk(blkdev_t *dev);
+/* The partition half of blkdev_register_disk, for a disk already
+ * registered with blkdev_register; does nothing the second time. */
+void blkdev_attach_partitions(blkdev_t *dev);
 
 // Get a block device by name
 blkdev_t *blkdev_get(const char *name);

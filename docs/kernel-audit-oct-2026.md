@@ -518,7 +518,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/video/bdf_pcf.c:77-78, 194-203` reads `toc_count` and `glyph_offsets[glyph_index]` without bounds checks; `bdf_parse` (`:225`) runs `strstr` on unverified `data`; and `bdf_free` (`:375`) calls `kfree(font->glyph_widths, font->glyph_count * sizeof(uint16_t))` for an array allocated with `sizeof(uint8_t)` (`:288`).
   Basis: traced.
 
-- [ ] **SYS-DRV-008** *(High → Medium; confirmed)* When probing IDE controllers in `ide_scan_controller` (`sys/drivers/storage/ide/ide_probe.c`), the driver shall not invoke `geom_scan_partitions` a second time after `ide_register_blkdev` (`blkdev_register`) has already scanned the disk.
+- [x] **SYS-DRV-008** *(High → Medium; confirmed)* When probing IDE controllers in `ide_scan_controller` (`sys/drivers/storage/ide/ide_probe.c`), the driver shall not invoke `geom_scan_partitions` a second time after `ide_register_blkdev` (`blkdev_register`) has already scanned the disk.
   Evidence: `sys/drivers/storage/ide/ide_probe.c:796, 809-811, 831-833` calls `ide_register_blkdev` (which calls `blkdev_register` -> `geom_scan_partitions`) and then calls `geom_scan_partitions(&ide_blkdevs[idx])` again, leaking the first `geom_disk_t` and registering duplicate partition devices.
   Basis: traced.
 
