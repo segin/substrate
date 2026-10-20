@@ -39,6 +39,7 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name);
 static int minix_unlink(fs_node_t *dir, const char *name);
 static int minix_rmdir(fs_node_t *dir, const char *name);
 static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev);
+static int minix_mkdir(fs_node_t *dir, const char *name, uint16_t permission);
 static int minix_unmount(fs_node_t *root);
 static int minix_dir_is_empty(fs_node_t *node);
 
@@ -818,6 +819,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
     // Hook directory ops provided by VFS (create, mkdir, etc) if supported
     if (type == FS_DIRECTORY) {
          node->symlink = minix_symlink;
+         node->mkdir = minix_mkdir;
          node->link = minix_link;
          node->unlink = minix_unlink;
             node->rmdir = minix_rmdir;
@@ -1173,30 +1175,50 @@ static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
     return NULL;
 }
 
+/*
+ * Scan the directory itself, into an entry of its own.  This went through
+ * minix_readdir, which returns the directory node's one shared dirent: two
+ * lookups in the same directory at once overwrote each other's name and
+ * inode between the readdir and the compare, and a walk got another file
+ * (or none).  It also rescanned from the start for every index.
+ */
 static fs_node_t *minix_finddir(fs_node_t *node, char *name) {
-    // Scan directory
-    fs_node_t *result = NULL;
-    struct dirent *d;
-    uint64_t index = 0;
-    while ((d = minix_readdir(node, index++)) != NULL) {
-        if (strcmp(d->d_name, name) == 0) {
-            minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
-            /* Returned held, as a lookup's result is. */
-            fs_node_t *hit = minix_ncache_find_held(fs, d->d_ino);
-            if (hit) return hit;
-            result = (fs_node_t *)kmalloc(sizeof(fs_node_t));
-            if (result == NULL) {
-                return NULL;
-            }
-            memset(result, 0, sizeof(fs_node_t));
-            if (minix_read_inode(fs, d->d_ino, result) != 0) {
-                kfree(result, sizeof(fs_node_t));
-                return NULL;
-            }
-            return minix_ncache_insert(fs, result);
+    minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
+    if (!fs || !name) return NULL;
+    uint32_t entry_size = minix_dirent_size(fs);
+    uint32_t namelen    = minix_dirent_namelen(fs);
+    size_t want = strlen(name);
+    struct minix_dirent_v1 entry;
+    uint32_t ino = 0;
+
+    if (want == 0 || want > namelen) return NULL;
+    for (uint32_t offset = 0; offset < node->length; offset += entry_size) {
+        memset(&entry, 0, sizeof(entry));
+        if (minix_read(node, offset, entry_size, (uint8_t *)&entry) != entry_size)
+            return NULL;
+        if (entry.inode == 0) continue;
+        /* The name is NUL-padded, and unterminated when it fills the slot. */
+        if (strncmp(entry.name, name, namelen) == 0 &&
+            (want == namelen || entry.name[want] == '\0')) {
+            ino = entry.inode;
+            break;
         }
     }
-    return NULL;
+    if (ino == 0) return NULL;
+
+    /* Returned held, as a lookup's result is. */
+    fs_node_t *hit = minix_ncache_find_held(fs, ino);
+    if (hit) return hit;
+    fs_node_t *result = (fs_node_t *)kmalloc(sizeof(fs_node_t));
+    if (result == NULL) {
+        return NULL;
+    }
+    memset(result, 0, sizeof(fs_node_t));
+    if (minix_read_inode(fs, ino, result) != 0) {
+        kfree(result, sizeof(fs_node_t));
+        return NULL;
+    }
+    return minix_ncache_insert(fs, result);
 }
 
 static fs_node_t *minix_mount(const char *device, uint32_t flags, void *data) {
@@ -1450,6 +1472,71 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
         return -EIO;
     }
 
+    return 0;
+}
+
+/* The link count in a cached raw inode, which sits at a different offset in
+ * the V1 and V2 layouts (see minix_rmdir). */
+static void minix_nlinks_add(minix_fs_t *fs, void *raw, int delta) {
+    if (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14) {
+        struct minix_inode_v2 *ri = (struct minix_inode_v2 *)raw;
+        ri->i_nlinks = (uint16_t)(ri->i_nlinks + delta);
+    } else {
+        struct minix_inode_v1 *ri = (struct minix_inode_v1 *)raw;
+        ri->i_nlinks = (uint8_t)(ri->i_nlinks + delta);
+    }
+}
+
+/*
+ * mkdir(2).  The driver had none -- every mkdir on a Minix volume was
+ * EOPNOTSUPP -- and minix_mknod with an S_IFDIR mode is no substitute: it
+ * makes an inode with one link and no "." or "..".  A directory gets two
+ * links (its entry and its "."), both entries, and its parent one more link
+ * for the "..".
+ */
+static int minix_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
+    minix_fs_t *fs = (minix_fs_t *)(uintptr_t)dir->impl;
+
+    if (!name || !name[0]) return -EINVAL;
+    if (!strcmp(name, ".") || !strcmp(name, "..")) return -EEXIST;
+    if (strlen(name) > minix_dirent_namelen(fs)) return -ENAMETOOLONG;
+
+    int inode_num = minix_alloc_inode(fs);
+    if (inode_num < 0) return -ENOSPC;
+
+    fs_node_t nd;
+    memset(&nd, 0, sizeof(nd));
+    nd.inode = (uint64_t)inode_num;
+    nd.impl = (uintptr_t)fs;
+    nd.flags = FS_DIRECTORY;
+    nd.mask = permission & 07777;
+    nd.uid = dir->uid;
+    nd.gid = dir->gid;
+    nd.length = 0;
+    nd.ptr = kmalloc(sizeof(struct minix_inode_wrapper));
+    if (!nd.ptr) {
+        minix_free_inode(fs, (uint32_t)inode_num);
+        return -ENOMEM;
+    }
+    memset(nd.ptr, 0, sizeof(struct minix_inode_wrapper));
+    minix_nlinks_add(fs, nd.ptr, 2);
+
+    /* The entries first (each write extends the directory and commits its
+     * inode), then the name in the parent, then the parent's "..". */
+    if (minix_write_inode(fs, &nd) != 0 ||
+        minix_dir_add(&nd, ".", (uint32_t)inode_num) != 0 ||
+        minix_dir_add(&nd, "..", (uint32_t)dir->inode) != 0 ||
+        minix_dir_add(dir, name, (uint32_t)inode_num) != 0) {
+        kfree(nd.ptr, sizeof(struct minix_inode_wrapper));
+        minix_free_inode(fs, (uint32_t)inode_num);
+        return -EIO;
+    }
+    kfree(nd.ptr, sizeof(struct minix_inode_wrapper));
+
+    if (dir->ptr) {
+        minix_nlinks_add(fs, dir->ptr, 1);
+        minix_write_inode(fs, dir);
+    }
     return 0;
 }
 

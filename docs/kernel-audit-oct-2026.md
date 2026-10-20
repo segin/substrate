@@ -1131,7 +1131,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Evidence: `SYSV_MAGIC_XENIX` (`sys/fs/sysv/sysv.h`) is 0x012FF7B5, which is Linux's statfs `f_type` for System V 4, not a value ever written to a disk; a real Xenix filesystem has magic 0x2B5544 at offset 0x3F8 of a superblock at byte 1024, which the probe (1 KiB read at byte 512, magic at +0x1F8) never looks at.  So no real Xenix volume mounts.  Of the disks with magic 0xFD187E20, the driver reads `s_fsize` at offset 2 -- right for the System V Release 2 layout, wrong for Release 4, whose `s_fsize` follows a 2-byte pad at offset 4.  None of the images in the tree carries such a filesystem (their personality trees are ext2), so this was found by reading, and the driver had been exercised only by synthetic images.  Found while fixing SYS-FS-008.
   Basis: traced (against Linux `fs/sysv`).
 
-- [ ] **SYS-NEW-011** *(Low; confirmed)* Minix shall support `mkdir(2)`.
+- [x] **SYS-NEW-011** *(Low; confirmed)* Minix shall support `mkdir(2)`.
   Evidence: `minix_init_node` (`sys/fs/minix/minix.c`) gives a directory node symlink, link, unlink, rmdir and mknod but never `mkdir`, so `vfs_mkdir_in` and `kern_mkdirat` answer EOPNOTSUPP on every Minix volume (V1 and V2), though `minix_mknod` can already make a directory from an `S_IFDIR` mode.  Found when the `tests/sys` torture tests were wired up: `torture_minix` fails there, its other 13 checks passing.
   Basis: observed.
 
