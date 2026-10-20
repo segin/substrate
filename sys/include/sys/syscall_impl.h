@@ -291,6 +291,11 @@ extern int sys_issetugid(void);
 extern int sys_cap_getmode(unsigned int*);
 extern ssize_t sys_readv(int, const void*, int);
 extern ssize_t sys_writev(int, const void*, int);
+/* Positioned I/O on user buffers; the descriptor's offset is untouched. */
+extern ssize_t sys_pread_at(int, void*, size_t, off_t);
+extern ssize_t sys_pwrite_at(int, const void*, size_t, off_t);
+extern ssize_t sys_preadv_at(int, const void*, int, off_t);
+extern ssize_t sys_pwritev_at(int, const void*, int, off_t);
 extern int sys_getgroups(int, void*);
 extern int sys_setgroups(int, const void*);
 extern int sys_getlogin(char*, unsigned int);

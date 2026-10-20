@@ -1614,49 +1614,31 @@ int netbsd_sys_lwp_kill(int target, int signo) {
 int64_t netbsd_sys_pread(int fd, void *buf, size_t nbyte, int pad,
                          uint32_t off_lo, uint32_t off_hi) {
     (void)pad;
-    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
-    if (saved < 0) return saved;
-    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
-    if (pos < 0) return pos;
-    ssize_t n = sys_read(fd, (char *)buf, nbyte);
-    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
-    return n;
+    return sys_pread_at(fd, buf, nbyte,
+                        (off_t)(((uint64_t)off_hi << 32) | off_lo));
 }
 
 /* pwrite(fd, buf, nbyte, PAD, off_t offset). */
 int64_t netbsd_sys_pwrite(int fd, const void *buf, size_t nbyte, int pad,
                           uint32_t off_lo, uint32_t off_hi) {
     (void)pad;
-    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
-    if (saved < 0) return saved;
-    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
-    if (pos < 0) return pos;
-    ssize_t n = sys_write(fd, (const char *)buf, nbyte);
-    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
-    return n;
+    return sys_pwrite_at(fd, buf, nbyte,
+                         (off_t)(((uint64_t)off_hi << 32) | off_lo));
 }
 
 /* preadv/pwritev(fd, iov, iovcnt, PAD, off_t offset). */
 int64_t netbsd_sys_preadv(int fd, const void *iov, int iovcnt, int pad,
                           uint32_t off_lo, uint32_t off_hi) {
     (void)pad;
-    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
-    if (saved < 0) return saved;
-    if (sys_lseek(fd, off_lo, off_hi, SEEK_SET) < 0) return -EINVAL;
-    ssize_t n = sys_readv(fd, iov, iovcnt);
-    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
-    return n;
+    return sys_preadv_at(fd, iov, iovcnt,
+                         (off_t)(((uint64_t)off_hi << 32) | off_lo));
 }
 
 int64_t netbsd_sys_pwritev(int fd, const void *iov, int iovcnt, int pad,
                            uint32_t off_lo, uint32_t off_hi) {
     (void)pad;
-    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
-    if (saved < 0) return saved;
-    if (sys_lseek(fd, off_lo, off_hi, SEEK_SET) < 0) return -EINVAL;
-    ssize_t n = sys_writev(fd, iov, iovcnt);
-    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
-    return n;
+    return sys_pwritev_at(fd, iov, iovcnt,
+                          (off_t)(((uint64_t)off_hi << 32) | off_lo));
 }
 
 /* fpathconf(fd, name): substrate keeps no per-fd config store; report the

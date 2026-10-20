@@ -33,6 +33,11 @@ int kern_open_exec(const char *path);
 int kern_openat(int dirfd, const char *path, int flags, int mode);
 ssize_t kern_read(int fd, char *buf, size_t len);
 ssize_t kern_write(int fd, const char *buf, size_t len);
+/* At `off`, leaving the descriptor's offset alone; kernel buffers. */
+ssize_t kern_pread(int fd, char *buf, size_t len, off_t off);
+ssize_t kern_pwrite(int fd, const char *buf, size_t len, off_t off);
+/* lchown on a path already in kernel memory. */
+int kern_lchown(const char *path, int uid, int gid);
 int kern_close(int fd);
 int kern_stat(const char *path, struct stat *buf);
 int kern_lstat(const char *path, struct stat *buf);

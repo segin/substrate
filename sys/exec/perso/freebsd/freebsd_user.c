@@ -681,24 +681,14 @@ int freebsd_sys_mkfifo(const char *path, int mode) {
  * moving the descriptor's file pointer. */
 int64_t freebsd_sys_pread(int fd, void *buf, size_t nbyte,
                           uint32_t off_lo, uint32_t off_hi) {
-    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
-    if (saved < 0) return saved;
-    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
-    if (pos < 0) return pos;
-    ssize_t n = sys_read(fd, (char *)buf, nbyte);
-    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
-    return n;
+    return sys_pread_at(fd, buf, nbyte,
+                        (off_t)(((uint64_t)off_hi << 32) | off_lo));
 }
 
 int64_t freebsd_sys_pwrite(int fd, const void *buf, size_t nbyte,
                            uint32_t off_lo, uint32_t off_hi) {
-    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
-    if (saved < 0) return saved;
-    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
-    if (pos < 0) return pos;
-    ssize_t n = sys_write(fd, (const char *)buf, nbyte);
-    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
-    return n;
+    return sys_pwrite_at(fd, buf, nbyte,
+                         (off_t)(((uint64_t)off_hi << 32) | off_lo));
 }
 
 /* fpathconf(fd, name): report fixed limits for the common names. */
@@ -1082,7 +1072,6 @@ abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int
                                        abi_ulong_t len, unsigned int flags) {
     struct stat st;
     int64_t inoff = 0, outoff = 0;
-    off_t in_saved = 0, out_saved = 0;
     size_t done = 0;
     char *kbuf;
     int rc = 0;
@@ -1115,20 +1104,9 @@ abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int
     if (kbuf == NULL) {
         return -ENOMEM;
     }
-    /* With an offset given, the file is read or written there and its
-     * position put back afterwards. */
-    /* Offsets are 64-bit: keep them in off_t and turn only an error into
-     * rc, or a position past 2 GiB would read as a negative errno. */
-    if (inoffp != NULL) {
-        in_saved = kern_lseek(infd, 0, SEEK_CUR);
-        off_t r = in_saved < 0 ? in_saved : kern_lseek(infd, (off_t)inoff, SEEK_SET);
-        rc = r < 0 ? (int)r : 0;
-    }
-    if (rc >= 0 && outoffp != NULL) {
-        out_saved = kern_lseek(outfd, 0, SEEK_CUR);
-        off_t r = out_saved < 0 ? out_saved : kern_lseek(outfd, (off_t)outoff, SEEK_SET);
-        rc = r < 0 ? (int)r : 0;
-    }
+    /* With an offset given, the file is read or written there by
+     * positioned I/O, its position never moved (seeking away and back
+     * moved it under every other user of the file description). */
     /* A call may copy less than it was asked to, and one that copies a
      * megabyte and comes back lets a signal in. */
     while (rc == 0 && done < (size_t)len && done < 16U * FREEBSD_COPY_CHUNK) {
@@ -1138,12 +1116,15 @@ abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int
         if (want > FREEBSD_COPY_CHUNK) {
             want = FREEBSD_COPY_CHUNK;
         }
-        got = kern_read(infd, kbuf, want);
+        got = inoffp != NULL ? kern_pread(infd, kbuf, want, (off_t)(inoff + (int64_t)done))
+                             : kern_read(infd, kbuf, want);
         if (got <= 0) {
             rc = (int)got;
             break;
         }
-        put = kern_write(outfd, kbuf, (size_t)got);
+        put = outoffp != NULL ? kern_pwrite(outfd, kbuf, (size_t)got,
+                                            (off_t)(outoff + (int64_t)done))
+                              : kern_write(outfd, kbuf, (size_t)got);
         if (put < 0) {
             rc = (int)put;
             break;
@@ -1156,14 +1137,12 @@ abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int
     kfree(kbuf, FREEBSD_COPY_CHUNK);
 
     if (inoffp != NULL) {
-        (void)kern_lseek(infd, (off_t)in_saved, SEEK_SET);
         inoff += (int64_t)done;
         if (copyout(&inoff, inoffp, sizeof(inoff)) != 0 && rc == 0) {
             rc = -EFAULT;
         }
     }
     if (outoffp != NULL) {
-        (void)kern_lseek(outfd, (off_t)out_saved, SEEK_SET);
         outoff += (int64_t)done;
         if (copyout(&outoff, outoffp, sizeof(outoff)) != 0 && rc == 0) {
             rc = -EFAULT;

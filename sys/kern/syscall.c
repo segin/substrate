@@ -539,6 +539,132 @@ ssize_t kern_write(int fd, const char *buf, size_t len) {
     }
 }
 
+/*
+ * Positioned I/O: read or write at `off` and leave the descriptor's offset
+ * alone.  The BSD personalities emulated pread/pwrite with lseek, read
+ * and lseek back, which moved the offset every other thread and every
+ * process sharing the file description reads from in between.  A pipe or
+ * socket has no position (ESPIPE).  Buffers are kernel memory here.
+ */
+static inline int io_sigkill_pending(void);
+
+static int kern_pio_file(int fd, off_t off, file_t **fp) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+    if (f->f_type == DTYPE_PIPE || f->f_type == DTYPE_SOCKET) return -ESPIPE;
+    uint32_t ftype = ((fs_node_t *)f->f_data)->flags & 0x7;
+    if (ftype == FS_PIPE || ftype == FS_SOCKET) return -ESPIPE;
+    if (off < 0) return -EINVAL;
+    *fp = f;
+    return 0;
+}
+
+ssize_t kern_pread(int fd, char *buf, size_t len, off_t off) {
+    file_t *f;
+    int err = kern_pio_file(fd, off, &f);
+    if (err) return err;
+    if (len == 0) return 0;
+
+    struct file *prev_io = current_thread ? current_thread->io_file : NULL;
+    if (current_thread) current_thread->io_file = f;
+    ssize_t bytes = (ssize_t)read_fs((fs_node_t *)f->f_data, off, len, (uint8_t *)buf);
+    if (current_thread) current_thread->io_file = prev_io;
+    return bytes;
+}
+
+ssize_t kern_pwrite(int fd, const char *buf, size_t len, off_t off) {
+    file_t *f;
+    int err = kern_pio_file(fd, off, &f);
+    if (err) return err;
+    if (len == 0) return 0;
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    if (!node->write) return -EBADF;
+    /* RLIMIT_FSIZE, as kern_write applies it, at this offset. */
+    if ((node->flags & 0x7) == FS_FILE) {
+        rlim_t soft = current_process->rlimits[RLIMIT_FSIZE].rlim_cur;
+
+        if (soft != RLIM_INFINITY) {
+            if ((uint64_t)off >= (uint64_t)soft) {
+                psignal(current_process, SIGXFSZ);
+                return -EFBIG;
+            }
+            if ((uint64_t)off + (uint64_t)len > (uint64_t)soft)
+                len = (size_t)((uint64_t)soft - (uint64_t)off);
+        }
+    }
+
+    struct file *prev_io = current_thread ? current_thread->io_file : NULL;
+    if (current_thread) current_thread->io_file = f;
+    ssize_t bytes = (ssize_t)write_fs(node, off, len, (const uint8_t *)buf);
+    if (current_thread) current_thread->io_file = prev_io;
+    return bytes;
+}
+
+/* pread/pwrite on a user buffer, through a kernel bounce buffer. */
+ssize_t sys_pread_at(int fd, void *buf, size_t len, off_t off) {
+    uintptr_t buf_end;
+    if (__builtin_add_overflow((uintptr_t)buf, len, &buf_end)) return -EFAULT;
+    if (len == 0) return kern_pread(fd, NULL, 0, off);
+
+    char *kbuf = kmalloc(IO_CHUNK_SIZE);
+    if (!kbuf) return -ENOMEM;
+    ssize_t total = 0;
+    while (len > 0) {
+        if (io_sigkill_pending()) {
+            if (total == 0) total = -EINTR;
+            break;
+        }
+        size_t n = len > IO_CHUNK_SIZE ? IO_CHUNK_SIZE : len;
+        ssize_t r = kern_pread(fd, kbuf, n, off + total);
+        if (r <= 0) {
+            if (total == 0) total = r;
+            break;
+        }
+        if (copyout(kbuf, (char *)buf + total, (size_t)r) != 0) {
+            if (total == 0) total = -EFAULT;
+            break;
+        }
+        total += r;
+        len -= (size_t)r;
+        if ((size_t)r < n) break;
+    }
+    kfree(kbuf, IO_CHUNK_SIZE);
+    return total;
+}
+
+ssize_t sys_pwrite_at(int fd, const void *buf, size_t len, off_t off) {
+    uintptr_t buf_end;
+    if (__builtin_add_overflow((uintptr_t)buf, len, &buf_end)) return -EFAULT;
+    if (len == 0) return kern_pwrite(fd, NULL, 0, off);
+
+    char *kbuf = kmalloc(IO_CHUNK_SIZE);
+    if (!kbuf) return -ENOMEM;
+    ssize_t total = 0;
+    while (len > 0) {
+        if (io_sigkill_pending()) {
+            if (total == 0) total = -EINTR;
+            break;
+        }
+        size_t n = len > IO_CHUNK_SIZE ? IO_CHUNK_SIZE : len;
+        if (copyin((const char *)buf + total, kbuf, n) != 0) {
+            if (total == 0) total = -EFAULT;
+            break;
+        }
+        ssize_t r = kern_pwrite(fd, kbuf, n, off + total);
+        if (r <= 0) {
+            if (total == 0) total = r;
+            break;
+        }
+        total += r;
+        len -= (size_t)r;
+        if ((size_t)r < n) break;
+    }
+    kfree(kbuf, IO_CHUNK_SIZE);
+    return total;
+}
+
 int truncate_fs(fs_node_t *node, off_t length) {
     if (vfs_node_rdonly(node)) {
         return -EROFS;
@@ -3826,12 +3952,17 @@ static int chown_node_rele(fs_node_t *node, int uid, int gid) {
     return ret;
 }
 
+/* lchown on a path already in kernel memory (personality wrappers). */
+int kern_lchown(const char *kpath, int uid, int gid) {
+    if (uid < -1 || gid < -1) return -EINVAL;
+    return chown_node_rele(sys_lookup_path(kpath, 0), uid, gid);
+}
+
 int sys_lchown(const char *path, int uid, int gid) {
     char kpath[256];
 
-    if (uid < -1 || gid < -1) return -EINVAL;
     COPYIN_STR(path, kpath);
-    return chown_node_rele(sys_lookup_path(kpath, 0), uid, gid);
+    return kern_lchown(kpath, uid, gid);
 }
 
 int sys_fchmod(int fd, int mode) {

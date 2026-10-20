@@ -492,6 +492,12 @@ static int utime_node(fs_node_t *node, void *times) {
         if (times != NULL) {
             return -EPERM;
         }
+        if (vfs_check_permissions_groups(node, current_process->euid,
+                                         current_process->egid,
+                                         current_process->supp_groups,
+                                         current_process->n_supp_groups, 2) != 0) {
+            return -EACCES;
+        }
     }
 
     if (times) {
@@ -729,6 +735,42 @@ ssize_t sys_readv(int fd, const void *iov_user, int iovcnt) {
     }
     if (kiov != stackbuf) kfree(kiov, sz);
     return total;
+}
+
+/* preadv/pwritev: readv/writev at `off`, the descriptor's offset untouched
+ * (sys_pread_at / sys_pwrite_at, in kern/syscall.c). */
+static ssize_t sys_pv_at(int fd, const void *iov_user, int iovcnt, off_t off,
+                         int writing) {
+    if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
+    if (iovcnt == 0) return 0;
+    struct iovec stackbuf[IOV_STACK];
+    size_t sz = (size_t)iovcnt * sizeof(struct iovec);
+    struct iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
+    if (!kiov) return -ENOMEM;
+    if (iovec_copyin(iov_user, kiov, iovcnt) != 0) {
+        if (kiov != stackbuf) kfree(kiov, sz);
+        return -EFAULT;
+    }
+    ssize_t total = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        if (kiov[i].iov_len == 0) continue;
+        ssize_t r = writing
+            ? sys_pwrite_at(fd, kiov[i].iov_base, kiov[i].iov_len, off + total)
+            : sys_pread_at(fd, kiov[i].iov_base, kiov[i].iov_len, off + total);
+        if (r < 0) { total = total > 0 ? total : r; break; }
+        total += r;
+        if ((size_t)r < kiov[i].iov_len) break;
+    }
+    if (kiov != stackbuf) kfree(kiov, sz);
+    return total;
+}
+
+ssize_t sys_preadv_at(int fd, const void *iov_user, int iovcnt, off_t off) {
+    return sys_pv_at(fd, iov_user, iovcnt, off, 0);
+}
+
+ssize_t sys_pwritev_at(int fd, const void *iov_user, int iovcnt, off_t off) {
+    return sys_pv_at(fd, iov_user, iovcnt, off, 1);
 }
 
 /*

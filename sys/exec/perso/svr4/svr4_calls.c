@@ -440,7 +440,9 @@ static int64_t svr4_sys_lchown(struct sysv386_frame *f) {
     int rc = sysv386_string(f->a[0], &path);
 
     if (rc == 0) {
-        rc = sys_lchown(path, (int)f->a[1], (int)f->a[2]);
+        /* path is a kernel copy: sys_lchown would copy it in again from
+         * "user" memory and fail. */
+        rc = kern_lchown(path, (int)f->a[1], (int)f->a[2]);
         sysv386_free_string(path);
     }
     return rc;
