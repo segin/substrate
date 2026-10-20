@@ -296,6 +296,8 @@ void pmap_remove(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
 void pmm_free_block(void *p) { (void)p; }
 struct personality *perso_lookup(int id) { (void)id; return NULL; }
 void ptrace_exec_stop(struct registers *frame) { (void)frame; }
+/* No personality pushes cleanup here. */
+void exec_cleanup_drain(void) {}
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 
 // Stub random
