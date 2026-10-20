@@ -1120,6 +1120,7 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
   Basis: observed.
   Cause and fix: libthr's unlock stores `UMUTEX_UNOWNED`, clearing `UMUTEX_CONTESTED`, then calls `UMTX_OP_MUTEX_WAKE2`, which only woke one waiter.  FreeBSD's `do_wake2_umutex` sets the contested bit again while waiters remain; without it the waiter that took the lock next held an "uncontested" word, its unlock woke nobody, and the rest slept for ever.  `umtx_mutex_wake2` now does the same.  torture_pthread passed 3 runs of 3 on i386 and 1 of 1 on x86_64.
 
-- [ ] **SYS-NEW-009** *(Low; unconfirmed)* `torture_shm`'s `shared_pingpong` shall finish.
-  Evidence: `tests/lib/ipc/torture_shm` reports test 20, `shared_pingpong`, as a hang (killed after 8 s) on i386 and x86_64, and identically on the kernel from before the October 2026 remediation; the other 36 tests pass.  Not yet known whether it is a lost wake-up in the kernel or an 8 s budget too short under TCG.
+- [x] **SYS-NEW-009** *(Medium; confirmed — raised from Low)* A System V segment attached before `fork()` shall stay shared with the parent.
+  Evidence: `tests/lib/ipc/torture_shm` reports test 20, `shared_pingpong`, as a hang (killed after 8 s) on i386 and x86_64, and identically on the kernel from before the October 2026 remediation.  Not a timing problem: the child, attaching the segment itself, never saw the parent's writes.  `shmat` maps with `VM_INHERIT_NONE`; `vm_map_fork` tears the cloned PTEs out of the child, but `pmap_fork` had also cleared `PTE_W` on the parent's side to arm COW, so the parent's next write faulted and split the device page into a private copy.
+  Fix: for an inherit-none entry backed by a device or physical object, restore the parent's write access as the inherit-share path does (`vm_map.c`).  torture_shm: 37 of 37 on i386 and x86_64.
   Basis: observed.

@@ -1515,6 +1515,24 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
              * so explicitly tear the cloned PTEs back out of the child pmap. */
             pmap_fork_clear_range(dst_pmap, (uint32_t)src_entry->start,
                                   (uint32_t)src_entry->end);
+            /* And the parent must keep writing the shared pages.
+             * pmap_fork() cleared PTE_W on its side too, to arm COW, so
+             * its next write faulted and split the device page into a
+             * private copy: a System V segment attached before fork() was
+             * from then on the parent's alone, and a child attaching the
+             * same segment never saw the parent's writes.  A device or
+             * physical object has no COW state to protect; an anonymous
+             * entry marked inherit-none may (an earlier fork's), so it
+             * keeps the read-only PTEs and faults as before. */
+            if (obj && (obj->type == VM_OBJ_TYPE_DEVICE ||
+                        obj->type == VM_OBJ_TYPE_PHYS) &&
+                (src_entry->protection & VM_PROT_WRITE)) {
+                pmap_share_range(src_map->pmap, src_entry->start, src_entry->end);
+                for (uintptr_t va = src_entry->start; va < src_entry->end;
+                     va += 0x1000) {
+                    pmap_invalidate_page(va);
+                }
+            }
             continue;
         }
             
