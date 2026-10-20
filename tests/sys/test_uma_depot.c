@@ -57,6 +57,11 @@ void kfree(void *p, size_t size) {
     free(p);
 }
 
+/* uma_core.c compiles its slab lock out under HOST_TEST, but
+ * uma_zone_report() still takes it unconditionally. */
+static unsigned long uma_slab_lock_acquire(void) { return 0; }
+static void uma_slab_lock_release(unsigned long f) { (void)f; }
+
 #include <vm/uma.h>
 #include "../../sys/vm/uma_core.c"
 #include "../../sys/vm/uma_debug.c"
