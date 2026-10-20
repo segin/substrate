@@ -734,10 +734,51 @@ static void procfs_node_close(fs_node_t *node) {
     if (dead) procfs_free_block(dead);
 }
 
-/* Give a procfs node the open/close that pin its block. */
+/* Give a procfs node the open/close that pin its block.  The pin has no
+ * other effect, so it is the lookup reference (hold/rele) too. */
 static void procfs_pin_ops(fs_node_t *node) {
     node->open = &procfs_node_open;
     node->close = &procfs_node_close;
+    node->hold = &procfs_node_open;
+    node->rele = &procfs_node_close;
+}
+
+/* A lookup's result is returned held; static nodes have no hold op. */
+static fs_node_t *procfs_held(fs_node_t *n) {
+    if (n && n->hold) n->hold(n);
+    return n;
+}
+
+static void procfs_block_rele(procfs_pid_nodes_t *blk);
+
+/* Return node `n` of held block `blk` as a lookup's result: held itself,
+ * and the block's own reference dropped. */
+static fs_node_t *procfs_from_block(procfs_pid_nodes_t *blk, fs_node_t *n) {
+    procfs_held(n);
+    procfs_block_rele(blk);
+    return n;
+}
+
+/* Drop the block reference procfs_get_pid_nodes took; the last one frees a
+ * block whose process has been reaped. */
+static void procfs_block_rele(procfs_pid_nodes_t *blk) {
+    procfs_pid_nodes_t *dead = NULL;
+
+    if (!blk) return;
+    procfs_lock();
+    if (blk->refs > 0) blk->refs--;
+    if (blk->refs == 0) {
+        for (procfs_pid_nodes_t **pp = &procfs_dead_nodes; *pp;
+             pp = &(*pp)->next_dead) {
+            if (*pp == blk) {
+                *pp = blk->next_dead;
+                dead = blk;
+                break;
+            }
+        }
+    }
+    spinlock_release(&procfs_pid_nodes_lock);
+    if (dead) procfs_free_block(dead);
 }
 
 /* Entries of one kind a process keeps before reusing one nobody holds. */
@@ -786,7 +827,12 @@ static int procfs_block_live_locked(const procfs_pid_nodes_t *blk) {
     return 0;
 }
 
-
+/*
+ * The node block for `pid`, made on first use, returned held (refs): a
+ * process reaped meanwhile cannot free it under the caller, who drops it
+ * with procfs_block_rele -- after taking the reference of any node it
+ * returns from it (procfs_held).
+ */
 static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     procfs_pid_nodes_t **new_nodes;
     procfs_pid_nodes_t *nodes;
@@ -806,6 +852,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     for (size_t i = 0; i < procfs_pid_nodes_count; i++) {
         if (procfs_pid_nodes[i] && procfs_pid_nodes[i]->pid == pid) {
             procfs_pid_nodes_t *r = procfs_pid_nodes[i];
+            r->refs++;          /* held: see procfs_get_pid_nodes */
             spinlock_release(&procfs_pid_nodes_lock);
             return r;
         }
@@ -923,6 +970,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
             procfs_pin_ops(all[i]);
     }
 
+    nodes->refs = 1;            /* held: see procfs_get_pid_nodes */
     spinlock_release(&procfs_pid_nodes_lock);
     return nodes;
 }
@@ -1570,7 +1618,7 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
 
     if (strcmp(name, ".") == 0) {
         procfs_refresh_timestamps(node);
-        return node;
+        return procfs_held(node);
     }
     if (strcmp(name, "..") == 0) {
         procfs_refresh_timestamps(&procfs_root_node);
@@ -1580,47 +1628,22 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
     nodes = procfs_get_pid_nodes((int)node->inode);
     if (!nodes) return NULL;
 
-    if (strcmp(name, "status") == 0) {
-        nodes->status.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->status);
-        return &nodes->status;
+    fs_node_t *n = NULL;
+    if (strcmp(name, "status") == 0) n = &nodes->status;
+    else if (strcmp(name, "cmdline") == 0) n = &nodes->cmdline;
+    else if (strcmp(name, "stat") == 0) n = &nodes->stat;
+    else if (strcmp(name, "maps") == 0) n = &nodes->maps;
+    else if (strcmp(name, "exe") == 0) n = &nodes->exe;
+    else if (strcmp(name, "cwd") == 0) n = &nodes->cwd;
+    else if (strcmp(name, "fd") == 0) n = &nodes->fd_dir;
+    else if (strcmp(name, "task") == 0) n = &nodes->task_dir;
+    if (!n) {
+        procfs_block_rele(nodes);
+        return NULL;
     }
-    if (strcmp(name, "cmdline") == 0) {
-        nodes->cmdline.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->cmdline);
-        return &nodes->cmdline;
-    }
-    if (strcmp(name, "stat") == 0) {
-        nodes->stat.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->stat);
-        return &nodes->stat;
-    }
-    if (strcmp(name, "maps") == 0) {
-        nodes->maps.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->maps);
-        return &nodes->maps;
-    }
-    if (strcmp(name, "exe") == 0) {
-        nodes->exe.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->exe);
-        return &nodes->exe;
-    }
-    if (strcmp(name, "cwd") == 0) {
-        nodes->cwd.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->cwd);
-        return &nodes->cwd;
-    }
-    if (strcmp(name, "fd") == 0) {
-        nodes->fd_dir.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->fd_dir);
-        return &nodes->fd_dir;
-    }
-    if (strcmp(name, "task") == 0) {
-        nodes->task_dir.inode = node->inode;
-        procfs_refresh_timestamps(&nodes->task_dir);
-        return &nodes->task_dir;
-    }
-    return NULL;
+    n->inode = node->inode;
+    procfs_refresh_timestamps(n);
+    return procfs_from_block(nodes, n);
 }
 
 static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
@@ -1631,7 +1654,7 @@ static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
 
     if (strcmp(name, ".") == 0) {
         procfs_refresh_timestamps(node);
-        return node;
+        return procfs_held(node);
     }
     if (strcmp(name, "..") == 0) {
         nodes = procfs_get_pid_nodes((int)node->inode);
@@ -1640,7 +1663,7 @@ static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
         }
         nodes->dir.inode = node->inode;
         procfs_refresh_timestamps(&nodes->dir);
-        return &nodes->dir;
+        return procfs_from_block(nodes, &nodes->dir);
     }
 
     p = proc_find((int)node->inode);
@@ -1690,9 +1713,14 @@ static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
         link->readlink = &proc_pid_fd_readlink;
         procfs_pin_ops(link);
         procfs_refresh_timestamps(link);
+        /* The lookup's reference, taken before the lock goes: an entry
+         * nobody holds may be rewritten for another fd. */
+        d->refs++;
+        nodes->refs++;
     }
     spinlock_release(&procfs_pid_nodes_lock);
     if (spare) kfree(spare, sizeof(*spare));
+    procfs_block_rele(nodes);
     return link;
 }
 
@@ -1779,7 +1807,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
          * belongs to the covered directory -- devfs already does this.
          */
         if (node->mp && node->mp->mnt_node_covered) {
-            return node->mp->mnt_node_covered;
+            return procfs_held(node->mp->mnt_node_covered);
         }
         procfs_refresh_timestamps(node);
         return node;    /* not mounted anywhere — self is the only answer */
@@ -1816,7 +1844,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
             nodes->dir.inode = pid;
             snprintf(nodes->dir.name, sizeof(nodes->dir.name), "%d", pid);
             procfs_refresh_timestamps(&nodes->dir);
-            return &nodes->dir;
+            return procfs_from_block(nodes, &nodes->dir);
         }
     }
     return NULL;
@@ -1858,7 +1886,10 @@ static fs_node_t *procfs_tid_node(int pid, int tid, int which) {
     procfs_dyn_t *spare, *d = NULL;
     fs_node_t *n = NULL;
 
-    if (!p || !nodes) return NULL;
+    if (!p || !nodes) {
+        procfs_block_rele(nodes);
+        return NULL;
+    }
     spare = kmalloc(sizeof(*spare));
     if (spare) memset(spare, 0, sizeof(*spare));
     procfs_lock();
@@ -1886,9 +1917,13 @@ static fs_node_t *procfs_tid_node(int pid, int tid, int which) {
         n->impl = (uintptr_t)tid;
         procfs_pin_ops(n);
         procfs_refresh_timestamps(n);
+        /* The lookup's reference, under the lock (see proc_pid_fd_finddir). */
+        d->refs++;
+        nodes->refs++;
     }
     spinlock_release(&procfs_pid_nodes_lock);
     if (spare) kfree(spare, sizeof(*spare));
+    procfs_block_rele(nodes);
     return n;
 }
 
@@ -1986,13 +2021,13 @@ static fs_node_t *proc_pid_task_finddir(fs_node_t *node, char *name) {
 
     if (strcmp(name, ".") == 0) {
         procfs_refresh_timestamps(node);
-        return node;
+        return procfs_held(node);
     }
     if (strcmp(name, "..") == 0) {
         procfs_pid_nodes_t *nodes = procfs_get_pid_nodes(pid);
         if (!nodes) return NULL;
         procfs_refresh_timestamps(&nodes->dir);
-        return &nodes->dir;
+        return procfs_from_block(nodes, &nodes->dir);
     }
 
     /* Parse name as decimal TID. */
@@ -2024,13 +2059,13 @@ static struct dirent *proc_pid_task_tid_readdir(fs_node_t *node, uint64_t index)
 static fs_node_t *proc_pid_task_tid_finddir(fs_node_t *node, char *name) {
     if (strcmp(name, ".") == 0) {
         procfs_refresh_timestamps(node);
-        return node;
+        return procfs_held(node);
     }
     if (strcmp(name, "..") == 0) {
         procfs_pid_nodes_t *nodes = procfs_get_pid_nodes((int)node->inode);
         if (!nodes) return NULL;
         procfs_refresh_timestamps(&nodes->task_dir);
-        return &nodes->task_dir;
+        return procfs_from_block(nodes, &nodes->task_dir);
     }
 
     int which;
