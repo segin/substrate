@@ -304,6 +304,11 @@ kmemhole: kmemhole.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptyopost: with OPOST clear, pty slave output reaches the master unchanged.
+ptyopost: ptyopost.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pktrebind: an AF_PACKET reader asleep in recv survives a bind.  Substrate
 # only; run as root.
 pktrebind: pktrebind.c

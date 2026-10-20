@@ -315,23 +315,26 @@ static void tty_send_xchar(struct tty *tp, char c) {
 
 // Unix v6-style output processing
 static void tty_output_locked(char c, struct tty *tp) {
-    // Ignore EOT in normal mode
-    if (c == 004 && (tp->termios.c_lflag & ICANON)) return;
-    
-    // Turn tabs to spaces
-    if (c == '\t' && (tp->termios.c_oflag & OXTABS)) { // using OXTABS instead of XTABS
-        int spaces = 8 - (tp->output_col & 7);
-        if (spaces <= 0) {
-            spaces = 8;
+    /* POSIX: with OPOST clear, characters go out without change. */
+    if (tp->termios.c_oflag & OPOST) {
+        // Ignore EOT in normal mode
+        if (c == 004 && (tp->termios.c_lflag & ICANON)) return;
+
+        // Turn tabs to spaces
+        if (c == '\t' && (tp->termios.c_oflag & OXTABS)) { // using OXTABS instead of XTABS
+            int spaces = 8 - (tp->output_col & 7);
+            if (spaces <= 0) {
+                spaces = 8;
+            }
+            do {
+                tty_output_locked(' ', tp);
+            } while (--spaces > 0);
+            return;
         }
-        do {
-            tty_output_locked(' ', tp);
-        } while (--spaces > 0);
-        return;
-    }
-    
-    if (c == '\n' && (tp->termios.c_oflag & ONLCR)) {
-        tty_output_locked('\r', tp);
+
+        if (c == '\n' && (tp->termios.c_oflag & ONLCR)) {
+            tty_output_locked('\r', tp);
+        }
     }
     
     if (tty_buf_put(&tp->write_buf, c) == 0) {
