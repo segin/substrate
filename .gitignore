@@ -165,6 +165,10 @@ dist/
 /tests/sys/host_test_*
 !tests/sys/host_test_*.c
 !tests/sys/host_test_perso_netbsd_rusage.c
+/tests/sys/torture_*
+!tests/sys/torture_*.c
+/tests/sys/setuid_helper
+/tests/sys/setuid_preload.so
 
 # Keep source trees under usr.bin/tests tracked even with broad ignore rules.
 !usr.bin/

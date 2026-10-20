@@ -154,7 +154,7 @@ int main(void)
     printf("TTRPC: RESULT iters=%d missed_wakeups=%d select_errors=%d "
            "accept_fails=%d short_reads=%d\n",
            ITERS, missed_wakeups, fails, connect_fails, bad_replies);
-    printf("TTRPC: %s\n",
+    printf("Result: %s\n",
            (missed_wakeups == 0 && fails == 0 && connect_fails == 0 && bad_replies == 0)
              ? "PASS" : "FAIL");
     fflush(stdout);

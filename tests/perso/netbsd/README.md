@@ -106,6 +106,22 @@ set, since the programs that make the call cannot run otherwise.
     cc -o ldttest ldttest.c
     ./ldttest            # must be ALL ok — the reference
 
+## sockopttest
+
+Pins `setsockopt(2)` / `getsockopt(2)` at `SOL_SOCKET`.  A BSD binary passes
+`SOL_SOCKET` as 0xffff and the BSD `SO_*` numbers, which the native calls (Linux
+numbering) did not recognise, so every option it set was lost.  Checks
+`SO_TYPE`, a `SO_RCVTIMEO` that reads back and really times a `recv()` out
+with `EAGAIN` after about 250 ms, and `SO_REUSEADDR`.  NetBSD renumbers
+`SO_SNDTIMEO`/`SO_RCVTIMEO` (0x100b/0x100c) and uses a 12-byte `struct
+timeval` on i386; FreeBSD keeps 0x1005/0x1006 and 8 bytes, so run it under
+both personalities, each built on its own host:
+
+    cc -static -O2 -o sockopttest sockopttest.c
+    ./sockopttest        # "Result: PASSED" -- the reference
+
+It runs as init on substrate (it parks in `pause()` after its Result line).
+
 ### Build + run
 
 On a NetBSD 10.1/i386 host:

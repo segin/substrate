@@ -626,8 +626,43 @@ property_cmdline: property_cmdline.c
 tests.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
+# Guest torture tests: ordinary user programs, cross-built for Substrate and
+# run as init in QEMU, each printing a "Result:" line.  Not part of `all`,
+# which is host-only; build them with `make torture`.  run-torture.sh boots
+# one; README.md lists the ones that need a disk, NIC, sound card or USB
+# keyboard besides the root disk, and torture_halt has run-torture-halt.sh.
+TORTURE_CROSS ?= /opt/substrate/bin/i386-unknown-substrate-
+TORTURE_CC     = $(TORTURE_CROSS)gcc
+TORTURE_CFLAGS = -Wall -Wextra -Werror -O2 -g -march=i486
+
+TORTURE  = torture_afunix_dgram torture_afunix_grow
+TORTURE += torture_audio_formats torture_audio_nonblock
+TORTURE += torture_audio_share torture_audio_stream
+TORTURE += torture_devfs_sysfs torture_devnull_poll torture_dirperm
+TORTURE += torture_ephemeral_race torture_ext2_htree
+TORTURE += torture_fat_nodecache torture_fat_persist torture_fsync
+TORTURE += torture_halt torture_lseek_espipe torture_minix torture_netsec
+TORTURE += torture_path_errno torture_pipe_fifo torture_procfs
+TORTURE += torture_readdir torture_sethostname torture_setuid
+TORTURE += torture_sock_close_race torture_sockconf torture_srcaddr
+TORTURE += torture_ttrpc torture_udp torture_usbkbd
+TORTURE += setuid_helper setuid_preload.so
+
+torture: $(TORTURE)
+
+torture_%: torture_%.c
+	$(TORTURE_CC) $(TORTURE_CFLAGS) $< -o $@ -lpthread -lm
+
+setuid_helper: setuid_helper.c
+	$(TORTURE_CC) $(TORTURE_CFLAGS) $< -o $@
+
+setuid_preload.so: setuid_preload.c
+	$(TORTURE_CC) $(TORTURE_CFLAGS) -fPIC -shared $< -o $@
+
 clean:
-	rm -f *.o $(HOST_TESTS)
+	rm -f *.o $(HOST_TESTS) $(TORTURE)
+
+.PHONY: torture
 
 host_test_udf_read_file: host_test_udf_read_file.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_read_file.c -o $@

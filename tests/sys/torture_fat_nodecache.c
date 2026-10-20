@@ -13,14 +13,22 @@
  * lookups than the cache has slots, then read it and check the bytes are
  * still the file's own.
  *
- * Expects a FAT filesystem mounted at /mnt containing secret.txt plus enough
- * other files to cycle the cache.  Run as init after mounting.
+ * Expects a FAT volume on /dev/storage/sata0 (an AHCI disk) holding
+ * secret.txt plus enough other files to cycle the cache, for instance:
+ *
+ *     mkfs.fat -C fat.img 16384
+ *     printf 'SECRET-CONTENT-DO-NOT-RECYCLE\n' > secret.txt
+ *     mcopy -i fat.img secret.txt ::
+ *     for i in $(seq 1 100); do echo $i > f$i.txt; mcopy -i fat.img f$i.txt ::; done
+ *
+ * Run as init: it mounts the volume on /mnt unless something already has.
  */
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -37,6 +45,10 @@ static void ok(const char *what, int cond, const char *why)
     }
 }
 
+#define DEV     "/dev/storage/sata0"
+#ifndef FSTYPE
+#define FSTYPE  "fat"           /* -DFSTYPE='"exfat"' for an exFAT volume */
+#endif
 #define MNT     "/mnt"
 #define SECRET  MNT "/secret.txt"
 static const char EXPECT[] = "SECRET-CONTENT-DO-NOT-RECYCLE\n";
@@ -44,6 +56,14 @@ static const char EXPECT[] = "SECRET-CONTENT-DO-NOT-RECYCLE\n";
 int main(void)
 {
     printf("torture_fat_nodecache: FAT node cache recycling (#413)\n\n");
+
+    /* Run as init nothing has mounted the volume yet: do it here. */
+    if (access(SECRET, F_OK) != 0) {
+        mkdir(MNT, 0755);
+        if (mount(DEV, MNT, FSTYPE, 0, NULL) != 0)
+            printf("  note: mount %s on %s as %s: errno=%d\n",
+                   DEV, MNT, FSTYPE, errno);
+    }
 
     /* Baseline: the file reads correctly with nothing else going on. */
     int fd = open(SECRET, O_RDONLY);

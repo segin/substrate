@@ -46,13 +46,14 @@ int main(void)
         fflush(stdout);
 
         if (total >= 5) {
-            printf("torture_usbkbd: got %lu byte(s) -- PASSED\n", total);
+            printf("torture_usbkbd: got %lu byte(s)\nResult: PASSED\n", total);
             fflush(stdout);
             return 0;
         }
     }
 
-    printf("torture_usbkbd: got %lu byte(s) -- FAILED (no keystrokes)\n", total);
+    printf("torture_usbkbd: got %lu byte(s), no keystrokes\nResult: FAILED\n",
+           total);
     fflush(stdout);
     return 1;
 }

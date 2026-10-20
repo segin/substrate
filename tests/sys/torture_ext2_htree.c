@@ -19,15 +19,28 @@
  *    ext2_finddir treated an htree miss as authoritative, so the file you
  *    just created was invisible (ENOENT).
  *
+ * The first fix refused every change to an indexed directory; the driver
+ * now maintains the index on write instead.
+ *
  * What this checks:
- *   1. an htree directory can be listed and its entries opened (the linear
- *      fallback works),
- *   2. creating in one fails cleanly instead of silently corrupting it.
+ *   1. an htree directory can be listed and its entries opened,
+ *   2. a file created in one succeeds and resolves straight away (through
+ *      the index, which the insert must have updated).
  *
  * The load-bearing half is NOT here: it is running host e2fsck over the
  * image afterwards and finding the directory still intact.
+ * host_test_ext2_htree drives the same driver code much harder on the
+ * host; this is the end-to-end check through the system calls.
  *
- * Expects the htree volume on /dev/storage/sata0.  Run as init.
+ * Expects the htree volume on /dev/storage/sata0 (an AHCI disk), made with:
+ *
+ *     mkdir -p seed/big
+ *     for i in $(seq 0 2999); do echo x > seed/big/file_$i.txt; done
+ *     echo hello-from-htree > seed/big/MARKER.txt
+ *     mke2fs -t ext2 -b 1024 -O dir_index -d seed htree.img 64M
+ *     e2fsck -fD -y htree.img          # builds the index on /big
+ *
+ * Run as init, then `e2fsck -fn htree.img`.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -57,7 +70,7 @@ static void ok(const char *what, int cond, const char *why)
 
 int main(void)
 {
-    printf("torture_ext2_htree: indexed-directory read + write refusal (#410)\n\n");
+    printf("torture_ext2_htree: indexed-directory read + write (#410)\n\n");
 
     if (mkdir(MNT, 0755) != 0 && errno != EEXIST) {
         printf("  FAIL  mkdir %s: errno=%d\n", MNT, errno);
@@ -110,16 +123,18 @@ int main(void)
        "a name beyond the first leaf did not resolve");
     if (fd >= 0) close(fd);
 
-    /* 3. Creating in an indexed directory must FAIL rather than corrupt it. */
-    errno = 0;
+    /* 3. Creating in an indexed directory must work, and the new name must
+     *    be found again.  e2fsck afterwards says whether the index (and the
+     *    htree root in particular) survived the insert. */
     fd = open(BIG "/NEWFILE.txt", O_RDWR | O_CREAT | O_EXCL, 0644);
-    ok("create in an indexed directory is refused", fd < 0,
-       "the create SUCCEEDED -- the htree root has probably been overwritten");
+    ok("create in an indexed directory", fd >= 0, "the create failed");
     if (fd >= 0) {
+        ok("and write to it", write(fd, "new", 3) == 3, "write failed");
         close(fd);
-    } else {
-        ok("and it fails with EOPNOTSUPP", errno == EOPNOTSUPP,
-           "refused, but with an unexpected errno");
+        fd = open(BIG "/NEWFILE.txt", O_RDONLY);
+        ok("the new name resolves", fd >= 0,
+           "created, but the lookup misses -- the index was not updated");
+        if (fd >= 0) close(fd);
     }
 
     sync();

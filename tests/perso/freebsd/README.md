@@ -55,3 +55,11 @@ linked a file of the right length and all zeros: `ld.lld` writes its
 output through a shared mapping and nothing else, and what was stored
 through one was not written to the file when it was unmapped
 (`tests/kern/mmapshared.c`).
+
+## sockopttest
+
+BSD `SOL_SOCKET` option numbering under both BSD personalities; the
+source and its description live in `tests/perso/netbsd/` (`sockopttest`).
+Build it on a FreeBSD host as well and run that binary under the FreeBSD
+personality: FreeBSD's `SO_RCVTIMEO` number and `struct timeval` size
+differ from NetBSD's.

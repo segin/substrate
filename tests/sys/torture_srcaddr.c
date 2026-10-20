@@ -61,6 +61,15 @@ static void sin_set(struct sockaddr_in *sa, const char *ip, unsigned short port)
     sa->sin_addr.s_addr = inet_addr(ip);
 }
 
+/* Loopback delivers from the lo kthread, asynchronously to the sender, so a
+ * bare MSG_DONTWAIT right after a send can race the delivery and report a
+ * datagram as missing.  Wait (briefly) for it to arrive first. */
+static void wait_readable(int fd)
+{
+    struct pollfd pfd = { fd, POLLIN, 0 };
+    poll(&pfd, 1, 300);
+}
+
 static void test_udp_bound(void)
 {
     printf("a bound UDP socket sends from its bound address\n");
@@ -78,6 +87,7 @@ static void test_udp_bound(void)
     ssize_t n = sendto(tx, "hello", 5, 0, (struct sockaddr *)&a, sizeof(a));
     ok("sendto accepted", n == 5, "sendto failed");
     memset(&from, 0, sizeof(from));
+    wait_readable(rx);
     n = recvfrom(rx, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &flen);
     ok("datagram arrived with a valid checksum", n == 5, "datagram dropped");
     ok("receiver sees the bound source address",
@@ -206,6 +216,7 @@ static void test_self(void)
     sin_set(&a, NIC_ADDR, 31985);
     ssize_t n = sendto(tx, "self", 4, 0, (struct sockaddr *)&a, sizeof(a));
     ok("UDP sendto(own NIC address) succeeds", n == 4, "send failed");
+    wait_readable(rx);
     n = recvfrom(rx, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &flen);
     ok("and is delivered locally", n == 4, "datagram lost");
     ok("from our NIC address, not 127.0.0.1",

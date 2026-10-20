@@ -1,6 +1,6 @@
 /*
- * torture_bsdsockopt.c -- socket options set by a BSD binary under
- * Substrate's BSD personalities.
+ * sockopttest.c -- socket options set by a BSD binary under
+ * Substrate's BSD personalities (NetBSD and FreeBSD alike).
  *
  * sys_setsockopt()/sys_getsockopt() use Linux numbering; a BSD binary passes
  * SOL_SOCKET 0xffff and BSD SO_* values, so every option it set was lost.
@@ -8,7 +8,7 @@
  * (it must pass there first -- that host is the oracle), then run the
  * static binary as init on Substrate:
  *
- *     cc -static -O2 -o torture_bsdsockopt torture_bsdsockopt.c
+ *     cc -static -O2 -o sockopttest sockopttest.c
  *
  * NetBSD renumbers SO_SNDTIMEO/SO_RCVTIMEO (0x100b/0x100c) and uses a
  * 12-byte struct timeval on i386; FreeBSD keeps 0x1005/0x1006 and 8 bytes.
@@ -25,7 +25,7 @@
 static int fails;
 static void ok(const char *w, int c) { printf("  %s %s\n", c ? "ok  " : "FAIL", w); if (!c) fails++; }
 int main(void) {
-    printf("torture_bsdsockopt\n");
+    printf("sockopttest\n");
     int one = 1, t = 0;
     socklen_t l = sizeof t;
     int s = socket(AF_INET, SOCK_DGRAM, 0);

@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -46,6 +47,15 @@ static void lo_addr(struct sockaddr_in *sin, unsigned short port)
     sin->sin_addr.s_addr = htonl(0x7F000001);
 }
 
+/* Loopback delivers from the lo kthread, asynchronously to the sender, so a
+ * bare MSG_DONTWAIT right after a send can race the delivery and report a
+ * datagram as missing.  Wait (briefly) for it to arrive first. */
+static void wait_readable(int fd)
+{
+    struct pollfd pfd = { fd, POLLIN, 0 };
+    poll(&pfd, 1, 300);
+}
+
 static int bind_udp(unsigned short port)
 {
     struct sockaddr_in sin;
@@ -70,6 +80,7 @@ static void test_peek_and_trunc_udp(void)
 
     lo_addr(&dst, 33001);
     sendto(tx, msg, sizeof(msg), 0, (struct sockaddr *)&dst, sizeof(dst));
+    wait_readable(rx);
 
     memset(buf, 0, sizeof(buf));
     ssize_t p1 = recv(rx, buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT);
@@ -383,6 +394,7 @@ static void test_large_datagram(void)
         ok("oversized send is refused rather than silently cut",
            errno == EMSGSIZE, "unexpected send error");
     } else {
+        wait_readable(rx);
         ssize_t r = recv(rx, in, sizeof(in), MSG_DONTWAIT);
         ok("the whole datagram came back",
            r == (ssize_t)sizeof(out) && memcmp(in, out, sizeof(out)) == 0,

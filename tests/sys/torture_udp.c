@@ -1267,7 +1267,13 @@ static void test_rcvbuf_bytes(void)
     lo_addr(&dst, 31947);
     for (int i = 0; i < 10; i++)
         sendto(tx, big, sizeof(big), 0, (struct sockaddr *)&dst, sizeof(dst));
-    ok("and admits exactly three 1000-byte datagrams", drain_count(rx) == 3,
+    /* Let the lo kthread deliver (or drop) all ten first: draining while
+     * it is still delivering frees room, and later datagrams get in. */
+    usleep(200000);
+    int admitted = drain_count(rx);
+    if (admitted != 3)
+        printf("        admitted %d\n", admitted);
+    ok("and admits exactly three 1000-byte datagrams", admitted == 3,
        "not byte-bounded");
 
     /* Growing keeps what is queued, in order. */
