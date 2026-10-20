@@ -313,11 +313,11 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/vfs/vfs.c:909` (`finddir_fs_internal`) and `:1076` (`vfs_perso_component`) resolve `link_target[0] == '/'` against global `fs_root` instead of `current_process->root_node`. `vfs_perso_shadow` (`sys/vfs/vfs.c:957-976`) resolves `/perso/<name>/...` against `fs_root` even when chrooted. In `sys/vfs/vfs_lookup.c:274` (`namei`), `target` and remaining path `p` (after `while (*p == '/') p++;` at `:143`) are concatenated without a `'/'` separator.
   Basis: traced.
 
-- [ ] **SYS-VFS-004** *(High → Medium; partly confirmed)* When checking access permissions on a bridged vnode in `fsnode_vop_access`, the vnode-to-`fs_node` bridge shall pass the caller's credentials rather than hardcoded `uid = 0, gid = 0`.
+- [x] **SYS-VFS-004** *(High → Medium; partly confirmed)* When checking access permissions on a bridged vnode in `fsnode_vop_access`, the vnode-to-`fs_node` bridge shall pass the caller's credentials rather than hardcoded `uid = 0, gid = 0`.
   Evidence: `sys/vfs/vnode_fsnode.c:194-208` (`fsnode_vop_access`) casts `ap->a_cred` to `(void)cred;` and calls `vfs_check_permissions(n, 0, 0, mode)`, granting superuser access on all bridged vnode permission checks.
   Basis: traced.
 
-- [ ] **SYS-VFS-005** *(High → Low; partly confirmed)* When looking up a directory entry on a bridged vnode in `fsnode_vop_lookup`, the vnode-to-`fs_node` bridge shall call `finddir_lstat_fs` rather than `finddir_fs` so `namei` controls symlink traversal and honors `NOFOLLOW`.
+- [x] **SYS-VFS-005** *(High → Low; partly confirmed)* When looking up a directory entry on a bridged vnode in `fsnode_vop_lookup`, the vnode-to-`fs_node` bridge shall call `finddir_lstat_fs` rather than `finddir_fs` so `namei` controls symlink traversal and honors `NOFOLLOW`.
   Evidence: `sys/vfs/vnode_fsnode.c:131-132` calls `finddir_fs(dn, name)` under the inaccurate comment `/* finddir_fs() does not follow symlinks */` (`finddir_fs` in `sys/vfs/vfs.c:819` passes `follow_symlinks = 1`).
   Basis: traced.
 

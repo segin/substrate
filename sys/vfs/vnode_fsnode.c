@@ -55,6 +55,9 @@
 #include <kern/console.h>
 #include <sys/errno.h>
 #include <sys/namei.h>
+#include <sys/proc.h>
+#include <sys/ucred.h>
+#include <sys/uio.h>
 #include <vfs/vfs.h>
 #include <vfs/vnode.h>
 #include <vm/vm_kmem.h>
@@ -126,10 +129,11 @@ int fsnode_vget(struct mount *mp, fs_node_t *n, struct vnode **vpp)
 /*
  * vop_lookup — resolve one path component.
  *
- * namei() has already split the path, so this is a single-component lookup,
- * which is exactly what finddir_fs() does.  Symlink following and ".."
- * handling stay in namei(); using finddir_fs() (which follows) rather than
- * the non-following variant would resolve links twice.
+ * namei() has already split the path, so this is a single-component lookup.
+ * Symlink following and ".." handling stay in namei(): the lookup must not
+ * follow a link itself (finddir_lstat_fs), or namei() could never stop at
+ * one for NOFOLLOW, and would follow it twice otherwise.  Mount points are
+ * still crossed, as finddir_fs does.
  */
 static int fsnode_vop_lookup(struct vnode *dvp, struct vnode **vpp,
                              struct componentname *cnp)
@@ -151,7 +155,7 @@ static int fsnode_vop_lookup(struct vnode *dvp, struct vnode **vpp,
     memcpy(name, cnp->cn_nameptr, cnp->cn_namelen);
     name[cnp->cn_namelen] = '\0';
 
-    child = finddir_fs(dir, name);
+    child = finddir_lstat_fs(dir, name);
     if (!child)
         return -ENOENT;
 
@@ -198,33 +202,70 @@ static int fsnode_vop_getattr(struct vnode *vp, struct vattr *vap,
 static int fsnode_vop_access(struct vnode *vp, int mode, struct ucred *cred)
 {
     fs_node_t *n;
+    int denied;
 
-    (void)cred;
     if (!vp)
         return -EINVAL;
     n = VTOFSNODE(vp);
     if (!n)
         return -EINVAL;
 
-    if (vfs_check_permissions(n, 0, 0, mode) != 0)
-        return -EACCES;
-    return 0;
+    /* Whose access: the credentials passed, else the calling process's;
+     * only a kernel context with neither is checked as root. */
+    if (cred) {
+        uint32_t groups[16];
+        int ng = cred->cr_ngroups;
+
+        if (ng < 0) ng = 0;
+        if (ng > 16) ng = 16;
+        for (int i = 0; i < ng; i++)
+            groups[i] = cred->cr_groups[i];
+        denied = vfs_check_permissions_groups(n, cred->cr_uid, cred->cr_gid,
+                                              groups, ng, mode);
+    } else if (current_process) {
+        denied = vfs_check_permissions_groups(n, current_process->euid,
+                                              current_process->egid,
+                                              current_process->supp_groups,
+                                              current_process->n_supp_groups,
+                                              mode);
+    } else {
+        denied = vfs_check_permissions(n, 0, 0, mode);
+    }
+    return denied ? -EACCES : 0;
 }
 
+/* vop_readlink — the link's target, through readlink_fs, into uio.  namei()
+ * follows links itself (lookup does not), so it reads them here. */
 static int fsnode_vop_readlink(struct vnode *vp, struct uio *uio,
                                struct ucred *cred)
 {
-    (void)uio; (void)cred;
-    if (!vp)
+    fs_node_t *n;
+    char *buf;
+    int len;
+
+    (void)cred;
+    if (!vp || !uio)
         return -EINVAL;
     if (vp->v_type != VLNK)
         return -EINVAL;
-    /*
-     * namei() reads link targets through its own path, and no caller drives
-     * uio yet.  Report honestly rather than silently returning an empty
-     * target, which would look like a link to "".
-     */
-    return -EOPNOTSUPP;
+    n = VTOFSNODE(vp);
+    if (!n)
+        return -EINVAL;
+
+    buf = kmalloc(1024);
+    if (!buf)
+        return -ENOMEM;
+    len = readlink_fs(n, buf, 1024);
+    if (len < 0) {
+        kfree(buf, 1024);
+        return len;
+    }
+    size_t want = (size_t)len;
+    if (want > uio->uio_resid)
+        want = uio->uio_resid;
+    int error = uiomove(buf, want, uio);
+    kfree(buf, 1024);
+    return error ? -error : 0;
 }
 
 /*

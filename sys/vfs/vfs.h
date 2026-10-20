@@ -234,6 +234,7 @@ void close_fs(fs_node_t *node);
 struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out);
 void vfs_readdir_init(void);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);    /* held: vfs_rele */
+fs_node_t *finddir_lstat_fs(fs_node_t *node, char *name); /* no link follow; held */
 int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
 int poll_fs(fs_node_t *node, void *waiter);

@@ -910,6 +910,11 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return finddir_fs_internal(node, name, 0, 1);
 }
 
+/* As finddir_fs, but a symlink is returned itself, not followed. */
+fs_node_t *finddir_lstat_fs(fs_node_t *node, char *name) {
+    return finddir_fs_internal(node, name, 0, 0);
+}
+
 /*
  * Maximum symlink recursion depth.
  *
