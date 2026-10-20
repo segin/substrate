@@ -125,13 +125,21 @@ static int vm_grow_user_stack(uintptr_t cr2) {
 
     void *pa = pmm_alloc_block();
     if (!pa) return 0;                      /* genuine OOM */
+    /* Zero before mapping: once the PTE is in, another thread of the
+     * process can read whatever the page held before. */
+    memset(pa, 0, 0x1000);
     uint32_t pa_phys = (uint32_t)V2P(pa);
     uintptr_t va = cr2 & ~PAGE_MASK;
+    /* Another thread may have grown the stack onto this page while we
+     * allocated; keep its page (and what it wrote there). */
+    if (pmap_extract((pmap_t)p->pmap, va) != 0) {
+        pmm_free_block(pa);
+        return 1;
+    }
     if (pmap_enter((pmap_t)p->pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
         pmm_free_block(pa);
         return 0;
     }
-    memset(pa, 0, 0x1000);
     return 1;
 #endif
 }

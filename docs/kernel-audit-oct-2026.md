@@ -130,7 +130,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/vm/vm_syscalls.c:540-707` (`sys_brk_locked`) maps pages directly into `current_process->pmap` without inserting or updating a `vm_map_entry` in `current_process->vm_map`, allowing `brk` expansion and `vm_map_find_space` (`mmap`) to overlap. On shrink, `brk_unmap_free_pages` (`sys/vm/vm_syscalls.c:79-99`) calls both `pmap_remove(pmap, va)` and `pmm_free_block(P2V(pa & ~0xFFFU))`, dropping two references on `pa` even when `pa` is COW-shared with a forked child.
   Basis: traced.
 
-- [ ] **SYS-VM-007** *(High → Low; partly confirmed)* When demand-growing the user stack in `vm_grow_user_stack`, the kernel shall zero the newly allocated page before inserting it into the process `pmap`.
+- [x] **SYS-VM-007** *(High → Low; partly confirmed)* When demand-growing the user stack in `vm_grow_user_stack`, the kernel shall zero the newly allocated page before inserting it into the process `pmap`.
   Evidence: `sys/arch/x86-common/trap.c:130-134` calls `pmap_enter(p->pmap, va, pa_phys, VM_PROT_WRITE, 0)` at line 130 and `memset(pa, 0, 0x1000)` at line 134, leaving uninitialized physical memory mapped and writable to concurrent threads in `p` during the window between `pmap_enter` and `memset`.
   Basis: traced.
 
