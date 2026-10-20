@@ -502,7 +502,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/console/tty.c:1369-1400` sets `int kernel_arg = ((uintptr_t)arg >= KERN_BASE);` and uses `memcpy` when true, while `freebsd_sys_ioctl` (`sys/exec/perso/compat.c`) passes user `arg` directly to `kern_ioctl` without checking `arg < KERN_BASE`.
   Basis: traced.
 
-- [ ] **SYS-DRV-004** *(High → Medium; partly confirmed)* When recording an input event in `input_report_event` and reading events in `input_read` (`sys/drivers/input/input_subsys.c`), the input subsystem shall obtain timestamps via `kern_gettimeofday` rather than `sys_gettimeofday` and shall not copy directly to user space while holding an IRQ-disabled spinlock.
+- [x] **SYS-DRV-004** *(High → Medium; partly confirmed)* When recording an input event in `input_report_event` and reading events in `input_read` (`sys/drivers/input/input_subsys.c`), the input subsystem shall obtain timestamps via `kern_gettimeofday` rather than `sys_gettimeofday` and shall not copy directly to user space while holding an IRQ-disabled spinlock.
   Evidence: `sys/drivers/input/input_subsys.c:170-176` calls `sys_gettimeofday(&tv, NULL)` with a kernel stack pointer `&tv` (which fails `copyout` with `-EFAULT`, leaving `tv` uninitialized and leaking 8 bytes of kernel stack per event), and `input_read` (`:451-479`) copies to user `buffer` while holding `input_lock` with interrupts disabled.
   Basis: traced.
 

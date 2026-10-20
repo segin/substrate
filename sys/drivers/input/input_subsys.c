@@ -10,6 +10,7 @@
 #include <sys/errno.h>
 #include <sys/file.h>
 #include <sys/input.h>
+#include <sys/kern_syscalls.h>
 #include <sys/lock.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
@@ -167,8 +168,11 @@ void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t 
         return;
     }
 
+    /* kern_: sys_gettimeofday takes a user pointer, failed its copyout to
+     * this stack one, and left tv -- and so every event's time -- as
+     * whatever the stack held. */
     struct timeval tv;
-    sys_gettimeofday(&tv, NULL);
+    kern_gettimeofday(&tv, NULL);
 
     uint32_t __if = input_lock_take();
     uint64_t idx = global_seq % INPUT_QUEUE_SIZE;
@@ -448,35 +452,51 @@ static size_t input_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
     int read_count = 0;
     uint8_t *out = buffer;
 
-    uint32_t __rif = input_lock_take();
-    /* Same snap inside the lock — a fast producer could have wrapped
-     * the ring between the wait loop and here. */
-    if (global_seq > current_seq + INPUT_QUEUE_SIZE) {
-        current_seq = (global_seq > INPUT_QUEUE_SIZE)
-                          ? (global_seq - INPUT_QUEUE_SIZE)
-                          : 0;
-    }
-    while (current_seq < global_seq && size >= rec) {
-        uint64_t idx = current_seq % INPUT_QUEUE_SIZE;
-        const struct input_event32 *ev = &global_event_log[idx];
-        if (rec == sizeof(*ev)) {
-            memcpy(out, ev, rec);
-        } else {
-            /* A native 64-bit reader: the same event with 64-bit times. */
-            struct amd64_input_event wide;
-            wide.time_sec = ev->time_sec;
-            wide.time_usec = ev->time_usec;
-            wide.type = ev->type;
-            wide.code = ev->code;
-            wide.value = ev->value;
-            memcpy(out, &wide, rec);
+    /*
+     * Events are taken from the ring a batch at a time under input_lock,
+     * which holds interrupts off, and copied to `buffer` after it is
+     * released: some personalities' reads hand a user pointer straight
+     * through, and a fault on it must not be taken with the lock held.
+     */
+    enum { BATCH = 16 };
+    struct input_event32 batch[BATCH];
+    while (size >= rec) {
+        int n = 0;
+        uint32_t __rif = input_lock_take();
+        /* Same snap inside the lock — a fast producer could have wrapped
+         * the ring between the wait loop and here. */
+        if (global_seq > current_seq + INPUT_QUEUE_SIZE) {
+            current_seq = (global_seq > INPUT_QUEUE_SIZE)
+                              ? (global_seq - INPUT_QUEUE_SIZE)
+                              : 0;
         }
-        out += rec;
-        read_count++;
-        current_seq++;
-        size -= rec;
+        while (n < BATCH && current_seq < global_seq && size >= (size_t)(n + 1) * rec) {
+            batch[n++] = global_event_log[current_seq % INPUT_QUEUE_SIZE];
+            current_seq++;
+        }
+        input_lock_give(__rif);
+        if (n == 0)
+            break;
+
+        for (int i = 0; i < n; i++) {
+            const struct input_event32 *ev = &batch[i];
+            if (rec == sizeof(*ev)) {
+                memcpy(out, ev, rec);
+            } else {
+                /* A native 64-bit reader: the same event with 64-bit times. */
+                struct amd64_input_event wide;
+                wide.time_sec = ev->time_sec;
+                wide.time_usec = ev->time_usec;
+                wide.type = ev->type;
+                wide.code = ev->code;
+                wide.value = ev->value;
+                memcpy(out, &wide, rec);
+            }
+            out += rec;
+            size -= rec;
+        }
+        read_count += n;
     }
-    input_lock_give(__rif);
 
     return read_count * rec;
 }
