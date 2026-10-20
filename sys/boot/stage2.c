@@ -19,11 +19,23 @@ static char cmdline_buf[256];
 extern uint8_t __bss_start[];
 extern uint8_t __bss_end[];
 
-/* Simple heap (bump allocator starting at 0x100000 - 256KB .. we use 64KB) */
-static uint32_t heap_ptr = 0x00060000;  /* above stage2, below stack */
+/* Simple bump heap from 0x60000, above stage2.  stage1 puts the stack at
+ * 0x90000, growing down; the heap stops 64 KiB short of it. */
+#define HEAP_START 0x00060000
+#define HEAP_LIMIT 0x00080000
+static uint32_t heap_ptr = HEAP_START;
+
+static void puts(const char *s);
 
 static void *salloc(uint32_t size)
 {
+	/* A directory's size comes off the disk: an absurd one stops here
+	 * rather than running the heap into the stack. */
+	if (size > HEAP_LIMIT - heap_ptr) {
+		puts("stage2: out of memory\n");
+		for (;;)
+			__asm__ volatile ("cli; hlt");
+	}
 	void *p = (void *)heap_ptr;
 	heap_ptr = (heap_ptr + size + 3) & ~3;  /* 4-byte align */
 	return p;
@@ -459,7 +471,8 @@ static struct ext2_inode *ext2_read_inode(uint32_t ino)
 	uint32_t blk = bgd[bg].bg_inode_table + (idx * INODE_SIZE) / BLOCK_SIZE;
 	uint32_t off = (idx * INODE_SIZE) % BLOCK_SIZE;
 
-	uint8_t *buf = salloc(BLOCK_SIZE);
+	/* The block is only read through: one buffer serves every call. */
+	static uint8_t buf[BLOCK_SIZE];
 	read_block(buf, blk);
 	struct ext2_inode *inode = salloc(sizeof(struct ext2_inode));
 	__builtin_memcpy(inode, buf + off, sizeof(struct ext2_inode));

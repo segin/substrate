@@ -180,7 +180,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/arch/i386/ldt.c:389` (`ldt_clone_process`) calls `kfree(new_ldt, bytes)` instead of `ldt_free_storage(new_ldt, src_entry_count, new_is_uma)` when `src_entry_count == 8192` (`new_is_uma == 1`, allocated from `ldt_full_zone`). `ldt_activate` (`sys/arch/i386/ldt.c:302-310`) returns after `ldt_load_selector(0)` when `proc->ldt == NULL`, leaving the previous process's 16-byte LDT descriptor marked `GDT_PRESENT` in the x86_64 GDT.
   Basis: traced.
 
-- [ ] **SYS-ARCH-007** *(Medium → Low; partly confirmed)* While allocating memory in the stage-2 BIOS bootloader (`sys/boot/stage2.c`), `salloc` shall verify that the bump pointer does not collide with the bootloader stack, and `ext2_read_inode` shall reuse a static block buffer.
+- [x] **SYS-ARCH-007** *(Medium → Low; partly confirmed)* While allocating memory in the stage-2 BIOS bootloader (`sys/boot/stage2.c`), `salloc` shall verify that the bump pointer does not collide with the bootloader stack, and `ext2_read_inode` shall reuse a static block buffer.
   Evidence: `sys/boot/stage2.c:25-30` advances `alloc_ptr` from `0x60000` with no upper-bound check against the stack at `0x90000`, and `ext2_read_inode` (`:551-596`) allocates a fresh 1 KiB buffer via `salloc(block_size)` on every inode read.
   Basis: traced.
 
