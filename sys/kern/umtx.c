@@ -117,16 +117,15 @@ static int umtx_read_timeout(const void *utime, uint64_t *deadline_ticks) {
     /* FreeBSD i386's timespec: 32-bit time_t, 8 bytes. */
     struct freebsd_timespec ts;
     if (copyin(utime, &ts, sizeof(ts)) != 0) return -EFAULT;
-    if (ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000) return -EINVAL;
+    if (ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000 || ts.tv_sec < 0)
+        return -EINVAL;
     if (ts.tv_sec == 0 && ts.tv_nsec == 0) {
         /* zero timeout: caller wants a poll; encode as an already-past
          * deadline so the wait returns ETIMEDOUT immediately. */
         *deadline_ticks = get_ticks();
         return 0;
     }
-    uint64_t hz = get_hz();
-    uint64_t ticks = (uint64_t)ts.tv_sec * hz +
-                     ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
+    uint64_t ticks = timespan_ticks((uint64_t)ts.tv_sec, ts.tv_nsec);
     if (ticks == 0) ticks = 1;
     *deadline_ticks = get_ticks() + ticks;
     return 0;

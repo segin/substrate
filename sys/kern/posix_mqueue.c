@@ -300,18 +300,12 @@ static uint64_t mq_abs_to_deadline(const struct timespec *abstime, int *expired)
     struct timespec now;
     kern_clock_gettime(CLOCK_REALTIME, &now);
 
-    int64_t dsec  = (int64_t)abstime->tv_sec - (int64_t)now.tv_sec;
-    int64_t dnsec = (int64_t)abstime->tv_nsec - (int64_t)now.tv_nsec;
-    int64_t total_ns = dsec * 1000000000LL + dnsec;
-    if (total_ns <= 0) {
+    uint64_t ticks = abstime_ticks(abstime->tv_sec, abstime->tv_nsec,
+                                   now.tv_sec, now.tv_nsec);
+    if (ticks == 0) {
         *expired = 1;
         return get_ticks();       /* already due */
     }
-
-    uint32_t hz = get_hz();
-    uint64_t ticks = (uint64_t)((total_ns * (int64_t)hz + 999999999LL) / 1000000000LL);
-    if (ticks == 0)
-        ticks = 1;
     return get_ticks() + ticks;
 }
 

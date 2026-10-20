@@ -251,7 +251,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/kern/futex.c:889-896` (`pi_spinlock`) spins with `__sync_lock_test_and_set` without calling `preempt_disable()`, and `pi_waiter_alloc` (`:926`) and `pi_get_or_create` (`:957`) call `kmalloc` while holding `pi_lock`.
   Basis: traced.
 
-- [ ] **SYS-KERN-017** *(Medium → Low; confirmed)* When converting `struct timespec` timeouts in `posix_mqueue.c`, `posix_sem.c`, `futex.c`, and `umtx.c`, the kernel shall reject negative `tv_sec` on relative timeouts with `-EINVAL` and clamp large `tv_sec` values against signed 64-bit multiplication overflow.
+- [x] **SYS-KERN-017** *(Medium → Low; confirmed)* When converting `struct timespec` timeouts in `posix_mqueue.c`, `posix_sem.c`, `futex.c`, and `umtx.c`, the kernel shall reject negative `tv_sec` on relative timeouts with `-EINVAL` and clamp large `tv_sec` values against signed 64-bit multiplication overflow.
   Evidence: `sys/kern/posix_mqueue.c:256-268`, `sys/kern/posix_sem.c:450-460`, and `sys/kern/futex.c:546, 1132` overflow signed `int64_t` on `dsec * 1000000000LL` or `total_ns * hz`, and `sys/kern/futex.c:532, 554` and `sys/kern/umtx.c:120, 128` do not check `ts.tv_sec < 0` on relative timeouts.
   Basis: traced.
 

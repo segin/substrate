@@ -532,7 +532,6 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                     return -EINVAL;
                 }
 
-                uint64_t hz = get_hz();
                 uint64_t deadline;
                 if (is_bitset) {
                     /*
@@ -540,19 +539,20 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                      * tick count relative to now; if already in the past the
                      * wait times out immediately.
                      */
-                    time_t now_sec = get_time();
-                    int64_t delta_sec = (int64_t)ts.tv_sec - (int64_t)now_sec;
-                    int64_t ticks = delta_sec * (int64_t)hz +
-                                    ((int64_t)ts.tv_nsec * (int64_t)hz) / 1000000000LL;
-                    if (ticks <= 0) {
+                    uint64_t ticks = abstime_ticks(ts.tv_sec, ts.tv_nsec,
+                                                   get_time(), 0);
+                    if (ticks == 0) {
                         current_thread->futex_bitset = 0;
                         return -ETIMEDOUT;
                     }
-                    deadline = get_ticks() + (uint64_t)ticks;
-                } else {
-                    uint64_t ticks = (uint64_t)ts.tv_sec * hz;
-                    ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
                     deadline = get_ticks() + ticks;
+                } else {
+                    if (ts.tv_sec < 0) {
+                        current_thread->futex_bitset = 0;
+                        return -EINVAL;
+                    }
+                    deadline = get_ticks() +
+                               timespan_ticks((uint64_t)ts.tv_sec, ts.tv_nsec);
                 }
                 current_thread->sleep_expiry = deadline;
                 current_thread->sleep_status = 0;
@@ -1133,14 +1133,10 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
             return -EFAULT;
         if (ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000)
             return -EINVAL;
-        uint64_t hz = get_hz();
-        time_t now_sec = get_time();
-        int64_t delta_sec = (int64_t)ts.tv_sec - (int64_t)now_sec;
-        int64_t ticks = delta_sec * (int64_t)hz +
-                        ((int64_t)ts.tv_nsec * (int64_t)hz) / 1000000000LL;
-        if (ticks <= 0)
+        uint64_t ticks = abstime_ticks(ts.tv_sec, ts.tv_nsec, get_time(), 0);
+        if (ticks == 0)
             return -ETIMEDOUT;
-        deadline = get_ticks() + (uint64_t)ticks;
+        deadline = get_ticks() + ticks;
         has_timeout = 1;
     }
 

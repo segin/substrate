@@ -531,18 +531,10 @@ int kern_ksem_timedwait(int id, const struct timespec *kabstime,
     struct timespec now;
     if (kern_clock_gettime(CLOCK_REALTIME, &now) != 0)
         return -EINVAL;
-    int64_t delta_ns = ((int64_t)kabstime->tv_sec - (int64_t)now.tv_sec) * 1000000000LL
-                     + ((int64_t)kabstime->tv_nsec - (int64_t)now.tv_nsec);
-
-    uint64_t hz = get_hz();
-    uint64_t deadline;
-    if (delta_ns <= 0) {
-        deadline = get_ticks();          /* already past: poll once, then ETIMEDOUT */
-    } else {
-        uint64_t ticks = ((uint64_t)delta_ns * hz) / 1000000000ULL;
-        if (ticks == 0) ticks = 1;
-        deadline = get_ticks() + ticks;
-    }
+    /* Already past: poll once, then ETIMEDOUT. */
+    uint64_t deadline = get_ticks() +
+                        abstime_ticks(kabstime->tv_sec, kabstime->tv_nsec,
+                                      now.tv_sec, now.tv_nsec);
     return ksem_wait_common(id, deadline, key);
 }
 

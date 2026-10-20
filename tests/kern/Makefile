@@ -282,6 +282,12 @@ sysctlstr: sysctlstr.c
 acctpath.linux: acctpath.c
 	gcc -m32 -static -O2 $< -o $@
 
+# longtimeout: far-off futex and mq timeouts wait; a negative relative one
+# is EINVAL.  Substrate only.
+longtimeout: longtimeout.c
+	$(CC) $(CFLAGS) $< $(RTLIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # procinspect: sys_proc_* show another user's or a set-id process only to
 # root.  Substrate only; run as root.
 procinspect: procinspect.c

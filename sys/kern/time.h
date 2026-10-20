@@ -34,6 +34,18 @@ void timer_busywait_us(unsigned us);
 // Get system HZ
 uint32_t get_hz(void);
 
+/* A timeout longer than this many ticks (millions of years) never
+ * expires; tick arithmetic on it cannot overflow. */
+#define TICKS_FOREVER (1ULL << 62)
+
+/* Ticks in a span of sec seconds and nsec (0..999999999) nanoseconds,
+ * rounded up, at most TICKS_FOREVER. */
+uint64_t timespan_ticks(uint64_t sec, long nsec);
+
+/* Ticks from (now_sec, now_nsec) until (sec, nsec), rounded up and at most
+ * TICKS_FOREVER; 0 if that time has come. */
+uint64_t abstime_ticks(int64_t sec, long nsec, int64_t now_sec, long now_nsec);
+
 // Timer tick handlers (called from PIT/APIC interrupt)
 void timer_init(void);
 void timer_tick(void);

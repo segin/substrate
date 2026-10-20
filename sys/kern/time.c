@@ -456,6 +456,26 @@ uint32_t get_hz(void) {
     return HZ;
 }
 
+uint64_t timespan_ticks(uint64_t sec, long nsec) {
+    if (sec >= TICKS_FOREVER / HZ)
+        return TICKS_FOREVER;
+    return sec * HZ + ((uint64_t)nsec * HZ + 999999999ULL) / 1000000000ULL;
+}
+
+uint64_t abstime_ticks(int64_t sec, long nsec, int64_t now_sec, long now_nsec) {
+    if (sec < now_sec || (sec == now_sec && nsec <= now_nsec))
+        return 0;
+    /* sec > now_sec here unless only the nanoseconds differ; the unsigned
+     * difference cannot overflow. */
+    uint64_t dsec = (uint64_t)sec - (uint64_t)now_sec;
+    long dnsec = nsec - now_nsec;
+    if (dnsec < 0) {
+        dsec--;
+        dnsec += 1000000000L;
+    }
+    return timespan_ticks(dsec, dnsec);
+}
+
 void set_boot_time(time_t time) {
     boot_time = time;
 }
