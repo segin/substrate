@@ -275,12 +275,52 @@ static int pty_alloc_index_locked(void) {
 static void pty_slave_node_open(fs_node_t *node);
 static void pty_slave_node_close(fs_node_t *node);
 
+/*
+ * A Unix98 slave's node and the lookup references on it (fs_node_t
+ * hold/rele).  The pair, and the slave tty the node points at, go when
+ * both ends are closed; a path walk may still be holding the node then (a
+ * stat of /dev/pts/N, say).  Such a node outlives its pair as an orphan:
+ * cut off from the tty, its own references its only operations, freed at
+ * the last release.
+ */
+typedef struct pty_slave_box {
+    fs_node_t  node;        /* first: the node is the box */
+    spinlock_t lock;
+    int        refs;
+    int        orphan;
+} pty_slave_box_t;
+
+static void pty_slave_node_hold(fs_node_t *node) {
+    pty_slave_box_t *b = (pty_slave_box_t *)node;
+
+    spinlock_acquire(&b->lock);
+    b->refs++;
+    spinlock_release(&b->lock);
+}
+
+static void pty_slave_node_rele(fs_node_t *node) {
+    pty_slave_box_t *b = (pty_slave_box_t *)node;
+    int last;
+
+    spinlock_acquire(&b->lock);
+    if (b->refs > 0) b->refs--;
+    last = b->orphan && b->refs == 0;
+    spinlock_release(&b->lock);
+    if (last) kfree(b, sizeof(*b));
+}
+
+static void pty_slave_orphan_noop(fs_node_t *node) {
+    (void)node;
+}
+
 static void pty_publish_slave_node(pty_pair_t *p) {
-    fs_node_t *node = kmalloc(sizeof(fs_node_t));
-    if (!node) {
+    pty_slave_box_t *box = kmalloc(sizeof(*box));
+    if (!box) {
         return;
     }
-    memset(node, 0, sizeof(*node));
+    memset(box, 0, sizeof(*box));
+    spinlock_init(&box->lock, "pty_slave_node");
+    fs_node_t *node = &box->node;
     snprintf(node->name, sizeof(node->name), "pts/%d", p->index);
     node->flags = FS_CHARDEVICE;
     /*
@@ -307,6 +347,8 @@ static void pty_publish_slave_node(pty_pair_t *p) {
     node->open  = pty_slave_node_open;
     node->close = pty_slave_node_close;
     node->poll  = tty_fs_poll;
+    node->hold  = pty_slave_node_hold;
+    node->rele  = pty_slave_node_rele;
 
     p->slave_node = node;
     devfs_register_device(node);
@@ -315,9 +357,30 @@ static void pty_publish_slave_node(pty_pair_t *p) {
 
 static void pty_unpublish_slave_node(pty_pair_t *p) {
     if (p->slave_node) {
-        devfs_unregister_device(p->slave_node);
-        kfree(p->slave_node, sizeof(fs_node_t));
+        pty_slave_box_t *b = (pty_slave_box_t *)p->slave_node;
+        fs_node_t *n = &b->node;
+        int free_now;
+
+        devfs_unregister_device(n);
         p->slave_node = NULL;
+        spinlock_acquire(&b->lock);
+        free_now = b->refs == 0;
+        if (!free_now) {
+            /* Held by a lookup: orphan it.  Nothing of the tty is reached
+             * through it any more.  An open of it (by whoever holds it)
+             * gets a private copy, as for any char device with an open
+             * hook (vfs_prepare_open_node), so no fd refers to it. */
+            b->orphan = 1;
+            n->ptr   = NULL;
+            n->read  = NULL;
+            n->write = NULL;
+            n->ioctl = NULL;
+            n->poll  = NULL;
+            n->open  = pty_slave_orphan_noop;
+            n->close = pty_slave_orphan_noop;
+        }
+        spinlock_release(&b->lock);
+        if (free_now) kfree(b, sizeof(*b));
     }
 }
 

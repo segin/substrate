@@ -262,6 +262,12 @@ rmdirwalk: rmdirwalk.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ptsrace: /dev/pts/N looked up while ptys are made and destroyed.  Runs on
+# the host too.
+ptsrace: ptsrace.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # walkrecycle: a path walk keeps the nodes it passes through while other
 # lookups cycle the ext2 node cache.  Runs on the host too.
 walkrecycle: walkrecycle.c
@@ -305,6 +311,6 @@ clean:
 	rm -f soak_reap trapsig advlock opencreat mmapshared cowwrite pokecow brkfork \
 	      brkfork.linux thrstart vm86guest thrkill tidkern.linux truncperm shmgrow \
 	      ioctlkern.linux ioctlkern_fbsd linuxptr.linux setredrop shmrange rofault \
-	      sigretsel.linux execipc linkfollow.linux
+	      sigretsel.linux execipc linkfollow.linux walkrecycle ptsrace
 
 .PHONY: all clean

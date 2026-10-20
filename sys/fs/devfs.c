@@ -83,6 +83,11 @@ typedef struct devfs_entry {
     struct devfs_entry *child;
     struct devfs_entry *next;
     uint8_t owns_node;
+    /* Lookup references on an alias node devfs owns (owns_node), and
+     * whether the entry was removed while it had some: then it and its
+     * node are freed at the last release (devfs_alias_rele). */
+    uint8_t dead;
+    int refs;
     char link_target[128];
     /*
      * Personality visibility mask.  0 = universal (visible to every
@@ -412,20 +417,32 @@ static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
      * caller's getcwd notices via curr->mp == mp->mnt_node_root and
      * splices in the mount path directly, so we just return the
      * underlying covered node (or self as a fallback). */
+    /* Every node returned is held (fs_node_t hold/rele): devfs's own
+     * directories have no hold op; an alias it owns is counted on its
+     * entry, under this lock; a driver's node (a pty slave) takes its own
+     * reference, also under this lock, so an unregister that frees it
+     * cannot come between finding it and holding it. */
     if (name && name[0] == '.' && name[1] == '\0') {
+        if (node->hold) node->hold(node);
         return node;
     }
     if (name && name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        fs_node_t *up = node;   /* devfs root with no covered node — self */
         if (entry->parent && entry->parent->node)
-            return entry->parent->node;
-        if (node->mp && node->mp->mnt_node_covered)
-            return node->mp->mnt_node_covered;
-        return node;   /* devfs root with no covered node — self */
+            up = entry->parent->node;
+        else if (node->mp && node->mp->mnt_node_covered)
+            up = node->mp->mnt_node_covered;
+        if (up->hold) up->hold(up);
+        return up;
     }
 
     spinlock_acquire(&devfs_lock);
     child = devfs_present_child(entry, name);
     fs_node_t *found = child ? child->node : NULL;
+    if (found && child->owns_node)
+        child->refs++;
+    else if (found && found->hold)
+        found->hold(found);
     spinlock_release(&devfs_lock);
     if (found) {
         devfs_refresh_timestamps(found);
@@ -553,10 +570,43 @@ static void devfs_destroy_entry(devfs_entry_t *entry) {
         child = next;
     }
 
+    /* A held alias waits for its last release (devfs_alias_rele); it is
+     * already out of the tree, so nothing else reaches it. */
+    if (entry->owns_node && entry->refs > 0) {
+        entry->dead = 1;
+        entry->parent = NULL;
+        entry->child = NULL;
+        return;
+    }
     if (entry->owns_node && entry->node != NULL) {
         kfree(entry->node, sizeof(fs_node_t));
     }
     kfree(entry, sizeof(*entry));
+}
+
+/* hold/rele of an alias node devfs owns: its entry counts them. */
+static void devfs_alias_hold(fs_node_t *node) {
+    devfs_entry_t *entry = (devfs_entry_t *)node->impl;
+
+    spinlock_acquire(&devfs_lock);
+    if (entry) entry->refs++;
+    spinlock_release(&devfs_lock);
+}
+
+static void devfs_alias_rele(fs_node_t *node) {
+    devfs_entry_t *entry = (devfs_entry_t *)node->impl;
+    int last = 0;
+
+    spinlock_acquire(&devfs_lock);
+    if (entry) {
+        if (entry->refs > 0) entry->refs--;
+        last = entry->dead && entry->refs == 0;
+    }
+    spinlock_release(&devfs_lock);
+    if (last) {
+        kfree(node, sizeof(fs_node_t));
+        kfree(entry, sizeof(*entry));
+    }
 }
 
 static void devfs_remove_entry(devfs_entry_t *entry) {
@@ -639,7 +689,24 @@ static int devfs_add_entry(const char *path, fs_node_t *node, uint32_t perso_mas
              * caller supplied this node and owns its lifetime.
              */
             if (next->owns_node && next->node && next->node != node) {
-                kfree(next->node, sizeof(fs_node_t));
+                if (next->refs > 0) {
+                    /* Held by a lookup: the old node moves, with its
+                     * references, to a detached entry its last release
+                     * frees (devfs_alias_rele).  Without memory for one
+                     * it is leaked, which is safe. */
+                    devfs_entry_t *ghost = kmalloc(sizeof(*ghost));
+                    if (ghost) {
+                        memset(ghost, 0, sizeof(*ghost));
+                        ghost->node = next->node;
+                        ghost->owns_node = 1;
+                        ghost->dead = 1;
+                        ghost->refs = next->refs;
+                        next->node->impl = (uintptr_t)ghost;
+                    }
+                    next->refs = 0;
+                } else {
+                    kfree(next->node, sizeof(fs_node_t));
+                }
             }
             next->owns_node = 0;
             next->node = node;
@@ -789,6 +856,8 @@ int devfs_register_alias_perso(const char *path, const char *target,
     node->uid = 0;
     node->gid = 0;
     node->readlink = devfs_symlink_readlink;
+    node->hold = devfs_alias_hold;
+    node->rele = devfs_alias_rele;
     devfs_refresh_timestamps(node);
 
     if (devfs_add_entry(path, node, perso_mask) != 0) {

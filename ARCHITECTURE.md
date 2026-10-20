@@ -163,11 +163,12 @@ the node takes its own `open_fs` first. A thread's outstanding holds are
 counted (`vfs_holds`) and checked as each system call returns
 (`vfs_holds_check`), which names a syscall that leaks or over-drops.
 Drivers map hold/rele to their pin (ext2's `pin_count`, FAT's and exFAT's
-`pin`, UDF's and Minix's open counts), so a
-held slot of their node cache is never recycled or rebuilt; a node with no
-hold op lives as long as its filesystem.
-The drivers still to be given hold ops are listed under SYS-NEW-001b in
-`docs/kernel-audit-oct-2026.md`.
+`pin`, UDF's and Minix's open counts, procfs's per-pid block `refs`, shmfs's
+inode refcount), so a held slot of their node cache is never recycled or
+rebuilt and a held node is never freed. devfs counts references on the
+alias nodes it owns, and a pty slave node held when its pair is destroyed
+stays as an inert orphan until released. A node with no hold op lives as
+long as its filesystem.
 
 *Cross-filesystem operations.* A driver's directory ops read the other
 node they are given (`link`'s source, `rename`'s target directory) as one
