@@ -23,6 +23,8 @@
 #include <drivers/audio/sb16.h>
 #include <kern/console.h>
 #include <kern/isa.h>
+#include <kern/sched.h>
+#include <kern/time.h>
 #include <sys/audioio.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
@@ -296,6 +298,13 @@ static int sb16_write(audio_dev_t *adev, const void *buf, size_t len)
 		return (int)len;
 	}
 	copy_len = (len > d->dma_size) ? d->dma_size : len;
+	/* Whole 16-bit samples only: one byte made (copy_len / 2) - 1 wrap
+	 * to 0xFFFF, a 64 Ki-sample transfer from a two-byte buffer.  A
+	 * stray odd byte is taken and dropped. */
+	copy_len &= ~(size_t)1;
+	if (copy_len == 0) {
+		return (int)len;
+	}
 
 	/*
 	 * Back-pressure: SB16 single-shot DMA — at most one chunk in
@@ -303,7 +312,13 @@ static int sb16_write(audio_dev_t *adev, const void *buf, size_t len)
 	 * drained.  Without this, every write() reprograms the DMA
 	 * pointer mid-playback and the DSP races through whatever's in
 	 * the (partially overwritten) buffer at full speed.
+	 *
+	 * Bounded: no chunk of ours lasts two seconds, so an IRQ that has
+	 * not come by then is not coming (masked, or a lost edge), and the
+	 * chunk is taken as played rather than spinning here forever.
+	 * Killable meanwhile.
 	 */
+	uint64_t wait_start = (uint64_t)get_uptime_ms();
 	for (;;) {
 		uint32_t done = __atomic_load_n(&d->plays_done,
 		                                __ATOMIC_ACQUIRE);
@@ -311,7 +326,16 @@ static int sb16_write(audio_dev_t *adev, const void *buf, size_t len)
 		if (in_flight == 0) {
 			break;
 		}
-		__asm__ volatile("pause");
+		if ((uint64_t)get_uptime_ms() - wait_start >= 2000) {
+			__atomic_store_n(&d->plays_done, d->writes_queued,
+			                 __ATOMIC_RELEASE);
+			break;
+		}
+		if (current_thread &&
+		    (current_thread->sig_pending & ~current_thread->sig_mask)) {
+			return -EINTR;
+		}
+		sched_yield();
 	}
 
 	memcpy(d->dma_buf, buf, copy_len);
@@ -424,8 +448,15 @@ void sb16_init(void)
 	d->dma_size = npages * 4096u;
 	memset(d->dma_buf, 0, d->dma_size);
 
-	(void)request_irq((unsigned int)d->irq, sb16_irq_handler,
-	                  0, "sb16", d);
+	/* Without its IRQ the card never reports a chunk played, and every
+	 * write after the first would wait for nothing. */
+	if (request_irq((unsigned int)d->irq, sb16_irq_handler,
+	                0, "sb16", d) != 0) {
+		kprintf("sb16: IRQ %d unavailable, not attaching\n", d->irq);
+		vm_phys_free_contiguous(pages, npages);
+		d->dma_buf = NULL;
+		return;
+	}
 
 	d->audio.ops = &sb16_ops;
 	d->audio.driver_data = d;
@@ -434,6 +465,9 @@ void sb16_init(void)
 	d->audio.hw_chan_max = 2;
 	snprintf(d->audio.name, sizeof(d->audio.name), "sb16");
 	if (audio_register_device(&d->audio) != 0) {
+		free_irq((unsigned int)d->irq, d);
+		vm_phys_free_contiguous(pages, npages);
+		d->dma_buf = NULL;
 		return;
 	}
 	sb16_present = 1;

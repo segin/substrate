@@ -641,6 +641,10 @@ static int ac97_flush(audio_dev_t *adev)
 {
 	ac97_dev_t *d = adev->driver_data;
 
+	/* Under feed_lock, IRQs off, like everything else that touches the
+	 * ring: the completion interrupt refills from it and must not see it
+	 * half reset. */
+	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, AC97_CR_RR);
 	d->next_idx = 0;
 	d->lvi = 0;
@@ -649,6 +653,7 @@ static int ac97_flush(audio_dev_t *adev)
 	d->running       = 0;
 	d->mmap_mode     = 0;
 	audio_fifo_reset(&d->fifo);
+	spinlock_release_irq(&d->feed_lock, flags);
 	return 0;
 }
 
@@ -968,9 +973,15 @@ static int ac97_attach(pci_device_t *pdev)
 	d->audio.hw_chan_max = 2;
 	snprintf(d->audio.name, sizeof(d->audio.name), "ac97");
 	if (audio_register_device(&d->audio) != 0) {
+		/* Undo all of the attach: the IRQ handler would otherwise run
+		 * against freed buffers, and the 256 KiB FIFO leaked. */
+		if (d->irq >= 0)
+			free_irq((unsigned int)d->irq, d);
+		dma_free_coherent(d->fifo_buf, AC97_FIFO_BYTES);
 		dma_free_coherent(d->chunk_buf, d->chunk_count * AC97_CHUNK_BYTES);
 		dma_free_coherent(d->bdl,
 		                  sizeof(ac97_bdl_entry_t) * AC97_BDL_ENTRIES);
+		d->fifo_buf = NULL;
 		d->bdl = NULL;
 		d->chunk_buf = NULL;
 		return -EBUSY;

@@ -530,7 +530,7 @@ SYS-DRV-003 are Critical and not listed.
   Evidence: `sys/drivers/storage/nvme/nvme.c:166-237, 635-695` mutates `sq_tail`, `cq_head`, and `next_cid` without any lock and polls `cqe->status` via a non-`volatile` pointer.
   Basis: traced.
 
-- [ ] **SYS-DRV-011** *(Medium; partly confirmed)* In the audio subsystem (`sys/drivers/audio/`), `sb16_write` shall bound its completion wait and avoid `(copy_len / 2) - 1` underflow when `copy_len == 1`, `ac97_flush` shall hold `d->feed_lock`, `ac97_attach` shall free `d->fifo_buf` on registration failure, and `audio_node_close` shall decrement `dev->open_count` rather than forcing it to `0`.
+- [x] **SYS-DRV-011** *(Medium; partly confirmed)* In the audio subsystem (`sys/drivers/audio/`), `sb16_write` shall bound its completion wait and avoid `(copy_len / 2) - 1` underflow when `copy_len == 1`, `ac97_flush` shall hold `d->feed_lock`, `ac97_attach` shall free `d->fifo_buf` on registration failure, and `audio_node_close` shall decrement `dev->open_count` rather than forcing it to `0`.
   Evidence: `sys/drivers/audio/sb16.c:307-324` spins forever if the IRQ is masked and underflows `samples = (uint16_t)((copy_len / 2) - 1)` to `0xFFFF` when `copy_len == 1`; `sys/drivers/audio/ac97.c:640-653` resets ring indices without `d->feed_lock` and leaks 256 KiB `d->fifo_buf` at `:971`; and `sys/drivers/audio/audio.c:1139-1142` sets `dev->open_count = 0` unconditionally.
   Basis: traced.
 
