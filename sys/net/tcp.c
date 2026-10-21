@@ -951,6 +951,19 @@ static int tcp_timer_tick(uint64_t now) {
             p->urg_sig_pending = 0;
             if (p->owner) urg_owner[nurg++] = p->owner;
         }
+        /*
+         * A detached PCB will never be read again (data arriving for it
+         * is answered with a RST), yet it lingers through FIN_WAIT and a
+         * minute of TIME_WAIT.  Its 32 KiB receive ring went with it, so a
+         * burst of short connections pinned hundreds of megabytes until
+         * their timers ran out and a 512 MiB machine ran out of memory.
+         * Free the ring now; a hold means a reader may still be in it.
+         */
+        if (p->detached && p->holds == 0 && p->rxbuf) {
+            kfree(p->rxbuf, TCP_RING_LEN);
+            p->rxbuf = NULL;
+            p->rx_head = p->rx_tail = p->rx_count = 0;
+        }
         if (p->state == TCP_CLOSED) {
             /* Terminal.  Reap if orphaned — tcp_find() never returns a
              * CLOSED PCB, so no RX path can be holding this pointer. */
@@ -1571,6 +1584,8 @@ static int tcp_seg_check(tcp_pcb_t *p, uint32_t *seqp, uint8_t *flagsp,
 
 /* Copy up to `n` octets into the receive ring; returns how many fit. */
 static uint32_t tcp_rx_copy(tcp_pcb_t *p, const uint8_t *data, uint32_t n) {
+    if (!p->rxbuf)              /* detached: the reaper freed the ring */
+        return 0;
     if (n > TCP_RING_LEN - p->rx_count)
         n = TCP_RING_LEN - p->rx_count;
     for (uint32_t i = 0; i < n; i++) {

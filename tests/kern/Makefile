@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# tcptwmem: closed TCP connections in TIME_WAIT don't pin receive rings.
+tcptwmem: tcptwmem.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # pipe2flag: pipe2(O_NONBLOCK) shows in fcntl(F_GETFL).
 pipe2flag: pipe2flag.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
