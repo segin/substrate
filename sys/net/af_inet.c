@@ -1234,8 +1234,14 @@ int afinet_socket(int family, int type, int protocol) {
      * with a worse error path (ssh prints "connect to host  port :
      * Address family not supported").  Refusing it now lets
      * getaddrinfo-driven callers iterate straight to the AF_INET
-     * result.  Lift this once inet6.c grows real v6 bind/connect. */
-    if (family != AF_INET) return -EAFNOSUPPORT;
+     * result.  Lift this once inet6.c grows real v6 bind/connect.
+     *
+     * SOCK_RAW is the exception: getaddrinfo never hands one out, and
+     * the raw path does carry v6 -- sendto() takes a sockaddr_in6 and
+     * ICMPv6 input is delivered to AF_INET6 raw sockets -- so ping6-style
+     * callers (torture_inet's ::1 echo) work. */
+    if (family != AF_INET && !(family == AF_INET6 && type == SOCK_RAW))
+        return -EAFNOSUPPORT;
     if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
         return -EPROTONOSUPPORT;
     /*

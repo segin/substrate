@@ -314,6 +314,12 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# raw6lo: an ICMPv6 raw socket pings ::1; v6 stream/dgram still refused.
+# Substrate only; run as root.
+raw6lo: raw6lo.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # tcptwmem: closed TCP connections in TIME_WAIT don't pin receive rings.
 tcptwmem: tcptwmem.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
