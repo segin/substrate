@@ -2,6 +2,13 @@ include ../../../Makefile.inc
 
 CFLAGS += -I../../../include
 
+# Cancel make's built-in yacc/lex rules: ../../../lib/at/at_parse.c is
+# hand-written and shares its stem with at_parse.y, so naming it as a
+# prerequisite here let make "update" it by running yacc over it and
+# clobbering the real source -- lib/at/Makefile carries the same guard.
+%.c: %.y
+%.c: %.l
+
 all: test_acl test_parse fuzz_acl
 
 test_parse: test_parse.c ../../../lib/at/at_parse.c
