@@ -3810,7 +3810,7 @@ int sys_pipe2(int *fds, int flags) {
             if (kfd < 0) continue;
             file_t *f = current_process->fds[kfd];
             if (!f) continue;
-            f->f_flag |= O_NONBLOCK;
+            f->f_flag |= FNONBLOCK;     /* f_flag holds F*, not O_* */
             /* The pipe driver doesn't see f_flag — push the flag
              * onto the endpoint so pipe_read/_write return -EAGAIN
              * instead of blocking on an empty/full buffer. */

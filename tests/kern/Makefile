@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# pipe2flag: pipe2(O_NONBLOCK) shows in fcntl(F_GETFL).
+pipe2flag: pipe2flag.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ttynxio: /dev/tty without a controlling terminal is ENXIO.
 ttynxio: ttynxio.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
