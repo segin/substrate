@@ -13,7 +13,12 @@
 # and runs them on the substrate target.
 
 CROSS  ?=
-CC      = $(CROSS)cc
+# The cross toolchain ships $(CROSS)gcc but no $(CROSS)cc; hosts have cc.
+ifeq ($(CROSS),)
+  CC      = cc
+else
+  CC      = $(CROSS)gcc
+endif
 CFLAGS  = -Wall -Wextra -O2 -g
 # When cross-compiling for substrate, match the userland baseline
 # (i486+) so 4-byte atomics inline as cmpxchg/xchg rather than
