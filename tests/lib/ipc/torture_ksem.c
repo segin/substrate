@@ -339,19 +339,24 @@ static int t_local_basic(void)
 
 static int t_local_fork_shared(void)
 {
-    /* A process-local sem in MAP_SHARED memory still coordinates across fork
-     * on substrate only because sem_post/sem_wait touch the count word via the
-     * futex in the shared page — this exercises the fast path under fork. */
+    /* A process-local sem in MAP_SHARED memory: its count word lives in the
+     * shared page, so a post made in a forked child is visible to the parent
+     * -- the fast path under fork.  The parent waits for the child to exit
+     * before sem_wait(): a pshared=0 semaphore sleeps on a process-private
+     * futex, so a post from another process cannot wake a waiter already
+     * asleep (on Linux either; POSIX leaves it undefined), and the old
+     * order -- wait first, post 2 ms later -- hung whenever the wait won
+     * the race. */
     sem_t *s = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE,
                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (s == MAP_FAILED) return 1;
     if (sem_init(s, 0, 0) != 0) { munmap(s, sizeof(sem_t)); return 1; }
     pid_t pid = fork();
     if (pid < 0) { munmap(s, sizeof(sem_t)); return 1; }
-    if (pid == 0) { usleep(2000); sem_post(s); _exit(0); }
-    int r = sem_wait(s);
+    if (pid == 0) { sem_post(s); _exit(0); }
     int cst;
     while (waitpid(pid, &cst, 0) < 0 && errno == EINTR) {}
+    int r = sem_wait(s);
     munmap(s, sizeof(sem_t));
     return r == 0 ? 0 : 1;
 }
