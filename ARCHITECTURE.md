@@ -103,7 +103,11 @@ process's last running thread; the last one ends the process through
 `proc_exit()`, so per-process cleanup always runs. Linux `exit_group` ends
 the process; Linux threads are detached and joined through their
 clear-tid word, which the scheduler zeroes and futex-wakes as the thread
-leaves the CPU.
+leaves the CPU. The scheduler picks the ready thread with the lowest
+weighted vruntime (CFS-style, charged per tick). A thread that has to
+sleep on a kernel `mutex_t` whose owner was preempted holding it hands the
+CPU straight to that owner (`sched_yield_to`), so the critical section
+finishes now rather than after every other ready thread has had a slice.
 
 **Inter-process communication** (`sys/kern/`): System V semaphores
 (`ipc_sem.c`) and shared memory (`ipc_shm.c`); POSIX message queues

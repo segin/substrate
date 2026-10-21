@@ -114,9 +114,14 @@ void mutex_lock(mutex_t *m) {
             // "deadlock"
         }
         
+        /* Run the owner if it was preempted holding the lock (see
+         * sched_yield_to); its tid is read under the guard. */
+        thread_t *holder = (thread_t *)m->owner;
+        int holder_tid = holder ? holder->tid : 0;
+
         sleepq_add(m, me);
         spinlock_release(&m->guard);
-        sched_yield(); // Context switch
+        sched_yield_to(holder_tid);
         
         // Creating logic to re-acquire guard
         spinlock_acquire(&m->guard);

@@ -1142,3 +1142,69 @@ critic's suggested fix order is 007a, 003, 001a, 004, 006a, 002, 001b, 005,
 - [x] **SYS-NEW-012** *(Low; observed)* The AC97 driver shall honour `O_NONBLOCK`.
   Evidence: on AC97, `torture_audio_nonblock` never sees EAGAIN -- writes on a non-blocking descriptor go on accepting (blocking) for the whole fill window and the run stalls -- and `torture_audio_share` gets EBUSY from a write.  Only `hda.c` checks the flag (`hda_nonblock`, added by f2ac3e2d5).  Not root-caused.
   Basis: observed.
+
+The following were found on 2026-10-20 by running every guest torture
+suite under `tests/lib` (pty, ipc, net, pthread, c) on i386 and x86_64
+once the audit above was closed.  Each fix has a `tests/kern` regression
+test that fails on the kernel before it and passes on both architectures.
+
+- [x] **SYS-NEW-013** *(Medium; observed)* A tty shall pass a 0xFF input byte through as data.
+  Evidence: the line discipline marked the end of a canonical line with an in-band 0xFF in `raw_buf` (`sys/drivers/console/tty.c`), and every reader took any 0xFF there for that mark: a raw read dropped it and slept with `poll` saying readable, a canonical read ended the line early.  `torture_pty` hung on every payload of 256 bytes or more.
+  Fix: 425acaad6 -- the delimiter is out of band (`tty_buffer_t.delim[]`).  Test `ptyff`.
+  Basis: observed.
+
+- [x] **SYS-NEW-014** *(Medium; observed)* With `OPOST` clear a tty shall transmit output unchanged.
+  Evidence: `tty_output_locked` applied ONLCR, OXTABS and its canonical ^D drop whatever `OPOST` said, so a raw-mode `\n` reached a pty master as `\r\n`.
+  Fix: e21e89017.  Test `ptyopost`.
+  Basis: observed.
+
+- [x] **SYS-NEW-015** *(Medium; observed)* A non-canonical read of any length shall wait for `VMIN` characters.
+  Evidence: `tty_read` compared `VMIN` with the length cast to `cc_t`, so a read of a multiple of 256 bytes wanted 0 characters and returned 0 (EOF) on an idle tty.
+  Fix: 17db4f1b9.  Test `ptyvmin`.
+  Basis: observed.
+
+- [x] **SYS-NEW-016** *(Medium; observed)* A pty master write shall not drop data the slave has no room for.
+  Evidence: `pty_master_node_write` pushed every byte into the slave's 2 KiB input ring and the ring dropped the overflow while `write` reported it all sent; `torture_pty`'s transfers of 4 KiB and up hung waiting for it.
+  Fix: 907121e88 -- the writer waits (`tty_input_wait_room`) in non-canonical mode, EAGAIN with `O_NONBLOCK`; pts.4 (c5fd9e645).  Test `ptyburst`.
+  Basis: observed.
+
+- [x] **SYS-NEW-017** *(Medium; observed)* `tcflush`, `tcdrain` and `tcflow` shall work on a terminal.
+  Evidence: `tty_ioctl` handled none of `TCFLSH`, `TCSBRK` or `TCXONC`; all three calls failed with ENOTTY on every terminal.
+  Fix: 938e6a8f8.  Test `ptyflush`.
+  Basis: observed.
+
+- [x] **SYS-NEW-018** *(Medium; observed)* Opening a terminal shall make it the controlling terminal of a session leader that has none, unless `O_NOCTTY` is given.
+  Evidence: device open callbacks never saw the open flags, so `O_NOCTTY` was ignored, and the acquisition rule never asked whether the leader already had a terminal -- which once made luit's second pty land in its own session, after which pty slaves were excluded from acquisition altogether.  After `setsid` + `open(slave)` `/dev/tty` still meant the console (`torture_ctty` 11/13).
+  Fix: 3be261c77 -- `current_thread->open_flags`, the "already has one" test, ptys no longer excluded; open.2, tty.4.  xterm running luit verified headless.  Test `ptyctty`.
+  Basis: observed.
+
+- [x] **SYS-NEW-019** *(Medium; observed)* Opening `/dev/tty` without a controlling terminal shall fail with ENXIO.
+  Evidence: the open succeeded and the descriptor's I/O fell through to the console, so ssh/sudo/getpass prompted on the console of the machine.  tty.4 already documented ENXIO.
+  Fix: d38a6d646.  Test `ttynxio`; a full boot with console and telnet logins behaves as before.
+  Basis: observed.
+
+- [x] **SYS-NEW-020** *(Low; observed)* `pipe2(O_NONBLOCK)` shall be visible in `fcntl(F_GETFL)`.
+  Evidence: `sys_pipe2` or'ed `O_NONBLOCK` (0x800) into `f_flag`, which holds `F*` bits (`FNONBLOCK` 0x4).
+  Fix: b21cf67a8.  Test `pipe2flag`.
+  Basis: observed.
+
+- [x] **SYS-NEW-021** *(High; observed)* A closed TCP connection shall not pin its receive buffer.
+  Evidence: a detached PCB kept its 32 KiB receive ring through FIN_WAIT and a minute of TIME_WAIT though data for it is only answered with a RST; `torture_tcp_lo` ran a 512 MiB machine out of memory, and everything after it failed to fork.
+  Fix: a97b8b4b0 -- the reaper frees the ring of a detached, unheld PCB.  Test `tcptwmem` (96 MiB pinned before, under 1 MiB after).
+  Basis: observed.
+
+- [x] **SYS-NEW-022** *(Low; observed)* `AF_INET6` raw sockets shall be available.
+  Evidence: b091bf322 refused `AF_INET6` at `socket()` for the sake of getaddrinfo's stream callers, and caught `SOCK_RAW` too, though the raw path carries IPv6; `torture_inet`'s `::1` echo failed with EAFNOSUPPORT.
+  Fix: 40ed33580 -- `SOCK_RAW` exempt; stream and datagram v6 sockets still refused.  Test `raw6lo`.
+  Basis: observed.
+
+- [x] **SYS-NEW-023** *(High; observed)* `CLOCK_MONOTONIC` shall never go backwards.
+  Evidence: the time was built from `ticks` and the TSC snapshot of the last tick, loaded one after the other; a tick between the loads paired the old count with the new snapshot, almost a tick in the past.  Monotonic, realtime and `gettimeofday` stepped back up to 4 ms about 25 times in 400,000 reads; `torture_kernel`'s `mutex_fair` reported every thread starved (gaps of 2^64 - 4000 us).
+  Fix: 5660d501e -- a sequence count around the ISR's update; `uptime_ns_now()`.  Test `clockmono`.
+  Basis: observed.
+
+- [x] **SYS-NEW-024** *(Medium; observed)* A thread woken by I/O shall be served promptly while many CPU-bound threads run.
+  Evidence: `torture_poll_mc`'s `fairness_under_flood` -- one server multiplexing N non-blocking flooders and one quiet client with `poll` -- answers the quiet client in 0.8 s at N=32, 4.6 s at N=64 and not within 5 s at N=100 and 127, on i386 and x86_64 (Linux: milliseconds).
+  Basis: observed.
+  Cause: not the vruntime policy suspected first.  Instrumented, the server ran a `poll` pass every few seconds while charged almost no CPU: it slept on the AF_UNIX socket mutexes its flooders held, and a flooder preempted by the timer inside `read`/`write` got the CPU back only after every other ready thread had had a 4 ms slice -- N slices for each of the ~130 syscalls of a pass.
+  Fix: a thread about to sleep on a `mutex_t` whose owner is ready hands the CPU to the owner (`sched_yield_to`, `sys/pm/sched.c`; `sys/kern/mutex.c`).  The quiet client is answered in 72/124/280/540 ms at N=16/32/64/127 (was 296 ms/1.8 s/6.9 s/never); `torture_poll_mc` 431/431 and every other guest torture pass on i386 and x86_64.  Test `lockyield` (5.4-5.9 s before, ~270 ms after).

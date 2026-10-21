@@ -109,6 +109,9 @@ int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg);
 
 void sched_yield(void);
+/* Give the CPU to thread `tid` if it is runnable here (a directed yield, for
+ * a waiter whose lock holder was preempted); otherwise sched_yield(). */
+void sched_yield_to(int tid);
 
 /* Freeze userspace for shutdown: after this the scheduler never
  * dispatches a user thread again except `keep` (the reboot caller).

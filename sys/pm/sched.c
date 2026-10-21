@@ -571,6 +571,36 @@ rescan:
     goto rescan;
 }
 
+/*
+ * Directed yield.  A thread about to sleep on a mutex whose owner was
+ * preempted mid-critical-section otherwise waits for the owner's next turn:
+ * with N CPU-bound threads ready that is N timeslices, and a thread that
+ * meets such a lock on every syscall (a server polling sockets its busy
+ * clients keep locked) makes almost no progress at all.  Running the owner
+ * now lets it finish and release.  The owner is found by tid under the
+ * registry lock, so a thread reaped meanwhile is never touched; anything
+ * that cannot run here falls back to an ordinary yield.
+ */
+void sched_yield_to(int tid) {
+    if (!current_thread) return;
+
+    uint32_t pf = intr_disable();
+    unsigned long rf = thread_registry_lock();
+    thread_t *t = sched_lookup_tid_locked(tid);
+    int ok = t && t != current_thread && t->state == THREAD_READY &&
+             !(t->proc && t->proc->state == SZOMB) &&
+             sched_can_run_on_cpu(t, percpu_get_cpu_id());
+    thread_registry_unlock(rf);
+    if (ok) {
+        rr_last = t;
+        sched_context_switch(current_thread, t);
+        intr_restore(pf);
+        return;
+    }
+    intr_restore(pf);
+    sched_yield();
+}
+
 void sched_switch(thread_t *next) {
     if (!next) return;
     if (!current_thread) return;

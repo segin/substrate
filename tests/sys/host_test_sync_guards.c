@@ -42,6 +42,7 @@ void spinlock_release(spinlock_t *lock) { lock->locked = 0; }
 bool spinlock_is_held(spinlock_t *lock) { return lock->locked != 0; }
 
 void sched_yield(void) {}
+void sched_yield_to(int tid) { (void)tid; }
 void sleepq_add(void *chan, thread_t *t) { (void)chan; t->state = THREAD_BLOCKED; }
 thread_t *sleepq_wake_one(void *chan) { (void)chan; wake_one_calls++; return NULL; }
 int sleepq_wake_all(void *chan) { (void)chan; return 0; }

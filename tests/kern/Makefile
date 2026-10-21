@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# lockyield: a poll server is served promptly while 64 clients flood it.
+lockyield: lockyield.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # clockmono: CLOCK_MONOTONIC and gettimeofday never step backwards.
 clockmono: clockmono.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
