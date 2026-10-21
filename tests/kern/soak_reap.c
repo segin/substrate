@@ -248,8 +248,12 @@ static int run_sequential(int iters) {
         pid_t pid = fork();
         if (pid < 0) { printf("soak_reap: fork FAILED iter %d errno=%d\n", i, errno); break; }
         if (pid == 0) {
-            if (!clean && sp[0] >= 0) close(sp[0]);
-            victim_main(mode, 0, clean ? -1 : sp[1]);
+            /* A clean victim exits on its own -- the parent waits for it
+             * without killing it, so it must not block (it used to enter
+             * victim_block too, and the run hung at the first one). */
+            if (clean) _exit(0);
+            if (sp[0] >= 0) close(sp[0]);
+            victim_main(mode, 0, sp[1]);
             _exit(9);
         }
         if (!clean) {
