@@ -6,8 +6,10 @@
 # dynamic linker /sbin/ld64.so, libraries in /lib64 and /usr/lib64 — see
 # docs/specs/abi-amd64.md).
 #
-# It is stage 1 only: there is no 64-bit compiler that runs ON substrate.
-# It installs beside the 32-bit toolchain in $STAGE1_PREFIX; every tool is
+# It is stage 1 only.  The 64-bit compiler that runs ON substrate is stage
+# 2 of the same target, built afterwards by build64.sh
+# (TARGET_TRIPLE=x86_64-unknown-substrate contrib/build-toolchain.sh
+# --stage=2).  It installs beside the 32-bit toolchain in $STAGE1_PREFIX; every tool is
 # prefixed with its triple and each target has its own sysroot directory,
 # so neither disturbs the other.
 #

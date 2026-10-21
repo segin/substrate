@@ -16,15 +16,17 @@
 #
 # Env knobs (with defaults):
 #   STAGE1_PREFIX     /opt/substrate-toolchain
-#   STAGE2_DESTDIR    ${SUBSTRATE_TOP}/dist-overlay/dist-gcc
+#   STAGE2_DESTDIR    ${SUBSTRATE_TOP}/dist-overlay/dist-gcc, or
+#                     dist-overlay64/dist-gcc for the 64-bit target
 #   PARALLEL          $(nproc)
-#   TARGET_TRIPLE     i386-unknown-substrate.  Stage 1 (and
-#                     --target-runtime) also build
-#                     x86_64-unknown-substrate, the 64-bit cross
-#                     compiler, into the same prefix from its own build
-#                     directory, build-stage1-x86_64; see
-#                     contrib/build-toolchain64.sh for the whole
-#                     sequence.  Stage 2 is 32-bit only.
+#   TARGET_TRIPLE     i386-unknown-substrate.  Every stage also builds
+#                     x86_64-unknown-substrate: stage 1 (and
+#                     --target-runtime) the 64-bit cross compiler, into
+#                     the same prefix, stage 2 the compiler that runs on
+#                     the 64-bit image.  Each target has its own build
+#                     directories (build-stage1-x86_64,
+#                     build-stage2-x86_64); see contrib/build-toolchain64.sh
+#                     for the whole sequence.
 #   ENABLE_LANGUAGES  c                  (add "c,c++" once libstdc++
 #                                         is sortable on substrate)
 #
@@ -62,6 +64,13 @@ fi
 TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
+# HOST_LIBDIR is stage 2's --libdir, where libgcc_s, libstdc++ and GCC's
+# own lib/gcc tree go on the image.  The 64-bit image keeps the 32-bit
+# libraries in /usr/lib and the 64-bit ones in /usr/lib64.
+case "$TARGET_TRIPLE" in
+    i[3-7]86-*) OVERLAY_DIR=dist-overlay   HOST_LIBDIR=/usr/lib ;;
+    *)          OVERLAY_DIR=dist-overlay64 HOST_LIBDIR=/usr/lib64 ;;
+esac
 # Stage-2 GCC stages into its OWN DESTDIR, separate from binutils.
 # contrib/binutils/build.sh stages into ${SUBSTRATE_TOP}/dist-overlay/dist-toolchain
 # and does `rm -rf` on it; if GCC used the same directory the second
@@ -73,7 +82,10 @@ STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 # common build hosts, so a reboot deleted the staged compiler, and the next
 # image bake -- which skipped a missing staging tree with a note -- shipped
 # binutils and make but no gcc, cc1 or libgcc.
-STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-gcc}"
+#
+# The 64-bit target's stage 2 goes under dist-overlay64/, which
+# build-rootfs.sh --arch=x86_64 overlays onto rootfs64.img.
+STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/${OVERLAY_DIR}/dist-gcc}"
 ENABLE_LANGUAGES="${ENABLE_LANGUAGES:-c,c++}"
 
 # Per-target settings.  Each target builds in its own directory, so the
@@ -89,10 +101,6 @@ case "$TARGET_TRIPLE" in
         BUILD_SUFFIX="-${TARGET_TRIPLE%%-*}"
         ARCH_FLAGS= ;;
 esac
-if [ "$STAGE" = 2 ] && [ -n "$BUILD_SUFFIX" ]; then
-    echo "build.sh: stage 2 is only wired up for the 32-bit target" >&2
-    exit 2
-fi
 
 # The directory whose permissions decide whether the stage-1 install needs
 # sudo: the prefix itself when it exists, its parent otherwise.  A prefix
@@ -278,7 +286,7 @@ if [ "$STAGE" = 2 ]; then
         echo "build.sh: stage 2 needs ${TARGET_TRIPLE}-gcc from stage 1." >&2
         exit 1
     fi
-    BUILD_DIR="$HERE/build-stage2"
+    BUILD_DIR="$HERE/build-stage2$BUILD_SUFFIX"
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
@@ -363,9 +371,9 @@ if [ "$STAGE" = 2 ]; then
         --host="$TARGET_TRIPLE" \
         --target="$TARGET_TRIPLE" \
         --prefix=/usr \
+        --libdir="$HOST_LIBDIR" \
         --with-sysroot=/ \
-        --with-arch=i486 \
-        --with-tune=i486 \
+        $ARCH_FLAGS \
         --enable-threads=posix \
         --enable-languages="$ENABLE_LANGUAGES" \
         $DISABLES \
@@ -424,14 +432,33 @@ if [ "$STAGE" = 2 ]; then
     #
     # because libstdc++.so.6's own DT_NEEDED on libgcc_s is not followed.
     # The rpath-link points at the target's own library directories.
-    _gcc_libdir="$STAGE2_DESTDIR/usr/lib/gcc/${TARGET_TRIPLE}/$(cat "$SRC_TREE/gcc/BASE-VER")"
-    cat > "$_gcc_libdir/specs" <<'SPECS'
+    #
+    # The 64-bit compiler also states its *libgcc spec, as the cross one
+    # does: a specs file turns off the rewrite of -lgcc into the shared or
+    # static choice, and without -lgcc_s every link misses the unwinder
+    # (see install-specs.sh).  Unlike the cross compiler it keeps
+    # -L/usr/lib64: on the image that is the target's own directory.
+    _gcc_libdir="$STAGE2_DESTDIR$HOST_LIBDIR/gcc/${TARGET_TRIPLE}/$(cat "$SRC_TREE/gcc/BASE-VER")"
+    case "$TARGET_TRIPLE" in
+        x86_64-*) _rpath_link=/usr/lib64:/lib64 ;;
+        *)        _rpath_link=/usr/lib:/lib ;;
+    esac
+    cat > "$_gcc_libdir/specs" <<SPECS
 *link:
-+ %{!static:--eh-frame-hdr} --copy-dt-needed-entries -rpath-link /usr/lib:/lib
++ %{!static:--eh-frame-hdr} --copy-dt-needed-entries -rpath-link $_rpath_link
 
 *lib:
 + -lpthread
 SPECS
+    case "$TARGET_TRIPLE" in
+    x86_64-*)
+        cat >> "$_gcc_libdir/specs" <<'SPECS'
+
+*libgcc:
+%{static|static-libgcc:-lgcc -lgcc_eh;:-lgcc_s -lgcc}
+SPECS
+        ;;
+    esac
     echo "==> installed $_gcc_libdir/specs"
 
     cat <<EOF

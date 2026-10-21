@@ -74,9 +74,6 @@ specs (`TARGET_TRIPLE=... ./install-specs.sh`) and runs
 
 ## What's deliberately deferred
 
-- **A 64-bit compiler that runs on substrate.**  The
-  `x86_64-unknown-substrate` target exists (patch 0012) as a stage-1
-  cross compiler only; stage 2 is 32-bit.
 - **libstdc++ and friends.**  `--disable-libstdcxx --disable-libgomp
   --disable-libitm --disable-libsanitizer --disable-libquadmath
   --disable-libvtv --disable-libssp` — every C++/runtime library is

@@ -1584,7 +1584,8 @@ if [ "$ARCH64" = true ]; then
     ROOT_LABEL=sub-root64
     if [ "$DO_TOOLCHAIN" = true ]; then
         echo "Error: --toolchain overlays the 32-bit stage-2 compiler;" \
-             "there is no 64-bit one." >&2
+             "the 64-bit one is overlaid with the other dist-overlay64/" \
+             "trees by --dist." >&2
         exit 1
     fi
 fi

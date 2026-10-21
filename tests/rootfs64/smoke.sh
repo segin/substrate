@@ -114,6 +114,36 @@ check "cc -m32 builds a 32-bit program that runs" \
 check "the 32-bit program uses the 32-bit runtime" \
       'ldd /tmp/smoke32 2>&1 | grep -q "/lib/libc.so.0"'
 
+# The GNU toolchain that runs on the image (stage 2 of the 64-bit target,
+# build64.sh step 1b): what a configure script looks for on PATH -- gcc,
+# cpp, as and ld by those names -- each a 64-bit program, and gcc and g++
+# building programs that run.  An image without it failed every configure.
+cat > /tmp/gnu64.cc <<'EOF'
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+int main() {
+    try { throw std::runtime_error("g++"); }
+    catch (const std::exception &e) { std::printf("%s: OK\n", e.what()); }
+    return 0;
+}
+EOF
+for t in gcc g++ cpp as ld; do
+    check "$t is on PATH" "command -v $t"
+done
+check "gcc is a 64-bit program"  'ldd /usr/bin/gcc 2>&1 | grep -q ld64.so'
+check "as is the GNU assembler"  'as --version | grep -q "GNU assembler"'
+check "ld is the GNU linker"     'ld --version | grep -q "GNU ld"'
+check "gcc builds a program that runs" \
+      'cd /tmp && gcc -O2 -o gnu64 smoke64.c && ./gnu64 | grep -q "cc: OK 42"'
+check "what gcc builds is a 64-bit program" \
+      'ldd /tmp/gnu64 2>&1 | grep -q /lib64/libc.so.0'
+check "g++ builds a program that throws and catches" \
+      'cd /tmp && g++ -o gnu64cc gnu64.cc && ./gnu64cc | grep -q "g++: OK"'
+check "cpp preprocesses" \
+      'echo "#define X 42
+X" | cpp -P - | grep -q 42'
+
 # Contrib ports built for the 64-bit target (contrib/port64.sh), where the
 # image has them.  Each of these is a different slice of the port set:
 # zsh is the login shell and pulls in ncurses and libiconv, openssl and

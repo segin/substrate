@@ -6,6 +6,8 @@
 #   1.  contrib/build-toolchain64.sh — substrate's 64-bit libraries, the
 #       x86_64-unknown-substrate cross binutils and GCC, their runtime
 #       (libgcc_s.so.1, libstdc++.so.6) and the toolchain checks.
+#   1b. contrib/build-toolchain.sh --stage=2 for the same target: the
+#       binutils and GCC that run on the image, under dist-overlay64/.
 #   2.  programs built with that toolchain, staged for the image under
 #       dist-overlay64/: the boot test's init, the toolchain test
 #       programs, and the contrib ports, built for the 64-bit target by
@@ -41,6 +43,20 @@ step() { echo ""; echo "=========================  $*  =========================
 
 step "Stage 1: 64-bit cross toolchain"
 SKIP_BUILD="$SKIP_TOOLCHAIN" contrib/build-toolchain64.sh
+
+step "Stage 1b: the native 64-bit toolchain (runs on the image)"
+# binutils and GCC built by the cross toolchain to run ON substrate -- the
+# 64-bit image's /usr/bin/gcc, as and ld, without which configure scripts
+# on it find no compiler.  A Canadian cross, as build.sh's stage 2 is for
+# the 32-bit image; both stage under dist-overlay64/, which build-rootfs.sh
+# --arch=x86_64 overlays.  SKIP_TOOLCHAIN=1 reuses an existing staging.
+if [ "$SKIP_TOOLCHAIN" = 1 ] && [ -d dist-overlay64/dist-gcc ] &&
+   [ -d dist-overlay64/dist-toolchain ]; then
+    echo "skipped (SKIP_TOOLCHAIN=1): reusing dist-overlay64/dist-{toolchain,gcc}"
+else
+    TARGET_TRIPLE=x86_64-unknown-substrate PATH="$STAGE1_PREFIX/bin:$PATH" \
+        contrib/build-toolchain.sh --stage=2
+fi
 
 step "Stage 2: programs built with the cross toolchain"
 T64="$STAGE1_PREFIX/bin/x86_64-unknown-substrate"

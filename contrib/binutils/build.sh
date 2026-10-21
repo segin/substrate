@@ -27,13 +27,17 @@
 #   STAGE1_PREFIX        install prefix for stage 1 (default
 #                        /opt/substrate-toolchain)
 #   STAGE2_DESTDIR       DESTDIR for stage-2 staging (default
-#                        ${SUBSTRATE_TOP}/dist-overlay/dist-toolchain)
-#   TARGET_TRIPLE        default i386-unknown-substrate.  Stage 1 also
-#                        builds x86_64-unknown-substrate, the 64-bit cross
-#                        toolchain, into the same prefix (the tools are
-#                        prefixed with the triple) from its own build
-#                        directory, build-stage1-x86_64.  Stage 2 is
-#                        32-bit only.
+#                        ${SUBSTRATE_TOP}/dist-overlay/dist-toolchain, or
+#                        dist-overlay64/dist-toolchain for the 64-bit
+#                        target, which build-rootfs.sh --arch=x86_64
+#                        overlays onto rootfs64.img)
+#   TARGET_TRIPLE        default i386-unknown-substrate.  Both stages also
+#                        build x86_64-unknown-substrate: stage 1 the 64-bit
+#                        cross toolchain, into the same prefix (the tools
+#                        are prefixed with the triple), stage 2 the
+#                        binutils that run on the 64-bit image.  Each
+#                        target has its own build directory
+#                        (build-stage1-x86_64, build-stage2-x86_64).
 #   PARALLEL             default $(nproc)
 #
 # Usage:
@@ -79,18 +83,28 @@ fi
 TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
-STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-toolchain}"
 
 # Each target builds in its own directory, so the two cross toolchains do
 # not wipe each other's trees.  The 32-bit one keeps the historical name.
+# HOST_CFLAGS is how the stage-2 binaries themselves are compiled: i486 for
+# the 32-bit image (see contrib/gcc/build.sh), the compiler's own x86-64
+# baseline for the 64-bit one.  The 64-bit stage 2 stages under
+# dist-overlay64/, the tree build-rootfs.sh --arch=x86_64 overlays, and
+# puts its libbfd/libopcodes archives in /usr/lib64: /usr/lib on that image
+# holds the 32-bit libraries.
 case "$TARGET_TRIPLE" in
-    i[3-7]86-*) BUILD_SUFFIX= ;;
-    *)          BUILD_SUFFIX="-${TARGET_TRIPLE%%-*}" ;;
+    i[3-7]86-*)
+        BUILD_SUFFIX=
+        OVERLAY_DIR=dist-overlay
+        HOST_LIBDIR=/usr/lib
+        HOST_CFLAGS="-march=i486 -mtune=i486 -O2 -g" ;;
+    *)
+        BUILD_SUFFIX="-${TARGET_TRIPLE%%-*}"
+        OVERLAY_DIR=dist-overlay64
+        HOST_LIBDIR=/usr/lib64
+        HOST_CFLAGS="-O2 -g" ;;
 esac
-if [ "$STAGE" = 2 ] && [ -n "$BUILD_SUFFIX" ]; then
-    echo "build.sh: stage 2 is only wired up for the 32-bit target" >&2
-    exit 2
-fi
+STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/${OVERLAY_DIR}/dist-toolchain}"
 
 # Locate the patched source tree.  fetch.sh extracts to ./build/binutils-X.Y.Z/
 SRC_TREE="$(ls -d "$HERE"/build/binutils-*/ 2>/dev/null | head -1 || true)"
@@ -165,7 +179,7 @@ EOF
         exit 1
     fi
 
-    BUILD_DIR="$HERE/build-stage2"
+    BUILD_DIR="$HERE/build-stage2$BUILD_SUFFIX"
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
@@ -180,6 +194,7 @@ EOF
         --host="$TARGET_TRIPLE" \
         --target="$TARGET_TRIPLE" \
         --prefix=/usr \
+        --libdir="$HOST_LIBDIR" \
         --sysconfdir=/etc \
         --localstatedir=/var \
         --with-sysroot=/ \
@@ -196,8 +211,8 @@ EOF
         OBJDUMP="${TARGET_TRIPLE}-objdump" \
         RANLIB="${TARGET_TRIPLE}-ranlib" \
         STRIP="${TARGET_TRIPLE}-strip" \
-        CFLAGS="-march=i486 -mtune=i486 -O2 -g" \
-        CXXFLAGS="-march=i486 -mtune=i486 -O2 -g"
+        CFLAGS="$HOST_CFLAGS" \
+        CXXFLAGS="$HOST_CFLAGS"
 
     echo "==> Building (-j $PARALLEL)"
     make -j "$PARALLEL"

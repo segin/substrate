@@ -71,8 +71,16 @@ libraries come from `/lib64` and `/usr/lib64`.  It is a separate target,
 not a multilib of the 32-bit one, and the two do not share a build
 directory, a sysroot or a tool name.
 
-There is no 64-bit stage 2: nothing 64-bit that runs on substrate is a
-compiler.
+Its stage 2 is the compiler on `rootfs64.img`: `TARGET_TRIPLE=x86_64-unknown-substrate`
+to `contrib/build-toolchain.sh --stage=2` builds binutils and GCC as
+64-bit substrate programs (Canadian cross, `--prefix=/usr`, build trees in
+`build-stage2-x86_64/`) and stages them in `dist-overlay64/dist-toolchain`
+and `dist-overlay64/dist-gcc`.  `build64.sh` runs it after the cross
+toolchain (step 1b), and `build-rootfs.sh --arch=x86_64` overlays both
+trees with the other `dist-overlay64/` ports, so the image has
+`/usr/bin/gcc`, `g++`, `cpp`, `as` and `ld`.  Its `specs` carries the
+same `*libgcc` rule as the cross compiler's, and `-rpath-link
+/usr/lib64:/lib64`.
 
 The script's order is the 32-bit bootstrap's, in one place:
 
