@@ -887,16 +887,18 @@ static int sc9g_memset_only(void) {
     return reports > 0 ? 1 : 0;
 }
 
-/* sc9d: handler that calls _exit(42) on first SIGALRM.  If the
+/* sc9d: handler that calls _exit(0) on first SIGALRM.  If the
  * corruption happens during the iret-to-handler transition (i.e.
  * before the handler body runs at all), we'll still see byte
  * damage in the live blocks visible to the EXIT path.  But the
  * test's main process forked us, and we _exit from a signal
  * handler — async-signal-safe — so the child status reflects
- * whether we got to _exit cleanly or crashed before. */
+ * whether we got to _exit cleanly or crashed before.  The status is
+ * 0 because run_scenario() passes exactly that; it used to be 42,
+ * which counted as a failure on every system, Linux included. */
 static void sc9d_exit_handler(int sig) {
     (void)sig;
-    _exit(42);   /* async-signal-safe per POSIX */
+    _exit(0);    /* async-signal-safe per POSIX */
 }
 
 static int sc9d_exit_in_handler(void) {
@@ -914,9 +916,9 @@ static int sc9d_exit_in_handler(void) {
     if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
 
     /* Pre-allocate a block + canary it.  Then spin for >50ms so the
-     * timer fires.  The exit handler _exit(42)s the child without
+     * timer fires.  The exit handler _exit(0)s the child without
      * touching any userland state, so the parent's waitpid sees
-     * status 42 if the iret-to-handler-PC transition itself is
+     * status 0 if the iret-to-handler-PC transition itself is
      * clean.  A crash before _exit indicates iret corrupts state. */
     void *p = malloc(512);
     if (!p) FAIL("malloc");
