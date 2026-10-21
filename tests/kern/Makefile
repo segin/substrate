@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# shadowchain: freeing a long COW shadow chain doesn't overflow the kstack.
+shadowchain: shadowchain.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # connfastclose: connect() returns when the server accepts and closes at once.
 connfastclose: connfastclose.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@

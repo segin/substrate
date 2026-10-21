@@ -192,9 +192,16 @@ int vm_object_try_reference(vm_object_t *object) {
     }
 }
 
+/*
+ * Drop a reference; at zero, free the object and then drop its reference on
+ * the object it shadows -- iteratively.  This used to recurse into the
+ * shadow, one frame per link: a process that forks over and over (a shell
+ * running a test loop) builds a backing chain hundreds long, and freeing it
+ * ran a 16 KiB kernel stack off its base into the page below, overwriting
+ * whatever lived there (block-cache headers, corrupting the cache's queues).
+ */
 void vm_object_deallocate(vm_object_t *object) {
-    if (!object) return;
-
+  while (object) {
     /* Tripwire: a live vm_object must carry VM_OBJECT_MAGIC.  A bad
      * value means either a double-free (VM_OBJECT_DEAD) or that the
      * struct has been scribbled by a stray write. */
@@ -211,7 +218,9 @@ void vm_object_deallocate(vm_object_t *object) {
                 (void *)object, new_ref);
         panic("vm_object ref_count underflow");
     }
-    if (new_ref == 0) {
+    if (new_ref != 0)
+        return;
+    {
         vm_page_t *pages;
 
         /* Evict from the shared-file-object cache BEFORE teardown so a
@@ -253,9 +262,6 @@ void vm_object_deallocate(vm_object_t *object) {
             p = next;
         }
 
-        if (shadow) {
-            vm_object_deallocate(shadow);
-        }
         if (pager) {
             vm_pager_deallocate(pager);
         }
@@ -268,7 +274,12 @@ void vm_object_deallocate(vm_object_t *object) {
         } else {
             kfree(object, sizeof(vm_object_t));
         }
+
+        /* Our reference on the shadow goes next -- by looping, not
+         * recursing (see above). */
+        object = shadow;
     }
+  }
 }
 
 void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
