@@ -651,6 +651,9 @@ int pty_bsd_master_open(struct fs_node *node) { (void)node; return -1; }
 int pty_is_bsd_master(struct fs_node *node) { (void)node; return 0; }
 int pty_set_nonblock(struct fs_node *node, int on) { (void)node; (void)on; return 0; }
 
+/* --- devfs (vfs/vfs.h) --- */
+int devfs_is_ctty_alias(const fs_node_t *node) { (void)node; return 0; }
+
 /* --- scheduler reboot/halt hooks (kern/sched.h) --- */
 void sched_halt_userspace(thread_t *keep) { (void)keep; }
 void sched_park_if_reboot_frozen(void) { }

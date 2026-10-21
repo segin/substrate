@@ -76,6 +76,10 @@ static fs_node_t tty_node = {
     .poll = tty_poll_proxy
 };
 
+int devfs_is_ctty_alias(const fs_node_t *node) {
+    return node == &tty_node;
+}
+
 typedef struct devfs_entry {
     char name[128];
     fs_node_t *node;

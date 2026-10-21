@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# ttynxio: /dev/tty without a controlling terminal is ENXIO.
+ttynxio: ttynxio.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # ptyctty: opening a pty slave makes it a new session's controlling tty.
 ptyctty: ptyctty.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@

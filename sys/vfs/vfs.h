@@ -304,6 +304,10 @@ void vfs_init(void);
 
 void devfs_init(void);
 void devfs_register_device(fs_node_t *node);
+/* Is `node` /dev/tty, the caller's-controlling-terminal alias?  Its open
+ * must fail with ENXIO when there is none, which the void open callback
+ * cannot report, so kern_open_from asks. */
+int devfs_is_ctty_alias(const fs_node_t *node);
 /*
  * Personality-scoped registration.  perso_mask == 0 means universal (the
  * default; identical to the non-_perso variants).  A non-zero mask is a

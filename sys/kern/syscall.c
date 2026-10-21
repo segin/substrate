@@ -1024,6 +1024,15 @@ static int kern_open_node(fs_node_t *node, int fd, const char *path, int flags,
         f->f_type = DTYPE_PIPE;   /* a FIFO is not seekable (lseek -> ESPIPE) */
     }
 
+    /* /dev/tty with no controlling terminal: ENXIO (POSIX), which is how
+     * ssh, sudo and getpass(3) learn there is no terminal to talk to.
+     * It used to open, and its I/O went to the console instead. */
+    if (devfs_is_ctty_alias(open_node) && !current_process->tty) {
+        file_free(f);
+        proc_clear_fd(current_process, fd);
+        return -ENXIO;
+    }
+
     /* BSD pty master (/dev/pty[pq][0-9a-f]): claiming it must fail with
      * -EIO when already open so a legacy pty scan loop moves on — the
      * void node->open callback can't report that, so claim it here. */
