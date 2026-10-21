@@ -18,6 +18,17 @@
 # unset, so an explicit --build=/--host= argument, or a caller-set
 # environment value, still takes precedence.
 
-: "${ac_cv_build=i386-unknown-substrate}"
-: "${ac_cv_host=i386-unknown-substrate}"
-: "${ac_cv_target=i386-unknown-substrate}"
+#
+# The tuple is the machine's own: both images install this file, and the
+# 64-bit one's gcc is x86_64-unknown-substrate.  Telling configure it is
+# building on i386 there makes it describe a machine its compiler does not
+# target.
+
+case "$(uname -m 2>/dev/null)" in
+    x86_64|amd64) _substrate_tuple=x86_64-unknown-substrate ;;
+    *)            _substrate_tuple=i386-unknown-substrate ;;
+esac
+: "${ac_cv_build=$_substrate_tuple}"
+: "${ac_cv_host=$_substrate_tuple}"
+: "${ac_cv_target=$_substrate_tuple}"
+unset _substrate_tuple
