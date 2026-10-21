@@ -53,6 +53,17 @@ static uint64_t tsc_hz             = 0;       /* 0 = uncalibrated, fall back */
 static uint64_t tsc_at_last_tick   = 0;
 static uint64_t tsc_ns_per_tick    = 0;       /* 1e9 / HZ, precomputed */
 
+/*
+ * Odd while the timer ISR is updating `ticks` and `tsc_at_last_tick`, even
+ * otherwise; uptime_ns_now() retries until it reads the same even value on
+ * both sides.  The two used to be read one after the other with nothing to
+ * tie them together, so a tick landing between the reads paired the old
+ * tick count with the new snapshot -- a time almost a whole tick in the
+ * past -- and CLOCK_MONOTONIC ran backwards by up to 4 ms.  (It also keeps
+ * a 64-bit `ticks` from being read torn on i386.)
+ */
+static volatile uint32_t tick_seq  = 0;
+
 
 
 #define PIT_FREQUENCY 1193182U
@@ -183,16 +194,13 @@ void timer_busywait_us(unsigned us) {
 }
 
 /*
- * Sub-tick nanoseconds since the most recent timer tick, computed from
- * the TSC.  Returns 0 if calibration hasn't run or TSC isn't available.
- * Clamped to one tick's worth of nanoseconds so a missed snapshot
- * doesn't make tv_nsec overflow into next-second territory.
+ * Sub-tick nanoseconds from the tick's TSC snapshot `snap` to `now`.
+ * 0 if calibration hasn't run or the TSC isn't available.  Clamped to one
+ * tick's worth of nanoseconds so a missed snapshot doesn't make tv_nsec
+ * overflow into next-second territory.
  */
-static uint64_t subtick_nsec(void) {
-    if (tsc_hz == 0) return 0;
-    uint64_t snap = tsc_at_last_tick;
-    uint64_t now  = i386_cpu_cycle_counter();
-    if (now <= snap) return 0;
+static uint64_t subtick_ns(uint64_t snap, uint64_t now) {
+    if (tsc_hz == 0 || now <= snap) return 0;
     uint64_t delta = now - snap;
     /* ns = delta * 1e9 / tsc_hz; avoid overflow by using a slightly
      * lossier scaled form. */
@@ -202,9 +210,26 @@ static uint64_t subtick_nsec(void) {
 }
 
 /* Nanoseconds since boot: the tick count refined by the TSC between ticks
- * (tick resolution when there is no TSC).  Monotonic across ticks. */
+ * (tick resolution when there is no TSC), read consistently -- see
+ * tick_seq. */
+static uint64_t uptime_ns_now(void) {
+    uint32_t seq;
+    uint64_t t, snap, now;
+
+    do {
+        seq = tick_seq;
+        __asm__ volatile("" ::: "memory");
+        t    = ticks;
+        snap = tsc_at_last_tick;
+        now  = tsc_hz ? i386_cpu_cycle_counter() : 0;
+        __asm__ volatile("" ::: "memory");
+    } while ((seq & 1) || seq != tick_seq);
+    return t * (1000000000ULL / HZ) + subtick_ns(snap, now);
+}
+
+/* Monotonic across ticks. */
 uint64_t get_uptime_ns(void) {
-    return get_ticks() * (1000000000ULL / HZ) + subtick_nsec();
+    return uptime_ns_now();
 }
 
 static int proc_itimer_index(int which) {
@@ -494,18 +519,10 @@ int kern_stime(time_t *t) {
 int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -EFAULT;
 
-    time_t total_seconds = boot_time + (ticks / HZ);
-    uint64_t base_usec = ((ticks % HZ) * 1000000ULL) / HZ;
-    base_usec += subtick_nsec() / 1000ULL;
-    if (base_usec >= 1000000ULL) {
-        /* Sub-tick overflowed past a full second — unlikely (capped to
-         * <tick worth of ns) but defensive. */
-        total_seconds += (time_t)(base_usec / 1000000ULL);
-        base_usec %= 1000000ULL;
-    }
+    uint64_t ns = uptime_ns_now();
 
-    tv->tv_sec = total_seconds;
-    tv->tv_usec = (suseconds_t)base_usec;
+    tv->tv_sec = boot_time + (time_t)(ns / 1000000000ULL);
+    tv->tv_usec = (suseconds_t)((ns % 1000000000ULL) / 1000ULL);
 
     if (tz) {
         tz->tz_minuteswest = 0;
@@ -561,24 +578,18 @@ int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
 
     time_t sec_base;
     if (clk_id == CLOCK_REALTIME) {
-        sec_base = boot_time + (ticks / HZ);
+        sec_base = boot_time;
     } else if (clk_id == CLOCK_MONOTONIC) {
-        sec_base = (time_t)(ticks / HZ);
+        sec_base = 0;
     } else {
         /* Unknown clock id: POSIX requires EINVAL (a bare -1 would become
          * EPERM in libc — see OPTS clock_gettime/8-1,8-2). */
         return -EINVAL;
     }
 
-    uint64_t nsec = ((ticks % HZ) * 1000000000ULL) / HZ;
-    nsec += subtick_nsec();
-    if (nsec >= 1000000000ULL) {
-        sec_base += (time_t)(nsec / 1000000000ULL);
-        nsec %= 1000000000ULL;
-    }
-
-    tp->tv_sec  = sec_base;
-    tp->tv_nsec = (long)nsec;
+    uint64_t ns = uptime_ns_now();
+    tp->tv_sec  = sec_base + (time_t)(ns / 1000000000ULL);
+    tp->tv_nsec = (long)(ns % 1000000000ULL);
     return 0;
 }
 
@@ -1208,11 +1219,15 @@ void timer_tick_context(int is_usermode) {
      * preemption, but they must not multiply global timekeeping.
      */
     if (cpu_id == 0) {
+        tick_seq++;                             /* odd: readers retry */
+        __asm__ volatile("" ::: "memory");
         ticks++;
+        if (tsc_hz != 0) tsc_at_last_tick = i386_cpu_cycle_counter();
+        __asm__ volatile("" ::: "memory");
+        tick_seq++;                             /* even: consistent */
         /* Maintain wall-clock seconds incrementally (avoids a per-call
          * 64-bit divide in get_time/get_uptime — see uptime_secs above). */
         if (++tick_in_sec >= HZ) { tick_in_sec = 0; uptime_secs++; }
-        if (tsc_hz != 0) tsc_at_last_tick = i386_cpu_cycle_counter();
         sched_tick();
         hw_text_tick();
         fb_console_tick();

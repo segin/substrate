@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# clockmono: CLOCK_MONOTONIC and gettimeofday never step backwards.
+clockmono: clockmono.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # raw6lo: an ICMPv6 raw socket pings ::1; v6 stream/dgram still refused.
 # Substrate only; run as root.
 raw6lo: raw6lo.c
