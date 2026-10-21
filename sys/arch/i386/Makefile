@@ -38,8 +38,15 @@ zimage_header.o: zimage_header.S
 %.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Read every object's -MMD deps, ../x86-common/ ones included: Makefile.inc
+# only globs *.d and */*.d under this directory, so trap.o and fpu.o --
+# which embed thread_t's layout -- were never rebuilt when proc.h changed,
+# and a field added mid-thread_t left the page-fault handler reading the
+# wrong offsets (a kernel write to a copy-on-write page then panicked).
+-include $(OBJS:.o=.d)
+
 clean:
-	rm -f *.o zimage_header.bin
+	rm -f *.o *.d zimage_header.bin ../x86-common/*.o ../x86-common/*.d
 
 install:
 	# Nothing to install yet
