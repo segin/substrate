@@ -2696,9 +2696,15 @@ int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     ret = tcp_connect_start(p, raddr, rport);
     if (ret) { tcp_unhold(p); return ret; }
     /* Wait — the retransmit kthread enforces the overall timeout via
-     * TCP_MAX_RETX.  Loop on state changes.  */
+     * TCP_MAX_RETX.  Loop on state changes.
+     *
+     * Any synchronized state means the handshake completed, not only
+     * ESTABLISHED: a peer that accepts and closes at once (a server that
+     * forks a session which exits) can carry the connection on to
+     * CLOSE_WAIT before this thread runs again, and testing for
+     * ESTABLISHED alone then waited for ever. */
     for (;;) {
-        if (p->state == TCP_ESTABLISHED) { ret = 0; break; }
+        if (tcp_is_synchronized(p)) { ret = 0; break; }
         if (p->state == TCP_CLOSED) {
             ret = p->so_error ? -p->so_error : -ECONNREFUSED;
             break;
@@ -2718,7 +2724,7 @@ int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
 int tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     int rc = tcp_connect_start(p, raddr, rport);
     if (rc) return rc;
-    if (p->state == TCP_ESTABLISHED) return 0;
+    if (tcp_is_synchronized(p)) return 0;       /* see tcp_connect */
     if (p->state == TCP_CLOSED) {
         return p->so_error ? -p->so_error : -ECONNREFUSED;
     }

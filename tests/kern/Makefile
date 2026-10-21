@@ -314,6 +314,11 @@ ptyvmin: ptyvmin.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# connfastclose: connect() returns when the server accepts and closes at once.
+connfastclose: connfastclose.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 # lockyield: a poll server is served promptly while 64 clients flood it.
 lockyield: lockyield.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
