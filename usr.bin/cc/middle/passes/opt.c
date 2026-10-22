@@ -261,6 +261,16 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         if (dst >= 0 && (size_t)dst < (size_t)f->value_count) {
             vt = cc_ssa_value_class(f, dst);
         }
+        if (!fold_branches && dst >= 0 && vt == CC_VAL_F64) {
+            /*
+             * Before legalization (cc_fold_constant_values()) only integers
+             * are folded: a floating value computed on the host would take
+             * its precision -- x87's excess precision on a 32-bit host --
+             * and -O0 output would depend on where cc was built.
+             */
+            st[dst].known = 0;
+            continue;
+        }
 
         switch (in->op) {
         case CC_SSA_CONST:
