@@ -1,5 +1,6 @@
 #include "as_cfi.h"
 
+#include "as_expr.h"
 #include "as_x86_regs.h"
 
 #include <ctype.h>
@@ -192,19 +193,18 @@ static const char *arg_of(const as_directive_t *d, size_t i) {
     return a;
 }
 
-/* A number of a directive: 0 and the number, or -1. */
+/*
+ * A number of a directive, written as a constant expression -- Linux's
+ * vDSO has `.cfi_def_cfa esp, IA32_SIGFRAME_sigcontext - 4`, a number
+ * from asm-offsets less 4: 0 and the number, or -1.
+ */
 static int number_of(const as_directive_t *d, size_t i, long long *out) {
     const char *a = arg_of(d, i);
-    char *end = NULL;
 
     if (*a == '\0') {
         return -1;
     }
-    *out = strtoll(a, &end, 0);
-    while (end != NULL && isspace((unsigned char)*end)) {
-        end++;
-    }
-    return end == NULL || *end != '\0' ? -1 : 0;
+    return as_expr_eval_string(a, NULL, NULL, out) == AS_EXPR_EVAL_OK ? 0 : -1;
 }
 
 /*
