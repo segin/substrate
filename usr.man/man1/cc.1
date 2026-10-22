@@ -229,6 +229,17 @@ emits an inline-only definition as a local copy, which
 and up inline where they can, as any
 .Ic static inline
 function.
+.It Fl ftrivial-auto-var-init Ns = Ns Cm zero|uninitialized
+With
+.Cm zero ,
+an automatic variable declared without an initializer starts as zero:
+a structure, union or array has every byte cleared, as a scalar always
+has.  A variable-length array is not cleared.
+.Cm uninitialized ,
+the default, leaves an aggregate as the stack had it.
+gcc's
+.Cm pattern
+is refused.
 .It Fl shared
 Link shared object.
 .It Fl pthread

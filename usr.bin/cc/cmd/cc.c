@@ -92,6 +92,7 @@ typedef struct {
   int code16; /* -m16 */
   int i386_regparm; /* -mregparm=N */
   int i386_reg_struct_return; /* -freg-struct-return, -fpcc-struct-return */
+  int trivial_auto_var_init_zero; /* -ftrivial-auto-var-init=zero */
 
   const char *std;
   const char *opt_level;
@@ -179,6 +180,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->i386_fpmath = (cc_fpmath_t)o->i386_fp_math_mode;
   out->i386_regparm = o->i386_regparm;
   out->i386_reg_struct_return = o->i386_reg_struct_return;
+  out->trivial_auto_var_init_zero = o->trivial_auto_var_init_zero;
 }
 
 
@@ -1242,6 +1244,26 @@ static int opt_regparm(cc_opts_t *o, const driver_opt_t *d, const char *as, cons
   return 0;
 }
 
+/**
+ * -ftrivial-auto-var-init=zero|uninitialized: whether an automatic variable
+ * with no initializer starts as zero, as Linux builds with.  gcc's third
+ * value, pattern, is refused.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_trivial_auto_var_init(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val != NULL && strcmp(val, "zero") == 0) {
+    o->trivial_auto_var_init_zero = 1;
+  } else if (val != NULL && strcmp(val, "uninitialized") == 0) {
+    o->trivial_auto_var_init_zero = 0;
+  } else {
+    fprintf(stderr, "cc: error: %s=%s: the argument must be zero or uninitialized\n", as, val != NULL ? val : "");
+    return -1;
+  }
+  return 0;
+}
+
 /*
  * The options cc knows.  Words (FLAG, VALUE) are tried first; then the
  * prefixes (LETTER, PREFIX) in table order, so a longer prefix must come
@@ -1289,6 +1311,7 @@ static const driver_opt_t options[] = {
     {"-mavx -mno-avx -mavx2 -mno-avx2", OPT_FLAG, FWD_C | FWD_CPP, NULL, 0, 0},
     {"-mfpmath", OPT_VALUE, FWD_C, opt_fpmath, 0, 0},
     {"-mregparm", OPT_VALUE, FWD_C, opt_regparm, 0, 0},
+    {"-ftrivial-auto-var-init", OPT_VALUE, FWD_C, opt_trivial_auto_var_init, 0, 0},
     /* i386: structures of 1, 2, 4 or 8 bytes come back in %eax(:%edx), one float or double in %st0 (gcc) */
     {"-freg-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 1},
     {"-fpcc-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 0},

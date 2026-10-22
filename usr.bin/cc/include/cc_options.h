@@ -41,6 +41,7 @@ typedef struct {
     int i386_reg_struct_return; /**< -freg-struct-return: small structures returned in registers, not memory */
     const char *dump_ir;     /**< -fdump-ir: the dump files' name without .ir; NULL for none */
     int dump_ir_all;         /**< -fdump-ir=all: one dump after each pass, not only the last */
+    int trivial_auto_var_init_zero; /**< -ftrivial-auto-var-init=zero: an automatic aggregate with no initializer is zeroed */
 } cc_options_t;
 
 /**

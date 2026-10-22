@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 static cc_options_t g_current = {
-    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, CC_FPMATH_AUTO, 0, 0, NULL, 0,
+    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, CC_FPMATH_AUTO, 0, 0, NULL, 0, 0,
 };
 
 /**
@@ -37,6 +37,7 @@ void cc_options_init(cc_options_t *o) {
     o->i386_reg_struct_return = 0;
     o->dump_ir = NULL;
     o->dump_ir_all = 0;
+    o->trivial_auto_var_init_zero = 0;
 }
 
 /**
