@@ -930,6 +930,7 @@ test:
 	sh run_gnu_inline.sh
 	sh run_div64_pow2.sh
 	sh run_inline_dead_call.sh
+	sh run_pic_i386.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh

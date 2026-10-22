@@ -1933,6 +1933,36 @@ int module_symbol_is_extern_global(const cc_ssa_module_t *m, const char *sym) {
     return 0;
 }
 
+int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
+    const cc_attr_flags_t local_vis = CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+    size_t n;
+    size_t i;
+
+    if (m == NULL || sym == NULL || sym[0] == '\0') {
+        return 0;
+    }
+    if (sym[0] == '.') {
+        return 1; /* a local label: a string literal's, a constant's */
+    }
+    /* `name+8`: the symbol is the name */
+    n = strcspn(sym, "+-");
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+
+        if (g->name != NULL && strlen(g->name) == n && strncmp(g->name, sym, n) == 0) {
+            return (g->storage & CC_STORAGE_STATIC) != 0 || (g->attr_flags & local_vis) != 0;
+        }
+    }
+    for (i = 0; i < m->func_count; ++i) {
+        const cc_ssa_function_t *fn = &m->funcs[i];
+
+        if (fn->name != NULL && strlen(fn->name) == n && strncmp(fn->name, sym, n) == 0) {
+            return (fn->storage & CC_STORAGE_STATIC) != 0 || (fn->attr_flags & local_vis) != 0;
+        }
+    }
+    return 0;
+}
+
 int slot_off(const slot_layout_t *lay, int v) {
     return -lay->slot_size * (lay->slot_of[v] + 1);
 }

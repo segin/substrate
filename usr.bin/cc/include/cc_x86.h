@@ -119,6 +119,12 @@ void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, co
                                const char *restore_sec);
 /** Whether @p sym is a global the module declares but does not define. */
 int module_symbol_is_extern_global(const cc_ssa_module_t *m, const char *sym);
+/**
+ * Whether @p sym (`name` or `name+offset`) binds within the object being made, so position-independent code
+ * reaches it at a fixed offset from the GOT rather than through a GOT entry: a local label, a static object or
+ * function of the module, or one of hidden, protected or internal visibility, defined here or declared so.
+ */
+int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym);
 
 /* common.c: the frame */
 

@@ -21,6 +21,8 @@
 /** The registers the integer register cache allocates from. */
 static const char *const emit_regs32[] = {"%eax", "%ecx", "%edx"};
 
+static void emit_i386_call_sym(FILE *fp, const char *sym);
+
 /*
  * Where the first parameter is: above the return address, and above the
  * hidden pointer a function returning a struct is passed first.
@@ -453,7 +455,7 @@ static void emit_i386_load_half(FILE *fp, const cc_ssa_function_t *f, const slot
     fprintf(fp, "\tmovzwl (%s), %%eax\n", reg);
     fprintf(fp, "\tsubl $12, %%esp\n");
     fprintf(fp, "\tpushl %%eax\n");
-    fprintf(fp, "\tcall __extendhfdf2\n");
+    emit_i386_call_sym(fp, "__extendhfdf2");
     fprintf(fp, "\taddl $16, %%esp\n");
     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, dst));
 }
@@ -470,7 +472,7 @@ static void emit_i386_store_half(FILE *fp, const cc_ssa_function_t *f, const slo
     fprintf(fp, "\tmovl %s, 8(%%esp)\n", reg);
     fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, v));
     fprintf(fp, "\tfstpl (%%esp)\n");
-    fprintf(fp, "\tcall __truncdfhf2\n");
+    emit_i386_call_sym(fp, "__truncdfhf2");
     fprintf(fp, "\tmovl 8(%%esp), %%edx\n");
     fprintf(fp, "\taddl $16, %%esp\n");
     fprintf(fp, "\tmovd %%xmm0, %%eax\n");
@@ -584,7 +586,7 @@ static void emit_i386_call_memcpy(FILE *fp, long size) {
             pushed++;
         }
     }
-    fprintf(fp, "\tcall memcpy\n");
+    emit_i386_call_sym(fp, "memcpy");
     if (pushed > 0) {
         fprintf(fp, "\taddl $%d, %%esp\n", pushed * 4);
     }
@@ -664,27 +666,148 @@ static void emit_i386_addr_of_local(FILE *fp, const cc_ssa_function_t *f, const 
     fprintf(fp, "\tleal %d(%%ebp), %s\n", slot_off(lay, in->lhs), ist->regs[rd]);
 }
 
-static void emit_i386_addr_of_global_sym(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                         const cc_ssa_instr_t *in) {
+/*
+ * Position-independent code (-fPIC) reaches its data through the GOT: the GOT's address is the pc, from a
+ * thunk that returns its return address, plus _GLOBAL_OFFSET_TABLE_ (R_386_GOTPC); a symbol that binds within
+ * the object is at a fixed offset from it (sym@GOTOFF), another's address is in its GOT entry (sym@GOT).  A
+ * thunk per register is written once in each object that uses it, local to the object.
+ */
+
+/** The registers whose pc thunk this object uses, by bit (i386_thunk_bit()). */
+static unsigned i386_pc_thunks;
+/** The module being written, for where a symbol binds (module_symbol_binds_locally()). */
+static const cc_ssa_module_t *i386_module;
+
+/** Whether the code is position-independent. */
+static int i386_pic(void) {
+    const cc_options_t *opts = cc_options_current();
+
+    return opts != NULL && opts->pic;
+}
+
+/** The register names a pc thunk is made for, as `%eax` is written, and the thunk's suffix. */
+static const char *const i386_thunk_regs[] = {"%eax", "%ebx", "%ecx", "%edx", "%esi", "%edi", "%ebp"};
+
+/** The bit of register @p reg in i386_pc_thunks, or 0 for one no thunk is made for. */
+static unsigned i386_thunk_bit(const char *reg) {
+    size_t i;
+
+    for (i = 0; i < sizeof(i386_thunk_regs) / sizeof(i386_thunk_regs[0]); ++i) {
+        if (strcmp(i386_thunk_regs[i], reg) == 0) {
+            return 1u << i;
+        }
+    }
+    return 0;
+}
+
+/** Put the GOT's address in register @p reg (`%ecx`): its pc thunk's return address plus the GOT's offset. */
+static void emit_i386_got_base(FILE *fp, const char *reg) {
+    i386_pc_thunks |= i386_thunk_bit(reg);
+    fprintf(fp, "\tcall __x86.get_pc_thunk.%s\n", reg + 2);
+    fprintf(fp, "\taddl $_GLOBAL_OFFSET_TABLE_, %s\n", reg);
+}
+
+/** Write the pc thunks this object used, each local to it, and go back to .text. */
+static void emit_i386_pc_thunks(FILE *fp) {
+    size_t i;
+
+    for (i = 0; i < sizeof(i386_thunk_regs) / sizeof(i386_thunk_regs[0]); ++i) {
+        const char *reg = i386_thunk_regs[i];
+
+        if ((i386_pc_thunks & (1u << i)) == 0) {
+            continue;
+        }
+        fprintf(fp, "\n\t.text\n");
+        fprintf(fp, ".type __x86.get_pc_thunk.%s, @function\n", reg + 2);
+        fprintf(fp, "__x86.get_pc_thunk.%s:\n", reg + 2);
+        fprintf(fp, "\tmovl (%%esp), %s\n", reg);
+        fprintf(fp, "\tret\n");
+        fprintf(fp, ".size __x86.get_pc_thunk.%s, .-__x86.get_pc_thunk.%s\n", reg + 2, reg + 2);
+    }
+    i386_pc_thunks = 0;
+}
+
+/**
+ * Write symbol reference @p sym (`name` or `name+offset`) relocated as @p kind (`GOTOFF`, `GOT`): gas takes the
+ * relocation after the name, the offset after that.
+ */
+static void emit_i386_sym_reloc(FILE *fp, const char *sym, const char *kind) {
+    size_t n = strcspn(sym, "+-");
+
+    fprintf(fp, "%.*s@%s%s", (int)n, sym, kind, sym + n);
+}
+
+/**
+ * The address of @p sym into register @p reg: an immediate, or under -fPIC the GOT's address plus the
+ * symbol's offset from it when it binds within the object, else its GOT entry (and its offset added).
+ */
+static void emit_i386_symbol_address(FILE *fp, const cc_ssa_module_t *m, const char *sym, const char *reg) {
+    if (!i386_pic()) {
+        fprintf(fp, "\tmovl $%s, %s\n", sym, reg);
+        return;
+    }
+    emit_i386_got_base(fp, reg);
+    if (module_symbol_binds_locally(m, sym)) {
+        fprintf(fp, "\tleal ");
+        emit_i386_sym_reloc(fp, sym, "GOTOFF");
+        fprintf(fp, "(%s), %s\n", reg, reg);
+    } else {
+        size_t n = strcspn(sym, "+-");
+
+        fprintf(fp, "\tmovl %.*s@GOT(%s), %s\n", (int)n, sym, reg, reg);
+        if (sym[n] != '\0') {
+            fprintf(fp, "\taddl $%s, %s\n", sym + n + (sym[n] == '+' ? 1 : 0), reg);
+        }
+    }
+}
+
+/**
+ * A direct call of @p sym.  Under -fPIC one that may bind outside the object goes through its PLT entry,
+ * which finds the GOT in %ebx (the i386 psABI): %ebx is loaded first.  It is callee-saved and the
+ * allocator never gives it out, so the function saves it on entry and restores it on return
+ * (i386_pic_saves_ebx).
+ */
+static void emit_i386_call_sym(FILE *fp, const char *sym) {
+    if (i386_pic() && !module_symbol_binds_locally(i386_module, sym)) {
+        emit_i386_got_base(fp, "%ebx");
+        fprintf(fp, "\tcall %s@PLT\n", sym);
+        return;
+    }
+    fprintf(fp, "\tcall %s\n", sym);
+}
+
+static void emit_i386_addr_of_global_sym(FILE *fp, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
+                                         const slot_layout_t *lay, int_reg_state_t *ist, const cc_ssa_instr_t *in) {
     int rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
-    fprintf(fp, "\tmovl $%s, %s\n", in->sym, ist->regs[rd]);
+
+    emit_i386_symbol_address(fp, m, in->sym, ist->regs[rd]);
 }
 
 static void emit_i386_addr_of_local_label(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                                           const cc_ssa_instr_t *in) {
     int rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
+
+    if (i386_pic()) {
+        /* a label of this function: at a fixed offset from the GOT */
+        emit_i386_got_base(fp, ist->regs[rd]);
+        fprintf(fp, "\tleal ");
+        emit_local_label(fp, f->name, in->label);
+        fprintf(fp, "@GOTOFF(%s), %s\n", ist->regs[rd], ist->regs[rd]);
+        return;
+    }
     fprintf(fp, "\tmovl $");
     emit_local_label(fp, f->name, in->label);
     fprintf(fp, ", %s\n", ist->regs[rd]);
 }
 
-static void emit_i386_addr_of_string_label(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                           int dst, size_t fn_index, size_t instr_index) {
+static void emit_i386_addr_of_string_label(FILE *fp, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
+                                           const slot_layout_t *lay, int_reg_state_t *ist, int dst, size_t fn_index,
+                                           size_t instr_index) {
     char label[96];
     int rd;
     snprintf(label, sizeof(label), ".L__cc_str_%zu_%zu", fn_index, instr_index);
     rd = int_regs_define(fp, f, lay, ist, dst, -1, -1);
-    fprintf(fp, "\tmovl $%s, %s\n", label, ist->regs[rd]);
+    emit_i386_symbol_address(fp, m, label, ist->regs[rd]);
 }
 
 static void emit_i386_load_scalar_indirect(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, int_reg_state_t *ist,
@@ -1097,7 +1220,7 @@ static void emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const sl
             /* a GNU nested function's environment, in the static chain register */
             emit_i386_load_int_value_to_reg(fp, f, lay, in->call_chain - 1, "%ecx");
         }
-        fprintf(fp, "\tcall %s\n", in->sym);
+        emit_i386_call_sym(fp, in->sym);
     }
 }
 
@@ -1279,6 +1402,7 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
     const cc_options_t *opts = cc_options_current();
     size_t i;
 
+    i386_module = m;
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
         const char *func_sec = (f->attr_section != NULL && f->attr_section[0] != '\0') ? f->attr_section : ".text";
@@ -1326,6 +1450,11 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
             }
         }
         if (cc_backend_checked_frame_add(&frame, 16, diag, "i386 call scratch area") != 0) {
+            slot_layout_free(&lay);
+            return -1;
+        }
+        /* -fPIC: %ebx, which a PLT call loads with the GOT, saved above the scratch area */
+        if (i386_pic() && cc_backend_checked_frame_add(&frame, 16, diag, "i386 PIC %ebx save") != 0) {
             slot_layout_free(&lay);
             return -1;
         }
@@ -1377,6 +1506,9 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
             fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", regparm_home);
             fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", regparm_home + 4);
             fprintf(fp, "\tmovl %%ecx, %d(%%ebp)\n", regparm_home + 8);
+        }
+        if (i386_pic()) {
+            fprintf(fp, "\tmovl %%ebx, %d(%%ebp)\n", scratch_off + 16);
         }
         if (emit_dynalloc_slot_clears(fp, f, &lay, 0, diag) != 0) {
             slot_layout_free(&lay);
@@ -1513,7 +1645,7 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
             case CC_SSA_STR:
                 emit_string_literal_label(fp, i, j, in->sym, func_sec);
                 int_regs_flush(fp, f, &lay, &ist);
-                emit_i386_addr_of_string_label(fp, f, &lay, &ist, in->dst, i, j);
+                emit_i386_addr_of_string_label(fp, m, f, &lay, &ist, in->dst, i, j);
                 break;
 
             case CC_SSA_MOV:
@@ -1627,7 +1759,7 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
 
             case CC_SSA_GADDR:
                 int_regs_flush(fp, f, &lay, &ist);
-                emit_i386_addr_of_global_sym(fp, f, &lay, &ist, in);
+                emit_i386_addr_of_global_sym(fp, m, f, &lay, &ist, in);
                 break;
 
             case CC_SSA_LADDR:
@@ -1841,6 +1973,9 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
                         emit_i386_call_memcpy(fp, (long)in->imm);
                     }
                     fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", hidden);
+                    if (i386_pic()) {
+                        fprintf(fp, "\tmovl %d(%%ebp), %%ebx\n", scratch_off + 16);
+                    }
                     fprintf(fp, "\tleave\n");
                     if (emit_debug) {
                         fprintf(fp, "\t.cfi_def_cfa %%esp, 4\n");
@@ -1885,6 +2020,9 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
                 } else {
                     int_regs_flush(fp, f, &lay, &ist);
                 }
+                if (i386_pic()) {
+                    fprintf(fp, "\tmovl %d(%%ebp), %%ebx\n", scratch_off + 16);
+                }
                 fprintf(fp, "\tleave\n");
                 if (emit_debug) {
                     fprintf(fp, "\t.cfi_def_cfa %%esp, 4\n");
@@ -1907,6 +2045,7 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
         int_regs_free(&ist);
         slot_layout_free(&lay);
     }
+    emit_i386_pc_thunks(fp);
 
     return 0;
 }

@@ -204,6 +204,18 @@ Warning controls.
 Standards conformance diagnostics.
 .It Fl fPIC
 Generate position-independent code.
+On i386 a symbol that binds within the object (a static one, a label,
+or one of hidden, protected or internal visibility) is addressed from
+the GOT's address, found with a pc thunk, at
+.Li sym@GOTOFF ;
+another through its GOT entry,
+.Li sym@GOT ;
+and a call of one goes through
+.Li sym@PLT
+with the GOT in
+.Li %ebx ,
+which every function then saves and restores.
+The code holds no absolute relocation.
 .It Fl fgnu89-inline , Fl fno-gnu89-inline
 Use, or do not use, GNU89 inline semantics, the reverse of C99's: a
 plain
