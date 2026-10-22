@@ -1088,6 +1088,10 @@ uint64_t elf_section_addr(const elf_section_t *section) {
     return section == NULL ? 0 : section->addr;
 }
 
+uint64_t elf_section_lma(const elf_section_t *section) {
+    return section == NULL ? 0 : section->has_lma ? section->lma : section->addr;
+}
+
 uint64_t elf_section_align(const elf_section_t *section) {
     return section == NULL ? 0 : section->addralign;
 }

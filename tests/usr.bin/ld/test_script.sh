@@ -185,6 +185,17 @@ if [ -f "$work/at_zero.out" ]; then
              END { print bad ? "overlap" : n }')" 3
 fi
 
+# AT() says where a section is loaded, and a segment's p_paddr is its first
+# section's; a section after one with AT() loads as far from its address.
+# The i386 kernel is linked at 0xc1000000 and loaded at 0x1000000, and its
+# decompressor puts each segment at its p_paddr; AT() was read and ignored.
+ok  at_lma "$std SECTIONS { . = 0xc1000000; .text : AT(ADDR(.text) - 0xc0000000) { *(.text*) }
+             . = ALIGN(4096); .data : { *(.data*) } }"
+if [ -f "$work/at_lma.out" ]; then
+    is  at_lma_paddr "$(readelf -lW "$work/at_lma.out" | awk '$1 == "LOAD" { printf "%s-%s ", $3, $4 }')" \
+        "$(readelf -lW "$work/at_lma.out" | awk '$1 == "LOAD" { v = strtonum($3); printf "%s-0x%08x ", $3, v - 0xc0000000 }')"
+fi
+
 # INCLUDE: where a statement may stand, its statements standing there.
 mkdir -p "$work/inc"
 echo '*(.text .text.*)' > "$work/inc/body.lds"

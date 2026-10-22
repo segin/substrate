@@ -377,6 +377,7 @@ struct lds_stmt {
     lds_stmtvec_t body;         /* OUTSEC */
     strvec_t phdrs;             /* OUTSEC: :phdr ... */
     lds_tokvec_t align;         /* OUTSEC: ALIGN(expr) after the colon */
+    lds_tokvec_t lma;           /* OUTSEC: AT(expr), where it is loaded */
     char *region;               /* OUTSEC: >region */
     uint64_t pad;               /* OUTSEC: what its body adds to its end */
     int keep;                   /* INPUT: KEEP() */
@@ -587,6 +588,8 @@ typedef struct {
     uint64_t dot;
     uint64_t high;              /* the end of what has an address so far */
     int moved;                  /* a statement set the counter since the last section */
+    int have_lma_bias;          /* a section was given AT(): those after it load as far from their addresses */
+    uint64_t lma_bias;
     int final;                  /* values are settled: define, assert */
 } lds_walk_t;
 

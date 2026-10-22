@@ -1384,6 +1384,9 @@ elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, u
 elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);
 elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align);
 elf_err_t elf_section_set_addr(elf_section_t *section, uint64_t addr);
+/* Where the section is loaded, when not at its address (a linker script's
+ * AT()): a segment's p_paddr is its first section's. */
+elf_err_t elf_section_set_lma(elf_section_t *section, uint64_t lma);
 elf_err_t elf_section_set_type(elf_section_t *section, uint32_t type);
 elf_err_t elf_section_set_flags(elf_section_t *section, uint64_t flags);
 elf_err_t elf_section_set_name(elf_section_t *section, const char *name);
@@ -1549,6 +1552,8 @@ const char *elf_section_name(const elf_section_t *section);
 uint32_t elf_section_type(const elf_section_t *section);
 uint64_t elf_section_flags(const elf_section_t *section);
 uint64_t elf_section_addr(const elf_section_t *section);
+/* Its load address: the one set with elf_section_set_lma(), else its address. */
+uint64_t elf_section_lma(const elf_section_t *section);
 uint64_t elf_section_align(const elf_section_t *section);
 uint64_t elf_section_size(const elf_section_t *section);
 const void *elf_section_data(const elf_section_t *section, size_t *size_out);

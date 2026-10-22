@@ -1,0 +1,70 @@
+.Dd October 22, 2026
+.Dt ELF_SECTION_LMA 3
+.Os Substrate
+.Sh NAME
+.Nm elf_section_set_lma ,
+.Nm elf_section_lma
+.Nd where a section is loaded, when not at its address
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_section_set_lma "elf_section_t *section" "uint64_t lma"
+.Ft uint64_t
+.Fn elf_section_lma "const elf_section_t *section"
+.Sh DESCRIPTION
+A section's load address is where its contents are put in memory to begin
+with, which may differ from the address it runs at
+.Pq Fn elf_section_addr :
+a linker script gives it with
+.Ql AT(lma) .
+The i386 Linux kernel, for one, runs at 0xc1000000 and is loaded at
+0x1000000.
+.Pp
+.Fn elf_section_set_lma
+sets
+.Fa section Ns 's
+load address.
+When an executable or shared object is written, each loadable segment's
+.Dv p_paddr
+is its lowest-addressed section's load address, less the section's
+distance from the start of the segment; for a segment whose first section
+has none,
+.Dv p_paddr
+is
+.Dv p_vaddr .
+.Pp
+.Fn elf_section_lma
+returns
+.Fa section Ns 's
+load address: the one set, else its address.
+.Sh RETURN VALUES
+.Fn elf_section_set_lma
+returns
+.Dv ELF_OK ,
+or
+.Dv ELF_ERR_STATE
+for a
+.Dv NULL
+section or one of an object opened read-only.
+.Fn elf_section_lma
+returns the load address, or 0 for a
+.Dv NULL
+section.
+.Sh EXAMPLES
+Load a section a fixed distance below where it runs.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+void
+load_low(elf_section_t *text)
+{
+    elf_section_set_addr(text, 0xc1000000);
+    elf_section_set_lma(text, elf_section_addr(text) - 0xc0000000);
+}
+.Ed
+.Sh SEE ALSO
+.Xr ld 1 ,
+.Xr elf_section 3 ,
+.Xr elf_section_addr 3

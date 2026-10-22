@@ -105,6 +105,8 @@ struct elf_section {
     uint32_t type;
     uint64_t flags;
     uint64_t addr;
+    uint64_t lma;       /* where it is loaded, when has_lma: a linker script's AT() */
+    int has_lma;
     uint64_t offset;
     uint64_t size;
     uint32_t link;

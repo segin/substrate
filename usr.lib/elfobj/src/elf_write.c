@@ -6,6 +6,8 @@ typedef struct {
     uint32_t type;
     uint64_t flags;
     uint64_t addr;
+    uint64_t lma;       /* its load address, when has_lma */
+    int has_lma;
     uint64_t offset;
     uint64_t size;
     uint32_t link;
@@ -814,6 +816,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.type = s->type;
         out.flags = s->flags;
         out.addr = s->addr;
+        out.lma = s->lma;
+        out.has_lma = s->has_lma;
         out.link = s->link;
         out.info = s->info;
         if (!align_valid(s->addralign)) {
@@ -1486,6 +1490,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 uint64_t out_memsz;
                 uint64_t out_off;
                 uint64_t out_vaddr;
+                uint64_t out_paddr;
+                int64_t lma_bias = 0;   /* load address less address, of the segment's first section */
                 size_t j;
 
                 /* A NULL segment slot must not be dereferenced; emit a zeroed
@@ -1524,6 +1530,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     }
                     if (secs[sidx].addr < lo_addr) {
                         lo_addr = secs[sidx].addr;
+                        lma_bias = secs[sidx].has_lma ? (int64_t)(secs[sidx].lma - secs[sidx].addr) : 0;
                     }
                     if (end_addr > hi_addr) {
                         hi_addr = end_addr;
@@ -1616,11 +1623,13 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     }
                 }
 
+                /* where it is loaded: its first section's load address (a script's AT()), else its address */
+                out_paddr = out_vaddr + (uint64_t)lma_bias;
                 if (obj->cls == ELFOBJ_CLASS_32) {
                     elf__wr32(p + 0, obj->endian, seg->type);
                     elf__wr32(p + 4, obj->endian, (uint32_t)out_off);
                     elf__wr32(p + 8, obj->endian, (uint32_t)out_vaddr);
-                    elf__wr32(p + 12, obj->endian, (uint32_t)out_vaddr);
+                    elf__wr32(p + 12, obj->endian, (uint32_t)out_paddr);
                     elf__wr32(p + 16, obj->endian, (uint32_t)out_filesz);
                     elf__wr32(p + 20, obj->endian, (uint32_t)out_memsz);
                     elf__wr32(p + 24, obj->endian, seg->flags);
@@ -1630,7 +1639,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     elf__wr32(p + 4, obj->endian, seg->flags);
                     elf__wr64(p + 8, obj->endian, out_off);
                     elf__wr64(p + 16, obj->endian, out_vaddr);
-                    elf__wr64(p + 24, obj->endian, out_vaddr);
+                    elf__wr64(p + 24, obj->endian, out_paddr);
                     elf__wr64(p + 32, obj->endian, out_filesz);
                     elf__wr64(p + 40, obj->endian, out_memsz);
                     elf__wr64(p + 48, obj->endian, seg->align ? seg->align : 1);

@@ -1371,6 +1371,7 @@ static void lds_stmtvec_free(lds_stmtvec_t *v) {
         lds_tok_free(&st->at);
         lds_tokvec_free(&st->expr);
         lds_tokvec_free(&st->align);
+        lds_tokvec_free(&st->lma);
         free(st->message);
         free(st->region);
         lds_stmtvec_free(&st->body);
@@ -1962,7 +1963,7 @@ static int lp_body_statement(lds_parser_t *p, lds_stmtvec_t *v) {
  */
 static int lp_outsec(lds_parser_t *p, lds_stmtvec_t *v, const lds_tok_t *name) {
     static const char *const types[] = { "NOLOAD", "DSECT", "COPY", "INFO", "OVERLAY", NULL };
-    static const char *const skipped[] = { "AT", "SUBALIGN", "BLOCK", NULL };
+    static const char *const skipped[] = { "SUBALIGN", "BLOCK", NULL };
     static const char *const flags[] = { "ONLY_IF_RO", "ONLY_IF_RW", "SPECIAL", NULL };
     lds_stmt_t *st = lds_stmt_new(v, LDS_ST_OUTSEC, LDS_IN_SECTIONS, name);
     const lds_tok_t *t;
@@ -2003,6 +2004,13 @@ static int lp_outsec(lds_parser_t *p, lds_stmtvec_t *v, const lds_tok_t *name) {
             lp_take(p);
             if (lp_expect(p, LDS_TOK_LPAREN, "expected '(' after ALIGN") != 0 ||
                 lp_expr(p, &st->align, 0, 0) != 0 || lp_expect(p, LDS_TOK_RPAREN, "expected ')'") != 0) {
+                return -1;
+            }
+        } else if (t->kind == LDS_TOK_IDENT && strcmp(t->text, "AT") == 0) {
+            /* AT(lma): where it is loaded (Linux: AT(ADDR(.text) - LOAD_OFFSET)) */
+            lp_take(p);
+            if (lp_expect(p, LDS_TOK_LPAREN, "expected '(' after AT") != 0 || lp_expr(p, &st->lma, 0, 0) != 0 ||
+                lp_expect(p, LDS_TOK_RPAREN, "expected ')'") != 0) {
                 return -1;
             }
         } else if (t->kind == LDS_TOK_IDENT && lds_word_in(t->text, skipped)) {
@@ -3169,6 +3177,8 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
     w->dot = first_addr;
     w->high = 0;
     w->moved = 0;
+    w->have_lma_bias = 0;
+    w->lma_bias = 0;
     for (i = 0; i < sc->region_count; ++i) {
         lds_region_t *r = &sc->regions[i];
         lds_tok_t none;
@@ -3273,6 +3283,24 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
             return -1;
         }
         if (elf_section_set_addr(sec, w->dot) != ELF_OK) {
+            return -1;
+        }
+        /*
+         * Where it is loaded: AT(), or, after a section that had one, as far
+         * from its address as that one was, as GNU ld has it.  The i386
+         * kernel is linked at 0xc1000000 and loaded at 0x1000000, and its
+         * decompressor puts each segment at its p_paddr.
+         */
+        if (os != NULL && os->lma.count != 0) {
+            uint64_t lma = 0;
+
+            if (lw_eval(w, &os->lma, 1, w->dot, &os->at, &lma) != 0) {
+                return -1;
+            }
+            w->lma_bias = lma - w->dot;
+            w->have_lma_bias = 1;
+        }
+        if (w->have_lma_bias && elf_section_set_lma(sec, w->dot + w->lma_bias) != ELF_OK) {
             return -1;
         }
         size = elf_section_size(sec);
