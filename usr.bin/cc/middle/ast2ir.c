@@ -2022,14 +2022,18 @@ static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s) {
     return s->ctype;
 }
 
-/** Whether a local declaration gets storage allocated up front: a structure, or an array of fixed size. */
+/**
+ * Whether a local declaration gets storage allocated up front: a structure, or an array of fixed size.
+ * A block-scope `extern` declares the global and owns no storage -- its type may even be incomplete,
+ * as Linux's `extern char __init_begin[];` is.
+ */
 static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
     const cc_ctype_t *t;
 
     if (s == NULL || s->kind != CC_STMT_DECL) {
         return 0;
     }
-    if ((s->storage & CC_STORAGE_STATIC) != 0) {
+    if ((s->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) != 0) {
         return 0;
     }
     t = stmt_decl_ctype(s);
