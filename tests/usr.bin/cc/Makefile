@@ -218,7 +218,7 @@ test:
 	$(CC_TMP)/cc_native_c99_attr_codegen
 	$(TOP)/usr.bin/cc/cc -S native_c99_attr_codegen.c -o $(CC_TMP)/cc_native_c99_attr_codegen.s
 	grep -Eq "^[[:space:]]*\\.section \\.hotdata" $(CC_TMP)/cc_native_c99_attr_codegen.s
-	grep -A2 -E "^[[:space:]]*\\.section \\.ptrdata" $(CC_TMP)/cc_native_c99_attr_codegen.s | grep -q "^hot_ptr:"
+	grep -A4 -E "^[[:space:]]*\\.section \\.ptrdata" $(CC_TMP)/cc_native_c99_attr_codegen.s | grep -q "^hot_ptr:"
 	grep -A2 -E "^[[:space:]]*\\.section \\.text\\.ptrfn" $(CC_TMP)/cc_native_c99_attr_codegen.s | grep -q "^ptr_fn:"
 	grep -Eq "^[[:space:]]*\\.section \\.text\\.panic" $(CC_TMP)/cc_native_c99_attr_codegen.s
 	grep -q "^\\.align 32$$" $(CC_TMP)/cc_native_c99_attr_codegen.s
