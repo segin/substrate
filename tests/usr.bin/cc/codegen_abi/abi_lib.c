@@ -10,6 +10,24 @@ struct R {
     int a, b, c, d, e;
 };
 
+/*
+ * An empty structure returned: on i386 through the hidden pointer like any
+ * structure (the callee pops it, `ret $4`), on x86-64 nothing at all.  A
+ * caller and callee that disagree leave %esp 4 bytes off.
+ */
+struct E0 { };
+struct E0 lib_empty(int *k) {
+    struct E0 e;
+
+    *k += 1;
+    return e;
+}
+/* and as an argument it takes no register and no stack at all, on either target */
+int lib_empty_arg(int a, struct E0 e, int b) {
+    (void)e;
+    return a * 10 + b;
+}
+
 struct Q lib_q(int a) {
     struct Q q = {a, a * 2};
     return q;

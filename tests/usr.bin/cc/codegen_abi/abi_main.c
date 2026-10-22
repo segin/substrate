@@ -15,6 +15,9 @@ struct R {
     int a, b, c, d, e;
 };
 
+struct E0 { };
+struct E0 lib_empty(int *k);
+int lib_empty_arg(int a, struct E0 e, int b);
 struct Q lib_q(int a);
 struct R lib_r(int a, int b);
 int lib_sum(char c, short s, int i, long long ll, double d, struct Q q);
@@ -184,8 +187,12 @@ int main(void) {
     div_t dv = div(17, 5);
     ldiv_t lv = ldiv(-100L, 7L);
     struct Q arg = {7, 8};
+    int ek = 40;
+    struct E0 e0 = lib_empty(&ek);
 
-    printf("%d %d | %d %d %d %d %d\n", q.a, q.b, r.a, r.b, r.c, r.d, r.e);
+    (void)e0;
+    e0 = lib_empty(&ek);
+    printf("%d %d | %d %d %d %d %d | %d %d\n", q.a, q.b, r.a, r.b, r.c, r.d, r.e, ek, lib_empty_arg(5, e0, 6));
     printf("%d %d %ld %ld\n", dv.quot, dv.rem, lv.quot, lv.rem);
     printf("%d %lld\n", lib_sum(1, 2, 3, 4000000005LL, 1.5, arg), lib_wide(-5000000000LL, 0xfedcba9876543210ULL));
     classes();

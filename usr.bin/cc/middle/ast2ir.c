@@ -5255,6 +5255,10 @@ static int lower_member_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     if (expr_is_array_object_ref(tu, vars, var_count, depth, e)) {
         return lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
     }
+    if (mem_size == 0 && lower_record_id(e) >= 0) {
+        /* an empty structure member: its value is its address, as any structure's */
+        return lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
+    }
     if (mem_size <= 0) {
         set_diag(diag, "unsupported member type size in lowering");
         return -1;
@@ -5840,7 +5844,8 @@ static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
                 if (saddr < 0) {
                     return -1;
                 }
-                if (mem_size <= 0) {
+                /* an empty structure (size 0) is assigned by copying nothing */
+                if (mem_size < 0 || (mem_size == 0 && ct_record_id(lower_var_ctype(&vars[idx])) < 0)) {
                     set_diag(diag, "unsupported static local assignment type");
                     return -1;
                 }
@@ -5899,7 +5904,7 @@ static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             }
             if (ct_record_id(lower_var_ctype(&vars[idx])) >= 0) {
                 long mem_size = cc_ct_size(lower_var_ctype(&vars[idx]), tu);
-                if (mem_size <= 0) {
+                if (mem_size < 0) { /* 0, an empty structure, copies nothing */
                     set_diag(diag, "unsupported local aggregate assignment type");
                     return -1;
                 }
@@ -5944,7 +5949,8 @@ static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
                 return -1;
             }
             mem_size = cc_ct_size(lower_global_ctype(g), tu);
-            if (mem_size <= 0) {
+            /* an empty structure (size 0) is assigned by copying nothing */
+            if (mem_size < 0 || (mem_size == 0 && ct_record_id(lower_global_ctype(g)) < 0)) {
                 set_diag(diag, "unsupported global assignment type in lowering");
                 return -1;
             }
@@ -7106,7 +7112,10 @@ int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, long size
     cc_ssa_instr_t call_in;
     int sizev;
 
-    if (size <= 0) {
+    if (size == 0) {
+        return 0; /* an empty structure: nothing to copy */
+    }
+    if (size < 0) {
         set_diag(diag, "invalid memcpy size in lowering");
         return -1;
     }
@@ -10189,7 +10198,21 @@ static int lower_return_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
             long ret_size = cc_ct_size(fn_ret_ctype(ctx->fn), tu);
             /* a returned aggregate fills at most two registers (%rax:%rdx, %eax:%edx) */
             long reg_agg_limit = 2L * cc_target_pointer_size();
-            if (ret_size <= 0) {
+            if (ret_size == 0) {
+                /*
+                 * An empty structure, as gcc returns one: through the
+                 * caller's hidden pointer where every structure goes so
+                 * (i386, which still pops it: `ret $4`), with nothing to
+                 * copy; elsewhere (x86-64) nothing at all.
+                 */
+                if (sf->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) {
+                    ret_size_hint = 0;
+                } else {
+                    rv = -1;
+                }
+                goto append_return;
+            }
+            if (ret_size < 0) {
                 set_diag(diag, "unsupported aggregate return size in return lowering");
                 return -1;
             }

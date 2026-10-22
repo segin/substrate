@@ -72,8 +72,8 @@ static int i386_param_layout(const cc_ssa_function_t *f, int count, int want) {
             bytes = 12;
         } else if (abi == CC_CALL_ARG_ABI_FLOAT) {
             bytes = 4;
-        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG) {
-            bytes = 0;
+        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG || abi == CC_CALL_ARG_ABI_ZERO) {
+            bytes = 0; /* a vector in a register, or an empty structure: no stack */
         } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
             long size = x86_64_param_size_bytes(f, i, 4);
 
@@ -886,8 +886,9 @@ static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t 
     if (in->call_arg_abi != NULL && in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_FLOAT) {
         return 4;
     }
-    if (call_arg_is_agg_reg_abi(in, arg_index)) {
-        /* a vector in %xmm0-2 or %mm0-2 */
+    if (call_arg_is_agg_reg_abi(in, arg_index) ||
+        (in->call_arg_abi != NULL && in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_ZERO)) {
+        /* a vector in %xmm0-2 or %mm0-2, or an empty structure, which gcc passes as nothing */
         return 0;
     }
     if (call_arg_is_agg_mem_abi(in, arg_index)) {
@@ -1022,8 +1023,11 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
                           const cc_ssa_instr_t *in) {
     long stack_bytes = 0;
     long a;
-    /* a struct result: the i386 psABI passes the buffer's address first */
-    int agg = in->dst >= 0 && in->rhs == in->dst && is_stackalloc_value(lay, in->dst) && in->imm > 0;
+    /*
+     * a struct result: the i386 psABI passes the buffer's address first --
+     * an empty structure's too (size 0), which the callee pops as well
+     */
+    int agg = in->dst >= 0 && in->rhs == in->dst && is_stackalloc_value(lay, in->dst) && in->imm >= 0;
     int ret_vec = agg && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0;
     int in_regs = agg && (in->agg_class & CC_ABI_RET_EAX_EDX) != 0;
     int sret = agg && !in_regs && !ret_vec;
@@ -1071,7 +1075,7 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         cur = start < 0 ? 0 : start;
     }
     for (a = 0; a < (long)in->arg_count; ++a) {
-        if (offs[a] >= 0) {
+        if (offs[a] >= 0 || (in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_ZERO)) {
             continue;
         }
         emit_load_ptr_value_reg(fp, lay, in->args[a], 0, "%eax");
@@ -1217,6 +1221,11 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
                      f->param_abi[in->param_index] == CC_CALL_ARG_ABI_LDOUBLE)
                         ? 1
                         : 0;
+                if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
+                    f->param_abi[in->param_index] == CC_CALL_ARG_ABI_ZERO) {
+                    /* an empty structure: nothing came, nothing to read (as on x86-64) */
+                    break;
+                }
                 if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
                     CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_AGG_MEM) {
                     /* a struct passed by value is its copy on the stack */

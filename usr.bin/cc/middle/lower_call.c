@@ -2660,8 +2660,10 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             arg_needs_ldouble_abi = 1;
         }
         in.args[i] = av;
+        /* (an empty structure's CC_CALL_ARG_ABI_ZERO stays: it takes no register and no stack) */
         if (CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_MEM &&
-            CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_REG) {
+            CC_ABI_KIND(in.call_arg_abi[i]) != CC_CALL_ARG_ABI_AGG_REG &&
+            in.call_arg_abi[i] != CC_CALL_ARG_ABI_ZERO) {
             in.call_arg_abi[i] = (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE
                                                  : arg_needs_float_abi ? CC_CALL_ARG_ABI_FLOAT
                                                                        : CC_CALL_ARG_ABI_DEFAULT);
@@ -2676,7 +2678,7 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
     if (lower_record_id(e) >= 0) {
         long agg_size = lower_value_size(tu, e);
         int agg_addr;
-        if (agg_size <= 0) {
+        if (agg_size < 0) {
             free(in.sym);
             free(in.args);
             free(in.call_arg_abi);
@@ -2684,7 +2686,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             set_diag(diag, "unsupported aggregate return size in call lowering");
             return -1;
         }
-        agg_addr = cc_ir_stackalloc(sf, agg_size, diag);
+        /* an empty structure (size 0) still needs a place for the i386 hidden pointer to name */
+        agg_addr = cc_ir_stackalloc(sf, agg_size > 0 ? agg_size : 1, diag);
         if (agg_addr < 0) {
             free(in.sym);
             free(in.args);
