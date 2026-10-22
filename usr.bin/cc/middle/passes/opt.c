@@ -61,6 +61,47 @@ static const_state_t *single_def_consts(const cc_ssa_function_t *f) {
             g[d].i = in->imm;
         }
     }
+    /*
+     * A value every definition of which is a move of one and the same such
+     * constant is that constant too: the result of `0 && x` once the arm
+     * that computed x is gone (Linux's `IS_ENABLED(CONFIG_TMPFS) &&
+     * is_tmpfs`), and of `x && 0`, 0 on both paths.
+     */
+    for (;;) {
+        int changed = 0;
+        size_t v;
+
+        for (v = 0; v < (size_t)f->value_count; ++v) {
+            int agree = 0;
+            long long val = 0;
+            int ok = defs[v] > 0 && !g[v].known && cc_ssa_value_class(f, (int)v) == CC_VAL_I64;
+
+            for (i = 0; ok && i < f->instr_count; ++i) {
+                const cc_ssa_instr_t *in = &f->instrs[i];
+
+                if (in->dst != (int)v) {
+                    continue;
+                }
+                if (in->op != CC_SSA_MOV || in->lhs < 0 || in->lhs >= f->value_count || !g[in->lhs].known ||
+                    cc_ssa_value_size(f, (int)v) != cc_ssa_value_size(f, in->lhs) ||
+                    (agree > 0 && g[in->lhs].i != val)) {
+                    ok = 0;
+                    break;
+                }
+                val = g[in->lhs].i;
+                agree++;
+            }
+            if (ok && agree == defs[v]) {
+                g[v].known = 1;
+                g[v].type = CC_VAL_I64;
+                g[v].i = val;
+                changed = 1;
+            }
+        }
+        if (!changed) {
+            break;
+        }
+    }
     free(defs);
     return g;
 }
@@ -528,7 +569,10 @@ static int eval_invariant(const cc_ssa_function_t *f, int v, const int *def_at, 
     case CC_SSA_XOR:
     case CC_SSA_SHL:
     case CC_SSA_SHR:
-        if (!eval_invariant(f, in->lhs, def_at, g, depth + 1, &a) || !eval_invariant(f, in->rhs, def_at, g, depth + 1, &b)) {
+        /* a shift by an immediate has its count in imm (x86-64's sign extension: shl 32, ashr 32) */
+        if (!eval_invariant(f, in->lhs, def_at, g, depth + 1, &a) ||
+            !((in->rhs < 0 && (in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) && (b = in->imm, 1)) ||
+              eval_invariant(f, in->rhs, def_at, g, depth + 1, &b))) {
             return 0;
         }
         return fold_int_binop(in->op, in->is_unsigned, value_is_word32(f, v), a, b, out) == 0;
@@ -968,8 +1012,10 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
          * it -- an arm may hold inline asm the target's assembler refuses.
          */
         if (opt_level <= 0) {
-            rc1 = fold_const_branches(&m->funcs[i]);
-            rc3 = rc1 > 0 ? unreachable_function(&m->funcs[i]) : 0;
+            do {
+                rc1 = fold_const_branches(&m->funcs[i]);
+                rc3 = rc1 > 0 ? unreachable_function(&m->funcs[i]) : 0;
+            } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
             rc2 = 0;
         } else {
             do {

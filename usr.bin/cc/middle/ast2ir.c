@@ -5354,6 +5354,41 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         return lower_complex_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
     }
     if (is_logical_op(e->op)) {
+        /*
+         * An operand that is an integer constant decides or drops out, as
+         * gcc folds it even at -O0: `0 && x` is 0 and x is not evaluated,
+         * `x && 0` is 0 once x is, `1 && x` is x's truth.  Lowered as a
+         * branch, the result was a variable set on two paths, and a call in
+         * the arm it guarded stayed -- Linux's `if (IS_ENABLED(CONFIG_TMPFS)
+         * && is_tmpfs) return shmem_init_fs_context(fc);` named a function
+         * a kernel without shmem does not have.
+         */
+        long long kl = 0;
+        long long kr = 0;
+        int land = e->op == CC_BIN_LAND;
+        int lconst = eval_const_i64_expr(tu, e->lhs, &kl) == 0;
+        int rconst = !lconst && eval_const_i64_expr(tu, e->rhs, &kr) == 0;
+
+        if (lconst || rconst) {
+            const cc_expr_t *other = lconst ? e->rhs : e->lhs;
+            long long k = lconst ? kl : kr;
+            int v;
+
+            if (lconst && (land ? k == 0 : k != 0)) {
+                return cc_ir_const(sf, land ? 0 : 1);
+            }
+            v = lower_expr(tu, sf, ctx, vars, var_count, depth, other, diag);
+            if (v < 0) {
+                return -1;
+            }
+            if (land ? k == 0 : k != 0) {
+                /* x && 0, x || 1: x for what it does, then the constant */
+                return cc_ir_const(sf, land ? 0 : 1);
+            }
+            return lower_truthy_value(sf, v, diag);
+        }
+    }
+    if (is_logical_op(e->op)) {
         int dst;
         int zero;
         int one;
