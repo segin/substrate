@@ -446,6 +446,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     int applied;
     int script_layout;
     int run_class = -1;
+    int force_rw = 0;
 
     if (obj == NULL || ctx == NULL) {
         return -1;
@@ -495,6 +496,11 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
              */
             int cls = (flags & SHF_EXECINSTR) != 0 ? 1 : (flags & SHF_WRITE) != 0 ? 2 : 0;
 
+            /* read-only data after writable stays in the writable segment, as with GNU ld (realmode's .signature) */
+            force_rw = run_class == 2 && cls == 0;
+            if (force_rw) {
+                cls = 2;
+            }
             if (cls != run_class) {
                 load_rx = NULL;
                 load_rw = NULL;
@@ -521,7 +527,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 if (elf_segment_add_section(load_rx, sec) != ELF_OK) {
                     return -1;
                 }
-            } else if ((flags & SHF_WRITE) != 0) {
+            } else if ((flags & SHF_WRITE) != 0 || force_rw) {
                 if (load_rw == NULL) {
                     load_rw = elf_add_load_segment(obj, LD_PF_R | LD_PF_W, 0x1000);
                     if (load_rw == NULL) {

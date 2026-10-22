@@ -1,0 +1,118 @@
+.Dd October 22, 2026
+.Dt ELF_LINK_PLAN_SET_SECTION_RANK_HOOKS 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_section_rank_hooks ,
+.Nm elf_link_plan_rank_extent
+.Nd order the sections of each output section, and say where they went
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_set_section_rank_hooks "elf_link_plan_t *plan" "elf_link_section_rank_hook_t rank" "elf_link_section_gap_hook_t gap" "void *user"
+.Ft int
+.Fn elf_link_plan_rank_extent "const elf_link_plan_t *plan" "const char *output_name" "int rank" "uint64_t *start" "uint64_t *end"
+.Sh DESCRIPTION
+Without rank hooks,
+.Xr elf_link_plan_link 3
+merges its inputs one after another, each input's sections into the
+output sections they go to.
+With them, the sections of all inputs go into each output section in
+order of their
+.Em rank ,
+and in input order within one rank, as a linker script's input
+descriptions order them:
+.Fa rank
+is called with an input section's name and its input's name and returns
+its rank, which a linker gives as the place, in its output section's
+body, of the input description that takes the section.
+.Pp
+Before the first section of a rank goes into an output section,
+.Fa gap
+is called, if it is not
+.Dv NULL ,
+with the output section's name, the rank, the offset the section has
+reached in
+.Fa *offset ,
+which it may move on (never back), and
+.Fa *align ,
+1, which it may raise to an alignment the output section then needs.
+The section is padded to the new offset (with zeros, or in a
+.Dv SHT_NOBITS
+section by its size) and the rank's sections go in from there:
+a linker script's
+.Ql "\&. = ALIGN(16)"
+between two input descriptions.
+It returns 0, or \-1 to fail the link.
+.Fa user
+is passed to both.
+.Pp
+Symbols and relocations are merged after every input's sections are in
+place.
+.Pp
+After the link,
+.Fn elf_link_plan_rank_extent
+gives where the sections of
+.Fa rank
+lie in output section
+.Fa output_name :
+from
+.Fa *start ,
+after any gap, to
+.Fa *end ,
+offsets in the section.
+A linker gives a script's statements between two input descriptions
+their location counter from these.
+.Sh RETURN VALUES
+.Fn elf_link_plan_set_section_rank_hooks
+returns
+.Dv ELF_OK ,
+or
+.Dv ELF_ERR_STATE
+for a
+.Dv NULL
+.Fa plan .
+.Fn elf_link_plan_rank_extent
+returns 1 when the rank has sections in the output section, else 0.
+.Sh EXAMPLES
+Put sections named
+.Ql .header
+first in their output section, aligned to 16, and say where they went.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <string.h>
+
+static int
+rank(const char *section, const char *input, void *user)
+{
+    (void)input; (void)user;
+    return strcmp(section, ".header") == 0 ? 0 : 1;
+}
+
+static int
+gap(const char *out, int r, uint64_t *offset, uint64_t *align, void *user)
+{
+    (void)out; (void)user;
+    if (r == 0) {
+        *offset = (*offset + 15) & ~(uint64_t)15;
+        *align = 16;
+    }
+    return 0;
+}
+
+int
+link_ordered(elf_link_plan_t *plan, elfobj_t **out, uint64_t *hdr_end)
+{
+    uint64_t start;
+
+    elf_link_plan_set_section_rank_hooks(plan, rank, gap, NULL);
+    if (elf_link_plan_link(plan, out) != ELF_OK)
+        return -1;
+    return elf_link_plan_rank_extent(plan, ".header", 0, &start, hdr_end) ? 0 : -1;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elf_link_plan 3 ,
+.Xr elf_link_plan_link 3 ,
+.Xr elf_link_plan_set_section_merge_hook 3

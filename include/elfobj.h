@@ -1319,6 +1319,17 @@ typedef elf_link_merge_action_t (*elf_link_section_merge_hook_t)(
  * its own name and its input's; NULL leaves the section out. */
 typedef const char *(*elf_link_section_name_hook_t)(
     const char *section_name, const char *input_name, void *user);
+/* Where an input section goes among the others of its output section: a
+ * rank (a linker script's input description's place in the section's
+ * body); sections go in by rank, and in input order within one. */
+typedef int (*elf_link_section_rank_hook_t)(const char *section_name, const char *input_name, void *user);
+/* Before the first section of a rank goes into an output section: where
+ * it starts, given the offset the section has reached (*offset, which
+ * may only grow), and an alignment the output section then needs
+ * (*align, 1 for none): a linker script's `. = ALIGN(16)` between two
+ * input descriptions.  0, or -1 to fail the link. */
+typedef int (*elf_link_section_gap_hook_t)(const char *output_name, int rank, uint64_t *offset,
+                                           uint64_t *align, void *user);
 typedef int (*elf_link_archive_hook_t)(const char *archive_path, const char *member_name, void *user);
 typedef int (*elf_link_gc_hook_t)(const elf_section_t *section, void *user);
 typedef void (*elf_link_incremental_hook_t)(const char *key, const char *value, void *user);
@@ -1440,6 +1451,12 @@ elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,
 elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
                                               elf_link_section_name_hook_t hook,
                                               void *user);
+elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_section_rank_hook_t rank,
+                                               elf_link_section_gap_hook_t gap, void *user);
+/* After elf_link_plan_link() with rank hooks: where the sections of a rank
+ * lie in an output section, [*start, *end); 1, or 0 if it has none. */
+int elf_link_plan_rank_extent(const elf_link_plan_t *plan, const char *output_name, int rank,
+                              uint64_t *start, uint64_t *end);
 elf_err_t elf_link_plan_set_archive_hook(elf_link_plan_t *plan, elf_link_archive_hook_t hook,
                                          void *user);
 elf_err_t elf_link_plan_set_gc_hook(elf_link_plan_t *plan, elf_link_gc_hook_t hook, void *user);

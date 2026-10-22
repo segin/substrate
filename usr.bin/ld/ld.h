@@ -380,6 +380,9 @@ struct lds_stmt {
     char *region;               /* OUTSEC: >region */
     uint64_t pad;               /* OUTSEC: what its body adds to its end */
     int keep;                   /* INPUT: KEEP() */
+    int ext_have;               /* INPUT: its sections went in at [ext_start, ext_end) of the output section */
+    uint64_t ext_start;
+    uint64_t ext_end;
     strvec_t patterns;          /* INPUT: section name patterns */
     strvec_t excludes;          /* INPUT: EXCLUDE_FILE() patterns */
 };
@@ -656,6 +659,9 @@ int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_discards_section(const ld_ctx_t *ctx, const char *name);
+int script_input_rank(const char *section, const char *file, void *user);
+int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user);
+void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan);
 int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out);
 
 /* ld_plugin.c */

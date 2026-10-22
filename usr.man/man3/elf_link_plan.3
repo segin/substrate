@@ -7,6 +7,8 @@
 .Nm elf_link_plan_add_input ,
 .Nm elf_link_plan_input_count ,
 .Nm elf_link_plan_set_section_merge_hook ,
+.Nm elf_link_plan_set_section_rank_hooks ,
+.Nm elf_link_plan_rank_extent ,
 .Nm elf_link_plan_set_archive_hook ,
 .Nm elf_link_plan_set_gc_hook ,
 .Nm elf_link_plan_set_incremental_hook ,
@@ -31,6 +33,10 @@ libelfobj
 .Fn elf_link_plan_input_count "const elf_link_plan_t *plan"
 .Ft elf_err_t
 .Fn elf_link_plan_set_section_merge_hook "elf_link_plan_t *plan" "elf_link_section_merge_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_section_rank_hooks "elf_link_plan_t *plan" "elf_link_section_rank_hook_t rank" "elf_link_section_gap_hook_t gap" "void *user"
+.Ft int
+.Fn elf_link_plan_rank_extent "const elf_link_plan_t *plan" "const char *output_name" "int rank" "uint64_t *start" "uint64_t *end"
 .Ft elf_err_t
 .Fn elf_link_plan_set_archive_hook "elf_link_plan_t *plan" "elf_link_archive_hook_t hook" "void *user"
 .Ft elf_err_t
@@ -113,6 +119,7 @@ main(void)
 .Ed
 .Sh SEE ALSO
 .Xr elf_link 3 ,
+.Xr elf_link_plan_set_section_rank_hooks 3 ,
 .Xr elf_link_utils 3 ,
 .Xr elf_reloc 3 ,
 .Xr elf_section 3 ,

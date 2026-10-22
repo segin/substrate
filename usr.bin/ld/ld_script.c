@@ -2559,6 +2559,120 @@ const char *script_output_name(const char *section, const char *file, void *user
     return section;
 }
 
+/*
+ * The elfobj rank hook: the place, in its output section's body, of the
+ * input description that takes this input section, so that sections go
+ * in in the order the descriptions are written.  0 for one no description
+ * takes.  The user is the link context.
+ */
+int script_input_rank(const char *section, const char *file, void *user) {
+    const lds_script_t *sc = ((const ld_ctx_t *)user)->script;
+    size_t i, k;
+
+    for (i = 0; sc != NULL && i < sc->stmts.count; ++i) {
+        const lds_stmt_t *os = &sc->stmts.items[i];
+
+        if (os->kind != LDS_ST_OUTSEC) {
+            continue;
+        }
+        for (k = 0; k < os->body.count; ++k) {
+            if (os->body.items[k].kind == LDS_ST_INPUT &&
+                script_input_matches(&os->body.items[k], section, file)) {
+                return (int)k;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
+ * The elfobj gap hook: before the sections of input description `rank` of
+ * output section `name`, the location counter moves as the statements
+ * since the description before it say -- `. = ALIGN(16)`, `. += 8` -- and
+ * the section must be aligned as much as any ALIGN there asks, since the
+ * offsets are counted from its start.  An expression this cannot work
+ * out here moves nothing, and the walk that gives the addresses says so.
+ */
+int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user) {
+    ld_ctx_t *ctx = (ld_ctx_t *)user;
+    const lds_stmt_t *os = NULL;
+    size_t i;
+    long k;
+
+    for (i = 0; ctx->script != NULL && i < ctx->script->stmts.count; ++i) {
+        const lds_stmt_t *st = &ctx->script->stmts.items[i];
+
+        if (st->kind == LDS_ST_OUTSEC && !st->discard && strcmp(st->at.text, name) == 0) {
+            os = st;
+            break;
+        }
+    }
+    if (os == NULL || rank < 0 || (size_t)rank >= os->body.count) {
+        return 0;
+    }
+    for (k = rank - 1; k >= 0 && os->body.items[k].kind != LDS_ST_INPUT; --k) {
+    }
+    for (k = k + 1; k < rank; ++k) {
+        const lds_stmt_t *st = &os->body.items[k];
+        lds_eval_ctx_t ec;
+        uint64_t v;
+
+        if (st->kind != LDS_ST_ASSIGN || strcmp(st->at.text, ".") != 0 || (st->op != '=' && st->op != '+')) {
+            continue;
+        }
+        memset(&ec, 0, sizeof(ec));
+        ec.ctx = ctx;
+        ec.have_dot = 1;
+        ec.dot = *offset;
+        if (lds_eval_expr_slice(&ec, st->expr.items, 0, st->expr.count, &v) != 0) {
+            continue;
+        }
+        if (st->op == '+') {
+            v += *offset;
+        }
+        if (v < *offset) {
+            continue;
+        }
+        if (st->op == '=' && st->expr.count != 0 && st->expr.items[0].kind == LDS_TOK_IDENT &&
+            strcmp(st->expr.items[0].text, "ALIGN") == 0) {
+            uint64_t a;
+
+            /* ALIGN(n) of 1 is n */
+            memset(&ec, 0, sizeof(ec));
+            ec.ctx = ctx;
+            ec.have_dot = 1;
+            ec.dot = 1;
+            if (lds_eval_expr_slice(&ec, st->expr.items, 0, st->expr.count, &a) == 0 && a > *align) {
+                *align = a;
+            }
+        }
+        *offset = v;
+    }
+    return 0;
+}
+
+/* After the merge: where each input description's sections went in its
+ * output section, for the walk to place what stands between them. */
+void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan) {
+    lds_script_t *sc = ctx->script;
+    size_t i, k;
+
+    for (i = 0; sc != NULL && i < sc->stmts.count; ++i) {
+        lds_stmt_t *os = &sc->stmts.items[i];
+
+        if (os->kind != LDS_ST_OUTSEC || os->discard) {
+            continue;
+        }
+        for (k = 0; k < os->body.count; ++k) {
+            lds_stmt_t *in = &os->body.items[k];
+
+            if (in->kind == LDS_ST_INPUT) {
+                in->ext_have = elf_link_plan_rank_extent(plan, os->at.text, (int)k, &in->ext_start, &in->ext_end);
+            }
+        }
+    }
+}
+
 /* Whether the script says KEEP of this input section: the statement that
  * places it is the one that decides, as above. */
 int script_keeps_input(const lds_script_t *sc, const char *section, const char *file) {
@@ -2883,6 +2997,60 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
                    uint64_t *end_out) {
     size_t first = os->body.count, last = 0, k;
     uint64_t end = start + size;
+    int have_extents = 0;
+
+    for (k = 0; sec != NULL && k < os->body.count; ++k) {
+        have_extents |= os->body.items[k].kind == LDS_ST_INPUT && os->body.items[k].ext_have;
+    }
+    if (have_extents) {
+        /*
+         * The merge put each input description's sections at a known place
+         * (script_note_extents()): the counter runs through the body, and
+         * a statement between two descriptions -- Linux's `video_cards = .`
+         * after `. = ALIGN(16)` -- sees it where it stands.
+         */
+        uint64_t cur = 0;
+
+        for (k = 0; k < os->body.count; ++k) {
+            const lds_stmt_t *st = &os->body.items[k];
+            uint64_t dot = start + cur;
+
+            if (st->kind == LDS_ST_INPUT) {
+                if (st->ext_have) {
+                    if (cur > st->ext_start) {
+                        lds_report_error(NULL, &st->at,
+                                         "the location counter moved past where these sections were put "
+                                         "(only ALIGN and adding a constant are understood there)");
+                        return -1;
+                    }
+                    cur = st->ext_end;
+                }
+                continue;
+            }
+            if (st->kind == LDS_ST_DATA) {
+                lds_report_error(NULL, &st->at, "data statements (BYTE, SHORT, LONG, QUAD) are not supported");
+                return -1;
+            }
+            if (st->kind == LDS_ST_ASSERT) {
+                if (lw_assert(w, st, 1, dot) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (lw_assign(w, st, 1, &dot, sec, start + size) != 0) {
+                return -1;
+            }
+            if (dot < start + cur) {
+                lds_report_error(NULL, &st->at, "the location counter may not move backwards");
+                return -1;
+            }
+            cur = dot - start;
+        }
+        end = start + cur > start + size ? start + cur : start + size;
+        os->pad = end - (start + size);
+        *end_out = end;
+        return 0;
+    }
 
     for (k = 0; k < os->body.count; ++k) {
         if (os->body.items[k].kind == LDS_ST_INPUT) {
@@ -3074,7 +3242,8 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
              * does not share a page. */
             int relro = cls == 2 && is_relro_candidate_name(name);
 
-            if ((last_class != -1 && cls != last_class) ||
+            /* (read-only after writable shares the writable segment, as add_default_segments() makes it) */
+            if ((last_class != -1 && cls != last_class && !(last_class == 2 && cls == 1)) ||
                 (cls == 2 && last_class == 2 && last_relro != -1 && relro != last_relro)) {
                 if (!align_up_u64_checked(w->dot, page, &w->dot)) {
                     return -1;

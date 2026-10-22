@@ -245,6 +245,14 @@ struct elf_link_map_entry_rec {
     size_t input_index;
 };
 
+/* The sections of one rank in one output section: [start, end) of it. */
+struct elf_link_rank_extent {
+    char *output_name;
+    int rank;
+    uint64_t start;
+    uint64_t end;
+};
+
 struct elf_link_plan {
     struct elf_link_input *inputs;
     size_t input_count;
@@ -254,6 +262,12 @@ struct elf_link_plan {
     void *section_merge_user;
     elf_link_section_name_hook_t section_name_hook;
     void *section_name_user;
+    elf_link_section_rank_hook_t rank_hook;
+    elf_link_section_gap_hook_t gap_hook;
+    void *rank_user;
+    struct elf_link_rank_extent *extents; /* with rank hooks: where each rank's sections went */
+    size_t extent_count;
+    size_t extent_cap;
     elf_link_archive_hook_t archive_hook;
     void *archive_user;
     elf_link_gc_hook_t gc_hook;

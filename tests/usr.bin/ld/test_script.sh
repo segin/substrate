@@ -82,7 +82,6 @@ bad semicolon  "x = 1 y = 2;" "expected ';'"
 bad sections   "SECTIONS { .text : { *(.text) }" "SECTIONS is not closed"
 bad phdrs      "PHDRS { text PT_LOAD" "expected ';' after the program header"
 bad brace      "}" "unexpected '}'"
-bad between    "SECTIONS { .text : { *(.text) mid = .; *(.text.*) } }" "between two input section descriptions"
 bad backwards  "SECTIONS { .text : { *(.text*) } . = 0x10; .data : { *(.data) } }" "may not move back"
 bad no_phdr    "$std PHDRS { a PT_LOAD; } SECTIONS { .text : { *(.text*) } :nope }" "does not declare"
 bad region     "$std MEMORY { ram : ORIGIN = 0x900000, LENGTH = 0x10 } SECTIONS { .text : { *(.text*) } >ram }" \
@@ -155,6 +154,17 @@ if (cd "$work" && ./ld -m elf_i386 -T wrap.lds -o wrap.out t.o far.o) > "$work/e
 else
     echo "FAIL a call across the address space: $(head -1 "$work/err")"; fail=1
 fi
+
+# Statements between two input descriptions see the location counter
+# where they stand, and the sections go in in the descriptions' order, not
+# the inputs': Linux's scripts bracket tables with `__start_x = .;
+# KEEP(*(x)) __stop_x = .;` inside one output section, and realmode's has
+# `. = ALIGN(16); video_cards = .;` between two.  They were refused.
+ok  between "$std SECTIONS { .text : { *(.text) mid = .; *(.text.helper) . = ALIGN(64); al = .; *(.text._start)
+                after = .; } }
+             ASSERT(helper == mid && al % 64 == 0 && al > mid && _start == al && after > _start, \"between\")"
+ok  between_order "$std SECTIONS { .text : { *(.text._start) first_end = .; *(.text.helper) } }
+             ASSERT(_start < helper && helper == first_end, \"order\")"
 
 # An image linked at 0, read-only data before the code, as Linux's realmode
 # blob is: the script's order and addresses hold, though the default

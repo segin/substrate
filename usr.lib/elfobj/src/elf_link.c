@@ -653,25 +653,121 @@ static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj
     return name != NULL ? elf_find_section(out, name) : NULL;
 }
 
+/* Pad merged section @p dst out to @p offset (which it has not passed). */
+static elf_err_t pad_merged_section_to(struct elf_section *dst, uint64_t offset) {
+    uint64_t base = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
+    uint8_t *buf;
+
+    if (offset <= base) {
+        return ELF_OK;
+    }
+    if (dst->type == SHT_NOBITS) {
+        dst->size = offset;
+        return ELF_OK;
+    }
+    if (offset > (uint64_t)SIZE_MAX) {
+        return ELF_ERR_BOUNDS;
+    }
+    buf = merged_data_room(dst, (size_t)offset);
+    if (buf == NULL) {
+        return ELF_ERR_OOM;
+    }
+    memset(buf + dst->data_size, 0, (size_t)offset - dst->data_size);
+    dst->data = buf;
+    dst->owns_data = 1;
+    dst->data_size = (size_t)offset;
+    dst->size = dst->data_size;
+    return ELF_OK;
+}
+
+/* The extent of @p rank in output section @p name, or NULL. */
+static struct elf_link_rank_extent *rank_extent_find(const elf_link_plan_t *plan, const char *name, int rank) {
+    size_t i;
+
+    for (i = 0; i < plan->extent_count; ++i) {
+        if (plan->extents[i].rank == rank && strcmp(plan->extents[i].output_name, name) == 0) {
+            return &plan->extents[i];
+        }
+    }
+    return NULL;
+}
+
+/*
+ * With rank hooks: the first section of a rank in output section @p dst
+ * starts where the gap hook says (a script's `. = ALIGN(16)` before its
+ * input description), and the rank's extent begins there.
+ */
+static elf_err_t rank_begin(elf_link_plan_t *plan, struct elf_section *dst, const char *out_name, int rank) {
+    uint64_t offset = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
+    uint64_t align = 1;
+    struct elf_link_rank_extent *ext;
+    elf_err_t err;
+
+    if (rank_extent_find(plan, out_name, rank) != NULL) {
+        return ELF_OK;
+    }
+    if (plan->gap_hook != NULL && plan->gap_hook(out_name, rank, &offset, &align, plan->rank_user) != 0) {
+        return ELF_ERR_FORMAT;
+    }
+    if (align > dst->addralign) {
+        dst->addralign = align;
+    }
+    err = pad_merged_section_to(dst, offset);
+    if (err != ELF_OK) {
+        return err;
+    }
+    if (plan->extent_count == plan->extent_cap) {
+        size_t ncap = plan->extent_cap == 0 ? 32 : plan->extent_cap * 2;
+        struct elf_link_rank_extent *grown =
+            (struct elf_link_rank_extent *)realloc(plan->extents, ncap * sizeof(*grown));
+
+        if (grown == NULL) {
+            return ELF_ERR_OOM;
+        }
+        plan->extents = grown;
+        plan->extent_cap = ncap;
+    }
+    ext = &plan->extents[plan->extent_count];
+    ext->output_name = elf__strdup(out_name);
+    if (ext->output_name == NULL) {
+        return ELF_ERR_OOM;
+    }
+    ext->rank = rank;
+    ext->start = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
+    ext->end = ext->start;
+    plan->extent_count++;
+    return ELF_OK;
+}
+
+static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const struct elf_link_input *input,
+                                   size_t j, uint64_t *sec_bases, uint8_t *sec_included,
+                                   const uint8_t *sec_discard);
+
 static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                                 const struct elf_link_input *input,
                                 uint64_t *sec_bases, uint8_t *sec_included,
                                 comdat_set_t *comdat_seen) {
     size_t j;
     uint8_t *sec_discard = NULL;
-    elf_err_t pre_err;
+    elf_err_t err;
 
     sec_discard = (uint8_t *)elf__calloc(input->obj->section_count, sizeof(sec_discard[0]));
     if (sec_discard == NULL && input->obj->section_count != 0) {
         return ELF_ERR_OOM;
     }
-    pre_err = mark_discarded_comdat_members(input, comdat_seen, sec_discard);
-    if (pre_err != ELF_OK) {
-        free(sec_discard);
-        return pre_err;
+    err = mark_discarded_comdat_members(input, comdat_seen, sec_discard);
+    for (j = 0; err == ELF_OK && j < input->obj->section_count; ++j) {
+        err = merge_one_section(plan, out, input, j, sec_bases, sec_included, sec_discard);
     }
+    free(sec_discard);
+    return err;
+}
 
-    for (j = 0; j < input->obj->section_count; ++j) {
+/* Input section @p j of @p input, merged into the output section it goes to. */
+static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const struct elf_link_input *input,
+                                   size_t j, uint64_t *sec_bases, uint8_t *sec_included,
+                                   const uint8_t *sec_discard) {
+    {
         struct elf_section *src = input->obj->sections[j];
         struct elf_section *dst;
         elf_link_merge_action_t action = ELF_LINK_MERGE_APPEND;
@@ -683,28 +779,28 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         uint64_t src_align, src_flags;
 
         if (src == NULL || src->name == NULL || src->name[0] == '\0') {
-            continue;
+            return ELF_OK;
         }
         if (src->type == SHT_GROUP || sec_discard[j]) {
-            continue;
+            return ELF_OK;
         }
         if (is_internal_section_name(src->name)) {
-            continue;
+            return ELF_OK;
         }
         if (plan->gc_hook != NULL && !plan->gc_hook(src, plan->gc_user)) {
-            continue;
+            return ELF_OK;
         }
 
         out_name = output_section_name(plan, input, src);
         if (out_name == NULL) {
-            continue;
+            return ELF_OK;
         }
         dst = elf_find_section(out, out_name);
         if (dst != NULL && plan->section_merge_hook != NULL) {
             action = plan->section_merge_hook(out_name, dst, src, plan->section_merge_user);
         }
         if (action == ELF_LINK_MERGE_SKIP) {
-            continue;
+            return ELF_OK;
         }
 
         /*
@@ -719,7 +815,6 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             err = inflate_input_section(out, src, &inflated, &src_size,
                                         &src_align);
             if (err != ELF_OK) {
-                free(sec_discard);
                 return err;
             }
             src_data = inflated;
@@ -735,7 +830,6 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             dst = elf_add_section(out, out_name, src->type, src_flags);
             if (dst == NULL) {
                 free(inflated);
-                free(sec_discard);
                 return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
             }
             dst->addralign = src_align;
@@ -744,7 +838,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                    (src->data_size != dst->data_size ||
                     memcmp(src->data, dst->data, src->data_size) != 0)) {
             elf__set_err(out, ELF_ERR_FORMAT, ".ARM.attributes mismatch across inputs");
-            free(sec_discard);
+            free(inflated);
             return ELF_ERR_FORMAT;
         } else if (action == ELF_LINK_MERGE_APPEND) {
             /*
@@ -756,7 +850,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             if (dst->type != src->type && strcmp(src->name, ".note.GNU-stack") != 0) {
                 elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
                 (void)elf__append_diag(out, src->name);
-                free(sec_discard);
+                free(inflated);
                 return ELF_ERR_FORMAT;
             }
             if (src_align > dst->addralign) {
@@ -787,32 +881,46 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         if (action == ELF_LINK_MERGE_REPLACE) {
             err = replace_section_data(dst, src);
             if (err != ELF_OK) {
-                free(sec_discard);
+                free(inflated);
                 return err;
             }
             sec_bases[j] = 0;
         } else {
+            int rank = 0;
+
+            if (plan->rank_hook != NULL) {
+                /* the first of its rank starts where the script's statements before it say */
+                rank = plan->rank_hook(src->name, input->name, plan->rank_user);
+                err = rank_begin(plan, dst, out_name, rank);
+                if (err != ELF_OK) {
+                    free(inflated);
+                    return err;
+                }
+            }
             err = align_merged_section(dst, src_align, &sec_bases[j]);
             if (err != ELF_OK) {
                 free(inflated);
-                free(sec_discard);
                 return err;
             }
             err = append_section_data(dst, src_data, src_size, NULL);
             if (err != ELF_OK) {
                 free(inflated);
-                free(sec_discard);
                 return err;
             }
             if (src->type == SHT_NOBITS && src->size > 0) {
                 dst->size += src->size;
             }
+            if (plan->rank_hook != NULL) {
+                struct elf_link_rank_extent *ext = rank_extent_find(plan, out_name, rank);
+
+                if (ext != NULL) {
+                    ext->end = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
+                }
+            }
         }
         free(inflated);
         sec_included[j] = 1;
     }
-
-    free(sec_discard);
     return ELF_OK;
 }
 
@@ -1177,7 +1285,178 @@ void elf_link_plan_destroy(elf_link_plan_t *plan) {
     }
     free(plan->inputs);
     free_map_entries(plan);
+    for (i = 0; i < plan->extent_count; ++i) {
+        free(plan->extents[i].output_name);
+    }
+    free(plan->extents);
     free(plan);
+}
+
+elf_err_t elf_link_plan_set_section_rank_hooks(elf_link_plan_t *plan, elf_link_section_rank_hook_t rank,
+                                               elf_link_section_gap_hook_t gap, void *user) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->rank_hook = rank;
+    plan->gap_hook = gap;
+    plan->rank_user = user;
+    return ELF_OK;
+}
+
+int elf_link_plan_rank_extent(const elf_link_plan_t *plan, const char *output_name, int rank,
+                              uint64_t *start, uint64_t *end) {
+    const struct elf_link_rank_extent *ext;
+
+    if (plan == NULL || output_name == NULL) {
+        return 0;
+    }
+    ext = rank_extent_find(plan, output_name, rank);
+    if (ext == NULL) {
+        return 0;
+    }
+    if (start != NULL) {
+        *start = ext->start;
+    }
+    if (end != NULL) {
+        *end = ext->end;
+    }
+    return 1;
+}
+
+/* One input section to merge with rank hooks: which, its rank, and its place in input order. */
+struct ranked_piece {
+    size_t input;
+    size_t section;
+    int rank;
+    size_t seq;
+};
+
+static int ranked_piece_cmp(const void *a, const void *b) {
+    const struct ranked_piece *x = (const struct ranked_piece *)a;
+    const struct ranked_piece *y = (const struct ranked_piece *)b;
+
+    if (x->rank != y->rank) {
+        return x->rank < y->rank ? -1 : 1;
+    }
+    return x->seq < y->seq ? -1 : x->seq > y->seq ? 1 : 0;
+}
+
+/*
+ * The merge with rank hooks: every input's sections go in by rank -- a
+ * linker script's input descriptions, in the order its output section
+ * lists them -- and in input order within a rank, and only then are the
+ * symbols and relocations of each input merged, against where its
+ * sections went.  Merging input by input put a later description's
+ * sections of one input before an earlier description's of the next.
+ */
+static elf_err_t link_ranked(elf_link_plan_t *plan, elfobj_t *out, comdat_set_t *comdat_seen) {
+    uint64_t **bases = (uint64_t **)elf__calloc(plan->input_count, sizeof(*bases));
+    uint8_t **included = (uint8_t **)elf__calloc(plan->input_count, sizeof(*included));
+    uint8_t **discard = (uint8_t **)elf__calloc(plan->input_count, sizeof(*discard));
+    struct ranked_piece *pieces = NULL;
+    size_t piece_count = 0;
+    size_t total = 0;
+    elf_err_t err = ELF_OK;
+    size_t i, j;
+
+    if (bases == NULL || included == NULL || discard == NULL) {
+        err = ELF_ERR_OOM;
+        goto done;
+    }
+    for (i = 0; err == ELF_OK && i < plan->input_count; ++i) {
+        const struct elf_link_input *in = &plan->inputs[i];
+
+        if (in->obj == NULL) {
+            err = ELF_ERR_STATE;
+            break;
+        }
+        if (in->obj->machine != out->machine || in->obj->cls != out->cls || in->obj->endian != out->endian) {
+            err = ELF_ERR_UNSUPPORTED;
+            break;
+        }
+        err = merge_arch_metadata(out, in->obj);
+        if (err != ELF_OK) {
+            break;
+        }
+        bases[i] = (uint64_t *)elf__calloc(in->obj->section_count + 1, sizeof(*bases[i]));
+        included[i] = (uint8_t *)elf__calloc(in->obj->section_count + 1, sizeof(*included[i]));
+        discard[i] = (uint8_t *)elf__calloc(in->obj->section_count + 1, sizeof(*discard[i]));
+        if (bases[i] == NULL || included[i] == NULL || discard[i] == NULL) {
+            err = ELF_ERR_OOM;
+            break;
+        }
+        err = mark_discarded_comdat_members(in, comdat_seen, discard[i]);
+        total += in->obj->section_count;
+    }
+    if (err == ELF_OK && total != 0) {
+        pieces = (struct ranked_piece *)elf__calloc(total, sizeof(*pieces));
+        if (pieces == NULL) {
+            err = ELF_ERR_OOM;
+        }
+    }
+    for (i = 0; err == ELF_OK && i < plan->input_count; ++i) {
+        const elfobj_t *obj = plan->inputs[i].obj;
+
+        for (j = 0; j < obj->section_count; ++j) {
+            const struct elf_section *src = obj->sections[j];
+
+            pieces[piece_count].input = i;
+            pieces[piece_count].section = j;
+            pieces[piece_count].rank = src != NULL && src->name != NULL
+                                           ? plan->rank_hook(src->name, plan->inputs[i].name, plan->rank_user)
+                                           : 0;
+            pieces[piece_count].seq = piece_count;
+            piece_count++;
+        }
+    }
+    if (err == ELF_OK && piece_count > 1) {
+        qsort(pieces, piece_count, sizeof(*pieces), ranked_piece_cmp);
+    }
+    for (i = 0; err == ELF_OK && i < piece_count; ++i) {
+        size_t in = pieces[i].input;
+
+        err = merge_one_section(plan, out, &plan->inputs[in], pieces[i].section, bases[in], included[in],
+                                discard[in]);
+        if (err != ELF_OK) {
+            (void)elf__append_diag(out, plan->inputs[in].name != NULL ? plan->inputs[in].name : "");
+        }
+    }
+    for (i = 0; err == ELF_OK && i < plan->input_count; ++i) {
+        const struct elf_link_input *in = &plan->inputs[i];
+        struct elf_symbol **sym_map = (struct elf_symbol **)elf__calloc(in->obj->symbol_count + 1, sizeof(*sym_map));
+
+        if (sym_map == NULL) {
+            err = ELF_ERR_OOM;
+            break;
+        }
+        err = merge_symbols(plan, out, in, bases[i], included[i], sym_map, i);
+        if (err == ELF_OK) {
+            err = merge_relocations(plan, out, in, bases[i], included[i], sym_map, i);
+        }
+        free(sym_map);
+        if (err != ELF_OK) {
+            (void)elf__append_diag(out, in->name != NULL ? in->name : "");
+            break;
+        }
+        (void)elf_link_plan_note_incremental(plan, "merged-input", in->name != NULL ? in->name : "");
+    }
+done:
+    for (i = 0; i < plan->input_count; ++i) {
+        if (bases != NULL) {
+            free(bases[i]);
+        }
+        if (included != NULL) {
+            free(included[i]);
+        }
+        if (discard != NULL) {
+            free(discard[i]);
+        }
+    }
+    free(bases);
+    free(included);
+    free(discard);
+    free(pieces);
+    return err;
 }
 
 elf_err_t elf_link_plan_add_input(elf_link_plan_t *plan, elfobj_t *obj, const char *name) {
@@ -1296,6 +1575,23 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
 
     free_map_entries(plan);
     out->flags = plan->inputs[0].obj->flags;
+
+    if (plan->rank_hook != NULL) {
+        elf_err_t err = link_ranked(plan, out, &comdat_seen);
+
+        comdat_set_free(&comdat_seen);
+        if (err != ELF_OK && err != ELF_ERR_OOM && err != ELF_ERR_STATE && err != ELF_ERR_UNSUPPORTED) {
+            /* the unfinished object goes back, with the account of what went wrong */
+            *output = out;
+            return err;
+        }
+        if (err != ELF_OK) {
+            elf_close(out);
+            return err;
+        }
+        *output = out;
+        return ELF_OK;
+    }
 
     for (i = 0; i < plan->input_count; ++i) {
         const struct elf_link_input *in = &plan->inputs[i];
