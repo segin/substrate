@@ -52,4 +52,38 @@ for m in 32 64; do
 		fi
 	done
 done
+# A call with no effect but its unused result goes too, inlined or not:
+# Linux's noinline apply_retpolines(__retpoline_sites, ...) is empty
+# without retpolines, and the linker script then defines neither symbol.
+# A call that reads memory (a device register), may loop forever, or
+# whose result is used stays, and under -fPIC so does a call of an
+# external function, which another object may interpose.
+cat > "$CC_TMP/no_effect.c" <<'EOF'
+typedef int s32;
+extern s32 undefined_sites[], undefined_sites_end[];
+extern volatile int mmio;
+void __attribute__((noinline)) apply_retpolines(s32 *start, s32 *end) { }
+int __attribute__((noinline)) reads_mmio(s32 *start) { return mmio; }
+void __attribute__((noinline)) spins(int x) { while (x) { } }
+static int __attribute__((noinline)) used_result(int x) { return x + 1; }
+int setup(void) {
+	apply_retpolines(undefined_sites, undefined_sites_end);
+	reads_mmio(0);
+	spins(0);
+	return used_result(4);
+}
+EOF
+for m in 32 64; do
+	"$CC_BIN" -m$m -Os -S -o "$CC_TMP/no_effect.s" "$CC_TMP/no_effect.c"
+	calls=$(grep -Eo 'call[lq]?[[:space:]]+[a-z_]+' "$CC_TMP/no_effect.s" | awk '{print $2}' | sort | tr '\n' ' ')
+	if [ "$calls" != "reads_mmio spins used_result " ]; then
+		echo "run_inline_dead_call: -m$m -Os calls: $calls"
+		exit 1
+	fi
+	"$CC_BIN" -m$m -Os -fPIC -S -o "$CC_TMP/no_effect.s" "$CC_TMP/no_effect.c"
+	if ! grep -Eq 'call[lq]?[[:space:]]+apply_retpolines' "$CC_TMP/no_effect.s"; then
+		echo "run_inline_dead_call: -m$m -fPIC dropped a call of an interposable function"
+		exit 1
+	fi
+done
 echo "run_inline_dead_call: ok"

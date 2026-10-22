@@ -1,4 +1,5 @@
 #include "cc_middle.h"
+#include "cc_options.h"
 #include "cc_target.h"
 
 #include <stdio.h>
@@ -1123,6 +1124,142 @@ out:
     return rc < 0 ? -1 : 0;
 }
 
+/**
+ * Whether calling @p g has no effect but its result: a body that calls nothing, has no asm, traps
+ * or alloca, writes and reads memory only in its own stack slots, and has no backward branch, so
+ * it always returns.  A weak or aliased function is not known by its body here, nor, under -fPIC,
+ * an external one, which another object may interpose.
+ */
+static int call_has_no_effect(const cc_ssa_function_t *g, int pic) {
+    unsigned char *local;
+    long *label_at;
+    size_t i;
+    int ok = 1;
+
+    if ((g->attr_flags & CC_ATTR_WEAK) != 0 || g->attr_alias != NULL || g->instrs == NULL ||
+        (pic && (g->storage & CC_STORAGE_STATIC) == 0)) {
+        return 0;
+    }
+    local = (unsigned char *)calloc((size_t)(g->value_count > 0 ? g->value_count : 1), 1);
+    label_at = (long *)malloc((size_t)(g->label_count > 0 ? g->label_count : 1) * sizeof(*label_at));
+    if (local == NULL || label_at == NULL) {
+        free(local);
+        free(label_at);
+        return 0;
+    }
+    for (i = 0; i < (size_t)g->label_count; ++i) {
+        label_at[i] = -1;
+    }
+    for (i = 0; i < g->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &g->instrs[i];
+
+        if (in->op == CC_SSA_STACKALLOC && in->dst >= 0) {
+            local[in->dst] = 1;
+        } else if (in->op == CC_SSA_LABEL && in->label >= 0 && in->label < g->label_count) {
+            label_at[in->label] = (long)i;
+        }
+    }
+    for (i = 0; i < g->instr_count && ok; ++i) {
+        const cc_ssa_instr_t *in = &g->instrs[i];
+
+        switch (in->op) {
+        case CC_SSA_LOAD:
+        case CC_SSA_STORE:
+            /* only its own slots: another load may be of a device register */
+            ok = in->lhs >= 0 && local[in->lhs];
+            break;
+        case CC_SSA_BR:
+            ok = in->label >= 0 && in->label < g->label_count && label_at[in->label] > (long)i;
+            break;
+        case CC_SSA_BR_COND:
+            ok = in->true_label >= 0 && in->true_label < g->label_count && in->false_label >= 0 &&
+                 in->false_label < g->label_count && label_at[in->true_label] > (long)i &&
+                 label_at[in->false_label] > (long)i;
+            break;
+        case CC_SSA_CALL:
+        case CC_SSA_CALLI:
+        case CC_SSA_ASM:
+        case CC_SSA_TRAP:
+        case CC_SSA_VA_START:
+        case CC_SSA_DYNALLOC:
+        case CC_SSA_CHAIN:
+        case CC_SSA_LADDR:
+            ok = 0;
+            break;
+        default:
+            break;
+        }
+    }
+    free(local);
+    free(label_at);
+    return ok;
+}
+
+/**
+ * Drop each call whose result is not used of a function of the module whose call has no other
+ * effect (call_has_no_effect()), as gcc does from what it learns of a body even when it does not
+ * inline it: Linux calls the noinline apply_retpolines(__retpoline_sites, __retpoline_sites_end),
+ * empty without retpolines, whose linker script then defines neither symbol.  A function that
+ * dropped a call is folded again, its arguments' computations going with it.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int drop_effectless_calls(cc_ssa_module_t *m, int opt_level) {
+    const cc_options_t *opts = cc_options_current();
+    int pic = opts != NULL && opts->pic;
+    unsigned char *no_effect;
+    size_t i;
+    int rc = 0;
+
+    if (m->func_count == 0) {
+        return 0;
+    }
+    no_effect = (unsigned char *)malloc(m->func_count);
+    if (no_effect == NULL) {
+        return -1;
+    }
+    for (i = 0; i < m->func_count; ++i) {
+        no_effect[i] = (unsigned char)call_has_no_effect(&m->funcs[i], pic);
+    }
+    for (i = 0; i < m->func_count && rc == 0; ++i) {
+        cc_ssa_function_t *f = &m->funcs[i];
+        int *uses = (int *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), sizeof(*uses));
+        size_t k;
+        size_t w = 0;
+        int dropped = 0;
+
+        if (uses == NULL) {
+            rc = -1;
+            break;
+        }
+        for (k = 0; k < f->instr_count; ++k) {
+            mark_uses(&f->instrs[k], uses);
+        }
+        for (k = 0; k < f->instr_count; ++k) {
+            cc_ssa_instr_t *in = &f->instrs[k];
+            long gi;
+
+            if (in->op == CC_SSA_CALL && in->sym != NULL && (in->dst < 0 || uses[in->dst] == 0) &&
+                (gi = called_function(m, in->sym)) >= 0 && no_effect[gi]) {
+                cc_ssa_instr_free(in);
+                dropped = 1;
+                continue;
+            }
+            if (w != k) {
+                f->instrs[w] = f->instrs[k];
+            }
+            w++;
+        }
+        f->instr_count = w;
+        free(uses);
+        if (dropped) {
+            rc = optimize_function(f, opt_level);
+        }
+    }
+    free(no_effect);
+    return rc;
+}
+
 int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     size_t i;
     int oom = 0;
@@ -1132,7 +1269,7 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     }
     /* gcc inlines static inline functions from -O1 and folds what they make constant */
     if (!oom && opt_level > 0) {
-        oom = inline_module(m, opt_level) != 0;
+        oom = inline_module(m, opt_level) != 0 || drop_effectless_calls(m, opt_level) != 0;
     }
     if (oom) {
         if (diag != NULL && diag->message[0] == '\0') {
