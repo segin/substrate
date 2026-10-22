@@ -830,6 +830,114 @@ static int dce_function(cc_ssa_function_t *f) {
     return any;
 }
 
+/** The length of symbol reference @p s without an offset: `fn+8` names fn. */
+static size_t sym_name_len(const char *s) {
+    size_t n = 0;
+
+    while (s[n] != '\0' && s[n] != '+' && s[n] != '-' && s[n] != ' ' && s[n] != '@') {
+        n++;
+    }
+    return n;
+}
+
+/** Mark the function @p sym names as kept, and queue it, if it is one not kept yet. */
+static void keep_named(const cc_ssa_module_t *m, const char *sym, unsigned char *keep, size_t *stack, size_t *top) {
+    size_t n;
+    size_t i;
+
+    if (sym == NULL) {
+        return;
+    }
+    n = sym_name_len(sym);
+    for (i = 0; i < m->func_count; ++i) {
+        const char *name = m->funcs[i].name;
+
+        if (!keep[i] && name != NULL && strlen(name) == n && strncmp(name, sym, n) == 0) {
+            keep[i] = 1;
+            stack[(*top)++] = i;
+        }
+    }
+}
+
+/**
+ * Drop the static functions nothing refers to, as gcc does: one marked
+ * `static inline` at every level, any static one from -O1.  Kept are the
+ * functions with external linkage, those marked used, constructor or
+ * destructor, and whatever a kept function calls or takes the address of,
+ * or a global's initializer or an alias names.  Linux's headers define
+ * many static inline helpers per file, some for the other architecture
+ * (rip_rel_ptr's `leaq ...(%rip)` in an i386 build), which gcc never
+ * compiles unless called; cc emitted them all.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
+    const cc_attr_flags_t pinned = CC_ATTR_USED | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR;
+    unsigned char *keep;
+    size_t *stack;
+    size_t top = 0;
+    size_t i;
+    size_t w = 0;
+
+    if (m->func_count == 0) {
+        return 0;
+    }
+    keep = (unsigned char *)calloc(m->func_count, 1);
+    stack = (size_t *)malloc(m->func_count * sizeof(*stack));
+    if (keep == NULL || stack == NULL) {
+        free(keep);
+        free(stack);
+        return -1;
+    }
+    for (i = 0; i < m->func_count; ++i) {
+        const cc_ssa_function_t *f = &m->funcs[i];
+        int removable = (f->storage & CC_STORAGE_STATIC) != 0 && (opt_level > 0 || (f->storage & CC_STORAGE_INLINE) != 0) &&
+                        (f->attr_flags & pinned) == 0;
+
+        if (!removable) {
+            keep[i] = 1;
+            stack[top++] = i;
+        }
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+        size_t k;
+
+        keep_named(m, g->init_sym, keep, stack, &top);
+        keep_named(m, g->attr_alias, keep, stack, &top);
+        for (k = 0; k < g->init_item_count; ++k) {
+            keep_named(m, g->init_items[k].init_sym, keep, stack, &top);
+        }
+    }
+    while (top > 0) {
+        const cc_ssa_function_t *f = &m->funcs[stack[--top]];
+        size_t k;
+
+        keep_named(m, f->attr_alias, keep, stack, &top);
+        for (k = 0; k < f->instr_count; ++k) {
+            const cc_ssa_instr_t *in = &f->instrs[k];
+
+            if (in->sym != NULL && (in->op == CC_SSA_CALL || in->op == CC_SSA_GADDR)) {
+                keep_named(m, in->sym, keep, stack, &top);
+            }
+        }
+    }
+    for (i = 0; i < m->func_count; ++i) {
+        if (!keep[i]) {
+            cc_ssa_function_free(&m->funcs[i]);
+            continue;
+        }
+        if (w != i) {
+            m->funcs[w] = m->funcs[i];
+        }
+        w++;
+    }
+    m->func_count = w;
+    free(keep);
+    free(stack);
+    return 0;
+}
+
 int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     size_t i;
     (void)diag;
@@ -869,6 +977,13 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
             }
             return -1;
         }
+    }
+    /* after the functions' own passes: a call that was in a dead arm no longer keeps its callee */
+    if (remove_unused_static_functions(m, opt_level) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "out of memory in optimizer");
+        }
+        return -1;
     }
     return 0;
 }
