@@ -847,7 +847,25 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
              * type (gcc and gas write PROGBITS, glibc's own start files
              * NOTE), and GNU ld takes either; only its flags matter.
              */
-            if (dst->type != src->type && strcmp(src->name, ".note.GNU-stack") != 0) {
+            if (dst->type == SHT_NOBITS && src->type == SHT_PROGBITS) {
+                /*
+                 * Zeros and contents in one output section: it has contents,
+                 * the zeros so far written out, as GNU ld makes it (and the
+                 * other way round below) -- Linux's vDSO script gathers
+                 * *(.bss*) into .data.
+                 */
+                uint64_t zeros = dst->size;
+
+                dst->type = SHT_PROGBITS;
+                dst->size = 0;
+                dst->data_size = 0;
+                err = pad_merged_section_to(dst, zeros);
+                if (err != ELF_OK) {
+                    free(inflated);
+                    return err;
+                }
+            } else if (dst->type != src->type && !(src->type == SHT_NOBITS && dst->type == SHT_PROGBITS) &&
+                       strcmp(src->name, ".note.GNU-stack") != 0) {
                 elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
                 (void)elf__append_diag(out, src->name);
                 free(inflated);
@@ -902,13 +920,18 @@ static elf_err_t merge_one_section(elf_link_plan_t *plan, elfobj_t *out, const s
                 free(inflated);
                 return err;
             }
-            err = append_section_data(dst, src_data, src_size, NULL);
+            if (src->type == SHT_NOBITS && dst->type != SHT_NOBITS) {
+                /* zeros into a section with contents: written out */
+                err = pad_merged_section_to(dst, sec_bases[j] + src->size);
+            } else {
+                err = append_section_data(dst, src_data, src_size, NULL);
+                if (err == ELF_OK && src->type == SHT_NOBITS && src->size > 0) {
+                    dst->size += src->size;
+                }
+            }
             if (err != ELF_OK) {
                 free(inflated);
                 return err;
-            }
-            if (src->type == SHT_NOBITS && src->size > 0) {
-                dst->size += src->size;
             }
             if (plan->rank_hook != NULL) {
                 struct elf_link_rank_extent *ext = rank_extent_find(plan, out_name, rank);

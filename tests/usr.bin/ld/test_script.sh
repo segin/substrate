@@ -185,6 +185,16 @@ if [ -f "$work/at_zero.out" ]; then
              END { print bad ? "overlap" : n }')" 3
 fi
 
+# Zeros (.bss) gathered into a section with contents (.data) are written
+# out as zeros, as GNU ld does: Linux's vDSO script puts *(.bss*) in
+# .data, and the merge stopped at "section type mismatch".
+ok  bss_in_data "$std SECTIONS { .text : { *(.text*) } .data : { *(.data*) *(.bss*) *(COMMON) } }
+             ASSERT(SIZEOF(.data) >= 4 + 64 * 4, \"bss_in_data\")"
+if [ -f "$work/bss_in_data.out" ]; then
+    is  bss_in_data_type "$(readelf -SW "$work/bss_in_data.out" |
+        awk '{ for (i = 1; i < NF; i++) if ($i == ".data") print $(i + 1) }')" PROGBITS
+fi
+
 # AT() says where a section is loaded, and a segment's p_paddr is its first
 # section's; a section after one with AT() loads as far from its address.
 # The i386 kernel is linked at 0xc1000000 and loaded at 0x1000000, and its
