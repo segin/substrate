@@ -96,6 +96,9 @@ typedef struct {
     size_t hoisted_func_count;
     size_t hoisted_func_cap;
     int scope_depth;
+    /** a statement expression's block is being parsed at this depth (0: none); its value's type goes in: */
+    int stmt_expr_value_depth;
+    const cc_ctype_t *stmt_expr_value_ctype; /**< the type of that block's last expression statement */
     size_t file_literal_count; /**< file-scope compound literals hoisted into globals so far */
     int parse_depth;
     int last_storage;

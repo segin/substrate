@@ -2382,7 +2382,9 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     }
                     typeof_ctype = parser_expr_ctype(p, te);
                     if (typeof_ctype == NULL) {
-                        set_diag(p->diag, te->line, te->col, "cannot determine the type of typeof's operand");
+                        /* a node built without a position: point at the `)` after the operand */
+                        set_diag(p->diag, te->line != 0 ? te->line : p->tok.line, te->line != 0 ? te->col : p->tok.col,
+                                 "cannot determine the type of typeof's operand");
                         free_expr(te);
                         return -1;
                     }
@@ -7290,11 +7292,20 @@ static cc_expr_t *parse_primary(parser_t *p) {
             return NULL;
         }
         if (p->tok.kind == TOK_LBRACE) {
+            int saved_value_depth = p->stmt_expr_value_depth;
+            const cc_ctype_t *value_ctype;
+
             memset(&st, 0, sizeof(st));
+            /* parse_block_stmt() types the value before the block's scope closes */
+            p->stmt_expr_value_depth = p->scope_depth + 1;
+            p->stmt_expr_value_ctype = NULL;
             if (parse_stmt(p, &st) != 0) {
+                p->stmt_expr_value_depth = saved_value_depth;
                 free_stmt(&st);
                 return NULL;
             }
+            value_ctype = p->stmt_expr_value_ctype;
+            p->stmt_expr_value_depth = saved_value_depth;
             if (st.kind != CC_STMT_BLOCK) {
                 free_stmt(&st);
                 set_diag(p->diag, p->tok.line, p->tok.col, "expected block in statement expression");
@@ -7311,6 +7322,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             e->stmt_expr_stmts = st.block_stmts;
             e->stmt_expr_count = st.block_count;
+            e->ctype = value_ctype;
             st.block_stmts = NULL;
             st.block_count = 0;
             free_stmt(&st);
@@ -8946,8 +8958,20 @@ static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
     }
     /*
      * Keep CC_STORAGE_AUTO_TYPE until semantic analysis, where initializer
-     * expression types are available and stable.
+     * expression types are available and stable; sema deduces the type
+     * again there.  But the parser needs it now too: `typeof` is settled
+     * while parsing, and Linux's scoped user-access macros take
+     * `__typeof__(&p->member)` of an `__auto_type p`.  So deduce it as
+     * sema does -- the initializer's value type, decayed and unqualified --
+     * where the parser can type the initializer.
      */
+    {
+        const cc_ctype_t *t = parser_expr_ctype(p, s->expr);
+
+        if (t != NULL) {
+            s->ctype = cc_ct_decay(t)->unqual;
+        }
+    }
     return 0;
 }
 
@@ -9566,6 +9590,17 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
         local_label_pop_to_depth(p, saved_depth);
         p->scope_depth = saved_depth;
         return -1;
+    }
+    if (p->stmt_expr_value_depth == saved_depth + 1) {
+        /*
+         * A statement expression's block: its value is its last expression
+         * statement's, which may name the block's own locals -- type it
+         * now, while they are still in scope.
+         */
+        p->stmt_expr_value_ctype =
+            s->block_count > 0 && s->block_stmts[s->block_count - 1].kind == CC_STMT_EXPR
+                ? parser_expr_ctype(p, s->block_stmts[s->block_count - 1].expr)
+                : cc_ct_basic(CC_CT_VOID);
     }
     typedef_pop_to_depth(p, saved_depth);
     var_pop_to_depth(p, saved_depth);

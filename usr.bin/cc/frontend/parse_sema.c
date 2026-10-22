@@ -507,6 +507,9 @@ const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
         }
         return parser_usual_arith(a, b) != NULL ? parser_usual_arith(a, b) : b;
     case CC_EXPR_STMT:
+        if (e->ctype != NULL) {
+            return e->ctype; /* typed when parsed, while its locals were in scope */
+        }
         if (e->stmt_expr_count > 0 && e->stmt_expr_stmts[e->stmt_expr_count - 1].kind == CC_STMT_EXPR) {
             return parser_expr_ctype(p, e->stmt_expr_stmts[e->stmt_expr_count - 1].expr);
         }
