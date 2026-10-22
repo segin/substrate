@@ -7,7 +7,10 @@
 # link ("duplicate strong definition of `native_save_fl`").  cc has no
 # inliner, so such a function is a copy local to the file; two files
 # including it link, and a plain gnu_inline function is callable from
-# another file, as with gcc.
+# another file, as with gcc.  A plain extern declaration before a plain
+# gnu_inline definition changes nothing: Linux declares cyc2ns_read_begin
+# extern in a header and tsc.c defines it `__always_inline`, which cc
+# read as `extern inline` and left undefined.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -22,12 +25,14 @@ cat > "$CC_TMP/gi.h" <<'EOF'
 extern gnu_inline unsigned long save_fl(void);
 extern gnu_inline __attribute__((__always_inline__)) unsigned long save_fl(void) { return 42; }
 gnu_inline int defined_here(int x);
+extern int read_begin(int x);
 /* static inline is as before: unused, it is not compiled (Linux's `inline` is gnu_inline on all of them) */
 static gnu_inline void *rip_rel_ptr(void *p) { __asm__("leaq %c1(%%rip), %0" : "=r"(p) : "i"(p)); return p; }
 EOF
 cat > "$CC_TMP/gi_a.c" <<'EOF'
 #include "gi.h"
 gnu_inline int defined_here(int x) { return x * 3; }
+gnu_inline __attribute__((__always_inline__)) int read_begin(int x) { return x + 7; }
 int from_a(void) { return (int)save_fl() + 1; }
 EOF
 cat > "$CC_TMP/gi_b.c" <<'EOF'
@@ -35,7 +40,7 @@ cat > "$CC_TMP/gi_b.c" <<'EOF'
 #include "gi.h"
 int from_a(void);
 int main(void) {
-	printf("%d %d %d\n", (int)save_fl(), from_a(), defined_here(5));
+	printf("%d %d %d %d\n", (int)save_fl(), from_a(), defined_here(5), read_begin(1));
 	return 0;
 }
 EOF
@@ -47,8 +52,9 @@ for m in 32 64; do
 		# no global save_fl in either object
 		! nm "$CC_TMP/gi_a.o" "$CC_TMP/gi_b.o" | grep -q ' T save_fl$'
 		nm "$CC_TMP/gi_a.o" | grep -q ' T defined_here$'
+		nm "$CC_TMP/gi_a.o" | grep -q ' T read_begin$'
 		"$CC_BIN" -m$m -o "$CC_TMP/gi" "$CC_TMP/gi_a.o" "$CC_TMP/gi_b.o"
-		[ "$("$CC_TMP/gi")" = "42 43 15" ]
+		[ "$("$CC_TMP/gi")" = "42 43 15 8" ]
 	done
 done
 echo "run_gnu_inline: ok"

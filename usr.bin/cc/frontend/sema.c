@@ -6557,6 +6557,17 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
     }
 }
 
+/**
+ * Whether @p f is an inline function with the GNU89 meaning, `__attribute__((gnu_inline))`, whose
+ * storage says what is defined outside the file without regard to other declarations of it.
+ *
+ * @param f the function
+ * @return 1 if it is, else 0
+ */
+static int fn_is_gnu_inline_def(const cc_function_t *f) {
+    return (f->storage & CC_STORAGE_INLINE) != 0 && (f->attr_flags & CC_ATTR_GNU_INLINE) != 0;
+}
+
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     size_t i;
     int had_error = 0;
@@ -7051,11 +7062,19 @@ fail_global_item:
             /*
              * C inline/linkage rule interaction:
              * a prior extern declaration keeps a later plain inline definition
-             * externally visible in this TU.
+             * externally visible in this TU.  A gnu_inline one keeps the
+             * storage it was written with: its `extern` is what says it is
+             * for inlining only, and its plain `inline` is external already
+             * (Linux's cyc2ns_read_begin, declared extern in a header, was
+             * left with no definition at all).
              */
             if ((prev_extern || cur_extern) && !prev_static && !cur_static) {
-                prev->storage |= CC_STORAGE_EXTERN;
-                f->storage |= CC_STORAGE_EXTERN;
+                if (!fn_is_gnu_inline_def(prev)) {
+                    prev->storage |= CC_STORAGE_EXTERN;
+                }
+                if (!fn_is_gnu_inline_def(f)) {
+                    f->storage |= CC_STORAGE_EXTERN;
+                }
             }
             if (prev->has_body && f->has_body) {
                 int prev_inline = ((prev->storage & CC_STORAGE_INLINE) != 0);
