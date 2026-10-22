@@ -24,6 +24,14 @@ typedef struct {
     size_t cap;
 } local_label_vec_t;
 
+/* Names set to a register (`.set src, %esi`), which GAS lets stand for it in operands. */
+typedef struct {
+    char **names;
+    char **regs;
+    size_t count;
+    size_t cap;
+} reg_alias_vec_t;
+
 typedef struct {
     const as_parser_cfg_t *cfg;
     int syntax_intel;
@@ -32,6 +40,7 @@ typedef struct {
     size_t errbuf_sz;
     local_label_vec_t local_defs;
     int unresolved_local;       /* a 1f or 1b with no label to go to */
+    reg_alias_vec_t reg_aliases;
 } parse_ctx_t;
 
 typedef struct {
@@ -93,6 +102,91 @@ static int push_local_def(local_label_vec_t *v, int digit, const char *file, uns
         return -1;
     }
     v->count++;
+    return 0;
+}
+
+static void free_reg_aliases(reg_alias_vec_t *v) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        free(v->names[i]);
+        free(v->regs[i]);
+    }
+    free(v->names);
+    free(v->regs);
+    memset(v, 0, sizeof(*v));
+}
+
+/** The register name @p name was set to, or NULL. */
+static const char *reg_alias_find(const reg_alias_vec_t *v, const char *name) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->names[i], name) == 0) {
+            return v->regs[i];
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Note that @p name was set to @p value: an alias of the register when
+ * @p value is one, else no alias any more.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int reg_alias_note(reg_alias_vec_t *v, const char *name, const char *value, int is_reg) {
+    size_t i;
+    char *reg;
+
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->names[i], name) == 0) {
+            break;
+        }
+    }
+    if (!is_reg) {
+        if (i < v->count) {
+            free(v->names[i]);
+            free(v->regs[i]);
+            v->names[i] = v->names[v->count - 1];
+            v->regs[i] = v->regs[v->count - 1];
+            v->count--;
+        }
+        return 0;
+    }
+    reg = xstrdup(value);
+    if (reg == NULL) {
+        return -1;
+    }
+    if (i < v->count) {
+        free(v->regs[i]);
+        v->regs[i] = reg;
+        return 0;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
+        char **nn = (char **)realloc(v->names, ncap * sizeof(*nn));
+        char **nr;
+
+        if (nn == NULL) {
+            free(reg);
+            return -1;
+        }
+        v->names = nn;
+        nr = (char **)realloc(v->regs, ncap * sizeof(*nr));
+        if (nr == NULL) {
+            free(reg);
+            return -1;
+        }
+        v->regs = nr;
+        v->cap = ncap;
+    }
+    v->names[v->count] = xstrdup(name);
+    if (v->names[v->count] == NULL) {
+        free(reg);
+        return -1;
+    }
+    v->regs[v->count++] = reg;
     return 0;
 }
 
@@ -3053,6 +3147,49 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
     return as_parse_end(p);
 }
 
+/**
+ * An instruction line's tokens with each name set to a register (an
+ * alias, reg_alias_note()) made that register, as GAS reads them --
+ * Linux's memmove_32.S has `.set src, %esi` and then `movl (src), %eax`.
+ * Labels, directives and assignments are left alone, so the name can be
+ * set again.
+ *
+ * @param out  receives a copy with the substitutions (its texts shared),
+ *             or NULL when the line has none
+ * @return     0, or -1 when out of memory
+ */
+static int reg_alias_substitute(const reg_alias_vec_t *v, const as_token_t *tokv, size_t n, as_token_t **out) {
+    size_t k = 0;
+    size_t m;
+
+    *out = NULL;
+    while (k + 1 < n && strcmp(tokv[k + 1].text, ":") == 0) {
+        k += 2;
+    }
+    if (k >= n || tokv[k].kind == AS_TOK_DIRECTIVE || (k + 1 < n && strcmp(tokv[k + 1].text, "=") == 0)) {
+        return 0;
+    }
+    for (m = k + 1; m < n; ++m) {
+        const char *reg;
+
+        if (tokv[m].kind != AS_TOK_IDENTIFIER || tokv[m].quoted ||
+            (m > 0 && strcmp(tokv[m - 1].text, "%") == 0) ||
+            (reg = reg_alias_find(v, tokv[m].text)) == NULL) {
+            continue;
+        }
+        if (*out == NULL) {
+            *out = (as_token_t *)malloc(n * sizeof(**out));
+            if (*out == NULL) {
+                return -1;
+            }
+            memcpy(*out, tokv, n * sizeof(**out));
+        }
+        (*out)[m].kind = AS_TOK_REGISTER;
+        (*out)[m].text = (char *)reg;
+    }
+    return 0;
+}
+
 int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count) {
     /* (The statements below were written for a vector of them.) */
     const struct {
@@ -3083,13 +3220,54 @@ int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count) {
         size_t j = i + 1;
         size_t start = i;
         as_stmt_t st;
+        as_token_t *aliased;
+        int rc;
 
         while (j < tokens->count && tokens->items[j].line == tokens->items[i].line &&
                strcmp(tokens->items[j].file, tokens->items[i].file) == 0) {
             j++;
         }
 
-        if (parse_line_tokens(&ctx, tokens->items + start, j - start, &st) != 0) {
+        aliased = NULL;
+        if (parse_is_x86 && ctx.reg_aliases.count != 0 &&
+            reg_alias_substitute(&ctx.reg_aliases, tokens->items + start, j - start, &aliased) != 0) {
+            set_err(&ctx, "%s:%u: out of memory", tokens->items[start].file, tokens->items[start].line);
+            p->ctx = ctx;
+            p->done = 1;
+            return -1;
+        }
+        rc = parse_line_tokens(&ctx, aliased != NULL ? aliased : tokens->items + start, j - start, &st);
+        free(aliased);
+        if (rc == 0 && parse_is_x86 && st.kind == AS_STMT_DIRECTIVE && st.u.directive.name != NULL &&
+            st.u.directive.arg_count == 2 &&
+            (streq_ci(st.u.directive.name, ".set") || streq_ci(st.u.directive.name, ".equ") ||
+             streq_ci(st.u.directive.name, ".equiv"))) {
+            int is_reg = st.u.directive.args[1][0] == '%' && is_x86_register_text(st.u.directive.args[1]);
+
+            if (reg_alias_note(&ctx.reg_aliases, st.u.directive.args[0], st.u.directive.args[1], is_reg) != 0) {
+                free_stmt(&st);
+                set_err(&ctx, "%s:%u: out of memory", tokens->items[start].file, tokens->items[start].line);
+                p->ctx = ctx;
+                p->done = 1;
+                return -1;
+            }
+            if (is_reg) {
+                /* GAS keeps such a name in its register section, out of the object: nothing more to do */
+                if (st.label_count == 0) {
+                    free_stmt(&st);
+                    i = j;
+                    continue;
+                }
+                free(st.u.directive.name);
+                for (unsigned a = 0; a < st.u.directive.arg_count; ++a) {
+                    free(st.u.directive.args[a]);
+                }
+                free(st.u.directive.args);
+                memset(&st.u, 0, sizeof(st.u));
+                st.kind = AS_STMT_LABEL_ONLY;
+            }
+        }
+        if (rc != 0) {
             as_label_def_t *labels = st.labels;
             size_t label_count = st.label_count;
             size_t label_cap = st.label_cap;
@@ -3196,6 +3374,7 @@ int as_parse_end(as_parser_t *p) {
 
     resolve_locals(&ctx);
     free_local_defs(&ctx.local_defs);
+    free_reg_aliases(&ctx.reg_aliases);
     /* The room that was made by doubling and is not used is given
      * back: it was a third of the vector on average. */
     if (ctx.out->count != 0 && ctx.out->count < ctx.out->cap) {
