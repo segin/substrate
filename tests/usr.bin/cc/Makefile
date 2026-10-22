@@ -928,6 +928,7 @@ test:
 	sh run_pp_c99_baseline.sh
 	sh run_m16.sh
 	sh run_gnu_inline.sh
+	sh run_div64_pow2.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh

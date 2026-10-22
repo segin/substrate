@@ -18,7 +18,9 @@
  *    32 and over;
  *  - a compare decides on the high words unless they are equal, and then
  *    on the low words as unsigned numbers;
- *  - div calls libgcc's __divdi3 or __udivdi3.
+ *  - div by a constant power of two is a shift (signed, after a bias that
+ *    rounds toward zero), as gcc makes it; any other div calls libgcc's
+ *    __divdi3 or __udivdi3.
  *
  * After this, the emitter has no 64-bit arithmetic of its own: it moves
  * 64-bit values (load, store, move, constant, call and return) and
@@ -435,17 +437,138 @@ static int split_cmp(lz_t *z, const cc_ssa_instr_t *in, const words_t *a, const 
     return lz_label(z, l_done);
 }
 
+static int split_one(lz_t *z, const cc_ssa_instr_t *in);
+
 /**
- * A 64-bit division: a call of libgcc's __divdi3 or __udivdi3, written in
- * place of the DIV so the quotient keeps its value.
+ * The constant value @p v always holds: the immediate of its one definition, a CONST.
+ *
+ * @param f    the function, its instructions as they were before this pass
+ * @param v    the value
+ * @param out  receives the constant
+ * @return 1 if @p v is such a constant, else 0
+ */
+static int value_single_const(const cc_ssa_function_t *f, int v, long long *out) {
+    const cc_ssa_instr_t *def = NULL;
+    size_t i;
+
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].dst == v) {
+            if (def != NULL) {
+                return 0;
+            }
+            def = &f->instrs[i];
+        }
+    }
+    if (def == NULL || def->op != CC_SSA_CONST) {
+        return 0;
+    }
+    *out = def->imm;
+    return 1;
+}
+
+/**
+ * Append the 64-bit shift `dst = src >> k` (arithmetic unless @p is_unsigned), rewritten into words.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int lz_shr64(lz_t *z, int dst, int src, int k, int is_unsigned) {
+    cc_ssa_instr_t sh;
+
+    memset(&sh, 0, sizeof(sh));
+    sh.op = CC_SSA_SHR;
+    sh.dst = dst;
+    sh.lhs = src;
+    sh.rhs = -1;
+    sh.imm = k;
+    sh.is_unsigned = is_unsigned;
+    sh.label = -1;
+    sh.true_label = -1;
+    sh.false_label = -1;
+    sh.param_index = -1;
+    return split_one(z, &sh);
+}
+
+/**
+ * A 64-bit division by a constant power of two, 2^k: a shift, as gcc makes it, and no call of libgcc,
+ * which Linux does not link (its head32.c divides a 64-bit constant by PTRS_PER_PGD).  A signed
+ * quotient rounds toward zero: a negative dividend is biased by 2^k - 1 first,
+ * (x + ((x >> 63) >>> (64 - k))) >> k.
+ *
+ * @param z     the rewrite
+ * @param div   the DIV
+ * @param done  set to 1 when @p div was such a division and is rewritten, else 0
+ * @return 0, or -1 when out of memory
+ */
+static int split_div_pow2(lz_t *z, const cc_ssa_instr_t *div, int *done) {
+    long long d;
+    unsigned long long ud;
+    int k = 0;
+    int x;
+
+    *done = 0;
+    if (div->rhs < 0) {
+        d = div->imm;
+    } else if (!value_single_const(z->f, div->rhs, &d)) {
+        return 0;
+    }
+    ud = (unsigned long long)d;
+    if (ud == 0 || (ud & (ud - 1)) != 0 || (!div->is_unsigned && d < 0)) {
+        return 0;
+    }
+    while ((ud >> k) != 1) {
+        ++k;
+    }
+    x = lz_widen(z, div->lhs);
+    if (x < 0) {
+        return -1;
+    }
+    *done = 1;
+    if (!div->is_unsigned && k > 0) {
+        int sign = lz_value(z, 8, 0);
+        int bias = sign < 0 ? -1 : lz_value(z, 8, 1);
+        int biased = bias < 0 ? -1 : lz_value(z, 8, 0);
+        cc_ssa_instr_t add;
+
+        if (biased < 0 || lz_shr64(z, sign, x, 63, 0) != 0 || lz_shr64(z, bias, sign, 64 - k, 1) != 0) {
+            return -1;
+        }
+        memset(&add, 0, sizeof(add));
+        add.op = CC_SSA_ADD;
+        add.dst = biased;
+        add.lhs = x;
+        add.rhs = bias;
+        add.label = -1;
+        add.true_label = -1;
+        add.false_label = -1;
+        add.param_index = -1;
+        if (split_one(z, &add) != 0) {
+            return -1;
+        }
+        x = biased;
+    }
+    return lz_shr64(z, div->dst, x, k, div->is_unsigned);
+}
+
+/**
+ * A 64-bit division: a shift for a power of two (split_div_pow2()), else a call of libgcc's
+ * __divdi3 or __udivdi3, written in place of the DIV so the quotient keeps its value.
  *
  * @return 0, or -1 when out of memory
  */
 static int split_div(lz_t *z, const cc_ssa_instr_t *div) {
     cc_ssa_instr_t in;
-    int dividend = lz_widen(z, div->lhs);
-    int divisor = div->rhs >= 0 ? lz_widen(z, div->rhs) : -1;
+    int dividend;
+    int divisor;
+    int done;
 
+    if (split_div_pow2(z, div, &done) != 0) {
+        return -1;
+    }
+    if (done) {
+        return 0;
+    }
+    dividend = lz_widen(z, div->lhs);
+    divisor = div->rhs >= 0 ? lz_widen(z, div->rhs) : -1;
     if (dividend < 0 || (div->rhs >= 0 && divisor < 0)) {
         return -1;
     }
