@@ -5528,8 +5528,15 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
         d->nested = 1;
         d->inner_arrays = inner.inner_arrays + inner.outer_arrays;
         d->saw_restrict |= inner.saw_restrict;
-    } else if (p->tok.kind == TOK_IDENT && (!abstract || (flags & DECL_MEMBER) != 0 || !is_declspec_start(p))) {
-        /* after the specifiers an identifier is the name, even one that is also a typedef name */
+    } else if (p->tok.kind == TOK_IDENT &&
+               (!abstract || (flags & (DECL_MEMBER | DECL_PARAM)) != 0 || !is_declspec_start(p))) {
+        /*
+         * After the specifiers an identifier is the name, even one that is
+         * also a typedef name: `poll_table *poll_table`, `T T`.  An abstract
+         * declarator has no identifier in this place, so in a parameter it
+         * cannot be the type; the one ambiguous form, `(T)`, was settled by
+         * starts_nested_declarator() before this (C11 6.7.6.3p11).
+         */
         inner.name = cc_strndup(p->tok.start, p->tok.len);
         if (inner.name == NULL || next_tok(p) != 0) {
             goto out;
