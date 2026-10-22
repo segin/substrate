@@ -169,6 +169,7 @@ struct elfobj {
     uint8_t mmapped_image;
     uint8_t readonly;
     uint8_t finalized;
+    uint8_t no_load_headers;   /* the ELF and program headers are in no PT_LOAD (elf_set_load_headers) */
     uint8_t dirty;
     uint8_t lazy_parse;
     uint8_t symrel_loaded;

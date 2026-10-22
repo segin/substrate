@@ -462,8 +462,12 @@ static int phase_icf(ld_link_t *l) {
 }
 
 static int phase_ld_note(ld_link_t *l) {
-    /* not where the script throws notes away: it would land among the script's sections */
-    if (script_discards_section(l->ctx, ".note.substrate_ld")) {
+    /*
+     * Not in a link a script lays out (Linux's images): it would land among
+     * the script's sections, an orphan -- in realmode's .data's place, in
+     * vmlinux's text segment -- where GNU ld makes nothing.
+     */
+    if (l->ctx->script != NULL && l->ctx->script->has_sections) {
         return 0;
     }
     return ensure_substrate_ld_note(l->out);

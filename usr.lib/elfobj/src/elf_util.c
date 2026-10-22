@@ -939,6 +939,15 @@ elf_err_t elf_set_entry(elfobj_t *obj, uint64_t entry) {
     return ELF_OK;
 }
 
+elf_err_t elf_set_load_headers(elfobj_t *obj, int load) {
+    if (obj == NULL || obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    obj->no_load_headers = load ? 0 : 1;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
 uint16_t elf_type(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->type;
 }

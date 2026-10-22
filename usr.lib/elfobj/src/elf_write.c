@@ -1606,7 +1606,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                         out_memsz = page_end - lo_addr;
                     }
                 }
-                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0 && out_vaddr >= out_off) {
+                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0 && out_vaddr >= out_off &&
+                    !obj->no_load_headers) {
                     /*
                      * The headers are taken into the segment where they fit
                      * below its first address; where they do not -- an image

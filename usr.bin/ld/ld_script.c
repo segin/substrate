@@ -1176,38 +1176,6 @@ static int is_protected_output_section_name(const char *name) {
     return strcmp(name, ".shstrtab") == 0 || strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0;
 }
 
-/**
- * Whether the script's /DISCARD/ takes sections named @p name, which the
- * linker would otherwise make itself: Linux's realmode script discards
- * `*(.note*)`, and a .note.substrate_ld put between its sections moved
- * .data a page on.
- */
-int script_discards_section(const ld_ctx_t *ctx, const char *name) {
-    const lds_script_t *sc = ctx != NULL ? ctx->script : NULL;
-    size_t i, k, j;
-
-    if (sc == NULL || !sc->has_sections || name == NULL) {
-        return 0;
-    }
-    for (i = 0; i < sc->stmts.count; ++i) {
-        const lds_stmt_t *os = &sc->stmts.items[i];
-
-        if (os->kind != LDS_ST_OUTSEC || !os->discard) {
-            continue;
-        }
-        for (k = 0; k < os->body.count; ++k) {
-            const lds_stmt_t *in = &os->body.items[k];
-
-            for (j = 0; in->kind == LDS_ST_INPUT && j < in->patterns.count; ++j) {
-                if (script_section_pattern_match(in->patterns.items[j], name)) {
-                    return 1;
-                }
-            }
-        }
-    }
-    return 0;
-}
-
 static int apply_script_discard_pattern(elfobj_t *obj, const char *pattern) {
     size_t i;
 
@@ -1286,6 +1254,10 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     if (sc == NULL || sc->phdrs.count == 0) {
         return 0;
     }
+    /* No FILEHDR, no headers loaded: Linux's vmlinux text segment begins with its code, at its p_paddr */
+    if (!sc->phdrs_filehdr && elf_set_load_headers(obj, 0) != ELF_OK) {
+        return -1;
+    }
     phdrs = &sc->phdrs;
     segs = (elf_segment_t **)calloc(phdrs->count, sizeof(*segs));
     flags = (uint32_t *)calloc(phdrs->count, sizeof(*flags));
@@ -1301,7 +1273,10 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 have_phdr |= phdrs->items[k].type == PT_PHDR;
                 have_interp |= phdrs->items[k].type == PT_INTERP;
             }
-            if (!have_phdr && elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
+            /* a PT_PHDR the script does not ask for: for a dynamic linker, and only where the headers are loaded */
+            if (!have_phdr &&
+                (sc->phdrs_filehdr || (ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0')) &&
+                elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
                 goto done;
             }
             if (!have_interp && ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0' &&
@@ -2217,6 +2192,9 @@ static int lp_phdrs(lds_parser_t *p) {
                 break;
             }
             if (lds_tok_is(t, LDS_TOK_IDENT, "FILEHDR") || lds_tok_is(t, LDS_TOK_IDENT, "PHDRS")) {
+                if (lds_tok_is(t, LDS_TOK_IDENT, "FILEHDR")) {
+                    p->sc->phdrs_filehdr = 1;
+                }
                 lp_take(p);
             } else if (lds_tok_is(t, LDS_TOK_IDENT, "AT")) {
                 lp_take(p);

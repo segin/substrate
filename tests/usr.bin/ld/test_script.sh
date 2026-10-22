@@ -206,6 +206,19 @@ if [ -f "$work/at_lma.out" ]; then
         "$(readelf -lW "$work/at_lma.out" | awk '$1 == "LOAD" { v = strtonum($3); printf "%s-0x%08x ", $3, v - 0xc0000000 }')"
 fi
 
+# PHDRS without FILEHDR: the headers are in no segment, and there is no
+# PT_PHDR the script did not ask for.  vmlinux's text segment, so made,
+# took the headers in a page below its code -- at p_paddr 0xfff000, where
+# the decompressor would have put them -- and had a PT_PHDR nothing loads.
+ok  phdrs_nofilehdr "$std PHDRS { text PT_LOAD FLAGS(5); data PT_LOAD FLAGS(6); }
+             SECTIONS { . = 0xc1000000; .text : AT(ADDR(.text) - 0xc0000000) { *(.text*) } :text
+             . = ALIGN(4096); .data : AT(ADDR(.data) - 0xc0000000) { *(.data*) *(.bss*) *(COMMON) } :data }"
+if [ -f "$work/phdrs_nofilehdr.out" ]; then
+    is  phdrs_nofilehdr_text "$(readelf -lW "$work/phdrs_nofilehdr.out" | awk '$1 == "LOAD" { print $3, $4; exit }')" \
+        "0xc1000000 0x01000000"
+    is  phdrs_nofilehdr_phdr "$(readelf -lW "$work/phdrs_nofilehdr.out" 2>&1 | grep -cE '^ *PHDR|Error')" 0
+fi
+
 # INCLUDE: where a statement may stand, its statements standing there.
 mkdir -p "$work/inc"
 echo '*(.text .text.*)' > "$work/inc/body.lds"

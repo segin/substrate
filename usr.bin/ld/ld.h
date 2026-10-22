@@ -401,6 +401,7 @@ typedef struct {
 typedef struct lds_script {
     lds_stmtvec_t stmts;        /* in order; SECTIONS' own statements inline */
     lds_phdr_vec_t phdrs;
+    int phdrs_filehdr;          /* a PHDRS entry says FILEHDR: the headers are loaded */
     lds_region_t *regions;
     size_t region_count;
     size_t region_cap;
@@ -661,7 +662,6 @@ int script_keeps_input(const lds_script_t *sc, const char *section, const char *
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);
-int script_discards_section(const ld_ctx_t *ctx, const char *name);
 int script_input_rank(const char *section, const char *file, void *user);
 int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user);
 void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan);

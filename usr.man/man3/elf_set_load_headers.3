@@ -1,0 +1,57 @@
+.Dd October 22, 2026
+.Dt ELF_SET_LOAD_HEADERS 3
+.Os Substrate
+.Sh NAME
+.Nm elf_set_load_headers
+.Nd whether an executable's headers are loaded with its code
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_set_load_headers "elfobj_t *obj" "int load"
+.Sh DESCRIPTION
+When an executable or shared object is written, its first executable
+.Dv PT_LOAD
+segment takes in the ELF header and the program headers where they fit
+below the segment's first address, so that the headers are in memory
+with the program.
+.Fn elf_set_load_headers
+with
+.Fa load
+0 leaves them out: the segment begins with its first section.
+A linker script's
+.Ic PHDRS
+command without
+.Ic FILEHDR
+says so; the i386 Linux kernel's text segment begins with its code, at the
+physical address its decompressor puts it at.
+.Pp
+With
+.Fa load
+non-zero, the default, they are taken in again.
+.Sh RETURN VALUES
+.Fn elf_set_load_headers
+returns
+.Dv ELF_OK ,
+or
+.Dv ELF_ERR_STATE
+for a
+.Dv NULL
+object or one opened read-only or finalized.
+.Sh EXAMPLES
+Write an image whose segments hold only its sections.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+elf_err_t
+write_bare(elfobj_t *obj, const char *path)
+{
+    elf_err_t err = elf_set_load_headers(obj, 0);
+
+    return err != ELF_OK ? err : elf_write_file(obj, path);
+}
+.Ed
+.Sh SEE ALSO
+.Xr ld 1 ,
+.Xr elf_section_lma 3

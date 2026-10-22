@@ -1523,6 +1523,10 @@ elf_err_t elf_set_osabi(elfobj_t *obj, uint8_t osabi);
 elf_err_t elf_set_abiversion(elfobj_t *obj, uint8_t abiversion);
 elf_err_t elf_set_flags(elfobj_t *obj, uint32_t flags);
 elf_err_t elf_set_entry(elfobj_t *obj, uint64_t entry);
+/* Whether the first executable PT_LOAD takes in the ELF and program
+ * headers where they fit below it (1, the default); a linker script's
+ * PHDRS without FILEHDR says not. */
+elf_err_t elf_set_load_headers(elfobj_t *obj, int load);
 elf_section_t *elf_add_arm_exidx(elfobj_t *obj);
 elf_err_t elf_add_arm_attributes(elfobj_t *obj, const void *attrs_data, size_t attrs_size);
 elf_err_t elf_add_gnu_property_aarch64(elfobj_t *obj, uint32_t feature_1);

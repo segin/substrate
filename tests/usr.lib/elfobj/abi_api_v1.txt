@@ -106,6 +106,7 @@ elf_segment_count
 elf_segment_flags
 elf_segment_section_count
 elf_segment_type
+elf_set_load_headers
 elf_set_reloc_hooks
 elf_set_type
 elf_set_validation_mode
