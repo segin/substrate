@@ -166,6 +166,29 @@ ok  between "$std SECTIONS { .text : { *(.text) mid = .; *(.text.helper) . = ALI
 ok  between_order "$std SECTIONS { .text : { *(.text._start) first_end = .; *(.text.helper) } }
              ASSERT(_start < helper && helper == first_end, \"order\")"
 
+# The gap before a description's sections is every statement since the last
+# description that had any: an ALIGN before one with none still counts
+# (vmlinux's `. = ALIGN(4); *(.text.asan.* .text.tsan.*)`, empty), and a
+# symbol set there is an offset a later `. = sym + n` is worked out from
+# (vmlinux's init stack).  Both were refused: "the location counter moved
+# past where these sections were put".
+ok  gap_empty "$std SECTIONS { .text : { *(.text._start) . = ALIGN(64); *(.nothing) a = .; *(.text.helper) } }
+             ASSERT(helper == a && a % 64 == 0, \"gap_empty\")"
+ok  gap_symbol "$std SECTIONS { .text : { *(.text*) } .data : { s = .; *(.data*) . = s + 0x100; e = .; *(.bss*) } }
+             ASSERT(e - s == 0x100 && SIZEOF(.data) > 0x100, \"gap_symbol\")"
+# An output section nothing goes into, given its own address (vmlinux's
+# `.stab 0 : { *(.stab) }`), leaves the location counter where it was:
+# "may not move back over what is placed".
+ok  empty_at_zero "$std SECTIONS { .text : { *(.text*) } .stab 0 : { *(.stab) } .data : { *(.data*) } }
+             ASSERT(ADDR(.data) > ADDR(.text), \"empty_at_zero\")"
+# `. = ASSERT(cond, msg)` is the assertion, the counter staying put, as GNU
+# ld reads it (vmlinux checks its size so); it was "not a function".
+ok  dot_assert "$std SECTIONS { .text : { *(.text*) } . = ASSERT(1, \"fine\"); .data : { *(.data*) } }"
+bad dot_assert_fails "$std SECTIONS { .text : { *(.text*) } . = ASSERT(0, \"too big\"); }" "too big"
+# A PROVIDE nothing needs is not evaluated where it cannot be: vmlinux's
+# PROVIDE(__ref_stack_chk_guard = __stack_chk_guard), without the symbol.
+ok  provide_unneeded "$std PROVIDE(unneeded = nowhere_at_all); SECTIONS { .text : { *(.text*) } }"
+
 # An image linked at 0, read-only data before the code, as Linux's realmode
 # blob is: the script's order and addresses hold, though the default
 # policy puts code first; no section the linker makes itself (.dynstr, its

@@ -147,6 +147,9 @@ static int script_lookup_symbol_value(const lds_eval_ctx_t *ec, const char *name
     if (ec == NULL || ec->ctx == NULL || name == NULL || out == NULL) {
         return -1;
     }
+    if (ec->section_locals != NULL && defsymvec_get(ec->section_locals, name, out) == 0) {
+        return 0;
+    }
     if (defsymvec_get(&ec->ctx->opt.defsyms, name, out) == 0 ||
         (ec->ctx->script != NULL && defsymvec_get(&ec->ctx->script->locals, name, out) == 0)) {
         return 0;
@@ -1347,6 +1350,7 @@ static void lds_stmtvec_free(lds_stmtvec_t *v) {
         lds_tokvec_free(&st->expr);
         lds_tokvec_free(&st->align);
         lds_tokvec_free(&st->lma);
+        defsymvec_free(&st->gap_locals);
         free(st->message);
         free(st->region);
         lds_stmtvec_free(&st->body);
@@ -1593,6 +1597,8 @@ static int lp_expr(lds_parser_t *p, lds_tokvec_t *out, int colon, int juxta) {
  * operator when the name swallowed it ("a+" before "=").  `closer` is what
  * follows: a ';', or the ')' of PROVIDE(...).
  */
+static int lp_assert(lds_parser_t *p, lds_stmtvec_t *v, lds_where_t where, const lds_tok_t *kw);
+
 static int lp_assignment(lds_parser_t *p, lds_stmtvec_t *v, lds_where_t where, const lds_tok_t *name, char preop,
                          int provide, int hidden, lds_tok_kind_t closer) {
     lds_stmt_t *st = lds_stmt_new(v, LDS_ST_ASSIGN, where, name);
@@ -1600,6 +1606,39 @@ static int lp_assignment(lds_parser_t *p, lds_stmtvec_t *v, lds_where_t where, c
 
     if (st == NULL) {
         return -1;
+    }
+    if (preop == 0 && strcmp(name->text, ".") == 0 && (t = lp_peek(p, 0)) != NULL && t->kind == LDS_TOK_EQUAL) {
+        /*
+         * `. = ASSERT(cond, "msg");` is the assertion, and leaves the
+         * counter where it is, as GNU ld reads it (Linux's vmlinux.lds
+         * checks the image's size so).
+         */
+        lds_tok_t kw;
+
+        lp_take(p);
+        t = lp_peek(p, 0);
+        if (t != NULL && lds_tok_is(t, LDS_TOK_IDENT, "ASSERT")) {
+            lds_tok_free(&v->items[v->count - 1].at);
+            v->count--;
+            if (lds_tok_dup(&kw, t) != 0) {
+                return -1;
+            }
+            lp_take(p);
+            {
+                int rc = lp_assert(p, v, where, &kw);
+
+                lds_tok_free(&kw);
+                return rc;
+            }
+        }
+        st->op = '=';
+        if (lp_expr(p, &st->expr, 0, 0) != 0) {
+            return -1;
+        }
+        if (closer == LDS_TOK_RPAREN) {
+            return lp_expect(p, LDS_TOK_RPAREN, "expected ')'") != 0 ? -1 : lp_semi(p);
+        }
+        return lp_expect(p, LDS_TOK_SEMI, "expected ';' after the assignment");
     }
     st->provide = provide;
     st->hidden = hidden;
@@ -2581,12 +2620,12 @@ int script_input_rank(const char *section, const char *file, void *user) {
  */
 int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user) {
     ld_ctx_t *ctx = (ld_ctx_t *)user;
-    const lds_stmt_t *os = NULL;
+    lds_stmt_t *os = NULL;
     size_t i;
     long k;
 
     for (i = 0; ctx->script != NULL && i < ctx->script->stmts.count; ++i) {
-        const lds_stmt_t *st = &ctx->script->stmts.items[i];
+        lds_stmt_t *st = &ctx->script->stmts.items[i];
 
         if (st->kind == LDS_ST_OUTSEC && !st->discard && strcmp(st->at.text, name) == 0) {
             os = st;
@@ -2596,13 +2635,35 @@ int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *alig
     if (os == NULL || rank < 0 || (size_t)rank >= os->body.count) {
         return 0;
     }
-    for (k = rank - 1; k >= 0 && os->body.items[k].kind != LDS_ST_INPUT; --k) {
-    }
+    /*
+     * Every statement since the last description whose sections went in:
+     * one with none moves nothing, but the ALIGN before it still counts
+     * (vmlinux's `. = ALIGN(4); *(.text.asan.* .text.tsan.*)`, empty).
+     */
+    k = os->gap_after > 0 ? os->gap_after - 1 : -1;
+    os->gap_after = rank + 1;
     for (k = k + 1; k < rank; ++k) {
         const lds_stmt_t *st = &os->body.items[k];
         lds_eval_ctx_t ec;
         uint64_t v;
 
+        if (st->kind == LDS_ST_ASSIGN && strcmp(st->at.text, ".") != 0 && st->op == '=') {
+            /*
+             * A symbol set here is an offset in the section, for a later
+             * `. = __start_init_stack + THREAD_SIZE` (vmlinux's .data) to
+             * be worked out from.
+             */
+            memset(&ec, 0, sizeof(ec));
+            ec.ctx = ctx;
+            ec.have_dot = 1;
+            ec.dot = *offset;
+            ec.section_locals = &os->gap_locals;
+            if (lds_eval_expr_slice(&ec, st->expr.items, 0, st->expr.count, &v) == 0 &&
+                defsymvec_set(&os->gap_locals, st->at.text, v) != 0) {
+                return -1;
+            }
+            continue;
+        }
         if (st->kind != LDS_ST_ASSIGN || strcmp(st->at.text, ".") != 0 || (st->op != '=' && st->op != '+')) {
             continue;
         }
@@ -2610,6 +2671,7 @@ int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *alig
         ec.ctx = ctx;
         ec.have_dot = 1;
         ec.dot = *offset;
+        ec.section_locals = &os->gap_locals;
         if (lds_eval_expr_slice(&ec, st->expr.items, 0, st->expr.count, &v) != 0) {
             continue;
         }
@@ -2905,11 +2967,26 @@ static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
     if (!is_dot && !st->active) {
         /* A PROVIDE that provides nothing still has a value the rest of
          * the script may use, if nothing else defines the name. */
+        lds_eval_ctx_t ec;
+
         if (st->op != '=' || defsymvec_find(&w->sc->locals, st->at.text) < 0) {
             return 0;
         }
-        return lw_eval(w, &st->expr, have_dot, *dot, &st->at, &v) != 0 ? -1
-             : defsymvec_set(&w->sc->locals, st->at.text, v);
+        /*
+         * Only if it can be worked out: GNU ld does not evaluate a PROVIDE
+         * nothing needs, and vmlinux's PROVIDE(__ref_stack_chk_guard =
+         * __stack_chk_guard) names a symbol a kernel without the stack
+         * protector does not have.
+         */
+        memset(&ec, 0, sizeof(ec));
+        ec.ctx = w->ctx;
+        ec.obj = w->out;
+        ec.have_dot = have_dot;
+        ec.dot = *dot;
+        if (lds_eval_expr_slice(&ec, st->expr.items, 0, st->expr.count, &v) != 0) {
+            return 0;
+        }
+        return defsymvec_set(&w->sc->locals, st->at.text, v);
     }
     if (lw_eval(w, &st->expr, have_dot, *dot, &st->at, &v) != 0) {
         return -1;
@@ -3004,9 +3081,14 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
             if (st->kind == LDS_ST_INPUT) {
                 if (st->ext_have) {
                     if (cur > st->ext_start) {
-                        lds_report_error(NULL, &st->at,
-                                         "the location counter moved past where these sections were put "
-                                         "(only ALIGN and adding a constant are understood there)");
+                        char msg[256];
+
+                        snprintf(msg, sizeof(msg),
+                                 "the location counter (+0x%llx in %s) moved past where these sections were put "
+                                 "(+0x%llx..0x%llx; only ALIGN and adding a constant are understood there)",
+                                 (unsigned long long)cur, os->at.text, (unsigned long long)st->ext_start,
+                                 (unsigned long long)st->ext_end);
+                        lds_report_error(NULL, &st->at, msg);
                         return -1;
                     }
                     cur = st->ext_end;
@@ -3109,17 +3191,21 @@ static int lw_run(lds_walk_t *w, size_t lo, size_t hi) {
             }
         } else if (st->kind == LDS_ST_OUTSEC && !st->discard) {
             /* An output section nothing went into: its symbols are where
-             * it would have been. */
+             * it would have been.  One given its own address (vmlinux's
+             * `.stab 0 : { *(.stab) }`) leaves the counter where it was. */
             uint64_t end = dot;
+            uint64_t at = dot;
 
-            if (st->expr.count != 0 && lw_eval(w, &st->expr, 1, dot, &st->at, &dot) != 0) {
+            if (st->expr.count != 0 && lw_eval(w, &st->expr, 1, dot, &st->at, &at) != 0) {
                 return -1;
             }
-            if (lw_body(w, st, NULL, dot, 0, &end) != 0) {
+            if (lw_body(w, st, NULL, at, 0, &end) != 0) {
                 return -1;
             }
             st->pad = 0;
-            dot = end;
+            if (st->expr.count == 0) {
+                dot = end;
+            }
         }
         if (dot != w->dot) {
             if (dot < w->high) {

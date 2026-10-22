@@ -317,6 +317,8 @@ typedef struct {
     char err_buf[160];          /* for an err_msg that names something */
     unsigned skip;              /* in the arm of a ?: that is not taken:
                                  * read, and nothing in it is an error */
+    const defsymvec_t *section_locals; /* consulted first: values as offsets in the section the
+                                        * merge is filling (script_rank_gap()), or NULL */
 } lds_eval_ctx_t;
 
 typedef struct {
@@ -378,6 +380,8 @@ struct lds_stmt {
     strvec_t phdrs;             /* OUTSEC: :phdr ... */
     lds_tokvec_t align;         /* OUTSEC: ALIGN(expr) after the colon */
     lds_tokvec_t lma;           /* OUTSEC: AT(expr), where it is loaded */
+    int gap_after;              /* OUTSEC, in the merge: 1 + the last input description whose sections went in; 0 none */
+    defsymvec_t gap_locals;     /* OUTSEC, in the merge: symbols its body sets, as offsets in it */
     char *region;               /* OUTSEC: >region */
     uint64_t pad;               /* OUTSEC: what its body adds to its end */
     int keep;                   /* INPUT: KEEP() */
