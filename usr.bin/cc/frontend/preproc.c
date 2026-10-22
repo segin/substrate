@@ -1008,6 +1008,17 @@ static int is_reserved_identifier_name(const char *name, const pp_state_t *st) {
     return 0;
 }
 
+/** Whether pragma text @p rest (after `#pragma`) is `GCC visibility ...`. */
+static int is_visibility_pragma(const char *rest) {
+    const char *p = skip_ws(rest);
+
+    if (strncmp(p, "GCC", 3) != 0 || !isspace((unsigned char)p[3])) {
+        return 0;
+    }
+    p = skip_ws(p + 3);
+    return strncmp(p, "visibility", 10) == 0 && (p[10] == '\0' || isspace((unsigned char)p[10]) || p[10] == '(');
+}
+
 static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
     const char *p = rest;
     char scope[32];
@@ -6668,6 +6679,34 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     }
                     if (strncmp(r, "once", 4) == 0) {
                         saw_pragma_once = 1;
+                    }
+                    /*
+                     * #pragma GCC visibility push(...) / pop sets the visibility of the declarations
+                     * after it, so it goes on to the compiler, which reads it between them (the lexer,
+                     * lx_note_visibility_pragma()), as gcc's -E output keeps it.  Linux's
+                     * include/linux/hidden.h makes every symbol of its position-independent code hidden
+                     * so; else each was reached through a GOT entry.
+                     */
+                    if (!macros_only && is_visibility_pragma(r)) {
+                        if (code_accum.len > 0) {
+                            char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path,
+                                                         code_start_line, 0, NULL, diag);
+
+                            if (expanded == NULL || pp_emit_text(st, out, expanded) != 0) {
+                                free(expanded);
+                                goto fail;
+                            }
+                            free(expanded);
+                            code_accum.len = 0;
+                            if (code_accum.buf != NULL) {
+                                code_accum.buf[0] = '\0';
+                            }
+                            code_paren_depth = 0;
+                        }
+                        if (pp_emit_text(st, out, "#pragma ") != 0 || pp_emit_text(st, out, r) != 0 ||
+                            pp_emit_text(st, out, "\n") != 0) {
+                            goto fail;
+                        }
                     }
                 }
                 continue;

@@ -66,6 +66,7 @@ typedef struct {
   int debug;
   int shared;
   int pic;
+  int fpie; /**< -fPIE or -fpie */
   int pthread_flag;
   int emit_ssa;
   int dump_ir; /**< -fdump-ir: 1; -fdump-ir=all: 2 */
@@ -164,7 +165,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->code16 = o->code16;
   out->opt_level = opt_level_num(o);
   out->debug = o->debug;
-  out->pic = o->pic || o->shared;
+  out->pic = o->pic || o->fpie || o->shared;
+  out->pie = o->fpie && !o->pic && !o->shared;
   out->warn_all = o->wall;
   out->warn_error = o->werror;
   out->pedantic = o->pedantic;
@@ -1290,7 +1292,11 @@ static const driver_opt_t options[] = {
     /* i386: structures of 1, 2, 4 or 8 bytes come back in %eax(:%edx), one float or double in %st0 (gcc) */
     {"-freg-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 1},
     {"-fpcc-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 0},
-    {"-fPIC", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
+    {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
+    /* an executable's position-independent code: its own symbols bind within it (Linux's boot/compressed) */
+    {"-fPIE -fpie", OPT_FLAG, FWD_C, opt_int, F(fpie), 1},
+    {"-fno-PIE -fno-pie", OPT_FLAG, FWD_C, opt_int, F(fpie), 0},
+    {"-fno-PIC -fno-pic", OPT_FLAG, FWD_C, opt_int, F(pic), 0},
 
     /* the preprocessor */
     {"-I -D -U -iquote -isystem -idirafter", OPT_LETTER, FWD_CPP | FWD_C, NULL, 0, 0},

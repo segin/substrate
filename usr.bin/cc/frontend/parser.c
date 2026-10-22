@@ -9276,6 +9276,29 @@ fail:
     return -1;
 }
 
+/**
+ * @p flags with the visibility `#pragma GCC visibility push(...)` set where the declaration began (@p vis,
+ * CC_LEX_VIS_*), unless the declaration names one itself.
+ */
+static cc_attr_flags_t with_pragma_visibility(cc_attr_flags_t flags, unsigned char vis) {
+    const cc_attr_flags_t any_vis = CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED |
+                                    CC_ATTR_VIS_INTERNAL;
+
+    if ((flags & any_vis) != 0) {
+        return flags;
+    }
+    switch (vis) {
+    case CC_LEX_VIS_HIDDEN:
+        return flags | CC_ATTR_VIS_HIDDEN;
+    case CC_LEX_VIS_PROTECTED:
+        return flags | CC_ATTR_VIS_PROTECTED;
+    case CC_LEX_VIS_INTERNAL:
+        return flags | CC_ATTR_VIS_INTERNAL;
+    default:
+        return flags;
+    }
+}
+
 static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int need_semi) {
     int is_typedef = 0;
     int base_saw_restrict = 0;
@@ -9284,6 +9307,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     long base_typedef_align; /* the alignment of a typedef name among the specifiers, or 0 */
     int base_struct_id; /* the structure the specifiers name, else -1 */
     decl_attrs_t base_attrs;
+    unsigned char start_vis = p->tok.default_vis; /* a visibility pragma's, where the declaration begins */
 
     decl_attrs_reset(&base_attrs);
     if (parse_declspec(p, &base_spec, 1, "expected declaration type", &is_typedef, &base_saw_restrict,
@@ -9383,7 +9407,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         merged_regparm = merged_attrs.regparm;
         merged_format_index = merged_attrs.format_index;
         merged_format_first_to_check = merged_attrs.format_first_to_check;
-        s.attr_flags = merged_attrs.flags;
+        s.attr_flags = with_pragma_visibility(merged_attrs.flags, start_vis);
         s.attr_align = merged_attrs.align;
         if (typedef_align_for(base_typedef_align, base_spec, s.ctype) > s.attr_align) {
             s.attr_flags |= CC_ATTR_ALIGNED;
@@ -10683,6 +10707,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     decl_attrs_t spec_attrs;
     decl_attrs_t suffix_attrs;
     decl_attrs_t merged_attrs;
+    unsigned char f_start_vis = p->tok.default_vis; /* a visibility pragma's, where the definition begins */
     memset(f, 0, sizeof(*f));
     f->line = p->tok.line;
     f->col = p->tok.col;
@@ -10741,7 +10766,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         decl_attrs_clear(&merged_attrs);
         return -1;
     }
-    f->attr_flags = merged_attrs.flags;
+    f->attr_flags = with_pragma_visibility(merged_attrs.flags, f_start_vis);
     f->attr_align = merged_attrs.align;
     f->attr_format_index = merged_attrs.format_index;
     f->attr_format_first_to_check = merged_attrs.format_first_to_check;

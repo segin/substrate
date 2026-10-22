@@ -1947,6 +1947,8 @@ int module_symbol_is_extern_global(const cc_ssa_module_t *m, const char *sym) {
 
 int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
     const cc_attr_flags_t local_vis = CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+    const cc_options_t *opts = cc_options_current();
+    int pie = opts != NULL && opts->pie; /* an executable's own symbols cannot be preempted */
     size_t n;
     size_t i;
 
@@ -1962,14 +1964,16 @@ int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
         const cc_ssa_global_t *g = &m->globals[i];
 
         if (g->name != NULL && strlen(g->name) == n && strncmp(g->name, sym, n) == 0) {
-            return (g->storage & CC_STORAGE_STATIC) != 0 || (g->attr_flags & local_vis) != 0;
+            return (g->storage & CC_STORAGE_STATIC) != 0 || (g->attr_flags & local_vis) != 0 ||
+                   (pie && (g->storage & CC_STORAGE_EXTERN) == 0);
         }
     }
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *fn = &m->funcs[i];
 
         if (fn->name != NULL && strlen(fn->name) == n && strncmp(fn->name, sym, n) == 0) {
-            return (fn->storage & CC_STORAGE_STATIC) != 0 || (fn->attr_flags & local_vis) != 0;
+            /* a function of the module is one defined here */
+            return (fn->storage & CC_STORAGE_STATIC) != 0 || (fn->attr_flags & local_vis) != 0 || pie;
         }
     }
     return 0;

@@ -8,6 +8,17 @@
 
 #include <stddef.h>
 
+/** The most `#pragma GCC visibility push` levels the lexer keeps. */
+#define CC_LEX_VIS_DEPTH 16
+
+/** A default visibility a `#pragma GCC visibility push(...)` sets (cc_token_t.default_vis). */
+enum {
+    CC_LEX_VIS_DEFAULT = 0, /**< none set: a declaration's own attributes decide */
+    CC_LEX_VIS_HIDDEN,
+    CC_LEX_VIS_PROTECTED,
+    CC_LEX_VIS_INTERNAL
+};
+
 typedef struct {
     const char *src;
     size_t len;
@@ -15,6 +26,10 @@ typedef struct {
     size_t line;
     size_t col;
     char *logical_file;
+    /** the default visibility `#pragma GCC visibility push(...)`/`pop` have set, innermost last; copied by value
+     *  with the lexer, as the parser's lookahead copies it */
+    unsigned char vis_stack[CC_LEX_VIS_DEPTH];
+    int vis_depth;
 } cc_lexer_t;
 
 typedef enum {
@@ -129,6 +144,7 @@ typedef struct {
     const char *file;
     size_t line;
     size_t col;
+    unsigned char default_vis; /**< the default visibility where the token is (CC_LEX_VIS_*) */
 } cc_token_t;
 
 /**

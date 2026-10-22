@@ -21,7 +21,7 @@
 /** The registers the integer register cache allocates from. */
 static const char *const emit_regs32[] = {"%eax", "%ecx", "%edx"};
 
-static void emit_i386_call_sym(FILE *fp, const char *sym);
+static void emit_i386_call_sym(FILE *fp, const char *sym, int known_local);
 
 /*
  * Where the first parameter is: above the return address, and above the
@@ -455,7 +455,7 @@ static void emit_i386_load_half(FILE *fp, const cc_ssa_function_t *f, const slot
     fprintf(fp, "\tmovzwl (%s), %%eax\n", reg);
     fprintf(fp, "\tsubl $12, %%esp\n");
     fprintf(fp, "\tpushl %%eax\n");
-    emit_i386_call_sym(fp, "__extendhfdf2");
+    emit_i386_call_sym(fp, "__extendhfdf2", 0);
     fprintf(fp, "\taddl $16, %%esp\n");
     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, dst));
 }
@@ -472,7 +472,7 @@ static void emit_i386_store_half(FILE *fp, const cc_ssa_function_t *f, const slo
     fprintf(fp, "\tmovl %s, 8(%%esp)\n", reg);
     fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, v));
     fprintf(fp, "\tfstpl (%%esp)\n");
-    emit_i386_call_sym(fp, "__truncdfhf2");
+    emit_i386_call_sym(fp, "__truncdfhf2", 0);
     fprintf(fp, "\tmovl 8(%%esp), %%edx\n");
     fprintf(fp, "\taddl $16, %%esp\n");
     fprintf(fp, "\tmovd %%xmm0, %%eax\n");
@@ -586,7 +586,7 @@ static void emit_i386_call_memcpy(FILE *fp, long size) {
             pushed++;
         }
     }
-    emit_i386_call_sym(fp, "memcpy");
+    emit_i386_call_sym(fp, "memcpy", 0);
     if (pushed > 0) {
         fprintf(fp, "\taddl $%d, %%esp\n", pushed * 4);
     }
@@ -765,10 +765,11 @@ static void emit_i386_symbol_address(FILE *fp, const cc_ssa_module_t *m, const c
  * A direct call of @p sym.  Under -fPIC one that may bind outside the object goes through its PLT entry,
  * which finds the GOT in %ebx (the i386 psABI): %ebx is loaded first.  It is callee-saved and the
  * allocator never gives it out, so the function saves it on entry and restores it on return
- * (i386_pic_saves_ebx).
+ * (i386_pic_saves_ebx).  @p known_local says a declaration the module does not keep made the symbol bind
+ * within the object (cc_ssa_instr_t.call_binds_local): it is then called directly.
  */
-static void emit_i386_call_sym(FILE *fp, const char *sym) {
-    if (i386_pic() && !module_symbol_binds_locally(i386_module, sym)) {
+static void emit_i386_call_sym(FILE *fp, const char *sym, int known_local) {
+    if (i386_pic() && !known_local && !module_symbol_binds_locally(i386_module, sym)) {
         emit_i386_got_base(fp, "%ebx");
         fprintf(fp, "\tcall %s@PLT\n", sym);
         return;
@@ -1220,7 +1221,7 @@ static void emit_i386_call_target(FILE *fp, const cc_ssa_function_t *f, const sl
             /* a GNU nested function's environment, in the static chain register */
             emit_i386_load_int_value_to_reg(fp, f, lay, in->call_chain - 1, "%ecx");
         }
-        emit_i386_call_sym(fp, in->sym);
+        emit_i386_call_sym(fp, in->sym, in->call_binds_local);
     }
 }
 

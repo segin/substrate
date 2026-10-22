@@ -2430,6 +2430,30 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
 }
 
 /**
+ * Whether function @p name binds within the object by a declaration of it in @p tu: static, or of hidden,
+ * protected or internal visibility, by an attribute or a `#pragma GCC visibility` the declaration came under.
+ * A position-independent call of it is then direct (cc_ssa_instr_t.call_binds_local); a prototype is in no IR
+ * module the backend could ask.
+ */
+static int callee_binds_locally(const cc_translation_unit_t *tu, const char *name) {
+    const cc_attr_flags_t local_vis = CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+    size_t i;
+
+    if (tu == NULL || name == NULL) {
+        return 0;
+    }
+    for (i = 0; i < tu->func_count; ++i) {
+        const cc_function_t *f = &tu->funcs[i];
+
+        if (f->name != NULL && strcmp(f->name, name) == 0 &&
+            ((f->storage & CC_STORAGE_STATIC) != 0 || (f->attr_flags & local_vis) != 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
  * Lower a call: a builtin, a direct or indirect call, with its arguments passed as the target's ABI says (CC_EXPR_CALL).
  *
  * @param tu         the translation unit
@@ -2542,6 +2566,7 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         in.sym = NULL;
     } else {
         in.op = CC_SSA_CALL;
+        in.call_binds_local = callee_binds_locally(tu, e->ident);
         /*
          * For calls without a visible prototype, C applies default argument
          * promotions and the real callee may be variadic. On SysV AMD64

@@ -25,7 +25,8 @@ typedef struct {
     int code16;              /**< -m16: i386 code assembled under .code16gcc, for real mode (gcc) */
     int opt_level;           /**< -O0 .. -O3 */
     int debug;               /**< -g */
-    int pic;                 /**< -fPIC, -fpic or -shared */
+    int pic;                 /**< -fPIC, -fpic, -fPIE, -fpie or -shared */
+    int pie;                 /**< -fPIE or -fpie: the code is an executable's, whose own symbols bind within it */
     int warn_all;            /**< -Wall */
     int warn_error;          /**< -Werror */
     int pedantic;            /**< -pedantic */

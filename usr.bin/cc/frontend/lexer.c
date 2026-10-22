@@ -252,6 +252,88 @@ static int lx_parse_line_marker(const cc_lexer_t *lx, size_t start, size_t end, 
     return 1;
 }
 
+/** Whether the text from @p p, up to @p ep, starts with word @p w (followed by neither a letter, digit nor `_`). */
+static int lx_word_at(const char *p, const char *ep, const char *w) {
+    size_t n = strlen(w);
+
+    return (size_t)(ep - p) >= n && strncmp(p, w, n) == 0 &&
+           (p + n == ep || !(isalnum((unsigned char)p[n]) || p[n] == '_'));
+}
+
+/** @p p past spaces and tabs, not beyond @p ep. */
+static const char *lx_skip_blank(const char *p, const char *ep) {
+    while (p < ep && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\f' || *p == '\v')) {
+        p++;
+    }
+    return p;
+}
+
+/**
+ * Take in a `#pragma GCC visibility push(name)` or `pop` line from @p start to @p end, which the preprocessor
+ * passes on: the default visibility of the declarations after it (cc_token_t.default_vis).
+ */
+static void lx_note_visibility_pragma(cc_lexer_t *lx, size_t start, size_t end) {
+    const char *p = lx->src + start;
+    const char *ep = lx->src + end;
+    static const struct {
+        const char *name;
+        unsigned char vis;
+    } names[] = {{"default", CC_LEX_VIS_DEFAULT},
+                 {"hidden", CC_LEX_VIS_HIDDEN},
+                 {"protected", CC_LEX_VIS_PROTECTED},
+                 {"internal", CC_LEX_VIS_INTERNAL}};
+    size_t i;
+
+    p = lx_skip_blank(p, ep);
+    if (p >= ep || *p != '#') {
+        return;
+    }
+    p = lx_skip_blank(p + 1, ep);
+    if (!lx_word_at(p, ep, "pragma")) {
+        return;
+    }
+    p = lx_skip_blank(p + 6, ep);
+    if (!lx_word_at(p, ep, "GCC")) {
+        return;
+    }
+    p = lx_skip_blank(p + 3, ep);
+    if (!lx_word_at(p, ep, "visibility")) {
+        return;
+    }
+    p = lx_skip_blank(p + 10, ep);
+    if (lx_word_at(p, ep, "pop")) {
+        if (lx->vis_depth > 0) {
+            lx->vis_depth--;
+        }
+        return;
+    }
+    if (!lx_word_at(p, ep, "push")) {
+        return;
+    }
+    p = lx_skip_blank(p + 4, ep);
+    if (p >= ep || *p != '(') {
+        return;
+    }
+    p = lx_skip_blank(p + 1, ep);
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (lx_word_at(p, ep, names[i].name)) {
+            if (lx->vis_depth < CC_LEX_VIS_DEPTH) {
+                lx->vis_stack[lx->vis_depth] = names[i].vis;
+            }
+            lx->vis_depth++;
+            return;
+        }
+    }
+}
+
+/** The default visibility where the lexer is (CC_LEX_VIS_*). */
+static unsigned char lx_default_vis(const cc_lexer_t *lx) {
+    if (lx->vis_depth <= 0) {
+        return CC_LEX_VIS_DEFAULT;
+    }
+    return lx->vis_stack[(lx->vis_depth <= CC_LEX_VIS_DEPTH ? lx->vis_depth : CC_LEX_VIS_DEPTH) - 1];
+}
+
 static void lx_skip_directive_line(cc_lexer_t *lx) {
     size_t start = lx->pos;
     size_t end = start;
@@ -264,6 +346,9 @@ static void lx_skip_directive_line(cc_lexer_t *lx) {
         end++;
     has_newline = end < lx->len && lx->src[end] == '\n';
     has_marker = lx_parse_line_marker(lx, start, end, &marker_line, &marker_file);
+    if (!has_marker) {
+        lx_note_visibility_pragma(lx, start, end);
+    }
 
     lx->pos = end;
     if (has_newline) {
@@ -966,6 +1051,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->file = lx->logical_file;
     out->line = lx->line;
     out->col = lx->col;
+    out->default_vis = lx_default_vis(lx);
 
     if (c < 0) {
         out->kind = TOK_EOF;

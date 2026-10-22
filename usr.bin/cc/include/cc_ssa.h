@@ -167,6 +167,8 @@ typedef struct {
     int call_fixed_count;
     int call_ret_x87;
     int call_chain;    /**< CALL: one more than the value to pass in the static chain register; 0 for none */
+    int call_binds_local; /**< CALL: the callee is static or hidden, protected or internal by its declaration,
+                               so -fPIC calls it directly, not through the PLT */
     int agg_class;     /**< CALL, RET of an aggregate: CC_ABI_SSE0/SSE1/RET_* for how it is returned */
     char *sym;
     int *args;
