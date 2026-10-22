@@ -2513,126 +2513,131 @@ static char *dup_cstr(const char *s) {
     return out;
 }
 
-static const char *pick_generic_reg64(size_t idx) {
-    static const char *regs[] = {"%r10", "%r11", "%r8", "%r9", "%rcx", "%rdx"};
-    return regs[idx % (sizeof(regs) / sizeof(regs[0]))];
-}
+/** An inline asm operand's register to fill before the asm runs. */
+typedef struct {
+    const char *reg; /**< the register, full width */
+    long off;        /**< the frame slot it is loaded from */
+    int value;       /**< for an address: the value whose address it is */
+    int is_address;  /**< load the address of @c value (an indirect memory output), not a slot */
+} asm_load_t;
 
-static const char *pick_generic_reg32(size_t idx) {
-    static const char *regs[] = {"%eax", "%ebx", "%ecx", "%edx", "%esi", "%edi"};
-    return regs[idx % (sizeof(regs) / sizeof(regs[0]))];
-}
 
-static int reg_name_in_set(const char *reg, const char *const *set, size_t count) {
+/** The general registers, by hardware number, under each width's name. */
+static const struct {
+    const char *n64, *n32, *n16, *n8;
+} x86_gprs[16] = {
+    {"%rax", "%eax", "%ax", "%al"},     {"%rcx", "%ecx", "%cx", "%cl"},     {"%rdx", "%edx", "%dx", "%dl"},
+    {"%rbx", "%ebx", "%bx", "%bl"},     {"%rsp", "%esp", "%sp", "%spl"},    {"%rbp", "%ebp", "%bp", "%bpl"},
+    {"%rsi", "%esi", "%si", "%sil"},    {"%rdi", "%edi", "%di", "%dil"},    {"%r8", "%r8d", "%r8w", "%r8b"},
+    {"%r9", "%r9d", "%r9w", "%r9b"},    {"%r10", "%r10d", "%r10w", "%r10b"}, {"%r11", "%r11d", "%r11w", "%r11b"},
+    {"%r12", "%r12d", "%r12w", "%r12b"}, {"%r13", "%r13d", "%r13w", "%r13b"}, {"%r14", "%r14d", "%r14w", "%r14b"},
+    {"%r15", "%r15d", "%r15w", "%r15b"},
+};
+
+/**
+ * The hardware number of a general register named in any width, with or
+ * without its `%` -- "%ebx", "rbx", "bl", "r12d" -- as asm clobber lists
+ * name them.
+ *
+ * @return 0..15, or -1 for no general register
+ */
+static int x86_gpr_index(const char *name) {
+    static const char *const high8[4] = {"ah", "ch", "dh", "bh"};
     size_t i;
-    if (reg == NULL || set == NULL) {
-        return 0;
+
+    if (name == NULL) {
+        return -1;
     }
-    for (i = 0; i < count; ++i) {
-        if (set[i] != NULL && strcmp(reg, set[i]) == 0) {
-            return 1;
+    if (name[0] == '%') {
+        name++;
+    }
+    for (i = 0; i < 16; ++i) {
+        if (strcmp(name, x86_gprs[i].n64 + 1) == 0 || strcmp(name, x86_gprs[i].n32 + 1) == 0 ||
+            strcmp(name, x86_gprs[i].n16 + 1) == 0 || strcmp(name, x86_gprs[i].n8 + 1) == 0) {
+            return (int)i;
         }
     }
-    return 0;
+    for (i = 0; i < 4; ++i) {
+        if (strcmp(name, high8[i]) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
 }
-
-static const char *pick_nonconflict_constraint_reg(int is_64bit, const char *constraint, int op_size, size_t *idx,
-                                                    const char *const *forbid, size_t forbid_count) {
-    static const char *regs64_q[] = {"%rax", "%rbx", "%rcx", "%rdx"};
-    static const char *regs64_g[] = {"%r10", "%r11", "%r8", "%r9", "%rcx", "%rdx"};
-    static const char *regs32_q[] = {"%eax", "%ebx", "%ecx", "%edx"};
-    static const char *regs32_g[] = {"%eax", "%ebx", "%ecx", "%edx", "%esi", "%edi"};
-    const char *const *set = NULL;
-    size_t set_n = 0;
-    size_t start;
-    size_t probe;
-
-    if (is_64bit) {
-        if (cc_asm_constraint_has(constraint, 'q')) {
-            set = regs64_q;
-            set_n = sizeof(regs64_q) / sizeof(regs64_q[0]);
-        } else {
-            set = regs64_g;
-            set_n = sizeof(regs64_g) / sizeof(regs64_g[0]);
-        }
-    } else {
-        if (cc_asm_constraint_has(constraint, 'q') || op_size == 1) {
-            set = regs32_q;
-            set_n = sizeof(regs32_q) / sizeof(regs32_q[0]);
-        } else {
-            set = regs32_g;
-            set_n = sizeof(regs32_g) / sizeof(regs32_g[0]);
-        }
-    }
-
-    start = *idx;
-    for (probe = 0; probe < set_n; ++probe) {
-        const char *reg = set[(start + probe) % set_n];
-        if (!reg_name_in_set(reg, forbid, forbid_count)) {
-            *idx = start + probe + 1;
-            return reg;
-        }
-    }
-    *idx = start + 1;
-    return set[start % set_n];
-}
-
 
 const char *reg64_to8(const char *r) {
-    if (strcmp(r, "%rax") == 0) return "%al";
-    if (strcmp(r, "%rcx") == 0) return "%cl";
-    if (strcmp(r, "%rdx") == 0) return "%dl";
-    if (strcmp(r, "%rsi") == 0) return "%sil";
-    if (strcmp(r, "%rdi") == 0) return "%dil";
-    if (strcmp(r, "%r8") == 0) return "%r8b";
-    if (strcmp(r, "%r9") == 0) return "%r9b";
-    if (strcmp(r, "%r10") == 0) return "%r10b";
-    if (strcmp(r, "%r11") == 0) return "%r11b";
-    return "%al";
+    int i = x86_gpr_index(r);
+    return i >= 0 ? x86_gprs[i].n8 : "%al";
 }
 
 const char *reg64_to16(const char *r) {
-    if (strcmp(r, "%rax") == 0) return "%ax";
-    if (strcmp(r, "%rcx") == 0) return "%cx";
-    if (strcmp(r, "%rdx") == 0) return "%dx";
-    if (strcmp(r, "%rsi") == 0) return "%si";
-    if (strcmp(r, "%rdi") == 0) return "%di";
-    if (strcmp(r, "%r8") == 0) return "%r8w";
-    if (strcmp(r, "%r9") == 0) return "%r9w";
-    if (strcmp(r, "%r10") == 0) return "%r10w";
-    if (strcmp(r, "%r11") == 0) return "%r11w";
-    return "%ax";
+    int i = x86_gpr_index(r);
+    return i >= 0 ? x86_gprs[i].n16 : "%ax";
 }
 
 const char *reg64_to32(const char *r) {
-    if (strcmp(r, "%rax") == 0) return "%eax";
-    if (strcmp(r, "%rcx") == 0) return "%ecx";
-    if (strcmp(r, "%rdx") == 0) return "%edx";
-    if (strcmp(r, "%rsi") == 0) return "%esi";
-    if (strcmp(r, "%rdi") == 0) return "%edi";
-    if (strcmp(r, "%r8") == 0) return "%r8d";
-    if (strcmp(r, "%r9") == 0) return "%r9d";
-    if (strcmp(r, "%r10") == 0) return "%r10d";
-    if (strcmp(r, "%r11") == 0) return "%r11d";
-    return "%eax";
+    int i = x86_gpr_index(r);
+    return i >= 0 ? x86_gprs[i].n32 : "%eax";
 }
 
+/** The callee-saved general registers, as a mask by hardware number: %ebx, %esi, %edi (i386); %rbx, %r12-%r15 (x86-64). */
+static unsigned x86_callee_saved_mask(int is_64bit) {
+    return is_64bit ? (1u << 3) | (1u << 12) | (1u << 13) | (1u << 14) | (1u << 15)
+                    : (1u << 3) | (1u << 6) | (1u << 7);
+}
+
+/**
+ * Choose a register for an inline asm operand: the first the constraint
+ * allows that is not in @p avoid.  Caller-saved registers come first, so
+ * that fewer have to be saved around the asm.
+ *
+ * @param is_64bit    64-bit code
+ * @param constraint  the operand's constraint (`q` limits it to the byte-addressable four)
+ * @param op_size     the operand's size: a byte operand in 32-bit code needs one of those four too
+ * @param avoid       registers already spoken for, by hardware number
+ * @return            the register's full-width name, or NULL if none is free
+ */
+static const char *asm_pick_reg(int is_64bit, const char *constraint, int op_size, unsigned avoid) {
+    static const int order32_q[] = {0, 1, 2, 3};
+    static const int order32_r[] = {0, 1, 2, 3, 6, 7};
+    static const int order64_r[] = {10, 11, 8, 9, 1, 2, 0, 6, 7, 3, 12, 13, 14, 15};
+    const int *order;
+    size_t n;
+    size_t i;
+
+    if (is_64bit) {
+        order = order64_r;
+        n = sizeof(order64_r) / sizeof(order64_r[0]);
+    } else if (cc_asm_constraint_has(constraint, 'q') || op_size == 1) {
+        order = order32_q;
+        n = sizeof(order32_q) / sizeof(order32_q[0]);
+    } else {
+        order = order32_r;
+        n = sizeof(order32_r) / sizeof(order32_r[0]);
+    }
+    for (i = 0; i < n; ++i) {
+        if ((avoid & (1u << order[i])) == 0) {
+            return is_64bit ? x86_gprs[order[i]].n64 : x86_gprs[order[i]].n32;
+        }
+    }
+    return NULL;
+}
+
+/** The mask bit of a register named in any width; 0 for none. */
+static unsigned x86_gpr_bit(const char *name) {
+    int i = x86_gpr_index(name);
+    return i >= 0 ? 1u << i : 0;
+}
+
+/* in 32-bit code only %eax..%ebx have byte registers */
 const char *reg32_to8(const char *r) {
-    if (strcmp(r, "%eax") == 0) return "%al";
-    if (strcmp(r, "%ebx") == 0) return "%bl";
-    if (strcmp(r, "%ecx") == 0) return "%cl";
-    if (strcmp(r, "%edx") == 0) return "%dl";
-    return "%al";
+    int i = x86_gpr_index(r);
+    return i >= 0 && i < 4 ? x86_gprs[i].n8 : "%al";
 }
 
 const char *reg32_to16(const char *r) {
-    if (strcmp(r, "%eax") == 0) return "%ax";
-    if (strcmp(r, "%ebx") == 0) return "%bx";
-    if (strcmp(r, "%ecx") == 0) return "%cx";
-    if (strcmp(r, "%edx") == 0) return "%dx";
-    if (strcmp(r, "%esi") == 0) return "%si";
-    if (strcmp(r, "%edi") == 0) return "%di";
-    return "%ax";
+    int i = x86_gpr_index(r);
+    return i >= 0 && i < 8 ? x86_gprs[i].n16 : "%ax";
 }
 
 static int asm_operand_size(const unsigned char *sizes, size_t count, size_t idx, int default_size) {
@@ -2699,14 +2704,24 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     size_t in_n = in->asm_in_count;
     size_t total = out_n + in_n;
     size_t i;
-    size_t reg_pick = 0;
     char **op_text = NULL;
     char **op_names = NULL;
     const char **out_regs = NULL;
     int *out_write_back = NULL;
     int *out_tied_read = NULL;
-    const char **forbid_regs = NULL;
-    size_t forbid_count = 0;
+    /*
+     * The operands' registers are chosen first and loaded after: any
+     * callee-saved register the asm uses has to be saved before the first
+     * load.  Registers are tracked as masks by hardware number.
+     */
+    asm_load_t *loads = NULL;
+    size_t load_count = 0;
+    unsigned fixed_mask = 0;    /* named by a constraint (`a`, `D`, ...) of any operand */
+    unsigned clobber_mask = 0;  /* in the clobber list */
+    unsigned out_mask = 0;      /* holding an output */
+    unsigned out_live_mask = 0; /* holding an output an input may not share: read (`+`, matched) or early-clobber */
+    unsigned in_mask = 0;       /* holding an input */
+    unsigned saved_mask = 0;    /* callee-saved, used, so saved around the asm */
     char *rendered = NULL;
 
     op_text = (char **)calloc(total, sizeof(*op_text));
@@ -2714,25 +2729,36 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     out_regs = (const char **)calloc(out_n, sizeof(*out_regs));
     out_write_back = (int *)calloc(out_n, sizeof(*out_write_back));
     out_tied_read = (int *)calloc(out_n, sizeof(*out_tied_read));
-    forbid_regs = (const char **)calloc(out_n, sizeof(*forbid_regs));
-    if ((total > 0 && (op_text == NULL || op_names == NULL)) ||
-        (out_n > 0 &&
-         (out_regs == NULL || out_write_back == NULL || out_tied_read == NULL || forbid_regs == NULL))) {
+    loads = (asm_load_t *)calloc(total + 1, sizeof(*loads));
+    if ((total > 0 && (op_text == NULL || op_names == NULL)) || loads == NULL ||
+        (out_n > 0 && (out_regs == NULL || out_write_back == NULL || out_tied_read == NULL))) {
         free(op_text);
         free(op_names);
         free(out_regs);
         free(out_write_back);
         free(out_tied_read);
-        free(forbid_regs);
+        free(loads);
         set_diag(diag, "out of memory preparing inline asm operands");
         return -1;
     }
 
     for (i = 0; i < in_n; ++i) {
-        int tied = cc_asm_constraint_matched_operand(in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL);
+        const char *c = in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL;
+        int tied = cc_asm_constraint_matched_operand(c);
         if (tied >= 0 && (size_t)tied < out_n) {
             out_tied_read[tied] = 1;
+        } else if (tied < 0 && !cc_asm_constraint_is_memory_only(c)) {
+            fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
         }
+    }
+    for (i = 0; i < out_n; ++i) {
+        const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
+        if (!cc_asm_constraint_is_memory_only(c)) {
+            fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
+        }
+    }
+    for (i = 0; i < in->asm_clobber_count; ++i) {
+        clobber_mask |= x86_gpr_bit(in->asm_clobbers[i]);
     }
 
     for (i = 0; i < out_n; ++i) {
@@ -2748,9 +2774,18 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
         if (cc_asm_constraint_is_memory_only(c)) {
             if (is_indirect) {
-                const char *areg = is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++);
+                /* the address lives in a register for the whole asm: no input may share it */
+                const char *areg = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4, fixed_mask | clobber_mask | out_mask);
                 char abuf[32];
-                emit_load_ptr_value_reg(fp, lay, v, is_64bit, areg);
+                if (areg == NULL) {
+                    goto impossible;
+                }
+                out_mask |= x86_gpr_bit(areg);
+                out_live_mask |= x86_gpr_bit(areg);
+                loads[load_count].reg = areg;
+                loads[load_count].value = v;
+                loads[load_count].is_address = 1;
+                load_count++;
                 snprintf(abuf, sizeof(abuf), "(%s)", areg);
                 op_text[i] = dup_cstr(abuf);
             } else {
@@ -2760,21 +2795,29 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 goto oom;
             }
         } else {
-            const char *reg = fixed != NULL
-                                  ? fixed
-                                  : pick_nonconflict_constraint_reg(is_64bit, c, osz, &reg_pick, NULL, 0);
-            const char *render_reg = reg_alias_for_size(reg, is_64bit, osz);
+            /* never another output's register, another operand's fixed one, or a clobbered one */
+            const char *reg = fixed != NULL ? fixed : asm_pick_reg(is_64bit, c, osz, fixed_mask | clobber_mask | out_mask);
+            const char *render_reg;
+            int read = (c != NULL && strchr(c, '+') != NULL) || out_tied_read[i];
+
+            if (reg == NULL) {
+                goto impossible;
+            }
+            render_reg = reg_alias_for_size(reg, is_64bit, osz);
             out_regs[i] = reg;
             out_write_back[i] = 1;
-            if (c != NULL && strchr(c, '&') != NULL) {
-                forbid_regs[forbid_count++] = reg;
+            out_mask |= x86_gpr_bit(reg);
+            if (read || (c != NULL && strchr(c, '&') != NULL)) {
+                out_live_mask |= x86_gpr_bit(reg);
             }
             op_text[i] = dup_cstr(render_reg);
             if (op_text[i] == NULL) {
                 goto oom;
             }
-            if ((c != NULL && strchr(c, '+') != NULL) || out_tied_read[i]) {
-                emit_frame_load_reg(fp, is_64bit, off, reg);
+            if (read) {
+                loads[load_count].reg = reg;
+                loads[load_count].off = off;
+                load_count++;
             }
         }
     }
@@ -2864,15 +2907,64 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                  * vDSO inline asm exercises this pattern. */
                 reg = fixed;
             } else {
-                reg = pick_nonconflict_constraint_reg(is_64bit, c, isz, &reg_pick, forbid_regs, forbid_count);
+                /*
+                 * Not another input's register, another operand's fixed one,
+                 * a clobbered one, or an output's the asm reads or writes
+                 * early.  An output's it only writes at the end may be
+                 * shared, as gcc does, but only when nothing else is free.
+                 */
+                unsigned avoid = fixed_mask | clobber_mask | out_live_mask | in_mask;
+
+                reg = asm_pick_reg(is_64bit, c, isz, avoid | out_mask);
+                if (reg == NULL) {
+                    reg = asm_pick_reg(is_64bit, c, isz, avoid);
+                }
+                if (reg == NULL) {
+                    goto impossible;
+                }
             }
+            in_mask |= x86_gpr_bit(reg);
             render_reg = reg_alias_for_size(reg, is_64bit, isz);
             long off = slot_off(lay, v);
             op_text[slot] = dup_cstr(render_reg);
             if (op_text[slot] == NULL) {
                 goto oom;
             }
-            emit_frame_load_reg(fp, is_64bit, off, reg);
+            loads[load_count].reg = reg;
+            loads[load_count].off = off;
+            load_count++;
+        }
+    }
+
+    /*
+     * Save the callee-saved registers the asm uses -- an operand's, or a
+     * clobbered one -- then load the operands.  The function's own code
+     * keeps nothing in registers across an instruction, but its caller
+     * does, and the ABI says these survive the call.  (%esp and %ebp are
+     * the frame's, and not the asm's to change.)
+     */
+    saved_mask = (out_mask | in_mask | clobber_mask) & x86_callee_saved_mask(is_64bit);
+    {
+        int pushes = 0;
+        int r;
+
+        for (r = 0; r < 16; ++r) {
+            pushes += (saved_mask & (1u << r)) != 0;
+        }
+        if (is_64bit && (pushes & 1) != 0) {
+            fprintf(fp, "\tsubq $8, %%rsp\n"); /* keep %rsp 16-aligned for a call in the asm */
+        }
+        for (r = 0; r < 16; ++r) {
+            if ((saved_mask & (1u << r)) != 0) {
+                fprintf(fp, "\tpush%c %s\n", is_64bit ? 'q' : 'l', is_64bit ? x86_gprs[r].n64 : x86_gprs[r].n32);
+            }
+        }
+    }
+    for (i = 0; i < load_count; ++i) {
+        if (loads[i].is_address) {
+            emit_load_ptr_value_reg(fp, lay, loads[i].value, is_64bit, loads[i].reg);
+        } else {
+            emit_frame_load_reg(fp, is_64bit, loads[i].off, loads[i].reg);
         }
     }
 
@@ -2926,6 +3018,20 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             emit_frame_store_reg(fp, is_64bit, out_regs[i], off);
         }
     }
+    {
+        int pushes = 0;
+        int r;
+
+        for (r = 15; r >= 0; --r) {
+            if ((saved_mask & (1u << r)) != 0) {
+                fprintf(fp, "\tpop%c %s\n", is_64bit ? 'q' : 'l', is_64bit ? x86_gprs[r].n64 : x86_gprs[r].n32);
+                pushes++;
+            }
+        }
+        if (is_64bit && (pushes & 1) != 0) {
+            fprintf(fp, "\taddq $8, %%rsp\n");
+        }
+    }
 
     free(rendered);
     for (i = 0; i < total; ++i) {
@@ -2936,9 +3042,16 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     free(out_regs);
     free(out_write_back);
     free(out_tied_read);
-    free(forbid_regs);
+    free(loads);
     return 0;
 
+impossible: {
+    char msg[192];
+    snprintf(msg, sizeof(msg), "impossible register constraints in asm (fn=%s): no free register for an operand",
+             f->name != NULL ? f->name : "<anon>");
+    set_diag(diag, msg);
+    goto fail;
+}
 oom:
     set_diag(diag, "out of memory preparing inline asm");
 fail:
@@ -2957,7 +3070,7 @@ fail:
     free(out_regs);
     free(out_write_back);
     free(out_tied_read);
-    free(forbid_regs);
+    free(loads);
     return -1;
 }
 
