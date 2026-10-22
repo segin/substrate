@@ -1196,6 +1196,8 @@ static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower
             set_diag(diag, "out of memory assigning label id");
             return -1;
         }
+        ctx->labels[ctx->label_count].cleanups = NULL;
+        ctx->labels[ctx->label_count].cleanup_count = 0;
         ctx->label_count++;
         return lower_collect_labels(sf, s->then_branch, ctx, diag);
     }
@@ -1247,6 +1249,109 @@ static int lower_collect_labels_expr(cc_ssa_function_t *sf, const cc_expr_t *e, 
         }
     }
     return 0;
+}
+
+/** The `cleanup` declarations in scope at a point of the function being walked, outermost first. */
+typedef struct {
+    const cc_stmt_t **at;
+    size_t count;
+    size_t cap;
+} cleanup_stack_t;
+
+/**
+ * Record, for each label in @p s, the `cleanup` declarations in scope at it (label_entry_t.cleanups), as
+ * lowering will have them in scope there, so a goto runs the cleanups of those it leaves.  The walk keeps
+ * scope as lowering does: a block's declarations end with it (a synthetic block's, several declarators,
+ * do not), a for's init ones with the for, and a branch's or a loop body's with it.
+ *
+ * @return 0, or -1 out of memory (diagnosed)
+ */
+static int lower_collect_label_cleanups(const cc_stmt_t *s, lower_ctx_t *ctx, cleanup_stack_t *st, cc_diag_t *diag) {
+    size_t saved;
+    size_t i;
+
+    if (s == NULL) {
+        return 0;
+    }
+    saved = st->count;
+    switch (s->kind) {
+    case CC_STMT_DECL:
+        if (s->attr_cleanup != NULL && (s->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0) {
+            if (st->count == st->cap) {
+                size_t ncap = st->cap == 0 ? 8 : st->cap * 2;
+                const cc_stmt_t **next = (const cc_stmt_t **)realloc(st->at, ncap * sizeof(*next));
+
+                if (next == NULL) {
+                    set_diag(diag, "out of memory collecting cleanup scopes");
+                    return -1;
+                }
+                st->at = next;
+                st->cap = ncap;
+            }
+            st->at[st->count++] = s;
+        }
+        return 0;
+    case CC_STMT_LABEL:
+        for (i = 0; i < ctx->label_count; ++i) {
+            if (s->label_name != NULL && strcmp(ctx->labels[i].name, s->label_name) == 0 && st->count > 0) {
+                ctx->labels[i].cleanups = (const cc_stmt_t **)malloc(st->count * sizeof(*st->at));
+                if (ctx->labels[i].cleanups == NULL) {
+                    set_diag(diag, "out of memory collecting cleanup scopes");
+                    return -1;
+                }
+                memcpy(ctx->labels[i].cleanups, st->at, st->count * sizeof(*st->at));
+                ctx->labels[i].cleanup_count = st->count;
+                break;
+            }
+        }
+        return lower_collect_label_cleanups(s->then_branch, ctx, st, diag);
+    case CC_STMT_BLOCK:
+        for (i = 0; i < s->block_count; ++i) {
+            if (lower_collect_label_cleanups(&s->block_stmts[i], ctx, st, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!s->is_synthetic_block) {
+            st->count = saved;
+        }
+        return 0;
+    case CC_STMT_IF:
+        if (lower_collect_label_cleanups(s->then_branch, ctx, st, diag) != 0) {
+            return -1;
+        }
+        st->count = saved;
+        if (lower_collect_label_cleanups(s->else_branch, ctx, st, diag) != 0) {
+            return -1;
+        }
+        st->count = saved;
+        return 0;
+    case CC_STMT_WHILE:
+    case CC_STMT_DO:
+    case CC_STMT_SWITCH:
+        if (lower_collect_label_cleanups(s->then_branch, ctx, st, diag) != 0) {
+            return -1;
+        }
+        st->count = saved;
+        return 0;
+    case CC_STMT_FOR:
+        /* the init's declarations are in scope through the loop (lower_for_stmt() lowers a block of them flat) */
+        if (s->init_stmt != NULL && s->init_stmt->kind == CC_STMT_BLOCK) {
+            for (i = 0; i < s->init_stmt->block_count; ++i) {
+                if (lower_collect_label_cleanups(&s->init_stmt->block_stmts[i], ctx, st, diag) != 0) {
+                    return -1;
+                }
+            }
+        } else if (lower_collect_label_cleanups(s->init_stmt, ctx, st, diag) != 0) {
+            return -1;
+        }
+        if (lower_collect_label_cleanups(s->then_branch, ctx, st, diag) != 0) {
+            return -1;
+        }
+        st->count = saved;
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 
@@ -1520,6 +1625,7 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].vla_is_pointer = 0;
     (*vars)[*var_count].ctype = ctype;
     (*vars)[*var_count].align = 0;
+    (*vars)[*var_count].cleanup_decl = NULL;
     (*var_count)++;
     return 0;
 }
@@ -1563,6 +1669,134 @@ static void vars_pop_to(var_entry_t *vars, size_t *var_count, size_t saved) {
     while (*var_count > saved) {
         var_release(&vars[--*var_count]);
     }
+}
+
+/**
+ * Call the `cleanup` function of each variable from @p from up to @p to that has one, the last declared
+ * first, with the variable's address, as the variables go out of scope (GNU `__attribute__((cleanup))`:
+ * Linux's guard(), scoped_guard() and __free() release their locks and memory so).  The call is lowered as
+ * `fn(&var)` with @p vars[k] the only variable in scope, so a variable of the same name declared further in
+ * does not hide it.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int emit_cleanups(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                         var_entry_t *vars, size_t from, size_t to, cc_diag_t *diag) {
+    size_t k = to;
+
+    while (k > from) {
+        var_entry_t *v = &vars[--k];
+        cc_expr_t id;
+        cc_expr_t addr;
+        cc_expr_t call;
+        cc_expr_t *argv[1];
+
+        if (v->cleanup_decl == NULL || v->cleanup_decl->attr_cleanup == NULL) {
+            continue;
+        }
+        memset(&id, 0, sizeof(id));
+        memset(&addr, 0, sizeof(addr));
+        memset(&call, 0, sizeof(call));
+        id.kind = CC_EXPR_IDENT;
+        id.line = v->cleanup_decl->line;
+        id.col = v->cleanup_decl->col;
+        id.ident = v->name;
+        id.ctype = v->ctype;
+        addr.kind = CC_EXPR_ADDR;
+        addr.line = id.line;
+        addr.col = id.col;
+        addr.lhs = &id;
+        addr.ctype = v->ctype != NULL ? cc_ct_pointer(v->ctype) : NULL;
+        argv[0] = &addr;
+        call.kind = CC_EXPR_CALL;
+        call.line = id.line;
+        call.col = id.col;
+        call.ident = v->cleanup_decl->attr_cleanup;
+        call.args = argv;
+        call.arg_count = 1;
+        call.ctype = cc_ct_basic(CC_CT_VOID);
+        if (lower_call_expr(tu, sf, ctx, v, 1, v->depth, &call, diag) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * End a scope that is left by going on past its end: run the cleanups of the variables declared in it
+ * (emit_cleanups()), then take them out of scope.
+ *
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int scope_end(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                     var_entry_t *vars, size_t *var_count, size_t saved, cc_diag_t *diag) {
+    if (emit_cleanups(tu, sf, ctx, vars, saved, *var_count, diag) != 0) {
+        return -1;
+    }
+    vars_pop_to(vars, var_count, saved);
+    return 0;
+}
+
+/**
+ * Enter a loop's or switch's body: a break to @p break_label or a continue to @p continue_label leaves the
+ * variables declared after the first @p var_count, whose cleanups it runs.
+ *
+ * @return 0, or -1 out of memory (diagnosed)
+ */
+static int jump_scope_push(const lower_ctx_t *ctx, int break_label, int continue_label, size_t var_count,
+                           cc_diag_t *diag) {
+    lower_jump_scopes_t *j = ctx != NULL ? ctx->jumps : NULL;
+
+    if (j == NULL) {
+        return 0;
+    }
+    if (j->count == j->cap) {
+        size_t ncap = j->cap == 0 ? 8 : j->cap * 2;
+        lower_jump_scope_t *next = (lower_jump_scope_t *)realloc(j->at, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            set_diag(diag, "out of memory entering a loop");
+            return -1;
+        }
+        j->at = next;
+        j->cap = ncap;
+    }
+    j->at[j->count].break_label = break_label;
+    j->at[j->count].continue_label = continue_label;
+    j->at[j->count].var_count = var_count;
+    j->count++;
+    return 0;
+}
+
+/** Leave the innermost loop's or switch's body. */
+static void jump_scope_pop(const lower_ctx_t *ctx) {
+    if (ctx != NULL && ctx->jumps != NULL && ctx->jumps->count > 0) {
+        ctx->jumps->count--;
+    }
+}
+
+/**
+ * Before a break or continue to @p label: run the cleanups of the variables it takes out of scope, those
+ * declared in the innermost loop or switch body it leaves since the body began.
+ *
+ * @param is_continue  a continue (its label is the loop's continue label), else a break
+ * @return 0, or -1 on error (diagnosed)
+ */
+static int jump_cleanups(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                         var_entry_t *vars, size_t var_count, int label, int is_continue, cc_diag_t *diag) {
+    size_t k;
+
+    if (ctx == NULL || ctx->jumps == NULL) {
+        return 0;
+    }
+    for (k = ctx->jumps->count; k > 0; --k) {
+        const lower_jump_scope_t *js = &ctx->jumps->at[k - 1];
+
+        if ((is_continue ? js->continue_label : js->break_label) == label) {
+            return js->var_count < var_count ? emit_cleanups(tu, sf, ctx, vars, js->var_count, var_count, diag) : 0;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -6802,6 +7036,12 @@ static int lower_stmt_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     if (outv >= 0) {
         outv = cast_value(sf, outv, lower_value_kind(e), diag);
     }
+    /* its own declarations go out of scope once its value is computed: their cleanups run */
+    if (emit_cleanups(tu, sf, ctx, lvars, var_count, lcount, diag) != 0) {
+        vars_pop_to(lvars, &lcount, 0);
+        free(lvars);
+        return -1;
+    }
     vars_pop_to(lvars, &lcount, 0);
     free(lvars);
     if (outv < 0) {
@@ -10425,6 +10665,9 @@ static int lower_return_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
                     return -1;
                 }
                 rv = load_in.dst;
+                if (emit_cleanups(tu, sf, ctx, *vars, 0, *var_count, diag) != 0) {
+                    return -1;
+                }
                 memset(&ret_in, 0, sizeof(ret_in));
                 ret_in.op = CC_SSA_RET;
                 ret_in.dst = -1;
@@ -10499,6 +10742,9 @@ static int lower_return_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
                     return -1;
                 }
 
+                if (emit_cleanups(tu, sf, ctx, *vars, 0, *var_count, diag) != 0) {
+                    return -1;
+                }
                 memset(&ret_in, 0, sizeof(ret_in));
                 ret_in.op = CC_SSA_RET;
                 ret_in.dst = -1;
@@ -10553,6 +10799,10 @@ static int lower_return_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
     }
 
 append_return:
+    /* every variable in scope goes out of it: the cleanups run once the value returned is computed */
+    if (emit_cleanups(tu, sf, ctx, *vars, 0, *var_count, diag) != 0) {
+        return -1;
+    }
     memset(&ret_in, 0, sizeof(ret_in));
     ret_in.op = CC_SSA_RET;
     ret_in.dst = -1;
@@ -10639,10 +10889,15 @@ static int lower_for_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
     }
     {
         size_t body_saved = *var_count;
-        if (lower_stmt(tu, sf, vars, var_count, ctx, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
+        /* a break or continue runs the body's cleanups; the init's run at l_end, where a break goes */
+        if (jump_scope_push(ctx, l_end, l_post, body_saved, diag) != 0 ||
+            lower_stmt(tu, sf, vars, var_count, ctx, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
             return -1;
         }
-        vars_pop_to(*vars, var_count, body_saved);
+        jump_scope_pop(ctx);
+        if (scope_end(tu, sf, ctx, *vars, var_count, body_saved, diag) != 0) {
+            return -1;
+        }
     }
     if (cc_ir_br(sf, l_post) != 0) {
         return -1;
@@ -10659,8 +10914,7 @@ static int lower_for_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
     if (cc_ir_label(sf, l_end) != 0) {
         return -1;
     }
-    vars_pop_to(*vars, var_count, saved);
-    return 0;
+    return scope_end(tu, sf, ctx, *vars, var_count, saved, diag);
 }
 
 /**
@@ -10907,7 +11161,9 @@ static int lower_switch_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
         size_t saved_site_count = g_switch_site_count;
         g_switch_sites = sites;
         g_switch_site_count = site_count;
-        if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, l_end, continue_label, s->then_branch, saw_ret,
+        /* a break leaves the body; a continue the enclosing loop's (its scope, not this one, says how far) */
+        if (jump_scope_push(ctx, l_end, -1, *var_count, diag) != 0 ||
+            lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, l_end, continue_label, s->then_branch, saw_ret,
                        diag) != 0) {
             g_switch_sites = saved_sites;
             g_switch_site_count = saved_site_count;
@@ -10919,6 +11175,7 @@ static int lower_switch_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t 
             free(case_has_range);
             return -1;
         }
+        jump_scope_pop(ctx);
         g_switch_sites = saved_sites;
         g_switch_site_count = saved_site_count;
     }
@@ -11027,6 +11284,37 @@ static int lower_goto_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         }
         return -1;
     }
+    {
+        /*
+         * the cleanups of the variables in scope here and not at the label run first: those past the
+         * cleanup declarations the two have in common, outermost first (lower_collect_label_cleanups())
+         */
+        const label_entry_t *le = NULL;
+        size_t i;
+        size_t common = 0;
+        size_t from = *var_count;
+
+        for (i = 0; i < ctx->label_count; ++i) {
+            if (strcmp(ctx->labels[i].name, s->label_name) == 0) {
+                le = &ctx->labels[i];
+                break;
+            }
+        }
+        for (i = 0; i < *var_count; ++i) {
+            if ((*vars)[i].cleanup_decl == NULL) {
+                continue;
+            }
+            if (le != NULL && common < le->cleanup_count && le->cleanups[common] == (*vars)[i].cleanup_decl) {
+                common++;
+                continue;
+            }
+            from = i;
+            break;
+        }
+        if (from < *var_count && emit_cleanups(tu, sf, ctx, *vars, from, *var_count, diag) != 0) {
+            return -1;
+        }
+    }
     return cc_ir_br(sf, l);
 }
 
@@ -11125,7 +11413,18 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     size_t j;
 
     if (s->kind == CC_STMT_DECL) {
-        return lower_decl_stmt(tu, sf, vars, var_count, ctx, depth, s, diag);
+        size_t before = *var_count;
+
+        if (lower_decl_stmt(tu, sf, vars, var_count, ctx, depth, s, diag) != 0) {
+            return -1;
+        }
+        /* a `cleanup(fn)` automatic variable: fn runs as it goes out of scope (emit_cleanups()) */
+        if (s->attr_cleanup != NULL && *var_count > before && !(*vars)[*var_count - 1].is_static_storage &&
+            (*vars)[*var_count - 1].name != NULL && s->decl_name != NULL &&
+            strcmp((*vars)[*var_count - 1].name, s->decl_name) == 0) {
+            (*vars)[*var_count - 1].cleanup_decl = s;
+        }
+        return 0;
     }
 
     if (s->kind == CC_STMT_EXPR) {
@@ -11167,10 +11466,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         {
             size_t saved = *var_count;
             if (lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->then_branch, saw_ret,
-                           diag) != 0) {
+                           diag) != 0 ||
+                scope_end(tu, sf, ctx, *vars, var_count, saved, diag) != 0) {
                 return -1;
             }
-            vars_pop_to(*vars, var_count, saved);
         }
         if (cc_ir_br(sf, l_end) != 0) {
             return -1;
@@ -11183,10 +11482,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             {
                 size_t saved = *var_count;
                 if (lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->else_branch, saw_ret,
-                               diag) != 0) {
+                               diag) != 0 ||
+                    scope_end(tu, sf, ctx, *vars, var_count, saved, diag) != 0) {
                     return -1;
                 }
-                vars_pop_to(*vars, var_count, saved);
             }
             if (cc_ir_br(sf, l_end) != 0) {
                 return -1;
@@ -11224,10 +11523,14 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+            if (jump_scope_push(ctx, l_end, l_cond, saved, diag) != 0 ||
+                lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
-            vars_pop_to(*vars, var_count, saved);
+            jump_scope_pop(ctx);
+            if (scope_end(tu, sf, ctx, *vars, var_count, saved, diag) != 0) {
+                return -1;
+            }
         }
         if (cc_ir_br(sf, l_cond) != 0) {
             return -1;
@@ -11249,10 +11552,14 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+            if (jump_scope_push(ctx, l_end, l_cond, saved, diag) != 0 ||
+                lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
-            vars_pop_to(*vars, var_count, saved);
+            jump_scope_pop(ctx);
+            if (scope_end(tu, sf, ctx, *vars, var_count, saved, diag) != 0) {
+                return -1;
+            }
         }
         if (cc_ir_label(sf, l_cond) != 0) {
             return -1;
@@ -11287,12 +11594,18 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             set_diag(diag, "break used outside loop/switch in lowering");
             return -1;
         }
+        if (jump_cleanups(tu, sf, ctx, *vars, *var_count, break_label, 0, diag) != 0) {
+            return -1;
+        }
         return cc_ir_br(sf, break_label);
     }
 
     if (s->kind == CC_STMT_CONTINUE) {
         if (continue_label < 0) {
             set_diag(diag, "continue used outside loop in lowering");
+            return -1;
+        }
+        if (jump_cleanups(tu, sf, ctx, *vars, *var_count, continue_label, 1, diag) != 0) {
             return -1;
         }
         return cc_ir_br(sf, continue_label);
@@ -11333,8 +11646,8 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
         }
-        if (!s->is_synthetic_block) {
-            vars_pop_to(*vars, var_count, saved);
+        if (!s->is_synthetic_block && scope_end(tu, sf, ctx, *vars, var_count, saved, diag) != 0) {
+            return -1;
         }
         return 0;
     }
@@ -14497,6 +14810,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         cc_ssa_function_t *sf;
         var_entry_t *vars = NULL;
         lower_ctx_t lctx;
+        lower_jump_scopes_t jumps;
         size_t var_count = 0;
         size_t j;
         size_t k;
@@ -14823,6 +15137,22 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 return -1;
             }
         }
+        {
+            /* the cleanup declarations in scope at each label, for the gotos to it */
+            cleanup_stack_t cst;
+
+            memset(&cst, 0, sizeof(cst));
+            for (j = 0; j < af->stmt_count; ++j) {
+                if (lower_collect_label_cleanups(&af->stmts[j], &lctx, &cst, diag) != 0) {
+                    free(cst.at);
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+            }
+            free(cst.at);
+        }
+        memset(&jumps, 0, sizeof(jumps));
+        lctx.jumps = &jumps;
         for (j = 0; j < af->stmt_count; ++j) {
             if (lower_collect_hoisted_allocs(tu, sf, &lctx, &af->stmts[j], diag) != 0) {
                 cc_ssa_module_free(out);
@@ -14838,6 +15168,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
 
         if (sf->instr_count == 0 || sf->instrs[sf->instr_count - 1].op != CC_SSA_RET) {
+            /* falling off the end leaves the function's outermost block: its cleanups run */
+            if (emit_cleanups(tu, sf, &lctx, vars, 0, var_count, diag) != 0) {
+                cc_ssa_module_free(out);
+                return -1;
+            }
             if ((sf->attr_flags & CC_ATTR_NORETURN) != 0) {
                 if (append_noreturn_loop(sf) != 0) {
                     set_diag(diag, "out of memory appending noreturn terminator");
@@ -14857,9 +15192,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         free(vars);
         for (j = 0; j < lctx.label_count; ++j) {
             free(lctx.labels[j].name);
+            free(lctx.labels[j].cleanups);
         }
         free(lctx.labels);
         free(lctx.hoisted_allocs);
+        free(jumps.at);
     }
 
     return 0;

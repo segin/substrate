@@ -15,7 +15,8 @@ linker to produce objects, executables and shared objects.
   (a link to `cc`) run it.  No external `cpp` is used.
 - **Languages:** `-std=c90`, `c95`, `c99`, `c11`, `c17`, `c23` and the
   GNU variants; the default is `gnu17`.  GNU extensions (statement
-  expressions, `__attribute__`, inline asm with goto, file-scope
+  expressions, `__attribute__` (`cleanup(fn)` runs fn on every way out
+  of the variable's scope), inline asm with goto, file-scope
   `asm("...")` (written to the `.s` as is, before the functions),
   `__builtin_*`, computed goto, ...) are supported.
 - **Targets:** `-m64` (x86-64) and `-m32` (i386; non-PIE unless

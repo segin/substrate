@@ -149,6 +149,8 @@ typedef struct {
     long vector_elems; /**< `ext_vector_type(n)`: its element count; 0 for none */
     int regparm;       /**< `regparm(n)` (i386): n + 1; 0 for none */
     char *asm_label;   /**< the string of a declarator's `asm("...")`, whole (owned); NULL for none */
+    char *cleanup_fn;  /**< `cleanup(fn)`: the function called with the variable's address as it goes out of
+                            scope (owned); NULL for none */
 } decl_attrs_t;
 
 static int is_decl_qual_tok(cc_tok_kind_t k);
@@ -3787,6 +3789,7 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->section = NULL;
     a->alias = NULL;
     a->asm_label = NULL;
+    a->cleanup_fn = NULL;
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
@@ -3802,6 +3805,8 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->alias = NULL;
     free(a->asm_label);
     a->asm_label = NULL;
+    free(a->cleanup_fn);
+    a->cleanup_fn = NULL;
     a->flags = 0;
     a->align = 0;
     a->format_index = 0;
@@ -3865,6 +3870,15 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
         }
         free(dst->asm_label);
         dst->asm_label = label;
+    }
+    if (src->cleanup_fn != NULL) {
+        char *fn = cc_strndup(src->cleanup_fn, strlen(src->cleanup_fn));
+
+        if (fn == NULL) {
+            return -1;
+        }
+        free(dst->cleanup_fn);
+        dst->cleanup_fn = fn;
     }
     return 0;
 }
@@ -4982,7 +4996,33 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     if (next_tok(p) != 0) {
         return -1;
     }
-    if (p->tok.kind == TOK_LPAREN) {
+    if (is_cleanup && p->tok.kind == TOK_LPAREN) {
+        /* cleanup(fn): its argument names the function, which the parser keeps */
+        char *fn = NULL;
+
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "cleanup attribute expects a function name");
+            return -1;
+        }
+        fn = cc_strndup(p->tok.start, p->tok.len);
+        if (fn == NULL) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a cleanup attribute");
+            return -1;
+        }
+        if (next_tok(p) != 0 || expect(p, TOK_RPAREN, "expected ')' after the cleanup function") != 0) {
+            free(fn);
+            return -1;
+        }
+        if (out_attrs != NULL) {
+            free(out_attrs->cleanup_fn);
+            out_attrs->cleanup_fn = fn;
+        } else {
+            free(fn);
+        }
+    } else if (p->tok.kind == TOK_LPAREN) {
         int rc = is_format ? parse_gnu_format_attr_arguments(p, &num, &has_num, &num2, &has_num2)
                            : parse_gnu_attr_arguments(p, &num, &has_num, &num2, &has_num2, &sec);
         if (rc != 0) {
@@ -5974,6 +6014,7 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->attr_section);
     free(s->attr_alias);
     free(s->asm_register);
+    free(s->attr_cleanup);
     cc_bounds_free(&s->array_bounds);
     free_expr(s->expr);
     free(s->asm_template);
@@ -7631,6 +7672,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     dst->attr_section = NULL;
     dst->attr_alias = NULL;
     dst->asm_register = NULL;
+    dst->attr_cleanup = NULL;
     dst->expr = NULL;
     dst->init_stmt = NULL;
     dst->init_expr = NULL;
@@ -7679,6 +7721,13 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     if (src->asm_register != NULL) {
         dst->asm_register = cc_strndup(src->asm_register, strlen(src->asm_register));
         if (dst->asm_register == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->attr_cleanup != NULL) {
+        dst->attr_cleanup = cc_strndup(src->attr_cleanup, strlen(src->attr_cleanup));
+        if (dst->attr_cleanup == NULL) {
             free_stmt(dst);
             return -1;
         }
@@ -9350,6 +9399,13 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         if (merged_attrs.alias != NULL) {
             s.attr_alias = cc_strndup(merged_attrs.alias, strlen(merged_attrs.alias));
             if (s.attr_alias == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
+        }
+        if (merged_attrs.cleanup_fn != NULL) {
+            s.attr_cleanup = cc_strndup(merged_attrs.cleanup_fn, strlen(merged_attrs.cleanup_fn));
+            if (s.attr_cleanup == NULL) {
                 free_stmt(&s);
                 return -1;
             }

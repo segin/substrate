@@ -232,6 +232,8 @@ struct cc_stmt {
     char *attr_section;
     char *attr_alias;
     char *asm_register; /**< a `register ... asm("reg")` declaration: the register, without % (owned) */
+    char *attr_cleanup; /**< a declaration's `cleanup(fn)`: fn, called with the variable's address as the
+                             variable goes out of scope (owned); NULL for none */
     cc_stmt_kind_t kind;
     int is_synthetic_block;
     char *decl_name;

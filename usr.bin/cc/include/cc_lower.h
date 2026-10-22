@@ -33,13 +33,34 @@ typedef struct {
     int vla_is_pointer; /**< a pointer to a VLA, whose own size is a pointer's */
     const cc_ctype_t *ctype; /**< the variable's declared type; NULL where the declaration recorded none */
     long align; /**< the alignment `_Alignas` or `aligned` asks of it beyond its type's, or 0 */
+    /** a `cleanup(fn)` variable's declaration (its attr_cleanup names fn), called with its address as the
+     *  variable goes out of scope; NULL for none */
+    const cc_stmt_t *cleanup_decl;
 } var_entry_t;
 
 /** A C label of the function being lowered, and the IR label it is. */
 typedef struct {
     char *name;
     int label;
+    /** the `cleanup` declarations in scope at the label, outermost first (the array is owned): a goto to it
+     *  runs the cleanups of those in scope at the goto and not here */
+    const cc_stmt_t **cleanups;
+    size_t cleanup_count;
 } label_entry_t;
+
+/** Where a break or continue goes, and how many variables were in scope where the loop or switch body began. */
+typedef struct {
+    int break_label;     /**< -1 if a break does not go here */
+    int continue_label;  /**< -1 if a continue does not go here */
+    size_t var_count;    /**< the variables in scope at the body's start: those after it a jump takes out of scope */
+} lower_jump_scope_t;
+
+/** The loops and switches being lowered, innermost last, for the cleanups a break or continue runs. */
+typedef struct {
+    lower_jump_scope_t *at;
+    size_t count;
+    size_t cap;
+} lower_jump_scopes_t;
 
 /** A declaration whose storage is allocated at the function's entry, and the allocation's address. */
 typedef struct {
@@ -57,6 +78,7 @@ typedef struct {
     hoisted_alloc_entry_t *hoisted_allocs;
     size_t hoisted_alloc_count;
     size_t hoisted_alloc_cap;
+    lower_jump_scopes_t *jumps; /**< the enclosing loops and switches (mutable through a const context) */
 } lower_ctx_t;
 
 enum {
