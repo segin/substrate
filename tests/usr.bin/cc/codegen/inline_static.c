@@ -61,6 +61,12 @@ static inline long long wide_add(long long a, long long b) {
     return a + b;
 }
 
+/* narrow parameters given wider arguments: a bool's compare word, an int for a char or short */
+static inline __attribute__((__always_inline__)) int narrow_params(_Bool b, signed char sc, unsigned char uc,
+                                                                    short sh) {
+    return b * 1000000 + sc * 10000 + uc * 10 + sh;
+}
+
 #if defined(__i386__) || defined(__x86_64__)
 static inline __attribute__((__always_inline__)) int branch_if_nonzero(int x) {
     __asm__ goto("testl %0, %0\n\tjnz %l[yes]" : : "r"(x) : "cc" : yes);
@@ -93,6 +99,8 @@ int main(int argc, char **argv) {
     c3 = counter();
     printf("%d %d %d\n", c1, c2, c3);
     printf("%lld\n", wide_add(0x100000000LL + k, 0xffffffffLL));
+    printf("%d %d\n", narrow_params(k == 0, 0x17f + k, 0x1fe + k, 0x18000 + k),
+           narrow_params(k != 0, -1 + k, -1 + k, -1 + k));
     printf("%d %d\n", branch_if_nonzero(k), branch_if_nonzero(k + 5));
     return 0;
 }

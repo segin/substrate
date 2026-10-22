@@ -163,8 +163,11 @@ static int call_site_inlinable(const cc_ssa_function_t *f, const cc_ssa_instr_t 
         const cc_ssa_instr_t *in = &g->instrs[i];
 
         if (in->op == CC_SSA_PARAM) {
+            /* an integer argument of another width is converted as the parameter takes it (a bool's compare) */
             if (in->param_index < 0 || (size_t)in->param_index >= call->arg_count || in->dst < 0 ||
-                call->args[in->param_index] < 0 || !same_shape(f, call->args[in->param_index], g, in->dst)) {
+                call->args[in->param_index] < 0 ||
+                (!same_shape(f, call->args[in->param_index], g, in->dst) &&
+                 !converts_to(g, in->dst, f, call->args[in->param_index]))) {
                 return 0;
             }
         } else if (in->op == CC_SSA_RET && in->lhs >= 0 && call->dst >= 0 && !same_shape(f, call->dst, g, in->lhs) &&
@@ -448,12 +451,20 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
         const cc_ssa_instr_t *src = &g->instrs[i];
 
         if (src->op == CC_SSA_PARAM) {
-            /* the parameter is its argument */
-            in = plain_instr(CC_SSA_MOV);
-            in.dst = vmap[src->dst];
-            in.lhs = call->args[src->param_index];
-            in.is_unsigned = src->is_unsigned;
-            if (ivec_put(out, &in) != 0) {
+            /* the parameter is its argument, narrowed when the parameter is narrower */
+            int arg = call->args[src->param_index];
+            int rc;
+
+            if (same_shape(f, vmap[src->dst], f, arg) || cc_ssa_value_size(f, vmap[src->dst]) > cc_ssa_value_size(f, arg)) {
+                in = plain_instr(CC_SSA_MOV);
+                in.dst = vmap[src->dst];
+                in.lhs = arg;
+                in.is_unsigned = src->is_unsigned;
+                rc = ivec_put(out, &in);
+            } else {
+                rc = put_narrow(f, out, vmap[src->dst], arg);
+            }
+            if (rc != 0) {
                 free(vmap);
                 return -1;
             }

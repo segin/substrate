@@ -114,6 +114,31 @@ for m in 32 64; do
 	fi
 done
 
+# An always_inline function whose bool parameter takes a compare's word:
+# the argument is narrowed into it, and the switch on what it returns
+# folds (Linux's irq_startup() and __irq_startup_managed(), which returns
+# IRQ_STARTUP_NORMAL without SMP).
+cat > "$CC_TMP/narrow_param.c" <<'EOF'
+void undefined_set_affinity(void);
+enum { NORMAL, MANAGED, ABORT };
+static inline __attribute__((__always_inline__)) int startup_managed(void *d, const void *aff, _Bool force) { return NORMAL; }
+int startup(void *d, const void *aff, _Bool force) {
+	switch (startup_managed(d, aff, force)) {
+	case NORMAL: return 1;
+	case MANAGED: undefined_set_affinity(); return 2;
+	case ABORT: return 0;
+	}
+	return 3;
+}
+EOF
+for m in 32 64; do
+	"$CC_BIN" -m$m -Os -c -o "$CC_TMP/narrow_param.o" "$CC_TMP/narrow_param.c"
+	if nm -u "$CC_TMP/narrow_param.o" | grep -q 'undefined_'; then
+		echo "run_inline_dead_call: -m$m -Os did not inline a function with a bool parameter"
+		exit 1
+	fi
+done
+
 # Linux's scoped_seqlock_read(): its state lives in an on-stack struct
 # across a loop, __scoped_seqlock_next() switches on it, and the call of
 # the undefined canary in the state the loop's test rules out must go --
