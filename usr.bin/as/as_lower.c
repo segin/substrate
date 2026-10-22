@@ -1843,6 +1843,91 @@ static int set_consts_collect(const as_parse_result_t *parsed, set_consts_t *c) 
     return 0;
 }
 
+/*
+ * Argument @p i of @p d with each name set to a number by now written as
+ * that number, for an argument that stays an expression of labels: GAS
+ * reads a symbol's value where the expression stands, and Linux's
+ * head_32.S counts `.fill early_idt_handler_array + i*9 - ., 1, 0xcc`
+ * with `i = i + 1` in a .rept.  The emitter, which knows the labels, did
+ * not know i.
+ */
+static int arg_put_set_values(as_directive_t *d, size_t i, set_consts_t *c) {
+    const char *s = d->args[i];
+    size_t cap = strlen(s) * 2 + 64;
+    size_t n = 0;
+    int changed = 0;
+    char *out = (char *)malloc(cap);
+
+    if (out == NULL) {
+        return -1;
+    }
+    while (*s != '\0') {
+        if (isalpha((unsigned char)*s) || *s == '_' || (*s == '.' && (isalnum((unsigned char)s[1]) || s[1] == '_'))) {
+            const char *b = s;
+            char name[256];
+            long long v;
+            size_t len;
+
+            while (isalnum((unsigned char)*s) || *s == '_' || *s == '.' || *s == '$') {
+                s++;
+            }
+            len = (size_t)(s - b);
+            if (len < sizeof(name)) {
+                memcpy(name, b, len);
+                name[len] = '\0';
+            }
+            if (len < sizeof(name) && struct_lookup(&c->now, name, &v)) {
+                char num[40];
+                size_t k = (size_t)snprintf(num, sizeof(num), "(%lld)", v);
+
+                if (n + k + 1 > cap) {
+                    char *grown = (char *)realloc(out, cap = (n + k) * 2 + 64);
+
+                    if (grown == NULL) {
+                        free(out);
+                        return -1;
+                    }
+                    out = grown;
+                }
+                memcpy(out + n, num, k);
+                n += k;
+                changed = 1;
+                continue;
+            }
+            if (n + len + 1 > cap) {
+                char *grown = (char *)realloc(out, cap = (n + len) * 2 + 64);
+
+                if (grown == NULL) {
+                    free(out);
+                    return -1;
+                }
+                out = grown;
+            }
+            memcpy(out + n, b, len);
+            n += len;
+            continue;
+        }
+        if (n + 2 > cap) {
+            char *grown = (char *)realloc(out, cap *= 2);
+
+            if (grown == NULL) {
+                free(out);
+                return -1;
+            }
+            out = grown;
+        }
+        out[n++] = *s++;
+    }
+    out[n] = '\0';
+    if (!changed) {
+        free(out);
+        return 0;
+    }
+    free(d->args[i]);
+    d->args[i] = out;
+    return 0;
+}
+
 /* An argument that is a number once the symbols set to numbers are
  * known is written as the number. */
 static int arg_make_number(as_directive_t *d, size_t i, set_consts_t *c, int ahead) {
@@ -1853,10 +1938,12 @@ static int arg_make_number(as_directive_t *d, size_t i, set_consts_t *c, int ahe
     /* An alignment is of what is known where it stands; a count may
      * be of a symbol set further down. */
     if (i >= d->arg_count || d->args[i] == NULL || arg_is_empty(d, i) ||
-        as_expr_eval_string(d->args[i], NULL, NULL, &v) == AS_EXPR_EVAL_OK ||
-        (ahead ? as_expr_eval_string(d->args[i], set_lookup, c, &v)
-               : as_expr_eval_string(d->args[i], struct_lookup, &c->now, &v)) != AS_EXPR_EVAL_OK) {
+        as_expr_eval_string(d->args[i], NULL, NULL, &v) == AS_EXPR_EVAL_OK) {
         return 0;
+    }
+    if ((ahead ? as_expr_eval_string(d->args[i], set_lookup, c, &v)
+               : as_expr_eval_string(d->args[i], struct_lookup, &c->now, &v)) != AS_EXPR_EVAL_OK) {
+        return arg_put_set_values(d, i, c);
     }
     snprintf(text, sizeof(text), "%lld", v);
     copy = lower_strdup(text);
