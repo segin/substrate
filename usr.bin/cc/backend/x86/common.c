@@ -202,6 +202,58 @@ static int asm_constraint_is_immediate(const char *c) {
     return 0;
 }
 
+/**
+ * Whether constant @p v may be an immediate under constraint @p c: some
+ * letter of it takes v, as gcc reads x86 constraints -- i and n any
+ * constant, e a signed and Z an unsigned 32-bit one, I 0..31, J 0..63,
+ * K -128..127, L 0xff or 0xffff, M 0..3, N 0..255 (an in/out port), O
+ * 0..127.  A constant no letter takes goes to the constraint's register or
+ * memory alternative instead: Linux's `bts %1, %0` with "Ir" (nr) and
+ * `outw %w0, %w1` with "Nd" (port) need %ecx or %dx for a value out of
+ * range, and the assembler refuses `btsl $4294967295` or `outw $0x3f8`.
+ */
+static int asm_immediate_fits(const char *c, long long v) {
+    size_t i;
+
+    for (i = 0; c != NULL && c[i] != '\0'; ++i) {
+        switch (c[i]) {
+        case 'i':
+        case 'n':
+            return 1;
+        case 'e':
+            if (v >= INT32_MIN && v <= INT32_MAX) return 1;
+            break;
+        case 'Z':
+            if (v >= 0 && v <= (long long)UINT32_MAX) return 1;
+            break;
+        case 'I':
+            if (v >= 0 && v <= 31) return 1;
+            break;
+        case 'J':
+            if (v >= 0 && v <= 63) return 1;
+            break;
+        case 'K':
+            if (v >= -128 && v <= 127) return 1;
+            break;
+        case 'L':
+            if (v == 0xff || v == 0xffff) return 1;
+            break;
+        case 'M':
+            if (v >= 0 && v <= 3) return 1;
+            break;
+        case 'N':
+            if (v >= 0 && v <= 255) return 1;
+            break;
+        case 'O':
+            if (v >= 0 && v <= 127) return 1;
+            break;
+        default:
+            break;
+        }
+    }
+    return 0;
+}
+
 static const char *asm_constraint_fixed_reg64(const char *c) {
     if (c == NULL) {
         return NULL;
@@ -2903,7 +2955,10 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             long imm = 0;
             char ibuf[64];
             int sym_ok = -1;
-            if (find_const_i64_for_value(f, v, instr_index, &imm) == 0) {
+            int have_const = find_const_i64_for_value(f, v, instr_index, &imm) == 0;
+            int alternative = cc_asm_constraint_allows_gpr(c) || cc_asm_constraint_allows_memory(c);
+
+            if (have_const && (asm_immediate_fits(c, imm) || !alternative)) {
                 snprintf(ibuf, sizeof(ibuf), "$%ld", imm);
                 op_text[slot] = dup_cstr(ibuf);
                 if (op_text[slot] == NULL) {
@@ -2911,7 +2966,17 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 }
                 continue;
             }
-            sym_ok = resolve_asm_immediate_symbol(f, v, instr_index, fn_index, 0, ibuf, sizeof(ibuf));
+            /*
+             * A constant out of the immediate's range, or a value that is no
+             * constant at all, takes the register or memory alternative below
+             * when there is one.  resolve_asm_immediate_symbol() guesses a
+             * value through loads and stores -- fit only for a constraint
+             * that leaves no choice: it made set_bit()'s "Ir" (nr), a
+             * parameter, the constant of an unrelated earlier store.
+             */
+            sym_ok = have_const || alternative
+                         ? -1
+                         : resolve_asm_immediate_symbol(f, v, instr_index, fn_index, 0, ibuf, sizeof(ibuf));
             if (sym_ok == 0) {
                 op_text[slot] = dup_cstr(ibuf);
                 if (op_text[slot] == NULL) {
