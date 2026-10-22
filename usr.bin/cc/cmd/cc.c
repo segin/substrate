@@ -88,6 +88,7 @@ typedef struct {
   int implicit_funcdecl_override;
   int i386_arch_explicit;
   cc_target_t target;
+  int code16; /* -m16 */
 
   const char *std;
   const char *opt_level;
@@ -146,6 +147,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   /* parse_args has already rejected an unknown -std= */
   cc_lang_from_std(o->std, &out->lang);
   out->target = o->target;
+  out->code16 = o->code16;
   out->opt_level = opt_level_num(o);
   out->debug = o->debug;
   out->pic = o->pic || o->shared;
@@ -1121,9 +1123,10 @@ static int opt_rdynamic(cc_opts_t *o, const driver_opt_t *d, const char *as, con
  * @return 0
  */
 static int opt_target(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
-  (void)as;
   (void)val;
   o->target = (cc_target_t)d->n;
+  /* -m16 is -m32 with the output assembled for real mode (.code16gcc), as gcc has it */
+  o->code16 = as != NULL && strcmp(as, "-m16") == 0;
   if (o->target == CC_TARGET_I386 && !o->i386_arch_explicit) {
     o->i386_isa_level = 6;
     o->i386_has_sse = 0;
@@ -1243,7 +1246,7 @@ static const driver_opt_t options[] = {
     {"-fno-gnu89-inline", OPT_FLAG, FWD_C, opt_gnu89_inline, 0, 0},
 
     /* the machine */
-    {"-m32", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_I386},
+    {"-m32 -m16", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_I386},
     {"-m64", OPT_FLAG, FWD_C | FWD_CPP, opt_target, 0, CC_TARGET_X86_64},
     {"-march -mcpu -mtune", OPT_VALUE, FWD_C | FWD_CPP, opt_arch, 0, 0},
     {"-msse -mno-sse", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_sse), (int)F(i386_supports_sse)},
@@ -2065,7 +2068,7 @@ static int maybe_print_info_and_exit(int argc, char **argv) {
   int has_other = 0;
 
   for (i = 1; i < argc; ++i) {
-    if (strcmp(argv[i], "-m32") == 0) {
+    if (strcmp(argv[i], "-m32") == 0 || strcmp(argv[i], "-m16") == 0) {
       target = CC_TARGET_I386;
     } else if (strcmp(argv[i], "-m64") == 0) {
       target = CC_TARGET_X86_64;

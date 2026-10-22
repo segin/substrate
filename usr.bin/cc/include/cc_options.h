@@ -22,6 +22,7 @@ typedef enum {
 typedef struct {
     cc_lang_t lang;          /**< -std= */
     cc_target_t target;      /**< -m32 / -m64 */
+    int code16;              /**< -m16: i386 code assembled under .code16gcc, for real mode (gcc) */
     int opt_level;           /**< -O0 .. -O3 */
     int debug;               /**< -g */
     int pic;                 /**< -fPIC, -fpic or -shared */

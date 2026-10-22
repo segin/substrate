@@ -923,6 +923,7 @@ test:
 	$(CC_TMP)/cc_native_x86_64_large_struct_byval
 	sh run_pp_postc99.sh
 	sh run_pp_c99_baseline.sh
+	sh run_m16.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh

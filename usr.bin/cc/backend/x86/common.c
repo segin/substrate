@@ -3487,7 +3487,12 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
     emit_compiler_stamp(fp);
 
     if (tgt->id == CC_TARGET_I386) {
-        fprintf(fp, ".code32\n");
+        /*
+         * -m16: the same 32-bit code, assembled with operand- and
+         * address-size prefixes to run in real mode -- Linux's realmode
+         * trampoline and boot setup are built so.
+         */
+        fprintf(fp, cc_options_current() != NULL && cc_options_current()->code16 ? ".code16gcc\n" : ".code32\n");
         if (emit_i386(fp, m, src_path, emit_debug, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "i386 emission failed");

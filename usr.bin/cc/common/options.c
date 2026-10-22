@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 static cc_options_t g_current = {
-    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, CC_FPMATH_AUTO, NULL, 0,
+    {"gnu17", 2017, 1}, CC_TARGET_X86_64, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 6, 1, 1, CC_FPMATH_AUTO, NULL, 0,
 };
 
 /**
@@ -18,6 +18,7 @@ static cc_options_t g_current = {
 void cc_options_init(cc_options_t *o) {
     cc_lang_from_std(NULL, &o->lang);
     o->target = CC_TARGET_X86_64;
+    o->code16 = 0;
     o->opt_level = 0;
     o->debug = 0;
     o->pic = 0;
