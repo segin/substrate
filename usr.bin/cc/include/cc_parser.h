@@ -49,6 +49,7 @@ typedef struct {
     long value;              /**< its value */
     uint64_t bits;           /**< its value's bits, as wide as its type */
     const cc_ctype_t *ctype; /**< the type of its value */
+    int depth;               /**< the scope depth it was declared at: an enumerator has block scope */
 } enum_const_entry_t;
 
 /** An enumeration tag. */

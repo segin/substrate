@@ -431,11 +431,18 @@ static int typedef_push(parser_t *p, const char *name, const cc_ctype_t *ctype, 
     return 0;
 }
 
+static void enum_const_pop_to_depth(parser_t *p, int depth);
+
+/**
+ * Close the scopes deeper than @p depth for the names the parser itself
+ * resolves: typedef names, and enumerators, which share their name space.
+ */
 static void typedef_pop_to_depth(parser_t *p, int depth) {
     while (p->typedef_count > 0 && p->typedefs[p->typedef_count - 1].depth > depth) {
         free(p->typedefs[p->typedef_count - 1].name);
         p->typedef_count--;
     }
+    enum_const_pop_to_depth(p, depth);
 }
 
 static void parser_free_typedefs(parser_t *p) {
@@ -469,18 +476,33 @@ static int enum_const_find_visible_n(const parser_t *p, const char *name, size_t
     size_t i = p->enum_const_count;
     while (i > 0) {
         i--;
-        if (strlen(p->enum_consts[i].name) == len && strncmp(p->enum_consts[i].name, name, len) == 0) {
+        if (strlen(p->enum_consts[i].name) == len && strncmp(p->enum_consts[i].name, name, len) == 0 &&
+            p->enum_consts[i].depth <= p->scope_depth) {
             return (int)i;
         }
     }
     return -1;
 }
 
+/**
+ * Declare an enumerator in the current scope.  An enumerator has block
+ * scope (C11 6.2.1p4): two functions may each declare `st_wordstart` with
+ * its own value, and a block's enumerators hide outer ones of the same
+ * name.  A second declaration in the same scope -- the parser reads some
+ * declarations twice while looking ahead -- updates the first.
+ *
+ * @return the enumerator's index, for its value to be set, or -1 when out of memory
+ */
 static int enum_const_push(parser_t *p, const char *name, size_t len, long value) {
     enum_const_entry_t *next;
     char *dup;
-    if (enum_const_find_visible_n(p, name, len) >= 0) {
-        return 0;
+    int existing = enum_const_find_visible_n(p, name, len);
+
+    if (existing >= 0 && p->enum_consts[existing].depth == p->scope_depth) {
+        p->enum_consts[existing].value = value;
+        p->enum_consts[existing].bits = (uint64_t)value;
+        p->enum_consts[existing].ctype = cc_ct_basic(CC_CT_INT);
+        return existing;
     }
     if (p->enum_const_count == p->enum_const_cap) {
         size_t ncap = p->enum_const_cap == 0 ? 32 : p->enum_const_cap * 2;
@@ -499,8 +521,16 @@ static int enum_const_push(parser_t *p, const char *name, size_t len, long value
     p->enum_consts[p->enum_const_count].value = value;
     p->enum_consts[p->enum_const_count].bits = (uint64_t)value;
     p->enum_consts[p->enum_const_count].ctype = cc_ct_basic(CC_CT_INT);
-    p->enum_const_count++;
-    return 0;
+    p->enum_consts[p->enum_const_count].depth = p->scope_depth;
+    return (int)p->enum_const_count++;
+}
+
+/** Forget the enumerators declared in scopes deeper than @p depth, which have closed. */
+static void enum_const_pop_to_depth(parser_t *p, int depth) {
+    while (p->enum_const_count > 0 && p->enum_consts[p->enum_const_count - 1].depth > depth) {
+        free(p->enum_consts[p->enum_const_count - 1].name);
+        p->enum_const_count--;
+    }
 }
 
 static void parser_free_enum_consts(parser_t *p) {
@@ -2968,7 +2998,8 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 }
                 {
                     long enum_cur = enum_next;
-                    if (enum_const_push(p, p->tok.start, p->tok.len, enum_cur) != 0) {
+                    int enum_idx = enum_const_push(p, p->tok.start, p->tok.len, enum_cur);
+                    if (enum_idx < 0) {
                         return -1;
                     }
                     if (next_tok(p) != 0) {
@@ -3016,9 +3047,9 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         }
                         enum_cur = v;
                         enum_next = v;
-                        p->enum_consts[p->enum_const_count - 1].value = enum_next;
-                        p->enum_consts[p->enum_const_count - 1].bits = ev.bits;
-                        p->enum_consts[p->enum_const_count - 1].ctype = ev.type;
+                        p->enum_consts[enum_idx].value = enum_next;
+                        p->enum_consts[enum_idx].bits = ev.bits;
+                        p->enum_consts[enum_idx].ctype = ev.type;
                     }
                     {
                         decl_attrs_t enum_attrs;
@@ -6820,8 +6851,17 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             return e;
         }
-        if (var_idx < 0) {
-            eidx = enum_const_find_visible_n(p, p->tok.start, p->tok.len);
+        /*
+         * Variables and enumerators share one name space; when both are
+         * visible, the one declared in the inner scope hides the other.
+         */
+        eidx = enum_const_find_visible_n(p, p->tok.start, p->tok.len);
+        if (eidx >= 0 && var_idx >= 0) {
+            if (p->enum_consts[eidx].depth > p->vars[var_idx].depth) {
+                var_idx = -1;
+            } else {
+                eidx = -1;
+            }
         }
         if (is_typedef_name && var_idx < 0 && eidx < 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected expression");
