@@ -4,6 +4,7 @@ void free(void *p);
 int main(void) {
     int *p = (int *)malloc(sizeof(int) * 4);
     int sum;
+    int one = 1; /* a variable index: a constant one's scaling is folded at compile time */
     if (p == 0) {
         return 90;
     }
@@ -16,7 +17,7 @@ int main(void) {
         return 1;
     }
 
-    sum = p[0] + 1[p] + p[2];
+    sum = p[0] + one[p] + p[2];
     free(p);
     if (sum != 21) {
         return 2;

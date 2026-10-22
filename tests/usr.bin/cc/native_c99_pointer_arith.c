@@ -8,6 +8,11 @@ static int sum_tail(int *p) {
     return *q + *s;
 }
 
+/* an index that is a variable: p + 1 scales by a constant, folded at compile time */
+static int at(int *p, int i) {
+    return *(p + i);
+}
+
 int main(void) {
     int *p = malloc((unsigned long long)(sizeof(int) * 3));
     if (p == 0) {
@@ -29,6 +34,10 @@ int main(void) {
     if (sum_tail(p) != 16) {
         free(p);
         return 4;
+    }
+    if (at(p, 2) != 9) {
+        free(p);
+        return 5;
     }
 
     free(p);
