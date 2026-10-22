@@ -1176,6 +1176,38 @@ static int is_protected_output_section_name(const char *name) {
     return strcmp(name, ".shstrtab") == 0 || strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0;
 }
 
+/**
+ * Whether the script's /DISCARD/ takes sections named @p name, which the
+ * linker would otherwise make itself: Linux's realmode script discards
+ * `*(.note*)`, and a .note.substrate_ld put between its sections moved
+ * .data a page on.
+ */
+int script_discards_section(const ld_ctx_t *ctx, const char *name) {
+    const lds_script_t *sc = ctx != NULL ? ctx->script : NULL;
+    size_t i, k, j;
+
+    if (sc == NULL || !sc->has_sections || name == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sc->stmts.count; ++i) {
+        const lds_stmt_t *os = &sc->stmts.items[i];
+
+        if (os->kind != LDS_ST_OUTSEC || !os->discard) {
+            continue;
+        }
+        for (k = 0; k < os->body.count; ++k) {
+            const lds_stmt_t *in = &os->body.items[k];
+
+            for (j = 0; in->kind == LDS_ST_INPUT && j < in->patterns.count; ++j) {
+                if (script_section_pattern_match(in->patterns.items[j], name)) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static int apply_script_discard_pattern(elfobj_t *obj, const char *pattern) {
     size_t i;
 
@@ -2601,10 +2633,7 @@ static int script_body_moves_dot(const lds_stmt_t *os) {
 
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out) {
     lds_script_t *sc = ctx->script;
-    elf_section_t **want = NULL;
-    size_t *slot = NULL;
-    size_t n = 0, i, k, j;
-    int rc = -1;
+    size_t i, k, j;
 
     if (sc == NULL || !sc->has_sections) {
         return 0;
@@ -2645,13 +2674,28 @@ int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out) {
             return -1;
         }
     }
+    return script_order_sections(ctx, out);
+}
 
-    /*
-     * The script's order.  The sections it names change places among
-     * themselves: the places they hold stay the ones the default policy
-     * gave to them as a set, so that what the script does not mention
-     * stays where it was.
-     */
+/**
+ * Put the sections the script names in its order.  They change places
+ * among themselves: the places they hold stay the ones the default
+ * policy gave to them as a set, so that what the script does not mention
+ * stays where it was.  Run again after each default reordering, which
+ * would otherwise put a script's `.header` back after `.text`.
+ *
+ * @return 0, or -1 on error
+ */
+int script_order_sections(ld_ctx_t *ctx, elfobj_t *out) {
+    lds_script_t *sc = ctx->script;
+    elf_section_t **want = NULL;
+    size_t *slot = NULL;
+    size_t n = 0, i, k, j;
+    int rc = -1;
+
+    if (sc == NULL || !sc->has_sections) {
+        return 0;
+    }
     want = (elf_section_t **)calloc(sc->stmts.count + 1, sizeof(*want));
     slot = (size_t *)calloc(sc->stmts.count + 1, sizeof(*slot));
     if (want == NULL || slot == NULL) {

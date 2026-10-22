@@ -444,6 +444,8 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     size_t i;
     int execstack_mode;
     int applied;
+    int script_layout;
+    int run_class = -1;
 
     if (obj == NULL || ctx == NULL) {
         return -1;
@@ -452,8 +454,15 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     if (applied != 0) {
         return applied < 0 ? -1 : 0;
     }
+    script_layout = ctx->script != NULL && ctx->script->has_sections;
 
-    if (elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
+    /*
+     * The program headers are a segment of their own for a dynamic linker
+     * to find.  A script's static image (Linux's realmode blob, linked at
+     * 0) need not load them, and a PT_PHDR no PT_LOAD covers is no ELF.
+     */
+    if (!(script_layout && (ctx->opt.interp_path == NULL || ctx->opt.interp_path[0] == '\0')) &&
+        elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
         return -1;
     }
     if (ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0') {
@@ -477,7 +486,22 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         type = elf_section_type(sec);
         is_alloc = (flags & SHF_ALLOC) != 0;
 
-        if (is_alloc && script_places_section(ctx, name)) {
+        if (is_alloc && script_layout) {
+            /*
+             * The script's order is the layout's: a segment is a run of
+             * sections of one kind, and a section of another kind starts
+             * the next, as GNU ld makes them.  Gathering every read-only
+             * section into one segment made it span the code between them.
+             */
+            int cls = (flags & SHF_EXECINSTR) != 0 ? 1 : (flags & SHF_WRITE) != 0 ? 2 : 0;
+
+            if (cls != run_class) {
+                load_rx = NULL;
+                load_rw = NULL;
+                load_ro = NULL;
+                run_class = cls;
+            }
+        } else if (is_alloc && script_places_section(ctx, name)) {
             if ((flags & SHF_EXECINSTR) != 0) {
                 load_rx = NULL;
             } else if ((flags & SHF_WRITE) != 0) {

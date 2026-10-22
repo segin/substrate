@@ -743,6 +743,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     size_t verdef_size = 0;
     size_t dynstr_size = 0;
     int has_dynstr_section = 0;
+    int has_dynamic_section = 0;
     int has_gnu_versym = 0;
     int has_gnu_verdef = 0;
     size_t symtab_size = 0;
@@ -829,6 +830,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.group_comdat = s->comdat;
         if (strcmp(name, ".dynstr") == 0) {
             has_dynstr_section = 1;
+        } else if (strcmp(name, ".dynamic") == 0) {
+            has_dynamic_section = 1;
         } else if (strcmp(name, ".gnu.version") == 0) {
             has_gnu_versym = 1;
         } else if (strcmp(name, ".gnu.version_d") == 0) {
@@ -1070,7 +1073,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         versym_data = NULL;
     }
 
-    if ((obj->type == ET_EXEC || obj->type == ET_DYN) && !has_dynstr_section) {
+    /*
+     * A shared object's dynamic string table is made up for it; an
+     * executable's only when it has a .dynamic.  A static one got an
+     * allocated .dynstr nothing placed, at address 0, where it overlapped
+     * the first section of an image linked at 0 (Linux's realmode blob),
+     * and the output could not be read back.
+     */
+    if ((obj->type == ET_DYN || (obj->type == ET_EXEC && has_dynamic_section)) && !has_dynstr_section) {
         out_sec_t dynst;
         dynstr_data = build_dynstr(obj, &dynstr_size);
         if (dynstr_data == NULL && dynstr_size != 0) {
@@ -1338,7 +1348,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             secs[i].offset = 0;
             continue;
         }
-        if ((secs[i].flags & SHF_ALLOC) != 0 && secs[i].addr != 0) {
+        /* in a linked image (one with program headers) address 0 is an address too: Linux's realmode
+         * blob is linked at 0 */
+        if ((secs[i].flags & SHF_ALLOC) != 0 && (secs[i].addr != 0 || phnum != 0)) {
             /*
              * A loaded section has its address already, and where it goes
              * in the file follows from that: as far past the section
@@ -1587,12 +1599,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                         out_memsz = page_end - lo_addr;
                     }
                 }
-                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0) {
+                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0 && out_vaddr >= out_off) {
+                    /*
+                     * The headers are taken into the segment where they fit
+                     * below its first address; where they do not -- an image
+                     * linked at 0, as Linux's realmode blob is -- the segment
+                     * starts at its own page, as GNU ld leaves it.
+                     */
                     uint64_t delta = out_off;
-                    if (out_vaddr < delta) {
-                        err = ELF_ERR_BOUNDS;
-                        goto done;
-                    }
                     out_off = 0;
                     out_vaddr -= delta;
                     if (!u64_add_checked(out_filesz, delta, &out_filesz) ||

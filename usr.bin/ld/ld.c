@@ -439,7 +439,11 @@ static int phase_script_symbols(ld_link_t *l) {
 }
 
 static int phase_order_sections(ld_link_t *l) {
-    return reorder_sections_default_policy(l->out);
+    /* the default order, then a script's over it: it runs after the script's sections are placed too */
+    if (reorder_sections_default_policy(l->out) != 0) {
+        return -1;
+    }
+    return script_order_sections(l->ctx, l->out);
 }
 
 static int phase_script_sections(ld_link_t *l) {
@@ -451,6 +455,10 @@ static int phase_icf(ld_link_t *l) {
 }
 
 static int phase_ld_note(ld_link_t *l) {
+    /* not where the script throws notes away: it would land among the script's sections */
+    if (script_discards_section(l->ctx, ".note.substrate_ld")) {
+        return 0;
+    }
     return ensure_substrate_ld_note(l->out);
 }
 

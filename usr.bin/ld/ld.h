@@ -654,6 +654,8 @@ const char *script_output_name(const char *section, const char *file, void *user
 int script_keeps_input(const lds_script_t *sc, const char *section, const char *file);
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
+int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);
+int script_discards_section(const ld_ctx_t *ctx, const char *name);
 int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out);
 
 /* ld_plugin.c */

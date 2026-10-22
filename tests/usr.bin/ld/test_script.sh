@@ -156,6 +156,25 @@ else
     echo "FAIL a call across the address space: $(head -1 "$work/err")"; fail=1
 fi
 
+# An image linked at 0, read-only data before the code, as Linux's realmode
+# blob is: the script's order and addresses hold, though the default
+# policy puts code first; no section the linker makes itself (.dynstr, its
+# own note, which the script's /DISCARD/ of .note* covers) lands among
+# them; no PT_PHDR that nothing loads; and the segments are runs of one
+# kind of section, none spanning another.  The output was refused when
+# read back, or not written at all.
+ok  at_zero "$std SECTIONS { . = 0; .rodata : { r0 = .; *(.rodata*) } . = ALIGN(4096); tstart = .;
+                .text : { *(.text*) } . = ALIGN(4096); .data : { *(.data*) } .bss : { *(.bss*) *(COMMON) }
+                /DISCARD/ : { *(.note*) } }
+             ASSERT(r0 == 0 && tstart == 0x1000 && ADDR(.text) == 0x1000 && ADDR(.data) == 0x2000, \"placed\")"
+if [ -f "$work/at_zero.out" ]; then
+    is  at_zero_sections "$(readelf -SW "$work/at_zero.out" | grep -cE ' \.(dynstr|note\.substrate_ld) ')" 0
+    is  at_zero_phdr "$(readelf -lW "$work/at_zero.out" 2>&1 | grep -cE '^ *PHDR|Error')" 0
+    is  at_zero_loads "$(readelf -lW "$work/at_zero.out" | awk '$1 == "LOAD" { print $3, $6 }' |
+        awk '{ lo = strtonum($1); hi = lo + strtonum($2); if (n && lo < last) bad = 1; last = hi; n++ }
+             END { print bad ? "overlap" : n }')" 3
+fi
+
 # INCLUDE: where a statement may stand, its statements standing there.
 mkdir -p "$work/inc"
 echo '*(.text .text.*)' > "$work/inc/body.lds"
