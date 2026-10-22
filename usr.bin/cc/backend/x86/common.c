@@ -2109,7 +2109,12 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
         return 0;
     case CC_SSA_ASM:
         for (i = 0; i < in->asm_in_count; ++i) {
-            if (in->asm_in_values != NULL && in->asm_in_values[i] == value) {
+            int v = in->asm_in_values != NULL ? in->asm_in_values[i] : -1;
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            }
+            if (v >= 0 && v == value) {
                 return 1;
             }
         }
@@ -2940,6 +2945,27 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         int tied = cc_asm_constraint_matched_operand(c);
         if (in->asm_in_names != NULL && in->asm_in_names[i] != NULL) {
             op_names[slot] = in->asm_in_names[i];
+        }
+        if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+            /* a memory input given by its address (the object itself, as gcc passes it): in a register */
+            const char *areg = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
+                                            fixed_mask | clobber_mask | out_mask | out_live_mask | in_mask);
+            char abuf[32];
+
+            if (areg == NULL) {
+                goto impossible;
+            }
+            in_mask |= x86_gpr_bit(areg);
+            loads[load_count].reg = areg;
+            loads[load_count].value = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            loads[load_count].is_address = 1;
+            load_count++;
+            snprintf(abuf, sizeof(abuf), "(%s)", areg);
+            op_text[slot] = dup_cstr(abuf);
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            continue;
         }
         if (tied >= 0) {
             if ((size_t)tied >= out_n || op_text[tied] == NULL) {

@@ -486,6 +486,29 @@ static int asm_constraint_only_register(const char *c) {
  * @param diag  receives the error
  * @return      0, or -1 if an input conflicts
  */
+/**
+ * Whether asm constraint @p c allows memory alone (`m`, `o`, `V`, with
+ * `=`, `+` or `&`): such an operand is an address, whatever its type --
+ * Linux's FDIV check hands doubles to fldl as "m".
+ */
+static int asm_constraint_is_memory_only(const char *c) {
+    int seen = 0;
+
+    if (c == NULL) {
+        return 0;
+    }
+    for (; *c != '\0'; ++c) {
+        if (*c == '=' || *c == '+' || *c == '&') {
+            continue;
+        }
+        if (*c != 'm' && *c != 'o' && *c != 'V') {
+            return 0;
+        }
+        seen = 1;
+    }
+    return seen;
+}
+
 static int asm_check_early_clobber_inputs(const cc_stmt_t *s, cc_diag_t *diag) {
     size_t i;
     size_t j;
@@ -6112,8 +6135,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->asm_outputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 1 ||
-                sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 2) {
+            if ((sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 1 ||
+                 sema_float_rank(sx_vtype(s->asm_outputs[i2].expr)) == 2) &&
+                !asm_constraint_is_memory_only(s->asm_outputs[i2].constraint)) {
                 sema_diag(diag, "floating asm outputs are not supported yet");
                 return -1;
             }
@@ -6131,8 +6155,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (check_expr(tu, s->asm_inputs[i2].expr, *vars, *var_count, depth, diag) != 0) {
                 return -1;
             }
-            if (sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 1 ||
-                sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 2) {
+            if ((sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 1 ||
+                 sema_float_rank(sx_vtype(s->asm_inputs[i2].expr)) == 2) &&
+                !asm_constraint_is_memory_only(s->asm_inputs[i2].constraint)) {
                 sema_diag(diag, "floating asm inputs are not supported yet");
                 return -1;
             }

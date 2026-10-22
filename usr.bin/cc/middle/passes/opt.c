@@ -732,8 +732,14 @@ static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
         }
     }
     for (i = 0; i < in->asm_in_count; ++i) {
-        if (in->asm_in_values[i] >= 0) {
-            uses[in->asm_in_values[i]]++;
+        int iv = in->asm_in_values[i];
+
+        if (CC_SSA_ASM_MEM_INDIRECT_P(iv)) {
+            /* a memory input by its address uses the address */
+            iv = CC_SSA_ASM_MEM_INDIRECT_DECODE(iv);
+        }
+        if (iv >= 0) {
+            uses[iv]++;
         }
     }
 }

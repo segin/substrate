@@ -10052,8 +10052,32 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
     for (i4 = 0; i4 < in.asm_in_count; ++i4) {
         const cc_asm_operand_t *op = &s->asm_inputs[i4];
         long in_sz = 0;
-        int av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
-        if (av < 0) {
+        int av;
+
+        if (op->expr != NULL && cc_asm_constraint_is_memory_only(op->constraint) &&
+            ct_value_kind(lower_value_ctype(op->expr)) == CC_VAL_F64) {
+            /*
+             * A floating object as a memory input is the object, by its
+             * address: its value is held as a double, so a copy of the
+             * value is no float in memory (fdivs would read half a double).
+             */
+            cc_expr_t addr_of;
+
+            memset(&addr_of, 0, sizeof(addr_of));
+            addr_of.kind = CC_EXPR_ADDR;
+            addr_of.lhs = (cc_expr_t *)op->expr;
+            addr_of.ctype = cc_ct_pointer(lower_value_ctype(op->expr));
+            addr_of.line = op->expr->line;
+            addr_of.col = op->expr->col;
+            addr_of.generic_selected = -1;
+            av = lower_addr_expr(tu, sf, ctx, *vars, *var_count, depth, &addr_of, diag);
+            if (av >= 0) {
+                av = CC_SSA_ASM_MEM_INDIRECT_ENCODE(av);
+            }
+        } else {
+            av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
+        }
+        if (av == -1) {
             free_asm_instr_fields(&in);
             free(asm_out_store_ptr);
             free(asm_out_store_size);
