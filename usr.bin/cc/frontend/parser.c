@@ -5537,6 +5537,10 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     memset(&inner, 0, sizeof(inner));
     memset(&ptrs, 0, sizeof(ptrs));
     memset(&suffix, 0, sizeof(suffix));
+    /* GNU attributes may open a declarator, before its `*`s: `(__attribute__((regparm(0))) *fn)(void)` */
+    if (skip_decl_gnu_suffix(p, NULL) != 0) {
+        goto out;
+    }
     while (is_ptr_declarator_tok(p->tok.kind)) {
         decl_op_t op;
 
