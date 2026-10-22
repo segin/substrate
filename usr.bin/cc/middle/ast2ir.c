@@ -2058,11 +2058,20 @@ static int lower_collect_hoisted_allocs(const cc_translation_unit_t *tu, cc_ssa_
 
     if (stmt_needs_hoisted_alloc(s) && lower_find_hoisted_alloc(ctx, s) < 0) {
         total_size = cc_ct_size(stmt_decl_ctype(s), tu);
-        if (total_size <= 0 && ct_record_id(stmt_decl_ctype(s)) >= 0) {
-            total_size = 1; /* an empty structure still has an address */
+        if (total_size == 0 || (total_size < 0 && ct_record_id(stmt_decl_ctype(s)) >= 0)) {
+            /*
+             * An object of size 0 -- an empty structure, a GNU zero-length
+             * array `char z[0]`, an array of empty structures -- still has
+             * an address; give it a byte, as gcc does.  sizeof stays 0.
+             */
+            total_size = 1;
         }
         if (total_size <= 0) {
-            set_diag(diag, "unsupported hoisted local array element type");
+            char msg[256];
+
+            snprintf(msg, sizeof(msg), "local '%s': its size is not known in lowering",
+                     s->decl_name != NULL ? s->decl_name : "?");
+            cc_diag_set(diag, "", s->line, s->col, msg);
             return -1;
         }
         value = cc_ir_stackalloc_aligned(sf, total_size, stmt_decl_align(tu, s), diag);
@@ -9382,7 +9391,8 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         if (arr_elems <= 0) {
             arr_elems = 1;
         }
-        if (total_size <= 0 || stmt_is_vla_decl(s)) {
+        /* size 0 (`char z[0]`, an array of empty structures) is fine: it has no elements to fill */
+        if (total_size < 0 || stmt_is_vla_decl(s)) {
             if (stmt_is_vla_decl(s)) {
                 vla_shape_t shape = {dct, &s->array_bounds, 0};
 
@@ -9410,6 +9420,9 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         }
         if (elem_size <= 0) {
             elem_size = cc_ct_size(elem_ct, tu);
+        }
+        if (elem_size <= 0 && total_size == 0) {
+            elem_size = 1; /* an array of empty structures: a stride nothing uses */
         }
         if (elem_size <= 0) {
             set_diag(diag, "unsupported local array element type in lowering");
