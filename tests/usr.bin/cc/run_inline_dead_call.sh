@@ -41,12 +41,15 @@ int frame(struct ksig *k) { if (is_ia32_frame(k)) return 1; undefined_x32_frame(
 unsigned long copy(unsigned long n) { if (movsl_is_ok(1, 2, n)) return n; undefined_slow_copy(n); return 0; }
 EOF
 
+# -Os is how Linux is built: gcc's named levels optimize, -Os as -O2
 for m in 32 64; do
-	"$CC_BIN" -m$m -O2 -c -o "$CC_TMP/dead_call.o" "$CC_TMP/dead_call.c"
-	if nm -u "$CC_TMP/dead_call.o" | grep -q 'undefined_'; then
-		echo "run_inline_dead_call: -m$m -O2 keeps a guarded call:"
-		nm -u "$CC_TMP/dead_call.o" | grep 'undefined_'
-		exit 1
-	fi
+	for o in O2 Os Oz Og; do
+		"$CC_BIN" -m$m -$o -c -o "$CC_TMP/dead_call.o" "$CC_TMP/dead_call.c"
+		if nm -u "$CC_TMP/dead_call.o" | grep -q 'undefined_'; then
+			echo "run_inline_dead_call: -m$m -$o keeps a guarded call:"
+			nm -u "$CC_TMP/dead_call.o" | grep 'undefined_'
+			exit 1
+		fi
+	done
 done
 echo "run_inline_dead_call: ok"

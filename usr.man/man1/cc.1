@@ -141,13 +141,26 @@ is not defined in C90 (as the standard has it), and is 199409L for
 .It Fl ansi
 The same as
 .Fl std Ns = Ns Ar c89 .
-.It Fl O0 , Fl O1 , Fl O2 , Fl O3 , Fl O
+.It Fl O0 , Fl O1 , Fl O2 , Fl O3 , Fl O , Fl Os , Fl Oz , Fl Og , Fl Ofast
 Optimization level.
 .Fl O
 alone is
 .Fl O1 ,
 as in
-.Xr gcc 1 .
+.Xr gcc 1 ,
+and so are its named levels:
+.Fl Os
+and
+.Fl Oz
+are
+.Fl O2 ,
+.Fl Og
+is
+.Fl O1
+and
+.Fl Ofast
+is
+.Fl O3 .
 Every level above 0 currently runs the same passes.
 From
 .Fl O1

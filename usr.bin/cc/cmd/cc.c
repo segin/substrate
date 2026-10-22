@@ -119,7 +119,10 @@ static const char *target_gcc_flag(cc_target_t target) {
 
 /**
  * The optimization level the command line asks for: 0 without -O, 1 for
- * a bare -O (as gcc takes it), else the digit after -O.
+ * a bare -O (as gcc takes it), else the digit after -O.  The named levels
+ * are gcc's: -Os and -Oz optimize as -O2 does but for size, -Og as -O1,
+ * -Ofast as -O3.  -Os was 0, and Linux, built -Os, was not optimized at
+ * all: none of its static inline helpers was inlined.
  *
  * @param o  the parsed command line
  * @return   0 to 3
@@ -130,6 +133,15 @@ static int opt_level_num(const cc_opts_t *o) {
   }
   if (o->opt_level[0] == '\0') {
     return 1;
+  }
+  if (strcmp(o->opt_level, "s") == 0 || strcmp(o->opt_level, "z") == 0) {
+    return 2;
+  }
+  if (strcmp(o->opt_level, "g") == 0) {
+    return 1;
+  }
+  if (strcmp(o->opt_level, "fast") == 0) {
+    return 3;
   }
   if (o->opt_level[0] < '0' || o->opt_level[0] > '3') {
     return 0;
