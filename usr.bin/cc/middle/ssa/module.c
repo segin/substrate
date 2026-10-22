@@ -33,5 +33,9 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
         cc_ssa_function_free(&m->funcs[i]);
     }
     free(m->funcs);
+    for (i = 0; i < m->toplevel_asm_count; ++i) {
+        free(m->toplevel_asm[i]);
+    }
+    free(m->toplevel_asm);
     memset(m, 0, sizeof(*m));
 }

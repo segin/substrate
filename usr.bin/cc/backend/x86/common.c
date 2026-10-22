@@ -1370,6 +1370,25 @@ void emit_text_section(FILE *fp, const char *section_name) {
     }
 }
 
+/**
+ * Write each file-scope `asm("...")` of @p m as it was written, in source order, and go back to
+ * .text after them: whatever section one of them leaves current, the code that follows is not in it.
+ *
+ * @param fp the assembly output
+ * @param m  the module
+ */
+static void emit_toplevel_asm(FILE *fp, const cc_ssa_module_t *m) {
+    size_t i;
+
+    if (m->toplevel_asm_count == 0) {
+        return;
+    }
+    for (i = 0; i < m->toplevel_asm_count; ++i) {
+        fprintf(fp, "%s\n", m->toplevel_asm[i]);
+    }
+    fprintf(fp, "\t.text\n");
+}
+
 static void emit_compiler_stamp(FILE *fp) {
     /*
      * Keep the compiler stamp in a regular read-only section so assemblers
@@ -3646,6 +3665,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
          * trampoline and boot setup are built so.
          */
         fprintf(fp, cc_options_current() != NULL && cc_options_current()->code16 ? ".code16gcc\n" : ".code32\n");
+        emit_toplevel_asm(fp, m);
         if (emit_i386(fp, m, src_path, emit_debug, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "i386 emission failed");
@@ -3654,6 +3674,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
             return -1;
         }
     } else {
+        emit_toplevel_asm(fp, m);
         if (emit_x86_64(fp, m, src_path, emit_debug, pic, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64 emission failed");

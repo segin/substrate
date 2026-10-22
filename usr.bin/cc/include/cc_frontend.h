@@ -416,6 +416,8 @@ typedef struct cc_translation_unit {
     size_t global_count;
     cc_struct_def_t *structs;
     size_t struct_count;
+    char **toplevel_asm;       /**< each file-scope `asm("...")`'s text, in source order (owned) */
+    size_t toplevel_asm_count; /**< the number of them */
 } cc_translation_unit_t;
 
 /** A variable of the function a GNU nested function is defined in, visible where it is defined. */

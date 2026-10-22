@@ -131,7 +131,7 @@ Deployment: Shared between `cc` and standalone IR utilities (`ir-verifier`, `ir-
 
 Name: Instruction selection, register allocation, frame layout, and assembly emission
 
-Description: The backend converts legalized IR into GAS-style assembly for supported ABIs. `backend/x86/` writes the `.s` stream: `common.c` holds what both targets share (the frame's slots, the integer register cache, inline asm, sections, data and string literals) and `cc_emit_gas()`, which writes the module's data and hands each function to `x86_64.c` or `i386.c`, which select instructions from legal IR for their target (`include/cc_x86.h` declares what the three share); `backend/regalloc.c` chooses which register to spill and `backend/frame.c` checks and aligns frame sizes for it.
+Description: The backend converts legalized IR into GAS-style assembly for supported ABIs. `backend/x86/` writes the `.s` stream: `common.c` holds what both targets share (the frame's slots, the integer register cache, inline asm, sections, data and string literals) and `cc_emit_gas()`, which writes the module's data and its file-scope `asm("...")` text, as written and in source order, and hands each function to `x86_64.c` or `i386.c`, which select instructions from legal IR for their target (`include/cc_x86.h` declares what the three share); `backend/regalloc.c` chooses which register to spill and `backend/frame.c` checks and aligns frame sizes for it.
 
 Technologies: C, target-specific lowering for i386/x86_64, linear-scan style allocation, textual assembly emission
 

@@ -13763,6 +13763,23 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         diag->message[0] = '\0';
     }
 
+    if (tu->toplevel_asm_count > 0) {
+        out->toplevel_asm = (char **)calloc(tu->toplevel_asm_count, sizeof(*out->toplevel_asm));
+        if (out->toplevel_asm == NULL) {
+            set_diag(diag, "out of memory copying file-scope asm");
+            return -1;
+        }
+        for (i = 0; i < tu->toplevel_asm_count; ++i) {
+            out->toplevel_asm[i] = cc_strdup(tu->toplevel_asm[i]);
+            if (out->toplevel_asm[i] == NULL) {
+                set_diag(diag, "out of memory copying file-scope asm");
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            out->toplevel_asm_count = i + 1;
+        }
+    }
+
     if (tu->global_count > 0) {
         out->globals = (cc_ssa_global_t *)calloc(tu->global_count, sizeof(*out->globals));
         if (out->globals == NULL) {

@@ -10294,6 +10294,31 @@ void cc_tu_free(cc_translation_unit_t *tu) {
     free(tu->structs);
     tu->structs = NULL;
     tu->struct_count = 0;
+    for (i = 0; i < tu->toplevel_asm_count; ++i) {
+        free(tu->toplevel_asm[i]);
+    }
+    free(tu->toplevel_asm);
+    tu->toplevel_asm = NULL;
+    tu->toplevel_asm_count = 0;
+}
+
+/**
+ * Keep a file-scope `asm("...")`'s text in @p tu, after those before it.
+ *
+ * @param tu   the translation unit
+ * @param text the text, which @p tu now owns
+ * @return 0, or -1 out of memory (and @p text is freed)
+ */
+static int tu_add_toplevel_asm(cc_translation_unit_t *tu, char *text) {
+    char **grown = (char **)realloc(tu->toplevel_asm, (tu->toplevel_asm_count + 1) * sizeof(*grown));
+
+    if (grown == NULL) {
+        free(text);
+        return -1;
+    }
+    tu->toplevel_asm = grown;
+    tu->toplevel_asm[tu->toplevel_asm_count++] = text;
+    return 0;
 }
 
 static int can_parse_oldstyle_param_names(parser_t *p) {
@@ -11092,6 +11117,23 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 }
                 continue;
             }
+            /* the text goes to the assembler as written, as gcc passes it: a trampoline, a section of data */
+            if (asm_stmt.asm_template != NULL && tu_add_toplevel_asm(out, asm_stmt.asm_template) != 0) {
+                asm_stmt.asm_template = NULL;
+                free_stmt(&asm_stmt);
+                set_diag(diag, p.tok.line, p.tok.col, "out of memory keeping a file-scope asm");
+                cc_lexer_deinit(&p.lx);
+                parser_free_hoisted_funcs(&p);
+                parser_free_typedefs(&p);
+                parser_free_vars(&p);
+                parser_free_enum_consts(&p);
+                parser_free_enum_tags(&p);
+                parser_free_structs(&p);
+                free(buf);
+                cc_tu_free(out);
+                return -1;
+            }
+            asm_stmt.asm_template = NULL;
             free_stmt(&asm_stmt);
             continue;
         }

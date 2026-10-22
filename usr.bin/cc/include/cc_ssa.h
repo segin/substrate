@@ -277,6 +277,8 @@ typedef struct {
     cc_ssa_function_t *funcs;
     size_t func_count;
     int needs_exec_stack; /**< a trampoline is built on the stack (a nested function's address) */
+    char **toplevel_asm;       /**< each file-scope `asm("...")`'s text, emitted as written (owned) */
+    size_t toplevel_asm_count; /**< the number of them */
 } cc_ssa_module_t;
 
 /** The register class value @p v lives in: CC_VAL_F64 for a floating value, else CC_VAL_I64. */
