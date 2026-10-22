@@ -16,7 +16,8 @@ fi
 # and codegen/const64_fold.c: a division of constants is computed at
 # compile time, at -O0 too (Linux's KTIME_MAX / NSEC_PER_SEC)
 # and codegen/mul_overflow64.c: a 64-bit __builtin_mul_overflow divides nothing
-for t in div64_pow2 const64_fold mul_overflow64; do
+# and codegen/div64_narrow.c: a zero-extended 32-bit value divided by a constant
+for t in div64_pow2 const64_fold mul_overflow64 div64_narrow; do
 	for o in O0 O2; do
 		"$CC_BIN" -m32 -$o -S -o "$CC_TMP/$t.s" "$ROOT/tests/usr.bin/cc/codegen/$t.c"
 		if grep -Eq '__u?(div|mod)di3' "$CC_TMP/$t.s"; then

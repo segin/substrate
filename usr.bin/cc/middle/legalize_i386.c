@@ -41,7 +41,83 @@ typedef struct {
     cc_ssa_instr_t *out;  /**< the instructions written so far */
     size_t count;         /**< how many */
     size_t cap;           /**< room for */
+    /*
+     * What the function's instructions said before the rewrite, which frees (and zeroes) each one it
+     * splits; for the values it had then.
+     */
+    int nvalues;            /**< the values it had */
+    unsigned char *is_const; /**< per value: defined once, by an integer CONST */
+    long long *const_val;   /**< per value: that constant */
+    unsigned char *hi_zero; /**< per value: a 64-bit value whose high word is 0 (lz_analyze()) */
 } lz_t;
+
+/**
+ * Note, before anything is rewritten, each value defined once by an integer constant, and each whose high
+ * word is known 0: such a constant, an AND with one, or a move of such a value.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int lz_analyze(lz_t *z) {
+    const cc_ssa_function_t *f = z->f;
+    size_t n = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    int *defs = (int *)calloc(n, sizeof(*defs));
+    size_t i;
+    int round;
+
+    z->nvalues = f->value_count;
+    z->is_const = (unsigned char *)calloc(n, 1);
+    z->const_val = (long long *)calloc(n, sizeof(*z->const_val));
+    z->hi_zero = (unsigned char *)calloc(n, 1);
+    if (defs == NULL || z->is_const == NULL || z->const_val == NULL || z->hi_zero == NULL) {
+        free(defs);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        int d = f->instrs[i].dst;
+
+        if (d >= 0 && d < f->value_count) {
+            defs[d]++;
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int d = in->dst;
+
+        if (in->op == CC_SSA_CONST && d >= 0 && d < f->value_count && defs[d] == 1 &&
+            cc_ssa_value_class(f, d) == CC_VAL_I64) {
+            z->is_const[d] = 1;
+            z->const_val[d] = in->imm;
+            z->hi_zero[d] = ((unsigned long long)in->imm >> 32) == 0;
+        }
+    }
+    for (round = 0; round < 4; ++round) {
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+
+            if (d < 0 || d >= f->value_count || defs[d] != 1 || z->hi_zero[d]) {
+                continue;
+            }
+            if (in->op == CC_SSA_MOV && in->lhs >= 0 && in->lhs < f->value_count && z->hi_zero[in->lhs]) {
+                z->hi_zero[d] = 1;
+            } else if (in->op == CC_SSA_AND && ((in->lhs >= 0 && in->lhs < f->value_count && z->hi_zero[in->lhs]) ||
+                                                (in->rhs >= 0 && in->rhs < f->value_count && z->hi_zero[in->rhs]))) {
+                z->hi_zero[d] = 1;
+            }
+        }
+    }
+    free(defs);
+    return 0;
+}
+
+static void lz_analysis_free(lz_t *z) {
+    free(z->is_const);
+    free(z->const_val);
+    free(z->hi_zero);
+    z->is_const = NULL;
+    z->const_val = NULL;
+    z->hi_zero = NULL;
+}
 
 /**
  * Append @p in to the new list, which takes ownership of what it points
@@ -440,29 +516,16 @@ static int split_cmp(lz_t *z, const cc_ssa_instr_t *in, const words_t *a, const 
 static int split_one(lz_t *z, const cc_ssa_instr_t *in);
 
 /**
- * The constant value @p v always holds: the immediate of its one definition, a CONST.
+ * The constant value @p v always holds, as the function said before the rewrite (lz_analyze()): the
+ * immediate of its one definition, a CONST.
  *
- * @param f    the function, its instructions as they were before this pass
- * @param v    the value
- * @param out  receives the constant
- * @return 1 if @p v is such a constant, else 0
+ * @return 1 if @p v is such a constant (*@p out), else 0
  */
-static int value_single_const(const cc_ssa_function_t *f, int v, long long *out) {
-    const cc_ssa_instr_t *def = NULL;
-    size_t i;
-
-    for (i = 0; i < f->instr_count; ++i) {
-        if (f->instrs[i].dst == v) {
-            if (def != NULL) {
-                return 0;
-            }
-            def = &f->instrs[i];
-        }
-    }
-    if (def == NULL || def->op != CC_SSA_CONST) {
+static int value_single_const(const lz_t *z, int v, long long *out) {
+    if (v < 0 || v >= z->nvalues || z->is_const == NULL || !z->is_const[v]) {
         return 0;
     }
-    *out = def->imm;
+    *out = z->const_val[v];
     return 1;
 }
 
@@ -508,7 +571,7 @@ static int split_div_pow2(lz_t *z, const cc_ssa_instr_t *div, int *done) {
     *done = 0;
     if (div->rhs < 0) {
         d = div->imm;
-    } else if (!value_single_const(z->f, div->rhs, &d)) {
+    } else if (!value_single_const(z, div->rhs, &d)) {
         return 0;
     }
     ud = (unsigned long long)d;
@@ -549,6 +612,46 @@ static int split_div_pow2(lz_t *z, const cc_ssa_instr_t *div, int *done) {
     return lz_shr64(z, div->dst, x, k, div->is_unsigned);
 }
 
+/** Whether 64-bit value @p v's high word is known 0 (lz_analyze()). */
+static int high_word_zero(const lz_t *z, int v) {
+    return v >= 0 && v < z->nvalues && z->hi_zero != NULL && z->hi_zero[v];
+}
+
+/**
+ * A 64-bit division of a value whose high word is 0 (a zero-extended 32-bit one) by a constant from 1 to
+ * 2^31 - 1: one 32-bit unsigned division, as gcc narrows it from what it knows of the value's range, and no
+ * call of libgcc, which Linux does not link (mm/backing-dev.c divides `(long long)bdi->min_ratio` by
+ * BDI_RATIO_SCALE).  Both operands are non-negative, so a signed division is the unsigned one.
+ *
+ * @param done  set to 1 when @p div was such a division and is rewritten, else 0
+ * @return 0, or -1 when out of memory
+ */
+static int split_div_narrow(lz_t *z, const cc_ssa_instr_t *div, int *done) {
+    long long d;
+    words_t a;
+    int q;
+    int zero;
+    int dv;
+
+    *done = 0;
+    if (div->rhs < 0) {
+        d = div->imm;
+    } else if (!value_single_const(z, div->rhs, &d)) {
+        return 0;
+    }
+    if (d <= 0 || d > 0x7fffffffLL || div->lhs < 0 || !is_wide(z->f, div->lhs) || !high_word_zero(z, div->lhs)) {
+        return 0;
+    }
+    if (lz_split(z, div->lhs, &a) != 0) {
+        return -1;
+    }
+    *done = 1;
+    dv = lz_const(z, d);
+    q = dv < 0 ? -1 : lz_op(z, CC_SSA_DIV, a.lo, dv, 0, 1, -1);
+    zero = q < 0 ? -1 : lz_const(z, 0);
+    return zero < 0 ? -1 : lz_pair(z, div->dst, q, zero);
+}
+
 /**
  * A 64-bit division: a shift for a power of two (split_div_pow2()), else a call of libgcc's
  * __divdi3 or __udivdi3, written in place of the DIV so the quotient keeps its value.
@@ -562,6 +665,9 @@ static int split_div(lz_t *z, const cc_ssa_instr_t *div) {
     int done;
 
     if (split_div_pow2(z, div, &done) != 0) {
+        return -1;
+    }
+    if (!done && split_div_narrow(z, div, &done) != 0) {
         return -1;
     }
     if (done) {
@@ -701,6 +807,11 @@ int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     }
     memset(&z, 0, sizeof(z));
     z.f = f;
+    if (lz_analyze(&z) != 0) {
+        lz_analysis_free(&z);
+        cc_diag_set(diag, "", 0, 0, "out of memory legalizing 64-bit arithmetic");
+        return -1;
+    }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
 
@@ -713,6 +824,7 @@ int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
             break;
         }
     }
+    lz_analysis_free(&z);
     if (i < f->instr_count) {
         /* the instructions not yet moved are freed with the old list */
         for (; i < f->instr_count; ++i) {
