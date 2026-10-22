@@ -60,6 +60,32 @@ static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, const cc_cty
 static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *store_t, cc_diag_t *diag);
 
 /**
+ * The function a call to @p name goes to: for `__builtin_memcmp` and the
+ * other builtins named after a C library function that nothing lowers
+ * specially, the library function, as gcc calls it; otherwise @p name.
+ * A call to `__builtin_memcmp` itself was to a function nobody defines
+ * (Linux's init/main.o, at the vmlinux link).
+ */
+static const char *builtin_library_name(const char *name) {
+    static const char *const libc[] = {
+        "memcmp", "memchr", "bcmp", "bzero", "strcmp", "strncmp", "strchr", "strrchr", "strstr", "strcpy",
+        "strncpy", "strcat", "strncat", "strlen", "strnlen", "strspn", "strcspn", "strpbrk", "abort", "exit",
+        "abs", "labs", "llabs", "malloc", "calloc", "realloc", "free", "printf", "sprintf", "snprintf",
+        "vsnprintf", "puts", "putchar", "memcpy", "memmove", "memset", NULL};
+    size_t i;
+
+    if (name == NULL || strncmp(name, "__builtin_", 10) != 0) {
+        return name;
+    }
+    for (i = 0; libc[i] != NULL; ++i) {
+        if (strcmp(name + 10, libc[i]) == 0) {
+            return name + 10;
+        }
+    }
+    return name;
+}
+
+/**
  * Whether a file-scope variable is a pointer object: its declared type,
  * not decayed, is a pointer (an array is not one).
  *
@@ -2559,7 +2585,7 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         in.call_is_variadic = (callee != NULL && callee->has_prototype) ? callee->is_variadic : 1;
         in.call_fixed_count =
             (callee != NULL && callee->has_prototype && callee->is_variadic) ? (int)callee->param_count : 0;
-        in.sym = cc_strdup(e->ident);
+        in.sym = cc_strdup(builtin_library_name(e->ident));
         if (in.sym == NULL) {
             return -1;
         }
