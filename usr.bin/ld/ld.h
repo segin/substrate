@@ -402,8 +402,19 @@ typedef struct {
     uint64_t cursor;            /* where its next section goes */
 } lds_region_t;
 
+/* A data statement's value, to be written where the layout put it. */
+typedef struct {
+    const char *section;        /* the output section (its statement's name) */
+    uint64_t off;               /* the offset in it */
+    unsigned size;              /* 1, 2, 4 or 8 bytes */
+    uint64_t value;
+} lds_data_write_t;
+
 typedef struct lds_script {
     lds_stmtvec_t stmts;        /* in order; SECTIONS' own statements inline */
+    lds_data_write_t *data;     /* BYTE/SHORT/LONG/QUAD values, from the final pass of the layout */
+    size_t data_count;
+    size_t data_cap;
     lds_phdr_vec_t phdrs;
     int phdrs_filehdr;          /* a PHDRS entry says FILEHDR: the headers are loaded */
     lds_region_t *regions;
@@ -669,6 +680,7 @@ int script_order_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_input_rank(const char *section, const char *file, void *user);
 int script_rank_gap(const char *name, int rank, uint64_t *offset, uint64_t *align, void *user);
 void script_note_extents(ld_ctx_t *ctx, const elf_link_plan_t *plan);
+int script_make_data_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out);
 
 /* ld_plugin.c */

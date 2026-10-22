@@ -559,6 +559,21 @@ longer.
 A statement between two input section descriptions is refused: where the
 pieces of an output section meet is not kept.
 .Pp
+The data statements
+.Ic BYTE ,
+.Ic SHORT ,
+.Ic LONG ,
+.Ic QUAD
+and
+.Ic SQUAD
+put the value of their expression, of 1, 2, 4 or 8 bytes in the output's
+byte order, at the location counter and move it past them.
+They may stand after an output section's last input section description,
+or be all a section has, which is then made for them; before or between
+input section descriptions they are refused.
+.Ic SIZEOF
+counts them.
+.Pp
 A symbol is defined by
 .Dq name = expression ;
 or changed by

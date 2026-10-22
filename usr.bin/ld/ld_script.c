@@ -200,6 +200,19 @@ static int script_lookup_section_metric(const lds_eval_ctx_t *ec, const char *na
         *out = elf_section_addr(sec);
     } else if (metric == 1) {
         *out = elf_section_size(sec);
+        /* with what its body adds to its end, data statements included, before that is made bytes */
+        if (ec->ctx != NULL && ec->ctx->script != NULL) {
+            const lds_stmtvec_t *v = &ec->ctx->script->stmts;
+            size_t i;
+
+            for (i = 0; i < v->count; ++i) {
+                if (v->items[i].kind == LDS_ST_OUTSEC && v->items[i].at.text != NULL &&
+                    strcmp(v->items[i].at.text, name) == 0) {
+                    *out += v->items[i].pad;
+                    break;
+                }
+            }
+        }
     } else {
         *out = elf_section_addr(sec);
     }
@@ -1379,6 +1392,7 @@ void lds_script_free(lds_script_t *sc) {
     defsymvec_free(&sc->locals);
     free(sc->entry);
     strvec_free(&sc->files);
+    free(sc->data);
     free(sc);
 }
 
@@ -3056,6 +3070,53 @@ static int lw_assert(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
  * meet is not kept once they are merged, so a statement that depends on
  * it, between two input descriptions, is refused.
  */
+/* The bytes data statement keyword `kw` (BYTE, SHORT, LONG, QUAD, SQUAD) puts. */
+static unsigned lds_data_size(const char *kw) {
+    if (strcmp(kw, "BYTE") == 0) {
+        return 1;
+    }
+    if (strcmp(kw, "SHORT") == 0) {
+        return 2;
+    }
+    if (strcmp(kw, "LONG") == 0) {
+        return 4;
+    }
+    return 8; /* QUAD, SQUAD */
+}
+
+/*
+ * Data statement `st` of output section `os`, at `dot` in a section that
+ * starts at `start`: in the final pass its value is kept to be written
+ * there once the section has its bytes (script_assign_addresses()).
+ */
+static int lw_data(lds_walk_t *w, const lds_stmt_t *os, const lds_stmt_t *st, uint64_t start, uint64_t dot) {
+    lds_script_t *sc = w->sc;
+    uint64_t value = 0;
+
+    if (!w->final) {
+        return 0;
+    }
+    if (lw_eval(w, &st->expr, 1, dot, &st->at, &value) != 0) {
+        return -1;
+    }
+    if (sc->data_count == sc->data_cap) {
+        size_t ncap = sc->data_cap == 0 ? 8 : sc->data_cap * 2;
+        lds_data_write_t *next = (lds_data_write_t *)realloc(sc->data, ncap * sizeof(*next));
+
+        if (next == NULL) {
+            return -1;
+        }
+        sc->data = next;
+        sc->data_cap = ncap;
+    }
+    sc->data[sc->data_count].section = os->at.text;
+    sc->data[sc->data_count].off = dot - start;
+    sc->data[sc->data_count].size = lds_data_size(st->at.text);
+    sc->data[sc->data_count].value = value;
+    sc->data_count++;
+    return 0;
+}
+
 static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t start, uint64_t size,
                    uint64_t *end_out) {
     size_t first = os->body.count, last = 0, k;
@@ -3096,8 +3157,21 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
                 continue;
             }
             if (st->kind == LDS_ST_DATA) {
-                lds_report_error(NULL, &st->at, "data statements (BYTE, SHORT, LONG, QUAD) are not supported");
-                return -1;
+                /* after the input sections it is in the padding the body adds to the end */
+                size_t later;
+
+                for (later = k + 1; later < os->body.count; ++later) {
+                    if (os->body.items[later].kind == LDS_ST_INPUT && os->body.items[later].ext_have) {
+                        lds_report_error(NULL, &st->at,
+                                         "a data statement before an input section description is not supported");
+                        return -1;
+                    }
+                }
+                if (lw_data(w, os, st, start, start + cur) != 0) {
+                    return -1;
+                }
+                cur += lds_data_size(st->at.text);
+                continue;
             }
             if (st->kind == LDS_ST_ASSERT) {
                 if (lw_assert(w, st, 1, dot) != 0) {
@@ -3137,8 +3211,17 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
             continue;
         }
         if (st->kind == LDS_ST_DATA) {
-            lds_report_error(NULL, &st->at, "data statements (BYTE, SHORT, LONG, QUAD) are not supported");
-            return -1;
+            /* after the contents, or all there is (setup.ld's `.signature : { LONG(0x5a5aaa55) }`) */
+            if (at_start || (size != 0 && first != os->body.count && k < last)) {
+                lds_report_error(NULL, &st->at,
+                                 "a data statement before or between input section descriptions is not supported");
+                return -1;
+            }
+            if (lw_data(w, os, st, start, end) != 0) {
+                return -1;
+            }
+            end += lds_data_size(st->at.text);
+            continue;
         }
         if (size != 0 && first != os->body.count && k > first && k < last) {
             lds_report_error(NULL, &st->at,
@@ -3425,6 +3508,7 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
     w.ctx = ctx;
     w.out = out;
     w.sc = sc;
+    sc->data_count = 0; /* the final pass collects the data statements' values */
     /* A statement may use what a later one defines: twice over to learn
      * the values, a third time to act on them. */
     for (pass = 0; pass < 3; ++pass) {
@@ -3464,6 +3548,74 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
             }
         }
         os->pad = 0;
+    }
+    /* the data statements' values, in the bytes the padding made for them */
+    for (i = 0; i < sc->data_count; ++i) {
+        const lds_data_write_t *d = &sc->data[i];
+        elf_section_t *sec = elf_find_section(out, d->section);
+        const void *old;
+        uint8_t *buf;
+        size_t size = 0;
+        unsigned b;
+        int ok;
+
+        if (sec == NULL || elf_section_type(sec) == SHT_NOBITS) {
+            fprintf(stderr, "ld: %s: no bytes for a data statement\n", d->section);
+            return -1;
+        }
+        old = elf_section_data(sec, &size);
+        if (old == NULL || d->off + d->size > size || (buf = (uint8_t *)malloc(size)) == NULL) {
+            fprintf(stderr, "ld: %s: a data statement past its end\n", d->section);
+            return -1;
+        }
+        memcpy(buf, old, size);
+        for (b = 0; b < d->size; ++b) {
+            unsigned shift = elf_endian(out) == ELFOBJ_ENDIAN_BE ? 8u * (d->size - 1u - b) : 8u * b;
+
+            buf[d->off + b] = (uint8_t)(d->value >> shift);
+        }
+        ok = elf_section_set_data(sec, buf, size) == ELF_OK;
+        free(buf);
+        if (!ok) {
+            return -1;
+        }
+    }
+    sc->data_count = 0;
+    return 0;
+}
+
+/*
+ * An output section the script gives data statements but no input
+ * section goes into (setup.ld's `.signature : { LONG(0x5a5aaa55) }`) is
+ * made now, empty, so that it is placed with the others and its padding
+ * (lw_body()) holds the data.
+ */
+int script_make_data_sections(ld_ctx_t *ctx, elfobj_t *out) {
+    lds_script_t *sc = ctx != NULL ? ctx->script : NULL;
+    size_t i;
+
+    if (sc == NULL || out == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sc->stmts.count; ++i) {
+        const lds_stmt_t *os = &sc->stmts.items[i];
+        elf_section_t *sec;
+        size_t k;
+        int has_data = 0;
+
+        if (os->kind != LDS_ST_OUTSEC || os->discard) {
+            continue;
+        }
+        for (k = 0; k < os->body.count && !has_data; ++k) {
+            has_data = os->body.items[k].kind == LDS_ST_DATA;
+        }
+        if (!has_data || elf_find_section(out, os->at.text) != NULL) {
+            continue;
+        }
+        sec = elf_add_section(out, os->at.text, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+        if (sec == NULL || elf_section_set_align(sec, 1) != ELF_OK || set_section_zero_data(sec, 0) != 0) {
+            return -1;
+        }
     }
     return 0;
 }

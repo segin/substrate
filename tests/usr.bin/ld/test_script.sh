@@ -208,6 +208,19 @@ if [ -f "$work/at_zero.out" ]; then
              END { print bad ? "overlap" : n }')" 3
 fi
 
+# Data statements put their values where they stand, after a section's
+# input sections or in a section of nothing else, which is made for them
+# (Linux's setup.ld: `.signature : { setup_sig = .; LONG(0x5a5aaa55) }`);
+# a value may use a symbol defined after it.  They were refused.
+ok  data_stmts "$std SECTIONS { .text : { *(.text*) } .data : { *(.data*) BYTE(0x11) SHORT(0x2233) LONG(s_end - s_start) }
+                .signature : { s_start = .; LONG(0x5a5aaa55) QUAD(0x0102030405060708) s_end = .; } }
+             ASSERT(SIZEOF(.signature) == 12 && s_end - s_start == 12, \"data_stmts\")"
+if [ -f "$work/data_stmts.out" ]; then
+    is  data_stmts_signature "$(readelf -x .signature "$work/data_stmts.out" | awk '/0x/ { print $2, $3, $4 }')" \
+        "55aa5a5a 08070605 04030201"
+    is  data_stmts_after_inputs "$(readelf -x .data "$work/data_stmts.out" | grep -o '1133220c')" 1133220c
+fi
+
 # Zeros (.bss) gathered into a section with contents (.data) are written
 # out as zeros, as GNU ld does: Linux's vDSO script puts *(.bss*) in
 # .data, and the merge stopped at "section type mismatch".

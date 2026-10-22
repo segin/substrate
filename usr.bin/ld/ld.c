@@ -381,6 +381,9 @@ static int phase_merge(ld_link_t *l) {
     }
     if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
         script_note_extents(ctx, plan);
+        if (script_make_data_sections(ctx, l->out) != 0) {
+            err = ELF_ERR_OOM;
+        }
     }
     if (plan != NULL) {
         elf_link_plan_destroy(plan);
