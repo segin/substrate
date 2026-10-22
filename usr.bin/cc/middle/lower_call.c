@@ -945,6 +945,103 @@ static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t 
 }
 
 /**
+ * Append `a op b` (a compare when @p op is CMP, of kind @p kind).  Arithmetic on 64-bit values is
+ * 64 bits; a compare's 0/1, and what combines such results, is a value of the default width, as a
+ * compare writes it (on i386 one word: read as 64 bits, its high word would be garbage).
+ *
+ * @return the result, or -1 when out of memory
+ */
+static int ovf_op(cc_ssa_function_t *sf, cc_ssa_opcode_t op, cc_cmp_kind_t kind, int a, int b, int is_unsigned) {
+    cc_ssa_instr_t in;
+
+    if (a < 0 || b < 0) {
+        return -1;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = op;
+    in.cmp_kind = kind;
+    in.is_unsigned = is_unsigned;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = a;
+    in.rhs = b;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        return -1;
+    }
+    if (op != CC_SSA_CMP && value_size(sf, a) == 8) {
+        cc_ir_set_size(sf, in.dst, 8);
+    }
+    return in.dst;
+}
+
+/** A 64-bit constant, or -1 when out of memory. */
+static int ovf_const(cc_ssa_function_t *sf, long long v) {
+    int c = cc_ir_const(sf, v);
+
+    if (c >= 0) {
+        cc_ir_set_size(sf, c, 8);
+    }
+    return c;
+}
+
+/**
+ * Whether the product of unsigned 64-bit values @p a and @p b overflows 64 bits, computed from
+ * their 32-bit halves with no division: both high halves nonzero, a cross product with a high
+ * word, or the cross products' low words and the low product's high word carrying past 32 bits.
+ * Every multiplication is of values under 2^32, so exact.  The division the check was made with
+ * (the product divided by one operand is the other) is a call of libgcc's __udivdi3 on i386,
+ * which Linux does not link (check_mul_overflow() in lib/kstrtox.c).
+ *
+ * @return the 0/1 result, or -1 when out of memory
+ */
+static int umul64_overflows(cc_ssa_function_t *sf, int a, int b) {
+    int m = ovf_const(sf, 0xffffffffLL);
+    int s = ovf_const(sf, 32);
+    int z = ovf_const(sf, 0);
+    int ah = ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, a, s, 1);
+    int al = ovf_op(sf, CC_SSA_AND, CC_CMP_EQ, a, m, 1);
+    int bh = ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, b, s, 1);
+    int bl = ovf_op(sf, CC_SSA_AND, CC_CMP_EQ, b, m, 1);
+    int both = ovf_op(sf, CC_SSA_AND, CC_CMP_EQ, ovf_op(sf, CC_SSA_CMP, CC_CMP_NE, ah, z, 1),
+                      ovf_op(sf, CC_SSA_CMP, CC_CMP_NE, bh, z, 1), 1);
+    int t1 = ovf_op(sf, CC_SSA_MUL, CC_CMP_EQ, al, bh, 1);
+    int t2 = ovf_op(sf, CC_SSA_MUL, CC_CMP_EQ, ah, bl, 1);
+    int t0 = ovf_op(sf, CC_SSA_MUL, CC_CMP_EQ, al, bl, 1);
+    int h1 = ovf_op(sf, CC_SSA_CMP, CC_CMP_NE, ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, t1, s, 1), z, 1);
+    int h2 = ovf_op(sf, CC_SSA_CMP, CC_CMP_NE, ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, t2, s, 1), z, 1);
+    int sum = ovf_op(sf, CC_SSA_ADD, CC_CMP_EQ,
+                     ovf_op(sf, CC_SSA_ADD, CC_CMP_EQ, ovf_op(sf, CC_SSA_AND, CC_CMP_EQ, t1, m, 1),
+                            ovf_op(sf, CC_SSA_AND, CC_CMP_EQ, t2, m, 1), 1),
+                     ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, t0, s, 1), 1);
+    int carry = ovf_op(sf, CC_SSA_CMP, CC_CMP_NE, ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, sum, s, 1), z, 1);
+
+    return ovf_op(sf, CC_SSA_OR, CC_CMP_EQ, ovf_op(sf, CC_SSA_OR, CC_CMP_EQ, both, h1, 1),
+                  ovf_op(sf, CC_SSA_OR, CC_CMP_EQ, h2, carry, 1), 1);
+}
+
+/**
+ * Whether the product of signed 64-bit values @p a and @p b overflows: the unsigned check
+ * (umul64_overflows()) on their magnitudes, or a product of magnitudes past 2^63 - 1, or 2^63 for
+ * operands of different signs.
+ *
+ * @return the 0/1 result, or -1 when out of memory
+ */
+static int smul64_overflows(cc_ssa_function_t *sf, int a, int b) {
+    int k63 = ovf_const(sf, 63);
+    int sa = ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, a, k63, 0); /* all ones when negative */
+    int sb = ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, b, k63, 0);
+    int ua = ovf_op(sf, CC_SSA_SUB, CC_CMP_EQ, ovf_op(sf, CC_SSA_XOR, CC_CMP_EQ, a, sa, 1), sa, 1);
+    int ub = ovf_op(sf, CC_SSA_SUB, CC_CMP_EQ, ovf_op(sf, CC_SSA_XOR, CC_CMP_EQ, b, sb, 1), sb, 1);
+    int ovu = umul64_overflows(sf, ua, ub);
+    int p = ovf_op(sf, CC_SSA_MUL, CC_CMP_EQ, ua, ub, 1);
+    /* 1 when the signs differ, in 64 bits: the sign bit of a ^ b */
+    int neg = ovf_op(sf, CC_SSA_SHR, CC_CMP_EQ, ovf_op(sf, CC_SSA_XOR, CC_CMP_EQ, a, b, 1), k63, 1);
+    int lim = ovf_op(sf, CC_SSA_ADD, CC_CMP_EQ, ovf_const(sf, 0x7fffffffffffffffLL), neg, 1);
+    int big = ovf_op(sf, CC_SSA_CMP, CC_CMP_GT, p, lim, 1);
+
+    return ovf_op(sf, CC_SSA_OR, CC_CMP_EQ, ovu, big, 1);
+}
+
+/**
  * Lower a call of a builtin the compiler implements itself (va_*, alloca,
  * the bit, overflow, atomic, memory and floating-point builtins, bswap).
  *
@@ -1539,81 +1636,11 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             ov = bin.dst;
         } else if (out_unsigned) {
             if (overflow_op == 2) {
-                int z = cc_ir_const(sf, 0);
-                int cmp_nz;
-                int cmp_z;
-                int safe_bv;
-                int qv;
-                int cmp_ne;
-                if (z < 0) {
+                /* no division: on i386 a call of __udivdi3 */
+                ov = umul64_overflows(sf, av, bv);
+                if (ov < 0) {
                     return -1;
                 }
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_CMP;
-                bin.cmp_kind = CC_CMP_NE;
-                bin.is_unsigned = 1;
-                bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                bin.lhs = bv;
-                bin.rhs = z;
-                if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                    return -1;
-                }
-                cmp_nz = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_CMP;
-                bin.cmp_kind = CC_CMP_EQ;
-                bin.is_unsigned = 1;
-                bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                bin.lhs = bv;
-                bin.rhs = z;
-                if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                    return -1;
-                }
-                cmp_z = normalize_integral_value(sf, bin.dst, cc_ct_basic(CC_CT_ULLONG), diag);
-                if (cmp_z < 0) {
-                    return -1;
-                }
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_OR;
-                bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                bin.lhs = bv;
-                bin.rhs = cmp_z;
-                if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                    return -1;
-                }
-                safe_bv = bin.dst;
-                cc_ir_set_size(sf, safe_bv, 8);
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_DIV;
-                bin.is_unsigned = 1;
-                bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                bin.lhs = rv;
-                bin.rhs = safe_bv;
-                if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                    return -1;
-                }
-                qv = bin.dst;
-                cc_ir_set_size(sf, qv, 8);
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_CMP;
-                bin.cmp_kind = CC_CMP_NE;
-                bin.is_unsigned = 1;
-                bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                bin.lhs = qv;
-                bin.rhs = av;
-                if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                    return -1;
-                }
-                cmp_ne = bin.dst;
-                memset(&bin, 0, sizeof(bin));
-                bin.op = CC_SSA_AND;
-                bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-                bin.lhs = cmp_nz;
-                bin.rhs = cmp_ne;
-                if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                    return -1;
-                }
-                ov = bin.dst;
             } else {
                 memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_CMP;
@@ -1627,7 +1654,12 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
                 }
                 ov = bin.dst;
             }
-            {
+            if (!lower_is_unsigned(e->args[0]) || !lower_is_unsigned(e->args[1])) {
+                /*
+                 * a signed operand: a negative exact result does not fit.
+                 * Unsigned operands have no negative result -- their wrapped
+                 * one at 2^63 and over is a large number, not an overflow.
+                 */
                 int z = cc_ir_const(sf, 0);
                 int exact_neg;
                 if (z < 0) {
@@ -1654,79 +1686,14 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
                 ov = bin.dst;
             }
         } else if (overflow_op == 2) {
-            int z = cc_ir_const(sf, 0);
-            int cmp_nz;
-            int cmp_z;
-            int safe_bv;
-            int qv;
-            int cmp_eq;
-            int not_eq;
-            if (z < 0) {
+            /*
+             * no division: on i386 a call of __divdi3, and dividing the
+             * product of INT64_MIN and -1 back by -1 traps (SIGFPE)
+             */
+            ov = smul64_overflows(sf, av, bv);
+            if (ov < 0) {
                 return -1;
             }
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_CMP;
-            bin.cmp_kind = CC_CMP_NE;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = bv;
-            bin.rhs = z;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            cmp_nz = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_CMP;
-            bin.cmp_kind = CC_CMP_EQ;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = bv;
-            bin.rhs = z;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            cmp_z = normalize_integral_value(sf, bin.dst, cc_ct_basic(CC_CT_ULLONG), diag);
-            if (cmp_z < 0) {
-                return -1;
-            }
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_OR;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = bv;
-            bin.rhs = cmp_z;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            safe_bv = bin.dst;
-            cc_ir_set_size(sf, safe_bv, 8);
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_DIV;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = rv;
-            bin.rhs = safe_bv;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            qv = bin.dst;
-            cc_ir_set_size(sf, qv, 8);
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_CMP;
-            bin.cmp_kind = CC_CMP_NE;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = qv;
-            bin.rhs = av;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            cmp_eq = bin.dst;
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_AND;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = cmp_nz;
-            bin.rhs = cmp_eq;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            not_eq = bin.dst;
-            ov = not_eq;
         } else {
             int sign_r;
             int sign_a;
