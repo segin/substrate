@@ -13,11 +13,56 @@ typedef struct {
     long double ld;
 } const_state_t;
 
-static void clear_known(const_state_t *st, int count) {
-    int i;
-    for (i = 0; i < count; ++i) {
-        st[i].known = 0;
+/**
+ * The integer values that are constant on every path: defined once, by a
+ * CONST.  What fold_function() learns between labels it must forget at a
+ * label (another path may join there), but not these -- `switch
+ * (sizeof(x))` compares a value set to the size before the first label.
+ *
+ * @return an array of f->value_count states (free it), or NULL when out of memory
+ */
+static const_state_t *single_def_consts(const cc_ssa_function_t *f) {
+    const_state_t *g = (const_state_t *)calloc((size_t)f->value_count, sizeof(*g));
+    int *defs = (int *)calloc((size_t)f->value_count, sizeof(*defs));
+    size_t i;
+
+    if (g == NULL || defs == NULL) {
+        free(g);
+        free(defs);
+        return NULL;
     }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int d = in->dst;
+        size_t k;
+
+        if (d >= 0 && d < f->value_count) {
+            defs[d]++;
+        }
+        /* an asm output writes its value too, without being the instruction's dst */
+        for (k = 0; in->op == CC_SSA_ASM && in->asm_out_values != NULL && k < in->asm_out_count; ++k) {
+            int v = in->asm_out_values[k];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            }
+            if (v >= 0 && v < f->value_count) {
+                defs[v] += 2;
+            }
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int d = in->dst;
+        if (in->op == CC_SSA_CONST && d >= 0 && d < f->value_count && defs[d] == 1 &&
+            cc_ssa_value_class(f, d) == CC_VAL_I64) {
+            g[d].known = 1;
+            g[d].type = CC_VAL_I64;
+            g[d].i = in->imm;
+        }
+    }
+    free(defs);
+    return g;
 }
 
 static int value_is_ldouble(const cc_ssa_function_t *f, int v) {
@@ -141,6 +186,7 @@ static long long fold_int_cmp(cc_cmp_kind_t kind, int is_unsigned, int word32, l
 
 static int fold_function(cc_ssa_function_t *f) {
     const_state_t *st;
+    const_state_t *g;
     size_t i;
     int changed = 0;
 
@@ -152,6 +198,12 @@ static int fold_function(cc_ssa_function_t *f) {
     if (st == NULL) {
         return -1;
     }
+    g = single_def_consts(f);
+    if (g == NULL) {
+        free(st);
+        return -1;
+    }
+    memcpy(st, g, (size_t)f->value_count * sizeof(*st));
 
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
@@ -405,11 +457,20 @@ static int fold_function(cc_ssa_function_t *f) {
              * values from one predecessor path cannot be propagated across
              * control-flow joins.
              */
-            clear_known(st, f->value_count);
+            memcpy(st, g, (size_t)f->value_count * sizeof(*st));
+            break;
+
+        case CC_SSA_BR_COND:
+            /* a branch on a known condition goes one way: unreachable_function() removes the other */
+            if (in->lhs >= 0 && in->lhs < f->value_count && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64) {
+                in->label = st[in->lhs].i != 0 ? in->true_label : in->false_label;
+                in->op = CC_SSA_BR;
+                in->lhs = -1;
+                changed = 1;
+            }
             break;
 
         case CC_SSA_BR:
-        case CC_SSA_BR_COND:
         case CC_SSA_TRAP:
         case CC_SSA_RET:
             break;
@@ -417,7 +478,231 @@ static int fold_function(cc_ssa_function_t *f) {
     }
 
     free(st);
+    free(g);
     return changed;
+}
+
+/**
+ * The value of integer value @p v if it is the same on every path: defined
+ * once, by a CONST, or by integer arithmetic, a compare or a move of
+ * values that are themselves so -- `sizeof(void *) == 2` lowers to a
+ * chain of them.  @p def_at gives each value's one defining instruction
+ * (or < 0), @p g the single-def CONSTs.
+ *
+ * @return 1 with *@p out set, or 0 if it is not known
+ */
+static int eval_invariant(const cc_ssa_function_t *f, int v, const int *def_at, const const_state_t *g, int depth,
+                          long long *out) {
+    const cc_ssa_instr_t *in;
+    long long a;
+    long long b;
+
+    if (v < 0 || v >= f->value_count || depth > 16) {
+        return 0;
+    }
+    if (g[v].known) {
+        *out = g[v].i;
+        return 1;
+    }
+    if (def_at[v] < 0 || cc_ssa_value_class(f, v) != CC_VAL_I64) {
+        return 0;
+    }
+    in = &f->instrs[def_at[v]];
+    switch (in->op) {
+    case CC_SSA_MOV:
+        return eval_invariant(f, in->lhs, def_at, g, depth + 1, out);
+    case CC_SSA_CMP:
+        if (!eval_invariant(f, in->lhs, def_at, g, depth + 1, &a) || !eval_invariant(f, in->rhs, def_at, g, depth + 1, &b)) {
+            return 0;
+        }
+        *out = fold_int_cmp(in->cmp_kind, in->is_unsigned, value_is_word32(f, in->lhs) || value_is_word32(f, in->rhs),
+                            a, b);
+        return 1;
+    case CC_SSA_ADD:
+    case CC_SSA_SUB:
+    case CC_SSA_MUL:
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
+        if (!eval_invariant(f, in->lhs, def_at, g, depth + 1, &a) || !eval_invariant(f, in->rhs, def_at, g, depth + 1, &b)) {
+            return 0;
+        }
+        return fold_int_binop(in->op, in->is_unsigned, value_is_word32(f, v), a, b, out) == 0;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * At -O0: turn into a jump only a branch whose condition is a constant on
+ * every path (eval_invariant()) and rewrite nothing else.  Enough for `if (0)` and `switch
+ * (sizeof(x))`, whose dead arms gcc drops at -O0 too, while -O0 code is
+ * otherwise as written.
+ *
+ * @return 1 if a branch was folded, 0 if not, -1 when out of memory
+ */
+static int fold_const_branches(cc_ssa_function_t *f) {
+    const_state_t *g;
+    int *def_at;
+    size_t i;
+    int changed = 0;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    g = single_def_consts(f);
+    def_at = (int *)malloc((size_t)f->value_count * sizeof(*def_at));
+    if (g == NULL || def_at == NULL) {
+        free(g);
+        free(def_at);
+        return -1;
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        def_at[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        int d = f->instrs[i].dst;
+        if (d >= 0 && d < f->value_count) {
+            def_at[d] = def_at[d] == -1 ? (int)i : -2; /* -2: defined more than once */
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        long long cond = 0;
+
+        if (in->op != CC_SSA_BR_COND) {
+            continue;
+        }
+        if (eval_invariant(f, in->lhs, def_at, g, 0, &cond)) {
+            in->label = cond != 0 ? in->true_label : in->false_label;
+            in->op = CC_SSA_BR;
+            in->lhs = -1;
+            changed = 1;
+        }
+    }
+    free(g);
+    free(def_at);
+    return changed;
+}
+
+/**
+ * Mark the labels the instruction can transfer control to as reachable.
+ *
+ * @return 1 if one was newly marked
+ */
+static int mark_targets(const cc_ssa_instr_t *in, unsigned char *reach, int label_count) {
+    int marked = 0;
+    size_t k;
+
+#define MARK(l)                                                                                                    \
+    do {                                                                                                           \
+        int _l = (l);                                                                                              \
+        if (_l >= 0 && _l < label_count && !reach[_l]) {                                                           \
+            reach[_l] = 1;                                                                                         \
+            marked = 1;                                                                                            \
+        }                                                                                                          \
+    } while (0)
+    if (in->op == CC_SSA_BR) {
+        MARK(in->label);
+    } else if (in->op == CC_SSA_BR_COND) {
+        MARK(in->true_label);
+        MARK(in->false_label);
+    } else if (in->op == CC_SSA_ASM) {
+        for (k = 0; k < in->asm_goto_count; ++k) {
+            MARK(in->asm_goto_labels[k]);
+        }
+    }
+#undef MARK
+    return marked;
+}
+
+/** Whether control never passes from the instruction to the next one. */
+static int ends_flow(const cc_ssa_instr_t *in) {
+    return in->op == CC_SSA_BR || in->op == CC_SSA_BR_COND || in->op == CC_SSA_RET || in->op == CC_SSA_TRAP;
+}
+
+/**
+ * Remove the instructions no path reaches: those after a jump, a return
+ * or a trap up to a label something reachable branches to.  With
+ * fold_function() turning a branch on a constant into a jump, this drops
+ * the arms of `if (0)` and of `switch (sizeof(x))` that cannot run -- the
+ * way Linux writes size-generic inline asm, whose dead arms hold asm for
+ * the other sizes (`cmpxchgq` and %rax in an i386 build) that the
+ * assembler refuses.  A label whose address is taken (`&&l`) may be
+ * jumped to from anywhere and is always kept reachable; labels themselves
+ * are never removed.
+ *
+ * @return 1 if anything was removed, 0 if not, -1 when out of memory
+ */
+static int unreachable_function(cc_ssa_function_t *f) {
+    unsigned char *reach;
+    int label_count = f->label_count;
+    size_t i;
+    size_t w = 0;
+    int live;
+    int removed = 0;
+    int again;
+
+    if (f->instr_count == 0) {
+        return 0;
+    }
+    reach = (unsigned char *)calloc((size_t)(label_count > 0 ? label_count : 1), 1);
+    if (reach == NULL) {
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        if (in->op == CC_SSA_LADDR && in->label >= 0 && in->label < label_count) {
+            reach[in->label] = 1;
+        }
+    }
+    /* a branch back to a label above it can make more reachable: until nothing changes */
+    do {
+        again = 0;
+        live = 1;
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+
+            if (in->op == CC_SSA_LABEL && in->label >= 0 && in->label < label_count) {
+                if (live && !reach[in->label]) {
+                    reach[in->label] = 1;
+                    again = 1;
+                }
+                live = reach[in->label];
+                continue;
+            }
+            if (!live) {
+                continue;
+            }
+            again |= mark_targets(in, reach, label_count);
+            if (ends_flow(in)) {
+                live = 0;
+            }
+        }
+    } while (again);
+
+    live = 1;
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_LABEL) {
+            live = in->label >= 0 && in->label < label_count ? reach[in->label] : 1;
+        } else if (!live) {
+            cc_ssa_instr_free(in);
+            removed = 1;
+            continue;
+        } else if (ends_flow(in)) {
+            live = 0;
+            f->instrs[w++] = *in;
+            continue;
+        }
+        f->instrs[w++] = *in;
+    }
+    f->instr_count = w;
+    free(reach);
+    return removed;
 }
 
 static void mark_uses(const cc_ssa_instr_t *in, int *uses) {
@@ -549,14 +834,33 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     size_t i;
     (void)diag;
 
-    if (opt_level <= 0) {
-        return 0;
-    }
-
     for (i = 0; i < m->func_count; ++i) {
-        int rc1 = fold_function(&m->funcs[i]);
-        int rc2 = dce_function(&m->funcs[i]);
-        if (rc1 < 0 || rc2 < 0) {
+        int rc1;
+        int rc2;
+        int rc3 = 0;
+        int round = 0;
+
+        /*
+         * Folding a branch on a constant makes code unreachable; removing
+         * it can leave a label with one predecessor fewer and a compare
+         * more to fold.  Until neither finds anything (or a few rounds).
+         * -O0 folds only the branches whose condition is a constant on
+         * every path (fold_const_branches()): gcc drops the dead arms of
+         * `if (0)` and `switch (sizeof(x))` even then, and code relies on
+         * it -- an arm may hold inline asm the target's assembler refuses.
+         */
+        if (opt_level <= 0) {
+            rc1 = fold_const_branches(&m->funcs[i]);
+            rc3 = rc1 > 0 ? unreachable_function(&m->funcs[i]) : 0;
+            rc2 = 0;
+        } else {
+            do {
+                rc1 = fold_function(&m->funcs[i]);
+                rc3 = rc1 < 0 ? 0 : unreachable_function(&m->funcs[i]);
+            } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
+            rc2 = dce_function(&m->funcs[i]);
+        }
+        if (rc1 < 0 || rc2 < 0 || rc3 < 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 diag->path[0] = '\0';
                 diag->line = 0;
