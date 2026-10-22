@@ -9392,6 +9392,17 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 free_stmt(&s);
                 return -1;
             }
+            /*
+             * The name is in scope from the end of its declarator (C11
+             * 6.2.1p7), so in its own initializer: Linux's kzalloc_obj is
+             * `struct probe *base = ({ ... typeof(*base) ... })`.  Declared
+             * again below with the type the initializer completes.
+             */
+            if (!is_typedef && !is_fn_decl && s.decl_name != NULL && (s.storage & CC_STORAGE_AUTO_TYPE) == 0 &&
+                var_push(p, s.decl_name, s.ctype) != 0) {
+                free_stmt(&s);
+                return -1;
+            }
             s.expr = parse_initializer_expr(p);
             if (s.expr == NULL) {
                 free_stmt(&s);

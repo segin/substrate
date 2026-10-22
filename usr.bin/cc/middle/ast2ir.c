@@ -9356,6 +9356,14 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         if (varv < 0) {
             return -1;
         }
+        /* in scope in its own initializer -- Linux's LIST_HEAD(x) is `struct list_head x = {&(x), &(x)}` */
+        if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
+            set_diag(diag, "out of memory defining local struct variable");
+            return -1;
+        }
+        if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
+            return -1;
+        }
         if (s->expr != NULL) {
             if (s->expr->kind == CC_EXPR_INIT_LIST) {
                 if (emit_memset_instr(sf, varv, 0, sz, diag) != 0) {
@@ -9374,13 +9382,6 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                     return -1;
                 }
             }
-        }
-        if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
-            set_diag(diag, "out of memory defining local struct variable");
-            return -1;
-        }
-        if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
-            return -1;
         }
         return 0;
     }
@@ -9444,6 +9445,18 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             if (varv < 0) {
                 return -1;
             }
+        }
+        /* in scope in its own initializer (`void *a[] = {a, a}`): bound before it */
+        if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
+            free(vla_strides);
+            set_diag(diag, "out of memory defining local array variable");
+            return -1;
+        }
+        (*vars)[*var_count - 1].vla_bytes = vla_bytes_v;
+        (*vars)[*var_count - 1].vla_strides = vla_strides;
+        (*vars)[*var_count - 1].vla_rank = is_runtime_vla ? vla_rank : 0;
+        if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
+            return -1;
         }
 
         if (s->expr != NULL) {
@@ -9683,18 +9696,6 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                 }
             }
         }
-
-        if (var_define(vars, var_count, s->decl_name, dct, varv, depth, 0, 0, NULL) != 0) {
-            free(vla_strides);
-            set_diag(diag, "out of memory defining local array variable");
-            return -1;
-        }
-        (*vars)[*var_count - 1].vla_bytes = vla_bytes_v;
-        (*vars)[*var_count - 1].vla_strides = vla_strides;
-        (*vars)[*var_count - 1].vla_rank = is_runtime_vla ? vla_rank : 0;
-        if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
-            return -1;
-        }
         return 0;
     }
     varv = cc_ir_new_value(sf, ct_value_kind(lower_decl_ctype(s)));
@@ -9751,6 +9752,21 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         }
         if (ct_has_kind(lower_decl_ctype(s), CC_CT_LDOUBLE)) {
             cc_ir_set_size(sf, varv, 16);
+        }
+        if ((*vars)[*var_count - 1].addr_value >= 0) {
+            /* the initializer took its address (`void *p = &p`): the value goes to that storage too */
+            cc_ssa_instr_t st;
+
+            memset(&st, 0, sizeof(st));
+            st.op = CC_SSA_STORE;
+            st.dst = -1;
+            st.lhs = (*vars)[*var_count - 1].addr_value;
+            st.rhs = varv;
+            st.imm = (*vars)[*var_count - 1].addr_size;
+            if (cc_ir_push(sf, st) != 0) {
+                set_diag(diag, "out of memory storing local variable initializer");
+                return -1;
+            }
         }
     } else {
         cc_ssa_instr_t in;
