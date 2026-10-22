@@ -114,6 +114,39 @@ for m in 32 64; do
 	fi
 done
 
+# `!a() || b`, a() constant false, is true: the dead arm b leaves a label
+# behind that falls into the join, and the join must not count it, and
+# the copy of the result defined once keeps its constant past the next
+# label (Linux's select_task_rq_fair() and is_rd_overutilized(), true
+# without energy-aware scheduling, guarding find_energy_efficient_cpu()).
+cat > "$CC_TMP/eas.c" <<'EOF'
+struct root_domain { int overutilized; };
+struct rq { struct root_domain *rd; };
+extern struct rq runqueue;
+unsigned long undefined_sugov(int cpu);
+#define READ_ONCE(x) (*(const volatile __typeof__(x) *)&(x))
+static inline _Bool sched_energy_enabled(void) { return 0; }
+static inline int is_rd_overutilized(struct root_domain *rd) { return !sched_energy_enabled() || READ_ONCE(rd->overutilized); }
+static int __attribute__((noinline)) find_energy_efficient_cpu(int prev) { return (int)undefined_sugov(prev); }
+int select_task_rq_fair(int prev_cpu) {
+	int new_cpu = prev_cpu;
+	if (!is_rd_overutilized(runqueue.rd)) {
+		new_cpu = find_energy_efficient_cpu(prev_cpu);
+		if (new_cpu >= 0)
+			return new_cpu;
+		new_cpu = prev_cpu;
+	}
+	return new_cpu;
+}
+EOF
+for m in 32 64; do
+	"$CC_BIN" -m$m -Os -c -o "$CC_TMP/eas.o" "$CC_TMP/eas.c"
+	if nm -u "$CC_TMP/eas.o" | grep -q 'undefined_'; then
+		echo "run_inline_dead_call: -m$m -Os keeps a call !false || x guards"
+		exit 1
+	fi
+done
+
 # An always_inline function whose bool parameter takes a compare's word:
 # the argument is narrowed into it, and the switch on what it returns
 # folds (Linux's irq_startup() and __irq_startup_managed(), which returns

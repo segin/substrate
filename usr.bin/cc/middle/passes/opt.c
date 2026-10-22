@@ -242,6 +242,7 @@ typedef struct {
     unsigned char *forget; /**< per label: 1 if it cannot be joined */
     unsigned char *seen;   /**< per label x variable: 0 no edge yet, 1 a constant, 2 varying */
     long long *val;        /**< per label x variable: the constant */
+    unsigned char *reached; /**< per label: an edge from code that can run has come into it */
 } join_state_t;
 
 static void join_free(join_state_t *j) {
@@ -250,6 +251,7 @@ static void join_free(join_state_t *j) {
     free(j->forget);
     free(j->seen);
     free(j->val);
+    free(j->reached);
     memset(j, 0, sizeof(*j));
 }
 
@@ -341,7 +343,8 @@ static int join_init(join_state_t *j, const cc_ssa_function_t *f) {
     j->vars = (int *)malloc((size_t)j->nvars * sizeof(*j->vars));
     j->seen = (unsigned char *)calloc((size_t)j->nvars * (size_t)f->label_count, 1);
     j->val = (long long *)malloc((size_t)j->nvars * (size_t)f->label_count * sizeof(*j->val));
-    if (j->vars == NULL || j->seen == NULL || j->val == NULL) {
+    j->reached = (unsigned char *)calloc((size_t)f->label_count, 1);
+    if (j->vars == NULL || j->seen == NULL || j->val == NULL || j->reached == NULL) {
         join_free(j);
         return -1;
     }
@@ -353,13 +356,18 @@ static int join_init(join_state_t *j, const cc_ssa_function_t *f) {
     return 0;
 }
 
-/** Record the edge into @p label carrying the variables' states @p st. */
-static void join_edge(join_state_t *j, int label, int label_count, const const_state_t *st) {
+/**
+ * Record the edge into @p label carrying the variables' states @p st -- if it comes from code that can run
+ * (@p live): an edge out of dead code (a branch the folder has not removed yet, a dead label falling into
+ * the next) says nothing.
+ */
+static void join_edge(join_state_t *j, int label, int label_count, const const_state_t *st, int live) {
     int k;
 
-    if (j->nvars == 0 || label < 0 || label >= label_count || j->forget[label]) {
+    if (!live || j->nvars == 0 || label < 0 || label >= label_count || j->forget[label]) {
         return;
     }
+    j->reached[label] = 1;
     for (k = 0; k < j->nvars; ++k) {
         size_t at = (size_t)label * (size_t)j->nvars + (size_t)k;
         const const_state_t *s = &st[j->vars[k]];
@@ -374,12 +382,20 @@ static void join_edge(join_state_t *j, int label, int label_count, const const_s
     }
 }
 
-/** At @p label, take in @p st what every edge into it agrees on. */
-static void join_enter(const join_state_t *j, int label, int label_count, const_state_t *st) {
+/**
+ * At @p label, take in @p st what every edge into it agrees on.
+ *
+ * @return whether the code from the label can run: a label that forgets (a loop's, an address taken) always
+ *         can; another only if an edge from code that can run came into it
+ */
+static int join_enter(const join_state_t *j, int label, int label_count, const_state_t *st) {
     int k;
 
     if (j->nvars == 0 || label < 0 || label >= label_count || j->forget[label]) {
-        return;
+        return 1;
+    }
+    if (!j->reached[label]) {
+        return 0;
     }
     for (k = 0; k < j->nvars; ++k) {
         size_t at = (size_t)label * (size_t)j->nvars + (size_t)k;
@@ -392,6 +408,7 @@ static void join_enter(const join_state_t *j, int label, int label_count, const_
             s->i = j->val[at];
         }
     }
+    return 1;
 }
 
 /**
@@ -404,6 +421,8 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
     const_state_t *st;
     const_state_t *g;
     join_state_t join;
+    unsigned char *single_def = NULL;
+    int live = 1; /* the code being walked can run, as far as the joins tell (join_enter()) */
     size_t i;
     int changed = 0;
 
@@ -428,6 +447,42 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         free(g);
         return -1;
     }
+    if (fold_branches) {
+        /* the values defined once, whose known value a MOV can make a CONST */
+        int *defs = (int *)calloc((size_t)f->value_count, sizeof(*defs));
+
+        single_def = (unsigned char *)calloc((size_t)f->value_count, 1);
+        if (defs == NULL || single_def == NULL) {
+            free(defs);
+            free(single_def);
+            join_free(&join);
+            free(st);
+            free(g);
+            return -1;
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *d = &f->instrs[i];
+            size_t k;
+
+            if (d->dst >= 0 && d->dst < f->value_count) {
+                defs[d->dst]++;
+            }
+            for (k = 0; d->op == CC_SSA_ASM && k < d->asm_out_count; ++k) {
+                int ov = d->asm_out_values[k];
+
+                if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+                    ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+                }
+                if (ov >= 0 && ov < f->value_count) {
+                    defs[ov] += 2;
+                }
+            }
+        }
+        for (i = 0; i < (size_t)f->value_count; ++i) {
+            single_def[i] = defs[i] == 1;
+        }
+        free(defs);
+    }
 
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
@@ -437,7 +492,7 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         if (in->op == CC_SSA_LABEL) {
             /* falling into it from the instruction before is an edge too */
             if (i > 0 && !cc_ssa_opcode_is_terminator(f->instrs[i - 1].op)) {
-                join_edge(&join, in->label, f->label_count, st);
+                join_edge(&join, in->label, f->label_count, st, live);
             }
         }
 
@@ -469,6 +524,18 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         case CC_SSA_MOV:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known) {
                 st[dst] = st[in->lhs];
+                /*
+                 * a value defined only here holds what it is given here wherever it is used: the
+                 * constant a join gave its operand (join_state_t) lasts past the next label as a CONST
+                 */
+                if (fold_branches && single_def != NULL && single_def[dst] && st[dst].type == CC_VAL_I64 &&
+                    vt == CC_VAL_I64) {
+                    in->op = CC_SSA_CONST;
+                    in->imm = st[dst].i;
+                    in->lhs = -1;
+                    in->rhs = -1;
+                    changed = 1;
+                }
             } else if (dst >= 0) {
                 st[dst].known = 0;
             }
@@ -718,7 +785,7 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
              * on (join_state_t).
              */
             memcpy(st, g, (size_t)f->value_count * sizeof(*st));
-            join_enter(&join, in->label, f->label_count, st);
+            live = join_enter(&join, in->label, f->label_count, st);
             break;
 
         case CC_SSA_BR_COND:
@@ -729,24 +796,28 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 in->op = CC_SSA_BR;
                 in->lhs = -1;
                 changed = 1;
-                join_edge(&join, in->label, f->label_count, st);
+                join_edge(&join, in->label, f->label_count, st, live);
             } else {
-                join_edge(&join, in->true_label, f->label_count, st);
-                join_edge(&join, in->false_label, f->label_count, st);
+                join_edge(&join, in->true_label, f->label_count, st, live);
+                join_edge(&join, in->false_label, f->label_count, st, live);
             }
+            live = 0;
             break;
 
         case CC_SSA_BR:
-            join_edge(&join, in->label, f->label_count, st);
+            join_edge(&join, in->label, f->label_count, st, live);
+            live = 0;
             break;
 
         case CC_SSA_TRAP:
         case CC_SSA_RET:
+            live = 0;
             break;
         }
     }
 
     join_free(&join);
+    free(single_def);
     free(st);
     free(g);
     return changed;
