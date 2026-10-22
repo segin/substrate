@@ -275,9 +275,38 @@ static void expr_lex_free_cur(expr_lex_t *lx) {
 }
 
 /*
+ * The length of a C integer suffix at s -- `u`, `l`, `ll`, `ul`, `lu`,
+ * `ull`, `llu`, in either case -- which GNU as accepts after a number and
+ * ignores: headers shared with C hand it constants such as Linux's
+ * generated `#define REQUIRED_MASK0 0x00008101U`.  Only a whole suffix
+ * counts, one no identifier character follows, so `1f`, `1b` and a symbol
+ * that merely starts like one are left alone; otherwise 0.
+ */
+static size_t expr_number_suffix_len(const char *s) {
+    size_t i = 0;
+    int u = 0;
+    int l = 0;
+
+    while (s[i] == 'u' || s[i] == 'U' || s[i] == 'l' || s[i] == 'L') {
+        if (s[i] == 'u' || s[i] == 'U') {
+            if (u++ > 0) {
+                return 0;
+            }
+        } else if (l++ > 1) {
+            return 0;
+        }
+        i++;
+    }
+    if (isalnum((unsigned char)s[i]) || s[i] == '_' || s[i] == '$' || s[i] == '.') {
+        return 0;
+    }
+    return i;
+}
+
+/*
  * An unsigned integer literal at s[*inout_i]: decimal, 0x, 0b, or octal
- * for a leading 0.  The value is its 64 bits; one that needs more is
- * refused.
+ * for a leading 0, with any C integer suffix.  The value is its 64 bits;
+ * one that needs more is refused.
  */
 static int expr_parse_number(const char *s, size_t *inout_i, long long *out) {
     size_t i = *inout_i;
@@ -319,6 +348,7 @@ static int expr_parse_number(const char *s, size_t *inout_i, long long *out) {
     if (!saw) {
         return -1;
     }
+    i += expr_number_suffix_len(s + i);
     *out = (long long)(int64_t)v;
     *inout_i = i;
     return 0;
