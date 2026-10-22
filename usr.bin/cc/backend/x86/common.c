@@ -319,6 +319,9 @@ static int find_named_goto_index(const char *name, char **names, size_t count) {
  * @param diag           receives an error
  * @return               the rendered text (caller frees), or NULL
  */
+static int x86_gpr_index(const char *name);
+static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz);
+
 static char *render_inline_asm_template(const char *tmpl, char **operand_texts, char **operand_names, size_t op_count,
                                         size_t label_base, const int *goto_labels, char **goto_names,
                                         size_t goto_count, const char *fn_name, cc_diag_t *diag) {
@@ -331,6 +334,8 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
     }
     while (tmpl[i] != '\0') {
         int strip_dollar = 0;
+        char mod = 0;
+        char mbuf[96];
         if (tmpl[i] != '%') {
             if (append_c(&out, &len, &cap, tmpl[i]) != 0) {
                 free(out);
@@ -354,8 +359,8 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
         } else if (tmpl[i] == 'P' || tmpl[i] == 'q' || tmpl[i] == 'k' || tmpl[i] == 'w' || tmpl[i] == 'b' ||
                    tmpl[i] == 'h' || tmpl[i] == 'z' || tmpl[i] == 'n' || tmpl[i] == 'a' || tmpl[i] == 'A' ||
                    tmpl[i] == 'V' || tmpl[i] == 'L' || tmpl[i] == 'p' || tmpl[i] == 'B' || tmpl[i] == 'R') {
-            /* GCC operand modifiers we accept and pass through unchanged.
-             * %a => address of mem operand; %A => alias; %V => no '%'; etc. */
+            /* a GCC operand modifier: asm_operand_with_modifier() applies the ones that change the text */
+            mod = tmpl[i];
             i++;
         }
         if (tmpl[i] >= '0' && tmpl[i] <= '9') {
@@ -371,7 +376,7 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            op_text = operand_texts[n];
+            op_text = asm_operand_with_modifier(mod, operand_texts[n], mbuf, sizeof(mbuf));
             op_len = strlen(op_text);
             if (strip_dollar && op_len > 0 && op_text[0] == '$') {
                 op_text++;
@@ -476,7 +481,7 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            op_text = operand_texts[idx];
+            op_text = asm_operand_with_modifier(mod, operand_texts[idx], mbuf, sizeof(mbuf));
             op_len = strlen(op_text);
             if (strip_dollar && op_len > 0 && op_text[0] == '$') {
                 op_text++;
@@ -2563,6 +2568,59 @@ static int x86_gpr_index(const char *name) {
         }
     }
     return -1;
+}
+
+/**
+ * An inline asm operand's text under a GCC x86 operand modifier, as gcc
+ * prints it: for a register, `b` `h` `w` `k` `q` its 8-bit low, 8-bit
+ * high, 16-, 32- and 64-bit name, `V` the name without its `%`, `a` its
+ * address `(%reg)`; for a constant `$n`, `c` `P` `a` the bare number and
+ * `n` its negation.  Linux writes `movl %k0, %%ds` and
+ * `extable_type_reg reg=%k0` for a u16 operand: the register's 32-bit
+ * name, which extable_type_reg insists on.  Other modifiers, and a
+ * memory operand under any, leave the text as it is.
+ *
+ * @param mod   the modifier letter, or 0 for none
+ * @param text  the operand's text
+ * @param buf   room for a changed text
+ * @return      @p text or @p buf
+ */
+static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz) {
+    static const char *const high8[4] = {"%ah", "%ch", "%dh", "%bh"};
+    int r = text != NULL && text[0] == '%' ? x86_gpr_index(text) : -1;
+
+    if (mod == 0 || text == NULL) {
+        return text;
+    }
+    if (r >= 0) {
+        switch (mod) {
+        case 'b': return x86_gprs[r].n8;
+        case 'h': return r < 4 ? high8[r] : text;
+        case 'w': return x86_gprs[r].n16;
+        case 'k': return x86_gprs[r].n32;
+        case 'q': return x86_gprs[r].n64;
+        case 'V': return text + 1;
+        case 'a':
+            snprintf(buf, bufsz, "(%s)", text);
+            return buf;
+        default: return text;
+        }
+    }
+    if (text[0] == '$') {
+        if (mod == 'c' || mod == 'P' || mod == 'a') {
+            return text + 1;
+        }
+        if (mod == 'n') {
+            char *end;
+            long long v = strtoll(text + 1, &end, 0);
+
+            if (end != text + 1 && *end == '\0') {
+                snprintf(buf, bufsz, "%lld", -v);
+                return buf;
+            }
+        }
+    }
+    return text;
 }
 
 const char *reg64_to8(const char *r) {

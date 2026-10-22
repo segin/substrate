@@ -4225,6 +4225,14 @@ static void format_string_for_diag(const char *stored, char *out, size_t cap) {
     out[j] = '\0';
 }
 
+/**
+ * Decode one string literal's escapes, once, as C does -- `\\` is one
+ * backslash, `\x41` and `\101` are 'A'.  asm templates, constraints and
+ * operand names are read through this: a template is the literal's
+ * value, so Linux's `"\\reg"` reaches the assembler as `\reg`, a macro
+ * argument.  (They were decoded twice, which turned it into a carriage
+ * return and "eg", and `\\type` into a tab and "ype".)
+ */
 static char *unescape_string_piece(const char *in) {
     size_t i;
     size_t j;
@@ -4242,13 +4250,11 @@ static char *unescape_string_piece(const char *in) {
     j = 0;
     for (i = 0; i < n; ++i) {
         if (in[i] == '\\' && i + 1 < n) {
-            char c = in[++i];
-            if (c == 'n') out[j++] = '\n';
-            else if (c == 't') out[j++] = '\t';
-            else if (c == 'r') out[j++] = '\r';
-            else if (c == '\\') out[j++] = '\\';
-            else if (c == '"') out[j++] = '"';
-            else out[j++] = c;
+            size_t adv = 0;
+            unsigned c = parser_decode_escape_unit((const unsigned char *)in + i + 1, n - i - 1, &adv);
+
+            out[j++] = (char)c;
+            i += adv > 0 ? adv : 1;
             continue;
         }
         out[j++] = in[i];
@@ -4261,20 +4267,13 @@ static char *parse_string_concat_literal(parser_t *p) {
     char *out = NULL;
     while (p->tok.kind == TOK_STR) {
         char *raw = dup_string_token(&p->tok);
-        char *tmp;
         char *part;
         if (raw == NULL) {
             free(out);
             return NULL;
         }
-        tmp = unescape_string_piece(raw);
+        part = unescape_string_piece(raw);
         free(raw);
-        if (tmp == NULL) {
-            free(out);
-            return NULL;
-        }
-        part = unescape_string_piece(tmp);
-        free(tmp);
         if (part == NULL) {
             free(out);
             return NULL;
