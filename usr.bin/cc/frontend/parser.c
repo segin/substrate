@@ -10585,9 +10585,11 @@ static int parse_function_params(parser_t *p, void *ctx) {
  * @param p          the parser, at the declarator
  * @param f          the function; receives name, params and ret_ctype
  * @param base       the specifiers' type
+ * @param attrs      receives the attributes written in the declarator before
+ *                   the name -- `char * __init f(void)` -- the function's
  * @return           0, or -1 on error (diagnosed)
  */
-static int parse_function_declarator(parser_t *p, cc_function_t *f, const cc_ctype_t *base) {
+static int parse_function_declarator(parser_t *p, cc_function_t *f, const cc_ctype_t *base, decl_attrs_t *attrs) {
     declarator_t d;
     const cc_ctype_t *t;
     size_t line = p->tok.line;
@@ -10596,6 +10598,7 @@ static int parse_function_declarator(parser_t *p, cc_function_t *f, const cc_cty
     memset(&d, 0, sizeof(d));
     d.name_params = parse_function_params;
     d.name_params_ctx = f;
+    d.attrs = attrs;
     if (parse_declarator_into(p, &d, 0) != 0) {
         declarator_free(&d);
         return -1;
@@ -10656,8 +10659,9 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         set_diag(p->diag, p->tok.line, p->tok.col, "expected function return type");
         return -1;
     }
-    if (parse_function_declarator(p, f, base) != 0) {
+    if (parse_function_declarator(p, f, base, &suffix_attrs) != 0) {
         decl_attrs_clear(&spec_attrs);
+        decl_attrs_clear(&suffix_attrs);
         return -1;
     }
     f->storage = fn_storage;
