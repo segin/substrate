@@ -9930,7 +9930,24 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         in.asm_out_sizes[i4] = (unsigned char)out_sz;
         if (op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL) {
             vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
-            if (vidx >= 0) {
+            if (vidx >= 0 && (*vars)[vidx].is_static_storage && is_mem_only) {
+                /*
+                 * A block-scope static or extern is an object by its symbol,
+                 * not a value: Linux's fpu__init_system_mxcsr() fxsaves into
+                 * `static struct fxregs_state fxregs` through "+m".
+                 */
+                const char *sym = (*vars)[vidx].static_sym != NULL ? (*vars)[vidx].static_sym : op->expr->ident;
+                int addrv = emit_global_addr(sf, sym, diag);
+
+                if (addrv < 0) {
+                    free_asm_instr_fields(&in);
+                    free(asm_out_store_ptr);
+                    free(asm_out_store_size);
+                    free(asm_out_store_type);
+                    return -1;
+                }
+                out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
+            } else if (vidx >= 0 && !(*vars)[vidx].is_static_storage) {
                 if (is_mem_only) {
                     int ptrv = ensure_local_var_addressable(tu, sf, &(*vars)[vidx], diag);
                     if (ptrv < 0) {
