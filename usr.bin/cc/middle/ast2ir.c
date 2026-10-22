@@ -5040,6 +5040,19 @@ static int lower_ident_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *
             }
             return in.dst;
         }
+        if (g != NULL && g->asm_register != NULL) {
+            /* a global register variable: no storage, the register itself (Linux's current_stack_pointer) */
+            in.op = CC_SSA_REGREAD;
+            in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+            in.sym = cc_strdup(g->asm_register);
+            if (in.dst < 0 || in.sym == NULL || cc_ir_push(sf, in) != 0) {
+                free(in.sym);
+                set_diag(diag, "out of memory reading a global register variable");
+                return -1;
+            }
+            cc_ir_set_size(sf, in.dst, (uint32_t)cc_target_pointer_size());
+            return in.dst;
+        }
         if (g != NULL) {
             /* an array's value is its address (the identifier's type, as sema settled it) */
             if (expr_is_array_obj) {
@@ -13747,6 +13760,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 out->globals[i].size_bytes = cc_ct_size(global_decl_ctype(&tu->globals[i]), tu);
             }
             out->globals[i].storage = tu->globals[i].storage;
+            if (tu->globals[i].asm_register != NULL) {
+                /* a global register variable has no storage: nothing to define (it was a .bss object, once per file) */
+                out->globals[i].storage = CC_STORAGE_EXTERN;
+                out->globals[i].has_init = 0;
+                continue;
+            }
             out->globals[i].attr_flags = tu->globals[i].attr_flags;
             out->globals[i].attr_align = tu->globals[i].attr_align;
             if (tu->globals[i].attr_section != NULL) {

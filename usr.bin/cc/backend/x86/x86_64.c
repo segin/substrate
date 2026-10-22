@@ -1529,6 +1529,14 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 break;
             }
 
+            case CC_SSA_REGREAD: {
+                /* a global register variable: the register as it is here (a 64-bit one, as %rsp) */
+                int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+
+                fprintf(fp, "\tmovq %%%s, %s\n", in->sym, ist.regs[rd]);
+                break;
+            }
+
             case CC_SSA_FRAMEADDR: {
                 /* every function keeps %rbp as its frame pointer: walk the saved ones up */
                 int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);

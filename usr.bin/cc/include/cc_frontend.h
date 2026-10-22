@@ -230,6 +230,7 @@ struct cc_stmt {
     long attr_align;
     char *attr_section;
     char *attr_alias;
+    char *asm_register; /**< a `register ... asm("reg")` declaration: the register, without % (owned) */
     cc_stmt_kind_t kind;
     int is_synthetic_block;
     char *decl_name;
@@ -400,6 +401,8 @@ typedef struct {
     long attr_align;
     char *attr_section;
     char *attr_alias;
+    char *asm_register; /**< a global register variable, `register T x asm("esp")`: its register, without %;
+                             it has no storage and reading it reads the register (owned) */
     cc_expr_t *init;
     const struct cc_ctype *ctype; /**< its type (cc_ctype.h): as declared, completed by a later declaration or,
                                        by sema, from its initializer */

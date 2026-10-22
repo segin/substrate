@@ -771,6 +771,7 @@ const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_DYNALLOC: return "dynalloc";
     case CC_SSA_CHAIN: return "chain";
     case CC_SSA_FRAMEADDR: return "frameaddr";
+    case CC_SSA_REGREAD: return "regread";
     case CC_SSA_LABEL: return "label";
     case CC_SSA_BR: return "br";
     case CC_SSA_BR_COND: return "br_cond";

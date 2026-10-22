@@ -148,6 +148,7 @@ typedef struct {
     long vector_bytes; /**< `vector_size(n)`: the vector's size in bytes; 0 for none */
     long vector_elems; /**< `ext_vector_type(n)`: its element count; 0 for none */
     int regparm;       /**< `regparm(n)` (i386): n + 1; 0 for none */
+    char *asm_label;   /**< the string of a declarator's `asm("...")`, whole (owned); NULL for none */
 } decl_attrs_t;
 
 static int is_decl_qual_tok(cc_tok_kind_t k);
@@ -3785,6 +3786,7 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->format_first_to_check = 0;
     a->section = NULL;
     a->alias = NULL;
+    a->asm_label = NULL;
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
@@ -3798,6 +3800,8 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->section = NULL;
     free(a->alias);
     a->alias = NULL;
+    free(a->asm_label);
+    a->asm_label = NULL;
     a->flags = 0;
     a->align = 0;
     a->format_index = 0;
@@ -3852,6 +3856,15 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     if (alias_dup != NULL) {
         free(dst->alias);
         dst->alias = alias_dup;
+    }
+    if (src->asm_label != NULL) {
+        char *label = cc_strndup(src->asm_label, strlen(src->asm_label));
+
+        if (label == NULL) {
+            return -1;
+        }
+        free(dst->asm_label);
+        dst->asm_label = label;
     }
     return 0;
 }
@@ -5210,6 +5223,56 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
         if (next_tok(p) != 0) {
             return -1;
         }
+        if (out_attrs != NULL && peek_kind(p) == TOK_STR) {
+            /* `asm("name")`, its strings joined (glibc writes `"" "__isoc23_fscanf"`): kept, for a
+             * global register variable's register */
+            char *label = NULL;
+
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            while (p->tok.kind == TOK_STR) {
+                char *piece = dup_string_token(&p->tok);
+                char *joined;
+
+                if (piece == NULL) {
+                    free(label);
+                    return -1;
+                }
+                if (label == NULL) {
+                    joined = piece;
+                } else {
+                    size_t a = strlen(label);
+                    size_t b = strlen(piece);
+
+                    joined = (char *)malloc(a + b + 1);
+                    if (joined != NULL) {
+                        memcpy(joined, label, a);
+                        memcpy(joined + a, piece, b + 1);
+                    }
+                    free(label);
+                    free(piece);
+                }
+                if (joined == NULL) {
+                    return -1;
+                }
+                label = joined;
+                if (next_tok(p) != 0) {
+                    free(label);
+                    return -1;
+                }
+            }
+            free(out_attrs->asm_label);
+            out_attrs->asm_label = label;
+            if (p->tok.kind != TOK_RPAREN) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected ')' after the asm label");
+                return -1;
+            }
+            if (next_tok(p) != 0) {
+                return -1;
+            }
+            continue;
+        }
         if (skip_balanced_parens(p) != 0) {
             return -1;
         }
@@ -5898,6 +5961,7 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->label_name);
     free(s->attr_section);
     free(s->attr_alias);
+    free(s->asm_register);
     cc_bounds_free(&s->array_bounds);
     free_expr(s->expr);
     free(s->asm_template);
@@ -5999,6 +6063,8 @@ static void free_global_decl(cc_global_t *g) {
     g->attr_section = NULL;
     free(g->attr_alias);
     g->attr_alias = NULL;
+    free(g->asm_register);
+    g->asm_register = NULL;
     free_expr(g->init);
     g->init = NULL;
 }
@@ -6077,6 +6143,10 @@ static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
         if (cur->attr_alias == NULL && g.attr_alias != NULL) {
             cur->attr_alias = g.attr_alias;
             g.attr_alias = NULL;
+        }
+        if (cur->asm_register == NULL && g.asm_register != NULL) {
+            cur->asm_register = g.asm_register;
+            g.asm_register = NULL;
         }
         free_global_decl(&g);
         return 0;
@@ -7548,6 +7618,7 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     dst->label_name = NULL;
     dst->attr_section = NULL;
     dst->attr_alias = NULL;
+    dst->asm_register = NULL;
     dst->expr = NULL;
     dst->init_stmt = NULL;
     dst->init_expr = NULL;
@@ -7589,6 +7660,13 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
     if (src->attr_alias != NULL) {
         dst->attr_alias = cc_strndup(src->attr_alias, strlen(src->attr_alias));
         if (dst->attr_alias == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
+    if (src->asm_register != NULL) {
+        dst->asm_register = cc_strndup(src->asm_register, strlen(src->asm_register));
+        if (dst->asm_register == NULL) {
             free_stmt(dst);
             return -1;
         }
@@ -9260,6 +9338,16 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 return -1;
             }
         }
+        if (merged_attrs.asm_label != NULL && (s.storage & CC_STORAGE_REGISTER) != 0) {
+            /* `register unsigned long current_stack_pointer asm("esp")`: the register is its storage */
+            const char *r = merged_attrs.asm_label[0] == '%' ? merged_attrs.asm_label + 1 : merged_attrs.asm_label;
+
+            s.asm_register = cc_strndup(r, strlen(r));
+            if (s.asm_register == NULL) {
+                free_stmt(&s);
+                return -1;
+            }
+        }
         decl_attrs_clear(&suffix_attrs);
         decl_attrs_clear(&merged_attrs);
         /* a parameter list after a plain name: a function declaration */
@@ -10183,6 +10271,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
         free(tu->globals[i].name);
         free(tu->globals[i].attr_section);
         free(tu->globals[i].attr_alias);
+        free(tu->globals[i].asm_register);
         free_expr(tu->globals[i].init);
     }
     free(tu->globals);
@@ -11065,6 +11154,8 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
                 decls[di].attr_section = NULL;
                 g.attr_alias = decls[di].attr_alias;
                 decls[di].attr_alias = NULL;
+                g.asm_register = decls[di].asm_register;
+                decls[di].asm_register = NULL;
                 g.init = decls[di].expr;
                 decls[di].expr = NULL;
                 g.ctype = decls[di].ctype;

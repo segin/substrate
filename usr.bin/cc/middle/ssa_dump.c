@@ -575,6 +575,9 @@ static void put_rhs(const dump_func_t *d, const cc_ssa_instr_t *in, FILE *out) {
     case CC_SSA_FRAMEADDR:
         fprintf(out, "frameaddr %s %lld", t, in->imm);
         return;
+    case CC_SSA_REGREAD:
+        fprintf(out, "regread %s @%s", t, in->sym != NULL ? in->sym : "");
+        return;
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
         fprintf(out, "%s %s ", in->call_is_variadic ? "call.va" : "call", t);

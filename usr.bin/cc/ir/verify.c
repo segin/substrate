@@ -258,6 +258,7 @@ static const op_info_t op_table[] = {
     {"undef", FORM_TYPE, TC_ANY, TC_NONE},
     {"chain", FORM_TYPE, TC_INT, TC_NONE},
     {"frameaddr", FORM_IMM, TC_ADDR, TC_NONE},
+    {"regread", FORM_SYM, TC_INT, TC_NONE},
     {"gaddr", FORM_SYM, TC_ADDR, TC_NONE},
     {"str", FORM_SYM, TC_ADDR, TC_NONE},
     {"load", FORM_LOAD, TC_ANY, TC_ADDR},

@@ -1588,6 +1588,14 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
                 break;
             }
 
+            case CC_SSA_REGREAD: {
+                /* a global register variable: the register as it is here */
+                int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+
+                fprintf(fp, "\tmovl %%%s, %s\n", in->sym, ist.regs[rd]);
+                break;
+            }
+
             case CC_SSA_FRAMEADDR: {
                 /* every function keeps %ebp as its frame pointer: walk the saved ones up */
                 int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
