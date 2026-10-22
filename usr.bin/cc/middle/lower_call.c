@@ -394,6 +394,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_strlen") == 0) {
         return BUILTIN_STRLEN;
     }
+    if (strcmp(name, "__builtin_strcmp") == 0) {
+        return BUILTIN_STRCMP;
+    }
     if (strcmp(name, "__builtin___memcpy_chk") == 0) {
         return BUILTIN_MEMCPY_CHK;
     }
@@ -1834,34 +1837,58 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         }
         return call_in.dst;
     }
-    if (bk == BUILTIN_STRLEN) {
+    if (bk == BUILTIN_STRLEN || bk == BUILTIN_STRCMP) {
+        /* of string literals a constant, as gcc folds it; otherwise the library's function */
+        size_t nargs = bk == BUILTIN_STRCMP ? 2 : 1;
         cc_ssa_instr_t call_in;
-        int arg0;
-        if (e->arg_count != 1 || e->args[0] == NULL) {
-            set_diag(diag, "__builtin_strlen lowering expects 1 argument");
+        long long folded;
+        int argv[2];
+        size_t ai;
+
+        if (e->arg_count != nargs) {
+            set_diag(diag, bk == BUILTIN_STRCMP ? "__builtin_strcmp lowering expects 2 arguments"
+                                                : "__builtin_strlen lowering expects 1 argument");
             return -1;
         }
-        arg0 = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
-        if (arg0 < 0) {
-            return -1;
+        if (eval_const_i64_expr(tu, e, &folded) == 0) {
+            int c = emit_const_u64_instr(sf, (unsigned long long)folded, diag);
+
+            if (c >= 0 && bk == BUILTIN_STRCMP) {
+                cc_ir_set_size(sf, c, 4);
+            }
+            return c;
         }
-        arg0 = cast_value(sf, arg0, CC_VAL_I64, diag);
-        if (arg0 < 0) {
-            return -1;
+        for (ai = 0; ai < nargs; ++ai) {
+            if (e->args[ai] == NULL) {
+                return -1;
+            }
+            argv[ai] = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[ai], diag);
+            if (argv[ai] < 0) {
+                return -1;
+            }
+            argv[ai] = cast_value(sf, argv[ai], CC_VAL_I64, diag);
+            if (argv[ai] < 0) {
+                return -1;
+            }
         }
         memset(&call_in, 0, sizeof(call_in));
         call_in.op = CC_SSA_CALL;
         call_in.call_is_variadic = 0;
-        call_in.sym = cc_strdup("strlen");
-        call_in.arg_count = 1;
-        call_in.args = (int *)calloc(1, sizeof(*call_in.args));
+        call_in.sym = cc_strdup(bk == BUILTIN_STRCMP ? "strcmp" : "strlen");
+        call_in.arg_count = (int)nargs;
+        call_in.args = (int *)calloc(nargs, sizeof(*call_in.args));
         call_in.dst = cc_ir_new_value(sf, CC_VAL_I64);
         if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
             free(call_in.sym);
             free(call_in.args);
             return -1;
         }
-        call_in.args[0] = arg0;
+        for (ai = 0; ai < nargs; ++ai) {
+            call_in.args[ai] = argv[ai];
+        }
+        if (bk == BUILTIN_STRCMP) {
+            cc_ir_set_size(sf, call_in.dst, 4);
+        }
         if (cc_ir_push(sf, call_in) != 0) {
             free(call_in.sym);
             free(call_in.args);

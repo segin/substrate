@@ -258,6 +258,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_strlen") == 0) {
         return BUILTIN_STRLEN;
     }
+    if (strcmp(name, "__builtin_strcmp") == 0) {
+        return BUILTIN_STRCMP;
+    }
     if (strcmp(name, "__builtin_memcpy") == 0) {
         return BUILTIN_MEMCPY;
     }
@@ -986,6 +989,23 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
+        return 0;
+    }
+    if (bk == BUILTIN_STRCMP) {
+        if (e->arg_count != 2) {
+            sema_diag(diag, "__builtin_strcmp expects exactly 2 arguments");
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!sx_is_ptr(e->args[0]) || !sx_is_ptr(e->args[1])) {
+            sema_diag(diag, "__builtin_strcmp arguments must be pointers");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_basic(CC_CT_INT));
         return 0;
     }
     if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||

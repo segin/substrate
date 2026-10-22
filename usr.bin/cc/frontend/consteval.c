@@ -7,6 +7,7 @@
 #include "cc_target.h"
 #include "cc_types.h"
 
+#include <ctype.h>
 #include <float.h>
 #include <string.h>
 
@@ -188,6 +189,72 @@ static int const_bitop_width(const char *name, const char *base) {
 }
 
 /**
+ * The bytes of narrow string literal @p e, its escapes decoded, up to its
+ * first NUL (as strlen and strcmp see it), through any conversion of it.
+ *
+ * @param e    the expression
+ * @param buf  receives the bytes; not NUL-terminated
+ * @param cap  its size
+ * @param len  receives how many
+ * @return     0, or -1 if @p e is no narrow literal (or one with a universal character name, or too long)
+ */
+static int const_literal_bytes(const cc_expr_t *e, unsigned char *buf, size_t cap, size_t *len) {
+    const unsigned char *s;
+    size_t n;
+    size_t i;
+    size_t out = 0;
+
+    while (e != NULL && e->kind == CC_EXPR_CAST && e->lhs != NULL) {
+        e = e->lhs;
+    }
+    if (e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL || cc_string_literal_is_wide(e)) {
+        return -1;
+    }
+    s = (const unsigned char *)e->ident;
+    n = strlen(e->ident);
+    if (n < 2 || s[0] != '"' || s[n - 1] != '"') {
+        return -1;
+    }
+    for (i = 1; i < n - 1; ++i) {
+        unsigned v = s[i];
+
+        if (s[i] == '\\' && i + 1 < n - 1) {
+            unsigned char c = s[++i];
+
+            if (c == 'x') {
+                v = 0;
+                while (i + 1 < n - 1 && isxdigit(s[i + 1])) {
+                    c = s[++i];
+                    v = v * 16 + (unsigned)(isdigit(c) ? c - '0' : (tolower(c) - 'a' + 10));
+                }
+            } else if (c >= '0' && c <= '7') {
+                int k = 1;
+
+                v = c - '0';
+                while (k < 3 && i + 1 < n - 1 && s[i + 1] >= '0' && s[i + 1] <= '7') {
+                    v = v * 8 + (unsigned)(s[++i] - '0');
+                    k++;
+                }
+            } else if (c == 'u' || c == 'U') {
+                return -1;
+            } else {
+                v = c == 'n' ? '\n' : c == 't' ? '\t' : c == 'r' ? '\r' : c == 'a' ? '\a' : c == 'b' ? '\b'
+                    : c == 'f' ? '\f' : c == 'v' ? '\v' : c == 'e' ? 27 : c;
+            }
+        }
+        if ((v & 0xffu) == 0) {
+            break;
+        }
+        if (out >= cap) {
+            return -1;
+        }
+        buf[out++] = (unsigned char)v;
+    }
+    *len = out;
+    return 0;
+}
+
+/**
  * The result type of a builtin the evaluator knows.
  *
  * @param e  the call
@@ -207,6 +274,9 @@ static const cc_ctype_t *const_builtin_type(const cc_expr_t *e) {
     }
     if (strcmp(name, "__builtin_expect") == 0) {
         return cc_ct_basic(CC_CT_LONG);
+    }
+    if (strcmp(name, "__builtin_strlen") == 0) {
+        return const_uintptr();
     }
     if (strcmp(name, "__builtin_choose_expr") == 0 && e->arg_count == 3) {
         cc_const_t c;
@@ -295,6 +365,38 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
             return -1;
         }
         return cc_const_eval(env, arg.bits != 0 ? e->args[1] : e->args[2], out);
+    }
+    if (strcmp(name, "__builtin_strlen") == 0 || strcmp(name, "__builtin_strcmp") == 0) {
+        /*
+         * Of string literals, constants, as gcc folds them: Linux's
+         * MODULE_INFO asserts `sizeof(s) - 1 == __builtin_strlen(s)`, and
+         * its sched comparisons pick an arm with `!__builtin_strcmp(">", "<")`.
+         */
+        unsigned char a[512];
+        unsigned char b[512];
+        size_t la;
+        size_t lb;
+        size_t i;
+        int r = 0;
+
+        if (strcmp(name, "__builtin_strlen") == 0) {
+            if (e->arg_count != 1 || const_literal_bytes(e->args[0], a, sizeof(a), &la) != 0) {
+                return -1;
+            }
+            return const_make((uint64_t)la, const_uintptr(), out);
+        }
+        if (e->arg_count != 2 || const_literal_bytes(e->args[0], a, sizeof(a), &la) != 0 ||
+            const_literal_bytes(e->args[1], b, sizeof(b), &lb) != 0) {
+            return -1;
+        }
+        for (i = 0; i < la && i < lb && a[i] == b[i]; ++i) {
+        }
+        if (i < la && i < lb) {
+            r = a[i] < b[i] ? -1 : 1;
+        } else if (la != lb) {
+            r = la < lb ? -1 : 1;
+        }
+        return const_make((uint64_t)(int64_t)r, const_int(), out);
     }
     if (e->arg_count != 1 || cc_const_eval(env, e->args[0], &arg) != 0) {
         return -1;
