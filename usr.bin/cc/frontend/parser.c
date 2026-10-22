@@ -1924,6 +1924,14 @@ static int is_declspec_ident(parser_t *p) {
     if (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t")) {
         return 1;
     }
+    /*
+     * so is __builtin_va_list, which parse_declspec() already reads; a
+     * block-scope `__builtin_va_list ap;` was taken for an expression --
+     * Linux's <linux/stdarg.h> makes every va_list one
+     */
+    if (tok_is_ident(p, "__builtin_va_list")) {
+        return 1;
+    }
     if (parser_is_gnu_mode() &&
         (tok_is_ident(p, "__signed__") || tok_is_ident(p, "__signed") || tok_is_ident(p, "__unsigned__") ||
          tok_is_ident(p, "__unsigned") || tok_is_ident(p, "__auto_type"))) {
