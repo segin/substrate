@@ -1630,6 +1630,16 @@ static size_t select_global_emit_index(const cc_ssa_module_t *m, size_t idx) {
     return best;
 }
 
+/**
+ * Say that @p name is a data object of @p size bytes, as gcc does: an STT_OBJECT with its size in the symbol
+ * table.  It was an untyped, unsized symbol, and a tool that looks for an object by its type found nothing
+ * (Linux's scripts/sorttable, after main_extable_sort_needed, failed the vmlinux link).
+ */
+static void emit_object_type_size(FILE *fp, const char *name, long size) {
+    fprintf(fp, ".type %s, @object\n", name);
+    fprintf(fp, ".size %s, %ld\n", name, size > 0 ? size : 0);
+}
+
 static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc_diag_t *diag) {
     size_t i;
     for (i = 0; i < m->global_count; ++i) {
@@ -1688,6 +1698,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             if (align > 1) {
                 fprintf(fp, ".align %ld\n", align);
             }
+            emit_object_type_size(fp, g->name, sz);
             fprintf(fp, "%s:\n", g->name);
             fprintf(fp, "\t.zero %ld\n", sz);
             continue;
@@ -1704,6 +1715,7 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
         if (align > 1) {
             fprintf(fp, ".align %ld\n", align);
         }
+        emit_object_type_size(fp, g->name, sz);
         fprintf(fp, "%s:\n", g->name);
         if (g->init_item_count > 0) {
             if (g->init_items[0].init_size > 0 || g->init_items[0].init_is_zero_fill) {
