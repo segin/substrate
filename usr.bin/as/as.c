@@ -1956,6 +1956,16 @@ static int push_macro_arg_slice(strvec_t *out, const char *start, const char *en
     return 0;
 }
 
+/**
+ * Whether @p c is a character GAS's i386 scrubber counts as part of an
+ * operand (a symbol component, or one of `* % - ( [` that may start one):
+ * whitespace between two of them separates; anywhere else it is dropped.
+ */
+static int x86_operand_char(char c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '.' || c == '$' || c == '*' || c == '%' || c == '-' ||
+           c == '(' || c == '[';
+}
+
 static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
     const char *start;
     size_t i;
@@ -1992,6 +2002,18 @@ static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
                     return -1;
                 }
                 return 0;
+            }
+            if (as_scan_dialect() == AS_DIALECT_X86 && s + i > start &&
+                !(x86_operand_char(s[i - 1]) &&
+                  (x86_operand_char(*next) || *next == '"' || *next == '\'' || *next == '\\'))) {
+                /*
+                 * GAS's scrubber keeps whitespace in operands only between
+                 * two characters an operand can hold, so `1 << 2` and
+                 * Linux's `type=(17 | ((-14) << 16)) | ((3) << 12)` are one
+                 * argument, while `1 -2` is two.
+                 */
+                i = (size_t)(next - s) - 1;
+                continue;
             }
             if (*next != '\0' && *next != '\n') {
                 if (push_macro_arg_slice(out, start, s + i) != 0) {
