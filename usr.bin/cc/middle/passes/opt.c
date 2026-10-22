@@ -992,47 +992,145 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
     return 0;
 }
 
-int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
+/**
+ * Fold, drop unreachable code and remove dead values in @p f.
+ *
+ * Folding a branch on a constant makes code unreachable; removing it can
+ * leave a label with one predecessor fewer and a compare more to fold.
+ * Until neither finds anything (or a few rounds).  -O0 folds only the
+ * branches whose condition is a constant on every path
+ * (fold_const_branches()): gcc drops the dead arms of `if (0)` and
+ * `switch (sizeof(x))` even then, and code relies on it -- an arm may
+ * hold inline asm the target's assembler refuses.
+ *
+ * @param f          the function
+ * @param opt_level  the -O level
+ * @return 0, or -1 when out of memory
+ */
+static int optimize_function(cc_ssa_function_t *f, int opt_level) {
+    int rc1;
+    int rc2;
+    int rc3 = 0;
+    int round = 0;
+
+    if (opt_level <= 0) {
+        do {
+            rc1 = fold_const_branches(f);
+            rc3 = rc1 > 0 ? unreachable_function(f) : 0;
+        } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
+        rc2 = 0;
+    } else {
+        do {
+            rc1 = fold_function(f);
+            rc3 = rc1 < 0 ? 0 : unreachable_function(f);
+        } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
+        rc2 = dce_function(f);
+    }
+    return rc1 < 0 || rc2 < 0 || rc3 < 0 ? -1 : 0;
+}
+
+/** The index of the function of @p m that @p sym calls, or -1 when it is not one of the module's. */
+static long called_function(const cc_ssa_module_t *m, const char *sym) {
     size_t i;
-    (void)diag;
 
     for (i = 0; i < m->func_count; ++i) {
-        int rc1;
-        int rc2;
-        int rc3 = 0;
-        int round = 0;
+        if (m->funcs[i].name != NULL && strcmp(m->funcs[i].name, sym) == 0) {
+            return (long)i;
+        }
+    }
+    return -1;
+}
 
-        /*
-         * Folding a branch on a constant makes code unreachable; removing
-         * it can leave a label with one predecessor fewer and a compare
-         * more to fold.  Until neither finds anything (or a few rounds).
-         * -O0 folds only the branches whose condition is a constant on
-         * every path (fold_const_branches()): gcc drops the dead arms of
-         * `if (0)` and `switch (sizeof(x))` even then, and code relies on
-         * it -- an arm may hold inline asm the target's assembler refuses.
-         */
-        if (opt_level <= 0) {
-            do {
-                rc1 = fold_const_branches(&m->funcs[i]);
-                rc3 = rc1 > 0 ? unreachable_function(&m->funcs[i]) : 0;
-            } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
-            rc2 = 0;
-        } else {
-            do {
-                rc1 = fold_function(&m->funcs[i]);
-                rc3 = rc1 < 0 ? 0 : unreachable_function(&m->funcs[i]);
-            } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
-            rc2 = dce_function(&m->funcs[i]);
+/**
+ * Inline the module's small static inline functions (passes/inline.c) bottom-up: a function is
+ * rewritten once every function it calls is, so what it copies has its own calls inlined and is
+ * folded; then it is folded again, and a call guarded by what an inlined body made constant goes
+ * with its dead arm.  A function on a cycle of calls is not inlined into the cycle.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int inline_module(cc_ssa_module_t *m, int opt_level) {
+    size_t n = m->func_count;
+    unsigned char *open = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    unsigned char *done = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    size_t *stack = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*stack));
+    size_t *next = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*next));
+    size_t root;
+    int rc = 0;
+
+    if (open == NULL || done == NULL || stack == NULL || next == NULL) {
+        rc = -1;
+        goto out;
+    }
+    for (root = 0; root < n && rc == 0; ++root) {
+        size_t top = 0;
+
+        if (open[root]) {
+            continue;
         }
-        if (rc1 < 0 || rc2 < 0 || rc3 < 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                diag->path[0] = '\0';
-                diag->line = 0;
-                diag->col = 0;
-                snprintf(diag->message, sizeof(diag->message), "out of memory in optimizer");
+        open[root] = 1;
+        next[root] = 0;
+        stack[top++] = root;
+        while (top > 0 && rc == 0) {
+            size_t fi = stack[top - 1];
+            cc_ssa_function_t *f = &m->funcs[fi];
+            long gi = -1;
+
+            /* the first function it calls not yet visited, visited first */
+            while (next[fi] < f->instr_count && gi < 0) {
+                const cc_ssa_instr_t *in = &f->instrs[next[fi]++];
+
+                if (in->op == CC_SSA_CALL && in->sym != NULL) {
+                    gi = called_function(m, in->sym);
+                    if (gi >= 0 && open[gi]) {
+                        gi = -1;
+                    }
+                }
             }
-            return -1;
+            if (gi >= 0) {
+                open[gi] = 1;
+                next[gi] = 0;
+                stack[top++] = (size_t)gi;
+                continue;
+            }
+            top--;
+            rc = cc_inline_calls(m, fi, done);
+            if (rc > 0) {
+                rc = optimize_function(&m->funcs[fi], opt_level);
+            }
+            if (rc > 0) {
+                rc = 0;
+            }
+            done[fi] = 1;
         }
+    }
+out:
+    free(open);
+    free(done);
+    free(stack);
+    free(next);
+    return rc < 0 ? -1 : 0;
+}
+
+int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
+    size_t i;
+    int oom = 0;
+
+    for (i = 0; i < m->func_count && !oom; ++i) {
+        oom = optimize_function(&m->funcs[i], opt_level) != 0;
+    }
+    /* gcc inlines static inline functions from -O1 and folds what they make constant */
+    if (!oom && opt_level > 0) {
+        oom = inline_module(m, opt_level) != 0;
+    }
+    if (oom) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            diag->path[0] = '\0';
+            diag->line = 0;
+            diag->col = 0;
+            snprintf(diag->message, sizeof(diag->message), "out of memory in optimizer");
+        }
+        return -1;
     }
     /* after the functions' own passes: a call that was in a dead arm no longer keeps its callee */
     if (remove_unused_static_functions(m, opt_level) != 0) {

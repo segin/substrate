@@ -19,4 +19,27 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag);
  */
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 
+/**
+ * Whether @p g may be inlined (passes/inline.c): static, inline by its
+ * storage or always_inline and not noinline, small enough, its interface
+ * plain values, and its body free of what depends on its own frame.
+ *
+ * @param g  the function
+ * @return   1 if it may, else 0
+ */
+int cc_inline_candidate(const cc_ssa_function_t *g);
+
+/**
+ * Replace each call in function @p fi of @p m of a function that may be
+ * inlined, and is marked in @p ready, by a copy of its body
+ * (passes/inline.c).
+ *
+ * @param m      the module
+ * @param fi     the function to rewrite
+ * @param ready  per function of @p m: 1 if its body is final, its own
+ *               calls inlined and folded, so it may be copied
+ * @return       how many calls were inlined, or -1 when out of memory
+ */
+int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready);
+
 #endif

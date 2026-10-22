@@ -149,6 +149,19 @@ alone is
 as in
 .Xr gcc 1 .
 Every level above 0 currently runs the same passes.
+From
+.Fl O1
+a call of a small
+.Ic static inline
+(or
+.Ic always_inline )
+function of the same file is replaced by the function's body, and what
+that makes constant is folded, so a call a constant helper guards is
+dropped with its dead branch, as with
+.Xr gcc 1 .
+At
+.Fl O0
+nothing is inlined.
 .It Fl m32 , Fl m64
 Target i386 or x86_64 ABI.
 The default is the ABI
@@ -186,7 +199,11 @@ function definition is an external definition, and an
 .Ic extern inline
 one is for inlining only and defines no external symbol.
 .Nm
-does not inline; it emits an inline-only definition as a local copy.
+emits an inline-only definition as a local copy, which
+.Fl O1
+and up inline where they can, as any
+.Ic static inline
+function.
 .It Fl shared
 Link shared object.
 .It Fl pthread
