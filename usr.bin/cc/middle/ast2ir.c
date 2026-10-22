@@ -880,9 +880,13 @@ int lower_designates_function(const cc_expr_t *e) {
  *
  * @param tu  the translation unit
  * @param t   the type
- * @return    the step, or -1 if @p t is not a pointer to a complete type
+ * @return    the step -- 0 for a complete type of no size, an empty
+ *            structure (GNU) or a zero-length array, as a uniprocessor
+ *            Linux's spinlock_t is -- or -1 if @p t is not a pointer to
+ *            a complete type
  */
 static long ct_pointer_step(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    const cc_ctype_t *of;
     long n;
 
     if (t == NULL || t->kind != CC_CT_POINTER || t->of == NULL) {
@@ -892,7 +896,17 @@ static long ct_pointer_step(const cc_translation_unit_t *tu, const cc_ctype_t *t
         return 1;
     }
     n = cc_ct_size(t->of, tu);
-    return n > 0 ? n : -1;
+    if (n > 0) {
+        return n;
+    }
+    for (of = t->of->unqual; of != NULL && of->kind == CC_CT_ARRAY && of->count > 0; of = of->of->unqual) {
+    }
+    if (n == 0 && of != NULL &&
+        ((of->kind == CC_CT_ARRAY && of->count == 0) ||
+         (of->kind == CC_CT_RECORD && of->id >= 0 && (size_t)of->id < tu->struct_count && tu->structs[of->id].complete))) {
+        return 0;
+    }
+    return -1;
 }
 
 /**
@@ -5626,7 +5640,7 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         }
 
         elem_size = lower_pointer_step(tu, ptr_expr);
-        if (elem_size <= 0) {
+        if (elem_size < 0) {
             set_diag(diag, "unsupported pointer base type in lowering");
             return -1;
         }
@@ -6148,7 +6162,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             /* a pointer to a variable-length array steps by a run-time stride, below */
             if (ct_is_pointer(lower_var_ctype(&vars[idx])) && !vars[idx].vla_is_pointer) {
                 step = ct_pointer_step(tu, lower_var_ctype(&vars[idx]));
-                if (step <= 0) {
+                if (step < 0) {
                     set_diag(diag, "unsupported pointer ++/-- type in lowering");
                     return -1;
                 }
@@ -6251,7 +6265,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             }
             if (ct_is_pointer(lower_global_ctype(g))) {
                 step = ct_pointer_step(tu, lower_global_ctype(g));
-                if (step <= 0) {
+                if (step < 0) {
                     set_diag(diag, "unsupported pointer ++/-- type in lowering");
                     return -1;
                 }
@@ -6322,7 +6336,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             if (step <= 0) {
                 step = lower_pointer_step(tu, e);
             }
-            if (step <= 0) {
+            if (step < 0) {
                 set_diag(diag, "unsupported pointer ++/-- type in lowering");
                 return -1;
             }
@@ -11264,7 +11278,7 @@ static int apply_global_ptr_addend(long base, long idx, long step, int is_sub, l
     if (out == NULL) {
         return -1;
     }
-    if (step <= 0) {
+    if (step < 0) {
         step = 1;
     }
     if (idx > 0 && step > LONG_MAX / idx) {
