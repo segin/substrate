@@ -34,6 +34,12 @@ extern int mys_setvbuf(mys_FILE *stream, char *buf, int mode, size_t size);
 extern mys_FILE *mys_tmpfile(void);
 extern void mys_perror(const char *s);
 extern int mys_fprintf(mys_FILE *stream, const char *format, ...);
+extern int mys_fseeko(mys_FILE *stream, off_t offset, int whence);
+extern off_t mys_ftello(mys_FILE *stream);
+extern void mys___fpurge(mys_FILE *stream);
+extern int mys___freading(mys_FILE *stream);
+extern int mys___fwriting(mys_FILE *stream);
+extern size_t mys___fpending(mys_FILE *stream);
 
 extern mys_FILE *mys_stdout;
 extern mys_FILE *mys_stderr;
@@ -731,6 +737,147 @@ void test_stdio_perror(void) {
 
 extern void mys___stdio_init(void);
 
+// fflush on a seekable input stream leaves the descriptor at the stream's
+// position and drops a pushed-back character -- gnulib's "fflush works on
+// input streams" test, step for step.  The old fflush threw the read-ahead
+// away without seeking back (step 5 failed), so every native gnulib
+// configure replaced fflush, fseeko and ftello with code that stops on an
+// unknown FILE layout.
+void test_stdio_fflush_input_syncs_fd(void) {
+	const char *fname = "test_fflush_in.tmp";
+	char buf[10];
+	int fd, c;
+
+	seed_file(fname, "1234567890", 10);
+	mys_FILE *f = mys_fopen(fname, "r");
+	assert(f != NULL);
+	fd = mys_fileno(f);
+	assert(mys_fread(buf, 1, 5, f) == 5);
+	assert(lseek(fd, 0, SEEK_CUR) != 5);           // it read ahead
+	assert(mys_fflush(f) == 0 && mys_fseek(f, 0, SEEK_CUR) == 0);
+	assert(lseek(fd, 0, SEEK_CUR) == 5);
+	c = mys_fgetc(f);                              // backup ungetc
+	mys_ungetc(c, f);
+	mys_fflush(f);
+	assert(mys_fgetc(f) == c);
+	c = mys_fgetc(f);                              // non-backup ungetc
+	mys_ungetc('@', f);
+	mys_fflush(f);
+	assert(mys_fgetc(f) == c);
+	assert(mys_fclose(f) == 0);
+	unlink(fname);
+	printf("test_stdio_fflush_input_syncs_fd passed\n");
+}
+
+// An update stream read to end-of-file and then written appends where it
+// left off, and ftell follows -- gnulib's "ftello works" test.  The old
+// fwrite wrote into the read buffer, so the read-ahead went out again with
+// the new byte ("foogarshh!"), and ftell chose its arithmetic by open mode.
+void test_stdio_read_then_write(void) {
+	const char *fname = "test_rw_switch.tmp";
+	char buf[16];
+
+	seed_file(fname, "foogarsh", 8);
+	mys_FILE *f = mys_fopen(fname, "r+");
+	assert(f != NULL);
+	assert(mys_fseek(f, -1, SEEK_END) == 0);
+	assert(mys_fgetc(f) == 'h');
+	assert(mys_fgetc(f) == EOF);
+	assert(mys_ftell(f) == 8);
+	assert(mys_fputc('!', f) == '!');
+	assert(mys_ftell(f) == 9);
+	assert(mys_ftello(f) == 9);
+	assert(mys_fclose(f) == 0);
+	assert(host_size(fname) == 9);
+	f = mys_fopen(fname, "r");
+	assert(mys_fread(buf, 1, sizeof buf, f) == 9);
+	assert(memcmp(buf, "foogarsh!", 9) == 0);
+	assert(mys_fclose(f) == 0);
+
+	// Written mid-file after a read, through an fseek as C requires.
+	seed_file(fname, "abcdefghij", 10);
+	f = mys_fopen(fname, "r+");
+	assert(mys_fgetc(f) == 'a' && mys_fgetc(f) == 'b');
+	assert(mys_fseek(f, 0, SEEK_CUR) == 0);
+	assert(mys_fputc('X', f) == 'X');
+	assert(mys_fclose(f) == 0);
+	f = mys_fopen(fname, "r");
+	assert(mys_fread(buf, 1, sizeof buf, f) == 10);
+	assert(memcmp(buf, "abXdefghij", 10) == 0);
+	assert(mys_fclose(f) == 0);
+	unlink(fname);
+	printf("test_stdio_read_then_write passed\n");
+}
+
+// An update stream written and then read (through fflush or fseek, as C
+// requires) keeps what it wrote.  The old fread marked the buffer as read
+// data without writing it out, so fflush and fclose never did either.
+void test_stdio_write_then_read(void) {
+	const char *fname = "test_wr_switch.tmp";
+	char buf[16];
+
+	seed_file(fname, "", 0);
+	mys_FILE *f = mys_fopen(fname, "w+");
+	assert(f != NULL);
+	assert(mys_fputs("hello", f) >= 0);
+	assert(mys_fseek(f, 0, SEEK_SET) == 0);
+	assert(mys_fread(buf, 1, 5, f) == 5 && memcmp(buf, "hello", 5) == 0);
+	assert(mys_fclose(f) == 0);
+
+	// Straight from a write to a read at end-of-file: the write must
+	// still reach the file.
+	f = mys_fopen(fname, "a+");
+	assert(mys_fputs(" world", f) >= 0);
+	assert(mys_fgetc(f) == EOF);
+	assert(mys_fclose(f) == 0);
+	assert(host_size(fname) == 11);
+	unlink(fname);
+	printf("test_stdio_write_then_read passed\n");
+}
+
+// fflush(NULL) -- which exit() uses -- flushes output streams only, and
+// leaves an input stream's read-ahead (and its descriptor) alone.
+void test_stdio_fflush_all_skips_input(void) {
+	const char *fname = "test_fflush_null_in.tmp";
+
+	seed_file(fname, "0123456789", 10);
+	mys_FILE *f = mys_fopen(fname, "r");
+	assert(mys_fgetc(f) == '0');
+	off_t before = lseek(mys_fileno(f), 0, SEEK_CUR);
+	assert(mys_fflush(NULL) == 0);
+	assert(lseek(mys_fileno(f), 0, SEEK_CUR) == before);
+	assert(mys_fgetc(f) == '1');
+	assert(mys_fclose(f) == 0);
+	unlink(fname);
+	printf("test_stdio_fflush_all_skips_input passed\n");
+}
+
+// The <stdio_ext.h> queries gnulib uses instead of reading FILE fields.
+void test_stdio_ext(void) {
+	const char *fname = "test_stdio_ext.tmp";
+
+	seed_file(fname, "0123456789", 10);
+	mys_FILE *f = mys_fopen(fname, "r+");
+	assert(f != NULL);
+	assert(!mys___freading(f) && !mys___fwriting(f));
+	assert(mys_fgetc(f) == '0');
+	assert(mys___freading(f) && !mys___fwriting(f));
+	assert(mys___fpending(f) == 0);
+	assert(mys_fseek(f, 0, SEEK_CUR) == 0);
+	assert(mys_fputs("ab", f) >= 0);
+	assert(mys___fwriting(f) && !mys___freading(f));
+	assert(mys___fpending(f) == 2);
+	mys___fpurge(f);                    // drop "ab" unwritten
+	assert(mys___fpending(f) == 0);
+	assert(mys_fclose(f) == 0);
+	char buf[10];
+	int fd = open(fname, O_RDONLY);
+	assert(read(fd, buf, 10) == 10 && memcmp(buf, "0123456789", 10) == 0);
+	close(fd);
+	unlink(fname);
+	printf("test_stdio_ext passed\n");
+}
+
 int main(void) {
 	mys___stdio_init(); // Crucial to initialize Substrate stdio streams
 	printf("Running Substrate stdio tests...\n");
@@ -762,6 +909,11 @@ int main(void) {
 	test_stdio_setvbuf_fbf();
 	test_stdio_tmpfile();
 	test_stdio_perror();
+	test_stdio_fflush_input_syncs_fd();
+	test_stdio_read_then_write();
+	test_stdio_write_then_read();
+	test_stdio_fflush_all_skips_input();
+	test_stdio_ext();
 	printf("All stdio tests passed!\n");
 	return 0;
 }

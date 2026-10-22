@@ -1,0 +1,95 @@
+.\" __fpurge.3 - stdio_ext.h stream queries and buffer purge
+.TH __FPURGE 3 "2026-10-21" "Substrate" "Library Functions Manual"
+.SH NAME
+__fpurge, __freading, __fwriting, __fpending \- inspect and purge a stream's buffer
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio_ext.h>
+.PP
+.BI "void __fpurge(FILE *" stream ");"
+.BI "int __freading(FILE *" stream ");"
+.BI "int __fwriting(FILE *" stream ");"
+.BI "size_t __fpending(FILE *" stream ");"
+.SH DESCRIPTION
+.BR __fpurge ()
+discards everything
+.I stream
+has buffered: output not yet written, input read ahead but not yet
+consumed, and a character pushed back with
+.BR ungetc (3).
+Nothing is written and the underlying file descriptor's offset is not
+moved; contrast
+.BR fflush (3),
+which writes pending output and gives read-ahead back to a seekable file.
+.PP
+.BR __freading ()
+returns non-zero if
+.I stream
+is open for reading only, or if its last operation was a read.
+.PP
+.BR __fwriting ()
+returns non-zero if
+.I stream
+is open for writing only, or if its last operation was a write.
+.PP
+An update stream that has not yet been read or written, or has just been
+flushed or repositioned, is neither reading nor writing.
+.PP
+.BR __fpending ()
+returns the number of bytes of output
+.I stream
+holds that have not yet been written to the file.
+.SH RETURN VALUE
+.BR __fpurge ()
+returns no value.
+.BR __freading ()
+and
+.BR __fwriting ()
+return non-zero or zero as described above.
+.BR __fpending ()
+returns a byte count, zero for a stream that holds no output.
+.PP
+None of these functions sets
+.IR errno .
+.SH NOTES
+These functions are extensions provided under the same names by glibc and
+Solaris.
+gnulib looks for them before falling back to code that reads the fields
+of
+.I FILE
+for a list of known C libraries, and stops the build on any other with
+.RI \(dq "Please port gnulib fpurge.c to your platform!" \(dq
+and similar.
+.PP
+.BR __fbufsize (),
+.BR __flbf (),
+.BR __freadahead ()
+and the rest of the family are not provided.
+.SH EXAMPLE
+The following program buffers some output, then thinks better of it.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <stdio_ext.h>
+
+int
+main(void)
+{
+    fputs("never shown", stdout);
+    printf("%zu bytes pending\en", __fpending(stdout));
+    __fpurge(stdout);       /* both lines are dropped */
+    puts("only this line is written");
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR fflush (3),
+.BR fopen (3),
+.BR __fseterr (3),
+.BR setvbuf (3),
+.BR ungetc (3)
+.SH STANDARDS
+None; these are nonstandard extensions.

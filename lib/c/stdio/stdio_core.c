@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,6 +81,25 @@ static int __fflush_write(FILE *f) {
 		f->pos = f->buffer;
 	}
 	return 0;
+}
+
+/*
+ * Give back a read stream's read-ahead.  The descriptor is ahead of the
+ * stream by the bytes buffered but not yet consumed, plus one for a
+ * character pushed back by ungetc(); seek it back by that much so its
+ * offset is the stream's position, and discard the buffer and the
+ * pushback.  This is what POSIX asks of fflush() on a seekable input
+ * stream, and what makes a switch from reading to writing land where the
+ * caller has read to.  On a pipe or terminal the seek fails and the data
+ * is simply dropped.
+ */
+static void __fsync_read(FILE *f) {
+	off_t ahead = (off_t)(f->limit - f->pos) + (f->has_unget ? 1 : 0);
+
+	if (ahead > 0)
+		(void)lseek(f->fd, -ahead, SEEK_CUR);
+	f->pos = f->limit = f->buffer;
+	f->has_unget = 0;
 }
 
 FILE *fdopen(int fd, const char *mode) {
@@ -171,11 +191,15 @@ int fflush(FILE *stream) {
 	if(!stream) {
 		/* Walk the shared open-FILE list under the lock so a
 		 * concurrent fdopen/fclose can't splice a node mid-traversal. */
+		/* Output streams only, as in glibc and musl: exit() flushes
+		 * through here, and should not move the offset of every input
+		 * stream's descriptor (stdin's above all) on the way out. */
 		int ret = 0;
 		__file_list_lock_acquire();
 		FILE *current = g_file_list_head;
 		while(current) {
-			if(fflush(current) == EOF) ret = EOF;
+			if(current->rw_state == _IO_RW_WRITE &&
+			   fflush(current) == EOF) ret = EOF;
 			current = current->next;
 		}
 		__file_list_lock_release();
@@ -185,10 +209,12 @@ int fflush(FILE *stream) {
 	 * read-buffered or idle stream — including an update-mode "r+" stream last
 	 * used for reading — the buffer holds data read FROM the file, and the old
 	 * unconditional __fflush_write() wrote that read-ahead back, corrupting the
-	 * file (e.g. fopen("f","r+"); fgetc(f); fclose(f)). */
+	 * file (e.g. fopen("f","r+"); fgetc(f); fclose(f)).  Such a stream gives
+	 * its read-ahead back instead, leaving the descriptor at the stream's
+	 * position. */
 	if(stream->rw_state != _IO_RW_WRITE) {
-		stream->pos = stream->buffer;
-		stream->limit = stream->buffer;
+		__fsync_read(stream);
+		stream->rw_state = _IO_RW_NONE;
 		return 0;
 	}
 	int r = __fflush_write(stream);
@@ -298,6 +324,15 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     size_t read_bytes = 0;
     unsigned char *dest = ptr;
 
+    /* An update stream switching from writing to reading: write out what
+     * is buffered first.  The buffer is about to hold read data, and once
+     * it says so fflush() would never write the old contents. */
+    if (stream->rw_state == _IO_RW_WRITE) {
+        if (__fflush_write(stream) == EOF)
+            return 0;
+        stream->pos = stream->limit = stream->buffer;
+    }
+
     /* The buffer now holds (or will hold) READ data; a subsequent fflush()
      * must not write it back to the file. */
     stream->rw_state = _IO_RW_READ;
@@ -377,6 +412,14 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     size_t written = 0;
     const unsigned char *src = ptr;
 
+    /* An update stream switching from reading to writing (legal after a
+     * read that hit end-of-file, or after fflush/fseek): give back the
+     * read-ahead, so the write lands where the caller has read to and the
+     * buffer starts empty.  Writing into the read buffer instead put the
+     * read-ahead out with the new data, at the descriptor's offset. */
+    if (stream->rw_state != _IO_RW_WRITE)
+        __fsync_read(stream);
+
     if (stream->mode == _IONBF) {
         /* Loop over short writes — a single write() may transfer fewer
          * bytes than requested (signal, pipe capacity, etc.).  The old
@@ -430,60 +473,17 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 int fseek(FILE *stream, long offset, int whence) {
-	/* SEEK_CUR must compensate for read-ahead buffering: after an
-	 * fread, the kernel's file position is N bytes past the caller's
-	 * logical position, where N = (limit - pos) bytes still buffered
-	 * (plus one for ungetc).  Compute the compensation BEFORE fflush
-	 * — fflush on a read stream resets pos/limit to the buffer base
-	 * (per the POSIX 2017 input-fflush contract this is incomplete,
-	 * but it's what we do today) which destroys the pending count.
-	 * Without this adjustment, fseek(-16, SEEK_CUR) right after
-	 * reading 8 bytes lseeks the fd by -16 from its already-advanced
-	 * position rather than from the caller's view, landing far past
-	 * where the caller expects.  BFD's bfd_generic_archive_p hits
-	 * this exact pattern when probing ar archives — reads the 8-byte
-	 * magic, reads 16 more for the first member header, then seeks
-	 * back -16 — and silently sees garbage if the seek lands inside
-	 * the first member's content. */
-	long pending = 0;
-	if (whence == SEEK_CUR) {
-		pending = stream->limit - stream->pos;
-		if (stream->has_unget) pending++;
-	}
-
-	fflush(stream);
-
-	if (whence == SEEK_CUR)
-		offset -= pending;
-
-	stream->pos = stream->limit = stream->buffer;
-	stream->has_unget = 0;
-	stream->eof = 0;
-
-	/* A failed seek (ESPIPE on a pipe, EINVAL for a bad offset) is not
-	 * an I/O error: report it through errno alone, as C and POSIX
-	 * specify, and leave the error indicator clear.  Setting it made a
-	 * probing fseek(stdout, 0, SEEK_CUR) on a pipe poison the stream,
-	 * so later ferror() checks saw a write error that never happened. */
-	if (lseek(stream->fd, offset, whence) == -1)
-		return -1;
-	return 0;
+	return fseeko(stream, (off_t)offset, whence);
 }
 
 long ftell(FILE *stream) {
-	long pos = lseek(stream->fd, 0, SEEK_CUR);
+	off_t pos = ftello(stream);
 	if(pos == -1) return -1;
-
-	int access_mode = stream->flags & O_ACCMODE;
-	if(access_mode == O_RDONLY || access_mode == O_RDWR) {
-		// Read mode: subtract unread buffered data
-		pos -= (stream->limit - stream->pos);
-		if(stream->has_unget) pos--;
-	} else {
-		// Write mode: add buffered but unflushed data
-		pos += (stream->pos - stream->buffer);
+	if(pos > LONG_MAX) {
+		errno = EOVERFLOW;
+		return -1;
 	}
-	return pos;
+	return (long)pos;
 }
 
 int fgetpos(FILE *stream, fpos_t *pos) {
@@ -498,18 +498,14 @@ int fsetpos(FILE *stream, const fpos_t *pos) {
 }
 
 int fseeko(FILE *stream, off_t offset, int whence) {
-	/* Same buffer-compensation rationale as fseek() above — compute
-	 * pending BEFORE fflush. */
-	off_t pending = 0;
-	if (whence == SEEK_CUR) {
-		pending = (off_t)(stream->limit - stream->pos);
-		if (stream->has_unget) pending++;
-	}
-
-	fflush(stream);
-
-	if (whence == SEEK_CUR)
-		offset -= pending;
+	/* fflush() leaves the descriptor at the stream's position: it writes
+	 * out a write buffer, and gives back a read buffer's read-ahead (and
+	 * pushback).  So SEEK_CUR is relative to where the caller is, not to
+	 * where read-ahead left the descriptor -- BFD's ar probe reads 8
+	 * bytes of magic and 16 of header, then seeks back -16, and lands in
+	 * the first member's content if the read-ahead is not given back. */
+	if (fflush(stream) == EOF)
+		return -1;
 
 	stream->pos = stream->limit = stream->buffer;
 	stream->has_unget = 0;
@@ -529,12 +525,14 @@ off_t ftello(FILE *stream) {
 	off_t pos = lseek(stream->fd, 0, SEEK_CUR);
 	if(pos == -1) return -1;
 
-	int access_mode = stream->flags & O_ACCMODE;
-	if(access_mode == O_RDONLY || access_mode == O_RDWR) {
+	/* Go by what the buffer holds, not by the open mode: an update
+	 * stream's buffer holds read-ahead after reading and unwritten data
+	 * after writing. */
+	if(stream->rw_state == _IO_RW_WRITE) {
+		pos += (stream->pos - stream->buffer);
+	} else {
 		pos -= (stream->limit - stream->pos);
 		if(stream->has_unget) pos--;
-	} else {
-		pos += (stream->pos - stream->buffer);
 	}
 	return pos;
 }
@@ -574,6 +572,29 @@ int feof(FILE *stream) { return stream->eof; }
 int ferror(FILE *stream) { return stream->error; }
 /* Declared in <stdio_ext.h>; see there for why this exists. */
 void __fseterr(FILE *stream) { stream->error = 1; }
+
+/* The rest of the <stdio_ext.h> family that gnulib looks for before
+ * falling back to FILE-layout code that stops on an unknown libc. */
+void __fpurge(FILE *stream) {
+	stream->pos = stream->limit = stream->buffer;
+	stream->has_unget = 0;
+	stream->rw_state = _IO_RW_NONE;
+}
+
+int __freading(FILE *stream) {
+	return (stream->flags & O_ACCMODE) == O_RDONLY ||
+	       stream->rw_state == _IO_RW_READ;
+}
+
+int __fwriting(FILE *stream) {
+	return (stream->flags & O_ACCMODE) == O_WRONLY ||
+	       stream->rw_state == _IO_RW_WRITE;
+}
+
+size_t __fpending(FILE *stream) {
+	return stream->rw_state == _IO_RW_WRITE ?
+	       (size_t)(stream->pos - stream->buffer) : 0;
+}
 #undef fileno
 int fileno(FILE *stream) { return stream ? stream->fd : -1; }
 

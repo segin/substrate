@@ -36,6 +36,10 @@ vscanf mys_vscanf
 vfscanf mys_vfscanf
 fseeko mys_fseeko
 ftello mys_ftello
+__fpurge mys___fpurge
+__freading mys___freading
+__fwriting mys___fwriting
+__fpending mys___fpending
 fgetpos mys_fgetpos
 fsetpos mys_fsetpos
 fdopen mys_fdopen

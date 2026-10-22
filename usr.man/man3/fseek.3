@@ -72,14 +72,28 @@ The
 .BR ftell ()
 function obtains the current value of the file position indicator for
 .IR stream .
-For streams opened for reading the value returned by
+When the stream's buffer holds data read from the file, the value
+returned by
 .BR lseek (2)
 is adjusted downward by the number of bytes that have been buffered but
 not yet returned to the caller, including any character pending from
 .BR ungetc (3).
-For streams opened for writing the value is adjusted upward by the
-number of bytes buffered but not yet flushed to the underlying file
-descriptor.
+When it holds data written by the caller, the value is adjusted upward
+by the number of bytes buffered but not yet flushed to the underlying
+file descriptor.
+Which applies depends on the stream's last operation, not on the mode it
+was opened in, so an update stream
+.RB ( \(dqr+\(dq ,
+.BR \(dqw+\(dq ,
+.BR \(dqa+\(dq )
+reports the right position after either.
+If the position does not fit in a
+.IR long ,
+.BR ftell ()
+fails with
+.BR EOVERFLOW ;
+.BR ftello ()
+does not have that limit.
 .PP
 The
 .BR ftello ()

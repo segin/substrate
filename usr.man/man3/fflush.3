@@ -18,12 +18,18 @@ The buffered bytes are passed to
 .BR write (2);
 no data remains in the stream's user-space buffer on successful return.
 .PP
-For input streams associated with a seekable file,
+For input streams \(em and update streams whose last operation was a
+read \(em
 .BR fflush ()
 discards any buffered data that has been fetched from the underlying file
-but not yet consumed by the application.
-The stream's read position and read limit are reset so that subsequent reads
-refetch from the underlying file descriptor.
+but not yet consumed by the application, and any character pushed back with
+.BR ungetc (3).
+If the file is seekable, the underlying file descriptor's offset is moved
+back by that amount, so that it is the stream's position, as POSIX
+requires; the next read refetches from there.
+On a pipe or terminal the buffered data is simply discarded.
+.BR fclose (3)
+does the same before it closes the descriptor.
 .PP
 The open status of the stream is unaffected.
 .PP
@@ -34,9 +40,13 @@ argument is
 .BR fflush ()
 walks the global list of open
 .B FILE
-streams maintained by the library and flushes every one of them, applying the
-rules above to each stream individually according to its mode.
-This is the behavior required by C99 \[char167]7.19.5.2.
+streams maintained by the library and flushes every one that holds
+unwritten output.
+Input streams are left alone: their read-ahead stays buffered and their
+descriptors do not move.
+.BR exit (3)
+flushes streams this way.
+glibc and musl behave the same.
 If any of the per-stream flushes fails, the call returns
 .B EOF
 but processing of the remaining streams continues so that as many streams as
@@ -103,7 +113,7 @@ main(void)
 .BR write (2),
 .BR fclose (3),
 .BR fopen (3),
-.BR fpurge (3),
+.BR __fpurge (3),
 .BR setvbuf (3)
 .SH STANDARDS
 The
