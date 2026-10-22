@@ -21,8 +21,8 @@ module "ir/agg.c" {
     %v12 = const i32 1;
     %v13 = shl i64 %v11, 32;
     %v14 = ashr i32 %v13, 32;
-    %v15 = shl i64 %v12, 32;
-    %v16 = ashr i32 %v15, 32;
+    %v15 = const i64 4294967296;
+    %v16 = const i32 1;
     %v17 = add i64 %v14, %v16;
     %v18 = shl i64 %v17, 32;
     %v19 = ashr i32 %v18, 32;
@@ -33,8 +33,8 @@ module "ir/agg.c" {
     %v23 = const i32 2;
     %v24 = shl i64 %v22, 32;
     %v25 = ashr i32 %v24, 32;
-    %v26 = shl i64 %v23, 32;
-    %v27 = ashr i32 %v26, 32;
+    %v26 = const i64 8589934592;
+    %v27 = const i32 2;
     %v28 = add i64 %v25, %v27;
     %v29 = shl i64 %v28, 32;
     %v30 = ashr i32 %v29, 32;
@@ -84,8 +84,8 @@ module "ir/agg.c" {
     %v4 = undef agg12;
     %v0 = stackalloc i64 12;
     %v1 = const i32 3;
-    %v2 = shl i64 %v1, 32;
-    %v3 = ashr i32 %v2, 32;
+    %v2 = const i64 12884901888;
+    %v3 = const i32 3;
     %t0 = stackalloc agg12 12;
     set agg12 %v4, %t0;
     %t1 = call agg12 @mk(%v3) sret 12 %v4;

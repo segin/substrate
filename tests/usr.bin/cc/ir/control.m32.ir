@@ -81,7 +81,7 @@ module "ir/control.c" {
   L3:
     %v9 = const i32 -1;
     %v10 = const i32 1;
-    %v11 = mul i32 %v9, %v10;
+    %v11 = const i32 -1;
     ret i32 %v11;
   }
 }

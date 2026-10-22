@@ -20,6 +20,18 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag);
 int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 
 /**
+ * Fold the constant values of @p f (passes/opt.c), its branches left as
+ * they are: legalization runs it at every -O level before a target splits
+ * operations, so i386 computes `KTIME_MAX / NSEC_PER_SEC` at compile time,
+ * as gcc does, rather than calling __divdi3, and 64-bit constants are not
+ * taken apart into words to be put back together.
+ *
+ * @param f  the function
+ * @return   0, or -1 when out of memory
+ */
+int cc_fold_constant_values(cc_ssa_function_t *f);
+
+/**
  * Whether @p g may be inlined (passes/inline.c): static, inline by its
  * storage or always_inline and not noinline, small enough, its interface
  * plain values, and its body free of what depends on its own frame.

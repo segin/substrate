@@ -265,7 +265,8 @@ int cc_middle_legalize_module(cc_ssa_module_t *m, cc_diag_t *diag) {
     for (i = 0; i < m->func_count; ++i) {
         const cc_target_desc_t *tgt = cc_target_current();
 
-        if (legalize_ext(&m->funcs[i], diag) != 0 ||
+        /* constants folded before a target splits what it cannot compute in one operation */
+        if (legalize_ext(&m->funcs[i], diag) != 0 || cc_fold_constant_values(&m->funcs[i]) != 0 ||
             (tgt->legalize != NULL && tgt->legalize(&m->funcs[i], diag) != 0) ||
             legalize_function(&m->funcs[i], diag) != 0) {
             return(-1);

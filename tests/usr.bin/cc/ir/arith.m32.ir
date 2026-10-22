@@ -40,7 +40,7 @@ module "ir/arith.c" {
     %v11 = const i32 4294967295;
     %v12 = and i32 %v9, %v11;
     %v13 = const i32 4294967295;
-    %v14 = and i32 %v10, %v13;
+    %v14 = const i32 2;
     %v15 = lshr i32 %v12, %v14;
     %v16 = const i32 4294967295;
     %v17 = and i32 %v15, %v16;
@@ -73,7 +73,7 @@ module "ir/arith.c" {
     %v13 = const i32 4294967295;
     %v14 = and i32 %v11, %v13;
     %v15 = const i32 4294967295;
-    %v16 = and i32 %v12, %v15;
+    %v16 = const i32 5;
     %v17 = icmp ult i32 %v14, %v16;
     %v18 = add i32 %v10, %v17;
     %v19 = load i32 4, %v7;

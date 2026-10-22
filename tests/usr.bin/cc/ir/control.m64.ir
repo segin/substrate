@@ -13,20 +13,20 @@ module "ir/control.c" {
     %v3 = ashr i32 %v2, 32;
     store i32 4, %v3, %v1;
     %v5 = const i32 0;
-    %v6 = shl i64 %v5, 32;
-    %v7 = ashr i32 %v6, 32;
+    %v6 = const i64 0;
+    %v7 = const i32 0;
     set i32 %v4, %v7;
     %v8 = stackalloc i64 4;
-    %v9 = shl i64 %v4, 32;
-    %v10 = ashr i32 %v9, 32;
+    %v9 = const i64 0;
+    %v10 = const i32 0;
     store i32 4, %v10, %v8;
     %v12 = const i32 0;
-    %v13 = shl i64 %v12, 32;
-    %v14 = ashr i32 %v13, 32;
+    %v13 = const i64 0;
+    %v14 = const i32 0;
     set i32 %v11, %v14;
     %v15 = stackalloc i64 4;
-    %v16 = shl i64 %v11, 32;
-    %v17 = ashr i32 %v16, 32;
+    %v16 = const i64 0;
+    %v17 = const i32 0;
     store i32 4, %v17, %v15;
     br L0;
   L0:
@@ -67,16 +67,16 @@ module "ir/control.c" {
     %v44 = const i32 100;
     %v45 = shl i64 %v43, 32;
     %v46 = ashr i32 %v45, 32;
-    %v47 = shl i64 %v44, 32;
-    %v48 = ashr i32 %v47, 32;
+    %v47 = const i64 429496729600;
+    %v48 = const i32 100;
     %v49 = icmp sgt i32 %v46, %v48;
     %v50 = const i64 0;
     %v51 = icmp ne i32 %v49, %v50;
     br_cond i32 %v51, L4, L5;
   L4:
     %v53 = const i32 100;
-    %v54 = shl i64 %v53, 32;
-    %v55 = ashr i32 %v54, 32;
+    %v54 = const i64 429496729600;
+    %v55 = const i32 100;
     set i32 %v52, %v55;
     br L6;
   L5:
@@ -110,26 +110,26 @@ module "ir/control.c" {
     br_cond i32 %v8, L2, L3;
   L1:
     %v9 = const i32 10;
-    %v10 = shl i64 %v9, 32;
-    %v11 = ashr i32 %v10, 32;
+    %v10 = const i64 42949672960;
+    %v11 = const i32 10;
     ret i32 %v11;
   L2:
     %v12 = const i32 20;
-    %v13 = shl i64 %v12, 32;
-    %v14 = ashr i32 %v13, 32;
+    %v13 = const i64 85899345920;
+    %v14 = const i32 20;
     ret i32 %v14;
   L3:
     %v15 = const i32 -1;
     %v16 = const i32 1;
-    %v17 = shl i64 %v15, 32;
-    %v18 = ashr i32 %v17, 32;
-    %v19 = shl i64 %v16, 32;
-    %v20 = ashr i32 %v19, 32;
-    %v21 = mul i64 %v18, %v20;
-    %v22 = shl i64 %v21, 32;
-    %v23 = ashr i32 %v22, 32;
-    %v24 = shl i64 %v23, 32;
-    %v25 = ashr i32 %v24, 32;
+    %v17 = const i64 -4294967296;
+    %v18 = const i32 -1;
+    %v19 = const i64 4294967296;
+    %v20 = const i32 1;
+    %v21 = const i64 -1;
+    %v22 = const i64 -4294967296;
+    %v23 = const i32 -1;
+    %v24 = const i64 -4294967296;
+    %v25 = const i32 -1;
     ret i32 %v25;
   }
 }

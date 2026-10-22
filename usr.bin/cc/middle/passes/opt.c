@@ -225,7 +225,13 @@ static long long fold_int_cmp(cc_cmp_kind_t kind, int is_unsigned, int word32, l
     return 0;
 }
 
-static int fold_function(cc_ssa_function_t *f) {
+/**
+ * Fold what is constant in @p f: arithmetic, compares and conversions of known values become
+ * CONSTs, and with @p fold_branches a branch on a known condition a jump.
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int fold_function(cc_ssa_function_t *f, int fold_branches) {
     const_state_t *st;
     const_state_t *g;
     size_t i;
@@ -505,7 +511,8 @@ static int fold_function(cc_ssa_function_t *f) {
 
         case CC_SSA_BR_COND:
             /* a branch on a known condition goes one way: unreachable_function() removes the other */
-            if (in->lhs >= 0 && in->lhs < f->value_count && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64) {
+            if (fold_branches && in->lhs >= 0 && in->lhs < f->value_count && st[in->lhs].known &&
+                st[in->lhs].type == CC_VAL_I64) {
                 in->label = st[in->lhs].i != 0 ? in->true_label : in->false_label;
                 in->op = CC_SSA_BR;
                 in->lhs = -1;
@@ -992,6 +999,10 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
     return 0;
 }
 
+int cc_fold_constant_values(cc_ssa_function_t *f) {
+    return fold_function(f, 0) < 0 ? -1 : 0;
+}
+
 /**
  * Fold, drop unreachable code and remove dead values in @p f.
  *
@@ -1021,7 +1032,7 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
         rc2 = 0;
     } else {
         do {
-            rc1 = fold_function(f);
+            rc1 = fold_function(f, 1);
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
         } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
         rc2 = dce_function(f);
