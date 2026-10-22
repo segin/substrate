@@ -5052,11 +5052,15 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
 
     if (query_version) {
         /*
-         * Its own name, and no one else's: a configure script that reads
-         * "GNU assembler" here takes it for one with every feature of
-         * that version, and does not try them.
+         * GNU-compatible, as ld says of itself: build systems that accept
+         * only a GNU or LLVM assembler -- Linux's scripts/as-version.sh is
+         * one -- read the first line, and the version is the binutils
+         * release whose syntax and options this assembler takes.  A
+         * script that trusts the version instead of probing can be told
+         * of a feature this assembler lacks; as-instr-style probes still
+         * get the truth.
          */
-        printf("as (Substrate assembler)\n");
+        printf("GNU assembler (Substrate) 2.42.0\n");
         printf("Assembles for i386 and x86-64, to ELF or to a flat binary, and for ARM and AArch64, to ELF.\n");
         return 0;
     }

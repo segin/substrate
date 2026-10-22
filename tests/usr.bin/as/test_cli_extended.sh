@@ -171,16 +171,18 @@ done
 cmp -s help.out help2.out || bad "--target-help with a source: prints something else"
 
 # --- --version ----------------------------------------------------------
-# Prints and stops, like --target-help.  It says what it is -- and does
-# not say it is GNU's, which a configure script would take for a promise
-# of everything that assembler does.
+# Prints and stops, like --target-help.  The first line is GNU's form,
+# "GNU assembler (<package>) <version>", with Substrate as the package:
+# build systems that accept only a GNU or LLVM assembler read it (Linux's
+# scripts/as-version.sh takes the second word and the last), as ld's
+# "GNU ld (Substrate)" is read.
 for opt in --version -v; do
     rm -f t.o
     "$AS" "$opt" > ver.out 2> ver.err
     [ $? -eq 0 ] || bad "$opt: does not exit 0"
     [ -s ver.err ] && bad "$opt: writes to the standard error"
-    grep -q 'Substrate assembler' ver.out || bad "$opt: does not say it is the Substrate assembler: $(head -1 ver.out)"
-    grep -qi 'GNU\|Binutils' ver.out && bad "$opt: claims to be GNU's: $(grep -i 'GNU\|Binutils' ver.out | head -1)"
+    head -1 ver.out | grep -q '^GNU assembler (Substrate) [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' ||
+        bad "$opt: first line is not GNU's form naming Substrate: $(head -1 ver.out)"
     "$AS" "$opt" -32 -o t.o att.s > ver2.out 2>&1
     [ -e t.o ] && bad "$opt with a source: assembles it"
     cmp -s ver.out ver2.out || bad "$opt with a source: prints something else"

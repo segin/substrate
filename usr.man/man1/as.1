@@ -261,9 +261,20 @@ has for the machine being allowed.
 Refused when the machine is x86.
 .It Fl -version , Fl v
 Print what this assembler is, and exit.
-It names itself the Substrate assembler: it is not GNU
-.Nm ,
-and a script that asks should not be told it is.
+The first line is
+.Dl GNU assembler (Substrate) 2.42.0
+in GNU
+.Nm Ns 's
+form, naming the binutils release whose syntax and options this
+assembler takes, as
+.Xr ld 1
+does.
+Build systems that accept only a GNU or LLVM assembler, such as Linux's,
+read that line.
+It is not GNU
+.Nm :
+a script that trusts the version rather than trying a feature can be
+told of one this assembler lacks.
 .It Fl -target Ns = Ns Ar name
 The machine to assemble for:
 .Cm i386 ,
