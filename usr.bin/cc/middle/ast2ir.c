@@ -12804,7 +12804,9 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
             break;
         }
 
-        if (raw != NULL && raw->kind == CC_EXPR_STR) {
+        /* a string fills an array of characters; for an array of pointers (`const char *ident[2]`) it is one element */
+        if (raw != NULL && raw->kind == CC_EXPR_STR &&
+            (cc_string_literal_is_wide(raw) ? cc_ct_is_integer(elem) : cc_ct_is_character(elem))) {
             if (fill_fixed_char_array_from_string(raw, elem, elem_size, max_elems, field_off, buf, buf_size, diag) != 0) {
                 return -1;
             }
