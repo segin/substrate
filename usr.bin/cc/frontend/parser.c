@@ -9307,7 +9307,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     long base_typedef_align; /* the alignment of a typedef name among the specifiers, or 0 */
     int base_struct_id; /* the structure the specifiers name, else -1 */
     decl_attrs_t base_attrs;
-    unsigned char start_vis = p->tok.default_vis; /* a visibility pragma's, where the declaration begins */
+    /* a visibility pragma's, where the declaration begins: for a file-scope one; a block's has no visibility */
+    unsigned char start_vis = p->scope_depth == 0 ? p->tok.default_vis : (unsigned char)CC_LEX_VIS_DEFAULT;
 
     decl_attrs_reset(&base_attrs);
     if (parse_declspec(p, &base_spec, 1, "expected declaration type", &is_typedef, &base_saw_restrict,
