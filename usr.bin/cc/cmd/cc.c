@@ -1519,12 +1519,15 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     use_stdin_tmp = 1;
   }
 
-  if ((target_flag != NULL && target_flag[0] != '\0') ||
+  if ((target_flag != NULL && target_flag[0] != '\0') || use_stdin_tmp ||
       (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0)) {
     size_t j;
     size_t extra = (target_flag != NULL && target_flag[0] != '\0') ? 1 : 0;
     if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
       extra += 2;
+    }
+    if (use_stdin_tmp) {
+      extra += 1;
     }
     pp_flags_aug = (const char **)calloc(pp_count + extra, sizeof(*pp_flags_aug));
     if (pp_flags_aug == NULL) {
@@ -1544,6 +1547,13 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
       pp_flags_aug[pp_count++] = as_def1;
       pp_flags_aug[pp_count++] = as_def2;
+    }
+    if (use_stdin_tmp) {
+      /* The input is a copy of standard input: the preprocessor names it
+       * "<stdin>" and leaves it out of the dependencies, as GCC does --
+       * a temporary that is gone by the time make reads the .d file
+       * stopped Linux's fixdep ("error opening file: /tmp/ccstdin..."). */
+      pp_flags_aug[pp_count++] = "--cc-stdin";
     }
     pp_flags = pp_flags_aug;
   }

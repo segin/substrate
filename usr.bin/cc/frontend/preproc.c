@@ -30,6 +30,8 @@
 #endif
 
 #define PP_MAX_INCLUDE_DEPTH 128
+/** The name standard input goes by in line markers, __FILE__ and diagnostics. */
+#define PP_STDIN_NAME "<stdin>"
 #define PP_MAX_EXPAND_DEPTH 32
 #define PP_MAX_EXPAND_PASSES 2
 #define PP_MAX_EXPANDED_TEXT (64 * 1024 * 1024)
@@ -114,6 +116,12 @@ typedef struct {
     int std_is_c23;
     int std_is_gnu;
     const char *base_file;
+    /**
+     * The main file is the driver's copy of standard input (--cc-stdin):
+     * it is named "<stdin>" wherever a name is shown, is not a dependency,
+     * and the dependency rule's default target is "-", as in GCC.
+     */
+    int main_is_stdin;
     int include_level;
     unsigned long counter_value;
     size_t output_bytes;
@@ -2479,9 +2487,18 @@ static int emit_dependency_file(pp_state_t *st, const char *in_path) {
     if (!st->dep_emit) {
         return 0;
     }
+    /* GCC names standard input "-" here: the rule is "-: ..." and a
+     * default dependency file "-.d", never the driver's temporary copy. */
+    if (st->main_is_stdin) {
+        in_path = "-";
+    }
 
     if (st->dep_target != NULL && st->dep_target[0] != '\0') {
         if (sb_append_escaped_make_target(&dep, st->dep_target, st->target_quote) != 0) {
+            goto fail;
+        }
+    } else if (st->main_is_stdin) {
+        if (sb_append(&dep, "-") != 0) {
             goto fail;
         }
     } else {
@@ -2657,6 +2674,11 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
     size_t i;
     for (i = 0; i < flag_count; ++i) {
         const char *f = flags[i];
+        if (strcmp(f, "--cc-stdin") == 0) {
+            st->main_is_stdin = 1;
+            st->base_file = PP_STDIN_NAME;
+            continue;
+        }
         if (strcmp(f, "-P") == 0) {
             st->emit_line_markers = 0;
             continue;
@@ -6133,6 +6155,10 @@ static int pp_emit_embed_file(pp_state_t *st, FILE *out, const char *path) {
 }
 
 static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int depth, int macros_only, cc_diag_t *diag) {
+    /* Standard input is read from the driver's copy but named "<stdin>"
+     * everywhere else; its quoted includes are then looked up from ".",
+     * as GCC does. */
+    const char *open_path = path;
     FILE *fp;
     sb_t line = {0};
     sb_t stripped = {0};
@@ -6150,6 +6176,9 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     int old_include_level = st->include_level;
     const char *old_diag_file = g_pp_diag_file;
 
+    if (depth == 0 && st->main_is_stdin) {
+        path = PP_STDIN_NAME;
+    }
     g_pp_diag_file = path;
 
     if (depth > (int)st->max_include_depth) {
@@ -6165,13 +6194,13 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
         return 0;
     }
 
-    fp = fopen(path, "r");
+    fp = fopen(open_path, "r");
     if (fp == NULL) {
         set_diag(diag, 0, 0, "failed to open include file");
         g_pp_diag_file = old_diag_file;
         return -1;
     }
-    if (dep_add_path(st, path, 0, depth == 0) != 0) {
+    if (!(depth == 0 && st->main_is_stdin) && dep_add_path(st, path, 0, depth == 0) != 0) {
         goto fail;
     }
     if (pp_emit_line_marker(st, out, 1, path) != 0) {

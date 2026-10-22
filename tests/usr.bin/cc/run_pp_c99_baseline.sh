@@ -39,6 +39,21 @@ test -s $CC_TMP/cc_pp_s3_md.d
 grep -q 'out.o' $CC_TMP/cc_pp_s3_md.d
 grep -q '\$\$dep\\\\:target' $CC_TMP/cc_pp_s3_md.d
 
+# Standard input, as GCC treats it (Linux's checksyscalls.sh runs
+# `cc -E -x c - -Wp,-MD,<file>` and fixdep then opens every dependency):
+# named "<stdin>" in line markers and __FILE__, not a dependency, rule
+# target "-".  The driver's temporary copy appeared in all three, and was
+# gone by the time fixdep looked for it.
+printf '#include "pp_s3_quote.h"\nconst char *f = __FILE__;\n' |
+	"$CC_BIN" -E -x c - -I. -Wp,-MD,$CC_TMP/cc_pp_stdin.d -o $CC_TMP/cc_pp_stdin.i
+grep -q '^#line 1 "<stdin>"' $CC_TMP/cc_pp_stdin.i
+grep -q 'const char \*f = "<stdin>";' $CC_TMP/cc_pp_stdin.i
+! grep -q 'ccstdin' $CC_TMP/cc_pp_stdin.i $CC_TMP/cc_pp_stdin.d
+grep -q '^-:' $CC_TMP/cc_pp_stdin.d
+grep -q 'pp_s3_quote.h' $CC_TMP/cc_pp_stdin.d
+printf 'int x = ;\n' | "$CC_BIN" -c -x c - -o $CC_TMP/cc_pp_stdin.o 2>$CC_TMP/cc_pp_stdin.err || true
+grep -q '^<stdin>:1:' $CC_TMP/cc_pp_stdin.err
+
 "$CC_BIN" -E -v -I. -isystem . pp_s3_main.c -o $CC_TMP/cc_pp_s3_v.i 2>$CC_TMP/cc_pp_s3_v.log
 grep -q 'cpp include search paths:' $CC_TMP/cc_pp_s3_v.log
 grep -q '/usr/include' $CC_TMP/cc_pp_s3_v.log
