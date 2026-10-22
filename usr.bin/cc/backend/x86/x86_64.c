@@ -1529,6 +1529,18 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 break;
             }
 
+            case CC_SSA_FRAMEADDR: {
+                /* every function keeps %rbp as its frame pointer: walk the saved ones up */
+                int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                long long k;
+
+                fprintf(fp, "\tmovq %%rbp, %s\n", ist.regs[rd]);
+                for (k = 0; k < in->imm; ++k) {
+                    fprintf(fp, "\tmovq (%s), %s\n", ist.regs[rd], ist.regs[rd]);
+                }
+                break;
+            }
+
             case CC_SSA_DYNALLOC:
                 if (emit_dynalloc(fp, f, &lay, &ist, in, j, diag) != 0) {
                     int_regs_free(&ist);

@@ -55,6 +55,7 @@ static const builtin_name_t g_known_builtins[] = {
     {"__builtin_cpu_supports"},
     {"__builtin_strlen"},
     {"__builtin_strcmp"},
+    {"__builtin_extract_return_addr"},
     {"__builtin_memcpy"},
     {"__builtin_memmove"},
     {"__builtin_memset"},

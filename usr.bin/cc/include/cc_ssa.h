@@ -105,6 +105,7 @@ typedef enum {
     CC_SSA_STACKALLOC,
     CC_SSA_DYNALLOC,   /**< dst = lhs bytes taken off the stack; rhs, if >= 0, a STACKALLOC save slot (below) */
     CC_SSA_CHAIN,      /**< dst = the static chain register as the function was entered (the first instruction) */
+    CC_SSA_FRAMEADDR,  /**< dst = the frame pointer imm frames up (0: this function's), as __builtin_frame_address */
     CC_SSA_LABEL,
     CC_SSA_BR,
     CC_SSA_BR_COND,

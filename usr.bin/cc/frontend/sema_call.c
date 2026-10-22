@@ -261,6 +261,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_strcmp") == 0) {
         return BUILTIN_STRCMP;
     }
+    if (strcmp(name, "__builtin_extract_return_addr") == 0) {
+        return BUILTIN_EXTRACT_RETURN_ADDR;
+    }
     if (strcmp(name, "__builtin_memcpy") == 0) {
         return BUILTIN_MEMCPY;
     }
@@ -1006,6 +1009,21 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             return -1;
         }
         sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        return 0;
+    }
+    if (bk == BUILTIN_EXTRACT_RETURN_ADDR) {
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__builtin_extract_return_addr expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        if (!sx_is_ptr(e->args[0])) {
+            sema_diag(diag, "__builtin_extract_return_addr argument must be a pointer");
+            return -1;
+        }
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
         return 0;
     }
     if (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMSET || bk == BUILTIN_MEMCPY_CHK ||

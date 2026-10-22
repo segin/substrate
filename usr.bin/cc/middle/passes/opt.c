@@ -240,6 +240,7 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_STACKALLOC:
         case CC_SSA_DYNALLOC:
         case CC_SSA_CHAIN:
+        case CC_SSA_FRAMEADDR:
         case CC_SSA_LOAD:
         case CC_SSA_LO32:
         case CC_SSA_HI32:
@@ -746,6 +747,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_STR:
     case CC_SSA_GADDR:
     case CC_SSA_LADDR:
+    case CC_SSA_FRAMEADDR:
     case CC_SSA_STACKALLOC:
     case CC_SSA_LOAD:
     case CC_SSA_ADD:

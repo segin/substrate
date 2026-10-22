@@ -397,6 +397,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_strcmp") == 0) {
         return BUILTIN_STRCMP;
     }
+    if (strcmp(name, "__builtin_extract_return_addr") == 0) {
+        return BUILTIN_EXTRACT_RETURN_ADDR;
+    }
+    if (strcmp(name, "__builtin_return_address") == 0) {
+        return BUILTIN_RETURN_ADDRESS;
+    }
+    if (strcmp(name, "__builtin_frame_address") == 0) {
+        return BUILTIN_FRAME_ADDRESS;
+    }
     if (strcmp(name, "__builtin___memcpy_chk") == 0) {
         return BUILTIN_MEMCPY_CHK;
     }
@@ -1095,6 +1104,73 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             return -1;
         }
         return v0;
+    }
+    if (bk == BUILTIN_EXTRACT_RETURN_ADDR) {
+        /* on x86 a return address is the code address itself */
+        if (e->arg_count != 1) {
+            set_diag(diag, "__builtin_extract_return_addr lowering expects 1 argument");
+            return -1;
+        }
+        return lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+    }
+    if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
+        /*
+         * The frame pointer N frames up; a return address is the word
+         * above the saved frame pointer it was pushed before.  They were
+         * calls to functions nobody defines, and Linux's _RET_IP_ is one.
+         */
+        long long level;
+        cc_ssa_instr_t in;
+        int v;
+
+        if (e->arg_count != 1 || eval_const_i64_expr(tu, e->args[0], &level) != 0 || level < 0) {
+            set_diag(diag, bk == BUILTIN_RETURN_ADDRESS
+                               ? "__builtin_return_address argument must be a non-negative integer constant"
+                               : "__builtin_frame_address argument must be a non-negative integer constant");
+            return -1;
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_FRAMEADDR;
+        in.lhs = -1;
+        in.rhs = -1;
+        in.imm = level;
+        in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+        if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory lowering __builtin_frame_address");
+            return -1;
+        }
+        v = in.dst;
+        if (bk == BUILTIN_RETURN_ADDRESS) {
+            int off = cc_ir_const(sf, cc_target_pointer_size());
+
+            if (off < 0) {
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_ADD;
+            in.lhs = v;
+            in.rhs = off;
+            in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+            if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+                set_diag(diag, "out of memory lowering __builtin_return_address");
+                return -1;
+            }
+            cc_ir_set_size(sf, in.dst, cc_target_pointer_size());
+            v = in.dst;
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_LOAD;
+            in.lhs = v;
+            in.rhs = -1;
+            in.imm = cc_target_pointer_size();
+            in.is_unsigned = 1;
+            in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+            if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+                set_diag(diag, "out of memory lowering __builtin_return_address");
+                return -1;
+            }
+            v = in.dst;
+        }
+        return v;
     }
     if (bk == BUILTIN_CONSTANT_P) {
         int is_const = 0;

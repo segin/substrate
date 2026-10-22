@@ -53,6 +53,7 @@ int cc_ir_push(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_STACKALLOC:
         case CC_SSA_DYNALLOC:
         case CC_SSA_VA_START:
+        case CC_SSA_FRAMEADDR:
             cc_ssa_value_set_unsigned(f, in.dst, 1);
             break;
         default:
@@ -83,6 +84,7 @@ int cc_ir_push(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         case CC_SSA_STACKALLOC:
         case CC_SSA_DYNALLOC:
         case CC_SSA_VA_START:
+        case CC_SSA_FRAMEADDR:
             cc_ir_set_size(f, in.dst, cc_target_pointer_size());
             break;
         case CC_SSA_CONST:
