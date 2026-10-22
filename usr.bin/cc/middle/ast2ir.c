@@ -13686,6 +13686,25 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 size_t z;
                 const cc_expr_t *struct_init = init;
 
+                if (tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count &&
+                    tu->structs[struct_id].complete && tu->structs[struct_id].size == 0) {
+                    /*
+                     * An object of size 0 -- an empty structure, as a
+                     * uniprocessor Linux's spinlock_t is, or an array of them
+                     * -- still has an address: one zero byte, as a local of
+                     * size 0 gets.  sizeof stays 0, and an initializer (`= {}`)
+                     * has no bytes to give it.
+                     */
+                    ssa_global_set_bytes(&out->globals[i], 1);
+                    out->globals[i].has_init = 0;
+                    out->globals[i].init_i = 0;
+                    out->globals[i].init_f = 0.0;
+                    out->globals[i].init_is_float = 0;
+                    out->globals[i].init_is_string = 0;
+                    out->globals[i].init_is_symbol = 0;
+                    out->globals[i].init_sym = NULL;
+                    continue;
+                }
                 if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count ||
                     !tu->structs[struct_id].complete || tu->structs[struct_id].size <= 0) {
                     if (diag != NULL) {
