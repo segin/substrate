@@ -114,6 +114,52 @@ for m in 32 64; do
 	fi
 done
 
+# Linux's scoped_seqlock_read(): its state lives in an on-stack struct
+# across a loop, __scoped_seqlock_next() switches on it, and the call of
+# the undefined canary in the state the loop's test rules out must go --
+# the struct split into its fields, the slot's possible states followed
+# around the loop (codegen/slot_opt.c checks the values).
+cat > "$CC_TMP/seqlock.c" <<'EOF'
+typedef struct { unsigned sequence; int lock; } seqlock_t;
+extern void undefined_seqlock_bug(void);
+unsigned read_seqbegin(const seqlock_t *sl);
+int read_seqretry(const seqlock_t *sl, unsigned start);
+unsigned long lock_irqsave(int *l);
+void unlock_irqrestore(int *l, unsigned long f);
+enum ss_state { ss_done = 0, ss_lock, ss_lock_irqsave, ss_lockless };
+struct ss_tmp { enum ss_state state; unsigned long data; int *lock_irqsave; };
+static inline __attribute__((__always_inline__)) void cleanup(struct ss_tmp *sst) {
+	if (sst->lock_irqsave)
+		unlock_irqrestore(sst->lock_irqsave, sst->data);
+}
+static inline __attribute__((__always_inline__)) void next(struct ss_tmp *sst, seqlock_t *lock) {
+	switch (sst->state) {
+	case ss_done: undefined_seqlock_bug(); return;
+	case ss_lock: case ss_lock_irqsave: sst->state = ss_done; return;
+	case ss_lockless:
+		if (!read_seqretry(lock, sst->data)) { sst->state = ss_done; return; }
+		break;
+	}
+	sst->lock_irqsave = &lock->lock;
+	sst->data = lock_irqsave(sst->lock_irqsave);
+	sst->state = ss_lock_irqsave;
+}
+unsigned long reader(seqlock_t *sl, unsigned long *v) {
+	unsigned long r = 0;
+	for (struct ss_tmp s __attribute__((cleanup(cleanup))) = { .state = ss_lockless, .data = read_seqbegin(sl) };
+	     s.state != ss_done; next(&s, sl))
+		r = *v;
+	return r;
+}
+EOF
+for m in 32 64; do
+	"$CC_BIN" -m$m -Os -c -o "$CC_TMP/seqlock.o" "$CC_TMP/seqlock.c"
+	if nm -u "$CC_TMP/seqlock.o" | grep -q 'undefined_'; then
+		echo "run_inline_dead_call: -m$m -Os keeps the seqlock canary"
+		exit 1
+	fi
+done
+
 # A call with no effect but its unused result goes too, inlined or not:
 # Linux's noinline apply_retpolines(__retpoline_sites, ...) is empty
 # without retpolines, and the linker script then defines neither symbol.

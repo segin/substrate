@@ -32,6 +32,17 @@ int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag);
 int cc_fold_constant_values(cc_ssa_function_t *f);
 
 /**
+ * What the optimizer learns of @p f's own stack slots whose addresses do
+ * not escape (passes/mem.c): a slot stored once read as its value, a
+ * structure slot split into its fields, and a compare of a slot only
+ * stored constants decided by the set it can hold there.
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 if anything changed, 0 if not, -1 when out of memory
+ */
+int cc_optimize_slots(cc_ssa_function_t *f);
+
+/**
  * Whether @p g may be inlined (passes/inline.c): static, inline by its
  * storage or always_inline and not noinline, small enough, its interface
  * plain values, and its body free of what depends on its own frame.

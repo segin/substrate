@@ -1386,8 +1386,12 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
     } else {
         /* a slot's constant forwarded may fold a branch, and a branch folded may leave one store */
         do {
-            int rc0 = forward_const_slots(f);
+            int rcs = cc_optimize_slots(f);
+            int rc0 = rcs < 0 ? -1 : forward_const_slots(f);
 
+            if (rc0 == 0 && rcs > 0) {
+                rc0 = 1;
+            }
             rc1 = rc0 < 0 ? -1 : fold_function(f, 1);
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
             if (rc0 > 0 && rc1 == 0) {

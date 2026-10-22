@@ -10,7 +10,7 @@ COMMON_OBJS = $(COMMON_SRCS:.c=.o)
 CC_SRCS = cmd/cc.c cmd/pipeline.c common/asm_constraint.c common/diag.c common/lang.c common/options.c common/target.c common/util.c \
 	  frontend/consteval.c frontend/ctype.c frontend/preproc.c frontend/lexer.c frontend/parser.c frontend/parse_sema.c frontend/sema.c frontend/sema_call.c frontend/builtin.c frontend/types.c frontend/nested.c frontend/decimal.c frontend/binary128.c \
 	  middle/ast2ir.c middle/lower_call.c middle/irbuild.c middle/abi_x86_64.c middle/abi_i386.c middle/legalize.c middle/legalize_i386.c middle/ssa_dump.c \
-	  middle/passes/opt.c middle/passes/inline.c \
+	  middle/passes/opt.c middle/passes/inline.c middle/passes/mem.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
 	  backend/regalloc.c backend/frame.c backend/x86/common.c backend/x86/x86_64.c backend/x86/i386.c
 CC_OBJS = $(CC_SRCS:.c=.o)
