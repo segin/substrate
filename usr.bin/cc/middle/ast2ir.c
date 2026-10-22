@@ -1358,6 +1358,48 @@ static int value_is_unsigned(const cc_ssa_function_t *f, int v) {
     return cc_ssa_value_is_unsigned(f, v);
 }
 
+/**
+ * Point a static local's constant address initializer at the static it names when that is a static
+ * of the enclosing blocks, itself included: eval_global_init_expr() knows only file-scope names, and
+ * gives `&a[1]` as "a+4", the bare name, which nothing defines.
+ *
+ * @param vars       the variables in scope
+ * @param var_count  how many
+ * @param depth      the current block depth
+ * @param io_sym     the initializer's symbol, `name` or `name+offset` / `name-offset` (owned); replaced
+ *                   by the static's symbol and the same offset
+ * @return 0, or -1 out of memory (and *io_sym is freed and NULL)
+ */
+static int static_init_sym_to_local(var_entry_t *vars, size_t var_count, int depth, char **io_sym) {
+    const char *full = *io_sym;
+    size_t name_len = strcspn(full, "+-");
+    char name[256];
+    char *renamed;
+    size_t renamed_len;
+    int idx;
+
+    if (name_len == 0 || name_len >= sizeof(name)) {
+        return 0;
+    }
+    memcpy(name, full, name_len);
+    name[name_len] = '\0';
+    idx = var_find_visible(vars, var_count, name, depth);
+    if (idx < 0 || !vars[idx].is_static_storage || vars[idx].static_sym == NULL) {
+        return 0;
+    }
+    renamed_len = strlen(vars[idx].static_sym) + strlen(full + name_len) + 1;
+    renamed = (char *)malloc(renamed_len);
+    if (renamed == NULL) {
+        free(*io_sym);
+        *io_sym = NULL;
+        return -1;
+    }
+    snprintf(renamed, renamed_len, "%s%s", vars[idx].static_sym, full + name_len);
+    free(*io_sym);
+    *io_sym = renamed;
+    return 0;
+}
+
 int var_find_visible(var_entry_t *vars, size_t var_count, const char *name, int depth) {
     size_t i = var_count;
     while (i > 0) {
@@ -8897,6 +8939,16 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             set_diag(diag, "failed to construct static local symbol");
             return -1;
         }
+        /*
+         * Its scope begins after its declarator, so its own initializer
+         * names it (C11 6.2.1p7): Linux's register_nmi_handler() makes a
+         * `static struct nmiaction` whose list head points at itself, and
+         * that address was a global of the bare name, which nothing defines.
+         */
+        if (var_define(vars, var_count, s->decl_name, decl_ct, -1, depth, 1, 0, sym) != 0) {
+            set_diag(diag, "out of memory defining static local variable");
+            return -1;
+        }
         if (is_array_obj) {
             long total_size = cc_ct_size(decl_ct, tu);
 
@@ -8933,6 +8985,10 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                 eval_global_init_expr(tu, s->expr, &init_i, &init_f, &init_is_float, &init_sym) == 0) {
                 if (init_is_float && eval_global_init_ld_expr(tu, s->expr, &init_f_ld) != 0) {
                     init_f_ld = (long double)init_f;
+                }
+                if (init_sym != NULL && static_init_sym_to_local(*vars, *var_count, depth, &init_sym) != 0) {
+                    set_diag(diag, "out of memory naming a static local's initializer");
+                    return -1;
                 }
                 have_const_init = 1;
             } else if (s->expr != NULL) {
@@ -9401,11 +9457,6 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             if (cc_ir_label(sf, l_done) != 0) {
                 return -1;
             }
-        }
-
-        if (var_define(vars, var_count, s->decl_name, decl_ct, -1, depth, 1, 0, sym) != 0) {
-            set_diag(diag, "out of memory defining static local variable");
-            return -1;
         }
         return 0;
     }
