@@ -5326,6 +5326,12 @@ typedef struct {
      */
     int (*name_params)(parser_t *p, void *ctx);
     void *name_params_ctx; /**< passed to name_params */
+    /**
+     * When not NULL, receives the GNU attributes written in the declarator
+     * before its name -- `void * __attribute__((section(".x"))) p` -- which
+     * gcc gives the declaration, as it does those after the name.
+     */
+    decl_attrs_t *attrs;
 } declarator_t;
 
 /** How parse_declarator_into() reads a declarator. */
@@ -5422,9 +5428,10 @@ static const cc_ctype_t *declarator_type(const declarator_t *d, const cc_ctype_t
  *
  * @param p          the parser, at the token after the `*`
  * @param out_quals  receives the CC_CQ_* bits
+ * @param out_attrs  receives the attributes, or NULL to drop them
  * @return           0, or -1 on a syntax error
  */
-static int parse_pointer_quals(parser_t *p, unsigned *out_quals) {
+static int parse_pointer_quals(parser_t *p, unsigned *out_quals, decl_attrs_t *out_attrs) {
     *out_quals = 0;
     while (1) {
         if (p->tok.kind == TOK_KW_CONST) {
@@ -5438,7 +5445,7 @@ static int parse_pointer_quals(parser_t *p, unsigned *out_quals) {
         } else if (is_decl_qual_at_token(p)) {
             /* another spelling of a qualifier this encoding does not keep */
         } else if (tok_is_gnu_attribute_kw(p) || (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK)) {
-            if (skip_decl_gnu_suffix(p, NULL) != 0) {
+            if (skip_decl_gnu_suffix(p, out_attrs) != 0) {
                 return -1;
             }
             continue;
@@ -5643,7 +5650,7 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
     memset(&ptrs, 0, sizeof(ptrs));
     memset(&suffix, 0, sizeof(suffix));
     /* GNU attributes may open a declarator, before its `*`s: `(__attribute__((regparm(0))) *fn)(void)` */
-    if (skip_decl_gnu_suffix(p, NULL) != 0) {
+    if (skip_decl_gnu_suffix(p, d->attrs) != 0) {
         goto out;
     }
     while (is_ptr_declarator_tok(p->tok.kind)) {
@@ -5651,11 +5658,11 @@ static int parse_declarator_into(parser_t *p, declarator_t *d, unsigned flags) {
 
         memset(&op, 0, sizeof(op));
         op.kind = DECL_OP_POINTER;
-        if (next_tok(p) != 0 || parse_pointer_quals(p, &op.quals) != 0 || declarator_push(&ptrs, &op) != 0) {
+        if (next_tok(p) != 0 || parse_pointer_quals(p, &op.quals, d->attrs) != 0 || declarator_push(&ptrs, &op) != 0) {
             goto out;
         }
     }
-    if (skip_decl_gnu_suffix(p, NULL) != 0) {
+    if (skip_decl_gnu_suffix(p, d->attrs) != 0) {
         goto out;
     }
     /* the direct declarator: a nested declarator, a name, or nothing */
@@ -9116,9 +9123,11 @@ typedef struct {
  * @param base  the specifiers' type (parser_t.last_spec_ctype)
  * @param out   receives the declaration; free its name and vla_bounds
  *              when done with them
+ * @param attrs receives the attributes written in the declarator before
+ *              the name, the declaration's as gcc reads them
  * @return      0, or -1 on error (diagnosed)
  */
-static int parse_named_decl(parser_t *p, const cc_ctype_t *base, named_decl_t *out) {
+static int parse_named_decl(parser_t *p, const cc_ctype_t *base, named_decl_t *out, decl_attrs_t *attrs) {
     declarator_t d;
     size_t line = p->tok.line;
     size_t col = p->tok.col;
@@ -9127,6 +9136,7 @@ static int parse_named_decl(parser_t *p, const cc_ctype_t *base, named_decl_t *o
 
     memset(out, 0, sizeof(*out));
     memset(&d, 0, sizeof(d));
+    d.attrs = attrs;
     if (parse_declarator_into(p, &d, DECL_STOP_AT_PARAMS) != 0) {
         declarator_free(&d);
         return -1;
@@ -9290,7 +9300,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         {
             named_decl_t nd;
 
-            if (parse_named_decl(p, base_spec, &nd) != 0) {
+            if (parse_named_decl(p, base_spec, &nd, &suffix_attrs) != 0) {
+                decl_attrs_clear(&suffix_attrs);
                 free_stmt(&s);
                 return -1;
             }
