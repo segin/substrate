@@ -1010,6 +1010,139 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
     return 0;
 }
 
+/**
+ * Forward the constant a local slot holds into its loads: a STACKALLOC whose address is used only
+ * as the address of loads and stores of one size, all integer, stored once with a known constant,
+ * is read as that constant.  `bool set_uncached = IS_ENABLED(...) && ...;` in Linux's
+ * dma_direct_alloc() is such a local, and the inlined parameters of a call with constant
+ * arguments are; folding then decides the branches on them, as gcc does once it has promoted
+ * them to registers.  A load reached before the store reads an uninitialized local, so the
+ * constant is as good an answer there; a loop changes nothing, the slot never holding another.
+ *
+ * @return 1 if a load was replaced, 0 if not, -1 when out of memory
+ */
+static int forward_const_slots(cc_ssa_function_t *f) {
+    enum { SLOT_NONE = 0, SLOT_OK = 1, SLOT_BAD = 2 };
+    unsigned char *state;
+    int *stores;
+    long *size;
+    int *stored;
+    const_state_t *g;
+    size_t i;
+    size_t a;
+    int changed = 0;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    state = (unsigned char *)calloc((size_t)f->value_count, 1);
+    stores = (int *)calloc((size_t)f->value_count, sizeof(*stores));
+    size = (long *)calloc((size_t)f->value_count, sizeof(*size));
+    stored = (int *)malloc((size_t)f->value_count * sizeof(*stored));
+    g = state == NULL || stores == NULL || size == NULL || stored == NULL ? NULL : single_def_consts(f);
+    if (g == NULL) {
+        free(state);
+        free(stores);
+        free(size);
+        free(stored);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].op == CC_SSA_STACKALLOC && f->instrs[i].dst >= 0) {
+            state[f->instrs[i].dst] = SLOT_OK;
+        }
+    }
+    /* a slot's address used any other way, or accesses of different sizes, and it is not one */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if ((in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE) && in->lhs >= 0 && state[in->lhs] == SLOT_OK) {
+            long sz = in->imm > 0 ? in->imm : 0;
+
+            if (sz != 1 && sz != 2 && sz != 4 && sz != 8) {
+                state[in->lhs] = SLOT_BAD;
+            } else if (size[in->lhs] != 0 && size[in->lhs] != sz) {
+                state[in->lhs] = SLOT_BAD;
+            } else {
+                size[in->lhs] = sz;
+            }
+            if (in->op == CC_SSA_STORE) {
+                if (in->rhs < 0 || cc_ssa_value_class(f, in->rhs) != CC_VAL_I64 || !g[in->rhs].known) {
+                    state[in->lhs] = SLOT_BAD;
+                } else if (stores[in->lhs]++ == 0) {
+                    stored[in->lhs] = in->rhs;
+                }
+                if (in->rhs >= 0 && state[in->rhs] != SLOT_NONE) {
+                    state[in->rhs] = SLOT_BAD; /* the address of another slot, stored */
+                }
+            } else if (in->dst >= 0 && cc_ssa_value_class(f, in->dst) != CC_VAL_I64) {
+                state[in->lhs] = SLOT_BAD;
+            }
+            continue;
+        }
+        if (in->dst >= 0 && in->op != CC_SSA_STACKALLOC && state[in->dst] != SLOT_NONE) {
+            state[in->dst] = SLOT_BAD; /* defined again */
+        }
+        if (in->lhs >= 0 && state[in->lhs] != SLOT_NONE) {
+            state[in->lhs] = SLOT_BAD;
+        }
+        if (in->rhs >= 0 && state[in->rhs] != SLOT_NONE) {
+            state[in->rhs] = SLOT_BAD;
+        }
+        if (in->call_chain > 0 && state[in->call_chain - 1] != SLOT_NONE) {
+            state[in->call_chain - 1] = SLOT_BAD;
+        }
+        for (a = 0; a < in->arg_count; ++a) {
+            if (in->args[a] >= 0 && state[in->args[a]] != SLOT_NONE) {
+                state[in->args[a]] = SLOT_BAD;
+            }
+        }
+        for (a = 0; a < in->asm_out_count + in->asm_in_count; ++a) {
+            int v = a < in->asm_out_count ? in->asm_out_values[a] : in->asm_in_values[a - in->asm_out_count];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+                v = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
+            }
+            if (v >= 0 && v < f->value_count && state[v] != SLOT_NONE) {
+                state[v] = SLOT_BAD;
+            }
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        unsigned long long v;
+        long sz;
+
+        if (in->op != CC_SSA_LOAD || in->lhs < 0 || state[in->lhs] != SLOT_OK || stores[in->lhs] != 1 ||
+            in->dst < 0) {
+            continue;
+        }
+        /* the constant as the slot holds it, then as the load reads it */
+        sz = size[in->lhs];
+        v = (unsigned long long)g[stored[in->lhs]].i;
+        if (sz < 8) {
+            unsigned long long mask = (1ULL << (sz * 8)) - 1;
+            unsigned long long sign = 1ULL << (sz * 8 - 1);
+
+            v &= mask;
+            if (!in->is_unsigned && (v & sign) != 0) {
+                v |= ~mask;
+            }
+        }
+        in->op = CC_SSA_CONST;
+        in->imm = (long long)v;
+        in->lhs = -1;
+        in->rhs = -1;
+        changed = 1;
+    }
+    free(state);
+    free(stores);
+    free(size);
+    free(stored);
+    free(g);
+    return changed;
+}
+
 int cc_fold_constant_values(cc_ssa_function_t *f) {
     return fold_function(f, 0) < 0 ? -1 : 0;
 }
@@ -1042,9 +1175,15 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
         } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
         rc2 = 0;
     } else {
+        /* a slot's constant forwarded may fold a branch, and a branch folded may leave one store */
         do {
-            rc1 = fold_function(f, 1);
+            int rc0 = forward_const_slots(f);
+
+            rc1 = rc0 < 0 ? -1 : fold_function(f, 1);
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
+            if (rc0 > 0 && rc1 == 0) {
+                rc1 = 1;
+            }
         } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
         rc2 = dce_function(f);
     }

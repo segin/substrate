@@ -52,6 +52,39 @@ for m in 32 64; do
 		fi
 	done
 done
+# A call guarded by a local stored once with a constant goes: Linux's
+# `bool set_uncached = IS_ENABLED(...) && ...; if (set_uncached) ...` in
+# dma_direct_alloc(), and a switch on what an inlined function returns
+# through a local.
+cat > "$CC_TMP/const_local.c" <<'EOF'
+void *undefined_set_uncached(void *p);
+void undefined_managed(int);
+int coherent(int d);
+enum { NORMAL, MANAGED };
+static inline int startup_kind(int force) { int r = NORMAL; return r; }
+void *alloc(void *p, int dev) {
+	_Bool set_uncached = 0 && !coherent(dev);
+	if (set_uncached)
+		p = undefined_set_uncached(p);
+	return p;
+}
+int startup(int force) {
+	switch (startup_kind(force)) {
+	case NORMAL: return 1;
+	case MANAGED: undefined_managed(force); return 2;
+	}
+	return 0;
+}
+EOF
+for m in 32 64; do
+	"$CC_BIN" -m$m -Os -c -o "$CC_TMP/const_local.o" "$CC_TMP/const_local.c"
+	if nm -u "$CC_TMP/const_local.o" | grep -q 'undefined_'; then
+		echo "run_inline_dead_call: -m$m -Os keeps a call a constant local guards:"
+		nm -u "$CC_TMP/const_local.o" | grep 'undefined_'
+		exit 1
+	fi
+done
+
 # A call with no effect but its unused result goes too, inlined or not:
 # Linux's noinline apply_retpolines(__retpoline_sites, ...) is empty
 # without retpolines, and the linker script then defines neither symbol.
