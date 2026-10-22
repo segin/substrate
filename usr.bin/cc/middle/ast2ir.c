@@ -14138,6 +14138,35 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         diag->message[0] = '\0';
     }
 
+    /* the functions only declared here that bind within the object: a prototype is in no other list */
+    {
+        const cc_attr_flags_t local_vis = CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
+
+        for (i = 0; i < tu->func_count; ++i) {
+            const cc_function_t *fn = &tu->funcs[i];
+            char **grown;
+
+            if (fn->has_body || fn->name == NULL ||
+                ((fn->storage & CC_STORAGE_STATIC) == 0 && (fn->attr_flags & local_vis) == 0)) {
+                continue;
+            }
+            grown = (char **)realloc(out->local_decls, (out->local_decl_count + 1) * sizeof(*grown));
+            if (grown == NULL) {
+                set_diag(diag, "out of memory noting local declarations");
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            out->local_decls = grown;
+            out->local_decls[out->local_decl_count] = cc_strdup(fn->name);
+            if (out->local_decls[out->local_decl_count] == NULL) {
+                set_diag(diag, "out of memory noting local declarations");
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            out->local_decl_count++;
+        }
+    }
+
     if (tu->toplevel_asm_count > 0) {
         out->toplevel_asm = (char **)calloc(tu->toplevel_asm_count, sizeof(*out->toplevel_asm));
         if (out->toplevel_asm == NULL) {

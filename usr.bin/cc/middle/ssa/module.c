@@ -37,5 +37,9 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
         free(m->toplevel_asm[i]);
     }
     free(m->toplevel_asm);
+    for (i = 0; i < m->local_decl_count; ++i) {
+        free(m->local_decls[i]);
+    }
+    free(m->local_decls);
     memset(m, 0, sizeof(*m));
 }

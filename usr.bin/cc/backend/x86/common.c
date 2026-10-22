@@ -1976,6 +1976,12 @@ int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
             return (fn->storage & CC_STORAGE_STATIC) != 0 || (fn->attr_flags & local_vis) != 0 || pie;
         }
     }
+    for (i = 0; i < m->local_decl_count; ++i) {
+        /* one only declared, static or hidden: Linux's decompressor passes its hidden error() by address */
+        if (strlen(m->local_decls[i]) == n && strncmp(m->local_decls[i], sym, n) == 0) {
+            return 1;
+        }
+    }
     return 0;
 }
 

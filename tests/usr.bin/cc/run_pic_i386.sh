@@ -33,7 +33,8 @@ cat > "$d/vis.c" <<'EOF'
 extern int ext_data;
 int defined_data = 3;
 extern void ext_fn(void);
-int f(void) { ext_fn(); return ext_data + defined_data; }
+void take(void (*fn)(void));
+int f(void) { ext_fn(); take(ext_fn); return ext_data + defined_data; }
 /* a block's declarations take no visibility from the pragma */
 int g(int k) { int local = k; static int st; st += local; return st; }
 #pragma GCC visibility pop
