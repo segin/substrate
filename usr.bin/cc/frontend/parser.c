@@ -364,12 +364,23 @@ static cc_tok_kind_t peek_kind(parser_t *p) {
     return t.kind;
 }
 
+/**
+ * The visible typedef named @p name, or -1: none, or one an ordinary
+ * identifier declared in its scope or an inner one hides -- Linux's
+ * `u8 mtrr_type, uniform;` under `typedef __u8 mtrr_type;` makes
+ * `mtrr_type = ...` an assignment.
+ */
 static int typedef_find_visible_n(const parser_t *p, const char *name, size_t len) {
     size_t i = p->typedef_count;
     while (i > 0) {
         i--;
         if (strlen(p->typedefs[i].name) == len && strncmp(p->typedefs[i].name, name, len) == 0 &&
             p->typedefs[i].depth <= p->scope_depth) {
+            int v = var_find_visible_n(p, name, len);
+
+            if (v >= 0 && p->vars[v].depth >= p->typedefs[i].depth) {
+                return -1;
+            }
             return (int)i;
         }
     }
