@@ -11676,10 +11676,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
 static int append_default_return(cc_ssa_function_t *sf) {
     cc_ssa_instr_t ret_in;
 
+    /*
+     * Operands not used are -1, not the 0 memset leaves: 0 names value %v0, and a pass that reads the fields
+     * (inlining renumbers them) would take the constant for a use of it.
+     */
     if (sf->ret_type == CC_VAL_F64) {
         cc_ssa_instr_t c;
         memset(&c, 0, sizeof(c));
         c.op = CC_SSA_CONST;
+        c.lhs = -1;
+        c.rhs = -1;
         c.dst = cc_ir_new_value(sf, CC_VAL_F64);
         c.fimm = 0.0;
         if (c.dst < 0 || cc_ir_push(sf, c) != 0) {
@@ -11688,6 +11694,7 @@ static int append_default_return(cc_ssa_function_t *sf) {
         memset(&ret_in, 0, sizeof(ret_in));
         ret_in.op = CC_SSA_RET;
         ret_in.lhs = c.dst;
+        ret_in.rhs = -1;
         ret_in.dst = -1;
         return cc_ir_push(sf, ret_in);
     }
@@ -11696,6 +11703,8 @@ static int append_default_return(cc_ssa_function_t *sf) {
         cc_ssa_instr_t c;
         memset(&c, 0, sizeof(c));
         c.op = CC_SSA_CONST;
+        c.lhs = -1;
+        c.rhs = -1;
         c.dst = cc_ir_new_value(sf, CC_VAL_I64);
         c.imm = 0;
         if (c.dst < 0 || cc_ir_push(sf, c) != 0) {
@@ -11704,6 +11713,7 @@ static int append_default_return(cc_ssa_function_t *sf) {
         memset(&ret_in, 0, sizeof(ret_in));
         ret_in.op = CC_SSA_RET;
         ret_in.lhs = c.dst;
+        ret_in.rhs = -1;
         ret_in.dst = -1;
         return cc_ir_push(sf, ret_in);
     }
@@ -11711,6 +11721,7 @@ static int append_default_return(cc_ssa_function_t *sf) {
     memset(&ret_in, 0, sizeof(ret_in));
     ret_in.op = CC_SSA_RET;
     ret_in.lhs = -1;
+    ret_in.rhs = -1;
     ret_in.dst = -1;
     return cc_ir_push(sf, ret_in);
 }
