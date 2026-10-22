@@ -3034,9 +3034,11 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 label_base++; /* a `+` output is also an implicit input */
             }
         }
-        rendered = render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total, label_base,
-                                              in->asm_goto_labels, in->asm_goto_names, in->asm_goto_count, f->name,
-                                              diag);
+        rendered = in->asm_is_basic
+                       ? dup_cstr(in->sym != NULL ? in->sym : "") /* basic asm: the text as written */
+                       : render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total,
+                                                    label_base, in->asm_goto_labels, in->asm_goto_names,
+                                                    in->asm_goto_count, f->name, diag);
     }
     if (rendered == NULL) {
         if (diag != NULL && diag->message[0] == '\0') {

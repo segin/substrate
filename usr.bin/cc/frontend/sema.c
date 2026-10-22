@@ -514,6 +514,9 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
         sema_diag(diag, "asm statement missing template");
         return -1;
     }
+    if (s->asm_is_basic) {
+        return 0; /* basic asm has no operands: its `%`s are the assembler's */
+    }
     while (t[i] != '\0') {
         int has_modifier = 0;
         if (t[i] != '%') {

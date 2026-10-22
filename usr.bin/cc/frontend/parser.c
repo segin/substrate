@@ -4493,6 +4493,8 @@ static int parse_asm_stmt(parser_t *p, cc_stmt_t *s) {
     if (s->asm_template == NULL) {
         return -1;
     }
+    /* basic asm, with no `:` at all: its `%`s are its own -- `movq %rax, %rbx` -- not operand references */
+    s->asm_is_basic = p->tok.kind != TOK_COLON;
     if (p->tok.kind == TOK_COLON) {
         if (next_tok(p) != 0) {
             return -1;

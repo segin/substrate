@@ -248,6 +248,7 @@ struct cc_stmt {
     int case_has_range;
     int asm_is_volatile;
     int asm_is_goto;
+    int asm_is_basic; /**< basic asm (no `:`): the template is the text, `%` and all */
     char *asm_template;
     cc_asm_operand_t *asm_outputs;
     size_t asm_output_count;

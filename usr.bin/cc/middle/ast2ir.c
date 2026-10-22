@@ -9801,6 +9801,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
     in.rhs = -1;
     in.asm_volatile = s->asm_is_volatile ? 1 : 0;
     in.asm_is_goto = s->asm_is_goto ? 1 : 0;
+    in.asm_is_basic = s->asm_is_basic ? 1 : 0;
     in.sym = cc_strdup(s->asm_template != NULL ? s->asm_template : "");
     in.asm_out_count = s->asm_output_count;
     in.asm_in_count = s->asm_input_count;

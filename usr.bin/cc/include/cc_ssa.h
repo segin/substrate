@@ -163,6 +163,7 @@ typedef struct {
     size_t arg_count;
     int asm_volatile;
     int asm_is_goto;
+    int asm_is_basic; /**< basic asm: emit the template as it is, no operand substitution */
     int *asm_out_values;
     unsigned char *asm_out_sizes;
     char **asm_out_constraints;
