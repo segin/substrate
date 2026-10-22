@@ -11395,6 +11395,38 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
     return -1;
 }
 
+/**
+ * The address of lvalue @p lv, a static object or a part of one, as a
+ * global's initializer has it: a symbol with any addend, `sym+8`.
+ *
+ * @param out_sym  receives it (owned by the caller); may be NULL
+ * @return         0, or -1 if it is no such address
+ */
+static int eval_global_lvalue_address(const cc_translation_unit_t *tu, const cc_expr_t *lv, char **out_sym) {
+    char *sym = NULL;
+    long addend = 0;
+
+    if (eval_global_addr_symbol_addend(tu, lv, &sym, &addend) != 0 || sym == NULL) {
+        free(sym);
+        return -1;
+    }
+    if (out_sym == NULL) {
+        free(sym);
+        return 0;
+    }
+    if (addend == 0) {
+        *out_sym = sym;
+        return 0;
+    } else {
+        char tmp[384];
+
+        snprintf(tmp, sizeof(tmp), "%s%+ld", sym, addend);
+        *out_sym = cc_strdup(tmp);
+        free(sym);
+        return *out_sym == NULL ? -1 : 0;
+    }
+}
+
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym) {
     const_integral_value_t ivalue;
@@ -11458,31 +11490,19 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
         return 0;
     case CC_EXPR_ADDR:
-        {
-            char *sym = NULL;
-            long addend = 0;
-            *out_i = 0;
-            *out_f = 0.0;
-            *out_is_float = 0;
-            if (eval_global_addr_symbol_addend(tu, e->lhs, &sym, &addend) != 0 || sym == NULL) {
-                free(sym);
-                return -1;
-            }
-            if (out_sym != NULL) {
-                if (addend == 0) {
-                    *out_sym = sym;
-                } else {
-                    char tmp[384];
-                    snprintf(tmp, sizeof(tmp), "%s%+ld", sym, addend);
-                    *out_sym = cc_strdup(tmp);
-                    free(sym);
-                    return *out_sym == NULL ? -1 : 0;
-                }
-            } else {
-                free(sym);
-            }
-            return 0;
+        *out_i = 0;
+        *out_f = 0.0;
+        *out_is_float = 0;
+        return eval_global_lvalue_address(tu, e->lhs, out_sym);
+    case CC_EXPR_MEMBER:
+        /* an array member as a value is its address: Linux's init_files has `.open_fds = init_files.open_fds_init` */
+        if (e->ctype == NULL || e->ctype->unqual->kind != CC_CT_ARRAY) {
+            return -1;
         }
+        *out_i = 0;
+        *out_f = 0.0;
+        *out_is_float = 0;
+        return eval_global_lvalue_address(tu, e, out_sym);
     case CC_EXPR_CAST:
         return eval_global_init_expr(tu, e->lhs, out_i, out_f, out_is_float, out_sym);
     case CC_EXPR_CALL:
