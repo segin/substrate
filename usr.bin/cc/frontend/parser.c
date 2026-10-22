@@ -147,6 +147,7 @@ typedef struct {
     char *alias;
     long vector_bytes; /**< `vector_size(n)`: the vector's size in bytes; 0 for none */
     long vector_elems; /**< `ext_vector_type(n)`: its element count; 0 for none */
+    int regparm;       /**< `regparm(n)` (i386): n + 1; 0 for none */
 } decl_attrs_t;
 
 static int is_decl_qual_tok(cc_tok_kind_t k);
@@ -3775,6 +3776,7 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->alias = NULL;
     a->vector_bytes = 0;
     a->vector_elems = 0;
+    a->regparm = 0;
 }
 
 static void decl_attrs_clear(decl_attrs_t *a) {
@@ -3791,6 +3793,7 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->format_first_to_check = 0;
     a->vector_bytes = 0;
     a->vector_elems = 0;
+    a->regparm = 0;
 }
 
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
@@ -3827,6 +3830,9 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     }
     if (src->vector_elems > 0) {
         dst->vector_elems = src->vector_elems;
+    }
+    if (src->regparm > 0) {
+        dst->regparm = src->regparm;
     }
     if (sec_dup != NULL) {
         free(dst->section);
@@ -4888,6 +4894,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_ext_vector_type;
     int is_may_alias;
     int is_mode;
+    int is_regparm;
     int has_num = 0;
     int has_num2 = 0;
     long num = 0;
@@ -4938,12 +4945,13 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_ext_vector_type = tok_is_gnu_attr_name(p, "ext_vector_type");
     is_may_alias = tok_is_gnu_attr_name(p, "may_alias");
     is_mode = tok_is_gnu_attr_name(p, "mode");
+    is_regparm = tok_is_gnu_attr_name(p, "regparm");
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
                 is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_constructor ||
                 is_destructor || is_transparent_union ||
-                is_vector_size || is_ext_vector_type || is_may_alias || is_mode;
+                is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm;
 
     if (next_tok(p) != 0) {
         return -1;
@@ -5042,6 +5050,15 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         if (is_vector_size) {
             out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
             out_attrs->vector_bytes = num;
+        }
+        if (is_regparm) {
+            /* i386: how many integer arguments go in %eax, %edx, %ecx; Linux's asmlinkage is regparm(0) */
+            if (!has_num || num < 0 || num > 3) {
+                set_diag(p->diag, attr_line, attr_col, "regparm attribute takes 0, 1, 2 or 3");
+                free(sec);
+                return -1;
+            }
+            out_attrs->regparm = (int)num + 1;
         }
         if (is_ext_vector_type) {
             out_attrs->flags |= CC_ATTR_VECTOR_SIZE;
@@ -9203,11 +9220,13 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         }
         long merged_format_index = 0;
         long merged_format_first_to_check = 0;
+        int merged_regparm = 0;
 
         if (decl_attrs_merge(&merged_attrs, &base_attrs) != 0 || decl_attrs_merge(&merged_attrs, &suffix_attrs) != 0) {
             free_stmt(&s);
             return -1;
         }
+        merged_regparm = merged_attrs.regparm;
         merged_format_index = merged_attrs.format_index;
         merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = merged_attrs.flags;
@@ -9245,6 +9264,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             fn_decl.attr_align = s.attr_align;
             fn_decl.attr_format_index = merged_format_index;
             fn_decl.attr_format_first_to_check = merged_format_first_to_check;
+            fn_decl.attr_regparm = merged_regparm;
             fn_decl.has_body = 0;
             if (next_tok(p) != 0) {
                 free_stmt(&s);
@@ -9299,6 +9319,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             fn_decl.attr_align = s.attr_align;
             fn_decl.attr_format_index = merged_format_index;
             fn_decl.attr_format_first_to_check = merged_format_first_to_check;
+            fn_decl.attr_regparm = merged_regparm;
             fn_decl.has_body = 0;
             fn_decl.is_variadic = s.ctype->variadic;
             fn_decl.has_prototype = s.ctype->prototyped;
@@ -10512,6 +10533,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     f->attr_align = merged_attrs.align;
     f->attr_format_index = merged_attrs.format_index;
     f->attr_format_first_to_check = merged_attrs.format_first_to_check;
+    f->attr_regparm = merged_attrs.regparm;
     if (merged_attrs.section != NULL) {
         f->attr_section = cc_strndup(merged_attrs.section, strlen(merged_attrs.section));
         if (f->attr_section == NULL) {

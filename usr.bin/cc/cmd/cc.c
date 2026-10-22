@@ -89,6 +89,8 @@ typedef struct {
   int i386_arch_explicit;
   cc_target_t target;
   int code16; /* -m16 */
+  int i386_regparm; /* -mregparm=N */
+  int i386_reg_struct_return; /* -freg-struct-return, -fpcc-struct-return */
 
   const char *std;
   const char *opt_level;
@@ -161,6 +163,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->i386_sse2 = o->i386_has_sse2;
   out->i386_mmx = o->i386_has_mmx;
   out->i386_fpmath = (cc_fpmath_t)o->i386_fp_math_mode;
+  out->i386_regparm = o->i386_regparm;
+  out->i386_reg_struct_return = o->i386_reg_struct_return;
 }
 
 
@@ -1208,6 +1212,22 @@ static int opt_fpmath(cc_opts_t *o, const driver_opt_t *d, const char *as, const
   return 0;
 }
 
+/**
+ * -mregparm=N (i386): how many of the first integer arguments travel in
+ * %eax, %edx, %ecx; 0 to 3, as gcc takes it.
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_regparm(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val == NULL || val[0] < '0' || val[0] > '3' || val[1] != '\0') {
+    fprintf(stderr, "cc: error: %s=%s: the argument must be 0, 1, 2 or 3\n", as, val != NULL ? val : "");
+    return -1;
+  }
+  o->i386_regparm = val[0] - '0';
+  return 0;
+}
+
 /*
  * The options cc knows.  Words (FLAG, VALUE) are tried first; then the
  * prefixes (LETTER, PREFIX) in table order, so a longer prefix must come
@@ -1254,6 +1274,10 @@ static const driver_opt_t options[] = {
     {"-mmmx -mno-mmx", OPT_FLAG, FWD_C | FWD_CPP, opt_isa_feature, F(i386_has_mmx), (int)F(i386_supports_mmx)},
     {"-mavx -mno-avx -mavx2 -mno-avx2", OPT_FLAG, FWD_C | FWD_CPP, NULL, 0, 0},
     {"-mfpmath", OPT_VALUE, FWD_C, opt_fpmath, 0, 0},
+    {"-mregparm", OPT_VALUE, FWD_C, opt_regparm, 0, 0},
+    /* i386: structures of 1, 2, 4 or 8 bytes come back in %eax(:%edx), one float or double in %st0 (gcc) */
+    {"-freg-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 1},
+    {"-fpcc-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 0},
     {"-fPIC", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
 
     /* the preprocessor */

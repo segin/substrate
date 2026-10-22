@@ -26,7 +26,8 @@ static const char *const emit_regs32[] = {"%eax", "%ecx", "%edx"};
  * hidden pointer a function returning a struct is passed first.
  */
 static int i386_first_param_offset(const cc_ssa_function_t *f) {
-    return f->ret_abi == CC_CALL_ARG_ABI_AGG_MEM ? 12 : 8;
+    /* (under regparm the hidden pointer came in %eax instead) */
+    return f->ret_abi == CC_CALL_ARG_ABI_AGG_MEM && !f->sret_reg ? 12 : 8;
 }
 
 /* Stack bytes an integer parameter of size bytes takes: a multiple of 4. */
@@ -68,7 +69,10 @@ static int i386_param_layout(const cc_ssa_function_t *f, int count, int want) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
         long bytes;
 
-        if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_LDOUBLE) {
+        if ((CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT || CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) &&
+            CC_ABI_REGPARM(abi) > 0) {
+            bytes = 0; /* regparm: it came in a register, which the prologue stored in the frame */
+        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_LDOUBLE) {
             bytes = 12;
         } else if (abi == CC_CALL_ARG_ABI_FLOAT) {
             bytes = 4;
@@ -555,16 +559,43 @@ static void emit_i386_load_int_value_to_reg(FILE *fp, const cc_ssa_function_t *f
     }
 }
 
+/**
+ * Call memcpy(%eax, %edx, @p size) -- the destination already in %eax and
+ * the source in %edx -- as gcc calls it: under -mregparm=N the first N of
+ * the three in %eax, %edx, %ecx (Linux's own memcpy is built so and reads
+ * them there), the rest on the stack.
+ */
+static void emit_i386_call_memcpy(FILE *fp, long size) {
+    const cc_options_t *o = cc_options_current();
+    int nregs = o != NULL ? o->i386_regparm : 0;
+    int pushed = 0;
+
+    if (nregs >= 3) {
+        fprintf(fp, "\tmovl $%ld, %%ecx\n", size);
+    } else {
+        fprintf(fp, "\tpushl $%ld\n", size);
+        pushed++;
+        if (nregs < 2) {
+            fprintf(fp, "\tpushl %%edx\n");
+            pushed++;
+        }
+        if (nregs < 1) {
+            fprintf(fp, "\tpushl %%eax\n");
+            pushed++;
+        }
+    }
+    fprintf(fp, "\tcall memcpy\n");
+    if (pushed > 0) {
+        fprintf(fp, "\taddl $%d, %%esp\n", pushed * 4);
+    }
+}
+
 static void emit_i386_store_aggregate_indirect(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
                                                const cc_ssa_instr_t *in) {
     long mem_size = in->imm > 0 ? in->imm : 4;
     emit_i386_load_int_value_to_reg(fp, f, lay, in->lhs, "%eax");
-    emit_i386_load_int_value_to_reg(fp, f, lay, in->rhs, "%ecx");
-    fprintf(fp, "\tpushl $%ld\n", mem_size);
-    fprintf(fp, "\tpushl %%ecx\n");
-    fprintf(fp, "\tpushl %%eax\n");
-    fprintf(fp, "\tcall memcpy\n");
-    fprintf(fp, "\taddl $12, %%esp\n");
+    emit_i386_load_int_value_to_reg(fp, f, lay, in->rhs, "%edx");
+    emit_i386_call_memcpy(fp, mem_size);
 }
 
 static void emit_i386_store_scalar_indirect(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
@@ -876,10 +907,15 @@ static void emit_i386_push_slot(FILE *fp, int off) {
  * The stack bytes emit_i386_push_call_arg() pushes for an argument, for
  * aligning the stack before the pushes.  Keep the two in step.
  */
+static int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a);
+
 static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
                                 size_t arg_index, int value) {
     long arg_size = call_arg_size_bytes(in, arg_index, value_size_bytes(f, value, 4));
 
+    if (i386_call_arg_regparm(f, in, arg_index) > 0) {
+        return 0; /* in %eax, %edx or %ecx */
+    }
     if (call_arg_is_ldouble_abi(in, arg_index)) {
         return 12;
     }
@@ -901,6 +937,100 @@ static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t 
         return 4;
     }
     return arg_size >= 8 ? 8 : 4;
+}
+
+/** The regparm registers, in the order arguments take them. */
+static const char *const i386_regparm_regs[3] = {"%eax", "%edx", "%ecx"};
+
+/**
+ * The register argument @p a of call @p in starts in under regparm: 1
+ * %eax, 2 %edx, 3 %ecx, or 0 for the stack.  Lowering marks a source
+ * call's arguments in their ABI bytes; a call the compiler made itself
+ * (memcpy for a structure copy) has none, and under -mregparm takes the
+ * registers by its arguments' sizes, as gcc's library calls do.
+ */
+static int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a) {
+    const cc_options_t *o = cc_options_current();
+    int next = 0;
+    size_t k;
+
+    if (in->call_arg_abi != NULL) {
+        unsigned char abi = in->call_arg_abi[a];
+        int kind = CC_ABI_KIND(abi);
+
+        return kind == CC_CALL_ARG_ABI_DEFAULT || kind == CC_CALL_ARG_ABI_AGG_MEM ? CC_ABI_REGPARM(abi) : 0;
+    }
+    if (o == NULL || o->i386_regparm <= 0 || in->call_is_variadic) {
+        return 0;
+    }
+    for (k = 0; k <= a && k < in->arg_count; ++k) {
+        int v = in->args[k];
+        /* the compiler's own calls pass pointers, size_t and int: a word each (a constant may be held wider) */
+        int words = cc_ssa_value_class(f, v) == CC_VAL_F64 ? 0 : 1;
+
+        if (words == 0) {
+            if (k == a) {
+                return 0;
+            }
+            continue;
+        }
+        if (next + words > o->i386_regparm) {
+            return 0;
+        }
+        if (k == a) {
+            return next + 1;
+        }
+        next += words;
+    }
+    return 0;
+}
+
+/**
+ * Load the register arguments of call @p in, after its stack arguments are
+ * pushed: each its value -- an integer, a long long's two halves, or a
+ * structure's words (its address first in the last register it fills, so
+ * the others are not disturbed).
+ *
+ * @return a mask of the registers loaded (bit 0 %eax, 1 %edx, 2 %ecx)
+ */
+static unsigned emit_i386_load_regparm_args(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                            const cc_ssa_instr_t *in) {
+    unsigned used = 0;
+    size_t a;
+
+    for (a = 0; a < in->arg_count; ++a) {
+        int r = i386_call_arg_regparm(f, in, a);
+        int v = in->args[a];
+
+        if (r == 0) {
+            continue;
+        }
+        if (call_arg_is_agg_mem_abi(in, a)) {
+            long words = (call_arg_size_bytes(in, a, 4) + 3) / 4;
+            int last = r - 1 + (int)words - 1;
+            long w;
+
+            if (last > 2) {
+                last = 2;
+            }
+            emit_load_ptr_value_reg(fp, lay, v, 0, i386_regparm_regs[last]);
+            for (w = 0; r - 1 + w < last; ++w) {
+                fprintf(fp, "\tmovl %ld(%s), %s\n", w * 4, i386_regparm_regs[last], i386_regparm_regs[r - 1 + w]);
+                used |= 1u << (r - 1 + w);
+            }
+            fprintf(fp, "\tmovl %ld(%s), %s\n", (long)(last - (r - 1)) * 4, i386_regparm_regs[last],
+                    i386_regparm_regs[last]);
+            used |= 1u << last;
+        } else if (!is_stackalloc_value(lay, v) && call_arg_size_bytes(in, a, value_size_bytes(f, v, 4)) >= 8 && r < 3) {
+            fprintf(fp, "\tmovl %d(%%ebp), %s\n", slot_off(lay, v), i386_regparm_regs[r - 1]);
+            fprintf(fp, "\tmovl %d(%%ebp), %s\n", slot_off(lay, v) + 4, i386_regparm_regs[r]);
+            used |= 3u << (r - 1);
+        } else {
+            emit_i386_load_int_value_to_reg(fp, f, lay, v, i386_regparm_regs[r - 1]);
+            used |= 1u << (r - 1);
+        }
+    }
+    return used;
 }
 
 static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
@@ -985,12 +1115,10 @@ static void emit_i386_capture_call_result(FILE *fp, const cc_ssa_function_t *f, 
             fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", dst_off);
             fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", dst_off + 4);
         } else {
-            fprintf(fp, "\tpushl $%ld\n", ret_bytes);
-            fprintf(fp, "\tpushl %%eax\n");
+            /* the callee returned the buffer's address in %eax: copy from it */
+            fprintf(fp, "\tmovl %%eax, %%edx\n");
             fprintf(fp, "\tleal %d(%%ebp), %%eax\n", dst_off);
-            fprintf(fp, "\tpushl %%eax\n");
-            fprintf(fp, "\tcall memcpy\n");
-            fprintf(fp, "\taddl $12, %%esp\n");
+            emit_i386_call_memcpy(fp, ret_bytes);
         }
         return;
     }
@@ -1030,7 +1158,10 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     int agg = in->dst >= 0 && in->rhs == in->dst && is_stackalloc_value(lay, in->dst) && in->imm >= 0;
     int ret_vec = agg && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0;
     int in_regs = agg && (in->agg_class & CC_ABI_RET_EAX_EDX) != 0;
-    int sret = agg && !in_regs && !ret_vec;
+    int ret_x87 = agg && (in->agg_class & CC_ABI_RET_X87) != 0;
+    /* regparm: the hidden pointer goes in %eax, loaded with the register arguments, not pushed */
+    int sret_reg = agg && (in->agg_class & CC_ABI_RET_SRET_REG) != 0;
+    int sret = agg && !in_regs && !ret_vec && !ret_x87 && !sret_reg;
     long *offs = (long *)calloc(in->arg_count > 0 ? in->arg_count : 1, sizeof(*offs));
     long pos = sret ? 4 : 0;
     long cur;
@@ -1075,7 +1206,8 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         cur = start < 0 ? 0 : start;
     }
     for (a = 0; a < (long)in->arg_count; ++a) {
-        if (offs[a] >= 0 || (in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_ZERO)) {
+        if (offs[a] >= 0 || (in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_ZERO) ||
+            i386_call_arg_regparm(f, in, (size_t)a) > 0) {
             continue;
         }
         emit_load_ptr_value_reg(fp, lay, in->args[a], 0, "%eax");
@@ -1086,6 +1218,22 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         }
     }
     free(offs);
+
+    /* regparm: the register arguments last, once nothing else needs %eax, %edx, %ecx */
+    {
+        unsigned rp = emit_i386_load_regparm_args(fp, f, lay, in);
+
+        if (sret_reg) {
+            fprintf(fp, "\tleal %d(%%ebp), %%eax\n", stackalloc_off(lay, in->dst));
+            rp |= 1u;
+        }
+        if (rp != 0 && in->op == CC_SSA_CALLI && is_stackalloc_value(lay, in->lhs)) {
+            return -1; /* the target would need %eax */
+        }
+        if ((rp & 4u) != 0 && in->op == CC_SSA_CALL && in->call_chain > 0) {
+            return -1; /* a nested function's static chain is %ecx too */
+        }
+    }
 
     emit_i386_call_target(fp, f, lay, in);
 
@@ -1106,11 +1254,22 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     } else if (in_regs) {
         int off = stackalloc_off(lay, in->dst);
 
-        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", off);
+        /* by its size: a 1- or 2-byte structure (-freg-struct-return) has no room for all of %eax */
+        if (in->imm == 1) {
+            fprintf(fp, "\tmovb %%al, %d(%%ebp)\n", off);
+        } else if (in->imm == 2) {
+            fprintf(fp, "\tmovw %%ax, %d(%%ebp)\n", off);
+        } else {
+            fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", off);
+        }
         if (in->imm > 4) {
             fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", off + 4);
         }
-    } else if (!sret) {
+    } else if (ret_x87) {
+        /* -freg-struct-return: a structure of one float or double came back in %st0 */
+        fprintf(fp, "\t%s %d(%%ebp)\n", in->imm == 4 ? "fstps" : "fstpl", stackalloc_off(lay, in->dst));
+    } else if (!sret && !sret_reg) {
+        /* (a hidden pointer's callee filled the buffer itself: %eax holds only its address) */
         emit_i386_capture_call_result(fp, f, lay, ist, in);
     }
     return 0;
@@ -1129,6 +1288,8 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
         int frame;
         int fn_x87_fp = 0; /* doubles on the x87, not SSE; a long double always is */
         int scratch_off;
+        int regparm_home = 0; /* regparm: where the prologue stores %eax, %edx, %ecx; 0 when nothing came in them */
+        size_t pi;
 
         if (opts->i386_mmx && opts->i386_isa_level < 5) {
             set_diag(diag, "i386 MMX codegen requires -march=i586 or newer");
@@ -1150,6 +1311,20 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
             return -1;
         }
         frame = lay.frame_bytes;
+        for (pi = 0; pi < f->param_count || (pi == 0 && f->sret_reg); ++pi) {
+            int kind = f->param_abi != NULL && pi < f->param_count ? CC_ABI_KIND(f->param_abi[pi]) : -1;
+
+            if (f->sret_reg || ((kind == CC_CALL_ARG_ABI_DEFAULT || kind == CC_CALL_ARG_ABI_AGG_MEM) &&
+                                CC_ABI_REGPARM(f->param_abi[pi]) > 0)) {
+                /* twelve bytes below the slots, %eax lowest: a value of two or three words reads them in order */
+                regparm_home = -(frame + 12);
+                if (cc_backend_checked_frame_add(&frame, 12, diag, "i386 regparm home") != 0) {
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                break;
+            }
+        }
         if (cc_backend_checked_frame_add(&frame, 16, diag, "i386 call scratch area") != 0) {
             slot_layout_free(&lay);
             return -1;
@@ -1197,6 +1372,12 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
         if (frame > 0) {
             fprintf(fp, "\tsubl $%d, %%esp\n", frame);
         }
+        if (regparm_home != 0) {
+            /* before anything else can touch them */
+            fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", regparm_home);
+            fprintf(fp, "\tmovl %%edx, %d(%%ebp)\n", regparm_home + 4);
+            fprintf(fp, "\tmovl %%ecx, %d(%%ebp)\n", regparm_home + 8);
+        }
         if (emit_dynalloc_slot_clears(fp, f, &lay, 0, diag) != 0) {
             slot_layout_free(&lay);
             return -1;
@@ -1215,6 +1396,14 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
             switch (in->op) {
             case CC_SSA_PARAM: {
                 int poff = i386_param_offset(f, in->param_index);
+
+                if (f->param_abi != NULL && in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
+                    (CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_DEFAULT ||
+                     CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_AGG_MEM) &&
+                    CC_ABI_REGPARM(f->param_abi[in->param_index]) > 0) {
+                    /* it came in a register: read it where the prologue stored it */
+                    poff = regparm_home + 4 * (CC_ABI_REGPARM(f->param_abi[in->param_index]) - 1);
+                }
                 int param_is_ldouble =
                     (f->param_abi != NULL && in->param_index >= 0 &&
                      (size_t)in->param_index < f->param_count &&
@@ -1623,21 +1812,21 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
                      * whose address is the hidden first argument, return
                      * that address, and pop it.
                      */
+                    /* under regparm the hidden pointer came in %eax, which the prologue stored */
+                    int hidden = f->sret_reg ? regparm_home : 8;
                     int_regs_flush(fp, f, &lay, &ist);
                     if (in->lhs >= 0 && in->imm > 0) {
-                        fprintf(fp, "\tpushl $%ld\n", (long)in->imm);
-                        emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%eax");
-                        fprintf(fp, "\tpushl %%eax\n");
-                        fprintf(fp, "\tpushl 8(%%ebp)\n");
-                        fprintf(fp, "\tcall memcpy\n");
-                        fprintf(fp, "\taddl $12, %%esp\n");
+                        emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%edx");
+                        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", hidden);
+                        emit_i386_call_memcpy(fp, (long)in->imm);
                     }
-                    fprintf(fp, "\tmovl 8(%%ebp), %%eax\n");
+                    fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", hidden);
                     fprintf(fp, "\tleave\n");
                     if (emit_debug) {
                         fprintf(fp, "\t.cfi_def_cfa %%esp, 4\n");
                     }
-                    fprintf(fp, "\tret $4\n");
+                    /* popping the pointer only if it was on the stack */
+                    fprintf(fp, f->sret_reg ? "\tret\n" : "\tret $4\n");
                     break;
                 }
                 if (in->lhs >= 0 && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0) {
@@ -1649,6 +1838,11 @@ int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit
                     } else {
                         fprintf(fp, "\tmovq (%%eax), %%mm0\n");
                     }
+                } else if (in->lhs >= 0 && (in->agg_class & CC_ABI_RET_X87) != 0) {
+                    /* -freg-struct-return: a structure of one float or double, as that value in %st0 */
+                    int_regs_flush(fp, f, &lay, &ist);
+                    emit_load_ptr_value_reg(fp, &lay, in->lhs, 0, "%eax");
+                    fprintf(fp, "\t%s (%%eax)\n", in->imm == 4 ? "flds" : "fldl");
                 } else if (in->lhs >= 0) {
                     if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);

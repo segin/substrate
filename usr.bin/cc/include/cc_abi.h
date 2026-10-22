@@ -122,6 +122,36 @@ int cc_abi_i386_aggregate_arg(const cc_translation_unit_t *tu, int sid, long siz
 int cc_abi_i386_aggregate_return(const cc_translation_unit_t *tu, int sid, long size);
 
 /**
+ * i386 -mregparm / regparm(N): how many of %eax, %edx, %ecx an argument of
+ * type @p t takes, as gcc counts them -- an integer, pointer or aggregate
+ * one per four bytes (a long long two, a 12-byte structure three) -- or 0
+ * for one gcc keeps on the stack without using up a register: a floating
+ * value, a structure of one float or double, a vector, an empty structure.
+ */
+int cc_abi_i386_regparm_words(const cc_translation_unit_t *tu, const cc_ctype_t *t);
+
+/**
+ * Give arguments of types @p types the registers of regparm(@p nregs), as
+ * gcc does: in order, each that takes words gets the next ones if they are
+ * all free; the first that does not fit goes on the stack and so does
+ * every one after it.  Each one's ABI byte in @p abi (CC_CALL_ARG_ABI_
+ * DEFAULT or _AGG_MEM) gets its register (CC_ABI_WITH_REGPARM).  @p first
+ * is the first register free: 1 when a structure result's hidden pointer
+ * takes %eax, as gcc passes it under regparm.
+ */
+void cc_abi_i386_regparm_assign(const cc_translation_unit_t *tu, const cc_ctype_t *const *types, size_t n, int nregs,
+                                int first, unsigned char *abi);
+
+/**
+ * The regparm count a call of, or the body of, the function named @p name
+ * uses: a regparm(N) on any of its declarations, else @p default_regparm
+ * (-mregparm); 0 for a variadic function, which gcc always passes on the
+ * stack.
+ */
+int cc_abi_i386_function_regparm(const cc_translation_unit_t *tu, const char *name, int is_variadic,
+                                 int default_regparm);
+
+/**
  * The x86-64 va_arg: from the register save area while the va_list
  * record's gp_offset (or fp_offset) says registers remain, else from the
  * overflow area; a long double always from the overflow area, aligned to

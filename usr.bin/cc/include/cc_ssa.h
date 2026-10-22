@@ -61,8 +61,18 @@ typedef enum {
 #define CC_ABI_VEC64 0x80            /**< with AGG_REG (i386): an 8-byte vector, whole in one MMX register */
 #define CC_ABI_STACK_VEC 0x40        /**< with AGG_MEM: a vector, its stack copy aligned to its size from 16 up */
 #define CC_ABI_STACK_16 0x80         /**< with AGG_MEM: its stack copy aligned to 16 (_Complex _Float128) */
+/*
+ * i386 -mregparm / regparm(N): with CC_CALL_ARG_ABI_DEFAULT or _AGG_MEM
+ * (which never carry the SSE bits, x86-64's), the register an argument
+ * travels in instead of the stack -- 1 %eax, 2 %edx, 3 %ecx; an argument
+ * of two or three words fills that one and the ones after.  0: the stack.
+ */
+#define CC_ABI_REGPARM_MASK 0x30
+#define CC_ABI_REGPARM(b) (((b) & CC_ABI_REGPARM_MASK) >> 4)
+#define CC_ABI_WITH_REGPARM(b, r) ((unsigned char)(((b) & ~CC_ABI_REGPARM_MASK) | (((r) & 3) << 4)))
 #define CC_ABI_RET_VEC128 0x800      /**< agg_class: a 16-byte vector, returned whole in %xmm0 */
 #define CC_ABI_RET_VEC64 0x1000      /**< agg_class (i386): an 8-byte vector, returned in %mm0 */
+#define CC_ABI_RET_SRET_REG 0x2000   /**< agg_class, CALL (i386 regparm): the hidden pointer goes in %eax, not on the stack */
 
 typedef enum {
     CC_SSA_PARAM = 0,
@@ -246,6 +256,7 @@ typedef struct cc_ssa_function {
     cc_value_type_t *param_types;
     unsigned char *param_abi;
     unsigned char ret_abi;
+    int sret_reg; /**< i386 regparm: the hidden pointer of a structure result came in %eax, not on the stack */
 
     cc_ssa_instr_t *instrs;
     size_t instr_count;

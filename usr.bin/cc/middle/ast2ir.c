@@ -9,6 +9,7 @@
 #include "cc_types.h"
 #include "cc_util.h"
 #include "cc_lower.h"
+#include "cc_options.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14343,7 +14344,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                                               : CC_CALL_ARG_ABI_DEFAULT);
         }
         if (cc_target_pointer_size() <= 4 && ct_record_id(fn_ret_ctype(af)) >= 0 &&
-            cc_abi_aggregate_return(tu, ct_record_id(fn_ret_ctype(af)), 8) == 0) {
+            cc_abi_aggregate_return(tu, ct_record_id(fn_ret_ctype(af)), cc_ct_size(fn_ret_ctype(af), tu)) == 0) {
             /*
              * the i386 psABI returns every struct in memory; a float
              * _Complex comes back in %eax:%edx, and a vector of 4, 8 or
@@ -14471,6 +14472,34 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if (CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_MEM || CC_ABI_KIND(agg_abi) == CC_CALL_ARG_ABI_AGG_REG) {
                 /* the value is the address of the struct's stack copy or storage, not the struct */
                 cc_ir_set_size(sf, in.dst, cc_target_pointer_size());
+            }
+        }
+        if (cc_target_current()->id == CC_TARGET_I386) {
+            /*
+             * -mregparm / regparm(N): the first integer parameters arrive in
+             * %eax, %edx, %ecx -- after a structure result's hidden pointer,
+             * which takes %eax (and is not popped on return).
+             */
+            int nregs = cc_abi_i386_function_regparm(tu, af->name, af->is_variadic,
+                                                     cc_options_current() != NULL ? cc_options_current()->i386_regparm
+                                                                                  : 0);
+
+            if (nregs > 0 && sf->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) {
+                sf->sret_reg = 1;
+            }
+            if (nregs > 0 && af->param_count > 0) {
+                const cc_ctype_t **ptypes = (const cc_ctype_t **)calloc(af->param_count, sizeof(*ptypes));
+
+                if (ptypes == NULL) {
+                    set_diag(diag, "out of memory assigning regparm registers");
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+                for (j = 0; j < af->param_count; ++j) {
+                    ptypes[j] = lower_param_ctype(&af->params[j]);
+                }
+                cc_abi_i386_regparm_assign(tu, ptypes, af->param_count, nregs, sf->sret_reg, sf->param_abi);
+                free(ptypes);
             }
         }
         for (j = 0; j < af->param_count; ++j) {

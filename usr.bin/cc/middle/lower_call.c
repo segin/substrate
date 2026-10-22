@@ -6,6 +6,7 @@
 
 #include "cc_frontend.h"
 #include "cc_abi.h"
+#include "cc_options.h"
 #include "cc_irbuild.h"
 #include "cc_asm.h"
 #include "cc_consteval.h"
@@ -2490,6 +2491,8 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
 
     /* the argument registers the aggregates so far took */
     cc_abi_regs_t regs = {0, 0};
+    /* i386 regparm: a structure result's hidden pointer goes in %eax (CC_ABI_RET_SRET_REG) */
+    int regparm_sret = 0;
 
     for (i = 0; i < e->arg_count; ++i) {
         int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
@@ -2670,6 +2673,61 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         }
         in.call_arg_sizes[i] = (uint32_t)(arg_needs_ldouble_abi ? 12 : arg_needs_float_abi ? 4 : arg_size);
     }
+    if (cc_target_current()->id == CC_TARGET_I386) {
+        /*
+         * -mregparm / regparm(N): the first integer arguments go in %eax,
+         * %edx, %ecx -- by the callee's declarations for a direct call,
+         * by -mregparm through a pointer (whose type gcc's regparm would
+         * be an attribute of, which cc does not keep); never for a
+         * variadic callee.  A structure result's hidden pointer comes
+         * first, in %eax.
+         */
+        int dflt = cc_options_current() != NULL ? cc_options_current()->i386_regparm : 0;
+        const cc_ctype_t *fnt = NULL;
+        int nregs;
+        int rid = lower_record_id(e);
+
+        if (in.op == CC_SSA_CALLI) {
+            const cc_ctype_t *ct = e->lhs != NULL              ? lower_value_ctype(e->lhs)
+                                   : ident_var_idx >= 0         ? lower_var_ctype(&vars[ident_var_idx])
+                                   : ident_global != NULL       ? lower_global_ctype(ident_global)
+                                                                : NULL;
+
+            if (ct != NULL && ct->kind == CC_CT_POINTER) {
+                ct = ct->of;
+            }
+            fnt = ct != NULL && ct->unqual->kind == CC_CT_FUNCTION ? ct->unqual : NULL;
+            nregs = fnt != NULL && fnt->variadic ? 0 : dflt;
+        } else {
+            nregs = cc_abi_i386_function_regparm(tu, e->ident,
+                                                 callee != NULL && callee->has_prototype && callee->is_variadic, dflt);
+        }
+        if (nregs > 0 && rid >= 0 &&
+            (cc_abi_aggregate_return(tu, rid, lower_value_size(tu, e)) &
+             (CC_ABI_RET_EAX_EDX | CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64 | CC_ABI_RET_X87)) == 0) {
+            regparm_sret = 1;
+        }
+        if (nregs > 0 && in.arg_count > 0) {
+            const cc_ctype_t **atypes = (const cc_ctype_t **)calloc(in.arg_count, sizeof(*atypes));
+
+            if (atypes == NULL) {
+                free(in.sym);
+                free(in.args);
+                free(in.call_arg_abi);
+                free(in.call_arg_sizes);
+                set_diag(diag, "out of memory assigning regparm registers");
+                return -1;
+            }
+            for (i = 0; i < in.arg_count; ++i) {
+                atypes[i] = (callee != NULL && callee->has_prototype && i < callee->param_count)
+                                ? lower_param_ctype(&callee->params[i])
+                            : (fnt != NULL && fnt->prototyped && i < fnt->param_count) ? fnt->params[i]
+                                                                                        : lower_value_ctype(e->args[i]);
+            }
+            cc_abi_i386_regparm_assign(tu, atypes, in.arg_count, nregs, regparm_sret, in.call_arg_abi);
+            free(atypes);
+        }
+    }
     in.call_ret_x87 = (lower_has_kind(e, CC_CT_LDOUBLE)) ? 1 : 0;
     if (lower_has_kind(e, CC_CT_FLOAT)) {
         /* a float comes back in single precision */
@@ -2700,6 +2758,9 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         in.imm = agg_size;
         in.is_unsigned = 1;
         in.agg_class = cc_abi_aggregate_return(tu, lower_record_id(e), agg_size);
+        if (regparm_sret) {
+            in.agg_class |= CC_ABI_RET_SRET_REG;
+        }
     } else if (lower_has_kind(e, CC_CT_VOID)) {
         in.dst = cc_ir_new_value(sf, CC_VAL_I64);
         in.imm = cc_target_pointer_size();

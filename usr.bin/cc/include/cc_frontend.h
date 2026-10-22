@@ -376,6 +376,7 @@ typedef struct {
     long attr_align;
     long attr_format_index;
     long attr_format_first_to_check;
+    int attr_regparm; /**< `regparm(n)` (i386): n + 1; 0 when this declaration does not say */
     char *attr_section;
     char *attr_alias;
     int has_body;
