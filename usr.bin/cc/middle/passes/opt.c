@@ -226,6 +226,174 @@ static long long fold_int_cmp(cc_cmp_kind_t kind, int is_unsigned, int word32, l
     return 0;
 }
 
+/** The most label x variable states join_state_t keeps; past it labels forget, as before. */
+#define JOIN_MAX_STATES (8L * 1024 * 1024)
+
+/**
+ * What the edges into each label carry of the function's variables -- the integer values defined
+ * more than once, `x = c ? 1 : 2`'s and `a || b`'s result -- so that at a join a variable every
+ * incoming edge gives the same constant is that constant.  A label with an edge from later in the
+ * stream (a loop), or one an asm goto or a label address reaches, forgets them, as every label did.
+ */
+typedef struct {
+    int nvars;             /**< how many variables */
+    int *var_of;           /**< per value: its variable's index, or -1 */
+    int *vars;             /**< per variable: its value */
+    unsigned char *forget; /**< per label: 1 if it cannot be joined */
+    unsigned char *seen;   /**< per label x variable: 0 no edge yet, 1 a constant, 2 varying */
+    long long *val;        /**< per label x variable: the constant */
+} join_state_t;
+
+static void join_free(join_state_t *j) {
+    free(j->var_of);
+    free(j->vars);
+    free(j->forget);
+    free(j->seen);
+    free(j->val);
+    memset(j, 0, sizeof(*j));
+}
+
+/**
+ * Set up @p j for @p f; with no variables, or too many states, it joins nothing (nvars 0).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int join_init(join_state_t *j, const cc_ssa_function_t *f) {
+    int *defs;
+    long *label_at;
+    size_t i;
+    int v;
+
+    memset(j, 0, sizeof(*j));
+    if (f->value_count <= 0 || f->label_count <= 0) {
+        return 0;
+    }
+    defs = (int *)calloc((size_t)f->value_count, sizeof(*defs));
+    label_at = (long *)malloc((size_t)f->label_count * sizeof(*label_at));
+    j->var_of = (int *)malloc((size_t)f->value_count * sizeof(*j->var_of));
+    j->forget = (unsigned char *)calloc((size_t)f->label_count, 1);
+    if (defs == NULL || label_at == NULL || j->var_of == NULL || j->forget == NULL) {
+        free(defs);
+        free(label_at);
+        join_free(j);
+        return -1;
+    }
+    for (i = 0; i < (size_t)f->label_count; ++i) {
+        label_at[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            defs[in->dst]++;
+        }
+        if (in->op == CC_SSA_LABEL && in->label >= 0 && in->label < f->label_count) {
+            label_at[in->label] = (long)i;
+        }
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        j->var_of[v] = -1;
+        if (defs[v] > 1 && cc_ssa_value_class(f, v) == CC_VAL_I64) {
+            j->var_of[v] = j->nvars++;
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        /* an edge from later in the stream (a loop), or one not a branch's, and the label forgets */
+        if (in->op == CC_SSA_BR && in->label >= 0 && in->label < f->label_count && label_at[in->label] <= (long)i) {
+            j->forget[in->label] = 1;
+        } else if (in->op == CC_SSA_BR_COND) {
+            if (in->true_label >= 0 && in->true_label < f->label_count && label_at[in->true_label] <= (long)i) {
+                j->forget[in->true_label] = 1;
+            }
+            if (in->false_label >= 0 && in->false_label < f->label_count && label_at[in->false_label] <= (long)i) {
+                j->forget[in->false_label] = 1;
+            }
+        } else if (in->op == CC_SSA_LADDR && in->label >= 0 && in->label < f->label_count) {
+            j->forget[in->label] = 1;
+        } else if (in->op == CC_SSA_ASM) {
+            for (k = 0; k < in->asm_goto_count; ++k) {
+                if (in->asm_goto_labels[k] >= 0 && in->asm_goto_labels[k] < f->label_count) {
+                    j->forget[in->asm_goto_labels[k]] = 1;
+                }
+            }
+            /* an asm's outputs are set by the asm: never a join's constant */
+            for (k = 0; k < in->asm_out_count; ++k) {
+                int ov = in->asm_out_values[k];
+
+                if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+                    ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+                }
+                if (ov >= 0 && ov < f->value_count && j->var_of[ov] >= 0) {
+                    j->var_of[ov] = -1;
+                }
+            }
+        }
+    }
+    free(defs);
+    free(label_at);
+    if (j->nvars == 0 || (long)j->nvars * f->label_count > JOIN_MAX_STATES) {
+        join_free(j);
+        return 0;
+    }
+    j->vars = (int *)malloc((size_t)j->nvars * sizeof(*j->vars));
+    j->seen = (unsigned char *)calloc((size_t)j->nvars * (size_t)f->label_count, 1);
+    j->val = (long long *)malloc((size_t)j->nvars * (size_t)f->label_count * sizeof(*j->val));
+    if (j->vars == NULL || j->seen == NULL || j->val == NULL) {
+        join_free(j);
+        return -1;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        if (j->var_of[v] >= 0) {
+            j->vars[j->var_of[v]] = v;
+        }
+    }
+    return 0;
+}
+
+/** Record the edge into @p label carrying the variables' states @p st. */
+static void join_edge(join_state_t *j, int label, int label_count, const const_state_t *st) {
+    int k;
+
+    if (j->nvars == 0 || label < 0 || label >= label_count || j->forget[label]) {
+        return;
+    }
+    for (k = 0; k < j->nvars; ++k) {
+        size_t at = (size_t)label * (size_t)j->nvars + (size_t)k;
+        const const_state_t *s = &st[j->vars[k]];
+        int known = s->known && s->type == CC_VAL_I64;
+
+        if (j->seen[at] == 0) {
+            j->seen[at] = known ? 1 : 2;
+            j->val[at] = s->i;
+        } else if (j->seen[at] == 1 && (!known || j->val[at] != s->i)) {
+            j->seen[at] = 2;
+        }
+    }
+}
+
+/** At @p label, take in @p st what every edge into it agrees on. */
+static void join_enter(const join_state_t *j, int label, int label_count, const_state_t *st) {
+    int k;
+
+    if (j->nvars == 0 || label < 0 || label >= label_count || j->forget[label]) {
+        return;
+    }
+    for (k = 0; k < j->nvars; ++k) {
+        size_t at = (size_t)label * (size_t)j->nvars + (size_t)k;
+
+        if (j->seen[at] == 1) {
+            const_state_t *s = &st[j->vars[k]];
+
+            s->known = 1;
+            s->type = CC_VAL_I64;
+            s->i = j->val[at];
+        }
+    }
+}
+
 /**
  * Fold what is constant in @p f: arithmetic, compares and conversions of known values become
  * CONSTs, and with @p fold_branches a branch on a known condition a jump.
@@ -235,6 +403,7 @@ static long long fold_int_cmp(cc_cmp_kind_t kind, int is_unsigned, int word32, l
 static int fold_function(cc_ssa_function_t *f, int fold_branches) {
     const_state_t *st;
     const_state_t *g;
+    join_state_t join;
     size_t i;
     int changed = 0;
 
@@ -252,11 +421,25 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         return -1;
     }
     memcpy(st, g, (size_t)f->value_count * sizeof(*st));
+    /* the optimizer's folding joins variables at labels; the -O0 one, before legalization, does not */
+    memset(&join, 0, sizeof(join));
+    if (fold_branches && join_init(&join, f) != 0) {
+        free(st);
+        free(g);
+        return -1;
+    }
 
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
         int dst = in->dst;
         cc_value_type_t vt = CC_VAL_I64;
+
+        if (in->op == CC_SSA_LABEL) {
+            /* falling into it from the instruction before is an edge too */
+            if (i > 0 && !cc_ssa_opcode_is_terminator(f->instrs[i - 1].op)) {
+                join_edge(&join, in->label, f->label_count, st);
+            }
+        }
 
         if (dst >= 0 && (size_t)dst < (size_t)f->value_count) {
             vt = cc_ssa_value_class(f, dst);
@@ -531,9 +714,11 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
              * The current IR stream is linearized and does not maintain
              * per-block dataflow states. Clear known constants at labels so
              * values from one predecessor path cannot be propagated across
-             * control-flow joins.
+             * control-flow joins -- but for what every edge into it agrees
+             * on (join_state_t).
              */
             memcpy(st, g, (size_t)f->value_count * sizeof(*st));
+            join_enter(&join, in->label, f->label_count, st);
             break;
 
         case CC_SSA_BR_COND:
@@ -544,16 +729,24 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 in->op = CC_SSA_BR;
                 in->lhs = -1;
                 changed = 1;
+                join_edge(&join, in->label, f->label_count, st);
+            } else {
+                join_edge(&join, in->true_label, f->label_count, st);
+                join_edge(&join, in->false_label, f->label_count, st);
             }
             break;
 
         case CC_SSA_BR:
+            join_edge(&join, in->label, f->label_count, st);
+            break;
+
         case CC_SSA_TRAP:
         case CC_SSA_RET:
             break;
         }
     }
 
+    join_free(&join);
     free(st);
     free(g);
     return changed;

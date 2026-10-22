@@ -85,6 +85,35 @@ for m in 32 64; do
 	fi
 done
 
+# A call guarded by x & 0 (Linux's IS_DAX(inode), S_DAX 0 without DAX)
+# goes, and one guarded by `a || b` with b constant true, whose result
+# is set on two paths that agree (folio_unqueue_deferred_split()'s
+# `folio_order(folio) <= 1 || !folio_test_large_rmappable(folio)`, the
+# test false without THP).
+cat > "$CC_TMP/join.c" <<'EOF'
+struct inode { unsigned i_flags; };
+struct folio { unsigned long flags; };
+void undefined_dax(void);
+_Bool undefined_unqueue(struct folio *);
+static inline _Bool test_large(const struct folio *f) { return 0; }
+static inline unsigned order(const struct folio *f) { return f->flags & 0xff; }
+static inline _Bool unqueue(struct folio *f) {
+	if (order(f) <= 1 || !test_large(f))
+		return 0;
+	return undefined_unqueue(f);
+}
+void dax(struct inode *inode) { if (inode->i_flags & 0) undefined_dax(); }
+int put(struct folio *f) { return unqueue(f); }
+EOF
+for m in 32 64; do
+	"$CC_BIN" -m$m -Os -c -o "$CC_TMP/join.o" "$CC_TMP/join.c"
+	if nm -u "$CC_TMP/join.o" | grep -q 'undefined_'; then
+		echo "run_inline_dead_call: -m$m -Os keeps a call x & 0 or a join guards:"
+		nm -u "$CC_TMP/join.o" | grep 'undefined_'
+		exit 1
+	fi
+done
+
 # A call with no effect but its unused result goes too, inlined or not:
 # Linux's noinline apply_retpolines(__retpoline_sites, ...) is empty
 # without retpolines, and the linker script then defines neither symbol.
