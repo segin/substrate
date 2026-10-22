@@ -5727,7 +5727,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
             return -1;
         }
     }
-    if (array_len == 0 && init->arg_count == 0) {
+    if (arr->count < 0 && init->arg_count == 0) {
+        /* `T a[] = {}`; a zero-length array's `{}` is all of it */
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "cannot deduce array size for %s from empty initializer list",
                      name != NULL ? name : "<anon>");

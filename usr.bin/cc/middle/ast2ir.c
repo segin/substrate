@@ -7757,6 +7757,10 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     elem = member_elem_ctype(m);
     elem_sid = ct_record_id(elem);
     elem_size = member_elem_size(tu, m);
+    if (m->size == 0 && item->arg_count == 0) {
+        /* a zero-length array's `{}`: nothing to write */
+        return 0;
+    }
     if (elem_size <= 0 || m->size <= 0) {
         set_diag(diag, "unsupported array-like struct member size in initializer lowering");
         return -1;

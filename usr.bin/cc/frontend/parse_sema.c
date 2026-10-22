@@ -1246,7 +1246,12 @@ int cc_struct_designated_member(const cc_struct_def_t *sd, const char *name) {
     return -1;
 }
 
-/** A zero for a part no initializer named: `0`, or `{0}` for a vector or an aggregate. */
+/**
+ * A zero for a part no initializer named: `0`, or `{0}` for a vector or an
+ * aggregate -- `{}` for one with no parts, an empty structure (Linux's
+ * vm_userfaultfd_ctx without userfaultfd) or a zero-length array, where a
+ * 0 would be an initializer too many.
+ */
 static cc_expr_t *init_zero(parser_t *p, const cc_ctype_t *t) {
     cc_expr_t *z = (cc_expr_t *)calloc(1, sizeof(*z));
     const cc_struct_def_t *sd;
@@ -1264,6 +1269,10 @@ static cc_expr_t *init_zero(parser_t *p, const cc_ctype_t *t) {
         if (l == NULL) {
             cc_expr_free(z);
             return NULL;
+        }
+        if (init_is_aggregate(p, t) && init_part_count(p, t) == 0) {
+            cc_expr_free(z);
+            return l;
         }
         l->args = (cc_expr_t **)malloc(sizeof(*l->args));
         if (l->args == NULL) {
