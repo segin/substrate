@@ -22,6 +22,8 @@ cat > "$CC_TMP/gi.h" <<'EOF'
 extern gnu_inline unsigned long save_fl(void);
 extern gnu_inline __attribute__((__always_inline__)) unsigned long save_fl(void) { return 42; }
 gnu_inline int defined_here(int x);
+/* static inline is as before: unused, it is not compiled (Linux's `inline` is gnu_inline on all of them) */
+static gnu_inline void *rip_rel_ptr(void *p) { __asm__("leaq %c1(%%rip), %0" : "=r"(p) : "i"(p)); return p; }
 EOF
 cat > "$CC_TMP/gi_a.c" <<'EOF'
 #include "gi.h"

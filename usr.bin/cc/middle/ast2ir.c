@@ -14479,7 +14479,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
              */
             if ((sf->storage & CC_STORAGE_EXTERN) != 0) {
                 sf->storage = (sf->storage & ~CC_STORAGE_EXTERN) | CC_STORAGE_STATIC;
-            } else {
+            } else if ((sf->storage & CC_STORAGE_STATIC) == 0) {
+                /* (a static inline one is as it was: Linux's `inline` carries gnu_inline on all of them) */
                 sf->storage &= ~CC_STORAGE_INLINE;
             }
         }
