@@ -422,6 +422,22 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                     st[dst].i = out;
                     changed = 1;
                 }
+            } else if (dst >= 0 && vt == CC_VAL_I64 && (in->op == CC_SSA_AND || in->op == CC_SSA_MUL) &&
+                       in->rhs >= 0 &&
+                       ((in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64 && st[in->lhs].i == 0) ||
+                        (st[in->rhs].known && st[in->rhs].type == CC_VAL_I64 && st[in->rhs].i == 0))) {
+                /*
+                 * x & 0 and x * 0 are 0 whatever x is: Linux's IS_DAX(inode),
+                 * `inode->i_flags & S_DAX`, with S_DAX 0 when DAX is not built
+                 */
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->imm = 0;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_I64;
+                st[dst].i = 0;
+                changed = 1;
             } else if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 &&
                        st[in->lhs].known && st[in->rhs].known &&
                        st[in->lhs].type == CC_VAL_F64 && st[in->rhs].type == CC_VAL_F64) {
