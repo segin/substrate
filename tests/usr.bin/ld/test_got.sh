@@ -84,5 +84,33 @@ for arch in 32 64; do
     done
 done
 
+# i386 code that only reaches things by their distance from the GOT
+# (GOTPC, GOTOFF), no slot: the base is .got.plt with its three reserved
+# words, where GNU ld puts _GLOBAL_OFFSET_TABLE_, and there is no .got --
+# Linux's decompressor, linked -pie, asserts exactly that.
+cat > base.s <<'EOF'
+	.text
+	.globl _start
+_start:
+	call 1f
+1:	popl %ebx
+	addl $_GLOBAL_OFFSET_TABLE_+[.-1b], %ebx
+	leal datum@GOTOFF(%ebx), %eax
+	ret
+	.data
+datum:	.long 7
+EOF
+if ${CC:-cc} -m32 -c -o base.o base.s 2>/dev/null; then
+    if "$work/ld" -m elf_i386 -pie -o base base.o 2>err; then
+        is "base-only i386 -pie: no .got" "$(readelf -SW base | grep -c ' \.got ')" 0
+        is "base-only i386 -pie: .got.plt is its reserved words" "$(( $(sec base .got.plt size) ))" 12
+        lea=$(objdump -d base | awk '/lea/ && /\(%ebx\)/ { print; exit }' | grep -o '0x[0-9a-f]*(' | tr -d '(')
+        is "base-only i386 -pie: datum is at its offset from .got.plt" \
+            "$(( $(sec base .got.plt addr) + lea ))" "$(( $(symval base datum) ))"
+    else
+        echo "FAIL base-only i386 -pie: does not link: $(head -1 err)"; fail=1
+    fi
+fi
+
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

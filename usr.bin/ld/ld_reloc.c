@@ -522,6 +522,10 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
  * Where nothing is imported there is no table yet: make one, for the
  * slots collected, or on i386 for a base alone where code refers to
  * things by their distance from the table and none of it through a slot.
+ * A base alone is .got.plt with its reserved words, where GNU ld puts
+ * _GLOBAL_OFFSET_TABLE_, and .got stays empty: Linux's decompressor,
+ * position-independent and linked -pie, asserts .got is, and .got.plt
+ * no more than those words.
  */
 int plan_local_got(ld_ctx_t *ctx, elfobj_t *out) {
     size_t entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4;
@@ -531,6 +535,14 @@ int plan_local_got(ld_ctx_t *ctx, elfobj_t *out) {
         (ctx->local_got_count == 0 && !ctx->local_got_need_base) ||
         elf_find_section(out, ".got") != NULL || elf_find_section(out, ".got.plt") != NULL) {
         return 0;               /* nothing to do, or sized with the imports' */
+    }
+    if (ctx->local_got_count == 0) {
+        got = elf_add_section(out, ".got.plt", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+        if (got == NULL || elf_section_set_align(got, entsz) != ELF_OK ||
+            set_section_zero_data(got, entsz * LD_GOTPLT_RESERVED) != 0) {
+            return -1;
+        }
+        return 0;
     }
     got = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
     if (got == NULL || elf_section_set_align(got, entsz) != ELF_OK ||
