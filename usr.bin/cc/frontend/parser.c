@@ -4898,6 +4898,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_unused;
     int is_used;
     int is_always_inline;
+    int is_gnu_inline;
     int is_noinline;
     int is_hot;
     int is_cold;
@@ -4949,6 +4950,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_unused = tok_is_gnu_attr_name(p, "unused");
     is_used = tok_is_gnu_attr_name(p, "used");
     is_always_inline = tok_is_gnu_attr_name(p, "always_inline");
+    is_gnu_inline = tok_is_gnu_attr_name(p, "gnu_inline");
     is_noinline = tok_is_gnu_attr_name(p, "noinline");
     is_hot = tok_is_gnu_attr_name(p, "hot");
     is_cold = tok_is_gnu_attr_name(p, "cold");
@@ -4971,7 +4973,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_mode = tok_is_gnu_attr_name(p, "mode");
     is_regparm = tok_is_gnu_attr_name(p, "regparm");
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
-                is_always_inline ||
+                is_always_inline || is_gnu_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
                 is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_constructor ||
                 is_destructor || is_transparent_union ||
@@ -5012,6 +5014,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_always_inline) {
             out_attrs->flags |= CC_ATTR_ALWAYS_INLINE;
+        }
+        if (is_gnu_inline) {
+            out_attrs->flags |= CC_ATTR_GNU_INLINE;
         }
         if (is_noinline) {
             out_attrs->flags |= CC_ATTR_NOINLINE;

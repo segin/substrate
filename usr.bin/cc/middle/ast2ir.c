@@ -14469,6 +14469,20 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             sf->ret_abi = CC_CALL_ARG_ABI_AGG_MEM;
         }
         sf->storage = af->storage;
+        if ((eff_attr_flags & CC_ATTR_GNU_INLINE) != 0 && (sf->storage & CC_STORAGE_INLINE) != 0) {
+            /*
+             * gnu_inline, the GNU89 meaning: an `extern inline` function
+             * defines nothing outside the file -- gcc inlines it, and with
+             * no inliner it is a copy of the file's own (Linux's
+             * native_save_fl was defined by every file using it) -- and a
+             * plain `inline` one is an ordinary definition.
+             */
+            if ((sf->storage & CC_STORAGE_EXTERN) != 0) {
+                sf->storage = (sf->storage & ~CC_STORAGE_EXTERN) | CC_STORAGE_STATIC;
+            } else {
+                sf->storage &= ~CC_STORAGE_INLINE;
+            }
+        }
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;
         if (eff_attr_section != NULL) {
