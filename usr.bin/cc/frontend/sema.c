@@ -1148,18 +1148,12 @@ static int find_struct_member_recursive(const cc_translation_unit_t *tu, int str
 
 static int find_struct_member_index(const cc_translation_unit_t *tu, int struct_id, const char *name) {
     const cc_struct_def_t *sd;
-    size_t i;
 
     sd = find_struct_def(tu, struct_id);
-    if (sd == NULL || !sd->complete || name == NULL) {
+    if (sd == NULL || !sd->complete) {
         return -1;
     }
-    for (i = 0; i < sd->member_count; ++i) {
-        if (sd->members[i].name != NULL && strcmp(sd->members[i].name, name) == 0) {
-            return (int)i;
-        }
-    }
-    return -1;
+    return cc_struct_designated_member(sd, name);
 }
 
 /**

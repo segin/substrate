@@ -1223,6 +1223,26 @@ fail:
     return -1;
 }
 
+int cc_struct_designated_member(const cc_struct_def_t *sd, const char *name) {
+    size_t i;
+
+    if (sd == NULL || name == NULL) {
+        return -1;
+    }
+    if (name[0] == CC_MEMBER_INDEX_DESIGNATOR) {
+        char *end;
+        unsigned long idx = strtoul(name + 1, &end, 10);
+
+        return end != name + 1 && *end == '\0' && idx < sd->member_count ? (int)idx : -1;
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        if (sd->members[i].name != NULL && strcmp(sd->members[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 /** A zero for a part no initializer named: `0`, or `{0}` for a vector or an aggregate. */
 static cc_expr_t *init_zero(parser_t *p, const cc_ctype_t *t) {
     cc_expr_t *z = (cc_expr_t *)calloc(1, sizeof(*z));
@@ -1279,13 +1299,15 @@ static int init_finish(parser_t *p, const cc_ctype_t *t, cc_expr_t *l) {
         }
         if (member > 0) {
             cc_expr_t *d = (cc_expr_t *)calloc(1, sizeof(*d));
+            char index_name[24];
+            const char *dname = sd->members[member].name;
 
-            if (sd->members[member].name == NULL) {
-                cc_expr_free(d);
-                parser_error(p, "unsupported initializer: an anonymous union member other than the first");
-                return -1;
+            /* an anonymous member, as Linux's iov_iter has: designated by its index */
+            if (dname == NULL) {
+                snprintf(index_name, sizeof(index_name), "%c%ld", CC_MEMBER_INDEX_DESIGNATOR, member);
+                dname = index_name;
             }
-            if (d == NULL || (d->ident = cc_strndup(sd->members[member].name, strlen(sd->members[member].name))) == NULL) {
+            if (d == NULL || (d->ident = cc_strndup(dname, strlen(dname))) == NULL) {
                 cc_expr_free(d);
                 parser_error(p, "out of memory canonicalizing an initializer");
                 return -1;

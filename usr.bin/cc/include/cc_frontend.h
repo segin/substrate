@@ -338,6 +338,22 @@ typedef struct {
 } cc_struct_def_t;
 
 /**
+ * A canonical initializer names the member a union is initialized through
+ * with a designator (a CC_EXPR_MEMBER whose ident is the member's name).
+ * An anonymous member has no name; its designator is spelled with this
+ * prefix and the member's index, "#2", which no identifier can be.
+ */
+#define CC_MEMBER_INDEX_DESIGNATOR '#'
+
+/**
+ * The index of the member of @p sd that designator @p name names: a member
+ * of that name, or the one a CC_MEMBER_INDEX_DESIGNATOR spelling gives.
+ *
+ * @return the index, or -1 if there is none
+ */
+int cc_struct_designated_member(const cc_struct_def_t *sd, const char *name);
+
+/**
  * The width of the floating type a structure stands for when cc carries
  * that type's encoding in one and libgcc operates on it: a decimal type's
  * (32, 64, 128) or _Float128's (128).

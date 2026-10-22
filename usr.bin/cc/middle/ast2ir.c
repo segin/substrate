@@ -11844,16 +11844,7 @@ typedef struct {
 } global_reloc_t;
 
 static int find_struct_member_index_by_name(const cc_struct_def_t *sd, const char *name) {
-    size_t i;
-    if (sd == NULL || name == NULL) {
-        return -1;
-    }
-    for (i = 0; i < sd->member_count; ++i) {
-        if (sd->members[i].name != NULL && strcmp(sd->members[i].name, name) == 0) {
-            return (int)i;
-        }
-    }
-    return -1;
+    return cc_struct_designated_member(sd, name);
 }
 
 static int find_struct_member_recursive(const cc_translation_unit_t *tu, int struct_id, const char *name,
