@@ -26,8 +26,11 @@ TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 # compiled against a stale struct layout -- e.g. adding a field to
 # usb_endpoint_t silently broke the (unrebuilt) USB HID drivers.  This must come
 # AFTER TOP is computed: the .d files land in MAKEFILE_LIST, and TOP uses
-# $(lastword $(MAKEFILE_LIST)).  Covers objects up to one subdir deep (fs/fat/).
--include $(wildcard *.d */*.d)
+# $(lastword $(MAKEFILE_LIST)).  Covers objects up to three subdirs deep:
+# usr.bin/cc keeps them in backend/x86/ and middle/ssa/, and with only one
+# level read a new field in cc_options.h left backend/x86/i386.o reading the
+# old layout -- -m32 code came out with SSE where it had x87.
+-include $(wildcard *.d */*.d */*/*.d */*/*/*.d)
 # The .d fragments define targets (foo.o: ...); since Makefile.inc is included
 # first, one of them would otherwise become the default goal.  Clear it so the
 # including Makefile's own first target (usually `all`) is the default again.
