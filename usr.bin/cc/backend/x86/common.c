@@ -2934,7 +2934,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         const char *c = in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL;
         int tied = cc_asm_constraint_matched_operand(c);
         if (tied >= 0 && (size_t)tied < out_n) {
-            out_tied_read[tied] = 1;
+            /* which input: its value is what the output's register holds as the asm begins */
+            out_tied_read[tied] = (int)i + 1;
         } else if (tied < 0 && !cc_asm_constraint_is_memory_only(c)) {
             fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
         }
@@ -3003,8 +3004,13 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 goto oom;
             }
             if (read) {
+                int from = in->asm_in_values != NULL && out_tied_read[i] > 0 && (c == NULL || strchr(c, '+') == NULL)
+                               ? in->asm_in_values[out_tied_read[i] - 1]
+                               : -1;
+
                 loads[load_count].reg = reg;
-                loads[load_count].off = off;
+                /* a matching input's value ("0"(id)), not the output's: that is only written after */
+                loads[load_count].off = from >= 0 && !CC_SSA_ASM_MEM_INDIRECT_P(from) ? slot_off(lay, from) : off;
                 load_count++;
             }
         }
