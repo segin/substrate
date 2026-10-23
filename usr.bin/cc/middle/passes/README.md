@@ -16,7 +16,8 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   into one slot per field (its zeroing memset into stores of 0), and a
   compare of a slot only stored constants folded where the set of them
   it can hold, followed over the blocks and narrowed by branches on it,
-  decides it.
+  decides it; and a scalar slot made a value (`cc_promote_slots()`),
+  under an asm goto as anywhere.
 - `inline.c`: the inlining itself -- which functions may be inlined
   (`cc_inline_candidate()`: static and inline or always_inline, small,
   plain-value interface, no frame-dependent body; or, as gcc's

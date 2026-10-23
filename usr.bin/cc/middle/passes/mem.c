@@ -242,12 +242,12 @@ static long slot_size(const addr_info_t *a, int s) {
 /**
  * Work out where each value points: a STACKALLOC, a single-definition move of such an address, or one plus a
  * constant.  An address used any other way -- passed, stored, compared, offset by a variable, moved into a value
- * defined more than once -- escapes its slot, and under an asm goto every slot does.  A zeroing memset of a whole
- * slot does not count as an escape when @p allow_memset.
+ * defined more than once -- escapes its slot, and under an asm goto every slot does when @p asm_goto_escapes.  A
+ * zeroing memset of a whole slot does not count as an escape when @p allow_memset.
  *
  * @return 0, or -1 when out of memory
  */
-static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow_memset) {
+static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow_memset, int asm_goto_escapes) {
     size_t n = (size_t)(f->value_count > 0 ? f->value_count : 1);
     size_t i;
     int v;
@@ -311,7 +311,7 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
             a->off[in->args[0]] == 0 && sz == slot_size(a, a->slot[in->args[0]])) {
             continue;
         }
-        if (in->op == CC_SSA_ASM && in->asm_is_goto) {
+        if (asm_goto_escapes && in->op == CC_SSA_ASM && in->asm_is_goto) {
             /* asm goto: nothing stays known about the function's memory */
             for (v = 0; v < f->value_count; ++v) {
                 if (a->slot[v] == v) {
@@ -346,7 +346,7 @@ static int forward_slot_copies(cc_ssa_function_t *f) {
     if (f->value_count <= 0) {
         return 0;
     }
-    if (addr_info_build(&a, f, 0) != 0) {
+    if (addr_info_build(&a, f, 0, 1) != 0) {
         return -1;
     }
     stores = (int *)calloc((size_t)f->value_count, sizeof(*stores));
@@ -526,7 +526,7 @@ static int scalarize_slots(cc_ssa_function_t *f) {
     if (f->value_count <= 0) {
         return 0;
     }
-    if (addr_info_build(&a, f, 1) != 0) {
+    if (addr_info_build(&a, f, 1, 1) != 0) {
         return -1;
     }
     split = (unsigned char *)calloc((size_t)f->value_count, 1);
@@ -1204,7 +1204,7 @@ static int slot_value_sets(cc_ssa_function_t *f) {
     if (f->value_count <= 0 || f->instr_count == 0) {
         return 0;
     }
-    if (addr_info_build(&a, f, 0) != 0) {
+    if (addr_info_build(&a, f, 0, 1) != 0) {
         return -1;
     }
     if (slots_find(&s, f, &a) != 0) {
@@ -1782,7 +1782,12 @@ int cc_promote_slots(cc_ssa_function_t *f) {
     if (f->value_count <= 0) {
         return 0;
     }
-    if (addr_info_build(&a, f, 0) != 0) {
+    /*
+     * an asm goto does not stop it: a slot made a value is the same storage under another name, whatever the
+     * blocks -- Linux's static keys put one in most functions, and every local of intel_pmu_init() stayed in
+     * memory, 1.6 KiB of its frame
+     */
+    if (addr_info_build(&a, f, 0, 0) != 0) {
         return -1;
     }
     size = (long *)calloc((size_t)f->value_count, sizeof(*size));

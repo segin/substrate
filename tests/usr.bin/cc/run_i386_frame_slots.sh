@@ -6,6 +6,10 @@
 # ranges do not meet its own: cc gave each its own slot, and Linux's
 # siphash_1u32() had a 2 KiB frame where a kernel stack is 8 KiB.
 #
+# A local of a function with an asm goto is made a value as any other:
+# Linux's static keys put an asm goto in most functions, and every local
+# of intel_pmu_init() stayed in memory, 1.6 KiB of its frame.
+#
 # codegen/frame_slots.c checks the functions' results against gcc.
 set -eu
 
@@ -37,5 +41,6 @@ check() {
 
 "$CC_BIN" -m32 -O2 -S -o "$CC_TMP/fs.s" "$ROOT/tests/usr.bin/cc/codegen/frame_slots.c"
 check "$CC_TMP/fs.s" chain_blocks 96 "values live across blocks share slots"
+check "$CC_TMP/fs.s" chain_asm_goto 96 "locals made values under an asm goto"
 [ "$status" -eq 0 ] && echo "run_i386_frame_slots: ok"
 exit "$status"
