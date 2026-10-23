@@ -7031,6 +7031,25 @@ static int lower_stmt_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *s
     for (j = 0; j < e->stmt_expr_count; ++j) {
         const cc_stmt_t *cur = &e->stmt_expr_stmts[j];
         int is_last = (j + 1 == e->stmt_expr_count);
+
+        while (is_last && cur->kind == CC_STMT_LABEL && cur->then_branch != NULL) {
+            /*
+             * `({ ...; goto out; ...; out: sz; })`: the label is placed, and the value is still the expression
+             * it labels.  It was lowered as a statement, its value dropped for 0: Linux's FIND_NEXT_BIT ends
+             * so, every find_next_bit() was 0, and the per-CPU allocator searched forever.
+             */
+            int l = lower_find_label(ctx, cur->label_name);
+
+            if (l < 0 || cc_ir_label(sf, l) != 0) {
+                vars_pop_to(lvars, &lcount, 0);
+                free(lvars);
+                if (l < 0) {
+                    set_diag(diag, "label not collected in lowering");
+                }
+                return -1;
+            }
+            cur = cur->then_branch;
+        }
         if (is_last && cur->kind == CC_STMT_EXPR && cur->expr != NULL) {
             outv = lower_expr(tu, sf, ctx, lvars, lcount, depth + 1, cur->expr, diag);
             if (outv < 0) {
