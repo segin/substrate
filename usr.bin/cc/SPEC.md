@@ -347,7 +347,7 @@ The compiler shall implement case ranges (`case low ... high:`).
 The compiler shall implement cast-to-union, zero-length arrays, empty structs, and `void*` arithmetic.
 
 **REQ-CC-168** *(Ubiquitous)*
-The compiler shall implement all GNU `__attribute__` forms used in practice: function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, `visibility`), variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`), and type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`).
+The compiler shall implement all GNU `__attribute__` forms used in practice: function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, `visibility`), variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`), and type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`). As gcc places them, an `aligned` or `packed` written in a structure's specifier — after `struct`, after its tag or after its closing brace — shall apply to the structure type only, and one written before `struct`, or an `_Alignas`, to the declaration only.
 
 **REQ-CC-169** *(Ubiquitous)*
 The compiler shall implement GNU builtins: `__builtin_expect`, `__builtin_constant_p`, `__builtin_clz`/`ctz`/`popcount`/`parity`/`ffs` families, overflow builtins, object-size builtins, `__builtin_types_compatible_p`, `__builtin_choose_expr`, `__builtin_offsetof`, `__builtin_unreachable`, `__builtin_trap`, and varargs builtins.

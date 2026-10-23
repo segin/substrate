@@ -2059,6 +2059,7 @@ typedef struct {
     long bitint_width;
     int seen_int128; /* GNU __int128 */
     int seen_struct_id;
+    int record_tail; /* the structure whose definition the specifiers just closed, else -1 */
     const cc_ctype_t *enum_ctype; /* an enumeration's type, once known */
     int decimal_bits;
     const cc_ctype_t *alias_ctype; /* the type a typedef name, typeof or the like gave */
@@ -2074,7 +2075,31 @@ typedef struct {
 static void declspec_acc_init(declspec_acc_t *acc) {
     memset(acc, 0, sizeof(*acc));
     acc->seen_struct_id = -1;
+    acc->record_tail = -1;
     acc->decimal_bits = 64;
+}
+
+/**
+ * Give structure @p sid the `packed` and `aligned` among @p attrs, which
+ * were written in its specifier -- after `struct`, its tag or its closing
+ * brace -- and pass the others on to @p out_attrs.  Those two are the
+ * type's alone, as gcc has them: `struct { ... } __attribute__((aligned(2)))
+ * m;` in a packed structure puts m at any byte, and `_Alignas(8) struct s
+ * { char c; } v;` or an attribute before `struct` aligns v, not struct s.
+ *
+ * @param p          the parser
+ * @param sid        the structure
+ * @param attrs      the attributes; its `packed` and `aligned` are cleared
+ * @param out_attrs  receives the others; may be NULL
+ * @return           0, or -1 on error
+ */
+static int record_spec_attrs(parser_t *p, int sid, decl_attrs_t *attrs, decl_attrs_t *out_attrs) {
+    if ((attrs->flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0 && apply_struct_attrs(p, sid, attrs) != 0) {
+        return -1;
+    }
+    attrs->flags &= ~(CC_ATTR_PACKED | CC_ATTR_ALIGNED);
+    attrs->align = 0;
+    return decl_attrs_merge(out_attrs, attrs);
 }
 
 /**
@@ -2130,11 +2155,28 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
         }
         if ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
             tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
+            if (acc->record_tail >= 0) {
+                /* `struct { ... } __attribute__((packed))`: after the brace, the structure's */
+                decl_attrs_t tail;
+                int rc;
+
+                decl_attrs_reset(&tail);
+                rc = skip_decl_gnu_suffix(p, &tail);
+                if (rc == 0) {
+                    rc = record_spec_attrs(p, acc->record_tail, &tail, out_attrs);
+                }
+                decl_attrs_clear(&tail);
+                if (rc != 0) {
+                    return -1;
+                }
+                continue;
+            }
             if (skip_decl_gnu_suffix(p, out_attrs) != 0) {
                 return -1;
             }
             continue;
         }
+        acc->record_tail = -1;
         if (p->tok.kind == TOK_IDENT) {
             if (tok_is_ident(p, "__auto_type")) {
                 if (!parser_is_gnu_mode()) {
@@ -2614,15 +2656,9 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
             }
             acc->seen_struct_id = sid;
             if (p->tok.kind != TOK_LBRACE) {
-                if (decl_attrs_merge(out_attrs, &struct_attrs) != 0) {
+                if (record_spec_attrs(p, sid, &struct_attrs, out_attrs) != 0) {
                     decl_attrs_clear(&struct_attrs);
                     return -1;
-                }
-                if ((struct_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
-                    if (apply_struct_attrs(p, sid, &struct_attrs) != 0) {
-                        decl_attrs_clear(&struct_attrs);
-                        return -1;
-                    }
                 }
                 decl_attrs_clear(&struct_attrs);
                 continue;
@@ -2652,7 +2688,6 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 decl_attrs_t mspec_attrs;
                 long mspec_align = 0;
                 long mtypedef_align = 0; /* the alignment of a typedef name among the specifiers, or 0 */
-                size_t structs_before; /* the structures before the specifiers: one after is defined in them */
                 if (p->structs[sid].has_flexible_array) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
                     decl_attrs_clear(&struct_attrs);
@@ -2694,26 +2729,11 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     continue;
                 }
                 decl_attrs_reset(&mspec_attrs);
-                structs_before = p->struct_count;
                 if (parse_declspec(p, &mspec, 1, "expected member declaration type", &mtypedef, NULL, &mspec_attrs) !=
                     0) {
                     decl_attrs_clear(&mspec_attrs);
                     decl_attrs_clear(&struct_attrs);
                     return -1;
-                }
-                if (mspec != NULL && mspec->unqual != NULL && mspec->unqual->kind == CC_CT_RECORD &&
-                    mspec->unqual->id >= (int)structs_before &&
-                    (mspec_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
-                    /*
-                     * `struct { ... } __attribute__((packed)) scsi;`: the attributes after the braces are the
-                     * structure's, as at file scope -- it was laid out unpacked, and Linux's edd_device_params
-                     * (in boot_params, which the boot loader fills) came out four bytes long per entry
-                     */
-                    if (apply_struct_attrs(p, mspec->unqual->id, &mspec_attrs) != 0) {
-                        decl_attrs_clear(&mspec_attrs);
-                        decl_attrs_clear(&struct_attrs);
-                        return -1;
-                    }
                 }
                 /* `_Alignas(T) char x;`: the specifiers' alignment applies to each member they declare */
                 mspec_align = (mspec_attrs.flags & CC_ATTR_ALIGNED) != 0 ? mspec_attrs.align : 0;
@@ -2960,20 +2980,16 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 return -1;
             }
             p->structs[sid].complete = 1;
-            if (decl_attrs_merge(out_attrs, &struct_attrs) != 0) {
+            if ((struct_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) == 0 && struct_layout(p, sid, 0, 0) != 0) {
                 decl_attrs_clear(&struct_attrs);
                 return -1;
             }
-            if ((struct_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
-                if (apply_struct_attrs(p, sid, &struct_attrs) != 0) {
-                    decl_attrs_clear(&struct_attrs);
-                    return -1;
-                }
-            } else if (struct_layout(p, sid, 0, 0) != 0) {
+            if (record_spec_attrs(p, sid, &struct_attrs, out_attrs) != 0) {
                 decl_attrs_clear(&struct_attrs);
                 return -1;
             }
             decl_attrs_clear(&struct_attrs);
+            acc->record_tail = sid;
             continue;
         }
         case TOK_KW_ENUM: {
@@ -9394,7 +9410,6 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     int decl_storage = 0;
     const cc_ctype_t *base_spec = NULL;
     long base_typedef_align; /* the alignment of a typedef name among the specifiers, or 0 */
-    int base_struct_id; /* the structure the specifiers name, else -1 */
     decl_attrs_t base_attrs;
     /* a visibility pragma's, where the declaration begins: for a file-scope one; a block's has no visibility */
     unsigned char start_vis = p->scope_depth == 0 ? p->tok.default_vis : (unsigned char)CC_LEX_VIS_DEFAULT;
@@ -9412,18 +9427,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             return -1;
         }
     }
-    base_struct_id = base_spec->unqual->kind == CC_CT_RECORD ? base_spec->unqual->id : -1;
     if (p->tok.kind == TOK_SEMI) {
         if ((decl_storage & CC_STORAGE_AUTO_TYPE) != 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "auto type deduction requires an initializer");
             decl_attrs_clear(&base_attrs);
             return -1;
-        }
-        if (base_struct_id >= 0 && (base_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
-            if (apply_struct_attrs(p, base_struct_id, &base_attrs) != 0) {
-                decl_attrs_clear(&base_attrs);
-                return -1;
-            }
         }
         if (is_typedef) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected identifier after declaration type");
@@ -9438,13 +9446,6 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         decl_attrs_clear(&base_attrs);
         return 0;
     }
-    if (base_struct_id >= 0 && (base_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
-        if (apply_struct_attrs(p, base_struct_id, &base_attrs) != 0) {
-            decl_attrs_clear(&base_attrs);
-            return -1;
-        }
-    }
-
     for (;;) {
         cc_stmt_t s;
         int is_fn_decl = 0;
