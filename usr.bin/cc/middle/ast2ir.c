@@ -10218,6 +10218,40 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
  * @return                0, or -1 on error
  */
 /**
+ * The temporary an asm output @p op into the object at @p ptrv is made in: a value of the operand's size,
+ * @p size bytes, stored to the object after the asm.  When the operand is also read ("+a" (*old)) it is
+ * loaded from the object first -- it was only written back after, and Linux's try_cmpxchg() compared
+ * against junk in %eax.
+ *
+ * @return the value, or -1 with @p diag set
+ */
+static int asm_inout_temp(cc_ssa_function_t *sf, const cc_asm_operand_t *op, int ptrv, long size, cc_diag_t *diag) {
+    int tmpv = cc_ir_new_value(sf, lower_value_kind(op->expr));
+
+    if (tmpv < 0) {
+        set_diag(diag, "out of memory allocating asm output temporary");
+        return -1;
+    }
+    cc_ir_set_size(sf, tmpv, size);
+    if (op->constraint != NULL && strchr(op->constraint, '+') != NULL) {
+        cc_ssa_instr_t ld;
+
+        memset(&ld, 0, sizeof(ld));
+        ld.op = CC_SSA_LOAD;
+        ld.dst = tmpv;
+        ld.lhs = ptrv;
+        ld.rhs = -1;
+        ld.imm = size;
+        ld.is_unsigned = cc_ct_is_unsigned(lower_value_ctype(op->expr));
+        if (cc_ir_push(sf, ld) != 0) {
+            set_diag(diag, "out of memory loading an asm in-out operand");
+            return -1;
+        }
+    }
+    return tmpv;
+}
+
+/**
  * Whether asm memory input @p e names an object that must be given to the asm as itself, by its address,
  * rather than as a copy of its value: one reached through a pointer (`*p`, `p[i]`, `p->m`), or a block-scope
  * static, or a member of one of those.
@@ -10382,6 +10416,19 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
                 } else {
                     out_v = (*vars)[vidx].value;
                     if ((*vars)[vidx].addr_value >= 0) {
+                        /*
+                         * a variable that lives in memory: the asm's value in a temporary of the operand's size,
+                         * stored to it after.  The variable's own value is no more than a placeholder there, of
+                         * a word: "=A" (n), n 64 bits, came out its low word sign-extended (Linux's do_div()).
+                         */
+                        out_v = asm_inout_temp(sf, op, (*vars)[vidx].addr_value, out_sz, diag);
+                        if (out_v < 0) {
+                            free_asm_instr_fields(&in);
+                            free(asm_out_store_ptr);
+                            free(asm_out_store_size);
+                            free(asm_out_store_type);
+                            return -1;
+                        }
                         asm_out_store_ptr[i4] = (*vars)[vidx].addr_value;
                         asm_out_store_size[i4] = out_sz;
                         asm_out_store_type[i4] = lower_value_ctype(op->expr);
@@ -10451,37 +10498,14 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             if (is_mem_only) {
                 out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(ptrv);
             } else {
-                int tmpv = cc_ir_new_value(sf, lower_value_kind(op->expr));
+                int tmpv = asm_inout_temp(sf, op, ptrv, out_sz, diag);
+
                 if (tmpv < 0) {
                     free_asm_instr_fields(&in);
                     free(asm_out_store_ptr);
                     free(asm_out_store_size);
                     free(asm_out_store_type);
-                    set_diag(diag, "out of memory allocating asm output temporary");
                     return -1;
-                }
-                if (op->constraint != NULL && strchr(op->constraint, '+') != NULL) {
-                    /*
-                     * read and written ("+a" (*old)): the object's value is what the asm reads.  It was
-                     * only written back after: Linux's try_cmpxchg() compared against junk in %eax.
-                     */
-                    cc_ssa_instr_t ld;
-
-                    memset(&ld, 0, sizeof(ld));
-                    ld.op = CC_SSA_LOAD;
-                    ld.dst = tmpv;
-                    ld.lhs = ptrv;
-                    ld.rhs = -1;
-                    ld.imm = out_sz;
-                    ld.is_unsigned = cc_ct_is_unsigned(lower_value_ctype(op->expr));
-                    if (cc_ir_push(sf, ld) != 0) {
-                        free_asm_instr_fields(&in);
-                        free(asm_out_store_ptr);
-                        free(asm_out_store_size);
-                        free(asm_out_store_type);
-                        set_diag(diag, "out of memory loading an asm in-out operand");
-                        return -1;
-                    }
                 }
                 out_v = tmpv;
                 asm_out_store_ptr[i4] = ptrv;

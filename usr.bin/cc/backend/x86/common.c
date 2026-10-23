@@ -301,7 +301,19 @@ static const char *asm_constraint_fixed_reg32(const char *c) {
     if (cc_asm_constraint_has(c, 'D')) {
         return "%edi";
     }
+    if (cc_asm_constraint_has(c, 'A')) {
+        /* %edx:%eax, of an 8-byte operand (asm_pair_operand()): named by its low word */
+        return "%eax";
+    }
     return NULL;
+}
+
+/**
+ * Whether an i386 asm operand of @p size bytes and constraint @p c is held in the pair %edx:%eax ("A" of a
+ * 64-bit value: Linux's do_div() hands its dividend in and its quotient out so).
+ */
+static int asm_pair_operand(const char *c, int is_64bit, int size) {
+    return !is_64bit && size == 8 && c != NULL && cc_asm_constraint_has(c, 'A');
 }
 
 static int append_text(char **dst, size_t *len, size_t *cap, const char *text, size_t n) {
@@ -3023,7 +3035,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     out_regs = (const char **)calloc(out_n, sizeof(*out_regs));
     out_write_back = (int *)calloc(out_n, sizeof(*out_write_back));
     out_tied_read = (int *)calloc(out_n, sizeof(*out_tied_read));
-    loads = (asm_load_t *)calloc(total + 1, sizeof(*loads));
+    loads = (asm_load_t *)calloc(2 * total + 1, sizeof(*loads)); /* (a pair operand loads two registers) */
     if ((total > 0 && (op_text == NULL || op_names == NULL)) || loads == NULL ||
         (out_n > 0 && (out_regs == NULL || out_write_back == NULL || out_tied_read == NULL))) {
         free(op_text);
@@ -3044,12 +3056,18 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             out_tied_read[tied] = (int)i + 1;
         } else if (tied < 0 && !cc_asm_constraint_is_memory_only(c)) {
             fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
+            if (asm_pair_operand(c, is_64bit, asm_operand_size(in->asm_in_sizes, in_n, i, 4))) {
+                fixed_mask |= x86_gpr_bit("%edx");
+            }
         }
     }
     for (i = 0; i < out_n; ++i) {
         const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
         if (!cc_asm_constraint_is_memory_only(c)) {
             fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
+            if (asm_pair_operand(c, is_64bit, asm_operand_size(in->asm_out_sizes, out_n, i, 4))) {
+                fixed_mask |= x86_gpr_bit("%edx");
+            }
         }
     }
     for (i = 0; i < in->asm_clobber_count; ++i) {
@@ -3102,6 +3120,13 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             out_regs[i] = reg;
             out_write_back[i] = 1;
             out_mask |= x86_gpr_bit(reg);
+            if (asm_pair_operand(c, is_64bit, osz)) {
+                /* its high word in %edx, written by the asm too */
+                out_mask |= x86_gpr_bit("%edx");
+                if (read) {
+                    out_live_mask |= x86_gpr_bit("%edx");
+                }
+            }
             if (read || (c != NULL && strchr(c, '&') != NULL)) {
                 out_live_mask |= x86_gpr_bit(reg);
             }
@@ -3118,6 +3143,11 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 /* a matching input's value ("0"(id)), not the output's: that is only written after */
                 loads[load_count].off = from >= 0 && !CC_SSA_ASM_MEM_INDIRECT_P(from) ? slot_off(lay, from) : off;
                 load_count++;
+                if (asm_pair_operand(c, is_64bit, osz)) {
+                    loads[load_count].reg = "%edx";
+                    loads[load_count].off = loads[load_count - 1].off + 4;
+                    load_count++;
+                }
             }
         }
     }
@@ -3267,6 +3297,13 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             loads[load_count].reg = reg;
             loads[load_count].off = off;
             load_count++;
+            if (asm_pair_operand(c, is_64bit, isz)) {
+                /* and its high word in %edx */
+                in_mask |= x86_gpr_bit("%edx");
+                loads[load_count].reg = "%edx";
+                loads[load_count].off = off + 4;
+                load_count++;
+            }
         }
     }
 
@@ -3368,6 +3405,9 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             long off = slot_off(lay, in->asm_out_values[i]);
             emit_zero_extend_reg(fp, out_regs[i], is_64bit, osz);
             emit_frame_store_reg(fp, is_64bit, out_regs[i], off);
+            if (asm_pair_operand(in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL, is_64bit, osz)) {
+                emit_frame_store_reg(fp, is_64bit, "%edx", off + 4);
+            }
         }
     }
     {
