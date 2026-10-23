@@ -42,6 +42,8 @@ typedef struct {
     int *slot_of;
     int *stackalloc_off;
     int *live_end; /**< a value defined once and used in its block only: its last use (its slot may be another's after); else -1 */
+    int *slot_end; /**< past this instruction the value's slot may be another's, so it is not written back: live_end, or a
+                        value live across blocks its live range's end (x86_value_spans()); else -1 */
     int bias;      /**< bytes right below %ebp the slots start under (i386: the callee-saved registers pushed); 0 */
     int value_count;
     int slot_count;
@@ -218,6 +220,17 @@ void x86_for_each_use(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, void
  */
 int i386_assign_homes(const cc_ssa_function_t *f, const unsigned char *addr_taken, const unsigned char *remat,
                       const int *alias, int *home, unsigned *used);
+
+/**
+ * Each value's live range in @p f as one interval of instruction indexes, @p lo[v] to @p hi[v]: from the first
+ * point it is live to the last, by liveness over the blocks, so a loop around a use is inside it.  A value never
+ * read or written gets lo INT32_MAX, hi -1.  Where @p alias[v] names another value (NULL for none), that one's
+ * interval takes in v's.
+ *
+ * @return 0; 1 when @p f takes a label's address, has an asm goto or is too big to follow (nothing set but
+ *         the empty intervals); -1 when out of memory
+ */
+int x86_value_spans(const cc_ssa_function_t *f, const int *alias, int *lo, int *hi);
 
 /**
  * Write each constant operand of @p in that is made where it is read (st->remat) to its slot, for an

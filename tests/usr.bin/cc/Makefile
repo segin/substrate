@@ -944,6 +944,7 @@ test:
 	sh run_static_local_orphans.sh
 	sh run_asm_imm_symbol.sh
 	sh run_inline_called_once.sh
+	sh run_i386_frame_slots.sh
 	sh run_compiler_stamp.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh

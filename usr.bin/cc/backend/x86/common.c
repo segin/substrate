@@ -2161,13 +2161,13 @@ int int_regs_spill_reg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t
     }
     /*
      * On i386, a value written back after its last use stays in the register: its slot, if shared
-     * (live_end), may be another value's by now, and nothing reads it again -- a 64-bit one's high word
+     * (slot_end), may be another value's by now, and nothing reads it again -- a 64-bit one's high word
      * too, read only by what names the value.  (Only the i386 emitter keeps values in registers across
      * instructions; x86-64's flushes after each.)
      */
     if (st->reg_dirty[r] && cc_ssa_value_class(f, v) == CC_VAL_I64 && !is_stackalloc_value(lay, v) &&
-        !(!st->is_64bit && lay->live_end != NULL && v < lay->value_count && lay->live_end[v] >= 0 &&
-          st->cur_index > lay->live_end[v])) {
+        !(!st->is_64bit && lay->slot_end != NULL && v < lay->value_count && lay->slot_end[v] >= 0 &&
+          st->cur_index > lay->slot_end[v])) {
         off = slot_off(lay, v);
         emit_frame_store_reg(fp, st->is_64bit, st->regs[r], off);
     }
@@ -2534,9 +2534,11 @@ void slot_layout_free(slot_layout_t *lay) {
     free(lay->slot_of);
     free(lay->stackalloc_off);
     free(lay->live_end);
+    free(lay->slot_end);
     lay->slot_of = NULL;
     lay->stackalloc_off = NULL;
     lay->live_end = NULL;
+    lay->slot_end = NULL;
     lay->value_count = 0;
     lay->slot_count = 0;
     lay->slot_size = 0;
@@ -3602,6 +3604,9 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     unsigned char *pinned = NULL;
     unsigned char *cross_block = NULL;
     unsigned char *multi_def = NULL;
+    int *span_lo = NULL; /* per value: its live range over the blocks (x86_value_spans()) */
+    int *span_hi = NULL;
+    int spans = 0;       /* whether they are known: a value live across blocks then shares a slot too */
     int free_count = 0;
     int next_slot = 0;
     int enable_reuse = 0;
@@ -3627,6 +3632,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
     out->stackalloc_off = (int *)calloc((size_t)nvals, sizeof(*out->stackalloc_off));
     out->live_end = (int *)malloc((size_t)nvals * sizeof(*out->live_end));
+    out->slot_end = (int *)malloc((size_t)nvals * sizeof(*out->slot_end));
     def_at =(int *)malloc((size_t)nvals * sizeof(*def_at));
     first_use = (int *)malloc((size_t)nvals * sizeof(*first_use));
     last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
@@ -3643,7 +3649,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     pinned = (unsigned char *)calloc((size_t)nvals, sizeof(*pinned));
     cross_block = (unsigned char *)calloc((size_t)nvals, sizeof(*cross_block));
     multi_def = (unsigned char *)calloc((size_t)nvals, sizeof(*multi_def));
-    if (out->slot_of == NULL || out->stackalloc_off == NULL || out->live_end == NULL || def_at == NULL || first_use == NULL || last_use == NULL ||
+    if (out->slot_of == NULL || out->stackalloc_off == NULL || out->live_end == NULL || out->slot_end == NULL || def_at == NULL || first_use == NULL || last_use == NULL ||
         def_block == NULL || use_block == NULL || next_start == NULL || next_end == NULL || instr_block == NULL ||
         block_start == NULL || block_end == NULL || start_head == NULL || end_head == NULL || free_slots == NULL ||
         pinned == NULL || cross_block == NULL || multi_def == NULL) {
@@ -3664,12 +3670,15 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         free(pinned);
         free(cross_block);
         free(multi_def);
+        free(span_lo);
+        free(span_hi);
         slot_layout_free(out);
         return -1;
     }
     for (i = 0; i < nvals; ++i) {
         out->slot_of[i] = -1;
         out->live_end[i] = -1;
+        out->slot_end[i] = -1;
         def_at[i] = -1;
         first_use[i] = -1;
         last_use[i] = -1;
@@ -3785,6 +3794,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     for (i = 0; i < nvals; ++i) {
         if (!pinned[i] && !cross_block[i] && def_at[i] >= 0) {
             out->live_end[i] = last_use[i] > def_at[i] ? last_use[i] : def_at[i];
+            out->slot_end[i] = out->live_end[i];
         }
     }
     if (!enable_reuse) {
@@ -3795,11 +3805,65 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         raw_frame = out->slot_count * slot_size;
         goto build_stackalloc_offsets;
     }
+    /*
+     * A value live across blocks shares a slot with others whose live ranges do not meet its own, over the
+     * blocks: one slot each took Linux's siphash_1u32() to a 2 KiB frame.  Not when the blocks cannot be
+     * followed (a label's address taken, an asm goto) or the function is too big for the sets.
+     */
+    span_lo = (int *)malloc((size_t)nvals * sizeof(*span_lo));
+    span_hi = (int *)malloc((size_t)nvals * sizeof(*span_hi));
+    if (span_lo != NULL && span_hi != NULL) {
+        int rc = x86_value_spans(f, alias, span_lo, span_hi);
+
+        spans = rc == 0;
+        if (rc < 0) {
+            free(span_lo);
+            free(span_hi);
+            span_lo = span_hi = NULL;
+        }
+    }
+    if (span_lo == NULL || span_hi == NULL) {
+        set_diag(diag, "out of memory building stack slot layout");
+        free(def_at);
+        free(first_use);
+        free(last_use);
+        free(def_block);
+        free(use_block);
+        free(next_start);
+        free(next_end);
+        free(instr_block);
+        free(block_start);
+        free(block_end);
+        free(start_head);
+        free(end_head);
+        free(free_slots);
+        free(pinned);
+        free(cross_block);
+        free(multi_def);
+        free(span_lo);
+        free(span_hi);
+        slot_layout_free(out);
+        return -1;
+    }
     for (i = 0; i < nvals; ++i) {
         int s;
         int e;
-        if (pinned[i] || cross_block[i]) {
+        if (pinned[i] || (cross_block[i] && (!spans || span_hi[i] < 0))) {
             out->slot_of[i] = next_slot++;
+            continue;
+        }
+        if (cross_block[i]) {
+            s = span_lo[i];
+            e = span_hi[i];
+            /* written back after its range, it would overwrite the slot's next value */
+            out->slot_end[i] = e;
+            if ((size_t)e > f->instr_count) {
+                e = (int)f->instr_count;
+            }
+            next_start[i] = start_head[s];
+            start_head[s] = i;
+            next_end[i] = end_head[e];
+            end_head[e] = i;
             continue;
         }
         s = def_at[i];
@@ -3830,7 +3894,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         }
         for (v = end_head[j]; v >= 0; v = next_end[v]) {
             int slot = out->slot_of[v];
-            if (!pinned[v] && !cross_block[v] && slot >= 0 && free_count < nvals) {
+            if (!pinned[v] && (!cross_block[v] || spans) && slot >= 0 && free_count < nvals) {
                 free_slots[free_count++] = slot;
             }
         }
@@ -3858,6 +3922,8 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         free(pinned);
         free(cross_block);
         free(multi_def);
+        free(span_lo);
+        free(span_hi);
         slot_layout_free(out);
         return -1;
     }
@@ -3940,6 +4006,8 @@ build_stackalloc_offsets:
     free(pinned);
     free(cross_block);
     free(multi_def);
+    free(span_lo);
+    free(span_hi);
     out->frame_bytes = raw_frame;
     return 0;
 }

@@ -1360,8 +1360,8 @@ static int i386_carry_single(const i386_carry_t *c, int l) {
 }
 
 /**
- * Write each dirty register's value back and keep it in the register, clean; one past its last use
- * (int_regs_spill_reg()'s live_end) is dropped instead.
+ * Write each dirty register's value back and keep it in the register, clean; one past its slot's use
+ * (int_regs_spill_reg()'s slot_end) is dropped instead.
  */
 static void i386_sync_cache(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist) {
     int r;
@@ -1372,7 +1372,7 @@ static void i386_sync_cache(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         if (v < 0 || !ist->reg_dirty[r]) {
             continue;
         }
-        if (lay->live_end != NULL && lay->live_end[v] >= 0 && ist->cur_index > lay->live_end[v]) {
+        if (lay->slot_end != NULL && lay->slot_end[v] >= 0 && ist->cur_index > lay->slot_end[v]) {
             int_regs_forget(ist, v);
             continue;
         }
