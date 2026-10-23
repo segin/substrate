@@ -10169,6 +10169,30 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
  * @param diag            receives an error
  * @return                0, or -1 on error
  */
+/**
+ * Whether asm memory input @p e names an object that must be given to the asm as itself, by its address,
+ * rather than as a copy of its value: one reached through a pointer (`*p`, `p[i]`, `p->m`), or a block-scope
+ * static, or a member of one of those.
+ */
+static int asm_mem_input_is_object(var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e) {
+    int vidx;
+
+    if (e == NULL) {
+        return 0;
+    }
+    switch (e->kind) {
+    case CC_EXPR_DEREF:
+        return 1;
+    case CC_EXPR_MEMBER:
+        return e->member_is_arrow || asm_mem_input_is_object(vars, var_count, depth, e->lhs);
+    case CC_EXPR_IDENT:
+        vidx = e->ident != NULL ? var_find_visible(vars, var_count, e->ident, depth) : -1;
+        return vidx >= 0 && vars[vidx].is_static_storage;
+    default:
+        return 0;
+    }
+}
+
 static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
                           size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
                           cc_diag_t *diag) {
@@ -10421,11 +10445,16 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         int av;
 
         if (op->expr != NULL && cc_asm_constraint_is_memory_only(op->constraint) &&
-            ct_value_kind(lower_value_ctype(op->expr)) == CC_VAL_F64) {
+            (ct_value_kind(lower_value_ctype(op->expr)) == CC_VAL_F64 || asm_mem_input_is_object(*vars, *var_count,
+                                                                                               depth, op->expr))) {
             /*
              * A floating object as a memory input is the object, by its
              * address: its value is held as a double, so a copy of the
              * value is no float in memory (fdivs would read half a double).
+             * So is an object reached through a pointer, or a static one:
+             * the asm may read it through a segment (Linux's rdfs8(),
+             * `movb %%fs:%1` on "m" (*(u8 *)addr)), where a copy on the
+             * stack is not.
              */
             cc_expr_t addr_of;
 
