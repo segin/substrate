@@ -514,6 +514,16 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
      module tree so native builds resolve the platform (a native cmake
      reports `uname -s == Substrate`).
 
+## Toolchain tests
+
+- **Linux 7.3** (`contrib/linux-kernel/`) — not staged into the image: the
+  unmodified upstream kernel (no patch series) built for i386 by the
+  in-tree `cc`, `as` and `ld` on a Linux host, tinyconfig plus
+  `substrate-boot.config`, with an initramfs whose `/init` the same tools
+  build.  `tests/linux-kernel/boot.sh` boots it in qemu and passes when
+  `/init` reports.  The 16-bit setup code must end by 0x8000 and has
+  32 bytes to spare (2026-10-23); see its `README.SUBSTRATE.md`.
+
 ## Multimedia / audio stack
 
 - **SDL stack** — three layered ports.  SDL3 is the only one that talks to
