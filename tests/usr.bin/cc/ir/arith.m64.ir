@@ -4,6 +4,7 @@ module "ir/arith.c" {
 
   func @narrow : fn(i32, i32) -> i64 {
   entry:
+    %v28 = undef i8;
     %v0 = param i32 0;
     %v1 = param i32 1;
     %v2 = stackalloc i64 4;
@@ -34,12 +35,14 @@ module "ir/arith.c" {
     %v25 = const i64 255;
     %v26 = and i8 %v24, %v25;
     %v27 = const i64 255;
-    %v28 = and i8 %v26, %v27;
+    set i8 %v28, %v26;
     ret i8 %v28;
   }
 
   func @shifts : fn(i32, i32) -> i64 {
   entry:
+    %v7 = undef i32;
+    %v20 = undef i32;
     %v0 = param i32 0;
     %v1 = param i32 1;
     %v2 = stackalloc i64 4;
@@ -48,7 +51,7 @@ module "ir/arith.c" {
     store i32 4, %v4, %v2;
     %v5 = stackalloc i64 4;
     %v6 = const i64 4294967295;
-    %v7 = and i32 %v1, %v6;
+    set i32 %v7, %v1;
     store i32 4, %v7, %v5;
     %v8 = load i32 4, %v2;
     %v9 = const i32 3;
@@ -62,7 +65,7 @@ module "ir/arith.c" {
     %v17 = zload i32 4, %v5;
     %v18 = const i32 2;
     %v19 = const i64 4294967295;
-    %v20 = and i32 %v17, %v19;
+    set i32 %v20, %v17;
     %v21 = const i64 4294967295;
     %v22 = const i32 2;
     %v23 = lshr i64 %v20, %v22;
@@ -100,6 +103,8 @@ module "ir/arith.c" {
 
   func @cmp : fn(i32, i32, i64) -> i64 {
   entry:
+    %v8 = undef i32;
+    %v20 = undef i32;
     %v0 = param i32 0;
     %v1 = param i32 1;
     %v2 = param i64 2;
@@ -109,7 +114,7 @@ module "ir/arith.c" {
     store i32 4, %v5, %v3;
     %v6 = stackalloc i64 4;
     %v7 = const i64 4294967295;
-    %v8 = and i32 %v1, %v7;
+    set i32 %v8, %v1;
     store i32 4, %v8, %v6;
     %v9 = stackalloc i64 8;
     store i64 8, %v2, %v9;
@@ -123,7 +128,7 @@ module "ir/arith.c" {
     %v17 = zload i32 4, %v6;
     %v18 = const i32 5;
     %v19 = const i64 4294967295;
-    %v20 = and i32 %v17, %v19;
+    set i32 %v20, %v17;
     %v21 = const i64 4294967295;
     %v22 = const i32 5;
     %v23 = icmp ult i32 %v20, %v22;

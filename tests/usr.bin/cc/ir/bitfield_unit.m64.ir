@@ -32,26 +32,27 @@ module "ir/bitfield_unit.c" {
     %v22 = ashr i64 %v21, 61;
     %v23 = shl i64 %v22, 32;
     %v24 = ashr i32 %v23, 32;
-    %v25 = const i64 0;
-    ret i64 %v25;
+    ret void;
   }
 
   func @set_f : fn(i64, i32) -> i64 {
   entry:
+    %v5 = undef i32;
+    %v11 = undef i32;
     %v0 = param i64 0;
     %v1 = param i32 1;
     %v2 = stackalloc i64 8;
     store i64 8, %v0, %v2;
     %v3 = stackalloc i64 4;
     %v4 = const i64 4294967295;
-    %v5 = and i32 %v1, %v4;
+    set i32 %v5, %v1;
     store i32 4, %v5, %v3;
     %v6 = zload i32 4, %v3;
     %v7 = zload i64 8, %v2;
     %v8 = const i64 1;
     %v9 = add i64 %v7, %v8;
     %v10 = const i64 4294967295;
-    %v11 = and i32 %v6, %v10;
+    set i32 %v11, %v6;
     %v12 = const i64 255;
     %v13 = and i64 %v11, %v12;
     %v14 = zload i8 1, %v9;
@@ -64,26 +65,27 @@ module "ir/bitfield_unit.c" {
     %v20 = and i64 %v18, %v19;
     %v21 = const i64 4294967295;
     %v22 = and i32 %v20, %v21;
-    %v23 = const i64 0;
-    ret i64 %v23;
+    ret void;
   }
 
   func @set_g : fn(i64, i32) -> i64 {
   entry:
+    %v5 = undef i32;
+    %v11 = undef i32;
     %v0 = param i64 0;
     %v1 = param i32 1;
     %v2 = stackalloc i64 8;
     store i64 8, %v0, %v2;
     %v3 = stackalloc i64 4;
     %v4 = const i64 4294967295;
-    %v5 = and i32 %v1, %v4;
+    set i32 %v5, %v1;
     store i32 4, %v5, %v3;
     %v6 = zload i32 4, %v3;
     %v7 = zload i64 8, %v2;
     %v8 = const i64 2;
     %v9 = add i64 %v7, %v8;
     %v10 = const i64 4294967295;
-    %v11 = and i32 %v6, %v10;
+    set i32 %v11, %v6;
     %v12 = const i64 4095;
     %v13 = and i64 %v11, %v12;
     %v14 = zload i16 2, %v9;
@@ -96,8 +98,7 @@ module "ir/bitfield_unit.c" {
     %v20 = and i64 %v18, %v19;
     %v21 = const i64 4294967295;
     %v22 = and i32 %v20, %v21;
-    %v23 = const i64 0;
-    ret i64 %v23;
+    ret void;
   }
 
   func @get_b : fn(i64) -> i64 {

@@ -35,15 +35,17 @@ module "ir/float.c" {
 
   func @to_ul : fn(f64) -> i64 {
   entry:
+    %v5 = undef i32;
+    %v7 = undef i32;
     %v0 = param f64 0;
     %v1 = stackalloc i32 8;
     store f64 8, %v0, %v1;
     %v2 = load f64 8, %v1;
     %v3 = fptosi i32 %v2;
     %v4 = const i32 4294967295;
-    %v5 = and i32 %v3, %v4;
+    set i32 %v5, %v3;
     %v6 = const i32 4294967295;
-    %v7 = and i32 %v5, %v6;
+    set i32 %v7, %v5;
     ret i32 %v7;
   }
 

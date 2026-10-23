@@ -41,6 +41,8 @@ typedef struct {
 typedef struct {
     int *slot_of;
     int *stackalloc_off;
+    int *live_end; /**< a value defined once and used in its block only: its last use (its slot may be another's after); else -1 */
+    int bias;      /**< bytes right below %ebp the slots start under (i386: the callee-saved registers pushed); 0 */
     int value_count;
     int slot_count;
     int slot_size;
@@ -58,6 +60,12 @@ typedef struct {
     unsigned long tick;
     int is_64bit;
     int cur_index;
+    const unsigned char *remat; /**< per value: a word constant loaded as `movl $imm` where it is read (i386), or NULL:
+                                     1 a number, 2 a symbol's address (remat_sym) plus remat_imm */
+    const long long *remat_imm; /**< per value: that constant */
+    const char *const *remat_sym; /**< per value: the symbol of a constant address (remat 2) */
+    int alloc_count;            /**< the registers values are cached in: regs[0..alloc_count) (int_regs_init(): all) */
+    const int *home;            /**< per value: the register past those that is its home (i386), or -1; or NULL */
 } int_reg_state_t;
 
 /* common.c: diagnostics, labels, names */
@@ -128,8 +136,14 @@ int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym);
 
 /* common.c: the frame */
 
-/** Lay out @p f's frame: a slot for each value, the stack allocations, the frame size. */
-int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag);
+/**
+ * Lay out @p f's frame: a slot for each value, the stack allocations, the frame size.  Values defined once and
+ * used in their block only share slots in a function of 64 values or more, or in any with @p reuse_always.
+ * Where @p alias[v] names another value (NULL for none), each read of v reads that one too, in v's place: an
+ * address folded into its loads and stores as its base's register plus a constant (i386).
+ */
+int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_always, const int *alias,
+                      slot_layout_t *out, cc_diag_t *diag);
 void slot_layout_free(slot_layout_t *lay);
 /** The frame offset of value @p v's slot, and of stack allocation @p v. */
 int slot_off(const slot_layout_t *lay, int v);
@@ -181,6 +195,36 @@ int int_regs_remap_dst(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t
                        int reg);
 /** Drop value @p v's register without writing it back. */
 void int_regs_forget(int_reg_state_t *st, int v);
+/** A free register of the cache, other than @p avoid, its value written back if it held one; bound to nothing. */
+int int_regs_scratch(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st, int avoid);
+/** Call @p fn(v, @p ctx) for each value @p in reads, as the frame layout counts its uses. */
+void x86_for_each_use(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, void (*fn)(int v, void *ctx), void *ctx);
+
+/* regalloc_i386.c: values that live in a callee-saved register for the whole of their range */
+
+/** The registers i386_assign_homes() gives: %ebx, %esi, %edi. */
+#define I386_HOME_REGS 3
+
+/**
+ * Give the integer words of @p f read and written most a home in %ebx, %esi or %edi (home[v]: 0, 1, 2) for
+ * the whole of their live range, two values sharing one only when their ranges do not meet; -1 for the rest,
+ * which live in their frame slots.  Not given one: a value whose address is taken (@p addr_taken), a
+ * constant made where it is read (@p remat), a stack allocation, an asm's operand; nothing in a
+ * function that takes a label's address or has an asm goto.  *@p used gets a bit for each register given.
+ * Where @p alias[v] names another value (NULL for none), v is read as that one, its range and reads that
+ * one's too (an address folded into its loads and stores as its base plus a constant).
+ *
+ * @return 0, or -1 when out of memory (and no value has a home)
+ */
+int i386_assign_homes(const cc_ssa_function_t *f, const unsigned char *addr_taken, const unsigned char *remat,
+                      const int *alias, int *home, unsigned *used);
+
+/**
+ * Write each constant operand of @p in that is made where it is read (st->remat) to its slot, for an
+ * instruction whose emission reads operands from their slots (i386).
+ */
+void int_regs_store_remat_uses(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const int_reg_state_t *st,
+                               const cc_ssa_instr_t *in);
 
 /* x86_64.c, i386.c: the emitters */
 

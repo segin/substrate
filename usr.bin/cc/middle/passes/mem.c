@@ -25,6 +25,7 @@
  */
 
 #include "cc_middle.h"
+#include "cc_options.h"
 #include "cc_ssa.h"
 #include "cc_target.h"
 #include "cc_util.h"
@@ -1327,6 +1328,582 @@ done:
     slots_free(&s);
     addr_info_free(&a);
     return rc;
+}
+
+/* ---- (d) a copy read as what it copies ---- */
+
+/** for_each_use() callback: an asm operand's value, or a value whose address is taken, is not a copy's. */
+static void note_pinned(void *ctx, int v, int role) {
+    unsigned char *pinned = (unsigned char *)ctx;
+
+    (void)role;
+    pinned[v] = 1;
+}
+
+/** Operand @p v read through @p repl, the copies resolved. */
+static int resolve_copy(const int *repl, int v) {
+    while (v >= 0 && repl[v] != v) {
+        v = repl[v];
+    }
+    return v;
+}
+
+int cc_propagate_copies(cc_ssa_function_t *f) {
+    int *defs;
+    int *repl = NULL;
+    unsigned char *pinned = NULL;
+    size_t i;
+    size_t k;
+    int v;
+    int any = 0;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    defs = count_defs(f);
+    repl = (int *)malloc((size_t)f->value_count * sizeof(*repl));
+    pinned = (unsigned char *)calloc((size_t)f->value_count, 1);
+    if (defs == NULL || repl == NULL || pinned == NULL) {
+        free(defs);
+        free(repl);
+        free(pinned);
+        return -1;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        repl[v] = v;
+    }
+    /* a value whose storage is reached otherwise than by its name: its address taken, or an asm's operand */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_ADDR && is_value(f, in->lhs)) {
+            pinned[in->lhs] = 1;
+        } else if (in->op == CC_SSA_ASM) {
+            for_each_use(in, note_pinned, pinned);
+        }
+    }
+    /*
+     * dst = src, each defined once and neither pinned, and of one class, size and signedness: dst is src
+     * wherever it is read.  src's definition is before the move on every path to it and the move before
+     * every read of dst, and src never changes: it is the same value at each.
+     */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op != CC_SSA_MOV || !is_value(f, in->dst) || !is_value(f, in->lhs) || in->dst == in->lhs ||
+            defs[in->dst] != 1 || defs[in->lhs] != 1 || pinned[in->dst] || pinned[in->lhs] ||
+            cc_ssa_value_class(f, in->dst) != cc_ssa_value_class(f, in->lhs) ||
+            cc_ssa_value_size(f, in->dst) != cc_ssa_value_size(f, in->lhs) ||
+            cc_ssa_value_is_unsigned(f, in->dst) != cc_ssa_value_is_unsigned(f, in->lhs)) {
+            continue;
+        }
+        repl[in->dst] = in->lhs;
+    }
+    /* each read of a copy reads its source: the operands for_each_use() names, an asm's aside */
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        int r;
+
+        switch (in->op) {
+        case CC_SSA_PARAM:
+        case CC_SSA_CONST:
+        case CC_SSA_STR:
+        case CC_SSA_GADDR:
+        case CC_SSA_LADDR:
+        case CC_SSA_STACKALLOC:
+        case CC_SSA_CHAIN:
+        case CC_SSA_FRAMEADDR:
+        case CC_SSA_REGREAD:
+        case CC_SSA_LABEL:
+        case CC_SSA_BR:
+        case CC_SSA_ASM:
+        case CC_SSA_ADDR:
+            continue;
+        default:
+            break;
+        }
+        if (in->lhs >= 0 && (r = resolve_copy(repl, in->lhs)) != in->lhs) {
+            in->lhs = r;
+            any = 1;
+        }
+        if (in->op != CC_SSA_LOAD && in->rhs >= 0 && (r = resolve_copy(repl, in->rhs)) != in->rhs) {
+            in->rhs = r;
+            any = 1;
+        }
+        if (in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE) {
+            continue;
+        }
+        if (in->call_chain > 0 && (r = resolve_copy(repl, in->call_chain - 1)) != in->call_chain - 1) {
+            in->call_chain = r + 1;
+            any = 1;
+        }
+        for (k = 0; k < in->arg_count; ++k) {
+            if (in->args[k] >= 0 && (r = resolve_copy(repl, in->args[k])) != in->args[k]) {
+                in->args[k] = r;
+                any = 1;
+            }
+        }
+    }
+    free(defs);
+    free(repl);
+    free(pinned);
+    return any;
+}
+
+/** for_each_use() callback: count a use. */
+static void count_one_use(void *ctx, int v, int role) {
+    int *uses = (int *)ctx;
+
+    (void)role;
+    uses[v]++;
+}
+
+int cc_coalesce_moves(cc_ssa_function_t *f) {
+    int *defs;
+    int *uses;
+    size_t i;
+    size_t w;
+    int changed = 0;
+
+    if (f->value_count <= 0 || f->instr_count < 2) {
+        return 0;
+    }
+    defs = count_defs(f);
+    uses = (int *)calloc((size_t)f->value_count, sizeof(*uses));
+    if (defs == NULL || uses == NULL) {
+        free(defs);
+        free(uses);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        for_each_use(&f->instrs[i], count_one_use, uses);
+    }
+    /*
+     * t = op ..., then v = t, t made once and read only there, of v's class, size and signedness: op writes v
+     * itself.  It reads its operands before it writes, so op v, k into v is v's update (x += k, p++).
+     */
+    for (i = 0; i + 1 < f->instr_count; ++i) {
+        cc_ssa_instr_t *op = &f->instrs[i];
+        cc_ssa_instr_t *mv = &f->instrs[i + 1];
+        int t = op->dst;
+
+        if (mv->op != CC_SSA_MOV || mv->lhs != t || !is_value(f, t) || !is_value(f, mv->dst) || mv->dst == t ||
+            defs[t] != 1 || uses[t] != 1 ||
+            (op->op != CC_SSA_ADD && op->op != CC_SSA_SUB && op->op != CC_SSA_MUL && op->op != CC_SSA_AND &&
+             op->op != CC_SSA_OR && op->op != CC_SSA_XOR && op->op != CC_SSA_SHL && op->op != CC_SSA_SHR &&
+             op->op != CC_SSA_LOAD && op->op != CC_SSA_CONST) ||
+            cc_ssa_value_class(f, t) != cc_ssa_value_class(f, mv->dst) ||
+            cc_ssa_value_size(f, t) != cc_ssa_value_size(f, mv->dst) ||
+            cc_ssa_value_is_unsigned(f, t) != cc_ssa_value_is_unsigned(f, mv->dst)) {
+            continue;
+        }
+        op->dst = mv->dst;
+        defs[mv->dst]++;
+        cc_ssa_instr_free(mv);
+        mv->op = CC_SSA_LABEL;   /* marked for removal below: a label of no number */
+        mv->label = -2;
+        changed = 1;
+        i++;
+    }
+    if (changed) {
+        w = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            if (f->instrs[i].op == CC_SSA_LABEL && f->instrs[i].label == -2) {
+                continue;
+            }
+            f->instrs[w++] = f->instrs[i];
+        }
+        f->instr_count = w;
+    }
+    free(defs);
+    free(uses);
+    return changed;
+}
+
+/* ---- (f) a definition nothing reads ---- */
+
+/** Whether @p in only makes its result: removed when nothing reads it. */
+static int defines_only(const cc_ssa_instr_t *in) {
+    switch (in->op) {
+    case CC_SSA_CONST:
+    case CC_SSA_MOV:
+    case CC_SSA_ADD:
+    case CC_SSA_SUB:
+    case CC_SSA_MUL:
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
+    case CC_SSA_CMP:
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
+    case CC_SSA_PAIR:
+    case CC_SSA_GADDR:
+    case CC_SSA_STR:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+typedef struct {
+    uint32_t *set;
+} bits_ctx_t;
+
+/** for_each_use() callback: the value is live. */
+static void bits_add(void *ctx, int v, int role) {
+    bits_ctx_t *c = (bits_ctx_t *)ctx;
+
+    (void)role;
+    c->set[v / 32] |= (uint32_t)1u << (v % 32);
+}
+
+/** Whether asm output @p k of @p in is written only: `=`, not `+`, and not a memory operand by its address. */
+static int asm_output_write_only(const cc_ssa_instr_t *in, size_t k) {
+    const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[k] : NULL;
+
+    return c != NULL && strchr(c, '+') == NULL && !CC_SSA_ASM_MEM_INDIRECT_P(in->asm_out_values[k]);
+}
+
+/**
+ * Liveness back across @p in in @p cur: what it defines is not live before it, what it reads is.  An asm's
+ * write-only outputs are definitions, not reads; its other operands are read.
+ */
+static void live_step(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, bits_ctx_t *bc) {
+    size_t k;
+
+    if (is_value(f, in->dst)) {
+        bc->set[in->dst / 32] &= ~((uint32_t)1u << (in->dst % 32));
+    }
+    if (in->op != CC_SSA_ASM) {
+        for_each_use(in, bits_add, bc);
+        return;
+    }
+    for (k = 0; k < in->asm_out_count; ++k) {
+        int o = in->asm_out_values[k];
+
+        if (asm_output_write_only(in, k) && is_value(f, o)) {
+            bc->set[o / 32] &= ~((uint32_t)1u << (o % 32));
+        }
+    }
+    for (k = 0; k < in->asm_out_count + in->asm_in_count; ++k) {
+        int o = k < in->asm_out_count ? in->asm_out_values[k] : in->asm_in_values[k - in->asm_out_count];
+
+        if (k < in->asm_out_count && asm_output_write_only(in, k)) {
+            continue;
+        }
+        if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+            o = CC_SSA_ASM_MEM_INDIRECT_DECODE(o);
+        }
+        if (is_value(f, o)) {
+            bits_add(bc, o, 0);
+        }
+    }
+}
+
+int cc_dead_defs(cc_ssa_function_t *f) {
+    cfg_t c;
+    size_t nw;
+    uint32_t *live_in = NULL;
+    uint32_t *live_out = NULL;
+    uint32_t *cur = NULL;
+    unsigned char *pinned = NULL;
+    unsigned char *dead = NULL;
+    size_t i;
+    size_t b;
+    size_t w;
+    int changed;
+    int removed = 0;
+    int rc = 0;
+
+    if (f->value_count <= 0 || f->instr_count == 0) {
+        return 0;
+    }
+    if (cfg_build(&c, f) != 0) {
+        return -1;
+    }
+    nw = ((size_t)f->value_count + 31) / 32;
+    for (b = 0; b < c.count; ++b) {
+        if (c.opaque[b]) {
+            /* an asm goto or a computed goto: where control goes is not known */
+            cfg_free(&c);
+            return 0;
+        }
+    }
+    if ((unsigned long)c.count * nw > 8UL * 1024 * 1024) {
+        /* too big a function to be worth the sets */
+        cfg_free(&c);
+        return 0;
+    }
+    live_in = (uint32_t *)calloc(c.count * nw, sizeof(uint32_t));
+    live_out = (uint32_t *)calloc(c.count * nw, sizeof(uint32_t));
+    cur = (uint32_t *)calloc(nw, sizeof(uint32_t));
+    pinned = (unsigned char *)calloc((size_t)f->value_count, 1);
+    dead = (unsigned char *)calloc(f->instr_count, 1);
+    if (live_in == NULL || live_out == NULL || cur == NULL || pinned == NULL || dead == NULL) {
+        rc = -1;
+        goto done;
+    }
+    /*
+     * a value whose address is taken is read through it, and an asm's inputs and read-write outputs as it
+     * pleases: always live.  A write-only output is only defined there (live_step()).
+     */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->op == CC_SSA_ADDR && is_value(f, in->lhs)) {
+            pinned[in->lhs] = 1;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count + in->asm_in_count; ++k) {
+            int o = k < in->asm_out_count ? in->asm_out_values[k] : in->asm_in_values[k - in->asm_out_count];
+
+            if (k < in->asm_out_count && asm_output_write_only(in, k)) {
+                continue;
+            }
+            if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+                o = CC_SSA_ASM_MEM_INDIRECT_DECODE(o);
+            }
+            if (is_value(f, o)) {
+                pinned[o] = 1;
+            }
+        }
+    }
+    /* live in = (live out - defined) + read, back from each block's end, until nothing changes */
+    do {
+        changed = 0;
+        for (b = c.count; b-- > 0;) {
+            uint32_t *out = live_out + b * nw;
+            uint32_t *inb = live_in + b * nw;
+            bits_ctx_t bc;
+            int k;
+
+            for (k = 0; k < 2; ++k) {
+                int s = c.succ[2 * b + k];
+
+                if (s >= 0) {
+                    for (w = 0; w < nw; ++w) {
+                        out[w] |= live_in[(size_t)s * nw + w];
+                    }
+                }
+            }
+            memcpy(cur, out, nw * sizeof(uint32_t));
+            bc.set = cur;
+            for (i = c.end[b]; i-- > c.first[b];) {
+                live_step(f, &f->instrs[i], &bc);
+            }
+            for (w = 0; w < nw; ++w) {
+                if (cur[w] != inb[w]) {
+                    inb[w] = cur[w];
+                    changed = 1;
+                }
+            }
+        }
+    } while (changed);
+    /* a definition only of its result, whose result is not live after it: gone */
+    for (b = 0; b < c.count; ++b) {
+        bits_ctx_t bc;
+
+        memcpy(cur, live_out + b * nw, nw * sizeof(uint32_t));
+        bc.set = cur;
+        for (i = c.end[b]; i-- > c.first[b];) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+
+            if (defines_only(in) && is_value(f, d) && !pinned[d] && (cur[d / 32] & ((uint32_t)1u << (d % 32))) == 0) {
+                dead[i] = 1;
+                removed = 1;
+                continue;
+            }
+            live_step(f, in, &bc);
+        }
+    }
+    if (removed) {
+        size_t k = 0;
+
+        for (i = 0; i < f->instr_count; ++i) {
+            if (dead[i]) {
+                cc_ssa_instr_free(&f->instrs[i]);
+                continue;
+            }
+            f->instrs[k++] = f->instrs[i];
+        }
+        f->instr_count = k;
+    }
+done:
+    free(live_in);
+    free(live_out);
+    free(cur);
+    free(pinned);
+    free(dead);
+    cfg_free(&c);
+    return rc < 0 ? -1 : removed;
+}
+
+/* ---- (e) a scalar slot made a value ---- */
+
+/** The bits of the target's integer register, which a shift works on: 32 on i386, 64 on x86-64. */
+static int word_bits(const cc_ssa_instr_t *in) {
+    (void)in;
+    return cc_options_current()->target == CC_TARGET_I386 ? 32 : 64;
+}
+
+/**
+ * Whether @p in loads 1 or 2 bytes into a wider integer, extending them (zload or load): a char or short
+ * local read as an int.  Up to a word: a wider result is a pair of words on i386.
+ */
+static int widening_load(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
+    uint32_t dsize;
+
+    if (in->op != CC_SSA_LOAD || (in->imm != 1 && in->imm != 2) || !is_value(f, in->dst) ||
+        cc_ssa_value_class(f, in->dst) != CC_VAL_I64) {
+        return 0;
+    }
+    dsize = cc_ssa_value_size(f, in->dst);
+    return dsize > (uint32_t)in->imm && 8 * dsize <= (uint32_t)word_bits(in);
+}
+
+int cc_promote_slots(cc_ssa_function_t *f) {
+    addr_info_t a;
+    long *size = NULL;         /* per slot: the size of its accesses, 0 for none yet */
+    int *cls = NULL;           /* per slot: the class of the values stored and loaded */
+    int *proto = NULL;         /* per slot: a value stored or loaded, whose signedness the new one takes */
+    unsigned char *bad = NULL; /* per slot: not promoted */
+    int *var = NULL;           /* per slot: the value it becomes, or -1 */
+    int nold = f->value_count; /* the values before those made here, which the arrays cover */
+    ilist_t out;               /* the instructions rewritten */
+    size_t i;
+    int s;
+    int changed = 0;
+    int rc = 0;
+
+    memset(&out, 0, sizeof(out));
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    if (addr_info_build(&a, f, 0) != 0) {
+        return -1;
+    }
+    size = (long *)calloc((size_t)f->value_count, sizeof(*size));
+    cls = (int *)calloc((size_t)f->value_count, sizeof(*cls));
+    proto = (int *)calloc((size_t)f->value_count, sizeof(*proto));
+    bad = (unsigned char *)calloc((size_t)f->value_count, 1);
+    var = (int *)malloc((size_t)f->value_count * sizeof(*var));
+    if (size == NULL || cls == NULL || proto == NULL || bad == NULL || var == NULL) {
+        rc = -1;
+        goto done;
+    }
+    for (s = 0; s < nold; ++s) {
+        proto[s] = -1;
+    }
+    /*
+     * each access: of the whole slot, directly, at one size, of a value of exactly that size (or a load that
+     * extends it, widening_load()) and one class
+     */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int v;
+
+        if ((in->op != CC_SSA_LOAD && in->op != CC_SSA_STORE) || !is_value(f, in->lhs) || a.slot[in->lhs] < 0) {
+            continue;
+        }
+        s = a.slot[in->lhs];
+        v = in->op == CC_SSA_STORE ? in->rhs : in->dst;
+        if (in->lhs != s || (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
+            (long)in->imm != slot_size(&a, s) || (size[s] != 0 && size[s] != (long)in->imm) || !is_value(f, v) ||
+            (cc_ssa_value_size(f, v) != (uint32_t)in->imm && !widening_load(f, in)) ||
+            (size[s] != 0 && cls[s] != (int)cc_ssa_value_class(f, v))) {
+            bad[s] = 1;
+            continue;
+        }
+        size[s] = (long)in->imm;
+        cls[s] = (int)cc_ssa_value_class(f, v);
+        if (cc_ssa_value_size(f, v) == (uint32_t)in->imm) {
+            proto[s] = v;
+        }
+    }
+    for (s = 0; s < nold; ++s) {
+        var[s] = -1;
+        if (a.slot[s] == s && size[s] != 0 && !bad[s] && !a.escapes[s]) {
+            int nv = cc_ssa_function_new_value(f, (cc_value_type_t)cls[s]);
+
+            if (nv < 0) {
+                rc = -1;
+                goto done;
+            }
+            cc_ssa_value_set_size(f, nv, (uint32_t)size[s]);
+            cc_ssa_value_set_unsigned(f, nv, proto[s] >= 0 ? cc_ssa_value_is_unsigned(f, proto[s]) : 0);
+            var[s] = nv;
+        }
+    }
+    /* a store sets the value, a load reads it; a load wider than the slot extends it */
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+
+        if ((in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE) && in->lhs >= 0 && in->lhs < nold &&
+            a.slot[in->lhs] == in->lhs && var[in->lhs] >= 0) {
+            if (in->op == CC_SSA_LOAD && widening_load(f, in)) {
+                /* dst = (var << k) >> k, k the bits of the word above the slot's */
+                int k = word_bits(in) - 8 * (int)in->imm;
+                int t = cc_ssa_function_new_value(f, CC_VAL_I64);
+                cc_ssa_instr_t sh = plain_instr(CC_SSA_SHL);
+
+                if (t < 0) {
+                    rc = -1;
+                    goto done;
+                }
+                cc_ssa_value_set_size(f, t, cc_ssa_value_size(f, in->dst));
+                cc_ssa_value_set_unsigned(f, t, in->is_unsigned);
+                sh.dst = t;
+                sh.lhs = var[in->lhs];
+                sh.imm = k;
+                if (ilist_put(&out, &sh) != 0) {
+                    rc = -1;
+                    goto done;
+                }
+                in->op = CC_SSA_SHR;
+                in->lhs = t;
+                in->imm = k;
+            } else if (in->op == CC_SSA_STORE) {
+                in->dst = var[in->lhs];
+                in->lhs = in->rhs;
+                in->op = CC_SSA_MOV;
+                in->imm = 0;
+            } else {
+                in->lhs = var[in->lhs];
+                in->op = CC_SSA_MOV;
+                in->imm = 0;
+            }
+            in->rhs = -1;
+            changed = 1;
+        }
+        if (ilist_put(&out, in) != 0) {
+            rc = -1;
+            goto done;
+        }
+    }
+    if (changed) {
+        free(f->instrs);
+        f->instrs = out.at;
+        f->instr_count = out.count;
+        f->instr_cap = out.cap;
+        out.at = NULL;
+    }
+done:
+    if (rc < 0 && out.at != NULL) {
+        /* the instructions copied to out are f's too: only the array goes */
+        free(out.at);
+        out.at = NULL;
+    }
+    free(out.at);
+    free(size);
+    free(cls);
+    free(proto);
+    free(bad);
+    free(var);
+    addr_info_free(&a);
+    return rc < 0 ? -1 : changed;
 }
 
 int cc_optimize_slots(cc_ssa_function_t *f) {

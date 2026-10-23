@@ -6026,6 +6026,19 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         break;
     case CC_BIN_MUL:
         in.op = CC_SSA_MUL;
+        if (vt == CC_VAL_I64 && e->lhs != NULL && e->lhs->kind == CC_EXPR_INT && e->lhs->int_val == -1) {
+            /* unary minus, which the parser writes -1 * x: 0 - x, a negation, not a multiply */
+            int zero = cc_ir_const(sf, 0);
+
+            if (zero < 0) {
+                set_diag(diag, "out of memory lowering a negation");
+                return -1;
+            }
+            cc_ssa_value_set_size(sf, zero, cc_ssa_value_size(sf, lhs));
+            cc_ssa_value_set_unsigned(sf, zero, cc_ssa_value_is_unsigned(sf, lhs));
+            lhs = zero;
+            in.op = CC_SSA_SUB;
+        }
         break;
     case CC_BIN_DIV:
         in.op = CC_SSA_DIV;
@@ -15323,6 +15336,21 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if ((sf->attr_flags & CC_ATTR_NORETURN) != 0) {
                 if (append_noreturn_loop(sf) != 0) {
                     set_diag(diag, "out of memory appending noreturn terminator");
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+            } else if (ct_has_kind(fn_ret_ctype(af), CC_CT_VOID)) {
+                /* falling off the end of a void function returns nothing: no value is made for %eax */
+                cc_ssa_instr_t ret_in;
+
+                memset(&ret_in, 0, sizeof(ret_in));
+                ret_in.op = CC_SSA_RET;
+                ret_in.dst = -1;
+                ret_in.lhs = -1;
+                ret_in.rhs = -1;
+                ret_in.param_index = -1;
+                if (cc_ir_push(sf, ret_in) != 0) {
+                    set_diag(diag, "out of memory appending default return");
                     cc_ssa_module_free(out);
                     return -1;
                 }

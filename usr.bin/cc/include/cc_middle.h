@@ -43,6 +43,50 @@ int cc_fold_constant_values(cc_ssa_function_t *f);
 int cc_optimize_slots(cc_ssa_function_t *f);
 
 /**
+ * Make each slot of @p f whose address does not escape, and which is only
+ * loaded and stored whole at one size, a value: each store sets it, each
+ * load reads it, and its STACKALLOC is left to dead-code elimination.  A
+ * value lives in a register where the back end can keep it, where a slot
+ * is reloaded at every use.  Run after cc_optimize_slots(), which reasons
+ * about slots, has done its work (passes/mem.c).
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 if anything changed, 0 if not, -1 when out of memory
+ */
+int cc_promote_slots(cc_ssa_function_t *f);
+
+/**
+ * Read each copy `dst = src` of @p f as its source, where both are
+ * defined once, neither's address is taken nor an asm's operand, and
+ * they are of one class, size and signedness; the move is left to
+ * dead-code elimination (passes/mem.c).
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 if anything changed, 0 if not, -1 when out of memory
+ */
+int cc_propagate_copies(cc_ssa_function_t *f);
+
+/**
+ * Coalesce `t = op ...; v = t`, t made once and read only by the move, into `v = op ...` (passes/mem.c):
+ * cc lowers each update of a variable (x += k, p++) so, and the back end can then do it in place.
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 if anything changed, 0 if not, -1 when out of memory
+ */
+int cc_coalesce_moves(cc_ssa_function_t *f);
+
+/**
+ * Remove each definition of @p f that only makes its result -- a constant, a move, arithmetic, a compare --
+ * where nothing reads the result before it is defined again or the function returns: a variable's
+ * initializer overwritten before use (passes/mem.c).  Liveness over the blocks; nothing is removed in a
+ * function with an asm goto or a computed goto, or of a value whose address is taken or an asm reads.
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 if anything was removed, 0 if not, -1 when out of memory
+ */
+int cc_dead_defs(cc_ssa_function_t *f);
+
+/**
  * Whether @p g may be inlined (passes/inline.c): static, inline by its
  * storage or always_inline and not noinline, small enough, its interface
  * plain values, and its body free of what depends on its own frame.

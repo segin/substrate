@@ -1161,7 +1161,7 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         has_sret = sret_mem_size > 0 ? 1 : 0;
         param_gpr_bias = has_sret ? 1 : 0;
 
-        if (build_slot_layout(f, 16, &lay, diag) != 0) {
+        if (build_slot_layout(f, 16, 0, NULL, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64: failed to build slot layout");
             }

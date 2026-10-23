@@ -50,7 +50,8 @@ usr.bin/cc/
 │   └── x86/                 # GAS-style assembly emission (include/cc_x86.h)
 │       ├── common.c         # Frame layout, register cache, inline asm, data, cc_emit_gas()
 │       ├── x86_64.c         # x86-64 instruction selection and calling convention
-│       └── i386.c           # i386 instruction selection and calling convention
+│       ├── i386.c           # i386 instruction selection and calling convention
+│       └── regalloc_i386.c  # i386: the values given %ebx, %esi or %edi as their home
 ├── include/                 # Internal driver/frontend/backend headers
 ├── ir/                      # The textual SSA IR (typed, LLVM-like; tests/usr.bin/cc/valid.ir)
 │   ├── ir.c / ir.h          # Module representation
@@ -133,7 +134,7 @@ Deployment: Shared between `cc` and standalone IR utilities (`ir-verifier`, `ir-
 
 Name: Instruction selection, register allocation, frame layout, and assembly emission
 
-Description: The backend converts legalized IR into GAS-style assembly for supported ABIs. `backend/x86/` writes the `.s` stream: `common.c` holds what both targets share (the frame's slots, the integer register cache, inline asm, sections, data and string literals) and `cc_emit_gas()`, which writes the module's data and its file-scope `asm("...")` text, as written and in source order, and hands each function to `x86_64.c` or `i386.c`, which select instructions from legal IR for their target (`include/cc_x86.h` declares what the three share); `backend/regalloc.c` chooses which register to spill and `backend/frame.c` checks and aligns frame sizes for it.
+Description: The backend converts legalized IR into GAS-style assembly for supported ABIs. `backend/x86/` writes the `.s` stream: `common.c` holds what both targets share (the frame's slots, the integer register cache, inline asm, sections, data and string literals) and `cc_emit_gas()`, which writes the module's data and its file-scope `asm("...")` text, as written and in source order, and hands each function to `x86_64.c` or `i386.c`, which select instructions from legal IR for their target (`include/cc_x86.h` declares what the three share); `backend/regalloc.c` chooses which register to spill and `backend/frame.c` checks and aligns frame sizes for it. On i386 the emitter keeps values in registers rather than in their slots: `common.c`'s register cache holds %eax, %ecx and %edx, a constant or a global's address is made where it is read, an address computed once is folded into the loads and stores through it, the values that pay for it most (by uses, weighted by loop depth) get %ebx, %esi or %edi as their home for the whole function (`regalloc_i386.c`, over liveness it works out), and the cache's contents are carried into a block reached only from the one before. Each function is written to a scratch file first and copied out through text passes: shift and mask extensions made movsx/movzx, stores to slots nothing reads dropped and the slots left packed nearest %ebp, and a store followed by a load of the same slot made a move. Linux's 16-bit setup code, which must fit 32 KiB, is what this is measured against.
 
 Technologies: C, target-specific lowering for i386/x86_64, linear-scan style allocation, textual assembly emission
 

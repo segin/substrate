@@ -2028,7 +2028,7 @@ int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
 }
 
 int slot_off(const slot_layout_t *lay, int v) {
-    return -lay->slot_size * (lay->slot_of[v] + 1);
+    return -lay->slot_size * (lay->slot_of[v] + 1) - lay->bias;
 }
 
 int stackalloc_off(const slot_layout_t *lay, int v) {
@@ -2121,6 +2121,8 @@ int int_regs_init(int_reg_state_t *st, const cc_ssa_function_t *f, const char *c
     }
     st->tick = 1;
     st->cur_index = -1;
+    st->alloc_count = reg_count;
+    st->home = NULL;
     return 0;
 }
 
@@ -2145,7 +2147,15 @@ int int_regs_spill_reg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t
         st->reg_dirty[r] = 0;
         return 0;
     }
-    if (st->reg_dirty[r] && cc_ssa_value_class(f, v) == CC_VAL_I64 && !is_stackalloc_value(lay, v)) {
+    /*
+     * On i386, a value written back after its last use stays in the register: its slot, if shared
+     * (live_end), may be another value's by now, and nothing reads it again -- a 64-bit one's high word
+     * too, read only by what names the value.  (Only the i386 emitter keeps values in registers across
+     * instructions; x86-64's flushes after each.)
+     */
+    if (st->reg_dirty[r] && cc_ssa_value_class(f, v) == CC_VAL_I64 && !is_stackalloc_value(lay, v) &&
+        !(!st->is_64bit && lay->live_end != NULL && v < lay->value_count && lay->live_end[v] >= 0 &&
+          st->cur_index > lay->live_end[v])) {
         off = slot_off(lay, v);
         emit_frame_store_reg(fp, st->is_64bit, st->regs[r], off);
     }
@@ -2257,13 +2267,13 @@ static int int_regs_alloc(FILE *fp, const cc_ssa_function_t *f, const slot_layou
     int victim = -1;
     int *next_use = NULL;
 
-    if (prefer >= 0 && prefer < st->reg_count) {
+    if (prefer >= 0 && prefer < st->alloc_count) {
         if (st->reg_val[prefer] < 0) {
             return prefer;
         }
     }
 
-    for (i = 0; i < st->reg_count; ++i) {
+    for (i = 0; i < st->alloc_count; ++i) {
         if (i == avoid) {
             continue;
         }
@@ -2281,10 +2291,12 @@ static int int_regs_alloc(FILE *fp, const cc_ssa_function_t *f, const slot_layou
                 next_use[i] = -1;
             }
         }
-        victim = cc_backend_pick_spill_victim(st->reg_val, next_use, st->reg_dirty, st->reg_count, avoid, prefer);
+        victim = cc_backend_pick_spill_victim(st->reg_val, next_use, st->reg_dirty, st->alloc_count, avoid,
+                                              prefer < st->alloc_count ? prefer : -1);
         free(next_use);
     } else {
-        victim = cc_backend_pick_spill_victim(st->reg_val, NULL, st->reg_dirty, st->reg_count, avoid, prefer);
+        victim = cc_backend_pick_spill_victim(st->reg_val, NULL, st->reg_dirty, st->alloc_count, avoid,
+                                              prefer < st->alloc_count ? prefer : -1);
     }
 
     if (victim < 0) {
@@ -2321,12 +2333,32 @@ int int_regs_load(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay
     if (value < 0 || value >= f->value_count) {
         return -1;
     }
+    if (st->home != NULL && st->home[value] >= 0) {
+        /* it lives in its home register: read there, written only by moving a result in (i386) */
+        return st->home[value];
+    }
     reg = st->val_reg[value];
     if (reg >= 0 && reg < st->reg_count) {
         st->reg_age[reg] = st->tick++;
         return reg;
     }
     reg = int_regs_alloc(fp, f, lay, st, prefer, avoid);
+    if (st->remat != NULL && st->remat[value]) {
+        /*
+         * a constant is made where it is read; its slot is written only for what reads that (i386).  Zero
+         * is xorl, shorter: no flags are live where an operand is loaded (a compare reads its operands
+         * first, and only stores come between it and the flags' reader).
+         */
+        if (st->remat[value] == 2) {
+            fprintf(fp, "\tmovl $%s%+ld, %s\n", st->remat_sym[value], (long)st->remat_imm[value], st->regs[reg]);
+        } else if ((unsigned int)st->remat_imm[value] == 0) {
+            fprintf(fp, "\txorl %s, %s\n", st->regs[reg], st->regs[reg]);
+        } else {
+            fprintf(fp, "\tmovl $%ld, %s\n", (long)(int)(unsigned int)st->remat_imm[value], st->regs[reg]);
+        }
+        int_regs_bind(st, value, reg, 0);
+        return reg;
+    }
     if (is_stackalloc_value(lay, value)) {
         off = stackalloc_off(lay, value);
         if (st->is_64bit) {
@@ -2371,9 +2403,20 @@ void int_regs_forget(int_reg_state_t *st, int v) {
     st->val_reg[v] = -1;
 }
 
+int int_regs_scratch(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st, int avoid) {
+    return int_regs_alloc(fp, f, lay, st, -1, avoid);
+}
+
 int int_regs_remap_dst(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st, int dst, int reg) {
     if (reg < 0 || reg >= st->reg_count) {
         return -1;
+    }
+    if (reg >= st->alloc_count) {
+        /* a value's home register (i386) stays its: the result is a copy in one of the cache's */
+        int t = int_regs_alloc(fp, f, lay, st, -1, -1);
+
+        fprintf(fp, "\tmovl %s, %s\n", st->regs[reg], st->regs[t]);
+        reg = t;
     }
     if (st->reg_val[reg] >= 0 && st->reg_val[reg] != dst && st->reg_dirty[reg]) {
         int_regs_spill_reg(fp, f, lay, st, reg);
@@ -2478,8 +2521,10 @@ void slot_layout_free(slot_layout_t *lay) {
     }
     free(lay->slot_of);
     free(lay->stackalloc_off);
+    free(lay->live_end);
     lay->slot_of = NULL;
     lay->stackalloc_off = NULL;
+    lay->live_end = NULL;
     lay->value_count = 0;
     lay->slot_count = 0;
     lay->slot_size = 0;
@@ -2563,8 +2608,12 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     case CC_SSA_LO32:
     case CC_SSA_HI32:
     case CC_SSA_BR_COND:
-    case CC_SSA_RET:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
+        break;
+    case CC_SSA_RET:
+        /* a 64-bit value returned on i386: rhs is its high word */
+        if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
+        if (in->rhs >= 0 && in->rhs < f->value_count) fn(in->rhs, ctx);
         break;
     case CC_SSA_STORE:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
@@ -2599,11 +2648,16 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     }
 }
 
+void x86_for_each_use(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, void (*fn)(int v, void *ctx), void *ctx) {
+    for_each_instr_use(f, in, fn, ctx);
+}
+
 typedef struct {
     int nvals;
     int at;
     int *first_use;
     int *last_use;
+    const int *alias; /**< per value: another it reads in its place (build_slot_layout()), or -1; or NULL */
 } slot_use_ctx_t;
 
 typedef struct {
@@ -2619,6 +2673,7 @@ typedef struct {
     int *def_block;
     int *use_block;
     unsigned char *cross_block;
+    const int *alias; /**< as slot_use_ctx_t's */
 } slot_block_ctx_t;
 
 static void slot_mark_use_cb(int v, void *ctxp) {
@@ -2631,6 +2686,10 @@ static void slot_mark_use_cb(int v, void *ctxp) {
     }
     if (ctx->first_use[v] < 0 || ctx->at < ctx->first_use[v]) {
         ctx->first_use[v] = ctx->at;
+    }
+    if (ctx->alias != NULL && ctx->alias[v] >= 0 && ctx->alias[v] != v) {
+        /* read here in its place: a use of the other too */
+        slot_mark_use_cb(ctx->alias[v], ctxp);
     }
 }
 
@@ -2658,6 +2717,9 @@ static void slot_mark_use_block_cb(int v, void *ctxp) {
     }
     if (ctx->def_block[v] < 0 || ctx->def_block[v] != ctx->block) {
         ctx->cross_block[v] = 1;
+    }
+    if (ctx->alias != NULL && ctx->alias[v] >= 0 && ctx->alias[v] != v) {
+        slot_mark_use_block_cb(ctx->alias[v], ctxp);
     }
 }
 
@@ -3346,7 +3408,123 @@ fail:
     return -1;
 }
 
-int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
+typedef struct {
+    FILE *fp;
+    const slot_layout_t *lay;
+    const int_reg_state_t *st;
+} remat_store_ctx_t;
+
+/** for_each_instr_use() callback: a constant made where it is read goes to its slot. */
+static void remat_store_cb(int v, void *ctx) {
+    const remat_store_ctx_t *c = (const remat_store_ctx_t *)ctx;
+
+    if (c->st->remat[v] == 2) {
+        fprintf(c->fp, "\tmovl $%s%+ld, %d(%%ebp)\n", c->st->remat_sym[v], (long)c->st->remat_imm[v],
+                slot_off(c->lay, v));
+    } else if (c->st->remat[v] && !is_stackalloc_value(c->lay, v)) {
+        fprintf(c->fp, "\tmovl $%ld, %d(%%ebp)\n", (long)(int)(unsigned int)c->st->remat_imm[v], slot_off(c->lay, v));
+    }
+}
+
+void int_regs_store_remat_uses(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const int_reg_state_t *st,
+                               const cc_ssa_instr_t *in) {
+    remat_store_ctx_t c;
+
+    if (st->remat == NULL) {
+        return;
+    }
+    c.fp = fp;
+    c.lay = lay;
+    c.st = st;
+    for_each_instr_use(f, in, remat_store_cb, &c);
+}
+
+/** The largest stack object an i386 frame places above its slots, near %ebp (build_slot_layout()). */
+#define SMALL_STACK_OBJECT 64
+
+typedef struct {
+    long weight;
+    int slot;
+} slot_weight_t;
+
+typedef struct {
+    const slot_layout_t *lay;
+    slot_weight_t *w;
+} slot_count_ctx_t;
+
+/** for_each_instr_use() callback: a use of a value is an access of its slot. */
+static void slot_count_cb(int v, void *ctxp) {
+    slot_count_ctx_t *c = (slot_count_ctx_t *)ctxp;
+
+    if (v < c->lay->value_count && c->lay->slot_of[v] >= 0) {
+        c->w[c->lay->slot_of[v]].weight++;
+    }
+}
+
+/** qsort() order: the busier slot first, then the lower number. */
+static int slot_weight_cmp(const void *a, const void *b) {
+    const slot_weight_t *x = (const slot_weight_t *)a;
+    const slot_weight_t *y = (const slot_weight_t *)b;
+
+    if (x->weight != y->weight) {
+        return x->weight > y->weight ? -1 : 1;
+    }
+    return x->slot - y->slot;
+}
+
+/**
+ * Renumber the @p nslots slots of @p lay so the most used are nearest the frame pointer, where an 8-bit
+ * displacement reaches them: what a value's definitions and uses count, a STACKALLOC's own aside (its
+ * address is computed, not loaded).
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int order_slots_by_use(const cc_ssa_function_t *f, slot_layout_t *lay, int nslots) {
+    slot_weight_t *w;
+    int *renum;
+    slot_count_ctx_t c;
+    size_t j;
+    int i;
+
+    if (nslots <= 1) {
+        return 0;
+    }
+    w = (slot_weight_t *)calloc((size_t)nslots, sizeof(*w));
+    renum = (int *)malloc((size_t)nslots * sizeof(*renum));
+    if (w == NULL || renum == NULL) {
+        free(w);
+        free(renum);
+        return -1;
+    }
+    for (i = 0; i < nslots; ++i) {
+        w[i].slot = i;
+    }
+    c.lay = lay;
+    c.w = w;
+    for (j = 0; j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+
+        for_each_instr_use(f, in, slot_count_cb, &c);
+        if (in->op != CC_SSA_STACKALLOC && in->dst >= 0 && in->dst < lay->value_count && lay->slot_of[in->dst] >= 0) {
+            w[lay->slot_of[in->dst]].weight++;
+        }
+    }
+    qsort(w, (size_t)nslots, sizeof(*w), slot_weight_cmp);
+    for (i = 0; i < nslots; ++i) {
+        renum[w[i].slot] = i;
+    }
+    for (i = 0; i < lay->value_count; ++i) {
+        if (lay->slot_of[i] >= 0 && lay->slot_of[i] < nslots) {
+            lay->slot_of[i] = renum[lay->slot_of[i]];
+        }
+    }
+    free(w);
+    free(renum);
+    return 0;
+}
+
+int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_always, const int *alias,
+                      slot_layout_t *out, cc_diag_t *diag) {
     int i;
     int nvals;
     int raw_frame;
@@ -3383,12 +3561,15 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
     /*
      * Reuse stack slots once functions accumulate many SSA values.
      * This keeps frame size bounded for normalization-heavy integer code.
+     * i386 reuses them always: a smaller frame is reached with shorter
+     * displacements, which Linux's 16-bit setup code needs to fit.
      */
-    enable_reuse = (nvals >= 64) ? 1 : 0;
+    enable_reuse = (nvals >= 64 || reuse_always) ? 1 : 0;
     out->value_count = nvals;
     out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
     out->stackalloc_off = (int *)calloc((size_t)nvals, sizeof(*out->stackalloc_off));
-    def_at = (int *)malloc((size_t)nvals * sizeof(*def_at));
+    out->live_end = (int *)malloc((size_t)nvals * sizeof(*out->live_end));
+    def_at =(int *)malloc((size_t)nvals * sizeof(*def_at));
     first_use = (int *)malloc((size_t)nvals * sizeof(*first_use));
     last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
     def_block = (int *)malloc((size_t)nvals * sizeof(*def_block));
@@ -3404,7 +3585,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
     pinned = (unsigned char *)calloc((size_t)nvals, sizeof(*pinned));
     cross_block = (unsigned char *)calloc((size_t)nvals, sizeof(*cross_block));
     multi_def = (unsigned char *)calloc((size_t)nvals, sizeof(*multi_def));
-    if (out->slot_of == NULL || out->stackalloc_off == NULL || def_at == NULL || first_use == NULL || last_use == NULL ||
+    if (out->slot_of == NULL || out->stackalloc_off == NULL || out->live_end == NULL || def_at == NULL || first_use == NULL || last_use == NULL ||
         def_block == NULL || use_block == NULL || next_start == NULL || next_end == NULL || instr_block == NULL ||
         block_start == NULL || block_end == NULL || start_head == NULL || end_head == NULL || free_slots == NULL ||
         pinned == NULL || cross_block == NULL || multi_def == NULL) {
@@ -3430,6 +3611,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
     }
     for (i = 0; i < nvals; ++i) {
         out->slot_of[i] = -1;
+        out->live_end[i] = -1;
         def_at[i] = -1;
         first_use[i] = -1;
         last_use[i] = -1;
@@ -3474,6 +3656,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
         uctx.at = (int)j;
         uctx.first_use = first_use;
         uctx.last_use = last_use;
+        uctx.alias = alias;
         dctx.nvals = nvals;
         dctx.at = (int)j;
         dctx.def_at = def_at;
@@ -3483,6 +3666,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
         bctx.def_block = def_block;
         bctx.use_block = use_block;
         bctx.cross_block = cross_block;
+        bctx.alias = alias;
 
         for_each_instr_use(f, in, slot_mark_use_cb, &uctx);
         for_each_instr_def(f, in, slot_mark_def_cb, &dctx);
@@ -3539,6 +3723,12 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
         }
     }
 
+    /* a value defined once and used in its own block only is dead past its last use */
+    for (i = 0; i < nvals; ++i) {
+        if (!pinned[i] && !cross_block[i] && def_at[i] >= 0) {
+            out->live_end[i] = last_use[i] > def_at[i] ? last_use[i] : def_at[i];
+        }
+    }
     if (!enable_reuse) {
         for (i = 0; i < nvals; ++i) {
             out->slot_of[i] = i;
@@ -3592,15 +3782,67 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *
             out->slot_of[i] = allocate_slot(free_slots, &free_count, &next_slot);
         }
     }
+    if (reuse_always && order_slots_by_use(f, out, next_slot) != 0) {
+        set_diag(diag, "out of memory building stack slot layout");
+        free(def_at);
+        free(first_use);
+        free(last_use);
+        free(def_block);
+        free(use_block);
+        free(next_start);
+        free(next_end);
+        free(instr_block);
+        free(block_start);
+        free(block_end);
+        free(start_head);
+        free(end_head);
+        free(free_slots);
+        free(pinned);
+        free(cross_block);
+        free(multi_def);
+        slot_layout_free(out);
+        return -1;
+    }
 
     out->slot_count = next_slot;
     raw_frame = out->slot_count * slot_size;
 build_stackalloc_offsets:
+    if (reuse_always) {
+        /*
+         * i386: the stack objects of SMALL_STACK_OBJECT bytes or fewer -- a local whose address is taken, a
+         * small structure, read and written often -- first, right under %ebp at a short displacement; the
+         * slots start below them (bias).  One of 16 bytes or more on a 16-byte boundary, as below.
+         */
+        int small = 0;
+
+        for (j = 0; j < f->instr_count; ++j) {
+            const cc_ssa_instr_t *in = &f->instrs[j];
+            int bytes = in->imm > 0 ? (int)in->imm : 1;
+
+            if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= nvals || bytes > SMALL_STACK_OBJECT) {
+                continue;
+            }
+            small += (bytes + 3) & ~3;
+            while (bytes >= 16 && small % 16 != 8) {
+                small += 4;
+            }
+            out->stackalloc_off[in->dst] = -small;
+        }
+        out->bias = small;
+        if (cc_backend_checked_frame_add(&raw_frame, small, diag, "stack allocation layout") != 0) {
+            slot_layout_free(out);
+            return -1;
+        }
+    }
     for (j = 0; j < f->instr_count; ++j) {
         const cc_ssa_instr_t *in = &f->instrs[j];
         int bytes;
 
         if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= nvals) {
+            continue;
+        }
+        if (reuse_always && (in->imm > 0 ? in->imm : 1) <= SMALL_STACK_OBJECT) {
+            /* placed above */
             continue;
         }
         bytes = in->imm > 0 ? (int)in->imm : 1;
@@ -3617,8 +3859,9 @@ build_stackalloc_offsets:
              */
             int residue = cc_target_pointer_size() == 4 ? 8 : 0;
 
+            /* by 4: an i386 frame of word slots is a multiple of 4 only */
             while (raw_frame % 16 != residue) {
-                raw_frame += 8;
+                raw_frame += 4;
             }
         }
         out->stackalloc_off[in->dst] = -raw_frame;
@@ -3748,6 +3991,13 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
 
     if (emit_debug && src_path != NULL) {
         fprintf(fp, ".file 1 \"%s\"\n", src_path);
+    }
+    if (emit_debug && cc_options_current() != NULL && !cc_options_current()->unwind_tables) {
+        /*
+         * -fno-asynchronous-unwind-tables: the frame descriptions are for a debugger only, in .debug_frame,
+         * not loaded with the code in .eh_frame (Linux's 16-bit setup code has no room for them)
+         */
+        fprintf(fp, "\t.cfi_sections .debug_frame\n");
     }
     if (emit_globals(fp, m, tgt->pointer_size, diag) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {

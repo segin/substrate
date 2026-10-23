@@ -26,26 +26,28 @@ module "ir/bitfield_unit.c" {
     %v16 = and i32 %v14, %v15;
     %v17 = shl i32 %v16, 29;
     %v18 = ashr i32 %v17, 29;
-    %v19 = const i32 0;
-    ret i32 %v19;
+    ret void;
   }
 
   func @set_f : fn(i32, i32) -> i64 {
   entry:
+    %v5 = undef i32;
+    %v11 = undef i32;
+    %v22 = undef i32;
     %v0 = param i32 0;
     %v1 = param i32 1;
     %v2 = stackalloc i32 4;
     store i32 4, %v0, %v2;
     %v3 = stackalloc i32 4;
     %v4 = const i32 4294967295;
-    %v5 = and i32 %v1, %v4;
+    set i32 %v5, %v1;
     store i32 4, %v5, %v3;
     %v6 = zload i32 4, %v3;
     %v7 = zload i32 4, %v2;
     %v8 = const i32 1;
     %v9 = add i32 %v7, %v8;
     %v10 = const i32 4294967295;
-    %v11 = and i32 %v6, %v10;
+    set i32 %v11, %v6;
     %v12 = const i32 255;
     %v13 = and i32 %v11, %v12;
     %v14 = zload i8 1, %v9;
@@ -57,27 +59,29 @@ module "ir/bitfield_unit.c" {
     %v19 = const i32 255;
     %v20 = and i32 %v18, %v19;
     %v21 = const i32 4294967295;
-    %v22 = and i32 %v20, %v21;
-    %v23 = const i32 0;
-    ret i32 %v23;
+    set i32 %v22, %v20;
+    ret void;
   }
 
   func @set_g : fn(i32, i32) -> i64 {
   entry:
+    %v5 = undef i32;
+    %v11 = undef i32;
+    %v22 = undef i32;
     %v0 = param i32 0;
     %v1 = param i32 1;
     %v2 = stackalloc i32 4;
     store i32 4, %v0, %v2;
     %v3 = stackalloc i32 4;
     %v4 = const i32 4294967295;
-    %v5 = and i32 %v1, %v4;
+    set i32 %v5, %v1;
     store i32 4, %v5, %v3;
     %v6 = zload i32 4, %v3;
     %v7 = zload i32 4, %v2;
     %v8 = const i32 2;
     %v9 = add i32 %v7, %v8;
     %v10 = const i32 4294967295;
-    %v11 = and i32 %v6, %v10;
+    set i32 %v11, %v6;
     %v12 = const i32 4095;
     %v13 = and i32 %v11, %v12;
     %v14 = zload i16 2, %v9;
@@ -89,9 +93,8 @@ module "ir/bitfield_unit.c" {
     %v19 = const i32 4095;
     %v20 = and i32 %v18, %v19;
     %v21 = const i32 4294967295;
-    %v22 = and i32 %v20, %v21;
-    %v23 = const i32 0;
-    ret i32 %v23;
+    set i32 %v22, %v20;
+    ret void;
   }
 
   func @get_b : fn(i32) -> i64 {

@@ -417,13 +417,494 @@ static int join_enter(const join_state_t *j, int label, int label_count, const_s
  *
  * @return 1 if anything changed, 0 if not, -1 when out of memory
  */
+/** Whether value @p v is the integer constant @p k as far as @p st knows, read at @p mask's width. */
+static int known_int(const const_state_t *st, int v, unsigned long long k, unsigned long long mask) {
+    return v >= 0 && st[v].known && st[v].type == CC_VAL_I64 && ((unsigned long long)st[v].i & mask) == (k & mask);
+}
+
+/**
+ * The operand @p in yields unchanged, the other a constant that leaves it so -- x & ~0, x | 0, x ^ 0, x + 0,
+ * x - 0, x << 0, x >> 0, x * 1, and b != 0 of a @p is_bool value b (NULL: none known) -- when it is an
+ * integer of the result's size and signedness; else -1.
+ */
+static int identity_operand(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const const_state_t *st,
+                            const unsigned char *is_bool) {
+    uint32_t size = cc_ssa_value_size(f, in->dst);
+    unsigned long long mask = size >= 8 ? ~0ULL : (1ULL << (size * 8)) - 1;
+    int x = -1;
+
+    if (in->lhs < 0 || in->rhs < 0 || in->lhs >= f->value_count || in->rhs >= f->value_count || size == 0) {
+        return -1;
+    }
+    switch (in->op) {
+    case CC_SSA_AND:
+        x = known_int(st, in->rhs, ~0ULL, mask) ? in->lhs : known_int(st, in->lhs, ~0ULL, mask) ? in->rhs : -1;
+        break;
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_ADD:
+        x = known_int(st, in->rhs, 0, mask) ? in->lhs : known_int(st, in->lhs, 0, mask) ? in->rhs : -1;
+        break;
+    case CC_SSA_SUB:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
+        x = known_int(st, in->rhs, 0, mask) ? in->lhs : -1;
+        break;
+    case CC_SSA_MUL:
+        x = known_int(st, in->rhs, 1, mask) ? in->lhs : known_int(st, in->lhs, 1, mask) ? in->rhs : -1;
+        break;
+    case CC_SSA_CMP:
+        /* a truth value compared unequal to 0 is itself: cc tests each condition so */
+        x = in->cmp_kind == CC_CMP_NE && is_bool != NULL && is_bool[in->lhs] && known_int(st, in->rhs, 0, ~0ULL)
+                ? in->lhs
+                : -1;
+        break;
+    default:
+        break;
+    }
+    /*
+     * of another signedness, a narrow x is held extended the other way: `& 0xff` of a signed char is a
+     * zero-extension.  A word on i386 fills its register, and is held one way whatever its signedness.
+     */
+    if (x < 0 || cc_ssa_value_class(f, x) != CC_VAL_I64 || cc_ssa_value_size(f, x) != size ||
+        (cc_ssa_value_is_unsigned(f, x) != cc_ssa_value_is_unsigned(f, in->dst) &&
+         !(size == 4 && cc_options_current()->target == CC_TARGET_I386))) {
+        return -1;
+    }
+    return x;
+}
+
+/** What is known of a value as an extension of a narrower one (ext_info_build()). */
+typedef struct {
+    int shl_src; /**< made once by `shl x, k` with x made once: x, else -1 */
+    int shl_k;   /**< that k */
+    int width;   /**< it is extended from this many bits (0: not known) */
+    int sign;    /**< sign-extended (1) or zero-extended (0) */
+    int mask_k;  /**< a constant 2^k - 1, a mask of the low k bits: k (else 0) */
+    long shl_at; /**< the shl's instruction */
+    int shl_src_var; /**< x is a variable, defined more than once */
+} ext_info_t;
+
+/**
+ * For each value of @p f defined once (@p defs), what makes it an extension: a narrow load (zload or
+ * load of 1 or 2 bytes), or `shr (shl x, k), k` -- how legalization extends a narrow integer -- of a word
+ * of W bits, extended from W - k.  NULL when out of memory.
+ */
+static ext_info_t *ext_info_build(const cc_ssa_function_t *f, const int *defs) {
+    ext_info_t *e = (ext_info_t *)malloc((size_t)f->value_count * sizeof(*e));
+    size_t i;
+    int v;
+
+    if (e == NULL) {
+        return NULL;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        e[v].shl_src = -1;
+        e[v].shl_k = 0;
+        e[v].width = 0;
+        e[v].sign = 0;
+        e[v].mask_k = 0;
+        e[v].shl_at = -1;
+        e[v].shl_src_var = 0;
+    }
+    /* in stream order: a definition comes before what reads it, as each value here is made once */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *d = &f->instrs[i];
+        int dst = d->dst;
+        uint32_t bits;
+
+        if (dst < 0 || dst >= f->value_count || defs[dst] != 1 || cc_ssa_value_class(f, dst) != CC_VAL_I64) {
+            continue;
+        }
+        bits = 8 * cc_ssa_value_size(f, dst);
+        if (d->op == CC_SSA_LOAD && (d->imm == 1 || d->imm == 2) && bits > 8 * (uint32_t)d->imm) {
+            e[dst].width = (int)(8 * d->imm);
+            e[dst].sign = !d->is_unsigned;
+        } else if (d->op == CC_SSA_SHL && d->rhs < 0 && d->imm > 0 && d->imm < 64 && d->lhs >= 0 &&
+                   d->lhs < f->value_count) {
+            /* of a variable (defined more than once) only right before the shr: nothing redefines it between */
+            e[dst].shl_src = d->lhs;
+            e[dst].shl_k = (int)d->imm;
+            e[dst].shl_at = (long)i;
+            e[dst].shl_src_var = defs[d->lhs] != 1;
+        } else if (d->op == CC_SSA_SHR && d->rhs < 0 && d->lhs >= 0 && d->lhs < f->value_count &&
+                   e[d->lhs].shl_src >= 0 && e[d->lhs].shl_k == (int)d->imm &&
+                   8 * cc_ssa_value_size(f, d->lhs) > (uint32_t)d->imm) {
+            e[dst].width = (int)(8 * cc_ssa_value_size(f, d->lhs)) - (int)d->imm;
+            e[dst].sign = !d->is_unsigned;
+        } else if (d->op == CC_SSA_CMP) {
+            /* 0 or 1 */
+            e[dst].width = 1;
+            e[dst].sign = 0;
+        } else if (d->op == CC_SSA_MOV && d->lhs >= 0 && d->lhs < f->value_count && e[d->lhs].width > 0) {
+            /* a copy is extended as what it copies */
+            e[dst].width = e[d->lhs].width;
+            e[dst].sign = e[d->lhs].sign;
+        } else if ((d->op == CC_SSA_CALL || d->op == CC_SSA_CALLI) && (d->imm == 1 || d->imm == 2) &&
+                   cc_options_current()->target == CC_TARGET_I386) {
+            /* a char or short result, which the i386 caller extends from %al or %ax as it is signed */
+            e[dst].width = (int)(8 * d->imm);
+            e[dst].sign = !d->is_unsigned;
+        } else if (d->op == CC_SSA_AND && d->rhs >= 0 && d->rhs < f->value_count && e[d->rhs].mask_k > 0) {
+            e[dst].width = e[d->rhs].mask_k;
+            e[dst].sign = 0;
+        } else if (d->op == CC_SSA_AND && d->lhs >= 0 && d->lhs < f->value_count && e[d->lhs].mask_k > 0) {
+            e[dst].width = e[d->lhs].mask_k;
+            e[dst].sign = 0;
+        } else if (d->op == CC_SSA_CONST) {
+            /* a mask of the low k bits, 2^k - 1 */
+            unsigned long long m = (unsigned long long)d->imm & 0xffffffffULL;
+            int k = 0;
+
+            while (k < 32 && ((m >> k) & 1u) != 0) {
+                k++;
+            }
+            e[dst].mask_k = k > 0 && k < 32 && (m >> k) == 0 ? k : 0;
+        }
+    }
+    /*
+     * a variable (defined more than once) each of whose definitions moves in a value extended alike, or is a
+     * small non-negative constant, is extended so too: to the widest of them; until nothing changes
+     */
+    {
+        int *mw = (int *)malloc((size_t)f->value_count * sizeof(int));   /* widest moved in */
+        int *ms = (int *)malloc((size_t)f->value_count * sizeof(int));   /* their sign, -1 none yet */
+        int *mc = (int *)malloc((size_t)f->value_count * sizeof(int));   /* bits of the widest constant */
+        unsigned char *ok = (unsigned char *)malloc((size_t)f->value_count);
+        int again = 1;
+        int round = 0;
+
+        while (mw != NULL && ms != NULL && mc != NULL && ok != NULL && again && round++ < 4) {
+            again = 0;
+            for (v = 0; v < f->value_count; ++v) {
+                mw[v] = 0;
+                ms[v] = -1;
+                mc[v] = 0;
+                ok[v] = defs[v] > 1 && cc_ssa_value_class(f, v) == CC_VAL_I64 && e[v].width == 0;
+            }
+            for (i = 0; i < f->instr_count; ++i) {
+                const cc_ssa_instr_t *d = &f->instrs[i];
+                int t = d->dst;
+
+                if (t < 0 || t >= f->value_count || !ok[t]) {
+                    continue;
+                }
+                if (d->op == CC_SSA_MOV && d->lhs >= 0 && d->lhs < f->value_count && e[d->lhs].width > 0 &&
+                    (ms[t] < 0 || ms[t] == e[d->lhs].sign)) {
+                    ms[t] = e[d->lhs].sign;
+                    mw[t] = e[d->lhs].width > mw[t] ? e[d->lhs].width : mw[t];
+                } else if (d->op == CC_SSA_CONST && d->imm >= 0 && d->imm < 0x8000) {
+                    int k = 1;
+
+                    while (k < 16 && (d->imm >> k) != 0) {
+                        k++;
+                    }
+                    mc[t] = k > mc[t] ? k : mc[t];
+                } else {
+                    ok[t] = 0;
+                }
+            }
+            for (v = 0; v < f->value_count; ++v) {
+                /* a non-negative constant sign-extended from w bits needs w - 1 for its value */
+                int need = ms[v] == 1 ? mc[v] + 1 : mc[v];
+                int width = mw[v] > need ? mw[v] : need;
+
+                if (ok[v] && width > 0 && (mw[v] > 0 || mc[v] > 0)) {
+                    e[v].width = width;
+                    e[v].sign = ms[v] < 0 ? 0 : ms[v];
+                    again = 1;
+                }
+            }
+        }
+        free(mw);
+        free(ms);
+        free(mc);
+        free(ok);
+    }
+    return e;
+}
+
+/**
+ * The value `shr (shl x, k), k` (@p in) is when x is already extended so from as few bits or fewer: x; else
+ * -1.  cc extends a narrow integer at each conversion, and a char converted twice is extended twice.
+ */
+static int redundant_ext(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const ext_info_t *e) {
+    int u;
+    int x;
+    int w;
+
+    if (e != NULL && in->op == CC_SSA_AND && in->lhs >= 0 && in->lhs < f->value_count && in->rhs >= 0 &&
+        in->rhs < f->value_count) {
+        /* x & (2^k - 1) of an x already zero-extended from k bits or fewer, a word of 32 bits: x */
+        int k = e[in->rhs].mask_k > 0 ? e[in->rhs].mask_k : e[in->lhs].mask_k;
+
+        x = e[in->rhs].mask_k > 0 ? in->lhs : in->rhs;
+        if (k > 0 && e[x].width > 0 && !e[x].sign && e[x].width <= k && cc_ssa_value_size(f, x) == 4 &&
+            cc_ssa_value_size(f, in->dst) == 4) {
+            return x;
+        }
+        return -1;
+    }
+    if (e == NULL || in->op != CC_SSA_SHR || in->rhs >= 0 || in->lhs < 0 || in->lhs >= f->value_count) {
+        return -1;
+    }
+    u = in->lhs;
+    x = e[u].shl_src;
+    /* words of 32 bits: a narrow load on x86-64 extends to 32, not 64 */
+    if (x < 0 || e[u].shl_k != (int)in->imm || cc_ssa_value_size(f, u) != 4) {
+        return -1;
+    }
+    if (e[u].shl_src_var && e[u].shl_at != (long)(in - f->instrs) - 1) {
+        /* a variable may have changed between the shl and here */
+        return -1;
+    }
+    w = (int)(8 * cc_ssa_value_size(f, u)) - (int)in->imm;
+    /*
+     * x's register holds it extended (its width): the same bits the shifts would leave.  Of another size the
+     * result is a move too on i386, where a narrow value's register holds the whole extended word.
+     */
+    if (e[x].width <= 0 || e[x].width > w || e[x].sign != !in->is_unsigned ||
+        (cc_ssa_value_size(f, x) != cc_ssa_value_size(f, in->dst) &&
+         !(cc_options_current()->target == CC_TARGET_I386 && cc_ssa_value_size(f, in->dst) == 4))) {
+        return -1;
+    }
+    return x;
+}
+
+/** Whether @p in defines value @p v: its result, or an asm's output. */
+static int instr_defines(const cc_ssa_instr_t *in, int v) {
+    size_t k;
+
+    if (in->dst == v) {
+        return 1;
+    }
+    for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+        int o = in->asm_out_values[k];
+
+        if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+            o = CC_SSA_ASM_MEM_INDIRECT_DECODE(o);
+        }
+        if (o == v) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * The instruction of @p f's block before @p at (exclusive) that last defines @p v, scanning back to the
+ * block's label; -1 if none there.
+ */
+static long last_def_in_block(const cc_ssa_function_t *f, size_t at, int v) {
+    size_t k = at;
+
+    while (k > 0) {
+        const cc_ssa_instr_t *in = &f->instrs[--k];
+
+        if (instr_defines(in, v)) {
+            return (long)k;
+        }
+        if (in->op == CC_SSA_LABEL || in->op == CC_SSA_BR || in->op == CC_SSA_BR_COND || in->op == CC_SSA_RET ||
+            in->op == CC_SSA_TRAP) {
+            return -1;
+        }
+    }
+    return -1;
+}
+
+static void mark_uses(const cc_ssa_instr_t *in, int *uses);
+
+/** The most instructions a block that only tests a variable has before its branch (block_test_of()). */
+#define TEST_BLOCK_MAX 6
+
+/**
+ * Whether the block at label index @p li of @p f only tests a variable defined before it: constants, moves
+ * and compares of it against 0 (`!= 0`, `== 0`), each read only there (@p uses), then a branch on the result.
+ * The variable goes to *@p v, the branch to *@p test, and *@p neg is 1 when a `== 0` turns its sense.
+ */
+static int block_test_of(const cc_ssa_function_t *f, long li, const const_state_t *g, const int *uses, int *v,
+                         const cc_ssa_instr_t **test, int *neg) {
+    int inside[TEST_BLOCK_MAX];
+    int n = 0;
+    long k;
+    long b;
+    int t;
+    int j;
+
+    for (k = li + 1; (size_t)k < f->instr_count && f->instrs[k].op != CC_SSA_BR_COND; ++k) {
+        const cc_ssa_instr_t *in = &f->instrs[k];
+
+        if (n == TEST_BLOCK_MAX || in->dst < 0 || in->dst >= f->value_count ||
+            (in->op != CC_SSA_CONST && in->op != CC_SSA_MOV && in->op != CC_SSA_CMP)) {
+            return 0;
+        }
+        inside[n++] = in->dst;
+    }
+    if ((size_t)k >= f->instr_count) {
+        return 0;
+    }
+    b = k;
+    /* what the block defines is read in it only: a jump past it leaves nothing undefined */
+    for (j = 0; j < n; ++j) {
+        int in_block = 0;
+        long q;
+
+        for (q = li + 1; q <= b; ++q) {
+            const cc_ssa_instr_t *in = &f->instrs[q];
+
+            in_block += (in->lhs == inside[j]) + (in->rhs == inside[j]);
+        }
+        if (uses[inside[j]] != in_block) {
+            return 0;
+        }
+    }
+    /* back from the branch's operand through the block's moves and compares with 0 */
+    t = f->instrs[b].lhs;
+    *neg = 0;
+    for (k = b - 1; k > li; --k) {
+        const cc_ssa_instr_t *in = &f->instrs[k];
+
+        if (in->dst != t) {
+            continue;
+        }
+        if (in->op == CC_SSA_MOV) {
+            t = in->lhs;
+        } else if (in->op == CC_SSA_CMP && (in->cmp_kind == CC_CMP_NE || in->cmp_kind == CC_CMP_EQ) &&
+                   in->rhs >= 0 && in->rhs < f->value_count && g[in->rhs].known &&
+                   g[in->rhs].type == CC_VAL_I64 && g[in->rhs].i == 0) {
+            *neg ^= in->cmp_kind == CC_CMP_EQ;
+            t = in->lhs;
+        } else {
+            return 0;
+        }
+    }
+    for (j = 0; j < n; ++j) {
+        if (inside[j] == t) {
+            return 0;
+        }
+    }
+    if (t < 0 || t >= f->value_count || cc_ssa_value_class(f, t) != CC_VAL_I64) {
+        return 0;
+    }
+    *v = t;
+    *test = &f->instrs[b];
+    return 1;
+}
+
+/**
+ * Jump threading.  A block that only tests a variable (block_test_of()) is where cc's && and || meet: each way
+ * in sets the variable, to 0 or 1 or to a compare.  A way in that sets it to a constant just before goes
+ * where the test sends that constant; an unconditional jump in after `v = s` branches on s itself.  The test's
+ * label may be left with no way in (unreachable_function()) and the moves with no reader (dce_function()).
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int thread_jumps(cc_ssa_function_t *f) {
+    long *at;
+    const_state_t *g;
+    int *uses;
+    size_t i;
+    int changed = 0;
+
+    if (f->label_count <= 0 || f->value_count <= 0) {
+        return 0;
+    }
+    at = (long *)malloc((size_t)f->label_count * sizeof(*at));
+    uses = (int *)calloc((size_t)f->value_count, sizeof(*uses));
+    g = single_def_consts(f);
+    if (at == NULL || g == NULL || uses == NULL) {
+        free(at);
+        free(uses);
+        free(g);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        mark_uses(&f->instrs[i], uses);
+    }
+    for (i = 0; i < (size_t)f->label_count; ++i) {
+        at[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].op == CC_SSA_LABEL && f->instrs[i].label >= 0 && f->instrs[i].label < f->label_count) {
+            at[f->instrs[i].label] = (long)i;
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        int edge;
+
+        if (in->op != CC_SSA_BR && in->op != CC_SSA_BR_COND) {
+            continue;
+        }
+        for (edge = 0; edge < (in->op == CC_SSA_BR ? 1 : 2); ++edge) {
+            int *target = in->op == CC_SSA_BR ? &in->label : (edge == 0 ? &in->true_label : &in->false_label);
+            const cc_ssa_instr_t *test;
+            const cc_ssa_instr_t *d;
+            long li;
+            long di;
+            int v;
+            int neg;
+            long long c;
+            int known = 0;
+
+            if (*target >= 0 && *target < f->label_count && (li = at[*target]) >= 0 &&
+                (size_t)li + 1 < f->instr_count && f->instrs[li + 1].op == CC_SSA_BR &&
+                f->instrs[li + 1].label != *target && (size_t)li + 1 != i) {
+                /* a block that only jumps on: go there */
+                *target = f->instrs[li + 1].label;
+                changed = 1;
+                continue;
+            }
+            if (*target < 0 || *target >= f->label_count || (li = at[*target]) < 0 ||
+                (size_t)li == i || !block_test_of(f, li, g, uses, &v, &test, &neg) ||
+                (di = last_def_in_block(f, i, v)) < 0) {
+                continue;
+            }
+            d = &f->instrs[di];
+            if (d->op == CC_SSA_CONST && d->dst == v) {
+                c = d->imm;
+                known = 1;
+            } else if (d->op == CC_SSA_MOV && d->dst == v && d->lhs >= 0 && d->lhs < f->value_count &&
+                       g[d->lhs].known && g[d->lhs].type == CC_VAL_I64) {
+                c = g[d->lhs].i;
+                known = 1;
+            }
+            if (known) {
+                /* v is known on this way in: it goes where the test sends it */
+                *target = (c != 0) != neg ? test->true_label : test->false_label;
+                changed = 1;
+            } else if (in->op == CC_SSA_BR && d->op == CC_SSA_MOV && d->dst == v && d->lhs >= 0 &&
+                       d->lhs < f->value_count && d->lhs != v && last_def_in_block(f, i, d->lhs) < di &&
+                       cc_ssa_value_class(f, d->lhs) == CC_VAL_I64 &&
+                       cc_ssa_value_size(f, d->lhs) == cc_ssa_value_size(f, v)) {
+                /* v = s, and s unchanged since: the test is of s, made here */
+                in->op = CC_SSA_BR_COND;
+                in->lhs = d->lhs;
+                in->true_label = neg ? test->false_label : test->true_label;
+                in->false_label = neg ? test->true_label : test->false_label;
+                in->label = -1;
+                changed = 1;
+                break;
+            }
+        }
+    }
+    free(at);
+    free(uses);
+    free(g);
+    return changed;
+}
+
 static int fold_function(cc_ssa_function_t *f, int fold_branches) {
     const_state_t *st;
     const_state_t *g;
     join_state_t join;
     unsigned char *single_def = NULL;
+    unsigned char *is_bool = NULL; /* per value: only ever 0 or 1 (fold_branches only) */
+    int *pair_half = NULL;         /* per value: the words of its one PAIR, two each, or -1 (fold_branches only) */
+    ext_info_t *ext = NULL;        /* per value: what extends it (fold_branches only) */
     int live = 1; /* the code being walked can run, as far as the joins tell (join_enter()) */
     size_t i;
+    int x;
     int changed = 0;
 
     if (f->value_count <= 0) {
@@ -481,6 +962,94 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         for (i = 0; i < (size_t)f->value_count; ++i) {
             single_def[i] = defs[i] == 1;
         }
+        /* the values only ever 0 or 1: each definition a compare or the constant 0 or 1 */
+        is_bool = (unsigned char *)malloc((size_t)f->value_count);
+        if (is_bool == NULL) {
+            free(defs);
+            free(single_def);
+            join_free(&join);
+            free(st);
+            free(g);
+            return -1;
+        }
+        for (i = 0; i < (size_t)f->value_count; ++i) {
+            is_bool[i] = defs[i] > 0;
+        }
+        /* per value made once by a PAIR of words each made once: its halves, else -1 */
+        pair_half = (int *)malloc((size_t)f->value_count * 2 * sizeof(*pair_half));
+        if (pair_half == NULL) {
+            free(defs);
+            free(single_def);
+            free(is_bool);
+            join_free(&join);
+            free(st);
+            free(g);
+            return -1;
+        }
+        for (i = 0; i < (size_t)f->value_count * 2; ++i) {
+            pair_half[i] = -1;
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *d = &f->instrs[i];
+
+            if (d->op == CC_SSA_PAIR && d->dst >= 0 && d->dst < f->value_count && defs[d->dst] == 1 &&
+                d->lhs >= 0 && d->lhs < f->value_count && defs[d->lhs] == 1 && d->rhs >= 0 &&
+                d->rhs < f->value_count && defs[d->rhs] == 1) {
+                pair_half[2 * d->dst] = d->lhs;
+                pair_half[2 * d->dst + 1] = d->rhs;
+            }
+        }
+        ext = ext_info_build(f, defs);
+        if (ext == NULL) {
+            free(defs);
+            free(single_def);
+            free(is_bool);
+            free(pair_half);
+            join_free(&join);
+            free(st);
+            free(g);
+            return -1;
+        }
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *d = &f->instrs[i];
+
+            if (d->op == CC_SSA_ASM) {
+                size_t k;
+
+                for (k = 0; k < d->asm_out_count; ++k) {
+                    int ov = d->asm_out_values[k];
+
+                    if (CC_SSA_ASM_MEM_INDIRECT_P(ov)) {
+                        ov = CC_SSA_ASM_MEM_INDIRECT_DECODE(ov);
+                    }
+                    if (ov >= 0 && ov < f->value_count) {
+                        is_bool[ov] = 0;
+                    }
+                }
+            }
+            if (d->dst >= 0 && d->dst < f->value_count && d->op != CC_SSA_CMP && d->op != CC_SSA_MOV &&
+                !(d->op == CC_SSA_CONST && (d->imm == 0 || d->imm == 1) &&
+                  cc_ssa_value_class(f, d->dst) == CC_VAL_I64)) {
+                is_bool[d->dst] = 0;
+            }
+        }
+        /* a move makes a truth value of a truth value only: && and || set their result so */
+        {
+            int again = 1;
+
+            while (again) {
+                again = 0;
+                for (i = 0; i < f->instr_count; ++i) {
+                    const cc_ssa_instr_t *d = &f->instrs[i];
+
+                    if (d->op == CC_SSA_MOV && d->dst >= 0 && d->dst < f->value_count && is_bool[d->dst] &&
+                        (d->lhs < 0 || d->lhs >= f->value_count || !is_bool[d->lhs])) {
+                        is_bool[d->dst] = 0;
+                        again = 1;
+                    }
+                }
+            }
+        }
         free(defs);
     }
 
@@ -536,6 +1105,13 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                     in->rhs = -1;
                     changed = 1;
                 }
+            } else if (dst >= 0 && pair_half != NULL && in->lhs >= 0 && in->lhs < f->value_count &&
+                       pair_half[2 * in->lhs] >= 0 && cc_ssa_value_size(f, dst) <= 4 &&
+                       cc_ssa_value_size(f, in->lhs) == 8) {
+                /* a word taken of a pair is its low word: the high one's arithmetic may go */
+                in->lhs = pair_half[2 * in->lhs];
+                st[dst].known = 0;
+                changed = 1;
             } else if (dst >= 0) {
                 st[dst].known = 0;
             }
@@ -551,11 +1127,57 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         case CC_SSA_FRAMEADDR:
         case CC_SSA_REGREAD:
         case CC_SSA_LOAD:
-        case CC_SSA_LO32:
-        case CC_SSA_HI32:
-        case CC_SSA_PAIR:
         case CC_SSA_UMULW:
             if (dst >= 0) {
+                st[dst].known = 0;
+            }
+            break;
+
+        case CC_SSA_LO32:
+        case CC_SSA_HI32:
+            if (dst >= 0 && in->lhs >= 0 && in->lhs < f->value_count && st[in->lhs].known &&
+                st[in->lhs].type == CC_VAL_I64) {
+                /* a half of a known 64-bit value */
+                unsigned long long u = (unsigned long long)st[in->lhs].i;
+                long long half = (long long)(in->op == CC_SSA_LO32 ? (u & 0xffffffffULL) : (u >> 32));
+
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->imm = half;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_I64;
+                st[dst].i = half;
+                changed = 1;
+            } else if (dst >= 0 && pair_half != NULL && in->lhs >= 0 && in->lhs < f->value_count &&
+                       pair_half[2 * in->lhs] >= 0) {
+                /* a half of a pair is the word it was made of */
+                in->lhs = pair_half[2 * in->lhs + (in->op == CC_SSA_HI32 ? 1 : 0)];
+                in->op = CC_SSA_MOV;
+                in->rhs = -1;
+                st[dst].known = 0;
+                changed = 1;
+            } else if (dst >= 0) {
+                st[dst].known = 0;
+            }
+            break;
+
+        case CC_SSA_PAIR:
+            if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 && st[in->lhs].known && st[in->rhs].known &&
+                st[in->lhs].type == CC_VAL_I64 && st[in->rhs].type == CC_VAL_I64) {
+                /* two known words are a known 64-bit value */
+                long long v = (long long)(((unsigned long long)st[in->rhs].i << 32) |
+                                          ((unsigned long long)st[in->lhs].i & 0xffffffffULL));
+
+                in->op = CC_SSA_CONST;
+                in->lhs = -1;
+                in->rhs = -1;
+                in->imm = v;
+                st[dst].known = 1;
+                st[dst].type = CC_VAL_I64;
+                st[dst].i = v;
+                changed = 1;
+            } else if (dst >= 0) {
                 st[dst].known = 0;
             }
             break;
@@ -688,6 +1310,22 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 st[dst].type = CC_VAL_I64;
                 st[dst].i = 0;
                 changed = 1;
+            } else if (dst >= 0 && vt == CC_VAL_I64 && (x = redundant_ext(f, in, ext)) >= 0) {
+                /* an extension of what is already extended so */
+                in->op = CC_SSA_MOV;
+                in->lhs = x;
+                in->rhs = -1;
+                in->imm = 0;
+                st[dst].known = 0;
+                changed = 1;
+            } else if (dst >= 0 && vt == CC_VAL_I64 && (x = identity_operand(f, in, st, is_bool)) >= 0) {
+                /* x & ~0, x | 0, x + 0, x * 1 and the like are x: cc masks each unsigned int so */
+                in->op = CC_SSA_MOV;
+                in->lhs = x;
+                in->rhs = -1;
+                in->imm = 0;
+                st[dst].known = 0;
+                changed = 1;
             } else if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 &&
                        st[in->lhs].known && st[in->rhs].known &&
                        st[in->lhs].type == CC_VAL_F64 && st[in->rhs].type == CC_VAL_F64) {
@@ -762,6 +1400,14 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 st[dst].type = CC_VAL_I64;
                 st[dst].i = out;
                 changed = 1;
+            } else if (dst >= 0 && (x = identity_operand(f, in, st, is_bool)) >= 0) {
+                /* b != 0 of a truth value b is b */
+                in->op = CC_SSA_MOV;
+                in->lhs = x;
+                in->rhs = -1;
+                in->imm = 0;
+                st[dst].known = 0;
+                changed = 1;
             } else if (dst >= 0) {
                 st[dst].known = 0;
             }
@@ -818,6 +1464,9 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
 
     join_free(&join);
     free(single_def);
+    free(is_bool);
+    free(pair_half);
+    free(ext);
     free(st);
     free(g);
     return changed;
@@ -1558,6 +2207,13 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
                 rc0 = 1;
             }
             rc1 = rc0 < 0 ? -1 : fold_function(f, 1);
+            if (rc1 >= 0) {
+                /* a copy read as its source, which may be known */
+                int rcp = cc_propagate_copies(f);
+                int rct = rcp < 0 ? -1 : thread_jumps(f);
+
+                rc1 = rct < 0 ? -1 : (rc1 > 0 || rcp > 0 || rct > 0);
+            }
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
             if (rc0 > 0 && rc1 == 0) {
                 rc1 = 1;
@@ -1797,6 +2453,35 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     /* gcc inlines static inline functions from -O1 and folds what they make constant */
     if (!oom && opt_level > 0) {
         oom = inline_module(m, opt_level) != 0 || drop_effectless_calls(m, opt_level) != 0;
+    }
+    /* last, once nothing reasons about the slots: a scalar local is a value, not memory */
+    for (i = 0; i < m->func_count && !oom && opt_level > 0; ++i) {
+        int rc = cc_promote_slots(&m->funcs[i]);
+
+        if (rc > 0) {
+            /* what the new values make known or plain copies */
+            rc = fold_function(&m->funcs[i], 1);
+            rc = rc < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
+            rc = rc < 0 ? -1 : thread_jumps(&m->funcs[i]);
+            rc = rc < 0 ? -1 : unreachable_function(&m->funcs[i]);
+            rc = rc < 0 ? -1 : 1;
+        }
+        oom = rc < 0 || (rc > 0 && dce_function(&m->funcs[i]) < 0);
+        /* definitions nothing reads, a variable's overwritten initializer among them; and what they read */
+        if (!oom) {
+            int round;
+
+            for (round = 0; round < 2 && !oom; ++round) {
+                int rd = cc_dead_defs(&m->funcs[i]);
+
+                oom = rd < 0 || (rd > 0 && dce_function(&m->funcs[i]) < 0);
+                if (rd == 0) {
+                    break;
+                }
+            }
+        }
+        /* last of all: a variable's update made in place */
+        oom = oom || cc_coalesce_moves(&m->funcs[i]) < 0;
     }
     if (oom) {
         if (diag != NULL && diag->message[0] == '\0') {

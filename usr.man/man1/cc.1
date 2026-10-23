@@ -172,9 +172,19 @@ function of the same file is replaced by the function's body, and what
 that makes constant is folded, so a call a constant helper guards is
 dropped with its dead branch, as with
 .Xr gcc 1 .
+A local variable whose address is not taken, and that is read and
+written whole, is kept as a value rather than in memory; a copy is read
+as what it copies; and arithmetic that leaves its operand as it was
+(a mask of all ones, adding zero, a truth value compared unequal to
+zero) is dropped.
 At
 .Fl O0
 nothing is inlined.
+.Pp
+At every level the i386 code generator keeps values in registers from
+one instruction to the next within a block, writes back only what is
+read again, uses a constant operand as an immediate, and branches on a
+compare's flags when the branch is all that reads it.
 .It Fl m32 , Fl m64
 Target i386 or x86_64 ABI.
 The default is the ABI
@@ -196,8 +206,21 @@ as the program's interpreter.
 A 64-bit program is linked as a position-independent executable; a
 32-bit one is not, as the i386 code generator writes position-dependent
 code.
+.It Fl mpreferred-stack-boundary Ns = Ns Ar n
+i386: keep the stack aligned to 2^n bytes at a call, n from 2 to 12,
+rather than the psABI's 16; with 2 or 3 a function's frame is not padded
+for it, nor a call's arguments.
 .It Fl g
 Emit debug information.
+.It Fl fasynchronous-unwind-tables , Fl funwind-tables
+.It Fl fno-asynchronous-unwind-tables , Fl fno-unwind-tables
+Whether the frame descriptions
+.Fl g
+emits go to
+.Li .eh_frame ,
+loaded with the code, as by default, or only to
+.Li .debug_frame ,
+for a debugger.
 .It Fl Wall , Fl Werror
 Warning controls.
 .It Fl pedantic , Fl pedantic-errors

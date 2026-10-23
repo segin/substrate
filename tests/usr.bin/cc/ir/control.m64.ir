@@ -125,11 +125,12 @@ module "ir/control.c" {
     %v18 = const i32 -1;
     %v19 = const i64 4294967296;
     %v20 = const i32 1;
-    %v21 = const i64 -1;
-    %v22 = const i64 -4294967296;
-    %v23 = const i32 -1;
-    %v24 = const i64 -4294967296;
-    %v25 = const i32 -1;
-    ret i32 %v25;
+    %v21 = const i32 0;
+    %v22 = const i64 -1;
+    %v23 = const i64 -4294967296;
+    %v24 = const i32 -1;
+    %v25 = const i64 -4294967296;
+    %v26 = const i32 -1;
+    ret i32 %v26;
   }
 }

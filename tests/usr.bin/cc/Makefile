@@ -31,7 +31,7 @@ test:
 	# Compile and run test_ast2ir; a failed build must fail the suite,
 	# not leave an earlier binary to run
 	rm -f test_ast2ir_bin
-	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/common/asm_constraint.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/common/options.c $(TOP)/usr.bin/cc/frontend/consteval.c $(TOP)/usr.bin/cc/frontend/ctype.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/frontend/nested.c $(TOP)/usr.bin/cc/frontend/decimal.c $(TOP)/usr.bin/cc/frontend/binary128.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/parse_sema.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/sema_call.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/lower_call.c $(TOP)/usr.bin/cc/middle/irbuild.c $(TOP)/usr.bin/cc/middle/abi_x86_64.c $(TOP)/usr.bin/cc/middle/abi_i386.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/legalize_i386.c $(TOP)/usr.bin/cc/middle/ssa_dump.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/passes/inline.c $(TOP)/usr.bin/cc/middle/passes/mem.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/x86/common.c $(TOP)/usr.bin/cc/backend/x86/x86_64.c $(TOP)/usr.bin/cc/backend/x86/i386.c -o test_ast2ir_bin
+	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/common/asm_constraint.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/common/options.c $(TOP)/usr.bin/cc/frontend/consteval.c $(TOP)/usr.bin/cc/frontend/ctype.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/frontend/nested.c $(TOP)/usr.bin/cc/frontend/decimal.c $(TOP)/usr.bin/cc/frontend/binary128.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/parse_sema.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/sema_call.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/lower_call.c $(TOP)/usr.bin/cc/middle/irbuild.c $(TOP)/usr.bin/cc/middle/abi_x86_64.c $(TOP)/usr.bin/cc/middle/abi_i386.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/legalize_i386.c $(TOP)/usr.bin/cc/middle/ssa_dump.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/passes/inline.c $(TOP)/usr.bin/cc/middle/passes/mem.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/x86/common.c $(TOP)/usr.bin/cc/backend/x86/x86_64.c $(TOP)/usr.bin/cc/backend/x86/i386.c $(TOP)/usr.bin/cc/backend/x86/regalloc_i386.c -o test_ast2ir_bin
 	./test_ast2ir_bin
 	rm -f test_ctype_bin
 	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ctype.c $(TOP)/usr.bin/cc/frontend/ctype.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/options.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/middle/abi_x86_64.c $(TOP)/usr.bin/cc/middle/abi_i386.c $(TOP)/usr.bin/cc/middle/irbuild.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/legalize_i386.c -o test_ctype_bin
@@ -705,7 +705,7 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_empty_stmt2.c -o $(CC_TMP)/cc_native_c99_empty_stmt2_32
 	$(CC_TMP)/cc_native_c99_empty_stmt2_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_switch.c -o $(CC_TMP)/cc_native_switch_32.s
-	grep -q "sete" $(CC_TMP)/cc_native_switch_32.s
+	grep -Eq "sete|je " $(CC_TMP)/cc_native_switch_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_for_decl.c -o $(CC_TMP)/cc_native_c99_for_decl_32.s
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_for_decl.c -o $(CC_TMP)/cc_native_c99_for_decl_32
 	$(CC_TMP)/cc_native_c99_for_decl_32
@@ -769,7 +769,9 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_expr_conversions.c -o $(CC_TMP)/cc_native_c99_expr_conversions_32
 	$(CC_TMP)/cc_native_c99_expr_conversions_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_sizeof_array.c -o $(CC_TMP)/cc_native_c99_sizeof_array_32.s
-	grep -A8 "main:" $(CC_TMP)/cc_native_c99_sizeof_array_32.s | grep -Eq '[$$](28|20)'
+	# the sizes are constants: as operands, or folded with the compares before the first call
+	grep -A8 "main:" $(CC_TMP)/cc_native_c99_sizeof_array_32.s | grep -Eq '[$$](28|20)' || \
+	  ! sed -n '/^main:/,/call param_size/p' $(CC_TMP)/cc_native_c99_sizeof_array_32.s | grep -q cmpl
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_sizeof_unsigned.c -o $(CC_TMP)/cc_native_c99_sizeof_unsigned_32.s
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_sizeof_unsigned.c -o $(CC_TMP)/cc_native_c99_sizeof_unsigned_32
 	$(CC_TMP)/cc_native_c99_sizeof_unsigned_32
@@ -828,7 +830,8 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_designated_init.c -o $(CC_TMP)/cc_native_c99_designated_init_32
 	$(CC_TMP)/cc_native_c99_designated_init_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_compound_literal.c -o $(CC_TMP)/cc_native_c99_compound_literal_32.s
-	grep -Eq "movl %e[a-z]{2}, \\(%e[a-z]{2}\\)" $(CC_TMP)/cc_native_c99_compound_literal_32.s
+	# a store into the object: through a register, or off the frame pointer
+	grep -Eq "movl (%e[a-z]{2}|\\$$-?[0-9]+), (\\(%e[a-z]{2}\\)|-?[0-9]+\\(%ebp\\))" $(CC_TMP)/cc_native_c99_compound_literal_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32.s
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32
 	$(CC_TMP)/cc_native_c99_flexible_array_32
@@ -839,7 +842,7 @@ test:
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_member_array.c -o $(CC_TMP)/cc_native_c99_struct_member_array_32.s
 	grep -Eq "movl %e[a-z]{2}, \\(%e[a-z]{2}\\)" $(CC_TMP)/cc_native_c99_struct_member_array_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_array_init.c -o $(CC_TMP)/cc_native_c99_struct_array_init_32.s
-	grep -Eq "movl %e[a-z]{2}, \\(%e[a-z]{2}\\)" $(CC_TMP)/cc_native_c99_struct_array_init_32.s
+	grep -Eq "movl (%e[a-z]{2}|\\$$-?[0-9]+), (\\(%e[a-z]{2}\\)|-?[0-9]+\\(%ebp\\))" $(CC_TMP)/cc_native_c99_struct_array_init_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_copy_init.c -o $(CC_TMP)/cc_native_c99_struct_copy_init_32.s
 	grep -q "call memcpy" $(CC_TMP)/cc_native_c99_struct_copy_init_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_pass_value.c -o $(CC_TMP)/cc_native_c99_struct_pass_value_32.s
@@ -933,10 +936,11 @@ test:
 	sh run_pic_i386.sh
 	sh run_object_symbols.sh
 	sh run_trivial_auto_var_init.sh
+	sh run_i386_regcache.sh
+	sh run_static_local_tables.sh
+	sh run_static_local_orphans.sh
 	sh run_asm_imm_symbol.sh
 	sh run_compiler_stamp.sh
-	sh run_static_local_orphans.sh
-	sh run_static_local_tables.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh

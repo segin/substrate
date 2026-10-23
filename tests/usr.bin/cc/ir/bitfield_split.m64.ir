@@ -48,7 +48,6 @@ module "ir/bitfield_split.c" {
     %v36 = ashr i64 %v35, 40;
     %v37 = shl i64 %v36, 32;
     %v38 = ashr i32 %v37, 32;
-    %v39 = const i64 0;
-    ret i64 %v39;
+    ret void;
   }
 }
