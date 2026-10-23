@@ -2656,6 +2656,12 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
             }
             acc->seen_struct_id = sid;
             if (p->tok.kind != TOK_LBRACE) {
+                /*
+                 * `struct s __attribute__((packed)) v;` names the structure without defining it: as gcc does,
+                 * its `packed` and `aligned` are dropped, not laid out into a structure defined elsewhere
+                 */
+                struct_attrs.flags &= ~(CC_ATTR_PACKED | CC_ATTR_ALIGNED);
+                struct_attrs.align = 0;
                 if (record_spec_attrs(p, sid, &struct_attrs, out_attrs) != 0) {
                     decl_attrs_clear(&struct_attrs);
                     return -1;
