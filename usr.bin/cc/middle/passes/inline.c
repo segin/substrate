@@ -155,8 +155,9 @@ static int converts_to(const cc_ssa_function_t *fa, int a, const cc_ssa_function
 static int call_site_inlinable(const cc_ssa_function_t *f, const cc_ssa_instr_t *call, const cc_ssa_function_t *g) {
     size_t i;
 
+    /* a structure result the call writes to memory (rhs, imm bytes) as well: the copied body would not */
     if (call->op != CC_SSA_CALL || call->call_chain != 0 || call->call_is_variadic || call->call_ret_x87 ||
-        call->agg_class != 0 || call->arg_count != g->param_count) {
+        call->agg_class != 0 || call->arg_count != g->param_count || (call->rhs >= 0 && call->imm > 0)) {
         return 0;
     }
     for (i = 0; i < g->instr_count; ++i) {
