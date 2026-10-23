@@ -1692,6 +1692,15 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
         const char *data_sec = g->attr_section != NULL && g->attr_section[0] != '\0' ? g->attr_section : ".data";
         const char *bss_sec = g->attr_section != NULL && g->attr_section[0] != '\0' ? g->attr_section : ".bss";
 
+        if (pointer_size == 4 && g->attr_section != NULL && g->attr_section[0] != '\0' && g->type_align > 0) {
+            /*
+             * i386, in a section of its own making: its type's alignment, as gcc has it.  The objects a
+             * program puts in one are walked as an array of them (Linux's .videocards, of 28-byte
+             * card_info: at 8, each was padded to 32, and probe_cards() called into the middle of the
+             * next).  x86-64 keeps the size's, gcc aligning an aggregate of 16 bytes or more to 16 there.
+             */
+            align = g->type_align;
+        }
         if ((g->attr_flags & CC_ATTR_PACKED) != 0) {
             align = 1;
         }
