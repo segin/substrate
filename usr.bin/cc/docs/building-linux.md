@@ -93,7 +93,12 @@ The result is `arch/x86/boot/bzImage`.
 ## 5. An /init to boot to
 
 A static i386 program with no C library, built by the same cc and ld,
-that says it ran and powers the machine off:
+that says it ran and asks to power the machine off.  Work beside the kernel
+tree, not in it (it has an `init/` directory of its own):
+
+```sh
+mkdir ../boot && cd ../boot
+```
 
 ```c
 /* init.c */
@@ -122,7 +127,7 @@ $T/cc -m32 -O0 -ffreestanding -fno-pic -nostdlib -static -Wl,-e,_start -o init i
 Pack it into an initramfs with the kernel's own `gen_init_cpio`:
 
 ```sh
-gcc -O2 -o gen_init_cpio usr/gen_init_cpio.c
+gcc -O2 -o gen_init_cpio ../linux-7.3/usr/gen_init_cpio.c
 cat > initramfs.list <<EOF
 dir /dev 755 0 0
 nod /dev/console 600 0 0 c 5 1
@@ -135,12 +140,13 @@ EOF
 
 ```sh
 qemu-system-i386 -m 128 -nographic -no-reboot \
-    -kernel arch/x86/boot/bzImage -initrd initramfs.cpio \
+    -kernel ../linux-7.3/arch/x86/boot/bzImage -initrd initramfs.cpio \
     -append "console=ttyS0 earlyprintk=serial,ttyS0,115200 panic=-1"
 ```
 
 The kernel's log ends with `Run /init as init process`, then
-`INIT: userspace reached`, and qemu exits when `/init` powers off.
+`INIT: userspace reached`.  This configuration has no ACPI, so the power
+off request ends in `System halted instead`; leave qemu with Ctrl-A X.
 
 ## Limits to know
 
