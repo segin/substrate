@@ -48,9 +48,7 @@ The full option list is the man page, `usr.man/man1/cc.1`.
   diagnostic (`negative/CASES.txt`).
 
 gcc (or clang, for the clang-compatibility tests) is the judge of what
-is correct.  `docs/cc-audit.md` at the top of the tree lists what the
-audit found and how each item was met, with what each still does not
-do.
+is correct.
 
 ## Build and install
 
@@ -76,7 +74,6 @@ On the host, the in-tree toolchain is installed under `/opt/substrate`:
 | `ir/` | a textual form of SSA with a verifier, normalizer and differ (`ir-verifier`, `ir-normalize`, `ir-diff`); cc does not write it yet |
 | `include/` | the compiler's internal headers |
 | `resource/include/` | headers cc supplies to programs (`x86intrin.h`, ...) |
-| `docs/` | `refactor-plan.md`, `neutral-ir-plan.md` |
 
 `ARCHITECTURE.md` describes the design; `SPEC.md` the requirements.
 

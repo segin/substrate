@@ -165,11 +165,9 @@ static int compute_dominators(const ir_func_t *f, unsigned char *dom) {
 
 /*
  * The opcode table.  Each opcode has a form, which says how its operands
- * are written, and the class of type its result and operands have.  At
- * this stage the checks are by class -- integer, floating, aggregate --
- * not width: lowering still narrows integers with an shl/ashr pair of
- * mixed widths, which typed values (docs/neutral-ir-plan.md step 1)
- * replace with conversion opcodes.
+ * are written, and the class of type its result and operands have --
+ * integer, floating, aggregate.  Integer widths are checked apart from it
+ * (check_int_operand_width(), below).
  */
 
 /** A type's class. */

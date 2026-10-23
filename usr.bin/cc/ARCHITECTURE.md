@@ -66,8 +66,7 @@ usr.bin/cc/
 │                            # (cc -fdump-ir writes this form: middle/ssa_dump.c)
 ├── README.md                # Current capability/status overview
 ├── SPEC.md                  # Functional requirements
-├── Makefile                 # Native/target build-mode split and utility builds
-└── docs/                    # refactor-plan.md, neutral-ir-plan.md, language-tasklist.md
+└── Makefile                 # Native/target build-mode split and utility builds
 
 tests/usr.bin/cc/
 ├── conformance_c99/         # C99 conformance inputs
@@ -220,9 +219,9 @@ Integration role: The compiler is the coordinator for real-world toolchain tests
 
 ## 9. Future Considerations / Roadmap
 
-Structure: `docs/refactor-plan.md` is the order of work for the compiler as a whole -- one type representation, a typed AST from sema, one constant evaluator, a context in place of globals -- and `docs/neutral-ir-plan.md` for the IR and back ends: typed IR values, per-target ABI and legalization passes, thin emitters, with the `ir/` text form as the IR's dump format.
+Structure: the refactor of the compiler as a whole is done -- one type representation, a typed AST from sema, one constant evaluator, a typed target-neutral IR with the ABI and legalization per target, thin emitters, and a compiler that builds itself (`run_selfhost.sh`).  Left from it: per-compilation state is still file-scope variables -- the interned type table (`frontend/ctype.c`), the language, target and settings (`common/lang.c`, `common/target.c`, `common/options.c`), and diagnostics' file names and label serials (`frontend/preproc.c`, `frontend/parser.c`, `frontend/sema.c`, `backend/x86/common.c`) -- where one context passed through the phases would let a process compile more than once.  A third target is possible and not scheduled.
 
-Correctness: open requirements are tracked in `docs/cc-audit.md` at the top of the tree; the language-level goals left from the original bring-up (building the kernel and bash with this cc, as, ld) are in `docs/language-tasklist.md`.
+Correctness: gcc (or clang, for the clang-compatibility tests) is the judge; a program cc compiles differently is a bug, fixed with a test under `tests/usr.bin/cc/` that fails before the fix.
 
 ## 10. Project Identification
 
