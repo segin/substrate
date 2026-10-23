@@ -1430,15 +1430,8 @@ static void emit_toplevel_asm(FILE *fp, const cc_ssa_module_t *m) {
 }
 
 static void emit_compiler_stamp(FILE *fp) {
-    /*
-     * Keep the compiler stamp in a regular read-only section so assemblers
-     * that do not preserve arbitrary section payload routing still keep
-     * zero-initialized globals in .bss/.data semantics intact.
-     */
-    fprintf(fp, "\n\t.section .rodata\n");
-    fprintf(fp, ".L__substrate_cc_stamp:\n");
-    fprintf(fp, "\t.asciz \"Substrate C Compiler v0.1\"\n");
-    fprintf(fp, "\t.text\n");
+    /* in .comment, as gcc's: no part of what is loaded (it was in .rodata, 26 bytes in every program's image) */
+    fprintf(fp, "\n\t.ident \"Substrate C Compiler v0.1\"\n");
 }
 
 void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags) {
