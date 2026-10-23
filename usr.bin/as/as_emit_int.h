@@ -315,6 +315,7 @@ int fold_absolute_operands(emit_ctx_t *ctx);
 int expr_has_symbol(const as_expr_t *e);
 int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
                                 unsigned x86_code_bits, const as_expr_t *e, long long *out);
+int linux_alt_pad_labels(const char *arg, int *a, int *b, int *c, int *d);
 int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st, uint64_t sec_off,
                             unsigned x86_code_bits, const char *arg, long long *out);
 int eval_linux_alt_len_expr(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg, long long *out);

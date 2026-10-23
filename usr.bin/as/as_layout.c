@@ -1543,6 +1543,33 @@ static int numeric_local_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base
     return 0;
 }
 
+/*
+ * The numbered labels of Linux's alternative padding, `.skip -(((Af-Bf)-(Cb-Db)) > 0) * ((Af-Bf)-(Cb-Db))`:
+ * the replacement is from B to A, the original from D to C, C being where the .skip is.  The kernel has
+ * numbered them 740..744 and, since, 771..775; whichever they are, they are read from the expression.
+ *
+ * @return 0 with the four numbers, or -1 when @p arg is not of that form
+ */
+int linux_alt_pad_labels(const char *arg, int *a, int *b, int *c, int *d) {
+    char packed[128]; /* the expression without its spaces: the parser hands it on as `- ( ( ( 775f-774f ) ...` */
+    size_t n = 0;
+    const char *p;
+    char fa = 0, fb = 0, fc = 0, fd = 0;
+
+    for (p = arg; p != NULL && *p != '\0' && n + 1 < sizeof(packed); ++p) {
+        if (*p != ' ' && *p != '\t') {
+            packed[n++] = *p;
+        }
+    }
+    packed[n] = '\0';
+    p = strstr(packed, "(((");
+    if (p == NULL || sscanf(p, "(((%d%c-%d%c)-(%d%c-%d%c))", a, &fa, b, &fb, c, &fc, d, &fd) != 8 || fa != 'f' ||
+        fb != 'f' || fc != 'b' || fd != 'b') {
+        return -1;
+    }
+    return 0;
+}
+
 int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                    uint64_t sec_off, unsigned x86_code_bits, const char *arg, long long *out) {
     virtual_addr_value_t v744f;
@@ -1552,15 +1579,17 @@ int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, const as_
     long long repl_len;
     long long orig_len;
     long long delta;
+    int la, lb, lc, ld;
 
     if (ctx == NULL || st == NULL || arg == NULL || out == NULL ||
-        strstr(arg, "744f-743f") == NULL || strstr(arg, "741b-740b") == NULL) {
+        linux_alt_pad_labels(arg, &la, &lb, &lc, &ld) != 0) {
         return -1;
     }
+    (void)lc;
     {
-        const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->unit,744, 1);
-        const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->unit,743, 1);
-        const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->unit,740, 0);
+        const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->unit, la, 1);
+        const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->unit, lb, 1);
+        const as_stmt_t *s740 = resolve_local_ref_target_stmt(ctx, st, st->unit, ld, 0);
         size_t i744;
         size_t i743;
         size_t i740;
@@ -1583,9 +1612,9 @@ int eval_linux_alt_pad_expr(emit_ctx_t *ctx, const char *section_name, const as_
             return 0;
         }
     }
-    if (numeric_local_virtual_location(ctx, st, 744, 1, &v744f) != 0 ||
-        numeric_local_virtual_location(ctx, st, 743, 1, &v743f) != 0 ||
-        numeric_local_virtual_location(ctx, st, 740, 0, &v740b) != 0 ||
+    if (numeric_local_virtual_location(ctx, st, la, 1, &v744f) != 0 ||
+        numeric_local_virtual_location(ctx, st, lb, 1, &v743f) != 0 ||
+        numeric_local_virtual_location(ctx, st, ld, 0, &v740b) != 0 ||
         !v744f.has_section || !v743f.has_section || !v740b.has_section ||
         as_strcmp(v744f.section, v743f.section) != 0 ||
         section_name == NULL || as_strcmp(section_name, v740b.section) != 0) {
@@ -2097,6 +2126,7 @@ static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_na
                                          unsigned x86_code_bits, uint64_t *size_out) {
     section_track_t track;
     uint64_t total = 0;
+    int pad_a, pad_b, pad_c, pad_d; /* linux_alt_pad_labels() */
     size_t i;
 
     if (ctx == NULL || section_name == NULL || size_out == NULL || start_idx > end_idx ||
@@ -2136,10 +2166,9 @@ static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_na
              as_strcmp(st->u.directive.name, ".space") == 0) &&
             st->u.directive.arg_count >= 1 &&
             st->u.directive.args[0] != NULL &&
-            strstr(st->u.directive.args[0], "744f-743f") != NULL &&
-            strstr(st->u.directive.args[0], "741b-740b") != NULL) {
-            const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->unit,744, 1);
-            const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->unit,743, 1);
+            linux_alt_pad_labels(st->u.directive.args[0], &pad_a, &pad_b, &pad_c, &pad_d) == 0) {
+            const as_stmt_t *s744 = resolve_local_ref_target_stmt(ctx, st, st->unit, pad_a, 1);
+            const as_stmt_t *s743 = resolve_local_ref_target_stmt(ctx, st, st->unit, pad_b, 1);
             size_t i744;
             size_t i743;
             uint64_t repl = 0;
