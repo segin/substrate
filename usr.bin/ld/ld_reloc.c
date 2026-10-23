@@ -43,6 +43,10 @@ static int reloc_addend_is_signed(uint16_t machine, uint32_t type) {
     switch (machine) {
     case EM_386:
         switch (type) {
+        case R_386_8:
+        case R_386_16:
+            /* a bitfield, as GNU ld has it: Linux's header.S stores
+             * `.byte setup_sects - 1`, an addend of 0xff that is -1 */
         case R_386_GOT32:
         case R_386_GOTOFF:
         case R_386_TLS_TPOFF:
