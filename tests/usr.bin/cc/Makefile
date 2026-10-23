@@ -938,6 +938,7 @@ test:
 	sh run_trivial_auto_var_init.sh
 	sh run_i386_regcache.sh
 	sh run_i386_frame_shapes.sh
+	sh run_alignof_std.sh
 	sh run_static_local_tables.sh
 	sh run_static_local_orphans.sh
 	sh run_asm_imm_symbol.sh

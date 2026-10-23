@@ -8419,12 +8419,16 @@ static cc_expr_t *parse_unary(parser_t *p) {
         return e;
     }
 
+    /*
+     * __alignof__ and __alignof are the implementation's names, and gcc takes them in every -std mode: the
+     * host's <stddef.h> aligns max_align_t's members by __alignof__(long long) under -std=c23 too
+     */
     if (p->tok.kind == TOK_IDENT &&
         (tok_is_ident(p, "_Alignof") || (parser_is_c23_or_newer() && tok_is_ident(p, "alignof")) ||
-         (parser_is_gnu_mode() && (tok_is_ident(p, "__alignof__") || tok_is_ident(p, "__alignof"))))) {
+         tok_is_ident(p, "__alignof__") || tok_is_ident(p, "__alignof"))) {
         long align;
         cc_expr_t *ae;
-        int is_gnu_alignof = parser_is_gnu_mode() && (tok_is_ident(p, "__alignof__") || tok_is_ident(p, "__alignof"));
+        int is_gnu_alignof = tok_is_ident(p, "__alignof__") || tok_is_ident(p, "__alignof");
         if (!parser_is_c11_or_newer() && !is_gnu_alignof) {
             set_diag(p->diag, p->tok.line, p->tok.col, "_Alignof/__alignof__ requires C11 or GNU mode");
             return NULL;
