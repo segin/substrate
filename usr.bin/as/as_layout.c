@@ -3818,7 +3818,16 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
     if (ctx != NULL && ctx->virtual_scanning &&
         (as_strcmp(d->name, ".skip") == 0 || as_strcmp(d->name, ".space") == 0)) {
         long long tmp = 0;
-        if (ctx->virtual_scanning > 1) {
+        int la, lb, lc, ld;
+
+        if (ctx->virtual_scanning > 1 &&
+            (d->arg_count < 1 || linux_alt_pad_labels(d->args[0], &la, &lb, &lc, &ld) != 0)) {
+            /*
+             * a scan inside a scan counts no .skip it would have to look elsewhere to size -- but the padding
+             * of an alternative is still sized (from its replacement and original, each smaller than this):
+             * left out, every label after it in a table built inside another scan was short by it, and
+             * Linux's .altinstructions pointed short of the entry code's instructions
+             */
             return 1;
         }
         if (d->arg_count >= 1 && d->args[0] != NULL &&
