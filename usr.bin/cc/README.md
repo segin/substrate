@@ -58,9 +58,12 @@ make -C usr.bin/cc                  # a cc that runs on substrate (i386)
 make -C usr.bin/cc ARCH=x86_64      # ... on 64-bit substrate (obj-x86_64/cc)
 ```
 
-On the host, the in-tree toolchain is installed under `/opt/substrate`:
-`bin/cc`, `bin/cpp`, `bin/as`, `bin/ld`, and cc's own headers in
-`lib/substratecc/include/`.
+On the host, `./build-native-toolchain.sh --install` (at the top of the
+tree) builds cc with as and ld and installs them under
+`/opt/substrate/native`: `bin/cc`, `bin/cpp`, `bin/as`, `bin/ld`, and cc's
+own headers in `lib/substratecc/include/`.
+
+`docs/building-linux.md` builds an upstream Linux kernel with them.
 
 ## Layout
 
@@ -74,6 +77,7 @@ On the host, the in-tree toolchain is installed under `/opt/substrate`:
 | `ir/` | a textual form of SSA with a verifier, normalizer and differ (`ir-verifier`, `ir-normalize`, `ir-diff`); cc does not write it yet |
 | `include/` | the compiler's internal headers |
 | `resource/include/` | headers cc supplies to programs (`x86intrin.h`, ...) |
+| `docs/` | `building-linux.md` |
 
 `ARCHITECTURE.md` describes the design; `SPEC.md` the requirements.
 

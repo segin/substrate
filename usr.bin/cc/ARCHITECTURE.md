@@ -66,7 +66,8 @@ usr.bin/cc/
 │                            # (cc -fdump-ir writes this form: middle/ssa_dump.c)
 ├── README.md                # Current capability/status overview
 ├── SPEC.md                  # Functional requirements
-└── Makefile                 # Native/target build-mode split and utility builds
+├── Makefile                 # Native/target build-mode split and utility builds
+└── docs/                    # building-linux.md
 
 tests/usr.bin/cc/
 ├── conformance_c99/         # C99 conformance inputs
