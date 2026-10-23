@@ -374,7 +374,12 @@ static int emit_i386_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_la
 
     if (imm) {
         k = (long)(int)(unsigned int)ist->remat_imm[in->rhs];
-        fprintf(fp, "\tcmpl $%ld, %s\n", k, ist->regs[rl]);
+        if (k == 0) {
+            /* against 0: testl, a byte shorter, and the flags the same for every condition (CF and OF clear) */
+            fprintf(fp, "\ttestl %s, %s\n", ist->regs[rl], ist->regs[rl]);
+        } else {
+            fprintf(fp, "\tcmpl $%ld, %s\n", k, ist->regs[rl]);
+        }
     } else {
         fprintf(fp, "\tcmpl %s, %s\n", ist->regs[rr], ist->regs[rl]);
     }
@@ -1959,9 +1964,8 @@ static void emit_i386_cmp_branch(FILE *fp, const cc_ssa_function_t *f, const slo
     const char *set = setcc_int_mnemonic(cmp->cmp_kind, cmp->is_unsigned); /* "setl": the condition after "set" */
     int rl = int_regs_load(fp, f, lay, ist, cmp->lhs, -1, -1);
 
-    if (ist->remat != NULL && cmp->rhs >= 0 && ist->remat[cmp->rhs] == 1 && (unsigned int)ist->remat_imm[cmp->rhs] == 0 &&
-        (cmp->cmp_kind == CC_CMP_EQ || cmp->cmp_kind == CC_CMP_NE)) {
-        /* equal to zero or not: testl, shorter, sets ZF the same */
+    if (ist->remat != NULL && cmp->rhs >= 0 && ist->remat[cmp->rhs] == 1 && (unsigned int)ist->remat_imm[cmp->rhs] == 0) {
+        /* against zero: testl, shorter, sets the flags as cmpl $0 does for every condition (CF and OF clear) */
         fprintf(fp, "\ttestl %s, %s\n", ist->regs[rl], ist->regs[rl]);
     } else if (ist->remat != NULL && cmp->rhs >= 0 && ist->remat[cmp->rhs] == 1) {
         fprintf(fp, "\tcmpl $%ld, %s\n", (long)(int)(unsigned int)ist->remat_imm[cmp->rhs], ist->regs[rl]);
@@ -2713,7 +2717,10 @@ static int i386_peephole_copy(FILE *in, FILE *out) {
 
         if (!i386_split_movl(line, src, dst, sizeof(src))) {
             fprintf(out, "%s\n", line);
-            have_prev = 0;
+            /* a line-table or frame-description directive is no instruction: the movl before is still the last */
+            if (strncmp(line, "\t.loc ", 6) != 0 && strncmp(line, "\t.cfi_", 6) != 0) {
+                have_prev = 0;
+            }
             continue;
         }
         if (strcmp(src, dst) == 0 && i386_is_reg32(src)) {
@@ -3177,6 +3184,28 @@ static FILE *i386_function_file(FILE *out) {
     FILE *tmp = tmpfile();
 
     return tmp != NULL ? tmp : out;
+}
+
+/**
+ * Whether value @p v is a 64-bit integer that lives in its 8-byte slot: one an 8-byte load or store of a
+ * stack object copies word by word off the frame pointer (i386_frame_copy64()), with no leal.
+ */
+static int i386_slot_i64(const cc_ssa_function_t *f, const slot_layout_t *lay, const int_reg_state_t *ist, int v) {
+    return v >= 0 && cc_ssa_value_class(f, v) == CC_VAL_I64 && cc_ssa_value_size(f, v) == 8 &&
+           lay->slot_size >= 8 && !is_stackalloc_value(lay, v) && (ist->remat == NULL || ist->remat[v] == 0) &&
+           (ist->home == NULL || ist->home[v] < 0);
+}
+
+/** Copy 8 bytes at %ebp offset @p from to %ebp offset @p to, a word at a time through a scratch register. */
+static void i386_frame_copy64(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
+                              int from, int to) {
+    int t = int_regs_scratch(fp, f, lay, ist, -1);
+    int w;
+
+    for (w = 0; w < 8; w += 4) {
+        fprintf(fp, "\tmovl %d(%%ebp), %s\n", from + w, ist->regs[t]);
+        fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist->regs[t], to + w);
+    }
 }
 
 int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emit_debug, cc_diag_t *diag) {
@@ -3688,6 +3717,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 }
                 if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     emit_i386_load_fp_indirect(fp, f, &lay, &ist, in, use_x87_fp);
+                } else if (in->imm == 8 && is_stackalloc_value(&lay, in->lhs) && i386_slot_i64(f, &lay, &ist, in->dst)) {
+                    /* a 64-bit integer from a stack object to its slot: word by word off the frame pointer */
+                    i386_frame_copy64(fp, f, &lay, &ist, stackalloc_off(&lay, in->lhs), slot_off(&lay, in->dst));
                 } else if (in->imm > 0 && in->imm <= 4 && is_stackalloc_value(&lay, in->lhs)) {
                     /* from a stack object: addressed off the frame pointer, no leal */
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
@@ -3776,6 +3808,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 int_regs_flush(fp, f, &lay, &ist);
                 if (cc_ssa_value_class(f, in->rhs) == CC_VAL_F64) {
                     emit_i386_store_fp_indirect(fp, f, &lay, &ist, in, use_x87_fp);
+                } else if (in->imm == 8 && is_stackalloc_value(&lay, in->lhs) && i386_slot_i64(f, &lay, &ist, in->rhs)) {
+                    /* a 64-bit integer from its slot to a stack object: word by word off the frame pointer */
+                    i386_frame_copy64(fp, f, &lay, &ist, slot_off(&lay, in->rhs), stackalloc_off(&lay, in->lhs));
                 } else {
                     int rp = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int rv = int_regs_load(fp, f, &lay, &ist, in->rhs, -1, rp);
