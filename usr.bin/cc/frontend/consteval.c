@@ -626,6 +626,13 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
     }
     case CC_EXPR_BIN:
         if (e->op == CC_BIN_COMMA) {
+            /*
+             * a constant only if the left is one too: `(list = &...[t], 1)` is 1 but not a constant -- taken
+             * for one, a condition's assignment was never made (Linux's for_each_free_list())
+             */
+            if (cc_const_eval(env, e->lhs, &a) != 0) {
+                return -1;
+            }
             return cc_const_eval(env, e->rhs, out);
         }
         if (cc_const_eval(env, e->lhs, &a) != 0) {
