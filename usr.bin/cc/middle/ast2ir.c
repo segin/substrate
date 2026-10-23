@@ -10460,6 +10460,29 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
                     set_diag(diag, "out of memory allocating asm output temporary");
                     return -1;
                 }
+                if (op->constraint != NULL && strchr(op->constraint, '+') != NULL) {
+                    /*
+                     * read and written ("+a" (*old)): the object's value is what the asm reads.  It was
+                     * only written back after: Linux's try_cmpxchg() compared against junk in %eax.
+                     */
+                    cc_ssa_instr_t ld;
+
+                    memset(&ld, 0, sizeof(ld));
+                    ld.op = CC_SSA_LOAD;
+                    ld.dst = tmpv;
+                    ld.lhs = ptrv;
+                    ld.rhs = -1;
+                    ld.imm = out_sz;
+                    ld.is_unsigned = cc_ct_is_unsigned(lower_value_ctype(op->expr));
+                    if (cc_ir_push(sf, ld) != 0) {
+                        free_asm_instr_fields(&in);
+                        free(asm_out_store_ptr);
+                        free(asm_out_store_size);
+                        free(asm_out_store_type);
+                        set_diag(diag, "out of memory loading an asm in-out operand");
+                        return -1;
+                    }
+                }
                 out_v = tmpv;
                 asm_out_store_ptr[i4] = ptrv;
                 asm_out_store_size[i4] = out_sz;
