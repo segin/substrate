@@ -515,8 +515,14 @@ protects the section from
 and
 .Ic /DISCARD/
 leaves what it names out.
+An output section the script names is placed at the location counter,
+however it is protected: no page is skipped between read-only, code and
+data, as GNU ld does not skip one; a script that wants them apart says so
+with
+.Ic ALIGN .
 An input section nothing asks for keeps its own name, and is placed where
-the default layout would have put it among the sections the script names.
+the default layout would have put it among the sections the script names,
+on a page of its own when it is protected unlike the section before it.
 .It Ic PHDRS
 The program headers of the output.
 A section goes in the headers named after its output section, and one

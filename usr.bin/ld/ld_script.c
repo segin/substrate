@@ -3394,9 +3394,13 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
             }
         }
         cls = alloc_section_class(flags);
-        if (!explicit) {
-            /* As the default layout has it: what is protected differently
-             * does not share a page. */
+        if (!explicit && os == NULL) {
+            /* A section the script does not place, as the default layout
+             * has it: what is protected differently does not share a
+             * page.  One it places is where the counter is, as GNU ld
+             * has it: Linux's setup.ld runs .header (read-only), .text
+             * and .data on without a gap and asserts the whole is at
+             * most 64 sectors, which two pages of padding broke. */
             int relro = cls == 2 && is_relro_candidate_name(name);
 
             /* (read-only after writable shares the writable segment, as add_default_segments() makes it) */

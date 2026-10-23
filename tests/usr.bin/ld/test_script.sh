@@ -255,6 +255,16 @@ if [ -f "$work/phdrs_nofilehdr.out" ]; then
     is  phdrs_nofilehdr_phdr "$(readelf -lW "$work/phdrs_nofilehdr.out" 2>&1 | grep -cE '^ *PHDR|Error')" 0
 fi
 
+# Sections the script places are where the counter is, however they are
+# protected: no page between read-only, code and data (Linux's setup.ld
+# runs them on and asserts the whole fits in 64 sectors).
+ok  contiguous "SECTIONS { . = 0; .rodata : { *(.rodata*) } .text : { *(.text*) etext = .; }
+.data : { *(.data*) } .bss : { bss_begin = .; *(.bss*) bss_finish = .; } /DISCARD/ : { *(.note*) } }"
+if [ -f "$work/contiguous.out" ]; then
+    is  contiguous_text "$(readelf -SW "$work/contiguous.out" | awk '{ for (i = 1; i < NF; i++) if ($i == ".text") print (substr($(i + 2), 1, length($(i + 2)) - 3) ~ /^0+$/) }')" 1
+    is  contiguous_data "$(readelf -SW "$work/contiguous.out" | awk '{ for (i = 1; i < NF; i++) if ($i == ".data") print (substr($(i + 2), 1, length($(i + 2)) - 3) ~ /^0+$/) }')" 1
+fi
+
 # INCLUDE: where a statement may stand, its statements standing there.
 mkdir -p "$work/inc"
 echo '*(.text .text.*)' > "$work/inc/body.lds"
