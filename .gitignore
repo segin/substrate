@@ -553,3 +553,33 @@ obj-x86_64/
 
 # Programs built by tests/toolchain64/check.sh
 /tests/toolchain64/out/
+
+# Built test programs and test output
+/tests/kern/*
+!/tests/kern/*/
+!/tests/kern/*.*
+!/tests/kern/Makefile
+/tests/kern/*.linux
+/tests/lib/aio/aiotest
+/tests/lib/at/fuzz_acl
+/tests/lib/at/test_acl
+/tests/lib/at/test_parse
+/tests/lib/c/poll_relay
+/tests/lib/dl/torture_cxxdso
+/tests/lib/ipc/ksemforeign
+/tests/lib/ipc/ksemmap
+/tests/lib/ipc/torture_ksem
+/tests/lib/ipc/torture_shm
+/tests/lib/mqueue/mqforeign
+/tests/lib/mqueue/mqtest
+/tests/lib/pthread/torture_pifutex
+/tests/lib/pthread/torture_pthread64
+/tests/lib/pthread/torture_pthread_ext
+/tests/lib/pty/torture_bsdpty
+/tests/usr.lib/regex/test_regex
+/tests/usr.bin/cc/pp_fuzz_fail_*.c
+/torture-cross/
+
+# Copies of disk images kept before risky changes
+/*.img.prev
+/*.img.pre-*
