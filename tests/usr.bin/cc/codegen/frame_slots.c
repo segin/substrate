@@ -1,6 +1,7 @@
 /*
  * Frame slots: a chain of values each live across a block or two, with and
- * without an asm goto.  The results are checked against gcc here;
+ * without an asm goto, and words live together in a function with a
+ * 64-bit value.  The results are checked against gcc here;
  * run_i386_frame_slots.sh checks that the frames are small.
  */
 #include <stdio.h>
@@ -300,11 +301,90 @@ out:
     return 0;
 }
 
+__attribute__((noinline)) unsigned long long words_live(unsigned x, int n) {
+    unsigned long long wide = (unsigned long long)x << 20;
+    unsigned w0 = x * 3u + (unsigned)n;
+    if (n > 0)
+        w0 += 0;
+    unsigned w1 = x * 5u + (unsigned)n;
+    if (n > 1)
+        w1 += 1;
+    unsigned w2 = x * 7u + (unsigned)n;
+    if (n > 2)
+        w2 += 2;
+    unsigned w3 = x * 9u + (unsigned)n;
+    if (n > 3)
+        w3 += 3;
+    unsigned w4 = x * 11u + (unsigned)n;
+    if (n > 4)
+        w4 += 4;
+    unsigned w5 = x * 13u + (unsigned)n;
+    if (n > 5)
+        w5 += 5;
+    unsigned w6 = x * 15u + (unsigned)n;
+    if (n > 6)
+        w6 += 6;
+    unsigned w7 = x * 17u + (unsigned)n;
+    if (n > 7)
+        w7 += 7;
+    unsigned w8 = x * 19u + (unsigned)n;
+    if (n > 8)
+        w8 += 8;
+    unsigned w9 = x * 21u + (unsigned)n;
+    if (n > 9)
+        w9 += 9;
+    unsigned w10 = x * 23u + (unsigned)n;
+    if (n > 10)
+        w10 += 10;
+    unsigned w11 = x * 25u + (unsigned)n;
+    if (n > 11)
+        w11 += 11;
+    unsigned w12 = x * 27u + (unsigned)n;
+    if (n > 12)
+        w12 += 12;
+    unsigned w13 = x * 29u + (unsigned)n;
+    if (n > 13)
+        w13 += 13;
+    unsigned w14 = x * 31u + (unsigned)n;
+    if (n > 14)
+        w14 += 14;
+    unsigned w15 = x * 33u + (unsigned)n;
+    if (n > 15)
+        w15 += 15;
+    unsigned w16 = x * 35u + (unsigned)n;
+    if (n > 16)
+        w16 += 16;
+    unsigned w17 = x * 37u + (unsigned)n;
+    if (n > 17)
+        w17 += 17;
+    unsigned w18 = x * 39u + (unsigned)n;
+    if (n > 18)
+        w18 += 18;
+    unsigned w19 = x * 41u + (unsigned)n;
+    if (n > 19)
+        w19 += 19;
+    unsigned w20 = x * 43u + (unsigned)n;
+    if (n > 20)
+        w20 += 20;
+    unsigned w21 = x * 45u + (unsigned)n;
+    if (n > 21)
+        w21 += 21;
+    unsigned w22 = x * 47u + (unsigned)n;
+    if (n > 22)
+        w22 += 22;
+    unsigned w23 = x * 49u + (unsigned)n;
+    if (n > 23)
+        w23 += 23;
+    if (n > 30)
+        wide += 5;
+    return wide + w0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + w9 + w10 + w11 + w12 + w13 + w14 + w15 + w16 + w17 + w18 + w19 + w20 + w21 + w22 + w23;
+}
+
 int main(void) {
     int n;
 
     for (n = 0; n < 4; ++n) {
-        printf("%u %u\n", chain_blocks(0x1234u + n, n), chain_asm_goto(0x777u * n, n));
+        printf("%u %u %llu\n", chain_blocks(0x1234u + n, n), chain_asm_goto(0x777u * n, n), words_live(3u + n, n * 9));
     }
     return 0;
 }

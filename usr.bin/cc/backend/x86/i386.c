@@ -3024,11 +3024,11 @@ static void i386_move_frame_refs(const char *line, int lo, int hi, int slot_size
  * Then the slots still named are packed: the most named nearest %ebp, where a displacement is a byte, and
  * what is below them raised by the bytes freed (a multiple of 16, the alignment of what is there), which
  * the prologue's `subl $frame_sub, %esp` allocates no more.  Nothing is moved or dropped where a line names
- * the frame in a way not told apart.
+ * the frame in a way not told apart.  *@p moved gets those bytes; the frame below @p lo is that much nearer.
  *
  * @return 0, or -1 when out of memory
  */
-static int i386_peephole_dead_slots(FILE *in, FILE *out, int lo, int hi, int slot_size, int frame_sub) {
+static int i386_peephole_dead_slots(FILE *in, FILE *out, int lo, int hi, int slot_size, int frame_sub, int *moved) {
     char **lines = NULL;
     size_t count = 0;
     size_t cap = 0;
@@ -3176,6 +3176,7 @@ static int i386_peephole_dead_slots(FILE *in, FILE *out, int lo, int hi, int slo
     free(dead);
     free(uses);
     free(map);
+    *moved = all || rc != 0 ? 0 : delta;
     return rc < 0 ? -1 : 0;
 }
 
@@ -3232,7 +3233,9 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         int slot_lo;                       /* the %ebp offsets of the value slots: [slot_lo, slot_hi) */
         int slot_hi;
         int slot_size;
+        int word_lo;                       /* and of the 4-byte slots below them: [word_lo, slot_lo) */
         int frame_sub;                     /* what the prologue's subl allocates */
+        int moved;                         /* how far the first peephole pass raised what is below the slots */
         const i386_faddr_t *faddr = NULL;  /* i386_fold_addrs() */
         const int *faddr_alias = NULL;
         char faddr_buf[160];
@@ -4164,6 +4167,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         slot_lo = -(lay.bias + lay.slot_size * lay.slot_count);
         slot_hi = -lay.bias;
         slot_size = lay.slot_size;
+        word_lo = slot_lo - 4 * lay.word_count;
         frame_sub = frame - pushed;
         slot_layout_free(&lay);
         if (fp != out) {
@@ -4180,10 +4184,25 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 fp = ext;
             }
             dead = prc == 0 ? tmpfile() : NULL;
-            prc = dead != NULL ? i386_peephole_dead_slots(fp, dead, slot_lo, slot_hi, slot_size, frame_sub) : prc;
+            moved = 0;
+            prc = dead != NULL ? i386_peephole_dead_slots(fp, dead, slot_lo, slot_hi, slot_size, frame_sub, &moved)
+                               : prc;
             if (dead != NULL) {
                 fclose(fp);
                 fp = dead;
+            }
+            if (prc == 0 && word_lo < slot_lo) {
+                /* the 4-byte slots, the first pass having raised them and what is below by moved */
+                int moved2 = 0;
+
+                dead = tmpfile();
+                prc = dead != NULL ? i386_peephole_dead_slots(fp, dead, word_lo + moved, slot_lo + moved, 4,
+                                                              frame_sub - moved, &moved2)
+                                   : prc;
+                if (dead != NULL) {
+                    fclose(fp);
+                    fp = dead;
+                }
             }
             prc = prc != 0 ? prc : i386_peephole_copy(fp, out);
             fclose(fp);

@@ -2040,6 +2040,9 @@ int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
 }
 
 int slot_off(const slot_layout_t *lay, int v) {
+    if (lay->word_of != NULL && lay->word_of[v] >= 0) {
+        return -lay->slot_size * lay->slot_count - lay->bias - 4 * (lay->word_of[v] + 1);
+    }
     return -lay->slot_size * (lay->slot_of[v] + 1) - lay->bias;
 }
 
@@ -2535,10 +2538,13 @@ void slot_layout_free(slot_layout_t *lay) {
     free(lay->stackalloc_off);
     free(lay->live_end);
     free(lay->slot_end);
+    free(lay->word_of);
     lay->slot_of = NULL;
     lay->stackalloc_off = NULL;
     lay->live_end = NULL;
     lay->slot_end = NULL;
+    lay->word_of = NULL;
+    lay->word_count = 0;
     lay->value_count = 0;
     lay->slot_count = 0;
     lay->slot_size = 0;
@@ -3607,6 +3613,10 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     int *span_lo = NULL; /* per value: its live range over the blocks (x86_value_spans()) */
     int *span_hi = NULL;
     int spans = 0;       /* whether they are known: a value live across blocks then shares a slot too */
+    unsigned char *is_word = NULL; /* per value: it takes a 4-byte slot of the pool (word_of) */
+    int *free_words = NULL;
+    int free_word_count = 0;
+    int next_word = 0;
     int free_count = 0;
     int next_slot = 0;
     int enable_reuse = 0;
@@ -3633,6 +3643,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     out->stackalloc_off = (int *)calloc((size_t)nvals, sizeof(*out->stackalloc_off));
     out->live_end = (int *)malloc((size_t)nvals * sizeof(*out->live_end));
     out->slot_end = (int *)malloc((size_t)nvals * sizeof(*out->slot_end));
+    out->word_of = (int *)malloc((size_t)nvals * sizeof(*out->word_of));
     def_at =(int *)malloc((size_t)nvals * sizeof(*def_at));
     first_use = (int *)malloc((size_t)nvals * sizeof(*first_use));
     last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
@@ -3649,7 +3660,8 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     pinned = (unsigned char *)calloc((size_t)nvals, sizeof(*pinned));
     cross_block = (unsigned char *)calloc((size_t)nvals, sizeof(*cross_block));
     multi_def = (unsigned char *)calloc((size_t)nvals, sizeof(*multi_def));
-    if (out->slot_of == NULL || out->stackalloc_off == NULL || out->live_end == NULL || out->slot_end == NULL || def_at == NULL || first_use == NULL || last_use == NULL ||
+    if (out->slot_of == NULL || out->stackalloc_off == NULL || out->live_end == NULL || out->slot_end == NULL ||
+        out->word_of == NULL || def_at == NULL || first_use == NULL || last_use == NULL ||
         def_block == NULL || use_block == NULL || next_start == NULL || next_end == NULL || instr_block == NULL ||
         block_start == NULL || block_end == NULL || start_head == NULL || end_head == NULL || free_slots == NULL ||
         pinned == NULL || cross_block == NULL || multi_def == NULL) {
@@ -3672,6 +3684,8 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         free(multi_def);
         free(span_lo);
         free(span_hi);
+        free(is_word);
+        free(free_words);
         slot_layout_free(out);
         return -1;
     }
@@ -3679,6 +3693,7 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         out->slot_of[i] = -1;
         out->live_end[i] = -1;
         out->slot_end[i] = -1;
+        out->word_of[i] = -1;
         def_at[i] = -1;
         first_use[i] = -1;
         last_use[i] = -1;
@@ -3842,14 +3857,41 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         free(multi_def);
         free(span_lo);
         free(span_hi);
+        free(is_word);
+        free(free_words);
         slot_layout_free(out);
         return -1;
+    }
+    /*
+     * i386 slots of 8 bytes, which a function with any value of 8 bytes has: the words among the values take
+     * 4-byte slots of their own pool instead, right below the slots, as twice as many fit -- Linux's
+     * do_sys_poll() has 8-byte times and was 4 bytes over 1 KiB.  A value nothing names keeps a slot as before,
+     * which i386_peephole_dead_slots() then drops.
+     */
+    if (reuse_always && slot_size == 8) {
+        is_word = (unsigned char *)calloc((size_t)nvals, 1);
+        free_words = (int *)malloc((size_t)nvals * sizeof(*free_words));
+        if (is_word == NULL || free_words == NULL) {
+            free(is_word);
+            free(free_words);
+            is_word = NULL;
+            free_words = NULL;
+        } else {
+            for (i = 0; i < nvals; ++i) {
+                is_word[i] = cc_ssa_value_class(f, i) == CC_VAL_I64 && cc_ssa_value_size(f, i) <= 4 &&
+                             (def_at[i] >= 0 || first_use[i] >= 0 || (spans && span_hi[i] >= 0));
+            }
+        }
     }
     for (i = 0; i < nvals; ++i) {
         int s;
         int e;
         if (pinned[i] || (cross_block[i] && (!spans || span_hi[i] < 0))) {
-            out->slot_of[i] = next_slot++;
+            if (is_word != NULL && is_word[i]) {
+                out->word_of[i] = next_word++;
+            } else {
+                out->slot_of[i] = next_slot++;
+            }
             continue;
         }
         if (cross_block[i]) {
@@ -3890,17 +3932,26 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
     for (j = 0; j <= f->instr_count; ++j) {
         int v;
         for (v = start_head[j]; v >= 0; v = next_start[v]) {
-            out->slot_of[v] = allocate_slot(free_slots, &free_count, &next_slot);
+            if (is_word != NULL && is_word[v]) {
+                out->word_of[v] = allocate_slot(free_words, &free_word_count, &next_word);
+            } else {
+                out->slot_of[v] = allocate_slot(free_slots, &free_count, &next_slot);
+            }
         }
         for (v = end_head[j]; v >= 0; v = next_end[v]) {
             int slot = out->slot_of[v];
-            if (!pinned[v] && (!cross_block[v] || spans) && slot >= 0 && free_count < nvals) {
+            if (pinned[v] || (cross_block[v] && !spans)) {
+                continue;
+            }
+            if (out->word_of[v] >= 0 && free_word_count < nvals) {
+                free_words[free_word_count++] = out->word_of[v];
+            } else if (slot >= 0 && free_count < nvals) {
                 free_slots[free_count++] = slot;
             }
         }
     }
     for (i = 0; i < nvals; ++i) {
-        if (out->slot_of[i] < 0) {
+        if (out->slot_of[i] < 0 && out->word_of[i] < 0) {
             out->slot_of[i] = allocate_slot(free_slots, &free_count, &next_slot);
         }
     }
@@ -3924,12 +3975,15 @@ int build_slot_layout(const cc_ssa_function_t *f, int slot_size, int reuse_alway
         free(multi_def);
         free(span_lo);
         free(span_hi);
+        free(is_word);
+        free(free_words);
         slot_layout_free(out);
         return -1;
     }
 
     out->slot_count = next_slot;
-    raw_frame = out->slot_count * slot_size;
+    out->word_count = next_word;
+    raw_frame = out->slot_count * slot_size + 4 * next_word;
 build_stackalloc_offsets:
     if (reuse_always) {
         /*
@@ -4008,6 +4062,8 @@ build_stackalloc_offsets:
     free(multi_def);
     free(span_lo);
     free(span_hi);
+    free(is_word);
+    free(free_words);
     out->frame_bytes = raw_frame;
     return 0;
 }

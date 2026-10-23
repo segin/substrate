@@ -15,6 +15,9 @@
 # Linux's parse_elf_properties() kept a 1 KiB buffer the configuration
 # had made dead.
 #
+# In a frame of 8-byte slots (a function with a 64-bit value) a word
+# takes a 4-byte slot: Linux's do_sys_poll() was 4 bytes over 1 KiB.
+#
 # codegen/frame_slots.c checks the functions' results against gcc.
 set -eu
 
@@ -47,6 +50,7 @@ check() {
 "$CC_BIN" -m32 -O2 -S -o "$CC_TMP/fs.s" "$ROOT/tests/usr.bin/cc/codegen/frame_slots.c"
 check "$CC_TMP/fs.s" chain_blocks 96 "values live across blocks share slots"
 check "$CC_TMP/fs.s" chain_asm_goto 96 "locals made values under an asm goto"
+check "$CC_TMP/fs.s" words_live 200 "words in 4-byte slots"
 cat > "$CC_TMP/unread.c" <<'END'
 int probe(int *p);
 

@@ -48,6 +48,9 @@ typedef struct {
     int value_count;
     int slot_count;
     int slot_size;
+    int *word_of;  /**< i386 with slot_size 8: per value of a word or less, its 4-byte slot in the pool right below the
+                        slots (slot_of -1 then); else -1 */
+    int word_count;
     int frame_bytes;
 } slot_layout_t;
 
