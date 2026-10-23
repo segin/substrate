@@ -470,7 +470,8 @@ There are three, all described in `docs/toolchain.md`:
   (`contrib/build-toolchain64.sh`), which builds the 64-bit image.
 - **Substrate's own.** The in-tree compiler, assembler and linker
   (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`), installed under
-  `/usr/libexec/substrate-cc/` and run as `cc`.
+  `/usr/libexec/substrate-cc/` and run as `cc`. `build-native-toolchain.sh`
+  builds them for the Linux host (`--install`: `/opt/substrate/native/`).
 
 ### 3.6. Graphics and desktops
 

@@ -52,6 +52,17 @@ the only toolchain, that image having no GNU one -- native 64-bit builds
 (`make -C usr.bin/{cc,as,ld} ARCH=x86_64`, which leaves each program in
 its `obj-x86_64/`).
 
+On a Linux host, `./build-native-toolchain.sh` builds the same three
+against the host's libc (`NATIVE_BUILD=1`, with `usr.lib/elfobj` linked
+in statically), in a copy of the sources under `build/native-toolchain/`
+so no host objects are left in the tree for the target build to find.
+`--install` puts them in `/opt/substrate/native/bin` (`cc`, its `cpp`
+link, `as`, `ld`) and the compiler's headers in
+`/opt/substrate/native/lib/substratecc/include`; `PREFIX` moves both.
+Not in `/opt/substrate/bin`: that is the cross toolchain's, and an
+unprefixed `as` or `ld` there is found by the host `gcc` and breaks host
+builds.
+
 `cc` builds for the machine it was itself built for unless `-m32` or
 `-m64` says otherwise, and takes the runtime of the target: `crt0.o` from
 `/usr/lib` or `/usr/lib64`, `libc.so.0` from `/lib` or `/lib64`, and

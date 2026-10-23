@@ -95,6 +95,9 @@ vgcore.*
 # Always ignore those, regardless of depth.
 dist/
 
+# build-native-toolchain.sh builds in a copy of the sources here
+/build/
+
 # Kernel build artifacts
 /kernel.map
 /sys/arch/i386/floppy/stage1.bin
