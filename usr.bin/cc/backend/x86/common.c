@@ -1155,6 +1155,46 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
         snprintf(out, outsz, "$.L%s_%d", f->name != NULL ? f->name : "__fn", def->label);
         return 0;
     }
+    if ((def->op == CC_SSA_ADD || def->op == CC_SSA_SUB) && def->lhs >= 0 && def->rhs >= 0) {
+        /*
+         * an address and a constant: Linux's static_cpu_has() tests `%a[cap_byte]`, "i" of
+         * &boot_cpu_data.x86_capability[bit >> 3], gaddr + 40 + 1 -- which was `$0`, a test of address 0
+         */
+        int sym_side = def->lhs;
+        int k_side = def->rhs;
+        long k;
+        size_t used;
+
+        if (find_const_i64_for_value(f, k_side, max_instr_index, &k) != 0 && def->op == CC_SSA_ADD) {
+            sym_side = def->rhs;
+            k_side = def->lhs;
+        }
+        if (find_const_i64_for_value(f, k_side, max_instr_index, &k) != 0 ||
+            resolve_asm_immediate_symbol(f, sym_side, max_instr_index, fn_index, depth + 1, out, outsz) != 0) {
+            return -1;
+        }
+        used = strlen(out);
+        if (def->op == CC_SSA_SUB) {
+            k = -k;
+        }
+        {
+            /* an offset already after the symbol (`sym+40`) takes this one in: `sym+41` */
+            size_t at = used;
+
+            while (at > 1 && out[at - 1] >= '0' && out[at - 1] <= '9') {
+                at--;
+            }
+            if (at > 2 && at < used && (out[at - 1] == '+' || out[at - 1] == '-')) {
+                k += strtol(out + at - 1, NULL, 10);
+                used = at - 1;
+                out[used] = '\0';
+            }
+        }
+        if (k != 0 && snprintf(out + used, outsz - used, "%+ld", k) >= (int)(outsz - used)) {
+            return -1;
+        }
+        return 0;
+    }
     return -1;
 }
 

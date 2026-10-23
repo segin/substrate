@@ -933,6 +933,7 @@ test:
 	sh run_pic_i386.sh
 	sh run_object_symbols.sh
 	sh run_trivial_auto_var_init.sh
+	sh run_asm_imm_symbol.sh
 	sh run_pp_fuzz_smoke.sh
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh
