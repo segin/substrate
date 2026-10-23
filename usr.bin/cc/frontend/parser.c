@@ -2652,6 +2652,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 decl_attrs_t mspec_attrs;
                 long mspec_align = 0;
                 long mtypedef_align = 0; /* the alignment of a typedef name among the specifiers, or 0 */
+                size_t structs_before; /* the structures before the specifiers: one after is defined in them */
                 if (p->structs[sid].has_flexible_array) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
                     decl_attrs_clear(&struct_attrs);
@@ -2693,11 +2694,26 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     continue;
                 }
                 decl_attrs_reset(&mspec_attrs);
+                structs_before = p->struct_count;
                 if (parse_declspec(p, &mspec, 1, "expected member declaration type", &mtypedef, NULL, &mspec_attrs) !=
                     0) {
                     decl_attrs_clear(&mspec_attrs);
                     decl_attrs_clear(&struct_attrs);
                     return -1;
+                }
+                if (mspec != NULL && mspec->unqual != NULL && mspec->unqual->kind == CC_CT_RECORD &&
+                    mspec->unqual->id >= (int)structs_before &&
+                    (mspec_attrs.flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED)) != 0) {
+                    /*
+                     * `struct { ... } __attribute__((packed)) scsi;`: the attributes after the braces are the
+                     * structure's, as at file scope -- it was laid out unpacked, and Linux's edd_device_params
+                     * (in boot_params, which the boot loader fills) came out four bytes long per entry
+                     */
+                    if (apply_struct_attrs(p, mspec->unqual->id, &mspec_attrs) != 0) {
+                        decl_attrs_clear(&mspec_attrs);
+                        decl_attrs_clear(&struct_attrs);
+                        return -1;
+                    }
                 }
                 /* `_Alignas(T) char x;`: the specifiers' alignment applies to each member they declare */
                 mspec_align = (mspec_attrs.flags & CC_ATTR_ALIGNED) != 0 ? mspec_attrs.align : 0;
