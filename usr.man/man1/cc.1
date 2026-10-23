@@ -172,6 +172,21 @@ function of the same file is replaced by the function's body, and what
 that makes constant is folded, so a call a constant helper guards is
 dropped with its dead branch, as with
 .Xr gcc 1 .
+So is a call of a
+.Ic static
+function called from that one place only and named nowhere else (its
+address not taken, not
+.Ic used ,
+.Ic weak
+or
+.Ic noinline ) ,
+whatever its size within reason, and the function is then not emitted,
+unless it is on a cycle of calls or its locals would make the caller's
+frame larger than 256 bytes and either larger than 1024 bytes or more
+than eleven times what it was,
+as with
+.Xr gcc 1 Ns 's
+.Fl finline-functions-called-once .
 A local variable whose address is not taken, and that is read and
 written whole, is kept as a value rather than in memory; a copy is read
 as what it copies; and arithmetic that leaves its operand as it was

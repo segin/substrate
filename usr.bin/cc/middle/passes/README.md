@@ -19,7 +19,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   decides it.
 - `inline.c`: the inlining itself -- which functions may be inlined
   (`cc_inline_candidate()`: static and inline or always_inline, small,
-  plain-value interface, no frame-dependent body) and the copy of a body
-  in place of a call (`cc_inline_calls()`).
+  plain-value interface, no frame-dependent body; or, as gcc's
+  `-finline-functions-called-once`, any static function called from one
+  place, named nowhere else and on no cycle of calls, which `opt.c`
+  marks, if it does not grow the caller's frame past gcc's limit) and
+  the copy of a body in place of a call (`cc_inline_calls()`).
 
 Not here yet: mem2reg, GVN/CSE, LICM and loop transforms.

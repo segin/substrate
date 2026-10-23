@@ -8,6 +8,15 @@
  * without CONFIG_EFI -- and leaves the function called undefined, so a
  * compiler that keeps the call cannot link it.
  *
+ * gcc also inlines, from -O1, a static function called from one place
+ * only (-finline-functions-called-once), and code relies on that too:
+ * Linux's head32.c calls zap_early_initrd_mapping(), which reads __initdata,
+ * from its __init code alone, and modpost rejects a copy of it left in
+ * .text.  opt.c marks such functions, leaving out those on a cycle of
+ * calls; they are inlined at a larger size, unless that grows the caller's
+ * frame past gcc's limit (frame_growth_ok()), and the copy, called by
+ * nothing then, is dropped with the other unused static functions.
+ *
  * A call of a function of the module that is static, inline (by its
  * storage or always_inline) and not noinline, small, and whose interface
  * is plain values (no aggregate passed or returned in memory, no
@@ -33,6 +42,23 @@
 #define INLINE_MAX_INSTRS 160
 /** The same for an always_inline function, which gcc inlines whatever its size. */
 #define ALWAYS_INLINE_MAX_INSTRS 4000
+/** The same for a static function called from one place, which gcc inlines unless very large. */
+#define CALLED_ONCE_MAX_INSTRS 4000
+/** gcc's --param large-stack-frame: a frame no larger may grow by inlining a function called once. */
+#define LARGE_STACK_FRAME 256
+/** gcc's --param large-stack-frame-growth: a larger one by at most this percentage of what it was. */
+#define LARGE_STACK_FRAME_GROWTH 1000
+/**
+ * And never past this, which gcc has no need of: it shares one slot among
+ * locals not live at once, cc gives each its own, so what is inlined adds
+ * all its locals to the caller's frame.  Linux i386's FRAME_WARN.
+ */
+#define CALLED_ONCE_MAX_FRAME 1024
+/**
+ * What each value of an inlined body is reckoned to add to the frame: the
+ * i386 back end gives one live across blocks a slot of its own, a word.
+ */
+#define VALUE_SLOT_BYTES 4
 /** No more is inlined into a function grown this large. */
 #define CALLER_MAX_INSTRS 60000
 
@@ -84,16 +110,20 @@ static int abi_is_plain(unsigned char abi) {
     return (abi & ~CC_ABI_REGPARM_MASK) == CC_CALL_ARG_ABI_DEFAULT;
 }
 
-int cc_inline_candidate(const cc_ssa_function_t *g) {
-    int always = (g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0;
+/**
+ * Whether the body of @p g may be copied into a caller: no more than
+ * @p max_instrs instructions, its interface plain values, and nothing in
+ * it that depends on its own frame.
+ *
+ * @param g           the function
+ * @param max_instrs  the most instructions it may have
+ * @return            1 if it may, else 0
+ */
+static int inline_body_ok(const cc_ssa_function_t *g, size_t max_instrs) {
     size_t i;
 
-    if ((g->storage & CC_STORAGE_STATIC) == 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0 ||
-        ((g->storage & CC_STORAGE_INLINE) == 0 && !always)) {
-        return 0;
-    }
     if (g->is_variadic || g->attr_alias != NULL || g->sret_reg || !abi_is_plain(g->ret_abi) || g->instrs == NULL ||
-        g->instr_count > (size_t)(always ? ALWAYS_INLINE_MAX_INSTRS : INLINE_MAX_INSTRS)) {
+        g->instr_count > max_instrs) {
         return 0;
     }
     for (i = 0; i < g->param_count; ++i) {
@@ -121,6 +151,16 @@ int cc_inline_candidate(const cc_ssa_function_t *g) {
         }
     }
     return 1;
+}
+
+int cc_inline_candidate(const cc_ssa_function_t *g) {
+    int always = (g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0;
+
+    if ((g->storage & CC_STORAGE_STATIC) == 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0 ||
+        ((g->storage & CC_STORAGE_INLINE) == 0 && !always)) {
+        return 0;
+    }
+    return inline_body_ok(g, (size_t)(always ? ALWAYS_INLINE_MAX_INSTRS : INLINE_MAX_INSTRS));
 }
 
 /** Whether values @p a of @p fa and @p b of @p fb have the same class and size, so a move copies one to the other. */
@@ -510,6 +550,42 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
     return ivec_put(out, &in);
 }
 
+/** The bytes of stack @p f's slots take: cc gives each its own, so this is its frame less its values'. */
+static long stack_bytes(const cc_ssa_function_t *f) {
+    long total = 0;
+    size_t i;
+
+    for (i = 0; i < f->instr_count; ++i) {
+        if (f->instrs[i].op == CC_SSA_STACKALLOC && f->instrs[i].imm > 0) {
+            total += (long)f->instrs[i].imm;
+        }
+    }
+    return total;
+}
+
+/** What inlining @p g is reckoned to add to a caller's frame: its slots, and a word per value. */
+static long frame_cost(const cc_ssa_function_t *g) {
+    return stack_bytes(g) + (long)g->value_count * VALUE_SLOT_BYTES;
+}
+
+/**
+ * Whether a frame of @p was bytes may become @p now bytes by inlining a
+ * function called once, by gcc's rule: up to LARGE_STACK_FRAME freely,
+ * beyond it by at most LARGE_STACK_FRAME_GROWTH percent; and, as cc does
+ * not share slots, never past CALLED_ONCE_MAX_FRAME.  A kernel thread of
+ * Linux on i386 has 8 KiB of stack: inlining under gcc's rule alone took
+ * the kernel's frames over 1 KiB from 21 to 52.  @p now counts what is
+ * inlined by frame_cost(), values and all, since values are most of it.
+ *
+ * @param was  the caller's frame as it was
+ * @param now  the caller's frame with what is inlined so far and this
+ * @return     1 if it may, else 0
+ */
+static int frame_growth_ok(long was, long now) {
+    return now <= LARGE_STACK_FRAME ||
+           (now <= CALLED_ONCE_MAX_FRAME && now - was <= was * LARGE_STACK_FRAME_GROWTH / 100);
+}
+
 /** The index of the function of @p m named @p name, or -1. */
 static long find_function(const cc_ssa_module_t *m, const char *name) {
     size_t i;
@@ -522,23 +598,31 @@ static long find_function(const cc_ssa_module_t *m, const char *name) {
     return -1;
 }
 
-int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready) {
+int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once) {
     cc_ssa_function_t *f = &m->funcs[fi];
     ivec_t out;
     size_t i;
     int inlined = 0;
+    long frame = stack_bytes(f); /* its own slots */
+    long grown = frame;          /* and those of what is inlined so far */
 
     memset(&out, 0, sizeof(out));
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *call = &f->instrs[i];
         long gi = -1;
+        const cc_ssa_function_t *g;
 
         if (call->op == CC_SSA_CALL && call->sym != NULL && out.count < CALLER_MAX_INSTRS) {
             gi = find_function(m, call->sym);
         }
-        if (gi >= 0 && (size_t)gi != fi && ready[gi] && cc_inline_candidate(&m->funcs[gi]) &&
-            call_site_inlinable(f, call, &m->funcs[gi])) {
-            if (splice_body(f, call, &m->funcs[gi], &out) != 0) {
+        g = gi >= 0 ? &m->funcs[gi] : NULL;
+        if (g != NULL && (size_t)gi != fi && ready[gi] &&
+            (cc_inline_candidate(g) ||
+             (once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
+              frame_growth_ok(frame, grown + frame_cost(g)))) &&
+            call_site_inlinable(f, call, g)) {
+            grown += frame_cost(g);
+            if (splice_body(f, call, g, &out) != 0) {
                 break;
             }
             cc_ssa_instr_free(call);

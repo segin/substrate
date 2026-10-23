@@ -105,8 +105,11 @@ int cc_inline_candidate(const cc_ssa_function_t *g);
  * @param fi     the function to rewrite
  * @param ready  per function of @p m: 1 if its body is final, its own
  *               calls inlined and folded, so it may be copied
+ * @param once   per function of @p m: 1 if it is static and called from
+ *               one place only, so it is inlined though not marked inline
+ *               and at a larger size; may be NULL
  * @return       how many calls were inlined, or -1 when out of memory
  */
-int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready);
+int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once);
 
 #endif

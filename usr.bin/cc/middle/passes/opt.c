@@ -2236,11 +2236,227 @@ static long called_function(const cc_ssa_module_t *m, const char *sym) {
     return -1;
 }
 
+/** The index of the function of @p m that symbol @p sym names (an offset or @PLT after it ignored), or -1. */
+static long function_named(const cc_ssa_module_t *m, const char *sym) {
+    size_t n;
+    size_t i;
+
+    if (sym == NULL) {
+        return -1;
+    }
+    n = sym_name_len(sym);
+    for (i = 0; i < m->func_count; ++i) {
+        const char *name = m->funcs[i].name;
+
+        if (name != NULL && strlen(name) == n && strncmp(name, sym, n) == 0) {
+            return (long)i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Mark in @p rec the functions of @p m that are on a cycle of calls: one
+ * that calls itself, or one of a strongly connected group (Tarjan's
+ * algorithm, without recursion).
+ *
+ * @param m    the module
+ * @param rec  receives 1 or 0 per function of @p m
+ * @return     0, or -1 when out of memory
+ */
+static int mark_recursive(const cc_ssa_module_t *m, unsigned char *rec) {
+    size_t n = m->func_count;
+    long *idx = (long *)malloc((n > 0 ? n : 1) * sizeof(*idx));
+    long *low = (long *)malloc((n > 0 ? n : 1) * sizeof(*low));
+    size_t *scc = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*scc));
+    size_t *walk = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*walk));
+    size_t *next = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*next));
+    unsigned char *on = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    long counter = 0;
+    size_t sp = 0;
+    size_t root;
+
+    if (idx == NULL || low == NULL || scc == NULL || walk == NULL || next == NULL || on == NULL) {
+        free(idx);
+        free(low);
+        free(scc);
+        free(walk);
+        free(next);
+        free(on);
+        return -1;
+    }
+    for (root = 0; root < n; ++root) {
+        idx[root] = -1;
+        rec[root] = 0;
+    }
+    for (root = 0; root < n; ++root) {
+        size_t wp = 0;
+
+        if (idx[root] >= 0) {
+            continue;
+        }
+        idx[root] = low[root] = counter++;
+        scc[sp++] = root;
+        on[root] = 1;
+        next[root] = 0;
+        walk[wp++] = root;
+        while (wp > 0) {
+            size_t v = walk[wp - 1];
+            const cc_ssa_function_t *f = &m->funcs[v];
+            int down = 0;
+
+            while (next[v] < f->instr_count) {
+                const cc_ssa_instr_t *in = &f->instrs[next[v]++];
+                long w;
+
+                if (in->op != CC_SSA_CALL || in->sym == NULL || (w = function_named(m, in->sym)) < 0) {
+                    continue;
+                }
+                if ((size_t)w == v) {
+                    rec[v] = 1;
+                } else if (idx[w] < 0) {
+                    idx[w] = low[w] = counter++;
+                    scc[sp++] = (size_t)w;
+                    on[w] = 1;
+                    next[w] = 0;
+                    walk[wp++] = (size_t)w;
+                    down = 1;
+                    break;
+                } else if (on[w] && idx[w] < low[v]) {
+                    low[v] = idx[w];
+                }
+            }
+            if (down) {
+                continue;
+            }
+            if (low[v] == idx[v]) {
+                /* v roots a group: everything above it on the stack */
+                size_t base = sp;
+                int group;
+
+                do {
+                    base--;
+                } while (scc[base] != v);
+                group = sp - base > 1;
+                for (; sp > base; --sp) {
+                    on[scc[sp - 1]] = 0;
+                    if (group) {
+                        rec[scc[sp - 1]] = 1;
+                    }
+                }
+            }
+            wp--;
+            if (wp > 0 && low[v] < low[walk[wp - 1]]) {
+                low[walk[wp - 1]] = low[v];
+            }
+        }
+    }
+    free(idx);
+    free(low);
+    free(scc);
+    free(walk);
+    free(next);
+    free(on);
+    return 0;
+}
+
+/**
+ * Mark in @p once the static functions of @p m that gcc's
+ * -finline-functions-called-once inlines: called by one call, from another
+ * function, and named nowhere else -- no address taken, no global's
+ * initializer or alias naming it -- and not used, constructor, destructor,
+ * weak or noinline, nor given a section its caller is not in; and not on a
+ * cycle of calls (mark_recursive()), whose frames inlining would grow at
+ * every level of the recursion -- cc's own lower_cast_expr() inlined into
+ * lower_expr() ran a deeply nested expression out of stack.  Inlined, such
+ * a function is called by nothing, and is dropped.
+ *
+ * @param m     the module
+ * @param once  receives 1 or 0 per function of @p m
+ * @return      0, or -1 when out of memory
+ */
+static int mark_called_once(const cc_ssa_module_t *m, unsigned char *once) {
+    const cc_attr_flags_t barred =
+        CC_ATTR_USED | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR | CC_ATTR_WEAK | CC_ATTR_NOINLINE;
+    size_t n = m->func_count;
+    size_t *calls = (size_t *)calloc(n > 0 ? n : 1, sizeof(*calls));
+    long *caller = (long *)malloc((n > 0 ? n : 1) * sizeof(*caller));
+    unsigned char *named = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    unsigned char *rec = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    size_t i;
+
+    if (calls == NULL || caller == NULL || named == NULL || rec == NULL || mark_recursive(m, rec) != 0) {
+        free(calls);
+        free(caller);
+        free(named);
+        free(rec);
+        return -1;
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+        long gi;
+        size_t k;
+
+        if ((gi = function_named(m, g->init_sym)) >= 0) {
+            named[gi] = 1;
+        }
+        if ((gi = function_named(m, g->attr_alias)) >= 0) {
+            named[gi] = 1;
+        }
+        for (k = 0; k < g->init_item_count; ++k) {
+            if ((gi = function_named(m, g->init_items[k].init_sym)) >= 0) {
+                named[gi] = 1;
+            }
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_function_t *f = &m->funcs[i];
+        long gi;
+        size_t k;
+
+        if ((gi = function_named(m, f->attr_alias)) >= 0) {
+            named[gi] = 1;
+        }
+        for (k = 0; k < f->instr_count; ++k) {
+            const cc_ssa_instr_t *in = &f->instrs[k];
+
+            if (in->sym == NULL || (in->op != CC_SSA_CALL && in->op != CC_SSA_GADDR)) {
+                continue;
+            }
+            gi = function_named(m, in->sym);
+            if (gi < 0) {
+                continue;
+            }
+            if (in->op == CC_SSA_GADDR || (size_t)gi == i) {
+                named[gi] = 1;
+            } else {
+                calls[gi]++;
+                caller[gi] = (long)i;
+            }
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_function_t *g = &m->funcs[i];
+        const char *g_sec = g->attr_section;
+        const char *c_sec = calls[i] == 1 ? m->funcs[caller[i]].attr_section : NULL;
+
+        once[i] = (g->storage & CC_STORAGE_STATIC) != 0 && (g->attr_flags & barred) == 0 && g->attr_alias == NULL &&
+                  calls[i] == 1 && !named[i] && !rec[i] &&
+                  (g_sec == NULL || (c_sec != NULL && strcmp(g_sec, c_sec) == 0));
+    }
+    free(calls);
+    free(caller);
+    free(named);
+    free(rec);
+    return 0;
+}
+
 /**
  * Inline the module's small static inline functions (passes/inline.c) bottom-up: a function is
  * rewritten once every function it calls is, so what it copies has its own calls inlined and is
  * folded; then it is folded again, and a call guarded by what an inlined body made constant goes
- * with its dead arm.  A function on a cycle of calls is not inlined into the cycle.
+ * with its dead arm.  A function on a cycle of calls is not inlined into the cycle.  So is a
+ * static function called from one place only (mark_called_once()).
  *
  * @return 0, or -1 when out of memory
  */
@@ -2248,12 +2464,14 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
     size_t n = m->func_count;
     unsigned char *open = (unsigned char *)calloc(n > 0 ? n : 1, 1);
     unsigned char *done = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    unsigned char *once = (unsigned char *)calloc(n > 0 ? n : 1, 1);
     size_t *stack = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*stack));
     size_t *next = (size_t *)malloc((n > 0 ? n : 1) * sizeof(*next));
     size_t root;
     int rc = 0;
 
-    if (open == NULL || done == NULL || stack == NULL || next == NULL) {
+    if (open == NULL || done == NULL || once == NULL || stack == NULL || next == NULL ||
+        mark_called_once(m, once) != 0) {
         rc = -1;
         goto out;
     }
@@ -2289,7 +2507,7 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
                 continue;
             }
             top--;
-            rc = cc_inline_calls(m, fi, done);
+            rc = cc_inline_calls(m, fi, done, once);
             if (rc > 0) {
                 rc = optimize_function(&m->funcs[fi], opt_level);
             }
@@ -2302,6 +2520,7 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
 out:
     free(open);
     free(done);
+    free(once);
     free(stack);
     free(next);
     return rc < 0 ? -1 : 0;
