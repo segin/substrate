@@ -4782,6 +4782,7 @@ static int skip_balanced_parens(parser_t *p) {
 static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2, int *out_has_num2,
                                     char **out_str) {
     int depth = 1;
+    int str_open = 0; /* the token before was the string argument: an adjacent literal continues it */
     if (out_has_num != NULL) {
         *out_has_num = 0;
     }
@@ -4820,8 +4821,41 @@ static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num
                 if (*out_str == NULL) {
                     return -1;
                 }
+                str_open = 1;
+                if (next_tok(p) != 0) {
+                    free(*out_str);
+                    *out_str = NULL;
+                    return -1;
+                }
+                continue;
+            } else if (out_str != NULL && *out_str != NULL && str_open && p->tok.kind == TOK_STR) {
+                /*
+                 * adjacent literals are one string: Linux's __section("__" #name "_sched_class") named
+                 * every scheduling class's section "__", and the linker script's order of them was lost
+                 */
+                char *more = dup_string_token(&p->tok);
+                size_t a = strlen(*out_str);
+                size_t b = more != NULL ? strlen(more) : 0;
+                char *joined = more != NULL ? (char *)realloc(*out_str, a + b + 1) : NULL;
+
+                if (joined == NULL) {
+                    free(more);
+                    free(*out_str);
+                    *out_str = NULL;
+                    return -1;
+                }
+                memcpy(joined + a, more, b + 1);
+                free(more);
+                *out_str = joined;
+                if (next_tok(p) != 0) {
+                    free(*out_str);
+                    *out_str = NULL;
+                    return -1;
+                }
+                continue;
             }
         }
+        str_open = 0;
         if (p->tok.kind == TOK_LPAREN) {
             depth++;
         } else if (p->tok.kind == TOK_RPAREN) {

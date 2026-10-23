@@ -939,6 +939,7 @@ test:
 	sh run_i386_regcache.sh
 	sh run_i386_frame_shapes.sh
 	sh run_alignof_std.sh
+	sh run_attr_string_concat.sh
 	sh run_static_local_tables.sh
 	sh run_static_local_orphans.sh
 	sh run_asm_imm_symbol.sh
