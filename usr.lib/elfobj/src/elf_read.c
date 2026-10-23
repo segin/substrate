@@ -1080,6 +1080,16 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
             } else {
                 target = obj->sections[sec->info];
                 rel_offset = r_offset;
+                if (obj->type != ET_REL && target != NULL && (target->flags & SHF_ALLOC) != 0) {
+                    /*
+                     * kept in an executable or shared object (ld --emit-relocs): r_offset is the place's
+                     * address, as the writer puts it and GNU ld does, not its offset in the section
+                     */
+                    if (r_offset < target->addr) {
+                        return ELF_ERR_FORMAT;
+                    }
+                    rel_offset = r_offset - target->addr;
+                }
             }
             /* Relocations against a compressed section apply to its
              * uncompressed content, so bound r_offset by the uncompressed

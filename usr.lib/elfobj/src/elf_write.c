@@ -642,6 +642,7 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
         size_t sym_index = 0;
         uint8_t *p;
         int reloc_has_addend;
+        uint64_t place;
 
         if (r == NULL) {
             continue;
@@ -674,16 +675,26 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
             sym_index = r->symbol->index + (has_null ? 0 : 1);
         }
 
+        /*
+         * Where it applies: in a relocatable object, the offset in its section; in an executable or shared
+         * object (ld --emit-relocs), the address, as the reader takes it back (runtime_section_for_addr()).
+         * The offset was written there too: Linux's arch/x86/tools/relocs then fixed up the wrong words of
+         * the real-mode trampoline, and setup_real_mode() wrote 0xb0000000 too far.
+         */
+        place = r->offset;
+        if (obj->type != ET_REL && (target->flags & SHF_ALLOC) != 0) {
+            place += target->addr;
+        }
         if (obj->cls == ELFOBJ_CLASS_32) {
             uint32_t info = ELF32_R_INFO((uint32_t)sym_index, r->type);
-            elf__wr32(p + 0, obj->endian, (uint32_t)r->offset);
+            elf__wr32(p + 0, obj->endian, (uint32_t)place);
             elf__wr32(p + 4, obj->endian, info);
             if (with_addend) {
                 elf__wr32(p + 8, obj->endian, (uint32_t)r->addend);
             }
         } else {
             uint64_t info = ELF64_R_INFO((uint64_t)sym_index, r->type);
-            elf__wr64(p + 0, obj->endian, r->offset);
+            elf__wr64(p + 0, obj->endian, place);
             elf__wr64(p + 8, obj->endian, info);
             if (with_addend) {
                 elf__wr64(p + 16, obj->endian, (uint64_t)r->addend);

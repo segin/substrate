@@ -12,5 +12,6 @@ run:
 	./test_got.sh
 	./test_absolute_reloc.sh
 	./test_narrow_reloc.sh
+	./test_emit_relocs.sh
 
 clean:
