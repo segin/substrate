@@ -2894,6 +2894,14 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
                                        : (e->kind == AS_EXPR_SYMBOL &&
                                           local_temp_branch_is_short(ctx, section_name, st, e, x86_code_bits)))) ||
                 raw_is_numeric_local_ref(op->raw));
+    if (st->u.instr.target_in_other_section) {
+        /*
+         * a label of another section, numbered or not, is reached by the long form and a relocation:
+         * Linux's static_cpu_has() `jmp 6f`, 6: in .altinstr_aux, was counted two bytes, and every label
+         * after it in .text three short -- the jumps back to them from .altinstr_aux went mid-instruction
+         */
+        is_local = 0;
+    }
     /*
      * The distance is of 16 bits in 16-bit code and with a `w`, of 32
      * otherwise, and has the operand-size prefix where it is not the
