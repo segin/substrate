@@ -184,6 +184,37 @@ boot-tests `rootfs64.img` — a 4 GiB image labelled `sub-root64`/`sub-boot64`
 whose only kernel is `/vmunix64`. `SKIP_TOOLCHAIN=1` reuses an installed
 64-bit toolchain; `ONLY64="pkg …"` selects which ports to build.
 
+### Substrate's own toolchain on the host
+
+```sh
+./build-native-toolchain.sh             # build into build/native-toolchain/bin
+./build-native-toolchain.sh --install   # build and install under /opt/substrate
+```
+
+Builds Substrate's own C compiler, assembler and linker (`usr.bin/cc`,
+`usr.bin/as`, `usr.bin/ld`) to run on the Linux host, against its libc, and
+checks them by compiling and running a small program. `build.sh` does not
+need them: it uses the GNU cross toolchain. The build runs in a copy of the
+sources under `build/native-toolchain/`, so the tree is left as it was.
+
+`--install` puts `cc` (with a `cpp` link), `as` and `ld` in
+`/opt/substrate/native/bin` and the compiler's headers in
+`/opt/substrate/native/lib/substratecc/include`. Run `cc` by its full path
+(`/opt/substrate/native/bin/cc`) and it uses the `as` and `ld` beside it;
+run as a bare `cc` from `PATH`, it uses the first `as` and `ld` in `PATH`.
+`AS` and `LD` in the environment override either. The tools are kept out of
+`/opt/substrate/bin` on purpose: the host's `gcc` would find an unprefixed
+`as` or `ld` there and break host builds.
+
+| Variable | Effect |
+|---|---|
+| `PREFIX=dir` | Install under `dir/native` (default `/opt/substrate`). |
+| `BUILD_DIR=dir` | Build in `dir` (default `build/native-toolchain`). |
+| `JOBS=n` | Parallel jobs (default: `nproc`). |
+| `HOST_CC=cc` | The host compiler to build with (default `cc`). |
+
+`cc` builds for the host's word size; `-m32` or `-m64` picks the other.
+
 ### Rebuilding parts
 
 The kernel alone (the project always cleans before a kernel build):
@@ -331,6 +362,7 @@ docs/           changelog, port catalogue, subsystem specifications
 tools/ scripts/ build helpers
 build.sh        full build
 build-rootfs.sh image assembly
+build-native-toolchain.sh  substrate's cc, as and ld for the host
 run-networking.sh  QEMU launcher
 ```
 
