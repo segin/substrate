@@ -10,6 +10,11 @@
 # Linux's static keys put an asm goto in most functions, and every local
 # of intel_pmu_init() stayed in memory, 1.6 KiB of its frame.
 #
+# A buffer nothing reads loses its stores and its zeroing memset, and
+# with them its place in the frame: under -ftrivial-auto-var-init=zero,
+# Linux's parse_elf_properties() kept a 1 KiB buffer the configuration
+# had made dead.
+#
 # codegen/frame_slots.c checks the functions' results against gcc.
 set -eu
 
@@ -42,5 +47,25 @@ check() {
 "$CC_BIN" -m32 -O2 -S -o "$CC_TMP/fs.s" "$ROOT/tests/usr.bin/cc/codegen/frame_slots.c"
 check "$CC_TMP/fs.s" chain_blocks 96 "values live across blocks share slots"
 check "$CC_TMP/fs.s" chain_asm_goto 96 "locals made values under an asm goto"
+cat > "$CC_TMP/unread.c" <<'END'
+int probe(int *p);
+
+int unread(int x) {
+	union {
+		int head;
+		char data[1024];
+	} note;
+
+	if (1 || !x)
+		return 0;
+	return probe(&note.head);
+}
+END
+if "$CC_BIN" -m32 -O2 -ftrivial-auto-var-init=zero -S -o "$CC_TMP/unread.s" "$CC_TMP/unread.c"; then
+	check "$CC_TMP/unread.s" unread 96 "a buffer nothing reads goes"
+else
+	echo "FAIL unread: cc rejected it"
+	status=1
+fi
 [ "$status" -eq 0 ] && echo "run_i386_frame_slots: ok"
 exit "$status"

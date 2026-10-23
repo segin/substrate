@@ -4,8 +4,13 @@
  * A local is a stack slot (STACKALLOC), and a value kept in one is out of
  * the folder's sight.  When a slot's address does not escape -- it is used
  * only as the address of loads and stores, directly or through moves and
- * constant offsets -- three things are safe here:
+ * constant offsets -- four things are safe here:
  *
+ *  - a slot nothing loads from loses its stores and its zeroing memset,
+ *    whatever their sizes and offsets (drop_unread_slots()), and then the
+ *    slot itself: -ftrivial-auto-var-init=zero zeroes every local, and
+ *    Linux's parse_elf_properties() kept a 1 KiB buffer it never reads
+ *    once the configuration made the function return at once;
  *  - a slot stored once is read as the value stored, by every load after
  *    the store in the stream (a load before it reads an uninitialized
  *    local), and a slot nothing loads loses its stores
@@ -324,7 +329,66 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
     return 0;
 }
 
-/* ---- (a) a slot stored once is read as its value ---- */
+/* ---- (a) a slot nothing reads goes, and one stored once is read as its value ---- */
+
+/**
+ * Drop every store into, and every zeroing memset of, a slot whose address does not escape and that nothing
+ * loads from, at any offset or size: its contents are never read.  The STACKALLOC, used by nothing then, goes
+ * with the dead definitions.  An asm goto does not matter: its jump reads no memory it is not given.
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int drop_unread_slots(cc_ssa_function_t *f) {
+    addr_info_t a;
+    unsigned char *read;
+    size_t i;
+    size_t w;
+    int changed = 0;
+
+    if (f->value_count <= 0) {
+        return 0;
+    }
+    if (addr_info_build(&a, f, 1, 0) != 0) {
+        return -1;
+    }
+    read = (unsigned char *)calloc((size_t)f->value_count, 1);
+    if (read == NULL) {
+        addr_info_free(&a);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_LOAD && is_value(f, in->lhs) && a.slot[in->lhs] >= 0) {
+            read[a.slot[in->lhs]] = 1;
+        }
+    }
+    w = 0;
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        int s = -1;
+        long long n;
+
+        if (in->op == CC_SSA_STORE && is_value(f, in->lhs)) {
+            s = a.slot[in->lhs];
+        } else if (is_zeroing_memset(&a, in, &n) && is_value(f, in->args[0])) {
+            s = a.slot[in->args[0]];
+        }
+        if (s >= 0 && !a.escapes[s] && !read[s]) {
+            cc_ssa_instr_free(in);
+            changed = 1;
+            continue;
+        }
+        if (w != i) {
+            f->instrs[w] = f->instrs[i];
+        }
+        w++;
+    }
+    f->instr_count = w;
+    free(read);
+    addr_info_free(&a);
+    return changed;
+}
 
 /**
  * Forward each slot stored exactly once, directly and at one size, into its loads after the store, and drop
@@ -1912,12 +1976,13 @@ done:
 }
 
 int cc_optimize_slots(cc_ssa_function_t *f) {
-    int r1 = forward_slot_copies(f);
+    int r0 = drop_unread_slots(f);
+    int r1 = r0 < 0 ? -1 : forward_slot_copies(f);
     int r2 = r1 < 0 ? -1 : scalarize_slots(f);
     int r3 = r2 < 0 ? -1 : slot_value_sets(f);
 
-    if (r1 < 0 || r2 < 0 || r3 < 0) {
+    if (r0 < 0 || r1 < 0 || r2 < 0 || r3 < 0) {
         return -1;
     }
-    return r1 > 0 || r2 > 0 || r3 > 0;
+    return r0 > 0 || r1 > 0 || r2 > 0 || r3 > 0;
 }

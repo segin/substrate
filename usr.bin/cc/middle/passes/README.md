@@ -12,7 +12,8 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   nothing refers to any more are dropped.
 - `mem.c`: what is known of the function's own stack slots whose
   addresses do not escape (`cc_optimize_slots()`, run in the -O1 loop):
-  a slot stored once read as the value stored, a structure slot split
+  a slot nothing loads from dropped with its stores and its zeroing
+  memset, a slot stored once read as the value stored, a structure slot split
   into one slot per field (its zeroing memset into stores of 0), and a
   compare of a slot only stored constants folded where the set of them
   it can hold, followed over the blocks and narrowed by branches on it,
