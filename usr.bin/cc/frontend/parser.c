@@ -4838,6 +4838,36 @@ static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num
     return 0;
 }
 
+/**
+ * The one argument of an attribute that takes a constant expression -- `aligned(((1UL) << 12))`, Linux's
+ * __aligned(PAGE_SIZE) -- read whole and evaluated; `()` is none.  The argument scan before took the first
+ * number at the outer level: `(((1UL) << 12))` had none and was taken for no argument, and `(1UL) << 6`
+ * for 6.
+ *
+ * @return 0 (with @p *out_has_num 0 for none), or -1 with the diagnostic set
+ */
+static int parse_gnu_const_attr_argument(parser_t *p, long *out_num, int *out_has_num) {
+    cc_expr_t *expr;
+
+    *out_num = 0;
+    *out_has_num = 0;
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+    if (p->tok.kind == TOK_RPAREN) {
+        return next_tok(p);
+    }
+    expr = parse_cond(p);
+    if (expr == NULL) {
+        return -1;
+    }
+    if (eval_const_array_bound_expr(p, expr, out_num) == 0) {
+        *out_has_num = 1;
+    }
+    free_expr(expr);
+    return expect(p, TOK_RPAREN, "expected ')' after the attribute's argument");
+}
+
 static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2,
                                            int *out_has_num2) {
     int depth = 0;
@@ -5037,6 +5067,11 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
             out_attrs->cleanup_fn = fn;
         } else {
             free(fn);
+        }
+    } else if (is_aligned && p->tok.kind == TOK_LPAREN) {
+        if (parse_gnu_const_attr_argument(p, &num, &has_num) != 0) {
+            free(sec);
+            return -1;
         }
     } else if (p->tok.kind == TOK_LPAREN) {
         int rc = is_format ? parse_gnu_format_attr_arguments(p, &num, &has_num, &num2, &has_num2)
