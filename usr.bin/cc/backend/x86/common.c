@@ -2900,7 +2900,9 @@ static const char *asm_pick_reg(int is_64bit, const char *constraint, int op_siz
     if (is_64bit) {
         order = order64_r;
         n = sizeof(order64_r) / sizeof(order64_r[0]);
-    } else if (cc_asm_constraint_has(constraint, 'q') || op_size == 1) {
+    } else if (cc_asm_constraint_has(constraint, 'q') || op_size == 1 ||
+               (constraint != NULL && strncmp(constraint, "=@cc", 4) == 0)) {
+        /* (a flag output is set by setcc, a byte: a register that has one) */
         order = order32_q;
         n = sizeof(order32_q) / sizeof(order32_q[0]);
     } else {
@@ -3344,6 +3346,22 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
     }
 
+    for (i = 0; i < out_n; ++i) {
+        /*
+         * a flag output ("=@ccz"): the condition the asm leaves in the flags, set in the output's register
+         * first, before the moves below (which leave the flags be).  Linux 7.3's try_cmpxchg() has no other
+         * way out of its asm: with no setz, mutex_lock()'s fast path failed at random and the kernel tried
+         * to sleep in early boot.
+         */
+        const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
+
+        if (c != NULL && strncmp(c, "=@cc", 4) == 0 && c[4] != '\0' && out_regs[i] != NULL) {
+            /* (and the rest of the register clear: the output may be wider than the byte set) */
+            fprintf(fp, "\tset%s %s\n", c + 4, reg_alias_for_size(out_regs[i], is_64bit, 1));
+            fprintf(fp, "\tmovzbl %s, %s\n", reg_alias_for_size(out_regs[i], is_64bit, 1),
+                    reg_alias_for_size(out_regs[i], is_64bit, 4));
+        }
+    }
     for (i = 0; i < out_n; ++i) {
         if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {
             int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
