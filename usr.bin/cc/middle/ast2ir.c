@@ -37,7 +37,8 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
 static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_list, const char *member_name);
 static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                                     const cc_expr_t *e);
-static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g);
+static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, int file_scope_names,
+                                        cc_ssa_global_t *g);
 static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s);
 static const cc_ctype_t *member_decl_ctype(const cc_struct_member_t *m);
 
@@ -7867,14 +7868,17 @@ static int is_zero_initializer_expr(const cc_expr_t *e) {
         return is_zero_initializer_expr(e->lhs);
     case CC_EXPR_BIN:
         return e->op == CC_BIN_COMMA ? is_zero_initializer_expr(e->rhs) : 0;
-    case CC_EXPR_INIT_LIST:
-        if (e->arg_count == 0) {
-            return 1;
+    case CC_EXPR_INIT_LIST: {
+        /* every item zero: `{0, 0}` is `{0}` (an item of another kind, a designator's, is not taken so) */
+        size_t i;
+
+        for (i = 0; i < e->arg_count; ++i) {
+            if (!is_zero_initializer_expr(e->args[i])) {
+                return 0;
+            }
         }
-        if (e->arg_count == 1) {
-            return is_zero_initializer_expr(e->args[0]);
-        }
-        return 0;
+        return 1;
+    }
     case CC_EXPR_GENERIC: {
         const cc_expr_t *sel = selected_generic_expr(e);
         return sel != NULL ? is_zero_initializer_expr(sel) : 0;
@@ -9134,6 +9138,36 @@ static int lower_nested_trampoline(const cc_translation_unit_t *tu, cc_ssa_funct
  * @param diag            receives an error
  * @return                0, or -1 on error
  */
+/**
+ * Whether expression @p e names anything of block scope -- a variable, a block-scope static or extern, a
+ * parameter -- or holds a statement: what a file-scope initializer's layout, which takes a name for its
+ * file-scope symbol, cannot have.
+ */
+static int expr_names_block_scope(var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e) {
+    size_t i;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->stmt_expr_stmts != NULL || e->kind == CC_EXPR_STMT) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL && var_find_visible(vars, var_count, e->ident, depth) >= 0) {
+        return 1;
+    }
+    if (expr_names_block_scope(vars, var_count, depth, e->lhs) ||
+        expr_names_block_scope(vars, var_count, depth, e->rhs) ||
+        expr_names_block_scope(vars, var_count, depth, e->third)) {
+        return 1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (expr_names_block_scope(vars, var_count, depth, e->args[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
                            size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
                            cc_diag_t *diag) {
@@ -9271,7 +9305,8 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             return -1;
         }
         if (is_array_obj && needs_runtime_init) {
-            int rc = static_local_array_init_data(tu, s, &g);
+            int rc = static_local_array_init_data(tu, s, !expr_names_block_scope(*vars, *var_count, depth, s->expr),
+                                                  &g);
             if (rc < 0) {
                 free(g.name);
                 free(g.attr_section);
@@ -13974,7 +14009,8 @@ static int flatten_record_array_init(const cc_translation_unit_t *tu, int struct
     return 0;
 }
 
-static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, cc_ssa_global_t *g) {
+static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, int file_scope_names,
+                                        cc_ssa_global_t *g) {
     const cc_ctype_t *scalar;
     long *dims;
     int nd;
@@ -13988,12 +14024,40 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
     int d;
     int rc = 0;
 
-    if (s->expr == NULL || s->expr->kind != CC_EXPR_INIT_LIST) {
+    if (s->expr == NULL || (s->expr->kind != CC_EXPR_INIT_LIST && s->expr->kind != CC_EXPR_STR)) {
         return 0;
     }
     dims = ct_array_bounds(stmt_decl_ctype(s), &nd, &scalar);
     if (nd < 0) {
         return -1;
+    }
+    if (s->expr->kind == CC_EXPR_STR) {
+        /* a character array from a string literal: its bytes, padded with zeros, as at file scope */
+        scalar_size = cc_ct_size(scalar, tu);
+        if (nd != 1 || dims[0] <= 0 || scalar_size <= 0 || scalar_size > LONG_MAX / dims[0]) {
+            goto out;
+        }
+        buf = (unsigned char *)calloc((size_t)(scalar_size * dims[0]), 1);
+        if (buf == NULL) {
+            rc = -1;
+            goto out;
+        }
+        memset(&quiet, 0, sizeof(quiet));
+        if (fill_fixed_char_array_from_string(s->expr, scalar, scalar_size, dims[0], 0, buf, scalar_size * dims[0],
+                                              &quiet) != 0) {
+            goto out;
+        }
+        if (build_global_stream_from_bytes(g, buf, scalar_size * dims[0], NULL, 0, &quiet) != 0) {
+            rc = -1;
+            goto out;
+        }
+        ssa_global_set_bytes(g, scalar_size * dims[0]);
+        g->has_init = 1;
+        rc = 1;
+        goto out;
+    }
+    if (s->expr->kind != CC_EXPR_INIT_LIST) {
+        goto out;
     }
     if (nd == 1 && ct_record_id(scalar) >= 0 && tu->structs[ct_record_id(scalar)].wide_bits > 0) {
         /* an integer wider than 64 bits is a structure of limbs, laid out as file-scope arrays of them are */
@@ -14021,8 +14085,12 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
         rc = 1;
         goto out;
     }
-    if (nd == 0 || !cc_ct_is_arithmetic(scalar) || ct_record_id(scalar) >= 0) {
-        /* aggregates and pointers (string tables) keep their own initialization code */
+    if (nd == 0 || (!cc_ct_is_arithmetic(scalar) && !(file_scope_names && ct_is_pointer(scalar))) ||
+        ct_record_id(scalar) >= 0) {
+        /*
+         * aggregates keep their own initialization code; so do pointers but where every name the initializer
+         * uses is of file scope (a string table, a table of file-scope arrays), the symbol it is laid out with
+         */
         goto out;
     }
     scalar_size = cc_ct_size(scalar, tu);
