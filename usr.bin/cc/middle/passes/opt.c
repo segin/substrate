@@ -1211,6 +1211,100 @@ static void keep_named(const cc_ssa_module_t *m, const char *sym, unsigned char 
     }
 }
 
+/** Whether @p sym (a symbol, perhaps with an offset) is @p name. */
+static int sym_is(const char *sym, const char *name) {
+    size_t n;
+
+    if (sym == NULL || name == NULL) {
+        return 0;
+    }
+    n = sym_name_len(sym);
+    return strlen(name) == n && strncmp(name, sym, n) == 0;
+}
+
+/** Whether global @p g's initializer names @p name. */
+static int global_names(const cc_ssa_global_t *g, const char *name) {
+    size_t k;
+
+    if (sym_is(g->init_sym, name) || sym_is(g->attr_alias, name)) {
+        return 1;
+    }
+    for (k = 0; k < g->init_item_count; ++k) {
+        if (sym_is(g->init_items[k].init_sym, name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Drop the block-scope statics (and their guards) of the functions dropped: those cc made, named
+ * __cc_static_*, that no function left and no global kept names.  A static inline in a header that
+ * nothing calls left its tables behind, and a table of pointers in .data has relocations: the vDSO,
+ * which must have none, got of_overlay_action_name()'s.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int remove_orphan_static_locals(cc_ssa_module_t *m) {
+    static const char prefix[] = "__cc_static_";
+    unsigned char *keep;
+    size_t i;
+    size_t w = 0;
+    int grew = 1;
+
+    if (m->global_count == 0) {
+        return 0;
+    }
+    keep = (unsigned char *)calloc(m->global_count, 1);
+    if (keep == NULL) {
+        return -1;
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        const char *name = m->globals[i].name;
+        size_t fi;
+
+        if (name == NULL || strncmp(name, prefix, sizeof(prefix) - 1) != 0) {
+            keep[i] = 1;
+            continue;
+        }
+        for (fi = 0; fi < m->func_count && !keep[i]; ++fi) {
+            const cc_ssa_function_t *f = &m->funcs[fi];
+            size_t k;
+
+            for (k = 0; k < f->instr_count && !keep[i]; ++k) {
+                keep[i] = sym_is(f->instrs[k].sym, name);
+            }
+        }
+    }
+    /* and what a kept one's initializer names, until no more is */
+    while (grew) {
+        grew = 0;
+        for (i = 0; i < m->global_count; ++i) {
+            size_t j;
+
+            for (j = 0; !keep[i] && j < m->global_count; ++j) {
+                if (keep[j] && j != i && global_names(&m->globals[j], m->globals[i].name)) {
+                    keep[i] = 1;
+                    grew = 1;
+                }
+            }
+        }
+    }
+    for (i = 0; i < m->global_count; ++i) {
+        if (!keep[i]) {
+            cc_ssa_global_free(&m->globals[i]);
+            continue;
+        }
+        if (w != i) {
+            m->globals[w] = m->globals[i];
+        }
+        w++;
+    }
+    m->global_count = w;
+    free(keep);
+    return 0;
+}
+
 /**
  * Drop the static functions nothing refers to, as gcc does: one marked
  * `static inline` at every level, any static one from -O1.  Kept are the
@@ -1287,7 +1381,7 @@ static int remove_unused_static_functions(cc_ssa_module_t *m, int opt_level) {
     m->func_count = w;
     free(keep);
     free(stack);
-    return 0;
+    return remove_orphan_static_locals(m);
 }
 
 /**

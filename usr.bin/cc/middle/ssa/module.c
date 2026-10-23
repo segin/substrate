@@ -7,6 +7,25 @@ void cc_ssa_module_init(cc_ssa_module_t *m) {
     memset(m, 0, sizeof(*m));
 }
 
+void cc_ssa_global_free(cc_ssa_global_t *g) {
+    size_t j;
+
+    if (g == NULL) {
+        return;
+    }
+    free(g->name);
+    free(g->attr_section);
+    free(g->attr_alias);
+    free(g->init_str);
+    free(g->init_sym);
+    for (j = 0; j < g->init_item_count; ++j) {
+        free(g->init_items[j].init_str);
+        free(g->init_items[j].init_sym);
+    }
+    free(g->init_items);
+    memset(g, 0, sizeof(*g));
+}
+
 void cc_ssa_module_free(cc_ssa_module_t *m) {
     size_t i;
 
@@ -15,17 +34,7 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
     }
 
     for (i = 0; i < m->global_count; ++i) {
-        size_t j;
-        free(m->globals[i].name);
-        free(m->globals[i].attr_section);
-        free(m->globals[i].attr_alias);
-        free(m->globals[i].init_str);
-        free(m->globals[i].init_sym);
-        for (j = 0; j < m->globals[i].init_item_count; ++j) {
-            free(m->globals[i].init_items[j].init_str);
-            free(m->globals[i].init_items[j].init_sym);
-        }
-        free(m->globals[i].init_items);
+        cc_ssa_global_free(&m->globals[i]);
     }
     free(m->globals);
 

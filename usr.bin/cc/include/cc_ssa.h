@@ -332,6 +332,9 @@ void cc_ssa_instr_free(cc_ssa_instr_t *in);
 void cc_ssa_function_init(cc_ssa_function_t *f);
 void cc_ssa_function_free(cc_ssa_function_t *f);
 
+/** Free what global @p g owns, and clear it. */
+void cc_ssa_global_free(cc_ssa_global_t *g);
+
 /**
  * Add a value to a function: signed, and a word (the pointer size), or a
  * double for CC_VAL_F64, until its definition says otherwise.
