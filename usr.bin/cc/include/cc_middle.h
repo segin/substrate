@@ -44,8 +44,9 @@ int cc_optimize_slots(cc_ssa_function_t *f);
 
 /**
  * Make each slot of @p f whose address does not escape, and which is only
- * loaded and stored whole at one size, a value: each store sets it, each
- * load reads it, and its STACKALLOC is left to dead-code elimination.  A
+ * loaded and stored whole at one size, a value: each store sets it (a
+ * store of a wider integer truncated), each load reads it (a wider load
+ * extended), and its STACKALLOC is left to dead-code elimination.  A
  * value lives in a register where the back end can keep it, where a slot
  * is reloaded at every use.  Run after cc_optimize_slots(), which reasons
  * about slots, has done its work (passes/mem.c).

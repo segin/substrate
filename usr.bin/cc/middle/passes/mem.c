@@ -1814,6 +1814,22 @@ static int word_bits(const cc_ssa_instr_t *in) {
 }
 
 /**
+ * Whether @p in stores the low 1, 2 or 4 bytes of a wider integer, up to a word: an int stored to a char or a
+ * _Bool local -- Linux's copy_fpstate_to_sigframe() stores a compare to its bool ia32_fxstate, and the call
+ * under it that must be proven dead stayed.
+ */
+static int narrowing_store(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
+    uint32_t vsize;
+
+    if (in->op != CC_SSA_STORE || (in->imm != 1 && in->imm != 2 && in->imm != 4) || !is_value(f, in->rhs) ||
+        cc_ssa_value_class(f, in->rhs) != CC_VAL_I64) {
+        return 0;
+    }
+    vsize = cc_ssa_value_size(f, in->rhs);
+    return vsize > (uint32_t)in->imm && 8 * vsize <= (uint32_t)word_bits(in);
+}
+
+/**
  * Whether @p in loads 1 or 2 bytes into a wider integer, extending them (zload or load): a char or short
  * local read as an int.  Up to a word: a wider result is a pair of words on i386.
  */
@@ -1881,7 +1897,7 @@ int cc_promote_slots(cc_ssa_function_t *f) {
         v = in->op == CC_SSA_STORE ? in->rhs : in->dst;
         if (in->lhs != s || (in->imm != 1 && in->imm != 2 && in->imm != 4 && in->imm != 8) ||
             (long)in->imm != slot_size(&a, s) || (size[s] != 0 && size[s] != (long)in->imm) || !is_value(f, v) ||
-            (cc_ssa_value_size(f, v) != (uint32_t)in->imm && !widening_load(f, in)) ||
+            (cc_ssa_value_size(f, v) != (uint32_t)in->imm && !widening_load(f, in) && !narrowing_store(f, in)) ||
             (size[s] != 0 && cls[s] != (int)cc_ssa_value_class(f, v))) {
             bad[s] = 1;
             continue;
@@ -1906,7 +1922,10 @@ int cc_promote_slots(cc_ssa_function_t *f) {
             var[s] = nv;
         }
     }
-    /* a store sets the value, a load reads it; a load wider than the slot extends it */
+    /*
+     * a store sets the value, a load reads it; a load wider than the slot extends it, and a store of a wider
+     * value truncates it, extended as the slot's own values are held
+     */
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
 
@@ -1933,6 +1952,29 @@ int cc_promote_slots(cc_ssa_function_t *f) {
                 }
                 in->op = CC_SSA_SHR;
                 in->lhs = t;
+                in->imm = k;
+            } else if (in->op == CC_SSA_STORE && narrowing_store(f, in)) {
+                /* var = (value << k) >> k */
+                int k = word_bits(in) - 8 * (int)in->imm;
+                int t = cc_ssa_function_new_value(f, CC_VAL_I64);
+                cc_ssa_instr_t sh = plain_instr(CC_SSA_SHL);
+
+                if (t < 0) {
+                    rc = -1;
+                    goto done;
+                }
+                cc_ssa_value_set_size(f, t, cc_ssa_value_size(f, in->rhs));
+                sh.dst = t;
+                sh.lhs = in->rhs;
+                sh.imm = k;
+                if (ilist_put(&out, &sh) != 0) {
+                    rc = -1;
+                    goto done;
+                }
+                in->dst = var[in->lhs];
+                in->op = CC_SSA_SHR;
+                in->lhs = t;
+                in->is_unsigned = cc_ssa_value_is_unsigned(f, in->dst);
                 in->imm = k;
             } else if (in->op == CC_SSA_STORE) {
                 in->dst = var[in->lhs];
