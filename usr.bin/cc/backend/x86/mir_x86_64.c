@@ -87,6 +87,38 @@ static void copy_bytes(xsel_t *s, xop_t from, xop_t to, long size) {
     }
 }
 
+/** Whether ABI byte @p abi passes a structure in general registers only: AGG_REG with no SSE eightbyte. */
+static int agg_in_gprs(unsigned char abi) {
+    return CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG && (abi & (CC_ABI_SSE0 | CC_ABI_SSE1 | CC_ABI_VEC128)) == 0;
+}
+
+/** Whether an eightbyte of @p bytes bytes is one access (1, 2, 4 or 8 bytes). */
+static int whole_piece(long bytes) {
+    return bytes == 1 || bytes == 2 || bytes == 4 || bytes == 8;
+}
+
+/**
+ * Load the eightbytes of the structure at IR address @p v, @p size bytes, into the general registers from
+ * argument register @p first on: each zero-extended past its bytes, as the old emitter loads them.
+ */
+static void load_agg_gprs(xsel_t *s, int v, long size, size_t first, unsigned *used) {
+    long k;
+
+    for (k = 0; k * 8 < size; ++k) {
+        long bytes = size - k * 8 > 8 ? 8 : size - k * 8;
+        int reg = x64_arg_regs[first + (size_t)k];
+        xop_t m = xs_mem_at(s, v, 8 * k, (int)bytes);
+        xop_t d = xop_reg(reg, bytes == 8 ? 8 : 4);
+
+        if (bytes == 8 || bytes == 4) {
+            xs_emit(s, XI_MOV, (int)bytes, 2, &m, &d, NULL);
+        } else {
+            xs_emit(s, XI_MOVZX, 4, 2, &m, &d, NULL);
+        }
+        *used |= XR_BIT(reg);
+    }
+}
+
 /** A call: stack arguments stored below the call's %rsp, register ones moved in, the result out of %rax. */
 static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
@@ -128,7 +160,12 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             continue;
         }
         if (v < 0 || cc_ssa_value_class(f, v) == CC_VAL_F64 || locs[a].kind == ABI_LOC_XMM ||
-            (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM) ||
+            (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM &&
+             !agg_in_gprs(abi)) ||
+            (agg_in_gprs(abi) && locs[a].kind == ABI_LOC_GPR &&
+             (locs[a].index + (locs[a].size + 7) / 8 > 6 || !whole_piece((long)locs[a].size > 8
+                                                                        ? (long)locs[a].size - 8
+                                                                        : (long)locs[a].size))) ||
             (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT && f->value_ty[v].kind == CC_TY_AGG && !s->is_addr[v])) {
             free(locs);
             XS_NOPE(s);
@@ -148,7 +185,8 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             continue;
         }
         at = xop_mem(XR_SP, (long long)locs[a].index, 8);
-        if (in->call_arg_abi != NULL && CC_ABI_KIND(in->call_arg_abi[a]) == CC_CALL_ARG_ABI_AGG_MEM) {
+        if (in->call_arg_abi != NULL && (CC_ABI_KIND(in->call_arg_abi[a]) == CC_CALL_ARG_ABI_AGG_MEM ||
+                                         agg_in_gprs(in->call_arg_abi[a]))) {
             /* a structure passed by value: a copy of it */
             copy_bytes(s, xs_mem_at(s, v, 0, 8), at, (long)locs[a].size);
         } else {
@@ -169,6 +207,11 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t d;
 
         if (locs[a].kind != ABI_LOC_GPR) {
+            continue;
+        }
+        if (in->call_arg_abi != NULL && agg_in_gprs(in->call_arg_abi[a])) {
+            /* a structure in registers: its eightbytes, from where the value points */
+            load_agg_gprs(s, in->args[a], (long)locs[a].size, locs[a].index, &used);
             continue;
         }
         d = xop_reg(x64_arg_regs[locs[a].index], 8);
@@ -259,6 +302,43 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
         }
         return;
     }
+    if (agg_in_gprs(abi)) {
+        /*
+         * a structure in registers: its eightbytes into the storage lowering gave it (lhs), whose address is
+         * the value -- struct timespec64 is passed so throughout Linux, and every function that took one kept
+         * all its values in memory, frames past the 16 KiB of a kernel stack among them
+         */
+        int o = in->lhs >= 0 ? s->obj[in->lhs] : -1;
+        xop_t m;
+
+        if (o < 0) {
+            XS_NOPE(s);
+        }
+        if (loc.kind == ABI_LOC_GPR) {
+            long k;
+
+            for (k = 0; k * 8 < bytes; ++k) {
+                long part = bytes - k * 8 > 8 ? 8 : bytes - k * 8;
+                xop_t r = xop_reg(k == 0 ? s->param_lo[pi] : s->param_hi[pi], (int)part);
+                xop_t to = xop_frame(o, 8 * k, (int)part);
+
+                if (r.reg == XR_NONE || !whole_piece(part)) {
+                    XS_NOPE(s);
+                }
+                xs_emit(s, XI_MOV, (int)part, 2, &r, &to, NULL);
+            }
+        } else if (loc.kind == ABI_LOC_STACK) {
+            int st = xf_new_obj(&s->xf, XF_FIXED, 8, 8, 16 + (long)loc.index);
+
+            copy_bytes(s, xop_frame(st, 0, 8), xop_frame(o, 0, 8), bytes);
+        } else {
+            XS_NOPE(s);
+        }
+        m = xop_frame(o, 0, 8);
+        d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
+        xs_emit(s, XI_LEA, 8, 2, &m, &d, NULL);
+        return;
+    }
     if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT) {
         XS_NOPE(s);
     }
@@ -335,7 +415,7 @@ static const char *x64_function_ok(const xsel_t *s) {
 
         if (f->param_types[i] == CC_VAL_F64 ||
             (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && abi != CC_CALL_ARG_ABI_ZERO &&
-             CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM)) {
+             CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM && !agg_in_gprs(abi))) {
             return "a parameter's ABI";
         }
     }
@@ -365,7 +445,7 @@ static int x64_begin(xsel_t *s) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
         abi_loc_t loc;
 
-        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT) {
+        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && !agg_in_gprs(abi)) {
             continue;
         }
         loc = abi64_param_loc(f, (int)i, 0);
@@ -375,6 +455,13 @@ static int x64_begin(xsel_t *s) {
 
             xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);
             s->param_lo[i] = to.reg;
+            if (agg_in_gprs(abi) && loc.size > 8) {
+                /* a structure's second eightbyte, in the next register */
+                from = xop_reg(x64_arg_regs[loc.index + 1], 8);
+                to = xs_temp(s);
+                xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);
+                s->param_hi[i] = to.reg;
+            }
         }
     }
     return s->xf.oom ? -1 : 0;
