@@ -231,6 +231,16 @@ code.
 i386: keep the stack aligned to 2^n bytes at a call, n from 2 to 12,
 rather than the psABI's 16; with 2 or 3 a function's frame is not padded
 for it, nor a call's arguments.
+.It Fl msse , Fl mno-sse
+On i386, whether SSE instructions may be used.
+On x86-64,
+.Fl mno-sse
+leaves the vector registers alone where nothing uses them: a variadic
+function does not save them for
+.Xr stdarg 3 ,
+which it otherwise does only when its caller says in
+.Li %al
+that it passed any, as gcc does.
 .It Fl mcmodel Ns = Ns Cm small | kernel | medium | large
 x86-64: where the code and its data are linked.
 With

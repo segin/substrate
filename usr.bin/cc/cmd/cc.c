@@ -96,6 +96,7 @@ typedef struct {
   int no_unwind_tables; /* -fno-asynchronous-unwind-tables, -fno-unwind-tables */
   int i386_stack_boundary; /* -mpreferred-stack-boundary=N: 2^N, or 0 */
   int cmodel_kernel; /* -mcmodel=kernel */
+  int no_sse;        /* -mno-sse, the last of it and -msse */
 
   const char *std;
   const char *opt_level;
@@ -187,6 +188,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->unwind_tables = !o->no_unwind_tables;
   out->i386_stack_boundary = o->i386_stack_boundary;
   out->cmodel_kernel = o->cmodel_kernel;
+  out->no_sse = o->no_sse;
 }
 
 
@@ -831,7 +833,7 @@ static void usage(const char *prog) {
           "  -m32/-m64          target ABI (i386 or x86_64)\n"
           "  -march=<arch>      ISA level control (e.g. i386/i486/i586/i686)\n"
           "  -msse2/-mno-sse2   i386 SSE2 opcode enable/disable\n"
-          "  -msse/-mno-sse     i386 SSE opcode enable/disable\n"
+          "  -msse/-mno-sse     SSE opcodes (i386); -mno-sse, no SSE register touched (x86-64)\n"
           "  -mmmx/-mno-mmx     i386 MMX opcode enable/disable\n"
           "  -mavx/-mno-avx     x86 AVX feature macro enable/disable\n"
           "  -mavx2/-mno-avx2   x86 AVX2 feature macro enable/disable\n"
@@ -1215,6 +1217,9 @@ static int opt_isa_feature(cc_opts_t *o, const driver_opt_t *d, const char *as, 
     return -1;
   }
   *(int *)((char *)o + d->field) = on;
+  if (d->field == offsetof(cc_opts_t, i386_has_sse)) {
+    o->no_sse = !on;
+  }
   return 0;
 }
 

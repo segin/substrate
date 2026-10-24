@@ -1255,14 +1255,20 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             fprintf(fp, "\tmovq %%rcx, %d(%%rbp)\n", va_regsave_off + 24);
             fprintf(fp, "\tmovq %%r8, %d(%%rbp)\n", va_regsave_off + 32);
             fprintf(fp, "\tmovq %%r9, %d(%%rbp)\n", va_regsave_off + 40);
-            fprintf(fp, "\tmovdqu %%xmm0, %d(%%rbp)\n", va_regsave_off + 48);
-            fprintf(fp, "\tmovdqu %%xmm1, %d(%%rbp)\n", va_regsave_off + 64);
-            fprintf(fp, "\tmovdqu %%xmm2, %d(%%rbp)\n", va_regsave_off + 80);
-            fprintf(fp, "\tmovdqu %%xmm3, %d(%%rbp)\n", va_regsave_off + 96);
-            fprintf(fp, "\tmovdqu %%xmm4, %d(%%rbp)\n", va_regsave_off + 112);
-            fprintf(fp, "\tmovdqu %%xmm5, %d(%%rbp)\n", va_regsave_off + 128);
-            fprintf(fp, "\tmovdqu %%xmm6, %d(%%rbp)\n", va_regsave_off + 144);
-            fprintf(fp, "\tmovdqu %%xmm7, %d(%%rbp)\n", va_regsave_off + 160);
+            /*
+             * the vector registers only when the caller says (%al) it passed any, as gcc saves them, and
+             * never under -mno-sse: Linux's _printk() ran movdqu with SSE off and took #UD
+             */
+            if (!cc_options_current()->no_sse) {
+                int k;
+
+                fprintf(fp, "\ttestb %%al, %%al\n");
+                fprintf(fp, "\tje .L__cc_va_nosse_%zu\n", i);
+                for (k = 0; k < 8; ++k) {
+                    fprintf(fp, "\tmovdqu %%xmm%d, %d(%%rbp)\n", k, va_regsave_off + 48 + 16 * k);
+                }
+                fprintf(fp, ".L__cc_va_nosse_%zu:\n", i);
+            }
         }
         if (emit_dynalloc_slot_clears(fp, f, &lay, 1, diag) != 0) {
             slot_layout_free(&lay);

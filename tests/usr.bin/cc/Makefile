@@ -38,7 +38,7 @@ SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff \
 	run_pp_postc99 run_pp_c99_baseline run_m16 run_gnu_inline \
 	run_div64_pow2 run_inline_dead_call run_pic_i386 run_object_symbols \
 	run_trivial_auto_var_init run_i386_regcache run_regalloc run_int_extend run_i386_frame_shapes run_alignof_std \
-	run_attr_string_concat run_static_local_tables run_static_local_orphans run_used_static_local run_builtin_mem_inline run_cmodel_kernel run_dead_bool_call run_constant_args run_x64_local_no_got run_asm_a_modifier run_asm_imm_symbol \
+	run_attr_string_concat run_static_local_tables run_static_local_orphans run_used_static_local run_builtin_mem_inline run_cmodel_kernel run_dead_bool_call run_constant_args run_x64_local_no_got run_asm_a_modifier run_va_no_sse run_asm_imm_symbol \
 	run_inline_called_once run_i386_frame_slots run_compiler_stamp run_pp_fuzz_smoke \
 	run_pp_gnu_ext run_pp_clang_feature_probe run_pp_clang_pragma run_pp_cmd_injection_test \
 	checks_pp_strict run_simd_intrinsics run_negative run_ir_golden \
@@ -1063,6 +1063,10 @@ run_x64_local_no_got: build
 run_asm_a_modifier: build
 	mkdir -p "$(CC_TMP)"
 	sh run_asm_a_modifier.sh
+
+run_va_no_sse: build
+	mkdir -p "$(CC_TMP)"
+	sh run_va_no_sse.sh
 
 run_pic_i386: build
 	mkdir -p "$(CC_TMP)"
