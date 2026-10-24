@@ -1,13 +1,15 @@
 # Building Linux with substrate's cc, as and ld
 
 The in-tree compiler, assembler and linker can build an unmodified
-upstream Linux kernel for i386 that boots to a userspace `/init`.  The
+upstream Linux kernel for i386 or x86-64 that boots to a userspace
+`/init`.  The
 kernel is a hard test of the toolchain: GNU C extensions, inline assembly
 of every kind, linker scripts, and 16-bit setup code that has to fit in
 32 KiB.  These are the steps that do it.
 
-Tested: Linux 7.3, `ARCH=i386`, `tinyconfig` plus the options below, on a
-Linux host, booted in `qemu-system-i386`.  Other versions and configurations
+Tested: Linux 7.3, `ARCH=i386` and `ARCH=x86_64`, `tinyconfig` plus the
+options below, on a Linux host, booted in `qemu-system-i386` and
+`qemu-system-x86_64`.  Other versions and configurations
 have not been tried.  The kernel source is never patched; a kernel that
 fails to build or boot is a bug in cc, as or ld, and is fixed there.
 
@@ -151,10 +153,49 @@ off request ends in `System halted instead`; leave qemu with Ctrl-A X.
 ## Limits to know
 
 - **Setup code size.**  `arch/x86/boot/setup.ld` requires the 16-bit setup
-  code to end by 0x8000, its bss included.  With cc as of 2026-10-23 it
-  ends at 0x7fe0: 32 bytes spare.  A change that makes cc's i386 code
-  larger fails the link with `Setup too big!`.
-- **i386 only.**  `ARCH=x86_64` has not been tried.
+  code to end by 0x8000, its bss included.  With the register allocator
+  (2026-10-24) `setup.bin` is about 22 KiB, against 0x7fe0 bytes before
+  it; a change that makes cc's i386 code much larger fails the link with
+  `Setup too big!`.
+
+## x86-64
+
+The same steps with `ARCH=x86_64` in `K`, the same `boot.config`, and an
+`/init` that enters the kernel with `syscall`:
+
+```c
+/* init64.c */
+static long sys(long nr, long a, long b, long c) {
+    long r;
+
+    __asm__ volatile("syscall" : "=a"(r) : "a"(nr), "D"(a), "S"(b), "d"(c) : "rcx", "r11", "memory");
+    return r;
+}
+
+void _start(void) {
+    static const char msg[] = "\nINIT: userspace reached\n";
+
+    sys(1, 1, (long)msg, sizeof(msg) - 1);              /* write(1, msg, len) */
+    sys(169, 0xfee1dead, 672274793, 0x4321fedc);         /* reboot(POWER_OFF) */
+    for (;;) {
+        sys(60, 0, 0, 0);                                /* exit(0) */
+    }
+}
+```
+
+```sh
+$T/cc -m64 -O2 -ffreestanding -fno-pie -nostdlib -static -Wl,-e,_start -o init init64.c
+qemu-system-x86_64 -m 256 -nographic -no-reboot \
+    -kernel ../linux-7.3/arch/x86/boot/bzImage -initrd initramfs.cpio \
+    -append "console=ttyS0 earlyprintk=serial,ttyS0,115200 panic=-1"
+```
+
+A kernel stack is 16 KiB, with no guard page in this configuration: a
+function cc does not take through its register allocator (see
+`CC_MIR_STATS` in cc(1)) keeps each value in a stack slot of its own, and
+one with a frame of many KiB overruns the stack silently.  To see the
+largest frames, look for each function's `sub $N, %rsp` in
+`objdump -d vmlinux`.
 
 ## When it does not boot
 
@@ -164,6 +205,13 @@ off request ends in `System halted instead`; leave qemu with Ctrl-A X.
   ((char *)&__log_buf)+(1<<17)` and read `log.bin` with `strings`.
 - **A silent reset** (a triple fault): `-d int,cpu_reset -D qemu.log`
   records the exceptions before it.
+- **A fault that comes and goes**: build the kernel with gcc as well
+  (a copy of the tree, the same `.config`), and link mixes of the two
+  sets of objects -- copy one set's `.o` files over the other's, `touch`
+  them and rerun `make`, which relinks without recompiling -- booting each
+  a few times, to halve the cc-built objects down to the one at fault.
+  An answer that moves as the halves change points at the stack or
+  memory being overrun, not at one function.
 - **A wrong section, size or offset**: compile the same preprocessed file
   with gcc, assemble or link the same input with GNU as or ld, and compare
   the objects (`readelf -a`, `objdump -dr`).  A difference narrows to one
