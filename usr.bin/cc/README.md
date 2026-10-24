@@ -34,7 +34,9 @@ The full option list is the man page, `usr.man/man1/cc.1`.
 
 ## How it is checked
 
-`make -C tests/usr.bin/cc` runs the suite.  The parts that matter most:
+`make -C tests/usr.bin/cc` runs the suite, and `make -j` runs its scripts
+and blocks of checks side by side (`make -C tests/usr.bin/cc run_selfhost`
+runs one).  The parts that matter most:
 
 - `run_codegen_diff.sh`: every program in `tests/usr.bin/cc/codegen/`
   is built by gcc and by cc at -m64/-m32 and -O0/-O2; output and exit

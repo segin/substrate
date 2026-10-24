@@ -25,9 +25,39 @@ export CC_TMP
 
 all: test
 
-test:
-	test -d "$(CC_TMP)"
+# The suite is one target per script and per block of checks, so `make
+# -j` runs them side by side; `test` waits for all of them.  Each writes
+# to its own directory under CC_TMP, as two of them may name a file
+# alike, and each script makes its own temporaries besides.  A target's
+# output is printed whole when it ends, not interleaved with the others'.
+MAKEFLAGS += --output-sync=target
+SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff \
+	run_codegen_random run_codegen_abi run_codegen_regparm run_selfhost \
+	run_crosshost run_postc99_c11_c17 run_postc99_c23 run_postc99_c23_attrs \
+	run_postc99_mode_matrix run_postc99_diff_modes run_postc99_abi_modes checks_c23 \
+	run_pp_postc99 run_pp_c99_baseline run_m16 run_gnu_inline \
+	run_div64_pow2 run_inline_dead_call run_pic_i386 run_object_symbols \
+	run_trivial_auto_var_init run_i386_regcache run_i386_frame_shapes run_alignof_std \
+	run_attr_string_concat run_static_local_tables run_static_local_orphans run_asm_imm_symbol \
+	run_inline_called_once run_i386_frame_slots run_compiler_stamp run_pp_fuzz_smoke \
+	run_pp_gnu_ext run_pp_clang_feature_probe run_pp_clang_pragma run_pp_cmd_injection_test \
+	checks_pp_strict run_simd_intrinsics run_negative run_ir_golden \
+	checks_misc
+
+SUITE_TMP := $(CC_TMP)
+$(foreach t,$(SUITE),$(eval $(t): CC_TMP := $(SUITE_TMP)/$(t)))
+
+.PHONY: build $(SUITE)
+
+test: $(SUITE)
+	if [ "$(CC_TMP_OWNED)" = 1 ]; then rm -rf "$(SUITE_TMP)"; fi
+
+build:
+	test -d "$(SUITE_TMP)"
 	$(MAKE) -C $(TOP)/usr.bin/cc NATIVE_BUILD=1
+
+checks_main: build
+	mkdir -p "$(CC_TMP)"
 	# Compile and run test_ast2ir; a failed build must fail the suite,
 	# not leave an earlier binary to run
 	rm -f test_ast2ir_bin
@@ -905,20 +935,65 @@ test:
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_source_line.c -o $(CC_TMP)/cc_native_bad_source_line.o 2>$(CC_TMP)/cc_native_bad_source_line.log
 	grep -q "return missing + ;" $(CC_TMP)/cc_native_bad_source_line.log
 	grep -Eq '^[[:space:]]*\^$$' $(CC_TMP)/cc_native_bad_source_line.log
+
+run_conformance_c99: build
+	mkdir -p "$(CC_TMP)"
 	sh run_conformance_c99.sh
+
+run_diff_c99: build
+	mkdir -p "$(CC_TMP)"
 	sh run_diff_c99.sh
+
+run_codegen_diff: build
+	mkdir -p "$(CC_TMP)"
 	sh run_codegen_diff.sh
+
+run_codegen_random: build
+	mkdir -p "$(CC_TMP)"
 	sh run_codegen_random.sh
+
+run_codegen_abi: build
+	mkdir -p "$(CC_TMP)"
 	sh run_codegen_abi.sh
+
+run_codegen_regparm: build
+	mkdir -p "$(CC_TMP)"
 	sh run_codegen_regparm.sh
+
+run_selfhost: build
+	mkdir -p "$(CC_TMP)"
 	sh run_selfhost.sh
+
+run_crosshost: build
+	mkdir -p "$(CC_TMP)"
 	sh run_crosshost.sh
+
+run_postc99_c11_c17: build
+	mkdir -p "$(CC_TMP)"
 	sh run_postc99_c11_c17.sh
+
+run_postc99_c23: build
+	mkdir -p "$(CC_TMP)"
 	sh run_postc99_c23.sh
+
+run_postc99_c23_attrs: build
+	mkdir -p "$(CC_TMP)"
 	sh run_postc99_c23_attrs.sh
+
+run_postc99_mode_matrix: build
+	mkdir -p "$(CC_TMP)"
 	sh run_postc99_mode_matrix.sh
+
+run_postc99_diff_modes: build
+	mkdir -p "$(CC_TMP)"
 	sh run_postc99_diff_modes.sh
+
+run_postc99_abi_modes: build
+	mkdir -p "$(CC_TMP)"
 	sh run_postc99_abi_modes.sh
+
+checks_c23: build
+	mkdir -p "$(CC_TMP)"
 	$(TOP)/usr.bin/cc/cc -std=c23 native_c23_float16_storage.c -o $(CC_TMP)/cc_native_c23_float16_storage
 	$(CC_TMP)/cc_native_c23_float16_storage
 	$(TOP)/usr.bin/cc/cc native_global_ulong_div_init.c -o $(CC_TMP)/cc_native_global_ulong_div_init
@@ -927,38 +1002,125 @@ test:
 	$(CC_TMP)/cc_native_link_atexit
 	$(TOP)/usr.bin/cc/cc native_x86_64_large_struct_byval.c -o $(CC_TMP)/cc_native_x86_64_large_struct_byval
 	$(CC_TMP)/cc_native_x86_64_large_struct_byval
+
+run_pp_postc99: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_postc99.sh
+
+run_pp_c99_baseline: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_c99_baseline.sh
+
+run_m16: build
+	mkdir -p "$(CC_TMP)"
 	sh run_m16.sh
+
+run_gnu_inline: build
+	mkdir -p "$(CC_TMP)"
 	sh run_gnu_inline.sh
+
+run_div64_pow2: build
+	mkdir -p "$(CC_TMP)"
 	sh run_div64_pow2.sh
+
+run_inline_dead_call: build
+	mkdir -p "$(CC_TMP)"
 	sh run_inline_dead_call.sh
+
+run_pic_i386: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pic_i386.sh
+
+run_object_symbols: build
+	mkdir -p "$(CC_TMP)"
 	sh run_object_symbols.sh
+
+run_trivial_auto_var_init: build
+	mkdir -p "$(CC_TMP)"
 	sh run_trivial_auto_var_init.sh
+
+run_i386_regcache: build
+	mkdir -p "$(CC_TMP)"
 	sh run_i386_regcache.sh
+
+run_i386_frame_shapes: build
+	mkdir -p "$(CC_TMP)"
 	sh run_i386_frame_shapes.sh
+
+run_alignof_std: build
+	mkdir -p "$(CC_TMP)"
 	sh run_alignof_std.sh
+
+run_attr_string_concat: build
+	mkdir -p "$(CC_TMP)"
 	sh run_attr_string_concat.sh
+
+run_static_local_tables: build
+	mkdir -p "$(CC_TMP)"
 	sh run_static_local_tables.sh
+
+run_static_local_orphans: build
+	mkdir -p "$(CC_TMP)"
 	sh run_static_local_orphans.sh
+
+run_asm_imm_symbol: build
+	mkdir -p "$(CC_TMP)"
 	sh run_asm_imm_symbol.sh
+
+run_inline_called_once: build
+	mkdir -p "$(CC_TMP)"
 	sh run_inline_called_once.sh
+
+run_i386_frame_slots: build
+	mkdir -p "$(CC_TMP)"
 	sh run_i386_frame_slots.sh
+
+run_compiler_stamp: build
+	mkdir -p "$(CC_TMP)"
 	sh run_compiler_stamp.sh
+
+run_pp_fuzz_smoke: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_fuzz_smoke.sh
+
+run_pp_gnu_ext: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_gnu_ext.sh
+
+run_pp_clang_feature_probe: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_clang_feature_probe.sh
+
+run_pp_clang_pragma: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_clang_pragma.sh
+
+run_pp_cmd_injection_test: build
+	mkdir -p "$(CC_TMP)"
 	sh run_pp_cmd_injection_test.sh
+
+checks_pp_strict: build
+	mkdir -p "$(CC_TMP)"
 	printf '' > $(CC_TMP)/cc_pp_std_probe.c
 	$(TOP)/usr.bin/cc/cc -E -dM -std=c11 $(CC_TMP)/cc_pp_std_probe.c -o $(CC_TMP)/cc_pp_strict_c11.i
 	grep -q "^#define __STRICT_ANSI__ 1$$" $(CC_TMP)/cc_pp_strict_c11.i
 	$(TOP)/usr.bin/cc/cc -E -dM -std=gnu11 $(CC_TMP)/cc_pp_std_probe.c -o $(CC_TMP)/cc_pp_strict_gnu11.i
 	! grep -q "^#define __STRICT_ANSI__" $(CC_TMP)/cc_pp_strict_gnu11.i
+
+run_simd_intrinsics: build
+	mkdir -p "$(CC_TMP)"
 	sh run_simd_intrinsics.sh
+
+run_negative: build
+	mkdir -p "$(CC_TMP)"
 	sh run_negative.sh
+
+run_ir_golden: build
+	mkdir -p "$(CC_TMP)"
 	sh run_ir_golden.sh
+
+checks_misc: build
+	mkdir -p "$(CC_TMP)"
 	$(TOP)/usr.bin/cc/cc native_gnu_sizeof_void.c -o $(CC_TMP)/cc_native_gnu_sizeof_void
 	$(CC_TMP)/cc_native_gnu_sizeof_void
 	$(TOP)/usr.bin/cc/cc -m32 native_gnu_sizeof_void.c -o $(CC_TMP)/cc_native_gnu_sizeof_void_32
@@ -992,115 +1154,7 @@ test:
 	$(TOP)/usr.bin/cc/cc -c driver_hello.s -o $(CC_TMP)/cc_driver_hello.o
 	$(TOP)/usr.bin/cc/cc -nostdlib $(CC_TMP)/cc_driver_hello.o -o $(CC_TMP)/cc_driver_hello
 	$(CC_TMP)/cc_driver_hello | grep -q "cc-driver-asm-ok"
-	if [ "$(CC_TMP_OWNED)" = 1 ]; then rm -rf "$(CC_TMP)"; fi
 
 clean:
-	rm -f $(CC_TMP)/cc_valid.norm $(CC_TMP)/cc_driver.pp $(CC_TMP)/cc_driver_fail.o $(CC_TMP)/cc_native_c99_phase12_trigraph_splice_c23.pp \
-	      $(CC_TMP)/cc_driver_bootstrap.o $(CC_TMP)/cc_driver_hello.o $(CC_TMP)/cc_driver_hello \
-	      $(CC_TMP)/cc_native_arith.s $(CC_TMP)/cc_native_main $(CC_TMP)/cc_native_bad.o \
-	      $(CC_TMP)/cc_native_phase1 $(CC_TMP)/cc_native_call_stmt $(CC_TMP)/cc_native_bad_assign.o \
-	      $(CC_TMP)/cc_native_bad_break.o $(CC_TMP)/cc_native_bad_continue.o $(CC_TMP)/cc_native_double $(CC_TMP)/cc_native_void $(CC_TMP)/cc_native_c99_empty_void $(CC_TMP)/cc_native_variadic \
-	      $(CC_TMP)/cc_native_bad_case.o $(CC_TMP)/cc_native_bad_default.o $(CC_TMP)/cc_native_bad_switch_dup_case.o $(CC_TMP)/cc_native_bad_switch_dup_default.o $(CC_TMP)/cc_native_bad_for_scope.o \
-	      $(CC_TMP)/cc_native_abi_stack_int $(CC_TMP)/cc_native_abi_stack_fp $(CC_TMP)/cc_native_abi_mix $(CC_TMP)/cc_native_host_stdint_inttypes $(CC_TMP)/cc_native_host_stdint_inttypes.i \
-	      $(CC_TMP)/cc_native_if_else $(CC_TMP)/cc_native_if_abs $(CC_TMP)/cc_native_c95_digraph $(CC_TMP)/cc_native_c95_trigraph $(CC_TMP)/cc_native_c99_phase12_trigraph_splice $(CC_TMP)/cc_native_c99_ucn_ident $(CC_TMP)/cc_native_c99_tokenization_ppnum $(CC_TMP)/cc_native_c99_line_comment $(CC_TMP)/cc_native_do_while $(CC_TMP)/cc_native_switch $(CC_TMP)/cc_native_c99_switch_constexpr $(CC_TMP)/cc_native_c99_for_decl $(CC_TMP)/cc_native_c99_for_multi_decl $(CC_TMP)/cc_native_c99_types $(CC_TMP)/cc_native_c99_const_qual $(CC_TMP)/cc_native_c99_composite_types $(CC_TMP)/cc_native_c99_inline_semantics $(CC_TMP)/cc_native_c99_inline_semantics.s $(CC_TMP)/cc_native_c99_typedef $(CC_TMP)/cc_native_c99_multi_decl $(CC_TMP)/cc_native_c99_char_hex $(CC_TMP)/cc_native_c99_char_cast_sign $(CC_TMP)/cc_native_c99_signed_char_type $(CC_TMP)/cc_native_c99_logic $(CC_TMP)/cc_native_c99_inc_expr $(CC_TMP)/cc_native_c99_update $(CC_TMP)/cc_native_c99_bitwise $(CC_TMP)/cc_native_c99_comma $(CC_TMP)/cc_native_c99_goto $(CC_TMP)/cc_native_c99_goto_loop $(CC_TMP)/cc_native_c99_computed_goto $(CC_TMP)/cc_native_c99_ternary $(CC_TMP)/cc_native_c99_cast_sizeof $(CC_TMP)/cc_native_c99_expr_conversions $(CC_TMP)/cc_native_c99_unary_integer_promotion $(CC_TMP)/cc_native_c99_sizeof_array $(CC_TMP)/cc_native_c99_sizeof_unsigned $(CC_TMP)/cc_native_c99_sizeof_local_array_cmp $(CC_TMP)/cc_native_c99_float_cmp $(CC_TMP)/cc_native_c99_math_classify_builtins $(CC_TMP)/cc_native_c99_long_double_type $(CC_TMP)/cc_native_c99_unsigned $(CC_TMP)/cc_native_c99_unsigned_literals $(CC_TMP)/cc_native_c99_short $(CC_TMP)/cc_native_c99_pointer $(CC_TMP)/cc_native_c99_pointer_param $(CC_TMP)/cc_native_c99_pointer_store $(CC_TMP)/cc_native_c99_pointer_store_param $(CC_TMP)/cc_native_c99_deref_compound $(CC_TMP)/cc_native_c99_deref_prefix_update $(CC_TMP)/cc_native_c99_deref_postfix_update $(CC_TMP)/cc_native_c99_pointer_arith $(CC_TMP)/cc_native_c99_index $(CC_TMP)/cc_native_c99_pointer_diff $(CC_TMP)/cc_native_c99_ptr_cast $(CC_TMP)/cc_native_c99_ptr_size $(CC_TMP)/cc_native_c99_ptrptr $(CC_TMP)/cc_native_c99_ptrptrptr $(CC_TMP)/cc_native_c99_ptr4 $(CC_TMP)/cc_native_c99_pointer_update $(CC_TMP)/cc_native_c99_pointer_array_steps $(CC_TMP)/cc_native_c99_pointer_array_param $(CC_TMP)/cc_native_c99_param_array_constexpr_bound $(CC_TMP)/cc_native_c99_pointer_sub_array_decay $(CC_TMP)/cc_native_c99_local_struct_array_2d $(CC_TMP)/cc_native_c99_octal_char $(CC_TMP)/cc_native_c99_char_octal_signedness $(CC_TMP)/cc_native_c99_string_concat $(CC_TMP)/cc_native_c99_global_string_embedded_nul $(CC_TMP)/cc_native_c99_compound_literal_array_decay $(CC_TMP)/cc_native_c99_func_name $(CC_TMP)/cc_native_c99_atomic_fetch $(CC_TMP)/cc_native_c99_builtin_strlen.s $(CC_TMP)/cc_native_gnu_static_inline_extern.o $(CC_TMP)/cc_native_c99_global_array_init $(CC_TMP)/cc_native_c99_storage_tentative $(CC_TMP)/cc_native_c99_global_bool_addr $(CC_TMP)/cc_native_c99_designated_init $(CC_TMP)/cc_native_c99_compound_literal $(CC_TMP)/cc_native_c99_flexible_array $(CC_TMP)/cc_native_c99_flexible_array_global_init $(CC_TMP)/cc_native_c99_pragma $(CC_TMP)/cc_native_c99_stdc_pragma $(CC_TMP)/cc_native_c99_struct_assign $(CC_TMP)/cc_native_c99_struct_ptr_arith $(CC_TMP)/cc_native_c99_struct_member_array $(CC_TMP)/cc_native_c99_anonymous_struct_union $(CC_TMP)/cc_native_c99_bitfield_basic $(CC_TMP)/cc_native_c99_consteval_limits $(CC_TMP)/cc_native_c99_void_pointer $(CC_TMP)/cc_native_c99_pointer_cmp $(CC_TMP)/cc_native_c99_decay $(CC_TMP)/cc_native_c99_local_array_decay_addr $(CC_TMP)/cc_native_c99_block_scope_shadow $(CC_TMP)/cc_native_c99_typedef_shadow_expr $(CC_TMP)/cc_native_c99_mixed_decl_stmt $(CC_TMP)/cc_native_c99_return_conversion $(CC_TMP)/cc_native_c99_unproto_decl_call $(CC_TMP)/cc_native_c99_unproto_extern_call.s $(CC_TMP)/cc_native_c99_proto_call $(CC_TMP)/cc_native_c99_proto_extern.s $(CC_TMP)/cc_native_c99_empty_stmt2 $(CC_TMP)/cc_native_loops $(CC_TMP)/cc_native_if_assign $(CC_TMP)/cc_native_variadic_call $(CC_TMP)/cc_native_c99_variadic_fnptr $(CC_TMP)/cc_native_variadic_call.s $(CC_TMP)/cc_native_c99_struct_fnptr_pass_value $(CC_TMP)/cc_native_c99_grouped_fn_param_decay \
-	      $(CC_TMP)/cc_native_opt_fold $(CC_TMP)/cc_native_opt_fold.s $(CC_TMP)/cc_native_slot_pressure.s \
-	      $(CC_TMP)/cc_native_arith_32.s $(CC_TMP)/cc_native_if_else_32.s $(CC_TMP)/cc_native_c95_digraph_32.s $(CC_TMP)/cc_native_c95_trigraph_32.s $(CC_TMP)/cc_native_c99_phase12_trigraph_splice_32.s $(CC_TMP)/cc_native_c99_ucn_ident_32.s $(CC_TMP)/cc_native_c99_tokenization_ppnum_32.s $(CC_TMP)/cc_native_c99_line_comment_32.s $(CC_TMP)/cc_native_do_while_32.s $(CC_TMP)/cc_native_c99_empty_stmt2_32.s $(CC_TMP)/cc_native_switch_32.s $(CC_TMP)/cc_native_c99_for_decl_32.s $(CC_TMP)/cc_native_c99_for_multi_decl_32.s $(CC_TMP)/cc_native_c99_types_32.s $(CC_TMP)/cc_native_c99_const_qual_32.s $(CC_TMP)/cc_native_c99_composite_types_32.s $(CC_TMP)/cc_native_c99_inline_semantics_32.s $(CC_TMP)/cc_native_c99_typedef_32.s $(CC_TMP)/cc_native_c99_multi_decl_32.s $(CC_TMP)/cc_native_c99_logic_32.s $(CC_TMP)/cc_native_c99_update_32.s $(CC_TMP)/cc_native_c99_bitwise_32.s $(CC_TMP)/cc_native_c99_comma_32.s $(CC_TMP)/cc_native_c99_goto_32.s $(CC_TMP)/cc_native_c99_goto_loop_32.s $(CC_TMP)/cc_native_c99_ternary_32.s $(CC_TMP)/cc_native_c99_cast_sizeof_32.s $(CC_TMP)/cc_native_c99_sizeof_array_32.s $(CC_TMP)/cc_native_c99_sizeof_unsigned_32.s $(CC_TMP)/cc_native_c99_float_cmp_32.s $(CC_TMP)/cc_native_c99_unsigned_32.s $(CC_TMP)/cc_native_c99_unsigned_literals_32.s $(CC_TMP)/cc_native_c99_short_32.s $(CC_TMP)/cc_native_c99_pointer_32.s $(CC_TMP)/cc_native_c99_pointer_store_32.s $(CC_TMP)/cc_native_c99_pointer_arith.s $(CC_TMP)/cc_native_c99_pointer_arith_32.s $(CC_TMP)/cc_native_c99_index_32.s $(CC_TMP)/cc_native_c99_pointer_diff_32.s $(CC_TMP)/cc_native_c99_ptr_cast_32.s $(CC_TMP)/cc_native_c99_ptr_size_32.s $(CC_TMP)/cc_native_c99_ptrptr_32.s $(CC_TMP)/cc_native_c99_ptrptrptr_32.s $(CC_TMP)/cc_native_c99_ptr4_32.s $(CC_TMP)/cc_native_c99_pointer_update_32.s $(CC_TMP)/cc_native_c99_global_array_init_32.s $(CC_TMP)/cc_native_c99_storage_tentative_32.s $(CC_TMP)/cc_native_c99_designated_init_32.s $(CC_TMP)/cc_native_c99_compound_literal_32.s $(CC_TMP)/cc_native_c99_flexible_array_32.s $(CC_TMP)/cc_native_c99_struct_assign_32.s $(CC_TMP)/cc_native_c99_struct_ptr_arith_32.s $(CC_TMP)/cc_native_c99_struct_member_array_32.s $(CC_TMP)/cc_native_c99_bitfield_basic_32.s $(CC_TMP)/cc_native_c99_deref_postfix_update_32.s $(CC_TMP)/cc_native_c99_proto_extern_32.s $(CC_TMP)/cc_native_c99_block_scope_shadow_32.s $(CC_TMP)/cc_native_c99_mixed_decl_stmt_32.s $(CC_TMP)/cc_native_c99_return_conversion_32.s $(CC_TMP)/cc_native_c99_stdc_pragma_32.s $(CC_TMP)/cc_native_c99_unproto_decl_call_32.s $(CC_TMP)/cc_native_c99_unproto_extern_call_32.s $(CC_TMP)/cc_native_c90_unproto_call_promotions_32.s $(CC_TMP)/cc_native_loops_32.s $(CC_TMP)/cc_native_arith_32.o $(CC_TMP)/cc_native_double_32.s $(CC_TMP)/cc_native_double_32.o \
-	      $(CC_TMP)/cc_native_bad_inc.o $(CC_TMP)/cc_native_bad_goto.o $(CC_TMP)/cc_native_bad_label_dup.o $(CC_TMP)/cc_native_bad_bitwise_float.o $(CC_TMP)/cc_native_gnu_sizeof_void $(CC_TMP)/cc_native_gnu_sizeof_void_32 $(CC_TMP)/cc_native_bad_proto_conflict.o $(CC_TMP)/cc_native_bad_signed_unsigned.o $(CC_TMP)/cc_native_bad_short_long.o $(CC_TMP)/cc_native_bad_typedef_init.o $(CC_TMP)/cc_native_bad_deref_nonptr.o $(CC_TMP)/cc_native_bad_addr_expr.o $(CC_TMP)/cc_native_bad_deref_compound.o $(CC_TMP)/cc_native_bad_deref_postfix_update.o $(CC_TMP)/cc_native_bad_ptr_add_ptr.o $(CC_TMP)/cc_native_bad_index_nonptr.o $(CC_TMP)/cc_native_bad_ptr_add_float.o $(CC_TMP)/cc_native_bad_ptr_sub_incompat.o $(CC_TMP)/cc_native_bad_ptr_cmp_incompat.o $(CC_TMP)/cc_native_bad_ptr_depth5.o $(CC_TMP)/cc_native_bad_cast_ptr_float.o $(CC_TMP)/cc_native_bad_computed_goto_float.o $(CC_TMP)/cc_native_bad_void_ptr_arith.o $(CC_TMP)/cc_native_bad_attr_noreturn_return.o \
-	      $(CC_TMP)/cc_native_c99_typedef_fnptr_retptr $(CC_TMP)/cc_native_c99_attr_codegen $(CC_TMP)/cc_native_c99_attr_codegen.s $(CC_TMP)/cc_native_double_dbg.s \
-	      $(CC_TMP)/cc_native_gnu_typeof_alt $(CC_TMP)/cc_native_gnu_builtins $(CC_TMP)/cc_native_gnu_floatn_builtins $(CC_TMP)/cc_native_gnu_builtin_prefetch.o $(CC_TMP)/cc_native_gnu_stmt_expr $(CC_TMP)/cc_native_gnu_extension_cast_stmt_expr $(CC_TMP)/cc_native_gnu_label_decl \
-	      $(CC_TMP)/cc_native_gnu_elvis $(CC_TMP)/cc_native_gnu_case_range $(CC_TMP)/cc_native_gnu_types_choose $(CC_TMP)/cc_native_gnu_overflow \
-	      $(CC_TMP)/cc_native_gnu_stmt_expr.s $(CC_TMP)/cc_native_gnu_stmt_expr_32.s $(CC_TMP)/cc_native_gnu_label_decl.s $(CC_TMP)/cc_native_gnu_label_decl_32.s \
-	      $(CC_TMP)/cc_native_gnu_elvis.s $(CC_TMP)/cc_native_gnu_elvis_32.s $(CC_TMP)/cc_native_gnu_case_range.s $(CC_TMP)/cc_native_gnu_case_range_32.s \
-	      $(CC_TMP)/cc_native_gnu_types_choose.s $(CC_TMP)/cc_native_gnu_overflow.s $(CC_TMP)/cc_native_gnu_overflow_32.s \
-	      $(CC_TMP)/cc_native_gnu_object_size_chk $(CC_TMP)/cc_native_gnu_object_size_chk.s $(CC_TMP)/cc_native_gnu_object_size_chk_32.s \
-	      $(CC_TMP)/cc_native_gnu_trap_unreachable $(CC_TMP)/cc_native_gnu_trap_unreachable.s $(CC_TMP)/cc_native_gnu_trap_unreachable_32.s \
-	      $(CC_TMP)/cc_native_gnu_nested_func $(CC_TMP)/cc_native_gnu_union_cast $(CC_TMP)/cc_native_gnu_zerolen_array \
-	      $(CC_TMP)/cc_native_gnu_empty_struct $(CC_TMP)/cc_native_gnu89_inline \
-	      $(CC_TMP)/cc_native_gnu89_inline.s $(CC_TMP)/cc_native_gnu_attr_fn_codegen $(CC_TMP)/cc_native_gnu_attr_fn_codegen.s \
-	      $(CC_TMP)/cc_native_gnu_attr_var_codegen $(CC_TMP)/cc_native_gnu_attr_var_codegen.s \
-	      $(CC_TMP)/cc_native_gnu_attr_type_parse $(CC_TMP)/cc_native_gnu_attr_alias $(CC_TMP)/cc_native_gnu_attr_alias.s \
-	      $(CC_TMP)/cc_native_gnu_attr_label_enum_stmt $(CC_TMP)/cc_native_clang_blocks_decl $(CC_TMP)/cc_native_clang_blocks_decl_32.s \
-	      $(CC_TMP)/cc_native_clang_ext_vector_attr $(CC_TMP)/cc_native_clang_builtin_aliases \
-	      $(CC_TMP)/cc_native_gnu_attr_placement $(CC_TMP)/cc_native_clang_asm_goto_quirks $(CC_TMP)/cc_native_clang_asm_goto_quirks.s \
-	      $(CC_TMP)/cc_native_bad_negative_array_bound.o $(CC_TMP)/cc_native_bad_negative_array_bound.log \
-	      $(CC_TMP)/cc_native_bad_gnu_int128.o $(CC_TMP)/cc_native_bad_gnu_int128.log $(CC_TMP)/cc_native_gnu_int128_64 \
-	      $(CC_TMP)/cc_no_such_as.o $(CC_TMP)/cc_no_such_as.log \
-	      $(CC_TMP)/cc_native_gnu_asm_basic $(CC_TMP)/cc_native_gnu_asm_basic.s $(CC_TMP)/cc_native_gnu_asm_ext \
-	      $(CC_TMP)/cc_native_gnu_asm_ext.s $(CC_TMP)/cc_native_gnu_asm_ext_32.s \
-	      $(CC_TMP)/cc_native_gnu_asm_goto $(CC_TMP)/cc_native_gnu_asm_goto.s $(CC_TMP)/cc_native_gnu_asm_goto_32.s $(CC_TMP)/cc_native_gnu_asm_goto_outputs \
-	      $(CC_TMP)/cc_native_gnu_asm_early_clobber $(CC_TMP)/cc_native_gnu_asm_volatile_barrier.s \
-	      $(CC_TMP)/cc_native_gnu_asm_side_effect $(CC_TMP)/cc_native_gnu_asm_side_effect.s \
-	      $(CC_TMP)/cc_native_gnu_void_ptr_arith $(CC_TMP)/cc_native_gnu_void_ptr_arith_pedantic.o $(CC_TMP)/cc_native_gnu_void_ptr_arith_pedantic.log \
-	      $(CC_TMP)/cc_native_bad_gnu_asm_constraint.o $(CC_TMP)/cc_native_bad_gnu_asm_constraint.log \
-	      $(CC_TMP)/cc_native_bad_gnu_asm_match_idx.o $(CC_TMP)/cc_native_bad_gnu_asm_match_idx.log \
-	      $(CC_TMP)/cc_native_bad_gnu_asm_template_mismatch.o $(CC_TMP)/cc_native_bad_gnu_asm_template_mismatch.log \
-	      $(CC_TMP)/cc_native_bad_gnu_asm_early_clobber_tie.o $(CC_TMP)/cc_native_bad_gnu_asm_early_clobber_tie.log \
-	      $(CC_TMP)/cc_native_bad_gnu_asm_early_clobber_fixed.o $(CC_TMP)/cc_native_bad_gnu_asm_early_clobber_fixed.log \
-	      $(CC_TMP)/cc_native_bad_attr_inline_conflict.o $(CC_TMP)/cc_native_bad_attr_hot_cold_conflict.o \
-	      $(CC_TMP)/cc_native_bad_attr_alias_init.o $(CC_TMP)/cc_native_bad_attr_malloc_nonptr.o \
-	      $(CC_TMP)/cc_native_bad_attr_format_nonvariadic.o $(CC_TMP)/cc_native_attr_nonnull_noparams.o $(CC_TMP)/cc_native_attr_noreturn_nonvoid.o \
-	      $(CC_TMP)/cc_native_bad_attr_nonnull_call.o
-	rm -f $(CC_TMP)/cc_native_c99_integer_literals $(CC_TMP)/cc_native_c99_hex_float_suffix $(CC_TMP)/cc_native_c99_wide_literals \
-	      $(CC_TMP)/cc_native_c99_complex_decl $(CC_TMP)/cc_native_c99_imaginary_decl $(CC_TMP)/cc_native_c99_complex_types $(CC_TMP)/cc_native_c99_composite_types $(CC_TMP)/cc_native_c99_param_array_qual $(CC_TMP)/cc_native_c99_restrict_ptr $(CC_TMP)/cc_native_c99_vla_decl $(CC_TMP)/cc_native_c90_oldstyle $(CC_TMP)/cc_native_c90_unproto_call_promotions $(CC_TMP)/cc_native_c90_unproto_call_promotions.s \
-	      $(CC_TMP)/cc_native_c99_float_signbit_negzero_nan \
-	      $(CC_TMP)/cc_native_c99_static_local_string_pointer_array \
-	      $(CC_TMP)/cc_native_c99_string_concat_octal_boundary \
-	      $(CC_TMP)/cc_native_c99_global_pointer_arith_init \
-	      $(CC_TMP)/cc_native_c99_integer_literals_32.s $(CC_TMP)/cc_native_c99_hex_float_suffix_32.s $(CC_TMP)/cc_native_c99_wide_literals_32.s \
-	      $(CC_TMP)/cc_native_c99_complex_decl_32.s $(CC_TMP)/cc_native_c99_imaginary_decl_32.s $(CC_TMP)/cc_native_c99_composite_types_32.s $(CC_TMP)/cc_native_c99_param_array_qual_32.s $(CC_TMP)/cc_native_c99_restrict_ptr_32.s $(CC_TMP)/cc_native_c99_vla_decl_32.s $(CC_TMP)/cc_native_c90_oldstyle_32.s $(CC_TMP)/cc_native_c90_unproto_call_promotions_32.s \
-	      $(CC_TMP)/cc_native_c99_typedef_array_member_layout \
-	      $(CC_TMP)/cc_native_bad_c99_implicit_function.o $(CC_TMP)/cc_native_bad_no_implicit_int.o $(CC_TMP)/cc_native_bad_c99_const_assign.o $(CC_TMP)/cc_native_bad_c99_const_param_assign.o $(CC_TMP)/cc_native_bad_c99_restrict_nonptr.o $(CC_TMP)/cc_native_bad_c99_file_scope_auto.o $(CC_TMP)/cc_native_bad_c99_extern_local_init.o $(CC_TMP)/cc_native_bad_c99_flexible_array_init.o $(CC_TMP)/cc_native_bad_c99_union_init.o $(CC_TMP)/cc_native_bad_c99_array_assign.o $(CC_TMP)/cc_native_bad_c99_array_update.o $(CC_TMP)/cc_native_bad_c99_bitfield_addr.o $(CC_TMP)/cc_native_bad_c99_bitfield_sizeof.o $(CC_TMP)/cc_native_bad_c99_bitfield_named_zero.o $(CC_TMP)/cc_native_bad_c99_return_void_value.o $(CC_TMP)/cc_native_bad_c99_return_missing_value.o $(CC_TMP)/cc_native_bad_c99_variadic_too_few.o $(CC_TMP)/cc_native_bad_c99_pragma_stdc_bad.o $(CC_TMP)/cc_native_c90_oldstyle_c99_bad.o
-	rm -f $(CC_TMP)/cc_native_warn_assign_cond.o $(CC_TMP)/cc_native_warn_assign_cond.log $(CC_TMP)/cc_native_warn_assign_cond_werror.o \
-	      $(CC_TMP)/cc_native_c99_computed_goto_pedantic.o $(CC_TMP)/cc_native_c99_computed_goto_pedantic.log $(CC_TMP)/cc_native_c99_computed_goto_pedantic_errors.o \
-	      $(CC_TMP)/cc_native_bad_ptr_add_ptr_loc.o $(CC_TMP)/cc_native_bad_ptr_add_ptr_loc.log $(CC_TMP)/cc_native_bad_source_line.o $(CC_TMP)/cc_native_bad_source_line.log \
-	      $(CC_TMP)/cc_conformance_pass.log $(CC_TMP)/cc_conformance_xfail.log $(CC_TMP)/cc_diff_host.log $(CC_TMP)/cc_diff_ours.log \
-	      $(CC_TMP)/cc_pp_gnu11_predefs.i
-	rm -f $(CC_TMP)/cc_native_c11_static_assert $(CC_TMP)/cc_native_c11_generic $(CC_TMP)/cc_native_c11_align_thread_noreturn \
-	      $(CC_TMP)/cc_native_c11_atomic $(CC_TMP)/cc_native_c11_atomic_wrapper_type $(CC_TMP)/cc_native_c11_atomic_fence $(CC_TMP)/cc_native_c11_atomic_fence.s $(CC_TMP)/cc_native_c11_atomic_fence_32.s $(CC_TMP)/cc_native_c11_unicode_literals $(CC_TMP)/cc_native_bad_c11_static_assert_fail.o \
-	      $(CC_TMP)/cc_native_bad_c11_thread_local_local.o $(CC_TMP)/cc_native_c17_register $(CC_TMP)/cc_native_c11_pp_version.i \
-	      $(CC_TMP)/cc_native_c17_pp_version.i \
-	      $(CC_TMP)/cc_native_c23_keywords $(CC_TMP)/cc_native_c23_nullptr $(CC_TMP)/cc_native_c23_typeof \
-	      $(CC_TMP)/cc_native_c23_bitint $(CC_TMP)/cc_native_c23_bitint_size $(CC_TMP)/cc_native_c23_binary_sep $(CC_TMP)/cc_native_c23_empty_init \
-	      $(CC_TMP)/cc_native_c23_enum_underlying $(CC_TMP)/cc_native_c23_label_decl $(CC_TMP)/cc_native_c23_constexpr_auto_decimal $(CC_TMP)/cc_native_c23_decimal_sizes \
-	      $(CC_TMP)/cc_native_c23_empty_param $(CC_TMP)/cc_native_c23_asm_extension $(CC_TMP)/cc_native_c23_float16_storage \
-	      $(CC_TMP)/cc_native_global_ulong_div_init $(CC_TMP)/cc_native_link_atexit $(CC_TMP)/cc_native_x86_64_large_struct_byval \
-	      $(CC_TMP)/cc_native_bad_c23_auto_no_init.o $(CC_TMP)/cc_native_bad_c23_bitint_zero.o \
-	      $(CC_TMP)/cc_native_bad_c23_static_assert_single_fail.o $(CC_TMP)/cc_native_bad_c23_empty_param_call.o $(CC_TMP)/cc_native_c23_pp_version.i \
-	      $(CC_TMP)/cc_native_c23_attr_std $(CC_TMP)/cc_native_c23_attr_std.log $(CC_TMP)/cc_native_c23_attr_std_werror \
-	      $(CC_TMP)/cc_native_c23_attr_std_werror.log $(CC_TMP)/cc_native_bad_c23_attr_fallthrough_outside.o \
-	      $(CC_TMP)/cc_native_c23_attr_has.i \
-	      $(CC_TMP)/cc_postc99_mode_c11.i $(CC_TMP)/cc_postc99_mode_c17.i $(CC_TMP)/cc_postc99_mode_c18.i $(CC_TMP)/cc_postc99_mode_c23.i $(CC_TMP)/cc_postc99_mode_c2x.i \
-	      $(CC_TMP)/cc_postc99_mode_c11 $(CC_TMP)/cc_postc99_mode_c17 $(CC_TMP)/cc_postc99_mode_c23 $(CC_TMP)/cc_postc99_mode_c2x \
-	      $(CC_TMP)/cc_postc99_abi_c11 $(CC_TMP)/cc_postc99_abi_c17 $(CC_TMP)/cc_postc99_abi_c23 \
-	      $(CC_TMP)/cc_postc99_abi_c11_64.o $(CC_TMP)/cc_postc99_abi_c17_64.o $(CC_TMP)/cc_postc99_abi_c23_64.o \
-	      $(CC_TMP)/cc_postc99_abi_c11_32.o $(CC_TMP)/cc_postc99_abi_c17_32.o $(CC_TMP)/cc_postc99_abi_c23_32.o \
-	      $(CC_TMP)/cc_postc99_probe_bin $(CC_TMP)/cc_postc99_probe_gcc_c11.c $(CC_TMP)/cc_postc99_probe_gcc_c17.c \
-	      $(CC_TMP)/cc_postc99_probe_gcc_c23.c $(CC_TMP)/cc_postc99_probe_clang_c11.c $(CC_TMP)/cc_postc99_probe_clang_c17.c \
-	      $(CC_TMP)/cc_postc99_probe_clang_c23.c $(CC_TMP)/cc_postc99_ours_gcc_c11 $(CC_TMP)/cc_postc99_ours_gcc_c17 \
-	      $(CC_TMP)/cc_postc99_ours_gcc_c23 $(CC_TMP)/cc_postc99_host_gcc_c11 $(CC_TMP)/cc_postc99_host_gcc_c17 \
-	      $(CC_TMP)/cc_postc99_host_gcc_c23 $(CC_TMP)/cc_postc99_ours_clang_c11 $(CC_TMP)/cc_postc99_ours_clang_c17 \
-	      $(CC_TMP)/cc_postc99_ours_clang_c23 $(CC_TMP)/cc_postc99_host_clang_c11 $(CC_TMP)/cc_postc99_host_clang_c17 \
-	      $(CC_TMP)/cc_postc99_host_clang_c23
-	rm -f $(CC_TMP)/cc_postc99_abi_* $(CC_TMP)/cc_postc99_ours_* $(CC_TMP)/cc_postc99_host_*
-	rm -f $(CC_TMP)/cc_pp_s3.i $(CC_TMP)/cc_pp_s3_p.i $(CC_TMP)/cc_pp_s3_dM.i $(CC_TMP)/cc_pp_s3_m.d $(CC_TMP)/cc_pp_s3_mm.d $(CC_TMP)/cc_pp_s3_md.d \
-	      $(CC_TMP)/cc_pp_s3_md.i $(CC_TMP)/cc_pp_s3_v.i $(CC_TMP)/cc_pp_s3_v.log $(CC_TMP)/cc_pp_s3_depth.i $(CC_TMP)/cc_pp_s3_macro.i $(CC_TMP)/cc_pp_s3_macro_limit.i $(CC_TMP)/cc_pp_s3_token_limit.i $(CC_TMP)/cc_pp_s3_output_limit.i \
-	      $(CC_TMP)/cc_pp_s6_probe_gnu11.i $(CC_TMP)/cc_pp_s6_probe_c99.i $(CC_TMP)/cc_pp_s63_clang_pragma.i $(CC_TMP)/cc_pp_s63_bad_clang_pragma.i $(CC_TMP)/cc_pp_s63_bad_clang_section.i $(CC_TMP)/cc_pp_s63_bad_clang_fp.i $(CC_TMP)/cc_pp_s63_bad_clang_attribute.i $(CC_TMP)/cc_pp_s63_bad_clang_loop.i \
-	      $(CC_TMP)/cc_pp_std_probe.c $(CC_TMP)/cc_pp_strict_c11.i $(CC_TMP)/cc_pp_strict_gnu11.i \
-	      $(CC_TMP)/cc_pp_s63_bad_clang_pragma.log $(CC_TMP)/cc_pp_s63_bad_clang_section.log $(CC_TMP)/cc_pp_s63_bad_clang_fp.log $(CC_TMP)/cc_pp_s63_bad_clang_attribute.log $(CC_TMP)/cc_pp_s63_bad_clang_loop.log \
-	      $(CC_TMP)/cc_pp_cpp_mode.i $(CC_TMP)/cc_pp_cpp_mode_h.i $(CC_TMP)/cc_pp_cpp_mode_input.h $(CC_TMP)/cpp $(CC_TMP)/cc_pp_fuzz_out.i $(CC_TMP)/cc_pp_fuzz_seed.c $(CC_TMP)/cc_pp_fuzz_seed.i \
-	      $(CC_TMP)/cc_pp_fuzz_0.c $(CC_TMP)/cc_pp_fuzz_1.c $(CC_TMP)/cc_pp_fuzz_2.c $(CC_TMP)/cc_pp_fuzz_3.c $(CC_TMP)/cc_pp_fuzz_4.c \
-	      $(CC_TMP)/cc_pp_fuzz_5.c $(CC_TMP)/cc_pp_fuzz_6.c $(CC_TMP)/cc_pp_fuzz_7.c $(CC_TMP)/cc_pp_fuzz_8.c $(CC_TMP)/cc_pp_fuzz_9.c \
-	      $(CC_TMP)/cc_pp_fuzz_10.c $(CC_TMP)/cc_pp_fuzz_11.c $(CC_TMP)/cc_pp_fuzz_12.c $(CC_TMP)/cc_pp_fuzz_13.c $(CC_TMP)/cc_pp_fuzz_14.c \
-	      $(CC_TMP)/cc_pp_fuzz_15.c $(CC_TMP)/cc_pp_s4_elif_c23.i $(CC_TMP)/cc_pp_s4_elif_c11.i $(CC_TMP)/cc_pp_s4_warning_c23.i \
-	      $(CC_TMP)/cc_pp_s4_warning_c23.log $(CC_TMP)/cc_pp_s4_warning_c11.i $(CC_TMP)/cc_pp_s4_has_c23.i $(CC_TMP)/cc_pp_s4_has_c11.i $(CC_TMP)/cc_pp_s4_vaopt_c23.i \
-	      $(CC_TMP)/cc_pp_s4_vaopt_c11.i $(CC_TMP)/cc_pp_s4_stdver_c99.i $(CC_TMP)/cc_pp_s4_stdver_c11.i $(CC_TMP)/cc_pp_s4_stdver_c17.i \
-	      $(CC_TMP)/cc_pp_s4_stdver_c23.i $(CC_TMP)/cc_pp_s4_stdver_gnu11.i $(CC_TMP)/cc_pp_s4_stdver_gnu17.i $(CC_TMP)/cc_pp_s4_stdver_gnu23.i \
-	      $(CC_TMP)/cc_pp_s4_trigraph_c11.i $(CC_TMP)/cc_pp_s4_trigraph_c23.i $(CC_TMP)/cc_pp_s4_trigraph_gnu17.i \
-	      $(CC_TMP)/cc_pp_s4_trigraph_gnu17t.i $(CC_TMP)/cc_pp_s4_embed.bin $(CC_TMP)/cc_pp_s4_embed.c $(CC_TMP)/cc_pp_s4_embed.i $(CC_TMP)/cc_pp_s4_embed_c11.i \
-	      $(CC_TMP)/cc_pp_s5_named_va.i $(CC_TMP)/cc_pp_s5_named_va_c99.i $(CC_TMP)/cc_pp_s5_dynmac.i $(CC_TMP)/cc_pp_s5_include_next.i $(CC_TMP)/cc_pp_s5_pragma.i \
-	      $(CC_TMP)/cc_pp_s4_host_gcc.i $(CC_TMP)/cc_pp_s4_host_clang.i $(CC_TMP)/cc_pp_s4_host_gcc.ab $(CC_TMP)/cc_pp_s4_host_clang.ab \
-	      $(CC_TMP)/cc_pp_s4_ours.ab
-	rm -f $(CC_TMP)/cc_native_c99_simd_intrinsics $(CC_TMP)/cc_native_c99_simd_intrinsics_32.o \
-	      $(CC_TMP)/cc_simd_macro_probe.c $(CC_TMP)/cc_simd_macro_none.i $(CC_TMP)/cc_simd_macro_avx.i $(CC_TMP)/cc_simd_macro_avx2.i \
-	      $(CC_TMP)/cc_simd_macro_avx_m64.i $(CC_TMP)/cc_simd_macro_avx2_off.i $(CC_TMP)/cc_simd_macro_v3.i
+	rm -rf $(addprefix $(CC_TMP)/,$(SUITE))
 	rm -f test_ast2ir_bin test_ctype_bin
