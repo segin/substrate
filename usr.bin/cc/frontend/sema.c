@@ -4423,6 +4423,16 @@ static int sema_check_addr(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
         sema_set_type(e, sx_vtype(x->lhs));
         return 0;
     }
+    if (x->kind == CC_EXPR_STR && x->ctype != NULL && x->ctype->kind == CC_CT_ARRAY) {
+        /*
+         * A string literal is an array lvalue: `&"s"` points to the array,
+         * at the address "s" decays to.  Linux's MODULE_DEVICE_TABLE
+         * entries hold `(kernel_ulong_t)&"PARPORT_SERIAL"`.
+         */
+        e->kind = CC_EXPR_CAST;
+        sema_set_type(e, cc_ct_pointer(x->ctype));
+        return 0;
+    }
     if (!of_literal && x->kind != CC_EXPR_IDENT && x->kind != CC_EXPR_MEMBER &&
         !(x->kind == CC_EXPR_CAST && sx_ct_record(x->ctype) >= 0)) {
         sema_diag(diag, "address-of currently requires an identifier or member lvalue");
