@@ -138,6 +138,12 @@ int module_symbol_is_extern_global(const cc_ssa_module_t *m, const char *sym);
  * function of the module, or one of hidden, protected or internal visibility, defined here or declared so.
  */
 int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym);
+/**
+ * Whether x86-64 code reaches symbol @p sym's address through its GOT entry rather than relative to %rip:
+ * when it may bind outside the object -- under @p pic, or a global declared extern but under
+ * -mcmodel=kernel.
+ */
+int x86_64_symbol_uses_got(const cc_ssa_module_t *m, const char *sym, int pic);
 
 /* common.c: the frame */
 

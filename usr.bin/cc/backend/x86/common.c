@@ -2041,6 +2041,18 @@ int module_symbol_binds_locally(const cc_ssa_module_t *m, const char *sym) {
     return 0;
 }
 
+int x86_64_symbol_uses_got(const cc_ssa_module_t *m, const char *sym, int pic) {
+    /*
+     * what binds within the object is in reach of %rip, as gcc reaches it: Linux's decompressor, -fPIE with
+     * every declaration hidden, asserts it has no GOT
+     */
+    if (sym == NULL || module_symbol_binds_locally(m, sym)) {
+        return 0;
+    }
+    /* (-mcmodel=kernel: a kernel has no GOT, and its globals are all in reach of %rip) */
+    return pic || (module_symbol_is_extern_global(m, sym) && !cc_options_current()->cmodel_kernel);
+}
+
 int slot_off(const slot_layout_t *lay, int v) {
     if (lay->word_of != NULL && lay->word_of[v] >= 0) {
         return -lay->slot_size * lay->slot_count - lay->bias - 4 * (lay->word_of[v] + 1);

@@ -270,6 +270,13 @@ with the GOT in
 .Li %ebx ,
 which every function then saves and restores.
 The code holds no absolute relocation.
+On x86-64 such a symbol is reached relative to
+.Li %rip
+and only another through its GOT entry,
+.Li sym@GOTPCREL ;
+with
+.Fl fPIE
+a global defined in the file binds within it too.
 .It Fl fgnu89-inline , Fl fno-gnu89-inline
 Use, or do not use, GNU89 inline semantics, the reverse of C99's: a
 plain
