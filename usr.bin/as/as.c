@@ -3468,11 +3468,85 @@ static int cond_syms_note_line(cond_syms_t *syms, const char *line) {
 
 /* Whether the expression of an .if is true: 1 or 0, or -1 if it is not
  * a number. */
+/**
+ * Whether @p s, @p n bytes, is a register's name: `%` and a name.
+ */
+static int is_register_text(const char *s, size_t n) {
+    size_t i;
+
+    if (n < 2 || s[0] != '%') {
+        return 0;
+    }
+    for (i = 1; i < n; ++i) {
+        if (!isalnum((unsigned char)s[i]) && s[i] != '_') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * A comparison of two registers, `%a == %b` or `%a != %b`, as GNU as makes it in a conditional: true when
+ * they are (not) the same register.  Linux's UNWIND_HINT_REGS asks `.if \base == %rsp`.
+ *
+ * @return 1 or 0 for the comparison's truth; -1 when @p expr is not one
+ */
+static int eval_register_compare(const char *expr) {
+    const char *op = strstr(expr, "==");
+    int negate = 0;
+    const char *l;
+    const char *le;
+    const char *r;
+    const char *re;
+
+    if (op == NULL) {
+        op = strstr(expr, "!=");
+        negate = 1;
+    }
+    if (op == NULL) {
+        return -1;
+    }
+    l = expr;
+    while (isspace((unsigned char)*l)) {
+        l++;
+    }
+    le = op;
+    while (le > l && isspace((unsigned char)le[-1])) {
+        le--;
+    }
+    r = op + 2;
+    while (isspace((unsigned char)*r)) {
+        r++;
+    }
+    re = r + strlen(r);
+    while (re > r && isspace((unsigned char)re[-1])) {
+        re--;
+    }
+    if (!is_register_text(l, (size_t)(le - l)) || !is_register_text(r, (size_t)(re - r))) {
+        return -1;
+    }
+    {
+        size_t n = (size_t)(le - l);
+        int same = n == (size_t)(re - r);
+        size_t i;
+
+        for (i = 0; same && i < n; ++i) {
+            same = tolower((unsigned char)l[i]) == tolower((unsigned char)r[i]);
+        }
+        return negate ? !same : same;
+    }
+}
+
 static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr) {
     long long ln = 0;
+    int reg;
 
     if (expr == NULL) {
         return 0;
+    }
+    reg = eval_register_compare(expr);
+    if (reg >= 0) {
+        return reg;
     }
     /* An expression of numbers, and of the names that have been given
      * numbers by now, is as_expr.c's, whole: `.if 1+1 == 2`,

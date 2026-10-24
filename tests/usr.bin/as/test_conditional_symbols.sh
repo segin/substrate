@@ -59,6 +59,13 @@ t 01   '.set K, 2|.if K*2 > 3|.byte 1|.else|.byte 2|.endif'
 t 02   '.equ K, 1|.if K*2 > 3|.byte 1|.else|.byte 2|.endif'
 t 02   '.equiv Q, 2|.if Q == 2|.byte 2|.endif'
 
+# Two registers compared: the same register or not, as a macro's argument
+# is in Linux's UNWIND_HINT_REGS (`.if \base == %rsp`).
+t 01   '.if %esp == %esp|.byte 1|.else|.byte 2|.endif'
+t 02   '.if %esp == %ebp|.byte 1|.else|.byte 2|.endif'
+t 01   '.if %esp != %ebp|.byte 1|.else|.byte 2|.endif'
+t 010302 '.macro M base=%esp|.if \base == %esp|.byte 1|.elseif \base == %ebp|.byte 3|.else|.byte 2|.endif|.endm|M|M base=%ebp|M base=%eax'
+
 # Each way of giving a symbol a value, and a value given by another's.
 t 02   'K = 5|.if K - 5|.byte 1|.else|.byte 2|.endif'
 t 01   'K=5|.if K == 5|.byte 1|.endif'
