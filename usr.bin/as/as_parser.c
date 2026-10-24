@@ -3242,9 +3242,14 @@ int as_parse_feed(as_parser_t *p, const as_token_t *items, size_t count) {
             st.u.directive.arg_count == 2 &&
             (streq_ci(st.u.directive.name, ".set") || streq_ci(st.u.directive.name, ".equ") ||
              streq_ci(st.u.directive.name, ".equiv"))) {
-            int is_reg = st.u.directive.args[1][0] == '%' && is_x86_register_text(st.u.directive.args[1]);
+            /* a name for a register, or for another such name -- the register it stands for now: Linux's
+             * SHA-256 rotates its round's registers so, `TMP_ = h`, `h = g`, ..., `a = TMP_` */
+            const char *alias = reg_alias_find(&ctx.reg_aliases, st.u.directive.args[1]);
+            int is_reg = (st.u.directive.args[1][0] == '%' && is_x86_register_text(st.u.directive.args[1])) ||
+                         alias != NULL;
 
-            if (reg_alias_note(&ctx.reg_aliases, st.u.directive.args[0], st.u.directive.args[1], is_reg) != 0) {
+            if (reg_alias_note(&ctx.reg_aliases, st.u.directive.args[0],
+                               alias != NULL ? alias : st.u.directive.args[1], is_reg) != 0) {
                 free_stmt(&st);
                 set_err(&ctx, "%s:%u: out of memory", tokens->items[start].file, tokens->items[start].line);
                 p->ctx = ctx;
