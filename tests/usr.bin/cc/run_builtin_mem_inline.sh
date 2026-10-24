@@ -6,6 +6,9 @@
 # memcpy.  Nor do the copy of a small structure and the zeroing of one,
 # which cc makes calls of memcpy and memset (and the vDSO's link failed
 # on memset).  codegen/builtin_mem_inline.c checks the bytes they leave.
+# Their result is a void *, as the functions', whatever the destination:
+# Linux's decompressor assigns memcpy's, its __builtin_memcpy, to a
+# function pointer, refused as an unsigned long * was.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -52,6 +55,15 @@ void zero_local(void) {
 
 void copy(struct small *d, const struct small *s) {
     *d = *s;
+}
+
+extern char code[];
+
+void *place(unsigned long *t) {
+    void (*run)(void *);
+
+    run = __builtin_memcpy(t + 2, &code, 16);
+    return (void *)run;
 }
 EOF
 for m in 32 64; do

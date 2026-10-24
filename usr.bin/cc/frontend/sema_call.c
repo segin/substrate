@@ -1057,7 +1057,11 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             sema_diag(diag, "memory builtin size argument must be integral");
             return -1;
         }
-        sema_set_type(e, sx_vtype(e->args[0]));
+        /*
+         * void *, as the functions return, not the destination's type: Linux's decompressor assigns the
+         * result of `memcpy(trampoline + off, ...)`, its __builtin_memcpy, to a function pointer
+         */
+        sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
         return 0;
     }
     if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
