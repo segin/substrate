@@ -377,7 +377,12 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_TPOFF32:
         case R_X86_64_TLSLD:
         case R_X86_64_DTPOFF32:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            /*
+             * a 64-bit address, sign-extended from the field: the sum wraps as the machine's does, so an
+             * address in the top 2 GiB is the negative number that fits -- Linux's kernel is linked at
+             * 0xffffffff81000000 and its `cmpq $sym, ...` took it for too large a number
+             */
+            v = (elf_swide_t)(int64_t)(sym_value + (uint64_t)addend);
             if (!swide_in_signed_bits(v, 32)) {
                 return -2;
             }

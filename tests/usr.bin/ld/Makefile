@@ -13,5 +13,6 @@ run:
 	./test_absolute_reloc.sh
 	./test_narrow_reloc.sh
 	./test_emit_relocs.sh
+	./test_kernel_reloc.sh
 
 clean:
