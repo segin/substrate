@@ -948,6 +948,18 @@ elf_err_t elf_set_load_headers(elfobj_t *obj, int load) {
     return ELF_OK;
 }
 
+elf_err_t elf_set_max_page_size(elfobj_t *obj, uint64_t size) {
+    if (obj == NULL || obj->readonly || obj->finalized) {
+        return ELF_ERR_STATE;
+    }
+    if ((size & (size - 1)) != 0) {
+        return ELF_ERR_UNSUPPORTED;
+    }
+    obj->max_page_size = size;
+    obj->dirty = 1;
+    return ELF_OK;
+}
+
 uint16_t elf_type(const elfobj_t *obj) {
     return obj == NULL ? 0 : obj->type;
 }

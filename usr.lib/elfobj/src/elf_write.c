@@ -77,20 +77,26 @@ static int align_up_checked(uint64_t v, uint64_t a, uint64_t *out) {
     return 1;
 }
 
-static uint64_t align_with_page_mod(uint64_t off, uint64_t align, uint64_t addr) {
-    uint64_t want = addr & 0xfffu;
+/** The page a PT_LOAD is aligned to: elf_set_max_page_size()'s, or 4 KiB. */
+static uint64_t out_page_size(const elfobj_t *obj) {
+    return obj->max_page_size != 0 ? obj->max_page_size : 0x1000u;
+}
+
+/** @p off aligned to @p align, then moved on to the place in a page of @p page bytes that @p addr has. */
+static uint64_t align_with_page_mod(uint64_t off, uint64_t align, uint64_t addr, uint64_t page) {
+    uint64_t want = addr & (page - 1);
     uint64_t cur;
     uint64_t steps;
 
     off = align_up(off, align ? align : 1);
-    cur = off & 0xfffu;
+    cur = off & (page - 1);
     if (cur == want) {
         return off;
     }
     if (cur < want) {
         return off + (want - cur);
     }
-    steps = 0x1000u - (cur - want);
+    steps = page - (cur - want);
     return off + steps;
 }
 
@@ -1382,7 +1388,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 prev_alloc_off + (secs[i].addr - prev_alloc_addr) >= off) {
                 off = prev_alloc_off + (secs[i].addr - prev_alloc_addr);
             } else {
-                off = align_with_page_mod(off, 1, secs[i].addr);
+                off = align_with_page_mod(off, 1, secs[i].addr, out_page_size(obj));
             }
             have_prev_alloc = 1;
             prev_alloc_addr = secs[i].addr + secs[i].size;
@@ -1797,7 +1803,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     elf__wr32(p + 16, obj->endian, (uint32_t)filesz);
                     elf__wr32(p + 20, obj->endian, (uint32_t)memsz);
                     elf__wr32(p + 24, obj->endian, load_flags);
-                    elf__wr32(p + 28, obj->endian, 0x1000);
+                    elf__wr32(p + 28, obj->endian, (uint32_t)out_page_size(obj));
                 } else {
                     elf__wr32(p + 0, obj->endian, PT_LOAD);
                     elf__wr32(p + 4, obj->endian, load_flags);
@@ -1806,7 +1812,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     elf__wr64(p + 24, obj->endian, load_addr_lo == UINT64_MAX ? 0 : load_addr_lo);
                     elf__wr64(p + 32, obj->endian, filesz);
                     elf__wr64(p + 40, obj->endian, memsz);
-                    elf__wr64(p + 48, obj->endian, 0x1000);
+                    elf__wr64(p + 48, obj->endian, out_page_size(obj));
                 }
                 phidx++;
             }

@@ -1527,6 +1527,11 @@ elf_err_t elf_set_entry(elfobj_t *obj, uint64_t entry);
  * headers where they fit below it (1, the default); a linker script's
  * PHDRS without FILEHDR says not. */
 elf_err_t elf_set_load_headers(elfobj_t *obj, int load);
+/* The largest page the output may be loaded in, a power of two (GNU ld's
+ * -z max-page-size): what a PT_LOAD the writer makes is aligned to, and
+ * what a segment's file offset is congruent to its address modulo.  0 is
+ * the default, 4 KiB. */
+elf_err_t elf_set_max_page_size(elfobj_t *obj, uint64_t size);
 elf_section_t *elf_add_arm_exidx(elfobj_t *obj);
 elf_err_t elf_add_arm_attributes(elfobj_t *obj, const void *attrs_data, size_t attrs_size);
 elf_err_t elf_add_gnu_property_aarch64(elfobj_t *obj, uint32_t feature_1);

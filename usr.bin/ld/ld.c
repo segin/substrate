@@ -413,6 +413,10 @@ static int phase_brand(ld_link_t *l) {
         fprintf(stderr, "ld: failed to set Substrate ELF OSABI\n");
         return -1;
     }
+    if (elf_set_max_page_size(l->out, l->ctx->opt.max_page_size) != ELF_OK) {
+        fprintf(stderr, "ld: failed to set the output's page size\n");
+        return -1;
+    }
     return 0;
 }
 

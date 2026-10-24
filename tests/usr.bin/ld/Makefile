@@ -14,5 +14,6 @@ run:
 	./test_narrow_reloc.sh
 	./test_emit_relocs.sh
 	./test_kernel_reloc.sh
+	./test_page_size.sh
 
 clean:

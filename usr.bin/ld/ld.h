@@ -180,6 +180,7 @@ typedef struct {
     int z_execstack; /* -1=auto, 0=noexecstack, 1=execstack */
     int z_relro; /* 0=norelro, 1=relro */
     int z_now;   /* -z now: the dynamic linker binds everything at once */
+    uint64_t max_page_size; /* -z max-page-size: a PT_LOAD's alignment; 0 for 4 KiB */
     ld_hash_style_t hash_style;
     const char *out_path;
     const char *script_path;
@@ -641,6 +642,8 @@ int parse_mode_token(const char *tok);
 int parse_compat_mode(const char *tok, ld_compat_mode_t *out_mode);
 const char *canonical_mode_name(int mode);
 int parse_z_option(ld_ctx_t *ctx, const char *val);
+/** The largest page the output may be loaded in (-z max-page-size), 4 KiB by default. */
+uint64_t ld_max_page_size(const ld_ctx_t *ctx);
 int parse_hash_style_option(const char *val, ld_hash_style_t *out_style);
 void ld_diag_note(const char *category, const char *source, const char *hint);
 int ld_warn(ld_ctx_t *ctx, const char *fmt, ...);

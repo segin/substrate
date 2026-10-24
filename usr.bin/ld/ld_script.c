@@ -389,7 +389,7 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
         *out += ec->dot & (vals[0] - 1);
     } else if (strcmp(name, "CONSTANT") == 0 && word != NULL &&
                (strcmp(word, "MAXPAGESIZE") == 0 || strcmp(word, "COMMONPAGESIZE") == 0)) {
-        *out = 0x1000u;
+        *out = strcmp(word, "MAXPAGESIZE") == 0 ? ld_max_page_size(ec->ctx) : 0x1000u;
     } else if (strcmp(name, "ALIGNOF") == 0 && word != NULL) {
         elf_section_t *sec = ec->obj != NULL ? elf_find_section((elfobj_t *)ec->obj, word) : NULL;
 
@@ -1307,7 +1307,7 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 } else {
                     segs[k] = elf_add_segment(obj, ph->type,
                                               ph->has_flags || ph->type != PT_LOAD ? ph->flags : (flags[k] | LD_PF_R),
-                                              ph->align);
+                                              ph->type == PT_LOAD ? ld_max_page_size(ctx) : ph->align);
                 }
                 if (segs[k] == NULL) {
                     goto done;

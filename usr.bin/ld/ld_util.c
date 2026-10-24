@@ -359,6 +359,10 @@ int parse_compat_mode(const char *tok, ld_compat_mode_t *out_mode) {
     return -1;
 }
 
+uint64_t ld_max_page_size(const ld_ctx_t *ctx) {
+    return ctx != NULL && ctx->opt.max_page_size != 0 ? ctx->opt.max_page_size : 0x1000u;
+}
+
 const char *canonical_mode_name(int mode) {
     if (mode == 64) {
         return "x86-64";
@@ -388,6 +392,19 @@ int parse_z_option(ld_ctx_t *ctx, const char *val) {
 
     if (ctx == NULL || val == NULL || val[0] == '\0') {
         return -1;
+    }
+    if (strncmp(val, "max-page-size=", 14) == 0) {
+        /*
+         * Linux's x86-64 vmlinux is linked with 2 MiB pages, and its decompressor refuses a PT_LOAD aligned to
+         * less: "Alignment of LOAD segment isn't multiple of 2MB"
+         */
+        uint64_t size = 0;
+
+        if (parse_u64_auto(val + 14, &size) != 0 || size == 0 || (size & (size - 1)) != 0) {
+            return -1;
+        }
+        ctx->opt.max_page_size = size;
+        return 0;
     }
     for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
         if (strcmp(val, words[i].word) == 0) {

@@ -519,7 +519,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         if (is_alloc) {
             if ((flags & SHF_EXECINSTR) != 0) {
                 if (load_rx == NULL) {
-                    load_rx = elf_add_load_segment(obj, LD_PF_R | LD_PF_X, 0x1000);
+                    load_rx = elf_add_load_segment(obj, LD_PF_R | LD_PF_X, ld_max_page_size(ctx));
                     if (load_rx == NULL) {
                         return -1;
                     }
@@ -529,7 +529,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 }
             } else if ((flags & SHF_WRITE) != 0 || force_rw) {
                 if (load_rw == NULL) {
-                    load_rw = elf_add_load_segment(obj, LD_PF_R | LD_PF_W, 0x1000);
+                    load_rw = elf_add_load_segment(obj, LD_PF_R | LD_PF_W, ld_max_page_size(ctx));
                     if (load_rw == NULL) {
                         return -1;
                     }
@@ -539,7 +539,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 }
             } else {
                 if (load_ro == NULL) {
-                    load_ro = elf_add_load_segment(obj, LD_PF_R, 0x1000);
+                    load_ro = elf_add_load_segment(obj, LD_PF_R, ld_max_page_size(ctx));
                     if (load_ro == NULL) {
                         return -1;
                     }
