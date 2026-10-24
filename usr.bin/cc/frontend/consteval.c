@@ -9,6 +9,7 @@
 
 #include <ctype.h>
 #include <float.h>
+#include <stdlib.h>
 #include <string.h>
 
 /**
@@ -193,7 +194,7 @@ static int const_bitop_width(const char *name, const char *base) {
  * first NUL (as strlen and strcmp see it), through any conversion of it.
  *
  * @param e    the expression
- * @param buf  receives the bytes; not NUL-terminated
+ * @param buf  receives the bytes, not NUL-terminated; NULL only counts them
  * @param cap  its size
  * @param len  receives how many
  * @return     0, or -1 if @p e is no narrow literal (or one with a universal character name, or too long)
@@ -245,10 +246,13 @@ static int const_literal_bytes(const cc_expr_t *e, unsigned char *buf, size_t ca
         if ((v & 0xffu) == 0) {
             break;
         }
-        if (out >= cap) {
-            return -1;
+        if (buf != NULL) {
+            if (out >= cap) {
+                return -1;
+            }
+            buf[out] = (unsigned char)v;
         }
-        buf[out++] = (unsigned char)v;
+        out++;
     }
     *len = out;
     return 0;
@@ -372,23 +376,32 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
          * MODULE_INFO asserts `sizeof(s) - 1 == __builtin_strlen(s)`, and
          * its sched comparisons pick an arm with `!__builtin_strcmp(">", "<")`.
          */
-        unsigned char a[512];
-        unsigned char b[512];
+        unsigned char *a;
+        unsigned char *b;
         size_t la;
         size_t lb;
         size_t i;
         int r = 0;
 
         if (strcmp(name, "__builtin_strlen") == 0) {
-            if (e->arg_count != 1 || const_literal_bytes(e->args[0], a, sizeof(a), &la) != 0) {
+            if (e->arg_count != 1 || const_literal_bytes(e->args[0], NULL, 0, &la) != 0) {
                 return -1;
             }
             return const_make((uint64_t)la, const_uintptr(), out);
         }
-        if (e->arg_count != 2 || const_literal_bytes(e->args[0], a, sizeof(a), &la) != 0 ||
-            const_literal_bytes(e->args[1], b, sizeof(b), &lb) != 0) {
+        if (e->arg_count != 2 || const_literal_bytes(e->args[0], NULL, 0, &la) != 0 ||
+            const_literal_bytes(e->args[1], NULL, 0, &lb) != 0) {
             return -1;
         }
+        a = (unsigned char *)malloc(la + 1);
+        b = (unsigned char *)malloc(lb + 1);
+        if (a == NULL || b == NULL) {
+            free(a);
+            free(b);
+            return -1;
+        }
+        const_literal_bytes(e->args[0], a, la, &la);
+        const_literal_bytes(e->args[1], b, lb, &lb);
         for (i = 0; i < la && i < lb && a[i] == b[i]; ++i) {
         }
         if (i < la && i < lb) {
@@ -396,6 +409,8 @@ static int const_eval_builtin(const cc_const_env_t *env, const cc_expr_t *e, cc_
         } else if (la != lb) {
             r = la < lb ? -1 : 1;
         }
+        free(a);
+        free(b);
         return const_make((uint64_t)(int64_t)r, const_int(), out);
     }
     if (e->arg_count != 1 || cc_const_eval(env, e->args[0], &arg) != 0) {
