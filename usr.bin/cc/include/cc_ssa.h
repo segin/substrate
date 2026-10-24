@@ -270,6 +270,11 @@ typedef struct cc_ssa_function {
     size_t value_cap;
     int value_count;
     int label_count;
+
+    /** the symbols the function keeps in the object although no instruction names them: its static locals
+     *  marked used, and those of the functions inlined into it (owned) */
+    char **keep_syms;
+    size_t keep_sym_count;
 } cc_ssa_function_t;
 
 typedef struct {
@@ -344,6 +349,12 @@ void cc_ssa_global_free(cc_ssa_global_t *g);
  * @return    the new value, or -1 when out of memory
  */
 int cc_ssa_function_new_value(cc_ssa_function_t *f, cc_value_type_t vt);
+/**
+ * Add @p sym to the symbols @p f keeps in the object though no instruction names them, unless it has it.
+ *
+ * @return 0, or -1 when out of memory
+ */
+int cc_ssa_function_keep_sym(cc_ssa_function_t *f, const char *sym);
 int cc_ssa_function_append_instr(cc_ssa_function_t *f, const cc_ssa_instr_t *in, cc_diag_t *diag);
 int cc_ssa_function_has_label(const cc_ssa_function_t *f, int label);
 size_t cc_ssa_function_basic_block_count(const cc_ssa_function_t *f);

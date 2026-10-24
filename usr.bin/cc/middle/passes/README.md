@@ -28,6 +28,9 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   `-finline-functions-called-once`, any static function called from one
   place, named nowhere else and on no cycle of calls, which `opt.c`
   marks, if it does not grow the caller's frame past gcc's limit) and
-  the copy of a body in place of a call (`cc_inline_calls()`).
+  the copy of a body in place of a call (`cc_inline_calls()`), which
+  hands the caller the callee's `keep_syms` too: the static locals
+  marked `used` that the object keeps while some function still holds
+  them, whether or not its code names them.
 
 Not here yet: mem2reg, GVN/CSE, LICM and loop transforms.

@@ -9309,7 +9309,7 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
         ssa_global_set_layout(&g, decl_ct, tu);
         g.size_bytes = obj_size;
         g.storage = CC_STORAGE_STATIC;
-        g.attr_flags = s->attr_flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED | CC_ATTR_SECTION);
+        g.attr_flags = s->attr_flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED | CC_ATTR_SECTION | CC_ATTR_USED);
         g.attr_align = s->attr_align;
         if (s->attr_section != NULL) {
             g.attr_section = cc_strdup(s->attr_section);
@@ -9352,6 +9352,15 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
             free(g.attr_section);
             free(g.init_sym);
             set_diag(diag, "out of memory appending static local global");
+            return -1;
+        }
+        /*
+         * marked used: in the object whether or not the code names it, as long as the function is there or is
+         * inlined into one that is -- Linux's static_call() names its key only so (__ADDRESSABLE), and objtool
+         * looks the key up by that reference
+         */
+        if ((s->attr_flags & CC_ATTR_USED) != 0 && cc_ssa_function_keep_sym(sf, sym) != 0) {
+            set_diag(diag, "out of memory keeping a used static local");
             return -1;
         }
 

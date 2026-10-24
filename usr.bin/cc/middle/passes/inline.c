@@ -625,6 +625,21 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
             if (splice_body(f, call, g, &out) != 0) {
                 break;
             }
+            {
+                /* what the callee keeps in the object, the caller keeps now too */
+                size_t k;
+
+                for (k = 0; k < g->keep_sym_count; ++k) {
+                    if (cc_ssa_function_keep_sym(f, g->keep_syms[k]) != 0) {
+                        break;
+                    }
+                }
+                if (k < g->keep_sym_count) {
+                    cc_ssa_instr_free(call);
+                    i++;
+                    break;
+                }
+            }
             cc_ssa_instr_free(call);
             inlined++;
             continue;

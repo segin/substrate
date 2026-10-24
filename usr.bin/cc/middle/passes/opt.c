@@ -1888,7 +1888,8 @@ static int global_names(const cc_ssa_global_t *g, const char *name) {
 
 /**
  * Drop the block-scope statics (and their guards) of the functions dropped: those cc made, named
- * __cc_static_*, that no function left and no global kept names.  A static inline in a header that
+ * __cc_static_*, that no function left names or keeps (a used one, cc_ssa_function_t.keep_syms) and
+ * no global kept names.  A static inline in a header that
  * nothing calls left its tables behind, and a table of pointers in .data has relocations: the vDSO,
  * which must have none, got of_overlay_action_name()'s.
  *
@@ -1922,6 +1923,10 @@ static int remove_orphan_static_locals(cc_ssa_module_t *m) {
 
             for (k = 0; k < f->instr_count && !keep[i]; ++k) {
                 keep[i] = sym_is(f->instrs[k].sym, name);
+            }
+            /* a used one its function, or one inlined into it, keeps */
+            for (k = 0; k < f->keep_sym_count && !keep[i]; ++k) {
+                keep[i] = strcmp(f->keep_syms[k], name) == 0;
             }
         }
     }

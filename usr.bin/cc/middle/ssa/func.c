@@ -153,7 +153,38 @@ void cc_ssa_function_free(cc_ssa_function_t *f) {
         cc_ssa_instr_free(&f->instrs[i]);
     }
     free(f->instrs);
+    for (i = 0; i < f->keep_sym_count; ++i) {
+        free(f->keep_syms[i]);
+    }
+    free(f->keep_syms);
     memset(f, 0, sizeof(*f));
+}
+
+int cc_ssa_function_keep_sym(cc_ssa_function_t *f, const char *sym) {
+    size_t i;
+    size_t len;
+    char **n;
+    char *c;
+
+    for (i = 0; i < f->keep_sym_count; ++i) {
+        if (strcmp(f->keep_syms[i], sym) == 0) {
+            return 0;
+        }
+    }
+    len = strlen(sym);
+    c = (char *)malloc(len + 1);
+    n = (char **)realloc(f->keep_syms, (f->keep_sym_count + 1) * sizeof(*n));
+    if (c == NULL || n == NULL) {
+        free(c);
+        if (n != NULL) {
+            f->keep_syms = n;
+        }
+        return -1;
+    }
+    memcpy(c, sym, len + 1);
+    f->keep_syms = n;
+    f->keep_syms[f->keep_sym_count++] = c;
+    return 0;
 }
 
 static int dup_instr(cc_ssa_instr_t *dst, const cc_ssa_instr_t *src) {
