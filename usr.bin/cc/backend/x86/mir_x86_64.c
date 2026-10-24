@@ -380,9 +380,13 @@ static int x64_begin(xsel_t *s) {
     return s->xf.oom ? -1 : 0;
 }
 
-/** Whether symbol @p sym's address is read from the GOT: under -fPIC, or a global declared extern; never a label. */
+/**
+ * Whether symbol @p sym's address is read from the GOT: under -fPIC, or a global declared extern but under
+ * -mcmodel=kernel, as x86_64.c decides it; never a label.
+ */
 static int x64_sym_got(const xsel_t *s, const char *sym) {
-    return sym[0] != '.' && (x64_pic || module_symbol_is_extern_global(s->m, sym));
+    return sym[0] != '.' &&
+           (x64_pic || (module_symbol_is_extern_global(s->m, sym) && !cc_options_current()->cmodel_kernel));
 }
 
 int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_function_t *f, size_t fn_index,

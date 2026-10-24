@@ -1586,7 +1586,8 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
                 break;
 
             case CC_SSA_GADDR: {
-                int use_got = pic || module_symbol_is_extern_global(m, in->sym);
+                /* (-mcmodel=kernel: a kernel has no GOT, and its globals are all in reach of %rip) */
+                int use_got = pic || (module_symbol_is_extern_global(m, in->sym) && !cc_options_current()->cmodel_kernel);
                 if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     if (use_got) {

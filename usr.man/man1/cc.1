@@ -225,6 +225,16 @@ code.
 i386: keep the stack aligned to 2^n bytes at a call, n from 2 to 12,
 rather than the psABI's 16; with 2 or 3 a function's frame is not padded
 for it, nor a call's arguments.
+.It Fl mcmodel Ns = Ns Cm small | kernel | medium | large
+x86-64: where the code and its data are linked.
+With
+.Cm kernel ,
+a global declared
+.Sy extern
+is reached relative to
+.Li %rip
+as any other is, not through the GOT, which a kernel has none of; the
+others change nothing.
 .It Fl g
 Emit debug information.
 .It Fl fasynchronous-unwind-tables , Fl funwind-tables

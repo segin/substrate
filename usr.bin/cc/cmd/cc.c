@@ -95,6 +95,7 @@ typedef struct {
   int trivial_auto_var_init_zero; /* -ftrivial-auto-var-init=zero */
   int no_unwind_tables; /* -fno-asynchronous-unwind-tables, -fno-unwind-tables */
   int i386_stack_boundary; /* -mpreferred-stack-boundary=N: 2^N, or 0 */
+  int cmodel_kernel; /* -mcmodel=kernel */
 
   const char *std;
   const char *opt_level;
@@ -185,6 +186,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->trivial_auto_var_init_zero = o->trivial_auto_var_init_zero;
   out->unwind_tables = !o->no_unwind_tables;
   out->i386_stack_boundary = o->i386_stack_boundary;
+  out->cmodel_kernel = o->cmodel_kernel;
 }
 
 
@@ -1287,6 +1289,25 @@ static int opt_stack_boundary(cc_opts_t *o, const driver_opt_t *d, const char *a
   return 0;
 }
 
+/**
+ * -mcmodel=small|kernel|medium|large (x86-64): where the code and data are.  Only kernel changes anything here:
+ * a global declared extern is then addressed off %rip as any other is, not through the GOT, which a kernel has
+ * none of (Linux's vmlinux.lds asserts "Unexpected GOT entries detected!").
+ *
+ * @return 0, or -1 for another value
+ */
+static int opt_cmodel(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)d;
+  if (val == NULL || (strcmp(val, "small") != 0 && strcmp(val, "kernel") != 0 && strcmp(val, "medium") != 0 &&
+                      strcmp(val, "large") != 0)) {
+    fprintf(stderr, "cc: error: %s=%s: the argument must be small, kernel, medium or large\n", as,
+            val != NULL ? val : "");
+    return -1;
+  }
+  o->cmodel_kernel = strcmp(val, "kernel") == 0;
+  return 0;
+}
+
 /*
  * The options cc knows.  Words (FLAG, VALUE) are tried first; then the
  * prefixes (LETTER, PREFIX) in table order, so a longer prefix must come
@@ -1336,6 +1357,7 @@ static const driver_opt_t options[] = {
     {"-mregparm", OPT_VALUE, FWD_C, opt_regparm, 0, 0},
     {"-ftrivial-auto-var-init", OPT_VALUE, FWD_C, opt_trivial_auto_var_init, 0, 0},
     {"-mpreferred-stack-boundary", OPT_VALUE, FWD_C, opt_stack_boundary, 0, 0},
+    {"-mcmodel", OPT_VALUE, FWD_C, opt_cmodel, 0, 0},
     {"-fno-asynchronous-unwind-tables -fno-unwind-tables", OPT_FLAG, FWD_C, opt_int, F(no_unwind_tables), 1},
     {"-fasynchronous-unwind-tables -funwind-tables", OPT_FLAG, FWD_C, opt_int, F(no_unwind_tables), 0},
     /* i386: structures of 1, 2, 4 or 8 bytes come back in %eax(:%edx), one float or double in %st0 (gcc) */
