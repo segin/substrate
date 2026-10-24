@@ -11,8 +11,11 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   its callees are, then folded again); at the end of a function's
   passes, the target's legalization once more, for what it split before
   the constants were known (on i386, a 64-bit division by a local that
-  holds a power of two); last, the static functions nothing refers to
-  any more are dropped.
+  holds a power of two), after a parameter of a static function that
+  every call of it passes the same constant has become that constant
+  and the function been folded again (`constant_args()`, as gcc's
+  interprocedural constant propagation); last, the static functions
+  nothing refers to any more are dropped.
 - `mem.c`: what is known of the function's own stack slots whose
   addresses do not escape (`cc_optimize_slots()`, run in the -O1 loop):
   a slot nothing loads from dropped with its stores and its zeroing

@@ -2456,6 +2456,232 @@ static int mark_called_once(const cc_ssa_module_t *m, unsigned char *once) {
     return 0;
 }
 
+/** Constant @p c as a value of @p size bytes holds it: truncated to them, and extended as @p is_unsigned says. */
+static long long held_as(long long c, uint32_t size, int is_unsigned) {
+    int k = 64 - 8 * (int)size;
+
+    if (size == 0 || size >= 8) {
+        return c;
+    }
+    return is_unsigned ? (long long)(((unsigned long long)c << k) >> k)
+                       : (long long)((unsigned long long)c << k) >> k;
+}
+
+/**
+ * Fold @p f again, after something became known: constants, copies, jumps, unreachable code, dead
+ * definitions.  The folding until it changes nothing: a value it folds is known past a label only from
+ * the next round on.
+ */
+static int refold_function(cc_ssa_function_t *f) {
+    int rc;
+    int round = 0;
+
+    do {
+        rc = fold_function(f, 1);
+    } while (rc > 0 && ++round < 8);
+    rc = rc < 0 ? -1 : cc_propagate_copies(f);
+    rc = rc < 0 ? -1 : thread_jumps(f);
+    rc = rc < 0 ? -1 : unreachable_function(f);
+    if (rc < 0 || dce_function(f) < 0) {
+        return -1;
+    }
+    for (round = 0; round < 2; ++round) {
+        int rd = cc_dead_defs(f);
+
+        if (rd < 0 || (rd > 0 && dce_function(f) < 0)) {
+            return -1;
+        }
+        if (rd == 0) {
+            break;
+        }
+    }
+    return 0;
+}
+
+/** Per parameter of the static functions constant_args() follows: what the calls seen so far pass. */
+typedef enum { ARG_UNSEEN, ARG_CONST, ARG_VARIES } arg_state_t;
+
+/**
+ * A parameter of a static function that every call of it passes the same integer constant is that
+ * constant, as gcc's interprocedural constant propagation makes it, and the function is folded again:
+ * only direct calls reach it -- its address is not taken, nor is it named by a global or an alias, nor
+ * used, weak, a constructor or a destructor.  Linux's fpu__restore_sig() passes its static
+ * __fpu_restore_sig(), too large a frame to inline, an ia32_fxstate it has made false on x86-64 without
+ * IA32 emulation, and the call of convert_to_fxsr() under it, a function that kernel does not define,
+ * must go.  Run once each function's own passes are done, so a caller's arguments are as folded as
+ * they will be; until nothing changes, as a function made simpler may pass constants of its own.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int constant_args(cc_ssa_module_t *m) {
+    const cc_attr_flags_t barred =
+        CC_ATTR_USED | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR | CC_ATTR_WEAK | CC_ATTR_NOINLINE;
+    size_t n = m->func_count;
+    size_t *base = (size_t *)malloc((n + 1) * sizeof(*base));
+    unsigned char *named = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    unsigned char *redo = (unsigned char *)calloc(n > 0 ? n : 1, 1);
+    unsigned char *st = NULL;
+    long long *val = NULL;
+    int *ndef = NULL;
+    long long *cval = NULL;
+    size_t i;
+    size_t k;
+    int round;
+    int rc = 0;
+
+    if (base == NULL || named == NULL || redo == NULL) {
+        rc = -1;
+        goto done;
+    }
+    base[0] = 0;
+    for (i = 0; i < n; ++i) {
+        base[i + 1] = base[i] + m->funcs[i].param_count;
+    }
+    st = (unsigned char *)malloc(base[n] > 0 ? base[n] : 1);
+    val = (long long *)malloc((base[n] > 0 ? base[n] : 1) * sizeof(*val));
+    if (st == NULL || val == NULL) {
+        rc = -1;
+        goto done;
+    }
+    /* what names a function other than a direct call: its address, a global's initializer, an alias */
+    for (i = 0; i < m->global_count; ++i) {
+        const cc_ssa_global_t *g = &m->globals[i];
+        long gi;
+
+        if ((gi = function_named(m, g->init_sym)) >= 0) {
+            named[gi] = 1;
+        }
+        if ((gi = function_named(m, g->attr_alias)) >= 0) {
+            named[gi] = 1;
+        }
+        for (k = 0; k < g->init_item_count; ++k) {
+            if ((gi = function_named(m, g->init_items[k].init_sym)) >= 0) {
+                named[gi] = 1;
+            }
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        const cc_ssa_function_t *f = &m->funcs[i];
+        long gi;
+
+        if ((gi = function_named(m, f->attr_alias)) >= 0) {
+            named[gi] = 1;
+        }
+        for (k = 0; k < f->instr_count; ++k) {
+            if (f->instrs[k].op != CC_SSA_CALL && f->instrs[k].sym != NULL &&
+                (gi = function_named(m, f->instrs[k].sym)) >= 0) {
+                named[gi] = 1;
+            }
+        }
+    }
+    for (round = 0; round < 4; ++round) {
+        int any = 0;
+
+        memset(st, ARG_UNSEEN, base[n] > 0 ? base[n] : 1);
+        /* each direct call: the constants it passes, or a parameter that varies */
+        for (i = 0; i < n; ++i) {
+            const cc_ssa_function_t *f = &m->funcs[i];
+            int v;
+
+            free(ndef);
+            free(cval);
+            ndef = (int *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), sizeof(*ndef));
+            cval = (long long *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1) * sizeof(*cval));
+            if (ndef == NULL || cval == NULL) {
+                rc = -1;
+                goto done;
+            }
+            for (k = 0; k < f->instr_count; ++k) {
+                const cc_ssa_instr_t *in = &f->instrs[k];
+
+                if (in->dst >= 0 && in->dst < f->value_count) {
+                    /* a constant's own definition counts once, any other makes it vary */
+                    ndef[in->dst] += in->op == CC_SSA_CONST ? 1 : 2;
+                    cval[in->dst] = in->imm;
+                }
+            }
+            for (k = 0; k < f->instr_count; ++k) {
+                const cc_ssa_instr_t *in = &f->instrs[k];
+                long gi = in->op == CC_SSA_CALL ? function_named(m, in->sym) : -1;
+                const cc_ssa_function_t *g = gi >= 0 ? &m->funcs[gi] : NULL;
+                size_t a;
+
+                if (g == NULL) {
+                    continue;
+                }
+                for (a = 0; a < g->param_count; ++a) {
+                    unsigned char *s = &st[base[gi] + a];
+                    long long c;
+
+                    v = a < in->arg_count ? in->args[a] : -1;
+                    if (in->call_chain != 0 || in->call_is_variadic || in->arg_count != g->param_count ||
+                        (in->call_arg_abi != NULL && (in->call_arg_abi[a] & ~CC_ABI_REGPARM_MASK) !=
+                                                          CC_CALL_ARG_ABI_DEFAULT) ||
+                        v < 0 || v >= f->value_count || ndef[v] != 1 || cc_ssa_value_class(f, v) != CC_VAL_I64) {
+                        *s = ARG_VARIES;
+                        continue;
+                    }
+                    c = held_as(cval[v], cc_ssa_value_size(f, v), cc_ssa_value_is_unsigned(f, v));
+                    if (*s == ARG_UNSEEN) {
+                        *s = ARG_CONST;
+                        val[base[gi] + a] = c;
+                    } else if (*s == ARG_CONST && val[base[gi] + a] != c) {
+                        *s = ARG_VARIES;
+                    }
+                }
+            }
+        }
+        /* a parameter every call passes one constant: that constant */
+        for (i = 0; i < n; ++i) {
+            cc_ssa_function_t *g = &m->funcs[i];
+
+            if ((g->storage & CC_STORAGE_STATIC) == 0 || (g->attr_flags & barred) != 0 || g->attr_alias != NULL ||
+                g->is_variadic || named[i] || g->param_count == 0) {
+                continue;
+            }
+            for (k = 0; k < g->instr_count; ++k) {
+                cc_ssa_instr_t *in = &g->instrs[k];
+                int p = in->param_index;
+
+                if (in->op != CC_SSA_PARAM || p < 0 || (size_t)p >= g->param_count || st[base[i] + p] != ARG_CONST ||
+                    in->dst < 0 || cc_ssa_value_class(g, in->dst) != CC_VAL_I64 ||
+                    cc_ssa_value_size(g, in->dst) > (uint32_t)cc_target_pointer_size() ||
+                    (g->param_abi != NULL &&
+                     (g->param_abi[p] & ~CC_ABI_REGPARM_MASK) != CC_CALL_ARG_ABI_DEFAULT)) {
+                    continue;
+                }
+                in->op = CC_SSA_CONST;
+                in->imm = held_as(val[base[i] + p], cc_ssa_value_size(g, in->dst),
+                                  cc_ssa_value_is_unsigned(g, in->dst));
+                in->param_index = -1;
+                redo[i] = 1;
+                any = 1;
+            }
+        }
+        for (i = 0; i < n; ++i) {
+            if (redo[i]) {
+                redo[i] = 0;
+                if (refold_function(&m->funcs[i]) != 0) {
+                    rc = -1;
+                    goto done;
+                }
+            }
+        }
+        if (!any) {
+            break;
+        }
+    }
+done:
+    free(base);
+    free(named);
+    free(redo);
+    free(st);
+    free(val);
+    free(ndef);
+    free(cval);
+    return rc;
+}
+
 /**
  * Inline the module's small static inline functions (passes/inline.c) bottom-up: a function is
  * rewritten once every function it calls is, so what it copies has its own calls inlined and is
@@ -2716,11 +2942,17 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
                 }
             }
         }
+    }
+    /* what every call of a static function passes it */
+    if (!oom && opt_level > 0) {
+        oom = constant_args(m) != 0;
+    }
+    for (i = 0; i < m->func_count && !oom && opt_level > 0; ++i) {
         /*
          * what the target split before the constants were known: a 64-bit division by one, as a shift
          * (Linux's roundup() divides by a local), and the constant it leaves dead
          */
-        if (!oom && cc_target_current()->legalize != NULL) {
+        if (cc_target_current()->legalize != NULL) {
             oom = cc_target_current()->legalize(&m->funcs[i], diag) != 0 || dce_function(&m->funcs[i]) < 0;
         }
         /* last of all: a variable's update made in place */

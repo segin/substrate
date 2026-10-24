@@ -192,6 +192,12 @@ written whole, is kept as a value rather than in memory; a copy is read
 as what it copies; and arithmetic that leaves its operand as it was
 (a mask of all ones, adding zero, a truth value compared unequal to
 zero) is dropped.
+A parameter of a
+.Ic static
+function that every call of it passes the same constant, its address
+not taken, is that constant within it, as with
+.Xr gcc 1 Ns 's
+interprocedural constant propagation.
 At
 .Fl O0
 nothing is inlined.
