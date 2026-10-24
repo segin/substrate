@@ -3014,6 +3014,22 @@ void emit_load_ptr_value_reg(FILE *fp, const slot_layout_t *lay, int value, int 
     emit_frame_load_reg(fp, is_64bit, slot_off(lay, value), reg);
 }
 
+int x86_asm_input_is_immediate(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t i, size_t instr_index) {
+    const char *c = in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL;
+    int v = in->asm_in_values != NULL ? in->asm_in_values[i] : -1;
+    long imm = 0;
+    int have_const;
+    int alternative;
+
+    /* as emit_inline_asm() decides it */
+    if (CC_SSA_ASM_MEM_INDIRECT_P(v) || cc_asm_constraint_matched_operand(c) >= 0 || !asm_constraint_is_immediate(c)) {
+        return 0;
+    }
+    have_const = find_const_i64_for_value(f, v, instr_index, &imm) == 0;
+    alternative = cc_asm_constraint_allows_gpr(c) || cc_asm_constraint_allows_memory(c);
+    return (have_const && (asm_immediate_fits(c, imm) || !alternative)) || (!have_const && !alternative);
+}
+
 int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
                            size_t fn_index, size_t instr_index, int is_64bit, cc_diag_t *diag) {
     size_t out_n = in->asm_out_count;

@@ -11,6 +11,7 @@
 #include "cc_options.h"
 #include "cc_types.h"
 #include "cc_x86.h"
+#include "cc_x86_mir.h"
 
 #include <float.h>
 #include <limits.h>
@@ -30,7 +31,7 @@ static void emit_i386_call_sym(FILE *fp, const char *sym, int known_local);
 static int i386_pic(void);
 
 /** The stack's alignment at a call, in bytes: 16 (the psABI's), or -mpreferred-stack-boundary's 2^N. */
-static int i386_stack_boundary(void) {
+int i386_stack_boundary(void) {
     int b = cc_options_current()->i386_stack_boundary;
 
     return b >= 4 ? b : 16;
@@ -147,11 +148,11 @@ static int i386_param_layout(const cc_ssa_function_t *f, int count, int want) {
     return base + (int)off;
 }
 
-static int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
+int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
     return i386_param_layout(f, param_index + 1, param_index);
 }
 
-static int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count) {
+int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count) {
     return i386_param_layout(f, fixed_count < 0 ? 0 : fixed_count, -1);
 }
 
@@ -192,7 +193,7 @@ static const char *i386_fp_tmp_reg(void) {
     return "%xmm7";
 }
 
-static int i386_has_ud2(void) {
+int i386_has_ud2(void) {
     return cc_options_current()->i386_isa_level >= 6;
 }
 
@@ -2021,7 +2022,6 @@ static void emit_i386_push_slot(FILE *fp, int off) {
  * The stack bytes emit_i386_push_call_arg() pushes for an argument, for
  * aligning the stack before the pushes.  Keep the two in step.
  */
-static int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a);
 
 static long i386_call_arg_bytes(const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
                                 size_t arg_index, int value) {
@@ -2063,7 +2063,7 @@ static const char *const i386_regparm_regs[3] = {"%eax", "%edx", "%ecx"};
  * (memcpy for a structure copy) has none, and under -mregparm takes the
  * registers by its arguments' sizes, as gcc's library calls do.
  */
-static int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a) {
+int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a) {
     const cc_options_t *o = cc_options_current();
     int next = 0;
     size_t k;
@@ -3263,6 +3263,20 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
             fn_x87_fp = 1;
         } else {
             fn_x87_fp = opts->i386_sse2 ? 0 : 1;
+        }
+        /* through machine IR and the register allocator, when that path handles all the function does */
+        {
+            int mrc = i386_mir_emit_function(out, m, f, i, src_path, emit_debug, diag);
+
+            if (mrc <= 0) {
+                if (fp != out) {
+                    fclose(fp);
+                }
+                if (mrc < 0) {
+                    return -1;
+                }
+                continue;
+            }
         }
         /*
          * the values whose address is taken (the only ones a pointer may reach, i386_sync_aliased()), the

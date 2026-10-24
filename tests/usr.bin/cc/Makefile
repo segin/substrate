@@ -37,7 +37,7 @@ SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff \
 	run_postc99_mode_matrix run_postc99_diff_modes run_postc99_abi_modes checks_c23 \
 	run_pp_postc99 run_pp_c99_baseline run_m16 run_gnu_inline \
 	run_div64_pow2 run_inline_dead_call run_pic_i386 run_object_symbols \
-	run_trivial_auto_var_init run_i386_regcache run_i386_frame_shapes run_alignof_std \
+	run_trivial_auto_var_init run_i386_regcache run_i386_regalloc run_i386_frame_shapes run_alignof_std \
 	run_attr_string_concat run_static_local_tables run_static_local_orphans run_asm_imm_symbol \
 	run_inline_called_once run_i386_frame_slots run_compiler_stamp run_pp_fuzz_smoke \
 	run_pp_gnu_ext run_pp_clang_feature_probe run_pp_clang_pragma run_pp_cmd_injection_test \
@@ -61,7 +61,7 @@ checks_main: build
 	# Compile and run test_ast2ir; a failed build must fail the suite,
 	# not leave an earlier binary to run
 	rm -f test_ast2ir_bin
-	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/common/asm_constraint.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/common/options.c $(TOP)/usr.bin/cc/frontend/consteval.c $(TOP)/usr.bin/cc/frontend/ctype.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/frontend/nested.c $(TOP)/usr.bin/cc/frontend/decimal.c $(TOP)/usr.bin/cc/frontend/binary128.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/parse_sema.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/sema_call.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/lower_call.c $(TOP)/usr.bin/cc/middle/irbuild.c $(TOP)/usr.bin/cc/middle/abi_x86_64.c $(TOP)/usr.bin/cc/middle/abi_i386.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/legalize_i386.c $(TOP)/usr.bin/cc/middle/ssa_dump.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/passes/inline.c $(TOP)/usr.bin/cc/middle/passes/mem.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/x86/common.c $(TOP)/usr.bin/cc/backend/x86/x86_64.c $(TOP)/usr.bin/cc/backend/x86/i386.c $(TOP)/usr.bin/cc/backend/x86/regalloc_i386.c -o test_ast2ir_bin
+	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/common/asm_constraint.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/common/options.c $(TOP)/usr.bin/cc/frontend/consteval.c $(TOP)/usr.bin/cc/frontend/ctype.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/frontend/nested.c $(TOP)/usr.bin/cc/frontend/decimal.c $(TOP)/usr.bin/cc/frontend/binary128.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/parse_sema.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/sema_call.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/lower_call.c $(TOP)/usr.bin/cc/middle/irbuild.c $(TOP)/usr.bin/cc/middle/abi_x86_64.c $(TOP)/usr.bin/cc/middle/abi_i386.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/legalize_i386.c $(TOP)/usr.bin/cc/middle/ssa_dump.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/passes/inline.c $(TOP)/usr.bin/cc/middle/passes/mem.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/x86/common.c $(TOP)/usr.bin/cc/backend/x86/x86_64.c $(TOP)/usr.bin/cc/backend/x86/i386.c $(TOP)/usr.bin/cc/backend/x86/regalloc_i386.c $(TOP)/usr.bin/cc/backend/x86/mir.c $(TOP)/usr.bin/cc/backend/x86/linscan.c $(TOP)/usr.bin/cc/backend/x86/mir_i386.c -o test_ast2ir_bin
 	./test_ast2ir_bin
 	rm -f test_ctype_bin
 	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ctype.c $(TOP)/usr.bin/cc/frontend/ctype.c $(TOP)/usr.bin/cc/frontend/types.c $(TOP)/usr.bin/cc/common/target.c $(TOP)/usr.bin/cc/common/options.c $(TOP)/usr.bin/cc/common/lang.c $(TOP)/usr.bin/cc/middle/abi_x86_64.c $(TOP)/usr.bin/cc/middle/abi_i386.c $(TOP)/usr.bin/cc/middle/irbuild.c $(TOP)/usr.bin/cc/common/diag.c $(TOP)/usr.bin/cc/common/util.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/legalize_i386.c -o test_ctype_bin
@@ -861,7 +861,7 @@ checks_main: build
 	$(CC_TMP)/cc_native_c99_designated_init_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_compound_literal.c -o $(CC_TMP)/cc_native_c99_compound_literal_32.s
 	# a store into the object: through a register, or off the frame pointer
-	grep -Eq "movl (%e[a-z]{2}|\\$$-?[0-9]+), (\\(%e[a-z]{2}\\)|-?[0-9]+\\(%ebp\\))" $(CC_TMP)/cc_native_c99_compound_literal_32.s
+	grep -Eq 'movl (%e[a-z]{2}|\$$-?[0-9]+), (\(%e[a-z]{2}\)|-?[0-9]+\(%ebp\))' $(CC_TMP)/cc_native_c99_compound_literal_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32.s
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32
 	$(CC_TMP)/cc_native_c99_flexible_array_32
@@ -872,7 +872,7 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_member_array.c -o $(CC_TMP)/cc_native_c99_struct_member_array_32.s
 	grep -Eq "movl %e[a-z]{2}, \\(%e[a-z]{2}\\)" $(CC_TMP)/cc_native_c99_struct_member_array_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_array_init.c -o $(CC_TMP)/cc_native_c99_struct_array_init_32.s
-	grep -Eq "movl (%e[a-z]{2}|\\$$-?[0-9]+), (\\(%e[a-z]{2}\\)|-?[0-9]+\\(%ebp\\))" $(CC_TMP)/cc_native_c99_struct_array_init_32.s
+	grep -Eq 'movl (%e[a-z]{2}|\$$-?[0-9]+), (\(%e[a-z]{2}\)|-?[0-9]+\(%ebp\))' $(CC_TMP)/cc_native_c99_struct_array_init_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_copy_init.c -o $(CC_TMP)/cc_native_c99_struct_copy_init_32.s
 	grep -q "call memcpy" $(CC_TMP)/cc_native_c99_struct_copy_init_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_pass_value.c -o $(CC_TMP)/cc_native_c99_struct_pass_value_32.s
@@ -1026,6 +1026,10 @@ run_div64_pow2: build
 run_inline_dead_call: build
 	mkdir -p "$(CC_TMP)"
 	sh run_inline_dead_call.sh
+
+run_i386_regalloc: build
+	mkdir -p "$(CC_TMP)"
+	sh run_i386_regalloc.sh
 
 run_pic_i386: build
 	mkdir -p "$(CC_TMP)"

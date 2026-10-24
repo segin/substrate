@@ -13,7 +13,7 @@ CC_SRCS = cmd/cc.c cmd/pipeline.c common/asm_constraint.c common/diag.c common/l
 	  middle/passes/opt.c middle/passes/inline.c middle/passes/mem.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
 	  backend/regalloc.c backend/frame.c backend/x86/common.c backend/x86/x86_64.c backend/x86/i386.c \
-	  backend/x86/regalloc_i386.c
+	  backend/x86/regalloc_i386.c backend/x86/mir.c backend/x86/linscan.c backend/x86/mir_i386.c
 CC_OBJS = $(CC_SRCS:.c=.o)
 IR_VERIFIER_OBJS = ir/ir-verifier.o $(COMMON_OBJS)
 IR_NORMALIZE_OBJS = ir/ir-normalize.o $(COMMON_OBJS)
@@ -24,7 +24,7 @@ BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 CC_HEADERS = include/cc_driver.h include/cc_frontend.h include/cc_ssa.h \
 	     include/cc_backend.h include/cc_pipeline.h \
-	     include/cc_middle.h include/cc_target.h include/cc_abi.h include/cc_irbuild.h include/cc_x86.h include/cc_lower.h include/cc_sema.h include/cc_types.h include/cc_lexer.h include/cc_util.h include/cc_diag.h include/cc_asm.h
+	     include/cc_middle.h include/cc_target.h include/cc_abi.h include/cc_irbuild.h include/cc_x86.h include/cc_x86_mir.h include/cc_lower.h include/cc_sema.h include/cc_types.h include/cc_lexer.h include/cc_util.h include/cc_diag.h include/cc_asm.h
 
 ifeq ($(NATIVE_BUILD),1)
     TOOL_CFLAGS = $(CFLAGS) -DCC_NATIVE_BUILD=1

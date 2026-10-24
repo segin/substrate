@@ -167,6 +167,11 @@ int emit_dynalloc_slot_clears(FILE *fp, const cc_ssa_function_t *f, const slot_l
 /** A DYNALLOC: take bytes off the stack, giving back an earlier allocation of the same instruction. */
 int emit_dynalloc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st,
                   const cc_ssa_instr_t *in, size_t index, cc_diag_t *diag);
+/**
+ * Whether input @p i of inline asm @p in (IR instruction @p instr_index of @p f) is written into the template as
+ * an immediate, as emit_inline_asm() renders it: then nothing reads its slot.
+ */
+int x86_asm_input_is_immediate(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t i, size_t instr_index);
 /** An inline asm statement: bind its operands, write its template. */
 int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
                     size_t fn_index, size_t instr_index, int is_64bit, cc_diag_t *diag);
@@ -204,6 +209,19 @@ void int_regs_forget(int_reg_state_t *st, int v);
 int int_regs_scratch(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *st, int avoid);
 /** Call @p fn(v, @p ctx) for each value @p in reads, as the frame layout counts its uses. */
 void x86_for_each_use(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, void (*fn)(int v, void *ctx), void *ctx);
+
+/* i386.c: what mir_i386.c shares with the i386 emitter */
+
+/** The stack's alignment at a call, in bytes: -mpreferred-stack-boundary's, else the psABI's 16. */
+int i386_stack_boundary(void);
+/** The offset from %ebp of the stack copy of parameter @p param_index of @p f. */
+int i386_param_offset(const cc_ssa_function_t *f, int param_index);
+/** The offset from %ebp where the arguments after the first @p fixed_count of variadic @p f start. */
+int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count);
+/** Whether the target has ud2 (-march=i686 and up); else a trap is int3. */
+int i386_has_ud2(void);
+/** The register argument @p a of call @p in starts in under regparm: 1 %eax, 2 %edx, 3 %ecx, or 0 for the stack. */
+int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a);
 
 /* regalloc_i386.c: values that live in a callee-saved register for the whole of their range */
 

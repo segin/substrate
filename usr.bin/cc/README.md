@@ -24,8 +24,11 @@ linker to produce objects, executables and shared objects.
   to the architecture it was built for.  Data layout and calling
   conventions follow the psABI and are checked against gcc.
 - **Optimization:** `-O1` and up fold constants and remove dead
-  values.  Every value lives in a stack slot, cached in a few registers;
-  the code is correct, not fast.
+  values.  On i386 values live in registers, given out by a linear-scan
+  allocator (`backend/x86/linscan.c`), and go to the frame only when
+  there are not enough; a function using what that path does not handle
+  yet (floating point, `-fPIC`, alloca) and all x86-64 code keep every
+  value in a stack slot, cached in a few registers.
 - **Assembler and linker:** `$AS` / `$LD` if set, else `../as/as` and
   `../ld/ld` relative to the `cc` binary (the tree's layout), else `as`
   and `ld` beside it (an installed layout), else the ones on `PATH`.
@@ -83,7 +86,7 @@ own headers in `lib/substratecc/include/`.
 
 `ARCHITECTURE.md` describes the design; `SPEC.md` the requirements.
 
-## Two options to know
+## Options and variables to know
 
 - `--bootstrap-gcc` compiles C with the host's gcc instead, then
   assembles and links as usual.  It predates the compiler handling
@@ -92,3 +95,9 @@ own headers in `lib/substratecc/include/`.
 - `-fdump-ir` writes cc's own IR, as the back end gets it, to `NAME.ir`
   in that text form; `-fdump-ir=all` writes it after each middle-end
   pass (`NAME.lower.ir`, `NAME.legalize.ir`, `NAME.opt.ir`).
+
+Three environment variables help find a function the i386 allocator
+miscompiles: `CC_NO_MIR=1` emits every function the older way,
+`CC_MIR_LIMIT=n` takes only the first n functions the allocator would
+take (bisect on n), and `CC_MIR_STATS=1` prints to stderr each function
+it takes and why it does not take the others.
