@@ -1041,6 +1041,118 @@ static int smul64_overflows(cc_ssa_function_t *sf, int a, int b) {
     return ovf_op(sf, CC_SSA_OR, CC_CMP_EQ, ovu, big, 1);
 }
 
+/** The most words a __builtin_memcpy or __builtin_memset of a constant size is copied or set in without a call; a
+ *  __builtin_memmove, which reads all before it writes, half as many. */
+#define INLINE_MEM_WORDS 8
+
+/** IR value @p base plus @p off: a new ADD, or @p base itself for 0; -1 when out of memory. */
+static int ir_addr_plus(cc_ssa_function_t *sf, int base, long off) {
+    cc_ssa_instr_t in;
+    int k;
+
+    if (off == 0) {
+        return base;
+    }
+    k = cc_ir_const(sf, off);
+    if (k < 0) {
+        return -1;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ADD;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = base;
+    in.rhs = k;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        return -1;
+    }
+    return in.dst;
+}
+
+/**
+ * A __builtin_memcpy (@p kind 0), __builtin_memmove (1) or __builtin_memset (2) of @p n bytes, a constant, made
+ * as loads and stores of words and then of 4, 2 and 1 bytes, as gcc makes one: no call of the library's
+ * function, which code with none to call -- Linux's vDSO, its unaligned accesses -- may not have.  A memmove
+ * reads every piece before it writes one; a memset stores byte @p c in each.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int lower_inline_mem(cc_ssa_function_t *sf, int kind, int dst, int src, long long c, long n) {
+    int word = cc_target_pointer_size();
+    long offs[INLINE_MEM_WORDS + 3];
+    int sizes[INLINE_MEM_WORDS + 3];
+    int vals[INLINE_MEM_WORDS + 3];
+    int np = 0;
+    long off = 0;
+    int p;
+    int i;
+
+    for (p = word; p >= 1; p /= 2) {
+        while (n - off >= p && np < INLINE_MEM_WORDS + 3) {
+            offs[np] = off;
+            sizes[np] = p;
+            np++;
+            off += p;
+        }
+    }
+    for (i = 0; i < np; ++i) {
+        if (kind == 2) {
+            unsigned long long b = (unsigned long long)(c & 0xff);
+            unsigned long long v = 0;
+            int k;
+
+            for (k = 0; k < sizes[i]; ++k) {
+                v |= b << (8 * k);
+            }
+            vals[i] = cc_ir_const(sf, (long long)v);
+        } else {
+            cc_ssa_instr_t ld;
+
+            memset(&ld, 0, sizeof(ld));
+            ld.op = CC_SSA_LOAD;
+            ld.lhs = ir_addr_plus(sf, src, offs[i]);
+            ld.imm = sizes[i];
+            ld.is_unsigned = 1;
+            ld.dst = cc_ir_new_value(sf, CC_VAL_I64);
+            ld.rhs = -1;
+            if (ld.lhs < 0 || ld.dst < 0 || cc_ir_push(sf, ld) != 0) {
+                return -1;
+            }
+            vals[i] = ld.dst;
+        }
+        if (vals[i] < 0) {
+            return -1;
+        }
+        if (kind != 1) {
+            /* (a memmove writes once it has read all) */
+            cc_ssa_instr_t st;
+
+            memset(&st, 0, sizeof(st));
+            st.op = CC_SSA_STORE;
+            st.lhs = ir_addr_plus(sf, dst, offs[i]);
+            st.rhs = vals[i];
+            st.imm = sizes[i];
+            st.dst = -1;
+            if (st.lhs < 0 || cc_ir_push(sf, st) != 0) {
+                return -1;
+            }
+        }
+    }
+    for (i = 0; kind == 1 && i < np; ++i) {
+        cc_ssa_instr_t st;
+
+        memset(&st, 0, sizeof(st));
+        st.op = CC_SSA_STORE;
+        st.lhs = ir_addr_plus(sf, dst, offs[i]);
+        st.rhs = vals[i];
+        st.imm = sizes[i];
+        st.dst = -1;
+        if (st.lhs < 0 || cc_ir_push(sf, st) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /**
  * Lower a call of a builtin the compiler implements itself (va_*, alloca,
  * the bit, overflow, atomic, memory and floating-point builtins, bswap).
@@ -1865,6 +1977,33 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             }
         }
 
+        {
+            /* a constant size up to a few words: the copy or the stores themselves, as gcc makes them */
+            int kind = (bk == BUILTIN_MEMCPY || bk == BUILTIN_MEMCPY_CHK)     ? 0
+                       : (bk == BUILTIN_MEMMOVE || bk == BUILTIN_MEMMOVE_CHK) ? 1
+                                                                              : 2;
+            long long n_const;
+            long long c = 0;
+            long max = (long)cc_target_pointer_size() * (kind == 1 ? INLINE_MEM_WORDS / 2 : INLINE_MEM_WORDS);
+
+            if (eval_const_i64_expr(tu, e->args[2], &n_const) == 0 && n_const >= 0 && n_const <= max &&
+                (kind != 2 || eval_const_i64_expr(tu, e->args[1], &c) == 0)) {
+                int srcv = -1;
+
+                if (kind != 2) {
+                    srcv = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
+                                      CC_VAL_I64, diag);
+                    if (srcv < 0) {
+                        return -1;
+                    }
+                }
+                if (lower_inline_mem(sf, kind, dstv, srcv, c, (long)n_const) != 0) {
+                    set_diag(diag, "out of memory expanding a __builtin_mem* call");
+                    return -1;
+                }
+                return dstv;
+            }
+        }
         memset(&call_in, 0, sizeof(call_in));
         call_in.op = CC_SSA_CALL;
         call_in.call_is_variadic = 0;
