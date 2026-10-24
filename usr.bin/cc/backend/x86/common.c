@@ -384,11 +384,11 @@ static int find_named_goto_index(const char *name, char **names, size_t count) {
  * @return               the rendered text (caller frees), or NULL
  */
 static int x86_gpr_index(const char *name);
-static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz);
+static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz, int is_64bit);
 
 static char *render_inline_asm_template(const char *tmpl, char **operand_texts, char **operand_names, size_t op_count,
                                         size_t label_base, const int *goto_labels, char **goto_names,
-                                        size_t goto_count, const char *fn_name, cc_diag_t *diag) {
+                                        size_t goto_count, const char *fn_name, int is_64bit, cc_diag_t *diag) {
     size_t i = 0;
     size_t len = 0;
     size_t cap = 0;
@@ -440,7 +440,7 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            op_text = asm_operand_with_modifier(mod, operand_texts[n], mbuf, sizeof(mbuf));
+            op_text = asm_operand_with_modifier(mod, operand_texts[n], mbuf, sizeof(mbuf), is_64bit);
             op_len = strlen(op_text);
             if (strip_dollar && op_len > 0 && op_text[0] == '$') {
                 op_text++;
@@ -545,7 +545,7 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 free(out);
                 return NULL;
             }
-            op_text = asm_operand_with_modifier(mod, operand_texts[idx], mbuf, sizeof(mbuf));
+            op_text = asm_operand_with_modifier(mod, operand_texts[idx], mbuf, sizeof(mbuf), is_64bit);
             op_len = strlen(op_text);
             if (strip_dollar && op_len > 0 && op_text[0] == '$') {
                 op_text++;
@@ -2843,7 +2843,11 @@ static int x86_gpr_index(const char *name) {
  * prints it: for a register, `b` `h` `w` `k` `q` its 8-bit low, 8-bit
  * high, 16-, 32- and 64-bit name, `V` the name without its `%`, `a` its
  * address `(%reg)`; for a constant `$n`, `c` `P` `a` the bare number and
- * `n` its negation.  Linux writes `movl %k0, %%ds` and
+ * `n` its negation -- but `a` of a symbol's address in 64-bit code is
+ * `sym(%rip)`, as gcc prints it, reached from where the code runs: Linux's
+ * early startup runs where it was loaded, not where it was linked, and
+ * its static_cpu_has() tests boot_cpu_data through `%a`, which, made an
+ * absolute address, was not yet mapped.  Linux writes `movl %k0, %%ds` and
  * `extable_type_reg reg=%k0` for a u16 operand: the register's 32-bit
  * name, which extable_type_reg insists on.  Other modifiers, and a
  * memory operand under any, leave the text as it is.
@@ -2851,9 +2855,10 @@ static int x86_gpr_index(const char *name) {
  * @param mod   the modifier letter, or 0 for none
  * @param text  the operand's text
  * @param buf   room for a changed text
+ * @param is_64bit  64-bit code
  * @return      @p text or @p buf
  */
-static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz) {
+static const char *asm_operand_with_modifier(char mod, const char *text, char *buf, size_t bufsz, int is_64bit) {
     static const char *const high8[4] = {"%ah", "%ch", "%dh", "%bh"};
     int r = text != NULL && text[0] == '%' ? x86_gpr_index(text) : -1;
 
@@ -2875,6 +2880,15 @@ static const char *asm_operand_with_modifier(char mod, const char *text, char *b
         }
     }
     if (text[0] == '$') {
+        if (mod == 'a' && is_64bit) {
+            char *end;
+
+            (void)strtoll(text + 1, &end, 0);
+            if (end == text + 1 || *end != '\0') {
+                snprintf(buf, bufsz, "%s(%%rip)", text + 1);
+                return buf;
+            }
+        }
         if (mod == 'c' || mod == 'P' || mod == 'a') {
             return text + 1;
         }
@@ -3389,7 +3403,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                        ? dup_cstr(in->sym != NULL ? in->sym : "") /* basic asm: the text as written */
                        : render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total,
                                                     label_base, in->asm_goto_labels, in->asm_goto_names,
-                                                    in->asm_goto_count, f->name, diag);
+                                                    in->asm_goto_count, f->name, is_64bit, diag);
     }
     if (rendered == NULL) {
         if (diag != NULL && diag->message[0] == '\0') {
