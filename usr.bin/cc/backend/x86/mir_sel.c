@@ -1114,6 +1114,110 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
     }
 }
 
+/** The most words a call of memcpy or memset of a constant size is copied or set in without the call; memmove,
+ *  which reads all before it writes, half as many. */
+#define XS_INLINE_MEM_WORDS 8
+
+/**
+ * A call of memcpy, memmove or memset of a constant size up to a few words, the moves themselves -- as gcc makes
+ * the library's string functions, and as code with no library to call needs: Linux's vDSO zeroes and copies its
+ * structures so, through the calls lowering makes for them.  Words, then 4, 2 and 1 bytes; a memmove reads every
+ * piece before it writes one; a memset stores its constant byte repeated.  The call's value is the destination.
+ *
+ * @return 1 when @p in is such a call and is selected; 0 when it is to be called
+ */
+static int sel_string_call(xsel_t *s, const cc_ssa_instr_t *in) {
+    int w = s->word;
+    int kind;
+    long long n;
+    long long c = 0;
+    long offs[XS_INLINE_MEM_WORDS + 3];
+    int sizes[XS_INLINE_MEM_WORDS + 3];
+    xop_t vals[XS_INLINE_MEM_WORDS + 3];
+    xop_t pattern;
+    int have_pattern = 0;
+    int np = 0;
+    long off = 0;
+    int p;
+    int i;
+
+    if (in->op != CC_SSA_CALL || in->sym == NULL || in->arg_count != 3 || in->call_chain > 0 || in->agg_class != 0 ||
+        in->call_is_variadic || (in->dst >= 0 && in->rhs == in->dst)) {
+        return 0;
+    }
+    if (strcmp(in->sym, "memcpy") == 0) {
+        kind = 0;
+    } else if (strcmp(in->sym, "memmove") == 0) {
+        kind = 1;
+    } else if (strcmp(in->sym, "memset") == 0) {
+        kind = 2;
+    } else {
+        return 0;
+    }
+    if (!xs_const_of(s, in->args[2], &n) || n < 0 || n > (long long)w * (kind == 1 ? XS_INLINE_MEM_WORDS / 2
+                                                                                   : XS_INLINE_MEM_WORDS) ||
+        (kind == 2 && !xs_const_of(s, in->args[1], &c))) {
+        return 0;
+    }
+    for (i = 0; i < 3; ++i) {
+        if (in->args[i] < 0 || cc_ssa_value_class(s->f, in->args[i]) == CC_VAL_F64 || xs_is_pair(s, in->args[i])) {
+            return 0;
+        }
+    }
+    for (p = w; p >= 1; p /= 2) {
+        while (n - off >= p) {
+            offs[np] = off;
+            sizes[np] = p;
+            np++;
+            off += p;
+        }
+    }
+    for (i = 0; i < np; ++i) {
+        if (kind == 2) {
+            unsigned long long b = (unsigned long long)(c & 0xff);
+            unsigned long long v = 0;
+            int k;
+
+            for (k = 0; k < sizes[i]; ++k) {
+                v |= b << (8 * k);
+            }
+            vals[i] = xop_imm(sizes[i] == 4 ? (long long)(int)(unsigned)v : (long long)v, sizes[i]);
+            if (sizes[i] == 8 && !(vals[i].disp >= -2147483647LL - 1 && vals[i].disp <= 2147483647LL)) {
+                /* eight bytes no 32-bit immediate holds: made once in a register */
+                if (!have_pattern) {
+                    pattern = xs_temp(s);
+                    xs_emit(s, XI_MOV, 8, 2, &vals[i], &pattern, NULL);
+                    have_pattern = 1;
+                }
+                vals[i] = pattern;
+            }
+        } else {
+            xop_t m = xs_mem_at(s, in->args[1], offs[i], sizes[i]);
+            xop_t t = xs_temp(s);
+
+            t.size = (unsigned char)sizes[i];
+            xs_emit(s, XI_MOV, sizes[i], 2, &m, &t, NULL);
+            vals[i] = t;
+        }
+        if (kind != 1) {
+            xop_t d = xs_mem_at(s, in->args[0], offs[i], sizes[i]);
+
+            xs_emit(s, XI_MOV, sizes[i], 2, &vals[i], &d, NULL);
+        }
+    }
+    for (i = 0; kind == 1 && i < np; ++i) {
+        xop_t d = xs_mem_at(s, in->args[0], offs[i], sizes[i]);
+
+        xs_emit(s, XI_MOV, sizes[i], 2, &vals[i], &d, NULL);
+    }
+    if (in->dst >= 0) {
+        xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), w);
+
+        xs_move_word_to(s, in->args[0], 0, &d);
+    }
+    return 1;
+}
+
 /** Select instruction @p j of the function. */
 static void sel_instr(xsel_t *s, size_t j) {
     const cc_ssa_function_t *f = s->f;
@@ -1382,7 +1486,9 @@ static void sel_instr(xsel_t *s, size_t j) {
 
     case CC_SSA_CALL:
     case CC_SSA_CALLI:
-        s->t->call(s, in);
+        if (!sel_string_call(s, in)) {
+            s->t->call(s, in);
+        }
         break;
 
     case CC_SSA_ASM:

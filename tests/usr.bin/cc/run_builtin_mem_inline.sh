@@ -3,7 +3,9 @@
 # size up to a few words calls no library function, as with gcc: Linux's
 # vDSO, which has no memcpy to call, makes its unaligned accesses with
 # __builtin_memcpy of 1 to 8 bytes, and its link failed on an undefined
-# memcpy.  codegen/builtin_mem_inline.c checks the bytes they leave.
+# memcpy.  Nor do the copy of a small structure and the zeroing of one,
+# which cc makes calls of memcpy and memset (and the vDSO's link failed
+# on memset).  codegen/builtin_mem_inline.c checks the bytes they leave.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -31,6 +33,25 @@ void shift7(char *p) {
 
 void clear13(char *p) {
     __builtin_memset(p, 0, 13);
+}
+
+struct small {
+    int a;
+    char b;
+    long c;
+    short d[3];
+};
+
+void use(struct small *);
+
+void zero_local(void) {
+    struct small v = {0};
+
+    use(&v);
+}
+
+void copy(struct small *d, const struct small *s) {
+    *d = *s;
 }
 EOF
 for m in 32 64; do
