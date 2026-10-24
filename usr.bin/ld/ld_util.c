@@ -452,16 +452,12 @@ int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
 }
 
 int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text) {
+    (void)opt_text;
     if (mode != 32 && mode != 64) {
         return -1;
     }
-    if (ctx->explicit_mode && ctx->mode != mode) {
-        fprintf(stderr,
-                "ld: conflicting target mode options: already %s, new %s from %s\n",
-                canonical_mode_name(ctx->mode), canonical_mode_name(mode),
-                opt_text != NULL ? opt_text : "<option>");
-        return -1;
-    }
+    /* the last one given is the target, as GNU ld takes it: Linux links its 16-bit realmode blob with the
+     * x86-64 build's -m elf_x86_64 and then its own -m elf_i386 */
     ctx->mode = mode;
     ctx->explicit_mode = 1;
     return 0;

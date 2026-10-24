@@ -33,6 +33,11 @@ is "a program under umask 027"        "$(stat -c %a p027)" 750
 is "a program under umask 022"        "$(stat -c %a p022)" 755
 is "a relocatable file is not executable" "$(stat -c %a r022.o)" 644
 
+# Of two -m, the last is the target, as with GNU ld: Linux links its
+# 16-bit realmode blob with the x86-64 build's -m and then its own.
+./ld -m elf_x86_64 -m elf_i386 -o plast s.o 2> mlast.err
+is "the last -m is the target"        "$(readelf -h plast 2>/dev/null | awk '/Class:/ { print $2 }')" ELF32
+
 # A name that is not a plain file is written into, not replaced.
 echo old > target; ln -s target link
 ./ld -m elf_i386 -o link s.o
