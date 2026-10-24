@@ -1435,7 +1435,7 @@ static const char *const x86_max_operands[] = {
     " fimuls fist fistl fistp fistpl fistpll fistpq fistps fists fisttp fisttpl fisttpll fisttpq"
     " fisttps fisub fisubl fisubr fisubrl fisubrs fisubs fld fldcw fldenv fldl flds fldt fmull"
     " fmuls fnsave fnstcw fnstenv fnstsw frstor fsave fst fstcw fstenv fstl fstp fstpl fstps fstpt"
-    " fsts fstsw fsubl fsubrl fsubrs fsubs fucom fucomp fxch fxrstor fxrstor64 fxsave fxsave64"
+    " fsts fstsw fsubl fsubrl fsubrs fsubs fucom fucomp fxch fxrstor fxrstor64 fxrstorq fxsave fxsave64 fxsaveq"
     " hreset imulb incsspd int invlpg ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb"
     " jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz ldmxcsr lgdt lgdtl"
     " lidt lidtl lldt lmsw loop loope loopne loopnz loopz lret lretq lretw ltr mul mulb mull mulq verr verw"

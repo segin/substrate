@@ -342,6 +342,8 @@
 64	dae9	fucompp
 64	9b	fwait
 64	d9c9	fxch
+64	480fae4c2408	fxrstorq 8(%rsp)
+64	480fae00	fxsaveq (%rax)
 64	65	gs
 64	refused	icebp
 64	refused	idiv %bl,%ax

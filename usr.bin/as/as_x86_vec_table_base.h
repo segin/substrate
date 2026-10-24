@@ -1986,6 +1986,9 @@
     LW("fxrstor64", P0, M1, 0xae, W1, "m", "m", AS_VEC_F_BASE | DG(1) | O64),
     LW("fxsave", P0, M1, 0xae, W0, "m", "m", AS_VEC_F_BASE | DG(0)),
     LW("fxsave64", P0, M1, 0xae, W1, "m", "m", AS_VEC_F_BASE | DG(0) | O64),
+    /* GNU as's other names for the 64-bit forms, which Linux's fpu code writes */
+    LW("fxrstorq", P0, M1, 0xae, W1, "m", "m", AS_VEC_F_BASE | DG(1) | O64),
+    LW("fxsaveq", P0, M1, 0xae, W1, "m", "m", AS_VEC_F_BASE | DG(0) | O64),
     LW("idiv", P0, AS_VEC_MAP_ONE, 0xf7, W0, "m", "m", AS_VEC_F_BASE | DG(7)),
     LW("imul", P0, AS_VEC_MAP_ONE, 0xf7, W0, "m", "m", AS_VEC_F_BASE | DG(5)),
     LW("imull", P0, AS_VEC_MAP_ONE, 0xf7, W0, "m", "m", AS_VEC_F_BASE | DG(5) | OP32),
