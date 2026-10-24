@@ -223,6 +223,24 @@ int i386_has_ud2(void);
 /** The register argument @p a of call @p in starts in under regparm: 1 %eax, 2 %edx, 3 %ecx, or 0 for the stack. */
 int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a);
 
+/* x86_64.c: what mir_x86_64.c shares with the x86-64 emitter */
+
+/** Where parameter @p param_index of @p f comes, the general registers taken from @p gpr_start on. */
+abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start);
+/**
+ * Where each argument of call @p in goes (@p locs, one per argument), the general registers taken from
+ * @p gpr_start on; the stack bytes they take and the xmm registers they use go to *@p out_stack_bytes and
+ * *@p out_xmm_regs.
+ */
+void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t gpr_start,
+                              abi_loc_t *locs, size_t *out_stack_bytes, size_t *out_xmm_regs);
+/** Whether an aggregate result of @p size bytes and return classes @p cls comes back through a hidden pointer. */
+int x86_64_agg_ret_in_memory(long size, int cls);
+/** The largest structure @p f returns through a hidden pointer, or 0. */
+long x86_64_function_sret_size(const cc_ssa_function_t *f);
+/** The largest structure a call in @p m expects @p callee to return through a hidden pointer, or 0. */
+long x86_64_infer_sret_size_from_calls(const cc_ssa_module_t *m, const cc_ssa_function_t *callee);
+
 /* regalloc_i386.c: values that live in a callee-saved register for the whole of their range */
 
 /** The registers i386_assign_homes() gives: %ebx, %esi, %edi. */

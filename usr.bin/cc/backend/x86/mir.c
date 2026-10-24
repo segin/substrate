@@ -472,6 +472,12 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
             fputs("\t# ?\n", fp);
             return;
         }
+        if (in->op == XI_MOV && in->w == 8 && in->o[0].kind == XO_IMM && in->o[0].sym == NULL &&
+            (in->o[0].disp < -2147483647LL - 1 || in->o[0].disp > 2147483647LL)) {
+            /* a 64-bit immediate: only a move into a register takes one */
+            fputs("\tmovabsq ", fp);
+            break;
+        }
         fprintf(fp, "\t%s%c ", alu[in->op], suffix(in->w));
         break;
     }

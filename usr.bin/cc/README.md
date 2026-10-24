@@ -24,11 +24,12 @@ linker to produce objects, executables and shared objects.
   to the architecture it was built for.  Data layout and calling
   conventions follow the psABI and are checked against gcc.
 - **Optimization:** `-O1` and up fold constants and remove dead
-  values.  On i386 values live in registers, given out by a linear-scan
+  values.  Values live in registers, given out by a linear-scan
   allocator (`backend/x86/linscan.c`), and go to the frame only when
   there are not enough; a function using what that path does not handle
-  yet (floating point, `-fPIC`, alloca) and all x86-64 code keep every
-  value in a stack slot, cached in a few registers.
+  yet (floating point, alloca, nested functions; on i386 `-fPIC`, on
+  x86-64 variadic functions and structures returned through memory)
+  keeps every value in a stack slot, cached in a few registers.
 - **Assembler and linker:** `$AS` / `$LD` if set, else `../as/as` and
   `../ld/ld` relative to the `cc` binary (the tree's layout), else `as`
   and `ld` beside it (an installed layout), else the ones on `PATH`.
@@ -96,7 +97,7 @@ own headers in `lib/substratecc/include/`.
   in that text form; `-fdump-ir=all` writes it after each middle-end
   pass (`NAME.lower.ir`, `NAME.legalize.ir`, `NAME.opt.ir`).
 
-Three environment variables help find a function the i386 allocator
+Three environment variables help find a function the allocator
 miscompiles: `CC_NO_MIR=1` emits every function the older way,
 `CC_MIR_LIMIT=n` takes only the first n functions the allocator would
 take (bisect on n), and `CC_MIR_STATS=1` prints to stderr each function

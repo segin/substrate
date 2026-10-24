@@ -10,6 +10,7 @@
 #include "cc_options.h"
 #include "cc_types.h"
 #include "cc_x86.h"
+#include "cc_x86_mir.h"
 
 #include <float.h>
 #include <stdint.h>
@@ -37,7 +38,7 @@ static size_t abi64_stack_align(unsigned char abi, long size) {
     return 8;
 }
 
-static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start) {
+abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start) {
     abi_loc_t loc;
     size_t gpr = gpr_start;
     size_t xmm = 0;
@@ -161,8 +162,8 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
     return loc;
 }
 
-static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t gpr_start,
-                                     abi_loc_t *locs, size_t *out_stack_bytes, size_t *out_xmm_regs) {
+void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t gpr_start,
+                              abi_loc_t *locs, size_t *out_stack_bytes, size_t *out_xmm_regs) {
     size_t gpr = gpr_start;
     size_t xmm = 0;
     size_t stack_bytes = 0;
@@ -979,7 +980,7 @@ static void emit_x86_64_store_aggregate_return(FILE *fp, const cc_ssa_function_t
  * returned through a hidden pointer: one over 16 bytes or of MEMORY class,
  * unless it comes back in x87 registers.
  */
-static int x86_64_agg_ret_in_memory(long size, int cls) {
+int x86_64_agg_ret_in_memory(long size, int cls) {
     if ((cls & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX)) != 0) {
         return 0;
     }
@@ -1085,7 +1086,7 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     return 0;
 }
 
-static long x86_64_function_sret_size(const cc_ssa_function_t *f) {
+long x86_64_function_sret_size(const cc_ssa_function_t *f) {
     size_t i;
     long max_size = 0;
 
@@ -1104,7 +1105,7 @@ static long x86_64_function_sret_size(const cc_ssa_function_t *f) {
     return max_size;
 }
 
-static long x86_64_infer_sret_size_from_calls(const cc_ssa_module_t *m, const cc_ssa_function_t *callee) {
+long x86_64_infer_sret_size_from_calls(const cc_ssa_module_t *m, const cc_ssa_function_t *callee) {
     size_t i;
     long max_size = 0;
 
@@ -1160,6 +1161,18 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
         }
         has_sret = sret_mem_size > 0 ? 1 : 0;
         param_gpr_bias = has_sret ? 1 : 0;
+
+        /* through machine IR and the register allocator, when that path handles all the function does */
+        {
+            int mrc = x86_64_mir_emit_function(fp, m, f, i, src_path, emit_debug, pic, diag);
+
+            if (mrc < 0) {
+                return -1;
+            }
+            if (mrc == 0) {
+                continue;
+            }
+        }
 
         if (build_slot_layout(f, 16, 0, NULL, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {

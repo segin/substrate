@@ -317,17 +317,17 @@ Temporary C-to-assembly fallback via host gcc.
 The assembler and linker to run, instead of the ones beside
 .Nm .
 .It Ev CC_NO_MIR
-With the value 1, i386 code is emitted with every value in a stack
-slot, not through the register allocator.
+With the value 1, code is emitted with every value in a stack slot,
+not through the register allocator.
 .It Ev CC_MIR_LIMIT
 A number
 .Ar n :
 only the first
 .Ar n
-functions the i386 register allocator would take go through it, to
+functions the register allocator would take go through it, to
 find a function it miscompiles by bisection.
 .It Ev CC_MIR_STATS
-With the value 1, print to the standard error each function the i386
+With the value 1, print to the standard error each function the
 register allocator takes, and why it does not take each other one.
 .El
 .Sh EXIT STATUS

@@ -265,16 +265,120 @@ const char *xr_name(int r, int size);
  */
 int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t);
 
-/* mir_i386.c */
+/* mir_sel.c: instruction selection from legal IR, what the targets share */
+
+typedef struct xsel xsel_t;
+
+/** What one target's selection does its own way (mir_i386.c, mir_x86_64.c). */
+typedef struct {
+    int word;               /**< the word's bytes: 4 or 8 */
+    const xtarget_t *alloc; /**< the registers the allocator gives out */
+    unsigned caller_saved;  /**< the registers a call clobbers */
+    const int *saved;       /**< the callee-saved registers, in the order the prologue pushes them */
+    int nsaved;
+    int fp_residue;         /**< the frame pointer's offset from a 16-byte boundary, for 16-aligned frame objects */
+    int stack_boundary;     /**< the stack's alignment at a call, in bytes */
+    int sym_imm;            /**< a symbol's address may be an immediate (else it is made with leaq, off %rip) */
+    /** NULL when the function is one this path takes, else why not */
+    const char *(*function_ok)(const xsel_t *s);
+    /** Before the first instruction: the parameters out of their registers, the frame objects of those on the
+     *  stack; 0, 1 for a function not taken, -1 when out of memory */
+    int (*begin)(xsel_t *s);
+    void (*param)(xsel_t *s, const cc_ssa_instr_t *in);
+    void (*call)(xsel_t *s, const cc_ssa_instr_t *in);
+    void (*ret)(xsel_t *s, const cc_ssa_instr_t *in);
+    void (*va_start)(xsel_t *s, const cc_ssa_instr_t *in);
+    /** Whether symbol @p sym's address is read from the GOT, not made off %rip */
+    int (*sym_got)(const xsel_t *s, const char *sym);
+} xsel_target_t;
+
+/** Where an inline asm finds an operand's value: its frame object.  A value of -1 ends an asm's list. */
+typedef struct {
+    int v;
+    int obj;
+    unsigned char in;  /**< copied there before the asm */
+    unsigned char out; /**< and back after it */
+} xasm_bind_t;
+
+/** Selection state for one function. */
+struct xsel {
+    const xsel_target_t *t;
+    int word;                 /**< t->word */
+    xfunc_t xf;
+    const cc_ssa_module_t *m;
+    const cc_ssa_function_t *f;
+    size_t fn_index;
+    int *lo;                  /**< per IR value: the virtual register of its (low) word, or XR_NONE */
+    int *hi;                  /**< per IR value: of its high word (an i386 64-bit integer), or XR_NONE */
+    int *ndefs;               /**< per IR value: how many instructions write it */
+    int *nuses;               /**< and read it */
+    int *def_at;              /**< per IR value written once: that instruction, else -1 (-2: a branch's flags) */
+    unsigned char *addr_taken;/**< per IR value: an ADDR takes its address */
+    unsigned char *is_addr;   /**< per IR value: a STACKALLOC writes it -- an address, a word whatever its type */
+    int *obj;                 /**< per IR value: its frame object (a stack allocation's, or the memory it lives in) */
+    int *frame_val;           /**< per IR value: the frame object it is the address of, when written once; else -1 */
+    int *param_lo;            /**< per parameter that came in a register: the register holding it from entry */
+    int *param_hi;
+    int unsupported;          /**< the line that gave up on the function, for CC_MIR_STATS; or 0 */
+    const char *unsupported_file; /**< and its file */
+    xasm_bind_t *bind;        /**< each inline asm's operands and where they are (XI_ASM's aux: its first) */
+    int nbind;
+    int bindcap;
+    int *asm_slot;            /**< the frame objects inline asms take their operands in, the k-th operand in the k-th */
+    int nasm_slot;
+    int has_goto;             /**< the function has an asm goto */
+    int hidden;               /**< a structure result: the register holding the caller's buffer's address */
+    int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
+};
+
+/** Give up on the function in a selection hook: something it does is not handled there. */
+#define XS_NOPE(s)                              \
+    do {                                        \
+        (s)->unsupported = __LINE__;            \
+        (s)->unsupported_file = __FILE__;       \
+        return;                                 \
+    } while (0)
+
+/** Whether IR value @p v is two words: an i386 64-bit integer. */
+int xs_is_pair(const xsel_t *s, int v);
+/** Whether IR value @p v is defined once by an integer constant, which is then *@p k. */
+int xs_const_of(const xsel_t *s, int v, long long *k);
+/** Whether IR value @p v is defined once as a global's or a string literal's address, *@p sym. */
+int xs_sym_of(xsel_t *s, int v, const char **sym);
+/** The virtual register of word @p part of IR value @p v, made the first time it is asked for. */
+int xs_vreg_of(xsel_t *s, int v, int part);
+/** Append an instruction. */
+void xs_emit(xsel_t *s, xi_op_t op, int w, int n, const xop_t *a, const xop_t *b, const xop_t *c);
+/** A new virtual register as a word operand. */
+xop_t xs_temp(xsel_t *s);
+/** Word @p part of IR value @p v as a source operand: an immediate where one may be, else a register. */
+xop_t xs_src_word(xsel_t *s, int v, int part);
+/** The same in a register. */
+xop_t xs_reg_word(xsel_t *s, int v, int part);
+/** The memory at IR address value @p v plus @p disp, accessed as @p size bytes. */
+xop_t xs_mem_at(xsel_t *s, int v, long long disp, int size);
+/** Write word @p part of IR value @p v to operand @p d. */
+void xs_move_word_to(xsel_t *s, int v, int part, const xop_t *d);
+/** Whether label @p label comes right after IR instruction @p j, with only labels between. */
+int xs_label_follows(const xsel_t *s, size_t j, int label);
 
 /**
  * Write function @p f of module @p m (its index @p fn_index) to @p out through machine IR and the register
- * allocator.
+ * allocator, selecting for target @p t.
  *
  * @return 0 when it is written; 1 when it uses what this path does not handle yet (nothing is written: the
  *         caller emits it its own way); -1 on error
  */
+int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
+                          size_t fn_index, const char *src_path, int emit_debug, cc_diag_t *diag);
+
+/* mir_i386.c, mir_x86_64.c: the targets */
+
+/** i386: x86_mir_emit_function() for i386 (cdecl, regparm). */
 int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_function_t *f, size_t fn_index,
                            const char *src_path, int emit_debug, cc_diag_t *diag);
+/** x86-64: x86_mir_emit_function() for the System V psABI; @p pic as emit_x86_64() takes it. */
+int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_function_t *f, size_t fn_index,
+                             const char *src_path, int emit_debug, int pic, cc_diag_t *diag);
 
 #endif
