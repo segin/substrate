@@ -2698,6 +2698,18 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
             for (round = 0; round < 2 && !oom; ++round) {
                 int rd = cc_dead_defs(&m->funcs[i]);
 
+                if (rd > 0) {
+                    /*
+                     * a variable whose other definitions were overwritten now holds one value, which folds:
+                     * Linux's copy_fpstate_to_sigframe() clears its bool ia32_fxstate past an asm goto, and
+                     * the call of an undefined function it guards must go
+                     */
+                    rd = fold_function(&m->funcs[i], 1);
+                    rd = rd < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
+                    rd = rd < 0 ? -1 : thread_jumps(&m->funcs[i]);
+                    rd = rd < 0 ? -1 : unreachable_function(&m->funcs[i]);
+                    rd = rd < 0 ? -1 : 1;
+                }
                 oom = rd < 0 || (rd > 0 && dce_function(&m->funcs[i]) < 0);
                 if (rd == 0) {
                     break;

@@ -788,8 +788,13 @@ typedef struct {
     size_t *end;      /**< per block: one past its last */
     int *block_of_label; /**< per label: the block it starts, or -1 */
     int *succ;        /**< per block: up to two successors (-1 none) at [2b], [2b+1] */
-    unsigned char *opaque; /**< per block: it ends in an asm goto or reaches a label by address: give up */
+    unsigned char *opaque; /**< per block: CFG_ASM_GOTO, CFG_COMPUTED_GOTO or 0: give up */
 } cfg_t;
+
+/** cfg_t.opaque: the block ends in an asm goto, which also goes to each of its labels. */
+#define CFG_ASM_GOTO 1
+/** cfg_t.opaque: a label's address is taken, and a computed goto reaches it from anywhere. */
+#define CFG_COMPUTED_GOTO 2
 
 static void cfg_free(cfg_t *c) {
     free(c->first);
@@ -867,7 +872,7 @@ static int cfg_build(cfg_t *c, const cc_ssa_function_t *f) {
         } else {
             s0 = next;
             if (last->op == CC_SSA_ASM && last->asm_is_goto) {
-                c->opaque[b] = 1;
+                c->opaque[b] = CFG_ASM_GOTO;
             }
         }
         c->succ[2 * b] = s0;
@@ -877,7 +882,7 @@ static int cfg_build(cfg_t *c, const cc_ssa_function_t *f) {
     for (i = 0; i < f->instr_count; ++i) {
         if (f->instrs[i].op == CC_SSA_LADDR) {
             for (b = 0; b < c->count; ++b) {
-                c->opaque[b] = 1;
+                c->opaque[b] = CFG_COMPUTED_GOTO;
             }
             break;
         }
@@ -1688,9 +1693,13 @@ int cc_dead_defs(cc_ssa_function_t *f) {
         return -1;
     }
     nw = ((size_t)f->value_count + 31) / 32;
+    /*
+     * a computed goto: where control goes is not known.  An asm goto goes on or to one of its labels, which
+     * liveness follows too: Linux's static keys put one in most functions, and a store a later one overwrote
+     * stayed, with what it kept alive
+     */
     for (b = 0; b < c.count; ++b) {
-        if (c.opaque[b]) {
-            /* an asm goto or a computed goto: where control goes is not known */
+        if (c.opaque[b] == CFG_COMPUTED_GOTO) {
             cfg_free(&c);
             return 0;
         }
@@ -1749,6 +1758,23 @@ int cc_dead_defs(cc_ssa_function_t *f) {
                 if (s >= 0) {
                     for (w = 0; w < nw; ++w) {
                         out[w] |= live_in[(size_t)s * nw + w];
+                    }
+                }
+            }
+            if (c.opaque[b] == CFG_ASM_GOTO) {
+                const cc_ssa_instr_t *last = &f->instrs[c.end[b] - 1];
+                size_t g;
+
+                for (g = 0; g < last->asm_goto_count; ++g) {
+                    int l = last->asm_goto_labels[g];
+                    int s = l >= 0 && l < f->label_count ? c.block_of_label[l] : -1;
+
+                    for (w = 0; s >= 0 && w < nw; ++w) {
+                        out[w] |= live_in[(size_t)s * nw + w];
+                    }
+                    if (s < 0) {
+                        /* a label not found: everything is live there */
+                        memset(out, 0xff, nw * sizeof(uint32_t));
                     }
                 }
             }

@@ -5,8 +5,10 @@
 # being narrower than it, and Linux's copy_fpstate_to_sigframe(), whose
 # `ia32_fxstate &= (IS_ENABLED(CONFIG_X86_32) || ...)` makes its call of
 # convert_from_fxsr() dead on x86-64 without IA32 emulation, left vmlinux
-# with that function undefined.  codegen/narrow_store_promote.c checks
-# the values of such locals.
+# with that function undefined.  So with an asm goto between, a static
+# key's, as there: liveness gave up on such a function, and the store
+# the clearing overwrote kept the local unknown.
+# codegen/narrow_store_promote.c checks the values of such locals.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -30,6 +32,24 @@ int f(void *a, void *b) {
     x &= (0 || 0);
     if ((x || !1) && !need())
         return 1;
+    return 0;
+}
+
+static inline __attribute__((always_inline)) int key(void) {
+    asm goto("jmp %l[no]" : : : : no);
+    return 1;
+no:
+    return 0;
+}
+
+int g(void *a, void *b, int n) {
+    _Bool x = (a != b);
+
+    x &= (0 || 0);
+    if (key())
+        n += 2;
+    if ((x || !1) && !need())
+        return n;
     return 0;
 }
 EOF
