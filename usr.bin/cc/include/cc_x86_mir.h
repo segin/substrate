@@ -279,6 +279,8 @@ typedef struct {
     int fp_residue;         /**< the frame pointer's offset from a 16-byte boundary, for 16-aligned frame objects */
     int stack_boundary;     /**< the stack's alignment at a call, in bytes */
     int sym_imm;            /**< a symbol's address may be an immediate (else it is made with leaq, off %rip) */
+    int extends_params;     /**< a narrow parameter or call result is held extended once taken (x86-64), not as it
+                                 came (i386, but for a call's 1- and 2-byte results) */
     /** NULL when the function is one this path takes, else why not */
     const char *(*function_ok)(const xsel_t *s);
     /** Before the first instruction: the parameters out of their registers, the frame objects of those on the
@@ -329,6 +331,8 @@ struct xsel {
     int has_goto;             /**< the function has an asm goto */
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */
     int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
+    unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
+    unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
 };
 
 /** Give up on the function in a selection hook: something it does is not handled there. */

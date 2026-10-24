@@ -11,8 +11,9 @@
  * global's or a string's address on i386, which x86-64 makes off %rip; a
  * stack object's address is folded into the loads and stores that use it,
  * and so is a pointer plus a constant (a structure's field), when the
- * pointer cannot change in between.  A compare that only a branch right
- * after it reads is that branch's flags.  A value whose address is
+ * pointer cannot change in between.  A shift left and back right by the
+ * same count is the extension it makes.  A compare that only a branch
+ * right after it reads is that branch's flags.  A value whose address is
  * taken lives in its frame object.  Inline asm reads its operands from
  * frame slots and writes its outputs there (emit_inline_asm()).
  *
@@ -438,6 +439,253 @@ static int compare(xsel_t *s, const cc_ssa_instr_t *in, xcc_t *cc, int *known) {
     return 0;
 }
 
+/**
+ * Whether shift @p in is the right half of an extension -- a shift left by the same constant count, which only it
+ * reads -- of the low 1, 2 or 4 bytes of a value: then that value goes to *@p src and the byte count is returned;
+ * else 0.  Legalization writes every integer conversion that way.
+ */
+static int ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src) {
+    const cc_ssa_instr_t *d;
+    long long k;
+    long long k2;
+    int bytes;
+
+    if ((in->op != CC_SSA_SHR) || in->lhs < 0 || !stable(s, in->lhs) || s->nuses[in->lhs] != 1 ||
+        xs_is_pair(s, in->dst)) {
+        return 0;
+    }
+    if (in->rhs < 0) {
+        k = in->imm;
+    } else if (!xs_const_of(s, in->rhs, &k)) {
+        return 0;
+    }
+    d = &s->f->instrs[s->def_at[in->lhs]];
+    if (d->op != CC_SSA_SHL || d->lhs < 0 || xs_is_pair(s, d->lhs)) {
+        return 0;
+    }
+    if (d->rhs < 0) {
+        k2 = d->imm;
+    } else if (!xs_const_of(s, d->rhs, &k2)) {
+        return 0;
+    }
+    if (k != k2 || k <= 0 || k >= 8 * s->word) {
+        return 0;
+    }
+    bytes = (8 * s->word - (int)k) / 8;
+    if ((8 * s->word - (int)k) % 8 != 0 || (bytes != 1 && bytes != 2 && bytes != 4) || bytes >= s->word) {
+        return 0;
+    }
+    *src = d->lhs;
+    return bytes;
+}
+
+/**
+ * Extend the low @p bytes bytes of IR value @p src into IR value @p dst, signed or not (@p sign): ext_of()'s pair of
+ * shifts, or an and with 0xff, 0xffff or 0xffffffff.
+ */
+static void sel_ext(xsel_t *s, int dst, int src, int bytes, int sign) {
+    xop_t d = xop_reg(xs_vreg_of(s, dst, 0), s->word);
+    xop_t a;
+
+    if ((sign ? s->sbits[src] : s->zbits[src]) <= 8 * bytes) {
+        /* it is held so already */
+        xs_move_word_to(s, src, 0, &d);
+        return;
+    }
+    a = xs_reg_word(s, src, 0);
+
+    if (bytes == 1 && s->word == 4) {
+        /* from a byte register: a copy in one, so that the value itself may live anywhere */
+        xop_t t = xs_temp(s);
+
+        xs_emit(s, XI_MOV, 4, 2, &a, &t, NULL);
+        a = t;
+    }
+    a.size = (unsigned char)bytes;
+    /* zero-extended into the 32-bit register, which clears the rest of a 64-bit one */
+    d.size = (unsigned char)(sign ? s->word : 4);
+    xs_emit(s, sign ? XI_MOVSX : XI_MOVZX, s->word, 2, &a, &d, NULL);
+}
+
+/** The fewest bits @p k is the sign extension of, as a word of @p w bytes. */
+static int const_sbits(long long k, int w) {
+    long long v = w == 4 ? (long long)(int)k : k;
+    int n;
+
+    for (n = 1; n < 8 * w; ++n) {
+        long long lo = -(1LL << (n - 1));
+        long long hi = (1LL << (n - 1)) - 1;
+
+        if (v >= lo && v <= hi) {
+            return n;
+        }
+    }
+    return 8 * w;
+}
+
+/** The fewest bits @p k is the zero extension of, as a word of @p w bytes. */
+static int const_zbits(long long k, int w) {
+    unsigned long long v = w == 4 ? (unsigned long long)(unsigned)k : (unsigned long long)k;
+    int n = 0;
+
+    while (n < 8 * w && (v >> n) != 0) {
+        n++;
+    }
+    return n > 0 ? n : 1;
+}
+
+/** sbits, zbits of an integer of @p bytes bytes held extended as @p is_unsigned says, in a word of @p w bytes. */
+static void held_bits(int bytes, int is_unsigned, int w, int *sb, int *zb) {
+    int W = 8 * w;
+
+    if (bytes <= 0 || 8 * bytes >= W) {
+        *sb = W;
+        *zb = W;
+    } else if (is_unsigned) {
+        *zb = 8 * bytes;
+        *sb = 8 * bytes + 1;
+    } else {
+        *sb = 8 * bytes;
+        *zb = W;
+    }
+}
+
+/**
+ * Work out, for each IR value, the bits its definitions leave it extended from (sbits, zbits): a load of a narrower
+ * integer, an extension, a compare, a mask, a constant, a copy of one, and on x86-64 a parameter or a call's result
+ * as they are taken.  Every definition must say so; anything else says nothing.  Over and over until it settles,
+ * from the most a value could be, so that copies around a loop agree.
+ */
+static int compute_ext(xsel_t *s) {
+    const cc_ssa_function_t *f = s->f;
+    int W = 8 * s->word;
+    int changed;
+    int pass;
+    size_t i;
+    int v;
+
+    s->sbits = (unsigned char *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1));
+    s->zbits = (unsigned char *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1));
+    if (s->sbits == NULL || s->zbits == NULL) {
+        return -1;
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        /* defined: the least, raised by each definition; never defined: nothing known */
+        s->sbits[v] = (unsigned char)(s->ndefs[v] > 0 ? 1 : W);
+        s->zbits[v] = (unsigned char)(s->ndefs[v] > 0 ? 1 : W);
+    }
+    for (v = 0; v < f->value_count; ++v) {
+        if (s->addr_taken[v] || cc_ssa_value_class(f, v) != CC_VAL_I64 || xs_is_pair(s, v)) {
+            s->sbits[v] = (unsigned char)W;
+            s->zbits[v] = (unsigned char)W;
+        }
+    }
+    for (pass = 0; pass < 32; ++pass) {
+        changed = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+            int sb = W;
+            int zb = W;
+            long long k;
+            int src;
+            int bytes;
+
+            if (in->op == CC_SSA_ASM) {
+                size_t o;
+
+                for (o = 0; o < in->asm_out_count; ++o) {
+                    int ov = in->asm_out_values[o];
+
+                    if (ov >= 0 && ov < f->value_count && (s->sbits[ov] != W || s->zbits[ov] != W)) {
+                        s->sbits[ov] = (unsigned char)W;
+                        s->zbits[ov] = (unsigned char)W;
+                        changed = 1;
+                    }
+                }
+                continue;
+            }
+            if (d < 0 || d >= f->value_count || (s->sbits[d] == W && s->zbits[d] == W)) {
+                continue;
+            }
+            if ((in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && in->rhs == d) {
+                continue; /* it writes the structure, not the value */
+            }
+            switch (in->op) {
+            case CC_SSA_CONST:
+                sb = const_sbits(in->imm, s->word);
+                zb = const_zbits(in->imm, s->word);
+                break;
+            case CC_SSA_LOAD:
+                held_bits((int)in->imm, in->is_unsigned, s->word, &sb, &zb);
+                break;
+            case CC_SSA_CMP:
+                sb = 2;
+                zb = 1;
+                break;
+            case CC_SSA_MOV:
+                if (in->lhs >= 0) {
+                    sb = s->sbits[in->lhs];
+                    zb = s->zbits[in->lhs];
+                }
+                break;
+            case CC_SSA_AND:
+                if (in->lhs >= 0 && in->rhs >= 0) {
+                    zb = s->zbits[in->lhs] < s->zbits[in->rhs] ? s->zbits[in->lhs] : s->zbits[in->rhs];
+                    if (xs_const_of(s, in->rhs, &k) && const_zbits(k, s->word) < zb) {
+                        zb = const_zbits(k, s->word);
+                    }
+                    sb = zb < W ? zb + 1 : W;
+                }
+                break;
+            case CC_SSA_SHR:
+                bytes = ext_of(s, in, &src);
+                if (bytes > 0) {
+                    held_bits(bytes, in->is_unsigned, s->word, &sb, &zb);
+                } else if (in->is_unsigned && (in->rhs < 0 || xs_const_of(s, in->rhs, &k))) {
+                    if (in->rhs < 0) {
+                        k = in->imm;
+                    }
+                    k &= W - 1;
+                    zb = k > 0 ? W - (int)k : W;
+                    sb = zb < W ? zb + 1 : W;
+                }
+                break;
+            case CC_SSA_PARAM:
+                if (s->t->extends_params) {
+                    held_bits(in->imm > 0 ? (int)in->imm : s->word, in->is_unsigned, s->word, &sb, &zb);
+                }
+                break;
+            case CC_SSA_CALL:
+            case CC_SSA_CALLI:
+                if (s->t->extends_params || in->imm == 1 || in->imm == 2) {
+                    held_bits(in->imm > 0 ? (int)in->imm : s->word, in->is_unsigned, s->word, &sb, &zb);
+                }
+                break;
+            default:
+                break;
+            }
+            if (sb > s->sbits[d]) {
+                s->sbits[d] = (unsigned char)sb;
+                changed = 1;
+            }
+            if (zb > s->zbits[d]) {
+                s->zbits[d] = (unsigned char)zb;
+                changed = 1;
+            }
+        }
+        if (!changed) {
+            return 0;
+        }
+    }
+    /* not settled: nothing known */
+    for (v = 0; v < f->value_count; ++v) {
+        s->sbits[v] = (unsigned char)W;
+        s->zbits[v] = (unsigned char)W;
+    }
+    return 0;
+}
+
 /** A word binary operation: add, sub, and, or, xor, mul, shl, shr. */
 static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
     int w = s->word;
@@ -480,7 +728,13 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     if (op == XI_SHL || op == XI_SHR || op == XI_SAR) {
         long long k;
+        int src;
+        int bytes = ext_of(s, in, &src);
 
+        if (bytes > 0) {
+            sel_ext(s, in->dst, src, bytes, !in->is_unsigned);
+            return;
+        }
         if (in->rhs < 0 || xs_const_of(s, in->rhs, &k)) {
             xop_t c;
 
@@ -512,6 +766,17 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
             if (t.reg != d.reg) {
                 xs_emit(s, XI_MOV, w, 2, &t, &d, NULL);
             }
+            return;
+        }
+    }
+    if (op == XI_AND) {
+        /* a mask of the low byte, half or (x86-64) word: a zero extension */
+        long long m = 0;
+        int other = xs_const_of(s, in->rhs, &m) ? in->lhs : xs_const_of(s, in->lhs, &m) ? in->rhs : -1;
+        int bytes = m == 0xff ? 1 : m == 0xffff ? 2 : (w == 8 && m == 0xffffffffLL) ? 4 : 0;
+
+        if (other >= 0 && bytes > 0 && !xs_const_of(s, other, &m)) {
+            sel_ext(s, in->dst, other, bytes, 0);
             return;
         }
     }
@@ -1299,6 +1564,9 @@ static int sel_init(xsel_t *s) {
     if (rc != 0) {
         return rc;
     }
+    if (compute_ext(s) != 0) {
+        return -1;
+    }
     for (v = 0; v < f->value_count; ++v) {
         if (s->addr_taken[v] && s->frame_val[v] >= 0) {
             /* the address of a stack object taken again: not handled */
@@ -1309,6 +1577,8 @@ static int sel_init(xsel_t *s) {
 }
 
 static void sel_free(xsel_t *s) {
+    free(s->sbits);
+    free(s->zbits);
     free(s->bind);
     free(s->asm_slot);
     free(s->lo);

@@ -405,6 +405,7 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
     t.fp_residue = 0; /* %rbp is on a 16-byte boundary */
     t.stack_boundary = 16;
     t.sym_imm = 0;
+    t.extends_params = 1;
     t.function_ok = x64_function_ok;
     t.begin = x64_begin;
     t.param = x64_param;
