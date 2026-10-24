@@ -323,6 +323,13 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
                      uint64_t sym_value,
                      int64_t addend,
                      uint64_t *out_value) {
+    /*
+     * Sums of 64-bit addresses wrap as the machine's do, before the field's range is asked: the kernel's
+     * addresses are in the top 2 GiB, and its vDSO reaches data placed below its own address 0, both
+     * numbers past 2^63 in a type wider than 64 bits, where the link was refused.
+     */
+    uint64_t sum = sym_value + (uint64_t)addend;
+    elf_swide_t rel = (elf_swide_t)(int64_t)(sum - place);
     elf_swide_t v;
     (void)ctx;
 
@@ -350,7 +357,7 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_GOTPCRELX:
         case R_X86_64_REX_GOTPCRELX:
         case R_X86_64_GOTPC32:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            v = rel;
             if (!swide_in_signed_bits(v, 32)) {
                 return -2;
             }
@@ -365,7 +372,7 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_SIZE32:
         case R_X86_64_GOTPC32_TLSDESC:
         case R_X86_64_TLSDESC:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            v = (elf_swide_t)sum;
             if (!swide_in_unsigned_bits(v, 32)) {
                 return -2;
             }
@@ -377,44 +384,40 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_TPOFF32:
         case R_X86_64_TLSLD:
         case R_X86_64_DTPOFF32:
-            /*
-             * a 64-bit address, sign-extended from the field: the sum wraps as the machine's does, so an
-             * address in the top 2 GiB is the negative number that fits -- Linux's kernel is linked at
-             * 0xffffffff81000000 and its `cmpq $sym, ...` took it for too large a number
-             */
-            v = (elf_swide_t)(int64_t)(sym_value + (uint64_t)addend);
+            /* a 64-bit address, sign-extended from the field */
+            v = (elf_swide_t)(int64_t)sum;
             if (!swide_in_signed_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
             return 0;
         case R_X86_64_PC64:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            v = rel;
             *out_value = swide_to_width(v, 64);
             return 0;
         case R_X86_64_16:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 16) && !swide_in_signed_bits(v, 16)) {
+            v = (elf_swide_t)(int64_t)sum;
+            if (!swide_in_unsigned_bits((elf_swide_t)sum, 16) && !swide_in_signed_bits(v, 16)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 16);
             return 0;
         case R_X86_64_PC16:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            v = rel;
             if (!swide_in_signed_bits(v, 16)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 16);
             return 0;
         case R_X86_64_8:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 8) && !swide_in_signed_bits(v, 8)) {
+            v = (elf_swide_t)(int64_t)sum;
+            if (!swide_in_unsigned_bits((elf_swide_t)sum, 8) && !swide_in_signed_bits(v, 8)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 8);
             return 0;
         case R_X86_64_PC8:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            v = rel;
             if (!swide_in_signed_bits(v, 8)) {
                 return -2;
             }
