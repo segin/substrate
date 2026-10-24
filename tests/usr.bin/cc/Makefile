@@ -568,15 +568,13 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_object_size_chk.c -o $(CC_TMP)/cc_native_gnu_object_size_chk.s
 	grep -q "ud2" $(CC_TMP)/cc_native_gnu_object_size_chk.s
 	grep -q "call memcpy" $(CC_TMP)/cc_native_gnu_object_size_chk.s
-	grep -q "call memmove" $(CC_TMP)/cc_native_gnu_object_size_chk.s
-	grep -q "call memset" $(CC_TMP)/cc_native_gnu_object_size_chk.s
+	! grep -q "__mem[a-z]*_chk" $(CC_TMP)/cc_native_gnu_object_size_chk.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_object_size_chk.c -o $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 native_gnu_object_size_chk.c -o $(CC_TMP)/cc_native_gnu_object_size_chk_32
 	$(CC_TMP)/cc_native_gnu_object_size_chk_32
 	grep -q "ud2" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
 	grep -q "call memcpy" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
-	grep -q "call memmove" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
-	grep -q "call memset" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
+	! grep -q "__mem[a-z]*_chk" $(CC_TMP)/cc_native_gnu_object_size_chk_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_trap_unreachable.c -o $(CC_TMP)/cc_native_gnu_trap_unreachable
 	$(CC_TMP)/cc_native_gnu_trap_unreachable
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_trap_unreachable.c -o $(CC_TMP)/cc_native_gnu_trap_unreachable.s
