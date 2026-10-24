@@ -3799,6 +3799,115 @@ static int append_leb128_directive(emit_ctx_t *ctx, bytebuf_t *buf, const char *
     return 1;
 }
 
+/** The statement a label reference in an expression names -- a label, or a numbered label's `1f` or `1b` -- or NULL. */
+static const as_stmt_t *place_ref_stmt(emit_ctx_t *ctx, const as_stmt_t *st, const as_expr_t *e) {
+    size_t idx;
+
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && e->reloc_op == NULL && as_strcmp(e->symbol, ".") != 0 &&
+        label_stmt_index(ctx, e->symbol, &idx) == 0) {
+        return &ctx->parsed->items[idx];
+    }
+    if (e->kind == AS_EXPR_LOCAL_REF && e->src_file != NULL) {
+        return resolve_local_ref_target_stmt(ctx, st, e->src_file, e->local_digit, e->local_forward);
+    }
+    return NULL;
+}
+
+/**
+ * Evaluate @p e, a count made of numbers and of distances between two labels of @p section_name on the same
+ * side of statement @p st (the .skip it sizes): a distance is the size of the statements between its labels,
+ * which does not depend on where the .skip leaves them, so it is the same found inside any scan as at the
+ * end.  0, or -1 for anything else.
+ */
+static int eval_place_distances(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st, size_t at,
+                                unsigned x86_code_bits, const as_expr_t *e, long long *out) {
+    long long l;
+    long long r;
+
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        *out = e->value;
+        return 0;
+    case AS_EXPR_UNARY:
+        if (eval_place_distances(ctx, section_name, st, at, x86_code_bits, e->lhs, &l) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_NEG) {
+            *out = -l;
+            return 0;
+        }
+        return -1;
+    case AS_EXPR_BINARY:
+        if (e->op == AS_EXPR_OP_SUB) {
+            const as_stmt_t *a = place_ref_stmt(ctx, st, e->lhs);
+            const as_stmt_t *b = place_ref_stmt(ctx, st, e->rhs);
+            const char *sa = NULL;
+            const char *sb = NULL;
+            size_t ia;
+            size_t ib;
+            uint64_t size;
+
+            if (a != NULL && b != NULL) {
+                if (parsed_stmt_index(ctx, a, &ia) != 0 || parsed_stmt_index(ctx, b, &ib) != 0 ||
+                    stmt_declared_label_section(ctx, a, &sa) != 0 || stmt_declared_label_section(ctx, b, &sb) != 0 ||
+                    sa == NULL || sb == NULL || as_strcmp(sa, section_name) != 0 || as_strcmp(sb, section_name) != 0 ||
+                    (ia <= at) != (ib <= at)) {
+                    return -1;
+                }
+                if (stmt_range_size_in_section(ctx, section_name, ia < ib ? ia : ib, ia < ib ? ib : ia, 0,
+                                               x86_code_bits, &size) != 0) {
+                    return -1;
+                }
+                *out = ia >= ib ? (long long)size : -(long long)size;
+                return 0;
+            }
+        }
+        if (eval_place_distances(ctx, section_name, st, at, x86_code_bits, e->lhs, &l) != 0 ||
+            eval_place_distances(ctx, section_name, st, at, x86_code_bits, e->rhs, &r) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case AS_EXPR_OP_ADD:
+            *out = l + r;
+            return 0;
+        case AS_EXPR_OP_SUB:
+            *out = l - r;
+            return 0;
+        case AS_EXPR_OP_MUL:
+            *out = l * r;
+            return 0;
+        default:
+            return -1;
+        }
+    default:
+        return -1;
+    }
+}
+
+/**
+ * A .skip's count @p arg made of numbers and distances between labels both after it or both before
+ * (eval_place_distances()): Linux's clear_bhb_loop pads with `.skip 32 - (.Lret1 - 1f)`.  Places were found
+ * as though such a .skip were nothing, and every `1f` and `1b` pointed short by it.
+ */
+static int eval_skip_place_distances(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
+                                     unsigned x86_code_bits, const char *arg, long long *out) {
+    as_expr_t *expr;
+    size_t at;
+    int rc;
+
+    if (ctx == NULL || ctx->parsed == NULL || section_name == NULL || st == NULL || arg == NULL ||
+        parsed_stmt_index(ctx, st, &at) != 0) {
+        return -1;
+    }
+    expr = as_parse_expr_string(arg, st->unit, st->ordinal);
+    if (expr == NULL) {
+        return -1;
+    }
+    rc = eval_place_distances(ctx, section_name, st, at, x86_code_bits, expr, out);
+    as_expr_free(expr);
+    return rc;
+}
+
 int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name,
                                      const as_stmt_t *st, uint64_t sec_off, unsigned x86_code_bits,
                                      const as_directive_t *d) {
@@ -3821,7 +3930,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
         int la, lb, lc, ld;
 
         if (ctx->virtual_scanning > 1 &&
-            (d->arg_count < 1 || linux_alt_pad_labels(d->args[0], &la, &lb, &lc, &ld) != 0)) {
+            (d->arg_count < 1 || linux_alt_pad_labels(d->args[0], &la, &lb, &lc, &ld) != 0) &&
+            (d->arg_count < 1 || eval_skip_place_distances(ctx, section_name, st, x86_code_bits, d->args[0], &tmp) != 0)) {
             /*
              * a scan inside a scan counts no .skip it would have to look elsewhere to size -- but the padding
              * of an alternative is still sized (from its replacement and original, each smaller than this):
@@ -3833,7 +3943,8 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
         if (d->arg_count >= 1 && d->args[0] != NULL &&
             parse_int64(d->args[0], &tmp) != 0 &&
             parse_const_expr_string(d->args[0], &tmp) != 0 &&
-            eval_linux_alt_pad_expr(ctx, section_name, st, sec_off, x86_code_bits, d->args[0], &tmp) != 0) {
+            eval_linux_alt_pad_expr(ctx, section_name, st, sec_off, x86_code_bits, d->args[0], &tmp) != 0 &&
+            eval_skip_place_distances(ctx, section_name, st, x86_code_bits, d->args[0], &tmp) != 0) {
             return 1;
         }
     }
@@ -4082,6 +4193,10 @@ int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char *secti
             /* Linux alternative macros use label-difference expressions that must be
              * evaluated before generic constant parsing can treat comparisons as
              * ordinary arithmetic. */
+        } else if (parse_int64(d->args[0], &count) != 0 && parse_const_expr_string(d->args[0], &count) != 0 &&
+                   (as_strcmp(d->name, ".space") == 0 || as_strcmp(d->name, ".skip") == 0) &&
+                   eval_skip_place_distances(ctx, section_name, st, x86_code_bits, d->args[0], &count) == 0) {
+            /* distances between labels, the same in every scan */
         } else if (parse_int64(d->args[0], &count) != 0 && parse_const_expr_string(d->args[0], &count) != 0) {
             as_expr_t *expr = as_parse_expr_string(d->args[0], st != NULL ? st->unit : NULL,
                                                   st != NULL ? st->ordinal : 0);
