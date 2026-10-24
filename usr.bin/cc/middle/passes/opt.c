@@ -2699,6 +2699,13 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
                 }
             }
         }
+        /*
+         * what the target split before the constants were known: a 64-bit division by one, as a shift
+         * (Linux's roundup() divides by a local), and the constant it leaves dead
+         */
+        if (!oom && cc_target_current()->legalize != NULL) {
+            oom = cc_target_current()->legalize(&m->funcs[i], diag) != 0 || dce_function(&m->funcs[i]) < 0;
+        }
         /* last of all: a variable's update made in place */
         oom = oom || cc_coalesce_moves(&m->funcs[i]) < 0;
     }

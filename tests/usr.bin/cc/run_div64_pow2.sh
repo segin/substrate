@@ -26,4 +26,14 @@ for t in div64_pow2 const64_fold mul_overflow64 div64_narrow; do
 		fi
 	done
 done
+# and codegen/div64_divisor_via_local.c: a divisor a local holds is known
+# once the optimizer has run, as with gcc from -O1 (Linux's roundup())
+for o in O1 O2 Os; do
+	t=div64_divisor_via_local
+	"$CC_BIN" -m32 -$o -S -o "$CC_TMP/$t.s" "$ROOT/tests/usr.bin/cc/codegen/$t.c"
+	if grep -Eq '__u?(div|mod)di3' "$CC_TMP/$t.s"; then
+		echo "run_div64_pow2: $t.c -$o calls libgcc"
+		exit 1
+	fi
+done
 echo "run_div64_pow2: ok"

@@ -8,8 +8,11 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   forwarding of a local slot stored once with a constant into its loads
   (`forward_const_slots()`); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
-  its callees are, then folded again); last, the static functions
-  nothing refers to any more are dropped.
+  its callees are, then folded again); at the end of a function's
+  passes, the target's legalization once more, for what it split before
+  the constants were known (on i386, a 64-bit division by a local that
+  holds a power of two); last, the static functions nothing refers to
+  any more are dropped.
 - `mem.c`: what is known of the function's own stack slots whose
   addresses do not escape (`cc_optimize_slots()`, run in the -O1 loop):
   a slot nothing loads from dropped with its stores and its zeroing

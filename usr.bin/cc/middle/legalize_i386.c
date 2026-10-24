@@ -20,7 +20,9 @@
  *    on the low words as unsigned numbers;
  *  - div by a constant power of two is a shift (signed, after a bias that
  *    rounds toward zero), as gcc makes it; any other div calls libgcc's
- *    __divdi3 or __udivdi3.
+ *    __divdi3 or __udivdi3.  The optimizer runs this pass again once it
+ *    knows more constants, and a call whose divisor it learned is
+ *    rewritten as the div would have been.
  *
  * After this, the emitter has no 64-bit arithmetic of its own: it moves
  * 64-bit values (load, store, move, constant, call and return) and
@@ -53,7 +55,8 @@ typedef struct {
 
 /**
  * Note, before anything is rewritten, each value defined once by an integer constant, and each whose high
- * word is known 0: such a constant, an AND with one, or a move of such a value.
+ * word is known 0: such a constant, an AND with one, a move of such a value, or a pair of words whose
+ * high one is the constant 0.
  *
  * @return 0, or -1 when out of memory
  */
@@ -61,6 +64,7 @@ static int lz_analyze(lz_t *z) {
     const cc_ssa_function_t *f = z->f;
     size_t n = (size_t)(f->value_count > 0 ? f->value_count : 1);
     int *defs = (int *)calloc(n, sizeof(*defs));
+    unsigned char *word_zero = (unsigned char *)calloc(n, 1); /* per value: defined once, by the constant 0 */
     size_t i;
     int round;
 
@@ -68,8 +72,9 @@ static int lz_analyze(lz_t *z) {
     z->is_const = (unsigned char *)calloc(n, 1);
     z->const_val = (long long *)calloc(n, sizeof(*z->const_val));
     z->hi_zero = (unsigned char *)calloc(n, 1);
-    if (defs == NULL || z->is_const == NULL || z->const_val == NULL || z->hi_zero == NULL) {
+    if (defs == NULL || word_zero == NULL || z->is_const == NULL || z->const_val == NULL || z->hi_zero == NULL) {
         free(defs);
+        free(word_zero);
         return -1;
     }
     for (i = 0; i < f->instr_count; ++i) {
@@ -83,8 +88,11 @@ static int lz_analyze(lz_t *z) {
         const cc_ssa_instr_t *in = &f->instrs[i];
         int d = in->dst;
 
-        if (in->op == CC_SSA_CONST && d >= 0 && d < f->value_count && defs[d] == 1 &&
-            cc_ssa_value_class(f, d) == CC_VAL_I64) {
+        if (in->op != CC_SSA_CONST || d < 0 || d >= f->value_count || defs[d] != 1) {
+            continue;
+        }
+        word_zero[d] = in->imm == 0 && cc_ssa_value_class(f, d) != CC_VAL_F64;
+        if (cc_ssa_value_class(f, d) == CC_VAL_I64) {
             z->is_const[d] = 1;
             z->const_val[d] = in->imm;
             z->hi_zero[d] = ((unsigned long long)in->imm >> 32) == 0;
@@ -103,10 +111,14 @@ static int lz_analyze(lz_t *z) {
             } else if (in->op == CC_SSA_AND && ((in->lhs >= 0 && in->lhs < f->value_count && z->hi_zero[in->lhs]) ||
                                                 (in->rhs >= 0 && in->rhs < f->value_count && z->hi_zero[in->rhs]))) {
                 z->hi_zero[d] = 1;
+            } else if (in->op == CC_SSA_PAIR && in->rhs >= 0 && in->rhs < f->value_count && word_zero[in->rhs]) {
+                /* a zero extension, as this pass writes it and the optimizer leaves it */
+                z->hi_zero[d] = 1;
             }
         }
     }
     free(defs);
+    free(word_zero);
     return 0;
 }
 
@@ -717,6 +729,61 @@ static int split_div(lz_t *z, const cc_ssa_instr_t *div) {
 }
 
 /**
+ * A call of libgcc's 64-bit division, as the DIV it stands for: legalization runs before the optimizer,
+ * and a divisor it only then learns is constant -- `const int y = 32; n / y`, as Linux's roundup()
+ * writes -- reaches it again after (cc_run_middle_passes()) as the call made of the DIV.
+ *
+ * @param in   the instruction
+ * @param div  receives the DIV, operands the call's arguments
+ * @return 1 if @p in is a call of __udivdi3 or __divdi3, else 0
+ */
+static int div_call_as_div(const cc_ssa_instr_t *in, cc_ssa_instr_t *div) {
+    int is_unsigned;
+
+    if (in->op != CC_SSA_CALL || in->sym == NULL || in->dst < 0 || in->arg_count != 2 || in->args == NULL) {
+        return 0;
+    }
+    if (strcmp(in->sym, "__udivdi3") == 0) {
+        is_unsigned = 1;
+    } else if (strcmp(in->sym, "__divdi3") == 0) {
+        is_unsigned = 0;
+    } else {
+        return 0;
+    }
+    memset(div, 0, sizeof(*div));
+    div->op = CC_SSA_DIV;
+    div->dst = in->dst;
+    div->lhs = in->args[0];
+    div->rhs = in->args[1];
+    div->is_unsigned = is_unsigned;
+    div->label = -1;
+    div->true_label = -1;
+    div->false_label = -1;
+    div->param_index = -1;
+    return 1;
+}
+
+/**
+ * Rewrite a call of libgcc's 64-bit division whose divisor is now known (div_call_as_div()) as
+ * split_div() would the DIV: a shift, or one 32-bit division.
+ *
+ * @param done  set to 1 when @p call is rewritten (and may be freed), else 0
+ * @return 0, or -1 when out of memory
+ */
+static int split_div_call(lz_t *z, const cc_ssa_instr_t *call, int *done) {
+    cc_ssa_instr_t div;
+
+    *done = 0;
+    if (!div_call_as_div(call, &div)) {
+        return 0;
+    }
+    if (split_div_pow2(z, &div, done) != 0) {
+        return -1;
+    }
+    return *done ? 0 : split_div_narrow(z, &div, done);
+}
+
+/**
  * Whether @p in is 64-bit arithmetic this pass rewrites.
  */
 static int needs_split(const cc_ssa_function_t *f, const cc_ssa_instr_t *in) {
@@ -800,7 +867,9 @@ int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     int any = 0;
 
     for (i = 0; i < f->instr_count && !any; ++i) {
-        any = needs_split(f, &f->instrs[i]);
+        cc_ssa_instr_t div;
+
+        any = needs_split(f, &f->instrs[i]) || div_call_as_div(&f->instrs[i], &div);
     }
     if (!any) {
         return 0;
@@ -814,8 +883,14 @@ int cc_legalize_i386_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
+        int done = 0;
 
-        if (needs_split(f, in)) {
+        if (split_div_call(&z, in, &done) != 0) {
+            break;
+        }
+        if (done) {
+            cc_ssa_instr_free(in);
+        } else if (needs_split(f, in)) {
             if (split_one(&z, in) != 0) {
                 break;
             }
