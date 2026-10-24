@@ -557,8 +557,7 @@ Inside
 the location counter
 .Ql \&.
 is the address the next thing is placed at.
-It begins where the default layout begins the image and may only move
-forwards.
+It begins at 0, as in GNU ld, and may only move forwards.
 Assigned between output sections it places what follows; in a body it may
 stand before the first input section description, where it is the
 section's start, or after the last, where moving it makes the section

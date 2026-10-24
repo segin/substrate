@@ -3489,24 +3489,11 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
 int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
     lds_script_t *sc = ctx->script;
     lds_walk_t w;
-    uint64_t first_addr = 0;
-    int have_first = 0;
     size_t i;
     int pass;
 
     if (sc == NULL) {
         return 0;
-    }
-    /* Where the default layout began is where the script's begins, until
-     * the script says otherwise. */
-    for (i = 0; i < elf_section_count(out); ++i) {
-        elf_section_t *sec = elf_section_get(out, i);
-
-        if (sec != NULL && (elf_section_flags(sec) & SHF_ALLOC) != 0 &&
-            (!have_first || elf_section_addr(sec) < first_addr)) {
-            first_addr = elf_section_addr(sec);
-            have_first = 1;
-        }
     }
     memset(&w, 0, sizeof(w));
     w.ctx = ctx;
@@ -3517,7 +3504,12 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
      * the values, a third time to act on them. */
     for (pass = 0; pass < 3; ++pass) {
         w.final = pass == 2;
-        if (lw_pass(&w, first_addr) != 0) {
+        /*
+         * the location counter begins at 0, as GNU ld's does, not where the default layout put the first
+         * section: Linux's vDSO places its data pages below itself, `PROVIDE(vdso_u_data = . - 6 *
+         * PAGE_SIZE)` before `. = SIZEOF_HEADERS`, and they were off by the headers' size
+         */
+        if (lw_pass(&w, 0) != 0) {
             return -1;
         }
     }

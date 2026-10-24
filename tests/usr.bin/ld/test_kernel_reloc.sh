@@ -11,7 +11,9 @@
 #   relocation error: ... type=R_X86_64_32S ...: relocation error
 #
 # So with R_X86_64_PC32 in Linux's vDSO, a shared object at 0 whose data
-# its script places below it (`PROVIDE(vdso_u_data = . - 6 * PAGE_SIZE)`).
+# its script places below it (`PROVIDE(vdso_u_data = . - 6 * PAGE_SIZE)`
+# before `. = SIZEOF_HEADERS`) -- where the location counter began at the
+# first section, not at 0, and the data was off by the headers' size.
 #
 # The object is assembled by the host's as, so that the test is of the
 # linker; each immediate must be the address's low 32 bits.
@@ -49,10 +51,10 @@ as --64 -o b.o b.s
 if ! ./ld -m elf_x86_64 -shared -T v.lds -o lib.so b.o > out 2>&1; then
     echo "FAIL: below 0: refused: $(head -1 out)"; exit 1
 fi
-want=$(nm lib.so | awk '$3 == "below" { print $1 }' | sed 's/^0*//')
+# the location counter begins at 0, so below is at -0x4000
 got=$(objdump -d lib.so | sed -n 's/.*lea .*(%rip),%rax *# *\([0-9a-f]*\) <below>.*/\1/p')
-[ -n "$want" ] && [ "$got" = "$want" ] ||
-    { echo "FAIL: below 0: the lea reaches [$got], not below at [$want]"; fail=1; }
+[ "$got" = "ffffffffffffc000" ] ||
+    { echo "FAIL: below 0: the lea reaches [$got], not below at ffffffffffffc000"; fail=1; }
 
 [ "$fail" -eq 0 ] && echo "ok: sign-extended relocations in the top 2 GiB, PC-relative ones below 0"
 exit "$fail"
