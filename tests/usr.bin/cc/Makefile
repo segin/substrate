@@ -883,7 +883,8 @@ checks_main: build
 	grep -q "andl" $(CC_TMP)/cc_native_c99_bitfield_basic_32.s
 	grep -q "shll" $(CC_TMP)/cc_native_c99_bitfield_basic_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_deref_postfix_update.c -o $(CC_TMP)/cc_native_c99_deref_postfix_update_32.s
-	grep -q "addl" $(CC_TMP)/cc_native_c99_deref_postfix_update_32.s
+	# the increment: an add, or a lea of the value plus 1
+	grep -Eq "addl|leal 1\\(" $(CC_TMP)/cc_native_c99_deref_postfix_update_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_proto_extern.c -o $(CC_TMP)/cc_native_c99_proto_extern_32.s
 	grep -q "call extmul" $(CC_TMP)/cc_native_c99_proto_extern_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_decay.c -o $(CC_TMP)/cc_native_c99_decay_32.s
