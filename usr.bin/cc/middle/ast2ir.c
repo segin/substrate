@@ -13050,6 +13050,49 @@ static char *global_char_list_to_quoted_string(const cc_translation_unit_t *tu, 
 }
 
 /**
+ * The string literal whose address a static initializer's value is, as
+ * gcc folds it: through casts to a pointer or to an integer as wide as
+ * one, a `?:` of constant condition and a comma.  Linux's PCI tables
+ * hold `.driver_data = (0 ? 0 : (kernel_ulong_t)&"PARPORT_SERIAL")`.
+ *
+ * @param tu  the translation unit
+ * @param e   the initializer
+ * @return    the CC_EXPR_STR, or NULL if the value is no literal's address
+ */
+static const cc_expr_t *global_init_string(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    while (e != NULL) {
+        if (e->kind == CC_EXPR_STR) {
+            return e;
+        }
+        if (e->kind == CC_EXPR_CAST && e->lhs != NULL) {
+            const cc_ctype_t *t = lower_value_ctype(e);
+
+            if (!ct_is_pointer(t) &&
+                !(cc_ct_is_integer(t) && cc_ct_size(t, tu) >= (long)cc_target_pointer_size())) {
+                return NULL;
+            }
+            e = e->lhs;
+        } else if (e->kind == CC_EXPR_TERNARY && e->lhs != NULL && e->rhs != NULL && e->third != NULL) {
+            long long cv = 0;
+            double cf = 0.0;
+            int cisf = 0;
+            char *csym = NULL;
+
+            if (eval_global_init_expr(tu, e->lhs, &cv, &cf, &cisf, &csym) != 0 || csym != NULL) {
+                free(csym);
+                return NULL;
+            }
+            e = (cisf ? cf != 0.0 : cv != 0) ? e->rhs : e->third;
+        } else if (e->kind == CC_EXPR_BIN && e->op == CC_BIN_COMMA) {
+            e = e->rhs;
+        } else {
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+/**
  * Write the constant value of a scalar initializer into a global's bytes:
  * an integer or floating value in the field's size, or a relocation for
  * an address (a string literal, a symbol plus addend).
@@ -13087,12 +13130,12 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, const cc_ct
         return -1;
     }
 
-    if (expr != NULL && expr->kind == CC_EXPR_STR) {
-        if (!is_ptr || field_size != cc_target_pointer_size()) {
+    if (global_init_string(tu, expr) != NULL) {
+        if ((!is_ptr && !cc_ct_is_integer(ct)) || field_size != cc_target_pointer_size()) {
             set_diag(diag, "string scalar initializer requires pointer-sized pointer field");
             return -1;
         }
-        char *text = string_literal_emit_text(tu, expr);
+        char *text = string_literal_emit_text(tu, global_init_string(tu, expr));
         if (text == NULL ||
             append_global_string_reloc(relocs, reloc_count, off, field_size, text, diag) != 0) {
             free(text);
@@ -14920,10 +14963,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     cc_ssa_module_free(out);
                     return -1;
                 }
-            } else if (init != NULL && init->kind == CC_EXPR_CAST && init->lhs != NULL &&
-                       init->lhs->kind == CC_EXPR_STR && ct_is_pointer(lower_global_ctype(&tu->globals[i]))) {
+            } else if (global_init_string(tu, init) != NULL &&
+                       (ct_is_pointer(lower_global_ctype(&tu->globals[i])) ||
+                        cc_ct_is_integer(lower_global_ctype(&tu->globals[i])))) {
                 init_is_string = 1;
-                out->globals[i].init_str = string_literal_emit_text(tu, init->lhs);
+                out->globals[i].init_str = string_literal_emit_text(tu, global_init_string(tu, init));
                 if (out->globals[i].init_str == NULL) {
                     set_diag(diag, "out of memory duplicating global string initializer");
                     cc_ssa_module_free(out);

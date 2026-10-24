@@ -1940,7 +1940,9 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 if ((long)(slen + 1) < sz) {
                     fprintf(fp, "\t.zero %ld\n", sz - (long)(slen + 1));
                 }
-            } else if (g->data_kind == CC_SSA_DATA_POINTER) {
+            } else if (g->data_kind == CC_SSA_DATA_POINTER ||
+                       (g->data_kind == CC_SSA_DATA_INT && sz == (long)pointer_size)) {
+                /* a pointer, or an integer holding the literal's address: `(unsigned long)"s"` */
                 fprintf(fp, "\t.section .rodata\n");
                 fprintf(fp, ".L__cc_gstr_%zu:\n", i);
                 emit_asciz_literal(fp, g->init_str);
