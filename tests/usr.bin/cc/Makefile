@@ -864,7 +864,9 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc -m32 native_c99_flexible_array.c -o $(CC_TMP)/cc_native_c99_flexible_array_32
 	$(CC_TMP)/cc_native_c99_flexible_array_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_assign.c -o $(CC_TMP)/cc_native_c99_struct_assign_32.s
-	grep -q "call memcpy" $(CC_TMP)/cc_native_c99_struct_assign_32.s
+	# a small copy is its moves, as gcc makes it: what it leaves is checked by running it
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_struct_assign.c -o $(CC_TMP)/cc_native_c99_struct_assign_32
+	$(CC_TMP)/cc_native_c99_struct_assign_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_ptr_arith.c -o $(CC_TMP)/cc_native_c99_struct_ptr_arith_32.s
 	grep -q "imull" $(CC_TMP)/cc_native_c99_struct_ptr_arith_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_member_array.c -o $(CC_TMP)/cc_native_c99_struct_member_array_32.s
@@ -872,7 +874,9 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_array_init.c -o $(CC_TMP)/cc_native_c99_struct_array_init_32.s
 	grep -Eq 'movl (%e[a-z]{2}|\$$-?[0-9]+), (\(%e[a-z]{2}\)|-?[0-9]+\(%ebp\))' $(CC_TMP)/cc_native_c99_struct_array_init_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_copy_init.c -o $(CC_TMP)/cc_native_c99_struct_copy_init_32.s
-	grep -q "call memcpy" $(CC_TMP)/cc_native_c99_struct_copy_init_32.s
+	# a small copy is its moves, as gcc makes it: what it leaves is checked by running it
+	$(TOP)/usr.bin/cc/cc -m32 native_c99_struct_copy_init.c -o $(CC_TMP)/cc_native_c99_struct_copy_init_32
+	$(CC_TMP)/cc_native_c99_struct_copy_init_32
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_pass_value.c -o $(CC_TMP)/cc_native_c99_struct_pass_value_32.s
 	grep -q "call sum_pair" $(CC_TMP)/cc_native_c99_struct_pass_value_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_return_value.c -o $(CC_TMP)/cc_native_c99_struct_return_value_32.s
