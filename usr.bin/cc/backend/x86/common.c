@@ -254,9 +254,39 @@ static int asm_immediate_fits(const char *c, long long v) {
     return 0;
 }
 
+static int x86_gpr_index(const char *name);
+static const char *x86_gpr_name(int r, int is_64bit);
+
+/**
+ * The register a `{name}` constraint names (lowering gives a local register variable's operand one, such as
+ * `{r10}`), its 64-bit name with @p is_64bit, else its 32-bit one; NULL for none.  It is asked first: the
+ * letters of a name (`{rbp}`) are not a constraint's.
+ */
+static const char *asm_constraint_brace_reg(const char *c, int is_64bit) {
+    const char *open = c != NULL ? strchr(c, '{') : NULL;
+    const char *close = open != NULL ? strchr(open, '}') : NULL;
+    char name[24];
+    int r;
+
+    if (close == NULL || (size_t)(close - open) >= sizeof(name) - 1) {
+        return NULL;
+    }
+    name[0] = '%';
+    memcpy(name + 1, open + 1, (size_t)(close - open - 1));
+    name[close - open] = '\0';
+    r = x86_gpr_index(name);
+    if (r < 0) {
+        return NULL;
+    }
+    return x86_gpr_name(r, is_64bit);
+}
+
 static const char *asm_constraint_fixed_reg64(const char *c) {
     if (c == NULL) {
         return NULL;
+    }
+    if (strchr(c, '{') != NULL) {
+        return asm_constraint_brace_reg(c, 1);
     }
     if (cc_asm_constraint_has(c, 'a')) {
         return "%rax";
@@ -282,6 +312,9 @@ static const char *asm_constraint_fixed_reg64(const char *c) {
 static const char *asm_constraint_fixed_reg32(const char *c) {
     if (c == NULL) {
         return NULL;
+    }
+    if (strchr(c, '{') != NULL) {
+        return asm_constraint_brace_reg(c, 0);
     }
     if (cc_asm_constraint_has(c, 'a')) {
         return "%eax";
@@ -2814,6 +2847,11 @@ static const struct {
  *
  * @return 0..15, or -1 for no general register
  */
+/** General register @p r's name: its 64-bit one with @p is_64bit, else its 32-bit one. */
+static const char *x86_gpr_name(int r, int is_64bit) {
+    return is_64bit ? x86_gprs[r].n64 : x86_gprs[r].n32;
+}
+
 static int x86_gpr_index(const char *name) {
     static const char *const high8[4] = {"ah", "ch", "dh", "bh"};
     size_t i;

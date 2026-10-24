@@ -36,6 +36,9 @@ typedef struct {
     /** a `cleanup(fn)` variable's declaration (its attr_cleanup names fn), called with its address as the
      *  variable goes out of scope; NULL for none */
     const cc_stmt_t *cleanup_decl;
+    /** a local register variable's register (`register T x asm("rax")`), without %, its declaration's; NULL for
+     *  none.  Only an asm operand naming it is bound to the register, as gcc has it (asm_register_constraint()) */
+    const char *asm_register;
 } var_entry_t;
 
 /** A C label of the function being lowered, and the IR label it is. */

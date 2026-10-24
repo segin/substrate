@@ -1627,6 +1627,7 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
     (*vars)[*var_count].ctype = ctype;
     (*vars)[*var_count].align = 0;
     (*vars)[*var_count].cleanup_decl = NULL;
+    (*vars)[*var_count].asm_register = NULL;
     (*var_count)++;
     return 0;
 }
@@ -10280,6 +10281,60 @@ static int asm_inout_temp(cc_ssa_function_t *sf, const cc_asm_operand_t *op, int
 }
 
 /**
+ * The constraint asm operand @p op is given: its own, or, when its expression names a local register
+ * variable and the constraint lets it be in a register, that register -- `a` `b` `c` `d` `S` `D` for those that
+ * have a letter, `{name}` for another -- after the constraint's `=` `+` `&` `%`.  Linux's put_user() passes the
+ * value in `register __typeof__(*(ptr)) __val_pu asm("%rax")` as an "r" operand of a call of __put_user_8,
+ * which takes it in %rax: the operand was put in any register, and the value written was another.
+ *
+ * @return the constraint (owned), or NULL when out of memory
+ */
+static char *asm_register_constraint(var_entry_t *vars, size_t var_count, int depth, const cc_asm_operand_t *op) {
+    static const struct {
+        const char *names[4]; /* the register at each width */
+        char letter;
+    } letters[] = {
+        {{"rax", "eax", "ax", "al"}, 'a'},  {{"rbx", "ebx", "bx", "bl"}, 'b'},  {{"rcx", "ecx", "cx", "cl"}, 'c'},
+        {{"rdx", "edx", "dx", "dl"}, 'd'},  {{"rsi", "esi", "si", "sil"}, 'S'}, {{"rdi", "edi", "di", "dil"}, 'D'},
+    };
+    const char *c = op->constraint != NULL ? op->constraint : "";
+    const char *reg;
+    char buf[64];
+    size_t n = 0;
+    size_t k;
+    size_t w;
+    int idx;
+
+    idx = op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL
+              ? var_find_visible(vars, var_count, op->expr->ident, depth)
+              : -1;
+    reg = idx >= 0 ? vars[idx].asm_register : NULL;
+    if (reg == NULL || strpbrk(c, "rqQRg") == NULL) {
+        return cc_strdup(c);
+    }
+    if (reg[0] == '%') {
+        reg++;
+    }
+    while (c[n] == '=' || c[n] == '+' || c[n] == '&' || c[n] == '%') {
+        n++;
+    }
+    if (n + strlen(reg) + 3 > sizeof(buf)) {
+        return cc_strdup(c);
+    }
+    memcpy(buf, c, n);
+    for (k = 0; k < sizeof(letters) / sizeof(letters[0]); ++k) {
+        for (w = 0; w < 4; ++w) {
+            if (strcmp(reg, letters[k].names[w]) == 0) {
+                buf[n] = letters[k].letter;
+                buf[n + 1] = '\0';
+                return cc_strdup(buf);
+            }
+        }
+    }
+    snprintf(buf + n, sizeof(buf) - n, "{%s}", reg);
+    return cc_strdup(buf);
+}
+/**
  * Whether asm memory input @p e names an object that must be given to the asm as itself, by its address,
  * rather than as a copy of its value: one reached through a pointer (`*p`, `p[i]`, `p->m`), or a block-scope
  * static, or a member of one of those.
@@ -10549,7 +10604,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             return -1;
         }
         in.asm_out_values[i4] = out_v;
-        in.asm_out_constraints[i4] = cc_strdup(op->constraint != NULL ? op->constraint : "");
+        in.asm_out_constraints[i4] = asm_register_constraint(*vars, *var_count, depth, op);
         if (op->name != NULL) {
             in.asm_out_names[i4] = cc_strdup(op->name);
         }
@@ -10611,7 +10666,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             in_sz = 255;
         }
         in.asm_in_sizes[i4] = (unsigned char)in_sz;
-        in.asm_in_constraints[i4] = cc_strdup(op->constraint != NULL ? op->constraint : "");
+        in.asm_in_constraints[i4] = asm_register_constraint(*vars, *var_count, depth, op);
         if (op->name != NULL) {
             in.asm_in_names[i4] = cc_strdup(op->name);
         }
@@ -11585,6 +11640,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             (*vars)[*var_count - 1].name != NULL && s->decl_name != NULL &&
             strcmp((*vars)[*var_count - 1].name, s->decl_name) == 0) {
             (*vars)[*var_count - 1].cleanup_decl = s;
+        }
+        /* a local register variable: an asm operand naming it is in that register */
+        if (s->asm_register != NULL && *var_count > before && !(*vars)[*var_count - 1].is_static_storage &&
+            (*vars)[*var_count - 1].name != NULL && s->decl_name != NULL &&
+            strcmp((*vars)[*var_count - 1].name, s->decl_name) == 0) {
+            (*vars)[*var_count - 1].asm_register = s->asm_register;
         }
         return 0;
     }
