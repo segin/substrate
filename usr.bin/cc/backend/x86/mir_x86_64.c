@@ -286,7 +286,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             XS_NOPE(s);
         }
     }
-    total = (long)align_up_size(stack_bytes, 16);
+    total = (long)align_up_size(stack_bytes, (size_t)s->t->stack_boundary);
     if (total > 0) {
         xop_t k = xop_imm(-total, 8);
 
@@ -956,7 +956,12 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
     t.saved = x64_saved;
     t.nsaved = (int)(sizeof(x64_saved) / sizeof(x64_saved[0]));
     t.fp_residue = 0; /* %rbp is on a 16-byte boundary */
-    t.stack_boundary = 16;
+    {
+        /* -mpreferred-stack-boundary=3 (Linux's): 8 bytes; the psABI's 16 by default */
+        int b = cc_options_current()->i386_stack_boundary;
+
+        t.stack_boundary = b >= 16 || b == 0 ? 16 : 8;
+    }
     t.sym_imm = 0;
     t.extends_params = 1;
     t.sse_fp = 1;

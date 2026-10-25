@@ -456,6 +456,11 @@ static void print_op(FILE *fp, const xfunc_t *xf, const xop_t *o, int word) {
         print_sym_disp(fp, o->sym, o->disp);
         break;
     case XO_MEM:
+        if (o->base == XR_FRAME && xf->obj[o->obj].sp_based) {
+            /* off the realigned stack pointer, and what has been pushed since */
+            fprintf(fp, "%lld(%s)", o->disp + xf->obj[o->obj].off + xf->sp_depth, word == 8 ? "%rsp" : "%esp");
+            break;
+        }
         if (o->base == XR_FRAME && xf->fp_omit) {
             /* off the stack pointer: from where the frame pointer would be, and what has been pushed since */
             fprintf(fp, "%lld(%s)", o->disp + xf->obj[o->obj].off + xf->fp_bias + xf->sp_depth,

@@ -207,6 +207,8 @@ typedef struct {
     int align;
     long off;           /**< from the frame pointer, once laid out (XF_FIXED: from the start) */
     long uses;          /**< the memory operands that reach it, for placing the busiest nearest */
+    unsigned char sp_based; /**< off is from the stack pointer as the prologue realigned it, not the frame pointer:
+                                 a 16-byte object under a smaller stack boundary (layout_frame()) */
 } xobj_t;
 
 /** What the allocator knows of a virtual register beyond its instructions. */
@@ -240,6 +242,7 @@ typedef struct {
     long fp_bias;  /**< (printing, fp_omit) where the frame pointer would be, above the stack pointer after the
                         prologue: frame objects' offsets are from there */
     long sp_depth; /**< (printing, fp_omit) the bytes pushed since the prologue, by the instructions printed so far */
+    int realign;   /**< the prologue aligns the stack pointer to 16 bytes for the frame's sp_based objects */
 } xfunc_t;
 
 /** What the allocator needs of a target. */

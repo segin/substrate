@@ -228,9 +228,13 @@ A 64-bit program is linked as a position-independent executable; a
 32-bit one is not, as the i386 code generator writes position-dependent
 code.
 .It Fl mpreferred-stack-boundary Ns = Ns Ar n
-i386: keep the stack aligned to 2^n bytes at a call, n from 2 to 12,
-rather than the psABI's 16; with 2 or 3 a function's frame is not padded
-for it, nor a call's arguments.
+Keep the stack aligned to 2^n bytes at a call, n from 2 to 12, rather
+than the psABI's 16; with 2 or 3 a function's frame is not padded for
+it, nor a call's arguments.
+On x86-64, where Linux builds with 3, the stack is then 8-byte aligned:
+a function with an object of 16-byte alignment in its frame keeps a
+frame pointer and aligns the stack pointer to 16 bytes itself, as gcc
+does.
 .It Fl msse , Fl mno-sse
 On i386, whether SSE instructions may be used.
 On x86-64,

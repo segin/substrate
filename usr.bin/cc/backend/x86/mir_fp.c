@@ -67,7 +67,7 @@ xop_t xs_fp_home(xsel_t *s, int v) {
 /** Scratch memory @p bytes bytes long at the start of the function's 16-byte scratch object (made the first time). */
 static xop_t scratch(xsel_t *s, int bytes) {
     if (s->fscratch < 0) {
-        s->fscratch = xf_new_obj(&s->xf, XF_LOCAL, 16, 16, 0);
+        s->fscratch = xf_new_obj(&s->xf, XF_LOCAL, 16, 8, 0);
     }
     return xop_frame(s->fscratch, 0, bytes);
 }
@@ -75,7 +75,7 @@ static xop_t scratch(xsel_t *s, int bytes) {
 /** The second scratch object, for the x87 control word and its constants (16 bytes). */
 static xop_t scratch_cw(xsel_t *s) {
     if (s->fcw < 0) {
-        s->fcw = xf_new_obj(&s->xf, XF_LOCAL, 16, 16, 0);
+        s->fcw = xf_new_obj(&s->xf, XF_LOCAL, 16, 8, 0);
     }
     return xop_frame(s->fcw, 0, 2);
 }

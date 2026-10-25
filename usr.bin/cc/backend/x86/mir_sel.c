@@ -3707,6 +3707,19 @@ static void peephole(xfunc_t *xf, int word, int labels_taken) {
     xf->nins = j;
 }
 
+/** Whether @p xf has a frame object of 16-byte alignment, which a stack boundary below 16 leaves to the prologue. */
+static int needs_realign(const xfunc_t *xf) {
+    int i;
+
+    for (i = 0; i < xf->nobj; ++i) {
+        if (xf->obj[i].kind != XF_FIXED && xf->obj[i].align >= 16 &&
+            (xf->obj[i].uses > 0 || xf->obj[i].kind == XF_LOCAL)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /**
  * Lay out the frame: below the saved registers (@p saved bytes), each object not at a fixed place, the busiest
  * first; a 16-byte one on a 16-byte boundary.  The bytes the prologue allocates go to *@p frame.
@@ -3723,8 +3736,9 @@ static int layout_frame(const xsel_t *s, xfunc_t *xf, int saved, int *frame) {
         return -1;
     }
     for (i = 0; i < xf->nobj; ++i) {
-        if (xf->obj[i].kind != XF_FIXED && (xf->obj[i].uses > 0 || xf->obj[i].kind == XF_LOCAL)) {
-            order[n++] = i;
+        if (xf->obj[i].kind != XF_FIXED && (xf->obj[i].uses > 0 || xf->obj[i].kind == XF_LOCAL) &&
+            !(s->t->stack_boundary < 16 && xf->obj[i].align >= 16)) {
+            order[n++] = i; /* (16-byte ones under a smaller boundary placed apart, below) */
         }
     }
     /* busiest first, the big (16-byte aligned) ones last; insertion sort, the order otherwise kept */
@@ -3760,7 +3774,26 @@ static int layout_frame(const xsel_t *s, xfunc_t *xf, int saved, int *frame) {
     }
     free(order);
     bytes = -cur - saved;
-    if (s->t->stack_boundary >= 16) {
+    if (s->t->stack_boundary < 16 && needs_realign(xf)) {
+        /*
+         * a 16-byte object under a smaller stack boundary: below the rest, off the stack pointer, which the
+         * prologue aligns to 16 bytes -- the 8 bytes more that can take kept from the objects above
+         */
+        long up = 0;
+
+        for (i = 0; i < xf->nobj; ++i) {
+            xobj_t *o = &xf->obj[i];
+
+            if (o->kind != XF_FIXED && o->align >= 16 && (o->uses > 0 || o->kind == XF_LOCAL)) {
+                up = (long)align_up_size((size_t)up, 16);
+                o->off = up;
+                o->sp_based = 1;
+                up += o->size;
+            }
+        }
+        xf->realign = 1;
+        bytes = (long)align_up_size((size_t)bytes, 8) + (long)align_up_size((size_t)up, 8) + 8;
+    } else if (s->t->stack_boundary >= 16) {
         /* the body's stack pointer on a 16-byte boundary: saved + frame is fp_residue past one */
         while (((saved + bytes) % 16) != residue) {
             bytes += 4;
@@ -4007,6 +4040,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     if (frame > 0) {
         fprintf(fp, "\tsub%c $%d, %s\n", sfx, frame, xr_name(XR_SP, w));
     }
+    if (s->xf.realign) {
+        /* (the frame's 16-byte objects are off the stack pointer, aligned here; the epilogue makes it from %rbp) */
+        fprintf(fp, "\tand%c $-16, %s\n", sfx, xr_name(XR_SP, w));
+    }
     /* frame objects off the stack pointer: where the frame pointer would be is this far above it */
     s->xf.fp_omit = s->fpo;
     s->xf.fp_bias = s->fpo ? (long)(nsaved - 1) * w + frame : 0;
@@ -4137,6 +4174,10 @@ static int fpo_ok(xsel_t *s) {
     const cc_ssa_function_t *f = s->f;
     size_t j;
     int i;
+
+    if (s->t->stack_boundary < 16 && needs_realign(&s->xf)) {
+        return 0; /* (it realigns the stack pointer: the frame pointer keeps where things were) */
+    }
 
     if (s->has_dynalloc || s->has_goto || f->is_variadic) {
         return 0;
