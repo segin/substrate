@@ -441,6 +441,12 @@ static void print_op(FILE *fp, const xfunc_t *xf, const xop_t *o, int word) {
         print_sym_disp(fp, o->sym, o->disp);
         break;
     case XO_MEM:
+        if (o->base == XR_FRAME && xf->fp_omit) {
+            /* off the stack pointer: from where the frame pointer would be, and what has been pushed since */
+            fprintf(fp, "%lld(%s)", o->disp + xf->obj[o->obj].off + xf->fp_bias + xf->sp_depth,
+                    word == 8 ? "%rsp" : "%esp");
+            break;
+        }
         if (o->base == XR_FRAME) {
             fprintf(fp, "%lld(%s)", o->disp + xf->obj[o->obj].off, bp);
             break;
@@ -485,9 +491,14 @@ static const char *ext_mnemonic(int sign, int from, int to) {
     return to == 8 ? "movzwq" : "movzwl";
 }
 
-/** The bytes from the frame pointer of frame operand @p o. */
+/** The bytes of frame operand @p o from the frame pointer -- or the stack pointer, with no frame pointer. */
 static long frame_off(const xfunc_t *xf, const xop_t *o) {
-    return (long)o->disp + xf->obj[o->obj].off;
+    return (long)o->disp + xf->obj[o->obj].off + (xf->fp_omit ? xf->fp_bias + xf->sp_depth : 0);
+}
+
+/** The register frame_off() is from. */
+static const char *frame_reg(const xfunc_t *xf, int word) {
+    return xf->fp_omit ? (word == 8 ? "%rsp" : "%esp") : (word == 8 ? "%rbp" : "%ebp");
 }
 
 /**
@@ -641,7 +652,7 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
     }
     case XI_FTOI: {
         /* truncating, whatever the rounding mode: the control word's RC set to 11 around the store */
-        const char *bp = word == 8 ? "%rbp" : "%ebp";
+        const char *bp = frame_reg(xf, word);
         long cw = frame_off(xf, &in->o[1]);
 
         fprintf(fp, "\tfnstcw %ld(%s)\n\tmovw %ld(%s), %%ax\n\torw $0x0c00, %%ax\n", cw, bp, cw, bp);

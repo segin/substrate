@@ -262,6 +262,16 @@ emits go to
 loaded with the code, as by default, or only to
 .Li .debug_frame ,
 for a debugger.
+.It Fl fomit-frame-pointer , Fl fno-omit-frame-pointer
+Whether a function addresses its frame off the stack pointer and has
+.Li %ebp
+.Pq Li %rbp
+to allocate, as Linux builds with, or keeps a frame pointer, as by default.
+A function that takes its frame's address, moves the stack pointer itself
+.Pq Fn alloca , a variable-length array ,
+takes variadic arguments, or has an inline asm whose operand is a memory slot
+or an asm goto keeps one, and so does every function under
+.Fl g .
 .It Fl Wall , Fl Werror
 Warning controls.
 .It Fl pedantic , Fl pedantic-errors

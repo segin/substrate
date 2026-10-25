@@ -45,6 +45,8 @@ typedef struct {
     int unwind_tables;       /**< -f[no-]asynchronous-unwind-tables, -f[no-]unwind-tables: frame descriptions in .eh_frame (the default), else .debug_frame */
     int i386_stack_boundary; /**< -mpreferred-stack-boundary=N: the stack's alignment at a call, 2^N bytes; 0 for the psABI's 16 */
     int cmodel_kernel;       /**< -mcmodel=kernel (x86-64): the code and its data in the top 2 GiB, linked with no GOT */
+    int omit_frame_pointer;  /**< -fomit-frame-pointer: a function the frame pointer is not needed in addresses its
+                                  frame off the stack pointer and has %ebp (%rbp) to allocate */
     int no_sse;              /**< -mno-sse, the last of it and -msse: no SSE register is touched where none is used */
 } cc_options_t;
 

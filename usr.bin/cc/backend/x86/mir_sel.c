@@ -2841,16 +2841,28 @@ static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame,
     char sfx = w == 8 ? 'q' : 'l';
     const char *bp = w == 8 ? "%rbp" : "%ebp";
     const char *sp = w == 8 ? "%rsp" : "%esp";
+    const int *sv = s->fpo ? s->fp_saved : t->saved;
+    int nsv = s->fpo ? s->fp_nsaved : t->nsaved;
     int nsaved = 0;
     int r;
 
-    for (r = 0; r < t->nsaved; ++r) {
-        nsaved += (saved & XR_BIT(t->saved[r])) != 0;
+    for (r = 0; r < nsv; ++r) {
+        nsaved += (saved & XR_BIT(sv[r])) != 0;
     }
     if (emit_debug) {
         fputs("\t.cfi_remember_state\n", fp);
     }
-    if (nsaved == 0) {
+    if (s->fpo) {
+        /* no frame pointer: the frame given back, the saved registers popped */
+        if (frame > 0) {
+            fprintf(fp, "\tadd%c $%d, %s\n", sfx, frame, sp);
+        }
+        for (r = nsv - 1; r >= 0; --r) {
+            if ((saved & XR_BIT(sv[r])) != 0) {
+                fprintf(fp, "\tpop%c %s\n", sfx, xr_name(sv[r], w));
+            }
+        }
+    } else if (nsaved == 0) {
         if (frame > 0 || reset) {
             fputs("\tleave\n", fp);
         } else {
@@ -2860,9 +2872,9 @@ static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame,
         if (frame > 0 || reset) {
             fprintf(fp, "\tlea%c %d(%s), %s\n", sfx, -w * nsaved, bp, sp);
         }
-        for (r = t->nsaved - 1; r >= 0; --r) {
-            if ((saved & XR_BIT(t->saved[r])) != 0) {
-                fprintf(fp, "\tpop%c %s\n", sfx, xr_name(t->saved[r], w));
+        for (r = nsv - 1; r >= 0; --r) {
+            if ((saved & XR_BIT(sv[r])) != 0) {
+                fprintf(fp, "\tpop%c %s\n", sfx, xr_name(sv[r], w));
             }
         }
         fprintf(fp, "\tpop%c %s\n", sfx, bp);
@@ -2931,6 +2943,8 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     int w = t->word;
     char sfx = w == 8 ? 'q' : 'l';
     const char *func_sec = (f->attr_section != NULL && f->attr_section[0] != '\0') ? f->attr_section : ".text";
+    const int *sv = s->fpo ? s->fp_saved : t->saved; /* the callee-saved registers, in the order pushed */
+    int nsv = s->fpo ? s->fp_nsaved : t->nsaved;
     unsigned callee = 0;
     unsigned saved = 0;
     int nsaved = 0;
@@ -2942,8 +2956,8 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     int i;
     int r;
 
-    for (r = 0; r < t->nsaved; ++r) {
-        callee |= XR_BIT(t->saved[r]);
+    for (r = 0; r < nsv; ++r) {
+        callee |= XR_BIT(sv[r]);
     }
     for (i = 0; i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
@@ -2971,10 +2985,11 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         /* the asm saves what it uses, and its jump may skip the restore */
         saved = callee;
     }
-    for (r = 0; r < t->nsaved; ++r) {
-        nsaved += (saved & XR_BIT(t->saved[r])) != 0;
+    for (r = 0; r < nsv; ++r) {
+        nsaved += (saved & XR_BIT(sv[r])) != 0;
     }
-    if (layout_frame(s, &s->xf, w * nsaved, &frame) != 0) {
+    /* (with no frame pointer, the first register saved where it would have been) */
+    if (layout_frame(s, &s->xf, w * nsaved - (s->fpo ? w : 0), &frame) != 0) {
         s->xf.oom = 1;
         return -1;
     }
@@ -2999,7 +3014,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         fprintf(fp, "\t.cfi_startproc\n\t.cfi_def_cfa_offset %d\n\t.cfi_offset %s, -%d\n", 2 * w,
                 xr_name(XR_BP, w), 2 * w);
     }
-    fprintf(fp, "\tpush%c %s\n\tmov%c %s, %s\n", sfx, xr_name(XR_BP, w), sfx, xr_name(XR_SP, w), xr_name(XR_BP, w));
+    if (!s->fpo) {
+        fprintf(fp, "\tpush%c %s\n\tmov%c %s, %s\n", sfx, xr_name(XR_BP, w), sfx, xr_name(XR_SP, w),
+                xr_name(XR_BP, w));
+    }
     if (emit_debug) {
         fprintf(fp, "\t.cfi_def_cfa_register %s\n", xr_name(XR_BP, w));
         if (src_path != NULL) {
@@ -3009,12 +3027,12 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     {
         int off = -2 * w;
 
-        for (r = 0; r < t->nsaved; ++r) {
-            if ((saved & XR_BIT(t->saved[r])) != 0) {
+        for (r = 0; r < nsv; ++r) {
+            if ((saved & XR_BIT(sv[r])) != 0) {
                 off -= w;
-                fprintf(fp, "\tpush%c %s\n", sfx, xr_name(t->saved[r], w));
+                fprintf(fp, "\tpush%c %s\n", sfx, xr_name(sv[r], w));
                 if (emit_debug) {
-                    fprintf(fp, "\t.cfi_offset %s, %d\n", xr_name(t->saved[r], w), off);
+                    fprintf(fp, "\t.cfi_offset %s, %d\n", xr_name(sv[r], w), off);
                 }
             }
         }
@@ -3022,6 +3040,10 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     if (frame > 0) {
         fprintf(fp, "\tsub%c $%d, %s\n", sfx, frame, xr_name(XR_SP, w));
     }
+    /* frame objects off the stack pointer: where the frame pointer would be is this far above it */
+    s->xf.fp_omit = s->fpo;
+    s->xf.fp_bias = s->fpo ? (long)(nsaved - 1) * w + frame : 0;
+    s->xf.sp_depth = 0;
     /*
      * one epilogue, at the last return, the others jumping to it, as gcc keeps it -- when it is more than the
      * two bytes of `leave; ret` a jump takes as well
@@ -3041,6 +3063,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         if (in->op == XI_LABEL) {
             emit_local_label(fp, f->name, in->label);
             fputs(":\n", fp);
+            s->xf.sp_depth = 0; /* (a call's pushes never span a label) */
         } else if (in->op == XI_RET && share && i != last_ret) {
             fprintf(fp, "\tjmp .L%s_epilogue\n", f->name);
         } else if (in->op == XI_RET) {
@@ -3057,6 +3080,14 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         } else {
             xi_print(fp, &s->xf, in, w, f->name);
         }
+        /* what moved the stack pointer: a push, an adjustment, the arguments a callee pops */
+        if (in->op == XI_PUSH) {
+            s->xf.sp_depth += w;
+        } else if (in->op == XI_ADDSP) {
+            s->xf.sp_depth -= (long)in->o[0].disp;
+        } else if (in->op == XI_CALL) {
+            s->xf.sp_depth -= in->aux;
+        }
     }
     if (emit_debug) {
         fputs("\t.cfi_endproc\n", fp);
@@ -3069,6 +3100,64 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         emit_lifecycle_attr(fp, ".fini_array", "fini_array", f->name, w == 8);
     }
     return 0;
+}
+
+/**
+ * Whether the function @p s selected may do without a frame pointer: nothing reads the frame's address or the frame
+ * pointer itself (__builtin_frame_address, a register variable of %ebp, va_start's area), nothing moves the stack
+ * pointer but calls (alloca, a variable-length array), and each inline asm has its operands in registers where
+ * the plan put them (an asm goto, one bound through slots, or a memory operand in a slot is printed off the frame
+ * pointer).
+ */
+static int fpo_ok(xsel_t *s) {
+    const cc_ssa_function_t *f = s->f;
+    size_t j;
+    int i;
+
+    if (s->has_dynalloc || s->has_goto || f->is_variadic) {
+        return 0;
+    }
+    for (j = 0; j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+
+        if (in->op == CC_SSA_FRAMEADDR || in->op == CC_SSA_REGREAD || in->op == CC_SSA_VA_START) {
+            return 0;
+        }
+        if (in->op == CC_SSA_ASM) {
+            x86_asm_plan_t plan;
+            int rc = x86_asm_plan(f, in, j, s->word == 8, &plan);
+            int ok = rc == 0 && asm_bindable(s, in, &plan);
+            size_t k;
+
+            /* (and none in a slot: emit_inline_asm() writes a slot off the frame pointer) */
+            for (k = 0; ok && k < plan.n; ++k) {
+                ok = plan.kind[k] != X86_ASM_SLOT;
+            }
+            if (rc == 0) {
+                x86_asm_plan_free(&plan);
+            }
+            if (!ok) {
+                return 0;
+            }
+        }
+    }
+    for (i = 0; i < s->xf.nins; ++i) {
+        const xinst_t *in = &s->xf.ins[i];
+        int k;
+
+        if (((in->imp_use | in->imp_def | in->clobber) & XR_BIT(XR_BP)) != 0) {
+            return 0;
+        }
+        for (k = 0; k < in->nops; ++k) {
+            const xop_t *o = &in->o[k];
+
+            if ((o->kind == XO_REG && o->reg == XR_BP) ||
+                (o->kind == XO_MEM && (o->base == XR_BP || o->index == XR_BP))) {
+                return 0;
+            }
+        }
+    }
+    return 1;
 }
 
 int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
@@ -3112,7 +3201,30 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
         rc = s.xf.oom ? -1 : 1;
     }
     if (rc == 0) {
-        rc = x86_mir_allocate(&s.xf, t->alloc);
+        if (cc_options_current()->omit_frame_pointer && !emit_debug && fpo_ok(&s)) {
+            /* the frame pointer's register allocated too, last, saved by the prologue as the others are */
+            xtarget_t ta = *t->alloc;
+            int order[XR_NPHYS + 1];
+            int k;
+
+            for (k = 0; k < ta.norder && k < XR_NPHYS; ++k) {
+                order[k] = ta.order[k];
+            }
+            order[k++] = XR_BP;
+            ta.order = order;
+            ta.norder = k;
+            ta.alloc_mask |= XR_BIT(XR_BP);
+            ta.callee_saved |= XR_BIT(XR_BP);
+            s.fpo = 1;
+            for (k = 0; k < t->nsaved; ++k) {
+                s.fp_saved[k] = t->saved[k];
+            }
+            s.fp_saved[k++] = XR_BP;
+            s.fp_nsaved = k;
+            rc = x86_mir_allocate(&s.xf, &ta);
+        } else {
+            rc = x86_mir_allocate(&s.xf, t->alloc);
+        }
     }
     if (stats != NULL && stats[0] == '1') {
         if (rc == 0) {

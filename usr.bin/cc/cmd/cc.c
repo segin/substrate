@@ -96,6 +96,7 @@ typedef struct {
   int no_unwind_tables; /* -fno-asynchronous-unwind-tables, -fno-unwind-tables */
   int i386_stack_boundary; /* -mpreferred-stack-boundary=N: 2^N, or 0 */
   int cmodel_kernel; /* -mcmodel=kernel */
+  int omit_frame_pointer; /* -fomit-frame-pointer, -fno-omit-frame-pointer */
   int no_sse;        /* -mno-sse, the last of it and -msse */
 
   const char *std;
@@ -188,6 +189,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->unwind_tables = !o->no_unwind_tables;
   out->i386_stack_boundary = o->i386_stack_boundary;
   out->cmodel_kernel = o->cmodel_kernel;
+  out->omit_frame_pointer = o->omit_frame_pointer;
   out->no_sse = o->no_sse;
 }
 
@@ -1368,6 +1370,8 @@ static const driver_opt_t options[] = {
     /* i386: structures of 1, 2, 4 or 8 bytes come back in %eax(:%edx), one float or double in %st0 (gcc) */
     {"-freg-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 1},
     {"-fpcc-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 0},
+    {"-fomit-frame-pointer", OPT_FLAG, FWD_C, opt_int, F(omit_frame_pointer), 1},
+    {"-fno-omit-frame-pointer", OPT_FLAG, FWD_C, opt_int, F(omit_frame_pointer), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
     /* an executable's position-independent code: its own symbols bind within it (Linux's boot/compressed) */
     {"-fPIE -fpie", OPT_FLAG, FWD_C, opt_int, F(fpie), 1},

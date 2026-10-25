@@ -228,6 +228,10 @@ typedef struct {
     int objcap;
     int nlabels;   /**< labels are numbered 0..nlabels-1 */
     int oom;       /**< an allocation failed: the function is given up */
+    int fp_omit;   /**< (printing) the frame is addressed off the stack pointer: no frame pointer */
+    long fp_bias;  /**< (printing, fp_omit) where the frame pointer would be, above the stack pointer after the
+                        prologue: frame objects' offsets are from there */
+    long sp_depth; /**< (printing, fp_omit) the bytes pushed since the prologue, by the instructions printed so far */
 } xfunc_t;
 
 /** What the allocator needs of a target. */
@@ -383,6 +387,9 @@ struct xsel {
     int nasm_slot;
     int has_goto;             /**< the function has an asm goto */
     int has_dynalloc;         /**< it moves the stack pointer itself (alloca, a variable-length array) */
+    int fpo;                  /**< -fomit-frame-pointer taken: no frame pointer, %ebp (%rbp) allocated (fpo_ok()) */
+    int fp_saved[XR_NPHYS];   /**< (fpo) the callee-saved registers the prologue pushes: the target's and %ebp */
+    int fp_nsaved;
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */
     int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
     int got;                  /**< i386 -fPIC: the register holding the GOT's address, from entry; or XR_NONE */

@@ -235,6 +235,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     long pos = 0;
     long cur;
     long pushed = 0;
+    long callee_pops = 0; /* the hidden pointer pushed, which the callee pops */
     unsigned rp_used = 0;
     long a;
     long *offs;
@@ -324,6 +325,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
 
             xs_emit(s, XI_LEA, 4, 2, &m, &t, NULL);
             xs_emit(s, XI_PUSH, 4, 1, &t, NULL, NULL);
+            callee_pops = 4;
         }
         cur = start < 0 ? 0 : start;
     }
@@ -406,6 +408,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     c.imp_use = rp_used;
     c.clobber = I386_CALLER_SAVED;
+    c.aux = (int)callee_pops; /* (what the stack pointer moves by at the call itself) */
     if (in_regs) {
         c.imp_def = XR_BIT(XR_AX) | XR_BIT(XR_DX);
     } else if (in->dst >= 0 && !agg && xs_fp_kind(s, in->dst) == XFP_NONE) {
