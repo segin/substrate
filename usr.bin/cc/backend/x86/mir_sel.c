@@ -542,6 +542,8 @@ static int cc_holds(xcc_t cc, long long x, long long y, int w) {
     }
 }
 
+static int cmp32(const xsel_t *s, const cc_ssa_instr_t *in);
+
 /**
  * Set the flags for compare @p in (lhs against rhs), its operands swapped when the left one is a constant;
  * the condition to test them by goes to *@p cc.  0, or 1 when both are constants and *@p known is the result.
@@ -550,6 +552,7 @@ static int compare(xsel_t *s, const cc_ssa_instr_t *in, xcc_t *cc, int *known) {
     xop_t a = xs_src_word(s, in->lhs, 0);
     xop_t b = xs_src_word(s, in->rhs, 0);
     int w = s->word;
+    int narrow = cmp32(s, in); /* of ints: their 32-bit registers, whatever their upper halves are */
 
     *cc = cmp_cc(in->cmp_kind, in->is_unsigned);
     if (a.kind == XO_IMM && b.kind == XO_IMM) {
@@ -565,6 +568,17 @@ static int compare(xsel_t *s, const cc_ssa_instr_t *in, xcc_t *cc, int *known) {
         a = b;
         b = t;
         *cc = xcc_swap(*cc);
+    }
+    if (narrow && b.kind == XO_IMM && (b.sym != NULL || b.disp != (long long)(int)b.disp)) {
+        narrow = 0;
+    }
+    if (narrow && a.kind == XO_IMM) {
+        a = xs_reg_word(s, in->lhs, 0);
+    }
+    if (narrow) {
+        w = 4;
+        a.size = 4;
+        b.size = 4;
     }
     if (b.kind == XO_IMM && b.sym == NULL && b.disp == 0 && a.kind == XO_REG) {
         /* against 0: test sets the flags every condition reads as cmp $0 would */
@@ -613,6 +627,168 @@ static int ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src) {
     }
     *src = d->lhs;
     return bytes;
+}
+
+/**
+ * Whether compare @p in reads its operands' low 32 bits alone: on x86-64, a compare of integers of no more than four
+ * bytes, made of their 32-bit registers, which holds whatever their upper halves hold.
+ */
+static int cmp32(const xsel_t *s, const cc_ssa_instr_t *in) {
+    const cc_ssa_function_t *f = s->f;
+
+    return s->word == 8 && in->op == CC_SSA_CMP && in->lhs >= 0 && in->rhs >= 0 &&
+           cc_ssa_value_class(f, in->lhs) == CC_VAL_I64 && cc_ssa_value_class(f, in->rhs) == CC_VAL_I64 &&
+           cc_ssa_value_size(f, in->lhs) <= 4 && cc_ssa_value_size(f, in->rhs) <= 4 && !s->addr_taken[in->lhs] &&
+           !s->addr_taken[in->rhs];
+}
+
+/** The mask extension @p in is -- an and with 0xff, 0xffff or (x86-64) 0xffffffff -- its byte count, its source *@p src. */
+static int mask_ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src) {
+    long long m = 0;
+    int other;
+    int bytes;
+
+    if (in->op != CC_SSA_AND || in->lhs < 0 || in->rhs < 0 || xs_is_pair(s, in->dst)) {
+        return 0;
+    }
+    other = xs_const_of(s, in->rhs, &m) ? in->lhs : xs_const_of(s, in->lhs, &m) ? in->rhs : -1;
+    bytes = m == 0xff ? 1 : m == 0xffff ? 2 : (s->word == 8 && m == 0xffffffffLL) ? 4 : 0;
+    if (other < 0 || bytes == 0 || xs_const_of(s, other, &m)) {
+        return 0;
+    }
+    *src = other;
+    return bytes;
+}
+
+typedef struct {
+    xsel_t *s;
+    int changed;
+} demand_ctx_t;
+
+/** Raise what is read of value @p v to @p bits. */
+static void demand(demand_ctx_t *c, int v, int bits) {
+    if (v >= 0 && v < c->s->f->value_count && bits > c->s->dbits[v]) {
+        c->s->dbits[v] = (unsigned char)bits;
+        c->changed = 1;
+    }
+}
+
+/** x86_for_each_use() callback: all of a value is read. */
+static void demand_all(int v, void *ctx) {
+    demand_ctx_t *c = (demand_ctx_t *)ctx;
+
+    demand(c, v, 8 * c->s->word);
+}
+
+/**
+ * Work out, for each IR value, the most low bits anything reads of it (dbits), back from its readers: the low bits
+ * of a sum, a difference, a product, a mask or a shift left by a constant are those of its operands', a copy reads
+ * what is read of it, a store what it stores, a 32-bit compare (cmp32()) 32, an extension at most its source's
+ * width, and anything else all of a value.  Then an extension whose result is read no further than its source's
+ * width -- an int extended to a long only for a 32-bit compare -- is a copy (ext_copy), as the bits it would set
+ * are never read.
+ */
+static int compute_demand(xsel_t *s) {
+    const cc_ssa_function_t *f = s->f;
+    int W = 8 * s->word;
+    demand_ctx_t c;
+    int pass;
+    size_t i;
+
+    s->dbits = (unsigned char *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), 1);
+    s->ext_copy = (unsigned char *)calloc(f->instr_count > 0 ? f->instr_count : 1, 1);
+    if (s->dbits == NULL || s->ext_copy == NULL) {
+        return -1;
+    }
+    c.s = s;
+    for (pass = 0; pass < 32; ++pass) {
+        c.changed = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            int d = in->dst;
+            int D = d >= 0 && d < f->value_count && in->op != CC_SSA_STORE ? s->dbits[d] : 0;
+            int narrow = d >= 0 && d < f->value_count && in->op != CC_SSA_STORE &&
+                         cc_ssa_value_class(f, d) == CC_VAL_I64 && !xs_is_pair(s, d) && !s->addr_taken[d];
+            int src;
+            int bytes;
+            long long k;
+
+            if (narrow && (bytes = ext_of(s, in, &src)) > 0) {
+                demand(&c, src, D < 8 * bytes ? D : 8 * bytes);
+                continue;
+            }
+            if (narrow && (bytes = mask_ext_of(s, in, &src)) > 0) {
+                demand(&c, src, D < 8 * bytes ? D : 8 * bytes);
+                continue;
+            }
+            switch (in->op) {
+            case CC_SSA_ADD:
+            case CC_SSA_SUB:
+            case CC_SSA_MUL:
+            case CC_SSA_AND:
+            case CC_SSA_OR:
+            case CC_SSA_XOR:
+                if (narrow) {
+                    demand(&c, in->lhs, D);
+                    demand(&c, in->rhs, D);
+                    continue;
+                }
+                break;
+            case CC_SSA_SHL:
+                if (narrow && (in->rhs < 0 || xs_const_of(s, in->rhs, &k))) {
+                    demand(&c, in->lhs, D);
+                    demand(&c, in->rhs, W);
+                    continue;
+                }
+                break;
+            case CC_SSA_MOV:
+                if (narrow) {
+                    demand(&c, in->lhs, D);
+                    continue;
+                }
+                break;
+            case CC_SSA_CMP:
+                if (cmp32(s, in)) {
+                    demand(&c, in->lhs, 32);
+                    demand(&c, in->rhs, 32);
+                    continue;
+                }
+                break;
+            case CC_SSA_STORE:
+                if (in->rhs >= 0 && in->rhs < f->value_count && cc_ssa_value_class(f, in->rhs) == CC_VAL_I64 &&
+                    !xs_is_pair(s, in->rhs) && in->imm > 0 && in->imm < s->word) {
+                    demand(&c, in->rhs, 8 * (int)in->imm);
+                    demand(&c, in->lhs, W);
+                    continue;
+                }
+                break;
+            default:
+                break;
+            }
+            x86_for_each_use(f, in, demand_all, &c);
+        }
+        if (!c.changed) {
+            break;
+        }
+    }
+    if (c.changed) {
+        /* not settled: every extension stays */
+        return 0;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        int src;
+        int bytes = ext_of(s, in, &src);
+
+        if (bytes == 0) {
+            bytes = mask_ext_of(s, in, &src);
+        }
+        if (bytes > 0 && in->dst >= 0 && in->dst < f->value_count && !s->addr_taken[in->dst] &&
+            s->dbits[in->dst] <= 8 * bytes) {
+            s->ext_copy[i] = 1;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -749,6 +925,25 @@ static int compute_ext(xsel_t *s) {
             if ((in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) && in->rhs == d) {
                 continue; /* it writes the structure, not the value */
             }
+            if (s->ext_copy != NULL && s->ext_copy[i]) {
+                /* an extension made a copy: what its source is */
+                int from;
+
+                if (ext_of(s, in, &from) == 0) {
+                    (void)mask_ext_of(s, in, &from);
+                }
+                sb = s->sbits[from];
+                zb = s->zbits[from];
+                if (sb > s->sbits[d]) {
+                    s->sbits[d] = (unsigned char)sb;
+                    changed = 1;
+                }
+                if (zb > s->zbits[d]) {
+                    s->zbits[d] = (unsigned char)zb;
+                    changed = 1;
+                }
+                continue;
+            }
             switch (in->op) {
             case CC_SSA_CONST:
                 sb = const_sbits(in->imm, s->word);
@@ -869,6 +1064,11 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
         int src;
         int bytes = ext_of(s, in, &src);
 
+        if (bytes > 0 && s->ext_copy[in - s->f->instrs]) {
+            /* read no further than its source's bits: a copy */
+            xs_move_word_to(s, src, 0, &d);
+            return;
+        }
         if (bytes > 0) {
             sel_ext(s, in->dst, src, bytes, !in->is_unsigned);
             return;
@@ -914,6 +1114,10 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
         int bytes = m == 0xff ? 1 : m == 0xffff ? 2 : (w == 8 && m == 0xffffffffLL) ? 4 : 0;
 
         if (other >= 0 && bytes > 0 && !xs_const_of(s, other, &m)) {
+            if (s->ext_copy[in - s->f->instrs]) {
+                xs_move_word_to(s, other, 0, &d);
+                return;
+            }
             sel_ext(s, in->dst, other, bytes, 0);
             return;
         }
@@ -2255,7 +2459,7 @@ static int sel_init(xsel_t *s) {
             xs_emit(s, XI_MOV, s->word, 2, &z, &m, NULL);
         }
     }
-    if (compute_ext(s) != 0) {
+    if (compute_demand(s) != 0 || compute_ext(s) != 0) {
         return -1;
     }
     for (v = 0; v < f->value_count; ++v) {
@@ -2269,6 +2473,8 @@ static int sel_init(xsel_t *s) {
 
 static void sel_free(xsel_t *s) {
     free(s->sbits);
+    free(s->dbits);
+    free(s->ext_copy);
     free(s->zbits);
     free(s->bind);
     free(s->asm_slot);

@@ -385,6 +385,8 @@ struct xsel {
     int fcw;                  /**< and one for the x87 control word and constants, or -1 */
     unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
     unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
+    unsigned char *dbits;     /**< per IR value: the most low bits anything reads of it (compute_demand()) */
+    unsigned char *ext_copy;  /**< per IR instruction: an extension whose readers need no more than its source's bits, a copy */
 };
 
 /** Give up on the function in a selection hook: something it does is not handled there. */
