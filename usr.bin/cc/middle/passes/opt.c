@@ -854,6 +854,23 @@ static int merge_straight(cc_ssa_function_t *f) {
 }
 
 /**
+ * Whether labels @p a and @p b of @p f, at instructions @p at, each begin a block that is only a return, and the
+ * same one: a branch to either is the same.
+ */
+static int same_return(const cc_ssa_function_t *f, const long *at, int a, int b) {
+    const cc_ssa_instr_t *x;
+    const cc_ssa_instr_t *y;
+
+    if (a < 0 || b < 0 || a >= f->label_count || b >= f->label_count || at[a] < 0 || at[b] < 0 ||
+        (size_t)at[a] + 1 >= f->instr_count || (size_t)at[b] + 1 >= f->instr_count) {
+        return 0;
+    }
+    x = &f->instrs[at[a] + 1];
+    y = &f->instrs[at[b] + 1];
+    return x->op == CC_SSA_RET && y->op == CC_SSA_RET && x->lhs == y->lhs && x->rhs == y->rhs && x->imm == y->imm;
+}
+
+/**
  * Jump threading.  A block that only tests a variable (block_test_of()) is where cc's && and || meet: each way
  * in sets the variable, to 0 or 1 or to a compare.  A way in that sets it to a constant just before goes
  * where the test sends that constant; an unconditional jump in after `v = s` branches on s itself.  The test's
@@ -952,6 +969,15 @@ static int thread_jumps(cc_ssa_function_t *f) {
                 changed = 1;
                 break;
             }
+        }
+        if (in->op == CC_SSA_BR_COND &&
+            (in->true_label == in->false_label || same_return(f, at, in->true_label, in->false_label))) {
+            /* both ways one place, or to a return of one value (the arms between were empty): a jump, the
+             * condition left for dce */
+            in->op = CC_SSA_BR;
+            in->label = in->true_label;
+            in->lhs = -1;
+            changed = 1;
         }
     }
     free(at);
