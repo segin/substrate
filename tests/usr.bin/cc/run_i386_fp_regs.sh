@@ -1,7 +1,8 @@
 #!/bin/sh
 # i386 floating point goes through the register allocator: every floating
 # value in a frame slot of its own, each operation on the x87, so that the
-# integers around it are given registers.  Floating parameters and
+# integers around it are given registers -- or under -mfpmath=sse floats
+# and doubles in %xmm0-7, which the allocator gives out as well.  Floating parameters and
 # arguments in their words on the stack -- a float's one in single
 # precision, a double's two, a long double's three -- results back in
 # %st0, one nothing takes popped; compares against NaN; conversions both
@@ -98,20 +99,32 @@ int main(void) {
     return 0;
 }
 EOF2
-gcc -m32 -O1 -o "$CC_TMP/fg" "$CC_TMP/f.c"
-want=$("$CC_TMP/fg")
-for o in O0 O2; do
-	CC_MIR_STATS=1 "$CC_BIN" -m32 -$o -o "$CC_TMP/fc" "$CC_TMP/f.c" 2>"$CC_TMP/stats"
-	if grep "^mir: .*not taken" "$CC_TMP/stats"; then
-		echo "run_i386_fp_regs: -$o: the above do not go through the allocator"
-		exit 1
-	fi
-	got=$("$CC_TMP/fc")
-	if [ "$got" != "$want" ]; then
-		echo "run_i386_fp_regs: -$o prints"
-		echo "$got"
-		echo "where gcc's prints"
-		echo "$want"
+sse="-march=pentium4 -msse2 -mfpmath=sse"
+for fpm in x87 sse; do
+	if [ $fpm = sse ]; then fl=$sse; else fl=""; fi
+	# shellcheck disable=SC2086
+	gcc -m32 $fl -O1 -o "$CC_TMP/fg" "$CC_TMP/f.c"
+	want=$("$CC_TMP/fg")
+	for o in O0 O2; do
+		# shellcheck disable=SC2086
+		CC_MIR_STATS=1 "$CC_BIN" -m32 $fl -$o -o "$CC_TMP/fc" "$CC_TMP/f.c" 2>"$CC_TMP/stats"
+		if grep "^mir: .*not taken" "$CC_TMP/stats"; then
+			echo "run_i386_fp_regs: $fpm -$o: the above do not go through the allocator"
+			exit 1
+		fi
+		got=$("$CC_TMP/fc")
+		if [ "$got" != "$want" ]; then
+			echo "run_i386_fp_regs: $fpm -$o prints"
+			echo "$got"
+			echo "where gcc's prints"
+			echo "$want"
+			exit 1
+		fi
+	done
+	# shellcheck disable=SC2086
+	"$CC_BIN" -m32 $fl -O2 -S -o "$CC_TMP/f.s" "$CC_TMP/f.c"
+	if [ $fpm = sse ] && ! grep -q 'mulsd.*%xmm' "$CC_TMP/f.s"; then
+		echo "run_i386_fp_regs: -mfpmath=sse computes no double in a vector register"
 		exit 1
 	fi
 done

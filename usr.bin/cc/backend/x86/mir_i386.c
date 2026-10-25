@@ -11,8 +11,9 @@
  *
  * Floating arguments are stored in their words on the stack -- a float's
  * one in single precision, a double's two, a long double's three -- and a
- * floating result comes back in %st0 (mir_fp.c holds every floating value
- * on the x87).
+ * floating result comes back in %st0.  mir_fp.c holds every floating
+ * value on the x87, but under -mfpmath=sse (or -msse2) floats and doubles
+ * in %xmm0-7, as i386.c computes them.
  *
  * Under -fPIC the GOT's address is made once at entry (XI_GOTBASE, a pc
  * thunk); a symbol is reached off it, @GOTOFF where it binds within the
@@ -29,13 +30,27 @@
 #include <string.h>
 
 /** The allocation order: the caller-saved registers first, which cost no save. */
-static const int i386_order[] = {XR_AX, XR_CX, XR_DX, XR_BX, XR_SI, XR_DI};
+static const int i386_order[] = {XR_AX,       XR_CX,       XR_DX,       XR_BX,       XR_SI,       XR_DI,       XR_XMM0,
+                                 XR_XMM0 + 1, XR_XMM0 + 2, XR_XMM0 + 3, XR_XMM0 + 4, XR_XMM0 + 5, XR_XMM0 + 6, XR_XMM0 + 7};
 
 /** The callee-saved registers, in the order the prologue pushes them. */
 static const int i386_saved[] = {XR_BX, XR_SI, XR_DI};
 
-/** The registers a call clobbers. */
-#define I386_CALLER_SAVED (XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX))
+/** The registers a call clobbers: three general ones, and every vector one. */
+#define I386_CALLER_SAVED (XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_XMM_MASK(8))
+
+/** The general registers the allocator gives out. */
+#define I386_GPRS (XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI))
+
+/**
+ * Whether doubles are SSE's, as i386.c chooses: under -mfpmath=sse, or with SSE2 and no -mfpmath=387; else the
+ * x87's.
+ */
+static int i386_sse_fp(void) {
+    const cc_options_t *o = cc_options_current();
+
+    return o->i386_fpmath == CC_FPMATH_SSE || (o->i386_fpmath != CC_FPMATH_387 && o->i386_sse2);
+}
 
 /** The regparm registers, in the order arguments take them. */
 static const int i386_rp_regs[3] = {XR_AX, XR_DX, XR_CX};
@@ -772,19 +787,27 @@ static int i386_sym_got(const xsel_t *s, const char *sym) {
 
 int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_function_t *f, size_t fn_index,
                            const char *src_path, int emit_debug, cc_diag_t *diag) {
-    static const xtarget_t alloc = {
-        XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI),
-        0,
-        XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI),
-        XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX),
-        i386_order,
-        (int)(sizeof(i386_order) / sizeof(i386_order[0])),
-        4};
+    /* the x87's floating code: general registers only; SSE's: %xmm0-7 as well */
+    static const xtarget_t alloc = {I386_GPRS,
+                                    0,
+                                    XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI),
+                                    XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX),
+                                    i386_order,
+                                    6,
+                                    4};
+    static const xtarget_t alloc_sse = {I386_GPRS | XR_XMM_MASK(8),
+                                        XR_XMM_MASK(8),
+                                        XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI),
+                                        XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX),
+                                        i386_order,
+                                        (int)(sizeof(i386_order) / sizeof(i386_order[0])),
+                                        4};
     xsel_target_t t;
 
     memset(&t, 0, sizeof(t));
     t.word = 4;
-    t.alloc = &alloc;
+    t.sse_fp = i386_sse_fp();
+    t.alloc = t.sse_fp ? &alloc_sse : &alloc;
     t.caller_saved = I386_CALLER_SAVED;
     t.saved = i386_saved;
     t.nsaved = (int)(sizeof(i386_saved) / sizeof(i386_saved[0]));
