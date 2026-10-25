@@ -110,11 +110,7 @@ static int single_const(const cc_ssa_function_t *f, const int *defs, const int *
     return 1;
 }
 
-/**
- * Call @p fn for each value @p in uses, with the role it has: 0 an operand, 1 the address of a load or store,
- * 2 the value a store writes.
- */
-static void for_each_use(const cc_ssa_instr_t *in, void (*fn)(void *ctx, int v, int role), void *ctx) {
+void cc_ssa_for_each_use(const cc_ssa_instr_t *in, void (*fn)(void *ctx, int v, int role), void *ctx) {
     size_t i;
 
     switch (in->op) {
@@ -198,7 +194,7 @@ static void addr_info_free(addr_info_t *a) {
     memset(a, 0, sizeof(*a));
 }
 
-/** for_each_use() callback: count a use. */
+/** cc_ssa_for_each_use() callback: count a use. */
 static void count_use(void *ctx, int v, int role) {
     addr_info_t *a = (addr_info_t *)ctx;
 
@@ -215,7 +211,7 @@ static void escape_value(addr_info_t *a, int v) {
     }
 }
 
-/** for_each_use() callback: an operand that is an address into a slot is an escape, unless a load's or store's. */
+/** cc_ssa_for_each_use() callback: an operand that is an address into a slot is an escape, unless a load's or store's. */
 static void note_use(void *ctx, int v, int role) {
     addr_info_t *a = (addr_info_t *)ctx;
 
@@ -272,7 +268,7 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
         return -1;
     }
     for (i = 0; i < f->instr_count; ++i) {
-        for_each_use(&f->instrs[i], count_use, a);
+        cc_ssa_for_each_use(&f->instrs[i], count_use, a);
     }
     for (v = 0; v < f->value_count; ++v) {
         a->slot[v] = -1;
@@ -324,7 +320,7 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
                 }
             }
         }
-        for_each_use(in, note_use, a);
+        cc_ssa_for_each_use(in, note_use, a);
     }
     return 0;
 }
@@ -1401,7 +1397,7 @@ done:
 
 /* ---- (d) a copy read as what it copies ---- */
 
-/** for_each_use() callback: an asm operand's value, or a value whose address is taken, is not a copy's. */
+/** cc_ssa_for_each_use() callback: an asm operand's value, or a value whose address is taken, is not a copy's. */
 static void note_pinned(void *ctx, int v, int role) {
     unsigned char *pinned = (unsigned char *)ctx;
 
@@ -1448,7 +1444,7 @@ int cc_propagate_copies(cc_ssa_function_t *f) {
         if (in->op == CC_SSA_ADDR && is_value(f, in->lhs)) {
             pinned[in->lhs] = 1;
         } else if (in->op == CC_SSA_ASM) {
-            for_each_use(in, note_pinned, pinned);
+            cc_ssa_for_each_use(in, note_pinned, pinned);
         }
     }
     /*
@@ -1468,7 +1464,7 @@ int cc_propagate_copies(cc_ssa_function_t *f) {
         }
         repl[in->dst] = in->lhs;
     }
-    /* each read of a copy reads its source: the operands for_each_use() names, an asm's aside */
+    /* each read of a copy reads its source: the operands cc_ssa_for_each_use() names, an asm's aside */
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
         int r;
@@ -1519,7 +1515,7 @@ int cc_propagate_copies(cc_ssa_function_t *f) {
     return any;
 }
 
-/** for_each_use() callback: count a use. */
+/** cc_ssa_for_each_use() callback: count a use. */
 static void count_one_use(void *ctx, int v, int role) {
     int *uses = (int *)ctx;
 
@@ -1545,7 +1541,7 @@ int cc_coalesce_moves(cc_ssa_function_t *f) {
         return -1;
     }
     for (i = 0; i < f->instr_count; ++i) {
-        for_each_use(&f->instrs[i], count_one_use, uses);
+        cc_ssa_for_each_use(&f->instrs[i], count_one_use, uses);
     }
     /*
      * t = op ..., then v = t, t made once and read only there, of v's class, size and signedness: op writes v
@@ -1620,7 +1616,7 @@ typedef struct {
     uint32_t *set;
 } bits_ctx_t;
 
-/** for_each_use() callback: the value is live. */
+/** cc_ssa_for_each_use() callback: the value is live. */
 static void bits_add(void *ctx, int v, int role) {
     bits_ctx_t *c = (bits_ctx_t *)ctx;
 
@@ -1646,7 +1642,7 @@ static void live_step(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, bits
         bc->set[in->dst / 32] &= ~((uint32_t)1u << (in->dst % 32));
     }
     if (in->op != CC_SSA_ASM) {
-        for_each_use(in, bits_add, bc);
+        cc_ssa_for_each_use(in, bits_add, bc);
         return;
     }
     for (k = 0; k < in->asm_out_count; ++k) {

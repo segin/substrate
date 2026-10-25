@@ -110,6 +110,26 @@ static int abi_is_plain(unsigned char abi) {
     return (abi & ~CC_ABI_REGPARM_MASK) == CC_CALL_ARG_ABI_DEFAULT;
 }
 
+/** Whether ABI byte @p abi passes a structure by value: its address, lowering copying it at the callee's entry. */
+static int abi_is_struct(unsigned char abi) {
+    return CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM || CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG;
+}
+
+/** Whether ABI byte @p abi passes what an inlined body may take: a plain value or a structure's address. */
+static int abi_inlinable(unsigned char abi) {
+    return abi_is_plain(abi) || (abi_is_struct(abi) && (abi & (CC_ABI_VEC128 | CC_ABI_VEC64)) == 0);
+}
+
+/**
+ * Whether a structure result returned by @p ret, of @p g, is the address of its bytes (copied by the backend to
+ * the caller's buffer) rather than its words in lhs and rhs, as lowering writes it: through a hidden pointer, a
+ * class the target returns by address, or more than two words.
+ */
+static int ret_by_address(const cc_ssa_function_t *g, const cc_ssa_instr_t *ret) {
+    return g->ret_abi == CC_CALL_ARG_ABI_AGG_MEM || (ret->agg_class & cc_target_current()->ret_by_address_classes) != 0 ||
+           ret->imm > 2L * cc_target_pointer_size();
+}
+
 /**
  * Whether the body of @p g may be copied into a caller: no more than
  * @p max_instrs instructions, its interface plain values, and nothing in
@@ -122,12 +142,13 @@ static int abi_is_plain(unsigned char abi) {
 static int inline_body_ok(const cc_ssa_function_t *g, size_t max_instrs) {
     size_t i;
 
-    if (g->is_variadic || g->attr_alias != NULL || g->sret_reg || !abi_is_plain(g->ret_abi) || g->instrs == NULL ||
+    if (g->is_variadic || g->attr_alias != NULL || g->sret_reg ||
+        !(abi_is_plain(g->ret_abi) || g->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) || g->instrs == NULL ||
         g->instr_count > max_instrs) {
         return 0;
     }
     for (i = 0; i < g->param_count; ++i) {
-        if (g->param_abi != NULL && !abi_is_plain(g->param_abi[i])) {
+        if (g->param_abi != NULL && !abi_inlinable(g->param_abi[i])) {
             return 0;
         }
     }
@@ -142,7 +163,8 @@ static int inline_body_ok(const cc_ssa_function_t *g, size_t max_instrs) {
         case CC_SSA_LADDR:
             return 0;
         case CC_SSA_RET:
-            if (in->agg_class != 0) {
+            /* (an x87 one, a long double structure's, the caller's call could not take apart) */
+            if ((in->agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0) {
                 return 0;
             }
             break;
@@ -188,21 +210,113 @@ static int converts_to(const cc_ssa_function_t *fa, int a, const cc_ssa_function
     return (to == 1 || to == 2 || to == 4) && from <= 8;
 }
 
+/** read_only_address()'s view of one instruction's operands: how the value looked for is used. */
+typedef struct {
+    int v;
+    int addr;  /**< as a load's or store's address */
+    int other; /**< in any other way (a store's value among them) */
+} ro_use_t;
+
+/** cc_ssa_for_each_use() callback: note how the value looked for is used. */
+static void note_ro_use(void *ctx, int v, int role) {
+    ro_use_t *u = (ro_use_t *)ctx;
+
+    if (v == u->v) {
+        if (role == 1) {
+            u->addr = 1;
+        } else {
+            u->other = 1;
+        }
+    }
+}
+
 /**
- * Whether @p call, in @p f, can be replaced by @p g's body: its arguments are plain values of the
- * parameters' shapes, and its result the shape of what @p g returns.
+ * Whether value @p v of @p g is only read through: loaded from, copied from by memcpy, or an address made from it
+ * by an add that is so in turn (to a few levels) -- so that an inlined body may take a structure argument's own
+ * storage for its parameter, as lowering copies the parameter at entry before it writes it.
  */
-static int call_site_inlinable(const cc_ssa_function_t *f, const cc_ssa_instr_t *call, const cc_ssa_function_t *g) {
+static int read_only_address(const cc_ssa_function_t *g, int v, int depth) {
     size_t i;
 
-    /* a structure result the call writes to memory (rhs, imm bytes) as well: the copied body would not */
+    if (depth > 4) {
+        return 0;
+    }
+    for (i = 0; i < g->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &g->instrs[i];
+        ro_use_t u;
+
+        u.v = v;
+        u.addr = 0;
+        u.other = 0;
+        if (in->op == CC_SSA_CALL) {
+            /* a direct call reads its arguments alone (lhs and rhs hold nothing, but a structure result's buffer) */
+            size_t a;
+
+            for (a = 0; a < in->arg_count; ++a) {
+                u.other |= in->args[a] == v;
+            }
+            u.other |= in->rhs == v && in->rhs == in->dst;
+        } else {
+            cc_ssa_for_each_use(in, note_ro_use, &u);
+        }
+        if (!u.addr && !u.other) {
+            continue;
+        }
+        if (in->op == CC_SSA_LOAD && !u.other) {
+            continue;
+        }
+        if (in->op == CC_SSA_ADD && !u.addr && read_only_address(g, in->dst, depth + 1)) {
+            continue;
+        }
+        if (in->op == CC_SSA_CALL && in->sym != NULL && strcmp(in->sym, "memcpy") == 0 && in->arg_count == 3 &&
+            in->args[1] == v && in->args[0] != v && in->args[2] != v) {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+/**
+ * Whether @p call, in @p f, can be replaced by @p g's body: its arguments are plain values of the
+ * parameters' shapes or structures by value (their storage, which the body only reads), and its result the
+ * shape of what @p g returns, or a structure its returns store to the call's buffer.
+ */
+static int call_site_inlinable(const cc_ssa_function_t *f, const cc_ssa_instr_t *call, const cc_ssa_function_t *g) {
+    int agg = call->rhs >= 0 && call->imm > 0;
+    size_t i;
+
     if (call->op != CC_SSA_CALL || call->call_chain != 0 || call->call_is_variadic || call->call_ret_x87 ||
-        call->agg_class != 0 || call->arg_count != g->param_count || (call->rhs >= 0 && call->imm > 0)) {
+        call->arg_count != g->param_count || (agg && call->rhs != call->dst) ||
+        (!agg && call->agg_class != 0) ||
+        (call->agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0) {
         return 0;
     }
     for (i = 0; i < g->instr_count; ++i) {
         const cc_ssa_instr_t *in = &g->instrs[i];
 
+        if (in->op == CC_SSA_RET && agg) {
+            /* each return a structure of the call's size */
+            if (in->lhs < 0 || in->imm != call->imm) {
+                return 0;
+            }
+            continue;
+        }
+        if (in->op == CC_SSA_RET && in->imm > 0 && in->lhs >= 0 && call->dst >= 0 &&
+            f->value_ty[call->dst].kind != CC_TY_AGG &&
+            (in->agg_class != 0 || g->ret_abi == CC_CALL_ARG_ABI_AGG_MEM)) {
+            return 0; /* (a structure returned to a call that takes it as no structure) */
+        }
+        if (in->op == CC_SSA_PARAM && g->param_abi != NULL && in->param_index >= 0 &&
+            (size_t)in->param_index < g->param_count && abi_is_struct(g->param_abi[in->param_index])) {
+            /* a structure by value: the argument is its storage's address, which the body must only read */
+            if ((size_t)in->param_index >= call->arg_count || call->args[in->param_index] < 0 || in->dst < 0 ||
+                call->call_arg_abi == NULL || !abi_is_struct(call->call_arg_abi[in->param_index]) ||
+                !read_only_address(g, in->dst, 0)) {
+                return 0;
+            }
+            continue;
+        }
         if (in->op == CC_SSA_PARAM) {
             /* an integer argument of another width is converted as the parameter takes it (a bool's compare) */
             if (in->param_index < 0 || (size_t)in->param_index >= call->arg_count || in->dst < 0 ||
@@ -217,7 +331,7 @@ static int call_site_inlinable(const cc_ssa_function_t *f, const cc_ssa_instr_t 
         }
     }
     for (i = 0; i < call->arg_count; ++i) {
-        if (call->call_arg_abi != NULL && !abi_is_plain(call->call_arg_abi[i])) {
+        if (call->call_arg_abi != NULL && !abi_inlinable(call->call_arg_abi[i])) {
             return 0;
         }
     }
@@ -460,6 +574,70 @@ static int put_narrow(cc_ssa_function_t *f, ivec_t *out, int dst, int src) {
 }
 
 /**
+ * Append, for return @p ret of @p g inlined for @p call (its values renamed by @p vmap), the store of the
+ * structure it returns into the call's buffer: a memcpy from the address it returns, or its words -- lhs, and rhs
+ * past a word -- each of its size.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int put_struct_result(cc_ssa_function_t *f, ivec_t *out, const cc_ssa_instr_t *call, const cc_ssa_function_t *g,
+                             const cc_ssa_instr_t *ret, const int *vmap) {
+    long word = cc_target_pointer_size();
+    cc_ssa_instr_t in;
+
+    if (ret_by_address(g, ret)) {
+        cc_ssa_instr_t k = plain_instr(CC_SSA_CONST);
+
+        k.dst = new_int_value(f, (uint32_t)word, 1);
+        k.imm = call->imm;
+        if (k.dst < 0 || ivec_put(out, &k) != 0) {
+            return -1;
+        }
+        in = plain_instr(CC_SSA_CALL);
+        in.sym = cc_strdup("memcpy");
+        in.args = (int *)malloc(3 * sizeof(int));
+        in.dst = new_int_value(f, (uint32_t)word, 1);
+        if (in.sym == NULL || in.args == NULL || in.dst < 0) {
+            free(in.sym);
+            free(in.args);
+            return -1;
+        }
+        in.arg_count = 3;
+        in.args[0] = call->rhs;
+        in.args[1] = vmap[ret->lhs];
+        in.args[2] = k.dst;
+        in.imm = word;
+        return ivec_put(out, &in);
+    }
+    in = plain_instr(CC_SSA_STORE);
+    in.lhs = call->rhs;
+    in.rhs = vmap[ret->lhs];
+    in.imm = call->imm < word ? call->imm : word;
+    if (ivec_put(out, &in) != 0) {
+        return -1;
+    }
+    if (call->imm > word && ret->rhs >= 0) {
+        cc_ssa_instr_t k = plain_instr(CC_SSA_CONST);
+        cc_ssa_instr_t a = plain_instr(CC_SSA_ADD);
+
+        k.dst = new_int_value(f, (uint32_t)word, 1);
+        k.imm = word;
+        a.dst = new_int_value(f, (uint32_t)word, 1);
+        a.lhs = call->rhs;
+        a.rhs = k.dst;
+        if (k.dst < 0 || a.dst < 0 || ivec_put(out, &k) != 0 || ivec_put(out, &a) != 0) {
+            return -1;
+        }
+        in = plain_instr(CC_SSA_STORE);
+        in.lhs = a.dst;
+        in.rhs = vmap[ret->rhs];
+        in.imm = call->imm - word;
+        return ivec_put(out, &in);
+    }
+    return 0;
+}
+
+/**
  * Write @p g's body in place of @p call into @p out, the rewrite of @p f.
  *
  * @return 0, or -1 when out of memory
@@ -496,7 +674,9 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
             int arg = call->args[src->param_index];
             int rc;
 
-            if (same_shape(f, vmap[src->dst], f, arg) || cc_ssa_value_size(f, vmap[src->dst]) > cc_ssa_value_size(f, arg)) {
+            if (same_shape(f, vmap[src->dst], f, arg) || cc_ssa_value_size(f, vmap[src->dst]) > cc_ssa_value_size(f, arg) ||
+                (g->param_abi != NULL && abi_is_struct(g->param_abi[src->param_index]))) {
+                /* (a structure by value: its storage's address, whatever the argument's type says of its size) */
                 in = plain_instr(CC_SSA_MOV);
                 in.dst = vmap[src->dst];
                 in.lhs = arg;
@@ -506,6 +686,21 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
                 rc = put_narrow(f, out, vmap[src->dst], arg);
             }
             if (rc != 0) {
+                free(vmap);
+                return -1;
+            }
+            continue;
+        }
+        if (src->op == CC_SSA_RET && call->rhs >= 0 && call->imm > 0 && src->lhs >= 0) {
+            /* a structure result: its bytes stored to the call's buffer -- copied from where it points, or its
+             * words -- and the caller goes on after the call */
+            if (put_struct_result(f, out, call, g, src, vmap) != 0) {
+                free(vmap);
+                return -1;
+            }
+            in = plain_instr(CC_SSA_BR);
+            in.label = done_label;
+            if (ivec_put(out, &in) != 0) {
                 free(vmap);
                 return -1;
             }

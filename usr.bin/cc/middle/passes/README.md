@@ -35,7 +35,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   labels too, and what that leaves one value folds again.
 - `inline.c`: the inlining itself -- which functions may be inlined
   (`cc_inline_candidate()`: static and inline or always_inline, small,
-  plain-value interface, no frame-dependent body; or, as gcc's
+  an interface of plain values or structures by value -- an argument's
+  storage taken for the parameter where the body only reads it, a result
+  stored to the call's buffer, its words or a copy from where it points
+  -- no frame-dependent body; or, as gcc's
   `-finline-functions-called-once`, any static function called from one
   place, named nowhere else and on no cycle of calls, which `opt.c`
   marks, if it does not grow the caller's frame past gcc's limit) and

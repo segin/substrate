@@ -68,6 +68,13 @@ int cc_promote_slots(cc_ssa_function_t *f);
 int cc_propagate_copies(cc_ssa_function_t *f);
 
 /**
+ * Call @p fn for each value instruction @p in reads, with the role it has: 0 an operand, 1 the address of a
+ * load or store, 2 the value a store writes (passes/mem.c).  An operation's fields it does not read are not
+ * named, whatever they hold.
+ */
+void cc_ssa_for_each_use(const cc_ssa_instr_t *in, void (*fn)(void *ctx, int v, int role), void *ctx);
+
+/**
  * Coalesce `t = op ...; v = t`, t made once and read only by the move, into `v = op ...` (passes/mem.c):
  * cc lowers each update of a variable (x += k, p++) so, and the back end can then do it in place.
  *
