@@ -3357,6 +3357,33 @@ static int fpo_ok(xsel_t *s) {
     return 1;
 }
 
+/**
+ * Whether @p nofp, a function allocated with no frame pointer, comes out smaller than @p fp, the same allocated
+ * with one, by an estimate in bytes: an instruction about four, a frame access off the stack pointer one more (its
+ * SIB byte), and the frame pointer's push, move and pop -- four bytes on i386, five on x86-64 -- saved, but for
+ * the push and pop of %ebp (%rbp) when it is allocated.  On i386, short of registers, its seventh is worth more
+ * than that costs; on x86-64 the stack pointer's byte on every frame access often is not.
+ */
+static int fpo_smaller(const xfunc_t *fp, const xfunc_t *nofp, int word) {
+    long frame_refs = 0;
+    int bp_used = 0;
+    int i;
+    int k;
+
+    for (i = 0; i < nofp->nins; ++i) {
+        const xinst_t *in = &nofp->ins[i];
+
+        for (k = 0; k < in->nops; ++k) {
+            const xop_t *o = &in->o[k];
+
+            frame_refs += o->kind == XO_MEM && o->base == XR_FRAME;
+            bp_used |= (o->kind == XO_REG && o->reg == XR_BP) ||
+                       (o->kind == XO_MEM && (o->base == XR_BP || o->index == XR_BP));
+        }
+    }
+    return 4L * nofp->nins + frame_refs + (bp_used ? 2 : 0) < 4L * fp->nins + (word == 8 ? 5 : 4);
+}
+
 int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
                           size_t fn_index, const char *src_path, int emit_debug, cc_diag_t *diag) {
     static long taken; /* the functions this path has taken, for CC_MIR_LIMIT */
@@ -3398,11 +3425,17 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
         rc = s.xf.oom ? -1 : 1;
     }
     if (rc == 0) {
-        if (cc_options_current()->omit_frame_pointer && !emit_debug && fpo_ok(&s)) {
+        xfunc_t alt;
+        int try_fpo = cc_options_current()->omit_frame_pointer && !emit_debug && fpo_ok(&s) &&
+                      xf_copy(&alt, &s.xf) == 0;
+
+        rc = x86_mir_allocate(&s.xf, t->alloc);
+        if (try_fpo) {
             /* the frame pointer's register allocated too, last, saved by the prologue as the others are */
             xtarget_t ta = *t->alloc;
             int order[XR_NPHYS + 1];
             int k;
+            int arc;
 
             for (k = 0; k < ta.norder && k < XR_NPHYS; ++k) {
                 order[k] = ta.order[k];
@@ -3412,15 +3445,20 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
             ta.norder = k;
             ta.alloc_mask |= XR_BIT(XR_BP);
             ta.callee_saved |= XR_BIT(XR_BP);
-            s.fpo = 1;
-            for (k = 0; k < t->nsaved; ++k) {
-                s.fp_saved[k] = t->saved[k];
+            arc = x86_mir_allocate(&alt, &ta);
+            if (arc == 0 && (rc != 0 || fpo_smaller(&s.xf, &alt, t->word))) {
+                xf_free(&s.xf);
+                s.xf = alt;
+                rc = 0;
+                s.fpo = 1;
+                for (k = 0; k < t->nsaved; ++k) {
+                    s.fp_saved[k] = t->saved[k];
+                }
+                s.fp_saved[k++] = XR_BP;
+                s.fp_nsaved = k;
+            } else {
+                xf_free(&alt);
             }
-            s.fp_saved[k++] = XR_BP;
-            s.fp_nsaved = k;
-            rc = x86_mir_allocate(&s.xf, &ta);
-        } else {
-            rc = x86_mir_allocate(&s.xf, t->alloc);
         }
     }
     if (stats != NULL && stats[0] == '1') {

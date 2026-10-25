@@ -3,7 +3,8 @@
 # frame pointer addresses its frame off the stack pointer -- counting what
 # a call's pushes have moved it by, and what a callee pops (i386's hidden
 # pointer to a structure result) -- and has %ebp (%rbp) to allocate, saved
-# by the prologue as the others are.  One that reads its frame's address,
+# by the prologue as the others are, where that comes out smaller (each
+# access off the stack pointer takes a byte more).  One that reads its frame's address,
 # moves the stack pointer itself, or takes variadic arguments keeps one.
 # Results are gcc's.
 set -eu
@@ -52,6 +53,12 @@ long __attribute__((noinline)) busy(long x, long y)
 	return v + c.c + arr[5] + p + q + r + s + t + u + b.b;
 }
 
+/* no frame objects of its own: no frame pointer either */
+long __attribute__((noinline)) lean(long a, long b, long c)
+{
+	return many(a, b, c, a, b, c, a, b, c) * c + many(c, b, a, c, b, a, c, b, a);
+}
+
 /* keeps its frame pointer: an asm's memory operand in a slot, */
 int __attribute__((noinline)) asm_slot(int x)
 {
@@ -90,7 +97,7 @@ long __attribute__((noinline)) vla(int n)
 
 int main(void)
 {
-	printf("%ld %ld %ld %d\n", busy(7, 3), varsum(4, 1L, 2L, 3L, 40L), vla(5), asm_slot(3));
+	printf("%ld %ld %ld %d %ld\n", busy(7, 3), varsum(4, 1L, 2L, 3L, 40L), vla(5), asm_slot(3), lean(1, 2, 3));
 	return 0;
 }
 EOF2
@@ -111,8 +118,8 @@ for m in $modes; do
 		fi
 	done
 	"$CC_BIN" -m$m -O2 $F -S -o "$CC_TMP/f.s" "$CC_TMP/f.c"
-	if awk '/^busy:/{x=1} /^\.size busy,/{x=0} x' "$CC_TMP/f.s" | grep -qE 'mov[lq] %[er]sp, %[er]bp'; then
-		echo "run_omit_frame_pointer: -m$m: busy() still makes a frame pointer"
+	if awk '/^lean:/{x=1} /^\.size lean,/{x=0} x' "$CC_TMP/f.s" | grep -qE 'mov[lq] %[er]sp, %[er]bp'; then
+		echo "run_omit_frame_pointer: -m$m: lean() still makes a frame pointer"
 		exit 1
 	fi
 	if ! awk '/^vla:/{x=1} /^\.size vla,/{x=0} x' "$CC_TMP/f.s" | grep -qE 'mov[lq] %[er]sp, %[er]bp'; then

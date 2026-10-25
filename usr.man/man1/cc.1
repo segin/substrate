@@ -266,7 +266,8 @@ for a debugger.
 Whether a function addresses its frame off the stack pointer and has
 .Li %ebp
 .Pq Li %rbp
-to allocate, as Linux builds with, or keeps a frame pointer, as by default.
+to allocate, as Linux builds with, where that makes it smaller, or keeps a
+frame pointer, as by default.
 A function that takes its frame's address, moves the stack pointer itself
 .Pq Fn alloca , a variable-length array ,
 takes variadic arguments, or has an inline asm whose operand is a memory slot

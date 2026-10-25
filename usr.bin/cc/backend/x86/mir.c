@@ -15,6 +15,21 @@ void xf_init(xfunc_t *xf) {
     memset(xf, 0, sizeof(*xf));
 }
 
+int xf_copy(xfunc_t *dst, const xfunc_t *src) {
+    *dst = *src;
+    dst->ins = (xinst_t *)malloc((size_t)(src->cap > 0 ? src->cap : 1) * sizeof(*dst->ins));
+    dst->vr = (xvreg_t *)malloc((size_t)(src->vrcap > 0 ? src->vrcap : 1) * sizeof(*dst->vr));
+    dst->obj = (xobj_t *)malloc((size_t)(src->objcap > 0 ? src->objcap : 1) * sizeof(*dst->obj));
+    if (dst->ins == NULL || dst->vr == NULL || dst->obj == NULL) {
+        xf_free(dst);
+        return -1;
+    }
+    memcpy(dst->ins, src->ins, (size_t)src->nins * sizeof(*dst->ins));
+    memcpy(dst->vr, src->vr, (size_t)src->nvr * sizeof(*dst->vr));
+    memcpy(dst->obj, src->obj, (size_t)src->nobj * sizeof(*dst->obj));
+    return 0;
+}
+
 void xf_free(xfunc_t *xf) {
     free(xf->ins);
     free(xf->vr);

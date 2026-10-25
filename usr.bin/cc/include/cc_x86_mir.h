@@ -251,6 +251,8 @@ typedef struct {
 void xf_init(xfunc_t *xf);
 /** Free what @p xf owns. */
 void xf_free(xfunc_t *xf);
+/** Make @p dst a copy of @p src, arrays and all; 0, or -1 when out of memory (@p dst then empty). */
+int xf_copy(xfunc_t *dst, const xfunc_t *src);
 /** A new virtual register, or XR_NONE when out of memory. */
 int xf_new_vreg(xfunc_t *xf);
 /** A new virtual vector register (a double's), or XR_NONE when out of memory. */
