@@ -2557,9 +2557,18 @@ typedef struct {
     unsigned dver;        /**< dst's version once written: dst still holds it while that is current */
 } cse_entry_t;
 
-/** Whether instruction @p in is a computation cse_function() may share: pure, of its operands alone. */
+/**
+ * Whether instruction @p in is a computation cse_function() may share: pure, of its operands alone.  A symbol's
+ * address is shared only in position-independent code, where it is a load from the GOT: otherwise it costs nothing
+ * where it is used -- incq counter, counter(%rip) -- and a register holding it is one more to keep.
+ */
 static int cse_candidate(const cc_ssa_instr_t *in) {
+    const cc_options_t *opts;
+
     if (in->dst < 0) {
+        return 0;
+    }
+    if (in->op == CC_SSA_GADDR && ((opts = cc_options_current()) == NULL || !opts->pic)) {
         return 0;
     }
     switch (in->op) {
