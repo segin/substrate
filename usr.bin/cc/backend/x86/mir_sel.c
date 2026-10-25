@@ -1114,6 +1114,37 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
         }
     }
     if (op == XI_AND) {
+        /* a mask of a mask: one, of both (Linux's pte_flags(pte) & _PAGE_RW is (pte & 0xfff) & 2) */
+        long long m1 = 0;
+        long long m2 = 0;
+        int inner = xs_const_of(s, in->rhs, &m2) ? in->lhs : xs_const_of(s, in->lhs, &m2) ? in->rhs : -1;
+        const cc_ssa_instr_t *id = inner >= 0 ? def_of(s, inner) : NULL;
+        int x = -1;
+        int hops;
+
+        /* (through the copies an inlined function's result is made of) */
+        for (hops = 0; hops < 4 && id != NULL && id->op == CC_SSA_MOV && id->lhs >= 0; ++hops) {
+            inner = id->lhs;
+            id = def_of(s, inner);
+        }
+
+        if (id != NULL && id->op == CC_SSA_AND && id->lhs >= 0 && id->rhs >= 0 && !xs_is_pair(s, inner)) {
+            x = xs_const_of(s, id->rhs, &m1) ? id->lhs : xs_const_of(s, id->lhs, &m1) ? id->rhs : -1;
+        }
+        if (x >= 0 && stable(s, x) && !xs_is_pair(s, x)) {
+            long long c;
+            long long m = m1 & m2;
+
+            if (!xs_const_of(s, x, &c) && (w == 4 || fits32(m))) {
+                xop_t k = xop_imm(w == 4 ? (long long)(int)m : m, w);
+
+                xs_move_word_to(s, x, 0, &d);
+                xs_emit(s, XI_AND, w, 2, &k, &d, NULL);
+                return;
+            }
+        }
+    }
+    if (op == XI_AND) {
         /* a mask of the low byte, half or (x86-64) word: a zero extension */
         long long m = 0;
         int other = xs_const_of(s, in->rhs, &m) ? in->lhs : xs_const_of(s, in->lhs, &m) ? in->rhs : -1;
