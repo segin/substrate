@@ -70,7 +70,11 @@ for m in $modes; do
 	want=$("$CC_TMP/hg")
 	for flags in -O0 -O2 "-O2 -fPIC"; do
 		# shellcheck disable=SC2086
-		CC_MIR_STATS=1 "$CC_BIN" -m$m $flags -o "$CC_TMP/hc" "$CC_TMP/h.c" 2>"$CC_TMP/stats"
+		CC_MIR_STATS=1 "$CC_BIN" -m$m $flags -c -o "$CC_TMP/h.o" "$CC_TMP/h.c" 2>"$CC_TMP/stats" || {
+			cat "$CC_TMP/stats"
+			exit 1
+		}
+		"$CC_BIN" -m$m -o "$CC_TMP/hc" "$CC_TMP/h.o"
 		if grep "^mir: .*not taken" "$CC_TMP/stats"; then
 			echo "run_float16_regs: -m$m $flags: the above do not go through the allocator"
 			exit 1
