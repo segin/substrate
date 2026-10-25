@@ -1476,6 +1476,26 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
             b = t;
         }
         if (b.kind == XO_IMM && b.sym == NULL) {
+            unsigned long long m = (unsigned long long)b.disp & (w == 4 ? 0xffffffffULL : ~0ULL);
+            int sh = 0;
+
+            while (sh < 8 * w - 1 && (1ULL << sh) < m) {
+                sh++;
+            }
+            if (a.kind != XO_IMM && m > 1 && (1ULL << sh) == m &&
+                (m >= 128 || (a.kind == XO_REG && a.reg == d.reg) || in->dst == in->lhs || in->dst == in->rhs)) {
+                /*
+                 * by a power of two, a shift: imul $4096 takes 32 bits of constant where shl $12 takes 8, and
+                 * one into the register it reads is no larger
+                 */
+                xop_t c = xop_imm(sh, 1);
+
+                if (!(a.kind == XO_REG && a.reg == d.reg)) {
+                    xs_emit(s, XI_MOV, w, 2, &a, &d, NULL);
+                }
+                xs_emit(s, XI_SHL, w, 2, &c, &d, NULL);
+                return;
+            }
             if (a.kind == XO_IMM) {
                 /* a symbol's address times a constant */
                 xop_t t = xs_temp(s);
