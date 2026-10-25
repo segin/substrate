@@ -3094,6 +3094,280 @@ int x86_asm_input_is_immediate(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     return (have_const && (asm_immediate_fits(c, imm) || !alternative)) || (!have_const && !alternative);
 }
 
+/** The most operands an asm has in x87 stack registers or %xmm ones (asm_fp_t). */
+#define ASM_FP_MAX 32
+
+/**
+ * An inline asm's floating and vector operands that live in registers no general-register operand does: an
+ * %xmm register ('x'), or a position on the x87 stack ('t' st(0), 'u' st(1), 'f' any).  Per operand, inputs after
+ * the outputs: its class (0 for an ordinary one) and its register's number or stack position.
+ */
+typedef struct {
+    int cls[ASM_FP_MAX];
+    int reg[ASM_FP_MAX];
+    unsigned xmm_clobber; /**< the %xmm registers the clobber list names */
+    unsigned st_clobber;  /**< the x87 stack positions it names, popped by the asm ("st", "st(1)") */
+    const char *scratch;  /**< a general register free for a vector's address, or NULL */
+} asm_fp_t;
+
+/** The register class of floating or vector asm constraint @p c: 'x', 't', 'u' or 'f'; 0 for any other. */
+static int asm_fp_letter(const char *c) {
+    if (c == NULL || cc_asm_constraint_is_memory_only(c) || cc_asm_constraint_allows_gpr(c)) {
+        return 0;
+    }
+    if (strchr(c, 'x') != NULL) {
+        return 'x';
+    }
+    if (strchr(c, 't') != NULL) {
+        return 't';
+    }
+    if (strchr(c, 'u') != NULL) {
+        return 'u';
+    }
+    if (strchr(c, 'f') != NULL) {
+        return 'f';
+    }
+    return 0;
+}
+
+/** The x87 stack position or %xmm number clobber @p name names into @p fp; nothing for any other. */
+static void asm_fp_note_clobber(asm_fp_t *fp, const char *name) {
+    const char *n = name != NULL && name[0] == '%' ? name + 1 : name;
+    int k;
+
+    if (n == NULL) {
+        return;
+    }
+    if (strncmp(n, "xmm", 3) == 0 && n[3] >= '0' && n[3] <= '9') {
+        k = atoi(n + 3);
+        if (k >= 0 && k < 16) {
+            fp->xmm_clobber |= 1u << k;
+        }
+    } else if (strcmp(n, "st") == 0) {
+        fp->st_clobber |= 1u;
+    } else if (strncmp(n, "st(", 3) == 0 && n[3] >= '0' && n[3] <= '7') {
+        fp->st_clobber |= 1u << (n[3] - '0');
+    }
+}
+
+/**
+ * Give @p in's floating and vector operands their registers: an %xmm one each, not clobbered and not another's;
+ * 't' st(0), 'u' st(1), 'f' the lowest position left; a matching input its output's.  0, or -1 when they do not
+ * fit.
+ */
+static int asm_fp_assign(asm_fp_t *fp, const cc_ssa_instr_t *in, int is_64bit) {
+    size_t out_n = in->asm_out_count;
+    size_t total = out_n + in->asm_in_count;
+    unsigned xmm_used = fp->xmm_clobber;
+    unsigned st_used[2] = {0, 0}; /* the positions outputs take after the asm, inputs before it */
+    size_t i;
+
+    if (total > ASM_FP_MAX) {
+        return -1;
+    }
+    for (i = 0; i < total; ++i) {
+        const char *c = i < out_n ? (in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL)
+                                  : (in->asm_in_constraints != NULL ? in->asm_in_constraints[i - out_n] : NULL);
+        int tied = i < out_n ? -1 : cc_asm_constraint_matched_operand(c);
+        int l = tied >= 0 && (size_t)tied < out_n ? fp->cls[tied] : asm_fp_letter(c);
+
+        fp->cls[i] = l;
+        fp->reg[i] = -1;
+        if (tied >= 0 && (size_t)tied < out_n) {
+            fp->reg[i] = fp->reg[tied];
+        } else if (l == 't' || l == 'u') {
+            fp->reg[i] = l == 't' ? 0 : 1;
+            st_used[i >= out_n] |= 1u << fp->reg[i];
+        }
+    }
+    for (i = 0; i < total; ++i) {
+        const char *c = i < out_n ? NULL : (in->asm_in_constraints != NULL ? in->asm_in_constraints[i - out_n] : NULL);
+        int k;
+
+        if (fp->reg[i] >= 0 || (i >= out_n && cc_asm_constraint_matched_operand(c) >= 0)) {
+            continue;
+        }
+        if (fp->cls[i] == 'x') {
+            for (k = 0; k < (is_64bit ? 16 : 8) && (xmm_used & (1u << k)) != 0; ++k) {
+            }
+            if (k == (is_64bit ? 16 : 8)) {
+                return -1;
+            }
+            fp->reg[i] = k;
+            xmm_used |= 1u << k;
+        } else if (fp->cls[i] == 'f') {
+            unsigned *used = &st_used[i >= out_n];
+
+            for (k = 0; k < 8 && (*used & (1u << k)) != 0; ++k) {
+            }
+            if (k == 8) {
+                return -1;
+            }
+            fp->reg[i] = k;
+            *used |= 1u << k;
+        }
+    }
+    for (i = 0; i < total; ++i) {
+        if (fp->cls[i] == 'u' || fp->cls[i] == 'f') {
+            fp->cls[i] = 't'; /* a stack position, from here on */
+        }
+    }
+    return 0;
+}
+
+/** The operand text of floating or vector operand @p k: %xmmN, %st or %st(N); NULL when out of memory. */
+static char *asm_fp_text(const asm_fp_t *fp, size_t k) {
+    char buf[16];
+
+    if (fp->cls[k] == 'x') {
+        snprintf(buf, sizeof(buf), "%%xmm%d", fp->reg[k]);
+    } else if (fp->reg[k] == 0) {
+        snprintf(buf, sizeof(buf), "%%st");
+    } else {
+        snprintf(buf, sizeof(buf), "%%st(%d)", fp->reg[k]);
+    }
+    return dup_cstr(buf);
+}
+
+/** The frame slot of value @p v as the asm reads it: from %rbp or %ebp. */
+static const char *asm_fp_frame(int is_64bit) {
+    return is_64bit ? "%rbp" : "%ebp";
+}
+
+/**
+ * Load floating or vector value @p v (@p bytes as the asm takes it) into %xmm @p reg: a float from the double it
+ * is held as, a double, or a 16-byte vector from the storage its value points at, through @p scratch.
+ */
+static int asm_fp_xmm_load(FILE *out, const cc_ssa_function_t *f, const slot_layout_t *lay, int v, int bytes,
+                           int reg, const char *scratch, int is_64bit) {
+    int off = slot_off(lay, v);
+
+    if (cc_ssa_value_class(f, v) != CC_VAL_F64) {
+        if (scratch == NULL) {
+            return -1;
+        }
+        fprintf(out, "\tmov%c %d(%s), %s\n", is_64bit ? 'q' : 'l', off, asm_fp_frame(is_64bit), scratch);
+        fprintf(out, "\t%s (%s), %%xmm%d\n", bytes >= 16 ? "movups" : bytes == 4 ? "movss" : "movsd", scratch, reg);
+        return 0;
+    }
+    fprintf(out, "\tmovsd %d(%s), %%xmm%d\n", off, asm_fp_frame(is_64bit), reg);
+    if (bytes == 4) {
+        fprintf(out, "\tcvtsd2ss %%xmm%d, %%xmm%d\n", reg, reg);
+    }
+    return 0;
+}
+
+/** Store %xmm @p reg, @p bytes as the asm wrote it, back into floating or vector output value @p v. */
+static int asm_fp_xmm_store(FILE *out, const cc_ssa_function_t *f, const slot_layout_t *lay, int v, int bytes,
+                            int reg, const char *scratch, int is_64bit) {
+    int off = slot_off(lay, v);
+
+    if (cc_ssa_value_class(f, v) != CC_VAL_F64) {
+        if (scratch == NULL) {
+            return -1;
+        }
+        fprintf(out, "\tmov%c %d(%s), %s\n", is_64bit ? 'q' : 'l', off, asm_fp_frame(is_64bit), scratch);
+        fprintf(out, "\t%s %%xmm%d, (%s)\n", bytes >= 16 ? "movups" : bytes == 4 ? "movss" : "movsd", reg, scratch);
+        return 0;
+    }
+    if (bytes == 4) {
+        fprintf(out, "\tcvtss2sd %%xmm%d, %%xmm%d\n", reg, reg);
+    }
+    fprintf(out, "\tmovsd %%xmm%d, %d(%s)\n", reg, off, asm_fp_frame(is_64bit));
+    return 0;
+}
+
+/**
+ * Push @p in's x87 operands before it runs, the deepest first: at each stack position up from st(0) the input
+ * there (a matching one's value, or a `+` output's own).  -1 when the positions it reads leave a gap.
+ */
+static int asm_fp_push(FILE *out, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
+                       const asm_fp_t *fp, int is_64bit) {
+    size_t out_n = in->asm_out_count;
+    size_t total = out_n + in->asm_in_count;
+    int src[8];
+    int top = -1;
+    int p;
+    size_t i;
+
+    for (p = 0; p < 8; ++p) {
+        src[p] = -1;
+    }
+    for (i = 0; i < total; ++i) {
+        int v = -1;
+
+        if (fp->cls[i] != 't') {
+            continue;
+        }
+        if (i >= out_n) {
+            v = in->asm_in_values[i - out_n];
+        } else if (in->asm_out_constraints != NULL && in->asm_out_constraints[i] != NULL &&
+                   strchr(in->asm_out_constraints[i], '+') != NULL) {
+            v = in->asm_out_values[i];
+        }
+        if (v >= 0 && !CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+            src[fp->reg[i]] = v;
+            if (fp->reg[i] > top) {
+                top = fp->reg[i];
+            }
+        }
+    }
+    for (p = top; p >= 0; --p) {
+        if (src[p] < 0) {
+            return -1;
+        }
+        fprintf(out, "\t%s %d(%s)\n", value_size_bytes(f, src[p], 8) >= 10 ? "fldt" : "fldl", slot_off(lay, src[p]),
+                asm_fp_frame(is_64bit));
+    }
+    return 0;
+}
+
+/**
+ * Pop the x87 stack after @p in has run: what it leaves is, as gcc has it, its outputs from the top down, pushed
+ * over the inputs it did not pop (neither clobbered, as gcc requires of one it pops, nor matched to an output);
+ * each output into its value, then the inputs thrown away.
+ */
+static void asm_fp_pop(FILE *out, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
+                       const asm_fp_t *fp, int is_64bit) {
+    size_t out_n = in->asm_out_count;
+    size_t total = out_n + in->asm_in_count;
+    int dst[8];
+    int depth = 0;
+    int live = 0;
+    int p;
+    size_t i;
+
+    for (p = 0; p < 8; ++p) {
+        dst[p] = -1;
+    }
+
+    for (i = 0; i < total; ++i) {
+        if (fp->cls[i] != 't') {
+            continue;
+        }
+        if (i < out_n) {
+            dst[fp->reg[i]] = in->asm_out_values[i];
+            if (fp->reg[i] + 1 > depth) {
+                depth = fp->reg[i] + 1;
+            }
+        } else if (cc_asm_constraint_matched_operand(in->asm_in_constraints[i - out_n]) < 0 &&
+                   (fp->st_clobber & (1u << fp->reg[i])) == 0) {
+            live++;
+        }
+    }
+    for (p = 0; p < depth; ++p) {
+        if (dst[p] >= 0) {
+            fprintf(out, "\t%s %d(%s)\n", value_size_bytes(f, dst[p], 8) >= 10 ? "fstpt" : "fstpl",
+                    slot_off(lay, dst[p]), asm_fp_frame(is_64bit));
+        } else {
+            fputs("\tfstp %st(0)\n", out);
+        }
+    }
+    while (live-- > 0) {
+        fputs("\tfstp %st(0)\n", out);
+    }
+}
+
 int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
                            size_t fn_index, size_t instr_index, int is_64bit, cc_diag_t *diag) {
     size_t out_n = in->asm_out_count;
@@ -3122,6 +3396,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     char stub_fn[160];          /* an asm goto's stubs are labels .L<stub_fn>_<k> and .L<stub_fn>_end */
     int *stub_ids = NULL;       /* and their numbers, 0 up, when it has them */
     size_t path;
+    asm_fp_t fpo;               /* the operands in x87 stack or %xmm registers */
 
     op_text = (char **)calloc(total, sizeof(*op_text));
     op_names = (char **)calloc(total, sizeof(*op_names));
@@ -3163,8 +3438,13 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             }
         }
     }
+    memset(&fpo, 0, sizeof(fpo));
     for (i = 0; i < in->asm_clobber_count; ++i) {
         clobber_mask |= x86_gpr_bit(in->asm_clobbers[i]);
+        asm_fp_note_clobber(&fpo, in->asm_clobbers[i]);
+    }
+    if (asm_fp_assign(&fpo, in, is_64bit) != 0) {
+        goto impossible;
     }
 
     for (i = 0; i < out_n; ++i) {
@@ -3177,6 +3457,14 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
         if (in->asm_out_names != NULL && in->asm_out_names[i] != NULL) {
             op_names[i] = in->asm_out_names[i];
+        }
+        if (fpo.cls[i] != 0) {
+            /* in an x87 stack register or an %xmm one: loaded and stored around the asm below */
+            op_text[i] = asm_fp_text(&fpo, i);
+            if (op_text[i] == NULL) {
+                goto oom;
+            }
+            continue;
         }
         if (cc_asm_constraint_is_memory_only(c)) {
             if (is_indirect) {
@@ -3252,6 +3540,13 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         int tied = cc_asm_constraint_matched_operand(c);
         if (in->asm_in_names != NULL && in->asm_in_names[i] != NULL) {
             op_names[slot] = in->asm_in_names[i];
+        }
+        if (fpo.cls[slot] != 0 && tied < 0) {
+            op_text[slot] = asm_fp_text(&fpo, slot);
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            continue;
         }
         if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
             /* a memory input given by its address (the object itself, as gcc passes it): in a register */
@@ -3431,6 +3726,33 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             emit_frame_load_reg(fp, is_64bit, loads[i].off, loads[i].reg);
         }
     }
+    /* the %xmm operands' values, then the x87 ones', pushed */
+    fpo.scratch = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
+                               fixed_mask | clobber_mask | out_mask | out_live_mask | in_mask);
+    for (i = 0; i < total; ++i) {
+        int v = -1;
+        int bytes;
+
+        if (fpo.cls[i] != 'x') {
+            continue;
+        }
+        if (i >= out_n) {
+            v = in->asm_in_values[i - out_n];
+            bytes = asm_operand_size(in->asm_in_sizes, in_n, i - out_n, 8);
+        } else if ((in->asm_out_constraints[i] != NULL && strchr(in->asm_out_constraints[i], '+') != NULL)) {
+            v = in->asm_out_values[i];
+            bytes = asm_operand_size(in->asm_out_sizes, out_n, i, 8);
+        } else {
+            continue;
+        }
+        if (v < 0 || CC_SSA_ASM_MEM_INDIRECT_P(v) ||
+            asm_fp_xmm_load(fp, f, lay, v, bytes, fpo.reg[i], fpo.scratch, is_64bit) != 0) {
+            goto impossible;
+        }
+    }
+    if (asm_fp_push(fp, f, lay, in, &fpo, is_64bit) != 0) {
+        goto impossible;
+    }
 
     {
         size_t label_base = total;
@@ -3499,6 +3821,15 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     for (path = 0; path <= (stub_ids != NULL ? in->asm_goto_count : 0); ++path) {
         if (path > 0) {
             fprintf(fp, ".L%s_%zu:\n", stub_fn, path - 1);
+        }
+        /* the x87 outputs popped, and what the asm left above them; the %xmm outputs stored */
+        asm_fp_pop(fp, f, lay, in, &fpo, is_64bit);
+        for (i = 0; i < out_n; ++i) {
+            if (fpo.cls[i] == 'x' &&
+                asm_fp_xmm_store(fp, f, lay, in->asm_out_values[i], asm_operand_size(in->asm_out_sizes, out_n, i, 8),
+                                 fpo.reg[i], fpo.scratch, is_64bit) != 0) {
+                goto impossible;
+            }
         }
         for (i = 0; i < out_n; ++i) {
             /*

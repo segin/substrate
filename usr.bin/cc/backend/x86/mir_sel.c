@@ -1210,9 +1210,6 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
         if (v < 0 || v >= f->value_count) {
             continue;
         }
-        if (cc_ssa_value_class(f, v) == CC_VAL_F64) {
-            NOPE(s);
-        }
         /* read: an input not written as an immediate, a `+` output, the address of a memory output; a 64-bit
          * output too, whose word the asm does not write keeps its value */
         need_in = !is_out || indirect || (c != NULL && strchr(c, '+') != NULL) || xs_is_pair(s, v);
@@ -1225,7 +1222,10 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
             }
         }
         if (bd == NULL) {
-            int o = s->addr_taken[v] ? s->obj[v] : asm_slot(s, s->nbind - first);
+            /* an x87 floating value lives in its home, which the asm reads and writes as its slot */
+            int o = xs_fp_kind(s, v) == XFP_X87 ? xs_fp_home(s, v).obj
+                    : s->addr_taken[v]          ? s->obj[v]
+                                                : asm_slot(s, s->nbind - first);
 
             bd = add_bind(s);
             if (bd == NULL || o < 0) {
@@ -1234,14 +1234,20 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
             bd->v = v;
             bd->obj = o;
         }
-        if (s->addr_taken[v]) {
+        if (s->addr_taken[v] || xs_fp_kind(s, v) == XFP_X87) {
             continue; /* it lives there */
         }
         bd->in |= (unsigned char)need_in;
         bd->out |= (unsigned char)(is_out && !indirect);
     }
     for (b = first; b < s->nbind; ++b) {
-        if (s->bind[b].in) {
+        if (s->bind[b].in && xs_fp_kind(s, s->bind[b].v) == XFP_SSE) {
+            /* a double in a vector register: its 8 bytes */
+            xop_t m = xop_frame(s->bind[b].obj, 0, 8);
+            xop_t r = xs_fp_reg(s, s->bind[b].v);
+
+            xs_emit(s, XI_MOV, 8, 2, &r, &m, NULL);
+        } else if (s->bind[b].in) {
             for (part = 0; part < (xs_is_pair(s, s->bind[b].v) ? 2 : 1); ++part) {
                 xop_t m = xop_frame(s->bind[b].obj, 4 * part, w);
 
@@ -1261,7 +1267,12 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
     }
     xf_emit(&s->xf, &x);
     for (b = first; b < s->nbind; ++b) {
-        if (s->bind[b].out) {
+        if (s->bind[b].out && xs_fp_kind(s, s->bind[b].v) == XFP_SSE) {
+            xop_t m = xop_frame(s->bind[b].obj, 0, 8);
+            xop_t r = xs_fp_reg(s, s->bind[b].v);
+
+            xs_emit(s, XI_MOV, 8, 2, &m, &r, NULL);
+        } else if (s->bind[b].out) {
             for (part = 0; part < (xs_is_pair(s, s->bind[b].v) ? 2 : 1); ++part) {
                 xop_t m = xop_frame(s->bind[b].obj, 4 * part, w);
                 xop_t d = xop_reg(xs_vreg_of(s, s->bind[b].v, part), w);
