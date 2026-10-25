@@ -7,7 +7,9 @@
 # to its address made off %rip.  Linux's ia32_sys_call(), 471 system
 # calls, was 471 compares and branches, 8265 bytes against gcc's 2382.
 # A sparse switch stays a chain of compares, and i386 -fPIC code gets no
-# table.  The program is linked PIE as well.  Results are gcc's.
+# table, nor any under -fno-jump-tables, as Linux builds the code that
+# runs before it is relocated.  The program is linked PIE as well.
+# Results are gcc's.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -162,6 +164,11 @@ for m in $modes; do
 	"$CC_BIN" -m$m -O2 -fPIC -S -o "$CC_TMP/p.s" "$CC_TMP/s.c"
 	if [ "$m" = 32 ] && grep -q '_jt[0-9]' "$CC_TMP/p.s"; then
 		echo "run_switch_table: -m32: -fPIC code has an absolute jump table"
+		exit 1
+	fi
+	"$CC_BIN" -m$m -O2 -fno-jump-tables -S -o "$CC_TMP/n.s" "$CC_TMP/s.c"
+	if grep -q '_jt[0-9]' "$CC_TMP/n.s"; then
+		echo "run_switch_table: -m$m: -fno-jump-tables code has a jump table"
 		exit 1
 	fi
 	if [ "$m" = 64 ]; then

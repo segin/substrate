@@ -48,6 +48,9 @@ typedef struct {
     int omit_frame_pointer;  /**< -fomit-frame-pointer: a function the frame pointer is not needed in addresses its
                                   frame off the stack pointer and has %ebp (%rbp) to allocate */
     int no_sse;              /**< -mno-sse, the last of it and -msse: no SSE register is touched where none is used */
+    int no_jump_tables;      /**< -fno-jump-tables, the last of it and -fjump-tables: a switch is always compares --
+                                  Linux's code that runs before it is relocated, which a table's absolute entries
+                                  would send nowhere */
 } cc_options_t;
 
 /**

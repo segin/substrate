@@ -262,6 +262,15 @@ emits go to
 loaded with the code, as by default, or only to
 .Li .debug_frame ,
 for a debugger.
+.It Fl fjump-tables , Fl fno-jump-tables
+Whether a
+.Ic switch
+of enough cases, dense enough, is a jump through a table, as by default,
+or always a chain of compares.
+Linux builds code that runs before it is relocated with
+.Fl fno-jump-tables :
+a table's absolute entries would send it nowhere.
+The last of the two given counts.
 .It Fl fomit-frame-pointer , Fl fno-omit-frame-pointer
 Whether a function addresses its frame off the stack pointer and has
 .Li %ebp

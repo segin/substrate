@@ -98,6 +98,7 @@ typedef struct {
   int cmodel_kernel; /* -mcmodel=kernel */
   int omit_frame_pointer; /* -fomit-frame-pointer, -fno-omit-frame-pointer */
   int no_sse;        /* -mno-sse, the last of it and -msse */
+  int no_jump_tables; /* -fno-jump-tables, the last of it and -fjump-tables */
 
   const char *std;
   const char *opt_level;
@@ -191,6 +192,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->cmodel_kernel = o->cmodel_kernel;
   out->omit_frame_pointer = o->omit_frame_pointer;
   out->no_sse = o->no_sse;
+  out->no_jump_tables = o->no_jump_tables;
 }
 
 
@@ -1372,6 +1374,8 @@ static const driver_opt_t options[] = {
     {"-fpcc-struct-return", OPT_FLAG, FWD_C, opt_int, F(i386_reg_struct_return), 0},
     {"-fomit-frame-pointer", OPT_FLAG, FWD_C, opt_int, F(omit_frame_pointer), 1},
     {"-fno-omit-frame-pointer", OPT_FLAG, FWD_C, opt_int, F(omit_frame_pointer), 0},
+    {"-fjump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 0},
+    {"-fno-jump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 1},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
     /* an executable's position-independent code: its own symbols bind within it (Linux's boot/compressed) */
     {"-fPIE -fpie", OPT_FLAG, FWD_C, opt_int, F(fpie), 1},

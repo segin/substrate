@@ -2675,7 +2675,8 @@ static int switch_labels(xsel_t *s) {
  * table's size (above it, the default), and a jump through the table, which print_function() writes in .rodata.
  * The chain's blocks after the first are skipped (s->skip_to).  Linux's ia32_sys_call(), a switch of 471 system
  * calls, was 471 compares and branches.  The entries are absolute on i386 and under -mcmodel=kernel, offsets from
- * the table in other x86-64 code, which may be linked position-independent; none under -fPIC on i386.
+ * the table in other x86-64 code, which may be linked position-independent; none under -fPIC on i386, nor under
+ * -fno-jump-tables (Linux's code that runs before it is relocated).
  *
  * @return 1 if it was, else 0
  */
@@ -2696,7 +2697,7 @@ static int sel_switch_table(xsel_t *s, size_t j) {
     int vsz;
     int w = s->word;
 
-    if ((opts != NULL && opts->pic && w == 4) || switch_labels(s) != 0) {
+    if ((opts != NULL && ((opts->pic && w == 4) || opts->no_jump_tables)) || switch_labels(s) != 0) {
         return 0;
     }
     for (;;) {
