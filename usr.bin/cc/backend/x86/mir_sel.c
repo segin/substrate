@@ -625,6 +625,36 @@ static int sel_mask_test(xsel_t *s, int mv) {
     return 1;
 }
 
+static int ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src);
+static int zero_test_operand(const xsel_t *s, const cc_ssa_instr_t *in);
+static int br_test_bytes(const xsel_t *s, int v);
+
+/**
+ * Set the flags for an extension @p v of the low bytes of a value, read only here, against 0: a test of those
+ * bytes (on x86-64, every register having a byte), the extension unmade -- a bool a call returned, tested, was a
+ * movzbl and a test of the word.
+ *
+ * @return 1 when @p v is such an extension and the flags are set, else 0
+ */
+static int sel_ext_test(xsel_t *s, int v) {
+    const cc_ssa_instr_t *d = def_of(s, v);
+    int src;
+    int bytes;
+    xop_t r;
+
+    if (s->word != 8 || d == NULL || s->nuses[v] != 1 || (bytes = ext_of(s, d, &src)) <= 0 || bytes > 4 ||
+        xs_is_pair(s, src) || !stable(s, src)) {
+        return 0;
+    }
+    r = xs_reg_word(s, src, 0);
+    if (r.kind != XO_REG) {
+        return 0;
+    }
+    r.size = (unsigned char)bytes;
+    xs_emit(s, XI_TEST, bytes, 2, &r, &r, NULL);
+    return 1;
+}
+
 /**
  * Set the flags for compare @p in (lhs against rhs), its operands swapped when the left one is a constant;
  * the condition to test them by goes to *@p cc.  0, or 1 when both are constants and *@p known is the result.
@@ -640,9 +670,22 @@ static int compare(xsel_t *s, const cc_ssa_instr_t *in, xcc_t *cc, int *known) {
         /* (x & k) == 0, != 0 */
         long long z;
 
-        if ((xs_const_of(s, in->rhs, &z) && z == 0 && sel_mask_test(s, in->lhs)) ||
-            (xs_const_of(s, in->lhs, &z) && z == 0 && sel_mask_test(s, in->rhs))) {
+        int x;
+
+        if ((xs_const_of(s, in->rhs, &z) && z == 0 && (sel_mask_test(s, in->lhs) || sel_ext_test(s, in->lhs))) ||
+            (xs_const_of(s, in->lhs, &z) && z == 0 && (sel_mask_test(s, in->rhs) || sel_ext_test(s, in->rhs)))) {
             return 0;
+        }
+        if ((x = zero_test_operand(s, in)) >= 0) {
+            /* of its own bits, compute_demand() having said that is all that is read of it */
+            int bytes = br_test_bytes(s, x);
+            xop_t r = xs_reg_word(s, x, 0);
+
+            if (r.kind == XO_REG) {
+                r.size = (unsigned char)bytes;
+                xs_emit(s, XI_TEST, bytes, 2, &r, &r, NULL);
+                return 0;
+            }
         }
     }
     if (a.kind == XO_IMM && b.kind == XO_IMM) {
@@ -744,6 +787,43 @@ static int cmp32(const xsel_t *s, const cc_ssa_instr_t *in) {
 
 int xs_extends_taken(const xsel_t *s, int v, int bytes) {
     return s->dbits == NULL || v < 0 || v >= s->f->value_count || bytes >= s->word || s->dbits[v] > 8 * bytes;
+}
+
+/**
+ * The bytes a branch on value @p v tests, on x86-64: an integer of four bytes or less is nonzero by its own bits
+ * (test %al, %al; test %eax, %eax), whatever is above them; 0 for the whole word.
+ */
+static int br_test_bytes(const xsel_t *s, int v) {
+    const cc_ssa_function_t *f = s->f;
+    uint32_t n;
+
+    if (s->word != 8 || v < 0 || v >= f->value_count || cc_ssa_value_class(f, v) != CC_VAL_I64 ||
+        f->value_ty[v].kind == CC_TY_AGG || s->addr_taken[v] || xs_is_pair(s, v)) {
+        return 0;
+    }
+    n = cc_ssa_value_size(f, v);
+    return n == 1 || n == 2 || n == 4 ? (int)n : 0;
+}
+
+/**
+ * Of compare @p in, `x == 0` or `x != 0`, x an integer br_test_bytes() tests by its own bits: x; else -1.
+ */
+static int zero_test_operand(const xsel_t *s, const cc_ssa_instr_t *in) {
+    long long z;
+    int x;
+
+    if (in->op != CC_SSA_CMP || (in->cmp_kind != CC_CMP_EQ && in->cmp_kind != CC_CMP_NE) || in->lhs < 0 ||
+        in->rhs < 0) {
+        return -1;
+    }
+    if (xs_const_of((xsel_t *)s, in->rhs, &z) && z == 0) {
+        x = in->lhs;
+    } else if (xs_const_of((xsel_t *)s, in->lhs, &z) && z == 0) {
+        x = in->rhs;
+    } else {
+        return -1;
+    }
+    return br_test_bytes(s, x) > 0 && !xs_const_of((xsel_t *)s, x, &z) ? x : -1;
 }
 
 /** The mask extension @p in is -- an and with 0xff, 0xffff or (x86-64) 0xffffffff -- its byte count, its source *@p src. */
@@ -853,9 +933,23 @@ static int compute_demand(xsel_t *s) {
                 }
                 break;
             case CC_SSA_CMP:
+                if (zero_test_operand(s, in) >= 0) {
+                    /* x == 0, x != 0 of an integer of four bytes or less: its own bits */
+                    int x = zero_test_operand(s, in);
+
+                    demand(&c, x, 8 * br_test_bytes(s, x));
+                    continue;
+                }
                 if (cmp32(s, in)) {
                     demand(&c, in->lhs, 32);
                     demand(&c, in->rhs, 32);
+                    continue;
+                }
+                break;
+            case CC_SSA_BR_COND:
+                /* a branch on an integer of four bytes or less, on x86-64: whether its own bits are 0 (br_test_bytes()) */
+                if (br_test_bytes(s, in->lhs) > 0) {
+                    demand(&c, in->lhs, 8 * br_test_bytes(s, in->lhs));
                     continue;
                 }
                 break;
@@ -2567,9 +2661,11 @@ static void sel_instr(xsel_t *s, size_t j) {
             break;
         }
         {
-            xop_t v = xop_reg(xs_vreg_of(s, in->lhs, 0), w);
+            int bytes = br_test_bytes(s, in->lhs);
+            xop_t v = xop_reg(xs_vreg_of(s, in->lhs, 0), bytes > 0 ? bytes : w);
 
-            xs_emit(s, XI_TEST, w, 2, &v, &v, NULL);
+            /* (of its own bits: what is above them may be anything, compute_demand() having said so) */
+            xs_emit(s, XI_TEST, bytes > 0 ? bytes : w, 2, &v, &v, NULL);
             branch(s, j, XC_NE, in->true_label, in->false_label);
         }
         break;

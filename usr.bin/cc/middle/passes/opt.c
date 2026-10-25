@@ -795,6 +795,65 @@ static int block_test_of(const cc_ssa_function_t *f, long li, const const_state_
 }
 
 /**
+ * A jump to the label right after it, the label's only way in, goes, and the label with it: the two blocks are
+ * one, which block_test_of() can then see whole -- inlining leaves the copies of a result in one block and the
+ * test of them in the next.
+ *
+ * @return 1 if anything changed, 0 if not, -1 when out of memory
+ */
+static int merge_straight(cc_ssa_function_t *f) {
+    int *refs;
+    size_t i;
+    size_t w = 0;
+    int changed = 0;
+
+    if (f->label_count <= 0) {
+        return 0;
+    }
+    refs = (int *)calloc((size_t)f->label_count, sizeof(*refs));
+    if (refs == NULL) {
+        return -1;
+    }
+#define REF(l) do { if ((l) >= 0 && (l) < f->label_count) refs[(l)]++; } while (0)
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->op == CC_SSA_BR || in->op == CC_SSA_LADDR) {
+            REF(in->label);
+        } else if (in->op == CC_SSA_BR_COND) {
+            REF(in->true_label);
+            REF(in->false_label);
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_goto_count; ++k) {
+            REF(in->asm_goto_labels[k]);
+        }
+    }
+#undef REF
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_BR && i + 1 < f->instr_count && f->instrs[i + 1].op == CC_SSA_LABEL &&
+            f->instrs[i + 1].label == in->label && in->label >= 0 && in->label < f->label_count &&
+            refs[in->label] == 1) {
+            /* the jump and the label: what follows is reached only from here, by falling through */
+            cc_ssa_instr_free(in);
+            cc_ssa_instr_free(&f->instrs[i + 1]);
+            ++i;
+            changed = 1;
+            continue;
+        }
+        if (w != i) {
+            f->instrs[w] = f->instrs[i];
+        }
+        w++;
+    }
+    f->instr_count = w;
+    free(refs);
+    return changed;
+}
+
+/**
  * Jump threading.  A block that only tests a variable (block_test_of()) is where cc's && and || meet: each way
  * in sets the variable, to 0 or 1 or to a compare.  A way in that sets it to a constant just before goes
  * where the test sends that constant; an unconditional jump in after `v = s` branches on s itself.  The test's
@@ -807,10 +866,14 @@ static int thread_jumps(cc_ssa_function_t *f) {
     const_state_t *g;
     int *uses;
     size_t i;
-    int changed = 0;
+    int changed;
 
     if (f->label_count <= 0 || f->value_count <= 0) {
         return 0;
+    }
+    changed = merge_straight(f);
+    if (changed < 0) {
+        return -1;
     }
     at = (long *)malloc((size_t)f->label_count * sizeof(*at));
     uses = (int *)calloc((size_t)f->value_count, sizeof(*uses));
@@ -2389,6 +2452,28 @@ static int fold_bool_not(cc_ssa_function_t *f) {
             changed++;
             continue;
         }
+        if (in->op == CC_SSA_AND && in->lhs >= 0 && in->rhs >= 0 && in->dst >= 0) {
+            /* a 0 or a 1 masked with an odd number (a bool's 0xff): itself */
+            int side;
+
+            for (side = 0; side < 2; ++side) {
+                int kv = side ? in->lhs : in->rhs;
+                int xv = side ? in->rhs : in->lhs;
+
+                if (defs[kv] == 1 && f->instrs[def_at[kv]].op == CC_SSA_CONST && (f->instrs[def_at[kv]].imm & 1) &&
+                    truth[xv] && cc_ssa_value_class(f, xv) == CC_VAL_I64) {
+                    in->op = CC_SSA_MOV;
+                    in->lhs = xv;
+                    in->rhs = -1;
+                    in->imm = 0;
+                    changed++;
+                    break;
+                }
+            }
+            if (in->op == CC_SSA_MOV) {
+                continue;
+            }
+        }
 
         if (in->op != CC_SSA_CMP || (in->cmp_kind != CC_CMP_EQ && in->cmp_kind != CC_CMP_NE) || in->lhs < 0 ||
             in->rhs < 0) {
@@ -2741,6 +2826,18 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
             }
         } while (rc1 > 0 && rc3 >= 0 && ++round < 8);
         rc2 = dce_function(f);
+        /* a block the definitions gone left only jumping on is threaded past (merge_straight(), thread_jumps()) */
+        for (round = 0; round < 3 && rc2 > 0; ++round) {
+            int rt = thread_jumps(f);
+
+            if (rt <= 0) {
+                rc2 = rt;
+                break;
+            }
+            rc2 = unreachable_function(f);
+            rc2 = rc2 < 0 ? -1 : dce_function(f);
+        }
+        rc2 = rc2 < 0 ? -1 : 0;
     }
     return rc1 < 0 || rc2 < 0 || rc3 < 0 ? -1 : 0;
 }
@@ -3426,6 +3523,11 @@ static int settle_function(cc_ssa_function_t *f) {
         rc = rc < 0 ? -1 : cc_propagate_copies(f);
         rc = rc < 0 ? -1 : thread_jumps(f);
         rc = rc < 0 ? -1 : unreachable_function(f);
+        if (rc == 0) {
+            /* (and what the dead definitions leave only jumping on) */
+            rc = dce_function(f);
+            rc = rc <= 0 ? rc : thread_jumps(f);
+        }
         if (rc <= 0) {
             return rc < 0 ? -1 : 0;
         }

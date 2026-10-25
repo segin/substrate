@@ -7,7 +7,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   (a value every definition of which copies one constant -- across a
   change of size when the constant means the same at every width -- is
   that constant; after the last passes, folding repeats while it drops
-  arms that cannot run, `settle_function()`),
+  arms that cannot run, `settle_function()`), jump threading
+  (`thread_jumps()`: a way into a block that only tests a variable goes
+  where the value it sets goes, or branches on the compare it sets, a
+  jump to the next label, its only way in, merging the blocks first),
   unreachable-code removal and dead-value elimination, and from -O1 the
   forwarding of a local slot stored once with a constant into its loads
   (`forward_const_slots()`), a compare's truth tested again (`!!x`,
