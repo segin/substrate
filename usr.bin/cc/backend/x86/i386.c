@@ -4068,7 +4068,7 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
 
             case CC_SSA_ASM:
                 int_regs_flush(fp, f, &lay, &ist);
-                if (emit_inline_asm(fp, f, &lay, in, i, j, 0, diag) != 0) {
+                if (emit_inline_asm(fp, f, &lay, in, i, j, 0, NULL, diag) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
                     return -1;

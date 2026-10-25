@@ -1181,6 +1181,168 @@ static int asm_slot(xsel_t *s, int k) {
     return s->asm_slot[k];
 }
 
+/** Whether output @p k of inline asm @p in is a flag output ("=@ccz"). */
+static int c_is_flag(const cc_ssa_instr_t *in, size_t k) {
+    const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[k] : NULL;
+
+    return c != NULL && strncmp(c, "=@cc", 4) == 0;
+}
+
+/** The value of inline asm @p in's operand @p k (outputs then inputs), its address for one given so, or -1. */
+static int asm_operand_value(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t k) {
+    int raw = k < in->asm_out_count ? in->asm_out_values[k] : in->asm_in_values[k - in->asm_out_count];
+    int v = CC_SSA_ASM_MEM_INDIRECT_P(raw) ? CC_SSA_ASM_MEM_INDIRECT_DECODE(raw) : raw;
+
+    return v >= 0 && v < f->value_count ? v : -1;
+}
+
+/**
+ * Whether inline asm @p in may have its operands in registers by @p plan (x86_asm_plan()): no value of a register
+ * operand in two words or floating, which the plan's general registers would not hold.
+ */
+static int asm_bindable(xsel_t *s, const cc_ssa_instr_t *in, const x86_asm_plan_t *plan) {
+    size_t k;
+
+    for (k = 0; k < plan->n; ++k) {
+        int v = asm_operand_value(s->f, in, k);
+
+        if (v >= 0 && (xs_is_pair(s, v) || xs_fp_kind(s, v) != XFP_NONE)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * Inline asm @p in, IR instruction @p j, with its register operands in the registers @p plan gives them: each
+ * input moved there before, each output moved out after (zero-extended from its size, as emit_inline_asm() left
+ * it), the rest -- memory operands -- in slots as sel_asm() binds them.  The asm reads, writes and clobbers those
+ * registers alone, so the function keeps its values in registers across it, and saves a callee-saved one it uses
+ * in its own prologue.
+ */
+static void sel_asm_bound(xsel_t *s, size_t j, const cc_ssa_instr_t *in, const x86_asm_plan_t *plan) {
+    const cc_ssa_function_t *f = s->f;
+    size_t out_n = in->asm_out_count;
+    int first = s->nbind;
+    int w = s->word;
+    unsigned uses = 0;
+    unsigned defs = 0;
+    xinst_t x;
+    size_t k;
+    int b;
+
+    /* the memory operands' slots */
+    for (k = 0; k < plan->n; ++k) {
+        int is_out = k < out_n;
+        const char *c = is_out ? (in->asm_out_constraints != NULL ? in->asm_out_constraints[k] : NULL)
+                               : (in->asm_in_constraints != NULL ? in->asm_in_constraints[k - out_n] : NULL);
+        int v = asm_operand_value(f, in, k);
+        xasm_bind_t *bd = NULL;
+
+        if (v < 0 || plan->kind[k] != X86_ASM_SLOT) {
+            continue;
+        }
+        for (b = first; b < s->nbind; ++b) {
+            if (s->bind[b].v == v) {
+                bd = &s->bind[b];
+            }
+        }
+        if (bd == NULL) {
+            int o = s->addr_taken[v] ? s->obj[v] : asm_slot(s, s->nbind - first);
+
+            bd = add_bind(s);
+            if (bd == NULL || o < 0) {
+                return;
+            }
+            bd->v = v;
+            bd->obj = o;
+        }
+        if (s->addr_taken[v]) {
+            continue; /* it lives there */
+        }
+        bd->in |= (unsigned char)(!is_out || (c != NULL && strchr(c, '+') != NULL));
+        bd->out |= (unsigned char)is_out;
+    }
+    for (b = first; b < s->nbind; ++b) {
+        if (s->bind[b].in) {
+            xop_t m = xop_frame(s->bind[b].obj, 0, w);
+
+            xs_move_word_to(s, s->bind[b].v, 0, &m);
+        }
+    }
+    /* the register operands' values, into their registers */
+    for (k = 0; k < plan->n; ++k) {
+        int v = asm_operand_value(f, in, k);
+        int is_out = k < out_n;
+        const char *c = is_out ? (in->asm_out_constraints != NULL ? in->asm_out_constraints[k] : NULL) : NULL;
+        int r = plan->reg[k];
+        xop_t d;
+
+        if (v < 0 || r < 0) {
+            continue;
+        }
+        d = xop_reg(r, w);
+        if (plan->kind[k] == X86_ASM_ADDR || (!is_out && plan->kind[k] == X86_ASM_REG) ||
+            (!is_out && plan->kind[k] == X86_ASM_IMM) /* a tied input: into its output's register */ ||
+            (is_out && plan->kind[k] == X86_ASM_REG && c != NULL && strchr(c, '+') != NULL)) {
+            xs_move_word_to(s, v, 0, &d);
+            uses |= XR_BIT(r);
+        }
+        if (is_out && plan->kind[k] == X86_ASM_REG) {
+            defs |= XR_BIT(r);
+        }
+    }
+    x = xi_make(XI_ASM, w, 0, NULL, NULL, NULL);
+    x.ir_index = (int)j;
+    x.aux = first;
+    x.imp_use = uses;
+    x.imp_def = defs;
+    x.clobber = x86_asm_clobbered_gprs(in) & ~(XR_BIT(XR_SP) | XR_BIT(XR_BP));
+    xf_emit(&s->xf, &x);
+    /* the outputs, out of their registers: of their size, the rest zero */
+    for (k = 0; k < out_n; ++k) {
+        int v = asm_operand_value(f, in, k);
+        int osz = in->asm_out_sizes != NULL && in->asm_out_sizes[k] > 0 ? (int)in->asm_out_sizes[k] : w;
+        xop_t r;
+        xop_t d;
+
+        if (v < 0 || plan->kind[k] != X86_ASM_REG) {
+            continue;
+        }
+        d = xop_reg(xs_vreg_of(s, v, 0), w);
+        if (c_is_flag(in, k)) {
+            /* emit_inline_asm() set it and cleared the rest */
+            r = xop_reg(plan->reg[k], w);
+            xs_emit(s, XI_MOV, w, 2, &r, &d, NULL);
+        } else if (osz < 4) {
+            r = xop_reg(plan->reg[k], osz);
+            xs_emit(s, XI_MOVZX, w, 2, &r, &d, NULL);
+        } else if (osz == 4 && w == 8) {
+            r = xop_reg(plan->reg[k], 4);
+            d.size = 4;
+            xs_emit(s, XI_MOV, 4, 2, &r, &d, NULL);
+        } else {
+            r = xop_reg(plan->reg[k], w);
+            xs_emit(s, XI_MOV, w, 2, &r, &d, NULL);
+        }
+    }
+    for (b = first; b < s->nbind; ++b) {
+        if (s->bind[b].out) {
+            xop_t m = xop_frame(s->bind[b].obj, 0, w);
+            xop_t d = xop_reg(xs_vreg_of(s, s->bind[b].v, 0), w);
+
+            xs_emit(s, XI_MOV, w, 2, &m, &d, NULL);
+        }
+    }
+    {
+        xasm_bind_t *end = add_bind(s);
+
+        if (end != NULL) {
+            end->v = -1;
+        }
+    }
+}
+
 /**
  * An inline asm: emit_inline_asm() reads its operands from frame slots and writes its outputs there, so each is
  * copied into a slot of its own first and back out after -- a value whose address is taken is in its frame object
@@ -1196,6 +1358,27 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
     size_t i;
     int b;
     int part;
+
+    {
+        x86_asm_plan_t plan;
+        int rc = x86_asm_plan(f, in, j, w == 8, &plan);
+
+        if (rc < 0) {
+            s->xf.oom = 1;
+            return;
+        }
+        if (rc == 0) {
+            int ok = asm_bindable(s, in, &plan);
+
+            if (ok) {
+                sel_asm_bound(s, j, in, &plan);
+            }
+            x86_asm_plan_free(&plan);
+            if (ok) {
+                return;
+            }
+        }
+    }
 
     for (i = 0; i < total; ++i) {
         int is_out = i < in->asm_out_count;
@@ -2263,8 +2446,20 @@ static int print_asm(FILE *fp, const xsel_t *s, const xinst_t *in, cc_diag_t *di
         /* slot_off() is -(slot_of + 1) with a slot size of 1 and no bias */
         lay.slot_of[s->bind[b].v] = (int)(-s->xf.obj[s->bind[b].obj].off - 1);
     }
-    rc = emit_inline_asm(fp, f, &lay, &f->instrs[in->ir_index], s->fn_index, (size_t)in->ir_index, s->word == 8,
-                         diag);
+    {
+        /* bound as the selector bound it: the same plan, made again */
+        const cc_ssa_instr_t *ai = &f->instrs[in->ir_index];
+        x86_asm_plan_t plan;
+        int prc = x86_asm_plan(f, ai, (size_t)in->ir_index, s->word == 8, &plan);
+        int bound = prc == 0 && asm_bindable((xsel_t *)s, ai, &plan);
+
+        rc = prc < 0 ? -1
+                     : emit_inline_asm(fp, f, &lay, ai, s->fn_index, (size_t)in->ir_index, s->word == 8,
+                                       bound ? &plan : NULL, diag);
+        if (prc == 0) {
+            x86_asm_plan_free(&plan);
+        }
+    }
     free(lay.slot_of);
     free(lay.stackalloc_off);
     return rc;
@@ -2295,6 +2490,8 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         const xinst_t *in = &s->xf.ins[i];
         int k;
 
+        /* (and what an asm reads, writes or clobbers: its registers are its operands') */
+        saved |= in->imp_use | in->imp_def | in->clobber;
         for (k = 0; k < in->nops; ++k) {
             const xop_t *o = &in->o[k];
 

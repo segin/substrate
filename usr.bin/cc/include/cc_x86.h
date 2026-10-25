@@ -178,9 +178,44 @@ int emit_dynalloc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay
  * an immediate, as emit_inline_asm() renders it: then nothing reads its slot.
  */
 int x86_asm_input_is_immediate(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t i, size_t instr_index);
-/** An inline asm statement: bind its operands, write its template. */
+/** Where x86_asm_plan() puts an inline asm operand. */
+enum {
+    X86_ASM_IMM = 0, /**< written into the template: an immediate, or a tied input (its output's register) */
+    X86_ASM_SLOT,    /**< in memory: its frame slot */
+    X86_ASM_REG,     /**< its value in a general register */
+    X86_ASM_ADDR     /**< memory given by its address, in a general register */
+};
+
+/**
+ * The places of an inline asm's operands, outputs then inputs, for a caller that keeps its values in registers
+ * (the MIR selector): each operand's kind, and for X86_ASM_REG and X86_ASM_ADDR the general register's hardware
+ * number.  emit_inline_asm() given it binds each operand there and loads, stores and saves nothing itself.
+ */
+typedef struct {
+    size_t n;
+    unsigned char *kind;
+    signed char *reg;
+} x86_asm_plan_t;
+
+/**
+ * Plan inline asm @p in, IR instruction @p instr_index of @p f: each operand's place, a register chosen as
+ * emit_inline_asm() chooses one.  An asm goto, an x87 or vector operand, or one in a register pair is not
+ * planned: emit_inline_asm() binds those through slots.
+ *
+ * @return 0 with *@p p filled (x86_asm_plan_free() frees it), 1 when not planned, -1 when out of memory
+ */
+int x86_asm_plan(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t instr_index, int is_64bit,
+                 x86_asm_plan_t *p);
+/** Free what x86_asm_plan() made. */
+void x86_asm_plan_free(x86_asm_plan_t *p);
+/** The general registers (hardware numbers, as a mask) inline asm @p in's clobber list names. */
+unsigned x86_asm_clobbered_gprs(const cc_ssa_instr_t *in);
+/**
+ * An inline asm statement: bind its operands, write its template.  With @p bound (x86_asm_plan()), each
+ * register operand is in the register the plan gives it, before and after.
+ */
 int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
-                    size_t fn_index, size_t instr_index, int is_64bit, cc_diag_t *diag);
+                    size_t fn_index, size_t instr_index, int is_64bit, const x86_asm_plan_t *bound, cc_diag_t *diag);
 /** Store %st0 truncated as a 64-bit integer at @p out(@p base), unsigned if @p is_unsigned. */
 void emit_x87_store_i64(FILE *fp, const char *base, int out, int k, int is_unsigned);
 

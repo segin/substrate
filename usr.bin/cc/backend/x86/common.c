@@ -3394,8 +3394,194 @@ static void asm_fp_pop(FILE *out, const cc_ssa_function_t *f, const slot_layout_
     }
 }
 
+unsigned x86_asm_clobbered_gprs(const cc_ssa_instr_t *in) {
+    unsigned m = 0;
+    size_t i;
+
+    for (i = 0; i < in->asm_clobber_count; ++i) {
+        m |= x86_gpr_bit(in->asm_clobbers[i]);
+    }
+    return m;
+}
+
+void x86_asm_plan_free(x86_asm_plan_t *p) {
+    free(p->kind);
+    free(p->reg);
+    memset(p, 0, sizeof(*p));
+}
+
+/** Whether constraint @p c is a flag output's ("=@ccz"): the letters after it are a condition, not registers. */
+static int asm_flag_output(const char *c) {
+    return c != NULL && strncmp(c, "=@cc", 4) == 0;
+}
+
+int x86_asm_plan(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t instr_index, int is_64bit,
+                 x86_asm_plan_t *p) {
+    size_t out_n = in->asm_out_count;
+    size_t in_n = in->asm_in_count;
+    size_t total = out_n + in_n;
+    unsigned fixed_mask = 0;
+    unsigned clobber_mask = x86_asm_clobbered_gprs(in);
+    unsigned out_mask = 0;
+    unsigned out_live_mask = 0;
+    unsigned in_mask = 0;
+    asm_fp_t fpo;
+    size_t i;
+
+    memset(p, 0, sizeof(*p));
+    if (in->asm_is_goto) {
+        return 1;
+    }
+    memset(&fpo, 0, sizeof(fpo));
+    for (i = 0; i < in->asm_clobber_count; ++i) {
+        asm_fp_note_clobber(&fpo, in->asm_clobbers[i]);
+    }
+    if (total > ASM_FP_MAX || asm_fp_assign(&fpo, in, is_64bit) != 0) {
+        return 1;
+    }
+    for (i = 0; i < total; ++i) {
+        const char *c = i < out_n ? (in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL)
+                                  : (in->asm_in_constraints != NULL ? in->asm_in_constraints[i - out_n] : NULL);
+        int size = i < out_n ? asm_operand_size(in->asm_out_sizes, out_n, i, 4)
+                             : asm_operand_size(in->asm_in_sizes, in_n, i - out_n, 4);
+
+        if (fpo.cls[i] != 0 || asm_pair_operand(c, is_64bit, size)) {
+            return 1;
+        }
+    }
+    p->n = total;
+    p->kind = (unsigned char *)calloc(total > 0 ? total : 1, 1);
+    p->reg = (signed char *)malloc(total > 0 ? total : 1);
+    if (p->kind == NULL || p->reg == NULL) {
+        x86_asm_plan_free(p);
+        return -1;
+    }
+    for (i = 0; i < total; ++i) {
+        p->reg[i] = -1;
+    }
+    /* the registers constraints name, kept from the others' choices (as emit_inline_asm() keeps them) */
+    for (i = 0; i < total; ++i) {
+        const char *c = i < out_n ? (in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL)
+                                  : (in->asm_in_constraints != NULL ? in->asm_in_constraints[i - out_n] : NULL);
+
+        if (asm_flag_output(c) || cc_asm_constraint_matched_operand(c) >= 0 || cc_asm_constraint_is_memory_only(c)) {
+            continue;
+        }
+        fixed_mask |= x86_gpr_bit(is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
+    }
+    for (i = 0; i < out_n; ++i) {
+        const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
+        int vraw = in->asm_out_values != NULL ? in->asm_out_values[i] : -1;
+        int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
+        const char *reg;
+        int read = (c != NULL && strchr(c, '+') != NULL);
+        size_t k;
+
+        for (k = 0; k < in_n; ++k) {
+            const char *ic = in->asm_in_constraints != NULL ? in->asm_in_constraints[k] : NULL;
+
+            read |= cc_asm_constraint_matched_operand(ic) == (int)i;
+        }
+        if (cc_asm_constraint_is_memory_only(c)) {
+            if (CC_SSA_ASM_MEM_INDIRECT_P(vraw)) {
+                /* the address lives in a register for the whole asm: no input may share it */
+                reg = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4, fixed_mask | clobber_mask | out_mask);
+                if (reg == NULL) {
+                    x86_asm_plan_free(p);
+                    return 1;
+                }
+                out_mask |= x86_gpr_bit(reg);
+                out_live_mask |= x86_gpr_bit(reg);
+                p->kind[i] = X86_ASM_ADDR;
+                p->reg[i] = (signed char)x86_gpr_index(reg);
+            } else {
+                p->kind[i] = X86_ASM_SLOT;
+            }
+            continue;
+        }
+        reg = asm_flag_output(c) ? NULL : (is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c));
+        if (reg == NULL) {
+            reg = asm_pick_reg(is_64bit, c, osz, fixed_mask | clobber_mask | out_mask);
+        }
+        if (reg == NULL) {
+            x86_asm_plan_free(p);
+            return 1;
+        }
+        out_mask |= x86_gpr_bit(reg);
+        if (read || (c != NULL && strchr(c, '&') != NULL)) {
+            out_live_mask |= x86_gpr_bit(reg);
+        }
+        p->kind[i] = X86_ASM_REG;
+        p->reg[i] = (signed char)x86_gpr_index(reg);
+    }
+    for (i = 0; i < in_n; ++i) {
+        const char *c = in->asm_in_constraints != NULL ? in->asm_in_constraints[i] : NULL;
+        int v = in->asm_in_values != NULL ? in->asm_in_values[i] : -1;
+        size_t k = out_n + i;
+        int tied = cc_asm_constraint_matched_operand(c);
+        int isz = asm_operand_size(in->asm_in_sizes, in_n, i, is_64bit ? 8 : 4);
+        const char *reg;
+
+        if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
+            reg = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
+                               fixed_mask | clobber_mask | out_mask | out_live_mask | in_mask);
+            if (reg == NULL) {
+                x86_asm_plan_free(p);
+                return 1;
+            }
+            in_mask |= x86_gpr_bit(reg);
+            p->kind[k] = X86_ASM_ADDR;
+            p->reg[k] = (signed char)x86_gpr_index(reg);
+            continue;
+        }
+        if (tied >= 0) {
+            if ((size_t)tied >= out_n || p->kind[tied] != X86_ASM_REG) {
+                x86_asm_plan_free(p);
+                return 1;
+            }
+            p->kind[k] = X86_ASM_IMM;
+            p->reg[k] = p->reg[tied];
+            continue;
+        }
+        if (asm_constraint_is_immediate(c)) {
+            int gpr = cc_asm_constraint_allows_gpr(c);
+            int mem = cc_asm_constraint_allows_memory(c);
+
+            if (x86_asm_input_is_immediate(f, in, i, instr_index) || (!gpr && !mem)) {
+                p->kind[k] = X86_ASM_IMM;
+                continue;
+            }
+            if (mem && !gpr) {
+                p->kind[k] = X86_ASM_SLOT;
+                continue;
+            }
+        }
+        if (cc_asm_constraint_is_memory_only(c)) {
+            p->kind[k] = X86_ASM_SLOT;
+            continue;
+        }
+        reg = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
+        if (reg == NULL) {
+            unsigned avoid = fixed_mask | clobber_mask | out_live_mask | in_mask;
+
+            reg = asm_pick_reg(is_64bit, c, isz, avoid | out_mask);
+            if (reg == NULL) {
+                reg = asm_pick_reg(is_64bit, c, isz, avoid);
+            }
+        }
+        if (reg == NULL) {
+            x86_asm_plan_free(p);
+            return 1;
+        }
+        in_mask |= x86_gpr_bit(reg);
+        p->kind[k] = X86_ASM_REG;
+        p->reg[k] = (signed char)x86_gpr_index(reg);
+    }
+    return 0;
+}
+
 int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
-                           size_t fn_index, size_t instr_index, int is_64bit, cc_diag_t *diag) {
+                           size_t fn_index, size_t instr_index, int is_64bit, const x86_asm_plan_t *bound, cc_diag_t *diag) {
     size_t out_n = in->asm_out_count;
     size_t in_n = in->asm_in_count;
     size_t total = out_n + in_n;
@@ -3495,7 +3681,9 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         if (cc_asm_constraint_is_memory_only(c)) {
             if (is_indirect) {
                 /* the address lives in a register for the whole asm: no input may share it */
-                const char *areg = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4, fixed_mask | clobber_mask | out_mask);
+                const char *areg = bound != NULL ? x86_gpr_name(bound->reg[i], is_64bit)
+                                                 : asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
+                                                                fixed_mask | clobber_mask | out_mask);
                 char abuf[32];
                 if (areg == NULL) {
                     goto impossible;
@@ -3516,7 +3704,9 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             }
         } else {
             /* never another output's register, another operand's fixed one, or a clobbered one */
-            const char *reg = fixed != NULL ? fixed : asm_pick_reg(is_64bit, c, osz, fixed_mask | clobber_mask | out_mask);
+            const char *reg = bound != NULL ? x86_gpr_name(bound->reg[i], is_64bit)
+                              : fixed != NULL ? fixed
+                                              : asm_pick_reg(is_64bit, c, osz, fixed_mask | clobber_mask | out_mask);
             const char *render_reg;
             int read = (c != NULL && strchr(c, '+') != NULL) || out_tied_read[i];
 
@@ -3576,8 +3766,10 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
         if (CC_SSA_ASM_MEM_INDIRECT_P(v)) {
             /* a memory input given by its address (the object itself, as gcc passes it): in a register */
-            const char *areg = asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
-                                            fixed_mask | clobber_mask | out_mask | out_live_mask | in_mask);
+            const char *areg = bound != NULL ? x86_gpr_name(bound->reg[slot], is_64bit)
+                                             : asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
+                                                            fixed_mask | clobber_mask | out_mask | out_live_mask |
+                                                                in_mask);
             char abuf[32];
 
             if (areg == NULL) {
@@ -3677,7 +3869,9 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             const char *reg = NULL;
             int isz = asm_operand_size(in->asm_in_sizes, in_n, i, is_64bit ? 8 : 4);
             const char *render_reg = NULL;
-            if (fixed != NULL) {
+            if (bound != NULL) {
+                reg = x86_gpr_name(bound->reg[slot], is_64bit);
+            } else if (fixed != NULL) {
                 /* GCC accepts a fixed-class input that shares a register
                  * with an early-clobber output as long as the user wrote
                  * matching constraints; we don't fully model matching
@@ -3728,7 +3922,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
      * does, and the ABI says these survive the call.  (%esp and %ebp are
      * the frame's, and not the asm's to change.)
      */
-    saved_mask = (out_mask | in_mask | clobber_mask) & x86_callee_saved_mask(is_64bit);
+    /* (bound: the function's prologue saves what the asm uses, and its operands are in place) */
+    saved_mask = bound != NULL ? 0 : (out_mask | in_mask | clobber_mask) & x86_callee_saved_mask(is_64bit);
     {
         int pushes = 0;
         int r;
@@ -3745,7 +3940,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             }
         }
     }
-    for (i = 0; i < load_count; ++i) {
+    for (i = 0; i < load_count && bound == NULL; ++i) {
         if (loads[i].is_address) {
             emit_load_ptr_value_reg(fp, lay, loads[i].value, is_64bit, loads[i].reg);
         } else {
@@ -3874,7 +4069,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             }
         }
         for (i = 0; i < out_n; ++i) {
-            if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {
+            if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL && bound == NULL) {
                 int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
                 long off = slot_off(lay, in->asm_out_values[i]);
                 emit_zero_extend_reg(fp, out_regs[i], is_64bit, osz);
