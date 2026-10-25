@@ -41,7 +41,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   into one slot per field (its zeroing memset into stores of 0), and a
   compare of a slot only stored constants folded where the set of them
   it can hold, followed over the blocks and narrowed by branches on it,
-  decides it; and a scalar slot made a value (`cc_promote_slots()`),
+  decides it; and a scalar slot made a value (`cc_promote_slots()`: a
+  slot of a word or less, a one-word structure's among them, a whole
+  zeroing memset of it the value 0 and a whole memcpy to or from it a
+  copy, a load or a store),
   under an asm goto as anywhere, after which the definitions nothing
   reads go (`cc_dead_defs()`), liveness followed to an asm goto's
   labels too, and what that leaves one value folds again.

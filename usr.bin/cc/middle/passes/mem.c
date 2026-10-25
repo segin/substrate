@@ -233,6 +233,8 @@ static int is_zeroing_memset(const addr_info_t *a, const cc_ssa_instr_t *in, lon
            single_const(a->f, a->defs, a->def_at, in->args[2], n);
 }
 
+static int is_plain_memcpy(const addr_info_t *a, const cc_ssa_instr_t *in, long long *n);
+
 /** The size of slot @p s (its STACKALLOC's), or -1. */
 static long slot_size(const addr_info_t *a, int s) {
     return is_value(a->f, s) && a->def_at[s] >= 0 && a->f->instrs[a->def_at[s]].op == CC_SSA_STACKALLOC
@@ -244,7 +246,8 @@ static long slot_size(const addr_info_t *a, int s) {
  * Work out where each value points: a STACKALLOC, a single-definition move of such an address, or one plus a
  * constant.  An address used any other way -- passed, stored, compared, offset by a variable, moved into a value
  * defined more than once -- escapes its slot, and under an asm goto every slot does when @p asm_goto_escapes.  A
- * zeroing memset of a whole slot does not count as an escape when @p allow_memset.
+ * zeroing memset of a whole slot does not count as an escape when @p allow_memset has bit 1, nor a constant-size
+ * memcpy to or from one, the whole of it, when it has bit 2.
  *
  * @return 0, or -1 when out of memory
  */
@@ -308,8 +311,22 @@ static int addr_info_build(addr_info_t *a, const cc_ssa_function_t *f, int allow
             /* the address derivation itself: its operand is the base, not an escape */
             continue;
         }
-        if (allow_memset && is_zeroing_memset(a, in, &sz) && is_value(f, in->args[0]) && a->slot[in->args[0]] >= 0 &&
-            a->off[in->args[0]] == 0 && sz == slot_size(a, a->slot[in->args[0]])) {
+        if ((allow_memset & 1) && is_zeroing_memset(a, in, &sz) && is_value(f, in->args[0]) &&
+            a->slot[in->args[0]] >= 0 && a->off[in->args[0]] == 0 && sz == slot_size(a, a->slot[in->args[0]])) {
+            continue;
+        }
+        if ((allow_memset & 2) && is_plain_memcpy(a, in, &sz)) {
+            int k2;
+
+            /* a whole slot copied to or from is accessed, not escaping; any other address of one escapes */
+            for (k2 = 0; k2 < 2; ++k2) {
+                int p = in->args[k2];
+
+                if (is_value(f, p) && a->slot[p] >= 0 &&
+                    !(a->slot[p] == p && sz == slot_size(a, p) && in->args[0] != in->args[1])) {
+                    escape_value(a, p);
+                }
+            }
             continue;
         }
         if (asm_goto_escapes && in->op == CC_SSA_ASM && in->asm_is_goto) {
@@ -2192,7 +2209,9 @@ int cc_promote_slots(cc_ssa_function_t *f) {
      * blocks -- Linux's static keys put one in most functions, and every local of intel_pmu_init() stayed in
      * memory, 1.6 KiB of its frame
      */
-    if (addr_info_build(&a, f, 0, 0) != 0) {
+    /* (a whole slot's zeroing memset -- -ftrivial-auto-var-init=zero's, a structure's initializer -- is a store
+     * of 0, below) */
+    if (addr_info_build(&a, f, 3, 0) != 0) {
         return -1;
     }
     size = (long *)calloc((size_t)f->value_count, sizeof(*size));
@@ -2213,8 +2232,42 @@ int cc_promote_slots(cc_ssa_function_t *f) {
      */
     for (i = 0; i < f->instr_count; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
+        long long n;
         int v;
 
+        if (is_zeroing_memset(&a, in, &n) && is_value(f, in->args[0]) && a.slot[in->args[0]] >= 0) {
+            /* a store of 0 of the slot's size, when that is a word's or less, and the slot integers */
+            s = a.slot[in->args[0]];
+            if (in->args[0] != s || n != slot_size(&a, s) || (n != 1 && n != 2 && n != 4 && n != 8) ||
+                (size[s] != 0 && (size[s] != (long)n || cls[s] != (int)CC_VAL_I64))) {
+                bad[s] = 1;
+                continue;
+            }
+            size[s] = (long)n;
+            cls[s] = (int)CC_VAL_I64;
+            continue;
+        }
+        if (is_plain_memcpy(&a, in, &n)) {
+            /* a copy to or from a whole slot: an access of its size, of integers */
+            int k2;
+
+            for (k2 = 0; k2 < 2; ++k2) {
+                int p = in->args[k2];
+
+                if (!is_value(f, p) || a.slot[p] != p) {
+                    continue;
+                }
+                s = p;
+                if (n != slot_size(&a, s) || (n != 1 && n != 2 && n != 4 && n != 8) || in->args[0] == in->args[1] ||
+                    (size[s] != 0 && (size[s] != (long)n || cls[s] != (int)CC_VAL_I64))) {
+                    bad[s] = 1;
+                    continue;
+                }
+                size[s] = (long)n;
+                cls[s] = (int)CC_VAL_I64;
+            }
+            continue;
+        }
         if ((in->op != CC_SSA_LOAD && in->op != CC_SSA_STORE) || !is_value(f, in->lhs) || a.slot[in->lhs] < 0) {
             continue;
         }
@@ -2253,7 +2306,67 @@ int cc_promote_slots(cc_ssa_function_t *f) {
      */
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
+        long long n;
 
+        if (is_zeroing_memset(&a, in, &n) && is_value(f, in->args[0]) && in->args[0] < nold &&
+            a.slot[in->args[0]] == in->args[0] && var[in->args[0]] >= 0) {
+            /* var = 0 */
+            int t = cc_ssa_function_new_value(f, CC_VAL_I64);
+            int vv = var[in->args[0]];
+            cc_ssa_instr_t k = plain_instr(CC_SSA_CONST);
+            cc_ssa_instr_t mv = plain_instr(CC_SSA_MOV);
+
+            if (t < 0) {
+                rc = -1;
+                goto done;
+            }
+            cc_ssa_value_set_size(f, t, cc_ssa_value_size(f, vv));
+            k.dst = t;
+            k.imm = 0;
+            mv.dst = vv;
+            mv.lhs = t;
+            cc_ssa_instr_free(in);
+            if (ilist_put(&out, &k) != 0 || ilist_put(&out, &mv) != 0) {
+                rc = -1;
+                goto done;
+            }
+            changed = 1;
+            continue;
+        }
+        if (is_plain_memcpy(&a, in, &n)) {
+            int dv = is_value(f, in->args[0]) && in->args[0] < nold && a.slot[in->args[0]] == in->args[0]
+                         ? var[in->args[0]]
+                         : -1;
+            int sv = is_value(f, in->args[1]) && in->args[1] < nold && a.slot[in->args[1]] == in->args[1]
+                         ? var[in->args[1]]
+                         : -1;
+
+            if (dv >= 0 || sv >= 0) {
+                /* both values: a copy; into a value: a load of the source; from one: a store of it */
+                cc_ssa_instr_t r = plain_instr(dv >= 0 && sv >= 0 ? CC_SSA_MOV : dv >= 0 ? CC_SSA_LOAD : CC_SSA_STORE);
+
+                if (dv >= 0 && sv >= 0) {
+                    r.dst = dv;
+                    r.lhs = sv;
+                } else if (dv >= 0) {
+                    r.dst = dv;
+                    r.lhs = in->args[1];
+                    r.imm = n;
+                    r.is_unsigned = 1;
+                } else {
+                    r.lhs = in->args[0];
+                    r.rhs = sv;
+                    r.imm = n;
+                }
+                cc_ssa_instr_free(in);
+                if (ilist_put(&out, &r) != 0) {
+                    rc = -1;
+                    goto done;
+                }
+                changed = 1;
+                continue;
+            }
+        }
         if ((in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE) && in->lhs >= 0 && in->lhs < nold &&
             a.slot[in->lhs] == in->lhs && var[in->lhs] >= 0) {
             if (in->op == CC_SSA_LOAD && widening_load(f, in)) {
