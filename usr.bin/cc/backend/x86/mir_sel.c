@@ -1733,16 +1733,51 @@ static int asm_operand_value(const cc_ssa_function_t *f, const cc_ssa_instr_t *i
 }
 
 /**
+ * Whether value @p v is, through copies, what register read @p r has: then an asm operand bound to that register
+ * has it already -- Linux's ASM_CALL_CONSTRAINT, "+r"(current_stack_pointer), is %esp as it is.
+ */
+static int reads_register(const xsel_t *s, int v, int r) {
+    int hops;
+
+    for (hops = 0; hops < 8; ++hops) {
+        const cc_ssa_instr_t *d = def_of(s, v);
+
+        if (d == NULL) {
+            return 0;
+        }
+        if (d->op == CC_SSA_MOV && d->rhs < 0) {
+            v = d->lhs;
+            continue;
+        }
+        if (d->op == CC_SSA_REGREAD && d->sym != NULL) {
+            const char *n = d->sym[0] == '%' ? d->sym + 1 : d->sym;
+
+            return r == XR_SP && (strcmp(n, "esp") == 0 || strcmp(n, "rsp") == 0);
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/**
  * Whether inline asm @p in may have its operands in registers by @p plan (x86_asm_plan()): no value of a register
- * operand in two words or floating, which the plan's general registers would not hold.
+ * operand in two words or floating, which the plan's general registers would not hold, and none a new stack
+ * pointer an operand bound to %esp is given.
  */
 static int asm_bindable(xsel_t *s, const cc_ssa_instr_t *in, const x86_asm_plan_t *plan) {
+    size_t out_n = in->asm_out_count;
     size_t k;
 
     for (k = 0; k < plan->n; ++k) {
         int v = asm_operand_value(s->f, in, k);
+        const char *c = k < out_n ? (in->asm_out_constraints != NULL ? in->asm_out_constraints[k] : NULL) : NULL;
 
         if (v >= 0 && (xs_is_pair(s, v) || xs_fp_kind(s, v) != XFP_NONE)) {
+            return 0;
+        }
+        if (v >= 0 && plan->kind[k] == X86_ASM_REG && plan->reg[k] == XR_SP &&
+            (k >= out_n || (c != NULL && strchr(c, '+') != NULL)) && !reads_register(s, v, XR_SP)) {
+            /* a new stack pointer the asm is given: the unbound way */
             return 0;
         }
     }
@@ -1838,6 +1873,10 @@ static void sel_asm_bound(xsel_t *s, size_t j, const cc_ssa_instr_t *in, const x
             continue;
         }
         d = xop_reg(r, w);
+        if (r == XR_SP) {
+            /* the stack pointer has itself already (asm_bindable()); an output of it is read after as any is */
+            continue;
+        }
         if (plan->kind[k] == X86_ASM_ADDR || (!is_out && plan->kind[k] == X86_ASM_REG) ||
             (!is_out && plan->kind[k] == X86_ASM_IMM) /* a tied input: into its output's register */ ||
             (is_out && plan->kind[k] == X86_ASM_REG && c != NULL && strchr(c, '+') != NULL)) {
@@ -3452,6 +3491,19 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     return 0;
 }
 
+/** Whether register read @p in reads the stack pointer, `register unsigned long sp asm("esp")`. */
+static int reads_stack_pointer(const cc_ssa_instr_t *in) {
+    const char *r = in->sym;
+
+    if (r == NULL) {
+        return 0;
+    }
+    if (r[0] == '%') {
+        r++;
+    }
+    return strcmp(r, "esp") == 0 || strcmp(r, "rsp") == 0 || strcmp(r, "sp") == 0;
+}
+
 /**
  * Whether the function @p s selected may do without a frame pointer: nothing reads the frame's address or the frame
  * pointer itself (__builtin_frame_address, a register variable of %ebp, va_start's area), nothing moves the stack
@@ -3470,7 +3522,11 @@ static int fpo_ok(xsel_t *s) {
     for (j = 0; j < f->instr_count; ++j) {
         const cc_ssa_instr_t *in = &f->instrs[j];
 
-        if (in->op == CC_SSA_FRAMEADDR || in->op == CC_SSA_REGREAD || in->op == CC_SSA_VA_START) {
+        if (in->op == CC_SSA_FRAMEADDR || in->op == CC_SSA_VA_START) {
+            return 0;
+        }
+        if (in->op == CC_SSA_REGREAD && !reads_stack_pointer(in)) {
+            /* (the stack pointer read is the register as it is; the frame pointer is another) */
             return 0;
         }
         if (in->op == CC_SSA_ASM) {

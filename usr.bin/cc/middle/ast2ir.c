@@ -10289,7 +10289,8 @@ static int asm_inout_temp(cc_ssa_function_t *sf, const cc_asm_operand_t *op, int
  *
  * @return the constraint (owned), or NULL when out of memory
  */
-static char *asm_register_constraint(var_entry_t *vars, size_t var_count, int depth, const cc_asm_operand_t *op) {
+static char *asm_register_constraint(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                     const cc_asm_operand_t *op) {
     static const struct {
         const char *names[4]; /* the register at each width */
         char letter;
@@ -10309,6 +10310,12 @@ static char *asm_register_constraint(var_entry_t *vars, size_t var_count, int de
               ? var_find_visible(vars, var_count, op->expr->ident, depth)
               : -1;
     reg = idx >= 0 ? vars[idx].asm_register : NULL;
+    if (idx < 0 && op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL) {
+        /* or a global one: Linux's current_stack_pointer, in ASM_CALL_CONSTRAINT, is %esp itself */
+        const cc_global_t *g = find_global(tu, op->expr->ident);
+
+        reg = g != NULL ? g->asm_register : NULL;
+    }
     if (reg == NULL || strpbrk(c, "rqQRg") == NULL) {
         return cc_strdup(c);
     }
@@ -10686,7 +10693,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             return -1;
         }
         in.asm_out_values[i4] = out_v;
-        in.asm_out_constraints[i4] = asm_register_constraint(*vars, *var_count, depth, op);
+        in.asm_out_constraints[i4] = asm_register_constraint(tu, *vars, *var_count, depth, op);
         if (op->name != NULL) {
             in.asm_out_names[i4] = cc_strdup(op->name);
         }
@@ -10748,7 +10755,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             in_sz = 255;
         }
         in.asm_in_sizes[i4] = (unsigned char)in_sz;
-        in.asm_in_constraints[i4] = asm_register_constraint(*vars, *var_count, depth, op);
+        in.asm_in_constraints[i4] = asm_register_constraint(tu, *vars, *var_count, depth, op);
         if (op->name != NULL) {
             in.asm_in_names[i4] = cc_strdup(op->name);
         }
@@ -11710,6 +11717,51 @@ static int lower_nested_bind_outer(const cc_translation_unit_t *tu, cc_ssa_funct
     return envv < 0 ? -1 : rc;
 }
 
+/**
+ * Whether local register variable @p v, declared without an initializer, starts as its register's value: a scalar
+ * of a register's size -- `register unsigned long sp asm("esp")` passed as "+r" to an asm is %esp as it is, as gcc
+ * has it, not a 0 the asm's register is loaded with.
+ */
+static int reads_its_register(const cc_translation_unit_t *tu, const var_entry_t *v) {
+    return v->ctype != NULL && cc_ct_is_scalar(v->ctype) && !cc_ct_is_floating(v->ctype) &&
+           cc_ct_size(v->ctype, tu) == (long)cc_target_pointer_size() && (v->addr_value >= 0 || v->value >= 0);
+}
+
+/**
+ * Set local register variable @p v to its register's value, as it is where the variable is declared: into its
+ * slot, or its value.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int read_register_into(cc_ssa_function_t *sf, const var_entry_t *v, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int r;
+
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_REGREAD;
+    in.dst = r = cc_ir_new_value(sf, CC_VAL_I64);
+    in.sym = cc_strdup(v->asm_register);
+    if (r < 0 || in.sym == NULL || cc_ir_push(sf, in) != 0) {
+        free(in.sym);
+        set_diag(diag, "out of memory reading a local register variable");
+        return -1;
+    }
+    cc_ir_set_size(sf, r, (uint32_t)cc_target_pointer_size());
+    if (v->addr_value >= 0) {
+        return emit_store_at(sf, v->addr_value, 0, r, (long)cc_target_pointer_size(), diag);
+    }
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_MOV;
+    in.dst = v->value;
+    in.lhs = r;
+    in.rhs = -1;
+    if (cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory reading a local register variable");
+        return -1;
+    }
+    return 0;
+}
+
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret,
@@ -11733,6 +11785,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             (*vars)[*var_count - 1].name != NULL && s->decl_name != NULL &&
             strcmp((*vars)[*var_count - 1].name, s->decl_name) == 0) {
             (*vars)[*var_count - 1].asm_register = s->asm_register;
+            if (s->expr == NULL && reads_its_register(tu, &(*vars)[*var_count - 1]) &&
+                read_register_into(sf, &(*vars)[*var_count - 1], diag) != 0) {
+                return -1;
+            }
         }
         return 0;
     }
