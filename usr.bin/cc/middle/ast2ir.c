@@ -14416,8 +14416,14 @@ static int static_local_array_init_data(const cc_translation_unit_t *tu, const c
     if (s->expr->kind != CC_EXPR_INIT_LIST) {
         goto out;
     }
-    if (nd == 1 && ct_record_id(scalar) >= 0 && tu->structs[ct_record_id(scalar)].wide_bits > 0) {
-        /* an integer wider than 64 bits is a structure of limbs, laid out as file-scope arrays of them are */
+    if (nd == 1 && ct_record_id(scalar) >= 0 &&
+        (tu->structs[ct_record_id(scalar)].wide_bits > 0 || file_scope_names)) {
+        /*
+         * an array of structures -- or of the integers wider than 64 bits that are structures of limbs -- laid out
+         * as file-scope arrays of them are, where every name the initializer uses is of file scope: Linux's
+         * format_decode() has a table of 256, `['l'] = { 0, sizeof(long), sizeof(long long) }` and so on, that
+         * was 149 byte stores on its first call
+         */
         long elem_size = cc_ct_size(scalar, tu);
 
         if (elem_size <= 0 || dims[0] <= 0 || elem_size > LONG_MAX / dims[0]) {
