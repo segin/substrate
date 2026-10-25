@@ -205,6 +205,12 @@ int xi_role(const xinst_t *in, int k) {
         return k == 0 ? 1 : 3;
     case XI_IMUL3:
         return k == 2 ? 2 : 1;
+    case XI_ADC:
+    case XI_SBB:
+        return k == 0 ? 1 : 3;
+    case XI_SHLD:
+    case XI_SHRD:
+        return k == 2 ? 3 : 1;
     case XI_NEG:
     case XI_NOT:
         return 3;
@@ -234,6 +240,8 @@ int xi_pure(const xinst_t *in) {
     case XI_SHL:
     case XI_SHR:
     case XI_SAR:
+    case XI_SHLD:
+    case XI_SHRD:
     case XI_NEG:
     case XI_NOT:
     case XI_SETCC:
@@ -253,6 +261,9 @@ int xi_pure(const xinst_t *in) {
     }
     if (in->imp_def != 0 || in->nops == 0) {
         return 0;
+    }
+    if ((in->op == XI_ADD || in->op == XI_SUB) && in->aux == XI_AUX_CARRY_OUT) {
+        return 0; /* the adc (sbb) after it reads its carry, whatever reads its result */
     }
     d = &in->o[in->nops - 1];
     return d->kind == XO_REG && XR_IS_VIRT(d->reg);
@@ -303,12 +314,17 @@ int xi_mem_ok(const xinst_t *in, int k) {
         return 0;
     case XI_ADD:
     case XI_SUB:
+    case XI_ADC:
+    case XI_SBB:
     case XI_AND:
     case XI_OR:
     case XI_XOR:
     case XI_CMP:
     case XI_TEST:
         return 1;
+    case XI_SHLD:
+    case XI_SHRD:
+        return k == 2;
     case XI_SHL:
     case XI_SHR:
     case XI_SAR:
@@ -545,6 +561,24 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
         return;
     case XI_TRAP:
         fputs("\tud2\n", fp);
+        return;
+    case XI_ADC:
+    case XI_SBB:
+        fprintf(fp, "\t%s%c ", in->op == XI_ADC ? "adc" : "sbb", suffix(in->w));
+        print_op(fp, xf, &in->o[0], word);
+        fputs(", ", fp);
+        print_op(fp, xf, &in->o[1], word);
+        fputc('\n', fp);
+        return;
+    case XI_SHLD:
+    case XI_SHRD:
+        fprintf(fp, "\t%s%c ", in->op == XI_SHLD ? "shld" : "shrd", suffix(in->w));
+        print_op(fp, xf, &in->o[0], word);
+        fputs(", ", fp);
+        print_op(fp, xf, &in->o[1], word);
+        fputs(", ", fp);
+        print_op(fp, xf, &in->o[2], word);
+        fputc('\n', fp);
         return;
     case XI_FADD:
     case XI_FSUB:

@@ -697,7 +697,8 @@ static int compute_demand(xsel_t *s) {
 
     s->dbits = (unsigned char *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), 1);
     s->ext_copy = (unsigned char *)calloc(f->instr_count > 0 ? f->instr_count : 1, 1);
-    if (s->dbits == NULL || s->ext_copy == NULL) {
+    s->done = (unsigned char *)calloc(f->instr_count > 0 ? f->instr_count : 1, 1);
+    if (s->dbits == NULL || s->ext_copy == NULL || s->done == NULL) {
         return -1;
     }
     c.s = s;
@@ -1017,6 +1018,11 @@ static int compute_ext(xsel_t *s) {
         s->zbits[v] = (unsigned char)W;
     }
     return 0;
+}
+
+/** The instruction that writes value @p v once, or NULL. */
+static const cc_ssa_instr_t *def_of(const xsel_t *s, int v) {
+    return v >= 0 && v < s->f->value_count && stable(s, v) ? &s->f->instrs[s->def_at[v]] : NULL;
 }
 
 /** A word binary operation: add, sub, and, or, xor, mul, shl, shr. */
@@ -1938,6 +1944,159 @@ static int branch_reads_later(xsel_t *s, size_t j) {
 }
 
 /** Select instruction @p j of the function. */
+/** Whether value @p v, written once, has its value by instruction @p j: written before it, or a constant. */
+static int ready_at(xsel_t *s, int v, size_t j) {
+    long long k;
+    const char *sym;
+
+    return v >= 0 && v < s->f->value_count &&
+           (xs_const_of(s, v, &k) || xs_sym_of(s, v, &sym) || (stable(s, v) && (size_t)s->def_at[v] < j));
+}
+
+/**
+ * An i386 two-word add or subtract as legalization writes it, from its low word's instruction @p j: `lo = a + b`,
+ * the carry `lo <u a` (the borrow `a <u b`), `h1 = ah + bh`, `hi = h1 + carry` -- each but the low word read only
+ * by the next.  Selected as one add (sub) and an adc (sbb), the carry the flags between them: the compare, the
+ * setcc and the extra add go.  The instructions of the high word are marked done.
+ *
+ * @return 1 when @p j is such a low word and is selected, else 0
+ */
+static int sel_carry_pair(xsel_t *s, size_t j) {
+    const cc_ssa_function_t *f = s->f;
+    const cc_ssa_instr_t *lo = &f->instrs[j];
+    int is_add = lo->op == CC_SSA_ADD;
+    size_t c_at = 0;
+    size_t h_at = 0;
+    size_t x_at;
+    const cc_ssa_instr_t *c = NULL;
+    const cc_ssa_instr_t *h = NULL;
+    const cc_ssa_instr_t *x;
+    size_t i;
+    int carry;
+    int other;
+    xop_t ob, obh, dlo, dhi;
+
+    if (s->word != 4 || (lo->op != CC_SSA_ADD && lo->op != CC_SSA_SUB) || lo->dst < 0 || lo->lhs < 0 ||
+        lo->rhs < 0 || !stable(s, lo->dst) || xs_is_pair(s, lo->dst) || s->addr_taken[lo->dst] ||
+        cc_ssa_value_size(f, lo->dst) != 4) {
+        return 0;
+    }
+    /* the carry, a little after it in the same straight run */
+    for (i = j + 1; i < f->instr_count && i <= j + 6 && c == NULL; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_LABEL || in->op == CC_SSA_BR || in->op == CC_SSA_BR_COND || in->op == CC_SSA_RET) {
+            break;
+        }
+        if (in->op == CC_SSA_CMP && in->cmp_kind == CC_CMP_LT && in->is_unsigned && in->dst >= 0 &&
+            stable(s, in->dst) && s->nuses[in->dst] == 1 &&
+            (is_add ? in->lhs == lo->dst && (in->rhs == lo->lhs || in->rhs == lo->rhs)
+                    : in->lhs == lo->lhs && in->rhs == lo->rhs)) {
+            c = in;
+            c_at = i;
+        }
+    }
+    if (c == NULL) {
+        return 0;
+    }
+    carry = c->dst;
+    /* the high word: one more add (sub) of the carry to the sum (difference) of the high words */
+    for (i = c_at + 1; i < f->instr_count && i <= c_at + 6 && h == NULL; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_LABEL || in->op == CC_SSA_BR || in->op == CC_SSA_BR_COND || in->op == CC_SSA_RET) {
+            break;
+        }
+        if (in->op == lo->op && in->dst >= 0 && stable(s, in->dst) && !s->addr_taken[in->dst] &&
+            (in->rhs == carry || (is_add && in->lhs == carry))) {
+            h = in;
+            h_at = i;
+        }
+    }
+    if (h == NULL) {
+        return 0;
+    }
+    other = h->rhs == carry ? h->lhs : h->rhs;
+    x = def_of(s, other);
+    if (x == NULL || x->op != lo->op || s->nuses[other] != 1 || (x_at = (size_t)s->def_at[other]) <= j ||
+        x->lhs < 0 || x->rhs < 0 || !ready_at(s, x->lhs, j) || !ready_at(s, x->rhs, j) ||
+        xs_is_pair(s, x->lhs) || xs_is_pair(s, x->rhs) || xs_is_pair(s, lo->lhs) || xs_is_pair(s, lo->rhs)) {
+        return 0;
+    }
+    /* the operands first: what makes them (a symbol's address) may write the flags */
+    ob = xs_src_word(s, lo->rhs, 0);
+    obh = xs_src_word(s, x->rhs, 0);
+    dlo = xop_reg(xs_vreg_of(s, lo->dst, 0), 4);
+    dhi = xop_reg(xs_vreg_of(s, h->dst, 0), 4);
+    xs_move_word_to(s, lo->lhs, 0, &dlo);
+    xs_move_word_to(s, x->lhs, 0, &dhi);
+    {
+        xinst_t low = xi_make(is_add ? XI_ADD : XI_SUB, 4, 2, &ob, &dlo, NULL);
+
+        low.aux = XI_AUX_CARRY_OUT;
+        xf_emit(&s->xf, &low);
+    }
+    xs_emit(s, is_add ? XI_ADC : XI_SBB, 4, 2, &obh, &dhi, NULL);
+    s->done[c_at] = 1;
+    s->done[x_at] = 1;
+    s->done[h_at] = 1;
+    return 1;
+}
+
+/**
+ * Whether `x << k | y >> (word - k)` (or `x >> k | y << (word - k)`), the shifts each read only here, of a word:
+ * a two-word shift's or rotate's word as legalization writes it -- one shld (shrd) of a copy of x.
+ *
+ * @return 1 when @p in is such an or and is selected, else 0
+ */
+static int sel_double_shift(xsel_t *s, const cc_ssa_instr_t *in) {
+    const cc_ssa_function_t *f = s->f;
+    int side;
+
+    if (in->op != CC_SSA_OR || in->dst < 0 || in->lhs < 0 || in->rhs < 0 || xs_is_pair(s, in->dst) ||
+        cc_ssa_value_size(f, in->dst) != (uint32_t)s->word) {
+        return 0;
+    }
+    for (side = 0; side < 2; ++side) {
+        int pv = side ? in->rhs : in->lhs;
+        int qv = side ? in->lhs : in->rhs;
+        const cc_ssa_instr_t *p = def_of(s, pv);
+        const cc_ssa_instr_t *q = def_of(s, qv);
+        long long kp;
+        long long kq;
+        xop_t d;
+        xop_t y;
+        xop_t c;
+
+        if (p == NULL || q == NULL || s->nuses[pv] != 1 || s->nuses[qv] != 1 ||
+            (p->op != CC_SSA_SHL && !(p->op == CC_SSA_SHR && p->is_unsigned)) ||
+            (q->op != CC_SSA_SHL && !(q->op == CC_SSA_SHR && q->is_unsigned)) || p->op == q->op || p->lhs < 0 ||
+            q->lhs < 0 || xs_is_pair(s, p->lhs) || xs_is_pair(s, q->lhs) ||
+            cc_ssa_value_size(f, pv) != (uint32_t)s->word || cc_ssa_value_size(f, qv) != (uint32_t)s->word) {
+            continue;
+        }
+        kp = p->imm;
+        kq = q->imm;
+        if ((p->rhs >= 0 && !xs_const_of(s, p->rhs, &kp)) || (q->rhs >= 0 && !xs_const_of(s, q->rhs, &kq)) ||
+            kp <= 0 || kq <= 0 || kp + kq != 8 * s->word) {
+            continue;
+        }
+        d = xop_reg(xs_vreg_of(s, in->dst, 0), s->word);
+        y = xs_reg_word(s, q->lhs, 0);
+        c = xop_imm(kp, 1);
+        if (y.kind == XO_REG && y.reg == d.reg) {
+            xop_t t = xs_temp(s);
+
+            xs_emit(s, XI_MOV, s->word, 2, &y, &t, NULL);
+            y = t;
+        }
+        xs_move_word_to(s, p->lhs, 0, &d);
+        xs_emit(s, p->op == CC_SSA_SHL ? XI_SHLD : XI_SHRD, s->word, 3, &c, &y, &d);
+        return 1;
+    }
+    return 0;
+}
+
 static void sel_instr(xsel_t *s, size_t j) {
     const cc_ssa_function_t *f = s->f;
     const cc_ssa_instr_t *in = &f->instrs[j];
@@ -1945,6 +2104,9 @@ static void sel_instr(xsel_t *s, size_t j) {
     long long k;
     const char *sym;
 
+    if (s->done != NULL && s->done[j]) {
+        return; /* selected with an earlier instruction */
+    }
     if (xs_fp_select(s, j)) {
         return; /* floating point (mir_fp.c) */
     }
@@ -2119,6 +2281,9 @@ static void sel_instr(xsel_t *s, size_t j) {
         if (xs_is_pair(s, in->dst) || f->value_ty[in->dst].kind == CC_TY_AGG || in->lhs < 0 ||
             (in->rhs < 0 && in->op != CC_SSA_SHL && in->op != CC_SSA_SHR)) {
             NOPE(s);
+        }
+        if (sel_carry_pair(s, j) || sel_double_shift(s, in)) {
+            break;
         }
         sel_binop(s, in);
         break;
@@ -2475,6 +2640,7 @@ static void sel_free(xsel_t *s) {
     free(s->sbits);
     free(s->dbits);
     free(s->ext_copy);
+    free(s->done);
     free(s->zbits);
     free(s->bind);
     free(s->asm_slot);
@@ -2503,6 +2669,8 @@ static int flags_live_after(const xfunc_t *xf, int i) {
         switch (xf->ins[k].op) {
         case XI_JCC:
         case XI_SETCC:
+        case XI_ADC:
+        case XI_SBB:
             return 1;
         case XI_MOV:
         case XI_LEA:

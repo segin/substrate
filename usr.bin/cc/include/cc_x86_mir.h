@@ -140,8 +140,16 @@ typedef enum {
     XI_GOTBASE,   /**< i386 -fPIC: the GOT's address -> o0, by its pc thunk (call, addl $_GLOBAL_OFFSET_TABLE_) */
     XI_SAVEXMM,   /**< x86-64 variadic entry: %xmm0..7 stored at memory o0 on, 16 bytes each, when %al (imp_use) is not 0;
                        label is its own, past the IR's */
+    XI_ADC,       /**< o1 += o0 + the carry flag: the high word of a two-word add after the low word's add (whose aux
+                       is XI_AUX_CARRY_OUT, so that it stays when nothing reads its result) */
+    XI_SBB,       /**< o1 -= o0 + the carry flag: the same of a subtract */
+    XI_SHLD,      /**< o2 = o2 << o0 | o1 >> (word - o0), o0 an immediate: a two-word shift's or rotate's word */
+    XI_SHRD,      /**< o2 = o2 >> o0 | o1 << (word - o0) */
     XI_COUNT
 } xi_op_t;
+
+/** XI_ADD's or XI_SUB's aux: an adc or sbb after it reads its carry. */
+#define XI_AUX_CARRY_OUT 1
 
 /** Condition codes, as jcc and setcc name them. */
 typedef enum {
@@ -387,6 +395,7 @@ struct xsel {
     unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
     unsigned char *dbits;     /**< per IR value: the most low bits anything reads of it (compute_demand()) */
     unsigned char *ext_copy;  /**< per IR instruction: an extension whose readers need no more than its source's bits, a copy */
+    unsigned char *done;      /**< per IR instruction: selected already, with an earlier one (a two-word add's high word) */
 };
 
 /** Give up on the function in a selection hook: something it does is not handled there. */
