@@ -3593,6 +3593,11 @@ int x86_asm_plan(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t in
     return 0;
 }
 
+/** Whether register name @p r is the stack pointer's, %esp or %rsp. */
+static int is_stack_pointer(const char *r) {
+    return r != NULL && (strcmp(r, "%esp") == 0 || strcmp(r, "%rsp") == 0);
+}
+
 int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
                            size_t fn_index, size_t instr_index, int is_64bit, const x86_asm_plan_t *bound, cc_diag_t *diag) {
     size_t out_n = in->asm_out_count;
@@ -3682,6 +3687,14 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
         if (in->asm_out_names != NULL && in->asm_out_names[i] != NULL) {
             op_names[i] = in->asm_out_names[i];
+        }
+        if (bound == NULL && is_stack_pointer(fixed)) {
+            /* the stack pointer, as it is: never loaded or stored, which would undo what the asm's saves pushed */
+            op_text[i] = dup_cstr(fixed);
+            if (op_text[i] == NULL) {
+                goto oom;
+            }
+            continue;
         }
         if (fpo.cls[i] != 0) {
             /* in an x87 stack register or an %xmm one: loaded and stored around the asm below */
@@ -3898,6 +3911,14 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             const char *reg = NULL;
             int isz = asm_operand_size(in->asm_in_sizes, in_n, i, is_64bit ? 8 : 4);
             const char *render_reg = NULL;
+            if (bound == NULL && is_stack_pointer(fixed)) {
+                /* the stack pointer, as it is (Linux's ASM_CALL_CONSTRAINT): never loaded */
+                op_text[slot] = dup_cstr(fixed);
+                if (op_text[slot] == NULL) {
+                    goto oom;
+                }
+                continue;
+            }
             if (bound != NULL) {
                 reg = x86_gpr_name(bound->reg[slot], is_64bit);
             } else if (fixed != NULL) {
