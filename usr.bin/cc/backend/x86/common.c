@@ -2816,6 +2816,17 @@ static void slot_mark_use_block_cb(int v, void *ctxp) {
     }
 }
 
+/** Symbol @p sym (and offset) as an asm's memory operand: off %rip in 64-bit code; a new string, or NULL. */
+static char *asm_sym_operand(const char *sym, int is_64bit) {
+    size_t n = strlen(sym) + sizeof("(%rip)");
+    char *out = (char *)malloc(n);
+
+    if (out != NULL) {
+        snprintf(out, n, "%s%s", sym, is_64bit ? "(%rip)" : "");
+    }
+    return out;
+}
+
 static char *dup_printf(const char *fmt, long off, const char *bp) {
     char tmp[64];
     size_t n;
@@ -3407,6 +3418,7 @@ unsigned x86_asm_clobbered_gprs(const cc_ssa_instr_t *in) {
 void x86_asm_plan_free(x86_asm_plan_t *p) {
     free(p->kind);
     free(p->reg);
+    free((void *)p->sym);
     memset(p, 0, sizeof(*p));
 }
 
@@ -3452,7 +3464,8 @@ int x86_asm_plan(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t in
     p->n = total;
     p->kind = (unsigned char *)calloc(total > 0 ? total : 1, 1);
     p->reg = (signed char *)malloc(total > 0 ? total : 1);
-    if (p->kind == NULL || p->reg == NULL) {
+    p->sym = (const char **)calloc(total > 0 ? total : 1, sizeof(*p->sym));
+    if (p->kind == NULL || p->reg == NULL || p->sym == NULL) {
         x86_asm_plan_free(p);
         return -1;
     }
@@ -3679,7 +3692,13 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             continue;
         }
         if (cc_asm_constraint_is_memory_only(c)) {
-            if (is_indirect) {
+            if (is_indirect && bound != NULL && bound->kind[i] == X86_ASM_SYM) {
+                /* a symbol's: written as the symbol */
+                op_text[i] = asm_sym_operand(bound->sym[i], is_64bit);
+                if (op_text[i] == NULL) {
+                    goto oom;
+                }
+            } else if (is_indirect) {
                 /* the address lives in a register for the whole asm: no input may share it */
                 const char *areg = bound != NULL ? x86_gpr_name(bound->reg[i], is_64bit)
                                                  : asm_pick_reg(is_64bit, NULL, is_64bit ? 8 : 4,
@@ -3759,6 +3778,14 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
         if (fpo.cls[slot] != 0 && tied < 0) {
             op_text[slot] = asm_fp_text(&fpo, slot);
+            if (op_text[slot] == NULL) {
+                goto oom;
+            }
+            continue;
+        }
+        if (CC_SSA_ASM_MEM_INDIRECT_P(v) && bound != NULL && bound->kind[slot] == X86_ASM_SYM) {
+            /* a symbol's: written as the symbol */
+            op_text[slot] = asm_sym_operand(bound->sym[slot], is_64bit);
             if (op_text[slot] == NULL) {
                 goto oom;
             }

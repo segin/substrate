@@ -1599,6 +1599,26 @@ static int asm_bindable(xsel_t *s, const cc_ssa_instr_t *in, const x86_asm_plan_
 }
 
 /**
+ * Of @p plan for inline asm @p in, each memory operand given by its address that is a symbol's -- one the code
+ * reaches without the GOT -- written as the symbol (X86_ASM_SYM), as gcc writes `"m" (var)`: its address was made
+ * in a register (lea var(%rip), %r10) for the asm to read through.
+ */
+static void asm_plan_symbols(xsel_t *s, const cc_ssa_instr_t *in, x86_asm_plan_t *plan) {
+    size_t k;
+
+    for (k = 0; k < plan->n; ++k) {
+        int v = asm_operand_value(s->f, in, k);
+        const char *sym;
+
+        if (plan->kind[k] == X86_ASM_ADDR && v >= 0 && xs_sym_of(s, v, &sym) && s->got == XR_NONE &&
+            !(s->t->sym_got != NULL && s->t->sym_got(s, sym))) {
+            plan->kind[k] = X86_ASM_SYM;
+            plan->sym[k] = sym;
+        }
+    }
+}
+
+/**
  * Inline asm @p in, IR instruction @p j, with its register operands in the registers @p plan gives them: each
  * input moved there before, each output moved out after (zero-extended from its size, as emit_inline_asm() left
  * it), the rest -- memory operands -- in slots as sel_asm() binds them.  The asm reads, writes and clobbers those
@@ -1756,6 +1776,7 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
             int ok = asm_bindable(s, in, &plan);
 
             if (ok) {
+                asm_plan_symbols(s, in, &plan);
                 sel_asm_bound(s, j, in, &plan);
             }
             x86_asm_plan_free(&plan);
@@ -3095,6 +3116,10 @@ static int print_asm(FILE *fp, const xsel_t *s, const xinst_t *in, cc_diag_t *di
         x86_asm_plan_t plan;
         int prc = x86_asm_plan(f, ai, (size_t)in->ir_index, s->word == 8, &plan);
         int bound = prc == 0 && asm_bindable((xsel_t *)s, ai, &plan);
+
+        if (bound) {
+            asm_plan_symbols((xsel_t *)s, ai, &plan);
+        }
 
         rc = prc < 0 ? -1
                      : emit_inline_asm(fp, f, &lay, ai, s->fn_index, (size_t)in->ir_index, s->word == 8,

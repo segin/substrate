@@ -183,7 +183,8 @@ enum {
     X86_ASM_IMM = 0, /**< written into the template: an immediate, or a tied input (its output's register) */
     X86_ASM_SLOT,    /**< in memory: its frame slot */
     X86_ASM_REG,     /**< its value in a general register */
-    X86_ASM_ADDR     /**< memory given by its address, in a general register */
+    X86_ASM_ADDR,    /**< memory given by its address, in a general register */
+    X86_ASM_SYM      /**< (the selector's) memory given by a symbol's address: written as the symbol, off %rip */
 };
 
 /**
@@ -195,6 +196,7 @@ typedef struct {
     size_t n;
     unsigned char *kind;
     signed char *reg;
+    const char **sym; /**< X86_ASM_SYM: the symbol (and offset), "sym" or "sym+8" */
 } x86_asm_plan_t;
 
 /**
