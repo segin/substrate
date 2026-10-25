@@ -46,10 +46,14 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   an interface of plain values or structures by value -- an argument's
   storage taken for the parameter where the body only reads it, a result
   stored to the call's buffer, its words or a copy from where it points
-  -- no frame-dependent body; or, as gcc's
+  -- no frame-dependent body; a static function not declared inline
+  whose body is no bigger than a call; or, as gcc's
   `-finline-functions-called-once`, any static function called from one
   place, named nowhere else and on no cycle of calls, which `opt.c`
-  marks, if it does not grow the caller's frame past gcc's limit) and
+  marks, if it does not grow the caller's frame past gcc's limit -- a
+  frame reckoned by the slots that stay memory, `mem.c`'s
+  `cc_ssa_memory_slot_bytes()`, and a few spills, the values being the
+  register allocator's) and
   the copy of a body in place of a call (`cc_inline_calls()`), which
   hands the caller the callee's `keep_syms` too: the static locals
   marked `used` that the object keeps while some function still holds

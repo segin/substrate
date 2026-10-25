@@ -68,6 +68,12 @@ int cc_promote_slots(cc_ssa_function_t *f);
 int cc_propagate_copies(cc_ssa_function_t *f);
 
 /**
+ * The bytes of @p f's slots that are reckoned to stay in memory, not to become values: those whose address
+ * escapes, and those larger than a word (passes/mem.c).  What inlining @p f adds to a caller's frame.
+ */
+long cc_ssa_memory_slot_bytes(const cc_ssa_function_t *f);
+
+/**
  * Call @p fn for each value instruction @p in reads, with the role it has: 0 an operand, 1 the address of a
  * load or store, 2 the value a store writes (passes/mem.c).  An operation's fields it does not read are not
  * named, whatever they hold.

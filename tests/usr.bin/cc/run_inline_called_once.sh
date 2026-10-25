@@ -31,7 +31,8 @@ static void once(int *out) {
 }
 
 static int twice(int x) {
-	return x * 7 + table[x & 3];
+	/* (more than a call's worth, as down()) */
+	return x * 7 + table[x & 3] * (x ^ 11) - table[(x >> 2) & 3] + (x | 3) * table[(x + 1) & 3];
 }
 
 static int taken(int x) {
@@ -51,7 +52,8 @@ int up(int n) {
 }
 
 static int down(int n) {
-	return n > 0 ? up(n - 1) * 2 : 0;
+	/* (more than a call's worth: a small static function is inlined whatever calls it, as gcc does) */
+	return n > 0 ? up(n - 1) * 2 + (n ^ 5) * 3 - (n >> 2) + table[n & 3] * (n | 9) : 0;
 }
 
 static int bigframe(int x) {

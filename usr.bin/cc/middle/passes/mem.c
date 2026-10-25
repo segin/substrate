@@ -2342,6 +2342,26 @@ done:
     return rc < 0 ? -1 : changed;
 }
 
+long cc_ssa_memory_slot_bytes(const cc_ssa_function_t *f) {
+    addr_info_t a;
+    long total = 0;
+    size_t i;
+
+    if (f->value_count <= 0 || addr_info_build(&a, f, 1, 0) != 0) {
+        return 0;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_STACKALLOC && in->imm > 0 && is_value(f, in->dst) && a.slot[in->dst] == in->dst &&
+            (a.escapes[in->dst] || in->imm > 8)) {
+            total += (long)in->imm;
+        }
+    }
+    addr_info_free(&a);
+    return total;
+}
+
 int cc_optimize_slots(cc_ssa_function_t *f) {
     int r0 = drop_unread_slots(f);
     int rm = r0 < 0 ? -1 : forward_memcpy_slots(f);

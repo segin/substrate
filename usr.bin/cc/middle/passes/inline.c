@@ -40,6 +40,8 @@
 
 /** The most instructions an inline function's folded body may have to be inlined. */
 #define INLINE_MAX_INSTRS 160
+/** The most code (body_cost()) a static function not declared inline may have to be inlined: about a call's. */
+#define SMALL_BODY_COST 8
 /** The same for an always_inline function, which gcc inlines whatever its size. */
 #define ALWAYS_INLINE_MAX_INSTRS 4000
 /** The same for a static function called from one place, which gcc inlines unless very large. */
@@ -55,10 +57,10 @@
  */
 #define CALLED_ONCE_MAX_FRAME 1024
 /**
- * What each value of an inlined body is reckoned to add to the frame: the
- * i386 back end gives one live across blocks a slot of its own, a word.
+ * What an inlined body is reckoned to add to the frame besides its slots:
+ * its values are the register allocator's, and a few of them spilled.
  */
-#define VALUE_SLOT_BYTES 4
+#define INLINED_SPILL_BYTES 16
 /** No more is inlined into a function grown this large. */
 #define CALLER_MAX_INSTRS 60000
 
@@ -175,12 +177,35 @@ static int inline_body_ok(const cc_ssa_function_t *g, size_t max_instrs) {
     return 1;
 }
 
+/**
+ * The instructions of @p g that are code once selected: not its parameters, labels or constants, nor the
+ * extensions legalization writes as a shift pair (most cost nothing).
+ */
+static size_t body_cost(const cc_ssa_function_t *g) {
+    size_t n = 0;
+    size_t i;
+
+    for (i = 0; i < g->instr_count; ++i) {
+        cc_ssa_opcode_t op = g->instrs[i].op;
+
+        if (op != CC_SSA_PARAM && op != CC_SSA_LABEL && op != CC_SSA_CONST && op != CC_SSA_SHL && op != CC_SSA_MOV) {
+            n++;
+        }
+    }
+    return n;
+}
+
 int cc_inline_candidate(const cc_ssa_function_t *g) {
     int always = (g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0;
 
-    if ((g->storage & CC_STORAGE_STATIC) == 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0 ||
-        ((g->storage & CC_STORAGE_INLINE) == 0 && !always)) {
+    if ((g->storage & CC_STORAGE_STATIC) == 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0) {
         return 0;
+    }
+    if ((g->storage & CC_STORAGE_INLINE) == 0 && !always) {
+        /* a static function no bigger than a call of it costs, inlined as gcc -O2 does -- one keeping nothing in
+         * memory: its frame would be the caller's, unchecked */
+        return body_cost(g) <= SMALL_BODY_COST && cc_ssa_memory_slot_bytes(g) == 0 &&
+               inline_body_ok(g, INLINE_MAX_INSTRS);
     }
     return inline_body_ok(g, (size_t)(always ? ALWAYS_INLINE_MAX_INSTRS : INLINE_MAX_INSTRS));
 }
@@ -745,22 +770,9 @@ static int splice_body(cc_ssa_function_t *f, const cc_ssa_instr_t *call, const c
     return ivec_put(out, &in);
 }
 
-/** The bytes of stack @p f's slots take: cc gives each its own, so this is its frame less its values'. */
-static long stack_bytes(const cc_ssa_function_t *f) {
-    long total = 0;
-    size_t i;
-
-    for (i = 0; i < f->instr_count; ++i) {
-        if (f->instrs[i].op == CC_SSA_STACKALLOC && f->instrs[i].imm > 0) {
-            total += (long)f->instrs[i].imm;
-        }
-    }
-    return total;
-}
-
-/** What inlining @p g is reckoned to add to a caller's frame: its slots, and a word per value. */
+/** What inlining @p g is reckoned to add to a caller's frame: its slots that stay memory, and a few spills. */
 static long frame_cost(const cc_ssa_function_t *g) {
-    return stack_bytes(g) + (long)g->value_count * VALUE_SLOT_BYTES;
+    return cc_ssa_memory_slot_bytes(g) + INLINED_SPILL_BYTES;
 }
 
 /**
@@ -770,7 +782,7 @@ static long frame_cost(const cc_ssa_function_t *g) {
  * not share slots, never past CALLED_ONCE_MAX_FRAME.  A kernel thread of
  * Linux on i386 has 8 KiB of stack: inlining under gcc's rule alone took
  * the kernel's frames over 1 KiB from 21 to 52.  @p now counts what is
- * inlined by frame_cost(), values and all, since values are most of it.
+ * inlined by frame_cost().
  *
  * @param was  the caller's frame as it was
  * @param now  the caller's frame with what is inlined so far and this
@@ -798,7 +810,7 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
     ivec_t out;
     size_t i;
     int inlined = 0;
-    long frame = stack_bytes(f); /* its own slots */
+    long frame = cc_ssa_memory_slot_bytes(f); /* its own slots */
     long grown = frame;          /* and those of what is inlined so far */
 
     memset(&out, 0, sizeof(out));
