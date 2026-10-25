@@ -477,6 +477,31 @@ static int identity_operand(const cc_ssa_function_t *f, const cc_ssa_instr_t *in
     return x;
 }
 
+/**
+ * The low word of a pair (@p pair_half: each pair's two words) that and @p in, of four bytes, masks with 32 bits
+ * of ones, whose result it is; else -1.
+ */
+static int low_word_masked(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const const_state_t *st,
+                           const int *pair_half) {
+    int k;
+
+    if (in->lhs < 0 || in->rhs < 0 || in->lhs >= f->value_count || in->rhs >= f->value_count ||
+        cc_ssa_value_size(f, in->dst) != 4) {
+        return -1;
+    }
+    for (k = 0; k < 2; ++k) {
+        int p = k == 0 ? in->lhs : in->rhs;
+        int m = k == 0 ? in->rhs : in->lhs;
+        int lo = pair_half[2 * p];
+
+        if (lo >= 0 && known_int(st, m, 0xffffffffULL, 0xffffffffULL) && cc_ssa_value_class(f, lo) == CC_VAL_I64 &&
+            cc_ssa_value_size(f, lo) == 4) {
+            return lo;
+        }
+    }
+    return -1;
+}
+
 /** What is known of a value as an extension of a narrower one (ext_info_build()). */
 typedef struct {
     int shl_src; /**< made once by `shl x, k` with x made once: x, else -1 */
@@ -1404,6 +1429,15 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
                 changed = 1;
             } else if (dst >= 0 && vt == CC_VAL_I64 && (x = redundant_ext(f, in, ext)) >= 0) {
                 /* an extension of what is already extended so */
+                in->op = CC_SSA_MOV;
+                in->lhs = x;
+                in->rhs = -1;
+                in->imm = 0;
+                st[dst].known = 0;
+                changed = 1;
+            } else if (dst >= 0 && vt == CC_VAL_I64 && in->op == CC_SSA_AND && pair_half != NULL &&
+                       (x = low_word_masked(f, in, st, pair_half)) >= 0) {
+                /* a pair masked to its low word is that word: i386's 64-bit arithmetic cut to a long */
                 in->op = CC_SSA_MOV;
                 in->lhs = x;
                 in->rhs = -1;

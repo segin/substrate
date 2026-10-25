@@ -6,7 +6,9 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
 - `opt.c`: per function, constant folding and constant-branch folding
   (a value every definition of which copies one constant -- across a
   change of size when the constant means the same at every width -- is
-  that constant; after the last passes, folding repeats while it drops
+  that constant -- and, on i386, a pair masked with 32 bits of ones its
+  low word, as 64-bit arithmetic cut to a long is; after the last
+  passes, folding repeats while it drops
   arms that cannot run, `settle_function()`), jump threading
   (`thread_jumps()`: a way into a block that only tests a variable goes
   where the value it sets goes, or branches on the compare it sets, a
