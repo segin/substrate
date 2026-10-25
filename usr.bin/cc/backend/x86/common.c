@@ -3713,7 +3713,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 loads[load_count].value = v;
                 loads[load_count].is_address = 1;
                 load_count++;
-                snprintf(abuf, sizeof(abuf), "(%s)", areg);
+                /* (with its displacement, as gcc writes a memory operand: "2+%0" stays an address) */
+                snprintf(abuf, sizeof(abuf), "0(%s)", areg);
                 op_text[i] = dup_cstr(abuf);
             } else {
                 op_text[i] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
@@ -3807,7 +3808,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             loads[load_count].value = CC_SSA_ASM_MEM_INDIRECT_DECODE(v);
             loads[load_count].is_address = 1;
             load_count++;
-            snprintf(abuf, sizeof(abuf), "(%s)", areg);
+            /* (with its displacement, as gcc writes a memory operand: "2+%0" stays an address) */
+            snprintf(abuf, sizeof(abuf), "0(%s)", areg);
             op_text[slot] = dup_cstr(abuf);
             if (op_text[slot] == NULL) {
                 goto oom;

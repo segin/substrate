@@ -10346,20 +10346,35 @@ static char *asm_register_constraint(const cc_translation_unit_t *tu, var_entry_
  * rather than as a copy of its value: one reached through a pointer (`*p`, `p[i]`, `p->m`), or a block-scope
  * static, or a member of one of those.
  */
-static int asm_mem_input_is_object(var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e) {
+static int asm_mem_input_is_object(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                   const cc_expr_t *e) {
     int vidx;
+    const cc_global_t *g;
 
     if (e == NULL) {
         return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_MEMBER) {
+        /* an aggregate's value is its address: the object, whatever it is, never a copy of that address */
+        const cc_ctype_t *t = lower_value_ctype(e);
+
+        if (t != NULL && (lower_record_id(e) >= 0 || ct_has_kind(t, CC_CT_ARRAY))) {
+            return 1;
+        }
     }
     switch (e->kind) {
     case CC_EXPR_DEREF:
         return 1;
     case CC_EXPR_MEMBER:
-        return e->member_is_arrow || asm_mem_input_is_object(vars, var_count, depth, e->lhs);
+        return e->member_is_arrow || asm_mem_input_is_object(tu, vars, var_count, depth, e->lhs);
     case CC_EXPR_IDENT:
         vidx = e->ident != NULL ? var_find_visible(vars, var_count, e->ident, depth) : -1;
-        return vidx >= 0 && vars[vidx].is_static_storage;
+        if (vidx >= 0) {
+            return vars[vidx].is_static_storage;
+        }
+        /* a global (but a register variable, its register): the object by its symbol, as gcc writes it */
+        g = e->ident != NULL ? find_global(tu, e->ident) : NULL;
+        return g != NULL && g->asm_register == NULL;
     default:
         return 0;
     }
@@ -10712,7 +10727,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         int av;
 
         if (op->expr != NULL && cc_asm_constraint_is_memory_only(op->constraint) &&
-            (ct_value_kind(lower_value_ctype(op->expr)) == CC_VAL_F64 || asm_mem_input_is_object(*vars, *var_count,
+            (ct_value_kind(lower_value_ctype(op->expr)) == CC_VAL_F64 || asm_mem_input_is_object(tu, *vars, *var_count,
                                                                                                depth, op->expr))) {
             /*
              * A floating object as a memory input is the object, by its
