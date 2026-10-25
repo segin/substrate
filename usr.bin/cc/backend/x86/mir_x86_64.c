@@ -165,7 +165,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     xop_t target;
     int indirect = 0;
 
-    if (in->call_chain > 0 || in->call_ret_x87 || (agg && agg_obj < 0) ||
+    if (in->call_ret_x87 || (agg && agg_obj < 0) ||
         (agg && !sret && (in->agg_class & ~(int)(CC_ABI_RET_MEMORY)) != 0) || (!agg && !empty && in->agg_class != 0) ||
         (in->dst >= 0 && !agg && (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 ||
                                   (f->value_ty[in->dst].kind == CC_TY_AGG && f->value_ty[in->dst].size > 8)))) {
@@ -253,6 +253,13 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
 
         xs_emit(s, XI_LEA, 8, 2, &m, &rdi, NULL);
         used |= XR_BIT(XR_DI);
+    }
+    if (in->call_chain > 0) {
+        /* a GNU nested function's environment, in the static chain register */
+        xop_t r10 = xop_reg(XR_R10, 8);
+
+        xs_move_word_to(s, in->call_chain - 1, 0, &r10);
+        used |= XR_BIT(XR_R10);
     }
     if (in->call_is_variadic) {
         /* %al: the vector registers the arguments took */
@@ -664,6 +671,7 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
     t.stack_boundary = 16;
     t.sym_imm = 0;
     t.extends_params = 1;
+    t.chain_reg = XR_R10;
     t.function_ok = x64_function_ok;
     t.begin = x64_begin;
     t.param = x64_param;

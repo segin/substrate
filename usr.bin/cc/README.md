@@ -27,7 +27,7 @@ linker to produce objects, executables and shared objects.
   values.  Values live in registers, given out by a linear-scan
   allocator (`backend/x86/linscan.c`), and go to the frame only when
   there are not enough; a function using what that path does not handle
-  yet (floating point, nested functions; on i386 `-fPIC`)
+  yet (floating point; on i386 `-fPIC`)
   keeps every value in a stack slot, cached in a few registers.
 - **Assembler and linker:** `$AS` / `$LD` if set, else `../as/as` and
   `../ld/ld` relative to the `cc` binary (the tree's layout), else `as`

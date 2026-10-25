@@ -1674,6 +1674,15 @@ static void sel_instr(xsel_t *s, size_t j) {
         s->t->va_start(s, in);
         break;
 
+    case CC_SSA_CHAIN: {
+        /* a nested function's environment, in the static chain register as the function was entered */
+        xop_t r = xop_reg(s->t->chain_reg, w);
+        xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), w);
+
+        xs_emit(s, XI_MOV, w, 2, &r, &d, NULL);
+        break;
+    }
+
     case CC_SSA_DYNALLOC:
         if (in->lhs < 0 || xs_is_pair(s, in->lhs)) {
             NOPE(s);
@@ -1728,7 +1737,6 @@ static const char *function_ok(const xsel_t *s) {
     }
     for (i = 0; i < f->instr_count; ++i) {
         switch (f->instrs[i].op) {
-        case CC_SSA_CHAIN:
         case CC_SSA_I2F:
         case CC_SSA_F2I:
         case CC_SSA_FROUND32:

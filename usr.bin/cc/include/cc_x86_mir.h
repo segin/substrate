@@ -281,6 +281,7 @@ typedef struct {
     int fp_residue;         /**< the frame pointer's offset from a 16-byte boundary, for 16-aligned frame objects */
     int stack_boundary;     /**< the stack's alignment at a call, in bytes */
     int sym_imm;            /**< a symbol's address may be an immediate (else it is made with leaq, off %rip) */
+    int chain_reg;          /**< the static chain register a GNU nested function's environment comes in */
     int extends_params;     /**< a narrow parameter or call result is held extended once taken (x86-64), not as it
                                  came (i386, but for a call's 1- and 2-byte results) */
     /** NULL when the function is one this path takes, else why not */

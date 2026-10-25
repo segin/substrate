@@ -131,7 +131,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     int sret = agg && in->agg_class == 0;
     int agg_obj = agg ? s->obj[in->dst] : -1;
 
-    if (in->call_chain > 0 || in->call_ret_x87 || (agg && !in_regs && !sret_reg && !sret) ||
+    if (in->call_ret_x87 || (agg && !in_regs && !sret_reg && !sret) ||
         (agg && agg_obj < 0) || (!agg && in->agg_class != 0) ||
         (in->dst >= 0 && !agg && (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 ||
                                   f->value_ty[in->dst].kind == CC_TY_AGG))) {
@@ -227,6 +227,16 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
 
         xs_emit(s, XI_LEA, 4, 2, &m, &eax, NULL);
         rp_used |= XR_BIT(XR_AX);
+    }
+    if (in->call_chain > 0) {
+        /* a GNU nested function's environment, in the static chain register -- which regparm's third is too */
+        xop_t ecx = xop_reg(XR_CX, 4);
+
+        if ((rp_used & XR_BIT(XR_CX)) != 0) {
+            XS_NOPE(s);
+        }
+        xs_move_word_to(s, in->call_chain - 1, 0, &ecx);
+        rp_used |= XR_BIT(XR_CX);
     }
     if (indirect) {
         c = xi_make(XI_CALL, 4, 1, &target, NULL, NULL);
@@ -516,6 +526,7 @@ int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_fun
     t.fp_residue = 8; /* %ebp is 8 past a 16-byte boundary */
     t.stack_boundary = i386_stack_boundary();
     t.sym_imm = 1;
+    t.chain_reg = XR_CX;
     t.function_ok = i386_function_ok;
     t.begin = i386_begin;
     t.param = i386_param;
