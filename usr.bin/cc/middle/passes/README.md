@@ -14,8 +14,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   once legalization has extended it), and
   common subexpressions within a block
   (`cse_function()`: a pure computation made again from the same versions
-  of the same operands a copy of the first, loads left alone as the IR
-  does not mark the volatile ones); then, from -O1,
+  of the same operands a copy of the first, an operand read as what the
+  block copied it from while neither is written, loads left alone as the
+  IR does not mark the volatile ones; it runs again once slots are
+  values); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
   its callees are, then folded again); at the end of a function's
   passes, the target's legalization once more, for what it split before

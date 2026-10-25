@@ -2502,17 +2502,36 @@ static int cse_candidate(const cc_ssa_instr_t *in) {
     }
 }
 
+/** Where cse_function() knows a value to be a copy of another, made in the block being scanned. */
+typedef struct {
+    int *of;           /**< per value: the value it was copied from, or -1 */
+    unsigned *of_ver;  /**< that value's version then */
+    unsigned *own_ver; /**< this value's version the copy made */
+    unsigned *gen;     /**< the block it was made in */
+} cse_copies_t;
+
+/** Value @p v read as what it is a copy of, while both hold as they did then in block @p gen. */
+static int cse_source(const cse_copies_t *c, const unsigned *ver, unsigned gen, int v) {
+    if (v >= 0 && c->of[v] >= 0 && c->gen[v] == gen && ver[v] == c->own_ver[v] && ver[c->of[v]] == c->of_ver[v]) {
+        return c->of[v];
+    }
+    return v;
+}
+
 /** Fill @p e with the key of instruction @p in of @p f, operands at versions @p ver; commutative ones ordered. */
-static void cse_key(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const unsigned *ver, cse_entry_t *e) {
-    int a = in->lhs;
-    int b = in->rhs;
+static void cse_key(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const unsigned *ver, const cse_copies_t *c,
+                    unsigned gen, cse_entry_t *e) {
+    int a = cse_source(c, ver, gen, in->lhs);
+    int b = cse_source(c, ver, gen, in->rhs);
 
     memset(e, 0, sizeof(*e));
     if ((in->op == CC_SSA_ADD || in->op == CC_SSA_MUL || in->op == CC_SSA_AND || in->op == CC_SSA_OR ||
          in->op == CC_SSA_XOR) &&
         a >= 0 && b >= 0 && b < a) {
-        a = in->rhs;
-        b = in->lhs;
+        int t = a;
+
+        a = b;
+        b = t;
     }
     e->op = in->op;
     e->lhs = a;
@@ -2570,6 +2589,8 @@ static int cse_function(cc_ssa_function_t *f) {
     size_t cap = 64;
     cse_entry_t *tab;
     unsigned *ver;
+    cse_copies_t cp;
+    size_t nv = (size_t)(f->value_count > 0 ? f->value_count : 1);
     unsigned gen = 1;
     int changed = 0;
     size_t i;
@@ -2578,11 +2599,22 @@ static int cse_function(cc_ssa_function_t *f) {
         cap *= 2;
     }
     tab = (cse_entry_t *)calloc(cap, sizeof(*tab));
-    ver = (unsigned *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), sizeof(*ver));
-    if (tab == NULL || ver == NULL) {
+    ver = (unsigned *)calloc(nv, sizeof(*ver));
+    cp.of = (int *)malloc(nv * sizeof(*cp.of));
+    cp.of_ver = (unsigned *)calloc(nv, sizeof(*cp.of_ver));
+    cp.own_ver = (unsigned *)calloc(nv, sizeof(*cp.own_ver));
+    cp.gen = (unsigned *)calloc(nv, sizeof(*cp.gen));
+    if (tab == NULL || ver == NULL || cp.of == NULL || cp.of_ver == NULL || cp.own_ver == NULL || cp.gen == NULL) {
         free(tab);
         free(ver);
+        free(cp.of);
+        free(cp.of_ver);
+        free(cp.own_ver);
+        free(cp.gen);
         return -1;
+    }
+    for (i = 0; i < nv; ++i) {
+        cp.of[i] = -1;
     }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
@@ -2597,7 +2629,7 @@ static int cse_function(cc_ssa_function_t *f) {
             cse_entry_t *hit = NULL;
             cse_entry_t *slot = NULL;
 
-            cse_key(f, in, ver, &key);
+            cse_key(f, in, ver, &cp, gen, &key);
             for (h = cse_hash(&key) & (cap - 1);; h = (h + 1) & (cap - 1)) {
                 cse_entry_t *e = &tab[h];
 
@@ -2626,7 +2658,20 @@ static int cse_function(cc_ssa_function_t *f) {
             }
         }
         if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
+            int src = in->op == CC_SSA_MOV ? cse_source(&cp, ver, gen, in->lhs) : -1;
+
             ver[in->dst]++;
+            /* a copy of a value of its own type: read as that value while neither is written */
+            if (src >= 0 && src < f->value_count && src != in->dst && f->value_ty[src].kind == f->value_ty[in->dst].kind &&
+                f->value_ty[src].size == f->value_ty[in->dst].size &&
+                f->value_ty[src].is_unsigned == f->value_ty[in->dst].is_unsigned) {
+                cp.of[in->dst] = src;
+                cp.of_ver[in->dst] = ver[src];
+                cp.own_ver[in->dst] = ver[in->dst];
+                cp.gen[in->dst] = gen;
+            } else {
+                cp.of[in->dst] = -1;
+            }
         }
         for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
             int o = in->asm_out_values[k];
@@ -2647,6 +2692,10 @@ static int cse_function(cc_ssa_function_t *f) {
             memset(tab, 0, cap * sizeof(*tab));
         }
     }
+    free(cp.of);
+    free(cp.of_ver);
+    free(cp.own_ver);
+    free(cp.gen);
     free(tab);
     free(ver);
     return changed;
@@ -3373,9 +3422,10 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
         int rc = cc_promote_slots(&m->funcs[i]);
 
         if (rc > 0) {
-            /* what the new values make known, a truth tested again, or plain copies */
+            /* what the new values make known, a truth tested again, computed twice, or plain copies */
             rc = fold_function(&m->funcs[i], 1);
             rc = rc < 0 ? -1 : fold_bool_not(&m->funcs[i]);
+            rc = rc < 0 ? -1 : cse_function(&m->funcs[i]);
             rc = rc < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
             rc = rc < 0 ? -1 : thread_jumps(&m->funcs[i]);
             rc = rc < 0 ? -1 : unreachable_function(&m->funcs[i]);
