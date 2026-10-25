@@ -360,7 +360,7 @@ int xi_mem_ok(const xinst_t *in, int k) {
 
 int xi_ends_block(const xinst_t *in) {
     return in->op == XI_JMP || in->op == XI_JCC || in->op == XI_RET || in->op == XI_TRAP ||
-           (in->op == XI_ASM && in->ntargets > 0);
+           (in->op == XI_ASM && in->ntargets > 0) || in->op == XI_JMPT;
 }
 
 xcc_t xcc_negate(xcc_t cc) {
@@ -557,6 +557,17 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
     switch (in->op) {
     case XI_JMP:
         fprintf(fp, "\tjmp .L%s_%d\n", fn_name, in->label);
+        return;
+    case XI_JMPT:
+        if (in->cc) {
+            const char *ix = xr_name(in->o[0].reg, 8);
+
+            fprintf(fp, "\tleaq .L%s_jt%d(%%rip), %%r11\n", fn_name, in->aux);
+            fprintf(fp, "\tmovslq (%%r11,%s,4), %s\n", ix, ix);
+            fprintf(fp, "\taddq %%r11, %s\n\tjmp *%s\n", ix, ix);
+            return;
+        }
+        fprintf(fp, "\tjmp *.L%s_jt%d(,%s,%d)\n", fn_name, in->aux, xr_name(in->o[0].reg, word), word);
         return;
     case XI_JCC:
         fprintf(fp, "\tj%s .L%s_%d\n", xcc_name((xcc_t)in->cc), fn_name, in->label);

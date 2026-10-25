@@ -278,7 +278,8 @@ static int ls_liveness(ls_t *ls) {
         if (end->op == XI_JMP || end->op == XI_JCC) {
             s[0] = end->label >= 0 && end->label < xf->nlabels ? ls->label_block[end->label] : -1;
         }
-        if (end->op != XI_JMP && end->op != XI_RET && end->op != XI_TRAP && b + 1 < ls->nblocks) {
+        if (end->op != XI_JMP && end->op != XI_JMPT && end->op != XI_RET && end->op != XI_TRAP &&
+            b + 1 < ls->nblocks) {
             s[1] = b + 1;
         }
     }
@@ -304,10 +305,10 @@ static int ls_liveness(ls_t *ls) {
                 }
             }
             {
-                /* an asm goto goes on to any of its labels too */
+                /* an asm goto goes on to any of its labels too, and a jump through a table to any of its */
                 const xinst_t *end = &xf->ins[ls->blast[b]];
 
-                for (k = 0; end->op == XI_ASM && k < end->ntargets; ++k) {
+                for (k = 0; (end->op == XI_ASM || end->op == XI_JMPT) && k < end->ntargets; ++k) {
                     int lab = end->targets[k];
                     int s = lab >= 0 && lab < xf->nlabels ? ls->label_block[lab] : -1;
 

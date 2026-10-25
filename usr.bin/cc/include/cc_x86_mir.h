@@ -145,6 +145,10 @@ typedef enum {
     XI_SBB,       /**< o1 -= o0 + the carry flag: the same of a subtract */
     XI_SHLD,      /**< o2 = o2 << o0 | o1 >> (word - o0), o0 an immediate: a two-word shift's or rotate's word */
     XI_SHRD,      /**< o2 = o2 >> o0 | o1 << (word - o0) */
+    XI_JMPT,      /**< jmp through a table of ntargets labels (targets), the selector's table aux: to targets[o0], o0 a
+                       register holding an index below ntargets -- a switch's cases.  It does not fall through.  With
+                       cc, x86-64 code that may be position-independent: the table's entries are offsets from it,
+                       added to its address made off %rip in %r11 (clobbered), as gcc's -fPIE tables are. */
     XI_COUNT
 } xi_op_t;
 
@@ -185,7 +189,7 @@ typedef struct {
     unsigned clobber;   /**< and leaves with no value anyone may read (a call's caller-saved registers) */
     int ir_index;       /**< XI_ASM: the IR instruction */
     int aux;            /**< XI_ASM: the selector's own */
-    const int *targets; /**< XI_ASM: the labels an asm goto may jump to, besides falling through */
+    const int *targets; /**< XI_ASM: the labels an asm goto may jump to, besides falling through; XI_JMPT: its table */
     int ntargets;
 } xinst_t;
 
@@ -394,6 +398,12 @@ struct xsel {
     int has_dynalloc;         /**< it moves the stack pointer itself (alloca, a variable-length array) */
     int fpo;                  /**< -fomit-frame-pointer taken: no frame pointer, %ebp (%rbp) allocated (fpo_ok()) */
     long flag_br;             /**< the IR branch that reads an asm's flag output from the flags themselves, or -1 */
+    size_t skip_to;           /**< IR instructions before this one are selected already (a switch's chain of cases) */
+    int *jt;                  /**< the labels of the function's jump tables, one after another (XI_JMPT's aux) */
+    size_t njt;
+    size_t jtcap;
+    int *label_refs;          /**< per IR label: the branches, asm gotos and label addresses that name it, or NULL */
+    long *label_at;           /**< per IR label: its instruction */
     unsigned char flag_cc;    /**< and the condition it branches on */
     int fp_saved[XR_NPHYS];   /**< (fpo) the callee-saved registers the prologue pushes: the target's and %ebp */
     int fp_nsaved;

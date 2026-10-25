@@ -2540,12 +2540,324 @@ static int sel_double_shift(xsel_t *s, const cc_ssa_instr_t *in) {
     return 0;
 }
 
+/** Fewest cases a switch's chain of compares has to be a jump through a table. */
+#define SWITCH_TABLE_MIN_CASES 4
+/** A table's entries at most this many per case, and never more than SWITCH_TABLE_MAX. */
+#define SWITCH_TABLE_DENSITY 8
+#define SWITCH_TABLE_MAX 4096
+
+/** One case of a switch's chain of compares (switch_case()). */
+typedef struct {
+    long long k;  /**< the value compared with, at the value's width */
+    int target;   /**< the label it branches to */
+} switch_case_t;
+
+/**
+ * Of branch @p j of @p s, a case of a switch as lowering makes it: a branch on `icmp eq x, k` of a constant, the
+ * compare read only there -- x into *@p v, k (at x's width) into *@p k, where it goes when equal into *@p target,
+ * where when not into *@p next.
+ *
+ * @return 1 if it is one, else 0
+ */
+static int switch_case(const xsel_t *s, size_t j, int *v, long long *k, int *target, int *next) {
+    const cc_ssa_function_t *f = s->f;
+    const cc_ssa_instr_t *br = &f->instrs[j];
+    const cc_ssa_instr_t *c;
+    int x;
+    long long kk;
+
+    if (br->op != CC_SSA_BR_COND || br->lhs < 0 || br->lhs >= f->value_count || s->nuses[br->lhs] != 1) {
+        return 0;
+    }
+    c = s->def_at[br->lhs] == -2 ? &f->instrs[s->cmp_at[br->lhs]] : def_of(s, br->lhs);
+    if (c == NULL || c->op != CC_SSA_CMP || c->cmp_kind != CC_CMP_EQ || c->lhs < 0 || c->rhs < 0) {
+        return 0;
+    }
+    if (xs_const_of(s, c->rhs, &kk) && !xs_const_of(s, c->lhs, &kk)) {
+        x = c->lhs;
+        (void)xs_const_of(s, c->rhs, &kk);
+    } else if (xs_const_of(s, c->lhs, &kk) && !xs_const_of(s, c->rhs, &kk)) {
+        x = c->rhs;
+        (void)xs_const_of(s, c->lhs, &kk);
+    } else {
+        return 0;
+    }
+    if (xs_is_pair(s, x) || xs_fp_kind(s, x) != XFP_NONE || cc_ssa_value_class(f, x) != CC_VAL_I64 ||
+        (cc_ssa_value_size(f, x) > 4 && cc_ssa_value_size(f, x) != (uint32_t)s->word)) {
+        return 0;
+    }
+    *v = x;
+    switch (cc_ssa_value_size(f, x)) {
+    case 1:
+        /* (a narrow value as its type extends it, the cases the same) */
+        *k = cc_ssa_value_is_unsigned(f, x) ? (long long)(unsigned char)kk : (long long)(signed char)kk;
+        break;
+    case 2:
+        *k = cc_ssa_value_is_unsigned(f, x) ? (long long)(unsigned short)kk : (long long)(short)kk;
+        break;
+    case 4:
+        *k = (long long)(int)kk;
+        break;
+    default:
+        *k = kk;
+        break;
+    }
+    *target = br->true_label;
+    *next = br->false_label;
+    return 1;
+}
+
+/**
+ * Whether IR instructions @p from up to @p to (exclusive) of @p s are only what a case's block holds besides its
+ * branch: its constants, read nowhere else, and the compare the branch reads.
+ */
+static int switch_case_block(const xsel_t *s, size_t from, size_t to) {
+    const cc_ssa_function_t *f = s->f;
+    size_t i;
+
+    for (i = from; i < to; ++i) {
+        const cc_ssa_instr_t *x = &f->instrs[i];
+
+        if (x->op == CC_SSA_CONST && x->dst >= 0 && s->nuses[x->dst] <= 1) {
+            continue;
+        }
+        if (x->op == CC_SSA_CMP && x->dst >= 0 && s->nuses[x->dst] == 1 && x->dst == f->instrs[to].lhs) {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+/** Fill in s->label_refs and s->label_at, once. */
+static int switch_labels(xsel_t *s) {
+    const cc_ssa_function_t *f = s->f;
+    size_t n = f->label_count > 0 ? (size_t)f->label_count : 1;
+    size_t i;
+
+    if (s->label_refs != NULL) {
+        return 0;
+    }
+    s->label_refs = (int *)calloc(n, sizeof(int));
+    s->label_at = (long *)malloc(n * sizeof(long));
+    if (s->label_refs == NULL || s->label_at == NULL) {
+        s->xf.oom = 1;
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        s->label_at[i] = -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t g;
+
+#define REF(l) do { if ((l) >= 0 && (l) < f->label_count) s->label_refs[(l)]++; } while (0)
+        if (in->op == CC_SSA_LABEL && in->label >= 0 && in->label < f->label_count) {
+            s->label_at[in->label] = (long)i;
+        } else if (in->op == CC_SSA_BR || in->op == CC_SSA_LADDR) {
+            REF(in->label);
+        } else if (in->op == CC_SSA_BR_COND) {
+            REF(in->true_label);
+            REF(in->false_label);
+        } else if (in->op == CC_SSA_ASM) {
+            for (g = 0; g < in->asm_goto_count; ++g) {
+                REF(in->asm_goto_labels[g]);
+            }
+        }
+#undef REF
+    }
+    return 0;
+}
+
+/**
+ * At branch @p j, a switch's chain of compares of one value -- each case's block right after the last, reached only
+ * from it -- as gcc makes one of enough cases dense enough: the value less the smallest case, checked against the
+ * table's size (above it, the default), and a jump through the table, which print_function() writes in .rodata.
+ * The chain's blocks after the first are skipped (s->skip_to).  Linux's ia32_sys_call(), a switch of 471 system
+ * calls, was 471 compares and branches.  The entries are absolute on i386 and under -mcmodel=kernel, offsets from
+ * the table in other x86-64 code, which may be linked position-independent; none under -fPIC on i386.
+ *
+ * @return 1 if it was, else 0
+ */
+static int sel_switch_table(xsel_t *s, size_t j) {
+    const cc_ssa_function_t *f = s->f;
+    const cc_options_t *opts = cc_options_current();
+    switch_case_t *cs = NULL;
+    size_t n = 0;
+    size_t cap = 0;
+    size_t at = j;
+    size_t last = j; /* the last case's branch */
+    int v = -1;
+    int def = -1;
+    long long lo = 0;
+    long long hi = 0;
+    long long range;
+    size_t i;
+    int vsz;
+    int w = s->word;
+
+    if ((opts != NULL && opts->pic && w == 4) || switch_labels(s) != 0) {
+        return 0;
+    }
+    for (;;) {
+        int x;
+        long long k;
+        int target;
+        int next;
+        long li;
+        size_t b;
+
+        if (!switch_case(s, at, &x, &k, &target, &next) || (v >= 0 && x != v)) {
+            break;
+        }
+        if (n == cap) {
+            switch_case_t *ncs;
+
+            cap = cap > 0 ? cap * 2 : 16;
+            ncs = (switch_case_t *)realloc(cs, cap * sizeof(*cs));
+            if (ncs == NULL) {
+                free(cs);
+                s->xf.oom = 1;
+                return 0;
+            }
+            cs = ncs;
+        }
+        v = x;
+        cs[n].k = k;
+        cs[n].target = target;
+        n++;
+        def = next;
+        last = at;
+        /* the next case: the block at next, right after this branch, reached only from it */
+        if (next < 0 || next >= f->label_count || s->label_refs[next] != 1 || (li = s->label_at[next]) != (long)at + 1) {
+            break;
+        }
+        for (b = (size_t)li + 1; b < f->instr_count && f->instrs[b].op != CC_SSA_BR_COND; ++b) {
+            const cc_ssa_instr_t *x2 = &f->instrs[b];
+
+            if (x2->op != CC_SSA_CONST && x2->op != CC_SSA_CMP) {
+                break;
+            }
+        }
+        if (b >= f->instr_count || f->instrs[b].op != CC_SSA_BR_COND || !switch_case_block(s, (size_t)li + 1, b)) {
+            break;
+        }
+        at = b;
+    }
+    if (n < SWITCH_TABLE_MIN_CASES) {
+        free(cs);
+        return 0;
+    }
+    lo = hi = cs[0].k;
+    for (i = 1; i < n; ++i) {
+        lo = cs[i].k < lo ? cs[i].k : lo;
+        hi = cs[i].k > hi ? cs[i].k : hi;
+    }
+    range = hi - lo + 1;
+    vsz = (int)cc_ssa_value_size(f, v);
+    if (range <= 0 || range > SWITCH_TABLE_MAX || range > (long long)n * SWITCH_TABLE_DENSITY ||
+        !fits32(lo) || !fits32(range - 1)) {
+        free(cs);
+        return 0;
+    }
+    {
+        size_t base = s->njt;
+        int *tab;
+        xop_t src = xs_src_word(s, v, 0);
+        xop_t t = xs_temp(s);
+        xop_t t4 = t;
+        xop_t k;
+        xinst_t x;
+
+        if (s->njt + (size_t)range > s->jtcap) {
+            size_t ncap = s->jtcap > 0 ? s->jtcap : 256;
+            int *nj;
+
+            while (ncap < s->njt + (size_t)range) {
+                ncap *= 2;
+            }
+            nj = (int *)realloc(s->jt, ncap * sizeof(int));
+            if (nj == NULL) {
+                free(cs);
+                s->xf.oom = 1;
+                return 0;
+            }
+            s->jt = nj;
+            s->jtcap = ncap;
+        }
+        tab = s->jt + base;
+        for (i = 0; i < (size_t)range; ++i) {
+            tab[i] = def;
+        }
+        /* the first case of a value wins, as the chain's compares have it */
+        for (i = n; i-- > 0;) {
+            tab[cs[i].k - lo] = cs[i].target;
+        }
+        s->njt += (size_t)range;
+        free(cs);
+        /* the index: the value less the smallest case, at its own width (a 32-bit move clears the rest) */
+        if (vsz < 4) {
+            /* a byte or a half, extended as its type is */
+            t4.size = 4;
+            if (src.kind == XO_REG) {
+                src.size = (unsigned char)vsz;
+            } else if (src.kind == XO_IMM) {
+                src.size = 4;
+            }
+            {
+                int uns = cc_ssa_value_is_unsigned(f, v);
+                /* (or only moved, where every definition leaves it so extended: a byte zbl-loaded) */
+                int done = (uns ? s->zbits[v] : s->sbits[v]) <= 8 * vsz;
+
+                if (done && src.kind == XO_REG) {
+                    src.size = 4;
+                }
+                xs_emit(s, src.kind == XO_IMM || done ? XI_MOV : uns ? XI_MOVZX : XI_MOVSX, 4, 2, &src, &t4, NULL);
+            }
+            vsz = 4;
+        } else if (vsz == 4) {
+            t4.size = 4;
+            if (src.kind == XO_REG) {
+                src.size = 4;
+            }
+            xs_emit(s, XI_MOV, 4, 2, &src, &t4, NULL);
+        } else {
+            xs_emit(s, XI_MOV, w, 2, &src, &t, NULL);
+        }
+        if (lo != 0) {
+            k = xop_imm(vsz == 4 ? (long long)(int)lo : lo, vsz == 4 ? 4 : w);
+            xs_emit(s, XI_SUB, vsz == 4 ? 4 : w, 2, &k, vsz == 4 ? &t4 : &t, NULL);
+        }
+        k = xop_imm(range - 1, vsz == 4 ? 4 : w);
+        xs_emit(s, XI_CMP, vsz == 4 ? 4 : w, 2, &k, vsz == 4 ? &t4 : &t, NULL);
+        x = xi_make(XI_JCC, w, 0, NULL, NULL, NULL);
+        x.cc = XC_A;
+        x.label = def;
+        xf_emit(&s->xf, &x);
+        x = xi_make(XI_JMPT, w, 1, &t, NULL, NULL);
+        x.aux = (int)base;
+        x.ntargets = (int)range;
+        if (w == 8 && !(opts != NULL && opts->cmodel_kernel)) {
+            /* (the table's entries offsets from it: the code may be linked position-independent) */
+            x.cc = 1;
+            x.clobber = XR_BIT(XR_R11);
+        }
+        xf_emit(&s->xf, &x);
+        s->skip_to = last + 1;
+    }
+    return 1;
+}
+
 static void sel_instr(xsel_t *s, size_t j) {
     const cc_ssa_function_t *f = s->f;
     const cc_ssa_instr_t *in = &f->instrs[j];
     int w = s->word;
     long long k;
     const char *sym;
+
+    if (j < s->skip_to) {
+        return;
+    }
 
     if (s->done != NULL && s->done[j]) {
         return; /* selected with an earlier instruction */
@@ -2785,6 +3097,9 @@ static void sel_instr(xsel_t *s, size_t j) {
         break;
 
     case CC_SSA_BR_COND:
+        if (s->flag_br != (long)j && sel_switch_table(s, j)) {
+            break;
+        }
         if (s->flag_br == (long)j) {
             /* an asm's flag output: on the flags it left (asm_flag_branch()) */
             s->flag_br = -1;
@@ -3094,6 +3409,9 @@ static int sel_init(xsel_t *s) {
 }
 
 static void sel_free(xsel_t *s) {
+    free(s->jt);
+    free(s->label_refs);
+    free(s->label_at);
     free(s->sbits);
     free(s->dbits);
     free(s->ext_copy);
@@ -3247,7 +3565,7 @@ static void tidy_branches(xfunc_t *xf, int labels_taken) {
                 if ((in->op == XI_JMP || in->op == XI_JCC) && in->label >= 0 && in->label < xf->nlabels) {
                     refs[in->label]++;
                 }
-                for (k = 0; in->op == XI_ASM && k < in->ntargets; ++k) {
+                for (k = 0; (in->op == XI_ASM || in->op == XI_JMPT) && k < in->ntargets; ++k) {
                     if (in->targets[k] >= 0 && in->targets[k] < xf->nlabels) {
                         refs[in->targets[k]]++;
                     }
@@ -3277,7 +3595,7 @@ static void tidy_branches(xfunc_t *xf, int labels_taken) {
                 continue;
             }
             xf->ins[j++] = *in;
-            if (in->op == XI_JMP || in->op == XI_RET || in->op == XI_TRAP) {
+            if (in->op == XI_JMP || in->op == XI_JMPT || in->op == XI_RET || in->op == XI_TRAP) {
                 while (i + 1 < xf->nins) {
                     const xinst_t *nx = &xf->ins[i + 1];
 
@@ -3718,6 +4036,26 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         fputs("\t.cfi_endproc\n", fp);
     }
     fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
+    for (i = 0; i < s->xf.nins; ++i) {
+        /* the switches' jump tables, in .rodata as gcc puts them */
+        const xinst_t *in = &s->xf.ins[i];
+        int k;
+
+        if (in->op != XI_JMPT) {
+            continue;
+        }
+        fprintf(fp, "\t.pushsection .rodata\n\t.p2align %d\n.L%s_jt%d:\n", w == 8 && !in->cc ? 3 : 2, f->name,
+                in->aux);
+        for (k = 0; k < in->ntargets; ++k) {
+            fprintf(fp, "\t%s ", w == 8 && !in->cc ? ".quad" : ".long");
+            emit_local_label(fp, f->name, in->targets[k]);
+            if (in->cc) {
+                fprintf(fp, "-.L%s_jt%d", f->name, in->aux);
+            }
+            fputc('\n', fp);
+        }
+        fputs("\t.popsection\n", fp);
+    }
     if ((f->attr_flags & CC_ATTR_CONSTRUCTOR) != 0) {
         emit_lifecycle_attr(fp, ".init_array", "init_array", f->name, w == 8);
     }
@@ -3865,6 +4203,12 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     rc = sel_init(&s);
     for (j = 0; rc == 0 && j < f->instr_count && !s.unsupported && !s.xf.oom; ++j) {
         sel_instr(&s, j);
+    }
+    for (j = 0; rc == 0 && j < (size_t)s.xf.nins; ++j) {
+        /* (the tables grow as they are made: a jump through one points into it now) */
+        if (s.xf.ins[j].op == XI_JMPT) {
+            s.xf.ins[j].targets = s.jt + s.xf.ins[j].aux;
+        }
     }
     if (rc == 0 && (s.unsupported || s.xf.oom)) {
         rc = s.xf.oom ? -1 : 1;
