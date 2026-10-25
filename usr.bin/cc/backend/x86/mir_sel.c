@@ -593,7 +593,9 @@ static int compute_ext(xsel_t *s) {
         s->zbits[v] = (unsigned char)(s->ndefs[v] > 0 ? 1 : W);
     }
     for (v = 0; v < f->value_count; ++v) {
-        if (s->addr_taken[v] || cc_ssa_value_class(f, v) != CC_VAL_I64 || xs_is_pair(s, v)) {
+        if (s->addr_taken[v] || cc_ssa_value_class(f, v) != CC_VAL_I64 || xs_is_pair(s, v) ||
+            f->value_ty[v].kind == CC_TY_AGG) {
+            /* (a small structure in a register is its bytes, not an extended integer) */
             s->sbits[v] = (unsigned char)W;
             s->zbits[v] = (unsigned char)W;
         }
@@ -908,6 +910,78 @@ static void sel_div(xsel_t *s, const cc_ssa_instr_t *in) {
     xs_emit(s, XI_MOV, w, 2, &eax, &d, NULL);
 }
 
+void xs_load_bytes(xsel_t *s, xop_t m, xop_t d, int bytes) {
+    int w = s->word;
+    int off = 0;
+    int p;
+
+    d.size = (unsigned char)w;
+    for (p = w; p >= 1; p /= 2) {
+        if (bytes - off < p) {
+            continue;
+        }
+        {
+            xop_t a = m;
+            xop_t t = off == 0 ? d : xs_temp(s);
+            xop_t t4 = t;
+
+            a.disp += off;
+            a.size = (unsigned char)p;
+            t4.size = (unsigned char)(p == 8 ? 8 : 4);
+            if (p >= 4) {
+                xs_emit(s, XI_MOV, p, 2, &a, &t4, NULL);
+            } else {
+                /* zero-extended into the 32-bit register, which clears the rest of a 64-bit one */
+                xs_emit(s, XI_MOVZX, w, 2, &a, &t4, NULL);
+            }
+            if (off > 0) {
+                xop_t sh = xop_imm(8 * off, 1);
+
+                xs_emit(s, XI_SHL, w, 2, &sh, &t, NULL);
+                xs_emit(s, XI_OR, w, 2, &t, &d, NULL);
+            }
+            off += p;
+        }
+    }
+}
+
+void xs_store_bytes(xsel_t *s, xop_t v, xop_t m, int bytes) {
+    int w = s->word;
+    xop_t t = xs_temp(s);
+    int off = 0;
+    int p;
+
+    v.size = (unsigned char)w;
+    xs_emit(s, XI_MOV, w, 2, &v, &t, NULL);
+    for (p = w; p >= 1; p /= 2) {
+        if (bytes - off < p) {
+            continue;
+        }
+        {
+            xop_t a = m;
+            xop_t tp = t;
+
+            a.disp += off;
+            a.size = (unsigned char)p;
+            if (p == 1 && w == 4) {
+                /* a byte register: a copy in one */
+                xop_t b = xs_temp(s);
+
+                xs_emit(s, XI_MOV, 4, 2, &t, &b, NULL);
+                tp = b;
+            }
+            tp.size = (unsigned char)p;
+            xs_emit(s, XI_MOV, p, 2, &tp, &a, NULL);
+            off += p;
+            if (off < bytes) {
+                xop_t sh = xop_imm(8 * p, 1);
+
+                xs_emit(s, XI_SHR, w, 2, &sh, &t, NULL);
+            }
+        }
+    }
+}
+
 /** A load of @p in->imm bytes, extended as the result is held. */
 static void sel_load(xsel_t *s, const cc_ssa_instr_t *in) {
     int size = (int)in->imm;
@@ -921,6 +995,13 @@ static void sel_load(xsel_t *s, const cc_ssa_instr_t *in) {
 
         xs_emit(s, XI_MOV, 4, 2, &m0, &d0, NULL);
         xs_emit(s, XI_MOV, 4, 2, &m1, &d1, NULL);
+        return;
+    }
+    if (size > 0 && size < w && size != 1 && size != 2 && size != 4) {
+        /* a structure of 3, 5, 6 or 7 bytes, into one register */
+        xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), w);
+
+        xs_load_bytes(s, xs_mem_at(s, in->lhs, 0, 1), d, size);
         return;
     }
     if (size != 1 && size != 2 && size != 4 && !(size == 8 && w == 8)) {
@@ -962,6 +1043,11 @@ static void sel_store(xsel_t *s, const cc_ssa_instr_t *in) {
 
             xs_emit(s, XI_MOV, 4, 2, &v, &m, NULL);
         }
+        return;
+    }
+    if (size > 0 && size < w && size != 1 && size != 2 && size != 4) {
+        /* a structure of 3, 5, 6 or 7 bytes from one register */
+        xs_store_bytes(s, xs_src_word(s, in->rhs, 0), xs_mem_at(s, in->lhs, 0, 1), size);
         return;
     }
     if (size != 1 && size != 2 && size != 4 && !(size == 8 && w == 8)) {
@@ -1548,7 +1634,8 @@ static void sel_instr(xsel_t *s, size_t j) {
         break;
 
     case CC_SSA_LOAD:
-        if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 || f->value_ty[in->dst].kind == CC_TY_AGG) {
+        if (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 ||
+            (f->value_ty[in->dst].kind == CC_TY_AGG && (in->imm <= 0 || in->imm > w))) {
             NOPE(s);
         }
         sel_load(s, in);

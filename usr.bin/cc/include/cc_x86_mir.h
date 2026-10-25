@@ -368,6 +368,13 @@ xop_t xs_reg_word(xsel_t *s, int v, int part);
 xop_t xs_mem_at(xsel_t *s, int v, long long disp, int size);
 /** Write word @p part of IR value @p v to operand @p d. */
 void xs_move_word_to(xsel_t *s, int v, int part, const xop_t *d);
+/**
+ * Load @p bytes bytes (1 up to a word) at memory @p m into register @p d, zero-extended: the biggest pieces first,
+ * each shifted into place, for a small structure of no whole access's size.
+ */
+void xs_load_bytes(xsel_t *s, xop_t m, xop_t d, int bytes);
+/** Store the low @p bytes bytes (1 up to a word) of @p v at memory @p m: the biggest pieces first. */
+void xs_store_bytes(xsel_t *s, xop_t v, xop_t m, int bytes);
 /** Whether label @p label comes right after IR instruction @p j, with only labels between. */
 int xs_label_follows(const xsel_t *s, size_t j, int label);
 

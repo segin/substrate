@@ -133,8 +133,15 @@ static void load_agg_gprs(xsel_t *s, int v, long size, size_t first, unsigned *u
 
         if (bytes == 8 || bytes == 4) {
             xs_emit(s, XI_MOV, (int)bytes, 2, &m, &d, NULL);
-        } else {
+        } else if (bytes <= 2) {
             xs_emit(s, XI_MOVZX, 4, 2, &m, &d, NULL);
+        } else {
+            /* 3, 5, 6 or 7 bytes: in pieces, by way of a register of its own */
+            xop_t t = xs_temp(s);
+
+            xs_load_bytes(s, m, t, (int)bytes);
+            d.size = 8;
+            xs_emit(s, XI_MOV, 8, 2, &t, &d, NULL);
         }
         *used |= XR_BIT(reg);
     }
@@ -144,6 +151,8 @@ static void load_agg_gprs(xsel_t *s, int v, long size, size_t first, unsigned *u
 static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
     int agg = in->dst >= 0 && in->rhs == in->dst && in->imm > 0;
+    /* an empty structure result: nothing comes back, and the value is its storage's address (rhs) */
+    int empty = in->dst >= 0 && in->rhs >= 0 && in->imm == 0 && in->agg_class != 0;
     int agg_obj = agg ? s->obj[in->dst] : -1;
     int sret = agg && x86_64_agg_ret_in_memory(in->imm, in->agg_class);
     abi_loc_t *locs = NULL;
@@ -157,9 +166,9 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     int indirect = 0;
 
     if (in->call_chain > 0 || in->call_ret_x87 || (agg && agg_obj < 0) ||
-        (agg && !sret && (in->agg_class & ~(int)(CC_ABI_RET_MEMORY)) != 0) || (!agg && in->agg_class != 0) ||
+        (agg && !sret && (in->agg_class & ~(int)(CC_ABI_RET_MEMORY)) != 0) || (!agg && !empty && in->agg_class != 0) ||
         (in->dst >= 0 && !agg && (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 ||
-                                  f->value_ty[in->dst].kind == CC_TY_AGG))) {
+                                  (f->value_ty[in->dst].kind == CC_TY_AGG && f->value_ty[in->dst].size > 8)))) {
         XS_NOPE(s);
     }
     if (agg && !sret && in->imm > 16) {
@@ -183,11 +192,9 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         if (v < 0 || cc_ssa_value_class(f, v) == CC_VAL_F64 || locs[a].kind == ABI_LOC_XMM ||
             (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM &&
              !agg_in_gprs(abi)) ||
-            (agg_in_gprs(abi) && locs[a].kind == ABI_LOC_GPR &&
-             (locs[a].index + (locs[a].size + 7) / 8 > 6 || !whole_piece((long)locs[a].size > 8
-                                                                        ? (long)locs[a].size - 8
-                                                                        : (long)locs[a].size))) ||
-            (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT && f->value_ty[v].kind == CC_TY_AGG && !s->is_addr[v])) {
+            (agg_in_gprs(abi) && locs[a].kind == ABI_LOC_GPR && locs[a].index + (locs[a].size + 7) / 8 > 6) ||
+            (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT && f->value_ty[v].kind == CC_TY_AGG && !s->is_addr[v] &&
+             f->value_ty[v].size > 8)) {
             free(locs);
             XS_NOPE(s);
         }
@@ -263,7 +270,7 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     c.imp_use = used;
     c.clobber = X64_CALLER_SAVED;
-    if (in->dst >= 0) {
+    if (in->dst >= 0 && !empty) {
         c.imp_def = XR_BIT(XR_AX) | (agg && !sret && in->imm > 8 ? XR_BIT(XR_DX) : 0);
     }
     xf_emit(&s->xf, &c);
@@ -271,6 +278,14 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t k = xop_imm(total, 8);
 
         xs_emit(s, XI_ADDSP, 8, 1, &k, NULL, NULL);
+    }
+    if (empty) {
+        if (in->dst != in->rhs) {
+            xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
+
+            xs_move_word_to(s, in->rhs, 0, &d);
+        }
+        return;
     }
     if (agg) {
         long k;
@@ -284,8 +299,9 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
             xop_t r = xop_reg(k == 0 ? XR_AX : XR_DX, (int)bytes);
             xop_t m = xop_frame(agg_obj, 8 * k, (int)bytes);
 
-            if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8) {
-                XS_NOPE(s);
+            if (!whole_piece(bytes)) {
+                xs_store_bytes(s, xop_reg(k == 0 ? XR_AX : XR_DX, 8), m, (int)bytes);
+                continue;
             }
             xs_emit(s, XI_MOV, (int)bytes, 2, &r, &m, NULL);
         }
@@ -296,7 +312,8 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t rax = xop_reg(XR_AX, 8);
         xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
 
-        extend_to(s, &rax, &d, in->imm > 0 ? (int)in->imm : 8, in->is_unsigned);
+        extend_to(s, &rax, &d, in->imm > 0 && f->value_ty[in->dst].kind != CC_TY_AGG ? (int)in->imm : 8,
+                  in->is_unsigned);
     }
 }
 
@@ -343,8 +360,12 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
                 xop_t r = xop_reg(k == 0 ? s->param_lo[pi] : s->param_hi[pi], (int)part);
                 xop_t to = xop_frame(o, 8 * k, (int)part);
 
-                if (r.reg == XR_NONE || !whole_piece(part)) {
+                if (r.reg == XR_NONE) {
                     XS_NOPE(s);
+                }
+                if (!whole_piece(part)) {
+                    xs_store_bytes(s, r, to, (int)part);
+                    continue;
                 }
                 xs_emit(s, XI_MOV, (int)part, 2, &r, &to, NULL);
             }
@@ -364,6 +385,10 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
         XS_NOPE(s);
     }
     d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
+    if (f->value_ty[in->dst].kind == CC_TY_AGG) {
+        /* a small structure as its bytes, in the word as it came */
+        bytes = 8;
+    }
     if (loc.kind == ABI_LOC_GPR) {
         xop_t r = xop_reg(s->param_lo[pi], 8);
 
@@ -437,7 +462,7 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t rax = xop_reg(XR_AX, 8);
 
         if (cc_ssa_value_class(f, in->lhs) == CC_VAL_F64 ||
-            (f->value_ty[in->lhs].kind == CC_TY_AGG && !s->is_addr[in->lhs])) {
+            (f->value_ty[in->lhs].kind == CC_TY_AGG && !s->is_addr[in->lhs] && f->value_ty[in->lhs].size > 8)) {
             XS_NOPE(s);
         }
         xs_move_word_to(s, in->lhs, 0, &rax);
