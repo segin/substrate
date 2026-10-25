@@ -55,7 +55,9 @@ typedef struct {
     double freq;       /**< its reads and writes, ten times each loop deep */
     double weight;     /**< freq per instruction spanned; huge when it may not be spilled */
     float hint_w[XR_NPHYS]; /**< per physical register: how often copies to and from it suggest it, by loop depth */
+    float hint_own[XR_NPHYS]; /**< the same of its own copies alone, not passed on along chains of them */
     int hint_vr;       /**< a virtual register a copy suggests sharing one with, or XR_NONE */
+    float hint_vr_w;   /**< how often that copy runs, by loop depth: its partner's register is worth as much */
     unsigned mask;     /**< the registers it may have */
     unsigned char spilled;
 } ival_t;
@@ -683,9 +685,11 @@ static int ls_build(ls_t *ls) {
                 }
                 if (ls->iv[dd - XR_VBASE].hint_vr == XR_NONE) {
                     ls->iv[dd - XR_VBASE].hint_vr = s;
+                    ls->iv[dd - XR_VBASE].hint_vr_w = (float)fc.f;
                 }
                 if (ls->iv[s - XR_VBASE].hint_vr == XR_NONE) {
                     ls->iv[s - XR_VBASE].hint_vr = dd;
+                    ls->iv[s - XR_VBASE].hint_vr_w = (float)fc.f;
                 }
             } else if (XR_IS_VIRT(s) && dd >= 0 && dd < XR_NPHYS) {
                 /* (each copy a vote, weighed as its accesses are: the one in a loop counts) */
@@ -698,15 +702,20 @@ static int ls_build(ls_t *ls) {
     {
         /*
          * and what a chain of copies suggests: a variable copied into a temporary that goes to an asm's register
-         * or a call's argument wants that register too -- each round passing half of each one's votes on
+         * or a call's argument wants that register too -- each round its own votes and half of its
+         * neighbours'
          */
         float *next = (float *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * XR_NPHYS * sizeof(float));
+        float *base = (float *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * XR_NPHYS * sizeof(float));
         int round;
 
-        for (round = 0; next != NULL && round < 3 && ncopies > 0; ++round) {
-            for (i = 0; i < xf->nvr; ++i) {
-                memcpy(next + (size_t)i * XR_NPHYS, ls->iv[i].hint_w, sizeof(ls->iv[i].hint_w));
-            }
+        /* (each round from a register's own votes: what it passes on does not come back to it the stronger) */
+        for (i = 0; next != NULL && base != NULL && i < xf->nvr; ++i) {
+            memcpy(base + (size_t)i * XR_NPHYS, ls->iv[i].hint_w, sizeof(ls->iv[i].hint_w));
+            memcpy(ls->iv[i].hint_own, ls->iv[i].hint_w, sizeof(ls->iv[i].hint_w));
+        }
+        for (round = 0; next != NULL && base != NULL && round < 3 && ncopies > 0; ++round) {
+            memcpy(next, base, (size_t)xf->nvr * XR_NPHYS * sizeof(float));
             for (i = 0; i < ncopies; ++i) {
                 int a = copies[2 * i];
                 int d = copies[2 * i + 1];
@@ -721,6 +730,7 @@ static int ls_build(ls_t *ls) {
             }
         }
         free(next);
+        free(base);
     }
     free(copies);
     for (i = 0; i < xf->nvr; ++i) {
@@ -885,19 +895,45 @@ static int ls_scan(ls_t *ls) {
             unsigned free_mask = cur->mask & ~blocked & ~busy;
             int hint = -1;
             float best_w = 0.0f;
+            int partner = -1;
 
-            /* the free register copies suggest most; else the one a copy's other virtual register has */
+            {
+                /* the partner a chain of copies leads to that has a register already: r = (r + 4) through copies */
+                int hv = cur->hint_vr;
+                int hops;
+
+                for (hops = 0; hops < 4 && hv != XR_NONE; ++hops) {
+                    const ival_t *h = &ls->iv[hv - XR_VBASE];
+
+                    if (h->phys >= 0 && !h->spilled) {
+                        partner = h->phys;
+                        break;
+                    }
+                    hv = h->hint_vr;
+                }
+            }
+            /*
+             * the free register copies suggest most -- a copy with a virtual register already given one counting
+             * for that register as the copy runs, both ways, over what longer chains of copies pass on
+             */
             for (k = 0; k < XR_NPHYS; ++k) {
-                if ((free_mask & XR_BIT(k)) != 0 && cur->hint_w[k] > best_w) {
-                    best_w = cur->hint_w[k];
+                float wk = cur->hint_w[k] + (k == partner ? 2.0f * cur->hint_vr_w + 0.5f : 0.0f);
+
+                if ((free_mask & XR_BIT(k)) != 0 && wk > best_w) {
+                    best_w = wk;
                     hint = k;
                 }
             }
-            if (hint < 0 && cur->hint_vr != XR_NONE) {
-                const ival_t *h = &ls->iv[cur->hint_vr - XR_VBASE];
+            if (partner >= 0 && (free_mask & XR_BIT(partner)) != 0 && hint != partner) {
+                /* the partner's register, free, unless a copy of its own asks more for another */
+                int own_more = 0;
 
-                if (h->phys >= 0 && !h->spilled) {
-                    hint = h->phys;
+                for (k = 0; k < XR_NPHYS && !own_more; ++k) {
+                    own_more = k != partner && (free_mask & XR_BIT(k)) != 0 &&
+                               cur->hint_own[k] > 2.0f * cur->hint_vr_w + cur->hint_own[partner];
+                }
+                if (!own_more) {
+                    hint = partner;
                 }
             }
             if (hint >= 0 && (free_mask & XR_BIT(hint)) != 0) {
@@ -1557,6 +1593,63 @@ static void forward_reloads(xfunc_t *xf) {
     free(holder);
 }
 
+/**
+ * Within each block, drop a copy between two registers that hold the same value already: one was copied from the
+ * other, whole, and neither has been written since.  A parameter moved into a callee-saved register and moved
+ * back for a call (mov %rdi, %rbx ... mov %rbx, %rdi) was a copy of what %rdi held.  Runs on physical registers,
+ * after allocation: each register has a number for the value it holds, a new one where it is written, at a label
+ * every one.
+ */
+static void drop_same_copies(xfunc_t *xf, int word) {
+    unsigned val[XR_NPHYS];
+    unsigned next = 1;
+    int i;
+    int j = 0;
+    int r;
+
+    for (r = 0; r < XR_NPHYS; ++r) {
+        val[r] = next++;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        xinst_t *in = &xf->ins[i];
+        unsigned defs;
+        int k;
+
+        if (in->op == XI_LABEL || in->op == XI_ASM || in->op == XI_JMP || in->op == XI_RET) {
+            for (r = 0; r < XR_NPHYS; ++r) {
+                val[r] = next++;
+            }
+            xf->ins[j++] = *in;
+            continue;
+        }
+        if (in->op == XI_MOV && in->nops == 2 && in->o[0].kind == XO_REG && in->o[1].kind == XO_REG &&
+            in->o[0].reg >= 0 && in->o[0].reg < XR_NPHYS && in->o[1].reg >= 0 && in->o[1].reg < XR_NPHYS &&
+            !XR_IS_XMM(in->o[0].reg) && !XR_IS_XMM(in->o[1].reg) && in->w == word && in->o[0].size == word &&
+            in->o[1].size == word) {
+            if (val[in->o[0].reg] == val[in->o[1].reg]) {
+                continue; /* the same value already */
+            }
+            val[in->o[1].reg] = val[in->o[0].reg];
+            xf->ins[j++] = *in;
+            continue;
+        }
+        defs = phys_defs(in, ~0u);
+        for (k = 0; k < in->nops; ++k) {
+            /* (a register written in part is a new value too) */
+            if (in->o[k].kind == XO_REG && in->o[k].reg >= 0 && in->o[k].reg < XR_NPHYS && (xi_role(in, k) & 2) != 0) {
+                defs |= XR_BIT(in->o[k].reg);
+            }
+        }
+        for (r = 0; r < XR_NPHYS; ++r) {
+            if ((defs & XR_BIT(r)) != 0) {
+                val[r] = next++;
+            }
+        }
+        xf->ins[j++] = *in;
+    }
+    xf->nins = j;
+}
+
 int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
     ls_t ls;
     int round;
@@ -1659,6 +1752,7 @@ int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
             }
             xf->nins = j;
             forward_reloads(xf);
+            drop_same_copies(xf, t->word);
             ls_free(&ls);
             return 0;
         }
