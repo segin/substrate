@@ -22,8 +22,11 @@
  * function uses pushed under the frame pointer, then the frame objects,
  * the busiest nearest.
  *
- * A function the path does not handle -- floating point, alloca,
- * computed goto and what each target turns down -- returns 1 before
+ * alloca and a variable-length array move the stack pointer
+ * (sel_dynalloc()); the epilogue makes it again from the frame pointer.
+ *
+ * A function the path does not handle -- floating point, computed goto
+ * and what each target turns down -- returns 1 before
  * anything is written, and the target's emitter emits it its own way.
  */
 
@@ -1218,6 +1221,54 @@ static int sel_string_call(xsel_t *s, const cc_ssa_instr_t *in) {
     return 1;
 }
 
+/**
+ * A dynamic stack allocation (alloca, a variable-length array): lhs bytes, rounded up to 16, off the stack, the
+ * block's 16-aligned address the value.  With a save slot (rhs) the stack pointer first goes back to where the
+ * previous execution found it, and is recorded there, so that an array declared in a loop reuses its storage, as
+ * emit_dynalloc() does.  The frame is addressed from the frame pointer, and a call's stack arguments from the
+ * stack pointer as it is then, so moving it disturbs neither; the epilogue makes it again from the frame pointer.
+ */
+static void sel_dynalloc(xsel_t *s, const cc_ssa_instr_t *in) {
+    int w = s->word;
+    xop_t sp = xop_reg(XR_SP, w);
+    xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), w);
+    xop_t n = xs_reg_word(s, in->lhs, 0);
+    xop_t k15 = xop_imm(15, w);
+    xop_t km16 = xop_imm(-16, w);
+    xop_t t = xs_temp(s);
+
+    if (in->rhs >= 0) {
+        int o = s->obj[in->rhs];
+        xop_t save = xop_frame(o, 0, w);
+        xop_t old = xs_temp(s);
+        xinst_t x;
+        int skip = xf_new_label(&s->xf);
+
+        if (o < 0) {
+            NOPE(s);
+        }
+        xs_emit(s, XI_MOV, w, 2, &save, &old, NULL);
+        xs_emit(s, XI_TEST, w, 2, &old, &old, NULL);
+        x = xi_make(XI_JCC, w, 0, NULL, NULL, NULL);
+        x.cc = XC_E;
+        x.label = skip;
+        xf_emit(&s->xf, &x);
+        xs_emit(s, XI_MOV, w, 2, &old, &sp, NULL);
+        x = xi_make(XI_LABEL, w, 0, NULL, NULL, NULL);
+        x.label = skip;
+        xf_emit(&s->xf, &x);
+        xs_emit(s, XI_MOV, w, 2, &sp, &save, NULL);
+    }
+    xs_emit(s, XI_MOV, w, 2, &n, &t, NULL);
+    xs_emit(s, XI_ADD, w, 2, &k15, &t, NULL);
+    xs_emit(s, XI_AND, w, 2, &km16, &t, NULL);
+    xs_emit(s, XI_SUB, w, 2, &t, &sp, NULL);
+    /* i386 does not keep the stack pointer 16-aligned: the block itself is */
+    xs_emit(s, XI_AND, w, 2, &km16, &sp, NULL);
+    xs_emit(s, XI_MOV, w, 2, &sp, &d, NULL);
+    s->has_dynalloc = 1;
+}
+
 /** Select instruction @p j of the function. */
 static void sel_instr(xsel_t *s, size_t j) {
     const cc_ssa_function_t *f = s->f;
@@ -1513,6 +1564,13 @@ static void sel_instr(xsel_t *s, size_t j) {
         s->t->va_start(s, in);
         break;
 
+    case CC_SSA_DYNALLOC:
+        if (in->lhs < 0 || xs_is_pair(s, in->lhs)) {
+            NOPE(s);
+        }
+        sel_dynalloc(s, in);
+        break;
+
     case CC_SSA_REGREAD: {
         xop_t d;
         xop_t r;
@@ -1560,7 +1618,6 @@ static const char *function_ok(const xsel_t *s) {
     }
     for (i = 0; i < f->instr_count; ++i) {
         switch (f->instrs[i].op) {
-        case CC_SSA_DYNALLOC:
         case CC_SSA_LADDR:
         case CC_SSA_CHAIN:
         case CC_SSA_I2F:
@@ -1671,6 +1728,17 @@ static int sel_init(xsel_t *s) {
     rc = s->t->begin(s);
     if (rc != 0) {
         return rc;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->op == CC_SSA_DYNALLOC && in->rhs >= 0 && in->rhs < f->value_count && s->obj[in->rhs] >= 0) {
+            /* a save slot: no earlier allocation to give back the first time */
+            xop_t z = xop_imm(0, s->word);
+            xop_t m = xop_frame(s->obj[in->rhs], 0, s->word);
+
+            xs_emit(s, XI_MOV, s->word, 2, &z, &m, NULL);
+        }
     }
     if (compute_ext(s) != 0) {
         return -1;
@@ -2021,7 +2089,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
             emit_local_label(fp, f->name, in->label);
             fputs(":\n", fp);
         } else if (in->op == XI_RET) {
-            print_epilogue(fp, s, saved, frame, s->has_goto, in->aux, emit_debug);
+            print_epilogue(fp, s, saved, frame, s->has_goto || s->has_dynalloc, in->aux, emit_debug);
         } else if (in->op == XI_ASM) {
             if (print_asm(fp, s, in, diag) != 0) {
                 return -1;

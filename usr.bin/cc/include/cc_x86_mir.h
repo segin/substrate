@@ -331,6 +331,7 @@ struct xsel {
     int *asm_slot;            /**< the frame objects inline asms take their operands in, the k-th operand in the k-th */
     int nasm_slot;
     int has_goto;             /**< the function has an asm goto */
+    int has_dynalloc;         /**< it moves the stack pointer itself (alloca, a variable-length array) */
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */
     int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
     int va_save;              /**< an x86-64 variadic function: the frame object of its register save area, or -1 */
