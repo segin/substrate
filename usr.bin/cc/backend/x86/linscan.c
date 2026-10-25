@@ -638,7 +638,8 @@ static int ls_build(ls_t *ls) {
         ls->iv[i].phys = -1;
         ls->iv[i].hint_phys = -1;
         ls->iv[i].hint_vr = XR_NONE;
-        ls->iv[i].mask = ls->t->alloc_mask;
+        /* a vector register's interval takes only vector registers, a general one's only general ones */
+        ls->iv[i].mask = xf->vr[i].xmm ? ls->t->alloc_mask & ls->t->xmm_mask : ls->t->alloc_mask & ~ls->t->xmm_mask;
     }
     for (i = 0; i < XR_NPHYS; ++i) {
         iv_finish(&ls->fixed[i]);
@@ -937,20 +938,27 @@ typedef struct {
     int off;
 } slot_t;
 
+/** The bytes a spill slot of virtual register @p r takes: a word, or a double's eight for a vector register. */
+static int slot_bytes(const ls_t *ls, int r) {
+    return ls->xf->vr[r - XR_VBASE].xmm ? 8 : ls->t->word;
+}
+
 /**
- * Give each spilled register a slot: its home if it has one, else a word-sized slot shared with others whose
- * intervals do not meet it.
+ * Give each spilled register a slot: its home if it has one, else a slot of its size (slot_bytes()) shared with
+ * others of that size whose intervals do not meet it.
  */
 static int ls_assign_slots(ls_t *ls, slot_t *slot) {
     xfunc_t *xf = ls->xf;
     int *list = (int *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * sizeof(int));
     int *slot_obj = (int *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * sizeof(int));
     int *slot_end = (int *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * sizeof(int));
+    int *slot_size = (int *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * sizeof(int));
     int nslots = 0;
     int n = 0;
     int i;
 
-    if (list == NULL || slot_obj == NULL || slot_end == NULL) {
+    if (list == NULL || slot_obj == NULL || slot_end == NULL || slot_size == NULL) {
+        free(slot_size);
         free(list);
         free(slot_obj);
         free(slot_end);
@@ -976,19 +984,23 @@ static int ls_assign_slots(ls_t *ls, slot_t *slot) {
         int s;
         int pick = -1;
 
+        int bytes = slot_bytes(ls, list[i] + XR_VBASE);
+
         for (s = 0; s < nslots && pick < 0; ++s) {
-            if (slot_end[s] <= iv->r[0].from) {
+            if (slot_end[s] <= iv->r[0].from && slot_size[s] == bytes) {
                 pick = s;
             }
         }
         if (pick < 0) {
-            slot_obj[nslots] = xf_new_obj(xf, XF_SPILL, ls->t->word, ls->t->word, 0);
+            slot_obj[nslots] = xf_new_obj(xf, XF_SPILL, bytes, bytes, 0);
             if (slot_obj[nslots] < 0) {
                 free(list);
                 free(slot_obj);
                 free(slot_end);
+                free(slot_size);
                 return -1;
             }
+            slot_size[nslots] = bytes;
             pick = nslots++;
         }
         slot_end[pick] = iv->r[iv->n - 1].to;
@@ -997,6 +1009,7 @@ static int ls_assign_slots(ls_t *ls, slot_t *slot) {
     free(list);
     free(slot_obj);
     free(slot_end);
+    free(slot_size);
     return 0;
 }
 
@@ -1037,7 +1050,7 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
         }
         /* test r, r of a spilled one: compare its slot with 0 */
         if (in.op == XI_TEST && in.o[0].kind == XO_REG && in.o[1].kind == XO_REG && in.o[0].reg == in.o[1].reg &&
-            SPILLED(in.o[0].reg)) {
+            SPILLED(in.o[0].reg) && !xf->vr[in.o[0].reg - XR_VBASE].xmm) {
             const slot_t *s = &slot[in.o[0].reg - XR_VBASE];
 
             in.op = XI_CMP;
@@ -1090,11 +1103,13 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                         t = tmp_reg[m];
                     }
                 }
+                int bytes = slot_bytes(ls, r);
+
                 if (t < 0) {
                     xop_t from;
                     xop_t to;
 
-                    t = xf_new_vreg(xf);
+                    t = xf->vr[r - XR_VBASE].xmm ? xf_new_xvreg(xf) : xf_new_vreg(xf);
                     if (t == XR_NONE || ntmp >= 6) {
                         free(old);
                         return -1;
@@ -1102,8 +1117,8 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                     xf_vreg(xf, t)->no_spill = 1;
                     tmp_of[ntmp] = r;
                     tmp_reg[ntmp++] = t;
-                    from = xop_frame(s->obj, s->off, ls->t->word);
-                    to = xop_reg(t, ls->t->word);
+                    from = xop_frame(s->obj, s->off, bytes);
+                    to = xop_reg(t, bytes);
                     {
                         /* loaded before if this instruction reads it anywhere */
                         int reads = 0;
@@ -1118,7 +1133,7 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                             }
                         }
                         if (reads) {
-                            xinst_t ld = xi_make(XI_MOV, ls->t->word, 2, &from, &to, NULL);
+                            xinst_t ld = xi_make(XI_MOV, bytes, 2, &from, &to, NULL);
 
                             xf->obj[s->obj].uses++;
                             if (xf_emit(xf, &ld) == NULL) {
@@ -1130,10 +1145,10 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                 }
                 *regs[j] = t;
                 if ((role & 2) != 0 && nafter < 6) {
-                    xop_t from = xop_reg(t, ls->t->word);
-                    xop_t to = xop_frame(s->obj, s->off, ls->t->word);
+                    xop_t from = xop_reg(t, bytes);
+                    xop_t to = xop_frame(s->obj, s->off, bytes);
 
-                    after[nafter++] = xi_make(XI_MOV, ls->t->word, 2, &from, &to, NULL);
+                    after[nafter++] = xi_make(XI_MOV, bytes, 2, &from, &to, NULL);
                     xf->obj[s->obj].uses++;
                 }
             }
@@ -1233,6 +1248,23 @@ static void rename_in(xinst_t *in, int from, int to) {
 }
 
 /**
+ * Whether @p in copies a whole virtual register into another of its class: a word between general registers, a
+ * double between vector ones.
+ */
+static int same_class_copy(const ls_t *ls, const xinst_t *in) {
+    int a;
+    int b;
+
+    if (in->op != XI_MOV || in->o[0].kind != XO_REG || in->o[1].kind != XO_REG || !XR_IS_VIRT(in->o[0].reg) ||
+        !XR_IS_VIRT(in->o[1].reg)) {
+        return 0;
+    }
+    a = ls->xf->vr[in->o[0].reg - XR_VBASE].xmm;
+    b = ls->xf->vr[in->o[1].reg - XR_VBASE].xmm;
+    return a == b && in->w == (a ? 8 : ls->t->word);
+}
+
+/**
  * After a copy `mov s, d` in a block, read d where s is read, until either changes: s is then read less, often
  * only by the copy, which ls_coalesce() can take away.
  *
@@ -1249,9 +1281,8 @@ static int ls_forward(ls_t *ls) {
         int d;
         int j;
 
-        if (in->op != XI_MOV || in->w != ls->t->word || in->o[0].kind != XO_REG || in->o[1].kind != XO_REG ||
-            !XR_IS_VIRT(in->o[0].reg) || !XR_IS_VIRT(in->o[1].reg) || in->o[0].reg == in->o[1].reg ||
-            xf->vr[in->o[0].reg - XR_VBASE].memory || xf->vr[in->o[1].reg - XR_VBASE].memory) {
+        if (!same_class_copy(ls, in) || in->o[0].reg == in->o[1].reg || xf->vr[in->o[0].reg - XR_VBASE].memory ||
+            xf->vr[in->o[1].reg - XR_VBASE].memory) {
             continue;
         }
         s = in->o[0].reg;
@@ -1332,8 +1363,7 @@ static int ls_coalesce(ls_t *ls) {
         const occ_t *os;
         const occ_t *od;
 
-        if (in->op != XI_MOV || in->w != ls->t->word || in->o[0].kind != XO_REG || in->o[1].kind != XO_REG ||
-            !XR_IS_VIRT(in->o[0].reg) || !XR_IS_VIRT(in->o[1].reg) || in->o[0].reg == in->o[1].reg) {
+        if (!same_class_copy(ls, in) || in->o[0].reg == in->o[1].reg) {
             continue;
         }
         s = in->o[0].reg;

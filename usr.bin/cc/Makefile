@@ -13,7 +13,7 @@ CC_SRCS = cmd/cc.c cmd/pipeline.c common/asm_constraint.c common/diag.c common/l
 	  middle/passes/opt.c middle/passes/inline.c middle/passes/mem.c \
 	  middle/ssa/module.c middle/ssa/func.c middle/ssa/bblock.c middle/ssa/instr_set.c \
 	  backend/regalloc.c backend/frame.c backend/x86/common.c backend/x86/x86_64.c backend/x86/i386.c \
-	  backend/x86/regalloc_i386.c backend/x86/mir.c backend/x86/linscan.c backend/x86/mir_sel.c backend/x86/mir_i386.c backend/x86/mir_x86_64.c
+	  backend/x86/regalloc_i386.c backend/x86/mir.c backend/x86/linscan.c backend/x86/mir_sel.c backend/x86/mir_fp.c backend/x86/mir_i386.c backend/x86/mir_x86_64.c
 CC_OBJS = $(CC_SRCS:.c=.o)
 IR_VERIFIER_OBJS = ir/ir-verifier.o $(COMMON_OBJS)
 IR_NORMALIZE_OBJS = ir/ir-normalize.o $(COMMON_OBJS)

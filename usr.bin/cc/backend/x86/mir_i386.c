@@ -556,6 +556,7 @@ int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_fun
                            const char *src_path, int emit_debug, cc_diag_t *diag) {
     static const xtarget_t alloc = {
         XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI),
+        0,
         XR_BIT(XR_BX) | XR_BIT(XR_SI) | XR_BIT(XR_DI),
         XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_BX),
         i386_order,

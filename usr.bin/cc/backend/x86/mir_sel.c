@@ -182,7 +182,8 @@ int xs_vreg_of(xsel_t *s, int v, int part) {
     int *slot = part ? &s->hi[v] : &s->lo[v];
 
     if (*slot == XR_NONE) {
-        *slot = xf_new_vreg(&s->xf);
+        /* a float or a double held in SSE: a vector register */
+        *slot = xs_fp_kind(s, v) == XFP_SSE ? xf_new_xvreg(&s->xf) : xf_new_vreg(&s->xf);
         if (*slot != XR_NONE && s->addr_taken[v]) {
             xvreg_t *r = xf_vreg(&s->xf, *slot);
 
@@ -1438,7 +1439,12 @@ static void sel_instr(xsel_t *s, size_t j) {
     long long k;
     const char *sym;
 
-    if (in->dst >= 0 && (cc_ssa_value_class(f, in->dst) == CC_VAL_F64)) {
+    if (xs_fp_select(s, j)) {
+        return; /* floating point (mir_fp.c) */
+    }
+    if (in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64 && in->op != CC_SSA_PARAM &&
+        in->op != CC_SSA_CALL && in->op != CC_SSA_CALLI && in->op != CC_SSA_STORE) {
+        /* (a store's dst is no value it writes) */
         NOPE(s);
     }
     switch (in->op) {
@@ -1793,17 +1799,9 @@ static const char *function_ok(const xsel_t *s) {
     size_t i;
     int v;
 
-    for (v = 0; v < f->value_count; ++v) {
-        if (f->value_ty[v].kind == CC_TY_FLOAT) {
-            return "floating point";
-        }
-    }
+    (void)v;
     for (i = 0; i < f->instr_count; ++i) {
         switch (f->instrs[i].op) {
-        case CC_SSA_I2F:
-        case CC_SSA_F2I:
-        case CC_SSA_FROUND32:
-        case CC_SSA_FROUND64:
         case CC_SSA_EXT:
             return ssa_op_name(f->instrs[i].op);
         default:
@@ -1845,11 +1843,13 @@ static int sel_init(xsel_t *s) {
     s->addr_taken = (unsigned char *)calloc(n, 1);
     s->is_addr = (unsigned char *)calloc(n, 1);
     s->obj = (int *)malloc(n * sizeof(int));
+    s->fhome = (int *)malloc(n * sizeof(int));
     s->frame_val = (int *)malloc(n * sizeof(int));
     s->param_lo = (int *)malloc(np * sizeof(int));
     s->param_hi = (int *)malloc(np * sizeof(int));
     if (s->lo == NULL || s->hi == NULL || s->ndefs == NULL || s->nuses == NULL || s->def_at == NULL ||
-        s->addr_taken == NULL || s->is_addr == NULL || s->obj == NULL || s->frame_val == NULL || s->param_lo == NULL ||
+        s->addr_taken == NULL || s->is_addr == NULL || s->obj == NULL || s->fhome == NULL || s->frame_val == NULL ||
+        s->param_lo == NULL ||
         s->param_hi == NULL) {
         return -1;
     }
@@ -1858,8 +1858,11 @@ static int sel_init(xsel_t *s) {
         s->hi[v] = XR_NONE;
         s->def_at[v] = -1;
         s->obj[v] = -1;
+        s->fhome[v] = -1;
         s->frame_val[v] = -1;
     }
+    s->fscratch = -1;
+    s->fcw = -1;
     for (i = 0; i < np; ++i) {
         s->param_lo[i] = XR_NONE;
         s->param_hi[i] = XR_NONE;
@@ -1900,7 +1903,15 @@ static int sel_init(xsel_t *s) {
         if (s->ndefs[v] != 1) {
             s->def_at[v] = -1;
         }
-        if (s->addr_taken[v]) {
+        if (s->addr_taken[v] && xs_fp_kind(s, v) != XFP_NONE) {
+            /* a floating value: its double's 8 bytes, or a long double's 16 -- an x87 one's home */
+            int bytes = value_size_bytes(f, v, 8) >= 10 ? 16 : 8;
+
+            s->obj[v] = xf_new_obj(&s->xf, XF_LOCAL, bytes, bytes, 0);
+            if (xs_fp_kind(s, v) == XFP_X87) {
+                s->fhome[v] = s->obj[v];
+            }
+        } else if (s->addr_taken[v]) {
             s->obj[v] = xf_new_obj(&s->xf, XF_LOCAL, xs_is_pair(s, v) ? 8 : s->word, s->word, 0);
         }
     }
@@ -1961,6 +1972,7 @@ static void sel_free(xsel_t *s) {
     free(s->addr_taken);
     free(s->is_addr);
     free(s->obj);
+    free(s->fhome);
     free(s->frame_val);
     free(s->param_lo);
     free(s->param_hi);

@@ -19,8 +19,10 @@
  * A structure returned through memory is copied to the buffer whose
  * address came in %rdi, and that address returned in %rax.
  *
- * Not taken yet: floating point, and structures passed or returned in
- * registers other than general ones.
+ * Floats and doubles are vector registers (mir_fp.c): passed in %xmm0..7
+ * and returned in %xmm0, a float in single precision across the call; a
+ * long double travels on the stack and comes back in %st0.  A structure's
+ * SSE eightbytes go in vector registers, a 16-byte vector whole in one.
  */
 
 #include "cc_x86_mir.h"
@@ -32,16 +34,19 @@
 #include <string.h>
 
 /** The allocation order: the caller-saved registers first, which cost no save. */
-static const int x64_order[] = {XR_AX,  XR_CX,  XR_DX,  XR_SI,  XR_DI,  XR_R8,  XR_R9,
-                                XR_R10, XR_R11, XR_BX,  XR_R12, XR_R13, XR_R14, XR_R15};
+static const int x64_order[] = {XR_AX,       XR_CX,       XR_DX,       XR_SI,       XR_DI,       XR_R8,
+                                XR_R9,       XR_R10,      XR_R11,      XR_BX,       XR_R12,      XR_R13,
+                                XR_R14,      XR_R15,      XR_XMM0,     XR_XMM0 + 1, XR_XMM0 + 2, XR_XMM0 + 3,
+                                XR_XMM0 + 4, XR_XMM0 + 5, XR_XMM0 + 6, XR_XMM0 + 7, XR_XMM0 + 8, XR_XMM0 + 9,
+                                XR_XMM0 + 10, XR_XMM0 + 11, XR_XMM0 + 12, XR_XMM0 + 13, XR_XMM0 + 14, XR_XMM15};
 
 /** The callee-saved registers, in the order the prologue pushes them. */
 static const int x64_saved[] = {XR_BX, XR_R12, XR_R13, XR_R14, XR_R15};
 
-/** The registers a call clobbers. */
+/** The registers a call clobbers: nine general ones and every vector one. */
 #define X64_CALLER_SAVED                                                                                          \
     (XR_BIT(XR_AX) | XR_BIT(XR_CX) | XR_BIT(XR_DX) | XR_BIT(XR_SI) | XR_BIT(XR_DI) | XR_BIT(XR_R8) |              \
-     XR_BIT(XR_R9) | XR_BIT(XR_R10) | XR_BIT(XR_R11))
+     XR_BIT(XR_R9) | XR_BIT(XR_R10) | XR_BIT(XR_R11) | XR_XMM_MASK(16))
 
 /** The integer argument registers, in order. */
 static const int x64_arg_regs[6] = {XR_DI, XR_SI, XR_DX, XR_CX, XR_R8, XR_R9};
@@ -108,9 +113,27 @@ static size_t gpr_bias(const xsel_t *s) {
     return s->hidden != XR_NONE ? 1 : 0;
 }
 
-/** Whether ABI byte @p abi passes a structure in general registers only: AGG_REG with no SSE eightbyte. */
-static int agg_in_gprs(unsigned char abi) {
-    return CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG && (abi & (CC_ABI_SSE0 | CC_ABI_SSE1 | CC_ABI_VEC128)) == 0;
+/**
+ * Whether ABI byte @p abi passes a structure in registers: AGG_REG, each eightbyte in a general register or (SSE)
+ * a vector one, or a 16-byte vector whole in one.
+ */
+static int agg_in_regs(unsigned char abi) {
+    return CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG;
+}
+
+/** Whether floating ABI byte @p abi is one this path passes: a double, a float in single precision, a long double. */
+static int fp_abi_ok(unsigned char abi) {
+    return abi == CC_CALL_ARG_ABI_DEFAULT || abi == CC_CALL_ARG_ABI_FLOAT || abi == CC_CALL_ARG_ABI_LDOUBLE;
+}
+
+/** The bytes floating ABI byte @p abi passes in memory: 16 for a long double, 4 for a float, else 8. */
+static int fp_abi_bytes(unsigned char abi) {
+    return abi == CC_CALL_ARG_ABI_LDOUBLE ? 16 : abi == CC_CALL_ARG_ABI_FLOAT ? 4 : 8;
+}
+
+/** Vector argument register @p k, %xmm0 .. %xmm7. */
+static int xmm_arg(size_t k) {
+    return XR_XMM0 + (int)k;
 }
 
 /** Whether an eightbyte of @p bytes bytes is one access (1, 2, 4 or 8 bytes). */
@@ -119,18 +142,40 @@ static int whole_piece(long bytes) {
 }
 
 /**
- * Load the eightbytes of the structure at IR address @p v, @p size bytes, into the general registers from
- * argument register @p first on: each zero-extended past its bytes, as the old emitter loads them.
+ * Load the eightbytes of the structure at IR address @p v into the registers @p loc names: each general one
+ * zero-extended past its bytes, as the old emitter loads them, each SSE one by movss or movsd, a vector whole by
+ * movups.
  */
-static void load_agg_gprs(xsel_t *s, int v, long size, size_t first, unsigned *used) {
+static void load_agg_regs(xsel_t *s, int v, const abi_loc_t *loc, unsigned *used) {
+    long size = (long)loc->size;
+    size_t gi = loc->index;
+    size_t xi = loc->xmm_index;
     long k;
 
+    if ((loc->sse & ABI_SSE_WHOLE) != 0) {
+        xop_t m = xs_mem_at(s, v, 0, 16);
+        xop_t d = xop_reg(xmm_arg(xi), 8);
+
+        xs_emit(s, XI_MOV, 8, 2, &m, &d, NULL);
+        *used |= XR_BIT(xmm_arg(xi));
+        return;
+    }
     for (k = 0; k * 8 < size; ++k) {
         long bytes = size - k * 8 > 8 ? 8 : size - k * 8;
-        int reg = x64_arg_regs[first + (size_t)k];
+        int reg;
         xop_t m = xs_mem_at(s, v, 8 * k, (int)bytes);
-        xop_t d = xop_reg(reg, bytes == 8 ? 8 : 4);
+        xop_t d;
 
+        if ((loc->sse & (1u << k)) != 0) {
+            reg = xmm_arg(xi++);
+            d = xop_reg(reg, 8);
+            m.size = (unsigned char)(bytes > 4 ? 8 : 4);
+            xs_emit(s, XI_MOV, 8, 2, &m, &d, NULL);
+            *used |= XR_BIT(reg);
+            continue;
+        }
+        reg = x64_arg_regs[gi++];
+        d = xop_reg(reg, bytes == 8 ? 8 : 4);
         if (bytes == 8 || bytes == 4) {
             xs_emit(s, XI_MOV, (int)bytes, 2, &m, &d, NULL);
         } else if (bytes <= 2) {
@@ -147,7 +192,41 @@ static void load_agg_gprs(xsel_t *s, int v, long size, size_t first, unsigned *u
     }
 }
 
-/** A call: stack arguments stored below the call's %rsp, register ones moved in, the result out of %rax. */
+/** The agg_class bits a structure result in registers may have. */
+#define X64_RET_CLASSES                                                                                            \
+    (CC_ABI_SSE0 | CC_ABI_SSE1 | CC_ABI_RET_VEC128 | CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX | CC_ABI_RET_MEMORY)
+
+/**
+ * The registers a structure of @p size bytes and return classes @p cls comes back in, from %rax and %rdx, %xmm0
+ * and %xmm1 by each eightbyte's class; none for the x87's.
+ */
+static unsigned agg_ret_regs(long size, int cls) {
+    unsigned m = 0;
+    int gi = 0;
+    int xi = 0;
+    long k;
+
+    if ((cls & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX)) != 0) {
+        return 0;
+    }
+    if ((cls & CC_ABI_RET_VEC128) != 0) {
+        return XR_BIT(XR_XMM0);
+    }
+    for (k = 0; k * 8 < size && k < 2; ++k) {
+        if ((cls & (k == 0 ? CC_ABI_SSE0 : CC_ABI_SSE1)) != 0) {
+            m |= XR_BIT(XR_XMM0 + xi++);
+        } else {
+            m |= XR_BIT(gi++ == 0 ? XR_AX : XR_DX);
+        }
+    }
+    return m;
+}
+
+/**
+ * A call: stack arguments stored below the call's %rsp, register ones moved in -- a double in its vector
+ * register, a float rounded there to single precision, a long double on the stack -- and the result out of %rax,
+ * %xmm0 or the x87's %st0.
+ */
 static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
     int agg = in->dst >= 0 && in->rhs == in->dst && in->imm > 0;
@@ -155,6 +234,8 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     int empty = in->dst >= 0 && in->rhs >= 0 && in->imm == 0 && in->agg_class != 0;
     int agg_obj = agg ? s->obj[in->dst] : -1;
     int sret = agg && x86_64_agg_ret_in_memory(in->imm, in->agg_class);
+    int agg_x87 = agg && (in->agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX)) != 0;
+    int fp_dst = !agg && xs_fp_kind(s, in->dst) != XFP_NONE;
     abi_loc_t *locs = NULL;
     size_t stack_bytes = 0;
     size_t xmm = 0;
@@ -165,13 +246,13 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     xop_t target;
     int indirect = 0;
 
-    if (in->call_ret_x87 || (agg && agg_obj < 0) ||
-        (agg && !sret && (in->agg_class & ~(int)(CC_ABI_RET_MEMORY)) != 0) || (!agg && !empty && in->agg_class != 0) ||
-        (in->dst >= 0 && !agg && (cc_ssa_value_class(f, in->dst) == CC_VAL_F64 ||
-                                  (f->value_ty[in->dst].kind == CC_TY_AGG && f->value_ty[in->dst].size > 8)))) {
+    if ((agg && agg_obj < 0) || (agg && !sret && (in->agg_class & ~(int)X64_RET_CLASSES) != 0) ||
+        (!agg && !empty && (in->agg_class & ~(int)CC_ABI_RET_FLOAT) != 0) ||
+        (in->dst >= 0 && !agg && !fp_dst && f->value_ty[in->dst].kind == CC_TY_AGG &&
+         f->value_ty[in->dst].size > 8)) {
         XS_NOPE(s);
     }
-    if (agg && !sret && in->imm > 16) {
+    if (agg && !sret && !agg_x87 && in->imm > 16) {
         XS_NOPE(s);
     }
     if (in->arg_count > 0) {
@@ -185,16 +266,22 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     for (a = 0; a < in->arg_count; ++a) {
         int v = in->args[a];
         unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+        int bad;
 
         if (locs[a].kind == ABI_LOC_NONE) {
             continue;
         }
-        if (v < 0 || cc_ssa_value_class(f, v) == CC_VAL_F64 || locs[a].kind == ABI_LOC_XMM ||
-            (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM &&
-             !agg_in_gprs(abi)) ||
-            (agg_in_gprs(abi) && locs[a].kind == ABI_LOC_GPR && locs[a].index + (locs[a].size + 7) / 8 > 6) ||
-            (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT && f->value_ty[v].kind == CC_TY_AGG && !s->is_addr[v] &&
-             f->value_ty[v].size > 8)) {
+        if (v >= 0 && xs_fp_kind(s, v) != XFP_NONE) {
+            bad = !fp_abi_ok(abi) || (locs[a].kind != ABI_LOC_XMM && locs[a].kind != ABI_LOC_STACK) ||
+                  (locs[a].kind == ABI_LOC_XMM && (locs[a].index >= 8 || xs_fp_kind(s, v) != XFP_SSE));
+        } else {
+            bad = v < 0 || locs[a].kind == ABI_LOC_XMM ||
+                  (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM &&
+                   !agg_in_regs(abi)) ||
+                  (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT && f->value_ty[v].kind == CC_TY_AGG &&
+                   !s->is_addr[v] && f->value_ty[v].size > 8);
+        }
+        if (bad) {
             free(locs);
             XS_NOPE(s);
         }
@@ -207,14 +294,27 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     for (a = 0; a < in->arg_count; ++a) {
         int v = in->args[a];
+        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
         xop_t at;
 
         if (locs[a].kind != ABI_LOC_STACK) {
             continue;
         }
         at = xop_mem(XR_SP, (long long)locs[a].index, 8);
-        if (in->call_arg_abi != NULL && (CC_ABI_KIND(in->call_arg_abi[a]) == CC_CALL_ARG_ABI_AGG_MEM ||
-                                         agg_in_gprs(in->call_arg_abi[a]))) {
+        if (xs_fp_kind(s, v) != XFP_NONE) {
+            xs_fp_to_mem(s, v, at, fp_abi_bytes(abi));
+            if (abi == CC_CALL_ARG_ABI_LDOUBLE) {
+                /* the two bytes past the 80, deterministic, as x86_64.c leaves them */
+                xop_t z = xop_imm(0, 1);
+                xop_t p = at;
+
+                p.size = 1;
+                p.disp += 10;
+                xs_emit(s, XI_MOV, 1, 2, &z, &p, NULL);
+                p.disp += 1;
+                xs_emit(s, XI_MOV, 1, 2, &z, &p, NULL);
+            }
+        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM || agg_in_regs(abi)) {
             /* a structure passed by value: a copy of it */
             copy_bytes(s, xs_mem_at(s, v, 0, 8), at, (long)locs[a].size);
         } else {
@@ -232,14 +332,24 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         }
     }
     for (a = 0; a < in->arg_count; ++a) {
+        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
         xop_t d;
 
+        if (locs[a].kind == ABI_LOC_XMM) {
+            /* a double in its register; a float in single precision */
+            xop_t r = xs_fp_reg(s, in->args[a]);
+
+            d = xop_reg(xmm_arg(locs[a].index), 8);
+            xs_emit(s, abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSD2SS : XI_MOV, 8, 2, &r, &d, NULL);
+            used |= XR_BIT(d.reg);
+            continue;
+        }
         if (locs[a].kind != ABI_LOC_GPR) {
             continue;
         }
-        if (in->call_arg_abi != NULL && agg_in_gprs(in->call_arg_abi[a])) {
+        if (agg_in_regs(abi)) {
             /* a structure in registers: its eightbytes, from where the value points */
-            load_agg_gprs(s, in->args[a], (long)locs[a].size, locs[a].index, &used);
+            load_agg_regs(s, in->args[a], &locs[a], &used);
             continue;
         }
         d = xop_reg(x64_arg_regs[locs[a].index], 8);
@@ -277,8 +387,12 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     c.imp_use = used;
     c.clobber = X64_CALLER_SAVED;
-    if (in->dst >= 0 && !empty) {
-        c.imp_def = XR_BIT(XR_AX) | (agg && !sret && in->imm > 8 ? XR_BIT(XR_DX) : 0);
+    if (agg && !sret) {
+        c.imp_def = agg_ret_regs(in->imm, in->agg_class);
+    } else if (fp_dst && !in->call_ret_x87) {
+        c.imp_def = XR_BIT(XR_XMM0);
+    } else if (in->dst >= 0 && !empty) {
+        c.imp_def = XR_BIT(XR_AX);
     }
     xf_emit(&s->xf, &c);
     if (total > 0) {
@@ -296,21 +410,60 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     if (agg) {
         long k;
+        int gi = 0;
+        int xi = 0;
 
         if (sret) {
             return; /* the callee filled the storage */
         }
-        /* its eightbytes from %rax and %rdx, each by its size */
+        if (agg_x87) {
+            /* a long double in %st0, a complex one's imaginary part in %st1 */
+            xop_t m = xop_frame(agg_obj, 0, 16);
+
+            xs_emit(s, XI_FSTP, 8, 1, &m, NULL, NULL);
+            if ((in->agg_class & CC_ABI_RET_X87_COMPLEX) != 0) {
+                m.disp = 16;
+                xs_emit(s, XI_FSTP, 8, 1, &m, NULL, NULL);
+            }
+            return;
+        }
+        if ((in->agg_class & CC_ABI_RET_VEC128) != 0) {
+            xop_t x0 = xop_reg(XR_XMM0, 8);
+            xop_t m = xop_frame(agg_obj, 0, 16);
+
+            xs_emit(s, XI_MOV, 8, 2, &x0, &m, NULL);
+            return;
+        }
+        /* its eightbytes from %rax and %rdx, %xmm0 and %xmm1, each by its class and size */
         for (k = 0; k * 8 < in->imm; ++k) {
             long bytes = in->imm - k * 8 > 8 ? 8 : in->imm - k * 8;
-            xop_t r = xop_reg(k == 0 ? XR_AX : XR_DX, (int)bytes);
             xop_t m = xop_frame(agg_obj, 8 * k, (int)bytes);
+            xop_t r;
 
+            if ((in->agg_class & (k == 0 ? CC_ABI_SSE0 : CC_ABI_SSE1)) != 0) {
+                r = xop_reg(XR_XMM0 + xi++, 8);
+                m.size = (unsigned char)(bytes > 4 ? 8 : 4);
+                xs_emit(s, XI_MOV, 8, 2, &r, &m, NULL);
+                continue;
+            }
+            r = xop_reg(gi++ == 0 ? XR_AX : XR_DX, (int)bytes);
             if (!whole_piece(bytes)) {
-                xs_store_bytes(s, xop_reg(k == 0 ? XR_AX : XR_DX, 8), m, (int)bytes);
+                r.size = 8;
+                xs_store_bytes(s, r, m, (int)bytes);
                 continue;
             }
             xs_emit(s, XI_MOV, (int)bytes, 2, &r, &m, NULL);
+        }
+        return;
+    }
+    if (fp_dst || (in->dst < 0 && in->call_ret_x87)) {
+        if (in->call_ret_x87) {
+            xs_fp_pop(s, in->dst); /* (thrown away when nothing takes it) */
+        } else if (in->dst >= 0) {
+            xop_t x0 = xop_reg(XR_XMM0, 8);
+            xop_t d = xs_fp_reg(s, in->dst);
+
+            xs_emit(s, (in->agg_class & CC_ABI_RET_FLOAT) != 0 ? XI_CVTSS2SD : XI_MOV, 8, 2, &x0, &d, NULL);
         }
         return;
     }
@@ -336,6 +489,25 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
     if (abi == CC_CALL_ARG_ABI_ZERO) {
         return;
     }
+    if (xs_fp_kind(s, in->dst) != XFP_NONE) {
+        /* a double from its vector register, a float from its single precision; else from the stack */
+        if (loc.kind == ABI_LOC_XMM) {
+            xop_t r = xop_reg(s->param_lo[pi], 8);
+
+            if (r.reg == XR_NONE || xs_fp_kind(s, in->dst) != XFP_SSE) {
+                XS_NOPE(s);
+            }
+            d = xs_fp_reg(s, in->dst);
+            xs_emit(s, abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSS2SD : XI_MOV, 8, 2, &r, &d, NULL);
+        } else if (loc.kind == ABI_LOC_STACK) {
+            int o = xf_new_obj(&s->xf, XF_FIXED, 16, 8, 16 + (long)loc.index);
+
+            xs_fp_from_mem(s, in->dst, xop_frame(o, 0, 8), fp_abi_bytes(abi));
+        } else {
+            XS_NOPE(s);
+        }
+        return;
+    }
     if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
         /* a structure passed by value: its copy on the stack, whose address is the value */
         if (s->frame_val[in->dst] < 0) {
@@ -347,7 +519,7 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
         }
         return;
     }
-    if (agg_in_gprs(abi)) {
+    if (agg_in_regs(abi)) {
         /*
          * a structure in registers: its eightbytes into the storage lowering gave it (lhs), whose address is
          * the value -- struct timespec64 is passed so throughout Linux, and every function that took one kept
@@ -359,7 +531,16 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
         if (o < 0) {
             XS_NOPE(s);
         }
-        if (loc.kind == ABI_LOC_GPR) {
+        if (loc.kind == ABI_LOC_GPR && (loc.sse & ABI_SSE_WHOLE) != 0) {
+            /* a vector, whole in one register */
+            xop_t r = xop_reg(s->param_lo[pi], 8);
+            xop_t to = xop_frame(o, 0, 16);
+
+            if (r.reg == XR_NONE) {
+                XS_NOPE(s);
+            }
+            xs_emit(s, XI_MOV, 8, 2, &r, &to, NULL);
+        } else if (loc.kind == ABI_LOC_GPR) {
             long k;
 
             for (k = 0; k * 8 < bytes; ++k) {
@@ -369,6 +550,13 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
 
                 if (r.reg == XR_NONE) {
                     XS_NOPE(s);
+                }
+                if ((loc.sse & (1u << k)) != 0) {
+                    /* an SSE eightbyte: a float's 4 bytes or a double's 8 */
+                    r.size = 8;
+                    to.size = (unsigned char)(part > 4 ? 8 : 4);
+                    xs_emit(s, XI_MOV, 8, 2, &r, &to, NULL);
+                    continue;
                 }
                 if (!whole_piece(part)) {
                     xs_store_bytes(s, r, to, (int)part);
@@ -462,23 +650,88 @@ static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
         xf_emit(&s->xf, &x);
         return;
     }
-    if ((in->agg_class & ~(int)CC_ABI_RET_MEMORY) != 0 || x86_64_agg_ret_in_memory(in->imm, in->agg_class)) {
+    if ((in->agg_class & ~(int)(X64_RET_CLASSES | CC_ABI_RET_FLOAT)) != 0 ||
+        x86_64_agg_ret_in_memory(in->imm, in->agg_class)) {
         XS_NOPE(s);
     }
-    if (in->lhs >= 0) {
-        xop_t rax = xop_reg(XR_AX, 8);
+    if (in->lhs >= 0 && (in->agg_class & (CC_ABI_RET_X87 | CC_ABI_RET_X87_COMPLEX)) != 0) {
+        /* lhs points at it: a long double in %st0, or a complex one's parts in %st0 and %st1 */
+        if ((in->agg_class & CC_ABI_RET_X87_COMPLEX) != 0) {
+            xop_t m = xs_mem_at(s, in->lhs, 16, 16);
 
-        if (cc_ssa_value_class(f, in->lhs) == CC_VAL_F64 ||
-            (f->value_ty[in->lhs].kind == CC_TY_AGG && !s->is_addr[in->lhs] && f->value_ty[in->lhs].size > 8)) {
+            xs_emit(s, XI_FLD, 8, 1, &m, NULL, NULL);
+        }
+        {
+            xop_t m = xs_mem_at(s, in->lhs, 0, 16);
+
+            xs_emit(s, XI_FLD, 8, 1, &m, NULL, NULL);
+        }
+        xf_emit(&s->xf, &x);
+        return;
+    }
+    if (in->lhs >= 0 && xs_fp_kind(s, in->lhs) != XFP_NONE) {
+        if (f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE || xs_fp_kind(s, in->lhs) == XFP_X87) {
+            /* in %st0 */
+            xs_fp_push(s, in->lhs);
+        } else {
+            /* in %xmm0, a float in single precision */
+            xop_t r = xs_fp_reg(s, in->lhs);
+            xop_t x0 = xop_reg(XR_XMM0, 8);
+
+            xs_emit(s, f->ret_abi == CC_CALL_ARG_ABI_FLOAT ? XI_CVTSD2SS : XI_MOV, 8, 2, &r, &x0, NULL);
+            x.imp_use = XR_BIT(XR_XMM0);
+        }
+        xf_emit(&s->xf, &x);
+        return;
+    }
+    if (in->lhs >= 0 && (in->agg_class & CC_ABI_RET_VEC128) != 0) {
+        /* a 16-byte vector, both eightbytes (lhs, rhs) in %xmm0 */
+        int o = xf_new_obj(&s->xf, XF_LOCAL, 16, 16, 0);
+        xop_t lo = xop_frame(o, 0, 8);
+        xop_t hi = xop_frame(o, 8, 8);
+        xop_t all = xop_frame(o, 0, 16);
+        xop_t x0 = xop_reg(XR_XMM0, 8);
+
+        xs_move_word_to(s, in->lhs, 0, &lo);
+        if (in->rhs >= 0) {
+            xs_move_word_to(s, in->rhs, 0, &hi);
+        }
+        xs_emit(s, XI_MOV, 8, 2, &all, &x0, NULL);
+        x.imp_use = XR_BIT(XR_XMM0);
+        xf_emit(&s->xf, &x);
+        return;
+    }
+    if (in->lhs >= 0) {
+        int gi = 0;
+        int xi = 0;
+        int k;
+
+        if (f->value_ty[in->lhs].kind == CC_TY_AGG && !s->is_addr[in->lhs] && f->value_ty[in->lhs].size > 8) {
             XS_NOPE(s);
         }
-        xs_move_word_to(s, in->lhs, 0, &rax);
-        x.imp_use = XR_BIT(XR_AX);
-        if (in->imm > 8 && in->rhs >= 0) {
-            xop_t rdx = xop_reg(XR_DX, 8);
+        /* its eightbytes (lhs, rhs): to %rax then %rdx, the SSE ones to %xmm0 then %xmm1 */
+        for (k = 0; k < 2; ++k) {
+            int part = k == 0 ? in->lhs : in->rhs;
+            int reg;
+            xop_t d;
 
-            xs_move_word_to(s, in->rhs, 0, &rdx);
-            x.imp_use |= XR_BIT(XR_DX);
+            if (k == 1 && (in->imm <= 8 || part < 0)) {
+                break;
+            }
+            if ((in->agg_class & (k == 0 ? CC_ABI_SSE0 : CC_ABI_SSE1)) != 0) {
+                reg = XR_XMM0 + xi++;
+            } else {
+                reg = gi++ == 0 ? XR_AX : XR_DX;
+            }
+            d = xop_reg(reg, 8);
+            if (XR_IS_XMM(reg)) {
+                xop_t g = xs_reg_word(s, part, 0);
+
+                xs_emit(s, XI_MOV, 8, 2, &g, &d, NULL);
+            } else {
+                xs_move_word_to(s, part, 0, &d);
+            }
+            x.imp_use |= XR_BIT(reg);
         }
     }
     xf_emit(&s->xf, &x);
@@ -489,15 +742,16 @@ static const char *x64_function_ok(const xsel_t *s) {
     const cc_ssa_function_t *f = s->f;
     size_t i;
 
-    if (f->ret_type == CC_VAL_F64 || f->ret_abi != CC_CALL_ARG_ABI_DEFAULT) {
+    if (f->ret_type == CC_VAL_F64 ? !fp_abi_ok(f->ret_abi) : f->ret_abi != CC_CALL_ARG_ABI_DEFAULT) {
         return "its return";
     }
     for (i = 0; i < f->param_count; ++i) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
 
-        if (f->param_types[i] == CC_VAL_F64 ||
-            (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && abi != CC_CALL_ARG_ABI_ZERO &&
-             CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM && !agg_in_gprs(abi))) {
+        if (f->param_types[i] == CC_VAL_F64 ? !fp_abi_ok(abi)
+                                            : (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT &&
+                                               abi != CC_CALL_ARG_ABI_ZERO &&
+                                               CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM && !agg_in_regs(abi))) {
             return "a parameter's ABI";
         }
     }
@@ -528,7 +782,7 @@ static void save_va_regs(xsel_t *s) {
         xinst_t x = xi_make(XI_SAVEXMM, 8, 1, &m, NULL, NULL);
 
         x.label = xf_new_label(&s->xf);
-        x.imp_use = XR_BIT(XR_AX);
+        x.imp_use = XR_BIT(XR_AX) | XR_XMM_MASK(8);
         xf_emit(&s->xf, &x);
     }
 }
@@ -623,22 +877,33 @@ static int x64_begin(xsel_t *s) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
         abi_loc_t loc;
 
-        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && !agg_in_gprs(abi)) {
+        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && abi != CC_CALL_ARG_ABI_FLOAT && !agg_in_regs(abi)) {
             continue;
         }
         loc = abi64_param_loc(f, (int)i, gpr_bias(s));
-        if (loc.kind == ABI_LOC_GPR) {
-            xop_t from = xop_reg(x64_arg_regs[loc.index], 8);
-            xop_t to = xs_temp(s);
+        if (loc.kind == ABI_LOC_XMM) {
+            xop_t from = xop_reg(xmm_arg(loc.index), 8);
+            xop_t to = xop_reg(xf_new_xvreg(&s->xf), 8);
 
             xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);
             s->param_lo[i] = to.reg;
-            if (agg_in_gprs(abi) && loc.size > 8) {
-                /* a structure's second eightbyte, in the next register */
-                from = xop_reg(x64_arg_regs[loc.index + 1], 8);
-                to = xs_temp(s);
+        } else if (loc.kind == ABI_LOC_GPR) {
+            /* each eightbyte from the next general or vector register its class names */
+            size_t gi = loc.index;
+            size_t xi = loc.xmm_index;
+            int k;
+
+            for (k = 0; k < (agg_in_regs(abi) && loc.size > 8 && (loc.sse & ABI_SSE_WHOLE) == 0 ? 2 : 1); ++k) {
+                int sse = agg_in_regs(abi) && (loc.sse & (ABI_SSE_WHOLE | (1u << k))) != 0;
+                xop_t from = xop_reg(sse ? xmm_arg(xi++) : x64_arg_regs[gi++], 8);
+                xop_t to = sse ? xop_reg(xf_new_xvreg(&s->xf), 8) : xs_temp(s);
+
                 xs_emit(s, XI_MOV, 8, 2, &from, &to, NULL);
-                s->param_hi[i] = to.reg;
+                if (k == 0) {
+                    s->param_lo[i] = to.reg;
+                } else {
+                    s->param_hi[i] = to.reg;
+                }
             }
         }
     }
@@ -654,6 +919,7 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
                              const char *src_path, int emit_debug, int pic, cc_diag_t *diag) {
     static const xtarget_t alloc = {
         X64_CALLER_SAVED | XR_BIT(XR_BX) | XR_BIT(XR_R12) | XR_BIT(XR_R13) | XR_BIT(XR_R14) | XR_BIT(XR_R15),
+        XR_XMM_MASK(16),
         XR_BIT(XR_BX) | XR_BIT(XR_R12) | XR_BIT(XR_R13) | XR_BIT(XR_R14) | XR_BIT(XR_R15),
         X64_CALLER_SAVED | XR_BIT(XR_BX) | XR_BIT(XR_R12) | XR_BIT(XR_R13) | XR_BIT(XR_R14) | XR_BIT(XR_R15),
         x64_order,
@@ -671,6 +937,7 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
     t.stack_boundary = 16;
     t.sym_imm = 0;
     t.extends_params = 1;
+    t.sse_fp = 1;
     t.chain_reg = XR_R10;
     t.function_ok = x64_function_ok;
     t.begin = x64_begin;

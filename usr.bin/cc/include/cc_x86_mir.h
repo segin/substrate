@@ -21,7 +21,7 @@
 
 #include <stdio.h>
 
-/** Physical registers, in their encoding order: 0 %eax/%rax .. 7 %edi/%rdi, 8..15 %r8..%r15. */
+/** Physical registers, in their encoding order: 0 %eax/%rax .. 7 %edi/%rdi, 8..15 %r8..%r15; then %xmm0..15. */
 enum {
     XR_AX = 0,
     XR_CX,
@@ -39,11 +39,17 @@ enum {
     XR_R13,
     XR_R14,
     XR_R15,
+    XR_XMM0,
+    XR_XMM15 = XR_XMM0 + 15,
     XR_NPHYS
 };
 
 /** The first virtual register: a register number below it is physical. */
-#define XR_VBASE 16
+#define XR_VBASE 32
+/** Whether physical register @p r is a vector register (%xmm0..15). */
+#define XR_IS_XMM(r) ((r) >= XR_XMM0 && (r) <= XR_XMM15)
+/** The vector registers %xmm0 .. %xmm(n-1) as a register mask. */
+#define XR_XMM_MASK(n) ((unsigned)(((1ull << (n)) - 1) << XR_XMM0))
 /** No register (a memory operand without a base or an index). */
 #define XR_NONE (-1)
 /** A memory operand's base that is the frame: the frame pointer plus its object's offset. */
@@ -109,6 +115,26 @@ typedef enum {
     XI_CALL,      /**< call sym, or indirect through o0 when nops is 1 */
     XI_TRAP,      /**< ud2, or int3 */
     XI_ASM,       /**< IR instruction ir_index, an inline asm, its operands in frame objects (the selector's aux) */
+    XI_FADD,      /**< SSE, a double: o1 += o0 (addsd); o0 may be memory */
+    XI_FSUB,
+    XI_FMUL,
+    XI_FDIV,
+    XI_UCOMI,     /**< flags from o1 against o0, unordered as CF, ZF and PF all set (ucomisd) */
+    XI_XORPS,     /**< o1 ^= o0, all 128 bits: of a register with itself, 0.0 */
+    XI_CVTSI2SD,  /**< integer o0, of o0.size bytes (4 or 8) -> the double o1 */
+    XI_CVTTSD2SI, /**< the double o0 truncated -> integer o1, of o1.size bytes (4 or 8) */
+    XI_CVTSD2SS,  /**< the double o0 rounded to a float -> o1 */
+    XI_CVTSS2SD,  /**< the float o0 (a register's low 4 bytes, or 4 bytes of memory) -> the double o1 */
+    XI_FLD,       /**< x87: push memory o0 -- 4 bytes flds, 8 fldl, 10 or 16 fldt */
+    XI_FILD,      /**< x87: push the integer at memory o0 -- 2, 4 or 8 bytes */
+    XI_FILDU64,   /**< x87: push the unsigned 64-bit integer at memory o0, 2^64 added when its top bit is set (o1, 4
+                       bytes of scratch memory) */
+    XI_FSTP,      /**< x87: pop to memory o0 -- 4 bytes fstps, 8 fstpl, 10 or 16 fstpt */
+    XI_FSTP0,     /**< x87: pop, the value thrown away */
+    XI_FARITH,    /**< x87: st(1) op= st(0) and pop, cc the op: 0 add, 1 sub, 2 mul, 3 div */
+    XI_FUCOMPP,   /**< x87: flags from st(0) against st(1), both popped (fucompp; fnstsw %ax; sahf; %ax clobbered) */
+    XI_FTOI,      /**< x87: pop, truncated, as a 64-bit integer to memory o0 -- unsigned when cc, through
+                       o1, 16 bytes of scratch memory for the control word (%ax clobbered) */
     XI_GOTBASE,   /**< i386 -fPIC: the GOT's address -> o0, by its pc thunk (call, addl $_GLOBAL_OFFSET_TABLE_) */
     XI_SAVEXMM,   /**< x86-64 variadic entry: %xmm0..7 stored at memory o0 on, 16 bytes each, when %al (imp_use) is not 0;
                        label is its own, past the IR's */
@@ -129,6 +155,8 @@ typedef enum {
     XC_AE,
     XC_S,
     XC_NS,
+    XC_P,
+    XC_NP,
     XC_COUNT
 } xcc_t;
 
@@ -173,6 +201,7 @@ typedef struct {
     unsigned char memory;  /**< it lives in memory always: its address is taken */
     unsigned char no_spill;/**< made for one instruction's operand: never spilled */
     unsigned char byte;    /**< (set by the allocator) it is read or written as a byte */
+    unsigned char xmm;     /**< it is a vector register's (a double, a float held as one), not a general one's */
     int phys;              /**< (the allocator's result) its register, or -1 when it was spilled */
 } xvreg_t;
 
@@ -193,7 +222,8 @@ typedef struct {
 
 /** What the allocator needs of a target. */
 typedef struct {
-    unsigned alloc_mask;  /**< the registers it may give out */
+    unsigned alloc_mask;  /**< the registers it may give out, vector ones among them */
+    unsigned xmm_mask;    /**< the vector registers of those */
     unsigned callee_saved;/**< the ones a callee keeps */
     unsigned byte_mask;   /**< the ones with a byte register (i386: %eax, %ecx, %edx, %ebx) */
     const int *order;     /**< the order to try them in */
@@ -209,6 +239,10 @@ void xf_init(xfunc_t *xf);
 void xf_free(xfunc_t *xf);
 /** A new virtual register, or XR_NONE when out of memory. */
 int xf_new_vreg(xfunc_t *xf);
+/** A new virtual vector register (a double's), or XR_NONE when out of memory. */
+int xf_new_xvreg(xfunc_t *xf);
+/** Whether register @p r -- physical or virtual -- is a vector register. */
+int xf_is_xmm(const xfunc_t *xf, int r);
 /** A new frame object of @p size bytes aligned to @p align, or -1 when out of memory. */
 int xf_new_obj(xfunc_t *xf, xobj_kind_t kind, int size, int align, long off);
 /** A new label number. */
@@ -283,6 +317,7 @@ typedef struct {
     int stack_boundary;     /**< the stack's alignment at a call, in bytes */
     int sym_imm;            /**< a symbol's address may be an immediate (else it is made with leaq, off %rip) */
     int chain_reg;          /**< the static chain register a GNU nested function's environment comes in */
+    int sse_fp;             /**< floats and doubles are vector registers (SSE); else every floating value is x87's */
     int extends_params;     /**< a narrow parameter or call result is held extended once taken (x86-64), not as it
                                  came (i386, but for a call's 1- and 2-byte results) */
     /** NULL when the function is one this path takes, else why not */
@@ -339,6 +374,9 @@ struct xsel {
     int got;                  /**< i386 -fPIC: the register holding the GOT's address, from entry; or XR_NONE */
     int va_save;              /**< an x86-64 variadic function: the frame object of its register save area, or -1 */
     int va_state;             /**< and of the record its va_lists point at */
+    int *fhome;               /**< per IR value: an x87 floating value's frame object, made the first time; else -1 */
+    int fscratch;             /**< a 16-byte frame object for moving floating values through memory, or -1 */
+    int fcw;                  /**< and one for the x87 control word and constants, or -1 */
     unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
     unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
 };
@@ -397,6 +435,32 @@ int xs_label_follows(const xsel_t *s, size_t j, int label);
  */
 int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
                           size_t fn_index, const char *src_path, int emit_debug, cc_diag_t *diag);
+
+/* mir_fp.c: floating point, what the targets share */
+
+/** How a floating value is held (xs_fp_kind()). */
+enum {
+    XFP_NONE = 0, /**< not a floating value */
+    XFP_SSE,      /**< a virtual vector register: a double, or a float as the double it rounds to */
+    XFP_X87       /**< a frame object of its own (xs_fp_home()): 8 bytes for a double, 16 for a long double's 80 bits */
+};
+
+/** How IR value @p v is held: XFP_NONE, XFP_SSE or XFP_X87. */
+int xs_fp_kind(const xsel_t *s, int v);
+/** An XFP_SSE value's vector register, as an operand. */
+xop_t xs_fp_reg(xsel_t *s, int v);
+/** An XFP_X87 value's frame object, as a memory operand of its size. */
+xop_t xs_fp_home(xsel_t *s, int v);
+/** Push floating value @p v onto the x87 stack. */
+void xs_fp_push(xsel_t *s, int v);
+/** Pop the x87 stack into floating value @p v, rounded to it; with @p v -1, throw the value away. */
+void xs_fp_pop(xsel_t *s, int v);
+/** Load the float (4 bytes), double (8) or long double (10, 16) at memory @p m into floating value @p v. */
+void xs_fp_from_mem(xsel_t *s, int v, xop_t m, int bytes);
+/** Store floating value @p v at memory @p m as a float (4 bytes), a double (8) or a long double (10, 16). */
+void xs_fp_to_mem(xsel_t *s, int v, xop_t m, int bytes);
+/** Select IR instruction @p j if it is a floating operation: 1 when it was (or gave up), 0 when it is not one. */
+int xs_fp_select(xsel_t *s, size_t j);
 
 /* mir_i386.c, mir_x86_64.c: the targets */
 

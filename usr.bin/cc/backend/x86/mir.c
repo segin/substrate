@@ -43,6 +43,22 @@ int xf_new_vreg(xfunc_t *xf) {
     return XR_VBASE + xf->nvr++;
 }
 
+int xf_new_xvreg(xfunc_t *xf) {
+    int r = xf_new_vreg(xf);
+
+    if (r != XR_NONE) {
+        xf->vr[r - XR_VBASE].xmm = 1;
+    }
+    return r;
+}
+
+int xf_is_xmm(const xfunc_t *xf, int r) {
+    if (XR_IS_VIRT(r)) {
+        return r - XR_VBASE < xf->nvr && xf->vr[r - XR_VBASE].xmm;
+    }
+    return XR_IS_XMM(r);
+}
+
 xvreg_t *xf_vreg(xfunc_t *xf, int r) {
     return &xf->vr[r - XR_VBASE];
 }
@@ -156,8 +172,8 @@ xinst_t xi_make(xi_op_t op, int w, int n, const xop_t *a, const xop_t *b, const 
 }
 
 int xi_role(const xinst_t *in, int k) {
-    if (in->op == XI_XOR && in->nops == 2 && in->o[0].kind == XO_REG && in->o[1].kind == XO_REG &&
-        in->o[0].reg == in->o[1].reg) {
+    if ((in->op == XI_XOR || in->op == XI_XORPS) && in->nops == 2 && in->o[0].kind == XO_REG &&
+        in->o[1].kind == XO_REG && in->o[0].reg == in->o[1].reg) {
         /* xor r, r: r is 0, whatever it held */
         return k == 0 ? 0 : 2;
     }
@@ -166,7 +182,17 @@ int xi_role(const xinst_t *in, int k) {
     case XI_MOVZX:
     case XI_MOVSX:
     case XI_LEA:
+    case XI_CVTSI2SD:
+    case XI_CVTTSD2SI:
+    case XI_CVTSD2SS:
+    case XI_CVTSS2SD:
         return k == 0 ? 1 : 2;
+    case XI_FADD:
+    case XI_FSUB:
+    case XI_FMUL:
+    case XI_FDIV:
+    case XI_XORPS:
+        return k == 0 ? 1 : 3;
     case XI_ADD:
     case XI_SUB:
     case XI_AND:
@@ -212,6 +238,15 @@ int xi_pure(const xinst_t *in) {
     case XI_NOT:
     case XI_SETCC:
     case XI_GOTBASE:
+    case XI_FADD:
+    case XI_FSUB:
+    case XI_FMUL:
+    case XI_FDIV:
+    case XI_XORPS:
+    case XI_CVTSI2SD:
+    case XI_CVTTSD2SI:
+    case XI_CVTSD2SS:
+    case XI_CVTSS2SD:
         break;
     default:
         return 0;
@@ -247,6 +282,17 @@ int xi_mem_ok(const xinst_t *in, int k) {
                       : in->o[0].kind == XO_REG ||
                             (in->o[0].kind == XO_IMM && in->o[0].sym == NULL &&
                              (in->w < 8 || (in->o[0].disp >= -2147483647LL - 1 && in->o[0].disp <= 2147483647LL)));
+    case XI_FADD:
+    case XI_FSUB:
+    case XI_FMUL:
+    case XI_FDIV:
+    case XI_UCOMI:
+    case XI_CVTSI2SD:
+    case XI_CVTTSD2SI:
+    case XI_CVTSD2SS:
+    case XI_CVTSS2SD:
+        /* the source, never the destination (a register) */
+        return k == 0;
     case XI_MOVZX:
     case XI_MOVSX:
     case XI_IMUL:
@@ -287,21 +333,22 @@ int xi_ends_block(const xinst_t *in) {
 }
 
 xcc_t xcc_negate(xcc_t cc) {
-    static const unsigned char neg[XC_COUNT] = {XC_NE, XC_E, XC_GE, XC_G, XC_LE, XC_L,
-                                                XC_AE, XC_A, XC_BE, XC_B, XC_NS, XC_S};
+    static const unsigned char neg[XC_COUNT] = {XC_NE, XC_E, XC_GE, XC_G, XC_LE, XC_L,  XC_AE,
+                                                XC_A,  XC_BE, XC_B, XC_NS, XC_S, XC_NP, XC_P};
 
     return (xcc_t)neg[cc];
 }
 
 xcc_t xcc_swap(xcc_t cc) {
-    static const unsigned char sw[XC_COUNT] = {XC_E, XC_NE, XC_G, XC_GE, XC_L, XC_LE,
-                                               XC_A, XC_AE, XC_B, XC_BE, XC_S, XC_NS};
+    static const unsigned char sw[XC_COUNT] = {XC_E, XC_NE, XC_G, XC_GE, XC_L, XC_LE, XC_A,
+                                               XC_AE, XC_B, XC_BE, XC_S, XC_NS, XC_P, XC_NP};
 
     return (xcc_t)sw[cc];
 }
 
 const char *xcc_name(xcc_t cc) {
-    static const char *const names[XC_COUNT] = {"e", "ne", "l", "le", "g", "ge", "b", "be", "a", "ae", "s", "ns"};
+    static const char *const names[XC_COUNT] = {"e", "ne", "l", "le", "g",  "ge", "b",
+                                                "be", "a", "ae", "s", "ns", "p",  "np"};
 
     return names[cc];
 }
@@ -316,8 +363,14 @@ const char *xr_name(int r, int size) {
     static const char *const n8[XR_NPHYS] = {"%al",  "%cl",  "%dl",  "%bl",  "%spl", "%bpl", "%sil", "%dil",
                                              "%r8b", "%r9b", "%r10b", "%r11b", "%r12b", "%r13b", "%r14b", "%r15b"};
 
+    static const char *const xmm[16] = {"%xmm0", "%xmm1", "%xmm2",  "%xmm3",  "%xmm4",  "%xmm5",  "%xmm6",  "%xmm7",
+                                        "%xmm8", "%xmm9", "%xmm10", "%xmm11", "%xmm12", "%xmm13", "%xmm14", "%xmm15"};
+
     if (r < 0 || r >= XR_NPHYS) {
         return "%?";
+    }
+    if (XR_IS_XMM(r)) {
+        return xmm[r - XR_XMM0];
     }
     switch (size) {
     case 8:
@@ -416,6 +469,37 @@ static const char *ext_mnemonic(int sign, int from, int to) {
     return to == 8 ? "movzwq" : "movzwl";
 }
 
+/** The bytes from the frame pointer of frame operand @p o. */
+static long frame_off(const xfunc_t *xf, const xop_t *o) {
+    return (long)o->disp + xf->obj[o->obj].off;
+}
+
+/**
+ * Print a move one of whose operands is a vector register: movaps between two, movss, movsd or movups to or from
+ * memory by its size, movd or movq to or from a general register by its size.
+ */
+static void print_xmm_move(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word) {
+    const xop_t *a = &in->o[0];
+    const xop_t *b = &in->o[1];
+    int ax = a->kind == XO_REG && XR_IS_XMM(a->reg);
+    int bx = b->kind == XO_REG && XR_IS_XMM(b->reg);
+    const xop_t *other = ax ? b : a;
+    const char *m;
+
+    if (ax && bx) {
+        m = "movaps";
+    } else if (other->kind == XO_MEM) {
+        m = other->size == 4 ? "movss" : other->size == 16 ? "movups" : "movsd";
+    } else {
+        m = other->size == 8 ? "movq" : "movd";
+    }
+    fprintf(fp, "	%s ", m);
+    print_op(fp, xf, a, word);
+    fputs(", ", fp);
+    print_op(fp, xf, b, word);
+    fputc('\n', fp);
+}
+
 void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const char *fn_name) {
     static const char *const alu[XI_COUNT] = {
         NULL, NULL, NULL, NULL, "mov", NULL, NULL, "lea", "add", "sub", "and", "or", "xor", "imul", "imul",
@@ -423,6 +507,11 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
         NULL};
     int k;
 
+    if (in->op == XI_MOV && ((in->o[0].kind == XO_REG && XR_IS_XMM(in->o[0].reg)) ||
+                             (in->o[1].kind == XO_REG && XR_IS_XMM(in->o[1].reg)))) {
+        print_xmm_move(fp, xf, in, word);
+        return;
+    }
     switch (in->op) {
     case XI_JMP:
         fprintf(fp, "\tjmp .L%s_%d\n", fn_name, in->label);
@@ -457,6 +546,76 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
     case XI_TRAP:
         fputs("\tud2\n", fp);
         return;
+    case XI_FADD:
+    case XI_FSUB:
+    case XI_FMUL:
+    case XI_FDIV:
+    case XI_UCOMI:
+    case XI_XORPS:
+    case XI_CVTSD2SS:
+    case XI_CVTSS2SD: {
+        static const char *const sse[] = {"addsd", "subsd", "mulsd", "divsd", "ucomisd", "xorps", "cvtsd2ss",
+                                          "cvtss2sd"};
+        int i = in->op == XI_CVTSD2SS ? 6 : in->op == XI_CVTSS2SD ? 7 : (int)in->op - (int)XI_FADD;
+
+        fprintf(fp, "\t%s ", sse[i]);
+        break;
+    }
+    case XI_CVTSI2SD:
+        fprintf(fp, "\tcvtsi2sd%c ", in->o[0].size == 8 ? 'q' : 'l');
+        break;
+    case XI_CVTTSD2SI:
+        fprintf(fp, "\tcvttsd2si%c ", in->o[1].size == 8 ? 'q' : 'l');
+        break;
+    case XI_FLD:
+        fprintf(fp, "\t%s ", in->o[0].size == 4 ? "flds" : in->o[0].size == 8 ? "fldl" : "fldt");
+        break;
+    case XI_FILD:
+        fprintf(fp, "\t%s ", in->o[0].size == 2 ? "filds" : in->o[0].size == 4 ? "fildl" : "fildll");
+        break;
+    case XI_FSTP:
+        fprintf(fp, "\t%s ", in->o[0].size == 4 ? "fstps" : in->o[0].size == 8 ? "fstpl" : "fstpt");
+        break;
+    case XI_FSTP0:
+        fputs("\tfstp %st(0)\n", fp);
+        return;
+    case XI_FARITH: {
+        static const char *const x87[4] = {"faddp", "fsubrp", "fmulp", "fdivrp"};
+
+        /* as gas spells them: lhs in st(1), rhs in st(0), st(1) op st(0) left */
+        fprintf(fp, "\t%s %%st, %%st(1)\n", x87[in->cc & 3]);
+        return;
+    }
+    case XI_FUCOMPP:
+        /* (no fucomip below the Pentium Pro: the status word's C0, C2 and C3 into CF, PF and ZF) */
+        fputs("\tfucompp\n\tfnstsw %ax\n\tsahf\n", fp);
+        return;
+    case XI_FILDU64: {
+        xop_t hi = in->o[0];
+
+        hi.disp += 4;
+        fputs("\tfildll ", fp);
+        print_op(fp, xf, &in->o[0], word);
+        fputs("\n\tcmpl $0, ", fp);
+        print_op(fp, xf, &hi, word);
+        fprintf(fp, "\n\tjge .L%s_%d\n\tmovl $0x5f800000, ", fn_name, in->label);
+        print_op(fp, xf, &in->o[1], word);
+        fputs("\n\tfadds ", fp);
+        print_op(fp, xf, &in->o[1], word);
+        fprintf(fp, "\n.L%s_%d:\n", fn_name, in->label);
+        return;
+    }
+    case XI_FTOI: {
+        /* truncating, whatever the rounding mode: the control word's RC set to 11 around the store */
+        const char *bp = word == 8 ? "%rbp" : "%ebp";
+        long cw = frame_off(xf, &in->o[1]);
+
+        fprintf(fp, "\tfnstcw %ld(%s)\n\tmovw %ld(%s), %%ax\n\torw $0x0c00, %%ax\n", cw, bp, cw, bp);
+        fprintf(fp, "\tmovw %%ax, %ld(%s)\n\tfldcw %ld(%s)\n", cw + 2, bp, cw + 2, bp);
+        emit_x87_store_i64(fp, bp, (int)frame_off(xf, &in->o[0]), (int)(cw + 4), in->cc);
+        fprintf(fp, "\tfldcw %ld(%s)\n", cw, bp);
+        return;
+    }
     case XI_GOTBASE:
         /* the pc thunk leaves its return address -- the next instruction's -- in the register */
         i386_note_pc_thunk(xr_name(in->o[0].reg, 4));
