@@ -3093,13 +3093,112 @@ static int test_redundant(const xfunc_t *xf, int i) {
     return 0;
 }
 
+/** Whether @p label is one of the labels at instruction @p i of @p xf on, before the next one not a label. */
+static int label_here(const xfunc_t *xf, int i, int label) {
+    for (; i < xf->nins && xf->ins[i].op == XI_LABEL; ++i) {
+        if (xf->ins[i].label == label) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /**
- * After allocation: a copy and an add become one lea, a move of 0 into a register an xorl, and on x86-64 a move
- * of a constant that fits 32 bits unsigned the 32-bit move, which zero-extends.
+ * After allocation, when copies have gone and blocks are empty that were not at selection: a label nothing jumps
+ * to goes (none does with @p labels_taken: a computed goto may reach any), code after a jump, a return or a trap
+ * up to the next label left; a jump or a branch to a label that comes next goes; and a branch over a jump,
+ * `jcc 1f; jmp 2f; 1:`, is the one branch the other way, `jncc 2f` -- over a return, print_function()'s branch to
+ * the epilogue.
  */
-static void peephole(xfunc_t *xf, int word) {
+static void tidy_branches(xfunc_t *xf, int labels_taken) {
+    int *refs = (int *)calloc((size_t)(xf->nlabels > 0 ? xf->nlabels : 1), sizeof(int));
+    int changed = 1;
+    int round;
+
+    for (round = 0; changed && round < 8; ++round) {
+        int i;
+        int j = 0;
+
+        changed = 0;
+        if (refs != NULL) {
+            memset(refs, 0, (size_t)(xf->nlabels > 0 ? xf->nlabels : 1) * sizeof(int));
+            for (i = 0; i < xf->nins; ++i) {
+                const xinst_t *in = &xf->ins[i];
+                int k;
+
+                if ((in->op == XI_JMP || in->op == XI_JCC) && in->label >= 0 && in->label < xf->nlabels) {
+                    refs[in->label]++;
+                }
+                for (k = 0; in->op == XI_ASM && k < in->ntargets; ++k) {
+                    if (in->targets[k] >= 0 && in->targets[k] < xf->nlabels) {
+                        refs[in->targets[k]]++;
+                    }
+                }
+            }
+        }
+        for (i = 0; i < xf->nins; ++i) {
+            xinst_t *in = &xf->ins[i];
+
+            if (in->op == XI_LABEL && !labels_taken && refs != NULL && in->label >= 0 && in->label < xf->nlabels &&
+                refs[in->label] == 0) {
+                /* (nothing jumps to it: what it separates are one block) */
+                changed = 1;
+                continue;
+            }
+            if ((in->op == XI_JMP || in->op == XI_JCC) && label_here(xf, i + 1, in->label)) {
+                changed = 1;
+                continue;
+            }
+            if (in->op == XI_JCC && i + 2 < xf->nins && xf->ins[i + 1].op == XI_JMP &&
+                xf->ins[i + 1].label != in->label && label_here(xf, i + 2, in->label)) {
+                in->cc = (unsigned char)xcc_negate((xcc_t)in->cc);
+                in->label = xf->ins[i + 1].label;
+                xf->ins[j++] = *in;
+                ++i;
+                changed = 1;
+                continue;
+            }
+            xf->ins[j++] = *in;
+            if (in->op == XI_JMP || in->op == XI_RET || in->op == XI_TRAP) {
+                while (i + 1 < xf->nins) {
+                    const xinst_t *nx = &xf->ins[i + 1];
+
+                    if (nx->op == XI_LABEL && (labels_taken || refs == NULL || nx->label < 0 ||
+                                               nx->label >= xf->nlabels || refs[nx->label] > 0)) {
+                        break;
+                    }
+                    ++i;
+                    changed = 1;
+                }
+            }
+        }
+        xf->nins = j;
+    }
+    free(refs);
+}
+
+/** Whether function @p f takes a label's address (&&label), which a computed goto may then jump to. */
+static int takes_label_address(const cc_ssa_function_t *f) {
+    size_t j;
+
+    for (j = 0; j < f->instr_count; ++j) {
+        if (f->instrs[j].op == CC_SSA_LADDR) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * After allocation: branches tidied (tidy_branches(), @p labels_taken as it has it), a copy and an add become one
+ * lea, a move of 0 into a register an xorl, and on x86-64 a move of a constant that fits 32 bits unsigned the
+ * 32-bit move, which zero-extends.
+ */
+static void peephole(xfunc_t *xf, int word, int labels_taken) {
     int i;
     int j = 0;
+
+    tidy_branches(xf, labels_taken);
 
     /* first, on its own: a test of what the flags were just set from (what follows may read them) */
     for (i = 0; i < xf->nins; ++i) {
@@ -3453,8 +3552,20 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
             emit_local_label(fp, f->name, in->label);
             fputs(":\n", fp);
             s->xf.sp_depth = 0; /* (a call's pushes never span a label) */
+        } else if (in->op == XI_JCC && share && i + 1 < last_ret && s->xf.ins[i + 1].op == XI_RET &&
+                   label_here(&s->xf, i + 2, in->label)) {
+            /* a branch over a return: the other way to the epilogue */
+            fprintf(fp, "\tj%s .L%s_epilogue\n", xcc_name(xcc_negate((xcc_t)in->cc)), f->name);
+            ++i;
         } else if (in->op == XI_RET && share && i != last_ret) {
-            fprintf(fp, "\tjmp .L%s_epilogue\n", f->name);
+            int k = i + 1;
+
+            while (k < last_ret && s->xf.ins[k].op == XI_LABEL) {
+                ++k;
+            }
+            if (k != last_ret) {
+                fprintf(fp, "\tjmp .L%s_epilogue\n", f->name);
+            }
         } else if (in->op == XI_RET) {
             if (share) {
                 fprintf(fp, ".L%s_epilogue:\n", f->name);
@@ -3683,7 +3794,7 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
         }
     }
     if (rc == 0) {
-        peephole(&s.xf, t->word);
+        peephole(&s.xf, t->word, takes_label_address(f));
         if (print_function(out, &s, src_path, emit_debug, diag) != 0) {
             rc = -1;
         }

@@ -82,8 +82,8 @@ if [ "$got" != "$want" ]; then
 	exit 1
 fi
 "$CC_BIN" -m64 -O2 -S -o "$CC_TMP/m.s" "$CC_TMP/m.c"
-# the loop's body, from the label after its test to the jump back, but the asm's own text
-awk '/^\.Ldot_1:/{f=1} /# mac2 \{/{a=1} f && !a; /# mac2 \}/{a=0} f && /^\tjmp \.Ldot_0$/{f=0}' "$CC_TMP/m.s" >"$CC_TMP/loop.s"
+# the loop's body, from its test's branch out to the jump back, but the asm's own text
+awk '/^\.Ldot_0:/{z=1} z && !f && /^\tj[a-z]+ \.Ldot_[0-9]+$/{f=1; next} /# mac2 \{/{a=1} f && !a; /# mac2 \}/{a=0} f && /^\tjmp \.Ldot_0$/{f=0; z=0}' "$CC_TMP/m.s" >"$CC_TMP/loop.s"
 if ! grep -q 'Ldot_0' "$CC_TMP/loop.s"; then
 	echo "run_copy_hints: no loop body found in dot()"
 	exit 1
