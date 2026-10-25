@@ -62,9 +62,11 @@ for m in $modes; do
 	want=$("$CC_TMP/g")
 	for o in O0 O2; do
 		for pic in "" -fPIC; do
-			if ! "$CC_BIN" -m$m -$o $pic -o "$CC_TMP/c" "$CC_TMP/s.c" 2>"$CC_TMP/err"; then
+			# (compiled, then linked: the driver passes -fPIC on to the linker, which GNU ld refuses)
+			if ! "$CC_BIN" -m$m -$o $pic -c -o "$CC_TMP/c.o" "$CC_TMP/s.c" 2>"$CC_TMP/err" ||
+				! "$CC_BIN" -m$m -o "$CC_TMP/c" "$CC_TMP/c.o" 2>>"$CC_TMP/err"; then
 				echo "run_asm_sym_operand: -m$m -$o $pic: cc rejected it"
-				grep -v 'unsupported option' "$CC_TMP/err" | head -3
+				head -3 "$CC_TMP/err"
 				exit 1
 			fi
 			got=$("$CC_TMP/c")
