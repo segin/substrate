@@ -317,6 +317,44 @@ static int stable(const xsel_t *s, int v) {
     return v >= 0 && s->ndefs[v] == 1 && s->def_at[v] >= 0;
 }
 
+/**
+ * Whether IR value @p v is a register's value scaled by 1, 2, 4 or 8 -- a multiply by one of them or a shift
+ * left by 0 to 3 of a value written once -- which an address takes as its index (*@p idx, *@p scale).
+ */
+static int scaled_index(xsel_t *s, int v, int *idx, int *scale) {
+    const cc_ssa_instr_t *d;
+    const char *sym;
+    long long k = 0;
+    long long c;
+    int x = -1;
+
+    if (!stable(s, v) || xs_is_pair(s, v)) {
+        return 0;
+    }
+    d = &s->f->instrs[s->def_at[v]];
+    if (d->op == CC_SSA_MUL && d->lhs >= 0 && d->rhs >= 0) {
+        if (xs_const_of(s, d->rhs, &k)) {
+            x = d->lhs;
+        } else if (xs_const_of(s, d->lhs, &k)) {
+            x = d->rhs;
+        }
+    } else if (d->op == CC_SSA_SHL && d->lhs >= 0) {
+        long long sh = d->imm;
+
+        if ((d->rhs < 0 || xs_const_of(s, d->rhs, &sh)) && sh >= 0 && sh <= 3) {
+            k = 1LL << sh;
+            x = d->lhs;
+        }
+    }
+    if (x < 0 || (k != 1 && k != 2 && k != 4 && k != 8) || !stable(s, x) || s->frame_val[x] >= 0 ||
+        xs_const_of(s, x, &c) || xs_sym_of(s, x, &sym) || xs_is_pair(s, x) || xs_fp_kind(s, x) != XFP_NONE) {
+        return 0;
+    }
+    *idx = x;
+    *scale = (int)k;
+    return 1;
+}
+
 /** xs_mem_at(), @p depth additions folded so far. */
 static xop_t mem_at(xsel_t *s, int v, long long disp, int size, int depth) {
     long long k;
@@ -355,8 +393,24 @@ static xop_t mem_at(xsel_t *s, int v, long long disp, int size, int depth) {
             if (stable(s, d->lhs) && stable(s, d->rhs) && s->frame_val[d->lhs] < 0 && s->frame_val[d->rhs] < 0 &&
                 !xs_const_of(s, d->lhs, &k) && !xs_const_of(s, d->rhs, &k) && !xs_sym_of(s, d->lhs, &sym) &&
                 !xs_sym_of(s, d->rhs, &sym)) {
-                o = xop_mem(xs_vreg_of(s, d->lhs, 0), disp, size);
-                o.index = xs_vreg_of(s, d->rhs, 0);
+                int base = d->lhs;
+                int idx = d->rhs;
+                int scale = 1;
+                int x;
+                int sc;
+
+                /* a scaled index, as an array's element is: (base, index, scale) */
+                if (scaled_index(s, d->rhs, &x, &sc)) {
+                    idx = x;
+                    scale = sc;
+                } else if (scaled_index(s, d->lhs, &x, &sc)) {
+                    base = d->rhs;
+                    idx = x;
+                    scale = sc;
+                }
+                o = xop_mem(xs_vreg_of(s, base, 0), disp, size);
+                o.index = xs_vreg_of(s, idx, 0);
+                o.scale = (unsigned char)scale;
                 return o;
             }
         }
