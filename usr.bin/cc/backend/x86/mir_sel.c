@@ -1785,6 +1785,76 @@ static int asm_bindable(xsel_t *s, const cc_ssa_instr_t *in, const x86_asm_plan_
 }
 
 /**
+ * The condition flag output constraint @p c names ("=@ccz", "=@ccnc"), into *@p cc; 0 for one with no condition
+ * of the selector's (overflow).
+ */
+static int flag_output_cc(const char *c, xcc_t *cc) {
+    static const struct {
+        const char *name;
+        xcc_t cc;
+    } names[] = {
+        {"e", XC_E},    {"z", XC_E},    {"ne", XC_NE},  {"nz", XC_NE},  {"l", XC_L},    {"nge", XC_L},
+        {"le", XC_LE},  {"ng", XC_LE},  {"g", XC_G},    {"nle", XC_G},  {"ge", XC_GE},  {"nl", XC_GE},
+        {"b", XC_B},    {"c", XC_B},    {"nae", XC_B},  {"be", XC_BE},  {"na", XC_BE},  {"a", XC_A},
+        {"nbe", XC_A},  {"ae", XC_AE},  {"nb", XC_AE},  {"nc", XC_AE},  {"s", XC_S},    {"ns", XC_NS},
+        {"p", XC_P},    {"pe", XC_P},   {"np", XC_NP},  {"po", XC_NP},
+    };
+    size_t i;
+
+    if (c == NULL || strncmp(c, "=@cc", 4) != 0) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(c + 4, names[i].name) == 0) {
+            *cc = names[i].cc;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Of @p plan for inline asm @p in, IR instruction @p j, a flag output read only by a branch after it -- through
+ * copies read once, and constants, nothing between that sets the flags -- left in the flags (X86_ASM_FLAGS): the
+ * branch is on the asm's condition itself (s->flag_br).  Linux's atomic_dec_and_test() and test_bit() were
+ * `decl; sete %cl; movzbl %cl, %ecx; test %ecx, %ecx; je` where gcc has `decl; je`.
+ */
+static void asm_flag_branch(xsel_t *s, size_t j, const cc_ssa_instr_t *in, x86_asm_plan_t *plan) {
+    const cc_ssa_function_t *f = s->f;
+    size_t k;
+
+    for (k = 0; k < in->asm_out_count && k < plan->n && k < 8; ++k) {
+        int v = asm_operand_value(f, in, k);
+        xcc_t cc;
+        size_t b;
+
+        if (v < 0 || !c_is_flag(in, k) || plan->kind[k] != X86_ASM_REG || s->nuses[v] != 1 || s->ndefs[v] > 1 /* (the asm's own write is not counted) */ ||
+            !flag_output_cc(in->asm_out_constraints[k], &cc)) {
+            continue;
+        }
+        for (b = j + 1; b < f->instr_count; ++b) {
+            const cc_ssa_instr_t *x = &f->instrs[b];
+
+            if (x->op == CC_SSA_BR_COND && x->lhs == v) {
+                plan->kind[k] = X86_ASM_FLAGS;
+                s->flag_br = (long)b;
+                s->flag_cc = (unsigned char)cc;
+                return;
+            }
+            if (x->op == CC_SSA_MOV && x->rhs < 0 && x->lhs == v && x->dst >= 0 && x->dst < f->value_count &&
+                s->nuses[x->dst] == 1 && s->ndefs[x->dst] == 1 && !xs_is_pair(s, x->dst)) {
+                v = x->dst;
+                continue;
+            }
+            if (x->op == CC_SSA_CONST) {
+                continue;
+            }
+            break;
+        }
+    }
+}
+
+/**
  * Of @p plan for inline asm @p in, each memory operand given by its address that is a symbol's -- one the code
  * reaches without the GOT -- written as the symbol (X86_ASM_SYM), as gcc writes `"m" (var)`: its address was made
  * in a register (lea var(%rip), %r10) for the asm to read through.
@@ -1890,6 +1960,11 @@ static void sel_asm_bound(xsel_t *s, size_t j, const cc_ssa_instr_t *in, const x
     x = xi_make(XI_ASM, w, 0, NULL, NULL, NULL);
     x.ir_index = (int)j;
     x.aux = first;
+    for (k = 0; k < out_n && k < 8; ++k) {
+        if (plan->kind[k] == X86_ASM_FLAGS) {
+            x.cc |= (unsigned char)(1u << k);
+        }
+    }
     x.imp_use = uses;
     x.imp_def = defs;
     x.clobber = x86_asm_clobbered_gprs(in) & ~(XR_BIT(XR_SP) | XR_BIT(XR_BP));
@@ -1967,6 +2042,7 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
 
             if (ok) {
                 asm_plan_symbols(s, in, &plan);
+                asm_flag_branch(s, j, in, &plan);
                 sel_asm_bound(s, j, in, &plan);
             }
             x86_asm_plan_free(&plan);
@@ -2674,6 +2750,12 @@ static void sel_instr(xsel_t *s, size_t j) {
         break;
 
     case CC_SSA_BR_COND:
+        if (s->flag_br == (long)j) {
+            /* an asm's flag output: on the flags it left (asm_flag_branch()) */
+            s->flag_br = -1;
+            branch(s, j, (xcc_t)s->flag_cc, in->true_label, in->false_label);
+            break;
+        }
         if (in->lhs >= 0 && s->def_at[in->lhs] == -2) {
             /* the compare deferred to here */
             const cc_ssa_instr_t *c = &f->instrs[s->cmp_at[in->lhs]];
@@ -2846,6 +2928,7 @@ static int sel_init(xsel_t *s) {
     s->va_save = -1;
     s->va_state = -1;
     s->got = XR_NONE;
+    s->flag_br = -1;
     s->lo = (int *)malloc(n * sizeof(int));
     s->hi = (int *)malloc(n * sizeof(int));
     s->ndefs = (int *)calloc(n, sizeof(int));
@@ -3409,7 +3492,14 @@ static int print_asm(FILE *fp, const xsel_t *s, const xinst_t *in, cc_diag_t *di
         int bound = prc == 0 && asm_bindable((xsel_t *)s, ai, &plan);
 
         if (bound) {
+            size_t k;
+
             asm_plan_symbols((xsel_t *)s, ai, &plan);
+            for (k = 0; k < plan.n && k < 8; ++k) {
+                if ((in->cc & (1u << k)) != 0) {
+                    plan.kind[k] = X86_ASM_FLAGS;
+                }
+            }
         }
 
         rc = prc < 0 ? -1

@@ -174,7 +174,8 @@ typedef enum {
 typedef struct {
     unsigned short op;  /**< an xi_op_t */
     unsigned char w;    /**< the operation's width in bytes, for its suffix: 1, 2, 4 or 8 */
-    unsigned char cc;   /**< XI_JCC, XI_SETCC: an xcc_t */
+    unsigned char cc;   /**< XI_JCC, XI_SETCC: an xcc_t; XI_ASM: the outputs (bit k of the first eight) a branch
+                             after reads from the flags the asm leaves, X86_ASM_FLAGS */
     unsigned char nops; /**< the operands in o */
     xop_t o[3];
     int label;          /**< XI_LABEL, XI_JMP, XI_JCC */
@@ -390,6 +391,8 @@ struct xsel {
     int has_goto;             /**< the function has an asm goto */
     int has_dynalloc;         /**< it moves the stack pointer itself (alloca, a variable-length array) */
     int fpo;                  /**< -fomit-frame-pointer taken: no frame pointer, %ebp (%rbp) allocated (fpo_ok()) */
+    long flag_br;             /**< the IR branch that reads an asm's flag output from the flags themselves, or -1 */
+    unsigned char flag_cc;    /**< and the condition it branches on */
     int fp_saved[XR_NPHYS];   /**< (fpo) the callee-saved registers the prologue pushes: the target's and %ebp */
     int fp_nsaved;
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */

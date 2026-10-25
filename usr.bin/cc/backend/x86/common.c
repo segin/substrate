@@ -4088,7 +4088,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
              */
             const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
 
-            if (c != NULL && strncmp(c, "=@cc", 4) == 0 && c[4] != '\0' && out_regs[i] != NULL) {
+            if (c != NULL && strncmp(c, "=@cc", 4) == 0 && c[4] != '\0' && out_regs[i] != NULL &&
+                !(bound != NULL && bound->kind[i] == X86_ASM_FLAGS)) {
                 /* (and the rest of the register clear: the output may be wider than the byte set) */
                 fprintf(fp, "\tset%s %s\n", c + 4, reg_alias_for_size(out_regs[i], is_64bit, 1));
                 fprintf(fp, "\tmovzbl %s, %s\n", reg_alias_for_size(out_regs[i], is_64bit, 1),

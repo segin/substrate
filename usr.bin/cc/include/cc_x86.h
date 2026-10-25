@@ -184,7 +184,8 @@ enum {
     X86_ASM_SLOT,    /**< in memory: its frame slot */
     X86_ASM_REG,     /**< its value in a general register */
     X86_ASM_ADDR,    /**< memory given by its address, in a general register */
-    X86_ASM_SYM      /**< (the selector's) memory given by a symbol's address: written as the symbol, off %rip */
+    X86_ASM_SYM,     /**< (the selector's) memory given by a symbol's address: written as the symbol, off %rip */
+    X86_ASM_FLAGS    /**< (the selector's) a flag output the branch after reads from the flags: nothing set */
 };
 
 /**
