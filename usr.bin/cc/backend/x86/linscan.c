@@ -1422,6 +1422,92 @@ static int ls_coalesce(ls_t *ls) {
     return merged;
 }
 
+/** Whether operand @p o is a whole spill slot of @p xf: a frame object of kind XF_SPILL at its start. */
+static int spill_slot_of(const xfunc_t *xf, const xop_t *o) {
+    return o->kind == XO_MEM && o->base == XR_FRAME && o->index == XR_NONE && o->sym == NULL && o->obj >= 0 &&
+                   o->obj < xf->nobj && xf->obj[o->obj].kind == XF_SPILL && o->disp == 0 &&
+                   o->size == xf->obj[o->obj].size
+               ? o->obj
+               : -1;
+}
+
+/**
+ * Within each block, read a spill slot from the register that still holds what it was last stored from or
+ * loaded into: the reload becomes a copy, or goes when it is into that register.  Linear scan spills a value
+ * for the whole of its life, and each read of it was a load, though the value was in a register an instruction
+ * before.  Nothing but a spill slot's own loads and stores reaches it (its address is never taken), so a slot
+ * stays as it was until an instruction names it as written, and a register until one writes or clobbers it.
+ * Runs on physical registers, after allocation.
+ */
+static void forward_reloads(xfunc_t *xf) {
+    int *holder = (int *)malloc((size_t)(xf->nobj > 0 ? xf->nobj : 1) * sizeof(int));
+    int i;
+    int j = 0;
+
+    if (holder == NULL) {
+        return;
+    }
+    for (i = 0; i < xf->nobj; ++i) {
+        holder[i] = -1;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        xinst_t *in = &xf->ins[i];
+        unsigned defs;
+        int k;
+        int o;
+
+        if (in->op == XI_LABEL || in->op == XI_ASM) {
+            /* another way in; and an asm goto may leave by a way of its own */
+            for (o = 0; o < xf->nobj; ++o) {
+                holder[o] = -1;
+            }
+            xf->ins[j++] = *in;
+            continue;
+        }
+        if (in->op == XI_MOV && in->o[1].kind == XO_REG && in->o[1].reg >= 0 && in->o[1].reg < XR_NPHYS &&
+            (o = spill_slot_of(xf, &in->o[0])) >= 0 && holder[o] >= 0 &&
+            XR_IS_XMM(holder[o]) == XR_IS_XMM(in->o[1].reg)) {
+            /* a reload of what a register holds */
+            int h = holder[o];
+
+            xf->obj[o].uses--;
+            if (h == in->o[1].reg) {
+                continue;
+            }
+            in->o[0] = xop_reg(h, in->o[1].size);
+        }
+        defs = phys_defs(in, ~0u);
+        for (k = 0; k < in->nops; ++k) {
+            if (in->o[k].kind == XO_MEM && in->o[k].base == XR_FRAME && (xi_role(in, k) & 2) != 0 &&
+                in->o[k].obj >= 0 && in->o[k].obj < xf->nobj) {
+                holder[in->o[k].obj] = -1;
+            }
+        }
+        if (defs != 0) {
+            for (o = 0; o < xf->nobj; ++o) {
+                if (holder[o] >= 0 && (defs & XR_BIT(holder[o])) != 0) {
+                    holder[o] = -1;
+                }
+            }
+        }
+        if (in->op == XI_MOV && in->o[0].kind == XO_REG && in->o[0].reg >= 0 && in->o[0].reg < XR_NPHYS &&
+            (o = spill_slot_of(xf, &in->o[1])) >= 0 && in->o[0].size == in->o[1].size) {
+            holder[o] = in->o[0].reg; /* stored from it */
+        } else if (in->op == XI_MOV && in->o[1].kind == XO_REG && in->o[1].reg >= 0 && in->o[1].reg < XR_NPHYS &&
+                   (o = spill_slot_of(xf, &in->o[0])) >= 0 && in->o[0].size == in->o[1].size) {
+            holder[o] = in->o[1].reg; /* loaded into it */
+        }
+        if (in->op == XI_JMP || in->op == XI_RET || in->op == XI_TRAP) {
+            for (o = 0; o < xf->nobj; ++o) {
+                holder[o] = -1;
+            }
+        }
+        xf->ins[j++] = *in;
+    }
+    xf->nins = j;
+    free(holder);
+}
+
 int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
     ls_t ls;
     int round;
@@ -1523,6 +1609,7 @@ int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
                 xf->ins[j++] = *in;
             }
             xf->nins = j;
+            forward_reloads(xf);
             ls_free(&ls);
             return 0;
         }
