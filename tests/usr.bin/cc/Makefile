@@ -38,7 +38,7 @@ SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff \
 	run_pp_postc99 run_pp_c99_baseline run_m16 run_gnu_inline \
 	run_div64_pow2 run_inline_dead_call run_pic_i386 run_object_symbols \
 	run_trivial_auto_var_init run_i386_regcache run_regalloc run_int_extend run_i386_frame_shapes run_alignof_std \
-	run_attr_string_concat run_static_local_tables run_static_local_orphans run_used_static_local run_builtin_mem_inline run_cmodel_kernel run_dead_bool_call run_constant_args run_x64_local_no_got run_asm_a_modifier run_va_no_sse run_x64_struct_regs run_x64_variadic_regs run_x64_sret_regs run_dynalloc_regs run_computed_goto_regs run_asm_goto_out_regs run_small_struct_regs run_asm_goto_out_label run_nested_fn_regs run_pic_i386_regs run_x64_fp_regs run_i386_fp_regs run_i386_abi_regs run_float16_regs run_store_no_dst run_asm_fp_operands run_mem_builtin_size_t run_i386_regparm_struct_regs run_cse_block run_shared_epilogue run_bool_not_fold run_cmp_branch_later run_inline_struct run_asm_stack_pointer_pair run_spill_region run_spill_store_unread run_mul_pow2_shift run_asm_mem_object run_switch_table run_spill_block_local run_scaled_add_lea run_i386_low_word run_asm_flag_branch run_branch_tidy run_empty_arms_fold run_asm_stack_pointer run_asm_global_out run_bool_join_thread run_copy_coalesce run_narrow_args run_asm_sym_operand run_mask_test run_omit_frame_pointer run_promote_struct_word run_mask_of_mask run_i386_wide_ops run_int_cmp32 run_scaled_index run_dead_arm_bool run_copy_hints run_inline_frame_cost run_spill_reload_forward run_struct_copy_forward run_cse_copies run_truth_fold run_asm_regs run_asm_loop_imm run_asm_imm_symbol \
+	run_attr_string_concat run_static_local_tables run_static_local_orphans run_used_static_local run_builtin_mem_inline run_cmodel_kernel run_dead_bool_call run_constant_args run_x64_local_no_got run_asm_a_modifier run_va_no_sse run_x64_struct_regs run_x64_variadic_regs run_x64_sret_regs run_dynalloc_regs run_computed_goto_regs run_asm_goto_out_regs run_small_struct_regs run_asm_goto_out_label run_nested_fn_regs run_pic_i386_regs run_x64_fp_regs run_i386_fp_regs run_i386_abi_regs run_float16_regs run_store_no_dst run_asm_fp_operands run_mem_builtin_size_t run_i386_regparm_struct_regs run_cse_block run_shared_epilogue run_bool_not_fold run_cmp_branch_later run_inline_struct run_tail_call run_asm_stack_pointer_pair run_spill_region run_spill_store_unread run_mul_pow2_shift run_asm_mem_object run_switch_table run_spill_block_local run_scaled_add_lea run_i386_low_word run_asm_flag_branch run_branch_tidy run_empty_arms_fold run_asm_stack_pointer run_asm_global_out run_bool_join_thread run_copy_coalesce run_narrow_args run_asm_sym_operand run_mask_test run_omit_frame_pointer run_promote_struct_word run_mask_of_mask run_i386_wide_ops run_int_cmp32 run_scaled_index run_dead_arm_bool run_copy_hints run_inline_frame_cost run_spill_reload_forward run_struct_copy_forward run_cse_copies run_truth_fold run_asm_regs run_asm_loop_imm run_asm_imm_symbol \
 	run_inline_called_once run_i386_frame_slots run_compiler_stamp run_pp_fuzz_smoke \
 	run_pp_gnu_ext run_pp_clang_feature_probe run_pp_clang_pragma run_pp_cmd_injection_test \
 	checks_pp_strict run_simd_intrinsics run_negative run_ir_golden \
@@ -225,7 +225,7 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc -std=c90 native_c90_oldstyle.c -o $(CC_TMP)/cc_native_c90_oldstyle
 	$(CC_TMP)/cc_native_c90_oldstyle
 	$(TOP)/usr.bin/cc/cc -std=c90 -S native_c90_unproto_call_promotions.c -o $(CC_TMP)/cc_native_c90_unproto_call_promotions.s
-	grep -q "call ext" $(CC_TMP)/cc_native_c90_unproto_call_promotions.s
+	grep -qE "(call|jmp) ext" $(CC_TMP)/cc_native_c90_unproto_call_promotions.s
 	$(TOP)/usr.bin/cc/cc native_c99_typedef.c -o $(CC_TMP)/cc_native_c99_typedef
 	$(CC_TMP)/cc_native_c99_typedef
 	$(TOP)/usr.bin/cc/cc native_c99_typedef_array_member_layout.c -o $(CC_TMP)/cc_native_c99_typedef_array_member_layout
@@ -488,11 +488,11 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc native_c99_unproto_decl_call.c -o $(CC_TMP)/cc_native_c99_unproto_decl_call
 	$(CC_TMP)/cc_native_c99_unproto_decl_call
 	$(TOP)/usr.bin/cc/cc -S native_c99_unproto_extern_call.c -o $(CC_TMP)/cc_native_c99_unproto_extern_call.s
-	grep -q "call ext" $(CC_TMP)/cc_native_c99_unproto_extern_call.s
+	grep -qE "(call|jmp) ext" $(CC_TMP)/cc_native_c99_unproto_extern_call.s
 	$(TOP)/usr.bin/cc/cc native_c99_proto_call.c -o $(CC_TMP)/cc_native_c99_proto_call
 	$(CC_TMP)/cc_native_c99_proto_call
 	$(TOP)/usr.bin/cc/cc -S native_c99_proto_extern.c -o $(CC_TMP)/cc_native_c99_proto_extern.s
-	grep -q "call extmul" $(CC_TMP)/cc_native_c99_proto_extern.s
+	grep -qE "(call|jmp) extmul" $(CC_TMP)/cc_native_c99_proto_extern.s
 	$(TOP)/usr.bin/cc/cc native_loops.c -o $(CC_TMP)/cc_native_loops
 	$(CC_TMP)/cc_native_loops
 	$(TOP)/usr.bin/cc/cc native_bad_if_assign.c -o $(CC_TMP)/cc_native_if_assign
@@ -1161,6 +1161,10 @@ run_cmp_branch_later: build
 run_inline_struct: build
 	mkdir -p "$(CC_TMP)"
 	sh run_inline_struct.sh
+
+run_tail_call: build
+	mkdir -p "$(CC_TMP)"
+	sh run_tail_call.sh
 
 run_asm_stack_pointer_pair: build
 	mkdir -p "$(CC_TMP)"

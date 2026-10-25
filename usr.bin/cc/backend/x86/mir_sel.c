@@ -3776,7 +3776,8 @@ static int layout_frame(const xsel_t *s, xfunc_t *xf, int saved, int *frame) {
  * Print the epilogue and return; with @p reset, the stack pointer is made again from the frame pointer, as an
  * asm goto's jump past its own restores may leave it; @p pop bytes of arguments popped.
  */
-static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame, int reset, int pop, int emit_debug) {
+static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame, int reset, int pop, int emit_debug,
+                           const char *tail) {
     const xsel_target_t *t = s->t;
     int w = t->word;
     char sfx = w == 8 ? 'q' : 'l';
@@ -3823,7 +3824,9 @@ static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame,
     if (emit_debug) {
         fprintf(fp, "\t.cfi_def_cfa %s, %d\n", sp, w);
     }
-    if (pop > 0) {
+    if (tail != NULL) {
+        fprintf(fp, "\tjmp %s\n", tail); /* (a tail call: the callee returns for it) */
+    } else if (pop > 0) {
         fprintf(fp, "\tret $%d\n", pop);
     } else {
         fputs("\tret\n", fp);
@@ -3831,6 +3834,17 @@ static void print_epilogue(FILE *fp, const xsel_t *s, unsigned saved, int frame,
     if (emit_debug) {
         fputs("\t.cfi_restore_state\n", fp);
     }
+}
+
+/**
+ * Whether the call at instruction @p i of @p xf, being printed, can be a tail call: a direct one of a function that
+ * pops nothing, with no argument pushed for it (sp_depth), and the return, popping nothing, right after it.
+ */
+static int tail_call_at(const xfunc_t *xf, int i) {
+    const xinst_t *in = &xf->ins[i];
+
+    return in->op == XI_CALL && in->nops == 0 && in->sym != NULL && in->aux == 0 && xf->sp_depth == 0 &&
+           i + 1 < xf->nins && xf->ins[i + 1].op == XI_RET && xf->ins[i + 1].aux == 0;
 }
 
 /**
@@ -3904,6 +3918,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     int last_ret;
     int nrets;
     int share;
+    int tail_ok;
     size_t j;
     int i;
     int r;
@@ -4009,6 +4024,14 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         }
     }
     share = nrets > 1 && nsaved > 0;
+    /* tail calls, where nothing the callee may reach is in this frame (no frame object's address made) */
+    tail_ok = !emit_debug && !s->has_goto && !s->has_dynalloc && s->nbind == 0;
+    for (i = 0; tail_ok && i < s->xf.nins; ++i) {
+        const xinst_t *in = &s->xf.ins[i];
+
+        tail_ok = !(in->op == XI_LEA && in->o[0].kind == XO_MEM && in->o[0].base == XR_FRAME) &&
+                  !(in->op == XI_RET && in->aux != 0);
+    }
     for (i = 0; i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
 
@@ -4034,13 +4057,17 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
             if (share) {
                 fprintf(fp, ".L%s_epilogue:\n", f->name);
             }
-            print_epilogue(fp, s, saved, frame, s->has_goto || s->has_dynalloc, in->aux, emit_debug);
+            print_epilogue(fp, s, saved, frame, s->has_goto || s->has_dynalloc, in->aux, emit_debug, NULL);
         } else if (in->op == XI_ASM) {
             if (print_asm(fp, s, in, diag) != 0) {
                 return -1;
             }
         } else if (in->op == XI_TRAP) {
             fputs(w == 8 || i386_has_ud2() ? "\tud2\n" : "\tint3\n", fp);
+        } else if (in->op == XI_CALL && !share && tail_ok && tail_call_at(&s->xf, i)) {
+            /* a call its return follows: the epilogue, and a jump to the callee, which returns for it */
+            print_epilogue(fp, s, saved, frame, s->has_goto || s->has_dynalloc, 0, emit_debug, in->sym);
+            ++i;
         } else {
             xi_print(fp, &s->xf, in, w, f->name);
         }

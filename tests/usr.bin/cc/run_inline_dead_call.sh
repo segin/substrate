@@ -241,7 +241,8 @@ int setup(void) {
 EOF
 for m in 32 64; do
 	"$CC_BIN" -m$m -Os -S -o "$CC_TMP/no_effect.s" "$CC_TMP/no_effect.c"
-	calls=$(grep -Eo 'call[lq]?[[:space:]]+[a-z_]+' "$CC_TMP/no_effect.s" | awk '{print $2}' | sort | tr '\n' ' ')
+	# (a call or a tail call's jump to the function)
+	calls=$(grep -Eo '(call[lq]?|jmp)[[:space:]]+[a-z_]+' "$CC_TMP/no_effect.s" | awk '{print $2}' | sort | tr '\n' ' ')
 	if [ "$calls" != "reads_mmio spins used_result " ]; then
 		echo "run_inline_dead_call: -m$m -Os calls: $calls"
 		exit 1
