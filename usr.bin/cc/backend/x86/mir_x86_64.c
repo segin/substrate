@@ -472,8 +472,14 @@ static void x64_call(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t rax = xop_reg(XR_AX, 8);
         xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
 
-        extend_to(s, &rax, &d, in->imm > 0 && f->value_ty[in->dst].kind != CC_TY_AGG ? (int)in->imm : 8,
-                  in->is_unsigned);
+        int bytes = in->imm > 0 && f->value_ty[in->dst].kind != CC_TY_AGG ? (int)in->imm : 8;
+
+        if (!xs_extends_taken(s, in->dst, bytes)) {
+            /* nothing reads past its bits: as it came */
+            xs_emit(s, XI_MOV, 8, 2, &rax, &d, NULL);
+        } else {
+            extend_to(s, &rax, &d, bytes, in->is_unsigned);
+        }
     }
 }
 
@@ -589,6 +595,11 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
 
         if (r.reg == XR_NONE) {
             XS_NOPE(s);
+        }
+        if (!xs_extends_taken(s, in->dst, bytes)) {
+            /* nothing reads past its bits: as it came */
+            xs_emit(s, XI_MOV, 8, 2, &r, &d, NULL);
+            return;
         }
         extend_to(s, &r, &d, bytes, in->is_unsigned);
     } else if (loc.kind == ABI_LOC_STACK) {

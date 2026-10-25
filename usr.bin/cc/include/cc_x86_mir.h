@@ -423,6 +423,11 @@ int xs_const_of(const xsel_t *s, int v, long long *k);
 int xs_sym_of(xsel_t *s, int v, const char **sym);
 /** The virtual register of word @p part of IR value @p v, made the first time it is asked for. */
 int xs_vreg_of(xsel_t *s, int v, int part);
+/**
+ * Whether value @p v, an integer of @p bytes bytes as a parameter or a call's result arrives, must be extended as
+ * it is taken: something reads more of it than its own bits (compute_demand()).
+ */
+int xs_extends_taken(const xsel_t *s, int v, int bytes);
 /** Append an instruction. */
 void xs_emit(xsel_t *s, xi_op_t op, int w, int n, const xop_t *a, const xop_t *b, const xop_t *c);
 /** A new virtual register as a word operand. */

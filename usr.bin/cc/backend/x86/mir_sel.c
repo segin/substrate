@@ -723,13 +723,27 @@ static int ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src) {
  * Whether compare @p in reads its operands' low 32 bits alone: on x86-64, a compare of integers of no more than four
  * bytes, made of their 32-bit registers, which holds whatever their upper halves hold.
  */
+/** Whether value @p v is, for a 32-bit compare, an int: no more than four bytes, or a constant of 32 bits. */
+static int int32_operand(const xsel_t *s, int v, int is_unsigned) {
+    long long k;
+
+    if (xs_const_of((xsel_t *)s, v, &k)) {
+        return is_unsigned ? (k >= 0 && k <= 0xffffffffLL) : (k >= -0x80000000LL && k <= 0x7fffffffLL);
+    }
+    return cc_ssa_value_size(s->f, v) <= 4 && !s->addr_taken[v];
+}
+
 static int cmp32(const xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
 
     return s->word == 8 && in->op == CC_SSA_CMP && in->lhs >= 0 && in->rhs >= 0 &&
            cc_ssa_value_class(f, in->lhs) == CC_VAL_I64 && cc_ssa_value_class(f, in->rhs) == CC_VAL_I64 &&
-           cc_ssa_value_size(f, in->lhs) <= 4 && cc_ssa_value_size(f, in->rhs) <= 4 && !s->addr_taken[in->lhs] &&
-           !s->addr_taken[in->rhs];
+           int32_operand(s, in->lhs, in->is_unsigned) && int32_operand(s, in->rhs, in->is_unsigned) &&
+           (cc_ssa_value_size(f, in->lhs) <= 4 || cc_ssa_value_size(f, in->rhs) <= 4);
+}
+
+int xs_extends_taken(const xsel_t *s, int v, int bytes) {
+    return s->dbits == NULL || v < 0 || v >= s->f->value_count || bytes >= s->word || s->dbits[v] > 8 * bytes;
 }
 
 /** The mask extension @p in is -- an and with 0xff, 0xffff or (x86-64) 0xffffffff -- its byte count, its source *@p src. */
@@ -842,6 +856,43 @@ static int compute_demand(xsel_t *s) {
                 if (cmp32(s, in)) {
                     demand(&c, in->lhs, 32);
                     demand(&c, in->rhs, 32);
+                    continue;
+                }
+                break;
+            case CC_SSA_CALL:
+                /*
+                 * an integer argument of four bytes or less, on x86-64: what the psABI has the callee read of it,
+                 * its own bits -- extended to 32 where it is narrower, as clang's callees read a char or a short
+                 */
+                if (s->word == 8 && in->sym != NULL && in->call_chain == 0 && !(in->rhs >= 0 && in->rhs == in->dst)) {
+                    size_t a;
+                    int ok = 1;
+
+                    for (a = 0; a < in->arg_count && ok; ++a) {
+                        int v = in->args[a];
+                        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+
+                        if (v < 0 || v >= f->value_count) {
+                            continue;
+                        }
+                        if (abi == CC_CALL_ARG_ABI_DEFAULT && cc_ssa_value_class(f, v) == CC_VAL_I64 &&
+                            f->value_ty[v].kind != CC_TY_AGG && cc_ssa_value_size(f, v) > 0 &&
+                            cc_ssa_value_size(f, v) <= 4) {
+                            demand(&c, v, 32);
+                        } else {
+                            demand(&c, v, W);
+                        }
+                    }
+                    continue;
+                }
+                break;
+            case CC_SSA_RET:
+                /* an integer result of four bytes or less: the caller reads its own bits, extended to 32 */
+                if (s->word == 8 && in->lhs >= 0 && in->lhs < f->value_count && in->rhs < 0 && in->agg_class == 0 &&
+                    cc_ssa_value_class(f, in->lhs) == CC_VAL_I64 && f->value_ty[in->lhs].kind != CC_TY_AGG &&
+                    cc_ssa_value_size(f, in->lhs) > 0 && cc_ssa_value_size(f, in->lhs) <= 4 &&
+                    (f->ret_abi & ~CC_ABI_REGPARM_MASK) == CC_CALL_ARG_ABI_DEFAULT) {
+                    demand(&c, in->lhs, 32);
                     continue;
                 }
                 break;
@@ -1076,13 +1127,15 @@ static int compute_ext(xsel_t *s) {
                 }
                 break;
             case CC_SSA_PARAM:
-                if (s->t->extends_params) {
+                /* (extended as it is taken, unless nothing reads past its bits: xs_extends_taken()) */
+                if (s->t->extends_params && xs_extends_taken(s, d, in->imm > 0 ? (int)in->imm : s->word)) {
                     held_bits(in->imm > 0 ? (int)in->imm : s->word, in->is_unsigned, s->word, &sb, &zb);
                 }
                 break;
             case CC_SSA_CALL:
             case CC_SSA_CALLI:
-                if (s->t->extends_params || in->imm == 1 || in->imm == 2) {
+                if ((s->t->extends_params || in->imm == 1 || in->imm == 2) &&
+                    xs_extends_taken(s, d, in->imm > 0 ? (int)in->imm : s->word)) {
                     held_bits(in->imm > 0 ? (int)in->imm : s->word, in->is_unsigned, s->word, &sb, &zb);
                 }
                 break;
