@@ -6,7 +6,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
 - `opt.c`: per function, constant folding and constant-branch folding,
   unreachable-code removal and dead-value elimination, and from -O1 the
   forwarding of a local slot stored once with a constant into its loads
-  (`forward_const_slots()`); then, from -O1,
+  (`forward_const_slots()`) and common subexpressions within a block
+  (`cse_function()`: a pure computation made again from the same versions
+  of the same operands a copy of the first, loads left alone as the IR
+  does not mark the volatile ones); then, from -O1,
   inlining bottom-up over the call graph (a function is rewritten once
   its callees are, then folded again); at the end of a function's
   passes, the target's legalization once more, for what it split before
@@ -38,4 +41,4 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   marked `used` that the object keeps while some function still holds
   them, whether or not its code names them.
 
-Not here yet: mem2reg, GVN/CSE, LICM and loop transforms.
+Not here yet: mem2reg, CSE across blocks (GVN), LICM and loop transforms.

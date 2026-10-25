@@ -2190,6 +2190,208 @@ int cc_fold_constant_values(cc_ssa_function_t *f) {
  * @param opt_level  the -O level
  * @return 0, or -1 when out of memory
  */
+/** A pure computation the current block has made, for cse_function(): its key and the value that holds it. */
+typedef struct {
+    unsigned gen;         /**< the block it was made in: valid while that is the current one */
+    cc_ssa_opcode_t op;
+    int lhs;
+    int rhs;
+    unsigned lver;        /**< the versions of lhs and rhs it read */
+    unsigned rver;
+    long long imm;
+    const char *sym;      /**< a symbol's address: the symbol */
+    int label;            /**< a label's address: the label */
+    unsigned char fbits[sizeof(double) + 10]; /**< a floating constant's double, then its long double's 80 bits */
+    int is_unsigned;
+    int cmp_kind;
+    cc_ssa_type_t ty;     /**< the result's type */
+    int dst;
+    unsigned dver;        /**< dst's version once written: dst still holds it while that is current */
+} cse_entry_t;
+
+/** Whether instruction @p in is a computation cse_function() may share: pure, of its operands alone. */
+static int cse_candidate(const cc_ssa_instr_t *in) {
+    if (in->dst < 0) {
+        return 0;
+    }
+    switch (in->op) {
+    case CC_SSA_CONST:
+    case CC_SSA_GADDR:
+    case CC_SSA_LADDR:
+    case CC_SSA_ADD:
+    case CC_SSA_SUB:
+    case CC_SSA_MUL:
+    case CC_SSA_DIV:
+    case CC_SSA_AND:
+    case CC_SSA_OR:
+    case CC_SSA_XOR:
+    case CC_SSA_SHL:
+    case CC_SSA_SHR:
+    case CC_SSA_CMP:
+    case CC_SSA_LO32:
+    case CC_SSA_HI32:
+    case CC_SSA_PAIR:
+    case CC_SSA_UMULW:
+    case CC_SSA_I2F:
+    case CC_SSA_F2I:
+    case CC_SSA_FROUND32:
+    case CC_SSA_FROUND64:
+        return in->op != CC_SSA_GADDR || in->sym != NULL;
+    default:
+        return 0;
+    }
+}
+
+/** Fill @p e with the key of instruction @p in of @p f, operands at versions @p ver; commutative ones ordered. */
+static void cse_key(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const unsigned *ver, cse_entry_t *e) {
+    int a = in->lhs;
+    int b = in->rhs;
+
+    memset(e, 0, sizeof(*e));
+    if ((in->op == CC_SSA_ADD || in->op == CC_SSA_MUL || in->op == CC_SSA_AND || in->op == CC_SSA_OR ||
+         in->op == CC_SSA_XOR) &&
+        a >= 0 && b >= 0 && b < a) {
+        a = in->rhs;
+        b = in->lhs;
+    }
+    e->op = in->op;
+    e->lhs = a;
+    e->rhs = b;
+    e->lver = a >= 0 ? ver[a] : 0;
+    e->rver = b >= 0 ? ver[b] : 0;
+    e->imm = in->imm;
+    e->sym = in->op == CC_SSA_GADDR ? in->sym : NULL;
+    e->label = in->op == CC_SSA_LADDR ? in->label : 0;
+    if (in->op == CC_SSA_CONST && cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
+        long double ld = in->fimm_ld;
+        double d = in->fimm;
+
+        /* (of a long double its 80 bits: what lies past them in its storage is no part of it) */
+        memcpy(e->fbits, &d, sizeof(d));
+        memcpy(e->fbits + sizeof(d), &ld, sizeof(ld) < 10 ? sizeof(ld) : 10);
+    }
+    e->is_unsigned = in->is_unsigned;
+    e->cmp_kind = (int)in->cmp_kind;
+    e->ty = f->value_ty[in->dst];
+}
+
+/** Whether keys @p a and @p b name the same computation. */
+static int cse_same(const cse_entry_t *a, const cse_entry_t *b) {
+    return a->op == b->op && a->lhs == b->lhs && a->rhs == b->rhs && a->lver == b->lver && a->rver == b->rver &&
+           a->imm == b->imm && a->label == b->label &&
+           (a->sym == b->sym || (a->sym != NULL && b->sym != NULL && strcmp(a->sym, b->sym) == 0)) && memcmp(a->fbits, b->fbits, sizeof(a->fbits)) == 0 && a->is_unsigned == b->is_unsigned &&
+           a->cmp_kind == b->cmp_kind && a->ty.kind == b->ty.kind && a->ty.size == b->ty.size &&
+           a->ty.is_unsigned == b->ty.is_unsigned;
+}
+
+/** A hash of key @p e. */
+static size_t cse_hash(const cse_entry_t *e) {
+    size_t h = (size_t)e->op * 1000003u;
+
+    h = (h ^ (size_t)(e->lhs + 1)) * 16777619u;
+    h = (h ^ (size_t)(e->rhs + 1)) * 16777619u;
+    h = (h ^ (size_t)e->lver) * 16777619u;
+    h = (h ^ (size_t)e->rver) * 16777619u;
+    h = (h ^ (size_t)(unsigned long long)e->imm) * 16777619u;
+    return h;
+}
+
+/**
+ * Common subexpressions within a block: a pure computation (an operation, a constant, a symbol's address) the
+ * block has made already from the same operands, not written since, becomes a copy of the value that holds it,
+ * while that value still does -- and copy propagation then reads the first instead.  The IR is not strictly SSA
+ * (a variable is written more than once), so each value has a version, bumped where it is written, and a
+ * computation is the same only of the same versions.  Loads are not shared: the IR does not say which are
+ * volatile.  Linux's bitmap helpers compute an index three times in one statement, `s[v / 32] |= ...`.
+ *
+ * @return the computations turned into copies, or -1 when out of memory
+ */
+static int cse_function(cc_ssa_function_t *f) {
+    size_t cap = 64;
+    cse_entry_t *tab;
+    unsigned *ver;
+    unsigned gen = 1;
+    int changed = 0;
+    size_t i;
+
+    while (cap < 2 * f->instr_count) {
+        cap *= 2;
+    }
+    tab = (cse_entry_t *)calloc(cap, sizeof(*tab));
+    ver = (unsigned *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), sizeof(*ver));
+    if (tab == NULL || ver == NULL) {
+        free(tab);
+        free(ver);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->op == CC_SSA_LABEL) {
+            gen++; /* a new block: what the last one computed may not have run */
+        }
+        if (cse_candidate(in) && in->dst < f->value_count && (in->lhs < f->value_count && in->rhs < f->value_count)) {
+            cse_entry_t key;
+            size_t h;
+            cse_entry_t *hit = NULL;
+            cse_entry_t *slot = NULL;
+
+            cse_key(f, in, ver, &key);
+            for (h = cse_hash(&key) & (cap - 1);; h = (h + 1) & (cap - 1)) {
+                cse_entry_t *e = &tab[h];
+
+                if (e->gen != gen) {
+                    slot = e;
+                    break;
+                }
+                if (cse_same(e, &key) && e->dst != in->dst && ver[e->dst] == e->dver) {
+                    hit = e;
+                    break;
+                }
+            }
+            if (hit != NULL) {
+                int from = hit->dst;
+
+                in->op = CC_SSA_MOV;
+                in->lhs = from;
+                in->rhs = -1;
+                in->imm = 0;
+                changed++;
+            } else if (slot != NULL) {
+                *slot = key;
+                slot->gen = gen;
+                slot->dst = in->dst;
+                slot->dver = ver[in->dst] + 1;
+            }
+        }
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
+            ver[in->dst]++;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (CC_SSA_ASM_MEM_INDIRECT_P(o)) {
+                continue;
+            }
+            if (o >= 0 && o < f->value_count) {
+                ver[o]++;
+            }
+        }
+        if (in->op == CC_SSA_BR || in->op == CC_SSA_BR_COND || in->op == CC_SSA_RET || in->op == CC_SSA_TRAP ||
+            (in->op == CC_SSA_ASM && in->asm_is_goto)) {
+            gen++;
+        }
+        if (gen == 0) {
+            gen = 1; /* (wrapped: every slot reads as empty again only at 0) */
+            memset(tab, 0, cap * sizeof(*tab));
+        }
+    }
+    free(tab);
+    free(ver);
+    return changed;
+}
+
 static int optimize_function(cc_ssa_function_t *f, int opt_level) {
     int rc1;
     int rc2;
@@ -2213,11 +2415,12 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
             }
             rc1 = rc0 < 0 ? -1 : fold_function(f, 1);
             if (rc1 >= 0) {
-                /* a copy read as its source, which may be known */
-                int rcp = cc_propagate_copies(f);
+                /* a computation made twice made once; a copy read as its source, which may be known */
+                int rce = cse_function(f);
+                int rcp = rce < 0 ? -1 : cc_propagate_copies(f);
                 int rct = rcp < 0 ? -1 : thread_jumps(f);
 
-                rc1 = rct < 0 ? -1 : (rc1 > 0 || rcp > 0 || rct > 0);
+                rc1 = rct < 0 ? -1 : (rc1 > 0 || rce > 0 || rcp > 0 || rct > 0);
             }
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
             if (rc0 > 0 && rc1 == 0) {
