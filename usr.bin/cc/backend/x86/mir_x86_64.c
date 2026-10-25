@@ -910,6 +910,17 @@ static int x64_begin(xsel_t *s) {
     return s->xf.oom ? -1 : 0;
 }
 
+/** A call of runtime routine @p sym (x86-64), as x86_64.c calls one: reading @p use, writing @p def. */
+static void x64_libcall(xsel_t *s, const char *sym, unsigned use, unsigned def) {
+    xinst_t c = xi_make(XI_CALL, 8, 0, NULL, NULL, NULL);
+
+    c.sym = sym;
+    c.imp_use = use;
+    c.imp_def = def;
+    c.clobber = X64_CALLER_SAVED;
+    xf_emit(&s->xf, &c);
+}
+
 /** Whether symbol @p sym's address is read from the GOT, as x86_64.c decides it (x86_64_symbol_uses_got()). */
 static int x64_sym_got(const xsel_t *s, const char *sym) {
     return x86_64_symbol_uses_got(s->m, sym, x64_pic);
@@ -946,6 +957,7 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
     t.ret = x64_ret;
     t.va_start = x64_va_start;
     t.sym_got = x64_sym_got;
+    t.libcall = x64_libcall;
     x64_pic = pic;
     return x86_mir_emit_function(out, &t, m, f, fn_index, src_path, emit_debug, diag);
 }

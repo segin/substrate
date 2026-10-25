@@ -333,6 +333,8 @@ typedef struct {
     void (*va_start)(xsel_t *s, const cc_ssa_instr_t *in);
     /** Whether symbol @p sym's address is read from the GOT, not made off %rip */
     int (*sym_got)(const xsel_t *s, const char *sym);
+    /** A call of runtime routine @p sym, its arguments already where they go: reading @p use, writing @p def */
+    void (*libcall)(xsel_t *s, const char *sym, unsigned use, unsigned def);
 } xsel_target_t;
 
 /** Where an inline asm finds an operand's value: its frame object.  A value of -1 ends an asm's list. */

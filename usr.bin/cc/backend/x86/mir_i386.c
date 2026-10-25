@@ -754,6 +754,17 @@ static int i386_begin(xsel_t *s) {
     return s->xf.oom ? -1 : 0;
 }
 
+/** A call of runtime routine @p sym (i386), through its PLT under -fPIC: reading @p use, writing @p def. */
+static void i386_libcall(xsel_t *s, const char *sym, unsigned use, unsigned def) {
+    xinst_t c = xi_make(XI_CALL, 4, 0, NULL, NULL, NULL);
+
+    c.sym = call_name(s, sym, 0, &use);
+    c.imp_use = use;
+    c.imp_def = def;
+    c.clobber = I386_CALLER_SAVED;
+    xf_emit(&s->xf, &c);
+}
+
 /** Whether symbol @p sym's address is read from the GOT under -fPIC: it may bind outside the object. */
 static int i386_sym_got(const xsel_t *s, const char *sym) {
     return s->got != XR_NONE && !module_symbol_binds_locally(s->m, sym);
@@ -781,6 +792,7 @@ int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_fun
     t.stack_boundary = i386_stack_boundary();
     t.sym_imm = !i386_pic_on();
     t.sym_got = i386_sym_got;
+    t.libcall = i386_libcall;
     t.chain_reg = XR_CX;
     t.function_ok = i386_function_ok;
     t.begin = i386_begin;

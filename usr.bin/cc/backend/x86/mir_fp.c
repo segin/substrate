@@ -623,47 +623,57 @@ static void sel_fround(xsel_t *s, const cc_ssa_instr_t *in) {
     }
 }
 
-/** A call of libgcc's @p sym, which takes its argument in %xmm0 and returns its result there (x86-64). */
-static void xmm0_libcall(xsel_t *s, const char *sym) {
-    xinst_t c = xi_make(XI_CALL, 8, 0, NULL, NULL, NULL);
-
-    c.sym = sym;
-    c.imp_use = XR_BIT(XR_XMM0);
-    c.imp_def = XR_BIT(XR_XMM0);
-    c.clobber = s->t->caller_saved;
-    xf_emit(&s->xf, &c);
-}
-
 /**
  * A _Float16 at memory @p m into floating value @p v (@p load), or @p v stored there as one: libgcc's
- * __extendhfdf2 and __truncdfhf2, the half in %xmm0's low 16 bits, as x86_64.c calls them.  1 when done, 0 when
- * the target is not x86-64.
+ * __extendhfdf2 and __truncdfhf2, as x86_64.c and i386.c call them.  On x86-64 the half and the double both
+ * travel in %xmm0; on i386 the half is pushed and the double comes back in %st0, the double is pushed and the
+ * half comes back in %xmm0.
  */
-static int half(xsel_t *s, int v, xop_t m, int load) {
+static void half(xsel_t *s, int v, xop_t m, int load) {
     xop_t x0 = xop_reg(XR_XMM0, 8);
     xop_t g = xs_temp(s);
     xop_t t = scratch(s, 8);
+    int w = s->word;
 
-    if (s->word != 8) {
-        return 0;
-    }
     g.size = 4;
     m.size = 2;
     if (load) {
-        xs_emit(s, XI_MOVZX, 8, 2, &m, &g, NULL);
-        xs_emit(s, XI_MOV, 4, 2, &g, &x0, NULL);
-        xmm0_libcall(s, "__extendhfdf2");
-        xs_emit(s, XI_MOV, 8, 2, &x0, &t, NULL);
-        xs_fp_from_mem(s, v, t, 8);
-        return 1;
+        xs_emit(s, XI_MOVZX, w, 2, &m, &g, NULL);
+        if (w == 8) {
+            xs_emit(s, XI_MOV, 4, 2, &g, &x0, NULL);
+            s->t->libcall(s, "__extendhfdf2", XR_BIT(XR_XMM0), XR_BIT(XR_XMM0));
+            xs_emit(s, XI_MOV, 8, 2, &x0, &t, NULL);
+            xs_fp_from_mem(s, v, t, 8);
+        } else {
+            xop_t pad = xop_imm(-12, 4);
+            xop_t pop = xop_imm(16, 4);
+
+            xs_emit(s, XI_ADDSP, 4, 1, &pad, NULL, NULL);
+            xs_emit(s, XI_PUSH, 4, 1, &g, NULL, NULL);
+            s->t->libcall(s, "__extendhfdf2", 0, 0);
+            xs_emit(s, XI_ADDSP, 4, 1, &pop, NULL, NULL);
+            xs_fp_pop(s, v);
+        }
+        return;
     }
-    xs_fp_to_mem(s, v, t, 8);
-    xs_emit(s, XI_MOV, 8, 2, &t, &x0, NULL);
-    xmm0_libcall(s, "__truncdfhf2");
+    if (w == 8) {
+        xs_fp_to_mem(s, v, t, 8);
+        xs_emit(s, XI_MOV, 8, 2, &t, &x0, NULL);
+        s->t->libcall(s, "__truncdfhf2", XR_BIT(XR_XMM0), XR_BIT(XR_XMM0));
+    } else {
+        xop_t pad = xop_imm(-16, 4);
+        xop_t pop = xop_imm(16, 4);
+        xop_t at = xop_mem(XR_SP, 0, 8);
+
+        xs_fp_push(s, v);
+        xs_emit(s, XI_ADDSP, 4, 1, &pad, NULL, NULL);
+        xs_emit(s, XI_FSTP, 4, 1, &at, NULL, NULL);
+        s->t->libcall(s, "__truncdfhf2", 0, 0);
+        xs_emit(s, XI_ADDSP, 4, 1, &pop, NULL, NULL);
+    }
     xs_emit(s, XI_MOV, 4, 2, &x0, &g, NULL);
     g.size = 2;
     xs_emit(s, XI_MOV, 2, 2, &g, &m, NULL);
-    return 1;
 }
 
 /** Whether instruction @p in reads or writes a floating value (its own operands, not a call's or an asm's). */
@@ -692,7 +702,8 @@ int xs_fp_select(xsel_t *s, size_t j) {
         if (xs_fp_kind(s, in->dst) == XFP_NONE) {
             return 0;
         }
-        if (in->imm == 2 && half(s, in->dst, xs_mem_at(s, in->lhs, 0, 2), 1)) {
+        if (in->imm == 2) {
+            half(s, in->dst, xs_mem_at(s, in->lhs, 0, 2), 1);
             return 1;
         }
         if (in->imm != 4 && in->imm != 8 && in->imm < 10) {
@@ -706,7 +717,8 @@ int xs_fp_select(xsel_t *s, size_t j) {
         if (xs_fp_kind(s, in->rhs) == XFP_NONE) {
             return 0;
         }
-        if (in->imm == 2 && half(s, in->rhs, xs_mem_at(s, in->lhs, 0, 2), 0)) {
+        if (in->imm == 2) {
+            half(s, in->rhs, xs_mem_at(s, in->lhs, 0, 2), 0);
             return 1;
         }
         if (in->imm != 4 && in->imm != 8 && in->imm < 10) {
