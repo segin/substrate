@@ -1103,9 +1103,47 @@ static int op_is_slot(const xop_t *o, const slot_t *s) {
     return o->kind == XO_MEM && o->base == XR_FRAME && o->obj == s->obj && o->disp == s->off && o->sym == NULL;
 }
 
+/** Whether instruction @p in reads register @p r: an operand it reads, or the base or index of an address. */
+static int reads_reg(const xinst_t *in, int r) {
+    int q;
+
+    for (q = 0; q < in->nops; ++q) {
+        const xop_t *p = &in->o[q];
+
+        if ((p->kind == XO_REG && p->reg == r && (xi_role(in, q) & 1) != 0) ||
+            (p->kind == XO_MEM && (p->base == r || p->index == r))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** What count_ref() counts in: per register, the instructions that reference it, and the last one that did. */
+typedef struct {
+    int *count;
+    int *seen;
+    int at;
+    int nvr;
+} ref_count_t;
+
+/** for_each_vreg() callback: count an instruction referencing a register, once, for ls_rewrite()'s blocks. */
+static void count_ref(int r, int k, void *ctx) {
+    ref_count_t *c = (ref_count_t *)ctx;
+    int v = r - XR_VBASE;
+
+    (void)k;
+    if (v < c->nvr && c->seen[v] != c->at) {
+        c->seen[v] = c->at;
+        c->count[v]++;
+    }
+}
+
 /**
- * Rewrite every operand of a spilled register: its slot where the instruction can take memory, else a new
- * register loaded before and stored after.
+ * Rewrite every operand of a spilled register.  Where it is read or written more than once before the next label,
+ * those share one new register (split): loaded from the slot at the first read, stored to it after each write, so
+ * the slot holds the value at every label -- a register the next round may give it, as a short interval, where the
+ * whole was spilled.  Elsewhere, and for one of those spilled in turn, each operand is the slot itself where the
+ * instruction can take memory there, else a new register loaded before and stored after.
  *
  * @return 0, or -1 when out of memory
  */
@@ -1113,8 +1151,26 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
     xfunc_t *xf = ls->xf;
     xinst_t *old = xf->ins;
     int nold = xf->nins;
+    int nvr = xf->nvr;
+    int *count = (int *)calloc((size_t)(nvr > 0 ? nvr : 1), sizeof(int)); /* per register: references this block */
+    int *local = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int)); /* and the register sharing them */
+    int *seen = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int));
+    ref_count_t rc;
     int i;
 
+    if (count == NULL || local == NULL || seen == NULL) {
+        free(count);
+        free(local);
+        free(seen);
+        return -1;
+    }
+    for (i = 0; i < nvr; ++i) {
+        local[i] = XR_NONE;
+        seen[i] = -1;
+    }
+    rc.count = count;
+    rc.seen = seen;
+    rc.nvr = nvr;
     xf->ins = NULL;
     xf->nins = 0;
     xf->cap = 0;
@@ -1127,15 +1183,40 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
         int ntmp = 0;
         int k;
 
-#define SPILLED(r) (XR_IS_VIRT(r) && slot[(r) - XR_VBASE].obj >= 0)
+#define SPILLED(r) (XR_IS_VIRT(r) && (r) - XR_VBASE < nvr && slot[(r) - XR_VBASE].obj >= 0)
+#define SHARED(r) (SPILLED(r) && !xf->vr[(r) - XR_VBASE].split && count[(r) - XR_VBASE] >= 2)
+        if (i == 0 || in.op == XI_LABEL) {
+            /* a block begins: its references counted, up to the next label */
+            int q;
+
+            for (q = 0; q < nvr; ++q) {
+                count[q] = 0;
+                local[q] = XR_NONE;
+            }
+            for (q = in.op == XI_LABEL ? i + 1 : i; q < nold && old[q].op != XI_LABEL; ++q) {
+                rc.at = q;
+                for_each_vreg(&old[q], 1, count_ref, &rc);
+                for_each_vreg(&old[q], 2, count_ref, &rc);
+            }
+            for (q = 0; q < nvr; ++q) {
+                if (count[q] > 0 && !SPILLED(q + XR_VBASE)) {
+                    count[q] = 0;
+                }
+            }
+        }
         /* a load of a parameter's incoming slot into the register that lives there: nothing to do */
         if (in.op == XI_MOV && in.o[1].kind == XO_REG && SPILLED(in.o[1].reg) &&
             op_is_slot(&in.o[0], &slot[in.o[1].reg - XR_VBASE])) {
             continue;
         }
+        /* and a store of one to its own slot (a split register's, spilled in turn) */
+        if (in.op == XI_MOV && in.o[0].kind == XO_REG && SPILLED(in.o[0].reg) &&
+            op_is_slot(&in.o[1], &slot[in.o[0].reg - XR_VBASE])) {
+            continue;
+        }
         /* test r, r of a spilled one: compare its slot with 0 */
         if (in.op == XI_TEST && in.o[0].kind == XO_REG && in.o[1].kind == XO_REG && in.o[0].reg == in.o[1].reg &&
-            SPILLED(in.o[0].reg) && !xf->vr[in.o[0].reg - XR_VBASE].xmm) {
+            SPILLED(in.o[0].reg) && !SHARED(in.o[0].reg) && !xf->vr[in.o[0].reg - XR_VBASE].xmm) {
             const slot_t *s = &slot[in.o[0].reg - XR_VBASE];
 
             in.op = XI_CMP;
@@ -1144,6 +1225,9 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
             xf->obj[s->obj].uses++;
             if (xf_emit(xf, &in) == NULL) {
                 free(old);
+                free(count);
+                free(local);
+                free(seen);
                 return -1;
             }
             continue;
@@ -1151,7 +1235,7 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
         for (k = 0; k < in.nops; ++k) {
             xop_t *o = &in.o[k];
 
-            if (o->kind == XO_REG && SPILLED(o->reg) && xi_mem_ok(&in, k)) {
+            if (o->kind == XO_REG && SPILLED(o->reg) && !SHARED(o->reg) && xi_mem_ok(&in, k)) {
                 const slot_t *s = &slot[o->reg - XR_VBASE];
                 int size = o->size;
 
@@ -1190,6 +1274,40 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                 }
                 int bytes = slot_bytes(ls, r);
 
+                if (t < 0 && SHARED(r)) {
+                    /* the block's register for it, made at its first reference here */
+                    t = local[r - XR_VBASE];
+                    if (t == XR_NONE) {
+                        t = xf->vr[r - XR_VBASE].xmm ? xf_new_xvreg(xf) : xf_new_vreg(xf);
+                        if (t == XR_NONE || ntmp >= 6) {
+                            free(old);
+                            free(count);
+                            free(local);
+                            free(seen);
+                            return -1;
+                        }
+                        xf_vreg(xf, t)->split = 1;
+                        xf_vreg(xf, t)->home_obj = s->obj;
+                        xf_vreg(xf, t)->home_off = s->off;
+                        local[r - XR_VBASE] = t;
+                        if (reads_reg(&in, r)) {
+                            xop_t from = xop_frame(s->obj, s->off, bytes);
+                            xop_t to = xop_reg(t, bytes);
+                            xinst_t ld = xi_make(XI_MOV, bytes, 2, &from, &to, NULL);
+
+                            xf->obj[s->obj].uses++;
+                            if (xf_emit(xf, &ld) == NULL) {
+                                free(old);
+                                free(count);
+                                free(local);
+                                free(seen);
+                                return -1;
+                            }
+                        }
+                    }
+                    tmp_of[ntmp] = r;
+                    tmp_reg[ntmp++] = t;
+                }
                 if (t < 0) {
                     xop_t from;
                     xop_t to;
@@ -1197,6 +1315,9 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                     t = xf->vr[r - XR_VBASE].xmm ? xf_new_xvreg(xf) : xf_new_vreg(xf);
                     if (t == XR_NONE || ntmp >= 6) {
                         free(old);
+                        free(count);
+                        free(local);
+                        free(seen);
                         return -1;
                     }
                     xf_vreg(xf, t)->no_spill = 1;
@@ -1204,27 +1325,17 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                     tmp_reg[ntmp++] = t;
                     from = xop_frame(s->obj, s->off, bytes);
                     to = xop_reg(t, bytes);
-                    {
+                    if (reads_reg(&in, r)) {
                         /* loaded before if this instruction reads it anywhere */
-                        int reads = 0;
-                        int q;
+                        xinst_t ld = xi_make(XI_MOV, bytes, 2, &from, &to, NULL);
 
-                        for (q = 0; q < in.nops; ++q) {
-                            const xop_t *p = &in.o[q];
-
-                            if ((p->kind == XO_REG && p->reg == r && (xi_role(&in, q) & 1) != 0) ||
-                                (p->kind == XO_MEM && (p->base == r || p->index == r))) {
-                                reads = 1;
-                            }
-                        }
-                        if (reads) {
-                            xinst_t ld = xi_make(XI_MOV, bytes, 2, &from, &to, NULL);
-
-                            xf->obj[s->obj].uses++;
-                            if (xf_emit(xf, &ld) == NULL) {
-                                free(old);
-                                return -1;
-                            }
+                        xf->obj[s->obj].uses++;
+                        if (xf_emit(xf, &ld) == NULL) {
+                            free(old);
+                            free(count);
+                            free(local);
+                            free(seen);
+                            return -1;
                         }
                     }
                 }
@@ -1238,19 +1349,29 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                 }
             }
         }
+#undef SHARED
 #undef SPILLED
         if (xf_emit(xf, &in) == NULL) {
             free(old);
+            free(count);
+            free(local);
+            free(seen);
             return -1;
         }
         for (k = 0; k < nafter; ++k) {
             if (xf_emit(xf, &after[k]) == NULL) {
                 free(old);
+                free(count);
+                free(local);
+                free(seen);
                 return -1;
             }
         }
     }
     free(old);
+    free(count);
+    free(local);
+    free(seen);
     return 0;
 }
 
