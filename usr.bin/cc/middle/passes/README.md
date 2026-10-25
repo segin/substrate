@@ -3,7 +3,11 @@
 Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
 (`opt.c`):
 
-- `opt.c`: per function, constant folding and constant-branch folding,
+- `opt.c`: per function, constant folding and constant-branch folding
+  (a value every definition of which copies one constant -- across a
+  change of size when the constant means the same at every width -- is
+  that constant; after the last passes, folding repeats while it drops
+  arms that cannot run, `settle_function()`),
   unreachable-code removal and dead-value elimination, and from -O1 the
   forwarding of a local slot stored once with a constant into its loads
   (`forward_const_slots()`), a compare's truth tested again (`!!x`,

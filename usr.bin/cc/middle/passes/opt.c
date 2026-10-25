@@ -83,8 +83,11 @@ static const_state_t *single_def_consts(const cc_ssa_function_t *f) {
                 if (in->dst != (int)v) {
                     continue;
                 }
+                /* (of another size only a constant that is the same at every width and either signedness: a
+                 * bool copied into an int and back, Linux's `likely(!ia32_fxstate)` of an inlined parameter) */
                 if (in->op != CC_SSA_MOV || in->lhs < 0 || in->lhs >= f->value_count || !g[in->lhs].known ||
-                    cc_ssa_value_size(f, (int)v) != cc_ssa_value_size(f, in->lhs) ||
+                    (cc_ssa_value_size(f, (int)v) != cc_ssa_value_size(f, in->lhs) &&
+                     (g[in->lhs].i < 0 || g[in->lhs].i > 127)) ||
                     (agree > 0 && g[in->lhs].i != val)) {
                     ok = 0;
                     break;
@@ -3406,6 +3409,30 @@ static int drop_effectless_calls(cc_ssa_module_t *m, int opt_level) {
     return rc;
 }
 
+/**
+ * Fold @p f, read its copies as their sources, thread its jumps and drop what cannot run, again while dropping it
+ * changed anything: an arm gone may leave a variable one definition, which folds what reads it -- the `ia32 = 1`
+ * of Linux's fpu__restore_sig(), in an arm `ia32_frame && use_fxsr()` with ia32_frame 0, was the last thing to go,
+ * and the call of convert_to_fxsr() it guarded, an undefined function, stayed.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int settle_function(cc_ssa_function_t *f) {
+    int round;
+
+    for (round = 0; round < 4; ++round) {
+        int rc = fold_function(f, 1);
+
+        rc = rc < 0 ? -1 : cc_propagate_copies(f);
+        rc = rc < 0 ? -1 : thread_jumps(f);
+        rc = rc < 0 ? -1 : unreachable_function(f);
+        if (rc <= 0) {
+            return rc < 0 ? -1 : 0;
+        }
+    }
+    return 0;
+}
+
 int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     size_t i;
     int oom = 0;
@@ -3429,6 +3456,7 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
             rc = rc < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
             rc = rc < 0 ? -1 : thread_jumps(&m->funcs[i]);
             rc = rc < 0 ? -1 : unreachable_function(&m->funcs[i]);
+            rc = rc < 0 ? -1 : settle_function(&m->funcs[i]);
             rc = rc < 0 ? -1 : 1;
         }
         oom = rc < 0 || (rc > 0 && dce_function(&m->funcs[i]) < 0);
@@ -3445,11 +3473,7 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
                      * Linux's copy_fpstate_to_sigframe() clears its bool ia32_fxstate past an asm goto, and
                      * the call of an undefined function it guards must go
                      */
-                    rd = fold_function(&m->funcs[i], 1);
-                    rd = rd < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
-                    rd = rd < 0 ? -1 : thread_jumps(&m->funcs[i]);
-                    rd = rd < 0 ? -1 : unreachable_function(&m->funcs[i]);
-                    rd = rd < 0 ? -1 : 1;
+                    rd = settle_function(&m->funcs[i]) < 0 ? -1 : 1;
                 }
                 oom = rd < 0 || (rd > 0 && dce_function(&m->funcs[i]) < 0);
                 if (rd == 0) {
