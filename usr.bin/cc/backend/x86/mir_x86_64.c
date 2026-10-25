@@ -16,9 +16,11 @@
  * A variadic function saves its argument registers at entry, and va_start
  * fills the record its va_lists point at, as the psABI lays both out.
  *
- * Not taken yet: floating point, structures passed or returned in
- * registers other than general ones, and functions returning a structure
- * through a hidden pointer.
+ * A structure returned through memory is copied to the buffer whose
+ * address came in %rdi, and that address returned in %rax.
+ *
+ * Not taken yet: floating point, and structures passed or returned in
+ * registers other than general ones.
  */
 
 #include "cc_x86_mir.h"
@@ -88,6 +90,22 @@ static void copy_bytes(xsel_t *s, xop_t from, xop_t to, long size) {
             off += pieces[p];
         }
     }
+}
+
+/**
+ * The size of the structure @p f returns through a hidden pointer -- the largest its returns or its callers in
+ * the module say, as x86_64.c decides it -- or 0 when it returns none so.
+ */
+static long sret_size(const xsel_t *s) {
+    long a = x86_64_function_sret_size(s->f);
+    long b = x86_64_infer_sret_size_from_calls(s->m, s->f);
+
+    return a > b ? a : b;
+}
+
+/** The first argument register the parameters take: past %rdi when it holds a structure result's address. */
+static size_t gpr_bias(const xsel_t *s) {
+    return s->hidden != XR_NONE ? 1 : 0;
 }
 
 /** Whether ABI byte @p abi passes a structure in general registers only: AGG_REG with no SSE eightbyte. */
@@ -287,7 +305,7 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
     int pi = in->param_index;
     unsigned char abi = f->param_abi != NULL ? f->param_abi[pi] : CC_CALL_ARG_ABI_DEFAULT;
-    abi_loc_t loc = abi64_param_loc(f, pi, 0);
+    abi_loc_t loc = abi64_param_loc(f, pi, gpr_bias(s));
     int bytes = in->imm > 0 ? (int)in->imm : 8;
     xop_t d;
 
@@ -372,11 +390,46 @@ static void x64_param(xsel_t *s, const cc_ssa_instr_t *in) {
     }
 }
 
-/** A return: the value in %rax, a structure's second eightbyte in %rdx. */
+/** The most bytes a structure result is copied to the caller's buffer in without a call of memcpy. */
+#define X64_INLINE_RET_COPY 64
+
+/**
+ * A return: the value in %rax, a structure's second eightbyte in %rdx; a structure returned through memory copied
+ * to the caller's buffer, whose address is returned.
+ */
 static void x64_ret(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
     xinst_t x = xi_make(XI_RET, 8, 0, NULL, NULL, NULL);
 
+    if (s->hidden != XR_NONE) {
+        xop_t h = xop_reg(s->hidden, 8);
+        xop_t rax = xop_reg(XR_AX, 8);
+        long bytes = in->imm > 0 ? in->imm : sret_size(s);
+
+        if (in->lhs >= 0 && bytes > 0) {
+            if (bytes <= X64_INLINE_RET_COPY) {
+                copy_bytes(s, xs_mem_at(s, in->lhs, 0, 8), xop_mem(s->hidden, 0, 8), bytes);
+            } else {
+                xop_t rdi = xop_reg(XR_DI, 8);
+                xop_t rsi = xop_reg(XR_SI, 8);
+                xop_t rdx = xop_reg(XR_DX, 8);
+                xop_t n = xop_imm(bytes, 8);
+                xinst_t c = xi_make(XI_CALL, 8, 0, NULL, NULL, NULL);
+
+                xs_move_word_to(s, in->lhs, 0, &rsi);
+                xs_emit(s, XI_MOV, 8, 2, &h, &rdi, NULL);
+                xs_emit(s, XI_MOV, 8, 2, &n, &rdx, NULL);
+                c.sym = "memcpy";
+                c.imp_use = XR_BIT(XR_DI) | XR_BIT(XR_SI) | XR_BIT(XR_DX);
+                c.clobber = X64_CALLER_SAVED;
+                xf_emit(&s->xf, &c);
+            }
+        }
+        xs_emit(s, XI_MOV, 8, 2, &h, &rax, NULL);
+        x.imp_use = XR_BIT(XR_AX);
+        xf_emit(&s->xf, &x);
+        return;
+    }
     if ((in->agg_class & ~(int)CC_ABI_RET_MEMORY) != 0 || x86_64_agg_ret_in_memory(in->imm, in->agg_class)) {
         XS_NOPE(s);
     }
@@ -406,9 +459,6 @@ static const char *x64_function_ok(const xsel_t *s) {
 
     if (f->ret_type == CC_VAL_F64 || f->ret_abi != CC_CALL_ARG_ABI_DEFAULT) {
         return "its return";
-    }
-    if (x86_64_function_sret_size(f) > 0 || x86_64_infer_sret_size_from_calls(s->m, f) > 0) {
-        return "a structure result";
     }
     for (i = 0; i < f->param_count; ++i) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
@@ -476,7 +526,7 @@ static void x64_va_start(xsel_t *s, const cc_ssa_instr_t *in) {
         }
         return;
     }
-    abi64_fixed_usage(f, (int)in->imm, s->hidden != XR_NONE ? 1 : 0, &gpr, &xmm, &stack);
+    abi64_fixed_usage(f, (int)in->imm, gpr_bias(s), &gpr, &xmm, &stack);
     gpr = gpr > 6 ? 6 : gpr;
     xmm = xmm > 8 ? 8 : xmm;
     /* the overflow area on an eightbyte boundary, as the psABI keeps it */
@@ -512,6 +562,14 @@ static int x64_begin(xsel_t *s) {
     const cc_ssa_function_t *f = s->f;
     size_t i;
 
+    if (sret_size(s) > 0) {
+        /* a structure result: the caller's buffer's address, from %rdi */
+        xop_t rdi = xop_reg(XR_DI, 8);
+        xop_t h = xs_temp(s);
+
+        xs_emit(s, XI_MOV, 8, 2, &rdi, &h, NULL);
+        s->hidden = h.reg;
+    }
     if (f->is_variadic) {
         save_va_regs(s);
     }
@@ -521,7 +579,7 @@ static int x64_begin(xsel_t *s) {
         if (in->op == CC_SSA_PARAM && in->dst >= 0 && s->ndefs[in->dst] == 1 && f->param_abi != NULL &&
             in->param_index >= 0 && (size_t)in->param_index < f->param_count &&
             CC_ABI_KIND(f->param_abi[in->param_index]) == CC_CALL_ARG_ABI_AGG_MEM) {
-            abi_loc_t loc = abi64_param_loc(f, in->param_index, 0);
+            abi_loc_t loc = abi64_param_loc(f, in->param_index, gpr_bias(s));
 
             if (loc.kind != ABI_LOC_STACK) {
                 return 1;
@@ -536,7 +594,7 @@ static int x64_begin(xsel_t *s) {
         if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT && !agg_in_gprs(abi)) {
             continue;
         }
-        loc = abi64_param_loc(f, (int)i, 0);
+        loc = abi64_param_loc(f, (int)i, gpr_bias(s));
         if (loc.kind == ABI_LOC_GPR) {
             xop_t from = xop_reg(x64_arg_regs[loc.index], 8);
             xop_t to = xs_temp(s);
