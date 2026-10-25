@@ -25,8 +25,10 @@
  * alloca and a variable-length array move the stack pointer
  * (sel_dynalloc()); the epilogue makes it again from the frame pointer.
  *
- * A function the path does not handle -- floating point, computed goto
- * and what each target turns down -- returns 1 before
+ * A label's address (a computed goto's) is a local symbol's.
+ *
+ * A function the path does not handle -- floating point and what each
+ * target turns down -- returns 1 before
  * anything is written, and the target's emitter emits it its own way.
  */
 
@@ -132,6 +134,19 @@ int xs_sym_of(xsel_t *s, int v, const char **sym) {
 
         str_label(s, (size_t)s->def_at[v], buf, sizeof(buf));
         *sym = keep_name(buf, "");
+        if (*sym == NULL) {
+            s->xf.oom = 1;
+            return 0;
+        }
+        return 1;
+    }
+    if (d->op == CC_SSA_LADDR) {
+        /* a label's address (&&label), as emit_local_label() names it: what a computed goto compares */
+        char buf[32];
+
+        snprintf(buf, sizeof(buf), "_%d", d->label);
+        *sym = keep_name(".L", s->f->name);
+        *sym = *sym != NULL ? keep_name(*sym, buf) : NULL;
         if (*sym == NULL) {
             s->xf.oom = 1;
             return 0;
@@ -1310,13 +1325,24 @@ static void sel_instr(xsel_t *s, size_t j) {
 
     case CC_SSA_STR:
     case CC_SSA_GADDR:
+    case CC_SSA_LADDR:
         if (in->op == CC_SSA_GADDR && in->sym == NULL) {
             NOPE(s);
         }
         if (xs_sym_of(s, in->dst, &sym)) {
             break; /* an immediate, or a %rip-relative address, where it is read */
         }
-        if (in->op == CC_SSA_STR) {
+        if (in->op == CC_SSA_LADDR) {
+            char buf[32];
+
+            snprintf(buf, sizeof(buf), "_%d", in->label);
+            sym = keep_name(".L", f->name);
+            sym = sym != NULL ? keep_name(sym, buf) : NULL;
+            if (sym == NULL) {
+                s->xf.oom = 1;
+                break;
+            }
+        } else if (in->op == CC_SSA_STR) {
             char buf[96];
 
             str_label(s, j, buf, sizeof(buf));
@@ -1618,7 +1644,6 @@ static const char *function_ok(const xsel_t *s) {
     }
     for (i = 0; i < f->instr_count; ++i) {
         switch (f->instrs[i].op) {
-        case CC_SSA_LADDR:
         case CC_SSA_CHAIN:
         case CC_SSA_I2F:
         case CC_SSA_F2I:
