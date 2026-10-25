@@ -616,6 +616,16 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
         fprintf(fp, "\tfldcw %ld(%s)\n", cw, bp);
         return;
     }
+    case XI_MMLOAD:
+        fputs("\tmovq ", fp);
+        print_op(fp, xf, &in->o[0], word);
+        fprintf(fp, ", %%mm%d\n", in->cc);
+        return;
+    case XI_MMSTORE:
+        fprintf(fp, "\tmovq %%mm%d, ", in->cc);
+        print_op(fp, xf, &in->o[0], word);
+        fputs("\n\temms\n", fp);
+        return;
     case XI_GOTBASE:
         /* the pc thunk leaves its return address -- the next instruction's -- in the register */
         i386_note_pc_thunk(xr_name(in->o[0].reg, 4));

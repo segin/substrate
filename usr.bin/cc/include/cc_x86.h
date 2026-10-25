@@ -222,6 +222,12 @@ void x86_for_each_use(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, void
 int i386_stack_boundary(void);
 /** The offset from %ebp of the stack copy of parameter @p param_index of @p f. */
 int i386_param_offset(const cc_ssa_function_t *f, int param_index);
+/** The stack bytes an i386 integer or structure argument of @p size bytes takes: a multiple of 4. */
+int i386_param_slot_bytes(long size);
+/** The stack alignment of an i386 argument or parameter of ABI byte @p abi and @p size bytes: 4, 16 or more. */
+long i386_stack_align(unsigned char abi, long size);
+/** The register, %xmmN or %mmN, i386 vector parameter @p param_index came in: its rank among its kind. */
+int i386_vector_param_reg(const cc_ssa_function_t *f, int param_index);
 /** The offset from %ebp where the arguments after the first @p fixed_count of variadic @p f start. */
 int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count);
 /** Whether the target has ud2 (-march=i686 and up); else a trap is int3. */

@@ -150,9 +150,7 @@ static int arg_words(const xsel_t *s, const cc_ssa_instr_t *in, size_t a) {
     if (in->call_arg_abi != NULL && CC_ABI_KIND(in->call_arg_abi[a]) == CC_CALL_ARG_ABI_AGG_MEM) {
         /* a structure passed by value: a copy of its words on the stack */
         bytes = call_arg_size_bytes(in, a, 4);
-        return (in->call_arg_abi[a] & (CC_ABI_STACK_VEC | CC_ABI_STACK_16)) != 0 || CC_ABI_REGPARM(in->call_arg_abi[a]) > 0
-                   ? 0
-                   : bytes <= 4 ? 1 : (int)((bytes + 3) / 4);
+        return bytes <= 4 ? 1 : (int)((bytes + 3) / 4);
     }
     if (s->is_addr[v] || f->value_ty[v].kind == CC_TY_AGG) {
         return 1;
@@ -164,7 +162,59 @@ static int arg_words(const xsel_t *s, const cc_ssa_instr_t *in, size_t a) {
     return bytes > 4 ? 2 : 1;
 }
 
-/** A call: stack arguments pushed last to first, register ones moved in, the result taken out of %eax:%edx. */
+/**
+ * The stack bytes argument @p a of call @p in takes: none for one in a register (regparm, a vector) or an empty
+ * structure; a float's 4, a double's 8, a long double's 12; a structure's copy, whole words; else its words.
+ */
+static long arg_bytes(const xsel_t *s, const cc_ssa_instr_t *in, size_t a) {
+    unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+
+    if (abi == CC_CALL_ARG_ABI_ZERO || i386_call_arg_regparm(s->f, in, a) > 0 ||
+        CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG) {
+        return 0;
+    }
+    if (xs_fp_kind(s, in->args[a]) != XFP_NONE) {
+        return abi == CC_CALL_ARG_ABI_FLOAT ? 4 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 12 : 8;
+    }
+    if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
+        return i386_param_slot_bytes(call_arg_size_bytes(in, a, 4));
+    }
+    return 4L * arg_words(s, in, a);
+}
+
+/**
+ * Store argument @p a of call @p in at the top of the stack, taking @p bytes of it, pushed or (a floating one)
+ * stored after the stack pointer moves; *@p pushed counts them.
+ */
+static void push_arg(xsel_t *s, const cc_ssa_instr_t *in, size_t a, long bytes, long *pushed) {
+    int v = in->args[a];
+    unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
+    long k;
+
+    if (xs_fp_kind(s, v) != XFP_NONE) {
+        /* a float in single precision, a long double's 80 bits in its 12 */
+        xop_t n = xop_imm(-bytes, 4);
+        xop_t at = xop_mem(XR_SP, 0, 4);
+
+        xs_emit(s, XI_ADDSP, 4, 1, &n, NULL, NULL);
+        *pushed += bytes;
+        xs_fp_to_mem(s, v, at, bytes == 4 ? 4 : bytes == 8 ? 8 : 16);
+        return;
+    }
+    for (k = bytes / 4 - 1; k >= 0; --k) {
+        /* a structure's words from its storage, from the last; else the value's */
+        xop_t o = CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM ? xs_mem_at(s, v, 4 * k, 4) : xs_src_word(s, v, (int)k);
+
+        xs_emit(s, XI_PUSH, 4, 1, &o, NULL, NULL);
+        *pushed += 4;
+    }
+}
+
+/**
+ * A call: stack arguments at their offsets (a vector's copy aligned to its size from 16, a _Complex _Float128's
+ * to 16), pushed last to first with the gaps between, as i386.c lays them out; vectors in %xmm0-2 or %mm0-2;
+ * register ones moved in last; the result taken out of %eax:%edx, %st0, %xmm0 or %mm0.
+ */
 static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     const cc_ssa_function_t *f = s->f;
     long pos = 0;
@@ -172,95 +222,116 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     long pushed = 0;
     unsigned rp_used = 0;
     long a;
+    long *offs;
+    int nx = 0;
+    int nm = 0;
     xinst_t c;
     xop_t target;
     int indirect = 0;
-    /* a structure result: in %eax:%edx (-freg-struct-return), else through a hidden pointer to its storage,
-     * pushed first or (regparm) in %eax */
+    /* a structure result: in %eax:%edx (-freg-struct-return), a vector's in %xmm0 or %mm0, one of a float or a
+     * double in %st0, else through a hidden pointer to its storage, pushed first or (regparm) in %eax */
     int agg = in->dst >= 0 && in->rhs == in->dst;
+    int ret_vec = agg && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0;
+    int ret_x87 = agg && (in->agg_class & CC_ABI_RET_X87) != 0;
     int in_regs = agg && in->agg_class == CC_ABI_RET_EAX_EDX;
     int sret_reg = agg && in->agg_class == CC_ABI_RET_SRET_REG;
     int sret = agg && in->agg_class == 0;
     int agg_obj = agg ? s->obj[in->dst] : -1;
 
-    if ((agg && !in_regs && !sret_reg && !sret) || (agg && agg_obj < 0) ||
+    if ((agg && !in_regs && !sret_reg && !sret && !ret_vec && !ret_x87) || (agg && agg_obj < 0) ||
         (!agg && (in->agg_class & ~(int)CC_ABI_RET_FLOAT) != 0) ||
         (in->dst >= 0 && !agg && cc_ssa_value_class(f, in->dst) != CC_VAL_F64 &&
          f->value_ty[in->dst].kind == CC_TY_AGG)) {
         XS_NOPE(s);
     }
-    if (sret) {
-        pos = 4;
-    }
     for (a = 0; a < (long)in->arg_count; ++a) {
         unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
         int words = arg_words(s, in, (size_t)a);
         int r = i386_call_arg_regparm(f, in, (size_t)a);
+        int ok;
 
         if (abi == CC_CALL_ARG_ABI_ZERO) {
             continue;
         }
-        if ((xs_fp_kind(s, in->args[a]) != XFP_NONE ? !i386_fp_abi_ok(abi)
-                                                    : (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT &&
-                                                       CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM)) ||
-            words == 0 || (words == 2 && r == 3)) {
+        if (in->args[a] < 0) {
+            ok = 0;
+        } else if (xs_fp_kind(s, in->args[a]) != XFP_NONE) {
+            ok = i386_fp_abi_ok(abi);
+        } else if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG) {
+            ok = (abi & (CC_ABI_VEC128 | CC_ABI_VEC64)) != 0;
+        } else {
+            ok = (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_DEFAULT || CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) &&
+                 words > 0 && !(r > 0 && r - 1 + words > 3);
+        }
+        if (!ok) {
             XS_NOPE(s);
         }
-        if (r == 0) {
-            pos += 4 * words;
-        }
     }
-    cur = (long)align_up_size((size_t)pos, (size_t)i386_stack_boundary());
-    if (cur > pos) {
-        xop_t k = xop_imm(-(cur - pos), 4);
-
-        xs_emit(s, XI_ADDSP, 4, 1, &k, NULL, NULL);
-        pushed += cur - pos;
+    offs = (long *)malloc((in->arg_count > 0 ? in->arg_count : 1) * sizeof(long));
+    if (offs == NULL) {
+        s->xf.oom = 1;
+        return;
     }
-    for (a = (long)in->arg_count - 1; a >= 0; --a) {
-        int v = in->args[a];
+    pos = sret ? 4 : 0;
+    for (a = 0; a < (long)in->arg_count; ++a) {
+        long bytes = arg_bytes(s, in, (size_t)a);
         unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
-        int k;
 
-        if (abi == CC_CALL_ARG_ABI_ZERO || i386_call_arg_regparm(f, in, (size_t)a) > 0) {
+        if (bytes == 0) {
+            offs[a] = -1;
             continue;
         }
-        if (xs_fp_kind(s, v) != XFP_NONE) {
-            /* a floating argument, stored where its words go: a float in single precision, a long double's 80
-             * bits in its three */
-            int words = arg_words(s, in, (size_t)a);
-            xop_t k = xop_imm(-4L * words, 4);
-            xop_t at = xop_mem(XR_SP, 0, 4);
+        pos = (long)align_up_size((size_t)pos, (size_t)i386_stack_align(abi, call_arg_size_bytes(in, (size_t)a, 4)));
+        offs[a] = pos;
+        pos += bytes;
+    }
+    /* the body runs with %esp on the stack boundary; it is so again at the call */
+    cur = (long)align_up_size((size_t)pos, (size_t)i386_stack_boundary());
+    for (a = (long)in->arg_count - 1; a >= -1; --a) {
+        long start = a >= 0 ? offs[a] : (sret ? 0 : -1);
+        long end = a >= 0 ? offs[a] + arg_bytes(s, in, (size_t)a) : (sret ? 4 : 0);
+
+        if (start < 0 && a >= 0) {
+            continue;
+        }
+        if (cur > end) {
+            xop_t k = xop_imm(-(cur - end), 4);
 
             xs_emit(s, XI_ADDSP, 4, 1, &k, NULL, NULL);
-            pushed += 4L * words;
-            xs_fp_to_mem(s, v, at, words == 1 ? 4 : words == 2 ? 8 : 16);
-            continue;
+            pushed += cur - end;
         }
-        if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
-            /* the structure's words, from the last */
-            for (k = arg_words(s, in, (size_t)a) - 1; k >= 0; --k) {
-                xop_t m = xs_mem_at(s, v, 4 * k, 4);
+        if (a >= 0) {
+            push_arg(s, in, (size_t)a, end - start, &pushed);
+        } else if (sret) {
+            /* the hidden pointer, the first argument; the callee pops it */
+            xop_t m = xop_frame(agg_obj, 0, 4);
+            xop_t t = xs_temp(s);
 
-                xs_emit(s, XI_PUSH, 4, 1, &m, NULL, NULL);
-                pushed += 4;
-            }
-            continue;
+            xs_emit(s, XI_LEA, 4, 2, &m, &t, NULL);
+            xs_emit(s, XI_PUSH, 4, 1, &t, NULL, NULL);
         }
-        for (k = arg_words(s, in, (size_t)a) - 1; k >= 0; --k) {
-            xop_t o = xs_src_word(s, v, k);
-
-            xs_emit(s, XI_PUSH, 4, 1, &o, NULL, NULL);
-            pushed += 4;
-        }
+        cur = start < 0 ? 0 : start;
     }
-    if (sret) {
-        /* the hidden pointer, the first argument; the callee pops it */
-        xop_t m = xop_frame(agg_obj, 0, 4);
-        xop_t t = xs_temp(s);
+    free(offs);
+    for (a = 0; a < (long)in->arg_count; ++a) {
+        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
 
-        xs_emit(s, XI_LEA, 4, 2, &m, &t, NULL);
-        xs_emit(s, XI_PUSH, 4, 1, &t, NULL, NULL);
+        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_REG) {
+            continue;
+        }
+        /* a vector, from its storage, into the next %xmm or %mm register */
+        if ((abi & CC_ABI_VEC128) != 0) {
+            xop_t m = xs_mem_at(s, in->args[a], 0, 16);
+            xop_t x = xop_reg(XR_XMM0 + nx++, 8);
+
+            xs_emit(s, XI_MOV, 8, 2, &m, &x, NULL);
+        } else {
+            xop_t m = xs_mem_at(s, in->args[a], 0, 8);
+            xinst_t x = xi_make(XI_MMLOAD, 4, 1, &m, NULL, NULL);
+
+            x.cc = (unsigned char)nm++;
+            xf_emit(&s->xf, &x);
+        }
     }
     if (in->op == CC_SSA_CALLI) {
         const char *sym;
@@ -275,15 +346,23 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
     for (a = 0; a < (long)in->arg_count; ++a) {
         int v = in->args[a];
         int r = i386_call_arg_regparm(f, in, (size_t)a);
+        unsigned char abi = in->call_arg_abi != NULL ? in->call_arg_abi[a] : CC_CALL_ARG_ABI_DEFAULT;
         int k;
 
-        if (r == 0 || (in->call_arg_abi != NULL && in->call_arg_abi[a] == CC_CALL_ARG_ABI_ZERO)) {
+        if (r == 0 || abi == CC_CALL_ARG_ABI_ZERO) {
             continue;
         }
         for (k = 0; k < arg_words(s, in, (size_t)a); ++k) {
             xop_t d = xop_reg(i386_rp_regs[r - 1 + k], 4);
 
-            xs_move_word_to(s, v, k, &d);
+            if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM) {
+                /* a structure's words, from its storage */
+                xop_t m = xs_mem_at(s, v, 4 * k, 4);
+
+                xs_emit(s, XI_MOV, 4, 2, &m, &d, NULL);
+            } else {
+                xs_move_word_to(s, v, k, &d);
+            }
             rp_used |= XR_BIT(i386_rp_regs[r - 1 + k]);
         }
     }
@@ -322,6 +401,27 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
         xop_t k = xop_imm(pushed, 4);
 
         xs_emit(s, XI_ADDSP, 4, 1, &k, NULL, NULL);
+    }
+    if (ret_vec) {
+        if ((in->agg_class & CC_ABI_RET_VEC128) != 0) {
+            xop_t x0 = xop_reg(XR_XMM0, 8);
+            xop_t m = xop_frame(agg_obj, 0, 16);
+
+            xs_emit(s, XI_MOV, 8, 2, &x0, &m, NULL);
+        } else {
+            xop_t m = xop_frame(agg_obj, 0, 8);
+            xinst_t x = xi_make(XI_MMSTORE, 4, 1, &m, NULL, NULL);
+
+            xf_emit(&s->xf, &x);
+        }
+        return;
+    }
+    if (ret_x87) {
+        /* -freg-struct-return: a structure of one float or double came back in %st0 */
+        xop_t m = xop_frame(agg_obj, 0, in->imm == 4 ? 4 : 8);
+
+        xs_emit(s, XI_FSTP, 4, 1, &m, NULL, NULL);
+        return;
     }
     if (in_regs) {
         /* by its size: a 1- or 2-byte structure has no room for all of %eax */
@@ -387,6 +487,34 @@ static void i386_param(xsel_t *s, const cc_ssa_instr_t *in) {
 
         xs_fp_from_mem(s, in->dst, xop_frame(o, 0, 8),
                        abi == CC_CALL_ARG_ABI_FLOAT ? 4 : abi == CC_CALL_ARG_ABI_LDOUBLE ? 16 : 8);
+        return;
+    }
+    if (kind == CC_CALL_ARG_ABI_AGG_REG) {
+        /* a vector that came in %xmm0-2 or %mm0-2: into its storage (lhs), whose address is the value */
+        int o = in->lhs >= 0 ? s->obj[in->lhs] : -1;
+        int r = i386_vector_param_reg(f, pi);
+        xop_t m;
+        xop_t d;
+
+        if (o < 0 || (abi & (CC_ABI_VEC128 | CC_ABI_VEC64)) == 0) {
+            XS_NOPE(s);
+        }
+        if ((abi & CC_ABI_VEC128) != 0) {
+            xop_t x = xop_reg(XR_XMM0 + r, 8);
+
+            m = xop_frame(o, 0, 16);
+            xs_emit(s, XI_MOV, 8, 2, &x, &m, NULL);
+        } else {
+            xinst_t x;
+
+            m = xop_frame(o, 0, 8);
+            x = xi_make(XI_MMSTORE, 4, 1, &m, NULL, NULL);
+            x.cc = (unsigned char)r;
+            xf_emit(&s->xf, &x);
+        }
+        m = xop_frame(o, 0, 4);
+        d = xop_reg(xs_vreg_of(s, in->dst, 0), 4);
+        xs_emit(s, XI_LEA, 4, 2, &m, &d, NULL);
         return;
     }
     if (kind == CC_CALL_ARG_ABI_AGG_MEM && CC_ABI_REGPARM(abi) == 0) {
@@ -461,8 +589,33 @@ static void i386_ret(xsel_t *s, const cc_ssa_instr_t *in) {
         return;
     }
     /* a structure returned in %eax:%edx (-freg-struct-return) is returned as its words */
-    if (in->agg_class != 0 && in->agg_class != CC_ABI_RET_EAX_EDX) {
+    if (in->agg_class != 0 && in->agg_class != CC_ABI_RET_EAX_EDX &&
+        (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64 | CC_ABI_RET_X87)) == 0) {
         XS_NOPE(s);
+    }
+    if (in->lhs >= 0 && (in->agg_class & (CC_ABI_RET_VEC128 | CC_ABI_RET_VEC64)) != 0) {
+        /* a vector, from the storage lhs points at, to %xmm0 or %mm0 */
+        if ((in->agg_class & CC_ABI_RET_VEC128) != 0) {
+            xop_t m = xs_mem_at(s, in->lhs, 0, 16);
+            xop_t x0 = xop_reg(XR_XMM0, 8);
+
+            xs_emit(s, XI_MOV, 8, 2, &m, &x0, NULL);
+        } else {
+            xop_t m = xs_mem_at(s, in->lhs, 0, 8);
+            xinst_t mm = xi_make(XI_MMLOAD, 4, 1, &m, NULL, NULL);
+
+            xf_emit(&s->xf, &mm);
+        }
+        xf_emit(&s->xf, &x);
+        return;
+    }
+    if (in->lhs >= 0 && (in->agg_class & CC_ABI_RET_X87) != 0) {
+        /* -freg-struct-return: a structure of one float or double, as that value in %st0 */
+        xop_t m = xs_mem_at(s, in->lhs, 0, in->imm == 4 ? 4 : 8);
+
+        xs_emit(s, XI_FLD, 4, 1, &m, NULL, NULL);
+        xf_emit(&s->xf, &x);
+        return;
     }
     if (in->lhs >= 0 && xs_fp_kind(s, in->lhs) != XFP_NONE) {
         /* in %st0 */
@@ -521,7 +674,9 @@ static const char *i386_function_ok(const xsel_t *s) {
                                             : (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT &&
                                                abi != CC_CALL_ARG_ABI_ZERO &&
                                                !(CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM &&
-                                                 CC_ABI_REGPARM(abi) == 0))) {
+                                                 CC_ABI_REGPARM(abi) == 0) &&
+                                               !(CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG &&
+                                                 (abi & (CC_ABI_VEC128 | CC_ABI_VEC64)) != 0))) {
             return "a parameter's ABI";
         }
     }

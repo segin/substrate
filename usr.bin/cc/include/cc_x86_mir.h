@@ -135,6 +135,8 @@ typedef enum {
     XI_FUCOMPP,   /**< x87: flags from st(0) against st(1), both popped (fucompp; fnstsw %ax; sahf; %ax clobbered) */
     XI_FTOI,      /**< x87: pop, truncated, as a 64-bit integer to memory o0 -- unsigned when cc, through
                        o1, 16 bytes of scratch memory for the control word (%ax clobbered) */
+    XI_MMLOAD,    /**< i386: the 8 bytes at memory o0 -> %mm(cc), an MMX vector argument or result */
+    XI_MMSTORE,   /**< i386: %mm(cc) -> the 8 bytes at memory o0, then emms */
     XI_GOTBASE,   /**< i386 -fPIC: the GOT's address -> o0, by its pc thunk (call, addl $_GLOBAL_OFFSET_TABLE_) */
     XI_SAVEXMM,   /**< x86-64 variadic entry: %xmm0..7 stored at memory o0 on, 16 bytes each, when %al (imp_use) is not 0;
                        label is its own, past the IR's */

@@ -83,7 +83,7 @@ static int i386_first_param_offset(const cc_ssa_function_t *f) {
 }
 
 /* Stack bytes an integer parameter of size bytes takes: a multiple of 4. */
-static int i386_param_slot_bytes(long size) {
+int i386_param_slot_bytes(long size) {
     if (size <= 4) {
         return 4;
     }
@@ -96,7 +96,7 @@ static int i386_param_slot_bytes(long size) {
  * size from 16 bytes up, as gcc places it, a _Complex _Float128's to 16;
  * everything else to 4.
  */
-static long i386_stack_align(unsigned char abi, long size) {
+long i386_stack_align(unsigned char abi, long size) {
     if (CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM && (abi & CC_ABI_STACK_VEC) != 0 && size >= 16) {
         return size;
     }
@@ -157,7 +157,7 @@ int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count) {
 }
 
 /** The register (%xmmN or %mmN) i386 vector parameter @p param_index came in: its rank among its kind. */
-static int i386_vector_param_reg(const cc_ssa_function_t *f, int param_index) {
+int i386_vector_param_reg(const cc_ssa_function_t *f, int param_index) {
     unsigned char want = f->param_abi[param_index] & (CC_ABI_VEC128 | CC_ABI_VEC64);
     int n = 0;
     int i;
