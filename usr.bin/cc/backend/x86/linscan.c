@@ -54,7 +54,7 @@ typedef struct {
     int phys;          /**< the register given it, or -1 */
     double freq;       /**< its reads and writes, ten times each loop deep */
     double weight;     /**< freq per instruction spanned; huge when it may not be spilled */
-    int hint_phys;     /**< a register a copy to or from it suggests, or -1 */
+    float hint_w[XR_NPHYS]; /**< per physical register: how often copies to and from it suggest it, by loop depth */
     int hint_vr;       /**< a virtual register a copy suggests sharing one with, or XR_NONE */
     unsigned mask;     /**< the registers it may have */
     unsigned char spilled;
@@ -545,6 +545,9 @@ static int ls_build(ls_t *ls) {
     xfunc_t *xf = ls->xf;
     word_t *live = (word_t *)malloc(ls->nwords * sizeof(word_t));
     build_ctx_t c;
+    int *copies;     /* the copies between virtual registers, as pairs */
+    int ncopies = 0;
+    int cap_copies;
     int b;
     int i;
     int k;
@@ -636,7 +639,6 @@ static int ls_build(ls_t *ls) {
     for (i = 0; i < xf->nvr; ++i) {
         iv_finish(&ls->iv[i]);
         ls->iv[i].phys = -1;
-        ls->iv[i].hint_phys = -1;
         ls->iv[i].hint_vr = XR_NONE;
         /* a vector register's interval takes only vector registers, a general one's only general ones */
         ls->iv[i].mask = xf->vr[i].xmm ? ls->t->alloc_mask & ls->t->xmm_mask : ls->t->alloc_mask & ~ls->t->xmm_mask;
@@ -645,6 +647,11 @@ static int ls_build(ls_t *ls) {
         iv_finish(&ls->fixed[i]);
     }
     /* accesses, byte operands, and the copies that suggest a register */
+    cap_copies = xf->nins;
+    copies = (int *)malloc((size_t)(cap_copies > 0 ? cap_copies : 1) * 2 * sizeof(int));
+    if (copies == NULL) {
+        return -1;
+    }
     for (i = 0; i < xf->nins; ++i) {
         const xinst_t *in = &xf->ins[i];
         freq_ctx_t fc;
@@ -669,19 +676,53 @@ static int ls_build(ls_t *ls) {
             int dd = in->o[1].reg;
 
             if (XR_IS_VIRT(s) && XR_IS_VIRT(dd)) {
+                if (ncopies < cap_copies) {
+                    copies[2 * ncopies] = s - XR_VBASE;
+                    copies[2 * ncopies + 1] = dd - XR_VBASE;
+                    ncopies++;
+                }
                 if (ls->iv[dd - XR_VBASE].hint_vr == XR_NONE) {
                     ls->iv[dd - XR_VBASE].hint_vr = s;
                 }
                 if (ls->iv[s - XR_VBASE].hint_vr == XR_NONE) {
                     ls->iv[s - XR_VBASE].hint_vr = dd;
                 }
-            } else if (XR_IS_VIRT(s) && dd >= 0 && ls->iv[s - XR_VBASE].hint_phys < 0) {
-                ls->iv[s - XR_VBASE].hint_phys = dd;
-            } else if (XR_IS_VIRT(dd) && s >= 0 && ls->iv[dd - XR_VBASE].hint_phys < 0) {
-                ls->iv[dd - XR_VBASE].hint_phys = s;
+            } else if (XR_IS_VIRT(s) && dd >= 0 && dd < XR_NPHYS) {
+                /* (each copy a vote, weighed as its accesses are: the one in a loop counts) */
+                ls->iv[s - XR_VBASE].hint_w[dd] += (float)fc.f;
+            } else if (XR_IS_VIRT(dd) && s >= 0 && s < XR_NPHYS) {
+                ls->iv[dd - XR_VBASE].hint_w[s] += (float)fc.f;
             }
         }
     }
+    {
+        /*
+         * and what a chain of copies suggests: a variable copied into a temporary that goes to an asm's register
+         * or a call's argument wants that register too -- each round passing half of each one's votes on
+         */
+        float *next = (float *)malloc((size_t)(xf->nvr > 0 ? xf->nvr : 1) * XR_NPHYS * sizeof(float));
+        int round;
+
+        for (round = 0; next != NULL && round < 3 && ncopies > 0; ++round) {
+            for (i = 0; i < xf->nvr; ++i) {
+                memcpy(next + (size_t)i * XR_NPHYS, ls->iv[i].hint_w, sizeof(ls->iv[i].hint_w));
+            }
+            for (i = 0; i < ncopies; ++i) {
+                int a = copies[2 * i];
+                int d = copies[2 * i + 1];
+
+                for (k = 0; k < XR_NPHYS; ++k) {
+                    next[(size_t)a * XR_NPHYS + k] += 0.5f * ls->iv[d].hint_w[k];
+                    next[(size_t)d * XR_NPHYS + k] += 0.5f * ls->iv[a].hint_w[k];
+                }
+            }
+            for (i = 0; i < xf->nvr; ++i) {
+                memcpy(ls->iv[i].hint_w, next + (size_t)i * XR_NPHYS, sizeof(ls->iv[i].hint_w));
+            }
+        }
+        free(next);
+    }
+    free(copies);
     for (i = 0; i < xf->nvr; ++i) {
         ival_t *iv = &ls->iv[i];
 
@@ -842,9 +883,17 @@ static int ls_scan(ls_t *ls) {
         }
         {
             unsigned free_mask = cur->mask & ~blocked & ~busy;
-            int hint = cur->hint_phys;
+            int hint = -1;
+            float best_w = 0.0f;
 
-            if (cur->hint_vr != XR_NONE) {
+            /* the free register copies suggest most; else the one a copy's other virtual register has */
+            for (k = 0; k < XR_NPHYS; ++k) {
+                if ((free_mask & XR_BIT(k)) != 0 && cur->hint_w[k] > best_w) {
+                    best_w = cur->hint_w[k];
+                    hint = k;
+                }
+            }
+            if (hint < 0 && cur->hint_vr != XR_NONE) {
                 const ival_t *h = &ls->iv[cur->hint_vr - XR_VBASE];
 
                 if (h->phys >= 0 && !h->spilled) {
