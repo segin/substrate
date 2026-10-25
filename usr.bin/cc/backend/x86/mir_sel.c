@@ -2222,6 +2222,9 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     unsigned saved = 0;
     int nsaved = 0;
     int frame = 0;
+    int last_ret;
+    int nrets;
+    int share;
     size_t j;
     int i;
     int r;
@@ -2304,13 +2307,31 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
     if (frame > 0) {
         fprintf(fp, "\tsub%c $%d, %s\n", sfx, frame, xr_name(XR_SP, w));
     }
+    /*
+     * one epilogue, at the last return, the others jumping to it, as gcc keeps it -- when it is more than the
+     * two bytes of `leave; ret` a jump takes as well
+     */
+    last_ret = -1;
+    nrets = 0;
+    for (i = 0; i < s->xf.nins; ++i) {
+        if (s->xf.ins[i].op == XI_RET) {
+            last_ret = i;
+            nrets++;
+        }
+    }
+    share = nrets > 1 && nsaved > 0;
     for (i = 0; i < s->xf.nins; ++i) {
         const xinst_t *in = &s->xf.ins[i];
 
         if (in->op == XI_LABEL) {
             emit_local_label(fp, f->name, in->label);
             fputs(":\n", fp);
+        } else if (in->op == XI_RET && share && i != last_ret) {
+            fprintf(fp, "\tjmp .L%s_epilogue\n", f->name);
         } else if (in->op == XI_RET) {
+            if (share) {
+                fprintf(fp, ".L%s_epilogue:\n", f->name);
+            }
             print_epilogue(fp, s, saved, frame, s->has_goto || s->has_dynalloc, in->aux, emit_debug);
         } else if (in->op == XI_ASM) {
             if (print_asm(fp, s, in, diag) != 0) {
