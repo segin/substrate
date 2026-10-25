@@ -4162,14 +4162,66 @@ static int fpo_ok(xsel_t *s) {
 }
 
 /**
+ * About how many bytes instruction @p in of a function of @p word-byte words takes, its frame addressed off the
+ * stack pointer when @p off_sp: a register's push or pop one, a call five, a jump two, else an opcode and its
+ * ModRM byte, a REX prefix where a register or the width needs one, a memory operand's displacement (a frame
+ * object's taken as reached in a byte) and SIB byte, and an immediate's bytes.
+ */
+static long ins_bytes(const xinst_t *in, int word, int off_sp) {
+    long n = 2;
+    int k;
+
+    switch (in->op) {
+    case XI_LABEL:
+        return 0;
+    case XI_JMP:
+    case XI_JCC:
+        return 2;
+    case XI_CALL:
+        return in->nops == 1 ? 3 : 5;
+    case XI_RET:
+        return 1;
+    case XI_PUSH:
+        if (in->o[0].kind == XO_REG) {
+            return in->o[0].reg >= XR_R8 && in->o[0].reg < XR_NPHYS ? 2 : 1;
+        }
+        break;
+    default:
+        break;
+    }
+    if (in->op == XI_MOV && in->o[0].kind == XO_IMM && in->o[1].kind == XO_REG) {
+        return in->w == 8 && !fits32(in->o[0].disp) ? 10 : 5 + (in->w == 8);
+    }
+    if (word == 8 && in->w == 8) {
+        n++;
+    }
+    for (k = 0; k < in->nops; ++k) {
+        const xop_t *o = &in->o[k];
+
+        if (o->kind == XO_REG && word == 8 && o->reg >= XR_R8 && o->reg < XR_NPHYS && in->w != 8) {
+            n++; /* (one REX for both) */
+        } else if (o->kind == XO_IMM) {
+            n += o->sym != NULL || o->disp < -128 || o->disp > 127 ? 4 : 1;
+        } else if (o->kind == XO_MEM && o->base == XR_FRAME) {
+            n += 1 + (off_sp ? 1 : 0);
+        } else if (o->kind == XO_MEM) {
+            n += o->sym != NULL || o->disp < -128 || o->disp > 127 ? 4 : o->disp != 0 ? 1 : 0;
+            n += o->index != XR_NONE || o->base == XR_SP;
+        }
+    }
+    return n;
+}
+
+/**
  * Whether @p nofp, a function allocated with no frame pointer, comes out smaller than @p fp, the same allocated
- * with one, by an estimate in bytes: an instruction about four, a frame access off the stack pointer one more (its
- * SIB byte), and the frame pointer's push, move and pop -- four bytes on i386, five on x86-64 -- saved, but for
- * the push and pop of %ebp (%rbp) when it is allocated.  On i386, short of registers, its seventh is worth more
- * than that costs; on x86-64 the stack pointer's byte on every frame access often is not.
+ * with one, by an estimate in bytes (ins_bytes()): a frame access off the stack pointer takes a SIB byte more, and
+ * the frame pointer's push, move and pop -- four bytes on i386, five on x86-64 -- are saved, but for the push and
+ * pop of %ebp (%rbp) when it is allocated.  On i386, short of registers, its seventh is often worth more than that
+ * costs; on x86-64 the stack pointer's byte on every frame access often is not.
  */
 static int fpo_smaller(const xfunc_t *fp, const xfunc_t *nofp, int word) {
-    long frame_refs = 0;
+    long with = word == 8 ? 5 : 4;
+    long without = 0;
     int bp_used = 0;
     int i;
     int k;
@@ -4177,15 +4229,18 @@ static int fpo_smaller(const xfunc_t *fp, const xfunc_t *nofp, int word) {
     for (i = 0; i < nofp->nins; ++i) {
         const xinst_t *in = &nofp->ins[i];
 
+        without += ins_bytes(in, word, 1);
         for (k = 0; k < in->nops; ++k) {
             const xop_t *o = &in->o[k];
 
-            frame_refs += o->kind == XO_MEM && o->base == XR_FRAME;
             bp_used |= (o->kind == XO_REG && o->reg == XR_BP) ||
                        (o->kind == XO_MEM && (o->base == XR_BP || o->index == XR_BP));
         }
     }
-    return 4L * nofp->nins + frame_refs + (bp_used ? 2 : 0) < 4L * fp->nins + (word == 8 ? 5 : 4);
+    for (i = 0; i < fp->nins; ++i) {
+        with += ins_bytes(&fp->ins[i], word, 0);
+    }
+    return without + (bp_used ? 2 : 0) < with;
 }
 
 int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module_t *m, const cc_ssa_function_t *f,

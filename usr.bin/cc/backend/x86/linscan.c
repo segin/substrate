@@ -1127,6 +1127,76 @@ typedef struct {
     int nvr;
 } ref_count_t;
 
+/**
+ * Where ls_rewrite()'s regions begin, per instruction of @p xf (1: one does): at the first, and at a label control
+ * does not only fall into or reach by forward jumps -- a jmp, a jcc or a jump through a table -- from the region
+ * before it.  A region is an extended block: entered only at its top.
+ *
+ * @return the array (the caller frees it), or NULL when out of memory
+ */
+static unsigned char *region_starts(const xfunc_t *xf) {
+    unsigned char *start = (unsigned char *)calloc((size_t)(xf->nins > 0 ? xf->nins : 1), 1);
+    int *minref = (int *)malloc((size_t)(xf->nlabels > 0 ? xf->nlabels : 1) * sizeof(int));
+    int *maxref = (int *)malloc((size_t)(xf->nlabels > 0 ? xf->nlabels : 1) * sizeof(int));
+    unsigned char *other = (unsigned char *)calloc((size_t)(xf->nlabels > 0 ? xf->nlabels : 1), 1);
+    int region = 0;
+    int i;
+
+    if (start == NULL || minref == NULL || maxref == NULL || other == NULL) {
+        free(start);
+        free(minref);
+        free(maxref);
+        free(other);
+        return NULL;
+    }
+    for (i = 0; i < xf->nlabels; ++i) {
+        minref[i] = -1;
+        maxref[i] = -1;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        const xinst_t *in = &xf->ins[i];
+        int k;
+
+#define NOTE(l) do { int l_ = (l); if (l_ >= 0 && l_ < xf->nlabels) { if (minref[l_] < 0) minref[l_] = i; maxref[l_] = i; } } while (0)
+        if (in->op == XI_JMP || in->op == XI_JCC) {
+            NOTE(in->label);
+        } else if (in->op == XI_JMPT) {
+            for (k = 0; k < in->ntargets; ++k) {
+                NOTE(in->targets[k]);
+            }
+        } else if (in->op == XI_ASM) {
+            for (k = 0; k < in->ntargets; ++k) {
+                if (in->targets[k] >= 0 && in->targets[k] < xf->nlabels) {
+                    other[in->targets[k]] = 1;
+                }
+            }
+        }
+#undef NOTE
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        const xinst_t *in = &xf->ins[i];
+
+        if (i == 0) {
+            start[i] = 1;
+            region = 0;
+        } else if (in->op == XI_LABEL) {
+            const xinst_t *prev = &xf->ins[i - 1];
+            int l = in->label;
+            int falls = prev->op != XI_JMP && prev->op != XI_JMPT && prev->op != XI_RET && prev->op != XI_TRAP;
+
+            if (l < 0 || l >= xf->nlabels || other[l] || !falls ||
+                (minref[l] >= 0 && (minref[l] < region || maxref[l] > i))) {
+                start[i] = 1;
+                region = i;
+            }
+        }
+    }
+    free(minref);
+    free(maxref);
+    free(other);
+    return start;
+}
+
 /** for_each_vreg() callback: count an instruction referencing a register, once, for ls_rewrite()'s blocks. */
 static void count_ref(int r, int k, void *ctx) {
     ref_count_t *c = (ref_count_t *)ctx;
@@ -1153,16 +1223,23 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
     xinst_t *old = xf->ins;
     int nold = xf->nins;
     int nvr = xf->nvr;
-    int *count = (int *)calloc((size_t)(nvr > 0 ? nvr : 1), sizeof(int)); /* per register: references this block */
+    int *count = (int *)calloc((size_t)(nvr > 0 ? nvr : 1), sizeof(int)); /* per register: references this region */
+    int *bcount = (int *)calloc((size_t)(nvr > 0 ? nvr : 1), sizeof(int)); /* and this block */
     int *local = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int)); /* and the register sharing them */
     int *seen = (int *)malloc((size_t)(nvr > 0 ? nvr : 1) * sizeof(int));
+    unsigned char *starts = region_starts(xf);
+    int *edge = NULL; /* per edge into a label of the region: its label, a register, the one sharing it then */
+    size_t nedge = 0;
+    size_t edgecap = 0;
     ref_count_t rc;
     int i;
 
-    if (count == NULL || local == NULL || seen == NULL) {
+    if (count == NULL || bcount == NULL || local == NULL || seen == NULL || starts == NULL) {
+        free(bcount);
         free(count);
         free(local);
         free(seen);
+        free(starts);
         return -1;
     }
     for (i = 0; i < nvr; ++i) {
@@ -1185,16 +1262,19 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
         int k;
 
 #define SPILLED(r) (XR_IS_VIRT(r) && (r) - XR_VBASE < nvr && slot[(r) - XR_VBASE].obj >= 0)
-#define SHARED(r) (SPILLED(r) && !xf->vr[(r) - XR_VBASE].split && count[(r) - XR_VBASE] >= 2)
-        if (i == 0 || in.op == XI_LABEL) {
-            /* a block begins: its references counted, up to the next label */
+#define SHARED(r)                                                                                                     \
+    (SPILLED(r) && ((xf->vr[(r) - XR_VBASE].split == 0 && count[(r) - XR_VBASE] >= 2) ||                          \
+                    (xf->vr[(r) - XR_VBASE].split == 1 && bcount[(r) - XR_VBASE] >= 2)))
+        if (starts[i]) {
+            /* a region begins: its references counted, up to the next region */
             int q;
 
             for (q = 0; q < nvr; ++q) {
                 count[q] = 0;
                 local[q] = XR_NONE;
             }
-            for (q = in.op == XI_LABEL ? i + 1 : i; q < nold && old[q].op != XI_LABEL; ++q) {
+            nedge = 0;
+            for (q = i; q < nold && (q == i || !starts[q]); ++q) {
                 rc.at = q;
                 for_each_vreg(&old[q], 1, count_ref, &rc);
                 for_each_vreg(&old[q], 2, count_ref, &rc);
@@ -1203,6 +1283,44 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                 if (count[q] > 0 && !SPILLED(q + XR_VBASE)) {
                     count[q] = 0;
                 }
+            }
+        } else if (in.op == XI_LABEL) {
+            /* a label within the region: a register still shares a value only if every way in had it so */
+            size_t e;
+            int q;
+
+            for (q = 0; q < nvr; ++q) {
+                if (xf->vr[q].split == 1) {
+                    local[q] = XR_NONE; /* (a region's register spilled: its own shared per block) */
+                }
+            }
+
+            for (e = 0; e < nedge; ++e) {
+                if (edge[3 * e] == in.label && local[edge[3 * e + 1]] != edge[3 * e + 2]) {
+                    local[edge[3 * e + 1]] = XR_NONE;
+                }
+            }
+            for (e = 0; e < nedge; ++e) {
+                /* (one that had none on a way in, nor here) */
+                if (edge[3 * e] == in.label && edge[3 * e + 2] == XR_NONE) {
+                    local[edge[3 * e + 1]] = XR_NONE;
+                }
+            }
+        }
+        if (starts[i] || in.op == XI_LABEL) {
+            /* a block begins: its references counted, up to the next label */
+            int q;
+
+            for (q = 0; q < nvr; ++q) {
+                bcount[q] = 0;
+            }
+            for (q = in.op == XI_LABEL ? i + 1 : i; q < nold && old[q].op != XI_LABEL; ++q) {
+                ref_count_t bc = rc;
+
+                bc.count = bcount;
+                bc.at = q + nold; /* (seen apart from the region's count) */
+                for_each_vreg(&old[q], 1, count_ref, &bc);
+                for_each_vreg(&old[q], 2, count_ref, &bc);
             }
         }
         /* a load of a parameter's incoming slot into the register that lives there: nothing to do */
@@ -1227,8 +1345,11 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
             if (xf_emit(xf, &in) == NULL) {
                 free(old);
                 free(count);
+                free(bcount);
                 free(local);
                 free(seen);
+                free(starts);
+                free(edge);
                 return -1;
             }
             continue;
@@ -1283,11 +1404,14 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                         if (t == XR_NONE || ntmp >= 6) {
                             free(old);
                             free(count);
+                            free(bcount);
                             free(local);
                             free(seen);
+                            free(starts);
+                            free(edge);
                             return -1;
                         }
-                        xf_vreg(xf, t)->split = 1;
+                        xf_vreg(xf, t)->split = (unsigned char)(xf->vr[r - XR_VBASE].split + 1);
                         xf_vreg(xf, t)->home_obj = s->obj;
                         xf_vreg(xf, t)->home_off = s->off;
                         local[r - XR_VBASE] = t;
@@ -1300,8 +1424,11 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                             if (xf_emit(xf, &ld) == NULL) {
                                 free(old);
                                 free(count);
+                                free(bcount);
                                 free(local);
                                 free(seen);
+                                free(starts);
+                                free(edge);
                                 return -1;
                             }
                         }
@@ -1317,8 +1444,11 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                     if (t == XR_NONE || ntmp >= 6) {
                         free(old);
                         free(count);
+                        free(bcount);
                         free(local);
                         free(seen);
+                        free(starts);
+                        free(edge);
                         return -1;
                     }
                     xf_vreg(xf, t)->no_spill = 1;
@@ -1334,8 +1464,11 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
                         if (xf_emit(xf, &ld) == NULL) {
                             free(old);
                             free(count);
+                            free(bcount);
                             free(local);
                             free(seen);
+                            free(starts);
+                            free(edge);
                             return -1;
                         }
                     }
@@ -1355,24 +1488,70 @@ static int ls_rewrite(ls_t *ls, const slot_t *slot) {
         if (xf_emit(xf, &in) == NULL) {
             free(old);
             free(count);
+            free(bcount);
             free(local);
             free(seen);
+            free(starts);
+            free(edge);
             return -1;
+        }
+        if (in.op == XI_JMP || in.op == XI_JCC || in.op == XI_JMPT) {
+            /* the edges it makes: for each register shared in the region, which one had it */
+            int nt = in.op == XI_JMPT ? in.ntargets : 1;
+            int t;
+
+            for (t = 0; t < nt; ++t) {
+                int lab = in.op == XI_JMPT ? in.targets[t] : in.label;
+                int q;
+
+                for (q = 0; q < nvr; ++q) {
+                    if (count[q] < 2 || xf->vr[q].split != 0) {
+                        continue;
+                    }
+                    if (nedge == edgecap) {
+                        size_t ncap = edgecap > 0 ? edgecap * 2 : 256;
+                        int *ne = (int *)realloc(edge, ncap * 3 * sizeof(int));
+
+                        if (ne == NULL) {
+                            free(old);
+                            free(count);
+                            free(bcount);
+                            free(local);
+                            free(seen);
+                            free(starts);
+                            free(edge);
+                            return -1;
+                        }
+                        edge = ne;
+                        edgecap = ncap;
+                    }
+                    edge[3 * nedge] = lab;
+                    edge[3 * nedge + 1] = q;
+                    edge[3 * nedge + 2] = local[q];
+                    nedge++;
+                }
+            }
         }
         for (k = 0; k < nafter; ++k) {
             if (xf_emit(xf, &after[k]) == NULL) {
                 free(old);
                 free(count);
+                free(bcount);
                 free(local);
                 free(seen);
+                free(starts);
+                free(edge);
                 return -1;
             }
         }
     }
     free(old);
     free(count);
+    free(bcount);
     free(local);
     free(seen);
+    free(starts);
+    free(edge);
     return 0;
 }
 

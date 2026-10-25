@@ -215,8 +215,9 @@ typedef struct {
     int home_off;          /**< its offset in that object */
     unsigned char memory;  /**< it lives in memory always: its address is taken */
     unsigned char no_spill;/**< made for one instruction's operand: never spilled */
-    unsigned char split;   /**< made for a spilled register's reads and writes in one block: spilled, it is reloaded
-                                at each of them, in the slot it was made for (home_obj) */
+    unsigned char split;   /**< made for a spilled register's reads and writes in one region (1) or one block (2):
+                                spilled, its own are shared per block, or at 2 reloaded at each, in the slot it was
+                                made for (home_obj) */
     unsigned char byte;    /**< (set by the allocator) it is read or written as a byte */
     unsigned char xmm;     /**< it is a vector register's (a double, a float held as one), not a general one's */
     int phys;              /**< (the allocator's result) its register, or -1 when it was spilled */
