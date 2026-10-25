@@ -1266,6 +1266,38 @@ static const cc_ssa_instr_t *def_of(const xsel_t *s, int v) {
     return v >= 0 && v < s->f->value_count && stable(s, v) ? &s->f->instrs[s->def_at[v]] : NULL;
 }
 
+/**
+ * Add @p in into @p d as one lea when one operand is an index scaled by 2, 4 or 8 (scaled_index()) that nothing
+ * else reads: `x + i * 4` was imul $4 and an add, as Linux's pte_offset() makes a table entry's address it keeps.
+ *
+ * @return 1 if it was, else 0
+ */
+static int sel_scaled_add(xsel_t *s, const cc_ssa_instr_t *in, const xop_t *d) {
+    int k;
+
+    for (k = 0; k < 2; ++k) {
+        int sv = k == 0 ? in->rhs : in->lhs;
+        int bv = k == 0 ? in->lhs : in->rhs;
+        int idx;
+        int scale;
+        long long c;
+        const char *sym;
+        xop_t m;
+
+        if (sv < 0 || bv < 0 || sv == bv || s->nuses[sv] != 1 || !scaled_index(s, sv, &idx, &scale) || scale == 1 ||
+            xs_is_pair(s, bv) || xs_const_of(s, bv, &c) || xs_sym_of(s, bv, &sym) || s->frame_val[bv] >= 0 ||
+            xs_fp_kind(s, bv) != XFP_NONE) {
+            continue;
+        }
+        m = xop_mem(xs_vreg_of(s, bv, 0), 0, s->word);
+        m.index = xs_vreg_of(s, idx, 0);
+        m.scale = (unsigned char)scale;
+        xs_emit(s, XI_LEA, s->word, 2, &m, d, NULL);
+        return 1;
+    }
+    return 0;
+}
+
 /** A word binary operation: add, sub, and, or, xor, mul, shl, shr. */
 static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
     int w = s->word;
@@ -1399,6 +1431,9 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
             sel_ext(s, in->dst, other, bytes, 0);
             return;
         }
+    }
+    if (op == XI_ADD && sel_scaled_add(s, in, &d)) {
+        return;
     }
     a = xs_src_word(s, in->lhs, 0);
     b = xs_src_word(s, in->rhs, 0);
