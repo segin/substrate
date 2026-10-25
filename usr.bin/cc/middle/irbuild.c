@@ -11,6 +11,22 @@
 #include <string.h>
 
 int cc_ir_push(cc_ssa_function_t *f, cc_ssa_instr_t in) {
+    switch (in.op) {
+    case CC_SSA_STORE:
+    case CC_SSA_LABEL:
+    case CC_SSA_BR:
+    case CC_SSA_BR_COND:
+    case CC_SSA_TRAP:
+    case CC_SSA_RET:
+        /*
+         * it defines no value: a dst left 0 by a memset would name %v0, count as another of its definitions and
+         * give it the store's signedness and size
+         */
+        in.dst = -1;
+        break;
+    default:
+        break;
+    }
     if (f->instr_count == f->instr_cap) {
         size_t ncap = f->instr_cap == 0 ? 16 : f->instr_cap * 2;
         cc_ssa_instr_t *next = (cc_ssa_instr_t *)realloc(f->instrs, ncap * sizeof(*next));
