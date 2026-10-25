@@ -1946,6 +1946,11 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         if (nbytes < 0) {
             return -1;
         }
+        /* a size_t, as the prototype has it: a wider count (a loff_t difference on i386) is cut to its word */
+        nbytes = normalize_integral_value(sf, nbytes, cc_ct_basic(CC_CT_ULONG), diag);
+        if (nbytes < 0) {
+            return -1;
+        }
         if (needs_chk) {
             objsz = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[argc - 1], diag);
             if (objsz < 0) {
@@ -2031,6 +2036,10 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             call_in.args[0] = dstv;
             call_in.args[1] = cast_value(sf, lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag),
                                          CC_VAL_I64, diag);
+            /* the byte value is an int */
+            call_in.args[1] = call_in.args[1] < 0 ? -1
+                                                  : normalize_integral_value(sf, call_in.args[1],
+                                                                             cc_ct_basic(CC_CT_INT), diag);
             call_in.args[2] = nbytes;
         }
         if (call_in.sym == NULL || call_in.args[1] < 0) {
