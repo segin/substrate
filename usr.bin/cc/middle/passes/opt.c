@@ -2243,6 +2243,88 @@ static const cc_ssa_instr_t *bool_source(const cc_ssa_function_t *f, const int *
 }
 
 /**
+ * Per value of @p f, whether it is only ever a 0 or a 1 (*@p out, an array the caller frees): each of its
+ * definitions a compare, a 0 or a 1, an asm's flag output ("=@ccz"), a mask with 1, or a copy, a mask with an odd number or an
+ * extension (a shift left and back right by up to 62) of such a value -- assumed of every value, and taken back
+ * of each definition that is not, until nothing changes, so that a variable a loop keeps a truth in is one.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int truth_values(const cc_ssa_function_t *f, const int *defs, const long *def_at, unsigned char **out) {
+    size_t nv = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    unsigned char *t = (unsigned char *)malloc(nv);
+    size_t i;
+    int changed;
+
+    if (t == NULL) {
+        return -1;
+    }
+    for (i = 0; i < nv; ++i) {
+        t[i] = (int)i < f->value_count && defs[i] > 0;
+    }
+    do {
+        changed = 0;
+        for (i = 0; i < f->instr_count; ++i) {
+            const cc_ssa_instr_t *in = &f->instrs[i];
+            size_t k;
+            int ok = 0;
+
+            for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+                int o = in->asm_out_values[k];
+                const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[k] : NULL;
+
+                if (!CC_SSA_ASM_MEM_INDIRECT_P(o) && o >= 0 && o < f->value_count && t[o] &&
+                    (c == NULL || strncmp(c, "=@cc", 4) != 0)) {
+                    t[o] = 0;
+                    changed = 1;
+                }
+            }
+            if (in->dst < 0 || in->dst >= f->value_count || !t[in->dst] || in->op == CC_SSA_STORE) {
+                continue;
+            }
+            switch (in->op) {
+            case CC_SSA_CMP:
+                ok = 1;
+                break;
+            case CC_SSA_CONST:
+                ok = cc_ssa_value_class(f, in->dst) == CC_VAL_I64 && (in->imm == 0 || in->imm == 1);
+                break;
+            case CC_SSA_MOV:
+                ok = in->lhs >= 0 && in->lhs < f->value_count && t[in->lhs];
+                break;
+            case CC_SSA_AND:
+                /* x & 1; a truth & an odd number */
+                for (k = 0; k < 2 && !ok; ++k) {
+                    int kv = k ? in->lhs : in->rhs;
+                    int xv = k ? in->rhs : in->lhs;
+
+                    if (kv >= 0 && defs[kv] == 1 && f->instrs[def_at[kv]].op == CC_SSA_CONST) {
+                        long long c = f->instrs[def_at[kv]].imm;
+
+                        ok = c == 1 || ((c & 1) == 1 && xv >= 0 && t[xv]);
+                    }
+                }
+                break;
+            case CC_SSA_SHR:
+                ok = in->rhs < 0 && in->imm > 0 && in->imm <= 62 && in->lhs >= 0 && defs[in->lhs] == 1 &&
+                     f->instrs[def_at[in->lhs]].op == CC_SSA_SHL && f->instrs[def_at[in->lhs]].rhs < 0 &&
+                     f->instrs[def_at[in->lhs]].imm == in->imm && f->instrs[def_at[in->lhs]].lhs >= 0 &&
+                     t[f->instrs[def_at[in->lhs]].lhs];
+                break;
+            default:
+                break;
+            }
+            if (!ok) {
+                t[in->dst] = 0;
+                changed = 1;
+            }
+        }
+    } while (changed);
+    *out = t;
+    return 0;
+}
+
+/**
  * A compare's truth tested again: `c == 0` (or `c != 1`) of an integer compare c, defined once, is the compare
  * with its condition inverted, read from c's own operands when each is defined once; `c == 1` is c.  `!!x` and
  * `unlikely(x)` make such tests of every condition (Linux's kfree() tests ZERO_OR_NULL_PTR so); each was a
@@ -2252,8 +2334,10 @@ static const cc_ssa_instr_t *bool_source(const cc_ssa_function_t *f, const int *
  * @return the compares rewritten, or -1 when out of memory
  */
 static int fold_bool_not(cc_ssa_function_t *f) {
-    int *defs = (int *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), sizeof(int));
-    long *def_at = (long *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1) * sizeof(long));
+    size_t nv = (size_t)(f->value_count > 0 ? f->value_count : 1);
+    int *defs = (int *)calloc(nv, sizeof(int));
+    long *def_at = (long *)malloc(nv * sizeof(long));
+    unsigned char *truth = NULL; /* per value: only ever a 0 or a 1 */
     int changed = 0;
     size_t i;
 
@@ -2266,7 +2350,7 @@ static int fold_bool_not(cc_ssa_function_t *f) {
         const cc_ssa_instr_t *in = &f->instrs[i];
         size_t k;
 
-        if (in->dst >= 0 && in->dst < f->value_count) {
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
             defs[in->dst]++;
             def_at[in->dst] = (long)i;
         }
@@ -2278,11 +2362,30 @@ static int fold_bool_not(cc_ssa_function_t *f) {
             }
         }
     }
+    if (truth_values(f, defs, def_at, &truth) != 0) {
+        free(defs);
+        free(def_at);
+        return -1;
+    }
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
         const cc_ssa_instr_t *c = NULL;
         const cc_ssa_instr_t *kd = NULL;
         int side;
+
+        if (in->op == CC_SSA_SHR && in->rhs < 0 && in->imm > 0 && in->imm <= 62 && in->lhs >= 0 &&
+            defs[in->lhs] == 1 && f->instrs[def_at[in->lhs]].op == CC_SSA_SHL && f->instrs[def_at[in->lhs]].rhs < 0 &&
+            f->instrs[def_at[in->lhs]].imm == in->imm && f->instrs[def_at[in->lhs]].lhs >= 0 &&
+            truth[f->instrs[def_at[in->lhs]].lhs] &&
+            cc_ssa_value_class(f, f->instrs[def_at[in->lhs]].lhs) == CC_VAL_I64) {
+            /* a 0 or a 1 extended: itself */
+            in->op = CC_SSA_MOV;
+            in->lhs = f->instrs[def_at[in->lhs]].lhs;
+            in->imm = 0;
+            in->is_unsigned = 0;
+            changed++;
+            continue;
+        }
 
         if (in->op != CC_SSA_CMP || (in->cmp_kind != CC_CMP_EQ && in->cmp_kind != CC_CMP_NE) || in->lhs < 0 ||
             in->rhs < 0) {
@@ -2295,7 +2398,20 @@ static int fold_bool_not(cc_ssa_function_t *f) {
             if (defs[kv] == 1 && f->instrs[def_at[kv]].op == CC_SSA_CONST && cc_ssa_value_class(f, kv) == CC_VAL_I64) {
                 c = bool_source(f, defs, def_at, cv);
                 kd = &f->instrs[def_at[kv]];
+                if (c == NULL && truth[cv] && cc_ssa_value_class(f, cv) == CC_VAL_I64 &&
+                    (in->cmp_kind == CC_CMP_EQ) == (kd->imm == 1) && (kd->imm == 0 || kd->imm == 1)) {
+                    /* a 0 or a 1 that is no compare of its own -- an asm's flag output, a bool kept in a variable: `x != 0` of it is x */
+                    in->op = CC_SSA_MOV;
+                    in->lhs = cv;
+                    in->rhs = -1;
+                    changed++;
+                    kd = NULL;
+                    break;
+                }
             }
+        }
+        if (in->op == CC_SSA_MOV) {
+            continue;
         }
         if (c == NULL || c->lhs < 0 || c->rhs < 0 || cc_ssa_value_class(f, c->lhs) != CC_VAL_I64 ||
             cc_ssa_value_class(f, c->rhs) != CC_VAL_I64 || (kd->imm != 0 && kd->imm != 1)) {
@@ -2330,6 +2446,7 @@ static int fold_bool_not(cc_ssa_function_t *f) {
     }
     free(defs);
     free(def_at);
+    free(truth);
     return changed;
 }
 
@@ -3256,8 +3373,9 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
         int rc = cc_promote_slots(&m->funcs[i]);
 
         if (rc > 0) {
-            /* what the new values make known or plain copies */
+            /* what the new values make known, a truth tested again, or plain copies */
             rc = fold_function(&m->funcs[i], 1);
+            rc = rc < 0 ? -1 : fold_bool_not(&m->funcs[i]);
             rc = rc < 0 ? -1 : cc_propagate_copies(&m->funcs[i]);
             rc = rc < 0 ? -1 : thread_jumps(&m->funcs[i]);
             rc = rc < 0 ? -1 : unreachable_function(&m->funcs[i]);
@@ -3301,6 +3419,10 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
          */
         if (cc_target_current()->legalize != NULL) {
             oom = cc_target_current()->legalize(&m->funcs[i], diag) != 0 || dce_function(&m->funcs[i]) < 0;
+            /* and a truth it extends to test again: an asm's flag output, a bool kept in a local */
+            if (!oom && fold_bool_not(&m->funcs[i]) > 0) {
+                oom = cc_propagate_copies(&m->funcs[i]) < 0 || dce_function(&m->funcs[i]) < 0;
+            }
         }
         /* last of all: a variable's update made in place */
         oom = oom || cc_coalesce_moves(&m->funcs[i]) < 0;

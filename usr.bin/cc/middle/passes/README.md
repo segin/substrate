@@ -8,7 +8,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   forwarding of a local slot stored once with a constant into its loads
   (`forward_const_slots()`), a compare's truth tested again (`!!x`,
   `!(a == b)`) the compare or its inverse (`fold_bool_not()`, integer
-  compares only, through the extension that makes an int of it), and
+  compares only, through the extension that makes an int of it; and a
+  value only ever a 0 or a 1 -- an asm's flag output, a bool a variable
+  keeps (`truth_values()`) -- tested again or extended itself, again
+  once legalization has extended it), and
   common subexpressions within a block
   (`cse_function()`: a pure computation made again from the same versions
   of the same operands a copy of the first, loads left alone as the IR
