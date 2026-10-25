@@ -543,6 +543,87 @@ static int cc_holds(xcc_t cc, long long x, long long y, int w) {
 }
 
 static int cmp32(const xsel_t *s, const cc_ssa_instr_t *in);
+static const cc_ssa_instr_t *def_of(const xsel_t *s, int v);
+
+/**
+ * Set the flags for `x & k` against 0, @p mv that mask (or a copy of it), read only here: one test of k against x,
+ * in the fewest bytes that hold k -- a testb on x86-64, whose every register has a byte, else a testl when k is no
+ * more than 31 bits.  The and and the test against 0 were two instructions; gcc's is one.
+ *
+ * @return 1 when @p mv is such a mask and the flags are set, else 0
+ */
+static int sel_mask_test(xsel_t *s, int mv) {
+    const cc_ssa_function_t *f = s->f;
+    long long z;
+    long long k = 0;
+    int x;
+    int hops;
+    const cc_ssa_instr_t *a = def_of(s, mv);
+    const char *sym;
+    int w;
+    xop_t imm;
+    xop_t r;
+
+    for (hops = 0; hops < 4 && a != NULL && a->op == CC_SSA_MOV && a->lhs >= 0 && s->nuses[mv] == 1; ++hops) {
+        mv = a->lhs;
+        a = def_of(s, mv);
+    }
+    if (a == NULL || a->op != CC_SSA_AND || s->nuses[mv] != 1 || xs_is_pair(s, mv) || a->lhs < 0 || a->rhs < 0) {
+        return 0;
+    }
+    x = xs_const_of(s, a->rhs, &k) ? a->lhs : xs_const_of(s, a->lhs, &k) ? a->rhs : -1;
+    for (hops = 0; hops < 3 && x >= 0; ++hops) {
+        /* a mask of a mask, read only by it (an unsigned int's extension of one): one mask, of both */
+        const cc_ssa_instr_t *in2 = def_of(s, x);
+        long long k2;
+        int x2;
+        int y = x;
+        int h2;
+
+        /* (through the copies an inlined function's result is made of) */
+        for (h2 = 0; h2 < 4 && in2 != NULL && in2->op == CC_SSA_MOV && in2->lhs >= 0 && s->nuses[y] == 1; ++h2) {
+            y = in2->lhs;
+            in2 = def_of(s, y);
+        }
+        if (in2 == NULL || in2->op != CC_SSA_AND || s->nuses[y] != 1 || s->nuses[x] != 1 || in2->lhs < 0 ||
+            in2->rhs < 0) {
+            break;
+        }
+        x2 = xs_const_of(s, in2->rhs, &k2) ? in2->lhs : xs_const_of(s, in2->lhs, &k2) ? in2->rhs : -1;
+        if (x2 < 0) {
+            break;
+        }
+        k &= k2;
+        x = x2;
+    }
+    if (x < 0 || k == 0 || xs_is_pair(s, x) || xs_const_of(s, x, &z) || xs_sym_of(s, x, &sym) ||
+        cc_ssa_value_class(f, x) != CC_VAL_I64) {
+        return 0;
+    }
+    if (s->word == 4) {
+        k = (long long)(unsigned)k;
+    }
+    if (s->word == 8 && k > 0 && k < 256) {
+        w = 1;
+    } else if (k > 0 && k <= 0x7fffffffLL) {
+        w = 4;
+    } else if (s->word == 4 && k > 0 && k <= 0xffffffffLL) {
+        w = 4;
+        k = (long long)(int)(unsigned)k;
+    } else if (s->word == 8 && k >= -0x80000000LL && k < 0) {
+        w = 8;
+    } else {
+        return 0;
+    }
+    r = xs_reg_word(s, x, 0);
+    if (r.kind != XO_REG) {
+        return 0;
+    }
+    r.size = (unsigned char)w;
+    imm = xop_imm(k, w);
+    xs_emit(s, XI_TEST, w, 2, &imm, &r, NULL);
+    return 1;
+}
 
 /**
  * Set the flags for compare @p in (lhs against rhs), its operands swapped when the left one is a constant;
@@ -555,6 +636,15 @@ static int compare(xsel_t *s, const cc_ssa_instr_t *in, xcc_t *cc, int *known) {
     int narrow = cmp32(s, in); /* of ints: their 32-bit registers, whatever their upper halves are */
 
     *cc = cmp_cc(in->cmp_kind, in->is_unsigned);
+    if ((in->cmp_kind == CC_CMP_EQ || in->cmp_kind == CC_CMP_NE) && in->lhs >= 0 && in->rhs >= 0) {
+        /* (x & k) == 0, != 0 */
+        long long z;
+
+        if ((xs_const_of(s, in->rhs, &z) && z == 0 && sel_mask_test(s, in->lhs)) ||
+            (xs_const_of(s, in->lhs, &z) && z == 0 && sel_mask_test(s, in->rhs))) {
+            return 0;
+        }
+    }
     if (a.kind == XO_IMM && b.kind == XO_IMM) {
         if (a.sym == NULL && b.sym == NULL) {
             *known = cc_holds(*cc, a.disp, b.disp, w);
@@ -2397,6 +2487,11 @@ static void sel_instr(xsel_t *s, size_t j) {
             jump(s, j, in->true_label);
             break;
         }
+        if (sel_mask_test(s, in->lhs)) {
+            /* if (x & k) */
+            branch(s, j, XC_NE, in->true_label, in->false_label);
+            break;
+        }
         {
             xop_t v = xop_reg(xs_vreg_of(s, in->lhs, 0), w);
 
@@ -2717,6 +2812,75 @@ static int flags_live_after(const xfunc_t *xf, int i) {
 }
 
 /**
+ * Whether the flags instruction @p i of @p xf leaves are read, up to what sets them again, only by tests of the zero
+ * and sign flags (je, jne, js, jns and their setcc): those an add or a subtract sets as a test of its result would.
+ */
+static int flags_read_zs_only(const xfunc_t *xf, int i) {
+    int k;
+
+    for (k = i + 1; k < xf->nins; ++k) {
+        const xinst_t *in = &xf->ins[k];
+
+        switch (in->op) {
+        case XI_JCC:
+        case XI_SETCC:
+            if (in->cc != XC_E && in->cc != XC_NE && in->cc != XC_S && in->cc != XC_NS) {
+                return 0;
+            }
+            continue;
+        case XI_MOV:
+        case XI_LEA:
+        case XI_MOVZX:
+        case XI_MOVSX:
+        case XI_PUSH:
+            continue;
+        case XI_ADC:
+        case XI_SBB:
+        case XI_LABEL:
+            return 0; /* (a label: a reader past it may be reached with these flags too) */
+        default:
+            return 1; /* sets them again, or no reader is left */
+        }
+    }
+    return 1;
+}
+
+/**
+ * Whether `test r, r`, instruction @p i of @p xf, tests what the instruction before it -- past copies that leave r
+ * be -- has just set the flags from as the test would: an and, or or xor of r always, an add or subtract when only
+ * the zero and sign flags are read.  Then the test is not needed: `and $k, r; test r, r` was two flag settings.
+ */
+static int test_redundant(const xfunc_t *xf, int i) {
+    const xinst_t *t = &xf->ins[i];
+    int r;
+    int k;
+
+    if (t->op != XI_TEST || t->nops != 2 || t->o[0].kind != XO_REG || t->o[1].kind != XO_REG ||
+        t->o[0].reg != t->o[1].reg || t->o[0].size != t->o[1].size || XR_IS_XMM(t->o[0].reg)) {
+        return 0;
+    }
+    r = t->o[0].reg;
+    for (k = i - 1; k >= 0; --k) {
+        const xinst_t *p = &xf->ins[k];
+
+        if (p->op == XI_MOV || p->op == XI_LEA || p->op == XI_MOVZX || p->op == XI_MOVSX) {
+            /* a copy leaves the flags be: past it, unless it writes r */
+            if (p->nops >= 2 && p->o[p->nops - 1].kind == XO_REG && p->o[p->nops - 1].reg == r) {
+                return 0;
+            }
+            continue;
+        }
+        if ((p->op == XI_AND || p->op == XI_OR || p->op == XI_XOR || p->op == XI_ADD || p->op == XI_SUB) &&
+            p->nops == 2 && p->o[1].kind == XO_REG && p->o[1].reg == r && p->o[1].size == t->o[1].size &&
+            p->w == t->w) {
+            return p->op == XI_AND || p->op == XI_OR || p->op == XI_XOR || flags_read_zs_only(xf, i);
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/**
  * After allocation: a copy and an add become one lea, a move of 0 into a register an xorl, and on x86-64 a move
  * of a constant that fits 32 bits unsigned the 32-bit move, which zero-extends.
  */
@@ -2724,6 +2888,14 @@ static void peephole(xfunc_t *xf, int word) {
     int i;
     int j = 0;
 
+    /* first, on its own: a test of what the flags were just set from (what follows may read them) */
+    for (i = 0; i < xf->nins; ++i) {
+        if (!test_redundant(xf, i)) {
+            xf->ins[j++] = xf->ins[i];
+        }
+    }
+    xf->nins = j;
+    j = 0;
     for (i = 0; i < xf->nins; ++i) {
         xinst_t *in = &xf->ins[i];
 
