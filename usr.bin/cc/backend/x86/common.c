@@ -989,8 +989,34 @@ static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_
     }
     for (i = 0; i < limit; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
-        if (in->dst >= 0 && in->dst < f->value_count) {
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE) {
             def_index[in->dst] = (int)i;
+        }
+    }
+    /*
+     * a value written anywhere else -- a loop's variable, set before the loop and again at its end, an asm's
+     * output -- is no constant, whatever the last write above this one is: it made `bt %1` of a loop's
+     * "Ir"(i & 7) the `$0` of `i = 0`
+     */
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->dst >= 0 && in->dst < f->value_count && in->op != CC_SSA_STORE && def_index[in->dst] != (int)i) {
+            visiting[in->dst] = 2;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (!CC_SSA_ASM_MEM_INDIRECT_P(o) && o >= 0 && o < f->value_count) {
+                visiting[o] = 2;
+            }
+        }
+    }
+    for (i = 0; i < (size_t)f->value_count; ++i) {
+        if (visiting[i] == 2) {
+            def_index[i] = -1;
+            visiting[i] = 0;
         }
     }
     rc = eval_const_i64_for_value(f, def_index, value, visiting, out_imm);
