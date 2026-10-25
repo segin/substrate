@@ -8,6 +8,11 @@
  * structure result comes back in %eax:%edx (-freg-struct-return), else
  * through a hidden pointer the callee pops -- or, under regparm, that
  * takes %eax.  linscan.c gives out %eax, %ecx, %edx, %ebx, %esi and %edi.
+ *
+ * Under -fPIC the GOT's address is made once at entry (XI_GOTBASE, a pc
+ * thunk); a symbol is reached off it, @GOTOFF where it binds within the
+ * object, else through its @GOT entry, and a call that may bind outside
+ * goes through @PLT with the GOT copied into %ebx, as i386.c does.
  */
 
 #include "cc_x86_mir.h"
@@ -29,6 +34,37 @@ static const int i386_saved[] = {XR_BX, XR_SI, XR_DI};
 
 /** The regparm registers, in the order arguments take them. */
 static const int i386_rp_regs[3] = {XR_AX, XR_DX, XR_CX};
+
+/** Whether this compilation is position-independent (-fPIC, -fPIE). */
+static int i386_pic_on(void) {
+    return cc_options_current()->pic;
+}
+
+/**
+ * The name a direct call of @p sym calls: under -fPIC, @p sym@PLT for one that may bind outside the object --
+ * whose PLT entry finds the GOT in %ebx, loaded here from the function's GOT register (*@p used gains it) --
+ * else @p sym itself, as i386.c calls it.  @p known_local: a declaration made it bind within the object.
+ */
+static const char *call_name(xsel_t *s, const char *sym, int known_local, unsigned *used) {
+    const char *n;
+
+    if (s->got == XR_NONE || known_local || module_symbol_binds_locally(s->m, sym)) {
+        return sym;
+    }
+    n = xs_reloc_name(sym, "PLT");
+    if (n == NULL) {
+        s->xf.oom = 1;
+        return sym;
+    }
+    {
+        xop_t g = xop_reg(s->got, 4);
+        xop_t ebx = xop_reg(XR_BX, 4);
+
+        xs_emit(s, XI_MOV, 4, 2, &g, &ebx, NULL);
+        *used |= XR_BIT(XR_BX);
+    }
+    return n;
+}
 
 /**
  * Call memcpy(@p dst, @p src, @p size) as the compiler's own calls are made: under -mregparm in %eax, %edx and
@@ -71,7 +107,7 @@ static void sel_memcpy(xsel_t *s, const xop_t *dst, const xop_t *src, long size)
         used |= XR_BIT(i386_rp_regs[k]);
     }
     c = xi_make(XI_CALL, 4, 0, NULL, NULL, NULL);
-    c.sym = "memcpy";
+    c.sym = call_name(s, "memcpy", 0, &used);
     c.imp_use = used;
     c.clobber = I386_CALLER_SAVED;
     xf_emit(&s->xf, &c);
@@ -242,7 +278,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
         c = xi_make(XI_CALL, 4, 1, &target, NULL, NULL);
     } else {
         c = xi_make(XI_CALL, 4, 0, NULL, NULL, NULL);
-        c.sym = in->op == CC_SSA_CALLI ? target.sym : in->sym;
+        c.sym = call_name(s, in->op == CC_SSA_CALLI ? target.sym : in->sym, in->call_binds_local, &rp_used);
     }
     c.imp_use = rp_used;
     c.clobber = I386_CALLER_SAVED;
@@ -425,9 +461,6 @@ static const char *i386_function_ok(const xsel_t *s) {
     const cc_ssa_function_t *f = s->f;
     size_t i;
 
-    if (cc_options_current()->pic) {
-        return "-fPIC";
-    }
     if (f->ret_type == CC_VAL_F64 || (f->ret_abi != CC_CALL_ARG_ABI_DEFAULT && f->ret_abi != CC_CALL_ARG_ABI_AGG_MEM)) {
         return "its return";
     }
@@ -460,6 +493,14 @@ static int i386_begin(xsel_t *s) {
             CC_ABI_REGPARM(f->param_abi[in->param_index]) == 0) {
             s->frame_val[in->dst] = xf_new_obj(&s->xf, XF_FIXED, 4, 4, i386_param_offset(f, in->param_index));
         }
+    }
+    if (i386_pic_on()) {
+        /* the GOT's address, made once at entry; nothing reads it, the allocator drops it */
+        xop_t g = xs_temp(s);
+        xinst_t x = xi_make(XI_GOTBASE, 4, 1, &g, NULL, NULL);
+
+        xf_emit(&s->xf, &x);
+        s->got = g.reg;
     }
     /* a structure result: the caller's buffer's address, from %eax (regparm) or the stack */
     if (f->ret_abi == CC_CALL_ARG_ABI_AGG_MEM) {
@@ -506,6 +547,11 @@ static int i386_begin(xsel_t *s) {
     return s->xf.oom ? -1 : 0;
 }
 
+/** Whether symbol @p sym's address is read from the GOT under -fPIC: it may bind outside the object. */
+static int i386_sym_got(const xsel_t *s, const char *sym) {
+    return s->got != XR_NONE && !module_symbol_binds_locally(s->m, sym);
+}
+
 int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_function_t *f, size_t fn_index,
                            const char *src_path, int emit_debug, cc_diag_t *diag) {
     static const xtarget_t alloc = {
@@ -525,7 +571,8 @@ int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_fun
     t.nsaved = (int)(sizeof(i386_saved) / sizeof(i386_saved[0]));
     t.fp_residue = 8; /* %ebp is 8 past a 16-byte boundary */
     t.stack_boundary = i386_stack_boundary();
-    t.sym_imm = 1;
+    t.sym_imm = !i386_pic_on();
+    t.sym_got = i386_sym_got;
     t.chain_reg = XR_CX;
     t.function_ok = i386_function_ok;
     t.begin = i386_begin;

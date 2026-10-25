@@ -109,6 +109,7 @@ typedef enum {
     XI_CALL,      /**< call sym, or indirect through o0 when nops is 1 */
     XI_TRAP,      /**< ud2, or int3 */
     XI_ASM,       /**< IR instruction ir_index, an inline asm, its operands in frame objects (the selector's aux) */
+    XI_GOTBASE,   /**< i386 -fPIC: the GOT's address -> o0, by its pc thunk (call, addl $_GLOBAL_OFFSET_TABLE_) */
     XI_SAVEXMM,   /**< x86-64 variadic entry: %xmm0..7 stored at memory o0 on, 16 bytes each, when %al (imp_use) is not 0;
                        label is its own, past the IR's */
     XI_COUNT
@@ -335,6 +336,7 @@ struct xsel {
     int has_dynalloc;         /**< it moves the stack pointer itself (alloca, a variable-length array) */
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */
     int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
+    int got;                  /**< i386 -fPIC: the register holding the GOT's address, from entry; or XR_NONE */
     int va_save;              /**< an x86-64 variadic function: the frame object of its register save area, or -1 */
     int va_state;             /**< and of the record its va_lists point at */
     unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
@@ -376,6 +378,13 @@ void xs_move_word_to(xsel_t *s, int v, int part, const xop_t *d);
 void xs_load_bytes(xsel_t *s, xop_t m, xop_t d, int bytes);
 /** Store the low @p bytes bytes (1 up to a word) of @p v at memory @p m: the biggest pieces first. */
 void xs_store_bytes(xsel_t *s, xop_t v, xop_t m, int bytes);
+/** A copy of @p a followed by @p b that lives until the function is printed, or NULL when out of memory. */
+const char *xs_keep_name(const char *a, const char *b);
+/**
+ * @p sym (`name`, `name+8`) relocated as @p kind (`GOTOFF`, `PLT`): the relocation after the name, the offset
+ * after that, as gas takes it; kept until the function is printed, or NULL when out of memory.
+ */
+const char *xs_reloc_name(const char *sym, const char *kind);
 /** Whether label @p label comes right after IR instruction @p j, with only labels between. */
 int xs_label_follows(const xsel_t *s, size_t j, int label);
 

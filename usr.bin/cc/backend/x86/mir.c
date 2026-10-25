@@ -6,6 +6,8 @@
 
 #include "cc_x86_mir.h"
 
+#include "cc_x86.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -181,6 +183,7 @@ int xi_role(const xinst_t *in, int k) {
     case XI_NOT:
         return 3;
     case XI_SETCC:
+    case XI_GOTBASE:
         return 2;
     default:
         return 1;
@@ -208,6 +211,7 @@ int xi_pure(const xinst_t *in) {
     case XI_NEG:
     case XI_NOT:
     case XI_SETCC:
+    case XI_GOTBASE:
         break;
     default:
         return 0;
@@ -452,6 +456,12 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
         return;
     case XI_TRAP:
         fputs("\tud2\n", fp);
+        return;
+    case XI_GOTBASE:
+        /* the pc thunk leaves its return address -- the next instruction's -- in the register */
+        i386_note_pc_thunk(xr_name(in->o[0].reg, 4));
+        fprintf(fp, "\tcall __x86.get_pc_thunk.%s\n", xr_name(in->o[0].reg, 4) + 2);
+        fprintf(fp, "\taddl $_GLOBAL_OFFSET_TABLE_, %s\n", xr_name(in->o[0].reg, 4));
         return;
     case XI_SAVEXMM:
         /* only when the caller says (%al) it passed any, as gcc saves them */

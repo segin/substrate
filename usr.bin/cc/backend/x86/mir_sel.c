@@ -82,6 +82,28 @@ typedef struct {
 
 static strpool_t sel_names;
 
+static const char *keep_name(const char *a, const char *b);
+
+const char *xs_keep_name(const char *a, const char *b) {
+    return keep_name(a, b);
+}
+
+const char *xs_reloc_name(const char *sym, const char *kind) {
+    size_t n = strcspn(sym, "+-");
+    char head[256];
+    char rel[32];
+    const char *h;
+
+    if (n >= sizeof(head)) {
+        return NULL;
+    }
+    memcpy(head, sym, n);
+    head[n] = '\0';
+    snprintf(rel, sizeof(rel), "@%s", kind);
+    h = keep_name(head, rel);
+    return h != NULL ? keep_name(h, sym + n) : NULL;
+}
+
 /** A copy of @p a followed by @p b that lives until the function is printed, or NULL when out of memory. */
 static const char *keep_name(const char *a, const char *b) {
     size_t la = strlen(a);
@@ -183,11 +205,49 @@ xop_t xs_temp(xsel_t *s) {
     return xop_reg(xf_new_vreg(&s->xf), s->word);
 }
 
-/** The address of symbol @p sym in a new register: off %rip, or read from the GOT. */
+/**
+ * The address of symbol @p sym in a new register: off %rip, or read from the GOT; on i386 under -fPIC off the
+ * GOT's address, @GOTOFF for what binds within the object, else read from its @GOT entry, the offset added.
+ */
 static xop_t sym_reg(xsel_t *s, const char *sym) {
     xop_t t = xs_temp(s);
     xop_t m = xop_mem(XR_NONE, 0, s->word);
 
+    if (s->got != XR_NONE) {
+        m.base = s->got;
+        if (s->t->sym_got(s, sym)) {
+            size_t n = strcspn(sym, "+-");
+            char head[256];
+
+            /* the entry holds the symbol's own address: the offset is added after */
+            if (n >= sizeof(head)) {
+                s->unsupported = __LINE__;
+                s->unsupported_file = __FILE__;
+                return t;
+            }
+            memcpy(head, sym, n);
+            head[n] = '\0';
+            m.sym = xs_reloc_name(head, "GOT");
+            if (m.sym == NULL) {
+                s->xf.oom = 1;
+                return t;
+            }
+            xs_emit(s, XI_MOV, 4, 2, &m, &t, NULL);
+            if (sym[n] != '\0') {
+                xop_t k = xop_imm(strtol(sym + n, NULL, 10), 4);
+
+                xs_emit(s, XI_ADD, 4, 2, &k, &t, NULL);
+            }
+        } else {
+            m.sym = xs_reloc_name(sym, "GOTOFF");
+            if (m.sym == NULL) {
+                s->xf.oom = 1;
+                return t;
+            }
+            xs_emit(s, XI_LEA, 4, 2, &m, &t, NULL);
+        }
+        return t;
+    }
     if (s->t->sym_got != NULL && s->t->sym_got(s, sym)) {
         m.sym = keep_name(sym, "@GOTPCREL");
         if (m.sym == NULL) {
@@ -271,8 +331,11 @@ static xop_t mem_at(xsel_t *s, int v, long long disp, int size, int depth) {
 
             return xop_mem(r.reg, disp, size);
         }
-        o = xop_mem(XR_NONE, disp, size);
-        o.sym = sym;
+        o = xop_mem(s->got, disp, size);
+        o.sym = s->got != XR_NONE ? xs_reloc_name(sym, "GOTOFF") : sym;
+        if (o.sym == NULL) {
+            s->xf.oom = 1;
+        }
         return o;
     }
     if (xs_const_of(s, v, &k)) {
@@ -1773,6 +1836,7 @@ static int sel_init(xsel_t *s) {
     s->hidden = XR_NONE;
     s->va_save = -1;
     s->va_state = -1;
+    s->got = XR_NONE;
     s->lo = (int *)malloc(n * sizeof(int));
     s->hi = (int *)malloc(n * sizeof(int));
     s->ndefs = (int *)calloc(n, sizeof(int));

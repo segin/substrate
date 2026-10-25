@@ -226,6 +226,8 @@ int i386_param_offset(const cc_ssa_function_t *f, int param_index);
 int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_count);
 /** Whether the target has ud2 (-march=i686 and up); else a trap is int3. */
 int i386_has_ud2(void);
+/** Note that the object calls the pc thunk of register @p reg (`%ebx`), so that it is written at its end. */
+void i386_note_pc_thunk(const char *reg);
 /** The register argument @p a of call @p in starts in under regparm: 1 %eax, 2 %edx, 3 %ecx, or 0 for the stack. */
 int i386_call_arg_regparm(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t a);
 

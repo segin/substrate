@@ -1570,6 +1570,10 @@ static unsigned i386_thunk_bit(const char *reg) {
     return 0;
 }
 
+void i386_note_pc_thunk(const char *reg) {
+    i386_pc_thunks |= i386_thunk_bit(reg);
+}
+
 /** Put the GOT's address in register @p reg (`%ecx`): its pc thunk's return address plus the GOT's offset. */
 static void emit_i386_got_base(FILE *fp, const char *reg) {
     i386_pc_thunks |= i386_thunk_bit(reg);
