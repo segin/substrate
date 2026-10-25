@@ -6,7 +6,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
 - `opt.c`: per function, constant folding and constant-branch folding,
   unreachable-code removal and dead-value elimination, and from -O1 the
   forwarding of a local slot stored once with a constant into its loads
-  (`forward_const_slots()`) and common subexpressions within a block
+  (`forward_const_slots()`), a compare's truth tested again (`!!x`,
+  `!(a == b)`) the compare or its inverse (`fold_bool_not()`, integer
+  compares only, through the extension that makes an int of it), and
+  common subexpressions within a block
   (`cse_function()`: a pure computation made again from the same versions
   of the same operands a copy of the first, loads left alone as the IR
   does not mark the volatile ones); then, from -O1,

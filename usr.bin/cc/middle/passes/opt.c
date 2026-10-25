@@ -2190,6 +2190,149 @@ int cc_fold_constant_values(cc_ssa_function_t *f) {
  * @param opt_level  the -O level
  * @return 0, or -1 when out of memory
  */
+/** The condition that holds of integers when @p k does not. */
+static cc_cmp_kind_t cmp_invert(cc_cmp_kind_t k) {
+    switch (k) {
+    case CC_CMP_EQ:
+        return CC_CMP_NE;
+    case CC_CMP_NE:
+        return CC_CMP_EQ;
+    case CC_CMP_LT:
+        return CC_CMP_GE;
+    case CC_CMP_GE:
+        return CC_CMP_LT;
+    case CC_CMP_LE:
+        return CC_CMP_GT;
+    default:
+        return CC_CMP_LE;
+    }
+}
+
+/**
+ * The compare whose truth value @p v is, through what leaves a 0 or a 1 as it is -- a copy, an extension (a
+ * shift left and back right by up to 62, as lowering makes an int of it), a mask with 1 -- each defined once
+ * (@p defs, @p def_at); NULL when it is none.
+ */
+static const cc_ssa_instr_t *bool_source(const cc_ssa_function_t *f, const int *defs, const long *def_at, int v) {
+    int depth;
+
+    for (depth = 0; depth < 8; ++depth) {
+        const cc_ssa_instr_t *d;
+
+        if (v < 0 || v >= f->value_count || defs[v] != 1) {
+            return NULL;
+        }
+        d = &f->instrs[def_at[v]];
+        if (d->op == CC_SSA_CMP) {
+            return d;
+        }
+        if (d->op == CC_SSA_MOV && d->lhs >= 0) {
+            v = d->lhs;
+        } else if (d->op == CC_SSA_SHR && d->rhs < 0 && d->imm > 0 && d->imm <= 62 && d->lhs >= 0 &&
+                   defs[d->lhs] == 1 && f->instrs[def_at[d->lhs]].op == CC_SSA_SHL &&
+                   f->instrs[def_at[d->lhs]].rhs < 0 && f->instrs[def_at[d->lhs]].imm == d->imm) {
+            v = f->instrs[def_at[d->lhs]].lhs;
+        } else if (d->op == CC_SSA_AND && d->lhs >= 0 && d->rhs >= 0 && defs[d->rhs] == 1 &&
+                   f->instrs[def_at[d->rhs]].op == CC_SSA_CONST && (f->instrs[def_at[d->rhs]].imm & 1) == 1) {
+            v = d->lhs;
+        } else {
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * A compare's truth tested again: `c == 0` (or `c != 1`) of an integer compare c, defined once, is the compare
+ * with its condition inverted, read from c's own operands when each is defined once; `c == 1` is c.  `!!x` and
+ * `unlikely(x)` make such tests of every condition (Linux's kfree() tests ZERO_OR_NULL_PTR so); each was a
+ * setcc, a movzbl and a test of its own.  Floating compares are left as they are: their inverse is not the
+ * other condition when an operand is a NaN.
+ *
+ * @return the compares rewritten, or -1 when out of memory
+ */
+static int fold_bool_not(cc_ssa_function_t *f) {
+    int *defs = (int *)calloc((size_t)(f->value_count > 0 ? f->value_count : 1), sizeof(int));
+    long *def_at = (long *)malloc((size_t)(f->value_count > 0 ? f->value_count : 1) * sizeof(long));
+    int changed = 0;
+    size_t i;
+
+    if (defs == NULL || def_at == NULL) {
+        free(defs);
+        free(def_at);
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        size_t k;
+
+        if (in->dst >= 0 && in->dst < f->value_count) {
+            defs[in->dst]++;
+            def_at[in->dst] = (long)i;
+        }
+        for (k = 0; in->op == CC_SSA_ASM && k < in->asm_out_count; ++k) {
+            int o = in->asm_out_values[k];
+
+            if (!CC_SSA_ASM_MEM_INDIRECT_P(o) && o >= 0 && o < f->value_count) {
+                defs[o] += 2;
+            }
+        }
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        cc_ssa_instr_t *in = &f->instrs[i];
+        const cc_ssa_instr_t *c = NULL;
+        const cc_ssa_instr_t *kd = NULL;
+        int side;
+
+        if (in->op != CC_SSA_CMP || (in->cmp_kind != CC_CMP_EQ && in->cmp_kind != CC_CMP_NE) || in->lhs < 0 ||
+            in->rhs < 0) {
+            continue;
+        }
+        for (side = 0; side < 2 && c == NULL; ++side) {
+            int cv = side ? in->rhs : in->lhs;
+            int kv = side ? in->lhs : in->rhs;
+
+            if (defs[kv] == 1 && f->instrs[def_at[kv]].op == CC_SSA_CONST && cc_ssa_value_class(f, kv) == CC_VAL_I64) {
+                c = bool_source(f, defs, def_at, cv);
+                kd = &f->instrs[def_at[kv]];
+            }
+        }
+        if (c == NULL || c->lhs < 0 || c->rhs < 0 || cc_ssa_value_class(f, c->lhs) != CC_VAL_I64 ||
+            cc_ssa_value_class(f, c->rhs) != CC_VAL_I64 || (kd->imm != 0 && kd->imm != 1)) {
+            continue;
+        }
+        if ((in->cmp_kind == CC_CMP_EQ) == (kd->imm == 1)) {
+            /* c == 1, c != 0: c */
+            int cv = c->dst;
+
+            in->op = CC_SSA_MOV;
+            in->lhs = cv;
+            in->rhs = -1;
+            changed++;
+            continue;
+        }
+        if (defs[c->lhs] != 1 || defs[c->rhs] != 1) {
+            continue;
+        }
+        {
+            /* c == 0, c != 1: c's operands under the other condition */
+            int l = c->lhs;
+            int r = c->rhs;
+            int uns = c->is_unsigned;
+            cc_cmp_kind_t k = cmp_invert(c->cmp_kind);
+
+            in->lhs = l;
+            in->rhs = r;
+            in->is_unsigned = uns;
+            in->cmp_kind = k;
+            changed++;
+        }
+    }
+    free(defs);
+    free(def_at);
+    return changed;
+}
+
 /** A pure computation the current block has made, for cse_function(): its key and the value that holds it. */
 typedef struct {
     unsigned gen;         /**< the block it was made in: valid while that is the current one */
@@ -2416,11 +2559,12 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
             rc1 = rc0 < 0 ? -1 : fold_function(f, 1);
             if (rc1 >= 0) {
                 /* a computation made twice made once; a copy read as its source, which may be known */
-                int rce = cse_function(f);
+                int rcn = fold_bool_not(f);
+                int rce = rcn < 0 ? -1 : cse_function(f);
                 int rcp = rce < 0 ? -1 : cc_propagate_copies(f);
                 int rct = rcp < 0 ? -1 : thread_jumps(f);
 
-                rc1 = rct < 0 ? -1 : (rc1 > 0 || rce > 0 || rcp > 0 || rct > 0);
+                rc1 = rct < 0 ? -1 : (rc1 > 0 || rcn > 0 || rce > 0 || rcp > 0 || rct > 0);
             }
             rc3 = rc1 < 0 ? 0 : unreachable_function(f);
             if (rc0 > 0 && rc1 == 0) {
