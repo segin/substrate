@@ -11718,12 +11718,19 @@ static int lower_nested_bind_outer(const cc_translation_unit_t *tu, cc_ssa_funct
 }
 
 /**
- * Whether local register variable @p v, declared without an initializer, starts as its register's value: a scalar
- * of a register's size -- `register unsigned long sp asm("esp")` passed as "+r" to an asm is %esp as it is, as gcc
- * has it, not a 0 the asm's register is loaded with.
+ * Whether local register variable @p v, declared without an initializer, starts as its register's value: one of
+ * the stack pointer, a scalar of its size -- `register unsigned long sp asm("esp")` passed as "+r" to an asm is
+ * %esp as it is, as gcc has it, not a 0 the stack pointer is loaded with.  Another register's is any value, and 0
+ * does (the selector reads no other register as it is).
  */
 static int reads_its_register(const cc_translation_unit_t *tu, const var_entry_t *v) {
-    return v->ctype != NULL && cc_ct_is_scalar(v->ctype) && !cc_ct_is_floating(v->ctype) &&
+    const char *r = v->asm_register;
+
+    if (r != NULL && r[0] == '%') {
+        r++;
+    }
+    return r != NULL && (strcmp(r, "esp") == 0 || strcmp(r, "rsp") == 0) && v->ctype != NULL &&
+           cc_ct_is_scalar(v->ctype) && !cc_ct_is_floating(v->ctype) &&
            cc_ct_size(v->ctype, tu) == (long)cc_target_pointer_size() && (v->addr_value >= 0 || v->value >= 0);
 }
 

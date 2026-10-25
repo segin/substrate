@@ -8,7 +8,10 @@
 # %esp itself now, nothing moved, and the function may go without a
 # frame pointer.  A local one declared without an initializer starts as
 # the register's value, as gcc has it: it was 0, and `xorl %esp, %esp`
-# put that in the stack pointer before the asm.  Results are gcc's.
+# put that in the stack pointer before the asm -- another register's
+# variable is still any value, which the selector reads none of: read
+# as the register, it sent such a function the old way.  Results are
+# gcc's.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -59,13 +62,27 @@ int __attribute__((noinline)) via_local(int *p, int a)
 	return a + *p;
 }
 
+/* another register's variable, its value the asm's: any value before, and the selector's still */
+long __attribute__((noinline)) via_other(long a)
+{
+#ifdef __x86_64__
+	register long r asm("r10");
+#else
+	register long r asm("ecx");
+#endif
+
+	asm volatile("mov %1, %0" : "=r"(r) : "r"(a));
+	return r + 1;
+}
+
 int main(void)
 {
 	int x = 4;
 	int a = via_global(&x, 1);
 	int b = via_local(&x, 2);
+	long c = via_other(40);
 
-	printf("%d %d %d\n", a, b, calls);
+	printf("%d %d %d %ld\n", a, b, calls, c);
 	return 0;
 }
 EOF2
@@ -84,6 +101,10 @@ for m in $modes; do
 			exit 1
 		fi
 	done
+	if CC_MIR_STATS=1 "$CC_BIN" -m$m -O2 -S -o "$CC_TMP/s.s" "$CC_TMP/s.c" 2>&1 | grep 'not taken'; then
+		echo "run_asm_stack_pointer: -m$m: a function goes the old way"
+		exit 1
+	fi
 	"$CC_BIN" -m$m -O2 -fomit-frame-pointer -S -o "$CC_TMP/s.s" "$CC_TMP/s.c"
 	for fn in via_global via_local; do
 		awk -v f="$fn" '$0 == f ":" {x=1} $0 ~ "^\\.size " f "," {x=0} x' "$CC_TMP/s.s" >"$CC_TMP/fn.s"
