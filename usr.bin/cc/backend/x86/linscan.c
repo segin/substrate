@@ -1629,6 +1629,47 @@ static int ls_coalesce(ls_t *ls) {
     return merged;
 }
 
+/**
+ * Drop each store to a spill slot nothing reads, once registers are physical: a register shared through a region or
+ * a block (ls_rewrite()) is stored after each write, so that a later reference may reload it, and where every one
+ * of them was given the register the slot is written for nothing.
+ */
+static void drop_unread_spill_stores(xfunc_t *xf) {
+    unsigned char *read = (unsigned char *)calloc((size_t)(xf->nobj > 0 ? xf->nobj : 1), 1);
+    int i;
+    int j = 0;
+
+    if (read == NULL) {
+        return;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        const xinst_t *in = &xf->ins[i];
+        int k;
+
+        for (k = 0; k < in->nops; ++k) {
+            const xop_t *o = &in->o[k];
+
+            if (o->kind == XO_MEM && o->base == XR_FRAME && o->obj >= 0 && o->obj < xf->nobj &&
+                xf->obj[o->obj].kind == XF_SPILL && !(in->op == XI_MOV && k == 1)) {
+                read[o->obj] = 1; /* (any use but a plain store's) */
+            }
+        }
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        const xinst_t *in = &xf->ins[i];
+        const xop_t *d = &in->o[1];
+
+        if (in->op == XI_MOV && in->nops == 2 && d->kind == XO_MEM && d->base == XR_FRAME && d->obj >= 0 &&
+            d->obj < xf->nobj && xf->obj[d->obj].kind == XF_SPILL && !read[d->obj]) {
+            xf->obj[d->obj].uses--;
+            continue;
+        }
+        xf->ins[j++] = *in;
+    }
+    xf->nins = j;
+    free(read);
+}
+
 /** Whether operand @p o is a whole spill slot of @p xf: a frame object of kind XF_SPILL at its start. */
 static int spill_slot_of(const xfunc_t *xf, const xop_t *o) {
     return o->kind == XO_MEM && o->base == XR_FRAME && o->index == XR_NONE && o->sym == NULL && o->obj >= 0 &&
@@ -1875,6 +1916,7 @@ int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t) {
             xf->nins = j;
             forward_reloads(xf);
             drop_same_copies(xf, t->word);
+            drop_unread_spill_stores(xf);
             ls_free(&ls);
             return 0;
         }
