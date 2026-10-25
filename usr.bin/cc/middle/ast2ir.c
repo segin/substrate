@@ -10599,7 +10599,28 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
                     return -1;
                 }
             } else {
-                int av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
+                /*
+                 * a static or global object in a register: the asm's value in a temporary, stored to it after,
+                 * as through a pointer -- but a global register variable is its register, its output dropped
+                 */
+                const cc_global_t *g = vidx < 0 ? find_global(tu, op->expr->ident) : NULL;
+                const char *sym = vidx >= 0 ? ((*vars)[vidx].static_sym != NULL ? (*vars)[vidx].static_sym
+                                                                                : op->expr->ident)
+                                            : (g != NULL && g->asm_register == NULL ? g->name : NULL);
+                int av;
+
+                if (sym != NULL) {
+                    int addrv = emit_global_addr(sf, sym, diag);
+
+                    av = addrv < 0 ? -1 : asm_inout_temp(sf, op, addrv, out_sz, diag);
+                    if (av >= 0) {
+                        asm_out_store_ptr[i4] = addrv;
+                        asm_out_store_size[i4] = out_sz;
+                        asm_out_store_type[i4] = lower_value_ctype(op->expr);
+                    }
+                } else {
+                    av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
+                }
                 if (av < 0) {
                     free_asm_instr_fields(&in);
                     free(asm_out_store_ptr);
