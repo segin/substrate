@@ -10358,6 +10358,66 @@ static int asm_mem_input_is_object(var_entry_t *vars, size_t var_count, int dept
     }
 }
 
+/**
+ * Store an asm's outputs back to the lvalues they name, after the asm: each converted to its type, an aggregate
+ * copied.  An asm goto's go on each way out of it (lower_asm_stmt()).
+ *
+ * @param sf          the function being lowered
+ * @param in          the asm
+ * @param store_ptr   per output, the address to store it at, or -1 for none
+ * @param store_size  per output, its size
+ * @param store_type  per output, its type
+ * @param diag        receives an error
+ * @return            0, or -1 on error
+ */
+static int emit_asm_out_storebacks(cc_ssa_function_t *sf, const cc_ssa_instr_t *in, const int *store_ptr,
+                                   const long *store_size, const cc_ctype_t *const *store_type, cc_diag_t *diag) {
+    size_t i4;
+
+    for (i4 = 0; i4 < in->asm_out_count; ++i4) {
+        cc_ssa_instr_t st;
+        int rhs;
+        if (store_ptr == NULL || store_ptr[i4] < 0) {
+            continue;
+        }
+        if (store_size[i4] <= 0) {
+            set_diag(diag, "asm output storeback has invalid size");
+            return -1;
+        }
+        if (ct_in_memory(store_type[i4])) {
+            /* Aggregate output: memcpy the asm result into the
+             * storeback pointer. Linux's perf perf_event_open uses
+             * an asm that returns a struct {u32, u32}; refusing
+             * blocks the build. */
+            if (emit_memcpy_instr(sf, store_ptr[i4], in->asm_out_values[i4],
+                                  store_size[i4], diag) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        rhs = in->asm_out_values[i4];
+        rhs = normalize_float_ct(sf, rhs, store_type[i4], diag);
+        if (rhs < 0) {
+            return -1;
+        }
+        rhs = normalize_int_ct(sf, rhs, store_type[i4], diag);
+        if (rhs < 0) {
+            return -1;
+        }
+        memset(&st, 0, sizeof(st));
+        st.op = CC_SSA_STORE;
+        st.dst = -1;
+        st.lhs = store_ptr[i4];
+        st.rhs = rhs;
+        st.imm = store_size[i4];
+        if (cc_ir_push(sf, st) != 0) {
+            set_diag(diag, "out of memory appending asm output storeback");
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars,
                           size_t *var_count, const lower_ctx_t *ctx, int depth, const cc_stmt_t *s,
                           cc_diag_t *diag) {
@@ -10367,6 +10427,7 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
     int *asm_out_store_ptr = NULL;
     long *asm_out_store_size = NULL;
     const cc_ctype_t **asm_out_store_type = NULL;
+    int *goto_targets = NULL; /* an asm goto storing outputs: its labels, each reached through an edge of its own */
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_ASM;
     in.dst = -1;
@@ -10723,8 +10784,33 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             return -1;
         }
     }
+    for (i4 = 0; in.asm_is_goto && asm_out_store_ptr != NULL && i4 < in.asm_out_count; ++i4) {
+        if (asm_out_store_ptr[i4] >= 0) {
+            /*
+             * its outputs hold on every way out, as gcc's do: the asm jumps to an edge of its own for each
+             * label, which stores them back as falling through does and goes on to the label
+             */
+            size_t k;
+
+            goto_targets = (int *)malloc((in.asm_goto_count > 0 ? in.asm_goto_count : 1) * sizeof(int));
+            if (goto_targets == NULL) {
+                free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                set_diag(diag, "out of memory storing asm goto edges");
+                return -1;
+            }
+            for (k = 0; k < in.asm_goto_count; ++k) {
+                goto_targets[k] = in.asm_goto_labels[k];
+                in.asm_goto_labels[k] = cc_ir_new_label(sf);
+            }
+            break;
+        }
+    }
     if (cc_ir_push(sf, in) != 0) {
         free_asm_instr_fields(&in);
+        free(goto_targets);
         free(asm_out_store_ptr);
         free(asm_out_store_size);
         free(asm_out_store_type);
@@ -10732,62 +10818,42 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         return -1;
     }
     pushed = 1;
-    for (i4 = 0; i4 < in.asm_out_count; ++i4) {
-        cc_ssa_instr_t st;
-        int rhs;
-        if (asm_out_store_ptr == NULL || asm_out_store_ptr[i4] < 0) {
-            continue;
+    if (emit_asm_out_storebacks(sf, &in, asm_out_store_ptr, asm_out_store_size,
+                                (const cc_ctype_t *const *)asm_out_store_type, diag) != 0) {
+        free(goto_targets);
+        free(asm_out_store_ptr);
+        free(asm_out_store_size);
+        free(asm_out_store_type);
+        return -1;
+    }
+    if (goto_targets != NULL) {
+        /* each label's edge: the same stores, then on to the label */
+        int cont = cc_ir_new_label(sf);
+
+        if (cont < 0 || cc_ir_br(sf, cont) != 0) {
+            goto edge_fail;
         }
-        if (asm_out_store_size[i4] <= 0) {
-            set_diag(diag, "asm output storeback has invalid size");
-            free(asm_out_store_ptr);
-            free(asm_out_store_size);
-            free(asm_out_store_type);
-            return -1;
-        }
-        if (ct_in_memory(asm_out_store_type[i4])) {
-            /* Aggregate output: memcpy the asm result into the
-             * storeback pointer. Linux's perf perf_event_open uses
-             * an asm that returns a struct {u32, u32}; refusing
-             * blocks the build. */
-            if (emit_memcpy_instr(sf, asm_out_store_ptr[i4], in.asm_out_values[i4],
-                                  asm_out_store_size[i4], diag) != 0) {
-                free(asm_out_store_ptr);
-                free(asm_out_store_size);
-                free(asm_out_store_type);
-                return -1;
+        for (i4 = 0; i4 < in.asm_goto_count; ++i4) {
+            if (cc_ir_label(sf, in.asm_goto_labels[i4]) != 0 ||
+                emit_asm_out_storebacks(sf, &in, asm_out_store_ptr, asm_out_store_size,
+                                        (const cc_ctype_t *const *)asm_out_store_type, diag) != 0 ||
+                cc_ir_br(sf, goto_targets[i4]) != 0) {
+                goto edge_fail;
             }
-            continue;
         }
-        rhs = in.asm_out_values[i4];
-        rhs = normalize_float_ct(sf, rhs, asm_out_store_type[i4], diag);
-        if (rhs < 0) {
-            free(asm_out_store_ptr);
-            free(asm_out_store_size);
-            free(asm_out_store_type);
-            return -1;
-        }
-        rhs = normalize_int_ct(sf, rhs, asm_out_store_type[i4], diag);
-        if (rhs < 0) {
-            free(asm_out_store_ptr);
-            free(asm_out_store_size);
-            free(asm_out_store_type);
-            return -1;
-        }
-        memset(&st, 0, sizeof(st));
-        st.op = CC_SSA_STORE;
-        st.dst = -1;
-        st.lhs = asm_out_store_ptr[i4];
-        st.rhs = rhs;
-        st.imm = asm_out_store_size[i4];
-        if (cc_ir_push(sf, st) != 0) {
-            set_diag(diag, "out of memory appending asm output storeback");
+        if (cc_ir_label(sf, cont) != 0) {
+        edge_fail:
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "out of memory appending asm goto output stores");
+            }
+            free(goto_targets);
             free(asm_out_store_ptr);
             free(asm_out_store_size);
             free(asm_out_store_type);
             return -1;
         }
     }
+    free(goto_targets);
     (void)pushed;
     free(asm_out_store_ptr);
     free(asm_out_store_size);

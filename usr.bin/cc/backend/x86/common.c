@@ -540,7 +540,7 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                 return NULL;
             }
             {
-                char lbuf[160];
+                char lbuf[192];
                 snprintf(lbuf, sizeof(lbuf), ".L%s_%d", fn_name != NULL ? fn_name : "__fn", label_id);
                 if (append_text(&out, &len, &cap, lbuf, strlen(lbuf)) != 0) {
                     free(out);
@@ -3119,6 +3119,9 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     unsigned in_mask = 0;       /* holding an input */
     unsigned saved_mask = 0;    /* callee-saved, used, so saved around the asm */
     char *rendered = NULL;
+    char stub_fn[160];          /* an asm goto's stubs are labels .L<stub_fn>_<k> and .L<stub_fn>_end */
+    int *stub_ids = NULL;       /* and their numbers, 0 up, when it has them */
+    size_t path;
 
     op_text = (char **)calloc(total, sizeof(*op_text));
     op_names = (char **)calloc(total, sizeof(*op_names));
@@ -3437,11 +3440,30 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 label_base++; /* a `+` output is also an implicit input */
             }
         }
+        /*
+         * an asm goto with outputs, or callee-saved registers to restore: its labels are stubs of its own
+         * (below), which store the outputs and pop the registers on the way to each -- gcc's outputs hold on
+         * every way out of the asm, and a jump straight to the label skipped both
+         */
+        if (in->asm_is_goto && in->asm_goto_count > 0 && !in->asm_is_basic &&
+            (out_n > 0 || (saved_mask != 0))) {
+            size_t k;
+
+            snprintf(stub_fn, sizeof(stub_fn), "%s__ag%zu", f->name != NULL ? f->name : "__fn", instr_index);
+            stub_ids = (int *)malloc(in->asm_goto_count * sizeof(int));
+            if (stub_ids == NULL) {
+                goto oom;
+            }
+            for (k = 0; k < in->asm_goto_count; ++k) {
+                stub_ids[k] = (int)k;
+            }
+        }
         rendered = in->asm_is_basic
                        ? dup_cstr(in->sym != NULL ? in->sym : "") /* basic asm: the text as written */
                        : render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total,
-                                                    label_base, in->asm_goto_labels, in->asm_goto_names,
-                                                    in->asm_goto_count, f->name, is_64bit, diag);
+                                                    label_base, stub_ids != NULL ? stub_ids : in->asm_goto_labels,
+                                                    in->asm_goto_names, in->asm_goto_count,
+                                                    stub_ids != NULL ? stub_fn : f->name, is_64bit, diag);
     }
     if (rendered == NULL) {
         if (diag != NULL && diag->message[0] == '\0') {
@@ -3473,46 +3495,64 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
     }
 
-    for (i = 0; i < out_n; ++i) {
-        /*
-         * a flag output ("=@ccz"): the condition the asm leaves in the flags, set in the output's register
-         * first, before the moves below (which leave the flags be).  Linux 7.3's try_cmpxchg() has no other
-         * way out of its asm: with no setz, mutex_lock()'s fast path failed at random and the kernel tried
-         * to sleep in early boot.
-         */
-        const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
-
-        if (c != NULL && strncmp(c, "=@cc", 4) == 0 && c[4] != '\0' && out_regs[i] != NULL) {
-            /* (and the rest of the register clear: the output may be wider than the byte set) */
-            fprintf(fp, "\tset%s %s\n", c + 4, reg_alias_for_size(out_regs[i], is_64bit, 1));
-            fprintf(fp, "\tmovzbl %s, %s\n", reg_alias_for_size(out_regs[i], is_64bit, 1),
-                    reg_alias_for_size(out_regs[i], is_64bit, 4));
+    /* what falls through, then each label's stub: the outputs, the registers, on to the label */
+    for (path = 0; path <= (stub_ids != NULL ? in->asm_goto_count : 0); ++path) {
+        if (path > 0) {
+            fprintf(fp, ".L%s_%zu:\n", stub_fn, path - 1);
         }
-    }
-    for (i = 0; i < out_n; ++i) {
-        if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {
-            int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
-            long off = slot_off(lay, in->asm_out_values[i]);
-            emit_zero_extend_reg(fp, out_regs[i], is_64bit, osz);
-            emit_frame_store_reg(fp, is_64bit, out_regs[i], off);
-            if (asm_pair_operand(in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL, is_64bit, osz)) {
-                emit_frame_store_reg(fp, is_64bit, "%edx", off + 4);
+        for (i = 0; i < out_n; ++i) {
+            /*
+             * a flag output ("=@ccz"): the condition the asm leaves in the flags, set in the output's register
+             * first, before the moves below (which leave the flags be).  Linux 7.3's try_cmpxchg() has no other
+             * way out of its asm: with no setz, mutex_lock()'s fast path failed at random and the kernel tried
+             * to sleep in early boot.
+             */
+            const char *c = in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL;
+
+            if (c != NULL && strncmp(c, "=@cc", 4) == 0 && c[4] != '\0' && out_regs[i] != NULL) {
+                /* (and the rest of the register clear: the output may be wider than the byte set) */
+                fprintf(fp, "\tset%s %s\n", c + 4, reg_alias_for_size(out_regs[i], is_64bit, 1));
+                fprintf(fp, "\tmovzbl %s, %s\n", reg_alias_for_size(out_regs[i], is_64bit, 1),
+                        reg_alias_for_size(out_regs[i], is_64bit, 4));
+            }
+        }
+        for (i = 0; i < out_n; ++i) {
+            if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {
+                int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
+                long off = slot_off(lay, in->asm_out_values[i]);
+                emit_zero_extend_reg(fp, out_regs[i], is_64bit, osz);
+                emit_frame_store_reg(fp, is_64bit, out_regs[i], off);
+                if (asm_pair_operand(in->asm_out_constraints != NULL ? in->asm_out_constraints[i] : NULL, is_64bit, osz)) {
+                    emit_frame_store_reg(fp, is_64bit, "%edx", off + 4);
+                }
+            }
+        }
+        {
+            int pushes = 0;
+            int r;
+
+            for (r = 15; r >= 0; --r) {
+                if ((saved_mask & (1u << r)) != 0) {
+                    fprintf(fp, "\tpop%c %s\n", is_64bit ? 'q' : 'l', is_64bit ? x86_gprs[r].n64 : x86_gprs[r].n32);
+                    pushes++;
+                }
+            }
+            if (is_64bit && (pushes & 1) != 0) {
+                fprintf(fp, "\taddq $8, %%rsp\n");
+            }
+        }
+        if (stub_ids != NULL) {
+            if (path == 0) {
+                fprintf(fp, "\tjmp .L%s_end\n", stub_fn);
+            } else {
+                fputs("\tjmp ", fp);
+                emit_local_label(fp, f->name, in->asm_goto_labels[path - 1]);
+                fputc('\n', fp);
             }
         }
     }
-    {
-        int pushes = 0;
-        int r;
-
-        for (r = 15; r >= 0; --r) {
-            if ((saved_mask & (1u << r)) != 0) {
-                fprintf(fp, "\tpop%c %s\n", is_64bit ? 'q' : 'l', is_64bit ? x86_gprs[r].n64 : x86_gprs[r].n32);
-                pushes++;
-            }
-        }
-        if (is_64bit && (pushes & 1) != 0) {
-            fprintf(fp, "\taddq $8, %%rsp\n");
-        }
+    if (stub_ids != NULL) {
+        fprintf(fp, ".L%s_end:\n", stub_fn);
     }
 
     free(rendered);
@@ -3525,6 +3565,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
     free(out_write_back);
     free(out_tied_read);
     free(loads);
+    free(stub_ids);
     return 0;
 
 impossible: {
@@ -3553,6 +3594,7 @@ fail:
     free(out_write_back);
     free(out_tied_read);
     free(loads);
+    free(stub_ids);
     return -1;
 }
 
