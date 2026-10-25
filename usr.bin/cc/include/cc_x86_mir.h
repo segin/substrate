@@ -358,6 +358,7 @@ struct xsel {
     int *ndefs;               /**< per IR value: how many instructions write it */
     int *nuses;               /**< and read it */
     int *def_at;              /**< per IR value written once: that instruction, else -1 (-2: a branch's flags) */
+    int *cmp_at;              /**< per IR value: the compare made at the branch that reads it (def_at -2), or -1 */
     unsigned char *addr_taken;/**< per IR value: an ADDR takes its address */
     unsigned char *is_addr;   /**< per IR value: a STACKALLOC writes it -- an address, a word whatever its type */
     int *obj;                 /**< per IR value: its frame object (a stack allocation's, or the memory it lives in) */

@@ -1442,6 +1442,60 @@ static void sel_dynalloc(xsel_t *s, const cc_ssa_instr_t *in) {
     s->has_dynalloc = 1;
 }
 
+/**
+ * The branch that integer compare @p j's value is read by, later in its block -- directly, or through copies each
+ * of which only the next reads (a variable set to the compare) -- when nothing between them writes the compare's
+ * operands.  The compare is then made at the branch: the value it reads has its compare noted in cmp_at, and the
+ * copies, made nowhere, def_at -2.  -1 when there is no such branch.
+ */
+static int branch_reads_later(xsel_t *s, size_t j) {
+    const cc_ssa_function_t *f = s->f;
+    const cc_ssa_instr_t *c = &f->instrs[j];
+    int cur = c->dst;
+    int copies[8];
+    int ncopies = 0;
+    size_t k;
+
+    for (k = j + 1; k < f->instr_count; ++k) {
+        const cc_ssa_instr_t *in = &f->instrs[k];
+        size_t o;
+
+        if (in->op == CC_SSA_BR_COND && in->lhs == cur) {
+            int m;
+
+            s->cmp_at[cur] = (int)j;
+            s->def_at[cur] = -2;
+            for (m = 0; m < ncopies; ++m) {
+                s->def_at[copies[m]] = -2;
+            }
+            return (int)k;
+        }
+        if (in->op == CC_SSA_MOV && in->lhs == cur && in->dst >= 0 && in->dst != cur && s->nuses[cur] == 1 &&
+            s->ndefs[in->dst] == 1 && s->nuses[in->dst] == 1 && ncopies < 8 && !s->addr_taken[in->dst]) {
+            copies[ncopies++] = in->dst;
+            cur = in->dst;
+            continue;
+        }
+        if (in->op == CC_SSA_LABEL || in->op == CC_SSA_BR || in->op == CC_SSA_BR_COND || in->op == CC_SSA_RET ||
+            in->op == CC_SSA_TRAP || (in->op == CC_SSA_ASM && in->asm_is_goto)) {
+            return -1;
+        }
+        if (in->dst >= 0 && in->op != CC_SSA_STORE && (in->dst == c->lhs || in->dst == c->rhs)) {
+            return -1;
+        }
+        for (o = 0; in->op == CC_SSA_ASM && o < in->asm_out_count; ++o) {
+            int ov = in->asm_out_values[o];
+
+            if (ov == c->lhs || ov == c->rhs || (CC_SSA_ASM_MEM_INDIRECT_P(ov) &&
+                                                 (CC_SSA_ASM_MEM_INDIRECT_DECODE(ov) == c->lhs ||
+                                                  CC_SSA_ASM_MEM_INDIRECT_DECODE(ov) == c->rhs))) {
+                return -1;
+            }
+        }
+    }
+    return -1;
+}
+
 /** Select instruction @p j of the function. */
 static void sel_instr(xsel_t *s, size_t j) {
     const cc_ssa_function_t *f = s->f;
@@ -1552,8 +1606,8 @@ static void sel_instr(xsel_t *s, size_t j) {
     case CC_SSA_MOV: {
         int part;
 
-        if (in->dst == in->lhs) {
-            break;
+        if (in->dst == in->lhs || (in->dst >= 0 && s->def_at[in->dst] == -2)) {
+            break; /* (a copy of a compare made at the branch that reads it) */
         }
         for (part = 0; part < (xs_is_pair(s, in->dst) ? 2 : 1); ++part) {
             xop_t d = xop_reg(xs_vreg_of(s, in->dst, part), w);
@@ -1643,17 +1697,9 @@ static void sel_instr(xsel_t *s, size_t j) {
             cc_ssa_value_class(f, in->rhs) == CC_VAL_F64 || xs_is_pair(s, in->lhs) || xs_is_pair(s, in->rhs)) {
             NOPE(s);
         }
-        if (j + 1 < f->instr_count && f->instrs[j + 1].op == CC_SSA_BR_COND && f->instrs[j + 1].lhs == in->dst &&
-            s->nuses[in->dst] == 1 && s->ndefs[in->dst] == 1) {
-            /* only the branch after it reads it: the branch is on the flags */
-            const cc_ssa_instr_t *br = &f->instrs[j + 1];
-
-            if (compare(s, in, &cc, &known)) {
-                jump(s, j + 1, known ? br->true_label : br->false_label);
-            } else {
-                branch(s, j + 1, cc, br->true_label, br->false_label);
-            }
-            /* the branch is done */
+        if (s->nuses[in->dst] == 1 && s->ndefs[in->dst] == 1 && branch_reads_later(s, j) > (int)j) {
+            /* only a branch later in the block reads it, nothing between writing its operands: the compare is
+             * made there, and the branch is on the flags */
             s->def_at[in->dst] = -2;
             break;
         }
@@ -1690,9 +1736,18 @@ static void sel_instr(xsel_t *s, size_t j) {
         break;
 
     case CC_SSA_BR_COND:
-        if (j > 0 && f->instrs[j - 1].op == CC_SSA_CMP && f->instrs[j - 1].dst == in->lhs && in->lhs >= 0 &&
-            s->def_at[in->lhs] == -2) {
-            break; /* the compare before it made it */
+        if (in->lhs >= 0 && s->def_at[in->lhs] == -2) {
+            /* the compare deferred to here */
+            const cc_ssa_instr_t *c = &f->instrs[s->cmp_at[in->lhs]];
+            xcc_t cc;
+            int known = 0;
+
+            if (compare(s, c, &cc, &known)) {
+                jump(s, j, known ? in->true_label : in->false_label);
+            } else {
+                branch(s, j, cc, in->true_label, in->false_label);
+            }
+            break;
         }
         if (in->lhs < 0 || xs_is_pair(s, in->lhs) || cc_ssa_value_class(f, in->lhs) == CC_VAL_F64) {
             NOPE(s);
@@ -1855,12 +1910,14 @@ static int sel_init(xsel_t *s) {
     s->is_addr = (unsigned char *)calloc(n, 1);
     s->obj = (int *)malloc(n * sizeof(int));
     s->fhome = (int *)malloc(n * sizeof(int));
+    s->cmp_at = (int *)malloc(n * sizeof(int));
     s->frame_val = (int *)malloc(n * sizeof(int));
     s->param_lo = (int *)malloc(np * sizeof(int));
     s->param_hi = (int *)malloc(np * sizeof(int));
     s->param_obj = (int *)malloc(np * sizeof(int));
     if (s->lo == NULL || s->hi == NULL || s->ndefs == NULL || s->nuses == NULL || s->def_at == NULL ||
-        s->addr_taken == NULL || s->is_addr == NULL || s->obj == NULL || s->fhome == NULL || s->frame_val == NULL ||
+        s->addr_taken == NULL || s->is_addr == NULL || s->obj == NULL || s->fhome == NULL || s->cmp_at == NULL ||
+        s->frame_val == NULL ||
         s->param_lo == NULL ||
         s->param_hi == NULL || s->param_obj == NULL) {
         return -1;
@@ -1871,6 +1928,7 @@ static int sel_init(xsel_t *s) {
         s->def_at[v] = -1;
         s->obj[v] = -1;
         s->fhome[v] = -1;
+        s->cmp_at[v] = -1;
         s->frame_val[v] = -1;
     }
     s->fscratch = -1;
@@ -1986,6 +2044,7 @@ static void sel_free(xsel_t *s) {
     free(s->is_addr);
     free(s->obj);
     free(s->fhome);
+    free(s->cmp_at);
     free(s->frame_val);
     free(s->param_lo);
     free(s->param_hi);
