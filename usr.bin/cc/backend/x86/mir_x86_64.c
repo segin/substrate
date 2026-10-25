@@ -777,7 +777,8 @@ static const char *x64_function_ok(const xsel_t *s) {
 static void save_va_regs(xsel_t *s) {
     size_t k;
 
-    s->va_save = xf_new_obj(&s->xf, XF_LOCAL, 176, 16, 0);
+    /* (on 16 bytes where the stack is; it is written with movdqu, which needs no more) */
+    s->va_save = xf_new_obj(&s->xf, XF_LOCAL, 176, s->t->stack_boundary >= 16 ? 16 : 8, 0);
     s->va_state = xf_new_obj(&s->xf, XF_LOCAL, 24, 8, 0);
     if (s->va_save < 0 || s->va_state < 0) {
         return;

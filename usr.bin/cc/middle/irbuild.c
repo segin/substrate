@@ -180,11 +180,18 @@ int cc_ir_stackalloc_aligned(cc_ssa_function_t *sf, long total_size, long align,
         return cc_ir_stackalloc(sf, total_size, diag);
     }
     if (align == 16) {
-        /* the frame puts 16 bytes or more on a 16-byte boundary */
-        return cc_ir_stackalloc(sf, total_size < 16 ? 16 : total_size, diag);
+        /* the frame puts 16 bytes or more on a 16-byte boundary -- this one because it must (stack_align) */
+        raw = cc_ir_stackalloc(sf, total_size < 16 ? 16 : total_size, diag);
+        if (raw >= 0) {
+            sf->instrs[sf->instr_count - 1].stack_align = 16;
+        }
+        return raw;
     }
     /* 16-aligned storage align - 16 bytes larger holds an align-aligned object */
     raw = cc_ir_stackalloc(sf, total_size + align - 16, diag);
+    if (raw >= 0) {
+        sf->instrs[sf->instr_count - 1].stack_align = 16;
+    }
     k = raw < 0 ? -1 : cc_ir_const(sf, align - 1);
     if (k < 0) {
         return -1;

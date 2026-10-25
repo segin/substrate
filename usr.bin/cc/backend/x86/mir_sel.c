@@ -3391,9 +3391,15 @@ static int sel_init(xsel_t *s) {
         if (in->op == CC_SSA_STACKALLOC && in->dst >= 0 && in->dst < f->value_count) {
             int bytes = in->imm > 0 ? (int)in->imm : 1;
 
-            /* 16 bytes or more on a 16-byte boundary, as gcc-built code may use movaps on it; on x86-64 eight on 8 */
+            /*
+             * 16 bytes or more on a 16-byte boundary, as gcc-built code may use movaps on it, where the stack is
+             * so aligned -- under a smaller boundary only one whose declaration asks it (stack_align), for which
+             * the prologue realigns the stack; on x86-64 eight on 8
+             */
+            int big = bytes >= 16 && (s->t->stack_boundary >= 16 || in->stack_align >= 16);
+
             s->obj[in->dst] = xf_new_obj(&s->xf, XF_LOCAL, (bytes + 3) & ~3,
-                                         bytes >= 16 ? 16 : s->word == 8 && bytes >= 8 ? 8 : 4, 0);
+                                         big ? 16 : s->word == 8 && bytes >= 8 ? 8 : 4, 0);
             if (s->ndefs[in->dst] == 1) {
                 s->frame_val[in->dst] = s->obj[in->dst];
             }

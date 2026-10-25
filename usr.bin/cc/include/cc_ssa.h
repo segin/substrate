@@ -155,6 +155,8 @@ typedef struct {
     int lhs;
     int rhs;
     long long imm;
+    int stack_align;   /**< STACKALLOC: the alignment its declaration requires, 16 or more, or 0 for none -- the
+                            frame may put a large one on 16 bytes by choice, which a smaller stack boundary drops */
     double fimm;
     long double fimm_ld;
     int label;
