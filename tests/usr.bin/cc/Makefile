@@ -682,7 +682,7 @@ checks_main: build
 	$(TOP)/usr.bin/cc/cc -S native_slot_pressure.c -o $(CC_TMP)/cc_native_slot_pressure.s
 	awk '/subq \$$[0-9]+, %rsp/ { n = $$2; gsub(/[^0-9]/, "", n); if ((n + 0) <= 256) ok = 1 } END { exit ok ? 0 : 1 }' $(CC_TMP)/cc_native_slot_pressure.s
 	$(TOP)/usr.bin/cc/cc -S native_variadic_call.c -o $(CC_TMP)/cc_native_variadic_call.s
-	grep -Fq 'movb $$2, %al' $(CC_TMP)/cc_native_variadic_call.s
+	grep -Eq 'mov(b \$$2, %al|l \$$2, %eax)' $(CC_TMP)/cc_native_variadic_call.s
 	$(TOP)/usr.bin/cc/cc -S native_c99_va_args.c -o $(CC_TMP)/cc_native_c99_va_args.s
 	grep -Fq 'movl $$8, ' $(CC_TMP)/cc_native_c99_va_args.s
 	grep -q 'addq %rcx, %rax' $(CC_TMP)/cc_native_c99_va_args.s
