@@ -1047,9 +1047,6 @@ static void sel_asm(xsel_t *s, size_t j, const cc_ssa_instr_t *in) {
     int b;
     int part;
 
-    if (in->asm_is_goto && in->asm_out_count > 0) {
-        NOPE(s);
-    }
     for (i = 0; i < total; ++i) {
         int is_out = i < in->asm_out_count;
         int raw = is_out ? in->asm_out_values[i] : in->asm_in_values[i - in->asm_out_count];
@@ -1719,6 +1716,21 @@ static int sel_init(xsel_t *s) {
         }
         if (in->op == CC_SSA_ADDR && in->lhs >= 0 && in->lhs < f->value_count) {
             s->addr_taken[in->lhs] = 1;
+        }
+        if (in->op == CC_SSA_ASM && in->asm_is_goto) {
+            /*
+             * an asm goto's output holds on every way out of it, its labels' as well as falling through: it
+             * lives in its frame object, which the asm writes, as a value whose address is taken does
+             */
+            size_t o;
+
+            for (o = 0; o < in->asm_out_count; ++o) {
+                int ov = in->asm_out_values[o];
+
+                if (!CC_SSA_ASM_MEM_INDIRECT_P(ov) && ov >= 0 && ov < f->value_count) {
+                    s->addr_taken[ov] = 1;
+                }
+            }
         }
         if (in->op == CC_SSA_STACKALLOC && in->dst >= 0 && in->dst < f->value_count) {
             s->is_addr[in->dst] = 1;
