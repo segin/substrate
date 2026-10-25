@@ -1858,10 +1858,11 @@ static int sel_init(xsel_t *s) {
     s->frame_val = (int *)malloc(n * sizeof(int));
     s->param_lo = (int *)malloc(np * sizeof(int));
     s->param_hi = (int *)malloc(np * sizeof(int));
+    s->param_obj = (int *)malloc(np * sizeof(int));
     if (s->lo == NULL || s->hi == NULL || s->ndefs == NULL || s->nuses == NULL || s->def_at == NULL ||
         s->addr_taken == NULL || s->is_addr == NULL || s->obj == NULL || s->fhome == NULL || s->frame_val == NULL ||
         s->param_lo == NULL ||
-        s->param_hi == NULL) {
+        s->param_hi == NULL || s->param_obj == NULL) {
         return -1;
     }
     for (v = 0; v < (int)n; ++v) {
@@ -1877,6 +1878,7 @@ static int sel_init(xsel_t *s) {
     for (i = 0; i < np; ++i) {
         s->param_lo[i] = XR_NONE;
         s->param_hi[i] = XR_NONE;
+        s->param_obj[i] = -1;
     }
     for (i = 0; i < f->instr_count; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
@@ -1987,6 +1989,7 @@ static void sel_free(xsel_t *s) {
     free(s->frame_val);
     free(s->param_lo);
     free(s->param_hi);
+    free(s->param_obj);
     xf_free(&s->xf);
 }
 

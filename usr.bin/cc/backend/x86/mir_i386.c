@@ -532,6 +532,22 @@ static void i386_param(xsel_t *s, const cc_ssa_instr_t *in) {
         xs_emit(s, XI_LEA, 4, 2, &m, &d, NULL);
         return;
     }
+    if (kind == CC_CALL_ARG_ABI_AGG_MEM && CC_ABI_REGPARM(abi) > 0) {
+        /* a structure that came in registers (regparm): their words, stored at entry, whose address is the value */
+        xop_t m;
+        xop_t d;
+
+        if (s->frame_val[in->dst] >= 0) {
+            return;
+        }
+        if (s->param_obj[pi] < 0) {
+            XS_NOPE(s);
+        }
+        m = xop_frame(s->param_obj[pi], 0, 4);
+        d = xop_reg(xs_vreg_of(s, in->dst, 0), 4);
+        xs_emit(s, XI_LEA, 4, 2, &m, &d, NULL);
+        return;
+    }
     if (kind == CC_CALL_ARG_ABI_AGG_MEM && CC_ABI_REGPARM(abi) == 0) {
         /* a structure passed by value: its copy on the stack, whose address is the value */
         int o;
@@ -688,8 +704,7 @@ static const char *i386_function_ok(const xsel_t *s) {
         if (f->param_types[i] == CC_VAL_F64 ? !i386_fp_abi_ok(abi)
                                             : (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_DEFAULT &&
                                                abi != CC_CALL_ARG_ABI_ZERO &&
-                                               !(CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_MEM &&
-                                                 CC_ABI_REGPARM(abi) == 0) &&
+                                               CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM &&
                                                !(CC_ABI_KIND(abi) == CC_CALL_ARG_ABI_AGG_REG &&
                                                  (abi & (CC_ABI_VEC128 | CC_ABI_VEC64)) != 0))) {
             return "a parameter's ABI";
@@ -740,6 +755,39 @@ static int i386_begin(xsel_t *s) {
             xs_emit(s, XI_MOV, 4, 2, &m, &h, NULL);
         }
         s->hidden = h.reg;
+    }
+    for (i = 0; i < f->param_count; ++i) {
+        unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
+        int r = CC_ABI_REGPARM(abi);
+        int words;
+        int k;
+        size_t j;
+
+        if (CC_ABI_KIND(abi) != CC_CALL_ARG_ABI_AGG_MEM || r == 0) {
+            continue;
+        }
+        /* a structure in registers (regparm): its words stored at once into a frame object of its own */
+        words = i386_param_slot_bytes(x86_64_param_size_bytes(f, (int)i, 4)) / 4;
+        if (r - 1 + words > 3) {
+            return 1;
+        }
+        s->param_obj[i] = xf_new_obj(&s->xf, XF_LOCAL, 4 * words, 4, 0);
+        if (s->param_obj[i] < 0) {
+            return -1;
+        }
+        for (k = 0; k < words; ++k) {
+            xop_t from = xop_reg(i386_rp_regs[r - 1 + k], 4);
+            xop_t to = xop_frame(s->param_obj[i], 4 * k, 4);
+
+            xs_emit(s, XI_MOV, 4, 2, &from, &to, NULL);
+        }
+        for (j = 0; j < f->instr_count; ++j) {
+            const cc_ssa_instr_t *in = &f->instrs[j];
+
+            if (in->op == CC_SSA_PARAM && in->param_index == (int)i && in->dst >= 0 && s->ndefs[in->dst] == 1) {
+                s->frame_val[in->dst] = s->param_obj[i];
+            }
+        }
     }
     for (i = 0; i < f->param_count; ++i) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;

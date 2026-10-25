@@ -364,6 +364,7 @@ struct xsel {
     int *frame_val;           /**< per IR value: the frame object it is the address of, when written once; else -1 */
     int *param_lo;            /**< per parameter that came in a register: the register holding it from entry */
     int *param_hi;
+    int *param_obj;           /**< per parameter: the frame object an i386 regparm structure's words are stored in */
     int unsupported;          /**< the line that gave up on the function, for CC_MIR_STATS; or 0 */
     const char *unsupported_file; /**< and its file */
     xasm_bind_t *bind;        /**< each inline asm's operands and where they are (XI_ASM's aux: its first) */
