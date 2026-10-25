@@ -6,8 +6,9 @@
 # test, jne.  A jump to the next label, its only way in, merges the two
 # blocks, a 0 or a 1 masked with an odd number is itself, and each way in
 # then jumps where its value goes, or branches on its compare.  And a
-# narrow value branched on or tested against 0 on x86-64 is tested by
-# its own bytes: a bool a call returned is testb %al, %al.  Results are
+# narrow value branched on or tested against 0 is tested by its own
+# bytes, an int's on x86-64 and a short's or a bool's on i386 too: a bool
+# a call returned is testb %al, %al, not extended first.  Results are
 # gcc's.
 set -eu
 
@@ -87,6 +88,10 @@ for m in $modes; do
 	"$CC_BIN" -m$m -O2 -S -o "$CC_TMP/j.s" "$CC_TMP/j.c"
 	if awk '/^f:/{x=1} /^\.size f,/{x=0} x' "$CC_TMP/j.s" | grep -qE '^	set'; then
 		echo "run_bool_join_thread: -m$m: f() makes a bool of IS_ERR_OR_NULL()"
+		exit 1
+	fi
+	if awk '/^g:/{x=1} /^\.size g,/{x=0} x' "$CC_TMP/j.s" | grep -qE 'movzbl %al'; then
+		echo "run_bool_join_thread: -m$m: g() extends the bool it only tests"
 		exit 1
 	fi
 done

@@ -642,7 +642,7 @@ static int sel_ext_test(xsel_t *s, int v) {
     int bytes;
     xop_t r;
 
-    if (s->word != 8 || d == NULL || s->nuses[v] != 1 || (bytes = ext_of(s, d, &src)) <= 0 || bytes > 4 ||
+    if (d == NULL || s->nuses[v] != 1 || (bytes = ext_of(s, d, &src)) <= 0 || bytes > 4 || bytes >= s->word ||
         xs_is_pair(s, src) || !stable(s, src)) {
         return 0;
     }
@@ -790,18 +790,22 @@ int xs_extends_taken(const xsel_t *s, int v, int bytes) {
 }
 
 /**
- * The bytes a branch on value @p v tests, on x86-64: an integer of four bytes or less is nonzero by its own bits
- * (test %al, %al; test %eax, %eax), whatever is above them; 0 for the whole word.
+ * The bytes a branch on value @p v tests: an integer narrower than the word -- four bytes or less on x86-64 -- is
+ * nonzero by its own bits (test %al, %al; test %eax, %eax), whatever is above them; 0 for the whole word.
  */
 static int br_test_bytes(const xsel_t *s, int v) {
     const cc_ssa_function_t *f = s->f;
     uint32_t n;
 
-    if (s->word != 8 || v < 0 || v >= f->value_count || cc_ssa_value_class(f, v) != CC_VAL_I64 ||
+    if (v < 0 || v >= f->value_count || cc_ssa_value_class(f, v) != CC_VAL_I64 ||
         f->value_ty[v].kind == CC_TY_AGG || s->addr_taken[v] || xs_is_pair(s, v)) {
         return 0;
     }
     n = cc_ssa_value_size(f, v);
+    if (s->word == 4) {
+        /* (an int is the word already; a byte's register is one of the four that have one) */
+        return n == 1 || n == 2 ? (int)n : 0;
+    }
     return n == 1 || n == 2 || n == 4 ? (int)n : 0;
 }
 

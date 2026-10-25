@@ -475,7 +475,7 @@ static void i386_call(xsel_t *s, const cc_ssa_instr_t *in) {
 
             xs_emit(s, XI_MOV, 4, 2, &eax, &d, NULL);
             xs_emit(s, XI_MOV, 4, 2, &edx, &d1, NULL);
-        } else if (ret_bytes == 1 || ret_bytes == 2) {
+        } else if ((ret_bytes == 1 || ret_bytes == 2) && xs_extends_taken(s, in->dst, (int)ret_bytes)) {
             /* the callee need not have extended it */
             xop_t r = xop_reg(XR_AX, (int)ret_bytes);
 
