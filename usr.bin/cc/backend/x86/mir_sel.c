@@ -1597,6 +1597,8 @@ static int sel_init(xsel_t *s) {
     xf_init(&s->xf);
     s->xf.nlabels = f->label_count;
     s->hidden = XR_NONE;
+    s->va_save = -1;
+    s->va_state = -1;
     s->lo = (int *)malloc(n * sizeof(int));
     s->hi = (int *)malloc(n * sizeof(int));
     s->ndefs = (int *)calloc(n, sizeof(int));

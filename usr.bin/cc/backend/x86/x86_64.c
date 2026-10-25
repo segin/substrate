@@ -244,8 +244,8 @@ void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *
     *out_xmm_regs = xmm;
 }
 
-static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t gpr_start, size_t *out_gpr, size_t *out_xmm,
-                              size_t *out_stack_bytes) {
+void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t gpr_start, size_t *out_gpr, size_t *out_xmm,
+                       size_t *out_stack_bytes) {
     size_t gpr = gpr_start;
     size_t xmm = 0;
     size_t stack_bytes = 0;

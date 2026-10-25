@@ -453,6 +453,19 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
     case XI_TRAP:
         fputs("\tud2\n", fp);
         return;
+    case XI_SAVEXMM:
+        /* only when the caller says (%al) it passed any, as gcc saves them */
+        fprintf(fp, "\ttestb %%al, %%al\n\tje .L%s_%d\n", fn_name, in->label);
+        for (k = 0; k < 8; ++k) {
+            xop_t m = in->o[0];
+
+            m.disp += 16 * k;
+            fprintf(fp, "\tmovdqu %%xmm%d, ", k);
+            print_op(fp, xf, &m, word);
+            fputc('\n', fp);
+        }
+        fprintf(fp, ".L%s_%d:\n", fn_name, in->label);
+        return;
     case XI_MOVZX:
     case XI_MOVSX:
         if (in->op == XI_MOVZX && in->o[0].size == 4) {

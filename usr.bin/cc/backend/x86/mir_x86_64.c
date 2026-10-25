@@ -13,9 +13,12 @@
  * and for a global declared extern, as x86_64.c does.  linscan.c gives
  * out every general register but %rsp and %rbp, the caller-saved first.
  *
- * Not taken yet: floating point, variadic functions (their register save
- * area), structures passed or returned in registers other than general
- * ones, and functions returning a structure through a hidden pointer.
+ * A variadic function saves its argument registers at entry, and va_start
+ * fills the record its va_lists point at, as the psABI lays both out.
+ *
+ * Not taken yet: floating point, structures passed or returned in
+ * registers other than general ones, and functions returning a structure
+ * through a hidden pointer.
  */
 
 #include "cc_x86_mir.h"
@@ -407,9 +410,6 @@ static const char *x64_function_ok(const xsel_t *s) {
     if (x86_64_function_sret_size(f) > 0 || x86_64_infer_sret_size_from_calls(s->m, f) > 0) {
         return "a structure result";
     }
-    if (f->is_variadic) {
-        return "variadic";
-    }
     for (i = 0; i < f->param_count; ++i) {
         unsigned char abi = f->param_abi != NULL ? f->param_abi[i] : CC_CALL_ARG_ABI_DEFAULT;
 
@@ -422,11 +422,99 @@ static const char *x64_function_ok(const xsel_t *s) {
     return NULL;
 }
 
+/**
+ * A variadic function's entry: its register save area -- the six argument registers, then %xmm0..7 when the
+ * caller passed any and SSE is on (never under -mno-sse: Linux's _printk() took #UD on movdqu) -- and the record
+ * va_start fills, its va_lists pointing at it.
+ */
+static void save_va_regs(xsel_t *s) {
+    size_t k;
+
+    s->va_save = xf_new_obj(&s->xf, XF_LOCAL, 176, 16, 0);
+    s->va_state = xf_new_obj(&s->xf, XF_LOCAL, 24, 8, 0);
+    if (s->va_save < 0 || s->va_state < 0) {
+        return;
+    }
+    for (k = 0; k < 6; ++k) {
+        xop_t r = xop_reg(x64_arg_regs[k], 8);
+        xop_t m = xop_frame(s->va_save, 8 * (long long)k, 8);
+
+        xs_emit(s, XI_MOV, 8, 2, &r, &m, NULL);
+    }
+    if (!cc_options_current()->no_sse) {
+        xop_t m = xop_frame(s->va_save, 48, 16);
+        xinst_t x = xi_make(XI_SAVEXMM, 8, 1, &m, NULL, NULL);
+
+        x.label = xf_new_label(&s->xf);
+        x.imp_use = XR_BIT(XR_AX);
+        xf_emit(&s->xf, &x);
+    }
+}
+
+/**
+ * va_start: the record's gp_offset and fp_offset past the fixed parameters' registers, its overflow_arg_area at the
+ * first variadic argument on the stack, its reg_save_area; the value is the record's address.  In a function that
+ * is not variadic, the address of the stack word after parameter imm, as x86_64.c makes it.
+ */
+static void x64_va_start(xsel_t *s, const cc_ssa_instr_t *in) {
+    const cc_ssa_function_t *f = s->f;
+    xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
+    size_t gpr = 0;
+    size_t xmm = 0;
+    size_t stack = 0;
+    int o;
+
+    if (!f->is_variadic || s->va_state < 0) {
+        o = xf_new_obj(&s->xf, XF_FIXED, 8, 8, 16 + 8 * (long)in->imm);
+        if (o < 0) {
+            return;
+        }
+        {
+            xop_t m = xop_frame(o, 0, 8);
+
+            xs_emit(s, XI_LEA, 8, 2, &m, &d, NULL);
+        }
+        return;
+    }
+    abi64_fixed_usage(f, (int)in->imm, s->hidden != XR_NONE ? 1 : 0, &gpr, &xmm, &stack);
+    gpr = gpr > 6 ? 6 : gpr;
+    xmm = xmm > 8 ? 8 : xmm;
+    /* the overflow area on an eightbyte boundary, as the psABI keeps it */
+    o = xf_new_obj(&s->xf, XF_FIXED, 8, 8, 16 + (long)align_up_size(stack, 8));
+    if (o < 0) {
+        return;
+    }
+    {
+        xop_t gp = xop_imm((long long)(gpr * 8), 4);
+        xop_t fp = xop_imm(48 + (long long)(xmm * 16), 4);
+        xop_t m0 = xop_frame(s->va_state, 0, 4);
+        xop_t m4 = xop_frame(s->va_state, 4, 4);
+        xop_t m8 = xop_frame(s->va_state, 8, 8);
+        xop_t m16 = xop_frame(s->va_state, 16, 8);
+        xop_t over = xop_frame(o, 0, 8);
+        xop_t save = xop_frame(s->va_save, 0, 8);
+        xop_t rec = xop_frame(s->va_state, 0, 8);
+        xop_t t = xs_temp(s);
+        xop_t t2 = xs_temp(s);
+
+        xs_emit(s, XI_MOV, 4, 2, &gp, &m0, NULL);
+        xs_emit(s, XI_MOV, 4, 2, &fp, &m4, NULL);
+        xs_emit(s, XI_LEA, 8, 2, &over, &t, NULL);
+        xs_emit(s, XI_MOV, 8, 2, &t, &m8, NULL);
+        xs_emit(s, XI_LEA, 8, 2, &save, &t2, NULL);
+        xs_emit(s, XI_MOV, 8, 2, &t2, &m16, NULL);
+        xs_emit(s, XI_LEA, 8, 2, &rec, &d, NULL);
+    }
+}
+
 /** Before the first instruction: a structure parameter's stack copy; each register parameter out of its register. */
 static int x64_begin(xsel_t *s) {
     const cc_ssa_function_t *f = s->f;
     size_t i;
 
+    if (f->is_variadic) {
+        save_va_regs(s);
+    }
     for (i = 0; i < f->instr_count; ++i) {
         const cc_ssa_instr_t *in = &f->instrs[i];
 
@@ -498,7 +586,7 @@ int x86_64_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_f
     t.param = x64_param;
     t.call = x64_call;
     t.ret = x64_ret;
-    t.va_start = NULL;
+    t.va_start = x64_va_start;
     t.sym_got = x64_sym_got;
     x64_pic = pic;
     return x86_mir_emit_function(out, &t, m, f, fn_index, src_path, emit_debug, diag);

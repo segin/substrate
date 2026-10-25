@@ -109,6 +109,8 @@ typedef enum {
     XI_CALL,      /**< call sym, or indirect through o0 when nops is 1 */
     XI_TRAP,      /**< ud2, or int3 */
     XI_ASM,       /**< IR instruction ir_index, an inline asm, its operands in frame objects (the selector's aux) */
+    XI_SAVEXMM,   /**< x86-64 variadic entry: %xmm0..7 stored at memory o0 on, 16 bytes each, when %al (imp_use) is not 0;
+                       label is its own, past the IR's */
     XI_COUNT
 } xi_op_t;
 
@@ -331,6 +333,8 @@ struct xsel {
     int has_goto;             /**< the function has an asm goto */
     int hidden;               /**< a structure result: the register holding the caller's buffer's address */
     int pop;                  /**< the bytes of arguments the return pops (an i386 hidden pointer) */
+    int va_save;              /**< an x86-64 variadic function: the frame object of its register save area, or -1 */
+    int va_state;             /**< and of the record its va_lists point at */
     unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
     unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
 };

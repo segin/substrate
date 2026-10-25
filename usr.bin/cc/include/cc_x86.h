@@ -240,6 +240,12 @@ abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gp
  */
 void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t gpr_start,
                               abi_loc_t *locs, size_t *out_stack_bytes, size_t *out_xmm_regs);
+/**
+ * What the first @p fixed_count parameters of @p f take, the general registers counted from @p gpr_start on: the
+ * general registers to *@p out_gpr, the xmm registers to *@p out_xmm, the stack bytes to *@p out_stack_bytes.
+ */
+void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t gpr_start, size_t *out_gpr, size_t *out_xmm,
+                       size_t *out_stack_bytes);
 /** Whether an aggregate result of @p size bytes and return classes @p cls comes back through a hidden pointer. */
 int x86_64_agg_ret_in_memory(long size, int cls);
 /** The largest structure @p f returns through a hidden pointer, or 0. */
