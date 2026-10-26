@@ -9642,6 +9642,7 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                                 return -1;
                             }
                             v = cast_value(sf, v, ct_value_kind(cc_ct_decay(elem_ct)), diag);
+                            v = widen_for_store(sf, v, elem_ct, elem_size, diag);
                             if (v < 0) {
                                 return -1;
                             }
@@ -9723,6 +9724,7 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                         return -1;
                     }
                     v = cast_value(sf, v, ct_value_kind(cc_ct_decay(elem_ct)), diag);
+                    v = widen_for_store(sf, v, elem_ct, elem_size, diag);
                     if (v < 0) {
                         return -1;
                     }
@@ -10040,7 +10042,9 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                         if (v < 0) {
                             return -1;
                         }
+                        /* (a constant, folded, is an int still: an i386 long long's high word made too) */
                         v = cast_value(sf, v, elem_kind, diag);
+                        v = widen_for_store(sf, v, elem_ct, elem_size, diag);
                         if (v < 0) {
                             return -1;
                         }
@@ -10120,6 +10124,7 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                     return -1;
                 }
                 v = cast_value(sf, v, elem_kind, diag);
+                v = widen_for_store(sf, v, elem_ct, elem_size, diag);
                 if (v < 0) {
                     return -1;
                 }
