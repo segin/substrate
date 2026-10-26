@@ -54,7 +54,7 @@ static int sema_builtin_complex(const cc_translation_unit_t *tu, cc_expr_t *e, v
 static const cc_ctype_t *sema_atomic_elem(const cc_expr_t *ptr);
 static int sema_transparent_union_accepts(const cc_translation_unit_t *tu, int sid, const cc_expr_t *arg);
 static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_function_t *callee,
-                                 size_t i);
+                                 const cc_ctype_t *ft, size_t i);
 static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars,
                                    size_t var_count, int depth, builtin_kind_t bk, int bswap_bits,
                                    const cc_function_t *callee, cc_diag_t *diag);
@@ -501,17 +501,18 @@ static int sema_transparent_union_accepts(const cc_translation_unit_t *tu, int s
  * parameter's type where a prototype gives one, else the default
  * argument promotions -- the integer promotions, and float to double.
  * The function's type comes from the declaration called or from the
- * pointer called through; an undeclared name (a builtin, or C89's
- * implicit declaration) converts nothing here.
+ * pointer called through (call_pointer_ftype()); an undeclared name (a
+ * builtin, or C89's implicit declaration) converts nothing here.
  *
  * @param tu      the translation unit
  * @param e       the call, its arguments checked
  * @param callee  the function the call names, or NULL
+ * @param ft      the function type the call goes through a pointer to, when @p callee is NULL; or NULL
  * @param i       the argument
  * @return        0, or -1 when out of memory
  */
 static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, const cc_function_t *callee,
-                                 size_t i) {
+                                 const cc_ctype_t *ft, size_t i) {
     const cc_ctype_t *a = sx_vtype(e->args[i]);
     int prototyped;
     size_t nparams;
@@ -524,10 +525,7 @@ static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, 
             param = sema_param_ctype(&callee->params[i]);
         }
     } else {
-        const cc_ctype_t *fp = e->lhs != NULL ? sx_vtype(e->lhs) : NULL;
-        const cc_ctype_t *ft = fp != NULL && fp->unqual->kind == CC_CT_POINTER ? fp->unqual->of : NULL;
-
-        if (ft == NULL || ft->kind != CC_CT_FUNCTION) {
+        if (ft == NULL) {
             return 0;
         }
         prototyped = ft->prototyped;
@@ -550,6 +548,34 @@ static int sema_convert_call_arg(const cc_translation_unit_t *tu, cc_expr_t *e, 
         return sema_convert(&e->args[i], cc_ct_promote(a->unqual));
     }
     return 0;
+}
+
+/**
+ * The function type call @p e goes through a pointer to: that of the
+ * pointer expression it calls, or of the pointer object it names -- a
+ * variable in scope or a global, as Linux's `delay_fn(loops)` is.
+ *
+ * @param tu         the translation unit
+ * @param e          the call, its callee checked
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the scope depth
+ * @return           the function type, or NULL when the call names no pointer to a function
+ */
+static const cc_ctype_t *call_pointer_ftype(const cc_translation_unit_t *tu, const cc_expr_t *e,
+                                            var_entry_t *vars, size_t var_count, int depth) {
+    const cc_ctype_t *fp = NULL;
+
+    if (e->ident == NULL) {
+        fp = e->lhs != NULL ? sx_vtype(e->lhs) : NULL;
+    } else {
+        int idx = vars_find_visible(vars, var_count, e->ident, depth);
+        const cc_global_t *g = idx >= 0 ? NULL : sema_find_global(tu, e->ident);
+
+        fp = idx >= 0 ? vars[idx].ctype : g != NULL ? g->ctype : NULL;
+    }
+    fp = fp != NULL && fp->unqual->kind == CC_CT_POINTER ? fp->unqual->of : NULL;
+    return fp != NULL && fp->kind == CC_CT_FUNCTION ? fp : NULL;
 }
 
 /**
@@ -1310,6 +1336,8 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
         }
         return -1;
     }
+    const cc_ctype_t *ptr_ft = callee == NULL ? call_pointer_ftype(tu, e, vars, var_count, depth) : NULL;
+
     for (i = 0; i < e->arg_count; ++i) {
         if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
             return -1;
@@ -1319,7 +1347,7 @@ int sema_check_call(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *
             sema_diag(diag, "out of memory");
             return -1;
         }
-        if (sema_convert_call_arg(tu, e, callee, i) != 0) {
+        if (sema_convert_call_arg(tu, e, callee, ptr_ft, i) != 0) {
             sema_diag(diag, "out of memory");
             return -1;
         }
