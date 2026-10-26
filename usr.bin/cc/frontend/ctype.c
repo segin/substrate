@@ -418,6 +418,18 @@ const cc_ctype_t *cc_ct_qualified(const cc_ctype_t *t, unsigned quals) {
     return n;
 }
 
+const cc_ctype_t *cc_ct_unqualified(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return NULL;
+    }
+    if (t->kind == CC_CT_ARRAY) {
+        const cc_ctype_t *e = cc_ct_unqualified(t->of);
+
+        return e == t->of ? t : e == NULL ? NULL : cc_ct_array(e, t->count);
+    }
+    return t->unqual;
+}
+
 /**
  * Whether a type is _Bool or an integer or enum type.
  *

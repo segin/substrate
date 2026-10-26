@@ -2474,7 +2474,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                 if (expect(p, TOK_RPAREN, "expected ')' after typeof/typeof_unqual") != 0) {
                     return -1;
                 }
-                acc->alias_ctype = drop_quals ? typeof_ctype->unqual : typeof_ctype;
+                acc->alias_ctype = drop_quals ? cc_ct_unqualified(typeof_ctype) : typeof_ctype;
                 continue;
             }
             if (tok_is_floatn_spelling(p)) {

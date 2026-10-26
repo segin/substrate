@@ -223,6 +223,17 @@ const cc_ctype_t *cc_ct_function(const cc_ctype_t *ret, const cc_ctype_t *const 
  */
 const cc_ctype_t *cc_ct_qualified(const cc_ctype_t *t, unsigned quals);
 
+/**
+ * A type with no qualifiers, as typeof_unqual gives it (C23 6.7.3.6): an
+ * array's elements unqualified too, since an array type's qualifiers are
+ * its elements' (C23 6.7.4.1) -- Linux's per_cpu_ptr() unqualifies a
+ * per-CPU array's __seg_gs elements so.
+ *
+ * @param t  the type
+ * @return   the unqualified type, or NULL when out of memory
+ */
+const cc_ctype_t *cc_ct_unqualified(const cc_ctype_t *t);
+
 /** @return whether @p t is _Bool or a (signed or unsigned) integer or enum type */
 int cc_ct_is_integer(const cc_ctype_t *t);
 
