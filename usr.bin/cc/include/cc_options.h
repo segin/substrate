@@ -5,6 +5,17 @@
 #include "cc_target.h"
 
 /*
+ * The gcc version cc answers to (__GNUC__, --version, -dumpversion): the
+ * gcc whose language and extensions it takes.  13.3, not 13.2, which Linux
+ * holds to have broken asm goto outputs (GCC_ASM_GOTO_OUTPUT_BROKEN) and so
+ * builds without them, though cc's work.
+ */
+#define CC_GCC_MAJOR 13
+#define CC_GCC_MINOR 3
+#define CC_GCC_PATCHLEVEL 0
+#define CC_GCC_VERSION_STR "13.3.0"
+
+/*
  * The settings one compilation runs with.  The driver fills a
  * cc_options_t from the command line and hands it to
  * cc_compile_c_to_s(), which selects it; every phase reads it back

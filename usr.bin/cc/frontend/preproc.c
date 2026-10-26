@@ -1516,14 +1516,17 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__FLT_EVAL_METHOD_TS_18661_3__", 0, 0, NULL, 0, flt_eval_method) != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__GNUC__", 0, 0, NULL, 0, "13") != 0) {
-        return -1;
-    }
-    if (macro_set(&st->macros, "__GNUC_MINOR__", 0, 0, NULL, 0, "2") != 0) {
-        return -1;
-    }
-    if (macro_set(&st->macros, "__GNUC_PATCHLEVEL__", 0, 0, NULL, 0, "0") != 0) {
-        return -1;
+    {
+        char gv[3][16];
+
+        snprintf(gv[0], sizeof(gv[0]), "%d", CC_GCC_MAJOR);
+        snprintf(gv[1], sizeof(gv[1]), "%d", CC_GCC_MINOR);
+        snprintf(gv[2], sizeof(gv[2]), "%d", CC_GCC_PATCHLEVEL);
+        if (macro_set(&st->macros, "__GNUC__", 0, 0, NULL, 0, gv[0]) != 0 ||
+            macro_set(&st->macros, "__GNUC_MINOR__", 0, 0, NULL, 0, gv[1]) != 0 ||
+            macro_set(&st->macros, "__GNUC_PATCHLEVEL__", 0, 0, NULL, 0, gv[2]) != 0) {
+            return -1;
+        }
     }
     if (macro_set(&st->macros, "__GNUC_STDC_INLINE__", 0, 0, NULL, 0, "1") != 0) {
         return -1;

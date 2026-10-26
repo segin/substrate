@@ -2282,12 +2282,12 @@ static int maybe_print_info_and_exit(int argc, char **argv) {
     return 0;
   }
   if (strcmp(info, "--version") == 0 || strcmp(info, "-v") == 0) {
-    printf("cc (Substrate GCC-compatible) 13.2.0\n");
+    printf("cc (Substrate GCC-compatible) %s\n", CC_GCC_VERSION_STR);
     return 1;
   }
   if (strcmp(info, "-dumpversion") == 0 ||
       strcmp(info, "-dumpfullversion") == 0) {
-    printf("13.2.0\n");
+    printf("%s\n", CC_GCC_VERSION_STR);
     return 1;
   }
   if (strcmp(info, "-dumpmachine") == 0) {
