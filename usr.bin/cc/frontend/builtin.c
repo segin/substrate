@@ -48,6 +48,7 @@ static const builtin_name_t g_known_builtins[] = {
     {"__builtin_sub_overflow_p"},
     {"__builtin_mul_overflow_p"},
     {"__builtin_object_size"},
+    {"__builtin_counted_by_ref"},
     {"__builtin_return_address"},
     {"__builtin_frame_address"},
     {"__builtin_memcmp"},

@@ -53,6 +53,7 @@ typedef enum {
     BUILTIN_SUB_OVERFLOW_P,
     BUILTIN_MUL_OVERFLOW_P,
     BUILTIN_OBJECT_SIZE,
+    BUILTIN_COUNTED_BY_REF,
     BUILTIN_RETURN_ADDRESS,
     BUILTIN_FRAME_ADDRESS,
     BUILTIN_MEMCMP,
@@ -200,6 +201,17 @@ int sema_complex_convert_for_assign(const cc_translation_unit_t *tu, cc_expr_t *
  * @return 0, or -1 with @p diag set
  */
 int sema_check_complex_parts(const cc_translation_unit_t *tu, cc_expr_t *e, cc_diag_t *diag);
+
+/**
+ * The member a checked member access's member is counted by -- gcc's
+ * `counted_by(m)` on a flexible array member or a pointer -- for
+ * __builtin_counted_by_ref().
+ *
+ * @param tu  the translation unit
+ * @param e   a checked CC_EXPR_MEMBER
+ * @return    the counting member's name, or NULL when it has none
+ */
+const char *sema_member_counted_by(const cc_translation_unit_t *tu, const cc_expr_t *e);
 
 /**
  * Check expression @p e and give it its interned type (see

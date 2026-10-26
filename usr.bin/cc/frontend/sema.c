@@ -5039,6 +5039,26 @@ static int sema_check_ident(const cc_translation_unit_t *tu, cc_expr_t *e, var_e
     return maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0 ? -1 : 0;
 }
 
+const char *sema_member_counted_by(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    const cc_struct_member_t *m = NULL;
+    const cc_ctype_t *t;
+    long off = 0;
+    int sid;
+
+    if (e == NULL || e->kind != CC_EXPR_MEMBER || e->lhs == NULL || e->ident == NULL) {
+        return NULL;
+    }
+    t = sx_vtype(e->lhs);
+    if (e->member_is_arrow) {
+        t = t != NULL && sema_is_ptr(t) ? t->of : NULL;
+    }
+    sid = sx_ct_record(t);
+    if (sid < 0 || find_struct_member_recursive(tu, sid, e->ident, 0, &m, &off) != 0 || m == NULL) {
+        return NULL;
+    }
+    return m->counted_by;
+}
+
 /**
  * Check a member access `s.m` or `p->m` (CC_EXPR_MEMBER), its bit-field
  * shape included, and type it the member's type.  GNU __real__/__imag__

@@ -151,6 +151,8 @@ typedef struct {
     char *asm_label;   /**< the string of a declarator's `asm("...")`, whole (owned); NULL for none */
     char *cleanup_fn;  /**< `cleanup(fn)`: the function called with the variable's address as it goes out of
                             scope (owned); NULL for none */
+    char *counted_by;  /**< `counted_by(m)`: the member holding a flexible array's or a pointer's element count
+                            (owned); NULL for none */
 } decl_attrs_t;
 
 static int is_decl_qual_tok(cc_tok_kind_t k);
@@ -1812,6 +1814,7 @@ static int struct_member_push(parser_t *p, int sid, const char *name, const cc_c
     sd->members[sd->member_count].bit_signed = bit_signed;
     sd->members[sd->member_count].bit_storage_size = bit_storage_size;
     sd->members[sd->member_count].ctype = ctype;
+    sd->members[sd->member_count].counted_by = NULL;
     sd->member_count++;
     return 0;
 }
@@ -1873,6 +1876,7 @@ static void parser_free_structs(parser_t *p) {
         free(p->structs[i].tag);
         for (j = 0; j < p->structs[i].member_count; ++j) {
             free(p->structs[i].members[j].name);
+            free(p->structs[i].members[j].counted_by);
         }
         free(p->structs[i].members);
         free(p->structs[i].layout);
@@ -2965,6 +2969,11 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                             return -1;
                         }
                         free(mname);
+                        if (mdecl_attrs.counted_by != NULL) {
+                            /* the member counting it, kept by name: it may come later in the structure */
+                            p->structs[sid].members[mindex].counted_by = mdecl_attrs.counted_by;
+                            mdecl_attrs.counted_by = NULL;
+                        }
                     } else if (skip_member_decl && mname == NULL && md.ctype->unqual->kind == CC_CT_RECORD &&
                                p->structs[md.ctype->unqual->id].complete) {
                         mindex = (int)p->structs[sid].member_count;
@@ -3858,6 +3867,7 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     a->alias = NULL;
     a->asm_label = NULL;
     a->cleanup_fn = NULL;
+    a->counted_by = NULL;
     a->vector_bytes = 0;
     a->vector_elems = 0;
     a->regparm = 0;
@@ -3875,6 +3885,8 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->asm_label = NULL;
     free(a->cleanup_fn);
     a->cleanup_fn = NULL;
+    free(a->counted_by);
+    a->counted_by = NULL;
     a->flags = 0;
     a->align = 0;
     a->format_index = 0;
@@ -3947,6 +3959,15 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
         }
         free(dst->cleanup_fn);
         dst->cleanup_fn = fn;
+    }
+    if (src->counted_by != NULL) {
+        char *m = cc_strndup(src->counted_by, strlen(src->counted_by));
+
+        if (m == NULL) {
+            return -1;
+        }
+        free(dst->counted_by);
+        dst->counted_by = m;
     }
     return 0;
 }
@@ -5058,6 +5079,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_visibility;
     int is_tls_model;
     int is_cleanup;
+    int is_counted_by;
     int is_constructor;
     int is_destructor;
     int is_transparent_union;
@@ -5110,6 +5132,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_visibility = tok_is_gnu_attr_name(p, "visibility");
     is_tls_model = tok_is_gnu_attr_name(p, "tls_model");
     is_cleanup = tok_is_gnu_attr_name(p, "cleanup");
+    is_counted_by = tok_is_gnu_attr_name(p, "counted_by");
     is_constructor = tok_is_gnu_attr_name(p, "constructor");
     is_destructor = tok_is_gnu_attr_name(p, "destructor");
     is_transparent_union = tok_is_gnu_attr_name(p, "transparent_union");
@@ -5121,14 +5144,41 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline || is_gnu_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
-                is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_constructor ||
+                is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_counted_by ||
+                is_constructor ||
                 is_destructor || is_transparent_union ||
                 is_vector_size || is_ext_vector_type || is_may_alias || is_mode || is_regparm;
 
     if (next_tok(p) != 0) {
         return -1;
     }
-    if (is_cleanup && p->tok.kind == TOK_LPAREN) {
+    if (is_counted_by && p->tok.kind == TOK_LPAREN) {
+        /* counted_by(m): the member holding the count, which __builtin_counted_by_ref() gives */
+        char *m = NULL;
+
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (p->tok.kind != TOK_IDENT) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "counted_by attribute expects a member name");
+            return -1;
+        }
+        m = cc_strndup(p->tok.start, p->tok.len);
+        if (m == NULL) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "out of memory reading a counted_by attribute");
+            return -1;
+        }
+        if (next_tok(p) != 0 || expect(p, TOK_RPAREN, "expected ')' after the counted_by member") != 0) {
+            free(m);
+            return -1;
+        }
+        if (out_attrs != NULL) {
+            free(out_attrs->counted_by);
+            out_attrs->counted_by = m;
+        } else {
+            free(m);
+        }
+    } else if (is_cleanup && p->tok.kind == TOK_LPAREN) {
         /* cleanup(fn): its argument names the function, which the parser keeps */
         char *fn = NULL;
 
@@ -10507,6 +10557,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
         free(tu->structs[i].tag);
         for (j = 0; j < tu->structs[i].member_count; ++j) {
             free(tu->structs[i].members[j].name);
+            free(tu->structs[i].members[j].counted_by);
         }
         free(tu->structs[i].members);
         free(tu->structs[i].layout);

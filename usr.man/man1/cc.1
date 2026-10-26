@@ -67,6 +67,15 @@ the address its offset there, and an inline asm memory operand of one is
 printed with the segment, as Linux's per-CPU data needs.
 Copying a structure into one is refused.
 .Pp
+gcc's
+.Sq Li counted_by Ns Pq Ar m
+on a flexible array member or a pointer member names the member holding
+its count, and
+.Fn __builtin_counted_by_ref p->fam
+is the address of that member, or a null
+.Vt void *
+where the member has none, as gcc gives it; no bounds are checked by it.
+.Pp
 Vector types, GNU
 .Sq Li vector_size
 and clang's

@@ -931,6 +931,7 @@ static int has_builtin_name(const char *name) {
         strcmp(name, "__builtin_bswap32") == 0 || strcmp(name, "__builtin_bswap64") == 0 ||
         strcmp(name, "__builtin_add_overflow") == 0 || strcmp(name, "__builtin_sub_overflow") == 0 ||
         strcmp(name, "__builtin_mul_overflow") == 0 || strcmp(name, "__builtin_object_size") == 0 ||
+        strcmp(name, "__builtin_counted_by_ref") == 0 ||
         strcmp(name, "__builtin___memcpy_chk") == 0 || strcmp(name, "__builtin___memmove_chk") == 0 ||
         strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_strlen") == 0 ||
         strcmp(name, "__builtin_prefetch") == 0 ||

@@ -240,6 +240,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_object_size") == 0) {
         return BUILTIN_OBJECT_SIZE;
     }
+    if (strcmp(name, "__builtin_counted_by_ref") == 0) {
+        return BUILTIN_COUNTED_BY_REF;
+    }
     if (strcmp(name, "__builtin_return_address") == 0) {
         return BUILTIN_RETURN_ADDRESS;
     }
@@ -926,6 +929,59 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         }
         sema_set_type(e, cc_ct_basic(CC_CT_ULLONG));
         return 0;
+    }
+    if (bk == BUILTIN_COUNTED_BY_REF) {
+        /*
+         * gcc's: &p->count for p->fam whose declaration says counted_by(count), else a null `void *` -- the call
+         * made that address-of, or a constant, here (Linux's __flex_counter())
+         */
+        cc_expr_t *fam;
+        const char *count;
+        char *name;
+
+        if (e->arg_count != 1) {
+            sema_diag(diag, "__builtin_counted_by_ref expects exactly 1 argument");
+            return -1;
+        }
+        if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        fam = e->args[0];
+        if (fam->kind != CC_EXPR_MEMBER || fam->ident == NULL || fam->lhs == NULL || fam->ctype == NULL ||
+            (fam->ctype->unqual->kind != CC_CT_ARRAY && fam->ctype->unqual->kind != CC_CT_POINTER)) {
+            sema_diag(diag, "__builtin_counted_by_ref argument must be a flexible array member or a pointer member");
+            return -1;
+        }
+        count = sema_member_counted_by(tu, fam);
+        if (count == NULL) {
+            cc_expr_free(fam);
+            e->args[0] = NULL;
+            e->arg_count = 0;
+            free(e->ident);
+            e->ident = NULL;
+            e->kind = CC_EXPR_INT;
+            e->int_val = 0;
+            sema_set_type(e, cc_ct_pointer(cc_ct_basic(CC_CT_VOID)));
+            return 0;
+        }
+        name = cc_strdup(count);
+        if (name == NULL) {
+            sema_diag(diag, "out of memory");
+            return -1;
+        }
+        /* the member access made the counter's, and the call its address */
+        free(fam->ident);
+        fam->ident = name;
+        if (check_expr(tu, fam, vars, var_count, depth, diag) != 0) {
+            return -1;
+        }
+        e->args[0] = NULL;
+        e->arg_count = 0;
+        free(e->ident);
+        e->ident = NULL;
+        e->kind = CC_EXPR_ADDR;
+        e->lhs = fam;
+        return check_expr(tu, e, vars, var_count, depth, diag);
     }
     if (bk == BUILTIN_RETURN_ADDRESS || bk == BUILTIN_FRAME_ADDRESS) {
         if (e->arg_count != 1) {

@@ -286,6 +286,8 @@ typedef struct {
     int bit_split; /**< a bit-field whose storage unit holds an ordinary member's bytes too: no unit could
                         avoid them, so a store writes only the bytes the field occupies */
     const struct cc_ctype *ctype; /**< its type, where its declaration recorded one; else NULL */
+    char *counted_by; /**< gcc's `counted_by(m)` on a flexible array member or a pointer: the member m holding its
+                           element count, as __builtin_counted_by_ref() gives it (owned); else NULL */
 } cc_struct_member_t;
 
 /**
