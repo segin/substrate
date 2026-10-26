@@ -6117,6 +6117,43 @@ static int push_cond(pp_cond_frame_t **stack, size_t *count, size_t *cap, pp_con
     return 0;
 }
 
+/**
+ * Whether code text @p s ends, but for white space, in the name of a
+ * function-like macro: its arguments may start on a later line, as in
+ * ACPICA's `return_ACPI_STATUS\n    (status);`, and the lines are expanded
+ * together (C11 6.10.3p10: the `(` is the next preprocessing token, new
+ * lines between counting as white space).
+ *
+ * @param st  the preprocessor state, its macros
+ * @param s   the code accumulated so far
+ * @return    1 if it does, else 0
+ */
+static int ends_with_fn_macro_name(pp_state_t *st, const char *s) {
+    size_t end;
+    size_t start;
+    char name[256];
+    const pp_macro_t *m;
+
+    if (s == NULL) {
+        return 0;
+    }
+    end = strlen(s);
+    while (end > 0 && isspace((unsigned char)s[end - 1])) {
+        end--;
+    }
+    start = end;
+    while (start > 0 && is_ident_char((unsigned char)s[start - 1])) {
+        start--;
+    }
+    if (start == end || end - start >= sizeof(name) || isdigit((unsigned char)s[start])) {
+        return 0;
+    }
+    memcpy(name, s + start, end - start);
+    name[end - start] = '\0';
+    m = macro_find(&st->macros, name);
+    return m != NULL && m->is_function;
+}
+
 static void update_paren_depth_line(const char *s, int *depth) {
     size_t i = 0;
     char in_quote = '\0';
@@ -6170,6 +6207,39 @@ static int pp_emit_text(pp_state_t *st, FILE *out, const char *s) {
         return -1;
     }
     st->output_bytes += n;
+    return 0;
+}
+
+/**
+ * Emit the expansion of code accumulated over several source lines -- a
+ * macro call whose arguments, or whose `(`, came on a later line -- and
+ * as many blank lines more as the call's expansion took up fewer than its
+ * source, as gcc does, so that the lines after it keep their numbers.
+ *
+ * @param st        the preprocessor state
+ * @param out       the output
+ * @param expanded  the expansion
+ * @param src       the source lines it came from
+ * @return          0, or -1 on an output error
+ */
+static int pp_emit_keeping_lines(pp_state_t *st, FILE *out, const char *expanded, const char *src) {
+    long missing = 0;
+    const char *c;
+
+    for (c = src; c != NULL && *c != '\0'; ++c) {
+        missing += *c == '\n';
+    }
+    for (c = expanded; *c != '\0'; ++c) {
+        missing -= *c == '\n';
+    }
+    if (pp_emit_text(st, out, expanded) != 0) {
+        return -1;
+    }
+    for (; missing > 0; --missing) {
+        if (pp_emit_text(st, out, "\n") != 0) {
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -6291,7 +6361,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (expanded == NULL) {
                     goto fail;
                 }
-                if (pp_emit_text(st, out, expanded) != 0) {
+                if (pp_emit_keeping_lines(st, out, expanded, code_accum.buf) != 0) {
                     free(expanded);
                     goto fail;
                 }
@@ -6801,7 +6871,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 goto fail;
             }
             update_paren_depth_line(proc, &code_paren_depth);
-            if (code_paren_depth > 0) {
+            if (code_paren_depth > 0 || ends_with_fn_macro_name(st, code_accum.buf)) {
                 continue;
             }
             {
@@ -6810,7 +6880,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (expanded == NULL) {
                     goto fail;
                 }
-                if (pp_emit_text(st, out, expanded) != 0) {
+                if (pp_emit_keeping_lines(st, out, expanded, code_accum.buf) != 0) {
                     free(expanded);
                     goto fail;
                 }
@@ -6832,7 +6902,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
         if (expanded == NULL) {
             goto fail;
         }
-        if (pp_emit_text(st, out, expanded) != 0) {
+        if (pp_emit_keeping_lines(st, out, expanded, code_accum.buf) != 0) {
             free(expanded);
             goto fail;
         }
