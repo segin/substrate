@@ -600,8 +600,9 @@ and
 make the symbol hidden.
 A symbol defined inside
 .Ic SECTIONS
-belongs to the section its address falls in; one defined outside is
-absolute.
+belongs to the section its address falls in, unless it is set between
+output sections to an expression of numbers alone, which is absolute as
+in GNU ld; one defined outside is absolute.
 Expressions have the operators of C, parentheses nested no more than 256
 deep, and the functions
 .Ic ALIGN

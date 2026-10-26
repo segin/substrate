@@ -2930,9 +2930,36 @@ static int lw_eval(lds_walk_t *w, const lds_tokvec_t *e, int have_dot, uint64_t 
     return 0;
 }
 
+/**
+ * @brief Whether an expression is made of numbers alone.
+ *
+ * It names no symbol, no section and not the location counter (which
+ * lexes as a name), so between output sections GNU ld takes its value as
+ * an absolute address.
+ *
+ * @param e The expression's tokens.
+ * @return 1 if it has tokens and none of them is a name or a string, else 0.
+ */
+static int lds_expr_is_number(const lds_tokvec_t *e) {
+    size_t i;
+
+    if (e->count == 0) {
+        return 0;
+    }
+    for (i = 0; i < e->count; ++i) {
+        if (e->items[i].kind == LDS_TOK_IDENT || e->items[i].kind == LDS_TOK_STRING) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Give a symbol the script defines its value in the output.  One defined
  * among the sections belongs to the section its address is in, so that it
- * moves with the program if the program is moved. */
+ * moves with the program if the program is moved -- unless it is set to a
+ * plain number between them, which is an absolute address (the kernel's
+ * real-mode `real_mode_seg = 0;`, which its relocs tool finds only as
+ * SHN_ABS). */
 static int lw_define(lds_walk_t *w, const lds_stmt_t *st, uint64_t value, elf_section_t *hint, uint64_t hint_end) {
     elf_symbol_t *sym = elf_find_symbol(w->out, st->at.text);
     elf_section_t *home = NULL;
@@ -2944,7 +2971,7 @@ static int lw_define(lds_walk_t *w, const lds_stmt_t *st, uint64_t value, elf_se
             return -1;
         }
     }
-    if (st->where != LDS_IN_TOP) {
+    if (st->where != LDS_IN_TOP && !(st->where == LDS_IN_SECTIONS && st->op == '=' && lds_expr_is_number(&st->expr))) {
         if (hint != NULL && value >= elf_section_addr(hint) && value <= hint_end) {
             home = hint;
         }
