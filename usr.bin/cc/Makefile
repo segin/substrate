@@ -130,7 +130,7 @@ ir/ir-verifier.o ir/ir-normalize.o ir/ir-diff.o: ir/ir.h
 	$(CC) $(TOOL_CFLAGS) $(TOOL_CPPFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(PROGS) $(ALL_OBJS) $(MODE_STAMP)
+	rm -f $(PROGS) $(ALL_OBJS) $(ALL_OBJS:.o=.d) $(MODE_STAMP)
 	rm -rf obj-x86_64
 
 install: $(PROGS)

@@ -143,7 +143,8 @@ ifdef NATIVE_BUILD
     # Host build configuration
     HOSTCFLAGS ?= -O2 $(WARNFLAGS)
     CC := $(HOSTCC)
-    CFLAGS := $(HOSTCFLAGS)
+    # (-MMD -MP as a target build has them in COMMON_FLAGS: the header tracking above needs the .d files)
+    CFLAGS := $(HOSTCFLAGS) -MMD -MP
     # Start with empty/standard flags for host, but allow overrides.
     USER_CFLAGS := $(CFLAGS) $(EXTRA_USER_CFLAGS)
     USER_LDFLAGS := $(EXTRA_USER_LDFLAGS)
