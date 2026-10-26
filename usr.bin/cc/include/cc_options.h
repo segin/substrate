@@ -6,14 +6,16 @@
 
 /*
  * The gcc version cc answers to (__GNUC__, --version, -dumpversion): the
- * gcc whose language and extensions it takes.  13.3, not 13.2, which Linux
- * holds to have broken asm goto outputs (GCC_ASM_GOTO_OUTPUT_BROKEN) and so
- * builds without them, though cc's work.
+ * gcc whose language and extensions it takes -- gcc 16's, the one Linux
+ * is built with beside it: asm goto outputs (which Linux holds broken in
+ * 13.0 to 13.2), __typeof_unqual__ (14), counted_by and
+ * __builtin_counted_by_ref (15.1, on pointers 16), so that a kernel cc
+ * configures takes the paths gcc's takes.
  */
-#define CC_GCC_MAJOR 13
-#define CC_GCC_MINOR 3
-#define CC_GCC_PATCHLEVEL 0
-#define CC_GCC_VERSION_STR "13.3.0"
+#define CC_GCC_MAJOR 16
+#define CC_GCC_MINOR 2
+#define CC_GCC_PATCHLEVEL 1
+#define CC_GCC_VERSION_STR "16.2.1"
 
 /*
  * The settings one compilation runs with.  The driver fills a
