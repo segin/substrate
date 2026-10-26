@@ -2911,6 +2911,10 @@ static int optimize_function(cc_ssa_function_t *f, int opt_level) {
     return rc1 < 0 || rc2 < 0 || rc3 < 0 ? -1 : 0;
 }
 
+int cc_optimize_function(cc_ssa_function_t *f, int opt_level) {
+    return optimize_function(f, opt_level);
+}
+
 /** The index of the function of @p m that @p sym calls, or -1 when it is not one of the module's. */
 static long called_function(const cc_ssa_module_t *m, const char *sym) {
     size_t i;
@@ -3420,7 +3424,7 @@ static int inline_module(cc_ssa_module_t *m, int opt_level) {
                 continue;
             }
             top--;
-            rc = cc_inline_calls(m, fi, done, once);
+            rc = cc_inline_calls(m, fi, done, once, opt_level);
             if (rc > 0) {
                 rc = optimize_function(&m->funcs[fi], opt_level);
             }

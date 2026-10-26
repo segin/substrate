@@ -122,8 +122,21 @@ int cc_inline_candidate(const cc_ssa_function_t *g);
  * @param once   per function of @p m: 1 if it is static and called from
  *               one place only, so it is inlined though not marked inline
  *               and at a larger size; may be NULL
+ * @param opt_level  the optimization level, which a copy of a callee is
+ *               folded at to weigh it where the call passes constants
  * @return       how many calls were inlined, or -1 when out of memory
  */
-int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once);
+int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once,
+                    int opt_level);
+
+/**
+ * Fold, propagate and drop what is dead in @p f, one function alone, as
+ * the optimizer does each function at @p opt_level (passes/opt.c).
+ *
+ * @param f          the function, rewritten in place
+ * @param opt_level  the optimization level
+ * @return           0, or -1 when out of memory
+ */
+int cc_optimize_function(cc_ssa_function_t *f, int opt_level);
 
 #endif

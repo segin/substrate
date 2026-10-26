@@ -35,6 +35,7 @@
 #include "cc_target.h"
 #include "cc_util.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,6 +43,12 @@
 #define INLINE_MAX_INSTRS 160
 /** The most code (body_cost()) a static function not declared inline may have to be inlined: about a call's. */
 #define SMALL_BODY_COST 8
+/**
+ * The same for one declared inline but not always_inline, from more than one place: inline is a hint gcc weighs
+ * against what each copy adds, and Linux's maple tree helpers, inlined at every call, made maple_tree.o 1.66 times
+ * gcc's.  Measured over six Linux objects on both targets: 10 smallest on i386, within half a percent on x86-64.
+ */
+#define INLINE_MAX_COST 10
 /** The same for an always_inline function, which gcc inlines whatever its size. */
 #define ALWAYS_INLINE_MAX_INSTRS 4000
 /** The same for a static function called from one place, which gcc inlines unless very large. */
@@ -207,7 +214,70 @@ int cc_inline_candidate(const cc_ssa_function_t *g) {
         return body_cost(g) <= SMALL_BODY_COST && cc_ssa_memory_slot_bytes(g) == 0 &&
                inline_body_ok(g, INLINE_MAX_INSTRS);
     }
+    if (!always && body_cost(g) > INLINE_MAX_COST) {
+        /* (one called from one place may still be, cc_inline_calls()'s once, and one a call's constants fold
+           down, hint_folds_to_small()) */
+        return 0;
+    }
     return inline_body_ok(g, (size_t)(always ? ALWAYS_INLINE_MAX_INSTRS : INLINE_MAX_INSTRS));
+}
+
+/**
+ * Whether @p g is declared inline, but not always_inline, and is not inlined everywhere only for its size: a
+ * call of it that passes constants may still fold it small enough (hint_folds_to_small()).
+ */
+static int inline_hint_too_big(const cc_ssa_function_t *g) {
+    return (g->storage & CC_STORAGE_STATIC) != 0 && (g->storage & CC_STORAGE_INLINE) != 0 &&
+           (g->attr_flags & (CC_ATTR_NOINLINE | CC_ATTR_ALWAYS_INLINE)) == 0 && body_cost(g) > INLINE_MAX_COST &&
+           inline_body_ok(g, INLINE_MAX_INSTRS);
+}
+
+/**
+ * The integer values of @p f, @p n of them, defined once only and by a constant: @p k[v] its value where
+ * @p is_k[v] is set.  A value a `set`, a call, an asm or another instruction defines too is none.
+ *
+ * @return 0, or -1 when out of memory (and nothing is left allocated)
+ */
+static int find_constants(const cc_ssa_function_t *f, int n, unsigned char **is_k, long long **k) {
+    unsigned char *defs = (unsigned char *)calloc((size_t)(n > 0 ? n : 1), 1);
+    size_t i;
+    size_t j;
+
+    *is_k = (unsigned char *)calloc((size_t)(n > 0 ? n : 1), 1);
+    *k = (long long *)calloc((size_t)(n > 0 ? n : 1), sizeof(**k));
+    if (defs == NULL || *is_k == NULL || *k == NULL) {
+        free(defs);
+        free(*is_k);
+        free(*k);
+        *is_k = NULL;
+        *k = NULL;
+        return -1;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+
+        if (in->dst >= 0 && in->dst < n && defs[in->dst] < 2) {
+            defs[in->dst]++;
+            if (in->op == CC_SSA_CONST && cc_ssa_value_class(f, in->dst) == CC_VAL_I64) {
+                (*is_k)[in->dst] = 1;
+                (*k)[in->dst] = in->imm;
+            }
+        }
+        for (j = 0; j < in->asm_out_count; ++j) {
+            int v = in->asm_out_values[j];
+
+            if (v >= 0 && v < n && defs[v] < 2) {
+                defs[v]++;
+            }
+        }
+    }
+    for (i = 0; i < (size_t)n; ++i) {
+        if (defs[i] != 1) {
+            (*is_k)[i] = 0;
+        }
+    }
+    free(defs);
+    return 0;
 }
 
 /** Whether values @p a of @p fa and @p b of @p fb have the same class and size, so a move copies one to the other. */
@@ -805,14 +875,102 @@ static long find_function(const cc_ssa_module_t *m, const char *name) {
     return -1;
 }
 
-int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once) {
+/**
+ * Whether @p g (inline_hint_too_big()), inlined for @p call, comes to no more than INLINE_MAX_COST and one for each
+ * argument the call sets up: a copy of it
+ * with each parameter the call passes a constant (@p is_k, @p k, as find_constants() leaves them, over the
+ * caller's first @p n values) made that constant, folded at @p opt_level as the inlined body would be.  gcc
+ * weighs a call's constant arguments the same way: Linux's rol64() with a variable count is a dozen word
+ * operations on i386, with a constant one shld.  No for a call passing no constant, or out of memory.
+ */
+static int hint_folds_to_small(const cc_ssa_function_t *g, const cc_ssa_instr_t *call, const unsigned char *is_k,
+                               const long long *k, int n, int opt_level) {
+    cc_ssa_function_t h;
+    int *vmap = NULL;
+    size_t i;
+    int bound = 0;
+    int small = 0;
+
+    for (i = 0; i < call->arg_count && !bound; ++i) {
+        bound = call->args[i] >= 0 && call->args[i] < n && is_k[call->args[i]];
+    }
+    if (!bound) {
+        return 0;
+    }
+    /* the copy shares g's names and parameter arrays, which no pass changes, and owns its code and values */
+    memset(&h, 0, sizeof(h));
+    h.name = g->name;
+    h.ret_type = g->ret_type;
+    h.storage = g->storage;
+    h.attr_flags = g->attr_flags;
+    h.is_variadic = g->is_variadic;
+    h.param_count = g->param_count;
+    h.param_values = g->param_values;
+    h.param_types = g->param_types;
+    h.param_abi = g->param_abi;
+    h.ret_abi = g->ret_abi;
+    h.sret_reg = g->sret_reg;
+    h.value_count = g->value_count;
+    h.label_count = g->label_count;
+    h.value_cap = g->value_count > 0 ? (size_t)g->value_count : 1;
+    h.value_ty = (cc_ssa_type_t *)malloc(h.value_cap * sizeof(*h.value_ty));
+    h.instr_cap = g->instr_count > 0 ? g->instr_count : 1;
+    h.instrs = (cc_ssa_instr_t *)malloc(h.instr_cap * sizeof(*h.instrs));
+    vmap = (int *)malloc(h.value_cap * sizeof(*vmap));
+    if (h.value_ty == NULL || h.instrs == NULL || vmap == NULL) {
+        goto out;
+    }
+    if (g->value_count > 0) {
+        memcpy(h.value_ty, g->value_ty, (size_t)g->value_count * sizeof(*h.value_ty));
+    }
+    for (i = 0; i < (size_t)g->value_count; ++i) {
+        vmap[i] = (int)i;
+    }
+    for (i = 0; i < g->instr_count; ++i) {
+        const cc_ssa_instr_t *src = &g->instrs[i];
+        int pi = src->op == CC_SSA_PARAM ? src->param_index : -1;
+
+        if (pi >= 0 && (size_t)pi < call->arg_count && call->args[pi] >= 0 && call->args[pi] < n &&
+            is_k[call->args[pi]] && src->dst >= 0 && cc_ssa_value_class(g, src->dst) == CC_VAL_I64) {
+            cc_ssa_instr_t c = plain_instr(CC_SSA_CONST);
+
+            c.dst = src->dst;
+            c.imm = k[call->args[pi]];
+            c.is_unsigned = cc_ssa_value_is_unsigned(g, src->dst);
+            h.instrs[h.instr_count++] = c;
+        } else if (clone_instr(src, vmap, 0, &h.instrs[h.instr_count]) == 0) {
+            h.instr_count++;
+        } else {
+            goto out;
+        }
+    }
+    /* (the call's setting up of each argument is saved too) */
+    small = cc_optimize_function(&h, opt_level) == 0 && body_cost(&h) <= INLINE_MAX_COST + call->arg_count;
+out:
+    for (i = 0; i < h.instr_count; ++i) {
+        cc_ssa_instr_free(&h.instrs[i]);
+    }
+    free(h.instrs);
+    free(h.value_ty);
+    free(vmap);
+    return small;
+}
+
+int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, const unsigned char *once,
+                    int opt_level) {
     cc_ssa_function_t *f = &m->funcs[fi];
     ivec_t out;
     size_t i;
     int inlined = 0;
     long frame = cc_ssa_memory_slot_bytes(f); /* its own slots */
     long grown = frame;          /* and those of what is inlined so far */
+    int nk = f->value_count;     /* the values the calls' arguments are */
+    unsigned char *is_const;
+    long long *consts;
 
+    if (find_constants(f, nk, &is_const, &consts) != 0) {
+        return -1;
+    }
     memset(&out, 0, sizeof(out));
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *call = &f->instrs[i];
@@ -826,7 +984,8 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
         if (g != NULL && (size_t)gi != fi && ready[gi] &&
             (cc_inline_candidate(g) ||
              (once != NULL && once[gi] && inline_body_ok(g, CALLED_ONCE_MAX_INSTRS) &&
-              frame_growth_ok(frame, grown + frame_cost(g)))) &&
+              frame_growth_ok(frame, grown + frame_cost(g))) ||
+             (inline_hint_too_big(g) && hint_folds_to_small(g, call, is_const, consts, nk, opt_level))) &&
             call_site_inlinable(f, call, g)) {
             grown += frame_cost(g);
             if (splice_body(f, call, g, &out) != 0) {
@@ -855,6 +1014,8 @@ int cc_inline_calls(cc_ssa_module_t *m, size_t fi, const unsigned char *ready, c
             break;
         }
     }
+    free(is_const);
+    free(consts);
     if (i < f->instr_count) {
         /* out of memory: the instructions moved are in out, the rest still in f */
         size_t k;

@@ -56,7 +56,10 @@ Optimization passes over legal SSA IR, run by `cc_run_middle_passes()`
   reads go (`cc_dead_defs()`), liveness followed to an asm goto's
   labels too, and what that leaves one value folds again.
 - `inline.c`: the inlining itself -- which functions may be inlined
-  (`cc_inline_candidate()`: static and inline or always_inline, small,
+  (`cc_inline_candidate()`: static and inline or always_inline, small --
+  inline alone no bigger than about a call, `INLINE_MAX_COST`, but at a
+  call whose constant arguments, bound in a copy of it folded on its own
+  (`cc_optimize_function()`), bring it to that, `hint_folds_to_small()` --
   an interface of plain values or structures by value -- an argument's
   storage taken for the parameter where the body only reads it, a result
   stored to the call's buffer, its words or a copy from where it points
