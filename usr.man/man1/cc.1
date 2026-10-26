@@ -111,6 +111,12 @@ as with
 .Xr gcc 1 .
 .It Fl I Ar dir , Fl D Ar name Ns Op =value , Fl U Ar name
 Preprocessor include/macro controls.
+A
+.Fl D
+that gives a macro already defined, by the compiler or an earlier
+.Fl D ,
+another value is warned of, as gcc does, and is an error under
+.Fl Werror .
 .It Fl idirafter Ar dir
 Add a late include search path.
 .It Fl include Ar file , Fl imacros Ar file

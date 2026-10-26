@@ -4,6 +4,7 @@
 #include "cc_frontend.h"
 #include "cc_diag.h"
 #include "cc_lang.h"
+#include "cc_options.h"
 #include "cc_target.h"
 #include "cc_util.h"
 
@@ -131,6 +132,9 @@ typedef struct {
     size_t max_expanded_text;
     size_t max_output_size;
     size_t max_expanded_tokens;
+    /** a -D redefining a macro differently under -Werror: the name, for the error (owned) */
+    char *cmd_redefined;
+    int werror; /**< -Werror among the flags, wherever it is */
 } pp_state_t;
 
 typedef struct {
@@ -2635,10 +2639,48 @@ static int emit_macro_dump(pp_state_t *st, FILE *out) {
     return 0;
 }
 
+/**
+ * Whether replacement lists @p a and @p b are the same, as C11 6.10.3p2 asks of a macro defined again: the same
+ * tokens, the white space between them counting only as there or not.
+ */
+static int same_replacement(const char *a, const char *b) {
+    while (isspace((unsigned char)*a)) {
+        a++;
+    }
+    while (isspace((unsigned char)*b)) {
+        b++;
+    }
+    while (*a != '\0' && *b != '\0') {
+        if (isspace((unsigned char)*a) || isspace((unsigned char)*b)) {
+            if (!isspace((unsigned char)*a) || !isspace((unsigned char)*b)) {
+                return 0;
+            }
+            while (isspace((unsigned char)*a)) {
+                a++;
+            }
+            while (isspace((unsigned char)*b)) {
+                b++;
+            }
+            continue;
+        }
+        if (*a++ != *b++) {
+            return 0;
+        }
+    }
+    while (isspace((unsigned char)*a)) {
+        a++;
+    }
+    while (isspace((unsigned char)*b)) {
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 static int parse_cmd_define(pp_state_t *st, const char *arg) {
     const char *eq = strchr(arg, '=');
     char *name = NULL;
     char *body = NULL;
+    const pp_macro_t *old;
     int rc = -1;
     if (eq == NULL) {
         name = cc_strdup(arg);
@@ -2649,6 +2691,16 @@ static int parse_cmd_define(pp_state_t *st, const char *arg) {
     }
     if (name == NULL || body == NULL) {
         goto out;
+    }
+    old = macro_find(&st->macros, name);
+    if (old != NULL && (old->is_function || !same_replacement(old->body, body))) {
+        /* as gcc: a predefined macro or an earlier -D given another value; Kconfig's __int128 probe asks it */
+        if (st->werror || (cc_options_current() != NULL && cc_options_current()->warn_error)) {
+            st->cmd_redefined = name;
+            name = NULL;
+            goto out;
+        }
+        fprintf(stderr, "<command-line>: warning: '%s' redefined\n", name);
     }
     rc = macro_set(&st->macros, name, 0, 0, NULL, 0, body);
 out:
@@ -6852,12 +6904,24 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     pp_set_lang(&st, &lang);
 
     scan_target_flags(&st, flags, flag_count);
+    for (size_t wi = 0; wi < flag_count; ++wi) {
+        if (strcmp(flags[wi], "-Werror") == 0) {
+            st.werror = 1;
+        }
+    }
     if (add_builtin_macros(&st) != 0) {
         set_diag(diag, 0, 0, "failed to initialize preprocessor builtins");
         goto out;
     }
     if (apply_flags(&st, flags, flag_count) != 0) {
-        set_diag(diag, 0, 0, "invalid preprocessor options");
+        if (st.cmd_redefined != NULL) {
+            char msg[192];
+
+            snprintf(msg, sizeof(msg), "'%s' redefined [-Werror]", st.cmd_redefined);
+            cc_diag_set(diag, "<command-line>", 0, 0, msg);
+        } else {
+            set_diag(diag, 0, 0, "invalid preprocessor options");
+        }
         goto out;
     }
     if (add_default_include_paths(&st) != 0) {
@@ -6928,5 +6992,6 @@ out:
     macro_stack_free(&st.pragma_macro_stack);
     free(st.dep_target);
     free(st.dep_file);
+    free(st.cmd_redefined);
     return rc;
 }

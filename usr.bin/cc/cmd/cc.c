@@ -1346,7 +1346,7 @@ static const driver_opt_t options[] = {
     {"-O", OPT_PREFIX, FWD_C, opt_str, F(opt_level), 0},
     {"-g", OPT_FLAG, FWD_C | FWD_AS, opt_int, F(debug), 1},
     {"-Wall", OPT_FLAG, FWD_C, opt_int, F(wall), 1},
-    {"-Werror", OPT_FLAG, FWD_C, opt_int, F(werror), 1},
+    {"-Werror", OPT_FLAG, FWD_C | FWD_CPP, opt_int, F(werror), 1},
     {"-pedantic", OPT_FLAG, FWD_C, opt_int, F(pedantic), 1},
     {"-pedantic-errors", OPT_FLAG, FWD_C, opt_pedantic_errors, 0, 0},
     {"-Werror=implicit-function-declaration", OPT_FLAG, FWD_C, opt_int, F(implicit_funcdecl_override), 0},
