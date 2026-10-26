@@ -34,7 +34,17 @@ libgcc's
 .Fn __divmodbitint4 ,
 .Fn __floatbitint*
 and
-.Fn __fix*bitint .
+.Fn __fix*bitint ,
+but for a product of two 64-bit limbs on x86-64
+.Po
+.Vt __int128 ,
+.Vt _BitInt Ns Pq 65
+to
+.Vt _BitInt Ns Pq 128
+.Pc ,
+made inline with
+.Li mulq ,
+as gcc makes it.
 .Vt __int128
 and
 .Vt unsigned __int128

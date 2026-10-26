@@ -812,6 +812,7 @@ const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_HI32: return "hi32";
     case CC_SSA_PAIR: return "pair";
     case CC_SSA_UMULW: return "umulw";
+    case CC_SSA_UMULH: return "umulh";
     case CC_SSA_STACKALLOC: return "stackalloc";
     case CC_SSA_DYNALLOC: return "dynalloc";
     case CC_SSA_CHAIN: return "chain";
@@ -2288,6 +2289,7 @@ static int instr_uses_value(const cc_ssa_instr_t *in, int value) {
         return in->lhs == value;
     case CC_SSA_PAIR:
     case CC_SSA_UMULW:
+    case CC_SSA_UMULH:
     case CC_SSA_STORE:
     case CC_SSA_DYNALLOC:
     case CC_SSA_ADD:
@@ -2687,6 +2689,7 @@ static void for_each_instr_use(const cc_ssa_function_t *f, const cc_ssa_instr_t 
     case CC_SSA_CMP:
     case CC_SSA_PAIR:
     case CC_SSA_UMULW:
+    case CC_SSA_UMULH:
         if (in->lhs >= 0 && in->lhs < f->value_count) fn(in->lhs, ctx);
         if (in->rhs >= 0 && in->rhs < f->value_count) fn(in->rhs, ctx);
         break;

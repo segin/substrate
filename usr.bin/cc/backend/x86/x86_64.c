@@ -1968,7 +1968,8 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             case CC_SSA_HI32:
             case CC_SSA_PAIR:
             case CC_SSA_UMULW:
-                /* i386 legalization writes these; x86-64 has 64-bit registers */
+            case CC_SSA_UMULH:
+                /* i386 legalization writes the first; UMULH only the register allocator's path selects */
                 set_diag(diag, "x86-64: word-pair operation in legal IR");
                 int_regs_free(&ist);
                 slot_layout_free(&lay);

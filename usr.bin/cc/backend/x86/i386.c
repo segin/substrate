@@ -3668,6 +3668,13 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 break;
             }
 
+            case CC_SSA_UMULH:
+                /* x86-64's: no i386 lowering writes it */
+                set_diag(diag, "i386: a 64-bit word's high product in legal IR");
+                int_regs_free(&ist);
+                slot_layout_free(&lay);
+                return -1;
+
             case CC_SSA_UMULW:
                 /* mull: %edx:%eax = %eax * the operand */
                 int_regs_flush(fp, f, &lay, &ist);

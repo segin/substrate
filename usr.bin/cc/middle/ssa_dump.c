@@ -255,6 +255,7 @@ static size_t instr_uses(const cc_ssa_instr_t *in, int *out, size_t cap) {
     case CC_SSA_DYNALLOC:
     case CC_SSA_PAIR:
     case CC_SSA_UMULW:
+    case CC_SSA_UMULH:
         USE(in->lhs);
         USE(in->rhs);
         break;
@@ -450,6 +451,8 @@ static const char *binop_name(const cc_ssa_instr_t *in, int is_float) {
         return "pair";
     case CC_SSA_UMULW:
         return "umulw";
+    case CC_SSA_UMULH:
+        return "umulh";
     default:
         return NULL;
     }

@@ -3056,6 +3056,28 @@ static void sel_instr(xsel_t *s, size_t j) {
         break;
     }
 
+    case CC_SSA_UMULH: {
+        /* mulq: %rdx:%rax = %rax * the operand, the high word wanted */
+        xop_t rax = xop_reg(XR_AX, 8);
+        xop_t rdx = xop_reg(XR_DX, 8);
+        xop_t b;
+        xop_t d;
+        xinst_t x;
+
+        if (w != 8) {
+            NOPE(s);
+        }
+        b = xs_reg_word(s, in->rhs, 0);
+        d = xop_reg(xs_vreg_of(s, in->dst, 0), 8);
+        xs_move_word_to(s, in->lhs, 0, &rax);
+        x = xi_make(XI_MUL1, 8, 1, &b, NULL, NULL);
+        x.imp_use = XR_BIT(XR_AX);
+        x.imp_def = XR_BIT(XR_AX) | XR_BIT(XR_DX);
+        xf_emit(&s->xf, &x);
+        xs_emit(s, XI_MOV, 8, 2, &rdx, &d, NULL);
+        break;
+    }
+
     case CC_SSA_ADD:
     case CC_SSA_SUB:
     case CC_SSA_MUL:

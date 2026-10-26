@@ -1245,6 +1245,7 @@ static int fold_function(cc_ssa_function_t *f, int fold_branches) {
         case CC_SSA_REGREAD:
         case CC_SSA_LOAD:
         case CC_SSA_UMULW:
+        case CC_SSA_UMULH:
             if (dst >= 0) {
                 st[dst].known = 0;
             }
@@ -1893,6 +1894,7 @@ static int is_pure(const cc_ssa_instr_t *in) {
     case CC_SSA_HI32:
     case CC_SSA_PAIR:
     case CC_SSA_UMULW:
+    case CC_SSA_UMULH:
         return 1;
     case CC_SSA_LABEL:
     case CC_SSA_BR:
@@ -2649,6 +2651,7 @@ static int cse_candidate(const cc_ssa_instr_t *in) {
     case CC_SSA_HI32:
     case CC_SSA_PAIR:
     case CC_SSA_UMULW:
+    case CC_SSA_UMULH:
     case CC_SSA_I2F:
     case CC_SSA_F2I:
     case CC_SSA_FROUND32:

@@ -4086,11 +4086,56 @@ static long wide_prec(const wide_t *w) {
     return w->is_unsigned ? w->bits : -w->bits;
 }
 
-/** @p a * / % @p b by libgcc's __mulbitint3 and __divmodbitint4, into a new temporary. */
+/**
+ * The high word of the unsigned product of limbs @p a and @p b (CC_SSA_UMULH, x86-64's mulq).
+ *
+ * @return the value, or -1 when out of memory
+ */
+static int wide_umulh(cc_ssa_function_t *sf, int a, int b, const wide_t *w, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    if (a < 0 || b < 0) {
+        return -1;
+    }
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_UMULH;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = a;
+    in.rhs = b;
+    in.is_unsigned = 1;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory multiplying wide integers");
+        return -1;
+    }
+    cc_ir_set_size(sf, in.dst, w->limb);
+    return in.dst;
+}
+
+/**
+ * @p a * / % @p b, into a new temporary: a product of two 64-bit limbs (x86-64's __int128) inline, as gcc makes it
+ * -- a0 * b0 whole, the low words of the cross products added to its high word -- so that what links no libgcc
+ * (Linux's vDSO) may multiply; the rest by libgcc's __mulbitint3 and __divmodbitint4.
+ */
 static int wide_muldiv(cc_ssa_function_t *sf, cc_binop_t op, int a, int b, const wide_t *w, cc_diag_t *diag) {
     int r = wide_new(sf, w, diag);
-    int null_ptr = cc_ir_const(sf, 0);
+    int null_ptr;
 
+    if (r >= 0 && op == CC_BIN_MUL && w->n == 2 && w->limb == 8) {
+        int a0 = wide_ld(sf, a, 0, w, diag);
+        int a1 = a0 < 0 ? -1 : wide_ld(sf, a, 1, w, diag);
+        int b0 = a1 < 0 ? -1 : wide_ld(sf, b, 0, w, diag);
+        int b1 = b0 < 0 ? -1 : wide_ld(sf, b, 1, w, diag);
+        int lo = wide_op(sf, CC_SSA_MUL, a0, b1 < 0 ? -1 : b0, 1, w, diag);
+        int hi = wide_umulh(sf, a0, lo < 0 ? -1 : b0, w, diag);
+
+        hi = wide_op(sf, CC_SSA_ADD, hi, wide_op(sf, CC_SSA_MUL, a0, b1, 1, w, diag), 1, w, diag);
+        hi = wide_op(sf, CC_SSA_ADD, hi, wide_op(sf, CC_SSA_MUL, a1, b0, 1, w, diag), 1, w, diag);
+        if (hi < 0 || wide_st(sf, r, 0, lo, w, diag) != 0 || wide_st(sf, r, 1, hi, w, diag) != 0) {
+            return -1;
+        }
+        return wide_fix_top(sf, r, w, diag) != 0 ? -1 : r;
+    }
+    null_ptr = cc_ir_const(sf, 0);
     if (r < 0 || null_ptr < 0) {
         return -1;
     }

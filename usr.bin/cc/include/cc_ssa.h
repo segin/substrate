@@ -123,7 +123,11 @@ typedef enum {
     CC_SSA_LO32,       /**< dst (4 bytes) = the low word of 64-bit lhs */
     CC_SSA_HI32,       /**< dst (4 bytes) = the high word of 64-bit lhs */
     CC_SSA_PAIR,       /**< dst (8 bytes) = lhs as the low word, rhs as the high word */
-    CC_SSA_UMULW       /**< dst (8 bytes) = the full product of words lhs and rhs, unsigned */
+    CC_SSA_UMULW,      /**< dst (8 bytes) = the full product of words lhs and rhs, unsigned */
+    /** dst = the high word of the unsigned product of words lhs and rhs: x86-64's mulq, which lowering writes for
+     *  a two-limb (__int128) multiplication, as gcc makes it, where libgcc's __mulbitint3 is not linked (Linux's
+     *  vDSO, mul_u64_u32_shr()) */
+    CC_SSA_UMULH
 } cc_ssa_opcode_t;
 
 /**
