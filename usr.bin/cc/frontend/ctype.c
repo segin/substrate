@@ -851,6 +851,12 @@ static void ct_cat_quals(char *buf, size_t cap, unsigned quals) {
     if (quals & CC_CQ_ATOMIC) {
         ct_cat(buf, cap, "_Atomic ");
     }
+    if (quals & CC_CQ_SEG_FS) {
+        ct_cat(buf, cap, "__seg_fs ");
+    }
+    if (quals & CC_CQ_SEG_GS) {
+        ct_cat(buf, cap, "__seg_gs ");
+    }
 }
 
 /**

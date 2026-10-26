@@ -2856,6 +2856,35 @@ static char *dup_cstr(const char *s) {
     return out;
 }
 
+/**
+ * Memory operand @p text of asm @p in, the @p i th input or output, with
+ * its segment before it if lowering marked it in a named address space
+ * (cc_ssa_instr_t.asm_seg_in, asm_seg_out): "%gs:0(%rax)", as gcc prints an
+ * operand in __seg_gs.
+ *
+ * @param in      the asm
+ * @param is_in   1 for an input, 0 for an output
+ * @param i       the operand
+ * @param text    the operand's text, a new string or NULL; taken
+ * @return        the text, a new string, or NULL when out of memory
+ */
+static char *asm_seg_text(const cc_ssa_instr_t *in, int is_in, size_t i, char *text) {
+    unsigned mask = is_in ? in->asm_seg_in : in->asm_seg_out;
+    char *out;
+    size_t n;
+
+    if (text == NULL || i >= 32 || (mask & (1u << i)) == 0u) {
+        return text;
+    }
+    n = strlen(text) + sizeof("%gs:");
+    out = (char *)malloc(n);
+    if (out != NULL) {
+        snprintf(out, n, "%s%s", in->seg == CC_SSA_SEG_FS ? "%fs:" : "%gs:", text);
+    }
+    free(text);
+    return out;
+}
+
 /** An inline asm operand's register to fill before the asm runs. */
 typedef struct {
     const char *reg; /**< the register, full width */
@@ -3707,7 +3736,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         if (cc_asm_constraint_is_memory_only(c)) {
             if (is_indirect && bound != NULL && bound->kind[i] == X86_ASM_SYM) {
                 /* a symbol's: written as the symbol */
-                op_text[i] = asm_sym_operand(bound->sym[i], is_64bit);
+                op_text[i] = asm_seg_text(in, 0, i, asm_sym_operand(bound->sym[i], is_64bit));
                 if (op_text[i] == NULL) {
                     goto oom;
                 }
@@ -3728,7 +3757,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
                 load_count++;
                 /* (with its displacement, as gcc writes a memory operand: "2+%0" stays an address) */
                 snprintf(abuf, sizeof(abuf), "0(%s)", areg);
-                op_text[i] = dup_cstr(abuf);
+                op_text[i] = asm_seg_text(in, 0, i, dup_cstr(abuf));
             } else {
                 op_text[i] = dup_printf("%ld(%s)", off, is_64bit ? "%rbp" : "%ebp");
             }
@@ -3799,7 +3828,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
         if (CC_SSA_ASM_MEM_INDIRECT_P(v) && bound != NULL && bound->kind[slot] == X86_ASM_SYM) {
             /* a symbol's: written as the symbol */
-            op_text[slot] = asm_sym_operand(bound->sym[slot], is_64bit);
+            op_text[slot] = asm_seg_text(in, 1, i, asm_sym_operand(bound->sym[slot], is_64bit));
             if (op_text[slot] == NULL) {
                 goto oom;
             }
@@ -3823,7 +3852,7 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
             load_count++;
             /* (with its displacement, as gcc writes a memory operand: "2+%0" stays an address) */
             snprintf(abuf, sizeof(abuf), "0(%s)", areg);
-            op_text[slot] = dup_cstr(abuf);
+            op_text[slot] = asm_seg_text(in, 1, i, dup_cstr(abuf));
             if (op_text[slot] == NULL) {
                 goto oom;
             }

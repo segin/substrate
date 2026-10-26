@@ -1172,6 +1172,11 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             if (mrc == 0) {
                 continue;
             }
+            if (x86_mir_uses_named_as(f)) {
+                set_diag(diag, "a named address space (__seg_fs, __seg_gs) in a function the register allocator "
+                               "did not take");
+                return -1;
+            }
         }
 
         if (build_slot_layout(f, 16, 0, NULL, &lay, diag) != 0) {

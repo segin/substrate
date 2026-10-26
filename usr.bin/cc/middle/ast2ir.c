@@ -2807,6 +2807,48 @@ int emit_i64_binop_instr(cc_ssa_function_t *sf, cc_ssa_opcode_t op, int lhs, int
 }
 
 /**
+ * The cc_ssa_instr_t.seg of a load or a store of an object of type @p t:
+ * the segment of its named address space (gcc's __seg_fs, __seg_gs), or 0.
+ *
+ * @param t  the object's type, the lvalue's, with its qualifiers; or NULL
+ * @return   CC_SSA_SEG_FS, CC_SSA_SEG_GS or 0
+ */
+static unsigned char seg_of_ctype(const cc_ctype_t *t) {
+    if (t == NULL) {
+        return 0;
+    }
+    return (t->quals & CC_CQ_SEG_GS) != 0u ? CC_SSA_SEG_GS : (t->quals & CC_CQ_SEG_FS) != 0u ? CC_SSA_SEG_FS : 0;
+}
+
+/**
+ * Mark asm memory operand @p i, given by its address, as in the named
+ * address space of its lvalue @p lv, if it is in one: the operand is printed
+ * with the segment, which Linux's per-CPU asm leaves to the compiler when it
+ * has __seg_gs.  One asm's operands are all in one address space.
+ *
+ * @param in    the asm
+ * @param mask  in->asm_seg_in or in->asm_seg_out
+ * @param i     the operand
+ * @param lv    the operand's lvalue
+ * @param diag  receives an error
+ * @return      0, or -1 for an operand cc cannot mark
+ */
+static int asm_mark_seg(cc_ssa_instr_t *in, unsigned *mask, size_t i, const cc_expr_t *lv, cc_diag_t *diag) {
+    unsigned char seg = seg_of_ctype(lv != NULL ? lv->ctype : NULL);
+
+    if (seg == 0) {
+        return 0;
+    }
+    if (i >= 32 || (in->seg != 0 && in->seg != seg)) {
+        set_diag(diag, "asm memory operands in more than one named address space, or past the 32nd, are not supported");
+        return -1;
+    }
+    in->seg = seg;
+    *mask |= 1u << i;
+    return 0;
+}
+
+/**
  * Ready integer value @p v to be stored as @p mem_size bytes of type
  * @p ct.  A store writes a value's low bytes, and a value narrower than
  * the word is held extended to the word, so only a store wider than the
@@ -5354,6 +5396,7 @@ static int lower_ident_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *
             in.rhs = -1;
             in.imm = mem_size;
             in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
+            in.seg = seg_of_ctype(global_decl_ctype(g)); /* (the declared type: decay drops the qualifiers) */
             if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
                 return -1;
             }
@@ -5579,6 +5622,7 @@ static int lower_member_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     in.rhs = -1;
     in.imm = mem_size;
     in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
+    in.seg = seg_of_ctype(e->ctype);
     if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
         return -1;
     }
@@ -6332,6 +6376,7 @@ static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
                 in.lhs = gaddr;
                 in.rhs = rhs;
                 in.imm = mem_size;
+                in.seg = seg_of_ctype(global_decl_ctype(g));
                 if (cc_ir_push(sf, in) != 0) {
                     set_diag(diag, "out of memory appending global assignment store");
                     return -1;
@@ -6389,6 +6434,10 @@ static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             return -1;
         }
         if (lower_record_id(e->lhs) >= 0) {
+            if (seg_of_ctype(e->lhs->ctype) != 0) {
+                set_diag(diag, "assigning a structure in a named address space (__seg_fs, __seg_gs) is not supported");
+                return -1;
+            }
             if (emit_memcpy_instr(sf, ptrv, rhs, mem_size, diag) != 0) {
                 return -1;
             }
@@ -6400,6 +6449,7 @@ static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
         in.lhs = ptrv;
         in.rhs = rhs;
         in.imm = mem_size;
+        in.seg = seg_of_ctype(e->lhs->ctype);
         if (cc_ir_push(sf, in) != 0) {
             set_diag(diag, "out of memory appending pointer store");
             return -1;
@@ -6620,6 +6670,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             load_in.rhs = -1;
             load_in.imm = mem_size;
             load_in.is_unsigned = ct_loads_unsigned(lower_global_ctype(g)) ? 1 : 0;
+            load_in.seg = seg_of_ctype(global_decl_ctype(g));
             if (load_in.dst < 0 || cc_ir_push(sf, load_in) != 0) {
                 return -1;
             }
@@ -6656,6 +6707,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
             store_in.lhs = gaddr;
             store_in.rhs = nextv;
             store_in.imm = mem_size;
+            store_in.seg = load_in.seg;
             if (cc_ir_push(sf, store_in) != 0) {
                 return -1;
             }
@@ -6738,6 +6790,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
         in.rhs = -1;
         in.imm = mem_size;
         in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
+        in.seg = seg_of_ctype(e->lhs->ctype);
         if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
             return -1;
         }
@@ -6777,6 +6830,7 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
         in.lhs = ptrv;
         in.rhs = nextv;
         in.imm = mem_size;
+        in.seg = seg_of_ctype(e->lhs->ctype);
         if (cc_ir_push(sf, in) != 0) {
             set_diag(diag, "out of memory appending pointer update store");
             return -1;
@@ -7354,6 +7408,7 @@ int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const low
         in.rhs = -1;
         in.imm = mem_size;
         in.is_unsigned = lower_loads_unsigned(e) ? 1 : 0;
+        in.seg = seg_of_ctype(e->ctype);
         if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
             return -1;
         }
@@ -10718,6 +10773,18 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             return -1;
         }
         in.asm_out_values[i4] = out_v;
+        if (CC_SSA_ASM_MEM_INDIRECT_P(out_v) ? asm_mark_seg(&in, &in.asm_seg_out, i4, op->expr, diag) != 0
+                                             : seg_of_ctype(op->expr->ctype) != 0) {
+            /* (a register output to such an lvalue would be stored back without its segment) */
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "an asm register output to an object in a named address space is not supported");
+            }
+            free_asm_instr_fields(&in);
+            free(asm_out_store_ptr);
+            free(asm_out_store_size);
+            free(asm_out_store_type);
+            return -1;
+        }
         in.asm_out_constraints[i4] = asm_register_constraint(tu, *vars, *var_count, depth, op);
         if (op->name != NULL) {
             in.asm_out_names[i4] = cc_strdup(op->name);
@@ -10772,6 +10839,13 @@ static int lower_asm_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
             return -1;
         }
         in.asm_in_values[i4] = av;
+        if (CC_SSA_ASM_MEM_INDIRECT_P(av) && asm_mark_seg(&in, &in.asm_seg_in, i4, op->expr, diag) != 0) {
+            free_asm_instr_fields(&in);
+            free(asm_out_store_ptr);
+            free(asm_out_store_size);
+            free(asm_out_store_type);
+            return -1;
+        }
         in_sz = lower_value_size(tu, op->expr);
         if (in_sz <= 0) {
             in_sz = cc_target_pointer_size();

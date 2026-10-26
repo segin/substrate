@@ -44,6 +44,19 @@ is 16; on i386 they are rejected and
 .Dv __SIZEOF_INT128__
 is left undefined, as gcc does.
 .Pp
+gcc's x86 named address spaces,
+.Li __seg_fs
+and
+.Li __seg_gs ,
+are type qualifiers: an object in one, through a pointer to one, a member
+of one or declared in one, is read and written through
+.Li %fs
+or
+.Li %gs ,
+the address its offset there, and an inline asm memory operand of one is
+printed with the segment, as Linux's per-CPU data needs.
+Copying a structure into one is refused.
+.Pp
 Vector types, GNU
 .Sq Li vector_size
 and clang's

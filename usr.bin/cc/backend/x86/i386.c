@@ -3281,6 +3281,14 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 }
                 continue;
             }
+            if (x86_mir_uses_named_as(f)) {
+                if (fp != out) {
+                    fclose(fp);
+                }
+                set_diag(diag, "a named address space (__seg_fs, __seg_gs) in a function the register allocator "
+                               "did not take");
+                return -1;
+            }
         }
         /*
          * the values whose address is taken (the only ones a pointer may reach, i386_sync_aliased()), the

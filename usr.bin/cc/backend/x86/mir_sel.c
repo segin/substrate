@@ -425,6 +425,12 @@ static xop_t mem_at(xsel_t *s, int v, long long disp, int size, int depth) {
 xop_t xs_mem_at(xsel_t *s, int v, long long disp, int size) {
     xop_t o = mem_at(s, v, disp, size, 0);
 
+    if (s->mem_seg != 0 && o.base == XR_FRAME) {
+        /* an offset in the segment, not this frame: the address as a number, in a register */
+        xop_t r = xs_reg_word(s, v, 0);
+
+        o = xop_mem(r.reg, disp, size);
+    }
     if (!fits32(o.disp)) {
         /* a displacement x86-64 cannot encode: the address made in a register */
         xop_t r = xs_reg_word(s, v, 0);
@@ -435,6 +441,7 @@ xop_t xs_mem_at(xsel_t *s, int v, long long disp, int size) {
             s->unsupported_file = __FILE__;
         }
     }
+    o.seg = s->mem_seg;
     return o;
 }
 
@@ -2883,6 +2890,9 @@ static void sel_instr(xsel_t *s, size_t j) {
     if (s->done != NULL && s->done[j]) {
         return; /* selected with an earlier instruction */
     }
+    /* a load or a store in a named address space: the memory operands xs_mem_at() makes for it carry its segment
+       (no other instruction takes a load's address into an operand of its own) */
+    s->mem_seg = in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE ? in->seg : 0;
     if (xs_fp_select(s, j)) {
         return; /* floating point (mir_fp.c) */
     }
@@ -4317,6 +4327,20 @@ static int fpo_smaller(const xfunc_t *fp, const xfunc_t *nofp, int word) {
     return without + (bp_used ? 2 : 0) < with;
 }
 
+int x86_mir_uses_named_as(const cc_ssa_function_t *f) {
+    size_t j;
+
+    for (j = 0; j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+
+        if (((in->op == CC_SSA_LOAD || in->op == CC_SSA_STORE) && in->seg != 0) ||
+            (in->op == CC_SSA_ASM && (in->asm_seg_in != 0u || in->asm_seg_out != 0u))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module_t *m, const cc_ssa_function_t *f,
                           size_t fn_index, const char *src_path, int emit_debug, cc_diag_t *diag) {
     static long taken; /* the functions this path has taken, for CC_MIR_LIMIT */
@@ -4353,6 +4377,7 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
     rc = sel_init(&s);
     for (j = 0; rc == 0 && j < f->instr_count && !s.unsupported && !s.xf.oom; ++j) {
         sel_instr(&s, j);
+        s.mem_seg = 0;
     }
     for (j = 0; rc == 0 && j < (size_t)s.xf.nins; ++j) {
         /* (the tables grow as they are made: a jump through one points into it now) */

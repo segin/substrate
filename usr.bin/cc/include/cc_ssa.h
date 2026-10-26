@@ -149,6 +149,10 @@ static inline int cc_ssa_ext_needs_scratch(int bits, int is_unsigned, long size,
 #define CC_SSA_ASM_MEM_INDIRECT_P(v) ((v) <= -2)
 #define CC_SSA_ASM_MEM_INDIRECT_DECODE(v) (-(int)(v) - 2)
 
+/** cc_ssa_instr_t.seg: a memory access through %fs or %gs, gcc's __seg_fs and __seg_gs. */
+#define CC_SSA_SEG_FS 1
+#define CC_SSA_SEG_GS 2
+
 typedef struct {
     cc_ssa_opcode_t op;
     int dst;
@@ -157,6 +161,11 @@ typedef struct {
     long long imm;
     int stack_align;   /**< STACKALLOC: the alignment its declaration requires, 16 or more, or 0 for none -- the
                             frame may put a large one on 16 bytes by choice, which a smaller stack boundary drops */
+    unsigned char seg; /**< LOAD, STORE: CC_SSA_SEG_FS or CC_SSA_SEG_GS for an access in that named address space
+                            (gcc's __seg_fs, __seg_gs), the address the offset in the segment; else 0.  ASM: the
+                            address space of the memory operands asm_seg_in and asm_seg_out mark */
+    unsigned asm_seg_in;  /**< ASM: bit i set when memory input i is in address space seg */
+    unsigned asm_seg_out; /**< ASM: the same for the outputs */
     double fimm;
     long double fimm_ld;
     int label;

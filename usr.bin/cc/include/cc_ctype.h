@@ -57,8 +57,14 @@ enum {
     CC_CQ_CONST = 1u,
     CC_CQ_VOLATILE = 2u,
     CC_CQ_RESTRICT = 4u,
-    CC_CQ_ATOMIC = 8u
+    CC_CQ_ATOMIC = 8u,
+    /** gcc's x86 named address spaces: an object reached through %fs or %gs, its address the offset there */
+    CC_CQ_SEG_FS = 16u,
+    CC_CQ_SEG_GS = 32u
 };
+
+/** The named address space bits of a set of qualifiers. */
+#define CC_CQ_SEG (CC_CQ_SEG_FS | CC_CQ_SEG_GS)
 
 typedef struct cc_ctype cc_ctype_t;
 

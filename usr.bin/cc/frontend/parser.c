@@ -156,6 +156,7 @@ typedef struct {
 static int is_decl_qual_tok(cc_tok_kind_t k);
 static int is_decl_qual_at_token(parser_t *p);
 static int tok_is_ident(parser_t *p, const char *s);
+static unsigned tok_is_seg_qual(parser_t *p);
 static int tok_is_gnu_attribute_kw(parser_t *p);
 static int is_ptr_declarator_tok(cc_tok_kind_t kind);
 static void decl_attrs_reset(decl_attrs_t *a);
@@ -1931,6 +1932,7 @@ static int builtin_typedef_type_n(const char *name, size_t len, const cc_ctype_t
 
 static int is_declspec_ident(parser_t *p) {
     if (tok_is_ident(p, "_Atomic") || tok_is_ident(p, "_Thread_local") || tok_is_ident(p, "_Alignas") ||
+        tok_is_seg_qual(p) != 0u ||
         tok_is_ident(p, "_Noreturn") || tok_is_ident(p, "_BitInt") || tok_is_ident(p, "_Decimal32") ||
         tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128") || tok_is_floatn_spelling(p)) {
         return 1;
@@ -2045,6 +2047,7 @@ typedef struct {
     int seen_typedef;
     int seen_alias;
     int seen_atomic;
+    unsigned seg_quals; /* CC_CQ_SEG_FS, CC_CQ_SEG_GS among the specifiers */
     int seen_bitint;
     int seen_decimal;
     int seen_enum;
@@ -2311,6 +2314,15 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     if (align > out_attrs->align) {
                         out_attrs->align = align;
                     }
+                }
+                continue;
+            }
+            if (tok_is_seg_qual(p) != 0u) {
+                /* gcc's __seg_fs, __seg_gs: qualifiers of the type, as const is */
+                acc->seen = 1;
+                acc->seg_quals |= tok_is_seg_qual(p);
+                if (next_tok(p) != 0) {
+                    return -1;
                 }
                 continue;
             }
@@ -3521,10 +3533,11 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         }
         acc.spec = cc_ct_qualified(acc.spec, CC_CQ_ATOMIC);
     }
-    /* const and volatile among the specifiers qualify the type they give (C11 6.7.3) */
-    if ((acc.storage_flags & (CC_STORAGE_CONST | CC_STORAGE_VOLATILE)) != 0) {
+    /* const and volatile among the specifiers qualify the type they give (C11 6.7.3), as an address space does */
+    if ((acc.storage_flags & (CC_STORAGE_CONST | CC_STORAGE_VOLATILE)) != 0 || acc.seg_quals != 0u) {
         acc.spec = cc_ct_qualified(acc.spec, ((acc.storage_flags & CC_STORAGE_CONST) != 0 ? CC_CQ_CONST : 0u) |
-                                                 ((acc.storage_flags & CC_STORAGE_VOLATILE) != 0 ? CC_CQ_VOLATILE : 0u));
+                                                 ((acc.storage_flags & CC_STORAGE_VOLATILE) != 0 ? CC_CQ_VOLATILE : 0u) |
+                                                 acc.seg_quals);
     }
     p->last_spec_ctype = acc.spec;
     if (out != NULL) {
@@ -3563,7 +3576,7 @@ static int is_decl_qual_tok(cc_tok_kind_t k) {
 }
 
 static int is_decl_qual_at_token(parser_t *p) {
-    return is_decl_qual_tok(p->tok.kind) || tok_is_ident(p, "_Atomic");
+    return is_decl_qual_tok(p->tok.kind) || tok_is_ident(p, "_Atomic") || tok_is_seg_qual(p) != 0u;
 }
 
 /**
@@ -3790,6 +3803,23 @@ static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, 
 static int tok_is_ident(parser_t *p, const char *s) {
     size_t n = strlen(s);
     return p->tok.kind == TOK_IDENT && p->tok.len == n && strncmp(p->tok.start, s, n) == 0;
+}
+
+/**
+ * The named address space the token is a qualifier for, gcc's x86 __seg_fs
+ * or __seg_gs.
+ *
+ * @param p  the parser
+ * @return   CC_CQ_SEG_FS, CC_CQ_SEG_GS, or 0 for another token
+ */
+static unsigned tok_is_seg_qual(parser_t *p) {
+    if (tok_is_ident(p, "__seg_fs")) {
+        return CC_CQ_SEG_FS;
+    }
+    if (tok_is_ident(p, "__seg_gs")) {
+        return CC_CQ_SEG_GS;
+    }
+    return 0u;
 }
 
 static int tok_is_gnu_attribute_kw(parser_t *p) {
@@ -5589,6 +5619,8 @@ static int parse_pointer_quals(parser_t *p, unsigned *out_quals, decl_attrs_t *o
             *out_quals |= CC_CQ_RESTRICT;
         } else if (tok_is_ident(p, "_Atomic")) {
             *out_quals |= CC_CQ_ATOMIC;
+        } else if (tok_is_seg_qual(p) != 0u) {
+            *out_quals |= tok_is_seg_qual(p);
         } else if (is_decl_qual_at_token(p)) {
             /* another spelling of a qualifier this encoding does not keep */
         } else if (tok_is_gnu_attribute_kw(p) || (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK)) {

@@ -79,6 +79,7 @@ typedef struct {
     int obj;             /**< XO_MEM with base XR_FRAME: the frame object */
     long long disp;      /**< XO_IMM: the value; XO_MEM: the displacement */
     const char *sym;     /**< XO_IMM, XO_MEM: a symbol the value or displacement is relative to, or NULL */
+    unsigned char seg;   /**< XO_MEM: CC_SSA_SEG_FS or CC_SSA_SEG_GS for an address in that segment, else 0 */
 } xop_t;
 
 /** Machine instructions. */
@@ -393,6 +394,8 @@ struct xsel {
     int *param_obj;           /**< per parameter: the frame object an i386 regparm structure's words are stored in */
     int unsupported;          /**< the line that gave up on the function, for CC_MIR_STATS; or 0 */
     const char *unsupported_file; /**< and its file */
+    unsigned char mem_seg;    /**< while a LOAD or STORE in a named address space is selected, its segment, which
+                                   xs_mem_at() gives the memory operands it makes; else 0 */
     xasm_bind_t *bind;        /**< each inline asm's operands and where they are (XI_ASM's aux: its first) */
     int nbind;
     int bindcap;
@@ -513,6 +516,12 @@ void xs_fp_to_mem(xsel_t *s, int v, xop_t m, int bytes);
 int xs_fp_select(xsel_t *s, size_t j);
 
 /* mir_i386.c, mir_x86_64.c: the targets */
+
+/**
+ * Whether @p f reaches memory in a named address space (__seg_fs, __seg_gs), which only this path emits: the
+ * other emitter refuses such a function rather than drop the segment.
+ */
+int x86_mir_uses_named_as(const cc_ssa_function_t *f);
 
 /** i386: x86_mir_emit_function() for i386 (cdecl, regparm). */
 int i386_mir_emit_function(FILE *out, const cc_ssa_module_t *m, const cc_ssa_function_t *f, size_t fn_index,

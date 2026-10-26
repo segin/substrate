@@ -471,6 +471,10 @@ static void print_op(FILE *fp, const xfunc_t *xf, const xop_t *o, int word) {
             fprintf(fp, "%lld(%s)", o->disp + xf->obj[o->obj].off, bp);
             break;
         }
+        if (o->seg != 0) {
+            /* a named address space's: the segment's base added (gcc's __seg_fs, __seg_gs) */
+            fputs(o->seg == CC_SSA_SEG_FS ? "%fs:" : "%gs:", fp);
+        }
         if (o->sym != NULL || o->disp != 0 || (o->base == XR_NONE && o->index == XR_NONE)) {
             print_sym_disp(fp, o->sym, o->disp);
         }
