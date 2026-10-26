@@ -447,8 +447,13 @@ const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
         return a != NULL && a->kind == CC_CT_POINTER ? a->of : NULL;
     case CC_EXPR_MEMBER: {
         const cc_struct_member_t *sm;
+        const cc_ctype_t *lt = parser_expr_ctype(p, e->lhs);
+        unsigned seg;
 
-        a = cc_ct_decay(parser_expr_ctype(p, e->lhs));
+        a = cc_ct_decay(lt);
+        /* the object's named address space, which its members are in too, as sema_check_member() has it */
+        seg = (e->member_is_arrow ? (a != NULL && a->kind == CC_CT_POINTER ? a->of->quals : 0u)
+                                  : (lt != NULL ? lt->quals : 0u)) & CC_CQ_SEG;
         if (a != NULL && e->member_is_arrow) {
             a = a->kind == CC_CT_POINTER ? a->of->unqual : NULL;
         }
@@ -456,7 +461,7 @@ const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
             return NULL;
         }
         sm = struct_member_find_n(p, a->id, e->ident, strlen(e->ident));
-        return sm != NULL ? sm->ctype : NULL;
+        return sm == NULL ? NULL : seg != 0u && sm->ctype != NULL ? cc_ct_qualified(sm->ctype, seg) : sm->ctype;
     }
     case CC_EXPR_BIN:
         return parser_bin_ctype(p, e);

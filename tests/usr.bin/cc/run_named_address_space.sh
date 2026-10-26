@@ -52,6 +52,11 @@ void __attribute__((noinline)) memw(struct pc SEG_AS *p, int k) { p->c[1] = (uns
 void __attribute__((noinline)) addm(ul v) { asm("add" SFX " %1, %0" : "+m"(SEG(counter)) : "r"(v)); }
 ul __attribute__((noinline)) rdm(void) { ul r; asm("mov" SFX " %1, %0" : "=r"(r) : "m"(SEG(counter))); return r; }
 void __attribute__((noinline)) incg(void) { asm("incl %0" : "+m"(gvar)); }
+/* an object declared in the address space: its members through `.`, and Linux's this_cpu_read() shape */
+struct pc SEG_AS gobj = { 5, 6, { 7, 8, 9, 10 } };
+long __attribute__((noinline)) rdo(void) { return gobj.b * 100 + gobj.c[3]; }
+void __attribute__((noinline)) wro(int k) { gobj.a += k; gobj.c[0] = (unsigned char)k; }
+long __attribute__((noinline)) rdt(void) { return *(volatile __typeof__(gobj.b) *)&gobj.b; }
 
 int main(void)
 {
@@ -65,7 +70,8 @@ int main(void)
 	wrg(rdg() + 1);
 	incg();
 	memw(p, 9);
-	printf("%lu %lu %d %ld %d %d\n", a, rdm(), rdg(), mem(p), obj.c[1], gvar);
+	wro(3);
+	printf("%lu %lu %d %ld %d %d %ld %ld\n", a, rdm(), rdg(), mem(p), obj.c[1], gvar, rdo(), rdt());
 	return 0;
 }
 EOF2
@@ -96,14 +102,14 @@ for o in O0 O1 O2 Os; do
 		exit 1
 	fi
 	"$CC_BIN" -$o -fno-pic -DSEG_AS=__seg_gs -DSFX='"q"' -S -o "$CC_TMP/c.s" "$CC_TMP/s.c"
-	for f in rd wr inc add rdg wrg mem memw addm rdm incg; do
+	for f in rd wr inc add rdg wrg mem memw addm rdm incg rdo wro rdt; do
 		check "$CC_TMP/c.s" $f gs
 	done
 done
 if printf 'int main(void) { return 0; }\n' | gcc -m32 -x c - -o "$CC_TMP/probe" 2>/dev/null; then
 	for o in O0 O2; do
 		"$CC_BIN" -m32 -$o -fno-pic -DSEG_AS=__seg_fs -DSFX='"l"' -S -o "$CC_TMP/c32.s" "$CC_TMP/s.c"
-		for f in rd wr inc add rdg wrg mem memw addm rdm incg; do
+		for f in rd wr inc add rdg wrg mem memw addm rdm incg rdo wro rdt; do
 			check "$CC_TMP/c32.s" $f fs
 		done
 	done
