@@ -30,6 +30,11 @@ typedef struct {
      *  with the lexer, as the parser's lookahead copies it */
     unsigned char vis_stack[CC_LEX_VIS_DEPTH];
     int vis_depth;
+    /** `#pragma pack`: the alignment structure members are held to now (1, 2, 4, 8, 16), or 0 for none; and the
+     *  values `pack(push)` saved, innermost last */
+    unsigned char pack_cur;
+    unsigned char pack_stack[CC_LEX_VIS_DEPTH];
+    int pack_depth;
 } cc_lexer_t;
 
 typedef enum {
@@ -145,6 +150,7 @@ typedef struct {
     size_t line;
     size_t col;
     unsigned char default_vis; /**< the default visibility where the token is (CC_LEX_VIS_*) */
+    unsigned char pack;        /**< the `#pragma pack` alignment where the token is, or 0 for none */
 } cc_token_t;
 
 /**

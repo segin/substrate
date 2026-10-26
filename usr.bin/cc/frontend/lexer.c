@@ -326,6 +326,81 @@ static void lx_note_visibility_pragma(cc_lexer_t *lx, size_t start, size_t end) 
     }
 }
 
+/**
+ * Take in a `#pragma pack` line from @p start to @p end, as gcc reads it: pack(N) holds the structure members
+ * declared after it to alignment N (1, 2, 4, 8 or 16), pack() lifts that, pack(push[, N]) saves the value before
+ * setting N, pack(pop) restores the one saved last (an identifier in push or pop is taken and ignored).
+ */
+static void lx_note_pack_pragma(cc_lexer_t *lx, size_t start, size_t end) {
+    const char *p = lx->src + start;
+    const char *ep = lx->src + end;
+    long n = -1;
+    int push = 0;
+    int pop = 0;
+
+    p = lx_skip_blank(p, ep);
+    if (p >= ep || *p != '#') {
+        return;
+    }
+    p = lx_skip_blank(p + 1, ep);
+    if (!lx_word_at(p, ep, "pragma")) {
+        return;
+    }
+    p = lx_skip_blank(p + 6, ep);
+    if (!lx_word_at(p, ep, "pack")) {
+        return;
+    }
+    p = lx_skip_blank(p + 4, ep);
+    if (p >= ep || *p != '(') {
+        return;
+    }
+    p++;
+    while (p < ep && *p != ')') {
+        p = lx_skip_blank(p, ep);
+        if (lx_word_at(p, ep, "push")) {
+            push = 1;
+            p += 4;
+        } else if (lx_word_at(p, ep, "pop")) {
+            pop = 1;
+            p += 3;
+        } else if (p < ep && isdigit((unsigned char)*p)) {
+            n = 0;
+            while (p < ep && isdigit((unsigned char)*p)) {
+                n = n * 10 + (*p - '0');
+                p++;
+            }
+        } else {
+            /* an identifier naming a push, or a comma */
+            while (p < ep && *p != ',' && *p != ')') {
+                p++;
+            }
+        }
+        p = lx_skip_blank(p, ep);
+        if (p < ep && *p == ',') {
+            p++;
+        }
+    }
+    if (n > 0 && (n > 16 || (n & (n - 1)) != 0)) {
+        return; /* not a power of two up to 16: gcc ignores it, with a warning */
+    }
+    if (pop) {
+        if (lx->pack_depth > 0) {
+            lx->pack_depth--;
+            lx->pack_cur = lx->pack_depth < CC_LEX_VIS_DEPTH ? lx->pack_stack[lx->pack_depth] : lx->pack_cur;
+        }
+        return;
+    }
+    if (push) {
+        if (lx->pack_depth < CC_LEX_VIS_DEPTH) {
+            lx->pack_stack[lx->pack_depth] = lx->pack_cur;
+        }
+        lx->pack_depth++;
+    }
+    if (n >= 0 || !push) {
+        lx->pack_cur = (unsigned char)(n > 0 ? n : 0);
+    }
+}
+
 /** The default visibility where the lexer is (CC_LEX_VIS_*). */
 static unsigned char lx_default_vis(const cc_lexer_t *lx) {
     if (lx->vis_depth <= 0) {
@@ -348,6 +423,7 @@ static void lx_skip_directive_line(cc_lexer_t *lx) {
     has_marker = lx_parse_line_marker(lx, start, end, &marker_line, &marker_file);
     if (!has_marker) {
         lx_note_visibility_pragma(lx, start, end);
+        lx_note_pack_pragma(lx, start, end);
     }
 
     lx->pos = end;
@@ -1052,6 +1128,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->line = lx->line;
     out->col = lx->col;
     out->default_vis = lx_default_vis(lx);
+    out->pack = lx->pack_cur;
 
     if (c < 0) {
         out->kind = TOK_EOF;

@@ -878,10 +878,11 @@ static long align_up_long(long x, long a) {
  * @param align       its type's alignment, or 1 where it is `packed`
  * @param user_align  the alignment `aligned` or `_Alignas` asks for, or 0
  * @param bit_width   a bit-field's width, or -1 for an ordinary member
+ * @param pack        the `#pragma pack` alignment its declaration came under, or 0
  * @return            0, or -1 when out of memory
  */
 static int struct_layout_push(parser_t *p, int sid, int member, const cc_ctype_t *ctype, long size, long align,
-                              long user_align, int bit_width) {
+                              long user_align, int bit_width, long pack) {
     cc_struct_def_t *sd = &p->structs[sid];
     cc_member_layout_t *it;
 
@@ -902,6 +903,7 @@ static int struct_layout_push(parser_t *p, int sid, int member, const cc_ctype_t
     it->align = align;
     it->user_align = user_align;
     it->bit_width = bit_width;
+    it->pack = pack;
     return 0;
 }
 
@@ -1079,10 +1081,18 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
         if (it->user_align > align) {
             align = it->user_align;
         }
+        if (it->pack > 0 && align > it->pack) {
+            /* #pragma pack: no member more aligned than it, an `aligned` one included, as gcc lays it out */
+            align = it->pack;
+        }
         if (it->bit_width >= 0) {
             long type_size = parser_ct_size(p, it->ctype);
             long type_align = parser_ct_align(p, it->ctype);
             int bit_packed = packed || it->align < type_align;
+
+            if (it->pack > 0 && type_align > it->pack) {
+                type_align = it->pack; /* (its storage unit's alignment held to the pack as well) */
+            }
             long pos = 0;
 
             if (type_size <= 0 || type_align <= 0) {
@@ -1141,6 +1151,9 @@ static int struct_layout(parser_t *p, int sid, int packed, long forced_align) {
                 c11 = parser_ct_c11_align(p, m->ctype);
                 if (it->user_align > c11) {
                     c11 = it->user_align;
+                }
+                if (it->pack > 0 && c11 > it->pack) {
+                    c11 = it->pack;
                 }
             }
             if (c11 > max_c11) {
@@ -2784,6 +2797,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                     long bit_storage_size = 0;
                     int skip_member_decl = 0;
                     decl_attrs_t mdecl_attrs;
+                    long mpack = p->tok.pack; /* the `#pragma pack` the declarator comes under */
                     decl_attrs_reset(&mdecl_attrs);
                     if (parse_member_decl(p, mspec, &md) != 0) {
                         return -1;
@@ -2984,7 +2998,7 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         }
                     }
                     if (struct_layout_push(p, sid, mindex, is_bitfield ? melem : NULL, is_bitfield ? 0 : msize,
-                                           malign, muser_align, is_bitfield ? bit_width : -1) != 0) {
+                                           malign, muser_align, is_bitfield ? bit_width : -1, mpack) != 0) {
                         set_diag(p->diag, p->tok.line, p->tok.col, "out of memory laying out a structure");
                         decl_attrs_clear(&mdecl_attrs);
                         return -1;

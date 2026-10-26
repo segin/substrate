@@ -301,6 +301,8 @@ typedef struct {
     long align;                   /**< its type's alignment, or 1 where the declarator is `packed` */
     long user_align;              /**< the alignment `aligned` or `_Alignas` asks for, or 0 */
     int bit_width;                /**< a bit-field's width, or -1 for an ordinary member */
+    long pack;                    /**< the `#pragma pack` its declaration came under: the most it is aligned to, `aligned`
+                                       or not, its storage unit's too; 0 for none */
 } cc_member_layout_t;
 
 typedef struct {

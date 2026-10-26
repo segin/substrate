@@ -67,6 +67,22 @@ the address its offset there, and an inline asm memory operand of one is
 printed with the segment, as Linux's per-CPU data needs.
 Copying a structure into one is refused.
 .Pp
+.Li #pragma pack Ns Pq Ar n ,
+.Li pack() ,
+.Li pack(push Ns Op , Ar n Ns )
+and
+.Li pack(pop) ,
+and the same through
+.Li _Pragma ,
+hold the members of the structures declared after them to alignment
+.Ar n ,
+as gcc does: one an
+.Sq Li aligned
+attribute asks more of and a bit-field's storage unit too, while a
+structure's own
+.Sq Li aligned
+still counts.
+.Pp
 gcc's
 .Sq Li counted_by Ns Pq Ar m
 on a flexible array member or a pointer member names the member holding

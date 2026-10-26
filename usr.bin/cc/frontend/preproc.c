@@ -1024,6 +1024,13 @@ static int is_visibility_pragma(const char *rest) {
     return strncmp(p, "visibility", 10) == 0 && (p[10] == '\0' || isspace((unsigned char)p[10]) || p[10] == '(');
 }
 
+/** Whether pragma text @p rest (after `#pragma`) is `pack(...)`. */
+static int is_pack_pragma(const char *rest) {
+    const char *p = skip_ws(rest);
+
+    return strncmp(p, "pack", 4) == 0 && (p[4] == '(' || isspace((unsigned char)p[4]));
+}
+
 static int validate_stdc_pragma(const char *rest, cc_diag_t *diag, size_t line_no) {
     const char *p = rest;
     char scope[32];
@@ -5031,6 +5038,41 @@ static int parse_pragma_operator(const char *src, size_t start, size_t *out_end)
     return 0;
 }
 
+/**
+ * For `_Pragma("...")` in @p src from @p start to @p end: a pragma the compiler reads -- `pack(...)` or `GCC
+ * visibility ...` -- appended to @p out as the `#pragma` line it stands for (C11 6.10.9), on a line of its own, as
+ * gcc's -E output writes it; the others are dropped, as before.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int pragma_operator_line(const char *src, size_t start, size_t end, sb_t *out) {
+    const char *q = strchr(src + start, '"');
+    sb_t text;
+    int rc = 0;
+
+    if (q == NULL || (size_t)(q - src) >= end) {
+        return 0;
+    }
+    memset(&text, 0, sizeof(text));
+    /* the string destringized: \" and \\ made " and \ */
+    for (q++; *q != '\0' && *q != '"' && (size_t)(q - src) < end; ++q) {
+        if (*q == '\\' && (q[1] == '"' || q[1] == '\\')) {
+            q++;
+        }
+        if (sb_append_c(&text, *q) != 0) {
+            sb_free(&text);
+            return -1;
+        }
+    }
+    if (text.buf != NULL && (is_pack_pragma(text.buf) || is_visibility_pragma(text.buf))) {
+        rc = sb_append(out, "\n#pragma ") != 0 || sb_append(out, text.buf) != 0 || sb_append_c(out, '\n') != 0
+                 ? -1
+                 : 0;
+    }
+    sb_free(&text);
+    return rc;
+}
+
 static char *strip_pragma_operators(const char *src) {
     sb_t out;
     size_t i = 0;
@@ -5052,6 +5094,10 @@ static char *strip_pragma_operators(const char *src) {
                 need_sep = 1;
             }
             if (need_sep && sb_append_c(&out, ' ') != 0) {
+                sb_free(&out);
+                return NULL;
+            }
+            if (pragma_operator_line(src, i, end, &out) != 0) {
                 sb_free(&out);
                 return NULL;
             }
@@ -6811,9 +6857,11 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                      * after it, so it goes on to the compiler, which reads it between them (the lexer,
                      * lx_note_visibility_pragma()), as gcc's -E output keeps it.  Linux's
                      * include/linux/hidden.h makes every symbol of its position-independent code hidden
-                     * so; else each was reached through a GOT entry.
+                     * so; else each was reached through a GOT entry.  So does #pragma pack, which holds
+                     * the alignment of the structure members after it (lx_note_pack_pragma()): ACPI's
+                     * table structures are packed so.
                      */
-                    if (!macros_only && is_visibility_pragma(r)) {
+                    if (!macros_only && (is_visibility_pragma(r) || is_pack_pragma(r))) {
                         if (code_accum.len > 0) {
                             char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path,
                                                          code_start_line, 0, NULL, diag);
