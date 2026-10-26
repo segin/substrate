@@ -42,6 +42,7 @@ typedef struct {
     const char *dump_ir;     /**< -fdump-ir: the dump files' name without .ir; NULL for none */
     int dump_ir_all;         /**< -fdump-ir=all: one dump after each pass, not only the last */
     int trivial_auto_var_init_zero; /**< -ftrivial-auto-var-init=zero: an automatic aggregate with no initializer is zeroed */
+    int trivial_auto_var_init_pattern; /**< -ftrivial-auto-var-init=pattern: such an aggregate's every byte is 0xfe */
     int unwind_tables;       /**< -f[no-]asynchronous-unwind-tables, -f[no-]unwind-tables: frame descriptions in .eh_frame (the default), else .debug_frame */
     int i386_stack_boundary; /**< -mpreferred-stack-boundary=N: the stack's alignment at a call, 2^N bytes; 0 for the psABI's 16 */
     int cmodel_kernel;       /**< -mcmodel=kernel (x86-64): the code and its data in the top 2 GiB, linked with no GOT */

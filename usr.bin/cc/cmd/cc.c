@@ -93,6 +93,7 @@ typedef struct {
   int i386_regparm; /* -mregparm=N */
   int i386_reg_struct_return; /* -freg-struct-return, -fpcc-struct-return */
   int trivial_auto_var_init_zero; /* -ftrivial-auto-var-init=zero */
+  int trivial_auto_var_init_pattern; /* -ftrivial-auto-var-init=pattern */
   int no_unwind_tables; /* -fno-asynchronous-unwind-tables, -fno-unwind-tables */
   int i386_stack_boundary; /* -mpreferred-stack-boundary=N: 2^N, or 0 */
   int cmodel_kernel; /* -mcmodel=kernel */
@@ -187,6 +188,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->i386_regparm = o->i386_regparm;
   out->i386_reg_struct_return = o->i386_reg_struct_return;
   out->trivial_auto_var_init_zero = o->trivial_auto_var_init_zero;
+  out->trivial_auto_var_init_pattern = o->trivial_auto_var_init_pattern;
   out->unwind_tables = !o->no_unwind_tables;
   out->i386_stack_boundary = o->i386_stack_boundary;
   out->cmodel_kernel = o->cmodel_kernel;
@@ -1260,20 +1262,77 @@ static int opt_regparm(cc_opts_t *o, const driver_opt_t *d, const char *as, cons
 }
 
 /**
- * -ftrivial-auto-var-init=zero|uninitialized: whether an automatic variable
- * with no initializer starts as zero, as Linux builds with.  gcc's third
- * value, pattern, is refused.
+ * An option gcc does not have, which cc refuses as gcc does: a build that
+ * probes for it (Linux's Kconfig, cc-option) must find it missing, not
+ * taken and ignored.
+ *
+ * @return -1
+ */
+static int opt_reject(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  (void)o;
+  (void)d;
+  fprintf(stderr, "cc: error: unrecognized command-line option '%s%s'\n", as, val != NULL ? val : "");
+  return -1;
+}
+
+/**
+ * -fsanitize=LIST: each of LIST one of gcc's sanitizers -- which cc takes,
+ * instrumenting nothing, as it takes the other gcc options it does not act
+ * on -- or the option is refused, as gcc refuses clang's (kernel-memory,
+ * kcfi, cfi, safe-stack, ...).
+ *
+ * @return 0, or -1 for a sanitizer gcc does not have
+ */
+static int opt_sanitize(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
+  static const char *const gcc_sanitizers[] = {
+      "address", "kernel-address", "hwaddress", "kernel-hwaddress", "pointer-compare", "pointer-subtract",
+      "thread", "leak", "undefined", "shadow-call-stack", "shift", "shift-exponent", "shift-base",
+      "integer-divide-by-zero", "unreachable", "vla-bound", "null", "return", "signed-integer-overflow",
+      "bounds", "bounds-strict", "alignment", "object-size", "float-divide-by-zero", "float-cast-overflow",
+      "nonnull-attribute", "returns-nonnull-attribute", "bool", "enum", "vptr", "pointer-overflow", "builtin",
+      "all"};
+  const char *p = val != NULL ? val : "";
+
+  while (*p != '\0') {
+    size_t n = strcspn(p, ",");
+    size_t k;
+
+    for (k = 0; k < sizeof(gcc_sanitizers) / sizeof(gcc_sanitizers[0]); ++k) {
+      if (strlen(gcc_sanitizers[k]) == n && strncmp(p, gcc_sanitizers[k], n) == 0) {
+        break;
+      }
+    }
+    if (k == sizeof(gcc_sanitizers) / sizeof(gcc_sanitizers[0])) {
+      fprintf(stderr, "cc: error: unrecognized argument to %s option: '%.*s'\n", as, (int)n, p);
+      return -1;
+    }
+    p += n;
+    p += *p == ',';
+  }
+  (void)o;
+  (void)d;
+  return 0;
+}
+
+/**
+ * -ftrivial-auto-var-init=zero|pattern|uninitialized: whether an automatic
+ * variable with no initializer starts as zero, as Linux builds with, as
+ * gcc's pattern (every byte 0xfe), or as whatever the stack held.
  *
  * @return 0, or -1 for another value
  */
 static int opt_trivial_auto_var_init(cc_opts_t *o, const driver_opt_t *d, const char *as, const char *val) {
   (void)d;
+  o->trivial_auto_var_init_zero = 0;
+  o->trivial_auto_var_init_pattern = 0;
   if (val != NULL && strcmp(val, "zero") == 0) {
     o->trivial_auto_var_init_zero = 1;
+  } else if (val != NULL && strcmp(val, "pattern") == 0) {
+    o->trivial_auto_var_init_pattern = 1;
   } else if (val != NULL && strcmp(val, "uninitialized") == 0) {
-    o->trivial_auto_var_init_zero = 0;
   } else {
-    fprintf(stderr, "cc: error: %s=%s: the argument must be zero or uninitialized\n", as, val != NULL ? val : "");
+    fprintf(stderr, "cc: error: %s=%s: the argument must be zero, pattern or uninitialized\n", as,
+            val != NULL ? val : "");
     return -1;
   }
   return 0;
@@ -1407,6 +1466,15 @@ static const driver_opt_t options[] = {
     /* standard input, and the warnings cc has no switch for */
     {"-", OPT_FLAG, 0, opt_input, 0, 0},
     {"-Werror= -Wno-error= -W", OPT_PREFIX, 0, NULL, 0, 0},
+
+    /*
+     * gcc's sanitizers and --param, taken and acted on no more than its other options cc ignores; and clang's
+     * options, which gcc refuses, refused (Linux's Kconfig probes for them)
+     */
+    {"-fsanitize=", OPT_PREFIX, FWD_C, opt_sanitize, 0, 0},
+    {"--param", OPT_VALUE, 0, NULL, 0, 0},
+    {"-falloc-token -fsanitize-coverage-stack-depth -frandomize-layout-seed -fsanitize-cfi -mllvm",
+     OPT_PREFIX, 0, opt_reject, 0, 0},
 };
 
 #undef F

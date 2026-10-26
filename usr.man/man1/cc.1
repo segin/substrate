@@ -330,17 +330,30 @@ emits an inline-only definition as a local copy, which
 and up inline where they can, as any
 .Ic static inline
 function.
-.It Fl ftrivial-auto-var-init Ns = Ns Cm zero|uninitialized
+.It Fl ftrivial-auto-var-init Ns = Ns Cm zero|pattern|uninitialized
 With
 .Cm zero ,
 an automatic variable declared without an initializer starts as zero:
 a structure, union or array has every byte cleared, as a scalar always
 has.  A variable-length array is not cleared.
+.Cm pattern
+gives such an aggregate gcc's pattern instead, every byte 0xfe.
 .Cm uninitialized ,
 the default, leaves an aggregate as the stack had it.
-gcc's
-.Cm pattern
-is refused.
+.It Fl fsanitize Ns = Ns Ar list , Fl -param Ar name Ns = Ns Ar value
+Taken, as gcc takes them, and acted on no more than the other gcc options
+.Nm
+ignores: no code is instrumented.
+A sanitizer gcc does not have
+.Pq Cm kernel-memory , Cm kcfi
+is refused, as are clang's
+.Fl falloc-token-max ,
+.Fl fsanitize-coverage-stack-depth-callback-min ,
+.Fl frandomize-layout-seed-file ,
+.Fl fsanitize-cfi-*
+and
+.Fl mllvm ,
+so that a build probing for them finds them missing.
 .It Fl shared
 Link shared object.
 .It Fl pthread

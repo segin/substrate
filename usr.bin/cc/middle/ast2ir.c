@@ -9818,9 +9818,11 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                     return -1;
                 }
             }
-        } else if (cc_options_current()->trivial_auto_var_init_zero) {
-            /* -ftrivial-auto-var-init=zero: no initializer is all zero */
-            if (emit_memset_instr(sf, varv, 0, sz, diag) != 0) {
+        } else if (cc_options_current()->trivial_auto_var_init_zero ||
+                   cc_options_current()->trivial_auto_var_init_pattern) {
+            /* -ftrivial-auto-var-init=zero: no initializer is all zero; =pattern, all 0xfe */
+            if (emit_memset_instr(sf, varv, cc_options_current()->trivial_auto_var_init_pattern ? 0xfe : 0, sz,
+                                  diag) != 0) {
                 return -1;
             }
         }
@@ -10139,9 +10141,12 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                     return -1;
                 }
             }
-        } else if (cc_options_current()->trivial_auto_var_init_zero && !is_runtime_vla && total_size > 0) {
-            /* -ftrivial-auto-var-init=zero: no initializer is all zero */
-            if (emit_memset_instr(sf, varv, 0, total_size, diag) != 0) {
+        } else if ((cc_options_current()->trivial_auto_var_init_zero ||
+                    cc_options_current()->trivial_auto_var_init_pattern) &&
+                   !is_runtime_vla && total_size > 0) {
+            /* -ftrivial-auto-var-init=zero: no initializer is all zero; =pattern, all 0xfe */
+            if (emit_memset_instr(sf, varv, cc_options_current()->trivial_auto_var_init_pattern ? 0xfe : 0,
+                                  total_size, diag) != 0) {
                 return -1;
             }
         }
