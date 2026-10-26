@@ -1279,7 +1279,10 @@ static int opt_reject(cc_opts_t *o, const driver_opt_t *d, const char *as, const
  * -fsanitize=LIST: each of LIST one of gcc's sanitizers -- which cc takes,
  * instrumenting nothing, as it takes the other gcc options it does not act
  * on -- or the option is refused, as gcc refuses clang's (kernel-memory,
- * kcfi, cfi, safe-stack, ...).
+ * kcfi, cfi, safe-stack, ...).  A note says so, so that no one takes a
+ * build for a checked one: a note, which -Werror leaves one, since Linux's
+ * Kconfig decides what the compiler has by `-Werror -fsanitize=...`
+ * succeeding, as it does with gcc.
  *
  * @return 0, or -1 for a sanitizer gcc does not have
  */
@@ -1308,6 +1311,9 @@ static int opt_sanitize(cc_opts_t *o, const driver_opt_t *d, const char *as, con
     }
     p += n;
     p += *p == ',';
+  }
+  if (val != NULL && val[0] != '\0') {
+    fprintf(stderr, "cc: note: %s%s: cc instruments nothing; the code is built without the sanitizer\n", as, val);
   }
   (void)o;
   (void)d;

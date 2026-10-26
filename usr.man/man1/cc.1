@@ -375,7 +375,11 @@ the default, leaves an aggregate as the stack had it.
 .It Fl fsanitize Ns = Ns Ar list , Fl -param Ar name Ns = Ns Ar value
 Taken, as gcc takes them, and acted on no more than the other gcc options
 .Nm
-ignores: no code is instrumented.
+ignores: no code is instrumented, and a note says so for each
+.Fl fsanitize
+taken (a note, which
+.Fl Werror
+does not make an error, as a build's probes for the option need it taken).
 A sanitizer gcc does not have
 .Pq Cm kernel-memory , Cm kcfi
 is refused, as are clang's

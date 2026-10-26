@@ -55,6 +55,15 @@ done <<'EOF2'
 -fno-strict-aliasing
 EOF2
 
+# a sanitizer taken is noted as instrumenting nothing -- a note, which -Werror leaves one
+if ! "$CC_BIN" -Werror -fsanitize=thread -c -x c /dev/null -o "$CC_TMP/c.o" 2>"$CC_TMP/c.err"; then
+	echo "run_driver_gcc_options: -Werror -fsanitize=thread fails: $(cat "$CC_TMP/c.err")"
+	fails=$((fails + 1))
+elif ! grep -q "note: -fsanitize=thread: cc instruments nothing" "$CC_TMP/c.err"; then
+	echo "run_driver_gcc_options: -fsanitize=thread is taken without a note that nothing is instrumented"
+	fails=$((fails + 1))
+fi
+
 cat >"$CC_TMP/p.c" <<'EOF2'
 #include <stdio.h>
 
