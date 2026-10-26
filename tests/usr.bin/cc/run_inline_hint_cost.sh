@@ -123,4 +123,64 @@ for m in $modes; do
 		exit 1
 	fi
 done
+# A wrapper whose constants fold little away -- a call and a few loads and
+# stores, as Linux's hid_map_usage_clear() (17, folded 16), copied into its
+# 237 calls in hidinput_configure_usage() -- stays a call: the constant
+# rule takes a function only where the constants fold half of it away.
+cat >"$CC_TMP/w.c" <<'EOF2'
+#include <stdio.h>
+struct u { int type; int code; long hits; long last; };
+void __attribute__((noinline)) map(struct u *u, int type, int code, unsigned long *bits)
+{
+	u->type = type;
+	u->code = code;
+	bits[code & 3] |= 1UL << (type & 31);
+}
+static inline void map_clear(struct u *u, int type, int code, unsigned long *bits)
+{
+	map(u, type, code, bits);
+	u->hits += u->type;
+	u->last = (long)bits[0];
+}
+int __attribute__((noinline)) conf(struct u *u, int k, unsigned long *bits)
+{
+	switch (k) {
+	case 0: map_clear(u, 1, 30, bits); break;
+	case 1: map_clear(u, 1, 31, bits); break;
+	case 2: map_clear(u, 2, 7, bits); break;
+	case 3: map_clear(u, 3, 9, bits); break;
+	default: map_clear(u, 1, k, bits); break;
+	}
+	return u->code;
+}
+int main(void)
+{
+	struct u u = { 0, 0, 0, 0 };
+	unsigned long b[4] = { 0, ~0UL, ~0UL, ~0UL };
+	int s = 0, k;
+
+	for (k = 0; k < 7; k++)
+		s += conf(&u, k, b);
+	printf("%d %ld %lx %lx %ld\n", s, u.hits, b[0], b[2], u.last);
+	return 0;
+}
+EOF2
+for m in $modes; do
+	gcc -m$m -O1 -o "$CC_TMP/g" "$CC_TMP/w.c"
+	want=$("$CC_TMP/g")
+	for o in O0 O2 Os; do
+		"$CC_BIN" -m$m -$o -o "$CC_TMP/c" "$CC_TMP/w.c"
+		got=$("$CC_TMP/c")
+		if [ "$got" != "$want" ]; then
+			echo "run_inline_hint_cost: -m$m -$o: the wrapper program prints [$got], gcc's [$want]"
+			exit 1
+		fi
+	done
+	"$CC_BIN" -m$m -O2 -S -o "$CC_TMP/w.s" "$CC_TMP/w.c"
+	# (on i386 map_clear(), its longs words, costs no more than a call: inlined as small, not by its constants)
+	if [ "$m" = 64 ] && [ "$(grep -cE '(call|jmp)[lq]?[[:space:]]+map_clear$' "$CC_TMP/w.s")" -lt 4 ]; then
+		echo "run_inline_hint_cost: -m$m: map_clear(), its constants folding little, is copied into conf()'s calls"
+		exit 1
+	fi
+done
 echo "run_inline_hint_cost: ok"

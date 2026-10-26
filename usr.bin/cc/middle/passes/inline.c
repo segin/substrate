@@ -877,7 +877,7 @@ static long find_function(const cc_ssa_module_t *m, const char *name) {
 
 /**
  * Whether @p g (inline_hint_too_big()), inlined for @p call, comes to no more than INLINE_MAX_COST and one for each
- * argument the call sets up: a copy of it
+ * argument the call sets up, and to no more than half its own cost: a copy of it
  * with each parameter the call passes a constant (@p is_k, @p k, as find_constants() leaves them, over the
  * caller's first @p n values) made that constant, folded at @p opt_level as the inlined body would be.  gcc
  * weighs a call's constant arguments the same way: Linux's rol64() with a variable count is a dozen word
@@ -944,8 +944,13 @@ static int hint_folds_to_small(const cc_ssa_function_t *g, const cc_ssa_instr_t 
             goto out;
         }
     }
-    /* (the call's setting up of each argument is saved too) */
-    small = cc_optimize_function(&h, opt_level) == 0 && body_cost(&h) <= INLINE_MAX_COST + call->arg_count;
+    /*
+     * (the call's setting up of each argument is saved too) -- where the constants fold at least half the body
+     * away: Linux's hid_map_usage_clear(), a call and a clear_bit() whatever its constants (17 to 16), copied into
+     * its 237 calls in hidinput_configure_usage(), made hid-input.o twice gcc's
+     */
+    small = cc_optimize_function(&h, opt_level) == 0 && body_cost(&h) <= INLINE_MAX_COST + call->arg_count &&
+            2 * body_cost(&h) <= body_cost(g);
 out:
     for (i = 0; i < h.instr_count; ++i) {
         cc_ssa_instr_free(&h.instrs[i]);
