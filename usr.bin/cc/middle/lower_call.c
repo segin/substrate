@@ -2626,6 +2626,7 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
     int indirect_callee = -1;
     int ident_var_idx = -1;
     const cc_global_t *ident_global = NULL;
+    const cc_ctype_t *ptr_fnt = NULL; /* a call through a pointer: the function type pointed to */
     if (e->ident != NULL) {
         callee = find_fn(tu, e->ident);
         ident_var_idx = var_find_visible(vars, var_count, e->ident, depth);
@@ -2704,6 +2705,18 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         }
         in.op = CC_SSA_CALLI;
         in.lhs = indirect_callee;
+        {
+            /* the function type pointed to, whose prototype says how each argument is passed */
+            const cc_ctype_t *ct = e->lhs != NULL              ? lower_value_ctype(e->lhs)
+                                   : ident_var_idx >= 0         ? lower_var_ctype(&vars[ident_var_idx])
+                                   : ident_global != NULL       ? lower_global_ctype(ident_global)
+                                                                : NULL;
+
+            if (ct != NULL && ct->kind == CC_CT_POINTER) {
+                ct = ct->of;
+            }
+            ptr_fnt = ct != NULL && ct->unqual->kind == CC_CT_FUNCTION ? ct->unqual : NULL;
+        }
         /*
          * A pointer without a prototype may reach a variadic function;
          * use variadic caller setup for CALLI so va_start-based callees
@@ -2930,6 +2943,10 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
             }
         } else if (e->args[i] != NULL && lower_has_kind(e->args[i], CC_CT_LDOUBLE)) {
             arg_needs_ldouble_abi = 1;
+        } else if (in.op == CC_SSA_CALLI && ptr_fnt != NULL && ptr_fnt->prototyped && i < ptr_fnt->param_count &&
+                   ptr_fnt->params[i] != NULL && ct_has_kind(ptr_fnt->params[i], CC_CT_FLOAT)) {
+            /* a float parameter of the prototype pointed to takes a float, as a declared function's does */
+            arg_needs_float_abi = 1;
         }
         in.args[i] = av;
         /* (an empty structure's CC_CALL_ARG_ABI_ZERO stays: it takes no register and no stack) */
@@ -2957,15 +2974,7 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         int rid = lower_record_id(e);
 
         if (in.op == CC_SSA_CALLI) {
-            const cc_ctype_t *ct = e->lhs != NULL              ? lower_value_ctype(e->lhs)
-                                   : ident_var_idx >= 0         ? lower_var_ctype(&vars[ident_var_idx])
-                                   : ident_global != NULL       ? lower_global_ctype(ident_global)
-                                                                : NULL;
-
-            if (ct != NULL && ct->kind == CC_CT_POINTER) {
-                ct = ct->of;
-            }
-            fnt = ct != NULL && ct->unqual->kind == CC_CT_FUNCTION ? ct->unqual : NULL;
+            fnt = ptr_fnt;
             nregs = fnt != NULL && fnt->variadic ? 0 : dflt;
         } else {
             nregs = cc_abi_i386_function_regparm(tu, e->ident,
