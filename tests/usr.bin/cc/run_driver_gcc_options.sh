@@ -43,6 +43,8 @@ done <<'EOF2'
 -fsanitize=kcfi -fsanitize-cfi-icall-experimental-normalize-integers
 -fsanitize=address,kcfi
 -mllvm -tsan-distinguish-volatile=1
+-fms-anonymous-structs
+-fms-extensions
 -ftrivial-auto-var-init=pattern
 -ftrivial-auto-var-init=zero
 -ftrivial-auto-var-init=uninitialized

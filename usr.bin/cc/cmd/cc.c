@@ -1473,7 +1473,8 @@ static const driver_opt_t options[] = {
      */
     {"-fsanitize=", OPT_PREFIX, FWD_C, opt_sanitize, 0, 0},
     {"--param", OPT_VALUE, 0, NULL, 0, 0},
-    {"-falloc-token -fsanitize-coverage-stack-depth -frandomize-layout-seed -fsanitize-cfi -mllvm",
+    {"-falloc-token -fsanitize-coverage-stack-depth -frandomize-layout-seed -fsanitize-cfi -fms-anonymous-structs "
+     "-mllvm",
      OPT_PREFIX, 0, opt_reject, 0, 0},
 };
 
