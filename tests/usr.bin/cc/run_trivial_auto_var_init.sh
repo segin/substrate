@@ -3,7 +3,8 @@
 # starts as zero, structure, union and array too.  Linux builds with it;
 # cc warned the option unsupported and left aggregates as the stack had
 # them, and the slot optimizer may read such a field as the value stored
-# to it later.  =uninitialized is the default; =pattern is refused.
+# to it later.  =uninitialized is the default; =pattern is taken
+# (run_driver_gcc_options checks its 0xfe), another value refused.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -87,9 +88,10 @@ for m in 32 64; do
 	done
 done
 "$CC_BIN" -m32 -ftrivial-auto-var-init=uninitialized -c -o "$CC_TMP/avi.o" "$CC_TMP/avi.c"
-if "$CC_BIN" -m32 -ftrivial-auto-var-init=pattern -c -o "$CC_TMP/avi.o" "$CC_TMP/avi.c" 2> "$CC_TMP/avi.err"; then
-	echo "run_trivial_auto_var_init: =pattern was taken"
+"$CC_BIN" -m32 -ftrivial-auto-var-init=pattern -c -o "$CC_TMP/avi.o" "$CC_TMP/avi.c"
+if "$CC_BIN" -m32 -ftrivial-auto-var-init=bogus -c -o "$CC_TMP/avi.o" "$CC_TMP/avi.c" 2> "$CC_TMP/avi.err"; then
+	echo "run_trivial_auto_var_init: =bogus was taken"
 	exit 1
 fi
-grep -q 'must be zero or uninitialized' "$CC_TMP/avi.err"
+grep -q 'must be zero, pattern or uninitialized' "$CC_TMP/avi.err"
 echo "run_trivial_auto_var_init: ok"
