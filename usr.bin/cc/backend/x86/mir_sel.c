@@ -3236,7 +3236,8 @@ static void sel_instr(xsel_t *s, size_t j) {
         if (s->t->va_start == NULL) {
             NOPE(s);
         }
-        s->t->va_start(s, in);
+        /* (in parentheses: Substrate's <stdarg.h> makes va_start a function-like macro) */
+        (s->t->va_start)(s, in);
         break;
 
     case CC_SSA_CHAIN: {
