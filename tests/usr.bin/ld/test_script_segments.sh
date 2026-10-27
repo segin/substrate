@@ -14,9 +14,12 @@
 # distance from its address than the one before's, and where it is more
 # than a page past where that one ends; contents after a .bss stay in
 # its segment.  GNU ld is the judge: each PT_LOAD's flags, where it
-# ends and how far its load address is from its address.  (Where the
-# first begins is left out: GNU ld does not load the headers below a
-# section that begins a page, and this linker does.)
+# begins and ends, and how far its load address is from its address.
+#
+# Where the first begins is where its first section does when that
+# section begins a page: the headers are loaded in its page only where
+# they fit below it.  They were taken in a page lower, so the kernel's
+# first segment was loaded at 0xff000, in the PC's BIOS area.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -54,11 +57,11 @@ _start:	jmp _start
 EOF
 ${AS_GNU:-as} --32 -mx86-used-note=no -o a.o a.s || exit 1
 
-# segs FILE: each PT_LOAD as its flags, its end, and its load address less its address
+# segs FILE: each PT_LOAD as its flags, where it begins and ends, and its load address less its address
 segs() {
     readelf -lW "$1" | awk '$1 == "LOAD" {
         v = strtonum($3); p = strtonum($4); m = strtonum($6)
-        printf "%s end=%#x lma-vma=%#x\n", $7 $8, v + m, (p - v) % 4294967296 }'
+        printf "%s %#x-%#x lma-vma=%#x\n", $7 $8, v, v + m, (p - v) % 4294967296 }'
 }
 
 # same NAME SCRIPT: both linkers link a.o with SCRIPT, to the same segments
