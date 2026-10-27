@@ -97,6 +97,42 @@ int cc_builtin_is_recognized(const char *name) {
     return(0);
 }
 
+/**
+ * Whether @p name is an atomic read-modify-write builtin, and which.
+ *
+ * @param name  the called name
+ * @param out   receives what the builtin does; may be NULL
+ * @return      1 if it is one, else 0
+ */
+int cc_builtin_atomic_rmw(const char *name, cc_rmw_builtin_t *out) {
+    static const struct {
+        const char *name;
+        cc_rmw_builtin_t rmw;
+    } rmw[] = {
+        {"__sync_fetch_and_add", {CC_RMW_ADD, 0, 0}},
+        {"__sync_fetch_and_sub", {CC_RMW_SUB, 0, 0}},
+        {"__sync_sub_and_fetch", {CC_RMW_SUB, 1, 0}},
+        {"__sync_lock_test_and_set", {CC_RMW_XCHG, 0, 0}},
+        {"__atomic_fetch_add", {CC_RMW_ADD, 0, 1}},
+        {"__atomic_fetch_sub", {CC_RMW_SUB, 0, 1}},
+        {"__atomic_exchange_n", {CC_RMW_XCHG, 0, 1}},
+    };
+    size_t i;
+
+    if (name == NULL) {
+        return(0);
+    }
+    for (i = 0; i < sizeof(rmw) / sizeof(rmw[0]); ++i) {
+        if (strcmp(rmw[i].name, name) == 0) {
+            if (out != NULL) {
+                *out = rmw[i].rmw;
+            }
+            return(1);
+        }
+    }
+    return(0);
+}
+
 int cc_builtin_bswap_bits(const char *name) {
     if (name == NULL) {
         return(0);

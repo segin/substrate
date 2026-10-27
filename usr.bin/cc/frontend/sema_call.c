@@ -339,35 +339,17 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_nanl") == 0 || strcmp(name, "__builtin_nansl") == 0) {
         return BUILTIN_NANL;
     }
-    if (strcmp(name, "__sync_fetch_and_add") == 0) {
-        return BUILTIN_SYNC_FETCH_ADD;
-    }
-    if (strcmp(name, "__sync_fetch_and_sub") == 0) {
-        return BUILTIN_SYNC_FETCH_SUB;
-    }
-    if (strcmp(name, "__sync_sub_and_fetch") == 0) {
-        return BUILTIN_SYNC_SUB_AND_FETCH;
+    if (cc_builtin_atomic_rmw(name, NULL)) {
+        return BUILTIN_ATOMIC_RMW;
     }
     if (strcmp(name, "__sync_bool_compare_and_swap") == 0) {
         return BUILTIN_SYNC_BOOL_CAS;
-    }
-    if (strcmp(name, "__sync_lock_test_and_set") == 0) {
-        return BUILTIN_SYNC_LOCK_TEST_AND_SET;
     }
     if (strcmp(name, "__sync_lock_release") == 0) {
         return BUILTIN_SYNC_LOCK_RELEASE;
     }
     if (strcmp(name, "__sync_synchronize") == 0) {
         return BUILTIN_SYNC_SYNCHRONIZE;
-    }
-    if (strcmp(name, "__atomic_fetch_add") == 0) {
-        return BUILTIN_ATOMIC_FETCH_ADD;
-    }
-    if (strcmp(name, "__atomic_fetch_sub") == 0) {
-        return BUILTIN_ATOMIC_FETCH_SUB;
-    }
-    if (strcmp(name, "__atomic_exchange_n") == 0) {
-        return BUILTIN_ATOMIC_EXCHANGE_N;
     }
     if (strcmp(name, "__atomic_load_n") == 0) {
         return BUILTIN_ATOMIC_LOAD_N;
@@ -1191,14 +1173,13 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
         return 0;
     }
-    if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
-        bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_FETCH_ADD ||
-        bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
-        int expect_argc = (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
-                           bk == BUILTIN_ATOMIC_EXCHANGE_N)
-                              ? 3
-                              : 2;
-        if (e->arg_count != (size_t)expect_argc) {
+    if (bk == BUILTIN_ATOMIC_RMW) {
+        cc_rmw_builtin_t rmw;
+        size_t expect_argc;
+
+        (void)cc_builtin_atomic_rmw(e->ident, &rmw);
+        expect_argc = rmw.has_memorder ? 3 : 2;
+        if (e->arg_count != expect_argc) {
             sema_diag(diag, "atomic fetch/exchange builtin has wrong argument count");
             return -1;
         }
@@ -1206,9 +1187,7 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             check_expr(tu, e->args[1], vars, var_count, depth, diag) != 0) {
             return -1;
         }
-        if ((bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB ||
-             bk == BUILTIN_ATOMIC_EXCHANGE_N) &&
-            check_expr(tu, e->args[2], vars, var_count, depth, diag) != 0) {
+        if (rmw.has_memorder && check_expr(tu, e->args[2], vars, var_count, depth, diag) != 0) {
             return -1;
         }
         if (!sx_is_ptr(e->args[0])) {
@@ -1220,15 +1199,12 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             sema_diag(diag, "atomic fetch/exchange value type mismatch");
             return -1;
         }
-        if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
-            const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
-                                 ? "__atomic_exchange_n"
-                                 : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
+        if (rmw.has_memorder) {
             if (!sx_is_int(e->args[2])) {
                 sema_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
                 return -1;
             }
-            if (atomic_memorder_check_arg(tu, e->args[2], nm, "operation", 0, 0, diag) != 0) {
+            if (atomic_memorder_check_arg(tu, e->args[2], e->ident, "operation", 0, 0, diag) != 0) {
                 return -1;
             }
         }

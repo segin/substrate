@@ -201,6 +201,327 @@ static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
     return 0;
 }
 
+/** One input of an asm emit_atomic_asm() writes. */
+typedef struct {
+    int value;              /**< the value, or CC_SSA_ASM_MEM_INDIRECT_ENCODE() of an address for "m" */
+    const char *constraint; /**< its constraint */
+    long size;              /**< its size in bytes */
+} atomic_asm_in_t;
+
+/**
+ * Emit `asm volatile (tmpl : "<out>" (result) : inputs : "memory", "cc")`, the one instruction an atomic builtin
+ * is: the asm keeps the read and the write of the object one locked access, which separate LOAD and STORE are not.
+ *
+ * @param sf        the function
+ * @param tmpl      the template
+ * @param out       the output's constraint
+ * @param out_size  the output's size in bytes
+ * @param ins       the inputs
+ * @param n_in      how many
+ * @param diag      receives an error
+ * @return          the output's value, or -1
+ */
+static int emit_atomic_asm(cc_ssa_function_t *sf, const char *tmpl, const char *out, long out_size,
+                           const atomic_asm_in_t *ins, size_t n_in, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int outv = cc_ir_new_value(sf, CC_VAL_I64);
+    size_t i;
+    int ok;
+
+    if (outv < 0) {
+        set_diag(diag, "out of memory emitting an atomic operation");
+        return -1;
+    }
+    cc_ir_set_size(sf, outv, out_size);
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ASM;
+    in.dst = -1;
+    in.lhs = -1;
+    in.rhs = -1;
+    in.asm_volatile = 1;
+    in.sym = cc_strdup(tmpl);
+    in.asm_out_count = 1;
+    in.asm_out_values = (int *)calloc(1, sizeof(*in.asm_out_values));
+    in.asm_out_sizes = (unsigned char *)calloc(1, sizeof(*in.asm_out_sizes));
+    in.asm_out_constraints = (char **)calloc(1, sizeof(*in.asm_out_constraints));
+    in.asm_out_names = (char **)calloc(1, sizeof(*in.asm_out_names));
+    in.asm_in_count = n_in;
+    in.asm_in_values = (int *)calloc(n_in, sizeof(*in.asm_in_values));
+    in.asm_in_sizes = (unsigned char *)calloc(n_in, sizeof(*in.asm_in_sizes));
+    in.asm_in_constraints = (char **)calloc(n_in, sizeof(*in.asm_in_constraints));
+    in.asm_in_names = (char **)calloc(n_in, sizeof(*in.asm_in_names));
+    in.asm_clobber_count = 2;
+    in.asm_clobbers = (char **)calloc(2, sizeof(*in.asm_clobbers));
+    ok = in.sym != NULL && in.asm_out_values != NULL && in.asm_out_sizes != NULL && in.asm_out_constraints != NULL &&
+         in.asm_out_names != NULL && in.asm_in_values != NULL && in.asm_in_sizes != NULL &&
+         in.asm_in_constraints != NULL && in.asm_in_names != NULL && in.asm_clobbers != NULL;
+    if (ok) {
+        in.asm_out_values[0] = outv;
+        in.asm_out_sizes[0] = (unsigned char)out_size;
+        in.asm_out_constraints[0] = cc_strdup(out);
+        ok = in.asm_out_constraints[0] != NULL;
+        for (i = 0; ok && i < n_in; ++i) {
+            in.asm_in_values[i] = ins[i].value;
+            in.asm_in_sizes[i] = (unsigned char)ins[i].size;
+            in.asm_in_constraints[i] = cc_strdup(ins[i].constraint);
+            ok = in.asm_in_constraints[i] != NULL;
+        }
+        if (ok) {
+            in.asm_clobbers[0] = cc_strdup("memory");
+            in.asm_clobbers[1] = cc_strdup("cc");
+            ok = in.asm_clobbers[0] != NULL && in.asm_clobbers[1] != NULL;
+        }
+    }
+    if (!ok || cc_ir_push(sf, in) != 0) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory emitting an atomic operation");
+        return -1;
+    }
+    return outv;
+}
+
+/**
+ * Value @p v as the object of @p size bytes an atomic builtin works on holds it: its low bytes, extended as the
+ * object's type loads.  An operand converts to the object's type, so a CAS of an unsigned char with -1 compares
+ * with 255; an atomic's result is what it read or wrote.
+ *
+ * @param sf           the function
+ * @param v            the value
+ * @param size         the object's size
+ * @param is_unsigned  whether it loads zero-extended
+ * @param diag         receives an error
+ * @return             the value converted, or -1
+ */
+static int atomic_fit(cc_ssa_function_t *sf, int v, long size, int is_unsigned, cc_diag_t *diag) {
+    if (v < 0 || size >= 8 || (size == 4 && value_size(sf, v) <= 4)) {
+        return v;
+    }
+    return emit_ext(sf, v, (int)size * 8, is_unsigned, size < 4 ? 4 : size, diag);
+}
+
+/**
+ * Argument @p arg of an atomic builtin on an object of @p size bytes, lowered and converted to the object's type.
+ *
+ * @return the value, or -1
+ */
+static int lower_atomic_operand(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg, long size,
+                                int is_unsigned, cc_diag_t *diag) {
+    int v = lower_expr(tu, sf, ctx, vars, var_count, depth, arg, diag);
+
+    if (v < 0 || (v = cast_value(sf, v, CC_VAL_I64, diag)) < 0) {
+        return -1;
+    }
+    if (size == 8 && value_size(sf, v) < 8) {
+        /* a word for a 64-bit object: extended as its own type says */
+        long vs = value_size(sf, v) > 0 ? value_size(sf, v) : 4;
+
+        return emit_ext(sf, v, (int)vs * 8, lower_loads_unsigned(arg), 8, diag);
+    }
+    return atomic_fit(sf, v, size, is_unsigned, diag);
+}
+
+/**
+ * The compare-exchange of @p size bytes at @p memop: `lock cmpxchg`, or `lock cmpxchg8b` for a pair of words.
+ *
+ * @param sf           the function
+ * @param memop        the object, CC_SSA_ASM_MEM_INDIRECT_ENCODE() of its address
+ * @param size         its size in bytes
+ * @param expectv      the value it must hold
+ * @param desiredv     the value it then gets
+ * @param diag         receives an error
+ * @return             the value it held, or -1
+ */
+static int emit_atomic_cmpxchg(cc_ssa_function_t *sf, int memop, long size, int expectv, int desiredv,
+                               cc_diag_t *diag) {
+    atomic_asm_in_t ins[4];
+
+    ins[0].value = expectv;
+    ins[0].constraint = "0";
+    ins[0].size = size;
+    ins[1].value = memop;
+    ins[1].constraint = "m";
+    ins[1].size = size;
+    if (size > cc_target_pointer_size()) {
+        int c32 = cc_ir_const(sf, 32);
+        int hi;
+
+        if (c32 < 0) {
+            return -1;
+        }
+        hi = emit_i64_binop_instr(sf, CC_SSA_SHR, desiredv, c32, 1, diag);
+        ins[2].value = emit_ext(sf, desiredv, 32, 1, 4, diag);
+        ins[3].value = hi < 0 ? -1 : emit_ext(sf, hi, 32, 1, 4, diag);
+        if (ins[2].value < 0 || ins[3].value < 0) {
+            return -1;
+        }
+        ins[2].constraint = "b";
+        ins[2].size = 4;
+        ins[3].constraint = "c";
+        ins[3].size = 4;
+        return emit_atomic_asm(sf, "lock cmpxchg8b %2", "=A", size, ins, 4, diag);
+    }
+    ins[2].value = desiredv;
+    ins[2].constraint = size == 1 ? "q" : "r";
+    ins[2].size = size;
+    return emit_atomic_asm(sf, "lock cmpxchg %3, %2", "=a", size, ins, 3, diag);
+}
+
+/**
+ * Lower an atomic read-modify-write builtin (cc_builtin_atomic_rmw()) or __sync_bool_compare_and_swap to locked
+ * instructions: `lock xadd` adds, `xchg` exchanges, `lock cmpxchg` compares and exchanges.  An operation with no
+ * instruction of its own -- any on a pair of words on i386 -- is a compare-exchange loop.  Each of these is a full
+ * barrier on x86, which every memory order asks no more than.
+ *
+ * @return the builtin's value, or -1
+ */
+static int lower_atomic_rmw(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                            var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, builtin_kind_t bk,
+                            cc_diag_t *diag) {
+    cc_rmw_builtin_t rmw;
+    const cc_ctype_t *elem_ct;
+    long size;
+    int uns;
+    int p;
+    int memop;
+    int v;
+    int cas = bk == BUILTIN_SYNC_BOOL_CAS;
+    int wide;
+
+    memset(&rmw, 0, sizeof(rmw));
+    if (!cas) {
+        (void)cc_builtin_atomic_rmw(e->ident, &rmw);
+    }
+    if (e->arg_count != (cas || rmw.has_memorder ? 3u : 2u) || e->args[0] == NULL || e->args[1] == NULL) {
+        set_diag(diag, "atomic builtin lowering has the wrong arguments");
+        return -1;
+    }
+    p = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+    if (p < 0 || (p = cast_value(sf, p, CC_VAL_I64, diag)) < 0) {
+        return -1;
+    }
+    elem_ct = lower_atomic_elem_ctype(e->args[0]);
+    uns = ct_loads_unsigned(elem_ct) ? 1 : 0;
+    size = lower_pointee_size(tu, e->args[0]);
+    if (size <= 0) {
+        size = lower_pointer_step(tu, e->args[0]);
+    }
+    if (size <= 0) {
+        size = cc_target_pointer_size();
+    }
+    if (size != 1 && size != 2 && size != 4 && size != 8) {
+        set_diag(diag, "atomic builtin on an object of unsupported size");
+        return -1;
+    }
+    wide = size > cc_target_pointer_size();
+    memop = CC_SSA_ASM_MEM_INDIRECT_ENCODE(p);
+    v = lower_atomic_operand(tu, sf, ctx, vars, var_count, depth, e->args[1], size, uns, diag);
+    if (v < 0) {
+        return -1;
+    }
+    if (cas) {
+        int desiredv = lower_atomic_operand(tu, sf, ctx, vars, var_count, depth, e->args[2], size, uns, diag);
+        int prev;
+
+        if (desiredv < 0) {
+            return -1;
+        }
+        prev = emit_atomic_cmpxchg(sf, memop, size, v, desiredv, diag);
+        if (prev < 0 || (prev = atomic_fit(sf, prev, size, uns, diag)) < 0) {
+            return -1;
+        }
+        return emit_cmp_instr(sf, CC_CMP_EQ, prev, v, uns, diag);
+    }
+    if (rmw.has_memorder && lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag) < 0) {
+        return -1;
+    }
+    if (!wide) {
+        atomic_asm_in_t ins[2];
+        int old;
+
+        ins[0].value = v;
+        ins[0].constraint = "0";
+        ins[0].size = size;
+        ins[1].value = memop;
+        ins[1].constraint = "m";
+        ins[1].size = size;
+        if (rmw.op == CC_RMW_XCHG) {
+            old = emit_atomic_asm(sf, "xchg %0, %2", size == 1 ? "=q" : "=r", size, ins, 2, diag);
+            return old < 0 ? -1 : atomic_fit(sf, old, size, uns, diag);
+        }
+        if (rmw.op == CC_RMW_SUB) {
+            int zero = cc_ir_const(sf, 0);
+
+            ins[0].value = zero < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_SUB, zero, v, uns, diag);
+            if (ins[0].value < 0) {
+                return -1;
+            }
+        }
+        old = emit_atomic_asm(sf, "lock xadd %0, %2", size == 1 ? "=q" : "=r", size, ins, 2, diag);
+        if (old < 0 || (old = atomic_fit(sf, old, size, uns, diag)) < 0) {
+            return -1;
+        }
+        if (!rmw.returns_new) {
+            return old;
+        }
+        return atomic_fit(sf, emit_i64_binop_instr(sf, rmw.op == CC_RMW_ADD ? CC_SSA_ADD : CC_SSA_SUB, old, v, uns,
+                                                   diag),
+                          size, uns, diag);
+    }
+    {
+        /* old = *p; do new = old OP v; while ((prev = cmpxchg(p, old, new)) != old && (old = prev, 1)); */
+        cc_ssa_instr_t in;
+        int old;
+        int newv;
+        int prev;
+        int eq;
+        int l_loop = cc_ir_new_label(sf);
+        int l_done = cc_ir_new_label(sf);
+
+        if (l_loop < 0 || l_done < 0) {
+            return -1;
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_LOAD;
+        in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+        in.lhs = p;
+        in.rhs = -1;
+        in.imm = size;
+        in.is_unsigned = uns;
+        if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory emitting an atomic operation");
+            return -1;
+        }
+        old = in.dst;
+        cc_ir_set_size(sf, old, size);
+        if (cc_ir_br(sf, l_loop) != 0 || cc_ir_label(sf, l_loop) != 0) {
+            return -1;
+        }
+        if (rmw.op == CC_RMW_XCHG) {
+            newv = v;
+        } else {
+            newv = emit_i64_binop_instr(sf, rmw.op == CC_RMW_ADD ? CC_SSA_ADD : CC_SSA_SUB, old, v, uns, diag);
+        }
+        if (newv < 0 || (prev = emit_atomic_cmpxchg(sf, memop, size, old, newv, diag)) < 0 ||
+            (eq = emit_cmp_instr(sf, CC_CMP_EQ, prev, old, uns, diag)) < 0) {
+            return -1;
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_MOV;
+        in.dst = old;
+        in.lhs = prev;
+        in.rhs = -1;
+        if (cc_ir_push(sf, in) != 0) {
+            set_diag(diag, "out of memory emitting an atomic operation");
+            return -1;
+        }
+        if (cc_ir_br_cond(sf, eq, l_done, l_loop) != 0 || cc_ir_label(sf, l_done) != 0) {
+            return -1;
+        }
+        return rmw.returns_new ? newv : old;
+    }
+}
+
 static int emit_local_var_scalar_load(cc_ssa_function_t *sf, const var_entry_t *v, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     cc_value_type_t vt;
@@ -495,35 +816,17 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_nanl") == 0 || strcmp(name, "__builtin_nansl") == 0) {
         return BUILTIN_NANL;
     }
-    if (strcmp(name, "__sync_fetch_and_add") == 0) {
-        return BUILTIN_SYNC_FETCH_ADD;
-    }
-    if (strcmp(name, "__sync_fetch_and_sub") == 0) {
-        return BUILTIN_SYNC_FETCH_SUB;
-    }
-    if (strcmp(name, "__sync_sub_and_fetch") == 0) {
-        return BUILTIN_SYNC_SUB_AND_FETCH;
+    if (cc_builtin_atomic_rmw(name, NULL)) {
+        return BUILTIN_ATOMIC_RMW;
     }
     if (strcmp(name, "__sync_bool_compare_and_swap") == 0) {
         return BUILTIN_SYNC_BOOL_CAS;
-    }
-    if (strcmp(name, "__sync_lock_test_and_set") == 0) {
-        return BUILTIN_SYNC_LOCK_TEST_AND_SET;
     }
     if (strcmp(name, "__sync_lock_release") == 0) {
         return BUILTIN_SYNC_LOCK_RELEASE;
     }
     if (strcmp(name, "__sync_synchronize") == 0) {
         return BUILTIN_SYNC_SYNCHRONIZE;
-    }
-    if (strcmp(name, "__atomic_fetch_add") == 0) {
-        return BUILTIN_ATOMIC_FETCH_ADD;
-    }
-    if (strcmp(name, "__atomic_fetch_sub") == 0) {
-        return BUILTIN_ATOMIC_FETCH_SUB;
-    }
-    if (strcmp(name, "__atomic_exchange_n") == 0) {
-        return BUILTIN_ATOMIC_EXCHANGE_N;
     }
     if (strcmp(name, "__atomic_load_n") == 0) {
         return BUILTIN_ATOMIC_LOAD_N;
@@ -2247,17 +2550,13 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         }
         return z;
     }
-    if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
-        bk == BUILTIN_SYNC_BOOL_CAS || bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_FETCH_ADD ||
-        bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N || bk == BUILTIN_ATOMIC_LOAD_N ||
-        bk == BUILTIN_ATOMIC_STORE_N) {
+    if (bk == BUILTIN_ATOMIC_RMW || bk == BUILTIN_SYNC_BOOL_CAS) {
+        return lower_atomic_rmw(tu, sf, ctx, vars, var_count, depth, e, bk, diag);
+    }
+    if (bk == BUILTIN_ATOMIC_LOAD_N || bk == BUILTIN_ATOMIC_STORE_N) {
         int p;
         int oldv = -1;
-        int newv = -1;
         int rhsv = -1;
-        int cmpv = -1;
-        int l_store = -1;
-        int l_done = -1;
         long mem_size;
         long long memorder = CC_ATOMIC_SEQ_CST;
         int need_pre_compiler = 0;
@@ -2265,7 +2564,6 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         int need_pre_full = 0;
         int need_post_full = 0;
         const cc_ctype_t *elem_ct;
-        cc_ssa_instr_t bin;
         if (e->arg_count == 0 || e->args[0] == NULL) {
             set_diag(diag, "atomic builtin requires pointer argument");
             return -1;
@@ -2295,8 +2593,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
                     memorder = CC_ATOMIC_SEQ_CST;
                 }
             }
-        } else if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N ||
-                   bk == BUILTIN_ATOMIC_STORE_N) {
+        } else {
             if (e->arg_count >= 3 && e->args[2] != NULL) {
                 if (lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag) < 0) {
                     return -1;
@@ -2313,20 +2610,12 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             } else if (memorder != CC_ATOMIC_RELAXED) {
                 need_post_compiler = 1;
             }
-        } else if (bk == BUILTIN_ATOMIC_STORE_N) {
-            if (memorder == CC_ATOMIC_SEQ_CST) {
-                need_pre_full = 1;
-                need_post_full = 1;
-            } else if (memorder != CC_ATOMIC_RELAXED) {
-                need_pre_compiler = 1;
-            }
         } else {
             if (memorder == CC_ATOMIC_SEQ_CST) {
                 need_pre_full = 1;
                 need_post_full = 1;
             } else if (memorder != CC_ATOMIC_RELAXED) {
                 need_pre_compiler = 1;
-                need_post_compiler = 1;
             }
         }
         if (need_pre_full) {
@@ -2361,10 +2650,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             }
             return oldv;
         }
-        if ((bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
-             bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_FETCH_ADD ||
-             bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N || bk == BUILTIN_ATOMIC_STORE_N) &&
-            e->arg_count >= 2 && e->args[1] != NULL) {
+        if (e->arg_count >= 2 && e->args[1] != NULL) {
             rhsv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
             if (rhsv < 0) {
                 return -1;
@@ -2374,59 +2660,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
                 return -1;
             }
         }
-        if (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_SYNC_FETCH_SUB || bk == BUILTIN_SYNC_SUB_AND_FETCH ||
-            bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB) {
-            memset(&bin, 0, sizeof(bin));
-            bin.op = (bk == BUILTIN_SYNC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_ADD) ? CC_SSA_ADD : CC_SSA_SUB;
-            bin.dst = cc_ir_new_value(sf, ct_value_kind(elem_ct));
-            bin.lhs = oldv;
-            bin.rhs = rhsv;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            newv = bin.dst;
-            memset(&in, 0, sizeof(in));
-            in.op = CC_SSA_STORE;
-            in.dst = -1;
-            in.lhs = p;
-            in.rhs = newv;
-            in.imm = mem_size;
-            if (cc_ir_push(sf, in) != 0) {
-                return -1;
-            }
-            if (need_post_full) {
-                if (emit_atomic_full_barrier(sf, diag) != 0) {
-                    return -1;
-                }
-            } else if (need_post_compiler) {
-                if (emit_atomic_compiler_barrier(sf, diag) != 0) {
-                    return -1;
-                }
-            }
-            return bk == BUILTIN_SYNC_SUB_AND_FETCH ? newv : oldv;
-        }
-        if (bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
-            memset(&in, 0, sizeof(in));
-            in.op = CC_SSA_STORE;
-            in.dst = -1;
-            in.lhs = p;
-            in.rhs = rhsv;
-            in.imm = mem_size;
-            if (cc_ir_push(sf, in) != 0) {
-                return -1;
-            }
-            if (need_post_full) {
-                if (emit_atomic_full_barrier(sf, diag) != 0) {
-                    return -1;
-                }
-            } else if (need_post_compiler) {
-                if (emit_atomic_compiler_barrier(sf, diag) != 0) {
-                    return -1;
-                }
-            }
-            return oldv;
-        }
-        if (bk == BUILTIN_ATOMIC_STORE_N) {
+        {
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_STORE;
             in.dst = -1;
@@ -2446,76 +2680,6 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
                 }
             }
             return rhsv;
-        }
-        if (bk == BUILTIN_SYNC_BOOL_CAS) {
-            int expectv;
-            int desiredv;
-            if (e->arg_count != 3 || e->args[1] == NULL || e->args[2] == NULL) {
-                set_diag(diag, "__sync_bool_compare_and_swap lowering expects 3 arguments");
-                return -1;
-            }
-            expectv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
-            if (expectv < 0) {
-                return -1;
-            }
-            expectv = cast_value(sf, expectv, ct_value_kind(elem_ct), diag);
-            if (expectv < 0) {
-                return -1;
-            }
-            desiredv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag);
-            if (desiredv < 0) {
-                return -1;
-            }
-            desiredv = cast_value(sf, desiredv, ct_value_kind(elem_ct), diag);
-            if (desiredv < 0) {
-                return -1;
-            }
-            memset(&bin, 0, sizeof(bin));
-            bin.op = CC_SSA_CMP;
-            bin.cmp_kind = CC_CMP_EQ;
-            bin.dst = cc_ir_new_value(sf, CC_VAL_I64);
-            bin.lhs = oldv;
-            bin.rhs = expectv;
-            if (bin.dst < 0 || cc_ir_push(sf, bin) != 0) {
-                return -1;
-            }
-            cmpv = bin.dst;
-            l_store = cc_ir_new_label(sf);
-            l_done = cc_ir_new_label(sf);
-            if (l_store < 0 || l_done < 0) {
-                return -1;
-            }
-            if (cc_ir_br_cond(sf, cmpv, l_store, l_done) != 0) {
-                return -1;
-            }
-            if (cc_ir_label(sf, l_store) != 0) {
-                return -1;
-            }
-            memset(&in, 0, sizeof(in));
-            in.op = CC_SSA_STORE;
-            in.dst = -1;
-            in.lhs = p;
-            in.rhs = desiredv;
-            in.imm = mem_size;
-            if (cc_ir_push(sf, in) != 0) {
-                return -1;
-            }
-            if (cc_ir_br(sf, l_done) != 0) {
-                return -1;
-            }
-            if (cc_ir_label(sf, l_done) != 0) {
-                return -1;
-            }
-            if (need_post_full) {
-                if (emit_atomic_full_barrier(sf, diag) != 0) {
-                    return -1;
-                }
-            } else if (need_post_compiler) {
-                if (emit_atomic_compiler_barrier(sf, diag) != 0) {
-                    return -1;
-                }
-            }
-            return cmpv;
         }
     }
     if (e->ident != NULL && bswap_bits != 0) {

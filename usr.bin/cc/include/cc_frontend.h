@@ -484,6 +484,22 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);
 int cc_builtin_bswap_bits(const char *name);
+
+/** What an atomic read-modify-write builtin does to the object. */
+typedef enum {
+    CC_RMW_ADD,
+    CC_RMW_SUB,
+    CC_RMW_XCHG /**< stores the operand */
+} cc_rmw_op_t;
+
+/** An atomic read-modify-write builtin: __sync_fetch_and_add, __atomic_exchange_n and the like. */
+typedef struct {
+    cc_rmw_op_t op;
+    int returns_new;  /**< it gives the value stored, not the value before */
+    int has_memorder; /**< an __atomic_ builtin: a memory order follows the operand */
+} cc_rmw_builtin_t;
+
+int cc_builtin_atomic_rmw(const char *name, cc_rmw_builtin_t *out);
 int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
                        const char *const *flags, size_t flag_count, cc_diag_t *diag);
 
