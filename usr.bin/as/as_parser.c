@@ -2641,6 +2641,17 @@ static int parse_instruction_tokens(parse_ctx_t *ctx, const as_token_t *tokv, si
         return -1;
     }
 
+    /* `jmp $0x08, $label` is the far jump, ljmp, as `jmp $0x08:$label`
+     * is above (and call lcall).  By its name every pass after took it
+     * for a jump to a place, and its offset went out with no relocation:
+     * the Substrate kernel's reload of %cs jumped to 0. */
+    if (parse_is_x86 && in.operand_count == 2 && in.operands[0].kind == AS_OPERAND_IMMEDIATE &&
+        in.operands[1].kind == AS_OPERAND_IMMEDIATE && is_x86_far_imm_mnemonic(in.mnemonic) &&
+        rewrite_x86_far_imm_mnemonic(&in.mnemonic) != 0) {
+        free_instruction(&in);
+        return -1;
+    }
+
     st->kind = AS_STMT_INSTRUCTION;
     st->u.instr = in;
     return 0;
