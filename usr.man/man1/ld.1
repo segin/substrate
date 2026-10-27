@@ -600,9 +600,29 @@ and
 make the symbol hidden.
 A symbol defined inside
 .Ic SECTIONS
-belongs to the section its address falls in, unless it is set between
-output sections to an expression of numbers alone, which is absolute as
-in GNU ld; one defined outside is absolute.
+belongs to the section its address falls in, except one set with
+.Ql =
+between output sections, which is where GNU ld puts it: a symbol or
+.Ic ADDR
+in the expression is an address in its section, a number or
+.Ql \&.
+an absolute address, and
+.Ic SIZEOF ,
+.Ic ALIGNOF
+or a comparison a plain number; of two operands that differ a plain
+number takes the other's section and otherwise the result is absolute, as
+arithmetic on two of one kind is, so
+.Dq "sym = other + 1;"
+is absolute and
+.Dq "sym = other + SIZEOF(.text);"
+is in other's section; and what came from
+.Ql \&.
+alone, unless
+.Ic ABSOLUTE
+took it out, is in the section before it, or the next one if
+.Ql \&.
+was set since.
+One defined outside is absolute.
 Expressions have the operators of C, parentheses nested no more than 256
 deep, and the functions
 .Ic ALIGN

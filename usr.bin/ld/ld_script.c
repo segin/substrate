@@ -182,6 +182,82 @@ static int script_symbol_defined(const lds_eval_ctx_t *ec, const char *name) {
     return sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
 }
 
+/**
+ * @brief Set the value's kind to that of a symbol an expression names.
+ *
+ * A symbol in a section is an address in that section, and any other an
+ * absolute address -- one the script set from the location counter too,
+ * since GNU ld moves those into a section only once the script is done.
+ *
+ * @param ec   The evaluation.
+ * @param name The symbol.
+ */
+static void lds_val_of_name(lds_eval_ctx_t *ec, const char *name) {
+    const lds_stmtvec_t *v = ec->ctx != NULL && ec->ctx->script != NULL ? &ec->ctx->script->stmts : NULL;
+    const elf_symbol_t *sym;
+    uint32_t shndx;
+    size_t i;
+
+    ec->vkind = LDS_VAL_ABS;
+    ec->vsec = NULL;
+    for (i = 0; v != NULL && i < v->count; ++i) {
+        if (v->items[i].kind == LDS_ST_ASSIGN && v->items[i].by_dot && strcmp(v->items[i].at.text, name) == 0) {
+            return;
+        }
+    }
+    sym = ec->obj != NULL ? elf_find_symbol((elfobj_t *)ec->obj, name) : NULL;
+    shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
+    if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || ELF_SHNDX_RESERVED(shndx) ||
+        (size_t)(shndx - 1) >= elf_section_count(ec->obj)) {
+        return;
+    }
+    ec->vkind = LDS_VAL_SECTION;
+    ec->vsec = elf_section_get(ec->obj, (size_t)(shndx - 1));
+}
+
+/**
+ * @brief Give the result of a binary operator its kind, as GNU ld does.
+ *
+ * The right operand's kind is in @p ec.  Of two that differ, a number
+ * takes the other's; otherwise both are made absolute addresses, which
+ * takes "." out of the result.  Arithmetic on two of one kind, between
+ * output sections, is an absolute address.
+ *
+ * @param ec    The evaluation, with the right operand's kind.
+ * @param lkind The left operand's kind.
+ * @param lsec  Its section.
+ * @param arith Whether the operator is arithmetic (not MAX, MIN or ALIGN).
+ */
+static void lds_val_binary(lds_eval_ctx_t *ec, lds_val_kind_t lkind, const elf_section_t *lsec, int arith) {
+    if (lkind != ec->vkind || lsec != ec->vsec) {
+        if (lkind != LDS_VAL_NUMBER && ec->vkind != LDS_VAL_NUMBER) {
+            ec->vkind = lkind = LDS_VAL_ABS;
+            ec->vsec = lsec = NULL;
+            ec->from_dot = 0;
+        } else if (ec->vkind == LDS_VAL_NUMBER) {
+            ec->vkind = lkind;
+            ec->vsec = lsec;
+            lkind = LDS_VAL_NUMBER;
+            lsec = NULL;
+        }
+    }
+    if (arith && lkind == ec->vkind && lsec == ec->vsec) {
+        ec->vkind = LDS_VAL_ABS;
+        ec->vsec = NULL;
+    }
+}
+
+/**
+ * @brief Make the value an absolute address that is not by ".".
+ *
+ * @param ec The evaluation.
+ */
+static void lds_val_abs(lds_eval_ctx_t *ec) {
+    ec->vkind = LDS_VAL_ABS;
+    ec->vsec = NULL;
+    ec->from_dot = 0;
+}
+
 static int script_lookup_section_metric(const lds_eval_ctx_t *ec, const char *name, int metric, uint64_t *out) {
     elf_section_t *sec;
 
@@ -256,6 +332,8 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
     int takes_name;
     const char *word;           /* the argument, of a function that takes a name */
     uint64_t vals[8];
+    lds_val_kind_t kinds[8] = {LDS_VAL_NUMBER};
+    const elf_section_t *secs[8] = {NULL};
 
     if (ec == NULL || name_tok == NULL || name_tok->text == NULL || items == NULL || out == NULL || begin >= end) {
         return -1;
@@ -311,9 +389,22 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
         if (lds_eval_expr_slice(ec, items, arg_starts[i], arg_ends[i], &vals[i]) != 0) {
             return -1;
         }
+        kinds[i] = ec->vkind;
+        secs[i] = ec->vsec;
     }
 
+    /* Most give a number; those that differ say so below. */
+    ec->vkind = LDS_VAL_NUMBER;
+    ec->vsec = NULL;
     if (strcmp(name, "ALIGN") == 0) {
+        if (arg_count == 2) {
+            ec->vkind = kinds[1];
+            ec->vsec = secs[1];
+            lds_val_binary(ec, kinds[0], secs[0], 0);
+        } else {
+            ec->vkind = LDS_VAL_ABS;
+            ec->from_dot = 1;
+        }
         if (arg_count == 1) {
             /* ALIGN(n) is the location counter, aligned. */
             if (!ec->have_dot) {
@@ -358,6 +449,12 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
             ec->err_msg = "failed to resolve section builtin";
             return -1;
         }
+        if (name[0] == 'L') {
+            ec->vkind = LDS_VAL_ABS;
+        } else if (name[0] == 'A' && section_name != NULL && ec->obj != NULL &&
+                   (ec->vsec = elf_find_section((elfobj_t *)ec->obj, section_name)) != NULL) {
+            ec->vkind = LDS_VAL_SECTION;
+        }
     } else if (strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0) {
         const char *sym = NULL;
         if (arg_count != 1 || arg_starts[0] >= arg_ends[0]) {
@@ -371,14 +468,26 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
         *out = sym != NULL && script_symbol_defined(ec, sym) ? 1 : 0;
     } else if ((strcmp(name, "MAX") == 0 || strcmp(name, "MIN") == 0) && arg_count == 2) {
         *out = (name[1] == 'A') == (vals[0] > vals[1]) ? vals[0] : vals[1];
+        ec->vkind = kinds[1];
+        ec->vsec = secs[1];
+        lds_val_binary(ec, kinds[0], secs[0], 0);
     } else if ((strcmp(name, "ABSOLUTE") == 0 || strcmp(name, "DATA_SEGMENT_END") == 0) && arg_count == 1) {
         *out = vals[0];
+        ec->vkind = kinds[0];
+        ec->vsec = secs[0];
+        if (name[0] == 'A') {
+            lds_val_abs(ec);
+        }
     } else if ((strcmp(name, "SEGMENT_START") == 0 || strcmp(name, "DATA_SEGMENT_RELRO_END") == 0) &&
                arg_count == 2) {
         /* No -T<segment> option overrides the default; no gap is left
          * after the read-only part of the data. */
         *out = vals[1];
+        ec->vkind = LDS_VAL_ABS;
+        ec->from_dot = 1;
     } else if (strcmp(name, "DATA_SEGMENT_ALIGN") == 0 && arg_count == 2 && vals[0] != 0 && ec->have_dot) {
+        ec->vkind = LDS_VAL_ABS;
+        ec->from_dot = 1;
         /* The next page, at the same place within it: the data begins
          * where the text ended in the file, a page further on in memory. */
         if (align_u64(ec->dot, vals[0], out) != 0) {
@@ -407,6 +516,10 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
             return -1;
         }
         *out = name[0] == 'O' ? sc->regions[r].org : sc->regions[r].len;
+        if (name[0] == 'O') {
+            ec->vkind = LDS_VAL_ABS;
+            ec->from_dot = 1;
+        }
     } else {
         snprintf(ec->err_buf, sizeof(ec->err_buf), "%s(): not a function of this linker, or not with these arguments",
                  name);
@@ -452,6 +565,8 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
             return -1;
         }
         *out = (uint64_t)parsed;
+        ec->vkind = LDS_VAL_ABS;
+        ec->vsec = NULL;
         (*idx)++;
         return 0;
     }
@@ -476,6 +591,9 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
             return -1;
         }
         *out = ec->dot;
+        ec->vkind = LDS_VAL_ABS;
+        ec->vsec = NULL;
+        ec->from_dot = 1;
         (*idx)++;
         return 0;
     }
@@ -494,9 +612,12 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
 
             *out = (wide ? 64u : 52u) +
                    (uint64_t)(ec->obj != NULL ? elf_segment_count(ec->obj) : 0) * (wide ? 56u : 32u);
+            ec->vkind = LDS_VAL_NUMBER;
+            ec->vsec = NULL;
             (*idx)++;
             return 0;
         }
+        lds_val_of_name(ec, tok->text);
         if (script_lookup_symbol_value(ec, tok->text, out) != 0 && ec->skip != 0) {
             /* In the arm of a conditional that is not taken. */
             *out = 0;
@@ -514,6 +635,8 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
     }
     if (tok->kind == LDS_TOK_STRING) {
         *out = 0;
+        ec->vkind = LDS_VAL_NUMBER;
+        ec->vsec = NULL;
         (*idx)++;
         return 0;
     }
@@ -578,6 +701,9 @@ static int lds_eval_unary_nested(lds_eval_ctx_t *ec, const lds_tok_t *items, siz
 }
 
 static int lds_eval_mul(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    lds_val_kind_t lkind;
+    const elf_section_t *lsec;
+
     if (lds_eval_unary(ec, items, idx, end, out) != 0) {
         return -1;
     }
@@ -588,10 +714,13 @@ static int lds_eval_mul(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
             !lds_tok_is(op, LDS_TOK_OTHER, "%")) {
             break;
         }
+        lkind = ec->vkind;
+        lsec = ec->vsec;
         (*idx)++;
         if (lds_eval_unary(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 1);
         if (lds_tok_is(op, LDS_TOK_OTHER, "*")) {
             *out = (*out) * rhs;
         } else if (lds_tok_is(op, LDS_TOK_OTHER, "/")) {
@@ -614,6 +743,9 @@ static int lds_eval_mul(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
 }
 
 static int lds_eval_add(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    lds_val_kind_t lkind;
+    const elf_section_t *lsec;
+
     if (lds_eval_mul(ec, items, idx, end, out) != 0) {
         return -1;
     }
@@ -623,10 +755,13 @@ static int lds_eval_add(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
         if (!lds_tok_is(op, LDS_TOK_OTHER, "+") && !lds_tok_is(op, LDS_TOK_OTHER, "-")) {
             break;
         }
+        lkind = ec->vkind;
+        lsec = ec->vsec;
         (*idx)++;
         if (lds_eval_mul(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 1);
         if (lds_tok_is(op, LDS_TOK_OTHER, "+")) {
             *out = (*out) + rhs;
         } else {
@@ -637,6 +772,9 @@ static int lds_eval_add(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
 }
 
 static int lds_eval_shift(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    lds_val_kind_t lkind;
+    const elf_section_t *lsec;
+
     if (lds_eval_add(ec, items, idx, end, out) != 0) {
         return -1;
     }
@@ -646,10 +784,13 @@ static int lds_eval_shift(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *id
         if (!lds_tok_is(op, LDS_TOK_OTHER, "<<") && !lds_tok_is(op, LDS_TOK_OTHER, ">>")) {
             break;
         }
+        lkind = ec->vkind;
+        lsec = ec->vsec;
         (*idx)++;
         if (lds_eval_add(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 1);
         rhs &= 63;
         if (lds_tok_is(op, LDS_TOK_OTHER, "<<")) {
             *out <<= rhs;
@@ -661,6 +802,9 @@ static int lds_eval_shift(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *id
 }
 
 static int lds_eval_rel(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    lds_val_kind_t lkind;
+    const elf_section_t *lsec;
+
     if (lds_eval_shift(ec, items, idx, end, out) != 0) {
         return -1;
     }
@@ -671,10 +815,15 @@ static int lds_eval_rel(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
             !lds_tok_is(op, LDS_TOK_OTHER, "<=") && !lds_tok_is(op, LDS_TOK_OTHER, ">=")) {
             break;
         }
+        lkind = ec->vkind;
+        lsec = ec->vsec;
         (*idx)++;
         if (lds_eval_shift(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 0);
+        ec->vkind = LDS_VAL_NUMBER;
+        ec->vsec = NULL;
         if (lds_tok_is(op, LDS_TOK_OTHER, "<")) {
             *out = (*out < rhs) ? 1 : 0;
         } else if (lds_tok_is(op, LDS_TOK_OTHER, ">")) {
@@ -689,6 +838,9 @@ static int lds_eval_rel(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
 }
 
 static int lds_eval_eq(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    lds_val_kind_t lkind;
+    const elf_section_t *lsec;
+
     if (lds_eval_rel(ec, items, idx, end, out) != 0) {
         return -1;
     }
@@ -698,10 +850,15 @@ static int lds_eval_eq(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, 
         if (!lds_tok_is(op, LDS_TOK_OTHER, "==") && !lds_tok_is(op, LDS_TOK_OTHER, "!=")) {
             break;
         }
+        lkind = ec->vkind;
+        lsec = ec->vsec;
         (*idx)++;
         if (lds_eval_rel(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 0);
+        ec->vkind = LDS_VAL_NUMBER;
+        ec->vsec = NULL;
         if (lds_tok_is(op, LDS_TOK_OTHER, "==")) {
             *out = (*out == rhs) ? 1 : 0;
         } else {
@@ -716,11 +873,14 @@ static int lds_eval_band(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx
         return -1;
     }
     while (*idx < end && lds_tok_is(&items[*idx], LDS_TOK_OTHER, "&")) {
+        lds_val_kind_t lkind = ec->vkind;
+        const elf_section_t *lsec = ec->vsec;
         uint64_t rhs = 0;
         (*idx)++;
         if (lds_eval_eq(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 1);
         *out &= rhs;
     }
     return 0;
@@ -731,11 +891,14 @@ static int lds_eval_bxor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx
         return -1;
     }
     while (*idx < end && lds_tok_is(&items[*idx], LDS_TOK_OTHER, "^")) {
+        lds_val_kind_t lkind = ec->vkind;
+        const elf_section_t *lsec = ec->vsec;
         uint64_t rhs = 0;
         (*idx)++;
         if (lds_eval_band(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 1);
         *out ^= rhs;
     }
     return 0;
@@ -746,11 +909,14 @@ static int lds_eval_bor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
         return -1;
     }
     while (*idx < end && lds_tok_is(&items[*idx], LDS_TOK_OTHER, "|")) {
+        lds_val_kind_t lkind = ec->vkind;
+        const elf_section_t *lsec = ec->vsec;
         uint64_t rhs = 0;
         (*idx)++;
         if (lds_eval_bxor(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 1);
         *out |= rhs;
     }
     return 0;
@@ -761,11 +927,16 @@ static int lds_eval_land(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx
         return -1;
     }
     while (*idx < end && lds_tok_is(&items[*idx], LDS_TOK_OTHER, "&&")) {
+        lds_val_kind_t lkind = ec->vkind;
+        const elf_section_t *lsec = ec->vsec;
         uint64_t rhs = 0;
         (*idx)++;
         if (lds_eval_bor(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 0);
+        ec->vkind = LDS_VAL_NUMBER;
+        ec->vsec = NULL;
         *out = ((*out != 0) && (rhs != 0)) ? 1 : 0;
     }
     return 0;
@@ -776,11 +947,16 @@ static int lds_eval_lor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
         return -1;
     }
     while (*idx < end && lds_tok_is(&items[*idx], LDS_TOK_OTHER, "||")) {
+        lds_val_kind_t lkind = ec->vkind;
+        const elf_section_t *lsec = ec->vsec;
         uint64_t rhs = 0;
         (*idx)++;
         if (lds_eval_land(ec, items, idx, end, &rhs) != 0) {
             return -1;
         }
+        lds_val_binary(ec, lkind, lsec, 0);
+        ec->vkind = LDS_VAL_NUMBER;
+        ec->vsec = NULL;
         *out = ((*out != 0) || (rhs != 0)) ? 1 : 0;
     }
     return 0;
@@ -792,6 +968,9 @@ static int lds_eval_lor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
  */
 static int lds_eval_cond(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
     uint64_t a = 0, b = 0;
+    lds_val_kind_t akind = LDS_VAL_NUMBER;
+    const elf_section_t *asec = NULL;
+    int adot = 0, cdot;
     int rc;
 
     if (lds_eval_lor(ec, items, idx, end, out) != 0) {
@@ -807,9 +986,16 @@ static int lds_eval_cond(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx
     }
     (*idx)++;
     ec->depth++;
+    /* The value, and its kind, are those of the arm taken: only it is
+     * evaluated, as GNU ld has it, so "." in the other does not count. */
+    cdot = ec->from_dot;
     ec->skip += *out == 0;
     rc = lds_eval_cond(ec, items, idx, end, &a);
     ec->skip -= *out == 0;
+    akind = ec->vkind;
+    asec = ec->vsec;
+    adot = ec->from_dot;
+    ec->from_dot = cdot;
     if (rc == 0 && (*idx >= end || items[*idx].kind != LDS_TOK_COLON)) {
         ec->err_tok = *idx < end ? &items[*idx] : &items[end - 1];
         ec->err_msg = "expected ':' of the conditional";
@@ -823,6 +1009,11 @@ static int lds_eval_cond(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx
     }
     ec->depth--;
     if (rc == 0) {
+        if (*out != 0) {
+            ec->vkind = akind;
+            ec->vsec = asec;
+            ec->from_dot = adot;
+        }
         *out = *out != 0 ? a : b;
     }
     return rc;
@@ -2913,54 +3104,99 @@ done:
     return rc;
 }
 
-static int lw_eval(lds_walk_t *w, const lds_tokvec_t *e, int have_dot, uint64_t dot, const lds_tok_t *at,
-                   uint64_t *out) {
-    lds_eval_ctx_t ec;
-
-    memset(&ec, 0, sizeof(ec));
-    ec.ctx = w->ctx;
-    ec.obj = w->out;
-    ec.have_dot = have_dot;
-    ec.dot = dot;
-    if (lds_eval_expr_slice(&ec, e->items, 0, e->count, out) != 0) {
-        lds_report_error(NULL, ec.err_tok != NULL ? ec.err_tok : at,
-                         ec.err_msg != NULL ? ec.err_msg : "expression evaluation failed");
+/**
+ * @brief Evaluate one of the script's expressions, keeping what kind of
+ *        value it came to.
+ *
+ * @param w        The walk.
+ * @param e        The expression.
+ * @param have_dot Whether "." has a value where it stands.
+ * @param dot      That value.
+ * @param at       Where to report an error that names no token.
+ * @param out      Its value.
+ * @param ec       The evaluation, for its vkind, vsec and from_dot.
+ * @return 0, or -1 with the error reported.
+ */
+static int lw_eval_val(lds_walk_t *w, const lds_tokvec_t *e, int have_dot, uint64_t dot, const lds_tok_t *at,
+                       uint64_t *out, lds_eval_ctx_t *ec) {
+    memset(ec, 0, sizeof(*ec));
+    ec->ctx = w->ctx;
+    ec->obj = w->out;
+    ec->have_dot = have_dot;
+    ec->dot = dot;
+    if (lds_eval_expr_slice(ec, e->items, 0, e->count, out) != 0) {
+        lds_report_error(NULL, ec->err_tok != NULL ? ec->err_tok : at,
+                         ec->err_msg != NULL ? ec->err_msg : "expression evaluation failed");
         return -1;
     }
     return 0;
 }
 
-/**
- * @brief Whether an expression is made of numbers alone.
- *
- * It names no symbol, no section and not the location counter (which
- * lexes as a name), so between output sections GNU ld takes its value as
- * an absolute address.
- *
- * @param e The expression's tokens.
- * @return 1 if it has tokens and none of them is a name or a string, else 0.
- */
-static int lds_expr_is_number(const lds_tokvec_t *e) {
-    size_t i;
+static int lw_eval(lds_walk_t *w, const lds_tokvec_t *e, int have_dot, uint64_t dot, const lds_tok_t *at,
+                   uint64_t *out) {
+    lds_eval_ctx_t ec;
 
-    if (e->count == 0) {
-        return 0;
-    }
-    for (i = 0; i < e->count; ++i) {
-        if (e->items[i].kind == LDS_TOK_IDENT || e->items[i].kind == LDS_TOK_STRING) {
-            return 0;
-        }
-    }
-    return 1;
+    return lw_eval_val(w, e, have_dot, dot, at, out, &ec);
 }
 
-/* Give a symbol the script defines its value in the output.  One defined
- * among the sections belongs to the section its address is in, so that it
- * moves with the program if the program is moved -- unless it is set to a
- * plain number between them, which is an absolute address (the kernel's
- * real-mode `real_mode_seg = 0;`, which its relocs tool finds only as
- * SHN_ABS). */
-static int lw_define(lds_walk_t *w, const lds_stmt_t *st, uint64_t value, elf_section_t *hint, uint64_t hint_end) {
+/**
+ * @brief The section a symbol set by "." between output sections belongs
+ *        to, as GNU ld's section_for_dot() chooses it.
+ *
+ * The one placed last -- unless "." has been set since, or none has been
+ * placed, when it is the next the script names that the output has (and
+ * that, when "_end" has been set and one has been placed, the last
+ * again).  Where that one is not allocated or is thread-local, the one
+ * before it that is.
+ *
+ * @param w The walk, at the statement.
+ * @return The section, or NULL: an absolute address.
+ */
+static elf_section_t *lw_dot_section(const lds_walk_t *w) {
+    const lds_stmtvec_t *v = &w->sc->stmts;
+    elf_section_t *next = NULL;
+    size_t i, n = elf_section_count(w->out);
+
+    if (w->last_sec != NULL && !w->dot_set) {
+        return (elf_section_t *)w->last_sec;
+    }
+    for (i = w->stmt_at + 1; next == NULL && i < v->count; ++i) {
+        if (v->items[i].kind == LDS_ST_OUTSEC && !v->items[i].discard && v->items[i].at.text != NULL) {
+            next = elf_find_section(w->out, v->items[i].at.text);
+        }
+    }
+    if (w->last_sec != NULL && next != NULL && w->past_end) {
+        return (elf_section_t *)w->last_sec;
+    }
+    i = n;
+    if (next != NULL) {
+        for (i = 0; i < n && elf_section_get(w->out, i) != next; ++i) {
+        }
+        i++;
+    }
+    for (; i > 0; --i) {
+        elf_section_t *s = elf_section_get(w->out, i - 1);
+
+        if (s != NULL && (elf_section_flags(s) & SHF_ALLOC) != 0 && (elf_section_flags(s) & SHF_TLS) == 0) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Give a symbol the script defines its value in the output.  One set
+ * between output sections ("sym = expr;") is where GNU ld puts it: in the
+ * section of a symbol or ADDR() the expression came to; absolute for a
+ * number or what mixes sections (the kernel's real-mode `real_mode_seg =
+ * 0;`, which its relocs tool finds only as SHN_ABS, and `sym = other + 1;`);
+ * and by the location counter for what came from "." alone.  One in an
+ * output section, or changed by an operator, belongs to the section its
+ * address is in, so that it moves with the program if the program is moved.
+ * @p ec is the evaluation of the value, or NULL when it has no single one.
+ */
+static int lw_define(lds_walk_t *w, lds_stmt_t *st, uint64_t value, const lds_eval_ctx_t *ec, elf_section_t *hint,
+                     uint64_t hint_end) {
     elf_symbol_t *sym = elf_find_symbol(w->out, st->at.text);
     elf_section_t *home = NULL;
     size_t i;
@@ -2971,7 +3207,14 @@ static int lw_define(lds_walk_t *w, const lds_stmt_t *st, uint64_t value, elf_se
             return -1;
         }
     }
-    if (st->where != LDS_IN_TOP && !(st->where == LDS_IN_SECTIONS && st->op == '=' && lds_expr_is_number(&st->expr))) {
+    if (st->where == LDS_IN_SECTIONS && st->op == '=' && ec != NULL) {
+        if (ec->vkind == LDS_VAL_SECTION) {
+            home = (elf_section_t *)ec->vsec;
+        } else if (ec->vkind == LDS_VAL_ABS && ec->from_dot) {
+            home = lw_dot_section(w);
+            st->by_dot = home != NULL;
+        }
+    } else if (st->where != LDS_IN_TOP) {
         if (hint != NULL && value >= elf_section_addr(hint) && value <= hint_end) {
             home = hint;
         }
@@ -2999,11 +3242,24 @@ static int lw_define(lds_walk_t *w, const lds_stmt_t *st, uint64_t value, elf_se
 
 /* Carry out one assignment.  *dot is the counter where the statement
  * stands, and is what an assignment to "." changes. */
-static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t *dot, elf_section_t *hint,
+static int lw_assign(lds_walk_t *w, lds_stmt_t *st, int have_dot, uint64_t *dot, elf_section_t *hint,
                      uint64_t hint_end) {
     int is_dot = strcmp(st->at.text, ".") == 0;
+    const char *base = st->at.text;
+    lds_eval_ctx_t vec;
     uint64_t v = 0;
     uint64_t cur = 0;
+
+    /* What lw_dot_section() asks: "." set between sections, "_end" set. */
+    if (is_dot && st->where == LDS_IN_SECTIONS) {
+        w->dot_set = 1;
+    }
+    while (*base == '_') {
+        base++;
+    }
+    if (strcmp(base, "end") == 0) {
+        w->past_end = 1;
+    }
 
     if (!is_dot && !st->active) {
         /* A PROVIDE that provides nothing still has a value the rest of
@@ -3029,7 +3285,7 @@ static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
         }
         return defsymvec_set(&w->sc->locals, st->at.text, v);
     }
-    if (lw_eval(w, &st->expr, have_dot, *dot, &st->at, &v) != 0) {
+    if (lw_eval_val(w, &st->expr, have_dot, *dot, &st->at, &v, &vec) != 0) {
         return -1;
     }
     if (st->op != '=') {
@@ -3069,7 +3325,7 @@ static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
     if (defsymvec_set(&w->ctx->opt.defsyms, st->at.text, v) != 0) {
         return -1;
     }
-    return w->final ? lw_define(w, st, v, hint, hint_end) : 0;
+    return w->final ? lw_define(w, st, v, &vec, hint, hint_end) : 0;
 }
 
 static int lw_assert(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t dot) {
@@ -3163,7 +3419,7 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
         uint64_t cur = 0;
 
         for (k = 0; k < os->body.count; ++k) {
-            const lds_stmt_t *st = &os->body.items[k];
+            lds_stmt_t *st = &os->body.items[k];
             uint64_t dot = start + cur;
 
             if (st->kind == LDS_ST_INPUT) {
@@ -3230,7 +3486,7 @@ static int lw_body(lds_walk_t *w, lds_stmt_t *os, elf_section_t *sec, uint64_t s
         }
     }
     for (k = 0; k < os->body.count; ++k) {
-        const lds_stmt_t *st = &os->body.items[k];
+        lds_stmt_t *st = &os->body.items[k];
         int at_start = size != 0 && k < first;
         uint64_t dot = at_start ? start : end;
 
@@ -3291,6 +3547,7 @@ static int lw_run(lds_walk_t *w, size_t lo, size_t hi) {
         int have_dot = st->where != LDS_IN_TOP;
         uint64_t dot = w->dot;
 
+        w->stmt_at = i;
         if (st->kind == LDS_ST_ASSERT) {
             if (lw_assert(w, st, have_dot, dot) != 0) {
                 return -1;
@@ -3353,6 +3610,9 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
     w->moved = 0;
     w->have_lma_bias = 0;
     w->lma_bias = 0;
+    w->last_sec = NULL;
+    w->dot_set = 0;
+    w->past_end = 0;
     for (i = 0; i < sc->region_count; ++i) {
         lds_region_t *r = &sc->regions[i];
         lds_tok_t none;
@@ -3483,6 +3743,10 @@ static int lw_pass(lds_walk_t *w, uint64_t first_addr) {
         }
         size = elf_section_size(sec);
         end = w->dot + size;
+        if ((flags & SHF_TLS) == 0) {
+            w->last_sec = sec;
+        }
+        w->dot_set = 0;
         if (os != NULL && lw_body(w, os, sec, w->dot, size, &end) != 0) {
             return -1;
         }
@@ -3537,6 +3801,29 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
          * PAGE_SIZE)` before `. = SIZEOF_HEADERS`, and they were off by the headers' size
          */
         if (lw_pass(&w, 0) != 0) {
+            return -1;
+        }
+    }
+    /* What "." set between sections goes to its section once every section
+     * has its address, as GNU ld's ldexp_finalize_syms() puts it: one given
+     * the section after it was defined against where that had been. */
+    for (i = 0; i < sc->stmts.count; ++i) {
+        const lds_stmt_t *st = &sc->stmts.items[i];
+        elf_symbol_t *sym;
+        elf_section_t *sec;
+        uint64_t v;
+        uint32_t shndx;
+
+        if (st->kind != LDS_ST_ASSIGN || !st->by_dot || (sym = elf_find_symbol(out, st->at.text)) == NULL ||
+            defsymvec_get(&ctx->opt.defsyms, st->at.text, &v) != 0) {
+            continue;
+        }
+        shndx = elf_symbol_shndx(sym);
+        if (shndx == SHN_UNDEF || ELF_SHNDX_RESERVED(shndx) || (size_t)(shndx - 1) >= elf_section_count(out)) {
+            continue;
+        }
+        sec = elf_section_get(out, (size_t)(shndx - 1));
+        if (elf_symbol_define(sym, sec, v - elf_section_addr(sec)) != ELF_OK) {
             return -1;
         }
     }

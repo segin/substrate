@@ -2254,9 +2254,9 @@ int finalize_symbol_values_for_output(elfobj_t *out) {
         }
         value = elf_symbol_value(sym);
         sec_addr = elf_section_addr(elf_section_get(out, (size_t)(shndx - 1)));
-        if (value > UINT64_MAX - sec_addr) {
-            return -1;
-        }
+        /* A sum that wraps is an offset below the section's start: a
+         * script's "sym = .;" before a section is that section's, as GNU
+         * ld has it, wherever the section is then put. */
         /* A thread-local symbol's value is where it is in a thread's
          * copy, there being no one address it is at. */
         if (elf_symbol_type(sym) == STT_TLS && tls_extent(out, &tls_start, NULL, NULL, NULL)) {

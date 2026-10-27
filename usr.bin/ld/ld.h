@@ -307,6 +307,15 @@ typedef struct {
     size_t cap;
 } lds_tokvec_t;
 
+/* What a script's value is, as GNU ld has it between output sections: a
+ * number (SIZEOF, a comparison), an absolute address (a literal, ".",
+ * ABSOLUTE()), or an address in a section (a symbol, ADDR()). */
+typedef enum {
+    LDS_VAL_NUMBER = 0,
+    LDS_VAL_ABS,
+    LDS_VAL_SECTION
+} lds_val_kind_t;
+
 typedef struct {
     ld_ctx_t *ctx;
     const elfobj_t *obj;
@@ -320,6 +329,11 @@ typedef struct {
                                  * read, and nothing in it is an error */
     const defsymvec_t *section_locals; /* consulted first: values as offsets in the section the
                                         * merge is filling (script_rank_gap()), or NULL */
+    lds_val_kind_t vkind;       /* what the value last worked out is ... */
+    const elf_section_t *vsec;  /* ... and its section, if LDS_VAL_SECTION */
+    int from_dot;               /* ".", ALIGN(n) or ORIGIN() went into the expression and no
+                                 * ABSOLUTE() or mix of sections took it out: an absolute result
+                                 * goes to the section by the location counter */
 } lds_eval_ctx_t;
 
 typedef struct {
@@ -374,6 +388,10 @@ struct lds_stmt {
     int provide;                /* ASSIGN: only if referenced and undefined */
     int hidden;
     int active;                 /* ASSIGN: it defines its symbol in this link */
+    int by_dot;                 /* ASSIGN: its symbol went to the section by the
+                                 * location counter (lw_dot_section()), which GNU ld
+                                 * does only once the script is done: until then,
+                                 * a reference to it is to an absolute address */
     lds_tokvec_t expr;          /* ASSIGN value, ASSERT condition, OUTSEC address */
     char *message;              /* ASSERT */
     int discard;                /* OUTSEC: /DISCARD/ */
@@ -608,6 +626,10 @@ typedef struct {
     int have_lma_bias;          /* a section was given AT(): those after it load as far from their addresses */
     uint64_t lma_bias;
     int final;                  /* values are settled: define, assert */
+    size_t stmt_at;             /* the statement between output sections being carried out */
+    const elf_section_t *last_sec; /* the last allocated, not thread-local, section placed */
+    int dot_set;                /* "." was assigned between sections since it */
+    int past_end;               /* "_end" (or "end", "__end") has been set */
 } lds_walk_t;
 
 /* ld_util.c */
