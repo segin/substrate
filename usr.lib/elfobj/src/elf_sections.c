@@ -638,3 +638,82 @@ int elf_segment_contains_section(const elf_segment_t *segment, const elf_section
     }
     return 0;
 }
+
+/**
+ * The segment at @p index in the program header order.
+ *
+ * @param obj    the object
+ * @param index  0 to elf_segment_count() - 1
+ * @return       the segment, or NULL for an index past the last
+ */
+elf_segment_t *elf_segment_get(const elfobj_t *obj, size_t index) {
+    if (obj == NULL || index >= obj->segment_count) {
+        return NULL;
+    }
+    return obj->segments[index];
+}
+
+/**
+ * The section at @p index among a segment's, in the order they were added.
+ *
+ * @param segment  the segment
+ * @param index    0 to elf_segment_section_count() - 1
+ * @return         the section, or NULL for an index past the last
+ */
+elf_section_t *elf_segment_section(const elf_segment_t *segment, size_t index) {
+    if (segment == NULL || index >= segment->section_count) {
+        return NULL;
+    }
+    return elf_section_get(segment->obj, segment->section_indices[index]);
+}
+
+/**
+ * Split a segment before its section at @p index: that section and the ones after it go to a new segment of the
+ * same type, flags and alignment, which comes right after it among the program headers.
+ *
+ * @param segment  the segment, of a mutable object
+ * @param index    1 to elf_segment_section_count() - 1: each part keeps a section
+ * @return         the new segment, or NULL for an index out of range, an object that cannot change, or no memory
+ */
+elf_segment_t *elf_segment_split(elf_segment_t *segment, size_t index) {
+    struct elf_segment *tail;
+    elfobj_t *obj;
+    size_t at;
+    size_t i;
+
+    if (segment == NULL || index == 0 || index >= segment->section_count || !is_mutable_obj(segment->obj)) {
+        return NULL;
+    }
+    obj = segment->obj;
+    for (at = 0; at < obj->segment_count && obj->segments[at] != segment; ++at) {
+    }
+    if (at == obj->segment_count) {
+        return NULL;
+    }
+    tail = (struct elf_segment *)elf__calloc(1, sizeof(*tail));
+    if (tail == NULL) {
+        return NULL;
+    }
+    tail->obj = obj;
+    tail->type = segment->type;
+    tail->flags = segment->flags;
+    tail->align = segment->align;
+    tail->section_cap = segment->section_count - index;
+    tail->section_indices = (size_t *)elf__calloc(tail->section_cap, sizeof(tail->section_indices[0]));
+    if (tail->section_indices == NULL || elf__push_segment(obj, tail) != ELF_OK) {
+        free(tail->section_indices);
+        free(tail);
+        return NULL;
+    }
+    for (i = index; i < segment->section_count; ++i) {
+        tail->section_indices[tail->section_count++] = segment->section_indices[i];
+    }
+    segment->section_count = index;
+    /* (pushed last; moved to follow the segment it came from) */
+    for (i = obj->segment_count - 1; i > at + 1; --i) {
+        obj->segments[i] = obj->segments[i - 1];
+    }
+    obj->segments[at + 1] = tail;
+    obj->dirty = 1;
+    return tail;
+}

@@ -13,7 +13,10 @@
 .Nm elf_segment_flags ,
 .Nm elf_segment_align ,
 .Nm elf_segment_section_count ,
-.Nm elf_segment_contains_section
+.Nm elf_segment_contains_section ,
+.Nm elf_segment_get ,
+.Nm elf_segment_section ,
+.Nm elf_segment_split
 .Nd ELF program segment API
 .Sh SYNOPSIS
 .In elfobj.h
@@ -75,13 +78,53 @@
 .Fa "const elf_segment_t *segment"
 .Fa "const elf_section_t *section"
 .Fc
+.Ft elf_segment_t *
+.Fo elf_segment_get
+.Fa "const elfobj_t *obj"
+.Fa "size_t index"
+.Fc
+.Ft elf_section_t *
+.Fo elf_segment_section
+.Fa "const elf_segment_t *segment"
+.Fa "size_t index"
+.Fc
+.Ft elf_segment_t *
+.Fo elf_segment_split
+.Fa "elf_segment_t *segment"
+.Fa "size_t index"
+.Fc
 .Sh DESCRIPTION
 These APIs define explicit section-to-segment mappings for generated ELF files.
 Segments are attached to an
 .Vt elfobj_t
 and can then be used during ELF program-header emission.
+.Pp
+.Fn elf_segment_get
+returns the segment at
+.Fa index
+in program-header order, and
+.Fn elf_segment_section
+the section at
+.Fa index
+among a segment's, in the order they were added.
+.Fn elf_segment_split
+moves the section at
+.Fa index ,
+which must be neither the first nor past the last, and the ones after it
+to a new segment of the same type, flags and alignment that comes right
+after
+.Fa segment
+among the program headers; a linker uses it once addresses are known, to
+begin a segment where the sections stop being one run of memory.
 .Sh RETURN VALUES
 Creation functions return a segment handle on success or NULL on failure.
+.Fn elf_segment_get
+and
+.Fn elf_segment_section
+return NULL for an index past the last, and
+.Fn elf_segment_split
+the new segment, or NULL for an index out of range, an object that can no
+longer change, or no memory.
 Mutation functions return
 .Dv ELF_OK
 on success or an error code.

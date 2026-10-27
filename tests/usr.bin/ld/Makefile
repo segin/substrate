@@ -6,6 +6,7 @@ all: run
 run:
 	./test_script.sh
 	./test_script_absolute.sh
+	./test_script_segments.sh
 	./test_archive.sh
 	./test_dynamic.sh
 	./test_output.sh

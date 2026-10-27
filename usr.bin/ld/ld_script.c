@@ -3790,11 +3790,13 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
     w.ctx = ctx;
     w.out = out;
     w.sc = sc;
-    sc->data_count = 0; /* the final pass collects the data statements' values */
     /* A statement may use what a later one defines: twice over to learn
      * the values, a third time to act on them. */
     for (pass = 0; pass < 3; ++pass) {
         w.final = pass == 2;
+        if (w.final) {
+            sc->data_count = 0; /* the final pass collects the data statements' values */
+        }
         /*
          * the location counter begins at 0, as GNU ld's does, not where the default layout put the first
          * section: Linux's vDSO places its data pages below itself, `PROVIDE(vdso_u_data = . - 6 *
@@ -3802,6 +3804,22 @@ int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out) {
          */
         if (lw_pass(&w, 0) != 0) {
             return -1;
+        }
+        /*
+         * With the addresses known, the segments made before them (no PHDRS) end where the sections stop
+         * being one run: the Substrate kernel's .setup at 1 MiB and its .text at 3 GiB + 1 MiB were one
+         * PT_LOAD of 3 GiB, and the boot loader put the command line where .bss is cleared.  More program
+         * headers make SIZEOF_HEADERS more, so the layout is done again after a split.
+         */
+        if (w.final && sc->has_sections && sc->phdrs.count == 0) {
+            int splits = split_load_segments(ctx, out);
+
+            if (splits < 0) {
+                return -1;
+            }
+            if (splits > 0) {
+                pass = -1;
+            }
         }
     }
     /* What "." set between sections goes to its section once every section

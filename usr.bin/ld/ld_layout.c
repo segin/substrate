@@ -628,6 +628,56 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     return 0;
 }
 
+/**
+ * Whether section @p sec, after @p last in a PT_LOAD, begins another, as GNU ld's
+ * _bfd_elf_map_sections_to_segments() has it: it is loaded at another distance from its address, or before
+ * where @p last ends, or more than a page past it (a segment is one run of the file loaded at one run of
+ * memory).  A .tbss takes no room in the segment it is in.  (Contents after a .bss stay in its segment, the
+ * .bss given zeros in the file, as GNU ld leaves them.)
+ *
+ * @param last  the section before it in the segment
+ * @param sec   the section
+ * @param page  the page size
+ * @return      1 or 0
+ */
+static int section_begins_segment(const elf_section_t *last, const elf_section_t *sec, uint64_t page) {
+    int last_tbss = elf_section_type(last) == SHT_NOBITS && (elf_section_flags(last) & SHF_TLS) != 0;
+    uint64_t last_lma = elf_section_lma(last);
+    uint64_t last_end = last_lma + (last_tbss ? 0 : elf_section_size(last));
+    uint64_t lma = elf_section_lma(sec);
+
+    if (last_lma - elf_section_addr(last) != lma - elf_section_addr(sec) || lma < last_end || last_end < last_lma) {
+        return 1;
+    }
+    return page > 1 && (last_end + page - 1) / page < (lma + page - 1) / page;
+}
+
+int split_load_segments(const ld_ctx_t *ctx, elfobj_t *obj) {
+    uint64_t page = ld_max_page_size(ctx);
+    int splits = 0;
+    size_t i;
+
+    for (i = 0; i < elf_segment_count(obj); ++i) {
+        elf_segment_t *seg = elf_segment_get(obj, i);
+        size_t k;
+
+        if (elf_segment_type(seg) != PT_LOAD) {
+            continue;
+        }
+        for (k = 1; k < elf_segment_section_count(seg); ++k) {
+            if (section_begins_segment(elf_segment_section(seg, k - 1), elf_segment_section(seg, k), page)) {
+                /* (the rest, now the next segment, is looked at in its turn) */
+                if (elf_segment_split(seg, k) == NULL) {
+                    return -1;
+                }
+                splits++;
+                break;
+            }
+        }
+    }
+    return splits;
+}
+
 int strip_group_sections_for_final(elfobj_t *obj) {
     size_t i = 0;
 

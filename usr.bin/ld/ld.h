@@ -795,6 +795,13 @@ int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr);
 int reorder_sections_default_policy(elfobj_t *obj);
 int is_relro_candidate_name(const char *name);
 int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx);
+/**
+ * Split each PT_LOAD where its sections, at the addresses a script gave them, stop being one run of the file
+ * loaded at one run of memory, as GNU ld begins another segment there: section_begins_segment().
+ *
+ * @return how many segments were split, or -1
+ */
+int split_load_segments(const ld_ctx_t *ctx, elfobj_t *obj);
 int strip_group_sections_for_final(elfobj_t *obj);
 int enforce_wx_policy(const elfobj_t *obj);
 

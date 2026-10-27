@@ -92,7 +92,10 @@ ELFOBJ_1.0 {
 		elf_segment_contains_section;
 		elf_segment_count;
 		elf_segment_flags;
+		elf_segment_get;
+		elf_segment_section;
 		elf_segment_section_count;
+		elf_segment_split;
 		elf_segment_type;
 		elf_set_load_headers;
 		elf_set_reloc_hooks;

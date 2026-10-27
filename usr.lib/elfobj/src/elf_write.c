@@ -1496,6 +1496,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             size_t phidx;
             uint64_t file_bias = 0;
             int have_file_bias = find_alloc_file_bias(secs, sec_count, &file_bias);
+            int load_seen = 0; /* a PT_LOAD has been written: the headers can go only in the first */
             for (phidx = 0; phidx < phnum; ++phidx) {
                 struct elf_segment *seg = obj->segments[phidx];
                 uint8_t *p = img + phoff + (phidx * phentsz);
@@ -1623,13 +1624,16 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                         out_memsz = page_end - lo_addr;
                     }
                 }
-                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0 && out_vaddr >= out_off &&
-                    !obj->no_load_headers) {
+                if (seg->type == PT_LOAD && !load_seen && (seg->flags & 0x1u) != 0 && out_off != 0 &&
+                    out_vaddr >= out_off && !obj->no_load_headers) {
                     /*
                      * The headers are taken into the segment where they fit
                      * below its first address; where they do not -- an image
                      * linked at 0, as Linux's realmode blob is -- the segment
-                     * starts at its own page, as GNU ld leaves it.
+                     * starts at its own page, as GNU ld leaves it.  Only the
+                     * first PT_LOAD has them: a second segment of code
+                     * (a kernel's boot code at 1 MiB, then the rest at
+                     * 3 GiB) was given them too, and began at offset 0.
                      */
                     uint64_t delta = out_off;
                     out_off = 0;
@@ -1641,6 +1645,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     }
                 }
 
+                if (seg->type == PT_LOAD) {
+                    load_seen = 1;
+                }
                 /* where it is loaded: its first section's load address (a script's AT()), else its address */
                 out_paddr = out_vaddr + (uint64_t)lma_bias;
                 if (obj->cls == ELFOBJ_CLASS_32) {

@@ -1586,6 +1586,10 @@ uint32_t elf_segment_flags(const elf_segment_t *segment);
 uint64_t elf_segment_align(const elf_segment_t *segment);
 size_t elf_segment_section_count(const elf_segment_t *segment);
 int elf_segment_contains_section(const elf_segment_t *segment, const elf_section_t *section);
+elf_segment_t *elf_segment_get(const elfobj_t *obj, size_t index);
+elf_section_t *elf_segment_section(const elf_segment_t *segment, size_t index);
+/* Move the section at index and the ones after it to a new segment right after this one. */
+elf_segment_t *elf_segment_split(elf_segment_t *segment, size_t index);
 
 uint32_t elf_hash_sysv(const char *name);
 uint32_t elf_hash_gnu(const char *name);

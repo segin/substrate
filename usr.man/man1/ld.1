@@ -540,6 +540,16 @@ A
 without
 .Ic FLAGS
 has the permissions of the sections in it.
+Without
+.Ic PHDRS ,
+a
+.Dv PT_LOAD
+holds a run of sections of one kind (code, read-only data, writable
+data) that are one run of memory, as GNU ld makes them: a section begins
+another where it is loaded at another distance from its address than
+the one before it
+.Pq Ic AT ,
+or where it is more than a page past where that one ends.
 .It Ic MEMORY
 Regions that
 .Dq >region
