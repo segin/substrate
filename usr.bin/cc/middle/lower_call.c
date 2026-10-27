@@ -67,22 +67,9 @@ static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, const cc_
  * (Linux's init/main.o, at the vmlinux link).
  */
 static const char *builtin_library_name(const char *name) {
-    static const char *const libc[] = {
-        "memcmp", "memchr", "bcmp", "bzero", "strcmp", "strncmp", "strchr", "strrchr", "strstr", "strcpy",
-        "strncpy", "strcat", "strncat", "strlen", "strnlen", "strspn", "strcspn", "strpbrk", "abort", "exit",
-        "abs", "labs", "llabs", "malloc", "calloc", "realloc", "free", "printf", "sprintf", "snprintf",
-        "vsnprintf", "puts", "putchar", "memcpy", "memmove", "memset", NULL};
-    size_t i;
+    const char *lib = cc_builtin_library_function(name);
 
-    if (name == NULL || strncmp(name, "__builtin_", 10) != 0) {
-        return name;
-    }
-    for (i = 0; libc[i] != NULL; ++i) {
-        if (strcmp(name + 10, libc[i]) == 0) {
-            return name + 10;
-        }
-    }
-    return name;
+    return lib != NULL ? lib : name;
 }
 
 /**

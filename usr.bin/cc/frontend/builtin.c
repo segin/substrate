@@ -83,11 +83,40 @@ static const builtin_name_t g_known_builtins[] = {
     {"__builtin_offsetof"},
 };
 
+/**
+ * The C library function a builtin named after one calls, as gcc calls it where it does not expand the builtin
+ * itself: "strncpy" for `__builtin_strncpy`.
+ *
+ * @param name  the called name
+ * @return      the function's name (a suffix of @p name), or NULL if @p name is no such builtin
+ */
+const char *cc_builtin_library_function(const char *name) {
+    static const char *const libc[] = {
+        "memcmp", "memchr", "bcmp", "bzero", "strcmp", "strncmp", "strchr", "strrchr", "strstr", "strcpy",
+        "strncpy", "strcat", "strncat", "strlen", "strnlen", "strspn", "strcspn", "strpbrk", "abort", "exit",
+        "abs", "labs", "llabs", "malloc", "calloc", "realloc", "free", "printf", "sprintf", "snprintf",
+        "vsnprintf", "puts", "putchar", "memcpy", "memmove", "memset", NULL};
+    size_t i;
+
+    if (name == NULL || strncmp(name, "__builtin_", 10) != 0) {
+        return(NULL);
+    }
+    for (i = 0; libc[i] != NULL; ++i) {
+        if (strcmp(name + 10, libc[i]) == 0) {
+            return(name + 10);
+        }
+    }
+    return(NULL);
+}
+
 int cc_builtin_is_recognized(const char *name) {
     size_t i;
 
     if (name == NULL || name[0] == '\0') {
         return(0);
+    }
+    if (cc_builtin_library_function(name) != NULL) {
+        return(1);
     }
     for (i = 0; i < sizeof(g_known_builtins) / sizeof(g_known_builtins[0]); ++i) {
         if (strcmp(g_known_builtins[i].name, name) == 0) {

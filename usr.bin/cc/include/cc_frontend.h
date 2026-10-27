@@ -483,6 +483,7 @@ void cc_bounds_free(cc_bounds_t *b);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
 int cc_builtin_is_recognized(const char *name);
+const char *cc_builtin_library_function(const char *name);
 int cc_builtin_bswap_bits(const char *name);
 
 /** What an atomic read-modify-write builtin does to the object. */
