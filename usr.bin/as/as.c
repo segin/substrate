@@ -1599,12 +1599,37 @@ out:
 
 static int eval_rept_count(const char *s, long *out) {
     long long v;
+    char *text;
+    size_t i;
+    as_scan_t scan;
+    int rc;
 
+    if (s == NULL || out == NULL || (text = xstrdup(s)) == NULL) {
+        return -1;
+    }
+    /* Without its comments: `.rept (0x7F - 0x50 + 1)  # 0x50 .. 0x7F`
+     * repeats 48 times, as to GNU as. */
+    memset(&scan, 0, sizeof(scan));
+    for (i = 0; text[i] != '\0'; ++i) {
+        size_t more = 0;
+        int kind = as_scan_step(&scan, text, i, &more);
+
+        if (kind == AS_SCAN_COMMENT_TO_EOL) {
+            text[i] = '\0';
+            break;
+        }
+        if (kind == AS_SCAN_COMMENT) {
+            for (; more > 0 && text[i + 1] != '\0'; --more) {
+                text[i++] = ' ';
+            }
+            text[i] = ' ';
+        }
+    }
     /* An expression of numbers alone -- no symbol has a value while the
      * source is still being expanded -- and not negative. */
-    if (s == NULL || out == NULL ||
-        as_expr_eval_string(s, NULL, NULL, &v) != AS_EXPR_EVAL_OK ||
-        v < 0 || v > (long long)LONG_MAX) {
+    rc = as_expr_eval_string(text, NULL, NULL, &v);
+    free(text);
+    if (rc != AS_EXPR_EVAL_OK || v < 0 || v > (long long)LONG_MAX) {
         return -1;
     }
     *out = (long)v;
