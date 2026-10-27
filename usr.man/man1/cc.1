@@ -344,6 +344,9 @@ or an asm goto keeps one, and so does every function under
 Warning controls.
 .It Fl pedantic , Fl pedantic-errors
 Standards conformance diagnostics.
+A GNU extension such as a zero-length array is accepted in every
+.Fl std
+mode, as by gcc, and reported only under these.
 .It Fl fPIC
 Generate position-independent code.
 On i386 a symbol that binds within the object (a static one, a label,

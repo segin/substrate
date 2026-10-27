@@ -261,6 +261,39 @@ static int parser_is_gnu_mode(void) {
     return cc_lang_gnu();
 }
 
+/**
+ * Report a GNU extension ISO C forbids, as gcc does in every mode: a warning under -pedantic, an error under
+ * -pedantic-errors or -Werror with it, and nothing otherwise.
+ *
+ * @param p    the parser, at the token the extension is
+ * @param msg  the message
+ * @return     0, or -1 when it is an error (recorded in p->diag)
+ */
+static int parser_pedantic(parser_t *p, const char *msg) {
+    /* where the last warning was: a probe that reads ahead and backs up parses a declarator again, from tokens
+       lexed anew, so not even the file name is the same pointer */
+    static char last_file[256];
+    static size_t last_line;
+    static size_t last_col;
+    const cc_options_t *o = cc_options_current();
+    const char *file = g_parser_diag_file != NULL ? g_parser_diag_file : "";
+
+    if (!o->pedantic) {
+        return 0;
+    }
+    if (strncmp(file, last_file, sizeof(last_file)) != 0 || p->tok.line != last_line || p->tok.col != last_col) {
+        snprintf(last_file, sizeof(last_file), "%s", file);
+        last_line = p->tok.line;
+        last_col = p->tok.col;
+        cc_diag_print("warning", file, p->tok.line, p->tok.col, msg, 0);
+    }
+    if (!o->pedantic_errors && !o->warn_error) {
+        return 0;
+    }
+    set_diag(p->diag, p->tok.line, p->tok.col, msg);
+    return -1;
+}
+
 static int parser_relax_static_asserts(void) {
     return 0;
 }
@@ -3713,14 +3746,17 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n, cc_exp
         return -1;
     }
     if (eval_const_array_bound_expr(p, bound, &n) == 0) {
-        if (n < 0 || (!parser_is_gnu_mode() && n == 0)) {
+        if (n < 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "array bound must be positive");
             free_expr(bound);
             return -1;
         }
-        if (n > 0 || (parser_is_gnu_mode() && n == 0)) {
-            is_const = 1;
+        /* a zero-length array is gcc's in every mode, ISO C's in none */
+        if (n == 0 && parser_pedantic(p, "ISO C forbids zero-size array") != 0) {
+            free_expr(bound);
+            return -1;
         }
+        is_const = 1;
     }
     if (expect(p, TOK_RBRACK, "expected ']' after array declarator") != 0) {
         free_expr(bound);
@@ -3800,14 +3836,17 @@ static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, 
         return -1;
     }
     if (eval_const_array_bound_expr(p, bound, &n) == 0) {
-        if (n < 0 || (!parser_is_gnu_mode() && n == 0)) {
+        if (n < 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "array bound must be positive");
             free_expr(bound);
             return -1;
         }
-        if (n > 0 || (parser_is_gnu_mode() && n == 0)) {
-            is_const = 1;
+        /* a zero-length array is gcc's in every mode, ISO C's in none */
+        if (n == 0 && parser_pedantic(p, "ISO C forbids zero-size array") != 0) {
+            free_expr(bound);
+            return -1;
         }
+        is_const = 1;
     }
     if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
         free_expr(bound);
