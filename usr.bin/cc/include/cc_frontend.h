@@ -489,7 +489,11 @@ int cc_builtin_bswap_bits(const char *name);
 typedef enum {
     CC_RMW_ADD,
     CC_RMW_SUB,
-    CC_RMW_XCHG /**< stores the operand */
+    CC_RMW_AND,
+    CC_RMW_OR,
+    CC_RMW_XOR,
+    CC_RMW_NAND, /**< ~(old & operand) */
+    CC_RMW_XCHG  /**< stores the operand */
 } cc_rmw_op_t;
 
 /** An atomic read-modify-write builtin: __sync_fetch_and_add, __atomic_exchange_n and the like. */

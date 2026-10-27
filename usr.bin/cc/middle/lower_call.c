@@ -368,10 +368,10 @@ static int emit_atomic_cmpxchg(cc_ssa_function_t *sf, int memop, long size, int 
 }
 
 /**
- * Lower an atomic read-modify-write builtin (cc_builtin_atomic_rmw()) or __sync_bool_compare_and_swap to locked
+ * Lower an atomic read-modify-write builtin (cc_builtin_atomic_rmw()) or a __sync compare-and-swap to locked
  * instructions: `lock xadd` adds, `xchg` exchanges, `lock cmpxchg` compares and exchanges.  An operation with no
- * instruction of its own -- any on a pair of words on i386 -- is a compare-exchange loop.  Each of these is a full
- * barrier on x86, which every memory order asks no more than.
+ * instruction that also gives the old value -- and, or, xor, nand, and any on a pair of words on i386 -- is a
+ * compare-exchange loop.  Each of these is a full barrier on x86, which every memory order asks no more than.
  *
  * @return the builtin's value, or -1
  */
@@ -385,7 +385,7 @@ static int lower_atomic_rmw(const cc_translation_unit_t *tu, cc_ssa_function_t *
     int p;
     int memop;
     int v;
-    int cas = bk == BUILTIN_SYNC_BOOL_CAS;
+    int cas = bk == BUILTIN_SYNC_BOOL_CAS || bk == BUILTIN_SYNC_VAL_CAS;
     int wide;
 
     memset(&rmw, 0, sizeof(rmw));
@@ -430,12 +430,12 @@ static int lower_atomic_rmw(const cc_translation_unit_t *tu, cc_ssa_function_t *
         if (prev < 0 || (prev = atomic_fit(sf, prev, size, uns, diag)) < 0) {
             return -1;
         }
-        return emit_cmp_instr(sf, CC_CMP_EQ, prev, v, uns, diag);
+        return bk == BUILTIN_SYNC_VAL_CAS ? prev : emit_cmp_instr(sf, CC_CMP_EQ, prev, v, uns, diag);
     }
     if (rmw.has_memorder && lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag) < 0) {
         return -1;
     }
-    if (!wide) {
+    if (!wide && (rmw.op == CC_RMW_ADD || rmw.op == CC_RMW_SUB || rmw.op == CC_RMW_XCHG)) {
         atomic_asm_in_t ins[2];
         int old;
 
@@ -493,16 +493,32 @@ static int lower_atomic_rmw(const cc_translation_unit_t *tu, cc_ssa_function_t *
             return -1;
         }
         old = in.dst;
-        cc_ir_set_size(sf, old, size);
+        if (wide) {
+            cc_ir_set_size(sf, old, size);
+        }
         if (cc_ir_br(sf, l_loop) != 0 || cc_ir_label(sf, l_loop) != 0) {
             return -1;
         }
         if (rmw.op == CC_RMW_XCHG) {
             newv = v;
         } else {
-            newv = emit_i64_binop_instr(sf, rmw.op == CC_RMW_ADD ? CC_SSA_ADD : CC_SSA_SUB, old, v, uns, diag);
+            static const cc_ssa_opcode_t ops[] = {
+                [CC_RMW_ADD] = CC_SSA_ADD, [CC_RMW_SUB] = CC_SSA_SUB, [CC_RMW_AND] = CC_SSA_AND,
+                [CC_RMW_OR] = CC_SSA_OR,   [CC_RMW_XOR] = CC_SSA_XOR, [CC_RMW_NAND] = CC_SSA_AND,
+            };
+
+            newv = emit_i64_binop_instr(sf, ops[rmw.op], old, v, uns, diag);
+            if (newv >= 0 && rmw.op == CC_RMW_NAND) {
+                int ones = cc_ir_const(sf, -1);
+
+                newv = ones < 0 ? -1 : emit_i64_binop_instr(sf, CC_SSA_XOR, newv, ones, uns, diag);
+            }
+            if (newv >= 0 && !wide) {
+                newv = atomic_fit(sf, newv, size, uns, diag);
+            }
         }
         if (newv < 0 || (prev = emit_atomic_cmpxchg(sf, memop, size, old, newv, diag)) < 0 ||
+            (!wide && (prev = atomic_fit(sf, prev, size, uns, diag)) < 0) ||
             (eq = emit_cmp_instr(sf, CC_CMP_EQ, prev, old, uns, diag)) < 0) {
             return -1;
         }
@@ -821,6 +837,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__sync_bool_compare_and_swap") == 0) {
         return BUILTIN_SYNC_BOOL_CAS;
+    }
+    if (strcmp(name, "__sync_val_compare_and_swap") == 0) {
+        return BUILTIN_SYNC_VAL_CAS;
     }
     if (strcmp(name, "__sync_lock_release") == 0) {
         return BUILTIN_SYNC_LOCK_RELEASE;
@@ -2550,7 +2569,7 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
         }
         return z;
     }
-    if (bk == BUILTIN_ATOMIC_RMW || bk == BUILTIN_SYNC_BOOL_CAS) {
+    if (bk == BUILTIN_ATOMIC_RMW || bk == BUILTIN_SYNC_BOOL_CAS || bk == BUILTIN_SYNC_VAL_CAS) {
         return lower_atomic_rmw(tu, sf, ctx, vars, var_count, depth, e, bk, diag);
     }
     if (bk == BUILTIN_ATOMIC_LOAD_N || bk == BUILTIN_ATOMIC_STORE_N) {

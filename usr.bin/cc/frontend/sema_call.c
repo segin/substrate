@@ -345,6 +345,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__sync_bool_compare_and_swap") == 0) {
         return BUILTIN_SYNC_BOOL_CAS;
     }
+    if (strcmp(name, "__sync_val_compare_and_swap") == 0) {
+        return BUILTIN_SYNC_VAL_CAS;
+    }
     if (strcmp(name, "__sync_lock_release") == 0) {
         return BUILTIN_SYNC_LOCK_RELEASE;
     }
@@ -1211,9 +1214,12 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         sema_set_type(e, atomic_elem);
         return 0;
     }
-    if (bk == BUILTIN_SYNC_BOOL_CAS) {
+    if (bk == BUILTIN_SYNC_BOOL_CAS || bk == BUILTIN_SYNC_VAL_CAS) {
+        char msg[128];
+
         if (e->arg_count != 3) {
-            sema_diag(diag, "__sync_bool_compare_and_swap expects exactly 3 arguments");
+            snprintf(msg, sizeof(msg), "%s expects exactly 3 arguments", e->ident);
+            sema_diag(diag, msg);
             return -1;
         }
         for (i = 0; i < 3; ++i) {
@@ -1222,15 +1228,18 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
             }
         }
         if (!sx_is_ptr(e->args[0])) {
-            sema_diag(diag, "__sync_bool_compare_and_swap first argument must be a pointer");
+            snprintf(msg, sizeof(msg), "%s first argument must be a pointer", e->ident);
+            sema_diag(diag, msg);
             return -1;
         }
         atomic_elem = sema_atomic_elem(e->args[0]);
         if (!sema_assignable(tu, atomic_elem, e->args[1]) || !sema_assignable(tu, atomic_elem, e->args[2])) {
-            sema_diag(diag, "__sync_bool_compare_and_swap value type mismatch");
+            snprintf(msg, sizeof(msg), "%s value type mismatch", e->ident);
+            sema_diag(diag, msg);
             return -1;
         }
-        sema_set_type(e, cc_ct_basic(CC_CT_INT));
+        /* the bool one says whether it stored; the val one gives what the object held */
+        sema_set_type(e, bk == BUILTIN_SYNC_BOOL_CAS ? cc_ct_basic(CC_CT_INT) : atomic_elem);
         return 0;
     }
     if (bk == BUILTIN_ATOMIC_LOAD_N) {

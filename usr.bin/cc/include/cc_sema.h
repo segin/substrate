@@ -87,6 +87,7 @@ typedef enum {
     BUILTIN_NANL,
     BUILTIN_ATOMIC_RMW, /**< cc_builtin_atomic_rmw() says which */
     BUILTIN_SYNC_BOOL_CAS,
+    BUILTIN_SYNC_VAL_CAS,
     BUILTIN_SYNC_LOCK_RELEASE,
     BUILTIN_SYNC_SYNCHRONIZE,
     BUILTIN_ATOMIC_LOAD_N,
