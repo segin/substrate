@@ -78,7 +78,7 @@ tests/usr.bin/as/
 `run_native_backend()` in `as.c` runs them, in this order, each on what the one before left:
 
 1. **Read.** The source, or the output of the C preprocessor for a `.S` file; several sources are one.
-2. **Expand.** Macros and `.irp` (`expand_gas_source_controls()`), repeats (`expand_rept_file()`), conditionals (`filter_gas_conditionals()`), all on text, each line carrying a mark of the file and line it came from.
+2. **Expand.** Macros and `.irp` (`expand_gas_source_controls()`; under `.altmacro` an argument `%expr` is the expression's value, read from the absolute symbols assigned so far, which the expansion follows line by line: `macro_track_assignment()`), repeats (`expand_rept_file()`), conditionals (`filter_gas_conditionals()`), all on text, each line carrying a mark of the file and line it came from.
 3. **Lex** (`as_lex_text()`): tokens, with `.include` read where an expansion wrote one.
 4. **Parse** (`as_parse_tokens()`): statements; numeric labels given names.
 5. **Lower.** `as_arm_lower()` for ARM and AArch64, then `as_directives_lower()`: the many directives made the few, numbers settled, `.struct` and common symbols resolved.

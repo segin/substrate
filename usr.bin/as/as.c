@@ -341,9 +341,6 @@ static int directive_is_known(const char *name) {
         ".extern", ".arch", ".loc_mark_labels", ".line", ".ln", ".eject", ".list", ".nolist", ".title",
         ".sbttl", ".psize", ".stabs", ".stabn", ".stabd", ".version", ".gnu_attribute", ".addrsig",
         ".addrsig_sym", ".sse_check", ".operand_check",
-        /* The way macros are read unless .altmacro says otherwise, and
-         * .altmacro is not taken. */
-        ".noaltmacro",
     };
     size_t i;
 
@@ -1597,18 +1594,19 @@ out:
     return rc;
 }
 
-static int eval_rept_count(const char *s, long *out) {
-    long long v;
-    char *text;
+/*
+ * A copy of `s` without its comments, a line comment ending it and a
+ * block comment a space: the text an expression in it is read from.
+ * NULL when out of memory.
+ */
+static char *text_without_comments(const char *s) {
+    char *text = xstrdup(s);
     size_t i;
     as_scan_t scan;
-    int rc;
 
-    if (s == NULL || out == NULL || (text = xstrdup(s)) == NULL) {
-        return -1;
+    if (text == NULL) {
+        return NULL;
     }
-    /* Without its comments: `.rept (0x7F - 0x50 + 1)  # 0x50 .. 0x7F`
-     * repeats 48 times, as to GNU as. */
     memset(&scan, 0, sizeof(scan));
     for (i = 0; text[i] != '\0'; ++i) {
         size_t more = 0;
@@ -1624,6 +1622,19 @@ static int eval_rept_count(const char *s, long *out) {
             }
             text[i] = ' ';
         }
+    }
+    return text;
+}
+
+static int eval_rept_count(const char *s, long *out) {
+    long long v;
+    char *text;
+    int rc;
+
+    /* Without its comments: `.rept (0x7F - 0x50 + 1)  # 0x50 .. 0x7F`
+     * repeats 48 times, as to GNU as. */
+    if (s == NULL || out == NULL || (text = text_without_comments(s)) == NULL) {
+        return -1;
     }
     /* An expression of numbers alone -- no symbol has a value while the
      * source is still being expanded -- and not negative. */
@@ -1842,6 +1853,14 @@ typedef struct {
     /* Where the line being expanded is from. */
     const char *file;
     unsigned line;
+    /* .altmacro: GNU's alternate macro syntax is on -- an argument
+     * `%expr` is the expression's value, `<text>` the text, and a
+     * parameter is named in the body without its backslash. */
+    int alternate;
+    /* The absolute symbols assigned so far whose values are known as
+     * the source is expanded (.set k, k + 1 in a .rept), for %expr. */
+    strvec_t abs_names;
+    long long *abs_values;
 } gas_macro_vec_t;
 
 static void gas_macro_free(gas_macro_t *m) {
@@ -1868,7 +1887,175 @@ static void gas_macro_vec_free(gas_macro_vec_t *v) {
     }
     free(v->items);
     gas_macro_free(&v->def);
+    strvec_free(&v->abs_names);
+    free(v->abs_values);
     memset(v, 0, sizeof(*v));
+}
+
+static char *macro_arg_value_copy(const char *raw);
+
+/* as_expr_lookup_fn over the symbols macro_track_assignment() knows. */
+static int macro_abs_lookup(void *cookie, const char *name, long long *value_out) {
+    const gas_macro_vec_t *v = (const gas_macro_vec_t *)cookie;
+    size_t i;
+
+    for (i = 0; i < v->abs_names.count; ++i) {
+        if (strcmp(v->abs_names.items[i], name) == 0) {
+            *value_out = v->abs_values[i];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Note what statement `line` assigns, if it is `.set sym, expr`,
+ * `.equ sym, expr` or `sym = expr`: the value, when the expression is
+ * of numbers and of symbols known here, or else that the symbol's value
+ * is not known.  This is what an %expr argument of an .altmacro call
+ * reads, as GNU as reads the value the symbol has at that line:
+ * `.set msivec, msivec + 1` in a .rept gives each call its own.
+ * 0, or -1 when out of memory.
+ */
+static int macro_track_assignment(gas_macro_vec_t *v, const char *line) {
+    const char *p = line;
+    const char *name;
+    size_t name_len;
+    const char *rhs;
+    char key[128];
+    char *text;
+    long long value;
+    int known;
+    size_t i;
+
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (line_starts_with_directive(p, ".set") || line_starts_with_directive(p, ".equ")) {
+        p += 4;
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        name = p;
+        while (isalnum((unsigned char)*p) || *p == '_' || *p == '.' || *p == '$') {
+            p++;
+        }
+        name_len = (size_t)(p - name);
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p != ',') {
+            return 0;
+        }
+        rhs = p + 1;
+    } else {
+        name = p;
+        while (isalnum((unsigned char)*p) || *p == '_' || *p == '.' || *p == '$') {
+            p++;
+        }
+        name_len = (size_t)(p - name);
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p != '=' || p[1] == '=') {
+            return 0;
+        }
+        rhs = p + 1;
+    }
+    if (name_len == 0 || name_len >= sizeof(key) || isdigit((unsigned char)*name)) {
+        return 0;
+    }
+    memcpy(key, name, name_len);
+    key[name_len] = '\0';
+    if ((text = text_without_comments(rhs)) == NULL) {
+        return -1;
+    }
+    known = as_expr_eval_string(text, macro_abs_lookup, v, &value) == AS_EXPR_EVAL_OK;
+    free(text);
+    for (i = 0; i < v->abs_names.count; ++i) {
+        if (strcmp(v->abs_names.items[i], key) == 0) {
+            break;
+        }
+    }
+    if (i < v->abs_names.count) {
+        if (known) {
+            v->abs_values[i] = value;
+        } else {
+            /* forgotten: the last one takes its place */
+            free(v->abs_names.items[i]);
+            v->abs_names.items[i] = v->abs_names.items[--v->abs_names.count];
+            v->abs_values[i] = v->abs_values[v->abs_names.count];
+        }
+        return 0;
+    }
+    if (!known) {
+        return 0;
+    }
+    if (strvec_push(&v->abs_names, key) != 0) {
+        return -1;
+    }
+    {
+        long long *next = (long long *)realloc(v->abs_values, v->abs_names.cap * sizeof(*next));
+
+        if (next == NULL) {
+            free(v->abs_names.items[--v->abs_names.count]);
+            return -1;
+        }
+        v->abs_values = next;
+        v->abs_values[v->abs_names.count - 1] = value;
+    }
+    return 0;
+}
+
+/*
+ * An argument of a macro call in .altmacro mode, as GNU as reads it:
+ * `%expr` the expression's value in decimal, `<text>` the text with each
+ * `!c` in it the character c, and anything else the argument as it is.
+ * NULL, with expand_err set, for an %expr that has no value here.
+ */
+static char *alt_macro_arg(const gas_macro_vec_t *v, const char *raw) {
+    char *arg = macro_arg_value_copy(raw);
+    size_t n;
+
+    if (arg == NULL) {
+        return NULL;
+    }
+    n = strlen(arg);
+    if (arg[0] == '%') {
+        long long value;
+        char *text = text_without_comments(arg + 1);
+        char buf[32];
+        int rc;
+
+        if (text == NULL) {
+            free(arg);
+            return NULL;
+        }
+        rc = as_expr_eval_string(text, macro_abs_lookup, (void *)v, &value);
+        free(text);
+        if (rc != AS_EXPR_EVAL_OK) {
+            snprintf(expand_err, sizeof(expand_err), "%s:%u: .altmacro argument %.60s has no value known here",
+                     v->file != NULL ? v->file : "<input>", v->line, arg);
+            free(arg);
+            return NULL;
+        }
+        free(arg);
+        snprintf(buf, sizeof(buf), "%lld", value);
+        return xstrdup(buf);
+    }
+    if (n >= 2 && arg[0] == '<' && arg[n - 1] == '>') {
+        size_t from = 1;
+        size_t to = 0;
+
+        while (from < n - 1) {
+            if (arg[from] == '!' && from + 1 < n - 1) {
+                from++;
+            }
+            arg[to++] = arg[from++];
+        }
+        arg[to] = '\0';
+    }
+    return arg;
 }
 
 static gas_macro_t *find_gas_macro(gas_macro_vec_t *v, const char *name) {
@@ -2154,11 +2341,13 @@ static int parse_gas_macro_header(const char *header, gas_macro_t *m) {
     return 0;
 }
 
-static char *expand_gas_macro_line_text(const char *line, const gas_macro_t *m, char **values, unsigned long serial) {
+static char *expand_gas_macro_line_text(const char *line, const gas_macro_t *m, char **values, unsigned long serial,
+                                        int alternate) {
     size_t cap = 0;
     size_t len = 0;
     char *out = NULL;
     const char *p;
+    int quoted = 0;
 
     if (line == NULL || m == NULL) {
         return NULL;
@@ -2175,7 +2364,31 @@ static char *expand_gas_macro_line_text(const char *line, const gas_macro_t *m, 
         size_t subst_len = 0;
         size_t i;
 
-        if (*p == '\\') {
+        if (*p == '"' && (p == line || p[-1] != '\\')) {
+            quoted = !quoted;
+        }
+        /* .altmacro: a parameter is named by itself too, outside strings
+         * (`.byte v` in a macro of parameter v), as GNU as substitutes it */
+        if (alternate && !quoted && (isalpha((unsigned char)*p) || *p == '_') &&
+            (p == line || !(isalnum((unsigned char)p[-1]) || p[-1] == '_' || p[-1] == '.' || p[-1] == '\\' ||
+                            p[-1] == '$'))) {
+            size_t n = 0;
+
+            while (isalnum((unsigned char)p[n]) || p[n] == '_') {
+                n++;
+            }
+            if (p[n] != '.' && p[n] != '$') {
+                for (i = 0; i < m->params.count; ++i) {
+                    if (strlen(m->params.items[i]) == n && strncmp(p, m->params.items[i], n) == 0) {
+                        subst = values[i] != NULL ? values[i] : "";
+                        subst_len = strlen(subst);
+                        p += n - 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if (subst == NULL && *p == '\\') {
             if (p[1] == '@') {
                 snprintf(serial_buf, sizeof(serial_buf), "%lu", serial);
                 subst = serial_buf;
@@ -2241,8 +2454,8 @@ static char *macro_arg_value_copy(const char *raw) {
     return tmp;
 }
 
-static int macro_arg_assign(char **slot, const char *raw) {
-    char *copy = macro_arg_value_copy(raw);
+static int macro_arg_assign(const gas_macro_vec_t *macros, char **slot, const char *raw) {
+    char *copy = macros->alternate ? alt_macro_arg(macros, raw) : macro_arg_value_copy(raw);
     if (copy == NULL) {
         return -1;
     }
@@ -2561,6 +2774,12 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
          * a directive of no meaning, and is passed on to be refused. */
         return depth > 0 ? MACRO_EXIT : write_split_asm_line(out, line);
     }
+    /* The macro syntax, from here on: the expansion's, not a statement. */
+    if ((line_starts_with_directive(directive, ".altmacro") || line_starts_with_directive(directive, ".noaltmacro")) &&
+        (macros->conds == NULL || macro_cond_active(macros->conds, out))) {
+        macros->alternate = line_starts_with_directive(directive, ".altmacro");
+        return 0;
+    }
     {
         int split_rc = expand_split_statement(out, macros, line, depth);
         if (split_rc != -2) {
@@ -2615,6 +2834,10 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
     }
     name[n] = '\0';
     if (n == 0 || (m = find_gas_macro(macros, name)) == NULL) {
+        if ((macros->conds == NULL || macro_cond_active(macros->conds, out)) &&
+            macro_track_assignment(macros, line) != 0) {
+            return -1;
+        }
         return write_split_asm_line(out, line);
     }
     /* A call in a branch not taken is not expanded: it is how a macro
@@ -2644,7 +2867,7 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
                 *eq = '\0';
                 for (k = 0; k < m->params.count; ++k) {
                     if (strcmp(trim_in_place(args.items[i]), m->params.items[k]) == 0) {
-                        if (macro_arg_assign(&values[k], trim_in_place(eq + 1)) != 0) {
+                        if (macro_arg_assign(macros, &values[k], trim_in_place(eq + 1)) != 0) {
                             goto out;
                         }
                         if (k < MACRO_PARAMS_TRACKED) {
@@ -2680,7 +2903,7 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
                     given[pos] = 1;
                     break;
                 }
-                if (macro_arg_assign(&values[pos], trim_in_place(args.items[i])) != 0) {
+                if (macro_arg_assign(macros, &values[pos], trim_in_place(args.items[i])) != 0) {
                     goto out;
                 }
                 if (pos < MACRO_PARAMS_TRACKED) {
@@ -2709,7 +2932,8 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
         /* The body with the arguments in it, and then its statements:
          * a repeat in it is known whole before it is begun. */
         for (i = 0; i < m->body.count; ++i) {
-            char *expanded = expand_gas_macro_line_text(m->body.items[i], m, values, macro_serial);
+            char *expanded =
+                expand_gas_macro_line_text(m->body.items[i], m, values, macro_serial, macros->alternate);
 
             if (expanded == NULL || strvec_push(&lines, expanded) != 0) {
                 free(expanded);

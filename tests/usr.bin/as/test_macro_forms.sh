@@ -118,7 +118,7 @@ printf '.text\n.rept 0x7fffffff\n.endr\nnop\n' > none.s
 timeout 20 "$AS" -32 -o none.o none.s 2> err || { echo "FAIL .rept of an empty body: $(head -1 err)"; fail=1; }
 said "a parameter required and not given"   'requires' '.text\n.macro m a, b:req\n.byte \\a\n.endm\nm 1\n'
 said "a macro that calls itself without end" 'max-macro-depth' '.macro m\nm\n.endm\n.text\nm\n'
-said ".altmacro is not taken, and says so"  'altmacro' '.altmacro\n.text\nnop\n'
+said "an .altmacro %expr of no known value" 'no value known here' '.macro m a\n.byte \\a\n.endm\n.data\n.altmacro\nm %%later\n.set later, 1\n'
 
 # lim WHAT STATUS OPTION SOURCE: with the option, the exit status.
 lim() {

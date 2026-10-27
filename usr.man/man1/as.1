@@ -516,6 +516,24 @@ In a macro
 ends the expansion, and
 .Cm .purgem
 forgets a macro.
+.Pp
+.Cm .altmacro
+turns on GNU's alternate macro syntax, and
+.Cm .noaltmacro
+turns it off.
+In it an argument
+.Ql %expr
+is the value of the expression in decimal, of the symbols set so far
+.Pq Cm .set , .equ No or Ql =
+as they are at the call;
+.Ql <text>
+is the text, a
+.Ql \&!
+before a character making it itself; and a parameter is named in the
+body by itself as well as with its backslash.
+Its
+.Cm LOCAL
+is not implemented.
 .It Debug/CFI
 .Cm .file , .loc , .cfi_*
 .Pp
@@ -594,11 +612,7 @@ the debugging format of
 .Cm .stabs , .stabn
 and
 .Cm .stabd ,
-which is not written, and
-.Cm .noaltmacro ,
-macros being read that way and
-.Cm .altmacro
-not taken.
+which is not written.
 A directive that is none of these and none above is an error.
 .El
 .Sh ARCHITECTURE SYNTAX
