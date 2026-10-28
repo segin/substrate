@@ -184,7 +184,7 @@ printf '\t.text\n\t.macro fn a\n\tmovl %%eax, \\a\n\t.endm\n\tnop\n\t.irp r, %%e
 cases=$((cases + 1))
 if "$AS" --64 -o t.o where.s > out 2>&1; then
     echo "FAIL where: assembled"; fail=1
-elif "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+elif "$AS" --version 2>/dev/null | grep -i 'GNU assembler' | grep -qv '(Substrate)'; then
     :
 else
     # (GNU as names the line of the macro's body, and the call after it.)

@@ -41,7 +41,7 @@ done
 
 # (The rest is of this assembler's own names and options: GNU as for
 # x86 has neither.)
-if "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+if "$AS" --version 2>/dev/null | grep -i 'GNU assembler' | grep -qv '(Substrate)'; then
     echo "ok: build matrix (the x86 names; the others are this assembler's own)"
     exit 0
 fi

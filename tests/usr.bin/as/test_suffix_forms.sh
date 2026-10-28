@@ -30,7 +30,7 @@ cd "$work" || exit 1
 fail=0
 cases=0
 gnu=0
-"$AS" --version 2> /dev/null | grep -q '^GNU assembler' && gnu=1
+"$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)' && gnu=1
 
 while IFS='	' read -r modes want src; do
     case $modes in '' | '#'*) continue ;; esac

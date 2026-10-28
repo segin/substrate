@@ -125,7 +125,7 @@ said ".if never closed"       'w\.s:2:' '.text\n.if 1\n.ifdef x\nnop\n.endif\nno
 said ".if of a name undefined" 'w\.s:2:' '.text\n.if zzz\nnop\n.endif\n'
 
 # A NUL byte is no character of a source.  (GNU as passes over it.)
-if ! "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+if ! "$AS" --version 2>/dev/null | grep -i 'GNU assembler' | grep -qv '(Substrate)'; then
     cases=$((cases + 1))
     printf 'nop\n\000bad\nnop\n' > nul.s
     rm -f nul.o

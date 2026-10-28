@@ -105,7 +105,7 @@ said "a .rept never closed"  'w\.s'     '.text\nnop\n.rept 2\nnop\n'
 said "an .irp never closed"  'w\.s:2:'  '.text\n.irp x, 1\n.byte \\x\n'
 
 # The rest is this assembler's own: the limits, and their wording.
-if "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+if "$AS" --version 2>/dev/null | grep -i 'GNU assembler' | grep -qv '(Substrate)'; then
     [ "$fail" -eq 0 ] && echo "ok: macro forms ($cases cases; the limits are this assembler's own)"
     exit "$fail"
 fi

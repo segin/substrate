@@ -98,7 +98,7 @@ level() {
     if "$AS" --64 $1 -o l.o l.s 2> err; then got=taken; else got=$(sed 's/.*requires -march=\(x86-64-v[0-9]\).*/\1/' err | tail -1); fi
     [ "$got" = "$2" ] || { echo "FAIL $1 [$3]: $got, not $2"; fail=1; }
 }
-if ! "$AS" --version 2> /dev/null | grep -q '^GNU assembler'; then
+if ! "$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)'; then
     level "" taken 'vaddps %ymm1,%ymm2,%ymm3'
     level "" taken 'vfmadd231pd %ymm1,%ymm2,%ymm3'
     level "" taken 'vaddps %zmm1,%zmm2,%zmm3{%k1}'

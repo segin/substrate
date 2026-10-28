@@ -72,7 +72,7 @@ at "after a # N \"file\" line" 'orig\.c:101:' marked.s
 
 # And a .S file is put through one: an error after an #include is on the
 # line of the .S file it is on.  (GNU as does not run the preprocessor.)
-if ! "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+if ! "$AS" --version 2>/dev/null | grep -i 'GNU assembler' | grep -qv '(Substrate)'; then
     printf '#define M nop\n\n\n\n' > hh.h
     printf '#include "hh.h"\n\t.text\n\tM\n\tnop\n\tbadone\n' > pre.S
     at "a .S file with an #include" 'pre\.S:5:' pre.S
@@ -122,7 +122,7 @@ fi
 
 # This assembler's own: it makes no file in /tmp on the way, and of two
 # macros, one calling the other, it names the one the statement is in.
-if ! "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+if ! "$AS" --version 2>/dev/null | grep -i 'GNU assembler' | grep -qv '(Substrate)'; then
     cases=$((cases + 1))
     printf '\t.text\n\t.macro in a\n\tmovl %%eax, \\a\n\t.endm\n\t.macro out a\n\tnop\n\tin \\a\n\t.endm\n\tout %%bx\n' > nest.s
     "$AS" --64 -o nest.o nest.s > out 2> err

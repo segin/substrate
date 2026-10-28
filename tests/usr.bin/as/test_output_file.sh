@@ -50,7 +50,7 @@ check "a file that was there is made anew, by the mask" "$(stat -c %a shut.o)" 6
 check "-o /dev/null" "$?" 0
 [ -c /dev/null ] || { echo "FAIL /dev/null is no longer a device"; fail=1; }
 # A pipe.  (GNU as cannot write an object to one: it seeks.)
-if ! "$AS" --version 2> /dev/null | grep -q '^GNU assembler' && command -v mkfifo > /dev/null 2>&1; then
+if ! "$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)' && command -v mkfifo > /dev/null 2>&1; then
     mkfifo pipe
     cat pipe > piped.o &
     reader=$!

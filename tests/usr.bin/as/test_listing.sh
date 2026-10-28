@@ -29,7 +29,7 @@ cases=0
 listing() {
     printf "$1" > t.s
     rm -f t.o lst raw
-    if "$AS" --version 2> /dev/null | grep -q '^GNU assembler'; then
+    if "$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)'; then
         "$AS" --32 -al -o t.o t.s > raw 2> err || return 1
         sed -n '4,$p' raw | sed '/^.$/,$d' > lst
     else

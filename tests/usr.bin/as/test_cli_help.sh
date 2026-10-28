@@ -21,7 +21,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work" || exit 1
 
-if "$AS" --version 2> /dev/null | grep -q '^GNU assembler'; then
+if "$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)'; then
     echo "ok: --help (not tried: the list is this assembler's own)"
     exit 0
 fi

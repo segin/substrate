@@ -31,7 +31,7 @@ cd "$work" || exit 1
 fail=0
 cases=0
 march=-march=x86-64-v4
-"$AS" --version 2> /dev/null | grep -q '^GNU assembler' && march=
+"$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)' && march=
 
 assemble() {
     printf '\t.text\n\t%s\n' "$1" > t.s

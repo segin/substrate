@@ -21,7 +21,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work" || exit 1
 
-if "$AS" --version 2> /dev/null | grep -q '^GNU assembler'; then
+if "$AS" --version 2> /dev/null | grep '^GNU assembler' | grep -qv '(Substrate)'; then
     echo "ok: ARM targets (not tried: GNU as for x86 has no ARM)"
     exit 0
 fi
