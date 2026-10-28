@@ -78,7 +78,7 @@ double lib_fl10(float a, float b, float c, float d, float e, float f, float g, f
     return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8 + i * 9 + j * 10;
 }
 
-#if __STDC_VERSION__ >= 202311L
+#if __STDC_VERSION__ >= 202311L && !defined(ABI_NO_BITINT)
 /* integers wider than 64 bits: in general registers up to 16 bytes, else in memory */
 _BitInt(100) lib_b100(_BitInt(100) a, _BitInt(100) b) { return a * b - (a >> 3); }
 unsigned _BitInt(200) lib_b200(unsigned _BitInt(200) a, int k) { return (a << k) / 7; }

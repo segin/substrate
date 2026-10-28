@@ -6,7 +6,8 @@
 # It could not build the C23 and _BitInt tests ("gcc cannot build it"),
 # and laid an 8-byte vector out at 4 under -m32 where cc and gcc 16 lay it
 # at 8: 29 failures, none of them cc's.  A test names the gcc it needs in
-# "cc-gcc:" or "cc-gcc-m32:".
+# "cc-gcc:" or "cc-gcc-m32:".  run_codegen_abi.sh leaves out its _BitInt
+# cases for such a gcc.
 #
 # The old gcc here is this host's, saying it is gcc 13 and refusing what
 # gcc 13 refuses: -std=c23, and _BitInt.
@@ -22,16 +23,26 @@ if ! gcc -v 2>&1 | grep -q '^gcc version'; then
 	exit 0
 fi
 
+# gcc 13 says C2X is 202000L, so a "__STDC_VERSION__ >= 202311L" block is
+# not compiled; what is left must not use _BitInt.
 cat > "$tmp/gcc13" <<'EOF'
 #!/bin/sh
 [ "$*" = -dumpversion ] && { echo 13.3.0; exit 0; }
 [ "$*" = -v ] && { echo "gcc version 13.3.0 (pretended)" >&2; exit 0; }
+cpp=
 for a; do
 	case $a in
 	-std=c23 | -std=gnu23) echo "gcc13: unrecognized command-line option '$a'" >&2; exit 1 ;;
-	*.c) if grep -q _BitInt "$a"; then echo "gcc13: _BitInt is not supported" >&2; exit 1; fi ;;
+	-std=c2x | -std=gnu2x) cpp="$cpp $a -U__STDC_VERSION__ -D__STDC_VERSION__=202000L" ;;
+	-std=* | -m32 | -m64 | -D* | -U* | -I*) cpp="$cpp $a" ;;
 	esac
 done
+for a; do
+	case $a in
+	*.c) if gcc -E $cpp "$a" 2>/dev/null | grep -q _BitInt; then echo "gcc13: _BitInt is not supported" >&2; exit 1; fi ;;
+	esac
+done
+case " $cpp " in *" -std=gnu2x "* | *" -std=c2x "*) exec gcc "$@" -U__STDC_VERSION__ -D__STDC_VERSION__=202000L ;; esac
 exec gcc "$@"
 EOF
 chmod +x "$tmp/gcc13"
@@ -62,6 +73,12 @@ if [ "$major" -ge 16 ]; then
 		echo "FAIL: gcc $major skipped:"; grep '^skip' "$tmp/new.out" | sed 's/^/    /'; fail=1
 	fi
 fi
+
+# run_codegen_abi.sh with the old gcc: no _BitInt in either half, and no failure.
+HOST_CC=$tmp/gcc13 sh "$ROOT/tests/usr.bin/cc/run_codegen_abi.sh" > "$tmp/abi.out" 2>&1 ||
+	{ echo "FAIL: with gcc 13 run_codegen_abi failed:"; sed 's/^/    /' "$tmp/abi.out"; fail=1; }
+grep -q '^run_codegen_abi: -m64: .*gcc13 has no _BitInt; its cases are skipped' "$tmp/abi.out" ||
+	{ echo "FAIL: run_codegen_abi did not skip the _BitInt cases for gcc 13"; fail=1; }
 
 [ $fail -eq 0 ] && echo "run_codegen_old_gcc: ok"
 exit $fail

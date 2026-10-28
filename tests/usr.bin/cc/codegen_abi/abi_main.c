@@ -43,7 +43,8 @@ struct C13 lib_c13(struct C13 a);
 struct X1 lib_x1(struct X1 a, long double k);
 struct XI lib_xi(struct XI a);
 double lib_many(struct DD a, struct DD b, struct DD c, struct DD d, struct DD e, double f, struct FF g);
-#if __STDC_VERSION__ >= 202311L
+/* ABI_NO_BITINT: run_codegen_abi.sh's gcc has no _BitInt to judge these by */
+#if __STDC_VERSION__ >= 202311L && !defined(ABI_NO_BITINT)
 _BitInt(100) lib_b100(_BitInt(100) a, _BitInt(100) b);
 unsigned _BitInt(200) lib_b200(unsigned _BitInt(200) a, int k);
 _BitInt(130) lib_b130(long long x, _BitInt(130) y);
@@ -157,7 +158,7 @@ static void classes(void) {
     printf("%g\n", lib_many(dd1, dd2, dd1, dd2, dd1, 0.5, ff1));
     printf("%g %g\n", (double)lib_fl(1.5f, 2.0, 0.25f),
            lib_fl10(0.5f, 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 6.5f, 7.5f, 8.5f, 9.5f));
-#if __STDC_VERSION__ >= 202311L
+#if __STDC_VERSION__ >= 202311L && !defined(ABI_NO_BITINT)
     {
         _BitInt(100) b100 = lib_b100((_BitInt(100))123456789012345LL * 1000003, -987654321);
         unsigned _BitInt(200) b200 = lib_b200((unsigned _BitInt(200))0xfedcba9876543210ULL << 64, 70);

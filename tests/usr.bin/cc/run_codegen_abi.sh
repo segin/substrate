@@ -5,7 +5,8 @@
 # require all three to print the same.  This holds cc to the platform
 # calling convention, not merely to one it agrees with itself on.
 #
-# A host whose gcc cannot link -m32 programs skips the -m32 runs.
+# A host whose gcc cannot link -m32 programs skips the -m32 runs, and one
+# without _BitInt for a mode builds neither half with the _BitInt cases.
 # CC_BIN names another cc to test.
 set -u
 
@@ -32,9 +33,17 @@ fi
 
 fail=0
 runs=0
+printf '_BitInt(100) probe;\n' > "$tmp/bitint.c"
 for m in $modes; do
+	# A gcc without _BitInt here (before 14, or before 16 for -m32) cannot
+	# judge those cases, so neither half has them.
+	nobitint=
+	if ! "$HOST_CC" -m$m -std=$STD -w -c -o "$tmp/bitint.o" "$tmp/bitint.c" 2>/dev/null; then
+		nobitint=-DABI_NO_BITINT
+		echo "run_codegen_abi: -m$m: $HOST_CC has no _BitInt; its cases are skipped"
+	fi
 	# -Wno-psabi: gcc notes the 32-byte vectors' ABI change (GCC 4.6) even under -w
-	"$HOST_CC" -m$m -std=$STD -w -Wno-psabi -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
+	"$HOST_CC" -m$m -std=$STD $nobitint -w -Wno-psabi -o "$tmp/ref" "$BASE/abi_main.c" "$BASE/abi_lib.c" || exit 1
 	"$tmp/ref" >"$tmp/ref.out" 2>&1
 	for o in O0 O2; do
 		for mix in main lib; do
@@ -46,13 +55,13 @@ for m in $modes; do
 				ours="$BASE/abi_lib.c"
 				theirs="$BASE/abi_main.c"
 			fi
-			if ! "$CC_BIN" -m$m -std=$STD -$o -c -o "$tmp/ours.o" "$ours" >"$tmp/cc.log" 2>&1; then
+			if ! "$CC_BIN" -m$m -std=$STD $nobitint -$o -c -o "$tmp/ours.o" "$ours" >"$tmp/cc.log" 2>&1; then
 				echo "FAIL -m$m -$o cc-built $mix: cc rejected it"
 				sed -n '1,5s/^/    /p' "$tmp/cc.log"
 				fail=1
 				continue
 			fi
-			"$HOST_CC" -m$m -std=$STD -w -Wno-psabi -c -o "$tmp/theirs.o" "$theirs" || exit 1
+			"$HOST_CC" -m$m -std=$STD $nobitint -w -Wno-psabi -c -o "$tmp/theirs.o" "$theirs" || exit 1
 			"$HOST_CC" -m$m -no-pie -o "$tmp/mixed" "$tmp/ours.o" "$tmp/theirs.o" || exit 1
 			timeout 10 "$tmp/mixed" >"$tmp/mixed.out" 2>&1
 			if ! cmp -s "$tmp/ref.out" "$tmp/mixed.out"; then

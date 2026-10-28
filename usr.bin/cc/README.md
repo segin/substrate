@@ -46,7 +46,8 @@ runs one).  The parts that matter most:
   status must match.
 - `run_codegen_random.sh`: 40 generated arithmetic programs, the same
   way.
-- `run_codegen_abi.sh`: objects from cc and gcc call each other.
+- `run_codegen_abi.sh`: objects from cc and gcc call each other (the
+  `_BitInt` calls only where that gcc has `_BitInt`).
 - `run_selfhost.sh`: a cc built by cc passes all of the above, and a cc
   built by *that* writes byte-identical assembly for cc's own sources.
 - `run_negative.sh`: invalid programs are rejected with the right
