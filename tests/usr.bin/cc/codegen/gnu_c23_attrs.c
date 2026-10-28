@@ -5,6 +5,7 @@
  * attributes are read and ignored.
  *
  * cc-std: c23
+ * cc-gcc: 14 (-std=c23)
  */
 #include <stdint.h>
 #include <stdio.h>

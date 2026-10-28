@@ -5,6 +5,7 @@
  * integers hold the converted values.
  *
  * cc-std: gnu2x
+ * cc-gcc-m32: 16 (_Float16 under -m32)
  */
 #include <stdio.h>
 

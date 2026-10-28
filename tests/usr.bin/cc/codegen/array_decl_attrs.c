@@ -4,6 +4,7 @@
  * at file scope, for members and for locals.
  *
  * cc-std: c23
+ * cc-gcc: 14 (-std=c23)
  */
 #include <stdint.h>
 #include <stdio.h>

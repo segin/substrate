@@ -31,7 +31,7 @@ all: test
 # alike, and each script makes its own temporaries besides.  A target's
 # output is printed whole when it ends, not interleaved with the others'.
 MAKEFLAGS += --output-sync=target
-SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff \
+SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff run_codegen_old_gcc \
 	run_codegen_random run_codegen_abi run_codegen_regparm run_selfhost \
 	run_crosshost run_postc99_c11_c17 run_postc99_c23 run_postc99_c23_attrs \
 	run_postc99_mode_matrix run_postc99_diff_modes run_postc99_abi_modes checks_c23 \
@@ -950,6 +950,10 @@ run_diff_c99: build
 run_codegen_diff: build
 	mkdir -p "$(CC_TMP)"
 	sh run_codegen_diff.sh
+
+run_codegen_old_gcc: build
+	mkdir -p "$(CC_TMP)"
+	sh run_codegen_old_gcc.sh
 
 run_codegen_random: build
 	mkdir -p "$(CC_TMP)"

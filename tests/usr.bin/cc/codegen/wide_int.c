@@ -6,6 +6,8 @@
  * that the result must be gcc's to the bit.
  *
  * cc-std: gnu2x
+ * cc-gcc: 14 (_BitInt)
+ * cc-gcc-m32: 16 (_BitInt under -m32)
  */
 #include <stdio.h>
 

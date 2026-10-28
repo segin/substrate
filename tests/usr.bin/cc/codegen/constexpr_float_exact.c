@@ -1,5 +1,6 @@
 /* constexpr floating objects whose initializers keep their values in the object's type (C23 6.7.1p6) */
 /* cc-std: c23 */
+/* cc-gcc: 14 (-std=c23) */
 #include <stdio.h>
 
 constexpr float g1 = 0.5;

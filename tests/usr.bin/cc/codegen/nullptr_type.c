@@ -5,6 +5,7 @@
  * pointers, and passed to a variadic function as a void * would be.
  *
  * cc-std: c23
+ * cc-gcc: 14 (-std=c23)
  */
 #include <stddef.h>
 #include <stdio.h>

@@ -3,6 +3,8 @@
  * globals and locals and when passed by value; gcc's _Alignof caps the
  * alignment a vector gives at 16 while __alignof__ does not, and neither
  * caps one _Alignas or aligned asks for.
+ *
+ * cc-gcc-m32: 16 (an older gcc aligns an 8-byte vector to 4 under -m32)
  */
 #include <stddef.h>
 #include <stdint.h>

@@ -1,5 +1,6 @@
 /* constexpr objects of floating and aggregate type, initialized by constant expressions (C23 6.7.1) */
 /* cc-std: c23 */
+/* cc-gcc: 14 (-std=c23) */
 #include <stdio.h>
 
 struct s {

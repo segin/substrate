@@ -1,5 +1,6 @@
 /* a member of a constexpr structure is a named constant (C23 6.6p7) */
 /* cc-std: c23 */
+/* cc-gcc: 14 (-std=c23) */
 #include <stdio.h>
 
 struct in {

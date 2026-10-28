@@ -6,6 +6,15 @@
 #
 # A host whose gcc cannot link -m32 programs skips the -m32 runs.
 # CC_BIN names another cc to test, such as a build of it for a 32-bit host.
+#
+# A test that gcc can judge only from some release on names it in a
+# "cc-gcc: <major>" comment, or "cc-gcc-m32: <major>" where only its
+# -m32 runs need it: an older gcc (CI's, say) rejects the language, or
+# lays the data out as gcc did before.  With an older gcc those runs are
+# skipped, and said to be, not failed.  Any other HOST_CC runs them all.
+#
+# Usage: run_codegen_diff.sh [name ...] -- the codegen/NAME.c named, or
+# all of them.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -27,14 +36,39 @@ else
 	echo "run_codegen_diff: $HOST_CC cannot link -m32 programs; skipping -m32"
 fi
 
+# the major release of HOST_CC if it is gcc, else empty
+gcc_major=
+if "$HOST_CC" -v 2>&1 | grep -q '^gcc version'; then
+	gcc_major=$("$HOST_CC" -dumpversion | cut -d. -f1)
+fi
+
+if [ $# -gt 0 ]; then
+	srcs=
+	for n in "$@"; do srcs="$srcs $BASE/$n.c"; done
+else
+	srcs=$(ls "$BASE"/*.c)
+fi
+
 fail=0
 runs=0
-for src in "$BASE"/*.c; do
+skipped=0
+for src in $srcs; do
 	name=$(basename "$src" .c)
 	# a test may name its language in a "cc-std: <std>" comment, for both compilers
 	std=$(sed -n 's/.*cc-std: *\([a-z0-9]*\).*/\1/p' "$src" | head -n 1)
 	cc_std=${std:+-std=$std}
+	need=$(sed -n 's/.*cc-gcc: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
+	need32=$(sed -n 's/.*cc-gcc-m32: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
 	for m in $modes; do
+		want=$need
+		if [ $m = 32 ] && [ -n "$need32" ] && [ "${need:-0}" -lt "$need32" ]; then
+			want=$need32
+		fi
+		if [ -n "$gcc_major" ] && [ -n "$want" ] && [ "$gcc_major" -lt "$want" ]; then
+			echo "skip $name -m$m: needs gcc $want, $HOST_CC is gcc $gcc_major"
+			skipped=$((skipped + 2))
+			continue
+		fi
 		if ! "$HOST_CC" -m$m -std=${std:-gnu11} -w -o "$tmp/ref" "$src" 2>"$tmp/ref.log"; then
 			echo "FAIL $name -m$m: $HOST_CC cannot build it"
 			fail=1
@@ -60,5 +94,5 @@ for src in "$BASE"/*.c; do
 		done
 	done
 done
-echo "run_codegen_diff: $runs runs"
+echo "run_codegen_diff: $runs runs, $skipped skipped for an old gcc"
 exit $fail
