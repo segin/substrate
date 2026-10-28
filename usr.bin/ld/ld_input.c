@@ -886,7 +886,7 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
             }
         }
     }
-    if (!include_default_dirs) {
+    if (!include_default_dirs || ctx->opt.nostdlib) {
         return NULL;
     }
 #ifdef LD_SUBSTRATE_BUILD
@@ -939,6 +939,9 @@ char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
             return cand;
         }
         free(cand);
+    }
+    if (ctx->opt.nostdlib) {
+        return NULL;
     }
 #ifdef LD_SUBSTRATE_BUILD
     sysroot = getenv("SUBSTRATE_SYSROOT");

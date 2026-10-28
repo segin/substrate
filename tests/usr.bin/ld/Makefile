@@ -17,5 +17,6 @@ run:
 	./test_emit_relocs.sh
 	./test_kernel_reloc.sh
 	./test_page_size.sh
+	./test_nostdlib.sh
 
 clean:

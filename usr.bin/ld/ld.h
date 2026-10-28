@@ -203,6 +203,7 @@ typedef struct {
     const char *reproduce_path;
     ld_compat_mode_t compat_mode;
     strvec_t lib_paths;
+    int nostdlib;               /* -nostdlib: -l searches lib_paths only */
     strvec_t trace_symbols;
     strvec_t force_undefined;
     defsymvec_t defsyms;

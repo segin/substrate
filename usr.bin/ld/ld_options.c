@@ -361,6 +361,7 @@ static const ld_opt_t options[] = {
 
     /* the inputs, and how the ones that follow are taken */
     { "-L", OPT_JOINED, opt_strvec, F(lib_paths), 0 },
+    { "-nostdlib --nostdlib", OPT_FLAG, opt_int, F(nostdlib), 1 },
     { "-l", OPT_JOINED, opt_input, 0, LD_INPUT_LIB },
     { "--start-group", OPT_FLAG, opt_input, 0, LD_INPUT_GROUP_START },
     { "--end-group", OPT_FLAG, opt_input, 0, LD_INPUT_GROUP_END },
