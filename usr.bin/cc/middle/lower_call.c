@@ -398,6 +398,9 @@ static int emit_atomic_libcall(cc_ssa_function_t *sf, const char *builtin, long 
         return -1;
     }
     cc_ir_set_size(sf, in.dst, size > 4 ? size : 4);
+    /* the result's size: an 8-byte one in %edx:%eax on i386, not %eax alone */
+    in.imm = size > 4 ? size : 4;
+    in.is_unsigned = 1;
     for (i = 0; i < n; ++i) {
         in.args[i] = args[i];
     }

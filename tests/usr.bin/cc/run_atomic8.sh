@@ -4,7 +4,8 @@
 # -march=i486 (a call of __atomic_load_8/__atomic_store_8, which
 # march_atomic_lib.c answers), i586 and i686 (the x87's fildq/fistpq) at
 # -O0 and -O2, races a storing thread against a loading one and must see
-# no value half old and half new.
+# no value half old and half new, nor one whose high word a call's result
+# lost.
 #
 # Needs a host gcc that builds -m32 programs with threads; skipped, with a
 # note, if not.

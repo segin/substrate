@@ -66,6 +66,19 @@ int main(void) {
     rmw_short();
     rmw_int();
     rmw_llong();
+    {
+        /* values whose high words matter: a call's 8-byte result must keep %edx */
+        static volatile long long q = 0x0123456789abcdefLL;
+        long long r = __sync_fetch_and_add(&q, 0x100000001LL);
+
+        printf("%llx %llx\n", r, (long long)q);
+        r = __sync_val_compare_and_swap(&q, q, 0x7edcba9876543210LL);
+        printf("%llx %llx\n", r, (long long)q);
+        r = __atomic_exchange_n(&q, -0x123456789LL, __ATOMIC_SEQ_CST);
+        printf("%llx %llx\n", r, __atomic_load_n(&q, __ATOMIC_SEQ_CST));
+        __atomic_store_n(&q, 0x5555555500000001LL, __ATOMIC_SEQ_CST);
+        printf("%llx\n", __atomic_add_fetch(&q, 0xffffffffLL, __ATOMIC_RELAXED));
+    }
     printf("%x %llx %d %d %d\n", swap32(u), swap64(w), max(a, b), less(x, y), less(y, x));
     return 0;
 }
