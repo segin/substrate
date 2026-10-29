@@ -1702,6 +1702,7 @@ static const cc_ctype_t *parser_vector_elem_ctype(const cc_ctype_t *t) {
 static int parser_vector_struct(parser_t *p, const cc_ctype_t *elem, long n) {
     static const cc_ctype_kind_t cmp_by_size[9] = {CC_CT_VOID, CC_CT_CHAR, CC_CT_SHORT, CC_CT_VOID, CC_CT_INT,
                                                    CC_CT_VOID, CC_CT_VOID, CC_CT_VOID,  CC_CT_LLONG};
+    const cc_options_t *o = cc_options_current();
     long es = parser_ct_size(p, elem);
     const cc_ctype_t *cmp_elem;
     size_t i;
@@ -1721,8 +1722,11 @@ static int parser_vector_struct(parser_t *p, const cc_ctype_t *elem, long n) {
     }
     p->structs[sid].size = n * es;
     p->structs[sid].align = n * es;
+    if (n * es == 8 && o != NULL && o->target == CC_TARGET_I386 && !o->i386_mmx) {
+        p->structs[sid].align = 4; /* gcc's i386 without MMX aligns an 8-byte vector as two words */
+    }
     /* gcc's _Alignof caps a vector's alignment at 16 (its BIGGEST_ALIGNMENT without AVX); layout does not */
-    p->structs[sid].c11_align = n * es < 16 ? n * es : 16;
+    p->structs[sid].c11_align = p->structs[sid].align < 16 ? p->structs[sid].align : 16;
     p->structs[sid].complete = 1;
     p->structs[sid].vector_count = n;
     p->structs[sid].vector_elem = elem;

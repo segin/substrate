@@ -56,11 +56,11 @@ if [ $rc -ne 0 ]; then
 	echo "FAIL: with gcc 13 the runner failed:"; sed 's/^/    /' "$tmp/old.out"; fail=1
 fi
 for want in "skip nullptr_type -m64: needs gcc 14" "skip bitint_narrow -m64: needs gcc 14" \
-	"skip float16_data -m32: needs gcc 16"; do
+	"skip bitint_narrow -m32: needs gcc 16"; do
 	grep -q "^$want" "$tmp/old.out" || { echo "FAIL: no '$want'"; fail=1; }
 done
-# float16_data's -m64 runs need no newer gcc, and alignof_object's none at all.
-if grep -qE '^skip (float16_data -m64|alignof_object)' "$tmp/old.out"; then
+# float16_data needs an ISA, not a newer gcc, and alignof_object nothing at all.
+if grep -qE '^skip (float16_data|alignof_object)' "$tmp/old.out"; then
 	echo "FAIL: a run that needs no newer gcc was skipped:"; grep '^skip' "$tmp/old.out" | sed 's/^/    /'; fail=1
 fi
 

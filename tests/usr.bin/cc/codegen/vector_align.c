@@ -1,10 +1,11 @@
 /*
  * A vector type is aligned to its size, as gcc aligns it, in structures,
- * globals and locals and when passed by value; gcc's _Alignof caps the
- * alignment a vector gives at 16 while __alignof__ does not, and neither
- * caps one _Alignas or aligned asks for.
+ * globals and locals and when passed by value -- except an 8-byte one on
+ * an i386 without MMX, aligned to 4; gcc's _Alignof caps the alignment a
+ * vector gives at 16 while __alignof__ does not, and neither caps one
+ * _Alignas or aligned asks for.
  *
- * cc-gcc-m32: 16 (an older gcc aligns an 8-byte vector to 4 under -m32)
+ * cc-march-m32: i686 pentium4 (without MMX, and with it)
  */
 #include <stddef.h>
 #include <stdint.h>

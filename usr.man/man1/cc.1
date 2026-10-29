@@ -101,13 +101,25 @@ as gcc (and clang) do: on i386 a 16-byte vector travels in
 .Li %xmm0
 to
 .Li %xmm2
-and an 8-byte one in an MMX register, so code that calls gcc-built
-functions taking 8-byte vectors must not rely on the x87 until the
-caller has issued
+when the target has SSE, and an 8-byte one in an MMX register when it
+has MMX, so code that calls gcc-built functions taking 8-byte vectors
+must not rely on the x87 until the caller has issued
 .Li emms ,
 as
 .Nm
 does.
+Without SSE a 16-byte vector is passed on the stack and returned in
+memory, and without MMX an 8-byte one is too, aligned to 4 rather than
+8, as gcc has them for that
+.Fl march :
+.Cm i686
+and
+.Cm pentiumpro
+have neither,
+.Cm pentium2
+adds MMX,
+.Cm pentium3
+SSE.
 .Pp
 .Vt _Decimal32 ,
 .Vt _Decimal64
@@ -265,6 +277,10 @@ Target i386 or x86_64 ABI.
 The default is the ABI
 .Nm
 was itself built for: x86_64 on a 64-bit system, i386 on a 32-bit one.
+.Fl m32
+without an
+.Fl march
+is an i686, with neither MMX nor SSE.
 The target's runtime is used: startup code from
 .Pa /usr/lib
 or

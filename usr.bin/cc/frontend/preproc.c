@@ -2159,9 +2159,10 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         if (strcmp(f, "-m32") == 0) {
             st->target = cc_target_get(CC_TARGET_I386);
             if (!arch_explicit) {
+                /* an i686, as the driver has it: no MMX, no SSE */
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
-                st->target_has_mmx = 1;
+                st->target_has_mmx = 0;
                 st->target_has_avx = 0;
                 st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;
@@ -2224,7 +2225,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             } else if (strcmp(name, "i686") == 0 || strcmp(name, "pentiumpro") == 0 || strcmp(name, "pentium2") == 0) {
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
-                st->target_has_mmx = 1;
+                st->target_has_mmx = strcmp(name, "pentium2") == 0; /* the Pentium Pro has no MMX */
                 st->target_has_avx = 0;
                 st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;

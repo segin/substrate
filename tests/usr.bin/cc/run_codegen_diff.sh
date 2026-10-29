@@ -13,6 +13,11 @@
 # lays the data out as gcc did before.  With an older gcc those runs are
 # skipped, and said to be, not failed.  Any other HOST_CC runs them all.
 #
+# gcc's -m32 has the ISA its host configured (SSE2 on Arch, a bare i686
+# on Ubuntu), and vectors and _Float16 depend on it.  A test that does
+# names the -march its -m32 runs need in "cc-march-m32: <arch> ...", and
+# both compilers are run with each.
+#
 # Usage: run_codegen_diff.sh [name ...] -- the codegen/NAME.c named, or
 # all of them.
 set -u
@@ -59,18 +64,31 @@ for src in $srcs; do
 	cc_std=${std:+-std=$std}
 	need=$(sed -n 's/.*cc-gcc: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
 	need32=$(sed -n 's/.*cc-gcc-m32: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
+	# the -m32 -march list, up to a "(" that starts the reason
+	march32=$(sed -n 's/.*cc-march-m32: *\([a-z0-9 -]*\).*/\1/p' "$src" | head -n 1)
+	runmodes=
 	for m in $modes; do
+		if [ $m = 32 ] && [ -n "$march32" ]; then
+			for a in $march32; do runmodes="$runmodes 32/$a"; done
+		else
+			runmodes="$runmodes $m"
+		fi
+	done
+	for mode in $runmodes; do
+		m=${mode%%/*}
+		flags=-m$m
+		case $mode in */*) flags="$flags -march=${mode#*/}" ;; esac
 		want=$need
 		if [ $m = 32 ] && [ -n "$need32" ] && [ "${need:-0}" -lt "$need32" ]; then
 			want=$need32
 		fi
 		if [ -n "$gcc_major" ] && [ -n "$want" ] && [ "$gcc_major" -lt "$want" ]; then
-			echo "skip $name -m$m: needs gcc $want, $HOST_CC is gcc $gcc_major"
+			echo "skip $name $flags: needs gcc $want, $HOST_CC is gcc $gcc_major"
 			skipped=$((skipped + 2))
 			continue
 		fi
-		if ! "$HOST_CC" -m$m -std=${std:-gnu11} -w -o "$tmp/ref" "$src" 2>"$tmp/ref.log"; then
-			echo "FAIL $name -m$m: $HOST_CC cannot build it"
+		if ! "$HOST_CC" $flags -std=${std:-gnu11} -w -o "$tmp/ref" "$src" 2>"$tmp/ref.log"; then
+			echo "FAIL $name $flags: $HOST_CC cannot build it"
 			fail=1
 			continue
 		fi
@@ -78,8 +96,8 @@ for src in $srcs; do
 		echo "exit $?" >>"$tmp/ref.out"
 		for o in O0 O2; do
 			runs=$((runs + 1))
-			if ! "$CC_BIN" -m$m $cc_std -$o -o "$tmp/ours" "$src" >"$tmp/cc.log" 2>&1; then
-				echo "FAIL $name -m$m -$o: cc rejected it"
+			if ! "$CC_BIN" $flags $cc_std -$o -o "$tmp/ours" "$src" >"$tmp/cc.log" 2>&1; then
+				echo "FAIL $name $flags -$o: cc rejected it"
 				sed -n '1,5s/^/    /p' "$tmp/cc.log"
 				fail=1
 				continue
@@ -87,7 +105,7 @@ for src in $srcs; do
 			timeout 10 "$tmp/ours" >"$tmp/ours.out" 2>&1
 			echo "exit $?" >>"$tmp/ours.out"
 			if ! cmp -s "$tmp/ref.out" "$tmp/ours.out"; then
-				echo "FAIL $name -m$m -$o: output differs from $HOST_CC (< $HOST_CC, > cc)"
+				echo "FAIL $name $flags -$o: output differs from $HOST_CC (< $HOST_CC, > cc)"
 				diff "$tmp/ref.out" "$tmp/ours.out" | sed -n '1,12s/^/    /p'
 				fail=1
 			fi

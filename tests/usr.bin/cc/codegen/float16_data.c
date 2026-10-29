@@ -5,7 +5,7 @@
  * integers hold the converted values.
  *
  * cc-std: gnu2x
- * cc-gcc-m32: 16 (_Float16 under -m32)
+ * cc-march-m32: pentium4 (gcc has _Float16 on i386 only with SSE2)
  */
 #include <stdio.h>
 

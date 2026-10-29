@@ -184,6 +184,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->i386_isa_level = o->i386_isa_level;
   out->i386_sse2 = o->i386_has_sse2;
   out->i386_mmx = o->i386_has_mmx;
+  /* SSE2 implies SSE, and -mno-sse turns both off, as in gcc */
+  out->i386_sse = (o->i386_has_sse || o->i386_has_sse2) && !o->no_sse;
   out->i386_fpmath = (cc_fpmath_t)o->i386_fp_math_mode;
   out->i386_regparm = o->i386_regparm;
   out->i386_reg_struct_return = o->i386_reg_struct_return;
@@ -911,12 +913,13 @@ static int i386_features_from_arch_name(const char *name, int *out_level,
     *out_supports_mmx = 1;
     return 1;
   }
+  /* the Pentium Pro has no MMX; the Pentium II adds it */
   if (strcmp(name, "i686") == 0 || strcmp(name, "pentiumpro") == 0 ||
       strcmp(name, "pentium2") == 0) {
     *out_level = 6;
     *out_has_sse = 0;
     *out_has_sse2 = 0;
-    *out_has_mmx = 1;
+    *out_has_mmx = strcmp(name, "pentium2") == 0;
     *out_supports_sse = 0;
     *out_supports_sse2 = 0;
     *out_supports_mmx = 1;
@@ -1152,7 +1155,8 @@ static int opt_rdynamic(cc_opts_t *o, const driver_opt_t *d, const char *as, con
 
 /**
  * -m32 / -m64 (d->n is the target).  -m32 without an -march so far
- * means an i686 with MMX and no SSE.
+ * means an i686, as -march=i686 does: no MMX and no SSE, so vectors are
+ * passed in memory, as gcc configured for i686 passes them.
  *
  * @return 0
  */
@@ -1165,7 +1169,7 @@ static int opt_target(cc_opts_t *o, const driver_opt_t *d, const char *as, const
     o->i386_isa_level = 6;
     o->i386_has_sse = 0;
     o->i386_has_sse2 = 0;
-    o->i386_has_mmx = 1;
+    o->i386_has_mmx = 0;
     o->i386_supports_sse = 0;
     o->i386_supports_sse2 = 0;
     o->i386_supports_mmx = 1;

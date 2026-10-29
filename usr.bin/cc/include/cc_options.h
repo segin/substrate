@@ -48,7 +48,8 @@ typedef struct {
     int implicit_funcdecl;   /**< implicit function declarations: 1, 0, or -1 for the mode's default */
     int i386_isa_level;      /**< -march=: 3 (i386) .. 7; clamped to that range */
     int i386_sse2;           /**< -m[no-]sse2 */
-    int i386_mmx;            /**< -m[no-]mmx */
+    int i386_mmx;            /**< -m[no-]mmx: 8-byte vectors in %mm registers, aligned to 8 */
+    int i386_sse;            /**< SSE, from -march, -msse or -msse2: 16-byte vectors in %xmm registers */
     cc_fpmath_t i386_fpmath; /**< -mfpmath= */
     int i386_regparm;        /**< -mregparm=N: integer arguments in %eax, %edx, %ecx (0-3) */
     int i386_reg_struct_return; /**< -freg-struct-return: small structures returned in registers, not memory */

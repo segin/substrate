@@ -16,23 +16,27 @@ static int i386_record_is_float_mode(const cc_translation_unit_t *tu, int sid, l
 
 /**
  * How an i386 vector argument or parameter of structure @p sid and
- * @p size bytes travels, as gcc passes one: the first three 16-byte
- * vectors in %xmm0-2 and the first three 8-byte ones in %mm0-2
- * (CC_CALL_ARG_ABI_AGG_REG with CC_ABI_VEC128 or CC_ABI_VEC64); a wider
- * one, or one the registers ran out for, on the stack aligned to its size
- * (CC_ABI_STACK_VEC).  *@p n16 and *@p n8 count the registers taken.
+ * @p size bytes travels, as gcc passes one: with SSE the first three
+ * 16-byte vectors in %xmm0-2, and with MMX the first three 8-byte ones in
+ * %mm0-2 (CC_CALL_ARG_ABI_AGG_REG with CC_ABI_VEC128 or CC_ABI_VEC64); a
+ * wider one, one the registers ran out for, or a 16-byte one without SSE,
+ * on the stack aligned to its size (CC_ABI_STACK_VEC); an 8-byte one
+ * without MMX on the stack as any 8-byte structure.  *@p n16 and *@p n8
+ * count the registers taken.
  *
  * @return the ABI byte, or -1 if it travels as any aggregate of its size
  */
 static int i386_vector_abi(const cc_translation_unit_t *tu, int sid, long size, int *n16, int *n8) {
+    const cc_options_t *o = cc_options_current();
+
     if (!cc_abi_sid_is_vector(tu, sid) || size <= 4) {
         return -1;
     }
-    if (size == 16 && *n16 < 3) {
+    if (size == 16 && *n16 < 3 && (o == NULL || o->i386_sse)) {
         ++*n16;
         return CC_CALL_ARG_ABI_AGG_REG | CC_ABI_VEC128;
     }
-    if (size == 8 && *n8 < 3) {
+    if (size == 8 && *n8 < 3 && (o == NULL || o->i386_mmx)) {
         ++*n8;
         return CC_CALL_ARG_ABI_AGG_REG | CC_ABI_VEC64;
     }
@@ -69,10 +73,20 @@ int cc_abi_i386_aggregate_return(const cc_translation_unit_t *tu, int sid, long 
         return cc_struct_soft_float_bits(&tu->structs[sid]) <= 64 ? CC_ABI_RET_EAX_EDX : 0;
     }
     if (cc_abi_sid_is_vector(tu, sid)) {
-        /* a vector of 16 bytes in %xmm0, of 8 in %mm0, of 4 or fewer in %eax, as gcc returns one */
+        /*
+         * a vector of 16 bytes in %xmm0 (with SSE), of 8 in %mm0 (with
+         * MMX), of 4 or fewer in %eax, as gcc returns one; else in memory
+         */
+        const cc_options_t *o = cc_options_current();
         long vsize = tu->structs[sid].size;
 
-        return vsize == 16 ? CC_ABI_RET_VEC128 : vsize == 8 ? CC_ABI_RET_VEC64 : vsize <= 4 ? CC_ABI_RET_EAX_EDX : 0;
+        if (vsize == 16) {
+            return o == NULL || o->i386_sse ? CC_ABI_RET_VEC128 : 0;
+        }
+        if (vsize == 8) {
+            return o == NULL || o->i386_mmx ? CC_ABI_RET_VEC64 : 0;
+        }
+        return vsize <= 4 ? CC_ABI_RET_EAX_EDX : 0;
     }
     if (cc_options_current() != NULL && cc_options_current()->i386_reg_struct_return && tu != NULL && sid >= 0 &&
         (size_t)sid < tu->struct_count && tu->structs[sid].complex_elem == NULL &&

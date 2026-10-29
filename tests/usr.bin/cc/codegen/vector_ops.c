@@ -6,7 +6,7 @@
  * vectors in structures and arrays.  Results are printed element by
  * element, so they must be gcc's exactly.
  *
- * cc-gcc-m32: 16 (an older gcc aligns an 8-byte vector to 4 under -m32)
+ * cc-march-m32: i686 pentium4 (an 8-byte vector's alignment, without MMX and with it)
  */
 #include <stdio.h>
 #include <string.h>
