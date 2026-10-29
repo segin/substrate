@@ -1154,9 +1154,27 @@ static int opt_rdynamic(cc_opts_t *o, const driver_opt_t *d, const char *as, con
 }
 
 /**
- * -m32 / -m64 (d->n is the target).  -m32 without an -march so far
- * means an i686, as -march=i686 does: no MMX and no SSE, so vectors are
- * passed in memory, as gcc configured for i686 passes them.
+ * Make @p o's i386 ISA the one an i386 target has without an -march: an
+ * i686, as -march=i686 has it -- no MMX and no SSE, so floating point is
+ * the x87's and vectors are passed in memory, as gcc configured for i686
+ * (Substrate's own) does.  -m32 and a cc whose own target is i386 both
+ * start from it.
+ *
+ * @param o  the options
+ */
+static void i386_default_isa(cc_opts_t *o) {
+  o->i386_isa_level = 6;
+  o->i386_has_sse = 0;
+  o->i386_has_sse2 = 0;
+  o->i386_has_mmx = 0;
+  o->i386_supports_sse = 0;
+  o->i386_supports_sse2 = 0;
+  o->i386_supports_mmx = 1;
+}
+
+/**
+ * -m32 / -m64 (d->n is the target).  -m32 without an -march so far is
+ * i386_default_isa()'s i686.
  *
  * @return 0
  */
@@ -1166,13 +1184,7 @@ static int opt_target(cc_opts_t *o, const driver_opt_t *d, const char *as, const
   /* -m16 is -m32 with the output assembled for real mode (.code16gcc), as gcc has it */
   o->code16 = as != NULL && strcmp(as, "-m16") == 0;
   if (o->target == CC_TARGET_I386 && !o->i386_arch_explicit) {
-    o->i386_isa_level = 6;
-    o->i386_has_sse = 0;
-    o->i386_has_sse2 = 0;
-    o->i386_has_mmx = 0;
-    o->i386_supports_sse = 0;
-    o->i386_supports_sse2 = 0;
-    o->i386_supports_mmx = 1;
+    i386_default_isa(o);
   }
   return 0;
 }
@@ -2336,6 +2348,10 @@ int cc_main(int argc, char **argv) {
 #else
   o.target = CC_TARGET_X86_64;
 #endif
+  if (o.target == CC_TARGET_I386) {
+    /* the ISA -m32 would give, not the SSE2 above: a cc on an i386 is asked for no -m32 */
+    i386_default_isa(&o);
+  }
   if (strcmp(prog_basename(argv[0]), "cpp") == 0) {
     o.invoked_as_cpp = 1;
     o.mode_E = 1;

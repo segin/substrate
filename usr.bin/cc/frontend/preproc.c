@@ -2130,9 +2130,10 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     st->target_supports_avx2 = 1;
 
     if (st->target->id == CC_TARGET_I386) {
+        /* an i686, as -m32 has it: no MMX, no SSE */
         st->target_has_sse = 0;
         st->target_has_sse2 = 0;
-        st->target_has_mmx = 1;
+        st->target_has_mmx = 0;
         st->target_has_avx = 0;
         st->target_has_avx2 = 0;
         st->target_supports_sse = 0;

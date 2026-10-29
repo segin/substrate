@@ -280,7 +280,10 @@ was itself built for: x86_64 on a 64-bit system, i386 on a 32-bit one.
 .Fl m32
 without an
 .Fl march
-is an i686, with neither MMX nor SSE.
+is an i686, with neither MMX nor SSE, and so is a
+.Nm
+built for i386 given neither: floating point is the x87's and vectors
+are passed in memory.
 The target's runtime is used: startup code from
 .Pa /usr/lib
 or
