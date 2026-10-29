@@ -34,7 +34,15 @@
     T sync_val_cas_##N(volatile T *p, T o, T n) __asm__("__sync_val_compare_and_swap_" #N);                       \
     T sync_val_cas_##N(volatile T *p, T o, T n) { return __sync_val_compare_and_swap(p, o, n); }                  \
     _Bool sync_bool_cas_##N(volatile T *p, T o, T n) __asm__("__sync_bool_compare_and_swap_" #N);                 \
-    _Bool sync_bool_cas_##N(volatile T *p, T o, T n) { return __sync_bool_compare_and_swap(p, o, n); }
+    _Bool sync_bool_cas_##N(volatile T *p, T o, T n) { return __sync_bool_compare_and_swap(p, o, n); }            \
+    _Bool atomic_cas_##N(volatile T *p, T *e, T n, _Bool weak, int so, int fo)                                    \
+        __asm__("__atomic_compare_exchange_" #N);                                                                 \
+    _Bool atomic_cas_##N(volatile T *p, T *e, T n, _Bool weak, int so, int fo) {                                  \
+        (void)weak;                                                                                               \
+        (void)so;                                                                                                 \
+        (void)fo;                                                                                                 \
+        return __atomic_compare_exchange_n(p, e, n, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);                       \
+    }
 
 ALL(1, unsigned char)
 ALL(2, unsigned short)

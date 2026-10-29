@@ -435,6 +435,100 @@ static int emit_atomic_x87_move8(cc_ssa_function_t *sf, int p, int v, cc_diag_t 
     return emit_atomic_asm(sf, "fildq %1\n\tfistpq %2", "=m", 8, ins, 2, diag) < 0 ? -1 : v;
 }
 
+/** The i386 -march level (3 for the 386 .. 7), or 7 on x86-64, which has every instruction in question. */
+static int atomic_isa_level(void) {
+    const cc_options_t *o = cc_options_current();
+
+    return o != NULL && o->target == CC_TARGET_I386 ? o->i386_isa_level : 7;
+}
+
+/** A load or store of @p size bytes at @p p, unsigned, of @p v (-1 for a load). */
+static int emit_plain_access(cc_ssa_function_t *sf, int p, long size, int v, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = v < 0 ? CC_SSA_LOAD : CC_SSA_STORE;
+    in.dst = v < 0 ? cc_ir_new_value(sf, CC_VAL_I64) : -1;
+    in.lhs = p;
+    in.rhs = v < 0 ? -1 : v;
+    in.imm = size;
+    in.is_unsigned = 1;
+    if ((v < 0 && in.dst < 0) || cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory emitting an atomic operation");
+        return -1;
+    }
+    if (v < 0 && size > 4) {
+        cc_ir_set_size(sf, in.dst, size);
+    }
+    return v < 0 ? in.dst : v;
+}
+
+int lower_atomic_load_bits(cc_ssa_function_t *sf, int p, long size, cc_diag_t *diag) {
+    if (size > cc_target_pointer_size()) {
+        if (atomic_isa_level() < 5) {
+            int args[2];
+
+            args[0] = p;
+            args[1] = cc_ir_const(sf, CC_ATOMIC_SEQ_CST);
+            return args[1] < 0 ? -1 : emit_atomic_libcall(sf, "__atomic_load_n", size, args, 2, diag);
+        }
+        return emit_atomic_x87_move8(sf, p, -1, diag);
+    }
+    /* an aligned word or less is read in one access, and on x86 a load is ordered enough */
+    return emit_plain_access(sf, p, size, -1, diag);
+}
+
+int lower_atomic_store_bits(cc_ssa_function_t *sf, int p, long size, int v, cc_diag_t *diag) {
+    atomic_asm_in_t ins[2];
+
+    if (size > cc_target_pointer_size()) {
+        if (atomic_isa_level() < 5) {
+            int args[3];
+
+            args[0] = p;
+            args[1] = v;
+            args[2] = cc_ir_const(sf, CC_ATOMIC_SEQ_CST);
+            return args[2] < 0 || emit_atomic_libcall(sf, "__atomic_store_n", size, args, 3, diag) < 0 ? -1 : v;
+        }
+        return emit_atomic_x87_move8(sf, p, v, diag) < 0 || emit_atomic_full_barrier(sf, diag) != 0 ? -1 : v;
+    }
+    /* xchg: the store and a full barrier at once, as gcc stores sequentially consistently without SSE2 */
+    ins[0].value = v;
+    ins[0].constraint = "0";
+    ins[0].size = size;
+    ins[1].value = CC_SSA_ASM_MEM_INDIRECT_ENCODE(p);
+    ins[1].constraint = "m";
+    ins[1].size = size;
+    return emit_atomic_asm(sf, "xchg %0, %2", size == 1 ? "=q" : "=r", size, ins, 2, diag) < 0 ? -1 : v;
+}
+
+int lower_atomic_cas_bits(cc_ssa_function_t *sf, int p, long size, int expect, int desired, cc_diag_t *diag) {
+    int prev;
+
+    if (atomic_isa_level() < (size > cc_target_pointer_size() ? 5 : 4)) {
+        /* __atomic_compare_exchange_N(p, &expect, desired, weak, success order, failure order): expect is updated */
+        int slot = cc_ir_stackalloc(sf, size, diag);
+        int args[6];
+
+        if (slot < 0 || emit_plain_access(sf, slot, size, expect, diag) < 0) {
+            return -1;
+        }
+        args[0] = p;
+        args[1] = slot;
+        args[2] = desired;
+        args[3] = cc_ir_const(sf, 0);
+        args[4] = cc_ir_const(sf, CC_ATOMIC_SEQ_CST);
+        args[5] = cc_ir_const(sf, CC_ATOMIC_SEQ_CST);
+        if (args[3] < 0 || args[4] < 0 || args[5] < 0 ||
+            emit_atomic_libcall(sf, "__atomic_compare_exchange_n", size, args, 6, diag) < 0) {
+            return -1;
+        }
+        return emit_plain_access(sf, slot, size, -1, diag);
+    }
+    prev = emit_atomic_cmpxchg(sf, CC_SSA_ASM_MEM_INDIRECT_ENCODE(p), size, expect, desired, diag);
+    return prev < 0 || size > cc_target_pointer_size() ? prev : atomic_fit(sf, prev, size, 1, diag);
+}
+
 /**
  * Lower an atomic read-modify-write builtin (cc_builtin_atomic_rmw()) or a __sync compare-and-swap to locked
  * instructions: `lock xadd` adds, `xchg` exchanges, `lock cmpxchg` compares and exchanges.  An operation with no

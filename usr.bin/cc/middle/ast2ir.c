@@ -6262,11 +6262,202 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
  * @param diag       receives an error
  * @return           the value, or -1 on error
  */
+/**
+ * The bits of value @p v of an _Atomic object's type @p ct, @p size bytes, as an unsigned integer: a floating
+ * value's through memory, an integer's or a pointer's its low bytes.
+ *
+ * @return the bits, or -1
+ */
+static int atomic_value_bits(cc_ssa_function_t *sf, int v, const cc_ctype_t *ct, long size, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int slot;
+
+    if (!cc_ct_is_floating(ct)) {
+        v = cast_value(sf, v, CC_VAL_I64, diag);
+        return v < 0 || size >= 8 ? v : emit_ext(sf, v, (int)size * 8, 1, 4, diag);
+    }
+    slot = cc_ir_stackalloc(sf, size, diag);
+    if (slot < 0) {
+        return -1;
+    }
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_STORE;
+    in.lhs = slot;
+    in.rhs = v;
+    in.imm = size;
+    if (cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering an atomic assignment");
+        return -1;
+    }
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_LOAD;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = slot;
+    in.imm = size;
+    in.is_unsigned = 1;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering an atomic assignment");
+        return -1;
+    }
+    if (size > 4) {
+        cc_ir_set_size(sf, in.dst, size);
+    }
+    return in.dst;
+}
+
+/**
+ * The value of type @p ct whose @p size bytes are @p bits (atomic_value_bits()'s inverse).
+ *
+ * @return the value, or -1
+ */
+static int atomic_bits_value(cc_ssa_function_t *sf, int bits, const cc_ctype_t *ct, long size, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int slot;
+
+    if (!cc_ct_is_floating(ct)) {
+        return normalize_int_ct(sf, bits, ct, diag);
+    }
+    slot = cc_ir_stackalloc(sf, size, diag);
+    if (slot < 0) {
+        return -1;
+    }
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_STORE;
+    in.lhs = slot;
+    in.rhs = bits;
+    in.imm = size;
+    if (cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering an atomic assignment");
+        return -1;
+    }
+    lower_expr_instr_init(&in);
+    in.op = CC_SSA_LOAD;
+    in.dst = cc_ir_new_value(sf, ct_value_kind(ct));
+    in.lhs = slot;
+    in.imm = size;
+    if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering an atomic assignment");
+        return -1;
+    }
+    return in.dst;
+}
+
+/**
+ * An assignment to an _Atomic object (sema's atomic_access): the object's address made once, then `x = v` one
+ * atomic store, and `x op= v` -- and `++x`, `x--`, which sema made such -- a compare-exchange loop: x read in
+ * one access, `x op v` made of what was read (lowering's substitution of it for the second reading of x, and
+ * of v, evaluated once before the loop), exchanged for what was read if x still holds it, else again from what
+ * it holds.  The value is what was stored, or for a postfix update what was read (C11 6.5.16.2p3).
+ *
+ * @return the value, or -1
+ */
+static int lower_atomic_assign(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                               var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    const cc_ctype_t *ct = e->ctype;
+    cc_value_type_t want = lower_value_kind(e);
+    long size = ct != NULL ? cc_ct_size(ct, tu) : -1;
+    cc_expr_t obj;
+    cc_expr_t addr;
+    int p;
+
+    if (ct == NULL || (size != 1 && size != 2 && size != 4 && size != 8) || ct->kind == CC_CT_COMPLEX ||
+        lower_record_id(e) >= 0) {
+        set_diag(diag, "atomic access to an object of this type is not supported");
+        return -1;
+    }
+    memset(&obj, 0, sizeof(obj));
+    memset(&addr, 0, sizeof(addr));
+    if (e->ident != NULL) {
+        obj.kind = CC_EXPR_IDENT;
+        obj.ident = e->ident;
+        obj.ctype = ct;
+        obj.line = e->line;
+        obj.col = e->col;
+    }
+    addr.kind = CC_EXPR_ADDR;
+    addr.lhs = e->ident != NULL ? &obj : e->lhs;
+    addr.ctype = cc_ct_pointer(ct);
+    addr.line = e->line;
+    addr.col = e->col;
+    p = lower_addr_expr(tu, sf, ctx, vars, var_count, depth, &addr, diag);
+    if (p < 0) {
+        return -1;
+    }
+    if (!e->compound_assign) {
+        int v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
+        int bits;
+
+        if (v < 0 || (v = cast_value(sf, v, want, diag)) < 0 || (v = normalize_float_ct(sf, v, ct, diag)) < 0 ||
+            (v = normalize_int_ct(sf, v, store_ctype(e, ct), diag)) < 0 ||
+            (bits = atomic_value_bits(sf, v, ct, size, diag)) < 0 ||
+            lower_atomic_store_bits(sf, p, size, bits, diag) < 0) {
+            return -1;
+        }
+        return v;
+    }
+    {
+        const cc_expr_t *bin = e->rhs;
+        const cc_expr_t *read;
+        lower_ctx_t c2;
+        int vval;
+        int old_bits;
+        int old;
+        int newv;
+        int new_bits;
+        int prev;
+        int eq;
+        int l_loop = cc_ir_new_label(sf);
+        int l_done = cc_ir_new_label(sf);
+
+        /* the operation under sema's conversion to x's type, and the reading of x under the operation's */
+        while (bin != NULL && bin->kind == CC_EXPR_CAST && bin->lhs != NULL) {
+            bin = bin->lhs;
+        }
+        if (bin == NULL || bin->kind != CC_EXPR_BIN || bin->lhs == NULL || bin->rhs == NULL || l_loop < 0 ||
+            l_done < 0) {
+            set_diag(diag, "malformed atomic compound assignment in lowering");
+            return -1;
+        }
+        read = bin->lhs;
+        while (read->kind == CC_EXPR_CAST && read->lhs != NULL) {
+            read = read->lhs;
+        }
+        vval = lower_expr(tu, sf, ctx, vars, var_count, depth, bin->rhs, diag);
+        old_bits = vval < 0 ? -1 : lower_atomic_load_bits(sf, p, size, diag);
+        if (old_bits < 0 || cc_ir_br(sf, l_loop) != 0 || cc_ir_label(sf, l_loop) != 0) {
+            return -1;
+        }
+        old = atomic_bits_value(sf, old_bits, ct, size, diag);
+        if (old < 0) {
+            return -1;
+        }
+        c2 = *ctx;
+        c2.subst_expr[0] = read;
+        c2.subst_value[0] = old;
+        c2.subst_expr[1] = bin->rhs;
+        c2.subst_value[1] = vval;
+        newv = lower_expr(tu, sf, &c2, vars, var_count, depth, e->rhs, diag);
+        if (newv < 0 || (newv = cast_value(sf, newv, want, diag)) < 0 ||
+            (newv = normalize_float_ct(sf, newv, ct, diag)) < 0 ||
+            (newv = normalize_int_ct(sf, newv, store_ctype(e, ct), diag)) < 0 ||
+            (new_bits = atomic_value_bits(sf, newv, ct, size, diag)) < 0 ||
+            (prev = lower_atomic_cas_bits(sf, p, size, old_bits, new_bits, diag)) < 0 ||
+            (eq = emit_cmp_instr(sf, CC_CMP_EQ, prev, old_bits, 1, diag)) < 0 || cc_ir_mov(sf, old_bits, prev) != 0 ||
+            cc_ir_br_cond(sf, eq, l_done, l_loop) != 0 || cc_ir_label(sf, l_done) != 0) {
+            return -1;
+        }
+        return e->atomic_postfix ? old : newv;
+    }
+}
+
 static int lower_assign_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int rhs;
 
+    if (e->atomic_access) {
+        return lower_atomic_assign(tu, sf, ctx, vars, var_count, depth, e, diag);
+    }
     lower_expr_instr_init(&in);
     cc_value_type_t want = lower_value_kind(e);
     rhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->rhs, diag);
@@ -7323,6 +7514,9 @@ int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const low
     if (e == NULL) {
         set_diag(diag, "null expression during AST->SSA lowering");
         return -1;
+    }
+    if (ctx != NULL && (e == ctx->subst_expr[0] || e == ctx->subst_expr[1])) {
+        return ctx->subst_value[e == ctx->subst_expr[0] ? 0 : 1];
     }
 
     lower_expr_instr_init(&in);

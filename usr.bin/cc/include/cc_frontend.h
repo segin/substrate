@@ -158,6 +158,16 @@ struct cc_expr {
      * list holds a value of the type.
      */
     unsigned char encoded_literal;
+    /** A CC_EXPR_ASSIGN the parser made of `x op= v`: rhs is `x op v`, its lhs a second reading of x. */
+    unsigned char compound_assign;
+    /**
+     * A CC_EXPR_ASSIGN to an _Atomic object, as sema marks it: one atomic
+     * store, or, for a compound one, a compare-exchange loop -- x read
+     * once, `x op v` made of what was read, v evaluated once.
+     */
+    unsigned char atomic_access;
+    /** With atomic_access: an `x++` or `x--` sema rewrote, whose value is x's before. */
+    unsigned char atomic_postfix;
     long long int_val;
     long long int_val_hi; /**< an array designator `[lo ... hi]`'s hi (int_val is lo); lo for `[index]` */
     double float_val;

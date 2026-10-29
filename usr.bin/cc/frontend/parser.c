@@ -8173,6 +8173,9 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->named_const_type = src->named_const_type;
     dst->excess_precision = src->excess_precision;
     dst->encoded_literal = src->encoded_literal;
+    dst->compound_assign = src->compound_assign;
+    dst->atomic_access = src->atomic_access;
+    dst->atomic_postfix = src->atomic_postfix;
     dst->float_val = src->float_val;
     dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
@@ -9334,6 +9337,7 @@ static cc_expr_t *parse_assign(parser_t *p) {
             e->lhs = lhs;
         }
         e->rhs = rhs;
+        e->compound_assign = aop != TOK_ASSIGN;
         return e;
     }
 

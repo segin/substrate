@@ -121,6 +121,21 @@ adds MMX,
 .Cm pentium3
 SSE.
 .Pp
+An object of
+.Vt _Atomic
+type of 1, 2, 4 or 8 bytes is stored in one access, sequentially
+consistently, and
+.Li ++ ,
+.Li --
+and compound assignment on it are one atomic read-modify-write, a
+compare-exchange loop; with the
+.Fl march
+that lacks the instruction, a call of
+.Fn __atomic_compare_exchange_ Ns Ar N ,
+.Fn __atomic_load_8
+or
+.Fn __atomic_store_8 .
+.Pp
 .Vt _Decimal32 ,
 .Vt _Decimal64
 and

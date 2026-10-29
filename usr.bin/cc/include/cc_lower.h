@@ -82,6 +82,13 @@ typedef struct {
     size_t hoisted_alloc_count;
     size_t hoisted_alloc_cap;
     lower_jump_scopes_t *jumps; /**< the enclosing loops and switches (mutable through a const context) */
+    /**
+     * Expressions lowering gives a value already made instead of lowering
+     * them: an atomic compound assignment's second reading of its object
+     * (what the compare-exchange loop read) and its v (evaluated once).
+     */
+    const cc_expr_t *subst_expr[2];
+    int subst_value[2];
 } lower_ctx_t;
 
 enum {
@@ -527,5 +534,32 @@ int param_record_id(const cc_param_t *p);
  */
 int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                     var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag);
+
+/**
+ * Load the @p size bytes (1, 2, 4 or 8) at @p p in one access, as an
+ * unsigned integer: an 8-byte one on i386 through the x87, or
+ * __atomic_load_8 before the Pentium.
+ *
+ * @return the value, or -1
+ */
+int lower_atomic_load_bits(cc_ssa_function_t *sf, int p, long size, cc_diag_t *diag);
+
+/**
+ * Store integer @p v in the @p size bytes at @p p in one access, sequentially
+ * consistently: xchg, or for 8 bytes on i386 the x87 and a barrier, or
+ * __atomic_store_8 before the Pentium.
+ *
+ * @return @p v, or -1
+ */
+int lower_atomic_store_bits(cc_ssa_function_t *sf, int p, long size, int v, cc_diag_t *diag);
+
+/**
+ * Compare the @p size bytes at @p p with @p expect and, if equal, replace
+ * them with @p desired, atomically: lock cmpxchg (cmpxchg8b), or
+ * __atomic_compare_exchange_N where the -march has neither.
+ *
+ * @return what the bytes held, unsigned, or -1
+ */
+int lower_atomic_cas_bits(cc_ssa_function_t *sf, int p, long size, int expect, int desired, cc_diag_t *diag);
 
 #endif

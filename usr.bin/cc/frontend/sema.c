@@ -4940,8 +4940,57 @@ static int sema_check_assign(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         }
         return -1;
     }
+    /* to an _Atomic object: one atomic access, which lowering makes (C11 6.5.16p3, 6.5.16.2p3) */
+    e->atomic_access = (dst->quals & CC_CQ_ATOMIC) != 0;
     sema_set_type(e, dst->unqual);
     return 0;
+}
+
+/**
+ * `++x`, `x--` and the like on an _Atomic object, rewritten in place as the
+ * compound assignment they are, `x += 1` or `x -= 1` (C11 6.5.2.4p2), one
+ * atomic read-modify-write; a postfix one is marked to have x's value
+ * before.  The second reading of a dereference or member target is a copy
+ * of it, as a compound assignment's is.  Then checked again.
+ *
+ * @return 0, or -1 with @p diag set
+ */
+static int sema_atomic_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
+                              int depth, cc_diag_t *diag) {
+    cc_expr_t *read;
+    cc_expr_t *bin = (cc_expr_t *)calloc(1, sizeof(*bin));
+    cc_expr_t *one = sema_int_node(1, e->line, e->col);
+
+    if (e->ident != NULL) {
+        read = (cc_expr_t *)calloc(1, sizeof(*read));
+        if (read != NULL) {
+            read->kind = CC_EXPR_IDENT;
+            read->ident = cc_strdup(e->ident);
+            read->line = e->line;
+            read->col = e->col;
+        }
+    } else {
+        read = cc_expr_clone(e->lhs);
+    }
+    if (bin == NULL || one == NULL || read == NULL || (e->ident != NULL && read->ident == NULL)) {
+        free(bin);
+        cc_expr_free(one);
+        cc_expr_free(read);
+        sema_diag(diag, "out of memory");
+        return -1;
+    }
+    bin->kind = CC_EXPR_BIN;
+    bin->op = e->op;
+    bin->line = e->line;
+    bin->col = e->col;
+    bin->lhs = read;
+    bin->rhs = one;
+    e->kind = CC_EXPR_ASSIGN;
+    e->rhs = bin;
+    e->compound_assign = 1;
+    e->atomic_postfix = e->update_postfix != 0;
+    e->update_postfix = 0;
+    return check_expr(tu, e, vars, var_count, depth, diag);
 }
 
 /**
@@ -4988,6 +5037,9 @@ static int sema_check_update(const cc_translation_unit_t *tu, cc_expr_t *e, var_
     if (sema_const_object(storage, obj, e->ident != NULL ? NULL : e->lhs)) {
         sema_diag(diag, "cannot modify const-qualified object with ++/--");
         return -1;
+    }
+    if ((obj->quals & CC_CQ_ATOMIC) != 0) {
+        return sema_atomic_update(tu, e, vars, var_count, depth, diag);
     }
     if (sema_is_ptr(t)) {
         if (sema_void_ptr_arith(t, e, diag) != 0) {
