@@ -132,7 +132,8 @@ typedef enum {
                        bytes of scratch memory) */
     XI_FSTP,      /**< x87: pop to memory o0 -- 4 bytes fstps, 8 fstpl, 10 or 16 fstpt */
     XI_FSTP0,     /**< x87: pop, the value thrown away */
-    XI_FARITH,    /**< x87: st(1) op= st(0) and pop, cc the op: 0 add, 1 sub, 2 mul, 3 div */
+    XI_FARITH,    /**< x87: st(1) op= st(0) and pop, cc the op: 0 add, 1 sub, 2 mul, 3 div; with cc's bit 2 the
+                       operands the other way round, st(1) = st(0) op st(1) */
     XI_FUCOMPP,   /**< x87: flags from st(0) against st(1), both popped (fucompp; fnstsw %ax; sahf; %ax clobbered) */
     XI_FTOI,      /**< x87: pop, truncated, as a 64-bit integer to memory o0 -- unsigned when cc, through
                        o1, 16 bytes of scratch memory for the control word (%ax clobbered) */
@@ -150,6 +151,9 @@ typedef enum {
                        register holding an index below ntargets -- a switch's cases.  It does not fall through.  With
                        cc, x86-64 code that may be position-independent: the table's entries are offsets from it,
                        added to its address made off %rip in %r11 (clobbered), as gcc's -fPIE tables are. */
+    XI_FLDST,     /**< x87: push a copy of st(cc) (fld %st(cc)) */
+    XI_FXCH,      /**< x87: exchange st(0) and st(cc) */
+    XI_FST,       /**< x87: st(0) to memory o0 without popping -- 4 bytes fsts, 8 fstl */
     XI_COUNT
 } xi_op_t;
 
@@ -334,6 +338,21 @@ int x86_mir_allocate(xfunc_t *xf, const xtarget_t *t);
 
 typedef struct xsel xsel_t;
 
+/**
+ * One x87 stack register as the selector follows it (mir_fp.c's stack cache): which IR value it holds and how.
+ * The value it stands for is its contents rounded to r bytes' precision (r 0: as they are).
+ */
+typedef struct {
+    int v;               /**< the IR value, XFQ_DEAD when it holds none any more, or XFQ_RAW: an operand in flight */
+    unsigned char dirty; /**< the value's home in the frame is not written yet */
+    unsigned char e;     /**< the contents are exact in e bytes: 4, 8 or 10 */
+    unsigned char r;     /**< 0, or the precision, 4 or 8 bytes, they still want rounding to */
+} xfq_t;
+
+#define XFQ_DEAD (-1)
+#define XFQ_RAW (-2)
+#define XFQ_DEPTH 8 /**< the x87 stack's registers */
+
 /** What one target's selection does its own way (mir_i386.c, mir_x86_64.c). */
 typedef struct {
     int word;               /**< the word's bytes: 4 or 8 */
@@ -422,6 +441,11 @@ struct xsel {
     int *fhome;               /**< per IR value: an x87 floating value's frame object, made the first time; else -1 */
     int fscratch;             /**< a 16-byte frame object for moving floating values through memory, or -1 */
     int fcw;                  /**< and one for the x87 control word and constants, or -1 */
+    xfq_t fq[XFQ_DEPTH];      /**< the x87 stack between IR instructions of a block, fq[0] st(0) (mir_fp.c) */
+    int fqn;                  /**< how many registers of it are in use */
+    int fq_any;               /**< the function has x87 floating values: the stack is followed */
+    int *fq_left;             /**< per IR value: the reads of it left in the current block */
+    unsigned char *fq_global; /**< per IR value: read in some block before it is written there, from its home */
     unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
     unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
     unsigned char *dbits;     /**< per IR value: the most low bits anything reads of it (compute_demand()) */
@@ -514,6 +538,12 @@ void xs_fp_from_mem(xsel_t *s, int v, xop_t m, int bytes);
 void xs_fp_to_mem(xsel_t *s, int v, xop_t m, int bytes);
 /** Select IR instruction @p j if it is a floating operation: 1 when it was (or gave up), 0 when it is not one. */
 int xs_fp_select(xsel_t *s, size_t j);
+/** Set up the x87 stack cache for the function: which values a block reads from their homes; 0, or -1 */
+int xs_fp_init(xsel_t *s);
+/** Free what xs_fp_init() made. */
+void xs_fp_free(xsel_t *s);
+/** Before IR instruction @p j is selected: the x87 stack emptied where it must be, the block's reads counted. */
+void xs_fp_begin(xsel_t *s, size_t j);
 
 /* mir_i386.c, mir_x86_64.c: the targets */
 

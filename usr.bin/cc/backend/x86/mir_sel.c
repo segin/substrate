@@ -2883,6 +2883,8 @@ static void sel_instr(xsel_t *s, size_t j) {
     long long k;
     const char *sym;
 
+    /* the x87 stack emptied before what does not keep it, the block's reads counted */
+    xs_fp_begin(s, j);
     if (j < s->skip_to) {
         return;
     }
@@ -3441,6 +3443,9 @@ static int sel_init(xsel_t *s) {
             s->frame_val[in->dst] = s->obj[in->lhs];
         }
     }
+    if (xs_fp_init(s) != 0) {
+        return -1;
+    }
     rc = s->t->begin(s);
     if (rc != 0) {
         return rc;
@@ -3469,6 +3474,7 @@ static int sel_init(xsel_t *s) {
 }
 
 static void sel_free(xsel_t *s) {
+    xs_fp_free(s);
     free(s->jt);
     free(s->label_refs);
     free(s->label_at);

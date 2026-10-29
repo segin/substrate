@@ -661,11 +661,21 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
         return;
     case XI_FARITH: {
         static const char *const x87[4] = {"faddp", "fsubrp", "fmulp", "fdivrp"};
+        static const char *const rev[4] = {"faddp", "fsubp", "fmulp", "fdivp"};
 
-        /* as gas spells them: lhs in st(1), rhs in st(0), st(1) op st(0) left */
-        fprintf(fp, "\t%s %%st, %%st(1)\n", x87[in->cc & 3]);
+        /* as gas spells them: lhs in st(1), rhs in st(0), st(1) op st(0) left -- or the other way round */
+        fprintf(fp, "\t%s %%st, %%st(1)\n", (in->cc & 4 ? rev : x87)[in->cc & 3]);
         return;
     }
+    case XI_FLDST:
+        fprintf(fp, "\tfld %%st(%d)\n", in->cc);
+        return;
+    case XI_FXCH:
+        fprintf(fp, "\tfxch %%st(%d)\n", in->cc);
+        return;
+    case XI_FST:
+        fprintf(fp, "\t%s ", in->o[0].size == 4 ? "fsts" : "fstl");
+        break;
     case XI_FUCOMPP:
         /* (no fucomip below the Pentium Pro: the status word's C0, C2 and C3 into CF, PF and ZF) */
         fputs("\tfucompp\n\tfnstsw %ax\n\tsahf\n", fp);
