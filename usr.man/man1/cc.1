@@ -135,6 +135,20 @@ that lacks the instruction, a call of
 .Fn __atomic_load_8
 or
 .Fn __atomic_store_8 .
+gcc's
+.In stdatomic.h
+works as it is: its generic
+.Fn __atomic_load ,
+.Fn __atomic_store ,
+.Fn __atomic_exchange ,
+.Fn __atomic_compare_exchange ,
+.Fn __atomic_test_and_set
+and
+.Fn __atomic_clear ,
+and the
+.Dv __GCC_ATOMIC_*_LOCK_FREE
+values gcc gives each
+.Fl march .
 .Pp
 .Vt _Decimal32 ,
 .Vt _Decimal64

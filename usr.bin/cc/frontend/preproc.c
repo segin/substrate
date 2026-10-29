@@ -105,6 +105,7 @@ typedef struct {
     int target_has_mmx;
     int target_has_avx;
     int target_has_avx2;
+    int target_isa_level; /**< i386 -march: 3 (the 386) .. 7; 7 for x86-64 */
     int target_supports_sse;
     int target_supports_sse2;
     int target_supports_mmx;
@@ -2105,12 +2106,69 @@ static int add_builtin_macros(pp_state_t *st) {
             }
         }
     }
+    {
+        /*
+         * The character types <uchar.h> and <stdatomic.h> name, and which
+         * atomic objects are lock-free, as gcc says: 2, always, where the
+         * CPU has the instruction (cmpxchg from the 486, cmpxchg8b for 8
+         * bytes from the Pentium), else 1, sometimes.
+         */
+        static const char *const word_kinds[] = {"BOOL", "CHAR", "CHAR16_T", "CHAR32_T", "WCHAR_T",
+                                                 "SHORT", "INT", "LONG", "POINTER", "CHAR8_T"};
+        int wide = st->target->pointer_size == 8;
+        const char *word = wide || st->target_isa_level >= 4 ? "2" : "1";
+        const char *dword = wide || st->target_isa_level >= 5 ? "2" : "1";
+        char name[64];
+        size_t k;
+
+        if (macro_set(&st->macros, "__CHAR16_TYPE__", 0, 0, NULL, 0, "short unsigned int") != 0 ||
+            macro_set(&st->macros, "__CHAR32_TYPE__", 0, 0, NULL, 0, "unsigned int") != 0 ||
+            (st->std_is_c23 && macro_set(&st->macros, "__CHAR8_TYPE__", 0, 0, NULL, 0, "unsigned char") != 0)) {
+            return -1;
+        }
+        for (k = 0; k < sizeof(word_kinds) / sizeof(word_kinds[0]); ++k) {
+            if (strcmp(word_kinds[k], "CHAR8_T") == 0 && !st->std_is_c23) {
+                continue;
+            }
+            snprintf(name, sizeof(name), "__GCC_ATOMIC_%s_LOCK_FREE", word_kinds[k]);
+            if (macro_set(&st->macros, name, 0, 0, NULL, 0, word) != 0) {
+                return -1;
+            }
+        }
+        if (macro_set(&st->macros, "__GCC_ATOMIC_LLONG_LOCK_FREE", 0, 0, NULL, 0, dword) != 0) {
+            return -1;
+        }
+    }
     if (st->std_is_gnu) {
         if (macro_set(&st->macros, "__BLOCKS__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
         }
     }
     return 0;
+}
+
+/** The i386 ISA level -march=@p name names, 3 (the 386) to 7, as the driver has it; 0 for one not known. */
+static int pp_arch_level(const char *name) {
+    static const char *const by_level[][4] = {
+        {"i386", NULL},
+        {"i486", NULL},
+        {"i586", "pentium", "pentium-mmx", NULL},
+        {"i686", "pentiumpro", "pentium2", "pentium3"},
+    };
+    size_t l;
+    size_t k;
+
+    for (l = 0; l < sizeof(by_level) / sizeof(by_level[0]); ++l) {
+        for (k = 0; k < 4 && by_level[l][k] != NULL; ++k) {
+            if (strcmp(name, by_level[l][k]) == 0) {
+                return (int)l + 3;
+            }
+        }
+    }
+    return strcmp(name, "pentium4") == 0 || strcmp(name, "prescott") == 0 || strcmp(name, "nocona") == 0 ||
+                   strcmp(name, "core2") == 0 || strncmp(name, "x86-64", 6) == 0
+               ? 7
+               : 0;
 }
 
 static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t flag_count) {
@@ -2129,6 +2187,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     st->target_supports_avx = 1;
     st->target_supports_avx2 = 1;
 
+    st->target_isa_level = st->target->id == CC_TARGET_I386 ? 6 : 7;
     if (st->target->id == CC_TARGET_I386) {
         /* an i686, as -m32 has it: no MMX, no SSE */
         st->target_has_sse = 0;
@@ -2160,6 +2219,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         if (strcmp(f, "-m32") == 0) {
             st->target = cc_target_get(CC_TARGET_I386);
             if (!arch_explicit) {
+                st->target_isa_level = 6;
                 /* an i686, as the driver has it: no MMX, no SSE */
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
@@ -2175,6 +2235,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         } else if (strcmp(f, "-m64") == 0) {
             st->target = cc_target_get(CC_TARGET_X86_64);
             if (!arch_explicit) {
+                st->target_isa_level = 7;
                 /* the x86-64 baseline; an explicit -march keeps its own */
                 st->target_has_sse = 1;
                 st->target_has_sse2 = 1;
@@ -2190,6 +2251,9 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
         } else if ((strcmp(f, "-march") == 0 || strcmp(f, "-mcpu") == 0) && i + 1 < flag_count) {
             const char *name = flags[++i];
             arch_explicit = 1;
+            if (pp_arch_level(name) > 0) {
+                st->target_isa_level = pp_arch_level(name);
+            }
             if (strcmp(name, "i386") == 0 || strcmp(name, "i486") == 0) {
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;

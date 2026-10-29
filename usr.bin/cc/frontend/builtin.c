@@ -115,7 +115,7 @@ int cc_builtin_is_recognized(const char *name) {
     if (name == NULL || name[0] == '\0') {
         return(0);
     }
-    if (cc_builtin_library_function(name) != NULL) {
+    if (cc_builtin_library_function(name) != NULL || cc_builtin_atomic_generic(name) != CC_AGEN_NONE) {
         return(1);
     }
     for (i = 0; i < sizeof(g_known_builtins) / sizeof(g_known_builtins[0]); ++i) {
@@ -179,6 +179,37 @@ int cc_builtin_atomic_rmw(const char *name, cc_rmw_builtin_t *out) {
         }
     }
     return(0);
+}
+
+/**
+ * Which of gcc's generic atomic builtins @p name is, if any.
+ *
+ * @param name  the called name
+ * @return      the builtin, or CC_AGEN_NONE
+ */
+cc_atomic_generic_t cc_builtin_atomic_generic(const char *name) {
+    static const struct {
+        const char *name;
+        cc_atomic_generic_t which;
+    } gen[] = {
+        {"__atomic_load", CC_AGEN_LOAD},
+        {"__atomic_store", CC_AGEN_STORE},
+        {"__atomic_exchange", CC_AGEN_EXCHANGE},
+        {"__atomic_compare_exchange", CC_AGEN_CAS},
+        {"__atomic_compare_exchange_n", CC_AGEN_CAS_N},
+        {"__atomic_test_and_set", CC_AGEN_TEST_AND_SET},
+        {"__atomic_clear", CC_AGEN_CLEAR},
+        {"__atomic_is_lock_free", CC_AGEN_IS_LOCK_FREE},
+        {"__atomic_always_lock_free", CC_AGEN_ALWAYS_LOCK_FREE},
+    };
+    size_t i;
+
+    for (i = 0; name != NULL && i < sizeof(gen) / sizeof(gen[0]); ++i) {
+        if (strcmp(gen[i].name, name) == 0) {
+            return(gen[i].which);
+        }
+    }
+    return(CC_AGEN_NONE);
 }
 
 int cc_builtin_bswap_bits(const char *name) {

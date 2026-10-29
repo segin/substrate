@@ -3031,6 +3031,164 @@ static int callee_binds_locally(const cc_translation_unit_t *tu, const char *nam
  * @param diag       receives an error
  * @return           the value, or -1 on error
  */
+/**
+ * Lower one of gcc's generic atomic builtins (cc_builtin_atomic_generic()), whose values travel through
+ * pointers: each is lower_atomic_load_bits(), lower_atomic_store_bits() or lower_atomic_cas_bits() on the object,
+ * with plain accesses of the values pointed to.  Every one is sequentially consistent, which no memory order asks
+ * more than; a compare-exchange is never weak.  __atomic_test_and_set is xchg of the byte, and the lock-free
+ * queries are constants: an object of 1, 2 or 4 bytes is from the 486 on, of 8 on i386 from the Pentium on.
+ *
+ * @return the builtin's value, or -1
+ */
+static int lower_atomic_generic(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e,
+                                cc_diag_t *diag) {
+    cc_atomic_generic_t ag = cc_builtin_atomic_generic(e->ident);
+    int v[6];
+    long size;
+    size_t i;
+
+    if (ag == CC_AGEN_IS_LOCK_FREE || ag == CC_AGEN_ALWAYS_LOCK_FREE) {
+        long long n;
+        int always;
+
+        if (eval_const_i64_expr(tu, e->args[0], &n) != 0) {
+            set_diag(diag, "an atomic lock-free query needs a constant size");
+            return -1;
+        }
+        /* as the __GCC_ATOMIC_*_LOCK_FREE macros say: cmpxchg from the 486, cmpxchg8b from the Pentium */
+        always = ((n == 1 || n == 2 || n == 4) && atomic_isa_level() >= 4) ||
+                 (n == 8 && (cc_target_pointer_size() == 8 || atomic_isa_level() >= 5));
+        if (always || ag == CC_AGEN_ALWAYS_LOCK_FREE) {
+            return cc_ir_const(sf, always);
+        }
+        {
+            /* not always: libatomic's __atomic_is_lock_free (size, p) says for the CPU it runs on, as gcc asks */
+            cc_ssa_instr_t in;
+            int args[2];
+
+            args[0] = cc_ir_const(sf, n);
+            args[1] = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
+            if (args[0] < 0 || args[1] < 0 || (args[1] = cast_value(sf, args[1], CC_VAL_I64, diag)) < 0) {
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_CALL;
+            in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+            in.lhs = -1;
+            in.rhs = -1;
+            in.imm = 4;
+            in.is_unsigned = 1;
+            in.arg_count = 2;
+            in.args = (int *)calloc(2, sizeof(*in.args));
+            in.sym = cc_strdup("__atomic_is_lock_free");
+            if (in.dst < 0 || in.args == NULL || in.sym == NULL) {
+                free(in.args);
+                free(in.sym);
+                set_diag(diag, "out of memory emitting an atomic operation");
+                return -1;
+            }
+            in.args[0] = args[0];
+            in.args[1] = args[1];
+            if (cc_ir_push(sf, in) != 0) {
+                free(in.args);
+                free(in.sym);
+                set_diag(diag, "out of memory emitting an atomic operation");
+                return -1;
+            }
+            /* a bool: its low byte */
+            return atomic_fit(sf, in.dst, 1, 1, diag);
+        }
+    }
+    for (i = 0; i < e->arg_count && i < 6; ++i) {
+        v[i] = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
+        if (v[i] < 0 || (v[i] = cast_value(sf, v[i], CC_VAL_I64, diag)) < 0) {
+            return -1;
+        }
+    }
+    size = ag == CC_AGEN_TEST_AND_SET || ag == CC_AGEN_CLEAR ? 1 : lower_pointee_size(tu, e->args[0]);
+    if (size != 1 && size != 2 && size != 4 && size != 8) {
+        set_diag(diag, "atomic builtin on an object of unsupported size");
+        return -1;
+    }
+    switch (ag) {
+    case CC_AGEN_LOAD: {
+        int bits = lower_atomic_load_bits(sf, v[0], size, diag);
+
+        return bits < 0 || emit_plain_access(sf, v[1], size, bits, diag) < 0 ? -1 : cc_ir_const(sf, 0);
+    }
+    case CC_AGEN_STORE: {
+        int bits = emit_plain_access(sf, v[1], size, -1, diag);
+
+        return bits < 0 || lower_atomic_store_bits(sf, v[0], size, bits, diag) < 0 ? -1 : cc_ir_const(sf, 0);
+    }
+    case CC_AGEN_EXCHANGE: {
+        /* old = *p; while ((prev = cas(p, old, new)) != old) old = prev; *ret = old */
+        int newv = emit_plain_access(sf, v[1], size, -1, diag);
+        int old = newv < 0 ? -1 : lower_atomic_load_bits(sf, v[0], size, diag);
+        int l_loop = cc_ir_new_label(sf);
+        int l_done = cc_ir_new_label(sf);
+        int prev;
+        int eq;
+
+        if (old < 0 || l_loop < 0 || l_done < 0 || cc_ir_br(sf, l_loop) != 0 || cc_ir_label(sf, l_loop) != 0 ||
+            (prev = lower_atomic_cas_bits(sf, v[0], size, old, newv, diag)) < 0 ||
+            (eq = emit_cmp_instr(sf, CC_CMP_EQ, prev, old, 1, diag)) < 0 || cc_ir_mov(sf, old, prev) != 0 ||
+            cc_ir_br_cond(sf, eq, l_done, l_loop) != 0 || cc_ir_label(sf, l_done) != 0 ||
+            emit_plain_access(sf, v[2], size, old, diag) < 0) {
+            return -1;
+        }
+        return cc_ir_const(sf, 0);
+    }
+    case CC_AGEN_CAS:
+    case CC_AGEN_CAS_N: {
+        /* what the object held: if not what was expected, the expected value becomes it */
+        int expect = emit_plain_access(sf, v[1], size, -1, diag);
+        int desired = ag == CC_AGEN_CAS ? emit_plain_access(sf, v[2], size, -1, diag) : v[2];
+        int l_fail = cc_ir_new_label(sf);
+        int l_done = cc_ir_new_label(sf);
+        int prev;
+        int eq;
+
+        if (expect < 0 || desired < 0 || l_fail < 0 || l_done < 0 ||
+            (prev = lower_atomic_cas_bits(sf, v[0], size, expect, desired, diag)) < 0 ||
+            (eq = emit_cmp_instr(sf, CC_CMP_EQ, prev, expect, 1, diag)) < 0 ||
+            cc_ir_br_cond(sf, eq, l_done, l_fail) != 0 || cc_ir_label(sf, l_fail) != 0 ||
+            emit_plain_access(sf, v[1], size, prev, diag) < 0 || cc_ir_br(sf, l_done) != 0 ||
+            cc_ir_label(sf, l_done) != 0) {
+            return -1;
+        }
+        return eq;
+    }
+    case CC_AGEN_TEST_AND_SET: {
+        atomic_asm_in_t ins[2];
+        int old;
+        int zero = cc_ir_const(sf, 0);
+
+        ins[0].value = cc_ir_const(sf, 1);
+        ins[0].constraint = "0";
+        ins[0].size = 1;
+        ins[1].value = CC_SSA_ASM_MEM_INDIRECT_ENCODE(v[0]);
+        ins[1].constraint = "m";
+        ins[1].size = 1;
+        if (ins[0].value < 0 || zero < 0) {
+            return -1;
+        }
+        old = emit_atomic_asm(sf, "xchg %0, %2", "=q", 1, ins, 2, diag);
+        old = old < 0 ? -1 : atomic_fit(sf, old, 1, 1, diag);
+        return old < 0 ? -1 : emit_cmp_instr(sf, CC_CMP_NE, old, zero, 1, diag);
+    }
+    case CC_AGEN_CLEAR: {
+        int zero = cc_ir_const(sf, 0);
+
+        return zero < 0 || lower_atomic_store_bits(sf, v[0], 1, zero, diag) < 0 ? -1 : cc_ir_const(sf, 0);
+    }
+    default:
+        set_diag(diag, "unknown atomic builtin");
+        return -1;
+    }
+}
+
 int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                            var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
     cc_ssa_instr_t in;
@@ -3048,6 +3206,9 @@ int lower_call_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cons
         callee = find_fn(tu, e->ident);
         ident_var_idx = var_find_visible(vars, var_count, e->ident, depth);
         ident_global = find_global(tu, e->ident);
+        if (callee == NULL && ident_var_idx < 0 && cc_builtin_atomic_generic(e->ident) != CC_AGEN_NONE) {
+            return lower_atomic_generic(tu, sf, ctx, vars, var_count, depth, e, diag);
+        }
     }
     {
         int bv = lower_builtin_call(tu, sf, ctx, vars, var_count, depth, e, bk, bswap_bits, &in, diag);

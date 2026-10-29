@@ -515,6 +515,22 @@ typedef struct {
 } cc_rmw_builtin_t;
 
 int cc_builtin_atomic_rmw(const char *name, cc_rmw_builtin_t *out);
+
+/** gcc's generic atomic builtins, which <stdatomic.h> is written in: the value through a pointer. */
+typedef enum {
+    CC_AGEN_NONE = 0,
+    CC_AGEN_LOAD,             /**< __atomic_load (p, ret, mo) */
+    CC_AGEN_STORE,            /**< __atomic_store (p, val, mo) */
+    CC_AGEN_EXCHANGE,         /**< __atomic_exchange (p, val, ret, mo) */
+    CC_AGEN_CAS,              /**< __atomic_compare_exchange (p, expected, desired, weak, so, fo) */
+    CC_AGEN_CAS_N,            /**< __atomic_compare_exchange_n (p, expected, desired value, weak, so, fo) */
+    CC_AGEN_TEST_AND_SET,     /**< __atomic_test_and_set (p, mo): the byte at p set, whether it was */
+    CC_AGEN_CLEAR,            /**< __atomic_clear (p, mo) */
+    CC_AGEN_IS_LOCK_FREE,     /**< __atomic_is_lock_free (size, p) */
+    CC_AGEN_ALWAYS_LOCK_FREE  /**< __atomic_always_lock_free (size, p) */
+} cc_atomic_generic_t;
+
+cc_atomic_generic_t cc_builtin_atomic_generic(const char *name);
 int cc_preprocess_file(const char *in_path, const char *out_path, const char *std_mode,
                        const char *const *flags, size_t flag_count, cc_diag_t *diag);
 

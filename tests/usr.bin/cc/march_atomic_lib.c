@@ -24,6 +24,10 @@
     SYNC2(nand_and_fetch, N, T)                                                                                   \
     SYNC2(lock_test_and_set, N, T)                                                                                \
     ATOMIC3(fetch_add, N, T)                                                                                      \
+    ATOMIC3(fetch_sub, N, T)                                                                                      \
+    ATOMIC3(fetch_and, N, T)                                                                                      \
+    ATOMIC3(fetch_or, N, T)                                                                                       \
+    ATOMIC3(fetch_xor, N, T)                                                                                      \
     ATOMIC3(sub_fetch, N, T)                                                                                      \
     ATOMIC3(fetch_nand, N, T)                                                                                     \
     T atomic_exchange_##N(volatile T *p, T v, int mo) __asm__("__atomic_exchange_" #N);                           \
@@ -48,6 +52,13 @@ ALL(1, unsigned char)
 ALL(2, unsigned short)
 ALL(4, unsigned int)
 ALL(8, unsigned long long)
+
+/* whether an object is lock-free where the -march cannot say: on the i686 this runs on, it is */
+_Bool atomic_is_lock_free_rt(unsigned long size, const volatile void *p) __asm__("__atomic_is_lock_free");
+_Bool atomic_is_lock_free_rt(unsigned long size, const volatile void *p) {
+    (void)p;
+    return size == 1 || size == 2 || size == 4 || size == 8;
+}
 
 /* before the Pentium an 8-byte load or store is a call too */
 unsigned long long atomic_load_8(volatile unsigned long long *p, int mo) __asm__("__atomic_load_8");

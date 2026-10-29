@@ -1176,6 +1176,44 @@ static int sema_check_builtin_call(const cc_translation_unit_t *tu, cc_expr_t *e
         sema_set_type(e, cc_ct_basic(CC_CT_VOID));
         return 0;
     }
+    if (e->ident != NULL && callee == NULL && cc_builtin_atomic_generic(e->ident) != CC_AGEN_NONE) {
+        /* gcc's generic atomic builtins: the object, then values through pointers, then memory orders */
+        static const size_t argc[] = {
+            [CC_AGEN_LOAD] = 3, [CC_AGEN_STORE] = 3,        [CC_AGEN_EXCHANGE] = 4,     [CC_AGEN_CAS] = 6,
+            [CC_AGEN_CAS_N] = 6, [CC_AGEN_TEST_AND_SET] = 2, [CC_AGEN_CLEAR] = 2,       [CC_AGEN_IS_LOCK_FREE] = 2,
+            [CC_AGEN_ALWAYS_LOCK_FREE] = 2,
+        };
+        cc_atomic_generic_t ag = cc_builtin_atomic_generic(e->ident);
+        int lock_free = ag == CC_AGEN_IS_LOCK_FREE || ag == CC_AGEN_ALWAYS_LOCK_FREE;
+        char msg[160];
+
+        if (e->arg_count != argc[ag]) {
+            snprintf(msg, sizeof(msg), "%s expects %zu arguments", e->ident, argc[ag]);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        for (i = 0; i < e->arg_count; ++i) {
+            if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+        }
+        if (!lock_free && !sx_is_ptr(e->args[0])) {
+            snprintf(msg, sizeof(msg), "%s first argument must be a pointer", e->ident);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        if ((ag == CC_AGEN_LOAD || ag == CC_AGEN_STORE || ag == CC_AGEN_EXCHANGE || ag == CC_AGEN_CAS ||
+             ag == CC_AGEN_CAS_N) &&
+            !sx_is_ptr(e->args[1])) {
+            snprintf(msg, sizeof(msg), "%s second argument must be a pointer", e->ident);
+            sema_diag(diag, msg);
+            return -1;
+        }
+        sema_set_type(e, ag == CC_AGEN_CAS || ag == CC_AGEN_CAS_N || ag == CC_AGEN_TEST_AND_SET || lock_free
+                             ? cc_ct_basic(CC_CT_BOOL)
+                             : cc_ct_basic(CC_CT_VOID));
+        return 0;
+    }
     if (bk == BUILTIN_ATOMIC_RMW) {
         cc_rmw_builtin_t rmw;
         size_t expect_argc;

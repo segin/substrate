@@ -2507,7 +2507,8 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         return -1;
                     }
                 } else {
-                    cc_expr_t *te = parse_cond(p);
+                    /* an expression, a comma one included (C23 6.7.2.5) */
+                    cc_expr_t *te = parse_expr(p);
                     if (te == NULL) {
                         return -1;
                     }
@@ -3586,11 +3587,11 @@ static int parse_declspec(parser_t *p, const cc_ctype_t **out, int allow_void, c
         return -1;
     }
     if (acc.seen_atomic && (acc.spec->quals & CC_CQ_ATOMIC) == 0) {
-        cc_ctype_kind_t k = acc.spec->unqual->kind;
-        if (k == CC_CT_RECORD || k == CC_CT_COMPLEX) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "_Atomic of aggregate type is not yet supported");
-            return -1;
-        }
+        /*
+         * an _Atomic structure or complex type is a type like any other --
+         * <stdatomic.h>'s atomic_flag is one, used through the builtins --
+         * though assigning one is not supported (lower_atomic_assign())
+         */
         acc.spec = cc_ct_qualified(acc.spec, CC_CQ_ATOMIC);
     }
     /* const and volatile among the specifiers qualify the type they give (C11 6.7.3), as an address space does */
