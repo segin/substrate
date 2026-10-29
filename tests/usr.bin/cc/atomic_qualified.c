@@ -26,6 +26,23 @@ static int cells[4];
 static int *_Atomic cursor = cells;
 static struct counters k;
 
+static _Atomic long long flip;
+static _Atomic double fflip = 1.0;
+static volatile int flipping;
+
+/* plain assignments of all-zero and all-one values, by turns */
+static void *flipper(void *arg) {
+    int i;
+
+    (void)arg;
+    for (i = 0; i < 20 * ROUNDS; ++i) {
+        flip = (i & 1) ? -1LL : 0;
+        fflip = (i & 1) ? -1.0 : 1.0;
+    }
+    flipping = 0;
+    return NULL;
+}
+
 static void *work(void *arg) {
     _Atomic int *pn = &n;
     struct counters *pk = &k;
@@ -99,5 +116,20 @@ int main(void) {
     pthread_join(t, NULL);
     printf("n %d w %lld c %d d %g u %x k %d %lld cursor %d\n", (int)n, (long long)w, (int)c, (double)d, (unsigned)u,
            (int)k.i, (long long)k.ll, (int)(cursor - cells));
+
+    /* a plain read of an _Atomic object sees one value whole, never halves of two */
+    flipping = 1;
+    if (pthread_create(&t, NULL, flipper, NULL) != 0) {
+        return 2;
+    }
+    a = 0;
+    while (flipping) {
+        long long v = flip;
+        double f = fflip;
+
+        a += (v != 0 && v != -1) + (f != 1.0 && f != -1.0);
+    }
+    pthread_join(t, NULL);
+    printf("torn %d\n", a);
     return 0;
 }

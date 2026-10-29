@@ -6343,6 +6343,35 @@ static int atomic_bits_value(cc_ssa_function_t *sf, int bits, const cc_ctype_t *
 }
 
 /**
+ * Read _Atomic object @p e (a name, `*p` or a member) in one access, lower_atomic_load_bits()'s: for one wider
+ * than a word, which a plain load reads in two.
+ *
+ * @return the value, or -1
+ */
+static int lower_atomic_read(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    const cc_ctype_t *ct = e->ctype->unqual;
+    long size = cc_ct_size(ct, tu);
+    cc_expr_t addr;
+    int p;
+    int bits;
+
+    if (size != 8 || ct->kind == CC_CT_COMPLEX) {
+        set_diag(diag, "atomic access to an object of this type is not supported");
+        return -1;
+    }
+    memset(&addr, 0, sizeof(addr));
+    addr.kind = CC_EXPR_ADDR;
+    addr.lhs = (cc_expr_t *)e;
+    addr.ctype = cc_ct_pointer(e->ctype);
+    addr.line = e->line;
+    addr.col = e->col;
+    p = lower_addr_expr(tu, sf, ctx, vars, var_count, depth, &addr, diag);
+    bits = p < 0 ? -1 : lower_atomic_load_bits(sf, p, size, diag);
+    return bits < 0 ? -1 : atomic_bits_value(sf, bits, ct, size, diag);
+}
+
+/**
  * An assignment to an _Atomic object (sema's atomic_access): the object's address made once, then `x = v` one
  * atomic store, and `x op= v` -- and `++x`, `x--`, which sema made such -- a compare-exchange loop: x read in
  * one access, `x op v` made of what was read (lowering's substitution of it for the second reading of x, and
@@ -7517,6 +7546,12 @@ int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const low
     }
     if (ctx != NULL && (e == ctx->subst_expr[0] || e == ctx->subst_expr[1])) {
         return ctx->subst_value[e == ctx->subst_expr[0] ? 0 : 1];
+    }
+    if ((e->kind == CC_EXPR_IDENT || e->kind == CC_EXPR_DEREF || e->kind == CC_EXPR_MEMBER) && e->ctype != NULL &&
+        (e->ctype->quals & CC_CQ_ATOMIC) != 0 && cc_ct_is_scalar(e->ctype) &&
+        cc_ct_size(e->ctype, tu) > cc_target_pointer_size()) {
+        /* an _Atomic object wider than a word read in one access, not two (C11 6.2.6.1p9) */
+        return lower_atomic_read(tu, sf, ctx, vars, var_count, depth, e, diag);
     }
 
     lower_expr_instr_init(&in);

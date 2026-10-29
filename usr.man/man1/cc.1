@@ -123,8 +123,8 @@ SSE.
 .Pp
 An object of
 .Vt _Atomic
-type of 1, 2, 4 or 8 bytes is stored in one access, sequentially
-consistently, and
+type of 1, 2, 4 or 8 bytes is read in one access, an 8-byte one on i386
+too, and stored in one, sequentially consistently, and
 .Li ++ ,
 .Li --
 and compound assignment on it are one atomic read-modify-write, a
