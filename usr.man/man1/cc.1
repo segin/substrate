@@ -330,6 +330,17 @@ libgcc on x86 provides none of these; the program supplies them, or
 libatomic the
 .Fn __atomic_*
 ones.
+An 8-byte
+.Fn __atomic_load_n
+or
+.Fn __atomic_store_n
+is one access: through the x87
+.Pq Li fildq , fistpq
+from the Pentium on, a call of
+.Fn __atomic_load_8
+or
+.Fn __atomic_store_8
+before it.
 A trap is
 .Li int3
 before the Pentium Pro, which added

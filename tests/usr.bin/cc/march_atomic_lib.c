@@ -40,3 +40,15 @@ ALL(1, unsigned char)
 ALL(2, unsigned short)
 ALL(4, unsigned int)
 ALL(8, unsigned long long)
+
+/* before the Pentium an 8-byte load or store is a call too */
+unsigned long long atomic_load_8(volatile unsigned long long *p, int mo) __asm__("__atomic_load_8");
+unsigned long long atomic_load_8(volatile unsigned long long *p, int mo) {
+    (void)mo;
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+}
+void atomic_store_8(volatile unsigned long long *p, unsigned long long v, int mo) __asm__("__atomic_store_8");
+void atomic_store_8(volatile unsigned long long *p, unsigned long long v, int mo) {
+    (void)mo;
+    __atomic_store_n(p, v, __ATOMIC_SEQ_CST);
+}

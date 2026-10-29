@@ -32,7 +32,7 @@ all: test
 # output is printed whole when it ends, not interleaved with the others'.
 MAKEFLAGS += --output-sync=target
 SUITE = checks_main run_conformance_c99 run_diff_c99 run_codegen_diff run_codegen_old_gcc \
-	run_codegen_random run_codegen_abi run_codegen_regparm run_march_opcodes run_i386_default_isa run_selfhost \
+	run_codegen_random run_codegen_abi run_codegen_regparm run_march_opcodes run_i386_default_isa run_atomic8 run_selfhost \
 	run_crosshost run_postc99_c11_c17 run_postc99_c23 run_postc99_c23_attrs \
 	run_postc99_mode_matrix run_postc99_diff_modes run_postc99_abi_modes checks_c23 \
 	run_pp_postc99 run_pp_c99_baseline run_m16 run_gnu_inline \
@@ -974,6 +974,10 @@ run_march_opcodes: build
 run_i386_default_isa: build
 	mkdir -p "$(CC_TMP)"
 	sh run_i386_default_isa.sh
+
+run_atomic8: build
+	mkdir -p "$(CC_TMP)"
+	sh run_atomic8.sh
 
 run_selfhost: build
 	mkdir -p "$(CC_TMP)"

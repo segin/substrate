@@ -411,6 +411,31 @@ static int emit_atomic_libcall(cc_ssa_function_t *sf, const char *builtin, long 
 }
 
 /**
+ * An i386 8-byte atomic load or store, as gcc makes one from the Pentium on: through the x87, whose fildq and
+ * fistpq move all eight bytes in one access -- exactly, as an x87 register holds any 64-bit integer.
+ *
+ * @param sf     the function
+ * @param p      the object's address
+ * @param v      the value to store, or -1 to load
+ * @param diag   receives an error
+ * @return       the value loaded (or stored), or -1
+ */
+static int emit_atomic_x87_move8(cc_ssa_function_t *sf, int p, int v, cc_diag_t *diag) {
+    atomic_asm_in_t ins[2];
+
+    ins[0].value = CC_SSA_ASM_MEM_INDIRECT_ENCODE(p);
+    ins[0].constraint = "m";
+    ins[0].size = 8;
+    if (v < 0) {
+        return emit_atomic_asm(sf, "fildq %1\n\tfistpq %0", "=m", 8, ins, 1, diag);
+    }
+    ins[1] = ins[0];
+    ins[0].value = v;
+    /* the output is only somewhere for the asm to have one: the store is to %2 */
+    return emit_atomic_asm(sf, "fildq %1\n\tfistpq %2", "=m", 8, ins, 2, diag) < 0 ? -1 : v;
+}
+
+/**
  * Lower an atomic read-modify-write builtin (cc_builtin_atomic_rmw()) or a __sync compare-and-swap to locked
  * instructions: `lock xadd` adds, `xchg` exchanges, `lock cmpxchg` compares and exchanges.  An operation with no
  * instruction that also gives the old value -- and, or, xor, nand, and any on a pair of words on i386 -- is a
@@ -2707,6 +2732,47 @@ static int lower_builtin_call(const cc_translation_unit_t *tu, cc_ssa_function_t
             } else if (memorder != CC_ATOMIC_RELAXED) {
                 need_pre_compiler = 1;
             }
+        }
+        if (mem_size == 8 && cc_target_pointer_size() == 4) {
+            /*
+             * Eight bytes on i386 are two words to a plain load or store: as gcc, the x87's one access from
+             * the Pentium on, and __atomic_load_8 or __atomic_store_8 before it.
+             */
+            const cc_options_t *o = cc_options_current();
+            int args[3];
+            size_t n = 0;
+            int r;
+
+            if (bk == BUILTIN_ATOMIC_STORE_N) {
+                rhsv = e->arg_count >= 2 && e->args[1] != NULL
+                           ? lower_atomic_operand(tu, sf, ctx, vars, var_count, depth, e->args[1], 8, 0, diag)
+                           : -1;
+                if (rhsv < 0) {
+                    return -1;
+                }
+            }
+            if (o != NULL && o->i386_isa_level < 5) {
+                args[n++] = p;
+                if (rhsv >= 0) {
+                    args[n++] = rhsv;
+                }
+                args[n] = cc_ir_const(sf, memorder);
+                if (args[n++] < 0) {
+                    return -1;
+                }
+                r = emit_atomic_libcall(sf, e->ident, 8, args, n, diag);
+                return r < 0 || rhsv < 0 ? r : rhsv;
+            }
+            if (need_pre_full ? emit_atomic_full_barrier(sf, diag) != 0
+                              : need_pre_compiler && emit_atomic_compiler_barrier(sf, diag) != 0) {
+                return -1;
+            }
+            r = emit_atomic_x87_move8(sf, p, rhsv, diag);
+            if (r < 0 || (need_post_full ? emit_atomic_full_barrier(sf, diag) != 0
+                                         : need_post_compiler && emit_atomic_compiler_barrier(sf, diag) != 0)) {
+                return -1;
+            }
+            return r;
         }
         if (need_pre_full) {
             if (emit_atomic_full_barrier(sf, diag) != 0) {
