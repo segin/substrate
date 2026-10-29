@@ -46,6 +46,8 @@ runs one).  The parts that matter most:
   status must match.
 - `run_codegen_random.sh`: 40 generated arithmetic programs, the same
   way.
+- `run_march_opcodes.sh`: each i386 `-march` gets only its CPU's
+  instructions, as GNU as told that `-march` judges.
 - `run_codegen_abi.sh`: objects from cc and gcc call each other (the
   `_BitInt` calls only where that gcc has `_BitInt`).
 - `run_selfhost.sh`: a cc built by cc passes all of the above, and a cc

@@ -355,10 +355,69 @@ static int emit_atomic_cmpxchg(cc_ssa_function_t *sf, int memop, long size, int 
 }
 
 /**
+ * The call gcc makes for atomic builtin @p builtin on an object of @p size bytes where the -march has no
+ * instruction for it: `__sync_<op>_<size>` or `__atomic_<op>_<size>` (the builtin's name, an `_n` dropped), from
+ * libgcc or libatomic, with the builtin's own arguments.
+ *
+ * @param sf       the function
+ * @param builtin  the builtin's name
+ * @param size     the object's size in bytes
+ * @param args     the arguments, lowered and converted
+ * @param n        how many
+ * @param diag     receives an error
+ * @return         the call's value, or -1
+ */
+static int emit_atomic_libcall(cc_ssa_function_t *sf, const char *builtin, long size, const int *args, size_t n,
+                               cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    size_t len = strlen(builtin);
+    char name[64];
+    size_t i;
+
+    if (len >= 2 && strcmp(builtin + len - 2, "_n") == 0) {
+        len -= 2;
+    }
+    if (len > sizeof(name) - 8) {
+        set_diag(diag, "atomic builtin name too long");
+        return -1;
+    }
+    memcpy(name, builtin, len);
+    snprintf(name + len, sizeof(name) - len, "_%ld", size);
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_CALL;
+    in.dst = cc_ir_new_value(sf, CC_VAL_I64);
+    in.lhs = -1;
+    in.rhs = -1;
+    in.arg_count = n;
+    in.args = (int *)calloc(n, sizeof(*in.args));
+    in.sym = cc_strdup(name);
+    if (in.dst < 0 || in.args == NULL || in.sym == NULL) {
+        free(in.args);
+        free(in.sym);
+        set_diag(diag, "out of memory emitting an atomic operation");
+        return -1;
+    }
+    cc_ir_set_size(sf, in.dst, size > 4 ? size : 4);
+    for (i = 0; i < n; ++i) {
+        in.args[i] = args[i];
+    }
+    if (cc_ir_push(sf, in) != 0) {
+        free(in.args);
+        free(in.sym);
+        set_diag(diag, "out of memory emitting an atomic operation");
+        return -1;
+    }
+    return in.dst;
+}
+
+/**
  * Lower an atomic read-modify-write builtin (cc_builtin_atomic_rmw()) or a __sync compare-and-swap to locked
  * instructions: `lock xadd` adds, `xchg` exchanges, `lock cmpxchg` compares and exchanges.  An operation with no
  * instruction that also gives the old value -- and, or, xor, nand, and any on a pair of words on i386 -- is a
  * compare-exchange loop.  Each of these is a full barrier on x86, which every memory order asks no more than.
+ *
+ * As gcc, an i386 -march without the instruction calls libgcc's or libatomic's function instead
+ * (emit_atomic_libcall()): cmpxchg and xadd came with the 486, cmpxchg8b with the Pentium; xchg the 386 has.
  *
  * @return the builtin's value, or -1
  */
@@ -405,6 +464,31 @@ static int lower_atomic_rmw(const cc_translation_unit_t *tu, cc_ssa_function_t *
     v = lower_atomic_operand(tu, sf, ctx, vars, var_count, depth, e->args[1], size, uns, diag);
     if (v < 0) {
         return -1;
+    }
+    {
+        const cc_options_t *o = cc_options_current();
+        int level = o != NULL && o->target == CC_TARGET_I386 ? o->i386_isa_level : 7;
+
+        if (level < (wide ? 5 : 4) && (cas || wide || rmw.op != CC_RMW_XCHG)) {
+            int args[4];
+            size_t n = 0;
+            int r;
+
+            args[n++] = p;
+            args[n++] = v;
+            if (cas || rmw.has_memorder) {
+                int third = cas ? lower_atomic_operand(tu, sf, ctx, vars, var_count, depth, e->args[2], size, uns,
+                                                       diag)
+                                : lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag);
+
+                if (third < 0 || (!cas && (third = cast_value(sf, third, CC_VAL_I64, diag)) < 0)) {
+                    return -1;
+                }
+                args[n++] = third;
+            }
+            r = emit_atomic_libcall(sf, e->ident, size, args, n, diag);
+            return r < 0 || bk == BUILTIN_SYNC_BOOL_CAS ? r : atomic_fit(sf, r, size, uns, diag);
+        }
     }
     if (cas) {
         int desiredv = lower_atomic_operand(tu, sf, ctx, vars, var_count, depth, e->args[2], size, uns, diag);

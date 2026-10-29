@@ -297,6 +297,40 @@ as the program's interpreter.
 A 64-bit program is linked as a position-independent executable; a
 32-bit one is not, as the i386 code generator writes position-dependent
 code.
+.It Fl march Ns = Ns Ar cpu
+i386: the CPU the code runs on, whose instructions alone it uses:
+.Cm i386 ,
+.Cm i486 ,
+.Cm i586
+.Pq Cm pentium ,
+.Cm pentium-mmx ,
+.Cm i686
+.Pq Cm pentiumpro ,
+.Cm pentium2 ,
+.Cm pentium3 ,
+.Cm pentium4
+and later.
+An atomic builtin the CPU has no instruction for is a call, as gcc makes
+it:
+.Fn __sync_ Ns Ar op Ns Fn _ Ns Ar N
+or
+.Fn __atomic_ Ns Ar op Ns Fn _ Ns Ar N
+for an object of
+.Ar N
+bytes, below the 486 (which added
+.Li cmpxchg
+and
+.Li xadd )
+and, for 8 bytes, below the Pentium
+.Pq Li cmpxchg8b .
+libgcc on x86 provides none of these; the program supplies them, or
+libatomic the
+.Fn __atomic_*
+ones.
+A trap is
+.Li int3
+before the Pentium Pro, which added
+.Li ud2 .
 .It Fl mpreferred-stack-boundary Ns = Ns Ar n
 Keep the stack aligned to 2^n bytes at a call, n from 2 to 12, rather
 than the psABI's 16; with 2 or 3 a function's frame is not padded for
