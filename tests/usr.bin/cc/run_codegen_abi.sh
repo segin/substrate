@@ -44,7 +44,7 @@ for mode in $modes; do
 	m=${mode%%/*}
 	flags=-m$m
 	case $mode in */*) flags="$flags -march=${mode#*/}" ;; esac
-	# A gcc without _BitInt here (before 14, or before 16 for -m32) cannot
+	# A gcc without _BitInt (before 14, -m32 and -m64 alike) cannot
 	# judge those cases, so neither half has them.
 	nobitint=
 	if ! "$HOST_CC" $flags -std=$STD -w -c -o "$tmp/bitint.o" "$tmp/bitint.c" 2>/dev/null; then

@@ -4,13 +4,13 @@
 #
 # CI's gcc was older than the one the codegen tests are written against.
 # It could not build the C23 and _BitInt tests ("gcc cannot build it"),
-# and laid an 8-byte vector out at 4 under -m32 where cc and gcc 16 lay it
-# at 8: 29 failures, none of them cc's.  A test names the gcc it needs in
-# "cc-gcc:" or "cc-gcc-m32:".  run_codegen_abi.sh leaves out its _BitInt
-# cases for such a gcc.
+# none of them cc's failures.  A test names the gcc it needs in "cc-gcc:",
+# for -m32 and -m64 alike: gcc 14 brought _BitInt to both.
+# run_codegen_abi.sh leaves out its _BitInt cases for such a gcc.
 #
 # The old gcc here is this host's, saying it is gcc 13 and refusing what
-# gcc 13 refuses: -std=c23, and _BitInt.
+# gcc 13 refuses: -std=c23, and _BitInt; and saying it is gcc 14, which
+# refuses neither.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -56,12 +56,26 @@ if [ $rc -ne 0 ]; then
 	echo "FAIL: with gcc 13 the runner failed:"; sed 's/^/    /' "$tmp/old.out"; fail=1
 fi
 for want in "skip nullptr_type -m64: needs gcc 14" "skip bitint_narrow -m64: needs gcc 14" \
-	"skip bitint_narrow -m32: needs gcc 16"; do
+	"skip bitint_narrow -m32: needs gcc 14"; do
 	grep -q "^$want" "$tmp/old.out" || { echo "FAIL: no '$want'"; fail=1; }
 done
 # float16_data needs an ISA, not a newer gcc, and alignof_object nothing at all.
 if grep -qE '^skip (float16_data|alignof_object)' "$tmp/old.out"; then
 	echo "FAIL: a run that needs no newer gcc was skipped:"; grep '^skip' "$tmp/old.out" | sed 's/^/    /'; fail=1
+fi
+
+# gcc 14 has _BitInt for -m32 too: nothing is skipped.
+cat > "$tmp/gcc14" <<'EOF'
+#!/bin/sh
+[ "$*" = -dumpversion ] && { echo 14.2.0; exit 0; }
+[ "$*" = -v ] && { echo "gcc version 14.2.0 (pretended)" >&2; exit 0; }
+exec gcc "$@"
+EOF
+chmod +x "$tmp/gcc14"
+HOST_CC=$tmp/gcc14 sh "$ROOT/tests/usr.bin/cc/run_codegen_diff.sh" bitint_narrow nullptr_type > "$tmp/g14.out" 2>&1 ||
+	{ echo "FAIL: with gcc 14 the runner failed:"; sed 's/^/    /' "$tmp/g14.out"; fail=1; }
+if grep -q '^skip' "$tmp/g14.out"; then
+	echo "FAIL: gcc 14 skipped:"; grep '^skip' "$tmp/g14.out" | sed 's/^/    /'; fail=1
 fi
 
 # With this host's own gcc nothing is skipped -- when it is new enough.

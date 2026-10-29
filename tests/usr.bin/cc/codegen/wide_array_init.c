@@ -5,8 +5,7 @@
  * structures initialized from structure values.
  *
  * cc-std: gnu2x
- * cc-gcc: 14 (_BitInt)
- * cc-gcc-m32: 16 (_BitInt under -m32)
+ * cc-gcc: 14 (_BitInt, on i386 as on x86-64)
  */
 #include <stdio.h>
 

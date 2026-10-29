@@ -8,10 +8,9 @@
 # CC_BIN names another cc to test, such as a build of it for a 32-bit host.
 #
 # A test that gcc can judge only from some release on names it in a
-# "cc-gcc: <major>" comment, or "cc-gcc-m32: <major>" where only its
-# -m32 runs need it: an older gcc (CI's, say) rejects the language, or
-# lays the data out as gcc did before.  With an older gcc those runs are
-# skipped, and said to be, not failed.  Any other HOST_CC runs them all.
+# "cc-gcc: <major>" comment: an older gcc (CI's, say) rejects the
+# language.  With an older gcc its runs are skipped, and said to be, not
+# failed.  Any other HOST_CC runs them all.
 #
 # gcc's -m32 has the ISA its host configured (SSE2 on Arch, a bare i686
 # on Ubuntu), and vectors and _Float16 depend on it.  A test that does
@@ -63,7 +62,6 @@ for src in $srcs; do
 	std=$(sed -n 's/.*cc-std: *\([a-z0-9]*\).*/\1/p' "$src" | head -n 1)
 	cc_std=${std:+-std=$std}
 	need=$(sed -n 's/.*cc-gcc: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
-	need32=$(sed -n 's/.*cc-gcc-m32: *\([0-9][0-9]*\).*/\1/p' "$src" | head -n 1)
 	# the -m32 -march list, up to a "(" that starts the reason
 	march32=$(sed -n 's/.*cc-march-m32: *\([a-z0-9 -]*\).*/\1/p' "$src" | head -n 1)
 	runmodes=
@@ -78,12 +76,8 @@ for src in $srcs; do
 		m=${mode%%/*}
 		flags=-m$m
 		case $mode in */*) flags="$flags -march=${mode#*/}" ;; esac
-		want=$need
-		if [ $m = 32 ] && [ -n "$need32" ] && [ "${need:-0}" -lt "$need32" ]; then
-			want=$need32
-		fi
-		if [ -n "$gcc_major" ] && [ -n "$want" ] && [ "$gcc_major" -lt "$want" ]; then
-			echo "skip $name $flags: needs gcc $want, $HOST_CC is gcc $gcc_major"
+		if [ -n "$gcc_major" ] && [ -n "$need" ] && [ "$gcc_major" -lt "$need" ]; then
+			echo "skip $name $flags: needs gcc $need, $HOST_CC is gcc $gcc_major"
 			skipped=$((skipped + 2))
 			continue
 		fi
