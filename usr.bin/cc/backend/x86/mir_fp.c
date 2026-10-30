@@ -13,11 +13,19 @@
  * them as well (the stack cache, xsel_t's fq): an operation takes its
  * operands from the stack where they are on it -- the register itself
  * when this is the block's last read of the value, fxch bringing it to
- * the top, else a copy, fld %st(i) -- and from the home where not, and
- * leaves its result on the stack, its home written only when a later
- * block may read it there (fq_global) and only when it leaves the stack.
- * A result rounded to a double, which a store to its 8-byte home rounds,
- * stays unrounded until something reads it otherwise (xfq_t's r).  The
+ * the top, else a copy, fld %st(i), or in place, fop %st(i), %st, when
+ * the block reads it again -- and from the home where not, a double's
+ * read by the operation itself (fopl), and leaves its result on the
+ * stack, its home written only when a later block may read it there
+ * (fq_global) and only when it leaves the stack.  A result rounded to a
+ * double, which a store to its 8-byte home rounds, stays unrounded until
+ * something reads it otherwise (xfq_t's r), then is rounded where it is,
+ * once.  A copy of a value with the same value in it (a widening) is
+ * another name of its register (xfq_t's al); a float or a double loaded
+ * for one read later in the block is loaded there, or read from memory
+ * by the operation, unless a store or a variable written again comes
+ * first (xsel_t's fqm); a constant is fldz, fld1 or the function's own
+ * in .rodata (pool_const()).  The
  * stack is emptied before anything the cache does not follow -- a call,
  * an asm, a branch, a label, and the floating operations that keep to
  * the homes (xs_fp_begin()) -- so that the allocator, which never sees
@@ -96,6 +104,9 @@ static void emit1(xsel_t *s, xi_op_t op, const xop_t *m) {
 
 /* ---- the x87 stack cache ---- */
 
+static void fq_put(xsel_t *s, int v);
+static void fqm_load_all(xsel_t *s);
+
 /** Append an x87 instruction @p op on stack register @p i (XI_FLDST, XI_FXCH) or on none. */
 static void fq_emit_st(xsel_t *s, xi_op_t op, int i) {
     xinst_t x = xi_make(op, s->word, 0, NULL, NULL, NULL);
@@ -113,6 +124,8 @@ static void fq_push_model(xsel_t *s, int v, int e, int r) {
     }
     memmove(&s->fq[1], &s->fq[0], (size_t)s->fqn * sizeof(s->fq[0]));
     s->fq[0].v = v;
+    s->fq[0].al[0] = XFQ_DEAD;
+    s->fq[0].al[1] = XFQ_DEAD;
     s->fq[0].dirty = 0;
     s->fq[0].e = (unsigned char)e;
     s->fq[0].r = (unsigned char)r;
@@ -127,16 +140,54 @@ static void fq_pop_model(xsel_t *s) {
     }
 }
 
-/** The stack register holding IR value @p v, or -1. */
+/** Whether stack register @p q holds IR value @p v, under its own name or a copy's. */
+static int fq_has_name(const xfq_t *q, int v) {
+    return q->v == v || (v >= 0 && (q->al[0] == v || q->al[1] == v));
+}
+
+/** The stack register holding IR value @p v, under any of its names, or -1. */
 static int fq_find(const xsel_t *s, int v) {
     int i;
 
     for (i = 0; i < s->fqn; ++i) {
-        if (s->fq[i].v == v) {
+        if (fq_has_name(&s->fq[i], v)) {
             return i;
         }
     }
     return -1;
+}
+
+/** IR value @p v is written anew: the register that held it before does not any more. */
+static void fq_unname(xsel_t *s, int v) {
+    int i = fq_find(s, v);
+    int k;
+
+    if (i < 0) {
+        return;
+    }
+    if (s->fq[i].v == v) {
+        s->fq[i].v = XFQ_DEAD;
+    }
+    for (k = 0; k < 2; ++k) {
+        if (s->fq[i].al[k] == v) {
+            s->fq[i].al[k] = XFQ_DEAD;
+        }
+    }
+}
+
+/** Whether stack register @p q is read again in the block under a name other than @p v. */
+static int fq_others_read(const xsel_t *s, const xfq_t *q, int v) {
+    int k;
+
+    if (q->v >= 0 && q->v != v && s->fq_left[q->v] > 0) {
+        return 1;
+    }
+    for (k = 0; k < 2; ++k) {
+        if (q->al[k] >= 0 && q->al[k] != v && s->fq_left[q->al[k]] > 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /** Bring stack register @p i to the top: fxch, the model's two exchanged. */
@@ -156,9 +207,9 @@ static void fq_fxch(xsel_t *s, int i) {
     s->fq[i] = t;
 }
 
-/** Whether stack register @p q is read again in the block. */
+/** Whether stack register @p q is read again in the block, under any name. */
 static int fq_read_again(const xsel_t *s, const xfq_t *q) {
-    return q->v >= 0 && s->fq_left[q->v] > 0;
+    return fq_others_read(s, q, XFQ_RAW);
 }
 
 /** Whether stack register @p q's value must be written to its home before the register goes. */
@@ -181,12 +232,12 @@ static void fq_round_top(xsel_t *s) {
 }
 
 /**
- * Write the value at the top of the stack to its home, the register popped unless @p keep: a double's store
- * rounds it as it wants, other roundings are made first.
+ * Write the value at the top of the stack to the home of @p v, one of its names, the register popped unless
+ * @p keep: a double's store rounds it as it wants, other roundings are made first.
  */
-static void fq_store_top(xsel_t *s, int keep) {
+static void fq_store_top_as(xsel_t *s, int v, int keep) {
     xfq_t *q = &s->fq[0];
-    xop_t m = xs_fp_home(s, q->v);
+    xop_t m = xs_fp_home(s, v);
 
     if (q->r != 0 && q->e > q->r && !(m.size == 8 && q->r == 8)) {
         fq_round_top(s);
@@ -203,11 +254,28 @@ static void fq_store_top(xsel_t *s, int keep) {
         fq_emit_st(s, XI_FLDST, 0);
         emit1(s, XI_FSTP, &m);
     }
-    q->dirty = 0;
+    if (v == q->v) {
+        q->dirty = 0;
+    }
 }
 
-/** Pop the top of the stack, its value written to its home if anything may read it there. */
+/** fq_store_top_as() the top's own value. */
+static void fq_store_top(xsel_t *s, int keep) {
+    fq_store_top_as(s, s->fq[0].v, keep);
+}
+
+/** Pop the top of the stack, its value written to its homes if anything may read it there. */
 static void fq_drop_top(xsel_t *s) {
+    int k;
+
+    for (k = 0; k < 2; ++k) {
+        /* a copy's home, read later from there */
+        int a = s->fq[0].al[k];
+
+        if (a >= 0 && s->fq_left[a] > 0) {
+            fq_store_top_as(s, a, 1);
+        }
+    }
     if (fq_home_wanted(s, &s->fq[0])) {
         fq_store_top(s, 0);
         return;
@@ -218,6 +286,7 @@ static void fq_drop_top(xsel_t *s) {
 
 /** Empty the stack, each value written to its home where it is wanted there. */
 static void fq_flush(xsel_t *s) {
+    fqm_load_all(s);
     while (s->fqn > 0) {
         fq_drop_top(s);
     }
@@ -240,9 +309,7 @@ static void fq_room(xsel_t *s, int n, int a, int b) {
         int i;
 
         for (i = s->fqn - 1; i >= 0; --i) {
-            int v = s->fq[i].v;
-
-            if (v == a || v == b) {
+            if (s->fq[i].v == XFQ_RAW || fq_has_name(&s->fq[i], a) || fq_has_name(&s->fq[i], b)) {
                 continue;
             }
             if (k < 0) {
@@ -258,6 +325,45 @@ static void fq_room(xsel_t *s, int n, int a, int b) {
     }
 }
 
+/** The deferred load of floating value @p v (xsel_t's fqm), or -1. */
+static int fqm_find(const xsel_t *s, int v) {
+    int k;
+
+    for (k = 0; k < s->nfqm; ++k) {
+        if (s->fqm[k].v == v) {
+            return k;
+        }
+    }
+    return -1;
+}
+
+/** Forget deferred load @p k, its memory operand returned: the reader reads it there. */
+static xop_t fqm_take(xsel_t *s, int k) {
+    xop_t m = s->fqm[k].m;
+
+    s->nfqm--;
+    memmove(&s->fqm[k], &s->fqm[k + 1], (size_t)(s->nfqm - k) * sizeof(s->fqm[0]));
+    return m;
+}
+
+/** Make deferred load @p k: its value pushed on the stack, as any loaded value. */
+static void fqm_load(xsel_t *s, int k) {
+    int v = s->fqm[k].v;
+    xop_t m = fqm_take(s, k);
+
+    fq_room(s, 1, v, v);
+    emit1(s, XI_FLD, &m);
+    fq_push_model(s, XFQ_RAW, m.size, 0);
+    fq_put(s, v);
+}
+
+/** Make every deferred load: before what may write the memory or the registers they read. */
+static void fqm_load_all(xsel_t *s) {
+    while (s->nfqm > 0) {
+        fqm_load(s, 0);
+    }
+}
+
 /**
  * Push floating value @p v as an operand (XFQ_RAW) on the stack: its register when nothing reads it again (@p more
  * the reads of it the same instruction still makes), a copy of it when something does, or its home when it is not
@@ -265,9 +371,18 @@ static void fq_room(xsel_t *s, int n, int a, int b) {
  * @p exact the operand is the value, rounded as it wants; else it may want rounding still (its r).
  */
 static void fq_take(xsel_t *s, int v, int more, int after, int exact) {
-    int i = s->addr_taken[v] ? -1 : fq_find(s, v);
+    int i;
     int again = more > 0 || s->fq_left[v] > 0;
 
+    if (fqm_find(s, v) >= 0) {
+        fqm_load(s, fqm_find(s, v));
+    }
+    i = s->addr_taken[v] ? -1 : fq_find(s, v);
+
+    if (i >= 0 && !again) {
+        /* its register is given up only when its other names are not read again either */
+        again = fq_others_read(s, &s->fq[i], v);
+    }
     if (i < 0) {
         xop_t m = xs_fp_home(s, v);
         int e = m.size == 8 ? 8 : 10;
@@ -279,8 +394,15 @@ static void fq_take(xsel_t *s, int v, int more, int after, int exact) {
         }
         fq_push_model(s, XFQ_RAW, e, 0);
     } else if (again) {
-        xfq_t q = s->fq[i];
+        xfq_t q;
 
+        if (s->fq[i].r != 0 && s->fq[i].e > s->fq[i].r) {
+            /* rounded where it is, once, rather than each copy (read more than once, it is seldom only stored) */
+            fq_fxch(s, i);
+            fq_round_top(s);
+            i = 0;
+        }
+        q = s->fq[i];
         fq_emit_st(s, XI_FLDST, i);
         fq_push_model(s, XFQ_RAW, q.e, q.r);
     } else {
@@ -291,6 +413,8 @@ static void fq_take(xsel_t *s, int v, int more, int after, int exact) {
         }
         fq_fxch(s, i);
         s->fq[0].v = XFQ_RAW;
+        s->fq[0].al[0] = XFQ_DEAD;
+        s->fq[0].al[1] = XFQ_DEAD;
         s->fq[0].dirty = 0;
     }
     if (exact) {
@@ -301,15 +425,14 @@ static void fq_take(xsel_t *s, int v, int more, int after, int exact) {
 /** The operand at the top of the stack is now floating value @p v, which holds it rounded to its home's size. */
 static void fq_put(xsel_t *s, int v) {
     xfq_t *q = &s->fq[0];
-    int i = fq_find(s, v);
 
     if (!fp_wide(s, v) && q->r == 0 && q->e > 8) {
         q->r = 8;
     }
-    if (i >= 0) {
-        s->fq[i].v = XFQ_DEAD; /* what it held before */
-    }
+    fq_unname(s, v); /* what held it before */
     q->v = v;
+    q->al[0] = XFQ_DEAD;
+    q->al[1] = XFQ_DEAD;
     q->dirty = 1;
     if (s->addr_taken[v]) {
         /* read through pointers as well: its home, always */
@@ -333,6 +456,95 @@ static int fq_arrange(xsel_t *s) {
     fq_fxch(s, 1);
     fq_fxch(s, d);
     return 1;
+}
+
+/** Round stack register @p i in place to the precision it wants, if it wants one: its copies are exact then. */
+static void fq_round_at(xsel_t *s, int i) {
+    if (s->fq[i].r != 0 && s->fq[i].e > s->fq[i].r) {
+        fq_fxch(s, i);
+        fq_round_top(s);
+    }
+}
+
+/** The stack register of floating value @p v when the block reads it again after this instruction, else -1. */
+static int fq_kept(const xsel_t *s, int v) {
+    int i = s->addr_taken[v] ? -1 : fq_find(s, v);
+
+    return i >= 0 && s->fq_left[v] > 0 ? i : -1;
+}
+
+/** Whether floating value @p v is not on the stack and its home is a double, which an x87 operation may read. */
+static int fq_in_home8(const xsel_t *s, int v) {
+    return (s->addr_taken[v] || fq_find(s, v) < 0) && fqm_find(s, v) < 0 && !fp_wide(s, v);
+}
+
+/** st(0) = st(0) op memory @p m (4 or 8 bytes), @p k the op as fq_op_st()'s. */
+static void fq_op_mem(xsel_t *s, int k, xop_t m) {
+    emit1(s, XI_FOPM, &m);
+    s->xf.ins[s->xf.nins - 1].cc = (unsigned char)k;
+}
+
+/** st(0) = st(0) op st(@p i), @p k the op (with bit 2 the operands the other way round). */
+static void fq_op_st(xsel_t *s, int k, int i) {
+    xinst_t x = xi_make(XI_FOPST, s->word, 0, NULL, NULL, NULL);
+
+    x.cc = (unsigned char)k;
+    x.aux = i;
+    xf_emit(&s->xf, &x);
+}
+
+/**
+ * x87 value @p d = @p a op @p b, @p k the op (XI_FARITH's), the result left on the stack.  One operand the block
+ * reads again stays where it is and the operation reads it there (fop %st(i), %st), the other brought to the top;
+ * one not on the stack whose home is a double is read from it (fopl); else both are brought to the top and popped
+ * together (fop{,r}p).
+ */
+static void fq_binop(xsel_t *s, int d, int a, int b, int k) {
+    int i;
+
+    fq_room(s, 2, a, b);
+    if (a == b || ((i = fq_find(s, a)) >= 0 && i == fq_find(s, b))) {
+        /* one register, both operands: copies of one value */
+        fq_take(s, a, 0, 0, 1);
+        fq_op_st(s, k, 0);
+    } else if ((i = fqm_find(s, b)) >= 0) {
+        /* read where it was to be loaded from */
+        xop_t m = fqm_take(s, i);
+
+        fq_take(s, a, 0, 0, 1);
+        fq_op_mem(s, k, m);
+    } else if ((i = fqm_find(s, a)) >= 0) {
+        xop_t m = fqm_take(s, i);
+
+        fq_take(s, b, 0, 0, 1);
+        fq_op_mem(s, k | 4, m);
+    } else if ((i = fq_kept(s, b)) >= 0) {
+        fq_round_at(s, i);
+        fq_take(s, a, 0, 0, 1);
+        fq_op_st(s, k, fq_find(s, b));
+    } else if ((i = fq_kept(s, a)) >= 0) {
+        fq_round_at(s, i);
+        fq_take(s, b, 0, 0, 1);
+        fq_op_st(s, k | 4, fq_find(s, a));
+    } else if (fq_in_home8(s, b)) {
+        fq_take(s, a, 0, 0, 1);
+        fq_op_mem(s, k, xs_fp_home(s, b));
+    } else if (fq_in_home8(s, a)) {
+        fq_take(s, b, 0, 0, 1);
+        fq_op_mem(s, k | 4, xs_fp_home(s, a));
+    } else {
+        int rev;
+
+        fq_take(s, a, 0, 1, 1);
+        fq_take(s, b, 0, 0, 1);
+        rev = fq_arrange(s);
+        fq_emit_st(s, XI_FARITH, k | (rev ? 4 : 0));
+        fq_pop_model(s);
+    }
+    s->fq[0].e = 10;
+    s->fq[0].r = 0;
+    fq_put(s, d);
+    fq_tidy(s);
 }
 
 /** Whether a floating value is x87's, kept in a home the stack cache may hold. */
@@ -472,8 +684,12 @@ int xs_fp_init(xsel_t *s) {
 void xs_fp_free(xsel_t *s) {
     free(s->fq_left);
     free(s->fq_global);
+    free(s->fpool);
     s->fq_left = NULL;
     s->fq_global = NULL;
+    s->fpool = NULL;
+    s->nfpool = 0;
+    s->fpoolcap = 0;
 }
 
 void xs_fp_begin(xsel_t *s, size_t j) {
@@ -495,6 +711,11 @@ void xs_fp_begin(xsel_t *s, size_t j) {
     if (!fq_follows(s, in)) {
         /* (its reads counted still: it reads the homes) */
         fq_flush(s);
+    } else if (s->nfqm > 0 && (in->op == CC_SSA_STORE || (in->dst >= 0 && in->dst < f->value_count &&
+                                                           xs_fp_kind(s, in->dst) == XFP_NONE &&
+                                                           s->ndefs[in->dst] != 1))) {
+        /* a store may write what a deferred load reads, a variable written again be a register its address is in */
+        fqm_load_all(s);
     }
     x86_for_each_use(f, in, fq_uncount_read, s);
 }
@@ -597,19 +818,94 @@ static void store_bytes_const(xsel_t *s, xop_t m, const unsigned char *bytes, in
     }
 }
 
-/** A floating constant: 0.0 as xorps, else its bits through a general register; a long double's 10 bytes. */
+/**
+ * The @p n bytes at @p raw (8, a double; 16, a long double's 10 and padding) as a constant of the function's own in
+ * .rodata, as a memory operand: one already there if it is, gcc's .LC constants.  A double built in memory from two
+ * words' stores instead is read before they can be forwarded to the load.
+ */
+static xop_t pool_const(xsel_t *s, const unsigned char *raw, int n) {
+    char name[32];
+    xop_t o = xop_mem(s->got, 0, n);
+    int k;
+
+    for (k = 0; k < s->nfpool && (s->fpool[k].n != n || memcmp(s->fpool[k].b, raw, (size_t)n) != 0); ++k) {
+    }
+    if (k == s->nfpool) {
+        if (s->nfpool == s->fpoolcap) {
+            int cap = s->fpoolcap > 0 ? s->fpoolcap * 2 : 8;
+            xfconst_t *p = (xfconst_t *)realloc(s->fpool, (size_t)cap * sizeof(*p));
+
+            if (p == NULL) {
+                s->xf.oom = 1;
+                return o;
+            }
+            s->fpool = p;
+            s->fpoolcap = cap;
+        }
+        memset(&s->fpool[k], 0, sizeof(s->fpool[k]));
+        memcpy(s->fpool[k].b, raw, (size_t)n);
+        s->fpool[k].n = n;
+        s->nfpool++;
+    }
+    snprintf(name, sizeof(name), "_fc%d", k);
+    o.sym = xs_keep_name(".L", s->f->name);
+    o.sym = o.sym != NULL ? xs_keep_name(o.sym, name) : NULL;
+    if (o.sym != NULL && s->got != XR_NONE) {
+        o.sym = xs_reloc_name(o.sym, "GOTOFF");
+    }
+    if (o.sym == NULL) {
+        s->xf.oom = 1;
+    }
+    return o;
+}
+
+void xs_fp_print_pool(FILE *fp, const xsel_t *s) {
+    int k;
+    int i;
+
+    for (k = 0; k < s->nfpool; ++k) {
+        const xfconst_t *c = &s->fpool[k];
+
+        fprintf(fp, "\t.pushsection .rodata\n\t.p2align %d\n.L%s_fc%d:\n", c->n == 16 ? 4 : 3, s->f->name, k);
+        for (i = 0; i < c->n; i += 4) {
+            fprintf(fp, "\t.long %u\n",
+                    (unsigned)c->b[i] | (unsigned)c->b[i + 1] << 8 | (unsigned)c->b[i + 2] << 16 |
+                        (unsigned)c->b[i + 3] << 24);
+        }
+        fputs("\t.popsection\n", fp);
+    }
+}
+
+/**
+ * Floating constant @p raw (@p n bytes, 8 or 16) into x87 value @p v, on the stack: +0.0 and 1.0 the x87's own,
+ * fldz and fld1, any other read from .rodata.
+ */
+static void fq_const(xsel_t *s, int v, const unsigned char *raw, int n) {
+    static const unsigned char one8[8] = {0, 0, 0, 0, 0, 0, 0xf0, 0x3f};
+    static const unsigned char one16[10] = {0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f};
+    static const unsigned char zero[16];
+
+    fq_room(s, 1, v, v);
+    if (memcmp(raw, zero, (size_t)(n == 16 ? 10 : 8)) == 0 ||
+        memcmp(raw, n == 16 ? one16 : one8, (size_t)(n == 16 ? 10 : 8)) == 0) {
+        fq_emit_st(s, XI_FLDK, raw[n == 16 ? 9 : 7] != 0);
+    } else {
+        xop_t m = pool_const(s, raw, n);
+
+        emit1(s, XI_FLD, &m);
+    }
+    fq_push_model(s, XFQ_RAW, n == 16 ? 10 : 8, 0);
+    fq_put(s, v);
+    fq_tidy(s);
+}
+
+/**
+ * A floating constant: on the x87 fq_const()'s; in a vector register 0.0 as xorps, else its bits through a general
+ * register on x86-64 and from .rodata on i386.
+ */
 static void sel_fconst(xsel_t *s, const cc_ssa_instr_t *in) {
     unsigned char raw[16];
 
-    if (xs_fp_kind(s, in->dst) == XFP_X87) {
-        /* written in its home: what the stack held of it before is no more */
-        int i = fq_find(s, in->dst);
-
-        if (i >= 0) {
-            s->fq[i].v = XFQ_DEAD;
-        }
-        fq_tidy(s);
-    }
     memset(raw, 0, sizeof(raw));
     if (fp_wide(s, in->dst)) {
         long double cvt = (in->is_unsigned && in->imm >= 1 && in->imm <= 3) ? x86_64_special_ldouble_const(in->imm)
@@ -622,12 +918,12 @@ static void sel_fconst(xsel_t *s, const cc_ssa_instr_t *in) {
         }
 #endif
         memcpy(raw, &cvt, ncopy);
-        store_bytes_const(s, xs_fp_home(s, in->dst), raw, 16);
+        fq_const(s, in->dst, raw, 16);
         return;
     }
     memcpy(raw, &in->fimm, sizeof(in->fimm));
     if (xs_fp_kind(s, in->dst) == XFP_X87) {
-        store_bytes_const(s, xs_fp_home(s, in->dst), raw, 8);
+        fq_const(s, in->dst, raw, 8);
         return;
     }
     {
@@ -644,9 +940,8 @@ static void sel_fconst(xsel_t *s, const cc_ssa_instr_t *in) {
             xs_emit(s, XI_MOV, 8, 2, &k, &t, NULL);
             xs_emit(s, XI_MOV, 8, 2, &t, &d, NULL);
         } else {
-            xop_t m = scratch(s, 8);
+            xop_t m = pool_const(s, raw, 8);
 
-            store_bytes_const(s, m, raw, 8);
             xs_emit(s, XI_MOV, 8, 2, &m, &d, NULL);
         }
     }
@@ -706,6 +1001,37 @@ static void sel_fmov(xsel_t *s, const cc_ssa_instr_t *in) {
         return;
     }
     if (kd == XFP_X87 && ks == XFP_X87) {
+        int i = s->addr_taken[in->lhs] ? -1 : fq_find(s, in->lhs);
+        int k = fqm_find(s, in->lhs);
+
+        if (k >= 0 && s->fq_left[in->lhs] == 0 && s->fq_left[in->dst] == 1 && !s->fq_global[in->dst] &&
+            !s->addr_taken[in->dst]) {
+            /* a float or a double not loaded yet, the same value in the other (a widening): its load deferred */
+            int j = fqm_find(s, in->dst);
+
+            if (j >= 0) {
+                fqm_take(s, j);
+                k = fqm_find(s, in->lhs);
+            }
+            fq_unname(s, in->dst);
+            s->fqm[k].v = in->dst;
+            return;
+        }
+        k = -1;
+        if (i >= 0) {
+            k = s->fq[i].al[0] < 0 ? 0 : s->fq[i].al[1] < 0 ? 1 : -1;
+        }
+        if (k >= 0 && fq_read_again(s, &s->fq[i]) && !s->fq_global[in->dst] && !s->addr_taken[in->dst] &&
+            (fp_wide(s, in->dst) || s->fq[i].r != 0 || s->fq[i].e <= 8)) {
+            /*
+             * a copy of a value whose register is read again, the same value in it (a widening, or a double's
+             * copy): the register is the block's own new value as well, under another name, no copy made
+             */
+            fq_unname(s, in->dst);
+            s->fq[i].al[k] = in->dst;
+            fq_tidy(s);
+            return;
+        }
         /* on the stack: its register, or a copy, is the other value now */
         fq_room(s, 1, in->lhs, in->lhs);
         fq_take(s, in->lhs, 0, 0, 0);
@@ -736,18 +1062,7 @@ static void sel_fbinop(xsel_t *s, const cc_ssa_instr_t *in) {
     }
     if (xs_fp_kind(s, in->dst) == XFP_X87 && xs_fp_kind(s, in->lhs) == XFP_X87 &&
         xs_fp_kind(s, in->rhs) == XFP_X87) {
-        int rev;
-
-        fq_room(s, 2, in->lhs, in->rhs);
-        fq_take(s, in->lhs, in->lhs == in->rhs, 1, 1);
-        fq_take(s, in->rhs, 0, 0, 1);
-        rev = fq_arrange(s);
-        fq_emit_st(s, XI_FARITH, k | (rev ? 4 : 0));
-        fq_pop_model(s);
-        fq_pop_model(s);
-        fq_push_model(s, XFQ_RAW, 10, 0);
-        fq_put(s, in->dst);
-        fq_tidy(s);
+        fq_binop(s, in->dst, in->lhs, in->rhs, k);
         return;
     }
     {
@@ -1157,6 +1472,23 @@ static void half(xsel_t *s, int v, xop_t m, int load) {
 /** Whether instruction @p in reads or writes a floating value (its own operands, not a call's or an asm's). */
 /** Load the float, double or long double (@p bytes 4, 8, 10 or 16) at memory @p m into x87 value @p v, on the stack. */
 static void fq_load(xsel_t *s, int v, xop_t m, int bytes) {
+    int k = fqm_find(s, v);
+
+    if (k >= 0) {
+        fqm_take(s, k); /* written anew */
+    }
+    if (bytes <= 8 && s->fq_left[v] == 1 && !s->fq_global[v] && !s->addr_taken[v]) {
+        /* read once, later in the block: loaded there, or read there from memory by the operation */
+        if (s->nfqm == (int)(sizeof(s->fqm) / sizeof(s->fqm[0]))) {
+            fqm_load(s, 0);
+        }
+        fq_unname(s, v);
+        m.size = (unsigned char)bytes;
+        s->fqm[s->nfqm].v = v;
+        s->fqm[s->nfqm].m = m;
+        s->nfqm++;
+        return;
+    }
     fq_room(s, 1, v, v);
     m.size = (unsigned char)(bytes == 4 ? 4 : bytes == 8 ? 8 : 16);
     emit1(s, XI_FLD, &m);

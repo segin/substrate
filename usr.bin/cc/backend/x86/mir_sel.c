@@ -4186,6 +4186,7 @@ static int print_function(FILE *fp, xsel_t *s, const char *src_path, int emit_de
         }
         fputs("\t.popsection\n", fp);
     }
+    xs_fp_print_pool(fp, s);
     if ((f->attr_flags & CC_ATTR_CONSTRUCTOR) != 0) {
         emit_lifecycle_attr(fp, ".init_array", "init_array", f->name, w == 8);
     }

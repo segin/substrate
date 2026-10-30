@@ -154,6 +154,10 @@ typedef enum {
     XI_FLDST,     /**< x87: push a copy of st(cc) (fld %st(cc)) */
     XI_FXCH,      /**< x87: exchange st(0) and st(cc) */
     XI_FST,       /**< x87: st(0) to memory o0 without popping -- 4 bytes fsts, 8 fstl */
+    XI_FLDK,      /**< x87: push a constant of its own, cc 0 +0.0 (fldz), 1 1.0 (fld1) */
+    XI_FOPST,     /**< x87: st(0) = st(0) op st(aux), cc the op as XI_FARITH's (0 add .. 3 div); with cc's bit 2
+                       st(0) = st(aux) op st(0) */
+    XI_FOPM,      /**< x87: st(0) = st(0) op memory o0 (4 bytes a float, 8 a double), cc as XI_FOPST's */
     XI_COUNT
 } xi_op_t;
 
@@ -344,10 +348,17 @@ typedef struct xsel xsel_t;
  */
 typedef struct {
     int v;               /**< the IR value, XFQ_DEAD when it holds none any more, or XFQ_RAW: an operand in flight */
+    int al[2];           /**< values of the block's own copied from it (a widening), the register theirs too, or XFQ_DEAD */
     unsigned char dirty; /**< the value's home in the frame is not written yet */
     unsigned char e;     /**< the contents are exact in e bytes: 4, 8 or 10 */
     unsigned char r;     /**< 0, or the precision, 4 or 8 bytes, they still want rounding to */
 } xfq_t;
+
+/** A floating constant the function loads from .rodata (mir_fp.c's pool): its bytes, 8 or 16 of them. */
+typedef struct {
+    unsigned char b[16];
+    int n;
+} xfconst_t;
 
 #define XFQ_DEAD (-1)
 #define XFQ_RAW (-2)
@@ -446,6 +457,14 @@ struct xsel {
     int fq_any;               /**< the function has x87 floating values: the stack is followed */
     int *fq_left;             /**< per IR value: the reads of it left in the current block */
     unsigned char *fq_global; /**< per IR value: read in some block before it is written there, from its home */
+    struct {
+        int v;                /**< a float or double the block reads once, loaded from m only where it is read */
+        xop_t m;
+    } fqm[4];
+    int nfqm;
+    xfconst_t *fpool;         /**< the floating constants the function loads, .L<name>_fc<k> in .rodata */
+    int nfpool;
+    int fpoolcap;
     unsigned char *sbits;     /**< per IR value: every definition leaves it the sign extension of its low sbits bits */
     unsigned char *zbits;     /**< and the zero extension of its low zbits bits (the word's bits: nothing known) */
     unsigned char *dbits;     /**< per IR value: the most low bits anything reads of it (compute_demand()) */
@@ -544,6 +563,8 @@ int xs_fp_init(xsel_t *s);
 void xs_fp_free(xsel_t *s);
 /** Before IR instruction @p j is selected: the x87 stack emptied where it must be, the block's reads counted. */
 void xs_fp_begin(xsel_t *s, size_t j);
+/** Print the function's floating constants into .rodata, after its code. */
+void xs_fp_print_pool(FILE *fp, const xsel_t *s);
 
 /* mir_i386.c, mir_x86_64.c: the targets */
 

@@ -676,6 +676,23 @@ void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const ch
     case XI_FST:
         fprintf(fp, "\t%s ", in->o[0].size == 4 ? "fsts" : "fstl");
         break;
+    case XI_FLDK:
+        fputs(in->cc ? "\tfld1\n" : "\tfldz\n", fp);
+        return;
+    case XI_FOPST:
+    case XI_FOPM: {
+        /* st(0) the destination: gas spells these as Intel does (only a st(i) destination swaps fsub and fsubr) */
+        static const char *const op[4] = {"fadd", "fsub", "fmul", "fdiv"};
+        static const char *const rop[4] = {"fadd", "fsubr", "fmul", "fdivr"};
+        const char *m = (in->cc & 4 ? rop : op)[in->cc & 3];
+
+        if (in->op == XI_FOPST) {
+            fprintf(fp, "\t%s %%st(%d), %%st\n", m, in->aux);
+            return;
+        }
+        fprintf(fp, "\t%s%c ", m, in->o[0].size == 4 ? 's' : 'l');
+        break;
+    }
     case XI_FUCOMPP:
         /* (no fucomip below the Pentium Pro: the status word's C0, C2 and C3 into CF, PF and ZF) */
         fputs("\tfucompp\n\tfnstsw %ax\n\tsahf\n", fp);

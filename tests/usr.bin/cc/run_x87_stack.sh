@@ -59,14 +59,50 @@ if [ -z "$loop" ]; then
 	exit 1
 fi
 wide=$(printf '%s' "$loop" | grep -cE '^	f(ld|stp)t ' || true)
-mem=$(printf '%s' "$loop" | grep -cE '^	f(ld|st|stp)[slt]? [^%]' || true)
+mem=$(printf '%s' "$loop" | grep -cE '^	f[a-z]+ [^%]' || true)
 if [ "$wide" -ne 0 ] || [ "$mem" -ne 4 ]; then
 	echo "run_x87_stack: the inner loop has $wide 80-bit and $mem x87 memory accesses, not 0 and 4:"
 	printf '%s' "$loop"
 	exit 1
 fi
 
-# roundings to a double or a float the cache defers, read back every way
+# An n-body step's inner loop: dx, dy, dz, d2 and mag each rounded to a double once, through memory -- C's
+# rounding at assignment, which gcc makes the same way -- and nothing else stored to the frame: no copy rounded
+# again, no register spilled, no constant built there (they come from .rodata, a double made of two words' stores
+# being read before they can be forwarded to the load).
+cat >"$CC_TMP/nb.c" <<'EOF'
+struct body { double x, y, z, vx, vy, vz, m; };
+
+void step(struct body *b) {
+    int i, j;
+
+    for (i = 0; i < 5; ++i)
+        for (j = i + 1; j < 5; ++j) {
+            double dx = b[i].x - b[j].x, dy = b[i].y - b[j].y, dz = b[i].z - b[j].z;
+            double d2 = dx * dx + dy * dy + dz * dz + 0.01;
+            double mag = 0.001 / (d2 * d2);
+
+            b[i].vx -= dx * b[j].m * mag;
+            b[i].vy -= dy * b[j].m * mag;
+            b[i].vz -= dz * b[j].m * mag;
+            b[j].vx += dx * b[i].m * mag;
+            b[j].vy += dy * b[i].m * mag;
+            b[j].vz += dz * b[i].m * mag;
+        }
+}
+EOF
+"$CC_BIN" -m32 -O2 -S -o "$CC_TMP/nb.s" "$CC_TMP/nb.c"
+loop=$(awk '/^\.L/ { blk = "" } { blk = blk $0 "\n" } /^\tjmp/ { if (blk ~ /fstpl [0-9]+\(%e/) printf "%s", blk }' \
+	"$CC_TMP/nb.s")
+wide=$(printf '%s' "$loop" | grep -cE '^	f(ld|stp)t ' || true)
+frame=$(printf '%s' "$loop" | grep -cE '^	(fst[a-z]* |mov[a-z]* [^,]*, )-?[0-9]+\(%[er][bs]p\)' || true)
+if [ -z "$loop" ] || [ "$wide" -ne 0 ] || [ "$frame" -gt 5 ]; then
+	echo "run_x87_stack: the n-body loop has $wide 80-bit accesses and $frame stores to the frame, not 0 and 5:"
+	printf '%s' "${loop:-$(cat "$CC_TMP/nb.s")}"
+	exit 1
+fi
+
+# roundings to a double or a float the cache defers, read back every way; loads it defers to their reader
 cat >"$CC_TMP/round.c" <<'EOF'
 #include <stdio.h>
 
@@ -93,8 +129,31 @@ static void __attribute__((noinline)) rounds(void) {
            d == x * y, f < x / w);
 }
 
+static double mem[4] = {1.5, 2.5, 3.5, 4.5};
+static double *volatile alias = mem;
+
+/* a value loaded for one later read: the memory written, and the address's variable changed, before the read */
+static void __attribute__((noinline)) loads(int n) {
+    double *p = mem, *q = alias;
+    double a = p[0], b = p[1], c = p[2];
+    long double r;
+
+    p[0] = 10;
+    q[1] = 20;
+    r = a * c + b;
+    for (; n > 0; --n) {
+        double x = *p;
+
+        p = mem + n % 3;
+        r = r * x + *p;
+        *p = r - 1;
+    }
+    printf("%La %a %a %a\n", r, mem[0], mem[1], mem[2]);
+}
+
 int main(void) {
     rounds();
+    loads(7);
     printf("%a %a %La %a %a %La\n", fs[0], ds[0], ls[0], fs[1], ds[1], ls[1]);
     return 0;
 }
