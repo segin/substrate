@@ -2975,13 +2975,14 @@ static int declspec_accumulate(parser_t *p, declspec_acc_t *acc, decl_attrs_t *o
                         msize = bit_storage_size;
                     } else {
                         if (arr_saw) {
-                            if (arr_unsized) {
-                                if (is_union) {
-                                    set_diag(p->diag, p->tok.line, p->tok.col,
-                                             "flexible array member is not allowed in unions");
-                                    decl_attrs_clear(&mdecl_attrs);
-                                    return -1;
-                                }
+                            if (arr_unsized && is_union) {
+                                /*
+                                 * a union's flexible array, gcc's extension (15 on): wherever it is, of no
+                                 * size, the union as large as its other members -- Linux's DECLARE_FLEX_ARRAY
+                                 * puts one in a union for a compiler that takes it
+                                 */
+                                msize = 0;
+                            } else if (arr_unsized) {
                                 if (mname == NULL) {
                                     set_diag(p->diag, p->tok.line, p->tok.col,
                                              "flexible array member must be a named member");
