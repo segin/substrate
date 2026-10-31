@@ -633,6 +633,8 @@ static int sel_mask_test(xsel_t *s, int mv) {
 }
 
 static int ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src);
+static int const_sbits(long long k, int w);
+static int const_zbits(long long k, int w);
 static int zero_test_operand(const xsel_t *s, const cc_ssa_instr_t *in);
 static int br_test_bytes(const xsel_t *s, int v);
 
@@ -855,6 +857,44 @@ static int mask_ext_of(const xsel_t *s, const cc_ssa_instr_t *in, int *src) {
     return bytes;
 }
 
+/**
+ * Whether IR value @p v, an operand of a division, is a 32-bit integer extended as the division is signed or not
+ * (@p is_unsigned): a constant of 32 bits, an extension of 4 bytes of the same kind, or, with @p held, a value
+ * compute_ext() has found held so.  Without @p held the answer is from the instructions alone, which
+ * compute_demand() may take before the extensions are known.
+ */
+static int div32_operand(const xsel_t *s, int v, int is_unsigned, int held) {
+    const cc_ssa_instr_t *d = def_of(s, v);
+    long long k;
+    int src;
+
+    if (v < 0 || v >= s->f->value_count) {
+        return 0;
+    }
+    if (xs_const_of((xsel_t *)s, v, &k)) {
+        return is_unsigned ? const_zbits(k, 8) <= 32 : const_sbits(k, 8) <= 32;
+    }
+    if (d != NULL && ext_of(s, d, &src) == 4 && !d->is_unsigned == !is_unsigned) {
+        return 1;
+    }
+    if (d != NULL && is_unsigned && mask_ext_of(s, d, &src) == 4) {
+        return 1;
+    }
+    return held && s->sbits != NULL && (is_unsigned ? s->zbits[v] <= 32 : s->sbits[v] <= 32);
+}
+
+/**
+ * Whether division @p in, on x86-64, is of two 32-bit integers (div32_operand()), and so one idivl or divl of their
+ * low halves: the quotient is that of the 32-bit values (but INT_MIN / -1, which C leaves undefined and gcc's idivl
+ * traps on too), and a 64-bit divide is several times slower.  Dhrystone's `Int_2_Loc / Int_3_Loc` was a movslq of
+ * each and an idivq.
+ */
+static int div32(const xsel_t *s, const cc_ssa_instr_t *in, int held) {
+    return s->word == 8 && in->op == CC_SSA_DIV && in->lhs >= 0 && in->rhs >= 0 &&
+           cc_ssa_value_class(s->f, in->dst) == CC_VAL_I64 && s->f->value_ty[in->dst].kind != CC_TY_AGG &&
+           div32_operand(s, in->lhs, in->is_unsigned, held) && div32_operand(s, in->rhs, in->is_unsigned, held);
+}
+
 typedef struct {
     xsel_t *s;
     int changed;
@@ -878,7 +918,7 @@ static void demand_all(int v, void *ctx) {
 /**
  * Work out, for each IR value, the most low bits anything reads of it (dbits), back from its readers: the low bits
  * of a sum, a difference, a product, a mask or a shift left by a constant are those of its operands', a copy reads
- * what is read of it, a store what it stores, a 32-bit compare (cmp32()) 32, an extension at most its source's
+ * what is read of it, a store what it stores, a 32-bit compare (cmp32()) or division (div32()) 32, an extension at most its source's
  * width, and anything else all of a value.  Then an extension whose result is read no further than its source's
  * width -- an int extended to a long only for a 32-bit compare -- is a copy (ext_copy), as the bits it would set
  * are never read.
@@ -940,6 +980,13 @@ static int compute_demand(xsel_t *s) {
             case CC_SSA_MOV:
                 if (narrow) {
                     demand(&c, in->lhs, D);
+                    continue;
+                }
+                break;
+            case CC_SSA_DIV:
+                if (narrow && div32(s, in, 0)) {
+                    demand(&c, in->lhs, 32);
+                    demand(&c, in->rhs, 32);
                     continue;
                 }
                 break;
@@ -1111,7 +1158,7 @@ static void held_bits(int bytes, int is_unsigned, int w, int *sb, int *zb) {
 
 /**
  * Work out, for each IR value, the bits its definitions leave it extended from (sbits, zbits): a load of a narrower
- * integer, an extension, a compare, a mask, a constant, a copy of one, and on x86-64 a parameter or a call's result
+ * integer, an extension, a compare, a mask, a constant, a copy of one, an unsigned quotient, and on x86-64 a parameter or a call's result
  * as they are taken.  Every definition must say so; anything else says nothing.  Over and over until it settles,
  * from the most a value could be, so that copies around a loop agree.
  */
@@ -1202,6 +1249,16 @@ static int compute_ext(xsel_t *s) {
             case CC_SSA_CMP:
                 sb = 2;
                 zb = 1;
+                break;
+            case CC_SSA_DIV:
+                /* an unsigned quotient is no more than its dividend, and a divl's no more than 32 bits */
+                if (in->is_unsigned && in->lhs >= 0) {
+                    zb = s->zbits[in->lhs];
+                    if (div32(s, in, 1) && zb > 32) {
+                        zb = 32;
+                    }
+                    sb = zb < W ? zb + 1 : W;
+                }
                 break;
             case CC_SSA_MOV:
                 if (in->lhs >= 0) {
@@ -1546,15 +1603,19 @@ static void sel_binop(xsel_t *s, const cc_ssa_instr_t *in) {
     }
 }
 
-/** A word division: the quotient of %edx:%eax (%rdx:%rax) by the divisor. */
+/**
+ * A word division: the quotient of %edx:%eax (%rdx:%rax) by the divisor -- on x86-64 of %edx:%eax where both
+ * operands are 32-bit integers (div32()), the quotient then sign-extended only where more than its 32 bits is read.
+ */
 static void sel_div(xsel_t *s, const cc_ssa_instr_t *in) {
-    int w = s->word;
-    xop_t eax = xop_reg(XR_AX, w);
+    int w = div32(s, in, 1) ? 4 : s->word;
+    xop_t eax = xop_reg(XR_AX, s->word); /* (moved in and out whole: the division reads and writes its w bytes) */
     xop_t edx = xop_reg(XR_DX, 4);
-    xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), w);
+    xop_t d = xop_reg(xs_vreg_of(s, in->dst, 0), s->word);
     xop_t b = xs_reg_word(s, in->rhs, 0);
     xinst_t x;
 
+    b.size = (unsigned char)w;
     xs_move_word_to(s, in->lhs, 0, &eax);
     if (in->is_unsigned) {
         /* (xorl clears all of %rdx) */
@@ -1569,7 +1630,13 @@ static void sel_div(xsel_t *s, const cc_ssa_instr_t *in) {
     x.imp_use = XR_BIT(XR_AX) | XR_BIT(XR_DX);
     x.imp_def = XR_BIT(XR_AX) | XR_BIT(XR_DX);
     xf_emit(&s->xf, &x);
-    xs_emit(s, XI_MOV, w, 2, &eax, &d, NULL);
+    if (w < s->word && !in->is_unsigned && s->dbits[in->dst] > 32) {
+        /* (an unsigned one is zero-extended already, as writing %eax clears the rest of %rax) */
+        eax.size = 4;
+        xs_emit(s, XI_MOVSX, s->word, 2, &eax, &d, NULL);
+        return;
+    }
+    xs_emit(s, XI_MOV, s->word, 2, &eax, &d, NULL);
 }
 
 void xs_load_bytes(xsel_t *s, xop_t m, xop_t d, int bytes) {
