@@ -152,7 +152,8 @@ for m in $modes; do
 			echo "run_switch_table: -m$m: $fn() has no jump table"
 			exit 1
 		fi
-		if [ "$(grep -cE '^	cmp' "$CC_TMP/fn.s")" -gt 2 ]; then
+		# (the table's bound, and run()'s loop test, at its top and copied to its bottom)
+		if [ "$(grep -cE '^	cmp' "$CC_TMP/fn.s")" -gt 3 ]; then
 			echo "run_switch_table: -m$m: $fn() compares case by case"
 			exit 1
 		fi

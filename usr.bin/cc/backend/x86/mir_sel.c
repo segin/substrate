@@ -3746,6 +3746,141 @@ static void tidy_branches(xfunc_t *xf, int labels_taken) {
     free(refs);
 }
 
+/** The most instructions a loop's test may have before its branch for rotate_loops() to copy it. */
+#define ROTATE_TEST_MAX 3
+
+/** Whether instruction @p in may be one of a loop test's that rotate_loops() copies: a compare, a test or a copy. */
+static int rotate_copyable(const xinst_t *in) {
+    switch (in->op) {
+    case XI_CMP:
+    case XI_TEST:
+    case XI_MOV:
+    case XI_MOVZX:
+    case XI_MOVSX:
+    case XI_LEA:
+        return in->imp_def == 0 && in->clobber == 0;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * The length of the test at instruction @p k of @p xf -- the instructions rotate_copyable() allows, then one
+ * branch, XI_JCC, at k + n, with something after it -- or -1 when there is none there.
+ */
+static int loop_test_at(const xfunc_t *xf, int k) {
+    int n;
+
+    for (n = 0; n < ROTATE_TEST_MAX && k + n < xf->nins && rotate_copyable(&xf->ins[k + n]); ++n) {
+    }
+    return k + n + 1 < xf->nins && xf->ins[k + n].op == XI_JCC ? n : -1;
+}
+
+/**
+ * After allocation, a loop that tests at its top -- `1: cmp; jge 2f; body; jmp 1b; 2:` -- tests at its bottom
+ * too: the jump back is a copy of the test and the branch the other way, to the body, `1: cmp; jge 2f; 3: body;
+ * cmp; jl 3b; 2:`.  Each trip then takes one branch, not two, as gcc's copy of a loop's header has it.  The test
+ * reads at the jump what it would have read at the top, the registers being physical and the jump leading straight
+ * there; it is a few compares, tests and copies at most (rotate_copyable()), and where the exit is not what follows
+ * the jump, a jump to it comes after the branch.
+ *
+ * @return how many loops were rotated
+ */
+static int rotate_loops(xfunc_t *xf) {
+    int *at = (int *)malloc((size_t)(xf->nlabels > 0 ? xf->nlabels : 1) * sizeof(int));
+    int *body = (int *)malloc((size_t)(xf->nins > 0 ? xf->nins : 1) * sizeof(int));
+    unsigned char *rot = (unsigned char *)calloc((size_t)(xf->nins > 0 ? xf->nins : 1), 1);
+    xinst_t *out = NULL;
+    int nrot = 0;
+    int extra = 0;
+    int i;
+    int j = 0;
+
+    if (at == NULL || body == NULL || rot == NULL) {
+        goto done;
+    }
+    for (i = 0; i < xf->nlabels; ++i) {
+        at[i] = -1;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        body[i] = -1;
+        if (xf->ins[i].op == XI_LABEL && xf->ins[i].label >= 0 && xf->ins[i].label < xf->nlabels &&
+            at[xf->ins[i].label] < 0) {
+            at[xf->ins[i].label] = i;
+        }
+    }
+    /* which jumps back go, and the labels the bodies they branch to need */
+    for (i = 0; i < xf->nins; ++i) {
+        const xinst_t *in = &xf->ins[i];
+        int k;
+        int n;
+        int b;
+
+        if (in->op != XI_JMP || in->label < 0 || in->label >= xf->nlabels || (k = at[in->label]) < 0 || k >= i) {
+            continue;
+        }
+        while (k < xf->nins && xf->ins[k].op == XI_LABEL) {
+            k++;
+        }
+        if ((n = loop_test_at(xf, k)) < 0 || (b = k + n + 1) > i || xf->ins[k + n].label == in->label) {
+            continue;
+        }
+        if (body[b] < 0) {
+            body[b] = xf->ins[b].op == XI_LABEL ? xf->ins[b].label : xf_new_label(xf);
+            extra += xf->ins[b].op != XI_LABEL;
+        }
+        rot[i] = 1;
+        nrot++;
+        extra += n + 1;
+    }
+    if (nrot == 0) {
+        goto done;
+    }
+    out = (xinst_t *)malloc((size_t)(xf->nins + extra) * sizeof(*out));
+    if (out == NULL) {
+        nrot = 0;
+        goto done;
+    }
+    for (i = 0; i < xf->nins; ++i) {
+        const xinst_t *in = &xf->ins[i];
+        int k;
+        int n;
+        xinst_t br;
+
+        if (body[i] >= 0 && in->op != XI_LABEL) {
+            out[j] = xi_make(XI_LABEL, 0, 0, NULL, NULL, NULL);
+            out[j++].label = body[i];
+        }
+        if (!rot[i]) {
+            out[j++] = *in;
+            continue;
+        }
+        for (k = at[in->label]; xf->ins[k].op == XI_LABEL; ++k) {
+        }
+        n = loop_test_at(xf, k);
+        memcpy(&out[j], &xf->ins[k], (size_t)n * sizeof(*out));
+        j += n;
+        br = xf->ins[k + n];
+        br.cc = (unsigned char)xcc_negate((xcc_t)br.cc);
+        br.label = body[k + n + 1];
+        out[j++] = br;
+        if (!label_here(xf, i + 1, xf->ins[k + n].label)) {
+            /* the exit is elsewhere: the branch back, then a jump to it */
+            out[j] = *in;
+            out[j++].label = xf->ins[k + n].label;
+        }
+    }
+    free(xf->ins);
+    xf->ins = out;
+    xf->cap = xf->nins + extra;
+    xf->nins = j;
+done:
+    free(at);
+    free(body);
+    free(rot);
+    return nrot;
+}
+
 /** Whether function @p f takes a label's address (&&label), which a computed goto may then jump to. */
 static int takes_label_address(const cc_ssa_function_t *f) {
     size_t j;
@@ -3768,6 +3903,10 @@ static void peephole(xfunc_t *xf, int word, int labels_taken) {
     int j = 0;
 
     tidy_branches(xf, labels_taken);
+    /* (and what the copies leave: the header's label nothing jumps to now, a branch to what follows) */
+    if (rotate_loops(xf) > 0) {
+        tidy_branches(xf, labels_taken);
+    }
 
     /* first, on its own: a test of what the flags were just set from (what follows may read them) */
     for (i = 0; i < xf->nins; ++i) {
