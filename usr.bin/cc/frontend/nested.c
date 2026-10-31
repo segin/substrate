@@ -25,13 +25,10 @@
  * @return      the definition, or NULL if there is none
  */
 const cc_function_t *cc_find_function_def(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
+    long i;
 
-    if (tu == NULL || name == NULL) {
-        return NULL;
-    }
-    for (i = 0; i < tu->func_count; ++i) {
-        if (tu->funcs[i].has_body && tu->funcs[i].name != NULL && strcmp(tu->funcs[i].name, name) == 0) {
+    for (i = cc_tu_function_first(tu, name); i >= 0; i = cc_tu_function_next(tu, i)) {
+        if (tu->funcs[i].has_body) {
             return &tu->funcs[i];
         }
     }

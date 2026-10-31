@@ -2005,37 +2005,19 @@ static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_
 }
 
 const cc_function_t *find_fn(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    const cc_function_t *best = NULL;
-    int best_score = -1;
-    if (tu == NULL || name == NULL) {
-        return NULL;
-    }
-    for (i = 0; i < tu->func_count; ++i) {
-        const cc_function_t *f = &tu->funcs[i];
-        int score;
-        if (strcmp(f->name, name) != 0) {
-            continue;
-        }
-        score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
-        if (best == NULL || score > best_score) {
-            best = f;
-            best_score = score;
-        }
-    }
-    return best;
+    return cc_tu_function_best(tu, name);
 }
 
 const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    size_t best_idx = 0;
+    long i;
+    long best_idx = 0;
     const cc_global_t *best = NULL;
     int best_score = -1;
     if (tu == NULL || name == NULL) {
         return NULL;
     }
-    for (i = 0; i < tu->global_count; ++i) {
-        if (strcmp(tu->globals[i].name, name) == 0) {
+    for (i = cc_tu_global_first(tu, name); i >= 0; i = cc_tu_global_next(tu, i)) {
+        {
             const cc_global_t *g = &tu->globals[i];
             int score = 0;
             if (g->init != NULL) {
@@ -15892,7 +15874,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         lower_jump_scopes_t jumps;
         size_t var_count = 0;
         size_t j;
-        size_t k;
+        long k;
         int saw_ret = 0;
         cc_attr_flags_t eff_attr_flags;
         long eff_attr_align;
@@ -15913,11 +15895,9 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         eff_attr_align = af->attr_align;
         eff_attr_section = af->attr_section;
         eff_attr_alias = af->attr_alias;
-        for (k = 0; k < tu->func_count; ++k) {
+        for (k = cc_tu_function_first(tu, af->name); k >= 0; k = cc_tu_function_next(tu, k)) {
             const cc_function_t *cand = &tu->funcs[k];
-            if (strcmp(cand->name, af->name) != 0) {
-                continue;
-            }
+
             eff_attr_flags |= cand->attr_flags;
             if (cand->attr_align > eff_attr_align) {
                 eff_attr_align = cand->attr_align;

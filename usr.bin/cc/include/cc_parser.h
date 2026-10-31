@@ -78,6 +78,8 @@ typedef struct {
     var_entry_t *vars;
     size_t var_count;
     size_t var_cap;
+    struct parser_var_index *var_index; /**< vars by name, kept as they are pushed and popped (owned) */
+    int var_index_off;                  /**< it ran out of memory: vars are walked */
     cc_struct_def_t *structs;
     size_t struct_count;
     size_t struct_cap;

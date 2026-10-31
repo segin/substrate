@@ -28,6 +28,218 @@
 static const cc_function_t *parser_find_function_decl(parser_t *p, const char *name);
 static const cc_global_t *parser_find_global_decl(parser_t *p, const char *name);
 static const cc_ctype_t *parser_ident_ctype(parser_t *p, const char *name);
+
+/*
+ * The variables in scope by name.  Every file-scope name is one, and the
+ * kernel's headers have thousands: a walk of them all at each
+ * declaration and each use was much of the time cc took on a file of
+ * Linux.  For each name its topmost variable, and for each variable the
+ * one of its name it hides; kept as the stack is pushed and popped.
+ * Out of memory, it is dropped and the stack is walked as before.
+ */
+
+/** A name: its topmost variable. */
+typedef struct {
+    char *name;  /**< the name (owned); NULL for an empty slot */
+    size_t len;  /**< its length */
+    long head;   /**< its topmost variable, or -1 */
+} var_slot_t;
+
+struct parser_var_index {
+    var_slot_t *slots; /**< open addressing, a power of two of them */
+    size_t cap;        /**< their number */
+    size_t used;       /**< how many hold a name */
+    long *hides;       /**< hides[i]: the variable of i's name below it, or -1 */
+    size_t *slot_of;   /**< slot_of[i]: the slot of i's name */
+    size_t var_cap;    /**< the capacity of hides and slot_of */
+    size_t indexed;    /**< variables [0, indexed) are in the index */
+};
+
+/**
+ * Take variables [@p to, indexed) out of index @p ix, topmost first.  A
+ * lookahead copy of the parser shares its stack and its index, and what
+ * it pushed and did not pop is above the parser's top: gone, as the walk
+ * of the stack never saw it.
+ */
+static void var_index_unwind(struct parser_var_index *ix, size_t to) {
+    while (ix->indexed > to) {
+        size_t k = --ix->indexed;
+
+        ix->slots[ix->slot_of[k]].head = ix->hides[k];
+    }
+}
+
+/** FNV-1a of the @p len bytes at @p s. */
+static size_t var_name_hash(const char *s, size_t len) {
+    uint64_t h = 1469598103934665603ULL;
+    size_t i;
+
+    for (i = 0; i < len; ++i) {
+        h = (h ^ (unsigned char)s[i]) * 1099511628211ULL;
+    }
+    return (size_t)h;
+}
+
+/** The slot of the @p len-byte name @p name in @p slots (@p cap of them), or the empty one where it goes. */
+static size_t var_slot_find(const var_slot_t *slots, size_t cap, const char *name, size_t len) {
+    size_t s = var_name_hash(name, len) & (cap - 1);
+
+    while (slots[s].name != NULL && (slots[s].len != len || memcmp(slots[s].name, name, len) != 0)) {
+        s = (s + 1) & (cap - 1);
+    }
+    return s;
+}
+
+/** Drop the index of @p p: it is out of memory, and its stack is walked from now on. */
+static void var_index_drop(parser_t *p) {
+    struct parser_var_index *ix = p->var_index;
+    size_t i;
+
+    if (ix != NULL) {
+        for (i = 0; i < ix->cap; ++i) {
+            free(ix->slots[i].name);
+        }
+        free(ix->slots);
+        free(ix->hides);
+        free(ix->slot_of);
+        free(ix);
+        p->var_index = NULL;
+    }
+}
+
+/**
+ * Index variable p->vars[ix->indexed], the next one up: the topmost of
+ * its name.
+ *
+ * @return 0, or -1 when out of memory
+ */
+static int var_index_add(parser_t *p, struct parser_var_index *ix) {
+    size_t i = ix->indexed;
+    const char *name = p->vars[i].name;
+    size_t len = strlen(name);
+    size_t s;
+
+    if (i >= ix->var_cap) {
+        size_t ncap = ix->var_cap != 0 ? ix->var_cap * 2 : 256;
+        long *hides;
+        size_t *slot_of;
+
+        while (ncap <= i) {
+            ncap *= 2;
+        }
+        hides = (long *)realloc(ix->hides, ncap * sizeof(*hides));
+        if (hides == NULL) {
+            return -1;
+        }
+        ix->hides = hides;
+        slot_of = (size_t *)realloc(ix->slot_of, ncap * sizeof(*slot_of));
+        if (slot_of == NULL) {
+            return -1;
+        }
+        ix->slot_of = slot_of;
+        ix->var_cap = ncap;
+    }
+    if ((ix->used + 1) * 2 > ix->cap) {
+        size_t ncap = ix->cap != 0 ? ix->cap * 2 : 64;
+        var_slot_t *slots = (var_slot_t *)calloc(ncap, sizeof(*slots));
+        size_t k;
+        size_t v;
+
+        if (slots == NULL) {
+            return -1;
+        }
+        for (k = 0; k < ix->cap; ++k) {
+            if (ix->slots[k].name != NULL) {
+                slots[var_slot_find(slots, ncap, ix->slots[k].name, ix->slots[k].len)] = ix->slots[k];
+            }
+        }
+        free(ix->slots);
+        ix->slots = slots;
+        ix->cap = ncap;
+        /* the variables' slots moved with their names */
+        for (v = 0; v < i; ++v) {
+            ix->slot_of[v] = var_slot_find(slots, ncap, p->vars[v].name, strlen(p->vars[v].name));
+        }
+    }
+    s = var_slot_find(ix->slots, ix->cap, name, len);
+    if (ix->slots[s].name == NULL) {
+        ix->slots[s].name = cc_strndup(name, len);
+        if (ix->slots[s].name == NULL) {
+            return -1;
+        }
+        ix->slots[s].len = len;
+        ix->slots[s].head = -1;
+        ix->used++;
+    }
+    ix->hides[i] = ix->slots[s].head;
+    ix->slots[s].head = (long)i;
+    ix->slot_of[i] = s;
+    ix->indexed = i + 1;
+    return 0;
+}
+
+/**
+ * Index variable p->vars[@p i], just pushed, and any below it the index
+ * lacks; what is above it is a lookahead copy's, and gone.
+ *
+ * @return 0, or -1 when out of memory (and the index is dropped)
+ */
+static int var_index_push(parser_t *p, size_t i) {
+    struct parser_var_index *ix = p->var_index;
+
+    if (p->var_index_off) {
+        return 0;
+    }
+    if (ix == NULL) {
+        ix = (struct parser_var_index *)calloc(1, sizeof(*ix));
+        if (ix == NULL) {
+            p->var_index_off = 1;
+            return -1;
+        }
+        p->var_index = ix;
+    }
+    var_index_unwind(ix, i);
+    while (ix->indexed <= i) {
+        if (var_index_add(p, ix) != 0) {
+            var_index_drop(p);
+            p->var_index_off = 1;
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/** Unindex variable p->vars[@p i], about to be popped: the one it hid is the topmost again. */
+static void var_index_pop(parser_t *p, size_t i) {
+    if (p->var_index != NULL) {
+        var_index_unwind(p->var_index, i);
+    }
+}
+
+/**
+ * The topmost variable of the @p len-byte name @p name, and through
+ * p->var_index->hides those below it.
+ *
+ * @return its index, -1 if there is none, or -2 when there is no index
+ */
+static long var_index_top(const parser_t *p, const char *name, size_t len) {
+    struct parser_var_index *ix = p->var_index;
+    size_t s;
+
+    if (ix == NULL || p->var_index_off) {
+        return -2;
+    }
+    var_index_unwind(ix, p->var_count);
+    if (ix->indexed != p->var_count) {
+        /* variables pushed past the index (by a copy of the parser): walk them */
+        return -2;
+    }
+    if (ix->cap == 0) {
+        return -1;
+    }
+    s = var_slot_find(ix->slots, ix->cap, name, len);
+    return ix->slots[s].name != NULL ? ix->slots[s].head : -1;
+}
 static const cc_ctype_t *parser_usual_arith(const cc_ctype_t *a, const cc_ctype_t *b);
 static const cc_ctype_t *parser_bin_ctype(parser_t *p, const cc_expr_t *e);
 static const cc_ctype_t *parser_complete_operand_array(parser_t *p, const cc_expr_t *e, const cc_ctype_t *t);
@@ -51,17 +263,9 @@ static const cc_function_t *parser_find_function_decl(parser_t *p, const char *n
     }
 
     if (p->tu != NULL) {
-        for (i = 0; i < p->tu->func_count; ++i) {
-            const cc_function_t *f = &p->tu->funcs[i];
-            int score;
-            if (strcmp(f->name, name) != 0) {
-                continue;
-            }
-            score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
-            if (best == NULL || score > best_score) {
-                best = f;
-                best_score = score;
-            }
+        best = cc_tu_function_best(p->tu, name);
+        if (best != NULL) {
+            best_score = (best->has_prototype ? 2 : 0) + (best->has_body ? 1 : 0);
         }
     }
 
@@ -83,22 +287,27 @@ static const cc_function_t *parser_find_function_decl(parser_t *p, const char *n
 
 /** The first file-scope object named @p name seen so far, or NULL. */
 static const cc_global_t *parser_find_global_decl(parser_t *p, const char *name) {
-    size_t i;
+    long i;
 
     if (p == NULL || p->tu == NULL || name == NULL || name[0] == '\0') {
         return NULL;
     }
-    for (i = 0; i < p->tu->global_count; ++i) {
-        const cc_global_t *g = &p->tu->globals[i];
-        if (g->name != NULL && strcmp(g->name, name) == 0) {
-            return g;
-        }
-    }
-    return NULL;
+    i = cc_tu_global_first(p->tu, name);
+    return i >= 0 ? &p->tu->globals[i] : NULL;
 }
 
 int var_find_visible_n(const parser_t *p, const char *name, size_t len) {
     size_t i = p->var_count;
+    long j = var_index_top(p, name, len);
+
+    if (j != -2) {
+        for (; j >= 0; j = p->var_index->hides[j]) {
+            if (p->vars[j].depth <= p->scope_depth) {
+                return (int)j;
+            }
+        }
+        return -1;
+    }
     while (i > 0) {
         i--;
         if (strlen(p->vars[i].name) == len && strncmp(p->vars[i].name, name, len) == 0 &&
@@ -122,25 +331,40 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     var_entry_t *next;
     char *dup;
     int i;
+    long found = -1;
     size_t len;
 
     if (name == NULL || name[0] == '\0') {
         return 0;
     }
     len = strlen(name);
-    for (i = (int)p->var_count - 1; i >= 0; --i) {
-        if (p->vars[i].depth < p->scope_depth) {
-            break;
+    found = p->scope_depth == 0 ? var_index_top(p, name, len) : -2;
+    if (found != -2) {
+        /* at file scope, where no variable is shallower: the topmost of its name at depth 0, as the walk finds */
+        while (found >= 0 && p->vars[found].depth != 0) {
+            found = p->var_index->hides[found];
         }
-        if (p->vars[i].depth == p->scope_depth && strlen(p->vars[i].name) == len &&
-            strncmp(p->vars[i].name, name, len) == 0) {
-            p->vars[i].ctype = ctype;
-            p->vars[i].const_type = NULL;
-            p->vars[i].align = 0;
-            p->vars[i].is_constexpr = 0;
-            p->vars[i].const_init = NULL;
-            return 0;
+    } else {
+        /* in a block: a variable of the block's own, walking down to its start */
+        found = -1;
+        for (i = (int)p->var_count - 1; i >= 0; --i) {
+            if (p->vars[i].depth < p->scope_depth) {
+                break;
+            }
+            if (p->vars[i].depth == p->scope_depth && strlen(p->vars[i].name) == len &&
+                strncmp(p->vars[i].name, name, len) == 0) {
+                found = i;
+                break;
+            }
         }
+    }
+    if (found >= 0) {
+        p->vars[found].ctype = ctype;
+        p->vars[found].const_type = NULL;
+        p->vars[found].align = 0;
+        p->vars[found].is_constexpr = 0;
+        p->vars[found].const_init = NULL;
+        return 0;
     }
     if (p->var_count == p->var_cap) {
         size_t ncap = p->var_cap == 0 ? 32 : p->var_cap * 2;
@@ -164,6 +388,8 @@ int var_push(parser_t *p, const char *name, const cc_ctype_t *ctype) {
     p->vars[p->var_count].is_constexpr = 0;
     p->vars[p->var_count].const_init = NULL;
     p->var_count++;
+    /* (out of memory, the index is dropped and the stack walked) */
+    (void)var_index_push(p, p->var_count - 1);
     return 0;
 }
 
@@ -306,6 +532,7 @@ int parser_note_constexpr(parser_t *p, const char *name, const cc_ctype_t *ctype
 
 void var_pop_to_depth(parser_t *p, int depth) {
     while (p->var_count > 0 && p->vars[p->var_count - 1].depth > depth) {
+        var_index_pop(p, p->var_count - 1);
         free(p->vars[p->var_count - 1].name);
         p->var_count--;
     }
@@ -313,6 +540,7 @@ void var_pop_to_depth(parser_t *p, int depth) {
 
 void parser_free_vars(parser_t *p) {
     size_t i;
+    var_index_drop(p);
     for (i = 0; i < p->var_count; ++i) {
         free(p->vars[i].name);
     }

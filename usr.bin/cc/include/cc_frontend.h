@@ -434,6 +434,9 @@ typedef struct cc_translation_unit {
     size_t struct_count;
     char **toplevel_asm;       /**< each file-scope `asm("...")`'s text, in source order (owned) */
     size_t toplevel_asm_count; /**< the number of them */
+    struct cc_name_index *fn_index;     /**< funcs by name, built as they are looked up (frontend/nameindex.c;
+                                             owned) */
+    struct cc_name_index *global_index; /**< globals by name, likewise (owned) */
 } cc_translation_unit_t;
 
 /** A variable of the function a GNU nested function is defined in, visible where it is defined. */
@@ -447,6 +450,13 @@ int cc_nested_outer_vars(const cc_translation_unit_t *tu, const cc_function_t *f
                          size_t *count);
 int cc_nested_uses_outer(const cc_translation_unit_t *tu, const cc_function_t *f);
 const cc_function_t *cc_find_function_def(const cc_translation_unit_t *tu, const char *name);
+
+long cc_tu_function_first(const cc_translation_unit_t *tu, const char *name);
+long cc_tu_function_next(const cc_translation_unit_t *tu, long i);
+const cc_function_t *cc_tu_function_best(const cc_translation_unit_t *tu, const char *name);
+long cc_tu_global_first(const cc_translation_unit_t *tu, const char *name);
+long cc_tu_global_next(const cc_translation_unit_t *tu, long i);
+void cc_tu_name_indexes_free(cc_translation_unit_t *tu);
 
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag);
 

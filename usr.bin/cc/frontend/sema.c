@@ -832,22 +832,7 @@ static int collect_labels_gotos_stmt(const cc_stmt_t *s, name_list_t *labels, na
 }
 
 const cc_function_t *find_function(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    const cc_function_t *best = NULL;
-    int best_score = -1;
-    for (i = 0; i < tu->func_count; ++i) {
-        const cc_function_t *f = &tu->funcs[i];
-        int score;
-        if (strcmp(f->name, name) != 0) {
-            continue;
-        }
-        score = (f->has_prototype ? 2 : 0) + (f->has_body ? 1 : 0);
-        if (best == NULL || score > best_score) {
-            best = f;
-            best_score = score;
-        }
-    }
-    return best;
+    return cc_tu_function_best(tu, name);
 }
 
 /**
@@ -879,16 +864,9 @@ const cc_ctype_t *sema_param_ctype(const cc_param_t *p) {
 }
 
 const cc_global_t *sema_find_global(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    if (tu == NULL || name == NULL) {
-        return NULL;
-    }
-    for (i = 0; i < tu->global_count; ++i) {
-        if (strcmp(tu->globals[i].name, name) == 0) {
-            return &tu->globals[i];
-        }
-    }
-    return NULL;
+    long i = cc_tu_global_first(tu, name);
+
+    return i >= 0 ? &tu->globals[i] : NULL;
 }
 
 static int maybe_warn_deprecated_symbol(const cc_translation_unit_t *tu, const char *name, size_t line, size_t col,
@@ -6648,7 +6626,7 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
     for (i = 0; i < tu->global_count; ++i) {
         cc_global_t *g = &tu->globals[i];
         int sc_count = storage_class_count(g->storage);
-        size_t j;
+        long j;
         set_diag_context(g->line, g->col);
         if (diag != NULL && diag->message[0] == '\0' && (g->line != 0 || g->col != 0)) {
             diag->line = g->line;
@@ -6723,8 +6701,9 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
                 goto fail_global_item;
             }
         }
-        for (j = 0; j < i; ++j) {
-            if (strcmp(tu->globals[j].name, g->name) == 0) {
+        /* the first declaration of its name before it, if any */
+        for (j = cc_tu_global_first(tu, g->name); j >= 0 && (size_t)j < i; j = cc_tu_global_next(tu, j)) {
+            {
                 const cc_global_t *prev = &tu->globals[j];
                 int prev_static = (prev->storage & CC_STORAGE_STATIC) != 0;
                 int cur_static = (g->storage & CC_STORAGE_STATIC) != 0;
@@ -6919,7 +6898,7 @@ fail_global_item:
     for (i = 0; i < tu->func_count; ++i) {
         cc_function_t *f = &tu->funcs[i];
         int f_sc_count = storage_class_count(f->storage);
-        size_t j;
+        long j;
         set_diag_context(f->line, f->col);
         if (diag != NULL && diag->message[0] == '\0' && (f->line != 0 || f->col != 0)) {
             diag->line = f->line;
@@ -7085,15 +7064,13 @@ fail_global_item:
                 goto fail_decl;
             }
         }
-        for (j = 0; j < i; ++j) {
+        /* each declaration of its name before it */
+        for (j = cc_tu_function_first(tu, f->name); j >= 0 && (size_t)j < i; j = cc_tu_function_next(tu, j)) {
             cc_function_t *prev = &tu->funcs[j];
             int prev_static;
             int cur_static;
             int prev_extern;
             int cur_extern;
-            if (strcmp(prev->name, f->name) != 0) {
-                continue;
-            }
             if (!func_decl_compatible(tu, prev, f)) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "conflicting declarations for function: %s",
@@ -7193,10 +7170,8 @@ fail_decl:
             diag->col = f->col;
         }
 
-        for (k = 0; k < tu->func_count; ++k) {
-            if (strcmp(tu->funcs[k].name, f->name) == 0) {
-                fn_attr_flags |= tu->funcs[k].attr_flags;
-            }
+        for (long d = cc_tu_function_first(tu, f->name); d >= 0; d = cc_tu_function_next(tu, d)) {
+            fn_attr_flags |= tu->funcs[d].attr_flags;
         }
 
         if (f->nest_parent != NULL) {

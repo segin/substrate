@@ -6390,17 +6390,15 @@ static int parser_global_types_agree(const cc_ctype_t *a, const cc_ctype_t *b) {
 }
 
 static int push_global(cc_translation_unit_t *tu, cc_global_t g) {
-    size_t i;
-    for (i = 0; i < tu->global_count; ++i) {
+    long i;
+    /* the first declaration of its name, if any: this one merges into it */
+    for (i = cc_tu_global_first(tu, g.name); i >= 0; i = cc_tu_global_next(tu, i)) {
         cc_global_t *cur = &tu->globals[i];
         int cur_static;
         int new_static;
         int cur_extern;
         int new_extern;
 
-        if (strcmp(cur->name, g.name) != 0) {
-            continue;
-        }
         if (!parser_global_types_agree(cur->ctype, g.ctype)) {
             break;
         }
@@ -10604,6 +10602,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
     free(tu->funcs);
     tu->funcs = NULL;
     tu->func_count = 0;
+    cc_tu_name_indexes_free(tu);
     for (i = 0; i < tu->global_count; ++i) {
         free(tu->globals[i].name);
         free(tu->globals[i].attr_section);

@@ -2,6 +2,7 @@
 #include "cc_options.h"
 #include "cc_target.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2920,35 +2921,123 @@ int cc_optimize_function(cc_ssa_function_t *f, int opt_level) {
     return optimize_function(f, opt_level);
 }
 
-/** The index of the function of @p m that @p sym calls, or -1 when it is not one of the module's. */
-static long called_function(const cc_ssa_module_t *m, const char *sym) {
+/**
+ * The module's functions by name, for the passes that look a callee up
+ * at every call: a walk of them all was most of the inliner's time on a
+ * file of Linux.  Made when a lookup finds it missing or out of date --
+ * of another module, or of the same one after functions were added or
+ * removed -- and freed when cc_run_middle_passes() returns.
+ */
+static struct {
+    const cc_ssa_module_t *m;      /**< the module it is of */
+    const cc_ssa_function_t *funcs; /**< m->funcs when it was made */
+    size_t count;                  /**< m->func_count when it was made */
+    long *slots;                   /**< function indexes, open addressing; -1 for an empty slot */
+    size_t cap;                    /**< their number, a power of two; 0 when there is no map */
+} g_fn_map;
+
+/** FNV-1a of the @p n bytes at @p s. */
+static uint64_t fn_name_hash(const char *s, size_t n) {
+    uint64_t h = 1469598103934665603ULL;
     size_t i;
 
+    for (i = 0; i < n; ++i) {
+        h ^= (unsigned char)s[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+/** Free the function map. */
+static void fn_map_free(void) {
+    free(g_fn_map.slots);
+    memset(&g_fn_map, 0, sizeof(g_fn_map));
+}
+
+/**
+ * Make the function map of @p m: each name once, the first function that
+ * has it, as a walk of them finds.
+ *
+ * @return 0, or -1 when out of memory (and there is no map)
+ */
+static int fn_map_build(const cc_ssa_module_t *m) {
+    size_t cap = 64;
+    size_t i;
+
+    fn_map_free();
+    while (cap < m->func_count * 2) {
+        cap *= 2;
+    }
+    g_fn_map.slots = (long *)malloc(cap * sizeof(*g_fn_map.slots));
+    if (g_fn_map.slots == NULL) {
+        return -1;
+    }
+    for (i = 0; i < cap; ++i) {
+        g_fn_map.slots[i] = -1;
+    }
     for (i = 0; i < m->func_count; ++i) {
-        if (m->funcs[i].name != NULL && strcmp(m->funcs[i].name, sym) == 0) {
-            return (long)i;
+        const char *name = m->funcs[i].name;
+        size_t len;
+        size_t s;
+
+        if (name == NULL) {
+            continue;
         }
+        len = strlen(name);
+        s = (size_t)fn_name_hash(name, len) & (cap - 1);
+        while (g_fn_map.slots[s] >= 0 && strcmp(m->funcs[g_fn_map.slots[s]].name, name) != 0) {
+            s = (s + 1) & (cap - 1);
+        }
+        if (g_fn_map.slots[s] < 0) {
+            g_fn_map.slots[s] = (long)i;
+        }
+    }
+    g_fn_map.m = m;
+    g_fn_map.funcs = m->funcs;
+    g_fn_map.count = m->func_count;
+    g_fn_map.cap = cap;
+    return 0;
+}
+
+/**
+ * The index of the first function of @p m named by the @p n bytes at
+ * @p sym, or -1.
+ */
+static long fn_lookup(const cc_ssa_module_t *m, const char *sym, size_t n) {
+    size_t s;
+    size_t i;
+
+    if ((g_fn_map.cap == 0 || g_fn_map.m != m || g_fn_map.funcs != m->funcs || g_fn_map.count != m->func_count) &&
+        fn_map_build(m) != 0) {
+        for (i = 0; i < m->func_count; ++i) {
+            const char *name = m->funcs[i].name;
+
+            if (name != NULL && strlen(name) == n && strncmp(name, sym, n) == 0) {
+                return (long)i;
+            }
+        }
+        return -1;
+    }
+    s = (size_t)fn_name_hash(sym, n) & (g_fn_map.cap - 1);
+    while (g_fn_map.slots[s] >= 0) {
+        const char *name = m->funcs[g_fn_map.slots[s]].name;
+
+        if (strncmp(name, sym, n) == 0 && name[n] == '\0') {
+            return g_fn_map.slots[s];
+        }
+        s = (s + 1) & (g_fn_map.cap - 1);
     }
     return -1;
 }
 
+/** The index of the function of @p m that @p sym calls, or -1 when it is not one of the module's. */
+static long called_function(const cc_ssa_module_t *m, const char *sym) {
+    return sym != NULL ? fn_lookup(m, sym, strlen(sym)) : -1;
+}
+
 /** The index of the function of @p m that symbol @p sym names (an offset or @PLT after it ignored), or -1. */
 static long function_named(const cc_ssa_module_t *m, const char *sym) {
-    size_t n;
-    size_t i;
-
-    if (sym == NULL) {
-        return -1;
-    }
-    n = sym_name_len(sym);
-    for (i = 0; i < m->func_count; ++i) {
-        const char *name = m->funcs[i].name;
-
-        if (name != NULL && strlen(name) == n && strncmp(name, sym, n) == 0) {
-            return (long)i;
-        }
-    }
-    return -1;
+    return sym != NULL ? fn_lookup(m, sym, sym_name_len(sym)) : -1;
 }
 
 /**
@@ -3613,7 +3702,24 @@ static int settle_function(cc_ssa_function_t *f) {
     return 0;
 }
 
+static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag);
+
+/**
+ * Run the optimizer over module @p m.
+ *
+ * @param m          the module
+ * @param opt_level  the -O level
+ * @param diag       receives an error
+ * @return           0, or -1 on error
+ */
 int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
+    int rc = run_middle_passes(m, opt_level, diag);
+
+    fn_map_free();
+    return rc;
+}
+
+static int run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
     size_t i;
     int oom = 0;
 

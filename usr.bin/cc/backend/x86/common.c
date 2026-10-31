@@ -1735,6 +1735,65 @@ static size_t select_global_emit_index(const cc_ssa_module_t *m, size_t idx) {
 }
 
 /**
+ * select_global_emit_index() of every global of @p m at once: of the
+ * globals of one name, the last of those of the highest rank.  It walked
+ * all the globals for each, and a file of Linux declares thousands.
+ *
+ * @param m  the module, with at least one global
+ * @return   an array of m->global_count indexes (free it), or NULL when out of memory
+ */
+static size_t *global_emit_choices(const cc_ssa_module_t *m) {
+    size_t n = m->global_count;
+    size_t cap = 64;
+    size_t *best = (size_t *)malloc(n * sizeof(*best));
+    long *slots;
+    size_t i;
+
+    while (cap < n * 2) {
+        cap *= 2;
+    }
+    slots = (long *)malloc(cap * sizeof(*slots));
+    if (best == NULL || slots == NULL) {
+        free(best);
+        free(slots);
+        return NULL;
+    }
+    for (i = 0; i < cap; ++i) {
+        slots[i] = -1;
+    }
+    /* first each name's choice, kept in the slot of its name */
+    for (i = 0; i < n; ++i) {
+        const char *name = m->globals[i].name;
+        uint64_t h = 1469598103934665603ULL;
+        const char *c;
+        size_t s;
+
+        best[i] = i;
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        for (c = name; *c != '\0'; ++c) {
+            h = (h ^ (unsigned char)*c) * 1099511628211ULL;
+        }
+        s = (size_t)h & (cap - 1);
+        while (slots[s] >= 0 && strcmp(m->globals[slots[s]].name, name) != 0) {
+            s = (s + 1) & (cap - 1);
+        }
+        if (slots[s] < 0 || global_emit_rank(&m->globals[i]) >= global_emit_rank(&m->globals[slots[s]])) {
+            slots[s] = (long)i;
+        }
+        best[i] = s; /* the slot, for now */
+    }
+    for (i = 0; i < n; ++i) {
+        const char *name = m->globals[i].name;
+
+        best[i] = name == NULL || name[0] == '\0' ? i : (size_t)slots[best[i]];
+    }
+    free(slots);
+    return best;
+}
+
+/**
  * Say that @p name is a data object of @p size bytes, as gcc does: an STT_OBJECT with its size in the symbol
  * table.  It was an untyped, unsized symbol, and a tool that looks for an object by its type found nothing
  * (Linux's scripts/sorttable, after main_extable_sort_needed, failed the vmlinux link).
@@ -1744,11 +1803,29 @@ static void emit_object_type_size(FILE *fp, const char *name, long size) {
     fprintf(fp, ".size %s, %ld\n", name, size > 0 ? size : 0);
 }
 
+static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_size, const size_t *choices,
+                               cc_diag_t *diag);
+
+/**
+ * Emit the globals of @p m: each name's chosen declaration
+ * (global_emit_choices()).
+ *
+ * @return 0, or -1 on error
+ */
 static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc_diag_t *diag) {
+    size_t *choices = m->global_count > 0 ? global_emit_choices(m) : NULL;
+    int rc = emit_globals_chosen(fp, m, pointer_size, choices, diag);
+
+    free(choices);
+    return rc;
+}
+
+static int emit_globals_chosen(FILE *fp, const cc_ssa_module_t *m, int pointer_size, const size_t *choices,
+                               cc_diag_t *diag) {
     size_t i;
     for (i = 0; i < m->global_count; ++i) {
         const cc_ssa_global_t *g = &m->globals[i];
-        size_t best_i = select_global_emit_index(m, i);
+        size_t best_i = choices != NULL ? choices[i] : select_global_emit_index(m, i);
         long sz = global_object_size_bytes(g, pointer_size);
         long align = default_object_align(sz);
         int is_static = (g->storage & CC_STORAGE_STATIC) != 0;
