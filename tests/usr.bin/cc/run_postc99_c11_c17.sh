@@ -31,10 +31,10 @@ $CC_TMP/cc_native_c11_atomic_wrapper_type
 "$CC_BIN" -std=c11 native_c11_atomic_fence.c -o $CC_TMP/cc_native_c11_atomic_fence
 $CC_TMP/cc_native_c11_atomic_fence
 "$CC_BIN" -std=c11 -S native_c11_atomic_fence.c -o $CC_TMP/cc_native_c11_atomic_fence.s
-grep -Eq 'lock(;|[[:space:]]+)orl \$0, \(%rsp\)' $CC_TMP/cc_native_c11_atomic_fence.s
+grep -Eq 'lock(;[[:space:]]*|[[:space:]]+)orl \$0, \(%rsp\)' $CC_TMP/cc_native_c11_atomic_fence.s
 grep -q "# asm clobber memory" $CC_TMP/cc_native_c11_atomic_fence.s
 "$CC_BIN" -std=c11 -m32 -S native_c11_atomic_fence.c -o $CC_TMP/cc_native_c11_atomic_fence_32.s
-grep -Eq 'lock(;|[[:space:]]+)orl \$0, \(%esp\)' $CC_TMP/cc_native_c11_atomic_fence_32.s
+grep -Eq 'lock(;[[:space:]]*|[[:space:]]+)orl \$0, \(%esp\)' $CC_TMP/cc_native_c11_atomic_fence_32.s
 grep -q "# asm clobber memory" $CC_TMP/cc_native_c11_atomic_fence_32.s
 
 "$CC_BIN" -std=c11 native_c11_unicode_literals.c -o $CC_TMP/cc_native_c11_unicode_literals

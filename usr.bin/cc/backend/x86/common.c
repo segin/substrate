@@ -691,6 +691,13 @@ static char *escape_strings_in_asm_template(const char *src) {
     return out;
 }
 
+/*
+ * An asm's text, one statement a line, but for a prefix written as a
+ * statement of its own: that stays one, on the line of the instruction
+ * after it, as written (`rep; vmmcall`).  Joined to it as one statement
+ * (`rep vmmcall`) it is an instruction the assembler refuses -- Linux's
+ * VMGEXIT() is that `rep; vmmcall`.
+ */
 static int emit_asm_lines(FILE *fp, const char *text) {
     static const char *const x86_prefixes[] = {
         "lock",
@@ -711,7 +718,6 @@ static int emit_asm_lines(FILE *fp, const char *text) {
     }
 
     pending_prefix[0] = '\0';
-    (void)prefix_i;
 
     #define IS_WS(ch) ((ch) == ' ' || (ch) == '\t' || (ch) == '\r')
     #define EMIT_SEGMENT(seg_lo, seg_hi)                                                                     \
@@ -731,11 +737,10 @@ static int emit_asm_lines(FILE *fp, const char *text) {
                     }                                                                                        \
                 }                                                                                            \
                 if (have_pending_prefix) {                                                                   \
-                    fprintf(fp, "\t%s %.*s\n", pending_prefix, (int)_len, _lo);                             \
+                    fprintf(fp, "\t%s; %.*s\n", pending_prefix, (int)_len, _lo);                            \
                     have_pending_prefix = 0;                                                                 \
                     pending_prefix[0] = '\0';                                                                \
                 } else if (_is_prefix) {                                                                     \
-                    if (_len >= sizeof(pending_prefix)) _len = sizeof(pending_prefix) - 1;                  \
                     memcpy(pending_prefix, _lo, _len);                                                       \
                     pending_prefix[_len] = '\0';                                                             \
                     have_pending_prefix = 1;                                                                 \
