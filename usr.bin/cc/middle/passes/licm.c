@@ -11,8 +11,11 @@
  * next loop, once per i.
  *
  * Only what cannot fail and reads no memory moves: constants, addresses
- * of globals, copies, arithmetic but division, shifts and masks, on
- * integers.  An operation moved before the loop runs even where the
+ * of globals, arithmetic but division, shifts and masks, on integers --
+ * but an index's scaling by 2, 4 or 8, which an address makes for
+ * nothing.  A copy of a variable the loop does not write stays, and what
+ * is hoisted reads the variable instead: the copy made before the loop
+ * would be a second register held across it.  An operation moved before the loop runs even where the
  * loop's body would not have, so a division, which may trap, a load,
  * which may fault or read what the loop writes, and floating arithmetic,
  * which may raise an exception gcc's -ftrapping-math keeps, stay where
@@ -45,6 +48,7 @@
 /** A function's blocks, the edges between them, their dominators and the instructions hoisted into each. */
 typedef struct {
     const cc_ssa_function_t *f;
+    cc_ssa_function_t *fw;  /**< the same, to rewrite the operands of what is hoisted */
     int nb;            /**< blocks */
     int *start;        /**< per block: its first instruction */
     int *end;          /**< per block: one past its last */
@@ -589,13 +593,10 @@ static int plain_int(const cc_ssa_function_t *f, const licm_values_t *vs, int v)
     return v >= 0 && v < f->value_count && f->value_ty[v].kind == CC_TY_INT && !vs->addr_taken[v];
 }
 
-/** Whether operand @p v of an instruction in loop @p l is the same on every trip: no definition of it is in the loop. */
-static int invariant(const licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t *l, int v) {
+/** Whether no definition of value @p v is in loop @p l, so that it holds on every trip what it held before it. */
+static int defined_outside(const licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t *l, int v) {
     int k;
 
-    if (v < 0) {
-        return 1; /* (no operand: an immediate) */
-    }
     if (!plain_int(c->f, vs, v)) {
         return 0;
     }
@@ -607,10 +608,85 @@ static int invariant(const licm_cfg_t *c, const licm_values_t *vs, const licm_lo
     return 1;
 }
 
+/**
+ * The value that @p v, defined once in loop @p l, is a copy of, when that value is defined outside the loop and of
+ * v's own type; else -1.  Lowering reads a variable through such a copy (`set %v60, %i`), and what the loop makes
+ * of it is made before the loop of the variable itself.  The copy stays where it is: made before the loop, it
+ * would be a second register live across all of it for a value the variable holds already -- an i386 sieve's outer
+ * counter went to the stack for one.
+ */
+static int copy_source(const licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t *l, int v) {
+    const cc_ssa_function_t *f = c->f;
+    const cc_ssa_instr_t *d;
+    int s;
+
+    if (v < 0 || v >= f->value_count || vs->ndefs[v] != 1 || !plain_int(f, vs, v)) {
+        return -1;
+    }
+    d = &f->instrs[vs->defs[vs->def_off[v]]];
+    s = d->lhs;
+    if (d->op != CC_SSA_MOV || s < 0 || d->rhs >= 0 || !l->in[c->blk[vs->defs[vs->def_off[v]]]] ||
+        !defined_outside(c, vs, l, s) || f->value_ty[s].size != f->value_ty[v].size ||
+        f->value_ty[s].is_unsigned != f->value_ty[v].is_unsigned) {
+        return -1;
+    }
+    return s;
+}
+
+/**
+ * Whether operand @p v of an instruction in loop @p l is the same on every trip: no definition of it is in the
+ * loop, or it is a copy of one that has none (copy_source()), which a hoisted instruction reads instead.
+ */
+static int invariant(const licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t *l, int v) {
+    if (v < 0) {
+        return 1; /* (no operand: an immediate) */
+    }
+    return defined_outside(c, vs, l, v) || copy_source(c, vs, l, v) >= 0;
+}
+
+/** Whether value @p v is defined once, by an integer constant, which is then *@p k. */
+static int const_value(const licm_cfg_t *c, const licm_values_t *vs, int v, long long *k) {
+    const cc_ssa_instr_t *d;
+
+    if (v < 0 || v >= c->f->value_count || vs->ndefs[v] != 1) {
+        return 0;
+    }
+    d = &c->f->instrs[vs->defs[vs->def_off[v]]];
+    if (d->op != CC_SSA_CONST || !plain_int(c->f, vs, v)) {
+        return 0;
+    }
+    *k = d->imm;
+    return 1;
+}
+
+/**
+ * Whether @p in scales an index by 2, 4 or 8 -- a multiply by one of them, a shift left by 1 to 3 -- which an
+ * address takes for nothing, `(%base,%index,8)`: made before the loop, it would be an imul and a register held.
+ */
+static int index_scaling(const licm_cfg_t *c, const licm_values_t *vs, const cc_ssa_instr_t *in) {
+    long long k = 0;
+
+    if (in->op == CC_SSA_MUL) {
+        return (const_value(c, vs, in->rhs, &k) || const_value(c, vs, in->lhs, &k)) && (k == 2 || k == 4 || k == 8);
+    }
+    if (in->op == CC_SSA_SHL) {
+        if (in->rhs < 0) {
+            k = in->imm;
+        } else if (!const_value(c, vs, in->rhs, &k)) {
+            return 0;
+        }
+        return k >= 1 && k <= 3;
+    }
+    return 0;
+}
+
 /** Whether instruction @p i, in loop @p l, may be made once before it. */
 static int hoistable(const licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t *l, int i) {
     const cc_ssa_instr_t *in = &c->f->instrs[i];
 
+    if (index_scaling(c, vs, in)) {
+        return 0;
+    }
     switch (in->op) {
     case CC_SSA_CONST:
     case CC_SSA_STR:
@@ -618,7 +694,6 @@ static int hoistable(const licm_cfg_t *c, const licm_values_t *vs, const licm_lo
         return in->dst >= 0 && plain_int(c->f, vs, in->dst) && vs->ndefs[in->dst] == 1;
     case CC_SSA_GADDR:
         break;
-    case CC_SSA_MOV:
     case CC_SSA_LO32:
     case CC_SSA_HI32:
         if (in->lhs < 0 || in->rhs >= 0) {
@@ -653,8 +728,20 @@ static int hoistable(const licm_cfg_t *c, const licm_values_t *vs, const licm_lo
     return invariant(c, vs, l, in->lhs) && invariant(c, vs, l, in->rhs);
 }
 
-/** Append instruction @p i to those hoisted into block @p b. @return 0, or -1 when out of memory */
-static int push_moved(licm_cfg_t *c, int b, int i) {
+/**
+ * Append instruction @p i, of loop @p l, to those hoisted into block @p b, an operand that is a copy in the loop
+ * read as what it copies (copy_source()). @return 0, or -1 when out of memory
+ */
+static int push_moved(licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t *l, int b, int i) {
+    cc_ssa_instr_t *in = &c->fw->instrs[i];
+    int s;
+
+    if ((s = copy_source(c, vs, l, in->lhs)) >= 0) {
+        in->lhs = s;
+    }
+    if ((s = copy_source(c, vs, l, in->rhs)) >= 0) {
+        in->rhs = s;
+    }
     if (c->nmoved[b] == c->capmoved[b]) {
         int ncap = c->capmoved[b] > 0 ? 2 * c->capmoved[b] : 8;
         int *nm = (int *)realloc(c->moved[b], (size_t)ncap * sizeof(int));
@@ -698,7 +785,7 @@ static int hoist_loop(licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t 
             }
             for (i = c->start[b]; i < c->end[b]; ++i) {
                 if (c->blk[i] == b && !is_terminator(c, b, i) && hoistable(c, vs, l, i)) {
-                    if (push_moved(c, ph, i) != 0) {
+                    if (push_moved(c, vs, l, ph, i) != 0) {
                         return -1;
                     }
                     moved++;
@@ -708,7 +795,7 @@ static int hoist_loop(licm_cfg_t *c, const licm_values_t *vs, const licm_loop_t 
             for (k = 0; k < c->nmoved[b]; ++k) {
                 i = c->moved[b][k];
                 if (c->blk[i] == b && hoistable(c, vs, l, i)) {
-                    if (push_moved(c, ph, i) != 0) {
+                    if (push_moved(c, vs, l, ph, i) != 0) {
                         return -1;
                     }
                     moved++;
@@ -768,6 +855,7 @@ int cc_hoist_invariants(cc_ssa_function_t *f) {
         return 0;
     }
     rc = cfg_build(&c, f);
+    c.fw = f;
     if (rc != 0) {
         cfg_free(&c);
         return rc < 0 ? -1 : 0;

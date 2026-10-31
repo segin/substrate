@@ -116,6 +116,27 @@ NI long nested(int n, long x, long y)
 	return s + t;
 }
 
+/* i read through a copy in the inner loop: the copy made before it would hold a register, on i386 the outer r's */
+NI unsigned long sieve(void)
+{
+	enum { M = 30000 };
+	static unsigned char comp[M];
+	unsigned long count = 0;
+	int r, i, j;
+
+	for (r = 0; r < 3; ++r) {
+		for (i = 0; i < M; ++i)
+			comp[i] = 0;
+		for (i = 2; i * i < M; ++i)
+			if (!comp[i])
+				for (j = i * i; j < M; j += i)
+					comp[j] = 1;
+		for (i = 2; i < M; ++i)
+			count += !comp[i];
+	}
+	return count;
+}
+
 /* a loop entered at its top only by a goto */
 NI int gotoloop(int n, int x)
 {
@@ -146,7 +167,7 @@ int main(void)
 	for (i = 0; i < N; i++)
 		for (j = 0; j < N; j++)
 			h = h * 31 + (unsigned long)(c[i][j] * 1000);
-	printf("%lu %d %d %d %ld %ld %u %ld %ld %d %d\n", h, divs(0, 1, 0), divs(5, 100, 7), through(9),
+	printf("%lu %lu %d %d %d %ld %ld %u %ld %ld %d %d\n", h, sieve(), divs(0, 1, 0), divs(5, 100, 7), through(9),
 	       sometimes(10, 2), sometimes(2, 2), asmout(6, 1), nested(7, 3, 0x1234), nested(0, 3, 4),
 	       gotoloop(12, 4), gotoloop(0, 4));
 	return 0;
@@ -180,5 +201,15 @@ if [ "$(printf '%s\n' "$inner" | grep -c 'imul')" -ne 1 ]; then
 	echo "run_licm: mm()'s inner loop computes a row's address on every trip"
 	printf '%s\n' "$inner"
 	exit 1
+fi
+# sieve()'s counters all fit i386's registers: none goes to the frame for a hoisted copy of i
+if gcc -m32 -O1 -o "$CC_TMP/g" "$CC_TMP/l.c" 2>/dev/null; then
+	"$CC_BIN" -m32 -O2 -S -o "$CC_TMP/l32.s" "$CC_TMP/l.c"
+	awk '/^sieve:/{x=1} /^\.size sieve,/{x=0} x' "$CC_TMP/l32.s" >"$CC_TMP/sieve.s"
+	if grep -qE -- '-[0-9]+\(%ebp\)' "$CC_TMP/sieve.s"; then
+		echo "run_licm: -m32 sieve() keeps a counter in its frame"
+		cat "$CC_TMP/sieve.s"
+		exit 1
+	fi
 fi
 echo "run_licm: ok"
