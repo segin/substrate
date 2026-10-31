@@ -6008,7 +6008,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 init_checked = 1;
             }
             init_ct = s->ctype->kind == CC_CT_ARRAY ? s->ctype->of : s->ctype;
-            if (ct_kind_is(s->ctype->unqual, CC_CT_VOID)) {
+            /* an extern names an object defined elsewhere: void, like a linker script's symbol, is its type as at
+             * file scope (gcc's) */
+            if (ct_kind_is(s->ctype->unqual, CC_CT_VOID) && (s->storage & CC_STORAGE_EXTERN) == 0) {
                 sema_diag(diag, "void variable declarations are not supported");
                 return -1;
             }
