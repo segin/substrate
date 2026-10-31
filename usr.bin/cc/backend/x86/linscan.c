@@ -610,13 +610,19 @@ static int ls_build(ls_t *ls) {
                 }
             }
             for (r = 0; r < XR_NPHYS; ++r) {
+                /*
+                 * a jump table's scratch register (x86-64's %r11, the table's address) is written before its
+                 * index is read: from the read on, so that the index is never in it
+                 */
+                int from = in->op == XI_JMPT && (in->clobber & XR_BIT(r)) != 0 ? 2 * i : 2 * i + 1;
+
                 if ((pd & XR_BIT(r)) == 0) {
                     continue;
                 }
                 if ((plive & XR_BIT(r)) != 0) {
-                    iv_start_at(&ls->fixed[r], 2 * i + 1);
+                    iv_start_at(&ls->fixed[r], from);
                     plive &= ~XR_BIT(r);
-                } else if (iv_add(&ls->fixed[r], 2 * i + 1, 2 * i + 2) != 0) {
+                } else if (iv_add(&ls->fixed[r], from, 2 * i + 2) != 0) {
                     free(live);
                     return -1;
                 }
