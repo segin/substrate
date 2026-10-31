@@ -39,6 +39,8 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
                                     const cc_expr_t *e);
 static int static_local_array_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, int file_scope_names,
                                         cc_ssa_global_t *g);
+static int static_local_record_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, var_entry_t *vars,
+                                         size_t var_count, int depth, const char *fn_name, cc_ssa_global_t *g);
 static const cc_ctype_t *stmt_decl_ctype(const cc_stmt_t *s);
 static const cc_ctype_t *member_decl_ctype(const cc_struct_member_t *m);
 
@@ -9734,6 +9736,16 @@ static int lower_decl_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *s
                 return -1;
             }
             needs_runtime_init = rc == 0;
+        } else if (is_struct_obj && needs_runtime_init) {
+            int rc = static_local_record_init_data(tu, s, *vars, *var_count, depth,
+                                                   ctx->fn != NULL ? ctx->fn->name : NULL, &g);
+            if (rc < 0) {
+                free(g.name);
+                free(g.attr_section);
+                set_diag(diag, "out of memory laying out a static local's initializer");
+                return -1;
+            }
+            needs_runtime_init = rc == 0;
         }
         if (append_synth_global(ctx->mod, &g) != 0) {
             free(g.name);
@@ -13760,6 +13772,12 @@ static const cc_expr_t *global_init_string(const cc_translation_unit_t *tu, cons
  * @param diag         receives an error
  * @return             0, or -1 with @p diag set
  */
+/**
+ * The function whose static local's initializer is being laid out, which
+ * `__func__` in it names; NULL at file scope, where there is none.
+ */
+static const char *g_static_init_fn_name;
+
 static int store_scalar_global_init(const cc_translation_unit_t *tu, const cc_ctype_t *ct, long field_size,
                                     const cc_expr_t *expr, unsigned char *buf, long buf_size, long off,
                                     global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
@@ -13779,6 +13797,25 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, const cc_ct
     if (off < 0 || field_size <= 0 || off + field_size > buf_size) {
         set_diag(diag, "global initializer write exceeds destination object size");
         return -1;
+    }
+
+    if (g_static_init_fn_name != NULL && expr != NULL && expr->kind == CC_EXPR_IDENT && expr->ident != NULL &&
+        (strcmp(expr->ident, "__func__") == 0 || strcmp(expr->ident, "__FUNCTION__") == 0 ||
+         strcmp(expr->ident, "__PRETTY_FUNCTION__") == 0)) {
+        /* the function's name, the string the expression is in a function's code */
+        char *text;
+
+        if (!is_ptr || field_size != cc_target_pointer_size()) {
+            set_diag(diag, "__func__ initializer requires a pointer field");
+            return -1;
+        }
+        text = quote_c_string(g_static_init_fn_name);
+        if (text == NULL || append_global_string_reloc(relocs, reloc_count, off, field_size, text, diag) != 0) {
+            free(text);
+            return -1;
+        }
+        free(text);
+        return 0;
     }
 
     if (global_init_string(tu, expr) != NULL) {
@@ -14908,6 +14945,121 @@ out:
     free(buf);
     free_global_relocs(relocs, reloc_count);
     free(dims);
+    return rc;
+}
+
+/**
+ * Whether expression @p e names anything of block scope but an object of
+ * static storage -- an automatic variable or a parameter -- or holds a
+ * statement.  A static's name is that of its symbol
+ * (static_init_sym_to_local()), so an initializer naming only statics
+ * and file-scope names can be laid out as data.
+ *
+ * @param vars       the variables in scope
+ * @param var_count  their number
+ * @param depth      the current block depth
+ * @param e          the expression
+ * @return           1 or 0
+ */
+static int expr_names_block_automatic(var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e) {
+    size_t i;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->stmt_expr_stmts != NULL || e->kind == CC_EXPR_STMT) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        int idx = var_find_visible(vars, var_count, e->ident, depth);
+
+        if (idx >= 0 && !vars[idx].is_static_storage) {
+            return 1;
+        }
+    }
+    if (expr_names_block_automatic(vars, var_count, depth, e->lhs) ||
+        expr_names_block_automatic(vars, var_count, depth, e->rhs) ||
+        expr_names_block_automatic(vars, var_count, depth, e->third)) {
+        return 1;
+    }
+    for (i = 0; i < e->arg_count; ++i) {
+        if (expr_names_block_automatic(vars, var_count, depth, e->args[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Give a static local structure or union its initializer as data, the
+ * way a file-scope one gets it, instead of code that stores it on the
+ * function's first call behind a guard.  That code put the object in
+ * .bss whatever its section, and Linux's dynamic debug finds its
+ * descriptors -- static locals in __dyndbg, initialized with __func__
+ * and a compound literal -- by their section.  A name of a static of the
+ * enclosing blocks is its symbol, so `LIST_HEAD_INIT(l)` is `{ &l, &l }`
+ * in data; `__func__` is the function's name.
+ *
+ * @param tu         the translation unit
+ * @param s          the declaration; a structure or union
+ * @param vars       the variables in scope, the object itself among them
+ * @param var_count  their number
+ * @param depth      the current block depth
+ * @param fn_name    the function's name, for `__func__`
+ * @param g          the object's global, which receives the data and has_init
+ * @return           1 if it was given its data; 0 if the initializer is not
+ *                   one this lays out, so the caller falls back to storing it
+ *                   at run time; -1 when out of memory
+ */
+static int static_local_record_init_data(const cc_translation_unit_t *tu, const cc_stmt_t *s, var_entry_t *vars,
+                                         size_t var_count, int depth, const char *fn_name, cc_ssa_global_t *g) {
+    int sid = ct_record_id(stmt_decl_ctype(s));
+    const cc_expr_t *init;
+    long size;
+    unsigned char *buf = NULL;
+    global_reloc_t *relocs = NULL;
+    size_t reloc_count = 0;
+    size_t i;
+    cc_diag_t quiet;
+    int failed;
+    int rc = 0;
+
+    init = sid >= 0 ? extract_struct_init_list_expr(s->expr, sid) : NULL;
+    if (init == NULL || tu->structs[sid].wide_bits > 0 || expr_names_block_automatic(vars, var_count, depth, init)) {
+        return 0;
+    }
+    size = cc_ct_size(stmt_decl_ctype(s), tu);
+    if (size <= 0) {
+        return 0;
+    }
+    buf = (unsigned char *)calloc((size_t)size, 1);
+    if (buf == NULL) {
+        return -1;
+    }
+    memset(&quiet, 0, sizeof(quiet));
+    g_static_init_fn_name = fn_name != NULL ? fn_name : "";
+    failed = flatten_struct_init_bytes(tu, sid, init, 0, buf, size, &relocs, &reloc_count, &quiet) != 0;
+    g_static_init_fn_name = NULL;
+    if (failed) {
+        /* not a constant this can lay out: leave it to the run-time path and its diagnostics */
+        goto out;
+    }
+    for (i = 0; i < reloc_count; ++i) {
+        if (!relocs[i].is_string && static_init_sym_to_local(vars, var_count, depth, &relocs[i].payload) != 0) {
+            rc = -1;
+            goto out;
+        }
+    }
+    if (build_global_stream_from_bytes(g, buf, size, relocs, reloc_count, &quiet) != 0) {
+        rc = -1;
+        goto out;
+    }
+    ssa_global_set_bytes(g, size);
+    g->has_init = 1;
+    rc = 1;
+out:
+    free(buf);
+    free_global_relocs(relocs, reloc_count);
     return rc;
 }
 
