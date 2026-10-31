@@ -1215,17 +1215,16 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
         snprintf(out, outsz, "$%lld", def->imm);
         return 0;
     }
+    /* a name that does not fit is no name: cut short, it would be another symbol's, or none */
     if (def->op == CC_SSA_STR) {
-        snprintf(out, outsz, "$.L__cc_str_%zu_%d", fn_index, def_idx);
-        return 0;
+        return snprintf(out, outsz, "$.L__cc_str_%zu_%d", fn_index, def_idx) < (int)outsz ? 0 : -1;
     }
     if (def->op == CC_SSA_GADDR && def->sym != NULL && def->sym[0] != '\0') {
-        snprintf(out, outsz, "$%s", def->sym);
-        return 0;
+        return snprintf(out, outsz, "$%s", def->sym) < (int)outsz ? 0 : -1;
     }
     if (def->op == CC_SSA_LADDR) {
-        snprintf(out, outsz, "$.L%s_%d", f->name != NULL ? f->name : "__fn", def->label);
-        return 0;
+        return snprintf(out, outsz, "$.L%s_%d", f->name != NULL ? f->name : "__fn", def->label) < (int)outsz ? 0
+                                                                                                                : -1;
     }
     if ((def->op == CC_SSA_ADD || def->op == CC_SSA_SUB) && def->lhs >= 0 && def->rhs >= 0) {
         /*
@@ -3874,7 +3873,8 @@ int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *l
         }
         if (asm_constraint_is_immediate(c)) {
             long imm = 0;
-            char ibuf[64];
+            /* a symbol and its offset: a static local's name holds its function's, as long as Linux's 512 */
+            char ibuf[1024];
             int sym_ok = -1;
             int have_const = find_const_i64_for_value(f, v, instr_index, &imm) == 0;
             int alternative = cc_asm_constraint_allows_gpr(c) || cc_asm_constraint_allows_memory(c);
