@@ -3376,6 +3376,45 @@ static int strip_comments_line(const char *in, int *in_block_comment, sb_t *out)
     return 0;
 }
 
+/**
+ * Carry a directive on past the end of its line while a block comment
+ * it opened is still open.  Comments are replaced by a space before
+ * directives are seen (C11 5.1.1.2 phase 3), so a newline inside one
+ * does not end the directive: the kernel's printk index macro has a
+ * comment of several lines, without backslashes, in its body.
+ *
+ * @param fp                the file being read
+ * @param line              buffer for the raw lines read
+ * @param stripped          the directive so far, comments stripped; the
+ *                          rest of it is appended
+ * @param tail              scratch buffer for each further line, stripped
+ * @param in_block_comment  set on entry; cleared once the comment ends
+ * @param line_no           the physical line counter, advanced
+ * @param enable_trigraphs  whether trigraphs are replaced
+ * @return 0, or -1 when out of memory
+ */
+static int join_directive_comment(FILE *fp, sb_t *line, sb_t *stripped, sb_t *tail, int *in_block_comment,
+                                  int *line_no, int enable_trigraphs) {
+    int had_line = 0;
+    int start_line;
+
+    while (*in_block_comment) {
+        if (read_logical_line(fp, line, &had_line, line_no, &start_line, enable_trigraphs) != 0) {
+            return -1;
+        }
+        if (!had_line) {
+            break;
+        }
+        if (strip_comments_line(line->buf != NULL ? line->buf : "", in_block_comment, tail) != 0) {
+            return -1;
+        }
+        if (tail->len > 0 && sb_append(stripped, tail->buf) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int parse_int_literal(const char *s, pp_num_t *out) {
     const char *p;
     char *end;
@@ -6411,6 +6450,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     FILE *fp;
     sb_t line = {0};
     sb_t stripped = {0};
+    sb_t comment_tail = {0};
     int line_no = 1;
     int cur_line = 1;
     int had_line = 0;
@@ -6466,6 +6506,14 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
         }
         proc = stripped.buf != NULL ? stripped.buf : "";
         p = skip_ws(proc);
+        if (*p == '#' && in_block_comment) {
+            if (join_directive_comment(fp, &line, &stripped, &comment_tail, &in_block_comment, &line_no,
+                                       st->enable_trigraphs) != 0) {
+                goto fail;
+            }
+            proc = stripped.buf != NULL ? stripped.buf : "";
+            p = skip_ws(proc);
+        }
         if (*p == '#') {
             if (code_accum.len > 0 && code_paren_depth == 0) {
                 char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path, code_start_line,
@@ -7041,6 +7089,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     free(cond_stack);
     sb_free(&line);
     sb_free(&stripped);
+    sb_free(&comment_tail);
     sb_free(&code_accum);
     fclose(fp);
     return 0;
@@ -7051,6 +7100,7 @@ fail:
     free(cond_stack);
     sb_free(&line);
     sb_free(&stripped);
+    sb_free(&comment_tail);
     sb_free(&code_accum);
     fclose(fp);
     return -1;
