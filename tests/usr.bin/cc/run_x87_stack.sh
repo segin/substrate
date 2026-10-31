@@ -50,8 +50,8 @@ void mm(void) {
 }
 EOF
 "$CC_BIN" -m32 -O2 -S -o "$CC_TMP/mm.s" "$CC_TMP/mm.c"
-# the inner loop: the block that reads both arrays
-loop=$(awk '/^\.L/ { blk = "" } { blk = blk $0 "\n" } /^\tjmp/ { if (blk ~ /\$a/ && blk ~ /\$b/) printf "%s", blk }' \
+# the inner loop: the block, up to its first branch, that multiplies by b's elements (a row of a is found before it)
+loop=$(awk '/^\.L/ { blk = "" } { blk = blk $0 "\n" } /^\tj[a-z]+ / { if (blk ~ /\$b/ && blk ~ /fmul/) { printf "%s", blk; exit } }' \
 	"$CC_TMP/mm.s")
 if [ -z "$loop" ]; then
 	echo "run_x87_stack: no inner loop found in"
@@ -92,7 +92,7 @@ void step(struct body *b) {
 }
 EOF
 "$CC_BIN" -m32 -O2 -S -o "$CC_TMP/nb.s" "$CC_TMP/nb.c"
-loop=$(awk '/^\.L/ { blk = "" } { blk = blk $0 "\n" } /^\tjmp/ { if (blk ~ /fstpl [0-9]+\(%e/) printf "%s", blk }' \
+loop=$(awk '/^\.L/ { blk = "" } { blk = blk $0 "\n" } /^\tj[a-z]+ / { if (blk ~ /fstpl [0-9]+\(%e/) { printf "%s", blk; exit } }' \
 	"$CC_TMP/nb.s")
 wide=$(printf '%s' "$loop" | grep -cE '^	f(ld|stp)t ' || true)
 frame=$(printf '%s' "$loop" | grep -cE '^	(fst[a-z]* |mov[a-z]* [^,]*, )-?[0-9]+\(%[er][bs]p\)' || true)

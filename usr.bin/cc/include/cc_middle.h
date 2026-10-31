@@ -90,6 +90,16 @@ void cc_ssa_for_each_use(const cc_ssa_instr_t *in, void (*fn)(void *ctx, int v, 
 int cc_coalesce_moves(cc_ssa_function_t *f);
 
 /**
+ * Make each integer computation of @p f's loops that is the same on every trip -- its operands defined only
+ * outside the loop, or by another such computation -- once, in the loop's preheader, innermost loops first
+ * (passes/licm.c).  Only what cannot trap, reads no memory and every trip makes moves.
+ *
+ * @param f  the function, rewritten in place
+ * @return   1 if anything moved, 0 if not, -1 when out of memory
+ */
+int cc_hoist_invariants(cc_ssa_function_t *f);
+
+/**
  * Remove each definition of @p f that only makes its result -- a constant, a move, arithmetic, a compare --
  * where nothing reads the result before it is defined again or the function returns: a variable's
  * initializer overwritten before use (passes/mem.c).  Liveness over the blocks; nothing is removed in a

@@ -293,6 +293,14 @@ function that every call of it passes the same constant, its address
 not taken, is that constant within it, as with
 .Xr gcc 1 Ns 's
 interprocedural constant propagation.
+Integer arithmetic a loop computes the same on every trip \(em of values
+the loop does not change, an address of a global, a constant \(em and
+on every trip, not in a branch some trips skip, is
+computed once before the loop, as with
+.Xr gcc 1 Ns 's
+.Fl fmove-loop-invariants ;
+a division, a load from memory and floating-point arithmetic are not
+moved, as each may fail or differ where the loop would not have run.
 At
 .Fl O0
 nothing is inlined.

@@ -3676,6 +3676,18 @@ int cc_run_middle_passes(cc_ssa_module_t *m, int opt_level, cc_diag_t *diag) {
                 oom = cc_propagate_copies(&m->funcs[i]) < 0 || dce_function(&m->funcs[i]) < 0;
             }
         }
+        /* what a loop computes the same on every trip, made once before it, and what two loops both made, once */
+        if (!oom) {
+            int rh = cc_hoist_invariants(&m->funcs[i]);
+            int round;
+
+            /* (twice: constants merged in one block make the same of what another computes from them) */
+            for (round = 0; round < 2 && rh > 0; ++round) {
+                rh = cse_function(&m->funcs[i]);
+                rh = rh <= 0 ? rh : cc_propagate_copies(&m->funcs[i]) < 0 ? -1 : 1;
+                oom = rh < 0 || (rh > 0 && dce_function(&m->funcs[i]) < 0);
+            }
+        }
         /* last of all: a variable's update made in place */
         oom = oom || cc_coalesce_moves(&m->funcs[i]) < 0;
     }
