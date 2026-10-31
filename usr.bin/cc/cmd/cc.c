@@ -100,6 +100,7 @@ typedef struct {
   int omit_frame_pointer; /* -fomit-frame-pointer, -fno-omit-frame-pointer */
   int no_sse;        /* -mno-sse, the last of it and -msse */
   int no_jump_tables; /* -fno-jump-tables, the last of it and -fjump-tables */
+  int wrapv;          /* -fwrapv, -fno-strict-overflow; the last of them and -fno-wrapv, -fstrict-overflow */
 
   const char *std;
   const char *opt_level;
@@ -197,6 +198,7 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->omit_frame_pointer = o->omit_frame_pointer;
   out->no_sse = o->no_sse;
   out->no_jump_tables = o->no_jump_tables;
+  out->wrapv = o->wrapv;
 }
 
 
@@ -1457,6 +1459,8 @@ static const driver_opt_t options[] = {
     {"-fno-omit-frame-pointer", OPT_FLAG, FWD_C, opt_int, F(omit_frame_pointer), 0},
     {"-fjump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 0},
     {"-fno-jump-tables", OPT_FLAG, FWD_C, opt_int, F(no_jump_tables), 1},
+    {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
+    {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
     /* an executable's position-independent code: its own symbols bind within it (Linux's boot/compressed) */
     {"-fPIE -fpie", OPT_FLAG, FWD_C, opt_int, F(fpie), 1},

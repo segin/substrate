@@ -441,6 +441,24 @@ A function that takes its frame's address, moves the stack pointer itself
 takes variadic arguments, or has an inline asm whose operand is a memory slot
 or an asm goto keeps one, and so does every function under
 .Fl g .
+.It Fl fwrapv , Fl fno-strict-overflow , Fl fno-wrapv , Fl fstrict-overflow
+Whether signed integer arithmetic wraps on overflow, as under the first
+two \(em Linux builds with
+.Fl fno-strict-overflow
+\(em or its overflow is undefined, as C has it and by default, as with
+.Xr gcc 1 .
+On x86-64, where an
+.Ic int
+lives in a 64-bit register, the sum, difference or product of two
+.Ic int Ns s
+is then not extended again where its operands are held extended: a
+loop's
+.Li i++
+is one add.
+Unsigned arithmetic, and a conversion of a wider integer to
+.Ic int ,
+wrap either way.
+The last given counts.
 .It Fl Wall , Fl Werror
 Warning controls.
 .It Fl pedantic , Fl pedantic-errors

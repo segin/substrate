@@ -2614,6 +2614,7 @@ typedef struct {
     unsigned char fbits[sizeof(double) + 10]; /**< a floating constant's double, then its long double's 80 bits */
     int is_unsigned;
     int cmp_kind;
+    int nsw;              /**< an int operation whose overflow is undefined: not the same as one that wraps */
     cc_ssa_type_t ty;     /**< the result's type */
     int dst;
     unsigned dver;        /**< dst's version once written: dst still holds it while that is current */
@@ -2711,6 +2712,7 @@ static void cse_key(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, const 
     }
     e->is_unsigned = in->is_unsigned;
     e->cmp_kind = (int)in->cmp_kind;
+    e->nsw = in->nsw;
     e->ty = f->value_ty[in->dst];
 }
 
@@ -2719,7 +2721,7 @@ static int cse_same(const cse_entry_t *a, const cse_entry_t *b) {
     return a->op == b->op && a->lhs == b->lhs && a->rhs == b->rhs && a->lver == b->lver && a->rver == b->rver &&
            a->imm == b->imm && a->label == b->label &&
            (a->sym == b->sym || (a->sym != NULL && b->sym != NULL && strcmp(a->sym, b->sym) == 0)) && memcmp(a->fbits, b->fbits, sizeof(a->fbits)) == 0 && a->is_unsigned == b->is_unsigned &&
-           a->cmp_kind == b->cmp_kind && a->ty.kind == b->ty.kind && a->ty.size == b->ty.size &&
+           a->cmp_kind == b->cmp_kind && a->nsw == b->nsw && a->ty.kind == b->ty.kind && a->ty.size == b->ty.size &&
            a->ty.is_unsigned == b->ty.is_unsigned;
 }
 

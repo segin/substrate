@@ -1250,6 +1250,17 @@ static int compute_ext(xsel_t *s) {
                 sb = 2;
                 zb = 1;
                 break;
+            case CC_SSA_ADD:
+            case CC_SSA_SUB:
+            case CC_SSA_MUL:
+                /*
+                 * a C operation on signed ints, whose overflow is undefined (lowering's nsw): of two ints held
+                 * extended, its 64-bit result is the int's, extended -- the extension to int after it a move
+                 */
+                if (in->nsw && in->lhs >= 0 && in->rhs >= 0 && s->sbits[in->lhs] <= 32 && s->sbits[in->rhs] <= 32) {
+                    sb = 32;
+                }
+                break;
             case CC_SSA_DIV:
                 /* an unsigned quotient is no more than its dividend, and a divl's no more than 32 bits */
                 if (in->is_unsigned && in->lhs >= 0) {

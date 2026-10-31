@@ -66,6 +66,9 @@ typedef struct {
     int no_jump_tables;      /**< -fno-jump-tables, the last of it and -fjump-tables: a switch is always compares --
                                   Linux's code that runs before it is relocated, which a table's absolute entries
                                   would send nowhere */
+    int wrapv;               /**< -fwrapv or -fno-strict-overflow, the last of them and -fno-wrapv, -fstrict-overflow:
+                                  signed arithmetic wraps, as Linux builds; else its overflow is undefined, as C has
+                                  it, and an int's sum is not extended again */
 } cc_options_t;
 
 /**

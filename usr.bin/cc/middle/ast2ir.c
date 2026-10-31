@@ -2549,6 +2549,53 @@ int integral_type_bits(const cc_ctype_t *t) {
     }
 }
 
+/** How far back mark_int_nsw() looks for a value's definition: it is the operation just lowered. */
+#define NSW_LOOKBACK 8
+
+/** Whether signed int arithmetic's overflow is undefined here: x86-64 (an int in a 64-bit register), no -fwrapv. */
+static int int_overflow_undefined(void) {
+    const cc_options_t *opts = cc_options_current();
+
+    return cc_target_pointer_size() == 8 && !(opts != NULL && opts->wrapv);
+}
+
+/**
+ * Mark the sum, difference or product that made value @p v, just lowered, as a C operation on signed ints
+ * converted to int (cc_ssa_instr_t.nsw): its overflow is undefined, as gcc assumes it does not happen, so of two
+ * values held extended its 64-bit result is held extended too, and the extension to int after it may be a move
+ * (the back end's compute_ext()) -- `a[i + 1]` and a loop's `i++` were an add and a movslq.  The extension stays;
+ * a parameter, whose upper half is undefined, is added and then extended, as gcc's is.  Under -fwrapv (Linux's
+ * -fno-strict-overflow) an int wraps, and nothing is marked.
+ *
+ * @param sf        the function
+ * @param v         the value converted to int
+ * @param int_args  1 when the operation is known to be on ints (an int variable's ++ or --); else its operands
+ *                  must be values held as signed ints, which a long's sum converted to int is not
+ */
+static void mark_int_nsw(cc_ssa_function_t *sf, int v, int int_args) {
+    size_t k;
+    size_t stop = sf->instr_count > NSW_LOOKBACK ? sf->instr_count - NSW_LOOKBACK : 0;
+
+    if (!int_overflow_undefined() || v < 0 || v >= sf->value_count || cc_ssa_value_class(sf, v) != CC_VAL_I64) {
+        return;
+    }
+    for (k = sf->instr_count; k > stop; --k) {
+        cc_ssa_instr_t *d = &sf->instrs[k - 1];
+
+        if (d->dst != v) {
+            continue;
+        }
+        if ((d->op == CC_SSA_ADD || d->op == CC_SSA_SUB || d->op == CC_SSA_MUL) && d->lhs >= 0 && d->rhs >= 0 &&
+            d->lhs < sf->value_count && d->rhs < sf->value_count &&
+            (int_args || (value_size(sf, d->lhs) == 4 && !value_is_unsigned(sf, d->lhs) &&
+                          cc_ssa_value_class(sf, d->lhs) == CC_VAL_I64 && value_size(sf, d->rhs) == 4 &&
+                          !value_is_unsigned(sf, d->rhs) && cc_ssa_value_class(sf, d->rhs) == CC_VAL_I64))) {
+            d->nsw = 1;
+        }
+        return;
+    }
+}
+
 /**
  * Convert an integer value to standard integer type @p t: compare a
  * `_Bool` with zero, otherwise keep the type's low bits, sign- or
@@ -2657,6 +2704,10 @@ int normalize_integral_value(cc_ssa_function_t *sf, int v, const cc_ctype_t *t, 
         cc_ir_set_size(sf, v, 4);
         cc_ssa_value_set_unsigned(sf, v, 0);
         return v;
+    }
+    if (!want_unsigned && bits == 32 && t->kind != CC_CT_BITINT) {
+        /* an int's sum, difference or product: its overflow undefined */
+        mark_int_nsw(sf, v, 0);
     }
     /* narrow: keep the type's bits, extended as its signedness says */
     return emit_ext(sf, v, bits, want_unsigned, (bits + 7) / 8, diag);
@@ -6849,7 +6900,14 @@ static int lower_update_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
                 }
             }
             if (cc_ct_is_integer(lower_var_ctype(&vars[idx]))) {
-                nextv = normalize_int_ct(sf, nextv, store_ctype(e, lower_var_ctype(&vars[idx])), diag);
+                const cc_ctype_t *st = store_ctype(e, lower_var_ctype(&vars[idx]));
+
+                if (st != NULL && st->kind != CC_CT_BITINT && st->kind != CC_CT_BOOL && !cc_ct_is_unsigned(st) &&
+                    cc_ct_int_width(st) == 32) {
+                    /* an int variable one up or down: an int's sum */
+                    mark_int_nsw(sf, nextv, 1);
+                }
+                nextv = normalize_int_ct(sf, nextv, st, diag);
                 if (nextv < 0) {
                     return -1;
                 }

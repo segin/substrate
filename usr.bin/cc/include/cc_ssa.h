@@ -168,6 +168,9 @@ typedef struct {
     unsigned char seg; /**< LOAD, STORE: CC_SSA_SEG_FS or CC_SSA_SEG_GS for an access in that named address space
                             (gcc's __seg_fs, __seg_gs), the address the offset in the segment; else 0.  ASM: the
                             address space of the memory operands asm_seg_in and asm_seg_out mark */
+    unsigned char nsw;    /**< ADD, SUB, MUL: a C operation on signed ints, whose overflow is undefined (without
+                               -fwrapv): of two values held as ints, the result is held as one.  Only a licence to
+                               drop an extension -- a pass that loses it loses nothing else; the text form omits it */
     unsigned asm_seg_in;  /**< ASM: bit i set when memory input i is in address space seg */
     unsigned asm_seg_out; /**< ASM: the same for the outputs */
     double fimm;
