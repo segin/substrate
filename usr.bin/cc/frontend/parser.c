@@ -9848,6 +9848,25 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             free_stmt(&s);
             return -1;
         }
+        if (p->scope_depth == 0 && s.expr != NULL && s.decl_name != NULL && s.ctype != NULL &&
+            s.ctype->kind == CC_CT_ARRAY && s.ctype->count < 0) {
+            /*
+             * the composite type (C11 6.2.7p3): an earlier declaration's bound is this definition's, the
+             * initializer filling what it fills of it -- Linux's `extern const struct nla_policy p[MAX + 1];`
+             * in a header, and `p[] = { [A] = ..., [B] = ... }`, B short of MAX
+             */
+            long g;
+
+            for (g = cc_tu_global_first(p->tu, s.decl_name); g >= 0; g = cc_tu_global_next(p->tu, g)) {
+                const cc_ctype_t *prior = p->tu->globals[g].ctype;
+
+                if (prior != NULL && prior->unqual->kind == CC_CT_ARRAY && prior->unqual->count >= 0 &&
+                    parser_global_types_agree(prior, s.ctype)) {
+                    s.ctype = cc_ct_array(s.ctype->of, prior->unqual->count);
+                    break;
+                }
+            }
+        }
         if (s.expr != NULL && s.expr->kind == CC_EXPR_INIT_LIST) {
             /* the list in its one form; `T a[] = {...}`: and the bound it gives the array */
             long inferred = 0;
