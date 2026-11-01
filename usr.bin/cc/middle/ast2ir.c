@@ -2478,7 +2478,37 @@ int cast_value(cc_ssa_function_t *sf, int v, cc_value_type_t dst, cc_diag_t *dia
         in.op = CC_SSA_I2F;
         in.is_unsigned = value_is_unsigned(sf, v);
     } else if (src == CC_VAL_F64 && dst == CC_VAL_I64) {
+        size_t i;
+
         in.op = CC_SSA_F2I;
+        /*
+         * A constant's conversion is a constant, at -O0 too, as gcc folds it: `(int)3.5` was converted at run
+         * time, and refused under -mno-80387 -mno-sse.  As the optimizer folds it (opt.c), within the range a
+         * long long holds, where whether the result is unsigned does not matter yet; 64 bits, as an F2I's
+         * result is (an i386 long long kept only its low word).  Not one strictly between -1 and 1 but 0: a
+         * conversion to _Bool is the floating value's truth, which the truncation to 0 loses.
+         */
+        for (i = sf->instr_count; i > 0; --i) {
+            const cc_ssa_instr_t *def = &sf->instrs[i - 1];
+            long double c;
+
+            if (def->dst != v) {
+                continue;
+            }
+            c = value_size(sf, v) >= 16 ? def->fimm_ld : (long double)def->fimm;
+            if (def->op == CC_SSA_CONST && c > -9223372036854775809.0L && c < 9223372036854775808.0L &&
+                (c == 0.0L || c >= 1.0L || c <= -1.0L)) {
+                in.op = CC_SSA_CONST;
+                in.imm = (long long)c;
+                in.dst = cc_ir_new_value(sf, dst);
+                if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+                    return -1;
+                }
+                cc_ir_set_size(sf, in.dst, 8);
+                return in.dst;
+            }
+            break;
+        }
     } else {
         set_diag(diag, "unsupported cast in lowering");
         return -1;
@@ -5780,18 +5810,18 @@ static int lower_member_expr(const cc_translation_unit_t *tu, cc_ssa_function_t 
     return in.dst;
 }
 
-static int fold_double_const(const cc_translation_unit_t *tu, const cc_expr_t *e, double *out);
+static int fold_float_const(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *out);
 
 /**
- * The value, converted to double, of @p e, an operand of a double constant expression (fold_double_const()):
- * a double one, or an integer constant.
+ * The value of @p e, an operand of a floating constant expression (fold_float_const()): a floating one, a float
+ * literal, or an integer constant, converted exactly to long double.
  *
  * @param tu   the translation unit
  * @param e    the operand
  * @param out  receives its value
  * @return     0, or -1 when it is not constant so
  */
-static int fold_double_operand(const cc_translation_unit_t *tu, const cc_expr_t *e, double *out) {
+static int fold_float_operand(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *out) {
     long long iv = 0;
     double fv = 0.0;
     int isf = 0;
@@ -5800,8 +5830,12 @@ static int fold_double_operand(const cc_translation_unit_t *tu, const cc_expr_t 
     if (e == NULL) {
         return -1;
     }
-    if (lower_has_kind(e, CC_CT_DOUBLE)) {
-        return fold_double_const(tu, e, out);
+    if (lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_LDOUBLE)) {
+        return fold_float_const(tu, e, out);
+    }
+    if (lower_has_kind(e, CC_CT_FLOAT) && e->kind == CC_EXPR_FLOAT) {
+        *out = (long double)e->float_val; /* (a float's value, which a double holds exactly) */
+        return 0;
     }
     if (!cc_ct_is_integer(lower_value_ctype(e)) || eval_global_init_expr(tu, e, &iv, &fv, &isf, &sym) != 0) {
         return -1;
@@ -5810,70 +5844,85 @@ static int fold_double_operand(const cc_translation_unit_t *tu, const cc_expr_t 
         free(sym);
         return -1;
     }
-    *out = lower_is_unsigned(e) ? (double)(unsigned long long)iv : (double)iv;
+    *out = lower_is_unsigned(e) ? (long double)(unsigned long long)iv : (long double)iv;
     return 0;
 }
 
 /**
- * The value of @p e when it is a double constant expression -- a literal, an integer constant converted to
- * double, the negation, sum, difference, product or quotient of such -- computed in double, as gcc folds it.
- * Negation is lowered as a flip of the sign bit through memory, which the optimizer does not see through: `-3.0`
- * stayed a floating computation, and Linux's `(s32)(-41.25 * 4)` (rtw89's RTW89_MIN_DBM) was refused under
- * -mno-80387 -mno-sse.
+ * The value of @p e when it is a constant expression of type double or long double -- a literal, an integer
+ * constant converted, the negation, sum, difference, product or quotient of such -- computed in its type, as gcc
+ * folds it at -O0 too: a double operation's result rounded to double, an excess-precision one (i386's evaluation
+ * of a double operation in long double) kept in long double, as cc's code computes it.  cc left it to the code at
+ * -O0, and a negation, a flip of the sign bit through memory, at any level: `(int)3.5` and Linux's
+ * `(s32)(-41.25 * 4)` (rtw89's RTW89_MIN_DBM) were converted at run time, and refused under -mno-80387 -mno-sse.
  *
  * @param tu   the translation unit
- * @param e    the expression, of type double
+ * @param e    the expression, of type double or long double
  * @param out  receives its value
  * @return     0, or -1 when it is not constant so
  */
-static int fold_double_const(const cc_translation_unit_t *tu, const cc_expr_t *e, double *out) {
-    double a;
-    double b;
+static int fold_float_const(const cc_translation_unit_t *tu, const cc_expr_t *e, long double *out) {
+    int is_double = lower_has_kind(e, CC_CT_DOUBLE);
+    long double a;
+    long double b;
 
-    if (e == NULL || !lower_has_kind(e, CC_CT_DOUBLE)) {
+    if (e == NULL || !(is_double || lower_has_kind(e, CC_CT_LDOUBLE))) {
         return -1;
     }
     switch (e->kind) {
     case CC_EXPR_FLOAT:
-        *out = e->float_val;
+        *out = is_double ? (long double)e->float_val : e->float_val_ld;
         return 0;
     case CC_EXPR_CAST:
-        if (e->excess_precision || e->encoded_literal) {
+        if (e->encoded_literal || fold_float_operand(tu, e->lhs, &a) != 0) {
             return -1;
         }
-        return fold_double_operand(tu, e->lhs, out);
+        /* an excess-precision cast keeps its operand's long double value; a conversion to double rounds it */
+        *out = is_double && !e->excess_precision ? (long double)(double)a : a;
+        return 0;
     case CC_EXPR_BIN:
         if (e->unary_form == CC_UNARY_RHS) {
             /* `-x`, `+x`: `-1 * x`, `1 * x` */
             if (e->op != CC_BIN_MUL || e->lhs == NULL || e->lhs->kind != CC_EXPR_INT ||
-                fold_double_operand(tu, e->rhs, &b) != 0) {
+                fold_float_operand(tu, e->rhs, &b) != 0) {
                 return -1;
             }
             *out = e->lhs->int_val < 0 ? -b : b;
             return 0;
         }
-        if (e->unary_form != 0 || fold_double_operand(tu, e->lhs, &a) != 0 ||
-            fold_double_operand(tu, e->rhs, &b) != 0) {
+        if (e->unary_form != 0 || fold_float_operand(tu, e->lhs, &a) != 0 ||
+            fold_float_operand(tu, e->rhs, &b) != 0) {
             return -1;
         }
-        switch (e->op) {
-        case CC_BIN_ADD:
-            *out = a + b;
-            return 0;
-        case CC_BIN_SUB:
-            *out = a - b;
-            return 0;
-        case CC_BIN_MUL:
-            *out = a * b;
-            return 0;
-        case CC_BIN_DIV:
-            if (b == 0.0) {
-                return -1; /* (left to the code, as it was) */
+        if (e->op == CC_BIN_DIV && b == 0.0L) {
+            return -1; /* (left to the code, as it was) */
+        }
+        if (is_double) {
+            /*
+             * in double: each operand is one, an integer's conversion to double rounded as C rounds it; the
+             * result stored, so that a cc hosted on the x87, which computes it in long double, has it in
+             * double too (run_crosshost)
+             */
+            volatile double x = (double)a;
+            volatile double y = (double)b;
+            volatile double r;
+
+            switch (e->op) {
+            case CC_BIN_ADD: r = x + y; break;
+            case CC_BIN_SUB: r = x - y; break;
+            case CC_BIN_MUL: r = x * y; break;
+            case CC_BIN_DIV: r = x / y; break;
+            default: return -1;
             }
-            *out = a / b;
+            *out = (long double)r;
             return 0;
-        default:
-            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD: *out = a + b; return 0;
+        case CC_BIN_SUB: *out = a - b; return 0;
+        case CC_BIN_MUL: *out = a * b; return 0;
+        case CC_BIN_DIV: *out = a / b; return 0;
+        default: return -1;
         }
     default:
         return -1;
@@ -5925,6 +5974,29 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
          (e->lhs != NULL && complex_elem_of(tu, lower_record_id(e->lhs)) != NULL) ||
          (e->rhs != NULL && complex_elem_of(tu, lower_record_id(e->rhs)) != NULL))) {
         return lower_complex_binop(tu, sf, ctx, vars, var_count, depth, e, diag);
+    }
+    if ((e->op == CC_BIN_ADD || e->op == CC_BIN_SUB || e->op == CC_BIN_MUL || e->op == CC_BIN_DIV) &&
+        (lower_has_kind(e, CC_CT_DOUBLE) || lower_has_kind(e, CC_CT_LDOUBLE))) {
+        long double folded;
+
+        if (fold_float_const(tu, e, &folded) == 0) {
+            /*
+             * a constant: its value, as gcc folds it at -O0 too, and one the optimizer can fold on -- a
+             * negation was a flip of its bits in memory, which it does not see through
+             */
+            in.op = CC_SSA_CONST;
+            in.dst = cc_ir_new_value(sf, CC_VAL_F64);
+            in.fimm = (double)folded;
+            in.fimm_ld = folded;
+            if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
+                set_diag(diag, "out of memory lowering a floating constant");
+                return -1;
+            }
+            if (lower_has_kind(e, CC_CT_LDOUBLE)) {
+                cc_ir_set_size(sf, in.dst, 16);
+            }
+            return in.dst;
+        }
     }
     if (is_logical_op(e->op)) {
         /*
@@ -6060,18 +6132,19 @@ static int lower_bin_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf
         (lower_has_kind(e->rhs, CC_CT_FLOAT) || lower_has_kind(e->rhs, CC_CT_DOUBLE) ||
          lower_has_kind(e->rhs, CC_CT_LDOUBLE))) {
         const cc_ctype_t *store_t = fp_builtin_storage_type(e->rhs);
-        double folded;
 
-        if (lower_has_kind(e, CC_CT_DOUBLE) && fold_double_const(tu, e, &folded) == 0) {
-            /* a constant: its value, which the optimizer can fold on, not a flip of its bits in memory */
-            memset(&in, 0, sizeof(in));
+        if (e->rhs->kind == CC_EXPR_FLOAT) {
+            /* a literal's negation, of any floating type, is exact: the literal negated, lowered as one */
             in.op = CC_SSA_CONST;
             in.dst = cc_ir_new_value(sf, CC_VAL_F64);
-            in.fimm = folded;
-            in.fimm_ld = (long double)folded;
+            in.fimm = -e->rhs->float_val;
+            in.fimm_ld = -e->rhs->float_val_ld;
             if (in.dst < 0 || cc_ir_push(sf, in) != 0) {
                 set_diag(diag, "out of memory lowering a floating constant");
                 return -1;
+            }
+            if (lower_has_kind(e->rhs, CC_CT_LDOUBLE)) {
+                cc_ir_set_size(sf, in.dst, 16);
             }
             return in.dst;
         }

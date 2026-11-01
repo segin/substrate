@@ -1725,24 +1725,32 @@ const char *x86_ssp_guard(char *buf, size_t cap) {
     return n >= 0 && (size_t)n < cap ? buf : NULL;
 }
 
-/** x86_for_each_use()'s test for a floating value among an instruction's operands (function_computes_float()). */
+/** x86_for_each_use()'s record of the values instructions use (function_computes_float()). */
 typedef struct {
     const cc_ssa_function_t *f;
-    int found;
+    unsigned char *used; /**< one per value, or NULL */
+    int found;           /**< a floating value is among them */
 } float_use_t;
 
 static void note_float_use(int v, void *ctx) {
     float_use_t *u = (float_use_t *)ctx;
 
-    if (v >= 0 && cc_ssa_value_class(u->f, v) == CC_VAL_F64) {
+    if (v < 0 || v >= u->f->value_count) {
+        return;
+    }
+    if (u->used != NULL) {
+        u->used[v] = 1;
+    }
+    if (cc_ssa_value_class(u->f, v) == CC_VAL_F64) {
         u->found = 1;
     }
 }
 
 /**
  * Whether an instruction of function @p f makes or uses a floating value.  The values of instructions folded
- * away stay in its table: `(int)3.5`, Linux's `(s32)(3.141592653589 * 32768.0)`, left a double there, and the
- * function was refused under -mno-80387 though nothing computed it.
+ * away stay in its table, and at -O0 a floating constant whose conversion was folded stays, used by nothing:
+ * `(int)3.5`, Linux's `(s32)(3.141592653589 * 32768.0)`, left a double there, and the function was refused
+ * under -mno-80387 though nothing computed it.  A constant nothing uses is no floating point the code has.
  *
  * @param f  the function
  * @return   1 if one does, else 0
@@ -1750,18 +1758,24 @@ static void note_float_use(int v, void *ctx) {
 static int function_computes_float(const cc_ssa_function_t *f) {
     float_use_t u;
     size_t j;
+    int r = 0;
 
     u.f = f;
     u.found = 0;
+    u.used = f->value_count > 0 ? (unsigned char *)calloc((size_t)f->value_count, 1) : NULL;
     for (j = 0; !u.found && j < f->instr_count; ++j) {
+        x86_for_each_use(f, &f->instrs[j], note_float_use, &u);
+    }
+    for (j = 0; !u.found && r == 0 && j < f->instr_count; ++j) {
         const cc_ssa_instr_t *in = &f->instrs[j];
 
-        if (in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64) {
-            return 1;
+        if (in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64 &&
+            (in->op != CC_SSA_CONST || u.used == NULL || u.used[in->dst])) {
+            r = 1;
         }
-        x86_for_each_use(f, in, note_float_use, &u);
     }
-    return u.found;
+    free(u.used);
+    return u.found || r;
 }
 
 /**

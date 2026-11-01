@@ -1527,6 +1527,11 @@ int xs_fp_select(xsel_t *s, size_t j) {
         if (xs_fp_kind(s, in->dst) == XFP_NONE) {
             return 0;
         }
+        if (s->nuses[in->dst] == 0) {
+            /* read by nothing -- at -O0, a constant whose conversion was folded: no load of it (an x87 one was
+             * loaded and popped, and refused under -mno-80387) */
+            return 1;
+        }
         sel_fconst(s, in);
         return 1;
     case CC_SSA_MOV:

@@ -5,7 +5,7 @@
 # A program with no floating point compiles under both, -m64 and -m32,
 # through the MIR path and the legacy emitters, as gcc compiles it --
 # one whose only floating point is a constant folded to an integer too,
-# and with -mno-sse besides; one that would compute
+# at -O0 as well, and with -mno-sse besides; one that would compute
 # or return in the x87 -- a long double on x86-64, a double on i386 --
 # is refused, as gcc refuses it; and with neither option it compiles.
 set -eu
@@ -29,6 +29,11 @@ cat >"$CC_TMP/folded.c" <<'EOF2'
 #define INT_PI ((int)(3.141592653589 * 32768.0))
 int period(unsigned x) { return x / INT_PI + (int)3.5; }
 EOF2
+# the same at -O0, where gcc folds them too, a float's, a long double's and implicit conversions among them
+cat >"$CC_TMP/folded0.c" <<'EOF2'
+#define INT_PI ((int)(3.141592653589 * 32768.0))
+int period(unsigned x) { int y = -41.25 * 4; return x / INT_PI + (int)3.5 + (int)-3.5f + (int)3.5L + y; }
+EOF2
 cat >"$CC_TMP/ld64.c" <<'EOF2'
 long double half(long double x) { return x / 2; }
 EOF2
@@ -44,14 +49,16 @@ for path in mir legacy; do
 	if [ $path = legacy ]; then run="env CC_NO_MIR=1"; fi
 	for m in 64 32; do
 		for f in -mno-80387 -mno-fp-ret-in-387 "-mno-80387 -mno-fp-ret-in-387" "-mno-80387 -mno-sse -mno-sse2"; do
-			for src in int.c folded.c; do
+			for case in "O2 int.c" "O2 folded.c" "O0 folded0.c" "O2 folded0.c"; do
+				o=${case% *}
+				src=${case#* }
 				# shellcheck disable=SC2086
-				if ! gcc -m$m -O2 $f -c -o "$CC_TMP/g.o" "$CC_TMP/$src" 2>/dev/null; then
+				if ! gcc -m$m -$o $f -c -o "$CC_TMP/g.o" "$CC_TMP/$src" 2>/dev/null; then
 					continue
 				fi
 				# shellcheck disable=SC2086
-				if ! $run "$CC_BIN" -m$m -O2 $f -c -o "$CC_TMP/o.o" "$CC_TMP/$src" 2>"$CC_TMP/c.err"; then
-					echo "run_no_80387: -m$m $path [$f] $src: no floating point computed, refused: $(head -1 "$CC_TMP/c.err")"
+				if ! $run "$CC_BIN" -m$m -$o $f -c -o "$CC_TMP/o.o" "$CC_TMP/$src" 2>"$CC_TMP/c.err"; then
+					echo "run_no_80387: -m$m -$o $path [$f] $src: no floating point computed, refused: $(head -1 "$CC_TMP/c.err")"
 					exit 1
 				fi
 			done
