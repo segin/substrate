@@ -1165,8 +1165,12 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
 
         /* through machine IR and the register allocator, when that path handles all the function does */
         {
-            int mrc = x86_64_mir_emit_function(fp, m, f, i, src_path, emit_debug, pic, diag);
+            int mrc;
 
+            if (x86_check_x87_options(f, 0, diag) != 0) {
+                return -1;
+            }
+            mrc = x86_64_mir_emit_function(fp, m, f, i, src_path, emit_debug, pic, diag);
             if (mrc < 0) {
                 return -1;
             }
@@ -1176,6 +1180,9 @@ int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int em
             if (x86_mir_uses_named_as(f)) {
                 set_diag(diag, "a named address space (__seg_fs, __seg_gs) in a function the register allocator "
                                "did not take");
+                return -1;
+            }
+            if (x86_check_x87_options(f, 1, diag) != 0) {
                 return -1;
             }
         }

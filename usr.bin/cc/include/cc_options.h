@@ -106,6 +106,8 @@ typedef struct {
                                        __ref_stack_chk_guard); NULL for the offset alone */
     int default_visibility;  /**< -fvisibility=: what a definition with none of its own has, as CC_LEX_VIS_*:
                                   default (0), hidden (1), protected (2), internal (3) */
+    int no_80387;            /**< -mno-80387: no x87 instruction; floating point that needs one is refused */
+    int no_fp_ret_in_387;    /**< -mno-fp-ret-in-387: no result in %st0; a function or call with one is refused */
 } cc_options_t;
 
 /**

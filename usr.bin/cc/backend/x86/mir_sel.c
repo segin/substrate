@@ -4743,6 +4743,16 @@ int x86_mir_emit_function(FILE *out, const xsel_target_t *t, const cc_ssa_module
             s.xf.ins[j].targets = s.jt + s.xf.ins[j].aux;
         }
     }
+    for (j = 0; rc == 0 && !s.unsupported && cc_options_current()->no_80387 && j < (size_t)s.xf.nins; ++j) {
+        if (xi_is_x87(s.xf.ins[j].op)) {
+            /* (as gcc refuses it, rather than make the x87 code it was told not to) */
+            char msg[512];
+
+            snprintf(msg, sizeof(msg), "-mno-80387: '%s' has floating point the x87 would compute", f->name);
+            set_diag(diag, msg);
+            rc = -1;
+        }
+    }
     if (rc == 0 && !s.unsupported && !s.xf.oom && x86_stack_protected(f)) {
         /* the -fstack-protector canary: a word, laid out first (layout_frame()) */
         s.ssp_obj = xf_new_obj(&s.xf, XF_LOCAL, s.word, s.word, 0);

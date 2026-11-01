@@ -3303,8 +3303,11 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
         }
         /* through machine IR and the register allocator, when that path handles all the function does */
         {
-            int mrc = i386_mir_emit_function(out, m, f, i, src_path, emit_debug, diag);
+            int mrc = -1;
 
+            if (x86_check_x87_options(f, 0, diag) == 0) {
+                mrc = i386_mir_emit_function(out, m, f, i, src_path, emit_debug, diag);
+            }
             if (mrc <= 0) {
                 if (fp != out) {
                     fclose(fp);
@@ -3320,6 +3323,12 @@ int emit_i386(FILE *out, const cc_ssa_module_t *m, const char *src_path, int emi
                 }
                 set_diag(diag, "a named address space (__seg_fs, __seg_gs) in a function the register allocator "
                                "did not take");
+                return -1;
+            }
+            if (x86_check_x87_options(f, 1, diag) != 0) {
+                if (fp != out) {
+                    fclose(fp);
+                }
                 return -1;
             }
         }

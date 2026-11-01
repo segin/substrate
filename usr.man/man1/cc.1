@@ -743,6 +743,15 @@ from
 that one, as
 .Xr gcc 1
 does; a declaration of something defined elsewhere keeps the default.
+.It Fl mno-80387 , Fl m80387 , Fl mno-fp-ret-in-387 , Fl mfp-ret-in-387
+Make no x87 instruction, or no result in
+.Li %st0 ;
+a function that would need one \(em a
+.Ic long double ,
+or on i386 any floating point \(em is refused.
+.Xr gcc 1
+refuses the same on x86-64, as Linux builds; on i386 it calls a library
+for floating point instead, which cc does not.
 .It Fl fsyntax-only
 Check each C input \(em its syntax and what it means \(em and write
 nothing: no assembly or object is made and nothing is linked.

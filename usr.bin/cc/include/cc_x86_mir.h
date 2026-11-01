@@ -324,6 +324,8 @@ const char *xcc_name(xcc_t cc);
 void xi_print(FILE *fp, const xfunc_t *xf, const xinst_t *in, int word, const char *fn_name);
 /** Print operand @p o as xi_print() prints an instruction's, for a target of @p word bytes. */
 void xop_print(FILE *fp, const xfunc_t *xf, const xop_t *o, int word);
+/** Whether machine instruction @p op is an x87 one (-mno-80387 forbids them). */
+int xi_is_x87(int op);
 /** The name of physical register @p r accessed as @p size bytes. */
 const char *xr_name(int r, int size);
 

@@ -1614,6 +1614,55 @@ const char *x86_ssp_guard(char *buf, size_t cap) {
     return n >= 0 && (size_t)n < cap ? buf : NULL;
 }
 
+/**
+ * Refuse what -mno-80387 and -mno-fp-ret-in-387 forbid in function @p f, as gcc refuses it, rather than make
+ * x87 code it was told not to: a result in %st0 -- its own (any floating one on i386, a long double on
+ * x86-64), or a call's -- under either; and under -mno-80387, on the legacy emitters (@p legacy), any floating
+ * value at all, which they compute on the x87 (the MIR path checks the instructions it selects:
+ * x86_mir_x87_refused()).  Linux builds with both, and has none.
+ *
+ * @param f       the function
+ * @param legacy  1 when a legacy emitter is to emit it
+ * @param diag    receives the refusal
+ * @return        0, or -1 when refused
+ */
+int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *diag) {
+    const cc_options_t *o = cc_options_current();
+    int is_64bit = o->target == CC_TARGET_X86_64;
+    const char *opt = o->no_80387 ? "-mno-80387" : "-mno-fp-ret-in-387";
+    const char *why = NULL;
+    char msg[512];
+    size_t j;
+    int v;
+
+    if (!o->no_80387 && !o->no_fp_ret_in_387) {
+        return 0;
+    }
+    if (is_64bit ? f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE : f->ret_type == CC_VAL_F64) {
+        why = "returns its result in the x87's %st0";
+    }
+    for (j = 0; why == NULL && j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+
+        if ((in->op == CC_SSA_CALL || in->op == CC_SSA_CALLI) &&
+            (in->call_ret_x87 ||
+             (!is_64bit && in->dst >= 0 && cc_ssa_value_class(f, in->dst) == CC_VAL_F64))) {
+            why = "calls a function whose result is in the x87's %st0";
+        }
+    }
+    for (v = 0; why == NULL && o->no_80387 && legacy && v < f->value_count; ++v) {
+        if (cc_ssa_value_class(f, v) == CC_VAL_F64) {
+            why = "has floating point, which cc computes on the x87 here";
+        }
+    }
+    if (why == NULL) {
+        return 0;
+    }
+    snprintf(msg, sizeof(msg), "%s: '%s' %s", opt, f->name, why);
+    set_diag(diag, msg);
+    return -1;
+}
+
 /** x86_for_each_use()'s counter of the uses of one value (stack_object_escapes()). */
 typedef struct {
     int v;

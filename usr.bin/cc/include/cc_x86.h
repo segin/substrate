@@ -146,6 +146,8 @@ void x86_emit_profile_call(FILE *fp, const cc_ssa_function_t *f, int after_frame
  * patchable_function_entry attribute, if it has one, says how many.
  */
 void x86_emit_patchable_entry(FILE *fp, const cc_ssa_function_t *f, int after_entry);
+/** Refuse the x87 results (and, on a legacy emitter, @p legacy, x87 code) -mno-80387 / -mno-fp-ret-in-387 forbid. */
+int x86_check_x87_options(const cc_ssa_function_t *f, int legacy, cc_diag_t *diag);
 /** Whether -fstack-protector guards function @p f (gcc's rules for the level asked for, and its attributes). */
 int x86_stack_protected(const cc_ssa_function_t *f);
 /** A legacy prologue's copy of the -fstack-protector guard to the canary at @p off(%rbp); -1 if it cannot be. */

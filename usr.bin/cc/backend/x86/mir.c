@@ -514,6 +514,34 @@ void xop_print(FILE *fp, const xfunc_t *xf, const xop_t *o, int word) {
     print_op(fp, xf, o, word);
 }
 
+/**
+ * Whether machine instruction @p op is an x87 one, which -mno-80387 forbids.
+ *
+ * @param op  an xinst_op_t
+ * @return    1 if it is, else 0
+ */
+int xi_is_x87(int op) {
+    switch (op) {
+    case XI_FLD:
+    case XI_FILD:
+    case XI_FILDU64:
+    case XI_FSTP:
+    case XI_FSTP0:
+    case XI_FARITH:
+    case XI_FUCOMPP:
+    case XI_FTOI:
+    case XI_FLDST:
+    case XI_FXCH:
+    case XI_FST:
+    case XI_FLDK:
+    case XI_FOPST:
+    case XI_FOPM:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /** The extension mnemonic of XI_MOVZX or XI_MOVSX from @p from bytes to @p to. */
 static const char *ext_mnemonic(int sign, int from, int to) {
     if (sign) {

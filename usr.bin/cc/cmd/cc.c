@@ -123,6 +123,8 @@ typedef struct {
   long ssp_guard_offset; /* -mstack-protector-guard-offset=N; -1 the target's */
   const char *ssp_guard_symbol; /* -mstack-protector-guard-symbol=S */
   int default_visibility; /* -fvisibility=: 0 default, 1 hidden, 2 protected, 3 internal (opt_visibility()) */
+  int no_80387;       /* -mno-80387, the last of it and -m80387 */
+  int no_fp_ret_in_387; /* -mno-fp-ret-in-387, the last of it and -mfp-ret-in-387 */
 
   const char *std;
   const char *opt_level;
@@ -253,6 +255,8 @@ static void compile_options(const cc_opts_t *o, cc_options_t *out) {
   out->ssp_guard_offset = o->ssp_guard_offset;
   out->ssp_guard_symbol = o->ssp_guard_symbol;
   out->default_visibility = o->default_visibility;
+  out->no_80387 = o->no_80387;
+  out->no_fp_ret_in_387 = o->no_fp_ret_in_387;
 }
 
 
@@ -1767,6 +1771,11 @@ static const driver_opt_t options[] = {
      */
     {"-ffreestanding -fhosted", OPT_FLAG, FWD_CPP, NULL, 0, 0},
     {"-fvisibility=", OPT_PREFIX, 0, opt_visibility, 0, 0},
+    /* no x87 code, nor results in %st0: what would need them refused, as gcc refuses it (Linux's x86-64) */
+    {"-mno-80387", OPT_FLAG, 0, opt_int, F(no_80387), 1},
+    {"-m80387", OPT_FLAG, 0, opt_int, F(no_80387), 0},
+    {"-mno-fp-ret-in-387", OPT_FLAG, 0, opt_int, F(no_fp_ret_in_387), 1},
+    {"-mfp-ret-in-387", OPT_FLAG, 0, opt_int, F(no_fp_ret_in_387), 0},
     {"-fwrapv -fno-strict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 1},
     {"-fno-wrapv -fstrict-overflow", OPT_FLAG, FWD_C, opt_int, F(wrapv), 0},
     {"-fPIC -fpic", OPT_FLAG, FWD_C | FWD_LD, opt_int, F(pic), 1},
