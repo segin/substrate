@@ -736,7 +736,13 @@ const cc_ctype_t *parser_expr_ctype(parser_t *p, const cc_expr_t *e) {
     case CC_EXPR_TERNARY:
         a = cc_ct_decay(parser_expr_ctype(p, e->rhs != NULL ? e->rhs : e->lhs));
         b = cc_ct_decay(parser_expr_ctype(p, e->third));
-        if (a == NULL || b == NULL || a == b || (a->kind == CC_CT_POINTER && b->kind == CC_CT_POINTER)) {
+        if (a != NULL && b != NULL && a->kind == CC_CT_POINTER && b->kind == CC_CT_POINTER) {
+            /* a null pointer constant takes the other arm's type (C11 6.5.15p6) */
+            cc_const_env_t env = parser_const_env(p);
+
+            return cc_const_is_null_pointer(&env, e->rhs != NULL ? e->rhs : e->lhs) ? b : a;
+        }
+        if (a == NULL || b == NULL || a == b) {
             return a != NULL ? a : b;
         }
         return parser_usual_arith(a, b) != NULL ? parser_usual_arith(a, b) : b;

@@ -719,3 +719,23 @@ int cc_const_eval_ll(const cc_const_env_t *env, const cc_expr_t *e, long long *o
     *out = (long long)v.bits;
     return 0;
 }
+
+/*
+ * A null pointer constant: Linux's __is_constexpr(x) is
+ * `sizeof(int) == sizeof(*(8 ? ((void *)((long)(x) * 0l)) : (int *)8))`,
+ * the conditional's type int * where the cast is one, void * where x is
+ * not constant.
+ */
+int cc_const_is_null_pointer(const cc_const_env_t *env, const cc_expr_t *e) {
+    cc_const_t v;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_CAST && e->ctype != NULL && e->ctype->unqual->kind == CC_CT_POINTER &&
+        e->ctype->unqual->of != NULL && e->ctype->unqual->of->kind == CC_CT_VOID &&
+        e->ctype->unqual->of == e->ctype->unqual->of->unqual) {
+        e = e->lhs;
+    }
+    return cc_const_eval(env, e, &v) == 0 && v.bits == 0 && v.type != NULL && cc_ct_is_integer(v.type);
+}

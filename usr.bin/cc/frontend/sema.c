@@ -4585,6 +4585,8 @@ static int sema_check_cast(const cc_translation_unit_t *tu, cc_expr_t *e, var_en
  *
  * @return 0, or -1 with @p diag set
  */
+static long sema_expr_sizeof(const cc_translation_unit_t *tu, const cc_ctype_t *t);
+
 static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count,
                              int depth, cc_diag_t *diag) {
     if (e->lhs != NULL) {
@@ -4600,7 +4602,7 @@ static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         /* an array with a bound that is no constant (a variable-length one) is sized when the program runs */
         for (t = e->lhs->ctype; t != NULL && t->kind == CC_CT_ARRAY && t->count >= 0; t = t->of) {
         }
-        if (!(t != NULL && t->kind == CC_CT_ARRAY) && cc_ct_size(e->lhs->ctype, tu) < 0) {
+        if (!(t != NULL && t->kind == CC_CT_ARRAY) && sema_expr_sizeof(tu, e->lhs->ctype) < 0) {
             sema_diag(diag, "sizeof unsupported for this operand type");
             return -1;
         }
@@ -4617,7 +4619,7 @@ static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_
     sema_set_type(e, cc_ct_basic(cc_target_pointer_size() >= 8 ? CC_CT_ULONG : CC_CT_UINT));
     {
         /* a size known now is the constant it is; only a variable-length array's is computed at run time */
-        long n = e->lhs != NULL ? cc_ct_size(e->lhs->ctype, tu) : cc_ct_sizeof_type(e->aux_ctype, tu);
+        long n = e->lhs != NULL ? sema_expr_sizeof(tu, e->lhs->ctype) : cc_ct_sizeof_type(e->aux_ctype, tu);
 
         if (n >= 0) {
             cc_expr_free(e->lhs);
@@ -4628,6 +4630,21 @@ static int sema_check_sizeof(const cc_translation_unit_t *tu, cc_expr_t *e, var_
         }
     }
     return 0;
+}
+
+/**
+ * The size `sizeof` gives an expression of type @p t: its type's, and 1
+ * for void or a function, as gcc has it and as `sizeof (void)` is --
+ * Linux's __is_constexpr(x) of an x no constant takes the size of what a
+ * void * points to.
+ *
+ * @return the size, or -1 if it is not known
+ */
+static long sema_expr_sizeof(const cc_translation_unit_t *tu, const cc_ctype_t *t) {
+    if (t != NULL && (t->unqual->kind == CC_CT_VOID || t->unqual->kind == CC_CT_FUNCTION)) {
+        return 1;
+    }
+    return cc_ct_size(t, tu);
 }
 
 /**
@@ -4728,11 +4745,21 @@ static int sema_check_ternary(const cc_translation_unit_t *tu, cc_expr_t *e, var
         }
         t = a_void ? b : a;
     } else if (sema_is_ptr(a) && sema_is_ptr(b)) {
-        if (!sema_ptrs_match(tu, a, b)) {
+        /* a null pointer constant, `(void *)0`, takes the other arm's type (C11 6.5.15p6) */
+        cc_const_env_t env;
+
+        env.sizeof_bytes = sema_const_sizeof;
+        env.ctx = (void *)tu;
+        if (cc_const_is_null_pointer(&env, x)) {
+            t = b;
+        } else if (cc_const_is_null_pointer(&env, y)) {
+            t = a;
+        } else if (!sema_ptrs_match(tu, a, b)) {
             sema_diag(diag, "incompatible pointer types in conditional expression");
             return -1;
+        } else {
+            t = a;
         }
-        t = a;
     } else if (sema_is_ptr(a) && cc_ct_is_integer(b) && is_null_ptr_constant(y)) {
         t = a;
     } else if (sema_is_ptr(b) && cc_ct_is_integer(a) && is_null_ptr_constant(x)) {

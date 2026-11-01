@@ -62,6 +62,16 @@ int cc_const_eval(const cc_const_env_t *env, const cc_expr_t *e, cc_const_t *out
 int cc_const_eval_ll(const cc_const_env_t *env, const cc_expr_t *e, long long *out);
 
 /**
+ * Whether an expression is a null pointer constant (C11 6.3.2.3p3): an
+ * integer constant expression of value 0, or one cast to void *.
+ *
+ * @param env  the context
+ * @param e    the expression
+ * @return     1 if it is, else 0
+ */
+int cc_const_is_null_pointer(const cc_const_env_t *env, const cc_expr_t *e);
+
+/**
  * Whether a constant reads as unsigned: its type is an unsigned integer
  * type, _Bool or a pointer.
  *
